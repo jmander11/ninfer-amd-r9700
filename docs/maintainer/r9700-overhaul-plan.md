@@ -216,11 +216,11 @@ selected-layout PV at 15 VGPR/0 LDS/0 scratch, each with reported occupancy 16. 
 PV dominates, no softmax launch or reduction edit is justified by this audit; profiler durations
 remain attribution rather than latency-selection evidence.
 
-For D256, the current fused candidate reduces each score inside its eight wave32s, places eight
+For D256, the retained fused leaf reduces each score inside its eight wave32s, places eight
 FP32 partials in LDS, and lets the first wave merge them. This replaces a full-block reduction
-tree without changing represented inputs, public output, or FP32 softmax/PV semantics. It has been
-requalified against the same tail and 4K all-layout oracle gates; it is still a candidate pending
-repeatable whole-Op measurement on the coherent driver.
+tree without changing represented inputs, public output, or FP32 softmax/PV semantics. It was
+requalified against the same tail and 4K all-layout oracle gates and subsequently selected by the
+whole-Op measurements recorded below.
 
 The Qwen `DecoderState` and `PagedKVCache` contracts now have only the asymmetric typed identity;
 the parallel homogeneous BF16/INT8/NVFP4 owner, its `kv_dtype`/`kv_quant_group`, paired K/V scale
@@ -676,7 +676,8 @@ Replace functional routes with measured gfx1201 families:
 - attention, GDN, MLP, output-head, bias/residual, and SwiGLU fused projections;
 - GQA decode/prefill and BF16-reference/FP8-K-INT4-V production consumers;
 - GDN recurrence/state transition and fused projected convolution;
-- MTP/DFlash proposal, path selection, verification, and state commit;
+- existing MTP regression preservation and DFlash2 proposal, path selection, verification, and
+  state commit;
 - sampling and output selection.
 
 - [x] Physically admit and promote the split-512 long-context decode-attention leaf. Its retained
@@ -736,7 +737,7 @@ Replace functional routes with measured gfx1201 families:
   `text.attention.query_key` plus `text.attention.gate_value` at `[2048,7168,5120]` and
   `text.gdn.query_key` at `[2048,4096,5120]`: three role-consistent families, 80 objects,
   1,024,065,536 added bytes, and 87,724,946 ns of measured Q4 service. The attention roles share
-  one physical qualifier, so the only pending report IDs are `attention_qk_gate_value` and
+  one physical qualifier, so the two required report IDs were `attention_qk_gate_value` and
   `gdn_query_key`, both under schema `ninfer.r9700.fp8_projection_qualification.v1` version 1.
   Selection is driven by the tightest 1,026,070,017-byte post-gate/up capacity slack; this set
   leaves 2,004,481 bytes in G16/C4/P8192. The hash-bound owner independently checks current role
@@ -1012,7 +1013,8 @@ Replace functional routes with measured gfx1201 families:
   versus the isolated `200.880451` TMAC/s IU4 ceiling; that headroom remains unexplained rather
   than being relabeled utilization. This selected-Q4 iteration is terminally tool-limited: all
   credible bounded pipeline mechanisms were tried and rejected, no ATT claim or new Q4
-  architecture follows, and the next performance decision returns to chunk/whole selection.
+  architecture follows, and the next performance decision returns to the practical-ceiling/P2048
+  work below.
 - [x] Qualify and terminally reject the scheduling-only response to the PMC dependency signature.
   A disconnected exact-production two-bank candidate used a zero-instruction value anchor plus
   `sched_barrier(0)` to place all eight IU4 WMMAs, 16 integer recombinations, 16 I32-to-FP32
@@ -1044,9 +1046,9 @@ Replace functional routes with measured gfx1201 families:
   floor alone cannot establish proximity to the ceiling. The retained four-role N16/K16 route's
   current exact whole measurement is `1,847.942898 tok/s` (`1.108835254 s`); the older
   `1,774.872034 tok/s` scale-sidecar result belongs to a rejected pre-cutover candidate and is not
-  the production baseline. The interrupted 32K finalist campaign's ten complete reports remain useful
-  diagnostic and resumable evidence, but they are not a chunk-selection authority until this floor
-  passes on the exact retained executable/artifact. A nominal chunk-size sweep cannot substitute
+  the production baseline. The interrupted 32K finalist campaign's ten complete reports remain
+  useful diagnostic but non-resumable evidence; their pre-receipt namespaces cannot become a
+  chunk-selection authority. A nominal chunk-size sweep cannot substitute
   for this gate because P2048 is a single effective chunk at either finalist setting. Re-establish
   attribution at the complete projection or fused-boundary scope, prove the expected gfx1201
   matrix instructions/resources and operand streaming for any replacement, qualify it numerically,
@@ -1057,8 +1059,8 @@ Replace functional routes with measured gfx1201 families:
   `3.64404 ms` for the incumbent. The raw bounded diagnostic is
   `profiles/bench/r9700-fp8-gate-up-catalog-screen-20260905/catalog-screen.txt` (SHA-256
   `f31f962da2253dafb3d0b6febbf23c4cd1eb64b6f6df84f4a6e5ba1bffd0960d`). No supported split-K or
-  nonzero-workspace candidate exists for this descriptor, so the next live projection route is the
-  disconnected custom FP8 gate/up challenger rather than further library or chunk sweeps. That
+  nonzero-workspace candidate exists for this descriptor, so the next projection route tested was
+  the disconnected custom FP8 gate/up challenger rather than further library or chunk sweeps. That
   exact M128xN128xK32 challenger reached `62` VGPR, `16,384`-byte LDS, occupancy `16`, zero
   private/scratch, eight native FP8 WMMA sites, explicit successor-load overlap, independent FP64
   represented-format correctness, and same-address graph replay. It nevertheless measured
@@ -1088,8 +1090,8 @@ Replace functional routes with measured gfx1201 families:
   `f1d818f68c3c243a030d64c83ac91525a212605134e6a6c337d1ad1712008651`). This exact clean
   phase-1+2 implementation is the current normalized-T2048 production route; its direct-scatter
   preparation and `scale_sidecar_recurrence_kernel` are also the route observed in the fresh
-  N16/K16 trace below. The floor remains closed by about `139.2268 ms` and no chunk sweep is
-  admitted. The first disconnected P2048/G16
+  N16/K16 trace below. At that pre-N16 checkpoint, the floor remained closed by about
+  `139.2268 ms` and no chunk sweep was admitted. The first disconnected P2048/G16
   native-FP8-Q/Bk32 plus
   PV-W16 timing receipt is explicitly invalid: review found that its reconstructed QK stage omitted
   production's causal CTA pruning and computed roughly twice the intended triangular work. The
@@ -1137,8 +1139,8 @@ Replace functional routes with measured gfx1201 families:
   `profiles/bench/r9700-a8q4-scalar-prefetch-p2048-ab-20260905.json` (SHA-256
   `caf6543e4c632863fa3861160e63b67ba6ed802edab172adc4cf71c3eb874f15`). Qualification-only
   source, checker, assembly, and executable surfaces are removed; production is unchanged. The
-  next live Q4 candidate must alter persistent transaction/coalescing geometry rather than add an
-  adjacent cache hint to the row-split layout.
+  next Q4 candidate at that checkpoint had to alter persistent transaction/coalescing geometry
+  rather than add an adjacent cache hint to the row-split layout.
   The distinct wave-role-specialized 128-bit cooperative loader did produce a real gain while
   preserving the row-split artifact and production M64xN128 arithmetic/LDS mapping. Its corrected
   qualifier emitted exactly two `global_load_b128` code sites and no narrow code loads, retained
@@ -1196,6 +1198,17 @@ Replace functional routes with measured gfx1201 families:
   It is terminally rejected and its qualification-only surfaces are removed. The immutable report
   is `profiles/bench/r9700-a8q4-n16k16-b128-p2048-gate-20260905.json` (SHA-256
   `6d1e95dd74126434c96c7d77563905da3275efcb27b79e36f95830cc6c93210b`).
+  CTA ordering and grid swizzling are terminal at the same boundary. Production maps N tiles to
+  grid X and token tiles to grid Y, but physical CU issue order is not contractual. The retained
+  exact group-M=4 traversal saved only `5.37676 ms` on its historical mix and failed one P2048 cell
+  at `1.01518x`; reweighting those medians to the current `48/64/64` inventory projects a
+  `-1.16323 ms` saving. The fresh short-K addressable bucket is `165.810625 ms`, so admission would
+  require a `15.077%` reduction despite already measured `93.8037%`--`95.5576%` GL2 hits. A
+  hypothetical group-M=8 may reduce an optimistic resident-weight-set proxy below 8 MiB for the
+  short-K shapes, but that is not scheduling evidence; group-M=4 and the exact W-only cache-policy
+  qualifier both show effects far below the threshold. Full X/Y swap, Morton, and larger grouped-M
+  traversals preserve the same trade and worsen the long-K resident-set model. No new swizzle
+  qualifier follows.
   A fresh selected-region trace of this exact retained N16/K16 route attributes `1,068.137022 ms`
   of the `1,097.333724 ms` Text-prefill wall to active kernels, leaving only `29.196702 ms`
   kernel-inactive wall. The N16 Q4 projection kernel remains the largest actionable family at
@@ -1209,6 +1222,18 @@ Replace functional routes with measured gfx1201 families:
   attribution is `profiles/rocprof/r9700-n16k16-production-p2048-trace-20260905/analysis.json`
   (SHA-256 `3466e40d50ec96b9377db06791eda7f7947c1811f0be3a23d619b392490accbd`); it selects the next
   optimization boundary but does not replace unprofiled timing.
+  A fresh trace-wide non-Q4 audit confirms that no unclosed secondary boundary meets the `25 ms`
+  admission threshold. After the already-terminal FP8-library, dense-attention, and GDN-recurrence
+  families, the largest unresolved bucket is only `22.662237 ms` for 96 BF16 GDN A/B projections;
+  even deleting it cannot qualify, and its prior complete A/B-plus-control boundary was only
+  `23.549814 ms`. The next buckets are fused SiLU-to-A8 at `20.761231 ms`, FP8 activation
+  quantization at `14.616312 ms`, K5120 RMSNorm at `13.322712 ms`, GDN direct scatter at
+  `12.543306 ms`, residual adds at `12.354227 ms`, ordinary A8 quantization at `8.850520 ms`, and
+  gated RMSNorm at `6.589754 ms`; their coherent adjacent fusions are already terminal. The
+  `29.196702 ms` marker-minus-active interval is not an attributable service bucket, and saving
+  `25 ms` there would require eliminating `85.63%` of all gaps across 2,089 dispatches despite
+  `97.3393%` active coverage. This leaves the Q4 boundary, rather than a fragmented non-Q4 sweep,
+  as the principal exact-format optimization target.
   The `306.172272 ms` selected-FP8-library bucket is terminal for the separate `>=25 ms`
   architectural threshold. The exact trace split is `253.819158 ms` for 64 post-mixer gate/up
   calls (`184.10` useful TFLOP/s), `23.799365 ms` for 48 GDN query/key calls (`173.25` TFLOP/s),
@@ -1303,7 +1328,7 @@ Replace functional routes with measured gfx1201 families:
   architectural boundary and far below the `173.025035 ms` practical-ceiling opportunity. There is
   no same-input projection pair that could amortize the slab across calls. No K128 qualifier or
   adjacent exact-G64 variant follows; the exact-G64 architecture is terminal at this boundary.
-  The represented-format contingency is therefore active only for its already-bounded next step.
+  The represented-format contingency therefore advanced only through its bounded next step.
   The qualification-only CPU diagnostic samples the
   exact 160 P2048-dominant Text Q4 matrices (64 MLP-down, 48 GDN value-Z, and 48 GDN-output), with
   eight deterministic rows per matrix. Source-MSE Q4G128 measured `1.021608707x` aggregate
@@ -1327,19 +1352,19 @@ Replace functional routes with measured gfx1201 families:
   barrier intact; it only removes `5.11705088 GB` of weight-scale requests over the exact selected
   `48/48/64` GDN-value-Z/GDN-output/MLP-down inventory, about `1.493%` of staged requests and an
   estimated `~5.2 ms` of its `350.51449 ms` service. This is terminally below the `25 ms` admission
-  boundary, so no A8G64-by-Q4G128 implementation follows. The only materially credible profile is
+  boundary, so no A8G64-by-Q4G128 implementation follows. The only materially credible profile was
   paired A8G128-by-Q4G128: it retains the IU4 and code-byte work but can carry the low/high integer
   accumulators across two G64 halves, halving reconstruction, I32-to-FP32 conversion, scale-product,
   and FP32-accumulation epilogues while saving `7.67557632 GB` of activation-plus-weight scale
   requests. The weight-only source diagnostic explicitly decodes weights to BF16 and keeps BF16
-  activations/mathematics, so even a pass cannot admit that arithmetic profile. Before any format,
-  artifact, or kernel implementation, run a separate activation-inclusive source/reference 8K gate
+  activations/mathematics, so even a pass could not admit that arithmetic profile. Before any format,
+  artifact, or kernel implementation, a separate activation-inclusive source/reference 8K gate was required
   over the same 160 logical roles and fixed 4,095 scored positions: compare the complete represented
   A8G64-by-canonical-Q4G64 grouped formula with A8G128-by-MSE-Q4G128, use FP32 per-group
   accumulation and one BF16 linear-output boundary, and gate the candidate directly against the
   retained BF16 authority at mean-NLL delta `<=ln(1.05)` and no more than `11` new `NLL>=10`
-  positions. The paired candidate-minus-control result remains diagnostic. This gate is prepared,
-  not executed, at `profiles/ppl/selective-a8g128-q4g128-source-8k-prepare-20260905` (closure
+  positions. The paired candidate-minus-control result remained diagnostic. This gate was prepared
+  at `profiles/ppl/selective-a8g128-q4g128-source-8k-prepare-20260905` (closure
   SHA-256 `13d92a7bdd065248d4c6a520164b866f6917ac3d71ec7262540d6a5ea1163a7f`), with the
   metadata-only no-GPU preflight at
   `profiles/bench/r9700-selective-a8g128-q4g128-source-8k-preflight-20260905.json` (SHA-256
@@ -1354,24 +1379,24 @@ Replace functional routes with measured gfx1201 families:
   `profiles/ppl/selective-a8g128-q4g128-source-8k-20260905/comparison.json` (SHA-256
   `450edc009b13fb0aba4e790adf0f00edc2439645ec3e1c86b8012eb37889963d`). This admits only a
   disconnected qualification kernel, not a product format, artifact, binder, or runtime path.
-  That qualifier must retain the 17,152-byte G64-bank pipeline, emit no more than
+  That qualifier was required to retain the 17,152-byte G64-bank pipeline, emit no more than
   96 VGPR at occupancy 16 with zero spills, pass the independent complete-formula oracle, lose no
   exact cell by more than `1.01x`, and save at least `25 ms` over the exact `48/48/64` aggregate.
   Its two banks remain K64 slabs rather than one G128 slab per bank: the even slab owns the one
   represented A/W scale pair for the logical G128 group, the odd slab extends the same low/high I32
   chains, and the epilogue must consume those scales before the even bank is overwritten by the
-  next prefetched slab. Static qualification must prove exactly one scale load per G128, scale-read
+  next prefetched slab. Static qualification had to prove exactly one scale load per G128, scale-read
   before same-bank overwrite, successor code-load issue before the current WMMA/epilogue, and no
-  compiler-inserted premature drain. Stored-layout correctness must cover the production small-T
+  compiler-inserted premature drain. Stored-layout correctness had to cover the production small-T
   union `{1,2,3,4,8,12,16,24,36,48}` at all three selected shapes, including status, tails, guards,
   and graph replay: ordinary C1--4 contributes T1--4, retained MTP width four contributes
   T4/8/12/16, and DFlash2 verify width 12 contributes T12/24/36/48 at the fixed C1--4 ceiling.
-  Complete quantizer-or-fused-quantizer-plus-wave32-GEMM timing must cover all ten reachable T
+  Complete quantizer-or-fused-quantizer-plus-wave32-GEMM timing had to cover all ten reachable T
   values for each selected shape because the activation grid/predication balance differs even when
-  the WMMA tile count is unchanged; T1/T4/T12/T48 are mandatory anchor and weighted-summary cells,
+  the WMMA tile count is unchanged; T1/T4/T12/T48 were mandatory anchor and weighted-summary cells,
   not substitutes for the omitted widths. Every reachable cell and the exact call-weighted aggregate
   must be `<=1.01x`. The proposal-width-eight and proposal-head-width-seven DFlash companion calls
-  remain G64 and are outside this selected G128 route. The P2048 aggregate must include ordinary
+  remain G64 and are outside this selected G128 route. The P2048 aggregate had to include ordinary
   A8G128 preparation for value-Z/output
   and fused-SiLU-to-A8G128 preparation for MLP-down, never GEMM-only timing.
   Production admission still requires a matched dense G16 C1/P2048/no-spec whole run at or below
@@ -1444,18 +1469,144 @@ Replace functional routes with measured gfx1201 families:
   residual across 2,089 eager dispatches is not a measured host-overhead bucket: saving 25 ms would
   require eliminating `85.63%` and leave about 2 microseconds per dispatch despite profiler queue
   interception and unavoidable gaps. Decode Device Graph evidence does not admit a capture-safe or
-  faster 2,089-node prefill graph. The activation-inclusive A8G128-by-Q4G128 represented-format
-  contingency was the final live material hypothesis. Its two independent robust point estimates
+  faster 2,089-node prefill graph. An exact follow-up of the fresh trace closes persistent/grouped
+  Q4 dispatch independently: the 176 Q4 kernels consume `356.276973 ms`, while all 349 positive
+  boundaries touching them total only `3.800482 ms` and no single boundary exceeds `22.04 us`.
+  Same-shape calls remain separated by required attention, GDN, SiLU, residual, and normalization
+  producers, so neither grouping nor a resident grid can reduce the in-kernel service loss.
+  Cross-Op represented-input reuse is also closed: the 112 ordinary A8 preparations correspond
+  exactly to 48 value-Z, 48 GDN-output, and 16 attention-output calls, while the other 64 inputs
+  already use fused SiLU-to-A8 preparation. Every represented input is distinct, and even perfect
+  removal of all ordinary A8 preparation is only `8.850520 ms`. A dedicated-loader-wave Q4 design
+  has no omitted operation or occupancy gain: production already issues successor payload loads
+  before all eight IU4 WMMAs and overlaps them across the compute body, while the closest measured
+  wave-role b128 mechanism lost `7.659%` weighted. No qualifier follows from these three designs.
+  ROCm 10 SPM is not an alternate causal-attribution route on this installation: gfx1201 is listed
+  as an SPM-capable agent, but every one of the 86 exposed metrics is marked `SPM: Not Supported`.
+  The fresh N16 trace instead bounds the physical question directly enough to justify one causal
+  diagnostic. Its Q4 service performs `21.99023255552` useful TMAC in `356.276973 ms`, or
+  `61.7223` useful TMAC/s (`30.73%` of the isolated `200.880451` IU4 ceiling), while the exact
+  M64xN128 request model is `364.823707648 GB` (`1.023989 TB/s`) but the unique represented
+  footprint is only `14.507049664 GB`. Neither raw GDDR saturation nor pure IU4 issue therefore
+  follows. The fail-closed full/half/quarter-CU scaling experiment on the exact production N16
+  P2048 Q4 service completed but is invalid/inconclusive under its frozen 10% controls. Measured
+  IU4 ratios were `0.551146` and `0.279208`, just outside the nominal `0.5`/`0.25` mask-response
+  tolerance; Q4 throughput ratios were `0.602902` and `0.307400`, with the quarter point
+  `10.0971%` from the measured IU4 curve. The shared greater-than-L2 stream ratios were much flatter
+  at `0.952047` and `0.801406`, so the result directionally favors CU-local service but is not a
+  causal authority. The one authorized fresh, unpooled repeat predeclared a 15% nominal mask sanity
+  tolerance while retaining the 10% measured-curve classification threshold. It validated all
+  controls and exact 176-call inventories, but terminated `mixed_or_inconclusive`: production
+  throughput ratios were `0.602442` and `0.307594`, IU4 ratios `0.550918` and `0.279232`, and shared
+  stream ratios `0.951367` and `0.801980`; neither comparison curve matched at both reduced-CU
+  points within 10%. Its immutable valid receipt is
+  `profiles/bench/r9700-n16k16-q4-cu-mask-causal-repeat1-prepare-20260905/result.json` (SHA-256
+  `56b6f742563fe7e2f54f94676a17245f1b35b5a1ec4be13a9ed439a67184b538`). No pooling,
+  further tolerance change, or repeat follows. The immutable first-run invalid receipt is
+  `profiles/bench/r9700-n16k16-q4-cu-mask-causal-prepare-20260905/invalid-result.json`.
+  The one cache-policy challenger was also qualified and terminally rejected at the disconnected
+  exact-MLP boundary. It applied gfx1201 high-temporal/device-scope policy only to the two packed-W payload loads for
+  `T2048/N5120/K17408`, leaving A and both scale planes at their retained default policy. The long-K
+  shape has the weakest legacy GL2 hit ratio (`84.25%` versus `93.80`--`95.56%` for shorter K), and
+  the opposite non-temporal policy is already physically terminal. Require unchanged load widths,
+  including the incumbent's two static packed-W `global_load_b64` sites, plus otherwise identical
+  instruction ordering/bytes, eight IU4 sites, `<=96` VGPR, `17,152`-byte LDS, occupancy 16, no scratch/spills,
+  complete represented-format correctness, and a direct ratio `<=0.86874` or saving
+  `>=0.390625 ms` per call. The final candidate and baseline HSCOs differed by exactly the two
+  intended policy bytes on the exact production 11-argument kernel. Stable timing was neutral:
+  `3.085972 ms` control versus `3.086026 ms` candidate, ratio `1.000017`, saving
+  `-0.000054 ms` per call. The immutable report is
+  `profiles/bench/r9700-a8q4-n16k16-weight-device-ht-p2048-ab-20260905.json` (SHA-256
+  `d1f5946a8808f855c67b138ef87e979b2af9f29e26a0806e2c56242d11d961a5`). No hint sweep
+  or production change follows.
+  A distinct private group-major A8G64 workspace challenger was qualified and terminally rejected.
+  It preserves the two
+  exact nibble planes, FP16 G64 scales, total workspace bytes, Q4N16K16 weights, two-bank
+  `17,152`-byte LDS mapping, barriers, eight signed-IU4 sites, and graph-stable plane addresses,
+  but changes code indexing to `[G,T,32 packed bytes]` and scales to `[G,T]`. At P2048 this changes
+  each CTA/G64 activation request model from 128 disjoint code segments plus 64 strided scale words
+  to 32 contiguous code segments plus two contiguous scale spans, without changing represented
+  bytes or arithmetic. The disconnected exact-shape implementation emits 88 VGPR for selected
+  prefill, 51 for small/T1, and 10/13 for ordinary/fused producers, all at occupancy 16 with no
+  scratch/spills. After repairing a harness-only null-stream error, its complete codec, bit-parity,
+  represented-FP64, T1/P2048, fused-boundary, status/guard, and graph regression passed. Stable
+  direct timing nevertheless lost every shape: candidate/control ratios were `1.003918` for
+  value-Z, `1.004987` for GDN/attention output, and `1.012580` for MLP-down, for a weighted
+  `-3.659893 ms` saving. It fails both the every-cell `<=1.01` guard and the required `>=25 ms`
+  saving. The immutable report is
+  `profiles/bench/r9700-a8q4-group-major-activation-p2048-ab-20260905.json` (SHA-256
+  `cccae429dda31f4bef9a71b425ea46bef2ad44388ffd7770327b50d241a684a2`). No production
+  cutover or whole-P2048 follow-up follows.
+  Lower/private accumulator precision and staged epilogues are terminal without a qualifier.
+  Production's 16 FP32 totals are not an occupancy limiter because 96 architectural VGPR already
+  retains occupancy 16 and the `17,152`-byte LDS footprint independently limits residency. Even an
+  impossible clean removal of two of roughly 50 arithmetic encodings per wave/G64 bounds saving
+  below `14.3 ms`; FP16/BF16 per-group accumulation introduces material rounding/overflow risk.
+  A single FP32 continuation plane would add `20.4011 GB` of write/read traffic, at least `32.21 ms`
+  at the retained stream ceiling, while sequential accumulator tiling removes no work and halves
+  independent chains. No production or GPU work follows.
+  Activation-only A8G128 with retained Q4G64 weights is also terminal without a numerical gate or
+  qualifier. The K128 activation scale is mathematically well defined, but the two distinct Q4G64
+  weight scales preserve both K64 epilogues, all 16 IU4 sites per K128, signed reconstruction,
+  I32-to-FP32 conversion, FP32 accumulation, payload publication, and barriers. Over the exact
+  `48/64/64` P2048 inventory, eliminating every redundant activation-scale request is worth at most
+  `4.239 ms` at the retained stream ceiling; even an intentionally generous 50% reduction of the
+  complete ordinary-plus-fused A8 producer bucket adds only `14.806 ms`, for a combined ceiling of
+  `19.045 ms`, below the fixed `25 ms` admission boundary. Because sharing a K128 maximum changes
+  represented activation codes, incumbent bit parity and the prior paired A8G128/Q4G128 quality
+  result cannot authorize this profile. No separate BF16 gate, workspace format, producer,
+  consumer, or GPU qualifier follows.
+  One final exact-format instruction-level candidate remains live: replace the four full 64-bit
+  VGPR payload cursors with exact unsigned 32-bit byte offsets and use the native gfx1201
+  scalar-base-plus-`voffset` forms for the unchanged A-low/A-high b32, packed-W b64, A-scale d16,
+  and W-scale d16 loads. The exact maximum spans are only 17.83 MiB, 44.56 MiB, 1.12 MiB, and
+  2.79 MiB respectively, so no offset can wrap. This can remove nine vector address/carry
+  instructions and six associated carry-dependency waits per G64 iteration. Across the exact
+  `48/64/64` P2048 inventory, nine issue slots bound at `~16.16 ms`; granting one issue-equivalent
+  cycle to each dependency gate raises the optimistic ceiling to `~26.93 ms`, barely above the
+  `25 ms` threshold. It is distinct from the terminal hand-FIFO, prefetch, epilogue-scheduling,
+  cache-policy, and swizzle families. Admit exactly one disconnected qualifier: preserve the
+  production 11-argument ABI, load widths/order/policies, successor issue point, `17,152`-byte LDS,
+  barriers, eight IU4 sites, reconstruction, scale, FP32 accumulation, and output; require at most
+  92 logical/96 architectural VGPR, occupancy 16, zero scratch/spills, complete represented-format
+  correctness/status/tails/guards, every shape `<=1.01x`, and at least `25 ms` weighted saving. The
+  disconnected wrapper must reject every shape outside the exact three P2048 tuples because a
+  later generic production route would need checked span arithmetic and fallback before using
+  32-bit offsets. This is an incremental physical-ceiling probe, not by itself a credible floor
+  closer: its `~26.93 ms` generous estimate projects only `~1,893 tok/s`, whereas opening the floor
+  requires a directly confirmed `84.835254 ms` whole saving. The first physical miss is terminal;
+  no address-form variant or sweep follows.
+  The existing A4Q4 route is also terminal as implemented: its retained relevant P2048 cells saved
+  `40.295811 ms` before N16, but current fused MLP-down has no fused-SiLU-to-A4 producer, leaving
+  only a projected `18.360 ms` saving on the routes it can actually replace. Global A4 quality is
+  already rejected (`+0.135526` all-Q4 mean NLL and `+0.046148` mixed). All 18 BF16 source shards
+  are now locally present, which made A4 the sole remaining live `>=25 ms` hypothesis.
+  - [x] Run the frozen numerical-first exact four-role N16 8K gate at
+    `profiles/ppl/four-role-n16k16-a4-8k-prepare-20260905`: require mean NLL delta
+    `<=0.048790164` and at most 11 new positions with NLL `>=10`. Only a pass can authorize a new
+    fused-SiLU-to-A4, exact-N16 three-shape qualifier; do not rerun the stale row-major A4 harness.
+    The exact 4,095-position run failed: PPL was `6.930091412` versus BF16 `6.458343869`, and mean
+    NLL was `1.9358730039`, delta `0.0705000860`, exceeding the limit by `0.021709922`; new severe
+    positions were `7/11`, but both gates are required. Its immutable schema-v6
+    report is `profiles/ppl/four-role-n16k16-a4-8k-20260905/results.json` (SHA-256
+    `cd449ecddbf7f2d260fb43d630b1274ae986631114bf6114c99f3253f0c6b8f5`). A4 is terminal with no
+    fused-A4 or physical qualifier. If the single scalar-base/32-bit-offset qualifier above also
+    misses, the broad P2048 item is blocked pending an explicit product-contract decision rather
+    than authorizing unbounded hypothesis search.
+  The activation-inclusive A8G128-by-Q4G128 represented-format
+  contingency was the final represented-format hypothesis before these two bounded follow-ups. Its
+  two independent robust point estimates
   and computed intervals above remain below `3 ms`, but instability prevents treating them as a
   physical speed bound; the permitted repeat is exhausted and admits no product path. The residual
-  audit therefore leaves no live
-  semantics-preserving `>=25 ms` or `>=30 ms` P2048 hypothesis.
+  audit therefore leaves no live represented-format hypothesis; only the single exact-format
+  address-generation qualifier above remains.
 - [ ] Rerun all 48 post-promotion capacity cells (dense/XAttention times
   all-Q4/mixed/four-role-hybrid times G16/G32, each at C=1..4). Bind the newly measured Device Graph
   executable allocation; this is
   still required even though the aliased split scratch does not raise the modeled global arena.
-  CPU command structure is complete in
-  `profiles/bench/post-chunk-twelve-candidate-20260905`. The all-Q4 and mixed N16/K16 artifacts and
+  The prior CPU command structure in
+  `profiles/bench/post-chunk-twelve-candidate-20260905` is a non-runnable template until regenerated
+  and refrozen against the new receipt-bound chunk namespace. The all-Q4 and mixed N16/K16 artifacts and
   their adjacent immutable migration receipts are published. The eight already-created
   all-Q4/mixed manifests in the earlier `-n16k16-20260905` roots predate those receipts and are
   superseded, non-runnable, and never rebound or resumed. Once the P2048 gate opens, a fresh shared
@@ -1469,16 +1620,19 @@ Replace functional routes with measured gfx1201 families:
   downstream gate because its companion artifact depends on the base winner. The required
   shared-runner publication/DFlash-preset patch is complete: runner-owned outputs use
   inode-checked same-directory durable publication and resume validates regular-file ownership and
-  report provenance; the focused runner suite passes `48/48`. One downstream closure refresh
-  remains deferred behind the P2048 floor gate; preparation is not physical completion. No
+  report provenance; the focused runner suite passes `48/48`. Dependent package regeneration and
+  closure refreshes remain deferred behind the P2048 floor gate and must follow the dependency
+  order above; preparation is not physical completion. No
   physical row or allocation measurement is credited until that package executes.
 
-  Final cutover admission is also prepared, not passed, at
-  `profiles/bench/final-artifact-cutover-admission-prepare-20260905`. Its CPU-only validator reopens
+  The prior final-cutover package at
+  `profiles/bench/final-artifact-cutover-admission-prepare-20260905` is likewise a non-runnable
+  pre-receipt template until regenerated and refrozen. Its CPU-only validator must reopen
   the schema-v7, chunk, six-quality, exact-token, low-context, retained MTP regression in the
   whole/selected-trace evidence, NIAH, selected-source-BF16
-  Vision diagnostic, focused, hardware-use, and DFlash owners; joins the exact twelve C1..4 capacity and twelve C1..4 whole
-  matrices; and publishes create-only only after every selected-route physical authority passes.
+  Vision diagnostic, focused, hardware-use, DFlash, and converter-preflight owners; join the exact
+  twelve C1..4 capacity and twelve C1..4 whole matrices; and publish create-only only after every
+  selected-route physical authority passes.
   The final receipt remains absent, so no artifact or product-identity mutation is authorized.
 
 Derive each route from real shapes and phase behavior. Qualify wave mode, WMMA atom, LDS layout,
@@ -1562,13 +1716,14 @@ artifact, ROCm/driver, and relevant settings recorded.
 
 ## Material risks and live decisions
 
-- The persistent integer weight assignment is unresolved until the Stage 0/3 BF16-source PPL and
-  real-shape performance gates; NVFP4 is not a candidate. The complete indexed 18-shard BF16
+- The persistent integer weight assignment remains unresolved until the receipt-bound selection,
+  capacity, quality, exact-token, post-terminal, converter-preflight, and final-cutover gates;
+  NVFP4 is not a candidate. The complete indexed 18-shard BF16
   source is local and target-validator accepted in
   `profiles/ppl/r9700-bf16-source-checkpoint-preflight-20260905.json` (SHA-256
-  `4c605982c84fbfc8803fea24ccdd0230277f4f20c8547a38098f6f440bf99fa9`), so this is a
-  pending conversion/PPL/exact-token evidence boundary rather than an external acquisition
-  blocker.
+  `4c605982c84fbfc8803fea24ccdd0230277f4f20c8547a38098f6f440bf99fa9`), and the three N16
+  candidate artifacts and migration receipts already exist. The remaining boundary is selection
+  and physical admission, not checkpoint acquisition or initial conversion.
 - INT4 V group 32 is the capacity/speed lead and group 16 is the accuracy challenger. Neither is
   selected by intuition: both must pass the same represented-value attention oracle, paired PPL,
   deterministic-token, long-context, and production-speed gates.

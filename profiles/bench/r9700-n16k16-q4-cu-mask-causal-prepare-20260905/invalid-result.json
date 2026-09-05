@@ -1,0 +1,44 @@
+{
+  "schema": "ninfer.r9700.n16k16_q4_cu_mask_causal_invalid.v1",
+  "status": "invalid_inconclusive",
+  "reason": "Both reduced-CU IU4 controls missed the frozen nominal mask-response tolerance, and the quarter-CU Q4 point also missed the frozen measured-curve classification tolerance. Thresholds are not relaxed after observing the data and no repeat is scheduled.",
+  "frozen_relative_tolerance": 0.10,
+  "arms": {
+    "full64": {
+      "iu4_useful_tmac_s": 400.7881620922331,
+      "stream_gb_s": 620.889741365492,
+      "q4_summed_duration_ms": 357.398385,
+      "q4_throughput_ratio": 1.0
+    },
+    "half32": {
+      "iu4_useful_tmac_s": 220.89270046001693,
+      "iu4_ratio": 0.5511457706407582,
+      "stream_gb_s": 591.1159615851125,
+      "stream_ratio": 0.9520465908892302,
+      "q4_summed_duration_ms": 592.796547,
+      "q4_throughput_ratio": 0.6029022719661692,
+      "q4_to_iu4_curve_relative_error": 0.09390710059380342
+    },
+    "quarter16": {
+      "iu4_useful_tmac_s": 111.90330230465158,
+      "iu4_ratio": 0.2792081026557352,
+      "stream_gb_s": 497.584628471321,
+      "stream_ratio": 0.801405781607871,
+      "q4_summed_duration_ms": 1162.649628,
+      "q4_throughput_ratio": 0.30739990483186225,
+      "q4_to_iu4_curve_relative_error": 0.10097057323185174
+    }
+  },
+  "directional_non_authority": "Q4 scaling is much closer to the IU4 curve than the shared greater-than-L2 stream curve, but the frozen fail-closed gates prohibit a causal classification.",
+  "sha256": {
+    "peak_full64": "37da07c9774babd32182c28a8e4208645a7de672369fad6b039e0813ff5152db",
+    "peak_half32": "384f25dc0b3b356e4499bf8b1b0898a083c4ef0f28e359c18678b73a3aad1520",
+    "peak_quarter16": "8999cf6ddf8c260e655003895580736b8d00f0cf9f792f8057710222bd48ae5c",
+    "benchmark_full64": "bfa4b599e73b2ccf69e086fdd674d3d592856c7ea878b165b3e5bf5f2365dc5d",
+    "benchmark_half32": "434262de3d4b32768f83eaf82f4dc371f05d3504be6b54a765818f0d60c215cf",
+    "benchmark_quarter16": "8ab492340c7ab8c81f12659cbbd25256f0094a06650bd56c5af78da545f3a5d8",
+    "database_full64": "b165500dc9c41aa9ba4769e05bb39224de7d8f87f0f6431f7f2baeee098b6b14",
+    "database_half32": "a87ffd29c49e42d2cc2d025209b96791a9920441f734a83f38c37c0762cdd181",
+    "database_quarter16": "2d8a00c53a0eb2b3bcf1380eebb304cb83c795b932f91a527135642d11b795bc"
+  }
+}

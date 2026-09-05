@@ -1,0 +1,126 @@
+{
+  "arms": {
+    "full64": {
+      "active_cus": 64,
+      "benchmark_report_sha256": "bebfd7c4d43e6690937ff743bc232a9c294e2664786dcfe871e2fec4b42d5200",
+      "database_sha256": "1f6caaad93b6f51f93db353272eabae8f0210891b52b4451409592d1f646d2d1",
+      "dispatches": 176,
+      "hsa_cu_mask": null,
+      "iu4": 401.2639951878213,
+      "peak_probe_sha256": "0ba68a5f2c13c24bc4ff210ed4ab9ab272c654263ba34e0eb70ab9ef460bcf08",
+      "stream": 620.8737093593136,
+      "summed_duration_ms": 356.733785
+    },
+    "half32": {
+      "active_cus": 32,
+      "benchmark_report_sha256": "89c0a32392e71d03207e6d092472541c950a2ffd7829f45994c92725b8541814",
+      "database_sha256": "d979987422bd01478709ea23907e02f5570ea06637c9f1e3568493e1c68edce6",
+      "dispatches": 176,
+      "hsa_cu_mask": "0:0-31",
+      "iu4": 221.06363047873782,
+      "peak_probe_sha256": "c478047f7a33be9f1785e89331512cbf272559529ec83fdcf2d0a8ced8add959",
+      "stream": 590.6787027079573,
+      "summed_duration_ms": 592.14664
+    },
+    "quarter16": {
+      "active_cus": 16,
+      "benchmark_report_sha256": "e62b10f357e82c9002115929c81aca7e332465ac9131ebb2147b22324027997d",
+      "database_sha256": "a7971e49154e6fbf0e7d0783a16c07047f5043f339d05204fe036bcf9fa77aa4",
+      "dispatches": 176,
+      "hsa_cu_mask": "0:0-15",
+      "iu4": 112.04566203007208,
+      "peak_probe_sha256": "2e57287d21a78cb8136549cde0cf7342cc7a967531d517d1e1938835d7ed82fb",
+      "stream": 497.92834786620557,
+      "summed_duration_ms": 1159.756341
+    }
+  },
+  "decision": {
+    "causal_curve_relative_tolerance": 0.1,
+    "classification": "mixed_or_inconclusive",
+    "curves_relative_to_full64": {
+      "full64": {
+        "iu4": 1.0,
+        "production": 1.0,
+        "stream": 1.0
+      },
+      "half32": {
+        "iu4": 0.5509181813715024,
+        "production": 0.6024416266214058,
+        "stream": 0.9513669105388359
+      },
+      "quarter16": {
+        "iu4": 0.2792317859907326,
+        "production": 0.3075937353292729,
+        "stream": 0.8019800812310499
+      }
+    },
+    "further_repeat_authorized": false,
+    "nominal_iu4_guard_relative_tolerance": 0.15,
+    "pooled_with_prior": false,
+    "repeat_index": 1,
+    "within_ten_percent": {
+      "iu4": false,
+      "stream": false
+    }
+  },
+  "interpretation": "Independent terminal CU-mask repeat; no pooled estimate and no further retry.",
+  "plan": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-n16k16-q4-cu-mask-causal-repeat1-prepare-20260905/plan.json",
+    "sha256": "570a3b8d18a88c80ef1086f049dc769e66fa46443539f1c202aa3c321ad401b4"
+  },
+  "repeat_contract": {
+    "index": 1,
+    "pooling": "none",
+    "prior_run": "profiles/bench/r9700-n16k16-q4-cu-mask-causal-prepare-20260905",
+    "terminal": "This sole repeat ends the experiment after any outcome. An invalid control or mixed/inconclusive result is a terminal miss; no further tolerance change, pooling, or repeat is authorized."
+  },
+  "schema": "ninfer.r9700.n16k16_q4_cu_mask_causal_result.v1",
+  "status": "valid",
+  "workload": {
+    "artifact_weights_id": "r9700-q4g64-f8e4m3-four-role-n16k16-eval",
+    "concurrency": 1,
+    "draft_tokens": 0,
+    "expected_launches": [
+      {
+        "calls": 48,
+        "grid": [
+          49152,
+          32,
+          1
+        ],
+        "workgroup": [
+          512,
+          1,
+          1
+        ]
+      },
+      {
+        "calls": 128,
+        "grid": [
+          20480,
+          32,
+          1
+        ],
+        "workgroup": [
+          512,
+          1,
+          1
+        ]
+      }
+    ],
+    "expected_q4_dispatches": 176,
+    "generated_tokens": 0,
+    "prefill_chunk": 4096,
+    "profile_measured": true,
+    "prompt_tokens": 2048,
+    "q4_kernel_substring": "a8q4g64_linear_prefill_cta_kernel",
+    "repetitions": 1,
+    "required_resources": {
+      "lds_bytes": 17152,
+      "scratch_bytes": 0,
+      "vgpr": 96
+    },
+    "spec": "none",
+    "warmup": 1
+  }
+}
