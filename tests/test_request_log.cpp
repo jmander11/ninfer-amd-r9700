@@ -40,7 +40,7 @@ int main() {
                       "request log accepted the model artifact as its output path");
 
     ServeOptions options;
-    options.artifact_path                  = "/models/qwen3_6_27b.ninfer";
+    options.artifact_path                  = "/models/qwen3_8_27b_r9700.ninfer";
     options.host                           = "127.0.0.1";
     options.port                           = 8123;
     options.api_key                        = "must-not-appear";
@@ -50,7 +50,6 @@ int main() {
     options.kv_capacity                    = ninfer::KvCapacityPolicy::explicit_capacity(524288);
     options.prefill_chunk                  = 1024;
     options.log_stats_interval_ms          = 2500;
-    options.kv_cache                       = ninfer::KvCacheStorage::Int8Group64;
     options.speculative.backend            = ninfer::SpeculativeBackend::Mtp;
     options.speculative.draft_tokens       = 3;
     options.speculative.proposal_head      = ninfer::ProposalHead::Optimized;
@@ -66,9 +65,9 @@ int main() {
     };
 
     ninfer::LoadSummary load;
-    load.target               = "qwen3_6_27b";
-    load.model_id             = "qwen3.6-27b";
-    load.weights_id           = "groupwise-int";
+    load.target               = "qwen3_8_27b_r9700";
+    load.model_id             = "qwen3.8-27b";
+    load.weights_id           = "fixture-weights";
     load.load_seconds         = 1.234567890123;
     load.upload_seconds       = 0.345678901234;
     load.artifact_bytes_read  = 1000;
@@ -83,7 +82,6 @@ int main() {
     memory.kv_capacity                       = 524288;
     memory.kv_capacity_page_groups           = 8192;
     memory.kv_capacity_max_page_groups       = 16384;
-    memory.kv_cache                          = ninfer::KvCacheStorage::Int8Group64;
     memory.weights.capacity_bytes            = 100;
     memory.sequence.capacity_bytes           = 200;
     memory.workspace.capacity_bytes          = 300;
@@ -94,20 +92,19 @@ int main() {
     memory.available_after_weights_bytes     = 1700;
     memory.available_after_startup_bytes     = 180;
     memory.planned_slack_bytes               = 100;
-    memory.cuda_graph_allowance_bytes        = 600;
-    memory.cuda_graph_observed_bytes         = 550;
+    memory.device_graph_allowance_bytes      = 600;
+    memory.device_graph_observed_bytes       = 550;
     memory.kv_payload_bytes                  = 400;
 
     ServerLogEnvironment environment;
     environment.device                    = 0;
-    environment.gpu_name                  = "NVIDIA GeForce RTX 5090";
+    environment.gpu_name                  = "Radeon AI PRO R9700";
     environment.gpu_uuid                  = "GPU-00000000-0000-0000-0000-000000000000";
+    environment.architecture_name         = "gfx1201";
     environment.total_device_memory_bytes = 32000000000ULL;
-    environment.compute_capability_major  = 12;
-    environment.compute_capability_minor  = 0;
-    environment.cuda_compile_version      = "13.1";
-    environment.cuda_runtime_version      = "13.1";
-    environment.cuda_driver_version       = "13.1";
+    environment.hip_compile_version       = "7.15.26333";
+    environment.hip_runtime_version       = "7.15.26333";
+    environment.hip_driver_version        = "7.1.3";
 
     const Json server = Json::parse(
         format_server_start_json("serve-test", 1000, options, sampling_defaults, "deployment-alias",
@@ -116,15 +113,18 @@ int main() {
                       "server record artifact type mismatch");
     failures += check(server.at("schema_version") == kRequestLogSchemaVersion,
                       "server record schema mismatch");
-    failures += check(kRequestLogSchemaVersion == 16, "request-log schema is not version 16");
+    failures += check(kRequestLogSchemaVersion == 20, "request-log schema is not version 20");
     failures += check(server.at("event") == "server_start", "server event mismatch");
     failures += check(server.at("server").at("public_model_id") == "deployment-alias",
                       "resolved public model id missing");
-    failures += check(server.at("artifact").at("target") == "qwen3_6_27b", "server target missing");
-    failures += check(server.at("artifact").at("weights_id") == "groupwise-int",
+    failures += check(server.at("artifact").at("target") == "qwen3_8_27b_r9700", "server target missing");
+    failures += check(server.at("artifact").at("weights_id") == "fixture-weights",
                       "server weights id missing");
     failures += check(server.at("artifact").at("size_bytes") == 123456, "artifact size missing");
     failures += check(server.at("engine").at("max_context") == 262144, "max context missing");
+    failures += check(server.at("engine").at("kv_value_group") ==
+                          NINFER_R9700_KV_VALUE_GROUP,
+                      "KV value group missing");
     failures += check(server.at("engine").at("kv_capacity") == 524288, "KV capacity missing");
     failures += check(server.at("engine").at("kv_capacity_mode") == "explicit" &&
                           server.at("engine").at("kv_capacity_page_groups") == 8192 &&
@@ -134,7 +134,22 @@ int main() {
         check(server.at("engine").at("log_stats_interval_ms") == 2500, "stats interval missing");
     failures += check(server.at("server").at("request_log_jsonl") == "requests.jsonl",
                       "request log path missing");
-    failures += check(server.at("engine").at("kv_cache") == "int8-group64", "KV type missing");
+    failures += check(server.at("engine").at("kv_cache_format") == "fp8-k-int4-v",
+                      "fixed KV format missing");
+#if defined(NINFER_R9700_XATTENTION_QUALIFICATION)
+    failures += check(
+        server.at("engine").at("xattention_qualification") == true &&
+            server.at("engine").at("xattention_profile") == "b128-s16-tau900" &&
+            server.at("engine").at("xattention_find_block") == 128 &&
+            server.at("engine").at("xattention_stride") == 16 &&
+            server.at("engine").at("xattention_tau_permille") == 900,
+        "compile-bound XAttention qualification profile missing");
+#else
+    failures += check(server.at("engine").at("xattention_qualification") == false,
+                      "ordinary server mislabeled as XAttention qualification");
+    failures += check(!server.at("engine").contains("xattention_profile"),
+                      "ordinary server carries an XAttention profile");
+#endif
     failures += check(server.at("engine").at("vision") == false, "Vision state missing");
     failures += check(server.at("engine").at("speculative_backend") == "mtp",
                       "speculative backend missing");
@@ -170,19 +185,21 @@ int main() {
                 0.6F &&
             server.at("sampling_defaults").at("server_overrides").at("top_p").is_null(),
         "server sampling overrides lost omission state");
-    failures += check(server.at("environment").at("gpu_name") == "NVIDIA GeForce RTX 5090",
+    failures += check(server.at("environment").at("gpu_name") == "Radeon AI PRO R9700" &&
+                          server.at("environment").at("architecture_name") == "gfx1201" &&
+                          server.at("environment").at("hip_runtime_version") == "7.15.26333",
                       "GPU name missing");
     failures += check(server.at("memory").at("request_transient").at("capacity_bytes") == 500 &&
                           server.at("memory").at("request_transient").at("peak_used_bytes") == 450,
                       "request transient memory missing");
-    failures += check(server.at("memory").at("cuda_graph_allowance_bytes") == 600,
-                      "CUDA Graph allowance missing");
+    failures += check(server.at("memory").at("device_graph_allowance_bytes") == 600,
+                      "Device Graph allowance missing");
     failures += check(server.at("memory").at("runtime_reservation_bytes") == 1600 &&
                           server.at("memory").at("available_after_weights_bytes") == 1700 &&
                           server.at("memory").at("available_after_startup_bytes") == 180 &&
                           server.at("memory").at("kv_capacity_headroom_bytes") == 0 &&
                           server.at("memory").at("planned_slack_bytes") == 100 &&
-                          server.at("memory").at("cuda_graph_observed_bytes") == 550,
+                          server.at("memory").at("device_graph_observed_bytes") == 550,
                       "adaptive KV memory ledger missing");
     failures += check(server.dump().find("must-not-appear") == std::string::npos,
                       "server JSON leaked the API key");
@@ -190,7 +207,7 @@ int main() {
                       "server argv did not retain the redaction marker");
 
     GenerationRequest request;
-    request.model          = "qwen3.6-27b";
+    request.model          = "qwen3.8-27b";
     request.stream         = false;
     request.max_tokens     = 4096;
     request.max_tokens_set = true;
@@ -273,8 +290,6 @@ int main() {
     outcome.metrics.speculative_accepted_tokens = 720;
     outcome.metrics.speculative_fallback_steps  = 2;
     outcome.metrics.speculative_accepted_per_position = {290, 240, 190};
-    outcome.metrics.speculative_live_draft_tokens     = 3;
-    outcome.metrics.speculative_rounds_per_draft      = {0, 0, 0, 300};
 
     const Json done = Json::parse(format_request_done_json("serve-test", 3000, context, outcome));
     failures +=
@@ -513,11 +528,6 @@ int main() {
     failures +=
         check(done.at("speculative").at("accepted_per_position") == Json::array({290, 240, 190}),
               "speculative position counts missing");
-    failures += check(done.at("speculative").at("live_draft_tokens") == 3,
-                      "speculative live draft tokens missing");
-    failures +=
-        check(done.at("speculative").at("rounds_per_draft") == Json::array({0, 0, 0, 300}),
-              "speculative rounds_per_draft missing");
 
     const Json error =
         Json::parse(format_request_error_json("serve-test", 4000, context, "generation failed"));

@@ -52,13 +52,6 @@ float parse_float(const char* text, std::string_view label, float minimum, float
     return static_cast<float>(value);
 }
 
-KvCacheStorage parse_kv_cache(std::string_view text) {
-    if (text == "bf16") { return KvCacheStorage::BFloat16; }
-    if (text == "int8") { return KvCacheStorage::Int8Group64; }
-    if (text == "nvfp4") { return KvCacheStorage::Nvfp4; }
-    throw std::invalid_argument("invalid kv-dtype: " + std::string(text));
-}
-
 KvCapacityPolicy parse_kv_capacity(const char* text) {
     if (std::string_view(text) == "auto") { return KvCapacityPolicy::automatic(); }
     return KvCapacityPolicy::explicit_capacity(parse_u32(text, "kv-capacity"));
@@ -95,15 +88,14 @@ std::string usage_text(const char* argv0) {
            " <model.ninfer> (--prompt <text>|--messages <messages.json>)\n"
            "       [--max-context N] [--kv-capacity N|auto] [--kv-ram-capacity off|N] [--prefill-chunk N] [--max-new N]\n"
            "       [--device N]\n"
-           "       [--kv-dtype bf16|int8|nvfp4] [--sage] [--keep-frac F] [--xattn-tau F]\n"
            "       [--spec mtp|dflash --draft-tokens N]\n"
-           "       [--adaptive-draft] [--dflash-verify-width N] [--lm-head-draft]\n"
+           "       [--dflash-verify-width N] [--lm-head-draft]\n"
            "       [--temperature F] [--top-p F] [--top-k N] [--min-p F]\n"
            "       [--presence-penalty F] [--frequency-penalty F] [--seed N] [--greedy]\n"
            "       [--stop-token-id N]... [--stop <text>]... [--reasoning-stop <text>]...\n"
            "       [--raw-output] [--print-token-ids] [--no-thinking]\n"
            "       [--reasoning-effort low|medium|xhigh] [--vision]\n"
-           "       [--vision] [--no-cuda-graph] [--capture-context-checkpoint]\n"
+           "       [--no-device-graph] [--capture-context-checkpoint]\n"
            "       [--context-checkpoints off|a,b,c]\n"
            "\n"
            "Streams answer content to stdout and reasoning plus diagnostics to stderr.\n"
@@ -156,20 +148,10 @@ Options parse_options(int argc, char** argv) {
             options.prefill_chunk = parse_u32(value(arg), "prefill-chunk");
         } else if (arg == "--device") {
             options.device = parse_device(value(arg));
-        } else if (arg == "--kv-dtype") {
-            options.kv_cache = parse_kv_cache(value(arg));
-        } else if (arg == "--sage") {
-            options.sage_attn = true;
-        } else if (arg == "--keep-frac") {
-            options.keep_frac = parse_unit_interval_flag(value(arg), "--keep-frac");
-        } else if (arg == "--xattn-tau") {
-            options.xattn_tau = parse_unit_interval_flag(value(arg), "--xattn-tau");
         } else if (arg == "--spec") {
             options.speculative.backend = product::parse_speculative_backend(value(arg));
         } else if (arg == "--draft-tokens") {
             options.speculative.draft_tokens = parse_u32(value(arg), "draft-tokens");
-        } else if (arg == "--adaptive-draft") {
-            options.speculative.adaptive_draft = true;
         } else if (arg == "--dflash-verify-width") {
             options.speculative.dflash_verify_width =
                 parse_u32(value(arg), "dflash-verify-width");
@@ -185,8 +167,8 @@ Options parse_options(int argc, char** argv) {
             options.reasoning_effort = parse_reasoning_effort(value(arg));
         } else if (arg == "--vision") {
             options.enable_vision = true;
-        } else if (arg == "--no-cuda-graph") {
-            options.use_cuda_graph = false;
+        } else if (arg == "--no-device-graph") {
+            options.use_device_graph = false;
         } else if (arg == "--capture-context-checkpoint") {
             options.capture_context_checkpoint = true;
         } else if (arg == "--context-checkpoints") {
@@ -249,11 +231,6 @@ Options parse_options(int argc, char** argv) {
         options.kv_capacity.explicit_tokens < options.max_context) {
         throw std::invalid_argument("--kv-capacity must be at least --max-context");
     }
-    if (options.sage_attn && options.kv_cache != KvCacheStorage::Nvfp4) {
-        throw std::invalid_argument("--sage requires --kv-dtype nvfp4");
-    }
-    validate_sparse_attn_flags(options.kv_cache, options.sage_attn, options.keep_frac,
-                               options.xattn_tau);
     product::validate_speculative_cli_options(options.speculative);
     if (options.speculative.backend == SpeculativeBackend::DFlash && options.enable_vision) {
         throw std::invalid_argument("--spec dflash cannot be combined with --vision");

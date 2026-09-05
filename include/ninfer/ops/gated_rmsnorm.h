@@ -2,7 +2,7 @@
 
 #include "core/tensor.h"
 
-#include <cuda_runtime.h>
+#include <hip/hip_runtime_api.h>
 
 namespace ninfer::ops {
 
@@ -21,6 +21,6 @@ namespace ninfer::ops {
  * side effect.
  */
 void gated_rmsnorm(const Tensor& x, const Tensor& weight, const Tensor& z, float eps, Tensor& out,
-                   cudaStream_t stream);
+                   hipStream_t stream);
 
 } // namespace ninfer::ops

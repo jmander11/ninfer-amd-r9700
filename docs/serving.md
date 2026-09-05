@@ -1,12 +1,12 @@
 # HTTP serving
 
-`build/apps/ninfer-serve` loads one registered artifact and exposes OpenAI- and
+`build-r9700/apps/ninfer-serve` loads the registered Qwen3.8-27B R9700 artifact and exposes OpenAI- and
 Anthropic-compatible HTTP endpoints over one resident NInfer Engine.
 
 ## Start the server
 
 ```bash
-./build/apps/ninfer-serve models/qwen3_8_27b_nvfp4.ninfer \
+./build-r9700/apps/ninfer-serve models/qwen3_8_27b_r9700_candidate.ninfer \
   --host 127.0.0.1 \
   --port 8080 \
   --max-context 16384 \
@@ -27,8 +27,8 @@ server must accept image or video input. Speculative residency is likewise froze
 `--spec mtp|dflash` and `--draft-tokens`; omitting `--spec` loads neither backend.
 `--lm-head-draft` additionally loads the optimized proposal head. DFlash is text-only: Qwen3.8-27B
 DFlash2 when `dflash/` is present, and it cannot be combined with
-`--vision`. On Qwen3.8-27B, DFlash2 uses paper-accurate chain verify (`W=k+1`); on RTX 5090,
-`--spec dflash --draft-tokens 4 --lm-head-draft` is the measured speed recommendation.
+`--vision`. The native Qwen3.8-27B DFlash2 runtime uses qualified chain and packed-tree schedules;
+the final R9700 draft-window recommendation remains pending real-artifact end-to-end measurement.
 A later request cannot enable a capability omitted at startup.
 
 ## Endpoints
@@ -145,7 +145,7 @@ duplicates, no Ollama-compat aliases):
   `tokens` are `max(0, completion_tokens - 1)`: when a first generated token exists it is sampled
   during prefill (and is in `prefill.ms` / TTFT), so `tok_s = tokens / (ms / 1000)`. Clients
   that divide `usage.completion_tokens` by `decode.ms` will overstate decode tok/s (2× on a
-  two-token completion). `decode.ms` is the GPU round time after host ingress and CUDA Graph
+  two-token completion). `decode.ms` is the GPU round time after host ingress and Device Graph
   install; it does not include CPU packing or graph-profile switching. Speculative GDN fold /
   compact after a round is still in `decode.ms`. Rate and millisecond fields are rounded to three decimal places.
   `cached_tokens` is the reused prefix length for any reuse path. `reuse_source` is where that
@@ -502,25 +502,23 @@ curl http://127.0.0.1:8080/v1/models \
 | `--max-context N` | logical context ceiling of each sequence | `8192` |
 | `--kv-capacity N\|auto` | explicit shared Main Text KV capacity, or maximize it from remaining GPU memory; omitted means `--max-context` | `8192` |
 | `--kv-ram-capacity off\|N` | pinned host KV prefix-cache capacity in MiB; `off` disables the tier | `off` |
-| `--max-concurrency N` | maximum admitted requests; valid range `1..8` | `1` |
+| `--max-concurrency N` | maximum admitted requests; valid range `1..4` | `1` |
 | `--max-pending-requests N` | additional requests allowed to wait for admission | `16` |
 | `--pending-timeout-ms N` | maximum preparation-plus-admission wait | `30000` |
 | `--prefill-chunk N` | text-prefill chunk | `4096` |
 | `--log-stats-interval-ms N` | aggregate throughput report interval; `0` disables it | `5000` |
-| `--device N` | CUDA device index | `0` |
+| `--device N` | HIP device index | `0` |
 | `--max-request-mib N` | body-size limit before JSON parsing | `384` |
 | `--request-log-jsonl FILE` | append full-precision server/request records | disabled |
 | `--response-store-max-records N` | maximum locally retained Responses objects | `1024` |
 | `--response-store-max-mib N` | total local Response envelope/Item/context budget | `256` |
-| `--kv-dtype bf16\|int8\|nvfp4` | KV-cache storage | `nvfp4` |
 | `--spec mtp\|dflash` | speculative backend | off |
-| `--draft-tokens N` | MTP `1..5`; 35B DFlash `1..15`; 3.8 DFlash2 `1..11` | unset |
-| `--adaptive-draft` | pick live draft K from host EWMA; requires `--spec mtp\|dflash` | off |
-| `--dflash-verify-width N` | DFlash verify width `2..16`; chain-only targets require `W=k+1`. Qwen3.8 DFlash2 defaults to chain `W=k+1` for `k<=5` and packed-tree `W=12` for `k` in `{6,7}` | auto |
+| `--draft-tokens N` | MTP `1..5`; DFlash2 `1..11` | unset |
+| `--dflash-verify-width N` | Qwen3.8 DFlash2 verify width `2..16`; auto uses chain `W=k+1` for `k<=5`, packed-tree `W=12` for `k` in `{6,7}`, and chain `W=k+1` for `k>=8` | auto |
 | `--lm-head-draft` | optimized proposal head | off |
 | `--default-max-tokens N` | output limit when omitted by a request | `8192` |
 | `--vision` | enable media input and load Vision GPU allocations | off |
-| `--no-cuda-graph` | disable CUDA Graph decode | graphs on |
+| `--no-device-graph` | disable Device Graph decode | graphs on |
 | `--no-prefix-reuse` | disable compatible-prefix caching | prefix reuse on |
 | `--context-checkpoints off\|a,b,c` | disable the automatic prefill ladder, or replace the default marks. Custom lists require `--spec mtp` or `--spec dflash`. Marks at or above `--max-context` stay unused. Advertised freeze `F` is the committed chunk end at or past the mark. | default ladder |
 | `--no-thinking` | disable thinking by default | thinking on |
@@ -536,15 +534,18 @@ curl http://127.0.0.1:8080/v1/models \
 | `--seed N` | fixed seed when a request omits one | fresh random seed per request |
 | `--greedy` | force exact argmax for all requests | off |
 
+The configured `--draft-tokens` value is fixed for the server lifetime. Startup creates only the
+matching speculative Device Graph profiles; requests cannot select a different live K. An
+automatic K policy requires fresh same-candidate execution-parity, acceptance, and complete-round timing evidence on
+the selected R9700 artifact at each supported concurrency before it can become a product option.
+
 Engine selects sampling defaults from the loaded model and the request's resolved thinking mode.
-Qwen3.6-27B uses `1.0/0.95/20/0/0` for temperature/top-p/top-k/min-p/presence penalty in thinking
-mode and `0.7/0.80/20/0/1.5` in non-thinking mode. Qwen3.8-27B uses presence penalty `0` in both
-modes (`0.6/0.95/20/0/0` thinking, `0.7/0.80/20/0/0` non-thinking). Qwen3.6-35B-A3B uses
-`1.0/0.95/20/0/1.5` in thinking mode and `0.7/0.80/20/0/1.5` in non-thinking mode. Frequency
-penalty is `0` for all registered presets. Process flags override registered values, request
+Qwen3.8-27B uses presence penalty `0` in both modes (`0.6/0.95/20/0/0` thinking,
+`0.7/0.80/20/0/0` non-thinking). Frequency penalty is `0` for all registered presets. Process
+flags override registered values, request
 fields override process flags, and `--greedy` finally forces temperature `0`.
 
-Run `./build/apps/ninfer-serve --help` for the exact option contract.
+Run `./build-r9700/apps/ninfer-serve --help` for the exact option contract.
 
 ## Structured request log
 
@@ -554,31 +555,38 @@ file. The parent directory must already exist. Failure to open the file aborts s
 is also rejected if it resolves to the model artifact.
 
 ```bash
-./build/apps/ninfer-serve models/qwen3_8_27b_nvfp4.ninfer \
+./build-r9700/apps/ninfer-serve models/qwen3_8_27b_r9700_candidate.ninfer \
   --request-log-jsonl profiles/bench/run/server.requests.jsonl
 ```
 
-Every line is one `ninfer_serve_request_log` schema-v16 JSON object. All events carry
+Every line is one `ninfer_serve_request_log` schema-v20 JSON object. All events carry
 `timestamp_unix_ms` and a process-unique `server_instance_id`; request IDs are monotonic only within
 that server instance.
 
 | Event | Contents |
 |---|---|
-| `server_start` | target/weights identity and artifact, resolved Engine, registered thinking/non-thinking sampler defaults plus process overrides, thinking-history defaults, weights/sequence/workspace/request-transient arenas, KV sizing ledger, pinned-host KV RAM capacity/occupancy, CUDA Graph observed/allowance bytes, CUDA/GPU environment, and redacted argv |
+| `server_start` | target/weights identity and artifact, resolved Engine, compile-bound Text-prefill/XAttention identity, registered thinking/non-thinking sampler defaults plus process overrides, thinking-history defaults, weights/sequence/workspace/request-transient arenas, KV sizing ledger, pinned-host KV RAM capacity/occupancy, Device Graph observed/allowance bytes, HIP/GPU environment, and redacted argv |
 | `request_start` | protocol, resolved sampler and seed, thinking modes, Responses semantic-change flag, output budget, stream/message/tool shape |
 | `request_rejected` | parsed request shape, media-item count, `phase: "prepare"`, and the exact HTTP status/type/code/parameter/message for a synchronous preparation rejection |
 | `request_done` | finish reason, prompt/completion/cache/computed-prefill tokens, prefix reuse path, `reuse_source` (`none` / `vram_resident` / `host_ram`), `context_checkpoint` (`restored_tokens` / `captured_tokens`), unrounded phase seconds including `kv_ram_save` / `kv_ram_load`, complete speculative-decoding counters, `tool_call_count`, and `ignored_qwen_tool_call_names` (empty unless a tools-off completion contained parseable Qwen `<tool_call>` markup) |
 | `request_error` | the resolved request configuration and generation error message |
 | `throughput` | interval token deltas and rates, scheduler occupancy, interval `timings_seconds.kv_ram_save` / `kv_ram_load`, and decode-round batch statistics |
 
+`server_start.engine.xattention_qualification` is always present. It is `false` in the ordinary
+product build. The OFF-by-default qualification build reports `true` plus the exact
+`xattention_profile`, `xattention_find_block`, `xattention_stride`, and
+`xattention_tau_permille` compiled into that executable; these are evidence fields, not runtime
+selectors. `server_start.engine.kv_value_group` likewise records the compile-bound G16/G32 Text
+and MTP value-cache group; it is not a runtime cache selector.
+
 `request_done.timings_seconds` contains `prepare`, `ttft`, `vision`, `prefill`, `decode`, `total`,
 `kv_ram_save`, and `kv_ram_load` as full-precision JSON numbers. `kv_ram_save` / `kv_ram_load` are
-CUDA event elapsed for that request's RAM-tier FIFO D2H capture and H2D unpack (KV plus GDN images
-in the same copy span). They are not admission wait. Live-lane context-checkpoint freeze D2H and a
+HIP event elapsed for that request's RAM-tier FIFO D2H capture and H2D unpack (Main KV, optional
+MTP KV or DFlash cyclic state, and GDN images in the same copy span). They are not admission wait.
+Live-lane context-checkpoint freeze D2H and a
 VRAM-resident restore that unpacks already-pinned lane GDN are not included. Throughput events repeat
 those two keys as interval sums. Its `speculative` object contains `backend`, `draft_window`, `rounds`,
-`drafted_tokens`, `accepted_tokens`, `fallback_steps`, `accepted_per_position`, `live_draft_tokens`,
-and `rounds_per_draft`. Rates can be
+`drafted_tokens`, `accepted_tokens`, `fallback_steps`, and `accepted_per_position`. Rates can be
 derived downstream from raw token counts and seconds instead of rounded stderr strings.
 
 The JSONL file contains no generated response text and never records an API-key value; `argv`
@@ -606,9 +614,9 @@ raw values.
 
 ## Execution behavior
 
-The server owns one resident Engine with a startup-fixed capacity of `1..8` active generation
+The server owns one resident Engine with a startup-fixed capacity of `1..4` active generation
 requests. At each decode boundary, every decode-ready request is compacted into one batch and
-processed by one model traversal and, when graphs are enabled, one exact-batch CUDA Graph replay. A
+processed by one model traversal and, when graphs are enabled, one exact-batch Device Graph replay. A
 request joins that batch only after its single-request prefill finishes; when it completes or is
 cancelled, the next boundary rebuilds the batch without an empty row.
 
@@ -638,8 +646,9 @@ in MiB for completed prefix bundles and does not change GPU pool sizing. One lon
 context-checkpoint heads is about 6 GiB in that FIFO; `off` still keeps same-lane GDN rollback on
 the live pinned log, but other-lane restore after eviction needs the FIFO.
 
-Automatic sizing evaluates the complete target runtime layout for the chosen concurrency, KV
-dtype, speculative backend, draft window, Vision setting, workspace, and CUDA Graph allowance. It
+Automatic sizing evaluates the complete target runtime layout for the chosen concurrency, fixed
+FP8-K/INT4-V growing-cache format, speculative backend, draft window, Vision setting, workspace,
+and Device Graph allowance. It
 uses a direct page-capacity calculation rather than allocation probing. Startup reports the policy,
 resolved capacity, runtime reservation, free memory after weights, automatic headroom, planned
 slack, actual free memory after complete startup, observed Graph memory, and pinned-host KV RAM
@@ -647,7 +656,7 @@ occupancy in MiB. When `--kv-ram-capacity` is enabled, a post-warmup line reprin
 periodic throughput lines print live host-resident `kv-ram=` used bytes plus `n=` / `restores=` /
 `evicts=` / `drops=` / `save=` / `load=`, and each `[req] done` line includes `reuse_source=` plus
 the same occupancy and counters. `kv-ram=` / `n=` count chats still in the host FIFO, not chats
-already consumed after a restore onto a KV lane. `save=` / `load=` are CUDA D2H/H2D elapsed for
+already consumed after a restore onto a KV lane. `save=` / `load=` are HIP D2H/H2D elapsed for
 that request or the throughput interval. `restores=` / `evicts=` / `drops=` are lifetime counters
 on both human lines; lifetime capture counts stay in JSONL.
 Exact RAM byte occupancy remains in `server_start`, `request_done`, and `throughput` JSONL; set

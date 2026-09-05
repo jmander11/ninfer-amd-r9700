@@ -1,350 +1,277 @@
-# NInfer
+# NInfer for Radeon AI PRO R9700
 
-> Selected checkpoints. Maximum single-GPU inference performance.
+NInfer is a from-scratch C++/HIP inference engine specialized for one AMD Radeon AI PRO R9700
+(`gfx1201`, wave32) and the Qwen3.8-27B model. It supports local CLI generation, OpenAI and
+Anthropic compatible HTTP serving, teacher-forced perplexity scoring, fixed concurrency from one to
+four requests, Vision input, MTP, DFlash2, prefix reuse, host-RAM prefix spill, and Device Graphs.
 
-NInfer is a from-scratch C++/CUDA inference engine for explicitly registered Qwen checkpoints on a
-single NVIDIA GeForce RTX 5090. It runs text, image, and video prompts through a local CLI or
-OpenAI-/Anthropic-compatible HTTP APIs.
+There is no compatibility backend and no runtime cache-format selector. The growing
+Text/MTP cache has one fixed represented format:
 
-NInfer deliberately supports a closed set of model artifacts instead of acting as a general model
-runtime:
+- keys: FP8 E4M3FN;
+- values: signed canonical INT4;
+- value scales: FP16, one scale per fixed feature group;
+- attention softmax and accumulation: FP32;
+- explicit model-boundary outputs: BF16 where required by the Qwen formula.
 
-| Model | Weights | NInfer artifact | Size | SHA-256 |
-|---|---|---|---:|---|
-| [Qwen3.6-27B](https://huggingface.co/neroued/Qwen3.6-27B-NInfer) | `groupwise-int` | `qwen3_6_27b.ninfer` | 17,495,365,888 bytes (16.29 GiB) | `7b51600ffd10632b9660f56085efdd9b751d79733ad32036a652234b64bebe7b` |
-| [Qwen3.6-27B NVFP4](https://huggingface.co/neroued/Qwen3.6-27B-nvfp4-NInfer) | `nvfp4` | `qwen3_6_27b_nvfp4.ninfer` | 18,324,064,000 bytes (17.07 GiB) | `bce5f00d066c0f20f1317bf1fdcb458264cf95837c3b1f3fbec163694627893a` |
-| [Qwen3.8-27B](https://huggingface.co/neroued/Qwen3.8-27B-NInfer) | `groupwise-int` | `qwen3_8_27b.ninfer` | 18,210,531,328 bytes (16.96 GiB) | `eec39564993d6e9c7d5e383382a760f093465c9d163ec9a1bd6b80199514bf3e` |
-| [Qwen3.8-27B NVFP4](https://huggingface.co/Ostfralla/Qwen3.8-27B-NVFP4-NInfer) | `nvfp4` | `qwen3_8_27b_nvfp4.ninfer` | — | — |
-| [Qwen3.6-35B-A3B](https://huggingface.co/neroued/Qwen3.6-35B-A3B-NInfer) | `groupwise-int` | `qwen3_6_35b_a3b.ninfer` | 22,783,246,080 bytes (21.22 GiB) | `1fb9ea0b5b8561e49d9604115ec89e5d9f2b6f6434e32c37c57fffd480a325d2` |
+FP64 is used only by independent qualification oracles, never by production attention.
 
-The supported identity `qwen3.8-27b/nvfp4` is registered as the `qwen3_8_27b` target and shares
-the 27B execution package while using W8 token-embedding and full-output-head weights. The `nvfp4`
-profile uses W4A4 Tensor Core MMA for prefill and A16 NVFP4 kernels for decode. The artifact
-retains the full Text, Vision, MTP, prefix-reuse, CLI, and serving routes. The other listed
-artifacts remain loadable but are outside the current product contract.
+## Migration status
 
-## Performance
+The HIP core, artifact reader/materializer, typed cache, sole-target runtime, public Engine, CLI,
+server, PPL executable, and a broad set of native Ops build for `gfx1201`. Physical R9700
+qualifiers cover cache bytes/lifecycle, full Text attention, speculative transitions, DFlash2,
+Vision, Linear, GDN, sampling, persistent state, and fixed C=1..4 runtime planning.
 
-The published measurements currently cover the three Qwen3.6 artifact profiles. Qwen3.8-27B is
-supported by current NInfer builds but is not yet included in the benchmark campaign.
+The currently accepted artifact identity is deliberately provisional:
 
-### Concurrent MTP3 decode
+```text
+model_id   = qwen3.8-27b
+weights_id = r9700-int-candidate
+target_key = qwen3_8_27b_r9700
+recipe     = W8G32 candidate
+```
 
-Saturated decode was measured on an RTX 5090 with INT8 group-64 KV cache, CUDA Graphs, MTP3, and
-one 8,192-token generation per active request. The values below are aggregate committed decode
-throughput from complete one-second intervals in which the actual decode batch remained equal to
-the configured concurrency. Each profile should be read independently.
-
-| Model profile | C=1 | C=2 | C=4 | C=8 | C8 / C1 |
-|---|---:|---:|---:|---:|---:|
-| Qwen3.6-27B `groupwise-int` | 185.8 tok/s | 247.0 tok/s | 309.5 tok/s | 535.0 tok/s | 2.88× |
-| Qwen3.6-27B `nvfp4` | 202.4 tok/s | 399.7 tok/s | 699.7 tok/s | 1,146.9 tok/s | 5.67× |
-| Qwen3.6-35B-A3B `groupwise-int` | 593.0 tok/s | 877.7 tok/s | 1,166.0 tok/s | 1,313.8 tok/s | 2.22× |
-
-At C=8, Qwen3.6-35B-A3B reaches **1,313.8 aggregate decode tok/s**. The 27B NVFP4 profile reaches
-**1,146.9 tok/s** and **5.67×** its C=1 throughput.
-
-### Single-request serving
-
-The single-request corpus was measured on the same GPU with INT8 group-64 KV cache, CUDA Graphs,
-and a 1,024-token prefill chunk. Each reported fixture uses five fixed seeds after server warm-up.
-The two measured targets are reported independently and are not cross-target comparisons. The two
-27B weight profiles are reported separately. Requests were submitted serially to a persistent
-server.
-
-**Qwen3.6-35B-A3B**
-
-- MTP0 at a 7,680-token prompt: **15,544.3 prefill tok/s** and **271.1 decode tok/s**.
-- MTP0 at a 260,096-token prompt: **5,157.1 prefill tok/s** and **188.2 decode tok/s**.
-- MTP3 long reasoning: **620.3–726.2 decode tok/s** with **72.7–82.8% acceptance**.
-- MTP3 structured output: **770.9 decode tok/s**, **89.1% acceptance**, and **3.67 tokens/round**.
-
-**Qwen3.6-27B (`groupwise-int`)**
-
-- MTP0 at a 7,680-token prompt: **3,218.1 prefill tok/s** and **77.6 decode tok/s**.
-- MTP0 at a 260,096-token prompt: **1,614.8 prefill tok/s** and **54.8 decode tok/s**.
-- MTP3 long reasoning: **161.9–175.4 decode tok/s** with **73.4–78.8% acceptance**.
-- MTP3 structured output: **193.0 decode tok/s**, **88.7% acceptance**, and **3.66 tokens/round**.
-
-**Qwen3.6-27B (`nvfp4`)**
-
-- MTP0 at a 7,680-token prompt: **11,191.5 prefill tok/s** and **86.4 decode tok/s**.
-- MTP0 at a 260,096-token prompt: **2,510.6 prefill tok/s** and **59.9 decode tok/s**.
-- MTP3 long reasoning: **213.1–231.0 decode tok/s** with **76.3–81.1% acceptance**.
-- MTP3 structured output: **252.2 decode tok/s**, **89.8% acceptance**, and **3.69 tokens/round**.
-- Against groupwise-int on the same corpus and runtime options: **3.48× the 7,680-token prefill
-  throughput**, **1.55× the 260,096-token prefill throughput**, and **30–32% higher MTP3 decode
-  throughput**.
-
-See [Performance](docs/performance.md) for the full methodology, variability, reproduction command,
-and per-fixture results.
-
-## Evaluation
-
-Capability scores were measured through NInfer's OpenAI-compatible serving route with thinking
-enabled, MTP=3, and EvalScope 1.9.0 (0-shot, rule scoring, one sample per problem). Qwen3.6 rows
-used INT8 KV. Qwen3.8-27B NVFP4 reports both KV codecs on
-[Ostfralla/Qwen3.8-27B-NVFP4-NInfer](https://huggingface.co/Ostfralla/Qwen3.8-27B-NVFP4-NInfer).
-
-| Model profile | KV | AIME 2025 | AIME 2026 | GPQA-Diamond |
-|---|---|---:|---:|---:|
-| [Qwen3.6-27B groupwise-int](model-cards/Qwen3.6-27B-NInfer/README.md) | INT8 | 86.67% | 93.33% | 86.87% |
-| [Qwen3.6-27B NVFP4](model-cards/Qwen3.6-27B-nvfp4-NInfer/README.md) | INT8 | 93.33% | 93.33% | 84.34% |
-| [Qwen3.6-35B-A3B groupwise-int](model-cards/Qwen3.6-35B-A3B-NInfer/README.md) | INT8 | 90.00% | 90.00% | 85.35% |
-| [Qwen3.8-27B NVFP4](https://huggingface.co/Ostfralla/Qwen3.8-27B-NVFP4-NInfer) | INT8 | 100.00% | 96.67% | 89.90% |
-| [Qwen3.8-27B NVFP4](https://huggingface.co/Ostfralla/Qwen3.8-27B-NVFP4-NInfer) | NVFP4 | 93.33% | 100.00% | 92.42% |
-
-Qwen3.8-27B `groupwise-int` remains loadable but is outside the current product contract, and is
-not in this evaluation campaign.
-
-These are single-sample results under that NInfer evaluation profile, not pass@k. See the model
-cards and [full performance document](docs/performance.md) for correct/total counts and evaluation
-notes.
+It exists so the real model gates can run. It is not yet a selected or published product artifact.
+Final weight-recipe and G16/G32 cache-layout selection require paired BF16-reference quality,
+resolved-capacity, and matched whole-inference performance results. BF16 greedy-token differences
+are retained as diagnostics rather than a zero-difference gate.
+Those inputs are not committed to this repository.
 
 ## Requirements
 
-NInfer currently requires:
-
 - 64-bit Linux;
-- NVIDIA GeForce RTX 5090 (`sm_120a`);
-- NVIDIA driver support for CUDA 13.1 and the CUDA Toolkit 13.1 or newer;
-- CMake 3.28 or newer and a C++20-capable host compiler;
-- `pkg-config`;
-- FFmpeg development libraries: `libavformat >= 60`, `libavcodec >= 60`,
-  `libavutil >= 58`, and `libswscale >= 7`;
-- `libcurl >= 7.85`;
-- Ninja, when using the commands below.
+- AMD Radeon AI PRO R9700;
+- a coherent ROCm 10 installation with `gfx1201` support;
+- CMake 3.28 or newer and Ninja;
+- a C++20 compiler;
+- FFmpeg development libraries;
+- libcurl development files for the CLI/server media-acquisition path;
+- Python 3.11, PyTorch, and safetensors only when converting or running Python reference tooling.
 
-The build rejects CUDA architectures other than `120a`. There is no install target or packaged
-binary distribution; NInfer is run from its source build tree.
+The build rejects every HIP architecture other than `gfx1201`.
 
 ## Build
 
-```bash
-git clone https://github.com/Neroued/ninfer.git
-cd ninfer
-
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel
+```sh
+cmake -S . -B build-r9700 -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DNINFER_BUILD_APPS=ON
+cmake --build build-r9700 --parallel
 ```
 
-The default configuration builds:
+The product executables are:
 
 ```text
-build/apps/ninfer
-build/apps/ninfer-serve
+build-r9700/apps/ninfer
+build-r9700/apps/ninfer-serve
+build-r9700/apps/ninfer-ppl
 ```
 
-Tests, benchmarks, and maintainer tools are excluded from the default build.
+Use each executable's `--help` output as the exact option/default authority.
 
-## Docker
+## Artifact conversion
 
-Build the runtime image on a 64-bit Linux host with an RTX 5090, a CUDA 13.1-compatible NVIDIA
-driver, Docker, and the
-[NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
+The provisional converter consumes a complete BF16 source directory directly. It preflights every
+required shard and frontend resource before creating output, writes final bound layouts, and never
+relies on runtime weight repacking.
 
-```bash
-docker build --tag ninfer:local .
+```sh
+python3 -m tools.convert.qwen3_8_27b_r9700.build_draft_ranking \
+  --corpus tools/ppl/corpus.ids \
+  --out out/qwen3_8_27b_draft_ranking.i64
+
+python3 -m tools.convert.qwen3_8_27b_r9700.convert \
+  --model /path/to/complete-qwen3.8-27b-bf16 \
+  --draft-ranking out/qwen3_8_27b_draft_ranking.i64 \
+  --out models/qwen3_8_27b_r9700_candidate.ninfer \
+  --device cpu
+
+python3 -m tools.convert.qwen3_8_27b_r9700.convert_q4 \
+  --model /path/to/complete-qwen3.8-27b-bf16 \
+  --draft-ranking out/qwen3_8_27b_draft_ranking.i64 \
+  --out models/qwen3_8_27b_r9700_q4_eval.ninfer \
+  --device cpu
+
+python3 -m tools.convert.qwen3_8_27b_r9700.convert_q4_w8 \
+  --model /path/to/complete-qwen3.8-27b-bf16 \
+  --draft-ranking out/qwen3_8_27b_draft_ranking.i64 \
+  --out models/qwen3_8_27b_r9700_q4_w8_eval.ninfer \
+  --device cpu
+
+python3 -m tools.convert.qwen3_8_27b_r9700.convert_q4_w8_mse \
+  --model /path/to/complete-qwen3.8-27b-bf16 \
+  --draft-ranking out/qwen3_8_27b_draft_ranking.i64 \
+  --out models/qwen3_8_27b_r9700_q4_w8_mse_eval.ninfer \
+  --device cpu
+
+python3 -m tools.convert.qwen3_8_27b_r9700.convert_w8_bf16_embedding \
+  --model /path/to/complete-qwen3.8-27b-bf16 \
+  --draft-ranking out/qwen3_8_27b_draft_ranking.i64 \
+  --out models/qwen3_8_27b_r9700_w8_bf16_embedding_eval.ninfer \
+  --device cpu
+
+python3 -m tools.convert.qwen3_8_27b_r9700.convert_w8_bf16_attention_vo \
+  --model /path/to/complete-qwen3.8-27b-bf16 \
+  --draft-ranking out/qwen3_8_27b_draft_ranking.i64 \
+  --out models/qwen3_8_27b_r9700_w8_bf16_attention_vo_eval.ninfer \
+  --device cpu
+
+python3 -m tools.convert.qwen3_8_27b_r9700.convert_w8_bf16_gdn_qk \
+  --model /path/to/complete-qwen3.8-27b-bf16 \
+  --draft-ranking out/qwen3_8_27b_draft_ranking.i64 \
+  --out models/qwen3_8_27b_r9700_w8_bf16_gdn_qk_eval.ninfer \
+  --device cpu
 ```
 
-Download a model into `models/` as described below, then run the HTTP server:
+The ranking builder validates the explicitly named Qwen3.8 token IDs, count, domain, and SHA-256
+against the sibling manifest and emits exactly one little-endian I64 frequency row plus its JSON
+provenance sidecar. Converter preflight requires that sibling sidecar, revalidates every named
+corpus and manifest, and re-derives the row before opening the artifact. The current PPL corpus is
+unique source text and is valid ranking evidence; the
+benchmark corpus is deliberately excluded because its manifest says it is tiled for throughput and
+would bias frequencies. Tokenizer special-ID force-inclusion remains converter-owned. Retired-model
+ranking fixtures are not valid provenance. The converter refuses partial checkpoints and existing
+output files. `convert_q4.py` writes the registered evaluation-only all-Q4G64 capacity artifact (15,159,801,760
+tensor bytes); `convert_q4_w8.py` preserves source-Q4 roles and promotes every source-Q5/Q6/W8 role
+to W8G32 (22,868,177,312 tensor bytes); `convert_q4_w8_mse.py` keeps that exact format and byte
+plan while refining both Q4G64 and W8G32 scales from the represented source weights alone;
+`convert.py` retains the all-W8G32 evaluator
+(30,260,413,792 tensor bytes); and `convert_w8_bf16_embedding.py` keeps those W8 matrices except for
+the direct source-BF16 token embedding (31,452,349,792 tensor bytes). The prior BF16-output-head
+evaluator was removed after its 8K result failed to improve all-W8. Q5/Q6 remain fallback
+measurements rather than primary artifacts; `convert_w8_bf16_attention_vo.py` is the coherent Q5
+fallback with all 16 full-attention gate/value and output pairs in BF16 (31,282,775,392 tensor bytes),
+while `convert_w8_bf16_gdn_qk.py` is the complete 48-layer GDN query/key fallback
+(31,204,132,192 tensor bytes),
+and none of these evaluator identities selects the production recipe. DFlash2 companion objects
+are optional in the base artifact but are required when
+starting the Engine with `--spec dflash`. See
+`docs/maintainer/r9700-integer-artifact-candidate.md` for the exact current inventory and codec.
 
-```bash
-docker run --rm \
-  --gpus '"device=0"' \
-  --publish 8080:8080 \
-  --volume "$PWD/models:/models:ro" \
-  ninfer:local \
-  ninfer-serve /models/qwen3_8_27b_nvfp4.ninfer \
-  --host 0.0.0.0
-```
+## CLI
 
-Run the CLI from the same image:
+Text generation:
 
-```bash
-docker run --rm \
-  --gpus '"device=0"' \
-  --volume "$PWD/models:/models:ro" \
-  ninfer:local \
-  ninfer /models/qwen3_8_27b_nvfp4.ninfer \
-  --prompt "Explain prefill and decode in three sentences." \
+```sh
+build-r9700/apps/ninfer models/qwen3_8_27b_r9700_candidate.ninfer \
+  --prompt "Explain wave32 matrix instructions." \
   --max-new 256
 ```
 
-## Download a model
+Structured messages and media:
 
-Use the Hugging Face CLI to download the supported artifact:
-
-```bash
-hf download Ostfralla/Qwen3.8-27B-NVFP4-NInfer \
-  qwen3_8_27b_nvfp4.ninfer \
-  --local-dir models
+```sh
+build-r9700/apps/ninfer models/qwen3_8_27b_r9700_candidate.ninfer \
+  --messages examples/cli/messages/scenario_translation_markdown.json \
+  --vision \
+  --max-new 256
 ```
 
-The other registered artifacts remain loadable but are outside the current product contract:
+MTP and DFlash2 are startup-fixed backends. DFlash2 is the preferred speculative path for the
+R9700 product and is the only backend with remaining feature/performance work. MTP remains a
+supported, already-implemented path whose cache, row-view, state, and exact-execution behavior are
+kept under regression coverage; no new MTP optimization is required for product completion.
 
-```bash
-hf download neroued/Qwen3.6-27B-NInfer \
-  qwen3_6_27b.ninfer \
-  --local-dir models
-
-# Or the 27B NVFP4 weight variant:
-hf download neroued/Qwen3.6-27B-nvfp4-NInfer \
-  qwen3_6_27b_nvfp4.ninfer \
-  --local-dir models
-
-# Or Qwen3.8-27B:
-hf download neroued/Qwen3.8-27B-NInfer \
-  qwen3_8_27b.ninfer \
-  --local-dir models
-
-# Or:
-hf download neroued/Qwen3.6-35B-A3B-NInfer \
-  qwen3_6_35b_a3b.ninfer \
-  --local-dir models
+```sh
+build-r9700/apps/ninfer models/qwen3_8_27b_r9700_dflash_candidate.ninfer \
+  --prompt "Write a short proof." \
+  --spec dflash --draft-tokens 4
 ```
 
-The supported identity is `qwen3.8-27b/nvfp4`; when available, the default artifact is the
-MTP-NVFP4 or DFlash2 (NVFP4 matrices, BF16 selector codebook) variant over the base Ostfralla
-NVFP4 shell. Both are built from `qwen3_8_27b_nvfp4.ninfer`, and the MTP-NVFP4 variant
-additionally takes the Qwen3.8-27B BF16 source, using the conversion tooling described in the
-[qwen3.8-27B artifact contract](docs/maintainer/qwen3.8-27b-artifact.md).
+The CLI streams answer content to stdout and diagnostics/reasoning to stderr. It accepts exactly one
+prompt source: `--prompt` or `--messages`.
 
-Current NInfer builds accept only the version-2 artifact container, and all five downloads above
-are version 2. Migration applies only to Qwen3.6 artifacts downloaded before their version-2
-publication; Qwen3.8-27B was published directly as version 2. Migrate an older exact local file in
-place:
+## HTTP server
 
-```bash
-python3 -m tools.artifact.migrate_v1_to_v2 models/qwen3_6_27b.ninfer
-```
-
-Use the same command with `qwen3_6_27b_nvfp4.ninfer` or `qwen3_6_35b_a3b.ninfer` for those
-artifacts. The migration updates only container metadata; it does not rewrite the weight payload.
-Alternatively, download the current version-2 file again from its Hugging Face repository.
-
-Each `.ninfer` file contains the weights and frontend resources needed by NInfer. It is not a
-Transformers checkpoint, Safetensors distribution, or GGUF file.
-
-Each artifact is complete, while GPU residency is fixed at process startup. Speculative decoding is
-disabled by default, so MTP/DFlash state and the optimized proposal head are not uploaded.
-Vision is also disabled by default, so its weights, Vision scratch phase, and frozen
-request-transient allocation are omitted. Add `--vision` to the CLI or server process that must
-accept image or video input. Disabled capabilities cannot be enabled by a later request. DFlash is
-text-only: Qwen3.8-27B NVFP4 DFlash2 when the artifact includes `dflash/` objects.
-
-## Run the CLI
-
-```bash
-./build/apps/ninfer models/qwen3_8_27b_nvfp4.ninfer \
-  --prompt "Explain prefill and decode in three sentences." \
-  --max-context 16384 \
-  --max-new 256 \
-  --spec mtp --draft-tokens 3 \
-  --lm-head-draft
-```
-
-Use `--messages FILE` instead of `--prompt` for chat history, images, or videos:
-
-```bash
-./build/apps/ninfer models/qwen3_8_27b_nvfp4.ninfer \
-  --messages examples/cli/messages/image_chart.json \
+```sh
+build-r9700/apps/ninfer-serve models/qwen3_8_27b_r9700_candidate.ninfer \
+  --host 127.0.0.1 \
+  --port 8080 \
   --max-context 8192 \
-  --max-new 128 \
-  --vision
-```
-
-Answer content is written to stdout. Loading progress, reasoning, timing, throughput, memory, and
-speculative-decoding statistics are written to stderr. See the [CLI guide](docs/cli.md) and
-[committed examples](examples/cli/) for structured input and runtime options.
-
-## Run the HTTP server
-
-```bash
-./build/apps/ninfer-serve models/qwen3_8_27b_nvfp4.ninfer \
-  --max-context 16384 \
   --kv-capacity auto \
-  --max-concurrency 2 \
-  --spec mtp --draft-tokens 3 \
-  --lm-head-draft
+  --max-concurrency 2
 ```
 
-The public model ID defaults to the artifact's `identity.model_id`; use `--model-id` only to
-publish a deployment-specific alias.
+The server exposes OpenAI Responses, OpenAI Chat Completions, and Anthropic Messages protocol
+surfaces. Request concurrency is startup-fixed in `[1,4]`; excess requests enter a bounded FIFO and
+are never preempted. See `docs/serving.md` for endpoint and streaming semantics.
 
-Then send an OpenAI-style request:
+## Perplexity and Pareto gates
 
-```bash
-curl http://127.0.0.1:8080/v1/chat/completions \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "model": "qwen3.8-27b",
-    "messages": [{"role": "user", "content": "Reply with one short sentence."}],
-    "max_tokens": 64
-  }'
+Encode a corpus once:
+
+```sh
+build-r9700/apps/ninfer-ppl \
+  --encode \
+  --weights models/qwen3_8_27b_r9700_candidate.ninfer \
+  --text corpus.txt \
+  --ids corpus.ids
 ```
 
-The server also implements OpenAI Responses Core (typed Items, semantic SSE, local continuation
-state, and function calls) plus Anthropic Messages, token counting, and multimodal input. See
-[HTTP serving](docs/serving.md).
+Score it:
 
-## Capabilities
+```sh
+build-r9700/apps/ninfer-ppl \
+  --weights models/qwen3_8_27b_r9700_candidate.ninfer \
+  --ids corpus.ids \
+  --schedule prefill \
+  --out-json profiles/bench/r9700-ppl.json
+```
 
-All three registered model IDs support:
+The report includes per-token NLL and greedy argmax IDs. Final admission uses the paired campaign
+runner described in `tools/ppl/README.md`: its schema-v6 result binds the candidate, scorers,
+validated corpus, commands, and sidecar hashes; requires explicit PPL and new-severe-position
+guardrails; and retains BF16 greedy flips as a diagnostic. Prefill/decode schedules require an
+explicit measured per-token NLL bound and report their greedy flips diagnostically because private
+attention precision may differ. Same-route graph/eager, speculative/ordinary, and draft-window
+variants retain exact-token parity. The
+reference is a separate BF16-source scorer; changing an Engine cache flag is not a reference path.
+G16 and G32 are separate compile-time evaluator/Engine profiles over runtime state, not separate
+`.ninfer` identities, and the selection campaign requires their candidate artifacts to be
+byte-identical. Speculative proposal acceptance and whole-path latency are measured separately by
+the schema-v14 native benchmark matrix, whose schema-v20 reports identify the compiled KV group
+and exact plane layouts, Q4/W8
+activation profiles, the exact FP8-Q/K crossover classifier, and the compile-bound dense or
+XAttention qualification identity.
 
-- text generation with thinking and non-thinking prompt modes;
-- image, multi-image, video, and mixed multimodal messages;
-- chunked prefill and CUDA Graph decode;
-- startup-bounded small-scale concurrent serving with true batched decode;
-- MTP speculative decoding with draft windows from one to five;
-- BF16, INT8 group-64, and NVFP4 KV cache (default NVFP4);
-- model- and thinking-mode-aware official sampling defaults, with explicit greedy, temperature,
-  top-k, top-p, min-p, and presence/frequency-penalty overrides;
-- compatible-prefix reuse;
-- OpenAI Responses Core, OpenAI Chat Completions, and Anthropic Messages, including streaming and
-  usage accounting;
-- prompt-rendered function tools and parsed tool calls.
+## Correctness and performance
 
-The supported identity additionally supports text-only DFlash2 speculative decoding with draft
-windows from one to eleven when the artifact contains the companion objects.
+Focused physical qualifiers are built under `build-r9700/src/`. The live completion ledger and
+latest verified commands are in `plans/r9700-autonomous-todos.md`.
 
-## Current limits
+Real-model 8K PPL evidence is retained for every evaluated weight/activation profile. The BF16
+reference is 6.460181; the best Q4-containing profile is the 183-Q4/256-W8 source-MSE artifact with
+A8G64 Q4 and adaptive-A8G32 W8 execution at 6.538677. Its +0.012077 mean-NLL delta and three new
+severe positions meet the 8K accuracy tier; the identical artifact's represented-BF16 W8 control
+is retained at 6.544746. All-Q4+A8 meets the capacity-speed tier at +0.039509 mean NLL and nine new
+severe positions. BF16-greedy differences are diagnostic. No end-to-end R9700
+tokens-per-second result is published for a final artifact. Pareto selection still requires current
+matched dense/sparse quality, post-promotion C=1..4 capacity, 32K graph/eager parity, phase and
+whole-inference measurement, and relevant profiler attribution on an otherwise idle R9700.
+Exact-v3 BF16 authority and the dense all-Q4 quality rebase are complete; mixed and sparse quality
+plus all post-promotion capacity gates remain open.
 
-- Only the `qwen3.8-27b/nvfp4` artifact identity is an accepted product identity; the other listed
-  artifacts remain loadable but are outside the current contract.
-- Execution is specialized for one RTX 5090 and one CUDA device.
-- One Engine owns one resident model and supports a startup-fixed capacity of 1–8 active requests.
-  Decode-ready requests are compacted at round boundaries and executed in one batched model
-  traversal.
-- NInfer does not provide large-scale or preemptive continuous batching, priority/QoS scheduling,
-  multi-GPU execution, CPU/GPU offload, or distributed serving.
-- `--max-context` is the logical ceiling of each sequence and is configurable up to the registered
-  models' native 262,144-token limit. `--kv-capacity N` explicitly sizes the shared Main Text KV
-  pool for all active and retained sequences, while `--kv-capacity auto` selects the largest usable
-  capacity from the memory remaining after weights are loaded while preserving 1 GiB of sizing
-  headroom. Omission defaults to one `--max-context` worth of pages. The resolved pool is fixed at
-  startup and is not divided statically among request lanes.
-- Tool calls are parsed and returned to the client; NInfer does not execute tools.
-- The C++ headers are used by the in-tree applications and are not distributed as an installed SDK.
+ROCm tracing and ISA/resource inspection use `rocprofv3`, `rocprof-compute` when its installed release
+supports `gfx1201`, HIP events, and LLVM disassembly. Radeon GPU Profiler is optional. The currently
+installed profiler stack does not expose complete VALU/LDS/stall or absolute request-size counters
+for `gfx1201`; zero values from those events are not accepted as evidence. Dispatch-level GL2C/TCP
+hit counters are usable while the card is held in `profile_standard`, but those pinned-clock timings
+are attribution-only and production performance is measured under `auto`.
 
 ## Documentation
 
-- [Contributing](CONTRIBUTING.md)
-- [Documentation index](docs/README.md)
-- [CLI](docs/cli.md)
-- [HTTP serving](docs/serving.md)
-- [Performance](docs/performance.md)
-- [CLI examples](examples/cli/)
+- `docs/cli.md`: CLI behavior and options.
+- `docs/serving.md`: HTTP contracts and server operation.
+- `docs/maintainer/qwen3.8-27b-model.md`: exact model and family-runtime semantics.
+- `docs/maintainer/paged-kv-cache.md`: typed cache ownership and capacity.
+- `docs/maintainer/softmax-attention.md`: Text/MTP and DFlash attention ownership.
+- `docs/maintainer/op-development.md`: numerical-oracle and Op admission rules.
+- `docs/maintainer/kernel-iteration.md`: gfx1201 kernel optimization procedure.
 
-## License
+## Scope
 
-NInfer is licensed under the [Apache License 2.0](LICENSE).
-
-The published artifacts are derived from
-[Qwen/Qwen3.6-27B](https://huggingface.co/Qwen/Qwen3.6-27B),
-[Qwen/Qwen3.8-27B](https://huggingface.co/Qwen/Qwen3.8-27B), and
-[Qwen/Qwen3.6-35B-A3B](https://huggingface.co/Qwen/Qwen3.6-35B-A3B). The 27B NVFP4 artifact also
-uses the fixed packed weights from
-[rdtand/Qwen3.6-27B-PrismaSCOUT-Blackwell-NVFP4-BF16-vllm](https://huggingface.co/rdtand/Qwen3.6-27B-PrismaSCOUT-Blackwell-NVFP4-BF16-vllm).
-These source repositories are distributed under Apache-2.0. Vendored dependencies retain their own
-license files under `third_party/`.
+NInfer is intentionally not a general inference framework. It supports one registered model/device
+contract, one resident model instance, and small fixed concurrency. Additional GPUs, checkpoint
+families, compatibility backends, plugin discovery, preemptive scheduling, and runtime weight
+repacking are outside the product.

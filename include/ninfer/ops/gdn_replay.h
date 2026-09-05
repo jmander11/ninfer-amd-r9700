@@ -3,7 +3,7 @@
 #include "core/gdn_replay_records.h"
 #include "core/linear_attention_state.h"
 
-#include <cuda_runtime.h>
+#include <hip/hip_runtime_api.h>
 
 #include <array>
 #include <cstdint>
@@ -38,11 +38,12 @@ struct GdnReplayFoldRow {
  * convolution history is tail_3(old_history || conv_record[path[0]], ...,
  * conv_record[path[path_length-1]]).
  *
- * The Op admits the two registered all-layer geometries only, owns no workspace or metadata
- * allocation, and does not read query or generate token output. The four record planes are
- * read-only, disjoint, and do not overlap either state region.
+ * The Op admits the sole Qwen3.8-27B all-layer geometry (L=48, Hqk=16, Hv=48, K=V=128,
+ * conv_channels=10240), owns no workspace or metadata allocation, and does not read query or
+ * generate token output. The four record planes are read-only, disjoint, and do not overlap
+ * either state region.
  */
 void gdn_replay_fold(const GdnReplayRecords& records, LinearAttentionStateAllLayersView states,
-                     std::span<const GdnReplayFoldRow> rows, cudaStream_t stream);
+                     std::span<const GdnReplayFoldRow> rows, hipStream_t stream);
 
 } // namespace ninfer::ops

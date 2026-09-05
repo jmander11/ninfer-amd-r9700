@@ -3,118 +3,47 @@
 #include "core/arena.h"
 #include "core/tensor.h"
 
-#include <cuda_runtime.h>
-
-#include <cstddef>
-#include <cstdint>
+#include <hip/hip_runtime_api.h>
 
 namespace ninfer::ops {
 
 /**
- * @brief Permitted private activation-compute profiles for a linear projection.
+ * Applies the sole R9700 bias-free matrix projection.
  *
- * The policy constrains private route selection; it does not select a kernel or prescribe a
- * particular MMA instruction. The public activation and output tensors remain BF16 for every
- * policy.
+ * The mathematical result is out[n,t] = sum_k dequantize(w[n,k]) * x[k,t].
+ * `x` is contiguous BF16 [K,T], `w` is contiguous BF16_CTRL or canonical
+ * Q4G64_F16S Q4N16K16 or W8G32_F16S RowSplit [N,K], and `out` is contiguous BF16 [N,T]. Dimension
+ * zero is stored fastest, so physical activation/output storage is token-major.
+ * The implementation accumulates in FP32 and rounds once to BF16 output; the
+ * independent qualification oracle decodes the represented weight and evaluates
+ * the complete dot product in FP64.
+ *
+ * T is any positive value. Decode T=1..8 and prefill T>=9 use separately
+ * qualified gfx1201 dispatches. The W8 code and FP16 scale planes are consumed
+ * directly from artifact storage, including target-owned row views. Q4 consumes
+ * canonical signed A4G64 or compile-time-evaluation A8G64 activation codes and
+ * FP16 scales in caller-owned serialized activation storage. A separately compiled W8 evaluator similarly uses
+ * signed A8G32 at physically measured shape-specific crossovers while retaining exact BF16xW8
+ * below them and for shapes outside the qualified mixed-artifact inventory.
+ * BF16 and the default exact W8 route use no workspace. No route performs hidden allocation or
+ * runtime weight repacking. Inputs, output, workspace, and weight planes must not overlap.
  */
-enum class LinearPolicy : std::uint8_t {
-    A16Only, ///< Admit only A16 compute profiles.
-    AllowA8, ///< Admit either A16 or A8 compute profiles.
-    AllowA4, ///< Admit either A16 or A4 compute profiles.
-};
+[[nodiscard]] std::size_t linear_workspace_capacity_bytes(QType qtype,
+                                                           std::int32_t tokens,
+                                                           std::int32_t columns);
+void linear(const Tensor& x, const Weight& w, Tensor& out, WorkspaceArena& workspace,
+            hipStream_t stream);
 
-/**
- * Returns the caller-owned transient capacity required by Linear for every T in the inclusive
- * `[min_tokens,max_tokens]` interval. Invalid registered profiles, policies, or intervals throw;
- * a legal route that requires no transient storage returns zero.
- */
-[[nodiscard]] std::size_t linear_workspace_capacity_bytes(QType qtype, std::int32_t output_rows,
-                                                          std::int32_t input_rows,
-                                                          LinearPolicy policy,
-                                                          std::int32_t min_tokens,
-                                                          std::int32_t max_tokens);
+// Executes an integer linear against a caller-owned serialized activation region. The span may
+// be larger than the exact image required by this shape; only the required prefix is consumed.
+// BF16 and exact-W8 routes ignore the span. This boundary lets a Program keep graph addresses
+// stable without reserving private activation storage inside each schedule's WorkspaceArena.
+void linear(const Tensor& x, const Weight& w, Tensor& out,
+            const DeviceSpan& activation_workspace, hipStream_t stream);
 
-/**
- * @brief Applies a bias-free matrix projection independently to every input column.
- *
- * @details The ideal mathematical result is
- *
- * @f[
- *   \mathrm{ideal}_{n,t} =
- *   \sum_{k=0}^{K-1}
- *     \mathrm{FP32Dequant}(w)_{n,k}\,\mathrm{FP32}(x_{k,t}).
- * @f]
- *
- * `out` stores a BF16 approximation of this ideal result under the named numerical criterion for
- * the selected private activation-compute path.
- *
- * @par Logical tensors and layout
- * `x` is contiguous, non-null, 16-byte-aligned BF16 `[K,T]`, `w` has logical shape `[N,K]`, and
- * `out` is contiguous, non-null, 16-byte-aligned BF16 `[N,T]`. Every logical extent is positive;
- * in particular, `T=0` is invalid rather than a no-op. Dimension zero is stored fastest. The Op has
- * no bias, activation, residual addition, or transpose mode.
- *
- * @par Supported execution domain
- * Registered execution uses RowSplit Q4G64_F16S, Q5G64_F16S, Q6G64_F16S, or W8G32_F16S weights
- * with FP16 scales, block-scaled NVFP4 weights, plus registered contiguous BF16_CTRL problems.
- * Each format owns a finite registry of exact physical weight problems and selects its kernel
- * internally; a valid encoding and alignment do not imply arbitrary N/K support. The current
- * NVFP4 problems `[N,K]` in `{[14336,5120], [16384,5120], [34816,5120],
- * [5120,6144], [5120,17408], [5120,25600], [6144,5120], [5120,4096],
- * [1280,5120], [256,5120], [5120,10240]}` accept every positive T. The five
- * DFlash2-only geometries are A16-only; AllowA4 still resolves them to A16.
- * MTP `fc` `[5120,10240]` admits W4A4 at T≥8 (residual-class N; T=4/6 stay A16). Text and MTP packed-weight problems accept
- * every positive column extent T. Registered W8 problems `[5120,25600]`, `[5120,4096]`,
- * `[1280,5120]`, and `[256,5120]`, and registered Q4 problems `[5120,25600]`, `[5120,4096]`,
- * `[5120,17408]`, `[1280,5120]`, and `[256,5120]`, also accept every positive T. Registered Vision
- * problems accept raw-patch P in `{4,8,...,131072}` or merged-token V in `[1,32768]`; a matrix
- * column does not inherently represent a text token. FP32_CTRL is unsupported.
- *
- * @par Numerical contract
- * Test fixture code materializes the persistent weight as its logical FP32 dequantized matrix.
- * The one Linear oracle accepts that matrix and the FP32 values represented by the BF16 activation,
- * evaluates every complete dot product with naive FP64 accumulation, and retains the FP64 result.
- * The BF16 output is promoted and compared against that result. Output representation,
- * accumulator precision, activation quantization, staging, reduction order, and kernel schedule
- * are private implementation effects covered by the named tolerance for the selected
- * activation-compute path; none is copied into the oracle. Kernel, schedule, template instance,
- * host launcher, and T region do not create separate criteria inside one path.
- *
- * @par Compute policy
- * `policy` specifies the permitted private activation-compute set. A permission does not require a
- * corresponding low-precision route: the resolved plan may remain A16 when that is the qualified
- * choice. BF16_CTRL admits only LinearPolicy::A16Only. Registered Q4/Q5/Q6/W8 formats admit
- * LinearPolicy::A16Only and LinearPolicy::AllowA8. NVFP4 admits A16Only and AllowA4; AllowA4
- * permits the private resolver to select either a qualified A16 route or activation quantization
- * to NVFP4 at every positive T. The selected route depends only on the registered problem and T.
- *
- * @par Workspace
- * `workspace` is caller-owned call-scoped transient storage sized by
- * linear_workspace_capacity_bytes(). It must not overlap x, any weight plane, or out. Linear does
- * not allocate device memory internally.
- *
- * @param[in] x Contiguous, non-null, 16-byte-aligned BF16 input matrix `[K,T]`.
- * @param[in] w Logical weight matrix `[N,K]` in a registered persistent format and layout.
- * @param[out] out Contiguous, non-null, 16-byte-aligned BF16 output matrix `[N,T]`. It must not
- * overlap `x` or any weight plane.
- * @param[in] policy Permitted private activation-compute profiles.
- * @param[in,out] workspace Caller-owned transient arena.
- * @param[in] stream CUDA stream on which execution is enqueued.
- */
-void linear(const Tensor& x, const Weight& w, Tensor& out, LinearPolicy policy,
-            WorkspaceArena& workspace, cudaStream_t stream);
-
-/**
- * @brief Applies the A16-only form of the bias-free matrix projection.
- *
- * @details This overload admits only A16 compute and requires no transient workspace. All tensor,
- * weight, aliasing, and execution-domain requirements of the policy-bearing overload apply.
- *
- * @param[in] x Contiguous BF16 input matrix `[K,T]`.
- * @param[in] w Logical weight matrix `[N,K]` in a registered persistent format and layout.
- * @param[out] out Contiguous BF16 output matrix `[N,T]`.
- * @param[in] stream CUDA stream on which execution is enqueued.
- */
-void linear(const Tensor& x, const Weight& w, Tensor& out, cudaStream_t stream);
+// Workspace-free boundary retained for BF16/exact-W8 control and qualification routes. It rejects
+// Q4 rather than allocating hidden activation storage; product execution uses the DeviceSpan
+// overload while isolated qualifiers may use the arena overload.
+void linear(const Tensor& x, const Weight& w, Tensor& out, hipStream_t stream);
 
 } // namespace ninfer::ops

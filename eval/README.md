@@ -27,17 +27,8 @@ Installing dependencies does not download the Qwen model or create a `.ninfer` a
 See [`configs/capability-suite.yaml`](configs/capability-suite.yaml) for the initial AIME25,
 AIME26, GPQA-Diamond, and BFCL-v4 suites, and [`configs/mock-suite.yaml`](configs/mock-suite.yaml)
 for a network-free example.
-[`configs/qwen3_6_27b_reasoning.yaml`](configs/qwen3_6_27b_reasoning.yaml) and
-[`configs/qwen3_8_27b_reasoning.yaml`](configs/qwen3_8_27b_reasoning.yaml) are the published
-AIME25, AIME26, and GPQA-Diamond reasoning suites for those 27B identities.
-
-[`configs/qwen3_6_35b_needle_haystack.yaml`](configs/qwen3_6_35b_needle_haystack.yaml)
-defines the 35B-A3B Needle-in-a-Haystack profiles separately: `standard` preserves EvalScope's
-1K--32K, ten-length, ten-depth English/Chinese matrix (200 samples), while `native_long` evaluates
-the exact 64K, 128K, and safe 260K prompt profiles at eleven depths in both languages (66 samples).
-The 260K profile uses the exact local 35B tokenizer and leaves more than 2K native context tokens
-for chat framing and its bounded 512-token answer. All profiles use rule scoring and explicitly
-disable thinking so the observable answer is the retrieved needle.
+`configs/qwen3_8_27b_reasoning.yaml` is the Qwen3.8-27B AIME25, AIME26, and GPQA-Diamond
+reasoning suite.
 
 A target defines the model service:
 
@@ -46,7 +37,7 @@ targets:
   model_api:
     protocol: openai_chat
     base_url: http://127.0.0.1:18080/v1
-    model: qwen3.6-27b
+    model: qwen3.8-27b
     api_key_env: MODEL_API_KEY   # optional; omit for an unauthenticated endpoint
     max_concurrency: 1
     request:
@@ -118,26 +109,6 @@ eval/.venv/bin/python -m ninfer_eval run \
 SERPAPI_API_KEY=... eval/.venv/bin/python -m ninfer_eval run \
   --config eval/configs/capability-suite.yaml --suite bfcl_full
 ```
-
-Prepare and inspect Needle-in-a-Haystack without issuing model requests:
-
-```bash
-eval/.venv/bin/python -m pip install -r eval/requirements.txt
-eval/.venv/bin/python - <<'PY'
-from modelscope import dataset_snapshot_download
-print(dataset_snapshot_download(
-    'AI-ModelScope/Needle-in-a-Haystack-Corpus',
-    allow_file_pattern=['PaulGraham_Essays.txt', 'Journey_to_the_West.txt'],
-))
-PY
-eval/.venv/bin/python -m ninfer_eval plan \
-  --config eval/configs/qwen3_6_35b_needle_haystack.yaml --suite standard --check-runtime
-eval/.venv/bin/python -m ninfer_eval plan \
-  --config eval/configs/qwen3_6_35b_needle_haystack.yaml --suite native_long --check-runtime
-```
-
-Run the one-sample NIAH smoke only after the active model evaluation has released the single target
-slot, then select `standard` or `native_long` as a separate formal run.
 
 BFCL-v4 full evaluation contains 5,106 samples. Multi-turn samples can make more than one model
 request. Its Web Search subsets require `SERPAPI_API_KEY`; `memory_vector` may download an upstream

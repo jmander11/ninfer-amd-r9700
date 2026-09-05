@@ -1,10 +1,10 @@
 # NInfer 小规模并发推理架构
 
 本文定义 NInfer 在单 GPU、单模型实例下支持少量并发请求的执行架构。典型
-`max_concurrency` 为 2–8。
+`max_concurrency` 为 2–4。
 
 设计目标不是让多个请求轮流执行，而是让所有处于 decode 阶段的请求形成一次真正的 batched
-model execution：一次 model traversal、一次 CUDA Graph replay 和一组 batched operators 同时为
+model execution：一次 model traversal、一次 Device Graph replay 和一组 batched operators 同时为
 多个请求产生结果。
 
 本文只定义会影响模块边界、调度语义、资源所有权或执行正确性的决策。协议错误格式、allocator
@@ -18,7 +18,7 @@ model execution：一次 model traversal、一次 CUDA Graph replay 和一组 ba
 ### 1.1 Supported workload
 
 - 单 GPU、单 resident model instance；
-- 启动时固定 `max_concurrency=C`，典型 `C=2..8`；
+- 启动时固定 `max_concurrency=C`，支持 `C=1..4`，典型 `C=2..4`；
 - 运行时 `0..C` 个 admitted requests；
 - Text 与 image/video prompt；
 - ordinary decoding 与 engine-wide speculative decoding；
@@ -33,7 +33,7 @@ model execution：一次 model traversal、一次 CUDA Graph replay 和一组 ba
 - 多 GPU 或 distributed inference；
 - priority、tenant QoS 或 deadline-aware GPU scheduling；
 - 面向数十至数百请求的通用 continuous batching；
-- serving 期间为新 shape 动态捕获 CUDA Graph。
+- serving 期间为新 shape 动态捕获 Device Graph。
 
 ### 1.3 Required sequence-state substrate
 
@@ -272,7 +272,8 @@ lane 的 backing 中，但不再存在 active request control，也不计入 act
 `SequenceState` 是 target 定义的一条可继续执行的 model state。一个 occupied slot 对它拥有唯一写权限，
 它至少包含或引用：
 
-- Main/backend KV allocations 及 committed frontiers；
+- Main Text and optional MTP KV allocations 及 committed frontiers, plus fixed DFlash cyclic state
+  when that backend is selected；
 - Linear Attention 和其他 fixed model-state allocation；
 - target decode cursor，包括 current anchor 和 position/RoPE progress；
 - continuation 所需的 hidden/checkpoint state；
@@ -284,7 +285,7 @@ workspace 或 graph。当前 fixed-state backing 是 lane-affine 的：retained 
 capacity 时可以先驱逐其他 free lanes 上的 retained state。新 request 的 sampling、RNG、stop 和 output
 state 始终重新创建。
 
-Qwen3.6 的 lane 是 Linear Attention state 的唯一 locator。`C=max_concurrency` 时，shared pool 固定使用
+Qwen3 的 lane 是 Linear Attention state 的唯一 locator。`C=max_concurrency` 时，shared pool 固定使用
 `[0,C)` 作为各 lane 的 current committed state，使用 `[C,2C)` 作为各 lane 的 rewrite-checkpoint
 state；MTP 或 DFlash 引擎额外保留 slot `2C` 作为 Engine-wide GDN：默认热 occupant 是 turn-rollback（append
 occupy 在 suffix prefill 之前把 current+`tail_hidden` 钉在上一完成 `E`），ladder freeze 借走后再
@@ -353,12 +354,12 @@ Scheduler 不从 token 数或显存字节重新推导请求能否进入。Target
 E(request) = {
     active lane:                  1,
     Main Text page groups:       E_main,
-    selected-backend page groups: E_backend,
+    optional MTP page groups:      E_mtp,
     other request-time units:    target-defined, if any
 }
 ```
 
-各维只能与同类容量逐维比较；Main/backend pages 不能按字节相加或互借，allocation 尾页 slack 也不是可用
+各维只能与同类容量逐维比较；Main/MTP pages 不能按字节相加或互借，allocation 尾页 slack 也不是可用
 capacity。当前 fixed recurrent/backend backing 已按 `C` 份建立并随 physical lane 转移 ownership，因此由
 `active lane` 这一维表达，不把固定 backing 的显存字节再次计入动态 entitlement。Graph、workspace、round
 frame 和权重是 engine-fixed resources；owning result capacity 已在 ingress 时取得，也不属于本向量。
@@ -372,9 +373,10 @@ frame 和权重是 engine-fixed resources；owning result capacity 已在 ingres
    request 的 suffix-prefill 或 exact-hit finalization ownership，或先进入 copy-hold 直到
    相关 RAM copies 允许 `start_prefill_lane`。
 
-Selected backend 的差异只体现在 target 给出的 typed entitlement；Scheduler 不为 ordinary、MTP 或 DFlash
-建立不同 queue policy。即使 startup sizing 保证 backend 不会早于 Main pool 成为正常 backpressure，
-admission 仍消费完整 authoritative vector，backend 提前失败属于 sizing/accounting invariant violation。
+MTP adds its typed growing-page entitlement; DFlash fixed cyclic state is already part of the
+startup-frozen lane backing. Scheduler 不为 ordinary、MTP 或 DFlash 建立不同 queue policy。即使 startup
+sizing 保证 MTP pool 不会早于 Main pool 成为正常 backpressure，admission 仍消费完整 authoritative
+vector，MTP 提前失败属于 sizing/accounting invariant violation。
 
 Admission 是一次 atomic boundary transaction：prepared entry、optional retained-state claim、slot/lane 和
 全部 fixed/growing state entitlement 要么同时取得并发布 admitted request，要么不改变 request-visible
@@ -468,7 +470,7 @@ sum(E(a), a in surviving members of A without D)
 合法 turn 先重试 `H`。
 
 这一 invariant 保证：即使所有 `P` 在 donor frontier 到达时仍然 active，`H` 也不会因它们失去所需 lane、
-Main pages 或 backend pages。它不保证 `H` 的 wall time 不受影响；backfill 的 bounded prefill 和更大的
+Main pages 或 optional MTP pages。它不保证 `H` 的 wall time 不受影响；backfill 的 bounded prefill 和更大的
 decode batch 仍会改变 incumbent round latency。
 
 Retained state 在 protection accounting 中是可驱逐 cache，而不是 queued ownership。`E(H)` 使用 cold
@@ -489,7 +491,7 @@ service work = known Text/Vision suffix-prefill and finalization work
 
 Output 部分使用声明的 finite effective output bound，不预测 prompt 内容、reasoning difficulty 或实际 EOS。
 Prefill 部分使用已经 bounded 的 target scheduling-unit profiles；短 output 不能抵消任意长的 Text/Vision
-prefill。当前 Qwen3.6 profile 以 externally scheduled prefill/finalization steps 的有限上界作为 prefill
+prefill。当前 Qwen3 profile 以 externally scheduled prefill/finalization steps 的有限上界作为 prefill
 quanta，并把每个 effective remaining output token 计为一个 decode quantum；prompt snapshot 和 Vision item
 造成的已知 prefill split 在 planning 时计入。Selected speculative backend 可以影响 target 的统一 work
 projection，但不会在 Scheduler 中产生 MTP/DFlash policy branches。
@@ -651,17 +653,17 @@ active used capacity
 <= total usable capacity
 ```
 
-Selected speculative backend 的物理 KV pool 虽与 Main Text pool 分离，但容量由同一个 target-specific
-profile 联合规划。设 `S=max_context`、`P` 为 page size、`L=ceil(S/P)`、
+The optional MTP KV pool is physically separate from Main Text but is sized by the same
+target-specific profile. 设 `S=max_context`、`P` 为 page size、`L=ceil(S/P)`、
 `C=max_concurrency`、`M_min=max(L,C)`、`M_max=C*L`。Explicit policy 从用户 token capacity 得到
 `M=ceil(K_main/P)`；Automatic policy 在权重加载后保留 headroom `R`，从完整 target physical layout 的
 reservation curve 直接求出 `F-R` 可容纳的最大 `M`。CLI/server 使用 `R=1 GiB`，并在完整 startup 后
-报告实际 free memory。Main 与 DFlash 各
-使用 `M` 个 physical page groups，每条
-allocation 的 logical capacity 为 `L`；MTP 使用
+报告实际 free memory。Main Text uses `M` physical page groups and each allocation has logical
+capacity `L`; MTP uses
 `M + C*ceil((K_draft-1)/P)` 个 physical groups，logical capacity 同样为 `L`，其中 `K_draft` 是
 speculative draft window。额外 groups 只容纳多个
-concurrent MTP rows 的 provisional lead，不扩大 request context。Startup 要求 `K_main>=S`、`M>=C`、
+concurrent MTP rows 的 provisional lead，不扩大 request context。DFlash2 has no growing page pool;
+its BF16 cyclic state is fixed at startup. Startup 要求 `K_main>=S`、`M>=C`、
 `M<=C*L`；`K_main>=S` 只适用于 Explicit。Capacity resolution 后全部 typed pools 与 Graph topology
 固定，不在 request-time 扩容。Active-priority retained eviction 后，任何满足 advertised Main pool contract 的 active
 entitlement set 都必须同时满足 backend reservation；backend 更早失败属于 startup sizing 或 accounting
@@ -693,9 +695,10 @@ generation cap。
 KV cache 等 growing state 按 request context 计费。Fixed-size recurrent/backend state 按 admitted
 sequence 分配。即使二者来自不同内部 pool，也必须在同一次 admission decision 中同时满足。
 
-Growing KV state 由 [Paged KV Context Store](paged-kv-cache.md) 以 target-defined homogeneous
-page-group pools 承载。一个 sequence 始终持有 Main Text allocation；Engine 选定 MTP 或 DFlash 时还
-必须持有对应的 backend allocation。各 pool 具有独立 frontier 和 reservation；单个 request 的 physical
+Growing KV state 由 [Paged KV Context Store](paged-kv-cache.md) 以 target-defined typed
+page-group pools 承载。一个 sequence 始终持有 Main Text allocation；MTP Engine additionally owns an
+MTP allocation, while DFlash owns only its separate fixed cyclic state. Each growing pool has an
+independent frontier and reservation；单个 request 的 physical
 context 不要求连续。Concurrent engine 只操作 bundle handle、logical frontiers 和 reservation vector，
 不参与 page 或物理地址管理。
 
@@ -706,7 +709,7 @@ block-table 和 allocator 的 contract 属于 Paged KV Context Store，不在本
 
 Retained prefix 是从已结束 request 中分离出来的、单一 owner 的 SequenceState。它留在原 physical lane，
 但该 lane 的 control slot 对 scheduler 是 free。Retained state 只发布 target 已保存完整 continuation state
-的 checkpoints。当前 Qwen3.6 retained state 可以发布 current resume frontier，一份有效时的 typed
+的 checkpoints。当前 Qwen3 retained state 可以发布 current resume frontier，一份有效时的 typed
 rewrite checkpoint，以及 MTP 或 DFlash 下 live-lane 上的 prefill context-checkpoint ladder heads。Rewrite 按捕获时的
 用途标记为 `TurnClosure` 或 `ResponseReplay`；两种 kind 互斥复用同一份物理 payload，并额外保存对应的
 recurrent、hidden、speculative-backend 和 position state，不复制 KV payload。Ladder head 冻结的是
@@ -774,7 +777,7 @@ request 都进入相同 prefill/decode schedule 和 compact batch formation。
 `--kv-ram-capacity` enables a startup-fixed pinned-host budget that stores **already completed**
 prefix bundles, plus any live ladder GDN heads moved into that same FIFO image at eviction. The
 default is `off`. It does not change GPU pool capacity, active-set
-accounting, or CUDA Graph addresses, and it does not move an in-flight request off the GPU.
+accounting, or Device Graph addresses, and it does not move an in-flight request off the GPU.
 
 MTP 或 DFlash prefill may freeze current GDN into an Engine-wide staging slot during an in-flight prefill
 (after the Program prefill step compute-syncs that chunk). That freeze borrows slot `2C` from the
@@ -808,14 +811,14 @@ The executor captures at each admission site that is about to destroy a retained
 Capture queues D2H on `copy_stream` and **holds the source pages mapped** until `copies_ready`.
 Admit is two-phase: bind records the request in its lane and any captured-but-not-evicted victims
 as copy-hold; other decode-ready lanes may run a DecodeRound while that D2H (and later restore
-H2D) is in flight. Admit-complete waits with `cudaEventQuery` (and `EventSynchronize` on copy
+H2D) is in flight. Admit-complete waits with `hipEventQuery` (and `hipEventSynchronize` on copy
 only when membership is empty), then `evict_retained_lane` / `kv.reset()`, optional restore H2D,
 `wait_kv_ram_copies_on_compute` immediately before this lane's `start_prefill_lane`, and harvest.
 Harvest of D2H/H2D elapsed happens after that wait, not on an overlapping DecodeRound launch.
 If the held request is cancelled or fails before admit-complete, drain waits for those copies,
 harvests, releases an unused RAM claim, and `evict_retained_lane` on every captured victim so the
 D2H image is the only remaining copy. A later RAM hit exclusive-claims the matching host entry (pinned entries are invisible to later
-`plan_match`). `capture` and `unpack` record a start CUDA event before the copies and a done event
+`plan_match`). `capture` and `unpack` record a start HIP event before the copies and a done event
 after them so other-lane decode can overlap the DMA. Consume then erases that entry wherever it
 sits in the FIFO and retires the host block, including after an incomplete first chunk; a throw
 before consume releases the claim and leaves the host row in place. After consume the bundle lives
@@ -848,7 +851,7 @@ DecodeRound(all decode-ready requests)
 ```
 
 完整 request 不是 scheduling unit。所有 **compute** GPU work 在 `device.stream` 上串行执行。
-Host-RAM D2H/H2D 在 `copy_stream` 上，不是 scheduling unit，不得进入 CUDA Graph，也不得与当前
+Host-RAM D2H/H2D 在 `copy_stream` 上，不是 scheduling unit，不得进入 Device Graph，也不得与当前
 compute unit 的 pages 别名。
 
 Model Runtime 拥有一份地址稳定的 shared workspace，由串行的 GPU units 复用，不按 request
@@ -959,7 +962,8 @@ Resident Model Runtime 是 model-instance object，不是 request object。它�
 - shared Sequence-State Store；
 - 一份 shared execution workspace；
 - 一份最大容量为 `C` 的 `DecodeBatchFrame`；
-- speculative backend 启用时，一份容量为 `C`、宽度为 `draft_window+1` 的 all-layer ReplaySSM record arena；
+- speculative backend 启用时，一份容量为 `C` 的 all-layer ReplaySSM record arena；其固定宽度为 MTP 的
+  `draft_window+1` 或 DFlash 的 resolved `dflash_verify_width`；
 - startup-captured graph definitions 和 topology executables。
 
 每个 request 的持久状态只存在于 slot control 和该 slot 当前拥有的 `SequenceState`。Model Runtime 不保存
@@ -988,13 +992,13 @@ Ordinary decode 所需的 typed fields 至少包括：
 current_tokens[B]
 cache_positions[1,B]
 RoPE positions/deltas[per target contract, B]
-Main KV table rows[B] + optional backend KV table rows[B]
+Main KV table rows[B] + optional MTP KV table rows[B]
 lanes[B]
 SamplingConfig[B] + logical sampling positions[B]
 sampled_tokens[B]
 ```
 
-`lanes[b]` 是 row `b` 的 stable execution lane。Qwen3.6 用它同时选择 Linear Attention current state 和
+`lanes[b]` 是 row `b` 的 stable execution lane。Qwen3 用它同时选择 Linear Attention current state 和
 continuation-hidden destination；speculative Fold 也从 frozen membership 取得同一个 lane。KV table row
 保持独立，因为它描述 paged allocation binding，不是 fixed-state ownership。
 
@@ -1049,7 +1053,7 @@ Host 可以对 `B<=C` 的 metadata 做轻量循环，但 GPU ingress 必须是 b
 ### 8.4 Ordinary round state transaction
 
 一个 `DECODE_READY` sequence 始终保存 target-defined committed cursor 和唯一 current decode anchor。以
-Qwen3.6 的 ordinary transition 为例：
+Qwen3 的 ordinary transition 为例：
 
 ```text
 before:
@@ -1076,7 +1080,7 @@ Ordinary round 对每个未取消 row 恰好 license 一个 token。EOS、stop �
 成为 terminal token，但不把同一 row 的 model state 与 output 截在不同 frontier。Cancellation 是唯一可以
 丢弃整行 provisional result 的 ordinary boundary outcome；该 `SequenceState` 随即释放。
 
-Qwen3.6 ordinary GDN 以 `initial_state_slots=lanes`、`snapshot_base_slots=lanes` 调用已有 width-1 Snapshot
+Qwen3 ordinary GDN 以 `initial_state_slots=lanes`、`snapshot_base_slots=lanes` 调用已有 width-1 Snapshot
 leaf。该 leaf 在完整读取 row 的 initial checkpoint 后原地覆盖同一 current slot，因此不产生 speculative
 trajectory，也不需要额外 state slot。
 
@@ -1157,7 +1161,7 @@ boundary 通过正常 batch assembly 加入 ordinary decode。
 
 ---
 
-## 9. CUDA Graph model
+## 9. Device Graph model
 
 ### 9.1 Exact-B graph definitions
 
@@ -1179,7 +1183,7 @@ shared frame、workspace 和 state-pool bases。它读取 typed controls 和 sel
 identity。
 
 Captured definition 和 replayable executable 不是一一对应。Exact `B` 是 executable 的结构键；同一
-`B` 内只有真实 CUDA node topology 不同才增加 executable：
+`B` 内只有真实 Device Graph node topology 不同才增加 executable：
 
 ```text
 exact definitions[family,B,profile]
@@ -1190,21 +1194,21 @@ executable[family,B,topology class]
 
 不同 context profiles 若在同一 exact `B` 下具有可更新的 node topology，共享一个 executable，并在 profile
 变化时安装选中的 definition。不同 `B` 不执行 cross-B graph update；这避免 batch-dependent operator route、
-kernel 参数和 launch shape 触发 `cudaGraphExecUpdate` 不兼容。资源数量因此是 exact `B` 的有限集合，而不是
+kernel 参数和 launch shape 触发 `hipGraphExecUpdate` 不兼容。资源数量因此是 exact `B` 的有限集合，而不是
 `B × context profile` 的完整笛卡尔积。
 
 Profile 在 capture 前按 configured context ceiling 截断，只有实际 reachable 的 topology classes 才实例化
-executable。Backend-specific proposal shape 只有在真实改变 CUDA node topology 时才形成每个 exact `B`
+executable。Backend-specific proposal shape 只有在真实改变 Device Graph node topology 时才形成每个 exact `B`
 下的 topology class，不生成 ordinary-tail 或额外 `B=1` compatibility graph。
 
 Startup 对 graph family 的准备顺序固定为：
 
-1. 对启用的 semantic family，以 `B=1` 的首个 reachable profile 执行一次 eager round，使 CUDA code 和
+1. 对启用的 semantic family，以 `B=1` 的首个 reachable profile 执行一次 eager round，使 HIP code 和
    library runtime 在 stream capture 前完成 lazy materialization；
-2. 捕获全部 exact-`B`/profile definitions。Capture 只记录 CUDA work，不执行 model round，也不承担
+2. 捕获全部 exact-`B`/profile definitions。Capture 只记录 HIP work，不执行 model round，也不承担
    production 数值 qualification；
 3. 每个 topology executable 由其首个 definition 实例化。该 topology 的其余 definitions 逐个通过
-   `cudaGraphExecUpdate` 验证兼容性，并通过 `cudaGraphUpload` 完成 executable resource materialization；
+   `hipGraphExecUpdate` 验证兼容性，并通过 `hipGraphUpload` 完成 executable resource materialization；
 4. 每个 executable 只 replay 一次首个 definition 作为 startup smoke。遍历其余 profiles 后，以
    update/upload 恢复首个 installed definition，不额外 replay。
 
@@ -1276,7 +1280,7 @@ Cross-page materialization 发生在 replay 前的同一 execution lane，不改
 graph key。Graph-off mode 按相同顺序 eager 提交这些动作。
 
 不得为每个 `B`、profile 或 captured definition 复制 logits、hidden、workspace 或 per-sequence state。
-Model/control ingress、forward 和 result egress 不存在 per-row CUDA submission；跨 page 时的 table
+Model/control ingress、forward 和 result egress 不存在 per-row device submission；跨 page 时的 table
 publication 属于 state substrate materialization。Serving 期间不 capture、instantiate 或扩展 graph family。
 Startup graph allowance 必须计入全部 reachable exact-`B` definitions，以及每个 exact `B`、每个实际
 topology class 的一份 executable，不能沿用只覆盖 `B=1` definitions 的 reservation。
@@ -1297,8 +1301,18 @@ Speculative decoding 是 Engine-level decode mode：
 speculative_backend = off | MTP | DFlash
 ```
 
+R9700产品以DFlash/DFlash2作为首选且必须完成支持与优化的 speculative path。MTP保留为已支持的
+backend；迁移与后续改动必须继续保护它现有的graph/eager语义、cache、row view、accept/commit状态和
+测试，但不再分配新的MTP feature、head-precision或性能优化工作，也不把这些工作作为发布门槛。
+
 同一 Engine 的全部 requests 使用相同 backend 和 proposal window。Scheduler 仍然只提交一个
 `DecodeRound(all decode-ready requests)`。
+
+Proposal window 是 startup-fixed contract。Runtime 只规划、capture 和执行配置的一个 K；DFlash 同样
+只保留该 K 对应的 resolved verify width。不得根据 request acceptance 在运行时切换 K，也不得为未选择的
+K 保留额外 graph、workspace 或 host policy state。未来的 automatic-K product change 必须先在选定 R9700
+artifact 上，对每个候选 K 和 C=1..4 完成 same-candidate execution parity、acceptance 与 whole-round time gate；其他
+cache/weight profile 的标定不能作为证据。
 
 该 round 内部执行：
 
@@ -1314,6 +1328,13 @@ MTP autoregressively 推进 proposal positions，每个 position 都在全部 ac
 DFlash 通过一次 batched block forward 产生 proposal block。二者的区别只存在于选定的 decode graph
 内部，不改变 slot、admission、scheduling 或 active-batch formation。
 
+MTP 的 Text verify 和 backend alignment/AR cache writes 都使用round-scoped segmented typed
+transactions。每个compact row各有固定地址的device status/cursor；ingress base frontier初始化cursor，
+pool-wide block-table base配合device row selector选择实际sequence mapping。Alignment和每个AR segment
+只在其全层append完成后推进cursor，graph内没有D2H或host publication mutation。Graph/eager执行完成后，
+Program对每行只resolve一次status/cursor：Text保留完整verify suffix，MTP只publish licensed alignment
+frontier；任何invalid count/position/table mapping使该row publication poison且不得部分publish。
+
 MTP 与 DFlash 保留各自的 proposal frame、proposal state 和 graph topology；它们只共用 non-owning target
 verify/accept view、per-row accepted-prefix result 和 target state transaction。并发层不建立隐藏 backend
 差异的 virtual interface，也不为两个 backend 维护两套 membership 或 commit loop。
@@ -1327,15 +1348,16 @@ Engine capability 在 startup 时固定。MTP Engine 可以同时启用 Vision�
 verification、重放 model 或形成 acceptance cohort。Target model 始终是 output authority，只有 accepted
 target/backend state 可以 commit。
 
-Qwen3.6 的 MTP 与 DFlash 共用同一 target ReplaySSM transaction：target verify 按 compact row 把每层
+Qwen3 的 MTP 与 DFlash 共用同一 target ReplaySSM transaction：target verify 按 compact row 把每层
 convolution/key/value/gate records 写入固定 arena，physical record row 恒等于本轮 batch row；CPU 得到
 最终 output prefix 后，一次 Fold 用 frozen `lanes[b]` 把 row `b` 提交到该 lane 的 current state。Rows
-不得因取消或不同 acceptance length 被压缩、重排。Record 位于 CUDA Graph 内，Fold 位于 CPU 决策后的
+不得因取消或不同 acceptance length 被压缩、重排。Record 位于 Device Graph 内，Fold 位于 CPU 决策后的
 eager commit tail；下一 GPU unit 必须等当前 records 被 Fold 消费后才能覆盖 arena。
 
 Target execution 完成到 Fold 结束期间，请求处于 Pending：authoritative execution/ledger frontiers、ledger
 内容和 prefix identity 仍停在 round base；licensed tokens 和 backend staging 只作为未发布候选存在。Fold、
-Text/backend KV trim、continuation hidden、proposal continuation 和 host frontier 必须提交同一个最终前缀。
+Text and optional MTP KV visibility、continuation hidden、proposal-backend continuation 和 host
+frontier 必须提交同一个最终前缀。
 Continuing row 提交全部 licensed outputs；terminal row 可因 stop/EOS/output limit 提交严格前缀；取消行
 提交零列并释放 sequence。
 
@@ -1459,14 +1481,14 @@ queue 并成为 protected head，直到 A 释放容量、B 的 queue timeout 到
 不会先 admission B，再在接近 128K 时决定截断哪个 active request。
 
 若还有 later request C，它只有通过 §5 的完整向量核算后才能 backfill。以 Main capacity 单维说明，A 是
-B 的 frozen donor；A release 后为 B 留出的容量之外仍有 64K shadow surplus。只要 lane/backend 等其他维
+B 的 frozen donor；A release 后为 B 留出的容量之外仍有 64K shadow surplus。只要 lane/optional-MTP 等其他维
 也成立，这给出 C 的 frontier-safe 上界；但 C 还必须满足当前 `fits-now`，此刻真实空闲只有 48K，因此
 C 当前最多取得 48K。即使 C 在 A 完成时仍 active，release boundary 仍先 admission B。若 C 需要借用 B
 的 critical capacity，则还必须满足 temporal work credit，并在 frontier miss 时触发 drain。
 
 ### 12.5 Persistent-safe and temporal backfill
 
-以下例子只写 Main entitlement；实际决策同时逐维检查 lane 和 selected-backend pages。假设 capacity 为
+以下例子只写 Main entitlement；实际决策同时逐维检查 lane 和 optional MTP pages。假设 capacity 为
 174K、`C>=4`：
 
 ```text
@@ -1523,5 +1545,4 @@ admission。Later arrivals 从未成为 H 的 donor，也不能恢复已消费�
 - [Paged KV context storage](paged-kv-cache.md)
 - [ReplaySSM GDN technical reference](replayssm-gdn.md)
 - [Serving behavior](../serving.md)
-- [Qwen3.6-27B model semantics](qwen3.6-27b-model.md)
-- [Qwen3.6-35B-A3B model semantics](qwen3.6-35b-a3b-model.md)
+- [Qwen3.8-27B model semantics](qwen3.8-27b-model.md)

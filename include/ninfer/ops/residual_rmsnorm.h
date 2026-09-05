@@ -2,7 +2,7 @@
 
 #include "core/tensor.h"
 
-#include <cuda_runtime.h> // cudaStream_t
+#include <hip/hip_runtime_api.h>
 
 namespace ninfer::ops {
 
@@ -20,6 +20,6 @@ namespace ninfer::ops {
  * the standalone rmsnorm uses). No workspace or persistent state.
  */
 void residual_rmsnorm(const Tensor& y, Tensor& x, const Tensor& weight, float eps, Tensor& out,
-                      cudaStream_t stream);
+                      hipStream_t stream);
 
 } // namespace ninfer::ops

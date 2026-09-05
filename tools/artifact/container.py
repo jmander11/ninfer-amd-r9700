@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import mmap
+import os
+import secrets
 import struct
 from dataclasses import dataclass
 from pathlib import Path
@@ -305,10 +307,7 @@ class Artifact:
             prefix = self._file.read(PREFIX_BYTES)
             magic, json_bytes = PREFIX.unpack(prefix)
             if magic == _V1_MAGIC:
-                raise ArtifactError(
-                    "NInfer artifact v1 is no longer supported; migrate it with: "
-                    "python3 -m tools.artifact.migrate_v1_to_v2 <artifact>"
-                )
+                raise ArtifactError("NInfer artifact v1 is no longer supported")
             if magic != MAGIC:
                 raise ArtifactError("artifact magic is not NInfer v2")
             if json_bytes == 0:
@@ -370,7 +369,7 @@ def _payload_chunks(payload: Payload) -> Iterator[memoryview]:
 
 
 class ArtifactWriter:
-    """Write one preplanned artifact payload at a time in directory order."""
+    """Stage one preplanned artifact and publish it atomically without replacement."""
 
     def __init__(
         self,
@@ -383,13 +382,22 @@ class ArtifactWriter:
         self.objects = plan_objects(specs)
         directory = encode_directory(self.identity, self.objects)
         self.payload_offset = align_up(PREFIX_BYTES + len(directory), PAYLOAD_ALIGNMENT)
-        self._file = self.path.open("wb")
-        self._file.write(PREFIX.pack(MAGIC, len(directory)))
-        self._file.write(directory)
-        self._file.write(b"\x00" * (self.payload_offset - PREFIX_BYTES - len(directory)))
         self._next = 0
         self._cursor = 0
         self._finished = False
+        self._temporary_path = self.path.with_name(
+            f".{self.path.name}.{secrets.token_hex(16)}.tmp"
+        )
+        self._file = self._temporary_path.open("x+b")
+        try:
+            self._file.write(PREFIX.pack(MAGIC, len(directory)))
+            self._file.write(directory)
+            self._file.write(
+                b"\x00" * (self.payload_offset - PREFIX_BYTES - len(directory))
+            )
+        except BaseException:
+            self.close()
+            raise
 
     def write(self, name: str, payload: Payload) -> None:
         if self._finished:
@@ -415,18 +423,40 @@ class ArtifactWriter:
 
     def finish(self) -> None:
         if self._finished:
+            self._remove_temporary_best_effort()
             return
-        if self._next != len(self.objects):
-            missing = self.objects[self._next].name
-            raise ArtifactError(f"artifact is missing payload {missing}")
-        self._file.truncate(self.payload_offset + self._cursor)
-        self._file.flush()
-        self._file.close()
+        try:
+            if self._next != len(self.objects):
+                missing = self.objects[self._next].name
+                raise ArtifactError(f"artifact is missing payload {missing}")
+            self._file.truncate(self.payload_offset + self._cursor)
+            self._file.flush()
+            self._file.close()
+            os.link(self._temporary_path, self.path)
+        except BaseException:
+            try:
+                self.close()
+            except BaseException:
+                pass
+            raise
         self._finished = True
+        self._remove_temporary_best_effort()
+
+    def _remove_temporary_best_effort(self) -> None:
+        try:
+            self._temporary_path.unlink(missing_ok=True)
+        except OSError:
+            # Publication is the commit point. A staging hard link that cannot
+            # be removed must never turn a complete destination into a reported
+            # failure or motivate deletion of that destination.
+            pass
 
     def close(self) -> None:
-        if not self._file.closed:
-            self._file.close()
+        try:
+            if not self._file.closed:
+                self._file.close()
+        finally:
+            self._remove_temporary_best_effort()
 
     def __enter__(self) -> "ArtifactWriter":
         return self
@@ -436,8 +466,7 @@ class ArtifactWriter:
             try:
                 self.finish()
             finally:
-                if not self._finished:
-                    self.close()
+                self.close()
         else:
             self.close()
 

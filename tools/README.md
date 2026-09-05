@@ -1,120 +1,73 @@
 # NInfer maintainer tools
 
-`tools/` contains the project-owner workflows for artifact conversion and inspection, independent
-Python references, numerical parity diagnostics, benchmark orchestration, and serving smoke checks.
-These tools are not part of the public download-and-run path; normal users should start with the
-[project README](../README.md).
+`tools/` owns conversion, inspection, numerical qualification, benchmarking, and serving smoke
+workflows for the sole Qwen3.8-27B R9700 product.
 
-Run commands from the repository root with a Python 3.11 environment containing the dependencies
-for the selected tool.
+## Artifact conversion
 
-## Task index
-
-| Task | Location |
-|---|---|
-| Build the 27B artifact | [`convert/qwen3_6_27b/`](convert/qwen3_6_27b/) |
-| Build the Qwen3.8-27B artifact | [`convert/qwen3_8_27b/`](convert/qwen3_8_27b/) |
-| Build the 35B-A3B artifact | [`convert/qwen3_6_35b_a3b/`](convert/qwen3_6_35b_a3b/) |
-| Inspect artifact metadata and objects | [`artifact/inspect.py`](artifact/inspect.py) |
-| Run the 27B Python reference | [`reference/qwen3_6_27b/`](reference/qwen3_6_27b/README.md) |
-| Run the 35B-A3B Python reference | [`reference/qwen3_6_35b_a3b/`](reference/qwen3_6_35b_a3b/README.md) |
-| Compare 27B artifact/source Vision activations | [`parity/qwen3_6_27b/`](parity/qwen3_6_27b/README.md) |
-| Kernel iteration (bound / MMA probe / Op loop) | [`kdev/`](kdev/README.md) |
-| Run benchmark matrices | [`bench/`](bench/README.md) |
-| Exercise a resident HTTP server | [`smoke/serve_contract.py`](smoke/serve_contract.py) |
-| Exercise thinking preservation through a managed server | [`smoke/serve_thinking_preservation.py`](smoke/serve_thinking_preservation.py) |
-
-## Artifact workflow
-
-The converters consume an official local BF16 checkpoint and write one complete `.ninfer`
-artifact. The paths below are placeholders for the maintainer's local checkpoint checkouts:
+The current converter starts from the complete official BF16 checkpoint and writes the provisional
+W8G32 evaluation artifact. It validates all 1,118 tensor objects and six frontend resources before
+opening the output. This identity remains provisional until real-model PPL, exact-token, and
+whole-inference gates choose the final integer recipe.
 
 ```bash
-python3 -m tools.convert.qwen3_6_27b.convert \
-  --model /path/to/Qwen3.6-27B \
-  --out out/qwen3_6_27b.ninfer
+python3 -m tools.convert.qwen3_8_27b_r9700.convert \
+  --model /path/to/Qwen3.8-27B-BF16 \
+  --draft-ranking /path/to/qwen3.8-draft-ranking.i64 \
+  --out out/qwen3_8_27b_r9700_candidate.ninfer \
+  --device cpu
 
-python3 -m tools.convert.qwen3_8_27b.convert \
-  --model /path/to/Qwen3.8-27B \
-  --out out/qwen3_8_27b.ninfer
-
-# Optional DFlash2 append onto an existing qwen3.8-27b/nvfp4 file (not the
-# Qwen3.8-27B Text checkpoint). NVFP4 draft matrices + BF16 selector codebooks.
-hf download Ostfralla/Qwen3.8-27B-NVFP4-NInfer \
-  qwen3_8_27b_nvfp4.ninfer \
-  --local-dir models
-hf download z-lab/Qwen3.8-27B-DFlash2 \
-  --revision 50307d4c4cde6860d4eee73e2547cd786fe8e8a4 \
-  --local-dir /path/to/Qwen3.8-27B-DFlash2
-python3 -m tools.convert.qwen3_8_27b.convert_nvfp4 \
-  --base-artifact models/qwen3_8_27b_nvfp4.ninfer \
-  --dflash-model /path/to/Qwen3.8-27B-DFlash2 \
-  --dflash-format nvfp4 \
-  --out out/qwen3_8_27b_nvfp4_dflash_nvfp4.ninfer \
-  --device cuda
-
-python3 -m tools.convert.qwen3_6_35b_a3b.convert \
-  --model /path/to/Qwen3.6-35B-A3B-base \
-  --dflash-model /path/to/Qwen3.6-35B-A3B-DFlash \
-  --out out/qwen3_6_35b_a3b.ninfer
+python3 -m tools.artifact.inspect \
+  out/qwen3_8_27b_r9700_candidate.ninfer --objects
 ```
 
-Inspect either result:
+The complete BF16 source, a Qwen3.8-derived draft-token frequency ranking, and a Python 3.11
+environment with Torch and safetensors are local maintainer prerequisites. No retired-model
+ranking is bundled or accepted implicitly. Conversion never uses a prior quantized artifact as
+its source. The ranking is a row-major little-endian I64 matrix with 248,320 columns and the total
+frequency vector in its first row; the conversion report records its resolved path, size, and
+SHA-256.
+
+## Python reference and parity
+
+`tools/reference/qwen3_8_27b` is the independent artifact-native Text, Vision, and MTP diagnostic
+over the exact 1,124-object candidate binding. It evaluates the represented packed weights and the
+fixed FP8-E4M3FN-K/INT4-G16-V/FP16-scale cache; it is not the source-BF16 authority. The
+checkpoint-direct Text authority is `tools/reference/qwen3_8_27b_bf16`, while the source-BF16
+Vision diagnostic is `tools/parity/qwen3_8_27b`. Real-model numerical claims require the complete
+BF16 checkpoint and converted candidate artifact.
+
+## R9700 qualification
+
+The gfx1201 workflow builds an owning HIP Op qualifier, checks it against an independent oracle,
+then measures the same real model shape with unprofiled HIP events. ISA and resource checks inspect
+the emitted gfx1201 code object.
 
 ```bash
-python3 -m tools.artifact.inspect out/qwen3_6_27b.ninfer --objects
+make -C tools/r9700 build/eager_op_qual
+tools/r9700/build/eager_op_qual
+make -C tools/r9700 eager-isa
 ```
 
-The exact source revisions, inventories, formats, and conversion recipes are recorded in
-[`docs/maintainer/`](../docs/maintainer/). Published users download the completed artifacts from
-Hugging Face instead of running these workflows.
+See tools/r9700/README.md, docs/maintainer/kernel-iteration.md, and bench/README.md.
 
-## Python references and parity
+## Performance evidence assembly
 
-```bash
-python3 -m tools.reference.qwen3_6_27b \
-  --weights out/qwen3_6_27b.ninfer \
-  --prompt "请简短介绍一下你自己。" --decode 128
-
-python3 -m tools.reference.qwen3_6_35b_a3b \
-  --weights out/qwen3_6_35b_a3b.ninfer \
-  --prompt "请简短介绍一下你自己。" --decode 128
-```
-
-The Python implementations are independent diagnostic references, not alternate public inference
-products or generated-token goldens for the C++ engine. See the parity README for the direct 27B
-artifact/source Vision comparison command.
-
-## Benchmark orchestration
-
-`tools/bench/run_ninfer_bench_matrix.py` builds and runs the public-Engine benchmark matrix and
-writes ignored local reports below `profiles/bench/`:
-
-```bash
-python3 tools/bench/run_ninfer_bench_matrix.py --preset core --dry-run
-python3 tools/bench/run_ninfer_bench_matrix.py --preset core
-```
-
-See [`tools/bench/README.md`](bench/README.md) and [`bench/README.md`](../bench/README.md) for the
-orchestrator and executable contracts.
+`bench/run_ninfer_bench_matrix.py` owns physical schema-v20 benchmark reports and schema-v14
+matrix manifests. `bench/select_prefill_chunk.py` owns the twelve-candidate global chunk decision;
+`ppl/assemble_pareto.py` plus `ppl/pareto.py` bind that authority into the schema-v7 base static-profile
+decision. After that record fixes G16 or G32, `bench/assemble_dflash_selection.py` is the sole owner
+of the schema-v1 DFlash K/W decision: it binds the shortlist, every frontier capacity campaign,
+every eligible full DFlash matrix, exact exclusions, and generated-behavior gates into one retained
+winner and full frontier. See bench/README.md for the copy-ready commands.
 
 ## Serving smoke
 
-After starting `ninfer-serve` in another terminal:
+After starting `build-r9700/apps/ninfer-serve`, run the protocol smoke client against the local
+endpoint. The resident server and every product application use the fixed FP8-K/INT4-V cache.
 
 ```bash
 python3 -m tools.smoke.serve_contract \
   --base-url http://127.0.0.1:18080 \
-  --model qwen3.6-27b
-```
-
-The client exercises OpenAI, Anthropic, streaming, usage, multimodal, and tool-call response
-surfaces against the resident process.
-
-For typed rewrite-checkpoint and thinking-history behavior, the managed smoke script launches a
-real server and consumes the repository fixture:
-
-```bash
-python3 tools/smoke/serve_thinking_preservation.py \
-  --artifact out/qwen3_6_27b.ninfer --backend mtp
+  --model qwen3.8-27b
 ```

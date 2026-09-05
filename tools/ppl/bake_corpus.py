@@ -18,10 +18,6 @@ import urllib.request
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-DEFAULT_WEIGHTS = (
-    "/ssdpool2nvme/local_llm/models/qwen3.8-nvfp4-Osfralla-mtp-ninfer/"
-    "qwen3_8_27b_nvfp4.ninfer"
-)
 DEFAULT_TOKENS = 8192
 LONG_TOKENS = 32768
 WIKITEXT_URLS = (
@@ -82,7 +78,8 @@ def load_source_text(paths: list[str]) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--weights", type=Path, default=Path(DEFAULT_WEIGHTS))
+    parser.add_argument("--weights", type=Path, required=True,
+                        help="Qwen3.8-27B artifact whose embedded tokenizer encodes the corpus")
     parser.add_argument("--tokens", type=int, default=DEFAULT_TOKENS)
     parser.add_argument("--long", action="store_true", help=f"bake {LONG_TOKENS} tokens")
     parser.add_argument("--source-text", action="append", default=[])
@@ -141,8 +138,9 @@ def main() -> int:
         json.dumps(
             {
                 "artifact_type": "ninfer_ppl_corpus",
-                "schema_version": 1,
-                "weights": str(args.weights),
+                "schema_version": 2,
+                "model_id": "qwen3.8-27b",
+                "tokenizer_artifact": str(args.weights),
                 "add_special_tokens": False,
                 "chat_template": False,
                 "tokens": token_count,

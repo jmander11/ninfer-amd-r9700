@@ -95,14 +95,17 @@ NumericFormat parse_format(std::string_view name) {
     if (name == "Q5G64_F16S") { return NumericFormat::Q5G64_F16S; }
     if (name == "Q6G64_F16S") { return NumericFormat::Q6G64_F16S; }
     if (name == "W8G32_F16S") { return NumericFormat::W8G32_F16S; }
-    if (name == "NVFP4") { return NumericFormat::NVFP4; }
+    if (name == "F8E4M3_ROW_F32S") { return NumericFormat::F8E4M3_ROW_F32S; }
     throw ArtifactError("unknown tensor format: " + std::string(name));
 }
 
 StorageLayout parse_layout(std::string_view name) {
     if (name == "contiguous-le-v1") { return StorageLayout::ContiguousLeV1; }
     if (name == "row-split-k128-v1") { return StorageLayout::RowSplitK128V1; }
-    if (name == "blockscale-k16-m128x4-v1") { return StorageLayout::BlockScaleK16M128x4V1; }
+    if (name == "row-scaled-k128-v1") { return StorageLayout::RowScaledK128V1; }
+    if (name == "r9700-q4g64-n16-k16-v1") {
+        return StorageLayout::R9700Q4G64N16K16V1;
+    }
     throw ArtifactError("unknown tensor layout: " + std::string(name));
 }
 
@@ -273,8 +276,7 @@ struct Reader::Impl {
             throw ArtifactError("artifact is shorter than the v2 prefix");
         }
         if (std::equal(kV1Magic.begin(), kV1Magic.end(), file.data())) {
-            throw ArtifactError("NInfer artifact v1 is no longer supported; migrate it with: "
-                                "python3 -m tools.artifact.migrate_v1_to_v2 <artifact>");
+            throw ArtifactError("NInfer artifact v1 is no longer supported");
         }
         if (!std::equal(kMagic.begin(), kMagic.end(), file.data())) {
             throw ArtifactError("artifact magic is not NInfer v2");

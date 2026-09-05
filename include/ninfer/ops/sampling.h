@@ -6,7 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 
-#include <cuda_runtime.h> // cudaStream_t
+#include <hip/hip_runtime_api.h>
 
 namespace ninfer::ops {
 
@@ -33,8 +33,9 @@ struct SamplingConfig {
 };
 
 // Caller-owned transient capacity for every parallel sampling-lane count in the inclusive
-// interval. For sample(), one lane is one batch row; speculative acceptance uses the same
-// workspace substrate for its verification columns. token_domain is the fixed route profile.
+// interval. For sample(), one lane is one request batch row and the interval is within [1,4];
+// speculative acceptance uses the same workspace substrate for its verification columns.
+// token_domain is the fixed route profile.
 // Invalid profiles or intervals throw; a legal single-block route returns zero.
 [[nodiscard]] std::size_t sampling_workspace_capacity_bytes(std::int32_t token_domain,
                                                             std::int32_t min_lanes,
@@ -42,7 +43,7 @@ struct SamplingConfig {
 
 /**
  * Produces one token id per independent request row. `logits` is contiguous BF16
- * [physical_rows,B], `out` and `logical_positions` are contiguous I32 [B], and only vocabulary
+ * [physical_rows,B], `out` and `logical_positions` are contiguous I32 [B], B is in [1,4], and only vocabulary
  * rows v in [0,token_domain) participate. `configs` is a device-resident contiguous
  * SamplingConfig[B] array. Greedy and stochastic rows may coexist in one invocation.
  *
@@ -74,6 +75,6 @@ struct SamplingConfig {
  */
 void sample(const Tensor& logits, Tensor& out, std::int32_t token_domain,
             const SamplingConfig* configs, const Tensor& logical_positions, std::int32_t purpose,
-            WorkspaceArena& workspace, cudaStream_t stream);
+            WorkspaceArena& workspace, hipStream_t stream);
 
 } // namespace ninfer::ops

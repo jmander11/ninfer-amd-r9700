@@ -3,7 +3,7 @@
 #include "core/layout.h"
 #include "core/tensor.h"
 
-#include <cuda_runtime_api.h>
+#include <hip/hip_runtime_api.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -14,50 +14,17 @@ namespace ninfer {
 
 inline constexpr std::int32_t kPagedKVPageSize = 64;
 
-/**
- * Non-owning, single-sequence view consumed by growing-cache Ops.
- *
- * Physical plane order is fixed by the owning homogeneous pool and validated by the consuming
- * Op. block_table is one contiguous I32 logical-block row.
- */
-struct PagedKVLayerView {
-    Tensor k_pages;
-    Tensor v_pages;
-    Tensor k_scale_pages;
-    Tensor v_scale_pages;
-    // Per-page (64-key tile) dequantized K mean for the Sparge meansim proxy
-    // [4][64][kv_heads][pages]; sum[d] = (page_offset=d/4)*4 + d%4. Present when
-    // sage_pv or keep_frac<1 on NVFP4; unused by XAttention.
-    Tensor k_mean_pages;
-    Tensor block_table;
-    std::int32_t head_dim     = 0;
-    std::int32_t num_kv_heads = 0;
-    DType dtype               = DType::BF16;
-    std::int32_t quant_group  = 0;
-    // Sage3-style FP4-PV compute recipe (NVFP4 storage only).
-    bool sage_pv               = false;
+enum class PagedKVPlaneOrder : std::uint8_t {
+    PageMajor,
+    HeadMajor,
 };
 
-/**
- * Non-owning multi-sequence view consumed by batched growing-cache Ops.
- *
- * Physical planes and the complete block-table matrix are shared by every logical row in one
- * invocation. block_tables is contiguous I32 [logical_pages, table_rows]; the consuming Op
- * receives its per-row table selectors separately.
- */
-struct PagedKVBatchLayerView {
-    Tensor k_pages;
-    Tensor v_pages;
-    Tensor k_scale_pages;
-    Tensor v_scale_pages;
-    Tensor k_mean_pages;
-    Tensor block_tables;
-    std::int32_t head_dim     = 0;
-    std::int32_t num_kv_heads = 0;
-    DType dtype               = DType::BF16;
-    std::int32_t quant_group  = 0;
-    // Sage3-style FP4-PV compute recipe (NVFP4 storage only).
-    bool sage_pv               = false;
+// The order of the two coordinates inside one 64-token physical page. This is deliberately
+// independent from page/head-major slab placement: R9700 decode candidates use both
+// [feature, token, ...] and [token, feature, ...] encodings.
+enum class PagedKVIntraPageOrder : std::uint8_t {
+    FeatureFastest,
+    TokenFastest,
 };
 
 // A pool plane is storage-only. Consumers assign K/V/layer meaning to plane indices.
@@ -66,18 +33,14 @@ struct PagedKVPlaneSpec {
     std::int32_t leading_extent = 0;
     std::int32_t head_extent    = 0;
     std::size_t alignment       = 256;
-};
-
-enum class PagedKVPlaneOrder : std::uint8_t {
-    PageMajor,
-    HeadMajor,
+    PagedKVPlaneOrder order     = PagedKVPlaneOrder::PageMajor;
+    PagedKVIntraPageOrder intra_page_order = PagedKVIntraPageOrder::FeatureFastest;
 };
 
 struct PagedKVPoolSpec {
     std::uint32_t page_group_count      = 0;
     std::uint32_t logical_page_capacity = 0;
     std::int32_t table_rows             = 0;
-    PagedKVPlaneOrder plane_order       = PagedKVPlaneOrder::PageMajor;
     std::vector<PagedKVPlaneSpec> planes;
 };
 
@@ -116,7 +79,8 @@ public:
     [[nodiscard]] std::uint32_t logical_page_capacity() const noexcept;
     [[nodiscard]] std::int32_t table_row_count() const noexcept;
     [[nodiscard]] std::size_t plane_count() const noexcept;
-    [[nodiscard]] PagedKVPlaneOrder plane_order() const noexcept;
+    [[nodiscard]] PagedKVPlaneOrder plane_order(std::size_t index) const;
+    [[nodiscard]] PagedKVIntraPageOrder plane_intra_page_order(std::size_t index) const;
     [[nodiscard]] const Tensor& plane(std::size_t index) const;
     [[nodiscard]] const Tensor& block_tables() const noexcept;
     [[nodiscard]] Tensor block_table_row(std::int32_t row) const;
@@ -128,7 +92,7 @@ public:
     [[nodiscard]] PagedKVAllocation reserve(std::uint32_t page_entitlement);
 
     // Zeros only the named physical page groups across every storage plane.
-    void zero_pages(std::span<const std::int32_t> page_ids, cudaStream_t stream = nullptr);
+    void zero_pages(std::span<const std::int32_t> page_ids, hipStream_t stream = nullptr);
 
 private:
     friend class PagedKVAllocation;
@@ -168,18 +132,19 @@ public:
     [[nodiscard]] std::uint32_t mapped_page_count() const noexcept;
     [[nodiscard]] std::uint32_t mapped_token_capacity() const noexcept;
     [[nodiscard]] std::int32_t bound_row() const noexcept;
+    [[nodiscard]] std::uint64_t mapping_generation() const noexcept;
     [[nodiscard]] std::span<const std::int32_t> page_ids() const noexcept;
     [[nodiscard]] bool belongs_to(const PagedKVPool& pool) const noexcept;
 
     void set_page_entitlement(std::uint32_t pages);
     void cancel_unmapped_entitlement() noexcept;
-    void materialize_pages(std::uint32_t pages, cudaStream_t stream = nullptr);
-    void materialize_tokens(std::uint32_t tokens, cudaStream_t stream = nullptr);
+    void materialize_pages(std::uint32_t pages, hipStream_t stream = nullptr);
+    void materialize_tokens(std::uint32_t tokens, hipStream_t stream = nullptr);
     void trim_pages(std::uint32_t pages);
     void trim_tokens(std::uint32_t tokens);
 
-    void bind_row(std::int32_t row, cudaStream_t stream = nullptr);
-    void publish_mapping(cudaStream_t stream = nullptr) const;
+    void bind_row(std::int32_t row, hipStream_t stream = nullptr);
+    void publish_mapping(hipStream_t stream = nullptr) const;
     void unbind_row() noexcept;
     [[nodiscard]] Tensor block_table() const;
 
@@ -191,12 +156,13 @@ private:
 
     PagedKVAllocation(PagedKVPool& pool, std::uint32_t page_entitlement);
     void publish_range(std::uint32_t first_page, std::uint32_t page_count,
-                       cudaStream_t stream) const;
+                       hipStream_t stream) const;
 
     PagedKVPool* pool_ = nullptr;
     std::vector<std::int32_t> page_ids_;
     std::uint32_t page_entitlement_ = 0;
     std::int32_t bound_row_         = -1;
+    std::uint64_t mapping_generation_ = 0;
 };
 
 struct PagedKVReservation {
@@ -221,10 +187,10 @@ void resize_paged_kv_bundle(std::span<const PagedKVResize> changes);
                                                     std::uint32_t page_count);
 
 void pack_paged_kv_allocation_to_host(const PagedKVAllocation& allocation, const PagedKVPool& pool,
-                                      void* dst, cudaStream_t stream);
+                                      void* dst, hipStream_t stream);
 
 void unpack_paged_kv_allocation_from_host(PagedKVAllocation& allocation, const PagedKVPool& pool,
                                           const void* src, std::uint32_t src_page_count,
-                                          std::uint32_t dst_extent, cudaStream_t stream);
+                                          std::uint32_t dst_extent, hipStream_t stream);
 
 } // namespace ninfer

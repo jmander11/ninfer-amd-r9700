@@ -6,15 +6,16 @@ hard thinking problems, long decode, and four long-context capacities. This is a
 example set, not a second correctness framework.
 
 [`manifest.json`](manifest.json) lists each case, its intended observation, recommended runtime
-budget, and its prepared-prompt token count.
+budget, and its prepared-prompt token count when that value has been requalified. A null count is
+an explicit external recount gate rather than a copied value from a superseded fixture.
 
 ## Quick start
 
 Run from the repository root because media paths in the JSON files are repository-relative:
 
 ```bash
-CLI=./build/apps/ninfer
-MODEL=models/qwen3_6_27b.ninfer
+CLI=./build-r9700/apps/ninfer
+MODEL=models/qwen3_8_27b_r9700_candidate.ninfer
 
 $CLI "$MODEL" \
   --messages examples/cli/messages/text_smoke_zh.json \
@@ -84,60 +85,53 @@ This case deliberately gets a generous budget. It is meant to run until the mode
 to discover the smallest `max-new` value that happens to fit one output.
 
 ```bash
-$CLI "$MODEL" --messages examples/cli/messages/long_decode_design_review.json \
+$CLI "$MODEL" --messages examples/cli/messages/long_decode_aime26_15.json \
   --greedy --max-context 32768 --max-new 16384
 ```
 
-The answer must contain all eight requested design sections plus `设计自检`. Its memory table must
-separate raw KV payload, 6.25% metadata, and total KV. The structural/factual oracle is intentional:
-the generated prose is not required to be byte-identical.
+The mathematical answer is the integer `83`; reasoning text is not required to be byte-identical.
 
 ## Long context
 
-These prompt lengths include the chat template with thinking disabled. The inputs freeze meaningful
-NInfer documentation and source excerpts, with four unique records placed across the packet.
+These prompt lengths include the chat template with thinking disabled. Each input uses a frozen
+document with one record placed near the middle of the packet.
 
 ```bash
-$CLI "$MODEL" --messages examples/cli/messages/long_8k.json \
-  --max-context 8192 --kv-dtype bf16 --prefill-chunk 4096 \
+$CLI "$MODEL" --messages examples/cli/messages/long_niah_8k.json \
+  --max-context 8192 --prefill-chunk 4096 \
   --no-thinking --greedy --max-new 64
 
-$CLI "$MODEL" --messages examples/cli/messages/long_64k.json \
-  --max-context 65536 --kv-dtype int8 --prefill-chunk 4096 \
+$CLI "$MODEL" --messages examples/cli/messages/long_niah_64k.json \
+  --max-context 65536 --prefill-chunk 4096 \
   --no-thinking --greedy --max-new 64
 
-$CLI "$MODEL" --messages examples/cli/messages/long_128k.json \
-  --max-context 131072 --kv-dtype int8 --prefill-chunk 4096 \
+$CLI "$MODEL" --messages examples/cli/messages/long_niah_128k.json \
+  --max-context 131072 --prefill-chunk 4096 \
   --no-thinking --greedy --max-new 64
 
-$CLI "$MODEL" --messages examples/cli/messages/long_256k.json \
-  --max-context 262144 --kv-dtype int8 --prefill-chunk 4096 \
+$CLI "$MODEL" --messages examples/cli/messages/long_niah_256k.json \
+  --max-context 262144 --prefill-chunk 4096 \
   --no-thinking --greedy --max-new 64
 ```
 
 All four must output:
 
 ```text
-ORCHID=37; COPPER=8142; HARBOR=KESTREL; COLOR=AMBER; SUM=8179
+ORCHID=493817; COLOR=COBALT
 ```
 
-The committed prompt token counts were validated against the Qwen3.6-27B and Qwen3.6-35B-A3B
-frontend profiles, which produce identical sequences for these files. Qwen3.8-27B uses the same CLI
-surface but carries its own tokenizer and chat-template resources; inspect its prepared token count
-when using these fixtures.
+The committed prompt token counts were validated against the sole Qwen3.8-27B frontend profile.
 
 ## Fixture construction
 
 All PNG and MP4 media are project-authored deterministic scenes. The video is five seconds at 8 FPS
 with forty H.264 frames. Runtime tests never depend on a network URL or mutable external content.
 
-The committed generated files are the actual inputs. To intentionally rebuild media and the four
-long-context JSON files from the current source tree:
+The committed generated files are the actual inputs. To intentionally rebuild an NIAH length and
+its position variants from the current deterministic source:
 
 ```bash
-python3 examples/cli/make_fixtures.py \
-  --tokenizer /path/to/Qwen3.6-27B
+python3 tools/bench/make_niah_positions.py --length 8k --position all
 ```
 
-Regeneration updates the frozen source snapshot when selected project files change, so generated
-differences should be reviewed like any other fixture change.
+Generated differences should be reviewed like any other fixture change.

@@ -3,7 +3,7 @@
 #include "core/layout.h"
 #include "core/tensor.h"
 
-#include <cuda_runtime_api.h>
+#include <hip/hip_runtime_api.h>
 
 #include <cstdint>
 #include <vector>
@@ -42,7 +42,7 @@ plan_linear_attention_state_pool(LayoutBuilder& builder, const LinearAttentionSt
  * Fixed-capacity physical storage for model-level Linear Attention state images.
  *
  * One logical slot selects the same frontier across every layer's convolution and recurrent
- * component. The pool owns no slot roles, validity, request metadata, allocation policy, or CUDA
+ * component. The pool owns no slot roles, validity, request metadata, allocation policy, or HIP
  * stream. Construction binds caller-owned backing without mutating it.
  */
 struct LinearAttentionStatePool {
@@ -66,13 +66,13 @@ struct LinearAttentionStatePool {
     [[nodiscard]] std::size_t conv_host_image_bytes() const noexcept;
     [[nodiscard]] std::size_t recurrent_host_image_bytes() const noexcept;
 
-    void copy_slot(std::int32_t src, std::int32_t dst, cudaStream_t stream = nullptr);
-    void copy_slot_2d(std::int32_t src, std::int32_t dst, cudaStream_t stream = nullptr);
-    void zero_slot(std::int32_t slot, cudaStream_t stream = nullptr);
+    void copy_slot(std::int32_t src, std::int32_t dst, hipStream_t stream = nullptr);
+    void copy_slot_2d(std::int32_t src, std::int32_t dst, hipStream_t stream = nullptr);
+    void zero_slot(std::int32_t slot, hipStream_t stream = nullptr);
     void pack_slot_to_host(std::int32_t slot, void* conv_dst, void* recurrent_dst,
-                           cudaStream_t stream) const;
+                           hipStream_t stream) const;
     void unpack_slot_from_host(std::int32_t slot, const void* conv_src, const void* recurrent_src,
-                               cudaStream_t stream);
+                               hipStream_t stream);
 };
 
 } // namespace ninfer

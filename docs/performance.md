@@ -1,609 +1,956 @@
-# Single-GPU serving performance
+# R9700 performance status
 
-Tested Git revisions:
+This document reports only measurements produced by the current native HIP/gfx1201 migration.
+Measurements from the retired backend are not comparable and are not product evidence.
 
-- Concurrent MTP3 decode saturation for the three measured Qwen3.6 artifact profiles:
-  `26da9df7c1b3d3c04ea7bbd730271aa01d00742a`;
-- Refreshed Qwen3.6-35B-A3B and Qwen3.6-27B NVFP4 MTP3:
-  `f4f21cc36bd1a83cbc046f668719d591dc9c1e2e`;
-- Qwen3.6-35B-A3B stored MTP3 response audit:
-  `b1a220f028aa750f75bceb3522ac00bbaab7e42d`;
-- Qwen3.6-35B-A3B DFlash block=8 (`k=7`):
-  `0dc94097e8ec5c5bcf59b9e13e9d1852f504eb61`;
-- Qwen3.6-27B NVFP4 accuracy and MTP0:
-  `b3d4d0f50b868711c62432bbd68e746217a2f49a`;
-- Qwen3.6-27B groupwise-int MTP3: `5ea3242a206cdb0c4c1beaeb9d8a3048e6248423`;
-- Qwen3.6-35B-A3B MTP0 and Qwen3.6-27B groupwise-int MTP0:
-  `0795169393cab0f2c16246d4bac20dee735dc2a4`;
-- Qwen3.8-27B NVFP4 EvalScope accuracy (INT8 and NVFP4 KV):
-  `c0f4ec2cfe234b3e3988f79f0399d077de8178b6`.
+## Evidence levels
 
-The serving measurements characterize the two measured Qwen3.6 model IDs independently on one
-NVIDIA GeForce RTX 5090. They cover long-context prefill and baseline decode with speculative
-decoding disabled, plus long-reasoning and cross-scenario decode with MTP and DFlash. The 27B
-results report its `groupwise-int` and `nvfp4` weight profiles separately. The concurrent
-decode-saturation campaign measures the same three Qwen3.6 artifact profiles at C=1, 2, 4, and 8.
-A separate C=1 Qwen3.8-27B NVFP4 campaign below compares MTP0/3/5 with DFlash2 k=7 on the same
-frozen AIME command (INT8 KV). A later NVFP4-KV DFlash2 campaign measures isolated CLI C=1 and
-serve C=1/2/3 after fused batched GDN conv-record. Qwen3.8-27B NVFP4 accuracy uses
-[Ostfralla/Qwen3.8-27B-NVFP4-NInfer](https://huggingface.co/Ostfralla/Qwen3.8-27B-NVFP4-NInfer)
-with INT8 and NVFP4 KV.
+NInfer distinguishes four scopes:
 
-The single-request corpus requests were submitted serially to a persistent `ninfer-serve` process
-over the loopback OpenAI-compatible HTTP endpoint. Each reported corpus fixture used five fixed
-seeds. Values are arithmetic mean ± sample standard deviation, and server warm-up completes before
-the measured requests. The concurrent campaign has its own sustained-wave method below.
+1. raw kernel candidates;
+2. complete semantic Ops;
+3. runtime phases/rounds;
+4. complete Engine inference at fixed concurrency.
 
-## Single-request serving performance method
+A result is stated only at the scope directly measured. Kernel or Op timings do not establish
+tokens per second. Final production selection requires a complete model artifact, numerical
+quality guardrails, same-candidate graph/eager parity, resolved capacity, and end-to-end C=1..4
+measurements on an otherwise idle R9700.
 
-| Setting | Value |
+## Platform
+
+The latest accepted measurements use:
+
+| Component | Value |
 |---|---|
-| GPU | NVIDIA GeForce RTX 5090, 32 GiB |
-| CUDA compile/runtime | 13.1 / 13.1 |
-| CUDA driver API | 13.3 for NVFP4 and refreshed 35B MTP3; 13.1 for the remaining single-request campaigns |
-| Request mode | One active request, `stream=false` |
-| Maximum context | 262,144 tokens; 131,072 for refreshed NVFP4 MTP3 |
-| Prefill chunk | 1,024 tokens |
-| KV cache | INT8 group-64 |
-| CUDA Graph | Enabled |
-| Prefix reuse | Disabled |
-| Sampling | Temperature 0.6, top-p 0.95, top-k 20, presence penalty 1.0 |
-| Greedy profile | Exact argmax (`--sampling greedy` in the corpus runner) |
-| MTP0 | no `--spec` |
-| MTP3 | `--spec mtp --draft-tokens 3 --lm-head-draft` |
-| DFlash block=8 | `--spec dflash --draft-tokens 7 --lm-head-draft` |
+| GPU | AMD Radeon AI PRO R9700 |
+| architecture | `gfx1201`, wave32 |
+| driver | `7.1.3.31500000` |
+| kernel | `7.0.0-30-generic` |
+| HIP | `7.15.26333` |
+| compiler | AMD Clang 23 under `/opt/rocm/core-10.0` |
+| build | Release, exact `gfx1201` code object |
 
-The MTP0 profile uses four Long NIAH prompts with approximately 8K, 64K, 128K, and 256K tokens.
-Thinking is disabled and the output budget is 128 tokens. These runs measure prefill throughput,
-server-internal time to first token, and baseline decode throughput at each context length. Content
-scenarios are not repeated with MTP disabled because they do not change the baseline decode path.
+The GPU must otherwise be idle. Timings use HIP events around the claimed physical work after
+warmup. Independent exact/FP64 oracles run before performance values are admitted.
 
-The speculative-decode corpus contains three long-reasoning fixtures with thinking enabled and a
-65,536-token output limit, followed by twelve fixtures covering code, story, translation, and
-structured output. The cross-scenario fixtures disable thinking and use a 4,096-token output limit.
-The tables report actual completion lengths rather than assuming that every request reaches its
-limit.
+### Sustained memory bound
 
-Metrics are computed from the server's unrounded phase timings and speculative-decode counters:
+The native exact-device probe uses two 4 GiB buffers, 512 times larger than L2, and reports five
+trials of at least 0.25 seconds. Its aggregate read checksum covers every workgroup and matched the
+expected value exactly.
 
-```text
-prefill_tok_s = prompt_tokens / prefill_seconds
-server_ttft_ms = 1000 * (prepare_seconds + vision_seconds + prefill_seconds)
-decode_tok_s = (completion_tokens - 1) / decode_seconds
-spec_acceptance = accepted_tokens / drafted_tokens
-spec_tokens_per_round = 1 + accepted_tokens / speculative_rounds
-```
+| Method | Best bus rate | Median bus rate | Advertised-peak fraction |
+|---|---:|---:|---:|
+| kernel uint4 read | `636.2 GB/s` | `636.0 GB/s` | `99.4%` |
+| kernel uint4 write | `588.0 GB/s` | `587.9 GB/s` | `91.9%` |
+| kernel uint4 copy | `549.0 GB/s` | `548.6 GB/s` | `85.8%` |
+| HIP D2D copy | `543.8 GB/s` | `543.4 GB/s` | `85.0%` |
 
-Decode throughput is a transport/execution measurement, not a correctness score. The response text,
-finish reason, and fixture-level structural requirements are audited separately below. A request
-that exhausts its output budget or enters a repetition loop remains useful as a sustained-decode
-stress sample, but is not presented as a successfully completed task.
+Copy bus rate counts both the read and write traffic. This is the hardware bandwidth bound, not a
+model or individual-Op throughput claim.
 
-## Concurrent MTP3 decode saturation
+## Typed Text/MTP cache and attention
 
-The concurrent campaign uses the `long_decode_aime26_15` fixture with thinking enabled. The
-rendered prompt is 293 tokens, and every request has an 8,192-token output budget. For each
-concurrency C, the runner starts a fresh `ninfer-serve` process with `max_concurrency=C`, releases
-C non-stream requests together using distinct fixed seeds, and waits for every HTTP response.
-Startup and server warmup occur before the measured wave.
+The growing cache stores FP8 E4M3FN K, signed INT4 V, and FP16 V scales. A 32-point sweep covering
+G16/G32, every K/V/scale plane order, T=1..8, and 1K/4K/8K/32K contexts passed the independent
+layout and attention oracles after the coherent ROCm update.
 
-All points use an RTX 5090, CUDA 13.1 compile/runtime, CUDA driver API 13.3, stochastic sampling
-(temperature 0.6, top-p 0.95, top-k 20, presence penalty 1.0), INT8 group-64 KV, a 1,024-token
-prefill chunk, CUDA Graphs, prefix reuse disabled, and
-`--spec mtp --draft-tokens 3 --lm-head-draft`. Each request has a 16,384-token context ceiling.
-`--kv-capacity auto` resolved to exactly `C * 16,384` tokens at every point.
+The provisional latency leader is G16 with token-fastest K, feature-fastest V, and feature-fastest
+V scales: mean normalized latency `1.004041`, mean rank `2.188`, and 14 wins. This is not yet the
+permanent ABI: the retained real 8K comparison measured both G16 and G32 within their quality tier
+and favored G16 on NLL error against one historical BF16 realization. The exact v3 BF16 authority
+is now closed and the dense all-Q4 sidecars pass their offline rebase; current mixed and sparse
+quality evidence, matched phase, and whole-inference speed evidence remain incomplete. The
+pre-promotion C=1..4 capacity matrices below are retained, but split-512 promotion and final
+prefill-chunk selection require a fresh 32-cell capacity rerun before selection.
 
-Saturated throughput uses only complete one-second server intervals satisfying all of the following:
+The production leaf uses two measured crossovers. At context 8,192 and above, ordinary T=1 and
+fixed-width T=4 select the three-stage split-512 leaf; T=4 includes causal, packed-tree, and
+device-active-row panels. At shorter contexts, T=1 selects wave32 FP8-Q/FP8-K WMMA from context 64,
+T=2 selects it from context 320, and remaining shapes retain represented-BF16-Q score streaming.
+The short-context WMMA path writes one caller-owned FP32 score panel, applies stable FP32 softmax,
+and keeps exact
+FP32-probability INT4-V accumulation vectorized because the tested WMMA PV formulation rounded
+information required by the represented contract. A separately compiled score-streaming control
+isolates the private FP8-Q profile in PPL and other model-level comparisons. The complete 8K
+decode comparison scores 4,095 aligned positions: WMMA PPL is `6.538098` versus `6.541706` for
+streaming, mean signed ΔNLL is `-0.000552`, maximum absolute ΔNLL is `1.017672`, and 72 greedy
+choices differ. Neither route creates a new NLL-at-least-10 position relative to the other. WMMA
+reduces the complete scorer time from `882.169` to `718.316` seconds (`1.228x`) and measured within
+the accuracy tier against that retained source-BF16 realization at mean ΔNLL `+0.011989` with three new
+severe positions. This is private arithmetic, not an observable semantic cast: schedule comparison
+therefore gates finite aligned NLL under an explicit campaign bound and retains greedy flips
+diagnostically. The short-context crossover is retained; scorer wall time supports this isolated A/B
+but does not replace the pending whole-inference benchmark objective. A
+paired pre-promotion MTP3 probe over the same 63 positions was bit-identical in both NLL and
+argmax sidecars (PPL `4.313991` in each build), when T=4 target verification still used score
+streaming. The cell JSON, raw sidecars, and machine-readable comparison
+are retained under `profiles/ppl/fp8-qk-wmma-crossover/` and
+`profiles/ppl/fp8-qk-wmma-crossover-8k/`.
 
-- computed prefill tokens are zero;
-- `running=C`, `prefilling=0`, and `decode_ready=C`;
-- at least one decode round completed;
-- every decode round had exactly C rows.
+The retained split-512 schema-v2 admission report passed the independent stored-byte FP64 oracle,
+invalid-input and workspace-boundary suites, fixed-address Device Graph replay, and an interleaved
+20-sample timing matrix on the R9700 under `auto`. Across G16/G32, 8K/32K, ordinary T=1, and every
+active prefix of fixed-width T=4, the complete incumbent/split ratio ranges from `6.323x` to
+`17.646x`. The report SHA-256 is
+`bb4f0f2fba4773ab7c16e1f9c2e746fa9105f19ab4073fdffaa810108f2e4f1e`. The native-context
+caller-owned scratch is 37,847,040 bytes for T=1 and 151,388,160 bytes for T=4; it aliases across
+sequential layers and request slots. Promotion introduces distinct captured graph topologies; an
+MTP3 graph tracks its max+6 MTP-cache and max+4 Text T=4 leaves independently as each crosses 8K.
+The 32 C=1..4 capacity cells therefore remain pending fresh post-promotion measurement even though
+modeled Text-prefill scratch still dominates the global arena.
 
-Ramp-up, prefill, and drain intervals are excluded. The reported aggregate rate is:
+The production P128..4096 initial-prefix leaf now uses the physically selected three-stage
+full-score GQA6 route. After the gated-RMSNorm, split-view SiLU, and K256 token8 RMSNorm
+promotions, a matched all-Q4/G16 P2048 C1 run under `auto`, with speculative execution disabled,
+measures `1,214.498278` prefill tok/s and `1.686293799 s` mean prefill with `0.001380049 s`
+standard deviation across three repetitions. The retained report is
+`profiles/bench/prefill-p2048-post-k256-rmsnorm-20260904.json`, SHA-256
+`fe0598f603b9a3d3e5d25475b27c39da897ed0b4069566495053f04c1246b6b4`. This is the
+authoritative current low-context baseline, but it does not satisfy the explicit P2048 floor of
+`2,000` prefill tok/s (`1.024 s`). A matched current mixed-Q4/W8 diagnostic, using A8 activation
+coding, C1, chunk 4,096, and no speculative execution, is slower at `920.8914604` prefill tok/s
+and `2.223935366 s`. Its report is
+`profiles/bench/prefill-p2048-mixed-q4-w8-current-20260904.json`, SHA-256
+`590f3e226d01a11269b79b959f7daf3800b3d392f7c6c8cea76c974bc1ec76df`. It is evidence that
+the current mixed recipe is not a shortcut to the dense P2048 gate, not a replacement for the
+all-Q4 authority.
 
-```text
-steady_decode_tok_s = sum(committed_decode_tokens) / sum(interval_seconds)
-```
+The retained post-full-score trace at
+`profiles/rocprof/diagnostic-p2048-post-fullscore-causal-20260904/trace_kernel_stats.csv`
+(SHA-256 `afba65658aea8dd344b8c81b17730c8e35402b61868d7a1f39c5733e0a3e0c88`) captured both
+one warmup and one measured pass, so the production Q4 CTA calls and durations are two-pass totals
+rather than the decision attribution. The unique `ninfer_bench_measured` marker instead retains
+2,249 wholly contained kernels with no boundary crossing. Its selected-region report is
+`profiles/rocprof/diagnostic-p2048-post-fullscore-causal-20260904/measured-selected-region-attribution.json`,
+SHA-256 `3993cb56bdc620f13e9ba223463f041120104d28cf91293dbe491d3bd3d976c7`.
+Independent kernel service is 1,729.283668 ms, with a 1,719.161926 ms timestamp union inside
+1,753.456094 ms of marker wall. The remaining 34.294168 ms is kernel-inactive marker wall, not
+proven GPU idle because runtime/API activity was not captured.
 
-Wave makespan starts when the client threads are released and ends after the last complete HTTP
-response. MTP acceptance is aggregated over the complete wave. Each row below is one sustained
-wave rather than a repeated-sample mean.
+On that measured-only basis, the production Q4 M64xN128 CTA accounts for 320 calls and 64.5355% of
+kernel service, ordinary GDN recurrence 48 calls and 8.4243%, dense full-score PV 16 calls and
+5.0115%, dense full-score QK 16 calls and 4.8159%, the then-generic split-view SiLU 64 calls and
+4.1999%, the then-incumbent gated RMSNorm 48 calls and 3.7309%, activation quantization 321 calls
+and 2.0451%, and the then-incumbent K256 RMSNorm 32 calls and 1.4637%. The global trace's 644 Q4
+WMMA32 calls are not ordinary two-pass P2048 work: 640 layer calls belong to the startup T=1
+ordinary code-warm execution and Device Graph capture, while four T=1 vocabulary-head calls cover
+those two startup executions plus warmup and measured prefill. Only the measured vocabulary head,
+at `2.585003 ms` or 0.1495% of measured kernel service, belongs to the measured P2048 pass; startup
+service is excluded from steady
+prefill attribution. Because the trace predates the gated-RMSNorm, split-view SiLU, and K256
+RMSNorm promotions visible in the current executable, those rows explain the completed changes but
+do not supersede the current 1,214.498278 tok/s whole-prefill authority or establish current
+residual timings.
 
-| Model profile | C | Steady (s) | Avg batch | Aggregate decode tok/s | MTP acceptance | Speedup vs. C1 | Wave makespan (s) |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| Qwen3.6-27B `groupwise-int` | 1 | 43.01 | 1.00 | 185.8 | 68.2% | 1.00× | 44.23 |
-| Qwen3.6-27B `groupwise-int` | 2 | 65.01 | 2.00 | 247.0 | 69.0% | 1.33× | 66.67 |
-| Qwen3.6-27B `groupwise-int` | 4 | 102.02 | 4.00 | 309.5 | 68.4% | 1.67× | 107.49 |
-| Qwen3.6-27B `groupwise-int` | 8 | 118.02 | 8.00 | 535.0 | 68.3% | 2.88× | 125.20 |
-| Qwen3.6-27B `nvfp4` | 1 | 39.01 | 1.00 | 202.4 | 69.3% | 1.00× | 40.46 |
-| Qwen3.6-27B `nvfp4` | 2 | 39.01 | 2.00 | 399.7 | 71.4% | 1.97× | 41.82 |
-| Qwen3.6-27B `nvfp4` | 4 | 44.01 | 4.00 | 699.7 | 69.3% | 3.46× | 47.92 |
-| Qwen3.6-27B `nvfp4` | 8 | 55.01 | 8.00 | 1,146.9 | 68.6% | 5.67× | 58.57 |
-| Qwen3.6-35B-A3B `groupwise-int` | 1 | 12.00 | 1.00 | 593.0 | 67.2% | 1.00× | 13.75 |
-| Qwen3.6-35B-A3B `groupwise-int` | 2 | 17.00 | 2.00 | 877.7 | 68.2% | 1.48× | 18.87 |
-| Qwen3.6-35B-A3B `groupwise-int` | 4 | 26.01 | 4.00 | 1,166.0 | 69.8% | 1.97× | 28.43 |
-| Qwen3.6-35B-A3B `groupwise-int` | 8 | 48.01 | 8.00 | 1,313.8 | 67.3% | 2.22× | 50.20 |
+The initial prefill-chunk screen then found a metadata boundary missed by the admission fixture. A
+T=1 attention call at visible frontier 8,192 carried a device active-row pointer; the former
+row/context-only decision selected split-512, whose admitted contract rejects active-row metadata
+for T=1, and returned `hipErrorInvalidValue`. Workspace sizing and launch now use the same
+metadata-aware selector. Metadata-bearing T=1 retains the fused leaf, ordinary T=1 remains split at
+8K and above, and fixed-width T=4 retains its admitted causal/tree/device-active-row split forms.
+The host routing test passes the exact 8,191/8,192 selector and workspace boundaries, and the direct
+8K MTP reproduction completes in
+`profiles/bench/prefill-split512-failure-diagnostic-20260904.json`. This is regression evidence, not
+a prefill-chunk selection or a terminal throughput result.
 
-All 45 requests reached their output limit, producing 368,640 completion tokens. The campaign
-contained 608 complete full-batch steady intervals and had no request, CUDA, or out-of-memory
-failure. At C=8, available device memory after startup was 2.66 GiB for 27B groupwise-int,
-2.18 GiB for 27B NVFP4, and 4.38 GiB for 35B-A3B.
+The September 3, 2026 XAttention schema-v1 measurements are superseded diagnostics, not production
+rejection evidence. Their zero Q/K corpus made the estimator uniform and therefore forced
+`tau=0.900` to retain about 90% of pages; those builds also lacked retained executable/source
+identity and had regressed from paper B128 selection to B64. The corrected candidate uses B128
+query/keep blocks expanded to the B64 cache, counts mandatory causal blocks inside the threshold
+budget, includes ragged estimator planes/groups, and uses a concentrated represented timing
+fixture with explicit achieved keep fraction. The current S16 `tau=0.900` candidate uses a
+B16-query sparse FlashAttention-style consumer: native BF16 WMMA forms B16xB16 QK tiles over the
+ranker's packed logical keys, FP32 online softmax preserves increasing retained-key order, and
+each direct INT4-V/FP16-scale load is reused across 16 queries without a global score workspace.
+Separate G16/G32 physical qualifiers passed the D256/Hq24/Hkv4 independent FP64 oracle at maximum
+absolute errors `1.6023e-8` and `1.6986e-8`, respectively, under the recorded `3e-4`
+absolute-or-relative tolerance. G16 measured `2.4200/8.8416 ms` sparse versus
+`69.1062/286.5128 ms` dense at 8K/32K (`28.56x/32.40x`), with `1.2393/4.0885 ms` consumer time.
+G32 measured `2.4008/8.7894 ms` versus `69.1753/287.6155 ms` (`28.81x/32.72x`), with
+`1.2454/4.0854 ms` consumer time. Both retained 14.06%/11.72% of pages. Schema-v4 reports have
+SHA-256 `697d26c1cb24a0cd059e92336a1f3494dac6cdc65a4c74aa80fef7af8d290519` (G16) and
+`dfcf0cd17801a83c97d978203e4763c089afc47e5bd15afe371ccceda1d6850e` (G32), with executable and
+source hashes beside them under
+`profiles/bench/r9700-xattention-b16-requal-s16-tau900-g{16,32}/`. These concentrated-fixture
+results qualify the redesigned operator, not whole-model performance. Static-profile selection,
+the selected-profile retrieval gate, production-prefill chunk selection, and fresh whole-inference
+evidence remain open; no end-to-end admission follows from this isolated speedup.
+
+A diagnostic selected-region trace of the compile-isolated S16/`tau=0.900` route at C=1,
+32K context, and a 4,096-token prefill chunk is retained under
+`profiles/rocprof/xattention-s16-tau900-all-q4-g16-c1-32k-trace-20260904/`. The benchmark
+report SHA-256 is
+`a22837755d61d295ed00e160a0ee272b96c6bff87e90121ef9d11803f21a02d9`; the rocprof database
+SHA-256 is `83a42f5ce11d73f03354cf5ec2872b29fa8e1d53a45ae537d96f519be40357ae`.
+The derived schema-v1 attribution report is
+`profiles/rocprof/xattention-s16-tau900-all-q4-g16-c1-32k-trace-20260904/prefill-attribution.json`
+with SHA-256 `81a9efbb0115775d102203441849dabc8aebe699d8368b5f124fb8bf3e6cd6b4`.
+Its eight Text-prefill chunk ranges total `444.416 s`, matching the benchmark's `444.418 s`
+prefill measurement within `2.312 ms`. Kernel activity covers `444.068 s` of their union,
+leaving only `0.348 s` (`0.078%`) as host/idle gap. Independently summed kernel time is
+`443.849 s` in base Text prefill versus `0.318 s` in MTP-prefill; concurrent streams make
+those category totals non-additive. Base full attention accounts for `325.124 s`, post-mixer
+for `92.908 s`, and GDN for `25.817 s`. Within attention, the former serial sparse consumer is the
+dominant kernel at `302.770 s` over 128 dispatches (`68.13%` of prefill); the prefill-only
+A8Q4 linear totals `116.717 s`, and the ranker totals `15.353 s`. This rules out the
+MTP-prefill or host-gap explanation.
+
+The runtime/qualifier comparison must normalize query work. The 32K qualifier's
+`32.450 ms` consumer result covers one 128-row query block, while the runtime chunk contains
+32 such blocks: its comparable qualifier baseline is therefore `1.038 s` per layer. The final
+runtime chunk measures `4.146 s` per full-attention layer, about `3.99x` that baseline. If
+consumer time scaled only with kept pages, applying that ratio to the qualifier's `11.71875%`
+keep fraction would suggest roughly `46.8%` retention on this model input. That value is an
+inference, not an observed retention measurement, because fixed costs and the real keep
+distribution can also change scaling. The existing C=1 whole row and this trace remain
+diagnostic that motivated the B16-query redesign above. It does not predict that redesign's real
+model keep distribution or end-to-end speed. The production prefill chunk and fresh whole matrices
+must still be selected and measured before admission or whole-inference performance claims.
+
+Selected complete target-leaf timings at context 257 are:
+
+| Query rows | Time |
+|---:|---:|
+| 1, selected WMMA | about `0.104 ms` (`0.191 ms` streaming control) |
+| 2, selected streaming | about `0.195 ms` (`0.196 ms` streaming control) |
+| 9 | about `0.204 ms` |
+| 17 | about `0.442 ms` |
+| 128 | about `2.504 ms` |
+
+At 4K context the focused raw-candidate trace attributes roughly `7.7 us` to parallel softmax and
+`818.8 us` to exact PV. QK/softmax/PV metadata is 24/23/15 VGPR, 0/76/0 bytes
+LDS, zero private scratch, wave32, occupancy 16.
+
+The serialized boundary sweep measured T1 streaming/WMMA medians of `0.0376/0.0431 ms` at
+context 48, `0.0427/0.0443 ms` at 56, and `0.0479/0.0460 ms` at 64. T2 medians were
+`0.1696/0.1724 ms` at context 256, `0.1897/0.1851 ms` at 288, and `0.2099/0.1980 ms` at 320;
+the conservative T2 classifier starts at 320. At 4K, WMMA is `2.998x` and `1.499x` faster for
+T1/T2, while T3 remains a measurement tie and stays on streaming. The represented-input FP64
+oracle, classifier, and timing record is retained in
+`profiles/bench/r9700-fp8-qk-wmma-crossover.json`.
+
+Production-shaped suffix append plus selected attention was measured independently at T=1..8 and
+T=9/17/128 over 1K/4K/8K/32K. Append costs about 5--8 microseconds at narrow decode and 37--46
+microseconds at T=128. Even an impossible zero-cost append bounds improvement to 0.80/0.20/0.10/
+0.03 percent at 1K/4K/8K/32K for decode and 0.40/0.10/0.05/0.01 percent at T=128. Ordered-pair
+timings showed no repeatable gain beyond clock variance.
+
+One ordinary HIP kernel cannot globally order the independent T x Hkv append writers before the
+T x Hq attention readers. A cooperative launch cannot keep the T=128 grid resident, while
+reader-local encoding duplicates the GQA codec work sixfold and violates the transaction's
+single-writer/status ownership. Production therefore retains separate ordered append followed by
+the already fused QK, online FP32 softmax, and exact PV attention Op. Append/attention metadata is
+13/23 VGPR, zero/52 bytes LDS, zero scratch, and occupancy 16.
+
+## Linear
+
+Standalone real-shape `[N,K]=[7168,5120]` prefill results:
+
+| Represented weights | T16 | T32 | T64 | T128 |
+|---|---:|---:|---:|---:|
+| BF16 wave32 WMMA | `0.203 ms` | `0.267 ms` | `0.698 ms` | `2.418 ms` |
+| provisional W8G32 | `1.119 ms` | `2.225 ms` | `4.371 ms` | `8.751 ms` |
+
+Both routes pass direct independent FP64 formulas. W8G32 uses exact signed codes and FP16 scales
+with FP32 FMA because no available WMMA form preserves that codec. These measurements qualify the
+Op; they do not select the final model weight recipe.
+
+The compile-time W8-A8 evaluator adds a native signed-INT8 WMMA route while preserving exact
+represented-BF16 execution below measured per-shape crossovers. Across the mixed artifact's 13
+unique W8 shapes, A8 begins at T3 or T4 for nine shapes, T32 for `[34816,5120]`, and T64 for the
+three 1152-row Vision shapes; unknown shapes remain exact. At `[7168,5120]`, interleaved medians
+show 1.32x at T3, 1.53--1.75x at T4--8, and 3.37--5.55x at T16--128. These are operator results;
+matched real-model quality and whole-inference results are still required before selection.
+
+The persistent Q4G64 evaluator additionally has separately compiled A4G64 and A8G64 activation
+profiles over identical artifact bytes. A8 is the production-style compile default; A4 requires
+an explicit evaluator build. A8 encodes a signed code into unsigned-low and signed-high
+nibble planes and uses two native IU4 WMMA sign modes with exact I32 recombination. Both profiles
+pass exact activation images and every independent FP64-formula output at `[7168,5120]`,
+T=1..8/16/32/64/128; four active lanes rotate across groups to cover all 64 packed K-lane/WMMA
+fragment positions. The timing harness measures five alternating forward/reverse route rounds,
+retains every sample, and reports the per-route median. The interleaved complete-Op medians are:
+
+| Q4 activation profile | T1 | T8 | T16 | T32 | T64 | T128 |
+|---|---:|---:|---:|---:|---:|---:|
+| A4G64 | `0.05356 ms` | `0.07826 ms` | `0.09961 ms` | `0.11374 ms` | `0.13436 ms` | `0.24254 ms` |
+| A8G64 two-plane | `0.05874 ms` | `0.08699 ms` | `0.11070 ms` | `0.12538 ms` | `0.15366 ms` | `0.30146 ms` |
+
+A8 reduces the represented-BF16-times-decoded-Q4 maximum error from 0.212891 to 0.015625. Its
+WMMA kernel uses 64 VGPR, zero LDS/scratch, occupancy 16; activation quantization uses 10 VGPR,
+zero LDS/scratch. The machine-readable result is
+`profiles/bench/r9700-a8q4g64-linear-qualification.json`; direct compile-selected A4/A8
+Tensor/WorkspaceArena results are retained beside it as
+`r9700-q4-tensor-dispatch-a4.json` and `r9700-q4-tensor-dispatch-a8.json`. Nonzero quantizer status
+is consumed asynchronously by both routes and poisons every output with exact BF16 NaN.
+
+The selected wave32 quantizer was also measured across all 17 distinct all-Q4 artifact shapes,
+all six mixed-artifact Q4 shapes, and all 32 Q4 DFlash2 matrices at T=1..8/32/128. Five additional
+DFlash shapes extend the inventory to 22 unique shapes and 220 extents, including the K=25600
+feature projection. Every extent matched the exact codec and independent sampled FP64 formula
+with zero BF16-step error. Count-weighted timing is effectively tied at the narrowest points:
+the selected route ranges from a 0.007% regression to a 2.034% gain for all-Q4, a 0.506%
+regression to a 1.401% gain for the mixed Q4 subset, and a 0.048% regression to a 1.436% gain for
+the DFlash matrices. The complete inventory, seven-trial interleaved samples, and medians are
+retained in `profiles/bench/r9700-a8q4g64-artifact-shape-sweep.json`. Physical public-wrapper
+checks also pass Q4 through grouped dynamic-convolution preparation and both selector chain/tree
+routes using their caller-owned nested Linear arena.
+
+The earlier matched real-model 8K prefill scoring isolates activation width over identical artifact bytes.
+Every row scores the same 4,095 index-aligned tokens after a 4,096-token skip against the
+source-BF16 reference (PPL 6.460181); raw FP32 NLL and I32 argmax sidecars are retained.
+
+| Stored matrix recipe | Q4 activation | PPL | mean-NLL delta | BF16-greedy flips | new NLL>=10 positions | score seconds |
+|---|---:|---:|---:|---:|---:|---:|
+| all Q4G64 | A4G64 | 7.397805 | +0.135526 | 800 | not separately attributed | 69.394 |
+| all Q4G64 | A8G64 | 6.720524 | +0.039509 | 450 | 9 | 71.601 |
+| 183 Q4G64 / 256 W8G32 | A4G64 | 6.765289 | +0.046148 | 420 | not separately attributed | 263.145 |
+| 183 Q4G64 / 256 W8G32 | A8G64 | 6.550048 | +0.013815 | 237 | 2 | 264.720 |
+| source-MSE 183 Q4G64 / 256 W8G32 | A8G64 | 6.544746 | +0.013005 | 234 | 3 | 264.980 |
+| source-MSE 183 Q4G64 / 256 W8G32 | A8G64 Q4 + adaptive A8G32 W8 | 6.538677 | +0.012077 | 234 | 3 | 133.504 |
+
+A8 is decisively useful: it reduces PPL by 0.677281 for all-Q4 and 0.215241 for the mixed artifact
+at only 2.207 and 1.575 seconds additional score time in these single runs. The source-MSE mixed
+adaptive-W8 profile is the Q4-containing accuracy leader in that retained comparison: +0.012077
+mean NLL and three new severe positions measured within the accuracy tier's 0.02/five-position
+limits. Its represented-BF16 W8 control remains retained at +0.013005. The all-Q4+A8 profile also
+measured within the declared capacity-speed tier: +0.039509 is below `ln(1.05)` and nine new severe
+positions are below its eleven-position limit in that realization. At that point both remained
+capacity candidates with BF16-derived quality admission open; BF16-greedy choices are diagnostic.
+The adaptive W8 route is selected within the mixed profile: versus the identical stored artifact
+with represented-BF16 W8 activations, it improves mean NLL by 0.000928 and reduces this scorer's
+wall time by 1.98x. Scorer wall time is useful for this isolated A/B but is not substituted for the
+pending whole-inference Pareto matrix.
+Complete comparison data is retained at `profiles/ppl/8k-candidate-comparison.json` and
+`profiles/ppl/8k-candidate-comparison.md`; raw A8 results are under `profiles/ppl/q4g64-a8-real/`,
+`profiles/ppl/q4-w8-a8-real/`, and `profiles/ppl/q4-w8-mse-a8-real/`.
+
+The final compile profile (A8 for Q4, adaptive A8 for W8, and the selected finite FP8-Q/K WMMA
+classifier) now has matched G16/G32 results at both 8K and 32K. Every FP32-NLL and I32-argmax
+sidecar is finite, complete, index-aligned with the independent BF16 source, and retained with its
+SHA-256:
+
+| matrix recipe | cache | length | scored | PPL | mean-NLL delta | BF16-greedy flips | new severe / tier budget | quality tier |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| all Q4G64 + A8G64 | G16 | 8K | 4,095 | 6.720524 | +0.039509 | 450 | 9 / 11 | capacity-speed, one realization |
+| all Q4G64 + A8G64 | G32 | 8K | 4,095 | 6.730933 | +0.041056 | 445 | 10 / 11 | capacity-speed, one realization |
+| all Q4G64 + A8G64 | G16 | 32K | 16,383 | 5.892102 | +0.044561 | 1,673 | 41 / 41 | capacity-speed, one realization |
+| all Q4G64 + A8G64 | G32 | 32K | 16,383 | 5.900777 | +0.046032 | 1,682 | 39 / 41 | capacity-speed, one realization |
+| source-MSE Q4G64/W8G32 + adaptive A8 | G16 | 8K | 4,095 | 6.538677 | +0.012077 | 234 | 3 / 5 | accuracy, one realization |
+| source-MSE Q4G64/W8G32 + adaptive A8 | G32 | 8K | 4,095 | 6.542475 | +0.012658 | 232 | 2 / 5 | accuracy, one realization |
+| source-MSE Q4G64/W8G32 + adaptive A8 | G16 | 32K | 16,383 | 5.724998 | +0.015790 | 956 | 16 / 17 | accuracy, one realization |
+| source-MSE Q4G64/W8G32 + adaptive A8 | G32 | 32K | 16,383 | 5.723254 | +0.015485 | 942 | 16 / 17 | accuracy, one realization |
+
+Against that retained BF16 realization, all-Q4 measured outside the stricter accuracy tier but
+within its declared capacity-speed tier in every cell; 32K G16 is exactly at that realization's
+new-severe budget. The mixed source-MSE recipe measured within the accuracy tier in every cell,
+with one new-severe position of margin at 32K. Direct G16/G32 NLL
+differences are diagnostic and do not choose a group: three of four are within two paired standard
+errors, while all-Q4 at 32K favors G16 by 0.001471 mean NLL (2.18 standard errors). Under the
+current C=1..4 product cap, both recipes and both cache groups remain capacity candidates.
+
+The table above is retained historical one-realization evidence, not current admission. The old
+source scorer was nondeterministic at both lengths; long-context tracing localized its first
+divergence to attention PV, and a later allocator-sensitive GDN route produced two stable 8K
+branches. The replacement v3 authority uses fixed-order PV and a single fused-recurrent GDN route,
+and binds the complete scorer/backend/environment boundary. Two fresh non-trace campaigns are
+byte-exact at both lengths. Their comparison is retained at
+`profiles/ppl/bf16-reference-deterministic-pv-gdn-v3-repeat-comparison-20260904.json` (SHA-256
+`9b13916a2a3ca8b8e5d01352f98a8306414f4e13a79989c19b1d1248d5eb00de`): 8K NLL/argmax SHA-256
+are `6ba4009ac23da9c831b475ce38fa98c377fd504ade81733de711be95e4092c0e` /
+`c9904bd5b09d00666aee8500023cb52cc6f22d5c369cc00ceba57ea04a6d80c1`, and 32K are
+`f5da949265ff566ebc368e3521cadc3f2ea7c687f1072ec993dbaec101ab1ab4` /
+`ec4e4d6b731d837f98b5f8bac7161ddacb9e55f0cf1842d68b58b9a2957a314b`.
+
+The unchanged dense all-Q4 candidate sidecars were rebound offline to that exact authority in
+`profiles/ppl/xattention-dense-q4g64-v3-rebase-20260904/results.json` (SHA-256
+`fc05174d70421f60351c0cd87c587d04f74eabd205e0d9431887a60c7c7bc4fa`). G16/G32 pass the
+capacity-speed tier: 8K mean-NLL deltas are `+0.0397932579` / `+0.0413409097` with 10/11 new
+severe positions of an 11-position budget; 32K deltas are `+0.0447215401` / `+0.0461926079` with
+40/38 of 41. This closes only dense all-Q4 quality admission. The retained sparse sidecars require
+fresh scoring after the B16 consumer rebuild. The mixed-dense historical scorer binaries were overwritten,
+so its candidate provenance cannot be reopened for a valid offline rebase; mixed dense and sparse
+both require fresh acquisition using the selected prefill chunk.
+
+The historical mixed dense schema-v6 campaign is fixed candidate-sidecar evidence at
+`profiles/ppl/xattention-dense-q4-w8-mse-20260903/results.json` (SHA-256
+`7530b27e503baf8bf29c2fd83135c0e2395a9a04bd050a2872dd2a7b341b9220`). It binds mixed artifact
+SHA-256 `8fbadf14e355b1943ef9386a91ebafff0d852295a9adc0054bdd430291505ebd` and dense G16/G32 scorer
+SHA-256 `fb36b2fca7871fbcbdbbce32cb1da8d05965e2164fea0d2773dd8259d686b6d4` and
+`552e73200a351691d5451adccfa7dd91e9381631388e366d3c03c051338a967d`. Against its shared old BF16
+realization, G16/G32 measured +0.011503/+0.012084 mean NLL with 4/3 new severe positions of a
+five-position budget at 8K and +0.015520/+0.015216 with 14/14 of 17 at 32K. These provisional
+pass flags are diagnostic only: the exact retained scorer bytes are no longer present, so the
+campaign cannot be rebound to the v3 authority and does not close current mixed quality admission.
+
+The retained pre-split-promotion all-Q4 schema-v20 reports under schema-v13 manifests record exact
+C=1..4 capacity for dense and B128/S16/tau900 execution at the 4,096-token campaign-control chunk:
+
+| execution | group | C1 | C2 | C3 | C4 | binding at C1/C2; C3/C4 |
+|---|---:|---:|---:|---:|---:|---|
+| dense | G16 | 262,144 | 524,288 | 570,304 | 558,080 | model context; device memory |
+| dense | G32 | 262,144 | 524,288 | 593,152 | 580,416 | model context; device memory |
+| B128/S16/tau900 | G16 | 262,144 | 524,288 | 553,280 | 541,056 | model context; device memory |
+| B128/S16/tau900 | G32 | 262,144 | 524,288 | 575,424 | 562,688 | model context; device memory |
+
+All sixteen historical cells are uncensored resolved effective maxima and exactly reproduce the
+corresponding C1..4 rows of their superseded C1..8 campaigns. The four manifests bind all-Q4 artifact
+SHA-256 `19d029a89c1ef1cf87420067555021a7c7b435c31a92bea7c64ccf42c03d80e9` and benchmark
+SHA-256 values `78b4f3ba85436badaaccb4695848406d4d8f5d4f4f1439235d8d3200758490fb` (dense G16),
+`5351c7c8fc4c7cd8fc136c2e6ab0107c65201d3fc0c4ab9fa4000f07e7587729` (dense G32),
+`ec85dfe59aa9fc8ca369f4ffb785bd33fda5959d2ac5889010643a8a01e4e775` (sparse G16), and
+`5780de5e08b5317c54e2212f4d3088dfeaad8bde290079c8adb42565b5e28e02` (sparse G32).
+The corresponding manifest SHA-256 values are
+`03265de925aa4be0b7a0584b60d819b80b3a1d8053e2cd0fa70eed37d104d63c`,
+`cb38eea0a67ceb9875aa04df5ea5c5be0c0f13881a8adf022c05ae86ee13460f`,
+`b75f8f4cf08c1ae28e7c51cef8b3ce11ad6eedf7605901a3b11798d50697a856`, and
+`74d448c2b2869dd3c37a33a26d7ce8e3f294acf221a7e934a6800b19437ee459`
+in the same dense-G16, dense-G32, sparse-G16, sparse-G32 order.
+The corresponding retained pre-promotion mixed schema-v20/schema-v13 matrices record dense and
+B128/S16/tau900 G16/G32 capacity at the same 4,096-token campaign-control chunk:
+
+| execution | group | C1 | C2 | C3 | C4 | binding at C1; C2--C4 |
+|---|---:|---:|---:|---:|---:|---|
+| dense | G16 | 262,144 | 314,112 | 301,888 | 289,664 | model context; device memory |
+| dense | G32 | 262,144 | 326,656 | 313,984 | 301,248 | model context; device memory |
+| B128/S16/tau900 | G16 | 262,144 | 297,088 | 284,800 | 272,576 | model context; device memory |
+| B128/S16/tau900 | G32 | 262,144 | 308,928 | 296,192 | 283,520 | model context; device memory |
+
+Both dense manifests bind `r9700-q4-w8-mse-n16k16-eval` artifact SHA-256
+`8fbadf14e355b1943ef9386a91ebafff0d852295a9adc0054bdd430291505ebd`.
+G16 binds benchmark SHA-256
+`78b4f3ba85436badaaccb4695848406d4d8f5d4f4f1439235d8d3200758490fb` and manifest
+SHA-256 `cf87ab0c3cfd2e574c0c114652658973b53785af8b34026a077ad8bf5cbbed58`;
+G32 binds benchmark SHA-256
+`5351c7c8fc4c7cd8fc136c2e6ab0107c65201d3fc0c4ab9fa4000f07e7587729` and manifest
+SHA-256 `93bcb29aaf2aceef9558cfd5221cb49b32688e691dd194c11f4bcf990a24995c`.
+Sparse G16 binds B128/S16/tau900 benchmark SHA-256
+`ec85dfe59aa9fc8ca369f4ffb785bd33fda5959d2ac5889010643a8a01e4e775` and manifest SHA-256
+`c4229e99a882c51158fe433a43cb44bc17b0c20c88cbaf352ecae178aec160b0`.
+Sparse G32 binds B128/S16/tau900 benchmark SHA-256
+`5780de5e08b5317c54e2212f4d3088dfeaad8bde290079c8adb42565b5e28e02` and manifest SHA-256
+`f12dfac84dc0d005e51e95142862dce1cc5abd020aeb7f98e1e354c76f937b03`.
+All sixteen mixed cells, and all 32 retained capacity cells across both recipes, were uncensored
+resolved effective maxima for their bound pre-promotion executables. The mixed dense cells exactly
+reproduce the corresponding historical C1..4 rows. The post-promotion capacity rerun, every
+whole-inference matrix, and terminal selection remain open.
+
+The superseded mixed-recipe campaign's C=1..4 rows likewise resolved G16 to 262,144, 314,112,
+301,888, and 289,664 tokens and G32 to 262,144, 326,656, 313,984, and 301,248 tokens.
+These values establish why the old C7/C8 exclusion no longer applies. Those old mixed manifests
+remain superseded history; the exact C=1..4 matrices above are retained controls and cannot become
+current selection inputs until rerun against the promoted executable and selected chunk.
+
+The superseded all-Q4 schema-v12 manifests are
+`profiles/bench/pareto-capacity-markerfree-layout-all-q4-g16-20260903/manifest.json` (SHA-256
+`be1d5727948512560f28a7e149547714f9b80dca96169646a2eef0310a883feb`) and
+`profiles/bench/pareto-capacity-markerfree-layout-all-q4-g32-20260903/manifest.json` (SHA-256
+`c7e5020b03cd104440011fcc17095e3166defdc59045274192e6b930b027d922`). Both bind artifact
+`r9700-q4g64-n16k16-eval`, 15,172,829,184 bytes, SHA-256
+`19d029a89c1ef1cf87420067555021a7c7b435c31a92bea7c64ccf42c03d80e9`. G16 binds benchmark
+SHA-256 `86763d6d3ac2ff8fc27a3815f3816aaba44a11acfaf4ebf54ca5d8991ddc7d65`; G32 binds
+`2c9bb5a64f0e25a307f3f2b783a527ed6b42d1671c6e826d7ca98545052e9b31`. These executables leave
+nested ROCTX ranges disabled in ordinary measurement. The prior `pareto-capacity-layout-*`
+campaigns, the completed G16 and interrupted G32 `pareto-capacity-unprofiled-layout-*`
+intermediate campaigns, and the schema-v11/schema-v18 `pareto-capacity-max-*` campaigns are all
+superseded for active selection. Their raw files remain unchanged as historical evidence. The durable
+exact comparison is `profiles/ppl/q4-a8-final-8k-32k-quality-comparison.json` with the concise
+companion `profiles/ppl/q4-a8-final-8k-32k-quality-comparison.md`. Matched whole-inference
+performance remains required to select a recipe, cache group, and execution profile.
+
+Cache group and plane order are runtime-state build profiles rather than artifact metadata. G16
+and G32 comparisons therefore use separately compiled evaluator/Engine binaries; the same explicit
+artifact is used for both when the experiment holds the weight recipe constant.
+
+## DFlash2 and Vision
+
+DFlash K/W selection begins only after the schema-v7 `terminal_production_selection` fixes the
+weight recipe, cache group, and execution profile. The fixed
+C=1 shortlist retains all exact-output candidates on its speed/acceptance/fallback/repair frontier;
+it does not itself choose a production K/W. Every shortlist-frontier tuple then receives a
+schema-v13 `dflash-capacity` campaign over all C=1..4. Missing capacity is an exclusion only when
+the exact failed command and logs are retained; excluded tuples receive no phase/whole campaign.
+Every capacity-eligible tuple receives the complete 18-point `dflash-pareto` matrix: matched
+8K/32K prefill, DFlash decode, ordinary control, and fresh-prompt whole inference at C=1..4 plus
+two isolated C=1 proposal diagnostics.
+
+The sole decision authority is the schema-v1 output from
+`tools/bench/assemble_dflash_selection.py`. It binds the base decision through the conversion
+report to the exact terminal winner's companion artifact, executable, cache group, and K/W; reopens every schema-v20
+report; and recomputes shortlist, exact ordinary-output parity, exact repeated proposal/target
+determinism, and generated-quality evidence. Its retained frontier treats every whole-throughput,
+capacity, and acceptance cell as a separate maximize objective. The static winner maximizes the
+worst normalized 8K/32K C=1..4 whole-throughput ratio, then worst normalized C=1..4 capacity,
+then worst normalized matched acceptance length. Numeric `(K, W)` resolves only a complete tie.
+No average or workload weighting may replace this rule. The DFlash gate closes only when this
+record passes; a shortlist row, capacity summary, or manually chosen frontier member is not a
+selection result.
+
+Selected qualified Op results:
+
+| Op/workload | Time | Numerical result |
+|---|---:|---|
+| SWA W4096 T3/B2 | `0.173 ms` | max abs `0.001246`, rel L2 `0.001619` |
+| SWA W2048 T1 | `0.063 ms` | same complete oracle suite |
+| grouped convolution BF16 T1/B1, D5120/G320 | `0.061 ms` | max abs `1.58101e-5` |
+| grouped convolution W8 T2/B2 | `0.091 ms` | complete represented-input formula |
+| Vision attention P194/S3 | about `0.087 ms` | rel L2 `0.001663` |
+| Vision positional embedding P1024 | about `0.021 ms` | rel L2 `0.001633` |
+
+The selected Vision attention route is resource-heavy (256 VGPR, 4 KiB LDS, 368 bytes private
+scratch) but measured faster than both its spill-free recompute candidate and scalar baseline.
+Resource counts alone are not a reason to replace a physically faster qualified implementation.
+
+After the product request-lane cap moved to C/B=4, a focused physical gfx1201 rerun passed the
+runtime planner, GDN recurrence, target GDN composition, scalar schedule, sampling, DFlash KV
+append-prefix, SWA, MTP-round, and speculative-round qualifiers. The first SWA attempt exposed a
+stale qualifier-only B8 workspace-capacity probe; the production Op correctly rejected that
+out-of-contract request before launch. Changing the probe to the shared B4 maximum restored the
+intended active-domain coverage, and the complete rerun passed. The retained direct W2048 T16/B4
+SWA point is `0.053 ms`, with maximum absolute oracle error `0.00125`. This is support-boundary
+correctness evidence, not model quality, capacity, whole-inference, or selection evidence.
+
+## Speculative transitions
+
+The retained pre-cap speculative-round measurements were approximately `2.01 ms` for chain K8/B8
+and `0.59 ms` for mixed product-tree W12/B8 over 20 events at the 248320-token vocabulary. Those
+B=8 values are historical, not supported-product evidence. The active exact qualifier covers
+B=1..4; MTP next-round transformation passes exactly for K=1..5 and B=1..4. These measurements
+cover the complete state transition but not a model round.
 
 ## Reproduction
 
-Build `ninfer-serve` and prepare the registered `.ninfer` artifacts. The refreshed per-target
-serving tables use:
+Build the current graph:
 
-```bash
-python3 tools/bench/run_serve_concurrency.py \
-  --serve build/apps/ninfer-serve \
-  --artifact qwen3_6_35b_a3b=out/qwen3_6_35b_a3b.ninfer \
-  --mode mtp3 --suite corpus-makespan --concurrency 1 \
-  --max-context 262144 --kv-capacity auto \
-  --output profiles/bench/concurrent_corpus_35b_mtp3_20260811
-
-python3 tools/bench/run_serve_corpus.py \
-  --serve build/apps/ninfer-serve \
-  --artifact qwen3_6_27b=out/qwen3_6_27b.ninfer \
-  --mode mtp3 \
-  --output profiles/bench/serve_corpus_27b_mtp3_20260724
-
-python3 tools/bench/run_serve_corpus.py \
-  --serve build/apps/ninfer-serve \
-  --artifact qwen3_6_27b=out/qwen3_6_27b_nvfp4.ninfer \
-  --mode mtp0 --sampling stochastic \
-  --output profiles/bench/serve_corpus_27b_nvfp4_w8_20260731
-
-python3 tools/bench/run_serve_concurrency.py \
-  --serve build/apps/ninfer-serve \
-  --artifact qwen3_6_27b=out/qwen3_6_27b_nvfp4.ninfer \
-  --mode mtp3 --suite corpus-makespan --concurrency 1 \
-  --max-context 131072 --kv-capacity auto \
-  --output profiles/bench/concurrent_corpus_27b_nvfp4_mtp3_20260811
+```sh
+cmake -S . -B build-r9700 -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DNINFER_BUILD_APPS=ON \
+  -DNINFER_BUILD_BENCHMARKS=ON
+cmake --build build-r9700 --parallel
 ```
 
-The concurrent decode-saturation campaigns use:
+Focused physical targets include:
 
-```bash
-python3 tools/bench/run_serve_concurrency.py \
-  --serve build/apps/ninfer-serve \
-  --artifact qwen3_6_27b=out/qwen3_6_27b.ninfer \
-  --mode mtp3 --suite decode-saturation \
-  --concurrency 1 --concurrency 2 --concurrency 4 --concurrency 8 \
-  --decode-tokens 8192 --max-context 16384 --kv-capacity auto \
-  --output profiles/bench/concurrent_decode_27b_mtp3_20260811
-
-python3 tools/bench/run_serve_concurrency.py \
-  --serve build/apps/ninfer-serve \
-  --artifact qwen3_6_27b=out/qwen3_6_27b_nvfp4.ninfer \
-  --mode mtp3 --suite decode-saturation \
-  --concurrency 1 --concurrency 2 --concurrency 4 --concurrency 8 \
-  --decode-tokens 8192 --max-context 16384 --kv-capacity auto \
-  --output profiles/bench/concurrent_decode_27b_nvfp4_mtp3_20260811
-
-python3 tools/bench/run_serve_concurrency.py \
-  --serve build/apps/ninfer-serve \
-  --artifact qwen3_6_35b_a3b=out/qwen3_6_35b_a3b.ninfer \
-  --mode mtp3 --suite decode-saturation \
-  --concurrency 1 --concurrency 2 --concurrency 4 --concurrency 8 \
-  --decode-tokens 8192 --max-context 16384 --kv-capacity auto \
-  --output profiles/bench/concurrent_decode_35b_mtp3_20260811
+```text
+ninfer_r9700_full_attention_qual
+ninfer_r9700_swa_qual
+ninfer_r9700_grouped_dynamic_conv_qual
+ninfer_r9700_vision_attention_qual
+ninfer_r9700_vision_pos_embed_qual
+ninfer_r9700_speculative_round_qual
+ninfer_r9700_runtime_planner_qual
 ```
 
-Use `--mode dflash7` for the corresponding DFlash block=8 campaign; add `--sampling greedy` for
-the exact-argmax profile. Qwen3.8-27B NVFP4 DFlash2 uses the same flag on a reconverted artifact.
-INT8-KV C=1 (the table below) and NVFP4-KV C=1/2/3 (the fused-GDN campaign after it):
-
-```bash
-python3 tools/bench/run_serve_concurrency.py \
-  --serve build/apps/ninfer-serve \
-  --artifact qwen3_8_27b=out/qwen3_8_27b_nvfp4_dflash_w8.ninfer \
-  --mode dflash7 --mode mtp3 --mode mtp5 --mode mtp0 \
-  --sampling stochastic \
-  --temperature 0.6 --top-p 0.95 --top-k 20 --min-p 0 --presence-penalty 0 \
-  --concurrency 1 --suite decode-saturation \
-  --saturation-fixture long_decode_aime26_15 \
-  --decode-tokens 4096 --max-context 16384 --kv-capacity 16384 \
-  --output profiles/bench/qwen38_dflash2_c1_aime
-
-python3 tools/bench/run_serve_concurrency.py \
-  --serve build/apps/ninfer-serve \
-  --artifact qwen3_8_27b=out/qwen3_8_27b_nvfp4_dflash_nvfp4.ninfer \
-  --mode dflash4 --mode dflash7 \
-  --sampling stochastic \
-  --temperature 0.6 --top-p 0.95 --top-k 20 --min-p 0 --presence-penalty 0 \
-  --concurrency 1 --concurrency 2 --concurrency 3 \
-  --suite decode-saturation \
-  --saturation-fixture long_decode_aime26_15 \
-  --decode-tokens 4096 --max-context 16384 --kv-capacity auto \
-  --kv-dtype nvfp4 --prefill-chunk 4096 \
-  --output profiles/bench/qwen38_dflash2_fused_batch_aime_20260829
-```
-
-## Qwen3.8-27B NVFP4 C=1 decode
-
-Same GPU, INT8 KV, graphs on, `--lm-head-draft`, seed `7632647173703958409`. The DFlash2 W8
-companion is appended on `out/qwen3_8_27b_nvfp4_dflash_w8.ninfer`; MTP points load that same file
-with DFlash host-placed. `long_decode_aime26_15` uses 4096 output tokens and max-context 16384.
-Story is `scenario_story_en_mystery` at 1024 output tokens.
-
-| Mode | Workload | Decode tok/s | Accept | Tokens/round |
-|---|---|---:|---:|---:|
-| MTP0 | AIME, stochastic | 86.0 | — | — |
-| MTP3 | AIME, stochastic | 184.7 | 51.9% | 2.56 |
-| MTP5 | AIME, stochastic | 195.9 | 41.1% | 3.06 |
-| DFlash2 k=7 W8 | AIME, stochastic | 126.7 | 27.5% | 2.92 |
-| MTP3 | AIME, greedy | 184.9 | 52.0% | 2.56 |
-| DFlash2 k=7 W8 | AIME, greedy | 132.0 | 29.1% | 3.04 |
-| MTP3 | story, stochastic | 163.5 | 41.9% | 2.26 |
-| DFlash2 k=7 W8 | story, stochastic | 115.7 | 21.6% | 2.51 |
-
-DFlash2 is a supported exclusive backend on this identity (`--spec dflash --draft-tokens 7
---lm-head-draft`; verify is the paper-accurate chain W=8). These first C=1 INT8-KV points beat
-MTP0 (1.47× on stochastic AIME) and trail MTP3 (0.69×) and MTP5 (0.65×). Greedy AIME and story
-show the same gap: DFlash2 accept is about 22–29% versus MTP3 about 42–52%. That accept gap is
-the current speed target; it is not a reason to drop the backend.
-
-Isolated CLI NVFP4-KV AIME (`long_decode_aime26_15`, 4096 tokens, seed `7632647173703958409`,
-presence penalty 0, `--lm-head-draft`) after fused batched GDN conv-record (2026-08-29):
-
-| Mode | Decode tok/s | Accept | Tokens/round | Rounds |
-|---|---:|---:|---:|---:|
-| chain k=4 W=5 | 162.18 | 46.57% | 2.86 | 1431 |
-| chain k=7 W=8 | 142.52 | 31.61% | 3.21 | 1275 |
-
-k=4 remains the RTX 5090 speed recommendation: cheaper W=5 verify, not more tokens per round.
-An earlier same-day W4A4 packed-verify CLI snapshot was faster at C=1 (k=4 **194.48** /
-k=7 **166.82**) with higher k=4 accept (50.26%). That snapshot is retained in
-[dflash2-tree-speed.md](maintainer/dflash2-tree-speed.md); it predates the C>1 fused GDN path.
-
-Serve C=1/2/3 on the same AIME fixture, NVFP4 KV, graphs, `--lm-head-draft`, presence penalty 0.
-Headline tok/s is aggregate `decode_tokens / wave_makespan` (GPU throughput). Per-request
-`(completion-1)/decode_seconds` is the isolation metric. All 12 serve requests hit the 4096 output
-limit. Logs: `profiles/bench/qwen38_dflash2_fused_batch_aime_20260829/`.
-
-| Mode | C | Aggregate tok/s | Per-request tok/s | Accept | Tokens/round | Makespan (s) | vs C=1 |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| chain k=4 W=5 | 1 | 162.1 | 162.6 | 46.6% | 2.86 | 25.26 | 1.00× |
-| chain k=4 W=5 | 2 | 262.0 | 133.0 | 45.5% | 2.82 | 31.26 | 1.62× |
-| chain k=4 W=5 | 3 | 324.4 | 112.1 | 47.3% | 2.89 | 37.87 | 2.00× |
-| chain k=7 W=8 | 1 | 143.0 | 143.4 | 31.6% | 3.21 | 28.63 | 1.00× |
-| chain k=7 W=8 | 2 | 230.8 | 121.3 | 29.7% | 3.08 | 35.49 | 1.61× |
-| chain k=7 W=8 | 3 | 302.0 | 103.1 | 29.6% | 3.07 | 40.68 | 2.11× |
-
-C=3 k=4 is **324 aggregate tok/s** on this 27B NVFP4 DFlash2 path. Per-request rate falls as
-the GPU is shared; isolation still matches C=1 DFlash. k=4 wins both C=1 and C=3 aggregate
-on this fixture.
-
-Omit `--mode` and supply the two measured Qwen3.6 groupwise-int artifacts to run the complete
-published Qwen3.6 MTP0/MTP3 campaign:
-
-```bash
-python3 tools/bench/run_serve_corpus.py \
-  --serve build/apps/ninfer-serve \
-  --artifact qwen3_6_35b_a3b=out/qwen3_6_35b_a3b.ninfer \
-  --artifact qwen3_6_27b=out/qwen3_6_27b.ninfer \
-  --output profiles/bench/serve_corpus_20260720
-```
-
-For the 27B NVFP4 accuracy run, start the model service with:
-
-```bash
-build/apps/ninfer-serve out/qwen3_6_27b_nvfp4.ninfer \
-  --host 127.0.0.1 --port 18080 \
-  --max-context 262144 --prefill-chunk 1024 --kv-dtype int8 \
-  --spec mtp --draft-tokens 3 --lm-head-draft
-```
-
-Then run the repository's full 27B reasoning suite in a separate shell:
-
-```bash
-PYTHONPATH=eval eval/.venv/bin/python -m ninfer_eval run \
-  --config eval/configs/qwen3_6_27b_reasoning.yaml \
-  --suite reasoning_full
-```
-
-## `qwen3_8_27b`
-
-### EvalScope reasoning accuracy
-
-The measured file is
-[`Ostfralla/Qwen3.8-27B-NVFP4-NInfer`](https://huggingface.co/Ostfralla/Qwen3.8-27B-NVFP4-NInfer)
-(`qwen3_8_27b_nvfp4.ninfer`, SHA-256
-`eaf8ad124256d0a0c1ebbbca442ca58eee4f97ab34a60a0b4d57e2b41e2c56d2`). That `nvfp4` weights identity
-was evaluated twice through NInfer's OpenAI-compatible serving route with thinking enabled, MTP=3,
-and a 262,144-token context limit. The two runs differ only in `--kv-dtype`. EvalScope 1.9.0 used
-0-shot prompts, rule-based scoring, and one sample per problem with temperature 0.6, top-p 0.95,
-top-k 20, presence penalty 1.0, and seed 42. All 258 samples completed and were scored for each KV
-codec.
-
-| KV | AIME 2025 | AIME 2026 | GPQA-Diamond |
-|---|---:|---:|---:|
-| `int8` | 100.00% (30 / 30) | 96.67% (29 / 30) | 89.90% (178 / 198) |
-| `nvfp4` | 93.33% (28 / 30) | 100.00% (30 / 30) | 92.42% (183 / 198) |
-
-These are single-sample results under the stated evaluation profile, not pass@k scores. Each
-benchmark remains independently reportable; no combined score is computed. Qwen3.8-27B
-`groupwise-int` was not part of this campaign.
-
-Download the measured artifact, start the model service with the matching `--kv-dtype`, and then
-run the 3.8 reasoning suite:
-
-```bash
-hf download Ostfralla/Qwen3.8-27B-NVFP4-NInfer \
-  qwen3_8_27b_nvfp4.ninfer \
-  --local-dir models
-```
-
-```bash
-build/apps/ninfer-serve models/qwen3_8_27b_nvfp4.ninfer \
-  --host 127.0.0.1 --port 18080 \
-  --max-context 262144 --prefill-chunk 1024 --kv-dtype int8 \
-  --spec mtp --draft-tokens 3 --lm-head-draft
-```
-
-```bash
-build/apps/ninfer-serve models/qwen3_8_27b_nvfp4.ninfer \
-  --host 127.0.0.1 --port 18080 \
-  --max-context 262144 --prefill-chunk 1024 --kv-dtype nvfp4 \
-  --spec mtp --draft-tokens 3 --lm-head-draft
-```
-
-```bash
-PYTHONPATH=eval eval/.venv/bin/python -m ninfer_eval run \
-  --config eval/configs/qwen3_8_27b_reasoning.yaml \
-  --suite reasoning_full
-```
-
-## `qwen3_6_35b_a3b`
-
-### MTP0 context-length profile
-
-| Prompt tokens | Samples | Prefill tok/s | Server TTFT (ms) | Decode tok/s |
-|---:|---:|---:|---:|---:|
-| 7,680 | 5 | 15,544.3 ± 242.4 | 500.2 ± 7.8 | 271.1 ± 3.6 |
-| 64,512 | 5 | 10,809.0 ± 95.3 | 6,009.9 ± 52.6 | 242.9 ± 1.3 |
-| 130,048 | 5 | 7,828.4 ± 34.1 | 16,693.3 ± 71.2 | 219.4 ± 1.6 |
-| 260,096 | 5 | 5,157.1 ± 52.4 | 50,598.8 ± 519.7 | 188.2 ± 2.1 |
-
-### MTP3 long-reasoning decode
-
-| Fixture | Samples | Completion tokens | Decode tok/s | MTP acceptance | MTP tokens/round |
-|---|---:|---:|---:|---:|---:|
-| `long_decode_aime26_01` | 5 | 8,223.0 ± 2,224.1 | 726.2 ± 22.9 | 82.8% ± 3.4% | 3.48 ± 0.10 |
-| `long_decode_aime26_15` | 5 | 65,536.0 ± 0.0 | 620.3 ± 8.1 | 72.7% ± 1.4% | 3.18 ± 0.04 |
-| `long_decode_aime26_30` | 5 | 52,977.8 ± 11,849.6 | 671.9 ± 8.8 | 80.1% ± 2.7% | 3.40 ± 0.08 |
-
-### MTP3 cross-scenario decode
-
-Each category contains three fixtures and five seeds per fixture, for 15 samples.
-
-| Category | Samples | Decode tok/s | MTP acceptance | MTP tokens/round |
-|---|---:|---:|---:|---:|
-| Code | 15 | 657.6 ± 34.3 | 70.3% ± 5.5% | 3.11 ± 0.16 |
-| Story | 15 | 456.2 ± 36.6 | 38.0% ± 6.0% | 2.14 ± 0.18 |
-| Translation | 15 | 649.7 ± 33.0 | 67.6% ± 5.1% | 3.03 ± 0.15 |
-| Structured | 15 | 770.9 ± 29.3 | 89.1% ± 4.9% | 3.67 ± 0.15 |
-
-### DFlash block=8 (`k=7`), stochastic sampling
-
-The fixtures, five seeds, sampling parameters, and output limits are identical to MTP3. Different
-speculative backends consume random values differently, so this is a fixed-workload comparison
-rather than a token-identical paired-output comparison.
-
-#### Long-reasoning decode
-
-| Fixture | Samples | Completion tokens | Decode tok/s | DFlash acceptance | DFlash tokens/round |
-|---|---:|---:|---:|---:|---:|
-| `long_decode_aime26_01` | 5 | 8,495.4 ± 2,221.2 | 764.1 ± 55.6 | 65.2% ± 5.4% | 5.56 ± 0.38 |
-| `long_decode_aime26_15` | 5 | 65,536.0 ± 0.0 | 584.0 ± 33.3 | 51.1% ± 3.7% | 4.58 ± 0.26 |
-| `long_decode_aime26_30` | 5 | 53,330.4 ± 11,198.5 | 638.3 ± 15.8 | 56.4% ± 2.5% | 4.95 ± 0.17 |
-
-#### Cross-scenario decode
-
-| Category | Samples | Decode tok/s | DFlash acceptance | DFlash tokens/round |
-|---|---:|---:|---:|---:|
-| Code | 15 | 562.3 ± 36.2 | 43.0% ± 3.7% | 4.01 ± 0.26 |
-| Story | 15 | 261.7 ± 51.1 | 12.1% ± 5.3% | 1.85 ± 0.37 |
-| Translation | 15 | 490.8 ± 62.6 | 34.8% ± 6.3% | 3.44 ± 0.44 |
-| Structured | 15 | 786.4 ± 124.7 | 66.5% ± 13.5% | 5.66 ± 0.94 |
-
-#### Decode throughput versus MTP3
-
-| Workload | MTP3 tok/s | DFlash tok/s | DFlash change |
-|---|---:|---:|---:|
-| `long_decode_aime26_01` | 726.2 | 764.1 | +5.2% |
-| `long_decode_aime26_15` | 620.3 | 584.0 | -5.9% |
-| `long_decode_aime26_30` | 671.9 | 638.3 | -5.0% |
-| Code | 657.6 | 562.3 | -14.5% |
-| Story | 456.2 | 261.7 | -42.6% |
-| Translation | 649.7 | 490.8 | -24.5% |
-| Structured | 770.9 | 786.4 | +2.0% |
-
-### DFlash block=8 (`k=7`), greedy sampling
-
-Greedy uses exact argmax; all other corpus and server settings remain unchanged. The five seeds
-repeat the same deterministic generation path, so within-fixture standard deviation measures
-runtime variation rather than output variation.
-
-#### Long-reasoning decode
-
-| Fixture | Samples | Completion tokens | Decode tok/s | DFlash acceptance | DFlash tokens/round |
-|---|---:|---:|---:|---:|---:|
-| `long_decode_aime26_01` | 5 | 6,692.0 ± 0.0 | 872.4 ± 3.3 | 74.4% ± 0.0% | 6.21 ± 0.00 |
-| `long_decode_aime26_15` | 5 | 65,536.0 ± 0.0 | 651.6 ± 0.6 | 58.6% ± 0.0% | 5.10 ± 0.00 |
-| `long_decode_aime26_30` | 5 | 65,536.0 ± 0.0 | 994.9 ± 3.4 † | 98.0% ± 0.0% | 7.86 ± 0.00 |
-
-† The generation is a deterministic repetition loop, not a valid AIME response. The raw rate is
-retained to describe what was measured, but is excluded from performance comparisons.
-
-#### Cross-scenario decode
-
-| Category | Samples | Decode tok/s | DFlash acceptance | DFlash tokens/round |
-|---|---:|---:|---:|---:|
-| Code | 15 | 599.8 ± 12.3 | 46.4% ± 1.4% | 4.25 ± 0.10 |
-| Story | 15 | 291.5 ± 55.6 | 14.9% ± 5.7% | 2.04 ± 0.40 |
-| Translation | 15 | 475.5 ± 50.6 | 33.0% ± 5.1% | 3.31 ± 0.36 |
-| Structured | 15 | 869.0 ± 120.2 | 74.5% ± 13.1% | 6.21 ± 0.92 |
-
-#### Decode throughput versus stochastic DFlash
-
-| Workload | Stochastic tok/s | Greedy tok/s | Greedy change |
-|---|---:|---:|---:|
-| `long_decode_aime26_01` | 764.1 | 872.4 | +14.2% |
-| `long_decode_aime26_15` | 584.0 | 651.6 | +11.6% |
-| `long_decode_aime26_30` | 638.3 | 994.9 † | not comparable † |
-| Code | 562.3 | 599.8 | +6.7% |
-| Story | 261.7 | 291.5 | +11.4% |
-| Translation | 490.8 | 475.5 | -3.1% |
-| Structured | 786.4 | 869.0 | +10.5% |
-
-### Speculative-decode output audit
-
-The audit covers all 225 stored July responses from the 35B-A3B MTP3 stochastic-sampler, DFlash
-stochastic-sampler, and DFlash greedy campaigns. It checks termination, exact repetition, and
-fixture-specific mechanical constraints. AIME 1 was checked algebraically; the AIME 30 answer
-(`393`) was checked by independent enumeration. This audit does not attempt to assign a subjective
-quality score to prose or translations.
-
-#### Long-reasoning answers
-
-| Fixture | MTP3 stochastic sampler | DFlash stochastic sampler | DFlash greedy |
-|---|---|---|---|
-| `long_decode_aime26_01` | 5/5 correct, natural stop | 5/5 correct, natural stop | 5/5 correct, natural stop |
-| `long_decode_aime26_15` | 0/5 answers; all reach 65,536-token limit | 0/5 answers; all reach 65,536-token limit | 0/5 answers; all reach 65,536-token limit |
-| `long_decode_aime26_30` | 3/5 correct, 1 wrong, 1 no answer | 2/5 correct, 1 wrong, 2 no answer | 0/5 answers; all enter the same repetition loop |
-
-The greedy AIME 30 response has an empty final-content field and fills its 65,536-token reasoning
-budget. The exact line `Wait, $x_7 x_1 x_3$ is $x_7 x_1 x_3$.` occurs 2,406 times among 2,538
-non-empty reasoning lines. Its 98.0% acceptance and 994.9 tok/s therefore characterize a highly
-predictable pathological loop, not normal reasoning performance.
-
-AIME 15 is also not a valid completion in any of the three campaigns: every sample exhausts the
-budget without a boxed answer. Its output is long, non-convergent reasoning rather than the short
-exact cycle seen in greedy AIME 30. The AIME 15 rates may be read only as sustained long-decode
-throughput.
-
-#### Cross-scenario outputs
-
-| Category | MTP3 stochastic sampler | DFlash stochastic sampler | DFlash greedy |
-|---|---|---|---|
-| Code | 1/15 natural stops; 0/15 prompt-complete | 2/15 natural stops; 0/15 prompt-complete | 0/15 natural stops |
-| Story | 9/15 natural stops; the nine Chinese outputs pass requested division and minimum length | 8/15 natural stops; the eight Chinese outputs pass requested division and minimum length | 10/15 natural stops; five Chinese dialogue outputs are under length |
-| Translation | 15/15 natural stops; 15/15 pass structural checks | 15/15 natural stops; 15/15 pass structural checks | 15/15 natural stops; 15/15 pass structural checks |
-| Structured | 0/15 satisfy the requested complete record/script contract | 0/15 satisfy the requested complete record/script contract | 0/15 satisfy the requested complete record/script contract |
-
-The code prompts require complete runnable multi-file deliverables, but almost all outputs end at the
-4,096-token limit. The three natural-stop exceptions also contain decisive contract failures: the
-MTP3 CUDA response substitutes CUDA 12.8 and an older architecture list; the DFlash CUDA response
-copies FP32 input into a half-sized 16-bit allocation and passes raw `unsigned short` values to BF16
-intrinsics; and the DFlash Python response never writes its advertised JSONL event stream to the
-configured log file. Code throughput is therefore a truncated-generation stress result, not
-successful code-generation throughput.
-
-All English mystery samples reach the output limit with an unfinished ending. The naturally stopped
-Chinese stories have the requested chapter/act counts; the MTP3 and stochastic-DFlash samples also
-meet their requested Chinese-character minima. Greedy's five dialogue stories contain 3,239 Chinese
-characters each, below the requested 3,500. Story results are consequently a mixed normal/truncated
-workload.
-
-All translation outputs stop naturally. Each plain-document result preserves six sections and
-provides at least twenty glossary entries; each Markdown result preserves heading levels, the
-six-line table, all required inline identifiers, and the exact fenced JSON object. Translation is
-the cleanest cross-scenario normal-completion comparison in this corpus.
-
-The structured prompts intentionally exceed what these generations fit into 4,096 tokens. MTP3,
-stochastic DFlash, and greedy DFlash produce only 49–60, 49–58, and 57 valid JSONL records,
-respectively, versus the requested 160. Their complete-width CSV ranges are 122–139, 121–143, and
-133 rows versus the requested 220. No SQL output satisfies all four tables, two views, at least 80
-rows, and six final analytical queries. These high-acceptance results describe predictable partial
-record generation only.
-
-The exact-line and repeated-token scan found no other response with a short-cycle collapse comparable
-to greedy AIME 30. Output-limit and prompt-compliance failures above remain material even when no
-repetition loop is present.
-
-## `qwen3_6_27b`
-
-### EvalScope reasoning accuracy
-
-Both weight profiles were evaluated through NInfer's OpenAI-compatible serving route with thinking
-enabled, MTP=3, and a 262,144-token context limit. EvalScope 1.9.0 used 0-shot prompts, rule-based
-scoring, and one sample per problem with temperature 0.6, top-p 0.95, top-k 20, presence penalty
-1.0, and seed 42. All 258 samples completed and were scored for each profile.
-
-| Weights ID | AIME 2025 | AIME 2026 | GPQA-Diamond |
-|---|---:|---:|---:|
-| `groupwise-int` | 86.67% (26 / 30) | 93.33% (28 / 30) | 86.87% (172 / 198) |
-| `nvfp4` | 93.33% (28 / 30) | 93.33% (28 / 30) | 84.34% (167 / 198) |
-
-These are single-sample results under the stated evaluation profile, not pass@k scores. Each
-benchmark remains independently reportable; no combined score is computed.
-
-### `groupwise-int`
-
-#### MTP0 context-length profile
-
-| Prompt tokens | Samples | Prefill tok/s | Server TTFT (ms) | Decode tok/s |
-|---:|---:|---:|---:|---:|
-| 7,680 | 5 | 3,218.1 ± 4.3 | 2,392.4 ± 3.0 | 77.6 ± 0.1 |
-| 64,512 | 5 | 2,655.9 ± 2.9 | 24,335.7 ± 25.2 | 70.7 ± 0.1 |
-| 130,048 | 5 | 2,185.3 ± 0.3 | 59,590.3 ± 8.9 | 64.5 ± 0.1 |
-| 260,096 | 5 | 1,614.8 ± 0.6 | 161,221.8 ± 62.5 | 54.8 ± 0.1 |
-
-#### MTP3 long-reasoning decode
-
-| Fixture | Samples | Completion tokens | Decode tok/s | MTP acceptance | MTP tokens/round |
-|---|---:|---:|---:|---:|---:|
-| `long_decode_aime26_01` | 5 | 10,686.2 ± 553.8 | 175.4 ± 1.0 | 77.9% ± 0.9% | 3.34 ± 0.03 |
-| `long_decode_aime26_15` | 5 | 61,604.2 ± 5,677.9 | 161.9 ± 2.8 | 73.4% ± 1.7% | 3.20 ± 0.05 |
-| `long_decode_aime26_30` | 5 | 47,339.8 ± 9,162.2 | 172.2 ± 0.9 | 78.8% ± 0.8% | 3.36 ± 0.02 |
-
-#### MTP3 cross-scenario decode
-
-Each category contains three fixtures and five seeds per fixture, for 15 samples.
-
-| Category | Samples | Decode tok/s | MTP acceptance | MTP tokens/round |
-|---|---:|---:|---:|---:|
-| Code | 15 | 167.0 ± 5.4 | 72.3% ± 3.5% | 3.17 ± 0.11 |
-| Story | 15 | 112.6 ± 9.4 | 37.8% ± 5.9% | 2.13 ± 0.18 |
-| Translation | 15 | 161.5 ± 11.3 | 68.3% ± 7.2% | 3.05 ± 0.22 |
-| Structured | 15 | 193.0 ± 18.8 | 88.7% ± 11.7% | 3.66 ± 0.35 |
-
-### `nvfp4`
-
-The fixtures, seeds, sampling parameters, output limits, and runtime options are identical to the
-groupwise-int serving campaign. Quantization can change sampled tokens, so the MTP3 results are a
-fixed-workload comparison rather than a token-identical output comparison.
-
-#### MTP0 context-length profile
-
-| Prompt tokens | Samples | Prefill tok/s | Server TTFT (ms) | Decode tok/s |
-|---:|---:|---:|---:|---:|
-| 7,680 | 5 | 11,191.5 ± 70.2 | 692.5 ± 4.3 | 86.4 ± 0.5 |
-| 64,512 | 5 | 6,298.5 ± 97.6 | 10,288.6 ± 159.3 | 78.0 ± 1.2 |
-| 130,048 | 5 | 4,204.7 ± 14.1 | 31,012.5 ± 104.6 | 71.2 ± 0.2 |
-| 260,096 | 5 | 2,510.6 ± 16.8 | 103,761.1 ± 698.8 | 59.9 ± 0.3 |
-
-#### MTP3 long-reasoning decode
-
-| Fixture | Samples | Completion tokens | Decode tok/s | MTP acceptance | MTP tokens/round |
-|---|---:|---:|---:|---:|---:|
-| `long_decode_aime26_01` | 5 | 12,053.4 ± 820.9 | 231.0 ± 3.0 | 80.2% ± 1.2% | 3.41 ± 0.04 |
-| `long_decode_aime26_15` | 5 | 63,109.0 ± 5,426.9 | 213.1 ± 4.2 | 76.3% ± 2.0% | 3.29 ± 0.06 |
-| `long_decode_aime26_30` | 5 | 57,166.4 ± 9,204.9 | 223.3 ± 1.8 | 81.1% ± 1.5% | 3.43 ± 0.04 |
-
-#### MTP3 cross-scenario decode
-
-Each category contains three fixtures and five seeds per fixture, for 15 samples.
-
-| Category | Samples | Decode tok/s | MTP acceptance | MTP tokens/round |
-|---|---:|---:|---:|---:|
-| Code | 15 | 220.3 ± 8.2 | 74.2% ± 4.0% | 3.23 ± 0.12 |
-| Story | 15 | 148.8 ± 11.6 | 39.2% ± 5.7% | 2.18 ± 0.17 |
-| Translation | 15 | 213.6 ± 12.2 | 70.5% ± 6.0% | 3.12 ± 0.18 |
-| Structured | 15 | 252.2 ± 16.3 | 89.8% ± 8.0% | 3.69 ± 0.24 |
-
-The baseline and speculative-decode suites intentionally measure different supported workloads.
-No per-scenario baseline/speculative speedup is reported.
+The standalone Linear sweep/ISA recipe is `make -C tools/r9700 build/linear_op_qual linear-isa
+linear-resources`. The Q4 A4/A8 oracle, timing, ISA, and durable report recipe is
+`make -C tools/r9700 q4g64-linear q4g64-linear-isa q4g64-linear-resources`.
+
+The fixed K6144 gated-RMSNorm prefill route assigns one token to each of eight wave32 waves while
+retaining the incumbent feature-ordered FP32 reduction and BF16 result. Its immutable
+pre-promotion report `profiles/bench/r9700-gated-rmsnorm-k6144-token8-ab-20260904-r3.json`
+(SHA-256 `31c50ee9f42edd61dae21266b64b099af0e5b3a94051eecb4f55fa783f5ed77f`)
+passed bit-exact incumbent and independent FP64 checks. Median P2048 time fell from 1.150442 to
+0.155001 ms (7.4222x); every measured T>=128 point was non-regressing, and T64 won by 1.7874x.
+Production therefore selects token8 for K6144/T>=64 and retains the incumbent elsewhere. LLVM
+reports 22 VGPR, occupancy 16, four 128-bit input loads, and zero LDS/private/scratch.
+
+The fixed K128 ordinary-GDN gated-RMSNorm route assigns one flattened value-head row to each
+wave32 wave and eight rows to each CTA only at `48*T` rows for T=1024/2048/4096/8192. Its
+immutable pre-promotion report `profiles/bench/r9700-gated-rmsnorm-k128-rows8-ab-20260904.json`
+(SHA-256 `bdada371d626a6f4398ac350f5aaebdf3318d1743fb507e32f626b3c062e2e5c`) passed incumbent
+BF16-bit parity, an independent FP64 complete-formula oracle, poison rewrite, input/output alias,
+and malformed-input checks and won every admitted extent. At P2048 it fell from 1.16636395 to
+0.143720999 ms, a 0.123221397 candidate/incumbent ratio. LLVM reports 24 VGPR, occupancy 16,
+128-bit reduction loads, and zero LDS/private/scratch. Other K128 row counts and feature widths
+retain the general route.
+
+On the same four-role hybrid artifact and P2048/C1/chunk4096/no-spec workload, the production
+promotion improved the matched whole mean from 1.251199252 s / 1,636.830337 tok/s to
+1.202762421 s / 1,702.749429 tok/s, a 1.040272x throughput gain. The post-promotion report is
+`profiles/bench/r9700-gated-rmsnorm-k128-rows8-production-p2048-c1-20260904.json`, SHA-256
+`d1f67fb21427c5378e87afec4f4a273a34425223dd4c941d58e01fa3bc45a5aa`. This admits the eager
+kernel, but it does not promote the evaluation-only hybrid artifact or satisfy the 2,000 tok/s
+product floor.
+
+The subsequent ordinary-GDN LDS-scope candidate narrowed synchronization only for CTA-private
+LDS and passed direct exact-parity and independent-oracle checks. Although its direct P2048 Op
+median improved from 3.113205 to 2.761526 ms, the matched whole run improved the accepted K128
+baseline from 1.202762421 s / 1,702.749429 tok/s to 1.193522512 s / 1,715.930810 tok/s. The
+9.239909 ms saving missed the predeclared 10 ms whole gate by 0.760091 ms, so the route is rejected
+and production retains the incumbent ordinary recurrence. The immutable terminal report is
+`profiles/bench/r9700-gdn-ordinary-lds-production-p2048-c1-20260904.json`, SHA-256
+`0af07a8340f310b7f89a800bc90864377fb76ac5e45c2e22f8dd74d580a6a69f`.
+
+The production Text-MLP boundary fuses SiLU-multiply with signed-A8G64 preparation only when the
+gate/up weight is row-scaled E4M3, the down weight is Q4G64, T=2,048, and the caller is one of the
+64 main Text layers. It consumes the concatenated BF16 gate/up result, computes the FP32
+SiLU-multiply, explicitly rounds that internal result to BF16, preserves the existing A8
+scale/code/status semantics, and invokes the unchanged M64N128 Q4 down matrix. This removes one
+142,606,336-byte BF16 write/read handoff and one launch per layer (9,126,805,504 logical bytes and
+64 launches for P2048), without changing the graph-stable 608,387,072-byte workspace. Every other
+weight profile, token width, and layer retains the ordinary SiLU plus linear path.
+
+The immutable direct report
+`profiles/bench/r9700-fused-silu-a8q4-down-p2048-ab-20260904.json` (SHA-256
+`4d4143bc096d759c71c7d12cca2e3d68aa2a5c2bf0a4c74d2e972dfbc195f2b3`) passed full workspace/output
+bit parity, independent represented-input formula/codec probes, poison, tail/alias, and resource
+gates. Its stage median fell from 0.659238994 to 0.342199489 ms (ratio 0.519082598), and the complete
+MLP median fell from 3.926753998 to 3.644394517 ms (ratio 0.928093412). The matched hybrid whole
+report `profiles/bench/r9700-fused-silu-a8q4-down-production-p2048-c1-20260904.json` (SHA-256
+`5daa98aafa34efcc5a55ee2eeca464ae94575c95ed60e6303cd9216ae253ab76`) improved the accepted K128
+baseline from 1.202762421 s / 1,702.749429 tok/s to 1.178537057 s / 1,737.747715 tok/s: a
+24.225364 ms saving, 0.97985855 elapsed ratio, and 1.02055953 throughput speedup. This clears the
+predeclared 10 ms whole gate and admits the exact fused boundary; it does not promote the
+evaluation-only hybrid artifact or satisfy the 2,000 tok/s product floor.
+The production static report `profiles/bench/r9700-fused-silu-a8q4-down-static-20260904.json`
+(SHA-256 `aea9061d6bb27fb9e0fec9508b242816cf5cf69118fe1f36b5616a3fcdbf5336`) binds the exact emitted
+symbol and confirms 12 VGPR, zero LDS/private/scratch, the required load/store and native-exp
+inventory, and no intermediate BF16 global traffic.
+
+The exact ordinary Text P2048/C1 GDN scale-sidecar candidate passed its direct gate but failed its
+fixed whole-prefill gate. It combined the two represented-BF16 Q/K extracts with one
+incumbent-order FP32 inverse-norm sidecar per token and Q/K head, then retained the production
+192-CTA/four-row-tile FP32-state recurrence. The provenance-complete direct report measured
+2.252036095 ms versus 3.259594917 ms per call, or 108.0977325 ms over 48 calls, while remaining
+bit-exact with the incumbent and passing the complete FP64 state/output oracle. Preparation was
+0.03379999846 versus 0.07719899714 ms and recurrence was 2.164277077 versus 2.893904924 ms. That
+report is
+`profiles/bench/r9700-gdn-scale-sidecar-p2048-ab-v2-20260904.json`, SHA-256
+`20288276c005bf469f99d6a7dccddc497c5d49c6a2301b65dac746f71fc38304`. The clean isolated whole
+run measured 1.153886920 s / 1774.872034 tok/s, saving 24.650137 ms from the accepted 1.178537057 s
+baseline but missing the fixed 1.148537057 s / 30 ms gate by 5.349863 ms, with workspace unchanged
+at 608,387,072 bytes. Its report is
+`profiles/bench/r9700-gdn-scale-sidecar-production-p2048-c1-v2-20260904.json`, SHA-256
+`110dbb4090dfa4a92ac993bd70ac4c21666b7a259abd17f63a4dbb913d9f6e95`. The candidate and its
+qualification surfaces were removed; production retains the general recurrence with no adjacent
+variant.
+
+The exact P2048 MLP gate/up hipBLASLt algorithm check is terminal. All eight algorithms returned
+under the production zero-workspace preference passed the represented FP64 and eager/captured
+correctness gates. The best non-default result, rank 1 fingerprint
+`dde00100000000000000000000000000`, was effectively tied with production rank 0: matrix medians
+were 4.064851046 versus 4.061550617 ms (ratio 1.000812603), and complete medians were 4.186669827
+versus 4.189990520 ms (ratio 0.999207470). Its projected 64-call saving was only 0.212524414 ms,
+far below the required 10 ms, while ranks 2 through 7 were slower. Production therefore retains
+rank 0 fingerprint `e0e00100000000000000000000000000`; no alternate fingerprint, workspace,
+capacity change, or whole run is admitted. The immutable terminal report is
+`profiles/bench/r9700-fp8-gate-up-algorithm-p2048-ab-20260904.json`, SHA-256
+`5dd95d8f01d911e34e437175e028ed973ce025361ba61e9a269239f97c32de31`.
+
+The ordinary-GDN output gated-RMSNorm-to-A8G64 fusion passed exact incumbent parity, an independent
+represented-FP64 formula/codec, poison and alias checks, and the gfx1201 static gate at 25 VGPR,
+256 threads/eight waves, and zero LDS/private/scratch. Under `auto` at P2048, preparation improved
+from `0.239998996` to `0.196279004 ms`, but the candidate's 48-call aggregate was
+`9.421392202 ms`, above the predeclared `5.699527 ms` ceiling. Complete output improved from
+`1.421954989` to `1.358394980 ms`, only `3.050880432 ms` across 48 calls versus the required
+`5 ms`. The candidate is rejected and removed; production retains separate K128 gated-RMSNorm,
+A8G64 preparation, and Q4 output projection. The immutable report is
+`profiles/bench/r9700-gdn-output-gated-rmsnorm-a8-fusion-p2048-ab-20260904.json`, SHA-256
+`8396c5e76b4166405acab70abce11f7f7137e264a1eb61eec3b25d0a098ba962`.
+
+The subsequent fixed-P2048 ordinary-GDN projection/convolution direct-scatter candidate passed
+its direct gate: its per-layer median was 0.288159013 versus 0.559597015 ms (ratio 0.514940202),
+projecting 13.0290241 ms over the 48 GDN layers. The immutable direct report is
+`profiles/bench/r9700-gdn-prefill-projection-conv-direct-scatter-ab-20260904.json`, SHA-256
+`fe852ad70f33f2e654cf31f2ef0da874c5355cdd491f9f97e027cb68142cf310`. At the isolated whole gate
+after the accepted MLP fusion, however, prefill improved only from 1.178537057 s /
+1,737.747715 tok/s to 1.168570885 s / 1,752.573288 tok/s: 9.966172 ms and 1.00852852x, missing the
+predeclared 12 ms and 1.01x gates by 2.033828 ms and 0.00147148x. Workspace remained exactly
+608,387,072 bytes. The immutable whole report is
+`profiles/bench/r9700-gdn-prefill-projection-conv-direct-scatter-production-p2048-c1-20260904.json`,
+SHA-256 `8ceaa1d948e0a76d29765a4255dd806a2bc3ffeba4b5ec009fc39f8b893e7c2f`. The candidate is rejected;
+production again uses the ordinary projection copies, causal convolution, and three extracts, and
+all candidate-only implementation and tooling surfaces are removed.
+
+The dense full-score P2048/G16 16-wave PV head-partition candidate passed its represented FP64,
+incumbent-bit, poison/error, and static checks (70 VGPR, occupancy 16, 9,208-byte LDS, 512 threads,
+zero private/scratch), but missed both direct admission gates. Candidate versus incumbent medians
+were 6.84690714 versus 7.28727818 ms for PV (ratio 0.93956989) and 10.1469564 versus 10.8013163 ms
+for the complete Op (ratio 0.939418495), above the required 0.80 and 0.90 ratios. No whole run was
+admitted, production retains the eight-wave PV kernel, and this result does not authorize an
+adjacent mapping sweep. The immutable terminal report is
+`profiles/bench/r9700-dense-full-score-pv-w16-head-partition-ab-20260904.json`, SHA-256
+`38ebd0c64352ccb0b27c1b60f92fa537865a92827901879f89b2c189c212feee`.
+
+A capacity-preserving FP32 hipBLASLt PV replacement was also terminally rejected at P2048/G16.
+Four zero-workspace strided-batched calls (`batch_count=6`, `[M,N,K]=[256,2048,2048]`) preserved
+the existing interleaved query-head score/output planes and used one 8,388,608-byte decoded-V image.
+The in-process selected solution 140189 was GSU1/SK0 and passed the complete FP64 causal oracle,
+bitwise repeat, graph replay, invalid-frontier, fixed-domain, and no-clobber gates. Candidate versus
+incumbent medians were 4.524150848 versus 5.141388893 ms, only 9.875808716 ms direct saving over
+16 calls; its old-bucket projection was 80.216934204 ms versus the required 61.161073 ms. Production
+is unchanged and no adjacent layout or algorithm sweep is admitted. The immutable terminal report
+is `profiles/bench/r9700-dense-fp32-gemm-pv-p2048-ab-20260904.json`, SHA-256
+`b231a114f4b50684f2e2fdc3eb8a8ce08a9702053dc32e5ff9346a80132a8538`.
+
+The dense full-score P2048 FP8-Q/Bk32 candidate also passed every numerical, liveness, and static
+gate (32 native FP8 and zero BF16 WMMAs, 63 VGPR, 8,192-byte LDS, occupancy 16, no spills), and was
+faster directly at 2.983591080 versus 3.442310095 ms per call (`0.8667409378x`). Across the 16
+dense layers this is 47.73745728 ms and only 7.33950424 ms matched projected saving, short of the
+predeclared 32.439611 ms / 15 ms gate. No whole run was admitted. Production therefore retains the
+BF16-WMMA Bq16/Bk32 QK route, and the candidate-only implementation and tooling are removed without
+an adjacent sweep. The immutable design and terminal reports are
+`profiles/bench/r9700-dense-full-score-fp8-q-bk32-static-design-20260904.json` (SHA-256
+`aed480c787313c280aefc83d8cdf943a6b81711872786677f905f3d4036cd521`) and
+`profiles/bench/r9700-dense-full-score-fp8-q-bk32-ab-20260904.json` (SHA-256
+`ef0d6557a59145c3f632b96b24f41c922369d9f42fa48ab2c7b24d5b1c7e7f30`).
+
+The fixed K256 query/key RMSNorm route likewise assigns one row to each of eight wave32 waves at
+T>=128 while retaining the exact feature-order FP32 reduction. Its immutable pre-promotion report
+`profiles/bench/r9700-rmsnorm-k256-token8-ab-20260904.json` (SHA-256
+`87e4be62c5c7574273f7ee22eaf4858fa8442a496d738fa68a42d8b4452edbce`) passed exact-incumbent
+and independent FP64 checks and won every measured row. At 2048 rows it fell from 0.093921 to
+0.041240 ms (2.2774x); at the real 49152-row query extent it fell from 1.101083 to 0.095321 ms
+(11.5513x). Smaller K256 rows and other widths retain the incumbent. LLVM reports 23 VGPR,
+occupancy 16, four 128-bit loads, and zero LDS/private/scratch.
+
+The exact Text-MLP split view `[17408,T]` with element strides
+`[1,34816,34816*T,34816*T]` uses a two-dimensional feature-by-token SiLU-multiply grid at T>=128,
+removing generic coordinate decomposition without changing the FP32 formula or BF16 result. The
+immutable pre-promotion report `profiles/bench/r9700-silu-mul-split17408-2d-ab-20260904.json`
+(SHA-256 `a561f8b7981b836b2a5a582d093d67d087f2841efede95791aa5969a13b7bc10`)
+passed exact incumbent and independent FP64 checks and won every measured row. P2048 fell from
+1.009159 to 0.374680 ms (2.6934x). Other layouts and T<128 retain the generic strided route; the
+selected gfx1201 kernel uses 9 VGPR, occupancy 16, and zero LDS/private/scratch.
+
+The whole-product benchmark builds as `build-r9700/bench/ninfer_bench`; it requires a real accepted
+artifact. Run its `--help` output for the exact workload options.
+
+## Missing final evidence
+
+The complete 18-shard Qwen3.8-27B BF16 source and matched 8K/32K dual-A8 candidate sidecars are
+present. The localized deterministic scorer route is now mandatory in the implementation:
+hipBLAS/no rocBLAS atomics are fixed before PyTorch import, strict deterministic algorithms are
+enabled before backend construction, conflicts fail, and ordinary results bind the complete
+implementation/runtime provenance. Two fresh-process campaigns are byte-exact at 8K and 32K and
+therefore close the BF16 numerical authority; the unchanged dense all-Q4 sidecars have also passed
+offline gate recomputation against it. Its greedy argmax is diagnostic rather than an admission
+condition. The following remain explicitly unproven before Pareto classification:
+
+- fresh current sparse all-Q4 and mixed dense/sparse quality acquisition against that authority;
+- the selected integer weight recipe;
+- G16 versus G32 under the qualified fixed plane orders;
+- graph/eager model parity;
+- DFlash2 acceptance and speed on the final companion artifact; existing MTP requires only
+  regression preservation of its exact execution, cache, and state contracts, not further tuning;
+- complete prefill/decode and C=1..4 throughput;
+- whole-inference profiler attribution.
+
+After the remaining candidate quality acquisition closes, the schema-v7 Pareto classifier retains
+every non-dominated candidate. A quality-eligible
+candidate is dominated only if another eligible candidate is no worse in
+mean-NLL delta, new-severe-position rate, resolved capacity, and every matched whole-inference
+speed cell, and is strictly better in at least one. Raw scorer seconds are not a throughput or
+dominance objective.
+
+The Pareto frontier remains the audit record, but the product ships one artifact, cache, and
+execution profile. Quality is the admission gate. The classifier first retains one static-profile
+winner for each recipe, then applies the same global ordering to those recipe winners: normalize
+each required whole-inference cell against the best frontier result and maximize the candidate's
+minimum ratio; on an exact tie maximize minimum normalized resolved capacity, then minimize the
+worst fraction of the declared mean-NLL/severe-position quality budgets consumed. Canonical
+artifact and static-profile identity resolves only a complete measured tie. The deterministic
+decision uses retained per-cell means; raw repetition spread remains evidence rather than a noise
+tolerance. Schema v7 retains this as `terminal_production_selection` under
+`global_maximin_whole_then_capacity_then_quality_then_canonical_v1`, including the complete
+frontier, every recipe winner, the one terminal winner,
+and its compile-bound dense or B128/S16/tau900 attention identity.
+This maximin decision reflects whole-product performance without inventing workload weights or
+allowing an average to conceal a material regression.
+
+`rocprofv3` runtime/kernel/memory traces and SQ busy/wave events are usable. On gfx1201, dispatch PMC
+cache collection additionally requires a stable power state. A focused real-model 8K G16
+XAttention-consumer pass under `profile_standard` produced nonzero `GL2C_HIT`, `GL2C_MISS`,
+`TCP_REQ`, `TCP_REQ_MISS`, GL2 external read/write activity, and `SQ_WAVES`. Summing hardware
+dimensions gives a 98.371% GL2 hit ratio and 77.692% TCP/vector-GL0 hit ratio. The raw CSV is
+`profiles/rocprof/xattention-b16-all-q4-g16-c1-8k-cache-pmc-20260904/cache-pmc_counter_collection.csv`
+(SHA-256 `7bc45f6fc1342ec4d49a42e3a195ecbf9e02e3e59c219c1682eae730989a9cae`).
+Its 32 selected consumer dispatches use the expected 1,572,864-thread grid and total 4.5698 seconds
+of device time, with a 126.027 ms median. That is 2.76% of this pass's prefill duration, so the new
+consumer does not own the stable-profile whole duration. It is nevertheless about 3.16x slower at
+4,096 real query rows than a linear extrapolation of the hot 128-row qualifier. The completed
+production-scale control below resolves that operator-scaling question; final matched `auto`
+whole-model attribution remains required.
+
+The schema-v6 XAttention qualifier supplies the production-scale control at
+context 8,192/T=4,096/Hq24/Hkv4/D256. It rotates four address-distinct operand and workspace sets,
+reports rank and consumer stages separately, and uses signed nonzero INT4 values with exact FP16
+scales varying by physical token, page, KV head, and value group behind a nonidentity page table.
+Its all-element FP64 softmax/PV check reconstructs the selected logical pages and therefore rejects
+payload or scale addressing failures that an all-zero timing fixture would conceal. Physical timing
+under `auto` passed exactly for both value groups. The current-tree refresh binds the updated dense
+control as well as the unchanged sparse implementation and independent oracles. At a measured
+16.2502% keep fraction, G16 took `53.4330635 ms` (`26.5418129 ms` rank and `26.3109531 ms`
+consumer) and G32 took `56.6925545 ms` (`26.3639278 ms` rank and `30.2011223 ms` consumer).
+Both all-element production oracles reported exact zero relative-L2 and maximum-absolute error.
+The retained reports under
+`profiles/bench/r9700-xattention-current-tree-refresh-20260905/` have SHA-256
+`205bac511ff61511a5e61233942beeead49829a417689a0ceaeafd4ef5427d11` (G16) and
+`ab5df29c798cdab9aae233da8433f84e2da8e36f8d3fde27a85f6e56d9bdcaaf` (G32). Schema v6
+binds the executable, exact current source inventory, device/runtime identity, and power state,
+rechecks `auto` after numerical qualification and timing, and publishes only to a fresh path. This
+closes the stale dense-control source-hash gap and operator-scale qualification; it does not select
+G16/G32, a weight recipe, a prefill chunk, or a whole-model route.
+
+The production-extent linear-Op gates also passed under `auto`. The A8Q4G64 cooperative CTA won
+all 32 qualified shape-by-token rows by `2.5261x` through `8.1587x`; the A8W8G32 CTA won all 16
+qualified rows by `14.8205x` through `18.4695x`. Both independent BF16-step oracles reported zero
+maximum steps, including their exhaustive padded-tail cases. Their schema-v3 report SHA-256 values
+are `b3c78cab21dfc0f97521269245b8442009048aadcd9db5ffd947a4d7d3baf889` (Q4) and
+`1547f7d62fae4077f32f203b61831fc97b4f98bffcc930c6a29de7284f5c40c0` (W8). These results admit
+only the exact measured T=1,024/2,048/4,096/8,192 tuple predicates, which are now the production
+linear-Op dispatch boundary. Decode, partial chunks, Vision, DFlash, and unmeasured matrix shapes
+retain the incumbent one-wave path. The reports are immutable pre-promotion admission provenance;
+future decisions use rebuilt whole-model evidence rather than regenerating an admission report
+against changed production source. Matched model-prefill and whole-inference selection remain open.
+
+The follow-up Q4 M64xN128 ping/pong staging challenger passed its exact oracle and had no
+regressing tuple, but it did not pass its predeclared `>=1.5x` admission gate. Weighted P2048 fell
+from `1126.778368` to `914.413888 ms`, a `0.8115295` challenger/incumbent ratio (`1.23224x`,
+`212.364480 ms` saved). The terminal report is
+`profiles/bench/r9700-a8q4-prefill-cta-pingpong-ab-20260904.json`, SHA-256
+`06a2846e1ae5ba90989dcb401e578a1b96479a8e472b7aa0d5befdcbcf6281f7`. Production remains
+the selected M64xN128 persistent-N2 CTA at that operator-only decision point; this rejected
+staging-only result is not by itself a production performance claim.
+
+The later matched whole-P2048 gate overrides that operator-only promotion decision without
+rewriting its evidence. The control report
+`profiles/bench/prefill-p2048-q4-pingpong-matched-control-20260904.json` (SHA-256
+`66a4c832b67156e713fbe5d3de57598086ec4a264acf513b212d149e70ec1254`) identifies
+`m64n128-production` and measured `1219.355187 tok/s` in `1.679577815 s`. The challenger report
+`profiles/bench/prefill-p2048-q4-pingpong-whole-20260904.json` (SHA-256
+`a187d24e1ed78154f40a71ec1243f1d64ef46fbb25d3f0a2b2af3937667bb244`) identifies ping/pong and
+measured `1348.188927 tok/s` in `1.519077416 s`. That is a `1.105657x` throughput improvement and
+`0.9044400` elapsed-time ratio, saving `0.160500399 s` at the whole-prefill scope. Ping/pong is now
+the sole production Q4 CTA for the exact eight-shape by P=1,024/2,048/4,096/8,192 predicate; the
+single-bank M64xN128 implementation remains only as an explicit regression/tail control.
+
+The structural M64xN256 plus ping/pong follow-up also passed its exact/FP64 oracle and every tuple
+was nonregressing, but it likewise failed the fixed `>=1.5x` gate. Weighted P2048 fell from
+`1109.850230` to `920.208770 ms`, a `0.8291288` challenger/incumbent ratio (`1.20609x`,
+`189.641460 ms` saved). Its terminal report is
+`profiles/bench/r9700-a8q4-prefill-cta-m64n256-ab-20260904.json`, SHA-256
+`e1d611ff2a74ebad9c300297c93ea1722a74c57d01c71a75836987fe7fe3ba3b`.
+At that operator-only decision point, production remained the single-bank M64xN128 route; the
+later matched whole-P2048 selection above supersedes that route with ping/pong.
+
+The subsequent trace-selected M64xN256 32-wave experiment narrowed the candidate to the dominant
+Q4 MLP-down tuple `[N,K]=[5120,17408]`. Its 1,024-thread kernel retained the eight IU4 instructions
+and compiled to 87 VGPR, 25,856 bytes LDS, and zero private/scratch storage, but was slower than
+production at every qualified token extent. At T=1,024/2,048/4,096/8,192 the challenger/control
+ratios were `1.0146974/1.0120804/1.0203344/1.0149652`; T2048 measured `3.419854/3.379034 ms`.
+The terminal report is
+`profiles/bench/r9700-a8q4-m64n256-w32-mlp-down-ab-20260904.json`, SHA-256
+`a41e2a2ad65809ade16b629e698244834d2c2da065335f8fab62869813aaef5b`. Both rejected M64xN256
+implementations have been removed, production remains M64xN128 ping/pong, and the bounded stop rule
+forbids an adjacent N256 or cache-hint sweep.
+
+The subsequent production-geometry next-G64 scale-prefetch experiment retained the M64xN128
+ping/pong tile, eight native IU4 WMMAs, exact arithmetic, and 17,152-byte LDS while moving two
+scale halfword loads into the existing code-prefetch window. It passed static and numerical gates
+at 89 VGPR, occupancy 16, and zero scratch, but lost every MLP-down/GDN value-Z/GDN output cell at
+T=1,024/2,048/4,096/8,192 (`1.016370x`--`1.048674x`). Trace-call-weighted P2048 regressed from
+`375.835487` to `391.499994 ms` (`1.041679x`, `-15.664507 ms`). The immutable terminal report is
+`profiles/bench/r9700-a8q4-prefill-cta-scale-prefetch-ab-20260904.json`, SHA-256
+`aaeeaf16a0040d5a23046d40fff532f34805124cdd3e5bbeb5d0a721962ad8ef`. The candidate was removed;
+production retains its post-compute scale loads.
+
+The bounded residual-add to K5120 token8 RMSNorm prefill fusion likewise passed exact residual and
+output publication, complete independent-oracle, alias, rewrite, and static resource gates at
+18 VGPR, occupancy 16, and zero LDS/private/scratch. Physical `auto` timing rejected it at every
+T=1,024/2,048/4,096/8,192 extent: challenger/control ratios were
+`2.98276377/2.94057178/2.26832342/1.89297712`. P2048 regressed from `0.188480005` to
+`0.554238975 ms` per pair, a `-0.365758955 ms` saving. The immutable terminal report is
+`profiles/bench/r9700-residual-rmsnorm-k5120-prefill-ab-20260904.json`, SHA-256
+`6ed367d0438f0f7f8dbfe4bd01f7da126a6857c1953da8f1ed6e294eec20c134`; the retained static design
+is `profiles/bench/r9700-residual-rmsnorm-k5120-prefill-static-design-20260904.json`, SHA-256
+`40dcc021e59e8c80272ed6c36c9ab4ef36e1bd6c2e9939c439671426a44eca73`. The candidate and its
+qualification tooling were removed. Production remains the separate residual-add plus selected
+K5120 RMSNorm pair, with no adjacent fusion variant authorized.
+
+A separate exact-device ceiling probe under `auto` measured `801.669240` median issued-IU4 TOPS
+from an eight-chain register-resident native `v_wmma_i32_16x16x32_iu4` kernel and
+`633.264977 GB/s` from a 272-times-L2 packed-Q4-code/FP16-scale stream with the production G64
+16:1 byte ratio. The streaming result is `98.9477%` of the nominal 640 GB/s bus rate. The retained
+report is `profiles/bench/r9700-q4-hardware-peak-20260904.json`, SHA-256
+`72e4c91eb9177ff5969cce6c06febde251a4852e1e69bd317b77646ddcb7baa4`. Its raw HIP
+`multiProcessorCount` value is 32 scheduler units and does not supersede the architectural 64-CU
+hardware description.
+
+For scale only, the production M64xN128 weighted P2048 aggregate's `101.082` tera-issued-operation-
+equivalents over `1.109850230 s` is `91.077154` issued TOPS, `11.3609%` of the isolated native-IU4
+ceiling. The traffic model's `842.961535 GB` over that duration is `759.527288 GB/s`, or `119.938%`
+of the isolated stream rate. This apparent excess is not a physical bandwidth measurement: the
+model counts represented source requests, including requests that may be served or combined by
+cache, coalescing, and LDS reuse, while the physical transactions and their overlap are unknown.
+Consequently these ceilings show substantial unused native-IU4 issue capacity and a healthy
+near-nominal isolated memory path, but do not establish production HBM utilization, cache reuse,
+or stall freedom. Those production claims remain gated on a matched GL2C/TCP/SQ profile.
+
+The corresponding complete direct-A8/packed-W4-to-IU8 P2048 pipeline was rejected statically
+before timing. Its fair M64xN128 expand-once ping-pong kernel used 25,344 LDS bytes, exact eight
+signed IU8 sites, and zero private/scratch bytes, but emitted 115 VGPR/occupancy 12. Preventing
+four-K16 operand hoisting and replacing tail-aware admitted-shape W loads reduced it only to 111
+VGPR with occupancy still 12, missing the fixed <=96 VGPR/occupancy-16 gate. The best compact legal
+expansion idiom projected roughly 100 VGPR even with sequential publication, so the route is closed
+without GPU or whole-inference timing. The retained evidence is
+`profiles/bench/r9700-a8q4-direct-iu8-pingpong-static-rejection-20260905.json`, SHA-256
+`d4f2c610b973935aa60b732c3ee39e9dc84a512781839458a5caadcca78f2a2c`; all qualifier
+source, checker, test, and build surfaces were removed.
+
+The signed-A4G64 activation challenger halved its matrix instruction count and activation-code
+plane, but its complete quantize-plus-M64xN128 path failed operator admission. Weighted P2048
+improved from `1121.674698` to `1006.050599 ms` (`1.11493x`), while the N1024 shape regressed at
+every measured extent by `1.21819x` through `1.35600x`. The retained report is
+`profiles/bench/r9700-a4q4-prefill-m64n128-vs-a8-production-ab-20260904.json`, SHA-256
+`2ac938b230197384a476bd57ccfd39d72a1b73c03bee82c58bf3be9df7de5b1f`. Production remains A8;
+model-quality gates were not rerun because the operator gate failed and existing A4 quality
+evidence already rejects that private activation profile.
+
+The matched `auto` ordinary C1 diagnostic used the all-Q4 G16 B128/S16/tau900 build, an 8,192-token
+prompt, a 4,096-token chunk, the Device Graph path, and 256 decoded tokens with speculative execution
+disabled. Across three repetitions it measured `239.5738442` prefill tok/s (`34.1947324 s`) and
+`8.354688852` decode output tok/s (`30.64198944 s`); whole output throughput was `3.963623176`
+tok/s over `64.84022237 s`. The raw report SHA-256 is
+`049f3e4712a65ba618f28b47d830a96019cd16dea8dd70a920e1385aca4f1c96` and its manifest SHA-256 is
+`a2ce50522910bd1442156383c85f359315c33bc5964578ba3ca28bf9685e104a`. The previously retained
+`19.24458338` tok/s result is the MTP3 speculative cell, not ordinary decode.
+
+The existing MTP shortlist head remains Q4G64 with A8G64 activations. MTP stays in exact-output,
+state, cache, row-view, and whole-route regression coverage, but a new shortlist-head trace,
+alternate head precision, acceptance campaign, or MTP performance optimization is not a final
+admission requirement. DFlash/DFlash2 is the preferred speculative path and the only speculative
+backend with remaining support and performance work.
+The terminal tooling reads each raw repetition, expects `64*C` because its counter sums request
+lanes, and verifies that the report aggregate is their exact sum. Extra rounds preserve the
+candidate's throughput objectives but produce `conditional_head_precision_required`; minimum-round
+rows produce `selected_route_pending_shortlist_head_trace_and_niah`, since executed-code evidence
+and selected-profile NIAH remain separate final gates.
+The fail-closed NIAH entry point is
+`profiles/bench/post-terminal-niah-prepare-20260905/prepare.sh`; it remains blocked until the
+schema-v7 terminal selection exists and then schedules only the required 64K five-position ladder.
+
+The `[131072,5120]` head payload is exactly 356,515,840 bytes (340 MiB) in Q4G64,
+713,031,680 bytes (680 MiB) in W8G32, and 1,342,177,280 bytes (1,280 MiB) in BF16. W8 therefore
+adds 340 MiB and BF16 adds 940 MiB over Q4. At the complete Text+MTP cache costs of 28,288 bytes per
+token for G16 and 27,200 for G32, those deltas correspond before page/allocator rounding to about
+12,603/13,107 aggregate cached tokens for W8 and 34,844/36,238 for BF16; divided evenly at C4,
+about 3,151/3,277 and 8,711/9,059 tokens per lane, respectively. The retained Q4/A8 shape sweep
+measured 2.337/2.265 ms at T=1/3, while the older W8 public-Linear bring-up observed
+3.153/9.428 ms. These results use different qualifier harnesses and are only a reason to keep the
+comparison conditional; they are not a same-base direct A/B or a precision-selection result. No
+source-BF16 MTP acceptance authority currently exists: the checkpoint-direct BF16 scorer treats
+MTP as a non-executed comparison label, and the Python artifact reference consumes the artifact's
+encoded shortlist head.
+
+This pass resolves the former known-zero cache-counter result, but it does not establish absolute
+bandwidth or final-route cache efficiency. The gfx1201 request-size buckets remain known-zero and
+base absolute counts may undercount, so no physical GL2/HBM byte rate is derived. The stable profile
+also pinned substantially lower clocks; its 49.43 tok/s benchmark timing is profiler control only,
+not production evidence. Ordinary performance timing stays under `auto`, and the same focused PMC
+pass must be repeated on the selected chunk/profile. ROCm Compute Profiler 3.8.0 still has no
+gfx1200/gfx1201 analysis configuration, and complete VALU/LDS/stall counters remain unavailable.

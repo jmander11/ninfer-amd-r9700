@@ -19,8 +19,10 @@ namespace ninfer {
 
 using TokenId = std::int32_t;
 
-inline constexpr std::uint32_t kMaximumConcurrency = 8;
+inline constexpr std::uint32_t kMaximumConcurrency = 4;
 inline constexpr std::size_t kMaxContextCheckpointMarks = 16;
+// Physical campaign commands remain explicit and do not inherit this product-wide startup default.
+inline constexpr std::uint32_t kDefaultPrefillChunk = 4096;
 
 [[nodiscard]] inline std::vector<std::uint32_t>
 parse_context_checkpoint_marks_flag(std::string_view raw,
@@ -55,12 +57,6 @@ parse_context_checkpoint_marks_flag(std::string_view raw,
     }
     return marks;
 }
-
-enum class KvCacheStorage : std::uint8_t {
-    BFloat16,
-    Int8Group64,
-    Nvfp4,
-};
 
 enum class KvCapacityMode : std::uint8_t {
     Explicit,
@@ -107,8 +103,6 @@ struct SpeculativeOptions {
     ProposalHead proposal_head = ProposalHead::Full;
     // Packed/chain DFlash verify width. 0 selects the k-dependent default.
     std::uint32_t dflash_verify_width = 0;
-    // Startup-only: capture extra draft-K graphs and pick live K from host EWMA.
-    bool adaptive_draft = false;
 };
 
 struct LoadProgress {
@@ -123,58 +117,15 @@ struct EngineOptions {
     std::uint32_t max_concurrency      = 1;
     std::uint32_t max_pending_requests = 16;
     std::uint32_t pending_timeout_ms   = 30000;
-    std::uint32_t prefill_chunk        = 4096;
+    std::uint32_t prefill_chunk        = kDefaultPrefillChunk;
     std::size_t kv_ram_capacity_bytes  = 0;
     // nullopt = default prefill ladder; empty = disable automatic ladder (`off`).
     std::optional<std::vector<std::uint32_t>> context_checkpoint_marks;
-    KvCacheStorage kv_cache            = KvCacheStorage::Nvfp4;
-    // Sage3-style FP4-PV compute recipe (SageAttention3): only issuable with KvCacheStorage::Nvfp4.
-    bool sage_attn                     = false;
-    // Prefill tile-skip on exact NVFP4 (not Sage3). 1.0 = dense. Mutually exclusive
-    // with xattn_tau < 1. Requires kv_cache == Nvfp4 and sage_attn == false.
-    float keep_frac = 1.0f;
-    // XAttention mass threshold τ on exact NVFP4 prefill. 1.0 = dense. Mutually
-    // exclusive with keep_frac < 1. Requires kv_cache == Nvfp4 and sage_attn == false.
-    float xattn_tau = 1.0f;
-    // Skip XAttention ranking below this cached length; short prefixes stay dense.
-    std::int32_t xattn_min_len = 8192;
     SpeculativeOptions speculative;
     bool enable_vision  = false;
-    bool use_cuda_graph = true;
+    bool use_device_graph = true;
     LoadProgress load_progress;
 };
-
-inline constexpr std::int32_t kDefaultXattnMinLen = 8192;
-
-inline float parse_unit_interval_flag(const char* raw, const char* flag) {
-    char* end = nullptr;
-    const float parsed = std::strtof(raw, &end);
-    if (end == raw || *end != '\0' || !(parsed > 0.0f && parsed <= 1.0f)) {
-        throw std::invalid_argument(std::string(flag) + " must be a float in (0, 1]");
-    }
-    return parsed;
-}
-
-inline void validate_sparse_attn_flags(KvCacheStorage kv_cache, bool sage_attn, float keep_frac,
-                                       float xattn_tau) {
-    if (!(keep_frac > 0.0f && keep_frac <= 1.0f)) {
-        throw std::invalid_argument("--keep-frac must be a float in (0, 1]");
-    }
-    if (!(xattn_tau > 0.0f && xattn_tau <= 1.0f)) {
-        throw std::invalid_argument("--xattn-tau must be a float in (0, 1]");
-    }
-    if (keep_frac < 1.0f && xattn_tau < 1.0f) {
-        throw std::invalid_argument("--keep-frac and --xattn-tau are mutually exclusive");
-    }
-    if (sage_attn && (keep_frac < 1.0f || xattn_tau < 1.0f)) {
-        throw std::invalid_argument(
-            "--sage is exact-S3 only; --keep-frac / --xattn-tau require --kv-dtype nvfp4 without "
-            "--sage");
-    }
-    if ((keep_frac < 1.0f || xattn_tau < 1.0f) && kv_cache != KvCacheStorage::Nvfp4) {
-        throw std::invalid_argument("--keep-frac / --xattn-tau require --kv-dtype nvfp4");
-    }
-}
 
 enum class SamplingMode : std::uint8_t {
     Thinking,
@@ -454,8 +405,6 @@ struct SpeculativeStats {
     std::uint64_t accepted_tokens = 0;
     std::uint64_t fallback_steps  = 0;
     std::vector<std::uint64_t> accepted_per_position;
-    std::uint32_t live_draft_tokens = 0;         // last live K used this request
-    std::vector<std::uint64_t> rounds_per_draft; // index = K, size N+1
 };
 
 enum class PrefixReusePath : std::uint8_t {
@@ -490,7 +439,7 @@ struct GenerationResult {
     // this request.
     std::uint32_t captured_context_checkpoint_tokens = 0;
     std::uint32_t restored_context_checkpoint_tokens = 0;
-    // CUDA D2H/H2D elapsed for this request's admission spills and RAM restore.
+    // HIP D2H/H2D elapsed for this request's admission spills and RAM restore.
     double kv_ram_save_seconds = 0;
     double kv_ram_load_seconds = 0;
     GenerationTimings timings;
@@ -510,7 +459,6 @@ struct MemorySummary {
     std::uint32_t kv_capacity                 = 0; // Resolved page-aligned Main KV capacity.
     std::uint32_t kv_capacity_page_groups     = 0;
     std::uint32_t kv_capacity_max_page_groups = 0;
-    KvCacheStorage kv_cache                   = KvCacheStorage::Nvfp4;
     ArenaMemorySummary weights;
     ArenaMemorySummary sequence;
     ArenaMemorySummary workspace;
@@ -523,8 +471,8 @@ struct MemorySummary {
     std::size_t kv_capacity_headroom_bytes        = 0;
     std::size_t planned_slack_bytes               = 0;
     std::size_t workspace_logical_peak_bytes      = 0;
-    std::size_t cuda_graph_allowance_bytes        = 0;
-    std::size_t cuda_graph_observed_bytes         = 0;
+    std::size_t device_graph_allowance_bytes      = 0;
+    std::size_t device_graph_observed_bytes       = 0;
     std::size_t kv_payload_bytes                  = 0;
     std::size_t kv_ram_capacity_bytes             = 0;
     // Live host-RAM residents only (claimed included). Not pinned-arena occupancy;
@@ -596,6 +544,10 @@ struct ScoreResult {
     double perplexity           = 0.0;
     double score_seconds        = 0.0;
     std::vector<float> token_nlls;
+    // Greedy prediction for every scored position, in the same order as token_nlls. PPL tooling
+    // compares this sequence exactly against the BF16-KV reference so a small mean-NLL delta
+    // cannot hide an argmax flip.
+    std::vector<TokenId> argmax_token_ids;
 };
 
 struct LoadSummary {

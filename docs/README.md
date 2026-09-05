@@ -1,66 +1,51 @@
 # NInfer documentation
 
-Start with the [project README](../README.md) to build NInfer, download a published artifact, and
-run the CLI or HTTP server.
+Start with the project `README.md` for the current Radeon AI PRO R9700 build, artifact status, and
+product commands. Executable `--help` output is the exact authority for option spelling/defaults.
 
 ## User guides
 
 | Document | Purpose |
 |---|---|
-| [CLI](cli.md) | text, chat-history, image/video input, output streams, sampling, MTP, and common runtime options |
-| [HTTP serving](serving.md) | OpenAI Responses/Chat Completions, Anthropic Messages, state, streaming, token counting, authentication, and tool calls |
-| [Performance](performance.md) | RTX 5090 single-request and concurrent-decode results, MTP/DFlash measurements, and reproduction commands |
-| [CLI examples](../examples/cli/) | committed text, multimodal, thinking, long-decode, and long-context inputs |
+| `cli.md` | text, structured messages, media, sampling, MTP/DFlash2, context, and memory |
+| `serving.md` | OpenAI/Anthropic HTTP schemas, streaming, state, concurrency, and logging |
+| `performance.md` | R9700 measurement policy and admitted results |
+| `../examples/cli/` | committed input examples |
 
-The executable `--help` output is the exact source for command-line option spelling and defaults.
+## Active maintainer authorities
 
-## Model artifacts
+Runtime and numerical ownership:
 
-| Model | Weights | Download | Versioned model card source |
-|---|---|---|---|
-| Qwen3.6-27B | `groupwise-int` | [Hugging Face](https://huggingface.co/neroued/Qwen3.6-27B-NInfer) | [model card](../model-cards/Qwen3.6-27B-NInfer/README.md) |
-| Qwen3.6-27B | `nvfp4` | [Hugging Face](https://huggingface.co/neroued/Qwen3.6-27B-nvfp4-NInfer) | [model card](../model-cards/Qwen3.6-27B-nvfp4-NInfer/README.md) |
-| Qwen3.8-27B | `groupwise-int` | [Hugging Face](https://huggingface.co/neroued/Qwen3.8-27B-NInfer) | [model card](../model-cards/Qwen3.8-27B-NInfer/README.md) |
-| Qwen3.6-35B-A3B | `groupwise-int` | [Hugging Face](https://huggingface.co/neroued/Qwen3.6-35B-A3B-NInfer) | [model card](../model-cards/Qwen3.6-35B-A3B-NInfer/README.md) |
+- `maintainer/concurrent-inference-architecture.md`: request/lane lifecycle, scheduling, and Device Graphs.
+- `maintainer/paged-kv-cache.md`: typed FP8-K/INT4-V cache, publication, capacity, and RAM spill.
+- `maintainer/softmax-attention.md`: Text/MTP and DFlash2 attention ownership.
+- `maintainer/replayssm-gdn.md`: Gated DeltaNet mathematics and state transitions.
+- `maintainer/op-development.md`: semantic Op admission and independent-oracle rules.
+- `maintainer/kernel-iteration.md`: gfx1201 optimization and profiling procedure.
+- `maintainer/gfx1201-low-precision-operations.md`: native INT4/INT8/BF16/FP8 matrix operations,
+  ROCm BLAS support boundaries, and the current source-to-ISA map.
 
-## Repository-local guides
+Artifact and target ownership:
 
-- [Benchmarks](../bench/README.md)
-- [Tests](../tests/README.md)
-- [Maintainer tools](../tools/README.md)
-- [Capability evaluation](../eval/README.md)
+- `maintainer/artifact-container.md`: generic `.ninfer` framing and binding.
+- `maintainer/tensor-formats.md`: persistent numerical formats.
+- `maintainer/storage-layouts.md`: registered physical layouts.
+- `maintainer/qwen3.8-27b-model.md`: shared Qwen3 family mathematics used by Qwen3.8-27B.
+- `maintainer/r9700-integer-artifact-candidate.md`: provisional/evaluation integer artifacts and
+  final recipe-selection contract.
+- `maintainer/qwen3.8-27b-artifact.md`: sole target inventory, conversion, and binding contract.
 
-## Maintainer references
+## Live execution state
 
-The active references under [`maintainer/`](maintainer/) record current architecture, model,
-artifact, and maintenance contracts. These files are not additional user workflows or installed
-API documentation.
+- `../plans/r9700-autonomous-todos.md`: authoritative completion ledger.
+- `../tools/bench/README.md`: physical matrix commands, DFlash selection, safe embedded-code
+  extraction, and the selected-P2048 trace/PMC/reconciliation/roofline/static-evidence workflow.
+- `../tools/r9700/README.md`: target-specific oracle, ISA/resource, and physical admission commands.
 
-Runtime and Op references:
+Superseded backend documentation is not an active product contract and must not supply production
+measurements or artifact decisions.
 
-- [Small-scale concurrent inference architecture](maintainer/concurrent-inference-architecture.md)
-- [Paged KV context storage, ownership, and capacity model](maintainer/paged-kv-cache.md)
-- [Op admission, contracts, ownership, qualification, and performance rules](maintainer/op-development.md)
-- [Kernel iteration layers 0–3](maintainer/kernel-iteration.md)
-- [NVFP4 decode-band Linear mapping (RTX 5090)](maintainer/nvfp4-decode-linear.md)
-- [Performance enhancements that did not move tok/s](maintainer/performance_enhancements.md)
-- [DFlash2 chain verify speed and historical tree A/Bs](maintainer/dflash2-tree-speed.md)
-- [ReplaySSM GDN technical reference](maintainer/replayssm-gdn.md)
-- [Linear benchmark contract and registered suites](maintainer/linear-benchmark.md)
+## Historical migration record
 
-Artifact and model references:
-
-- [NInfer artifact container](maintainer/artifact-container.md)
-- [Persistent tensor numeric formats](maintainer/tensor-formats.md)
-- [Persistent storage layouts](maintainer/storage-layouts.md)
-- [Qwen3.6-27B model semantics and family/Variant structure](maintainer/qwen3.6-27b-model.md)
-- [Qwen3.6-27B artifact contracts, including NVFP4](maintainer/qwen3.6-27b-artifact.md)
-- [Qwen3.8-27B artifact contract](maintainer/qwen3.8-27b-artifact.md)
-- [Qwen3.6-35B-A3B model semantics](maintainer/qwen3.6-35b-a3b-model.md)
-- [Qwen3.6-35B-A3B artifact contracts](maintainer/qwen3.6-35b-a3b-artifact.md)
-
-Pending plans:
-
-- [Softmax Attention organization and migration](maintainer/softmax-attention.md) describes the
-  single target state for an unfinished source and public-contract cutover; it is not the current
-  implementation map.
+`maintainer/r9700-overhaul-plan.md` records the migration's original decisions and acceptance
+background. It is not an active implementation, option, artifact, or performance authority.

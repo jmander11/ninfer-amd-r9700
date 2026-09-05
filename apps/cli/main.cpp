@@ -118,18 +118,6 @@ std::string format_finish(ninfer::FinishReason reason) {
     return "unknown";
 }
 
-std::string format_kv_cache(ninfer::KvCacheStorage storage) {
-    switch (storage) {
-    case ninfer::KvCacheStorage::BFloat16:
-        return "bf16";
-    case ninfer::KvCacheStorage::Int8Group64:
-        return "int8-group64";
-    case ninfer::KvCacheStorage::Nvfp4:
-        return "nvfp4";
-    }
-    return "unknown";
-}
-
 std::string format_kv_capacity_mode(ninfer::KvCapacityMode mode) {
     return mode == ninfer::KvCapacityMode::Automatic ? "auto" : "explicit";
 }
@@ -261,7 +249,7 @@ void print_generation_summary(const ninfer::GenerationResult& result,
                                        std::to_string(memory.kv_capacity_max_page_groups));
     print_metric("gpu weights used", format_arena_used(memory.weights));
     print_metric("gpu sequence used", format_arena_used(memory.sequence));
-    print_metric("kv cache dtype", format_kv_cache(memory.kv_cache));
+    print_metric("kv cache format", "fp8-k/int4-v");
     print_metric("kv cache payload", format_bytes(memory.kv_payload_bytes));
     print_metric("KV RAM capacity", memory.kv_ram_capacity_bytes == 0
                                         ? "off"
@@ -283,8 +271,8 @@ void print_generation_summary(const ninfer::GenerationResult& result,
     print_metric("free after startup", format_bytes(memory.available_after_startup_bytes));
     print_metric("KV capacity headroom", format_bytes(memory.kv_capacity_headroom_bytes));
     print_metric("planned slack", format_bytes(memory.planned_slack_bytes));
-    print_metric("CUDA Graph memory", format_bytes(memory.cuda_graph_observed_bytes) + " / " +
-                                          format_bytes(memory.cuda_graph_allowance_bytes));
+    print_metric("Device Graph memory", format_bytes(memory.device_graph_observed_bytes) + " / " +
+                                            format_bytes(memory.device_graph_allowance_bytes));
     print_metric("planned device total", format_bytes(reserved));
 
     const ninfer::SpeculativeStats& speculative = result.speculative;
@@ -292,10 +280,6 @@ void print_generation_summary(const ninfer::GenerationResult& result,
         const std::string backend =
             speculative.backend == ninfer::SpeculativeBackend::DFlash ? "dflash" : "mtp";
         print_metric(backend + " draft window", std::to_string(speculative.draft_window));
-        if (speculative.live_draft_tokens != 0) {
-            print_metric(backend + " live draft tokens",
-                         std::to_string(speculative.live_draft_tokens));
-        }
         print_metric(backend + " rounds", std::to_string(speculative.rounds));
         print_metric(backend + " fallback steps", std::to_string(speculative.fallback_steps));
         print_metric(backend + " drafted tokens", std::to_string(speculative.drafted_tokens));
@@ -357,13 +341,9 @@ int main(int argc, char** argv) {
         engine_options.kv_ram_capacity_bytes = cli.kv_ram_capacity_bytes;
         engine_options.context_checkpoint_marks = cli.context_checkpoint_marks;
         engine_options.prefill_chunk  = cli.prefill_chunk;
-        engine_options.kv_cache       = cli.kv_cache;
-        engine_options.sage_attn      = cli.sage_attn;
-        engine_options.keep_frac      = cli.keep_frac;
-        engine_options.xattn_tau      = cli.xattn_tau;
         engine_options.speculative    = cli.speculative;
         engine_options.enable_vision  = cli.enable_vision;
-        engine_options.use_cuda_graph = cli.use_cuda_graph;
+        engine_options.use_device_graph = cli.use_device_graph;
         engine_options.load_progress  = load_progress.callback();
 
         const auto load_started = Clock::now();

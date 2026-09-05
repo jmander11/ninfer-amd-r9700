@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """NIAH (needle-in-a-haystack) recall check against the live NInfer serve.
 
-This is the practical quality gate for approximate (sage / nvfp4) attention:
-a broken long-context attention path loses the needle. The script hits the
+This is a behavioral long-context attention gate: a broken attention path loses
+the needle. The script hits the
 *already-running* server (no engine restart / reconfig) and checks whether the
 exact needle string is retrieved in the model's answer to a long-context
 question. It reports per-run recall (e.g. 3/3) rather than a speed metric.
@@ -10,20 +10,26 @@ question. It reports per-run recall (e.g. 3/3) rather than a speed metric.
 Stdlib only; never restarts or reconfigures the engine. Fixtures resolve
 relative to the repo root (auto-detected) unless given as an absolute path.
 
-    python3 tools/bench/run_niah_check.py --label SAGE --runs 3
-    python3 tools/bench/run_niah_check.py --fixture examples/cli/messages/long_niah_64k.json \
+    python3 -m tools.bench.run_niah_check --label SAGE --runs 3
+    python3 -m tools.bench.run_niah_check --fixture examples/cli/messages/long_niah_64k.json \
         --needle "ORCHID=493817; COLOR=COBALT" --max-tokens 64 --label SAGE
 
-Outputs a per-run JSON record under profiles/bench/niah-check/ (gitignored).
+Outputs a per-run JSON record under profiles/bench/niah-check/ (gitignored). Durable gate evidence
+uses an explicit --out together with --server-log, --artifact, and --serve-bin; that mode binds the
+loaded files and requires one fresh full-prefill request_done event for every HTTP response.
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import time
 import urllib.request
 from pathlib import Path
+from typing import Any
+
+from tools.ppl.pareto import validate_terminal_production_authority
 
 
 def repo_root() -> Path:
@@ -53,6 +59,344 @@ DEFAULT_FIXTURES = [
 # positions use the suffixed name (long_niah_{len}_{pos}.json).
 NIAH_LENGTHS = ("8k", "64k", "100k", "128k", "150k", "200k")
 NIAH_POSITIONS = ("start", "q25", "mid", "q75", "end")
+SERVER_LOG_ARTIFACT_TYPE = "ninfer_serve_request_log"
+SERVER_LOG_SCHEMA_VERSION = 20
+XATTENTION_PROFILES = ("dense", "b128-s16-tau900")
+NIAH_ENGINE_PROFILE = {
+    "max_context": 262144,
+    "kv_capacity_mode": "explicit",
+    "kv_capacity": 262144,
+    "max_concurrency": 1,
+    "prefix_reuse": False,
+}
+
+
+def file_identity(path: Path) -> dict[str, Any]:
+    resolved = path.resolve(strict=True)
+    if not resolved.is_file():
+        raise ValueError(f"provenance input is not a file: {resolved}")
+    digest = hashlib.sha256()
+    with resolved.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return {"path": str(resolved), "bytes": resolved.stat().st_size,
+            "sha256": digest.hexdigest()}
+
+
+def _json_sha256(value: dict[str, Any]) -> str:
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def load_static_profile_selection(path: Path, artifact: dict[str, Any]) -> dict[str, Any]:
+    resolved = path.resolve(strict=True)
+    raw = resolved.read_bytes()
+    value = json.loads(raw)
+    if not isinstance(value, dict):
+        raise ValueError("static profile authority root must be an object")
+    validate_terminal_production_authority(value)
+    selection = value.get("same_recipe_static_profile_selection")
+    choices = selection.get("selections") if isinstance(selection, dict) else None
+    terminal = value.get("terminal_production_selection")
+    if (value.get("artifact_type") != "ninfer_r9700_pareto_comparison" or
+            value.get("schema_version") != 7 or not isinstance(choices, list) or
+            value.get("single_static_profile_selection_required") is not True or
+            not choices or any(not isinstance(choice, dict) for choice in choices) or
+            selection.get("rule") != "same_recipe_static_profile_maximin_v2" or
+            not isinstance(terminal, dict) or terminal.get("rule") !=
+            "global_maximin_whole_then_capacity_then_quality_then_canonical_v1"):
+        raise ValueError("static profile authority is not a terminal schema-v7 decision")
+    winner = terminal.get("winner")
+    candidates = value.get("candidates")
+    frontier = value.get("frontier")
+    if (not isinstance(candidates, list) or not isinstance(frontier, list) or
+            any(not isinstance(name, str) or not name for name in frontier) or
+            len(frontier) != len(set(frontier))):
+        raise ValueError("static profile authority lacks candidate/frontier arrays")
+    expected_profiles = {
+        (16, "dense"), (32, "dense"),
+        (16, "b128-s16-tau900"), (32, "b128-s16-tau900"),
+    }
+    candidate_profiles = []
+    for row in candidates:
+        cache_row = row.get("cache_profile") if isinstance(row, dict) else None
+        execution_row = row.get("execution_profile") if isinstance(row, dict) else None
+        recipe_row = row.get("weight_recipe") if isinstance(row, dict) else None
+        candidate_profiles.append((
+            cache_row.get("value_group") if isinstance(cache_row, dict) else None,
+            execution_row.get("xattention_profile") if isinstance(execution_row, dict) else None,
+        ))
+        if (not isinstance(recipe_row, dict) or recipe_row.get("kind") != "artifact" or
+                not isinstance(recipe_row.get("weights_id"), str) or
+                not isinstance(recipe_row.get("sha256"), str) or
+                len(recipe_row["sha256"]) != 64 or
+                any(character not in "0123456789abcdef"
+                    for character in recipe_row["sha256"])):
+            raise ValueError("static profile authority has unbound candidate provenance")
+    recipe_groups = {}
+    for row, profile_identity in zip(candidates, candidate_profiles, strict=True):
+        recipe = json.dumps(row["weight_recipe"], sort_keys=True)
+        recipe_groups.setdefault(recipe, []).append(profile_identity)
+    if any(len(profiles) != 4 or set(profiles) != expected_profiles
+           for profiles in recipe_groups.values()):
+        raise ValueError("static profile authority lacks dense/sparse G16/G32 per artifact")
+    rows = [row for row in candidates
+            if isinstance(row, dict) and row.get("name") == winner]
+    if not isinstance(winner, str) or not winner or len(rows) != 1 or winner not in frontier:
+        raise ValueError("static profile winner is not one retained frontier candidate")
+    per_recipe_winners = [choice.get("winner") for choice in choices]
+    if any(not isinstance(name, str) or not name for name in per_recipe_winners):
+        raise ValueError("static profile authority has an invalid per-recipe winner")
+    per_recipe_winners.sort()
+    if terminal.get("eligible_profile_winners") != per_recipe_winners:
+        raise ValueError("terminal selection does not bind every per-recipe winner")
+    cache = terminal.get("winner_cache_profile")
+    execution = terminal.get("winner_execution_profile")
+    if cache != rows[0].get("cache_profile") or execution != rows[0].get("execution_profile"):
+        raise ValueError("static profile winner identities disagree with its candidate row")
+    layouts = cache.get("plane_layouts") if isinstance(cache, dict) else None
+    expected_layouts = {
+        "key": "token-fastest-head-major",
+        "value": "feature-fastest-page-major",
+        "value_scale": "feature-fastest-page-major",
+    }
+    group = cache.get("value_group") if isinstance(cache, dict) else None
+    profile = execution.get("xattention_profile") if isinstance(execution, dict) else None
+    if (not isinstance(cache, dict) or set(cache) != {"value_group", "plane_layouts"} or
+            group not in (16, 32) or layouts != expected_layouts or
+            not isinstance(execution, dict) or set(execution) != {
+                "q4_activation_bits", "w8_activation_bits", "fp8_qk_wmma_profile",
+                "xattention_profile",
+            } or execution.get("q4_activation_bits") != 8 or
+            execution.get("w8_activation_bits") != 8 or
+            execution.get("fp8_qk_wmma_profile") !=
+            "t1-ge64-t2-ge320-t3plus-stream-v1" or profile not in XATTENTION_PROFILES):
+        raise ValueError("static profile winner has an unsupported cache/attention identity")
+    recipe = terminal.get("winner_artifact")
+    if (not isinstance(recipe, dict) or recipe.get("kind") != "artifact" or
+            recipe.get("weights_id") != artifact["weights_id"] or
+            recipe.get("sha256") != artifact["sha256"] or
+            rows[0].get("weight_recipe") != recipe):
+        raise ValueError("static profile authority does not select the supplied artifact bytes")
+    return {
+        "path": str(resolved), "bytes": resolved.stat().st_size,
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "winner": winner, "kv_value_group": group, "xattention_profile": profile,
+        "prefill_chunk": value["selected_prefill_chunk"],
+    }
+
+
+def _parse_jsonl(data: bytes, path: Path) -> list[dict[str, Any]]:
+    if data and not data.endswith(b"\n"):
+        raise ValueError(f"server request log has an incomplete final line: {path}")
+    events = []
+    for line_number, raw in enumerate(data.splitlines(), 1):
+        try:
+            event = json.loads(raw)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ValueError(f"invalid server request log JSON at {path}:{line_number}") from error
+        if not isinstance(event, dict):
+            raise ValueError(f"server request log event is not an object at {path}:{line_number}")
+        events.append(event)
+    return events
+
+
+def _require_log_event(event: dict[str, Any], name: str) -> None:
+    identity = (event.get("artifact_type"), event.get("schema_version"), event.get("event"))
+    expected = (SERVER_LOG_ARTIFACT_TYPE, SERVER_LOG_SCHEMA_VERSION, name)
+    if identity != expected:
+        raise ValueError(f"unexpected server log identity {identity!r}; expected {expected!r}")
+
+
+def prepare_server_log_binding(server_log: Path, artifact: Path,
+                               serve_bin: Path, selection: Path,
+                               ) -> tuple[dict[str, Any], int]:
+    log_path = server_log.resolve(strict=True)
+    initial = log_path.read_bytes()
+    events = _parse_jsonl(initial, log_path)
+    starts = [event for event in events if event.get("event") == "server_start"]
+    if len(events) != 1 or len(starts) != 1:
+        raise ValueError(
+            "fresh NIAH server request log must contain exactly one server_start event"
+        )
+    start = starts[0]
+    _require_log_event(start, "server_start")
+    instance = start.get("server_instance_id")
+    if not isinstance(instance, str) or not instance:
+        raise ValueError("server_start has no server_instance_id")
+
+    artifact_identity = file_identity(artifact)
+    executable_identity = file_identity(serve_bin)
+    logged_artifact = start.get("artifact", {})
+    logged_server = start.get("server", {})
+    logged_argv = start.get("argv", [])
+    if not isinstance(logged_artifact, dict) or not isinstance(logged_server, dict):
+        raise ValueError("server_start is missing artifact/server provenance")
+    try:
+        logged_artifact_path = Path(str(logged_artifact["path"])).resolve(strict=True)
+    except (KeyError, OSError) as error:
+        raise ValueError("server_start artifact path is missing or unavailable") from error
+    if logged_artifact_path != Path(artifact_identity["path"]):
+        raise ValueError("supplied artifact does not match server_start artifact path")
+    if logged_artifact.get("size_bytes") != artifact_identity["bytes"]:
+        raise ValueError("supplied artifact size does not match server_start")
+    weights_id = logged_artifact.get("weights_id")
+    target = logged_artifact.get("target")
+    if not isinstance(weights_id, str) or not weights_id or target != "qwen3_8_27b_r9700":
+        raise ValueError("server_start lacks canonical artifact identity")
+    selected = load_static_profile_selection(
+        selection, {**artifact_identity, "weights_id": weights_id})
+    if not isinstance(logged_argv, list) or not logged_argv:
+        raise ValueError("server_start has no startup argv")
+    try:
+        logged_executable = Path(str(logged_argv[0])).resolve(strict=True)
+    except OSError as error:
+        raise ValueError("server_start executable path is unavailable") from error
+    if logged_executable != Path(executable_identity["path"]):
+        raise ValueError("supplied server executable does not match server_start argv")
+
+    engine = start.get("engine", {})
+    if not isinstance(engine, dict):
+        raise ValueError("server_start engine provenance must be an object")
+    expected_engine = {
+        **NIAH_ENGINE_PROFILE,
+        "prefill_chunk": selected["prefill_chunk"],
+    }
+    for key, value in expected_engine.items():
+        if engine.get(key) != value:
+            raise ValueError(f"server_start {key}={engine.get(key)!r}; expected {value!r}")
+    if engine.get("kv_value_group") != selected["kv_value_group"]:
+        raise ValueError(
+            f"server_start kv_value_group={engine.get('kv_value_group')!r}; "
+            f"selected G{selected['kv_value_group']}")
+    expected_xattention_profile = selected["xattention_profile"]
+    expected_xattention = (
+        {"xattention_qualification": False}
+        if expected_xattention_profile == "dense"
+        else {
+            "xattention_qualification": True,
+            "xattention_profile": "b128-s16-tau900",
+            "xattention_find_block": 128,
+            "xattention_stride": 16,
+            "xattention_tau_permille": 900,
+        }
+    )
+    for key, value in expected_xattention.items():
+        if engine.get(key) != value:
+            raise ValueError(
+                f"server_start {key}={engine.get(key)!r}; expected {value!r}"
+            )
+    if expected_xattention_profile == "dense":
+        unexpected = [
+            key for key in (
+                "xattention_profile", "xattention_find_block", "xattention_stride",
+                "xattention_tau_permille",
+            ) if key in engine
+        ]
+        if unexpected:
+            raise ValueError(
+                f"dense server_start carries XAttention profile fields: {unexpected!r}"
+            )
+
+    return ({
+        "server_log": {
+            "path": str(log_path),
+            "initial_bytes": len(initial),
+            "initial_sha256": hashlib.sha256(initial).hexdigest(),
+        },
+        "server_start": {
+            "server_instance_id": instance,
+            "event_sha256": _json_sha256(start),
+            "public_model_id": logged_server.get("public_model_id"),
+            "engine": start.get("engine", {}),
+            "xattention_profile": expected_xattention_profile,
+        },
+        "static_profile_selection": selected,
+        "artifact": {**artifact_identity, "target": target, "weights_id": weights_id},
+        "server_executable": executable_identity,
+    }, len(initial))
+
+
+def validate_fresh_prefill_log(server_log: Path, offset: int, binding: dict[str, Any],
+                               expected: list[dict[str, Any]]) -> dict[str, Any]:
+    log_path = server_log.resolve(strict=True)
+    data = log_path.read_bytes()
+    if len(data) < offset:
+        raise ValueError("server request log was truncated during the NIAH run")
+    if (offset != binding["server_log"]["initial_bytes"] or
+            hashlib.sha256(data[:offset]).hexdigest() !=
+            binding["server_log"]["initial_sha256"]):
+        raise ValueError("server request log prefix changed during the NIAH run")
+    events = _parse_jsonl(data[offset:], log_path)
+    instance = binding["server_start"]["server_instance_id"]
+    relevant = [event for event in events if event.get("server_instance_id") == instance and
+                event.get("event") in {"request_done", "request_error", "request_rejected"}]
+    if len(relevant) != len(expected):
+        raise ValueError(
+            f"server log has {len(relevant)} terminal request events, expected {len(expected)}")
+
+    validated = []
+    previous_request_id = None
+    for index, (event, submitted) in enumerate(zip(relevant, expected, strict=True)):
+        _require_log_event(event, "request_done")
+        request = event.get("request", {})
+        result = event.get("result", {})
+        try:
+            request_id = int(request["request_id"])
+            prompt_tokens = int(result["prompt_tokens"])
+            completion_tokens = int(result["completion_tokens"])
+            computed = int(result["computed_prefill_tokens"])
+            cache_hit = int(result["prefix_cache_hit_tokens"])
+            checkpoint = result["context_checkpoint"]
+            restored = int(checkpoint["restored_tokens"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError(f"request_done event {index} lacks fresh-prefill metrics") from error
+        if (request_id <= 0 or prompt_tokens <= 0 or completion_tokens < 0 or computed < 0 or
+                cache_hit < 0 or restored < 0):
+            raise ValueError(f"request_done event {index} has invalid negative/empty metrics")
+        if previous_request_id is not None and request_id <= previous_request_id:
+            raise ValueError("NIAH request IDs are not strictly increasing")
+        previous_request_id = request_id
+        actual_request = {
+            "model": request.get("model"),
+            "message_count": request.get("message_count"),
+            "requested_output_tokens": request.get("requested_output_tokens"),
+            "enable_thinking": request.get("enable_thinking"),
+        }
+        wanted_request = {
+            "model": submitted["model"],
+            "message_count": submitted["message_count"],
+            "requested_output_tokens": submitted["requested_output_tokens"],
+            "enable_thinking": submitted["enable_thinking"],
+        }
+        if actual_request != wanted_request:
+            raise ValueError(f"request_done event {index} does not match submitted NIAH request")
+        if (prompt_tokens != submitted["prompt_tokens"] or
+                completion_tokens != submitted["completion_tokens"]):
+            raise ValueError(f"request_done event {index} disagrees with HTTP usage")
+        if (computed != prompt_tokens or cache_hit != 0 or restored != 0 or
+                result.get("reuse_source") != "none"):
+            raise ValueError(f"request_done event {index} did not perform a fresh full prefill")
+        validated.append({"request_id": request_id, "prompt_tokens": prompt_tokens,
+                          "computed_prefill_tokens": computed})
+
+    if file_identity(Path(binding["artifact"]["path"])) != {
+            key: binding["artifact"][key] for key in ("path", "bytes", "sha256")}:
+        raise ValueError("artifact bytes changed during the NIAH run")
+    if file_identity(Path(binding["server_executable"]["path"])) != binding["server_executable"]:
+        raise ValueError("server executable bytes changed during the NIAH run")
+    selected = binding["static_profile_selection"]
+    if file_identity(Path(selected["path"])) != {
+            key: selected[key] for key in ("path", "bytes", "sha256")}:
+        raise ValueError("static profile selection bytes changed during the NIAH run")
+    prefix = data[:]
+    return {
+        "pass": True,
+        "request_count": len(validated),
+        "requests": validated,
+        "validated_log_bytes": len(prefix),
+        "validated_log_sha256": hashlib.sha256(prefix).hexdigest(),
+    }
 
 
 def matrix_cases(lengths, positions):
@@ -103,11 +447,19 @@ def resolve_fixture(ref: str) -> Path:
     return p
 
 
-def load_messages(fixture: str) -> list:
-    raw = json.loads(resolve_fixture(fixture).read_text(encoding="utf-8"))
+def load_messages_and_identity(fixture: str) -> tuple[list, dict[str, Any]]:
+    path = resolve_fixture(fixture).resolve(strict=True)
+    data = path.read_bytes()
+    raw = json.loads(data)
+    identity = {"path": str(path), "bytes": len(data),
+                "sha256": hashlib.sha256(data).hexdigest()}
     if isinstance(raw, list):
-        return raw
-    return raw.get("messages", [])
+        return raw, identity
+    return raw.get("messages", []), identity
+
+
+def load_messages(fixture: str) -> list:
+    return load_messages_and_identity(fixture)[0]
 
 
 def post(base: str, key: str, body: dict, timeout: float) -> dict:
@@ -139,6 +491,8 @@ def main() -> int:
     ap.add_argument("--key", default=None, help="API key (else read from env/.env)")
     ap.add_argument("--needle", default=DEFAULT_NEEDLE,
                     help="substring that must appear in the answer for a PASS")
+    ap.add_argument("--exact-answer", action="store_true",
+                    help="require the stripped response to equal --needle exactly")
     ap.add_argument("--fixture", action="append", default=None,
                     help="fixture ref (repeatable). Default: 8k + 64k NIAH.")
     ap.add_argument("--lengths", default="",
@@ -154,13 +508,34 @@ def main() -> int:
     ap.add_argument("--runs", type=int, default=1, help="repeat each case N times")
     ap.add_argument("--timeout", type=float, default=600.0)
     ap.add_argument("--label", default="niah")
+    ap.add_argument("--out", type=Path,
+                    help="explicit JSON evidence path (must not already exist)")
+    ap.add_argument("--server-log", type=Path,
+                    help="serving schema-v20 request JSONL used to prove fresh full prefill")
+    ap.add_argument("--artifact", type=Path,
+                    help="exact artifact loaded by the supplied server log")
+    ap.add_argument("--serve-bin", type=Path,
+                        help="exact ninfer-serve executable named by server_start argv")
+    ap.add_argument("--selection", type=Path,
+                    help="schema-v7 terminal artifact/cache/execution selection authority")
     args = ap.parse_args()
 
-    key = load_key(args.key)
-    if not key:
-        print("ERROR: no API key (pass --key or set NINFER_API_KEY / LLAMA_CPP_LOCAL_API_KEY)",
-              file=__import__("sys").stderr)
-        return 2
+    durable_values = (args.server_log, args.artifact, args.serve_bin, args.selection)
+    if any(value is not None for value in durable_values):
+        if any(value is None for value in durable_values) or args.out is None:
+            ap.error("durable evidence requires --out, --server-log, --artifact, --serve-bin, "
+                     "and --selection")
+
+    binding = None
+    log_offset = 0
+    if args.server_log is not None:
+        try:
+            binding, log_offset = prepare_server_log_binding(
+                args.server_log, args.artifact, args.serve_bin, args.selection)
+            if binding["server_start"]["public_model_id"] != args.model:
+                raise ValueError("--model does not match server_start public model id")
+        except (OSError, ValueError) as error:
+            ap.error(str(error))
 
     cases = []
     if args.fixture:
@@ -185,26 +560,57 @@ def main() -> int:
     else:
         cases = DEFAULT_FIXTURES
 
-    out_dir = ROOT / "profiles" / "bench" / "niah-check"
+    # Resolve and freeze every fixture before the first request. A missing or malformed later cell
+    # must not leave a partially executed durable campaign.
+    loaded_cases = []
+    for label, ref in cases:
+        messages, fixture_identity = load_messages_and_identity(ref)
+        if not isinstance(messages, list) or not messages:
+            ap.error(f"NIAH fixture has no messages: {ref}")
+        loaded_cases.append((label, ref, messages, fixture_identity))
+
+    key = load_key(args.key)
+    if not key:
+        print("ERROR: no API key (pass --key or set NINFER_API_KEY / LLAMA_CPP_LOCAL_API_KEY)",
+              file=__import__("sys").stderr)
+        return 2
+
+    if args.out is None:
+        out_dir = ROOT / "profiles" / "bench" / "niah-check"
+        rec_path = out_dir / f"niah-check-{args.label}-{int(time.time())}.json"
+    else:
+        rec_path = args.out.parent.resolve(strict=True) / args.out.name
+        out_dir = rec_path.parent
+    if os.path.lexists(rec_path):
+        ap.error(f"output already exists: {rec_path}")
     out_dir.mkdir(parents=True, exist_ok=True)
     record = {
+        "artifact_type": "ninfer_niah_evidence",
+        "schema_version": 2,
         "label": args.label,
         "base": args.base,
         "model": args.model,
         "needle": args.needle,
+        "answer_match": "exact" if args.exact_answer else "contains",
+        "max_tokens": args.max_tokens,
         "thinking": args.thinking,
+        "seed": args.seed,
         "runs": args.runs,
         "ts": int(time.time()),
+        "evidence_mode": "provenance-bound" if binding is not None else "recall-only",
+        "provenance": binding,
         "cases": [],
     }
 
     all_pass = True
-    for label, ref in cases:
-        messages = load_messages(ref)
+    expected_log_requests = []
+    for label, ref, messages, fixture_identity in loaded_cases:
+        fixture_path = Path(fixture_identity["path"])
         n_prompt_chars = sum(len(m.get("content", "")) for m in messages)
         retrieved = 0
         total = 0
         snippets = []
+        request_records = []
         for run in range(args.runs):
             body = {
                 "model": args.model,
@@ -221,13 +627,29 @@ def main() -> int:
                 data = post(args.base, key, body, args.timeout)
             except Exception as exc:  # noqa: BLE001 - report and continue
                 total += 1
+                all_pass = False
                 snippets.append(f"RUN ERROR: {exc}")
+                request_records.append({"run": run + 1, "status": "error",
+                                        "error": str(exc)})
                 print(f"  [{label}] run {run + 1}/{args.runs}: ERROR {exc}")
                 continue
             wall = time.perf_counter() - t0
             text = content_of(data)
+            usage = data.get("usage", {})
+            try:
+                prompt_tokens = int(usage["prompt_tokens"])
+                completion_tokens = int(usage["completion_tokens"])
+            except (KeyError, TypeError, ValueError):
+                prompt_tokens = -1
+                completion_tokens = -1
+            if prompt_tokens <= 0 or completion_tokens < 0:
+                all_pass = False
             total += 1
-            ok = args.needle in text
+            normalized_answer = text.strip()
+            ok = (
+                normalized_answer == args.needle
+                if args.exact_answer else args.needle in text
+            )
             retrieved += 1 if ok else 0
             status = "PASS" if ok else "FAIL"
             all_pass = all_pass and ok
@@ -235,29 +657,95 @@ def main() -> int:
             if len(preview) > 240:
                 preview = preview[:240] + "..."
             snippets.append(f"{status}: {preview}")
+            request_records.append({"run": run + 1, "status": status.lower(),
+                                    "prompt_tokens": prompt_tokens,
+                                    "completion_tokens": completion_tokens,
+                                    "answer_bytes": len(normalized_answer.encode("utf-8")),
+                                    "answer_sha256": hashlib.sha256(
+                                        normalized_answer.encode("utf-8")
+                                    ).hexdigest()})
+            expected_log_requests.append({
+                "model": args.model,
+                "message_count": len(messages),
+                "requested_output_tokens": args.max_tokens,
+                "enable_thinking": args.thinking,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+            })
             print(f"  [{label}] run {run + 1}/{args.runs}: {status} "
                   f"(wall {wall:.1f}s, needle={ok})\n      {preview}")
-        passed = retrieved == total and total > 0
+        fixture_unchanged = file_identity(fixture_path) == fixture_identity
+        all_pass = all_pass and fixture_unchanged
+        passed = retrieved == total and total > 0 and fixture_unchanged
         record["cases"].append({
             "label": label,
             "fixture": str(ref),
+            "fixture_identity": fixture_identity,
+            "fixture_unchanged": fixture_unchanged,
             "prompt_chars": n_prompt_chars,
             "retrieved": retrieved,
             "total": total,
             "recall": (retrieved / total) if total else 0.0,
             "passed": passed,
             "snippets": snippets,
+            "requests": request_records,
         })
 
-    rec_path = out_dir / f"niah-check-{args.label}-{record['ts']}.json"
-    rec_path.write_text(json.dumps(record, indent=2), encoding="utf-8")
-    print(f"\nrecord -> {rec_path.relative_to(ROOT)}")
+    if binding is not None:
+        try:
+            record["fresh_full_prefill"] = validate_fresh_prefill_log(
+                args.server_log, log_offset, binding, expected_log_requests)
+        except (OSError, ValueError) as error:
+            record["fresh_full_prefill"] = {"pass": False, "error": str(error)}
+            all_pass = False
+    record["pass"] = all_pass and all(case["passed"] for case in record["cases"])
+    pending = rec_path.with_name(f".{rec_path.name}.pending-{os.getpid()}")
+    published = False
+    durable = False
+    published_inode = None
+    try:
+        with pending.open("x", encoding="utf-8") as output:
+            json.dump(record, output, indent=2)
+            output.write("\n")
+            output.flush()
+            os.fsync(output.fileno())
+        # Same-directory hard-link publication is atomic and refuses to replace an existing result.
+        os.link(pending, rec_path)
+        published = True
+        current = os.stat(rec_path, follow_symlinks=False)
+        published_inode = (current.st_dev, current.st_ino)
+        if json.loads(rec_path.read_text(encoding="utf-8")) != record:
+            raise ValueError("published NIAH evidence does not match completed run")
+        directory = os.open(rec_path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+        durable = True
+    finally:
+        pending.unlink(missing_ok=True)
+        if published and not durable and published_inode is not None:
+            try:
+                current = os.stat(rec_path, follow_symlinks=False)
+                if (current.st_dev, current.st_ino) == published_inode:
+                    rec_path.unlink()
+            except FileNotFoundError:
+                pass
+    try:
+        display_path = rec_path.relative_to(ROOT)
+    except ValueError:
+        display_path = rec_path
+    print(f"\nrecord -> {display_path}")
     failed_cases = [c for c in record["cases"] if not c["passed"]]
     failed_runs = sum(c["total"] - c["retrieved"] for c in record["cases"])
     total_runs = sum(c["total"] for c in record["cases"])
     for c in failed_cases:
         nfail = c["total"] - c["retrieved"]
-        print(f"  [FAIL] {c['label']}: {nfail}/{c['total']} runs failed to retrieve the needle")
+        if not c["fixture_unchanged"]:
+            print(f"  [FAIL] {c['label']}: fixture bytes changed during the run")
+        else:
+            print(f"  [FAIL] {c['label']}: {nfail}/{c['total']} runs failed to retrieve the needle")
+    all_pass = record["pass"]
     verdict = "PASS" if all_pass else "FAIL"
     print(f"NIAH gate: {verdict} "
           f"({len(failed_cases)}/{len(record['cases'])} cases, "

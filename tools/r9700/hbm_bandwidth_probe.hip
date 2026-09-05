@@ -1,0 +1,513 @@
+// Standalone gfx1201 sustained device-memory bandwidth probe.
+//
+// Build:
+//   hipcc -O3 -std=c++20 --offload-arch=gfx1201 \
+//     tools/r9700/hbm_bandwidth_probe.hip -o build-r9700/hbm_bandwidth_probe
+//
+// The "bus GB/s" column counts physical streaming traffic: N bytes for a
+// read or write and 2N bytes for a copy (N read + N written). This is the
+// column to compare with the advertised memory-bus bandwidth.
+
+#include <hip/hip_runtime.h>
+
+#include <algorithm>
+#include <cctype>
+#include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <fstream>
+#include <limits>
+#include <sstream>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+#define HIP_CHECK(expr)                                                                           \
+    do {                                                                                           \
+        const hipError_t error__ = (expr);                                                        \
+        if (error__ != hipSuccess) {                                                              \
+            std::fprintf(stderr, "HIP error at %s:%d: %s\n", __FILE__, __LINE__,                  \
+                         hipGetErrorString(error__));                                             \
+            std::exit(EXIT_FAILURE);                                                               \
+        }                                                                                          \
+    } while (false)
+
+namespace {
+
+constexpr int kThreads                 = 256;
+constexpr double kDefaultPeakGBps      = 640.0;
+constexpr double kDefaultTrialSeconds  = 0.25;
+constexpr int kDefaultTrials           = 5;
+constexpr std::size_t kDefaultMaxBytes = std::size_t{4} << 30;
+constexpr std::string_view kRequiredArch = "gfx1201";
+constexpr std::string_view kAmdVendor    = "0x1002";
+constexpr std::string_view kR9700Device  = "0x7551";
+
+struct Options {
+    double size_gib  = 0.0; // 0 selects min(4 GiB, 20% of currently free memory).
+    double seconds   = kDefaultTrialSeconds;
+    int trials       = kDefaultTrials;
+    double peak_gbps = kDefaultPeakGBps;
+};
+
+struct Result {
+    const char* name;
+    double payload_gbps;
+    double bus_gbps;
+    double median_bus_gbps;
+    double peak_fraction;
+    double ns;
+    int iterations;
+};
+
+std::string trim(std::string value) {
+    const auto begin = value.find_first_not_of(" \t\r\n");
+    if (begin == std::string::npos) { return {}; }
+    const auto end = value.find_last_not_of(" \t\r\n");
+    return value.substr(begin, end - begin + 1);
+}
+
+std::string read_text_file(const std::string& path) {
+    std::ifstream input(path);
+    if (!input) { return {}; }
+    std::string value;
+    std::getline(input, value);
+    return trim(value);
+}
+
+std::string normalize_pci_bus_id(std::string id) {
+    std::transform(id.begin(), id.end(), id.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    if (id.size() == 7 && id[2] == ':' && id[5] == '.') { id = "0000:" + id; }
+    return id;
+}
+
+int select_r9700() {
+    int count = 0;
+    HIP_CHECK(hipGetDeviceCount(&count));
+    const char* requested_env = std::getenv("NINFER_R9700_PCI_BUS_ID");
+    const std::string requested =
+        requested_env == nullptr ? "" : normalize_pci_bus_id(requested_env);
+    std::vector<int> matches;
+    for (int ordinal = 0; ordinal < count; ++ordinal) {
+        hipDeviceProp_t props{};
+        HIP_CHECK(hipGetDeviceProperties(&props, ordinal));
+        char pci_buffer[32]{};
+        HIP_CHECK(hipDeviceGetPCIBusId(pci_buffer, sizeof(pci_buffer), ordinal));
+        const std::string pci = normalize_pci_bus_id(pci_buffer);
+        const std::string sysfs = "/sys/bus/pci/devices/" + pci;
+        const bool exact_identity = read_text_file(sysfs + "/vendor") == kAmdVendor &&
+                                    read_text_file(sysfs + "/device") == kR9700Device;
+        const bool exact_device = exact_identity && props.integrated == 0 &&
+                                  std::string_view(props.gcnArchName) == kRequiredArch &&
+                                  props.warpSize == 32;
+        if (exact_device && (requested.empty() || requested == pci)) { matches.push_back(ordinal); }
+    }
+    if (matches.size() != 1) {
+        std::fprintf(stderr,
+                     "Expected exactly one discrete 1002:7551 gfx1201 wave32 R9700, found %zu\n",
+                     matches.size());
+        std::exit(EXIT_FAILURE);
+    }
+    HIP_CHECK(hipSetDevice(matches.front()));
+    return matches.front();
+}
+
+template <typename T>
+class DeviceBuffer {
+public:
+    explicit DeviceBuffer(std::size_t count) : count_(count) {
+        HIP_CHECK(hipMalloc(&data_, count_ * sizeof(T)));
+    }
+
+    ~DeviceBuffer() {
+        if (data_ != nullptr) {
+            const hipError_t error = hipFree(data_);
+            if (error != hipSuccess) {
+                std::fprintf(stderr, "HIP free failed during teardown: %s\n",
+                             hipGetErrorString(error));
+            }
+        }
+    }
+
+    DeviceBuffer(const DeviceBuffer&)            = delete;
+    DeviceBuffer& operator=(const DeviceBuffer&) = delete;
+
+    T* get() { return data_; }
+
+    const T* get() const { return data_; }
+
+    std::size_t size() const { return count_; }
+
+private:
+    T* data_           = nullptr;
+    std::size_t count_ = 0;
+};
+
+class Event {
+public:
+    Event() { HIP_CHECK(hipEventCreate(&event_)); }
+
+    ~Event() {
+        const hipError_t error = hipEventDestroy(event_);
+        if (error != hipSuccess) {
+            std::fprintf(stderr, "HIP event teardown failed: %s\n", hipGetErrorString(error));
+        }
+    }
+
+    Event(const Event&)            = delete;
+    Event& operator=(const Event&) = delete;
+
+    hipEvent_t get() const { return event_; }
+
+private:
+    hipEvent_t event_{};
+};
+
+__global__ void write_u128_kernel(uint4* __restrict__ dst, std::size_t count, uint4 value) {
+    const std::size_t tid    = static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const std::size_t stride = static_cast<std::size_t>(gridDim.x) * blockDim.x;
+    for (std::size_t i = tid; i < count; i += stride) { dst[i] = value; }
+}
+
+// The block checksum makes every load observable while adding only one tiny
+// output store per block. Four independent lanes avoid a single long integer
+// dependency chain in each thread.
+__global__ void read_u128_kernel(const uint4* __restrict__ src, uint4* __restrict__ block_checksums,
+                                 std::size_t count) {
+    __shared__ uint4 sums[kThreads];
+
+    const std::size_t tid    = static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const std::size_t stride = static_cast<std::size_t>(gridDim.x) * blockDim.x;
+    uint4 sum                = make_uint4(0u, 0u, 0u, 0u);
+
+    for (std::size_t i = tid; i < count; i += stride) {
+        const uint4 value = src[i];
+        sum.x += value.x;
+        sum.y += value.y;
+        sum.z += value.z;
+        sum.w += value.w;
+    }
+
+    sums[threadIdx.x] = sum;
+    __syncthreads();
+    for (int offset = blockDim.x / 2; offset != 0; offset /= 2) {
+        if (threadIdx.x < static_cast<unsigned>(offset)) {
+            const uint4 other = sums[threadIdx.x + offset];
+            sums[threadIdx.x].x += other.x;
+            sums[threadIdx.x].y += other.y;
+            sums[threadIdx.x].z += other.z;
+            sums[threadIdx.x].w += other.w;
+        }
+        __syncthreads();
+    }
+    if (threadIdx.x == 0) { block_checksums[blockIdx.x] = sums[0]; }
+}
+
+__global__ void copy_u128_kernel(const uint4* __restrict__ src, uint4* __restrict__ dst,
+                                 std::size_t count) {
+    const std::size_t tid    = static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const std::size_t stride = static_cast<std::size_t>(gridDim.x) * blockDim.x;
+    for (std::size_t i = tid; i < count; i += stride) { dst[i] = src[i]; }
+}
+
+// Expose four independent loads before their stores. On some GPUs this raises
+// the per-warp memory-level parallelism of a mixed read/write stream.
+__global__ void copy_u128x4_kernel(const uint4* __restrict__ src, uint4* __restrict__ dst,
+                                   std::size_t count) {
+    const std::size_t tid    = static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const std::size_t stride = static_cast<std::size_t>(gridDim.x) * blockDim.x;
+    std::size_t i            = tid;
+    for (; i + 3 * stride < count; i += 4 * stride) {
+        const uint4 value0  = src[i];
+        const uint4 value1  = src[i + stride];
+        const uint4 value2  = src[i + 2 * stride];
+        const uint4 value3  = src[i + 3 * stride];
+        dst[i]              = value0;
+        dst[i + stride]     = value1;
+        dst[i + 2 * stride] = value2;
+        dst[i + 3 * stride] = value3;
+    }
+    for (; i < count; i += stride) { dst[i] = src[i]; }
+}
+
+double parse_double(const char* text, const char* option) {
+    char* end          = nullptr;
+    const double value = std::strtod(text, &end);
+    if (end == text || *end != '\0' || !std::isfinite(value) || value <= 0.0) {
+        std::fprintf(stderr, "Invalid value for %s: %s\n", option, text);
+        std::exit(EXIT_FAILURE);
+    }
+    return value;
+}
+
+int parse_int(const char* text, const char* option) {
+    char* end        = nullptr;
+    const long value = std::strtol(text, &end, 10);
+    if (end == text || *end != '\0' || value <= 0 || value > std::numeric_limits<int>::max()) {
+        std::fprintf(stderr, "Invalid value for %s: %s\n", option, text);
+        std::exit(EXIT_FAILURE);
+    }
+    return static_cast<int>(value);
+}
+
+void print_help(const char* argv0) {
+    std::printf("Usage: %s [options]\n"
+                "  --size-gib N    bytes per large buffer (default: min(4, 20%% free))\n"
+                "  --seconds N     target duration of each timed trial (default: %.2f)\n"
+                "  --trials N      timed trials per method (default: %d)\n"
+                "  --peak-gbps N   advertised bus bandwidth (default: %.0f)\n"
+                "  --help          show this text\n",
+                argv0, kDefaultTrialSeconds, kDefaultTrials, kDefaultPeakGBps);
+}
+
+Options parse_options(int argc, char** argv) {
+    Options options;
+    for (int i = 1; i < argc; ++i) {
+        const char* arg = argv[i];
+        if (std::strcmp(arg, "--help") == 0) {
+            print_help(argv[0]);
+            std::exit(EXIT_SUCCESS);
+        }
+        if (i + 1 >= argc) {
+            std::fprintf(stderr, "Missing value after %s\n", arg);
+            std::exit(EXIT_FAILURE);
+        }
+        if (std::strcmp(arg, "--size-gib") == 0) {
+            options.size_gib = parse_double(argv[++i], arg);
+        } else if (std::strcmp(arg, "--seconds") == 0) {
+            options.seconds = parse_double(argv[++i], arg);
+        } else if (std::strcmp(arg, "--trials") == 0) {
+            options.trials = parse_int(argv[++i], arg);
+        } else if (std::strcmp(arg, "--peak-gbps") == 0) {
+            options.peak_gbps = parse_double(argv[++i], arg);
+        } else {
+            std::fprintf(stderr, "Unknown option: %s\n", arg);
+            print_help(argv[0]);
+            std::exit(EXIT_FAILURE);
+        }
+    }
+    return options;
+}
+
+template <typename Launch>
+double elapsed_ms(hipStream_t stream, int iterations, Launch&& launch) {
+    Event start;
+    Event stop;
+    HIP_CHECK(hipEventRecord(start.get(), stream));
+    for (int i = 0; i < iterations; ++i) { launch(); }
+    HIP_CHECK(hipEventRecord(stop.get(), stream));
+    HIP_CHECK(hipEventSynchronize(stop.get()));
+    float milliseconds = 0.0f;
+    HIP_CHECK(hipEventElapsedTime(&milliseconds, start.get(), stop.get()));
+    return static_cast<double>(milliseconds);
+}
+
+template <typename Launch>
+Result benchmark(const char* name, std::size_t payload_bytes, double traffic_multiplier,
+                 double peak_gbps, double trial_seconds, int trials, hipStream_t stream,
+                 Launch&& launch) {
+    // A few untimed sweeps settle clocks and page mappings before calibration.
+    for (int i = 0; i < 8; ++i) { launch(); }
+    HIP_CHECK(hipStreamSynchronize(stream));
+
+    const double calibration_ms = elapsed_ms(stream, 2, launch) / 2.0;
+    const int iterations =
+        std::max(1, static_cast<int>(std::ceil(trial_seconds * 1000.0 / calibration_ms)));
+
+    std::vector<double> trial_ns;
+    trial_ns.reserve(trials);
+    for (int trial = 0; trial < trials; ++trial) {
+        const double milliseconds = elapsed_ms(stream, iterations, launch);
+        trial_ns.push_back(milliseconds * 1.0e6 / iterations);
+    }
+    HIP_CHECK(hipGetLastError());
+
+    std::sort(trial_ns.begin(), trial_ns.end());
+    const double best_ns      = trial_ns.front();
+    const double median_ns    = trial_ns[trial_ns.size() / 2];
+    const double payload_gbps = static_cast<double>(payload_bytes) / best_ns;
+    const double bus_gbps     = payload_gbps * traffic_multiplier;
+    const double median_bus_gbps =
+        static_cast<double>(payload_bytes) / median_ns * traffic_multiplier;
+    return Result{name,    payload_gbps, bus_gbps, median_bus_gbps, bus_gbps / peak_gbps,
+                  best_ns, iterations};
+}
+
+template <typename Kernel>
+int resident_grid(Kernel kernel, int processor_count) {
+    int blocks_per_processor = 0;
+    HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(&blocks_per_processor, kernel, kThreads,
+                                                            0));
+    return std::max(processor_count, processor_count * blocks_per_processor);
+}
+
+void print_result(const Result& result) {
+    std::printf("%-28s %12.1f %12.1f %12.1f %9.1f%% %10.3f\n", result.name, result.payload_gbps,
+                result.bus_gbps, result.median_bus_gbps, result.peak_fraction * 100.0,
+                result.ns / 1.0e6);
+}
+
+} // namespace
+
+int main(int argc, char** argv) {
+    const Options options = parse_options(argc, argv);
+
+    const int device = select_r9700();
+    hipDeviceProp_t prop{};
+    HIP_CHECK(hipGetDeviceProperties(&prop, device));
+
+    std::size_t free_bytes  = 0;
+    std::size_t total_bytes = 0;
+    HIP_CHECK(hipMemGetInfo(&free_bytes, &total_bytes));
+
+    std::size_t bytes =
+        options.size_gib > 0.0
+            ? static_cast<std::size_t>(options.size_gib * static_cast<double>(std::size_t{1} << 30))
+            : std::min(kDefaultMaxBytes, free_bytes / 5);
+    bytes = bytes / sizeof(uint4) * sizeof(uint4);
+    if (bytes < static_cast<std::size_t>(prop.l2CacheSize) * 4) {
+        std::fprintf(stderr,
+                     "Working set must be at least 4x L2 (%d MiB); requested %.1f "
+                     "MiB\n",
+                     prop.l2CacheSize >> 20, static_cast<double>(bytes) / (1 << 20));
+        return EXIT_FAILURE;
+    }
+    if (bytes > free_bytes / 3) {
+        std::fprintf(stderr,
+                     "Two buffers plus headroom need <= 2/3 of free VRAM; "
+                     "requested %.2f GiB each with %.2f GiB free\n",
+                     static_cast<double>(bytes) / (std::size_t{1} << 30),
+                     static_cast<double>(free_bytes) / (std::size_t{1} << 30));
+        return EXIT_FAILURE;
+    }
+
+    const std::size_t vector_count = bytes / sizeof(uint4);
+    const int write_grid           = resident_grid(write_u128_kernel, prop.multiProcessorCount);
+    const int read_grid            = resident_grid(read_u128_kernel, prop.multiProcessorCount);
+    const int copy_grid            = resident_grid(copy_u128_kernel, prop.multiProcessorCount);
+    const int copy_x4_grid         = resident_grid(copy_u128x4_kernel, prop.multiProcessorCount);
+
+    std::printf("GPU:               %s\n", prop.name);
+    std::printf("Architecture:      %s (wave%d)\n", prop.gcnArchName, prop.warpSize);
+    std::printf("HIP processors/L2: %d / %.1f MiB\n", prop.multiProcessorCount,
+                static_cast<double>(prop.l2CacheSize) / (1 << 20));
+    std::printf("Memory bus width:  %d bits\n", prop.memoryBusWidth);
+    std::printf("VRAM total/free:   %.2f / %.2f GiB\n",
+                static_cast<double>(total_bytes) / (std::size_t{1} << 30),
+                static_cast<double>(free_bytes) / (std::size_t{1} << 30));
+    std::printf("Working set:       %.2f GiB per buffer (%.1fx L2)\n",
+                static_cast<double>(bytes) / (std::size_t{1} << 30),
+                static_cast<double>(bytes) / prop.l2CacheSize);
+    std::printf("Advertised peak:   %.1f GB/s\n", options.peak_gbps);
+    std::printf("Trial policy:      %d trials, >= %.2f s each, best + median\n", options.trials,
+                options.seconds);
+    std::printf("Resident grids:    write=%d read=%d copy=%d copy-x4=%d blocks x %d threads\n\n",
+                write_grid, read_grid, copy_grid, copy_x4_grid, kThreads);
+
+    DeviceBuffer<uint4> source(vector_count);
+    DeviceBuffer<uint4> destination(vector_count);
+    DeviceBuffer<uint4> checksums(read_grid);
+
+    hipStream_t stream{};
+    HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+
+    const uint4 source_value = make_uint4(0x13579bdfu, 0x2468ace0u, 0xdeadbeefu, 0x10203040u);
+    write_u128_kernel<<<write_grid, kThreads, 0, stream>>>(source.get(), vector_count,
+                                                           source_value);
+    HIP_CHECK(hipGetLastError());
+
+    // Long preconditioning phase: make the first reported method independent
+    // of idle P-state ramp-up.
+    for (int i = 0; i < 64; ++i) {
+        copy_u128_kernel<<<copy_grid, kThreads, 0, stream>>>(source.get(), destination.get(),
+                                                             vector_count);
+    }
+    HIP_CHECK(hipStreamSynchronize(stream));
+
+    std::vector<Result> results;
+    results.reserve(6);
+
+    results.push_back(benchmark(
+        "hipMemsetAsync (write)", bytes, 1.0, options.peak_gbps, options.seconds, options.trials,
+        stream, [&] { HIP_CHECK(hipMemsetAsync(destination.get(), 0xa5, bytes, stream)); }));
+
+    const uint4 write_value = make_uint4(0x55aa55aau, 0xaa55aa55u, 0x31415926u, 0x27182818u);
+    results.push_back(benchmark("kernel uint4 write", bytes, 1.0, options.peak_gbps,
+                                options.seconds, options.trials, stream, [&] {
+                                    write_u128_kernel<<<write_grid, kThreads, 0, stream>>>(
+                                        destination.get(), vector_count, write_value);
+                                }));
+
+    results.push_back(benchmark("kernel uint4 read", bytes, 1.0, options.peak_gbps, options.seconds,
+                                options.trials, stream, [&] {
+                                    read_u128_kernel<<<read_grid, kThreads, 0, stream>>>(
+                                        source.get(), checksums.get(), vector_count);
+                                }));
+
+    results.push_back(benchmark("kernel uint4 copy", bytes, 2.0, options.peak_gbps, options.seconds,
+                                options.trials, stream, [&] {
+                                    copy_u128_kernel<<<copy_grid, kThreads, 0, stream>>>(
+                                        source.get(), destination.get(), vector_count);
+                                }));
+
+    results.push_back(benchmark("kernel uint4x4 copy", bytes, 2.0, options.peak_gbps,
+                                options.seconds, options.trials, stream, [&] {
+                                    copy_u128x4_kernel<<<copy_x4_grid, kThreads, 0, stream>>>(
+                                        source.get(), destination.get(), vector_count);
+                                }));
+
+    results.push_back(benchmark("hipMemcpyAsync D2D", bytes, 2.0, options.peak_gbps,
+                                options.seconds, options.trials, stream, [&] {
+                                    HIP_CHECK(hipMemcpyAsync(destination.get(), source.get(),
+                                                               bytes, hipMemcpyDeviceToDevice,
+                                                               stream));
+                                }));
+
+    std::vector<uint4> host_checksums(static_cast<std::size_t>(read_grid));
+    HIP_CHECK(hipMemcpyAsync(host_checksums.data(), checksums.get(),
+                             host_checksums.size() * sizeof(uint4), hipMemcpyDeviceToHost,
+                             stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+
+    uint4 checksum = make_uint4(0, 0, 0, 0);
+    for (const uint4 value : host_checksums) {
+        checksum.x += value.x;
+        checksum.y += value.y;
+        checksum.z += value.z;
+        checksum.w += value.w;
+    }
+    const auto expected_lane = [vector_count](std::uint32_t value) {
+        return static_cast<std::uint32_t>(static_cast<std::uint64_t>(value) * vector_count);
+    };
+    const uint4 expected =
+        make_uint4(expected_lane(source_value.x), expected_lane(source_value.y),
+                   expected_lane(source_value.z), expected_lane(source_value.w));
+    if (checksum.x != expected.x || checksum.y != expected.y || checksum.z != expected.z ||
+        checksum.w != expected.w) {
+        std::fprintf(stderr, "Read checksum mismatch\n");
+        return EXIT_FAILURE;
+    }
+
+    std::printf("%-28s %12s %12s %12s %10s %10s\n", "method", "payload", "best bus", "median bus",
+                "of peak", "best ms");
+    std::printf("%-28s %12s %12s %12s %10s %10s\n", "", "GB/s", "GB/s", "GB/s", "", "");
+    for (const Result& result : results) { print_result(result); }
+
+    const auto best =
+        std::max_element(results.begin(), results.end(),
+                         [](const Result& a, const Result& b) { return a.bus_gbps < b.bus_gbps; });
+    std::printf("\nBest sustained bus rate: %.1f GB/s (%.1f%% of %.1f GB/s), %s\n", best->bus_gbps,
+                best->peak_fraction * 100.0, options.peak_gbps, best->name);
+    std::printf("Read checksum exact:     %08x:%08x:%08x:%08x\n", checksum.x, checksum.y,
+                checksum.z, checksum.w);
+    std::printf("Note: copy payload is half its bus rate because every copied byte is "
+                "both read and written.\n");
+
+    HIP_CHECK(hipStreamDestroy(stream));
+    return EXIT_SUCCESS;
+}

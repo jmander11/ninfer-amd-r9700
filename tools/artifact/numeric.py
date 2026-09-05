@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-import struct
 from types import MappingProxyType
 from typing import TypeAlias
 
@@ -29,14 +28,13 @@ class QuantFormat:
 
 
 @dataclass(frozen=True, slots=True)
-class Nvfp4Format:
-    """E2M1 weights with one E4M3FN scale word per K-axis group."""
+class RowScaledFormat:
+    """Eight-bit row-scaled codes with one FP32 multiplier per matrix row."""
 
     name: str
-    group_size: int
 
 
-NumericFormat: TypeAlias = DirectFormat | QuantFormat | Nvfp4Format
+NumericFormat: TypeAlias = DirectFormat | QuantFormat | RowScaledFormat
 
 
 BF16 = DirectFormat("BF16", 2)
@@ -47,7 +45,7 @@ Q4G64_F16S = QuantFormat("Q4G64_F16S", 4, 64, -8, 7)
 Q5G64_F16S = QuantFormat("Q5G64_F16S", 5, 64, -16, 15)
 Q6G64_F16S = QuantFormat("Q6G64_F16S", 6, 64, -32, 31)
 W8G32_F16S = QuantFormat("W8G32_F16S", 8, 32, -127, 127)
-NVFP4 = Nvfp4Format("NVFP4", 16)
+F8E4M3_ROW_F32S = RowScaledFormat("F8E4M3_ROW_F32S")
 
 
 DIRECT_FORMATS = MappingProxyType(
@@ -59,22 +57,12 @@ QUANT_FORMATS = MappingProxyType(
         for item in (Q4G64_F16S, Q5G64_F16S, Q6G64_F16S, W8G32_F16S)
     }
 )
-NVFP4_FORMATS = MappingProxyType({NVFP4.name: NVFP4})
-NUMERIC_FORMATS = MappingProxyType(
-    {**DIRECT_FORMATS, **QUANT_FORMATS, **NVFP4_FORMATS}
+ROW_SCALED_FORMATS = MappingProxyType(
+    {item.name: item for item in (F8E4M3_ROW_F32S,)}
 )
-
-
-_E2M1_MAGNITUDES = (0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0)
-
-
-def decode_e2m1_word(word: int) -> float:
-    """Decode one exact four-bit E2M1 word, including signed zero."""
-
-    if type(word) is not int or not 0 <= word <= 0xF:
-        raise ValueError("E2M1 word must be an integer in [0, 15]")
-    magnitude = _E2M1_MAGNITUDES[word & 0x7]
-    return math.copysign(magnitude, -1.0 if word & 0x8 else 1.0)
+NUMERIC_FORMATS = MappingProxyType(
+    {**DIRECT_FORMATS, **QUANT_FORMATS, **ROW_SCALED_FORMATS}
+)
 
 
 def decode_e4m3fn_word(word: int) -> float:
@@ -94,26 +82,6 @@ def decode_e4m3fn_word(word: int) -> float:
     return sign * (1.0 + fraction / 8.0) * (2.0 ** (exponent - 7))
 
 
-def valid_nvfp4_scale_word(word: int) -> bool:
-    """Return whether *word* is an admitted nonnegative finite E4M3FN scale."""
-
-    return (
-        type(word) is int
-        and 0 <= word <= 0xFF
-        and word & 0x80 == 0
-        and word != 0x7F
-    )
-
-
-def valid_positive_fp32_word(word: int) -> bool:
-    """Return whether an IEEE binary32 word represents a finite positive value."""
-
-    if type(word) is not int or not 0 <= word <= 0xFFFFFFFF:
-        return False
-    value = struct.unpack("<f", struct.pack("<I", word))[0]
-    return math.isfinite(value) and value > 0.0
-
-
 def get_format(name: str) -> NumericFormat:
     """Return the registered format named *name*."""
 
@@ -128,21 +96,18 @@ __all__ = [
     "DIRECT_FORMATS",
     "DirectFormat",
     "FP32",
+    "F8E4M3_ROW_F32S",
     "I32",
     "NUMERIC_FORMATS",
-    "NVFP4",
-    "NVFP4_FORMATS",
-    "Nvfp4Format",
     "NumericFormat",
     "Q4G64_F16S",
     "Q5G64_F16S",
     "Q6G64_F16S",
     "QUANT_FORMATS",
     "QuantFormat",
+    "ROW_SCALED_FORMATS",
+    "RowScaledFormat",
     "W8G32_F16S",
-    "decode_e2m1_word",
     "decode_e4m3fn_word",
     "get_format",
-    "valid_nvfp4_scale_word",
-    "valid_positive_fp32_word",
 ]

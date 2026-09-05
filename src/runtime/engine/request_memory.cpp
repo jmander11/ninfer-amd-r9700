@@ -21,14 +21,14 @@ class RequestMemory::Impl {
 public:
     Impl(DeviceContext& context, std::size_t capacity) : device(context.device) {
         if (capacity != 0) {
-            CUDA_CHECK(cudaSetDevice(device));
+            HIP_CHECK(hipSetDevice(device));
             arena = std::make_unique<DeviceArena>(capacity);
         }
     }
 
     ~Impl() {
         if (arena != nullptr) {
-            (void)cudaSetDevice(device);
+            (void)hipSetDevice(device);
             arena.reset();
         }
     }

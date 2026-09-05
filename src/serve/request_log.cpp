@@ -3,7 +3,7 @@
 #include "product/speculative_options.h"
 #include "serve/console_log.h"
 
-#include <cuda_runtime.h>
+#include <hip/hip_runtime.h>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -46,12 +46,19 @@ std::filesystem::path normalized_absolute_path(const std::string& value) {
     return error ? std::filesystem::path(value).lexically_normal() : path.lexically_normal();
 }
 
-std::string cuda_version_string(int version) {
+std::string hip_version_string(int version) {
     if (version <= 0) { return {}; }
-    return std::to_string(version / 1000) + '.' + std::to_string((version % 1000) / 10);
+    if (version >= 10'000'000) {
+        const int major = version / 10'000'000;
+        const int minor = (version / 100'000) % 100;
+        const int patch = version % 100'000;
+        return std::to_string(major) + '.' + std::to_string(minor) + '.' +
+               std::to_string(patch);
+    }
+    return std::to_string(version);
 }
 
-std::string cuda_uuid_string(const cudaUUID_t& uuid) {
+std::string hip_uuid_string(const hipUUID& uuid) {
     std::ostringstream out;
     out << "GPU-" << std::hex << std::setfill('0');
     for (int i = 0; i < 16; ++i) {
@@ -89,18 +96,6 @@ std::string tool_choice_name(const ToolChoice& choice) {
         return "required";
     case ToolChoiceMode::Named:
         return choice.name.empty() ? "named" : choice.name;
-    }
-    return "unknown";
-}
-
-const char* kv_cache_name(ninfer::KvCacheStorage storage) {
-    switch (storage) {
-    case ninfer::KvCacheStorage::BFloat16:
-        return "bf16";
-    case ninfer::KvCacheStorage::Int8Group64:
-        return "int8-group64";
-    case ninfer::KvCacheStorage::Nvfp4:
-        return "nvfp4";
     }
     return "unknown";
 }
@@ -255,9 +250,7 @@ Json speculative_json(const GenerationMetrics& metrics) {
                 {"drafted_tokens", metrics.speculative_draft_tokens},
                 {"accepted_tokens", metrics.speculative_accepted_tokens},
                 {"fallback_steps", metrics.speculative_fallback_steps},
-                {"accepted_per_position", metrics.speculative_accepted_per_position},
-                {"live_draft_tokens", metrics.speculative_live_draft_tokens},
-                {"rounds_per_draft", metrics.speculative_rounds_per_draft}};
+                {"accepted_per_position", metrics.speculative_accepted_per_position}};
 }
 
 // Tokens/second with fixed precision, or "n/a" when the interval is degenerate.
@@ -564,9 +557,10 @@ std::string format_server_start_json(
           {"pending_timeout_ms", options.pending_timeout_ms},
           {"prefill_chunk", options.prefill_chunk},
           {"log_stats_interval_ms", options.log_stats_interval_ms},
-          {"kv_cache", kv_cache_name(options.kv_cache)},
+          {"kv_cache_format", "fp8-k-int4-v"},
+          {"kv_value_group", NINFER_R9700_KV_VALUE_GROUP},
           {"vision", options.enable_vision},
-          {"cuda_graph", options.use_cuda_graph},
+          {"device_graph", options.use_device_graph},
           {"prefix_reuse", options.allow_prefix_reuse},
           {"kv_ram_capacity_bytes", memory.kv_ram_capacity_bytes},
           {"kv_ram_used_bytes", memory.kv_ram_used_bytes},
@@ -574,6 +568,18 @@ std::string format_server_start_json(
           {"speculative_backend", product::speculative_backend_name(options.speculative.backend)},
           {"speculative_draft_window", options.speculative.draft_tokens},
           {"proposal_head", proposal_head_name(options.speculative.proposal_head)}};
+#if defined(NINFER_R9700_XATTENTION_QUALIFICATION)
+    record["engine"]["xattention_qualification"] = true;
+    record["engine"]["xattention_profile"] =
+        "b128-s" + std::to_string(NINFER_R9700_XATTENTION_STRIDE) + "-tau" +
+        std::to_string(NINFER_R9700_XATTENTION_TAU_PERMILLE);
+    record["engine"]["xattention_find_block"] = 128;
+    record["engine"]["xattention_stride"] = NINFER_R9700_XATTENTION_STRIDE;
+    record["engine"]["xattention_tau_permille"] =
+        NINFER_R9700_XATTENTION_TAU_PERMILLE;
+#else
+    record["engine"]["xattention_qualification"] = false;
+#endif
     record["sampling_defaults"] =
         Json{{"thinking", preset_json(sampling_defaults.thinking)},
              {"non_thinking", preset_json(sampling_defaults.non_thinking)},
@@ -592,8 +598,8 @@ std::string format_server_start_json(
              {"available_after_startup_bytes", memory.available_after_startup_bytes},
              {"kv_capacity_headroom_bytes", memory.kv_capacity_headroom_bytes},
              {"planned_slack_bytes", memory.planned_slack_bytes},
-             {"cuda_graph_allowance_bytes", memory.cuda_graph_allowance_bytes},
-             {"cuda_graph_observed_bytes", memory.cuda_graph_observed_bytes},
+             {"device_graph_allowance_bytes", memory.device_graph_allowance_bytes},
+             {"device_graph_observed_bytes", memory.device_graph_observed_bytes},
              {"kv_payload_bytes", memory.kv_payload_bytes},
              {"kv_ram_capacity_bytes", memory.kv_ram_capacity_bytes},
              {"kv_ram_used_bytes", memory.kv_ram_used_bytes},
@@ -602,12 +608,11 @@ std::string format_server_start_json(
         Json{{"device", environment.device},
              {"gpu_name", environment.gpu_name},
              {"gpu_uuid", environment.gpu_uuid},
+             {"architecture_name", environment.architecture_name},
              {"total_device_memory_bytes", environment.total_device_memory_bytes},
-             {"compute_capability_major", environment.compute_capability_major},
-             {"compute_capability_minor", environment.compute_capability_minor},
-             {"cuda_compile_version", environment.cuda_compile_version},
-             {"cuda_runtime_version", environment.cuda_runtime_version},
-             {"cuda_driver_version", environment.cuda_driver_version}};
+             {"hip_compile_version", environment.hip_compile_version},
+             {"hip_runtime_version", environment.hip_runtime_version},
+             {"hip_driver_version", environment.hip_driver_version}};
     record["argv"] = options.startup_argv;
     return record.dump();
 }
@@ -721,24 +726,28 @@ std::string format_throughput_json(const std::string& server_instance_id, std::u
 
 ServerLogEnvironment query_server_log_environment(int device) {
     ServerLogEnvironment environment;
-    environment.device               = device;
-    environment.cuda_compile_version = cuda_version_string(CUDART_VERSION);
+    environment.device = device;
+    environment.hip_compile_version = std::to_string(HIP_VERSION_MAJOR) + '.' +
+                                      std::to_string(HIP_VERSION_MINOR) + '.' +
+                                      std::to_string(HIP_VERSION_PATCH);
 
     int runtime_version = 0;
-    if (cudaRuntimeGetVersion(&runtime_version) == cudaSuccess) {
-        environment.cuda_runtime_version = cuda_version_string(runtime_version);
+    if (hipRuntimeGetVersion(&runtime_version) == hipSuccess) {
+        environment.hip_runtime_version = hip_version_string(runtime_version);
     }
     int driver_version = 0;
-    if (cudaDriverGetVersion(&driver_version) == cudaSuccess) {
-        environment.cuda_driver_version = cuda_version_string(driver_version);
+    if (hipDriverGetVersion(&driver_version) == hipSuccess) {
+        environment.hip_driver_version = hip_version_string(driver_version);
     }
-    cudaDeviceProp properties{};
-    if (cudaGetDeviceProperties(&properties, device) == cudaSuccess) {
+    hipDeviceProp_t properties{};
+    if (hipGetDeviceProperties(&properties, device) == hipSuccess) {
         environment.gpu_name                  = properties.name;
-        environment.gpu_uuid                  = cuda_uuid_string(properties.uuid);
+        environment.architecture_name         = properties.gcnArchName;
         environment.total_device_memory_bytes = properties.totalGlobalMem;
-        environment.compute_capability_major  = properties.major;
-        environment.compute_capability_minor  = properties.minor;
+        hipUUID uuid{};
+        if (hipDeviceGetUuid(&uuid, device) == hipSuccess) {
+            environment.gpu_uuid = hip_uuid_string(uuid);
+        }
     }
     return environment;
 }

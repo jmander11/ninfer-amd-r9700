@@ -26,13 +26,14 @@ enum class NumericFormat {
     Q5G64_F16S,
     Q6G64_F16S,
     W8G32_F16S,
-    NVFP4,
+    F8E4M3_ROW_F32S,
 };
 
 enum class StorageLayout {
     ContiguousLeV1,
     RowSplitK128V1,
-    BlockScaleK16M128x4V1,
+    RowScaledK128V1,
+    R9700Q4G64N16K16V1,
 };
 
 enum class ResourceEncoding {
@@ -65,20 +66,20 @@ struct RowSplitGeometry {
 };
 
 RowSplitGeometry row_split_geometry(NumericFormat format, std::span<const std::uint64_t> shape);
+RowSplitGeometry r9700_q4g64_n16k16_geometry(std::span<const std::uint64_t> shape);
 
-struct BlockScaleGeometry {
-    std::uint64_t rows                  = 0;
-    std::uint64_t columns               = 0;
-    std::uint64_t groups_per_row        = 0;
-    std::uint64_t k_tiles               = 0;
-    std::uint64_t code_plane_bytes      = 0;
-    std::uint64_t scale_plane_offset    = 0;
-    std::uint64_t scale_plane_bytes     = 0;
-    std::uint64_t weight_divisor_offset = 0;
-    std::uint64_t encoded_bytes         = 0;
+struct RowScaledGeometry {
+    std::uint64_t rows               = 0;
+    std::uint64_t columns            = 0;
+    std::uint64_t padded_columns     = 0;
+    std::uint64_t code_plane_bytes   = 0;
+    std::uint64_t scale_plane_offset = 0;
+    std::uint64_t scale_plane_bytes  = 0;
+    std::uint64_t encoded_bytes      = 0;
 };
 
-BlockScaleGeometry block_scale_geometry(NumericFormat format, std::span<const std::uint64_t> shape);
+RowScaledGeometry row_scaled_geometry(NumericFormat format,
+                                      std::span<const std::uint64_t> shape);
 
 struct TensorDescriptor {
     std::string name;

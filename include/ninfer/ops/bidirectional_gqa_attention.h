@@ -1,10 +1,9 @@
 #pragma once
 
 #include "core/arena.h"
-#include "core/paged_kv_cache.h"
 #include "core/tensor.h"
 
-#include <cuda_runtime.h>
+#include <hip/hip_runtime_api.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -22,6 +21,16 @@ struct GqaContextExecutionEnvelope {
     std::uint32_t max_context = 0;
 };
 
+// Non-owning view of the DFlash Full BF16 state. This view is intentionally separate from the
+// asymmetric growing Text/MTP cache codec.
+struct BidirectionalGqaBF16ContextView {
+    Tensor key_pages;
+    Tensor value_pages;
+    Tensor block_tables;
+    std::int32_t head_dim     = 0;
+    std::int32_t num_kv_heads = 0;
+};
+
 /**
  * Op: bidirectional grouped-query attention over persistent context and one query block
  *
@@ -36,15 +45,15 @@ struct GqaContextExecutionEnvelope {
  * context_lengths, valid_columns, and table_rows are contiguous device I32 [B]. Row b has
  * V=valid_columns[b] live query columns and reads logical context [0,context_lengths[b]) through
  * table row table_rows[b]. Columns i>=V are an inert physical tail and produce zero output.
- * context is a read-only paged BF16 cache with head-major page planes [128,64,Nphysical,8]. scale
- * is 1/sqrt(128).
+ * context is a read-only paged BF16 cache with head-major page planes [128,64,Nphysical,8].
+ * scale is 1/sqrt(128).
  *
  * There is no causal triangle: every live query row attends every other live query K/V row in the
  * same batch row. Context and query K/V remain separate physical segments and every input/cache
  * byte is unchanged. The oracle evaluates `ideal` naively in FP64 from represented inputs. The
  * BF16 out is promoted and compared directly with that result; output storage rounding belongs to
  * the Op's numerical criterion, not the oracle. out is the only observable mutation and is
- * completely overwritten. The current optimized implementation domain is W=1..16 on sm_120a.
+ * completely overwritten. The native gfx1201 implementation domain is W=1..16 and B=1..4.
  *
  * The caller guarantees min_context <= L <= max_context and that every logical page intersecting
  * [0,L) is materialized. The execution envelope may affect finite launch selection and workspace
@@ -53,9 +62,9 @@ struct GqaContextExecutionEnvelope {
 void bidirectional_gqa_attention(const Tensor& q, const Tensor& query_k, const Tensor& query_v,
                                  const Tensor& context_lengths, const Tensor& valid_columns,
                                  const Tensor& table_rows, float scale,
-                                 const PagedKVBatchLayerView& context,
+                                 const BidirectionalGqaBF16ContextView& context,
                                  GqaContextExecutionEnvelope envelope, WorkspaceArena& workspace,
-                                 Tensor& out, cudaStream_t stream);
+                                 Tensor& out, hipStream_t stream);
 
 /**
  * Returns the transient arena capacity required for every T in the inclusive optimized interval.

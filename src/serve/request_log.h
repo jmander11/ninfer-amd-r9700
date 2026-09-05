@@ -17,7 +17,7 @@
 
 namespace ninfer::serve {
 
-inline constexpr int kRequestLogSchemaVersion        = 16;
+inline constexpr int kRequestLogSchemaVersion        = 20;
 inline constexpr const char* kRequestLogArtifactType = "ninfer_serve_request_log";
 
 struct RequestLogContext {
@@ -59,12 +59,11 @@ struct ServerLogEnvironment {
     int device = 0;
     std::string gpu_name;
     std::string gpu_uuid;
+    std::string architecture_name;
     std::uint64_t total_device_memory_bytes = 0;
-    int compute_capability_major            = 0;
-    int compute_capability_minor            = 0;
-    std::string cuda_compile_version;
-    std::string cuda_runtime_version;
-    std::string cuda_driver_version;
+    std::string hip_compile_version;
+    std::string hip_runtime_version;
+    std::string hip_driver_version;
 };
 
 struct ThroughputReport {

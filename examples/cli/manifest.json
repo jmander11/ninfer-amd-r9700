@@ -3,8 +3,8 @@
   "schema_version": 1,
   "working_directory": "repository root",
   "messages_format": "product CLI --messages JSON",
-  "prompt_token_basis": "Actual qwen3_6_27b Engine preparation, including expanded Vision tokens.",
-  "family_tokenizer_observation": "The local 27B and 35B tokenizer/chat-template resources produced identical prompt token sequences for every messages JSON before target media expansion.",
+  "prompt_token_basis": "Actual qwen3_8_27b Engine preparation, including expanded Vision tokens.",
+  "family_tokenizer_observation": "Prompt token counts use the sole Qwen3.8-27B tokenizer and chat template before target media expansion.",
   "media": [
     {
       "path": "media/visual_chart.png",
@@ -65,7 +65,6 @@
       "prompt_tokens": 30,
       "max_context": 2048,
       "max_new": 8,
-      "kv_dtype": "bf16",
       "oracle": {
         "mode": "exact",
         "stdout": "42"
@@ -79,7 +78,6 @@
       "prompt_tokens": 104,
       "max_context": 2048,
       "max_new": 32,
-      "kv_dtype": "bf16",
       "oracle": {
         "mode": "exact",
         "stdout": "Cedar|2041-09-17|37"
@@ -93,7 +91,6 @@
       "prompt_tokens": 80,
       "max_context": 2048,
       "max_new": 256,
-      "kv_dtype": "bf16",
       "oracle": {
         "mode": "facts",
         "facts": [
@@ -113,7 +110,6 @@
       "prompt_tokens": 428,
       "max_context": 8192,
       "max_new": 64,
-      "kv_dtype": "bf16",
       "oracle": {
         "mode": "facts",
         "facts": [
@@ -134,7 +130,6 @@
       "prompt_tokens": 417,
       "max_context": 8192,
       "max_new": 96,
-      "kv_dtype": "bf16",
       "oracle": {
         "mode": "facts",
         "facts": [
@@ -154,7 +149,6 @@
       "prompt_tokens": 1191,
       "max_context": 8192,
       "max_new": 64,
-      "kv_dtype": "bf16",
       "oracle": {
         "mode": "facts",
         "facts": [
@@ -177,7 +171,6 @@
       "prompt_tokens": 531,
       "max_context": 8192,
       "max_new": 64,
-      "kv_dtype": "bf16",
       "oracle": {
         "mode": "facts",
         "facts": [
@@ -199,7 +192,6 @@
       "prompt_tokens": 1575,
       "max_context": 8192,
       "max_new": 32,
-      "kv_dtype": "bf16",
       "oracle": {
         "mode": "exact",
         "stdout": "NIFER-9"
@@ -217,7 +209,6 @@
       "prompt_tokens": 1608,
       "max_context": 8192,
       "max_new": 32,
-      "kv_dtype": "bf16",
       "oracle": {
         "mode": "exact",
         "stdout": "24-9"
@@ -231,7 +222,6 @@
       "prompt_tokens": 415,
       "max_context": 16384,
       "max_new": 8192,
-      "kv_dtype": "bf16",
       "oracle": {
         "mode": "facts",
         "facts": [
@@ -257,7 +247,6 @@
       "prompt_tokens": 2070,
       "max_context": 8192,
       "max_new": 4096,
-      "kv_dtype": "bf16",
       "oracle": {
         "mode": "facts",
         "facts": [
@@ -273,14 +262,13 @@
     {
       "name": "long_niah_8k",
       "messages": "messages/long_niah_8k.json",
-      "messages_sha256": "3080d984516f2917aacf159aab6b4b42d3f7d1abe8ab39e0dadbaf1f05d8ae99",
+      "messages_sha256": "81e59cab82f584694aef88ad47ba7724f9dbf55eee631629d0df5b54b601e5bc",
       "kind": "long_context_niah",
       "thinking": false,
       "prompt_tokens": 7680,
       "needle_depth_percent": 50,
       "max_context": 262144,
       "max_new": 128,
-      "kv_dtype": "int8",
       "oracle": {
         "mode": "exact",
         "stdout": "ORCHID=493817; COLOR=COBALT"
@@ -289,14 +277,13 @@
     {
       "name": "long_niah_64k",
       "messages": "messages/long_niah_64k.json",
-      "messages_sha256": "7160fdf1aff52cd79b5e35efa829e7ef43004fe61aa86136a3bf0adef9cc03f4",
+      "messages_sha256": "cbe514d5a9051affffd03b497643b23ad901c8cc856fd33bc1b202757e3db412",
       "kind": "long_context_niah",
       "thinking": false,
       "prompt_tokens": 64512,
       "needle_depth_percent": 50,
       "max_context": 262144,
       "max_new": 128,
-      "kv_dtype": "int8",
       "oracle": {
         "mode": "exact",
         "stdout": "ORCHID=493817; COLOR=COBALT"
@@ -305,14 +292,13 @@
     {
       "name": "long_niah_100k",
       "messages": "messages/long_niah_100k.json",
-      "messages_sha256": "b3509749571314662c6eb485b593b9c78438165f64ee0034819c15118d930468",
+      "messages_sha256": "6a80aaf1f3b97dc41b3cb87e0a412edff04a858005943f37352c0dfe07652e0a",
       "kind": "long_context_niah",
       "thinking": false,
       "prompt_tokens": 100989,
       "needle_depth_percent": 50,
       "max_context": 262144,
       "max_new": 128,
-      "kv_dtype": "int8",
       "oracle": {
         "mode": "exact",
         "stdout": "ORCHID=493817; COLOR=COBALT"
@@ -321,14 +307,13 @@
     {
       "name": "long_niah_128k",
       "messages": "messages/long_niah_128k.json",
-      "messages_sha256": "8dcece5215805293490baa0d8204d59a899d8bc3f9d010b0c142ed6624260a9a",
+      "messages_sha256": "dcb7e6a5946dcb94133e87d5e5068f537ffb2a594f0c38551763104a680743e5",
       "kind": "long_context_niah",
       "thinking": false,
       "prompt_tokens": 130048,
       "needle_depth_percent": 50,
       "max_context": 262144,
       "max_new": 128,
-      "kv_dtype": "int8",
       "oracle": {
         "mode": "exact",
         "stdout": "ORCHID=493817; COLOR=COBALT"
@@ -337,14 +322,13 @@
     {
       "name": "long_niah_150k",
       "messages": "messages/long_niah_150k.json",
-      "messages_sha256": "4e4be08527b8f35123f24376e5f596aeb7f74b7608ac97c011f34a5024d275be",
+      "messages_sha256": "9eec6233d40e99b0d99f33f96325944953cbdcb59c0bcca89d82ad63621a1d0b",
       "kind": "long_context_niah",
       "thinking": false,
       "prompt_tokens": 151473,
       "needle_depth_percent": 50,
       "max_context": 262144,
       "max_new": 128,
-      "kv_dtype": "int8",
       "oracle": {
         "mode": "exact",
         "stdout": "ORCHID=493817; COLOR=COBALT"
@@ -353,14 +337,13 @@
     {
       "name": "long_niah_256k",
       "messages": "messages/long_niah_256k.json",
-      "messages_sha256": "73278973a82c80f5be8bcc7d4c89afd8bdd3edfe82e8900952cb4a7660cd9644",
+      "messages_sha256": "e3a958cd444abafc1d482f008c50dfc40c232bb1d91e204af426f3ca5ddab947",
       "kind": "long_context_niah",
       "thinking": false,
       "prompt_tokens": 260096,
       "needle_depth_percent": 50,
       "max_context": 262144,
       "max_new": 128,
-      "kv_dtype": "int8",
       "oracle": {
         "mode": "exact",
         "stdout": "ORCHID=493817; COLOR=COBALT"
@@ -378,7 +361,6 @@
       "prompt_tokens": 186,
       "max_context": 262144,
       "max_new": 65536,
-      "kv_dtype": "int8",
       "oracle": {
         "mode": "boxed_integer",
         "answer": "277"
@@ -396,7 +378,6 @@
       "prompt_tokens": 293,
       "max_context": 262144,
       "max_new": 65536,
-      "kv_dtype": "int8",
       "oracle": {
         "mode": "boxed_integer",
         "answer": "83"
@@ -414,30 +395,9 @@
       "prompt_tokens": 206,
       "max_context": 262144,
       "max_new": 65536,
-      "kv_dtype": "int8",
       "oracle": {
         "mode": "boxed_integer",
         "answer": "393"
-      }
-    },
-    {
-      "name": "scenario_code_cuda",
-      "messages": "messages/scenario_code_cuda.json",
-      "messages_sha256": "47b21086735b5c2d6a08cba6a16ea7e9aedef4168107d90e447293cfaf9eb5ae",
-      "kind": "scenario_code",
-      "thinking": false,
-      "prompt_tokens": 144,
-      "max_context": 262144,
-      "max_new": 4096,
-      "kv_dtype": "int8",
-      "oracle": {
-        "mode": "structure",
-        "requirements": [
-          "CUDA kernel",
-          "FP32 reference",
-          "CMakeLists.txt",
-          "verification"
-        ]
       }
     },
     {
@@ -449,7 +409,6 @@
       "prompt_tokens": 122,
       "max_context": 262144,
       "max_new": 4096,
-      "kv_dtype": "int8",
       "oracle": {
         "mode": "structure",
         "requirements": [
@@ -469,7 +428,6 @@
       "prompt_tokens": 122,
       "max_context": 262144,
       "max_new": 4096,
-      "kv_dtype": "int8",
       "oracle": {
         "mode": "structure",
         "requirements": [
@@ -489,7 +447,6 @@
       "prompt_tokens": 127,
       "max_context": 262144,
       "max_new": 4096,
-      "kv_dtype": "int8",
       "oracle": {
         "mode": "structure",
         "requirements": [
@@ -509,7 +466,6 @@
       "prompt_tokens": 131,
       "max_context": 262144,
       "max_new": 4096,
-      "kv_dtype": "int8",
       "oracle": {
         "mode": "structure",
         "requirements": [
@@ -529,7 +485,6 @@
       "prompt_tokens": 135,
       "max_context": 262144,
       "max_new": 4096,
-      "kv_dtype": "int8",
       "oracle": {
         "mode": "structure",
         "requirements": [
@@ -549,7 +504,6 @@
       "prompt_tokens": 401,
       "max_context": 262144,
       "max_new": 4096,
-      "kv_dtype": "int8",
       "oracle": {
         "mode": "structure",
         "requirements": [
@@ -568,7 +522,6 @@
       "prompt_tokens": 395,
       "max_context": 262144,
       "max_new": 4096,
-      "kv_dtype": "int8",
       "oracle": {
         "mode": "structure",
         "requirements": [
@@ -581,13 +534,12 @@
     {
       "name": "scenario_translation_markdown",
       "messages": "messages/scenario_translation_markdown.json",
-      "messages_sha256": "c7c4a89642bb8bee2003df5c2f098ca7f6c243d9ab3a82530aebb4645d6e75fa",
+      "messages_sha256": "d7809d10dde3b11c8bbad84e4cc5b90a5e1eae4cf1bc870f82c049343adc52a4",
       "kind": "scenario_translation",
       "thinking": false,
-      "prompt_tokens": 360,
+      "prompt_tokens": 357,
       "max_context": 262144,
       "max_new": 4096,
-      "kv_dtype": "int8",
       "oracle": {
         "mode": "structure",
         "requirements": [
@@ -601,13 +553,12 @@
     {
       "name": "scenario_structured_jsonl",
       "messages": "messages/scenario_structured_jsonl.json",
-      "messages_sha256": "7ef63d6a14d5bd34633388861b210d9af30638a6b5f1c94bf541b6daf6740111",
+      "messages_sha256": "ee7f8f6ce74caa9d599a734622af990b4f2a0393ac6c97ea8787c4d0d9ba3cc0",
       "kind": "scenario_structured",
       "thinking": false,
       "prompt_tokens": 130,
       "max_context": 262144,
       "max_new": 4096,
-      "kv_dtype": "int8",
       "oracle": {
         "mode": "structure",
         "requirements": [
@@ -626,7 +577,6 @@
       "prompt_tokens": 113,
       "max_context": 262144,
       "max_new": 4096,
-      "kv_dtype": "int8",
       "oracle": {
         "mode": "structure",
         "requirements": [
@@ -646,7 +596,6 @@
       "prompt_tokens": 101,
       "max_context": 262144,
       "max_new": 4096,
-      "kv_dtype": "int8",
       "oracle": {
         "mode": "structure",
         "requirements": [
@@ -660,7 +609,7 @@
   ],
   "text_corpus_sources": {
     "description": "Frozen local sources used to build the committed text examples.",
-    "tokenizer": "Qwen3.6 tokenizer supplied by --tokenizer",
+    "tokenizer": "Qwen3.8-27B tokenizer supplied by --tokenizer",
     "niah": {
       "dataset": "AI-ModelScope/Needle-in-a-Haystack-Corpus",
       "file": "PaulGraham_Essays.txt",
@@ -692,7 +641,6 @@
   },
   "text_corpus_runtime": {
     "max_context": 262144,
-    "kv_dtype": "int8",
     "mtp_draft_tokens": 3,
     "lm_head_draft": true,
     "sampling": "server defaults",

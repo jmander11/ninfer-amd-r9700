@@ -3,7 +3,7 @@
 #include "core/arena.h"
 #include "core/tensor.h"
 
-#include <cuda_runtime.h>
+#include <hip/hip_runtime_api.h>
 
 namespace ninfer::ops {
 
@@ -35,7 +35,7 @@ namespace ninfer::ops {
  * no capacity is consumed for a single segment. There is no persistent state side effect.
  */
 void vision_attention(const Tensor& q, const Tensor& k, const Tensor& v, const Tensor& cu_seqlens,
-                      WorkspaceArena& workspace, Tensor& out, cudaStream_t stream);
+                      WorkspaceArena& workspace, Tensor& out, hipStream_t stream);
 
 /**
  * Equal-segment overload of the same packed, non-causal attention operation. P must be divisible
@@ -45,6 +45,6 @@ void vision_attention(const Tensor& q, const Tensor& k, const Tensor& v, const T
  * descriptor-setup launch is used.
  */
 void vision_attention(const Tensor& q, const Tensor& k, const Tensor& v,
-                      std::int32_t segment_length, Tensor& out, cudaStream_t stream);
+                      std::int32_t segment_length, Tensor& out, hipStream_t stream);
 
 } // namespace ninfer::ops

@@ -2,7 +2,7 @@
 
 #include "core/tensor.h"
 
-#include <cuda_runtime.h>
+#include <hip/hip_runtime_api.h>
 
 namespace ninfer::ops {
 
@@ -28,6 +28,14 @@ namespace ninfer::ops {
  * Workspace:
  *   None. The Op has no state side effect beyond writing destination.
  */
-void cast_fp32_to_bf16(const Tensor& source, Tensor& destination, cudaStream_t stream);
+void cast_fp32_to_bf16(const Tensor& source, Tensor& destination, hipStream_t stream);
+
+/**
+ * Op: cast_bf16_to_fp32
+ *
+ * Promotes every represented BF16 value to FP32 exactly. Source and destination have identical
+ * contiguous shapes, do not alias, and the Op has no state or workspace side effect.
+ */
+void cast_bf16_to_fp32(const Tensor& source, Tensor& destination, hipStream_t stream);
 
 } // namespace ninfer::ops

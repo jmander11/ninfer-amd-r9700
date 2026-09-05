@@ -1,0 +1,1022 @@
+#!/usr/bin/env python3
+"""Assemble provenance-bound quality/whole/capacity evidence for pareto.py.
+
+Whole-inference rows retain the separately timed prefill and decode phases as well as
+fresh-request makespan, so one physical matrix owns all three speed objectives.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import sys
+from pathlib import Path
+from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from tools.bench.run_ninfer_bench_matrix import (
+    MATRIX_SCHEMA_VERSION,
+    PRODUCTION_PREFILL_CHUNKS,
+    PRODUCT_CONCURRENCIES,
+    R9700_POWER_PROFILE,
+    R9700_KV_PLANE_LAYOUTS,
+    build_cases,
+    file_sha256,
+    load_bench_report,
+    validate_automatic_feasibility,
+    validate_hybrid_shared_workspace_authority,
+)
+from tools.bench.select_prefill_chunk import RULE as PREFILL_CHUNK_SELECTION_RULE
+from tools.bench.select_prefill_chunk import validate_selection_record
+from tools.ppl import run as ppl_run
+
+
+HYBRID_WEIGHTS_ID = "r9700-q4g64-f8e4m3-four-role-n16k16-eval"
+TERMINAL_RECIPE_IDS = {
+    "r9700-q4g64-n16k16-eval", "r9700-q4-w8-mse-n16k16-eval", HYBRID_WEIGHTS_ID,
+}
+
+
+def _valid_sha256(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _manifest(root: Path, preset: str) -> dict[str, Any]:
+    path = root / "manifest.json"
+    value = json.loads(path.read_text(encoding="utf-8"))
+    failure_path = root / "failures.json"
+    if (
+        value.get("artifact_type") != "ninfer_bench_matrix_run"
+        or value.get("schema_version") != MATRIX_SCHEMA_VERSION
+        or value.get("preset") != preset
+        or value.get("dry_run") is not False
+        or value.get("failures")
+        or value.get("prepare_only") is True
+        or (preset == "pareto-whole" and (failure_path.exists() or failure_path.is_symlink()))
+    ):
+        raise ValueError(f"{path} is not a valid physical {preset} matrix")
+    if preset == "pareto-whole" and value.get("power_profile") != {
+        "required": "auto",
+        "sysfs_path": str(R9700_POWER_PROFILE),
+        "observed": "auto",
+        "rechecked_after": "auto",
+    }:
+        raise ValueError(f"{path} does not bind stable auto power for terminal timing")
+    return value
+
+
+def _reports(
+    root: Path, manifest: dict[str, Any], preset: str, prefill_chunk: int,
+    *, allow_missing: bool = False,
+) -> dict[int, list[dict[str, Any]]]:
+    campaign_root = root.resolve(strict=True)
+    cases = {
+        (case.suite, case.name): case
+        for case in build_cases(preset, production_prefill_chunk=prefill_chunk)
+    }
+    expected = manifest["concurrency"]
+    records = manifest.get("commands")
+    if not isinstance(records, list) or len(records) != len(expected) * len(cases):
+        raise ValueError(f"{root} does not retain every {preset} matrix point")
+    expected_points = {
+        (suite, case, concurrency)
+        for suite, case in cases
+        for concurrency in expected
+    }
+    actual_points = {
+        (record.get("suite"), record.get("case"), record.get("concurrency"))
+        for record in records
+        if isinstance(record, dict)
+    }
+    if len(actual_points) != len(records) or actual_points != expected_points:
+        raise ValueError(f"{root} does not retain the exact {preset} matrix point set")
+    reports: dict[int, list[dict[str, Any]]] = {}
+    for record in records:
+        key = (record.get("suite"), record.get("case"))
+        if key not in cases:
+            raise ValueError(f"{root} has an unknown {preset} case {key}")
+        concurrency = record.get("concurrency")
+        if concurrency not in expected:
+            raise ValueError(f"{root} has unexpected concurrency {concurrency}")
+        report_path = Path(record["report"])
+        if not report_path.is_absolute() or report_path.is_symlink():
+            raise ValueError(f"{root} report path is not campaign-owned: {report_path}")
+        report_boundary = (
+            report_path.resolve(strict=True)
+            if report_path.is_file()
+            else report_path.parent.resolve(strict=True) / report_path.name
+        )
+        try:
+            report_boundary.relative_to(campaign_root)
+        except ValueError as error:
+            raise ValueError(
+                f"{root} report path resolves outside its campaign: {report_path}"
+            ) from error
+        if allow_missing and not report_path.is_file():
+            continue
+        report = load_bench_report(
+            report_path,
+            manifest["expected_kv_value_group"],
+            manifest["expected_q4_activation_bits"],
+            manifest["expected_w8_activation_bits"],
+            manifest["expected_fp8_qk_wmma_enabled"],
+            concurrency,
+            manifest["artifact"],
+            record["command"],
+            cases[key],
+            manifest["expected_xattention_profile"],
+        )
+        reports.setdefault(concurrency, []).append(report)
+    if not allow_missing and sorted(reports) != sorted(expected):
+        raise ValueError(f"{root} has an incomplete concurrency set")
+    return reports
+
+
+def _manifest_prefill_chunk(manifest: dict[str, Any], preset: str) -> int:
+    records = manifest.get("commands")
+    if not isinstance(records, list) or not records:
+        raise ValueError(f"{preset} manifest has no commands")
+    chunks: set[int] = set()
+    for record in records:
+        command = record.get("command") if isinstance(record, dict) else None
+        if not isinstance(command, list) or command.count("--prefill-chunk") != 1:
+            raise ValueError(f"{preset} command lacks one explicit selected prefill chunk")
+        index = command.index("--prefill-chunk")
+        if index + 1 >= len(command):
+            raise ValueError(f"{preset} command has a malformed selected prefill chunk")
+        try:
+            chunk = int(command[index + 1])
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                f"{preset} command has a malformed selected prefill chunk"
+            ) from error
+        if chunk not in PRODUCTION_PREFILL_CHUNKS:
+            raise ValueError(f"{preset} command uses an unsupported selected prefill chunk")
+        chunks.add(chunk)
+    if len(chunks) != 1:
+        raise ValueError(f"{preset} commands do not bind one selected prefill chunk")
+    chunk = chunks.pop()
+    if type(manifest.get("selected_prefill_chunk")) is not int:
+        raise ValueError(f"{preset} manifest lacks an exact selected prefill chunk")
+    if manifest["selected_prefill_chunk"] != chunk:
+        raise ValueError(f"{preset} manifest selected prefill chunk differs from its commands")
+    return chunk
+
+
+def _validate_mtp_target_parity(
+    reports: list[dict[str, Any]], concurrency: int,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Return the MTP timing report and its exact ordinary-target parity evidence."""
+
+    mtp = [report for report in reports if report.get("config", {}).get("draft_tokens") == 3]
+    ordinary = [
+        report for report in reports if report.get("config", {}).get("draft_tokens") == 0
+    ]
+    if len(mtp) != 1 or len(ordinary) != 1:
+        raise ValueError(
+            f"C{concurrency} pareto-whole requires one MTP3 row and one ordinary control"
+        )
+    mtp_tests = {test.get("label"): test for test in mtp[0].get("tests", [])}
+    ordinary_tests = {test.get("label"): test for test in ordinary[0].get("tests", [])}
+    if len(mtp_tests) != 2 or set(mtp_tests) != set(ordinary_tests):
+        raise ValueError(f"C{concurrency} pareto-whole target controls are not geometry matched")
+    compared_lanes = 0
+    compared_tokens = 0
+    round_cells: dict[str, Any] = {}
+    for label in sorted(mtp_tests):
+        mtp_test = mtp_tests[label]
+        n_gen = mtp_test.get("n_gen")
+        if type(n_gen) is not int or n_gen <= 0:
+            raise ValueError(f"C{concurrency} {label} lacks an exact generated-token count")
+        minimum_rounds_per_lane = math.ceil(n_gen / 4)
+        expected_rounds_per_repetition = concurrency * minimum_rounds_per_lane
+        mtp_reps = mtp_tests[label].get("reps")
+        ordinary_reps = ordinary_tests[label].get("reps")
+        if not isinstance(mtp_reps, list) or not isinstance(ordinary_reps, list):
+            raise ValueError(f"C{concurrency} {label} lacks retained parity repetitions")
+        if len(mtp_reps) != len(ordinary_reps):
+            raise ValueError(f"C{concurrency} {label} target parity repetition count differs")
+        repetition_rounds: list[dict[str, Any]] = []
+        for repetition, (mtp_rep, ordinary_rep) in enumerate(
+            zip(mtp_reps, ordinary_reps, strict=True)
+        ):
+            mtp_ids = mtp_rep.get("generated_token_ids_by_lane")
+            ordinary_ids = ordinary_rep.get("generated_token_ids_by_lane")
+            if not isinstance(mtp_ids, list) or not isinstance(ordinary_ids, list):
+                raise ValueError(f"C{concurrency} {label} lacks retained target token lanes")
+            if mtp_ids != ordinary_ids:
+                raise ValueError(
+                    f"C{concurrency} {label} repetition {repetition} MTP/ordinary "
+                    "target-output parity failed"
+                )
+            compared_lanes += len(mtp_ids)
+            compared_tokens += sum(len(lane) for lane in mtp_ids)
+            speculative = mtp_rep.get("speculative")
+            if not isinstance(speculative, dict) or any(
+                type(speculative.get(key)) is not int or speculative[key] < 0
+                for key in ("rounds", "drafted_tokens", "accepted_tokens", "fallback_steps")
+            ):
+                raise ValueError(f"C{concurrency} {label} repetition {repetition} lacks counters")
+            repetition_rounds.append({
+                "repetition": repetition,
+                "observed_rounds": speculative["rounds"],
+                "expected_minimum_rounds": expected_rounds_per_repetition,
+                "minimum_met": speculative["rounds"] == expected_rounds_per_repetition,
+            })
+        aggregate = mtp_test.get("speculative")
+        if not isinstance(aggregate, dict) or any(
+            aggregate.get(key) != sum(rep["speculative"][key] for rep in mtp_reps)
+            for key in ("rounds", "drafted_tokens", "accepted_tokens", "fallback_steps")
+        ):
+            raise ValueError(f"C{concurrency} {label} aggregate counters do not equal repetitions")
+        round_cells[label] = {
+            "generated_tokens_per_lane": n_gen,
+            "draft_window": 3,
+            "minimum_rounds_per_lane": minimum_rounds_per_lane,
+            "concurrency": concurrency,
+            "expected_rounds_per_repetition": expected_rounds_per_repetition,
+            "expected_rounds_all_repetitions": (
+                expected_rounds_per_repetition * len(mtp_reps)
+            ),
+            "observed_rounds_all_repetitions": aggregate["rounds"],
+            "all_repetitions_minimum": all(
+                item["minimum_met"] for item in repetition_rounds
+            ),
+            "repetitions": repetition_rounds,
+        }
+    return mtp[0], {
+        "pass": True,
+        "comparison": "exact_generated_token_ids_by_lane",
+        "repetitions_per_workload": len(next(iter(mtp_tests.values()))["reps"]),
+        "workloads": sorted(mtp_tests),
+        "compared_lanes": compared_lanes,
+        "compared_tokens": compared_tokens,
+        "round_gate": {
+            "counter_semantics": (
+                "each repetition counter sums independent request-lane rounds; expected count "
+                "is concurrency * ceil(generated_tokens_per_lane / (draft_window + 1))"
+            ),
+            "all_repetitions_minimum": all(
+                cell["all_repetitions_minimum"] for cell in round_cells.values()
+            ),
+            "cells": round_cells,
+        },
+    }
+
+
+def _missing_capacity_provenance(root: Path, manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    missing = [record for record in manifest["commands"] if not Path(record["report"]).is_file()]
+    failure_path = root / "failures.json"
+    if not missing:
+        if failure_path.is_file():
+            raise ValueError(f"{root} has campaign failures despite complete capacity reports")
+        return []
+    if not failure_path.is_file():
+        raise ValueError(f"{root} has missing capacity reports but no failures.json")
+    campaign_failures = json.loads(failure_path.read_text(encoding="utf-8"))
+    if not isinstance(campaign_failures, list) or not campaign_failures:
+        raise ValueError(f"{failure_path} does not retain campaign failures")
+    failure_identity = {"path": str(failure_path), "sha256": file_sha256(failure_path)}
+    retained = []
+    matched_failure_indexes: set[int] = set()
+    for record in missing:
+        report_path = Path(record["report"])
+        stem = f"{record['suite']}.{record['case']}.c{record['concurrency']}"
+        stderr_path = root / "logs" / f"{stem}.stderr.txt"
+        stdout_path = root / "logs" / f"{stem}.stdout.txt"
+        if not stderr_path.is_file():
+            raise ValueError(f"missing capacity report has no retained stderr: {report_path}")
+        matches = [
+            (index, failure)
+            for index, failure in enumerate(campaign_failures)
+            if isinstance(failure, dict)
+            and failure.get("suite") == record["suite"]
+            and failure.get("case") == record["case"]
+            and failure.get("concurrency") == record["concurrency"]
+            and failure.get("command") == record["command"]
+            and failure.get("stderr") == str(stderr_path)
+            and failure.get("stdout") == str(stdout_path)
+            and (
+                (type(failure.get("returncode")) is int and failure["returncode"] != 0)
+                or isinstance(failure.get("error"), str) and bool(failure["error"])
+            )
+        ]
+        if len(matches) != 1:
+            raise ValueError(f"missing capacity report has no unique campaign failure: {report_path}")
+        failure_index, campaign_failure = matches[0]
+        matched_failure_indexes.add(failure_index)
+        retained.append({
+            "status": "unresolved_capacity_measurement_failure",
+            "concurrency": record["concurrency"],
+            "command": record["command"],
+            "missing_report": str(report_path),
+            "campaign_failure": campaign_failure,
+            "failures_file": failure_identity,
+            "stderr": {
+                "path": str(stderr_path), "sha256": file_sha256(stderr_path),
+                "text": stderr_path.read_text(encoding="utf-8"),
+            },
+            "stdout": (
+                {"path": str(stdout_path), "sha256": file_sha256(stdout_path)}
+                if stdout_path.is_file() else None
+            ),
+        })
+    if matched_failure_indexes != set(range(len(campaign_failures))):
+        raise ValueError(f"{root} has capacity campaign failures unrelated to missing reports")
+    return retained
+
+
+def _quality_candidate(
+    quality: dict[str, Any], weights_id: str, group: int, prefill_chunk: int | None = None,
+) -> tuple[dict, dict]:
+    if (
+        quality.get("artifact_type") == "ninfer_r9700_ppl_campaign"
+        and quality.get("schema_version") == 6
+    ):
+        return _campaign_quality_candidate(quality, weights_id, group, prefill_chunk)
+    representation = quality.get("representation", {})
+    if (
+        quality.get("schema") != "ninfer-r9700-q4-a8-final-quality-v2"
+        or representation.get("q4_activation_bits") != 8
+        or representation.get("w8_activation_bits") != 8
+        or representation.get("fp8_qk_wmma_profile")
+        != "t1-ge64-t2-ge320-t3plus-stream-v1"
+        or representation.get("xattention_profile") not in ("dense", "b128-s16-tau900")
+        or representation.get("kv_plane_layouts") != R9700_KV_PLANE_LAYOUTS
+    ):
+        raise ValueError("quality evidence has an unsupported identity or execution profile")
+    artifacts = [item for item in quality.get("artifacts", []) if item.get("weights_id") == weights_id]
+    if len(artifacts) != 1:
+        raise ValueError(f"quality evidence has no unique artifact {weights_id}")
+    artifact = artifacts[0]
+    if (
+        not _valid_sha256(artifact.get("sha256"))
+        or type(artifact.get("bytes")) is not int
+        or artifact["bytes"] <= 0
+    ):
+        raise ValueError(f"quality evidence has an invalid artifact identity for {weights_id}")
+    cells: dict[str, Any] = {}
+    sources: dict[str, Any] = {}
+    for tokens, label in ((8192, "8k"), (32768, "32k")):
+        matches = [
+            row for row in quality.get("results", [])
+            if row.get("artifact_weights_id") == weights_id
+            and row.get("kv_value_group") == group and row.get("prompt_tokens") == tokens
+        ]
+        if len(matches) != 1:
+            raise ValueError(f"quality evidence lacks unique {weights_id}/G{group}/{label}")
+        row = matches[0]
+        if row.get("kv_plane_layouts") != R9700_KV_PLANE_LAYOUTS:
+            raise ValueError(
+                f"quality {weights_id}/G{group}/{label} has the wrong plane layouts"
+            )
+        cell_path = Path(row["cell"])
+        if not cell_path.is_absolute():
+            cell_path = REPO_ROOT / cell_path
+        for suffix in ("json", "nllf32", "argmaxi32"):
+            source_path = cell_path if suffix == "json" else cell_path.with_suffix(f".{suffix}")
+            if not source_path.is_file() or file_sha256(source_path) != row["sha256"].get(suffix):
+                raise ValueError(f"quality {weights_id}/G{group}/{label} {suffix} bytes changed")
+        gates = row.get("gates", {})
+        tier = "accuracy" if gates.get("accuracy", {}).get("pass") is True else "capacity-speed"
+        gate = gates.get(tier, {})
+        cells[label] = {
+            "eligible": gate.get("pass") is True,
+            "tier": tier,
+            "mean_nll_delta": row.get("paired_vs_bf16", {}).get("mean_nll_delta"),
+            "complete_finite_aligned": row.get("complete_finite_aligned") is True,
+            "scored_positions": row.get("scored_positions"),
+            "new_severe_positions": row.get("paired_vs_bf16", {}).get("new_severe_positions"),
+        }
+        sources[label] = {"path": str(cell_path), "sha256": row["sha256"]}
+    return cells, {
+        "weights_id": weights_id,
+        "sha256": artifact["sha256"],
+        "file_size_bytes": artifact["bytes"],
+        "conversion_receipt": artifact.get("conversion_receipt"),
+        "representation": representation,
+        "cells": sources,
+    }
+
+
+def _campaign_quality_candidate(
+    campaign: dict[str, Any], weights_id: str, group: int, prefill_chunk: int | None,
+) -> tuple[dict, dict]:
+    artifact = campaign.get("candidate_artifact")
+    representation = {
+        "q4_activation_bits": campaign.get("q4_activation_bits"),
+        "w8_activation_bits": campaign.get("w8_activation_bits"),
+        "fp8_qk_wmma_profile": campaign.get("fp8_qk_wmma_profile"),
+        "xattention_profile": campaign.get("xattention_profile"),
+        "kv_plane_layouts": campaign.get("candidate_kv_plane_layouts"),
+    }
+    hybrid = weights_id == HYBRID_WEIGHTS_ID
+    if (
+        campaign.get("pass") is not True
+        or campaign.get("model_id") != "qwen3.8-27b"
+        or campaign.get("schedules") != ["prefill"]
+        or campaign.get("lengths") not in ([8192, 32768], [32768, 8192])
+        or (prefill_chunk is not None and campaign.get("prefill_chunk") != prefill_chunk)
+        or not isinstance(artifact, dict)
+        or artifact.get("weights_id") != weights_id
+        or not _valid_sha256(artifact.get("sha256"))
+        or type(artifact.get("bytes")) is not int
+        or artifact["bytes"] <= 0
+        or representation["q4_activation_bits"] != 8
+        or representation["w8_activation_bits"] != 8
+        or representation["fp8_qk_wmma_profile"]
+        != "t1-ge64-t2-ge320-t3plus-stream-v1"
+        or representation["xattention_profile"] not in ("dense", "b128-s16-tau900")
+        or representation["kv_plane_layouts"] != R9700_KV_PLANE_LAYOUTS
+        or campaign.get("required_candidate_identity")
+        != ("fp8-hybrid-selection-authority" if hybrid else None)
+        or (hybrid and not isinstance(artifact.get("conversion_receipt"), dict))
+    ):
+        raise ValueError("PPL campaign has an unsupported identity or execution profile")
+    cells: dict[str, Any] = {}
+    sources: dict[str, Any] = {}
+    campaign_cells = campaign.get("cells")
+    if not isinstance(campaign_cells, list):
+        raise ValueError("PPL campaign cells must be an array")
+    for tokens, label in ((8192, "8k"), (32768, "32k")):
+        matches = [
+            cell for cell in campaign_cells
+            if isinstance(cell, dict)
+            and cell.get("scheme") == f"r9700-g{group}"
+            and cell.get("schedule") == "prefill"
+            and cell.get("prompt_tokens") == tokens
+        ]
+        if len(matches) != 1:
+            raise ValueError(f"PPL campaign lacks unique {weights_id}/G{group}/{label}")
+        cell = matches[0]
+        expected_cell_identity = {
+            "scheme": f"r9700-g{group}",
+            "model_id": "qwen3.8-27b",
+            "weights_id": weights_id,
+            "kv_format": "fp8-k-int4-v",
+            "kv_value_group": group,
+            "schedule": "prefill",
+            "prompt_tokens": tokens,
+            **({"prefill_chunk": prefill_chunk} if prefill_chunk is not None else {}),
+            "kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
+            "q4_activation_bits": 8,
+            "w8_activation_bits": 8,
+            "fp8_qk_wmma_enabled": True,
+            "fp8_qk_wmma_profile": "t1-ge64-t2-ge320-t3plus-stream-v1",
+        }
+        expected_cell_identity.update(
+            {"xattention_qualification": False}
+            if representation["xattention_profile"] == "dense"
+            else {
+                "xattention_qualification": True,
+                "xattention_profile": "b128-s16-tau900",
+                "xattention_find_block": 128,
+                "xattention_stride": 16,
+                "xattention_tau_permille": 900,
+            }
+        )
+        if any(cell.get(key) != value for key, value in expected_cell_identity.items()):
+            raise ValueError(
+                f"PPL campaign {weights_id}/G{group}/{label} has the wrong compiled profile"
+            )
+        if representation["xattention_profile"] == "dense" and any(
+            key in cell
+            for key in (
+                "xattention_profile", "xattention_find_block", "xattention_stride",
+                "xattention_tau_permille",
+            )
+        ):
+            raise ValueError(
+                f"PPL campaign {weights_id}/G{group}/{label} dense cell retains sparse fields"
+            )
+        command = cell.get("command")
+        if not isinstance(command, list) or command.count("--out-json") != 1:
+            raise ValueError(f"PPL campaign {weights_id}/G{group}/{label} lacks its command")
+        index = command.index("--out-json")
+        if index + 1 >= len(command) or not isinstance(command[index + 1], str):
+            raise ValueError(f"PPL campaign {weights_id}/G{group}/{label} has a malformed command")
+        cell_path = Path(command[index + 1])
+        if not cell_path.is_absolute():
+            cell_path = REPO_ROOT / cell_path
+        if not cell_path.is_file():
+            raise ValueError(f"PPL campaign {weights_id}/G{group}/{label} json is missing")
+        try:
+            raw = json.loads(cell_path.read_text(encoding="utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ValueError(
+                f"PPL campaign {weights_id}/G{group}/{label} json is invalid"
+            ) from error
+        if (
+            not isinstance(raw, dict)
+            or any(raw.get(key) != value for key, value in expected_cell_identity.items())
+            or any(cell.get(key) != value for key, value in raw.items())
+        ):
+            raise ValueError(
+                f"PPL campaign {weights_id}/G{group}/{label} json differs from its campaign"
+            )
+        sources[label] = {"path": str(cell_path), "sha256": {}}
+        for suffix, retained_key in (
+            ("json", None), ("nllf32", "nll_sha256"), ("argmaxi32", "argmax_sha256")
+        ):
+            source_path = cell_path if suffix == "json" else cell_path.with_suffix(f".{suffix}")
+            digest = file_sha256(source_path) if source_path.is_file() else None
+            if digest is None or (retained_key is not None and digest != cell.get(retained_key)):
+                raise ValueError(
+                    f"PPL campaign {weights_id}/G{group}/{label} {suffix} bytes changed"
+                )
+            sources[label]["sha256"][suffix] = digest
+        tier = cell.get("quality_tier")
+        if (
+            tier not in ("accuracy", "capacity-speed")
+            or cell.get("pass") is not True
+            or cell.get("quality_eligible") is not True
+            or cell.get("complete_finite_aligned") is not True
+            or type(cell.get("tokens_scored")) is not int
+            or cell["tokens_scored"] <= 0
+            or type(cell.get("new_severe_positions")) is not int
+            or cell["new_severe_positions"] < 0
+            or isinstance(cell.get("delta_mean_nll"), bool)
+            or not isinstance(cell.get("delta_mean_nll"), (int, float))
+            or not math.isfinite(float(cell["delta_mean_nll"]))
+        ):
+            raise ValueError(f"PPL campaign {weights_id}/G{group}/{label} failed quality")
+        cells[label] = {
+            "eligible": True,
+            "tier": tier,
+            "mean_nll_delta": cell["delta_mean_nll"],
+            "complete_finite_aligned": True,
+            "scored_positions": cell["tokens_scored"],
+            "new_severe_positions": cell["new_severe_positions"],
+        }
+    return cells, {
+        "weights_id": weights_id,
+        "sha256": artifact["sha256"],
+        "file_size_bytes": artifact["bytes"],
+        "conversion_receipt": artifact.get("conversion_receipt"),
+        "representation": representation,
+        "cells": sources,
+        "campaign_identity": {
+            "artifact_type": campaign.get("artifact_type"),
+            "schema_version": campaign.get("schema_version"),
+            "prefill_chunk": campaign.get("prefill_chunk"),
+            "corpus": campaign.get("corpus"),
+            "reference_weights_id": campaign.get("reference_weights_id"),
+            "reference_source": campaign.get("reference_source"),
+            "reference_execution": campaign.get("reference_execution"),
+            "bf16_scorer": (
+                campaign.get("scorers", {}).get("bf16-reference")
+                if isinstance(campaign.get("scorers"), dict) else None
+            ),
+            "reused_bf16_campaign": campaign.get("reused_bf16_campaign"),
+            "bf16_repeat_comparison": campaign.get("bf16_repeat_comparison"),
+        },
+    }
+
+
+def assemble_candidate(
+    name: str, weights_id: str, group: int, quality_path: Path,
+    capacity_root: Path, whole_root: Path | None, prefill_chunk: int,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if prefill_chunk not in PRODUCTION_PREFILL_CHUNKS:
+        raise ValueError("selected prefill chunk is unsupported")
+    quality = json.loads(quality_path.read_text(encoding="utf-8"))
+    quality_cells, quality_source = _quality_candidate(
+        quality, weights_id, group, prefill_chunk
+    )
+    manifests = {"pareto-capacity": _manifest(capacity_root, "pareto-capacity")}
+    capacity_failures = _missing_capacity_provenance(
+        capacity_root, manifests["pareto-capacity"]
+    )
+    if not capacity_failures and whole_root is None:
+        raise ValueError("capacity-eligible candidate requires a whole matrix")
+    if whole_root is not None:
+        manifests["pareto-whole"] = _manifest(whole_root, "pareto-whole")
+    for preset, manifest in manifests.items():
+        if _manifest_prefill_chunk(manifest, preset) != prefill_chunk:
+            raise ValueError(f"{preset} does not use selected prefill chunk {prefill_chunk}")
+    identity = manifests["pareto-capacity"]["artifact"]
+    expected_identity = {
+        "weights_id": weights_id,
+        "sha256": quality_source["sha256"],
+        "file_size_bytes": quality_source["file_size_bytes"],
+    }
+    for preset, manifest in manifests.items():
+        if manifest.get("concurrency") != list(PRODUCT_CONCURRENCIES):
+            raise ValueError(f"{preset} does not contain the required ordered C=1..4 sweep")
+        actual = manifest["artifact"]
+        if any(actual.get(key) != value for key, value in expected_identity.items()):
+            raise ValueError(f"{preset} artifact does not match quality evidence")
+        if manifest.get("expected_kv_value_group") != group:
+            raise ValueError(f"{preset} cache group does not match candidate G{group}")
+        if manifest.get("expected_kv_plane_layouts") != R9700_KV_PLANE_LAYOUTS:
+            raise ValueError(f"{preset} cache plane layouts do not match the quality profile")
+        if (
+            manifest.get("expected_q4_activation_bits")
+            != quality_source["representation"]["q4_activation_bits"]
+            or manifest.get("expected_w8_activation_bits")
+            != quality_source["representation"]["w8_activation_bits"]
+            or manifest.get("expected_fp8_qk_wmma_profile")
+            != quality_source["representation"]["fp8_qk_wmma_profile"]
+            or manifest.get("expected_xattention_profile")
+            != quality_source["representation"].get("xattention_profile")
+        ):
+            raise ValueError(f"{preset} execution profile does not match quality evidence")
+        hybrid_identity = (
+            "fp8-hybrid-selection-authority" if weights_id == HYBRID_WEIGHTS_ID else None
+        )
+        if manifest.get("required_candidate_identity") != hybrid_identity:
+            raise ValueError(f"{preset} weight-recipe authority does not match quality evidence")
+        if weights_id == HYBRID_WEIGHTS_ID:
+            if actual.get("conversion_receipt") != quality_source.get("conversion_receipt"):
+                raise ValueError(
+                    f"{preset} hybrid conversion receipt differs from quality evidence"
+                )
+            validate_hybrid_shared_workspace_authority(
+                manifest.get("hybrid_shared_workspace_authority"), [prefill_chunk]
+            )
+        elif manifest.get("hybrid_shared_workspace_authority") is not None:
+            raise ValueError(f"{preset} non-hybrid candidate carries hybrid workspace authority")
+    benches = {json.dumps(manifest["bench"], sort_keys=True) for manifest in manifests.values()}
+    if len(benches) != 1:
+        raise ValueError("capacity and whole matrices use different benchmark bytes")
+    if weights_id == HYBRID_WEIGHTS_ID and len({
+        json.dumps(manifest["hybrid_shared_workspace_authority"]["tool"], sort_keys=True)
+        for manifest in manifests.values()
+    }) != 1:
+        raise ValueError("capacity and whole hybrid matrices use different planner bytes")
+
+    capacity_reports = _reports(
+        capacity_root, manifests["pareto-capacity"], "pareto-capacity", prefill_chunk,
+        allow_missing=True,
+    )
+    whole_reports = (
+        _reports(whole_root, manifests["pareto-whole"], "pareto-whole", prefill_chunk)
+        if whole_root is not None else {}
+    )
+    capacity: dict[str, Any] = {}
+    speeds: dict[str, float] = {}
+    target_head_parity: dict[str, Any] = {}
+    for concurrency in PRODUCT_CONCURRENCIES:
+        if concurrency in capacity_reports:
+            cap = validate_automatic_feasibility(capacity_reports[concurrency][0])
+            if cap["measurement_kind"] != "resolved_effective_maximum":
+                raise ValueError(f"C{concurrency} capacity is not an effective maximum")
+            capacity[f"c{concurrency}"] = {
+                "measurement_kind": cap["measurement_kind"],
+                "binding_constraint": cap["binding_constraint"],
+                "tokens": cap["resolved_effective_maximum_tokens"],
+            }
+        if whole_reports:
+            mtp_report, parity = _validate_mtp_target_parity(
+                whole_reports[concurrency], concurrency
+            )
+            target_head_parity[f"c{concurrency}"] = parity
+            whole_tests = {test["label"]: test for test in mtp_report["tests"]}
+            for tokens in (8192, 32768):
+                row = whole_tests[f"whole-pp{tokens}+tg256"]
+                speeds[f"prefill_{tokens}_c{concurrency}"] = row["prefill_tok_s_mean"]
+                speeds[f"decode_{tokens}_c{concurrency}"] = row["decode_output_tok_s_mean"]
+                speeds[f"whole_{tokens}_c{concurrency}"] = row["whole_output_tok_s_mean"]
+    candidate = {
+        "name": name,
+        "prefill_chunk": prefill_chunk,
+        "cache_profile": {
+            "value_group": group,
+            "plane_layouts": R9700_KV_PLANE_LAYOUTS,
+        },
+        "execution_profile": {
+            key: quality_source["representation"][key]
+            for key in (
+                "q4_activation_bits", "w8_activation_bits", "fp8_qk_wmma_profile",
+                "xattention_profile",
+            )
+        },
+        "quality_cells": quality_cells,
+        "capacity_by_cell": capacity,
+        "whole_inference_tokens_per_second": speeds,
+        "target_head_parity": target_head_parity,
+        "shortlist_head_precision_gate": {
+            "status": (
+                "q4_round_gate_pass_pending_trace"
+                if target_head_parity and all(
+                    cell["round_gate"]["all_repetitions_minimum"]
+                    for cell in target_head_parity.values()
+                )
+                else "conditional_head_precision_required"
+            ),
+            "head_format": "Q4G64_F16S",
+            "activation_profile": "A8G64",
+            "all_repetitions_minimum": bool(target_head_parity) and all(
+                cell["round_gate"]["all_repetitions_minimum"]
+                for cell in target_head_parity.values()
+            ),
+            "counter_semantics": (
+                "per-repetition counters sum request-lane rounds; every whole g256 MTP3 "
+                "cell requires concurrency * 64 rounds"
+            ),
+            "cells": {
+                f"{label}_c{concurrency}": detail
+                for concurrency, parity in (
+                    (int(key[1:]), value) for key, value in target_head_parity.items()
+                )
+                for label, detail in parity["round_gate"]["cells"].items()
+            },
+        },
+    }
+    provenance = {
+        "candidate": name,
+        "selected_prefill_chunk": prefill_chunk,
+        "cache_value_group": group,
+        "artifact": identity,
+        "benchmark_executable": manifests["pareto-capacity"]["bench"],
+        "quality": {
+            "path": str(quality_path),
+            "sha256": file_sha256(quality_path),
+            "artifact": {
+                "weights_id": quality_source["weights_id"],
+                "sha256": quality_source["sha256"],
+                "file_size_bytes": quality_source["file_size_bytes"],
+            },
+            "representation": quality_source["representation"],
+            "cells": quality_source["cells"],
+            "campaign_identity": quality_source.get("campaign_identity"),
+        },
+        "matrices": {
+            preset: {
+                "path": str(root / "manifest.json"),
+                "sha256": file_sha256(root / "manifest.json"),
+                "reports": [
+                    {"path": record["report"], "sha256": file_sha256(Path(record["report"]))}
+                    for record in manifests[preset]["commands"]
+                    if Path(record["report"]).is_file()
+                ],
+            }
+            for preset, root in (
+                ("pareto-capacity", capacity_root), ("pareto-whole", whole_root),
+            )
+            if root is not None
+        },
+        "capacity_failures": capacity_failures,
+    }
+    return candidate, provenance
+
+
+def validate_xattention_dense_controls(
+    candidates: list[dict[str, Any]], provenance: list[dict[str, Any]],
+) -> None:
+    """Require complete dense/sparse G16/G32 controls for every candidate recipe."""
+
+    expected = {
+        (16, "dense"),
+        (32, "dense"),
+        (16, "b128-s16-tau900"),
+        (32, "b128-s16-tau900"),
+    }
+    if len(candidates) != len(provenance) or not candidates:
+        raise ValueError("XAttention admission requires candidate provenance")
+    candidates_by_artifact: dict[tuple[object, object, object], list[dict[str, Any]]] = {}
+    for candidate, source in zip(candidates, provenance, strict=True):
+        artifact = source.get("artifact", {})
+        key = (
+            artifact.get("weights_id"), artifact.get("sha256"),
+            artifact.get("file_size_bytes"),
+        )
+        candidates_by_artifact.setdefault(key, []).append(candidate)
+    for key, recipe_candidates in candidates_by_artifact.items():
+        if (
+            not isinstance(key[0], str) or not key[0]
+            or not _valid_sha256(key[1])
+            or type(key[2]) is not int or key[2] <= 0
+        ):
+            raise ValueError("XAttention candidate artifact identity is incomplete")
+        actual = [
+            (candidate.get("cache_profile", {}).get("value_group"),
+             candidate.get("execution_profile", {}).get("xattention_profile"))
+            for candidate in recipe_candidates
+        ]
+        if len(actual) != len(expected) or set(actual) != expected:
+            raise ValueError(
+                f"XAttention admission requires dense and b128-s16-tau900 G16/G32 "
+                f"controls for every candidate artifact; {key[0]} is incomplete"
+            )
+
+    campaign_by_artifact_profile: dict[
+        tuple[object, object, object, str], set[tuple[str, str]]
+    ] = {}
+    shared_bindings: set[str] = set()
+    for candidate, source in zip(candidates, provenance, strict=True):
+        profile = candidate["execution_profile"]["xattention_profile"]
+        quality = source.get("quality", {})
+        representation = quality.get("representation") if isinstance(quality, dict) else None
+        matrices = source.get("matrices")
+        if (
+            source.get("candidate") != candidate.get("name")
+            or not isinstance(representation, dict)
+            or representation.get("xattention_profile") != profile
+        ):
+            raise ValueError("XAttention candidate and quality provenance identities disagree")
+        if (
+            not isinstance(matrices, dict)
+            or set(matrices) != {"pareto-capacity", "pareto-whole"}
+            or source.get("capacity_failures") != []
+        ):
+            raise ValueError(
+                "XAttention admission requires matched capacity and whole matrices"
+            )
+        identity = quality.get("campaign_identity") if isinstance(quality, dict) else None
+        if (
+            not isinstance(identity, dict)
+            or identity.get("artifact_type") != "ninfer_r9700_ppl_campaign"
+            or identity.get("schema_version") != 6
+            or identity.get("prefill_chunk") != candidate.get("prefill_chunk")
+        ):
+            raise ValueError("XAttention admission requires native schema-v6 PPL campaigns")
+        corpus = identity.get("corpus")
+        reference_source = identity.get("reference_source")
+        reference_execution = identity.get("reference_execution")
+        bf16_scorer = identity.get("bf16_scorer")
+        reused_bf16 = identity.get("reused_bf16_campaign")
+        repeat_comparison = identity.get("bf16_repeat_comparison")
+        if (
+            not isinstance(corpus, dict)
+            or not _valid_sha256(corpus.get("ids_sha256"))
+            or not _valid_sha256(corpus.get("manifest_sha256"))
+            or identity.get("reference_weights_id") != "bf16-source"
+            or not isinstance(reference_source, dict)
+            or not _valid_sha256(reference_source.get("config_sha256"))
+            or not _valid_sha256(reference_source.get("index_sha256"))
+            or not isinstance(reference_execution, dict)
+            or not isinstance(bf16_scorer, dict)
+            or not _valid_sha256(bf16_scorer.get("sha256"))
+            or type(bf16_scorer.get("bytes")) is not int
+            or bf16_scorer["bytes"] <= 0
+            or not isinstance(reused_bf16, dict)
+            or set(reused_bf16) != {"path", "sha256"}
+            or not isinstance(reused_bf16.get("path"), str)
+            or not _valid_sha256(reused_bf16.get("sha256"))
+            or not isinstance(repeat_comparison, dict)
+            or set(repeat_comparison) != {
+                "path", "sha256", "authority_input", "authority_campaign_sha256"
+            }
+            or repeat_comparison.get("authority_input") not in ("first", "second")
+            or repeat_comparison.get("authority_campaign_sha256") != reused_bf16.get("sha256")
+        ):
+            raise ValueError("XAttention schema-v6 PPL authority bindings are incomplete")
+        try:
+            validated_repeat = ppl_run.validate_bf16_repeat_comparison(
+                Path(repeat_comparison["path"]), Path(reused_bf16["path"])
+            )
+        except (OSError, SystemExit) as error:
+            raise ValueError("XAttention BF16 repeat authority is invalid") from error
+        if validated_repeat != repeat_comparison:
+            raise ValueError("XAttention BF16 repeat authority binding differs")
+        path = quality.get("path")
+        digest = quality.get("sha256")
+        if not isinstance(path, str) or not _valid_sha256(digest):
+            raise ValueError("XAttention PPL campaign identity is incomplete")
+        artifact = source["artifact"]
+        campaign_key = (
+            artifact["weights_id"], artifact["sha256"], artifact["file_size_bytes"], profile,
+        )
+        campaign_by_artifact_profile.setdefault(campaign_key, set()).add((path, digest))
+        shared_bindings.add(json.dumps({
+            "corpus": identity.get("corpus"),
+            "prefill_chunk": identity.get("prefill_chunk"),
+            "reference_weights_id": identity.get("reference_weights_id"),
+            "reference_source": identity.get("reference_source"),
+            "reference_execution": identity.get("reference_execution"),
+            "bf16_scorer": identity.get("bf16_scorer"),
+            "reused_bf16_campaign": identity.get("reused_bf16_campaign"),
+            "bf16_repeat_comparison": identity.get("bf16_repeat_comparison"),
+        }, sort_keys=True, separators=(",", ":")))
+    if any(len(campaigns) != 1 for campaigns in campaign_by_artifact_profile.values()):
+        raise ValueError(
+            "each artifact's XAttention profile must use one shared G16/G32 PPL campaign"
+        )
+    if len(shared_bindings) != 1:
+        raise ValueError("dense and XAttention PPL campaigns do not share one BF16/corpus authority")
+    required_recipes = TERMINAL_RECIPE_IDS
+    present_recipes = {key[0] for key in candidates_by_artifact}
+    if present_recipes != required_recipes:
+        raise ValueError(
+            "XAttention production admission requires complete all-Q4, mixed Q4/W8, "
+            "and four-role FP8/Q4 artifact profile sets"
+        )
+
+
+def validate_chunk_candidate_bindings(
+    chunk_selection: dict[str, Any], provenance: list[dict[str, Any]],
+) -> None:
+    sources = chunk_selection.get("sources")
+    if not isinstance(sources, list) or len(sources) != len(provenance):
+        raise ValueError("prefill-chunk selection does not cover every Pareto candidate")
+    expected = {}
+    for source in sources:
+        key = (
+            source.get("weights_id"), source.get("kv_value_group"),
+            source.get("xattention_profile"),
+        )
+        if key in expected:
+            raise ValueError("prefill-chunk selection has duplicate candidate bindings")
+        expected[key] = source
+    actual = set()
+    for source in provenance:
+        artifact = source.get("artifact", {})
+        quality = source.get("quality", {})
+        representation = quality.get("representation", {}) if isinstance(quality, dict) else {}
+        key = (
+            artifact.get("weights_id"), source.get("cache_value_group"),
+            representation.get("xattention_profile"),
+        )
+        bound = expected.get(key)
+        if (
+            bound is None
+            or bound.get("artifact") != artifact
+            or bound.get("benchmark_executable") != source.get("benchmark_executable")
+        ):
+            raise ValueError("Pareto candidate does not match its prefill-chunk selection identity")
+        actual.add(key)
+    if actual != set(expected):
+        raise ValueError("prefill-chunk selection and Pareto candidate sets differ")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--candidate", action="append", nargs=6, required=True,
+        metavar=(
+            "NAME", "WEIGHTS_ID", "GROUP", "QUALITY_JSON", "CAPACITY_DIR", "WHOLE_DIR",
+        ),
+    )
+    parser.add_argument(
+        "--require-xattention-dense-controls", action="store_true",
+        help="require matched dense and B128/S16/tau900 G16/G32 admission candidates",
+    )
+    parser.add_argument(
+        "--prefill-chunk-selection", type=Path, required=True,
+        help="validated schema-v2 global prefill-chunk selection record",
+    )
+    parser.add_argument("--out", type=Path, required=True)
+    args = parser.parse_args()
+    chunk_selection_path = args.prefill_chunk_selection.resolve()
+    chunk_selection_sha256 = file_sha256(chunk_selection_path)
+    chunk_selection = validate_selection_record(chunk_selection_path)
+    prefill_chunk = chunk_selection["selected_prefill_chunk"]
+    candidates, provenance = [], []
+    for name, weights_id, group, quality, capacity, whole in args.candidate:
+        whole_path = None if whole == "-" else Path(whole).resolve()
+        candidate, source = assemble_candidate(
+            name, weights_id, int(group), Path(quality).resolve(), Path(capacity).resolve(),
+            whole_path, prefill_chunk,
+        )
+        candidates.append(candidate)
+        provenance.append(source)
+    if args.require_xattention_dense_controls:
+        validate_xattention_dense_controls(candidates, provenance)
+        validate_chunk_candidate_bindings(chunk_selection, provenance)
+    if file_sha256(chunk_selection_path) != chunk_selection_sha256:
+        raise SystemExit("prefill-chunk selection bytes changed during assembly")
+    speed = sorted(
+        f"{phase}_{tokens}_c{concurrency}"
+        for concurrency in PRODUCT_CONCURRENCIES
+        for tokens in (8192, 32768)
+        for phase in ("prefill", "decode", "whole")
+    )
+    if any(
+        candidate["whole_inference_tokens_per_second"]
+        and sorted(candidate["whole_inference_tokens_per_second"]) != speed
+        for candidate in candidates
+    ):
+        raise SystemExit("candidate speed workload sets differ")
+    payload = {
+        "artifact_type": "ninfer_r9700_pareto_input",
+        "schema_version": 4,
+        "required_quality_cells": ["8k", "32k"],
+        "required_capacity_cells": [f"c{i}" for i in PRODUCT_CONCURRENCIES],
+        "required_speed_workloads": speed,
+        "selected_prefill_chunk": prefill_chunk,
+        "prefill_chunk_selection": {
+            "path": str(chunk_selection_path),
+            "sha256": chunk_selection_sha256,
+            "selection_rule": PREFILL_CHUNK_SELECTION_RULE,
+            "selected_prefill_chunk": prefill_chunk,
+        },
+        "require_single_static_profile_selection": args.require_xattention_dense_controls,
+        "candidates": candidates,
+        "source_provenance": provenance,
+    }
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,642 +1,461 @@
-# Softmax Attention 组织与迁移规范
+# R9700 Softmax Attention ownership
 
-本文定义 NInfer Softmax Attention 的目标语义、公共契约、源码组织和现有实现迁移方式。
-它是 [`op-development.md`](op-development.md) 在 Attention 领域的细化规范。本文描述的是迁移
-完成后的唯一目标态；在迁移完成前，源码中仍可见的 `gqa_attention`、`vision_attention`、
-`bidirectional_gqa_attention` 和 `swa` 是待替换的现状，不是需要兼容的第二套接口。
+This document records the current Softmax Attention ownership for the sole Qwen3.8-27B R9700
+product. It specializes the numerical and ownership rules in `op-development.md`; it is not a
+proposal for a generic Attention framework.
 
-## 1. 设计结论
+## Semantic vocabulary
 
-Softmax Attention 与现有 Linear Attention 是两个平行的算法类别：
-
-```text
-src/ops/
-├── softmax_attention/
-└── linear_attention/
-```
-
-Softmax Attention 内部按完整数学变换和显式状态效果划分 family，不按模型、模态、Head
-拓扑或 CUDA 算法划分：
+For head dimension `D`, query-head count `Hq`, KV-head count `Hkv`, query row `i`, and the
+entry-defined visible key set `A(i)`:
 
 ```text
-src/ops/softmax_attention/
-├── dense/
-└── sliding_window/
+group          = Hq / Hkv
+kv_head(h)     = floor(h / group)
+score(i,h,j)   = scale * dot(Q[:,h,i], K[:,kv_head(h),j]), j in A(i)
+probability    = stable_softmax(score)
+ideal[:,h,i]   = sum(j in A(i)) probability(i,h,j) * V[:,kv_head(h),j]
 ```
 
-当前迁移遵循以下结论：
+`Hq == Hkv`, `Hkv == 1`, and `1 < Hkv < Hq` are MHA, MQA, and GQA geometries respectively.
+Those terms describe head mapping; they do not create separate public Op families or storage
+owners. Kernel tiling, online Softmax, paged addressing, and WMMA are private implementation
+profiles and may not change `A(i)`, represented cache values, state publication, or outputs.
 
-1. MHA、MQA 和 GQA 不是三个 Op，也不是三个源码目录。它们是统一 Q/K/V Attention 的
-   Head geometry 取值。
-2. Text causal cache Attention、packed Vision Attention 和 DFlash context Attention 同属
-   `dense` family，但它们的可见域、物理输入和状态效果不同，保留效果明确的独立 entry。
-3. `vision` 是调用方身份，不是 Attention 语义。公共符号、文件名、测试和 benchmark 中不再
-   使用 `vision_attention`。
-4. `gqa` 只描述 Query Head 到 KV Head 的映射。公共符号、文件名、测试和 benchmark 中不再
-   使用 `gqa_attention`。
-5. 当前 SWA 使用循环 KV cache、绝对位置和对称局部可见域，是独立的
-   `sliding_window` family；公共全名为 `sliding_window_attention`。
-6. FlashAttention 是 exact Softmax Attention 的私有实现策略，PagedAttention 是 KV
-   存储和寻址策略。二者都不是公共 semantic family。
-7. MLA、结构化稀疏 Attention、二维窗口 Attention 和 Deformable Attention 只有在注册目标
-   实际需要时才创建 peer family；当前不创建空目录、占位接口或通用注册框架。
+Every floating-point route is checked directly against an independent naive FP64 oracle built
+from represented public inputs. A production route may use its natural private operand precision
+and reduction association. Exact codec bytes and state transitions use exact comparison.
 
-## 2. 分类轴
+## Current native entries
 
-Attention 相关术语必须先归入以下四个互相独立的轴，不能把不同轴的名字并列成目录：
-
-| 轴 | 回答的问题 | 当前例子 | 对源码组织的影响 |
+| Consumer | Geometry and visible set | Persistent representation | Current owner |
 |---|---|---|---|
-| 数学 family | 输出公式、可见域和状态转移是什么 | dense、sliding window | 决定 `softmax_attention/` 下的 family |
-| Head geometry | 每个 Query Head 使用哪个 KV Head | MHA、MQA、GQA | 普通值和验证规则，不创建 family |
-| 输入/状态表示 | K/V 是普通 Tensor、packed segment、线性 cache、循环 cache 还是 latent cache | packed、causal cache、context+query、未来 MLA | 在 family 内形成效果明确的 entry 或新的 family |
-| 实现策略 | 如何分块、搬运、归约和寻址 | flash、split-KV、paged、small-T | 只存在于私有 launcher、plan 和 kernel |
+| Text and MTP | `D256/Hq24/Hkv4`; causal prefix or explicit packed-tree ancestry | typed FP8-K/INT4-V growing cache | Qwen3.8 R9700 full-attention leaf |
+| DFlash Full | `D128/Hq32/Hkv8`; read-only context plus the complete live query segment | independent BF16 paged context | native bidirectional GQA Op |
 
-以下分类是强制的：
+Vision packed attention and DFlash Local sliding-window attention have different represented
+inputs and visibility rules. They do not borrow the Text/MTP cache codec or publication state.
 
-- self-attention 与 cross-attention 在 Q/K/V 已经显式给出后使用同一个 dense 公式；它们不因
-  Q/K/V 的来源不同而成为两个 Op。
-- causal、非 causal、packed block-diagonal、context+query 和 sliding window 描述可见域或
-  状态效果，必须在 entry 契约中明确，不能藏在调用方约定里。
-- `prefill`、`decode`、`small_t`、`flash`、`split_kv` 是实现或测量术语，不能成为公共
-  semantic entry。
-- Text、MTP、Vision、DFlash 是调用位置或模型调度概念，不能出现在通用 Attention Op 名称
-  中。
+## Text and MTP: typed FP8-K/INT4-V cache
 
-## 3. 统一数学语义与 Head geometry
+Text and MTP have no homogeneous cache-dtype selector. Their only growing-cache representation is:
 
-### 3.1 Head geometry
+- one OCP E4M3FN byte per K feature;
+- two canonical signed INT4 V codes per byte;
+- one IEEE binary16 V scale per feature group (provisionally 16 features; G16 versus G32 remains a
+  real-model gate);
+- a 64-token paged block table and an explicit physical plane-layout identity.
 
-显式 Q/K/V Softmax Attention 使用一个窄的 host value 表达 Head geometry：
+`src/core/fp8_int4_paged_kv_cache.{h,cpp}` owns the physical storage plan, semantic fingerprint,
+typed per-layer view, and allocation validation. `qwen3::PagedKVCache` owns per-sequence
+allocation and publication state. A cache view cannot be reconstructed from arbitrary homogeneous
+planes or selected by dtype at runtime.
 
-```cpp
-struct AttentionHeadGeometry {
-    std::int32_t head_dim;
-    std::int32_t query_heads;
-    std::int32_t kv_heads;
-};
-```
+### Mutation and publication
 
-当前公共表示保持 Q、K、V 的 Head dimension 相同。合法 geometry 满足：
+`PagedKVTransaction` is the sole Text/MTP mutation authority. An append transaction validates the
+logical suffix, clears one caller-owned status word, requires each layer exactly once on one HIP
+stream, and publishes the new frontier only after the codec status succeeds. A pending
+`PagedKVLayerRead` authorizes the same stream to attend a newly appended layer before the all-layer
+transaction commits; it does not expose that frontier to another consumer.
 
-```text
-D = head_dim > 0
-Hq = query_heads > 0
-Hkv = kv_heads > 0
-Hq % Hkv == 0
-group = Hq / Hkv
-kv_head(h) = floor(h / group)
-```
+The raw native mutations are:
 
-逻辑 Tensor 形状为：
+- `src/ops/r9700/kv/fp8_int4_kv_append.{h,hip}` for represented-BF16 K/V to stored FP8-K/INT4-V;
+- `src/ops/r9700/kv/fp8_int4_kv_compact.{h,hip}` for in-place monotone speculative-path gather.
 
-```text
-Q   [D, Hq,  Tq]
-K   [D, Hkv, Tk]
-V   [D, Hkv, Tk]
-Out [D, Hq,  Tq]
-```
+Accepted speculative paths use `PagedKVCache::begin_compact`, launch every layer through the same
+transaction, and commit the checked publication frontier only after the shared device status stays
+zero. When retained tokens are already in place, `truncate_publication` closes the speculative
+suffix without copying bytes. Neither route permits direct frontier repair by the schedule.
 
-geometry 给通用 `Tensor` 轴赋予语义，并供 workspace capacity 查询使用；执行 wrapper 必须
-验证 geometry 与 Q/K/V/Out/cache view 一致。它不包含目标 key、模型角色、执行阶段、kernel
-选择或设备资源。
+### Attention leaf
 
-MHA、MQA 和 GQA 只是以下三个取值区域：
+`src/targets/qwen3_8_27b/impl/r9700_full_attention.{h,hip}` is the target-private semantic bridge.
+It accepts represented BF16 queries, a generation-bound typed layer read, optional device I32
+causal positions, optional paired packed-tree ancestry metadata, and an optional device-resident
+active-row count. It delegates to
+`src/ops/r9700/kv/fp8_int4_kv_attention.{h,hip}` at the fixed Qwen3.8 geometry.
 
-```text
-MHA: Hq == Hkv
-MQA: Hkv == 1
-GQA: 1 < Hkv < Hq
-```
+The selected production implementation has two finite crossovers. At context 8,192 and above,
+ordinary T=1 and fixed-width T=4 use the admitted split-512 score, partial Softmax/PV, and merge
+stages; T=4 supports causal, packed-tree, and device-active-row metadata. T=1 with tree or
+device-active-row metadata retains the fused leaf at every context; workspace sizing and launch
+share this metadata-aware decision. Below the split boundary, ordinary T=1
+at context 64 and above and T=2 at context 320 and above privately cast represented BF16 Q to
+E4M3FN and use wave32 FP8-Q/FP8-K WMMA, a caller-owned FP32 score panel, stable FP32 Softmax, and
+exact vector FP32-probability INT4-V accumulation. Remaining shapes stream FP8 K and signed-
+INT4-times-FP16-scale V through online FP32 Softmax without materializing scores. The query cast is
+an implementation profile, not a cache-format or public-semantic change, and the compile-isolated
+score-streaming build remains the PPL control. Output is FP32; the family schedule performs the
+explicit BF16 cast where the next semantic boundary requires it. Inactive fixed-width rows are
+exact positive zero. Invalid represented position/tree/count/table-row metadata remains
+conspicuous as NaN in the affected contract-defined rows.
 
-因此不定义 `GqaGeometry`、`GqaExecutionEnvelope`、`gqa_*` launcher 或 `gqa_*` kernel。
-若未来真实目标需要非均匀或非连续 Head 映射，应为该数学语义定义新的显式映射契约；不得先
-把任意映射 Tensor 加入当前统一 geometry。
+### Qualification-only XAttention prefill evaluator
 
-### 3.2 Softmax 公式
-
-对 Query token `i`、Query Head `h` 和 entry 定义的可见 Key 集合 `A(i)`：
-
-```text
-kh = floor(h / (Hq / Hkv))
-score(i,h,j) = scale * dot(Q[:,h,i], K[:,kh,j]), j ∈ A(i)
-p(i,h,:)     = stable_softmax(score(i,h,:))
-ideal[:,h,i] = Σ(j ∈ A(i)) p(i,h,j) * V[:,kh,j]
-```
-
-公共输入 storage boundary 之后的逻辑值进入同一个朴素 FP64 oracle。实现可以使用在线
-Softmax、Flash tiling、split-KV、私有低精度 staging 或不同归约树，但不得改变可见集合、cache
-编码、公开输出和状态效果。
-
-`scale` 是显式语义参数。当前注册 domain 可只接受对应 geometry 的 `1/sqrt(D)`，但不能把
-scale 隐藏在 Vision、Text 或某个 kernel 名称中。
-
-### 3.3 当前注册 geometry
-
-迁移不借机扩大支持面。各 entry 只接收当前生产路径已经支持的有限 domain：
-
-| 使用位置 | geometry | cache/布局 | 迁移后 entry |
-|---|---:|---|---|
-| Qwen3.6-27B Text/MTP | `D256/Hq24/Hkv4` | BF16 或 INT8-G64 线性 cache | `causal_softmax_attention` |
-| Qwen3.6-35B-A3B Text/MTP | `D256/Hq16/Hkv2` | BF16 或 INT8-G64 线性 cache | `causal_softmax_attention` |
-| Qwen3.6 Vision | `D72/Hq16/Hkv16` | packed BF16 Q/K/V | `packed_softmax_attention` |
-| Qwen3.6-35B-A3B DFlash full | `D128/Hq32/Hkv8` | 只读 BF16 context + query K/V | `context_softmax_attention` |
-| Qwen3.6-35B-A3B DFlash local | `D128/Hq32/Hkv8` | 只读 BF16 cyclic context + query K/V | `sliding_window_attention` |
-
-## 4. 公共契约
-
-目标态使用一个共享值 header 和三个公共 contract header：
+The sparse-prefill candidate follows Algorithm 1 of Xu et al., *XAttention: Block Sparse
+Attention with Antidiagonal Scoring* (ICML 2025, PMLR 267). For stride `S`, estimator plane `p`
+concatenates query slices in the inverse order `Q_slice[S-1::S]` through `Q_slice[0::S]`, while
+the key groups retain forward order `K[0::S]` through `K[S-1::S]`. Each represented score is
+therefore the explicit antidiagonal sum
 
 ```text
-include/ninfer/ops/attention_geometry.h
-include/ninfer/ops/softmax_attention.h
-include/ninfer/ops/sliding_window_attention.h
-include/ninfer/ops/kv_cache_append.h
+logit(p,g) = scale / S * sum(s=0..S-1) dot(Q[p*S + S-1-s], K[g*S+s])
 ```
 
-`attention_geometry.h` 只拥有 `AttentionHeadGeometry` 及其 host-side 合法性规则，使 dense
-和 sliding-window contract 不需要互相 include。`softmax_attention.h` 拥有 dense family 的
-公式、entry-specific execution envelope 和 workspace capacity 查询。
-`sliding_window_attention.h` 拥有局部窗口的独立可见域与循环 cache 契约。
-`kv_cache_append.h` 拥有不计算 Attention 的 KV cache 状态转移。
+where `scale` is `1/sqrt(D)` for Qwen3.8. The implementation applies a separate stable Softmax
+over the causal key groups of every plane, sums those normalized probabilities into paper B128
+key blocks, and retains the minimum descending-mass set reaching the compile-fixed `tau`. Each
+retained block expands to two ordered B64 cache pages. Equal masses choose the lower logical block;
+the consumer then visits retained pages in
+ascending logical order. This normalization is per plane: accumulating only
+`exp(logit - plane_max)` is not the represented algorithm because unrelated plane denominators
+would change page rank and threshold.
 
-### 4.1 普通 dense Q/K/V
+NInfer's causal/ragged adaptation uses one estimator per B128 prefill block. Complete query planes
+use the paper's concatenation literally. Ragged final Q and K groups are zero padded by omitting
+out-of-range terms while retaining the `/S` scale; neither is discarded. These choices keep the
+estimator causal and prevent reading an unpublished key tail.
 
-普通单段 Q/K/V 入口采用所期望的直接形式：
+Q and K use the same global block origin. An ordinary prefill chunk whose first absolute query
+position is not divisible by B128 emits the complete causal page list and executes exact dense
+attention. It is never locally reanchored, because doing so would change the keep set solely when
+prefix reuse or suffix rewriting moves a chunk boundary. Aligned B128 blocks preserve the internal
+stride origin.
 
-```cpp
-void softmax_attention(const Tensor& q, const Tensor& k, const Tensor& v,
-                       AttentionHeadGeometry geometry, float scale,
-                       WorkspaceArena& workspace, Tensor& out, cudaStream_t stream);
+The causal selector makes the sink B128 block and current B128 query block mandatory and counts
+their estimated mass toward `tau` before greedily adding other blocks. This matches upstream
+`find_blocks_chunked` and avoids the over-retention caused by unioning mandatory blocks only after
+selection. The candidate consumes the same FP8-E4M3FN K,
+signed-INT4 V, and FP16 V-scale planes as dense attention; it introduces no cache representation or
+runtime selector. `tau=1` bypasses all estimator arithmetic and emits every causal page in dense
+order.
+
+Dense P2048 uses the physically selected production page-tiled route, not the sparse consumer and
+not the decode split-512 path. Its fixed Bk64 tile matches one cache page and Bq16 is the sole
+retained query tile. A 256-thread query-head CTA cooperatively decodes the
+token-fastest FP8 K page to BF16 LDS once, reuses that represented tile across its query rows, and
+uses native BF16 WMMA for QK. It retains increasing logical-key order, per-row causal positions,
+FP32 online softmax, and direct feature-fastest signed-INT4/FP16-scale V accumulation, with no
+global score or probability matrix. Fragmented physical page IDs affect only the cooperative page
+resolution. Production selects it only for initial-prefix P=128..4096 with the selected physical
+plane layouts; shorter contexts, later chunks, tree masks, and other layouts retain their existing
+routes.
+
+The static resource gate uses the combined gfx1201 residency envelope rather than an isolated
+register target: next-free VGPR must be at most 240, allocation-rounded LDS at most 43,520 bytes,
+reported occupancy at least 6, with wave32, a 256-thread maximum workgroup, WGP mode, and no
+private, scratch, or register-spill storage. Both G16/G32 Bq16 specializations report 217 next-free
+VGPR and 37,160 bytes of LDS. That LDS footprint already bounds the CTA residency,
+so reducing register allocation alone is not a valid optimization claim.
+
+The retained pre-promotion physical A/B report
+`profiles/bench/r9700-dense-prefill-attention-ab.json` has SHA-256
+`d7a0f50a6ae91448583b07d7477d2926b950b65eeadd3ac924f28a8354ed95a6`. Bq16 won every G16/G32
+P128/512/1024/2048/4096 cell. Its selected/incumbent median ratios are respectively
+0.561224173/0.566735009/0.504308119/0.437316979/0.416703457 for G16 and
+0.546212923/0.554317816/0.495417690/0.429230227/0.417418378 for G32. Bq4/Bq8 were removed after
+selection. Post-promotion operator revalidation and the complete low-context whole ladder remain
+required; the operator A/B alone does not prove the 2,000 tok/s whole-prefill floor.
+
+The evaluator is scoped only to ordinary Text prefill. A DFlash-enabled request uses that selected
+ordinary prefill route while capturing its companion features; DFlash proposal attention and
+target/tree verification, plus decode, MTP, and GDN, remain dense throughout qualification. The default build does not compile or link
+the sparse leaf and exposes no Engine, CLI, serving, PPL, or benchmark selector. A separate
+`NINFER_R9700_XATTENTION_QUALIFICATION=ON` build compiles the S16/tau900/B128 profile through the
+target-private Text-prefill leaf and its exact workspace planner, allowing matched PPL and whole
+prefill measurement without changing the public runtime contract. Its PPL sidecar reports
+`xattention_qualification=true`, `xattention_profile=b128-s16-tau900`, B128, S16, and tau 900;
+the ordinary scorer reports `xattention_qualification=false`. `tools/ppl/run.py` rejects either
+binary when it does not match the explicit `--expected-xattention-profile` campaign identity.
+
+`tools/r9700/xattention_prefill_qual.hip` independently derives keep sets and retained-page FP64
+attention from represented logical Q/K/V values, and then checks the raw physical execution at
+`D256/Hq24/Hkv4`. Its fixture writes the chosen physical planes with standalone handwritten
+offsets; it does not by itself prove the generic plane layout. Physical-format evidence is
+compositional with `tools/r9700/kv_op_qual.hip`, which independently qualifies the selected
+token-fastest K and feature-fastest V/V-scale codec and addressing contract.
+
+The September 3, 2026 schema-v1 reports are historical diagnostics, not rejection or cross-profile
+evidence. Their zero-filled Q/K corpus makes every estimator block equiprobable, so `tau=0.900`
+necessarily keeps about 90% of the cache. They also predate B128 selection and mandatory-mass
+accounting and retain no executable/source identity; their S16/S8 ranker ratio is not attributable
+across binaries. Earlier RTX 5090 work remains useful architecture-direction evidence, not R9700
+admission: at `tau=0.9` its tensor-core B128 implementation improved 32K prefill by about
+6.5--6.9% and 64K by 14.6--15.7%, while its 32K NLL and 64K needle gates passed.
+
+The corrected evaluator decodes each logical FP8 K once into caller-owned BF16 packed storage,
+then performs two skinny gfx1201 BF16-WMMA passes: one for per-plane maxima and one that accumulates
+B128 exp mass without materializing a full logit matrix. The one causal diagonal group per plane
+uses a wave-reduced BF16-input FP32 correction so terms beyond that plane's real query frontier are
+zero padded rather than entering the WMMA score. FP8 K is exactly representable in BF16 and Q
+remains represented BF16, so this is the same estimator oracle rather than an FP8-Q profile.
+For a 4,096-row planning chunk, workspace is 17.925/71.690/573.503 MiB at 8K/32K/262K for S16
+and 19.425/77.690/621.503 MiB for S8; the 128-row timing fixture uses 513.922 MiB at 262K for
+S16. Schema v3 uses a fixed concentrated represented Q/K corpus and reports achieved keep fraction,
+independent total/ranker/consumer times, and the measured physical-oracle maximum absolute error
+with its absolute-or-relative acceptance tolerances. Both profiles have `2.221e-8` maximum
+absolute error under the recorded `3e-4` tolerance. S16 measures `6.74x` dense-over-sparse at 8K
+and `7.80x` at 32K, with 14.06% and 11.72% page retention; its rank stage is
+`1.162/4.744 ms`. S8 measures `6.61x/7.60x` with the same fixture retention but a slower
+`1.416/5.581 ms` rank stage and larger
+workspace. S16 therefore advances to model gates. These are structured-fixture Op measurements,
+not model-quality or whole-inference evidence. Dense remains the sole production route until the
+remaining gates pass.
+
+The compile-isolated G16 S16/tau900 runtime passed the physical planner. A fresh 128-token
+dense/XAttention diagnostic produced byte-identical FP32-NLL and I32-argmax sidecars. A standalone
+8K XAttention scorer also completed in 50.47 seconds. A numerical comparison with the older
+72.09-second dense sidecar gives +0.00048794 mean NLL, two new and six resolved NLL-at-least-10
+positions, and 152 diagnostic greedy flips, but that dense sidecar predates the compile-bound
+profile and scorer-hash campaign envelope. The comparison is directional smoke evidence, not a
+matched model-distribution admission gate. The fresh schema-v6 dense campaign now covers G16/G32;
+the matched XAttention campaign at 8K and 32K, schema-v20/v13 benchmark matrices, and long-context
+needle retrieval remain required.
+
+Capacity evidence must also match the compile-isolated route. At the 4,096-row prefill chunk and
+262,144-token context envelope, the S16 leaf requires 601,361,408 bytes; after the live Text
+prefill roots and all-Q4 A8 linear reserve, the current planner's global workspace is
+1,085,967,619 bytes. The retained dense G16/G32 capacity executables reserve 603,619,587 bytes, so
+their historical resolved C=1..8 curves cannot be reused for the C=1..4 XAttention admission.
+Fresh ON-profile G16/G32
+capacity curves must bind the same executable/profile as the matched whole-inference evidence.
+Static projections from the old free-memory snapshots are diagnostic only and are not resolved
+capacity results.
+
+Whole-inference admission is a dense-versus-sparse decision, not merely a choice between sparse
+G16 and G32. The all-Q4 route comparison therefore contains four same-artifact candidates: dense
+G16, dense G32, XAttention G16, and XAttention G32. Under the C=1..4 product cap the mixed recipe
+is also capacity-eligible, so the final product comparison must add the equivalent four
+mixed-recipe candidates, with matched dense/XAttention schema-v6 PPL and fresh C=1..4
+capacity/whole evidence. Each dense candidate needs its own fresh
+schema-v14 capacity/whole pair from one current dense executable. Each whole row retains its
+separately timed prefill and decode phases, acceptance, and fresh-request makespan. The retained
+schema-v12/v19 dense capacity and standalone phase directories, plus the absent dense whole
+matrix, do not match the current assembler or provide a complete speed control. The fixed dense
+candidate sidecars remain reusable, but the former BF16 rows are not: the replacement schema-v6
+campaign must bind the mandatory deterministic BF16 `reference_execution` provenance alongside
+both cache groups, artifact bytes, scorer identity, and the dense execution profile. PPL scorer
+seconds and standalone Op timing remain attribution, never whole-inference speed objectives. The retained
+all-Q4 four-candidate evidence cannot by itself exclude or select the restored mixed recipe.
+The full classifier retains one cache/execution winner per recipe and then applies the same
+globally normalized maximin throughput, capacity, quality-budget, and canonical-identity ordering
+to emit one schema-v7 `terminal_production_selection`. Quality remains admission rather than the
+leading rank.
+The decision compares retained per-cell means exactly and retains raw repetition spread only as
+evidence; NIAH and DFlash consume the resulting terminal winner.
+
+The retained reproduction command for each candidate is:
+
+```bash
+cmake -S . -B build-r9700-xattention-s16-tau900 -G Ninja \
+  -DNINFER_BUILD_APPS=OFF -DBUILD_TESTING=ON \
+  -DNINFER_R9700_XATTENTION_STRIDE=16 \
+  -DNINFER_R9700_XATTENTION_TAU_PERMILLE=900
+cmake --build build-r9700-xattention-s16-tau900 --parallel 8 \
+  --target ninfer_r9700_xattention_qual
+mkdir -p profiles/bench/r9700-xattention-requal-s16-tau900
+build-r9700-xattention-s16-tau900/src/ninfer_r9700_xattention_qual \
+  --benchmark --iterations 7 \
+  --out-json profiles/bench/r9700-xattention-requal-s16-tau900/timing.json
+sha256sum build-r9700-xattention-s16-tau900/src/ninfer_r9700_xattention_qual \
+  > profiles/bench/r9700-xattention-requal-s16-tau900/executable.sha256
+sha256sum src/ops/r9700/kv/fp8_int4_kv_xattention.{h,hip} \
+  src/ops/r9700/kv/r9700_xattention_profile.h tools/r9700/xattention_prefill_qual.hip \
+  > profiles/bench/r9700-xattention-requal-s16-tau900/sources.sha256
+make -C tools/r9700 XATTENTION_STRIDE=16 XATTENTION_TAU_PERMILLE=900 \
+  xattention-reports
 ```
 
-公式和接口不把 `Tq` 与 `Tk` 强制为同一个语义轴，因此未来 dense cross-attention 不需要新建
-family。当前迁移只注册已有的 `D72/Hq16/Hkv16`、`Tq=Tk` 单段 self-attention domain；不能
-因为公式一般就宣称任意 shape 或 cross-attention 已支持。
+Repeat with `16` replaced by `8` in the build directory, configure value, evidence directory, and
+Make variables. The assembly report does not execute the GPU and may be generated independently;
+the qualification executable performs the physical correctness and timing run.
 
-当前迁移可由 packed 实现的单 segment route 承担该入口，不增加第二套 kernel。
+The model-distribution build and prefill campaign use the same compile-bound S16 implementation:
 
-### 4.2 Packed dense Q/K/V
+```bash
+cmake -S . -B build-r9700-xattention-model-s16-tau900 -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release -DNINFER_BUILD_APPS=ON \
+  -DNINFER_BUILD_BENCHMARKS=ON \
+  -DNINFER_R9700_KV_VALUE_GROUP=16 \
+  -DNINFER_R9700_XATTENTION_QUALIFICATION=ON \
+  -DNINFER_R9700_XATTENTION_STRIDE=16 \
+  -DNINFER_R9700_XATTENTION_TAU_PERMILLE=900
+cmake --build build-r9700-xattention-model-s16-tau900 --parallel 8 \
+  --target ninfer-ppl ninfer-serve ninfer_bench ninfer_r9700_runtime_planner_qual
 
-当前 Vision Attention 迁移为与模态无关的 packed entry：
-
-```cpp
-void packed_softmax_attention(const Tensor& q, const Tensor& k, const Tensor& v,
-                              AttentionHeadGeometry geometry, float scale,
-                              const Tensor& cu_seqlens, WorkspaceArena& workspace,
-                              Tensor& out, cudaStream_t stream);
-
-void packed_softmax_attention(const Tensor& q, const Tensor& k, const Tensor& v,
-                              AttentionHeadGeometry geometry, float scale,
-                              std::int32_t segment_length, Tensor& out,
-                              cudaStream_t stream);
+/ssdpool2nvme/local_llm/.venv-ninfer-r9700/bin/python tools/ppl/run.py \
+  --bf16-reference-ppl-bin tools/reference/qwen3_8_27b_bf16/ppl.py \
+  --bf16-reference-weights /ssdpool2nvme/local_llm/models/qwen3.8-27b-bf16 \
+  --g16-ppl-bin build-r9700-xattention-model-s16-tau900/apps/ninfer-ppl \
+  --g16-weights "$NINFER_XATTENTION_ARTIFACT" \
+  --profiles bf16-reference,r9700-g16 \
+  --quality-tier capacity-speed --gate r9700-g16=0.048790164169432 \
+  --schedule prefill --no-extras \
+  --expected-xattention-profile b128-s16-tau900 \
+  --out profiles/ppl/r9700-xattention-s16-tau900
 ```
 
-每个 segment 是独立的 dense non-causal self-attention；不同 segment 之间不可见。第一种
-entry 接受严格递增的 device `cu_seqlens`，第二种 entry 表示等长连续 segment。其 workspace
-查询改名为：
+Use the selected cache-group profile and its matching `--g16-*` or `--g32-*` flags. A retained
+dense sidecar may be reused only when corpus identity, scoring schedule, prefill chunk, cache and
+artifact identity all match; executable hashes and the explicit XAttention fields distinguish the
+two candidate routes. The same isolated build's `ninfer_bench` is the whole-prefill challenger;
+decode rows in that binary remain dense and are not sparse-speed evidence.
 
-```cpp
-packed_softmax_attention_workspace_capacity_bytes(...)
+The corresponding capacity and whole-inference campaigns must use the isolated benchmark bytes
+and require the compile-bound profile explicitly. Re-run the G16 configure/build command above
+before the campaign: an older cache with `NINFER_BUILD_BENCHMARKS=OFF` is not a usable benchmark
+build. Build G32 separately so its compile-time cache layout cannot be confused with G16:
+
+```bash
+cmake -S . -B build-r9700-xattention-model-s16-tau900-g32 -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release -DNINFER_BUILD_APPS=ON \
+  -DNINFER_BUILD_BENCHMARKS=ON \
+  -DNINFER_R9700_KV_VALUE_GROUP=32 \
+  -DNINFER_R9700_XATTENTION_QUALIFICATION=ON \
+  -DNINFER_R9700_XATTENTION_STRIDE=16 \
+  -DNINFER_R9700_XATTENTION_TAU_PERMILLE=900
+cmake --build build-r9700-xattention-model-s16-tau900-g32 --parallel 8 \
+  --target ninfer_bench ninfer_r9700_runtime_planner_qual
 ```
 
-迁移后 contract 中使用 `T` 或 `tokens` 表示通用 packed token 数，不使用 `patches` 作为 Op
-层轴名。Vision 调度仍可在自己的代码中把该值称为 `patches`。
+Run both capacity groups into new sparse directories rather than the completed dense directories:
 
-### 4.3 Causal cached dense Attention
+```bash
+python3 tools/bench/run_ninfer_bench_matrix.py --preset pareto-capacity \
+  --bench build-r9700-xattention-model-s16-tau900/bench/ninfer_bench --no-build \
+  --weights out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer \
+  --concurrency 1 --concurrency 2 --concurrency 3 --concurrency 4 \
+  --expected-kv-value-group 16 \
+  --expected-q4-activation-bits 8 --expected-w8-activation-bits 8 \
+  --expected-fp8-qk-wmma 1 \
+  --expected-xattention-profile b128-s16-tau900 \
+  --output-dir profiles/bench/pareto-capacity-xattention-s16-tau900-all-q4-g16-20260903
 
-Text/MTP 的线性 cache Attention 保留三个效果明确的行为：
+python3 tools/bench/run_ninfer_bench_matrix.py --preset pareto-capacity \
+  --bench build-r9700-xattention-model-s16-tau900-g32/bench/ninfer_bench --no-build \
+  --weights out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer \
+  --concurrency 1 --concurrency 2 --concurrency 3 --concurrency 4 \
+  --expected-kv-value-group 32 \
+  --expected-q4-activation-bits 8 --expected-w8-activation-bits 8 \
+  --expected-fp8-qk-wmma 1 \
+  --expected-xattention-profile b128-s16-tau900 \
+  --output-dir profiles/bench/pareto-capacity-xattention-s16-tau900-all-q4-g32-20260903
 
-```cpp
-struct CausalAttentionExecutionEnvelope {
-    std::uint32_t min_visible_keys;
-    std::uint32_t max_visible_keys;
-};
+python3 tools/bench/run_ninfer_bench_matrix.py --preset pareto-whole \
+  --bench build-r9700-xattention-model-s16-tau900/bench/ninfer_bench --no-build \
+  --weights out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer \
+  --concurrency 1 --concurrency 2 --concurrency 3 --concurrency 4 \
+  --expected-kv-value-group 16 \
+  --expected-q4-activation-bits 8 --expected-w8-activation-bits 8 \
+  --expected-fp8-qk-wmma 1 \
+  --expected-xattention-profile b128-s16-tau900 \
+  --output-dir profiles/bench/pareto-whole-xattention-s16-tau900-all-q4-g16-20260903
 
-void causal_softmax_attention(
-    const Tensor& q, const Tensor& k, const Tensor& v, const Tensor& positions,
-    AttentionHeadGeometry geometry, float scale, KVCacheLayerView cache,
-    CausalAttentionExecutionEnvelope envelope, WorkspaceArena& workspace,
-    Tensor& out, cudaStream_t stream);
-
-void causal_softmax_attention_cached(
-    const Tensor& q, const Tensor& positions, AttentionHeadGeometry geometry,
-    float scale, const KVCacheLayerView& cache,
-    CausalAttentionExecutionEnvelope envelope, WorkspaceArena& workspace,
-    Tensor& out, cudaStream_t stream);
+python3 tools/bench/run_ninfer_bench_matrix.py --preset pareto-whole \
+  --bench build-r9700-xattention-model-s16-tau900-g32/bench/ninfer_bench --no-build \
+  --weights out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer \
+  --concurrency 1 --concurrency 2 --concurrency 3 --concurrency 4 \
+  --expected-kv-value-group 32 \
+  --expected-q4-activation-bits 8 --expected-w8-activation-bits 8 \
+  --expected-fp8-qk-wmma 1 \
+  --expected-xattention-profile b128-s16-tau900 \
+  --output-dir profiles/bench/pareto-whole-xattention-s16-tau900-all-q4-g32-20260903
 ```
 
-`causal_softmax_attention` 先把当前 K/V 写入绝对 `positions` 对应的 cache rows，再让 Query
-位置 `p` 看见已经填充的 `[0,p]`。`causal_softmax_attention_cached` 不接受新 K/V，不修改
-cache，只读取相同可见域。二者共享同一个数学 oracle和 cache codec 定义，但必须分别直接
-qualification。
+Each capacity command produces exactly four cells, one native-262,144-context MTP3 workspace
+result for each C=1..4. On interruption, repeat the byte-identical command with `--resume`; the
+schema-v14 manifest must match the artifact, executable bytes, cache group, sparse profile, preset,
+and concurrency matrix before any valid cell is skipped. Raw schema-v20 reports bind
+qualification, B128, S16, and tau900; schema-v14 manifests and flattened rows carry the expected
+profile. The runner rejects dense/sparse mismatches on initial validation and resume. Never resume
+these commands into the retained schema-v12 dense capacity directories.
+The same no-overwrite rule applies to whole evidence. Keep each group's capacity and whole matrices
+on byte-identical benchmark and artifact files. A whole matrix contains four optimized-head MTP3
+timing commands and four matched ordinary greedy controls across C=1..4. The eight MTP3
+fresh-request rows retain separately timed prefill/decode phases, speculative acceptance, and
+whole-request makespan; all sixteen rows retain target tokens so assembly can require exact
+MTP/ordinary parity per repetition and lane. The assembler uses only MTP3 timings for all 48 speed
+objectives, so the older standalone phase matrices are diagnostic history and must not be scheduled
+or supplied as selection evidence. Only after both manifests are complete and have no
+`failures.json` may they enter the Pareto assembler.
 
-capacity 查询为：
+`prepare_whole_profile.py` is optional attribution after an unprofiled whole matrix completes; it
+is not a prerequisite or replacement for that timing. If a named bottleneck question remains,
+prepare one measured point into a new profiler directory, for example G16 C4/32K:
 
-```cpp
-causal_softmax_attention_workspace_capacity_bytes(
-    AttentionHeadGeometry geometry, DType cache_dtype,
-    CausalAttentionExecutionEnvelope envelope,
-    std::int32_t min_tokens, std::int32_t max_tokens);
+```bash
+python3 -m tools.bench.prepare_whole_profile \
+  --matrix-dir profiles/bench/pareto-whole-xattention-s16-tau900-all-q4-g16-20260903 \
+  --out profiles/rocprof/xattention-s16-tau900-all-q4-g16-c4-32k-trace-20260903 \
+  --concurrency 4 --prompt-tokens 32768 --generated-tokens 256 \
+  --expected-weights-id r9700-q4g64-n16k16-eval --expected-kv-value-group 16 \
+  --expected-xattention-profile b128-s16-tau900 --expected-prefill-chunk 4096 \
+  --kind trace --question "which dispatch family dominates XAttention C4 32K makespan?"
 ```
 
-`positions` 决定精确因果可见域；execution envelope 仅保证 graph-safe launch capacity，不是
-mask 参数。
-
-### 4.4 Context + query dense Attention
-
-当前 `bidirectional_gqa_attention` 的真实语义是：Query 同时看见只读 persistent context 和
-完整 query K/V segment。它迁移为：
-
-```cpp
-struct ContextAttentionExecutionEnvelope {
-    std::uint32_t min_context;
-    std::uint32_t max_context;
-};
-
-void context_softmax_attention(
-    const Tensor& q, const Tensor& query_k, const Tensor& query_v,
-    const Tensor& context_length, AttentionHeadGeometry geometry, float scale,
-    const KVCacheLayerView& context, ContextAttentionExecutionEnvelope envelope,
-    WorkspaceArena& workspace, Tensor& out, cudaStream_t stream);
-```
-
-所有 Query rows 都看见 `[0, context_length)` 和完整 query segment；不存在 causal triangle。
-`context` 与 query K/V 保持两个物理 segment，不要求拼接或复制。capacity 查询为
-`context_softmax_attention_workspace_capacity_bytes(...)`。
-
-`bidirectional` 不再出现在名称中，因为它只描述当前 entry 的可见域；`GQA` 不再出现在名称
-中，因为 `D128/Hq32/Hkv8` 已由 geometry 表达。
-
-### 4.5 Sliding-window Attention
-
-SWA 迁移到独立 header 和 family：
-
-```cpp
-struct SlidingWindowAttentionExecutionEnvelope {
-    std::uint32_t min_context;
-    std::uint32_t max_context;
-};
-
-void sliding_window_attention(
-    const Tensor& q, const Tensor& query_k, const Tensor& query_v,
-    const Tensor& positions, AttentionHeadGeometry geometry,
-    std::uint32_t window, float scale,
-    const CyclicKVCacheLayerView& context,
-    SlidingWindowAttentionExecutionEnvelope envelope,
-    WorkspaceArena& workspace, Tensor& out, cudaStream_t stream);
-```
-
-当前唯一注册的 `window` 是 4096。显式参数使 `abs(key_position-query_position) < window` 成为
-完整 Op 语义；wrapper 仍只接收已经实现和 qualification 的值。循环物理槽
-`absolute_position % window` 是该 entry 的状态布局契约。
-
-公共符号完整拼写 `sliding_window_attention`。`SWA` 可用于论文术语、局部变量或 profiler
-说明，但不再作为 contract、文件、测试 target 或 benchmark target 的主名称。
-
-### 4.6 KV cache append 移出 Attention
-
-当前 `gqa_kv_append` 只做 cache 写入和可选 INT8-G64 编码，不计算 Attention。它不是 dense
-Attention entry，迁移为 `kv_cache_append`：
-
-```cpp
-void kv_cache_append(const Tensor& k, const Tensor& v,
-                     const Tensor& positions, KVCacheLayerView cache,
-                     cudaStream_t stream);
-```
-
-它与现有 `kv_cache_append_prefix` 组成一个 cache state-transition overload group，共同迁移
-到：
-
-```text
-include/ninfer/ops/kv_cache_append.h
-src/ops/kv_cache/append/
-```
-
-`kv_cache_append` 覆盖所有输入 rows，并按目标 cache dtype 执行 BF16 exact copy 或
-INT8-G64 encode；`kv_cache_append_prefix` 继续接受 device `commit_count`，只写入被接纳前缀。
-二者不因被 Attention 调用而归属 `softmax_attention/`。
-
-`causal_softmax_attention` 的 fused append-and-attend entry 必须引用同一 cache codec 语义并
-产生相同 code/scale bits；它可以拥有性能所需的融合实现，不必通过公共
-`kv_cache_append` 产生额外 launch。
-
-### 4.7 明确不引入的统一接口
-
-不引入以下设计：
-
-- `AttentionOptions`、runtime `AttentionKind`、字符串 registry 或 Op 基类；
-- 一个接受任意 dense mask Tensor 的万能入口；
-- 用 `is_vision`、`is_decode`、`is_gqa`、`use_flash` 等布尔值选择语义；
-- 为 MHA、MQA、GQA 分别提供 overload；
-- 把 linear、cyclic、paged、latent cache 塞进一个 `std::variant`；
-- 由 wrapper 根据目标 key、layer role 或 Program phase 选择行为。
-
-当一个新目标需要新的完整可见域或状态表示时，先写出闭合公式和状态效果，再决定扩展现有
-entry 还是创建 peer family。
-
-## 5. 目标源码组织
-
-迁移完成后的目录如下。文件名表达语义 entry 或真实私有实现路线，不表达调用模型：
-
-```text
-src/ops/
-├── softmax_attention/
-│   ├── common/
-│   │   ├── head_mapping.cuh
-│   │   └── context_query.cuh
-│   ├── dense/
-│   │   ├── causal_cache/
-│   │   │   ├── causal_softmax_attention.cpp
-│   │   │   ├── launch.h
-│   │   │   ├── small_t.cu
-│   │   │   ├── small_t.cuh
-│   │   │   ├── small_t_bf16.cuh
-│   │   │   ├── small_t_i8.cuh
-│   │   │   ├── prompt.cu
-│   │   │   ├── prompt_common.cuh
-│   │   │   ├── prompt_bf16.cuh
-│   │   │   └── prompt_i8.cuh
-│   │   ├── packed/
-│   │   │   ├── packed_softmax_attention.cpp
-│   │   │   ├── launch.h
-│   │   │   ├── launch.cu
-│   │   │   └── kernel.cuh
-│   │   └── context/
-│   │       ├── context_softmax_attention.cpp
-│   │       ├── launch.h
-│   │       ├── launch.cu
-│   │       └── kernel.cuh
-│   └── sliding_window/
-│       ├── sliding_window_attention.cpp
-│       ├── launch.h
-│       ├── launch.cu
-│       └── kernel.cuh
-└── kv_cache/
-    ├── codec.cuh
-    └── append/
-        ├── kv_cache_append.cpp
-        ├── launch.h
-        ├── launch.cu
-        └── kernel.cuh
-```
-
-这是责任和归属结构，不要求为了对齐树形而制造空文件：
-
-- entry `.cpp` 负责 contract validation、workspace scope 和有限 dispatch；
-- `launch.h`、`launch.cu` 负责私有 plan、grid、block、shared memory 和 launch error；
-- `.cuh` 负责 kernel 和 entry-local device computation；
-- `softmax_attention/common/` 只接收至少两个 family 已经实际共享的窄 device primitive。
-
-当前 `bidirectional_gqa_attention.cuh` 同时承载 linear-context 与 cyclic-SWA 的共享 device
-body。迁移时应把这部分改成无 GQA/SWA 身份的 `common/context_query.cuh`，由
-`dense/context` 和 `sliding_window` 各自的 entry kernel 调用。不得让
-`sliding_window/` include `dense/context` 的私有 kernel，也不得建立一个通用 Attention
-backend 框架。
-
-`head_mapping.cuh` 只实现由 `AttentionHeadGeometry` 已验证事实导出的零成本索引；它不做
-runtime registry 或目标选择。
-
-INT8-G64 cache 的 exact encode/decode device primitive 归属 `kv_cache/codec.cuh`。Standalone
-append 和 causal append-and-attend 的融合实现都可以复用它；不得在两个 family 内复制 codec，
-也不得让 `kv_cache/append/` 反向 include Attention 私有文件。
-
-## 6. 现有契约与符号迁移
-
-### 6.1 公共 header 和符号
-
-| 现有内容 | 目标内容 | 处理 |
-|---|---|---|
-| （新增共享类型） | `include/ninfer/ops/attention_geometry.h` 中的 `AttentionHeadGeometry` | 只表达 Head 数值事实，不建立 family 或 registry |
-| `include/ninfer/ops/gqa_attention.h` | `include/ninfer/ops/softmax_attention.h` | 删除旧 header，不保留 forwarding include |
-| `GqaExecutionEnvelope` | `CausalAttentionExecutionEnvelope` | 重命名并去除 GQA 身份 |
-| `gqa_attention_workspace_capacity_bytes` | `causal_softmax_attention_workspace_capacity_bytes` | 增加显式 geometry |
-| `gqa_attention` | `causal_softmax_attention` | 保留 append-and-attend 状态效果 |
-| `gqa_attention_cached` | `causal_softmax_attention_cached` | 保留只读 cache 效果 |
-| `gqa_kv_append` | `kv_cache_append` | 移出 Attention family |
-| `include/ninfer/ops/vision_attention.h` | `include/ninfer/ops/softmax_attention.h` | 删除 Vision 身份 |
-| `vision_attention_workspace_capacity_bytes` | `packed_softmax_attention_workspace_capacity_bytes` | 轴名改为通用 tokens/segments |
-| `vision_attention(..., cu_seqlens, ...)` | `packed_softmax_attention(..., cu_seqlens, ...)` | 增加 geometry 与显式 scale |
-| `vision_attention(..., segment_length, ...)` | `packed_softmax_attention(..., segment_length, ...)` | 保留等长 segment overload |
-| `include/ninfer/ops/bidirectional_gqa_attention.h` | `include/ninfer/ops/softmax_attention.h` | 删除旧 header |
-| `GqaContextExecutionEnvelope` | `ContextAttentionExecutionEnvelope` | 去除 GQA 身份 |
-| `bidirectional_gqa_attention` | `context_softmax_attention` | 名称表达 context+query 物理语义 |
-| `bidirectional_gqa_attention_workspace_capacity_bytes` | `context_softmax_attention_workspace_capacity_bytes` | 与 entry 同名 |
-| `include/ninfer/ops/swa.h` | `include/ninfer/ops/sliding_window_attention.h` | 删除缩写 header |
-| `SwaContextExecutionEnvelope` | `SlidingWindowAttentionExecutionEnvelope` | 完整语义命名 |
-| `swa` | `sliding_window_attention` | 保留当前窗口公式 |
-| `swa_workspace_capacity_bytes` | `sliding_window_attention_workspace_capacity_bytes` | 与 entry 同名 |
-| `include/ninfer/ops/kv_cache_append_prefix.h` | `include/ninfer/ops/kv_cache_append.h` | 与全量 append 组成 overload group |
-
-项目自有接口不保留兼容性。最终不得存在旧函数 alias、旧类型 alias、转发 header、双注册 CMake
-source 或同时维护的新旧测试。
-
-### 6.2 源码文件
-
-| 现有文件组 | 目标目录 |
-|---|---|
-| `src/ops/wrapper/gqa_attention.cpp` | `softmax_attention/dense/causal_cache/causal_softmax_attention.cpp`；其中 standalone append 移入 `kv_cache/append/` |
-| `src/ops/launcher/gqa_attention*` | `softmax_attention/dense/causal_cache/` |
-| `src/ops/kernel/gqa_attention*` | Attention kernel 移入 `softmax_attention/dense/causal_cache/`；cache codec 移入 `kv_cache/codec.cuh`；全部符号去除 GQA |
-| `src/ops/wrapper/vision_attention.cpp` | `softmax_attention/dense/packed/packed_softmax_attention.cpp` |
-| `src/ops/launcher/vision_attention.*` | `softmax_attention/dense/packed/launch.*` |
-| `src/ops/kernel/vision_attention.cuh` | `softmax_attention/dense/packed/kernel.cuh` |
-| `src/ops/wrapper/bidirectional_gqa_attention.cpp` | `softmax_attention/dense/context/context_softmax_attention.cpp` |
-| `src/ops/launcher/bidirectional_gqa_attention.*` | `softmax_attention/dense/context/launch.*` |
-| `src/ops/wrapper/swa.cpp` | `softmax_attention/sliding_window/sliding_window_attention.cpp` |
-| `src/ops/launcher/swa.*` | `softmax_attention/sliding_window/launch.*` |
-| `src/ops/kernel/bidirectional_gqa_attention.cuh` | 拆为 `softmax_attention/common/context_query.cuh` 以及 context/sliding-window entry-local kernel |
-| `src/ops/wrapper/kv_cache_append_prefix.cpp` 与对应 launcher/kernel | `kv_cache/append/`，并接收从 causal cache 分离出的 standalone append |
-
-私有 C++/CUDA 类型同步按实际职责迁移：
-
-| 现有私有名称 | 目标命名规则 |
-|---|---|
-| `GqaAttentionRoute` | `CausalAttentionRoute` |
-| `GqaAppendInput` / `GqaCachedInput` | `CausalAppendInput` / `CausalCachedInput` |
-| `Gqa27Geometry` / `Gqa35Geometry` | 以数值事实命名的 `CausalD256H24Kv4` / `CausalD256H16Kv2` |
-| `BidirectionalGqaPlan` / `BidirectionalGqaRoute` | `ContextAttentionPlan` / `ContextAttentionRoute` |
-| `SwaPlan` / `SwaRoute` | `SlidingWindowAttentionPlan` / `SlidingWindowAttentionRoute` |
-| `VisionAttentionTile` | `PackedAttentionTile` |
-| `kGqa*` / `kBidirectionalGqa*` / `kVisionAttention*` | 优先由已验证 geometry 导出；必须编译期固定时按 entry、format 或 tile 事实命名 |
-
-数值 geometry 专用类型是私有 compile-time dispatch material，不是新的公共 Head 分类，也不
-进入 target include。公共调用始终传 `AttentionHeadGeometry`。
-
-`small_t`、`prompt`、`split_kv`、`bf16` 和 `i8` 可以继续作为私有 route/format 名称。`decode`
-和 `prefill` 若只表示 token extent 对应的实现路线，应在迁移时优先改成 `small_t`、`prompt`
-或具体算法名，避免把 Program phase 固化进实现身份。
-
-### 6.3 调用方
-
-| 调用方 | 迁移 |
-|---|---|
-| `src/targets/qwen3_6/impl/runtime/text_context_impl.h` | include `softmax_attention.h`；Text/MTP 调用 `causal_softmax_attention` 或 `_cached`；standalone cache 写调用 `kv_cache_append` |
-| `src/targets/qwen3_6/impl/runtime/layouts_impl.h` | capacity 查询改用 geometry 和新 entry 名称 |
-| `src/targets/qwen3_6/impl/runtime/vision_context_impl.h` | include `softmax_attention.h`；调用 `packed_softmax_attention`，不向 Op 传递 Vision 身份 |
-| `src/targets/qwen3_6/impl/runtime/dflash_impl.h` | full route 调用 `context_softmax_attention`；local route 调用 `sliding_window_attention` |
-| `src/targets/qwen3_6/impl/runtime/workspace_recipe.h` | target-local region 名可保留模型含义；Op capacity 和 shape 使用统一 geometry |
-
-Family schedule 仍决定何时调用 full、local、Vision 或 MTP 路径；Op wrapper 不读取 layer role
-或 target Variant。
-
-### 6.4 Build ownership
-
-`src/CMakeLists.txt` 继续显式列出每个 `.cpp`/`.cu`。迁移必须在一次目标态 cutover 中：
-
-1. 添加新 source path；
-2. 更新唯一 build owner；
-3. 删除旧 horizontal source path；
-4. 确认同一 kernel 或 launcher 没有被新旧 path 重复编译。
-
-不改成 recursive glob，也不建立临时第二个 Attention library。
-
-## 7. 测试与 benchmark 迁移
-
-### 7.1 Qualification tests
-
-Dense family 共享一个独立 FP64 oracle 和 Head mapping helper，但每个完整 entry 直接验证自己的
-可见域、状态效果和注册实现路线。建议组织为：
-
-```text
-tests/ops/softmax_attention/
-├── oracle.h
-├── main.cpp
-├── causal_cache.cpp
-├── plain_and_packed.cpp
-└── context.cpp
-
-tests/ops/test_sliding_window_attention.cpp
-tests/ops/test_kv_cache_append.cpp
-```
-
-对应测试 target：
-
-```text
-ninfer_softmax_attention_test
-ninfer_sliding_window_attention_test
-ninfer_kv_cache_append_test
-```
-
-现有测试迁移如下：
-
-| 现有测试 | 目标 |
-|---|---|
-| `test_gqa_attention.cpp` | `softmax_attention/causal_cache.cpp`，codec-only 部分移入 `test_kv_cache_append.cpp` |
-| `test_vision_attention.cpp` | `softmax_attention/plain_and_packed.cpp` |
-| `test_bidirectional_gqa_attention.cpp` | `softmax_attention/context.cpp` |
-| `test_swa.cpp` | `test_sliding_window_attention.cpp` |
-| `test_kv_cache_append_prefix.cpp` | 合并进 `test_kv_cache_append.cpp` 的 prefix cases |
-
-Oracle 必须从 geometry 和 entry 可见集合计算 Head 映射，不复制生产 kernel 的 group 常量。
-必须覆盖：
-
-- 四个当前注册 geometry；
-- BF16 与 INT8-G64 causal cache profile；
-- append-and-attend、cached-only 和 standalone append；
-- plain single-segment entry，以及 packed 非等长与等长 segments；
-- context 为零和非零时的 context+query 可见域；
-- window 边界 `distance=window-1` 包含、`distance=window` 排除；
-- CUDA Graph execution envelope 的有效 replay；
-- cache code/scale bits、只读输入和全部声明的状态写入。
-
-不同实现 profile 可以拥有不同命名 tolerance，但全部直接对同一个理想 Attention oracle
-负责。
-
-### 7.2 Benchmarks
-
-长驻 benchmark 按公共语义分为：
-
-| benchmark | 单次计时体的公共 entry |
-|---|---|
-| `ninfer_causal_softmax_attention_bench` | append-and-attend 或 cached-only |
-| `ninfer_packed_softmax_attention_bench` | uniform plain segment 或 packed segments |
-| `ninfer_context_softmax_attention_bench` | context-plus-query |
-| `ninfer_sliding_window_attention_bench` | symmetric sliding window |
-| `ninfer_kv_cache_append_bench` | full append 或 device-count prefix append |
-
-fixture 构造、公共 capacity 查询、cache 条件化、CUDA Graph capture/instantiate 和同步都在计时
-区间之外。eager 计时体恰好调用一次公共 Op；Graph 内也只 capture 同一次公共调用。
-benchmark 不包含 private header、launcher、candidate、route forcing、tile/split 参数、生产
-dispatch 复制或 kernel-name 正则。`--profile` 包围的是完整公共调用，调用内部出现的全部生产
-kernel 都属于该 Op 的实测结果。
-
-`attention_layer_bench` 不是闭合的公共 Op 契约，且原实现组合多个内部阶段并暴露 private
-route，因此从长驻 Op benchmark 移除。完整 mixer 和 target 影响由公共 Engine 或 target round
-benchmark 测量；private candidate 比较只允许存在于任务期临时代码，route 选定后删除。
-
-## 8. 一次性迁移顺序
-
-实现时按以下依赖顺序完成一个一致 cutover；这不是要求保留可发布的中间兼容态：
-
-1. 在 `attention_geometry.h` 和 `softmax_attention.h` 中写出统一 geometry、公共公式、
-   dense entries、envelopes 和 capacity contract。
-2. 把 standalone `gqa_kv_append` 与现有 prefix append 收敛到 `kv_cache_append.h` 和
-   `src/ops/kv_cache/append/`，确定唯一 cache codec 语义。
-3. 将 causal cache、packed 和 context 实现移入 `softmax_attention/dense/`，先保持数值和
-   route 选择不变，再消除 GQA/Vision/bidirectional 命名。
-4. 将共享 context+query device body 提取为中性 common primitive，把 SWA 移入
-   `sliding_window/` 并完整重命名。
-5. 更新 target caller、workspace capacity、显式 CMake source、测试和 benchmark。
-6. 更新受影响的 model reference、benchmark README 和测试命令。
-7. 删除全部旧 header、source、symbol、target 和 forwarding path。
-8. 运行 focused build、三类 Attention qualification、KV append qualification、相关 target
-   执行和最终公共 benchmark。
-
-若移动源码时发现现有 route 依赖旧 include 路径，应修正私有 ownership，不得以 forwarding
-header 或复制 kernel 作为过渡终态。
-
-## 9. 未来 Attention 的准入位置
-
-未来名称先按真实语义归类：
-
-| 常见名称 | 本规范中的归类 |
-|---|---|
-| MHA / MQA / GQA | `AttentionHeadGeometry`，不创建目录 |
-| self / cross attention | 普通 `softmax_attention` 的 Q/K/V 来源和 `Tq/Tk` 取值 |
-| causal / bidirectional / prefix mask | dense family 的明确可见域 entry；不预先增加任意 mask |
-| packed / variable length | dense family 的输入表示 entry |
-| local / sliding window | `sliding_window` 或在真实二维语义出现时创建独立 window family |
-| global+local / block sparse / dilated sparse | 实际注册后创建 `structured_sparse/` peer family |
-| MLA | 实际注册后创建 `multi_head_latent/` peer family；latent cache 与吸收投影不能展开成普通 K/V 再冒充复用 |
-| deformable attention | 实际注册后创建独立 family，显式拥有 reference point、sampling 和聚合语义 |
-| FlashAttention | dense/local family 内的私有 kernel/route |
-| PagedAttention | cache storage/view 与私有寻址实现，不是数学 family |
-| Ring Attention | 多设备执行策略；当前单 GPU 产品不准入 |
-
-新增 family 必须由已注册目标和闭合 contract 驱动。只为了“扩展性”创建空目录、公共 enum、
-runtime registry、通用 mask IR 或 backend interface 不属于扩展性，而是未被产品需要的框架。
-
-### 9.1 术语参考
-
-本规范使用下列原始工作区分数学语义、Head geometry 和实现策略：
-
-- [Attention Is All You Need](https://arxiv.org/abs/1706.03762)：scaled dot-product、
-  multi-head、self 和 encoder-decoder attention；
-- [Fast Transformer Decoding: One Write-Head is All You Need](https://arxiv.org/abs/1911.02150)
-  与 [GQA](https://arxiv.org/abs/2305.13245)：MQA/GQA 的 KV Head 共享关系；
-- [Longformer](https://arxiv.org/abs/2004.05150)、[BigBird](https://arxiv.org/abs/2007.14062)
-  与 [Swin Transformer](https://arxiv.org/abs/2103.14030)：local、global+local、
-  structured sparse 和二维窗口可见域；
-- [FlashAttention](https://arxiv.org/abs/2205.14135) 与
-  [PagedAttention](https://arxiv.org/abs/2309.06180)：IO-aware exact Attention 与 KV
-  内存管理；
-- [DeepSeek-V2](https://arxiv.org/abs/2405.04434)：MLA 的 latent KV cache 与吸收投影；
-- [Deformable DETR](https://arxiv.org/abs/2010.04159)：reference-point sampling Attention。
-
-## 10. 完成标准
-
-迁移只有同时满足以下条件才完成：
-
-- 目标源码树、共享 geometry header、三个公共 contract header 和唯一 CMake ownership
-  已建立；
-- 生产 target 只 include 新 semantic header；
-- MHA/MQA/GQA 只作为 geometry 术语存在；
-- Vision 身份不再出现在 Attention Op contract、源码 family、测试或 benchmark 名称中；
-- SWA 公共名称完整迁移为 `sliding_window_attention`；
-- standalone cache append 不再属于 Attention；
-- 旧 header、旧 source、旧 symbol、旧测试 target、旧 benchmark target 和兼容 alias 已删除；
-- dense、sliding-window 和 KV append 的独立 qualification 通过；
-- 两个注册目标的 Text、Vision、MTP、DFlash、prefix reuse 和 CUDA Graph 路径保持支持；
-- 受影响文档和命令使用新名称，除本文的迁移映射外没有陈旧引用；
-- 相关公共 benchmark 证明迁移未造成目标路径的性能回退，或对有意的性能变化给出直接证据。
+Preparation reopens the v13 manifest and v20 raw report, verifies the explicitly selected
+XAttention profile and prefill chunk, artifact and executable bytes, group, plane layout,
+concurrency, measured geometry, and `auto` timing provenance, then only writes a command plan.
+Execute that profiler command later under the serialized GPU protocol.
+
+For the long-context gate, start `ninfer-serve` from that same isolated build with
+`--request-log-jsonl`. Its schema-v20 `server_start` record carries the selected cache group and identical compile-bound
+profile. Durable NIAH must consume the one `terminal_production_selection` and pass its exact
+server executable and artifact; validation derives the selected dense or B128-S16-tau900 profile
+from that authority and rejects a mismatch before
+issuing any request and then requires a fresh full-prefill `request_done` for every response.
+The admission gate is exactly one run of the 64K start/q25/mid/q75/end ladder (five requests), with
+the exact-format needle, `--model qwen3.8-27b`, and `--max-tokens 64`. The server must use
+`--no-prefix-reuse`; otherwise the shared fixture stream can turn later cells into suffix prefills
+that the durable validator correctly rejects. The 8K/200K ladders and complete 6x5 matrix are
+optional broader or post-production-change coverage, not additional XAttention admission gates.
+
+There is deliberately no public append-and-attend function, homogeneous cache view, cache-dtype
+branch, or execution-envelope type for Text/MTP. The target schedule composes the checked cache
+transaction with the target leaf.
+
+## DFlash Full: native BF16 context attention
+
+`include/ninfer/ops/bidirectional_gqa_attention.h` and
+`src/ops/r9700/dflash/bidirectional_gqa_attention.{cpp,hip}` remain the native DFlash Full Op.
+`GqaContextExecutionEnvelope` bounds launch resources for graph replay; device context lengths and
+valid widths define the mathematical visible set. `BidirectionalGqaBF16ContextView` is a read-only
+BF16 paged state that is intentionally independent of the asymmetric Text/MTP cache.
+
+Every live query row sees the complete persistent context followed by every live query K/V row in
+its batch row; there is no causal triangle. The Op does not mutate context or query inputs, writes
+exact zero to inactive output tails, and owns no Text/MTP publication authority. Its retained GQA
+name denotes the fixed `Hq32/Hkv8` head geometry and must not be confused with the deleted
+homogeneous Text/MTP boundary.
+
+## Qualification and performance admission
+
+The maintained physical gates are:
+
+- `tools/r9700/kv_op_qual.hip`: exact codec, address, append, compact, QK/PV, malformed-input, and
+  layout cases;
+- `tools/r9700/hip_persistent_state_qual.hip`: allocation, all-layer transaction, publication,
+  compaction, and restore behavior;
+- `tools/r9700/full_attention_leaf_qual.hip`: causal, packed-tree, device-active-row, graph replay,
+  pending/committed-read, input-immutability, and FP64-oracle checks at `D256/Hq24/Hkv4`;
+- `tools/r9700/bidirectional_gqa_attention_qual.hip`: DFlash Full BF16 context/query semantics at
+  `D128/Hq32/Hkv8`.
+
+A performance change is admitted at the smallest level that supports its claim. Raw codec or
+attention candidates need their independent oracle and physical gfx1201 timing; a production
+selection additionally needs target-leaf timing and, when its private arithmetic changes, paired
+real-model quality evidence. Candidate timing alone cannot change the cache ABI or
+production dispatch.
+
+## Ownership constraints
+
+- Do not restore the removed homogeneous Text/MTP Attention API, its retired launchers/kernels, or
+  alternate cache-format branches.
+- Do not expose raw R9700 KV pointers through the Engine or family public state.
+- Do not let DFlash Full or Local state alias the Text/MTP cache or publication transaction.
+- Do not create MHA/MQA/GQA class hierarchies, backend registries, arbitrary-mask interfaces, or
+  model-key dispatch inside an Op.
+- A new visibility rule or persistent representation requires its own closed semantic contract and
+  direct qualification; a new tile or instruction schedule does not.

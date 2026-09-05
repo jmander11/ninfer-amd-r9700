@@ -1,18 +1,21 @@
 ---
-description: Kernel speed work must follow Layer 0–3 (bound classifier before CUDA).
-globs: src/ops/**/*.{cu,cuh,cpp,h},tools/kdev/**,tools/mma_issue_probe.cu
+description: R9700 kernel speed work must follow the Layer 0–3 qualification procedure.
+globs: src/ops/r9700/**/*.{hip,cpp,h},tools/r9700/**
 alwaysApply: false
 ---
 
-# Kernel iteration
+# R9700 kernel iteration
 
-Before writing or changing a CUDA kernel for performance:
+Before writing or changing a production HIP kernel for performance:
 
-1. Read `docs/maintainer/kernel-iteration.md`. For NVFP4 decode-band Linear (serving T,
-   MTP/DFlash packed verify) also read `docs/maintainer/nvfp4-decode-linear.md`.
-2. Run `python3 -m tools.kdev recipe --preset … --t … --idea …` (or `--n --k --t`) and
-   read `STOP` / `MEASURE` / `GO`. Linear uses `ninfer_linear_bench`, not `kdev <op>`.
-3. Stop if the last line is `STOP` or `sm120` is illegal (no TMEM / tcgen05 / 2-SM MMA).
-4. Search parameters inside the current family. Measure the public Op. Delete losers.
+1. Read `docs/maintainer/kernel-iteration.md` and the owning Op contract.
+2. State the represented inputs, independent oracle, current physical baseline, traffic/operation
+   lower bound, suspected limit, and the mechanism the challenger changes.
+3. Qualify the complete public Op at real model shapes before timing it on the selected `gfx1201`
+   device. Pairwise kernel parity is not an oracle.
+4. Search parameters within the qualified family, inspect ISA/resources only for a named question,
+   and use focused profiling only when event timing leaves attribution unresolved.
+5. Promote only a physically faster qualified route and delete losing challengers.
 
-Do not invent a new MMA ISA, import B200/SM100 pipelines onto sm_120a, or Engine-A/B a kernel that has not won its Op point.
+Do not infer instruction legality from a different architecture or run an Engine A/B before the
+challenger wins at its Op boundary.

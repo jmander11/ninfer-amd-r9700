@@ -45,7 +45,7 @@ SATURATION_SEEDS = (
 CORPUS_ORDER_SEED = 20260811
 POINT_ARTIFACT_TYPE = "ninfer_serve_concurrency_bench_point"
 SUMMARY_ARTIFACT_TYPE = "ninfer_serve_concurrency_bench_summary"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 @dataclasses.dataclass(frozen=True)
@@ -59,13 +59,11 @@ class Point:
     sampling_mode: str
     suite: str
     concurrency: int
-    adaptive_draft: bool = False
 
     @property
     def key(self) -> str:
-        adaptive = "_adaptive" if self.adaptive_draft else ""
         return (
-            f"{self.target}_{self.speculative_mode}{adaptive}_{self.sampling_mode}_"
+            f"{self.target}_{self.speculative_mode}_{self.sampling_mode}_"
             f"{self.suite.replace('-', '_')}_c{self.concurrency}"
         )
 
@@ -98,15 +96,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--serve",
         type=Path,
-        default=REPO_ROOT / "build/apps/ninfer-serve",
+        default=REPO_ROOT / "build-r9700/apps/ninfer-serve",
         help="ninfer-serve executable",
     )
     parser.add_argument(
         "--artifact",
-        action="append",
+        type=Path,
         required=True,
-        metavar="TARGET=PATH",
-        help="artifact for a registered target; repeat to benchmark multiple targets",
+        metavar="PATH",
+        help="Qwen3.8-27B R9700 artifact",
     )
     parser.add_argument(
         "--mode",
@@ -177,21 +175,17 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         metavar="N|auto",
         help="shared Main KV capacity passed to ninfer-serve (default: 262144)",
     )
-    parser.add_argument("--prefill-chunk", type=int, default=4096)
     parser.add_argument(
-        "--kv-dtype",
-        choices=corpus.KV_DTYPES,
-        default="int8",
-        help="KV storage for the server process (default: int8, published concurrency method)",
+        "--prefill-chunk", type=int, required=True,
+        help="schema-v2-selected production prefill chunk",
     )
+    parser.add_argument("--expected-kv-value-group", type=int, choices=(16, 32), required=True)
     parser.add_argument(
-        "--adaptive-draft",
-        action="store_true",
-        help="pass --adaptive-draft (live K); requires MTP or DFlash --mode",
+        "--expected-xattention-profile", choices=("dense", "b128-s16-tau900"), required=True,
     )
     parser.add_argument("--output", type=Path, required=True, help="benchmark output directory")
     parser.add_argument("--port", type=int, default=8080, help="loopback serving port")
-    parser.add_argument("--device", type=int, default=0, help="CUDA device index")
+    parser.add_argument("--device", type=int, default=0, help="HIP device index")
     parser.add_argument(
         "--proposal-head",
         choices=("optimized", "full"),
@@ -223,8 +217,8 @@ def validate_args(args: argparse.Namespace) -> None:
     if len(args.concurrency) != len(set(args.concurrency)):
         raise corpus.CampaignError("duplicate --concurrency value")
     for concurrency in args.concurrency:
-        if concurrency < 1 or concurrency > 8:
-            raise corpus.CampaignError("--concurrency must be in [1, 8]")
+        if concurrency < 1 or concurrency > 4:
+            raise corpus.CampaignError("--concurrency must be in [1, 4]")
     if len(args.suite) != len(set(args.suite)):
         raise corpus.CampaignError("duplicate --suite value")
 
@@ -240,16 +234,12 @@ def build_points(
     for target, artifact in artifacts:
         for mode_name in mode_names:
             backend, draft_tokens, _verify_width = corpus.SPECULATIVE_MODES[mode_name]
-            if backend == "dflash" and target not in {"qwen3_6_35b_a3b", "qwen3_8_27b"}:
-                raise corpus.CampaignError(
-                    "DFlash measurements require the 35B-A3B or Qwen3.8-27B target"
-                )
             for suite in args.suite:
                 for concurrency in args.concurrency:
                     points.append(
                         Point(
                             target=target,
-                            model_id=corpus.TARGET_MODEL_IDS[target],
+                            model_id=corpus.PUBLIC_MODEL_ID,
                             artifact=artifact,
                             speculative_mode=mode_name,
                             speculative_backend=backend,
@@ -257,7 +247,6 @@ def build_points(
                             sampling_mode=args.sampling,
                             suite=suite,
                             concurrency=concurrency,
-                            adaptive_draft=bool(getattr(args, "adaptive_draft", False)),
                         )
                     )
     return points
@@ -398,8 +387,6 @@ def server_command(
         str(args.device),
         "--request-log-jsonl",
         str(server_log),
-        "--kv-dtype",
-        args.kv_dtype,
         "--no-prefix-reuse",
     ]
     if point.speculative_backend != "none":
@@ -413,8 +400,6 @@ def server_command(
         )
         if getattr(args, "proposal_head", "optimized") == "optimized":
             command.append("--lm-head-draft")
-        if getattr(args, "adaptive_draft", False):
-            command.append("--adaptive-draft")
     if point.sampling_mode == "greedy":
         command.append("--greedy")
     else:
@@ -443,6 +428,11 @@ def validate_server_start(
 ) -> tuple[str, str]:
     corpus.require_server_log_identity(event, "server_start")
     engine = event.get("engine", {})
+    if not isinstance(engine, dict):
+        raise corpus.CampaignError("server_start engine provenance must be an object")
+    corpus.require_compiled_profile(
+        engine, args.expected_kv_value_group, args.expected_xattention_profile
+    )
     expected = {
         "device": args.device,
         "max_context": args.max_context,
@@ -452,8 +442,8 @@ def validate_server_start(
         "pending_timeout_ms": PENDING_TIMEOUT_MS,
         "prefill_chunk": args.prefill_chunk,
         "log_stats_interval_ms": STATS_INTERVAL_MS,
-        "kv_cache": corpus.KV_CACHE_LOG_NAMES[args.kv_dtype],
-        "cuda_graph": True,
+        "kv_cache_format": corpus.KV_CACHE_FORMAT,
+        "device_graph": True,
         "prefix_reuse": False,
         "speculative_backend": point.speculative_backend,
         "speculative_draft_window": point.draft_tokens,
@@ -881,7 +871,6 @@ def analyze_point(
         "speculative_mode": point.speculative_mode,
         "speculative_backend": point.speculative_backend,
         "draft_tokens": point.draft_tokens,
-        "adaptive_draft": point.adaptive_draft,
         "sampling_mode": point.sampling_mode,
         "suite": point.suite,
         "workload_order": workload_order(point),
@@ -1180,7 +1169,10 @@ def write_summaries(reports: Sequence[dict[str, Any]], output_dir: Path) -> None
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     validate_args(args)
-    artifacts = corpus.parse_artifacts(args.artifact)
+    artifact = args.artifact.expanduser().resolve()
+    artifacts = (
+        ((corpus.TARGET_KEY, artifact) if args.dry_run else corpus.parse_artifact(artifact)),
+    )
     fixtures = corpus.load_fixtures()
     points = build_points(artifacts, args)
     output_dir = args.output.expanduser().resolve()

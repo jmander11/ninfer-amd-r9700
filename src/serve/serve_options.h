@@ -31,20 +31,16 @@ struct ServeOptions {
     std::uint32_t max_concurrency          = 1;
     std::uint32_t max_pending_requests     = 16;
     std::uint32_t pending_timeout_ms       = 30000;
-    std::uint32_t prefill_chunk            = 4096;
+    std::uint32_t prefill_chunk            = kDefaultPrefillChunk;
     std::size_t kv_ram_capacity_bytes      = 0;
     std::uint32_t log_stats_interval_ms    = 5000; // 0 disables periodic Engine throughput logs
     std::size_t max_request_bytes          = kDefaultMaxRequestBytes;
     std::size_t response_store_max_records = kDefaultResponseStoreRecords;
     std::size_t response_store_max_bytes   = kDefaultResponseStoreBytes;
     int device                             = 0;
-    KvCacheStorage kv_cache                = KvCacheStorage::Nvfp4;
-    bool sage_attn                         = false; // Sage3-style FP4-PV (requires Nvfp4 KV)
-    float keep_frac                        = 1.0f;
-    float xattn_tau                        = 1.0f;
     SpeculativeOptions speculative;
     bool enable_vision      = false;
-    bool use_cuda_graph     = true;
+    bool use_device_graph   = true;
     bool allow_prefix_reuse = true;
     std::optional<std::vector<std::uint32_t>> context_checkpoint_marks;
     bool enable_thinking =

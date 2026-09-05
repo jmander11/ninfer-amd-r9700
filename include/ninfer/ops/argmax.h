@@ -4,7 +4,7 @@
 
 #include <cstdint>
 
-#include <cuda_runtime.h> // cudaStream_t
+#include <hip/hip_runtime_api.h>
 
 namespace ninfer::ops {
 
@@ -18,6 +18,6 @@ namespace ninfer::ops {
  * participate. Equal maxima select the lowest row index. `out` must not overlap `logits`.
  * The Op has no workspace and changes no state other than writing all of `out`.
  */
-void argmax(const Tensor& logits, Tensor& out, std::int32_t valid_rows, cudaStream_t stream);
+void argmax(const Tensor& logits, Tensor& out, std::int32_t valid_rows, hipStream_t stream);
 
 } // namespace ninfer::ops

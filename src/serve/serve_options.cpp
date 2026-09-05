@@ -45,14 +45,6 @@ std::uint64_t parse_u64(const char* text, const char* label) {
     return static_cast<std::uint64_t>(value);
 }
 
-KvCacheStorage parse_kv_dtype(const char* text) {
-    const std::string value(text);
-    if (value == "bf16") { return KvCacheStorage::BFloat16; }
-    if (value == "int8") { return KvCacheStorage::Int8Group64; }
-    if (value == "nvfp4") { return KvCacheStorage::Nvfp4; }
-    throw std::invalid_argument("invalid kv-dtype: " + value);
-}
-
 KvCapacityPolicy parse_kv_capacity(const char* text) {
     if (std::string_view(text) == "auto") { return KvCapacityPolicy::automatic(); }
     const int value = parse_nonnegative_int(text, "kv-capacity");
@@ -82,17 +74,16 @@ std::size_t parse_kv_ram_capacity_bytes(const char* text) {
 std::string serve_usage_text(const char* argv0) {
     return std::string("usage: ") + argv0 +
            " <model.ninfer> [--host H] [--port N] [--api-key KEY] "
-           "[--model-id ID] [--max-context N] [--kv-capacity N|auto] [--kv-ram-capacity off|N] [--max-concurrency N] "
+           "[--model-id ID] [--max-context N] [--kv-capacity N|auto] "
+           "[--kv-ram-capacity off|N] [--max-concurrency 1..4] "
            "[--max-pending-requests N] [--pending-timeout-ms N] "
            "[--prefill-chunk N] [--log-stats-interval-ms N] [--device N] "
            "[--max-request-mib N] [--request-log-jsonl FILE] "
            "[--response-store-max-records N] [--response-store-max-mib N] "
-           "[--kv-dtype bf16|int8|nvfp4] [--sage] [--keep-frac F] [--xattn-tau F] "
            "[--spec mtp|dflash --draft-tokens N] "
-           "[--adaptive-draft] "
            "[--dflash-verify-width N] "
            "[--default-max-tokens N] "
-           "[--vision] [--no-cuda-graph] [--no-prefix-reuse] "
+           "[--vision] [--no-device-graph] [--no-prefix-reuse] "
            "[--context-checkpoints off|a,b,c] "
            "[--lm-head-draft] [--no-thinking] [--preserve-thinking] [--system-prepend TEXT] "
            "[--cors] "
@@ -215,22 +206,12 @@ ServeOptions parse_serve_options(int argc, char** argv) {
             options.response_store_max_bytes = static_cast<std::size_t>(mib << 20);
         } else if (arg == "--device") {
             options.device = parse_nonnegative_int(require_value("--device"), "device");
-        } else if (arg == "--kv-dtype") {
-            options.kv_cache = parse_kv_dtype(require_value("--kv-dtype"));
-        } else if (arg == "--sage") {
-            options.sage_attn = true;
-        } else if (arg == "--keep-frac") {
-            options.keep_frac = parse_unit_interval_flag(require_value("--keep-frac"), "--keep-frac");
-        } else if (arg == "--xattn-tau") {
-            options.xattn_tau = parse_unit_interval_flag(require_value("--xattn-tau"), "--xattn-tau");
         } else if (arg == "--spec") {
             options.speculative.backend =
                 product::parse_speculative_backend(require_value("--spec"));
         } else if (arg == "--draft-tokens") {
             options.speculative.draft_tokens = static_cast<std::uint32_t>(
                 parse_nonnegative_int(require_value("--draft-tokens"), "draft-tokens"));
-        } else if (arg == "--adaptive-draft") {
-            options.speculative.adaptive_draft = true;
         } else if (arg == "--dflash-verify-width") {
             options.speculative.dflash_verify_width = static_cast<std::uint32_t>(
                 parse_nonnegative_int(require_value("--dflash-verify-width"),
@@ -241,8 +222,8 @@ ServeOptions parse_serve_options(int argc, char** argv) {
             default_max_tokens_explicit = true;
         } else if (arg == "--vision") {
             options.enable_vision = true;
-        } else if (arg == "--no-cuda-graph") {
-            options.use_cuda_graph = false;
+        } else if (arg == "--no-device-graph") {
+            options.use_device_graph = false;
         } else if (arg == "--no-prefix-reuse") {
             options.allow_prefix_reuse = false;
         } else if (arg == "--context-checkpoints") {
@@ -294,17 +275,12 @@ ServeOptions parse_serve_options(int argc, char** argv) {
         throw std::invalid_argument("--port must be in [1,65535]");
     }
     if (options.max_context == 0) { throw std::invalid_argument("--max-context must be positive"); }
-    if (options.sage_attn && options.kv_cache != KvCacheStorage::Nvfp4) {
-        throw std::invalid_argument("--sage requires --kv-dtype nvfp4");
-    }
-    validate_sparse_attn_flags(options.kv_cache, options.sage_attn, options.keep_frac,
-                               options.xattn_tau);
     if (options.kv_capacity.mode == KvCapacityMode::Explicit &&
         options.kv_capacity.explicit_tokens < options.max_context) {
         throw std::invalid_argument("--kv-capacity must be at least --max-context");
     }
     if (options.max_concurrency == 0 || options.max_concurrency > kMaximumConcurrency) {
-        throw std::invalid_argument("--max-concurrency must be in [1,8]");
+        throw std::invalid_argument("--max-concurrency must be in [1,4]");
     }
     if (options.max_pending_requests == 0) {
         throw std::invalid_argument("--max-pending-requests must be positive");

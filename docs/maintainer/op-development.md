@@ -1,7 +1,7 @@
 # NInfer Op Development Rules
 
 This document defines the repository-wide rules for admitting, specifying, owning, implementing,
-qualifying, and measuring NInfer Ops. An **Op** is a semantic execution contract. A CUDA
+qualifying, and measuring NInfer Ops. An **Op** is a semantic execution contract. A HIP
 **kernel** is one implementation, or one stage of an implementation, of an Op.
 
 Repository-wide product scope, numerical principles, and evidence requirements remain in
@@ -29,8 +29,8 @@ The remaining authorities are:
   measurement behavior;
 - family-specific maintainer references — current family design that cannot be expressed in its
   contract header;
-- [`kernel-iteration.md`](kernel-iteration.md) — Layer 0–3 kernel speed procedure (`tools.kdev bound`,
-  `mma`, public-Op sweep, production path).
+- [`kernel-iteration.md`](kernel-iteration.md) — Layer 0–3 gfx1201 kernel speed procedure
+  (bound hypothesis, qualified challenger, physical measurement, production path).
 
 Do not add current source inventories, target geometry tables, private route thresholds, one-time
 migration steps, profiler command lines, or test-tool output schemas here. A family reference may
@@ -45,7 +45,7 @@ An Op is a host-callable, semantically closed computation in the engine executio
 (outputs, new_state) = F(inputs, weights, old_state, semantic_parameters)
 ```
 
-Workspace, CUDA stream, and device facts are execution resources. They may select the
+Workspace, HIP stream, and device facts are execution resources. They may select the
 implementation but do not change the result or state transition.
 
 A component is an Op only when all of the following hold:
@@ -56,7 +56,7 @@ A component is an Op only when all of the following hold:
 3. **Schedule independence.** It does not decide model call order, request policy, sequence
    frontier, transaction commit or rollback, or state lifetime.
 4. **Implementation independence.** Its semantic interface does not expose grids, blocks, warps,
-   tiles, launch counts, CUDA symbols, implementation filenames, or model-labelled backend paths.
+   tiles, launch counts, device symbols, implementation filenames, or model-labelled backend paths.
 5. **Independent invocation.** It has a meaningful host-callable boundary and can be qualified
    without running a complete model schedule.
 
@@ -88,11 +88,11 @@ boundary is not semantically closed.
 
 Program, target schedule, and runtime policy own model topology, call order, weight-role and state
 instance selection, prompt chunking, multimodal spans, generated-token transactions,
-prefix/frontier/commit/rollback policy, persistent state lifetime, CUDA Graph variants, and
+prefix/frontier/commit/rollback policy, persistent state lifetime, Device Graph variants, and
 publication of product statistics.
 
 Core owns target-neutral storage and execution mechanisms: tensor and weight views, checked
-layouts, arenas, physical cache containers, CUDA Graph lifetime, and raw host/device or
+layouts, arenas, physical cache containers, Device Graph lifetime, and raw host/device or
 device/device transfers. A physical container may produce a checked view, but it does not acquire a
 logical sequence cursor or transaction policy.
 
@@ -101,7 +101,7 @@ tokenization and templates, media handling, request translation, transport, diag
 profiling control. These activities prepare, move, observe, or present data; they do not define a
 device transformation.
 
-Wrapper validation, launchers, CUDA entry points, codecs, implementation plans, partial reductions,
+Wrapper validation, launchers, HIP entry points, codecs, implementation plans, partial reductions,
 staging kernels, workspace layout helpers, and device primitives are parts of an Op implementation,
 not independently target-callable Ops.
 
@@ -120,7 +120,7 @@ Other axes retain the finite geometry or capacity declared by their own contract
 does not become Text/MTP `T` merely because an implementation uses the same physical layout.
 
 A wrapper may select a route or split a call into several launches for a valid extent. Private
-dispatch thresholds and CUDA grid or resource limits do not narrow the supported semantic domain.
+dispatch thresholds and HIP grid or resource limits do not narrow the supported semantic domain.
 
 ### 2.3 Stateful, fused, and stochastic Ops
 
@@ -159,7 +159,7 @@ capacity, and finite dispatch for the explicit envelope it accepts.
 
 ### 2.5 Logical assignment and raw transfer
 
-Classification follows the logical interface rather than the CUDA primitive used underneath. A
+Classification follows the logical interface rather than the HIP primitive used underneath. A
 typed assignment or a copy with cast, transpose, concat, scatter, remap, or another logical index
 mapping is the corresponding Op. An interface expressed only as addresses, byte count, and transfer
 direction is a core or host transfer.
@@ -238,7 +238,7 @@ semantic contract
 wrapper: validation, workspace scope, finite dispatch
        |
        v
-launcher: private CUDA launch policy
+launcher: private HIP launch policy
        |
        v
 kernel: device implementation
@@ -325,12 +325,12 @@ ordering.
 ### 5.3 Naming
 
 - Name an Op after its mathematical transformation or explicit state transition, not its first
-  model, layer role, schedule phase, or CUDA strategy.
+  model, layer role, schedule phase, or HIP strategy.
 - Use `ninfer::ops` for semantic entries. Use `ninfer::ops::detail` only for private material that
   must cross translation-unit boundaries.
 - Name an implementation specialization by real match facts such as format, geometry, extent,
   device capability, or algorithm.
-- Reserve `kernel` for CUDA implementation concepts.
+- Reserve `kernel` for device implementation concepts.
 - Prefer one family name across contract, implementation, tests, and benchmarks unless several
   contracts intentionally share an implementation family.
 
@@ -347,19 +347,21 @@ depend on artifact provenance or target binding concepts.
 
 Enforce the boundary in code and build ownership:
 
-- contract headers include only required L0, CUDA host, and peer semantic contract types;
+- contract headers include only required L0, HIP host, and peer semantic contract types;
 - `src/ops/**` does not include target, Program, schedule, product, or artifact-provenance headers;
 - target schedule includes contract headers, never private launcher, kernel, common, codec, or plan
   headers;
-- `ninfer_ops` does not link a target;
-- core and artifact do not link Ops or targets;
+- the closed `ninfer_r9700_core` archive may package core, Op, and target-leaf translation units,
+  but archive co-location does not reverse their source-level dependency direction;
+- artifact sources do not include or own Ops or target execution;
 - explicit source lists give every implementation one build and link owner.
 
 ## 6. Qualification
 
-Semantic Op tests live under `tests/ops/` and invoke the public contract independently of model call
-order. They link the Op layer and required L0 libraries rather than a target package. Commands and
-common reporting behavior belong in [`tests/README.md`](../../tests/README.md).
+Semantic Op tests and physical qualifiers invoke the public contract independently of model call
+order. In the native graph they link the closed production archive while retaining an independent
+oracle and no model artifact dependency. Commands and common reporting behavior belong in
+[`tests/README.md`](../../tests/README.md).
 
 ### 6.1 Oracle
 
@@ -397,7 +399,7 @@ and `b+1` where valid, and a representative interior extent for each route. Othe
 declared finite domains and relevant boundaries. Do not build a redundant Cartesian product when
 one case establishes several dimensions.
 
-When CUDA Graph capture/replay is part of the public execution contract, qualify the captured
+When Device Graph capture/replay is part of the public execution contract, qualify the captured
 public Op and its observable effects against the same oracle.
 
 Keep schedule composition, persistent-state lifetime, and end-to-end behavior in target or product
@@ -426,15 +428,18 @@ extent, device/toolchain, and stated cache and timing condition. It is implement
 a correctness oracle or proof of end-to-end improvement. Commands and executable-specific behavior
 belong in [`bench/README.md`](../../bench/README.md).
 
+When work or residency scales with a production extent, the performance qualifier includes that
+extent and its production layout. A smaller synthetic case may isolate a stage, but its hot-cache
+timing or chosen sparsity ratio does not predict full-extent performance. Report the represented
+input distribution and achieved work fraction, separate materially distinct stages, and use either
+rotating address-distinct operands or an explicitly stated warm-cache condition. Packed or
+quantized consumers use nonzero, index-varying represented values for their production-scale
+correctness check so a missing payload read, wrong nibble, or wrong token/page/head/group mapping
+cannot pass as an all-zero or constant output.
+
 A long-lived Op benchmark calls the public contract and, when applicable, its public workspace
 capacity query. It does not include private implementation headers, call private launchers, expose
 candidate or kernel forcing, or duplicate candidate legality and production dispatch tables.
-
-The sole standing exception is `ninfer_gated_delta_net_bench --chunked-only --breakdown`: the
-complete chunked pipeline is still measured through the public Op, while the benchmark may call
-exactly its three intrinsic `prepare_wy_wu`, `state_passing`, and `output` stage launchers for
-algorithm-stage attribution. It may not call the private complete-pipeline launcher or any other
-private launcher.
 
 Candidate comparison is task-local development work. A temporary sweep may call private launchers
 and encode the exact overlapping candidate domains needed for a decision. Measure candidates under
@@ -449,10 +454,10 @@ artifact or invoking a target, Program, Engine, or whole-round benchmark. Produc
 required only when the requested deliverable explicitly makes an end-to-end claim and includes
 that product route in scope.
 
-Kernel implementation for speed follows [`kernel-iteration.md`](kernel-iteration.md) before a
-candidate is written: bound classifier, SM120 legality, parameter sweep inside one family, then
-the public Op. Candidate comparison remains task-local and must still delete losers as required
-below.
+Kernel implementation for speed follows [`kernel-iteration.md`](kernel-iteration.md): state the
+bound hypothesis, satisfy gfx1201 legality, qualify the challenger against the independent oracle,
+then measure the public Op on physical R9700 silicon. Candidate comparison remains task-local and
+must still delete losers as required below.
 
 For a performance change:
 
@@ -474,7 +479,7 @@ For a new or changed device transformation:
 2. extend an existing family for a closely related overload or variant, and create a new family
    only for a distinct closed transformation;
 3. define formula or indexing, logical shapes, supported domain, numeric boundaries, effects,
-   aliasing, state, randomness, and workspace before selecting CUDA organization;
+   aliasing, state, randomness, and workspace before selecting HIP organization;
 4. keep Text/MTP `T` semantic and positive unless the contract declares a capacity, while preserving
    the declared domains of other axes;
 5. place validation and dispatch in the wrapper, launch policy in the launcher, device computation

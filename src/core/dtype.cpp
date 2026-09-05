@@ -1,4 +1,4 @@
-#include "core/dtype.h"
+#include "dtype.h"
 
 #include <stdexcept>
 

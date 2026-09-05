@@ -3,8 +3,9 @@
 #include "core/arena.h"
 #include "core/tensor.h"
 #include "ninfer/ops/sampling.h"
+#include "ninfer/types.h"
 
-#include <cuda_runtime.h>
+#include <hip/hip_runtime_api.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -16,7 +17,8 @@ inline constexpr std::int32_t kDflash2PathSelectRank           = 256;
 inline constexpr std::int32_t kDflash2PathSelectHidden         = 5120;
 inline constexpr std::int32_t kDflash2PathSelectCodebookRows   = 248320;
 inline constexpr std::int32_t kDflash2PathSelectShortlistRows  = 131072;
-inline constexpr std::int32_t kDflash2PathSelectMaxBatch       = 8;
+inline constexpr std::int32_t kDflash2PathSelectMaxBatch =
+    static_cast<std::int32_t>(kMaximumConcurrency);
 inline constexpr std::int32_t kDflash2PathSelectMaxWidthWhenBatched = 16;
 inline constexpr int kDflash2PathSelectRngPurpose              = 16;
 inline constexpr std::int32_t kDflash2TreeFrontier             = 2;
@@ -57,8 +59,7 @@ inline constexpr std::int32_t kDflash2VerifyWidth              = 12;
  *
  * Logical shapes:
  *   logits is contiguous BF16 [V,T] or [V,T,B] with V>=16. hidden is contiguous BF16 [5120,T] or
- *   [5120,T,B]. pred_code and succ_code are contiguous BF16 [256, codebook_rows] (rank fastest)
- *   when the NVFP4 codebook weights are null.
+ *   [5120,T,B]. pred_code and succ_code are contiguous BF16 [256, codebook_rows] (rank fastest).
  *   When logit_token_ids is null, codebook_rows >= V (identity: logit row is the token id).
  *   When logit_token_ids is non-null it is contiguous I32 [V] mapping each logit row to a token
  *   id; codebook_rows >= 248320 and is not required to be >= V. Product uses codebook_rows=248320
@@ -67,15 +68,14 @@ inline constexpr std::int32_t kDflash2VerifyWidth              = 12;
  *   [T,B]. selector_ids is contiguous I32 [16,T] or [16,T,B] and
  *   selector_q is contiguous FP32 of the same shape; both null or both non-null. Every anchor
  *   and every selected token id is in [0, codebook_rows).
- *   T is any positive value at B=1; B=2..8 admits T=1..16.
+ *   T is any positive value at B=1; B=2..4 admits T=1..16.
  *
  * Supported domain:
- *   hidden_projection is BF16_CTRL Contiguous [256,5120], or a Linear-registered Q4G64_F16S /
- *   W8G32_F16S RowSplit / NVFP4 BlockScale problem of that logical shape. The Q4/W8/NVFP4 route
- *   calls ops::linear.
+ *   hidden_projection is BF16_CTRL Contiguous [256,5120], or a Linear-registered
+ *   W8G32_F16S RowSplit or Q4G64_F16S Q4N16K16 problem of that logical shape. Quantized routes
+ *   call ops::linear with the caller-owned workspace.
  *
- *   pred_code and succ_code are contiguous BF16 [256, codebook_rows] (rank fastest), or NVFP4
- *   BlockScale weights of logical shape [codebook_rows, 256] passed as pred_nvfp4/succ_nvfp4.
+ *   pred_code and succ_code are contiguous BF16 [256, codebook_rows] (rank fastest).
  *
  * Numeric:
  *   Top-k and greedy path ids are exact functions of the represented BF16 logits/scores. The
@@ -102,8 +102,7 @@ void dflash2_path_select(const Tensor& logits, const Tensor& hidden,
                          const Tensor& succ_code, const Tensor& anchors,
                          const Tensor& logical_positions,
                          const SamplingConfig* configs, Tensor& path, WorkspaceArena& workspace,
-                         cudaStream_t stream, const Tensor* logit_token_ids = nullptr,
-                         const Weight* pred_nvfp4 = nullptr, const Weight* succ_nvfp4 = nullptr,
+                         hipStream_t stream, const Tensor* logit_token_ids = nullptr,
                          Tensor* selector_ids = nullptr, Tensor* selector_q = nullptr,
                          unsigned long long seed_xor = 0, std::int32_t position_offset = 0,
                          bool force_greedy = false);
@@ -128,8 +127,7 @@ void dflash2_tree_select(const Tensor& logits, const Tensor& hidden,
                          const Tensor& succ_code, const Tensor& anchors, const Tensor& frontiers,
                          Tensor& verify_ids, Tensor& parent_index, Tensor& cache_positions,
                          Tensor& rope_positions, Tensor& ancestor_mask, Tensor& valid_columns,
-                         WorkspaceArena& workspace, cudaStream_t stream,
-                         const Tensor* logit_token_ids = nullptr,
-                         const Weight* pred_nvfp4 = nullptr, const Weight* succ_nvfp4 = nullptr);
+                         WorkspaceArena& workspace, hipStream_t stream,
+                         const Tensor* logit_token_ids = nullptr);
 
 } // namespace ninfer::ops

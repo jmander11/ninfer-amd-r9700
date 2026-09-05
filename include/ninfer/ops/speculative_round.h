@@ -3,14 +3,17 @@
 #include "core/tensor.h"
 #include "ninfer/ops/sampling.h"
 
-#include <cuda_runtime.h>
+#include <hip/hip_runtime_api.h>
 
+#include <cstddef>
 #include <cstdint>
 
 namespace ninfer::ops {
 
 // Caller-owned transient capacity for every draft-count and batch-size pair in the inclusive
-// domains. token_domain is the fixed sampling profile; invalid domains throw.
+// domains. token_domain is the fixed sampling profile; K is in [1,15], B is in [1,4], and
+// invalid domains throw. The returned capacity includes every partial and normalized
+// distribution byte required by the native gfx1201 route.
 [[nodiscard]] std::size_t speculative_accept_greedy_drafts_workspace_capacity_bytes(
     std::int32_t token_domain, std::int32_t min_drafts, std::int32_t max_drafts,
     std::int32_t min_batch, std::int32_t max_batch);
@@ -34,7 +37,8 @@ namespace ninfer::ops {
  * Logical shapes:
  *   All tensors are contiguous I32. anchors/base_positions/current_extents are [B], drafts is
  *   [K,B] with K>=1 and B>=1, and verify_ids/positions are [K+1,B]. Each current extent is in
- *   [0,K]. Inputs and outputs do not overlap.
+ *   [0,K]. K is in [1,15], B is in [1,4], inputs and outputs do not overlap, and stream is
+ *   non-null.
  *
  * Effects:
  *   Writes every physical output element, including safe invalid-tail values. Inputs remain
@@ -45,7 +49,7 @@ namespace ninfer::ops {
  */
 void speculative_prepare_verify_inputs(const Tensor& anchors, const Tensor& drafts,
                                        const Tensor& base_positions, const Tensor& current_extents,
-                                       Tensor& verify_ids, Tensor& positions, cudaStream_t stream);
+                                       Tensor& verify_ids, Tensor& positions, hipStream_t stream);
 
 /**
  * Prepare only the target verification ids when the caller already owns the matching position
@@ -54,7 +58,7 @@ void speculative_prepare_verify_inputs(const Tensor& anchors, const Tensor& draf
  */
 void speculative_prepare_verify_ids(const Tensor& anchors, const Tensor& drafts,
                                     const Tensor& current_extents, Tensor& verify_ids,
-                                    cudaStream_t stream);
+                                    hipStream_t stream);
 
 /**
  * Op: speculative_accept_greedy_drafts
@@ -77,7 +81,7 @@ void speculative_prepare_verify_ids(const Tensor& anchors, const Tensor& drafts,
  *   is FP32 [C,K,B] with C>=1 (product C=16); both null or both non-null. token_domain is in
  *   [1,physical_rows], K>=1, B>=1, and configs points to a device-resident SamplingConfig[B].
  *   Tensor arguments, configs, and configs[b].token_counts do not overlap except for the
- *   explicitly mutated objects.
+ *   explicitly mutated objects. K is in [1,15], B is in [1,4], and stream is non-null.
  *
  * Numeric:
  *   Sampling filtering, penalties, normalization, and RNG semantics are those of sampling.h.
@@ -100,7 +104,7 @@ void speculative_accept_greedy_drafts(const Tensor& target_tokens, const Tensor&
                                       Tensor& lengths, Tensor& anchors, Tensor& licensed_tokens,
                                       Tensor& licensed_counts, Tensor& accepted,
                                       std::int32_t token_domain, const SamplingConfig* configs,
-                                      WorkspaceArena& workspace, cudaStream_t stream,
+                                      WorkspaceArena& workspace, hipStream_t stream,
                                       const Tensor* selector_ids = nullptr,
                                       const Tensor* selector_q = nullptr);
 
@@ -123,7 +127,8 @@ void speculative_accept_greedy_drafts(const Tensor& target_tokens, const Tensor&
  * logits is BF16 [physical_rows,W,B]. current_extents/valid_columns and the other vectors are
  * I32 [B]. W is the packed verify width in [2,16] (product k=7 uses 12). lengths[b] is the
  * pre-round sequence length and is incremented by the produced count; it must not alias the
- * packed-window base used by gqa_kv_compact_path (E+path[i] → E+i).
+ * packed-window base consumed by the typed FP8-K/INT4-V publication compaction transition
+ * (E+path[i] -> E+i). B is in [1,4] and stream is non-null.
  *
  * Workspace:
  *   Caller-owned transient storage reported by
@@ -136,7 +141,7 @@ void speculative_accept_tree_drafts(const Tensor& target_tokens, const Tensor& l
                                     Tensor& licensed_counts, Tensor& accepted,
                                     Tensor& accepted_column, Tensor& fold_path,
                                     std::int32_t token_domain, const SamplingConfig* configs,
-                                    WorkspaceArena& workspace, cudaStream_t stream);
+                                    WorkspaceArena& workspace, hipStream_t stream);
 
 /**
  * Op: speculative_select_accepted_hidden
@@ -146,11 +151,12 @@ void speculative_accept_tree_drafts(const Tensor& target_tokens, const Tensor& l
  *
  * Shape / numeric / effects:
  *   hidden is contiguous BF16 [D,T,B], selectors is contiguous I32 [B] with every value in [0,T),
- *   and out is distinct contiguous BF16 [D,B]. The Op exactly copies BF16 bits, writes all of out,
- *   and uses no workspace or other state.
+ *   and out is distinct contiguous BF16 [D,B]. T is in [1,16], B is in [1,4], and stream is
+ *   non-null. The Op exactly copies BF16 bits, writes all of out, and uses no workspace or other
+ *   state.
  */
 void speculative_select_accepted_hidden(const Tensor& hidden, const Tensor& selectors, Tensor& out,
-                                        cudaStream_t stream);
+                                        hipStream_t stream);
 
 /**
  * Op: proposal_remap_token_ids
@@ -161,9 +167,9 @@ void speculative_select_accepted_hidden(const Tensor& hidden, const Tensor& sele
  * Effects:
  *   Updates the contiguous non-empty I32 proposal_tokens vector in place; every input id is in
  *   [0,count), and id_map is a distinct device I32 array [count]. There is no workspace or other
- *   state side effect.
+ *   state side effect. stream is non-null.
  */
 void proposal_remap_token_ids(Tensor& proposal_tokens, const std::int32_t* id_map,
-                              std::int32_t count, cudaStream_t stream);
+                              std::int32_t count, hipStream_t stream);
 
 } // namespace ninfer::ops

@@ -84,8 +84,8 @@ int main(int argc, char** argv) {
                  << " free-after-startup=" << format_bytes(memory.available_after_startup_bytes)
                  << " headroom=" << format_bytes(memory.kv_capacity_headroom_bytes)
                  << " slack=" << format_bytes(memory.planned_slack_bytes)
-                 << " graphs=" << format_bytes(memory.cuda_graph_observed_bytes) << '/'
-                 << format_bytes(memory.cuda_graph_allowance_bytes)
+                 << " graphs=" << format_bytes(memory.device_graph_observed_bytes) << '/'
+                 << format_bytes(memory.device_graph_allowance_bytes)
                  << " kv-ram=" << ninfer::serve::format_kv_ram_occupancy(memory);
         ninfer::serve::write_console_log(ninfer::serve::ConsoleLogLevel::Info, capacity.str());
 

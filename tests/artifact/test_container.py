@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import struct
+from unittest import mock
 
 import pytest
 
@@ -12,6 +13,7 @@ from tools.artifact.container import (
     Artifact,
     ArtifactError,
     ArtifactIdentity,
+    ArtifactWriter,
     ResourceSpec,
     TensorSpec,
     write_artifact,
@@ -26,15 +28,15 @@ def _small_specs():
         TensorSpec("direct/bf16", (2,), "BF16", "contiguous-le-v1"),
         TensorSpec("direct/fp32", (1,), "FP32", "contiguous-le-v1"),
         TensorSpec("direct/i32", (1,), "I32", "contiguous-le-v1"),
-        TensorSpec("quant/q4", (1, 64), "Q4G64_F16S", "row-split-k128-v1"),
+        TensorSpec("quant/q4", (16, 64), "Q4G64_F16S", "r9700-q4g64-n16-k16-v1"),
         TensorSpec("quant/q5", (1, 64), "Q5G64_F16S", "row-split-k128-v1"),
         TensorSpec("quant/q6", (1, 64), "Q6G64_F16S", "row-split-k128-v1"),
         TensorSpec("quant/w8", (1, 32), "W8G32_F16S", "row-split-k128-v1"),
         TensorSpec(
-            "quant/nvfp4",
-            (128, 64),
-            "NVFP4",
-            "blockscale-k16-m128x4-v1",
+            "eval/fp8-row",
+            (2, 130),
+            "F8E4M3_ROW_F32S",
+            "row-scaled-k128-v1",
         ),
     ]
 
@@ -76,8 +78,67 @@ def test_v2_round_trip_covers_every_registered_storage(tmp_path):
             "Q5G64_F16S": 1,
             "Q6G64_F16S": 1,
             "W8G32_F16S": 1,
-            "NVFP4": 1,
+            "F8E4M3_ROW_F32S": 1,
         }
+
+
+def test_writer_never_replaces_destination_created_while_staging(tmp_path):
+    path = tmp_path / "raced.ninfer"
+    spec = ResourceSpec("frontend/tokenizer.json", "raw-bytes-v1", 2)
+    writer = ArtifactWriter(path, ArtifactIdentity("test-model", "candidate"), [spec])
+    writer.write(spec.name, b"{}")
+
+    competing_payload = b"created by another writer"
+    path.write_bytes(competing_payload)
+    with pytest.raises(FileExistsError):
+        writer.finish()
+
+    assert path.read_bytes() == competing_payload
+    assert list(tmp_path.iterdir()) == [path]
+
+
+def test_failed_writer_leaves_no_partial_destination_or_staging_file(tmp_path):
+    path = tmp_path / "failed.ninfer"
+    spec = ResourceSpec("frontend/tokenizer.json", "raw-bytes-v1", 2)
+
+    with pytest.raises(ArtifactError, match="has 1 bytes; expected 2"):
+        with ArtifactWriter(
+            path, ArtifactIdentity("test-model", "candidate"), [spec]
+        ) as writer:
+            writer.write(spec.name, b"{")
+
+    assert not path.exists()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_staging_cleanup_fault_does_not_make_publication_ambiguous(tmp_path):
+    path = tmp_path / "complete.ninfer"
+    spec = ResourceSpec("frontend/tokenizer.json", "raw-bytes-v1", 2)
+    writer = ArtifactWriter(path, ArtifactIdentity("test-model", "candidate"), [spec])
+    writer.write(spec.name, b"{}")
+    staging = next(tmp_path.iterdir())
+    original_unlink = type(staging).unlink
+    injected = False
+
+    def fail_first_staging_unlink(candidate, *args, **kwargs):
+        nonlocal injected
+        if candidate == staging and not injected:
+            injected = True
+            raise PermissionError("injected staging cleanup failure")
+        return original_unlink(candidate, *args, **kwargs)
+
+    with mock.patch.object(type(staging), "unlink", fail_first_staging_unlink):
+        writer.finish()
+        assert injected
+        assert path.read_bytes().endswith(b"{}")
+        assert staging.exists()
+
+        writer.finish()
+        assert not staging.exists()
+
+    with Artifact.open(path) as artifact:
+        assert artifact.identity == ArtifactIdentity("test-model", "candidate")
+        assert bytes(artifact.payload(spec.name)) == b"{}"
 
 
 def _write_raw(
@@ -159,15 +220,12 @@ def test_reader_rejects_invalid_framing_schema_and_geometry(tmp_path):
         Artifact.open(path)
 
 
-def test_reader_rejects_v1_with_the_migration_command(tmp_path):
+def test_reader_rejects_unsupported_v1(tmp_path):
     path = tmp_path / "legacy.ninfer"
     _write_raw(
         path,
         {"model_id": "test-model", "objects": [{"unused": True}]},
         magic=b"NINFER\x00\x01",
     )
-    with pytest.raises(
-        ArtifactError,
-        match=r"python3 -m tools\.artifact\.migrate_v1_to_v2 <artifact>",
-    ):
+    with pytest.raises(ArtifactError, match=r"NInfer artifact v1 is no longer supported"):
         Artifact.open(path)

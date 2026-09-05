@@ -1,218 +1,239 @@
-# Qwen3.8-27B artifact contract
+# Qwen3.8-27B R9700 artifact
 
-This document defines the registered `qwen3.8-27b/groupwise-int` and `qwen3.8-27b/nvfp4`
-artifacts: identity, persistent inventory, conversion entry point, and Engine binding. Model
-mathematics, dimensions, frontend semantics, and state behavior are defined by
-[`qwen3.6-27b-model.md`](qwen3.6-27b-model.md).
+The sole target owns 1,124 ordered objects: six exact frontend resources and 1,118 tensors. During
+migration it admits nine explicit evaluation identities under target key `qwen3_8_27b_r9700`:
+the all-W8 `r9700-int-candidate`, all-Q4 `r9700-q4g64-n16k16-eval`, and mixed
+`r9700-q4-w8-n16k16-eval`. The same-format `r9700-q4-w8-mse-n16k16-eval` retains that mixed plan and changes
+only its source-derived scale objective. `r9700-w8-bf16-embed-eval` retains all-W8 matrices except for a
+direct source-BF16 token embedding, and `r9700-w8-bf16-attn-vo-eval`, which restores the complete
+full-attention gate/value and output Q5 role family. None is a final recipe selection.
+`r9700-w8-bf16-attn-qk-eval` restores query/key in all 16 full-attention layers, while
+`r9700-w8-bf16-gdn-qk-eval` restores GDN query/key in all 48 GDN layers.
+The same-size `r9700-w8g32-mse-eval` retains the all-W8 layout and runtime while selecting each
+stored FP16 group scale by a deterministic source-only decoded-weight SSE objective.
 
-## 1. Identity
+The provisional tensor counts are 582 BF16, 96 FP32, one I32, and 439 W8G32. Conversion starts only
+from the complete official BF16 source. It uses the target-owned inventory and source recipe under
+`tools/convert/qwen3_8_27b_r9700`, validates checkpoint dimensions, all source tensors and shards,
+six exact frontend resource hashes, draft-head shortlist provenance, and every planned object
+before opening the output.
 
-```text
-filename   = qwen3_8_27b.ninfer
-model_id   = qwen3.8-27b
-weights_id = groupwise-int
-target_key = qwen3_8_27b
-recipe_id  = qwen3_8_27b-v1
-```
-
-```text
-filename   = qwen3_8_27b_nvfp4.ninfer
-model_id   = qwen3.8-27b
-weights_id = nvfp4
-target_key = qwen3_8_27b
-```
-
-Each artifact contains Text, the optimized MTP draft head, MTP, Vision, and six frontend
-resources. A Qwen3.8-27B NVFP4 file may additionally append 66 DFlash2 objects under `dflash/`.
-Those objects are inventory-conditional: current MTP-only 3.8 files and all 3.6-27B files remain
-valid. `--spec dflash` requires the appended companion; `--spec mtp` on a reconverted file still
-works (DFlash tensors stay host-placed). The identity is read from the version-2 artifact
-directory; filenames and object counts do not select the target or weight profile.
-
-## 2. Persistent inventory
-
-The artifact contains 1118 tensors and six resources, for 1124 objects in total. Tensor format
-counts are:
-
-| Format | Tensors |
-|---|---:|
-| `BF16` | 582 |
-| `FP32` | 96 |
-| `I32` | 1 |
-| `Q4G64_F16S` | 183 |
-| `Q5G64_F16S` | 246 |
-| `Q6G64_F16S` | 1 |
-| `W8G32_F16S` | 9 |
-
-The two vocabulary matrices use `W8G32_F16S` with `row-split-k128-v1`:
-
-| Object | Logical shape |
-|---|---|
-| `text/token_embedding` | `[248320,5120]` |
-| `text/output_head` | `[248320,5120]` |
-
-Text layers use the Q4/Q5/Q6 groupwise assignment, `text/draft_head` uses Q4, the Vision patch
-projection uses Q6, and the registered MTP and Vision-merger matrices use W8. Direct tensors use
-`contiguous-le-v1`; all quantized tensors use `row-split-k128-v1`. The complete ordered inventory,
-logical row views, and aliases are defined by
-`tools/convert/qwen3_8_27b/inventory.py`.
-
-On the NVFP4 identity the five MTP parents may be either that registered W8 layout or
-`NVFP4` `blockscale-k16-m128x4-v1` (same `[N,K]`). Heads stay W8/Q4. The Engine binder accepts
-either encoding. `tools/convert/qwen3_8_27b/convert_mtp_nvfp4.py` quantizes those five parents
-from `Qwen/Qwen3.8-27B` BF16 with encoder `DFLASH2_NVFP4_MAXABS_TWOLEVEL_V2` and leaves Text,
-Vision, and heads unchanged.
-
-Optional DFlash2 on the NVFP4 identity is defined by
-`tools/convert/qwen3_8_27b/inventory_dflash2.py` (66 tensors). W8 matrices use `W8G32_F16S`; the
-Q4 sibling uses `Q4G64_F16S` for the same `[N,K]` set. The product NVFP4 sibling uses `NVFP4`
-`blockscale-k16-m128x4-v1` for those matrices. Direct tensors (norms, conv `base_kernel`) stay
-BF16. Default selector codebooks are BF16 NInfer `(256, 248320)` rank-fastest; `--dflash-codebook nvfp4`
-stores them as NVFP4 weights of logical shape `[248320, 256]` (token = row, rank = K).
-`base_kernel` is stored as `(5120, 2, 2)` in Hugging Face order without a permute.
-
-| Object | Logical shape | Format (W8 sibling) |
-|---|---|---|
-| `dflash/feature_projection` | `[5120, 25600]` | `W8G32_F16S` |
-| `dflash/context_norm` | `[5120]` | `BF16` |
-| `dflash/layers/{0..4}/input_norm` | `[5120]` | `BF16` |
-| `dflash/layers/{0..4}/attention/query_key_value` | `[6144, 5120]` | `W8G32_F16S` |
-| `dflash/layers/{0..4}/attention/query_norm` | `[128]` | `BF16` |
-| `dflash/layers/{0..4}/attention/key_norm` | `[128]` | `BF16` |
-| `dflash/layers/{0..4}/attention/output` | `[5120, 4096]` | `W8G32_F16S` |
-| `dflash/layers/{0..4}/attention_conv/base_kernel` | `[5120, 2, 2]` | `BF16` |
-| `dflash/layers/{0..4}/attention_conv/kernel_projection` | `[1280, 5120]` | `W8G32_F16S` |
-| `dflash/layers/{0..4}/post_attention_norm` | `[5120]` | `BF16` |
-| `dflash/layers/{0..4}/mlp/gate_up` | `[34816, 5120]` | `W8G32_F16S` |
-| `dflash/layers/{0..4}/mlp/down` | `[5120, 17408]` | `W8G32_F16S` |
-| `dflash/layers/{0..4}/mlp_conv/base_kernel` | `[5120, 2, 2]` | `BF16` |
-| `dflash/layers/{0..4}/mlp_conv/kernel_projection` | `[1280, 5120]` | `W8G32_F16S` |
-| `dflash/final_norm` | `[5120]` | `BF16` |
-| `dflash/selector/hidden_projection` | `[256, 5120]` | `W8G32_F16S` |
-| `dflash/selector/{predecessor,successor}_codebook` | `[256, 248320]` | `BF16` |
-
-Fused QKV row ranges are query `[0,4096)`, key `[4096,5120)`, value `[5120,6144)`. Gate/up on
-`mlp/gate_up` are `[0,17408)` and `[17408,34816)`.
-
-## 3. Conversion
-
-The converter consumes the Qwen3.8-27B BF16 checkpoint and writes one complete artifact:
+The optimized shortlist is not recipe-dependent: every registered identity stores
+`text/draft_head` as `Q4G64_F16S[131072,5120]` in `r9700-q4g64-n16-k16-v1`, with packed signed codes
+followed by FP16 G64 scales. Startup validates that exact object even when speculation is disabled
+and materializes it only for optimized MTP/DFlash. Materialization exposes the resident artifact
+planes directly to Linear; it does not repack weights. The execution-side activation boundary is
+compile-time A8G64 over represented BF16 input, not a second artifact format or runtime selector.
 
 ```bash
-python3 -m tools.convert.qwen3_8_27b.convert \
-  --model /path/to/Qwen3.8-27B \
-  --out out/qwen3_8_27b.ninfer \
-  --device cuda
+python3 -m tools.convert.qwen3_8_27b_r9700.build_draft_ranking \
+  --corpus tools/ppl/corpus.ids \
+  --out out/qwen3_8_27b_draft_ranking.i64
+
+python3 -m tools.convert.qwen3_8_27b_r9700.convert \
+  --model /path/to/complete/Qwen3.8-27B-BF16 \
+  --draft-ranking out/qwen3_8_27b_draft_ranking.i64 \
+  --out out/qwen3_8_27b_r9700_candidate.ninfer \
+  --device cpu
+
+python3 -m tools.convert.qwen3_8_27b_r9700.convert_w8_mse \
+  --model /path/to/complete/Qwen3.8-27B-BF16 \
+  --draft-ranking out/qwen3_8_27b_draft_ranking.i64 \
+  --out out/qwen3.8-27b-r9700-w8g32-mse-eval.ninfer \
+  --device cpu
+
+python3 -m tools.convert.qwen3_8_27b_r9700.convert_q4 \
+  --model /path/to/complete/Qwen3.8-27B-BF16 \
+  --draft-ranking out/qwen3_8_27b_draft_ranking.i64 \
+  --out out/qwen3_8_27b_r9700_q4_eval.ninfer \
+  --device cpu
+
+python3 -m tools.convert.qwen3_8_27b_r9700.convert_q4_w8 \
+  --model /path/to/complete/Qwen3.8-27B-BF16 \
+  --draft-ranking out/qwen3_8_27b_draft_ranking.i64 \
+  --out out/qwen3_8_27b_r9700_q4_w8_eval.ninfer \
+  --device cpu
+
+python3 -m tools.convert.qwen3_8_27b_r9700.convert_q4_w8_mse \
+  --model /path/to/complete/Qwen3.8-27B-BF16 \
+  --draft-ranking out/qwen3_8_27b_draft_ranking.i64 \
+  --out out/qwen3_8_27b_r9700_q4_w8_mse_eval.ninfer \
+  --device cpu
+
+python3 -m tools.convert.qwen3_8_27b_r9700.convert_w8_bf16_embedding \
+  --model /path/to/complete/Qwen3.8-27B-BF16 \
+  --draft-ranking out/qwen3_8_27b_draft_ranking.i64 \
+  --out out/qwen3_8_27b_r9700_w8_bf16_embedding_eval.ninfer \
+  --device cpu
+
+python3 -m tools.convert.qwen3_8_27b_r9700.convert_w8_bf16_attention_qk \
+  --model /path/to/complete/Qwen3.8-27B-BF16 \
+  --draft-ranking out/qwen3_8_27b_draft_ranking.i64 \
+  --out out/qwen3_8_27b_r9700_w8_bf16_attention_qk_eval.ninfer \
+  --device cpu
+
+python3 -m tools.convert.qwen3_8_27b_r9700.convert_w8_bf16_attention_vo \
+  --model /path/to/complete/Qwen3.8-27B-BF16 \
+  --draft-ranking out/qwen3_8_27b_draft_ranking.i64 \
+  --out out/qwen3_8_27b_r9700_w8_bf16_attention_vo_eval.ninfer \
+  --device cpu
+
+python3 -m tools.convert.qwen3_8_27b_r9700.convert_w8_bf16_gdn_qk \
+  --model /path/to/complete/Qwen3.8-27B-BF16 \
+  --draft-ranking out/qwen3_8_27b_draft_ranking.i64 \
+  --out out/qwen3_8_27b_r9700_w8_bf16_gdn_qk_eval.ninfer \
+  --device cpu
 ```
 
-Before opening the output, it validates the checkpoint configuration, source tensor shapes and
-dtypes, frontend resources, conversion recipes, and complete object plan. It writes the conversion
-report to `out/qwen3_8_27b.ninfer.conversion.json`.
+The eight additional commands are registered evaluation-only lanes. `r9700-w8g32-mse-eval`
+uses the same 439 W8G32 tensor plan, 30,260,413,792 tensor bytes, 30,260,425,984-byte device
+arena, and projected 30,273,439,488-byte artifact as the baseline all-W8 identity. It refines
+only source-derived group scales and does not change runtime dispatch. `r9700-q4g64-n16k16-eval` stores all
+439 non-direct matrices as Q4G64: 15,159,801,760 tensor bytes, a 15,159,815,680-byte device arena,
+and a projected 15,172,829,184-byte complete artifact with the hash-qualified frontend resources.
+`r9700-q4-w8-n16k16-eval` keeps the 183 source-Q4 roles at Q4G64 and promotes all remaining 256 matrix
+roles to W8G32: 22,868,177,312 tensor bytes, a 22,868,191,232-byte device arena, and a projected
+22,881,204,736-byte complete artifact. `r9700-q4-w8-mse-n16k16-eval` has those exact formats, counts,
+layouts, and byte totals; both its Q4G64 and W8G32 groups use deterministic source-only MSE scale
+selection. That scale objective consumes no activation, draft-ranking/corpus-token, PPL, argmax,
+or GPU measurement input; the ordinary artifact-wide draft-head ranking preflight remains required.
+The 439-W8G32 candidate occupies 30,260,413,792 tensor
+bytes. The W8/BF16-embedding evaluator stores 438 W8G32 matrices and the represented source-BF16
+`text/token_embedding`: 31,452,349,792 tensor bytes, a 31,452,361,984-byte device arena, and a
+projected 31,465,375,488-byte complete artifact. The attention query/key evaluator has 16 BF16
+and 423 W8 matrices: 30,810,916,192 tensor bytes, a 30,810,928,384-byte device arena, and a
+projected 30,823,941,888-byte complete artifact; 2,475,068,160 bytes remain after default
+headroom. The attention value/output evaluator has 32 BF16
+and 407 W8 matrices: 31,282,775,392 tensor bytes, a 31,282,787,584-byte device arena, and a
+projected 31,295,801,088-byte complete artifact. It leaves 2,003,208,960 bytes after the default
+1 GiB sizing headroom on a 32 GiB R9700. The GDN-QK evaluator has 48 BF16 and 391 W8 matrices:
+31,204,132,192 tensor bytes, a 31,204,144,384-byte device arena, and a projected
+31,217,157,888-byte complete artifact; 2,081,852,160 bytes remain after default headroom. Q5/Q6
+are reserved as fallbacks if native Q4 and
+W8 cannot satisfy quality and capacity together; they are not primary candidate formats. These
+are representation sizes, not speed, quality, or selection claims.
 
-The converter owns and pins the official Qwen3.8 six-resource frontend profile. Relative to the
-Qwen3.6-27B profile, `tokenizer.json`, `tokenizer_config.json`, and `chat_template.jinja` have
-Qwen3.8-specific bytes; `generation_config.json`, `preprocessor_config.json`, and
-`video_preprocessor_config.json` are byte-identical.
+The first measured 8K comparison rejects all-Q4: its mean NLL increases by 0.1355 and 800 greedy
+positions flip relative to the BF16 scorer. All-W8 is much closer at +0.002053 mean NLL but still
+flips 90 greedy positions, and the short mixed-Q4/W8 result is already poor. A measured BF16 output
+head did not help: +0.002425 mean NLL and 92 flips, so that identity is rejected and no longer
+registered. The remaining source-Q6 role is the token embedding; unlike the final projection, it
+feeds every input through all 64 residual layers. The active BF16-embedding evaluator isolates that
+role while leaving `text/output_head` and all internal matrices W8. Restoring both vocabulary
+matrices would add another 1,191,936,000 resident bytes and leave only 641,698,560 bytes
+after the default 1 GiB sizing headroom on a 32 GiB R9700. That is smaller than the main 32K G32
+cache payload alone (838,860,800 bytes), before MTP KV, fixed state, graphs, or workspace.
+The attention value/output evaluator is independently runnable. It promotes
+all 16 full-attention gate/value and output pairs—the complete source-Q5 value/output family—rather
+than choosing layers without sensitivity evidence; query/key, every GDN/MLP matrix, vocabulary,
+MTP, and Vision remain W8.
+The full-attention query/key evaluator independently promotes that complete fused projection in
+all 16 full-attention layers without splitting the value/output family after observing its result.
+Gate/value, attention output, every GDN/MLP matrix, vocabulary, MTP, and Vision remain W8.
+The GDN fallback similarly promotes the complete GDN query/key family across all 48 GDN layers
+instead of choosing individual layers. GDN value/z and output, every attention/MLP matrix,
+vocabulary, MTP, and Vision remain W8.
 
-DFlash2 is not quantized from the Qwen3.8-27B Text checkpoint. It is an append of the Hugging Face
-DFlash2 companion onto an existing `qwen3.8-27b/nvfp4` `.ninfer`. The append does not rewrite
-Text, MTP, or Vision bytes. The directory passed to `--dflash-model` must contain that companion's
-`config.json` and `model.safetensors`.
+The completed matched 8K G16 evidence retains BF16-greedy differences as diagnostics. Token
+embedding produces +0.001624 mean NLL / 80 flips, full-attention value/output
++0.001098 / 84, GDN query/key +0.001375 / 98, and full-attention query/key +0.001996 / 81.
+All-W8 is +0.002053 / 90. With A4 activations, all-Q4 and mixed Q4/W8 fail the accuracy tier at
++0.135526 / 800 and +0.046148 / 420. The matched A8 route improves all-Q4 to +0.039509 / 450
+(PPL 6.720524) and mixed Q4/W8 to +0.013815 / 237 (PPL 6.550048). The same-format source-MSE
+mixed artifact with adaptive-A8 W8 execution is the Q4-containing leader at +0.012077 / 234
+(PPL 6.538677); its represented-BF16 W8 control remains retained at +0.013005 / 234 (PPL
+6.544746). Its three new NLL-at-least-10 positions are within the five-position 8K budget, so it
+is quality-eligible. The
+all-Q4+A8 row meets the capacity-speed tier at +0.039509 mean NLL and nine new severe positions.
+Both A8 profiles retain their quality evidence. Under the C=1..4 product cap, both recipes and
+both G16/G32 cache groups remain capacity candidates. The earlier mixed-recipe C7/C8 startup
+failures are retained as out-of-scope stress evidence and no longer exclude it. Fresh exact C=1..4
+capacity and whole-inference evidence is required for selection; the earlier C=1..8 manifests are
+historical rather than current product evidence.
+Their historical mixed C=1..4 rows resolved G16 to 262,144/314,112/301,888/289,664 tokens and
+G32 to 262,144/326,656/313,984/301,248 tokens; these are retained facts, not reusable admission
+manifests.
 
-Download a base artifact that has no `dflash/` objects (published Ostfralla NVFP4, or any other
-`qwen3.8-27b/nvfp4` file):
+The C++ binder consumes Q4G64/W8G32 planes directly according to each explicit identity. Q4G64
+uses the Q4-only `r9700-q4g64-n16-k16-v1` persistent order; W8G32 remains row-split. The converter
+and `transcode_q4_n16k16.py` are the only layout writers, while runtime binding never repacks. The
+runtime quantizes represented BF16 activations into caller-owned, compile-selected A4G64 or A8G64
+evaluation scratch and launches the qualified native signed-INT4 WMMA route without hidden
+allocation or runtime weight repacking.
+All-W8 keeps its previously qualified workspace-free dispatch. The BF16 token table goes directly
+through the existing BF16 embedding gather, and BF16 attention projections use the existing BF16
+Linear path; neither route repacks or copies weights to a private allocation.
+The family schedule reserves the
+maximum candidate scratch for Text, MTP, scoring, DFlash-head, and Vision call sites.
+
+An existing selected artifact can be migrated without source shards and without modifying it:
 
 ```bash
-hf download Ostfralla/Qwen3.8-27B-NVFP4-NInfer \
-  qwen3_8_27b_nvfp4.ninfer \
-  --local-dir models
+python3 -m tools.convert.qwen3_8_27b_r9700.transcode_q4_n16k16 \
+  --source out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-eval.ninfer \
+  --output out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer
 ```
 
-Download the pinned DFlash2 companion:
+The staging tool copies every non-Q4 payload exactly, transposes only Q4 code/scale storage,
+verifies exact logical code and scale hashes independently after publication, and refuses to
+replace either input or an existing destination.
 
-```bash
-hf download z-lab/Qwen3.8-27B-DFlash2 \
-  --revision 50307d4c4cde6860d4eee73e2547cd786fe8e8a4 \
-  --local-dir /path/to/Qwen3.8-27B-DFlash2
-```
+The retained migrated artifact is
+`out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer`, identity
+`qwen3.8-27b/r9700-q4g64-f8e4m3-four-role-n16k16-eval`, 21,553,549,312 bytes, SHA-256
+`040c6e7ed29c856718a638c00181975710d987b7d5f49f4cafbdf68911f7e7d2`. Its immutable legacy
+source is 21,553,545,216 bytes with SHA-256
+`1dfe9626fd6412592f87480a2f6934e8494a4b267693a25831dff490959542ce`. A production-parser
+reopen confirmed the exact ordered 1,124-object selected inventory and 295 Q4 descriptors; exact
+logical Q4 code/scale hashes and every non-Q4 payload hash matched the source, which remained
+unchanged.
 
-Product Engine path (NVFP4 matrices + BF16 selector codebooks):
+The three explicit DFlash2 evaluation identities are
+`qwen3.8-27b/r9700-q4g64-n16k16-dflash2-q4-eval` and
+`qwen3.8-27b/r9700-q4-w8-mse-n16k16-dflash2-q4-eval`, plus
+`qwen3.8-27b/r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval`. They extend their named base inventories with the
+complete 66-object DFlash plan: 32 Q4G64-FP16-scale matrices plus 34 BF16 objects, including both
+BF16 selector codebooks. Base objects retain their identity-owned Q4G64/W8G32 or selected
+four-role rowwise-FP8 formats. DFlash Q4
+calls use the same compile-selected adaptive A8G64 execution intermediate and caller-owned
+workspace as base Q4 calls; K=25600 determines the enlarged workspace maximum. The binder requires
+the complete DFlash inventory for these identities and admits no DFlash objects under other
+registered evaluation identities, preventing a byte-compatible base artifact from being silently
+reinterpreted as a DFlash package. DFlash grouped-convolution and selector child projections use
+the profile-derived Q4 type and the same caller-owned workspace; neither child may invoke the
+workspace-free Linear overload.
+The DFlash companion corresponding to the recipe selected by the base C=1..4 Pareto decision is
+eligible for physical DFlash shortlist, capacity, phase, and whole-inference campaigns. The other
+converted companions remain valid provenance and binder evidence but receive no duplicate
+physical campaign. The hybrid companion is not yet materialized; if selected, its conversion must
+bind the exact hybrid base receipt before those fresh DFlash gates begin.
+The production DFlash K/W is not encoded in either evaluation artifact and cannot be chosen from a
+filename or shortlist rank. It is selected only by the schema-v1 provenance-bound record emitted by
+`tools/bench/assemble_dflash_selection.py` after the base schema-v7
+`terminal_production_selection`, complete
+shortlist-frontier C=1..4 capacity accounting, and every capacity-eligible 18-point DFlash matrix.
 
-```bash
-python3 -m tools.convert.qwen3_8_27b.convert_nvfp4 \
-  --base-artifact models/qwen3_8_27b_nvfp4.ninfer \
-  --dflash-model /path/to/Qwen3.8-27B-DFlash2 \
-  --dflash-format nvfp4 \
-  --out out/qwen3_8_27b_nvfp4_dflash_nvfp4.ninfer \
-  --device cuda
-```
+The ranking is exactly one 248,320-column little-endian I64 total-frequency row. The builder accepts
+explicit `.ids` paths, discovers each sibling manifest, and validates Qwen3.8 tokenizer identity,
+decimal token IDs in `0..248076`, token count, and payload SHA-256 before summing each independent
+corpus once. It emits a JSON provenance sidecar with every input and output hash. Converter
+preflight requires the sibling sidecar, revalidates every named corpus and its manifest, and
+byte-compares a freshly derived row before opening artifact output. The non-tiled PPL corpus is the
+only currently valid repository input. The benchmark corpus is tiled throughput
+padding and is rejected because counting its repetitions would bias the shortlist. The builder
+does not force special IDs; that remains the converter's tokenizer-owned step. Retired-model counts
+remain invalid provenance. The artifact output is never overwritten and, after its atomic close,
+receives a conversion report containing the output path/size/SHA-256, source/checkpoint, exact
+ranking path/size/SHA-256, recipe, object, environment, and timing provenance. The candidate
+identity is usable only for the real comparison gates. It
+must be renamed and made final only after BF16-reference operator/model parity, paired 8K and 32K
+quality guardrails, same-candidate eager/Device-Graph parity, resolved capacity, and
+whole-inference performance establish the non-dominated weight recipes and fixed cache layout.
 
-`--dflash-format w8` or `q4` writes a sibling that differs only in DFlash2 matrix `QType`.
-`--dflash-codebook nvfp4` is optional, requires `--dflash-format nvfp4`, and is not the speed
-path (~174 MiB saved, no tok/s win on k=5 greedy). The default codebook is BF16.
-`--dflash-format nvfp4` uses the append-only encoder profile `DFLASH2_NVFP4_MAXABS_TWOLEVEL_V2`
-(one positive FP32 `d_w` in the A16 Linear contract `W = e2m1 * e4m3 / d_w`, E4M3FN per-K16
-scales, E2M1 codes). NVFP4 DFlash2 Linear geometries are A16-only. The converter pins Hugging Face
-`z-lab/Qwen3.8-27B-DFlash2` revision `50307d4c4cde6860d4eee73e2547cd786fe8e8a4`. The algorithm pin
-for `z-lab/dflash` `model.py` is `95c8aeca5e4b4c4f9c0c967c05ab89fa3ed24f4c` and is not a conversion
-input.
+Cache group and plane order are compile-time runtime-state profiles, not tensor descriptors or
+artifact identity fields. Separate G16/G32 evaluator builds may consume this same candidate artifact
+when the weight recipe is held constant.
 
-Rewrite the five MTP Linear parents from `Qwen/Qwen3.8-27B` BF16 onto an existing
-`qwen3.8-27b/nvfp4` shell (Ostfralla or any other file without those parents already
-consumed as the BF16 source). Text, Vision, and heads are copied unchanged:
-
-```bash
-python3 -m tools.convert.qwen3_8_27b.convert_mtp_nvfp4 \
-  --base-artifact /path/to/qwen3_8_27b_nvfp4.ninfer \
-  --model /path/to/Qwen3.8-27B \
-  --out /ssdpool2nvme/local_llm/models/qwen3.8-nvfp4-mtp-nvfp4-from-bf16/qwen3_8_27b_nvfp4.ninfer \
-  --device cuda
-```
-
-The BF16 checkout must include the MTP sources (`mtp.fc.weight` and the layer-0
-attention/MLP weights). Hugging Face revision `1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0`
-places them in `model-00018-of-00018.safetensors`.
-
-## 4. Engine binding
-
-The registered mapping is:
-
-```text
-ArtifactIdentity(qwen3.8-27b, groupwise-int)
-    -> WeightsProfile::GroupwiseIntW8Endpoints
-    -> target qwen3_8_27b
-
-ArtifactIdentity(qwen3.8-27b, nvfp4)
-    -> WeightsProfile::Nvfp4
-    -> target qwen3_8_27b
-```
-
-The groupwise profile binds the embedding and output head as W8 and the Text body through the
-groupwise binding. Workspace selection follows the groupwise execution routes. The NVFP4 identity
-reuses the Qwen3.6-27B NVFP4 profile unchanged: that profile already stores the vocabulary
-endpoints as W8, which is the only groupwise difference between the two models, so the object
-layouts are identical. MTP matrices on that identity bind as W8 or NVFP4. The registry constructs the 27B `LoadedModel`, `SequencePlan`, and
-`Program`, and reports `qwen3_8_27b/qwen3.8-27b/groupwise-int` or
-`qwen3_8_27b/qwen3.8-27b/nvfp4` in the load summary.
-
-The opt-in 27B live Engine tests (`ninfer_qwen3_6_27b_prefix_real_test`,
-`ninfer_qwen3_6_27b_ram_real_test`) load these identities when
-`NINFER_QWEN3_6_27B_WEIGHTS` or `NINFER_QWEN3_6_27B_NVFP4_WEIGHTS` points at the Qwen3.8
-`.ninfer` (`qwen3_8_27b.ninfer` or `qwen3_8_27b_nvfp4.ninfer`). The env names follow the shared
-27B package; they are not restricted to a Qwen3.6 filename.
-
-`ninfer_qwen3_8_27b_dflash_real_test` loads a reconverted NVFP4+DFlash2 file from
-`NINFER_QWEN3_8_27B_NVFP4_DFLASH_WEIGHTS`. Sequential C=1 DFlash tokens are saved and used
-as the C>1 oracle: overlapping C=3 Graph DFlash2 greedy on three distinct prompts must
-match C=1 DFlash of the same k (row isolation). The same C=1 and C>1 strings are also
-compared against target-only T=1 decode. A later packed/T=1 greedy flip is not treated as
-row mixing; `NINFER_DFLASH_TEST_RELAX_ORACLE=1` continues past that T=1 mismatch. Product
-k=4 and k=5 chain widths are T=5/T=6 SmallT, so they are not required to match MTP k=3
-token-for-token. NVFP4 GDN conv-record stays fused SmallT at `T=W` per row (one launch,
-`grid.x=B` when `B>1`). Flattening that site to `T=W×B` compose (W4A4 GEMM + BF16 conv)
-flipped greedy column 0 versus C=1; `run_nvfp4_batched_matches_serial_fused` guards the
-identity. Linear/MLP/lm_head remain one aggregate launch: `packed_route_tokens` returns the
-C=1 width so those sites do not flip A16↔W4A4 versus sequential DFlash. Per-row KV table
-rows, Linear-Attention slots, and ReplaySSM records remain `layer(g, 0, B)`. NVFP4 target
-verify at `T>=4` uses W4A4 attention, so no DFlash path is required to match ordinary
-`T=1` A16 decode.
+`r9700-integer-artifact-candidate.md` defines the live candidate details and outstanding external
+gate. `artifact-container.md`, `tensor-formats.md`, and `storage-layouts.md` define generic framing
+and representation.

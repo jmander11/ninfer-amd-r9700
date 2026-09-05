@@ -14,8 +14,7 @@ SOURCE_SUFFIXES = {
     ".hh",
     ".hpp",
     ".hxx",
-    ".cu",
-    ".cuh",
+    ".hip",
 }
 EXCLUDED_ROOTS = {"third_party"}
 

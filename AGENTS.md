@@ -69,17 +69,31 @@ reflexive agreement such as "You're right...", "Indeed", "Exactly", or "Good que
 the specific mistake directly, explain its concrete effect when relevant, and say what has been
 or will be changed, proportionately and without performative apology or praise.
 
+## Completion discipline
+
+Do not emit a final response while any user-assigned implementation task remains incomplete. The
+live R9700 execution ledger's unchecked items are assigned work unless the user explicitly narrows
+or cancels them. Continue autonomous in-scope work and use commentary only for progress updates.
+Emit a final response only after every assigned task is complete and verified, or when an external
+action, missing authority, or user decision genuinely blocks all further progress; state that
+specific blocker plainly.
+
 ## Current product contract
 
-NInfer is a from-scratch C++/CUDA inference engine for maximum single-GPU inference performance,
-compiled for `sm_120a` and tuned on an NVIDIA GeForce RTX 5090. The only supported identity is
-`qwen3.8-27b/nvfp4`; its default artifact, when available, is the MTP-NVFP4 or DFlash2 (NVFP4
-matrices, BF16 selector codebook) variant over the base Ostfralla NVFP4 shell. The workload is
-one GPU, one resident model instance, and a startup-fixed one to eight active requests. The
-Engine forms one compact decode batch per round boundary with bounded FIFO ingress and no
-preemption. Large-scale or preemptive continuous batching, priority/QoS scheduling, additional
-checkpoint targets, and retargeting to another execution platform are outside the current
-product. This is a trusted local, single-owner project, and requirements from a different
+NInfer is a from-scratch C++/HIP inference engine for maximum single-GPU inference performance,
+compiled only for `gfx1201` and tuned on one AMD Radeon AI PRO R9700. The sole supported model is
+Qwen3.8-27B. Its growing Text/MTP cache has exactly three planes: FP8 E4M3FN keys, signed INT4
+values, and FP16 value scales; there is no cache dtype selector, K scale, alternate cache path, or
+retained compatibility backend. The provisional directly bound weight profile is W8G32 under
+`qwen3.8-27b/r9700-int-candidate`; it must be renamed and made final only after the real BF16-source
+PPL, exact-token, and whole-inference gates select the production integer recipe. DFlash2 keeps its
+model-specified BF16 selector codebook and private fixed BF16 state.
+
+The workload is one R9700, one resident model instance, and a startup-fixed one to four active
+requests. The Engine forms one compact decode batch per round boundary with bounded FIFO ingress
+and no preemption. Large-scale or preemptive continuous batching, priority/QoS scheduling,
+additional checkpoint targets, and retargeting to another execution platform are outside the
+current product. This is a trusted local, single-owner project, and requirements from a different
 workload, trust model, or deployment model are out of scope until the contract is explicitly
 changed.
 
@@ -93,19 +107,19 @@ routing map, not a mandatory reading list:
   options; `docs/serving.md`: OpenAI/Anthropic HTTP behavior; `docs/performance.md`:
   performance methodology and results;
 - `docs/maintainer/concurrent-inference-architecture.md`: request/slot lifecycle, scheduling,
-  batched execution, CUDA Graph, and speculative-concurrency semantics;
+  batched execution, Device Graph, and speculative-concurrency semantics;
 - `docs/maintainer/paged-kv-cache.md`: KV capacity, page ownership and retention, physical
   layouts, and paged consumer contracts;
 - `docs/maintainer/artifact-container.md`, `storage-layouts.md`, and `tensor-formats.md`:
   generic `.ninfer` contracts;
-- `docs/maintainer/qwen3.6-27b-artifact.md`, `qwen3.8-27b-artifact.md`, and
-  `qwen3.6-35b-a3b-artifact.md`: target inventories, conversion, and binding;
-- `docs/maintainer/qwen3.6-27b-model.md` (also: family/Variant package structure) and
-  `qwen3.6-35b-a3b-model.md`: model mathematics, dimensions, and state semantics;
+- `docs/maintainer/qwen3.8-27b-artifact.md` and `r9700-integer-artifact-candidate.md`: target
+  inventory, conversion, and binding;
+- `docs/maintainer/qwen3.8-27b-model.md` (also: family/Variant package structure): model
+  mathematics, dimensions, and state semantics;
 - `docs/maintainer/op-development.md`: Op admission, contracts, ownership, qualification, and
   performance-evidence rules;
-- `docs/maintainer/kernel-iteration.md`: Layer 0-3 CUDA speed procedure (`tools.kdev`
-  bound/mma/Op sweep/production path);
+- `docs/maintainer/kernel-iteration.md`: Layer 0-3 R9700 speed procedure (bound hypothesis,
+  gfx1201 legality, qualified Op sweep, physical profiling, production path);
 - `include/ninfer/engine.h` and `include/ninfer/types.h`: in-tree C++ product interface.
 
 ## Product and ownership boundaries
@@ -121,7 +135,7 @@ them, updating the corresponding authorities and implementation together.
 | `src/core` | device primitives, tensors/views, checked layouts, arenas, graph RAII, physical KV-cache containers, raw transfer mechanisms | |
 | `src/artifact` | generic `.ninfer` framing, descriptors, binding primitives, materialization | checkpoint execution semantics |
 | `src/ops` | every semantically closed Op implementation, including fused, fixed-shape, and device-specialized paths; ownership follows the mathematical or state-transition contract, not the first model caller or demonstrated cross-target reuse | |
-| `src/targets/qwen3_6` | Qwen3.6-family invariants shared by 27B and 35B-A3B: tokenizer/template and output semantics, media preprocessing and MRoPE prompt construction, owning prepared-prompt/output-session types, semantic weight-view schemas, passive Vision definitions, and the fixed planning/Program/Text/Vision/speculative/state/workspace/CUDA-Graph algorithms | target identity, registry entry, artifact binder, target leaf implementation, storage for a live Program instance |
+| `src/targets/qwen3` | Qwen3-family invariants used by Qwen3.8-27B: tokenizer/template and output semantics, media preprocessing and MRoPE prompt construction, owning prepared-prompt/output-session types, semantic weight-view schemas, passive Vision definitions, and the fixed planning/Program/Text/Vision/speculative/state/workspace/Device-Graph algorithms | target identity, registry entry, artifact binder, target leaf implementation, storage for a live Program instance |
 | `src/targets/<package>` | registered checkpoint identities, storage profiles, binder, `LoadedModel`, configuration, populated family model-view values and private leaf payloads, diagnostics, graph frontier values, and exactly three execution-leaf families (attention projection, GDN projection/control, post-mixer); aliases and instantiates the family runtime types | a copied Program, Text/Vision/speculative schedule, workspace composition, state transaction, or graph-capture algorithm; leaf Ops remain in `src/ops` |
 | `src/runtime` | common contracts, generated-token transaction/publication policy, public Engine PIMPL | model mathematics or target state |
 | `src/media/decode` | consuming already-owned bytes | URL/path/data acquisition, which belongs to `src/product/media_acquire`, CLI, or serving and is not linked into a target |
@@ -168,18 +182,19 @@ directly against the same oracle with a criterion appropriate to its output and 
 profile; pairwise implementation parity is supplementary evidence only.
 
 Where relevant to the changed behavior, account for numeric-format decode, BF16 fusion order, FP32
-GDN state, BF16/INT8/NVFP4 KV, MTP accept/commit state, arena lifetime, and CUDA Graph address
-stability. This is a risk map, not a checklist for every numerical task.
+GDN state, the typed FP8-K/INT4-V/FP16-scale cache, private DFlash2 BF16 state, MTP accept/commit
+state, arena lifetime, and Device Graph address stability. This is a risk map, not a checklist for
+every numerical task.
 
 ## Performance work
 
-CLI, serve, Engine A/Bs, and decode-speed work use the Engine default `--kv-dtype nvfp4` unless
-the task is numerical identity, a long-context capacity comparison, or an explicit dtype A/B.
-Pass `--kv-dtype bf16` when uncompressed KV is the contract.
+CLI, serve, PPL, Engine A/Bs, and decode-speed work use the one fixed FP8-K/INT4-V cache. There is
+no cache dtype flag or alternate production cache path. Independent BF16-reference runs are
+separate executables/artifacts used for numerical comparison, not a mutable Engine option.
 
 Kernel speed work follows [`docs/maintainer/kernel-iteration.md`](docs/maintainer/kernel-iteration.md),
-including the `tools.kdev` recipe/bound/mma procedure; do not implement an idea the classifier
-refuses.
+including the `tools/r9700` oracle, ISA/resource, timing, and focused-profiler procedure; do not
+promote an unqualified or physically slower challenger.
 
 Define a performance claim at the level where it matters (operator, schedule, request phase, or
 end-to-end inference) and measure that level directly; use whole-inference profiling when
@@ -201,7 +216,7 @@ Typical evidence (not a cumulative checklist): documentation changes get an affe
 active-link/stale-reference review and `git diff --check`; C++ runtime/API changes get
 affected explicit targets and meaningful tests; Python tooling gets `py_compile` and affected
 Python tests; `.ninfer` reader/converter/binder changes get affected contract tests and a real
-artifact when semantics require it; CUDA math gets an independent numerical oracle at relevant
+artifact when semantics require it; HIP math gets an independent numerical oracle at relevant
 shapes; memory/lifetime changes get the affected execution, with a sanitizer only for a
 concrete lifetime risk; performance changes get measurement at the claimed scope, with
 attribution tools only when needed; serving changes get affected OpenAI/Anthropic schema tests
@@ -209,15 +224,20 @@ and observable request/stream behavior.
 
 ## Local environment
 
-Conventional project resources (not a per-task checklist): Python 3.11 via `python3`; the
-supported artifact is `qwen3_8_27b_nvfp4.ninfer`, a local file placed by the maintainer (for
-example in `models/`), with its download source in the README; local directories such as `out/`
-are checkout-specific, not a convention; normal build in `build/`; profiler output in
-`profiles/ncu/`, `profiles/nsys/`, `profiles/bench/`; hardware/toolchain is RTX 5090, `sm_120a`,
-CUDA 13.1; speed and Engine A/B work uses `--kv-dtype nvfp4`. Use the selected Python 3.11 interpreter explicitly; do not
-install or upgrade dependencies unless the task requires it. Never select an artifact by glob,
-modification time, or an unqualified "latest" name; large artifacts, source checkpoints, and
-profiler outputs are local prerequisites, not things to download or regenerate unless in scope.
+Conventional project resources (not a per-task checklist): Python 3.11 via `python3`; the complete
+18-shard Qwen3.8-27B BF16 source and selected converted R9700 `.ninfer` artifact are maintainer-
+provided local prerequisites and are not downloaded implicitly. The source index and all 18
+nonempty shards, about 52 GiB on disk, are currently present under
+`/ssdpool2nvme/local_llm/models/qwen3.8-27b-bf16`; fresh conversion/PPL/token campaigns still
+require their explicit artifact, Python environment, and physical-GPU prerequisites. The normal
+HIP build is `build-r9700/`; profiler output is under `profiles/rocprof/` and `profiles/bench/`;
+hardware is one AMD Radeon AI PRO R9700, `gfx1201`, wave32, with the selected ROCm 10 toolchain
+under `/opt/rocm`.
+Engine, CLI, serve, and PPL use the one fixed FP8-K/INT4-V cache and expose no cache dtype selector.
+Use the selected Python 3.11 interpreter explicitly; do not install or upgrade dependencies unless
+the task requires it. Never select an artifact by glob, modification time, or an unqualified
+"latest" name; large artifacts, source checkpoints, and profiler outputs are local prerequisites,
+not things to download or regenerate unless in scope.
 
 ## Commits
 

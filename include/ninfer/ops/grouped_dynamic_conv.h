@@ -2,8 +2,9 @@
 
 #include "core/arena.h"
 #include "core/tensor.h"
+#include "ninfer/types.h"
 
-#include <cuda_runtime.h>
+#include <hip/hip_runtime_api.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -16,7 +17,8 @@ inline constexpr std::int32_t kGroupedDynamicConvGroups    = 320;
 inline constexpr std::int32_t kGroupedDynamicConvKernel    = 2;
 inline constexpr std::int32_t kGroupedDynamicConvProjRows =
     2 * kGroupedDynamicConvKernel * kGroupedDynamicConvGroups; // 1280
-inline constexpr std::int32_t kGroupedDynamicConvMaxBatch = 8;
+inline constexpr std::int32_t kGroupedDynamicConvMaxBatch =
+    static_cast<std::int32_t>(kMaximumConcurrency);
 inline constexpr std::int32_t kGroupedDynamicConvMaxWidthWhenBatched = 16;
 
 /**
@@ -45,12 +47,13 @@ inline constexpr std::int32_t kGroupedDynamicConvMaxWidthWhenBatched = 16;
  *   hidden/prepared/out are contiguous BF16 [D,T] or [D,T,B]. finish_dynamic is contiguous BF16
  *   [G,2,T] or [G,2,T,B]. base_kernel is contiguous BF16 [D,2,2] stored D-fastest, then kernel
  *   offset, then phase (physical layout of a PyTorch [2,2,D] parameter). kernel_projection is a
- *   logical [1280,D] matrix. T is any positive value at B=1; B=2..8 admits T=1..16.
+ *   logical [1280,D] matrix. T is any positive value at B=1; B=2..4 admits T=1..16.
  *
  * Supported domain:
  *   Activations and base_kernel are BF16. kernel_projection is BF16_CTRL Contiguous [1280,D], or
- *   a Linear-registered Q4G64_F16S / W8G32_F16S RowSplit / NVFP4 BlockScale problem of the same
- *   logical shape. The Q4/W8/NVFP4 route calls ops::linear.
+ *   canonical W8G32_F16S RowSplit or Q4G64_F16S Q4N16K16 of the same logical shape. Every
+ *   projection route is owned by the native gfx1201 Linear Op and consumes artifact storage
+ *   directly.
  *
  * Numeric:
  *   The oracle evaluates the complete formula in FP64 from the represented BF16 activations and
@@ -65,8 +68,8 @@ inline constexpr std::int32_t kGroupedDynamicConvMaxWidthWhenBatched = 16;
  *
  * Workspace:
  *   Prepare uses caller-owned transient storage sized by
- *   grouped_dynamic_conv_prepare_workspace_capacity_bytes() for the [1280,T*B] projection and any
- *   Linear child scratch. Finish uses none.
+ *   grouped_dynamic_conv_prepare_workspace_capacity_bytes() for the [1280,T*B] BF16 projection
+ *   and any caller-owned Linear activation image. Finish uses no workspace.
  */
 [[nodiscard]] std::size_t grouped_dynamic_conv_prepare_workspace_capacity_bytes(
     QType qtype, std::int32_t min_tokens, std::int32_t max_tokens, std::int32_t batch = 1);
@@ -74,9 +77,9 @@ inline constexpr std::int32_t kGroupedDynamicConvMaxWidthWhenBatched = 16;
 void grouped_dynamic_conv_prepare(const Tensor& hidden, const Tensor& base_kernel,
                                   const Weight& kernel_projection, Tensor& prepared,
                                   Tensor& finish_dynamic, WorkspaceArena& workspace,
-                                  cudaStream_t stream);
+                                  hipStream_t stream);
 
 void grouped_dynamic_conv_finish(const Tensor& hidden, const Tensor& base_kernel,
-                                 const Tensor& finish_dynamic, Tensor& out, cudaStream_t stream);
+                                 const Tensor& finish_dynamic, Tensor& out, hipStream_t stream);
 
 } // namespace ninfer::ops

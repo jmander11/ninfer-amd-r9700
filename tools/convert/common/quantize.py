@@ -12,7 +12,7 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 
-from tools.artifact.layouts import encode_row_split, row_split_geometry
+from tools.artifact.layouts import encode_q4_n16k16, encode_row_split, row_split_geometry, q4_n16k16_geometry
 from tools.artifact.numeric import QuantFormat, get_format
 
 
@@ -33,7 +33,7 @@ def _canonical_scale_words(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Return canonical binary16 scales and binary32 reciprocals on the host.
 
-    CUDA division is not correctly rounded at every binary16 scale boundary.
+    Device division is not correctly rounded at every binary16 scale boundary.
     The host oracle performs the specified division in binary64, explicitly
     rounds through binary32 and binary16, then computes the reciprocal in the
     same way.  A binary32 input divided by these small integer denominators has
@@ -89,18 +89,25 @@ def quantize_matrix(
     if not weight.dtype.is_floating_point:
         raise TypeError(f"weight must be floating point, got {weight.dtype}")
 
-    geometry = row_split_geometry(spec, weight.shape)
+    if spec.name == "Q4G64_F16S":
+        n, k = map(int, weight.shape)
+        k_pad = ((k + 127) // 128) * 128
+        groups_per_row = k_pad // spec.group_size
+    else:
+        geometry = row_split_geometry(spec, weight.shape)
+        n, k, k_pad = geometry.n, geometry.k, geometry.k_pad
+        groups_per_row = geometry.groups_per_row
     target = pick_device() if device is None else pick_device(device)
     logical = weight.detach().to(device=target, dtype=torch.float32)
-    if geometry.k_pad != geometry.k:
+    if k_pad != k:
         physical = torch.zeros(
-            (geometry.n, geometry.k_pad), dtype=torch.float32, device=target
+            (n, k_pad), dtype=torch.float32, device=target
         )
-        physical[:, : geometry.k].copy_(logical)
+        physical[:, :k].copy_(logical)
         logical = physical
 
     grouped = logical.reshape(
-        geometry.n, geometry.groups_per_row, spec.group_size
+        n, groups_per_row, spec.group_size
     )
     max_abs = grouped.abs().amax(dim=2)
     host_scales, host_reciprocal = _canonical_scale_words(max_abs, spec.qmax)
@@ -118,12 +125,14 @@ def quantize_and_encode(
     *,
     device: str | torch.device | None = None,
 ) -> bytes:
-    """Quantize a logical matrix and encode ``row-split-k128-v1`` bytes."""
+    """Quantize a logical matrix and encode its sole registered layout."""
 
     spec = get_format(format) if isinstance(format, str) else format
     if not isinstance(spec, QuantFormat):
         raise ValueError("grouped quantization requires a quantized numeric format")
     quantized = quantize_matrix(weight, spec, device=device)
+    if spec.name == "Q4G64_F16S":
+        return encode_q4_n16k16(quantized.codes, quantized.scales, weight.shape)
     return encode_row_split(quantized.codes, quantized.scales, spec, weight.shape)
 
 

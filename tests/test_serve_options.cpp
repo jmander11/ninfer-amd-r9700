@@ -1,6 +1,7 @@
 #include "serve/serve_options.h"
 #include "serve/translate.h"
 
+#include <array>
 #include <iostream>
 #include <optional>
 #include <stdexcept>
@@ -30,7 +31,11 @@ ServeOptions parse(std::vector<std::string> arguments) {
 int main() {
     int failures = 0;
 
+    static_assert(ninfer::kMaximumConcurrency == 4);
+
     const ServeOptions defaults = parse({"ninfer-serve", "model.ninfer"});
+    failures += check(defaults.prefill_chunk == ninfer::kDefaultPrefillChunk,
+                      "serve prefill chunk diverges from the product default");
     failures += check(defaults.allow_prefix_reuse, "prefix reuse is not enabled by default");
     failures +=
         check(!defaults.preserve_thinking, "thinking history is unexpectedly preserved by default");
@@ -73,10 +78,10 @@ int main() {
     failures += check(empty_model_id_rejected, "empty --model-id was accepted");
 
     const ServeOptions dflash = parse({"ninfer-serve", "model.ninfer", "--spec", "dflash",
-                                       "--draft-tokens", "15", "--lm-head-draft"});
+                                       "--draft-tokens", "11", "--lm-head-draft"});
     failures += check(dflash.speculative.backend == ninfer::SpeculativeBackend::DFlash,
                       "--spec dflash did not select DFlash");
-    failures += check(dflash.speculative.draft_tokens == 15,
+    failures += check(dflash.speculative.draft_tokens == 11,
                       "--draft-tokens did not preserve the DFlash window");
     failures += check(dflash.speculative.proposal_head == ninfer::ProposalHead::Optimized,
                       "--lm-head-draft did not select the optimized proposal head");
@@ -98,7 +103,7 @@ int main() {
 
     bool dflash_vision_rejected = false;
     try {
-        (void)parse({"ninfer-serve", "model.ninfer", "--spec", "dflash", "--draft-tokens", "15",
+        (void)parse({"ninfer-serve", "model.ninfer", "--spec", "dflash", "--draft-tokens", "11",
                      "--vision"});
     } catch (const std::invalid_argument&) { dflash_vision_rejected = true; }
     failures += check(dflash_vision_rejected, "DFlash and Vision were accepted together");
@@ -108,17 +113,6 @@ int main() {
         (void)parse({"ninfer-serve", "model.ninfer", "--draft-tokens", "3"});
     } catch (const std::invalid_argument&) { implicit_backend_rejected = true; }
     failures += check(implicit_backend_rejected, "--draft-tokens selected a backend implicitly");
-
-    const ServeOptions adaptive = parse({"ninfer-serve", "model.ninfer", "--spec", "mtp",
-                                         "--draft-tokens", "5", "--adaptive-draft"});
-    failures += check(adaptive.speculative.adaptive_draft,
-                      "--adaptive-draft did not set SpeculativeOptions");
-    bool adaptive_without_spec_rejected = false;
-    try {
-        (void)parse({"ninfer-serve", "model.ninfer", "--adaptive-draft"});
-    } catch (const std::invalid_argument&) { adaptive_without_spec_rejected = true; }
-    failures += check(adaptive_without_spec_rejected,
-                      "--adaptive-draft was accepted without --spec");
 
     const ServeOptions configured = parse(
         {"ninfer-serve", "model.ninfer", "--no-prefix-reuse", "--vision", "--max-concurrency", "4",
@@ -155,6 +149,9 @@ int main() {
     failures +=
         check(serve_usage_text("ninfer-serve").find("--context-checkpoints") != std::string::npos,
               "serve help omits --context-checkpoints");
+    failures += check(serve_usage_text("ninfer-serve").find("--max-concurrency 1..4") !=
+                          std::string::npos,
+                      "serve help omits the product concurrency range");
     failures += check(configured.enable_vision, "--vision did not enable Vision");
     failures +=
         check(configured.preserve_thinking, "--preserve-thinking did not reach serving options");
@@ -171,6 +168,12 @@ int main() {
     failures += check(empty_prepend_rejected, "empty --system-prepend was accepted");
     failures +=
         check(configured.max_concurrency == 4, "--max-concurrency did not reach serving options");
+    bool excessive_concurrency_rejected = false;
+    try {
+        (void)parse({"ninfer-serve", "model.ninfer", "--max-concurrency", "5"});
+    } catch (const std::invalid_argument&) { excessive_concurrency_rejected = true; }
+    failures += check(excessive_concurrency_rejected,
+                      "--max-concurrency accepted more than four active requests");
     failures += check(configured.max_context == 4096 &&
                           configured.kv_capacity.mode == ninfer::KvCapacityMode::Explicit &&
                           configured.kv_capacity.explicit_tokens == 8192,
@@ -234,6 +237,13 @@ int main() {
     failures +=
         check(serve_usage_text("ninfer-serve").find("--no-prefix-reuse") != std::string::npos,
               "serve help omits --no-prefix-reuse");
+    const ServeOptions eager =
+        parse({"ninfer-serve", "model.ninfer", "--no-device-graph"});
+    failures += check(!eager.use_device_graph,
+                      "--no-device-graph did not disable serving Device Graph decode");
+    failures += check(serve_usage_text("ninfer-serve").find("--no-device-graph") !=
+                          std::string::npos,
+                      "serve help omits --no-device-graph");
     failures +=
         check(serve_usage_text("ninfer-serve").find("--preserve-thinking") != std::string::npos,
               "serve help omits --preserve-thinking");
@@ -313,32 +323,10 @@ int main() {
     failures += check(!secret_present, "startup argv retained the API key");
     failures += check(redaction_present, "startup argv omitted the API-key redaction marker");
 
-    failures += check(serve_usage_text("ninfer-serve").find("--keep-frac") != std::string::npos,
-                      "serve help omits --keep-frac");
-    failures += check(serve_usage_text("ninfer-serve").find("--xattn-tau") != std::string::npos,
-                      "serve help omits --xattn-tau");
-    {
-        const ServeOptions skip = parse({"ninfer-serve", "model.ninfer", "--kv-dtype", "nvfp4",
-                                         "--keep-frac", "0.5"});
-        failures += check(skip.keep_frac == 0.5f, "--keep-frac 0.5 did not parse");
-        failures += check(skip.xattn_tau == 1.0f, "xattn_tau default is not 1.0");
-    }
-    {
-        bool rejected = false;
-        try {
-            parse({"ninfer-serve", "model.ninfer", "--kv-dtype", "nvfp4", "--sage", "--keep-frac",
-                   "0.5"});
-        } catch (const std::invalid_argument&) { rejected = true; }
-        failures += check(rejected, "--sage --keep-frac 0.5 must be rejected");
-    }
-    {
-        bool rejected = false;
-        try {
-            parse({"ninfer-serve", "model.ninfer", "--kv-dtype", "nvfp4", "--keep-frac", "0.5",
-                   "--xattn-tau", "0.9"});
-        } catch (const std::invalid_argument&) { rejected = true; }
-        failures += check(rejected, "--keep-frac and --xattn-tau must be mutually exclusive");
-    }
+    const std::string help = serve_usage_text("ninfer-serve");
+    failures += check(help.find("--kv-capacity") != std::string::npos &&
+                          help.find("--kv-ram-capacity") != std::string::npos,
+                      "serve help omits the fixed-cache capacity controls");
 
     if (failures == 0) { std::cout << "ok\n"; }
     return failures == 0 ? 0 : 1;

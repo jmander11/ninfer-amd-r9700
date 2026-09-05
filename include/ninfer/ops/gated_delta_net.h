@@ -3,7 +3,7 @@
 #include "core/arena.h"
 #include "core/tensor.h"
 
-#include <cuda_runtime.h>
+#include <hip/hip_runtime_api.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -12,9 +12,9 @@ namespace ninfer::ops {
 
 /**
  * Returns the transient arena capacity required by gated_delta_net for the given geometry. It is
- * zero when the private implementation requires no transient storage. The state/head dimension is
- * fixed at 128; `value_heads` must be at least `qk_heads` and divisible by it. The query covers
- * every T in the inclusive interval and throws for an invalid profile or interval.
+ * zero when the private implementation requires no transient storage. The sole profile is
+ * Hq=16, Hv=48, K=V=128 and T=1..262144. The query covers every T in the inclusive interval and
+ * throws for any other profile or interval.
  */
 [[nodiscard]] std::size_t gated_delta_net_workspace_capacity_bytes(std::int32_t qk_heads,
                                                                    std::int32_t value_heads,
@@ -32,25 +32,25 @@ namespace ninfer::ops {
  *   S_h         = alpha * S_h + outer(delta, k[:,qh,t])
  *   ideal[:,h,t] = scale * S_h * q[:,qh,t].
  *
- * Shapes/dtypes are contiguous q/k BF16 [128,Hqk,T], v/out BF16 [128,Hv,T], g/beta FP32 [Hv,T],
- * and state FP32 [128,128,Hv], where Hqk>=1, Hv>=Hqk, and Hv%Hqk==0. `scale` is 1/sqrt(128). When
+ * Shapes/dtypes are contiguous q/k BF16 [128,16,T], v/out BF16 [128,48,T], g/beta FP32 [48,T],
+ * and state FP32 [128,128,48]. `scale` is 1/sqrt(128). When
  * `normalize_qk` is true, the recurrent implementation consumes raw q/k and applies
  * x / sqrt(sum(x^2) + 1e-6) independently to every 128-element row before using it. When false,
  * q/k are consumed as supplied. The oracle evaluates the complete recurrence and `ideal` naively
  * in FP64 from the represented inputs and FP32 initial state. The BF16 out is promoted and
  * compared directly with that result; output storage rounding belongs to the Op's numerical
  * criterion, not the oracle. Recurrent implementations may apply the normalization directly;
- * chunked implementations may use private normalized staging. The corresponding private storage
- * is included by gated_delta_net_workspace_capacity_bytes when `normalize_qk` is true.
- * Inputs and out do not overlap state or one another. `ws` supplies transient storage reported by
- * gated_delta_net_workspace_capacity_bytes; scratch is scoped to the call. T may be any positive
- * value.
+ * private arithmetic is implementation-defined. Inputs and out do not overlap state or one
+ * another. The exact normalized ordinary T=2048 implementation uses a caller-owned transient
+ * FP32 Q/K inverse-norm sidecar; every other ordinary width uses no transient storage. The
+ * ordinary sequential form accepts T=1..262144; snapshot and replay forms retain their fixed
+ * W=1..16 domain.
  *
  * This overload reads and writes the same `ssm_state`, publishing the state after all T tokens.
  */
 void gated_delta_net(const Tensor& q, const Tensor& k, const Tensor& v, const Tensor& g,
                      const Tensor& beta, float scale, bool normalize_qk, WorkspaceArena& ws,
-                     Tensor& ssm_state, Tensor& out, cudaStream_t stream);
+                     Tensor& ssm_state, Tensor& out, hipStream_t stream);
 
 /**
  * Distinct-state form of the same recurrence. `ssm_state_out` receives the final state;
@@ -60,14 +60,14 @@ void gated_delta_net(const Tensor& q, const Tensor& k, const Tensor& v, const Te
 void gated_delta_net(const Tensor& q, const Tensor& k, const Tensor& v, const Tensor& g,
                      const Tensor& beta, float scale, bool normalize_qk, WorkspaceArena& ws,
                      const Tensor& ssm_state_in, Tensor& ssm_state_out, Tensor& out,
-                     cudaStream_t stream);
+                     hipStream_t stream);
 
 /**
  * Snapshot form for B independent recurrences. q/k are contiguous BF16 [128,Hqk,W,B], v/out are
  * BF16 [128,Hv,W,B], g/beta are FP32 [Hv,W,B], and `ssm_states` is contiguous FP32
  * [128,128,Hv,Slots]. `initial_state_slots` and `snapshot_base_slots` are contiguous I32 [B].
  * `valid_columns` is either contiguous I32 [B], with every value in [1,W], or an empty Tensor
- * meaning every row has W valid columns. B=1 accepts every positive W; B=2..8 accepts W=1..16.
+ * meaning every row has W valid columns. B=1..4 and W=1..16.
  *
  * Row b starts from initial_state_slots[b] and writes the state after valid column j to
  * snapshot_base_slots[b]+j. Invalid-tail output columns are exact BF16 zero and do not mutate
@@ -79,7 +79,7 @@ void gated_delta_net_snapshot(const Tensor& q, const Tensor& k, const Tensor& v,
                               const Tensor& beta, float scale, bool normalize_qk,
                               Tensor& ssm_states, const Tensor& valid_columns,
                               const Tensor& initial_state_slots, const Tensor& snapshot_base_slots,
-                              Tensor& out, cudaStream_t stream);
+                              Tensor& out, hipStream_t stream);
 
 /**
  * Op: gated_delta_net_replay_record
@@ -87,7 +87,7 @@ void gated_delta_net_snapshot(const Tensor& q, const Tensor& k, const Tensor& v,
  * Evaluates B independent normalized Gated DeltaNet recurrences from absolute state-pool slots
  * without modifying any state. q/k are BF16 [128,Hq,T,B], v/out are BF16 [128,Hv,T,B], g/beta
  * are FP32 [Hv,T,B], and ssm_states is FP32 [128,128,Hv,S]. The ReplaySSM execution domain is
- * B=1..8 and T=2..16, with Hq=16 and Hv in {32,48}. scale is 1/sqrt(128).
+ * B=1..4 and T=2..16, with Hq=16 and Hv=48. scale is 1/sqrt(128).
  *
  * valid_columns is empty for dense rows or device I32 [B], with every caller-supplied extent in
  * [1,T]. initial_state_slots is device I32 [B] containing absolute slots in [0,S). For each valid
@@ -100,9 +100,9 @@ void gated_delta_net_snapshot(const Tensor& q, const Tensor& k, const Tensor& v,
  * checkpoint slot. When non-null it is contiguous I32 [T,B], or [T] when B=1, and the recurrence
  * is the tree rule S_j = F(S_parent[j], x_j). parent_index[0,b] is -1 and names the checkpoint
  * slot; every other valid column j has parent in [0,j). Packed order is not time. With a
- * workspace sized by gated_delta_net_replay_record_workspace_capacity_bytes(), parent tiles live
- * in HBM and the record kernel uses the 4-warp sequential tile geometry. Without workspace the
- * 1-warp shared-memory tile is used. Sequential record allocates no arena workspace.
+ * workspace sized by gated_delta_net_replay_record_workspace_capacity_bytes(), parent states live
+ * in HBM. Tree mode requires that caller-owned workspace; sequential record allocates no arena
+ * workspace.
  */
 [[nodiscard]] std::size_t gated_delta_net_replay_record_workspace_capacity_bytes(
     std::int32_t value_heads, std::int32_t batch, std::int32_t width);
@@ -112,7 +112,7 @@ void gated_delta_net_replay_record(const Tensor& q, const Tensor& k, const Tenso
                                    const Tensor& ssm_states, const Tensor& valid_columns,
                                    const Tensor& initial_state_slots, Tensor& key_record,
                                    Tensor& value_record, Tensor& gate_record, Tensor& out,
-                                   cudaStream_t stream, const Tensor* parent_index = nullptr,
+                                   hipStream_t stream, const Tensor* parent_index = nullptr,
                                    WorkspaceArena* workspace = nullptr);
 
 } // namespace ninfer::ops

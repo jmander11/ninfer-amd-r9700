@@ -4,7 +4,7 @@
 #include "core/cyclic_kv_cache.h"
 #include "core/tensor.h"
 
-#include <cuda_runtime.h>
+#include <hip/hip_runtime_api.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -40,20 +40,22 @@ struct SwaContextExecutionEnvelope {
  * row sees every live temporary query row from the same batch row. scale is 1/sqrt(128).
  *
  * Context and query K/V are unchanged. out is the only observable mutation and is completely
- * overwritten. The current optimized implementation domain is T=1..16 on sm_120a.
+ * overwritten. The R9700 implementation domain is T=1..16 on gfx1201 wave32.
  *
- * The caller guarantees min_context <= L <= max_context, sequential nonnegative positions, and
- * that the cyclic context contains the declared live interval. The execution envelope may affect
- * finite launch selection and workspace capacity, never the admitted key set.
+ * The registered request-batch domain is B=1..4. The caller guarantees min_context <= L <=
+ * max_context, sequential nonnegative positions, and that the cyclic context contains the
+ * declared live interval. The envelope is checked in the device route without a host read and
+ * never changes the admitted key set.
  */
 void swa(const Tensor& q, const Tensor& query_k, const Tensor& query_v, const Tensor& positions,
          const Tensor& valid_columns, const Tensor& lanes, float scale,
          const CyclicKVCacheLayerView& context, SwaContextExecutionEnvelope envelope,
-         WorkspaceArena& workspace, Tensor& out, cudaStream_t stream);
+         WorkspaceArena& workspace, Tensor& out, hipStream_t stream);
 
 /**
- * Returns the transient arena capacity required for every T in the inclusive optimized interval.
- * The execution envelope is the fixed profile; invalid profiles or intervals throw.
+ * Short fixed envelopes use a workspace-free wave32 score-streaming route. Longer envelopes use
+ * caller-owned split-KV partial accumulators and statistics sized by this function. Invalid
+ * profiles or intervals throw.
  */
 [[nodiscard]] std::size_t swa_workspace_capacity_bytes(SwaContextExecutionEnvelope envelope,
                                                        std::int32_t min_tokens,

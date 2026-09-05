@@ -13,7 +13,7 @@ state；它只记录驱动状态转移的 raw inputs。最终接受长度确定�
 > 等价公式。
 
 本文依次说明状态和 record 的数学定义、accepted-prefix replay、浮点漂移的来源、closed-loop
-bitwise clone 的条件、causal-conv history，以及 Qwen3.6 短窗口下的空间与计算特征。
+bitwise clone 的条件、causal-conv history，以及 Qwen3 短窗口下的空间与计算特征。
 
 ---
 
@@ -27,13 +27,12 @@ bitwise clone 的条件、causal-conv history，以及 Qwen3.6 短窗口下的�
 S\in\mathbb{R}^{V\times K}.
 \]
 
-Qwen3.6 使用 \(K=V=128\)。一个 value head 的 state 包含 16,384 个 FP32 元素，即 64 KiB。
+Qwen3 使用 \(K=V=128\)。一个 value head 的 state 包含 16,384 个 FP32 元素，即 64 KiB。
 乘上全部 GDN layers 和 value heads，一份完整 recurrent state image 为：
 
 | 模型 | GDN layers | value heads | 一份 recurrent state |
 |---|---:|---:|---:|
-| Qwen3.6-27B | 48 | 48 | 144 MiB |
-| Qwen3.6-35B-A3B | 30 | 32 | 60 MiB |
+| Qwen3.8-27B | 48 | 48 | 144 MiB |
 
 ### 1.2 Snapshot baseline
 
@@ -182,7 +181,7 @@ R_t^{raw}=
 - \(\beta_t\)：形成 correction；
 - \(q_t\)：只用于本轮 output readout，不改变 state，因此不进入 replay record。
 
-对于常见的 Qwen3.6 数值边界，raw \(k/v\) 是 BF16 represented values，\(g/\beta\) 是 FP32
+对于常见的 Qwen3 数值边界，raw \(k/v\) 是 BF16 represented values，\(g/\beta\) 是 FP32
 represented values，checkpoint 是 FP32。所谓 raw record，是对这些实际 transition inputs 的
 lossless side copy，而不是重新从 hidden state 或上游 projection 推导一次。
 
@@ -267,7 +266,7 @@ publish S_fold
 \(m=0\) 时 state 严格不变。Rejected suffix \(R_{m+1:T}\) 从未被 fold 读取。
 
 单个 head 内仍有最多 \(m\) 次顺序 transition，但不同 layers、value heads 和 batch rows 相互独立。
-Qwen3.6 的并行宽度来自 30/48 个 GDN layers、32/48 个 value heads 和多个 active rows，而单行
+Qwen3 的并行宽度来自 30/48 个 GDN layers、32/48 个 value heads 和多个 active rows，而单行
 token loop 最多只有 6 或 16 次。
 
 ### 3.4 Accepted-prefix 正确性
@@ -494,7 +493,7 @@ H_m=
 - \(m\ge W-1\)：使用 accepted prefix 的最后 \(W-1\) 列。
 
 只要 record 是 baseline 将写入 history 的同一 BF16 represented column，这个 commit 是 exact gather，
-没有 recurrent reduction 或浮点重关联。Qwen3.6 使用 \(W=4\)，所以一列 record 是一份三列 snapshot
+没有 recurrent reduction 或浮点重关联。Qwen3 使用 \(W=4\)，所以一列 record 是一份三列 snapshot
 的 \(1/3\)。
 
 ---
@@ -556,34 +555,29 @@ T(R+Q),
 T(P_{gdn}+P_{conv}).
 \]
 
-### 6.2 Qwen3.6 尺寸
+### 6.2 Qwen3 尺寸
 
 | 模型 | \(L_g\) | \(H_q\) | \(H_v\) | \(K/V\) | \(C_p\) | \(W\) |
 |---|---:|---:|---:|---:|---:|---:|
 | 27B | 48 | 16 | 48 | 128/128 | 10,240 | 4 |
-| 35B-A3B | 30 | 16 | 32 | 128/128 | 8,192 | 4 |
 
 对应的每 token state/record 尺寸为：
 
 | 模型 | recurrent image | conv history | raw GDN record | conv record | record total |
 |---|---:|---:|---:|---:|---:|
 | 27B | 144.000 MiB | 2.8125 MiB | 0.767578 MiB | 0.9375 MiB | 1.705078 MiB |
-| 35B-A3B | 60.000 MiB | 1.40625 MiB | 0.358887 MiB | 0.46875 MiB | 0.827637 MiB |
 
 单个 raw record 与一份 recurrent+conv snapshot 的比例是：
 
 | 模型 | snapshot/position | raw record/position | 尺寸比 |
 |---|---:|---:|---:|
 | 27B | 146.8125 MiB | 1.705078 MiB | 约 86.1× |
-| 35B-A3B | 61.40625 MiB | 0.827637 MiB | 约 74.2× |
 
 典型 verify windows 的 record 容量为：
 
 | 模型与窗口 | raw GDN records | conv records | 合计 |
 |---|---:|---:|---:|
 | 27B，\(T=6\) | 4.605469 MiB | 5.625000 MiB | 10.230469 MiB |
-| 35B-A3B，\(T=6\) | 2.153320 MiB | 2.812500 MiB | 4.965820 MiB |
-| 35B-A3B，\(T=16\) | 5.742188 MiB | 7.500000 MiB | 13.242188 MiB |
 
 ### 6.3 计算形态
 

@@ -10,20 +10,22 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import lru_cache
 from math import prod
+import importlib
 import operator
-import struct
 import sys
 from types import MappingProxyType
-from typing import Sequence, TypeAlias
+from typing import Any, Sequence, TYPE_CHECKING, TypeAlias
 
-import torch
+if TYPE_CHECKING:
+    import torch
+else:
+    torch = None  # type: ignore[assignment]
 
 from .numeric import (
     DirectFormat,
-    Nvfp4Format,
     NumericFormat,
     QuantFormat,
-    valid_positive_fp32_word,
+    RowScaledFormat,
     get_format,
 )
 
@@ -61,20 +63,38 @@ class RowSplitGeometry:
 
 
 @dataclass(frozen=True, slots=True)
-class BlockScaleGeometry:
+class RowScaledGeometry:
     n: int
     k: int
-    groups_per_row: int
-    k_tiles: int
-    code_plane_bytes: int
-    scale_plane_offset: int
-    scale_plane_bytes: int
-    weight_divisor_offset: int
+    k_pad: int
+    code_row_bytes: int
+    code_offset: int
+    code_bytes: int
+    scale_row_bytes: int
+    scale_offset: int
+    scale_bytes: int
     payload_bytes: int
 
 
-Plane: TypeAlias = bytes | bytearray | memoryview | torch.Tensor
-Payload: TypeAlias = bytes | bytearray | memoryview | torch.Tensor
+Plane: TypeAlias = bytes | bytearray | memoryview | Any
+Payload: TypeAlias = bytes | bytearray | memoryview | Any
+
+
+def _require_torch() -> None:
+    global torch
+    if torch is None:
+        try:
+            torch = importlib.import_module("torch")
+        except ModuleNotFoundError:
+            raise ModuleNotFoundError(
+                "Torch is required for tensor encoding and decoding, not artifact framing"
+            ) from None
+
+
+def _is_tensor(value: object) -> bool:
+    if torch is None and type(value).__module__.partition(".")[0] == "torch":
+        _require_torch()
+    return torch is not None and isinstance(value, torch.Tensor)
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,21 +113,22 @@ CONTIGUOUS_LE_V1 = Layout(
 ROW_SPLIT_K128_V1 = Layout(
     "row-split-k128-v1",
     256,
-    frozenset(("Q4G64_F16S", "Q5G64_F16S", "Q6G64_F16S", "W8G32_F16S")),
+    frozenset(("Q5G64_F16S", "Q6G64_F16S", "W8G32_F16S")),
 )
-BLOCKSCALE_K16_M128X4_V1 = Layout(
-    "blockscale-k16-m128x4-v1",
-    256,
-    frozenset(("NVFP4",)),
+R9700_Q4G64_N16_K16_V1 = Layout(
+    "r9700-q4g64-n16-k16-v1", 256, frozenset(("Q4G64_F16S",))
 )
-
+ROW_SCALED_K128_V1 = Layout(
+    "row-scaled-k128-v1", 256, frozenset(("F8E4M3_ROW_F32S",))
+)
 LAYOUTS = MappingProxyType(
     {
         layout.name: layout
         for layout in (
             CONTIGUOUS_LE_V1,
             ROW_SPLIT_K128_V1,
-            BLOCKSCALE_K16_M128X4_V1,
+            R9700_Q4G64_N16_K16_V1,
+            ROW_SCALED_K128_V1,
         )
     }
 )
@@ -168,6 +189,8 @@ def row_split_geometry(
     spec = _format(format)
     if not isinstance(spec, QuantFormat):
         raise ValueError("row-split-k128-v1 requires a grouped quantized format")
+    if spec.name == "Q4G64_F16S":
+        raise ValueError("row-split-k128-v1 does not accept Q4G64_F16S")
     n, k = _shape(shape, rank=2)
     k_pad = align_up(k, K_ALIGNMENT)
     groups_per_row = k_pad // spec.group_size
@@ -203,32 +226,42 @@ def row_split_geometry(
     )
 
 
-def block_scale_geometry(
-    format: str | Nvfp4Format, shape: Sequence[int]
-) -> BlockScaleGeometry:
-    spec = _format(format)
-    if not isinstance(spec, Nvfp4Format):
-        raise ValueError("blockscale-k16-m128x4-v1 requires NVFP4")
+def q4_n16k16_geometry(shape: Sequence[int]) -> RowSplitGeometry:
     n, k = _shape(shape, rank=2)
-    if n % 128 != 0 or k % 64 != 0:
-        raise ValueError(
-            "blockscale-k16-m128x4-v1 requires N divisible by 128 "
-            "and K divisible by 64"
-        )
-    code_plane_bytes = n * k // 2
-    scale_plane_offset = align_up(code_plane_bytes, PLANE_ALIGNMENT)
-    scale_plane_bytes = n * k // spec.group_size
-    weight_divisor_offset = scale_plane_offset + scale_plane_bytes
-    return BlockScaleGeometry(
+    if n % 16:
+        raise ValueError("r9700-q4g64-n16-k16-v1 requires N divisible by 16")
+    k_pad = align_up(k, K_ALIGNMENT)
+    groups = k_pad // 64
+    base_bytes = n * k_pad // 2
+    scale_offset = align_up(base_bytes, PLANE_ALIGNMENT)
+    scale_bytes = n * groups * 2
+    return RowSplitGeometry(n, k, k_pad, groups, 32, 0, groups * 32, 0,
+                            groups * 2, 0, base_bytes, scale_offset, 0,
+                            scale_offset, scale_bytes, scale_offset + scale_bytes)
+
+
+def row_scaled_geometry(
+    format: str | RowScaledFormat, shape: Sequence[int]
+) -> RowScaledGeometry:
+    spec = _format(format)
+    if not isinstance(spec, RowScaledFormat):
+        raise ValueError("row-scaled-k128-v1 requires a row-scaled format")
+    n, k = _shape(shape, rank=2)
+    k_pad = align_up(k, K_ALIGNMENT)
+    code_bytes = n * k_pad
+    scale_offset = align_up(code_bytes, PLANE_ALIGNMENT)
+    scale_bytes = n * 4
+    return RowScaledGeometry(
         n=n,
         k=k,
-        groups_per_row=k // spec.group_size,
-        k_tiles=k // 64,
-        code_plane_bytes=code_plane_bytes,
-        scale_plane_offset=scale_plane_offset,
-        scale_plane_bytes=scale_plane_bytes,
-        weight_divisor_offset=weight_divisor_offset,
-        payload_bytes=weight_divisor_offset + 4,
+        k_pad=k_pad,
+        code_row_bytes=k_pad,
+        code_offset=0,
+        code_bytes=code_bytes,
+        scale_row_bytes=4,
+        scale_offset=scale_offset,
+        scale_bytes=scale_bytes,
+        payload_bytes=scale_offset + scale_bytes,
     )
 
 
@@ -254,27 +287,28 @@ def encoded_size(
         if not isinstance(numeric_spec, QuantFormat):
             raise ValueError("row-split-k128-v1 requires a grouped quantized format")
         return row_split_geometry(numeric_spec, shape).payload_bytes
-    if layout_spec is BLOCKSCALE_K16_M128X4_V1:
-        if not isinstance(numeric_spec, Nvfp4Format):
-            raise ValueError("blockscale-k16-m128x4-v1 requires NVFP4")
-        return block_scale_geometry(numeric_spec, shape).payload_bytes
+    if layout_spec is ROW_SCALED_K128_V1:
+        if not isinstance(numeric_spec, RowScaledFormat):
+            raise ValueError("row-scaled-k128-v1 requires a row-scaled format")
+        return row_scaled_geometry(numeric_spec, shape).payload_bytes
+    if layout_spec is R9700_Q4G64_N16_K16_V1:
+        return q4_n16k16_geometry(shape).payload_bytes
     raise ValueError(f"unsupported tensor layout: {layout_spec.name!r}")
 
 
-_DIRECT_DTYPES = {
-    "BF16": torch.bfloat16,
-    "FP32": torch.float32,
-    "I32": torch.int32,
-}
+def _direct_dtypes():
+    _require_torch()
+    return {"BF16": torch.bfloat16, "FP32": torch.float32, "I32": torch.int32}
 
 
 def encode_direct(tensor: torch.Tensor, format: str | DirectFormat) -> bytes:
     """Encode exact direct-format words; implicit dtype conversion is forbidden."""
 
+    _require_torch()
     spec = _format(format)
     if not isinstance(spec, DirectFormat):
         raise ValueError("direct encoding requires BF16, FP32, or I32")
-    expected_dtype = _DIRECT_DTYPES[spec.name]
+    expected_dtype = _direct_dtypes()[spec.name]
     if tensor.dtype != expected_dtype:
         raise TypeError(
             f"{spec.name} encoding requires {expected_dtype}, got {tensor.dtype}"
@@ -289,7 +323,7 @@ def encode_direct(tensor: torch.Tensor, format: str | DirectFormat) -> bytes:
 
 
 def _payload_length(payload: Payload) -> int:
-    if isinstance(payload, torch.Tensor):
+    if _is_tensor(payload):
         if payload.dtype != torch.uint8 or payload.dim() != 1 or not payload.is_contiguous():
             raise TypeError("tensor payloads must be contiguous one-dimensional uint8 tensors")
         return payload.numel()
@@ -297,7 +331,8 @@ def _payload_length(payload: Payload) -> int:
 
 
 def _payload_tensor(payload: Payload, device: torch.device) -> torch.Tensor:
-    if isinstance(payload, torch.Tensor):
+    _require_torch()
+    if _is_tensor(payload):
         _payload_length(payload)
         return payload if payload.device == device else payload.to(device)
     raw = bytearray(payload)
@@ -315,6 +350,7 @@ def decode_direct(
 ) -> torch.Tensor:
     """Decode exact direct-format words into their registered torch dtype."""
 
+    _require_torch()
     spec = _format(format)
     if not isinstance(spec, DirectFormat):
         raise ValueError("direct decoding requires BF16, FP32, or I32")
@@ -328,7 +364,7 @@ def decode_direct(
     raw = _payload_tensor(payload, target)
     if sys.byteorder != "little" and target.type == "cpu":
         raw = raw.reshape(-1, spec.word_bytes).flip(1).contiguous().reshape(-1)
-    return raw.view(_DIRECT_DTYPES[spec.name]).reshape(dims)
+    return raw.view(_direct_dtypes()[spec.name]).reshape(dims)
 
 
 def _exact_uint8_matrix(
@@ -337,130 +373,6 @@ def _exact_uint8_matrix(
     if tensor.dtype != torch.uint8 or tuple(tensor.shape) != shape:
         raise TypeError(f"{label} must be uint8 with shape {shape}")
     return tensor.detach().contiguous().cpu()
-
-
-def swizzle_nvfp4_scales(
-    natural_scales: torch.Tensor, shape: Sequence[int]
-) -> torch.Tensor:
-    """Map natural ``[N,K/16]`` E4M3FN words to the registered scale layout."""
-
-    geometry = block_scale_geometry("NVFP4", shape)
-    source = _exact_uint8_matrix(
-        natural_scales,
-        (geometry.n, geometry.groups_per_row),
-        "NVFP4 scales",
-    )
-    return (
-        source.reshape(geometry.n // 128, 4, 32, geometry.k_tiles, 4)
-        .permute(0, 3, 2, 1, 4)
-        .contiguous()
-        .reshape(-1)
-    )
-
-
-def unswizzle_nvfp4_scales(
-    stored_scales: torch.Tensor, shape: Sequence[int]
-) -> torch.Tensor:
-    """Recover natural ``[N,K/16]`` E4M3FN words from registered layout bytes."""
-
-    geometry = block_scale_geometry("NVFP4", shape)
-    if (
-        stored_scales.dtype != torch.uint8
-        or stored_scales.dim() != 1
-        or stored_scales.numel() != geometry.scale_plane_bytes
-    ):
-        raise TypeError(
-            "stored NVFP4 scales must be one-dimensional uint8 with "
-            f"{geometry.scale_plane_bytes} elements"
-        )
-    source = stored_scales.detach().contiguous().cpu()
-    return (
-        source.reshape(geometry.n // 128, geometry.k_tiles, 32, 4, 4)
-        .permute(0, 3, 2, 1, 4)
-        .contiguous()
-        .reshape(geometry.n, geometry.groups_per_row)
-    )
-
-
-def _positive_fp32_word(value: torch.Tensor | bytes | bytearray | memoryview) -> bytes:
-    if isinstance(value, torch.Tensor):
-        if value.dtype != torch.float32 or value.numel() != 1:
-            raise TypeError("NVFP4 weight divisor must be one FP32 word")
-        raw = encode_direct(value.reshape(()), "FP32")
-    else:
-        raw = bytes(value)
-        if len(raw) != 4:
-            raise TypeError("NVFP4 weight divisor must contain exactly four bytes")
-    word = struct.unpack("<I", raw)[0]
-    if not valid_positive_fp32_word(word):
-        raise ValueError("NVFP4 weight divisor must be finite and positive")
-    return raw
-
-
-def encode_nvfp4(
-    packed_codes: torch.Tensor,
-    natural_scales: torch.Tensor,
-    weight_divisor: torch.Tensor | bytes | bytearray | memoryview,
-    shape: Sequence[int],
-) -> bytes:
-    """Encode exact source NVFP4 words without numerical conversion."""
-
-    geometry = block_scale_geometry("NVFP4", shape)
-    codes = _exact_uint8_matrix(
-        packed_codes,
-        (geometry.n, geometry.k // 2),
-        "NVFP4 packed codes",
-    )
-    scales = _exact_uint8_matrix(
-        natural_scales,
-        (geometry.n, geometry.groups_per_row),
-        "NVFP4 scales",
-    )
-    invalid = ((scales & 0x80) != 0) | (scales == 0x7F)
-    if bool(invalid.any()):
-        raise ValueError("NVFP4 scales must be nonnegative finite E4M3FN words")
-    divisor = _positive_fp32_word(weight_divisor)
-    swizzled = swizzle_nvfp4_scales(scales, shape)
-    payload = bytearray(geometry.payload_bytes)
-    payload[: geometry.code_plane_bytes] = codes.numpy().tobytes()
-    payload[
-        geometry.scale_plane_offset :
-        geometry.scale_plane_offset + geometry.scale_plane_bytes
-    ] = swizzled.numpy().tobytes()
-    payload[geometry.weight_divisor_offset :] = divisor
-    return bytes(payload)
-
-
-def decode_nvfp4_words(
-    payload: Payload,
-    shape: Sequence[int],
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Decode exact packed code, natural scale, and divisor words."""
-
-    geometry = block_scale_geometry("NVFP4", shape)
-    if _payload_length(payload) != geometry.payload_bytes:
-        raise ValueError(
-            f"NVFP4 payload has {_payload_length(payload)} bytes, "
-            f"expected {geometry.payload_bytes}"
-        )
-    raw = _payload_tensor(payload, torch.device("cpu"))
-    codes = raw[: geometry.code_plane_bytes].clone().reshape(
-        geometry.n, geometry.k // 2
-    )
-    stored_scales = raw[
-        geometry.scale_plane_offset :
-        geometry.scale_plane_offset + geometry.scale_plane_bytes
-    ]
-    scales = unswizzle_nvfp4_scales(stored_scales, shape)
-    invalid = ((scales & 0x80) != 0) | (scales == 0x7F)
-    if bool(invalid.any()):
-        raise ValueError("NVFP4 scales must be nonnegative finite E4M3FN words")
-    divisor_bytes = bytes(raw[geometry.weight_divisor_offset :].numpy())
-    divisor_word = struct.unpack("<I", divisor_bytes)[0]
-    if not valid_positive_fp32_word(divisor_word):
-        raise ValueError("NVFP4 weight divisor must be finite and positive")
-    divisor = torch.frombuffer(bytearray(divisor_bytes), dtype=torch.float32).reshape(())
-    return codes, scales, divisor
 
 
 def _pack_low_nibbles(codes: torch.Tensor) -> torch.Tensor:
@@ -528,6 +440,7 @@ def encode_row_split(
     owns quantization and the required zero-filled physical padding groups.
     """
 
+    _require_torch()
     spec = _format(format)
     if not isinstance(spec, QuantFormat):
         raise ValueError("row-split encoding requires a grouped quantized format")
@@ -551,6 +464,94 @@ def encode_row_split(
     payload = assemble_row_planes(planes, spec, geometry.k)
     assert isinstance(payload, torch.Tensor)
     return payload.cpu().numpy().tobytes()
+
+
+def encode_q4_n16k16(codes: torch.Tensor, scales: torch.Tensor,
+                     shape: Sequence[int]) -> bytes:
+    """Encode represented Q4G64 groups in the production gfx1201 N16/K16 order."""
+    _require_torch()
+    geometry = q4_n16k16_geometry(shape)
+    expected_codes = (geometry.n, geometry.groups_per_row, 64)
+    expected_scales = (geometry.n, geometry.groups_per_row)
+    if codes.dtype != torch.int8 or tuple(codes.shape) != expected_codes:
+        raise TypeError(f"codes must be int8 with shape {expected_codes}")
+    if scales.dtype != torch.float16 or tuple(scales.shape) != expected_scales:
+        raise TypeError(f"scales must be float16 with shape {expected_scales}")
+    if codes.device != scales.device:
+        raise ValueError("codes and scales must be on the same device")
+    spec = _format("Q4G64_F16S")
+    assert isinstance(spec, QuantFormat)
+    base, high = _pack_codes(codes.reshape(-1, 64), spec)
+    assert high.numel() == 0
+    tiled_codes = (base.reshape(geometry.n // 16, 16, geometry.groups_per_row, 4, 8)
+                   .permute(0, 2, 3, 1, 4).contiguous().reshape(-1))
+    tiled_scales = (scales.reshape(geometry.n // 16, 16, geometry.groups_per_row)
+                    .permute(0, 2, 1).contiguous().view(torch.uint8).reshape(-1))
+    payload = torch.zeros(geometry.payload_bytes, dtype=torch.uint8, device=codes.device)
+    payload[:geometry.base_bytes].copy_(tiled_codes)
+    payload[geometry.scale_offset:geometry.scale_offset + geometry.scale_bytes].copy_(tiled_scales)
+    return payload.cpu().numpy().tobytes()
+
+
+def decode_q4_n16k16_codes(source: Payload, shape: Sequence[int],
+                            device: torch.device | str = "cpu") -> tuple[torch.Tensor, torch.Tensor]:
+    """Decode production N16/K16 Q4 bytes to logical row/group code and scale tensors."""
+    _require_torch()
+    geometry = q4_n16k16_geometry(shape)
+    if _payload_length(source) != geometry.payload_bytes:
+        raise ValueError(f"N16/K16 payload has {_payload_length(source)} bytes, expected {geometry.payload_bytes}")
+    resident = _payload_tensor(source, torch.device(device))
+    base = resident[:geometry.base_bytes]
+    scale = resident[geometry.scale_offset:geometry.scale_offset + geometry.scale_bytes]
+    row_base = (base.reshape(geometry.n // 16, geometry.groups_per_row, 4, 16, 8)
+                .permute(0, 3, 1, 2, 4).contiguous().reshape(-1, 32).to(torch.int16))
+    unsigned = torch.empty((row_base.shape[0], 64), dtype=torch.int16, device=row_base.device)
+    unsigned[:, 0::2] = row_base & 15
+    unsigned[:, 1::2] = (row_base >> 4) & 15
+    codes = torch.where((unsigned & 8) != 0, unsigned - 16, unsigned).to(torch.int8)
+    scales = (scale.reshape(geometry.n // 16, geometry.groups_per_row, 16, 2)
+              .permute(0, 2, 1, 3).contiguous().view(torch.float16)
+              .reshape(geometry.n, geometry.groups_per_row))
+    return scales, codes.reshape(geometry.n, geometry.groups_per_row, 64)
+
+
+def dequantize_q4_n16k16(source: Payload, shape: Sequence[int],
+                          device: torch.device | str = "cpu", *,
+                          dtype: torch.dtype | None = None) -> torch.Tensor:
+    _require_torch()
+    target_dtype = torch.bfloat16 if dtype is None else dtype
+    if not target_dtype.is_floating_point:
+        raise TypeError("dequantized output dtype must be floating point")
+    geometry = q4_n16k16_geometry(shape)
+    scales, codes = decode_q4_n16k16_codes(source, shape, device)
+    physical = codes.float().mul(scales.float().unsqueeze(-1)).reshape(geometry.n, geometry.k_pad)
+    return physical[:, :geometry.k].to(target_dtype)
+
+
+def dequantize_q4_n16k16_rows(source: Payload, shape: Sequence[int], rows: Sequence[int],
+                               device: torch.device | str = "cpu", *,
+                               dtype: torch.dtype | None = None) -> torch.Tensor:
+    """Decode selected logical rows without materializing the complete Q4 matrix."""
+    _require_torch()
+    geometry = q4_n16k16_geometry(shape)
+    indices = _sequence_rows(rows, geometry.n)
+    resident = _payload_tensor(source, torch.device(device))
+    tile = torch.tensor([row // 16 for row in indices], dtype=torch.long, device=resident.device)
+    lane = torch.tensor([row % 16 for row in indices], dtype=torch.long, device=resident.device)
+    base = resident[:geometry.base_bytes].reshape(
+        geometry.n // 16, geometry.groups_per_row, 4, 16, 8)[tile, :, :, lane, :]
+    packed = base.reshape(-1, 32).to(torch.int16)
+    unsigned = torch.empty((packed.shape[0], 64), dtype=torch.int16, device=packed.device)
+    unsigned[:, 0::2] = packed & 15
+    unsigned[:, 1::2] = (packed >> 4) & 15
+    codes = torch.where((unsigned & 8) != 0, unsigned - 16, unsigned).reshape(
+        len(indices), geometry.groups_per_row, 64)
+    scale = resident[geometry.scale_offset:geometry.scale_offset + geometry.scale_bytes].reshape(
+        geometry.n // 16, geometry.groups_per_row, 16, 2)[tile, :, lane, :]
+    scales = scale.contiguous().view(torch.float16).reshape(len(indices), geometry.groups_per_row)
+    target_dtype = torch.bfloat16 if dtype is None else dtype
+    physical = codes.float().mul(scales.float().unsqueeze(-1)).reshape(len(indices), geometry.k_pad)
+    return physical[:, :geometry.k].to(target_dtype)
 
 
 def _byte_view(payload: bytes | bytearray | memoryview) -> memoryview:
@@ -577,7 +578,7 @@ def split_row_planes(
     if row_begin < 0 or count <= 0 or row_begin + count > geometry.n:
         raise IndexError("row range is outside the row-split tensor")
     source: memoryview | torch.Tensor
-    source = payload if isinstance(payload, torch.Tensor) else _byte_view(payload)
+    source = payload if _is_tensor(payload) else _byte_view(payload)
     base_begin = geometry.base_offset + row_begin * geometry.base_row_bytes
     high_begin = geometry.high_offset + row_begin * geometry.high_row_bytes
     scale_begin = geometry.scale_offset + row_begin * geometry.scale_row_bytes
@@ -614,8 +615,8 @@ def gather_row_planes(
     """Materialize arbitrary rows independently in each physical plane."""
 
     full = split_row_planes(payload, geometry)
-    if isinstance(payload, torch.Tensor):
-        if isinstance(rows, torch.Tensor):
+    if _is_tensor(payload):
+        if _is_tensor(rows):
             if rows.dim() != 1 or rows.numel() == 0:
                 raise ValueError("rows must be a nonempty one-dimensional tensor")
             if rows.dtype not in (torch.int32, torch.int64):
@@ -642,7 +643,7 @@ def gather_row_planes(
             count,
         )
 
-    if isinstance(rows, torch.Tensor):
+    if _is_tensor(rows):
         indices_list = _sequence_rows(rows.detach().cpu().tolist(), geometry.n)
     else:
         indices_list = _sequence_rows(rows, geometry.n)
@@ -664,7 +665,7 @@ def gather_row_planes(
 
 
 def _plane_length(plane: Plane) -> int:
-    if isinstance(plane, torch.Tensor):
+    if _is_tensor(plane):
         if plane.dtype != torch.uint8 or plane.dim() != 1 or not plane.is_contiguous():
             raise TypeError("row planes must be contiguous one-dimensional uint8 tensors")
         return plane.numel()
@@ -697,8 +698,8 @@ def assemble_row_planes(
     geometry = row_split_geometry(spec, (planes.rows, logical_k))
     _validate_planes(planes, geometry)
     values = (planes.base, planes.high, planes.scale)
-    tensor_mode = isinstance(planes.base, torch.Tensor)
-    if any(isinstance(value, torch.Tensor) != tensor_mode for value in values):
+    tensor_mode = _is_tensor(planes.base)
+    if any(_is_tensor(value) != tensor_mode for value in values):
         raise TypeError("row planes must all be tensors or all be byte buffers")
     if tensor_mode:
         assert isinstance(planes.base, torch.Tensor)
@@ -732,7 +733,8 @@ def assemble_row_planes(
 
 
 def _plane_tensor(plane: Plane, device: torch.device) -> torch.Tensor:
-    if isinstance(plane, torch.Tensor):
+    _require_torch()
+    if _is_tensor(plane):
         _plane_length(plane)
         return plane if plane.device == device else plane.to(device)
     raw = bytearray(plane)
@@ -836,6 +838,7 @@ def decode_row_split_codes(
     removes it from the reconstructed tensor.
     """
 
+    _require_torch()
     spec = _format(format)
     if not isinstance(spec, QuantFormat):
         raise ValueError("row-split decoding requires a grouped quantized format")
@@ -909,11 +912,14 @@ def dequantize_row_split(
     shape: Sequence[int],
     device: torch.device | str = "cpu",
     *,
-    dtype: torch.dtype = torch.bfloat16,
+    dtype: torch.dtype | None = None,
     compiled: bool = False,
 ) -> torch.Tensor:
     """Reconstruct a logical ``[N,K]`` tensor from a row-split payload."""
 
+    _require_torch()
+    if dtype is None:
+        dtype = torch.bfloat16
     spec = _format(format)
     if not isinstance(spec, QuantFormat):
         raise ValueError("row-split dequantization requires a grouped quantized format")
@@ -946,31 +952,33 @@ def dequantize_row_split(
 
 
 __all__ = [
-    "BLOCKSCALE_K16_M128X4_V1",
-    "BlockScaleGeometry",
     "CONTIGUOUS_LE_V1",
     "K_ALIGNMENT",
     "LAYOUTS",
     "Layout",
     "PLANE_ALIGNMENT",
     "ROW_SPLIT_K128_V1",
+    "R9700_Q4G64_N16_K16_V1",
+    "ROW_SCALED_K128_V1",
     "RowPlanes",
     "RowSplitGeometry",
+    "RowScaledGeometry",
     "align_up",
     "assemble_row_planes",
-    "block_scale_geometry",
     "decode_direct",
-    "decode_nvfp4_words",
     "decode_row_split_codes",
+    "decode_q4_n16k16_codes",
     "dequantize_row_split",
+    "dequantize_q4_n16k16",
+    "dequantize_q4_n16k16_rows",
     "encode_direct",
-    "encode_nvfp4",
     "encode_row_split",
+    "encode_q4_n16k16",
     "encoded_size",
     "gather_row_planes",
     "get_layout",
     "row_split_geometry",
+    "q4_n16k16_geometry",
+    "row_scaled_geometry",
     "split_row_planes",
-    "swizzle_nvfp4_scales",
-    "unswizzle_nvfp4_scales",
 ]

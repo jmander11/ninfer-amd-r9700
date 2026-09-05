@@ -1,4 +1,4 @@
-#include "core/tensor.h"
+#include "tensor.h"
 
 #include <array>
 #include <limits>

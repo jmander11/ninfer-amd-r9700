@@ -21,12 +21,8 @@ from typing import Any, Iterable, Sequence
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MANIFEST_PATH = REPO_ROOT / "examples/cli/manifest.json"
 
-TARGET_MODEL_IDS = {
-    "qwen3_6_35b_a3b": "qwen3.6-35b-a3b",
-    "qwen3_6_27b": "qwen3.6-27b",
-    "qwen3_8_27b": "qwen3.8-27b",
-}
-TARGET_ORDER = tuple(TARGET_MODEL_IDS)
+TARGET_KEY = "qwen3_8_27b_r9700"
+PUBLIC_MODEL_ID = "qwen3.8-27b"
 SPECULATIVE_MODES = {
     "mtp0": ("none", 0, 0),
     "mtp1": ("mtp", 1, 0),
@@ -71,7 +67,6 @@ SATURATION_ONLY_FIXTURES = ("thinking_logic_grid",)
 
 SCENARIO_FIXTURES = {
     "code": (
-        "scenario_code_cuda",
         "scenario_code_python",
         "scenario_code_typescript",
     ),
@@ -93,16 +88,11 @@ SCENARIO_FIXTURES = {
 }
 
 WARMUP_FIXTURE = "text_smoke_zh"
-KV_DTYPES = ("int8", "nvfp4", "bf16")
-KV_CACHE_LOG_NAMES = {
-    "int8": "int8-group64",
-    "nvfp4": "nvfp4",
-    "bf16": "bf16",
-}
+KV_CACHE_FORMAT = "fp8-k-int4-v"
 RUN_ARTIFACT_TYPE = "ninfer_serve_corpus_result"
-RUN_SCHEMA_VERSION = 5
+RUN_SCHEMA_VERSION = 6
 SERVER_LOG_ARTIFACT_TYPE = "ninfer_serve_request_log"
-SERVER_LOG_SCHEMA_VERSION = 16
+SERVER_LOG_SCHEMA_VERSION = 20
 STARTUP_TIMEOUT_SECONDS = 1800.0
 REQUEST_TIMEOUT_SECONDS = 24.0 * 60.0 * 60.0
 LOG_EVENT_TIMEOUT_SECONDS = 10.0
@@ -291,15 +281,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--serve",
         type=Path,
-        default=REPO_ROOT / "build/apps/ninfer-serve",
+        default=REPO_ROOT / "build-r9700/apps/ninfer-serve",
         help="ninfer-serve executable",
     )
     parser.add_argument(
         "--artifact",
-        action="append",
+        type=Path,
         required=True,
-        metavar="TARGET=PATH",
-        help="artifact for a registered target; repeat to benchmark multiple targets",
+        metavar="PATH",
+        help="Qwen3.8-27B R9700 artifact",
     )
     parser.add_argument(
         "--mode",
@@ -326,15 +316,17 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default="stochastic",
         help="sampling profile for all requests (default: stochastic)",
     )
-    parser.add_argument(
-        "--kv-dtype",
-        choices=KV_DTYPES,
-        default="nvfp4",
-        help="KV cache storage passed to ninfer-serve (default: nvfp4)",
-    )
     parser.add_argument("--output", type=Path, required=True, help="campaign output directory")
+    parser.add_argument(
+        "--prefill-chunk", type=int, required=True,
+        help="schema-v2-selected production prefill chunk",
+    )
+    parser.add_argument("--expected-kv-value-group", type=int, choices=(16, 32), required=True)
+    parser.add_argument(
+        "--expected-xattention-profile", choices=("dense", "b128-s16-tau900"), required=True,
+    )
     parser.add_argument("--port", type=int, default=8080, help="loopback serving port")
-    parser.add_argument("--device", type=int, default=0, help="CUDA device index")
+    parser.add_argument("--device", type=int, default=0, help="HIP device index")
     parser.add_argument(
         "--lm-head-draft",
         action=argparse.BooleanOptionalAction,
@@ -344,22 +336,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def parse_artifacts(values: Sequence[str]) -> list[tuple[str, Path]]:
-    parsed: dict[str, Path] = {}
-    for value in values:
-        target, separator, raw_path = value.partition("=")
-        if not separator or not target or not raw_path:
-            raise CampaignError(f"invalid --artifact value {value!r}; expected TARGET=PATH")
-        if target not in TARGET_MODEL_IDS:
-            expected = ", ".join(TARGET_MODEL_IDS)
-            raise CampaignError(f"unsupported artifact target {target!r}; expected {expected}")
-        if target in parsed:
-            raise CampaignError(f"duplicate artifact target: {target}")
-        path = Path(raw_path).expanduser().resolve()
-        if not path.is_file():
-            raise CampaignError(f"artifact not found: {path}")
-        parsed[target] = path
-    return [(target, parsed[target]) for target in TARGET_ORDER if target in parsed]
+def parse_artifact(value: Path) -> tuple[str, Path]:
+    path = value.expanduser().resolve()
+    if not path.is_file():
+        raise CampaignError(f"artifact not found: {path}")
+    return TARGET_KEY, path
 
 
 def fixture_metadata(name: str) -> tuple[str, str | None]:
@@ -435,10 +416,6 @@ def build_specs(
     for target, artifact in artifacts:
         for mode_name in mode_names:
             backend, draft_tokens, verify_width = SPECULATIVE_MODES[mode_name]
-            if backend == "dflash" and target not in {"qwen3_6_35b_a3b", "qwen3_8_27b"}:
-                raise CampaignError(
-                    "DFlash corpus measurements require the 35B-A3B or Qwen3.8-27B target"
-                )
             selected = block_fixture_names(backend)
             if fixture_filter:
                 unknown = [name for name in fixture_filter if name not in selected]
@@ -452,7 +429,7 @@ def build_specs(
                     specs.append(
                         RunSpec(
                             target=target,
-                            model_id=TARGET_MODEL_IDS[target],
+                            model_id=PUBLIC_MODEL_ID,
                             artifact=artifact,
                             speculative_mode=mode_name,
                             speculative_backend=backend,
@@ -529,22 +506,59 @@ def require_server_log_identity(event: dict[str, Any], event_name: str) -> None:
         raise CampaignError(f"unexpected serving log identity {identity!r}; expected {expected!r}")
 
 
+def require_compiled_profile(engine: dict[str, Any], group: int, profile: str) -> None:
+    if engine.get("kv_value_group") != group:
+        raise CampaignError(f"server_start does not bind selected G{group}")
+    expected = (
+        {"xattention_qualification": False}
+        if profile == "dense"
+        else {
+            "xattention_qualification": True,
+            "xattention_profile": "b128-s16-tau900",
+            "xattention_find_block": 128,
+            "xattention_stride": 16,
+            "xattention_tau_permille": 900,
+        }
+    )
+    if any(
+        type(engine.get(key)) is not type(value) or engine.get(key) != value
+        for key, value in expected.items()
+    ):
+        raise CampaignError(f"server_start does not bind selected {profile} attention profile")
+    if profile == "dense":
+        stale = sorted({
+            "xattention_profile", "xattention_find_block", "xattention_stride",
+            "xattention_tau_permille",
+        }.intersection(engine))
+        if stale:
+            raise CampaignError(
+                "dense serve-corpus server_start retains XAttention profile fields: "
+                + ", ".join(stale)
+            )
+
+
 def validate_server_start(
     event: dict[str, Any],
     spec: RunSpec,
     device: int,
-    kv_dtype: str,
+    prefill_chunk: int,
+    expected_group: int,
+    expected_profile: str,
     lm_head_draft: bool = True,
 ) -> tuple[str, str]:
     require_server_log_identity(event, "server_start")
     engine = event.get("engine", {})
+    if not isinstance(engine, dict):
+        raise CampaignError("server_start engine provenance must be an object")
+    require_compiled_profile(engine, expected_group, expected_profile)
     actual = {
         "device": engine.get("device"),
+        "max_concurrency": engine.get("max_concurrency"),
         "max_context": engine.get("max_context"),
         "kv_capacity": engine.get("kv_capacity"),
         "prefill_chunk": engine.get("prefill_chunk"),
-        "kv_cache": engine.get("kv_cache"),
-        "cuda_graph": engine.get("cuda_graph"),
+        "kv_cache_format": engine.get("kv_cache_format"),
+        "device_graph": engine.get("device_graph"),
         "prefix_reuse": engine.get("prefix_reuse"),
         "speculative_backend": engine.get("speculative_backend"),
         "speculative_draft_window": engine.get("speculative_draft_window"),
@@ -552,11 +566,12 @@ def validate_server_start(
     }
     expected = {
         "device": device,
+        "max_concurrency": 1,
         "max_context": 262144,
         "kv_capacity": 262144,
-        "prefill_chunk": 1024,
-        "kv_cache": KV_CACHE_LOG_NAMES[kv_dtype],
-        "cuda_graph": True,
+        "prefill_chunk": prefill_chunk,
+        "kv_cache_format": KV_CACHE_FORMAT,
+        "device_graph": True,
         "prefix_reuse": False,
         "speculative_backend": spec.speculative_backend,
         "speculative_draft_window": spec.draft_tokens,
@@ -596,6 +611,9 @@ def build_result_record(
     payload: dict[str, Any],
     response: dict[str, Any],
     server_event: dict[str, Any],
+    prefill_chunk: int,
+    expected_group: int,
+    expected_profile: str,
 ) -> dict[str, Any]:
     require_server_log_identity(server_event, "request_done")
     request = server_event.get("request", {})
@@ -679,6 +697,9 @@ def build_result_record(
         "weights_id": weights_id,
         "model": spec.model_id,
         "artifact_path": str(spec.artifact),
+        "prefill_chunk": prefill_chunk,
+        "kv_value_group": expected_group,
+        "xattention_profile": expected_profile,
         "fixture": spec.fixture.name,
         "suite": spec.fixture.suite,
         "category": spec.fixture.category,
@@ -710,6 +731,9 @@ def record_key(record: dict[str, Any]) -> tuple[str, str, str, str, int]:
 def load_existing_records(
     path: Path,
     expected_specs: dict[tuple[str, str, str, str, int], RunSpec],
+    prefill_chunk: int,
+    expected_group: int,
+    expected_profile: str,
 ) -> dict[tuple[str, str, str, str, int], dict[str, Any]]:
     records: dict[tuple[str, str, str, str, int], dict[str, Any]] = {}
     if not path.exists():
@@ -736,6 +760,18 @@ def load_existing_records(
                     raise CampaignError(
                         f"{path}:{line_number}: artifact path differs from the current command"
                     )
+                if type(record.get("prefill_chunk")) is not int or record["prefill_chunk"] != prefill_chunk:
+                    raise CampaignError(
+                        f"{path}:{line_number}: prefill chunk differs from the current command"
+                    )
+                if (
+                    type(record.get("kv_value_group")) is not int
+                    or record["kv_value_group"] != expected_group
+                    or record.get("xattention_profile") != expected_profile
+                ):
+                    raise CampaignError(
+                        f"{path}:{line_number}: static profile differs from the current command"
+                    )
                 records[key] = record
     except (OSError, json.JSONDecodeError) as exc:
         raise CampaignError(f"failed to read existing results from {path}: {exc}") from exc
@@ -754,7 +790,7 @@ def server_command(
     server_log: Path,
     port: int,
     device: int,
-    kv_dtype: str,
+    prefill_chunk: int,
     lm_head_draft: bool = True,
 ) -> list[str]:
     command = [
@@ -768,16 +804,16 @@ def server_command(
         spec.model_id,
         "--max-context",
         "262144",
+        "--max-concurrency",
+        "1",
         "--prefill-chunk",
-        "1024",
+        str(prefill_chunk),
         "--log-stats-interval-ms",
         "0",
         "--device",
         str(device),
         "--request-log-jsonl",
         str(server_log),
-        "--kv-dtype",
-        kv_dtype,
         "--no-prefix-reuse",
     ]
     if spec.speculative_backend != "none":
@@ -824,11 +860,13 @@ def run_block(
     output_dir: Path,
     port: int,
     device: int,
+    prefill_chunk: int,
+    expected_group: int,
+    expected_profile: str,
     run_handle: Any,
     records: dict[tuple[str, str, str, str, int], dict[str, Any]],
     completed_before_block: int,
     total: int,
-    kv_dtype: str,
     lm_head_draft: bool = True,
 ) -> None:
     first = block_specs[0]
@@ -838,7 +876,7 @@ def run_block(
         / f"{first.target}_{first.speculative_mode}_{first.sampling_mode}.jsonl"
     )
     command = server_command(
-        serve, first, server_log, port, device, kv_dtype, lm_head_draft
+        serve, first, server_log, port, device, prefill_chunk, lm_head_draft
     )
     print(
         f"start {first.target}/{first.speculative_mode}: "
@@ -848,7 +886,8 @@ def run_block(
     with RunningServer(command, "127.0.0.1", port, server_log) as server:
         server_start = server.wait_until_ready()
         server_instance_id, weights_id = validate_server_start(
-            server_start, first, device, kv_dtype, lm_head_draft
+            server_start, first, device, prefill_chunk, expected_group, expected_profile,
+            lm_head_draft
         )
 
         connection = http.client.HTTPConnection(
@@ -872,7 +911,10 @@ def run_block(
                         f"non-sequential serving request id {request_id}; expected {last_request_id + 1}"
                     )
                 last_request_id = request_id
-                record = build_result_record(spec, weights_id, payload, response, request_done)
+                record = build_result_record(
+                    spec, weights_id, payload, response, request_done, prefill_chunk,
+                    expected_group, expected_profile
+                )
                 append_record(run_handle, record)
                 records[spec.key] = record
                 completed = completed_before_block + block_index
@@ -1255,6 +1297,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise CampaignError("--port must be in [1, 65535]")
     if args.device < 0:
         raise CampaignError("--device must be nonnegative")
+    if args.prefill_chunk <= 0 or args.prefill_chunk % 128 != 0:
+        raise CampaignError("--prefill-chunk must be a positive multiple of 128")
 
     serve = args.serve.expanduser().resolve()
     if not serve.is_file():
@@ -1262,7 +1306,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not os.access(serve, os.X_OK):
         raise CampaignError(f"ninfer-serve is not executable: {serve}")
 
-    artifacts = parse_artifacts(args.artifact)
+    artifacts = (parse_artifact(args.artifact),)
     mode_names = args.mode or list(DEFAULT_MODES)
     if len(mode_names) != len(set(mode_names)):
         raise CampaignError("duplicate --mode value")
@@ -1276,7 +1320,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     output_dir = args.output.expanduser().resolve()
     (output_dir / "server").mkdir(parents=True, exist_ok=True)
     run_path = output_dir / "run.jsonl"
-    records = load_existing_records(run_path, expected_specs)
+    records = load_existing_records(
+        run_path, expected_specs, args.prefill_chunk,
+        args.expected_kv_value_group, args.expected_xattention_profile,
+    )
     print(f"resume state: {len(records)}/{total} formal request(s) complete", flush=True)
 
     with run_path.open("a", encoding="utf-8") as run_handle:
@@ -1299,11 +1346,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                     output_dir,
                     args.port,
                     args.device,
+                    args.prefill_chunk,
+                    args.expected_kv_value_group,
+                    args.expected_xattention_profile,
                     run_handle,
                     records,
                     len(records),
                     total,
-                    args.kv_dtype,
                     args.lm_head_draft,
                 )
 

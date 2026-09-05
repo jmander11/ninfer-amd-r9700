@@ -1,114 +1,170 @@
-# Kernel iteration (layers 0–3)
+# R9700 kernel iteration (layers 0–3)
 
-This is the required procedure for CUDA speed work on NInfer. The control plane is
-`python3 -m tools.kdev`. Fill the gate card before writing CUDA:
+This is the required speed-work procedure for the native HIP backend on Radeon AI PRO R9700.
+The physical target is ROCm 10, `gfx1201`, wave32. The executable recipes and independent-oracle
+qualifiers live under `tools/r9700`; there is no compatibility control plane or host-only
+classifier.
 
-```bash
-python3 -m tools.kdev recipe
-python3 -m tools.kdev recipe --preset attn_in --t 1 --idea occupancy
-python3 -m tools.kdev recipe --n 14336 --k 5120 --t 1024 --qtype nvfp4 --policy a4 \
-    --measured-us 152.6 --idea tile_shape
-```
+Op admission, numerical oracles, candidate ownership, and public-Op measurement follow
+[`op-development.md`](op-development.md). The R9700 qualifier inventory, exact commands, selected
+routes, and recorded baseline evidence are maintained in [`tools/r9700/README.md`](../../tools/r9700/README.md).
 
-Without geometry, `recipe` prints the procedure, idea catalog, and public-Op commands.
-With a Linear point it fills the eight-item gate card from the bound classifier, prints
-the exact `ninfer_linear_bench` command for that point, and exits 2 on `STOP`.
+Do not select a kernel from a datasheet peak, simulator, compiler output, or profiler-intercepted
+duration. Those inputs can reject an impossible idea or explain a measured result, but only an
+unprofiled event timing on the selected physical R9700 can choose a route.
 
-Hardware: RTX 5090, `sm_120a`. Linear byte floors and timing live in
-[`linear-benchmark.md`](linear-benchmark.md). Op admission, oracles, candidate-then-delete,
-and public-Op measurement live in [`op-development.md`](op-development.md) §6–§7.
+## Layer 0 — contract and bound hypothesis
 
-Do not use GPGPU-Sim, Accel-Sim, or an uncalibrated Python cycle model to pick a kernel.
-Those are slower than silicon and not faithful enough for a 5% `sm_120` NVFP4 decision.
+Before writing a challenger, record the decision point:
 
-The bound classifier is the Linear GEMM model-byte floor (`ninfer::ops::linear`). It does
-not apply to GQA or l2norm; those still use SM120 legality and the public-Op loop.
+1. public Op and exact represented inputs, formats, layouts, dimensions, and execution extent;
+2. independent oracle and its exact, tolerance-based, or behavioral acceptance criterion;
+3. current production route and its unprofiled physical latency at the same point;
+4. minimum bytes and useful operations for the complete Op boundary;
+5. the suspected limiting resource and the observation supporting it;
+6. the concrete mechanism by which the challenger reduces that limit.
 
-Decode-band NVFP4 Linear (serving T, CTA mapping, why fused quantize and MMA SASS lost):
-[`nvfp4-decode-linear.md`](nvfp4-decode-linear.md).
+Classify the hypothesis as bandwidth, arithmetic/issue, occupancy/latency hiding, synchronization,
+launch overhead, or cross-Op materialization traffic. Arithmetic intensity is evidence, not a
+universal classifier: include codec bytes, scales, page tables, workspace traffic, and fused
+epilogues actually crossed by the Op. If the proposed change does not reduce the suspected limit,
+stop before implementation.
 
-## Layer 0 — bound (host, no GPU)
+## Layer 1 — gfx1201 legality and numerical qualification
 
-Name the public Op, exact `(N,K,T,qtype,policy)`, and prefill vs decode. Run `recipe` as
-above, or the compact classifier:
+Implement a temporary challenger inside the owning R9700 Op family. Preserve wave32 semantics,
+caller-owned workspace, stream ordering, and the public Tensor/Weight contract. A private cast or
+reduction order is allowed only where the semantic contract permits it.
 
-```bash
-python3 -m tools.kdev bound --preset attn_in --t 1 --qtype nvfp4 --idea occupancy
-python3 -m tools.kdev bound --n 14336 --k 5120 --t 1024 --qtype nvfp4 --measured-us 152.6 --json
-python3 -m tools.kdev bound --list-ideas
-```
-
-The classifier uses the public Linear model-byte floor, 1674.5 GB/s sustained read, and
-1676 TFLOP/s dense FP4. Predicted time is `max(t_mem, t_comp[, t_issue])`.
-
-- **DRAM** (typical decode, `T ≲ 16`, ridge near `T ≈ 380` on 27B NVFP4 attn-in Linear): only ideas that
-  cut extra bytes or raise useful work per weight pass (`weight_replay`, `aggregate_T`).
-- **tensor-core** (typical prefill chunk `T=1024`): search tile, TMA, pipeline, and epilogue
-  fusion inside the existing SM120 NVFP4 family.
-
-If `verdict=refuse` or `sm120=ILLEGAL`, stop. Do not write CUDA.
-
-## Layer 1 — SM120 legality and MMA issue roof
-
-RTX 5090 is not B200. Legal: warp `mma.sync` (including `kind::mxf4nvf4`), single-CTA TMA,
-accumulators in registers, shared memory ≤ 99 KiB. Illegal: `tcgen05`, TMEM, 2-SM MMA,
-cluster-multicast TMA, SM100 128×128 TMEM tiles.
-
-Calibrate `t_issue` once per machine, and again if `ops/common/mma.cuh` changes:
+Build the qualifier that owns the changed route. Common standalone targets are:
 
 ```bash
-python3 -m tools.kdev mma
+make -C tools/r9700 build/eager_op_qual
+make -C tools/r9700 build/linear_op_qual
+make -C tools/r9700 build/kv_op_qual
+make -C tools/r9700 build/gdn_op_qual
+make -C tools/r9700 build/sampling_op_qual
 ```
 
-This writes `profiles/kdev/mma_issue.json`. Re-run bound or recipe; they pick up NVFP4
-`mma_per_s`. The register-only issue roof is the compute floor that matters. 1676 TFLOP/s
-is the datasheet fallback used when the probe file is absent.
+Run the resulting executable on the selected R9700 before timing it. Use
+`NINFER_R9700_PCI_BUS_ID` when the host has more than one matching device. The qualifier must
+compare the production/challenger result directly with its independent exact or FP64 oracle at the
+real model shapes and relevant boundary cases. Pairwise parity with another kernel is not the
+oracle.
 
-## Layer 2 — parameter sweep on the GPU
-
-Search parameters inside one family (tile M/N, K stages, warps, pipeline). Do not fork a new
-algorithm per idea. Measure through the public Op when the contract is unchanged; a temporary
-candidate sweep may call private launchers, then must keep one winner and delete the rest
-([op-development.md](op-development.md) §7).
-
-Linear is the bound's subject and is **not** a `kdev <op>`. Measure it through the public
-bench at the exact point (`recipe` prints this command filled in):
+Inspect ISA only for a named legality or code-generation question:
 
 ```bash
-./build/bench/ninfer_linear_bench --qtype nvfp4 --policy a16 --n 14336 --k 5120 --t 1
-./build/bench/ninfer_linear_bench --qtype nvfp4 --policy a4  --n 14336 --k 5120 --t 1024
+make -C tools/r9700 isa
+make -C tools/r9700 linear-isa
+make -C tools/r9700 linear-resources
+make -C tools/r9700 eager-isa
+make -C tools/r9700 gdn-isa
+make -C tools/r9700 sampling-isa
+make -C tools/r9700 kv-resources
 ```
 
-Registered kdev ops (currently `l2norm`, `gqa_attention`):
+Relevant gfx1201 facts include wave32 execution, the emitted AMD WMMA opcode when a WMMA route is
+claimed, VGPR/LDS/private-segment use, and reported occupancy. ISA presence proves code generation,
+not speed or correctness.
+
+When retained operation evidence needs the exact embedded gfx1201 code object, use the safe
+`tools/bench/extract_embedded_code_object.py` owner documented in `tools/bench/README.md`. It hashes
+the selected executable before and after extraction and gives `llvm-objcopy` a distinct temporary
+output ELF. Never run `llvm-objcopy --dump-section SECTION=FILE INPUT_ELF` without a distinct output
+ELF operand: that form rewrites `INPUT_ELF` in place.
+
+## Layer 2 — physical candidate sweep
+
+After the oracle passes, compare candidates at exactly the decision point. Use identical inputs,
+cache state, warmup, stream, event timing, and iteration count. Keep profiler interception disabled
+for selection. Report median or another declared robust statistic and enough repeated events to
+distinguish the expected change from noise.
+
+Performance-admission timing on the R9700 must fail closed unless
+`/sys/class/drm/card2/device/power_dpm_force_performance_level` is exactly `auto` before device
+construction. Recheck it after numerical qualification and after timing, and bind the observed
+value into retained evidence. A stable non-`auto` profile may be used for a focused counter
+diagnostic, but its durations are profiler controls and cannot select or admit a route.
+
+Sweep parameters within one coherent family first: workgroup shape, waves, tiles, staging depth,
+layout, vector width, fusion boundary, or a finite dispatch crossover. A temporary qualifier may
+expose candidate timings, but it must not turn private candidate names into a product option.
+
+`--timing-only` is valid only where the owning qualifier documents it and only after that identical
+shape, format, layout, and route passed a full-oracle run. It removes host reference time from a
+repeat sweep; it does not waive the oracle gate.
+
+If attribution could change the implementation decision, collect one focused profile after the
+unprofiled result is known. The maintained examples are:
 
 ```bash
-python3 -m tools.kdev <op> --fast --bench
-python3 -m tools.kdev <op> --fast --bench --profile
+make -C tools/r9700 profile-trace
+make -C tools/r9700 profile-attention-trace
+make -C tools/r9700 profile-pmc
+make -C tools/r9700 rocm-tool-audit-test rocm-tool-audit
 ```
 
-`--profile` / Linear `--profile` is one named NCU question (DRAM vs 1674.5 GB/s, tensor-pipe
-busy, spills, DRAM bytes vs `model_bytes`). Not an open-ended report.
+For a whole-inference bottleneck remaining after Pareto selection, do not substitute a raw Op
+qualifier for the production workload. Use `tools/bench/prepare_whole_profile.py` against the exact
+completed `pareto-whole` or `dflash-pareto` directory. Its generated rocprof command selects only
+the synchronized `ninfer_bench_measured` region of one already-measured geometry. Start with
+marker/kernel/memory-copy trace under `auto`; generate a separate dispatch-scoped GL2C/TCP/SQ PMC
+command under temporary `profile_standard` only if the trace leaves that specific cache/activity
+question; the generated command must begin in `auto` and restore and verify `auto` with an EXIT trap.
+The preparation command requires the selected weights identity, KV group, compile-bound
+XAttention profile, and prefill chunk, and a focused PMC additionally requires the named kernel
+regex. Inspect ISA/resources only for the dispatch family named by the trace.
 
-Correctness still gates performance: oracle first, then bench. Fast-but-wrong is invalid.
+For the selected dense P2048 gate, follow the complete provenance-bound pipeline in
+`tools/bench/README.md`: prepare the P2048 trace/PMC plan from the validated low-context authority;
+validate the trace; prepare its source-derived static schedule; reconcile every dispatch; build the
+roofline report; validate the separate profile-standard PMC capture; produce one strict
+ISA/resource report for every executed operation family; and assemble the final selected-P2048
+evidence. The reconciliation must retain modeled and explicitly uncovered dispatch duration/count
+coverage. Static reports bind the profiler display symbol separately from the mangled code-object
+symbol. The final assembler joins PMC only through exact recognized stage/display-symbol families,
+never through dispatch IDs from another capture. Unprofiled `auto` timing remains the performance
+authority; profiler durations and `profile_standard` counters are attribution-only, and unavailable
+physical HBM-byte or stall counters remain explicitly unavailable.
 
-## Layer 3 — production path
+Name the question before collection: dispatch split, wave count, occupancy, cache traffic, VALU or
+LDS issue, or a specific memory transfer. Treat unavailable or zeroed ROCm counters as unavailable,
+not as proof that the hardware performed no work. Give every capture a new explicit `PROFILE_DIR`,
+then pass its exact database path to the offline audit rather than selecting an output by glob or
+time. The audit report preserves the database hash, embedded workload command and R9700 identity,
+row/counter summaries, and exact installed tool versions. It never launches HIP and is not a
+performance measurement.
 
-Qualify the reachable production route against the independent oracle. Confirm the public Op
-bench at the exact point. Engine / `ninfer_bench` / serve A/B only when the requested claim is
-end-to-end tok/s.
+On the installed ROCm 10 baseline, rocprofiler-sdk 1.3.5 provides runtime/kernel/memory-copy traces
+and validated nonzero `SQ_BUSY_CYCLES`/`SQ_WAVES`. Isolated generic/wave32 VALU and wave32 LDS
+captures remain zero despite known matching work. The earlier known-zero TCP/GL2C result was a
+collection-scope failure: dispatch-scoped collection now produces nonzero TCP request/miss and
+GL2C hit/miss controls, so relative hit ratios are usable. The gfx1201 request-size buckets remain
+known-zero and base event counts may undercount, so those events do not support absolute cache/HBM
+byte rates. ROCm Compute Profiler 3.8.0 advertises no gfx1200/gfx1201 analysis architecture;
+copying a gfx115x configuration would not make its architecture-specific formulas valid.
 
-If the candidate loses, delete it. Do not leave a second path.
+## Layer 3 — production selection
 
-## Gate card
+Promote the fastest oracle-qualified route into the public Op dispatch. Encode only a measured
+finite crossover supported by the changed contract. Delete losing challengers, temporary forcing
+controls, duplicate launchers, and comparison-only benchmark ownership.
 
-`python3 -m tools.kdev recipe` with a Linear point fills this card. Any `unknown` means the
-task is measurement, not implementation. `STOP` / `MEASURE` / `GO` / `FILL` is the last line.
+Then rebuild and run the qualifier through the same public boundary linked by `ninfer_r9700_core`.
+Recheck the selected route at its real shapes and boundary extents, and repeat the unprofiled timing
+at the claimed scope. Use whole-Engine or serving measurements only when the requested claim is
+end-to-end; an Op-level change is established at the public Op boundary.
 
-1. Public Op, exact `(N,K,T,qtype,policy)`, prefill vs decode.
-2. `model_bytes`, `useful_flops`, AI, `t_mem`, `t_comp`[, `t_issue`]. Bound.
-3. Current measured µs and % of the matching roof (1674.5 GB/s or 1676 TFLOP/s).
-4. Idea class. If it does not attack the bound, stop.
-5. SM120 legality: MMA atom, smem, TMA, registers. TMEM / `tcgen05` ⇒ stop.
-6. Parameters inside an existing family, or why a new family is required.
-7. Microbench the public Op at that exact point. No Engine A/B until the Op wins.
-8. If it loses, delete the candidate.
+## Decision card
+
+A completed speed decision records:
+
+1. Op, represented inputs, exact shape/extent, format/layout, and phase;
+2. oracle and acceptance result for every promoted route;
+3. baseline and challenger unprofiled physical timings;
+4. bound hypothesis and how the challenger attacks it;
+5. gfx1201 ISA/resource facts material to the decision;
+6. focused profiler result only when it changed or explained the decision;
+7. selected route/crossover and the public qualification that reaches it;
+8. confirmation that losing candidates and temporary controls were removed.

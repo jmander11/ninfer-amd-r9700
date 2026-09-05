@@ -10,10 +10,11 @@ compile_commands.json
 CMakeUserPresets.json
 .cache/
 
-# CUDA / profiling artifacts
-*.nsys-rep
-*.ncu-rep
-*.qdrep
+# ROCm profiling artifacts
+.rocprofv3/
+rocprof-sys-config.cfg
+*.rpd
+*.pftrace
 *.sqlite
 
 # Python tooling
@@ -24,7 +25,6 @@ venv/
 *.egg-info/
 
 # Weight artifacts (large; produced by offline tooling)
-*.qus
 *.bin
 *.safetensors
 *.gguf

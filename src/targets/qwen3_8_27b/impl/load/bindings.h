@@ -1,0 +1,207 @@
+#pragma once
+
+#include <ninfer/targets/qwen3_8_27b/package.h>
+#include <ninfer/targets/qwen3/frontend_resources.h>
+#include <ninfer/targets/qwen3/model_view.h>
+#include <ninfer/targets/qwen3/startup_features.h>
+#include <ninfer/targets/qwen3/vision.h>
+
+#include "artifact/binder.h"
+#include "artifact/materializer.h"
+#include "core/tensor.h"
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+#include <utility>
+
+namespace ninfer::targets::qwen3_8_27b::detail {
+
+inline constexpr std::size_t kTextLayers          = 64;
+inline constexpr std::size_t kFullAttentionLayers = 16;
+inline constexpr std::size_t kGdnLayers           = 48;
+inline constexpr std::size_t kDFlash2Layers       = 5;
+
+struct WeightPlan {
+    artifact::ObjectHandle object;
+    artifact::NumericFormat format = artifact::NumericFormat::BF16;
+};
+
+struct MlpPlan {
+    WeightPlan gate_up;
+    WeightPlan down;
+};
+
+struct AttentionProjectionPlan {
+    WeightPlan query_key;
+    WeightPlan gate_value;
+};
+
+struct FullAttentionPlan {
+    AttentionProjectionPlan projection;
+    artifact::ObjectHandle query_norm;
+    artifact::ObjectHandle key_norm;
+    WeightPlan output;
+};
+
+struct GdnInputProjectionPlan {
+    WeightPlan query_key;
+    WeightPlan value_z;
+};
+
+struct GdnPlan {
+    artifact::ObjectHandle a_log;
+    artifact::ObjectHandle dt_bias;
+    artifact::ObjectHandle convolution;
+    artifact::ObjectHandle a_projection;
+    artifact::ObjectHandle b_projection;
+    GdnInputProjectionPlan input_projection;
+    artifact::ObjectHandle norm;
+    WeightPlan output;
+};
+
+struct TextLayerPlan {
+    artifact::ObjectHandle input_norm;
+    FullAttentionPlan attention{};
+    GdnPlan gdn{};
+    bool is_full_attention = false;
+    artifact::ObjectHandle post_attention_norm;
+    MlpPlan mlp;
+};
+
+struct MtpPlan {
+    WeightPlan input_projection;
+    artifact::ObjectHandle embedding_norm;
+    artifact::ObjectHandle hidden_norm;
+    artifact::ObjectHandle input_norm;
+    WeightPlan query_key_gate_value;
+    artifact::ObjectHandle query_norm;
+    artifact::ObjectHandle key_norm;
+    WeightPlan output;
+    artifact::ObjectHandle post_attention_norm;
+    MlpPlan mlp;
+    artifact::ObjectHandle final_norm;
+};
+
+struct DFlash2ConvPlan {
+    artifact::ObjectHandle base_kernel;
+    WeightPlan kernel_projection;
+};
+
+struct DFlash2LayerPlan {
+    artifact::ObjectHandle input_norm;
+    WeightPlan query_key_value;
+    artifact::ObjectHandle query_norm;
+    artifact::ObjectHandle key_norm;
+    WeightPlan attention_output;
+    DFlash2ConvPlan attention_conv;
+    artifact::ObjectHandle post_attention_norm;
+    WeightPlan gate_up;
+    WeightPlan down;
+    DFlash2ConvPlan mlp_conv;
+};
+
+struct DFlash2Plan {
+    WeightPlan feature_projection;
+    artifact::ObjectHandle context_norm;
+    std::array<DFlash2LayerPlan, kDFlash2Layers> layers;
+    artifact::ObjectHandle final_norm;
+    WeightPlan hidden_projection;
+    artifact::ObjectHandle predecessor_codebook;
+    artifact::ObjectHandle successor_codebook;
+};
+
+struct BindingPlan {
+    qwen3::FrontendResourcePlan frontend;
+    qwen3::StartupFeatures features;
+
+    WeightPlan token_embedding;
+    std::array<TextLayerPlan, kTextLayers> text_layers;
+    artifact::ObjectHandle final_norm;
+    WeightPlan output_head;
+    WeightPlan draft_head;
+    artifact::ObjectHandle draft_head_token_ids;
+    MtpPlan mtp;
+
+    qwen3::VisionBackbonePlan vision_backbone;
+    qwen3::VisionMergerInputPlan vision_merger_input;
+    WeightPlan vision_merger_fc2;
+    artifact::ObjectHandle vision_merger_fc2_bias;
+    qwen3::VisionMergerNormPlan vision_merger_norm;
+    std::optional<DFlash2Plan> dflash;
+};
+
+struct ArtifactLoadPlan {
+    BindingPlan bindings;
+    artifact::MaterializationPlan materialization;
+};
+
+ArtifactLoadPlan bind_artifact(artifact::Binder& binder, WeightsProfile weights_profile,
+                               qwen3::StartupFeatures features);
+
+struct DensePostMixerPayload {
+    Weight gate_up;
+    Weight down;
+};
+
+struct FullAttentionProjectionPayload {
+    Weight query_key;
+    Weight gate_value;
+};
+
+struct GdnInputProjectionPayload {
+    Weight query_key;
+    Weight value_z;
+};
+
+struct GdnProjectionPayload {
+    Tensor a_log;
+    Tensor dt_bias;
+    Weight a_projection;
+    Weight b_projection;
+    GdnInputProjectionPayload input_projection;
+};
+
+struct MtpAttentionPayload {
+    Weight packed;
+    Weight query;
+    Weight key;
+    Weight output_gate;
+    Weight value;
+};
+
+using RuntimeModelView =
+    qwen3::ModelView<FullAttentionProjectionPayload, GdnProjectionPayload, DensePostMixerPayload,
+                       MtpAttentionPayload, DensePostMixerPayload,
+                       qwen3::DFlash2Weights<kDFlash2Layers>, kFullAttentionLayers, kGdnLayers>;
+using FullAttentionWeights = RuntimeModelView::FullLayer;
+using GdnWeights           = RuntimeModelView::GdnLayer;
+using MtpWeights           = RuntimeModelView::MtpLayer;
+using DFlash2LayerWeights  = qwen3::DFlash2LayerWeights;
+
+class LoadedModelData {
+public:
+    LoadedModelData(BindingPlan plan, artifact::MaterializedArtifact materialized);
+
+    LoadedModelData(const LoadedModelData&)            = delete;
+    LoadedModelData& operator=(const LoadedModelData&) = delete;
+    LoadedModelData(LoadedModelData&&)                 = delete;
+    LoadedModelData& operator=(LoadedModelData&&)      = delete;
+
+    artifact::MaterializedArtifact backing;
+    qwen3::FrontendResources frontend;
+    RuntimeModelView runtime;
+};
+
+class LoadedModel::Impl {
+public:
+    Impl(WeightsProfile weights_profile_in, BindingPlan plan,
+         artifact::MaterializedArtifact materialized)
+        : weights_profile(weights_profile_in), data(std::move(plan), std::move(materialized)) {}
+
+    WeightsProfile weights_profile;
+    LoadedModelData data;
+};
+
+} // namespace ninfer::targets::qwen3_8_27b::detail
