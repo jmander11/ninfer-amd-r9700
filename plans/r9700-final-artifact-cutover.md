@@ -80,24 +80,22 @@ so it must not be encoded in either `weights_id`.
      invented numerical-error threshold; and
    - `profiles/bench/selected-hardware-use-20260905.json`, recomputed by the exact current
      `profiles/bench/post-terminal-selected-hardware-use-20260905` package from the selected-route
-     trace/static schedule and conditional IU8/FP8 proofs. Existing MTP dispatch checks are
-     regression evidence only and do not authorize an MTP optimization branch. If and only if the selected recipe
-     is mixed, it must bind the passed
-     `profiles/bench/selected-mtp-bulk-w8-prepare-20260905/evidence.json`, produced at the selected
-     chunk by `tools/bench/prepare_selected_mtp_bulk_w8.py`; an all-Q4 or four-role winner must not
-     carry that proof; and
+     trace/static schedule and conditional IU8/FP8 proofs. Existing MTP graph/eager/token,
+     acceptance, and selected Q4-wave dispatch checks remain regression evidence only. No selected
+     recipe carries a standalone MTP shortlist-head, alternate-precision, or mixed MTP-bulk
+     optimization proof, and none of those retired proofs is a finalization or cutover gate; and
    - `profiles/bench/selected-dflash-20260905/selection.json`, a passed schema-v2
      `ninfer_r9700_dflash_selection` record whose `selected_base` is the same schema-v7 authority
      and whose companion conversion receipt and selected K/W are exact.
 
-   If the four-role recipe wins, that DFlash record is also blocked on the deferred shared-runner
-   correction recorded in
-   `profiles/bench/selected-dflash-prepare-20260905/plan.json`: only after the live finalist process
-   exits may the runner admit the three DFlash presets for a hybrid companion, validate the
-   companion conversion report and `base.authority` back to the selected hybrid receipt, retain the
-   hybrid-width workspace proof, and cover the exact C1 shortlist plus ordered C1..4
-   capacity/Pareto cases while rejecting other presets and non-hybrid companions. Refresh all
-   runner-dependent preparation closures once after that change; do not weaken or bypass the flag.
+   The shared runner already admits the three DFlash presets for a hybrid companion only under its
+   exact `--require-fp8-hybrid` contract, validates the companion conversion report and
+   `base.authority` back to the selected hybrid receipt, retains the hybrid-width workspace proof,
+   and covers the exact C1 shortlist plus ordered C1..4 capacity/Pareto cases while rejecting other
+   presets and non-hybrid companions. If the four-role recipe wins, the remaining blockers are the
+   selected base authority, materialization of its currently absent companion, regenerated
+   selected-DFlash preparation, and explicitly authorized physical evidence; do not weaken or
+   bypass the flag.
 
    The selected physical mode in
    `profiles/bench/post-terminal-focused-verification-20260905` must also publish
@@ -165,8 +163,9 @@ so it must not be encoded in either `weights_id`.
    The executable joined gate is prepared at
    `profiles/bench/final-artifact-cutover-admission-prepare-20260905`: it invokes the owning
    validators and publishes no receipt while any physical authority is absent or fails fresh
-   revalidation. Its pre-decision closure must incorporate the removal of the obsolete MTP
-   shortlist-head requirement before it is used. The final receipt itself remains
+   revalidation. Its pre-decision closure excludes the obsolete standalone MTP shortlist-head and
+   bulk-optimization requirements while retaining MTP regression in the whole and selected-trace
+   evidence. The final receipt itself remains
    absent and is an explicit blocker, not permission
    to begin editing once only some individual reports appear. The preparation package is
    closure-bound to the validators it invokes; validation performs no conversion, benchmark, GPU,

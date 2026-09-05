@@ -657,6 +657,20 @@ def require_fp8_hybrid_artifact(
     return {**artifact, "conversion_receipt": hybrid["conversion_receipt"]}
 
 
+def bind_n16_migration_receipt(path: Path, artifact: dict[str, Any]) -> dict[str, Any]:
+    """Attach the exact migration authority for each selectable N16 base recipe."""
+    if artifact.get("weights_id") not in ppl_run.N16_MIGRATION_PROFILES:
+        return artifact
+    inspected = ppl_run.inspect_candidate_artifact(path, digest=artifact["sha256"])
+    if (inspected.get("path") != artifact.get("path")
+            or inspected.get("bytes") != artifact.get("file_size_bytes")
+            or any(inspected.get(key) != artifact.get(key) for key in (
+                "sha256", "model_id", "weights_id",
+            )) or not isinstance(inspected.get("conversion_receipt"), dict)):
+        raise SystemExit("N16 migration receipt inspection differs from benchmark provenance")
+    return {**artifact, "conversion_receipt": inspected["conversion_receipt"]}
+
+
 def validate_fp8_hybrid_performance_contract(args: argparse.Namespace) -> None:
     if not args.require_fp8_hybrid:
         return
@@ -3227,12 +3241,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     artifact_provenance = (
         {"path": str(args.weights), "exists": args.weights.is_file()}
         if args.dry_run
-        else inspect_artifact(args.weights)
+        else bind_n16_migration_receipt(args.weights, inspect_artifact(args.weights))
     )
     if args.require_fp8_hybrid:
-        artifact_provenance = require_fp8_hybrid_artifact(
-            args.weights, artifact_provenance, args.preset
-        )
+        if artifact_provenance.get("weights_id") == HYBRID_BASE_WEIGHTS_ID:
+            ppl_run.require_fp8_hybrid_candidate({
+                **artifact_provenance,
+                "bytes": artifact_provenance["file_size_bytes"],
+            })
+        else:
+            artifact_provenance = require_fp8_hybrid_artifact(
+                args.weights, artifact_provenance, args.preset
+            )
     validate_dflash_campaign_artifact(
         args.preset, artifact_provenance, dry_run=args.dry_run
     )
@@ -3647,11 +3667,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                 }
             )
 
-    finished_artifact = inspect_artifact(args.weights)
+    finished_artifact = bind_n16_migration_receipt(
+        args.weights, inspect_artifact(args.weights)
+    )
     if args.require_fp8_hybrid:
-        finished_artifact = require_fp8_hybrid_artifact(
-            args.weights, finished_artifact, args.preset
-        )
+        if finished_artifact.get("weights_id") == HYBRID_BASE_WEIGHTS_ID:
+            ppl_run.require_fp8_hybrid_candidate({
+                **finished_artifact, "bytes": finished_artifact["file_size_bytes"],
+            })
+        else:
+            finished_artifact = require_fp8_hybrid_artifact(
+                args.weights, finished_artifact, args.preset
+            )
     if finished_artifact != artifact_provenance:
         failures.append(
             {

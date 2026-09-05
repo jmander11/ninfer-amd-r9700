@@ -31,6 +31,23 @@ from tools.bench.select_prefill_chunk import (
 )
 
 
+def migration_receipt(weights_id: str) -> dict:
+    recipe_id = {
+        REQUIRED_RECIPES[0]: "r9700-all-q4g64-n16k16-eval-v1",
+        REQUIRED_RECIPES[1]: "r9700-source-q4-n16k16-promoted-w8-source-mse8-eval-v1",
+        REQUIRED_RECIPES[2]: "r9700-q4g64-f8e4m3-four-role-n16k16-eval-v1",
+    }[weights_id]
+    value = {"path": "/receipt.json", "sha256": "f" * 64, "recipe_id": recipe_id,
+             "object_plan_sha256": "e" * 64, "source_artifact_sha256": "d" * 64,
+             "source_receipt_sha256": "c" * 64, "transcoder_sha256": "b" * 64}
+    if weights_id == REQUIRED_RECIPES[2]:
+        value.update({"selection_sha256": "b2ceeb63c581c0f26aab5a4d8c0958da34d836fcc5c47d377bce709eaf37e3e8", "source_index_sha256": "9" * 64,
+                      "source_ranking_sha256": "8" * 64})
+    else:
+        value["receipt_producer_sha256"] = "7" * 64
+    return value
+
+
 class PrefillChunkSelectionTest(unittest.TestCase):
     def test_selection_point_estimate_is_derived_from_retained_repetitions(self) -> None:
         seconds = (4.0, 5.0, 6.0)
@@ -92,6 +109,7 @@ class PrefillChunkSelectionTest(unittest.TestCase):
                     "weights_id": REQUIRED_RECIPES[0],
                     "sha256": "a" * 64,
                     "file_size_bytes": 1,
+                    "conversion_receipt": migration_receipt(REQUIRED_RECIPES[0]),
                 },
                 "expected_kv_value_group": REQUIRED_GROUPS[0],
                 "expected_xattention_profile": REQUIRED_PROFILES[0],
@@ -220,8 +238,7 @@ class PrefillChunkSelectionTest(unittest.TestCase):
                     "file_size_bytes": 100 * (1 + REQUIRED_RECIPES.index(identity[0])),
                 }
                 hybrid = identity[0] == REQUIRED_RECIPES[2]
-                if hybrid:
-                    artifact["conversion_receipt"] = {"sha256": "f" * 64}
+                artifact["conversion_receipt"] = migration_receipt(identity[0])
                 common = {
                     "artifact": artifact, "bench": {"sha256": str(index) * 64},
                     "corpus_sha256": "c" * 64,
@@ -274,7 +291,9 @@ class PrefillChunkSelectionTest(unittest.TestCase):
         roots = [(Path(f"/screen-{index}"), Path(f"/final-{index}")) for index in range(12)]
         identity = (REQUIRED_RECIPES[0], 16, "dense")
         manifest = {
-            "artifact": {"model_id": "qwen3.8-27b", "weights_id": identity[0], "sha256": "a" * 64, "file_size_bytes": 1},
+            "artifact": {"model_id": "qwen3.8-27b", "weights_id": identity[0],
+                         "sha256": "a" * 64, "file_size_bytes": 1,
+                         "conversion_receipt": migration_receipt(identity[0])},
             "bench": {"sha256": "b" * 64, "file_size_bytes": 2},
             "corpus_sha256": "c" * 64,
             "expected_kv_value_group": identity[1], "expected_xattention_profile": identity[2],
@@ -327,6 +346,7 @@ class PrefillChunkSelectionTest(unittest.TestCase):
                     "model_id": "qwen3.8-27b", "weights_id": identity[0],
                     "sha256": chr(ord("a") + REQUIRED_RECIPES.index(identity[0])) * 64,
                     "file_size_bytes": 1,
+                    "conversion_receipt": migration_receipt(identity[0]),
                 },
                 "corpus_sha256": "c" * 64,
                 "expected_kv_value_group": identity[1],
@@ -336,8 +356,6 @@ class PrefillChunkSelectionTest(unittest.TestCase):
                     if identity[0] == REQUIRED_RECIPES[2] else None
                 ),
             }
-            if identity[0] == REQUIRED_RECIPES[2]:
-                manifest["artifact"]["conversion_receipt"] = {"sha256": "f" * 64}
             reports = {
                 1024: self.row(50, 900), 2048: self.row(90, 800),
                 4096: self.row(100, 1000), 8192: self.row(80, 1100),

@@ -19,6 +19,7 @@ import hashlib
 import json
 import math
 import os
+import stat
 import struct
 import subprocess
 import sys
@@ -30,7 +31,9 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 from tools.ppl.schemes import BASELINE, ORDER, PROFILES
-from tools.convert.qwen3_8_27b_r9700 import fp8_hybrid_decision, fp8_hybrid_inventory
+from tools.convert.qwen3_8_27b_r9700 import (
+    fp8_hybrid_decision, fp8_hybrid_inventory, q4_inventory, q4_w8_mse_inventory,
+)
 from tools.reference.qwen3_8_27b_bf16.protocol import (
     ATTENTION_PV_EXECUTION as BF16_ATTENTION_PV_EXECUTION,
     DETERMINISTIC_ENVIRONMENT as BF16_DETERMINISTIC_ENVIRONMENT,
@@ -211,51 +214,193 @@ def _require_sha256(value: object, label: str) -> str:
         not isinstance(value, str) or len(value) != 64
         or any(character not in "0123456789abcdef" for character in value)
     ):
-        raise SystemExit(f"hybrid conversion receipt {label} is not SHA-256")
+        raise SystemExit(f"conversion receipt {label} is not SHA-256")
     return value
 
 
-def validate_hybrid_conversion_receipt(path: Path, artifact: dict) -> dict | None:
-    """Bind the decision-owned hybrid bytes to their adjacent conversion receipt."""
+def _read_regular_bytes(path: Path, label: str) -> tuple[bytes, str]:
+    lexical = Path(os.path.abspath(os.fspath(path)))
+    try:
+        initial = os.lstat(lexical)
+        if not stat.S_ISREG(initial.st_mode):
+            raise SystemExit(f"{label} must be a regular file")
+        descriptor = os.open(lexical, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        try:
+            opened = os.fstat(descriptor)
+            expected = (initial.st_dev, initial.st_ino, initial.st_uid)
+            if (opened.st_dev, opened.st_ino, opened.st_uid) != expected:
+                raise SystemExit(f"{label} identity changed while opening")
+            chunks = []
+            while block := os.read(descriptor, 1 << 20):
+                chunks.append(block)
+            final_fd = os.fstat(descriptor)
+            final_path = os.lstat(lexical)
+            if ((final_fd.st_dev, final_fd.st_ino, final_fd.st_uid) != expected
+                    or (final_path.st_dev, final_path.st_ino, final_path.st_uid) != expected):
+                raise SystemExit(f"{label} identity changed during readback")
+        finally:
+            os.close(descriptor)
+    except FileNotFoundError as error:
+        raise SystemExit(f"{label} is missing: {lexical}") from error
+    payload = b"".join(chunks)
+    return payload, hashlib.sha256(payload).hexdigest()
 
-    decision = fp8_hybrid_decision.DECISION
-    if artifact["weights_id"] != decision.weights_id:
+
+N16_MIGRATION_PROFILES = {
+    q4_inventory.WEIGHTS_ID: (
+        "r9700-q4g64-eval", q4_inventory, 439,
+    ),
+    q4_w8_mse_inventory.WEIGHTS_ID: (
+        "r9700-q4-w8-mse-eval", q4_w8_mse_inventory, 183,
+    ),
+    fp8_hybrid_inventory.WEIGHTS_ID: (
+        "r9700-q4g64-f8e4m3-four-role-eval", fp8_hybrid_inventory, 295,
+    ),
+}
+
+
+def _validate_n16_migration_ancestry(receipt: dict) -> None:
+    if receipt.get("artifact_type") != (
+        "ninfer_qwen3_8_27b_r9700_q4_n16k16_migration_receipt"
+    ):
+        return
+    migration = receipt.get("migration")
+    if receipt.get("schema_version") != 1 or not isinstance(migration, dict):
+        raise SystemExit("N16 migration receipt schema is invalid")
+    source_artifact = migration.get("source_artifact")
+    source_receipt = migration.get("source_conversion_receipt")
+    transcoder = migration.get("transcoder")
+    if not all(isinstance(value, dict) for value in (
+        source_artifact, source_receipt, transcoder,
+    )):
+        raise SystemExit("N16 migration receipt ancestry is incomplete")
+    source_path_raw = source_artifact.get("path")
+    source_receipt_raw = source_receipt.get("path")
+    if not isinstance(source_path_raw, str) or not isinstance(source_receipt_raw, str):
+        raise SystemExit("N16 migration receipt ancestry paths are invalid")
+    source_path = Path(source_path_raw)
+    upstream_path = Path(source_receipt_raw)
+    transcoder_path_raw = transcoder.get("path")
+    expected_transcoder = (
+        REPO / "tools/convert/qwen3_8_27b_r9700/transcode_q4_n16k16.py"
+    )
+    if not isinstance(transcoder_path_raw, str):
+        raise SystemExit("N16 migration receipt transcoder path is invalid")
+    transcoder_path = Path(transcoder_path_raw)
+    if source_path.is_symlink() or upstream_path.is_symlink() or transcoder_path.is_symlink():
+        raise SystemExit("N16 migration receipt ancestry must be regular files")
+    try:
+        source_path = source_path.resolve(strict=True)
+        upstream_path = upstream_path.resolve(strict=True)
+        transcoder_path = transcoder_path.resolve(strict=True)
+        upstream = json.loads(upstream_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise SystemExit(f"N16 migration receipt ancestry is unavailable: {error}") from error
+    receipt_identity = receipt.get("identity")
+    profile = N16_MIGRATION_PROFILES.get(
+        receipt_identity.get("weights_id") if isinstance(receipt_identity, dict) else None
+    )
+    if profile is None:
+        raise SystemExit("N16 migration receipt identity is unsupported")
+    old_weights_id, inventory, q4_objects = profile
+    old_identity = {"model_id": MODEL_ID, "weights_id": old_weights_id}
+    upstream_artifact = upstream.get("artifact") if isinstance(upstream, dict) else None
+    if not source_path.is_file() or not upstream_path.is_file() or not transcoder_path.is_file():
+        raise SystemExit("N16 migration receipt ancestry must be regular files")
+    if (
+        source_artifact.get("identity") != old_identity
+        or type(source_artifact.get("bytes")) is not int
+        or source_artifact["bytes"] != source_path.stat().st_size
+        or _require_sha256(source_artifact.get("sha256"), "migration source artifact")
+        != file_sha256(source_path)
+        or ((upstream_artifact or {}).get("sha256") is not None
+            and source_artifact["sha256"] != upstream_artifact.get("sha256"))
+        or upstream.get("identity") != old_identity
+        or not isinstance(upstream_artifact, dict)
+        or Path(str(upstream_artifact.get("path"))).resolve(strict=True) != source_path
+        or upstream_artifact.get("bytes") != source_artifact["bytes"]
+        or upstream_path != Path(str(source_path) + ".conversion.json")
+        or _require_sha256(source_receipt.get("sha256"), "migration source receipt")
+        != file_sha256(upstream_path)
+        or transcoder_path != expected_transcoder.resolve(strict=True)
+        or _require_sha256(transcoder.get("sha256"), "migration transcoder")
+        != file_sha256(transcoder_path)
+        or migration.get("storage_transform") != {
+            "from": "row-split-k128-v1", "to": "r9700-q4g64-n16-k16-v1",
+        }
+        or migration.get("verification")
+        != "exact logical Q4 code/scale hashes and exact non-Q4 payload hashes"
+        or receipt.get("target_key") != inventory.TARGET_KEY
+        or receipt.get("recipe_id") != inventory.RECIPE_ID
+        or receipt.get("candidate", {}).get("format_counts") != inventory.FORMAT_COUNTS
+        or receipt.get("candidate", {}).get("format_encoded_bytes")
+        != inventory.FORMAT_ENCODED_BYTES
+        or receipt.get("candidate", {}).get("tensor_encoded_bytes")
+        != inventory.TENSOR_ENCODED_BYTES
+        or receipt.get("candidate", {}).get("device_arena_bytes")
+        != inventory.DEVICE_ARENA_BYTES
+        or migration.get("objects") != 1124
+        or migration.get("q4_objects") != q4_objects
+    ):
+        raise SystemExit("N16 migration receipt ancestry differs from its authority")
+
+
+# The retained four-role receipt was published under this exact validator name.
+_validate_hybrid_migration_ancestry = _validate_n16_migration_ancestry
+
+
+def validate_n16_conversion_receipt(path: Path, artifact: dict) -> dict | None:
+    """Bind each registered N16 artifact to its exact migration authority."""
+
+    profile = N16_MIGRATION_PROFILES.get(artifact["weights_id"])
+    if profile is None:
         return None
+    if artifact["weights_id"] != fp8_hybrid_inventory.WEIGHTS_ID:
+        from tools.convert.qwen3_8_27b_r9700.publish_n16_migration_receipt import (
+            validate_receipt,
+        )
+        try:
+            return validate_receipt(
+                Path(str(path.resolve()) + ".conversion.json"), artifact
+            )
+        except ValueError as error:
+            raise SystemExit(str(error)) from error
+    _, inventory, _ = profile
     receipt_path = Path(str(path.resolve()) + ".conversion.json")
     try:
-        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-    except FileNotFoundError as error:
-        raise SystemExit(f"hybrid conversion receipt is missing: {receipt_path}") from error
+        receipt_bytes, receipt_sha256 = _read_regular_bytes(
+            receipt_path, "N16 migration receipt")
+        receipt = json.loads(receipt_bytes.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise SystemExit(f"hybrid conversion receipt is invalid: {receipt_path}: {error}") from error
+        raise SystemExit(f"N16 migration receipt is invalid: {receipt_path}: {error}") from error
     if not isinstance(receipt, dict):
-        raise SystemExit("hybrid conversion receipt root must be an object")
+        raise SystemExit("N16 migration receipt root must be an object")
     expected = {
-        "identity": {"model_id": MODEL_ID, "weights_id": decision.weights_id},
-        "target_key": fp8_hybrid_inventory.TARGET_KEY,
-        "recipe_id": decision.recipe_id,
+        "identity": {"model_id": MODEL_ID, "weights_id": artifact["weights_id"]},
+        "target_key": inventory.TARGET_KEY,
+        "recipe_id": inventory.RECIPE_ID,
     }
     for name, value in expected.items():
         if receipt.get(name) != value:
-            raise SystemExit(f"hybrid conversion receipt {name} differs from its authority")
+            raise SystemExit(f"N16 migration receipt {name} differs from its authority")
     candidate = receipt.get("candidate")
     if (
         not isinstance(candidate, dict)
         or candidate.get("status") != "registered-evaluation-only"
         or candidate.get("weight_recipe_selected") is not False
-        or candidate.get("selection_sha256") != decision.selection_sha256
-        or candidate.get("format_counts") != fp8_hybrid_inventory.FORMAT_COUNTS
+        or candidate.get("format_counts") != inventory.FORMAT_COUNTS
         or candidate.get("format_encoded_bytes")
-        != fp8_hybrid_inventory.FORMAT_ENCODED_BYTES
+        != inventory.FORMAT_ENCODED_BYTES
         or candidate.get("tensor_encoded_bytes")
-        != fp8_hybrid_inventory.TENSOR_ENCODED_BYTES
+        != inventory.TENSOR_ENCODED_BYTES
         or candidate.get("device_arena_bytes")
-        != fp8_hybrid_inventory.DEVICE_ARENA_BYTES
+        != inventory.DEVICE_ARENA_BYTES
     ):
-        raise SystemExit("hybrid conversion receipt candidate record differs")
+        raise SystemExit("N16 migration receipt candidate record differs")
     object_plan_sha256 = _require_sha256(
         candidate.get("object_plan_sha256"), "object_plan_sha256"
     )
+    _validate_n16_migration_ancestry(receipt)
     artifact_record = receipt.get("artifact")
     if (
         not isinstance(artifact_record, dict)
@@ -263,27 +408,65 @@ def validate_hybrid_conversion_receipt(path: Path, artifact: dict) -> dict | Non
         or artifact_record.get("bytes") != artifact["bytes"]
         or artifact_record.get("sha256") != artifact["sha256"]
     ):
-        raise SystemExit("hybrid conversion receipt artifact record differs")
+        raise SystemExit("N16 migration receipt artifact record differs")
     source = receipt.get("source")
     if not isinstance(source, dict):
-        raise SystemExit("hybrid conversion receipt source record is missing")
-    index_sha256 = _require_sha256(source.get("index_sha256"), "source index_sha256")
-    ranking_sha256 = _require_sha256(source.get("ranking_sha256"), "source ranking_sha256")
-    return {
+        raise SystemExit("N16 migration receipt source record is missing")
+    result = {
         "path": str(receipt_path),
-        "sha256": file_sha256(receipt_path),
-        "recipe_id": decision.recipe_id,
-        "selection_sha256": decision.selection_sha256,
+        "sha256": receipt_sha256,
+        "recipe_id": inventory.RECIPE_ID,
         "object_plan_sha256": object_plan_sha256,
-        "source_index_sha256": index_sha256,
-        "source_ranking_sha256": ranking_sha256,
+        "source_artifact_sha256": receipt["migration"]["source_artifact"]["sha256"],
+        "source_receipt_sha256": receipt["migration"]["source_conversion_receipt"]["sha256"],
+        "transcoder_sha256": receipt["migration"]["transcoder"]["sha256"],
     }
+    if artifact["weights_id"] == fp8_hybrid_inventory.WEIGHTS_ID:
+        decision = fp8_hybrid_decision.DECISION
+        if candidate.get("selection_sha256") != decision.selection_sha256:
+            raise SystemExit("N16 hybrid selection authority differs")
+        result.update({
+            "selection_sha256": decision.selection_sha256,
+            "source_index_sha256": _require_sha256(
+                source.get("index_sha256"), "source index_sha256"),
+            "source_ranking_sha256": _require_sha256(
+                source.get("ranking_sha256"), "source ranking_sha256"),
+        })
+    return result
+
+
+def validate_n16_receipt_summary(value: object, weights_id: str) -> dict:
+    common = {
+        "path", "sha256", "recipe_id", "object_plan_sha256",
+        "source_artifact_sha256", "source_receipt_sha256", "transcoder_sha256",
+    }
+    expected = set(common)
+    if weights_id == fp8_hybrid_inventory.WEIGHTS_ID:
+        expected.update({"selection_sha256", "source_index_sha256", "source_ranking_sha256"})
+    elif weights_id in N16_MIGRATION_PROFILES:
+        expected.add("receipt_producer_sha256")
+    else:
+        raise ValueError("unsupported N16 receipt identity")
+    if (not isinstance(value, dict) or set(value) != expected
+            or not isinstance(value.get("path"), str) or not value["path"]
+            or value.get("recipe_id") != N16_MIGRATION_PROFILES[weights_id][1].RECIPE_ID
+            or any(not isinstance(value.get(key), str) or len(value[key]) != 64
+                   or any(character not in "0123456789abcdef" for character in value[key])
+                   for key in expected - {"path", "recipe_id"})):
+        raise ValueError("N16 migration receipt summary is incomplete")
+    if (weights_id == fp8_hybrid_inventory.WEIGHTS_ID
+            and value.get("selection_sha256") != fp8_hybrid_decision.DECISION.selection_sha256):
+        raise ValueError("N16 hybrid receipt summary has the wrong selection authority")
+    return value
 
 
 def inspect_candidate_artifact(path: Path, *, digest: str | None = None) -> dict:
     """Read the v2 identity and bind it to the exact candidate bytes."""
 
-    resolved = path.resolve()
+    lexical = Path(os.path.abspath(os.fspath(path)))
+    if lexical.is_symlink() or not lexical.is_file():
+        raise SystemExit(f"candidate artifact must be a regular nonsymlink file: {path}")
+    resolved = lexical.resolve(strict=True)
     with resolved.open("rb") as source:
         prefix = source.read(NINFER_PREFIX.size)
         if len(prefix) != NINFER_PREFIX.size:
@@ -316,9 +499,9 @@ def inspect_candidate_artifact(path: Path, *, digest: str | None = None) -> dict
         "model_id": model_id,
         "weights_id": weights_id,
     }
-    receipt = validate_hybrid_conversion_receipt(resolved, result)
+    receipt = validate_n16_conversion_receipt(resolved, result)
     if receipt is not None:
-        result["conversion_receipt"] = receipt
+        result["conversion_receipt"] = validate_n16_receipt_summary(receipt, weights_id)
     return result
 
 

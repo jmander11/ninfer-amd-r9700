@@ -5,7 +5,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-from tools.bench.prepare_selected_dflash import _common, _hybrid_base_authority, _matrix_shell
+from tools.bench.prepare_selected_dflash import _base_migration_authority, _common, _matrix_shell
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -47,10 +47,14 @@ class SelectedDflashPrepareTest(unittest.TestCase):
 
     def test_hybrid_base_receipt_is_normalized_to_converter_authority(self) -> None:
         receipt = {"path": "/out/base.conversion.json", "sha256": "a" * 64,
-                   "recipe_id": "recipe", "selection_sha256": "b" * 64,
+                   "recipe_id": "r9700-q4g64-f8e4m3-four-role-n16k16-eval-v1",
+                   "selection_sha256":
+                       "b2ceeb63c581c0f26aab5a4d8c0958da34d836fcc5c47d377bce709eaf37e3e8",
                    "object_plan_sha256": "c" * 64, "source_index_sha256": "d" * 64,
-                   "source_ranking_sha256": "e" * 64}
-        self.assertEqual(_hybrid_base_authority({
+                   "source_ranking_sha256": "e" * 64,
+                   "source_artifact_sha256": "1" * 64,
+                   "source_receipt_sha256": "2" * 64, "transcoder_sha256": "3" * 64}
+        self.assertEqual(_base_migration_authority({
             "weights_id": "r9700-q4g64-f8e4m3-four-role-n16k16-eval",
             "conversion_receipt": receipt,
         }), {"receipt": {"path": receipt["path"], "sha256": receipt["sha256"]},

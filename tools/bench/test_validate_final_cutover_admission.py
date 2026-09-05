@@ -37,19 +37,29 @@ def test_dense_control_is_the_only_profile_executable_exception() -> None:
 
 
 @pytest.mark.parametrize(
-    ("weights_id", "mixed", "fp8"),
+    ("weights_id", "fp8"),
     [
-        ("r9700-q4g64-n16k16-eval", None, []),
-        (gate.MIXED, {"path": "mixed"}, []),
-        (gate.HYBRID, None, [{"authority": {}}, {"authority": {}}]),
+        ("r9700-q4g64-n16k16-eval", []),
+        (gate.MIXED, []),
+        (gate.HYBRID, [{"authority": {}}, {"authority": {}}]),
     ],
 )
-def test_conditional_proofs_are_exact(weights_id: str, mixed: object, fp8: list) -> None:
+def test_conditional_proofs_are_exact(weights_id: str, fp8: list) -> None:
     result = gate.validate_conditionals(
-        route(weights_id), {"authorities": {"mixed_mtp_bulk_w8": mixed}, "loaded_fp8_proofs": fp8}
+        route(weights_id), {"authorities": {
+            "dispatch_reconciliation": {}, "trace": {}, "static_audit": {}},
+            "loaded_fp8_proofs": fp8}
     )
-    assert result["mixed_mtp_bulk_w8"] == (weights_id == gate.MIXED)
     assert result["four_role_loaded_fp8"] == (weights_id == gate.HYBRID)
+
+
+@pytest.mark.parametrize("obsolete", ["mtp_shortlist_head", "mixed_mtp_bulk_w8"])
+def test_obsolete_mtp_optimization_proof_is_rejected(obsolete: str) -> None:
+    hardware = {"authorities": {"dispatch_reconciliation": {}, "trace": {},
+                                 "static_audit": {}, obsolete: {}},
+                "loaded_fp8_proofs": []}
+    with pytest.raises(ValueError, match="obsolete conditional proof"):
+        gate.validate_conditionals(route(gate.MIXED), hardware)
 
 
 def test_missing_dependency_cannot_publish_receipt() -> None:
@@ -70,7 +80,7 @@ def test_joined_gate_requires_selected_vision_completion_inputs() -> None:
         inputs = {
             name: "missing" for name in (
                 "selection", "prefill_chunk", "quality_map", "exact_plan",
-                "exact_campaign", "exact_admission", "mtp", "low_manifest",
+                "exact_campaign", "exact_admission", "low_manifest",
                 "low_admission", "niah_plan", "niah_root", "niah_admission",
                 "focused_closure", "focused", "hardware", "dflash",
                 "converter_preflight",

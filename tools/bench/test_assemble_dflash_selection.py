@@ -27,6 +27,39 @@ CHUNK_SELECTION = {
 }
 
 
+def migration_receipt(weights_id: str) -> dict:
+    recipe_id = {
+        "r9700-q4g64-n16k16-eval": "r9700-all-q4g64-n16k16-eval-v1",
+        "r9700-q4-w8-mse-n16k16-eval":
+            "r9700-source-q4-n16k16-promoted-w8-source-mse8-eval-v1",
+        "r9700-q4g64-f8e4m3-four-role-n16k16-eval":
+            "r9700-q4g64-f8e4m3-four-role-n16k16-eval-v1",
+    }[weights_id]
+    value = {"path": "/receipt.json", "sha256": "a" * 64, "recipe_id": recipe_id,
+             "object_plan_sha256": "b" * 64, "source_artifact_sha256": "c" * 64,
+             "source_receipt_sha256": "d" * 64, "transcoder_sha256": "e" * 64}
+    if "four-role" in weights_id:
+        value.update({"selection_sha256": "b2ceeb63c581c0f26aab5a4d8c0958da34d836fcc5c47d377bce709eaf37e3e8", "source_index_sha256": "2" * 64,
+                      "source_ranking_sha256": "3" * 64})
+    else:
+        value["receipt_producer_sha256"] = "4" * 64
+    return value
+
+
+def base_authority(receipt: dict) -> dict:
+    result = {"receipt": {"path": receipt["path"], "sha256": receipt["sha256"]},
+              "recipe_id": receipt["recipe_id"],
+              "object_plan_sha256": receipt["object_plan_sha256"],
+              "source_artifact_sha256": receipt["source_artifact_sha256"],
+              "source_receipt_sha256": receipt["source_receipt_sha256"],
+              "transcoder_sha256": receipt["transcoder_sha256"]}
+    for key in ("selection_sha256", "source_index_sha256", "source_ranking_sha256",
+                "receipt_producer_sha256"):
+        if key in receipt:
+            result[key] = receipt[key]
+    return result
+
+
 def shortlist_head_gate() -> dict:
     cells = {}
     for prompt in (8192, 32768):
@@ -112,6 +145,7 @@ class DFlashSelectionTest(unittest.TestCase):
                 provenance.append({
                     "candidate": name, "artifact": {
                         "weights_id": recipe, "sha256": digest,
+                        "conversion_receipt": migration_receipt(recipe),
                     },
                 })
         source = {
@@ -139,7 +173,9 @@ class DFlashSelectionTest(unittest.TestCase):
             "identity": {"model_id": "qwen3.8-27b",
                          "weights_id": self.artifact["weights_id"]},
             "base": {"identity": {"weights_id": "r9700-q4g64-n16k16-eval"},
-                     "sha256": "b" * 64, "payload_copy": "byte_exact"},
+                     "sha256": "b" * 64, "payload_copy": "byte_exact",
+                     "authority": base_authority(
+                         migration_receipt("r9700-q4g64-n16k16-eval"))},
             "dflash_recipe": {
                 "matrix_format": "Q4G64_F16S", "selector_codebook_format": "BF16",
                 "objects": 66, "source_tensors": 81, "runtime_repack": False,

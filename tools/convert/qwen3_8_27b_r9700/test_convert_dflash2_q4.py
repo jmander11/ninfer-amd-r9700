@@ -27,38 +27,15 @@ class DFlash2ConversionPublicationTest(unittest.TestCase):
             base.write_bytes(b"hybrid-base")
             base_sha256 = _sha256(base)
             receipt = {
-                "identity": {
-                    "model_id": conversion.inventory.MODEL_ID,
-                    "weights_id": conversion.inventory.HYBRID_BASE_WEIGHTS_ID,
-                },
-                "target_key": conversion.inventory.TARGET_KEY,
+                "path": str(base) + ".conversion.json", "sha256": "0" * 64,
                 "recipe_id": conversion.fp8_hybrid_inventory.RECIPE_ID,
-                "candidate": {
-                    "selection_sha256":
-                        conversion.fp8_hybrid_inventory.SELECTION_SHA256,
-                    "object_plan_sha256": "1" * 64,
-                },
-                "source": {"index_sha256": "2" * 64, "ranking_sha256": "3" * 64},
-                "artifact": {
-                    "path": str(base), "bytes": base.stat().st_size, "sha256": base_sha256,
-                },
+                "selection_sha256": conversion.fp8_hybrid_inventory.SELECTION_SHA256,
+                "object_plan_sha256": "1" * 64, "source_index_sha256": "2" * 64,
+                "source_ranking_sha256": "3" * 64, "source_artifact_sha256": "4" * 64,
+                "source_receipt_sha256": "5" * 64, "transcoder_sha256": "6" * 64,
             }
-            receipt_path = Path(str(base) + ".conversion.json")
-            receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
-            authority = conversion._base_authority(
-                base,
-                ArtifactIdentity(
-                    conversion.inventory.MODEL_ID,
-                    conversion.inventory.HYBRID_BASE_WEIGHTS_ID,
-                ),
-                base_sha256,
-            )
-            self.assertEqual(authority["selection_sha256"], receipt["candidate"]["selection_sha256"])
-            self.assertEqual(authority["receipt"]["sha256"], _sha256(receipt_path))
-            receipt["artifact"]["sha256"] = "0" * 64
-            receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "authority differs"):
-                conversion._base_authority(
+            with patch("tools.ppl.run.validate_n16_conversion_receipt", return_value=receipt):
+                authority = conversion._base_authority(
                     base,
                     ArtifactIdentity(
                         conversion.inventory.MODEL_ID,
@@ -66,6 +43,8 @@ class DFlash2ConversionPublicationTest(unittest.TestCase):
                     ),
                     base_sha256,
                 )
+            self.assertEqual(authority["selection_sha256"], receipt["selection_sha256"])
+            self.assertEqual(authority["receipt"]["sha256"], receipt["sha256"])
 
     def test_hybrid_base_maps_to_its_own_companion(self) -> None:
         expected, output, arena = conversion._expected_base(ArtifactIdentity(

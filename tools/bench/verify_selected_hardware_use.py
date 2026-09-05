@@ -18,8 +18,10 @@ from tools.ppl.pareto import load_payload, validate_terminal_production_authorit
 from tools.bench.reconcile_qwen3_8_27b_dispatches import reconcile
 from tools.bench.selected_loaded_code_objects import selected_loaded_fp8
 from tools.bench.extract_embedded_code_object import extract
-from tools.bench.produce_operation_static_evidence import _embedded_code_object
 from tools.bench.validate_fp8_gate_up_hardware_proof import revalidate_fp8_resources
+from tools.bench.run_ninfer_bench_matrix import (
+    bind_n16_migration_receipt, inspect_artifact,
+)
 
 
 AUDIT_SCHEMA = "ninfer.r9700.twelve_candidate_hardware_path_static_audit.v1"
@@ -66,7 +68,8 @@ def _selected_embedded_static(executable: Path, profile: str, audit: dict[str, A
     if not isinstance(embedded, dict):
         raise ValueError("static audit lacks selected embedded code-object identities")
     groups = [
-        ("linear_by_profile", "q4_p2048_cta", ["q4_p2048_cta", "w8_p2048_cta"]),
+        ("linear_by_profile", "q4_p2048_cta",
+         ["q4_p2048_cta", "q4_wave32", "w8_p2048_cta"]),
         ("attention_by_profile", "ordinary_fp8_qk",
          ["ordinary_fp8_qk", "dense_initial_prefix_qk"]),
     ]
@@ -144,14 +147,18 @@ def selected_route(selection_path: Path) -> dict[str, Any]:
     executable = source.get("benchmark_executable")
     if not isinstance(artifact, dict) or not isinstance(executable, dict):
         raise ValueError("terminal winner lacks artifact/executable identity")
-    artifact_now, executable_now = verify_snapshot(artifact, "selected artifact"), verify_snapshot(
-        executable, "selected executable")
-    if artifact_now["sha256"] != terminal["winner_artifact"]["sha256"]:
+    artifact_path = Path(str(artifact.get("path", ""))).resolve(strict=True)
+    artifact_now = bind_n16_migration_receipt(
+        artifact_path, inspect_artifact(artifact_path))
+    executable_now = verify_snapshot(executable, "selected executable")
+    if (artifact_now["sha256"] != terminal["winner_artifact"]["sha256"]
+            or artifact_now.get("conversion_receipt")
+            != terminal["winner_artifact"].get("conversion_receipt")):
         raise ValueError("terminal artifact digest differs from winner")
     return {
         "terminal_selection": snapshot(selection_path), "winner": winner,
         "weights_id": terminal["winner_artifact"]["weights_id"],
-        "artifact": {**artifact_now, "weights_id": artifact.get("weights_id")},
+        "artifact": artifact_now,
         "executable": executable_now,
         "kv_value_group": terminal["winner_cache_profile"]["value_group"],
         "xattention_profile": terminal["winner_execution_profile"]["xattention_profile"],
@@ -161,12 +168,6 @@ def selected_route(selection_path: Path) -> dict[str, Any]:
 
 def _proof_file(value: object, label: str) -> None:
     verify_snapshot(value, label)
-
-
-def _same_snapshot(value: object, expected: dict[str, Any], label: str) -> None:
-    actual = verify_snapshot(value, label)
-    if actual != expected:
-        raise ValueError(f"{label} differs from selected route")
 
 
 def _fp8_proof(path: Path, qualification: str, dispatches: list[dict[str, Any]],
@@ -255,7 +256,7 @@ def _fp8_proof(path: Path, qualification: str, dispatches: list[dict[str, Any]],
 
 
 def verify(selection_path: Path, reconciliation_path: Path, audit_path: Path,
-           mtp_path: Path, fp8_paths: list[Path], mixed_mtp_path: Path | None = None, *,
+           fp8_paths: list[Path], *,
            route_resolver: Callable[[Path], dict[str, Any]] = selected_route,
            reconciliation_validator: Callable[[Path, Path], dict[str, Any]] = reconcile,
            loaded_fp8_validator: Callable[
@@ -264,8 +265,6 @@ def verify(selection_path: Path, reconciliation_path: Path, audit_path: Path,
            embedded_validator: Callable[
                [Path, str, dict[str, Any], dict[str, Any], list[str]], dict[str, Any]
            ] = _selected_embedded_static,
-           mtp_embedding_validator: Callable[[Path, Path], dict[str, int]] =
-           _embedded_code_object,
            fp8_resource_validator: Callable[[dict[str, Any]], dict[str, object]] =
            revalidate_fp8_resources,
            ) -> dict[str, Any]:
@@ -345,8 +344,9 @@ def verify(selection_path: Path, reconciliation_path: Path, audit_path: Path,
     proofs = audit.get("shared_symbol_proofs")
     if not isinstance(proofs, dict):
         raise ValueError("static audit lacks symbol proofs")
-    required = ["q4_p2048_cta"]
-    symbol_tokens = ["a8q4g64_linear_prefill_cta_kernel"]
+    required = ["q4_p2048_cta", "q4_wave32"]
+    symbol_tokens = ["a8q4g64_linear_prefill_cta_kernel",
+                     "a8q4g64_linear_wmma32_kernel"]
     if route["weights_id"] == "r9700-q4-w8-mse-n16k16-eval":
         required.append("w8_p2048_cta"); symbol_tokens.append("a8w8g32_linear_prefill_cta_kernel")
     if route["xattention_profile"] == "dense":
@@ -372,6 +372,11 @@ def verify(selection_path: Path, reconciliation_path: Path, audit_path: Path,
             or row.get("resources", {}).get("scratch_bytes") != q4["scratch_bytes"]
             for row in q4_dispatches)):
         raise ValueError("executed Q4 CTA resources differ from selected ELF/ISA proof")
+    wave = proofs["q4_wave32"]
+    if (wave.get("opcode") != "v_wmma_i32_16x16x32_iu4"
+            or wave.get("opcode_sites") != 4 or wave.get("vgpr") != 64
+            or wave.get("lds_bytes") != 0 or wave.get("private_bytes") != 0):
+        raise ValueError("selected Q4 wave32 static proof has the wrong IU4/resources")
     ordinary_qk = proofs.get("ordinary_fp8_qk")
     if (not isinstance(ordinary_qk, dict)
             or ordinary_qk.get("fp8_wmma_opcode") != "v_wmma_f32_16x16x16_fp8_fp8"
@@ -410,127 +415,6 @@ def verify(selection_path: Path, reconciliation_path: Path, audit_path: Path,
     for token in symbol_tokens:
         if not any(token in symbol for symbol in symbols):
             raise ValueError(f"selected inventory did not execute required symbol {token}")
-
-    mtp = json.loads(mtp_path.read_text(encoding="utf-8"))
-    selected_mtp = mtp.get("selected_route", {})
-    static_mtp = mtp.get("static_proof", {})
-    if (mtp.get("artifact_type") != "ninfer_r9700_mtp_shortlist_head_evidence"
-            or mtp.get("schema_version") != 1 or mtp.get("status") != "passed"
-            or selected_mtp.get("artifact", {}).get("sha256") != route["artifact"]["sha256"]
-            or selected_mtp.get("benchmark_executable", {}).get("sha256")
-            != route["executable"]["sha256"]
-            or selected_mtp.get("kv_value_group") != route["kv_value_group"]
-            or selected_mtp.get("xattention_profile") != route["xattention_profile"]
-            or selected_mtp.get("prefill_chunk") != route["prefill_chunk"]
-            or selected_mtp.get("concurrency") != 1
-            or selected_mtp.get("prompt_tokens") != 8192
-            or selected_mtp.get("generated_tokens") != 256
-            or selected_mtp.get("spec") != "mtp"
-            or selected_mtp.get("draft_tokens") != 3
-            or static_mtp.get("code_symbol") != proofs["q4_wave32"].get("code_symbol")
-            or static_mtp.get("opcode") != proofs["q4_wave32"].get("opcode")
-            or static_mtp.get("opcode_count") != proofs["q4_wave32"].get("opcode_sites")):
-        raise ValueError("MTP shortlist-head evidence differs from selected Q4 wave32 route")
-    _same_snapshot(selected_mtp.get("terminal_selection"), route["terminal_selection"],
-                   "MTP terminal selection")
-    wave = proofs["q4_wave32"]
-    resources = static_mtp.get("resources")
-    quantization = static_mtp.get("quantization")
-    executed = mtp.get("executed_trace")
-    if (
-        wave.get("opcode") != "v_wmma_i32_16x16x32_iu4"
-        or wave.get("opcode_sites") != 4 or wave.get("vgpr") != 64
-        or wave.get("lds_bytes") != 0 or wave.get("private_bytes") != 0
-        or not isinstance(resources, dict) or resources.get("vgpr_count") != 64
-        or any(resources.get(name) != 0 for name in
-               ("lds_bytes", "private_bytes", "scratch_bytes", "flat_scratch",
-                "sgpr_spill_count", "vgpr_spill_count"))
-        or resources.get("wavefront_size") != 32
-        or not isinstance(quantization, dict)
-        or quantization.get("weights", {}).get("format") != "Q4G64_F16S"
-        or quantization.get("activations", {}).get("codec") != "signed A8G64"
-        or not isinstance(executed, dict) or executed.get("dispatch_count") != 192
-        or executed.get("expected_dispatch_count") != 192
-        or executed.get("grid") != {"x": 8192, "y": 1, "z": 1}
-        or executed.get("workgroup") != {"x": 32, "y": 1, "z": 1}
-    ):
-        raise ValueError("MTP shortlist-head IU4/resource/quantization proof is incomplete")
-    for name in ("plan", "benchmark_report", "database", "power_before", "power_after"):
-        _proof_file(executed.get(name), f"MTP {name}")
-    _proof_file(static_mtp.get("code_object"), "MTP code object")
-    derivation = static_mtp.get("binary_derivation")
-    if not isinstance(derivation, dict):
-        raise ValueError("MTP proof lacks direct ELF derivation")
-    _proof_file(derivation.get("objdump"), "MTP objdump")
-    _proof_file(derivation.get("readelf"), "MTP readelf")
-    sources = static_mtp.get("sources")
-    if not isinstance(sources, list) or not sources:
-        raise ValueError("MTP proof lacks implementation sources")
-    for index, source in enumerate(sources):
-        _proof_file(source, f"MTP source {index}")
-    code_object = verify_snapshot(static_mtp.get("code_object"), "MTP code object")
-    embedding = static_mtp.get("executable_embedding")
-    if (not isinstance(embedding, dict)
-            or mtp_embedding_validator(Path(route["executable"]["path"]),
-                                       Path(code_object["path"])) != embedding):
-        raise ValueError("MTP code object is not uniquely embedded in selected executable")
-
-    mixed = route["weights_id"] == "r9700-q4-w8-mse-n16k16-eval"
-    if mixed != (mixed_mtp_path is not None):
-        raise ValueError("mixed winner requires exactly one MTP-bulk W8 proof")
-    mixed_mtp = None
-    if mixed_mtp_path is not None:
-        value = json.loads(mixed_mtp_path.read_text(encoding="utf-8"))
-        binding = value.get("selected_route", {})
-        shapes = value.get("shapes")
-        native = value.get("native_hardware")
-        quantization = value.get("quantization")
-        authorities = value.get("authorities")
-        expected_shapes = {(5120, 10240): 1, (1024, 5120): 2}
-        observed = {
-            (row.get("rows"), row.get("columns")): row.get("dispatches_per_full_chunk")
-            for row in shapes if isinstance(row, dict)
-        } if isinstance(shapes, list) else {}
-        if (
-            value.get("artifact_type") != "ninfer_r9700_mixed_mtp_bulk_w8_evidence"
-            or value.get("schema_version") != 1 or value.get("status") != "passed"
-            or not isinstance(shapes, list) or len(shapes) != 2
-            or binding.get("artifact_sha256") != route["artifact"]["sha256"]
-            or binding.get("executable_sha256") != route["executable"]["sha256"]
-            or binding.get("terminal_selection") != route["terminal_selection"]
-            or binding.get("winner") != route["winner"]
-            or binding.get("weights_id") != route["weights_id"]
-            or binding.get("kv_value_group") != route["kv_value_group"]
-            or binding.get("xattention_profile") != route["xattention_profile"]
-            or binding.get("prefill_chunk") != route["prefill_chunk"]
-            or binding.get("concurrency") != 1
-            or observed != expected_shapes
-            or quantization != {"weights": "W8G32_F16S", "activation": "signed A8G32",
-                                "output": "BF16", "baseline_activation": "signed A8G32"}
-            or native != {"symbol": "a8w8g32_linear_prefill_cta_kernel",
-                          "opcode": "v_wmma_i32_16x16x16_iu8", "opcode_sites": 2,
-                          "signedness": "signed_activation_signed_weight",
-                          "neg_lo": [[1, 1, 0], [1, 1, 0]],
-                          "vgpr": 50, "lds_bytes": 4352, "scratch_bytes": 0}
-            or not isinstance(authorities, dict)
-            or set(authorities) != {"plan", "operator_report", "selected_engine_report",
-                                    "selected_engine_trace", "production_code_object",
-                                    "production_gfx1201_assembly", "production_elf_metadata",
-                                    "qualifier", "planner",
-                                    "qualifier_source",
-                                    "production_kernel_source", "dispatch_profile_source"}
-            or value.get("selected_engine_execution", {}).get("dispatch_count") != 3
-            or any(row.get("opcode") != "v_wmma_i32_16x16x16_iu8"
-                   or row.get("oracle_max_bf16_steps", 3) > 2
-                   or row.get("oracle_sample_count") != 64
-                   or row.get("candidate_faster") is not True for row in shapes)
-        ):
-            raise ValueError("mixed MTP-bulk W8 proof is incomplete")
-        for name, authority in authorities.items():
-            _proof_file(authority, f"mixed MTP-bulk {name}")
-        if binding.get("planner") != authorities["planner"]:
-            raise ValueError("mixed MTP-bulk planner identity differs")
-        mixed_mtp = snapshot(mixed_mtp_path)
 
     hybrid = route["weights_id"] == HYBRID_ID
     if hybrid != (len(fp8_paths) == 2):
@@ -571,11 +455,9 @@ def verify(selection_path: Path, reconciliation_path: Path, audit_path: Path,
         "selected_route": route,
         "authorities": {"dispatch_reconciliation": snapshot(reconciliation_path),
                         "trace": trace_snapshot,
-                        "static_audit": snapshot(audit_path),
-                        "mtp_shortlist_head": snapshot(mtp_path),
-                        "mixed_mtp_bulk_w8": mixed_mtp},
+                        "static_audit": snapshot(audit_path)},
         "executed_symbol_count": len(symbols), "required_symbol_families": symbol_tokens,
-        "static_proof_names": required + ["q4_wave32", "ordinary_fp8_qk"],
+        "static_proof_names": required + ["ordinary_fp8_qk"],
         "selected_embedded_static_proofs": embedded_evidence,
         "static_only_proof_names": ["ordinary_fp8_qk"], "loaded_fp8_proofs": fp8,
         "physical_bandwidth_claim": None, "stall_freedom_claim": None,
@@ -588,8 +470,6 @@ def main() -> None:
     parser.add_argument("--selection", required=True, type=Path)
     parser.add_argument("--reconciliation", required=True, type=Path)
     parser.add_argument("--static-audit", required=True, type=Path)
-    parser.add_argument("--mtp-proof", required=True, type=Path)
-    parser.add_argument("--mixed-mtp-bulk-proof", type=Path)
     parser.add_argument("--fp8-proof", action="append", default=[], type=Path)
     parser.add_argument("--out", required=True, type=Path)
     args = parser.parse_args()
@@ -597,10 +477,9 @@ def main() -> None:
         output = args.out.parent.resolve(strict=True) / args.out.name
         if os.path.lexists(output):
             raise ValueError(f"refusing to overwrite {output}")
-        value = verify(args.selection, args.reconciliation, args.static_audit,
-                       args.mtp_proof, args.fp8_proof, args.mixed_mtp_bulk_proof)
+        value = verify(args.selection, args.reconciliation, args.static_audit, args.fp8_proof)
         revalidated = verify(args.selection, args.reconciliation, args.static_audit,
-                             args.mtp_proof, args.fp8_proof, args.mixed_mtp_bulk_proof)
+                             args.fp8_proof)
         if revalidated != value:
             raise ValueError("selected hardware-use inputs changed before publication")
         descriptor, temporary = tempfile.mkstemp(prefix=f".{output.name}.", dir=output.parent)
@@ -621,8 +500,7 @@ def main() -> None:
                 raise ValueError("published selected hardware-use inode changed")
             if (json.loads(output.read_text(encoding="utf-8")) != value
                     or verify(args.selection, args.reconciliation, args.static_audit,
-                              args.mtp_proof, args.fp8_proof,
-                              args.mixed_mtp_bulk_proof) != value):
+                              args.fp8_proof) != value):
                 raise ValueError("published selected hardware-use authority does not revalidate")
             directory = os.open(output.parent, os.O_RDONLY | os.O_DIRECTORY)
             try:

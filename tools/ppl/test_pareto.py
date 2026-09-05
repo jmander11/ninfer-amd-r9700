@@ -20,6 +20,25 @@ CHUNK_SELECTION = {
 }
 
 
+def migration_receipt(weights_id: str) -> dict:
+    recipe_id = {
+        "r9700-q4g64-n16k16-eval": "r9700-all-q4g64-n16k16-eval-v1",
+        "r9700-q4-w8-mse-n16k16-eval":
+            "r9700-source-q4-n16k16-promoted-w8-source-mse8-eval-v1",
+        "r9700-q4g64-f8e4m3-four-role-n16k16-eval":
+            "r9700-q4g64-f8e4m3-four-role-n16k16-eval-v1",
+    }[weights_id]
+    value = {"path": "/receipt.json", "sha256": "f" * 64, "recipe_id": recipe_id,
+             "object_plan_sha256": "e" * 64, "source_artifact_sha256": "d" * 64,
+             "source_receipt_sha256": "c" * 64, "transcoder_sha256": "b" * 64}
+    if weights_id == "r9700-q4g64-f8e4m3-four-role-n16k16-eval":
+        value.update({"selection_sha256": "b2ceeb63c581c0f26aab5a4d8c0958da34d836fcc5c47d377bce709eaf37e3e8", "source_index_sha256": "9" * 64,
+                      "source_ranking_sha256": "8" * 64})
+    else:
+        value["receipt_producer_sha256"] = "7" * 64
+    return value
+
+
 def shortlist_head_gate(*, extra_rounds: int = 0) -> dict:
     cells = {}
     for prompt in (8192, 32768):
@@ -615,6 +634,7 @@ class ParetoTest(unittest.TestCase):
         artifact = {
             "weights_id": "r9700-q4g64-n16k16-eval",
             "sha256": "a" * 64,
+            "conversion_receipt": migration_receipt("r9700-q4g64-n16k16-eval"),
         }
         with self.assertRaisesRegex(ValueError, "exactly all three product recipe"):
             pareto.classify({
@@ -641,6 +661,7 @@ class ParetoTest(unittest.TestCase):
             artifact = {
                 "weights_id": recipe,
                 "sha256": chr(ord("a") + list(pareto.TERMINAL_RECIPE_PROFILES).index(recipe)) * 64,
+                "conversion_receipt": migration_receipt(recipe),
             }
             for group, profile in (
                 (16, "dense"), (32, "dense"),
@@ -748,7 +769,10 @@ class ParetoTest(unittest.TestCase):
             duplicate_rows.append(duplicate)
             duplicate_provenance.append({
                 "candidate": duplicate["name"],
-                "artifact": {"weights_id": "r9700-q4g64-n16k16-eval", "sha256": "c" * 64},
+                "artifact": {"weights_id": "r9700-q4g64-n16k16-eval",
+                             "sha256": "c" * 64,
+                             "conversion_receipt": migration_receipt(
+                                 "r9700-q4g64-n16k16-eval")},
             })
         with self.assertRaisesRegex(ValueError, "one artifact hash per weights_id"):
             pareto.classify({

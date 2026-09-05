@@ -45,18 +45,28 @@ def sha(path: Path) -> str:
         return hashlib.file_digest(source, "sha256").hexdigest()
 
 
-def _hybrid_base_authority(artifact: dict) -> dict | None:
-    if artifact.get("weights_id") != "r9700-q4g64-f8e4m3-four-role-n16k16-eval":
-        return None
+def _base_migration_authority(artifact: dict) -> dict:
     receipt = artifact.get("conversion_receipt")
-    fields = ("recipe_id", "selection_sha256", "object_plan_sha256",
-              "source_index_sha256", "source_ranking_sha256")
+    from tools.ppl.run import validate_n16_receipt_summary
+    validate_n16_receipt_summary(receipt, artifact.get("weights_id"))
+    fields = ("recipe_id", "object_plan_sha256", "source_artifact_sha256",
+              "source_receipt_sha256", "transcoder_sha256")
     if (not isinstance(receipt, dict) or not isinstance(receipt.get("path"), str)
             or not isinstance(receipt.get("sha256"), str)
             or any(not isinstance(receipt.get(name), str) for name in fields)):
-        raise ValueError("selected hybrid base lacks its conversion authority")
-    return {"receipt": {"path": receipt["path"], "sha256": receipt["sha256"]},
-            **{name: receipt[name] for name in fields}}
+        raise ValueError("selected N16 base lacks its migration authority")
+    result = {"receipt": {"path": receipt["path"], "sha256": receipt["sha256"]},
+              **{name: receipt[name] for name in fields}}
+    if artifact.get("weights_id") == "r9700-q4g64-f8e4m3-four-role-n16k16-eval":
+        hybrid = ("selection_sha256", "source_index_sha256", "source_ranking_sha256")
+        if any(not isinstance(receipt.get(name), str) for name in hybrid):
+            raise ValueError("selected hybrid base lacks its selection authority")
+        result.update({name: receipt[name] for name in hybrid})
+    else:
+        if not isinstance(receipt.get("receipt_producer_sha256"), str):
+            raise ValueError("selected N16 base lacks its receipt producer authority")
+        result["receipt_producer_sha256"] = receipt["receipt_producer_sha256"]
+    return result
 
 
 def resolve(selection: Path) -> dict:
@@ -103,7 +113,7 @@ def _validate_companion(plan: dict) -> None:
     source = report.get("dflash_source", {})
     expected_source = plan["dflash_source"]
     base = report.get("base", {})
-    expected_authority = _hybrid_base_authority(plan["base_artifact"])
+    expected_authority = _base_migration_authority(plan["base_artifact"])
     checked = preflight(plan["base_artifact"]["path"], plan["dflash_source"]["path"])
     preflight_record = preflight_summary(checked)
     with Artifact.open(path) as opened:

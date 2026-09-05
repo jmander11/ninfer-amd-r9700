@@ -14,7 +14,6 @@ from typing import Any
 
 from tools.bench.assemble_dflash_selection import assemble as assemble_dflash
 from tools.bench.focused_verification_io import validate_report as validate_focused
-from tools.bench.produce_mtp_shortlist_head_evidence import produce as produce_mtp
 from tools.bench.prepare_selected_converter_preflight import revalidate as revalidate_converter
 from tools.bench.select_prefill_chunk import validate_selection_record
 from tools.bench.validate_low_context_prefill import validate_ladder
@@ -148,18 +147,15 @@ def validate_conditionals(route: dict[str, Any], hardware: dict[str, Any]) -> di
     authorities = hardware.get("authorities")
     if not isinstance(authorities, dict):
         raise ValueError("hardware-use authority lacks conditional proof identities")
-    mixed_proof = authorities.get("mixed_mtp_bulk_w8")
     fp8_proofs = hardware.get("loaded_fp8_proofs", [])
-    mixed = route["weights_id"] == MIXED
     hybrid = route["weights_id"] == HYBRID
-    if mixed != isinstance(mixed_proof, dict):
-        raise ValueError("mixed MTP-bulk W8 proof conditional differs")
+    if set(authorities) != {"dispatch_reconciliation", "trace", "static_audit"}:
+        raise ValueError("hardware-use authority carries an obsolete conditional proof")
     if hybrid != (isinstance(fp8_proofs, list) and len(fp8_proofs) == 2):
         raise ValueError("four-role loaded-FP8 proof conditional differs")
     if not hybrid and fp8_proofs not in (None, []):
         raise ValueError("non-hybrid route carries loaded-FP8 proof")
-    return {"mixed_mtp_bulk_w8": mixed, "four_role_loaded_fp8": hybrid,
-            "low_context_dense_control": True}
+    return {"four_role_loaded_fp8": hybrid, "low_context_dense_control": True}
 
 
 def validate_quality_map(path: Path, selection: dict, chunk: int) -> dict:
@@ -220,34 +216,13 @@ def matrix_inventory(selection: dict) -> list[dict[str, Any]]:
     return inventory
 
 
-def revalidate_mtp(path: Path) -> dict:
-    value = load_regular(path, "MTP shortlist-head evidence")
-    route = value.get("selected_route", {})
-    trace = value.get("executed_trace", {})
-    proof = value.get("static_proof", {})
-    rebuilt = produce(
-        plan_path=Path(trace["plan"]["path"]), benchmark_report=Path(trace["benchmark_report"]["path"]),
-        trace_database=Path(trace["database"]["path"]), power_before=Path(trace["power_before"]["path"]),
-        power_after=Path(trace["power_after"]["path"]),
-        terminal_selection=Path(route["terminal_selection"]["path"]),
-        artifact=Path(route["artifact"]["path"]), executable=Path(route["benchmark_executable"]["path"]),
-        code_object=Path(proof["code_object"]["path"]), dispatch_symbol=trace["display_symbol"],
-        stages=trace["stages"],
-    )
-    if rebuilt != value:
-        raise ValueError("MTP shortlist-head evidence does not revalidate")
-    return value
-
-
 def revalidate_hardware(path: Path, selection_path: Path) -> dict:
     value = load_regular(path, "selected hardware-use authority")
     authorities = value.get("authorities", {})
     fp8 = [Path(row["authority"]["path"]) for row in value.get("loaded_fp8_proofs", [])]
-    mixed = authorities.get("mixed_mtp_bulk_w8")
     rebuilt = verify_hardware(
         selection_path, Path(authorities["dispatch_reconciliation"]["path"]),
-        Path(authorities["static_audit"]["path"]), Path(authorities["mtp_shortlist_head"]["path"]),
-        fp8, Path(mixed["path"]) if isinstance(mixed, dict) else None,
+        Path(authorities["static_audit"]["path"]), fp8,
     )
     if rebuilt != value:
         raise ValueError("selected hardware-use authority does not revalidate")
@@ -295,7 +270,7 @@ def assemble(plan_path: Path) -> dict[str, Any]:
         for name, value in plan.get("inputs", {}).items()
     }
     required = {"selection", "prefill_chunk", "quality_map", "exact_plan", "exact_campaign",
-                "exact_admission", "mtp", "low_manifest", "low_admission", "niah_plan",
+                "exact_admission", "low_manifest", "low_admission", "niah_plan",
                 "niah_root", "niah_admission", "vision_plan", "vision_root",
                 "vision_admission", "focused_closure", "focused", "hardware", "dflash",
                 "converter_preflight"}
@@ -328,9 +303,6 @@ def assemble(plan_path: Path) -> dict[str, Any]:
     if exact != load_regular(paths["exact_admission"], "exact-token admission"):
         raise ValueError("exact-token admission does not revalidate")
     require_route("exact-token", exact, route)
-
-    mtp = revalidate_mtp(paths["mtp"])
-    require_route("MTP shortlist head", mtp, route)
 
     dense_sources = [source for source in selection["source_provenance"]
                      if source["artifact"]["weights_id"] == route["weights_id"]

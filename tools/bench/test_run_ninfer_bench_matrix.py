@@ -22,6 +22,7 @@ from tools.bench.run_ninfer_bench_matrix import (
     BenchCase,
     add_repetition_args,
     bind_dflash_diagnostic,
+    bind_n16_migration_receipt,
     build_hybrid_shared_workspace_authority,
     build_cases,
     dflash_shortlist_frontier,
@@ -49,9 +50,52 @@ from tools.bench.run_ninfer_bench_matrix import (
 )
 from tools.bench.run_serve_concurrency import main as serve_concurrency_main
 from tools.bench.run_serve_corpus import CampaignError
+from tools.ppl.run import validate_n16_receipt_summary
 
 
 class CompiledKvGroupTest(unittest.TestCase):
+    def test_n16_receipt_summary_rejects_minimal_dict(self) -> None:
+        with self.assertRaisesRegex(ValueError, "incomplete"):
+            validate_n16_receipt_summary(
+                {"sha256": "a" * 64}, "r9700-q4g64-n16k16-eval")
+
+    def test_n16_receipt_summary_rejects_cross_profile_recipe(self) -> None:
+        value = {
+            "path": "/receipt", "sha256": "1" * 64,
+            "recipe_id": "r9700-source-q4-n16k16-promoted-w8-source-mse8-eval-v1",
+            "object_plan_sha256": "2" * 64,
+            "source_artifact_sha256": "3" * 64,
+            "source_receipt_sha256": "4" * 64,
+            "transcoder_sha256": "5" * 64,
+            "receipt_producer_sha256": "6" * 64,
+        }
+        with self.assertRaisesRegex(ValueError, "incomplete"):
+            validate_n16_receipt_summary(value, "r9700-q4g64-n16k16-eval")
+
+    def test_all_n16_recipes_attach_exact_migration_receipt(self) -> None:
+        for weights_id in (
+            "r9700-q4g64-n16k16-eval",
+            "r9700-q4-w8-mse-n16k16-eval",
+            "r9700-q4g64-f8e4m3-four-role-n16k16-eval",
+        ):
+            with self.subTest(weights_id=weights_id), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "model.ninfer"; path.write_bytes(b"artifact")
+                artifact = {"path": str(path.resolve()), "file_size_bytes": 8,
+                            "sha256": "a" * 64, "model_id": "qwen3.8-27b",
+                            "weights_id": weights_id}
+                inspected = {"path": artifact["path"], "bytes": 8,
+                             "sha256": "a" * 64, "model_id": "qwen3.8-27b",
+                             "weights_id": weights_id,
+                             "conversion_receipt": {"sha256": "b" * 64}}
+                with mock.patch(
+                    "tools.bench.run_ninfer_bench_matrix.ppl_run.inspect_candidate_artifact",
+                    return_value=inspected,
+                ):
+                    self.assertEqual(
+                        bind_n16_migration_receipt(path, artifact)["conversion_receipt"],
+                        inspected["conversion_receipt"],
+                    )
+
     def write_artifact(self, path: Path, weights_id: str, object_count: int = 0) -> None:
         directory = json.dumps(
             {"identity": {"model_id": "qwen3.8-27b", "weights_id": weights_id},

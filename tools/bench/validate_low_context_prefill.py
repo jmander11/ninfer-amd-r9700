@@ -30,6 +30,7 @@ from tools.bench.run_ninfer_bench_matrix import (
     count_corpus_tokens,
     file_sha256,
     inspect_artifact,
+    bind_n16_migration_receipt,
     inspect_executable,
     load_bench_report,
     require_fp8_hybrid_artifact,
@@ -178,7 +179,7 @@ def resolve_selected_dense_route(path: Path) -> dict[str, Any]:
     manifest = manifests["pareto-capacity"]
     artifact_path = Path(manifest["artifact"]["path"]).resolve(strict=True)
     executable_path = Path(manifest["bench"]["path"]).resolve(strict=True)
-    artifact = inspect_artifact(artifact_path)
+    artifact = bind_n16_migration_receipt(artifact_path, inspect_artifact(artifact_path))
     hybrid = recipe["weights_id"] == "r9700-q4g64-f8e4m3-four-role-n16k16-eval"
     if hybrid:
         artifact = require_fp8_hybrid_artifact(artifact_path, artifact)
@@ -309,7 +310,8 @@ def validate_ladder(
     selected_artifact = expected_artifact.resolve(strict=True)
     if bench != inspect_executable(executable):
         raise ValueError("benchmark executable identity differs")
-    inspected_artifact = inspect_artifact(selected_artifact)
+    inspected_artifact = bind_n16_migration_receipt(
+        selected_artifact, inspect_artifact(selected_artifact))
     hybrid = artifact["weights_id"] == "r9700-q4g64-f8e4m3-four-role-n16k16-eval"
     if hybrid:
         inspected_artifact = require_fp8_hybrid_artifact(selected_artifact, inspected_artifact)
@@ -460,7 +462,8 @@ def validate_ladder(
         raise ValueError("low-context ladder manifest changed while validating")
     if inspect_executable(executable) != bench:
         raise ValueError("benchmark executable changed while validating")
-    final_artifact = inspect_artifact(selected_artifact)
+    final_artifact = bind_n16_migration_receipt(
+        selected_artifact, inspect_artifact(selected_artifact))
     if hybrid:
         final_artifact = require_fp8_hybrid_artifact(selected_artifact, final_artifact)
     if final_artifact != artifact:

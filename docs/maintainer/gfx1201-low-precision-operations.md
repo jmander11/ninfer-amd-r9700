@@ -367,14 +367,15 @@ rejected before GPU timing; the immutable static evidence is
 
 ### Installed packed-INT4 GEMM library boundary
 
-The installed CK Tile and rocWMMA sources do not contain an exact mixed-A8/packed-Q4G64 GEMM that
-can replace NInfer's prefill kernel. CK Tile's gfx12 matrix layer has dense signed/signed
+The installed CK Tile, rocWMMA, and hipBLASLt surfaces do not contain an exact
+mixed-A8/packed-Q4G64 GEMM that can replace NInfer's prefill kernel. CK Tile's gfx12 matrix layer has dense signed/signed
 `pk_int4_t` K16 and K32 specializations, but both operands are packed INT4. Its group-quant block
 GEMMs accept packed INT4 storage only by selecting FP8 or BF8 compute types; they convert the
 stored codes before matrix multiplication. That is a different arithmetic profile from NInfer's
 A8 low/high-nibble reconstruction followed by direct signed-Q4 integer accumulation and one FP16
-activation-scale times FP16 weight-scale application per G64 group. rocWMMA supplies the same
-fragment/instruction plumbing and packing transforms, not a fused mixed-width, group-scaled
+activation-scale times FP16 weight-scale application per G64 group. Installed rocWMMA 2.2.1 has no
+packed-INT4 type or specialization; its gfx1201 integer WMMA surface is INT8-by-INT8 K16, so it
+does not even provide an IU4 fragment wrapper from which to compose the required group-scaled
 kernel. The installed hipBLASLt gfx1201 solution directory contains INT8 and FP8/BF8 families but
 no INT4 family or code object. CK Tile's separate `flatmm` tree is not an integer escape hatch:
 its mixed-width policies are F16/FP8 by MXFP4, and the microscaling implementation explicitly

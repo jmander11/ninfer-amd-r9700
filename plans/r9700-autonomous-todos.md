@@ -121,7 +121,8 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
       shortlist-head clause is superseded, while the selected-profile NIAH clause remains live.
       - [x] Close the current schema-v14 whole-evidence admission contract. The assembler accepts
             only exact C=1..4 capacity/whole pairs using one selected chunk, artifact, executable,
-            cache group, attention profile, and (for four-role) conversion receipt plus matching
+            cache group, attention profile, and the exact adjacent N16 migration receipt for every
+            all-Q4, mixed, or four-role base; four-role additionally requires its matching hybrid
             planner bytes. A whole matrix must have no failure marker and must bind `auto` both
             before and after timing; every report path is campaign-owned and every raw schema-v20
             report is reopened against its exact command. Each of the four C values requires one
@@ -171,21 +172,28 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
               smaller-chunk tie-breaks,
               reopens every raw report, and binds every source hash. Schema-v4 Pareto input now
               requires this record and rejects PPL, capacity, or whole evidence at another chunk.
-        - [x] Close selected-chunk and hybrid provenance propagation in the matrix tooling. Every
-              four-role screen/finalist and downstream selected-chunk campaign now queries and
-              validates its compile-matched planner at each exact requested chunk instead of
-              retaining a hardcoded 4,096-token width proof; the selector requires one planner
-              identity across each candidate's 8K screen and 32K confirmation. The terminal
-              low-context validator reopens the hybrid conversion receipt and selected-chunk width
-              authority, while non-hybrid candidates reject both fields. The supported candidate
+        - [x] Close selected-chunk receipt and hybrid-planner provenance propagation in the matrix
+              tooling. Every all-Q4, mixed, and four-role screen/finalist and downstream
+              selected-chunk campaign requires its own exact adjacent N16 migration receipt.
+              Four-role additionally queries and validates its compile-matched planner at each
+              exact requested chunk instead of retaining a hardcoded 4,096-token width proof; the
+              selector requires one planner identity across that candidate's 8K screen and 32K
+              confirmation. The terminal low-context validator reopens the selected base receipt
+              and selected-chunk width authority for every recipe. It requires the hybrid
+              selection/planner fields only for four-role and rejects those hybrid-only fields for
+              all-Q4 and mixed. The supported candidate
               set remains exactly four chunks, screening is C=1 only, and all downstream product
               matrices remain capped at C=1..4. Paths and identities are explicit; no glob,
               modification-time, or `latest` selection is admitted.
-        - [x] Prepare the no-overwrite twelve-candidate screen and global-finalist pipeline at
-              `profiles/bench/prefill-chunk-screen-twelve-candidate-20260905` and
-              `profiles/bench/prefill-chunk-selection-pipeline-20260905`. This credits command,
-              validation, and publication ownership only; all C1 screen/finalist measurements and
-              the schema-v2 selected-chunk authority remain physically pending.
+        - [x] Retain the superseded twelve-candidate screen preparation at
+              `profiles/bench/prefill-chunk-screen-twelve-candidate-20260905` as non-runnable
+              history. Its eight already-created all-Q4/mixed manifests predate their now-published
+              N16 migration receipts and cannot be resumed, rebound, or selected. After the P2048
+              gate opens chunk preparation, create a fresh no-overwrite screen, finalist,
+              campaign, pipeline, and selection authority whose names end in
+              `-receipt-bound-n16k16-20260905`. This credits no physical evidence yet; all C1
+              screen/finalist measurements and the schema-v2 selected-chunk authority remain
+              pending.
   - [ ] After terminal artifact, value group, static execution-profile, and prefill-chunk
         selection, establish the separate C1 low-context dense-prefill performance ladder at
         prompt lengths
@@ -620,6 +628,33 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
           campaign cell because the raw descriptor does not itself carry the retained sidecar
           hashes, and normalizes the campaign dictionary versus diagnostic pair-list shard forms;
           eight focused tests pass. Do not escalate G128 to 32K or add a G128 product path.
+          A later exact-role selective gate narrowed the scope to 48 value-Z, 48 GDN-output, and
+          64 MLP-down calls and passed its activation-inclusive 8K quality boundary, but the only
+          admitted disconnected A8G128-by-Q4G128 kernel did not establish material P2048 speed.
+          Batched report
+          `profiles/bench/r9700-a8g128-q4g128-n16k16-batched-ab-20260905.json` (SHA-256
+          `62928d0d4d6054b55fb067457ef79e418db4a533e10b2cc4e31eeec7051dfddf`) measured
+          `-0.155958 ms` weighted saving with a conservative
+          `[-2.511666,+2.199750] ms` interval. Five isolated range outliers failed stability:
+          value-Z T1 control `50.7115%`, GDN-output T12 candidate `26.2646%`, GDN-output T36
+          control `27.3622%`, MLP-down T36 candidate `15.5050%`, and MLP-down T2048 candidate
+          `10.8517%`. Its one allowed
+          frozen-byte repeat,
+          `profiles/bench/r9700-a8g128-q4g128-n16k16-batched-repeat1-ab-20260905.json`
+          (SHA-256 `2bcbd267a99bf0316695732d9431cde65d16706dc405de68985220ed23c04287`),
+          measured `-0.423443 ms` with `[-3.595587,+2.748701] ms` and one GDN-output P2048
+          candidate range outlier at `15.3891%`. Exact P2048 control/candidate medians were respectively
+          `2.331719/2.334753`, `1.233698/1.220992`, `3.555652/3.565343 ms` in the first run and
+          `2.345716/2.351652`, `1.235031/1.223824`, `3.562162/3.572732 ms` in the repeat for
+          value-Z/GDN-output/MLP-down; their conservative ratio bounds were
+          `[0.995490,1.007142]`, `[0.981957,0.997511]`, `[0.997276,1.008189]` and
+          `[0.994598,1.010529]`, `[0.977557,1.004339]`, `[0.996479,1.009496]`.
+          These are independent, non-pooled reports. Both robust point estimates and computed
+          intervals remain below `3 ms`, but instability prevents treating either interval as a
+          stable physical speed bound. The repeat allowance is exhausted, so no third run follows.
+          Small-T wins are diagnostic only; no Q4G128 product or dual-scale compatibility lane
+          follows, no live `>=30 ms` hypothesis remains, and the separate `>=2,000 tok/s`
+          whole-model gate remains unchecked. Chunk selection remains blocked behind that unmet gate.
         - [x] Record the initial design rejection of direct signed-A8 by unpacked-signed-Q4 IU8
           WMMA. The
           gfx1201 builtin is K16 with signedness controls `(true, A, true, B, C, false)`. A G64
@@ -2036,8 +2071,9 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
           all-Q4/mixed screen directories and five finalist directories predate these executable
           bytes and are inadmissible; no four-role screen or finalist exists, and the global
           selection record remains absent. The same four binaries are reused, but each of the
-          twelve physical runs must bind its own artifact/profile identity and the four-role runs
-          must additionally bind the hybrid conversion receipt through their matching planner.
+          twelve physical runs must bind its own artifact/profile identity and exact adjacent N16
+          migration receipt; the four-role runs must additionally bind their hybrid
+          selection/planner authority.
         - [x] Close the CPU campaign contract. Every Pareto capacity invocation now requires the
           one schema-v2-selected prefill chunk instead of silently using 4,096, binds it in the
           schema-v14 manifest and all four C=1..4 commands, and rejects any raw capacity report
@@ -2046,10 +2082,11 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
           twelve candidates and the exact 48-command Cartesian inventory. The executable owner is
           `profiles/bench/post-chunk-twelve-candidate-20260905`; physical execution remains open
           until the 20260905 chunk pipeline publishes its validated schema-v2 selection. The
-          retained schema-v14 manifest must be published atomically in its own directory; the
-          shared-runner patch that supplies this and DFlash hybrid presets is deliberately deferred
-          until the active finalist process exits. Refresh the affected downstream closures once
-          after that single runner change, not while the live process still owns the old bytes.
+          retained schema-v14 manifest must be published atomically in its own directory. The
+          shared-runner durable-publication and DFlash-hybrid preset patch is complete; its focused
+          tests cover the exact hybrid companion authority and allowed preset boundary. Refresh the
+          affected downstream closures only after the P2048 floor reopens base selection, not as a
+          substitute for the still-missing physical rows.
         - [x] Close the matching whole-model CPU contract. Each of the twelve post-promotion
           `pareto-whole` matrices is fixed to C=1..4, the schema-v2-selected chunk, one 8K+256 and
           one 32K+256 fresh-prompt row per C, and one warmup plus three measured repetitions. Each

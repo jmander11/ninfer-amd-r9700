@@ -166,7 +166,22 @@ Linear path; neither route repacks or copies weights to a private allocation.
 The family schedule reserves the
 maximum candidate scratch for Text, MTP, scoring, DFlash-head, and Vision call sites.
 
-An existing selected artifact can be migrated without source shards and without modifying it:
+The three legacy evaluation artifacts can be migrated without source shards and without modifying
+them. The transcoder has a closed identity map: all-Q4, mixed source-MSE Q4/W8, and four-role
+FP8/Q4 map only to their corresponding `-n16k16-eval` identities. Inspect exact identity,
+inventory, offsets, formats, layouts, sizes, and projected identity without reading payload bytes
+or creating an output with:
+
+```bash
+python3 -m tools.convert.qwen3_8_27b_r9700.transcode_q4_n16k16 \
+  --source out/qwen3.8-27b-r9700-q4g64-eval.ninfer --preflight-only
+python3 -m tools.convert.qwen3_8_27b_r9700.transcode_q4_n16k16 \
+  --source out/qwen3.8-27b-r9700-q4-w8-mse-eval.ninfer --preflight-only
+python3 -m tools.convert.qwen3_8_27b_r9700.transcode_q4_n16k16 \
+  --source out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-eval.ninfer --preflight-only
+```
+
+An actual migration additionally requires a distinct nonexistent output path, for example:
 
 ```bash
 python3 -m tools.convert.qwen3_8_27b_r9700.transcode_q4_n16k16 \
@@ -175,8 +190,39 @@ python3 -m tools.convert.qwen3_8_27b_r9700.transcode_q4_n16k16 \
 ```
 
 The staging tool copies every non-Q4 payload exactly, transposes only Q4 code/scale storage,
-verifies exact logical code and scale hashes independently after publication, and refuses to
-replace either input or an existing destination.
+verifies exact logical code and scale hashes plus non-Q4 payload hashes before create-only
+publication, then verifies the published whole-file hash and inode. It refuses to replace either
+input or an existing destination. The all-Q4 and mixed conversions use the same command shape with
+outputs `qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer` and
+`qwen3.8-27b-r9700-q4-w8-mse-n16k16-eval.ninfer`, respectively.
+
+Every selectable N16/K16 artifact requires an adjacent create-only migration receipt. The retained
+four-role receipt remains the authority published by the transcoder. The all-Q4 and mixed receipts
+have also been published with the common producer and are immutable create-only authorities; do not
+rerun receipt publication or replace any of the three adjacent receipt paths.
+
+Receipt validation reopens the exact legacy source and its conversion receipt, the frozen
+transcoder, and the migrated artifact directory. It requires the registered source and N16 object
+plans, exact artifact hashes and sizes, and the logical-Q4/non-Q4 verification recorded by the
+publisher. Benchmark, selection, Pareto, and DFlash authorities carry the same normalized receipt
+identity; no recipe may borrow another recipe's migration receipt.
+
+The retained all-Q4 receipt is adjacent to
+`out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer`, SHA-256
+`a8567a6b25176aac1f2106bcac3131b74d887e1a5be2c98da23c38a3a7870e54`; it binds source plan
+`d77d47a8cc0e005c50a6488fdde7b539365a81443b59993113c023a8dcabf25c` to N16 plan
+`bff624cbfda357d7c8b355530824682b1625c68c1f909ddb8b4241c2b3d21ec6` across 1,124 objects,
+including 439 Q4 objects. The retained mixed receipt is adjacent to
+`out/qwen3.8-27b-r9700-q4-w8-mse-n16k16-eval.ninfer`, SHA-256
+`1298ba51b2e80c225663814771a706afcbbe014e03f0bdefd4aa7dbf1cc8551c`; it binds source plan
+`c9392556ae633dde553ed74d328c4f04cc6a1cde8e17c166f271ead192b6884c` to N16 plan
+`14b80eb8a8200112169ef34bda4520d8b50233935bc9aa1c79f02b674ef36fb3` across 1,124 objects,
+including 183 Q4 objects. Both receipts bind transcoder SHA-256
+`e988d0ecc7d20a12728aa8313a71221eeea9c30dfff5d998020a826baab52801` and common receipt
+producer SHA-256 `3fb4f58e376e5c8dbd333f06ef146796410eb7829de4130c408d8adc5a615d64`.
+The earlier occupied prepared screen/finalist roots are not upgraded in place. Any subsequent
+receipt-bound preparation uses fresh names ending in `-receipt-bound-n16k16-20260905` and creates
+a fresh campaign, pipeline, and selection authority after the prefill practical-ceiling gate.
 
 The retained migrated artifact is
 `out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer`, identity

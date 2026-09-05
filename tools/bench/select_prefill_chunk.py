@@ -24,6 +24,7 @@ from tools.bench.run_ninfer_bench_matrix import (
     load_bench_report,
     validate_hybrid_shared_workspace_authority,
 )
+from tools.ppl.run import validate_n16_receipt_summary
 
 ARTIFACT_TYPE = "ninfer_r9700_prefill_chunk_selection"
 SCREENING_ARTIFACT_TYPE = "ninfer_r9700_prefill_chunk_screening"
@@ -60,15 +61,14 @@ def _identity(manifest: dict[str, Any]) -> tuple[str, int, str]:
         or artifact.get("weights_id") not in REQUIRED_RECIPES
     ):
         raise ValueError("prefill-chunk manifest has an unsupported artifact recipe")
+    validate_n16_receipt_summary(
+        artifact.get("conversion_receipt"), artifact["weights_id"])
     if (
         artifact.get("weights_id") == "r9700-q4g64-f8e4m3-four-role-n16k16-eval"
-        and (
-            manifest.get("required_candidate_identity")
-            != "fp8-hybrid-selection-authority"
-            or not isinstance(artifact.get("conversion_receipt"), dict)
-        )
+        and manifest.get("required_candidate_identity")
+        != "fp8-hybrid-selection-authority"
     ):
-        raise ValueError("prefill-chunk hybrid manifest lacks its conversion authority")
+        raise ValueError("prefill-chunk hybrid manifest lacks its selection authority")
     if (
         not _valid_sha256(artifact.get("sha256"))
         or type(artifact.get("file_size_bytes")) is not int

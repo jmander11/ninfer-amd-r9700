@@ -284,6 +284,8 @@ def validate(
         not isinstance(winner_artifact, dict)
         or winner_artifact.get("weights_id") != plan["artifact"].get("weights_id")
         or winner_artifact.get("sha256") != snapshots["artifact"]["sha256"]
+        or winner_artifact.get("conversion_receipt")
+        != plan["artifact"].get("conversion_receipt")
         or not isinstance(winner_cache, dict)
         or winner_cache.get("value_group") != workload.get("kv_value_group")
         or terminal.get("selected_prefill_chunk") != workload.get("prefill_chunk")

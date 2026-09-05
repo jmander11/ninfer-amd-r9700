@@ -866,8 +866,10 @@ Replace functional routes with measured gfx1201 families:
   `profiles/bench/r9700-gdn-scale-sidecar-production-p2048-c1-v2-20260904.json`, SHA-256
   `110dbb4090dfa4a92ac993bd70ac4c21666b7a259abd17f63a4dbb913d9f6e95`. The candidate API,
   kernel, runtime/workspace integration, test, and qualification surfaces are removed; production
-  retains the general recurrence with no adjacent variant. The incomplete direct v1 and the
-  concurrently contaminated whole v1 are removed and are not evidence.
+  retained the general recurrence at this decision point. The later clean phase-1+2 bundle below
+  reintroduced and promoted the scale-sidecar route as part of a different coherent boundary, so
+  this historical standalone rejection is not the current production-route description. The
+  incomplete direct v1 and the concurrently contaminated whole v1 are removed and are not evidence.
 - [x] Audit and reject two-stream P2048 projection overlap without implementation. The fresh trace
   gives GDN query-key/value-Z service of `29.039348/116.964267 ms` across 48 layers, so perfect
   overlap can save only `29.039348 ms` and the 20 ms gate requires hiding `68.87%` of all query-key
@@ -1066,7 +1068,7 @@ Replace functional routes with measured gfx1201 families:
   `36dbb9206070e10eefa113820518c0189fdf6f45fbc75e7021d44c7dbba21772`). The floor-closing search
   therefore returns to the unexplained selected-Q4 whole-prefill service gap while retaining only
   coherent smaller gains that pass their combined boundaries. The compatible ordinary-P2048 GDN
-  bundle is now being qualified as one boundary: direct projection/convolution scatter, an exact
+  bundle was qualified as one boundary: direct projection/convolution scatter, an exact
   262,144-byte FP32 Q/K inverse-norm sidecar with four-row recurrence ownership, and a fused
   recurrent-output/gated-RMSNorm/A8 handoff. The recurrence component has passed its direct
   represented-input FP64 gate across complete 2,048-step sampled histories, in-place/distinct
@@ -1083,8 +1085,11 @@ Replace functional routes with measured gfx1201 families:
   `1.1632268 s` / `1,760.621777 tok/s`, a `15.310257 ms` saving from the retained baseline, with
   workspace unchanged at `608,387,072` bytes. Its report is
   `profiles/bench/r9700-gdn-bundle-phase12-clean-p2048-c1-20260905.json` (SHA-256
-  `f1d818f68c3c243a030d64c83ac91525a212605134e6a6c337d1ad1712008651`). The floor remains closed
-  by about `139.2268 ms` and no chunk sweep is admitted. The first disconnected P2048/G16
+  `f1d818f68c3c243a030d64c83ac91525a212605134e6a6c337d1ad1712008651`). This exact clean
+  phase-1+2 implementation is the current normalized-T2048 production route; its direct-scatter
+  preparation and `scale_sidecar_recurrence_kernel` are also the route observed in the fresh
+  N16/K16 trace below. The floor remains closed by about `139.2268 ms` and no chunk sweep is
+  admitted. The first disconnected P2048/G16
   native-FP8-Q/Bk32 plus
   PV-W16 timing receipt is explicitly invalid: review found that its reconstructed QK stage omitted
   production's causal CTA pruning and computed roughly twice the intended triangular work. The
@@ -1191,20 +1196,278 @@ Replace functional routes with measured gfx1201 families:
   It is terminally rejected and its qualification-only surfaces are removed. The immutable report
   is `profiles/bench/r9700-a8q4-n16k16-b128-p2048-gate-20260905.json` (SHA-256
   `6d1e95dd74126434c96c7d77563905da3275efcb27b79e36f95830cc6c93210b`).
+  A fresh selected-region trace of this exact retained N16/K16 route attributes `1,068.137022 ms`
+  of the `1,097.333724 ms` Text-prefill wall to active kernels, leaving only `29.196702 ms`
+  kernel-inactive wall. The N16 Q4 projection kernel remains the largest actionable family at
+  `356.276973 ms` across 176 calls, or about `61.7223` useful TMAC/s over the exact production
+  inventory. Its same-work service time at the `120`-TMAC/s practical-ceiling gate would be
+  `183.251938 ms`, a `173.025035 ms` saving, so Q4 alone retains more than enough credible gap to
+  close both the `84.835254 ms` minimum-floor deficit and the `25 ms` dominant-bucket criterion.
+  Chunk selection therefore remains blocked. Secondary observed families are the selected FP8
+  library projections (about `306.172272 ms` across their two emitted solution families), dense
+  attention (`148.044163 ms`), and GDN recurrence (`139.215284 ms` at the stage boundary). The
+  attribution is `profiles/rocprof/r9700-n16k16-production-p2048-trace-20260905/analysis.json`
+  (SHA-256 `3466e40d50ec96b9377db06791eda7f7947c1811f0be3a23d619b392490accbd`); it selects the next
+  optimization boundary but does not replace unprofiled timing.
+  The `306.172272 ms` selected-FP8-library bucket is terminal for the separate `>=25 ms`
+  architectural threshold. The exact trace split is `253.819158 ms` for 64 post-mixer gate/up
+  calls (`184.10` useful TFLOP/s), `23.799365 ms` for 48 GDN query/key calls (`173.25` TFLOP/s),
+  and `28.553749 ms` for 32 dense-attention query/key/gate/value calls (`168.47` TFLOP/s). All 791
+  installed gate/up entries have already reduced to ten supported solutions and all ten were timed;
+  selected solution 123104 remains best, while the nearest solution saves only a projected
+  `0.212524 ms` over 64 calls. The qualified custom M128xN128 native-FP8 route regressed by
+  `258.24 ms` over those calls and M128xN256 is resource-terminal. The two smaller-shape families
+  total only `52.353114 ms`; saving 25 ms would require `326.60` TFLOP/s including outer scales and
+  BF16 publication, versus the observed `168`--`173`. Even complete elimination of the downstream
+  gate/up SiLU/A8 consumer is bounded at `20.761231 ms`, and the installed library has no fused
+  paired-SiLU/group-quant epilogue. No further FP8 catalog, custom matmul, or adjacent fusion
+  qualifier follows under this threshold.
+  A structurally fused dense-attention retry is terminal at this boundary. The prior physical
+  Bq16/Bk64 online-softmax route already combined native BF16-WMMA QK, FP32 running
+  maximum/denominator/numerator state, and direct signed-INT4-times-FP16-scale PV without a global
+  score or probability matrix. At P2048/G16 it measured `64.364246 ms` per layer (the later
+  full-score comparator measured `61.569540 ms`) at 217 VGPR, 37,160-byte LDS, occupancy 6, and
+  zero scratch/spills; the retained report is `profiles/bench/r9700-dense-prefill-attention-ab.json`
+  (SHA-256 `d7a0f50a6ae91448583b07d7477d2926b950b65eeadd3ac924f28a8354ed95a6`). The fresh
+  `148.044163 ms` / 16-layer bucket must fall to about `<=123.044 ms`, or `<=7.69025 ms` per layer,
+  to save 25 ms, requiring more than an eightfold improvement over that physical online route.
+  A six-head-shared fused CTA does not supply it: retaining all `6*16*256` FP32 output
+  accumulators recreates the proven high-VGPR/low-residency envelope, while feature-group
+  partitioning rereads Q/K or spills the 96-KiB output tile beyond LDS. Even before online
+  rescaling and synchronization, removing the two remaining causal score-plane transfers at the
+  measured streaming read/write rates plus the entire `8.381 ms` maximum stage is only about
+  `18.9 ms` over 16 layers. No further online-fused tile is admitted without a changed numerical
+  or cache-layout contract.
+  N16/K16 does not reopen the terminal M64xN256 decision: its improved persistent-weight
+  coalescing applies symmetrically to N128 and N256. N256 still changes only activation rereads and
+  CTA/barrier count while preserving weight bytes, wave/IU4 work, reconstruction, and accumulation.
+  Even its impossible request-only bound saves at most `48.594 ms` over the 64 P2048 down calls;
+  the resource-sane 32-wave N256 was already physically slower at every tested extent, and the
+  N16+b128 composition independently regressed every exact shape. No adjacent N256 challenger is
+  admitted.
+  The distinct N16/K16 1,024-thread M128xN128 two-bank ping-pong candidate was then tested once.
+  It halved persistent-weight rereads, emitted 89 VGPR, 25,600-byte LDS, occupancy 16, eight IU4
+  sites, two workgroup-local barrier pairs, the intended successor-load overlap, and zero spills;
+  full production bit parity plus the independent sampled represented-formula oracle and guards
+  passed. Physical `auto` timing nevertheless regressed all three exact shapes by
+  `2.886%`--`3.781%`: the 48/64/64-call aggregate moved from `348.631420` to `360.949205 ms`, a
+  `-12.317785 ms` saving. It is terminally rejected with no whole run or adjacent M128 variant.
+  The immutable report is
+  `profiles/bench/r9700-a8q4-m128n128-n16k16-pingpong-p2048-ab-20260905.json` (SHA-256
+  `e17f97d896dfc65a7f9358be85830e07632aec0de770baed0fa713fd20884e85`).
+  The installed library/codegen escape routes are also terminal at the exact production formula.
+  CK 1.2.0 exposes native gfx1201 K16/K32 IU4 only for packed-I4 by packed-I4; its quantized
+  packed-W4 GEMMs convert to FP8/BF8 compute and do not accept the stored FP16 G64 scale plane.
+  rocWMMA 2.2.1 has no packed-I4 type or specialization on gfx1201. hipBLASLt 1.4.1 accepts the shared
+  `HIP_R_4I` type name syntactically, but its 292-file gfx1201 solution package contains no I4
+  family or code object, and its scale modes cannot express independent FP16 activation and weight
+  scales at each inner-K G64 boundary. Only the compiler K32 IU4 builtin can express the required
+  primitive, and retained production already invokes it directly for unsigned-low/signed-high A8
+  reconstruction against signed W4 before the per-G64 FP32 scale/FMA and BF16 output. At the fresh
+  `356.276973 ms` Q4 service, a `25 ms` whole saving would require `<=331.276973 ms`
+  (`<=0.929830x`, `>=1.07547x`), but none of these installed surfaces yields a callable candidate.
+  Splitting A8 into two library I4 GEMMs still lacks the combined per-G64 accumulation and would
+  require partial storage or 80--272 group launches per projection. No library qualification or
+  GPU run follows. A new target-specific kernel architecture remains a distinct possible route;
+  this decision closes only wrapping the installed rocWMMA, hipBLASLt, CK, or compiler interfaces
+  as if they supplied an exact complete GEMM.
+  The final exact-G64 target-specific escape route is now terminal as well. A qualification-only
+  standalone gfx1201 assembly kernel preserved the production ABI, N16/K16 layout, exact signed
+  IU4 reconstruction and per-G64 FP32 accumulation while explicitly maintaining a two-entry
+  global-load FIFO. The first physical regression exposed a real pending-request WAW hazard:
+  slot-A weight requests could complete into `v55:v56` after the parity-B path had reused that pair
+  for an activation address, and the resulting TCP permission-fault addresses contained the
+  packed-Q4 payload pattern. The bounded repair dedicated `v93:v94` to refill address formation;
+  subsequent review also corrected the G+2 activation/weight-scale cursors (`+4`/`+64` bytes) and
+  the final-group skip/drain/parity sequence. The rebuilt code object passed the frozen static,
+  metadata, ABI, CFG, request-order, resource, mutant, graph-replay, status, tail, alignment,
+  canary, incumbent-bit-parity, and sampled complete-K FP64 gates. It used 95 VGPR, 23 SGPR,
+  17,152-byte LDS, zero private/scratch/spills, compiler occupancy 16, and reported three maximum
+  active 512-thread blocks per CU through the distinct HIP runtime occupancy query. Direct balanced
+  `auto` timing nevertheless regressed every exact P2048 shape: candidate/incumbent ratios were
+  `1.0391881546`, `1.0410894525`, and `1.0324631967`; the exact 48/64/64-call aggregate moved from
+  `367.501329422` to `380.711719513 ms`, a `-13.210390091 ms` saving. It is terminally rejected
+  with no production or whole-model run. The immutable report is
+  `profiles/bench/r9700-a8q4-n16k16-hand-fifo-p2048-ab-20260905.json` (SHA-256
+  `8d9bbc228a1ab18fb7482f809089b93e2d53d50396209675f6182dfceab9482e`); all qualification-only
+  source, assembly, checker, harness, runner, validator, test, object, code-object, and executable
+  surfaces are removed.
+  A K128 two-G64 M64xN128 slab does not reopen this result. Packing one G64 payload in each of the
+  existing 8,576-byte banks gives a 17,152-byte K128 slab and can halve barrier cadence, but leaves
+  no free bank in which to publish the successor slab: its global requests serialize between pairs
+  instead of overlapping the current eight-IU4-plus-epilogue body. Preserving the production
+  ping-pong overlap requires two such slabs, 34,304-byte LDS, with the associated residency loss;
+  either form retains all weight/activation bytes, 16 IU4 sites per K128, signed reconstruction,
+  scale, and FP32 accumulation work. Even the generous issue-plus-wait ceiling for eliminating half
+  the barrier cadence is about `19.41 ms` over the exact inventory, below the fixed `25 ms`
+  architectural boundary and far below the `173.025035 ms` practical-ceiling opportunity. There is
+  no same-input projection pair that could amortize the slab across calls. No K128 qualifier or
+  adjacent exact-G64 variant follows; the exact-G64 architecture is terminal at this boundary.
+  The represented-format contingency is therefore active only for its already-bounded next step.
+  The qualification-only CPU diagnostic samples the
+  exact 160 P2048-dominant Text Q4 matrices (64 MLP-down, 48 GDN value-Z, and 48 GDN-output), with
+  eight deterministic rows per matrix. Source-MSE Q4G128 measured `1.021608707x` aggregate
+  relative-L2 versus canonical Q4G64; every role also passed the fixed `<=1.03x` screen at
+  `1.020869417x`--`1.022098216x`. The independently reopened report is
+  `profiles/bench/r9700-selective-q4g128-mse-source-screen-20260905.json` (SHA-256
+  `a5389d6597be7a9bed3e75a112b64e8d7f9d8a18411fc065b153f363aa144e09`). This is neither a
+  registered format nor artifact/runtime/selection authority. The terminal exact-G64 result leaves
+  the P2048 floor unresolved and activates exactly one source-only 8K PPL diagnostic; it does not
+  authorize an artifact conversion, kernel, chunk sweep, or 32K run. That weight-codec-only gate
+  now passes. Over the fixed 4,095 scored positions, selective canonical Q4G64 measured mean NLL
+  `1.8778456412`, delta `0.0124727233` versus BF16, and `5/11` new severe positions. Selective
+  source-MSE Q4G128 measured mean NLL `1.8869286448`, delta `0.0215557268` versus BF16, and `6/11`
+  new severe positions, passing both the `ln(1.05)=0.0487901642` mean-NLL and severe-position gates.
+  Its paired mean-NLL delta versus Q4G64 is `+0.0090830036` and remains diagnostic. The independently
+  revalidated comparison is `profiles/ppl/selective-q4g128-source-8k-20260905/comparison.json`
+  (SHA-256 `5ba80e928150889b4876b34db23188367b75de8fd78f24b3d4d9507cf929f08e`).
+  Kernel-feasibility review further narrows what that diagnostic can authorize. Retaining the
+  production A8G64 activation boundary with Q4G128 weights leaves both K64 integer dots and every
+  reconstruction, conversion, activation-scale product, FP32 accumulation, IU4 instruction, and
+  barrier intact; it only removes `5.11705088 GB` of weight-scale requests over the exact selected
+  `48/48/64` GDN-value-Z/GDN-output/MLP-down inventory, about `1.493%` of staged requests and an
+  estimated `~5.2 ms` of its `350.51449 ms` service. This is terminally below the `25 ms` admission
+  boundary, so no A8G64-by-Q4G128 implementation follows. The only materially credible profile is
+  paired A8G128-by-Q4G128: it retains the IU4 and code-byte work but can carry the low/high integer
+  accumulators across two G64 halves, halving reconstruction, I32-to-FP32 conversion, scale-product,
+  and FP32-accumulation epilogues while saving `7.67557632 GB` of activation-plus-weight scale
+  requests. The weight-only source diagnostic explicitly decodes weights to BF16 and keeps BF16
+  activations/mathematics, so even a pass cannot admit that arithmetic profile. Before any format,
+  artifact, or kernel implementation, run a separate activation-inclusive source/reference 8K gate
+  over the same 160 logical roles and fixed 4,095 scored positions: compare the complete represented
+  A8G64-by-canonical-Q4G64 grouped formula with A8G128-by-MSE-Q4G128, use FP32 per-group
+  accumulation and one BF16 linear-output boundary, and gate the candidate directly against the
+  retained BF16 authority at mean-NLL delta `<=ln(1.05)` and no more than `11` new `NLL>=10`
+  positions. The paired candidate-minus-control result remains diagnostic. This gate is prepared,
+  not executed, at `profiles/ppl/selective-a8g128-q4g128-source-8k-prepare-20260905` (closure
+  SHA-256 `13d92a7bdd065248d4c6a520164b866f6917ac3d71ec7262540d6a5ea1163a7f`), with the
+  metadata-only no-GPU preflight at
+  `profiles/bench/r9700-selective-a8g128-q4g128-source-8k-preflight-20260905.json` (SHA-256
+  `f024f63abd035ea8a800213bf0e9800e98e296d21ef4694bb0c824a780c9379f`). Its scorer processes
+  source weights in bounded 128-row chunks and streams one K64/K128 group at a time into one
+  M-by-N FP32 accumulator; it does not materialize an M-by-N-by-group tensor or a whole decoded
+  weight matrix. The activation-inclusive gate now passes: represented A8G64-by-Q4G64 measured mean
+  NLL `1.8772519572`, delta `0.01187903925` versus BF16, and `4/11` new severe positions; represented
+  A8G128-by-MSE-Q4G128 measured mean NLL `1.8862310771`, delta `0.02085815914`, and `6/11` new severe
+  positions. The paired candidate-minus-control delta is `+0.00897911989` with `9` new and `5`
+  repaired severe positions and remains diagnostic. The comparison is
+  `profiles/ppl/selective-a8g128-q4g128-source-8k-20260905/comparison.json` (SHA-256
+  `450edc009b13fb0aba4e790adf0f00edc2439645ec3e1c86b8012eb37889963d`). This admits only a
+  disconnected qualification kernel, not a product format, artifact, binder, or runtime path.
+  That qualifier must retain the 17,152-byte G64-bank pipeline, emit no more than
+  96 VGPR at occupancy 16 with zero spills, pass the independent complete-formula oracle, lose no
+  exact cell by more than `1.01x`, and save at least `25 ms` over the exact `48/48/64` aggregate.
+  Its two banks remain K64 slabs rather than one G128 slab per bank: the even slab owns the one
+  represented A/W scale pair for the logical G128 group, the odd slab extends the same low/high I32
+  chains, and the epilogue must consume those scales before the even bank is overwritten by the
+  next prefetched slab. Static qualification must prove exactly one scale load per G128, scale-read
+  before same-bank overwrite, successor code-load issue before the current WMMA/epilogue, and no
+  compiler-inserted premature drain. Stored-layout correctness must cover the production small-T
+  union `{1,2,3,4,8,12,16,24,36,48}` at all three selected shapes, including status, tails, guards,
+  and graph replay: ordinary C1--4 contributes T1--4, retained MTP width four contributes
+  T4/8/12/16, and DFlash2 verify width 12 contributes T12/24/36/48 at the fixed C1--4 ceiling.
+  Complete quantizer-or-fused-quantizer-plus-wave32-GEMM timing must cover all ten reachable T
+  values for each selected shape because the activation grid/predication balance differs even when
+  the WMMA tile count is unchanged; T1/T4/T12/T48 are mandatory anchor and weighted-summary cells,
+  not substitutes for the omitted widths. Every reachable cell and the exact call-weighted aggregate
+  must be `<=1.01x`. The proposal-width-eight and proposal-head-width-seven DFlash companion calls
+  remain G64 and are outside this selected G128 route. The P2048 aggregate must include ordinary
+  A8G128 preparation for value-Z/output
+  and fused-SiLU-to-A8G128 preparation for MLP-down, never GEMM-only timing.
+  Production admission still requires a matched dense G16 C1/P2048/no-spec whole run at or below
+  `1.024 s` (`>=2,000 tok/s`), not merely the isolated `25 ms` gain.
+  The disconnected qualifier is now terminally inconclusive with no admission after exhausting
+  its single frozen-byte repeat. The first batched report is
+  `profiles/bench/r9700-a8g128-q4g128-n16k16-batched-ab-20260905.json` (SHA-256
+  `62928d0d4d6054b55fb067457ef79e418db4a533e10b2cc4e31eeec7051dfddf`): P2048
+  control/candidate medians and conservative ratio bounds were
+  `2.331719/2.334753 ms`, `[0.995490,1.007142]` for value-Z;
+  `1.233698/1.220992 ms`, `[0.981957,0.997511]` for GDN-output; and
+  `3.555652/3.565343 ms`, `[0.997276,1.008189]` for MLP-down. Its exact
+  `48/48/64` weighted saving was `-0.155958 ms`, conservatively
+  `[-2.511666,+2.199750] ms`. Five isolated range outliers failed the fixed 6% stability gate:
+  value-Z T1 control was `50.7115%`, GDN-output T12 candidate `26.2646%`, GDN-output T36 control
+  `27.3622%`, MLP-down T36 candidate `15.5050%`, and MLP-down T2048 candidate `10.8517%`. The allowed
+  repeat is `profiles/bench/r9700-a8g128-q4g128-n16k16-batched-repeat1-ab-20260905.json`
+  (SHA-256 `2bcbd267a99bf0316695732d9431cde65d16706dc405de68985220ed23c04287`):
+  value-Z was `2.345716/2.351652 ms`, `[0.994598,1.010529]`; GDN-output was
+  `1.235031/1.223824 ms`, `[0.977557,1.004339]`; and MLP-down was
+  `3.562162/3.572732 ms`, `[0.996479,1.009496]`. Its weighted saving was
+  `-0.423443 ms`, conservatively `[-3.595587,+2.748701] ms`; one GDN-output outlier failed
+  stability because its P2048 candidate range was `15.3891%`. Both independent reports used
+  128 calls per P2048 event interval, seven alternating route samples,
+  and `3*1.4826*MAD` bounds. Small-T speedups remain qualification diagnostics only. Neither run
+  has a robust point estimate or computed interval above `3 ms`, but their failed stability means
+  those intervals are not a stable physical speed bound and the two reports are not pooled. The
+  repeat allowance is exhausted, so there is no third run and no admission; no Q4G128 format,
+  dual-scale artifact lane, binder, or runtime implementation follows. This does not complete or
+  weaken the separate `>=2,000 tok/s` whole-model gate, and chunk selection remains blocked behind
+  that unmet whole-model gate.
+  A separate two-bank next-token pipeline for the remaining GDN scale-sidecar recurrence was
+  admitted only to device compilation. It preserved the exact recurrence/state order and passed
+  its resource envelope at 57 VGPR, 2,064-byte LDS, occupancy 16, two local barrier pairs, and
+  zero scratch/spills, but the emitted ISA drained both successor vector loads and inverse/control
+  scalar requests before the current-token recurrence FMAs. The intended latency overlap was
+  therefore absent. It is terminally rejected at the frozen static gate without GPU regression or
+  timing; a barrier-count-only variant has no credible `>=25 ms` whole saving. The immutable
+  receipt is `profiles/bench/r9700-gdn-scale-sidecar-pingpong-static-rejection-20260905.json`
+  (SHA-256 `5465b90c100d9b93a1644f8143efc5b042230eabc13e865fc80a0fed3700b290`), and all
+  qualification-only surfaces are removed.
   Folding inverse-norm production into the direct-scatter kernel is also closed at design scope:
   it is bit-exactly feasible with a 2,048-byte BF16 shared panel and one barrier, but the retained
   sidecar preparation costs only `0.03379999846 ms` per layer, so perfect elimination can save at
   most `1.622399926 ms` over 48 layers before accounting for replacement LDS traffic and barriers.
   That is only `1.17%` of the remaining floor gap; no implementation or GPU run follows.
+  The complete GDN recurrence bucket is therefore terminal under the `>=25 ms` architectural
+  threshold without changing its FP32 persistent-state semantics. The fresh stage is
+  `139.215284 ms` across 96 dispatches: `137.916357 ms` for 48 main recurrence calls and about
+  `1.298927 ms` for sidecar preparation. Retaining preparation requires the main kernel to reach
+  `<=112.916357 ms` (`>=1.2214x`) to save 25 ms. Production already keeps each 128-value FP32 state
+  row in registers, coalesces its initial/final transfer, uses eight-lane row groups and precomputed
+  inverse norms, and preserves the ordered FP32 FMA dependency chain. Grouped-head serialization,
+  affine scan/chunking, output/RMSNorm/A8 fusion, inverse-norm folding, and two-bank successor
+  prefetch are measured or statically terminal. The remaining three-head-cohort sketch removes
+  only duplicated Q/K staging, roughly 2% of the arithmetic before cache effects, while retaining
+  every serial state FMA/reduction and cannot credibly provide the required 18.1% stage reduction.
+  Larger all-row schedules add barriers, FP32-input WMMA is unavailable, and BF16 state or parallel
+  reassociation changes the state contract. No adjacent recurrence qualifier follows.
+  No other semantics-preserving P2048 kernel, fusion, or launch-schedule fallback reaches the
+  `25 ms` admission bound. After the terminal Q4, selected-FP8, dense-attention, and GDN-recurrence
+  buckets, the remaining summed kernel service is `126.465547 ms` and fragmented: BF16 GDN a/b
+  linears are `22.662237 ms`, the already-promoted fused SiLU-to-A8 path `20.761231 ms`, FP8
+  activation quantization `14.616312 ms`, K5120 RMSNorm `13.322712 ms`, promoted GDN direct scatter
+  `12.543306 ms`, residual adds `12.354227 ms`, ordinary A8 quantization `8.850520 ms`, GDN gated
+  RMSNorm `6.589754 ms`, feature extraction `4.772466 ms`, and every other symbol `<=1.998 ms`.
+  The only adjacent pair above 25 ms, residual plus K5120 RMSNorm at `25.676939 ms`, already
+  regressed `2.94x` in its exact fusion. Perfect FP8-quantizer elimination is below the bound, and
+  attention input sharing removes only 16 of 144 calls. The `29.196702 ms` marker-minus-active-union
+  residual across 2,089 eager dispatches is not a measured host-overhead bucket: saving 25 ms would
+  require eliminating `85.63%` and leave about 2 microseconds per dispatch despite profiler queue
+  interception and unavoidable gaps. Decode Device Graph evidence does not admit a capture-safe or
+  faster 2,089-node prefill graph. The activation-inclusive A8G128-by-Q4G128 represented-format
+  contingency was the final live material hypothesis. Its two independent robust point estimates
+  and computed intervals above remain below `3 ms`, but instability prevents treating them as a
+  physical speed bound; the permitted repeat is exhausted and admits no product path. The residual
+  audit therefore leaves no live
+  semantics-preserving `>=25 ms` or `>=30 ms` P2048 hypothesis.
 - [ ] Rerun all 48 post-promotion capacity cells (dense/XAttention times
   all-Q4/mixed/four-role-hybrid times G16/G32, each at C=1..4). Bind the newly measured Device Graph
   executable allocation; this is
   still required even though the aliased split scratch does not raise the modeled global arena.
-  Command preparation is complete in
-  `profiles/bench/post-chunk-twelve-candidate-20260905`: it consumes the validated shared chunk and
+  CPU command structure is complete in
+  `profiles/bench/post-chunk-twelve-candidate-20260905`. The all-Q4 and mixed N16/K16 artifacts and
+  their adjacent immutable migration receipts are published. The eight already-created
+  all-Q4/mixed manifests in the earlier `-n16k16-20260905` roots predate those receipts and are
+  superseded, non-runnable, and never rebound or resumed. Once the P2048 gate opens, a fresh shared
+  chunk authority must be derived only from screen/finalist roots whose names end in
+  `-receipt-bound-n16k16-20260905`, with a fresh campaign, pipeline, and selection authority in the
+  same namespace. The post-chunk package then consumes that receipt-bound selection and
   owns exactly the twelve capacity matrices x C=1..4 plus their matched twelve whole matrices x
-  C=1..4. Each retained schema-v14 manifest must be published atomically in its own directory. The
-  required shared-runner publication/DFlash-preset patch is now complete: runner-owned outputs use
+  C=1..4. Each retained schema-v14 manifest must be published atomically in its own directory.
+  These base-selection rows retain the fixed existing MTP3 regression profile; they do not require
+  new MTP optimization. Recipe-specific DFlash shortlist/capacity/Pareto remains the selected-only
+  downstream gate because its companion artifact depends on the base winner. The required
+  shared-runner publication/DFlash-preset patch is complete: runner-owned outputs use
   inode-checked same-directory durable publication and resume validates regular-file ownership and
   report provenance; the focused runner suite passes `48/48`. One downstream closure refresh
   remains deferred behind the P2048 floor gate; preparation is not physical completion. No
@@ -1212,7 +1475,8 @@ Replace functional routes with measured gfx1201 families:
 
   Final cutover admission is also prepared, not passed, at
   `profiles/bench/final-artifact-cutover-admission-prepare-20260905`. Its CPU-only validator reopens
-  the schema-v7, chunk, six-quality, exact-token, low-context, MTP-head, NIAH, selected-source-BF16
+  the schema-v7, chunk, six-quality, exact-token, low-context, retained MTP regression in the
+  whole/selected-trace evidence, NIAH, selected-source-BF16
   Vision diagnostic, focused, hardware-use, and DFlash owners; joins the exact twelve C1..4 capacity and twelve C1..4 whole
   matrices; and publishes create-only only after every selected-route physical authority passes.
   The final receipt remains absent, so no artifact or product-identity mutation is authorized.

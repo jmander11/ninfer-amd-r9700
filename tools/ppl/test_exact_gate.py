@@ -649,21 +649,43 @@ class CampaignInputProvenanceTest(unittest.TestCase):
                     "device_arena_bytes": run.fp8_hybrid_inventory.DEVICE_ARENA_BYTES,
                     "object_plan_sha256": "3" * 64,
                 },
+                "migration": {
+                    "source_artifact": {"sha256": "4" * 64},
+                    "source_conversion_receipt": {"sha256": "5" * 64},
+                    "transcoder": {"sha256": "6" * 64},
+                },
             }
-            with self.assertRaisesRegex(SystemExit, "receipt is missing"):
+            with (mock.patch.object(run, "_validate_n16_migration_ancestry"),
+                  self.assertRaisesRegex(SystemExit, "receipt is missing")):
                 run.inspect_candidate_artifact(artifact)
             receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
-            inspected = run.inspect_candidate_artifact(artifact)
+            with mock.patch.object(run, "_validate_n16_migration_ancestry"):
+                inspected = run.inspect_candidate_artifact(artifact)
             self.assertEqual(
                 inspected["conversion_receipt"]["selection_sha256"],
                 decision.selection_sha256,
             )
             run.require_fp8_hybrid_candidate(inspected)
+            receipt_bytes = receipt_path.read_bytes()
+            receipt_target = root / "receipt-target.json"
+            receipt_target.write_bytes(receipt_bytes)
+            receipt_path.unlink()
+            receipt_path.symlink_to(receipt_target)
+            with (mock.patch.object(run, "_validate_n16_migration_ancestry"),
+                  self.assertRaisesRegex(SystemExit, "regular file")):
+                run.inspect_candidate_artifact(artifact)
+            receipt_path.unlink()
+            receipt_path.write_bytes(receipt_bytes)
+            artifact_alias = root / "hybrid-alias.ninfer"
+            artifact_alias.symlink_to(artifact)
+            with self.assertRaisesRegex(SystemExit, "nonsymlink"):
+                run.inspect_candidate_artifact(artifact_alias)
             with self.assertRaisesRegex(SystemExit, "authority-bound hybrid"):
                 run.require_fp8_hybrid_candidate({"weights_id": "different"})
             receipt["candidate"]["selection_sha256"] = "4" * 64
             receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
-            with self.assertRaisesRegex(SystemExit, "candidate record differs"):
+            with (mock.patch.object(run, "_validate_n16_migration_ancestry"),
+                  self.assertRaisesRegex(SystemExit, "selection authority differs")):
                 run.inspect_candidate_artifact(artifact)
 
     def test_corpus_manifest_hash_decimal_domain_and_count_are_enforced(self) -> None:

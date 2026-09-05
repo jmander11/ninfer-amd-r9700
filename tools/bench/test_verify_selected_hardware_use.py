@@ -32,10 +32,9 @@ class SelectedHardwareUseTest(unittest.TestCase):
         plan = json.loads((
             repo / "profiles/bench/post-terminal-selected-hardware-use-20260905/plan.json"
         ).read_text(encoding="utf-8"))
-        self.assertIn(
-            "python3 -m tools.bench.prepare_selected_mtp_bulk_w8",
-            plan["mixed_mtp_bulk_preparation"],
-        )
+        self.assertNotIn("--mtp-proof", script)
+        self.assertNotIn("mixed_mtp_bulk_preparation", plan)
+        self.assertNotIn("mixed_mtp_bulk_execution", plan)
         result = subprocess.run(
             [sys.executable, "-m", "tools.bench.verify_selected_hardware_use", "--help"],
             cwd=repo, capture_output=True, text=True, check=False,
@@ -59,7 +58,8 @@ class SelectedHardwareUseTest(unittest.TestCase):
             "executable": snapshot(executable), "kv_value_group": 16,
             "xattention_profile": attention, "prefill_chunk": 2048,
         }
-        symbols = [Q4_CTA, W8_CTA if weights == "r9700-q4-w8-mse-n16k16-eval" else Q4_CTA,
+        symbols = [Q4_CTA, Q4_WAVE,
+                   W8_CTA if weights == "r9700-q4-w8-mse-n16k16-eval" else Q4_CTA,
                    DENSE_QK if attention == "dense" else XRANK]
         if attention != "dense": symbols.append(XCONSUMER)
         if weights == "r9700-q4g64-f8e4m3-four-role-n16k16-eval":
@@ -144,45 +144,6 @@ class SelectedHardwareUseTest(unittest.TestCase):
                                         "sha256": route["executable"]["sha256"]}],
             "shared_symbol_proofs": proofs,
         })
-        mtp_files = {}
-        for name in ("plan", "benchmark_report", "database", "power_before", "power_after",
-                     "code_object", "objdump", "readelf", "source"):
-            file = root / f"mtp-{name}"
-            file.write_text(name)
-            mtp_files[name] = snapshot(file)
-        mtp = self.write(root / "mtp.json", {
-            "artifact_type": "ninfer_r9700_mtp_shortlist_head_evidence", "schema_version": 1,
-            "status": "passed", "selected_route": {
-                "terminal_selection": route["terminal_selection"],
-                "artifact": {"sha256": route["artifact"]["sha256"]},
-                "benchmark_executable": {"sha256": route["executable"]["sha256"]},
-                "kv_value_group": route["kv_value_group"],
-                "xattention_profile": route["xattention_profile"],
-                "prefill_chunk": route["prefill_chunk"],
-                "concurrency": 1, "prompt_tokens": 8192, "generated_tokens": 256,
-                "spec": "mtp", "draft_tokens": 3,
-            }, "executed_trace": {
-                **{name: mtp_files[name] for name in
-                   ("plan", "benchmark_report", "database", "power_before", "power_after")},
-                "dispatch_count": 192, "expected_dispatch_count": 192,
-                "grid": {"x": 8192, "y": 1, "z": 1},
-                "workgroup": {"x": 32, "y": 1, "z": 1},
-            }, "static_proof": {
-                "code_symbol": Q4_WAVE, "opcode": "v_wmma_i32_16x16x32_iu4",
-                "opcode_count": 4, "code_object": mtp_files["code_object"],
-                "executable_embedding": {"offset_bytes": 1, "file_size_bytes": 11,
-                                         "occurrence_count": 1},
-                "resources": {"vgpr_count": 64, "lds_bytes": 0, "private_bytes": 0,
-                              "scratch_bytes": 0, "flat_scratch": 0,
-                              "sgpr_spill_count": 0, "vgpr_spill_count": 0,
-                              "wavefront_size": 32},
-                "quantization": {"weights": {"format": "Q4G64_F16S"},
-                                 "activations": {"codec": "signed A8G64"}},
-                "binary_derivation": {"objdump": mtp_files["objdump"],
-                                      "readelf": mtp_files["readelf"]},
-                "sources": [mtp_files["source"]],
-            },
-        })
         fp8 = []
         loaded_fp8 = []
         if weights == "r9700-q4g64-f8e4m3-four-role-n16k16-eval":
@@ -245,58 +206,13 @@ class SelectedHardwareUseTest(unittest.TestCase):
             reconciliation_value = json.loads(reconciliation.read_text())
             reconciliation_value["trace_authority"] = snapshot(trace)
             self.write(reconciliation, reconciliation_value)
-        mixed_mtp = None
-        if weights == "r9700-q4-w8-mse-n16k16-eval":
-            mixed_authorities = {}
-            for name in ("plan", "operator_report", "selected_engine_report",
-                         "selected_engine_trace", "production_code_object",
-                         "production_gfx1201_assembly", "production_elf_metadata",
-                         "qualifier", "planner",
-                         "qualifier_source", "production_kernel_source",
-                         "dispatch_profile_source"):
-                path = root / f"mixed-{name}"
-                path.write_text(name)
-                mixed_authorities[name] = snapshot(path)
-            mixed_mtp = self.write(root / "mixed-mtp.json", {
-                "artifact_type": "ninfer_r9700_mixed_mtp_bulk_w8_evidence",
-                "schema_version": 1, "status": "passed",
-                "selected_route": {"artifact_sha256": route["artifact"]["sha256"],
-                                   "executable_sha256": route["executable"]["sha256"],
-                                   "terminal_selection": route["terminal_selection"],
-                                   "winner": route["winner"], "weights_id": weights,
-                                   "kv_value_group": route["kv_value_group"],
-                                   "xattention_profile": route["xattention_profile"],
-                                   "prefill_chunk": 2048, "concurrency": 1,
-                                   "planner": mixed_authorities["planner"]},
-                "quantization": {"weights": "W8G32_F16S",
-                                   "activation": "signed A8G32", "output": "BF16",
-                                   "baseline_activation": "signed A8G32"},
-                "native_hardware": {"symbol": "a8w8g32_linear_prefill_cta_kernel",
-                                    "opcode": "v_wmma_i32_16x16x16_iu8",
-                                    "opcode_sites": 2,
-                                    "signedness": "signed_activation_signed_weight",
-                                    "neg_lo": [[1, 1, 0], [1, 1, 0]], "vgpr": 50,
-                                    "lds_bytes": 4352, "scratch_bytes": 0},
-                "selected_engine_execution": {"dispatch_count": 3},
-                "authorities": mixed_authorities,
-                "shapes": [
-                    {"rows": 5120, "columns": 10240, "dispatches_per_full_chunk": 1,
-                     "opcode": "v_wmma_i32_16x16x16_iu8",
-                     "oracle_max_bf16_steps": 2, "oracle_sample_count": 64,
-                     "candidate_faster": True},
-                    {"rows": 1024, "columns": 5120, "dispatches_per_full_chunk": 2,
-                     "opcode": "v_wmma_i32_16x16x16_iu8",
-                     "oracle_max_bf16_steps": 2, "oracle_sample_count": 64,
-                     "candidate_faster": True},
-                ],
-            })
         return {"selection": selection, "route": route, "trace": trace,
                 "reconciliation": reconciliation,
-                "audit": audit, "mtp": mtp, "fp8": fp8, "mixed_mtp": mixed_mtp}
+                "audit": audit, "fp8": fp8}
 
     def run_fixture(self, fixture: dict) -> dict:
         return verify(fixture["selection"], fixture["reconciliation"], fixture["audit"],
-                      fixture["mtp"], fixture["fp8"], fixture["mixed_mtp"],
+                      fixture["fp8"],
                       route_resolver=lambda _: fixture["route"],
                       reconciliation_validator=lambda _trace, _schedule:
                       json.loads(fixture["reconciliation"].read_text()),
@@ -304,8 +220,6 @@ class SelectedHardwareUseTest(unittest.TestCase):
                       json.loads(fixture["trace"].read_text()).get(
                           "loaded_fp8_code_objects", []),
                       embedded_validator=lambda *_args: {"validated": True},
-                      mtp_embedding_validator=lambda *_args:
-                      {"offset_bytes": 1, "file_size_bytes": 11, "occurrence_count": 1},
                       fp8_resource_validator=lambda value: value["fp8"]["resources"])
 
     def test_mixed_dense_passes_and_rejects_missing_iu8(self) -> None:
@@ -314,6 +228,9 @@ class SelectedHardwareUseTest(unittest.TestCase):
             result = self.run_fixture(fixture)
             self.assertEqual(result["status"], "passed")
             self.assertIsNone(result["physical_bandwidth_claim"])
+            self.assertEqual(result["static_proof_names"].count("q4_wave32"), 1)
+            self.assertEqual(set(result["authorities"]),
+                             {"dispatch_reconciliation", "trace", "static_audit"})
             value = json.loads(fixture["reconciliation"].read_text())
             value["dispatch_inventory"]["dispatches"] = [
                 row for row in value["dispatch_inventory"]["dispatches"]
@@ -332,18 +249,16 @@ class SelectedHardwareUseTest(unittest.TestCase):
             self.assertEqual(len(result["loaded_fp8_proofs"]), 2)
             with self.assertRaisesRegex(ValueError, "current DB/URI capture"):
                 verify(fixture["selection"], fixture["reconciliation"], fixture["audit"],
-                       fixture["mtp"], fixture["fp8"], fixture["mixed_mtp"],
+                       fixture["fp8"],
                        route_resolver=lambda _: fixture["route"],
                        reconciliation_validator=lambda _trace, _schedule:
                        json.loads(fixture["reconciliation"].read_text()),
                        loaded_fp8_validator=lambda _database, _capture, _dispatches: [],
                        embedded_validator=lambda *_args: {"validated": True},
-                       mtp_embedding_validator=lambda *_args:
-                       {"offset_bytes": 1, "file_size_bytes": 11, "occurrence_count": 1},
                        fp8_resource_validator=lambda value: value["fp8"]["resources"])
             with self.assertRaisesRegex(ValueError, "exactly two"):
                 verify(fixture["selection"], fixture["reconciliation"], fixture["audit"],
-                       fixture["mtp"], fixture["fp8"][:1], fixture["mixed_mtp"],
+                       fixture["fp8"][:1],
                        route_resolver=lambda _: fixture["route"],
                        reconciliation_validator=lambda _trace, _schedule:
                        json.loads(fixture["reconciliation"].read_text()),
@@ -351,8 +266,6 @@ class SelectedHardwareUseTest(unittest.TestCase):
                        json.loads(fixture["trace"].read_text()).get(
                            "loaded_fp8_code_objects", []),
                        embedded_validator=lambda *_args: {"validated": True},
-                       mtp_embedding_validator=lambda *_args:
-                       {"offset_bytes": 1, "file_size_bytes": 11, "occurrence_count": 1},
                        fp8_resource_validator=lambda value: value["fp8"]["resources"])
 
             proof = json.loads(fixture["fp8"][0].read_text())
@@ -383,27 +296,25 @@ class SelectedHardwareUseTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, r"\[1,4\]"):
                 self.run_fixture(fixture)
 
-    def test_rejects_unrecomputed_inventory_and_missing_mixed_mtp_bulk(self) -> None:
+    def test_rejects_unrecomputed_inventory_and_missing_executed_q4_wave(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture = self.fixture(Path(directory))
             with self.assertRaisesRegex(ValueError, "differs from current trace/schedule"):
                 verify(
                     fixture["selection"], fixture["reconciliation"], fixture["audit"],
-                    fixture["mtp"], fixture["fp8"], fixture["mixed_mtp"],
+                    fixture["fp8"],
                     route_resolver=lambda _: fixture["route"],
                     reconciliation_validator=lambda _trace, _schedule: {},
                 )
-            with self.assertRaisesRegex(ValueError, "requires exactly one MTP-bulk"):
-                verify(
-                    fixture["selection"], fixture["reconciliation"], fixture["audit"],
-                    fixture["mtp"], fixture["fp8"], None,
-                    route_resolver=lambda _: fixture["route"],
-                    reconciliation_validator=lambda _trace, _schedule:
-                    json.loads(fixture["reconciliation"].read_text()),
-                    embedded_validator=lambda *_args: {"validated": True},
-                    mtp_embedding_validator=lambda *_args:
-                    {"offset_bytes": 1, "file_size_bytes": 11, "occurrence_count": 1},
-                )
+            value = json.loads(fixture["reconciliation"].read_text())
+            value["dispatch_inventory"]["dispatches"] = [
+                row for row in value["dispatch_inventory"]["dispatches"]
+                if Q4_WAVE not in row["symbol"]]
+            value["dispatches"] = [row for row in value["dispatches"]
+                                   if Q4_WAVE not in row["symbol"]]
+            self.write(fixture["reconciliation"], value)
+            with self.assertRaisesRegex(ValueError, "required symbol"):
+                self.run_fixture(fixture)
 
     def test_rejects_recipe_inconsistent_operation_and_conditional_proof_drift(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -415,27 +326,13 @@ class SelectedHardwareUseTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "FP8-linear dispatch presence"):
                 self.run_fixture(ordinary)
 
-            mixed = self.fixture(root / "mixed")
-            evidence = json.loads(mixed["mixed_mtp"].read_text())
-            authority = Path(evidence["authorities"]["operator_report"]["path"])
-            authority.write_text("changed")
-            with self.assertRaisesRegex(ValueError, "bytes changed"):
-                self.run_fixture(mixed)
-
             hybrid = self.fixture(root / "hybrid",
                                   "r9700-q4g64-f8e4m3-four-role-n16k16-eval")
-            mtp = json.loads(hybrid["mtp"].read_text())
-            mtp["selected_route"]["draft_tokens"] = 4
-            self.write(hybrid["mtp"], mtp)
-            with self.assertRaisesRegex(ValueError, "shortlist-head evidence differs"):
+            audit = json.loads(hybrid["audit"].read_text())
+            audit["shared_symbol_proofs"]["q4_wave32"]["opcode_sites"] = 3
+            self.write(hybrid["audit"], audit)
+            with self.assertRaisesRegex(ValueError, "Q4 wave32 static proof"):
                 self.run_fixture(hybrid)
-
-            embedding = self.fixture(root / "embedding", "r9700-q4g64-mse-eval")
-            mtp = json.loads(embedding["mtp"].read_text())
-            mtp["static_proof"]["executable_embedding"]["occurrence_count"] = 2
-            self.write(embedding["mtp"], mtp)
-            with self.assertRaisesRegex(ValueError, "uniquely embedded"):
-                self.run_fixture(embedding)
 
 
 if __name__ == "__main__":

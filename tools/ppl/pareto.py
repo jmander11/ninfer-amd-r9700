@@ -329,7 +329,10 @@ def _recipe_identity(
             or any(character not in "0123456789abcdef" for character in sha256)
         ):
             return None
-        return {"kind": "artifact", "weights_id": weights_id, "sha256": sha256}
+        result = {"kind": "artifact", "weights_id": weights_id, "sha256": sha256}
+        if artifact.get("conversion_receipt") is not None:
+            result["conversion_receipt"] = artifact["conversion_receipt"]
+        return result
 
     declared = record.get("weight_recipe")
     if declared is not None:
@@ -761,10 +764,14 @@ def classify(payload: dict) -> dict:
         recipe_groups: dict[str, list[dict]] = {}
         for result in results:
             identity = result["weight_recipe"]
-            if not isinstance(identity, dict) or identity.get("kind") != "artifact":
+            if (not isinstance(identity, dict) or identity.get("kind") != "artifact"
+                    or not isinstance(identity.get("conversion_receipt"), dict)):
                 raise ValueError(
-                    "static XAttention selection requires provenance-bound artifacts"
+                    "static XAttention selection requires provenance-bound N16 artifacts"
                 )
+            from tools.ppl.run import validate_n16_receipt_summary
+            validate_n16_receipt_summary(
+                identity["conversion_receipt"], identity["weights_id"])
             recipe_groups.setdefault(_recipe_key(identity), []).append(result)
         if not recipe_groups:
             raise ValueError("static XAttention selection requires candidate recipes")

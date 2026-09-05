@@ -41,6 +41,23 @@ TERMINAL_RECIPE_IDS = {
 }
 
 
+def _quality_migration_receipt(artifact: dict[str, Any], weights_id: str) -> dict | None:
+    if weights_id not in TERMINAL_RECIPE_IDS:
+        return artifact.get("conversion_receipt")
+    retained = artifact.get("conversion_receipt")
+    if retained is not None:
+        return ppl_run.validate_n16_receipt_summary(retained, weights_id)
+    raw_path = artifact.get("path")
+    if not isinstance(raw_path, str) or not raw_path:
+        raise ValueError("historical N16 quality artifact lacks a joinable path")
+    inspected = ppl_run.inspect_candidate_artifact(Path(raw_path), digest=artifact.get("sha256"))
+    if (inspected.get("weights_id") != weights_id
+            or inspected.get("sha256") != artifact.get("sha256")
+            or inspected.get("bytes") != artifact.get("bytes")):
+        raise ValueError("historical N16 quality artifact differs from current migration authority")
+    return ppl_run.validate_n16_receipt_summary(inspected.get("conversion_receipt"), weights_id)
+
+
 def _valid_sha256(value: object) -> bool:
     return (
         isinstance(value, str)
@@ -363,6 +380,7 @@ def _quality_candidate(
         or artifact["bytes"] <= 0
     ):
         raise ValueError(f"quality evidence has an invalid artifact identity for {weights_id}")
+    conversion_receipt = _quality_migration_receipt(artifact, weights_id)
     cells: dict[str, Any] = {}
     sources: dict[str, Any] = {}
     for tokens, label in ((8192, "8k"), (32768, "32k")):
@@ -401,7 +419,7 @@ def _quality_candidate(
         "weights_id": weights_id,
         "sha256": artifact["sha256"],
         "file_size_bytes": artifact["bytes"],
-        "conversion_receipt": artifact.get("conversion_receipt"),
+        "conversion_receipt": conversion_receipt,
         "representation": representation,
         "cells": sources,
     }
@@ -438,9 +456,9 @@ def _campaign_quality_candidate(
         or representation["kv_plane_layouts"] != R9700_KV_PLANE_LAYOUTS
         or campaign.get("required_candidate_identity")
         != ("fp8-hybrid-selection-authority" if hybrid else None)
-        or (hybrid and not isinstance(artifact.get("conversion_receipt"), dict))
     ):
         raise ValueError("PPL campaign has an unsupported identity or execution profile")
+    conversion_receipt = _quality_migration_receipt(artifact, weights_id)
     cells: dict[str, Any] = {}
     sources: dict[str, Any] = {}
     campaign_cells = campaign.get("cells")
@@ -560,7 +578,7 @@ def _campaign_quality_candidate(
         "weights_id": weights_id,
         "sha256": artifact["sha256"],
         "file_size_bytes": artifact["bytes"],
-        "conversion_receipt": artifact.get("conversion_receipt"),
+        "conversion_receipt": conversion_receipt,
         "representation": representation,
         "cells": sources,
         "campaign_identity": {
@@ -634,11 +652,13 @@ def assemble_candidate(
         )
         if manifest.get("required_candidate_identity") != hybrid_identity:
             raise ValueError(f"{preset} weight-recipe authority does not match quality evidence")
+        if (weights_id in TERMINAL_RECIPE_IDS
+                and actual.get("conversion_receipt")
+                != quality_source.get("conversion_receipt")):
+            raise ValueError(
+                f"{preset} N16 migration receipt differs from quality evidence"
+            )
         if weights_id == HYBRID_WEIGHTS_ID:
-            if actual.get("conversion_receipt") != quality_source.get("conversion_receipt"):
-                raise ValueError(
-                    f"{preset} hybrid conversion receipt differs from quality evidence"
-                )
             validate_hybrid_shared_workspace_authority(
                 manifest.get("hybrid_shared_workspace_authority"), [prefill_chunk]
             )

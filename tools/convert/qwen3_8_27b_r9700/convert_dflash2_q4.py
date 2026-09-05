@@ -151,49 +151,36 @@ def _sha256(path: Path) -> str:
 
 
 def _base_authority(path: Path, identity: ArtifactIdentity, artifact_sha256: str) -> dict | None:
-    if identity.weights_id != inventory.HYBRID_BASE_WEIGHTS_ID:
+    from tools.ppl.run import N16_MIGRATION_PROFILES
+    if identity.weights_id not in N16_MIGRATION_PROFILES:
         return None
     receipt_path = Path(str(path.resolve()) + ".conversion.json")
-    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    if identity.weights_id == inventory.HYBRID_BASE_WEIGHTS_ID:
+        from tools.ppl.run import validate_n16_conversion_receipt
+        receipt = validate_n16_conversion_receipt(path, {
+            "path": str(path.resolve()), "bytes": path.stat().st_size,
+            "sha256": artifact_sha256, "weights_id": identity.weights_id,
+        })
+    else:
+        from .publish_n16_migration_receipt import validate_receipt
+        receipt = validate_receipt(receipt_path, {
+            "path": str(path.resolve()), "bytes": path.stat().st_size,
+            "sha256": artifact_sha256, "weights_id": identity.weights_id,
+        })
     if not isinstance(receipt, dict):
-        raise ValueError("four-role hybrid base conversion authority must be an object")
-    candidate = receipt.get("candidate")
-    source = receipt.get("source")
-    artifact = receipt.get("artifact")
-    expected_identity = {
-        "model_id": inventory.MODEL_ID,
-        "weights_id": inventory.HYBRID_BASE_WEIGHTS_ID,
-    }
-    if (
-        receipt.get("identity") != expected_identity
-        or receipt.get("target_key") != inventory.TARGET_KEY
-        or receipt.get("recipe_id") != fp8_hybrid_inventory.RECIPE_ID
-        or not isinstance(candidate, dict)
-        or candidate.get("selection_sha256") != fp8_hybrid_inventory.SELECTION_SHA256
-        or candidate.get("object_plan_sha256") is None
-        or not isinstance(source, dict)
-        or source.get("index_sha256") is None
-        or source.get("ranking_sha256") is None
-        or not isinstance(artifact, dict)
-        or artifact.get("sha256") != artifact_sha256
-        or artifact.get("bytes") != path.stat().st_size
-        or Path(str(artifact.get("path"))).resolve() != path.resolve()
-    ):
-        raise ValueError("four-role hybrid base conversion authority differs")
-    values = {
-        "receipt": {"path": str(receipt_path), "sha256": _sha256(receipt_path)},
-        "recipe_id": receipt["recipe_id"],
-        "selection_sha256": candidate["selection_sha256"],
-        "object_plan_sha256": candidate["object_plan_sha256"],
-        "source_index_sha256": source["index_sha256"],
-        "source_ranking_sha256": source["ranking_sha256"],
-    }
-    if any(
-        not isinstance(value, str) or len(value) != 64
-        or any(character not in "0123456789abcdef" for character in value)
-        for key, value in values.items() if key not in ("receipt", "recipe_id")
-    ):
-        raise ValueError("four-role hybrid base conversion authority has invalid hashes")
+        raise ValueError("N16 base migration authority differs")
+    values = {"receipt": {"path": receipt["path"], "sha256": receipt["sha256"]},
+              "recipe_id": receipt["recipe_id"],
+              "object_plan_sha256": receipt["object_plan_sha256"],
+              "source_artifact_sha256": receipt["source_artifact_sha256"],
+              "source_receipt_sha256": receipt["source_receipt_sha256"],
+              "transcoder_sha256": receipt["transcoder_sha256"]}
+    if identity.weights_id == inventory.HYBRID_BASE_WEIGHTS_ID:
+        values.update({key: receipt[key] for key in (
+            "selection_sha256", "source_index_sha256", "source_ranking_sha256",
+        )})
+    else:
+        values["receipt_producer_sha256"] = receipt["receipt_producer_sha256"]
     return values
 
 

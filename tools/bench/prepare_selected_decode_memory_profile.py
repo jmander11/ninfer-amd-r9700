@@ -17,6 +17,7 @@ from tools.bench.run_ninfer_bench_matrix import (
     MATRIX_SCHEMA_VERSION,
     PRODUCT_CONCURRENCIES,
     REPORT_SCHEMA_VERSION,
+    bind_n16_migration_receipt,
     inspect_artifact,
     inspect_executable,
     require_fp8_hybrid_artifact,
@@ -238,7 +239,8 @@ def prepare(selection_path: Path, receipt_path: Path, out: Path) -> dict:
     if (recipe.get("weights_id") != manifest["artifact"].get("weights_id")
             or recipe.get("sha256") != manifest["artifact"].get("sha256")):
         raise ValueError("terminal winner artifact differs from selected whole matrix")
-    artifact = inspect_artifact(artifact_path)
+    artifact = bind_n16_migration_receipt(
+        artifact_path, inspect_artifact(artifact_path))
     hybrid = recipe["weights_id"] == "r9700-q4g64-f8e4m3-four-role-n16k16-eval"
     if hybrid:
         artifact = require_fp8_hybrid_artifact(artifact_path, artifact)

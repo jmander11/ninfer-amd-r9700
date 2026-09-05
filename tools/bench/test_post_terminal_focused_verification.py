@@ -16,6 +16,11 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 
+def test_hybrid_identity_is_the_registered_n16_artifact() -> None:
+    assert MODULE.is_hybrid_weights("r9700-q4g64-f8e4m3-four-role-n16k16-eval")
+    assert not MODULE.is_hybrid_weights("r9700-q4g64-f8e4m3-four-role-eval")
+
+
 def test_interpreter_identity_preserves_explicit_launcher() -> None:
     launcher = Path(sys.executable)
 

@@ -60,6 +60,26 @@ def shortlist_head_gate() -> dict:
 
 class LowContextPrefillValidationTest(unittest.TestCase):
     @staticmethod
+    def migration_receipt(weights_id: str) -> dict:
+        recipe = {
+            "r9700-q4g64-n16k16-eval": "r9700-all-q4g64-n16k16-eval-v1",
+            "r9700-q4-w8-mse-n16k16-eval":
+                "r9700-source-q4-n16k16-promoted-w8-source-mse8-eval-v1",
+            "r9700-q4g64-f8e4m3-four-role-n16k16-eval":
+                "r9700-q4g64-f8e4m3-four-role-n16k16-eval-v1",
+        }[weights_id]
+        value = {"path": "/receipt", "sha256": "1" * 64, "recipe_id": recipe,
+                 "object_plan_sha256": "2" * 64, "source_artifact_sha256": "3" * 64,
+                 "source_receipt_sha256": "4" * 64, "transcoder_sha256": "5" * 64}
+        if "four-role" in weights_id:
+            value.update({"selection_sha256": "b2ceeb63c581c0f26aab5a4d8c0958da34d836fcc5c47d377bce709eaf37e3e8",
+                          "source_index_sha256": "6" * 64,
+                          "source_ranking_sha256": "7" * 64})
+        else:
+            value["receipt_producer_sha256"] = "8" * 64
+        return value
+
+    @staticmethod
     def make_selection(
         root: Path,
         *,
@@ -121,7 +141,9 @@ class LowContextPrefillValidationTest(unittest.TestCase):
                 })
                 provenance.append({
                     "candidate": name,
-                    "artifact": {"weights_id": recipe, "sha256": digest},
+                    "artifact": {"weights_id": recipe, "sha256": digest,
+                                 "conversion_receipt":
+                                     LowContextPrefillValidationTest.migration_receipt(recipe)},
                 })
         source = {
             "artifact_type": "ninfer_r9700_pareto_input",
@@ -156,6 +178,9 @@ class LowContextPrefillValidationTest(unittest.TestCase):
             "path": str(root / "selected.ninfer"), "model_id": "qwen3.8-27b",
             "weights_id": "r9700-q4g64-n16k16-eval", "sha256": "a" * 64,
             "file_size_bytes": 10,
+            "conversion_receipt": self.migration_receipt(
+                "r9700-q4g64-n16k16-eval"
+            ),
         }
         bench = {"path": str(root / "bench"), "sha256": "b" * 64,
                  "file_size_bytes": 20}
@@ -214,6 +239,9 @@ class LowContextPrefillValidationTest(unittest.TestCase):
             "path": str(root / "selected.ninfer"), "model_id": "qwen3.8-27b",
             "weights_id": "r9700-q4g64-n16k16-eval", "sha256": "a" * 64,
             "file_size_bytes": 10,
+            "conversion_receipt": self.migration_receipt(
+                "r9700-q4g64-n16k16-eval"
+            ),
         }
         bench = {
             "path": str(root / "bench"), "sha256": "b" * 64,
@@ -263,6 +291,8 @@ class LowContextPrefillValidationTest(unittest.TestCase):
             with (
                 patch("tools.bench.validate_low_context_prefill.inspect_artifact",
                       return_value=artifact),
+                patch("tools.bench.validate_low_context_prefill.bind_n16_migration_receipt",
+                      return_value=artifact),
                 patch("tools.bench.validate_low_context_prefill.inspect_executable",
                       return_value=bench),
             ):
@@ -281,6 +311,8 @@ class LowContextPrefillValidationTest(unittest.TestCase):
             (root / "pareto-capacity/manifest.json").write_text("{}\n", encoding="utf-8")
             with (
                 patch("tools.bench.validate_low_context_prefill.inspect_artifact",
+                      return_value=artifact),
+                patch("tools.bench.validate_low_context_prefill.bind_n16_migration_receipt",
                       return_value=artifact),
                 patch("tools.bench.validate_low_context_prefill.inspect_executable",
                       return_value=bench),
@@ -315,6 +347,9 @@ class LowContextPrefillValidationTest(unittest.TestCase):
             "path": str(root / "selected.ninfer"), "model_id": "qwen3.8-27b",
             "weights_id": "r9700-q4g64-n16k16-eval", "sha256": "a" * 64,
             "file_size_bytes": 10,
+            "conversion_receipt": self.migration_receipt(
+                "r9700-q4g64-n16k16-eval"
+            ),
         }
         selection_path = root / "selection.json"
         selection_sha = hashlib.sha256(selection_path.read_bytes()).hexdigest()
@@ -336,6 +371,8 @@ class LowContextPrefillValidationTest(unittest.TestCase):
             patch("tools.bench.validate_low_context_prefill.inspect_executable",
                   return_value=expected_bench),
             patch("tools.bench.validate_low_context_prefill.inspect_artifact",
+                  return_value=expected_artifact),
+            patch("tools.bench.validate_low_context_prefill.bind_n16_migration_receipt",
                   return_value=expected_artifact),
             patch("tools.bench.validate_low_context_prefill.file_sha256",
                   side_effect=lambda path: (
@@ -371,6 +408,8 @@ class LowContextPrefillValidationTest(unittest.TestCase):
                 patch("tools.bench.validate_low_context_prefill.inspect_executable",
                       return_value=document["bench"]),
                 patch("tools.bench.validate_low_context_prefill.inspect_artifact",
+                      return_value=document["artifact"]),
+                patch("tools.bench.validate_low_context_prefill.bind_n16_migration_receipt",
                       return_value=document["artifact"]),
                 patch("tools.bench.validate_low_context_prefill.file_sha256",
                       side_effect=lambda path: (
@@ -441,6 +480,8 @@ class LowContextPrefillValidationTest(unittest.TestCase):
                 patch("tools.bench.validate_low_context_prefill.inspect_executable",
                       return_value=original["bench"]),
                 patch("tools.bench.validate_low_context_prefill.inspect_artifact",
+                      return_value=original["artifact"]),
+                patch("tools.bench.validate_low_context_prefill.bind_n16_migration_receipt",
                       return_value=original["artifact"]),
                 patch("tools.bench.validate_low_context_prefill.file_sha256",
                       side_effect=lambda path: (
