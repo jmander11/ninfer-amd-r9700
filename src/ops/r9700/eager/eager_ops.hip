@@ -992,6 +992,29 @@ hipError_t rmsnorm_incumbent_qualification(
         });
 }
 
+hipError_t rmsnorm_k5120_rows56_cta_qualification(
+    const hip_bfloat16* input, const hip_bfloat16* weight, hip_bfloat16* output,
+    std::uint32_t rows, float eps, bool unit_offset, hipStream_t stream) noexcept {
+    const auto overlaps = [](const hip_bfloat16* lhs, std::size_t lhs_count,
+                             const hip_bfloat16* rhs, std::size_t rhs_count) {
+        const auto lhs_begin = reinterpret_cast<std::uintptr_t>(lhs);
+        const auto rhs_begin = reinterpret_cast<std::uintptr_t>(rhs);
+        const auto lhs_bytes = lhs_count * sizeof(hip_bfloat16);
+        const auto rhs_bytes = rhs_count * sizeof(hip_bfloat16);
+        return lhs_begin < rhs_begin + rhs_bytes && rhs_begin < lhs_begin + lhs_bytes;
+    };
+    const std::size_t elements = static_cast<std::size_t>(rows) * 5120U;
+    return checked_launch(
+        input != nullptr && weight != nullptr && output != nullptr &&
+            !overlaps(input, elements, output, elements) &&
+            !overlaps(weight, 5120U, output, elements) && (rows == 5U || rows == 6U) &&
+            std::isfinite(eps) && eps > 0.0F && valid_stream(stream),
+        [&] {
+            hipLaunchKernelGGL(rmsnorm_k5120_rows4_cta_kernel, dim3(rows), dim3(kBlock), 0,
+                               stream, input, weight, output, eps, unit_offset);
+        });
+}
+
 hipError_t rmsnorm_k256_token8_qualification(
     const hip_bfloat16* input, const hip_bfloat16* weight, hip_bfloat16* output,
     std::uint32_t rows, float eps, bool unit_offset, hipStream_t stream) noexcept {

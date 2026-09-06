@@ -1,0 +1,20 @@
+{
+  "schema": "ninfer.r9700.rmsnorm-k5120-rows56-plan.v2",
+  "scope": {"features": 5120, "rows": [5, 6]},
+  "candidate": "existing one-row-per-256-thread-CTA K5120 kernel",
+  "incumbent": "generic one-wave-per-row RMSNorm kernel",
+  "oracle": "complete independent FP64 formula over represented BF16 input and weight, rounded directly from FP64 to BF16",
+  "correctness": ["unit_offset false and true", "epsilon 1e-8, 1e-6, 1e-4", "three fixtures", "guards and complete output", "invalid/status/full-range alias no-write", "eager and graph replay"],
+  "timing": {"method": "unprofiled HIP events", "pairs": 7, "iterations_per_sample": 256, "decision": "each exact row independently requires both launch-order medians faster, paired-ratio 2SE upper below one, and order-ratio delta at most 0.02"},
+  "hardware": {"name": "AMD Radeon AI PRO R9700", "architecture": "gfx1201", "pci_vendor_device": "1002:7551", "drm_card": 2, "power_profile_before_after": "auto"},
+  "build": {
+    "command": "make -C tools/r9700 -B rmsnorm-dflash-rows56-build rmsnorm-dflash-rows56-static rmsnorm-dflash-rows56-static-test -j2",
+    "binary": {"path": "tools/r9700/build/rmsnorm_dflash_rows56_qual", "sha256": "c898d101e970a4a8898663743e84c338b9758180b401996dd04a1d4ebbef8315"},
+    "assembly": {"path": "tools/r9700/build/eager_ops.s", "sha256": "2ebc597ecc05d0daa103d293a31f6e66d6edec4cc68ed4aa6fc18fa544049f92"},
+    "kernel_resources": {"vgprs": 17, "lds_bytes": 32, "occupancy": 16, "maximum_workgroup": 256, "wavefront": 32, "private_bytes": 0, "scratch_bytes": 0}
+  },
+  "toolchain": {"hipcc_sha256": "7b95d430bb8c4d4237f9b4935dbd6440e2067fde0979cc69bffb26ebd021464c", "clang_sha256": "241bf4da7ec39bc00b68ed74f6be751516d9892ed990e8c7fa372bad18500247", "libamdhip64_sha256": "817aeadfd9f62b68831ad89993163c7f1f470f30595e7e0da5fdc942193142a8"},
+  "outputs": ["hardware-before.txt", "hardware-after.txt", "static.stdout", "cells.json", "benchmark.stdout", "benchmark.stderr", "benchmark.exit", "summary.json", "result.sha256"],
+  "production_routing": false,
+  "limitations": ["standalone qualifier", "no whole-DFlash or production performance claim", "no rows beyond 5 and 6"]
+}

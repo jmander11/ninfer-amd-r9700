@@ -43,6 +43,7 @@ RMSNORM_PREFILL_TARGET := $(BUILD_DIR)/rmsnorm_prefill_qual
 RMSNORM_K256_PREFILL_TARGET := $(BUILD_DIR)/rmsnorm_k256_prefill_qual
 RMSNORM_DECODE_PRODUCTION_TARGET := $(BUILD_DIR)/rmsnorm_decode_production
 RMSNORM_DECODE_ROUTING_TARGET := $(BUILD_DIR)/test_rmsnorm_decode_routing
+RMSNORM_DFLASH_ROWS56_TARGET := $(BUILD_DIR)/rmsnorm_dflash_rows56_qual
 GATED_RMSNORM_PREFILL_TARGET := $(BUILD_DIR)/gated_rmsnorm_prefill_qual
 SILU_MUL_SPLIT_PREFILL_TARGET := $(BUILD_DIR)/silu_mul_split_prefill_qual
 GDN_TARGET := $(BUILD_DIR)/gdn_op_qual
@@ -78,6 +79,8 @@ EAGER_SOURCE := eager_op_qual.hip
 RMSNORM_PREFILL_SOURCE := rmsnorm_prefill_qual.hip
 RMSNORM_K256_PREFILL_SOURCE := rmsnorm_k256_prefill_qual.hip
 RMSNORM_DECODE_PRODUCTION_SOURCE := rmsnorm_decode_production.hip
+RMSNORM_DFLASH_ROWS56_SOURCE := rmsnorm_dflash_rows56_qual.hip
+RMSNORM_DFLASH_ROWS56_STATIC_CHECK := check_rmsnorm_dflash_rows56_static.py
 GATED_RMSNORM_PREFILL_SOURCE := gated_rmsnorm_prefill_qual.hip
 SILU_MUL_SPLIT_PREFILL_SOURCE := silu_mul_split_prefill_qual.hip
 GDN_SOURCE := gdn_op_qual.hip
@@ -161,7 +164,7 @@ CXXFLAGS := -O3 -std=c++20 --offload-arch=$(ARCH) -I../../src $(SYSTEM_INCLUDES)
 LDFLAGS := -L$(ROCM_ROOT)/lib -Wl,-rpath,$(ROCM_ROOT)/lib
 
 
-.PHONY: all clean hbm fp8-hipblaslt-probe int4-wmma int4-wmma-isa int4-wmma-resources w8a8-wmma w8a8-prefill-cta-regression w8a8-prefill-cta-lds-scope-regression w8a8-prefill-cta-lds-scope-benchmark w8a8-prefill-cta-lds-scope-report w8a8-wmma-isa w8a8-wmma-resources prefill-cta-static-q4 prefill-cta-static-w8 prefill-cta-static-incumbent-diagnostic q4g64-linear a8q4-shape-sweep a8q4-dflash-small-t-build a8q4-dflash-small-t-static a8q4-dflash-small-t-test a8q4-dflash-small-t-screen a8q4-dflash-mlp-down-small-t-build a8q4-dflash-mlp-down-small-t-static a8q4-dflash-mlp-down-small-t-static-test a8q4-prefill-cta-regression a8q4-prefill-cta-lds-scope-regression a8q4-prefill-cta-lds-scope-benchmark a8q4-prefill-cta-lds-scope-report a8q4-prefill-cta-m64n64-regression q4g64-linear-isa q4g64-linear-resources xattention-isa xattention-resources xattention-reports split512-attention split512-attention-isa split512-attention-resources dense-prefill-attention dense-prefill-attention-full-score-isa dense-prefill-attention-full-score-static dense-prefill-attention-static-test isa kv-resources linear-isa linear-resources eager-isa rmsnorm-prefill-static rmsnorm-prefill-static-test rmsnorm-prefill-benchmark rmsnorm-k256-prefill-static rmsnorm-k256-prefill-static-test rmsnorm-k256-prefill-benchmark rmsnorm-decode-production-static rmsnorm-decode-production-static-test rmsnorm-decode-production-routing-test rmsnorm-decode-production-regression gated-rmsnorm-prefill-static gated-rmsnorm-prefill-static-test gated-rmsnorm-prefill-path-test gated-rmsnorm-prefill-benchmark gated-rmsnorm-k128-production-static gated-rmsnorm-k128-production-static-test silu-mul-split-prefill-static silu-mul-split-prefill-static-test silu-mul-split-prefill-benchmark gdn-isa gdn-prefill-benchmark gdn-prefill-static gdn-prefill-static-test gdn-recurrence-resources sampling-isa rope-resources run sanitize rocm-tool-audit rocm-tool-audit-test profile-trace profile-attention-trace profile-pmc
+.PHONY: all clean hbm fp8-hipblaslt-probe int4-wmma int4-wmma-isa int4-wmma-resources w8a8-wmma w8a8-prefill-cta-regression w8a8-prefill-cta-lds-scope-regression w8a8-prefill-cta-lds-scope-benchmark w8a8-prefill-cta-lds-scope-report w8a8-wmma-isa w8a8-wmma-resources prefill-cta-static-q4 prefill-cta-static-w8 prefill-cta-static-incumbent-diagnostic q4g64-linear a8q4-shape-sweep a8q4-dflash-small-t-build a8q4-dflash-small-t-static a8q4-dflash-small-t-test a8q4-dflash-small-t-screen a8q4-dflash-mlp-down-small-t-build a8q4-dflash-mlp-down-small-t-static a8q4-dflash-mlp-down-small-t-static-test a8q4-prefill-cta-regression a8q4-prefill-cta-lds-scope-regression a8q4-prefill-cta-lds-scope-benchmark a8q4-prefill-cta-lds-scope-report a8q4-prefill-cta-m64n64-regression q4g64-linear-isa q4g64-linear-resources xattention-isa xattention-resources xattention-reports split512-attention split512-attention-isa split512-attention-resources dense-prefill-attention dense-prefill-attention-full-score-isa dense-prefill-attention-full-score-static dense-prefill-attention-static-test isa kv-resources linear-isa linear-resources eager-isa rmsnorm-prefill-static rmsnorm-prefill-static-test rmsnorm-prefill-benchmark rmsnorm-k256-prefill-static rmsnorm-k256-prefill-static-test rmsnorm-k256-prefill-benchmark rmsnorm-decode-production-static rmsnorm-decode-production-static-test rmsnorm-decode-production-routing-test rmsnorm-decode-production-regression rmsnorm-dflash-rows56-build rmsnorm-dflash-rows56-static rmsnorm-dflash-rows56-static-test rmsnorm-dflash-rows56-screen gated-rmsnorm-prefill-static gated-rmsnorm-prefill-static-test gated-rmsnorm-prefill-path-test gated-rmsnorm-prefill-benchmark gated-rmsnorm-k128-production-static gated-rmsnorm-k128-production-static-test silu-mul-split-prefill-static silu-mul-split-prefill-static-test silu-mul-split-prefill-benchmark gdn-isa gdn-prefill-benchmark gdn-prefill-static gdn-prefill-static-test gdn-recurrence-resources sampling-isa rope-resources run sanitize rocm-tool-audit rocm-tool-audit-test profile-trace profile-attention-trace profile-pmc
 
 all: $(PROBE_TARGET) $(KV_TARGET) $(HIP_DEVICE_TARGET) $(LINEAR_TARGET) $(EAGER_TARGET) $(GDN_TARGET) $(GDN_RECURRENCE_TARGET) $(SAMPLING_TARGET) $(ROPE_TARGET) $(SERVE_ENV_TARGET)
 
@@ -258,6 +261,23 @@ $(RMSNORM_DECODE_PRODUCTION_TARGET): $(RMSNORM_DECODE_PRODUCTION_SOURCE) $(EAGER
 $(RMSNORM_DECODE_ROUTING_TARGET): test_rmsnorm_decode_routing.cpp $(EAGER_HEADER) Makefile
 	mkdir -p $(BUILD_DIR)
 	$(HIPCC) $(CXXFLAGS) test_rmsnorm_decode_routing.cpp $(LDFLAGS) -o $@
+
+$(RMSNORM_DFLASH_ROWS56_TARGET): $(RMSNORM_DFLASH_ROWS56_SOURCE) $(EAGER_IMPL) $(EAGER_HEADER) Makefile
+	mkdir -p $(BUILD_DIR)
+	$(HIPCC) $(CXXFLAGS) $(RMSNORM_DFLASH_ROWS56_SOURCE) $(EAGER_IMPL) $(LDFLAGS) -o $@
+
+rmsnorm-dflash-rows56-build: $(RMSNORM_DFLASH_ROWS56_TARGET)
+
+rmsnorm-dflash-rows56-static: $(BUILD_DIR)/eager_ops.s rmsnorm-decode-production-routing-test
+	$(PYTHON) $(RMSNORM_DFLASH_ROWS56_STATIC_CHECK) $<
+
+rmsnorm-dflash-rows56-static-test:
+	cd ../.. && $(PYTHON) -m unittest tools.r9700.test_check_rmsnorm_dflash_rows56_static \
+		tools.r9700.test_check_rmsnorm_decode_static
+
+rmsnorm-dflash-rows56-screen: $(RMSNORM_DFLASH_ROWS56_TARGET) rmsnorm-dflash-rows56-static
+	test -n "$(RMSNORM_DFLASH_ROWS56_JSON)"
+	./$(RMSNORM_DFLASH_ROWS56_TARGET) --benchmark --out-json "$(RMSNORM_DFLASH_ROWS56_JSON)"
 
 $(GATED_RMSNORM_PREFILL_TARGET): $(GATED_RMSNORM_PREFILL_SOURCE) $(EAGER_IMPL) $(EAGER_HEADER) Makefile
 	mkdir -p $(BUILD_DIR)
