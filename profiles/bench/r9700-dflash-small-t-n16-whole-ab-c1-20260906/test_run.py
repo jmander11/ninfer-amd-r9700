@@ -33,37 +33,39 @@ def spec(draft: int, repeats: int = 1) -> dict:
                 "drafted_tokens": 0, "accepted_tokens": 0, "fallback_steps": 0,
                 "acceptance_rate": None, "acceptance_length": None,
                 "accepted_per_position": []}
-    rounds = 64 * repeats
-    accepted = 128 * repeats
+    rounds = 16 * repeats
+    accepted = 32 * repeats
     drafted = rounds * draft
     return {"enabled": True, "draft_window": draft, "rounds": rounds,
             "drafted_tokens": drafted, "accepted_tokens": accepted,
             "fallback_steps": 0, "acceptance_rate": accepted / drafted,
             "acceptance_length": 1.0 + accepted / rounds,
-            "accepted_per_position": [32 * repeats] * 4 + [0] * (draft - 4)}
+            "accepted_per_position": [8 * repeats] * 4 + [0] * (draft - 4)}
 
 
 def report(command: list[str], artifact: dict, role: str, draft: int, width: int) -> dict:
     ordinary = draft == 0
     tests = []
-    for label, kind in (("pp8192+tg256", "pp+tg"),
-                        ("whole-pp8192+tg256", "whole")):
+    for label, kind in (("pp128+tg64", "pp+tg"),
+                        ("whole-pp128+tg64", "whole")):
         reps = []
         for sample in (1.0, 1.01, 0.99):
             rep_spec = spec(draft)
-            engine_tokens = (256 if draft == 0 else
+            engine_tokens = (run.DECODE_STEPS if draft == 0 else
                              rep_spec["rounds"] + rep_spec["accepted_tokens"] +
                              rep_spec["fallback_steps"])
-            reps.append({"generated_output_tokens": 257,
-                         "decode_output_tokens": 256,
+            reps.append({"generated_output_tokens": run.REQUESTED_OUTPUT_TOKENS,
+                         "decode_output_tokens": run.DECODE_STEPS,
                          "decode_engine_tokens": engine_tokens,
-                         "generated_token_ids_by_lane": [list(range(257))],
+                         "generated_token_ids_by_lane": [list(range(run.REQUESTED_OUTPUT_TOKENS))],
                          "timings": {"prepare_seconds": 0.01, "vision_seconds": 0.0,
                                      "prefill_seconds": 0.5, "decode_seconds": sample,
                                      "total_seconds": sample + 0.5},
                          "speculative": spec(draft)})
-        tests.append({"label": label, "kind": kind, "n_prompt": 8192, "n_gen": 256,
-                      "requested_output_tokens": 257, "speculative": spec(draft, 3),
+        tests.append({"label": label, "kind": kind, "n_prompt": run.PROMPT_TOKENS,
+                      "n_gen": run.DECODE_STEPS,
+                      "requested_output_tokens": run.REQUESTED_OUTPUT_TOKENS,
+                      "speculative": spec(draft, 3),
                       "reps": reps})
     return {"schema_version": 20, "artifact_type": "ninfer_bench_report",
             "tool": "ninfer_bench", "command": shlex.join(command),
@@ -110,7 +112,7 @@ class ReportTest(unittest.TestCase):
         result = run.validate_report(self.write(self.payload), self.command, self.artifact,
                                      "candidate", 4, 5, PROFILE)
         self.assertEqual(len(result["decode"]["samples_seconds"]), 3)
-        self.assertEqual(len(result["whole"]["tokens"]), 257)
+        self.assertEqual(len(result["whole"]["tokens"]), run.REQUESTED_OUTPUT_TOKENS)
 
     def test_rejects_nonfinite_timing(self) -> None:
         changed = copy.deepcopy(self.payload)
@@ -135,7 +137,7 @@ class ReportTest(unittest.TestCase):
 
     def test_rejects_ordinary_engine_work_disagreement(self) -> None:
         ordinary = report(self.command, self.artifact, "control", 0, 0)
-        ordinary["tests"][1]["reps"][2]["decode_engine_tokens"] = 257
+        ordinary["tests"][1]["reps"][2]["decode_engine_tokens"] = run.DECODE_STEPS + 1
         with self.assertRaisesRegex(RuntimeError, "decode_engine_tokens"):
             run.validate_report(self.write(ordinary), self.command, self.artifact,
                                 "control", 0, 0, PROFILE)

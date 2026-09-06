@@ -1,8 +1,8 @@
 {
   "artifact_type": "ninfer_r9700_dflash_small_t_whole_ab_plan",
-  "schema_version": 1,
-  "status": "prepared_waiting_for_conversion_and_matched_builds",
-  "claim": "matched evaluation screen only; no production routing or DFlash recipe selection",
+  "schema_version": 2,
+  "status": "prepared_fast_c1_mechanism_screen",
+  "claim": "matched P128/G64 evaluation screen only; no production routing, production-scale evidence, or DFlash recipe selection",
   "production_routing_authorized": false,
   "production_recipe_selected": false,
   "prerequisites": {
@@ -28,9 +28,9 @@
   "matched_builds": {
     "receipt_artifact_type": "ninfer_r9700_dflash_small_t_matched_build_receipt",
     "receipt_schema_version": 1,
-    "source_commit": "ca2b58c5728de0fc52916796a2ac5ef6cee5e5f9",
-    "control_executable": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-small-t-n16-control-20260906/bench/ninfer_bench",
-    "candidate_executable": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-small-t-n16-candidate-20260906/bench/ninfer_bench",
+    "source_commit": "cd966d72ed18e1b5b7b57b664572b3c8aa1e02ce",
+    "control_executable": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-small-t-n16-cd966d72-control-20260906/bench/ninfer_bench",
+    "candidate_executable": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-small-t-n16-cd966d72-candidate-20260906/bench/ninfer_bench",
     "control_selector": false,
     "candidate_selector": true
   },
@@ -42,9 +42,9 @@
       {"draft_tokens": 4, "verify_width": 5},
       {"draft_tokens": 5, "verify_width": 6}
     ],
-    "prompt_tokens": 8192,
-    "decode_steps": 256,
-    "requested_output_tokens": 257,
+    "prompt_tokens": 128,
+    "decode_steps": 64,
+    "requested_output_tokens": 65,
     "prefill_chunk": 4096,
     "device_graph": true,
     "proposal_head": "optimized",
@@ -71,5 +71,23 @@
     "exact_speculative_accounting_across_control_and_candidate": true,
     "required_speculative_fields": ["rounds", "drafted_tokens", "accepted_tokens", "fallback_steps", "accepted_per_position"]
   },
+  "failed_attempt_provenance": {
+    "status": "retained_functional_failure_before_matched_ab",
+    "source_commit": "ca2b58c5728de0fc52916796a2ac5ef6cee5e5f9",
+    "archived_directory": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-small-t-n16-whole-ab-c1-20260906/results-functional-failure-device-graph-allowance-attempt2",
+    "failing_process": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-small-t-n16-whole-ab-c1-20260906/results-functional-failure-device-graph-allowance-attempt2/k4_w5-1-control.process.json",
+      "bytes": 1867,
+      "sha256": "018e1cf559a289ec3b5bbbb0dfb944fd5e38c73f8e517853f61d7dbbaadb34f3"
+    },
+    "stderr": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-small-t-n16-whole-ab-c1-20260906/results-functional-failure-device-graph-allowance-attempt2/k4_w5-1-control.stderr.txt",
+      "bytes": 311,
+      "sha256": "12c44d59ed024aa6877522d1b366f519e2557bf3339b7f3bd25527460123b6c4"
+    },
+    "failure": "Device Graph preparation consumed 71303168 bytes, exceeding the planned allowance of 69206016 bytes",
+    "timing_or_routing_conclusion": "none"
+  },
+  "later_required_evidence": "selected-recipe matched 8K/32K C1..4 capacity, acceptance, decode, and fresh-prompt whole inference",
   "results_directory": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-small-t-n16-whole-ab-c1-20260906/results"
 }

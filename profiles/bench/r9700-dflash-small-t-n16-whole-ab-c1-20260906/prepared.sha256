@@ -1,11 +1,11 @@
-b8919468923a6b80a9090696c4e737ed8aef09e7264da088b2dad7a88362e62e  profiles/bench/r9700-dflash-small-t-n16-whole-ab-c1-20260906/plan.json
-ea8c5cd0d32e5279441b54bcc52ec8e4567c853156cfb9be641d7c71fd729df5  profiles/bench/r9700-dflash-small-t-n16-whole-ab-c1-20260906/run.py
-b36903f31559e33b4381445dd6ad108b269d5a9c90f2904d34478b44b81f123b  profiles/bench/r9700-dflash-small-t-n16-whole-ab-c1-20260906/test_run.py
+4272af4b162ceda5e1ab84efdafb482227b41b5b635ca01af8752248574f8463  profiles/bench/r9700-dflash-small-t-n16-whole-ab-c1-20260906/plan.json
+4c4f96a0acf49f0f6bc8010355f7bd76d138e144b895dd2187c6584e6aa091b5  profiles/bench/r9700-dflash-small-t-n16-whole-ab-c1-20260906/run.py
+89891c8ff653168e3b2e696720b58c8569d791d52371bf238d00e97af24fb0ec  profiles/bench/r9700-dflash-small-t-n16-whole-ab-c1-20260906/test_run.py
 e019576eb2400c3c7a8cabd65d631de6b9e590723ad9af08e886abcfbf808cd3  profiles/bench/r9700-dflash-small-t-n16-whole-ab-c1-20260906/commands.sh
 7470efc8d7baa9755e9adc710dd6ff4e68342badd2beba1092223e54e8160506  profiles/bench/r9700-dflash-four-role-n16k16-canonical-q4-preflight-20260906/prepared.sha256
-8d0dfc424ea0592eaa0f28654a477e4c1ef4f29bc93581606e4b96d991ef2c8c  profiles/bench/r9700-dflash-small-t-n16-matched-builds-20260906/build-receipt.json
-9093368e17434b520515a0ef82f4b16de317ea349302e994f3a93a52f6973f32  build-r9700-dflash-small-t-n16-control-20260906/bench/ninfer_bench
-08f4a3caa8cf11fb0f3e7914cfcb4364c1e33510b7821cfd3d9a22e457c91677  build-r9700-dflash-small-t-n16-candidate-20260906/bench/ninfer_bench
+cedb40ad2a995dceb339d81f530eddda17629bed211ae83033252e923a81b8ec  profiles/bench/r9700-dflash-small-t-n16-matched-builds-20260906/build-receipt.json
+04122c7da1e262f0fc0ba5a3a2065b1e1750dadd64df3337038b54c3d85a1f75  build-r9700-dflash-small-t-n16-cd966d72-control-20260906/bench/ninfer_bench
+6dbb09fcc75185ee1a09c0261c1a2dbbccbaa29021eb6f303f883b70350f469f  build-r9700-dflash-small-t-n16-cd966d72-candidate-20260906/bench/ninfer_bench
 27e4f63c17efe3f89b5cf278b3b1a42a737316ed4044d7d0d1d52437059d1002  bench/fixtures/bench_corpus.ids
 d8fc77c36cf17c92e96d67b9a6b5a1826a1ade4f59d59c003b2368fe981fc512  out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval.ninfer
 fb657164b9a9dc2987542ca4578b2bf75d79092a3efa8b7b1776520b4959f61f  out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval.ninfer.conversion.json

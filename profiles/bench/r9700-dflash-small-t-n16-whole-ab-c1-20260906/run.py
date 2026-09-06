@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the projected companion and run the matched C1 whole-DFlash A/B."""
+"""Validate the companion and run the matched fast C1 whole-DFlash mechanism A/B."""
 
 from __future__ import annotations
 
@@ -23,6 +23,9 @@ PROFILE_ENV = {
     "HSA_TOOLS_LIB", "ROCPROFILER_TOOL_LIBRARIES", "ROCP_TOOL_LIBRARIES",
     "ROCPROFILER_OUTPUT_PATH", "ROCPROFILER_OUTPUT_FILE_NAME",
 }
+PROMPT_TOKENS = 128
+DECODE_STEPS = 64
+REQUESTED_OUTPUT_TOKENS = 65
 
 
 def fail(message: str) -> None:
@@ -75,7 +78,7 @@ def require_power() -> str:
 def validate_plan() -> dict:
     plan = load(PLAN_PATH)
     if (plan.get("artifact_type") != "ninfer_r9700_dflash_small_t_whole_ab_plan" or
-            plan.get("schema_version") != 1 or
+            plan.get("schema_version") != 2 or
             plan.get("production_routing_authorized") is not False or
             plan.get("production_recipe_selected") is not False):
         fail("A/B plan would make a production claim")
@@ -84,8 +87,9 @@ def validate_plan() -> dict:
             work.get("profiles") != [
                 {"draft_tokens": 4, "verify_width": 5},
                 {"draft_tokens": 5, "verify_width": 6},
-            ] or work.get("prompt_tokens") != 8192 or
-            work.get("decode_steps") != 256 or work.get("requested_output_tokens") != 257 or
+            ] or work.get("prompt_tokens") != PROMPT_TOKENS or
+            work.get("decode_steps") != DECODE_STEPS or
+            work.get("requested_output_tokens") != REQUESTED_OUTPUT_TOKENS or
             work.get("prefill_chunk") != 4096 or
             work.get("repetitions_per_process") != 3 or
             work.get("warmup_per_process") != 1 or
@@ -94,6 +98,26 @@ def validate_plan() -> dict:
                 "K5_W6": ["candidate", "control", "control", "candidate"],
             }):
         fail("A/B workload is not the exact bounded C1 K4/W5 and K5/W6 contract")
+    failed = plan.get("failed_attempt_provenance", {})
+    expected_failure = (
+        "Device Graph preparation consumed 71303168 bytes, exceeding the planned allowance "
+        "of 69206016 bytes"
+    )
+    if (failed.get("status") != "retained_functional_failure_before_matched_ab" or
+            failed.get("source_commit") !=
+            "ca2b58c5728de0fc52916796a2ac5ef6cee5e5f9" or
+            failed.get("failure") != expected_failure or
+            failed.get("timing_or_routing_conclusion") != "none" or
+            plan.get("later_required_evidence") !=
+            "selected-recipe matched 8K/32K C1..4 capacity, acceptance, decode, and fresh-prompt whole inference"):
+        fail("A/B plan does not retain the exact failed-attempt boundary")
+    archive = Path(failed.get("archived_directory", ""))
+    if not archive.is_dir():
+        fail("failed-attempt archive is absent")
+    for label in ("failing_process", "stderr"):
+        identity = failed.get(label)
+        if not isinstance(identity, dict) or identity != inspect(Path(identity.get("path", ""))):
+            fail(f"failed-attempt {label} identity changed")
     return plan
 
 
@@ -225,8 +249,8 @@ def command_for(executable: Path, artifact: Path, corpus: Path, output: Path,
                 draft: int, width: int, *, ordinary: bool = False) -> list[str]:
     command = [
         str(executable), "--weights", str(artifact), "--corpus", str(corpus),
-        "--device", "0", "--concurrency", "1", "-pg", "8192,256",
-        "--whole-pg", "8192,256", "--prefill-chunk", "4096",
+        "--device", "0", "--concurrency", "1", "-pg", "128,64",
+        "--whole-pg", "128,64", "--prefill-chunk", "4096",
         "--kv-capacity", "workload",
     ]
     if ordinary:
@@ -354,13 +378,15 @@ def validate_report(path: Path, command: list[str], artifact: dict, role: str,
             fail(f"benchmark config {key} differs for {path}")
     tests = report.get("tests")
     if not isinstance(tests, list) or [test.get("label") for test in tests] != [
-            "pp8192+tg256", "whole-pp8192+tg256"]:
+            "pp128+tg64", "whole-pp128+tg64"]:
         fail(f"benchmark lacks exact decode and whole tests: {path}")
     normalized = {}
     for test, kind, report_kind in zip(tests, ("decode", "whole"), ("pp+tg", "whole"),
                                        strict=True):
-        if (test.get("n_prompt") != 8192 or test.get("n_gen") != 256 or
-                test.get("requested_output_tokens") != 257 or test.get("kind") != report_kind):
+        if (test.get("n_prompt") != PROMPT_TOKENS or
+                test.get("n_gen") != DECODE_STEPS or
+                test.get("requested_output_tokens") != REQUESTED_OUTPUT_TOKENS or
+                test.get("kind") != report_kind):
             fail(f"benchmark test geometry differs: {path}")
         reps = test.get("reps")
         if not isinstance(reps, list) or len(reps) != 3:
@@ -369,12 +395,13 @@ def validate_report(path: Path, command: list[str], artifact: dict, role: str,
         tokens = []
         accounting = []
         for index, rep in enumerate(reps):
-            if (rep.get("generated_output_tokens") != 257 or
-                    rep.get("decode_output_tokens") != 256):
+            if (rep.get("generated_output_tokens") != REQUESTED_OUTPUT_TOKENS or
+                    rep.get("decode_output_tokens") != DECODE_STEPS):
                 fail(f"benchmark output/spec work count is invalid: {path}")
             lane_tokens = rep.get("generated_token_ids_by_lane")
             if (not isinstance(lane_tokens, list) or len(lane_tokens) != 1 or
-                    not isinstance(lane_tokens[0], list) or len(lane_tokens[0]) != 257 or
+                    not isinstance(lane_tokens[0], list) or
+                    len(lane_tokens[0]) != REQUESTED_OUTPUT_TOKENS or
                     any(isinstance(token, bool) or not isinstance(token, int) or token < 0
                         for token in lane_tokens[0])):
                 fail(f"benchmark retained output tokens are invalid: {path}")
@@ -384,7 +411,7 @@ def validate_report(path: Path, command: list[str], artifact: dict, role: str,
             tokens.append(tuple(lane_tokens[0]))
             rep_accounting = validate_spec(rep.get("speculative"), draft,
                                            f"{path} {kind} rep {index}")
-            expected_engine_tokens = (256 if draft == 0 else
+            expected_engine_tokens = (DECODE_STEPS if draft == 0 else
                                       rep_accounting[0] + rep_accounting[2] +
                                       rep_accounting[3])
             if rep.get("decode_engine_tokens") != expected_engine_tokens:
@@ -498,18 +525,20 @@ def validate_results(plan: dict, artifact: dict, receipt: dict,
         })
     return {
         "artifact_type": "ninfer_r9700_dflash_small_t_whole_ab_result",
-        "schema_version": 1,
-        "status": "complete_initial_c1_screen",
+        "schema_version": 2,
+        "status": "complete_fast_c1_mechanism_screen",
         "production_routing_authorized": False,
         "production_recipe_selected": False,
         "scope": {"concurrency": [1], "maximum_product_concurrency": 4,
+                  "prompt_tokens": PROMPT_TOKENS, "decode_steps": DECODE_STEPS,
                   "profiles": [{"draft_tokens": 4, "verify_width": 5},
                                {"draft_tokens": 5, "verify_width": 6}]},
         "artifact": artifact, "matched_build_receipt": {
             "path": receipt["path"], "sha256": receipt["sha256"]},
         "ordinary_control": {"report": inspect(ordinary_path), "process": ordinary_process},
         "cells": cells,
-        "limitation": "C1 canonical-Q4 evaluation screen only; no C2..4 or recipe selection evidence",
+        "failed_attempt_provenance": plan["failed_attempt_provenance"],
+        "limitation": "P128/G64 C1 canonical-Q4 mechanism screen only; a pass only retains the route for later selected-recipe matched 8K/32K C1..4 evidence and is not production admission",
     }
 
 
@@ -549,7 +578,7 @@ def main() -> int:
     results.mkdir(parents=False)
     preflight = {
         "artifact_type": "ninfer_r9700_dflash_small_t_whole_ab_preflight",
-        "schema_version": 1, "artifact": artifact,
+        "schema_version": 2, "artifact": artifact,
         "matched_build_receipt": {"path": receipt["path"], "sha256": receipt["sha256"]},
         "builds": builds, "corpus": inspect(corpus), "power_profile": "auto",
         "production_routing_authorized": False, "production_recipe_selected": False,
