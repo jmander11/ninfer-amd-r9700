@@ -1608,6 +1608,27 @@ Replace functional routes with measured gfx1201 families:
     report is `profiles/ppl/four-role-n16k16-a4-8k-20260905/results.json` (SHA-256
     `cd449ecddbf7f2d260fb43d630b1274ae986631114bf6114c99f3253f0c6b8f5`). A4 is terminal with no
     fused-A4 or physical qualifier.
+  A final bounded exact-Q4 architecture review found and qualified one topology not represented by
+  the earlier M128xN128 or M64xN256 probes: an M96xN256, 768-thread/twenty-four-wave CTA in which
+  each wave owns M16xN64 and reuses its staged A operands across four N16 output fragments. The
+  disconnected gfx1201 candidate passed full incumbent BF16 parity over all three exact P2048
+  shapes, 126 independent complete-K represented-FP64 samples, M96 tail/VMM-read-guard, graph,
+  status, overlap/alignment, and allocation-guard checks. Its emitted object had `105` logical /
+  `112` allocation-rounded VGPR, `30,208`-byte LDS, compiler occupancy `12` waves/SIMD, two derived
+  active CTAs and 48 resident waves per CU, exactly 16 ordered signed-IU4 sites, a 72-byte ABI, and
+  zero private/scratch/spill storage. Physical timing nevertheless stably rejected the topology in
+  every cell: robust candidate/control upper ratios were `1.050602`, `1.062665`, and `1.053037`;
+  matched point service was `390.703442 ms` versus `371.530018 ms`, only `56.283693` useful TMAC/s,
+  and the robust upper service was `392.300470 ms` versus the exact `271.441719 ms` floor-closing
+  gate. The immutable report is
+  `profiles/bench/r9700-a8q4-n16k16-m96n256-p2048-ab-20260905.json` (SHA-256
+  `c09f5b716cf8bce90ceac8e0c7c81e2621713610061582e0e66941a61cd9e20f`). The stable loss admits no
+  repeat or production transfer; qualification-only code and tooling are removed. The accompanying
+  Layer-0 review also excludes exact-Q4 split-K and unchanged-tile persistent/cooperative forms:
+  minimal two-way split-K adds at least `63.753421 ms` of FP32 partial traffic at the retained
+  stream ceiling, while unchanged-tile persistence can remove at most the measured `3.800482 ms`
+  of Q4-adjacent boundaries; larger live reuse tiles reduce to the already rejected M128/N256
+  families or require partial-result spill traffic.
   The activation-inclusive A8G128-by-Q4G128 represented-format
   contingency was the final represented-format hypothesis before these two bounded follow-ups. Its
   two independent robust point estimates
