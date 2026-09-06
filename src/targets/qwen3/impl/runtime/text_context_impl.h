@@ -1090,7 +1090,9 @@ void TextContext::attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_la
                                          linear_execution_);
 }
 
-void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_layer, Phase ph) {
+template <class Tap>
+void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_layer, Phase ph,
+                          Tap& tap) {
     hipStream_t s = ctx_.stream;
     const int T    = x.ne[1];
 
@@ -1100,6 +1102,9 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
     Tensor beta        = control.beta;
     Variant::gdn_norm_control_projection(x, *w.input_norm, kCfg.rms_eps, *w.projection, h, g, beta,
                                          work_, s, linear_execution_);
+    if constexpr (requires { tap.capture_gdn_controls(text_layer, h, g, beta, s); }) {
+        tap.capture_gdn_controls(text_layer, h, g, beta, s);
+    }
 
     auto projection       = workspace_recipe::gdn_projection<TextConfig>(work_, T);
     Tensor z              = projection.output_gate.view({kCfg.gdn_v_dim, kCfg.gdn_v_heads, T});
@@ -1158,6 +1163,9 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
                 *active_linear_state_slots_, *active_linear_state_slots_, query_output, key_output,
                 value_output, gate_output, ph, work_, s, linear_execution_, text_layer);
         }
+        if constexpr (requires { tap.capture_gdn_projection(text_layer, z, qc, kc, vc, s); }) {
+            tap.capture_gdn_projection(text_layer, z, qc, kc, vc, s);
+        }
 
         Tensor q_recurrent = qc.view({kCfg.gdn_k_dim, kCfg.gdn_k_heads, T});
         Tensor k_recurrent = kc.view({kCfg.gdn_k_dim, kCfg.gdn_k_heads, T});
@@ -1193,18 +1201,26 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
                                           *active_linear_state_slots_, *active_linear_state_slots_,
                                           out_batch, s);
         }
+        if constexpr (requires { tap.capture_gdn_recurrence(text_layer, o, s); }) {
+            tap.capture_gdn_recurrence(text_layer, o, s);
+        }
 
         Tensor on = workspace_recipe::gdn_normalized_output<TextConfig>(work_, T).view(
             {kCfg.gdn_v_dim, kCfg.gdn_v_heads, T});
         ops::gated_rmsnorm(o, *w.gdn_norm, z, kCfg.rms_eps, on, s);
+        if constexpr (requires { tap.capture_gdn_normalized(text_layer, on, s); }) {
+            tap.capture_gdn_normalized(text_layer, on, s);
+        }
         Tensor on_flat = on.view({kCfg.value_dim, T});
         Variant::gdn_output_projection(on_flat, *w.out_proj, x, ph, work_, s,
                                        packed_route_tokens(active_sequence_batch_,
                                                            active_sequence_width_),
                                        linear_execution_);
+        if constexpr (requires { tap.capture_gdn_residual(text_layer, x, s); }) {
+            tap.capture_gdn_residual(text_layer, x, s);
+        }
         return;
     }
-
     const auto conv = workspace_recipe::gdn_prefill_conv<TextConfig>(work_, T);
     Tensor qkv      = conv.projected;
     Tensor qkv_c = conv.convolved;
@@ -1226,6 +1242,9 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
         ops::extract_bf16_columns(qkv_c, kCfg.key_dim, kc, s);
         ops::extract_bf16_columns(qkv_c, 2 * kCfg.key_dim, vc, s);
     }
+    if constexpr (requires { tap.capture_gdn_projection(text_layer, z, qc, kc, vc, s); }) {
+        tap.capture_gdn_projection(text_layer, z, qc, kc, vc, s);
+    }
 
     Tensor q_recurrent = qc.view({kCfg.gdn_k_dim, kCfg.gdn_k_heads, T});
     Tensor k_recurrent = kc.view({kCfg.gdn_k_dim, kCfg.gdn_k_heads, T});
@@ -1236,16 +1255,25 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
         state_.recurrent_slot(static_cast<std::uint32_t>(gidx), linear_state_current_slot_);
     ops::gated_delta_net(q_recurrent, k_recurrent, vv, g, beta, kGdnScale,
                          /*normalize_qk=*/true, work_, recurrent_state, o, s);
+    if constexpr (requires { tap.capture_gdn_recurrence(text_layer, o, s); }) {
+        tap.capture_gdn_recurrence(text_layer, o, s);
+    }
 
     Tensor on = workspace_recipe::gdn_normalized_output<TextConfig>(work_, T).view(
         {kCfg.gdn_v_dim, kCfg.gdn_v_heads, T});
     ops::gated_rmsnorm(o, *w.gdn_norm, z, kCfg.rms_eps, on, s);
+    if constexpr (requires { tap.capture_gdn_normalized(text_layer, on, s); }) {
+        tap.capture_gdn_normalized(text_layer, on, s);
+    }
 
     Tensor on_flat = on.view({kCfg.value_dim, T});
     Variant::gdn_output_projection(on_flat, *w.out_proj, x, ph, work_, s,
                                    packed_route_tokens(active_sequence_batch_,
                                                        active_sequence_width_),
                                    linear_execution_);
+    if constexpr (requires { tap.capture_gdn_residual(text_layer, x, s); }) {
+        tap.capture_gdn_residual(text_layer, x, s);
+    }
 }
 
 void TextContext::mlp_tail(const Tensor* post_norm, const MlpW& m, Tensor& x,
@@ -1299,7 +1327,7 @@ void TextContext::run_layers(Tensor& x, Phase ph, Tap& tap) {
                     prefill ? roctx::Name::PrefillGdn : roctx::Name::VerifyGdn, roctx::Category::Gdn,
                     static_cast<std::uint64_t>(layer));
                 auto mixer_scope = work_.scope();
-                gdn_mix(gdn, x, gidx, layer, ph);
+                gdn_mix(gdn, x, gidx, layer, ph, tap);
             }
             if constexpr (requires { tap.capture_mixer(layer, x, ctx_.stream); }) {
                 tap.capture_mixer(layer, x, ctx_.stream);

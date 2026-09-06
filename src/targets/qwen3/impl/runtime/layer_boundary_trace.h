@@ -40,8 +40,42 @@ inline constexpr std::size_t kSnapshotBytes =
 inline constexpr std::size_t kPayloadBytes  = kSnapshots * kSnapshotBytes;
 inline constexpr std::size_t kMetadataBytes = 3U * sizeof(std::int32_t);
 
+struct GdnField {
+    const char* name;
+    DType dtype;
+    std::size_t elements;
+    std::size_t offset;
+};
+inline constexpr std::array<GdnField, 10> kGdnFields{{
+    {"h", DType::BF16, 5120U, 0U},
+    {"g", DType::FP32, 48U, 10240U},
+    {"beta", DType::FP32, 48U, 10432U},
+    {"z", DType::BF16, 6144U, 10624U},
+    {"q", DType::BF16, 2048U, 22912U},
+    {"k", DType::BF16, 2048U, 27008U},
+    {"v", DType::BF16, 6144U, 31104U},
+    {"o", DType::BF16, 6144U, 43392U},
+    {"on", DType::BF16, 6144U, 55680U},
+    {"x", DType::BF16, 5120U, 67968U},
+}};
+inline constexpr std::size_t kGdnPayloadBytes = 78208U;
+inline constexpr std::size_t kCombinedPayloadBytes = kPayloadBytes + kGdnPayloadBytes;
+
+consteval bool valid_gdn_layout() {
+    std::size_t offset = 0;
+    for (const GdnField& field : kGdnFields) {
+        if (field.offset != offset) return false;
+        const std::size_t element_bytes =
+            field.dtype == DType::BF16 ? 2U : (field.dtype == DType::FP32 ? 4U : 0U);
+        if (element_bytes == 0U) return false;
+        offset += field.elements * element_bytes;
+    }
+    return offset == kGdnPayloadBytes;
+}
+
 static_assert(std::endian::native == std::endian::little);
 static_assert(kHidden == 5120 && kLayers == 64 && TextConfig::token_domain == 248077);
+static_assert(valid_gdn_layout());
 
 enum class Role : std::uint8_t {
     None,
@@ -94,15 +128,52 @@ inline const std::string& sidecar_path() {
     return path;
 }
 
+inline const std::string& gdn_manifest_path() {
+    static const std::string path = [] {
+        const char* value = std::getenv("NINFER_QWEN3_GDN_DETAIL_TRACE_MANIFEST");
+        return value == nullptr ? std::string{} : std::string(value);
+    }();
+    return path;
+}
+
+inline const std::string& gdn_sidecar_path() {
+    static const std::string path = [] {
+        const char* value = std::getenv("NINFER_QWEN3_GDN_DETAIL_TRACE_SIDECAR");
+        return value == nullptr ? std::string{} : std::string(value);
+    }();
+    return path;
+}
+
+inline bool gdn_enabled() {
+    return !gdn_manifest_path().empty() || !gdn_sidecar_path().empty();
+}
+
 inline void require_eager(bool use_device_graph) {
-    if (!enabled()) { return; }
+    if (!enabled()) {
+        if (gdn_enabled()) {
+            throw std::invalid_argument("GDN detail trace requires the layer boundary trace");
+        }
+        return;
+    }
     if (manifest_path().empty() || sidecar_path().empty()) {
         throw std::invalid_argument("layer boundary trace requires manifest and sidecar paths");
     }
     if (manifest_path() == sidecar_path()) {
         throw std::invalid_argument("layer boundary trace outputs must be distinct");
     }
-    for (const std::string* path : {&manifest_path(), &sidecar_path()}) {
+    if (gdn_enabled() && (gdn_manifest_path().empty() || gdn_sidecar_path().empty())) {
+        throw std::invalid_argument("GDN detail trace requires both manifest and sidecar paths");
+    }
+    if (gdn_enabled() && (gdn_manifest_path() == gdn_sidecar_path() ||
+                          gdn_manifest_path() == manifest_path() ||
+                          gdn_manifest_path() == sidecar_path() ||
+                          gdn_sidecar_path() == manifest_path() ||
+                          gdn_sidecar_path() == sidecar_path())) {
+        throw std::invalid_argument("layer and GDN trace outputs must be distinct");
+    }
+    for (const std::string* path : {&manifest_path(), &sidecar_path(), &gdn_manifest_path(),
+                                    &gdn_sidecar_path()}) {
+        if (path->empty()) continue;
         if (!std::filesystem::path(*path).is_absolute() ||
             path->find_first_of("\"\\\n\r") != std::string::npos) {
             throw std::invalid_argument(
@@ -170,13 +241,19 @@ inline bool matches(Role role) { return enabled() && !completed() && requested_r
 class Session {
 public:
     Session(Call call, hipStream_t stream)
-        : call_(call), stream_(stream), device_(kPayloadBytes + kMetadataBytes),
-          host_(kPayloadBytes + kMetadataBytes) {
+        : call_(call), stream_(stream), device_(kCombinedPayloadBytes + kMetadataBytes),
+          host_(kCombinedPayloadBytes + kMetadataBytes) {
         require_call();
         ::ninfer::targets::qwen3::detail::prefill_tail_trace_path::require_new(
             manifest_path().c_str());
         ::ninfer::targets::qwen3::detail::prefill_tail_trace_path::require_new(
             sidecar_path().c_str());
+        if (gdn_enabled()) {
+            ::ninfer::targets::qwen3::detail::prefill_tail_trace_path::require_new(
+                gdn_manifest_path().c_str());
+            ::ninfer::targets::qwen3::detail::prefill_tail_trace_path::require_new(
+                gdn_sidecar_path().c_str());
+        }
         hipStreamCaptureStatus capture = hipStreamCaptureStatusNone;
         HIP_CHECK(hipStreamIsCapturing(stream_, &capture));
         if (capture != hipStreamCaptureStatusNone) {
@@ -202,16 +279,49 @@ public:
         capture(value, 2U + 2U * static_cast<std::size_t>(layer));
     }
 
+    void capture_gdn_controls(int layer, const Tensor& h, const Tensor& g,
+                              const Tensor& beta, hipStream_t) {
+        if (layer != 1 || !gdn_enabled()) return;
+        capture_gdn(h, "h");
+        capture_gdn(g, "g");
+        capture_gdn(beta, "beta");
+    }
+
+    void capture_gdn_projection(int layer, const Tensor& z, const Tensor& q, const Tensor& k,
+                                const Tensor& v, hipStream_t) {
+        if (layer != 1 || !gdn_enabled()) return;
+        capture_gdn(z, "z");
+        capture_gdn(q, "q");
+        capture_gdn(k, "k");
+        capture_gdn(v, "v");
+    }
+
+    void capture_gdn_recurrence(int layer, const Tensor& value, hipStream_t) {
+        if (layer == 1 && gdn_enabled()) capture_gdn(value, "o");
+    }
+
+    void capture_gdn_normalized(int layer, const Tensor& value, hipStream_t) {
+        if (layer == 1 && gdn_enabled()) capture_gdn(value, "on");
+    }
+
+    void capture_gdn_residual(int layer, const Tensor& value, hipStream_t) {
+        if (layer == 1 && gdn_enabled()) capture_gdn(value, "x");
+    }
+
     void finish() {
         if (next_snapshot_ != kSnapshots) {
             throw std::logic_error("layer boundary trace did not capture every boundary");
         }
+        if (gdn_enabled() && next_gdn_field_ != kGdnFields.size()) {
+            throw std::logic_error("GDN detail trace did not capture every layer-1 boundary");
+        }
         device_.copy_to_host_async(host_.data(), host_.size(), stream_);
         HIP_CHECK(hipStreamSynchronize(stream_));
         std::array<std::int32_t, 3> metadata{};
-        std::memcpy(metadata.data(), host_.data() + kPayloadBytes, kMetadataBytes);
+        std::memcpy(metadata.data(), host_.data() + kCombinedPayloadBytes, kMetadataBytes);
         validate_metadata(metadata[0], metadata[1], metadata[2]);
         write_outputs(metadata[0], metadata[1], metadata[2]);
+        if (gdn_enabled()) write_gdn_outputs(metadata[0], metadata[1], metadata[2]);
         completed() = true;
     }
 
@@ -245,7 +355,7 @@ private:
         const auto* address = static_cast<const std::uint8_t*>(source.data) +
                               static_cast<std::size_t>(call_.column) * sizeof(std::int32_t);
         HIP_CHECK(hipMemcpyAsync(static_cast<std::uint8_t*>(device_.data()) + kPayloadBytes +
-                                     metadata_offset,
+                                     kGdnPayloadBytes + metadata_offset,
                                  address, sizeof(std::int32_t), hipMemcpyDeviceToDevice, stream_));
     }
 
@@ -267,6 +377,26 @@ private:
                                      snapshot * kSnapshotBytes,
                                  source, kSnapshotBytes, hipMemcpyDeviceToDevice, stream_));
         ++next_snapshot_;
+    }
+
+    void capture_gdn(const Tensor& value, std::string_view expected_name) {
+        if (next_gdn_field_ >= kGdnFields.size()) {
+            throw std::logic_error("too many GDN detail fields");
+        }
+        const GdnField& field = kGdnFields[next_gdn_field_];
+        if (expected_name != field.name || value.dtype != field.dtype || value.data == nullptr ||
+            !value.is_contiguous() || value.numel() !=
+                static_cast<std::int64_t>(field.elements * static_cast<std::size_t>(call_.width))) {
+            throw std::logic_error("GDN detail tensor/order is invalid");
+        }
+        const std::size_t element_bytes = dtype_size(field.dtype);
+        const auto* source = static_cast<const std::uint8_t*>(value.data) +
+                             static_cast<std::size_t>(call_.column) * field.elements * element_bytes;
+        HIP_CHECK(hipMemcpyAsync(static_cast<std::uint8_t*>(device_.data()) + kPayloadBytes +
+                                     field.offset,
+                                 source, field.elements * element_bytes,
+                                 hipMemcpyDeviceToDevice, stream_));
+        ++next_gdn_field_;
     }
 
     void validate_metadata(std::int32_t token, std::int32_t position,
@@ -313,11 +443,55 @@ private:
         write_exclusive(manifest_path(), contents.data(), contents.size(), "manifest");
     }
 
+    void write_gdn_outputs(std::int32_t token, std::int32_t position,
+                           std::int32_t rope_position) const {
+        const auto* payload = host_.data() + kPayloadBytes;
+        write_exclusive(gdn_sidecar_path(), payload, kGdnPayloadBytes, "GDN sidecar");
+        const std::uint64_t hash = fnv1a64(payload, kGdnPayloadBytes);
+        std::ostringstream manifest;
+        manifest << "{\n"
+                 << "  \"artifact_type\": \"ninfer_qwen3_layer1_gdn_detail_trace\",\n"
+                 << "  \"schema_version\": 1,\n"
+                 << "  \"diagnostic_only\": true,\n"
+                 << "  \"timing_evidence_eligible\": false,\n"
+                 << "  \"production_routing_authorized\": false,\n"
+                 << "  \"execution\": \"eager\",\n"
+                 << "  \"role\": \"" << role_name(call_.role) << "\",\n"
+                 << "  \"width\": " << call_.width << ",\n"
+                 << "  \"selected_column\": " << call_.column << ",\n"
+                 << "  \"absolute_frontier\": " << call_.frontier << ",\n"
+                 << "  \"token\": " << token << ",\n"
+                 << "  \"cache_position\": " << position << ",\n"
+                 << "  \"rope_position\": " << rope_position << ",\n"
+                 << "  \"text_layer\": 1,\n"
+                 << "  \"gdn_index\": 1,\n"
+                 << "  \"sidecar_path\": \"" << gdn_sidecar_path() << "\",\n"
+                 << "  \"sidecar_bytes\": " << kGdnPayloadBytes << ",\n"
+                 << "  \"sidecar_fnv1a64\": \"" << std::hex << std::setfill('0')
+                 << std::setw(16) << hash << std::dec << "\",\n"
+                 << "  \"fields\": [\n";
+        for (std::size_t index = 0; index < kGdnFields.size(); ++index) {
+            const GdnField& field = kGdnFields[index];
+            manifest << "    {\"name\":\"" << field.name << "\",\"dtype\":\""
+                     << (field.dtype == DType::BF16 ? "bf16" : "fp32")
+                     << "\",\"elements\":" << field.elements << ",\"offset\":"
+                     << field.offset << ",\"bytes\":"
+                     << field.elements * dtype_size(field.dtype) << "}"
+                     << (index + 1U == kGdnFields.size() ? "\n" : ",\n");
+        }
+        manifest << "  ],\n"
+                 << "  \"layout\": \"typed selected-column layer1 GDN boundaries in field order\"\n"
+                 << "}\n";
+        const std::string contents = manifest.str();
+        write_exclusive(gdn_manifest_path(), contents.data(), contents.size(), "GDN manifest");
+    }
+
     Call call_;
     hipStream_t stream_ = nullptr;
     DeviceBuffer device_;
     std::vector<std::uint8_t> host_;
     std::size_t next_snapshot_ = 0;
+    std::size_t next_gdn_field_ = 0;
 };
 
 template <class Primary>
@@ -344,6 +518,23 @@ struct CompositeTap {
             primary.capture_positions(value, stream);
         }
     }
+    void capture_gdn_controls(int layer, const Tensor& h, const Tensor& g, const Tensor& beta,
+                              hipStream_t stream) {
+        trace.capture_gdn_controls(layer, h, g, beta, stream);
+    }
+    void capture_gdn_projection(int layer, const Tensor& z, const Tensor& q, const Tensor& k,
+                                const Tensor& v, hipStream_t stream) {
+        trace.capture_gdn_projection(layer, z, q, k, v, stream);
+    }
+    void capture_gdn_recurrence(int layer, const Tensor& value, hipStream_t stream) {
+        trace.capture_gdn_recurrence(layer, value, stream);
+    }
+    void capture_gdn_normalized(int layer, const Tensor& value, hipStream_t stream) {
+        trace.capture_gdn_normalized(layer, value, stream);
+    }
+    void capture_gdn_residual(int layer, const Tensor& value, hipStream_t stream) {
+        trace.capture_gdn_residual(layer, value, stream);
+    }
 };
 
 struct Tap {
@@ -355,6 +546,23 @@ struct Tap {
     }
     void capture_layer(int layer, const Tensor& value, hipStream_t stream) {
         trace.capture_layer(layer, value, stream);
+    }
+    void capture_gdn_controls(int layer, const Tensor& h, const Tensor& g, const Tensor& beta,
+                              hipStream_t stream) {
+        trace.capture_gdn_controls(layer, h, g, beta, stream);
+    }
+    void capture_gdn_projection(int layer, const Tensor& z, const Tensor& q, const Tensor& k,
+                                const Tensor& v, hipStream_t stream) {
+        trace.capture_gdn_projection(layer, z, q, k, v, stream);
+    }
+    void capture_gdn_recurrence(int layer, const Tensor& value, hipStream_t stream) {
+        trace.capture_gdn_recurrence(layer, value, stream);
+    }
+    void capture_gdn_normalized(int layer, const Tensor& value, hipStream_t stream) {
+        trace.capture_gdn_normalized(layer, value, stream);
+    }
+    void capture_gdn_residual(int layer, const Tensor& value, hipStream_t stream) {
+        trace.capture_gdn_residual(layer, value, stream);
     }
 };
 

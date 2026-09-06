@@ -4,7 +4,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from compare_qwen3_layer_boundary_trace import PAYLOAD_BYTES, ROLES, compare, fnv1a64
+from compare_qwen3_layer_boundary_trace import (
+    GDN_FIELDS, GDN_PAYLOAD_BYTES, PAYLOAD_BYTES, ROLES, compare, compare_gdn, fnv1a64,
+)
 
 
 class CompareTest(unittest.TestCase):
@@ -29,6 +31,36 @@ class CompareTest(unittest.TestCase):
             "sidecar_path": str(sidecar), "sidecar_bytes": PAYLOAD_BYTES,
             "sidecar_fnv1a64": fnv1a64(data),
             "layout": "little-endian-u16: input, then layer0..63 post_mixer,post_mlp",
+        }))
+        return manifest
+
+    def gdn_fixture(self, directory: Path, expected, suffix: str, mutate=None):
+        role, width, column, frontier, position = expected
+        data = bytearray(GDN_PAYLOAD_BYTES)
+        if mutate is not None:
+            field_name, element, bits = mutate
+            field = next(value for value in GDN_FIELDS if value[0] == field_name)
+            _, dtype, _, offset, _ = field
+            struct.pack_into("<H" if dtype == "bf16" else "<I", data,
+                             offset + element * (2 if dtype == "bf16" else 4), bits)
+        sidecar = directory / f"{suffix}.bin"
+        sidecar.write_bytes(data)
+        manifest = directory / f"{suffix}.json"
+        manifest.write_text(json.dumps({
+            "artifact_type": "ninfer_qwen3_layer1_gdn_detail_trace",
+            "schema_version": 1, "diagnostic_only": True,
+            "timing_evidence_eligible": False, "production_routing_authorized": False,
+            "execution": "eager", "role": role, "width": width,
+            "selected_column": column, "absolute_frontier": frontier, "token": 42,
+            "cache_position": position, "rope_position": position, "text_layer": 1,
+            "gdn_index": 1, "sidecar_path": str(sidecar),
+            "sidecar_bytes": GDN_PAYLOAD_BYTES, "sidecar_fnv1a64": fnv1a64(data),
+            "fields": [
+                {"name": name, "dtype": dtype, "elements": elements, "offset": offset,
+                 "bytes": byte_count}
+                for name, dtype, elements, offset, byte_count in GDN_FIELDS
+            ],
+            "layout": "typed selected-column layer1 GDN boundaries in field order",
         }))
         return manifest
 
@@ -82,6 +114,65 @@ class CompareTest(unittest.TestCase):
                 right.write_text(payload)
                 with self.assertRaisesRegex(RuntimeError, message):
                     compare(left, right, "target")
+
+    def test_gdn_exact_and_each_stage_localization(self):
+        cases = {
+            "h": "first_difference_gdn_input_rmsnorm",
+            "g": "first_difference_gdn_g_control",
+            "beta": "first_difference_gdn_beta_control",
+            "z": "first_difference_gdn_output_gate_projection",
+            "q": "first_difference_gdn_query_projection_or_conv",
+            "k": "first_difference_gdn_key_projection_or_conv",
+            "v": "first_difference_gdn_value_projection_or_conv",
+            "o": "first_difference_gdn_recurrence",
+            "on": "first_difference_gdn_gated_rmsnorm",
+            "x": "first_difference_gdn_output_projection_or_residual",
+        }
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            left = self.gdn_fixture(directory, ROLES["target"][0], "left")
+            right = self.gdn_fixture(directory, ROLES["target"][1], "right")
+            self.assertEqual(compare_gdn(left, right, "target")["classification"],
+                             "layer1_gdn_boundaries_exact")
+        for field, expected_classification in cases.items():
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as raw:
+                directory = Path(raw)
+                left = self.gdn_fixture(directory, ROLES["target"][0], "left")
+                right = self.gdn_fixture(directory, ROLES["target"][1], "right",
+                                         (field, 1, 0x3f80 if field not in {"g", "beta"}
+                                          else 0x3f800000))
+                result = compare_gdn(left, right, "target")
+                self.assertEqual(result["classification"], expected_classification)
+                self.assertEqual(result["first_difference"]["field"], field)
+                self.assertEqual(result["first_difference"]["first_element_index"], 1)
+                self.assertEqual(result["first_difference"]["right_value"], 1.0)
+                self.assertEqual(result["first_difference"]["maximum_absolute_difference"], 1.0)
+
+    def test_gdn_rejects_typed_layout_and_sidecar_identity_mutations(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            left = self.gdn_fixture(directory, ROLES["text"][0], "left")
+            right = self.gdn_fixture(directory, ROLES["text"][1], "right")
+            value = json.loads(right.read_text())
+            value["fields"][4]["dtype"] = "fp32"
+            right.write_text(json.dumps(value))
+            with self.assertRaisesRegex(RuntimeError, "field layout"):
+                compare_gdn(left, right, "text")
+            value["fields"][4]["dtype"] = "bf16"
+            value["sidecar_path"] = str(directory / "left.bin")
+            right.write_text(json.dumps(value))
+            with self.assertRaisesRegex(RuntimeError, "sidecar identity"):
+                compare_gdn(left, right, "text")
+
+    def test_gdn_rejects_nonfinite_bf16_and_fp32(self):
+        for field, bits in (("q", 0x7f80), ("g", 0x7f800000)):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as raw:
+                directory = Path(raw)
+                left = self.gdn_fixture(directory, ROLES["target"][0], "left")
+                right = self.gdn_fixture(directory, ROLES["target"][1], "right",
+                                         (field, 0, bits))
+                with self.assertRaisesRegex(RuntimeError, "nonfinite represented"):
+                    compare_gdn(left, right, "target")
 
 
 if __name__ == "__main__":
