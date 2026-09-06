@@ -1,0 +1,64 @@
+{
+  "artifact_type": "ninfer_r9700_dflash_p129_isolation_discriminator_plan",
+  "schema_version": 1,
+  "status": "prepared_cpu_only_no_gpu_execution",
+  "claim": "functional fresh-P129 versus isolated-prefix-reuse discriminator only; timings are ineligible",
+  "production_routing_authorized": false,
+  "production_recipe_selected": false,
+  "artifact": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval.ninfer",
+    "bytes": 22763026944,
+    "sha256": "d8fc77c36cf17c92e96d67b9a6b5a1826a1ade4f59d59c003b2368fe981fc512",
+    "weights_id": "r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval"
+  },
+  "build": {
+    "receipt": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-small-t-n16-matched-builds-20260906/build-receipt.json",
+    "receipt_sha256": "cedb40ad2a995dceb339d81f530eddda17629bed211ae83033252e923a81b8ec",
+    "source_commit": "cd966d72ed18e1b5b7b57b664572b3c8aa1e02ce",
+    "control_executable": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-small-t-n16-cd966d72-control-20260906/bench/ninfer_bench",
+    "control_executable_bytes": 5114632,
+    "control_executable_sha256": "04122c7da1e262f0fc0ba5a3a2065b1e1750dadd64df3337038b54c3d85a1f75"
+  },
+  "history_authority": {
+    "source_corpus": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids",
+    "source_corpus_bytes": 333620,
+    "source_corpus_sha256": "27e4f63c17efe3f89b5cf278b3b1a42a737316ed4044d7d0d1d52437059d1002",
+    "seed_report": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-small-t-n16-whole-ab-c1-20260906/results-functional-failure-isolated-token-parity-attempt3/ordinary-control.json",
+    "seed_report_bytes": 13290,
+    "seed_report_sha256": "02fe8d9eb0ba21224def806bdd06ac5d67c6a6a11e912a56a9018d35c544eea2",
+    "seed_token": 24178,
+    "history_corpus": "history-p129.ids",
+    "history_corpus_bytes": 811,
+    "history_corpus_sha256": "34e9bc09b99ae4efc06049e744e8b43ac5794a9dab76fcf43de43e31f5db4515",
+    "history_rule": "exact source-corpus tokens [0,128) followed by the retained fresh-P128 ordinary greedy seed",
+    "history_tokens": 129
+  },
+  "workload": {
+    "device": 0,
+    "concurrency": 1,
+    "maximum_product_concurrency": 4,
+    "prompt_tokens_before_seed": 128,
+    "effective_history_tokens": 129,
+    "decode_steps": 64,
+    "requested_output_tokens": 65,
+    "prefill_chunk": 4096,
+    "kv_capacity": "workload",
+    "dflash": {"draft_tokens": 4, "verify_width": 5, "proposal_head": "optimized"},
+    "repetitions": 1,
+    "warmup": 0,
+    "phases": ["eager", "graph"],
+    "seed_authority_arms_per_phase": ["ordinary_seed_p128", "dflash_seed_p128"],
+    "discriminator_arms_per_phase": ["ordinary_isolated", "ordinary_fresh_p129", "dflash_isolated", "dflash_fresh_p129"],
+    "total_single_test_processes": 12
+  },
+  "decision": {
+    "classification_only": true,
+    "timing_evidence_eligible": false,
+    "all_arms_single_test_processes": true,
+    "each_phase_and_spec_mode_has_a_fresh_p128_seed_authority": true,
+    "fresh_and_isolated_effective_histories_must_be_exactly_identical": true,
+    "candidate_small_t_route_used": false,
+    "no_routing_or_recipe_claim": true
+  },
+  "results_directory": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-p129-isolation-discriminator-20260906/results"
+}
