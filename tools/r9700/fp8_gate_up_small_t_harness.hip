@@ -14,6 +14,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <iomanip>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -434,6 +435,12 @@ double median(std::array<float, 14> values) {
     return 0.5 * (values[6] + values[7]);
 }
 
+template <typename T>
+void write_json_float(T value) {
+    std::cout << std::defaultfloat << std::setprecision(std::numeric_limits<T>::max_digits10)
+              << value;
+}
+
 void benchmark(Cell& cell, Stream& stream) {
     Event begin, end;
     std::array<float, 14> incumbent{}, challenger{};
@@ -458,7 +465,7 @@ void benchmark(Cell& cell, Stream& stream) {
         std::cout << '[';
         for (std::size_t index = 0; index < values.size(); ++index) {
             if (index != 0U) std::cout << ',';
-            std::cout << values[index];
+            write_json_float(values[index]);
         }
         std::cout << ']';
     };
@@ -470,12 +477,15 @@ void benchmark(Cell& cell, Stream& stream) {
     array(incumbent);
     std::cout << ",\"challenger_samples_ms\":";
     array(challenger);
-    std::cout << ",\"incumbent_median_ms\":" << incumbent_ms
-              << ",\"challenger_median_ms\":" << challenger_ms
-              << ",\"challenger_over_incumbent\":" << challenger_ms / incumbent_ms
-              << ",\"projected_64_call_saving_ms\":"
-              << 64.0 * (incumbent_ms - challenger_ms)
-              << ",\"decision\":\"unmade_until_gpu_measurement_is_validated\"}\n";
+    std::cout << ",\"incumbent_median_ms\":";
+    write_json_float(incumbent_ms);
+    std::cout << ",\"challenger_median_ms\":";
+    write_json_float(challenger_ms);
+    std::cout << ",\"challenger_over_incumbent\":";
+    write_json_float(challenger_ms / incumbent_ms);
+    std::cout << ",\"projected_64_call_saving_ms\":";
+    write_json_float(64.0 * (incumbent_ms - challenger_ms));
+    std::cout << ",\"decision\":\"unmade_until_gpu_measurement_is_validated\"}\n";
 }
 
 void require_target() {

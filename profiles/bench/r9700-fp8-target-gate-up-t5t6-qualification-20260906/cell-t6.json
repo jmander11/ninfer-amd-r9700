@@ -1,0 +1,88 @@
+{
+  "schema": "ninfer.r9700.fp8_target_gate_up_t5t6_qualified_cell.v1",
+  "status": "rejected",
+  "production_eligible": false,
+  "tokens": 6,
+  "rows": 34816,
+  "columns": 5120,
+  "timing_scope": "complete_bf16_quantize_matmul_status_poison",
+  "raw_samples": {
+    "incumbent_ms": [
+      0.44,
+      0.43,
+      0.42,
+      0.44,
+      0.42,
+      0.44,
+      0.43,
+      0.44,
+      0.44,
+      0.44,
+      0.43,
+      0.43,
+      0.42,
+      0.42
+    ],
+    "challenger_ms": [
+      1.5,
+      1.57,
+      1.51,
+      1.6,
+      1.58,
+      1.56,
+      1.55,
+      1.61,
+      1.61,
+      1.5,
+      1.6,
+      1.53,
+      1.65,
+      1.5
+    ]
+  },
+  "derived": {
+    "incumbent_median_ms": 0.43,
+    "challenger_median_ms": 1.565,
+    "challenger_over_incumbent": 3.63953488372093,
+    "forward_candidate_over_incumbent": [
+      3.409090909090909,
+      3.5952380952380953,
+      3.7619047619047623,
+      3.604651162790698,
+      3.659090909090909,
+      3.72093023255814,
+      3.9285714285714284
+    ],
+    "reverse_candidate_over_incumbent": [
+      3.6511627906976747,
+      3.6363636363636367,
+      3.5454545454545454,
+      3.659090909090909,
+      3.409090909090909,
+      3.558139534883721,
+      3.5714285714285716
+    ],
+    "forward_ratio_median": 3.659090909090909,
+    "reverse_ratio_median": 3.5714285714285716,
+    "paired_ratio_mean": 3.6221577425896365,
+    "paired_ratio_sample_standard_deviation": 0.13339561114557688,
+    "paired_ratio_two_standard_error_upper": 3.693460695990504,
+    "order_ratio_delta": 0.08766233766233755,
+    "projected_64_call_saving_ms": -72.64
+  },
+  "decision": {
+    "accepted": false,
+    "criterion": "both cells require overall candidate/incumbent median ratio at most 0.90, each launch-order median ratio at most 0.92, paired-ratio mean plus two standard errors below 0.95, launch-order median-ratio delta at most 0.03, and positive projected 64-call saving"
+  },
+  "serialization": {
+    "quantum_ms": 0.01,
+    "interpretation": "each retained timing represents value plus or minus 0.005 ms",
+    "acceptance_from_rounded_evidence_permitted": false
+  },
+  "robust_reject_certificate": {
+    "incumbent_median_upper_ms": 0.435,
+    "challenger_median_lower_ms": 1.56,
+    "positive_projected_saving_possible": false,
+    "reason": "challenger median lower bound exceeds incumbent median upper bound"
+  }
+}

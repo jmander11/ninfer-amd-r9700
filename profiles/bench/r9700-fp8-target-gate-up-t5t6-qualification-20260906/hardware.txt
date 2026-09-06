@@ -1,0 +1,7 @@
+device=0
+name=AMD Radeon AI PRO R9700
+architecture=gfx1201
+wavefront=32
+pci=0000:13:00.0
+vendor=0x1002
+device_id=0x7551

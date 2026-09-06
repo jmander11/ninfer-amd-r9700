@@ -49,6 +49,8 @@ above, not an executable task. Conditional tasks retain their explicit `if:` cla
   at T=4,5,6,8,10,12,18,20; T15/T16/T24 and every unlisted shape stay on WMMA. The T5
   N5120/K17408 MLP-down candidate is standalone-qualified but remains off by default. Require
   current-companion whole A/B, token parity, and a material end-to-end win before any route change.
+  The exact T5/T6 FP8 target gate/up challenger is terminally rejected at 3.77x/3.64x incumbent
+  time; do not rerun it without a changed source mechanism.
 
 - [ ] `DFLASH-TEXT-P129` Localize the shared Text append-versus-fresh dependence for the identical
   effective P129 history. Compare exact final normalized tail hidden and output-head top-two margin;

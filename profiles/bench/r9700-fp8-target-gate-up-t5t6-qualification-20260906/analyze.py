@@ -9,6 +9,7 @@ import json
 import math
 from pathlib import Path
 import statistics
+import sys
 
 ROOT = Path("/ssdpool2nvme/local_llm/ninfer-amd-r9700")
 PACKAGE = ROOT / "profiles/bench/r9700-fp8-target-gate-up-t5t6-qualification-20260906"
@@ -16,6 +17,8 @@ BINARY = ROOT / "tools/r9700/build/fp8_gate_up_small_t_qual"
 ASSEMBLY = ROOT / "tools/r9700/build/fp8_gate_up_small_t.s"
 BINARY_SHA = "4611e36dc2f1a5324a94a0da7f00c402b052f986dbf8ac4c504831d4327f4ece"
 ASSEMBLY_SHA = "a463e37e04512213013302769fa946c2fd1a57565533782f60797f107f46071d"
+BINARY_BYTES = 113272
+ASSEMBLY_BYTES = 63959
 SOURCE_COMMIT = "337940345d20cd0211fccd10bc4f7e9d0181bc2d"
 CRITERION = (
     "both cells require overall candidate/incumbent median ratio at most 0.90, "
@@ -37,6 +40,8 @@ LIMITATIONS = [
     "does not establish whole-DFlash performance, exact-token parity, or production eligibility",
     "a passing result only justifies a separately reviewed production integration",
 ]
+SERIALIZATION_QUANTUM_MS = 0.01
+SERIALIZATION_HALF_STEP = SERIALIZATION_QUANTUM_MS / 2.0
 
 
 def pairs(items: list[tuple[str, object]]) -> dict:
@@ -65,6 +70,10 @@ def identity(path: Path) -> dict:
     return {"path": str(resolved), "bytes": resolved.stat().st_size, "sha256": digest}
 
 
+def capture_identity(path: Path, size: int, digest: str) -> dict:
+    return {"path": str(path), "bytes": size, "sha256": digest}
+
+
 def finite(value: object, label: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
         raise ValueError(f"{label} is not finite numeric")
@@ -78,13 +87,24 @@ def samples(cell: dict, name: str) -> list[float]:
     result = [finite(value, f"{name}[{index}]") for index, value in enumerate(values)]
     if any(value <= 0.0 for value in result):
         raise ValueError(f"{name} contains a nonpositive sample")
+    for index, value in enumerate(result):
+        require_cent_serialized(value, f"{name}[{index}]")
     return result
 
 
-def close(actual: object, expected: float, label: str) -> None:
-    # The committed harness serializes with the C++ stream's six significant-digit default.
-    if not math.isclose(finite(actual, label), expected, rel_tol=2e-5, abs_tol=1e-7):
-        raise ValueError(f"reported {label} differs from raw samples")
+def require_cent_serialized(value: float, label: str) -> None:
+    if not math.isclose(value / SERIALIZATION_QUANTUM_MS,
+                        round(value / SERIALIZATION_QUANTUM_MS),
+                        rel_tol=0.0, abs_tol=1e-9):
+        raise ValueError(f"{label} is not serialized at the retained 0.01 precision")
+
+
+def require_interval_overlap(actual: object, low: float, high: float, label: str) -> float:
+    value = finite(actual, label)
+    require_cent_serialized(value, label)
+    if value + SERIALIZATION_HALF_STEP < low or value - SERIALIZATION_HALF_STEP > high:
+        raise ValueError(f"reported {label} is incompatible with retained rounded samples")
+    return value
 
 
 def parse_raw(text: str) -> list[dict]:
@@ -125,12 +145,31 @@ def analyze_cell(cell: dict) -> dict:
     challenger = samples(cell, "challenger_samples_ms")
     incumbent_median = statistics.median(incumbent)
     challenger_median = statistics.median(challenger)
-    close(cell.get("incumbent_median_ms"), incumbent_median, "incumbent_median_ms")
-    close(cell.get("challenger_median_ms"), challenger_median, "challenger_median_ms")
-    close(cell.get("challenger_over_incumbent"), challenger_median / incumbent_median,
-          "challenger_over_incumbent")
+    incumbent_low = incumbent_median - SERIALIZATION_HALF_STEP
+    incumbent_high = incumbent_median + SERIALIZATION_HALF_STEP
+    challenger_low = challenger_median - SERIALIZATION_HALF_STEP
+    challenger_high = challenger_median + SERIALIZATION_HALF_STEP
+    require_interval_overlap(cell.get("incumbent_median_ms"), incumbent_low, incumbent_high,
+                             "incumbent_median_ms")
+    require_interval_overlap(cell.get("challenger_median_ms"), challenger_low, challenger_high,
+                             "challenger_median_ms")
+    ratio_low = challenger_low / incumbent_high
+    ratio_high = challenger_high / incumbent_low
+    require_interval_overlap(cell.get("challenger_over_incumbent"), ratio_low, ratio_high,
+                             "challenger_over_incumbent")
     saving = 64.0 * (incumbent_median - challenger_median)
-    close(cell.get("projected_64_call_saving_ms"), saving, "projected_64_call_saving_ms")
+    saving_low = 64.0 * (incumbent_low - challenger_high)
+    saving_high = 64.0 * (incumbent_high - challenger_low)
+    require_interval_overlap(cell.get("projected_64_call_saving_ms"), saving_low, saving_high,
+                             "projected_64_call_saving_ms")
+
+    # Recovery from the retained 0.01-ms serialization is deliberately one-way. Publish a
+    # decision only when every value represented by the rounding intervals makes positive saving
+    # impossible. Ambiguous evidence, including any possible pass, requires fresh higher-precision
+    # timing and must never be accepted here.
+    if challenger_low <= incumbent_high:
+        raise ValueError(
+            "retained 0.01-ms timing is ambiguous or could pass; analysis cannot accept it")
 
     forward = [challenger[index] / incumbent[index] for index in range(0, 14, 2)]
     reverse = [challenger[index] / incumbent[index] for index in range(1, 14, 2)]
@@ -142,9 +181,7 @@ def analyze_cell(cell: dict) -> dict:
     reverse_median = statistics.median(reverse)
     order_delta = abs(forward_median - reverse_median)
     overall_ratio = challenger_median / incumbent_median
-    accepted = (overall_ratio <= 0.90 and forward_median <= 0.92 and
-                reverse_median <= 0.92 and ratio_upper < 0.95 and
-                order_delta <= 0.03 and saving > 0.0)
+    accepted = False
     return {
         "schema": "ninfer.r9700.fp8_target_gate_up_t5t6_qualified_cell.v1",
         "status": "accepted" if accepted else "rejected",
@@ -169,6 +206,17 @@ def analyze_cell(cell: dict) -> dict:
             "projected_64_call_saving_ms": saving,
         },
         "decision": {"accepted": accepted, "criterion": CRITERION},
+        "serialization": {
+            "quantum_ms": SERIALIZATION_QUANTUM_MS,
+            "interpretation": "each retained timing represents value plus or minus 0.005 ms",
+            "acceptance_from_rounded_evidence_permitted": False,
+        },
+        "robust_reject_certificate": {
+            "incumbent_median_upper_ms": incumbent_high,
+            "challenger_median_lower_ms": challenger_low,
+            "positive_projected_saving_possible": False,
+            "reason": "challenger median lower bound exceeds incumbent median upper bound",
+        },
     }
 
 
@@ -216,8 +264,10 @@ def validate_fixed_inputs() -> None:
         raise ValueError("plan workload/static/output contract differs")
     provenance = load_json(PACKAGE / "build-provenance.json")
     if provenance.get("source", {}).get("commit") != SOURCE_COMMIT or \
-       provenance.get("outputs", {}).get("binary", {}).get("sha256") != BINARY_SHA or \
-       provenance.get("outputs", {}).get("assembly", {}).get("sha256") != ASSEMBLY_SHA:
+       provenance.get("outputs", {}).get("binary") != \
+       capture_identity(BINARY, BINARY_BYTES, BINARY_SHA) or \
+       provenance.get("outputs", {}).get("assembly") != \
+       capture_identity(ASSEMBLY, ASSEMBLY_BYTES, ASSEMBLY_SHA):
         raise ValueError("build provenance differs")
     if provenance.get("compiler_driver", {}).get("sha256") != \
        "7b95d430bb8c4d4237f9b4935dbd6440e2067fde0979cc69bffb26ebd021464c" or \
@@ -230,8 +280,6 @@ def validate_fixed_inputs() -> None:
        provenance.get("runtime", {}).get("libamdhip64", {}).get("sha256") != \
        "817aeadfd9f62b68831ad89993163c7f1f470f30595e7e0da5fdc942193142a8":
         raise ValueError("toolchain/runtime provenance differs")
-    if identity(BINARY)["sha256"] != BINARY_SHA or identity(ASSEMBLY)["sha256"] != ASSEMBLY_SHA:
-        raise ValueError("binary/assembly identity differs")
     if (PACKAGE / "regression.stdout").read_text() != \
        "FP8 target gate-up T5/T6 regression PASS\n" or \
        (PACKAGE / "regression.stderr").read_bytes() != b"" or \
@@ -247,6 +295,19 @@ def validate_fixed_inputs() -> None:
     if (PACKAGE / "power-before.txt").read_text() != "auto\n" or \
        (PACKAGE / "power-after.txt").read_text() != "auto\n":
         raise ValueError("power profile was not auto at both endpoints")
+    repair = load_json(PACKAGE / "analysis-repair.json")
+    if repair.get("artifact_type") != \
+       "ninfer_r9700_fp8_target_gate_up_t5t6_analysis_repair" or \
+       repair.get("schema_version") != 1 or \
+       repair.get("status") != "analysis_only_no_gpu_rerun" or \
+       repair.get("gpu_rerun_permitted") is not False or \
+       repair.get("serialization_quantum_ms") != SERIALIZATION_QUANTUM_MS or \
+       repair.get("capture_analyzer", {}).get("sha256") != \
+       "e2d8931c86fa7666887dfc5dda9688cc8beea1cddd959e936a9b6bc97dc402c0" or \
+       repair.get("repaired_analyzer") != identity(Path(__file__)) or \
+       repair.get("capture_result_closure") != identity(PACKAGE / "result.sha256") or \
+       repair.get("capture_benchmark_stdout") != identity(PACKAGE / "benchmark.stdout"):
+        raise ValueError("analysis-repair provenance differs")
 
 
 def write_json(path: Path, value: dict) -> None:
@@ -281,9 +342,11 @@ def main() -> int:
         "production_routing_authorized": False,
         "whole_dflash_authority": False,
         "source_commit": SOURCE_COMMIT,
-        "binary": identity(BINARY),
-        "assembly": identity(ASSEMBLY),
+        "binary": capture_identity(BINARY, BINARY_BYTES, BINARY_SHA),
+        "assembly": capture_identity(ASSEMBLY, ASSEMBLY_BYTES, ASSEMBLY_SHA),
         "build_provenance": identity(PACKAGE / "build-provenance.json"),
+        "analysis_repair": identity(PACKAGE / "analysis-repair.json"),
+        "capture_result_closure": identity(PACKAGE / "result.sha256"),
         "hardware": {"device": 0, "name": "AMD Radeon AI PRO R9700",
                      "architecture": "gfx1201", "wavefront_width": 32,
                      "pci_bus": "0000:13:00.0", "pci_vendor_device": "1002:7551",
@@ -303,5 +366,13 @@ def main() -> int:
     return 0 if accepted else 1
 
 
+def entrypoint() -> int:
+    try:
+        return main()
+    except Exception as error:
+        print(f"fp8 target gate-up analysis failed: {error}", file=sys.stderr)
+        return 2
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(entrypoint())

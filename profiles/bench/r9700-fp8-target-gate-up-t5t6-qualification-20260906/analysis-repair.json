@@ -1,0 +1,36 @@
+{
+  "artifact_type": "ninfer_r9700_fp8_target_gate_up_t5t6_analysis_repair",
+  "schema_version": 1,
+  "status": "analysis_only_no_gpu_rerun",
+  "cause": "the retained harness stream serialized timing samples and derived diagnostics at 0.01 precision while the original analyzer required near-exact recomputation from displayed samples",
+  "recovery_contract": "0.01 timing values are interpreted as closed plus-or-minus 0.005 intervals; publish only a robust rejection proving positive saving impossible for every represented value; ambiguous or possibly passing evidence is invalid and cannot be accepted",
+  "serialization_quantum_ms": 0.01,
+  "gpu_rerun_permitted": false,
+  "capture_package_commit": "9f70226fb3ddc21a07b920d2a00ac13ce36b8112",
+  "capture_package_tree": "9ff80a926fcaf58f14cf4834f945490c1d0f4332",
+  "capture_prepared_closure": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-target-gate-up-t5t6-qualification-20260906/prepared.sha256",
+    "bytes": 2596,
+    "sha256": "897c64092d1b709590ecbd2c3009fad836536e60dee722d60d58cae00cf2b96c"
+  },
+  "capture_result_closure": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-target-gate-up-t5t6-qualification-20260906/result.sha256",
+    "bytes": 1911,
+    "sha256": "d78fceed234a4f15990c5324bb9150433a9d2c48e18398dbc4a432a72748069c"
+  },
+  "capture_benchmark_stdout": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-target-gate-up-t5t6-qualification-20260906/benchmark.stdout",
+    "bytes": 1134,
+    "sha256": "d5d53e68da3fb2ecbf962518dfa345b62ff9c009ed170dffec7fe4204bb1f528"
+  },
+  "capture_analyzer": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-target-gate-up-t5t6-qualification-20260906/analyze.py",
+    "bytes": 15643,
+    "sha256": "e2d8931c86fa7666887dfc5dda9688cc8beea1cddd959e936a9b6bc97dc402c0"
+  },
+  "repaired_analyzer": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-target-gate-up-t5t6-qualification-20260906/analyze.py",
+    "bytes": 19149,
+    "sha256": "292539727b372e83754783918061ec4c4f3faf8402c7bceb205edf4ae29b79fd"
+  }
+}

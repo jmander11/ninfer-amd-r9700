@@ -1,0 +1,10 @@
+a01c8b5898b98aea4da3e629f7fe5c11e3aee461b77def3afce44004804658a9  /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-target-gate-up-t5t6-qualification-20260906/regression.stdout
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-target-gate-up-t5t6-qualification-20260906/regression.stderr
+9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa  /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-target-gate-up-t5t6-qualification-20260906/regression.exit
+d5d53e68da3fb2ecbf962518dfa345b62ff9c009ed170dffec7fe4204bb1f528  /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-target-gate-up-t5t6-qualification-20260906/benchmark.stdout
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-target-gate-up-t5t6-qualification-20260906/benchmark.stderr
+9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa  /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-target-gate-up-t5t6-qualification-20260906/benchmark.exit
+9622ae7c504072180458a5ca4f7d1da9357bda13f6019aed8e983f8ae63bddd4  /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-target-gate-up-t5t6-qualification-20260906/static.stdout
+b3ccbf6716f7e169ec87933e8cdbe7c01c0ebe56c6ff748cae5e6fe0382a293a  /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-target-gate-up-t5t6-qualification-20260906/hardware.txt
+6d1dbb9c582de44ad1dbc0d24eca4d831d8172bef0593680ecd24f6d0ce9def5  /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-target-gate-up-t5t6-qualification-20260906/power-before.txt
+6d1dbb9c582de44ad1dbc0d24eca4d831d8172bef0593680ecd24f6d0ce9def5  /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-target-gate-up-t5t6-qualification-20260906/power-after.txt

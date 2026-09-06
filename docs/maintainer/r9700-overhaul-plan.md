@@ -1778,6 +1778,16 @@ Replace functional routes with measured gfx1201 families:
   legacy RowSplit all-Q4/G32 artifact, eager P128/G64 execution, and profiler interception, it is
   attribution rather than N16 timing and establishes no bandwidth/cache/stall, quality,
   acceptance, recipe, routing, or production result.
+  The exact four-role FP8 target gate/up challenger is terminally rejected by
+  `profiles/bench/r9700-fp8-target-gate-up-t5t6-qualification-20260906/summary.json` (SHA-256
+  `3118801a29c6a9a134815ff2a17c3205b53b4ced4e9002a32e7b7c8ec939e37b`), whose analysis closure is
+  `a95d103f2a294ecaa3753b71935a0a4b57cb36945a1c74eb33549d0cd932159c`. Complete represented-input
+  regression and static gates pass, but T5 measures 0.43 ms incumbent versus 1.62 ms challenger
+  (`3.767442x`) and T6 measures 0.43 ms versus 1.565 ms (`3.639535x`). The capture serialized HIP
+  event samples at 0.01 ms precision; its analysis-only recovery is rejection-only and proves from
+  conservative rounding intervals that positive saving is impossible in both cells. No GPU rerun
+  is needed for this rejection. Future harness output uses explicit type-appropriate
+  `max_digits10`; the rejected challenger remains disconnected from production routing.
   The current four-role N16 canonical-Q4 evaluation companion is now materialized at
   `out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval.ninfer`, 22,763,026,944
   bytes with SHA-256 `d8fc77c36cf17c92e96d67b9a6b5a1826a1ade4f59d59c003b2368fe981fc512`;
