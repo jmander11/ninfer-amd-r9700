@@ -47,6 +47,11 @@ synthetic exact-shape operator work. Physical companion conversion, acceptance, 
 whole-inference measurement remain fail-closed until schema-v7 selects the base and a receipt-bound
 shared chunk exists. Production DFlash selection tests exactly K4/W5 and K5/W6; do not resume the
 superseded broad K1..11 campaign and do not optimize MTP instead.
+- [ ] Perform a requirements-preserving conciseness pass on this live ledger. Preserve every
+  unchecked obligation, dependency, admission gate, and completed decision that still constrains
+  active work; remove duplicated experiment narration and superseded completed blocks whose
+  evidence is already retained in the active maintainer/performance authorities. Independently
+  verify the before/after live-task inventory before accepting the rewrite.
 - [x] Capture and validate the fresh retained-production dense C1/P2048/G0/chunk4096/spec-none
   attribution trace before choosing another prefill mechanism. The validated evidence is
   `profiles/rocprof/r9700-retained-production-p2048-trace-plan-20260906/evidence.json`, SHA-256
