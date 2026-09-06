@@ -1,0 +1,34 @@
+{
+  "artifact_type": "ninfer_r9700_dflash_semantic_traces_plan",
+  "schema_version": 1,
+  "status": "prepared_cpu_only_no_gpu_execution",
+  "source": {"commit": "aebd5f82b91a756429651b2795e3ad24c1058cb3", "tree": "cd5a2e3e872759d88c094f56e0f7e6416cf1340e"},
+  "claim": "functional-only decision and P129 Text-prefill boundary diagnostics; all timings are ineligible",
+  "production_routing_authorized": false,
+  "build_provenance": "build-provenance.json",
+  "artifact": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval.ninfer", "bytes": 22763026944, "sha256": "d8fc77c36cf17c92e96d67b9a6b5a1826a1ade4f59d59c003b2368fe981fc512", "weights_id": "r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval"},
+  "history": {
+    "source_corpus": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids", "bytes": 333620, "sha256": "27e4f63c17efe3f89b5cf278b3b1a42a737316ed4044d7d0d1d52437059d1002"},
+    "p129_fixture": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-p129-isolation-discriminator-20260906/history-p129.ids", "bytes": 811, "sha256": "34e9bc09b99ae4efc06049e744e8b43ac5794a9dab76fcf43de43e31f5db4515"},
+    "seed_report": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-small-t-n16-whole-ab-c1-20260906/results-functional-failure-isolated-token-parity-attempt3/ordinary-control.json", "bytes": 13290, "sha256": "02fe8d9eb0ba21224def806bdd06ac5d67c6a6a11e912a56a9018d35c544eea2"},
+    "seed_token": 24178,
+    "rule": "source corpus tokens [0,128) followed by retained fresh-P128 ordinary greedy seed"
+  },
+  "hardware": {"device": 0, "name": "AMD Radeon AI PRO R9700", "architecture": "gfx1201", "wavefront_width": 32, "pci_bus": "0000:13:00.0", "pci_vendor_device": "1002:7551", "power_profile": "auto"},
+  "common": {"concurrency": 1, "maximum_product_concurrency": 4, "prefill_chunk": 4096, "kv_capacity": "workload", "repetitions": 1, "warmup": 0, "device_graph": false, "retain_token_ids": true},
+  "decision_campaign": {
+    "prompt_tokens": 129, "generated_decode_steps": 27, "retained_output_last_index": 27,
+    "history_fixture": "p129_fixture", "arms": ["ordinary", "dflash_k4w5"],
+    "dflash": {"draft_tokens": 4, "verify_width": 5, "proposal_head": "optimized"},
+    "required_common_prefix_last_index": 26,
+    "trace_environment": "NINFER_DFLASH_DECISION_TRACE_OUT"
+  },
+  "prefill_tail_campaign": {
+    "fresh": {"prefill_base": 0, "prefill_tokens": 129, "command_shape": "whole-pg129,1", "corpus": "p129_fixture"},
+    "append": {"prefill_base": 128, "prefill_tokens": 1, "command_shape": "pg128,1 isolate-prompt-decode", "corpus": "source_corpus"},
+    "trace_environment": {"NINFER_QWEN3_PREFILL_P129_TRACE": "1", "NINFER_QWEN3_PREFILL_P129_TRACE_OUT": "exact fresh output"},
+    "comparator": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/bench/compare_prefill_p129_tail_trace.py"
+  },
+  "decision": {"classification_only": true, "timing_evidence_eligible": false, "ordinary_and_dflash_history_identical": true, "tail_comparison_precedes_any_layer_instrumentation": true, "no_production_or_performance_claim": true},
+  "results_directory": "results"
+}
