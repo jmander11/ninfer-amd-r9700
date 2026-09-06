@@ -16,6 +16,15 @@ static_assert(NINFER_R9700_Q4_ACTIVATION_BITS == 4 ||
               "R9700 Q4 activation width must be A4 or A8");
 inline constexpr std::uint32_t kQ4ActivationBits = NINFER_R9700_Q4_ACTIVATION_BITS;
 
+#ifndef NINFER_R9700_DFLASH_SMALL_T_CANDIDATE
+#define NINFER_R9700_DFLASH_SMALL_T_CANDIDATE 0
+#endif
+static_assert(NINFER_R9700_DFLASH_SMALL_T_CANDIDATE == 0 ||
+                  NINFER_R9700_DFLASH_SMALL_T_CANDIDATE == 1,
+              "R9700 DFlash small-token candidate selector must be zero or one");
+inline constexpr bool kDFlashSmallTCandidateEnabled =
+    NINFER_R9700_DFLASH_SMALL_T_CANDIDATE == 1;
+
 inline constexpr std::string_view kQ4PrefillCtaProfile =
     "m64n128-pingpong-n16-k16-scalar-base-production";
 
@@ -33,6 +42,25 @@ inline constexpr std::string_view kQ4PrefillCtaProfile =
          (rows == 12288U && columns == 5120U) ||
          (rows == 34816U && columns == 5120U) ||
          (rows == 248320U && columns == 5120U));
+}
+
+// Exact direct-screen winners only. Keeping the evidence-selected domain separate from the build
+// selector lets host tests prove both matched A/B profiles without adding a runtime mode.
+[[nodiscard]] constexpr bool is_a8q4_dflash_small_t_eligible(
+    std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns,
+    std::uint32_t padded_columns) noexcept {
+    const bool eligible_width =
+        tokens == 4U || tokens == 5U || tokens == 6U || tokens == 8U || tokens == 10U ||
+        tokens == 12U || tokens == 18U || tokens == 20U;
+    return eligible_width && rows == 34816U && columns == 5120U &&
+           padded_columns == columns;
+}
+
+[[nodiscard]] constexpr bool use_a8q4_dflash_small_t(
+    std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns,
+    std::uint32_t padded_columns) noexcept {
+    return kDFlashSmallTCandidateEnabled && kQ4ActivationBits == 8U &&
+           is_a8q4_dflash_small_t_eligible(tokens, rows, columns, padded_columns);
 }
 
 enum class A8Q4PrefillRoute : std::uint8_t {

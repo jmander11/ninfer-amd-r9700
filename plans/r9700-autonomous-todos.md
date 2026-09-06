@@ -2716,8 +2716,22 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
           packed-W4 pair loads per K64 group, 51/60/54/64/67/74/84/99 VGPR respectively, zero
           LDS/private/scratch, wave32, and occupancy 16 except T24 at 12. The receipt-bound runner
           requires the exact retained C1 summary, validates all eight direct-oracle/timing cells,
-          and preserves an exact eligible/fallback set. Physical execution and whole-DFlash A/B
-          remain unchecked; this qualification surface does not change production routing.
+          and preserves an exact eligible/fallback set. The retained complete screen at
+          `profiles/bench/r9700-dflash-small-t-flattened-20260906/summary.json` has SHA-256
+          `bc8f72b5...4feb`: T8/T10/T12/T18/T20 pass at balanced-median ratios
+          `0.821087/0.889587/0.884984/0.883982/0.926681` and conservative uppers
+          `0.836888/0.903439/0.900791/0.890763/0.940414`; T15/T16/T24 reject at ratios
+          `1.139511/1.143556/1.041482`. Independent review reproduced every report and both routes'
+          oracle results. Combined with C1, the exact eligible widths are
+          T=`4,5,6,8,10,12,18,20`; all other widths and shapes remain on WMMA.
+        - [x] Add an off-by-default compile-selected candidate boundary for matched whole-DFlash
+          A/B. The candidate build routes only N34816/K5120 at the eight exact eligible widths to
+          packed dot8 after the unchanged caller-owned A8 workspace preparation; the control build,
+          T15/T16/T24, and every other valid unlisted shape/width retain WMMA; a noncanonical padded
+          layout remains invalid at the existing candidate API boundary. No allocation, workspace,
+          output address, or graph-capture contract changes, and this is not unconditional production
+          promotion. Exact predicate tests cover both compile profiles; the retained assembly/resource
+          gate remains the emitted kernel proof. Whole-DFlash A/B is still required.
       - Profile the current whole DFlash round first enough to separate proposal/head service from
         dense target verification; optimize the measured owner rather than assuming the proposal
         path dominates.

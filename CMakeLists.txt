@@ -44,6 +44,21 @@ endif()
 add_compile_definitions(
   NINFER_R9700_Q4_ACTIVATION_BITS=${NINFER_R9700_Q4_ACTIVATION_BITS})
 
+# Qualification-only matched whole-DFlash A/B selector. Zero is the ordinary WMMA control; one
+# admits only the exact small-token N34816/K5120 cells selected by the two retained direct screens.
+# This is a separately compiled candidate profile, not a runtime, CLI, or artifact selector.
+set(NINFER_R9700_DFLASH_SMALL_T_CANDIDATE "0" CACHE STRING
+  "Enable the exact qualified R9700 DFlash small-token Linear candidate")
+set_property(CACHE NINFER_R9700_DFLASH_SMALL_T_CANDIDATE PROPERTY STRINGS 0 1)
+if(NOT NINFER_R9700_DFLASH_SMALL_T_CANDIDATE STREQUAL "0" AND
+   NOT NINFER_R9700_DFLASH_SMALL_T_CANDIDATE STREQUAL "1")
+  message(FATAL_ERROR
+    "NINFER_R9700_DFLASH_SMALL_T_CANDIDATE must be 0 or 1; got "
+    "'${NINFER_R9700_DFLASH_SMALL_T_CANDIDATE}'")
+endif()
+add_compile_definitions(
+  NINFER_R9700_DFLASH_SMALL_T_CANDIDATE=${NINFER_R9700_DFLASH_SMALL_T_CANDIDATE})
+
 # The selected W8G32 profile uses dynamic A8G32 only at measured winning shapes/token extents and
 # retains exact represented-BF16 activation below each crossover. The explicit A16 build is the
 # matched quality/performance control over identical persistent W8G32 bytes.

@@ -15,6 +15,8 @@ struct Shape {
 };
 
 constexpr std::array<std::uint32_t, 4> kQualifiedTokens{1024U, 2048U, 4096U, 8192U};
+constexpr std::array<std::uint32_t, 8> kDFlashSmallTEligible{4U, 5U, 6U, 8U,
+                                                            10U, 12U, 18U, 20U};
 constexpr std::array<Shape, 8> kQ4Shapes{{
     {7168U, 5120U}, {4096U, 5120U}, {12288U, 5120U}, {5120U, 6144U},
     {34816U, 5120U}, {5120U, 17408U}, {5120U, 10240U}, {1024U, 5120U},
@@ -44,6 +46,26 @@ static_assert(!linear::use_a8q4_prefill_cta(1023U, 7168U, 5120U));
 static_assert(!linear::use_a8q4_prefill_cta(8193U, 7168U, 5120U));
 static_assert(!linear::use_a8q4_prefill_cta(4096U, 5120U, 5120U));
 static_assert(!linear::use_a8q4_prefill_cta(4096U, 5120U, 25600U));
+
+static_assert([] {
+    for (const std::uint32_t tokens : kDFlashSmallTEligible) {
+        if (!linear::is_a8q4_dflash_small_t_eligible(tokens, 34816U, 5120U, 5120U)) {
+            return false;
+        }
+        if (linear::use_a8q4_dflash_small_t(tokens, 34816U, 5120U, 5120U) !=
+            (linear::kDFlashSmallTCandidateEnabled && linear::kQ4ActivationBits == 8U)) {
+            return false;
+        }
+    }
+    return true;
+}());
+static_assert(!linear::is_a8q4_dflash_small_t_eligible(15U, 34816U, 5120U, 5120U));
+static_assert(!linear::is_a8q4_dflash_small_t_eligible(16U, 34816U, 5120U, 5120U));
+static_assert(!linear::is_a8q4_dflash_small_t_eligible(24U, 34816U, 5120U, 5120U));
+static_assert(!linear::is_a8q4_dflash_small_t_eligible(12U, 4096U, 5120U, 5120U));
+static_assert(!linear::is_a8q4_dflash_small_t_eligible(12U, 34816U, 5120U, 5248U));
+static_assert(!linear::use_a8q4_dflash_small_t(15U, 34816U, 5120U, 5120U));
+static_assert(!linear::use_a8q4_dflash_small_t(12U, 4096U, 5120U, 5120U));
 
 static_assert(linear::select_a8q4_prefill_route(2048U, 7168U, 5120U) ==
               linear::A8Q4PrefillRoute::M64N128PingPongProduction);

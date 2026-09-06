@@ -2876,6 +2876,10 @@ hipError_t a8q4g64_linear_candidate(const A8Q4G64CandidateArgs& args,
             args.tokens, args.rows, args.columns, args.padded_columns)) {
         return a8q4g64_linear_decode_dot8_t1(linear_args, stream);
     }
+    if (use_a8q4_dflash_small_t(
+            args.tokens, args.rows, args.columns, args.padded_columns)) {
+        return a8q4g64_linear_dflash_small_t_qualification(linear_args, stream);
+    }
     switch (select_a8q4_prefill_route(args.tokens, args.rows, args.columns)) {
     case A8Q4PrefillRoute::M64N128PingPongProduction:
         return a8q4g64_linear_prefill_cta(linear_args, stream);

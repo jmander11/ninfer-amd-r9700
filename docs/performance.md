@@ -515,10 +515,15 @@ lanes inactive. The retained complete 39-cell C1 screen admits only N34816/K5120
 balanced-median candidate/incumbent ratios are `0.839747/0.879463/0.788788`, with conservative
 paired-ratio uppers `0.855786/0.895273/0.801884`; all other 36 shape/width cells remain on WMMA.
 The summary SHA-256 is `27cba659...b122`, independent review passed, and routing remains false.
-Qualification is narrowed accordingly and next covers only this matrix at unresolved flattened
-widths T=`8,10,12,15,16,18,20,24` required by K4/W5 and K5/W6 through C4. It retains the independent
-represented-input oracle, exact gfx1201 ISA/resources, direct timing against current WMMA, and the
-current-companion whole-DFlash A/B requirement. The proposed `prepare_ragged_prefix` Wceil=12
+The SHA-bound flattened screen then admits T8/T10/T12/T18/T20 at balanced-median ratios
+`0.821087/0.889587/0.884984/0.883982/0.926681` and rejects T15/T16/T24 at
+`1.139511/1.143556/1.041482`; its independently reproduced summary SHA-256 is
+`bc8f72b5...4feb`. Combined with C1, only T=`4,5,6,8,10,12,18,20` at N34816/K5120 are eligible.
+An off-by-default compile-selected candidate profile routes exactly those cells through packed dot8
+for matched whole-DFlash A/B while the control build and all rejected/unlisted cells retain WMMA.
+The selector changes no caller-owned workspace or graph-stable addresses and is not production
+promotion. Independent represented-input oracle, exact gfx1201 ISA/resources, and current-companion
+whole-DFlash A/B remain required. The proposed `prepare_ragged_prefix` Wceil=12
 compaction is not a live
 optimization: startup planning already sizes persistent features, round tensors, append positions,
 and workspace to the one resolved W5 or W6, and the Op writes that width directly. Its unreachable

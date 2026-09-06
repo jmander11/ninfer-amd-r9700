@@ -705,6 +705,8 @@ std::string format_table(const BenchEnvironment& env, const std::vector<TestResu
         << " q4_activation_bits=" << ninfer::ops::r9700::linear::kQ4ActivationBits
         << " q4_prefill_cta_profile="
         << ninfer::ops::r9700::linear::kQ4PrefillCtaProfile
+        << " dflash_small_t_candidate="
+        << (ninfer::ops::r9700::linear::kDFlashSmallTCandidateEnabled ? "true" : "false")
         << " w8_activation_bits=" << ninfer::ops::r9700::linear::kW8ActivationBits
         << " fp8_qk_wmma_enabled="
         << (ninfer::ops::r9700::kv::kFp8QkWmmaDecode ? "true" : "false")
@@ -837,6 +839,9 @@ std::string format_json(const BenchEnvironment& env, const std::string& command,
          << ninfer::ops::r9700::linear::kQ4ActivationBits << ",\n"
          << "    \"q4_prefill_cta_profile\": \""
          << ninfer::ops::r9700::linear::kQ4PrefillCtaProfile << "\",\n"
+         << "    \"dflash_small_t_candidate\": "
+         << (ninfer::ops::r9700::linear::kDFlashSmallTCandidateEnabled ? "true" : "false")
+         << ",\n"
          << "    \"w8_activation_bits\": "
          << ninfer::ops::r9700::linear::kW8ActivationBits << ",\n"
          << "    \"fp8_qk_wmma_enabled\": "
@@ -959,7 +964,8 @@ std::string format_csv(const BenchEnvironment& env, const std::vector<TestResult
     out << "label,kind,n_prompt,n_gen,target,weights_id,max_context,prefill_chunk,concurrency,"
            "spec,draft_tokens,dflash_verify_width_requested,dflash_verify_width,proposal_head,decode_path,kv_cache_format,"
            "kv_value_group,kv_key_plane_layout,kv_value_plane_layout,"
-           "kv_value_scale_plane_layout,q4_activation_bits,q4_prefill_cta_profile,w8_activation_bits,"
+           "kv_value_scale_plane_layout,q4_activation_bits,q4_prefill_cta_profile,"
+           "dflash_small_t_candidate,w8_activation_bits,"
            "fp8_qk_wmma_enabled,"
            "fp8_qk_wmma_profile,fp8_qk_wmma_t1_min_context,fp8_qk_wmma_t2_min_context,"
            "kv_payload_bytes,load_host_to_device_bytes,"
@@ -1000,6 +1006,8 @@ std::string format_csv(const BenchEnvironment& env, const std::vector<TestResult
             << ninfer::targets::qwen3::detail::kR9700TextKVValueScalePlaneLayoutName << ','
             << ninfer::ops::r9700::linear::kQ4ActivationBits << ','
             << ninfer::ops::r9700::linear::kQ4PrefillCtaProfile << ','
+            << (ninfer::ops::r9700::linear::kDFlashSmallTCandidateEnabled ? "true" : "false")
+            << ','
             << ninfer::ops::r9700::linear::kW8ActivationBits << ','
             << (ninfer::ops::r9700::kv::kFp8QkWmmaDecode ? "true" : "false") << ','
             << "t1-ge64-t2-ge320-t3plus-stream-v1,"

@@ -359,10 +359,10 @@ struct A8Q4G64KernelResources {
 // seven full-K production tuples are rejected; the candidate boundary retains WMMA.
 [[nodiscard]] hipError_t a8q4g64_linear_decode_dot8_t1(
     const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept;
-// Qualification-only small-T packed-W4 challenger for DFlash proposal and target verification.
-// Following the C1 screen it accepts only the winning 34816x5120 matrix and the exact flattened
-// K4/W5 and K5/W6 widths through C4. It remains absent from candidate/product dispatch until
-// oracle, ISA/resource, direct timing, and whole-DFlash gates admit it.
+// Direct small-T packed-W4 route retained across the exact N34816/K5120 screen domain. The
+// compile-selected candidate boundary calls it only for the eight direct-screen winners; rejected
+// widths remain directly callable solely for retained qualification evidence. Whole-DFlash A/B is
+// still required before any unconditional product selection.
 [[nodiscard]] hipError_t a8q4g64_linear_dflash_small_t_qualification(
     const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept;
 // Direct 64-token x 128-row ping/pong cooperative-LDS production route. The candidate boundary
