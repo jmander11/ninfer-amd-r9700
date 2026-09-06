@@ -70,12 +70,14 @@ above, not an executable task. Conditional tasks retain their explicit `if:` cla
   `profiles/bench/selected-dflash-prepare-20260905` and fixed-Q4/K1..11 schema-v3 owner are
   historical and non-runnable; create a fresh receipt-bound recipe-aware two-width successor.
 
-- [ ] `DFLASH-QUALITY` [depends: DFLASH-RECIPE] Retain matched quality for every surviving companion
+- [ ] `DFLASH-QUALITY` [depends: DFLASH-RECIPE, DFLASH-TEXT-P129, DFLASH-TARGET-P129] Retain matched
+  quality for every surviving companion
   under the selected cache group: aligned target/draft outputs, deterministic proposal and final
   target tokens, exact ordinary-target parity, and exact artifact/profile provenance. Base-model
   PPL owns target NLL; synthetic operator error cannot select a DFlash recipe.
 
-- [ ] `DFLASH-WHOLE` [depends: DFLASH-QUALITY] Retain K4/W5 and K5/W6 acceptance, exact output,
+- [ ] `DFLASH-WHOLE` [depends: DFLASH-QUALITY, DFLASH-SCHEDULE] Retain K4/W5 and K5/W6 acceptance,
+  exact output,
   capacity, and whole-inference evidence at C1..4: resolved W, per-position acceptance, fallback and
   repair, prefill/graph-decode throughput, capacity/headroom, and focused attribution when needed.
   Select only with fresh recipe-aware two-width evidence and a material conservative win over the
@@ -146,7 +148,8 @@ All tasks in this section directly or transitively depend on `DENSE-FLOOR-DECISI
 - [ ] `XATT-ADMISSION` [depends: XATT-KEEP-DIST, QUALITY-8K32K, CAPACITY-WHOLE-12] Complete native
   gfx1201 B128/S16/tau900 admission for both G16/G32 typed-cache instances against each matching
   dense control. Preserve ordinary decode and DFlash verification on dense attention. Require
-  route-level PPL, exact shape/ISA/resources, capacity, whole inference, and selected NIAH.
+  route-level PPL, exact shape/ISA/resources, capacity, and whole inference for admission;
+  `SELECTED-NIAH` remains a post-selection cutover gate.
 
 - [ ] `WHOLE-PARETO` [depends: WHOLE-MATRIX, MODEL-EVIDENCE, XATT-ADMISSION] Select one G16/G32 and
   dense/B128-S16-tau900 static profile only from complete matched quality, capacity, phase, and
