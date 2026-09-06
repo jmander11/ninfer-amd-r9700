@@ -12,8 +12,8 @@ import subprocess
 
 ROOT = Path("/ssdpool2nvme/local_llm/ninfer-amd-r9700")
 PACKAGE = ROOT / "profiles/bench/r9700-dflash-small-t-n16-matched-builds-20260906"
-COMMIT = "ca2b58c5728de0fc52916796a2ac5ef6cee5e5f9"
-TREE = "adafc7167dd59740923808df86edba9929d237a8"
+COMMIT = "cd966d72ed18e1b5b7b57b664572b3c8aa1e02ce"
+TREE = "a8cf2ffcef1646d2c39128eab72c5808c889cbcd"
 
 
 def load(path: Path) -> dict:
