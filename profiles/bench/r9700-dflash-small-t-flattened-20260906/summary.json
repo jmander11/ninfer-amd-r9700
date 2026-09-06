@@ -1,0 +1,305 @@
+{
+  "cells": [
+    {
+      "applicability": [
+        "K4_C2_proposal"
+      ],
+      "candidate_over_incumbent": 0.8210865556435812,
+      "columns": 5120,
+      "eligible": true,
+      "evidence_valid": true,
+      "order_ratio_delta": 0.0006433949489619284,
+      "paired_ratio_upper": 0.8368883844217264,
+      "process": "n34816-k5120-t8.process.json",
+      "report": "n34816-k5120-t8.json",
+      "rows": 34816,
+      "sha256": "66464b03f028ca86a397dfb6e6774ae5a79b775da36d73f0a1037e0809a6fa3c",
+      "status": "passed",
+      "tokens": 8
+    },
+    {
+      "applicability": [
+        "K5_C2_proposal",
+        "W5_C2_verification"
+      ],
+      "candidate_over_incumbent": 0.889587435405738,
+      "columns": 5120,
+      "eligible": true,
+      "evidence_valid": true,
+      "order_ratio_delta": 0.006914721759194387,
+      "paired_ratio_upper": 0.9034385807510665,
+      "process": "n34816-k5120-t10.process.json",
+      "report": "n34816-k5120-t10.json",
+      "rows": 34816,
+      "sha256": "7d32a74e001b16cc707d9a4e0a6e75dcae3503cf1a530a4335fb9ca60bae1f90",
+      "status": "passed",
+      "tokens": 10
+    },
+    {
+      "applicability": [
+        "K4_C3_proposal",
+        "W6_C2_verification"
+      ],
+      "candidate_over_incumbent": 0.8849841981995057,
+      "columns": 5120,
+      "eligible": true,
+      "evidence_valid": true,
+      "order_ratio_delta": 0.006380089237094766,
+      "paired_ratio_upper": 0.9007909909059826,
+      "process": "n34816-k5120-t12.process.json",
+      "report": "n34816-k5120-t12.json",
+      "rows": 34816,
+      "sha256": "6eb29a9c0c000bd613af9710feeb4827fc691efe4834585d093bb38bda85aed7",
+      "status": "passed",
+      "tokens": 12
+    },
+    {
+      "applicability": [
+        "K5_C3_proposal",
+        "W5_C3_verification"
+      ],
+      "candidate_over_incumbent": 1.1395105715434044,
+      "columns": 5120,
+      "eligible": false,
+      "evidence_valid": true,
+      "order_ratio_delta": 0.004831092727923814,
+      "paired_ratio_upper": 1.1524585573529649,
+      "process": "n34816-k5120-t15.process.json",
+      "report": "n34816-k5120-t15.json",
+      "rows": 34816,
+      "sha256": "7fed0ca839c40086d34958d1fb19bf7851e2a625b88bd83665bc86d526e32b9b",
+      "status": "rejected",
+      "tokens": 15
+    },
+    {
+      "applicability": [
+        "K4_C4_proposal"
+      ],
+      "candidate_over_incumbent": 1.1435563011342913,
+      "columns": 5120,
+      "eligible": false,
+      "evidence_valid": true,
+      "order_ratio_delta": 0.020627247068325305,
+      "paired_ratio_upper": 1.1802476612630604,
+      "process": "n34816-k5120-t16.process.json",
+      "report": "n34816-k5120-t16.json",
+      "rows": 34816,
+      "sha256": "a509980f7e06627e0407db351cb5d7685f9ed8646015737eb8388e565c38ccc0",
+      "status": "rejected",
+      "tokens": 16
+    },
+    {
+      "applicability": [
+        "W6_C3_verification"
+      ],
+      "candidate_over_incumbent": 0.8839816076165713,
+      "columns": 5120,
+      "eligible": true,
+      "evidence_valid": true,
+      "order_ratio_delta": 0.006259524537942096,
+      "paired_ratio_upper": 0.8907633700916083,
+      "process": "n34816-k5120-t18.process.json",
+      "report": "n34816-k5120-t18.json",
+      "rows": 34816,
+      "sha256": "d7c1f700f0b92c2df18f6f9fa4beffc807615af8eeca5bf8101c43f11d45448f",
+      "status": "passed",
+      "tokens": 18
+    },
+    {
+      "applicability": [
+        "K5_C4_proposal",
+        "W5_C4_verification"
+      ],
+      "candidate_over_incumbent": 0.9266810090885664,
+      "columns": 5120,
+      "eligible": true,
+      "evidence_valid": true,
+      "order_ratio_delta": 0.0036783621009329748,
+      "paired_ratio_upper": 0.940414301802344,
+      "process": "n34816-k5120-t20.process.json",
+      "report": "n34816-k5120-t20.json",
+      "rows": 34816,
+      "sha256": "9ea8c5ea664e12bbd046a43948f9439f15ee8d235e8bbd28ae16842e331f4a07",
+      "status": "passed",
+      "tokens": 20
+    },
+    {
+      "applicability": [
+        "W6_C4_verification"
+      ],
+      "candidate_over_incumbent": 1.0414818763013627,
+      "columns": 5120,
+      "eligible": false,
+      "evidence_valid": true,
+      "order_ratio_delta": 0.03284421616897659,
+      "paired_ratio_upper": 1.0634370348482722,
+      "process": "n34816-k5120-t24.process.json",
+      "report": "n34816-k5120-t24.json",
+      "rows": 34816,
+      "sha256": "ce5ce669338a2e31f8807f705ad60157379521630f32942f1c43c184421bb180",
+      "status": "rejected",
+      "tokens": 24
+    }
+  ],
+  "complete_screen": true,
+  "eligible_cells": [
+    {
+      "columns": 5120,
+      "rows": 34816,
+      "tokens": 4
+    },
+    {
+      "columns": 5120,
+      "rows": 34816,
+      "tokens": 5
+    },
+    {
+      "columns": 5120,
+      "rows": 34816,
+      "tokens": 6
+    },
+    {
+      "columns": 5120,
+      "rows": 34816,
+      "tokens": 8
+    },
+    {
+      "columns": 5120,
+      "rows": 34816,
+      "tokens": 10
+    },
+    {
+      "columns": 5120,
+      "rows": 34816,
+      "tokens": 12
+    },
+    {
+      "columns": 5120,
+      "rows": 34816,
+      "tokens": 18
+    },
+    {
+      "columns": 5120,
+      "rows": 34816,
+      "tokens": 20
+    }
+  ],
+  "forbidden_cells": [
+    {
+      "columns": 5120,
+      "rows": 34816,
+      "tokens": 15
+    },
+    {
+      "columns": 5120,
+      "rows": 34816,
+      "tokens": 16
+    },
+    {
+      "columns": 5120,
+      "rows": 34816,
+      "tokens": 24
+    }
+  ],
+  "new_eligible_cells": [
+    {
+      "columns": 5120,
+      "rows": 34816,
+      "tokens": 8
+    },
+    {
+      "columns": 5120,
+      "rows": 34816,
+      "tokens": 10
+    },
+    {
+      "columns": 5120,
+      "rows": 34816,
+      "tokens": 12
+    },
+    {
+      "columns": 5120,
+      "rows": 34816,
+      "tokens": 18
+    },
+    {
+      "columns": 5120,
+      "rows": 34816,
+      "tokens": 20
+    }
+  ],
+  "preflight": {
+    "report": "preflight.json",
+    "sha256": "637a764c1176b36af0e50943ae760499abad6a2734bbd562fa7a2b79b58de9c3"
+  },
+  "production_dispatch_changed": false,
+  "required_cell_count": 8,
+  "required_shapes": [
+    [
+      34816,
+      5120
+    ]
+  ],
+  "required_tokens": [
+    8,
+    10,
+    12,
+    15,
+    16,
+    18,
+    20,
+    24
+  ],
+  "retained_c1_eligible_cells": [
+    {
+      "columns": 5120,
+      "rows": 34816,
+      "tokens": 4
+    },
+    {
+      "columns": 5120,
+      "rows": 34816,
+      "tokens": 5
+    },
+    {
+      "columns": 5120,
+      "rows": 34816,
+      "tokens": 6
+    }
+  ],
+  "routing_authorized": false,
+  "routing_requirement": "Only eligible exact cells may enter later whole-DFlash A/B; every forbidden or unlisted shape/width remains on the incumbent",
+  "schema": "ninfer.r9700.a8q4-dflash-small-t-gate.v3",
+  "scope": "N34816/K5120 flattened K4/W5 and K5/W6 widths through C4 only",
+  "status": "passed",
+  "width_applicability": {
+    "10": [
+      "K5_C2_proposal",
+      "W5_C2_verification"
+    ],
+    "12": [
+      "K4_C3_proposal",
+      "W6_C2_verification"
+    ],
+    "15": [
+      "K5_C3_proposal",
+      "W5_C3_verification"
+    ],
+    "16": [
+      "K4_C4_proposal"
+    ],
+    "18": [
+      "W6_C3_verification"
+    ],
+    "20": [
+      "K5_C4_proposal",
+      "W5_C4_verification"
+    ],
+    "24": [
+      "W6_C4_verification"
+    ],
+    "8": [
+      "K4_C2_proposal"
+    ]
+  }
+}
