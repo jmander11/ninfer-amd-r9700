@@ -954,13 +954,34 @@ the union is not GPU-active time, GPU wall time, utilization, or CU occupancy; i
 subtracted from host-marker time to assign a physical idle fraction. It directs attention first to
 the source-matched Q4 Linear candidate and then RMSNorm, with whole A/B as the decision authority.
 
-The native dot8 T=1 Q4 Linear operator gate passes every cell and reports a robust exact-call-weighted
-saving lower bound of `14.1025415618 ms` per token. Its report is
+The native-dot8 T=1 Q4 Linear operator gate passed every selected tuple and reported a robust
+ordinary-call-weighted saving lower bound of `14.1025415618 ms` per token. Its report is
 `profiles/bench/r9700-a8q4-t1-native-dot8-all-text-20260905.json`, SHA-256
-`300626f0d45b5b9bb8f6b420f44b7e5652e3a848738c636959f02f3448d2b5b0`. This is operator evidence,
-not a production promotion; the next gate is a source-matched ordinary whole candidate/control A/B.
-Ordinary decode remains the immediate priority, followed by DFlash2. MTP remains supported
-regression behavior and is not an optimization target.
+`300626f0d45b5b9bb8f6b420f44b7e5652e3a848738c636959f02f3448d2b5b0`. The seven full-K tuples
+were selected from ordinary decode; `[5120,17408]` and `[34816,5120]` also occur in DFlash2, so the
+canonical route is shape-owned by Linear rather than caller-specific. Its post-gate production
+regression uses nonuniform signed W4 codes in exact N16/K16 storage, nonuniform FP16 scales, dense
+varied activations, full-output WMMA parity, spread-row complete-K FP64 checks, status poisoning,
+full rewrites, and output canaries.
+
+The source-matched four-pair C1/P8192+G256 ordinary Device Graph gate promoted native dot8. Median
+decode fell from `16.9262812925 s` (`15.1244089340 tok/s`) to `12.5301623450 s`
+(`20.4307009719 tok/s`). The robust candidate/control upper ratio was `0.7427031671`, the robust
+saving lower was `17.0000856399 ms/token`, and the prefill upper ratio was `1.0016298424`; exact
+generated tokens and configuration, environment, artifact, and workspace identities matched. The
+immutable report is `profiles/bench/r9700-a8q4-t1-dot8-whole-p8192-g256-full-20260905.json`, SHA-256
+`19278ca8c8df5d417bbd5d36ce1689760e3cb6dbe606c3a597a6b2f0b847fee1`. There is no build or runtime
+selector. T=1 calls outside the seven exact full-K tuples retain WMMA. Ordinary decode remains open
+with RMSNorm as its next bounded target, followed by DFlash2. MTP remains supported regression
+behavior and is not an optimization target.
+
+A fresh selector-free production build retained exact 257 generated IDs for P8192+G256 and measured
+`20.45440879 tok/s` (`12.51563918 s` decode) in
+`profiles/bench/r9700-dot8-production-final-p8192-g256-c1-20260906.json`, SHA-256
+`c341f1eeb2f5d5597272dbecc532982b008701c7ff6a22d946541f98c9c94b2c`. The extracted loaded gfx1201
+code object has SHA-256 `6a4e9eed7804da2321e112a3c520f65eb3d6a1b88e8352c39f9b364a30033312`
+and contains exactly 16 `v_dot8_i32_iu4` instructions and no WMMA in the selected kernel, with 18
+VGPR, zero LDS/private/spills, wave32, and a 256-thread maximum workgroup.
 
 The existing MTP shortlist head remains Q4G64 with A8G64 activations. MTP stays in exact-output,
 state, cache, row-view, and whole-route regression coverage, but a new shortlist-head trace,

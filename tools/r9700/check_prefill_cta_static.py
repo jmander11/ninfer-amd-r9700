@@ -29,7 +29,7 @@ class Profile:
 PROFILES = {
     "q4-dot8": Profile(
         "",
-        "_ZN6ninfer3ops5r97006linear12_GLOBAL__N_150a8q4g64_linear_decode_dot8_t1_qualification_kernelEPKhS5_PKtPKjS5_S7_P12hip_bfloat16jj",
+        "_ZN6ninfer3ops5r97006linear12_GLOBAL__N_136a8q4g64_linear_decode_dot8_t1_kernelEPKhS5_PKtPKjS5_S7_P12hip_bfloat16jj",
         "v_dot8_i32_iu4", 16, 0, 64, 0, 0, 0, 0, 256,
     ),
     "q4": Profile(
@@ -335,7 +335,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit(str(error)) from error
     print(" ".join(f"{key}={value}" for key, value in result.items()))
     print("diagnostic_only=true admission=false" if args.mode == "incumbent-diagnostic"
-          else ("decode_dot8_challenger_static_gate=passed" if args.mode == "decode-dot8"
+          else ("decode_dot8_production_static_gate=passed" if args.mode == "decode-dot8"
           else ("a4_m64n128_challenger_static_gate=passed" if args.mode == "a4-m64n128"
                 else "m128n128_challenger_static_gate=passed" if args.mode == "m128n128"
                 else "lds_scope_production_static_gate=passed")))

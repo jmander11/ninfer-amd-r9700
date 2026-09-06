@@ -1672,6 +1672,21 @@ Replace functional routes with measured gfx1201 families:
   remap `f=[0,0,16,16,8,8,24,24]` and complete dual-FMAC pairing under the live 5 ms composition
   gate. Immediate optimization moves to ordinary non-speculative decode, followed by DFlash2;
   MTP3 remains diagnostic and is not an optimization or ranking route.
+  The first ordinary-decode promotion is the canonical native-dot8 T=1 A8Q4 Linear route. Its
+  exact domain is seven full-K matrix tuples selected by shape, not caller identity;
+  `[5120,17408]` and `[34816,5120]` also occur in DFlash2, while every off-inventory T=1 call,
+  logical-K tail, and wider token extent retains WMMA. The operator gate passed every tuple with a
+  `14.1025415618 ms/token` robust ordinary-call-weighted saving lower. The four-pair
+  C1/P8192+G256 ordinary Device Graph gate then reduced median decode from `16.9262812925 s`
+  (`15.1244089340 tok/s`) to `12.5301623450 s` (`20.4307009719 tok/s`), with a robust ratio upper
+  of `0.7427031671`, robust saving lower of `17.0000856399 ms/token`, prefill ratio upper of
+  `1.0016298424`, and exact generated-token and matched-run identities. The immutable whole report
+  is `profiles/bench/r9700-a8q4-t1-dot8-whole-p8192-g256-full-20260905.json` (SHA-256
+  `19278ca8c8df5d417bbd5d36ce1689760e3cb6dbe606c3a597a6b2f0b847fee1`). The private selector and
+  terminal qualification tooling are removed; the retained production regression uses varied
+  exact-N16/K16 signed codes/scales, dense activations, complete WMMA parity, independent FP64
+  checks, status poisoning, full rewrites, and output canaries. Ordinary decode remains open with
+  RMSNorm as the next bounded target before DFlash2.
 - [ ] After the dense C1/P2048/spec-none floor and practical-ceiling gate passes and the shared
   chunk is selected, rerun all 48 post-promotion capacity cells (dense/XAttention times
   all-Q4/mixed/four-role-hybrid times G16/G32, each at C=1..4). Bind the newly measured Device Graph

@@ -11,7 +11,7 @@
 namespace {
 
 using ninfer::ops::r9700::linear::a8q4g64_scalar_base_u32_offsets_fit;
-using ninfer::ops::r9700::linear::a8q4g64_decode_dot8_t1_qualification_shape;
+using ninfer::ops::r9700::linear::use_a8q4_decode_dot8_t1;
 using ninfer::ops::r9700::linear::use_a8q4_prefill_cta;
 
 struct LastBytes {
@@ -48,18 +48,18 @@ int main() {
         {12288U, 5120U}, {34816U, 5120U}, {248320U, 5120U},
     }};
     for (const auto [rows, columns] : decode_shapes) {
-        require(a8q4g64_decode_dot8_t1_qualification_shape(1U, rows, columns, columns),
-                "decode dot8 predicate omits a qualified T1 shape");
-        require(!a8q4g64_decode_dot8_t1_qualification_shape(2U, rows, columns, columns),
+        require(use_a8q4_decode_dot8_t1(1U, rows, columns, columns),
+                "decode dot8 predicate omits a selected T1 shape");
+        require(!use_a8q4_decode_dot8_t1(2U, rows, columns, columns),
                 "decode dot8 predicate admits T!=1");
-        require(!a8q4g64_decode_dot8_t1_qualification_shape(
+        require(!use_a8q4_decode_dot8_t1(
                     1U, rows, columns, columns + 128U),
                 "decode dot8 predicate admits a padded logical-K tail");
     }
-    require(!a8q4g64_decode_dot8_t1_qualification_shape(1U, 1152U, 1152U, 1152U) &&
-                !a8q4g64_decode_dot8_t1_qualification_shape(1U, 5120U, 10240U, 10240U) &&
-                !a8q4g64_decode_dot8_t1_qualification_shape(1U, 256U, 5120U, 5120U),
-            "decode dot8 predicate admits Vision, off-inventory Text, or DFlash/MTP shape");
+    require(!use_a8q4_decode_dot8_t1(1U, 1152U, 1152U, 1152U) &&
+                !use_a8q4_decode_dot8_t1(1U, 5120U, 10240U, 10240U) &&
+                !use_a8q4_decode_dot8_t1(1U, 256U, 5120U, 5120U),
+            "decode dot8 predicate admits an off-inventory shape");
     constexpr std::array<std::pair<std::uint32_t, std::uint32_t>, 8> shapes{{
         {1024U, 5120U}, {4096U, 5120U}, {5120U, 6144U}, {5120U, 10240U},
         {5120U, 17408U}, {7168U, 5120U}, {12288U, 5120U}, {34816U, 5120U},

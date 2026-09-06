@@ -39,7 +39,6 @@ constexpr const char* kPowerProfilePath =
 constexpr double kMaximumPerTupleRatio = 1.01;
 constexpr std::uint32_t kMaxTokens = 128;
 constexpr std::array<std::uint32_t, 10> kTokens{1, 2, 3, 4, 5, 6, 7, 8, 32, 128};
-constexpr double kRobustUncertaintyFactor = 4.4478; // 3 * 1.4826 * MAD
 struct Shape {
     std::uint32_t rows;
     std::uint32_t columns;
@@ -200,6 +199,22 @@ std::vector<hip_bfloat16> make_input(std::uint32_t columns,
     return input;
 }
 
+std::vector<hip_bfloat16> make_decode_dot8_input(std::uint32_t columns) {
+    std::vector<hip_bfloat16> input(columns);
+    const std::uint32_t groups = columns / kGroup;
+    for (std::uint32_t group = 0; group < groups; ++group) {
+        const float amplitude = 0.75F + static_cast<float>(group % 7U) * 0.125F;
+        for (std::uint32_t lane = 0; lane < kGroup; ++lane) {
+            int code = static_cast<int>((group * 29U + lane * 37U + 11U) % 255U) - 127;
+            if (lane == 0U) code = 127;
+            if (lane == 1U) code = -127;
+            input[static_cast<std::size_t>(group) * kGroup + lane] =
+                hip_bfloat16(amplitude * static_cast<float>(code) / 127.0F);
+        }
+    }
+    return input;
+}
+
 struct PrefillResult {
     Shape shape{};
     std::uint32_t tokens = 0;
@@ -293,6 +308,54 @@ std::uint16_t prefill_weight_scale_bits(std::uint32_t row, std::uint32_t group) 
     return static_cast<std::uint16_t>(0x1c00U + ((row + group * 3U) & 3U) * 0x0400U);
 }
 
+int decode_dot8_weight_code(std::uint32_t row, std::uint32_t group,
+                            std::uint32_t lane) {
+    return static_cast<int>((row * 3U + (row >> 4U) * 5U + group * 7U +
+                             lane * 11U + 1U) & 15U) - 8;
+}
+
+std::uint16_t decode_dot8_weight_scale_bits(std::uint32_t row,
+                                            std::uint32_t group) {
+    const float scale = 0.003F +
+        static_cast<float>((row * 11U + group * 7U + (row >> 4U) * 3U) % 23U) * 0.0001F;
+    return half_bits(scale);
+}
+
+struct DecodeDot8Weights {
+    std::vector<std::uint8_t> codes;
+    std::vector<std::uint16_t> scales;
+};
+
+DecodeDot8Weights make_decode_dot8_weights(std::uint32_t rows,
+                                           std::uint32_t padded_columns) {
+    const std::uint32_t groups = padded_columns / kGroup;
+    DecodeDot8Weights result{
+        std::vector<std::uint8_t>(static_cast<std::size_t>(rows) * padded_columns / 2U),
+        std::vector<std::uint16_t>(static_cast<std::size_t>(rows) * groups)};
+    for (std::uint32_t row = 0; row < rows; ++row) {
+        for (std::uint32_t group = 0; group < groups; ++group) {
+            const std::size_t stored_scale =
+                ((static_cast<std::size_t>(row) >> 4U) * groups + group) * 16U +
+                (row & 15U);
+            result.scales[stored_scale] = decode_dot8_weight_scale_bits(row, group);
+            for (std::uint32_t pair = 0; pair < 4U; ++pair) {
+                const std::size_t stored_word =
+                    (((static_cast<std::size_t>(row) >> 4U) * groups + group) * 4U + pair) *
+                        16U +
+                    (row & 15U);
+                for (std::uint32_t byte = 0; byte < 8U; ++byte) {
+                    const std::uint32_t lane = pair * 16U + byte * 2U;
+                    const int low = decode_dot8_weight_code(row, group, lane);
+                    const int high = decode_dot8_weight_code(row, group, lane + 1U);
+                    result.codes[stored_word * 8U + byte] = static_cast<std::uint8_t>(
+                        (low & 15) | ((high & 15) << 4));
+                }
+            }
+        }
+    }
+    return result;
+}
+
 __global__ void poison_q4_padded_tail(std::uint8_t* low, std::uint8_t* high,
                                       std::uint32_t tokens, std::uint32_t columns,
                                       std::uint32_t padded_columns) {
@@ -345,38 +408,34 @@ struct Result {
 
 struct DecodeDot8Result {
     Shape shape{};
-    double wmma_ms = 0.0;
-    double dot8_ms = 0.0;
     std::uint64_t maximum_bf16_steps = 0;
-    std::array<double, kTrials> wmma_samples{};
-    std::array<double, kTrials> dot8_samples{};
 };
 
 void write_samples(std::ostream& out, const std::array<double, kTrials>& values);
 
-DecodeDot8Result run_decode_dot8_case(Shape shape, bool collect_timing,
-                                      bool exercise_guards) {
+DecodeDot8Result run_decode_dot8_case(Shape shape, bool exercise_guards) {
     constexpr std::uint32_t tokens = 1U;
     const std::uint32_t padded_columns = (shape.columns + 127U) / 128U * 128U;
     const std::uint32_t groups = padded_columns / kGroup;
     const std::size_t weight_elements =
         static_cast<std::size_t>(shape.rows) * padded_columns;
     const std::size_t weight_scale_count = static_cast<std::size_t>(shape.rows) * groups;
-    const std::vector<hip_bfloat16> input = make_input(shape.columns, tokens);
+    const std::vector<hip_bfloat16> input = make_decode_dot8_input(shape.columns);
     const HostActivation expected = quantize_host(input, tokens, shape.columns);
+    const DecodeDot8Weights weights =
+        make_decode_dot8_weights(shape.rows, padded_columns);
     DeviceBuffer<hip_bfloat16> d_input(input.size());
     DeviceBuffer<std::uint8_t> d_weight_codes(weight_elements / 2U);
     DeviceBuffer<std::uint16_t> d_weight_scales(weight_scale_count);
-    DeviceBuffer<hip_bfloat16> d_output(shape.rows);
+    DeviceBuffer<hip_bfloat16> d_output(static_cast<std::size_t>(shape.rows) + 2U);
     const std::size_t workspace_bytes =
         linear::a8q4g64_activation_workspace_capacity_bytes(tokens, shape.columns);
     DeviceBuffer<std::uint8_t> d_workspace(workspace_bytes);
     HIP_CHECK(hipMemcpy(d_input.get(), input.data(), d_input.bytes(), hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemset(d_weight_codes.get(), 0x97, d_weight_codes.bytes()));
-    constexpr std::uint16_t weight_scale_bits = 0x2000U;
-    fill_u16<<<(weight_scale_count + 255U) / 256U, 256>>>(
-        d_weight_scales.get(), weight_scale_count, weight_scale_bits);
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipMemcpy(d_weight_codes.get(), weights.codes.data(), d_weight_codes.bytes(),
+                        hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_weight_scales.get(), weights.scales.data(),
+                        d_weight_scales.bytes(), hipMemcpyHostToDevice));
     linear::A8G64ActivationWorkspace workspace{};
     HIP_CHECK(linear::a8q4g64_bind_activation_workspace(
         d_workspace.get(), workspace_bytes, tokens, shape.columns, &workspace));
@@ -385,39 +444,57 @@ DecodeDot8Result run_decode_dot8_case(Shape shape, bool collect_timing,
         workspace.low_codes, workspace.low_code_bytes, workspace.high_codes,
         workspace.high_code_bytes, workspace.scales, workspace.scale_bytes,
         workspace.status, d_weight_codes.get(), d_weight_codes.bytes(),
-        d_weight_scales.get(), d_weight_scales.bytes(), d_output.get(), tokens,
+        d_weight_scales.get(), d_weight_scales.bytes(), d_output.get() + 1U, tokens,
         shape.rows, shape.columns, padded_columns};
     const auto launch_wmma = [&] { return linear::a8q4g64_linear_wmma32(args, nullptr); };
     const auto launch_dot8 = [&] {
-        return linear::a8q4g64_linear_decode_dot8_t1_qualification(args, nullptr);
+        return linear::a8q4g64_linear_decode_dot8_t1(args, nullptr);
     };
 
+    std::vector<hip_bfloat16> guarded_output(static_cast<std::size_t>(shape.rows) + 2U);
     std::vector<hip_bfloat16> output(shape.rows);
+    const auto initialize_guarded_output = [&](std::uint16_t poison) {
+        for (hip_bfloat16& value : guarded_output) value.data = poison;
+        HIP_CHECK(hipMemcpy(d_output.get(), guarded_output.data(), d_output.bytes(),
+                            hipMemcpyHostToDevice));
+    };
+    const auto read_guarded_output = [&](std::uint16_t canary, const char* route) {
+        HIP_CHECK(hipMemcpy(guarded_output.data(), d_output.get(), d_output.bytes(),
+                            hipMemcpyDeviceToHost));
+        if (guarded_output.front().data != canary || guarded_output.back().data != canary) {
+            fail(std::string("decode dot8 output canary changed in ") + route);
+        }
+        std::copy(guarded_output.begin() + 1, guarded_output.end() - 1, output.begin());
+    };
     if (exercise_guards) {
         linear::A8Q4G64LinearArgs bad_tokens = args;
         bad_tokens.tokens = 2U;
-        if (linear::a8q4g64_linear_decode_dot8_t1_qualification(bad_tokens, nullptr) !=
+        if (linear::a8q4g64_linear_decode_dot8_t1(bad_tokens, nullptr) !=
             hipErrorInvalidValue) fail("decode dot8 accepted T!=1");
         linear::A8Q4G64LinearArgs misaligned = args;
         ++misaligned.activation_low_codes;
-        if (linear::a8q4g64_linear_decode_dot8_t1_qualification(misaligned, nullptr) !=
+        if (linear::a8q4g64_linear_decode_dot8_t1(misaligned, nullptr) !=
             hipErrorInvalidValue) fail("decode dot8 accepted a misaligned code plane");
         const std::uint32_t bad_status = linear::Q4G64ActivationNonfinite;
         HIP_CHECK(hipMemcpy(workspace.status, &bad_status, sizeof(bad_status),
                             hipMemcpyHostToDevice));
+        initialize_guarded_output(0x7fc2U);
         HIP_CHECK(launch_dot8());
         HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipMemcpy(output.data(), d_output.get(), d_output.bytes(),
-                            hipMemcpyDeviceToHost));
+        read_guarded_output(0x7fc2U, "nonfinite-status path");
         if (!std::all_of(output.begin(), output.end(), [](hip_bfloat16 value) {
                 return value.data == 0x7fc1U;
             })) fail("decode dot8 did not poison every output for nonzero status");
         HIP_CHECK(linear::a8g64_quantize_activation({d_input.get(), workspace}, nullptr));
     }
 
+    initialize_guarded_output(0x7fc2U);
     HIP_CHECK(launch_dot8());
     HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipMemcpy(output.data(), d_output.get(), d_output.bytes(), hipMemcpyDeviceToHost));
+    read_guarded_output(0x7fc2U, "dot8 path");
+    if (std::any_of(output.begin(), output.end(), [](hip_bfloat16 value) {
+            return value.data == 0x7fc2U;
+        })) fail("decode dot8 did not rewrite every active output");
     std::uint64_t maximum_steps = 0;
     const std::array<std::uint32_t, 8> rows{
         0U, 1U, 15U, 16U, shape.rows / 3U, shape.rows / 2U,
@@ -430,42 +507,31 @@ DecodeDot8Result run_decode_dot8_case(Shape shape, bool collect_timing,
                 const std::size_t index = static_cast<std::size_t>(group) * kGroup + lane;
                 const int activation_code = unsigned_nibble(expected.low, index) +
                                             16 * signed_nibble(expected.high, index);
-                const int weight_code = (lane & 1U) == 0U ? 7 : -7;
+                const int weight_code = decode_dot8_weight_code(row, group, lane);
                 integer_dot += activation_code * weight_code;
             }
             sum = std::fma(static_cast<double>(integer_dot),
                            static_cast<double>(half_value(expected.scales[group])) *
-                               half_value(weight_scale_bits), sum);
+                               half_value(decode_dot8_weight_scale_bits(row, group)), sum);
         }
         const hip_bfloat16 oracle(static_cast<float>(sum));
         maximum_steps = std::max(maximum_steps, bf16_steps(output[row], oracle));
         if (bf16_steps(output[row], oracle) > 2U) fail("decode dot8 FP64 oracle mismatch");
     }
     const std::vector<hip_bfloat16> dot8_output = output;
+    initialize_guarded_output(0x7fc3U);
     HIP_CHECK(launch_wmma());
     HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipMemcpy(output.data(), d_output.get(), d_output.bytes(), hipMemcpyDeviceToHost));
+    read_guarded_output(0x7fc3U, "WMMA path");
+    if (std::any_of(output.begin(), output.end(), [](hip_bfloat16 value) {
+            return value.data == 0x7fc3U;
+        })) fail("decode WMMA did not rewrite every active output");
     if (!std::equal(output.begin(), output.end(), dot8_output.begin(), dot8_output.end(),
                     [](hip_bfloat16 lhs, hip_bfloat16 rhs) { return lhs.data == rhs.data; })) {
         fail("decode dot8 is not bit-exact with the WMMA incumbent");
     }
 
-    std::array<double, kTrials> wmma_samples{};
-    std::array<double, kTrials> dot8_samples{};
-    if (collect_timing) {
-        for (std::size_t trial = 0; trial < kTrials; ++trial) {
-            if ((trial & 1U) == 0U) {
-                wmma_samples[trial] = event_ms(10U, launch_wmma);
-                dot8_samples[trial] = event_ms(10U, launch_dot8);
-            } else {
-                dot8_samples[trial] = event_ms(10U, launch_dot8);
-                wmma_samples[trial] = event_ms(10U, launch_wmma);
-            }
-        }
-    }
-    return DecodeDot8Result{shape, collect_timing ? median(wmma_samples) : 0.0,
-                            collect_timing ? median(dot8_samples) : 0.0,
-                            maximum_steps, wmma_samples, dot8_samples};
+    return DecodeDot8Result{shape, maximum_steps};
 }
 
 std::vector<Result> run_shape(Shape shape) {
@@ -949,110 +1015,6 @@ void write_samples(std::ostream& out, const std::array<double, kTrials>& values)
     out << ']';
 }
 
-double robust_mad(const std::array<double, kTrials>& samples, double center) {
-    std::array<double, kTrials> deviations{};
-    std::transform(samples.begin(), samples.end(), deviations.begin(),
-                   [center](double sample) { return std::abs(sample - center); });
-    return median(deviations);
-}
-
-bool write_decode_dot8_json(const std::filesystem::path& path,
-                            const std::vector<DecodeDot8Result>& results,
-                            const hipDeviceProp_t& device, int runtime_version,
-                            const linear::A8Q4G64KernelResources& resources) {
-    if (results.empty()) fail("decode dot8 report requires nonempty evidence");
-    bool correctness_pass = true;
-    bool every_cell_pass = true;
-    double weighted_saving_lower_ms = 0.0;
-    std::vector<double> upper_ratios;
-    upper_ratios.reserve(results.size());
-    for (const DecodeDot8Result& result : results) {
-        correctness_pass = correctness_pass && result.maximum_bf16_steps <= 2U;
-        const double wmma_uncertainty =
-            kRobustUncertaintyFactor * robust_mad(result.wmma_samples, result.wmma_ms);
-        const double dot8_uncertainty =
-            kRobustUncertaintyFactor * robust_mad(result.dot8_samples, result.dot8_ms);
-        const double incumbent_lower = result.wmma_ms - wmma_uncertainty;
-        const double challenger_upper = result.dot8_ms + dot8_uncertainty;
-        const double upper_ratio = incumbent_lower > 0.0
-            ? challenger_upper / incumbent_lower
-            : std::numeric_limits<double>::max();
-        upper_ratios.push_back(upper_ratio);
-        every_cell_pass = every_cell_pass && upper_ratio <= kMaximumPerTupleRatio;
-        weighted_saving_lower_ms += result.shape.all_q4_count *
-                                    (incumbent_lower - challenger_upper);
-    }
-    const bool resource_pass = resources.decode_dot8_t1_qualification_registers <= 64 &&
-        resources.decode_dot8_t1_qualification_static_shared_bytes == 0 &&
-        resources.decode_dot8_t1_qualification_local_bytes == 0 &&
-        resources.decode_dot8_t1_qualification_max_threads_per_block >= 256;
-    const bool aggregate_pass = weighted_saving_lower_ms >= 5.0;
-    const bool accepted = correctness_pass && resource_pass && every_cell_pass && aggregate_pass;
-    std::ostringstream out;
-    out << std::setprecision(17)
-        << "{\n  \"schema_version\": 2,\n"
-        << "  \"qualification\": \"a8q4_t1_native_dot8_vs_wmma\",\n"
-        << "  \"status\": \"" << (accepted ? "passed" : "rejected") << "\",\n"
-        << "  \"hardware\": {\"architecture\": \"" << device.gcnArchName
-        << "\", \"wave_size\": " << device.warpSize
-        << ", \"hip_runtime_version\": " << runtime_version << "},\n"
-        << "  \"correctness\": {\"passed\": " << (correctness_pass ? "true" : "false")
-        << ", \"oracle\": \"independent FP64 complete represented formula\", "
-           "\"maximum_bf16_steps_allowed\": 2, \"guards_exercised_once\": true},\n"
-        << "  \"static_and_resources\": {\"static_gate\": \"required make prerequisite\", "
-           "\"required_opcode\": \"v_dot8_i32_iu4\", \"required_opcode_count\": 16, "
-           "\"wmma_forbidden\": true, \"runtime_resources_passed\": "
-        << (resource_pass ? "true" : "false") << ", \"vgpr\": "
-        << resources.decode_dot8_t1_qualification_registers << ", \"lds_bytes\": "
-        << resources.decode_dot8_t1_qualification_static_shared_bytes
-        << ", \"local_bytes\": " << resources.decode_dot8_t1_qualification_local_bytes
-        << ", \"max_threads_per_block\": "
-        << resources.decode_dot8_t1_qualification_max_threads_per_block << "},\n"
-        << "  \"incumbent\": \"T1 A8Q4G64 IU4 WMMA\",\n"
-        << "  \"challenger\": \"T1 one-row-per-thread packed mixed-sign IU4 dot8\",\n"
-        << "  \"timing\": {\"method\": \"unprofiled HIP events, 7 interleaved trials, "
-           "10 launches per sample, median\", \"uncertainty\": \"4.4478*MAD\"},\n"
-        << "  \"performance_decision\": {\"every_cell_robust_upper_ratio_limit\": 1.01, "
-           "\"every_cell_passed\": " << (every_cell_pass ? "true" : "false")
-        << ", \"exact_call_weighted_saving_lower_ms_per_token\": "
-        << weighted_saving_lower_ms << ", \"required_saving_ms_per_token\": 5, "
-           "\"aggregate_passed\": " << (aggregate_pass ? "true" : "false")
-        << ", \"accepted\": " << (accepted ? "true" : "false") << "},\n"
-        << "  \"shapes\": [\n";
-    for (std::size_t index = 0; index < results.size(); ++index) {
-        const DecodeDot8Result& result = results[index];
-        out << "    {\"rows\":" << result.shape.rows
-            << ",\"columns\":" << result.shape.columns
-            << ",\"tokens\":1,\"maximum_bf16_steps\":" << result.maximum_bf16_steps
-            << ",\"exact_decode_calls\":" << result.shape.all_q4_count
-            << ",\"wmma_ms\":" << result.wmma_ms << ",\"dot8_ms\":" << result.dot8_ms
-            << ",\"dot8_over_wmma\":" << result.dot8_ms / result.wmma_ms
-            << ",\"robust_upper_ratio\":" << upper_ratios[index]
-            << ",\"wmma_samples_ms\":";
-        write_samples(out, result.wmma_samples);
-        out << ",\"dot8_samples_ms\":";
-        write_samples(out, result.dot8_samples);
-        out << '}' << (index + 1U == results.size() ? "\n" : ",\n");
-    }
-    out << "  ]\n}\n";
-    const std::string bytes = out.str();
-    const int descriptor = ::open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
-    if (descriptor < 0) fail("cannot exclusively create decode dot8 report");
-    std::size_t offset = 0U;
-    while (offset < bytes.size()) {
-        const ssize_t written = ::write(descriptor, bytes.data() + offset, bytes.size() - offset);
-        if (written <= 0) {
-            (void)::close(descriptor); (void)::unlink(path.c_str());
-            fail("cannot write decode dot8 report");
-        }
-        offset += static_cast<std::size_t>(written);
-    }
-    if (::close(descriptor) != 0) {
-        (void)::unlink(path.c_str()); fail("cannot close decode dot8 report");
-    }
-    return accepted;
-}
-
 void write_json(const std::filesystem::path& path, const std::vector<Result>& results,
                 const hipDeviceProp_t& device, int runtime_version) {
     std::ofstream out(path);
@@ -1370,9 +1332,6 @@ bool write_lds_scope_report(const std::filesystem::path& output,
 int main(int argc, char** argv) {
     const bool decode_dot8_regression =
         argc == 2 && std::string_view(argv[1]) == "--decode-dot8-t1-regression";
-    const bool decode_dot8_benchmark =
-        argc == 4 && std::string_view(argv[1]) == "--decode-dot8-t1-benchmark" &&
-        std::string_view(argv[2]) == "--out-json";
     const bool prefill_regression =
         argc == 2 && std::string_view(argv[1]) == "--prefill-cta-regression";
     const bool lds_scope_regression =
@@ -1396,14 +1355,13 @@ int main(int argc, char** argv) {
         argc == 4 && std::string_view(argv[1]) == "--prefill-cta-pingpong-benchmark" &&
         std::string_view(argv[2]) == "--out-json";
     const bool shape_sweep = argc == 3 && std::string_view(argv[1]) == "--out-json";
-    if (!decode_dot8_regression && !decode_dot8_benchmark && !prefill_regression &&
+    if (!decode_dot8_regression && !prefill_regression &&
         !lds_scope_regression && !lds_scope_benchmark &&
         !n128_regression && !n128_benchmark && !m128n128_regression &&
         !m128n128_benchmark && !pingpong_regression && !pingpong_benchmark &&
         !shape_sweep) {
         std::cerr << "usage: a8q4_shape_sweep_qual "
                      "--out-json PATH | --decode-dot8-t1-regression | "
-                     "--decode-dot8-t1-benchmark --out-json FRESH.json | "
                      "--prefill-cta-regression | "
                      "--prefill-cta-lds-scope-regression | "
                      "--prefill-cta-lds-scope-benchmark --out-json FRESH.json | "
@@ -1463,19 +1421,13 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipRuntimeGetVersion(&runtime_version));
         int driver_version = 0;
         HIP_CHECK(hipDriverGetVersion(&driver_version));
-        if (decode_dot8_regression || decode_dot8_benchmark) {
-            if (decode_dot8_benchmark) {
-                require_fresh_output(argv[3]);
-                if (read_text(kPowerProfilePath) != "auto") {
-                    fail("decode dot8 physical A/B requires auto power");
-                }
-            }
+        if (decode_dot8_regression) {
             linear::A8Q4G64KernelResources resources{};
             HIP_CHECK(linear::a8q4g64_kernel_resources(&resources));
-            if (resources.decode_dot8_t1_qualification_registers > 64 ||
-                resources.decode_dot8_t1_qualification_static_shared_bytes != 0 ||
-                resources.decode_dot8_t1_qualification_local_bytes != 0 ||
-                resources.decode_dot8_t1_qualification_max_threads_per_block < 256) {
+            if (resources.decode_dot8_t1_registers > 64 ||
+                resources.decode_dot8_t1_static_shared_bytes != 0 ||
+                resources.decode_dot8_t1_local_bytes != 0 ||
+                resources.decode_dot8_t1_max_threads_per_block < 256) {
                 fail("decode dot8 requires <=64 VGPR, no LDS/scratch, and 256 threads");
             }
             const std::array<Shape, 7> shapes{{
@@ -1489,15 +1441,14 @@ int main(int argc, char** argv) {
             }};
             std::vector<DecodeDot8Result> results;
             for (std::size_t index = 0; index < shapes.size(); ++index) {
-                results.push_back(run_decode_dot8_case(
-                    shapes[index], decode_dot8_benchmark, index == 0U));
+                results.push_back(run_decode_dot8_case(shapes[index], index == 0U));
             }
-            const bool accepted = !decode_dot8_benchmark || write_decode_dot8_json(
-                argv[3], results, device, runtime_version, resources);
-            std::cout << "A8Q4 T1 native dot8/WMMA qualification: "
-                      << (accepted ? "PASS" : "REJECTED")
-                      << " (seven ordinary Text Q4 shapes)\n";
-            return accepted ? 0 : 1;
+            if (!std::all_of(results.begin(), results.end(), [](const DecodeDot8Result& result) {
+                    return result.maximum_bf16_steps <= 2U;
+                })) fail("decode dot8 represented-formula regression differs");
+            std::cout << "A8Q4 T1 native dot8 production regression: PASS "
+                         "(seven selected Q4 tuples; two overlap DFlash2)\n";
+            return 0;
         }
         if (prefill_regression || lds_scope_regression || lds_scope_benchmark ||
             n128_regression || n128_benchmark || m128n128_regression ||

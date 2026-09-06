@@ -994,7 +994,7 @@ __global__ __launch_bounds__(kWaveSize) void a8q4g64_linear_wmma32_kernel(
 }
 
 __global__ __launch_bounds__(kThreads)
-void a8q4g64_linear_decode_dot8_t1_qualification_kernel(
+void a8q4g64_linear_decode_dot8_t1_kernel(
     const std::uint8_t* activation_low_codes,
     const std::uint8_t* activation_high_codes,
     const std::uint16_t* activation_scales,
@@ -2253,19 +2253,6 @@ bool a8q4g64_scalar_base_u32_offsets_fit(
     return scalar_base_offsets_fit(tokens, rows, padded_columns);
 }
 
-bool a8q4g64_decode_dot8_t1_qualification_shape(
-    std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns,
-    std::uint32_t padded_columns) noexcept {
-    return tokens == 1U && columns == padded_columns &&
-        ((rows == 4096U && columns == 5120U) ||
-         (rows == 5120U && columns == 6144U) ||
-         (rows == 5120U && columns == 17408U) ||
-         (rows == 7168U && columns == 5120U) ||
-         (rows == 12288U && columns == 5120U) ||
-         (rows == 34816U && columns == 5120U) ||
-         (rows == 248320U && columns == 5120U));
-}
-
 std::size_t q4g64_activation_workspace_capacity_bytes(std::uint32_t tokens,
                                                        std::uint32_t columns) noexcept {
     std::uint32_t padded = 0;
@@ -2530,14 +2517,16 @@ hipError_t a8q4g64_linear_wmma32(const A8Q4G64LinearArgs& args,
 #endif
 }
 
-hipError_t a8q4g64_linear_decode_dot8_t1_qualification(
+hipError_t a8q4g64_linear_decode_dot8_t1(
     const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept {
-    if (!valid_a8q4_linear_args(args) || args.tokens != 1U) {
+    if (!valid_a8q4_linear_args(args) ||
+        !use_a8q4_decode_dot8_t1(
+            args.tokens, args.rows, args.columns, args.padded_columns)) {
         return hipErrorInvalidValue;
     }
 #if defined(__HIPCC__)
     const dim3 grid((args.rows + kThreads - 1U) / kThreads);
-    hipLaunchKernelGGL(a8q4g64_linear_decode_dot8_t1_qualification_kernel,
+    hipLaunchKernelGGL(a8q4g64_linear_decode_dot8_t1_kernel,
                        grid, dim3(kThreads), 0, stream,
                        args.activation_low_codes, args.activation_high_codes,
                        args.activation_scales, args.activation_status,
@@ -2707,16 +2696,10 @@ hipError_t a8q4g64_linear_candidate(const A8Q4G64CandidateArgs& args,
     if (!valid_a8q4_linear_args(linear_args)) return hipErrorInvalidValue;
     const hipError_t quantized = a8g64_quantize_activation({args.input, workspace}, stream);
     if (quantized != hipSuccess) return quantized;
-#if defined(NINFER_R9700_A8Q4_T1_DOT8_QUALIFICATION)
-    // In the fixed ordinary Qwen3.8-27B Text round this boundary is reached by
-    // exactly 321 T=1 Q4 linears (320 layer projections plus lm_head). The
-    // T=2048 fused-SiLU/down prefill boundary below prepares and invokes its
-    // cooperative CTA directly, so this private cutover cannot affect it.
-    if (a8q4g64_decode_dot8_t1_qualification_shape(
+    if (use_a8q4_decode_dot8_t1(
             args.tokens, args.rows, args.columns, args.padded_columns)) {
-        return a8q4g64_linear_decode_dot8_t1_qualification(linear_args, stream);
+        return a8q4g64_linear_decode_dot8_t1(linear_args, stream);
     }
-#endif
     switch (select_a8q4_prefill_route(args.tokens, args.rows, args.columns)) {
     case A8Q4PrefillRoute::M64N128PingPongProduction:
         return a8q4g64_linear_prefill_cta(linear_args, stream);
@@ -3014,7 +2997,7 @@ hipError_t a8q4g64_kernel_resources(A8Q4G64KernelResources* resources) noexcept 
     if (resources == nullptr) return hipErrorInvalidValue;
     hipFuncAttributes quantize{};
     hipFuncAttributes wmma{};
-    hipFuncAttributes decode_dot8_t1_qualification{};
+    hipFuncAttributes decode_dot8_t1{};
     hipFuncAttributes prefill_cta{};
     hipFuncAttributes prefill_cta_global_inv_qualification{};
     hipFuncAttributes prefill_cta_m64n64_regression{};
@@ -3027,8 +3010,8 @@ hipError_t a8q4g64_kernel_resources(A8Q4G64KernelResources* resources) noexcept 
         &wmma, reinterpret_cast<const void*>(a8q4g64_linear_wmma32_kernel));
     if (result != hipSuccess) return result;
     result = hipFuncGetAttributes(
-        &decode_dot8_t1_qualification, reinterpret_cast<const void*>(
-            a8q4g64_linear_decode_dot8_t1_qualification_kernel));
+        &decode_dot8_t1, reinterpret_cast<const void*>(
+            a8q4g64_linear_decode_dot8_t1_kernel));
     if (result != hipSuccess) return result;
     result = hipFuncGetAttributes(
         &prefill_cta,
@@ -3054,10 +3037,10 @@ hipError_t a8q4g64_kernel_resources(A8Q4G64KernelResources* resources) noexcept 
         quantize.numRegs, static_cast<int>(quantize.sharedSizeBytes),
         static_cast<int>(quantize.localSizeBytes), wmma.numRegs,
         static_cast<int>(wmma.sharedSizeBytes), static_cast<int>(wmma.localSizeBytes),
-        decode_dot8_t1_qualification.numRegs,
-        static_cast<int>(decode_dot8_t1_qualification.sharedSizeBytes),
-        static_cast<int>(decode_dot8_t1_qualification.localSizeBytes),
-        decode_dot8_t1_qualification.maxThreadsPerBlock,
+        decode_dot8_t1.numRegs,
+        static_cast<int>(decode_dot8_t1.sharedSizeBytes),
+        static_cast<int>(decode_dot8_t1.localSizeBytes),
+        decode_dot8_t1.maxThreadsPerBlock,
         prefill_cta.numRegs, static_cast<int>(prefill_cta.sharedSizeBytes),
         static_cast<int>(prefill_cta.localSizeBytes),
         prefill_cta_global_inv_qualification.numRegs,

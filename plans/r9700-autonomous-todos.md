@@ -16,9 +16,8 @@ only and must not be reused as an active command or product requirement.
 Immediate execution priority: scalar-base/U32-voffset addressing is now the sole canonical dense
 Q4G64/A8G64 ping/pong route. Its source-matched whole result is `1,904.339303 tok/s`, still below
 the 2,000 tok/s hard gate, so do not resume the dependent chunk/capacity/whole campaign. The next
-active optimization priority is ordinary non-speculative decode. Its current one-repetition C1
-8K+256 diagnostic is `15.133451 tok/s`; this supersedes the older `8.354689 tok/s` result for
-current optimization decisions but still requires a matched A/B before supporting a promotion.
+active optimization priority is ordinary non-speculative decode. Its selected native-dot8 C1
+8K+256 matched result is `20.430701 tok/s`; RMSNorm is the next bounded ordinary target.
 After ordinary decode, implement and optimize DFlash2. Do not schedule MTP optimization:
 existing MTP support may remain, but its `19.244583 tok/s` MTP3 result is diagnostic only and does
 not rank a product route. Dense prefill remains open for the two bounded future mechanisms recorded
@@ -1881,15 +1880,13 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         selected-artifact whole-prefill timing at prompt lengths `selected_chunk+129`,
         `selected_chunk+257`, and `selected_chunk+1,023` before closing the gap. This token-tail
         matrix does not qualify the mixed MTP-only W8 [5,120,10,240] or [1,024,5,120] shapes.
-  - [ ] Optimize ordinary non-speculative decode immediately from the current dense all-Q4 G16
-        exact C1 P8192+G256 spec-none Device Graph diagnostic. Its one measured repetition is
+  - [ ] Optimize ordinary non-speculative decode immediately from the dense all-Q4 G16 exact C1
+        P8192+G256 spec-none Device Graph route. Its pre-dot8 one-repetition diagnostic was
         `15.13345066` output tok/s over `16.91616841 s` of decode in
         `profiles/bench/ordinary-none-dense-all-q4-g16-c1-8k-current-20260905.json` (SHA-256
         `829d19d4eff2364e0d782f0da3cfe7dfa7c3bee313614799f5aa53a333e17f7f`). It supersedes the
-        older `8.354688852` tok/s result for current optimization decisions, but remains a
-        one-repetition diagnostic until a source-matched whole A/B confirms a candidate. This work
-        is explicitly exempt from the still-open dense-prefill floor and from the held
-        chunk/capacity campaign:
+        older `8.354688852` tok/s result. This work is explicitly exempt from the still-open
+        dense-prefill floor and from the held chunk/capacity campaign:
         identify the dominant ordinary-only kernels and host/launch gaps, qualify bounded direct
         changes against the fixed cache and exact output semantics, and confirm wins on ordinary
         whole decode. The one-round trace report is
@@ -1905,15 +1902,30 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         (`4.276113 ms`, 16 calls), and QK (`1.030131 ms`, 16 calls). Dispatch-interval union is
         only a union of rocprofiler start/end intervals: it is not GPU-active time, GPU wall time,
         utilization, or CU occupancy, so optimization follows source-matched whole A/B rather than
-        converting that union into a physical claim. The native dot8 T=1 operator gate passes with
+        converting that union into a physical claim. The native-dot8 T=1 operator gate passed with
         a `14.1025415618 ms` robust exact-call-weighted saving per token in
         `profiles/bench/r9700-a8q4-t1-native-dot8-all-text-20260905.json` (SHA-256
-        `300626f0d45b5b9bb8f6b420f44b7e5652e3a848738c636959f02f3448d2b5b0`); run its
-        source-matched ordinary whole A/B next before promotion. Do not optimize or rank MTP; its
-        `19.24458338` tok/s MTP3 row remains a diagnostic comparator only. After ordinary decode,
-        the next implementation priority is
-        DFlash2. Final selected-route profiling and roof accounting remain in the dependent item
-        below because they require the eventual selected chunk/profile authority.
+        `300626f0d45b5b9bb8f6b420f44b7e5652e3a848738c636959f02f3448d2b5b0`). Its seven exact
+        full-K tuples are selected by the Linear shape contract; `[5120,17408]` and
+        `[34816,5120]` also occur in DFlash2. The four-pair source-matched whole gate promoted the
+        route: median decode fell from `16.9262812925 s` (`15.1244089340 tok/s`) to
+        `12.5301623450 s` (`20.4307009719 tok/s`), robust ratio upper was `0.7427031671`, robust
+        saving lower was `17.0000856399 ms/token`, prefill ratio upper was `1.0016298424`, and all
+        generated tokens and matched identities were exact. The immutable report is
+        `profiles/bench/r9700-a8q4-t1-dot8-whole-p8192-g256-full-20260905.json` (SHA-256
+        `19278ca8c8df5d417bbd5d36ce1689760e3cb6dbe606c3a597a6b2f0b847fee1`). Native dot8 is now
+        canonical for those tuples with no selector; off-inventory T=1 and logical-K tails retain
+        WMMA. The strengthened production regression covers varied N16/K16 weights/scales, dense
+        activations, complete output parity, FP64 checks, poisoning, rewrites, and canaries. Continue
+        ordinary decode with RMSNorm next. Do not optimize or rank MTP; its `19.24458338` tok/s MTP3
+        row remains diagnostic. After ordinary decode, the next implementation priority is DFlash2.
+        A fresh selector-free production build then measured `20.45440879 tok/s` with exact 257
+        generated IDs in `profiles/bench/r9700-dot8-production-final-p8192-g256-c1-20260906.json`
+        (SHA-256 `c341f1eeb2f5d5597272dbecc532982b008701c7ff6a22d946541f98c9c94b2c`); its extracted loaded
+        gfx1201 object (SHA-256 `6a4e9eed7804da2321e112a3c520f65eb3d6a1b88e8352c39f9b364a30033312`)
+        has exactly 16 native dot8 instructions, no WMMA, 18 VGPR, and zero LDS/private/spills.
+        Final selected-route profiling and roof accounting remain in the dependent item below
+        because they require the eventual selected chunk/profile authority.
   - [ ] After chunk and terminal static-profile selection, profile only the ultimately selected 8K
         and 32K prefill and decode routes, including the admitted speculative mode; candidate
         screens used to make those selections are not a second terminal profiling campaign. First

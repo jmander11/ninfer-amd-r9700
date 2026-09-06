@@ -168,35 +168,29 @@ requested-byte service and instruction rates; an HBM bus rating is not a valid r
 bound when caches serve loads. The calculator has no implicit hardware defaults. Run
 `python3 tools/r9700/test_a8q4_prefill_traffic.py` for its focused tile-accounting checks.
 
-The qualification-only T=1 A8Q4 native-dot8 challenger can be checked without changing product
-routing. Its static gate requires the exact sixteen mixed-sign `v_dot8_i32_iu4` sites, no WMMA,
-at most 64 VGPR, and zero LDS/private/scratch. The physical A/B covers all seven ordinary Text Q4
-shapes using their exact per-token call weights and publishes a terminal create-only report. It
-accepts only when every cell's `(challenger median + 4.4478*MAD) / (incumbent median -
-4.4478*MAD)` is at most 1.01 and the exact-call-weighted saving lower bound is at least 5 ms/token.
+The selected T=1 A8Q4 native-dot8 route owns seven exact full-K Q4 matrix tuples. They were
+identified from ordinary decode; `[5120,17408]` and `[34816,5120]` also occur in DFlash2, so
+dispatch follows the Linear shape contract rather than caller identity. Every other T=1 tuple,
+logical-K tail, and wider token extent retains WMMA. The retained static gate requires exactly
+sixteen mixed-sign `v_dot8_i32_iu4` sites, no WMMA, at most 64 VGPR, and zero
+LDS/private/scratch. The production regression uses dense varied activations, nonuniform signed
+W4 codes in exact N16/K16 storage, nonuniform FP16 scales, full-output WMMA parity, spread-row
+complete-K FP64 checks, status poisoning, full rewrites, and output canaries.
 
 ```sh
 make -C tools/r9700 a8q4-decode-dot8-static
 make -C tools/r9700 a8q4-decode-dot8-regression
-make -C tools/r9700 a8q4-decode-dot8-benchmark \
-  A8Q4_DECODE_DOT8_OUT=profiles/bench/FRESH.json
-make -C tools/r9700 a8q4-decode-dot8-report \
-  A8Q4_DECODE_DOT8_OUT=profiles/bench/FRESH.json
 ```
 
-After the operator gate passes, `tools/bench/run_a8q4_t1_dot8_whole_ab.py` builds source-matched
-control and candidate `ninfer_bench` executables. The only admitted compile difference is the
-private, default-OFF `NINFER_R9700_A8Q4_T1_DOT8_QUALIFICATION` definition. It runs four balanced
-AB/BA pairs at C1, P8192+G256, ordinary graph decode; requires exact generated-token, environment,
-artifact, workspace, and configuration parity; and publishes its create-only terminal report
-before returning a rejection status. The private option, qualification entry, runner, and report
-machinery are temporary and must be removed when the route is promoted or rejected.
-The candidate switch admits only the seven operator-qualified ordinary Text shapes at T=1 with
-logical K equal to padded K; every tail and off-inventory call retains WMMA.
-`--pairs 1 --decode-tokens 32` provides a non-promoting screen; omitting both options runs the
-only promotion-eligible four-pair, G256 gate. The retained report includes every process role and
-raw prefill/decode duration, generated-token digest/count, artifact digest, and exact control and
-candidate CMake cache identities.
+The completed operator gate passed every tuple with a `14.1025415618 ms/token` robust weighted
+saving lower. The source-matched C1/P8192+G256 ordinary Device Graph gate then reduced median decode
+from `16.9262812925 s` (`15.1244089340 tok/s`) to `12.5301623450 s`
+(`20.4307009719 tok/s`). Its robust candidate/control upper ratio was `0.7427031671`, robust saving
+lower was `17.0000856399 ms/token`, prefill ratio upper was `1.0016298424`, and all generated tokens,
+configuration, environment, artifact, and workspace values matched. The immutable whole report is
+`profiles/bench/r9700-a8q4-t1-dot8-whole-p8192-g256-full-20260905.json`, SHA-256
+`19278ca8c8df5d417bbd5d36ce1689760e3cb6dbe606c3a597a6b2f0b847fee1`. The former private build
+selector and terminal A/B tooling were removed after promotion.
 
 The G16 and G32 S16/tau900 XAttention build variants each expose a production-scale admission
 control at context 8,192/T=4,096. Run each configured binary with `--benchmark

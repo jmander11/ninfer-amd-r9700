@@ -19,6 +19,22 @@ inline constexpr std::uint32_t kQ4ActivationBits = NINFER_R9700_Q4_ACTIVATION_BI
 inline constexpr std::string_view kQ4PrefillCtaProfile =
     "m64n128-pingpong-n16-k16-scalar-base-production";
 
+// The one-row-per-thread native-dot8 route is selected only for the exact full-K
+// Q4 tuples qualified at T=1. Two tuples are also used by DFlash2; selection follows
+// the closed Linear shape contract rather than the model caller.
+[[nodiscard]] constexpr bool use_a8q4_decode_dot8_t1(
+    std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns,
+    std::uint32_t padded_columns) noexcept {
+    return kQ4ActivationBits == 8U && tokens == 1U && columns == padded_columns &&
+        ((rows == 4096U && columns == 5120U) ||
+         (rows == 5120U && columns == 6144U) ||
+         (rows == 5120U && columns == 17408U) ||
+         (rows == 7168U && columns == 5120U) ||
+         (rows == 12288U && columns == 5120U) ||
+         (rows == 34816U && columns == 5120U) ||
+         (rows == 248320U && columns == 5120U));
+}
+
 enum class A8Q4PrefillRoute : std::uint8_t {
     Wmma32,
     M64N128PingPongProduction,

@@ -289,10 +289,10 @@ struct A8Q4G64KernelResources {
     int wmma_registers = 0;
     int wmma_static_shared_bytes = 0;
     int wmma_local_bytes = 0;
-    int decode_dot8_t1_qualification_registers = 0;
-    int decode_dot8_t1_qualification_static_shared_bytes = 0;
-    int decode_dot8_t1_qualification_local_bytes = 0;
-    int decode_dot8_t1_qualification_max_threads_per_block = 0;
+    int decode_dot8_t1_registers = 0;
+    int decode_dot8_t1_static_shared_bytes = 0;
+    int decode_dot8_t1_local_bytes = 0;
+    int decode_dot8_t1_max_threads_per_block = 0;
     int prefill_cta_registers = 0;
     int prefill_cta_static_shared_bytes = 0;
     int prefill_cta_local_bytes = 0;
@@ -354,10 +354,10 @@ struct A8Q4G64KernelResources {
 // INT32 is recombined before FP32 scale composition and one BF16 output rounding.
 [[nodiscard]] hipError_t a8q4g64_linear_wmma32(const A8Q4G64LinearArgs& args,
                                                 hipStream_t stream) noexcept;
-// Qualification-only T=1 GEMV challenger. Each thread owns one output row and
-// evaluates the exact A8 decomposition with packed gfx1201 mixed-sign dot8.
-// No product dispatch reaches this entry until its numerical and physical gates pass.
-[[nodiscard]] hipError_t a8q4g64_linear_decode_dot8_t1_qualification(
+// Selected exact-domain T=1 GEMV. Each thread owns one output row and evaluates
+// the A8 decomposition with packed gfx1201 mixed-sign dot8. Calls outside the
+// seven full-K production tuples are rejected; the candidate boundary retains WMMA.
+[[nodiscard]] hipError_t a8q4g64_linear_decode_dot8_t1(
     const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept;
 // Direct 64-token x 128-row ping/pong cooperative-LDS production route. The candidate boundary
 // admits it only for the exact qualified tuples/extents; tails use the named regression control.
@@ -365,9 +365,6 @@ struct A8Q4G64KernelResources {
                                                     hipStream_t stream) noexcept;
 [[nodiscard]] bool a8q4g64_scalar_base_u32_offsets_fit(
     std::uint32_t tokens, std::uint32_t rows,
-    std::uint32_t padded_columns) noexcept;
-[[nodiscard]] bool a8q4g64_decode_dot8_t1_qualification_shape(
-    std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns,
     std::uint32_t padded_columns) noexcept;
 // Superseded single-bank M64xN128 route retained only for direct regression and production-tail
 // correctness. No exact qualified product tuple dispatches here.

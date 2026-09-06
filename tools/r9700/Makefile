@@ -386,22 +386,13 @@ prefill-cta-static-q4:
 	python3 check_prefill_cta_static.py --recipe q4 --mode lds-scope \
 		--assembly "$(PREFILL_CTA_ASSEMBLY)" --metadata "$(PREFILL_CTA_METADATA)"
 
-.PHONY: a8q4-decode-dot8-static a8q4-decode-dot8-regression a8q4-decode-dot8-benchmark a8q4-decode-dot8-report
+.PHONY: a8q4-decode-dot8-static a8q4-decode-dot8-regression
 a8q4-decode-dot8-static: $(BUILD_DIR)/w8a8_wmma_linear_qual.s
 	python3 check_prefill_cta_static.py --recipe q4-dot8 --mode decode-dot8 \
 		--assembly "$<" --metadata "$<"
 
 a8q4-decode-dot8-regression: $(A8Q4_SHAPE_SWEEP_TARGET) a8q4-decode-dot8-static
 	$(A8Q4_SHAPE_SWEEP_TARGET) --decode-dot8-t1-regression
-
-a8q4-decode-dot8-benchmark: $(A8Q4_SHAPE_SWEEP_TARGET) a8q4-decode-dot8-static
-	test -n "$(A8Q4_DECODE_DOT8_OUT)"
-	$(A8Q4_SHAPE_SWEEP_TARGET) --decode-dot8-t1-benchmark \
-		--out-json "$(A8Q4_DECODE_DOT8_OUT)"
-
-a8q4-decode-dot8-report:
-	test -n "$(A8Q4_DECODE_DOT8_OUT)"
-	python3 check_decode_dot8_report.py "$(A8Q4_DECODE_DOT8_OUT)"
 
 .PHONY: prefill-cta-static-q4-m128n128 a8q4-prefill-cta-m128n128-regression a8q4-prefill-cta-m128n128-benchmark a8q4-prefill-cta-m128n128-report a8q4-prefill-cta-pingpong-regression a8q4-prefill-cta-pingpong-benchmark a8q4-prefill-cta-pingpong-report prefill-cta-static-q4-a4-m64n128
 prefill-cta-static-q4-m128n128:
