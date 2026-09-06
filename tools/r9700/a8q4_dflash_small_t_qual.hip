@@ -5,20 +5,12 @@
 
 namespace {
 
-constexpr std::array<Shape, 13> kDFlashSmallTShapes{{
-    {4096, 5120, 0, 0},
-    {5120, 6144, 0, 0},
-    {7168, 5120, 0, 0},
-    {12288, 5120, 0, 0},
+constexpr std::array<Shape, 1> kDFlashSmallTShapes{{
     {34816, 5120, 0, 0},
-    {5120, 17408, 0, 0},
-    {248320, 5120, 0, 0},
-    {131072, 5120, 0, 0},
-    {5120, 25600, 0, 0},
-    {6144, 5120, 0, 0},
-    {5120, 4096, 0, 0},
-    {1280, 5120, 0, 0},
-    {256, 5120, 0, 0},
+}};
+
+constexpr std::array<std::uint32_t, 11> kDFlashSmallTWidths{{
+    4U, 5U, 6U, 8U, 10U, 12U, 15U, 16U, 18U, 20U, 24U,
 }};
 
 bool exact_shape(Shape shape) {
@@ -26,6 +18,11 @@ bool exact_shape(Shape shape) {
                        [&](Shape item) {
                            return item.rows == shape.rows && item.columns == shape.columns;
                        });
+}
+
+bool exact_width(std::uint32_t tokens) {
+    return std::find(kDFlashSmallTWidths.begin(), kDFlashSmallTWidths.end(), tokens) !=
+           kDFlashSmallTWidths.end();
 }
 
 struct DeviceIdentity {
@@ -69,8 +66,8 @@ DeviceIdentity select_one_r9700_auto() {
 
 bool run_case(Shape shape, std::uint32_t tokens, const std::filesystem::path& output_path,
               const DeviceIdentity& device) {
-    if (!exact_shape(shape) || tokens < 4U || tokens > 6U) {
-        fail("small-T qualifier requires one exact DFlash/Text/head shape and T=4,5,6");
+    if (!exact_shape(shape) || !exact_width(tokens)) {
+        fail("small-T qualifier requires N34816/K5120 and one exact K4/W5 or K5/W6 width");
     }
     const std::uint32_t padded = (shape.columns + 127U) / 128U * 128U;
     const std::uint32_t groups = padded / kGroup;
@@ -106,6 +103,12 @@ bool run_case(Shape shape, std::uint32_t tokens, const std::filesystem::path& ou
     const auto incumbent = [&] { return linear::a8q4g64_linear_wmma32(args, nullptr); };
 
     linear::A8Q4G64LinearArgs invalid = args;
+    invalid.rows = 4096U;
+    if (linear::a8q4g64_linear_dflash_small_t_qualification(invalid, nullptr) !=
+        hipErrorInvalidValue) {
+        fail("small-T candidate accepted a C1-rejected matrix shape");
+    }
+    invalid = args;
     invalid.tokens = 3U;
     if (linear::a8q4g64_linear_dflash_small_t_qualification(invalid, nullptr) !=
         hipErrorInvalidValue) {
@@ -116,6 +119,12 @@ bool run_case(Shape shape, std::uint32_t tokens, const std::filesystem::path& ou
     if (linear::a8q4g64_linear_dflash_small_t_qualification(invalid, nullptr) !=
         hipErrorInvalidValue) {
         fail("small-T candidate accepted T=7");
+    }
+    invalid = args;
+    invalid.tokens = 9U;
+    if (linear::a8q4g64_linear_dflash_small_t_qualification(invalid, nullptr) !=
+        hipErrorInvalidValue) {
+        fail("small-T candidate accepted T=9");
     }
     invalid = args;
     ++invalid.activation_low_codes;
@@ -276,10 +285,10 @@ bool run_case(Shape shape, std::uint32_t tokens, const std::filesystem::path& ou
     const std::filesystem::path source_root = std::filesystem::canonical(NINFER_SOURCE_DIR);
     std::ostringstream out;
     out << std::setprecision(17)
-        << "{\n  \"schema\": \"ninfer.r9700.a8q4-dflash-small-t-cell.v2\",\n"
+        << "{\n  \"schema\": \"ninfer.r9700.a8q4-dflash-small-t-cell.v3\",\n"
         << "  \"status\": \"" << (accepted ? "passed" : "rejected") << "\",\n"
         << "  \"production_dispatch_changed\": false,\n"
-        << "  \"scope\": \"C1 T4/T5/T6 screen only; flattened C2..4 widths remain unqualified\",\n"
+        << "  \"scope\": \"N34816/K5120 flattened K4/W5 and K5/W6 widths through C4 only\",\n"
         << "  \"hardware\": {\"device\": \"" << json_escape(device.properties.name)
         << "\", \"architecture\": \"" << json_escape(device.properties.gcnArchName)
         << "\", \"pci_bus_id\": \"" << json_escape(device.pci_bus_id)

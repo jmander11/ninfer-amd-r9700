@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run and independently validate the complete C1 DFlash small-T screen."""
+"""Extend the retained C1 DFlash winner across exact flattened C2..4 widths."""
 
 from __future__ import annotations
 
@@ -17,15 +17,25 @@ try:
 except ImportError:
     from check_a8q4_dflash_small_t_static import check as check_static
 
-SHAPES = (
-    (4096, 5120), (5120, 6144), (7168, 5120), (12288, 5120),
-    (34816, 5120), (5120, 17408), (248320, 5120), (131072, 5120),
-    (5120, 25600), (6144, 5120), (5120, 4096), (1280, 5120), (256, 5120),
+SHAPES = ((34816, 5120),)
+TOKENS = (8, 10, 12, 15, 16, 18, 20, 24)
+WIDTH_ROLES = {
+    8: ("K4_C2_proposal",),
+    10: ("K5_C2_proposal", "W5_C2_verification"),
+    12: ("K4_C3_proposal", "W6_C2_verification"),
+    15: ("K5_C3_proposal", "W5_C3_verification"),
+    16: ("K4_C4_proposal",),
+    18: ("W6_C3_verification",),
+    20: ("K5_C4_proposal", "W5_C4_verification"),
+    24: ("W6_C4_verification",),
+}
+PRIOR_ELIGIBLE = (
+    (34816, 5120, 4), (34816, 5120, 5), (34816, 5120, 6),
 )
-TOKENS = (4, 5, 6)
-CELL_SCHEMA = "ninfer.r9700.a8q4-dflash-small-t-cell.v2"
-GATE_SCHEMA = "ninfer.r9700.a8q4-dflash-small-t-gate.v2"
-SCOPE = "C1 T4/T5/T6 screen only; flattened C2..4 widths remain unqualified"
+PRIOR_SUMMARY_SHA256 = "27cba6590e4272908b30e5a1ad6073610288c6e26b27100f5ad662d25648b122"
+CELL_SCHEMA = "ninfer.r9700.a8q4-dflash-small-t-cell.v3"
+GATE_SCHEMA = "ninfer.r9700.a8q4-dflash-small-t-gate.v3"
+SCOPE = "N34816/K5120 flattened K4/W5 and K5/W6 widths through C4 only"
 ORACLE = "independent FP64 represented A8G64 x Q4G64 formula"
 CRITERION = (
     "both launch-order medians faster, two-standard-error paired ratio upper below one, "
@@ -227,6 +237,26 @@ def _committed_package(repo: Path) -> tuple[str, dict[str, str]]:
     return commit, hashes
 
 
+def validate_prior_summary(report: object) -> None:
+    if not isinstance(report, dict) or \
+            report.get("schema") != "ninfer.r9700.a8q4-dflash-small-t-gate.v2" or \
+            report.get("status") != "passed" or report.get("complete_screen") is not True or \
+            report.get("routing_authorized") is not False or \
+            report.get("required_cell_count") != 39:
+        raise ValueError("retained C1 screen is not the closed schema-v2 authority")
+    eligible = report.get("eligible_cells")
+    expected = [
+        {"rows": rows, "columns": columns, "tokens": tokens}
+        for rows, columns, tokens in PRIOR_ELIGIBLE
+    ]
+    if eligible != expected or not isinstance(report.get("forbidden_cells"), list) or \
+            len(report["forbidden_cells"]) != 36 or \
+            not isinstance(report.get("cells"), list) or len(report["cells"]) != 39 or \
+            not all(isinstance(cell, dict) and cell.get("evidence_valid") is True
+                    for cell in report["cells"]):
+        raise ValueError("retained C1 screen has the wrong exact eligibility set")
+
+
 def _write_exclusive(path: Path, value: object) -> None:
     with path.open("x") as stream:
         json.dump(value, stream, indent=2, sort_keys=True)
@@ -239,11 +269,16 @@ def main() -> int:
                         default=Path("tools/r9700/build/a8q4_dflash_small_t_qual"))
     parser.add_argument("--assembly", type=Path,
                         default=Path("tools/r9700/build/q4g64_linear.s"))
+    parser.add_argument("--c1-summary", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[2]
     binary = args.binary.resolve(strict=True)
     assembly = args.assembly.resolve(strict=True)
+    prior_summary = args.c1_summary.resolve(strict=True)
+    if sha256(prior_summary) != PRIOR_SUMMARY_SHA256:
+        raise RuntimeError("retained C1 summary has the wrong SHA-256")
+    validate_prior_summary(json.loads(prior_summary.read_text()))
     commit, package_hashes = _committed_package(repo)
     source_hashes = {name: package_hashes[path.as_posix()]
                      for name, path in SOURCE_PATHS.items()}
@@ -256,6 +291,13 @@ def main() -> int:
         "executable": executable_identity,
         "assembly": {"path": str(assembly), "sha256": sha256(assembly)},
         "static": {str(tokens): values for tokens, values in static_result.items()},
+        "retained_c1_screen": {
+            "path": str(prior_summary), "sha256": PRIOR_SUMMARY_SHA256,
+            "eligible_cells": [
+                {"rows": rows, "columns": columns, "tokens": tokens}
+                for rows, columns, tokens in PRIOR_ELIGIBLE
+            ],
+        },
     }
     if args.output_dir.exists():
         raise SystemExit("output directory must be fresh")
@@ -281,7 +323,7 @@ def main() -> int:
             cell = {
                 "rows": rows, "columns": columns, "tokens": tokens,
                 "eligible": False, "evidence_valid": False, "report": name,
-                "process": process_name,
+                "process": process_name, "applicability": list(WIDTH_ROLES[tokens]),
             }
             try:
                 if process.returncode not in (0, 1) or not path.is_file():
@@ -310,7 +352,7 @@ def main() -> int:
                     cell["sha256"] = sha256(path)
             cells.append(cell)
 
-    eligible = [
+    new_eligible = [
         {"rows": cell["rows"], "columns": cell["columns"], "tokens": cell["tokens"]}
         for cell in cells if cell["eligible"]
     ]
@@ -321,7 +363,11 @@ def main() -> int:
     complete = len(cells) == len(SHAPES) * len(TOKENS) and all(
         cell["evidence_valid"] for cell in cells
     )
-    passed = complete and bool(eligible)
+    passed = complete
+    combined_eligible = [
+        {"rows": rows, "columns": columns, "tokens": tokens}
+        for rows, columns, tokens in PRIOR_ELIGIBLE
+    ] + new_eligible
     summary = {
         "schema": GATE_SCHEMA,
         "status": "passed" if passed else "rejected",
@@ -330,14 +376,17 @@ def main() -> int:
         "preflight": {"report": "preflight.json", "sha256": sha256(args.output_dir / "preflight.json")},
         "required_shapes": [list(shape) for shape in SHAPES],
         "required_tokens": list(TOKENS),
+        "width_applicability": {str(tokens): list(WIDTH_ROLES[tokens]) for tokens in TOKENS},
         "required_cell_count": len(SHAPES) * len(TOKENS),
         "complete_screen": complete,
-        "eligible_cells": eligible,
+        "retained_c1_eligible_cells": combined_eligible[:len(PRIOR_ELIGIBLE)],
+        "new_eligible_cells": new_eligible,
+        "eligible_cells": combined_eligible,
         "forbidden_cells": forbidden,
         "routing_authorized": False,
         "routing_requirement": (
-            "Only eligible exact cells may enter later flattened-width and whole-DFlash A/B; "
-            "all other cells remain on the incumbent"
+            "Only eligible exact cells may enter later whole-DFlash A/B; every forbidden or "
+            "unlisted shape/width remains on the incumbent"
         ),
         "cells": cells,
     }

@@ -360,9 +360,9 @@ struct A8Q4G64KernelResources {
 [[nodiscard]] hipError_t a8q4g64_linear_decode_dot8_t1(
     const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept;
 // Qualification-only small-T packed-W4 challenger for DFlash proposal and target verification.
-// One thread owns one output row and reuses each persistent Q4 word across T=4,5,6. This entry is
-// deliberately absent from candidate/product dispatch until exact-shape oracle, ISA/resource,
-// direct timing, and whole-DFlash gates admit it.
+// Following the C1 screen it accepts only the winning 34816x5120 matrix and the exact flattened
+// K4/W5 and K5/W6 widths through C4. It remains absent from candidate/product dispatch until
+// oracle, ISA/resource, direct timing, and whole-DFlash gates admit it.
 [[nodiscard]] hipError_t a8q4g64_linear_dflash_small_t_qualification(
     const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept;
 // Direct 64-token x 128-row ping/pong cooperative-LDS production route. The candidate boundary

@@ -223,13 +223,15 @@ bool valid_a8q4_linear_args(const A8Q4G64LinearArgs& args) noexcept {
 
 bool dflash_small_t_qualification_shape(std::uint32_t rows,
                                         std::uint32_t columns) noexcept {
-    return (columns == 5120U &&
-            (rows == 256U || rows == 1280U || rows == 4096U || rows == 6144U ||
-             rows == 7168U || rows == 12288U || rows == 34816U || rows == 131072U ||
-             rows == 248320U)) ||
-           (rows == 5120U &&
-            (columns == 4096U || columns == 6144U || columns == 17408U ||
-             columns == 25600U));
+    return rows == 34816U && columns == 5120U;
+}
+
+bool dflash_small_t_qualification_tokens(std::uint32_t tokens) noexcept {
+    switch (tokens) {
+    case 4U: case 5U: case 6U: case 8U: case 10U: case 12U:
+    case 15U: case 16U: case 18U: case 20U: case 24U: return true;
+    default: return false;
+    }
 }
 
 bool scalar_base_offsets_fit(std::uint32_t tokens, std::uint32_t rows,
@@ -1063,7 +1065,9 @@ void a8q4g64_linear_dflash_small_t_kernel(
     const std::uint8_t* weight_codes, const std::uint16_t* weight_scales,
     hip_bfloat16* output, std::uint32_t rows, std::uint32_t padded_columns) {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
-    static_assert(Tokens >= 4U && Tokens <= 6U);
+    static_assert(Tokens == 4U || Tokens == 5U || Tokens == 6U || Tokens == 8U ||
+                  Tokens == 10U || Tokens == 12U || Tokens == 15U || Tokens == 16U ||
+                  Tokens == 18U || Tokens == 20U || Tokens == 24U);
     const std::uint32_t row = blockIdx.x * blockDim.x + threadIdx.x;
     if (row >= rows) return;
     if (*activation_status != Q4G64ActivationOk) {
@@ -2617,7 +2621,8 @@ hipError_t a8q4g64_linear_decode_dot8_t1(
 
 hipError_t a8q4g64_linear_dflash_small_t_qualification(
     const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept {
-    if (!valid_a8q4_linear_args(args) || args.tokens < 4U || args.tokens > 6U ||
+    if (!valid_a8q4_linear_args(args) ||
+        !dflash_small_t_qualification_tokens(args.tokens) ||
         !dflash_small_t_qualification_shape(args.rows, args.columns)) {
         return hipErrorInvalidValue;
     }
@@ -2640,6 +2645,62 @@ hipError_t a8q4g64_linear_dflash_small_t_qualification(
         break;
     case 6U:
         hipLaunchKernelGGL((a8q4g64_linear_dflash_small_t_kernel<6U>), grid,
+                           dim3(kThreads), 0, stream, args.activation_low_codes,
+                           args.activation_high_codes, args.activation_scales,
+                           args.activation_status, args.weight_codes, args.weight_scales,
+                           args.output, args.rows, args.padded_columns);
+        break;
+    case 8U:
+        hipLaunchKernelGGL((a8q4g64_linear_dflash_small_t_kernel<8U>), grid,
+                           dim3(kThreads), 0, stream, args.activation_low_codes,
+                           args.activation_high_codes, args.activation_scales,
+                           args.activation_status, args.weight_codes, args.weight_scales,
+                           args.output, args.rows, args.padded_columns);
+        break;
+    case 10U:
+        hipLaunchKernelGGL((a8q4g64_linear_dflash_small_t_kernel<10U>), grid,
+                           dim3(kThreads), 0, stream, args.activation_low_codes,
+                           args.activation_high_codes, args.activation_scales,
+                           args.activation_status, args.weight_codes, args.weight_scales,
+                           args.output, args.rows, args.padded_columns);
+        break;
+    case 12U:
+        hipLaunchKernelGGL((a8q4g64_linear_dflash_small_t_kernel<12U>), grid,
+                           dim3(kThreads), 0, stream, args.activation_low_codes,
+                           args.activation_high_codes, args.activation_scales,
+                           args.activation_status, args.weight_codes, args.weight_scales,
+                           args.output, args.rows, args.padded_columns);
+        break;
+    case 15U:
+        hipLaunchKernelGGL((a8q4g64_linear_dflash_small_t_kernel<15U>), grid,
+                           dim3(kThreads), 0, stream, args.activation_low_codes,
+                           args.activation_high_codes, args.activation_scales,
+                           args.activation_status, args.weight_codes, args.weight_scales,
+                           args.output, args.rows, args.padded_columns);
+        break;
+    case 16U:
+        hipLaunchKernelGGL((a8q4g64_linear_dflash_small_t_kernel<16U>), grid,
+                           dim3(kThreads), 0, stream, args.activation_low_codes,
+                           args.activation_high_codes, args.activation_scales,
+                           args.activation_status, args.weight_codes, args.weight_scales,
+                           args.output, args.rows, args.padded_columns);
+        break;
+    case 18U:
+        hipLaunchKernelGGL((a8q4g64_linear_dflash_small_t_kernel<18U>), grid,
+                           dim3(kThreads), 0, stream, args.activation_low_codes,
+                           args.activation_high_codes, args.activation_scales,
+                           args.activation_status, args.weight_codes, args.weight_scales,
+                           args.output, args.rows, args.padded_columns);
+        break;
+    case 20U:
+        hipLaunchKernelGGL((a8q4g64_linear_dflash_small_t_kernel<20U>), grid,
+                           dim3(kThreads), 0, stream, args.activation_low_codes,
+                           args.activation_high_codes, args.activation_scales,
+                           args.activation_status, args.weight_codes, args.weight_scales,
+                           args.output, args.rows, args.padded_columns);
+        break;
+    case 24U:
+        hipLaunchKernelGGL((a8q4g64_linear_dflash_small_t_kernel<24U>), grid,
                            dim3(kThreads), 0, stream, args.activation_low_codes,
                            args.activation_high_codes, args.activation_scales,
                            args.activation_status, args.weight_codes, args.weight_scales,

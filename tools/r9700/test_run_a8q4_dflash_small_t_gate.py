@@ -4,7 +4,8 @@ import statistics
 import unittest
 
 from tools.r9700.run_a8q4_dflash_small_t_gate import (
-    CELL_SCHEMA, CRITERION, ORACLE, SHAPES, SCOPE, TOKENS, validate_cell,
+    CELL_SCHEMA, CRITERION, ORACLE, PRIOR_ELIGIBLE, SHAPES, SCOPE, TOKENS,
+    validate_cell, validate_prior_summary,
 )
 
 EXECUTABLE = {"path": "/qualified/binary", "sha256": "a" * 64}
@@ -67,7 +68,7 @@ def report(candidate: float = 0.8, incumbent: float = 1.0) -> dict:
             "integrated": False, "wavefront_width": 32,
             "power_profile_before_after": "auto",
         },
-        "shape": {"rows": 4096, "columns": 5120, "tokens": 4},
+        "shape": {"rows": 34816, "columns": 5120, "tokens": 8},
         "numeric": {
             "oracle": ORACLE, "maximum_bf16_steps_allowed": 2,
             "candidate_maximum_bf16_steps": 1, "incumbent_maximum_bf16_steps": 1,
@@ -93,12 +94,12 @@ def report(candidate: float = 0.8, incumbent: float = 1.0) -> dict:
 
 class GateTest(unittest.TestCase):
     def validate(self, value: dict) -> dict:
-        return validate_cell(value, 4096, 5120, 4, EXECUTABLE, SOURCES)
+        return validate_cell(value, 34816, 5120, 8, EXECUTABLE, SOURCES)
 
-    def test_inventory_is_exact_39_cells(self) -> None:
-        self.assertEqual(len(SHAPES), 13)
-        self.assertEqual(TOKENS, (4, 5, 6))
-        self.assertEqual(len(SHAPES) * len(TOKENS), 39)
+    def test_inventory_is_exact_unresolved_flattened_union(self) -> None:
+        self.assertEqual(SHAPES, ((34816, 5120),))
+        self.assertEqual(TOKENS, (8, 10, 12, 15, 16, 18, 20, 24))
+        self.assertEqual(len(SHAPES) * len(TOKENS), 8)
 
     def test_accepts_independently_recomputed_cell(self) -> None:
         self.assertTrue(self.validate(report())["eligible"])
@@ -152,6 +153,22 @@ class GateTest(unittest.TestCase):
                     value["sources"]["kernel"] = "0" * 64
                 with self.assertRaises(ValueError):
                     self.validate(value)
+
+    def test_prior_summary_requires_exact_retained_eligibility(self) -> None:
+        eligible = [
+            {"rows": rows, "columns": columns, "tokens": tokens}
+            for rows, columns, tokens in PRIOR_ELIGIBLE
+        ]
+        value = {
+            "schema": "ninfer.r9700.a8q4-dflash-small-t-gate.v2",
+            "status": "passed", "complete_screen": True, "routing_authorized": False,
+            "required_cell_count": 39, "eligible_cells": eligible,
+            "forbidden_cells": [{}] * 36, "cells": [{"evidence_valid": True}] * 39,
+        }
+        validate_prior_summary(value)
+        value["eligible_cells"] = eligible[:-1]
+        with self.assertRaisesRegex(ValueError, "eligibility"):
+            validate_prior_summary(value)
 
 
 if __name__ == "__main__":

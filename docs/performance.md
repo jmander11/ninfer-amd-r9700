@@ -511,10 +511,15 @@ selection result.
 
 The first kernel hypothesis after prefill closes is a packed-W4 small-T route. Current A8Q4 WMMA
 uses a 16-token tile, so C1 K4/K5 proposal/head calls and W5/W6 DFlash/target calls leave most token
-lanes inactive. Qualification starts at T4..6 on every reachable exact Text and DFlash matrix
-shape, then covers flattened K*C and W*C through C=4. It requires an independent represented-input
-oracle, gfx1201 ISA/resources, direct timing against current WMMA, and current-companion whole
-DFlash A/B evidence. The proposed `prepare_ragged_prefix` Wceil=12 compaction is not a live
+lanes inactive. The retained complete 39-cell C1 screen admits only N34816/K5120 at T4/T5/T6:
+balanced-median candidate/incumbent ratios are `0.839747/0.879463/0.788788`, with conservative
+paired-ratio uppers `0.855786/0.895273/0.801884`; all other 36 shape/width cells remain on WMMA.
+The summary SHA-256 is `27cba659...b122`, independent review passed, and routing remains false.
+Qualification is narrowed accordingly and next covers only this matrix at unresolved flattened
+widths T=`8,10,12,15,16,18,20,24` required by K4/W5 and K5/W6 through C4. It retains the independent
+represented-input oracle, exact gfx1201 ISA/resources, direct timing against current WMMA, and the
+current-companion whole-DFlash A/B requirement. The proposed `prepare_ragged_prefix` Wceil=12
+compaction is not a live
 optimization: startup planning already sizes persistent features, round tensors, append positions,
 and workspace to the one resolved W5 or W6, and the Op writes that width directly. Its unreachable
 Wceil/copy branch is removed rather than generalized. Physical profiling, not static traffic alone,

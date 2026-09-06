@@ -2704,8 +2704,20 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
           forward/reverse timing pairs. Each cell passes only when both launch-order medians win,
           the two-standard-error paired-ratio upper bound is below one, and order-ratio drift is at
           most 0.02. The fail-closed owner requires all 13 shapes at each C1 T4/T5/T6 (39 cells),
-          retaining rejects; flattened C2..4 widths remain a later gate. GPU numerical/timing and
-          whole-DFlash admission remain unchecked; the route is qualification-only.
+          retaining rejects. The retained complete screen at
+          `profiles/bench/r9700-dflash-small-t-c1-20260906/summary.json` has SHA-256
+          `27cba659...b122`: only N34816/K5120 is eligible, at T4/T5/T6 balanced-median ratios
+          `0.839747/0.879463/0.788788` and conservative paired-ratio uppers
+          `0.855786/0.895273/0.801884`; the other 36 cells remain forbidden on the incumbent.
+          Independent review passed and production routing remains false.
+        - [x] Narrow the qualification entry to that one winning matrix and implement its exact
+          unresolved flattened-width union T=`8,10,12,15,16,18,20,24` for K4/W5 and K5/W6 through
+          C4. The same weight-reuse mechanism compiles to 128..384 native dot8 sites with four
+          packed-W4 pair loads per K64 group, 51/60/54/64/67/74/84/99 VGPR respectively, zero
+          LDS/private/scratch, wave32, and occupancy 16 except T24 at 12. The receipt-bound runner
+          requires the exact retained C1 summary, validates all eight direct-oracle/timing cells,
+          and preserves an exact eligible/fallback set. Physical execution and whole-DFlash A/B
+          remain unchecked; this qualification surface does not change production routing.
       - Profile the current whole DFlash round first enough to separate proposal/head service from
         dense target verification; optimize the measured owner rather than assuming the proposal
         path dominates.

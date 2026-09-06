@@ -1,11 +1,15 @@
 import unittest
 
-from tools.r9700.check_a8q4_dflash_small_t_static import check
+from tools.r9700.check_a8q4_dflash_small_t_static import (
+    EXACT_OCCUPANCY, EXACT_VGPR, WIDTHS, check,
+)
 
 
-def fixture(*, t5_dot8: int = 80, t6_vgpr: int = 41) -> str:
+def fixture(*, t10_dot8: int = 160, t24_vgpr: int = 99) -> str:
     blocks = []
-    for tokens, dot8, vgpr in ((4, 64, 26), (5, t5_dot8, 29), (6, 96, t6_vgpr)):
+    for tokens in WIDTHS:
+        dot8 = t10_dot8 if tokens == 10 else 16 * tokens
+        vgpr = t24_vgpr if tokens == 24 else EXACT_VGPR[tokens]
         symbol = f"kernel_a8q4g64_linear_dflash_small_t_kernelILj{tokens}EE_tail"
         blocks.append(
             f"; -- Begin function {symbol}\n"
@@ -17,10 +21,11 @@ def fixture(*, t5_dot8: int = 80, t6_vgpr: int = 41) -> str:
               ".amdhsa_private_segment_fixed_size 0\n"
               f".amdhsa_next_free_vgpr {vgpr}\n"
               ".amdhsa_wavefront_size32 1\n.end_amdhsa_kernel\n"
-              "; ScratchSize: 0\n; Occupancy: 16\n"
+              f"; ScratchSize: 0\n; Occupancy: {EXACT_OCCUPANCY[tokens]}\n"
         )
     yaml = []
-    for tokens, vgpr in ((4, 26), (5, 29), (6, t6_vgpr)):
+    for tokens in WIDTHS:
+        vgpr = t24_vgpr if tokens == 24 else EXACT_VGPR[tokens]
         yaml.append(
             f".max_flat_workgroup_size: 256\n"
             f".name: kernel_a8q4g64_linear_dflash_small_t_kernelILj{tokens}EE_tail\n"
@@ -30,16 +35,20 @@ def fixture(*, t5_dot8: int = 80, t6_vgpr: int = 41) -> str:
 
 
 class StaticGateTest(unittest.TestCase):
-    def test_accepts_exact_three_widths(self) -> None:
-        self.assertEqual(check(fixture())[6]["vgpr"], 41)
+    def test_accepts_exact_flattened_width_union(self) -> None:
+        self.assertEqual(set(check(fixture())), set(WIDTHS))
 
     def test_rejects_missing_dot8(self) -> None:
-        with self.assertRaisesRegex(ValueError, "T5: expected 80"):
-            check(fixture(t5_dot8=79))
+        with self.assertRaisesRegex(ValueError, "T10: expected 160"):
+            check(fixture(t10_dot8=159))
 
     def test_rejects_resource_regression(self) -> None:
-        with self.assertRaisesRegex(ValueError, "T6: resource identity mismatch"):
-            check(fixture(t6_vgpr=65))
+        with self.assertRaisesRegex(ValueError, "T24: resource identity mismatch"):
+            check(fixture(t24_vgpr=100))
+
+    def test_rejects_extra_width(self) -> None:
+        with self.assertRaisesRegex(ValueError, "exact flattened width kernel set"):
+            check(fixture() + "; -- Begin function fake_a8q4g64_linear_dflash_small_t_kernelILj9EE\n")
 
 
 if __name__ == "__main__":

@@ -7,6 +7,11 @@ import argparse
 import re
 from pathlib import Path
 
+WIDTHS = (4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 24)
+EXACT_VGPR = {4: 26, 5: 29, 6: 41, 8: 51, 10: 60, 12: 54,
+              15: 64, 16: 67, 18: 74, 20: 84, 24: 99}
+EXACT_OCCUPANCY = {tokens: (12 if tokens == 24 else 16) for tokens in WIDTHS}
+
 
 def _symbol(assembly: str, tokens: int) -> tuple[str, str]:
     marker = f"a8q4g64_linear_dflash_small_t_kernelILj{tokens}EE"
@@ -31,9 +36,14 @@ def _field(block: str, name: str, tokens: int) -> int:
 
 
 def check(assembly: str) -> dict[int, dict[str, int]]:
+    symbols = re.findall(
+        r"; -- Begin function [^\n]*a8q4g64_linear_dflash_small_t_kernelILj(\d+)EE[^\n]*",
+        assembly,
+    )
+    if sorted(map(int, symbols)) != sorted(WIDTHS):
+        raise ValueError(f"expected exact flattened width kernel set {WIDTHS}, found {symbols}")
     result: dict[int, dict[str, int]] = {}
-    exact_vgpr = {4: 26, 5: 29, 6: 41}
-    for tokens in (4, 5, 6):
+    for tokens in WIDTHS:
         block, resource_comment = _symbol(assembly, tokens)
         dot8 = block.count("v_dot8_i32_iu4")
         expected_dot8 = 16 * tokens
@@ -67,10 +77,10 @@ def check(assembly: str) -> dict[int, dict[str, int]]:
         maximum_workgroup, yaml_vgpr, vgpr_spills, yaml_wave = map(int, yaml[0])
         occupancy = int(occupancies[0])
         scratch_bytes = int(scratch[0])
-        if (vgpr != exact_vgpr[tokens] or int(yaml_vgpr) != vgpr or lds != 0 or
+        if (vgpr != EXACT_VGPR[tokens] or int(yaml_vgpr) != vgpr or lds != 0 or
                 private != 0 or scratch_bytes != 0 or int(vgpr_spills) != 0 or
                 wave32 != 1 or int(yaml_wave) != 32 or maximum_workgroup != 256 or
-                occupancy != 16):
+                occupancy != EXACT_OCCUPANCY[tokens]):
             raise ValueError(
                 f"T{tokens}: resource identity mismatch: vgpr={vgpr}/{yaml_vgpr} "
                 f"lds={lds} private={private} scratch={scratch_bytes} spills={vgpr_spills} "
