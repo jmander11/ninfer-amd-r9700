@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import tempfile
 import unittest
+from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
 
@@ -67,6 +68,25 @@ class ReductionTests(unittest.TestCase):
             result = analyzer.parse_stream_probe(path)
         self.assertEqual(result["best_observed_bus_gbps"], 610.0)
         self.assertEqual(len(result["methods"]), 6)
+
+    def test_percent_rejects_negative_numerator(self) -> None:
+        with self.assertRaisesRegex(ValueError, "invalid operands"):
+            analyzer.percent(Decimal(-1), Decimal(10), "negative hit count")
+
+    def test_trace_inventory_requires_and_scales_exact_one_round(self) -> None:
+        row = {
+            "symbol": "kernel", "grid_size": 256, "workgroup_size": 256,
+            "static_lds_bytes": 4, "scratch_bytes": 0, "vgpr": 16,
+            "dispatch_count": analyzer.ONE_ROUND_DISPATCHES,
+        }
+        scaled = analyzer.scaled_trace_inventory([row])
+        self.assertEqual(scaled[0]["allocated_lds_bytes"], 256)
+        self.assertEqual(
+            scaled[0]["dispatch_count"],
+            analyzer.ONE_ROUND_DISPATCHES * analyzer.ROUNDS,
+        )
+        with self.assertRaisesRegex(ValueError, "exact 1806-dispatch"):
+            analyzer.scaled_trace_inventory([{**row, "dispatch_count": 1}])
 
 
 if __name__ == "__main__":

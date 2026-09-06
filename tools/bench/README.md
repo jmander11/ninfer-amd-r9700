@@ -628,7 +628,7 @@ bash profiles/bench/selected-dflash-prepare-20260905/prepare.sh
 
 ## Root schedules this future command after reviewing the generated plan. The staged runner uses
 ## C1 for the shortlist, C1..4 for every derived frontier capacity row, and the full Pareto matrix
-## only for capacity-eligible rows before publishing one schema-v2 selection without overwrite.
+## only for capacity-eligible rows before publishing one schema-v3 selection without overwrite.
 bash profiles/bench/selected-dflash-20260905/commands.sh
 
 # Optional diagnostic only: required-32K feasibility is not a Pareto capacity objective.
@@ -1178,7 +1178,17 @@ absent until schema-v7 selects its authority-bound hybrid base; it may not reuse
 companion and requires a fresh conversion plus DFlash K/W quality, C=1..4 capacity, and whole
 campaign. Dry runs remain path-only so future commands can be inspected before the artifact exists.
 For each fixed C=1..4 it retains matched 8K/32K DFlash prefill and graph-decode throughput,
-per-position acceptance, and an ordinary greedy decode control over identical prompts. Schema-v20
+per-position acceptance, and an ordinary greedy decode control over identical prompts. It also
+retains fresh-prompt DFlash whole inference and a separate exact spec-none ordinary `--whole-pg`
+control. Both controls use `--draft-tokens 0`, with no `--spec` or draft-head flag. Whole-route
+parity retains the complete generation including its first output token; isolated decode parity
+retains all 257 post-seed outputs and inherits seed equality from the deterministic whole route.
+The two DFlash Pareto `-pg` cases alone carry `--isolate-prompt-decode`, so C1 follows the same
+one-token seed/discard protocol as C2..4; ordinary benchmark `-pg`, shortlist, and whole semantics
+are unchanged. A four-role hybrid campaign additionally queries and binds the compile-matched planner inventory for every
+actual resolved DFlash verification width: MTP-width coverage is not accepted as DFlash workspace
+evidence. The planner authority additionally binds the same build root, `CMakeCache.txt`, and
+`compile_commands.json` identities as the benchmark executable. Schema-v20
 JSON can opt into per-repetition/per-lane token IDs; the matrix rejects the campaign unless every
 ordinary and DFlash greedy output is exactly identical. Two isolated eager C=1 probes synchronize
 proposal logits and selector outcomes into raw counters for top-16/64/256, tree/head membership,
@@ -1195,13 +1205,19 @@ explicitly ineligible for performance comparison.
 `assemble_dflash_selection.py` reopens the schema-v20 reports and schema-v14 manifests. Capacity
 inputs must cover the complete shortlist frontier, including exact retained failure provenance for
 excluded K/W profiles; `dflash-pareto` inputs must cover exactly the profiles with complete C=1..4
-effective maxima. Every eligible profile must retain all 18 phase/whole/control/diagnostic points,
+effective maxima. Every eligible profile must retain all 22 phase/whole/control/diagnostic points,
 exact C=1..4 ordinary-output parity, exact repeated proposal and licensed-target traces, and the
-bound generated-quality gate. The output preserves the objective frontier and chooses the static
-K/W by maximizing the worst normalized whole-inference throughput over all 8K/32K and C=1..4
-cells, then worst normalized capacity over C=1..4, then worst normalized acceptance length over
-the matched decode cells. A complete numerical tie selects the first numeric `(K, W)` tuple. No
-workload weights are introduced: exact quality is mandatory, and acceptance breaks ties only after
+bound generated-quality gate. Capacity admission and generated-quality/acceptance remain separate
+from speed admission. For every capacity-eligible K/W, the assembler matches its DFlash and exact
+spec-none ordinary whole/decode rows by prompt, generated length, and C. It requires at least a
+`1.02x` raw-mean speedup and a strictly positive two-standard-deviation conservative speedup in
+every 8K/32K C=1..4 whole and decode cell; equality, noise-overlap, or one materially regressed cell
+rejects that K/W from promotion. The schema-v3 output preserves the
+speed-eligible objective frontier and chooses the static K/W by maximizing the worst normalized
+whole-inference throughput over all 8K/32K and C=1..4 cells, then worst normalized capacity over
+C=1..4, then worst normalized acceptance length over the matched decode cells. A complete numerical
+tie selects the first numeric `(K, W)` tuple. No workload weights are introduced: exact quality is
+mandatory, positive matched ordinary speed is mandatory, and acceptance breaks ties only after
 end-to-end throughput and supported capacity.
 
 The `concurrency` preset is a phase decomposition, not a whole-request latency measurement. Its

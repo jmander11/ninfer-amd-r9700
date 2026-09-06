@@ -31,6 +31,7 @@ SEMANTIC_AUTHORITIES = (
     REPO / "tools/ppl/run.py",
     REPO / "tools/ppl/assemble_pareto.py",
     REPO / "tools/ppl/pareto.py",
+    REPO / "tools/ppl/validate_fp8_hybrid_execution_gate.py",
 )
 DFLASH_SOURCE = Path("/ssdpool2nvme/local_llm/models/qwen3.8-27b-dflash2")
 CONVERSION_PYTHON = Path("/ssdpool2nvme/local_llm/.venv-ninfer-r9700/bin/python")
@@ -39,6 +40,11 @@ RUNTIME_AUTHORITIES = (
     REPO / "src/targets/qwen3_8_27b/impl/config.h",
     REPO / "src/targets/qwen3/impl/runtime/dflash_context_impl.h",
     REPO / "src/targets/qwen3/impl/runtime/layouts_impl.h",
+)
+BENCH_AUTHORITIES = (
+    REPO / "bench/targets/qwen3_8_27b/ninfer_bench.cpp",
+    REPO / "bench/targets/qwen3_8_27b/ninfer_bench_support.cpp",
+    REPO / "bench/targets/qwen3_8_27b/ninfer_bench_support.h",
 )
 COMPANIONS = {
     "r9700-q4g64-n16k16-eval": ("all-q4", "r9700-q4g64-n16k16-dflash2-q4-eval",
@@ -341,7 +347,7 @@ def prepare(selection: Path, out: Path) -> dict:
                               "separate_runtime_state": "private fixed BF16",
                               "runtime_weight_repack": False},
         "maximum_concurrency": 4,
-        "stages": ["companion", "shortlist", "frontier-capacity", "eligible-pareto", "schema-v2-selection"],
+        "stages": ["companion", "shortlist", "frontier-capacity", "eligible-pareto", "schema-v3-selection"],
     }
     plan_path = out / "plan.json"
     commands: list[list[str]] = []
@@ -377,6 +383,7 @@ def prepare(selection: Path, out: Path) -> dict:
         source_tensor, source_config, source_readme, CONVERSION_PYTHON,
         CONVERSION_PYTHON.parent.parent / "pyvenv.cfg", *SEMANTIC_AUTHORITIES,
         *RUNTIME_AUTHORITIES,
+        *BENCH_AUTHORITIES,
     ])
     return plan
 
@@ -425,7 +432,7 @@ def _load_plan(path: Path) -> tuple[dict, Path]:
         or plan.get("maximum_concurrency") != 4
         or plan.get("stages") != [
             "companion", "shortlist", "frontier-capacity", "eligible-pareto",
-            "schema-v2-selection",
+            "schema-v3-selection",
         ]
         or Path(plan["dflash_source"]["path"]).resolve() != DFLASH_SOURCE.resolve()
         or sha(source_tensor) != plan["dflash_source"]["model_sha256"]

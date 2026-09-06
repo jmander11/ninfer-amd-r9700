@@ -4,7 +4,7 @@ This is a decision-gated cutover sequence, not a second live selection ledger. D
 product identity, converter identity, admitted profile, default, or artifact filename until gate 0
 below is complete. The retained schema-v7 base Pareto record selects only the base artifact/cache/
 execution tuple; it carries no downstream-readiness or MTP-head status and is not by itself cutover
-authority. The eventual schema-v2 DFlash selection record is likewise a companion decision, not
+authority. The eventual schema-v3 DFlash selection record is likewise a companion decision, not
 permission to promote the base early. DFlash2 is the preferred and required speculative production
 path. MTP is retained as an already-working backend and remains in regression/parity coverage, but
 no new MTP feature, head-precision experiment, trace, or performance optimization is a cutover
@@ -86,7 +86,7 @@ so it must not be encoded in either `weights_id`.
      acceptance, and selected Q4-wave dispatch checks remain regression evidence only. No selected
      recipe carries a standalone MTP shortlist-head, alternate-precision, or mixed MTP-bulk
      optimization proof, and none of those retired proofs is a finalization or cutover gate; and
-   - `profiles/bench/selected-dflash-20260905/selection.json`, a passed schema-v2
+   - `profiles/bench/selected-dflash-20260905/selection.json`, a passed schema-v3
      `ninfer_r9700_dflash_selection` record whose `selected_base` is the same schema-v7 authority
      and whose companion conversion receipt and selected K/W are exact.
 
@@ -177,7 +177,7 @@ so it must not be encoded in either `weights_id`.
    Steps 2--9 are staging operations after that receipt, not incremental edits to the admitted
    product tree. Step 10 is the only integration boundary.
 
-1. Freeze selection provenance. Retain the schema-v7 three-recipe base Pareto decision and schema-v2 DFlash
+1. Freeze selection provenance. Retain the schema-v7 three-recipe base Pareto decision and schema-v3 DFlash
    selection decision, exact quality/capacity/whole matrix manifests (the whole rows retain the
    separately timed prefill/decode phases), all raw report hashes, the complete non-dominated
    frontier, normalized objectives, all three per-recipe winners, the exact hybrid conversion
@@ -335,7 +335,7 @@ set `SELECTED_GROUP` and
 `SELECTED_PREFILL_CHUNK` from the schema-v7 authority, replace
 the `/absolute/path/to` prefixes while preserving the exact final filenames and weights identities,
 and replace `FINAL_DFLASH_K` and `FINAL_DFLASH_W` in the DFlash commands with the selected integer
-literals from the retained schema-v2 DFlash selection decision. K/W cannot be inferred from the
+literals from the retained schema-v3 DFlash selection decision. K/W cannot be inferred from the
 companion artifact and must not be selected from a filename, timestamp, or default.
 
 ```bash

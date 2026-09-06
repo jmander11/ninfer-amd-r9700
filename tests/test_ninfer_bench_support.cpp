@@ -137,6 +137,7 @@ int test_cli_contract() {
         "--no-device-graph",
         "--profile-measured",
         "--retain-token-ids",
+        "--isolate-prompt-decode",
         "--output",
         "json",
         "--output-file",
@@ -162,6 +163,7 @@ int test_cli_contract() {
     failures += expect(parsed.device == 1 && !parsed.use_device_graph, "device and graph settings");
     failures += expect(parsed.profile_measured, "profile-measured flag");
     failures += expect(parsed.retain_token_ids, "retained token IDs");
+    failures += expect(parsed.isolate_prompt_decode, "isolated prompt decode");
     failures +=
         expect(parsed.output == qb::OutputFormat::Json && parsed.output_file == "report.json",
                "output settings");
@@ -224,6 +226,12 @@ int test_cli_contract() {
                 {"ninfer_bench", "--weights", "model.ninfer", "--retain-token-ids"});
         },
         "retained token IDs require JSON");
+    failures += expect_throws<std::invalid_argument>(
+        [] {
+            (void)parse_for_test({"ninfer_bench", "--weights", "model.ninfer",
+                                  "--isolate-prompt-decode"});
+        },
+        "isolated prompt decode requires prompt-gen");
     return failures;
 }
 
@@ -368,6 +376,14 @@ int test_measurement_contract() {
     const std::vector<qb::BenchTest> matrix = {pp, tg, combined};
     failures +=
         expect_u32(qb::resolve_max_context(matrix, std::nullopt, mtp5, true), 2186, "auto context");
+    const std::vector<qb::BenchTest> ordinary_isolated = {
+        {qb::TestKind::PrefillDecode, 8192, 256, "pp8192+tg256"}};
+    failures += expect_u32(
+        qb::resolve_max_context(ordinary_isolated, std::nullopt, none, true), 8448,
+        "ordinary prompt-decode context");
+    failures += expect_u32(
+        qb::resolve_max_context(ordinary_isolated, std::nullopt, none, true, true), 8449,
+        "isolated prompt-decode seed context");
     failures +=
         expect_u32(qb::resolve_max_context(matrix, std::optional<std::uint32_t>(4096), mtp5, true),
                    4096, "explicit context");

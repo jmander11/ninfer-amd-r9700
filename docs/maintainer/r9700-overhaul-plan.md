@@ -1674,11 +1674,41 @@ Replace functional routes with measured gfx1201 families:
   private/scratch/spills, eight native IU4 instructions, and ten scalar-base/single-U32-voffset
   loads, so both candidates failed the explicit no-VGPR-regression gate and were removed. The
   restored canonical source SHA-256 is
-  `7d204bb10feeeb5988c26960ce992a6f487fd53afc162e89508ee3524b90b576`. The next bounded
-  prefill experiment is complete dual-FMAC pairing under the live 5 ms composition gate. After its
-  decision, test the explicitly scheduled two-slab load FIFO compounded only with admitted
-  mechanisms; it must provide at least `35.9 ms` whole-P2048 saving, with fresh attribution first
-  if needed to sustain that bound. Immediate optimization first closes the ordinary
+  `7d204bb10feeeb5988c26960ce992a6f487fd53afc162e89508ee3524b90b576`. Complete dual-FMAC
+  pairing then changed six dual plus four single FMACs to eight dual FMACs and zero singles while
+  preserving 88 VGPR, 17,152-byte LDS, occupancy 16, zero scratch/spills, eight IU4 sites, and ten
+  protected scalar-base/U32 loads. Its first two operator reports were inconclusive startup-
+  transient evidence: `profiles/bench/r9700-q4-prefill-dual-fmac-p2048-ab-20260906.json`
+  (SHA-256 `7c440f0b318c0886ad5e47a7629e91e992234637a96125b026943ad00edf9145`) and
+  `profiles/bench/r9700-q4-prefill-dual-fmac-p2048-ab-v2-20260906.json` (SHA-256
+  `a60b1a7ae2795b6be0c75ed9da657c88e782092d84417a3dcd71d5884ead64d6`). The corrected v3
+  operator report `profiles/bench/r9700-q4-prefill-dual-fmac-p2048-ab-v3-20260906.json` passed all
+  three cells and the call-weighted gate with a `12.6098960755 ms` robust saving lower (SHA-256
+  `42c3847f7b52a8d9c436dcc957175439191decc057f51d2234c8d729676f6e1d`). The terminal whole
+  report `profiles/bench/r9700-q4-prefill-dual-fmac-whole-p2048-c1-full-v2-20260906/report.json`
+  (SHA-256 `88da09557579e3d2e729ef1d7858c69fca5a29718c246ad9dc2403749cedfce1`) rejected it:
+  control/candidate medians were `1072.2601595`/`1059.691983 ms` and ratio upper
+  `0.9924224143` passed, but the `8.1438331535 ms` robust saving lower missed the required `10 ms`;
+  exact parity and identities passed. The private selector, implementation, and terminal tooling
+  were removed. The final explicitly scheduled two-entry register-load FIFO retained two
+  8,576-byte LDS banks and explicit G+1/G+2 payload slots. Loaded-object inspection retained
+  17,152-byte LDS, a 512-thread maximum workgroup, zero private storage/spills, eight IU4 WMMAs,
+  and the canonical six dual plus four single FMAC sites, but emitted `97` VGPR: nine above the
+  admitted canonical `88` baseline and one above the absolute `96` ceiling. It was rejected before
+  remaining pipeline/dynamic-traffic checks or GPU execution. The immutable report is
+  `profiles/bench/r9700-q4-prefill-register-fifo-static-rejection-20260906.json` (SHA-256
+  `15b9369772015ae1cb079d17272f3c027d29fb2a7148236968e2e014bf4cd133`), with extracted inner gfx1201
+  ELF SHA-256 `24da41789f510c0f848b62ca2020b890ce0a33be96cea05ffbaeea12ea73aef7`; selector and candidate
+  source were removed. Canonical P2048 remains `1075.438603 ms` / `1904.339303 tok/s`.
+  The explicit bounded candidate list is exhausted. A targeted audit of the canonical loaded ISA
+  and retained trace found no new mechanism outside the rejected topology/representation families
+  with a credible `>=35.9 ms` whole-P2048 saving. That is a `10.08%` reduction of the retained
+  `356.276973 ms` Q4 service. The canonical kernel already issues successor loads before eight IU4
+  WMMAs at occupancy 16; activation/scale-side cleanup has an independent optimistic `19.045 ms`
+  ceiling, arithmetic-encoding cleanup is independently bounded below `14.3 ms`, and the concrete
+  second-payload overlap schedule needs the nine additional VGPRs rejected above. These are
+  overlapping same-kernel bounds and cannot be composed. This exhaustion does not establish a
+  practical ceiling, which remains open. Immediate optimization first closes the ordinary
   non-speculative-decode roof, then returns to the P2048 floor/practical-ceiling and dependent
   chunk/base selection required before DFlash2;
   MTP3 remains diagnostic and is not an optimization or ranking route.

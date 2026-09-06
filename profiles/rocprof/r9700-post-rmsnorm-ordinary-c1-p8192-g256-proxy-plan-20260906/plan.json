@@ -1,8 +1,8 @@
 {
   "analyzer": {
-    "file_size_bytes": 19561,
+    "file_size_bytes": 26719,
     "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/bench/analyze_post_rmsnorm_decode_proxy.py",
-    "sha256": "77c503329ac140dacce37450365476feaf8b24eb72cdb7b34cbbcfb86d3600e3"
+    "sha256": "611a1f9e373f259b71cf274fe80fcb9bdae650c9b1a1602b9cf57cdd51f0aac9"
   },
   "artifact": {
     "file_size_bytes": 15172833280,
@@ -125,9 +125,9 @@
     "required_during_capture": "profile_standard"
   },
   "producer": {
-    "file_size_bytes": 15637,
+    "file_size_bytes": 15859,
     "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/bench/prepare_post_rmsnorm_decode_proxy.py",
-    "sha256": "3dc54c796ea3015470e1dd953f5e0fcd305bd4d0a0f736b31c9e68989e7b02fb"
+    "sha256": "09d5d6acf1041470cf8256e6d19225af26b944923572278c195fc3cd22d0adaa"
   },
   "profile_timing_admissible": false,
   "profiler": {

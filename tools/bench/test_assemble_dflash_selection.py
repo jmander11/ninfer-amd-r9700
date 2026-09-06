@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from tools.bench.assemble_dflash_selection import (
     _auxiliary,
+    _matched_ordinary_speed_gate,
     _matrix,
     _records,
     _same_campaign,
@@ -69,7 +70,7 @@ class DFlashSelectionTest(unittest.TestCase):
         "path": "/dflash.ninfer", "file_size_bytes": 200, "sha256": "d" * 64,
         "model_id": "qwen3.8-27b", "weights_id": "r9700-q4g64-n16k16-dflash2-q4-eval",
     }
-    bench = {"path": "/ninfer_bench", "file_size_bytes": 300, "sha256": "e" * 64}
+    bench = {"path": "/build/bench/ninfer_bench", "file_size_bytes": 300, "sha256": "e" * 64}
     auto_power = {
         "required": "auto",
         "sysfs_path": str(R9700_POWER_PROFILE),
@@ -221,6 +222,16 @@ class DFlashSelectionTest(unittest.TestCase):
                          "case": "context_p8192_p32768_g256_dflash_graph",
                          "concurrency": concurrency, "report": str(pareto / f"decode-c{concurrency}"),
                          "command": ["decode", str(k), "--prefill-chunk", "4096"]},
+                        {"suite": "dflash_pareto_control",
+                         "case": "context_p8192_p32768_g256_ordinary_graph",
+                         "concurrency": concurrency,
+                         "report": str(pareto / f"control-c{concurrency}"),
+                         "command": ["control", "0", "--prefill-chunk", "4096"]},
+                        {"suite": "dflash_pareto_whole_control",
+                         "case": "whole_p8192_p32768_g256_ordinary_graph",
+                         "concurrency": concurrency,
+                         "report": str(pareto / f"whole-control-c{concurrency}"),
+                         "command": ["whole-control", "0", "--prefill-chunk", "4096"]},
                     ))
                 self.write(pareto / "manifest.json", {
                     "artifact_type": "ninfer_bench_matrix_run", "schema_version": MATRIX_SCHEMA_VERSION,
@@ -276,12 +287,32 @@ class DFlashSelectionTest(unittest.TestCase):
                 concurrency = int(path.name.split("c")[-1])
                 speed = 100.0 if k == 1 else 80.0
                 acceptance = 1.0 if k == 1 else 2.0
+                if "whole-control" in path.name:
+                    return [{"suite": "dflash_pareto_whole_control",
+                             "label": f"whole-{tokens}", "n_prompt": tokens, "n_gen": 256,
+                             "requested_output_tokens": 257, "concurrency": concurrency,
+                             "whole_output_tok_s_mean": 50.0,
+                             "whole_output_tok_s_stddev": 0.1}
+                            for tokens in (8192, 32768)]
                 if "whole" in path.name:
                     return [{"suite": "dflash_pareto_whole_inference",
-                             "label": f"whole-{tokens}", "concurrency": concurrency,
-                             "whole_output_tok_s_mean": speed} for tokens in (8192, 32768)]
+                             "label": f"whole-{tokens}", "n_prompt": tokens, "n_gen": 256,
+                             "requested_output_tokens": 257, "concurrency": concurrency,
+                             "whole_output_tok_s_mean": speed,
+                             "whole_output_tok_s_stddev": 0.1}
+                            for tokens in (8192, 32768)]
+                if "control" in path.name:
+                    return [{"suite": "dflash_pareto_control", "label": f"control-{tokens}",
+                             "n_prompt": tokens, "n_gen": 256,
+                             "requested_output_tokens": 257,
+                             "concurrency": concurrency, "decode_output_tok_s_mean": 50.0,
+                             "decode_output_tok_s_stddev": 0.1}
+                            for tokens in (8192, 32768)]
                 return [{"suite": "dflash_pareto_decode", "label": f"decode-{tokens}",
-                         "concurrency": concurrency, "spec_acceptance_length": acceptance}
+                         "n_prompt": tokens, "n_gen": 256,
+                         "requested_output_tokens": 257,
+                         "concurrency": concurrency, "spec_acceptance_length": acceptance,
+                         "decode_output_tok_s_mean": speed, "decode_output_tok_s_stddev": 0.1}
                         for tokens in (8192, 32768)]
 
             with patch("tools.bench.assemble_dflash_selection._records", side_effect=records), patch(
@@ -302,7 +333,10 @@ class DFlashSelectionTest(unittest.TestCase):
             ):
                 result = assemble(base, conversion, shortlist, capacities, paretos)
             self.assertEqual(result["eligible_frontier"], ["k1-w2", "k2-w3"])
+            self.assertEqual(result["capacity_eligible_profiles"], ["k1-w2", "k2-w3"])
+            self.assertEqual(result["performance_eligible_profiles"], ["k1-w2", "k2-w3"])
             self.assertEqual(result["status"], "passed")
+            self.assertEqual(result["schema_version"], 3)
             self.assertEqual(result["winner"], "k1-w2")
             self.assertEqual(result["selected_prefill_chunk"], 4096)
             self.assertEqual(result["selected_base"]["prefill_chunk"], 4096)
@@ -310,6 +344,46 @@ class DFlashSelectionTest(unittest.TestCase):
             excluded = next(row for row in result["candidates"] if row["draft_tokens"] == 3)
             self.assertFalse(excluded["capacity_eligible"])
             self.assertEqual(excluded["capacity_failures"], [{"failure": "C4"}])
+            admitted = next(row for row in result["candidates"] if row["draft_tokens"] == 1)
+            self.assertTrue(admitted["performance_eligible"])
+            self.assertTrue(admitted["matched_ordinary_speed_gate"]["pass"])
+
+    def test_matched_ordinary_speed_gate_is_strict_and_fail_closed(self) -> None:
+        rows = []
+        for concurrency in range(1, 5):
+            for prompt in (8192, 32768):
+                common = {
+                    "n_prompt": prompt, "n_gen": 256,
+                    "requested_output_tokens": 257, "concurrency": concurrency,
+                }
+                rows.extend((
+                    {**common, "suite": "dflash_pareto_whole_inference",
+                     "whole_output_tok_s_mean": 110.0, "whole_output_tok_s_stddev": 1.0},
+                    {**common, "suite": "dflash_pareto_whole_control",
+                     "whole_output_tok_s_mean": 100.0, "whole_output_tok_s_stddev": 1.0},
+                    {**common, "suite": "dflash_pareto_decode",
+                     "decode_output_tok_s_mean": 110.0, "decode_output_tok_s_stddev": 1.0},
+                    {**common, "suite": "dflash_pareto_control",
+                     "decode_output_tok_s_mean": 100.0, "decode_output_tok_s_stddev": 1.0},
+                ))
+        gate = _matched_ordinary_speed_gate(rows)
+        self.assertTrue(gate["pass"])
+        self.assertGreater(gate["minimum_conservative_speedup"]["whole"], 1.0)
+        self.assertGreater(gate["minimum_conservative_speedup"]["decode"], 1.0)
+
+        changed = json.loads(json.dumps(rows))
+        changed[2]["decode_output_tok_s_mean"] = 101.0
+        gate = _matched_ordinary_speed_gate(changed)
+        self.assertFalse(gate["pass"])
+        self.assertLess(gate["minimum_raw_mean_speedup"]["decode"], 1.02)
+
+        missing = rows[:-1]
+        with self.assertRaisesRegex(ValueError, "lacks exact"):
+            _matched_ordinary_speed_gate(missing)
+        malformed = json.loads(json.dumps(rows))
+        malformed[0]["whole_output_tok_s_mean"] = float("inf")
+        with self.assertRaisesRegex(ValueError, "malformed"):
+            _matched_ordinary_speed_gate(malformed)
 
     def test_matrix_requires_selected_base_prefill_chunk(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -432,6 +506,11 @@ class DFlashSelectionTest(unittest.TestCase):
     def test_campaign_rejects_rebound_hybrid_planner(self) -> None:
         authority = {
             "tool": {"path": "/planner", "file_size_bytes": 10, "sha256": "a" * 64},
+            "build": {"root": "/build",
+                      "cmake_cache": {"path": "/build/CMakeCache.txt", "file_size_bytes": 10,
+                                      "sha256": "c" * 64},
+                      "compile_commands": {"path": "/build/compile_commands.json",
+                                           "file_size_bytes": 10, "sha256": "d" * 64}},
             "maximum_concurrency": 4, "prefill_chunks": [4096],
             "inventories_by_prefill_chunk": {
                 "4096": {
@@ -454,6 +533,50 @@ class DFlashSelectionTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "planner differs"):
             _same_campaign(
                 manifest, self.artifact, self.bench, 16, "dense", 4096, authority
+            )
+
+    def test_hybrid_dflash_campaign_binds_its_real_verify_width(self) -> None:
+        authority = {
+            "tool": {"path": "/planner", "file_size_bytes": 10, "sha256": "a" * 64},
+            "build": {"root": "/build",
+                      "cmake_cache": {"path": "/build/CMakeCache.txt", "file_size_bytes": 10,
+                                      "sha256": "c" * 64},
+                      "compile_commands": {"path": "/build/compile_commands.json",
+                                           "file_size_bytes": 10, "sha256": "d" * 64}},
+            "maximum_concurrency": 4, "prefill_chunks": [4096],
+            "inventories_by_prefill_chunk": {
+                "4096": {
+                    "ordinary": [1, 2, 3, 4, 4096],
+                    "mtp3": [1, 2, 3, 4, 8, 12, 16, 4096],
+                }
+            },
+        }
+        extended = {
+            **authority,
+            "inventories_by_prefill_chunk": {
+                "4096": {
+                    **authority["inventories_by_prefill_chunk"]["4096"],
+                    "dflash-w12": [1, 2, 3, 4, 12, 24, 36, 48, 4096],
+                }
+            },
+        }
+        manifest = {
+            "preset": "dflash-capacity",
+            "artifact": self.artifact, "bench": self.bench,
+            "expected_kv_value_group": 16,
+            "expected_q4_activation_bits": 8, "expected_w8_activation_bits": 8,
+            "expected_fp8_qk_wmma_enabled": True,
+            "expected_xattention_profile": "dense",
+            "required_candidate_identity": "fp8-hybrid-selection-authority",
+            "hybrid_shared_workspace_authority": extended,
+        }
+        _same_campaign(
+            manifest, self.artifact, self.bench, 16, "dense", 4096, authority, [12]
+        )
+        manifest["hybrid_shared_workspace_authority"] = authority
+        with self.assertRaisesRegex(ValueError, "width authority differs"):
+            _same_campaign(
+                manifest, self.artifact, self.bench, 16, "dense", 4096, authority, [12]
             )
 
     def test_nonhybrid_campaign_rejects_hybrid_authority(self) -> None:
@@ -497,11 +620,12 @@ class DFlashSelectionTest(unittest.TestCase):
             parity_path = root / "greedy-token-parity.json"
             determinism_path = root / "dflash-proposal-determinism.json"
             self.write(parity_path, {
-                "artifact_type": "ninfer_dflash_ordinary_greedy_parity", "schema_version": 1,
+                "artifact_type": "ninfer_dflash_ordinary_greedy_parity", "schema_version": 2,
                 "artifact": self.artifact, "benchmark_executable": self.bench, "pass": True,
-                "comparisons": [{"concurrency": c, "draft_tokens": 7,
-                                 "dflash_verify_width": 12, "exact": True}
-                                for c in range(1, 5)],
+                "comparisons": [{"phase": phase, "concurrency": c, "draft_tokens": 7,
+                                 "dflash_verify_width": 12, "includes_seed": phase == "whole",
+                                 "exact": True}
+                                for phase in ("decode", "whole") for c in range(1, 5)],
             })
             self.write(determinism_path, {
                 "artifact_type": "ninfer_dflash_proposal_determinism", "schema_version": 1,

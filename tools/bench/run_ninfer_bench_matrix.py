@@ -177,6 +177,10 @@ def mtp_args(k: int) -> tuple[str, ...]:
     return (*args, "--lm-head-draft") if k > 0 else args
 
 
+def ordinary_args() -> tuple[str, ...]:
+    return ("--draft-tokens", "0")
+
+
 def dflash_args(k: int, verify_width: int) -> tuple[str, ...]:
     args = ("--spec", "dflash", "--draft-tokens", str(k), "--lm-head-draft")
     if verify_width:
@@ -748,21 +752,31 @@ def validate_post_chunk_capacity_contract(args: argparse.Namespace) -> None:
 
 def validate_hybrid_shared_workspace_authority(
     authority: object, prefill_chunks: Sequence[int],
+    dflash_widths: Sequence[int] = (),
 ) -> dict[str, Any]:
     """Validate exact host-planner shared-workspace widths for every measured chunk."""
 
     chunks = sorted(set(prefill_chunks))
+    widths = sorted(set(dflash_widths))
+    if any(type(width) is not int or width < 2 or width > 16 for width in widths):
+        raise ValueError("hybrid DFlash workspace width is outside [2,16]")
     expected_by_chunk = {
         str(chunk): {
             "ordinary": [1, 2, 3, 4, chunk],
             "mtp3": [1, 2, 3, 4, 8, 12, 16, chunk],
+            **{
+                f"dflash-w{width}": sorted(set((1, 2, 3, 4, width, 2 * width,
+                                                  3 * width, 4 * width, chunk)))
+                for width in widths
+            },
         }
         for chunk in chunks
     }
     if (
         not isinstance(authority, dict)
         or set(authority) != {
-            "tool", "maximum_concurrency", "prefill_chunks", "inventories_by_prefill_chunk",
+            "tool", "build", "maximum_concurrency", "prefill_chunks",
+            "inventories_by_prefill_chunk",
         }
         or authority.get("maximum_concurrency") != 4
         or authority.get("prefill_chunks") != chunks
@@ -774,38 +788,85 @@ def validate_hybrid_shared_workspace_authority(
         or not isinstance(authority["tool"].get("sha256"), str)
         or len(authority["tool"]["sha256"]) != 64
         or any(character not in "0123456789abcdef" for character in authority["tool"]["sha256"])
+        or not isinstance(authority.get("build"), dict)
+        or set(authority["build"]) != {"root", "cmake_cache", "compile_commands"}
+        or not isinstance(authority["build"].get("root"), str)
+        or any(
+            not isinstance(authority["build"].get(name), dict)
+            or not isinstance(authority["build"][name].get("path"), str)
+            or not isinstance(authority["build"][name].get("sha256"), str)
+            for name in ("cmake_cache", "compile_commands")
+        )
     ):
         raise ValueError("hybrid shared-workspace width authority differs")
     return authority
 
 
 def build_hybrid_shared_workspace_authority(
-    width_tool: Path, prefill_chunks: Sequence[int],
+    width_tool: Path, bench: Path, prefill_chunks: Sequence[int],
+    dflash_widths: Sequence[int] = (),
 ) -> dict[str, Any]:
     chunks = sorted(set(prefill_chunks))
+    widths = sorted(set(dflash_widths))
+    if any(type(width) is not int or width < 2 or width > 16 for width in widths):
+        raise SystemExit("hybrid DFlash workspace width is outside [2,16]")
     inventories: dict[str, dict[str, list[int]]] = {}
     for chunk in chunks:
         observed = {
             "ordinary": query_widths(width_tool, chunk, 4, 0),
             "mtp3": query_widths(width_tool, chunk, 4, 4),
+            **{
+                f"dflash-w{width}": query_widths(width_tool, chunk, 4, 0, width)
+                for width in widths
+            },
         }
         expected = {
             "ordinary": [1, 2, 3, 4, chunk],
             "mtp3": [1, 2, 3, 4, 8, 12, 16, chunk],
+            **{
+                f"dflash-w{width}": sorted(set((1, 2, 3, 4, width, 2 * width,
+                                                  3 * width, 4 * width, chunk)))
+                for width in widths
+            },
         }
         if observed != expected:
             raise SystemExit(
                 f"hybrid shared-workspace width authority differs at chunk {chunk}: {observed!r}"
             )
         inventories[str(chunk)] = observed
+    bench = bench.resolve(strict=True)
+    if bench.name != "ninfer_bench" or bench.parent.name != "bench":
+        raise SystemExit("hybrid benchmark path does not identify its build root")
+    build_root = bench.parent.parent
+    if build_root not in width_tool.parents:
+        raise SystemExit("hybrid planner and benchmark do not share one build root")
+    cmake_cache = build_root / "CMakeCache.txt"
+    compile_commands = build_root / "compile_commands.json"
     authority = {
         "tool": inspect_executable(width_tool),
+        "build": {
+            "root": str(build_root),
+            "cmake_cache": inspect_executable(cmake_cache),
+            "compile_commands": inspect_executable(compile_commands),
+        },
         "maximum_concurrency": 4,
         "prefill_chunks": chunks,
         "inventories_by_prefill_chunk": inventories,
     }
-    validate_hybrid_shared_workspace_authority(authority, chunks)
+    validate_hybrid_shared_workspace_authority(authority, chunks, widths)
     return authority
+
+
+def base_hybrid_shared_workspace_authority(authority: dict[str, Any]) -> dict[str, Any]:
+    """Project an extended DFlash authority onto the terminal base authority."""
+
+    return {
+        **authority,
+        "inventories_by_prefill_chunk": {
+            chunk: {name: inventory[name] for name in ("ordinary", "mtp3")}
+            for chunk, inventory in authority["inventories_by_prefill_chunk"].items()
+        },
+    }
 
 
 def validate_dflash_campaign_artifact(
@@ -1039,7 +1100,7 @@ def build_cases(
             suite="dflash_shortlist_control",
             name="context_p8192_g256_ordinary_graph",
             args=("-pg", "8192,256", "--prefill-chunk", str(production_prefill_chunk),
-                  *mtp_args(0), "--retain-token-ids"),
+                  *ordinary_args(), "--retain-token-ids"),
             repetitions=2,
             warmup=1,
             notes="shared ordinary greedy control for every shortlisted K",
@@ -1103,32 +1164,47 @@ def build_cases(
                 suite="dflash_pareto_decode",
                 name="context_p8192_p32768_g256_dflash_graph",
                 args=("-pg", "8192,256;32768,256", "--prefill-chunk",
-                      str(production_prefill_chunk), *profile, "--retain-token-ids"),
+                      str(production_prefill_chunk), *profile, "--retain-token-ids",
+                      "--isolate-prompt-decode"),
                 repetitions=3,
                 warmup=1,
                 notes="matched 8K/32K DFlash decode, acceptance, and greedy outputs",
                 retain_token_ids=True,
-                parity_role="dflash",
+                parity_role="dflash_decode",
             ),
             BenchCase(
                 suite="dflash_pareto_control",
                 name="context_p8192_p32768_g256_ordinary_graph",
                 args=("-pg", "8192,256;32768,256", "--prefill-chunk",
-                      str(production_prefill_chunk), *mtp_args(0), "--retain-token-ids"),
+                      str(production_prefill_chunk), *ordinary_args(), "--retain-token-ids",
+                      "--isolate-prompt-decode"),
                 repetitions=3,
                 warmup=1,
                 notes="ordinary greedy control over the identical artifact and prompts",
                 retain_token_ids=True,
-                parity_role="ordinary",
+                parity_role="ordinary_decode",
             ),
             BenchCase(
                 suite="dflash_pareto_whole_inference",
                 name="whole_p8192_p32768_g256_dflash_graph",
                 args=("--whole-pg", "8192,256;32768,256", "--prefill-chunk",
-                      str(production_prefill_chunk), *profile),
+                      str(production_prefill_chunk), *profile, "--retain-token-ids"),
                 repetitions=3,
                 warmup=1,
                 notes="matched fresh-prompt DFlash whole-inference makespan and output throughput",
+                retain_token_ids=True,
+                parity_role="dflash_whole",
+            ),
+            BenchCase(
+                suite="dflash_pareto_whole_control",
+                name="whole_p8192_p32768_g256_ordinary_graph",
+                args=("--whole-pg", "8192,256;32768,256", "--prefill-chunk",
+                      str(production_prefill_chunk), *ordinary_args(), "--retain-token-ids"),
+                repetitions=3,
+                warmup=1,
+                notes="exact spec-none ordinary fresh-prompt whole-inference control",
+                retain_token_ids=True,
+                parity_role="ordinary_whole",
             ),
             *[
                 BenchCase(
@@ -1489,6 +1565,12 @@ def validate_case_profile(config: dict[str, Any], case: BenchCase) -> None:
     requested_prefill_chunk = _case_option(case, "--prefill-chunk")
     if requested_prefill_chunk is not None:
         expected["prefill_chunk"] = int(requested_prefill_chunk)
+    if config.get("isolate_prompt_decode", False) is not (
+        "--isolate-prompt-decode" in case.args
+    ):
+        raise ValueError(
+            f"benchmark report isolate_prompt_decode differs for {case.name}"
+        )
     for key, value in expected.items():
         if config.get(key) != value:
             raise ValueError(
@@ -1510,6 +1592,25 @@ def validate_whole_ordinary_command(case: BenchCase, command: Sequence[str] | No
         raise ValueError("pareto-whole command requires --draft-tokens 0")
     if "--spec" in command or "--lm-head-draft" in command:
         raise ValueError("pareto-whole command must be spec-none ordinary without a draft head")
+
+
+def validate_dflash_ordinary_command(case: BenchCase, command: Sequence[str] | None) -> None:
+    """Require DFlash parity controls to be ordinary, without a disabled MTP spelling."""
+
+    if case.suite not in {
+        "dflash_shortlist_control", "dflash_pareto_control",
+        "dflash_pareto_whole_control",
+    }:
+        return
+    if command is None:
+        raise ValueError("DFlash ordinary control requires the exact benchmark command")
+    if command.count("--draft-tokens") != 1:
+        raise ValueError("DFlash ordinary control requires exactly one --draft-tokens")
+    index = command.index("--draft-tokens")
+    if index + 1 >= len(command) or command[index + 1] != "0":
+        raise ValueError("DFlash ordinary control requires --draft-tokens 0")
+    if "--spec" in command or "--lm-head-draft" in command:
+        raise ValueError("DFlash ordinary control must be spec-none without a draft head")
 
 
 def _validate_speculative(spec: object, *, enabled: bool, draft_window: int,
@@ -1821,6 +1922,7 @@ def load_bench_report(
             raise ValueError("benchmark report command does not match this matrix point")
     if expected_case is not None:
         validate_whole_ordinary_command(expected_case, expected_command)
+        validate_dflash_ordinary_command(expected_case, expected_command)
         validate_case_profile(config, expected_case)
         validate_report_tests(report, expected_case)
         expected_capacity_mode = (
@@ -1959,6 +2061,7 @@ def report_rows(
             "repetitions": config.get("repetitions"),
             "warmup": config.get("warmup"),
             "retain_token_ids": config.get("retain_token_ids"),
+            "isolate_prompt_decode": config.get("isolate_prompt_decode"),
             "load_seconds": load.get("load_seconds") if performance_eligible else None,
             "upload_seconds": load.get("upload_seconds") if performance_eligible else None,
             "artifact_bytes_read": load.get("artifact_bytes_read"),
@@ -2390,14 +2493,25 @@ def write_dflash_quality_evidence(
     parity_rows = parity.get("comparisons")
     if not isinstance(parity_rows, list):
         parity_rows = []
-    observed_concurrency = {
-        row.get("concurrency") for row in parity_rows
+    expected_parity_cells = {
+        (phase, concurrency) for phase in ("decode", "whole")
+        for concurrency in PRODUCT_CONCURRENCIES
+    }
+    observed_parity_cells = {
+        (row.get("phase"), row.get("concurrency")) for row in parity_rows
         if isinstance(row, dict) and row.get("exact") is True
     }
     parity_complete = (
-        parity.get("pass") is True
-        and len(parity_rows) == len(PRODUCT_CONCURRENCIES)
-        and observed_concurrency == set(PRODUCT_CONCURRENCIES)
+        parity.get("artifact_type") == "ninfer_dflash_ordinary_greedy_parity"
+        and parity.get("schema_version") == 2
+        and parity.get("pass") is True
+        and len(parity_rows) == 2 * len(PRODUCT_CONCURRENCIES)
+        and observed_parity_cells == expected_parity_cells
+        and all(
+            isinstance(row, dict)
+            and row.get("includes_seed") is (row.get("phase") == "whole")
+            for row in parity_rows
+        )
     )
     if not parity_complete:
         failures.append({"error": "exact ordinary/DFlash target-output parity is incomplete"})
@@ -2488,7 +2602,10 @@ def write_dflash_quality_evidence(
         "benchmark_executable": bench,
         "scope": "generated DFlash proposal and target-output behavior",
         "target_output_gate": {
-            "criterion": "exact ordinary/DFlash generated tokens for every repetition and lane",
+            "criterion": (
+                "exact ordinary/DFlash whole generation including first output and isolated "
+                "post-seed decode outputs for every repetition and lane"
+            ),
             "concurrency": list(PRODUCT_CONCURRENCIES),
             "evidence": {
                 "path": str(out_dir / "greedy-token-parity.json"),
@@ -2528,113 +2645,105 @@ def write_dflash_greedy_parity(
     artifact: dict[str, Any],
     bench: dict[str, Any],
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    controls: dict[int, dict[str, Any]] = {}
     failures: list[dict[str, Any]] = []
-    for record in records:
-        if record["parity_role"] != "ordinary":
-            continue
-        concurrency = record["concurrency"]
-        if concurrency in controls:
-            failures.append({"concurrency": concurrency, "error": "duplicate ordinary control"})
-        else:
-            controls[concurrency] = record
-    candidates = [record for record in records if record["parity_role"] == "dflash"]
-    candidates.sort(key=lambda record: (record["concurrency"], record.get("case", "")))
     comparisons: list[dict[str, Any]] = []
-    candidate_concurrency = {record["concurrency"] for record in candidates}
-    for concurrency in sorted(set(controls) - candidate_concurrency):
-        failures.append({"concurrency": concurrency, "error": "ordinary control has no DFlash pair"})
-    for candidate_record in candidates:
-        concurrency = candidate_record["concurrency"]
-        if concurrency not in controls:
-            failures.append({
-                "concurrency": concurrency,
-                "candidate_report": candidate_record["report"],
-                "error": "missing ordinary control",
-            })
-            continue
-        control_path = Path(controls[concurrency]["report"])
-        candidate_path = Path(candidate_record["report"])
-        control = json.loads(control_path.read_text(encoding="utf-8"))
-        candidate = json.loads(candidate_path.read_text(encoding="utf-8"))
-        candidate_config = candidate.get("config", {})
-        draft_tokens = candidate_config.get("draft_tokens")
-        verify_width = candidate_config.get("dflash_verify_width")
-        if type(draft_tokens) is not int or type(verify_width) is not int:
-            raise ValueError("DFlash parity report lacks integer K/W profile")
-        mismatch_count = 0
-        compared_tokens = 0
-        first_mismatch: dict[str, Any] | None = None
-        if len(control.get("tests", [])) != len(candidate.get("tests", [])):
-            mismatch_count = 1
-            first_mismatch = {"reason": "test count differs"}
-        else:
-            for control_test, candidate_test in zip(control["tests"], candidate["tests"], strict=True):
-                geometry = tuple(control_test.get(key) for key in ("label", "kind", "n_prompt", "n_gen"))
-                candidate_geometry = tuple(
-                    candidate_test.get(key) for key in ("label", "kind", "n_prompt", "n_gen")
-                )
-                if geometry != candidate_geometry:
-                    mismatch_count += 1
-                    first_mismatch = first_mismatch or {"reason": "test geometry differs"}
-                    continue
-                control_runs = [rep["generated_token_ids_by_lane"] for rep in control_test["reps"]]
-                candidate_runs = [rep["generated_token_ids_by_lane"] for rep in candidate_test["reps"]]
-                expected = control_runs[0]
-                all_runs = [("ordinary", i, run) for i, run in enumerate(control_runs)] + [
-                    ("dflash", i, run) for i, run in enumerate(candidate_runs)
-                ]
-                for route, repetition, lanes in all_runs:
-                    for lane, (wanted, actual) in enumerate(zip(expected, lanes, strict=True)):
-                        compared_tokens += len(wanted)
-                        for position, (left, right) in enumerate(zip(wanted, actual, strict=True)):
-                            if left != right:
+    pairs = (("decode", "ordinary_decode", "dflash_decode"),
+             ("whole", "ordinary_whole", "dflash_whole"))
+    if any(record.get("parity_role") == "ordinary" for record in records):
+        pairs = (("decode", "ordinary", "dflash"),)
+    for phase, ordinary_role, dflash_role in pairs:
+        ordinary = [record for record in records if record.get("parity_role") == ordinary_role]
+        dflash = [record for record in records if record.get("parity_role") == dflash_role]
+        controls = {record["concurrency"]: record for record in ordinary}
+        candidates = {record["concurrency"]: record for record in dflash}
+        if len(controls) != len(ordinary) or len(candidates) != len(dflash):
+            failures.append({"phase": phase, "error": "duplicate parity route"})
+        for concurrency in sorted(set(controls) | set(candidates)):
+            if concurrency not in controls or concurrency not in candidates:
+                failures.append({"phase": phase, "concurrency": concurrency,
+                                 "error": "missing matched parity route"})
+                continue
+            control_path = Path(controls[concurrency]["report"])
+            candidate_path = Path(candidates[concurrency]["report"])
+            control = json.loads(control_path.read_text(encoding="utf-8"))
+            candidate = json.loads(candidate_path.read_text(encoding="utf-8"))
+            draft_tokens = candidate.get("config", {}).get("draft_tokens")
+            verify_width = candidate.get("config", {}).get("dflash_verify_width")
+            if type(draft_tokens) is not int or type(verify_width) is not int:
+                raise ValueError("DFlash parity report lacks integer K/W profile")
+            mismatch_count, compared_tokens = 0, 0
+            first_mismatch: dict[str, Any] | None = None
+            if len(control.get("tests", [])) != len(candidate.get("tests", [])):
+                mismatch_count, first_mismatch = 1, {"reason": "test count differs"}
+            else:
+                for control_test, candidate_test in zip(
+                    control["tests"], candidate["tests"], strict=True
+                ):
+                    geometry = tuple(control_test.get(key) for key in
+                                     ("label", "kind", "n_prompt", "n_gen"))
+                    other_geometry = tuple(candidate_test.get(key) for key in
+                                           ("label", "kind", "n_prompt", "n_gen"))
+                    if geometry != other_geometry:
+                        mismatch_count += 1
+                        first_mismatch = first_mismatch or {"reason": "test geometry differs"}
+                        continue
+                    requested = control_test.get("requested_output_tokens")
+                    if requested != candidate_test.get("requested_output_tokens"):
+                        mismatch_count += 1
+                        first_mismatch = first_mismatch or {"reason": "requested output differs"}
+                        continue
+                    control_runs = [rep["generated_token_ids_by_lane"]
+                                    for rep in control_test["reps"]]
+                    candidate_runs = [rep["generated_token_ids_by_lane"]
+                                      for rep in candidate_test["reps"]]
+                    expected = control_runs[0]
+                    for route, repetition, lanes in (
+                        [("ordinary", i, run) for i, run in enumerate(control_runs)]
+                        + [("dflash", i, run) for i, run in enumerate(candidate_runs)]
+                    ):
+                        for lane, (wanted, actual) in enumerate(zip(expected, lanes, strict=True)):
+                            compared_tokens += len(actual)
+                            if len(actual) != requested:
                                 mismatch_count += 1
                                 first_mismatch = first_mismatch or {
-                                    "test": geometry[0], "route": route, "repetition": repetition,
-                                    "lane": lane, "position": position,
-                                    "ordinary_token": left, "observed_token": right,
+                                    "reason": "retained generation has the wrong token count",
+                                    "route": route, "repetition": repetition, "lane": lane,
                                 }
-        exact = mismatch_count == 0
-        comparison = {
-            "concurrency": concurrency,
-            "draft_tokens": draft_tokens,
-            "dflash_verify_width": verify_width,
-            "dflash_topology": resolved_dflash_topology(draft_tokens, verify_width),
-            "ordinary_report": {"path": str(control_path), "sha256": file_sha256(control_path)},
-            "dflash_report": {"path": str(candidate_path), "sha256": file_sha256(candidate_path)},
-            "ordinary_profile": {
-                key: control.get("config", {}).get(key)
-                for key in (
-                    "spec", "draft_tokens", "dflash_verify_width_requested",
-                    "dflash_verify_width", "proposal_head", "use_device_graph", "concurrency",
-                    "kv_value_group", "q4_activation_bits", "q4_prefill_cta_profile",
-                    "w8_activation_bits",
-                    "fp8_qk_wmma_profile",
-                )
-            },
-            "dflash_profile": {
-                key: candidate.get("config", {}).get(key)
-                for key in (
-                    "spec", "draft_tokens", "dflash_verify_width_requested",
-                    "dflash_verify_width", "proposal_head", "use_device_graph", "concurrency",
-                    "kv_value_group", "q4_activation_bits", "q4_prefill_cta_profile",
-                    "w8_activation_bits",
-                    "fp8_qk_wmma_profile",
-                )
-            },
-            "compared_tokens": compared_tokens,
-            "mismatch_count": mismatch_count,
-            "exact": exact,
-            "first_mismatch": first_mismatch,
-        }
-        comparisons.append(comparison)
-        if not exact:
-            failures.append({"error": "greedy tokens differ", **comparison})
+                                continue
+                            for position, (left, right) in enumerate(
+                                zip(wanted, actual, strict=True)
+                            ):
+                                if left != right:
+                                    mismatch_count += 1
+                                    first_mismatch = first_mismatch or {
+                                        "test": geometry[0], "route": route,
+                                        "repetition": repetition, "lane": lane,
+                                        "position": position, "ordinary_token": left,
+                                        "observed_token": right,
+                                    }
+            comparison = {
+                "phase": phase, "concurrency": concurrency,
+                "draft_tokens": draft_tokens, "dflash_verify_width": verify_width,
+                "dflash_topology": resolved_dflash_topology(draft_tokens, verify_width),
+                "ordinary_report": {"path": str(control_path),
+                                    "sha256": file_sha256(control_path)},
+                "dflash_report": {"path": str(candidate_path),
+                                  "sha256": file_sha256(candidate_path)},
+                "compared_tokens": compared_tokens, "mismatch_count": mismatch_count,
+                "includes_seed": phase == "whole", "exact": mismatch_count == 0,
+                "first_mismatch": first_mismatch,
+            }
+            comparisons.append(comparison)
+            if mismatch_count:
+                failures.append({"error": "greedy tokens differ", **comparison})
     payload = {
         "artifact_type": "ninfer_dflash_ordinary_greedy_parity",
-        "schema_version": 1,
-        "criterion": "exact token identity for every retained repetition and concurrency lane",
+        "schema_version": 2,
+        "criterion": (
+            "exact complete whole-route generation including its first output token, plus exact "
+            "isolated post-seed decode outputs, for every repetition and concurrency lane; "
+            "isolated seed equality is inherited from deterministic whole-route parity"
+        ),
         "artifact": artifact,
         "benchmark_executable": bench,
         "comparisons": comparisons,
@@ -3045,7 +3154,7 @@ def write_manifest(
             "Use context_decode and mtp_sweep rows only for MTP diagnostics.",
             "tg rows use a one-token seed and report G decode tokens after the begin token.",
             "DFlash proposal diagnostics synchronize device-to-host copies and are never timing evidence.",
-            "DFlash greedy parity requires exact ordinary/DFlash token IDs for every repetition and lane.",
+            "DFlash parity covers complete whole generations including first output, plus isolated post-seed decode IDs.",
             "DFlash shortlist ranking admits exact-parity rows only and retains a multi-objective frontier.",
         ],
     }
@@ -3332,8 +3441,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     args.hybrid_width_authority = None
     if args.require_fp8_hybrid:
         width_tool = args.hybrid_width_tool.expanduser().resolve(strict=True)
+        dflash_widths = sorted({
+            resolved_dflash_verify_width(
+                int(_case_option(case, "--draft-tokens") or "0"),
+                int(_case_option(case, "--dflash-verify-width") or "0"),
+            )
+            for case in all_cases
+            if _case_option(case, "--spec") == "dflash"
+        })
         args.hybrid_width_authority = build_hybrid_shared_workspace_authority(
-            width_tool, args.prefill_chunk or PRODUCTION_PREFILL_CHUNKS,
+            width_tool, args.bench, args.prefill_chunk or PRODUCTION_PREFILL_CHUNKS,
+            dflash_widths,
         )
     max_prompt = max_prompt_in_cases(cases)
     if max_prompt > corpus_tokens:

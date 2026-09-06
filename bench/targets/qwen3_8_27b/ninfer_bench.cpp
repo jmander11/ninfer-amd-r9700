@@ -180,15 +180,17 @@ ninfer::bench::RepTiming fold_lane_results(const std::vector<ninfer::GenerationR
 ninfer::bench::RepTiming run_repetition(ninfer::Engine& engine,
                                         const ninfer::bench::BenchTest& test,
                                         const std::vector<ninfer::TokenId>& corpus,
-                                        std::uint32_t concurrency) {
+                                        std::uint32_t concurrency,
+                                        bool isolate_prompt_decode = false) {
     const int prompt_tokens = test.kind == ninfer::bench::TestKind::Decode
                                   ? ninfer::bench::kDecodeSeedTokens
                                   : test.n_prompt;
     const std::uint32_t expected = test.requested_output_tokens();
     const bool isolate_batched_decode =
-        concurrency > 1 && test.kind == ninfer::bench::TestKind::PrefillDecode;
+        (concurrency > 1 || isolate_prompt_decode) &&
+        test.kind == ninfer::bench::TestKind::PrefillDecode;
 
-    if (concurrency <= 1) {
+    if (concurrency <= 1 && !isolate_batched_decode) {
         const ninfer::RequestOptions request = benchmark_request(test, false);
         auto prompt = engine.prepare_tokens(ninfer::bench::prompt_slice(corpus, prompt_tokens),
                                             false);
@@ -316,7 +318,8 @@ int main(int argc, char** argv) {
             options.spec_backend, options.draft_tokens, options.proposal_head,
             options.dflash_verify_width};
         const std::uint32_t max_context = ninfer::bench::resolve_max_context(
-            tests, options.max_context, spec_options, options.use_device_graph);
+            tests, options.max_context, spec_options, options.use_device_graph,
+            options.isolate_prompt_decode);
 
         ninfer::EngineOptions engine_options;
         engine_options.artifact_path = options.artifact_path;
@@ -358,6 +361,7 @@ int main(int argc, char** argv) {
         env.proposal_head            = options.proposal_head;
         env.use_device_graph         = options.use_device_graph;
         env.retain_token_ids         = options.retain_token_ids;
+        env.isolate_prompt_decode    = options.isolate_prompt_decode;
         env.repetitions              = options.repetitions;
         env.warmup                   = options.warmup;
         env.corpus_path              = options.corpus_path;
@@ -390,12 +394,14 @@ int main(int argc, char** argv) {
             result.concurrency = options.concurrency;
             engine.reset_memory_peaks();
             for (int warmup = 0; warmup < options.warmup; ++warmup) {
-                (void)run_repetition(engine, test, corpus, options.concurrency);
+                (void)run_repetition(engine, test, corpus, options.concurrency,
+                                     options.isolate_prompt_decode);
             }
             result.reps.reserve(static_cast<std::size_t>(options.repetitions));
             ProfileMeasuredRegion profile_region(options.profile_measured);
             for (int repetition = 0; repetition < options.repetitions; ++repetition) {
-                result.reps.push_back(run_repetition(engine, test, corpus, options.concurrency));
+                result.reps.push_back(run_repetition(engine, test, corpus, options.concurrency,
+                                                     options.isolate_prompt_decode));
             }
             profile_region.finish();
             const ninfer::MemorySummary memory    = engine.memory_summary();

@@ -11,13 +11,21 @@ import math
 import os
 import re
 import sqlite3
+import sys
 import tempfile
 from collections import Counter, defaultdict
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
-from tools.bench.analyze_selected_decode_memory import read_database
+SCRIPT_REPO = Path(__file__).resolve().parents[2]
+if str(SCRIPT_REPO) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_REPO))
+
 from tools.bench.prepare_post_rmsnorm_decode_proxy import PASSES, REPO, identity, sha
+
+
+ROUNDS = 256
+ONE_ROUND_DISPATCHES = 1806
 
 
 def number(value: object, label: str) -> Decimal:
@@ -31,7 +39,7 @@ def number(value: object, label: str) -> Decimal:
 
 
 def percent(numerator: Decimal, denominator: Decimal, label: str) -> float:
-    if denominator <= 0 or numerator > denominator:
+    if numerator < 0 or denominator <= 0 or numerator > denominator:
         raise ValueError(f"{label} has invalid operands")
     return float(Decimal(100) * numerator / denominator)
 
@@ -92,6 +100,126 @@ def validate_closure(root: Path) -> None:
     if set(observed) != expected or any(not path.is_file() or sha(path) != digest
                                         for path, digest in observed.items()):
         raise ValueError("prepared closure bytes changed")
+
+
+def one_table(connection: sqlite3.Connection, prefix: str) -> str:
+    rows = [row[0] for row in connection.execute(
+        "select name from sqlite_master where type='table' and name like ?", (prefix + "%",))]
+    if len(rows) != 1:
+        raise ValueError(f"database lacks one {prefix} table")
+    return rows[0]
+
+
+def read_marker_counts(connection: sqlite3.Connection, marker_regions: str,
+                       events: str, strings: str) -> dict[str, int]:
+    counts: dict[str, int] = defaultdict(int)
+    query = f'''select e.extdata from "{marker_regions}" m
+                join "{events}" e on e.id=m.event_id
+                join "{strings}" n on n.id=m.name_id
+                join "{strings}" c on c.id=e.category_id
+                where n.string='roctxThreadRangeA'
+                  and c.string='MARKER_CORE_RANGE_API' '''
+    for row in connection.execute(query):
+        try:
+            extdata = json.loads(row["extdata"])
+        except (json.JSONDecodeError, TypeError) as error:
+            raise ValueError("database has malformed ROCTX range metadata") from error
+        message = extdata.get("message")
+        if not isinstance(message, str):
+            raise ValueError("database ROCTX range lacks a message")
+        counts[message] += 1
+    return dict(counts)
+
+
+def read_database(path: Path, command: list[str]) -> tuple[dict[int, dict], dict, dict[str, int]]:
+    """Read the exact rocprofiler tables needed by this frozen diagnostic."""
+
+    connection = sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)
+    connection.row_factory = sqlite3.Row
+    try:
+        agents = one_table(connection, "rocpd_info_agent_")
+        processes = one_table(connection, "rocpd_info_process_")
+        dispatches = one_table(connection, "rocpd_kernel_dispatch_")
+        symbols = one_table(connection, "rocpd_info_kernel_symbol_")
+        marker_regions = one_table(connection, "rocpd_region_")
+        events = one_table(connection, "rocpd_event_")
+        strings = one_table(connection, "rocpd_string_")
+        gpu = list(connection.execute(
+            f'''select name, product_name, extdata from "{agents}"
+                where type='GPU' and name='gfx1201' '''))
+        if len(gpu) != 1 or gpu[0]["product_name"] != "AMD Radeon AI PRO R9700":
+            raise ValueError("database lacks one R9700/gfx1201 agent")
+        agent = json.loads(gpu[0]["extdata"])
+        if (agent.get("cu_count") != 64 or agent.get("max_waves_per_cu") != 32
+                or agent.get("wave_front_size") != 32 or agent.get("simd_count") != 128):
+            raise ValueError("database R9700 execution resources differ")
+        process = list(connection.execute(f'''select command, environment from "{processes}"'''))
+        if len(process) != 1 or process[0]["command"] != " ".join(command):
+            raise ValueError("database process command differs from plan")
+        environment = json.loads(process[0]["environment"])
+        if not str(environment.get("ROCPROFILER_REGISTER_LIBRARY", "")).endswith(
+            "librocprofiler-sdk.so.1.3.5"
+        ):
+            raise ValueError("database does not bind rocprofiler SDK 1.3.5")
+        regions = {}
+        query = f'''select k.dispatch_id, r.string region, s.display_name symbol,
+                           k.grid_size_x, k.grid_size_y, k.grid_size_z,
+                           k.workgroup_size_x, k.workgroup_size_y, k.workgroup_size_z,
+                           k.group_segment_size, k.private_segment_size,
+                           s.arch_vgpr_count, s.accum_vgpr_count
+                    from "{dispatches}" k join "{symbols}" s on s.id=k.kernel_id
+                    left join "{strings}" r on r.id=k.region_name_id'''
+        for row in connection.execute(query):
+            dispatch = int(row["dispatch_id"])
+            metadata = {
+                "region": str(row["region"]) if row["region"] is not None else None,
+                "symbol": str(row["symbol"]),
+                "grid_size": int(row["grid_size_x"] * row["grid_size_y"] * row["grid_size_z"]),
+                "workgroup_size": int(row["workgroup_size_x"] * row["workgroup_size_y"]
+                                      * row["workgroup_size_z"]),
+                "static_lds_bytes": int(row["group_segment_size"]),
+                "scratch_bytes": int(row["private_segment_size"]),
+                "vgpr": int(row["arch_vgpr_count"] + row["accum_vgpr_count"]),
+            }
+            if dispatch in regions and regions[dispatch] != metadata:
+                raise ValueError("database has inconsistent dispatch metadata")
+            regions[dispatch] = metadata
+        marker_counts = read_marker_counts(connection, marker_regions, events, strings)
+        return regions, {
+            "name": gpu[0]["name"], "product_name": gpu[0]["product_name"],
+            "cu_count": agent["cu_count"], "simd_count": agent["simd_count"],
+            "max_waves_per_cu": agent["max_waves_per_cu"],
+            "wave_front_size": agent["wave_front_size"],
+        }, marker_counts
+    finally:
+        connection.close()
+
+
+def scaled_trace_inventory(rows: object) -> list[dict[str, object]]:
+    if not isinstance(rows, list) or not rows:
+        raise ValueError("selected-region trace inventory is missing")
+    result = []
+    for row in rows:
+        if (not isinstance(row, dict)
+                or not isinstance(row.get("symbol"), str) or not row["symbol"]
+                or any(type(row.get(name)) is not int or row[name] < 0 for name in (
+                    "grid_size", "workgroup_size", "static_lds_bytes", "scratch_bytes", "vgpr"))
+                or type(row.get("dispatch_count")) is not int or row["dispatch_count"] <= 0):
+            raise ValueError("selected-region trace inventory is malformed")
+        result.append({
+            "symbol": row["symbol"], "grid_size": row["grid_size"],
+            "workgroup_size": row["workgroup_size"],
+            "static_lds_bytes": row["static_lds_bytes"],
+            "allocated_lds_bytes": ((row["static_lds_bytes"] + 255) // 256) * 256,
+            "scratch_bytes": row["scratch_bytes"], "vgpr": row["vgpr"],
+            "dispatch_count": row["dispatch_count"] * ROUNDS,
+        })
+    if sum(row["dispatch_count"] for row in rows) != ONE_ROUND_DISPATCHES:
+        raise ValueError("selected-region trace is not the exact 1806-dispatch round")
+    return sorted(result, key=lambda row: (
+        row["symbol"], row["grid_size"], row["workgroup_size"], row["static_lds_bytes"],
+        row["allocated_lds_bytes"], row["scratch_bytes"], row["vgpr"],
+    ))
 
 
 def validate_benchmark(path: Path, command: list[str], plan: dict) -> dict:
@@ -196,6 +324,10 @@ def analyze(plan_path: Path, root: Path) -> dict:
         pinned = plan[field]
         if identity(Path(pinned["path"])) != pinned:
             raise ValueError(f"{field} changed")
+    for field in ("profiler", "counter_preflight"):
+        pinned = plan[field]
+        if identity(Path(pinned["path"])) != pinned:
+            raise ValueError(f"{field} changed")
     probe_contract = plan.get("stream_probe", {})
     probe_executable = probe_contract.get("executable", {})
     if (identity(Path(str(probe_executable.get("path", "")))) != probe_executable
@@ -204,6 +336,10 @@ def analyze(plan_path: Path, root: Path) -> dict:
             or probe_contract.get("working_set_gib_per_buffer") != 4
             or probe_contract.get("trials_per_method") != 5):
         raise ValueError("stream probe contract or executable changed")
+    expected_inventory = scaled_trace_inventory(
+        plan.get("selected_region_trace", {}).get("inventory")
+    )
+    expected_dispatches = ONE_ROUND_DISPATCHES * ROUNDS
     summaries = {}
     for label, counters in PASSES.items():
         record = plan["passes"][label]
@@ -220,15 +356,16 @@ def analyze(plan_path: Path, root: Path) -> dict:
         if len(csvs) != 1 or len(dbs) != 1:
             raise ValueError("pass lacks exactly one counter CSV and database")
         summary = reduce_pass(csvs[0], dbs[0], command, counters)
+        if (summary["ordinary_dispatch_count"] != expected_dispatches
+                or summary["dispatch_inventory"] != expected_inventory):
+            raise ValueError(
+                "PMC pass is not the exact 256x selected one-round dispatch inventory"
+            )
         summary["benchmark_report"] = benchmark
         summary["counter_csv"] = identity(csvs[0]); summary["database"] = identity(dbs[0])
         summaries[label] = summary
     if summaries["cache-wait"]["dispatch_inventory"] != summaries["issue-lds"]["dispatch_inventory"]:
         raise ValueError("two PMC passes have different dispatch inventory multisets")
-    trace_symbols = {row["symbol"] for row in plan["selected_region_trace"]["inventory"]}
-    measured_symbols = {row["symbol"] for row in summaries["cache-wait"]["dispatch_inventory"]}
-    if trace_symbols != measured_symbols:
-        raise ValueError("PMC symbol inventory differs from selected-region trace")
     a = {name: Decimal(value) for name, value in summaries["cache-wait"]["counter_sums"].items()}
     b = {name: Decimal(value) for name, value in summaries["issue-lds"]["counter_sums"].items()}
     agent = summaries["cache-wait"]["agent"]
@@ -240,6 +377,8 @@ def analyze(plan_path: Path, root: Path) -> dict:
     if (a["SQ_WAVE_CYCLES"] <= 0 or a["TCP_REQ"] <= 0
             or a["GL2C_HIT"] + a["GL2C_MISS"] <= 0 or a["GRBM_GUI_ACTIVE"] <= 0):
         raise ValueError("cache/wait pass has nonpositive proxy denominators")
+    if a["TCP_REQ_MISS"] > a["TCP_REQ"]:
+        raise ValueError("cache/wait pass has more TCP misses than requests")
     issue = b["SQ_INST_CYCLES_VALU"] + b["SQ_INST_CYCLES_VMEM"]
     if (issue <= 0 or b["SQC_LDS_IDX_ACTIVE"] <= 0 or b["SQ_WAVES"] <= 0
             or b["GRBM_GUI_ACTIVE"] <= 0):

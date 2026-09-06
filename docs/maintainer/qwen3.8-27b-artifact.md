@@ -254,10 +254,10 @@ converted companions remain valid provenance and binder evidence but receive no 
 physical campaign. The hybrid companion is not yet materialized; if selected, its conversion must
 bind the exact hybrid base receipt before those fresh DFlash gates begin.
 The production DFlash K/W is not encoded in either evaluation artifact and cannot be chosen from a
-filename or shortlist rank. It is selected only by the schema-v1 provenance-bound record emitted by
+filename or shortlist rank. It is selected only by the schema-v3 provenance-bound record emitted by
 `tools/bench/assemble_dflash_selection.py` after the base schema-v7
 `terminal_production_selection`, complete
-shortlist-frontier C=1..4 capacity accounting, and every capacity-eligible 18-point DFlash matrix.
+shortlist-frontier C=1..4 capacity accounting, and every capacity-eligible 22-point DFlash matrix.
 
 The ranking is exactly one 248,320-column little-endian I64 total-frequency row. The builder accepts
 explicit `.ids` paths, discovers each sibling manifest, and validates Qwen3.8 tokenizer identity,

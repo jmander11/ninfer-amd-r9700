@@ -377,9 +377,43 @@ both remap implementations and their temporary checker/runner/tests were removed
 execution. The restored canonical `src/ops/r9700/linear/r9700_linear.hip` SHA-256 is
 `7d204bb10feeeb5988c26960ce992a6f487fd53afc162e89508ee3524b90b576`.
 
-The next bounded prefill experiment is complete dual-FMAC pairing. Once it is decided, the
-scheduled compound is a two-slab load FIFO plus only the mechanisms then admitted; it must save at
-least `35.9 ms` at whole-P2048 scope, with fresh attribution if needed to re-establish that bound.
+Complete dual-FMAC pairing preserved 88 VGPR, 17,152-byte LDS, occupancy 16, zero scratch/spills,
+eight IU4 sites, and ten protected scalar-base/U32 loads while emitting eight dual FMACs and no
+single FMACs. The immutable v1 and v2 operator reports are inconclusive startup-transient evidence:
+`profiles/bench/r9700-q4-prefill-dual-fmac-p2048-ab-20260906.json` (SHA-256
+`7c440f0b318c0886ad5e47a7629e91e992234637a96125b026943ad00edf9145`) and
+`profiles/bench/r9700-q4-prefill-dual-fmac-p2048-ab-v2-20260906.json` (SHA-256
+`a60b1a7ae2795b6be0c75ed9da657c88e782092d84417a3dcd71d5884ead64d6`). The corrected v3
+operator gate, with two balanced unscored warmup intervals per server, accepted all three cells and
+reported a `12.6098960755 ms` call-weighted robust saving lower:
+`profiles/bench/r9700-q4-prefill-dual-fmac-p2048-ab-v3-20260906.json` (SHA-256
+`42c3847f7b52a8d9c436dcc957175439191decc057f51d2234c8d729676f6e1d`). The terminal whole
+gate then rejected the candidate: control/candidate medians were
+`1072.2601595`/`1059.691983 ms`, ratio upper `0.9924224143` passed, but robust saving lower
+`8.1438331535 ms` missed the required `10 ms`; exact parity and identities passed. Its report is
+`profiles/bench/r9700-q4-prefill-dual-fmac-whole-p2048-c1-full-v2-20260906/report.json` (SHA-256
+`88da09557579e3d2e729ef1d7858c69fca5a29718c246ad9dc2403749cedfce1`). All private selector,
+challenger, timing, and test surfaces were removed, so there is no retained dual-FMAC command.
+
+The final explicitly scheduled two-entry register-load FIFO was rejected at its loaded-object
+resource gate. Its explicit G+1/G+2 payload slots retained the two 8,576-byte LDS banks, 17,152-byte
+total LDS, a 512-thread maximum workgroup, zero private storage/spills, eight IU4 sites, and the
+canonical six dual plus four single FMAC sites. The selected kernel nevertheless used `97` VGPR,
+nine above the admitted canonical `88` baseline and one above the absolute `96` ceiling. No
+remaining pipeline/dynamic-traffic check, numerical run, or GPU timing was admitted. The immutable
+report is `profiles/bench/r9700-q4-prefill-register-fifo-static-rejection-20260906.json` (SHA-256
+`15b9369772015ae1cb079d17272f3c027d29fb2a7148236968e2e014bf4cd133`), with extracted inner gfx1201
+ELF SHA-256 `24da41789f510c0f848b62ca2020b890ce0a33be96cea05ffbaeea12ea73aef7`. The selector and candidate
+source were removed, so there is no retained command surface.
+
+Canonical P2048 remains `1075.438603 ms` / `1904.339303 tok/s`. The explicit bounded candidate list
+is exhausted. A targeted canonical-ISA/trace audit found no new mechanism outside rejected topology
+or representation families with a credible `>=35.9 ms` whole saving: this requires `10.08%` of the
+retained `356.276973 ms` Q4 service; canonical already overlaps successor loads with eight IU4
+WMMAs at occupancy 16; independent activation/scale and arithmetic-cleanup ceilings are only
+`19.045 ms` and `<14.3 ms`; and a concrete second outstanding payload costs the nine rejected
+VGPRs. The overlapping bounds are not additive. This does not prove practical-ceiling closure;
+that question remains open.
 
 Two M64xN256 Q4 prefill experiments are terminal rejections and their executable paths have been
 removed. The 16-wave/512-thread variant passed numerical qualification and improved the weighted

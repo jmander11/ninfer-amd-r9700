@@ -78,6 +78,7 @@ struct BenchOptions {
     bool use_device_graph          = true;
     bool profile_measured          = false;
     bool retain_token_ids          = false;
+    bool isolate_prompt_decode     = false;
     bool automatic_kv_capacity     = false;
     OutputFormat output            = OutputFormat::Table;
     std::string output_file;
@@ -128,6 +129,7 @@ struct BenchEnvironment {
     ProposalHead proposal_head                      = ProposalHead::Full;
     bool use_device_graph                          = true;
     bool retain_token_ids                          = false;
+    bool isolate_prompt_decode                     = false;
     bool decode_graph_primed                       = false;
     std::uint32_t decode_graph_prime_output_tokens = 0;
     int repetitions                                = 0;
@@ -142,7 +144,8 @@ std::string usage_text(std::string_view program);
 std::vector<BenchTest> expand_tests(const BenchOptions& options);
 std::uint32_t resolve_max_context(const std::vector<BenchTest>& tests,
                                   std::optional<std::uint32_t> override_max_context,
-                                  const SpeculativeOptions& spec, bool use_device_graph);
+                                  const SpeculativeOptions& spec, bool use_device_graph,
+                                  bool isolate_prompt_decode = false);
 std::uint32_t concurrent_kv_capacity_tokens(std::uint32_t max_context, std::uint32_t concurrency);
 void validate_prompt_lengths(const std::vector<BenchTest>& tests, std::size_t corpus_tokens);
 

@@ -301,6 +301,7 @@ std::string usage_text(std::string_view program) {
         << "  --no-device-graph           use eager decode\n"
         << "  --profile-measured          bracket one measured repetition as a profiler region\n"
         << "  --retain-token-ids          retain greedy token IDs by repetition and lane in JSON\n"
+        << "  --isolate-prompt-decode     seed and discard one token before every -pg decode lane\n"
         << "  -o, --output <table|json|csv>  output format (default: table)\n"
         << "  --output-file <path>        write report to a file\n"
         << "  -h, --help                  show this help\n\n"
@@ -394,6 +395,8 @@ BenchOptions parse_args(int argc, char** argv) {
             options.profile_measured = true;
         } else if (arg == "--retain-token-ids") {
             options.retain_token_ids = true;
+        } else if (arg == "--isolate-prompt-decode") {
+            options.isolate_prompt_decode = true;
         } else if (arg == "-o" || arg == "--output") {
             const std::string selected = value("--output");
             if (selected == "table") {
@@ -436,6 +439,9 @@ BenchOptions parse_args(int argc, char** argv) {
     if (options.retain_token_ids && options.output != OutputFormat::Json) {
         throw std::invalid_argument("--retain-token-ids requires --output json");
     }
+    if (options.isolate_prompt_decode && options.prompt_gen.empty()) {
+        throw std::invalid_argument("--isolate-prompt-decode requires -pg/--prompt-gen");
+    }
     return options;
 }
 
@@ -469,12 +475,17 @@ std::vector<BenchTest> expand_tests(const BenchOptions& options) {
 
 std::uint32_t resolve_max_context(const std::vector<BenchTest>& tests,
                                   std::optional<std::uint32_t> override_max_context,
-                                  const SpeculativeOptions& spec, bool use_device_graph) {
+                                  const SpeculativeOptions& spec, bool use_device_graph,
+                                  bool isolate_prompt_decode) {
     std::uint32_t required = 0;
     std::string driver;
     bool has_decode = false;
     for (const BenchTest& test : tests) {
-        const std::uint32_t candidate = test.required_context(spec);
+        const std::uint32_t base = test.required_context(spec);
+        const std::uint32_t candidate = checked_context(
+            static_cast<std::uint64_t>(base) +
+                (isolate_prompt_decode && test.kind == TestKind::PrefillDecode ? 1ULL : 0ULL),
+            "benchmark isolated context requirement");
         if (candidate > required) {
             required = candidate;
             driver   = test.label;
@@ -862,6 +873,8 @@ std::string format_json(const BenchEnvironment& env, const std::string& command,
          << "    \"proposal_head\": \"" << proposal_head_name(env.proposal_head) << "\",\n"
          << "    \"use_device_graph\": " << (env.use_device_graph ? "true" : "false") << ",\n"
          << "    \"retain_token_ids\": " << (env.retain_token_ids ? "true" : "false") << ",\n"
+         << "    \"isolate_prompt_decode\": "
+         << (env.isolate_prompt_decode ? "true" : "false") << ",\n"
          << "    \"decode_path\": \"" << decode_path_name(
                    env.use_device_graph, SpeculativeOptions{env.speculative_backend, env.draft_tokens,
                                                           env.proposal_head,

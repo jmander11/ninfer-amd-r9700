@@ -99,14 +99,17 @@ def parse_width_inventory(raw: str, expected: tuple[int, int, int, int]) -> list
     return widths
 
 
-def query_widths(tool: Path, prefill: int, concurrency: int, mtp_width: int) -> list[int]:
+def query_widths(
+    tool: Path, prefill: int, concurrency: int, mtp_width: int,
+    dflash_width: int = 0,
+) -> list[int]:
     process = subprocess.run(
         [str(tool), "--host-hybrid-widths-csv", str(prefill), str(concurrency),
-         str(mtp_width), "0"],
+         str(mtp_width), str(dflash_width)],
         check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
     return parse_width_inventory(
-        process.stdout, (prefill, concurrency, mtp_width, 0)
+        process.stdout, (prefill, concurrency, mtp_width, dflash_width)
     )
 
 

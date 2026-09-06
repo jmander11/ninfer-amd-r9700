@@ -471,17 +471,23 @@ DFlash K/W selection begins only after the schema-v7 `terminal_production_select
 weight recipe, cache group, and execution profile. The fixed
 C=1 shortlist retains all exact-output candidates on its speed/acceptance/fallback/repair frontier;
 it does not itself choose a production K/W. Every shortlist-frontier tuple then receives a
-schema-v13 `dflash-capacity` campaign over all C=1..4. Missing capacity is an exclusion only when
+schema-v14 `dflash-capacity` campaign over all C=1..4. Missing capacity is an exclusion only when
 the exact failed command and logs are retained; excluded tuples receive no phase/whole campaign.
-Every capacity-eligible tuple receives the complete 18-point `dflash-pareto` matrix: matched
-8K/32K prefill, DFlash decode, ordinary control, and fresh-prompt whole inference at C=1..4 plus
-two isolated C=1 proposal diagnostics.
+Every capacity-eligible tuple receives the complete 22-point `dflash-pareto` matrix: matched
+8K/32K prefill, DFlash decode plus ordinary decode control, and retained-token fresh-prompt DFlash
+whole inference plus its exact spec-none ordinary whole control at C=1..4, with two isolated C=1
+proposal diagnostics.
 
-The sole decision authority is the schema-v2 output from
+The sole decision authority is the schema-v3 output from
 `tools/bench/assemble_dflash_selection.py`. It binds the base decision through the conversion
 report to the exact terminal winner's companion artifact, executable, cache group, and K/W; reopens every schema-v20
 report; and recomputes shortlist, exact ordinary-output parity, exact repeated proposal/target
-determinism, and generated-quality evidence. Its retained frontier treats every whole-throughput,
+determinism, and generated-quality evidence. Whole parity covers the complete requested generation
+including its first output token; isolated decode parity covers all 257 post-seed outputs, with seed
+equality inherited from deterministic whole-route parity. Before frontier ranking, every K/W must provide at least
+`1.02x` raw-mean speedup and a strictly positive two-standard-deviation conservative speedup over
+its matching ordinary route in every 8K/32K C=1..4 whole and decode cell. Capacity, acceptance,
+quality, and speed remain distinct gates. Its retained frontier treats every whole-throughput,
 capacity, and acceptance cell as a separate maximize objective. The static winner maximizes the
 worst normalized 8K/32K C=1..4 whole-throughput ratio, then worst normalized C=1..4 capacity,
 then worst normalized matched acceptance length. Numeric `(K, W)` resolves only a complete tie.
@@ -850,11 +856,46 @@ gate before numerical or timing work. Both private remap forms and their tempora
 surfaces were removed; the restored canonical `r9700_linear.hip` SHA-256 is
 `7d204bb10feeeb5988c26960ce992a6f487fd53afc162e89508ee3524b90b576`.
 
-The next bounded prefill experiment is complete dual-FMAC pairing over the eligible accumulation
-stream. After that isolated decision, the explicitly scheduled compound is a two-slab load FIFO
-combined only with mechanisms already admitted at that point. It must demonstrate at least
-`35.9 ms` saving at whole-P2048 scope; refresh attribution first if the then-current whole profile
-no longer supports that bound. Ordinary-decode roof closure precedes this P2048 work, and
+Complete dual-FMAC pairing preserved the canonical static resource contract (88 VGPR, 17,152-byte
+LDS, occupancy 16, zero scratch/spills, eight IU4 sites, and ten protected scalar-base/U32 loads)
+while changing the eligible instruction mix to eight dual FMACs and zero singles. The v1 and v2
+operator reports were retained as inconclusive startup-transient evidence:
+`profiles/bench/r9700-q4-prefill-dual-fmac-p2048-ab-20260906.json` (SHA-256
+`7c440f0b318c0886ad5e47a7629e91e992234637a96125b026943ad00edf9145`) and
+`profiles/bench/r9700-q4-prefill-dual-fmac-p2048-ab-v2-20260906.json` (SHA-256
+`a60b1a7ae2795b6be0c75ed9da657c88e782092d84417a3dcd71d5884ead64d6`). After adding two
+balanced unscored intervals per server, v3 accepted every operator cell (robust upper ratios at
+most `0.9655278292`) and achieved a `12.6098960755 ms` call-weighted robust saving lower; its report
+is `profiles/bench/r9700-q4-prefill-dual-fmac-p2048-ab-v3-20260906.json` (SHA-256
+`42c3847f7b52a8d9c436dcc957175439191decc057f51d2234c8d729676f6e1d`).
+
+The terminal whole-P2048 gate rejected the candidate despite exact output parity and token
+identities passing. Control/candidate medians were `1072.2601595`/`1059.691983 ms`; ratio upper
+`0.9924224143` passed, but the robust saving lower was `8.1438331535 ms`, below the required
+`10 ms`. The authoritative report is
+`profiles/bench/r9700-q4-prefill-dual-fmac-whole-p2048-c1-full-v2-20260906/report.json` (SHA-256
+`88da09557579e3d2e729ef1d7858c69fca5a29718c246ad9dc2403749cedfce1`). The selector,
+challenger, and timing tooling were removed, leaving canonical scalar-base production unchanged.
+The final explicitly scheduled two-entry register-load FIFO was rejected at its loaded-object
+resource gate. Its fixed G+1/G+2 payload slots retained both 8,576-byte LDS banks, 17,152-byte total
+LDS, a 512-thread maximum workgroup, zero private storage/spills, eight IU4 sites, and the canonical
+six dual plus four single FMAC sites, but the selected kernel used `97` VGPR: nine above the
+canonical `88`-VGPR gate and one above the absolute `96`-VGPR ceiling. No numerical or GPU timing
+work was admitted. The immutable report is
+`profiles/bench/r9700-q4-prefill-register-fifo-static-rejection-20260906.json` (SHA-256
+`15b9369772015ae1cb079d17272f3c027d29fb2a7148236968e2e014bf4cd133`), with extracted inner gfx1201
+ELF SHA-256 `24da41789f510c0f848b62ca2020b890ce0a33be96cea05ffbaeea12ea73aef7`. The selector and candidate
+were removed. Canonical P2048 therefore remains `1075.438603 ms` / `1904.339303 tok/s`.
+
+This exhausts the explicit bounded candidate list. A targeted audit of the canonical loaded ISA and
+retained P2048 trace found no new mechanism outside the rejected topology and representation
+families with a credible `>=35.9 ms` whole-P2048 saving. That threshold is a `10.08%` reduction of
+the retained `356.276973 ms` Q4 service. Canonical ISA already issues successor loads ahead of its
+eight IU4 WMMAs at occupancy 16; the independent optimistic bounds for activation/scale-side cleanup
+(`19.045 ms`) and arithmetic-encoding cleanup (`<14.3 ms`) are each too small, and the concrete
+second-payload overlap schedule costs the nine VGPRs that failed this gate. Those overlapping bounds
+cannot be summed. Candidate exhaustion is not practical-ceiling evidence, so that closure remains
+open. Ordinary-decode roof closure precedes this P2048 work, and
 chunk/base selection and the selected companion remain prerequisites for DFlash2.
 
 The structural M64xN256 plus ping/pong follow-up also passed its exact/FP64 oracle and every tuple

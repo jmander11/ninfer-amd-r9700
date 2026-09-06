@@ -22,12 +22,14 @@ from tools.bench.run_ninfer_bench_matrix import (
     PRODUCT_CONCURRENCIES,
     R9700_POWER_PROFILE,
     build_cases,
+    dflash_shortlist_profiles,
     file_sha256,
     load_bench_report,
     report_rows,
     validate_automatic_feasibility,
     validate_bound_diagnostic,
     validate_hybrid_shared_workspace_authority,
+    base_hybrid_shared_workspace_authority,
     write_dflash_determinism,
     write_dflash_greedy_parity,
     write_dflash_quality_evidence,
@@ -39,8 +41,10 @@ from tools.ppl.pareto import validate_terminal_production_authority
 
 
 ARTIFACT_TYPE = "ninfer_r9700_dflash_selection"
-SCHEMA_VERSION = 2
-RULE = "maximin_whole_then_capacity_then_acceptance_then_canonical_kw_v2"
+SCHEMA_VERSION = 3
+RULE = "material_conservative_matched_ordinary_speed_then_maximin_v3"
+MATERIAL_SPEEDUP = 1.02
+UNCERTAINTY_SIGMAS = 2.0
 DFLASH_RECIPE_ID = "r9700-dflash2-all-q4g64-n16k16-bf16-codebook-eval-v1"
 DFLASH_COMPANION_BY_BASE = {
     "r9700-q4g64-n16k16-eval": "r9700-q4g64-n16k16-dflash2-q4-eval",
@@ -144,6 +148,7 @@ def _matrix(root: Path, preset: str, k: int | None = None, w: int | None = None,
 def _same_campaign(
     manifest: dict, artifact: dict, bench: dict, group: int, text_prefill_profile: str,
     prefill_chunk: int, hybrid_authority: dict[str, Any] | None,
+    dflash_widths: Sequence[int] = (),
 ) -> None:
     _validate_physical_identity(manifest.get("artifact"), "matrix artifact", artifact=True)
     _validate_physical_identity(manifest.get("bench"), "matrix benchmark")
@@ -173,9 +178,21 @@ def _same_campaign(
         if manifest.get("required_candidate_identity") != "fp8-hybrid-selection-authority":
             raise ValueError("hybrid DFlash campaign lacks its candidate identity")
         observed = validate_hybrid_shared_workspace_authority(
-            manifest.get("hybrid_shared_workspace_authority"), [prefill_chunk]
+            manifest.get("hybrid_shared_workspace_authority"), [prefill_chunk], dflash_widths
         )
-        if observed != hybrid_authority:
+        build = observed["build"]
+        bench_root = Path(bench["path"]).resolve().parent.parent
+        if (
+            Path(build["root"]).resolve() != bench_root
+            or Path(build["cmake_cache"]["path"]).resolve()
+            != bench_root / "CMakeCache.txt"
+            or Path(build["compile_commands"]["path"]).resolve()
+            != bench_root / "compile_commands.json"
+        ):
+            raise ValueError("hybrid planner does not bind the benchmark build root")
+        _validate_physical_identity(build["cmake_cache"], "hybrid CMake cache")
+        _validate_physical_identity(build["compile_commands"], "hybrid compile commands")
+        if base_hybrid_shared_workspace_authority(observed) != hybrid_authority:
             raise ValueError("hybrid DFlash campaign planner differs from selected base")
     elif (
         manifest.get("required_candidate_identity") is not None
@@ -365,7 +382,7 @@ def _validate_shortlist_output(
     parity = _load(parity_path)
     if (
         parity.get("artifact_type") != "ninfer_dflash_ordinary_greedy_parity"
-        or parity.get("schema_version") != 1
+        or parity.get("schema_version") != 2
         or parity.get("artifact") != artifact
         or parity.get("benchmark_executable") != bench
         or parity.get("pass") is not True
@@ -404,12 +421,16 @@ def _auxiliary(
     comparisons = parity.get("comparisons")
     if (
         parity.get("artifact_type") != "ninfer_dflash_ordinary_greedy_parity"
-        or parity.get("schema_version") != 1
+        or parity.get("schema_version") != 2
         or not isinstance(comparisons, list)
-        or len(comparisons) != len(PRODUCT_CONCURRENCIES)
-        or {row.get("concurrency") for row in comparisons} != set(PRODUCT_CONCURRENCIES)
+        or len(comparisons) != 2 * len(PRODUCT_CONCURRENCIES)
+        or {(row.get("phase"), row.get("concurrency")) for row in comparisons}
+        != {(phase, concurrency) for phase in ("decode", "whole")
+            for concurrency in PRODUCT_CONCURRENCIES}
         or any(row.get("draft_tokens") != k or row.get("dflash_verify_width") != w
-               or row.get("exact") is not True for row in comparisons)
+               or row.get("includes_seed") is not (row.get("phase") == "whole")
+               or row.get("exact") is not True
+               for row in comparisons)
     ):
         raise ValueError("DFlash ordinary-output parity is incomplete")
     det_rows = determinism.get("comparisons")
@@ -482,6 +503,109 @@ def _normalized(name: str, values: dict[str, dict], frontier: list[str]) -> dict
     return result
 
 
+def _matched_ordinary_speed_gate(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    """Require material, uncertainty-separated whole and decode wins at every product cell."""
+
+    suites = (
+        "dflash_pareto_whole_inference", "dflash_pareto_whole_control",
+        "dflash_pareto_decode", "dflash_pareto_control",
+    )
+    by_suite: dict[str, dict[tuple[int, int, int], dict[str, Any]]] = {}
+    metric = {
+        "dflash_pareto_whole_inference": ("whole_output_tok_s_mean", "whole_output_tok_s_stddev"),
+        "dflash_pareto_whole_control": ("whole_output_tok_s_mean", "whole_output_tok_s_stddev"),
+        "dflash_pareto_decode": ("decode_output_tok_s_mean", "decode_output_tok_s_stddev"),
+        "dflash_pareto_control": ("decode_output_tok_s_mean", "decode_output_tok_s_stddev"),
+    }
+    for suite in suites:
+        selected = [row for row in rows if row.get("suite") == suite]
+        indexed: dict[tuple[int, int, int], dict[str, Any]] = {}
+        for row in selected:
+            key_values = (row.get("n_prompt"), row.get("n_gen"), row.get("concurrency"))
+            mean_field, stddev_field = metric[suite]
+            if (
+                any(type(value) is not int or value <= 0 for value in key_values)
+                or key_values[2] not in PRODUCT_CONCURRENCIES
+                or type(row.get("requested_output_tokens")) is not int
+                or row["requested_output_tokens"] <= 0
+                or type(row.get(mean_field)) not in (int, float)
+                or isinstance(row.get(mean_field), bool)
+                or not math.isfinite(row[mean_field]) or row[mean_field] <= 0
+                or type(row.get(stddev_field)) not in (int, float)
+                or isinstance(row.get(stddev_field), bool)
+                or not math.isfinite(row[stddev_field]) or row[stddev_field] < 0
+            ):
+                raise ValueError(f"{suite} has malformed matched speed evidence")
+            key = (key_values[0], key_values[1], key_values[2])
+            if key in indexed:
+                raise ValueError(f"{suite} has duplicate matched speed cells")
+            indexed[key] = row
+        by_suite[suite] = indexed
+
+    expected = {
+        (prompt, 256, concurrency)
+        for prompt in (8192, 32768)
+        for concurrency in PRODUCT_CONCURRENCIES
+    }
+    if any(set(by_suite[suite]) != expected for suite in suites):
+        raise ValueError("DFlash matched speed gate lacks exact 8K/32K C1..4 cells")
+
+    raw_ratios: dict[str, dict[str, float]] = {"whole": {}, "decode": {}}
+    conservative: dict[str, dict[str, float]] = {"whole": {}, "decode": {}}
+    matched = {}
+    for phase, candidate_suite, control_suite in (
+        ("whole", "dflash_pareto_whole_inference", "dflash_pareto_whole_control"),
+        ("decode", "dflash_pareto_decode", "dflash_pareto_control"),
+    ):
+        mean_field, stddev_field = metric[candidate_suite]
+        for prompt, generated, concurrency in sorted(expected):
+            candidate = by_suite[candidate_suite][(prompt, generated, concurrency)]
+            control = by_suite[control_suite][(prompt, generated, concurrency)]
+            if candidate["requested_output_tokens"] != control["requested_output_tokens"]:
+                raise ValueError("DFlash matched speed cell changes requested output tokens")
+            cell = f"p{prompt}_g{generated}_c{concurrency}"
+            candidate_lower = candidate[mean_field] - UNCERTAINTY_SIGMAS * candidate[stddev_field]
+            control_upper = control[mean_field] + UNCERTAINTY_SIGMAS * control[stddev_field]
+            if candidate_lower <= 0 or control_upper <= 0:
+                raise ValueError("DFlash matched speed uncertainty bound is nonpositive")
+            raw_ratios[phase][cell] = candidate[mean_field] / control[mean_field]
+            conservative[phase][cell] = candidate_lower / control_upper
+            if not all(math.isfinite(value) for value in (
+                raw_ratios[phase][cell], conservative[phase][cell]
+            )):
+                raise ValueError("DFlash matched speed ratio is not finite")
+            matched[f"{phase}_{cell}"] = {
+                "dflash_mean": candidate[mean_field], "dflash_stddev": candidate[stddev_field],
+                "ordinary_mean": control[mean_field], "ordinary_stddev": control[stddev_field],
+            }
+    minimum_raw = {phase: min(values.values()) for phase, values in raw_ratios.items()}
+    minimum_conservative = {
+        phase: min(values.values()) for phase, values in conservative.items()
+    }
+    passed = all(
+        minimum_raw[phase] >= MATERIAL_SPEEDUP and minimum_conservative[phase] > 1.0
+        for phase in ("whole", "decode")
+    )
+    return {
+        "criterion": (
+            "at least 1.02x raw mean speedup and a strictly positive two-standard-deviation "
+            "lower-bound speedup for both exact whole-request and isolated decode controls at "
+            "every 8K/32K C1..4 cell"
+        ),
+        "material_speedup": MATERIAL_SPEEDUP,
+        "uncertainty_sigmas": UNCERTAINTY_SIGMAS,
+        "required_concurrency": list(PRODUCT_CONCURRENCIES),
+        "required_prompt_tokens": [8192, 32768],
+        "required_generated_tokens": 256,
+        "raw_mean_speedup_by_phase_and_cell": raw_ratios,
+        "conservative_speedup_by_phase_and_cell": conservative,
+        "matched_means_by_phase_and_cell": matched,
+        "minimum_raw_mean_speedup": minimum_raw,
+        "minimum_conservative_speedup": minimum_conservative,
+        "pass": passed,
+    }
+
+
 def assemble(
     base_selection: Path, conversion_report: Path, shortlist_root: Path,
     capacity_inputs: Sequence[tuple[int, int, Path]],
@@ -505,6 +629,7 @@ def assemble(
     _same_campaign(
         manifest, artifact, bench, group, text_prefill_profile,
         prefill_chunk, hybrid_authority,
+        sorted({row["verify_width_resolved"] for row in dflash_shortlist_profiles()}),
     )
     _records(shortlist_root, manifest, "dflash-shortlist", 1, 2, prefill_chunk)
     _validate_shortlist_output(
@@ -585,7 +710,7 @@ def assemble(
         )
         _same_campaign(
             cap_manifest, artifact, bench, group, text_prefill_profile,
-            prefill_chunk, hybrid_authority,
+            prefill_chunk, hybrid_authority, [w],
         )
         cap_reports = _records(
             root, cap_manifest, "dflash-capacity", k, w, prefill_chunk,
@@ -616,7 +741,7 @@ def assemble(
             )
             _same_campaign(
                 pmanifest, artifact, bench, group, text_prefill_profile,
-                prefill_chunk, hybrid_authority,
+                prefill_chunk, hybrid_authority, [w],
             )
             _records(proot, pmanifest, "dflash-pareto", k, w, prefill_chunk)
             aux = _auxiliary(proot, pmanifest, artifact, bench, k, w)
@@ -650,19 +775,26 @@ def assemble(
                        or value < 1 or value > k + 1 for value in acceptance.values())
             ):
                 raise ValueError(f"K{k}/W{w} lacks complete positive whole/acceptance cells")
-            objective_values[f"k{k}-w{w}"] = {
+            objectives = {
                 "whole": whole, "capacity": capacity, "acceptance": acceptance,
             }
+            performance_gate = _matched_ordinary_speed_gate(rows)
+            if performance_gate["pass"]:
+                objective_values[f"k{k}-w{w}"] = objectives
             row.update({
                 "pareto_matrix": _identity(proot / "manifest.json"),
-                "objectives": objective_values[f"k{k}-w{w}"],
+                "performance_eligible": performance_gate["pass"],
+                "matched_ordinary_speed_gate": performance_gate,
+                "objectives": objectives,
                 **aux,
             })
         candidates.append(row)
 
     eligible_names = sorted(objective_values)
     if not eligible_names:
-        raise ValueError("no shortlist-frontier K/W profile is capacity eligible")
+        raise ValueError(
+            "no capacity-eligible shortlist-frontier K/W has positive matched ordinary speed"
+        )
     reference = objective_values[eligible_names[0]]
     for name in eligible_names[1:]:
         if any(set(objective_values[name][kind]) != set(reference[kind])
@@ -707,6 +839,11 @@ def assemble(
         ),
         "hybrid_shared_workspace_authority": hybrid_authority,
         "shortlist": _identity(shortlist_path), "candidates": candidates,
+        "capacity_eligible_profiles": sorted(
+            f"k{row['draft_tokens']}-w{row['verify_width']}"
+            for row in candidates if row["capacity_eligible"]
+        ),
+        "performance_eligible_profiles": eligible_names,
         "eligible_frontier": frontier, "normalized_objectives": normalized,
         "winner": winner, "decisive_stage": decisive,
     }
@@ -729,7 +866,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         [(int(k), int(w), Path(root).resolve()) for k, w, root in args.pareto],
     )
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    payload = (json.dumps(result, indent=2) + "\n").encode("utf-8")
+    payload = (json.dumps(result, indent=2, allow_nan=False) + "\n").encode("utf-8")
     descriptor, temporary = tempfile.mkstemp(prefix=f".{args.out.name}.", dir=args.out.parent)
     published = False
     durable = False

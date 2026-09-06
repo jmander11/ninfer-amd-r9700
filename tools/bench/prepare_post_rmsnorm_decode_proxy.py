@@ -145,6 +145,8 @@ def shell(plan_dir: Path) -> str:
              "test \"$(sha256sum \"$artifact\" | cut -d' ' -f1)\" = " + ARTIFACT_SHA256,
              "test \"$(sha256sum \"$corpus\" | cut -d' ' -f1)\" = " + CORPUS_SHA256,
              f"test \"$(sha256sum {quoted(str(STREAM_PROBE.resolve()))} | cut -d' ' -f1)\" = {STREAM_PROBE_SHA256}",
+             f"test \"$(sha256sum {quoted(str(ROCPROF.resolve()))} | cut -d' ' -f1)\" = {sha(ROCPROF)}",
+             f"test \"$(sha256sum {quoted(str(ROCPROF_AVAIL.resolve()))} | cut -d' ' -f1)\" = {sha(ROCPROF_AVAIL)}",
              "test \"$(cat \"$power\")\" = auto", "sudo -v", "",
              "restore_auto() {", "  printf '%s\\n' auto | sudo tee \"$power\" >/dev/null",
              "  test \"$(cat \"$power\")\" = auto",

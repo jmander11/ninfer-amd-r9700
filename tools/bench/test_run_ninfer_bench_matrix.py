@@ -43,6 +43,7 @@ from tools.bench.run_ninfer_bench_matrix import (
     validate_hybrid_shared_workspace_authority,
     validate_automatic_feasibility,
     validate_dflash_campaign_artifact,
+    validate_dflash_ordinary_command,
     validate_dflash_diagnostic_raw,
     validate_case_profile,
     validate_report_tests,
@@ -324,21 +325,32 @@ class CompiledKvGroupTest(unittest.TestCase):
 
     def test_hybrid_width_authority_covers_every_requested_chunk(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            tool = Path(directory) / "planner"
+            build = Path(directory) / "build"
+            tool = build / "tools" / "planner"
+            bench = build / "bench" / "ninfer_bench"
+            tool.parent.mkdir(parents=True)
+            bench.parent.mkdir(parents=True)
             tool.write_bytes(b"planner")
+            bench.write_bytes(b"bench")
+            (build / "CMakeCache.txt").write_text("cache")
+            (build / "compile_commands.json").write_text("[]")
 
-            def widths(_tool: Path, chunk: int, concurrency: int, drafts: int):
+            def widths(
+                _tool: Path, chunk: int, concurrency: int, drafts: int,
+                dflash_width: int = 0,
+            ):
                 self.assertEqual(concurrency, 4)
-                return (
-                    [1, 2, 3, 4, chunk]
-                    if drafts == 0 else [1, 2, 3, 4, 8, 12, 16, chunk]
-                )
+                if dflash_width:
+                    return sorted(set((1, 2, 3, 4, dflash_width, 2 * dflash_width,
+                                       3 * dflash_width, 4 * dflash_width, chunk)))
+                return ([1, 2, 3, 4, chunk] if drafts == 0
+                        else [1, 2, 3, 4, 8, 12, 16, chunk])
 
             with mock.patch(
                 "tools.bench.run_ninfer_bench_matrix.query_widths", side_effect=widths
             ):
                 authority = build_hybrid_shared_workspace_authority(
-                    tool, [8192, 1024, 4096, 2048]
+                    tool, bench, [8192, 1024, 4096, 2048], [12, 8]
                 )
             self.assertEqual(authority["prefill_chunks"], [1024, 2048, 4096, 8192])
             self.assertEqual(
@@ -346,10 +358,14 @@ class CompiledKvGroupTest(unittest.TestCase):
                 {"1024", "2048", "4096", "8192"},
             )
             validate_hybrid_shared_workspace_authority(
-                authority, [1024, 2048, 4096, 8192]
+                authority, [1024, 2048, 4096, 8192], [8, 12]
+            )
+            self.assertEqual(
+                set(authority["inventories_by_prefill_chunk"]["4096"]),
+                {"ordinary", "mtp3", "dflash-w8", "dflash-w12"},
             )
             with self.assertRaisesRegex(ValueError, "width authority differs"):
-                validate_hybrid_shared_workspace_authority(authority, [2048, 4096])
+                validate_hybrid_shared_workspace_authority(authority, [2048, 4096], [8, 12])
 
     def test_expected_compiled_group_is_enforced(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1034,6 +1050,22 @@ class CompiledKvGroupTest(unittest.TestCase):
         report = {"config": config, "tests": [whole_row(8192), whole_row(32768)]}
         validate_report_tests(report, case)
 
+    def test_dflash_controls_require_exact_spec_none_ordinary_execution(self) -> None:
+        for preset in ("dflash-shortlist", "dflash-pareto"):
+            cases = build_cases(preset, 7, 12)
+            controls = [case for case in cases if case.parity_role in
+                        {"ordinary", "ordinary_decode", "ordinary_whole"}]
+            self.assertEqual(len(controls), 1 if preset == "dflash-shortlist" else 2)
+            for control in controls:
+                command = ["ninfer_bench", *control.args]
+                validate_dflash_ordinary_command(control, command)
+                self.assertEqual(command.count("--draft-tokens"), 1)
+                self.assertEqual(command[command.index("--draft-tokens") + 1], "0")
+                self.assertNotIn("--spec", command)
+                self.assertNotIn("--lm-head-draft", command)
+                with self.assertRaisesRegex(ValueError, "must be spec-none"):
+                    validate_dflash_ordinary_command(control, [*command, "--spec", "mtp"])
+
     def test_generic_speculative_diagnostic_allows_zero_acceptance(self) -> None:
         _validate_speculative(
             {
@@ -1431,6 +1463,7 @@ class CompiledKvGroupTest(unittest.TestCase):
             "context_p8192_p32768_g256_dflash_graph": (3, 1),
             "context_p8192_p32768_g256_ordinary_graph": (3, 1),
             "whole_p8192_p32768_g256_dflash_graph": (3, 1),
+            "whole_p8192_p32768_g256_ordinary_graph": (3, 1),
             "context_p8192_g256_dflash_eager_diagnostic_a": (1, 0),
             "context_p8192_g256_dflash_eager_diagnostic_b": (1, 0),
         }
@@ -1462,8 +1495,8 @@ class CompiledKvGroupTest(unittest.TestCase):
             self.assertEqual(manifest["dflash_draft_tokens"], 7)
             self.assertEqual(manifest["dflash_verify_width"], 12)
             self.assertEqual(manifest["selected_prefill_chunk"], 2048)
-            self.assertEqual(manifest["case_count"], 6)
-            self.assertEqual(manifest["point_count"], 18)
+            self.assertEqual(manifest["case_count"], 7)
+            self.assertEqual(manifest["point_count"], 22)
             records = manifest["commands"]
             for record in records:
                 command = record["command"]
@@ -1481,11 +1514,19 @@ class CompiledKvGroupTest(unittest.TestCase):
             diagnostics = [record for record in records if not record["performance_eligible"]]
             self.assertEqual(len(diagnostics), 2)
             self.assertTrue(all(record["concurrency"] == 1 for record in diagnostics))
+            isolated = [record for record in records
+                        if "--isolate-prompt-decode" in record["command"]]
+            self.assertEqual({record["suite"] for record in isolated},
+                             {"dflash_pareto_decode", "dflash_pareto_control"})
+            self.assertEqual({record["concurrency"] for record in isolated}, set(range(1, 5)))
+            self.assertTrue(all("--whole-pg" not in record["command"] for record in isolated))
             self.assertEqual(
                 diagnostics[0]["environment"]["NINFER_DFLASH_CANDIDATE_STATS"], "1"
             )
-            dflash = [record for record in records if record["parity_role"] == "dflash"]
-            ordinary = [record for record in records if record["parity_role"] == "ordinary"]
+            dflash = [record for record in records if record["parity_role"] in
+                      {"dflash_decode", "dflash_whole"}]
+            ordinary = [record for record in records if record["parity_role"] in
+                        {"ordinary_decode", "ordinary_whole"}]
             self.assertEqual({record["concurrency"] for record in dflash}, set(range(1, 5)))
             self.assertEqual({record["concurrency"] for record in ordinary}, set(range(1, 5)))
             self.assertTrue(all("--retain-token-ids" in record["command"] for record in dflash + ordinary))
@@ -1839,7 +1880,7 @@ class CompiledKvGroupTest(unittest.TestCase):
                     },
                     "tests": [{
                         "label": "pp8192+tg256", "kind": "pp+tg", "n_prompt": 8192,
-                        "n_gen": 256,
+                        "n_gen": 256, "requested_output_tokens": 3,
                         "reps": [{"generated_token_ids_by_lane": [tokens]}],
                     }]
                 }
@@ -1919,16 +1960,20 @@ class CompiledKvGroupTest(unittest.TestCase):
             self.assertTrue(result["pass"])
             self.assertFalse(failures)
             parity = {
+                "artifact_type": "ninfer_dflash_ordinary_greedy_parity",
+                "schema_version": 2,
                 "artifact": artifact,
                 "benchmark_executable": bench,
                 "comparisons": [
                     {
+                        "phase": phase,
                         "concurrency": concurrency,
                         "draft_tokens": 1,
                         "dflash_verify_width": 2,
+                        "includes_seed": phase == "whole",
                         "exact": True,
                     }
-                    for concurrency in range(1, 5)
+                    for phase in ("decode", "whole") for concurrency in range(1, 5)
                 ],
                 "pass": True,
             }
@@ -1944,6 +1989,13 @@ class CompiledKvGroupTest(unittest.TestCase):
             self.assertEqual(
                 quality["proposal_gate"]["diagnostics"][0]["finite_logit_elements"], 2
             )
+            malformed_parity = json.loads(json.dumps(parity))
+            malformed_parity["comparisons"][0]["includes_seed"] = True
+            _, malformed_failures = write_dflash_quality_evidence(
+                root, records, malformed_parity, result, artifact=artifact, bench=bench
+            )
+            self.assertTrue(any("parity is incomplete" in row["error"]
+                                for row in malformed_failures))
             second_report = Path(records[1]["report"])
             original_report = second_report.read_text(encoding="utf-8")
             second_report.write_text(original_report + "\n", encoding="utf-8")
