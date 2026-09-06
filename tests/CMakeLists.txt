@@ -86,6 +86,11 @@ ninfer_add_r9700_test(ninfer_r9700_fp8_execution_state_contract_test
 ninfer_add_r9700_test(ninfer_qwen3_runtime_mechanisms_test
   SOURCES targets/qwen3/test_runtime_mechanisms.cpp
   LIBRARIES ninfer_engine ninfer_r9700_core)
+ninfer_add_r9700_test(ninfer_qwen3_decision_trace_test
+  SOURCES targets/qwen3/test_decision_trace.cpp
+  LIBRARIES ninfer_r9700_core)
+ninfer_add_r9700_test(ninfer_qwen3_prefill_tail_trace_path_test
+  SOURCES targets/qwen3/test_prefill_tail_trace_path.cpp)
 ninfer_add_r9700_test(ninfer_qwen3_score_index_test
   SOURCES targets/qwen3/test_score_index.cpp
   LIBRARIES ninfer_engine)

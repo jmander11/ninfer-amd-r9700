@@ -1,4 +1,5 @@
 #include "targets/qwen3/impl/runtime/dflash_candidate_stats.h"
+#include "targets/qwen3/impl/runtime/decision_trace.h"
 #include "targets/qwen3/impl/runtime/instance.h"
 #include "targets/qwen3/impl/runtime/program.h"
 
@@ -3125,6 +3126,7 @@ ProgramImplCore::decode_ordinary_batch(std::span<const std::uint32_t> lanes,
     if (lanes.empty() || lanes.size() > max_concurrency || budgets.size() != lanes.size()) {
         throw std::invalid_argument("ordinary batch membership is invalid");
     }
+    decision_trace::require_eager(use_device_graph);
 
     std::uint32_t maximum_frontier = 0;
     for (std::size_t row = 0; row < lanes.size(); ++row) {
@@ -3216,6 +3218,10 @@ ProgramImplCore::decode_ordinary_batch(std::span<const std::uint32_t> lanes,
             retained_frontiers[row] = sequences[lanes[row]].execution_frontier + 1U;
         }
         text_transactions.finish_resolution({retained_frontiers.data(), lanes.size()});
+        decision_trace::record_ordinary(io.ordinary->logits, *ordinary_host_ingress,
+                                        *ordinary_host_egress,
+                                        static_cast<std::int32_t>(lanes.size()),
+                                        TextConfig::token_domain);
         for (std::size_t row = 0; row < lanes.size(); ++row) {
             SequenceState& sequence    = sequences[lanes[row]];
             RequestControl& request    = requests[lanes[row]];
@@ -3490,6 +3496,7 @@ ProgramImplCore::decode_dflash_batch(std::span<const std::uint32_t> lanes,
     if (lanes.empty() || lanes.size() > max_concurrency || budgets.size() != lanes.size()) {
         throw std::invalid_argument("DFlash batch membership is invalid");
     }
+    decision_trace::require_eager(use_device_graph);
 
     const std::uint32_t width           = dflash_verify_width;
     std::uint32_t maximum_frontier      = 0;
@@ -3616,6 +3623,13 @@ ProgramImplCore::decode_dflash_batch(std::span<const std::uint32_t> lanes,
                 sequences[lanes[row]].execution_frontier + text_target_columns[row];
         }
         text_transactions.finish_resolution({retained_frontiers.data(), lanes.size()});
+        decision_trace::record_dflash(
+            io.dflash_decode->target_logits, io.dflash_decode->target_argmax,
+            io.dflash_decode->cache_positions, io.dflash_decode->verify_ids,
+            *dflash_host_ingress, *dflash_host_egress,
+            std::span<const std::uint32_t>(text_target_columns.data(), lanes.size()),
+            static_cast<std::int32_t>(lanes.size()), static_cast<std::int32_t>(width),
+            TextConfig::token_domain, dflash_uses_tree_verify(batch_k, live_w));
         if (ninfer::targets::qwen3::detail::dflash_candidate_stats_enabled() &&
             io.dflash_decode.has_value()) {
             qwen3::DFlashDecodeState& frame = *io.dflash_decode;

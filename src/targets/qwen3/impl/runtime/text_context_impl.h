@@ -1,5 +1,6 @@
 #include "targets/qwen3/impl/runtime/instance.h"
 #include "targets/qwen3/impl/runtime/panel_copy.h"
+#include "targets/qwen3/impl/runtime/prefill_tail_trace.h"
 #include "targets/qwen3/impl/runtime/text_context.h"
 #include "targets/qwen3/impl/runtime/workspace_recipe.h"
 
@@ -1450,6 +1451,8 @@ TextContext::prefill_impl(std::span<const int> ids, const TextPrefill* text_pref
                 Tensor last_xf = xf.slice(1, len - 1, 1);
                 Tensor logits  = matrix_window(io_.logits, 1);
                 run_linear(last_xf, *lm_head_, logits, s);
+                prefill_tail_trace::capture_if_enabled(base, static_cast<std::uint32_t>(T),
+                                                       last_xf, logits, kCfg.token_domain, s);
                 // Set io_.pos to the bonus token's absolute position (base + T) before picking so
                 // the sampler RNG is keyed by it (prefill purpose keeps it distinct from the first
                 // decode step, which reuses the same io_.pos).
