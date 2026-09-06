@@ -616,9 +616,8 @@ run_mixed_selection_pair 32 build-r9700-dense-selection-g32 \
 # zero-warmup gate. Do not multiply repetitions by lane: one C-lane repetition already measures the
 # complete startup-fixed concurrent product workload.
 # Terminal assembly checks each raw repetition and conserves its sum against the report aggregate.
-# A row above 64*C rounds retains its measured throughput but emits
-# `conditional_head_precision_required`; it does not silently disqualify the recipe before the
-# bounded same-base head-only W8 comparison.
+# A row above the theoretical 64*C minimum retains its measured throughput and acceptance evidence;
+# it does not trigger an MTP proposal-head precision branch or alter base selection.
 
 # DFlash runs begin only after the terminal base decision selects the artifact, cache group, and
 # ordinary Text-prefill profile. Convert and measure the companion for that selected base recipe.
@@ -910,21 +909,25 @@ python3 -m tools.bench.decide_fp8_gate_up \
 ```
 
 The decision replaces the fresh trace's measured Q4 gate/up service with the qualifier's measured
-complete-path FP8/Q4 time ratio. It reports the exact 64-object resident-byte delta, conservative
-P2048/P8192 capacity slack for every G16/G32 C1..4 cell, and projected whole-P2048 time and
-throughput. `proceed` requires a faster complete FP8 median, nonnegative slack in all 16 cells,
-and an improving whole projection; otherwise the report explicitly says `reject` and why.
+complete-path FP8/Q4 time ratio. It reports the exact 64-object resident-byte delta, the historical
+P2048/P8192 capacity calculation for every G16/G32 C1..4 cell, and projected whole-P2048 time and
+throughput. Its `proceed` verdict required a faster complete FP8 median, nonnegative historical
+slack in all 16 cells, and an improving whole projection. That capacity calculation omitted MTP
+plus optimized-head materialization and is invalid for current admission; only fresh selected-
+chunk physical capacity can admit the route.
 
 ### FP8 post-gate/up fixed-role decision
 
-`decide_fp8_post_gate_up.py` owns the only next role-selection step after the retained gate/up
-decision. It recomputes the exact current converter inventories and all 16 planner capacity cells,
-then exhaustively maximizes measured Q4 service under the tightest post-gate/up slack. The fixed
-result is `text.attention.query_key`, `text.attention.gate_value`, and `text.gdn.query_key`:
+`decide_fp8_post_gate_up.py` owns the retained role-selection step after the gate/up decision. It
+recomputed converter inventories and the then-used 16 planner capacity cells, then maximized
+measured Q4 service under that envelope. The fixed role result is
+`text.attention.query_key`, `text.attention.gate_value`, and `text.gdn.query_key`:
 1,024,065,536 additional bytes and 87,724,946 ns of measured P2048 Q4 service. The two attention
 roles share `[2048,7168,5120]`, so the set requires only that matched complete-path qualifier and
-the `[2048,4096,5120]` GDN query/key qualifier. The remaining tight-cell slack is only 2,004,481
-bytes; no other role is admitted by this owner.
+the `[2048,4096,5120]` GDN query/key qualifier. Its reported 2,004,481-byte tight-cell remainder is
+invalid because the capacity input omitted MTP plus optimized-head materialization; it is not
+current capacity evidence and admits no additional role. Fresh selected-chunk physical capacity
+owns admission.
 
 Each pending input uses schema `ninfer.r9700.fp8_projection_qualification.v1`, version 1, with its
 fixed qualification ID, shape, live source/executable hashes, R9700/gfx1201/auto identity, the
@@ -947,8 +950,9 @@ python3 -m tools.bench.decide_fp8_post_gate_up \
 ```
 
 The tool emits nothing until both hash-bound physical inputs validate. A `proceed` verdict requires
-both complete FP8 paths to beat Q4, all 16 capacity cells to remain nonnegative, and the projection
-to improve on the already admitted gate/up projection. It remains a projection until a selected
+both complete FP8 paths to beat Q4, its historical capacity calculation to remain nonnegative, and
+the projection to improve on the gate/up projection. The capacity clause is now superseded by the
+exact feature-materialization correction. The result remains speed/design evidence until a selected
 hybrid artifact is converted and measured at whole-inference scope.
 
 The roofline tool does not infer a model role, shape, weight format, or inner dimension from a
@@ -1097,102 +1101,16 @@ Never run `llvm-objcopy --dump-section SECTION=FILE INPUT_ELF` without a distinc
 with no output ELF, `llvm-objcopy` rewrites `INPUT_ELF` in place even when the apparent intent is
 only to dump a section.
 
-The optimized MTP shortlist head has a dedicated terminal evidence owner because the generic
-selected-P2048 producer describes prefill operations and cannot establish that the proposal head
-executed. A CPU-only inspection of the current executable may establish that the exact wave32
-symbol is embedded and has the expected IU4/resource profile, but that static result is
-non-terminal: it proves neither an MTP dispatch nor the eventual selected artifact/profile and
-cannot distinguish an ordinary draft-off run that merely validates the same artifact object.
-After preparing and running one selected 8K or 32K whole-MTP3 trace, extract the unique
-inner gfx1201 ELF containing the exact shortlist-head code symbol (the unspecialized fatbin is not
-the proof input), then run:
+MTP whole-route reports retain exact target-token parity, speculative counters, and measured
+acceptance/throughput as regression evidence. DFlash is the only speculative backend with new
+optimization and admission work; no standalone MTP shortlist-head trace or precision branch is
+scheduled or accepted as terminal evidence.
 
-```bash
-MTP_HEAD_CODE_SYMBOL='_ZN6ninfer3ops5r97006linear12_GLOBAL__N_128a8q4g64_linear_wmma32_kernelEPKhS5_PKtPKjS5_S7_P12hip_bfloat16jjj'
-python3 -m tools.bench.extract_embedded_code_object \
-  --executable /absolute/path/to/selected/ninfer_bench \
-  --code-symbol "$MTP_HEAD_CODE_SYMBOL" \
-  --out /absolute/new/path/selected-mtp-head.hsaco
-```
-
-```bash
-python3 -m tools.bench.produce_mtp_shortlist_head_evidence \
-  --plan profiles/rocprof/EXPLICIT-WHOLE-MTP3/plan.json \
-  --benchmark-report profiles/rocprof/EXPLICIT-WHOLE-MTP3/benchmark-report.json \
-  --trace-database /absolute/path/to/EXPLICIT-WHOLE-MTP3/results.db \
-  --power-before profiles/rocprof/EXPLICIT-WHOLE-MTP3/power-profile-before.txt \
-  --power-after profiles/rocprof/EXPLICIT-WHOLE-MTP3/power-profile-after.txt \
-  --terminal-selection profiles/bench/EXPLICIT-SCHEMA-V7-SELECTION.json \
-  --artifact /absolute/path/to/selected.ninfer \
-  --executable /absolute/path/to/selected/ninfer_bench \
-  --code-object /absolute/path/to/selected-mtp-head.hsaco \
-  --dispatch-symbol 'EXACT_ROCPROF_DISPLAY_SYMBOL' \
-  --stage 'EXACT_ROCTX_STAGE' \
-  --out profiles/rocprof/EXPLICIT-WHOLE-MTP3/shortlist-head-evidence.json
-```
-
-Repeat `--stage` only when the exact `[131072,5120]` dispatch appears under multiple intentional
-ROCTX stages. The schema-v1 `ninfer_r9700_mtp_shortlist_head_evidence` producer recomputes the
-schema-v7 terminal choice; binds its artifact, G16/G32 cache, dense or B128/S16/tau900 execution
-profile, selected chunk, and exact benchmark executable to the complete MTP3/control C1..4 source
-matrix. It reopens all eight uniquely pathed reports, reruns their schema/config/geometry checks,
-requires every ordinary control to be `spec=none`, `draft_tokens=0`, `proposal_head=full`, and
-requires exact MTP/ordinary generated-token parity at every repetition and lane, and binds their
-per-repetition `C * 64` round cells back to the recomputed terminal gate. The profiled row must be
-exactly one repetition whose speculative counters equal the row aggregate, with nonzero drafts and
-acceptance. The
-terminal authority must report `selected_route_pending_shortlist_head_trace_and_niah` and the trace
-row must also have the theoretical-minimum lane-summed `64*C` rounds, exactly `192*C` drafted tokens, and
-therefore exactly 192 shortlist-head dispatches. Acceptance remains measured rather than required
-to be perfect: coherent rejected/fallback proposals can still coexist with 64 rounds. A terminal
-`conditional_head_precision_required` outcome is rejected here because it schedules the bounded
-head-only W8 comparator instead of finalizing Q4. It
-opens the artifact and requires `text/draft_head` to be
-`Q4G64_F16S[131072,5120]` in `r9700-q4g64-n16-k16-v1`. The lossless R9700/gfx1201 trace must contain the
-exact display symbol at grid `[8192,1,1]` and wave32 workgroup `[32,1,1]`; every head-shape match
-must have exactly the declared symbol/stage set, so load-only evidence and dense/sparse or symbol
-ambiguity fail. Its dispatch multiplicity must equal both `drafted_tokens / concurrency` and the
-fixed MTP3 g256 count of 192, rejecting coordinated counter/trace tampering and partial traces. The exact embedded code-object
-function, disassembled directly from that ELF by the snapshotted ROCm `llvm-objdump`, must contain two unsigned-low/signed-weight
-and two signed-high/signed-weight `v_wmma_i32_16x16x32_iu4` instructions, use no other WMMA form,
-use zero LDS/private/scratch/flat-scratch, and use at most 64 VGPRs. Resource and wave32/spill
-metadata are read directly from the same ELF by the snapshotted ROCm `llvm-readelf`; caller-authored
-assembly or metadata are not accepted. The report hashes the plan, capture report, database, power
-endpoints, terminal selection, artifact, executable, inner code object, both ROCm tools and their
-derived outputs, and fixed implementation/binding sources before and after validation.
-
-The producer retains the exact rocprof display symbol for dispatch assignment separately from the
-exact code-object symbol used to select assembly and metadata; this is required because a demangled
-display name can contain spaces and is not the code-object symbol. It reopens that exact code symbol
-in both assembly and metadata, hashes the selected
-artifact/executable, code object, disassembly, metadata, producer, all sources, and any overlap
-authority before and after validation,
-and publishes with no-clobber hard-link semantics. Its exact schema-v1 object contains:
-
-- `evidence_id`, `operation_family`, `specialization`, and the exact selected route
-  (`prompt_tokens`, `concurrency`, `prefill_chunk`, `kv_value_group`, `xattention_profile`, and
-  artifact/executable SHA-256 values);
-- one or more exact `{stage,symbol}` dispatch signatures and an exact static-proof `code_symbol`;
-  `stage` may be null only for an
-  explicitly unmodeled/unmarked trace row;
-- `intended_hardware` with classification `matrix`, `scalar_valu`, or `memory_control`, a named
-  arithmetic profile, and nonempty exact expected opcodes. Matrix reports must name a WMMA opcode;
-  scalar/VALU and control reports must not claim WMMA merely because their semantic dtype permits it;
-- `static_proof.status=passed`, the unique executable byte offset/size of the selected code object,
-  exact positive opcode counts, exact nonnegative LDS/VGPR/private/
-  scratch/flat-scratch resources, `zero_scratch=true`, and `inputs` containing hashed assembly,
-  code object, metadata, checker, and nonempty source snapshots; and
-- `memory_path` with residency `register_reuse`, `lds_reuse`, `cache_streaming`, or
-  `metadata_control`; a concrete access pattern; overlap `proven_dependency_safe`,
-  `not_applicable`, or `unproven`; and its evidence. Proven overlap additionally names the exact
-  checked Q4 CTA assembly. An unproven classification remains visible and prevents a
-  complete-status claim.
-
-The assembler rehashes every nested file snapshot again after all reads, refuses an existing or
-dangling output path, and assigns every reconciled dispatch to exactly one static report. Modeled,
-unmodeled, and unsupported dispatches all require intended-hardware ownership; extras, ambiguity,
-and silent subsets fail. Profile-standard PMC evidence retains each captured profiler display
-symbol and joins it through the exact same-capture ROCTX stage plus the selected trace's equal
+The hardware-use evidence assembler rehashes every nested file snapshot again after all reads,
+refuses an existing or dangling output path, and assigns every reconciled dispatch to exactly one
+static report. Modeled, unmodeled, and unsupported dispatches all require intended-hardware
+ownership; extras, ambiguity, and silent subsets fail. Profile-standard PMC evidence retains each
+captured profiler display symbol and joins it through the exact same-capture ROCTX stage plus the selected trace's equal
 `{stage,symbol}` multiplicity. A kernel-regex-filtered capture attributes counters only to the
 captured operation/specialization set, not every operation sharing its stage. PMC dispatch IDs are
 intentionally not joined to the separate auto trace. The output preserves auto profiler durations and roofline rates

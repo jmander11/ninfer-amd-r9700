@@ -1,0 +1,13 @@
+{
+  "artifact_type": "ninfer_r9700_selected_decode_instrumentation_build_preparation",
+  "schema_version": 1,
+  "status": "blocked_on_terminal_schema_v7_selection_and_live_finalist_exit",
+  "selection": "profiles/bench/pareto-result-post-promotion-20260905.json",
+  "build_directory": "build-r9700-selected-ordinary-decode-profile",
+  "receipt": "profiles/rocprof/selected-ordinary-decode-profile-build-20260905/receipt.json",
+  "command": "bash profiles/rocprof/selected-ordinary-decode-profile-build-20260905/build.sh",
+  "target": "ninfer_bench",
+  "maximum_build_jobs": 4,
+  "profile_timing_admissible": false,
+  "note": "Run only after the live 32K finalist campaign exits and schema-v7 selects the route. The producer resolves that authority, configures one fresh fixed build directory with the selected cache/arithmetic/attention definitions, builds only ninfer_bench with -j4, and atomically publishes the marker-bearing binary/cache/compile-database derivation receipt without modifying the terminal timing executable. The receipt does not claim byte-equivalence or that the marker is the only source delta; it binds the exact profiling build and requires the fresh benchmark report to prove the full selected runtime route. Its timing is inadmissible."
+}

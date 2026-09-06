@@ -30,12 +30,14 @@ from tools.bench.run_ninfer_bench_matrix import (
     durable_replace_text,
     file_sha256,
     inspect_artifact,
+    inspect_prefill_chunk_authority,
     load_bench_report,
     main,
     manifest_owned_path,
     require_auto_power_profile,
     require_fp8_hybrid_artifact,
     validate_fp8_hybrid_performance_contract,
+    validate_post_chunk_capacity_contract,
     validate_hybrid_shared_workspace_authority,
     validate_automatic_feasibility,
     validate_dflash_campaign_artifact,
@@ -54,6 +56,59 @@ from tools.ppl.run import validate_n16_receipt_summary
 
 
 class CompiledKvGroupTest(unittest.TestCase):
+    def test_post_chunk_capacity_requires_exact_product_geometry(self) -> None:
+        args = SimpleNamespace(
+            require_post_chunk_capacity=True,
+            preset="pareto-capacity",
+            concurrency=[1, 2, 3, 4],
+            device=0,
+            prefill_chunk_authority=Path(
+                "prefill-chunk-selection-receipt-bound-n16k16-20260905.json"
+            ),
+            expected_kv_value_group=16,
+            expected_xattention_profile="dense",
+            suite=[],
+            limit=None,
+            repetitions=None,
+            warmup=None,
+        )
+        validate_post_chunk_capacity_contract(args)
+        for concurrency in ([1, 2, 3], [1, 2, 3, 4, 5]):
+            with self.subTest(concurrency=concurrency):
+                args.concurrency = concurrency
+                with self.assertRaisesRegex(SystemExit, "exactly C=1,2,3,4"):
+                    validate_post_chunk_capacity_contract(args)
+        args.concurrency = [1, 2, 3, 4]
+        args.prefill_chunk_authority = None
+        with self.assertRaisesRegex(SystemExit, "requires --prefill-chunk-authority"):
+            validate_post_chunk_capacity_contract(args)
+
+    def test_chunk_authority_binds_validated_path_hash_and_selection(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "selection.json"
+            path.write_text('{"selected_prefill_chunk":2048}\n', encoding="utf-8")
+            validated = {
+                "artifact_type": "ninfer_r9700_prefill_chunk_selection",
+                "schema_version": 2,
+                "selected_prefill_chunk": 2048,
+            }
+            with mock.patch(
+                "tools.bench.select_prefill_chunk.validate_selection_record",
+                return_value=validated,
+            ):
+                authority = inspect_prefill_chunk_authority(path, 2048)
+                self.assertEqual(authority, {
+                    "path": str(path.resolve()),
+                    "sha256": file_sha256(path),
+                    **validated,
+                })
+                with self.assertRaisesRegex(ValueError, "differs"):
+                    inspect_prefill_chunk_authority(path, 4096)
+            symlink = Path(directory) / "selection-link.json"
+            symlink.symlink_to(path)
+            with self.assertRaisesRegex(ValueError, "not a regular file"):
+                inspect_prefill_chunk_authority(symlink, 2048)
+
     def test_n16_receipt_summary_rejects_minimal_dict(self) -> None:
         with self.assertRaisesRegex(ValueError, "incomplete"):
             validate_n16_receipt_summary(
@@ -674,6 +729,8 @@ class CompiledKvGroupTest(unittest.TestCase):
             self.assertEqual(manifest["case_count"], 3)
             self.assertEqual(manifest["point_count"], 12)
             self.assertEqual(manifest["concurrency"], list(range(1, 5)))
+            self.assertNotIn("prefill_chunk_authority", manifest)
+            self.assertNotIn("post_chunk_capacity_gate", manifest)
             self.assertEqual(
                 {record["concurrency"] for record in manifest["commands"]}, set(range(1, 5))
             )
@@ -691,6 +748,54 @@ class CompiledKvGroupTest(unittest.TestCase):
                     "--output-dir", str(root / "matrix"),
                     "--concurrency", "5", "--dry-run",
                 ])
+
+    def test_post_chunk_capacity_manifest_binds_authority_and_four_cells(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "capacity"
+            selection = root / "prefill-chunk-selection-receipt-bound-n16k16-20260905.json"
+            selection.write_text('{"selected_prefill_chunk":2048}\n', encoding="utf-8")
+            validated = {
+                "artifact_type": "ninfer_r9700_prefill_chunk_selection",
+                "schema_version": 2,
+                "selected_prefill_chunk": 2048,
+            }
+            argv = [
+                "--preset", "pareto-capacity",
+                "--weights", str(root / "eventual-selected.ninfer"),
+                "--bench", str(root / "eventual-bench"),
+                "--prefill-chunk", "2048",
+                "--prefill-chunk-authority", str(selection),
+                "--require-post-chunk-capacity",
+                "--expected-kv-value-group", "16",
+                "--expected-xattention-profile", "dense",
+                "--output-dir", str(output),
+                "--dry-run",
+            ]
+            for concurrency in range(1, 5):
+                argv.extend(("--concurrency", str(concurrency)))
+            with mock.patch(
+                "tools.bench.select_prefill_chunk.validate_selection_record",
+                return_value=validated,
+            ):
+                self.assertEqual(main(argv), 0)
+            manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["schema_version"], MATRIX_SCHEMA_VERSION)
+            self.assertTrue(manifest["post_chunk_capacity_gate"])
+            self.assertEqual(manifest["case_count"], 1)
+            self.assertEqual(manifest["point_count"], 4)
+            self.assertEqual(manifest["concurrency"], [1, 2, 3, 4])
+            self.assertEqual(manifest["prefill_chunk_authority"], {
+                "path": str(selection.resolve()),
+                "sha256": file_sha256(selection),
+                **validated,
+            })
+            self.assertTrue(all(
+                record["command"][record["command"].index("--draft-tokens") + 1] == "3"
+                and record["command"].count("--lm-head-draft") == 1
+                and "--no-device-graph" not in record["command"]
+                for record in manifest["commands"]
+            ))
 
     def test_prefill_chunk_sweep_is_fixed_c1_and_supports_32k_finalists(self) -> None:
         cases = build_cases("prefill-chunk")

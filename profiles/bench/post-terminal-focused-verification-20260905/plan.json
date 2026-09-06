@@ -1,0 +1,23 @@
+{
+  "artifact_type": "ninfer_r9700_post_terminal_focused_verification_plan",
+  "schema_version": 1,
+  "status": "blocked_on_terminal_schema_v7_selection",
+  "terminal_selection": "profiles/bench/pareto-result-post-promotion-20260905.json",
+  "cpu_command": "bash profiles/bench/post-terminal-focused-verification-20260905/run.sh --run-cpu",
+  "future_gpu_command": "bash profiles/bench/post-terminal-focused-verification-20260905/run.sh --execute-gpu-verification",
+  "gpu_success_authority": "profiles/bench/post-terminal-focused-verification-20260905/gpu-verification.json",
+  "cpu_scope": {
+    "native_host_contracts": 15,
+    "external_schema_contracts": 8,
+    "python_files": 9
+  },
+  "gpu_scope": "selected compile-profile core/artifact/binder/KV/linear/state/eager/GDN/full-attention/MTP/runtime/Engine qualifiers plus XAttention only when selected; CTest also runs the 13 required target-binding fixture producers",
+  "maximum_runtime_concurrency": 4,
+  "python_prerequisite": "Before creating the transient selected-route file or building tests, TEST_PYTHON must explicitly name an existing executable absolute interpreter path providing pytest, Torch, and safetensors. Preserve the launcher path rather than resolving its symlink, because venv package discovery depends on that path. /ssdpool2nvme/local_llm/ninfer-dylan2/eval/.venv/bin/python is a validated local option; the known .venv-ninfer-r9700 scorer environment does not provide pytest.",
+  "python_identity": "The transient selected-route authority records the exact launcher path, runtime executable, executable SHA-256, Python/package versions, sys.prefix/base_prefix, and pyvenv.cfg path/hash when present.",
+  "selection_binding": "schema-v7 winner, exact capacity/whole manifests, artifact, benchmark executable, G16/G32 cache profile, dense or tau0.9 execution profile, selected chunk, CMake cache, and hybrid planner when applicable",
+  "build_scope": "The selected compile-profile tree may initially contain only ninfer_bench; the runner builds with -j4 only the explicitly listed CPU/schema targets and, in physical mode, the selected device targets before validating the CTest inventory.",
+  "exclusions": "no broad build, CTest, converter, reference-scorer, downstream DFlash/NIAH/exact-token-tooling, or unrelated Python sweep; no instruction microprobes, performance/PPL campaign, or real final-artifact inference before artifact cutover",
+  "publication": "CPU mode is preflight-only and publishes no authority. Both modes reject occupied transient namespaces under lstat semantics and re-resolve the selected route after all checks. GPU mode alone writes a provenance-bound success report to a private pending regular file and publishes it by an exclusive same-directory hard link only after every selected device qualifier passes; cleanup removes only private pending names created by this invocation.",
+  "identity_closure": "profiles/bench/post-terminal-focused-verification-20260905/prepared.sha256"
+}

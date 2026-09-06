@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest import mock
 
 from tools.bench import prefill_chunk_selection_io as publication
+from tools.bench.prefill_chunk_authority import durable_create_json
 
 
 class PrefillChunkSelectionIoTest(unittest.TestCase):
@@ -16,6 +17,7 @@ class PrefillChunkSelectionIoTest(unittest.TestCase):
             "finalize-selection-and-prepare.sh"
         ).read_text(encoding="utf-8")
         self.assertIn("python3 -m tools.bench.prefill_chunk_selection_io", script)
+        self.assertIn("--create-only", script)
         result = subprocess.run(
             [sys.executable, "-m", "tools.bench.prefill_chunk_selection_io", "--help"],
             cwd=repo, capture_output=True, text=True, check=False,
@@ -44,6 +46,15 @@ class PrefillChunkSelectionIoTest(unittest.TestCase):
                 publication.publish(pending, published)
             self.assertTrue(pending.exists())
             self.assertTrue(published.is_symlink())
+
+    def test_pending_create_is_atomic_and_create_only(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "selection.pending.json"
+            durable_create_json(path, {"selected_prefill_chunk": 2048})
+            original = path.read_bytes()
+            with self.assertRaisesRegex(ValueError, "namespace already exists"):
+                durable_create_json(path, {"selected_prefill_chunk": 4096})
+            self.assertEqual(path.read_bytes(), original)
 
     def test_failed_readback_removes_only_owned_published_inode(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -196,12 +196,49 @@ def validate_quality_map(path: Path, selection: dict, chunk: int) -> dict:
 
 
 def matrix_inventory(selection: dict) -> list[dict[str, Any]]:
+    candidates = selection.get("candidates")
+    sources = selection.get("source_provenance")
+    if (
+        not isinstance(candidates, list) or len(candidates) != 12
+        or not isinstance(sources, list) or len(sources) != 12
+    ):
+        raise ValueError("schema-v7 matrix inventory requires twelve candidates and sources")
+    candidates_by_name = {
+        candidate.get("name"): candidate
+        for candidate in candidates if isinstance(candidate, dict)
+    }
+    if len(candidates_by_name) != 12 or None in candidates_by_name:
+        raise ValueError("schema-v7 matrix inventory has malformed candidate identities")
     inventory = []
-    for source in selection["source_provenance"]:
+    eligible_whole_count = 0
+    for source in sources:
+        if not isinstance(source, dict):
+            raise ValueError("schema-v7 matrix inventory has malformed source provenance")
+        candidate = candidates_by_name.get(source.get("candidate"))
+        capacity_failures = source.get("capacity_failures")
+        if candidate is None or type(candidate.get("comparable")) is not bool:
+            raise ValueError("schema-v7 matrix source does not bind one candidate")
+        comparable = candidate["comparable"]
+        if (
+            not isinstance(capacity_failures, list)
+            or comparable == bool(capacity_failures)
+        ):
+            raise ValueError(
+                "schema-v7 matrix shape disagrees with candidate capacity eligibility"
+            )
+        expected_presets = (
+            {"pareto-capacity", "pareto-whole"}
+            if comparable else {"pareto-capacity"}
+        )
         matrices = source.get("matrices")
-        if not isinstance(matrices, dict) or set(matrices) != {"pareto-capacity", "pareto-whole"}:
-            raise ValueError("schema-v7 candidate lacks capacity and whole matrices")
+        if not isinstance(matrices, dict) or set(matrices) != expected_presets:
+            raise ValueError(
+                "schema-v7 candidate matrix set disagrees with capacity eligibility"
+            )
+        eligible_whole_count += int(comparable)
         for preset, bound in matrices.items():
+            if not isinstance(bound, dict):
+                raise ValueError(f"{preset} matrix binding is malformed")
             path = Path(bound.get("path", ""))
             manifest = load_regular(path, f"{preset} matrix")
             if bound.get("sha256") != sha(path) or manifest.get("concurrency") != PRODUCT_CONCURRENCIES:
@@ -211,8 +248,12 @@ def matrix_inventory(selection: dict) -> list[dict[str, Any]]:
             inventory.append({"candidate": source["candidate"], "preset": preset,
                               "manifest": {"path": str(path.resolve()), "sha256": sha(path)},
                               "concurrency": PRODUCT_CONCURRENCIES})
-    if len(inventory) != 24:
-        raise ValueError("cutover requires twelve capacity and twelve whole matrices")
+    capacity_count = sum(row["preset"] == "pareto-capacity" for row in inventory)
+    whole_count = sum(row["preset"] == "pareto-whole" for row in inventory)
+    if capacity_count != 12 or whole_count != eligible_whole_count:
+        raise ValueError(
+            "cutover requires twelve capacity matrices and one whole matrix per eligible candidate"
+        )
     return inventory
 
 
@@ -288,8 +329,6 @@ def assemble(plan_path: Path) -> dict[str, Any]:
     selection_snapshot = snapshot(paths["selection"], "schema-v7 selection")
     selection = selection_snapshot["value"]
     terminal, _ = validate_terminal_production_authority(load_payload(json.dumps(selection)))
-    if terminal.get("production_status") != "selected_route_pending_shortlist_head_trace_and_niah":
-        raise ValueError("schema-v7 winner is not eligible for final physical gates")
     route, winner_source = selected_route(selection, terminal)
     converter = validate_converter_preflight(
         paths["converter_preflight"], paths["selection"], route)

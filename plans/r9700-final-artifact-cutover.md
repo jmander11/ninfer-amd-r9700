@@ -2,12 +2,13 @@
 
 This is a decision-gated cutover sequence, not a second live selection ledger. Do not edit a
 product identity, converter identity, admitted profile, default, or artifact filename until gate 0
-below is complete. The retained schema-v7 base Pareto record is necessary but deliberately reports
-`selected_route_pending_shortlist_head_trace_and_niah`; it is not by itself cutover authority. The
-eventual schema-v2 DFlash selection record is likewise a companion decision, not permission to
-promote the base early. DFlash2 is the preferred and required speculative production path. MTP is
-retained as an already-working backend and remains in regression/parity coverage, but no new MTP
-feature, head-precision experiment, trace, or performance optimization is a cutover prerequisite.
+below is complete. The retained schema-v7 base Pareto record selects only the base artifact/cache/
+execution tuple; it carries no downstream-readiness or MTP-head status and is not by itself cutover
+authority. The eventual schema-v2 DFlash selection record is likewise a companion decision, not
+permission to promote the base early. DFlash2 is the preferred and required speculative production
+path. MTP is retained as an already-working backend and remains in regression/parity coverage, but
+no new MTP feature, head-precision experiment, trace, or performance optimization is a cutover
+prerequisite.
 The cutover must replace the evaluation product surface in one change; it must not add final
 identity aliases beside the old identities.
 
@@ -63,8 +64,10 @@ so it must not be encoded in either `weights_id`.
      I32-token plus zero-NLL-delta comparisons. Candidate-to-BF16 argmax differences remain
      diagnostic and are not relabeled as this execution-parity gate;
    - `profiles/bench/pareto-result-post-promotion-20260905.json`, whose bound schema-v4 input
-     contains all twelve exact C=1..4 capacity matrices and all twelve exact C=1..4 whole matrices.
-     The whole rows must pass exact per-repetition/lane generated-target-token parity between MTP3
+     contains all twelve exact C=1..4 capacity outcomes and a C=1..4 whole matrix only for each
+     capacity-eligible profile. Dense/XAttention capacity eligibility must match within every
+     recipe/cache-group pair before whole acquisition begins. The eligible whole rows must pass
+     exact per-repetition/lane generated-target-token parity between MTP3
      and ordinary draft-off controls; BF16 argmax flips in PPL remain diagnostic rather than being
      mislabeled as that runtime token gate;
    - `profiles/bench/low-context-prefill-evaluation-20260905.json`, recomputed from the selected
@@ -146,7 +149,8 @@ so it must not be encoded in either `weights_id`.
    owning validators, recompute the schema-v7 winner, and publish one create-only
    `profiles/bench/final-artifact-cutover-admission-20260905.json` receipt. The receipt must retain
    each input path and SHA-256, the selected evaluation artifact and executable identities, cache
-   group, attention profile, prefill chunk, and the exact C=1..4 capacity/whole inventory. It must
+   group, attention profile, prefill chunk, all twelve exact C=1..4 capacity outcomes, and whole
+   matrices exactly for capacity-eligible profiles. It must
    require the same selected tuple in the exact-token, NIAH, selected-Vision, focused,
    hardware-use, and DFlash records. For low-context only, it must require the same winner recipe, artifact bytes,
    cache group, and chunk but require the unique schema-v7 dense-control profile/executable rather
@@ -178,7 +182,8 @@ so it must not be encoded in either `weights_id`.
    selection decision, exact quality/capacity/whole matrix manifests (the whole rows retain the
    separately timed prefill/decode phases), all raw report hashes, the complete non-dominated
    frontier, normalized objectives, all three per-recipe winners, the exact hybrid conversion
-   receipt when applicable, and the `terminal_production_selection` rule
+   receipt when applicable, exact retained capacity-failure provenance for excluded profiles, and
+   the `terminal_production_selection` rule
    `global_maximin_whole_then_capacity_then_quality_then_canonical_v1`, its normalized objectives,
    and decisive tie-break stage used to select the artifact/cache/execution tuple,
    selected DFlash K/W plus its shortlist/capacity/parity/determinism/generated-quality inputs,
@@ -219,12 +224,11 @@ so it must not be encoded in either `weights_id`.
    all-Q4 nor mixed companion may be reused. The projected hybrid companion is 22,763,026,944
    file bytes and 22,750,001,152 device-arena bytes, but those are planning bounds only: fresh
    DFlash K/W quality, C=1..4 capacity, and whole evidence remain mandatory.
-   Relative to the current hybrid base planner, the 1,209,469,440-byte DFlash append fits inside
-   C1's 1,539,289,088-byte slack without reducing its model-context-bound capacity. At C2/C3/C4,
-   current slack is only 1,761,280/1,290,240/819,200 bytes; with 1,810,432 bytes per additional G16
-   KV page group, the projected loss is 668 groups, or 42,752 aggregate tokens, at each of those
-   concurrencies. This is derived capacity impact, not a replacement for the required physical
-   selected-K/W capacity gates.
+   No DFlash capacity impact may be derived from the historical hybrid C1--C4 slack: that report
+   omitted MTP plus optimized-head materialization and its apparent slack is invalid. The appended
+   companion's selected-K/W C=1..4 capacity outcomes must be measured against its exact loaded
+   feature set after base selection; retained memory-admission failures are exclusions rather than
+   fabricated capacities.
 
 3. Materialize new artifacts from the isolated staging tree into fresh absent staging paths; never
    rename or overwrite the evaluation files and do not publish either reserved final filename yet.

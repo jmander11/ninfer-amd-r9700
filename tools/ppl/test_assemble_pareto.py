@@ -23,7 +23,7 @@ from tools.bench.run_ninfer_bench_matrix import BenchCase, file_sha256
 from tools.bench.run_ninfer_bench_matrix import MATRIX_SCHEMA_VERSION, R9700_KV_PLANE_LAYOUTS
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from pareto import classify
+from pareto import _valid_capacity_failure, classify
 
 
 class AssembleParetoTest(unittest.TestCase):
@@ -52,7 +52,11 @@ class AssembleParetoTest(unittest.TestCase):
         self.assertIs(selected, mtp)
         self.assertTrue(parity["pass"])
         self.assertEqual(parity["compared_tokens"], 4)
-        self.assertTrue(parity["round_gate"]["all_repetitions_minimum"])
+        self.assertEqual(
+            parity["round_accounting"]["cells"]["whole-pp8192+tg256"]
+            ["theoretical_minimum_rounds_per_repetition"],
+            64,
+        )
         with self.assertRaisesRegex(ValueError, "requires one MTP3 row"):
             _validate_mtp_target_parity([mtp], 1)
         changed = copy.deepcopy(ordinary)
@@ -63,13 +67,13 @@ class AssembleParetoTest(unittest.TestCase):
         for test in extra_round["tests"]:
             test["speculative"]["rounds"] = 65
             test["reps"][0]["speculative"]["rounds"] = 65
-        _, conditional = _validate_mtp_target_parity([extra_round, ordinary], 1)
-        self.assertFalse(conditional["round_gate"]["all_repetitions_minimum"])
+        _, accounting = _validate_mtp_target_parity([extra_round, ordinary], 1)
         self.assertEqual(
-            conditional["round_gate"]["cells"]["whole-pp8192+tg256"]["repetitions"][0],
+            accounting["round_accounting"]["cells"]["whole-pp8192+tg256"]
+            ["repetitions"][0],
             {
                 "repetition": 0, "observed_rounds": 65,
-                "expected_minimum_rounds": 64, "minimum_met": False,
+                "theoretical_minimum_rounds": 64,
             },
         )
         inconsistent = copy.deepcopy(mtp)
@@ -228,6 +232,31 @@ class AssembleParetoTest(unittest.TestCase):
             [*candidates, *second_candidates, *third_candidates],
             [*provenance, *second_provenance, *third_provenance],
         )
+        all_candidates = [*candidates, *second_candidates, *third_candidates]
+        failed_pair = copy.deepcopy([
+            *provenance, *second_provenance, *third_provenance,
+        ])
+        for index in (8, 10):
+            failed_pair[index]["matrices"] = {"pareto-capacity": {}}
+            failed_pair[index]["capacity_failures"] = [{
+                "status": "memory_admission_ineligible",
+                "concurrency": 4,
+            }]
+        validate_xattention_dense_controls(all_candidates, failed_pair)
+        unmatched = copy.deepcopy([
+            *provenance, *second_provenance, *third_provenance,
+        ])
+        unmatched[8]["matrices"] = {"pareto-capacity": {}}
+        unmatched[8]["capacity_failures"] = [{
+            "status": "memory_admission_ineligible",
+            "concurrency": 4,
+        }]
+        with self.assertRaisesRegex(ValueError, "matched dense/sparse capacity eligibility"):
+            validate_xattention_dense_controls(all_candidates, unmatched)
+        failed_with_whole = copy.deepcopy(failed_pair)
+        failed_with_whole[8]["matrices"]["pareto-whole"] = {}
+        with self.assertRaisesRegex(ValueError, "exactly for capacity-eligible profiles"):
+            validate_xattention_dense_controls(all_candidates, failed_with_whole)
         changed_repeat = copy.deepcopy(second_provenance)
         changed_repeat[-1]["quality"]["campaign_identity"] = copy.deepcopy(campaign_identity)
         changed_repeat[-1]["quality"]["campaign_identity"]["bf16_repeat_comparison"] = {
@@ -504,6 +533,13 @@ class AssembleParetoTest(unittest.TestCase):
                 "results": quality_results,
             }), encoding="utf-8")
             bench = {"path": "/bench", "sha256": "b" * 64, "file_size_bytes": 456}
+            chunk_authority = {
+                "path": str(root / "selected-prefill-chunk.json"),
+                "sha256": "9" * 64,
+                "artifact_type": "ninfer_r9700_prefill_chunk_selection",
+                "schema_version": 2,
+                "selected_prefill_chunk": 4096,
+            }
             roots = {}
             for preset in ("pareto-capacity", "pareto-whole"):
                 item = root / preset
@@ -516,7 +552,13 @@ class AssembleParetoTest(unittest.TestCase):
                         "suite": "pareto_effective_capacity",
                         "case": "effective_capacity_mtp3",
                         "concurrency": concurrency,
-                        "command": ["bench", str(concurrency), "--prefill-chunk", "4096"],
+                        "command": [
+                            "bench", "--weights", "/model.ninfer",
+                            "--max-ctx", "262144", "--concurrency", str(concurrency),
+                            "--kv-capacity", "auto", "--spec", "mtp",
+                            "--draft-tokens", "3", "--lm-head-draft",
+                            "--prefill-chunk", "4096", "--output-file", str(report),
+                        ],
                         "report": str(report),
                     })
                 (item / "manifest.json").write_text(json.dumps({
@@ -524,6 +566,9 @@ class AssembleParetoTest(unittest.TestCase):
                     "schema_version": MATRIX_SCHEMA_VERSION,
                     "preset": preset, "dry_run": False, "artifact": artifact, "bench": bench,
                     "selected_prefill_chunk": 4096,
+                    "prefill_chunk_authority": chunk_authority,
+                    **({"post_chunk_capacity_gate": True}
+                       if preset == "pareto-capacity" else {}),
                     "expected_kv_value_group": 16, "expected_q4_activation_bits": 8,
                     "expected_kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
                     "expected_w8_activation_bits": 8,
@@ -595,19 +640,17 @@ class AssembleParetoTest(unittest.TestCase):
                 candidate, provenance = assemble_candidate(
                     "candidate", "weights", 16, quality_path,
                     roots["pareto-capacity"], roots["pareto-whole"], 4096,
+                    chunk_authority,
                 )
             self.assertEqual(len(candidate["capacity_by_cell"]), 4)
             self.assertEqual(len(candidate["whole_inference_tokens_per_second"]), 24)
-            self.assertEqual(set(candidate["target_head_parity"]), {
+            self.assertEqual(set(candidate["mtp_target_token_parity"]), {
                 "c1", "c2", "c3", "c4",
             })
+            self.assertNotIn("shortlist_head_precision_gate", candidate)
             self.assertEqual(
-                candidate["shortlist_head_precision_gate"]["status"],
-                "q4_round_gate_pass_pending_trace",
-            )
-            self.assertEqual(
-                candidate["shortlist_head_precision_gate"]["cells"]
-                ["whole-pp32768+tg256_c4"]["expected_rounds_per_repetition"],
+                candidate["mtp_target_token_parity"]["c4"]["round_accounting"]["cells"]
+                ["whole-pp32768+tg256"]["theoretical_minimum_rounds_per_repetition"],
                 256,
             )
             self.assertEqual(
@@ -648,8 +691,43 @@ class AssembleParetoTest(unittest.TestCase):
                 {"kind": "artifact", "weights_id": "weights", "sha256": "a" * 64},
             )
 
+            capacity_manifest = roots["pareto-capacity"] / "manifest.json"
+            invalid_gate = json.loads(capacity_manifest.read_text(encoding="utf-8"))
+            invalid_gate["post_chunk_capacity_gate"] = False
+            capacity_manifest.write_text(json.dumps(invalid_gate), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "not a post-chunk capacity gate"):
+                assemble_candidate(
+                    "candidate", "weights", 16, quality_path,
+                    roots["pareto-capacity"], roots["pareto-whole"], 4096,
+                    chunk_authority,
+                )
+            invalid_gate["post_chunk_capacity_gate"] = True
+            invalid_gate["prefill_chunk_authority"] = {
+                **chunk_authority, "sha256": "8" * 64,
+            }
+            capacity_manifest.write_text(json.dumps(invalid_gate), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "does not bind the selected"):
+                assemble_candidate(
+                    "candidate", "weights", 16, quality_path,
+                    roots["pareto-capacity"], roots["pareto-whole"], 4096,
+                    chunk_authority,
+                )
+            invalid_gate["prefill_chunk_authority"] = chunk_authority
+            capacity_manifest.write_text(json.dumps(invalid_gate), encoding="utf-8")
+
             whole_manifest = roots["pareto-whole"] / "manifest.json"
             mismatched_chunk = json.loads(whole_manifest.read_text(encoding="utf-8"))
+            mismatched_chunk["prefill_chunk_authority"] = {
+                **chunk_authority, "path": "/different-selection.json",
+            }
+            whole_manifest.write_text(json.dumps(mismatched_chunk), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "does not bind the selected"):
+                assemble_candidate(
+                    "candidate", "weights", 16, quality_path,
+                    roots["pareto-capacity"], roots["pareto-whole"], 4096,
+                    chunk_authority,
+                )
+            mismatched_chunk["prefill_chunk_authority"] = chunk_authority
             chunk_index = mismatched_chunk["commands"][0]["command"].index("--prefill-chunk")
             mismatched_chunk["commands"][0]["command"][chunk_index + 1] = "2048"
             whole_manifest.write_text(json.dumps(mismatched_chunk), encoding="utf-8")
@@ -657,11 +735,11 @@ class AssembleParetoTest(unittest.TestCase):
                 assemble_candidate(
                     "candidate", "weights", 16, quality_path,
                     roots["pareto-capacity"], roots["pareto-whole"], 4096,
+                    chunk_authority,
                 )
             mismatched_chunk["commands"][0]["command"][chunk_index + 1] = "4096"
             whole_manifest.write_text(json.dumps(mismatched_chunk), encoding="utf-8")
 
-            capacity_manifest = roots["pareto-capacity"] / "manifest.json"
             superseded = json.loads(capacity_manifest.read_text(encoding="utf-8"))
             superseded["concurrency"].append(5)
             capacity_manifest.write_text(json.dumps(superseded), encoding="utf-8")
@@ -669,6 +747,7 @@ class AssembleParetoTest(unittest.TestCase):
                 assemble_candidate(
                     "candidate", "weights", 16, quality_path,
                     roots["pareto-capacity"], roots["pareto-whole"], 4096,
+                    chunk_authority,
                 )
             superseded["concurrency"] = list(range(1, 5))
             capacity_manifest.write_text(json.dumps(superseded), encoding="utf-8")
@@ -680,6 +759,7 @@ class AssembleParetoTest(unittest.TestCase):
                 assemble_candidate(
                     "candidate", "weights", 16, quality_path,
                     roots["pareto-capacity"], roots["pareto-whole"], 4096,
+                    chunk_authority,
                 )
             changed_layout["expected_xattention_profile"] = "dense"
             changed_layout["expected_kv_plane_layouts"] = {
@@ -691,6 +771,7 @@ class AssembleParetoTest(unittest.TestCase):
                 assemble_candidate(
                     "candidate", "weights", 16, quality_path,
                     roots["pareto-capacity"], roots["pareto-whole"], 4096,
+                    chunk_authority,
                 )
             changed_layout["expected_kv_plane_layouts"] = R9700_KV_PLANE_LAYOUTS
             whole_manifest.write_text(json.dumps(changed_layout), encoding="utf-8")
@@ -700,6 +781,7 @@ class AssembleParetoTest(unittest.TestCase):
                 assemble_candidate(
                     "candidate", "weights", 16, quality_path,
                     roots["pareto-capacity"], roots["pareto-whole"], 4096,
+                    chunk_authority,
                 )
             (roots["pareto-whole"] / "failures.json").unlink()
 
@@ -710,6 +792,7 @@ class AssembleParetoTest(unittest.TestCase):
                 assemble_candidate(
                     "candidate", "weights", 16, quality_path,
                     roots["pareto-capacity"], roots["pareto-whole"], 4096,
+                    chunk_authority,
                 )
             changed_power["power_profile"]["rechecked_after"] = "auto"
             whole_manifest.write_text(json.dumps(changed_power), encoding="utf-8")
@@ -719,7 +802,12 @@ class AssembleParetoTest(unittest.TestCase):
             logs = roots["pareto-capacity"] / "logs"
             logs.mkdir()
             (logs / "pareto_effective_capacity.effective_capacity_mtp3.c4.stderr.txt").write_text(
-                "minimum Engine runtime reservation exceeds available bytes\n", encoding="utf-8"
+                "[ninfer_bench] loading /model.ninfer (max_context=262144, concurrency=4, "
+                "kv_format=fp8-k-int4-v)\n"
+                "ninfer_bench: minimum Engine runtime reservation requires 10663212291 bytes "
+                "in addition to 1073741824 bytes of automatic headroom, but only "
+                "11477728256 bytes are available after weights\n",
+                encoding="utf-8",
             )
             (logs / "pareto_effective_capacity.effective_capacity_mtp3.c4.stdout.txt").write_text(
                 "", encoding="utf-8"
@@ -727,7 +815,7 @@ class AssembleParetoTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "no failures.json"):
                 assemble_candidate(
                     "candidate", "weights", 16, quality_path,
-                    roots["pareto-capacity"], None, 4096,
+                    roots["pareto-capacity"], None, 4096, chunk_authority,
                 )
             missing_record = json.loads(
                 (roots["pareto-capacity"] / "manifest.json").read_text(encoding="utf-8")
@@ -755,15 +843,51 @@ class AssembleParetoTest(unittest.TestCase):
             ):
                 incomplete, failed_source = assemble_candidate(
                     "candidate", "weights", 16, quality_path,
-                    roots["pareto-capacity"], None, 4096,
+                    roots["pareto-capacity"], None, 4096, chunk_authority,
                 )
             self.assertNotIn("c4", incomplete["capacity_by_cell"])
             self.assertFalse(incomplete["whole_inference_tokens_per_second"])
             self.assertEqual(failed_source["capacity_failures"][0]["concurrency"], 4)
             self.assertEqual(
                 failed_source["capacity_failures"][0]["status"],
-                "unresolved_capacity_measurement_failure",
+                "memory_admission_ineligible",
             )
+            self.assertEqual(
+                failed_source["capacity_failures"][0]["memory_admission"],
+                {
+                    "kind": "minimum_runtime_reservation",
+                    "minimum_runtime_reservation_bytes": 10663212291,
+                    "automatic_headroom_bytes": 1073741824,
+                    "available_after_weights_bytes": 11477728256,
+                    "shortfall_bytes": 259225859,
+                },
+            )
+            self.assertTrue(_valid_capacity_failure(failed_source["capacity_failures"][0]))
+            malformed_failure = copy.deepcopy(failed_source["capacity_failures"][0])
+            malformed_failure["campaign_failure"]["returncode"] = 139
+            self.assertFalse(_valid_capacity_failure(malformed_failure))
+            stderr_path = (
+                logs / "pareto_effective_capacity.effective_capacity_mtp3.c4.stderr.txt"
+            )
+            valid_stderr = stderr_path.read_text(encoding="utf-8")
+            stderr_path.write_text("ninfer_bench: segmentation fault\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "exact startup admission failure"):
+                assemble_candidate(
+                    "candidate", "weights", 16, quality_path,
+                    roots["pareto-capacity"], None, 4096, chunk_authority,
+                )
+            stderr_path.write_text(valid_stderr, encoding="utf-8")
+            failures_path = roots["pareto-capacity"] / "failures.json"
+            generic = json.loads(failures_path.read_text(encoding="utf-8"))
+            generic[0]["returncode"] = 139
+            failures_path.write_text(json.dumps(generic), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "exact process failure record"):
+                assemble_candidate(
+                    "candidate", "weights", 16, quality_path,
+                    roots["pareto-capacity"], None, 4096, chunk_authority,
+                )
+            generic[0]["returncode"] = 1
+            failures_path.write_text(json.dumps(generic), encoding="utf-8")
             excluded = classify({
                 "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
                 "required_quality_cells": ["8k", "32k"],
@@ -787,6 +911,7 @@ class AssembleParetoTest(unittest.TestCase):
                 assemble_candidate(
                     "candidate", "weights", 16, quality_path,
                     roots["pareto-capacity"], roots["pareto-whole"], 4096,
+                    chunk_authority,
                 )
 
 

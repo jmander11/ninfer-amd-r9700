@@ -925,11 +925,11 @@ state, cache, row-view, and whole-route regression coverage, but a new shortlist
 alternate head precision, acceptance campaign, or MTP performance optimization is not a final
 admission requirement. DFlash/DFlash2 is the preferred speculative path and the only speculative
 backend with remaining support and performance work.
-The terminal tooling reads each raw repetition, expects `64*C` because its counter sums request
-lanes, and verifies that the report aggregate is their exact sum. Extra rounds preserve the
-candidate's throughput objectives but produce `conditional_head_precision_required`; minimum-round
-rows produce `selected_route_pending_shortlist_head_trace_and_niah`, since executed-code evidence
-and selected-profile NIAH remain separate final gates.
+The terminal tooling reads each raw repetition, records the theoretical `64*C` round minimum
+because its counter sums request lanes, and verifies that the report aggregate is their exact sum.
+Extra rounds remain acceptance and measured-throughput evidence; they do not trigger an MTP head-
+precision branch or alter base selection. Schema v7 carries no downstream-readiness status;
+selected-profile NIAH and DFlash admission remain separate final gates.
 The fail-closed NIAH entry point is
 `profiles/bench/post-terminal-niah-prepare-20260905/prepare.sh`; it remains blocked until the
 schema-v7 terminal selection exists and then schedules only the required 64K five-position ladder.

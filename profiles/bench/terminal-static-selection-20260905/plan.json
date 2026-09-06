@@ -1,0 +1,34 @@
+{
+  "artifact_type": "ninfer_r9700_terminal_static_selection_plan",
+  "schema_version": 1,
+  "status": "blocked-on-complete-quality-and-post-chunk-evidence",
+  "scope": "exact twelve-candidate recipe/cache-group/attention-profile schema-v7 decision",
+  "prefill_chunk_selection": "profiles/bench/prefill-chunk-selection-receipt-bound-n16k16-20260905.json",
+  "post_chunk_capacity_validation": "profiles/bench/post-chunk-twelve-candidate-20260905/executed-capacity-validation.json",
+  "pareto_input": "profiles/bench/pareto-input-post-promotion-20260905.json",
+  "terminal_authority": "profiles/bench/pareto-result-post-promotion-20260905.json",
+  "identity_closure": "profiles/bench/terminal-static-selection-20260905/prepared.sha256",
+  "candidate_count": 12,
+  "concurrency": [1, 2, 3, 4],
+  "quality_arguments": [
+    "ALL_Q4_DENSE_QUALITY",
+    "ALL_Q4_XATTENTION_QUALITY",
+    "MIXED_DENSE_QUALITY",
+    "MIXED_XATTENTION_QUALITY",
+    "FOUR_ROLE_DENSE_QUALITY",
+    "FOUR_ROLE_XATTENTION_QUALITY"
+  ],
+  "known_current_quality": {
+    "all_q4_dense_if_selected_chunk_is_4096": "profiles/ppl/xattention-dense-q4g64-v3-rebase-20260904/results.json"
+  },
+  "quality_blockers": [
+    "all quality campaigns must use the selected prefill chunk",
+    "the retained sparse all-Q4 and dense mixed campaigns predate the exact deterministic BF16 repeat authority",
+    "no mixed sparse native schema-v6 campaign is retained",
+    "four-role evidence is split into 8K/32K dense G16-only campaigns and is not a complete dense G16/G32 authority",
+    "no four-role sparse native schema-v6 campaign is retained"
+  ],
+  "command": "bash profiles/bench/terminal-static-selection-20260905/assemble-and-select.sh ALL_Q4_DENSE_QUALITY ALL_Q4_XATTENTION_QUALITY MIXED_DENSE_QUALITY MIXED_XATTENTION_QUALITY FOUR_ROLE_DENSE_QUALITY FOUR_ROLE_XATTENTION_QUALITY",
+  "publication": "The four pending/final namespaces must be absent under lstat semantics, including dangling symlinks. Schema-v4 input binds the freshly rebuilt executed post-chunk capacity validation and uses '-' only for its capacity-ineligible symmetric dense/XAttention pairs. Schema-v4 input and schema-v7 result are fully constructed at package-private pending paths; immediately before publication the package closures and starting selected-chunk hash are revalidated. One create-only transaction fsyncs both pending files, hard-links the input without overwrite, recomputes the result against that published input, hard-links and revalidates the result, rechecks the selected-chunk guard before and after directory fsync, and rolls back only the transaction-owned inodes on failure.",
+  "note": "The entry point accepts only six explicit profile-level quality paths; one campaign must cover both G16 and G32 for its recipe/profile. It consumes only the three exact N16/K16 recipe identities and the fresh -n16k16 post-chunk capacity/whole roots; legacy RowSplit identities, selection authority, and result roots remain historical and are never resumed. It never chooses a quality file by glob or timestamp."
+}

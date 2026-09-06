@@ -392,7 +392,9 @@ void print_host_hybrid_capacity_authority() {
     constexpr std::uint32_t capacity = 262144U;
     constexpr std::uint32_t page_tokens = 64U;
     constexpr std::uint32_t minimum_groups = capacity / page_tokens;
-    std::printf("concurrency,minimum_groups,maximum_groups,minimum_sequence_bytes,workspace_bytes,"
+    std::printf("target,weights_profile,capacity_tokens,page_tokens,prefill_chunk,kv_value_group,"
+                "speculative_backend,draft_tokens,proposal_head,device_graph,"
+                "concurrency,minimum_groups,maximum_groups,minimum_sequence_bytes,workspace_bytes,"
                 "graph_allowance_bytes,request_transient_bytes,minimum_reservation_bytes,"
                 "kv_payload_bytes,kv_increment_bytes\n");
     for (std::uint32_t concurrency = 1; concurrency <= ninfer::kMaximumConcurrency;
@@ -405,10 +407,10 @@ void print_host_hybrid_capacity_authority() {
             .draft_window = 3U,
             .dflash_verify_width = 0U,
             .speculative_backend = ninfer::SpeculativeBackend::Mtp,
-            .proposal_head = ninfer::ProposalHead::Full,
+            .proposal_head = ninfer::ProposalHead::Optimized,
             .features = {.vision = false,
                          .speculative = ninfer::SpeculativeBackend::Mtp,
-                         .proposal_head = ninfer::ProposalHead::Full},
+                         .proposal_head = ninfer::ProposalHead::Optimized},
             .use_device_graph = true,
             .device = 0,
             .kv_ram_capacity_bytes = 0U,
@@ -420,7 +422,9 @@ void print_host_hybrid_capacity_authority() {
             inputs, minimum_groups + 1U);
         const std::size_t increment =
             adjacent->device_reservation_bytes - minimum->device_reservation_bytes;
-        std::printf("%u,%u,%u,%zu,%zu,%zu,%zu,%zu,%zu,%zu\n", concurrency,
+        std::printf("qwen3_8_27b_r9700,R9700Q4G64Fp8FourRoleN16K16Evaluation,"
+                    "262144,64,8192,16,mtp,3,optimized,1,"
+                    "%u,%u,%u,%zu,%zu,%zu,%zu,%zu,%zu,%zu\n", concurrency,
                     minimum_groups, concurrency * minimum_groups, minimum->persistent.bytes,
                     minimum->workspace.capacity, minimum->graph_allowance_bytes,
                     minimum->request_transient_capacity_bytes,

@@ -1,0 +1,19 @@
+{
+  "artifact_type": "ninfer_r9700_selected_low_context_prefill_plan",
+  "schema_version": 1,
+  "status": "blocked-on-terminal-schema-v7-selection",
+  "terminal_selection": "profiles/bench/pareto-result-post-promotion-20260905.json",
+  "ladder_output": "profiles/bench/low-context-prefill-selected-20260905",
+  "evaluation_authority": "profiles/bench/low-context-prefill-evaluation-20260905.json",
+  "prompt_tokens": [128, 512, 1024, 2048, 4096],
+  "concurrency": [1],
+  "attention_profile": "dense",
+  "speculative_execution": false,
+  "repetitions": 3,
+  "warmup": 1,
+  "minimum_p2048_tok_s": 2000.0,
+  "command": "bash profiles/bench/low-context-selected-ladder-20260905/run-and-publish.sh --execute-gpu-campaign",
+  "identity_resolution": "validate schema-v7, then select the unique dense candidate with the winner's exact artifact and value group; reopen its bound capacity and whole manifests to obtain the compile-matched benchmark and, for the four-role recipe, the selected-chunk planner",
+  "publication": "the raw ladder uses one fresh output directory; its evaluation remains package-private until all five reports pass exact validation and fresh recomputation, then a dedicated publisher fsyncs the private regular-file inode, hard-links it without overwrite to the global authority path, verifies the published inode, revalidates all dependencies and bytes, and fsyncs the parent directory. Failure rollback removes only that observed inode; occupied names including dangling symlinks are preserved.",
+  "note": "A valid P2048 result below 2000 tok/s is still published with passes_p2048_gate=false so selected-route tracing can proceed, and the runner returns nonzero so the floor remains a hard admission gate. The reported gate uses the benchmark's mean of per-repetition prompt_tokens/prefill_seconds throughput; it does not impose an inequivalent per-repeat time cutoff. No comparison candidate is run."
+}

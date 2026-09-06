@@ -27,37 +27,6 @@ from tools.bench.validate_low_context_prefill import (
 from tools.ppl.pareto import classify
 
 
-def shortlist_head_gate() -> dict:
-    cells = {}
-    for prompt in (8192, 32768):
-        for concurrency in range(1, 5):
-            expected = 64 * concurrency
-            cells[f"whole-pp{prompt}+tg256_c{concurrency}"] = {
-                "generated_tokens_per_lane": 256, "draft_window": 3,
-                "minimum_rounds_per_lane": 64, "concurrency": concurrency,
-                "expected_rounds_per_repetition": expected,
-                "expected_rounds_all_repetitions": expected * 3,
-                "observed_rounds_all_repetitions": expected * 3,
-                "all_repetitions_minimum": True,
-                "repetitions": [{
-                    "repetition": repetition,
-                    "observed_rounds": expected,
-                    "expected_minimum_rounds": expected,
-                    "minimum_met": True,
-                } for repetition in range(3)],
-            }
-    return {
-        "status": "q4_round_gate_pass_pending_trace",
-        "head_format": "Q4G64_F16S", "activation_profile": "A8G64",
-        "all_repetitions_minimum": True,
-        "counter_semantics": (
-            "per-repetition counters sum request-lane rounds; every whole g256 MTP3 "
-            "cell requires concurrency * 64 rounds"
-        ),
-        "cells": cells,
-    }
-
-
 class LowContextPrefillValidationTest(unittest.TestCase):
     @staticmethod
     def migration_receipt(weights_id: str) -> dict:
@@ -113,7 +82,6 @@ class LowContextPrefillValidationTest(unittest.TestCase):
                 candidates.append({
                     "name": name,
                     "prefill_chunk": chunk,
-                    "shortlist_head_precision_gate": shortlist_head_gate(),
                     "cache_profile": {
                         "value_group": group,
                         "plane_layouts": R9700_KV_PLANE_LAYOUTS,
@@ -144,6 +112,8 @@ class LowContextPrefillValidationTest(unittest.TestCase):
                     "artifact": {"weights_id": recipe, "sha256": digest,
                                  "conversion_receipt":
                                      LowContextPrefillValidationTest.migration_receipt(recipe)},
+                    "matrices": {"pareto-capacity": {}, "pareto-whole": {}},
+                    "capacity_failures": [],
                 })
         source = {
             "artifact_type": "ninfer_r9700_pareto_input",

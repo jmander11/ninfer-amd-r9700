@@ -110,6 +110,60 @@ def test_converter_preflight_must_revalidate_against_exact_winner() -> None:
             gate.validate_converter_preflight(Path("receipt"), Path("selection"), changed)
 
 
+def test_matrix_inventory_omits_whole_only_for_capacity_ineligible_candidates() -> None:
+    digest = "d" * 64
+    manifests = {}
+    candidates = []
+    sources = []
+    for index in range(12):
+        name = f"candidate-{index}"
+        comparable = index >= 2
+        artifact = {"weights_id": f"weights-{index}", "sha256": str(index) * 64}
+        bench = {"sha256": "b" * 64}
+        matrices = {}
+        for preset in (
+            ("pareto-capacity", "pareto-whole")
+            if comparable else ("pareto-capacity",)
+        ):
+            path = Path(f"/campaign/{index}/{preset}/manifest.json")
+            matrices[preset] = {"path": str(path), "sha256": digest}
+            manifests[path] = {
+                "artifact": artifact, "bench": bench,
+                "concurrency": gate.PRODUCT_CONCURRENCIES,
+            }
+        candidates.append({"name": name, "comparable": comparable})
+        sources.append({
+            "candidate": name, "artifact": artifact, "benchmark_executable": bench,
+            "matrices": matrices,
+            "capacity_failures": [] if comparable else [{"memory_admission": {}}],
+        })
+    selection = {"candidates": candidates, "source_provenance": sources}
+
+    with patch.object(
+        gate, "load_regular", side_effect=lambda path, _label: manifests[path]
+    ), patch.object(gate, "sha", return_value=digest):
+        inventory = gate.matrix_inventory(selection)
+        assert sum(row["preset"] == "pareto-capacity" for row in inventory) == 12
+        assert sum(row["preset"] == "pareto-whole" for row in inventory) == 10
+
+        missing_whole = json.loads(json.dumps(selection))
+        missing_whole["source_provenance"][2]["matrices"].pop("pareto-whole")
+        with pytest.raises(ValueError, match="matrix set disagrees"):
+            gate.matrix_inventory(missing_whole)
+
+        failed_with_whole = json.loads(json.dumps(selection))
+        failed_with_whole["source_provenance"][0]["matrices"]["pareto-whole"] = {
+            "path": "/campaign/0/pareto-whole/manifest.json", "sha256": digest,
+        }
+        with pytest.raises(ValueError, match="matrix set disagrees"):
+            gate.matrix_inventory(failed_with_whole)
+
+        missing_failure = json.loads(json.dumps(selection))
+        missing_failure["source_provenance"][0]["capacity_failures"] = []
+        with pytest.raises(ValueError, match="capacity eligibility"):
+            gate.matrix_inventory(missing_failure)
+
+
 def test_publication_rollback_preserves_replacement_inode() -> None:
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)

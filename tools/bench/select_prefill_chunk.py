@@ -15,16 +15,33 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tools.bench.run_ninfer_bench_matrix import (
+from tools.bench.matrix_contract import (
     MATRIX_SCHEMA_VERSION,
     PRODUCTION_PREFILL_CHUNKS,
     R9700_KV_PLANE_LAYOUTS,
-    build_cases,
-    file_sha256,
-    load_bench_report,
-    validate_hybrid_shared_workspace_authority,
 )
 from tools.ppl.run import validate_n16_receipt_summary
+
+
+def _runner():
+    from tools.bench import run_ninfer_bench_matrix
+    return run_ninfer_bench_matrix
+
+
+def build_cases(*args, **kwargs):
+    return _runner().build_cases(*args, **kwargs)
+
+
+def file_sha256(path: Path) -> str:
+    return _runner().file_sha256(path)
+
+
+def load_bench_report(*args, **kwargs):
+    return _runner().load_bench_report(*args, **kwargs)
+
+
+def validate_hybrid_shared_workspace_authority(*args, **kwargs):
+    return _runner().validate_hybrid_shared_workspace_authority(*args, **kwargs)
 
 ARTIFACT_TYPE = "ninfer_r9700_prefill_chunk_selection"
 SCREENING_ARTIFACT_TYPE = "ninfer_r9700_prefill_chunk_screening"
@@ -510,6 +527,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="rebuild an existing screening record and print its two finalists",
     )
     parser.add_argument("--out", type=Path)
+    parser.add_argument(
+        "--create-only", action="store_true",
+        help="atomically create --out and reject an existing namespace",
+    )
     args = parser.parse_args(argv)
     screens = [path.resolve() for path in args.screen]
     if args.verify_screening is not None:
@@ -527,8 +548,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         if len(screens) != 12 or len(finalists) != 12:
             raise SystemExit("final selection requires exactly twelve --screen and --finalist directories")
         payload = build_selection(list(zip(screens, finalists, strict=True)))
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    if args.create_only:
+        from tools.bench.prefill_chunk_authority import durable_create_json
+        durable_create_json(args.out, payload)
+    else:
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     if "selected_prefill_chunk" in payload:
         print(f"selected prefill chunk: {payload['selected_prefill_chunk']}")
     else:

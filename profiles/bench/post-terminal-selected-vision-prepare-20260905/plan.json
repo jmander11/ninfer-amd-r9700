@@ -1,0 +1,13 @@
+{
+  "artifact_type": "ninfer_r9700_selected_vision_diagnostic_preparation",
+  "schema_version": 1,
+  "status": "blocked_on_terminal_schema_v7_selection",
+  "selection": "profiles/bench/pareto-result-post-promotion-20260905.json",
+  "prepared_output": "profiles/bench/post-terminal-selected-vision-20260905",
+  "prepare_command": "bash profiles/bench/post-terminal-selected-vision-prepare-20260905/prepare.sh",
+  "future_gpu_command": "bash profiles/bench/post-terminal-selected-vision-20260905/commands.sh",
+  "scope": "one committed image, C1, thinking off, no prefix reuse, no speculative decode",
+  "gate": "diagnostic completion with exact finite block_00/block_13/block_26/merger shapes and identities; no numerical acceptance threshold",
+  "binding": "dynamic schema-v7 winner, exact selected artifact/build/cache group/execution profile/chunk, validated 18-shard BF16 receipt, two explicit Python environments, committed messages/media bytes, and frozen selected-artifact frontend output",
+  "publication": "Preparation uses a no-replace directory rename. Prepared input, raw diagnostic, and final completion authority are create-only; raw/final publishers use same-directory exclusive temporary inodes, hard links, fsync, readback, and owned-inode rollback. The validator reopens the schema-v7 route, BF16 protocol receipt, environments, fixture, prepared input, raw report, exact geometry, and finite metrics before and after publication."
+}

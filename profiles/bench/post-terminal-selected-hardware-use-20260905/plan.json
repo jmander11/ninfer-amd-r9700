@@ -1,0 +1,35 @@
+{
+  "artifact_type": "ninfer_r9700_post_terminal_selected_hardware_use_plan",
+  "schema_version": 1,
+  "status": "blocked_on_terminal_schema_v7_selection_and_selected_dispatch_evidence",
+  "selection": "profiles/bench/pareto-result-post-promotion-20260905.json",
+  "static_audit": "profiles/bench/r9700-twelve-candidate-hardware-path-static-audit-20260905.json",
+  "output": "profiles/bench/selected-hardware-use-20260905.json",
+  "scope": "one schema-v7 winner; exact artifact, benchmark executable, cache group, attention profile, selected chunk, executed dispatch inventory, dispatch resources joined to embedded IU4/IU8/BF16 ISA, the existing Q4 wave32 path used by MTP regression, and conditional selected-workload loaded-ELF FP8 paths",
+  "required_inputs": [
+    "one selected-route dispatch reconciliation whose inventory binds the schema-v7 artifact/executable/profile",
+    "the selected trace's executed Q4 wave32 path and its embedded static IU4/resource proof; existing whole graph/eager/token/acceptance evidence owns MTP behavior, with no separate MTP optimization proof",
+    "for a four-role hybrid winner only, a selected trace with load-time code-object capture plus gate/up and attention loaded-ELF FP8 proofs; every relevant dispatch maps through its database code-object URI to captured ELF bytes whose exact SHA and SGPR/architectural-VGPR/accumulator-VGPR/LDS/private-segment fields match the qualified native-FP8 ISA/resource proof; unavailable spill counters remain explicitly unavailable"
+  ],
+  "conditional_route_gates": {
+    "all_q4": "executed Q4 CTA, selected dense full-score or XAttention rank/consumer, and executed Q4 wave32 path used by retained MTP regression",
+    "mixed": "all-Q4 requirements plus executed W8 CTA/IU8; no MTP-bulk optimization proof is an admission gate",
+    "four_role_hybrid": "all-Q4 requirements plus both native-FP8 algorithms joined from every relevant selected dispatch through database code-object URI/load identity to captured ELF bytes, the exact qualified ELF SHA, and its retained SGPR/architectural-VGPR/accumulator-VGPR/LDS/private-segment envelope with separately represented spill availability; all selected dispatch resource fields must agree and kernel-name equality alone fails",
+    "xattention": "both rank and selected G16/G32 consumer must occur in the actual inventory; binary presence alone fails"
+  },
+  "concurrency": [1, 2, 3, 4],
+  "excluded_claims": [
+    "physical memory bytes or bandwidth",
+    "peak-bandwidth fraction",
+    "stall freedom",
+    "cross-operation overlap beyond the exact Q4 CTA static checker"
+  ],
+  "known_preparation_blockers": [
+    "Static schedule/reconciliation supports dense or fixed tau=0.9 XAttention and Q4/W8/four-role FP8 classification at C1 P2048. The prepared physical trace command resolves the future winner and its exact pareto-whole artifact/executable/profile/chunk identities; executing and validating that trace waits for terminal selection. A dense counterpart is not substituted for sparse or hybrid execution.",
+    "MTP shortlist-head, alternate-precision, and mixed MTP-bulk optimization evidence are not scheduled and cannot gate this verifier; existing MTP behavior remains covered by whole graph/eager/token/acceptance evidence plus the selected trace/static paths."
+  ],
+  "trace_preparation": "python3 -m tools.bench.prepare_selected_hardware_trace --selection profiles/bench/pareto-result-post-promotion-20260905.json --out profiles/rocprof/post-terminal-selected-hardware-trace-20260905",
+  "trace_validation": "python3 -m tools.bench.validate_selected_hardware_trace --plan profiles/rocprof/post-terminal-selected-hardware-trace-20260905/plan.json --benchmark-report profiles/rocprof/post-terminal-selected-hardware-trace-20260905/benchmark-report.json --database EXPLICIT_ROCPD_DB --power-before profiles/rocprof/post-terminal-selected-hardware-trace-20260905/power-profile-before.txt --power-after profiles/rocprof/post-terminal-selected-hardware-trace-20260905/power-profile-after.txt --selection profiles/bench/pareto-result-post-promotion-20260905.json --artifact EXACT_SELECTED_ARTIFACT --executable EXACT_SELECTED_EXECUTABLE --corpus EXACT_BOUND_CORPUS --out profiles/rocprof/post-terminal-selected-hardware-trace-20260905/validated-trace.json",
+  "command": "bash profiles/bench/post-terminal-selected-hardware-use-20260905/verify.sh RECONCILIATION [FP8_GATE_PROOF FP8_ATTENTION_PROOF]",
+  "publication": "Reject the final namespace under lstat semantics, recompute the complete selected route/reconciliation/conditional proof result immediately before publication, publish one same-directory hard link without overwrite, reopen and recompute after publication, fsync the directory, and remove only the newly published inode if final revalidation fails."
+}

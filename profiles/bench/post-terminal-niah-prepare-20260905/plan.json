@@ -1,0 +1,14 @@
+{
+  "artifact_type": "ninfer_r9700_selected_niah_preparation",
+  "schema_version": 1,
+  "status": "blocked_on_terminal_schema_v7_selection",
+  "selection": "profiles/bench/pareto-result-post-promotion-20260905.json",
+  "prepared_output": "profiles/bench/post-terminal-niah-20260905",
+  "prepare_command": "bash profiles/bench/post-terminal-niah-prepare-20260905/prepare.sh",
+  "future_gpu_command": "bash profiles/bench/post-terminal-niah-20260905/commands.sh",
+  "gate": "one fresh full-prefill request at each 64K start/q25/mid/q75/end needle position; after stripping surrounding whitespace the complete response must equal ORCHID=493817; COLOR=COBALT, with thinking off and at most 64 output tokens",
+  "runtime": "one local server, max concurrency 1, explicit 262144-token context and KV capacity, prefix reuse disabled",
+  "binding": "terminal schema-v7 winner, selected chunk, exact artifact, benchmark and already-built serving executable bytes from the selected build, G16/G32 cache profile, dense/tau0.9 attention profile, both source matrices, and hybrid planner when selected",
+  "publication": "Preparation rejects occupied names including dangling symlinks and atomically publishes the complete directory with renameat2(RENAME_NOREPLACE). Commands use noclobber, reject all five runtime output namespaces under lstat semantics, and do not rebuild or mutate the selected build before starting its frozen server executable. NIAH evidence and final admission use exclusive same-directory hard links; admission re-resolves the complete schema-v7 route, requires the canonical server/output contract and all five frozen fixture identities, binds one ordered full-prefill request and exact-answer digest to each passing response, rejects stale or extended server logs, revalidates after publication, and rolls back only its own published inode on a late failure.",
+  "scope": "the 8K/200K ladders and full 6x5 matrix remain optional and are not scheduled"
+}

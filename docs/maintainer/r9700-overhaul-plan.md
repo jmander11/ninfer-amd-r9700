@@ -713,16 +713,17 @@ Replace functional routes with measured gfx1201 families:
   executable hashes,
   the exact nine-point axis-sensitive FP64 represented-format oracle, seven balanced timing pairs,
   the R9700/auto-power complete-path identity, and retained P2048 trace/capacity hashes. It replaces the
-  trace's measured Q4 gate/up service by the measured complete-path ratio, verifies the exact
-  64-object FP8-over-Q4 byte delta against both inventories, and requires nonnegative conservative
-  P2048/P8192 capacity slack for G16/G32 at every C=1..4 plus an improving projected whole-P2048
-  time. The retained decision report SHA-256 is
+  trace's measured Q4 gate/up service by the measured complete-path ratio and verifies the exact
+  64-object FP8-over-Q4 byte delta against both inventories. Its original capacity calculation
+  omitted MTP plus optimized-head materialization and is invalid as current admission evidence;
+  only its measured operator result and projected P2048 service reduction remain design evidence.
+  The retained decision report SHA-256 is
   `3da19d842bba606b76fbd12625e8c5b65fa32e3bc64b74144865e92cc7a02809` for
   `profiles/bench/r9700-fp8-gate-up-decision-shared-source-20260904.json`: verdict `proceed`,
-  exact all-layer added resident bytes 5,356,650,496, minimum conservative capacity slack
-  1,026,070,017 bytes (G16/C4/P8192), and projected whole P2048 1.359737778 s / 1506.172758
-  tok/s from the bound 1.535900718 s trace. This projection admits the artifact/runtime work; it
-  is not a production whole-inference measurement.
+  exact all-layer added resident bytes 5,356,650,496 and projected whole P2048
+  1.359737778 s / 1506.172758 tok/s from the bound 1.535900718 s trace. Its reported
+  1,026,070,017-byte G16/C4/P8192 slack is superseded and must not admit an artifact or route.
+  The speed projection is not a production whole-inference measurement.
   The pre-shared-source executed-path proof is retained at
   `profiles/rocprof/r9700-fp8-gate-up-isa-proof-hsa-20260904/proof.json` (SHA-256
   `eb0988a0a55e3e8a5af16e480dd8d315845df6ca320e62401f7b27921773b7df`). Rocprof dispatch
@@ -739,10 +740,11 @@ Replace functional routes with measured gfx1201 families:
   1,024,065,536 added bytes, and 87,724,946 ns of measured Q4 service. The attention roles share
   one physical qualifier, so the two required report IDs were `attention_qk_gate_value` and
   `gdn_query_key`, both under schema `ninfer.r9700.fp8_projection_qualification.v1` version 1.
-  Selection is driven by the tightest 1,026,070,017-byte post-gate/up capacity slack; this set
-  leaves 2,004,481 bytes in G16/C4/P8192. The hash-bound owner independently checks current role
-  inventory, planner arithmetic, axis-sensitive oracles, balanced raw timing, live source and
-  executable identity, and emits no report before both physical inputs exist. The retained
+  Selection was driven by the then-retained 1,026,070,017-byte post-gate/up capacity estimate.
+  That estimate omitted MTP plus optimized-head materialization, so its claimed 2,004,481-byte
+  G16/C4/P8192 remainder is invalid and cannot serve as capacity admission. The hash-bound owner
+  independently checks role inventory, axis-sensitive oracles, balanced raw timing, and source/
+  executable identity; fresh selected-chunk physical capacity owns current admission. The retained
   attention report is `profiles/bench/r9700-fp8-vs-a8q4-attention-qk-gate-value-20260904.json`
   (SHA-256 `22f93d5280aeeec447b749f683c0e9ab2673b1f17ce1244bdd7abb91ab3080f8`):
   FP8 is 1.013659 ms versus 1.459598 ms Q4 (`1.439930x`). The retained GDN query-key report is
@@ -752,10 +754,11 @@ Replace functional routes with measured gfx1201 families:
   axis-sensitive probes. The terminal owner report is
   `profiles/bench/r9700-fp8-post-gate-up-decision-20260904.json` (SHA-256
   `7d12a2d962606d967d905c010cf0b506398b3dd0be09841df9cdd62ee8563128`), verdict
-  `proceed`; its exact 144-object replacement adds 6,380,716,032 bytes, leaves 2,004,481 bytes in
-  the tight cell, and projects 1.332472 s / 1,536.993 tok/s whole P2048. This remains far below
-  the 2,000 tok/s acceptance floor and is a projection until the selected hybrid artifact passes
-  whole-inference and decode-preservation measurement.
+  `proceed`; its exact 144-object replacement adds 6,380,716,032 bytes and projects
+  1.332472 s / 1,536.993 tok/s whole P2048. Its 2,004,481-byte tight-cell claim is invalid for the
+  reason above. The speed result remains far below the 2,000 tok/s acceptance floor and is a
+  projection until the selected hybrid artifact passes whole-inference and decode-preservation
+  measurement.
 - [x] Screen source-weight error for that exact selective set before its remaining physical
   qualifiers. `profiles/bench/r9700-selective-e4m3-vs-q4g64-sampled-quality-20260904.json`
   has SHA-256 `f94a7f6a2d65c0906f44d5b2c6d2ff553eea3c532f5a528dce0d8d3ff07568ed` and binds the
@@ -1649,9 +1652,11 @@ Replace functional routes with measured gfx1201 families:
   superseded, non-runnable, and never rebound or resumed. Once the P2048 gate opens, a fresh shared
   chunk authority must be derived only from screen/finalist roots whose names end in
   `-receipt-bound-n16k16-20260905`, with a fresh campaign, pipeline, and selection authority in the
-  same namespace. The post-chunk package then consumes that receipt-bound selection and
-  owns exactly the twelve capacity matrices x C=1..4 plus their matched twelve whole matrices x
-  C=1..4. Each retained schema-v14 manifest must be published atomically in its own directory.
+  same namespace. The post-chunk package then consumes that receipt-bound selection and owns
+  exactly twelve capacity matrices x C=1..4. It runs a whole matrix x C=1..4 only for each
+  capacity-eligible profile, after validating symmetric dense/XAttention eligibility within its
+  recipe/cache-group pair. Each retained schema-v14 manifest must be published atomically in its
+  own directory.
   These base-selection rows retain the fixed existing MTP3 regression profile; they do not require
   new MTP optimization. Recipe-specific DFlash shortlist/capacity/Pareto remains the selected-only
   downstream gate because its companion artifact depends on the base winner. The required
@@ -1667,9 +1672,9 @@ Replace functional routes with measured gfx1201 families:
   pre-receipt template until regenerated and refrozen. Its CPU-only validator must reopen
   the schema-v7, chunk, six-quality, exact-token, low-context, retained MTP regression in the
   whole/selected-trace evidence, NIAH, selected-source-BF16
-  Vision diagnostic, focused, hardware-use, DFlash, and converter-preflight owners; join the exact
-  twelve C1..4 capacity and twelve C1..4 whole matrices; and publish create-only only after every
-  selected-route physical authority passes.
+  Vision diagnostic, focused, hardware-use, DFlash, and converter-preflight owners; join all twelve
+  C1..4 capacity outcomes and the C1..4 whole matrices for capacity-eligible profiles; and publish
+  create-only only after every selected-route physical authority passes.
   The final receipt remains absent, so no artifact or product-identity mutation is authorized.
 
 Derive each route from real shapes and phase behavior. Qualify wave mode, WMMA atom, LDS layout,

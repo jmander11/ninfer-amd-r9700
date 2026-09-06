@@ -50,6 +50,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from tools.bench.matrix_contract import (
+    MATRIX_SCHEMA_VERSION,
+    PRODUCT_CONCURRENCIES,
+    PRODUCTION_PREFILL_CHUNKS,
+    R9700_KV_PLANE_LAYOUTS,
+)
+from tools.bench.prefill_chunk_authority import inspect_prefill_chunk_authority
 from tools.ppl import run as ppl_run
 from tools.ppl.validate_fp8_hybrid_execution_gate import query_widths
 
@@ -59,7 +66,6 @@ DEFAULT_CORPUS = REPO_ROOT / "bench/fixtures/bench_corpus.ids"
 PREFILL_LENGTHS_CORE = (128, 256, 512, 1024, 2048, 4096, 8192, 16384)
 PREFILL_LENGTHS_FULL_EXTRA = (32768, 65536)
 PREFILL_CHUNKS = (128, 256, 512, 1024, 2048, 4096)
-PRODUCTION_PREFILL_CHUNKS = (1024, 2048, 4096, 8192)
 PRODUCTION_PREFILL_PROMPTS = (8192, 32768)
 LOW_CONTEXT_PREFILL_PROMPTS = (128, 512, 1024, 2048, 4096)
 R9700_POWER_PROFILE = Path(
@@ -73,7 +79,6 @@ SWEEP_KS = (0, 1, 2, 3, 4, 5)
 REPORT_SCHEMA_VERSION = 20
 REPORT_ARTIFACT_TYPE = "ninfer_bench_report"
 REPORT_TOOL = "ninfer_bench"
-MATRIX_SCHEMA_VERSION = 14
 DFLASH_SHORTLIST_SCHEMA_VERSION = 1
 DFLASH_SHORTLIST_K_ORDER = (1, 11, 2, 10, 3, 9, 4, 8, 5, 7, 6)
 MODEL_ID = "qwen3.8-27b"
@@ -82,12 +87,6 @@ FP8_QK_WMMA_PROFILE = "t1-ge64-t2-ge320-t3plus-stream-v1"
 FP8_QK_WMMA_T1_MIN_CONTEXT = 64
 FP8_QK_WMMA_T2_MIN_CONTEXT = 320
 XATTENTION_PROFILES = ("dense", "b128-s16-tau900")
-PRODUCT_CONCURRENCIES = (1, 2, 3, 4)
-R9700_KV_PLANE_LAYOUTS = {
-    "key": "token-fastest-head-major",
-    "value": "feature-fastest-page-major",
-    "value_scale": "feature-fastest-page-major",
-}
 BENCHMARK_PENDING_TIMEOUT_MS = 0xFFFFFFFF
 NINFER_MAGIC = b"NINFER\x00\x02"
 NINFER_PREFIX = struct.Struct("<8sQ")
@@ -717,6 +716,32 @@ def validate_fp8_hybrid_performance_contract(args: argparse.Namespace) -> None:
         raise SystemExit("hybrid performance evidence requires the complete fixed preset")
     if args.hybrid_width_tool is None:
         raise SystemExit("--require-fp8-hybrid requires --hybrid-width-tool")
+
+
+def validate_post_chunk_capacity_contract(args: argparse.Namespace) -> None:
+    """Keep the terminal capacity gate on its exact four-concurrency product geometry."""
+
+    if not args.require_post_chunk_capacity:
+        return
+    if args.preset != "pareto-capacity":
+        raise SystemExit("--require-post-chunk-capacity requires --preset pareto-capacity")
+    if args.concurrency != list(PRODUCT_CONCURRENCIES):
+        raise SystemExit("post-chunk capacity requires exactly C=1,2,3,4")
+    if args.device != 0:
+        raise SystemExit("post-chunk capacity is fixed to device 0")
+    if args.prefill_chunk_authority is None:
+        raise SystemExit("post-chunk capacity requires --prefill-chunk-authority")
+    if args.expected_kv_value_group not in (16, 32):
+        raise SystemExit("post-chunk capacity requires a product G16 or G32 build")
+    if args.expected_xattention_profile not in XATTENTION_PROFILES:
+        raise SystemExit("post-chunk capacity requires a product attention profile")
+    if (
+        args.suite
+        or args.limit is not None
+        or args.repetitions is not None
+        or args.warmup is not None
+    ):
+        raise SystemExit("post-chunk capacity requires the complete fixed preset")
 
 
 def validate_hybrid_shared_workspace_authority(
@@ -2994,6 +3019,11 @@ def write_manifest(
         "selected_prefill_chunk": (
             args.prefill_chunk[0] if args.preset in SELECTED_PREFILL_CHUNK_PRESETS else None
         ),
+        **(
+            {"prefill_chunk_authority": args.prefill_chunk_authority_record}
+            if args.prefill_chunk_authority_record is not None else {}
+        ),
+        **({"post_chunk_capacity_gate": True} if args.require_post_chunk_capacity else {}),
         "power_profile": (
             {
                 "required": "auto",
@@ -3060,6 +3090,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         metavar="TOKENS",
         help=("chunk candidate for --preset prefill-chunk (default: 1024,2048,4096,8192); "
               "every Pareto/DFlash campaign preset requires one selected value"),
+    )
+    parser.add_argument(
+        "--prefill-chunk-authority",
+        type=Path,
+        help="validated production chunk-selection record bound into this matrix manifest",
     )
     parser.add_argument(
         "--prefill-prompt",
@@ -3130,6 +3165,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="require the authority-bound hybrid artifact/receipt and fixed C1..4 gate geometry",
     )
     parser.add_argument(
+        "--require-post-chunk-capacity", action="store_true",
+        help="require the exact receipt-bound twelve-matrix C1..4 capacity-gate contract",
+    )
+    parser.add_argument(
         "--hybrid-width-tool", type=Path,
         help="host-only runtime planner executable from the same shared-workspace build",
     )
@@ -3168,6 +3207,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if any(concurrency not in PRODUCT_CONCURRENCIES for concurrency in args.concurrency):
         raise SystemExit("--concurrency must be in [1, 4]")
     validate_fp8_hybrid_performance_contract(args)
+    validate_post_chunk_capacity_contract(args)
     if args.preset == "dflash-shortlist":
         if args.concurrency != [1]:
             raise SystemExit("--preset dflash-shortlist is the fixed C=1 shortlist")
@@ -3235,6 +3275,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     args.bench = args.bench.expanduser().resolve()
     args.weights = args.weights.expanduser().resolve()
     args.corpus = args.corpus.expanduser().resolve()
+
+    args.prefill_chunk_authority_record = None
+    if args.prefill_chunk_authority is not None:
+        if (
+            args.preset not in SELECTED_PREFILL_CHUNK_PRESETS
+            or args.prefill_chunk is None
+            or len(args.prefill_chunk) != 1
+        ):
+            raise SystemExit(
+                "--prefill-chunk-authority requires a selected-chunk campaign with one chunk"
+            )
+        try:
+            args.prefill_chunk_authority_record = inspect_prefill_chunk_authority(
+                args.prefill_chunk_authority, args.prefill_chunk[0]
+            )
+        except (OSError, ValueError) as error:
+            raise SystemExit(str(error)) from error
 
     if not args.dry_run and not args.weights.is_file():
         raise SystemExit(f"weights file not found: {args.weights}")
@@ -3451,6 +3508,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             "concurrency": list(args.concurrency),
             "commands": command_records,
         }
+        if args.prefill_chunk_authority_record is not None:
+            expected_resume["prefill_chunk_authority"] = args.prefill_chunk_authority_record
+        if args.require_post_chunk_capacity:
+            expected_resume["post_chunk_capacity_gate"] = True
         for key, value in expected_resume.items():
             if key == "power_profile" and prior_manifest.get("prepare_only") is True:
                 continue
@@ -3698,6 +3759,25 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "finished": finished_bench,
             }
         )
+    if args.prefill_chunk_authority_record is not None:
+        try:
+            finished_chunk_authority = inspect_prefill_chunk_authority(
+                Path(args.prefill_chunk_authority_record["path"]),
+                args.prefill_chunk_authority_record["selected_prefill_chunk"],
+            )
+        except (OSError, ValueError) as error:
+            failures.append({
+                "case": "prefill_chunk_authority",
+                "error": f"selected-chunk authority failed final revalidation: {error}",
+            })
+        else:
+            if finished_chunk_authority != args.prefill_chunk_authority_record:
+                failures.append({
+                    "case": "prefill_chunk_authority",
+                    "error": "selected-chunk authority changed during the matrix",
+                    "started": args.prefill_chunk_authority_record,
+                    "finished": finished_chunk_authority,
+                })
     if args.preset in POWER_RECHECK_PRESETS:
         try:
             args.power_profile_rechecked_after = require_auto_power_profile()

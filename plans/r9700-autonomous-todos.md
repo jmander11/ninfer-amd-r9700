@@ -15,9 +15,14 @@ Global execution cap: never schedule, generate, benchmark, profile, or require a
 only and must not be reused as an active command or product requirement.
 Immediate execution priority: the user stopped the queued whole-model/chunk/profiling campaign on
 2026-09-04. Do not resume those slow downstream rows while dense P2048 prefill remains below the
-2,000 tok/s hard gate. Use the GPU only for bounded operator qualification and matched P2048 checks
-that can select or reject a production-changing prefill implementation; resume the terminal
-campaign only after the prefill defect is fixed.
+2,000 tok/s hard gate. The current route reaches `1,847.942898 tok/s`; scalar-base failed its
+fixed operator gate, A4 failed quality, and M96N256 lost physically. A subsequent independent
+review found one omitted, materially distinct exact-Q4 architecture: M64xN192 with 24 waves while
+retaining the proven M16xN32/two-fragment wave shape. It is the only authorized next GPU path and
+must pass its bounded numerical/static gate before direct timing. Do not schedule adjacent Q4
+variants or any downstream chunk/capacity/whole campaign unless this candidate passes and then
+clears the whole-P2048/practical-ceiling gate; a terminal loss returns the work to an explicit
+representation/context/performance-contract decision.
 The 2,000 tok/s P2048 value is an acceptance floor based on an existing llama.cpp observation, not
 an optimization target or a performance ceiling for this fixed-model, fixed-R9700 engine. Crossing
 it permits the dependent campaign to resume but does not close prefill performance work: continue
@@ -33,10 +38,13 @@ value scales. Cache-only G16/G32 changes 93/94 of 4,095 BF16-greedy choices, so 
 identity is diagnostic rather than an admission condition. Quality eligibility requires an
 explicit tier plus complete finite aligned sidecars. Accuracy uses delta mean NLL at most 0.02 and
 `max(4, ceil(0.001 * scored positions))` new severe positions; capacity-speed uses at most
-`ln(1.05)` and `ceil(0.0025 * scored positions)`. Final classification retains
-every non-dominated candidate after matched 8K/32K quality, resolved capacity, and C=1..4
-whole-inference throughput. Quality is an admission constraint, not the terminal ranking objective.
-The classifier first retains one same-recipe cache/execution winner, then emits exactly one
+`ln(1.05)` and `ceil(0.0025 * scored positions)`. Final classification retains the exact
+twelve-profile input set after matched 8K/32K quality and resolved C=1..4 capacity outcomes. A
+measured capacity failure is a retained exclusion with no whole-inference objective;
+`pareto-whole` evidence is required only for capacity-eligible profiles, and dense/XAttention
+eligibility must match within each recipe/cache-group pair. Quality is an admission constraint,
+not the terminal ranking objective. The classifier first retains one same-recipe cache/execution
+winner for each recipe with an eligible pair, then emits exactly one
 `terminal_production_selection` across those recipe winners under
 `global_maximin_whole_then_capacity_then_quality_then_canonical_v1`: maximize worst-cell
 normalized matched whole-inference throughput, then normalized capacity, then remaining declared-tier quality budget,
@@ -95,9 +103,13 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
       route has not yet been acquired.
 - [x] Keep the authority-bound four-role rowwise-FP8/all-other-Q4G64 artifact as a distinct third
       recipe branch. Its exact role inventory, artifact/receipt identity, dense-G16 8K/32K quality,
-      executed-role proof, and planner-capacity gate pass; it does not inherit the all-Q4 recipe.
-      Its remaining G32 and sparse quality plus the full twelve-candidate chunk/capacity/whole
-      selection rows remain open under the shared terminal gate.
+      executed-role proof, and planner/capacity tooling exist; it does not inherit the all-Q4
+      recipe. Its retained capacity pass is invalid because it used `20,707,768,320` bytes of
+      dense/spec-none materialization while claiming MTP3 plus the optimized head. Exact
+      materialization is `21,290,468,352` bytes, making the chunk-4096/P8192/G16/C4 plan
+      startup-inadmissible by `245,140,480` bytes. Its remaining G32 and sparse quality plus fresh
+      selected-chunk capacity outcomes and eligible whole rows remain open under the shared
+      terminal gate.
 - [x] Replace impossible zero-BF16-flip admission with explicit accuracy and capacity-speed tiers
       over finite/aligned, paired mean-NLL, and position-aware severe-NLL guardrails. Both
       mixed-Q4/W8+A8 and all-Q4+A8 measured within a declared tier. Dense all-Q4 G16/G32 has now
@@ -116,23 +128,24 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
       useful only to preserve the already-supported MTP graph/eager, ordinary-target token,
       acceptance/state, cache, row-view, and draft-window semantics. Do not schedule the prepared
       MTP shortlist-head trace, alternate head precision, MTP-bulk tuning, or any other new MTP
-      optimization as a prerequisite. The retained schema field
-      `selected_route_pending_shortlist_head_trace_and_niah` predates this decision: its
-      shortlist-head clause is superseded, while the selected-profile NIAH clause remains live.
+      optimization as a prerequisite. Schema v7 carries no MTP shortlist-head or downstream-
+      readiness status; selected-profile NIAH and DFlash remain independent downstream gates.
       - [x] Close the current schema-v14 whole-evidence admission contract. The assembler accepts
-            only exact C=1..4 capacity/whole pairs using one selected chunk, artifact, executable,
-            cache group, attention profile, and the exact adjacent N16 migration receipt for every
-            all-Q4, mixed, or four-role base; four-role additionally requires its matching hybrid
-            planner bytes. A whole matrix must have no failure marker and must bind `auto` both
+            exact C=1..4 capacity outcomes for every all-Q4, mixed, or four-role base, then accepts
+            whole-inference pairs only for capacity-eligible profiles using one selected chunk,
+            artifact, executable, cache group, attention profile, and the exact adjacent N16
+            migration receipt; four-role additionally requires its matching hybrid planner bytes.
+            A whole matrix must have no failure marker and must bind `auto` both
             before and after timing; every report path is campaign-owned and every raw schema-v20
             report is reopened against its exact command. Each of the four C values requires one
             optimized-head MTP3 timing report and one diagnostic ordinary/draft-off report, both
             containing matched 8K+256 and 32K+256 rows with exact per-repetition/lane target-token
             parity. The two retained schema-v13 all-Q4/G16 sparse manifests are therefore
-            inadmissible. After the shared chunk is selected, the only whole-model acquisition is
-            twelve matrices x eight reports = 96 benchmark invocations; the matched 48 capacity
-            invocations and still-missing quality cells remain their separate prerequisites, and
-            only the terminal selected route proceeds to required profiling and DFlash evidence.
+            inadmissible. After the shared chunk is selected, acquire twelve exact capacity
+            outcomes (48 commands), retain measured failures as exclusions, and run the eight-report
+            `pareto-whole` matrix only for each capacity-eligible profile. Still-missing quality
+            cells remain a separate prerequisite, and only the terminal selected route proceeds to
+            required profiling and DFlash evidence.
       Classify cache-group/execution-profile dominance only over the complete matched objective set
       and preserve every raw report for the schema-v7 terminal production choice.
       Execute the remaining physical gates in dependency order: rebuild the four compile profiles
@@ -655,6 +668,57 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
           Small-T wins are diagnostic only; no Q4G128 product or dual-scale compatibility lane
           follows, no live `>=30 ms` hypothesis remains, and the separate `>=2,000 tok/s`
           whole-model gate remains unchecked. Chunk selection remains blocked behind that unmet gate.
+        - [x] Rebase the stopped P2048 recovery decision on the final N16/four-role production
+          path and close the previously enumerated bounded exact-Q4 candidates. The current dense
+          C1/P2048/chunk-4096/spec-none authority is
+          `profiles/bench/r9700-four-role-n16k16-dense-g16-p2048-c1-spec-none-20260905.json`
+          (SHA-256 `612d667eea61aebdee9a7d12add99bfd90d31b21f155b6114e0b3ca2361d0338`):
+          `1,847.942898 tok/s` and `1.108835254 s`. Its selected-region attribution at
+          `profiles/rocprof/r9700-n16k16-production-p2048-trace-20260905/analysis.json`
+          (SHA-256 `3466e40d50ec96b9377db06791eda7f7947c1811f0be3a23d619b392490accbd`)
+          measures the remaining 176 Q4 calls at `356.276973 ms` for
+          `21.99023255552` useful TMAC, or `61.7223 TMAC/s`; the literal floor needs
+          `84.835254 ms` less whole time. Two independent scalar-base/u32-voffset qualifiers
+          consistently improved those three Q4 shapes by about `6.4%`, but their robust lower
+          savings were only `22.833545/22.766320 ms`, below the frozen `25 ms` gate, and each run
+          had one unstable control arm. Their immutable SHA-256 values are
+          `1941b3c6a262a61928d3971fc2b0afe06f7dac16db68a4221e79ae42940afb9b` and
+          `6501bc10d6dcbfb7638fd3ad977555231e263e3642b184ad15151f3feb9714dc`;
+          the repeat allowance is exhausted and production remains unchanged. A4 failed its
+          numerical-first 8K gate at `+0.070500086` mean NLL versus the fixed
+          `0.048790164` limit (report SHA-256
+          `cd449ecddbf7f2d260fb43d630b1274ae986631114bf6114c99f3253f0c6b8f5`).
+          The final distinct M96xN256/twenty-four-wave exact-Q4 candidate passed full incumbent
+          BF16 parity, sampled complete-K represented-FP64, tail/VMM guard, graph/status, and
+          static hardware gates at 105 logical/112 allocated VGPR, 30,208-byte LDS, two active
+          CTAs/48 resident waves, 16 native signed-IU4 sites, and zero spills. It nevertheless
+          stably lost every physical cell by about `5%`--`6%`, delivering only
+          `56.283693 TMAC/s`; its immutable terminal report is
+          `profiles/bench/r9700-a8q4-n16k16-m96n256-p2048-ab-20260905.json` (SHA-256
+          `c09f5b716cf8bce90ceac8e0c7c81e2621713610061582e0e66941a61cd9e20f`).
+          Split-K and unchanged-tile persistent/cooperative forms are also terminal by traffic and
+          launch-gap bounds. Qualification-only code is removed. A later independent review found
+          the omitted M64xN192 topology below, so the former conclusion that no exact-Q4 route
+          retained a credible bound is superseded; the stopped chunk/whole campaign remains held
+          while that one bounded candidate is decided.
+        - [ ] Qualify the one omitted exact-Q4 M64xN192/twenty-four-wave topology, incorporating
+          the consistently faster scalar-base/u32-voffset address form as one compound candidate,
+          before any representation or performance-contract change. Each wave must retain the proven
+          M16xN32/two-fragment/eight-IU4 compute shape and exact group reduction; do not inherit the
+          rejected M96xN256 four-fragment live range. Across the exact 48/64/64 P2048 call mix, the
+          request model is `306.822512640 GB` versus incumbent `364.823707648 GB`, removing
+          `58.001195008 GB` (`15.90%`) while increasing issued compute waves only `0.658%` from the
+          N=5,120 tail. Ping/pong LDS is exactly `21,504` bytes. First require full incumbent-BF16
+          parity, an independent sampled complete-K represented-FP64 oracle, N-tail/VMM guards,
+          status/alias/graph checks, native signed-IU4 proof, zero spills, allocation-rounded VGPR
+          consistent with two active 768-thread CTAs, and 48 resident waves/CU. Only a pass may run
+          one balanced `auto` direct A/B over the exact three shapes. Require a robust
+          call-weighted saving of at least `25 ms` before production transfer and one matched whole
+          run. The request-reduction and scalar bounds overlap: even their generous compound
+          estimate is only about `79.3 ms` versus the `84.835254 ms` whole-floor deficit, so a win
+          advances Q4 performance but does not by itself reopen chunk selection; only the matched
+          whole result can clear the floor. A stable loss is terminal with no adjacent
+          M64xN160/N224 sweep.
         - [x] Record the initial design rejection of direct signed-A8 by unpacked-signed-Q4 IU8
           WMMA. The
           gfx1201 builtin is K16 with signedness controls `(true, A, true, B, C, false)`. A G64
@@ -1067,8 +1131,10 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
           `profiles/bench/r9700-fp8-post-gate-up-decision-20260904.json` (SHA-256
           `7d12a2d962606d967d905c010cf0b506398b3dd0be09841df9cdd62ee8563128`) selects all
           three additions. Replacing those 144 objects in total adds `6,380,716,032` bytes and
-          leaves `2,004,481` bytes in the strict P=8,192/G16/C4 retained capacity envelope, but
           projects only `1,536.993` whole-P2048 tok/s; it cannot close the 2,000 tok/s floor alone.
+          Its claimed `2,004,481`-byte P=8,192/G16/C4 remainder is invalid because the historical
+          capacity input omitted MTP plus optimized-head materialization and is not admission
+          evidence.
           The owner refactor deliberately changed the shared qualifier source and rebuilt the gate
           and attention executables, so these retained reports no longer pass the live
           source/executable validator. Their numerical/performance result remains bounded design
@@ -1517,19 +1583,20 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
           new execution-state capacity/profile contract both pass as CPU-only tests. No GPU run or
           production-profile promotion is claimed.
 
-          The post-relocation pure planner capacity report is
+          The retained post-relocation planner report
           `profiles/bench/r9700-fp8-hybrid-current-capacity-p8192-g16-20260904.json`
-          (SHA-256 `122ec14fe78aba37a9cbb4f53189aee3e8f85da670137b35d6634e69edaccaac`).
-          It uses the current loaded hybrid weight capacity (`20,707,768,320` bytes), physical
-          capacity (`33,978,546,176`), P=8,192/G16/MTP3 graph plan, and 1-GiB automatic headroom.
-          C=1..4 share `2,433,155,072` workspace bytes and `1,810,432` bytes per additional KV
-          page group; resolved sequence/graph/slack bytes are respectively C1
-          `8,119,734,272`/`104,857,600`/`1,539,289,088`, C2
-          `9,575,473,152`/`186,646,528`/`1,761,280`, C3
-          `9,494,155,264`/`268,435,456`/`1,290,240`, and C4
-          `9,412,837,376`/`350,224,384`/`819,200`. All remain admissible, but the retained
-          pre-relocation `2,004,481`-byte C4 claim is not exact current evidence: it used the old
-          projected workspace and graph allowances. The report validator fails closed against the
+          (SHA-256 `122ec14fe78aba37a9cbb4f53189aee3e8f85da670137b35d6634e69edaccaac`)
+          is historical invalid capacity evidence. It used the dense/spec-none materialization
+          (`20,707,768,320` bytes) while claiming the MTP3 optimized feature set. Exact inventory
+          accounting adds `582,700,032` bytes for that feature set, yielding
+          `21,290,468,352` materialized bytes. Recomputing the same P=8,192/G16/MTP3 graph plan
+          therefore leaves C1--C3 admissible at aggregate capacities
+          `262,144/281,792/267,584` tokens, while C4 is startup-inadmissible by
+          `245,140,480` bytes. The former C1--C4 slack values and the still older
+          pre-relocation C4 claim are not current authority. The schema-v2 capacity producer now
+          derives feature materialization from the exact inventory and binds the source schema,
+          tool, target, weights identity, device, graph mode, and concurrency; a fresh physical
+          selected-chunk capacity campaign remains required. The report validator fails closed against the
           live CPU planner executable and weight-report hashes; its two focused tests and
           `py_compile` pass without GPU allocation.
 
@@ -2043,8 +2110,8 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         Post-selection command preparation is complete, without physical evidence, in
         `profiles/bench/post-terminal-selected-hardware-use-20260905` and
         `profiles/rocprof/selected-ordinary-decode-memory-prepare-20260905`. The historical
-        `profiles/rocprof/selected-mtp-shortlist-head-prepare-20260905` package is not scheduled and
-        is not an admission prerequisite. The ordinary-decode package reports
+        `profiles/rocprof/selected-mtp-shortlist-head-prepare-20260905` package and its standalone
+        producer/finalizer tooling are removed rather than retained as a dormant product lane. The ordinary-decode package reports
         only supported relative cache/activity proxies and fails closed on unavailable or zero
         counters; it does not claim physical HBM bandwidth.
   - [ ] Use the four rebuilt static compile profiles to run all twelve recipe/cache/attention
@@ -2087,8 +2154,8 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
           tests cover the exact hybrid companion authority and allowed preset boundary. Refresh the
           affected downstream closures only after the P2048 floor reopens base selection, not as a
           substitute for the still-missing physical rows.
-        - [x] Close the matching whole-model CPU contract. Each of the twelve post-promotion
-          `pareto-whole` matrices is fixed to C=1..4, the schema-v2-selected chunk, one 8K+256 and
+        - [x] Close the matching whole-model CPU contract. Each capacity-eligible post-promotion
+          profile receives one `pareto-whole` matrix fixed to C=1..4, the schema-v2-selected chunk, one 8K+256 and
           one 32K+256 fresh-prompt row per C, and one warmup plus three measured repetitions. Each
           MTP3 timing report requires the optimized proposal head and nonzero drafted rounds/tokens;
           a matched ordinary report retains every output token and exact per-repetition/lane target
@@ -2423,8 +2490,9 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
       compile-isolated attention profile; retain the selected profile's required dense T=1, decode,
       MTP/tree, DFlash, and non-prefill boundaries.
       `profiles/bench/terminal-static-selection-20260905` is prepared to consume the exact twelve
-      candidate-local quality/capacity/whole rows and publish one schema-v7 winner atomically; its
-      absent output keeps this physical selection unchecked.
+      candidate-local quality/capacity-outcome rows plus whole rows only for capacity-eligible
+      profiles and publish one schema-v7 winner atomically; its absent output keeps this physical
+      selection unchecked.
   - [x] Make the pending comparison a compile-time identity rather than a runtime cache selector.
         Separate G16 and G32 builds compile the selected group through the complete runtime and
         PPL executable, reject every other configured value, and emit `kv_value_group` plus the
@@ -2444,10 +2512,11 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         schema-v18/v11 `pareto-capacity-max-*` campaigns remain superseded historical evidence and
         cannot enter the final C=1..4 frontier. Exact current values and hashes are retained in the
         candidate children below and `docs/performance.md`.
-  - [ ] Complete the twelve schema-v14 capacity/whole matrix pairs named in the XAttention
-        admission children below, then assemble one schema-v7 Pareto decision against each
-        candidate's matched quality evidence. This is the aggregation owner for those same physical
-        campaigns, not a second G16/G32 run. The schema-v7 decision must retain every per-recipe winner and
+  - [ ] Complete the twelve schema-v14 capacity outcomes named in the XAttention admission
+        children below plus the corresponding whole matrix for every capacity-eligible profile,
+        then assemble one schema-v7 Pareto decision against each candidate's matched quality
+        evidence. This is the aggregation owner for those same physical campaigns, not a second
+        G16/G32 run. The schema-v7 decision must retain every eligible per-recipe winner and
         one `terminal_production_selection` binding the selected artifact, fixed cache, and compile-bound
         dense or B128/S16/tau900 execution identity.
         The shared physical owner is `profiles/bench/post-chunk-twelve-candidate-20260905`; do not
@@ -2455,14 +2524,15 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
   - [x] Make that final handoff fail closed across the selection boundary. The schema-v4 assembler
         accepts a candidate-local native schema-v6 PPL campaign directly, so dense and sparse
         profiles cannot be conflated through one global quality label. It reopens raw cells and
-        hashed sidecars, requires the exact cache and compile-bound execution identity to match both
-        schema-v14 benchmark matrices, and carries both identities into the schema-v7 classifier.
-        Its deterministic same-recipe selection retains each of the three recipe branches'
-        winning cache and execution
-        profiles; the terminal rule must then retain exactly one production artifact/cache/execution
-        winner. Schema v7 records each branch's distinct weight-storage profile and retains and
-        reopens the complete schema-v4 input by path/SHA-256. Its legacy shortlist-head-pending
-        marker is superseded and must not gate selection; selected-profile NIAH remains pending.
+        hashed sidecars, requires the exact cache and compile-bound execution identity to match the
+        capacity matrix for all twelve candidates and the whole matrix exactly for each
+        capacity-eligible profile, and carries both identities into the schema-v7 classifier.
+        Capacity-failed dense/sparse pairs remain non-comparable; deterministic same-recipe
+        selection retains a winning cache and execution profile only for recipes with an eligible
+        pair. The terminal rule must then retain exactly one production artifact/cache/execution
+        winner. Schema v7 records every branch's distinct weight-storage profile and retains and
+        reopens the complete schema-v4 input by path/SHA-256. Schema v7 carries no MTP-head or
+        downstream-readiness marker; selected-profile NIAH and DFlash remain separate gates.
         DFlash and NIAH reject a missing terminal
         winner or any selected identity drift. The chunk selector and assembler now require the
         full twelve-candidate Cartesian set, so the older two-recipe chunk result cannot silently
@@ -2658,7 +2728,8 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
       identity and the sparse threshold/stride are compile-isolated qualification profiles, not a
       second cache format or an unmeasured production default. Physical requalification selected
       the compile-isolated S16/tau900 candidate; dense attention remains the sole production route
-      until the complete twelve-candidate, three-recipe whole-matrix decision and selected-profile
+      until the complete twelve-candidate, three-recipe decision retains capacity-failed pairs as
+      exclusions, measures every eligible whole matrix, and closes the selected-profile
       NIAH gate close.
   - [x] Add an independent host keep-set oracle for the XAttention antidiagonal algorithm and an
         FP64 attention oracle over exactly the retained pages. Qualify causal/tail pages, sinks and
@@ -3415,7 +3486,8 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
       `profiles/ppl/terminal-quality-recovery-20260905`; matched C1..4 whole and acceptance evidence
       is owned by `profiles/bench/post-chunk-twelve-candidate-20260905`. Both remain blocked behind
       the selected chunk and neither preparation closes this physical parent.
-  - [x] Reconcile the completed four-role hybrid prefill-quality and current capacity evidence.
+  - [ ] Reconcile the completed four-role hybrid prefill-quality evidence with fresh
+        selected-chunk capacity evidence.
         The fail-closed CPU report is
         `profiles/bench/r9700-fp8-hybrid-quality-capacity-admission-20260904.json` (SHA-256
         `8d6cfd8525905046c6c3837a77eeb58b9268559ca37409cdcc3692b64e67c99d`). It reopens the
@@ -3426,13 +3498,17 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         `97aacde821b0e570995b2fdc86cf9167763961ad92cfeb70d034a11fffdfa8f0`) has delta mean NLL
         `0.0279584773` and 25/41. Both beat the `ln(1.05)` and 0.25% gates. The regenerated current
         C1..4 capacity report (SHA-256
-        `e81d966017cc464938cdc612ec2f9da57fd99e84557f23763fef4242ece17fa4`) preserves all four
-        cells with slack `1,539,289,088/1,761,280/1,290,240/819,200` bytes; only its planner hash
-        changed after adding the host width query. Quality and capacity are admitted, but
-        performance promotion is not: the shared-workspace C1/P2048 observation is only
-        `1,636.830337 tok/s`, below the `2,000 tok/s` floor. The prepared broad C1..4 matrices
-        remain intentionally unlaunched until a fresh current-production P2048 run clears that
-        floor; decode graph/eager and speculative execution evidence also remains open.
+        `e81d966017cc464938cdc612ec2f9da57fd99e84557f23763fef4242ece17fa4`) is not admissible
+        current capacity evidence: it used `20,707,768,320` dense/spec-none materialized bytes
+        while claiming MTP3 plus the optimized head. The exact feature materialization is
+        `21,290,468,352` bytes, which makes the same P=8,192/G16/C4 plan startup-inadmissible by
+        `245,140,480` bytes; the old apparent C1--C4 slack values are invalid. Quality remains
+        admitted, but capacity must be rerun only after production chunk selection and must retain
+        any measured failed cells. Performance promotion is also still open: the current
+        dense C1/P2048/chunk-4096/spec-none authority reaches `1,847.942898 tok/s`, below the
+        `2,000 tok/s` floor and without practical-ceiling proof. The prepared broad C1..4 matrices
+        remain intentionally unlaunched; decode graph/eager and speculative execution evidence
+        also remains open.
   - [x] Implement the independent BF16-source scorer that emits the campaign's
         `bf16-reference` JSON plus index-aligned FP32 NLL and exact I32 argmax sidecars. The
         checkpoint-native evaluator validates the exact 1,199-tensor, 55,562,855,904-byte,
@@ -3519,7 +3595,8 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         all-Q4 whole matrices,
         acceptance, and same-route execution evidence remain.
 - [ ] Benchmark complete inference and concurrency C=1..4 with profiler attribution. The base
-      closure is supplied by the same twelve schema-v14 capacity/whole matrix pairs used by
+      closure is supplied by the same twelve schema-v14 capacity outcomes and corresponding
+      eligible whole matrices used by
       the schema-v7 `terminal_production_selection`; do not schedule a duplicate C=1..4 campaign. DFlash
       and any bottleneck-specific profiler evidence remain downstream of that selection. The
       prepared owners are `post-chunk-twelve-candidate-20260905` before selection and the selected
@@ -3620,7 +3697,7 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
       The machine-readable evidence is retained under `profiles/artifact/`.
   - [x] Cut every active Q4 artifact writer, reader, binder, consumer, benchmark validator, and
         command example to the Q4-only `r9700-q4g64-n16-k16-v1` persistent layout. The canonical
-        selected four-role input for all forthcoming P2048, capacity, focused-profile, PPL, and
+        four-role evaluation input for all forthcoming P2048, capacity, focused-profile, PPL, and
         DFlash preparation is
         `out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer`, identity
         `qwen3.8-27b/r9700-q4g64-f8e4m3-four-role-n16k16-eval`, size 21,553,549,312 bytes, SHA-256

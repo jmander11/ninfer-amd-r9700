@@ -41,70 +41,6 @@ TERMINAL_RECIPE_PROFILES = {
 }
 
 
-def _shortlist_head_precision_gate(value: object) -> dict:
-    if not isinstance(value, dict) or (
-        value.get("head_format") != "Q4G64_F16S"
-        or value.get("activation_profile") != "A8G64"
-        or type(value.get("all_repetitions_minimum")) is not bool
-        or value.get("counter_semantics")
-        != ("per-repetition counters sum request-lane rounds; every whole g256 MTP3 "
-            "cell requires concurrency * 64 rounds")
-    ):
-        raise ValueError("candidate lacks the exact Q4 shortlist-head round gate")
-    cells = value.get("cells")
-    expected_keys = {
-        f"whole-pp{prompt}+tg256_c{concurrency}"
-        for prompt in (8192, 32768) for concurrency in range(1, 5)
-    }
-    if not isinstance(cells, dict) or set(cells) != expected_keys:
-        raise ValueError("Q4 shortlist-head round gate lacks the exact 8K/32K C=1..4 cells")
-    all_minimum = True
-    for key, cell in cells.items():
-        concurrency = int(key.rsplit("_c", 1)[1])
-        expected_rounds = 64 * concurrency
-        repetitions = cell.get("repetitions") if isinstance(cell, dict) else None
-        if (
-            cell.get("generated_tokens_per_lane") != 256
-            or cell.get("draft_window") != 3
-            or cell.get("minimum_rounds_per_lane") != 64
-            or cell.get("concurrency") != concurrency
-            or cell.get("expected_rounds_per_repetition") != expected_rounds
-            or cell.get("expected_rounds_all_repetitions") != expected_rounds * 3
-            or not isinstance(repetitions, list) or len(repetitions) != 3
-        ):
-            raise ValueError(f"Q4 shortlist-head round gate cell {key} is malformed")
-        observed = 0
-        cell_minimum = True
-        for index, repetition in enumerate(repetitions):
-            if not isinstance(repetition, dict) or (
-                repetition.get("repetition") != index
-                or type(repetition.get("observed_rounds")) is not int
-                or repetition["observed_rounds"] < expected_rounds
-                or repetition.get("expected_minimum_rounds") != expected_rounds
-                or repetition.get("minimum_met")
-                is not (repetition["observed_rounds"] == expected_rounds)
-            ):
-                raise ValueError(f"Q4 shortlist-head round gate cell {key} repetition differs")
-            observed += repetition["observed_rounds"]
-            cell_minimum = cell_minimum and repetition["minimum_met"]
-        if (
-            cell.get("observed_rounds_all_repetitions") != observed
-            or cell.get("all_repetitions_minimum") is not cell_minimum
-        ):
-            raise ValueError(f"Q4 shortlist-head round gate cell {key} aggregate differs")
-        all_minimum = all_minimum and cell_minimum
-    expected_status = (
-        "q4_round_gate_pass_pending_trace"
-        if all_minimum else "conditional_head_precision_required"
-    )
-    if (
-        value["all_repetitions_minimum"] is not all_minimum
-        or value.get("status") != expected_status
-    ):
-        raise ValueError("Q4 shortlist-head round gate outcome differs from its repetitions")
-    return value
-
-
 def _valid_sha256(value: object) -> bool:
     return (
         isinstance(value, str)
@@ -116,6 +52,67 @@ def _valid_sha256(value: object) -> bool:
 def _file_sha256(path: Path) -> str:
     with path.open("rb") as source:
         return hashlib.file_digest(source, "sha256").hexdigest()
+
+
+def _valid_capacity_failure(failure: object) -> bool:
+    if not isinstance(failure, dict) or set(failure) != {
+        "status", "concurrency", "command", "missing_report", "memory_admission",
+        "campaign_failure", "failures_file", "stderr", "stdout",
+    }:
+        return False
+    concurrency = failure.get("concurrency")
+    command = failure.get("command")
+    campaign_failure = failure.get("campaign_failure")
+    failures_file = failure.get("failures_file")
+    stderr = failure.get("stderr")
+    stdout = failure.get("stdout")
+    if (
+        failure.get("status") != "memory_admission_ineligible"
+        or type(concurrency) is not int or concurrency not in (1, 2, 3, 4)
+        or not isinstance(command, list)
+        or any(not isinstance(part, str) for part in command)
+        or not isinstance(failure.get("missing_report"), str)
+        or not failure["missing_report"]
+        or not isinstance(campaign_failure, dict)
+        or not isinstance(failures_file, dict) or set(failures_file) != {"path", "sha256"}
+        or not isinstance(failures_file.get("path"), str)
+        or not failures_file["path"]
+        or not _valid_sha256(failures_file.get("sha256"))
+        or not isinstance(stderr, dict) or set(stderr) != {"path", "sha256", "text"}
+        or not isinstance(stderr.get("path"), str)
+        or not stderr["path"]
+        or not _valid_sha256(stderr.get("sha256"))
+        or not isinstance(stderr.get("text"), str)
+        or hashlib.sha256(stderr["text"].encode("utf-8")).hexdigest() != stderr["sha256"]
+        or not isinstance(stdout, dict) or set(stdout) != {"path", "sha256"}
+        or not isinstance(stdout.get("path"), str)
+        or not stdout["path"]
+        or stdout.get("sha256") != hashlib.sha256(b"").hexdigest()
+        or campaign_failure.get("concurrency") != concurrency
+        or campaign_failure.get("suite") != "pareto_effective_capacity"
+        or campaign_failure.get("case") != "effective_capacity_mtp3"
+        or campaign_failure.get("command") != command
+        or campaign_failure.get("stdout") != stdout["path"]
+        or campaign_failure.get("stderr") != stderr["path"]
+    ):
+        return False
+    if command.count("--output-file") != 1:
+        return False
+    output_index = command.index("--output-file")
+    if (
+        output_index + 1 >= len(command)
+        or command[output_index + 1] != failure["missing_report"]
+    ):
+        return False
+    try:
+        from tools.ppl.assemble_pareto import _structured_memory_admission_failure
+        parsed = _structured_memory_admission_failure(
+            {"concurrency": concurrency, "command": command},
+            campaign_failure, "", stderr["text"],
+        )
+    except (TypeError, ValueError):
+        return False
+    return parsed == failure.get("memory_admission")
 
 
 def _weight_storage_profile(identity: object) -> str | None:
@@ -564,9 +561,6 @@ def _terminal_production_selection(
             ),
         )
     selected = by_name[winner]
-    shortlist_head_gate = selected["shortlist_head_precision_gate"]
-    if not isinstance(shortlist_head_gate, dict):
-        raise ValueError("terminal production winner lacks shortlist-head precision evidence")
     return {
         "rule": TERMINAL_SELECTION_RULE,
         "eligible_profile_winners": winners,
@@ -574,13 +568,6 @@ def _terminal_production_selection(
         "winner_artifact": selected["weight_recipe"],
         "winner_cache_profile": selected["cache_profile"],
         "winner_execution_profile": selected["execution_profile"],
-        "shortlist_head_precision_status": shortlist_head_gate["status"],
-        "production_status": (
-            "selected_route_pending_shortlist_head_trace_and_niah"
-            if shortlist_head_gate["all_repetitions_minimum"]
-            else "conditional_head_precision_required"
-        ),
-        "shortlist_head_precision_gate": shortlist_head_gate,
         "decisive_stage": decisive_stage,
         "normalized_objectives": normalized,
         "rationale": {
@@ -716,10 +703,24 @@ def classify(payload: dict) -> dict:
         objective, reasons = _candidate_objectives(
             record, workloads, quality_cells, capacity_cells
         )
-        shortlist_head_gate = (
-            _shortlist_head_precision_gate(record.get("shortlist_head_precision_gate"))
-            if require_single_selection else None
-        )
+        if require_single_selection:
+            sources = provenance_by_candidate.get(name, [])
+            capacity_failures = (
+                sources[0].get("capacity_failures")
+                if len(sources) == 1 and isinstance(sources[0], dict) else None
+            )
+            if (
+                capacity_failures is not None
+                and (
+                    not isinstance(capacity_failures, list)
+                    or any(not _valid_capacity_failure(failure) for failure in capacity_failures)
+                )
+            ):
+                raise ValueError(
+                    f"candidate {name} has invalid capacity-failure provenance"
+                )
+        if require_single_selection and "shortlist_head_precision_gate" in record:
+            raise ValueError("static selection rejects the retired MTP shortlist-head gate")
         if objective is not None:
             objectives[name] = objective
         weight_recipe = _recipe_identity(record, provenance_by_candidate)
@@ -733,7 +734,6 @@ def classify(payload: dict) -> dict:
             "prefill_chunk": record.get("prefill_chunk"),
             "weight_recipe": weight_recipe,
             "weight_storage_profile": weight_storage_profile,
-            "shortlist_head_precision_gate": shortlist_head_gate,
             "comparable": objective is not None,
             "reasons": reasons,
         })
@@ -801,6 +801,22 @@ def classify(payload: dict) -> dict:
                 raise ValueError(
                     "static XAttention selection requires dense/sparse G16/G32 "
                     "controls for every candidate artifact"
+                )
+            eligibility_by_cache_group: dict[int, dict[str, bool]] = {}
+            for result in group:
+                cache_group = result["cache_profile"]["value_group"]
+                profile = result["execution_profile"]["xattention_profile"]
+                eligibility_by_cache_group.setdefault(cache_group, {})[profile] = (
+                    result["comparable"]
+                )
+            if any(
+                set(profiles) != set(XATTENTION_PROFILES)
+                or len(set(profiles.values())) != 1
+                for profiles in eligibility_by_cache_group.values()
+            ):
+                raise ValueError(
+                    "static XAttention selection requires matched dense/sparse "
+                    "capacity eligibility for each cache group"
                 )
     selection = _select_cache_profiles(
         results, objectives, workloads, include_singleton=require_single_selection
@@ -888,9 +904,20 @@ def validate_terminal_production_authority(value: object) -> tuple[dict, dict]:
         cache = row.get("cache_profile")
         execution = row.get("execution_profile")
         objective = row.get("objectives")
+        comparable = row.get("comparable")
+        reasons = row.get("reasons")
+        source = provenance_by_candidate.get(row.get("name"), [])
+        source = source[0] if len(source) == 1 else None
+        matrices = source.get("matrices") if isinstance(source, dict) else None
+        capacity_failures = (
+            source.get("capacity_failures") if isinstance(source, dict) else None
+        )
         if (
-            row.get("comparable") is not True or row.get("reasons") != []
-            or not isinstance(objective, dict)
+            type(comparable) is not bool
+            or not isinstance(reasons, list)
+            or any(not isinstance(reason, str) or not reason for reason in reasons)
+            or (comparable and (reasons != [] or not isinstance(objective, dict)))
+            or (not comparable and (not reasons or objective is not None))
             or not isinstance(recipe, dict) or recipe.get("kind") != "artifact"
             or not isinstance(recipe.get("weights_id"), str)
             or row.get("weight_storage_profile")
@@ -905,6 +932,45 @@ def validate_terminal_production_authority(value: object) -> tuple[dict, dict]:
             or _recipe_identity(row, provenance_by_candidate) != recipe
         ):
             raise ValueError("schema-v7 authority has malformed candidate provenance/objectives")
+        expected_matrices = (
+            {"pareto-capacity", "pareto-whole"}
+            if comparable else {"pareto-capacity"}
+        )
+        if (
+            not isinstance(matrices, dict)
+            or set(matrices) != expected_matrices
+            or not isinstance(capacity_failures, list)
+            or (comparable and capacity_failures)
+            or (not comparable and not capacity_failures)
+        ):
+            raise ValueError(
+                "schema-v7 capacity eligibility disagrees with matrix/failure provenance"
+            )
+        if not comparable:
+            capacity_reason_concurrency = {
+                int(reason.rsplit(":c", 1)[1])
+                for reason in reasons
+                if reason.startswith("missing_resolved_effective_maximum_capacity:c")
+            }
+            failure_concurrency = {
+                failure.get("concurrency")
+                for failure in capacity_failures
+                if isinstance(failure, dict)
+                and type(failure.get("concurrency")) is int
+            }
+            expected_speed_reasons = {
+                f"missing_positive_whole_inference_speed:{workload}"
+                for workload in workloads
+            }
+            if (
+                not capacity_reason_concurrency
+                or capacity_reason_concurrency != failure_concurrency
+                or len(failure_concurrency) != len(capacity_failures)
+                or not expected_speed_reasons.issubset(reasons)
+            ):
+                raise ValueError(
+                    "schema-v7 excluded candidate lacks bound capacity-failure reasons"
+                )
         weights_id = recipe["weights_id"]
         prior = recipe_identities.setdefault(weights_id, recipe)
         if prior != recipe:
@@ -912,7 +978,8 @@ def validate_terminal_production_authority(value: object) -> tuple[dict, dict]:
         recipe_profiles.setdefault(weights_id, set()).add((
             cache["value_group"], execution["xattention_profile"],
         ))
-        objectives[row["name"]] = objective
+        if comparable:
+            objectives[row["name"]] = objective
     expected_recipes = set(TERMINAL_RECIPE_PROFILES)
     expected_profiles = {
         (16, "dense"), (32, "dense"),
@@ -922,16 +989,36 @@ def validate_terminal_production_authority(value: object) -> tuple[dict, dict]:
         profiles != expected_profiles for profiles in recipe_profiles.values()
     ):
         raise ValueError("schema-v7 authority lacks all three complete recipe profile quartets")
+    for weights_id in expected_recipes:
+        recipe_rows = [
+            row for row in candidates
+            if row["weight_recipe"]["weights_id"] == weights_id
+        ]
+        for group in (16, 32):
+            eligibility = {
+                row["execution_profile"]["xattention_profile"]: row["comparable"]
+                for row in recipe_rows
+                if row["cache_profile"]["value_group"] == group
+            }
+            if set(eligibility) != set(XATTENTION_PROFILES) or len(set(eligibility.values())) != 1:
+                raise ValueError(
+                    "schema-v7 authority has unmatched dense/sparse capacity eligibility"
+                )
     recomputed_frontier = []
     for row in candidates:
-        dominated_by = sorted(
-            other for other in objectives
-            if other != row["name"]
-            and dominates(objectives[other], objectives[row["name"]], workloads)
-        )
-        if row.get("dominated_by") != dominated_by or row.get("pareto") != (not dominated_by):
+        if row["name"] in objectives:
+            dominated_by = sorted(
+                other for other in objectives
+                if other != row["name"]
+                and dominates(objectives[other], objectives[row["name"]], workloads)
+            )
+            pareto = not dominated_by
+        else:
+            dominated_by = []
+            pareto = False
+        if row.get("dominated_by") != dominated_by or row.get("pareto") is not pareto:
             raise ValueError("schema-v7 candidate Pareto status does not recompute exactly")
-        if not dominated_by:
+        if pareto:
             recomputed_frontier.append(row["name"])
     actual_frontier = sorted(recomputed_frontier)
     if value.get("frontier") != actual_frontier or not actual_frontier:
@@ -940,7 +1027,7 @@ def validate_terminal_production_authority(value: object) -> tuple[dict, dict]:
         candidates, objectives, workloads, include_singleton=True
     )
     if (
-        len(expected_profile_selection["selections"]) != 3
+        not expected_profile_selection["selections"]
         or expected_profile_selection["not_collapsed"]
         or value.get("same_recipe_static_profile_selection") != expected_profile_selection
     ):

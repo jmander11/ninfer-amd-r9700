@@ -3,9 +3,13 @@
 
 from __future__ import annotations
 
-import sys
-import unittest
+import copy
+import hashlib
+import json
 import math
+import sys
+import tempfile
+import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -18,6 +22,51 @@ CHUNK_SELECTION = {
     "selection_rule": "global_maximin_normalized_prefill_then_workspace_then_smaller_chunk_v2",
     "selected_prefill_chunk": 4096,
 }
+
+
+def capacity_failure(concurrency: int) -> dict:
+    report = f"/campaign/c{concurrency}.json"
+    stdout = f"/campaign/logs/c{concurrency}.stdout.txt"
+    stderr_path = f"/campaign/logs/c{concurrency}.stderr.txt"
+    command = [
+        "bench", "--weights", "/model.ninfer", "--max-ctx", "262144",
+        "--concurrency", str(concurrency), "--kv-capacity", "auto",
+        "--spec", "mtp", "--draft-tokens", "3", "--lm-head-draft",
+        "--output-file", report,
+    ]
+    stderr = (
+        f"[ninfer_bench] loading /model.ninfer (max_context=262144, "
+        f"concurrency={concurrency}, kv_format=fp8-k-int4-v)\n"
+        "ninfer_bench: minimum Engine runtime reservation requires 10663212291 bytes "
+        "in addition to 1073741824 bytes of automatic headroom, but only "
+        "11477728256 bytes are available after weights\n"
+    )
+    campaign_failure = {
+        "suite": "pareto_effective_capacity", "case": "effective_capacity_mtp3",
+        "concurrency": concurrency, "returncode": 1, "stdout": stdout,
+        "stderr": stderr_path, "command": command,
+    }
+    return {
+        "status": "memory_admission_ineligible", "concurrency": concurrency,
+        "command": command, "missing_report": report,
+        "memory_admission": {
+            "kind": "minimum_runtime_reservation",
+            "minimum_runtime_reservation_bytes": 10663212291,
+            "automatic_headroom_bytes": 1073741824,
+            "available_after_weights_bytes": 11477728256,
+            "shortfall_bytes": 259225859,
+        },
+        "campaign_failure": campaign_failure,
+        "failures_file": {"path": "/campaign/failures.json", "sha256": "f" * 64},
+        "stderr": {
+            "path": stderr_path,
+            "sha256": hashlib.sha256(stderr.encode("utf-8")).hexdigest(),
+            "text": stderr,
+        },
+        "stdout": {
+            "path": stdout, "sha256": hashlib.sha256(b"").hexdigest(),
+        },
+    }
 
 
 def migration_receipt(weights_id: str) -> dict:
@@ -37,41 +86,6 @@ def migration_receipt(weights_id: str) -> dict:
     else:
         value["receipt_producer_sha256"] = "7" * 64
     return value
-
-
-def shortlist_head_gate(*, extra_rounds: int = 0) -> dict:
-    cells = {}
-    for prompt in (8192, 32768):
-        for concurrency in range(1, 5):
-            expected = 64 * concurrency
-            repetitions = [{
-                "repetition": repetition,
-                "observed_rounds": expected + extra_rounds,
-                "expected_minimum_rounds": expected,
-                "minimum_met": extra_rounds == 0,
-            } for repetition in range(3)]
-            cells[f"whole-pp{prompt}+tg256_c{concurrency}"] = {
-                "generated_tokens_per_lane": 256, "draft_window": 3,
-                "minimum_rounds_per_lane": 64, "concurrency": concurrency,
-                "expected_rounds_per_repetition": expected,
-                "expected_rounds_all_repetitions": expected * 3,
-                "observed_rounds_all_repetitions": (expected + extra_rounds) * 3,
-                "all_repetitions_minimum": extra_rounds == 0,
-                "repetitions": repetitions,
-            }
-    return {
-        "status": (
-            "q4_round_gate_pass_pending_trace"
-            if extra_rounds == 0 else "conditional_head_precision_required"
-        ),
-        "head_format": "Q4G64_F16S", "activation_profile": "A8G64",
-        "all_repetitions_minimum": extra_rounds == 0,
-        "counter_semantics": (
-            "per-repetition counters sum request-lane rounds; every whole g256 MTP3 "
-            "cell requires concurrency * 64 rounds"
-        ),
-        "cells": cells,
-    }
 
 
 def candidate(
@@ -110,7 +124,6 @@ def candidate(
             "fp8_qk_wmma_profile": "t1-ge64-t2-ge320-t3plus-stream-v1",
             "xattention_profile": xattention_profile,
         },
-        "shortlist_head_precision_gate": shortlist_head_gate(),
         "quality": {
             "eligible": eligible,
             "tier": tier,
@@ -646,7 +659,8 @@ class ParetoTest(unittest.TestCase):
             "prefill_chunk_selection": CHUNK_SELECTION,
                 "candidates": rows,
                 "source_provenance": [
-                    {"candidate": row["name"], "artifact": artifact} for row in rows
+                    {"candidate": row["name"], "artifact": artifact,
+                     "capacity_failures": []} for row in rows
                 ],
             })
 
@@ -675,7 +689,9 @@ class ParetoTest(unittest.TestCase):
                     group=group, xattention_profile=profile,
                 )
                 rows.append(row)
-                provenance.append({"candidate": name, "artifact": artifact})
+                provenance.append({
+                    "candidate": name, "artifact": artifact, "capacity_failures": [],
+                })
         result = pareto.classify({
             "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
             "required_speed_workloads": WORKLOADS,
@@ -702,42 +718,121 @@ class ParetoTest(unittest.TestCase):
         self.assertEqual(result["selected_prefill_chunk"], 4096)
         self.assertEqual(result["prefill_chunk_selection"], CHUNK_SELECTION)
         self.assertTrue(all(row["prefill_chunk"] == 4096 for row in result["candidates"]))
-        self.assertEqual(
-            terminal["production_status"],
-            "selected_route_pending_shortlist_head_trace_and_niah",
-        )
-
-        conditional_rows = [
-            {**row, "shortlist_head_precision_gate": shortlist_head_gate(extra_rounds=1)}
-            for row in rows
-        ]
-        conditional = pareto.classify({
-            "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
-            "required_speed_workloads": WORKLOADS,
-            "require_single_static_profile_selection": True,
-            "selected_prefill_chunk": 4096,
-            "prefill_chunk_selection": CHUNK_SELECTION,
-            "candidates": conditional_rows,
-            "source_provenance": provenance,
-        })
-        self.assertEqual(
-            conditional["terminal_production_selection"]["production_status"],
-            "conditional_head_precision_required",
-        )
-        self.assertTrue(all(row["comparable"] for row in conditional["candidates"]))
-
-        missing_head_gate = [{key: value for key, value in row.items()
-                              if key != "shortlist_head_precision_gate"} for row in rows]
-        with self.assertRaisesRegex(ValueError, "exact Q4 shortlist-head round gate"):
+        self.assertNotIn("production_status", terminal)
+        self.assertNotIn("shortlist_head_precision_status", terminal)
+        self.assertNotIn("shortlist_head_precision_gate", terminal)
+        legacy_head_gate = [{
+            **row, "shortlist_head_precision_gate": {},
+        } if index == 0 else row for index, row in enumerate(rows)]
+        with self.assertRaisesRegex(ValueError, "retired MTP shortlist-head gate"):
             pareto.classify({
                 "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
                 "required_speed_workloads": WORKLOADS,
                 "require_single_static_profile_selection": True,
                 "selected_prefill_chunk": 4096,
                 "prefill_chunk_selection": CHUNK_SELECTION,
-                "candidates": missing_head_gate,
+                "candidates": legacy_head_gate,
                 "source_provenance": provenance,
             })
+
+        failed_pair_rows = []
+        for row in rows:
+            changed = dict(row)
+            changed["quality_cells"] = {
+                "8k": dict(row["quality"]), "32k": dict(row["quality"]),
+            }
+            changed["capacity_by_cell"] = {
+                f"c{concurrency}": dict(row["capacity"])
+                for concurrency in range(1, 5)
+            }
+            changed.pop("quality")
+            changed.pop("capacity")
+            if (
+                row["name"].startswith(
+                    "r9700-q4g64-f8e4m3-four-role-n16k16-eval-"
+                )
+                and row["cache_profile"]["value_group"] == 16
+            ):
+                changed["capacity_by_cell"].pop("c4")
+                changed["whole_inference_tokens_per_second"] = {}
+            failed_pair_rows.append(changed)
+        failed_pair_provenance = []
+        for source, row in zip(provenance, failed_pair_rows, strict=True):
+            failed = "c4" not in row["capacity_by_cell"]
+            failed_pair_provenance.append({
+                **source,
+                "matrices": (
+                    {"pareto-capacity": {}}
+                    if failed else {"pareto-capacity": {}, "pareto-whole": {}}
+                ),
+                "capacity_failures": ([capacity_failure(4)] if failed else []),
+            })
+        failed_pair_payload = {
+            "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
+            "required_speed_workloads": WORKLOADS,
+            "required_quality_cells": ["8k", "32k"],
+            "required_capacity_cells": [f"c{concurrency}" for concurrency in range(1, 5)],
+            "require_single_static_profile_selection": True,
+            "selected_prefill_chunk": 4096,
+            "prefill_chunk_selection": CHUNK_SELECTION,
+            "candidates": failed_pair_rows,
+            "source_provenance": failed_pair_provenance,
+        }
+        generic_failure_payload = copy.deepcopy(failed_pair_payload)
+        for source in generic_failure_payload["source_provenance"]:
+            if source["capacity_failures"]:
+                source["capacity_failures"][0]["campaign_failure"]["returncode"] = 139
+        with self.assertRaisesRegex(ValueError, "invalid capacity-failure provenance"):
+            pareto.classify(generic_failure_payload)
+        failed_pair_result = pareto.classify(failed_pair_payload)
+        excluded = [
+            row for row in failed_pair_result["candidates"]
+            if row["weight_recipe"]["weights_id"]
+            == "r9700-q4g64-f8e4m3-four-role-n16k16-eval"
+            and row["cache_profile"]["value_group"] == 16
+        ]
+        self.assertEqual(len(excluded), 2)
+        self.assertTrue(all(not row["comparable"] for row in excluded))
+        self.assertTrue(all("objectives" not in row for row in excluded))
+        self.assertTrue(all("shortlist_head_precision_gate" not in row for row in excluded))
+        self.assertEqual(
+            next(
+                selection for selection in failed_pair_result[
+                    "same_recipe_static_profile_selection"
+                ]["selections"]
+                if selection["weight_recipe"]["weights_id"]
+                == "r9700-q4g64-f8e4m3-four-role-n16k16-eval"
+            )["winner_cache_profile"]["value_group"],
+            32,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            input_path = Path(directory) / "pareto-input.json"
+            input_path.write_text(json.dumps(failed_pair_payload), encoding="utf-8")
+            failed_pair_result["pareto_input"] = {
+                "path": str(input_path), "sha256": pareto._file_sha256(input_path),
+            }
+            pareto.validate_terminal_production_authority(failed_pair_result)
+
+        unmatched_rows = list(failed_pair_rows)
+        restore_index = next(
+            index for index, row in enumerate(unmatched_rows)
+            if row["name"].startswith(
+                "r9700-q4g64-f8e4m3-four-role-n16k16-eval-"
+            )
+            and row["cache_profile"]["value_group"] == 16
+            and row["execution_profile"]["xattention_profile"]
+            == "b128-s16-tau900"
+        )
+        restored = dict(unmatched_rows[restore_index])
+        restored["capacity_by_cell"] = {
+            **restored["capacity_by_cell"], "c4": dict(rows[restore_index]["capacity"]),
+        }
+        restored["whole_inference_tokens_per_second"] = dict(
+            rows[restore_index]["whole_inference_tokens_per_second"]
+        )
+        unmatched_rows[restore_index] = restored
+        with self.assertRaisesRegex(ValueError, "matched dense/sparse capacity eligibility"):
+            pareto.classify({**failed_pair_payload, "candidates": unmatched_rows})
 
         without_chunk_authority = {
             "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
@@ -773,6 +868,7 @@ class ParetoTest(unittest.TestCase):
                              "sha256": "c" * 64,
                              "conversion_receipt": migration_receipt(
                                  "r9700-q4g64-n16k16-eval")},
+                "capacity_failures": [],
             })
         with self.assertRaisesRegex(ValueError, "one artifact hash per weights_id"):
             pareto.classify({
@@ -793,6 +889,7 @@ class ParetoTest(unittest.TestCase):
             fourth_provenance.append({
                 "candidate": fourth["name"],
                 "artifact": {"weights_id": "unqualified-recipe", "sha256": "c" * 64},
+                "capacity_failures": [],
             })
         with self.assertRaisesRegex(ValueError, "unsupported terminal weight recipe"):
             pareto.classify({
@@ -824,8 +921,13 @@ class ParetoTest(unittest.TestCase):
                 "required_speed_workloads": WORKLOADS,
                 "require_single_static_profile_selection": True,
                 "selected_prefill_chunk": 4096,
-            "prefill_chunk_selection": CHUNK_SELECTION,
+                "prefill_chunk_selection": CHUNK_SELECTION,
                 "candidates": rows,
+                "source_provenance": [{
+                    "candidate": row["name"],
+                    "artifact": {"weights_id": "unqualified-recipe", "sha256": "a" * 64},
+                    "capacity_failures": [],
+                } for row in rows],
             })
 
 

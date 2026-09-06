@@ -990,12 +990,11 @@ selected value. Each whole directory must contain one optimized-head MTP3 report
 ordinary greedy control at every C=1..4 point. Assembly takes timing only from MTP3, rejects zero
 draft activity, and requires exact retained target-token parity for every workload, repetition,
 and lane. The raw repetition counter sums request lanes: for g256/MTP3 it must equal `64*C`, and
-the test aggregate must equal the sum of all three repetitions. The terminal selector keeps the
-measured throughput candidate but reports `conditional_head_precision_required` when any
-repetition exceeds that theoretical minimum, allowing the bounded head-only W8 branch to run.
-Otherwise it reports `selected_route_pending_shortlist_head_trace_and_niah`; Q4 is not final until
-that trace proves the executed specialization and selected-profile NIAH passes. There is no manual
-or implicit historical-4096 path.
+the test aggregate must equal the sum of all three repetitions. The theoretical minimum remains
+diagnostic acceptance accounting; extra rounds neither trigger a proposal-head precision branch
+nor alter base selection. Schema v7 carries no downstream-readiness or MTP-head status.
+Selected-profile NIAH and DFlash admission remain separate gates. There is no manual or implicit
+historical-4096 path.
 
 After the dense and sparse G16/G32 capacity/whole matrix pairs finish, XAttention admission
 assembles the complete four-profile Cartesian set for every capacity-eligible artifact:

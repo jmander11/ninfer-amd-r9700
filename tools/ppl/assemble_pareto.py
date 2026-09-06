@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -30,7 +31,11 @@ from tools.bench.run_ninfer_bench_matrix import (
     validate_automatic_feasibility,
     validate_hybrid_shared_workspace_authority,
 )
-from tools.bench.select_prefill_chunk import RULE as PREFILL_CHUNK_SELECTION_RULE
+from tools.bench.select_prefill_chunk import (
+    ARTIFACT_TYPE as PREFILL_CHUNK_ARTIFACT_TYPE,
+    RULE as PREFILL_CHUNK_SELECTION_RULE,
+    SCHEMA_VERSION as PREFILL_CHUNK_SCHEMA_VERSION,
+)
 from tools.bench.select_prefill_chunk import validate_selection_record
 from tools.ppl import run as ppl_run
 
@@ -39,6 +44,16 @@ HYBRID_WEIGHTS_ID = "r9700-q4g64-f8e4m3-four-role-n16k16-eval"
 TERMINAL_RECIPE_IDS = {
     "r9700-q4g64-n16k16-eval", "r9700-q4-w8-mse-n16k16-eval", HYBRID_WEIGHTS_ID,
 }
+
+_MINIMUM_RUNTIME_ADMISSION = re.compile(
+    r"ninfer_bench: minimum Engine runtime reservation requires ([1-9][0-9]*) bytes "
+    r"in addition to ([1-9][0-9]*) bytes of automatic headroom, but only "
+    r"([1-9][0-9]*) bytes are available after weights"
+)
+_AUTOMATIC_HEADROOM_ADMISSION = re.compile(
+    r"ninfer_bench: automatic KV headroom requires ([1-9][0-9]*) bytes, but only "
+    r"([1-9][0-9]*) bytes are available after weights"
+)
 
 
 def _quality_migration_receipt(artifact: dict[str, Any], weights_id: str) -> dict | None:
@@ -188,6 +203,102 @@ def _manifest_prefill_chunk(manifest: dict[str, Any], preset: str) -> int:
     return chunk
 
 
+def _bind_prefill_chunk_authority(
+    manifest: dict[str, Any], preset: str, authority: dict[str, Any],
+) -> None:
+    expected_keys = {
+        "path", "sha256", "artifact_type", "schema_version", "selected_prefill_chunk",
+    }
+    if (
+        not isinstance(authority, dict)
+        or set(authority) != expected_keys
+        or not isinstance(authority.get("path"), str)
+        or not authority["path"]
+        or not Path(authority["path"]).is_absolute()
+        or not _valid_sha256(authority.get("sha256"))
+        or authority.get("artifact_type") != PREFILL_CHUNK_ARTIFACT_TYPE
+        or type(authority.get("schema_version")) is not int
+        or authority.get("schema_version") != PREFILL_CHUNK_SCHEMA_VERSION
+        or type(authority.get("selected_prefill_chunk")) is not int
+        or authority["selected_prefill_chunk"] not in PRODUCTION_PREFILL_CHUNKS
+    ):
+        raise ValueError("selected prefill-chunk authority is malformed")
+    if manifest.get("prefill_chunk_authority") != authority:
+        raise ValueError(f"{preset} does not bind the selected prefill-chunk authority")
+    if preset == "pareto-capacity" and manifest.get("post_chunk_capacity_gate") is not True:
+        raise ValueError("pareto-capacity is not a post-chunk capacity gate")
+
+
+def _one_command_option(command: list[Any], option: str) -> str:
+    if command.count(option) != 1:
+        raise ValueError(f"capacity failure command lacks exactly one {option}")
+    index = command.index(option)
+    if index + 1 >= len(command) or not isinstance(command[index + 1], str):
+        raise ValueError(f"capacity failure command has malformed {option}")
+    return command[index + 1]
+
+
+def _structured_memory_admission_failure(
+    record: dict[str, Any], failure: dict[str, Any], stdout_text: str, stderr_text: str,
+) -> dict[str, int | str]:
+    if set(failure) != {
+        "suite", "case", "concurrency", "returncode", "stdout", "stderr", "command",
+    } or type(failure.get("returncode")) is not int or failure["returncode"] != 1:
+        raise ValueError("missing capacity report is not an exact process failure record")
+    if stdout_text:
+        raise ValueError("memory-admission failure unexpectedly wrote stdout")
+    command = record.get("command")
+    if not isinstance(command, list) or not all(isinstance(item, str) for item in command):
+        raise ValueError("capacity failure command is malformed")
+    weights = _one_command_option(command, "--weights")
+    max_context = _one_command_option(command, "--max-ctx")
+    concurrency = _one_command_option(command, "--concurrency")
+    kv_capacity = _one_command_option(command, "--kv-capacity")
+    speculation = _one_command_option(command, "--spec")
+    draft_tokens = _one_command_option(command, "--draft-tokens")
+    if (
+        max_context != "262144"
+        or concurrency != str(record["concurrency"])
+        or kv_capacity != "auto"
+        or speculation != "mtp"
+        or draft_tokens != "3"
+        or command.count("--lm-head-draft") != 1
+        or "--no-device-graph" in command
+    ):
+        raise ValueError("capacity failure command is not the exact automatic MTP3 admission case")
+    lines = stderr_text.splitlines()
+    loading = (
+        f"[ninfer_bench] loading {weights} (max_context=262144, "
+        f"concurrency={record['concurrency']}, kv_format=fp8-k-int4-v)"
+    )
+    if len(lines) != 2 or lines[0] != loading or stderr_text != f"{loading}\n{lines[1]}\n":
+        raise ValueError("missing capacity report stderr is not an exact startup admission failure")
+    minimum = _MINIMUM_RUNTIME_ADMISSION.fullmatch(lines[1])
+    if minimum is not None:
+        runtime, headroom, available = map(int, minimum.groups())
+        if headroom != 1 << 30 or runtime + headroom <= available:
+            raise ValueError("reported minimum runtime reservation is not memory-inadmissible")
+        return {
+            "kind": "minimum_runtime_reservation",
+            "minimum_runtime_reservation_bytes": runtime,
+            "automatic_headroom_bytes": headroom,
+            "available_after_weights_bytes": available,
+            "shortfall_bytes": runtime + headroom - available,
+        }
+    headroom_only = _AUTOMATIC_HEADROOM_ADMISSION.fullmatch(lines[1])
+    if headroom_only is not None:
+        headroom, available = map(int, headroom_only.groups())
+        if headroom != 1 << 30 or headroom <= available:
+            raise ValueError("reported automatic headroom is not memory-inadmissible")
+        return {
+            "kind": "automatic_headroom",
+            "automatic_headroom_bytes": headroom,
+            "available_after_weights_bytes": available,
+            "shortfall_bytes": headroom - available,
+        }
+    raise ValueError("missing capacity report lacks a recognized memory-admission failure")
+
+
 def _validate_mtp_target_parity(
     reports: list[dict[str, Any]], concurrency: int,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -245,8 +356,7 @@ def _validate_mtp_target_parity(
             repetition_rounds.append({
                 "repetition": repetition,
                 "observed_rounds": speculative["rounds"],
-                "expected_minimum_rounds": expected_rounds_per_repetition,
-                "minimum_met": speculative["rounds"] == expected_rounds_per_repetition,
+                "theoretical_minimum_rounds": expected_rounds_per_repetition,
             })
         aggregate = mtp_test.get("speculative")
         if not isinstance(aggregate, dict) or any(
@@ -257,16 +367,13 @@ def _validate_mtp_target_parity(
         round_cells[label] = {
             "generated_tokens_per_lane": n_gen,
             "draft_window": 3,
-            "minimum_rounds_per_lane": minimum_rounds_per_lane,
+            "theoretical_minimum_rounds_per_lane": minimum_rounds_per_lane,
             "concurrency": concurrency,
-            "expected_rounds_per_repetition": expected_rounds_per_repetition,
-            "expected_rounds_all_repetitions": (
+            "theoretical_minimum_rounds_per_repetition": expected_rounds_per_repetition,
+            "theoretical_minimum_rounds_all_repetitions": (
                 expected_rounds_per_repetition * len(mtp_reps)
             ),
             "observed_rounds_all_repetitions": aggregate["rounds"],
-            "all_repetitions_minimum": all(
-                item["minimum_met"] for item in repetition_rounds
-            ),
             "repetitions": repetition_rounds,
         }
     return mtp[0], {
@@ -276,13 +383,10 @@ def _validate_mtp_target_parity(
         "workloads": sorted(mtp_tests),
         "compared_lanes": compared_lanes,
         "compared_tokens": compared_tokens,
-        "round_gate": {
+        "round_accounting": {
             "counter_semantics": (
-                "each repetition counter sums independent request-lane rounds; expected count "
-                "is concurrency * ceil(generated_tokens_per_lane / (draft_window + 1))"
-            ),
-            "all_repetitions_minimum": all(
-                cell["all_repetitions_minimum"] for cell in round_cells.values()
+                "each repetition counter sums independent request-lane rounds; theoretical "
+                "minimum is concurrency * ceil(generated_tokens_per_lane / (draft_window + 1))"
             ),
             "cells": round_cells,
         },
@@ -309,8 +413,13 @@ def _missing_capacity_provenance(root: Path, manifest: dict[str, Any]) -> list[d
         stem = f"{record['suite']}.{record['case']}.c{record['concurrency']}"
         stderr_path = root / "logs" / f"{stem}.stderr.txt"
         stdout_path = root / "logs" / f"{stem}.stdout.txt"
-        if not stderr_path.is_file():
-            raise ValueError(f"missing capacity report has no retained stderr: {report_path}")
+        if (
+            not stderr_path.is_file() or stderr_path.is_symlink()
+            or not stdout_path.is_file() or stdout_path.is_symlink()
+        ):
+            raise ValueError(
+                f"missing capacity report has no owned stdout/stderr: {report_path}"
+            )
         matches = [
             (index, failure)
             for index, failure in enumerate(campaign_failures)
@@ -321,30 +430,29 @@ def _missing_capacity_provenance(root: Path, manifest: dict[str, Any]) -> list[d
             and failure.get("command") == record["command"]
             and failure.get("stderr") == str(stderr_path)
             and failure.get("stdout") == str(stdout_path)
-            and (
-                (type(failure.get("returncode")) is int and failure["returncode"] != 0)
-                or isinstance(failure.get("error"), str) and bool(failure["error"])
-            )
         ]
         if len(matches) != 1:
             raise ValueError(f"missing capacity report has no unique campaign failure: {report_path}")
         failure_index, campaign_failure = matches[0]
         matched_failure_indexes.add(failure_index)
+        stderr_text = stderr_path.read_text(encoding="utf-8")
+        stdout_text = stdout_path.read_text(encoding="utf-8")
+        memory_admission = _structured_memory_admission_failure(
+            record, campaign_failure, stdout_text, stderr_text
+        )
         retained.append({
-            "status": "unresolved_capacity_measurement_failure",
+            "status": "memory_admission_ineligible",
             "concurrency": record["concurrency"],
             "command": record["command"],
             "missing_report": str(report_path),
+            "memory_admission": memory_admission,
             "campaign_failure": campaign_failure,
             "failures_file": failure_identity,
             "stderr": {
                 "path": str(stderr_path), "sha256": file_sha256(stderr_path),
-                "text": stderr_path.read_text(encoding="utf-8"),
+                "text": stderr_text,
             },
-            "stdout": (
-                {"path": str(stdout_path), "sha256": file_sha256(stdout_path)}
-                if stdout_path.is_file() else None
-            ),
+            "stdout": {"path": str(stdout_path), "sha256": file_sha256(stdout_path)},
         })
     if matched_failure_indexes != set(range(len(campaign_failures))):
         raise ValueError(f"{root} has capacity campaign failures unrelated to missing reports")
@@ -602,6 +710,7 @@ def _campaign_quality_candidate(
 def assemble_candidate(
     name: str, weights_id: str, group: int, quality_path: Path,
     capacity_root: Path, whole_root: Path | None, prefill_chunk: int,
+    prefill_chunk_authority: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     if prefill_chunk not in PRODUCTION_PREFILL_CHUNKS:
         raise ValueError("selected prefill chunk is unsupported")
@@ -618,8 +727,11 @@ def assemble_candidate(
     if whole_root is not None:
         manifests["pareto-whole"] = _manifest(whole_root, "pareto-whole")
     for preset, manifest in manifests.items():
+        _bind_prefill_chunk_authority(manifest, preset, prefill_chunk_authority)
         if _manifest_prefill_chunk(manifest, preset) != prefill_chunk:
             raise ValueError(f"{preset} does not use selected prefill chunk {prefill_chunk}")
+    if prefill_chunk_authority["selected_prefill_chunk"] != prefill_chunk:
+        raise ValueError("selected prefill-chunk authority differs from assembled chunk")
     identity = manifests["pareto-capacity"]["artifact"]
     expected_identity = {
         "weights_id": weights_id,
@@ -683,7 +795,7 @@ def assemble_candidate(
     )
     capacity: dict[str, Any] = {}
     speeds: dict[str, float] = {}
-    target_head_parity: dict[str, Any] = {}
+    mtp_target_token_parity: dict[str, Any] = {}
     for concurrency in PRODUCT_CONCURRENCIES:
         if concurrency in capacity_reports:
             cap = validate_automatic_feasibility(capacity_reports[concurrency][0])
@@ -698,7 +810,7 @@ def assemble_candidate(
             mtp_report, parity = _validate_mtp_target_parity(
                 whole_reports[concurrency], concurrency
             )
-            target_head_parity[f"c{concurrency}"] = parity
+            mtp_target_token_parity[f"c{concurrency}"] = parity
             whole_tests = {test["label"]: test for test in mtp_report["tests"]}
             for tokens in (8192, 32768):
                 row = whole_tests[f"whole-pp{tokens}+tg256"]
@@ -722,38 +834,12 @@ def assemble_candidate(
         "quality_cells": quality_cells,
         "capacity_by_cell": capacity,
         "whole_inference_tokens_per_second": speeds,
-        "target_head_parity": target_head_parity,
-        "shortlist_head_precision_gate": {
-            "status": (
-                "q4_round_gate_pass_pending_trace"
-                if target_head_parity and all(
-                    cell["round_gate"]["all_repetitions_minimum"]
-                    for cell in target_head_parity.values()
-                )
-                else "conditional_head_precision_required"
-            ),
-            "head_format": "Q4G64_F16S",
-            "activation_profile": "A8G64",
-            "all_repetitions_minimum": bool(target_head_parity) and all(
-                cell["round_gate"]["all_repetitions_minimum"]
-                for cell in target_head_parity.values()
-            ),
-            "counter_semantics": (
-                "per-repetition counters sum request-lane rounds; every whole g256 MTP3 "
-                "cell requires concurrency * 64 rounds"
-            ),
-            "cells": {
-                f"{label}_c{concurrency}": detail
-                for concurrency, parity in (
-                    (int(key[1:]), value) for key, value in target_head_parity.items()
-                )
-                for label, detail in parity["round_gate"]["cells"].items()
-            },
-        },
+        "mtp_target_token_parity": mtp_target_token_parity,
     }
     provenance = {
         "candidate": name,
         "selected_prefill_chunk": prefill_chunk,
+        "prefill_chunk_authority": prefill_chunk_authority,
         "cache_value_group": group,
         "artifact": identity,
         "benchmark_executable": manifests["pareto-capacity"]["bench"],
@@ -831,6 +917,9 @@ def validate_xattention_dense_controls(
     campaign_by_artifact_profile: dict[
         tuple[object, object, object, str], set[tuple[str, str]]
     ] = {}
+    capacity_eligibility: dict[
+        tuple[object, object, object, int], dict[str, bool]
+    ] = {}
     shared_bindings: set[str] = set()
     for candidate, source in zip(candidates, provenance, strict=True):
         profile = candidate["execution_profile"]["xattention_profile"]
@@ -843,13 +932,18 @@ def validate_xattention_dense_controls(
             or representation.get("xattention_profile") != profile
         ):
             raise ValueError("XAttention candidate and quality provenance identities disagree")
-        if (
-            not isinstance(matrices, dict)
-            or set(matrices) != {"pareto-capacity", "pareto-whole"}
-            or source.get("capacity_failures") != []
-        ):
+        capacity_failures = source.get("capacity_failures")
+        if not isinstance(capacity_failures, list):
+            raise ValueError("XAttention capacity failure provenance is malformed")
+        capacity_eligible = not capacity_failures
+        expected_matrices = (
+            {"pareto-capacity", "pareto-whole"}
+            if capacity_eligible else {"pareto-capacity"}
+        )
+        if not isinstance(matrices, dict) or set(matrices) != expected_matrices:
             raise ValueError(
-                "XAttention admission requires matched capacity and whole matrices"
+                "XAttention admission requires matched capacity and whole matrices "
+                "exactly for capacity-eligible profiles"
             )
         identity = quality.get("campaign_identity") if isinstance(quality, dict) else None
         if (
@@ -903,6 +997,11 @@ def validate_xattention_dense_controls(
         if not isinstance(path, str) or not _valid_sha256(digest):
             raise ValueError("XAttention PPL campaign identity is incomplete")
         artifact = source["artifact"]
+        group = candidate["cache_profile"]["value_group"]
+        eligibility_key = (
+            artifact["weights_id"], artifact["sha256"], artifact["file_size_bytes"], group,
+        )
+        capacity_eligibility.setdefault(eligibility_key, {})[profile] = capacity_eligible
         campaign_key = (
             artifact["weights_id"], artifact["sha256"], artifact["file_size_bytes"], profile,
         )
@@ -917,6 +1016,15 @@ def validate_xattention_dense_controls(
             "reused_bf16_campaign": identity.get("reused_bf16_campaign"),
             "bf16_repeat_comparison": identity.get("bf16_repeat_comparison"),
         }, sort_keys=True, separators=(",", ":")))
+    if any(
+        set(profiles) != {"dense", "b128-s16-tau900"}
+        or len(set(profiles.values())) != 1
+        for profiles in capacity_eligibility.values()
+    ):
+        raise ValueError(
+            "XAttention admission requires matched dense/sparse capacity eligibility "
+            "for each recipe and cache group"
+        )
     if any(len(campaigns) != 1 for campaigns in campaign_by_artifact_profile.values()):
         raise ValueError(
             "each artifact's XAttention profile must use one shared G16/G32 PPL campaign"
@@ -968,6 +1076,49 @@ def validate_chunk_candidate_bindings(
         raise ValueError("prefill-chunk selection and Pareto candidate sets differ")
 
 
+def bind_post_chunk_capacity_validation(
+    path: Path,
+    chunk_selection_path: Path,
+    capacity_roots: list[Path],
+    candidates: list[dict[str, Any]],
+    provenance: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Rebuild and bind the executed capacity campaign that controls whole eligibility."""
+
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("post-chunk capacity validation is not a regular file")
+    resolved = path.resolve(strict=True)
+    before = file_sha256(resolved)
+    retained = json.loads(resolved.read_text(encoding="utf-8"))
+    from tools.bench.validate_post_chunk_capacity_campaign import validate_campaign
+    rebuilt = validate_campaign(chunk_selection_path, capacity_roots, executed=True)
+    if retained != rebuilt or file_sha256(resolved) != before:
+        raise ValueError("post-chunk capacity validation differs from its physical campaign")
+    eligible = {
+        tuple(identity) for identity in retained.get("capacity_eligible_identities", [])
+        if isinstance(identity, list) and len(identity) == 3
+    }
+    actual = {
+        (
+            source["artifact"]["weights_id"],
+            source["cache_value_group"],
+            candidate["execution_profile"]["xattention_profile"],
+        )
+        for candidate, source in zip(candidates, provenance, strict=True)
+        if not source["capacity_failures"]
+    }
+    if eligible != actual:
+        raise ValueError("post-chunk capacity eligibility differs from assembled candidates")
+    return {
+        "path": str(resolved),
+        "sha256": before,
+        "artifact_type": retained["artifact_type"],
+        "schema_version": retained["schema_version"],
+        "selected_prefill_chunk": retained["selected_prefill_chunk"],
+        "capacity_eligible_identities": retained["capacity_eligible_identities"],
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -984,24 +1135,52 @@ def main() -> int:
         "--prefill-chunk-selection", type=Path, required=True,
         help="validated schema-v2 global prefill-chunk selection record",
     )
+    parser.add_argument(
+        "--post-chunk-capacity-validation", type=Path,
+        help="executed twelve-matrix capacity validation controlling whole eligibility",
+    )
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     chunk_selection_path = args.prefill_chunk_selection.resolve()
     chunk_selection_sha256 = file_sha256(chunk_selection_path)
     chunk_selection = validate_selection_record(chunk_selection_path)
     prefill_chunk = chunk_selection["selected_prefill_chunk"]
+    prefill_chunk_authority = {
+        "path": str(chunk_selection_path),
+        "sha256": chunk_selection_sha256,
+        "artifact_type": chunk_selection.get("artifact_type"),
+        "schema_version": chunk_selection.get("schema_version"),
+        "selected_prefill_chunk": prefill_chunk,
+    }
     candidates, provenance = [], []
     for name, weights_id, group, quality, capacity, whole in args.candidate:
         whole_path = None if whole == "-" else Path(whole).resolve()
         candidate, source = assemble_candidate(
             name, weights_id, int(group), Path(quality).resolve(), Path(capacity).resolve(),
-            whole_path, prefill_chunk,
+            whole_path, prefill_chunk, prefill_chunk_authority,
         )
         candidates.append(candidate)
         provenance.append(source)
     if args.require_xattention_dense_controls:
         validate_xattention_dense_controls(candidates, provenance)
         validate_chunk_candidate_bindings(chunk_selection, provenance)
+        if args.post_chunk_capacity_validation is None:
+            raise SystemExit(
+                "static profile selection requires --post-chunk-capacity-validation"
+            )
+        capacity_binding = bind_post_chunk_capacity_validation(
+            args.post_chunk_capacity_validation,
+            chunk_selection_path,
+            [Path(candidate[4]).resolve() for candidate in args.candidate],
+            candidates,
+            provenance,
+        )
+        for source in provenance:
+            source["post_chunk_capacity_validation"] = capacity_binding
+    elif args.post_chunk_capacity_validation is not None:
+        raise SystemExit(
+            "--post-chunk-capacity-validation requires --require-xattention-dense-controls"
+        )
     if file_sha256(chunk_selection_path) != chunk_selection_sha256:
         raise SystemExit("prefill-chunk selection bytes changed during assembly")
     speed = sorted(
