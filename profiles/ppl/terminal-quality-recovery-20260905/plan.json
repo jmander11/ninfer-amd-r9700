@@ -1,12 +1,20 @@
 {
   "artifact_type": "ninfer_r9700_terminal_quality_recovery_plan",
   "schema_version": 1,
-  "status": "awaiting-prefill-chunk-selection",
-  "scope": "six profile-level schema-v6 PPL authorities for the terminal twelve-candidate static-profile selection",
+  "status": "awaiting-receipt-bound-prefill-chunk-selection",
+  "scope": "six exact-N16 profile-level schema-v6 PPL authorities for the terminal twelve-candidate static-profile selection",
   "concurrency": 1,
   "required_lengths": [8192, 32768],
   "required_groups": [16, 32],
-  "selected_chunk_authority": "profiles/bench/prefill-chunk-selection-20260905.json",
+  "selected_chunk_authority": "profiles/bench/prefill-chunk-selection-receipt-bound-n16k16-20260905.json",
+  "authority_map": "profiles/ppl/terminal-quality-recovery-20260905/quality-authorities-receipt-bound-n16k16.json",
+  "authority_map_schema_version": 2,
+  "candidate_artifacts": {
+    "all_q4": "out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer",
+    "mixed": "out/qwen3.8-27b-r9700-q4-w8-mse-n16k16-eval.ninfer",
+    "four_role": "out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer"
+  },
+  "candidate_binding": "Before any GPU-capable subprocess, reopen each exact N16 artifact and its adjacent migration receipt with validate_n16_artifact_identity. Every schema-v6 campaign and authority-map entry must carry that N16 weights ID, artifact hash/size, and normalized migration receipt; no pre-N16 candidate sidecar is rebound.",
   "bf16_source": "/ssdpool2nvme/local_llm/models/qwen3.8-27b-bf16",
   "bf16_source_availability": "validated and locally available; profiles/ppl/r9700-bf16-source-checkpoint-preflight-20260905.json (SHA-256 4c605982c84fbfc8803fea24ccdd0230277f4f20c8547a38098f6f440bf99fa9) records protocol.validate_checkpoint_files accepting the exact config/index and all 18 named nonempty shards. Fresh runs still repeat checkpoint preflight before GPU work; this receipt unblocks the prerequisite but does not satisfy any PPL, exact-token, or candidate-admission gate",
   "retained": {
@@ -14,39 +22,15 @@
       "authority": "profiles/ppl/bf16-reference-deterministic-pv-gdn-v3-a-20260904/results.json",
       "repeat": "profiles/ppl/bf16-reference-deterministic-pv-gdn-v3-repeat-comparison-20260904.json",
       "classification": "complete and exactly reusable only when selected_prefill_chunk is 4096"
-    },
-    "all_q4_dense_chunk4096": {
-      "authority": "profiles/ppl/xattention-dense-q4g64-v3-rebase-20260904/results.json",
-      "classification": "complete native schema-v6 G16/G32 8K/32K authority; directly reusable only when selected_prefill_chunk is 4096"
-    },
-    "all_q4_xattention_chunk4096": {
-      "authority": "profiles/ppl/xattention-s16-tau900-q4g64-20260903/results.json",
-      "classification": "historical only; predates the current sparse scorer implementation and BF16-repeat binding, so it is not recoverable for terminal admission"
-    },
-    "mixed_dense_chunk4096": {
-      "authority": "profiles/ppl/xattention-dense-q4-w8-mse-20260903/results.json",
-      "classification": "historical only; its recorded scorer bytes are no longer the current dense scorer and it lacks BF16-repeat binding"
-    },
-    "mixed_xattention": {
-      "classification": "no retained native schema-v6 campaign"
-    },
-    "four_role_dense_chunk4096": {
-      "inputs": [
-        "profiles/ppl/fp8-hybrid-product-8k-20260904/results.json",
-        "profiles/ppl/fp8-hybrid-product-32k-20260904/results.json"
-      ],
-      "classification": "the two retained G16 cells and sidecars are current and independently revalidatable, but the evidence is split and G32 is absent; the future runner imports both disjoint sources and executes only the missing G32 cells into one native authority"
-    },
-    "four_role_xattention": {
-      "classification": "no retained native schema-v6 campaign"
     }
   },
+  "excluded_history": "All pre-N16 candidate PPL campaigns are diagnostic history only and are neither bound by this package closure nor reusable by its schema-v2 authority map.",
   "gpu_requirements": {
-    "selected_chunk_4096": "no BF16 rerun, no all-Q4 dense rerun, and no four-role dense G16 rerun; five candidate campaign invocations execute 18 missing cells while importing the exact retained BF16 and four-role G16 sidecars",
-    "selected_chunk_other": "two fresh BF16 campaigns plus all six complete candidate campaigns are required because floating-point chunk partitioning is authority-bound"
+    "selected_chunk_4096": "reuse only the exact deterministic BF16 authority/repeat; run all six complete exact-N16 candidate campaigns (24 candidate cells)",
+    "selected_chunk_other": "run two fresh BF16 campaigns plus all six complete exact-N16 candidate campaigns because floating-point chunk partitioning is authority-bound"
   },
   "cpu_validation_command": "python3 profiles/ppl/terminal-quality-recovery-20260905/validate_retained.py",
   "future_gpu_command": "bash profiles/ppl/terminal-quality-recovery-20260905/run-after-selection.sh --execute-gpu-quality",
-  "publication": "The target-owned checkpoint validator reopens all 18 BF16 shards for every selected chunk before the first GPU-capable subprocess. Every to-be-created final campaign namespace, any needed fresh BF16 namespace, and both authority-map paths are rejected with lstat/lexists semantics, including dangling symlinks. Campaign directories are evidence, not publication; there is no in-place resume or mutation of a partial directory. The six-entry authority map binds the validated selected-chunk authority path and starting hash, is validated into a pending regular file, rechecks that selection hash immediately before publication, and is atomically published last by an exclusive same-directory hard link that cannot replace an existing name.",
+  "publication": "The target-owned checkpoint validator reopens all 18 BF16 shards and the artifact validator reopens all three exact N16 artifacts plus adjacent migration receipts before the first GPU-capable subprocess. Every to-be-created receipt-bound N16 campaign namespace, any needed fresh BF16 namespace, and both receipt-bound authority-map paths are rejected with lstat/lexists semantics, including dangling symlinks. Campaign directories are evidence, not publication; there is no in-place resume or mutation of a partial directory. The six-entry authority map binds the validated receipt-bound selected-chunk authority path and starting hash, exact N16 artifact/receipt identities, and fresh candidate campaigns; it is validated into a pending regular file, rechecks that selection hash immediately before publication, and is atomically published last by an exclusive same-directory hard link that cannot replace an existing name.",
   "identity_closure": "profiles/ppl/terminal-quality-recovery-20260905/prepared.sha256"
 }

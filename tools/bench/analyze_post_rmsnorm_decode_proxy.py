@@ -26,6 +26,14 @@ from tools.bench.prepare_post_rmsnorm_decode_proxy import PASSES, REPO, identity
 
 ROUNDS = 256
 ONE_ROUND_DISPATCHES = 1806
+QK_GRID_CONTRACT = {
+    "kernel_symbol_fragment": "qk_wmma_kernel<true>",
+    "source_max_context": 8193,
+    "capture_max_context": 8448,
+    "context_tile_tokens": 16,
+    "kv_heads": 4,
+    "workgroup_size": 32,
+}
 
 
 def number(value: object, label: str) -> Decimal:
@@ -195,10 +203,17 @@ def read_database(path: Path, command: list[str]) -> tuple[dict[int, dict], dict
         connection.close()
 
 
-def scaled_trace_inventory(rows: object) -> list[dict[str, object]]:
+def trace_graph_inventory(rows: object, qk_grid_contract: object) -> list[dict[str, object]]:
     if not isinstance(rows, list) or not rows:
         raise ValueError("selected-region trace inventory is missing")
+    if qk_grid_contract != QK_GRID_CONTRACT:
+        raise ValueError("Device Graph QK grid contract differs")
+    tile = QK_GRID_CONTRACT["context_tile_tokens"]
+    launch_scale = QK_GRID_CONTRACT["kv_heads"] * QK_GRID_CONTRACT["workgroup_size"]
+    source_grid = ((QK_GRID_CONTRACT["source_max_context"] + tile - 1) // tile) * launch_scale
+    capture_grid = ((QK_GRID_CONTRACT["capture_max_context"] + tile - 1) // tile) * launch_scale
     result = []
+    qk_rows = 0
     for row in rows:
         if (not isinstance(row, dict)
                 or not isinstance(row.get("symbol"), str) or not row["symbol"]
@@ -206,20 +221,59 @@ def scaled_trace_inventory(rows: object) -> list[dict[str, object]]:
                     "grid_size", "workgroup_size", "static_lds_bytes", "scratch_bytes", "vgpr"))
                 or type(row.get("dispatch_count")) is not int or row["dispatch_count"] <= 0):
             raise ValueError("selected-region trace inventory is malformed")
+        grid_size = row["grid_size"]
+        if QK_GRID_CONTRACT["kernel_symbol_fragment"] in row["symbol"]:
+            qk_rows += 1
+            if (grid_size != source_grid
+                    or row["workgroup_size"] != QK_GRID_CONTRACT["workgroup_size"]
+                    or row["dispatch_count"] != 16):
+                raise ValueError("selected-region trace has unexpected QK geometry")
+            grid_size = capture_grid
         result.append({
-            "symbol": row["symbol"], "grid_size": row["grid_size"],
+            "symbol": row["symbol"], "grid_size": grid_size,
             "workgroup_size": row["workgroup_size"],
             "static_lds_bytes": row["static_lds_bytes"],
-            "allocated_lds_bytes": ((row["static_lds_bytes"] + 255) // 256) * 256,
+            "allocated_lds_bytes": (
+                0 if row["static_lds_bytes"] == 0
+                else ((row["static_lds_bytes"] + 511) // 512) * 512
+            ),
             "scratch_bytes": row["scratch_bytes"], "vgpr": row["vgpr"],
-            "dispatch_count": row["dispatch_count"] * ROUNDS,
+            "dispatch_count": row["dispatch_count"],
         })
     if sum(row["dispatch_count"] for row in rows) != ONE_ROUND_DISPATCHES:
         raise ValueError("selected-region trace is not the exact 1806-dispatch round")
+    if qk_rows != 1:
+        raise ValueError("selected-region trace lacks one Device Graph QK row")
     return sorted(result, key=lambda row: (
         row["symbol"], row["grid_size"], row["workgroup_size"], row["static_lds_bytes"],
         row["allocated_lds_bytes"], row["scratch_bytes"], row["vgpr"],
     ))
+
+
+def validate_region_inventories(regions: dict[int, dict], expected_markers: dict[str, int],
+                                expected_inventory: list[dict[str, object]]) -> set[int]:
+    expected = Counter((row["symbol"], row["grid_size"], row["workgroup_size"],
+                        row["static_lds_bytes"], row["allocated_lds_bytes"],
+                        row["scratch_bytes"], row["vgpr"])
+                       for row in expected_inventory for _ in range(row["dispatch_count"]))
+    observed: dict[str, Counter] = defaultdict(Counter)
+    selected = set()
+    for dispatch, row in regions.items():
+        region = row["region"]
+        if region not in expected_markers:
+            continue
+        selected.add(dispatch)
+        allocated = (0 if row["static_lds_bytes"] == 0 else
+                     ((row["static_lds_bytes"] + 511) // 512) * 512)
+        observed[region][(row["symbol"], row["grid_size"], row["workgroup_size"],
+                          row["static_lds_bytes"], allocated, row["scratch_bytes"],
+                          row["vgpr"])] += 1
+    if set(observed) != set(expected_markers):
+        raise ValueError("database lacks an exact ordinary region set")
+    for region in expected_markers:
+        if observed[region] != expected:
+            raise ValueError(f"{region} differs from exact one-round resource inventory")
+    return selected
 
 
 def validate_benchmark(path: Path, command: list[str], plan: dict) -> dict:
@@ -231,7 +285,8 @@ def validate_benchmark(path: Path, command: list[str], plan: dict) -> dict:
     if (value.get("artifact_type") != "ninfer_bench_report" or value.get("schema_version") != 20
             or value.get("command") != " ".join(command)
             or value.get("environment", {}).get("architecture_name") != "gfx1201"
-            or config.get("concurrency") != 1 or config.get("spec") != "none"
+            or config.get("concurrency") != 1 or config.get("max_context") != 8448
+            or config.get("spec") != "none"
             or config.get("draft_tokens") != 0 or config.get("prefill_chunk") != 4096
             or config.get("kv_cache_format") != "fp8-k-int4-v" or config.get("kv_value_group") != 16
             or config.get("xattention_qualification") is not False
@@ -244,7 +299,8 @@ def validate_benchmark(path: Path, command: list[str], plan: dict) -> dict:
     return identity(path)
 
 
-def reduce_pass(csv_path: Path, database: Path, command: list[str], counters: tuple[str, ...]) -> dict:
+def reduce_pass(csv_path: Path, database: Path, command: list[str], counters: tuple[str, ...],
+                expected_inventory: list[dict[str, object]] | None = None) -> dict:
     regions, agent, marker_counts = read_database(database, command)
     expected_markers = {f"ninfer.decode.decode.ordinary_round payload={frontier}": 1
                         for frontier in range(8192, 8448)}
@@ -254,45 +310,56 @@ def reduce_pass(csv_path: Path, database: Path, command: list[str], counters: tu
         raise ValueError("capture lacks exact ordinary frontiers 8192..8447")
     required = {"Dispatch_Id", "Kernel_Name", "Grid_Size", "Workgroup_Size", "LDS_Block_Size",
                 "Scratch_Size", "VGPR_Count", "Counter_Name", "Counter_Value"}
-    values: dict[tuple[int, str], Decimal] = {}
-    metadata: dict[int, tuple] = {}
+    selected = (validate_region_inventories(regions, expected_markers, expected_inventory)
+                if expected_inventory is not None else
+                {dispatch for dispatch, item in regions.items()
+                 if item["region"] in expected_markers})
+    if not selected:
+        raise ValueError("database has no selected ordinary dispatches")
+    counter_bits = {counter: 1 << index for index, counter in enumerate(counters)}
+    full_counter_mask = (1 << len(counters)) - 1
+    seen_masks: dict[int, int] = {}
+    totals = {counter: Decimal(0) for counter in counters}
+    per_symbol: dict[str, dict[str, Decimal]] = defaultdict(
+        lambda: {counter: Decimal(0) for counter in counters})
     with csv_path.open(newline="", encoding="utf-8") as source:
         reader = csv.DictReader(source)
         if reader.fieldnames is None or not required.issubset(reader.fieldnames):
             raise ValueError("counter CSV lacks native fields")
         for line, row in enumerate(reader, 2):
             dispatch = int(row["Dispatch_Id"])
+            db = regions.get(dispatch)
+            if db is None:
+                raise ValueError("counter CSV has a dispatch absent from database")
             item = (row["Kernel_Name"], int(row["Grid_Size"]), int(row["Workgroup_Size"]),
                     int(row["LDS_Block_Size"]), int(row["Scratch_Size"]), int(row["VGPR_Count"]))
-            if metadata.setdefault(dispatch, item) != item:
-                raise ValueError("counter CSV has inconsistent dispatch metadata")
             counter = row["Counter_Name"]
-            if counter not in counters or (dispatch, counter) in values:
+            bit = counter_bits.get(counter)
+            if bit is None or seen_masks.get(dispatch, 0) & bit:
                 raise ValueError(f"line {line} has unexpected or duplicate counter")
-            values[dispatch, counter] = number(row["Counter_Value"], f"line {line}")
-    selected = sorted(dispatch for dispatch, item in regions.items()
-                      if item["region"] in expected_markers)
-    if not selected or set(metadata) != set(regions):
+            seen_masks[dispatch] = seen_masks.get(dispatch, 0) | bit
+            if (item[0] != db["symbol"] or item[1] != db["grid_size"]
+                    or item[2] != db["workgroup_size"] or item[4] != db["scratch_bytes"]
+                    or item[5] != db["vgpr"]
+                    or item[3] != (
+                        0 if db["static_lds_bytes"] == 0
+                        else ((db["static_lds_bytes"] + 511) // 512) * 512
+                    )):
+                raise ValueError("CSV/database per-dispatch resources differ")
+            value = number(row["Counter_Value"], f"line {line}")
+            if dispatch in selected:
+                totals[counter] += value
+                per_symbol[db["symbol"]][counter] += value
+    if set(seen_masks) != set(regions):
         raise ValueError("CSV/database measured dispatch inventories differ")
-    for dispatch in metadata:
-        if {counter for item, counter in values if item == dispatch} != set(counters):
-            raise ValueError("dispatch lacks exact pass counter inventory")
-        db, row = regions[dispatch], metadata[dispatch]
-        if (row[0] != db["symbol"] or row[1] != db["grid_size"]
-                or row[2] != db["workgroup_size"] or row[4] != db["scratch_bytes"]
-                or row[5] != db["vgpr"]
-                or row[3] != ((db["static_lds_bytes"] + 255) // 256) * 256):
-            raise ValueError("CSV/database per-dispatch resources differ")
-    totals = {counter: sum((values[d, counter] for d in selected), Decimal(0))
-              for counter in counters}
-    inventory = Counter((metadata[d][0], metadata[d][1], metadata[d][2],
-                         regions[d]["static_lds_bytes"], metadata[d][3], metadata[d][4],
-                         metadata[d][5]) for d in selected)
-    per_symbol: dict[str, dict[str, Decimal]] = defaultdict(
-        lambda: {counter: Decimal(0) for counter in counters})
-    for dispatch in selected:
-        for counter in counters:
-            per_symbol[metadata[dispatch][0]][counter] += values[dispatch, counter]
+    if any(mask != full_counter_mask for mask in seen_masks.values()):
+        raise ValueError("dispatch lacks exact pass counter inventory")
+    inventory = Counter((regions[d]["symbol"], regions[d]["grid_size"],
+                         regions[d]["workgroup_size"], regions[d]["static_lds_bytes"],
+                         (0 if regions[d]["static_lds_bytes"] == 0 else
+                          ((regions[d]["static_lds_bytes"] + 511) // 512) * 512),
+                         regions[d]["scratch_bytes"], regions[d]["vgpr"])
+                        for d in selected)
     return {
         "ordinary_dispatch_count": len(selected), "agent": agent,
         "dispatch_inventory": [{"symbol": key[0], "grid_size": key[1],
@@ -336,8 +403,9 @@ def analyze(plan_path: Path, root: Path) -> dict:
             or probe_contract.get("working_set_gib_per_buffer") != 4
             or probe_contract.get("trials_per_method") != 5):
         raise ValueError("stream probe contract or executable changed")
-    expected_inventory = scaled_trace_inventory(
-        plan.get("selected_region_trace", {}).get("inventory")
+    trace = plan.get("selected_region_trace", {})
+    expected_inventory = trace_graph_inventory(
+        trace.get("inventory"), trace.get("qk_grid_contract")
     )
     expected_dispatches = ONE_ROUND_DISPATCHES * ROUNDS
     summaries = {}
@@ -355,12 +423,9 @@ def analyze(plan_path: Path, root: Path) -> dict:
         csvs = list(raw_dir.glob("*_counter_collection.csv")); dbs = list(raw_dir.glob("*_results.db"))
         if len(csvs) != 1 or len(dbs) != 1:
             raise ValueError("pass lacks exactly one counter CSV and database")
-        summary = reduce_pass(csvs[0], dbs[0], command, counters)
-        if (summary["ordinary_dispatch_count"] != expected_dispatches
-                or summary["dispatch_inventory"] != expected_inventory):
-            raise ValueError(
-                "PMC pass is not the exact 256x selected one-round dispatch inventory"
-            )
+        summary = reduce_pass(csvs[0], dbs[0], command, counters, expected_inventory)
+        if summary["ordinary_dispatch_count"] != expected_dispatches:
+            raise ValueError("PMC pass is not the exact 256x one-round dispatch count")
         summary["benchmark_report"] = benchmark
         summary["counter_csv"] = identity(csvs[0]); summary["database"] = identity(dbs[0])
         summaries[label] = summary

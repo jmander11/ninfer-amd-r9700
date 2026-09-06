@@ -1,8 +1,8 @@
 {
   "analyzer": {
-    "file_size_bytes": 26719,
+    "file_size_bytes": 30043,
     "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/bench/analyze_post_rmsnorm_decode_proxy.py",
-    "sha256": "611a1f9e373f259b71cf274fe80fcb9bdae650c9b1a1602b9cf57cdd51f0aac9"
+    "sha256": "d4778d00aeb35bab97a7c7a8938c0cd043d93ec83bc68946ac3e29b7e9aa5e51"
   },
   "artifact": {
     "file_size_bytes": 15172833280,
@@ -23,7 +23,8 @@
   "measurement_contract": {
     "conclusion": "diagnostic relative cache, request, wait, issue, and LDS proxies only",
     "counter_values": "native rocprofiler per-dispatch aggregates",
-    "cross_pass_join": "exact dispatch resource-inventory multiset, never dispatch id",
+    "cross_pass_join": "exact full dispatch resource-inventory multiset, never dispatch id",
+    "inventory_gate": "each of 256 exact ROCTX ordinary rounds must match the selected one-round 37-tuple/1806-dispatch inventory; terminal Device Graph QK grid is derived from ceil(max_context/16) tiles times 4 KV heads times workgroup 32",
     "physical_memory_bandwidth_bytes_per_second": null,
     "physical_peak_fraction": null,
     "scope": "selected ROCTX ordinary rounds from one C1/P8192+G256 request",
@@ -125,9 +126,9 @@
     "required_during_capture": "profile_standard"
   },
   "producer": {
-    "file_size_bytes": 15859,
+    "file_size_bytes": 16474,
     "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/bench/prepare_post_rmsnorm_decode_proxy.py",
-    "sha256": "09d5d6acf1041470cf8256e6d19225af26b944923572278c195fc3cd22d0adaa"
+    "sha256": "10fd44e6e38f4e1fd8bae494c91fabe39b083605b663af60f5d30543ace7e976"
   },
   "profile_timing_admissible": false,
   "profiler": {
@@ -478,6 +479,14 @@
         "workgroup_size": 256
       }
     ],
+    "qk_grid_contract": {
+      "capture_max_context": 8448,
+      "context_tile_tokens": 16,
+      "kernel_symbol_fragment": "qk_wmma_kernel<true>",
+      "kv_heads": 4,
+      "source_max_context": 8193,
+      "workgroup_size": 32
+    },
     "report": {
       "file_size_bytes": 5302,
       "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/rocprof/r9700-rmsnorm-production-selected-trace-20260906/benchmark-report.json",

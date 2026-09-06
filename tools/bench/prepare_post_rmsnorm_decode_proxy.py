@@ -48,6 +48,14 @@ PASSES = {
         "SQC_LDS_IDX_ACTIVE", "SQ_WAVES", "GRBM_GUI_ACTIVE", "TA_TA_BUSY",
     ),
 }
+QK_GRID_CONTRACT = {
+    "kernel_symbol_fragment": "qk_wmma_kernel<true>",
+    "source_max_context": 8193,
+    "capture_max_context": 8448,
+    "context_tile_tokens": 16,
+    "kv_heads": 4,
+    "workgroup_size": 32,
+}
 
 
 def sha(path: Path) -> str:
@@ -232,7 +240,8 @@ def prepare(out: Path) -> None:
         "corpus": identity(CORPUS, CORPUS_SHA256),
         "selected_region_trace": {"report": identity(TRACE_REPORT, TRACE_REPORT_SHA256),
                                   "database": identity(TRACE_DB, TRACE_DB_SHA256),
-                                  "frontier": 8192, "inventory": trace_inventory()},
+                                  "frontier": 8192, "inventory": trace_inventory(),
+                                  "qk_grid_contract": QK_GRID_CONTRACT},
         "profiler": identity(ROCPROF), "counter_preflight": identity(ROCPROF_AVAIL),
         "stream_probe": {"executable": identity(STREAM_PROBE, STREAM_PROBE_SHA256),
                          "arguments": ["--size-gib", "4", "--trials", "5"],
@@ -247,7 +256,12 @@ def prepare(out: Path) -> None:
         "measurement_contract": {
             "scope": "selected ROCTX ordinary rounds from one C1/P8192+G256 request",
             "counter_values": "native rocprofiler per-dispatch aggregates",
-            "cross_pass_join": "exact dispatch resource-inventory multiset, never dispatch id",
+            "inventory_gate": (
+                "each of 256 exact ROCTX ordinary rounds must match the selected one-round "
+                "37-tuple/1806-dispatch inventory; terminal Device Graph QK grid is derived "
+                "from ceil(max_context/16) tiles times 4 KV heads times workgroup 32"
+            ),
+            "cross_pass_join": "exact full dispatch resource-inventory multiset, never dispatch id",
             "physical_memory_bandwidth_bytes_per_second": None,
             "physical_peak_fraction": None, "stall_freedom": None,
             "conclusion": "diagnostic relative cache, request, wait, issue, and LDS proxies only",

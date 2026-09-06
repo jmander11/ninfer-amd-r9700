@@ -43,12 +43,18 @@ class ReductionTests(unittest.TestCase):
                     for counter in counters:
                         writer.writerow({"Dispatch_Id": dispatch, "Kernel_Name": "kernel",
                                          "Grid_Size": 256, "Workgroup_Size": 256,
-                                         "LDS_Block_Size": 256, "Scratch_Size": 0,
+                                         "LDS_Block_Size": 512, "Scratch_Size": 0,
                                          "VGPR_Count": 16, "Counter_Name": counter,
                                          "Counter_Value": multiplier})
             with patch.object(analyzer, "read_database",
                               return_value=(regions, {"wave_front_size": 32}, markers)):
                 result = analyzer.reduce_pass(csv_path, Path(raw) / "unused.db", [], counters)
+                with csv_path.open(newline="", encoding="utf-8") as source:
+                    duplicate = next(csv.DictReader(source))
+                with csv_path.open("a", newline="", encoding="utf-8") as output:
+                    csv.DictWriter(output, fieldnames=fields).writerow(duplicate)
+                with self.assertRaisesRegex(ValueError, "duplicate counter"):
+                    analyzer.reduce_pass(csv_path, Path(raw) / "unused.db", [], counters)
         self.assertEqual(result["ordinary_dispatch_count"], 2)
         self.assertTrue(all(value == "11" for value in result["counter_sums"].values()))
         self.assertEqual(result["dispatch_inventory"][0]["dispatch_count"], 2)
@@ -77,16 +83,26 @@ class ReductionTests(unittest.TestCase):
         row = {
             "symbol": "kernel", "grid_size": 256, "workgroup_size": 256,
             "static_lds_bytes": 4, "scratch_bytes": 0, "vgpr": 16,
-            "dispatch_count": analyzer.ONE_ROUND_DISPATCHES,
+            "dispatch_count": analyzer.ONE_ROUND_DISPATCHES - 16,
         }
-        scaled = analyzer.scaled_trace_inventory([row])
-        self.assertEqual(scaled[0]["allocated_lds_bytes"], 256)
-        self.assertEqual(
-            scaled[0]["dispatch_count"],
-            analyzer.ONE_ROUND_DISPATCHES * analyzer.ROUNDS,
-        )
+        qk = {
+            "symbol": "void qk_wmma_kernel<true>(...)", "grid_size": 65664,
+            "workgroup_size": 32, "static_lds_bytes": 0, "scratch_bytes": 0,
+            "vgpr": 24, "dispatch_count": 16,
+        }
+        scaled = analyzer.trace_graph_inventory([row, qk], analyzer.QK_GRID_CONTRACT)
+        self.assertEqual(scaled[0]["allocated_lds_bytes"], 512)
+        self.assertEqual(sum(item["dispatch_count"] for item in scaled),
+                         analyzer.ONE_ROUND_DISPATCHES)
+        self.assertEqual(next(item for item in scaled if "qk_wmma" in item["symbol"])["grid_size"],
+                         67584)
         with self.assertRaisesRegex(ValueError, "exact 1806-dispatch"):
-            analyzer.scaled_trace_inventory([{**row, "dispatch_count": 1}])
+            analyzer.trace_graph_inventory([{**row, "dispatch_count": 1}, qk],
+                                           analyzer.QK_GRID_CONTRACT)
+        with self.assertRaisesRegex(ValueError, "QK grid contract"):
+            analyzer.trace_graph_inventory([row, qk],
+                                           {**analyzer.QK_GRID_CONTRACT,
+                                            "capture_grid_size": 1})
 
 
 if __name__ == "__main__":

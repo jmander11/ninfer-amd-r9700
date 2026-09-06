@@ -887,6 +887,55 @@ work was admitted. The immutable report is
 ELF SHA-256 `24da41789f510c0f848b62ca2020b890ce0a33be96cea05ffbaeea12ea73aef7`. The selector and candidate
 were removed. Canonical P2048 therefore remains `1075.438603 ms` / `1904.339303 tok/s`.
 
+The focused retained-production trace now refreshes attribution for that exact dense
+C1/P2048/G0/chunk4096/spec-none route. The validated evidence is
+`profiles/rocprof/r9700-retained-production-p2048-trace-plan-20260906/evidence.json` (SHA-256
+`73b1f5ff024ec2b761411ab5f3e64eb7c9accdbd9fb0c93720a95ceb4c4857f0`). It binds the
+selector-free executable SHA-256
+`a7c9303bd213fa3dbdb29ca0cee73addef1de8ab6a6e6b231509e25239776425`, four-role N16/K16
+artifact SHA-256 `040c6e7ed29c856718a638c00181975710d987b7d5f49f4cafbdf68911f7e7d2`, and corpus
+SHA-256 `27e4f63c17efe3f89b5cf278b3b1a42a737316ed4044d7d0d1d52437059d1002`. The separate
+unprofiled authority remains `1075.438603 ms` / `1904.339303 tok/s`; trace timing cannot replace
+it. The Text range was `1076.624083 ms`, with `1043.339444 ms` active-kernel wall union and
+`33.284639 ms` kernel-inactive wall. Independent service attribution places Q4 projection at
+`334.762518 ms` across 176 calls (`65.6891` useful TMAC/s), FP8 projection at `307.310638 ms`
+across 144 calls, dense attention at `147.247476 ms` across 48 QK/maximum/PV calls, and GDN
+recurrence at `139.397112 ms` across 96 calls. Ninety-three known short runtime fill/copy
+dispatches overlap Text without a stage marker, totaling only `0.357956 ms` (maximum
+`0.006760 ms`, `0.033248%` of Text wall); they are retained as unattributed and make stage attribution
+explicitly incomplete. The trace has no hardware counters and establishes neither profiled
+throughput, physical bandwidth/cache utilization, causal stalls or stall freedom, nor practical-
+ceiling closure. The completed FP8 audit splits the `307.310638 ms` matrix service exactly:
+64 MLP gate/up calls at `[T,N,K]=[2048,34816,5120]` take `255.024909 ms` (`183.234` useful
+TFLOP/s), 48 GDN query/key calls at `[2048,4096,5120]` take `23.726265 ms` (`173.781` useful
+TFLOP/s), and the 32 query/key plus gate/value calls across 16 full-attention layers at
+`[2048,7168,5120]` take `28.559464 ms` (`168.433` useful TFLOP/s). The first two roles share
+hipBLASLt solution `123104`/fingerprint `e0e001...` and the attention pair uses solution
+`123100`/fingerprint `dce001...`. Their fresh runtime symbols and resource envelopes exactly match
+the prior URI-bound loaded-ELF proofs in
+`profiles/rocprof/r9700-fp8-gate-up-linear-execution-proof-20260904/proof/proof.json` and
+`profiles/rocprof/r9700-fp8-attention-qk-gate-value-linear-execution-proof-20260904/proof/proof.json`:
+the gfx1201 kernels contain respectively 112 and 160 static
+`v_wmma_f32_16x16x16_fp8_fp8` sites, use 192 architectural VGPR and zero private/scratch, and use
+25,088/12,544 bytes LDS. These are E4M3-by-E4M3 FP8 matrices with FP32 accumulation and BF16
+publication; they are not the separate A8W8/IU8 CTA route.
+
+Closing the unchanged 2,000 tok/s floor from `1075.438603 ms` requires at least `51.438603 ms` of
+whole-P2048 saving. Removing that amount from the FP8 matrices alone would require aggregate
+service no greater than `255.871638 ms`, or `217.542` useful TFLOP/s (`1.20103x` current). If the
+dominant gate/up family supplied it, that family would need `229.531` useful TFLOP/s
+(`1.25266x`). The two smaller families total only `52.285729 ms`; even at the retained
+`400.835`-TFLOP/s issue reference they can save at most `29.998424 ms`. The installed gate/up
+catalog has already reduced 791 entries to ten supported zero-workspace solutions and timed all
+ten; the nearest alternate projects only `0.212524 ms` saving over 64 calls. The exact custom
+M128xN128 route regressed from `3.605496` to `7.640492 ms` per call, M128xN256 failed its resource
+gate, and complete removal of the downstream SiLU/A8 stage is bounded near `20.76 ms`. Therefore
+no FP8 catalog, custom-matrix, adjacent-fusion, or counter-only experiment is admitted as a
+credible `>=51.439 ms` mechanism. Canonical dense P2048 remains `1904.339303 tok/s`; the floor has
+not passed, practical-ceiling closure has not been proved, and choosing whether to retain or revise
+that floor is now a product-contract/user decision rather than an authorization for another
+unbounded optimization sweep.
+
 This exhausts the explicit bounded candidate list. A targeted audit of the canonical loaded ISA and
 retained P2048 trace found no new mechanism outside the rejected topology and representation
 families with a credible `>=35.9 ms` whole-P2048 saving. That threshold is a `10.08%` reduction of
@@ -895,8 +944,9 @@ eight IU4 WMMAs at occupancy 16; the independent optimistic bounds for activatio
 (`19.045 ms`) and arithmetic-encoding cleanup (`<14.3 ms`) are each too small, and the concrete
 second-payload overlap schedule costs the nine VGPRs that failed this gate. Those overlapping bounds
 cannot be summed. Candidate exhaustion is not practical-ceiling evidence, so that closure remains
-open. Ordinary-decode roof closure precedes this P2048 work, and
-chunk/base selection and the selected companion remain prerequisites for DFlash2.
+open. Ordinary decode has separately reached its bounded roof. The P2048 floor/product-contract
+decision is now next; chunk/base selection and the selected companion remain blocked prerequisites
+for DFlash2.
 
 The structural M64xN256 plus ping/pong follow-up also passed its exact/FP64 oracle and every tuple
 was nonregressing, but it likewise failed the fixed `>=1.5x` gate. Weighted P2048 fell from
@@ -1069,9 +1119,33 @@ C1/P8192+G32 whole screen then measured a `1.0038023342` candidate/control decod
 `-0.141697625 ms/token` saving, and `1.0033795393` prefill ratio with exact generated tokens. The
 rejected report is `profiles/bench/r9700-split512-grouped-t1-whole-p8192-g32-screen-v2-20260906.json`
 (SHA-256 `bcd24621462dbb404ecc77b79a6b324f0c4d4b67a7e0afdcbacc69281cd1d9f2`). No full gate was run;
-the selector and challenger were removed. Ordinary-decode work proceeds to bounded
-bandwidth/stall-proxy profiling and a roof decision, not another grouped-PV variant. This work does
-not open the held chunk/capacity campaign or satisfy the selected-recipe DFlash2 gates.
+the selector and challenger were removed. The subsequent post-RMSNorm proxy analysis is
+`profiles/rocprof/r9700-post-rmsnorm-ordinary-c1-p8192-g256-proxy-plan-20260906/analysis.json`
+(SHA-256 `8784fe63db40d13163999077da8b62f049242807cfa3045a88d0412e7a0534ae`).
+It validates 256 exact ordinary regions, each with the terminal 37-tuple/1,806-dispatch Device
+Graph inventory. Whole-round ratio-of-sums proxies are 56.7040% GL2 hit, 52.0346% TCP hit,
+97.5089% wait-any/wave cycles, 1.02066% issue-wait/wave cycles, 25.6970% occupancy, and 13.1582%
+VALU busy. More decisively, the 82,176 dot8 dispatches account for 96.6624% of GL2 read requests,
+96.4485% of GL2 misses, 83.2272% of TA activity, and 72.0015% of wave cycles. Their symbol-local
+proxies are 51.0133% GL2 hit, 21.5963% TCP hit, 99.3061% wait-any/wave cycles, 0.03400%
+issue-wait/wave cycles, 28.7011% occupancy, and 6.08721% VALU busy. These overlapping counters do
+not establish physical HBM bandwidth, causal stalls, or stall freedom; the separate same-session
+4-GiB stream probe reaches 635.9 GB/s but is not inference traffic. The admitted weight-only
+non-temporal dot8 challenger preserved exact numerics and passed its static/resource gate, but its
+current-identity repeated-buffer direct report rejected it at `-8.26204 ms/token` weighted point
+saving and `-8.3750512166 ms/token` conservative lower saving. That report is
+`profiles/bench/r9700-dot8-weight-nt-direct-v2-20260906/report.json`, SHA-256
+`63ed87fef150a885ed3375548635ba529d8e08cbcb9df0e932b24d248e65034e`. Since repeated buffers do
+not exercise the proposed downstream cache-pollution benefit, the terminal decision used a
+source-matched three-pair, 12-process C1/P8192+G32 ordinary Device Graph screen. All three paired
+decode savings were negative (`-2.683606`, `-2.5499134531`, and `-2.6231869063 ms/token`); the
+robust decode ratio upper was `1.0773990082`, robust saving lower was
+`-2.8873396633 ms/token`, and robust prefill ratio upper was `1.0186573578`. The rejected report
+is `profiles/bench/r9700-dot8-weight-nt-whole-p8192-g32-screen-20260906.json`, SHA-256
+`c6a1dea0f0e94d9dfcd461145c83d9161e35313e17e2fe9b0ca041a9b405e31c`. No G256 gate was run. The
+private selector, challenger, and temporary qualification tooling were removed while both reports
+and raw whole-screen evidence remain immutable. This terminal rejection does not infer physical
+bandwidth saturation or stall freedom.
 
 The fresh selector-free build then measured `9.461402437 s` for 256 decode tokens
 (`27.05729956 tok/s`) with all 257 generated token IDs retained. The final report is
@@ -1084,6 +1158,9 @@ dispatches, so none of the 129 K5120 ordinary-decode calls fell back. The trace 
 (SHA-256 `8fe71be97e77c2651cb0c75fe203cedb13f200f8ac76082e4310bbfb855e5370`). The extracted loaded
 gfx1201 code object has SHA-256 `c3dcad45559a112f42f07b1d7e87fbd1d494d1d024083efc0498500ee678cd72`;
 the selected kernel uses 17 VGPR, 32 bytes LDS, wave32, occupancy 16, and zero scratch/spills.
+This selector-free `27.05729956 tok/s` result is the bounded practical ceiling used to close
+ordinary base-decode work. It is explicitly not an absolute hardware or physical ceiling and does
+not claim the maximum achievable throughput of the R9700.
 
 The existing MTP shortlist head remains Q4G64 with A8G64 activations. MTP stays in exact-output,
 state, cache, row-view, and whole-route regression coverage, but a new shortlist-head trace,

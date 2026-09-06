@@ -192,6 +192,20 @@ configuration, environment, artifact, and workspace values matched. The immutabl
 `19278ca8c8df5d417bbd5d36ce1689760e3cb6dbe606c3a597a6b2f0b847fee1`. The former private build
 selector and terminal A/B tooling were removed after promotion.
 
+The later weight-only non-temporal dot8 challenger was also removed after terminal rejection. Its
+current-identity repeated-buffer direct report,
+`profiles/bench/r9700-dot8-weight-nt-direct-v2-20260906/report.json` (SHA-256
+`63ed87fef150a885ed3375548635ba529d8e08cbcb9df0e932b24d248e65034e`), produced a weighted
+saving point/lower bound of `-8.26204`/`-8.3750512166 ms/token`. The source-matched three-pair
+C1/P8192+G32 whole screen then had negative savings in every pair, a `1.0773990082` robust decode
+ratio upper, `-2.8873396633 ms/token` robust saving lower, and `1.0186573578` robust prefill ratio
+upper. Its immutable report is
+`profiles/bench/r9700-dot8-weight-nt-whole-p8192-g32-screen-20260906.json` (SHA-256
+`c6a1dea0f0e94d9dfcd461145c83d9161e35313e17e2fe9b0ca041a9b405e31c`). No G256 gate was run;
+the private selector, implementation, and temporary tools are gone while the reports and raw
+evidence remain. Ordinary base decode is closed at the selector-free `27.05729956 tok/s` bounded
+practical ceiling, not a physical or absolute hardware ceiling.
+
 The G16 and G32 S16/tau900 XAttention build variants each expose a production-scale admission
 control at context 8,192/T=4,096. Run each configured binary with `--benchmark
 --production-scale --iterations 10 --out-json FRESH.json`, then validate it with `python3
@@ -414,6 +428,23 @@ WMMAs at occupancy 16; independent activation/scale and arithmetic-cleanup ceili
 `19.045 ms` and `<14.3 ms`; and a concrete second outstanding payload costs the nine rejected
 VGPRs. The overlapping bounds are not additive. This does not prove practical-ceiling closure;
 that question remains open.
+
+The retained-production FP8 audit closes that projection family as the missing `>=51.439 ms`
+floor mechanism. At C1/P2048/G0/chunk4096, hipBLASLt solution `123104` accounts for 64 MLP
+gate/up calls (`[T,N,K]=[2048,34816,5120]`, `255.024909 ms`, `183.234` useful TFLOP/s) and 48
+GDN query/key calls (`[2048,4096,5120]`, `23.726265 ms`, `173.781` TFLOP/s). Solution `123100`
+accounts for the 32 full-attention query/key and gate/value calls
+(`[2048,7168,5120]`, `28.559464 ms`, `168.433` TFLOP/s). The fresh symbols match the retained
+loaded-ELF proofs of native gfx1201 `v_wmma_f32_16x16x16_fp8_fp8`; both use 192 architectural VGPR,
+zero private/scratch, and 25,088 or 12,544 bytes LDS. Do not confuse these row-scaled E4M3 FP8
+roles with the separate A8W8/IU8 CTA implementation.
+
+All ten supported zero-workspace gate/up catalog solutions have been timed, the closest alternate
+saves only a projected `0.212524 ms` over 64 calls, M128xN128 regressed, M128xN256 is
+resource-terminal, and adjacent consumer fusion is bounded below the floor deficit. No additional
+FP8 catalog, custom-kernel, fusion, or counter-only performance command is admitted. P2048 remains
+`1904.339303 tok/s`; the 2,000 tok/s floor is not passed, and whether to retain or revise it is now
+a product-contract/user decision. Candidate exhaustion alone is not practical-ceiling proof.
 
 Two M64xN256 Q4 prefill experiments are terminal rejections and their executable paths have been
 removed. The 16-wave/512-thread variant passed numerical qualification and improved the weighted
