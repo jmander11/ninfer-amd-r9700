@@ -1,0 +1,68 @@
+{
+  "command": [
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-small-t-n16-cd966d72-control-20260906/bench/ninfer_bench",
+    "--weights",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval.ninfer",
+    "--corpus",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids",
+    "--device",
+    "0",
+    "--concurrency",
+    "1",
+    "-pg",
+    "128,64",
+    "--prefill-chunk",
+    "4096",
+    "--kv-capacity",
+    "workload",
+    "--draft-tokens",
+    "0",
+    "--retain-token-ids",
+    "--isolate-prompt-decode",
+    "--no-device-graph",
+    "--output",
+    "json",
+    "--output-file",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-p129-isolation-discriminator-20260906/results/eager-ordinary_isolated.json",
+    "-r",
+    "1",
+    "--warmup",
+    "0"
+  ],
+  "exit_code": 0,
+  "started_unix_ns": 1788730074233959364,
+  "finished_unix_ns": 1788730096583912365,
+  "power_profile_before": "auto",
+  "power_profile_after": "auto",
+  "profiling_environment_policy": {
+    "exact": [
+      "AMD_SERIALIZE_COPY",
+      "AMD_SERIALIZE_KERNEL",
+      "GPU_DUMP_CODE_OBJECT",
+      "HIP_FORCE_QUEUE_PROFILING",
+      "LD_AUDIT",
+      "LD_PRELOAD"
+    ],
+    "prefixes": [
+      "ROCPROF",
+      "ROCP_",
+      "ROCTRACER_",
+      "ROCTX_",
+      "HSA_TOOLS_",
+      "HIP_TRACE_",
+      "AQLPROFILE_",
+      "ATT_PROFILE"
+    ]
+  },
+  "profiling_environment_removed": [],
+  "stdout": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-p129-isolation-discriminator-20260906/results/eager-ordinary_isolated.stdout.txt",
+    "bytes": 150,
+    "sha256": "e768582b98a3a4e2d96873f201fb73a38fc1cc2e85c6d852b2bd15555b3214a6"
+  },
+  "stderr": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-p129-isolation-discriminator-20260906/results/eager-ordinary_isolated.stderr.txt",
+    "bytes": 248,
+    "sha256": "1b573af6feb913712aa7a5f92f11d6e643f9485741de4e6f6c732290dfe7fc65"
+  }
+}

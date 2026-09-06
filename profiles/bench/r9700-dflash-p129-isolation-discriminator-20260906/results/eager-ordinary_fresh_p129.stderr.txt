@@ -1,0 +1,2 @@
+[ninfer_bench] loading /ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval.ninfer (max_context=193, concurrency=1, kv_format=fp8-k-int4-v)
+[ninfer_bench] test 1/1 whole-pp129+tg64: warmup=0 reps=1
