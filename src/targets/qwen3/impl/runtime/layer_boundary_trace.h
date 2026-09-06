@@ -60,6 +60,8 @@ inline constexpr std::array<GdnField, 10> kGdnFields{{
 }};
 inline constexpr std::size_t kGdnPayloadBytes = 78208U;
 inline constexpr std::size_t kCombinedPayloadBytes = kPayloadBytes + kGdnPayloadBytes;
+inline constexpr std::size_t kRecurrentStateElements = 128U * 128U * 48U;
+inline constexpr std::size_t kRecurrentStateBytes = kRecurrentStateElements * sizeof(float);
 
 consteval bool valid_gdn_layout() {
     std::size_t offset = 0;
@@ -148,10 +150,31 @@ inline bool gdn_enabled() {
     return !gdn_manifest_path().empty() || !gdn_sidecar_path().empty();
 }
 
+inline const std::string& recurrent_state_manifest_path() {
+    static const std::string path = [] {
+        const char* value = std::getenv("NINFER_QWEN3_GDN_STATE_TRACE_MANIFEST");
+        return value == nullptr ? std::string{} : std::string(value);
+    }();
+    return path;
+}
+
+inline const std::string& recurrent_state_sidecar_path() {
+    static const std::string path = [] {
+        const char* value = std::getenv("NINFER_QWEN3_GDN_STATE_TRACE_SIDECAR");
+        return value == nullptr ? std::string{} : std::string(value);
+    }();
+    return path;
+}
+
+inline bool recurrent_state_enabled() {
+    return !recurrent_state_manifest_path().empty() || !recurrent_state_sidecar_path().empty();
+}
+
 inline void require_eager(bool use_device_graph) {
     if (!enabled()) {
-        if (gdn_enabled()) {
-            throw std::invalid_argument("GDN detail trace requires the layer boundary trace");
+        if (gdn_enabled() || recurrent_state_enabled()) {
+            throw std::invalid_argument(
+                "GDN diagnostic traces require the layer boundary trace");
         }
         return;
     }
@@ -164,6 +187,15 @@ inline void require_eager(bool use_device_graph) {
     if (gdn_enabled() && (gdn_manifest_path().empty() || gdn_sidecar_path().empty())) {
         throw std::invalid_argument("GDN detail trace requires both manifest and sidecar paths");
     }
+    if (recurrent_state_enabled() &&
+        (recurrent_state_manifest_path().empty() || recurrent_state_sidecar_path().empty())) {
+        throw std::invalid_argument(
+            "GDN recurrent-state trace requires both manifest and sidecar paths");
+    }
+    if (recurrent_state_enabled() &&
+        requested_role() != Role::TextFresh && requested_role() != Role::TextAppend) {
+        throw std::invalid_argument("GDN recurrent-state trace supports only the exact Text pair");
+    }
     if (gdn_enabled() && (gdn_manifest_path() == gdn_sidecar_path() ||
                           gdn_manifest_path() == manifest_path() ||
                           gdn_manifest_path() == sidecar_path() ||
@@ -171,13 +203,21 @@ inline void require_eager(bool use_device_graph) {
                           gdn_sidecar_path() == sidecar_path())) {
         throw std::invalid_argument("layer and GDN trace outputs must be distinct");
     }
-    for (const std::string* path : {&manifest_path(), &sidecar_path(), &gdn_manifest_path(),
-                                    &gdn_sidecar_path()}) {
+    const std::array<const std::string*, 6> paths{
+        &manifest_path(), &sidecar_path(), &gdn_manifest_path(), &gdn_sidecar_path(),
+        &recurrent_state_manifest_path(), &recurrent_state_sidecar_path()};
+    for (std::size_t i = 0; i < paths.size(); ++i) {
+        const std::string* path = paths[i];
         if (path->empty()) continue;
         if (!std::filesystem::path(*path).is_absolute() ||
             path->find_first_of("\"\\\n\r") != std::string::npos) {
             throw std::invalid_argument(
                 "layer boundary trace paths must be absolute JSON-safe paths");
+        }
+        for (std::size_t j = 0; j < i; ++j) {
+            if (!paths[j]->empty() && *path == *paths[j]) {
+                throw std::invalid_argument("layer boundary trace outputs must be distinct");
+            }
         }
     }
     if (use_device_graph) {
@@ -238,11 +278,19 @@ inline bool& completed() {
 
 inline bool matches(Role role) { return enabled() && !completed() && requested_role() == role; }
 
+struct RecurrentStateTrace {
+    Tensor destination;
+    std::int32_t prefix_tokens = 0;
+};
+
 class Session {
 public:
     Session(Call call, hipStream_t stream)
-        : call_(call), stream_(stream), device_(kCombinedPayloadBytes + kMetadataBytes),
-          host_(kCombinedPayloadBytes + kMetadataBytes) {
+        : call_(call), stream_(stream),
+          device_(kCombinedPayloadBytes +
+                  (recurrent_state_enabled() ? kRecurrentStateBytes : 0U) + kMetadataBytes),
+          host_(kCombinedPayloadBytes +
+                (recurrent_state_enabled() ? kRecurrentStateBytes : 0U) + kMetadataBytes) {
         require_call();
         ::ninfer::targets::qwen3::detail::prefill_tail_trace_path::require_new(
             manifest_path().c_str());
@@ -253,6 +301,12 @@ public:
                 gdn_manifest_path().c_str());
             ::ninfer::targets::qwen3::detail::prefill_tail_trace_path::require_new(
                 gdn_sidecar_path().c_str());
+        }
+        if (recurrent_state_enabled()) {
+            ::ninfer::targets::qwen3::detail::prefill_tail_trace_path::require_new(
+                recurrent_state_manifest_path().c_str());
+            ::ninfer::targets::qwen3::detail::prefill_tail_trace_path::require_new(
+                recurrent_state_sidecar_path().c_str());
         }
         hipStreamCaptureStatus capture = hipStreamCaptureStatusNone;
         HIP_CHECK(hipStreamIsCapturing(stream_, &capture));
@@ -308,6 +362,28 @@ public:
         if (layer == 1 && gdn_enabled()) capture_gdn(value, "x");
     }
 
+    RecurrentStateTrace capture_gdn_recurrent_state(int layer, const Tensor& state,
+                                                     std::int32_t slot, hipStream_t) {
+        if (layer != 1 || !recurrent_state_enabled()) return {};
+        if (recurrent_state_scheduled_ || slot != 0 || state.dtype != DType::FP32 ||
+            state.data == nullptr || !state.is_contiguous() ||
+            state.ne[0] != 128 || state.ne[1] != 128 || state.ne[2] != 48 || state.ne[3] != 1) {
+            throw std::logic_error("GDN recurrent-state trace tensor/slot differs");
+        }
+        recurrent_state_scheduled_ = true;
+        Tensor destination(static_cast<std::uint8_t*>(device_.data()) + kCombinedPayloadBytes,
+                           DType::FP32, {128, 128, 48});
+        if (call_.role == Role::TextAppend) {
+            HIP_CHECK(hipMemcpyAsync(destination.data, state.data, kRecurrentStateBytes,
+                                     hipMemcpyDeviceToDevice, stream_));
+            return {};
+        }
+        if (call_.role != Role::TextFresh || call_.width != 129 || call_.column != 128) {
+            throw std::logic_error("GDN recurrent-state trace role differs");
+        }
+        return {.destination = destination, .prefix_tokens = 128};
+    }
+
     void finish() {
         if (next_snapshot_ != kSnapshots) {
             throw std::logic_error("layer boundary trace did not capture every boundary");
@@ -315,13 +391,21 @@ public:
         if (gdn_enabled() && next_gdn_field_ != kGdnFields.size()) {
             throw std::logic_error("GDN detail trace did not capture every layer-1 boundary");
         }
+        if (recurrent_state_enabled() && !recurrent_state_scheduled_) {
+            throw std::logic_error("GDN recurrent-state trace was not scheduled");
+        }
         device_.copy_to_host_async(host_.data(), host_.size(), stream_);
         HIP_CHECK(hipStreamSynchronize(stream_));
         std::array<std::int32_t, 3> metadata{};
-        std::memcpy(metadata.data(), host_.data() + kCombinedPayloadBytes, kMetadataBytes);
+        const std::size_t metadata_offset =
+            kCombinedPayloadBytes + (recurrent_state_enabled() ? kRecurrentStateBytes : 0U);
+        std::memcpy(metadata.data(), host_.data() + metadata_offset, kMetadataBytes);
         validate_metadata(metadata[0], metadata[1], metadata[2]);
         write_outputs(metadata[0], metadata[1], metadata[2]);
         if (gdn_enabled()) write_gdn_outputs(metadata[0], metadata[1], metadata[2]);
+        if (recurrent_state_enabled()) {
+            write_recurrent_state_outputs(metadata[0], metadata[1], metadata[2]);
+        }
         completed() = true;
     }
 
@@ -355,7 +439,9 @@ private:
         const auto* address = static_cast<const std::uint8_t*>(source.data) +
                               static_cast<std::size_t>(call_.column) * sizeof(std::int32_t);
         HIP_CHECK(hipMemcpyAsync(static_cast<std::uint8_t*>(device_.data()) + kPayloadBytes +
-                                     kGdnPayloadBytes + metadata_offset,
+                                     kGdnPayloadBytes +
+                                     (recurrent_state_enabled() ? kRecurrentStateBytes : 0U) +
+                                     metadata_offset,
                                  address, sizeof(std::int32_t), hipMemcpyDeviceToDevice, stream_));
     }
 
@@ -486,12 +572,53 @@ private:
         write_exclusive(gdn_manifest_path(), contents.data(), contents.size(), "GDN manifest");
     }
 
+    void write_recurrent_state_outputs(std::int32_t token, std::int32_t position,
+                                       std::int32_t rope_position) const {
+        const auto* payload = host_.data() + kCombinedPayloadBytes;
+        write_exclusive(recurrent_state_sidecar_path(), payload, kRecurrentStateBytes,
+                        "GDN recurrent-state sidecar");
+        const std::uint64_t hash = fnv1a64(payload, kRecurrentStateBytes);
+        const char* point = call_.role == Role::TextFresh
+            ? "wide-prefill-state-after-prefix-128-before-selected-column-128"
+            : "restored-append-state-before-selected-column-0";
+        std::ostringstream manifest;
+        manifest << "{\n"
+                 << "  \"artifact_type\": \"ninfer_qwen3_layer1_gdn_recurrent_state_trace\",\n"
+                 << "  \"schema_version\": 1,\n"
+                 << "  \"diagnostic_only\": true,\n"
+                 << "  \"timing_evidence_eligible\": false,\n"
+                 << "  \"production_routing_authorized\": false,\n"
+                 << "  \"execution\": \"eager\",\n"
+                 << "  \"role\": \"" << role_name(call_.role) << "\",\n"
+                 << "  \"capture_point\": \"" << point << "\",\n"
+                 << "  \"selected_token\": " << token << ",\n"
+                 << "  \"selected_cache_position\": " << position << ",\n"
+                 << "  \"selected_rope_position\": " << rope_position << ",\n"
+                 << "  \"state_frontier\": 128,\n"
+                 << "  \"linear_state_slot\": 0,\n"
+                 << "  \"text_layer\": 1,\n"
+                 << "  \"gdn_index\": 1,\n"
+                 << "  \"dtype\": \"fp32\",\n"
+                 << "  \"shape\": [128,128,48],\n"
+                 << "  \"elements\": " << kRecurrentStateElements << ",\n"
+                 << "  \"sidecar_path\": \"" << recurrent_state_sidecar_path() << "\",\n"
+                 << "  \"sidecar_bytes\": " << kRecurrentStateBytes << ",\n"
+                 << "  \"sidecar_fnv1a64\": \"" << std::hex << std::setfill('0')
+                 << std::setw(16) << hash << std::dec << "\",\n"
+                 << "  \"layout\": \"little-endian-fp32:key,value,value_head\"\n"
+                 << "}\n";
+        const std::string contents = manifest.str();
+        write_exclusive(recurrent_state_manifest_path(), contents.data(), contents.size(),
+                        "GDN recurrent-state manifest");
+    }
+
     Call call_;
     hipStream_t stream_ = nullptr;
     DeviceBuffer device_;
     std::vector<std::uint8_t> host_;
     std::size_t next_snapshot_ = 0;
     std::size_t next_gdn_field_ = 0;
+    bool recurrent_state_scheduled_ = false;
 };
 
 template <class Primary>
@@ -535,6 +662,10 @@ struct CompositeTap {
     void capture_gdn_residual(int layer, const Tensor& value, hipStream_t stream) {
         trace.capture_gdn_residual(layer, value, stream);
     }
+    RecurrentStateTrace capture_gdn_recurrent_state(int layer, const Tensor& state,
+                                                     std::int32_t slot, hipStream_t stream) {
+        return trace.capture_gdn_recurrent_state(layer, state, slot, stream);
+    }
 };
 
 struct Tap {
@@ -563,6 +694,10 @@ struct Tap {
     }
     void capture_gdn_residual(int layer, const Tensor& value, hipStream_t stream) {
         trace.capture_gdn_residual(layer, value, stream);
+    }
+    RecurrentStateTrace capture_gdn_recurrent_state(int layer, const Tensor& state,
+                                                     std::int32_t slot, hipStream_t stream) {
+        return trace.capture_gdn_recurrent_state(layer, state, slot, stream);
     }
 };
 

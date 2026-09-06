@@ -5,7 +5,8 @@ import unittest
 from pathlib import Path
 
 from compare_qwen3_layer_boundary_trace import (
-    GDN_FIELDS, GDN_PAYLOAD_BYTES, PAYLOAD_BYTES, ROLES, compare, compare_gdn, fnv1a64,
+    GDN_FIELDS, GDN_PAYLOAD_BYTES, PAYLOAD_BYTES, RECURRENT_STATE_BYTES,
+    RECURRENT_STATE_ELEMENTS, ROLES, compare, compare_gdn, compare_recurrent_state, fnv1a64,
 )
 
 
@@ -61,6 +62,32 @@ class CompareTest(unittest.TestCase):
                 for name, dtype, elements, offset, byte_count in GDN_FIELDS
             ],
             "layout": "typed selected-column layer1 GDN boundaries in field order",
+        }))
+        return manifest
+
+    def recurrent_state_fixture(self, directory: Path, role: str, suffix: str, mutate=None):
+        data = bytearray(RECURRENT_STATE_BYTES)
+        if mutate is not None:
+            element, bits = mutate
+            struct.pack_into("<I", data, element * 4, bits)
+        sidecar = directory / f"{suffix}.bin"
+        sidecar.write_bytes(data)
+        manifest = directory / f"{suffix}.json"
+        point = ("wide-prefill-state-after-prefix-128-before-selected-column-128"
+                 if role == ROLES["text"][0][0] else
+                 "restored-append-state-before-selected-column-0")
+        manifest.write_text(json.dumps({
+            "artifact_type": "ninfer_qwen3_layer1_gdn_recurrent_state_trace",
+            "schema_version": 1, "diagnostic_only": True,
+            "timing_evidence_eligible": False, "production_routing_authorized": False,
+            "execution": "eager", "role": role, "capture_point": point,
+            "selected_token": 24178, "selected_cache_position": 128,
+            "selected_rope_position": 128, "state_frontier": 128,
+            "linear_state_slot": 0, "text_layer": 1, "gdn_index": 1, "dtype": "fp32",
+            "shape": [128, 128, 48], "elements": RECURRENT_STATE_ELEMENTS,
+            "sidecar_path": str(sidecar), "sidecar_bytes": RECURRENT_STATE_BYTES,
+            "sidecar_fnv1a64": fnv1a64(data),
+            "layout": "little-endian-fp32:key,value,value_head",
         }))
         return manifest
 
@@ -173,6 +200,50 @@ class CompareTest(unittest.TestCase):
                                          (field, 0, bits))
                 with self.assertRaisesRegex(RuntimeError, "nonfinite represented"):
                     compare_gdn(left, right, "target")
+
+    def test_recurrent_state_exact_and_first_difference(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            left = self.recurrent_state_fixture(directory, ROLES["text"][0][0], "left")
+            right = self.recurrent_state_fixture(directory, ROLES["text"][1][0], "right")
+            self.assertEqual(compare_recurrent_state(left, right)["classification"],
+                             "layer1_recurrent_prefix_state_exact")
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            left = self.recurrent_state_fixture(directory, ROLES["text"][0][0], "left")
+            right = self.recurrent_state_fixture(directory, ROLES["text"][1][0], "right",
+                                                  (154, 0x3f800000))
+            result = compare_recurrent_state(left, right)
+            self.assertEqual(result["classification"],
+                             "first_difference_layer1_recurrent_prefix_state")
+            self.assertEqual(result["first_difference"]["first_element_index"], 154)
+            self.assertEqual(result["first_difference"]["mismatch_count"], 1)
+            self.assertEqual(result["first_difference"]["right_value"], 1.0)
+            self.assertEqual(result["first_difference"]["maximum_absolute_difference"], 1.0)
+
+    def test_recurrent_state_rejects_frontier_role_hash_and_nonfinite(self):
+        mutations = (("state_frontier", 127, "field differs"),
+                     ("linear_state_slot", 1, "field differs"),
+                     ("role", ROLES["target"][1][0], "field differs"),
+                     ("sidecar_path", "/tmp/not-the-matching-sidecar.bin", "identity"),
+                     ("sidecar_fnv1a64", "0" * 16, "bytes/hash"))
+        for key, value, message in mutations:
+            with self.subTest(key=key), tempfile.TemporaryDirectory() as raw:
+                directory = Path(raw)
+                left = self.recurrent_state_fixture(directory, ROLES["text"][0][0], "left")
+                right = self.recurrent_state_fixture(directory, ROLES["text"][1][0], "right")
+                manifest = json.loads(right.read_text())
+                manifest[key] = value
+                right.write_text(json.dumps(manifest))
+                with self.assertRaisesRegex(RuntimeError, message):
+                    compare_recurrent_state(left, right)
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            left = self.recurrent_state_fixture(directory, ROLES["text"][0][0], "left")
+            right = self.recurrent_state_fixture(directory, ROLES["text"][1][0], "right",
+                                                  (0, 0x7f800000))
+            with self.assertRaisesRegex(RuntimeError, "nonfinite recurrent-state"):
+                compare_recurrent_state(left, right)
 
 
 if __name__ == "__main__":

@@ -179,7 +179,8 @@ template <bool Normalize>
 __global__ __launch_bounds__(kOrdinaryBlock, 1)
 void ordinary_kernel(const hip_bfloat16* q, const hip_bfloat16* k, const hip_bfloat16* v,
                      const float* g, const float* beta, const float* state_in, float* state_out,
-                     hip_bfloat16* output, int width, float scale) {
+                     hip_bfloat16* output, float* prefix_state, int prefix_tokens,
+                     int width, float scale) {
     const int value_head = static_cast<int>(blockIdx.x) / kOrdinaryRowTiles;
     const int row_tile = static_cast<int>(blockIdx.x) % kOrdinaryRowTiles;
     const int tid = static_cast<int>(threadIdx.x);
@@ -210,6 +211,9 @@ void ordinary_kernel(const hip_bfloat16* q, const hip_bfloat16* k, const hip_bfl
         transition(local, staged_q, staged_k, value, controls[0], controls[1], scale, sublane,
                    output + vh * kDim + value_row);
         __syncthreads();
+        if (prefix_state != nullptr && token + 1 == prefix_tokens) {
+            store_state_row(prefix_state, state_base, value_row, sublane, local);
+        }
     }
     store_state_row(state_out, state_base, value_row, sublane, local);
 }
@@ -450,9 +454,12 @@ void gated_delta_net(const Tensor& q, const Tensor& k, const Tensor& v, const Te
     gated_delta_net(q, k, v, g, beta, scale, normalize_qk, ws, state, state, out, stream);
 }
 
-void gated_delta_net(const Tensor& q, const Tensor& k, const Tensor& v, const Tensor& g,
-                     const Tensor& beta, float scale, bool normalize_qk, WorkspaceArena& ws,
-                     const Tensor& state_in, Tensor& state_out, Tensor& out, hipStream_t stream) {
+static void gated_delta_net_impl(const Tensor& q, const Tensor& k, const Tensor& v,
+                                 const Tensor& g, const Tensor& beta, float scale,
+                                 bool normalize_qk, WorkspaceArena& ws,
+                                 const Tensor& state_in, Tensor& state_out, Tensor& out,
+                                 Tensor* prefix_state, std::int32_t prefix_tokens,
+                                 hipStream_t stream) {
     const Geometry geometry =
         validate_inputs(q, k, v, g, beta, scale, out, 1, kMaximumPrefillWidth);
     require_tensor(state_in, DType::FP32, {kDim, kDim, kValueHeads}, "state_in");
@@ -463,6 +470,16 @@ void gated_delta_net(const Tensor& q, const Tensor& k, const Tensor& v, const Te
         disjoint({&q, &k, &v, &g, &beta, &out, &state_out});
         if (overlaps(range(state_in), range(state_out))) {
             throw std::invalid_argument("gated_delta_net: states partially overlap");
+        }
+    }
+    if (prefix_state != nullptr) {
+        require_tensor(*prefix_state, DType::FP32, {kDim, kDim, kValueHeads}, "prefix_state");
+        if (geometry.width != 129 || prefix_tokens != 128) {
+            throw std::invalid_argument("gated_delta_net: invalid traced prefix frontier");
+        }
+        disjoint({&q, &k, &v, &g, &beta, &out, &state_in, prefix_state});
+        if (!same_state) {
+            disjoint({&q, &k, &v, &g, &beta, &out, &state_out, prefix_state});
         }
     }
     if (stream == nullptr) { throw std::invalid_argument("gated_delta_net: null stream"); }
@@ -491,11 +508,28 @@ void gated_delta_net(const Tensor& q, const Tensor& k, const Tensor& v, const Te
                        static_cast<const float*>(g.data), static_cast<const float*>(beta.data), \
                        static_cast<const float*>(state_in.data), \
                        static_cast<float*>(state_out.data), \
-                       static_cast<hip_bfloat16*>(out.data), geometry.width, scale)
+                       static_cast<hip_bfloat16*>(out.data), \
+                       prefix_state == nullptr ? nullptr : static_cast<float*>(prefix_state->data), \
+                       prefix_tokens, geometry.width, scale)
     if (normalize_qk) { NINFER_LAUNCH_ORDINARY(true); }
     else { NINFER_LAUNCH_ORDINARY(false); }
 #undef NINFER_LAUNCH_ORDINARY
     HIP_CHECK(hipGetLastError());
+}
+
+void gated_delta_net(const Tensor& q, const Tensor& k, const Tensor& v, const Tensor& g,
+                     const Tensor& beta, float scale, bool normalize_qk, WorkspaceArena& ws,
+                     const Tensor& state_in, Tensor& state_out, Tensor& out, hipStream_t stream) {
+    gated_delta_net_impl(q, k, v, g, beta, scale, normalize_qk, ws, state_in, state_out, out,
+                         nullptr, 0, stream);
+}
+
+void gated_delta_net_trace_prefix_state(
+    const Tensor& q, const Tensor& k, const Tensor& v, const Tensor& g, const Tensor& beta,
+    float scale, bool normalize_qk, WorkspaceArena& ws, Tensor& state, Tensor& out,
+    Tensor& prefix_state, std::int32_t prefix_tokens, hipStream_t stream) {
+    gated_delta_net_impl(q, k, v, g, beta, scale, normalize_qk, ws, state, state, out,
+                         &prefix_state, prefix_tokens, stream);
 }
 
 void gated_delta_net_snapshot(const Tensor& q, const Tensor& k, const Tensor& v, const Tensor& g,

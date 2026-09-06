@@ -63,6 +63,18 @@ void gated_delta_net(const Tensor& q, const Tensor& k, const Tensor& v, const Te
                      hipStream_t stream);
 
 /**
+ * Diagnostic ordinary recurrence form. In addition to the normal final state and output, writes
+ * the complete FP32 state after `prefix_tokens` transitions to `prefix_state`. The trace state is
+ * disjoint caller-owned storage with shape [128,128,48]. The deliberately narrow diagnostic
+ * contract is T=129 and prefix_tokens=128: it compares the wide-prefill prefix with the exact
+ * restored append frontier without adding a second production recurrence route.
+ */
+void gated_delta_net_trace_prefix_state(
+    const Tensor& q, const Tensor& k, const Tensor& v, const Tensor& g, const Tensor& beta,
+    float scale, bool normalize_qk, WorkspaceArena& ws, Tensor& ssm_state, Tensor& out,
+    Tensor& prefix_state, std::int32_t prefix_tokens, hipStream_t stream);
+
+/**
  * Snapshot form for B independent recurrences. q/k are contiguous BF16 [128,Hqk,W,B], v/out are
  * BF16 [128,Hv,W,B], g/beta are FP32 [Hv,W,B], and `ssm_states` is contiguous FP32
  * [128,128,Hv,Slots]. `initial_state_slots` and `snapshot_base_slots` are contiguous I32 [B].

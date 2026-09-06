@@ -1253,8 +1253,23 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
         {kCfg.gdn_v_dim, kCfg.gdn_v_heads, T});
     Tensor recurrent_state =
         state_.recurrent_slot(static_cast<std::uint32_t>(gidx), linear_state_current_slot_);
-    ops::gated_delta_net(q_recurrent, k_recurrent, vv, g, beta, kGdnScale,
-                         /*normalize_qk=*/true, work_, recurrent_state, o, s);
+    layer_boundary_trace::RecurrentStateTrace recurrent_state_trace;
+    if constexpr (requires {
+                      tap.capture_gdn_recurrent_state(text_layer, recurrent_state,
+                                                      linear_state_current_slot_, s);
+                  }) {
+        recurrent_state_trace = tap.capture_gdn_recurrent_state(
+            text_layer, recurrent_state, linear_state_current_slot_, s);
+    }
+    if (recurrent_state_trace.destination.data != nullptr) {
+        ops::gated_delta_net_trace_prefix_state(
+            q_recurrent, k_recurrent, vv, g, beta, kGdnScale, /*normalize_qk=*/true, work_,
+            recurrent_state, o, recurrent_state_trace.destination,
+            recurrent_state_trace.prefix_tokens, s);
+    } else {
+        ops::gated_delta_net(q_recurrent, k_recurrent, vv, g, beta, kGdnScale,
+                             /*normalize_qk=*/true, work_, recurrent_state, o, s);
+    }
     if constexpr (requires { tap.capture_gdn_recurrence(text_layer, o, s); }) {
         tap.capture_gdn_recurrence(text_layer, o, s);
     }

@@ -45,6 +45,8 @@ GDN_FIELDS = (
     ("x", "bf16", 5120, 67968, 10240),
 )
 GDN_PAYLOAD_BYTES = 78208
+RECURRENT_STATE_ELEMENTS = 128 * 128 * 48
+RECURRENT_STATE_BYTES = RECURRENT_STATE_ELEMENTS * 4
 GDN_MANIFEST_KEYS = {
     "artifact_type", "schema_version", "diagnostic_only", "timing_evidence_eligible",
     "production_routing_authorized", "execution", "role", "width", "selected_column",
@@ -62,6 +64,13 @@ GDN_CLASSIFICATIONS = {
     "o": "first_difference_gdn_recurrence",
     "on": "first_difference_gdn_gated_rmsnorm",
     "x": "first_difference_gdn_output_projection_or_residual",
+}
+RECURRENT_STATE_MANIFEST_KEYS = {
+    "artifact_type", "schema_version", "diagnostic_only", "timing_evidence_eligible",
+    "production_routing_authorized", "execution", "role", "capture_point",
+    "selected_token", "selected_cache_position", "selected_rope_position", "state_frontier",
+    "linear_state_slot", "text_layer", "gdn_index", "dtype", "shape", "elements",
+    "sidecar_path", "sidecar_bytes", "sidecar_fnv1a64", "layout",
 }
 
 
@@ -82,6 +91,15 @@ def integer(value: object, label: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         fail(f"{label} must be an integer")
     return value
+
+
+def exact_json_value(actual: object, expected: object) -> bool:
+    if type(actual) is not type(expected):
+        return False
+    if isinstance(expected, list):
+        return len(actual) == len(expected) and all(
+            exact_json_value(left, right) for left, right in zip(actual, expected))
+    return actual == expected
 
 
 def fnv1a64(data: bytes) -> str:
@@ -196,6 +214,43 @@ def load_gdn(path: Path, expected: tuple[str, int, int, int, int]) -> tuple[dict
     data = sidecar.read_bytes()
     if len(data) != GDN_PAYLOAD_BYTES or value.get("sidecar_fnv1a64") != fnv1a64(data):
         fail(f"GDN sidecar bytes/hash differ: {path}")
+    return value, data
+
+
+def load_recurrent_state(path: Path, role: str) -> tuple[dict, bytes]:
+    if role not in {"text-fresh-frontier129-column128", "text-append-frontier129-column0"}:
+        fail("unknown recurrent-state role")
+    value = json.loads(path.read_text(), object_pairs_hook=pairs,
+                       parse_constant=lambda token: fail(f"nonfinite JSON: {token}"))
+    if not isinstance(value, dict) or set(value) != RECURRENT_STATE_MANIFEST_KEYS:
+        fail(f"recurrent-state manifest keys differ: {path}")
+    point = ("wide-prefill-state-after-prefix-128-before-selected-column-128"
+             if role == "text-fresh-frontier129-column128" else
+             "restored-append-state-before-selected-column-0")
+    exact = {
+        "artifact_type": "ninfer_qwen3_layer1_gdn_recurrent_state_trace",
+        "schema_version": 1, "diagnostic_only": True, "timing_evidence_eligible": False,
+        "production_routing_authorized": False, "execution": "eager", "role": role,
+        "capture_point": point, "selected_token": 24178, "selected_cache_position": 128,
+        "selected_rope_position": 128, "state_frontier": 128, "linear_state_slot": 0,
+        "text_layer": 1, "gdn_index": 1, "dtype": "fp32", "shape": [128,128,48],
+        "elements": RECURRENT_STATE_ELEMENTS, "sidecar_bytes": RECURRENT_STATE_BYTES,
+        "layout": "little-endian-fp32:key,value,value_head",
+    }
+    for key, expected in exact.items():
+        if not exact_json_value(value.get(key), expected):
+            fail(f"recurrent-state manifest field differs: {path}: {key}")
+    sidecar = Path(value.get("sidecar_path")) if isinstance(value.get("sidecar_path"), str) else None
+    expected_sidecar = path.with_suffix(".bin")
+    if (sidecar is None or sidecar != expected_sidecar or not sidecar.is_absolute() or
+            sidecar.is_symlink() or not sidecar.is_file()):
+        fail(f"recurrent-state sidecar identity is invalid: {path}")
+    data = sidecar.read_bytes()
+    if len(data) != RECURRENT_STATE_BYTES or value.get("sidecar_fnv1a64") != fnv1a64(data):
+        fail(f"recurrent-state sidecar bytes/hash differ: {path}")
+    values = struct.unpack(f"<{RECURRENT_STATE_ELEMENTS}f", data)
+    if not all(math.isfinite(item) for item in values):
+        fail(f"nonfinite recurrent-state value: {path}")
     return value, data
 
 
@@ -326,18 +381,59 @@ def compare_gdn(left_path: Path, right_path: Path, diagnostic: str) -> dict:
     }
 
 
+def compare_recurrent_state(left_path: Path, right_path: Path) -> dict:
+    _, left_data = load_recurrent_state(left_path, "text-fresh-frontier129-column128")
+    _, right_data = load_recurrent_state(right_path, "text-append-frontier129-column0")
+    left_bits = struct.unpack(f"<{RECURRENT_STATE_ELEMENTS}I", left_data)
+    right_bits = struct.unpack(f"<{RECURRENT_STATE_ELEMENTS}I", right_data)
+    mismatches = [index for index, pair in enumerate(zip(left_bits, right_bits))
+                  if pair[0] != pair[1]]
+    detail = None
+    classification = "layer1_recurrent_prefix_state_exact"
+    if mismatches:
+        first = mismatches[0]
+        left_values = struct.unpack(f"<{RECURRENT_STATE_ELEMENTS}f", left_data)
+        right_values = struct.unpack(f"<{RECURRENT_STATE_ELEMENTS}f", right_data)
+        classification = "first_difference_layer1_recurrent_prefix_state"
+        detail = {
+            "first_element_index": first, "mismatch_count": len(mismatches),
+            "left_bits": left_bits[first], "right_bits": right_bits[first],
+            "left_value": left_values[first], "right_value": right_values[first],
+            "maximum_absolute_difference": max(abs(a - b)
+                                                for a, b in zip(left_values, right_values)),
+        }
+    return {
+        "artifact_type": "ninfer_qwen3_layer1_gdn_recurrent_state_comparison",
+        "schema_version": 1, "diagnostic_only": True, "timing_evidence_eligible": False,
+        "production_routing_authorized": False, "diagnostic": "text-prefix-state",
+        "classification": classification, "first_difference": detail,
+        "limitations": [
+            "compares the exact layer1 FP32 state frontier and does not localize an earlier update",
+            "does not authorize production routing or a performance claim",
+        ],
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--left", type=Path, required=True)
     parser.add_argument("--right", type=Path, required=True)
     parser.add_argument("--diagnostic", choices=sorted(ROLES), required=True)
     parser.add_argument("--gdn-detail", action="store_true")
+    parser.add_argument("--recurrent-state", action="store_true")
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     if args.out.exists() or args.out.is_symlink():
         fail("comparison refuses to overwrite output")
-    result = (compare_gdn(args.left, args.right, args.diagnostic) if args.gdn_detail else
-              compare(args.left, args.right, args.diagnostic))
+    if args.gdn_detail and args.recurrent_state:
+        fail("comparison mode is ambiguous")
+    if args.recurrent_state:
+        if args.diagnostic != "text":
+            fail("recurrent-state comparison requires the Text diagnostic")
+        result = compare_recurrent_state(args.left, args.right)
+    else:
+        result = (compare_gdn(args.left, args.right, args.diagnostic) if args.gdn_detail else
+                  compare(args.left, args.right, args.diagnostic))
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     descriptor = os.open(args.out, flags, 0o644)
     with os.fdopen(descriptor, "w") as output:
