@@ -577,6 +577,17 @@ set_target_properties(ninfer_r9700_split512_attention_qual PROPERTIES
   HIP_ARCHITECTURES gfx1201)
 target_link_libraries(ninfer_r9700_split512_attention_qual PRIVATE ninfer_r9700_core hip::host)
 
+# Bounded T1/G16/C8192 grouped-KV-head PV challenger. It owns private producer kernels and shares
+# one merge implementation between the matched incumbent and challenger; product code is untouched.
+add_executable(ninfer_r9700_split512_grouped_pv_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/split512_grouped_pv_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_split512_grouped_pv_qual)
+target_compile_definitions(ninfer_r9700_split512_grouped_pv_qual PRIVATE
+  NINFER_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+set_target_properties(ninfer_r9700_split512_grouped_pv_qual PROPERTIES
+  HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_split512_grouped_pv_qual PRIVATE ninfer_r9700_core hip::host)
+
 # Qualification-only prefill XAttention evaluator. In an ordinary build it owns the evaluator
 # implementation directly. In the private runtime-qualification build it consumes the single
 # implementation already compiled into the core so the matched PPL route and evaluator cannot
