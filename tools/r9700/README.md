@@ -368,6 +368,19 @@ selector or duplicate full-tile production kernel. The retained scalar operator 
 are `profiles/bench/r9700-a8q4-n16k16-scalar-base-product-p2048-ab-20260905.json` and
 `profiles/bench/r9700-scalar-base-production-p2048-c1-ab-20260905.json`.
 
+The private LDS-index-remap follow-up is terminally rejected at the static gate and has no retained
+command surface. The canonical scalar-base object emits `88` VGPR; both algebraically equivalent
+remap forms emitted `92` VGPR, while all three retained exactly 17,152 bytes LDS, occupancy 16,
+zero private/scratch/spills, eight native IU4 instructions, and ten
+scalar-base/single-U32-voffset loads. The candidates failed the explicit no-VGPR-regression gate;
+both remap implementations and their temporary checker/runner/tests were removed without GPU
+execution. The restored canonical `src/ops/r9700/linear/r9700_linear.hip` SHA-256 is
+`7d204bb10feeeb5988c26960ce992a6f487fd53afc162e89508ee3524b90b576`.
+
+The next bounded prefill experiment is complete dual-FMAC pairing. Once it is decided, the
+scheduled compound is a two-slab load FIFO plus only the mechanisms then admitted; it must save at
+least `35.9 ms` at whole-P2048 scope, with fresh attribution if needed to re-establish that bound.
+
 Two M64xN256 Q4 prefill experiments are terminal rejections and their executable paths have been
 removed. The 16-wave/512-thread variant passed numerical qualification and improved the weighted
 P2048 operator aggregate by `1.20609x`, but missed its predeclared `1.5x` gate. Its immutable report

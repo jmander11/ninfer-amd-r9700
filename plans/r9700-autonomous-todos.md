@@ -23,7 +23,12 @@ The grouped-PV mechanism passed its reduced screen and exact direct product qual
 the C1/P8192+G32 whole screen at decode ratio `1.0038023342` and was removed without a full gate.
 Run bounded bandwidth/stall-proxy profiling next and make the ordinary-decode roof decision; do not
 open another grouped-PV variant.
-After ordinary decode, implement and optimize DFlash2. Do not schedule MTP optimization:
+After ordinary decode, resume the P2048 floor/practical-ceiling work and its dependent chunk/base
+selection; then implement and optimize DFlash2. The next bounded prefill experiment is complete
+dual-FMAC pairing. After that decision, run the explicitly scheduled two-slab load FIFO compounded
+only with mechanisms admitted at that point; require at least `35.9 ms` whole-P2048 saving and
+refresh attribution first if the current evidence no longer supports the bound. Do not schedule
+MTP optimization:
 existing MTP support may remain, but its `19.244583 tok/s` MTP3 result is diagnostic only and does
 not rank a product route. Dense prefill remains open for the two bounded future mechanisms recorded
 below, without reopening an unbounded topology search, FP8 substitution, Q4G128/A8G128
@@ -782,16 +787,24 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
           selects it, while every other valid direct tuple uses the predicated `size_t` fallback.
           The default final object retains 88 VGPR, 17,152-byte LDS, occupancy 16, zero
           scratch/spills, eight IU4 WMMAs, and ten scalar-base/single-U32-voffset loads.
-          Two non-overlapping mechanisms are recorded for bounded future prefill work after the
-          ordinary-decode and DFlash2 priorities. First, remap the canonical LDS index by adding
-          word bit 2 to row bit 3 while retaining word bit 1 to row bit 4, giving
-          `f=[0,0,16,16,8,8,24,24]`; the mapping is bijective, preserves two-address strides,
-          reduces activation publication from 8 banks x 4 lanes to 16 x 2, and has an optimistic
-          `8.39 ms` whole-weighted envelope at 2.5 GHz over 671,088,640 iterations. Second, pair the
-          complete eligible accumulation stream with dual-FMAC, whose optimistic envelope is
-          `5.84`--`7.18 ms`. Each remains future-only and must independently satisfy the existing
-          `5 ms` exact-call-weighted robust-lower composition gate with every-cell upper ratio
-          `<=1.01`; neither reopens the rejected topology or representation families.
+          The first bounded follow-up, the exact LDS-index remap
+          `f=[0,0,16,16,8,8,24,24]`, was rejected statically without GPU work. The selector-free
+          canonical scalar-base object emitted 88 VGPR; both algebraically equivalent remap forms
+          emitted 92 VGPR. All three retained 17,152-byte LDS, occupancy 16, zero
+          private/scratch/spills, eight native IU4 WMMAs, and ten
+          scalar-base/single-U32-voffset loads. Both candidates therefore failed the explicit
+          no-VGPR-regression gate and their private implementations and temporary qualification
+          surfaces were removed. The restored canonical source SHA-256 is
+          `7d204bb10feeeb5988c26960ce992a6f487fd53afc162e89508ee3524b90b576`.
+          The next bounded prefill experiment is complete dual-FMAC pairing over the eligible
+          accumulation stream, whose optimistic envelope remains `5.84`--`7.18 ms`; it must pass
+          the existing `5 ms` exact-call-weighted robust-lower composition gate with every-cell
+          upper ratio `<=1.01`. After that decision, test the explicitly scheduled two-slab load
+          FIFO compounded only with mechanisms admitted at that point. The compound must provide
+          at least `35.9 ms` whole-P2048 saving; obtain fresh attribution first if necessary to
+          support that bound. Neither experiment reopens rejected topology or representation
+          families. Dependency order remains ordinary-decode roof, P2048 floor/practical ceiling,
+          shared chunk and base selection, then DFlash2.
         - [x] Record the initial design rejection of direct signed-A8 by unpacked-signed-Q4 IU8
           WMMA. The
           gfx1201 builtin is K16 with signedness controls `(true, A, true, B, C, false)`. A G64
@@ -1959,9 +1972,10 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         (SHA-256 `bcd24621462dbb404ecc77b79a6b324f0c4d4b67a7e0afdcbacc69281cd1d9f2`). No full gate was run;
         the selector, challenger, and temporary tools were removed. Continue ordinary decode with
         bounded bandwidth/stall-proxy profiling and its roof decision, not another grouped-PV
-        variant. This work does not open the held prefill campaign or discharge the selected-recipe
+        variant. This work does not open the held chunk/capacity campaign or discharge the selected-recipe
         DFlash2 gates. Do not optimize or rank MTP; its `19.24458338` tok/s MTP3 row remains diagnostic.
-        After ordinary decode, the next implementation priority is DFlash2.
+        After ordinary decode, the next implementation priority is the P2048 floor/practical-ceiling
+        and dependent chunk/base selection required before DFlash2.
         Final selected-route profiling and roof accounting remain in the dependent item below
         because they require the eventual selected chunk/profile authority.
   - [ ] After chunk and terminal static-profile selection, profile only the ultimately selected 8K

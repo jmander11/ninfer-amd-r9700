@@ -841,6 +841,22 @@ operator and whole reports are
 `profiles/bench/r9700-a8q4-n16k16-scalar-base-product-p2048-ab-20260905.json` and
 `profiles/bench/r9700-scalar-base-production-p2048-c1-ab-20260905.json`.
 
+The next exact LDS-index-remap candidate was rejected statically without GPU execution. The
+selector-free canonical scalar-base object emits `88` VGPR; both algebraically equivalent remap
+forms emitted `92` VGPR. All three retained the same 17,152-byte LDS allocation, occupancy 16,
+zero private/scratch/spill storage, eight native IU4 instructions, and ten
+scalar-base/single-U32-voffset loads. The candidate therefore failed its explicit no-VGPR-regression
+gate before numerical or timing work. Both private remap forms and their temporary qualification
+surfaces were removed; the restored canonical `r9700_linear.hip` SHA-256 is
+`7d204bb10feeeb5988c26960ce992a6f487fd53afc162e89508ee3524b90b576`.
+
+The next bounded prefill experiment is complete dual-FMAC pairing over the eligible accumulation
+stream. After that isolated decision, the explicitly scheduled compound is a two-slab load FIFO
+combined only with mechanisms already admitted at that point. It must demonstrate at least
+`35.9 ms` saving at whole-P2048 scope; refresh attribution first if the then-current whole profile
+no longer supports that bound. Ordinary-decode roof closure precedes this P2048 work, and
+chunk/base selection and the selected companion remain prerequisites for DFlash2.
+
 The structural M64xN256 plus ping/pong follow-up also passed its exact/FP64 oracle and every tuple
 was nonregressing, but it likewise failed the fixed `>=1.5x` gate. Weighted P2048 fell from
 `1109.850230` to `920.208770 ms`, a `0.8291288` challenger/incumbent ratio (`1.20609x`,
@@ -1014,7 +1030,7 @@ rejected report is `profiles/bench/r9700-split512-grouped-t1-whole-p8192-g32-scr
 (SHA-256 `bcd24621462dbb404ecc77b79a6b324f0c4d4b67a7e0afdcbacc69281cd1d9f2`). No full gate was run;
 the selector and challenger were removed. Ordinary-decode work proceeds to bounded
 bandwidth/stall-proxy profiling and a roof decision, not another grouped-PV variant. This work does
-not open the held prefill campaign or satisfy the selected-recipe DFlash2 gates.
+not open the held chunk/capacity campaign or satisfy the selected-recipe DFlash2 gates.
 
 The fresh selector-free build then measured `9.461402437 s` for 256 decode tokens
 (`27.05729956 tok/s`) with all 257 generated token IDs retained. The final report is

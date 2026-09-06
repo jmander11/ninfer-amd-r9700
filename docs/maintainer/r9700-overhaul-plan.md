@@ -1668,9 +1668,19 @@ Replace functional routes with measured gfx1201 families:
   full-tile path are removed, and the predicated `size_t` M64xN128 kernel remains the complete
   tail/large-offset fallback. Its `1075.438603 ms` / `1904.339303 tok/s` median prefill remains
   below the 2,000 tok/s floor, so this promotion is one bounded composable gain rather than closure
-  of the dense floor or practical ceiling. Future bounded prefill work is limited to the exact LDS
-  remap `f=[0,0,16,16,8,8,24,24]` and complete dual-FMAC pairing under the live 5 ms composition
-  gate. Immediate optimization moves to ordinary non-speculative decode, followed by DFlash2;
+  of the dense floor or practical ceiling. The exact LDS-remap follow-up was rejected statically
+  without GPU work: canonical scalar-base emitted `88` VGPR while both algebraically equivalent
+  remap forms emitted `92` VGPR. Every form retained 17,152-byte LDS, occupancy 16, zero
+  private/scratch/spills, eight native IU4 instructions, and ten scalar-base/single-U32-voffset
+  loads, so both candidates failed the explicit no-VGPR-regression gate and were removed. The
+  restored canonical source SHA-256 is
+  `7d204bb10feeeb5988c26960ce992a6f487fd53afc162e89508ee3524b90b576`. The next bounded
+  prefill experiment is complete dual-FMAC pairing under the live 5 ms composition gate. After its
+  decision, test the explicitly scheduled two-slab load FIFO compounded only with admitted
+  mechanisms; it must provide at least `35.9 ms` whole-P2048 saving, with fresh attribution first
+  if needed to sustain that bound. Immediate optimization first closes the ordinary
+  non-speculative-decode roof, then returns to the P2048 floor/practical-ceiling and dependent
+  chunk/base selection required before DFlash2;
   MTP3 remains diagnostic and is not an optimization or ranking route.
   The first ordinary-decode promotion is the canonical native-dot8 T=1 A8Q4 Linear route. Its
   exact domain is seven full-K matrix tuples selected by shape, not caller identity;
@@ -1710,7 +1720,7 @@ Replace functional routes with measured gfx1201 families:
   `bcd24621462dbb404ecc77b79a6b324f0c4d4b67a7e0afdcbacc69281cd1d9f2`). No full gate was run;
   the selector, challenger, and temporary tooling were removed. The next ordinary action is bounded
   bandwidth/stall-proxy profiling and its roof decision, not another grouped-PV variant. This
-  sequence neither opens the held prefill campaign nor substitutes for the selected-recipe DFlash2
+  sequence neither opens the held chunk/capacity campaign nor substitutes for the selected-recipe DFlash2
   gates, which remain behind their existing dependencies.
   The selector-free final smoke measured `9.461402437 s` for 256 decode tokens
   (`27.05729956 tok/s`) and retained all 257 generated IDs. Its report SHA-256 is
