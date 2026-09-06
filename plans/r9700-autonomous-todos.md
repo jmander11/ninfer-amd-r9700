@@ -16,13 +16,11 @@ only and must not be reused as an active command or product requirement.
 Immediate execution priority: the user stopped the queued whole-model/chunk/profiling campaign on
 2026-09-04. Do not resume those slow downstream rows while dense P2048 prefill remains below the
 2,000 tok/s hard gate. The current route reaches `1,847.942898 tok/s`; scalar-base failed its
-fixed operator gate, A4 failed quality, and M96N256 lost physically. A subsequent independent
-review found one omitted, materially distinct exact-Q4 architecture: M64xN192 with 24 waves while
-retaining the proven M16xN32/two-fragment wave shape. It is the only authorized next GPU path and
-must pass its bounded numerical/static gate before direct timing. Do not schedule adjacent Q4
-variants or any downstream chunk/capacity/whole campaign unless this candidate passes and then
-clears the whole-P2048/practical-ceiling gate; a terminal loss returns the work to an explicit
-representation/context/performance-contract decision.
+fixed operator gate, A4 failed quality, M96N256 lost physically, and the final materially distinct
+exact-Q4 M64xN192/scalar-base compound candidate failed its frozen practical gate despite improving
+all three isolated cells. No adjacent Q4 topology sweep is authorized. The next action is an
+explicit representation/context/performance-contract decision; until that decision selects and
+authorizes a new bounded direction, keep every downstream chunk/capacity/whole campaign held.
 The 2,000 tok/s P2048 value is an acceptance floor based on an existing llama.cpp observation, not
 an optimization target or a performance ceiling for this fixed-model, fixed-R9700 engine. Crossing
 it permits the dependent campaign to resume but does not close prefill performance work: continue
@@ -47,7 +45,7 @@ not the terminal ranking objective. The classifier first retains one same-recipe
 winner for each recipe with an eligible pair, then emits exactly one
 `terminal_production_selection` across those recipe winners under
 `global_maximin_whole_then_capacity_then_quality_then_canonical_v1`: maximize worst-cell
-normalized matched whole-inference throughput, then normalized capacity, then remaining declared-tier quality budget,
+normalized matched spec-none ordinary whole-inference throughput, then normalized capacity, then remaining declared-tier quality budget,
 and use canonical artifact/static-profile identity only for a complete measured tie. Selection is
 deterministic on the retained per-cell means; raw repetition spread remains evidence but is not a
 tolerance or alternate decision rule. Raw scorer wall time and greedy flip rate are not speed objectives.
@@ -118,7 +116,8 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
       graph/eager, MTP/ordinary, and draft-window variants; compare prefill/decode schedules under
       an explicit finite aligned NLL bound with their flips diagnostic. BF16 flip count/rate is
       likewise diagnostic. Schema-v5 campaign output and focused tests cover the new contract.
-- [ ] Produce and retain matched whole-model benchmark artifacts for every capacity-eligible
+- [ ] Blocked at the explicit representation/context/performance-contract decision above. If that
+      decision authorizes resumption, produce and retain matched whole-model benchmark artifacts for every capacity-eligible
       recipe/cache/execution candidate under the C=1..4 product cap. Bind each candidate's
       completed 8K/32K quality sidecars to fresh exact C=1..4 capacity plus prefill/decode and
       whole-inference throughput, acceptance, and relevant profiler attribution. The retained
@@ -138,9 +137,12 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
             A whole matrix must have no failure marker and must bind `auto` both
             before and after timing; every report path is campaign-owned and every raw schema-v20
             report is reopened against its exact command. Each of the four C values requires one
-            optimized-head MTP3 timing report and one diagnostic ordinary/draft-off report, both
-            containing matched 8K+256 and 32K+256 rows with exact per-repetition/lane target-token
-            parity. The two retained schema-v13 all-Q4/G16 sparse manifests are therefore
+            spec-none ordinary timing report containing matched 8K+256 and 32K+256 rows. Retained
+            MTP3 rows serve only as diagnostic exact-token/state/graph regression evidence, cannot
+            enter base recipe/cache/attention ranking, and are not a prerequisite for it. Any
+            prepared runner or validator that still ranks or requires those MTP3 rows must be
+            revised before physical execution. The two retained schema-v13 all-Q4/G16 sparse
+            manifests are therefore
             inadmissible. After the shared chunk is selected, acquire twelve exact capacity
             outcomes (48 commands), retain measured failures as exclusions, and run the eight-report
             `pareto-whole` matrix only for each capacity-eligible profile. Still-missing quality
@@ -152,8 +154,9 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
       and bind them to all twelve recipe/cache/attention candidates; acquire only the bounded
       chunk-selection screens and finalist confirmations; select and bind one chunk;
       acquire the post-chunk quality, capacity, and whole candidate matrices; classify one terminal
-      artifact/group/static profile; then run the low-context, selected-route profiling, tail, and
-      conditional mixed-MTP gates only for that identity. A diagnostic trace used to explain a
+      artifact/group/static profile; then run the low-context, selected-route profiling and tail
+      gates only for that identity, with MTP retained solely as optional supported-behavior
+      regression diagnostics. A diagnostic trace used to explain a
       failed selection screen is not terminal profiling. If a retained selected-route optimization
       changes whole timing, rerun its affected terminal rows and classification, not unrelated
       candidate campaigns unless the selected identity or contract changes.
@@ -168,7 +171,8 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
       closure is not a completed cutover receipt. This chain remains held at its first physical step by the immediate P2048 floor
       above; it does not authorize resuming the stopped broad campaign. These are prepared
       boundaries, not completed physical evidence.
-  - [ ] Select the production text-prefill chunk instead of treating the current 4,096-token
+  - [ ] Blocked at the explicit representation/context/performance-contract decision above. If that
+        decision authorizes resumption, select the production text-prefill chunk instead of treating the current 4,096-token
         campaign control as final. After localizing the unexpectedly low native prefill throughput,
         sweep the supported aligned chunks 1,024, 2,048, 4,096, and 8,192 at 8K, then confirm the
         same two global finalists at 32K for all twelve candidates; qualify numerical behavior and workspace/capacity,
@@ -495,18 +499,20 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         measured `28.56x/32.40x` and `28.81x/32.72x` dense-over-sparse at 8K/32K on the concentrated
         fixture. Reports with executable/source hashes are retained under
         `profiles/bench/r9700-xattention-b16-requal-s16-tau900-g{16,32}/`.
-  - [ ] Validate the redesigned consumer at real 8K/32K model keep distributions, select the
+  - [ ] Blocked at the explicit representation/context/performance-contract decision above. If authorized, validate
+        the redesigned consumer at real 8K/32K model keep distributions, select the
         production prefill chunk, and rerun affected whole evidence. The concentrated 11.72%-keep
         qualifier corpus and the current-tree 16.2502%-keep production-scale refresh establish
         operator correctness and potential, not model-level speed. The existing serial-consumer C1
         whole row remains diagnostic and cannot enter selection. Resume no separate operator sweep:
-        after the low-context prefill blocker is closed, the next physical gate is the existing exact
+        after that decision authorizes resumption, the next physical gate is the existing exact
         twelve-candidate C1 8K chunk screen, followed only by its two globally selected 32K finalists.
         The prepared screen/finalist owner is
         `profiles/bench/prefill-chunk-screen-twelve-candidate-20260905` plus
         `profiles/bench/prefill-chunk-selection-pipeline-20260905`; operator refresh evidence is
         complete, but no model-distribution screen or terminal selection row is credited here.
-  - [ ] Obtain matched rebuilt real-model attribution and terminal whole-selection evidence for
+  - [ ] Blocked at the explicit representation/context/performance-contract decision above. If authorized, obtain
+        matched rebuilt real-model attribution and terminal whole-selection evidence for
         the already-promoted production-extent multi-wave A8Q4 prefill CTA. The retained 32K `auto`
         trace that motivated the completed operator replacement attributes
         `121.708 s` to 25,229 `a8q4g64_linear_wmma32_kernel` dispatches. At the dominant
@@ -698,27 +704,21 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
           `c09f5b716cf8bce90ceac8e0c7c81e2621713610061582e0e66941a61cd9e20f`).
           Split-K and unchanged-tile persistent/cooperative forms are also terminal by traffic and
           launch-gap bounds. Qualification-only code is removed. A later independent review found
-          the omitted M64xN192 topology below, so the former conclusion that no exact-Q4 route
-          retained a credible bound is superseded; the stopped chunk/whole campaign remains held
-          while that one bounded candidate is decided.
-        - [ ] Qualify the one omitted exact-Q4 M64xN192/twenty-four-wave topology, incorporating
-          the consistently faster scalar-base/u32-voffset address form as one compound candidate,
-          before any representation or performance-contract change. Each wave must retain the proven
-          M16xN32/two-fragment/eight-IU4 compute shape and exact group reduction; do not inherit the
-          rejected M96xN256 four-fragment live range. Across the exact 48/64/64 P2048 call mix, the
-          request model is `306.822512640 GB` versus incumbent `364.823707648 GB`, removing
-          `58.001195008 GB` (`15.90%`) while increasing issued compute waves only `0.658%` from the
-          N=5,120 tail. Ping/pong LDS is exactly `21,504` bytes. First require full incumbent-BF16
-          parity, an independent sampled complete-K represented-FP64 oracle, N-tail/VMM guards,
-          status/alias/graph checks, native signed-IU4 proof, zero spills, allocation-rounded VGPR
-          consistent with two active 768-thread CTAs, and 48 resident waves/CU. Only a pass may run
-          one balanced `auto` direct A/B over the exact three shapes. Require a robust
-          call-weighted saving of at least `25 ms` before production transfer and one matched whole
-          run. The request-reduction and scalar bounds overlap: even their generous compound
-          estimate is only about `79.3 ms` versus the `84.835254 ms` whole-floor deficit, so a win
-          advances Q4 performance but does not by itself reopen chunk selection; only the matched
-          whole result can clear the floor. A stable loss is terminal with no adjacent
-          M64xN160/N224 sweep.
+          the omitted M64xN192 topology below, so it received the final bounded qualification.
+        - [x] Terminally reject the exact-Q4 M64xN192/twenty-four-wave topology compounded with
+          scalar-base/u32-voffset addressing. The physical `auto` gate passed full incumbent-BF16
+          parity, 126 complete-K represented-FP64 samples, both N=5,120 five-role VMM guards,
+          wrapper/status/input/alias/graph checks, exact resource/ISA proof, and runtime occupancy
+          at two CTAs/48 waves. All three isolated cells were faster and stable, but the exact
+          48/64/64 call-weighted saving was only `9.1266002655 ms` with `0.5012054885 ms` robust
+          uncertainty, leaving a robust lower bound of `8.625394777 ms` versus the frozen `25 ms`
+          gate. Candidate service was `363.091501236 ms`, so the whole-floor diagnostic also failed.
+          The immutable terminal report is
+          `profiles/bench/r9700-a8q4-n16k16-m64n192-scalar-base-p2048-ab-20260905.json` (SHA-256
+          `ece998b8688acf4a76aff5592bdecf26aedc9b3497448db76ac1cf03d0a91baf`). Production remains
+          unchanged, qualification-only code is removed, and no adjacent M64xN160/N224 sweep is
+          authorized. This closes the final bounded exact-Q4 topology and returns prefill work to
+          the explicit representation/context/performance-contract decision above.
         - [x] Record the initial design rejection of direct signed-A8 by unpacked-signed-Q4 IU8
           WMMA. The
           gfx1201 builtin is K16 with signedness controls `(true, A, true, B, C, false)`. A G64
@@ -1681,8 +1681,10 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
             GPU ran.
 
           - [x] Prepare the bounded post-PPL selected-artifact execution validator. The planned
-            execution campaign remains the sole numerical comparator: its C1 decode extras must
-            cover MTP3 Device Graph versus eager, MTP3 versus ordinary, and MTP3 versus MTP4 with
+            execution campaign is subordinate to the explicit representation/context/performance-
+            contract hold and is diagnostic, non-ranking, and not a prerequisite for base
+            or DFlash selection. If retained as supported-behavior regression, its C1 decode extras cover
+            MTP3 Device Graph versus eager, MTP3 versus ordinary, and MTP3 versus MTP4 with
             complete aligned NLL sidecars and exact argmax identity. The new CPU-only validator
             reopens the hybrid artifact and adjacent conversion receipt, rehashes both scorer executables,
             rejects an incomplete or nonexact execution matrix, and queries the compiled runtime
@@ -1699,9 +1701,11 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
             chunk 4,096 is explicit, and concurrency is exactly C=1,2,3,4. The compiled host
             authority must report ordinary `{1,2,3,4,4096}` and MTP3
             `{1,2,3,4,8,12,16,4096}` widths before either manifest is written. The existing
-            `pareto-whole` matrix supplies matched MTP3 and spec-none exact-token control rows;
-            `pareto-capacity` supplies the model-native MTP3 capacity rows. Prepared manifests can
-            resume only after revalidating input identities, command coverage, and `auto` power.
+            revised `pareto-whole` matrix supplies ranking spec-none ordinary rows; any matched MTP3
+            rows are diagnostic exact-token/state/graph regression only and cannot enter ranking.
+            `pareto-capacity` supplies the base profile's product-capacity rows. Prepared manifests can
+            resume only after removing any stale MTP3 ranking requirement and revalidating input
+            identities, command coverage, and `auto` power.
             Exact commands are in `tools/bench/README.md`. This closes tooling preparation only;
             no GPU benchmark or performance/capacity admission is claimed.
 
@@ -1747,7 +1751,8 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
           `a41e2a2ad65809ade16b629e698244834d2c2da065335f8fab62869813aaef5b`.
           Both rejected M64xN256 executable/tooling paths are removed, M64xN128 ping/pong remains
           production, and the bounded stop rule excludes an adjacent N256 or cache-hint sweep.
-  - [ ] Obtain the matched rebuilt mixed-artifact trace and whole-selection evidence for the
+  - [ ] Blocked at the explicit representation/context/performance-contract decision above. If authorized, obtain
+        the matched rebuilt mixed-artifact trace and whole-selection evidence for the
         already-promoted target-specific A8W8G32 prefill CTA. The W8 implementation remains separate
         from A8Q4 and owns its distinct G32 signed-I8 payload, two native
         `v_wmma_i32_16x16x16_iu8` calls per group, FP32 scale accumulation, and one BF16 output
@@ -2114,7 +2119,8 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         producer/finalizer tooling are removed rather than retained as a dormant product lane. The ordinary-decode package reports
         only supported relative cache/activity proxies and fails closed on unavailable or zero
         counters; it does not claim physical HBM bandwidth.
-  - [ ] Use the four rebuilt static compile profiles to run all twelve recipe/cache/attention
+  - [ ] Blocked at the explicit representation/context/performance-contract decision above. If authorized, use the
+        four rebuilt static compile profiles to run all twelve recipe/cache/attention
         prefill-chunk screens, then rerun both globally selected finalists for all twelve candidates
         before selecting one chunk. After selection, run all 48 post-promotion capacity cells
         (dense/XAttention x all-Q4/mixed/four-role-hybrid x G16/G32 x C=1..4),
@@ -2155,14 +2161,16 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
           affected downstream closures only after the P2048 floor reopens base selection, not as a
           substitute for the still-missing physical rows.
         - [x] Close the matching whole-model CPU contract. Each capacity-eligible post-promotion
-          profile receives one `pareto-whole` matrix fixed to C=1..4, the schema-v2-selected chunk, one 8K+256 and
-          one 32K+256 fresh-prompt row per C, and one warmup plus three measured repetitions. Each
-          MTP3 timing report requires the optimized proposal head and nonzero drafted rounds/tokens;
-          a matched ordinary report retains every output token and exact per-repetition/lane target
-          parity is mandatory. Ordinary-control timings cannot enter selection. The
+          profile receives one ranking spec-none ordinary `pareto-whole` matrix fixed to C=1..4,
+          the schema-v2-selected chunk, one 8K+256 and one 32K+256 fresh-prompt row per C, and one
+          warmup plus three measured repetitions. Any retained MTP3 report requires the optimized
+          proposal head, nonzero drafted rounds/tokens, every output token, and exact per-repetition/
+          lane target parity against its matched ordinary diagnostic; it is exact-token/state/graph
+          regression evidence only and cannot enter base recipe/cache/attention ranking. The
           runner now checks and records `auto` before and after terminal speed evidence, while
           schema-v7 assembly requires the manifest-level chunk to equal every command. The dated
-          output authorities remain absent pending the selected-chunk record and capacity runs.
+          output authorities remain absent pending the selected-chunk record and capacity runs;
+          the prepared runner/validator must be revised to this ordinary-ranking contract before use.
         - [x] Close selected-chunk propagation through the remaining product command boundary. The
           compiled Engine, CLI, serving, benchmark, and PPL defaults share the one provisional
           product constant, while physical campaign commands remain explicit and terminal assembly
@@ -2171,8 +2179,8 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
           compile profile before accepting evidence; resume binds all three fields. The combined
           CPU suites pass 91 benchmark-tool, 99 PPL-tool, and 7 serving-corpus tests. This closes
           command preparation only: it neither selects a chunk nor creates capacity/whole evidence.
-  - [x] Add the focused `pareto` matrix preset for matched 8K/32K MTP3 prefill and graph decode at
-        C=1..4, plus `pareto-whole` fresh-prompt end-to-end and `pareto-feasibility` automatic
+  - [x] Add the focused diagnostic `pareto` matrix preset for matched 8K/32K MTP3 prefill and graph
+        decode at C=1..4, plus `pareto-whole` fresh-prompt end-to-end and `pareto-feasibility` automatic
         required-workload checks. The initial schema-v18 raw reports and schema-v11 matrix manifests bind Q4/W8 activation
         profiles, the exact FP8-Q/K T1>=64/T2>=320/T>=3-stream classifier, artifact identity/hash,
         and benchmark-executable hash; strict validation rejects missing rows, non-finite timing,
@@ -2193,8 +2201,10 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         unchecked.
         Historical mixed C1..4 maxima were G16 262144/314112/301888/289664 and G32
         262144/326656/313984/301248 tokens; they justify restored eligibility but are not current
-        admission inputs.
-  - [ ] Establish the final matched 8K/32K prefill quality authority for all three recipe branches,
+        admission inputs. Before physical reuse, revise `pareto-whole` so only matched spec-none
+        ordinary rows enter base recipe/cache/attention ranking and MTP3 remains diagnostic.
+  - [ ] Blocked at the explicit representation/context/performance-contract decision above. If authorized, establish
+        the final matched 8K/32K prefill quality authority for all three recipe branches,
         both attention profiles, and G16/G32.
         Historical two-recipe acquisition is complete: its eight candidate cells have finite, complete, index-aligned
         FP32-NLL and I32-argmax sidecars with retained hashes. Against one retained BF16 realization,
@@ -2483,7 +2493,8 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         two Text layers and one MTP layer through fragmented source/destination maps without an
         external host fence, proves both mismatch paths leave every destination byte unchanged,
         and exercises safe in-flight FIFO eviction.
-- [ ] Select one G16/G32 plus dense/B128-S16-tau900 static profile only from the full matched
+- [ ] Blocked at the explicit representation/context/performance-contract decision above. If authorized, select one
+      G16/G32 plus dense/B128-S16-tau900 static profile only from the full matched
       quality, capacity, separately timed prefill/decode, and whole-inference Pareto gate. During
       the subsequent production
       cutover, delete the losing cache-group qualification/dispatch branches and the unselected
@@ -2512,7 +2523,8 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         schema-v18/v11 `pareto-capacity-max-*` campaigns remain superseded historical evidence and
         cannot enter the final C=1..4 frontier. Exact current values and hashes are retained in the
         candidate children below and `docs/performance.md`.
-  - [ ] Complete the twelve schema-v14 capacity outcomes named in the XAttention admission
+  - [ ] Blocked at the explicit representation/context/performance-contract decision above. If authorized, complete
+        the twelve schema-v14 capacity outcomes named in the XAttention admission
         children below plus the corresponding whole matrix for every capacity-eligible profile,
         then assemble one schema-v7 Pareto decision against each candidate's matched quality
         evidence. This is the aggregation owner for those same physical campaigns, not a second
@@ -2721,7 +2733,8 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
 
 ### XAttention prefill sparsity
 
-- [ ] Complete the native gfx1201 XAttention prefill admission gate over both G16/G32 instances of
+- [ ] Blocked at the explicit representation/context/performance-contract decision above. If authorized, complete
+      the native gfx1201 XAttention prefill admission gate over both G16/G32 instances of
       the typed FP8-E4M3FN-K/INT4-V/FP16-scale cache. Keep ordinary T=1 decode, MTP/DFlash verification,
       tree masks, and GDN layers on their qualified dense paths. The evaluator must use an
       explicit antidiagonal ranker and 64-token cache-page keep list; `tau=1` is the exact dense
@@ -2823,8 +2836,9 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
               `profiles/bench/post-chunk-twelve-candidate-20260905` rerun both ON-profile capacity
               matrices with the rebuilt B16 consumer and then run each fresh schema-v14 whole
               matrix with the same group-specific executable and all-Q4 artifact bytes. Its four
-              MTP3 timing commands plus four matched ordinary target-output controls per matrix
-              replace the stale 20260903 execution directories. The eight MTP3
+              spec-none ordinary timing commands per matrix supply the ranking rows. Any retained
+              MTP3 commands are diagnostic exact-token/state/graph regression only and replace the
+              stale 20260903 execution directories without entering ranking. Those MTP3
               fresh-request rows retain separately timed prefill/decode phases, speculative
               acceptance, and whole makespan; exact retained-token parity against the eight control
               rows is required. The in-progress/retained standalone phase directories are diagnostic
@@ -3480,7 +3494,8 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         The physical qualifier passes an exact all-layer lane-1 capture/clear/restore oracle; the
         dormant family Full-cache shape has its own two-plane BF16 owner rather than reusing the
         asymmetric three-plane cache.
-- [ ] Produce real FP8-K/INT4-V 8K and 32K paired quality, diagnostic greedy-token, graph/eager,
+- [ ] Blocked at the explicit representation/context/performance-contract decision above. If authorized, produce
+      real FP8-K/INT4-V 8K and 32K paired quality, diagnostic greedy-token, graph/eager,
       prefill/decode, and speculative acceptance evidence.
       Missing candidate-local quality is owned by
       `profiles/ppl/terminal-quality-recovery-20260905`; matched C1..4 whole and acceptance evidence
@@ -3594,7 +3609,8 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         sparse all-Q4 and mixed dense/sparse PPL acquisition, all mixed and
         all-Q4 whole matrices,
         acceptance, and same-route execution evidence remain.
-- [ ] Benchmark complete inference and concurrency C=1..4 with profiler attribution. The base
+- [ ] Blocked at the explicit representation/context/performance-contract decision above. If authorized, benchmark
+      complete inference and concurrency C=1..4 with profiler attribution. The base
       closure is supplied by the same twelve schema-v14 capacity outcomes and corresponding
       eligible whole matrices used by
       the schema-v7 `terminal_production_selection`; do not schedule a duplicate C=1..4 campaign. DFlash
