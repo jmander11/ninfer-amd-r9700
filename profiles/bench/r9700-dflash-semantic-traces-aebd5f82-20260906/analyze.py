@@ -15,6 +15,9 @@ SOURCE_CORPUS = ROOT / "bench/fixtures/bench_corpus.ids"
 HISTORY = ROOT / "profiles/bench/r9700-dflash-p129-isolation-discriminator-20260906/history-p129.ids"
 EXPECTED_EXE = "49eae026ba04a7d7bc7a0bed6a137e94c4bed34439d74304a9eb344679f8473b"
 EXPECTED_ARTIFACT = "d8fc77c36cf17c92e96d67b9a6b5a1826a1ade4f59d59c003b2368fe981fc512"
+CAPTURE_ANALYZER_SHA = "f8c17bf643aad048455ef08b86d90a64029d819ffe67c61de742270064c53e3c"
+CAPTURE_PREPARED_SHA = "c45e9a346001c0824182508561aa4b7b2ed4dd9cd9a0e6b0cae5996799455a6c"
+CAPTURE_RESULT_SHA = "d517d347a5bec7721c8fb043bd4937b266879779526404e59ec2330ce2218bfe"
 DECISION_ENV = {"NINFER_DFLASH_DECISION_TRACE_OUT": None}
 TAIL_ENV = {"NINFER_QWEN3_PREFILL_P129_TRACE": "1",
             "NINFER_QWEN3_PREFILL_P129_TRACE_OUT": None}
@@ -99,7 +102,8 @@ def validate_plan() -> None:
 def validate_process(stem: str, expected_command: list[str]) -> dict:
     record = load(RESULTS / f"{stem}.process.json")
     if record.get("command") != expected_command or record.get("exit_code") != 0 or record.get("power_before") != "auto" or record.get("power_after") != "auto" or record.get("instrumentation_environment_present") != []: fail(f"process identity differs: {stem}")
-    if record.get("stdout") != identity(RESULTS / f"{stem}.stdout") or record.get("stderr") != identity(RESULTS / f"{stem}.stderr") or (RESULTS / f"{stem}.stderr").read_bytes() != b"": fail(f"process streams differ: {stem}")
+    if record.get("stdout") != identity(RESULTS / f"{stem}.stdout") or record.get("stderr") != identity(RESULTS / f"{stem}.stderr"): fail(f"process streams differ: {stem}")
+    validate_benchmark_stderr(stem, RESULTS / f"{stem}.stderr")
     trace = RESULTS / f"{stem}.trace.json"
     expected_env = ({"NINFER_DFLASH_DECISION_TRACE_OUT":str(trace)} if stem.startswith("decision-") else
                     {"NINFER_QWEN3_PREFILL_P129_TRACE":"1",
@@ -107,6 +111,21 @@ def validate_process(stem: str, expected_command: list[str]) -> dict:
     if record.get("trace_environment") != expected_env: fail(f"trace environment differs: {stem}")
     if integer(record.get("finished_unix_ns"), stem) <= integer(record.get("started_unix_ns"), stem): fail(f"invalid process interval: {stem}")
     return identity(RESULTS / f"{stem}.process.json")
+
+def validate_benchmark_stderr(stem: str, path: Path) -> None:
+    contexts={"decision-ordinary":156,"decision-dflash":166,"tail-fresh":130,"tail-append":130}
+    labels={"decision-ordinary":"whole-pp129+tg27","decision-dflash":"whole-pp129+tg27",
+            "tail-fresh":"whole-pp129+tg1","tail-append":"pp128+tg1"}
+    if stem not in contexts: fail(f"unknown benchmark stderr role: {stem}")
+    expected=(f"[ninfer_bench] loading {ARTIFACT} (max_context={contexts[stem]}, concurrency=1, kv_format=fp8-k-int4-v)\n"
+              f"[ninfer_bench] test 1/1 {labels[stem]}: warmup=0 reps=1\n")
+    if path.read_text() != expected: fail(f"benchmark stderr differs: {stem}")
+
+def validate_analysis_repair() -> dict:
+    repair=load(PACKAGE/"analysis-repair.json")
+    if repair.get("artifact_type") != "ninfer_r9700_dflash_semantic_trace_analysis_repair" or repair.get("schema_version") != 1 or repair.get("status") != "analysis_only_no_gpu_rerun" or repair.get("cause") != "capture analyzer rejected exact normal two-line ninfer_bench informational stderr and treated finite decimal speculative-rate serialization as exact rational equality" or repair.get("capture_analyzer_sha256") != CAPTURE_ANALYZER_SHA or repair.get("capture_prepared") != identity(PACKAGE/"prepared.sha256") or repair.get("capture_result") != identity(RESULTS/"result.sha256") or repair.get("repaired_analyzer") != identity(Path(__file__)) or repair.get("raw_capture_modified") is not False or repair.get("gpu_rerun_permitted") is not False: fail("analysis repair provenance differs")
+    if repair["capture_prepared"]["sha256"] != CAPTURE_PREPARED_SHA or repair["capture_result"]["sha256"] != CAPTURE_RESULT_SHA: fail("capture closure identity differs")
+    return identity(PACKAGE/"analysis-repair.json")
 
 def validate_report(stem: str, kind: str) -> tuple[dict, list[int], dict]:
     path = RESULTS / f"{stem}.json"; report = load(path); expected = command(kind, path)
@@ -139,7 +158,7 @@ def validate_report(stem: str, kind: str) -> tuple[dict, list[int], dict]:
             fail(f"spec position accounting differs: {stem}")
         for index,value in enumerate(positions): integer(value,f"{stem} accepted position {index}")
         if spec["rounds"] + spec["accepted_tokens"] + spec["fallback_steps"] != gen: fail(f"spec accounting differs: {stem}")
-        if not math.isclose(finite(spec.get("acceptance_rate"),stem),spec["accepted_tokens"]/spec["drafted_tokens"],rel_tol=0,abs_tol=1e-12) or not math.isclose(finite(spec.get("acceptance_length"),stem),1+spec["accepted_tokens"]/spec["rounds"],rel_tol=0,abs_tol=1e-12): fail(f"spec rates differ: {stem}")
+        if not math.isclose(finite(spec.get("acceptance_rate"),stem),spec["accepted_tokens"]/spec["drafted_tokens"],rel_tol=0,abs_tol=1e-9) or not math.isclose(finite(spec.get("acceptance_length"),stem),1+spec["accepted_tokens"]/spec["rounds"],rel_tol=0,abs_tol=1e-9): fail(f"spec rates differ: {stem}")
     return identity(path), lanes[0], spec
 
 def validate_decision_trace(path: Path, kind: str, outputs: list[int], report_spec: dict) -> dict:
@@ -184,14 +203,15 @@ def validate_decision_trace(path: Path, kind: str, outputs: list[int], report_sp
             for index in range(accepted_drafts): accepted_positions[index]+=1
             generated.extend(licensed); context_frontier = frontier; frontier += len(licensed)
         if frontier != 156 or generated != outputs[1:]: fail("DFlash licensed-token chain does not cover outputs 1..27")
-        expected_spec={"enabled":True,"draft_window":4,"rounds":rounds,"drafted_tokens":drafted,"accepted_tokens":accepted,"fallback_steps":fallback,"acceptance_rate":accepted/drafted,"acceptance_length":1+accepted/rounds,"accepted_per_position":accepted_positions}
-        if report_spec != expected_spec: fail("DFlash trace acceptance differs from report")
+        exact_spec={"enabled":True,"draft_window":4,"rounds":rounds,"drafted_tokens":drafted,"accepted_tokens":accepted,"fallback_steps":fallback,"accepted_per_position":accepted_positions}
+        if any(report_spec.get(key)!=value for key,value in exact_spec.items()) or not math.isclose(report_spec["acceptance_rate"],accepted/drafted,rel_tol=0,abs_tol=1e-9) or not math.isclose(report_spec["acceptance_length"],1+accepted/rounds,rel_tol=0,abs_tol=1e-9): fail("DFlash trace acceptance differs from report")
     return identity(path)
 
 def main() -> int:
     parser=argparse.ArgumentParser(); parser.add_argument("--summary",type=Path,required=True); args=parser.parse_args()
     if args.summary != RESULTS/"summary.json" or args.summary.exists() or args.summary.is_symlink(): fail("summary output is not fresh/exact")
     validate_plan()
+    repair_identity=validate_analysis_repair()
     if identity(EXE)["sha256"] != EXPECTED_EXE or identity(ARTIFACT)["sha256"] != EXPECTED_ARTIFACT: fail("bound executable/artifact differs")
     reports={}; sequences={}; report_specs={}
     for stem,kind in (("decision-ordinary","decision-ordinary"),("decision-dflash","decision-dflash"),("tail-fresh","tail-fresh"),("tail-append","tail-append")):
@@ -211,7 +231,7 @@ def main() -> int:
     comparator_command=["/usr/bin/python3",str(ROOT/"tools/bench/compare_prefill_p129_tail_trace.py"),"--fresh",str(RESULTS/"tail-fresh.trace.json"),"--append",str(RESULTS/"tail-append.trace.json"),"--out",str(RESULTS/"tail-comparison.json")]
     comparator_process=load(RESULTS/"tail-comparator.process.json")
     if comparator_process.get("command") != comparator_command or comparator_process.get("exit_code") != 0 or comparator_process.get("stdout") != identity(RESULTS/"tail-comparator.stdout") or comparator_process.get("stderr") != identity(RESULTS/"tail-comparator.stderr") or (RESULTS/"tail-comparator.stdout").read_bytes() or (RESULTS/"tail-comparator.stderr").read_bytes(): fail("tail comparator process differs")
-    summary={"artifact_type":"ninfer_r9700_dflash_semantic_trace_evidence","schema_version":1,"status":"valid_functional_diagnostic","timing_evidence_eligible":False,"production_routing_authorized":False,"source_commit":"aebd5f82b91a756429651b2795e3ad24c1058cb3","executable":identity(EXE),"artifact":identity(ARTIFACT),"history":{"fixture":identity(HISTORY),"seed_token":24178},"decision_campaign":{"common_prefix_last_index":26,"first_output_difference_index":first_difference,"ordinary_output_index27":ordinary[27],"dflash_output_index27":dflash[27]},"prefill_tail_comparison":comparison,"tail_comparator_process":identity(RESULTS/"tail-comparator.process.json"),"reports":reports,"traces":traces,"limitations":["functional diagnostic only; synchronous trace copies invalidate all timings","does not identify stale state without a first differing semantic boundary","does not authorize production routing or recipe selection"]}
+    summary={"artifact_type":"ninfer_r9700_dflash_semantic_trace_evidence","schema_version":1,"status":"valid_functional_diagnostic","timing_evidence_eligible":False,"production_routing_authorized":False,"source_commit":"aebd5f82b91a756429651b2795e3ad24c1058cb3","analysis_repair":repair_identity,"capture_result_closure":identity(RESULTS/"result.sha256"),"executable":identity(EXE),"artifact":identity(ARTIFACT),"history":{"fixture":identity(HISTORY),"seed_token":24178},"decision_campaign":{"common_prefix_last_index":26,"first_output_difference_index":first_difference,"ordinary_output_index27":ordinary[27],"dflash_output_index27":dflash[27]},"prefill_tail_comparison":comparison,"tail_comparator_process":identity(RESULTS/"tail-comparator.process.json"),"reports":reports,"traces":traces,"limitations":["functional diagnostic only; synchronous trace copies invalidate all timings","does not identify stale state without a first differing semantic boundary","does not authorize production routing or recipe selection"]}
     args.summary.write_text(json.dumps(summary,indent=2,allow_nan=False)+"\n"); return 0
 
 if __name__=="__main__": raise SystemExit(main())

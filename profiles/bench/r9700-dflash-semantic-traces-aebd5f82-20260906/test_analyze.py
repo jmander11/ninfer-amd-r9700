@@ -73,4 +73,12 @@ class AnalyzeTest(unittest.TestCase):
         self.assertEqual(dflash[dflash.index("--draft-tokens")+1],"4")
         append=analyze.command("tail-append",p); self.assertIn("--isolate-prompt-decode",append); self.assertIn("128,1",append)
 
+    def test_exact_normal_benchmark_stderr(self):
+        for stem in ("decision-ordinary","decision-dflash","tail-fresh","tail-append"):
+            analyze.validate_benchmark_stderr(stem,analyze.RESULTS/f"{stem}.stderr")
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/"stderr"; path.write_text((analyze.RESULTS/"tail-fresh.stderr").read_text()+"extra\n")
+            with self.assertRaisesRegex(RuntimeError,"stderr differs"):
+                analyze.validate_benchmark_stderr("tail-fresh",path)
+
 if __name__=="__main__": unittest.main()

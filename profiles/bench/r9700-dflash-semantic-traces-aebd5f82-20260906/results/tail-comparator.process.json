@@ -1,0 +1,23 @@
+{
+  "command": [
+    "/usr/bin/python3",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/bench/compare_prefill_p129_tail_trace.py",
+    "--fresh",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-semantic-traces-aebd5f82-20260906/results/tail-fresh.trace.json",
+    "--append",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-semantic-traces-aebd5f82-20260906/results/tail-append.trace.json",
+    "--out",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-semantic-traces-aebd5f82-20260906/results/tail-comparison.json"
+  ],
+  "exit_code": 0,
+  "stdout": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-semantic-traces-aebd5f82-20260906/results/tail-comparator.stdout",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "stderr": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-semantic-traces-aebd5f82-20260906/results/tail-comparator.stderr",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "command": [
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-semantic-traces-aebd5f82-final-20260906/bench/ninfer_bench",
+    "--weights",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval.ninfer",
+    "--corpus",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-p129-isolation-discriminator-20260906/history-p129.ids",
+    "--device",
+    "0",
+    "--concurrency",
+    "1",
+    "--whole-pg",
+    "129,1",
+    "--prefill-chunk",
+    "4096",
+    "--kv-capacity",
+    "workload",
+    "--draft-tokens",
+    "0",
+    "--retain-token-ids",
+    "--no-device-graph",
+    "--output",
+    "json",
+    "--output-file",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-semantic-traces-aebd5f82-20260906/results/tail-fresh.json",
+    "-r",
+    "1",
+    "--warmup",
+    "0"
+  ],
+  "trace_environment": {
+    "NINFER_QWEN3_PREFILL_P129_TRACE": "1",
+    "NINFER_QWEN3_PREFILL_P129_TRACE_OUT": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-semantic-traces-aebd5f82-20260906/results/tail-fresh.trace.json"
+  },
+  "exit_code": 0,
+  "started_unix_ns": 1788733376919996991,
+  "finished_unix_ns": 1788733402462791930,
+  "power_before": "auto",
+  "power_after": "auto",
+  "instrumentation_environment_present": [],
+  "stdout": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-semantic-traces-aebd5f82-20260906/results/tail-fresh.stdout",
+    "bytes": 133,
+    "sha256": "c208a10050d783dc292cf1f8c2fca9db08468bda3d714eb53c038a70e0aca551"
+  },
+  "stderr": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-semantic-traces-aebd5f82-20260906/results/tail-fresh.stderr",
+    "bytes": 253,
+    "sha256": "f3924a3d4fba51853eb16c80cff93847b0eacedfe66e25917978163131c5e30f"
+  }
+}

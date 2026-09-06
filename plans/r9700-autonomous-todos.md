@@ -54,14 +54,17 @@ above, not an executable task. Conditional tasks retain their explicit `if:` cla
 
 - [ ] `DFLASH-TEXT-P129` Localize the shared Text append-versus-fresh dependence for the identical
   effective P129 history. Compare exact final normalized tail hidden and output-head top-two margin;
-  instrument the first differing attention/GDN layer boundary only if the tail differs. Do not call
-  this stale state without a first differing semantic boundary. The retained P129 discriminator is
-  under `profiles/bench/r9700-dflash-p129-isolation-discriminator-20260906/results`.
+  the tail differs in 4,978/5,120 BF16 elements, so now trace fresh column128 versus append column0
+  at the shared frontier through the first differing mixer/MLP boundary. Do not call this stale
+  state without that semantic boundary. Evidence is under
+  `profiles/bench/r9700-dflash-semantic-traces-aebd5f82-20260906/results`.
 
 - [ ] `DFLASH-TARGET-P129` On the fresh-P129 common prefix through generated index 26, localize the
   first ordinary-versus-DFlash difference. Retain target-verification top-two/argmax by column,
   accepted column, licensed tokens, and next frontier so target arithmetic, acceptance selection,
-  and post-commit state remain distinct. Eager already equals graph; that does not waive parity.
+  and post-commit state remain distinct. Target logits already differ at the first generated step;
+  trace ordinary W1 versus DFlash W5 column0 at frontier130 through the first differing mixer/MLP
+  boundary. Eager already equals graph; that does not waive parity.
 
 - [ ] `DFLASH-RECIPE` [depends: TERMINAL-SELECTION, CHUNK-SELECT] Select DFlash matrices from the
   real BF16 DFlash2 checkpoint rather than inheriting the base recipe. Compare canonical Q4G64,

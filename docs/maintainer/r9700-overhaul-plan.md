@@ -1820,6 +1820,22 @@ Replace functional routes with measured gfx1201 families:
   (112522 versus 100730). Thus graph capture is excluded, but both the shared append path and the
   DFlash target/accept/commit path require focused semantic localization. No timing or routing
   conclusion follows.
+  The bounded semantic capture under
+  `profiles/bench/r9700-dflash-semantic-traces-aebd5f82-20260906/results` then separates both paths
+  further. Its summary SHA-256 is
+  `2250ae186fe604a7abaa035f82df9d92c40be62c8530f30addf84627b6cc4464`, with capture closure
+  `d517d347a5bec7721c8fb043bd4937b266879779526404e59ec2330ce2218bfe` and analysis closure
+  `e3aa333e5c2bceade0d72fda7ef725107f431b1957af522726a0211b9b3f9f25`. On the common fresh-P129
+  history, ordinary and DFlash target decisions already differ at absolute frontier 130: both
+  select token 96917, but the ordinary top logit is BF16 bits 16841 versus DFlash bits 16839 and
+  their second-ranked tokens differ. At frontier 156, ordinary has a BF16 tie at 18.875 and emits
+  95946, whereas DFlash ranks 98003 at 19.0 over 95946 at 18.875 and emits 98003. The mismatch is
+  therefore present in target arithmetic before acceptance selection. Separately, fresh
+  base0/T129 versus append base128/T1 differs in 4,978 of 5,120 final normalized-tail BF16 elements
+  (first hidden index zero, maximum absolute difference 0.75), although both immediate heads still
+  select 96558. The next diagnostic is an exact per-layer anchor-column boundary trace: ordinary
+  W1 versus DFlash W5 column0 at frontier 130, and fresh column128 versus append column0 at the
+  shared P129 tail. These functional traces are timing-ineligible and authorize no route change.
   The direct packed-W4 qualifier for the exact DFlash MLP-down N5120/K17408, T5 cell now executes
   the production entry symbol. Its accepted summary is
   `profiles/bench/r9700-dflash-mlp-down-t5-production-symbol-qualification-20260906/summary.json`

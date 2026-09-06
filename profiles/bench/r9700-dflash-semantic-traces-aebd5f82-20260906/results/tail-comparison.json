@@ -1,0 +1,32 @@
+{
+  "artifact_type": "ninfer_qwen3_text_prefill_p129_tail_comparison",
+  "schema_version": 1,
+  "diagnostic_only": true,
+  "timing_evidence_eligible": false,
+  "classification": "final_normalized_tail_hidden_differs",
+  "tail_hidden": {
+    "exact": false,
+    "mismatch_count": 4978,
+    "first_mismatch": {
+      "index": 0,
+      "fresh_bits": 48878,
+      "append_bits": 48860
+    },
+    "maximum_bf16_steps": 31743,
+    "maximum_absolute_difference": 0.75
+  },
+  "fresh": {
+    "top1_token": 96558,
+    "top1_bits": 16781,
+    "top2_token": 96604,
+    "top2_bits": 16731,
+    "top1_top2_margin": 3.9375
+  },
+  "append": {
+    "top1_token": 96558,
+    "top1_bits": 16783,
+    "top2_token": 96604,
+    "top2_bits": 16734,
+    "top1_top2_margin": 4.0
+  }
+}
