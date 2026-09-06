@@ -90,7 +90,7 @@ def _valid_capacity_failure(failure: object) -> bool:
         or stdout.get("sha256") != hashlib.sha256(b"").hexdigest()
         or campaign_failure.get("concurrency") != concurrency
         or campaign_failure.get("suite") != "pareto_effective_capacity"
-        or campaign_failure.get("case") != "effective_capacity_mtp3"
+        or campaign_failure.get("case") != "effective_capacity_ordinary"
         or campaign_failure.get("command") != command
         or campaign_failure.get("stdout") != stdout["path"]
         or campaign_failure.get("stderr") != stderr["path"]
@@ -607,6 +607,11 @@ def classify(payload: dict) -> dict:
         raise ValueError("selected_prefill_chunk is unsupported")
     if require_single_selection and selected_prefill_chunk is None:
         raise ValueError("static profile selection requires one explicit selected_prefill_chunk")
+    if require_single_selection and (
+        payload.get("base_ranking_profile") != "spec-none-ordinary"
+        or payload.get("base_capacity_profile") != "spec-none-ordinary"
+    ):
+        raise ValueError("static profile selection requires ordinary ranking and capacity profiles")
     prefill_chunk_selection = payload.get("prefill_chunk_selection")
     if require_single_selection and (
         not isinstance(prefill_chunk_selection, dict)
@@ -721,6 +726,12 @@ def classify(payload: dict) -> dict:
                 )
         if require_single_selection and "shortlist_head_precision_gate" in record:
             raise ValueError("static selection rejects the retired MTP shortlist-head gate")
+        if require_single_selection and (
+            record.get("whole_inference_profile") != "spec-none-ordinary"
+            or record.get("base_capacity_profile") != "spec-none-ordinary"
+            or "mtp_target_token_parity" in record
+        ):
+            raise ValueError(f"candidate {name} lacks ordinary whole-inference ranking")
         if objective is not None:
             objectives[name] = objective
         weight_recipe = _recipe_identity(record, provenance_by_candidate)
@@ -734,6 +745,8 @@ def classify(payload: dict) -> dict:
             "prefill_chunk": record.get("prefill_chunk"),
             "weight_recipe": weight_recipe,
             "weight_storage_profile": weight_storage_profile,
+            "whole_inference_profile": record.get("whole_inference_profile"),
+            "base_capacity_profile": record.get("base_capacity_profile"),
             "comparable": objective is not None,
             "reasons": reasons,
         })
@@ -833,6 +846,8 @@ def classify(payload: dict) -> dict:
         "artifact_type": ARTIFACT_TYPE,
         "schema_version": SCHEMA_VERSION,
         "required_speed_workloads": workloads,
+        "base_ranking_profile": payload.get("base_ranking_profile"),
+        "base_capacity_profile": payload.get("base_capacity_profile"),
         "required_quality_cells": quality_cells or ["quality"],
         "required_capacity_cells": capacity_cells or ["capacity"],
         "objective_directions": {
@@ -860,6 +875,8 @@ def validate_terminal_production_authority(value: object) -> tuple[dict, dict]:
         value.get("artifact_type") != ARTIFACT_TYPE
         or value.get("schema_version") != SCHEMA_VERSION
         or value.get("single_static_profile_selection_required") is not True
+        or value.get("base_ranking_profile") != "spec-none-ordinary"
+        or value.get("base_capacity_profile") != "spec-none-ordinary"
     ):
         raise ValueError("static profile authority is not a required schema-v7 decision")
     candidates = value.get("candidates")
@@ -929,6 +946,8 @@ def validate_terminal_production_authority(value: object) -> tuple[dict, dict]:
             or not isinstance(execution, dict)
             or execution.get("xattention_profile") not in XATTENTION_PROFILES
             or row.get("prefill_chunk") != selected_prefill_chunk
+            or row.get("whole_inference_profile") != "spec-none-ordinary"
+            or row.get("base_capacity_profile") != "spec-none-ordinary"
             or _recipe_identity(row, provenance_by_candidate) != recipe
         ):
             raise ValueError("schema-v7 authority has malformed candidate provenance/objectives")

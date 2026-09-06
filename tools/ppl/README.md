@@ -77,11 +77,13 @@ bash profiles/ppl/post-terminal-exact-token-prepare-20260905/prepare.sh
 That CPU-only step resolves and binds the winner's artifact, G16/G32 scorer, dense or
 B128/S16/tau900 profile, selected chunk, candidate-local quality authority, and validated 18-shard
 BF16 source. It emits one future C1 command under
-`profiles/ppl/post-terminal-selected-exact-token-20260905`. The physical campaign covers only 8K
-and 32K decode: graph/eager and MTP3/ordinary must have exact I32 greedy tokens and zero maximum
-absolute NLL delta at both lengths, and the existing MTP3/MTP4 control must do so at 8K. Its final
-admission JSON is atomically published only after recomputing those five comparisons from the raw
-sidecars. Candidate-to-BF16 greedy flips remain diagnostic; no zero-flip BF16 threshold is added.
+`profiles/ppl/post-terminal-selected-exact-token-20260905`. The required physical campaign covers
+8K and 32K same-route graph/eager exact-I32-token and zero-NLL-delta checks. MTP3/ordinary and
+MTP3/MTP4 comparisons are optional diagnostic exact-token/state/graph regressions, not base or
+DFlash admission prerequisites. Its final admission JSON is atomically published only after
+recomputing required comparisons from the raw sidecars and matching every raw cell's complete
+weights/corpus/schedule/spec/chunk/graph command and semantic identity. Candidate-to-BF16 greedy flips remain
+diagnostic; no zero-flip BF16 threshold is added.
 
 ## Required artifacts and executables
 
@@ -841,11 +843,11 @@ test ! -e "$NINFER_EXECUTION_GATE_DIR" || \
 ```
 
 The validator reopens the exact hybrid artifact and adjacent conversion receipt, rehashes both
-scorers, requires the complete MTP3 graph/eager, MTP3/ordinary, and MTP3/MTP4 exact comparison
-matrix, and asks the compiled host authority for the C=1..4 prepared descriptor inventories.
-For chunk 4096 those inventories must be ordinary `{1,2,3,4,4096}`, MTP3
-`{1,2,3,4,8,12,16,4096}`, and MTP4 `{1,2,3,4,5,10,15,20,4096}`. This host inventory check does
-not allocate a device and does not substitute for the physical C1 execution cells.
+scorers, requires the ordinary same-route graph/eager comparison, and asks the compiled host
+authority for its ordinary C=1..4 prepared descriptor inventory. Optional MTP comparisons may
+retain their wider inventories as diagnostics, but they do not gate base selection or required
+DFlash admission. This host inventory check does not allocate a device and does not substitute
+for the physical C1 execution cells.
 
 ## Candidate lifecycle
 
@@ -986,14 +988,13 @@ campaigns. The assembler reopens every selected native raw cell and sidecar, ver
 profile identity, and binds their hashes into the schema-v4 input.
 `--prefill-chunk-selection` is mandatory. The assembler recomputes the schema-v2 global selection,
 binds its hash, and requires every PPL cell plus every capacity and whole command to carry its
-selected value. Each whole directory must contain one optimized-head MTP3 report and one matched
-ordinary greedy control at every C=1..4 point. Assembly takes timing only from MTP3, rejects zero
-draft activity, and requires exact retained target-token parity for every workload, repetition,
-and lane. The raw repetition counter sums request lanes: for g256/MTP3 it must equal `64*C`, and
-the test aggregate must equal the sum of all three repetitions. The theoretical minimum remains
-diagnostic acceptance accounting; extra rounds neither trigger a proposal-head precision branch
-nor alter base selection. Schema v7 carries no downstream-readiness or MTP-head status.
-Selected-profile NIAH and DFlash admission remain separate gates. There is no manual or implicit
+selected value. Each whole directory must contain exactly one ordinary spec-none report at every
+C=1..4 point, and assembly ranks only those 8K/32K fresh-request timings. MTP3 may be retained as
+optional exact-token/state/graph regression evidence but is neither an assembly prerequisite nor
+a ranking input. Each base capacity directory likewise uses `effective_capacity_ordinary` with
+draft window zero and no speculative head. Schema v7 identifies both base ranking and capacity
+profiles as `spec-none-ordinary`.
+Selected-profile NIAH and required DFlash admission remain separate gates. There is no manual or implicit
 historical-4096 path.
 
 After the dense and sparse G16/G32 capacity/whole matrix pairs finish, XAttention admission
@@ -1089,8 +1090,9 @@ Each `--candidate` takes exactly six values. The assembler requires schema-v14 c
 all C=1..4 points, the same exact benchmark bytes across that candidate's two matrices, and
 artifact bytes matching its 8K/32K quality rows. It reopens and validates every schema-v20 raw
 report before emitting 24 matched speed cells and exactly four resolved effective-capacity cells.
-Each fresh-request whole row owns prefill throughput, decode throughput and acceptance, and
-end-to-end throughput from the same repetitions; separate pure-prefill and prefix-reuse-seeded
+Each spec-none ordinary fresh-request whole row owns prefill throughput, decode throughput, and
+end-to-end throughput from the same repetitions; its speculative counters must be disabled and
+zero. Separate pure-prefill and prefix-reuse-seeded
 decode matrices are diagnostic duplicates and are not selection inputs.
 The assembler emits `ninfer_r9700_pareto_input` schema v4; the classifier emits
 `ninfer_r9700_pareto_comparison` schema v7, retaining the full frontier, deterministic per-recipe

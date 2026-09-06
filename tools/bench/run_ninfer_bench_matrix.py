@@ -124,9 +124,11 @@ SELECTED_PREFILL_CHUNK_PRESETS = (
 )
 POWER_BOUND_PRESETS = frozenset({
     "prefill-chunk", "low-context-prefill", "ordinary-diagnostic", "pareto-whole",
+    "dflash-shortlist", "dflash-pareto",
 })
 POWER_RECHECK_PRESETS = frozenset({
     "ordinary-diagnostic", "pareto-whole", "prefill-chunk", "low-context-prefill",
+    "dflash-shortlist", "dflash-pareto",
 })
 AT_FDCWD = -100
 RENAME_EXCHANGE = 2
@@ -885,13 +887,13 @@ def build_cases(
         return [
             BenchCase(
                 "production_prefill_chunk",
-                f"prefill_p{prefill_prompt}_chunk{chunk}_k3",
-                ("-p", str(prefill_prompt), "--prefill-chunk", str(chunk), *mtp_args(3)),
+                f"prefill_p{prefill_prompt}_chunk{chunk}_ordinary",
+                ("-p", str(prefill_prompt), "--prefill-chunk", str(chunk),
+                 "--draft-tokens", "0"),
                 3,
                 1,
                 (
-                    "C1 Text plus MTP bulk-state prefill chunk selection; the one-output "
-                    "request has zero initial MTP proposals and zero decode rounds"
+                    "C1 spec-none ordinary Text-prefill chunk selection"
                 ),
                 concurrency_one_only=True,
             )
@@ -905,7 +907,7 @@ def build_cases(
                 f"prefill_p{prompt}_dense_none",
                 (
                     "-p", str(prompt), "--prefill-chunk", str(production_prefill_chunk),
-                    "--spec", "mtp", "--draft-tokens", "0",
+                    "--draft-tokens", "0",
                 ),
                 3,
                 1,
@@ -921,7 +923,7 @@ def build_cases(
                 "ordinary_decode",
                 "whole_p8192_g256_none_graph",
                 ("--whole-pg", "8192,256", "--prefill-chunk", "4096",
-                 "--spec", "mtp", "--draft-tokens", "0"),
+                 "--draft-tokens", "0"),
                 3,
                 1,
                 "C1 8K ordinary non-speculative prefill/decode diagnostic",
@@ -956,28 +958,13 @@ def build_cases(
         return [
             BenchCase(
                 "pareto_whole_inference",
-                "whole_p8192_p32768_g256_k3_graph",
-                ("--whole-pg", "8192,256;32768,256", "--prefill-chunk",
-                 str(production_prefill_chunk),
-                 *mtp_args(3), "--retain-token-ids"),
-                3,
-                1,
-                ("matched fresh-prompt 8K/32K whole-inference makespan, output throughput, "
-                 "and exact target-output parity"),
-                retain_token_ids=True,
-                parity_role="mtp",
-            ),
-            BenchCase(
-                "pareto_whole_control",
                 "whole_p8192_p32768_g256_ordinary_graph",
                 ("--whole-pg", "8192,256;32768,256", "--prefill-chunk",
-                 str(production_prefill_chunk), *mtp_args(0), "--retain-token-ids"),
+                 str(production_prefill_chunk), "--draft-tokens", "0"),
                 3,
                 1,
-                "matched ordinary greedy target-output control; timings are not selection inputs",
-                retain_token_ids=True,
+                "ranking spec-none ordinary fresh-prompt 8K/32K whole-inference throughput",
                 parity_role="ordinary",
-                diagnostic=True,
             ),
         ]
 
@@ -999,13 +986,13 @@ def build_cases(
         return [
             BenchCase(
                 "pareto_effective_capacity",
-                "effective_capacity_mtp3",
+                "effective_capacity_ordinary",
                 ("-p", "128", "--prefill-chunk", str(production_prefill_chunk),
                  "--max-ctx", str(MODEL_NATIVE_CONTEXT),
-                 "--kv-capacity", "auto", *mtp_args(3)),
+                 "--kv-capacity", "auto", "--draft-tokens", "0"),
                 1,
                 0,
-                "resolved effective maximum at the model-native context ceiling with MTP3",
+                "resolved ordinary effective maximum at the model-native context ceiling",
             ),
         ]
 
@@ -1509,25 +1496,20 @@ def validate_case_profile(config: dict[str, Any], case: BenchCase) -> None:
             )
 
 
-def validate_whole_mtp_command(case: BenchCase, command: Sequence[str] | None) -> None:
-    """Require the terminal MTP whole row to command the optimized proposal head explicitly."""
+def validate_whole_ordinary_command(case: BenchCase, command: Sequence[str] | None) -> None:
+    """Require base-selection whole timing to be the exact spec-none ordinary route."""
 
     if case.suite != "pareto_whole_inference":
         return
     if command is None:
         raise ValueError("pareto-whole validation requires the exact benchmark command")
-    required_options = {
-        "--spec": "mtp",
-        "--draft-tokens": "3",
-    }
-    for option, value in required_options.items():
-        if command.count(option) != 1:
-            raise ValueError(f"pareto-whole command requires exactly one {option}")
-        index = command.index(option)
-        if index + 1 >= len(command) or command[index + 1] != value:
-            raise ValueError(f"pareto-whole command requires {option} {value}")
-    if command.count("--lm-head-draft") != 1:
-        raise ValueError("pareto-whole command requires exactly one --lm-head-draft")
+    if command.count("--draft-tokens") != 1:
+        raise ValueError("pareto-whole command requires exactly one --draft-tokens")
+    index = command.index("--draft-tokens")
+    if index + 1 >= len(command) or command[index + 1] != "0":
+        raise ValueError("pareto-whole command requires --draft-tokens 0")
+    if "--spec" in command or "--lm-head-draft" in command:
+        raise ValueError("pareto-whole command must be spec-none ordinary without a draft head")
 
 
 def _validate_speculative(spec: object, *, enabled: bool, draft_window: int,
@@ -1663,7 +1645,7 @@ def validate_report_tests(report: dict[str, Any], case: BenchCase) -> None:
             enabled=draft_window > 0,
             draft_window=draft_window,
             require_sample=has_decode,
-            require_accepted=case.suite == "pareto_whole_inference",
+            require_accepted=case.parity_role == "mtp",
             label=label,
         )
 
@@ -1838,7 +1820,7 @@ def load_bench_report(
         if report.get("command") != wanted_command:
             raise ValueError("benchmark report command does not match this matrix point")
     if expected_case is not None:
-        validate_whole_mtp_command(expected_case, expected_command)
+        validate_whole_ordinary_command(expected_case, expected_command)
         validate_case_profile(config, expected_case)
         validate_report_tests(report, expected_case)
         expected_capacity_mode = (
@@ -2991,8 +2973,16 @@ def write_manifest(
         "schema_version": MATRIX_SCHEMA_VERSION,
         "created_at_utc": dt.datetime.now(dt.UTC).isoformat(),
         "preset": args.preset,
-        "primary_mtp_draft_tokens": 3,
-        "primary_proposal_head": "optimized",
+        "base_ranking_profile": (
+            "spec-none-ordinary" if args.preset == "pareto-whole" else None
+        ),
+        "base_capacity_profile": (
+            "spec-none-ordinary" if args.preset == "pareto-capacity" else None
+        ),
+        "base_chunk_profile": (
+            "spec-none-ordinary" if args.preset == "prefill-chunk" else None
+        ),
+        "mtp_diagnostic_only": args.preset == "pareto",
         "dflash_draft_tokens": args.dflash_draft_tokens,
         "dflash_verify_width_requested": args.dflash_verify_width,
         "dflash_verify_width": (
@@ -3051,8 +3041,8 @@ def write_manifest(
         "point_count": len(commands),
         "commands": list(commands),
         "notes": [
-            "k=3 with the optimized proposal head is the primary MTP path.",
-            "Use context_decode and mtp_sweep rows for MTP efficiency decisions.",
+            "MTP rows are optional diagnostics and never base chunk/capacity/whole ranking inputs.",
+            "Use context_decode and mtp_sweep rows only for MTP diagnostics.",
             "tg rows use a one-token seed and report G decode tokens after the begin token.",
             "DFlash proposal diagnostics synchronize device-to-host copies and are never timing evidence.",
             "DFlash greedy parity requires exact ordinary/DFlash token IDs for every repetition and lane.",

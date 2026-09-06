@@ -230,8 +230,9 @@ G16, dense G32, XAttention G16, and XAttention G32. Under the C=1..4 product cap
 is also capacity-eligible, so the final product comparison must add the equivalent four
 mixed-recipe candidates, with matched dense/XAttention schema-v6 PPL and fresh C=1..4
 capacity/whole evidence. Each dense candidate needs its own fresh
-schema-v14 capacity/whole pair from one current dense executable. Each whole row retains its
-separately timed prefill and decode phases, acceptance, and fresh-request makespan. The retained
+   schema-v14 capacity/whole pair from one current dense executable. Each spec-none ordinary whole
+   row retains its separately timed prefill and decode phases and fresh-request makespan, with
+   speculative state disabled and zero. The retained
 schema-v12/v19 dense capacity and standalone phase directories, plus the absent dense whole
 matrix, do not match the current assembler or provide a complete speed control. The fixed dense
 candidate sidecars remain reusable, but the former BF16 rows are not: the replacement schema-v6
@@ -364,7 +365,7 @@ python3 tools/bench/run_ninfer_bench_matrix.py --preset pareto-whole \
   --output-dir profiles/bench/pareto-whole-xattention-s16-tau900-all-q4-g32-20260903
 ```
 
-Each capacity command produces exactly four cells, one native-262,144-context MTP3 workspace
+Each capacity command produces exactly four cells, one native-262,144-context spec-none ordinary workspace
 result for each C=1..4. On interruption, repeat the byte-identical command with `--resume`; the
 schema-v14 manifest must match the artifact, executable bytes, cache group, sparse profile, preset,
 and concurrency matrix before any valid cell is skipped. Raw schema-v20 reports bind
@@ -372,12 +373,10 @@ qualification, B128, S16, and tau900; schema-v14 manifests and flattened rows ca
 profile. The runner rejects dense/sparse mismatches on initial validation and resume. Never resume
 these commands into the retained schema-v12 dense capacity directories.
 The same no-overwrite rule applies to whole evidence. Keep each group's capacity and whole matrices
-on byte-identical benchmark and artifact files. A whole matrix contains four optimized-head MTP3
-timing commands and four matched ordinary greedy controls across C=1..4. The eight MTP3
-fresh-request rows retain separately timed prefill/decode phases, speculative acceptance, and
-whole-request makespan; all sixteen rows retain target tokens so assembly can require exact
-MTP/ordinary parity per repetition and lane. The assembler uses only MTP3 timings for all 48 speed
-objectives, so the older standalone phase matrices are diagnostic history and must not be scheduled
+on byte-identical benchmark and artifact files. A whole matrix contains one spec-none ordinary
+timing command at each C=1..4, with matched 8K/32K rows. The assembler uses only those ordinary
+timings for all 24 speed objectives per candidate. MTP3 is optional exact-token/state/graph regression evidence,
+so older standalone phase matrices are diagnostic history and must not be scheduled
 or supplied as selection evidence. Only after both manifests are complete and have no
 `failures.json` may they enter the Pareto assembler.
 

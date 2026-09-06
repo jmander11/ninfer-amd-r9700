@@ -20,6 +20,7 @@ if str(REPO_ROOT) not in sys.path:
 from tools.bench.run_ninfer_bench_matrix import (
     MATRIX_SCHEMA_VERSION,
     PRODUCT_CONCURRENCIES,
+    R9700_POWER_PROFILE,
     build_cases,
     file_sha256,
     load_bench_report,
@@ -148,6 +149,15 @@ def _same_campaign(
     _validate_physical_identity(manifest.get("bench"), "matrix benchmark")
     if manifest.get("artifact") != artifact or manifest.get("bench") != bench:
         raise ValueError("DFlash campaign artifact or benchmark executable changed")
+    if manifest.get("preset") in {"dflash-shortlist", "dflash-pareto"} and (
+        manifest.get("power_profile") != {
+            "required": "auto",
+            "sysfs_path": str(R9700_POWER_PROFILE),
+            "observed": "auto",
+            "rechecked_after": "auto",
+        }
+    ):
+        raise ValueError("DFlash timing campaign does not bind stable auto power")
     if manifest.get("expected_kv_value_group") != group:
         raise ValueError("DFlash campaign cache group differs from selected base")
     if (

@@ -62,10 +62,10 @@ class PrefillChunkSelectionTest(unittest.TestCase):
                 {"timings": {"prefill_seconds": value}} for value in seconds
             ],
             "speculative": {
-                "enabled": True, "draft_window": 3, "rounds": 0,
+                "enabled": False, "draft_window": 0, "rounds": 0,
                 "drafted_tokens": 0, "accepted_tokens": 0, "fallback_steps": 0,
                 "acceptance_rate": None, "acceptance_length": None,
-                "accepted_per_position": [0, 0, 0],
+                "accepted_per_position": [],
             },
         }
         throughput, workspace = _validated_prefill_measurement(
@@ -76,7 +76,7 @@ class PrefillChunkSelectionTest(unittest.TestCase):
 
         wrong_protocol = json.loads(json.dumps(test))
         wrong_protocol["speculative"]["rounds"] = 1
-        with self.assertRaisesRegex(ValueError, "zero-proposal, zero-decode"):
+        with self.assertRaisesRegex(ValueError, "spec-none ordinary"):
             _validated_prefill_measurement(
                 wrong_protocol, 8192, Path("report.json")
             )
@@ -92,6 +92,7 @@ class PrefillChunkSelectionTest(unittest.TestCase):
                 "artifact_type": "ninfer_bench_matrix_run",
                 "schema_version": MATRIX_SCHEMA_VERSION,
                 "preset": "prefill-chunk",
+                "base_chunk_profile": "spec-none-ordinary",
                 "dry_run": False,
                 "failures": [],
                 "concurrency": [1],
@@ -152,6 +153,7 @@ class PrefillChunkSelectionTest(unittest.TestCase):
                 "artifact_type": "ninfer_bench_matrix_run",
                 "schema_version": MATRIX_SCHEMA_VERSION,
                 "preset": "prefill-chunk", "dry_run": False, "concurrency": [1],
+                "base_chunk_profile": "spec-none-ordinary",
                 "expected_kv_plane_layouts": {
                     "key": "token-fastest-head-major",
                     "value": "feature-fastest-page-major",
@@ -279,7 +281,10 @@ class PrefillChunkSelectionTest(unittest.TestCase):
             self.assertEqual(result["finalist_chunks"], [4096, 2048])
             self.assertEqual(result["selected_prefill_chunk"], 2048)
             self.assertEqual(result["measurement_semantics"], MEASUREMENT_SEMANTICS)
-            self.assertTrue(result["measurement_semantics"]["mtp_bulk_state_prefill"])
+            self.assertEqual(result["base_chunk_profile"], "spec-none-ordinary")
+            self.assertEqual(
+                result["measurement_semantics"]["configured_speculative_backend"], "none"
+            )
             self.assertFalse(result["measurement_semantics"]["proposal_head_executed"])
             self.assertEqual(result["measurement_semantics"]["decode_rounds"], 0)
             self.assertEqual(len(result["final_ranking"][0]["normalized_throughput"]), 24)

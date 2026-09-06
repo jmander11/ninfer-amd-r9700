@@ -18,6 +18,8 @@ from tools.bench.run_ninfer_bench_matrix import (
     NINFER_PREFIX,
     MATRIX_SCHEMA_VERSION,
     REPORT_SCHEMA_VERSION,
+    POWER_BOUND_PRESETS,
+    POWER_RECHECK_PRESETS,
     R9700_KV_PLANE_LAYOUTS,
     BenchCase,
     add_repetition_args,
@@ -44,7 +46,7 @@ from tools.bench.run_ninfer_bench_matrix import (
     validate_dflash_diagnostic_raw,
     validate_case_profile,
     validate_report_tests,
-    validate_whole_mtp_command,
+    validate_whole_ordinary_command,
     write_dflash_determinism,
     write_dflash_greedy_parity,
     write_dflash_quality_evidence,
@@ -90,6 +92,7 @@ class CompiledKvGroupTest(unittest.TestCase):
             validated = {
                 "artifact_type": "ninfer_r9700_prefill_chunk_selection",
                 "schema_version": 2,
+                "base_chunk_profile": "spec-none-ordinary",
                 "selected_prefill_chunk": 2048,
             }
             with mock.patch(
@@ -758,6 +761,7 @@ class CompiledKvGroupTest(unittest.TestCase):
             validated = {
                 "artifact_type": "ninfer_r9700_prefill_chunk_selection",
                 "schema_version": 2,
+                "base_chunk_profile": "spec-none-ordinary",
                 "selected_prefill_chunk": 2048,
             }
             argv = [
@@ -790,10 +794,11 @@ class CompiledKvGroupTest(unittest.TestCase):
                 "sha256": file_sha256(selection),
                 **validated,
             })
+            self.assertEqual(manifest["base_capacity_profile"], "spec-none-ordinary")
             self.assertTrue(all(
-                record["command"][record["command"].index("--draft-tokens") + 1] == "3"
-                and record["command"].count("--lm-head-draft") == 1
-                and "--no-device-graph" not in record["command"]
+                record["command"][record["command"].index("--draft-tokens") + 1] == "0"
+                and "--spec" not in record["command"]
+                and "--lm-head-draft" not in record["command"]
                 for record in manifest["commands"]
             ))
 
@@ -806,8 +811,11 @@ class CompiledKvGroupTest(unittest.TestCase):
         )
         self.assertTrue(all(case.concurrency_one_only for case in cases))
         self.assertTrue(all((case.repetitions, case.warmup) == (3, 1) for case in cases))
-        self.assertTrue(all("--draft-tokens" in case.args and "3" in case.args
-                            for case in cases))
+        self.assertTrue(all(
+            case.args[case.args.index("--draft-tokens") + 1] == "0"
+            and "--spec" not in case.args and "--lm-head-draft" not in case.args
+            for case in cases
+        ))
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -824,6 +832,7 @@ class CompiledKvGroupTest(unittest.TestCase):
             ]), 0)
             manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
             self.assertEqual((manifest["case_count"], manifest["point_count"]), (2, 2))
+            self.assertEqual(manifest["base_chunk_profile"], "spec-none-ordinary")
             self.assertEqual(
                 manifest["power_profile"],
                 {
@@ -950,7 +959,8 @@ class CompiledKvGroupTest(unittest.TestCase):
                 "--output-dir", str(output), "--dry-run",
             ]), 0)
             manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
-            self.assertEqual((manifest["case_count"], manifest["point_count"]), (2, 8))
+            self.assertEqual((manifest["case_count"], manifest["point_count"]), (1, 4))
+            self.assertEqual(manifest["base_ranking_profile"], "spec-none-ordinary")
             self.assertEqual(manifest["selected_prefill_chunk"], 2048)
             self.assertEqual(manifest["power_profile"], {
                 "required": "auto",
@@ -963,26 +973,15 @@ class CompiledKvGroupTest(unittest.TestCase):
                 == "2048"
                 for record in manifest["commands"]
             ))
-            mtp_records = [
+            ordinary_records = [
                 record for record in manifest["commands"]
                 if record["suite"] == "pareto_whole_inference"
             ]
-            ordinary_records = [
-                record for record in manifest["commands"]
-                if record["suite"] == "pareto_whole_control"
-            ]
-            self.assertEqual((len(mtp_records), len(ordinary_records)), (4, 4))
-            self.assertTrue(all(
-                record["command"].count("--lm-head-draft") == 1
-                and record["command"][record["command"].index("--spec") + 1] == "mtp"
-                and record["command"][record["command"].index("--draft-tokens") + 1] == "3"
-                and record["command"].count("--retain-token-ids") == 1
-                for record in mtp_records
-            ))
+            self.assertEqual(len(ordinary_records), 4)
             self.assertTrue(all(
                 record["command"][record["command"].index("--draft-tokens") + 1] == "0"
                 and "--lm-head-draft" not in record["command"]
-                and record["command"].count("--retain-token-ids") == 1
+                and "--spec" not in record["command"]
                 for record in ordinary_records
             ))
             self.assertIn(
@@ -991,25 +990,27 @@ class CompiledKvGroupTest(unittest.TestCase):
                 (output / "commands.sh").read_text(encoding="utf-8"),
             )
 
-    def test_pareto_whole_requires_executed_optimized_mtp_head(self) -> None:
+    def test_pareto_whole_requires_spec_none_ordinary_execution(self) -> None:
         case = build_cases("pareto-whole")[0]
         command = ["ninfer_bench", *case.args]
-        validate_whole_mtp_command(case, command)
-        with self.assertRaisesRegex(ValueError, "exactly one --lm-head-draft"):
-            validate_whole_mtp_command(
-                case, [part for part in command if part != "--lm-head-draft"]
+        validate_whole_ordinary_command(case, command)
+        with self.assertRaisesRegex(ValueError, "must be spec-none ordinary"):
+            validate_whole_ordinary_command(case, [*command, "--spec", "mtp"])
+        with self.assertRaisesRegex(ValueError, "requires --draft-tokens 0"):
+            validate_whole_ordinary_command(
+                case, ["3" if part == "0" else part for part in command]
             )
 
         config = {
-            "spec": "mtp", "draft_tokens": 3, "speculative_execution": True,
+            "spec": "none", "draft_tokens": 0, "speculative_execution": False,
             "dflash_verify_width_requested": 0, "dflash_verify_width": 0,
-            "proposal_head": "optimized", "use_device_graph": True,
-            "retain_token_ids": True, "repetitions": 3, "warmup": 1,
+            "proposal_head": "full", "use_device_graph": True,
+            "retain_token_ids": False, "repetitions": 3, "warmup": 1,
             "prefill_chunk": 4096, "concurrency": 1,
         }
         validate_case_profile(config, case)
-        with self.assertRaisesRegex(ValueError, "proposal_head='full'"):
-            validate_case_profile({**config, "proposal_head": "full"}, case)
+        with self.assertRaisesRegex(ValueError, "expected 'none'"):
+            validate_case_profile({**config, "spec": "mtp"}, case)
 
         def whole_row(tokens: int) -> dict[str, object]:
             return {
@@ -1021,27 +1022,16 @@ class CompiledKvGroupTest(unittest.TestCase):
                 "decode_engine_tok_s_mean": 512.0, "whole_output_tok_s_mean": 128.0,
                 "total_seconds_mean": 2.0,
                 "speculative": {
-                    "enabled": True, "draft_window": 3, "rounds": 0,
+                    "enabled": False, "draft_window": 0, "rounds": 0,
                     "drafted_tokens": 0, "accepted_tokens": 0, "fallback_steps": 0,
                     "acceptance_rate": None, "acceptance_length": None,
-                    "accepted_per_position": [0, 0, 0],
+                    "accepted_per_position": [],
                 },
-                "reps": [{"generated_token_ids_by_lane": [[1] * 257]} for _ in range(3)],
+                "reps": [{} for _ in range(3)],
             }
 
         report = {"config": config, "tests": [whole_row(8192), whole_row(32768)]}
-        with self.assertRaisesRegex(ValueError, "no speculative acceptance sample"):
-            validate_report_tests(report, case)
-
-        for row in report["tests"]:
-            row["speculative"].update({
-                "rounds": 192,
-                "drafted_tokens": 576,
-                "acceptance_rate": 0.0,
-                "acceptance_length": 1.0,
-            })
-        with self.assertRaisesRegex(ValueError, "no accepted speculative tokens"):
-            validate_report_tests(report, case)
+        validate_report_tests(report, case)
 
     def test_generic_speculative_diagnostic_allows_zero_acceptance(self) -> None:
         _validate_speculative(
@@ -1066,7 +1056,7 @@ class CompiledKvGroupTest(unittest.TestCase):
         self.assertTrue(case.concurrency_one_only)
         self.assertEqual(case.args, (
             "--whole-pg", "8192,256", "--prefill-chunk", "4096",
-            "--spec", "mtp", "--draft-tokens", "0",
+            "--draft-tokens", "0",
         ))
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -1192,9 +1182,9 @@ class CompiledKvGroupTest(unittest.TestCase):
 
     def test_pareto_supplements_retain_whole_inference_and_workload_feasibility(self) -> None:
         whole = build_cases("pareto-whole")
-        self.assertEqual(len(whole), 2)
-        self.assertEqual([case.parity_role for case in whole], ["mtp", "ordinary"])
-        self.assertTrue(all(case.retain_token_ids for case in whole))
+        self.assertEqual(len(whole), 1)
+        self.assertEqual([case.parity_role for case in whole], ["ordinary"])
+        self.assertFalse(whole[0].retain_token_ids)
         self.assertIn("--whole-pg", whole[0].args)
         self.assertEqual(
             whole[0].args[whole[0].args.index("--whole-pg") + 1],
@@ -1204,6 +1194,10 @@ class CompiledKvGroupTest(unittest.TestCase):
             whole[0].args[whole[0].args.index("--prefill-chunk") + 1], "4096"
         )
         self.assertEqual((whole[0].repetitions, whole[0].warmup), (3, 1))
+        self.assertTrue(
+            {"dflash-shortlist", "dflash-pareto"}
+            <= POWER_BOUND_PRESETS & POWER_RECHECK_PRESETS
+        )
         capacity = build_cases("pareto-feasibility")
         self.assertEqual(len(capacity), 1)
         self.assertEqual(
@@ -1221,6 +1215,14 @@ class CompiledKvGroupTest(unittest.TestCase):
             ],
             "4096",
         )
+        self.assertEqual(effective_capacity[0].name, "effective_capacity_ordinary")
+        self.assertEqual(
+            effective_capacity[0].args[
+                effective_capacity[0].args.index("--draft-tokens") + 1
+            ], "0",
+        )
+        self.assertNotIn("--spec", effective_capacity[0].args)
+        self.assertNotIn("--lm-head-draft", effective_capacity[0].args)
         dflash_capacity = build_cases("dflash-feasibility", 7, 12)
         self.assertEqual(len(dflash_capacity), 1)
         self.assertIn("--kv-capacity", dflash_capacity[0].args)

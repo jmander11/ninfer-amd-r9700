@@ -98,21 +98,18 @@ python3 tools/bench/run_ninfer_bench_matrix.py --preset full \
   --weights /absolute/path/to/selected.ninfer
 
 # Optional isolated phase diagnostic: 8K/32K MTP3 prefill and prefix-reuse-seeded decode.
-# Static-profile selection does not require this duplicate work; pareto-whole retains the
-# decision-relevant prefill and decode timings from its fresh-request repetitions.
+# Static-profile selection does not require this diagnostic; pareto-whole supplies its
+# decision-relevant timings from ordinary fresh-request repetitions.
 python3 tools/bench/run_ninfer_bench_matrix.py --preset pareto \
   --weights /absolute/path/to/selected.ninfer \
   --concurrency 1 --concurrency 2 --concurrency 3 --concurrency 4 \
   --expected-q4-activation-bits 8 --expected-w8-activation-bits 8 \
   --expected-fp8-qk-wmma 1
 
-# Complete selection-speed evidence: fresh-prompt prefill, decode, acceptance, makespan, and
-# output throughput for the same Pareto profiles. Every MTP3 row explicitly uses the optimized
-# draft head and is rejected unless it records nonzero speculative rounds and drafted tokens.
-# A matched ordinary greedy control retains every output token; assembly requires exact target
-# output identity for every workload, repetition, and concurrency lane. Control timings are not
-# selection inputs. Each repetition's speculative counter sums its request lanes, so the MTP3
-# g256 minimum is C*ceil(256/4)=64*C rounds (64, 128, 192, 256 for C=1..4).
+# Complete base-selection speed evidence: ordinary spec-none fresh-prompt prefill, decode,
+# makespan, and output throughput for the same Pareto profiles. MTP3 is optional diagnostic
+# exact-token/state/graph regression evidence and is neither required nor ranked. DFlash remains
+# the required downstream speculative admission for the selected base profile.
 python3 tools/bench/run_ninfer_bench_matrix.py --preset pareto-whole \
   --weights /absolute/path/to/selected.ninfer \
   --concurrency 1 --concurrency 2 --concurrency 3 --concurrency 4 \
@@ -164,13 +161,12 @@ python3 tools/bench/run_ninfer_bench_matrix.py --preset pareto-whole \
 Review each `manifest.json` and `commands.sh`. After the GPU queue is explicitly released, rerun
 the corresponding command with `--resume` in place of `--prepare-only`. Resume revalidates the
 artifact/receipt, benchmark and planner hashes, fixed C1..4 inventories, command matrix, and current
-`auto` power state before executing missing cells. `pareto-whole` already contains the MTP3
-fresh-request rows and its spec-none greedy control; its existing assembly requires exact retained
-target tokens for every repetition and concurrency lane. `pareto-capacity` is the model-native
-capacity matrix for the same MTP3 startup plan. Neither prepared manifest is performance evidence.
+`auto` power state before executing missing cells. `pareto-whole` contains one spec-none ordinary
+fresh-request row per concurrency and is the base-selection timing input. `pareto-capacity` is the
+model-native capacity matrix. Neither prepared manifest is performance evidence.
 
 # Production prefill-chunk selection starts with all twelve candidates at 8K, C=1, using the
-# MTP3-enabled prefill state path with 3/1 timing.
+# spec-none ordinary Text-prefill path with 3/1 timing.
 # The runner fails before creating the output directory unless the R9700 sysfs power profile is
 # `auto`; dry runs record the requirement but do not inspect hardware state.
 # Invoke this template once for every recipe x G16/G32 x dense/sparse tuple. Each output directory
@@ -593,8 +589,8 @@ run_mixed_selection_pair 32 build-r9700-dense-selection-g32 \
 
 # Run a group's whole matrix only after its capacity matrix completes. Do not rebuild or replace
 # the artifact between the two runs: the assembler requires byte-identical benchmark and artifact
-# provenance. Pareto-whole produces eight commands: four MTP3 timing reports and four matched
-# ordinary target-output controls, each with two 8K/32K fresh-request rows. Both v14 manifests
+# provenance. Pareto-whole produces four commands: one ordinary spec-none report at each C=1..4,
+# each with two 8K/32K fresh-request rows. Both v14 manifests
 # must be complete with no failures.json. The in-progress/retained pareto-phase directories are
 # diagnostic history and are not inputs to static-profile selection. Use --resume only with the
 # exact original command in the corresponding capacity or whole directory.
@@ -615,9 +611,8 @@ run_mixed_selection_pair 32 build-r9700-dense-selection-g32 \
 # pair by as much as 0.198%. Those results support the current 1+3 floor, not a two-sample or
 # zero-warmup gate. Do not multiply repetitions by lane: one C-lane repetition already measures the
 # complete startup-fixed concurrent product workload.
-# Terminal assembly checks each raw repetition and conserves its sum against the report aggregate.
-# A row above the theoretical 64*C minimum retains its measured throughput and acceptance evidence;
-# it does not trigger an MTP proposal-head precision branch or alter base selection.
+# Terminal base assembly consumes only spec-none ordinary capacity and whole rows. MTP acceptance
+# accounting remains optional diagnostic evidence and cannot alter base selection.
 
 # DFlash runs begin only after the terminal base decision selects the artifact, cache group, and
 # ordinary Text-prefill profile. Convert and measure the companion for that selected base recipe.
@@ -626,6 +621,9 @@ run_mixed_selection_pair 32 build-r9700-dense-selection-g32 \
 ## This preparation fails until the schema-v7 base winner exists. It resolves the exact base,
 ## companion, selected chunk, cache group, attention build, and conversion receipt. It runs only
 ## the selected companion and derives K/W from the physical shortlist; no K/W is entered here.
+## Companion conversion is bound to `/ssdpool2nvme/local_llm/.venv-ninfer-r9700/bin/python`
+## with `LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/core-10.0/lib`; preparation fails if that
+## interpreter cannot import ROCm Torch and safetensors.
 bash profiles/bench/selected-dflash-prepare-20260905/prepare.sh
 
 ## Root schedules this future command after reviewing the generated plan. The staged runner uses
@@ -664,15 +662,11 @@ four-chunk screen, normalizes each 32K objective against its better finalist, an
 minimum of all twenty-four ratios. Exact ties minimize the maximum retained workspace peak, then select
 the smaller chunk. The schema-v2 record reopens every raw report and binds every source hash.
 
-These prefill-only cases request exactly one output token. The MTP backend therefore executes the
-real per-chunk bulk MTP state/KV prefill in addition to Text prefill and target bonus-token sampling,
-but the runtime correctly resolves the initial MTP proposal extent to zero: there are no proposal
-head calls, drafted tokens, or decode rounds, and `--lm-head-draft` is only a bound startup setting
-in this protocol. The selector requires those zero counters and records this timed scope explicitly.
-This is the matched chunk-dependent product prefill control; it is not a substitute for the later
-whole-inference MTP3 measurement, whose longer output budget prepares initial drafts and decodes.
-An ordinary `--draft-tokens 0` prefill control omits the entire MTP state/KV prefill and therefore
-measures a different, smaller workload rather than a drop-in replacement for these selection rows.
+These prefill-only cases request exactly one output token and run the spec-none ordinary route with
+`--draft-tokens 0`. They measure Text prefill plus target sampling without MTP state/KV preparation,
+proposal-head work, drafted tokens, or decode rounds. The selector requires that exact protocol and
+records `base_chunk_profile=spec-none-ordinary`; DFlash selected-only evaluation later owns its own
+feature/state performance.
 
 Supply the selected value exactly once as `--prefill-chunk N` to fresh `pareto`, `pareto-whole`,
 `pareto-feasibility`, and `pareto-capacity` runs. There is no implicit 4,096 fallback for these
@@ -681,12 +675,13 @@ structured-fixture operator speedup does not replace this real-model selection.
 
 The ordinary-decode diagnostic uses the same all-Q4 G16 B128/S16/tau900 benchmark executable,
 artifact, 4,096-token chunk, graph route, 8K prompt, and 256-token output extent as the retained
-19.24 tok/s MTP3 row, changing only speculative execution. Although the benchmark CLI spells the
-request `--spec mtp --draft-tokens 0`, zero drafts resolve the Engine backend and report `spec=none`,
-`draft_tokens=0`, `speculative_execution=false`, per-test `speculative.enabled=false`, and the
-ordinary `device_graph` decode path. The fixed preset runs only C=1 with three measured repetitions
-after one warmup, retains separate prefill/decode timings and rates, rejects reuse of an existing
-output directory, and binds/rechecks the exact `auto` power profile.
+19.24 tok/s MTP3 row, changing only speculative execution. Its command explicitly uses
+`--draft-tokens 0` with no speculative backend or draft-head option, and the report must record
+`spec=none`, `draft_tokens=0`, `speculative_execution=false`, per-test
+`speculative.enabled=false`, and the ordinary `device_graph` decode path. The fixed preset runs
+only C=1 with three measured repetitions after one warmup, retains separate prefill/decode timings
+and rates, rejects reuse of an existing output directory, and binds/rechecks the exact `auto` power
+profile.
 
 The retained run at the path below passed the strict validator with speculative execution disabled
 in all three repetitions. It measured `239.5738442` prefill tok/s (`34.1947324 s`) and
@@ -912,9 +907,9 @@ The decision replaces the fresh trace's measured Q4 gate/up service with the qua
 complete-path FP8/Q4 time ratio. It reports the exact 64-object resident-byte delta, the historical
 P2048/P8192 capacity calculation for every G16/G32 C1..4 cell, and projected whole-P2048 time and
 throughput. Its `proceed` verdict required a faster complete FP8 median, nonnegative historical
-slack in all 16 cells, and an improving whole projection. That capacity calculation omitted MTP
-plus optimized-head materialization and is invalid for current admission; only fresh selected-
-chunk physical capacity can admit the route.
+slack in all 16 cells, and an improving whole projection. That historical capacity calculation
+predates the current N16 artifact, selected chunk, and exact ordinary physical-capacity contract;
+only fresh selected-chunk physical capacity can admit the route.
 
 ### FP8 post-gate/up fixed-role decision
 
@@ -925,9 +920,9 @@ measured Q4 service under that envelope. The fixed role result is
 1,024,065,536 additional bytes and 87,724,946 ns of measured P2048 Q4 service. The two attention
 roles share `[2048,7168,5120]`, so the set requires only that matched complete-path qualifier and
 the `[2048,4096,5120]` GDN query/key qualifier. Its reported 2,004,481-byte tight-cell remainder is
-invalid because the capacity input omitted MTP plus optimized-head materialization; it is not
-current capacity evidence and admits no additional role. Fresh selected-chunk physical capacity
-owns admission.
+invalid because its capacity input predates the current N16 artifact, selected chunk, and exact
+ordinary physical-capacity contract; it is not current capacity evidence and admits no additional
+role. Fresh selected-chunk physical capacity owns admission.
 
 Each pending input uses schema `ninfer.r9700.fp8_projection_qualification.v1`, version 1, with its
 fixed qualification ID, shape, live source/executable hashes, R9700/gfx1201/auto identity, the

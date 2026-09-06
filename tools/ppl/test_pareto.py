@@ -31,7 +31,7 @@ def capacity_failure(concurrency: int) -> dict:
     command = [
         "bench", "--weights", "/model.ninfer", "--max-ctx", "262144",
         "--concurrency", str(concurrency), "--kv-capacity", "auto",
-        "--spec", "mtp", "--draft-tokens", "3", "--lm-head-draft",
+        "--draft-tokens", "0",
         "--output-file", report,
     ]
     stderr = (
@@ -42,7 +42,7 @@ def capacity_failure(concurrency: int) -> dict:
         "11477728256 bytes are available after weights\n"
     )
     campaign_failure = {
-        "suite": "pareto_effective_capacity", "case": "effective_capacity_mtp3",
+        "suite": "pareto_effective_capacity", "case": "effective_capacity_ordinary",
         "concurrency": concurrency, "returncode": 1, "stdout": stdout,
         "stderr": stderr_path, "command": command,
     }
@@ -109,6 +109,8 @@ def candidate(
     return {
         "name": name,
         "prefill_chunk": 4096,
+        "whole_inference_profile": "spec-none-ordinary",
+        "base_capacity_profile": "spec-none-ordinary",
         "weight_recipe": weight_recipe,
         "cache_profile": {
             "value_group": group,
@@ -143,6 +145,27 @@ def candidate(
 
 
 class ParetoTest(unittest.TestCase):
+    def test_required_mode_rejects_missing_base_profile_markers(self) -> None:
+        row = candidate(
+            "candidate", mean_nll_delta=0.0, severe_rate=0.0,
+            speed=(1.0, 1.0, 1.0), capacity=1,
+        )
+        for missing in ("base_ranking_profile", "base_capacity_profile"):
+            payload = {
+                "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
+                "required_speed_workloads": WORKLOADS,
+                "require_single_static_profile_selection": True,
+                "base_ranking_profile": "spec-none-ordinary",
+                "base_capacity_profile": "spec-none-ordinary",
+                "selected_prefill_chunk": 4096,
+                "candidates": [row],
+            }
+            del payload[missing]
+            with self.subTest(missing=missing), self.assertRaisesRegex(
+                ValueError, "ordinary ranking and capacity profiles"
+            ):
+                pareto.classify(payload)
+
     def test_rejects_non_product_concurrency_cells(self) -> None:
         row = candidate(
             "candidate", mean_nll_delta=0.0, severe_rate=0.0,
@@ -655,6 +678,8 @@ class ParetoTest(unittest.TestCase):
                 "schema_version": 4,
                 "required_speed_workloads": WORKLOADS,
                 "require_single_static_profile_selection": True,
+                "base_ranking_profile": "spec-none-ordinary",
+                "base_capacity_profile": "spec-none-ordinary",
                 "selected_prefill_chunk": 4096,
             "prefill_chunk_selection": CHUNK_SELECTION,
                 "candidates": rows,
@@ -696,6 +721,8 @@ class ParetoTest(unittest.TestCase):
             "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
             "required_speed_workloads": WORKLOADS,
             "require_single_static_profile_selection": True,
+            "base_ranking_profile": "spec-none-ordinary",
+            "base_capacity_profile": "spec-none-ordinary",
             "selected_prefill_chunk": 4096,
             "prefill_chunk_selection": CHUNK_SELECTION,
             "candidates": rows,
@@ -729,9 +756,25 @@ class ParetoTest(unittest.TestCase):
                 "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
                 "required_speed_workloads": WORKLOADS,
                 "require_single_static_profile_selection": True,
+                "base_ranking_profile": "spec-none-ordinary",
+                "base_capacity_profile": "spec-none-ordinary",
                 "selected_prefill_chunk": 4096,
                 "prefill_chunk_selection": CHUNK_SELECTION,
                 "candidates": legacy_head_gate,
+                "source_provenance": provenance,
+            })
+        stale_mtp = copy.deepcopy(rows)
+        stale_mtp[0]["mtp_target_token_parity"] = {"c1": {"pass": True}}
+        with self.assertRaisesRegex(ValueError, "lacks ordinary whole-inference ranking"):
+            pareto.classify({
+                "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
+                "required_speed_workloads": WORKLOADS,
+                "require_single_static_profile_selection": True,
+                "base_ranking_profile": "spec-none-ordinary",
+                "base_capacity_profile": "spec-none-ordinary",
+                "selected_prefill_chunk": 4096,
+                "prefill_chunk_selection": CHUNK_SELECTION,
+                "candidates": stale_mtp,
                 "source_provenance": provenance,
             })
 
@@ -773,6 +816,8 @@ class ParetoTest(unittest.TestCase):
             "required_quality_cells": ["8k", "32k"],
             "required_capacity_cells": [f"c{concurrency}" for concurrency in range(1, 5)],
             "require_single_static_profile_selection": True,
+            "base_ranking_profile": "spec-none-ordinary",
+            "base_capacity_profile": "spec-none-ordinary",
             "selected_prefill_chunk": 4096,
             "prefill_chunk_selection": CHUNK_SELECTION,
             "candidates": failed_pair_rows,
@@ -838,6 +883,8 @@ class ParetoTest(unittest.TestCase):
             "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
             "required_speed_workloads": WORKLOADS,
             "require_single_static_profile_selection": True,
+            "base_ranking_profile": "spec-none-ordinary",
+            "base_capacity_profile": "spec-none-ordinary",
             "selected_prefill_chunk": 4096,
             "candidates": rows, "source_provenance": provenance,
         }
@@ -851,6 +898,8 @@ class ParetoTest(unittest.TestCase):
                 "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
                 "required_speed_workloads": WORKLOADS,
                 "require_single_static_profile_selection": True,
+                "base_ranking_profile": "spec-none-ordinary",
+                "base_capacity_profile": "spec-none-ordinary",
                 "selected_prefill_chunk": 4096,
             "prefill_chunk_selection": CHUNK_SELECTION,
                 "candidates": mismatched_chunk,
@@ -875,6 +924,8 @@ class ParetoTest(unittest.TestCase):
                 "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
                 "required_speed_workloads": WORKLOADS,
                 "require_single_static_profile_selection": True,
+                "base_ranking_profile": "spec-none-ordinary",
+                "base_capacity_profile": "spec-none-ordinary",
                 "selected_prefill_chunk": 4096,
             "prefill_chunk_selection": CHUNK_SELECTION,
                 "candidates": [*rows, *duplicate_rows],
@@ -896,6 +947,8 @@ class ParetoTest(unittest.TestCase):
                 "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
                 "required_speed_workloads": WORKLOADS,
                 "require_single_static_profile_selection": True,
+                "base_ranking_profile": "spec-none-ordinary",
+                "base_capacity_profile": "spec-none-ordinary",
                 "selected_prefill_chunk": 4096,
             "prefill_chunk_selection": CHUNK_SELECTION,
                 "candidates": [*rows, *fourth_rows],
@@ -920,6 +973,8 @@ class ParetoTest(unittest.TestCase):
                 "schema_version": 4,
                 "required_speed_workloads": WORKLOADS,
                 "require_single_static_profile_selection": True,
+                "base_ranking_profile": "spec-none-ordinary",
+                "base_capacity_profile": "spec-none-ordinary",
                 "selected_prefill_chunk": 4096,
                 "prefill_chunk_selection": CHUNK_SELECTION,
                 "candidates": rows,

@@ -57,7 +57,7 @@ See tools/r9700/README.md, docs/maintainer/kernel-iteration.md, and bench/README
 matrix manifests. `bench/select_prefill_chunk.py` owns the twelve-candidate global chunk decision;
 `ppl/assemble_pareto.py` plus `ppl/pareto.py` bind that authority into the schema-v7 base static-profile
 decision. After that record fixes G16 or G32, `bench/assemble_dflash_selection.py` is the sole owner
-of the schema-v1 DFlash K/W decision: it binds the shortlist, every frontier capacity campaign,
+of the schema-v2 DFlash K/W decision: it binds the shortlist, every frontier capacity campaign,
 every eligible full DFlash matrix, exact exclusions, and generated-behavior gates into one retained
 winner and full frontier. See bench/README.md for the copy-ready commands.
 

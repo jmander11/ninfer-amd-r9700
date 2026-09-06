@@ -9,6 +9,7 @@ import importlib.util
 import json
 import os
 import shlex
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -23,7 +24,17 @@ RUNNER = REPO / "tools/bench/run_ninfer_bench_matrix.py"
 ASSEMBLER = REPO / "tools/bench/assemble_dflash_selection.py"
 CONVERTER = REPO / "tools/convert/qwen3_8_27b_r9700/convert_dflash2_q4.py"
 DFLASH_INVENTORY = REPO / "tools/convert/qwen3_8_27b_r9700/dflash2_q4_inventory.py"
+SEMANTIC_AUTHORITIES = (
+    REPO / "tools/bench/matrix_contract.py",
+    REPO / "tools/bench/prefill_chunk_authority.py",
+    REPO / "tools/bench/select_prefill_chunk.py",
+    REPO / "tools/ppl/run.py",
+    REPO / "tools/ppl/assemble_pareto.py",
+    REPO / "tools/ppl/pareto.py",
+)
 DFLASH_SOURCE = Path("/ssdpool2nvme/local_llm/models/qwen3.8-27b-dflash2")
+CONVERSION_PYTHON = Path("/ssdpool2nvme/local_llm/.venv-ninfer-r9700/bin/python")
+CONVERSION_LD_LIBRARY_PATH = "/opt/rocm/lib:/opt/rocm/core-10.0/lib"
 RUNTIME_AUTHORITIES = (
     REPO / "src/targets/qwen3_8_27b/impl/config.h",
     REPO / "src/targets/qwen3/impl/runtime/dflash_context_impl.h",
@@ -43,6 +54,54 @@ COMPANIONS = {
 def sha(path: Path) -> str:
     with path.open("rb") as source:
         return hashlib.file_digest(source, "sha256").hexdigest()
+
+
+def _conversion_python_identity() -> dict:
+    """Bind the one interpreter/environment capable of the ROCm conversion."""
+
+    if (
+        not CONVERSION_PYTHON.is_absolute()
+        or not CONVERSION_PYTHON.is_file()
+        or not os.access(CONVERSION_PYTHON, os.X_OK)
+    ):
+        raise ValueError("selected DFlash conversion Python is unavailable")
+    pyvenv = CONVERSION_PYTHON.parent.parent / "pyvenv.cfg"
+    if not pyvenv.is_file():
+        raise ValueError("selected DFlash conversion Python lacks pyvenv.cfg")
+    probe = (
+        "import json, sys, torch, safetensors; "
+        "print(json.dumps({'runtime_executable': sys.executable, "
+        "'python_version': '.'.join(map(str, sys.version_info[:3])), "
+        "'torch': torch.__version__, 'torch_hip': torch.version.hip, "
+        "'safetensors': safetensors.__version__}))"
+    )
+    environment = {**os.environ, "LD_LIBRARY_PATH": CONVERSION_LD_LIBRARY_PATH}
+    try:
+        completed = subprocess.run(
+            [str(CONVERSION_PYTHON), "-c", probe], capture_output=True, text=True,
+            check=True, env=environment,
+        )
+        runtime = json.loads(completed.stdout)
+    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError) as error:
+        raise ValueError(
+            "selected DFlash conversion Python cannot import ROCm Torch and safetensors"
+        ) from error
+    if (
+        not isinstance(runtime, dict)
+        or set(runtime) != {
+            "runtime_executable", "python_version", "torch", "torch_hip", "safetensors",
+        }
+        or not all(isinstance(runtime.get(key), str) and runtime[key] for key in runtime)
+        or runtime.get("runtime_executable") != str(CONVERSION_PYTHON)
+    ):
+        raise ValueError("selected DFlash conversion Python returned malformed identity")
+    return {
+        "launcher_path": str(CONVERSION_PYTHON),
+        "launcher_sha256": sha(CONVERSION_PYTHON),
+        "pyvenv_cfg": {"path": str(pyvenv), "sha256": sha(pyvenv)},
+        "environment": {"LD_LIBRARY_PATH": CONVERSION_LD_LIBRARY_PATH},
+        **runtime,
+    }
 
 
 def _base_migration_authority(artifact: dict) -> dict:
@@ -156,6 +215,24 @@ def _validate_companion(plan: dict) -> None:
         raise ValueError("DFlash companion conversion does not match the terminal base")
 
 
+def _companion_conversion_command(plan: dict, *, companion_exists: bool) -> list[str]:
+    """Build the one selected winner's current-N16 companion conversion command."""
+
+    command = [
+        "env", f"LD_LIBRARY_PATH={plan['conversion_python']['environment']['LD_LIBRARY_PATH']}",
+        plan["conversion_python"]["launcher_path"], "-m",
+        "tools.convert.qwen3_8_27b_r9700.convert_dflash2_q4",
+        "--base", plan["base_artifact"]["path"],
+        "--dflash-model", plan["dflash_source"]["path"],
+        "--out", plan["companion"]["path"],
+    ]
+    if companion_exists:
+        command.append("--finalize-report")
+    else:
+        command.extend(["--device", "cuda"])
+    return command
+
+
 def _publish_text(path: Path, payload: str) -> None:
     descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
@@ -255,6 +332,7 @@ def prepare(selection: Path, out: Path) -> dict:
             "model_sha256": sha(source_tensor), "config_sha256": sha(source_config),
             "readme_sha256": sha(source_readme),
         },
+        "conversion_python": _conversion_python_identity(),
         "runtime_authorities": [
             {"path": str(path.resolve()), "sha256": sha(path)} for path in RUNTIME_AUTHORITIES
         ],
@@ -270,20 +348,11 @@ def prepare(selection: Path, out: Path) -> dict:
     companion_exists = companion.is_file()
     conversion_exists = conversion.is_file()
     if not companion_exists or not conversion_exists:
-        if recipe != "four-role":
-            raise ValueError("selected non-hybrid companion or conversion report is missing")
         if conversion_exists:
-            raise ValueError("selected hybrid companion is missing but its conversion report exists")
-        conversion_command = [
-            "python3", "-m", "tools.convert.qwen3_8_27b_r9700.convert_dflash2_q4",
-            "--base", route["artifact"]["path"], "--dflash-model", str(DFLASH_SOURCE),
-            "--out", str(companion),
-        ]
-        if companion_exists:
-            conversion_command.append("--finalize-report")
-        else:
-            conversion_command.extend(["--device", "cuda"])
-        commands.append(conversion_command)
+            raise ValueError("selected companion is missing but its conversion report exists")
+        commands.append(_companion_conversion_command(
+            plan, companion_exists=companion_exists
+        ))
     else:
         _validate_companion(plan)
     out.mkdir(parents=True)
@@ -305,7 +374,9 @@ def prepare(selection: Path, out: Path) -> dict:
     _write_closure(out / "prepared.sha256", [
         Path(__file__).resolve(), ASSEMBLER, RUNNER, CONVERTER, DFLASH_INVENTORY,
         RESOLVER, selection, plan_path, out / "commands.sh",
-        source_tensor, source_config, source_readme, *RUNTIME_AUTHORITIES,
+        source_tensor, source_config, source_readme, CONVERSION_PYTHON,
+        CONVERSION_PYTHON.parent.parent / "pyvenv.cfg", *SEMANTIC_AUTHORITIES,
+        *RUNTIME_AUTHORITIES,
     ])
     return plan
 
@@ -320,6 +391,7 @@ def _load_plan(path: Path) -> tuple[dict, Path]:
     source_tensor = Path(plan["dflash_source"]["path"]) / "model.safetensors"
     source_config = Path(plan["dflash_source"]["path"]) / "config.json"
     source_readme = Path(plan["dflash_source"]["path"]) / "README.md"
+    conversion_python = _conversion_python_identity()
     base_id = route["artifact"]["weights_id"]
     if base_id not in COMPANIONS:
         raise ValueError("terminal base has no registered DFlash2 companion")
@@ -364,6 +436,7 @@ def _load_plan(path: Path) -> tuple[dict, Path]:
             {"path": str(authority.resolve()), "sha256": sha(authority)}
             for authority in RUNTIME_AUTHORITIES
         ]
+        or plan.get("conversion_python") != conversion_python
     ):
         raise ValueError("terminal winner changed after DFlash preparation")
     _validate_companion(plan)

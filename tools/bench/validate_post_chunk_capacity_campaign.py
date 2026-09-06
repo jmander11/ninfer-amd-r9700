@@ -141,6 +141,7 @@ def validate_matrix(
         or manifest.get("artifact_type") != "ninfer_bench_matrix_run"
         or manifest.get("schema_version") != MATRIX_SCHEMA_VERSION
         or manifest.get("preset") != "pareto-capacity"
+        or manifest.get("base_capacity_profile") != "spec-none-ordinary"
         or manifest.get("dry_run") is not False
         or manifest.get("prepare_only") is not (not executed)
         or manifest.get("post_chunk_capacity_gate") is not True
@@ -182,7 +183,7 @@ def validate_matrix(
         raise ValueError(f"capacity manifest has an unsupported candidate identity: {identity!r}")
     records = manifest.get("commands")
     expected_points = {
-        ("pareto_effective_capacity", "effective_capacity_mtp3", concurrency)
+        ("pareto_effective_capacity", "effective_capacity_ordinary", concurrency)
         for concurrency in PRODUCT_CONCURRENCIES
     }
     actual_points = {
@@ -198,16 +199,13 @@ def validate_matrix(
         command = record.get("command")
         if not isinstance(command, list) or any(not isinstance(part, str) for part in command):
             raise ValueError("capacity manifest has an invalid command")
-        _require_option(command, "--spec", "mtp")
-        _require_option(command, "--draft-tokens", "3")
+        _require_option(command, "--draft-tokens", "0")
         _require_option(command, "--kv-capacity", "auto")
         _require_option(command, "--max-ctx", "262144")
         _require_option(command, "--prefill-chunk", str(authority["selected_prefill_chunk"]))
         _require_option(command, "--concurrency", str(record["concurrency"]))
-        if command.count("--lm-head-draft") != 1 or "--no-device-graph" in command:
-            raise ValueError(
-                "capacity command must materialize the optimized speculative weights and Device Graph"
-            )
+        if "--spec" in command or "--lm-head-draft" in command or "--no-device-graph" in command:
+            raise ValueError("capacity command must use the ordinary Device Graph profile")
     failed = _validate_capacity_outcomes(root, manifest, records) if executed else 0
     if _regular(path, "capacity manifest") != owner or file_sha256(path) != before:
         raise ValueError(f"capacity manifest changed while validating: {path}")

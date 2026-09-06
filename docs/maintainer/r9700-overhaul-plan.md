@@ -1657,8 +1657,9 @@ Replace functional routes with measured gfx1201 families:
   capacity-eligible profile, after validating symmetric dense/XAttention eligibility within its
   recipe/cache-group pair. Each retained schema-v14 manifest must be published atomically in its
   own directory.
-  These base-selection rows retain the fixed existing MTP3 regression profile; they do not require
-  new MTP optimization. Recipe-specific DFlash shortlist/capacity/Pareto remains the selected-only
+  Base selection ranks only matched spec-none ordinary whole rows. Existing MTP3 evidence is an
+  optional exact-token/state/graph regression and is not a prerequisite or ranking input.
+  Recipe-specific DFlash shortlist/capacity/Pareto remains the selected-only
   downstream gate because its companion artifact depends on the base winner. The required
   shared-runner publication/DFlash-preset patch is complete: runner-owned outputs use
   inode-checked same-directory durable publication and resume validates regular-file ownership and

@@ -168,7 +168,7 @@ class PostChunkCapacityCampaignTest(unittest.TestCase):
         self.assertNotIn(failed_identity, result["whole_eligible_identities"])
         self.assertNotIn(paired_identity, result["whole_eligible_identities"])
 
-    def test_matrix_requires_mtp3_optimized_head_and_graph(self) -> None:
+    def test_matrix_requires_spec_none_ordinary_and_graph(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             root.mkdir(exist_ok=True)
@@ -180,12 +180,13 @@ class PostChunkCapacityCampaignTest(unittest.TestCase):
                 "selected_prefill_chunk": 2048,
             }
             common = [
-                "bench", "--spec", "mtp", "--draft-tokens", "3", "--lm-head-draft",
+                "bench", "--draft-tokens", "0",
                 "--kv-capacity", "auto", "--max-ctx", "262144", "--prefill-chunk", "2048",
             ]
             manifest = {
                 "artifact_type": "ninfer_bench_matrix_run", "schema_version": 14,
                 "preset": "pareto-capacity", "dry_run": False, "prepare_only": True,
+                "base_capacity_profile": "spec-none-ordinary",
                 "post_chunk_capacity_gate": True, "prefill_chunk_authority": authority,
                 "selected_prefill_chunk": 2048, "concurrency": [1, 2, 3, 4],
                 "case_count": 1, "point_count": 4,
@@ -193,7 +194,7 @@ class PostChunkCapacityCampaignTest(unittest.TestCase):
                 "expected_kv_value_group": 16, "expected_xattention_profile": "dense",
                 **STATIC_CONTRACT,
                 "commands": [
-                    {"suite": "pareto_effective_capacity", "case": "effective_capacity_mtp3",
+                    {"suite": "pareto_effective_capacity", "case": "effective_capacity_ordinary",
                      "concurrency": concurrency,
                      "report": str(root / f"report-c{concurrency}.json"),
                      "command": [*common, "--concurrency", str(concurrency), "--output-file",
@@ -220,13 +221,14 @@ class PostChunkCapacityCampaignTest(unittest.TestCase):
             root = Path(directory)
             authority = {"selected_prefill_chunk": 2048}
             command = [
-                "bench", "--spec", "mtp", "--draft-tokens", "3", "--lm-head-draft",
+                "bench", "--draft-tokens", "0",
                 "--kv-capacity", "auto", "--max-ctx", "262144", "--prefill-chunk", "2048",
                 "--concurrency", "1", "--output-file", str(root / "report.json"),
             ]
             manifest = {
                 "artifact_type": "ninfer_bench_matrix_run", "schema_version": 14,
                 "preset": "pareto-capacity", "dry_run": False, "prepare_only": True,
+                "base_capacity_profile": "spec-none-ordinary",
                 "post_chunk_capacity_gate": True, "prefill_chunk_authority": authority,
                 "selected_prefill_chunk": 2048, "concurrency": [1, 2, 3, 4],
                 "case_count": 1, "point_count": 4,
@@ -236,7 +238,7 @@ class PostChunkCapacityCampaignTest(unittest.TestCase):
                 "commands": [
                     {
                         "suite": "pareto_effective_capacity",
-                        "case": "effective_capacity_mtp3", "concurrency": concurrency,
+                        "case": "effective_capacity_ordinary", "concurrency": concurrency,
                         "report": str(root / f"report-c{concurrency}.json"),
                         "command": [
                             *(command[:-4]), "--concurrency", str(concurrency),
@@ -263,20 +265,21 @@ class PostChunkCapacityCampaignTest(unittest.TestCase):
                 "schema_version": 2, "selected_prefill_chunk": 2048,
             }
             common = [
-                "bench", "--spec", "mtp", "--draft-tokens", "3", "--lm-head-draft",
+                "bench", "--draft-tokens", "0",
                 "--kv-capacity", "auto", "--max-ctx", "262144", "--prefill-chunk", "2048",
             ]
             records = []
             for concurrency in (1, 2, 3, 4):
                 report = root / f"report-c{concurrency}.json"
                 records.append({
-                    "suite": "pareto_effective_capacity", "case": "effective_capacity_mtp3",
+                    "suite": "pareto_effective_capacity", "case": "effective_capacity_ordinary",
                     "concurrency": concurrency, "report": str(report),
                     "command": [*common, "--concurrency", "4", "--output-file", str(report)],
                 })
             manifest = {
                 "artifact_type": "ninfer_bench_matrix_run", "schema_version": 14,
                 "preset": "pareto-capacity", "dry_run": False, "prepare_only": True,
+                "base_capacity_profile": "spec-none-ordinary",
                 "post_chunk_capacity_gate": True, "prefill_chunk_authority": authority,
                 "selected_prefill_chunk": 2048, "concurrency": [1, 2, 3, 4],
                 "case_count": 1, "point_count": 4,
@@ -297,12 +300,12 @@ class PostChunkCapacityCampaignTest(unittest.TestCase):
             (root / "logs").mkdir()
             authority = {"selected_prefill_chunk": 2048}
             common = [
-                "bench", "--spec", "mtp", "--draft-tokens", "3", "--lm-head-draft",
+                "bench", "--draft-tokens", "0",
                 "--kv-capacity", "auto", "--max-ctx", "262144", "--prefill-chunk", "2048",
             ]
             records, failures = [], []
             for concurrency in (1, 2, 3, 4):
-                stem = f"pareto_effective_capacity.effective_capacity_mtp3.c{concurrency}"
+                stem = f"pareto_effective_capacity.effective_capacity_ordinary.c{concurrency}"
                 report = root / f"report-c{concurrency}.json"
                 stdout = root / "logs" / f"{stem}.stdout.txt"
                 stderr = root / "logs" / f"{stem}.stderr.txt"
@@ -319,17 +322,18 @@ class PostChunkCapacityCampaignTest(unittest.TestCase):
                 )
                 stdout.write_text("", encoding="utf-8")
                 records.append({
-                    "suite": "pareto_effective_capacity", "case": "effective_capacity_mtp3",
+                    "suite": "pareto_effective_capacity", "case": "effective_capacity_ordinary",
                     "concurrency": concurrency, "report": str(report), "command": command,
                 })
                 failures.append({
-                    "suite": "pareto_effective_capacity", "case": "effective_capacity_mtp3",
+                    "suite": "pareto_effective_capacity", "case": "effective_capacity_ordinary",
                     "concurrency": concurrency, "returncode": 1,
                     "stdout": str(stdout), "stderr": str(stderr), "command": command,
                 })
             manifest = {
                 "artifact_type": "ninfer_bench_matrix_run", "schema_version": 14,
                 "preset": "pareto-capacity", "dry_run": False, "prepare_only": False,
+                "base_capacity_profile": "spec-none-ordinary",
                 "post_chunk_capacity_gate": True, "prefill_chunk_authority": authority,
                 "selected_prefill_chunk": 2048, "concurrency": [1, 2, 3, 4],
                 "case_count": 1, "point_count": 4,

@@ -477,7 +477,7 @@ Every capacity-eligible tuple receives the complete 18-point `dflash-pareto` mat
 8K/32K prefill, DFlash decode, ordinary control, and fresh-prompt whole inference at C=1..4 plus
 two isolated C=1 proposal diagnostics.
 
-The sole decision authority is the schema-v1 output from
+The sole decision authority is the schema-v2 output from
 `tools/bench/assemble_dflash_selection.py`. It binds the base decision through the conversion
 report to the exact terminal winner's companion artifact, executable, cache group, and K/W; reopens every schema-v20
 report; and recomputes shortlist, exact ordinary-output parity, exact repeated proposal/target
@@ -925,10 +925,10 @@ state, cache, row-view, and whole-route regression coverage, but a new shortlist
 alternate head precision, acceptance campaign, or MTP performance optimization is not a final
 admission requirement. DFlash/DFlash2 is the preferred speculative path and the only speculative
 backend with remaining support and performance work.
-The terminal tooling reads each raw repetition, records the theoretical `64*C` round minimum
-because its counter sums request lanes, and verifies that the report aggregate is their exact sum.
-Extra rounds remain acceptance and measured-throughput evidence; they do not trigger an MTP head-
-precision branch or alter base selection. Schema v7 carries no downstream-readiness status;
+Historical MTP diagnostics can retain the theoretical `64*C` round minimum because their counter
+sums request lanes, but schema-v7 terminal tooling does not consume or validate those rows.
+Extra rounds remain diagnostic acceptance evidence; they do not trigger an MTP head-precision
+branch or alter base selection. Schema v7 carries no downstream-readiness status;
 selected-profile NIAH and DFlash admission remain separate final gates.
 The fail-closed NIAH entry point is
 `profiles/bench/post-terminal-niah-prepare-20260905/prepare.sh`; it remains blocked until the

@@ -11,6 +11,7 @@ import argparse
 import json
 import math
 import re
+import statistics
 import sys
 from pathlib import Path
 from typing import Any
@@ -36,7 +37,7 @@ from tools.bench.select_prefill_chunk import (
     RULE as PREFILL_CHUNK_SELECTION_RULE,
     SCHEMA_VERSION as PREFILL_CHUNK_SCHEMA_VERSION,
 )
-from tools.bench.select_prefill_chunk import validate_selection_record
+from tools.bench.prefill_chunk_authority import validate_prefill_chunk_authority
 from tools.ppl import run as ppl_run
 
 
@@ -207,7 +208,8 @@ def _bind_prefill_chunk_authority(
     manifest: dict[str, Any], preset: str, authority: dict[str, Any],
 ) -> None:
     expected_keys = {
-        "path", "sha256", "artifact_type", "schema_version", "selected_prefill_chunk",
+        "path", "sha256", "artifact_type", "schema_version", "base_chunk_profile",
+        "selected_prefill_chunk",
     }
     if (
         not isinstance(authority, dict)
@@ -219,6 +221,7 @@ def _bind_prefill_chunk_authority(
         or authority.get("artifact_type") != PREFILL_CHUNK_ARTIFACT_TYPE
         or type(authority.get("schema_version")) is not int
         or authority.get("schema_version") != PREFILL_CHUNK_SCHEMA_VERSION
+        or authority.get("base_chunk_profile") != "spec-none-ordinary"
         or type(authority.get("selected_prefill_chunk")) is not int
         or authority["selected_prefill_chunk"] not in PRODUCTION_PREFILL_CHUNKS
     ):
@@ -254,18 +257,17 @@ def _structured_memory_admission_failure(
     max_context = _one_command_option(command, "--max-ctx")
     concurrency = _one_command_option(command, "--concurrency")
     kv_capacity = _one_command_option(command, "--kv-capacity")
-    speculation = _one_command_option(command, "--spec")
     draft_tokens = _one_command_option(command, "--draft-tokens")
     if (
         max_context != "262144"
         or concurrency != str(record["concurrency"])
         or kv_capacity != "auto"
-        or speculation != "mtp"
-        or draft_tokens != "3"
-        or command.count("--lm-head-draft") != 1
+        or draft_tokens != "0"
+        or "--spec" in command
+        or "--lm-head-draft" in command
         or "--no-device-graph" in command
     ):
-        raise ValueError("capacity failure command is not the exact automatic MTP3 admission case")
+        raise ValueError("capacity failure command is not the exact automatic ordinary admission case")
     lines = stderr_text.splitlines()
     loading = (
         f"[ninfer_bench] loading {weights} (max_context=262144, "
@@ -299,98 +301,93 @@ def _structured_memory_admission_failure(
     raise ValueError("missing capacity report lacks a recognized memory-admission failure")
 
 
-def _validate_mtp_target_parity(
+def _validate_ordinary_whole_report(
     reports: list[dict[str, Any]], concurrency: int,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Return the MTP timing report and its exact ordinary-target parity evidence."""
+) -> dict[str, Any]:
+    """Return the sole non-speculative report used by base selection."""
 
-    mtp = [report for report in reports if report.get("config", {}).get("draft_tokens") == 3]
-    ordinary = [
-        report for report in reports if report.get("config", {}).get("draft_tokens") == 0
-    ]
-    if len(mtp) != 1 or len(ordinary) != 1:
-        raise ValueError(
-            f"C{concurrency} pareto-whole requires one MTP3 row and one ordinary control"
-        )
-    mtp_tests = {test.get("label"): test for test in mtp[0].get("tests", [])}
-    ordinary_tests = {test.get("label"): test for test in ordinary[0].get("tests", [])}
-    if len(mtp_tests) != 2 or set(mtp_tests) != set(ordinary_tests):
-        raise ValueError(f"C{concurrency} pareto-whole target controls are not geometry matched")
-    compared_lanes = 0
-    compared_tokens = 0
-    round_cells: dict[str, Any] = {}
-    for label in sorted(mtp_tests):
-        mtp_test = mtp_tests[label]
-        n_gen = mtp_test.get("n_gen")
-        if type(n_gen) is not int or n_gen <= 0:
-            raise ValueError(f"C{concurrency} {label} lacks an exact generated-token count")
-        minimum_rounds_per_lane = math.ceil(n_gen / 4)
-        expected_rounds_per_repetition = concurrency * minimum_rounds_per_lane
-        mtp_reps = mtp_tests[label].get("reps")
-        ordinary_reps = ordinary_tests[label].get("reps")
-        if not isinstance(mtp_reps, list) or not isinstance(ordinary_reps, list):
-            raise ValueError(f"C{concurrency} {label} lacks retained parity repetitions")
-        if len(mtp_reps) != len(ordinary_reps):
-            raise ValueError(f"C{concurrency} {label} target parity repetition count differs")
-        repetition_rounds: list[dict[str, Any]] = []
-        for repetition, (mtp_rep, ordinary_rep) in enumerate(
-            zip(mtp_reps, ordinary_reps, strict=True)
+    if len(reports) != 1:
+        raise ValueError(f"C{concurrency} pareto-whole requires one ordinary ranking row")
+    report = reports[0]
+    config = report.get("config", {})
+    if (
+        config.get("spec") != "none"
+        or config.get("draft_tokens") != 0
+        or config.get("speculative_execution") is not False
+        or config.get("proposal_head") != "full"
+    ):
+        raise ValueError(f"C{concurrency} pareto-whole is not spec-none ordinary")
+    tests = {test.get("label"): test for test in report.get("tests", [])}
+    if set(tests) != {"whole-pp8192+tg256", "whole-pp32768+tg256"}:
+        raise ValueError(f"C{concurrency} pareto-whole has wrong ranking geometry")
+    for prompt in (8192, 32768):
+        label = f"whole-pp{prompt}+tg256"
+        test = tests[label]
+        if (
+            test.get("kind") != "whole"
+            or test.get("n_prompt") != prompt
+            or test.get("n_gen") != 256
+            or test.get("requested_output_tokens") != 257
         ):
-            mtp_ids = mtp_rep.get("generated_token_ids_by_lane")
-            ordinary_ids = ordinary_rep.get("generated_token_ids_by_lane")
-            if not isinstance(mtp_ids, list) or not isinstance(ordinary_ids, list):
-                raise ValueError(f"C{concurrency} {label} lacks retained target token lanes")
-            if mtp_ids != ordinary_ids:
-                raise ValueError(
-                    f"C{concurrency} {label} repetition {repetition} MTP/ordinary "
-                    "target-output parity failed"
-                )
-            compared_lanes += len(mtp_ids)
-            compared_tokens += sum(len(lane) for lane in mtp_ids)
-            speculative = mtp_rep.get("speculative")
-            if not isinstance(speculative, dict) or any(
-                type(speculative.get(key)) is not int or speculative[key] < 0
-                for key in ("rounds", "drafted_tokens", "accepted_tokens", "fallback_steps")
-            ):
-                raise ValueError(f"C{concurrency} {label} repetition {repetition} lacks counters")
-            repetition_rounds.append({
-                "repetition": repetition,
-                "observed_rounds": speculative["rounds"],
-                "theoretical_minimum_rounds": expected_rounds_per_repetition,
-            })
-        aggregate = mtp_test.get("speculative")
-        if not isinstance(aggregate, dict) or any(
-            aggregate.get(key) != sum(rep["speculative"][key] for rep in mtp_reps)
-            for key in ("rounds", "drafted_tokens", "accepted_tokens", "fallback_steps")
-        ):
-            raise ValueError(f"C{concurrency} {label} aggregate counters do not equal repetitions")
-        round_cells[label] = {
-            "generated_tokens_per_lane": n_gen,
-            "draft_window": 3,
-            "theoretical_minimum_rounds_per_lane": minimum_rounds_per_lane,
-            "concurrency": concurrency,
-            "theoretical_minimum_rounds_per_repetition": expected_rounds_per_repetition,
-            "theoretical_minimum_rounds_all_repetitions": (
-                expected_rounds_per_repetition * len(mtp_reps)
-            ),
-            "observed_rounds_all_repetitions": aggregate["rounds"],
-            "repetitions": repetition_rounds,
+            raise ValueError(f"C{concurrency} {label} has wrong ordinary geometry")
+        reps = test.get("reps")
+        if not isinstance(reps, list) or len(reps) != 3:
+            raise ValueError(f"C{concurrency} {label} lacks exactly three repetitions")
+        timings: dict[str, list[float]] = {
+            name: [] for name in ("prepare_seconds", "prefill_seconds", "decode_seconds", "total_seconds")
         }
-    return mtp[0], {
-        "pass": True,
-        "comparison": "exact_generated_token_ids_by_lane",
-        "repetitions_per_workload": len(next(iter(mtp_tests.values()))["reps"]),
-        "workloads": sorted(mtp_tests),
-        "compared_lanes": compared_lanes,
-        "compared_tokens": compared_tokens,
-        "round_accounting": {
-            "counter_semantics": (
-                "each repetition counter sums independent request-lane rounds; theoretical "
-                "minimum is concurrency * ceil(generated_tokens_per_lane / (draft_window + 1))"
-            ),
-            "cells": round_cells,
-        },
-    }
+        throughput = {
+            "prefill_tok_s": [], "decode_output_tok_s": [],
+            "decode_engine_tok_s": [], "whole_output_tok_s": [],
+        }
+        ordinary_speculative = {
+            "enabled": False, "draft_window": 0, "rounds": 0,
+            "drafted_tokens": 0, "accepted_tokens": 0, "fallback_steps": 0,
+            "acceptance_rate": None, "acceptance_length": None,
+            "accepted_per_position": [],
+        }
+        if test.get("speculative") != ordinary_speculative:
+            raise ValueError(f"C{concurrency} {label} is not aggregate spec-none ordinary")
+        for repetition, rep in enumerate(reps):
+            timing = rep.get("timings") if isinstance(rep, dict) else None
+            if (
+                not isinstance(timing, dict)
+                or rep.get("generated_output_tokens") != 257 * concurrency
+                or rep.get("decode_output_tokens") != 256 * concurrency
+                or rep.get("decode_engine_tokens") != 256 * concurrency
+                or rep.get("speculative") != ordinary_speculative
+                or timing.get("vision_seconds") != 0
+                or any(
+                    type(timing.get(name)) not in (int, float)
+                    or not math.isfinite(timing[name]) or timing[name] <= 0
+                    for name in timings
+                )
+                or timing["total_seconds"] < max(
+                    timing["prepare_seconds"], timing["prefill_seconds"],
+                    timing["decode_seconds"],
+                )
+            ):
+                raise ValueError(f"C{concurrency} {label} repetition {repetition} has invalid timing")
+            for name in timings:
+                timings[name].append(float(timing[name]))
+            throughput["prefill_tok_s"].append(prompt * concurrency / timing["prefill_seconds"])
+            throughput["decode_output_tok_s"].append(256 * concurrency / timing["decode_seconds"])
+            throughput["decode_engine_tok_s"].append(256 * concurrency / timing["decode_seconds"])
+            throughput["whole_output_tok_s"].append(257 * concurrency / timing["total_seconds"])
+        for name, values in {**timings, **throughput}.items():
+            for suffix, expected in (
+                ("mean", statistics.fmean(values)),
+                ("stddev", statistics.stdev(values)),
+            ):
+                actual = test.get(f"{name}_{suffix}")
+                if (
+                    type(actual) not in (int, float) or not math.isfinite(actual)
+                    or not math.isclose(float(actual), expected, rel_tol=2e-6, abs_tol=1e-9)
+                ):
+                    raise ValueError(
+                        f"C{concurrency} {label} {name}_{suffix} is not derived from repetitions"
+                    )
+    return report
 
 
 def _missing_capacity_provenance(root: Path, manifest: dict[str, Any]) -> list[dict[str, Any]]:
@@ -730,6 +727,12 @@ def assemble_candidate(
         _bind_prefill_chunk_authority(manifest, preset, prefill_chunk_authority)
         if _manifest_prefill_chunk(manifest, preset) != prefill_chunk:
             raise ValueError(f"{preset} does not use selected prefill chunk {prefill_chunk}")
+        profile_field = (
+            "base_capacity_profile" if preset == "pareto-capacity"
+            else "base_ranking_profile"
+        )
+        if manifest.get(profile_field) != "spec-none-ordinary":
+            raise ValueError(f"{preset} is not bound to spec-none ordinary")
     if prefill_chunk_authority["selected_prefill_chunk"] != prefill_chunk:
         raise ValueError("selected prefill-chunk authority differs from assembled chunk")
     identity = manifests["pareto-capacity"]["artifact"]
@@ -795,7 +798,6 @@ def assemble_candidate(
     )
     capacity: dict[str, Any] = {}
     speeds: dict[str, float] = {}
-    mtp_target_token_parity: dict[str, Any] = {}
     for concurrency in PRODUCT_CONCURRENCIES:
         if concurrency in capacity_reports:
             cap = validate_automatic_feasibility(capacity_reports[concurrency][0])
@@ -807,11 +809,10 @@ def assemble_candidate(
                 "tokens": cap["resolved_effective_maximum_tokens"],
             }
         if whole_reports:
-            mtp_report, parity = _validate_mtp_target_parity(
+            ordinary_report = _validate_ordinary_whole_report(
                 whole_reports[concurrency], concurrency
             )
-            mtp_target_token_parity[f"c{concurrency}"] = parity
-            whole_tests = {test["label"]: test for test in mtp_report["tests"]}
+            whole_tests = {test["label"]: test for test in ordinary_report["tests"]}
             for tokens in (8192, 32768):
                 row = whole_tests[f"whole-pp{tokens}+tg256"]
                 speeds[f"prefill_{tokens}_c{concurrency}"] = row["prefill_tok_s_mean"]
@@ -834,7 +835,8 @@ def assemble_candidate(
         "quality_cells": quality_cells,
         "capacity_by_cell": capacity,
         "whole_inference_tokens_per_second": speeds,
-        "mtp_target_token_parity": mtp_target_token_parity,
+        "whole_inference_profile": "spec-none-ordinary",
+        "base_capacity_profile": "spec-none-ordinary",
     }
     provenance = {
         "candidate": name,
@@ -1142,16 +1144,11 @@ def main() -> int:
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     chunk_selection_path = args.prefill_chunk_selection.resolve()
-    chunk_selection_sha256 = file_sha256(chunk_selection_path)
-    chunk_selection = validate_selection_record(chunk_selection_path)
+    prefill_chunk_authority, chunk_selection = validate_prefill_chunk_authority(
+        chunk_selection_path
+    )
+    chunk_selection_sha256 = prefill_chunk_authority["sha256"]
     prefill_chunk = chunk_selection["selected_prefill_chunk"]
-    prefill_chunk_authority = {
-        "path": str(chunk_selection_path),
-        "sha256": chunk_selection_sha256,
-        "artifact_type": chunk_selection.get("artifact_type"),
-        "schema_version": chunk_selection.get("schema_version"),
-        "selected_prefill_chunk": prefill_chunk,
-    }
     candidates, provenance = [], []
     for name, weights_id, group, quality, capacity, whole in args.candidate:
         whole_path = None if whole == "-" else Path(whole).resolve()
@@ -1201,6 +1198,8 @@ def main() -> int:
         "required_quality_cells": ["8k", "32k"],
         "required_capacity_cells": [f"c{i}" for i in PRODUCT_CONCURRENCIES],
         "required_speed_workloads": speed,
+        "base_ranking_profile": "spec-none-ordinary",
+        "base_capacity_profile": "spec-none-ordinary",
         "selected_prefill_chunk": prefill_chunk,
         "prefill_chunk_selection": {
             "path": str(chunk_selection_path),

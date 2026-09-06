@@ -1,11 +1,20 @@
 #!/usr/bin/env python3
 
+import json
+import tempfile
 import unittest
 from pathlib import Path
 import subprocess
 import sys
+from unittest.mock import patch
 
-from tools.bench.prepare_selected_dflash import _base_migration_authority, _common, _matrix_shell
+from tools.bench import prepare_selected_dflash as prepare_module
+from tools.bench.prepare_selected_dflash import (
+    _base_migration_authority,
+    _common,
+    _companion_conversion_command,
+    _matrix_shell,
+)
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -16,6 +25,14 @@ class SelectedDflashPrepareTest(unittest.TestCase):
             "selected_prefill_chunk": 2048,
             "benchmark": {"path": "/build/bench/ninfer_bench"},
             "companion": {"path": "/out/companion.ninfer"},
+            "base_artifact": {"path": "/out/selected-base.ninfer"},
+            "dflash_source": {"path": "/models/qwen3.8-27b-dflash2"},
+            "conversion_python": {
+                "launcher_path": "/venv/bin/python",
+                "environment": {
+                    "LD_LIBRARY_PATH": "/opt/rocm/lib:/opt/rocm/core-10.0/lib",
+                },
+            },
             "cache_group": 32,
             "text_prefill_attention_profile": "b128-s16-tau900",
             "recipe": "all-q4",
@@ -59,6 +76,75 @@ class SelectedDflashPrepareTest(unittest.TestCase):
             "conversion_receipt": receipt,
         }), {"receipt": {"path": receipt["path"], "sha256": receipt["sha256"]},
              **{key: receipt[key] for key in receipt if key not in ("path", "sha256")}})
+
+    def test_missing_companion_conversion_is_selected_only_for_every_recipe(self) -> None:
+        cases = (
+            ("all-q4", "/out/all-q4-n16k16.ninfer",
+             "/out/all-q4-n16k16-dflash2.ninfer"),
+            ("mixed", "/out/mixed-n16k16.ninfer",
+             "/out/mixed-n16k16-dflash2.ninfer"),
+            ("four-role", "/out/four-role-n16k16.ninfer",
+             "/out/four-role-n16k16-dflash2.ninfer"),
+        )
+        for recipe, base, companion in cases:
+            with self.subTest(recipe=recipe):
+                self.plan["recipe"] = recipe
+                self.plan["base_artifact"]["path"] = base
+                self.plan["companion"]["path"] = companion
+                command = _companion_conversion_command(
+                    self.plan, companion_exists=False
+                )
+                self.assertEqual(command, [
+                    "env", "LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/core-10.0/lib",
+                    "/venv/bin/python", "-m",
+                    "tools.convert.qwen3_8_27b_r9700.convert_dflash2_q4",
+                    "--base", base,
+                    "--dflash-model", "/models/qwen3.8-27b-dflash2",
+                    "--out", companion,
+                    "--device", "cuda",
+                ])
+
+    def test_existing_selected_companion_only_finalizes_its_missing_report(self) -> None:
+        command = _companion_conversion_command(self.plan, companion_exists=True)
+        self.assertIn("--finalize-report", command)
+        self.assertNotIn("--device", command)
+
+    def test_conversion_python_identity_fails_closed_and_binds_rocm_environment(self) -> None:
+        with patch.object(prepare_module, "CONVERSION_PYTHON", Path("/missing/python")), \
+                self.assertRaisesRegex(ValueError, "Python is unavailable"):
+            prepare_module._conversion_python_identity()
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            launcher = root / "bin/python"
+            launcher.parent.mkdir()
+            launcher.write_text("python", encoding="utf-8")
+            launcher.chmod(0o755)
+            pyvenv = root / "pyvenv.cfg"
+            pyvenv.write_text("venv", encoding="utf-8")
+            runtime = {
+                "runtime_executable": str(launcher), "python_version": "3.12.0",
+                "torch": "2.9.1", "torch_hip": "7.2", "safetensors": "0.8.0",
+            }
+            completed = subprocess.CompletedProcess([], 0, stdout=json.dumps(runtime), stderr="")
+            with patch.object(prepare_module, "CONVERSION_PYTHON", launcher), patch.object(
+                prepare_module.subprocess, "run", return_value=completed
+            ) as run:
+                identity = prepare_module._conversion_python_identity()
+            self.assertEqual(identity["environment"], {
+                "LD_LIBRARY_PATH": "/opt/rocm/lib:/opt/rocm/core-10.0/lib",
+            })
+            self.assertEqual(identity["pyvenv_cfg"]["path"], str(pyvenv))
+            self.assertEqual(
+                run.call_args.kwargs["env"]["LD_LIBRARY_PATH"],
+                "/opt/rocm/lib:/opt/rocm/core-10.0/lib",
+            )
+            wrong_runtime = {**runtime, "runtime_executable": "/different/python"}
+            completed.stdout = json.dumps(wrong_runtime)
+            with patch.object(prepare_module, "CONVERSION_PYTHON", launcher), patch.object(
+                prepare_module.subprocess, "run", return_value=completed
+            ), self.assertRaisesRegex(ValueError, "malformed identity"):
+                prepare_module._conversion_python_identity()
 
     def test_matrix_shell_resumes_only_an_existing_owned_output(self) -> None:
         command = _common(self.plan, "dflash-shortlist", Path("/fresh/shortlist"))

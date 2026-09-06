@@ -14,72 +14,116 @@ from tools.ppl.assemble_pareto import (
     _quality_candidate,
     _reports,
     _manifest_prefill_chunk,
-    _validate_mtp_target_parity,
+    _bind_prefill_chunk_authority,
+    _validate_ordinary_whole_report,
     assemble_candidate,
     validate_chunk_candidate_bindings,
     validate_xattention_dense_controls,
 )
 from tools.bench.run_ninfer_bench_matrix import BenchCase, file_sha256
 from tools.bench.run_ninfer_bench_matrix import MATRIX_SCHEMA_VERSION, R9700_KV_PLANE_LAYOUTS
+from tools.bench.prefill_chunk_authority import validate_prefill_chunk_authority
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pareto import _valid_capacity_failure, classify
 
 
 class AssembleParetoTest(unittest.TestCase):
-    def test_mtp_whole_requires_exact_target_output_parity(self) -> None:
-        def report(drafts: int, token: int) -> dict:
-            speculative = {
-                "rounds": 64, "drafted_tokens": 192,
-                "accepted_tokens": 192, "fallback_steps": 0,
+    def test_chunk_binding_accepts_exact_real_validator_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "selection.json"
+            path.write_text("{}\n", encoding="utf-8")
+            selection = {
+                "artifact_type": "ninfer_r9700_prefill_chunk_selection",
+                "schema_version": 2,
+                "base_chunk_profile": "spec-none-ordinary",
+                "selected_prefill_chunk": 2048,
             }
-            return {
-                "config": {"draft_tokens": drafts},
-                "tests": [{
-                    "label": f"whole-pp{tokens}+tg256",
-                    "n_gen": 256,
-                    "speculative": dict(speculative),
-                    "reps": [{
-                        "generated_token_ids_by_lane": [[token, tokens]],
-                        "speculative": dict(speculative),
-                    }],
-                } for tokens in (8192, 32768)],
+            with patch(
+                "tools.bench.select_prefill_chunk.validate_selection_record",
+                return_value=selection,
+            ):
+                authority, _ = validate_prefill_chunk_authority(path)
+            manifest = {
+                "prefill_chunk_authority": authority,
+                "post_chunk_capacity_gate": True,
             }
+            _bind_prefill_chunk_authority(manifest, "pareto-capacity", authority)
+            stale = {key: value for key, value in authority.items()
+                     if key != "base_chunk_profile"}
+            with self.assertRaisesRegex(ValueError, "malformed"):
+                _bind_prefill_chunk_authority(manifest, "pareto-capacity", stale)
 
-        mtp = report(3, 7)
-        ordinary = report(0, 7)
-        selected, parity = _validate_mtp_target_parity([mtp, ordinary], 1)
-        self.assertIs(selected, mtp)
-        self.assertTrue(parity["pass"])
-        self.assertEqual(parity["compared_tokens"], 4)
-        self.assertEqual(
-            parity["round_accounting"]["cells"]["whole-pp8192+tg256"]
-            ["theoretical_minimum_rounds_per_repetition"],
-            64,
-        )
-        with self.assertRaisesRegex(ValueError, "requires one MTP3 row"):
-            _validate_mtp_target_parity([mtp], 1)
-        changed = copy.deepcopy(ordinary)
-        changed["tests"][1]["reps"][0]["generated_token_ids_by_lane"][0][0] = 8
-        with self.assertRaisesRegex(ValueError, "target-output parity failed"):
-            _validate_mtp_target_parity([mtp, changed], 1)
-        extra_round = copy.deepcopy(mtp)
-        for test in extra_round["tests"]:
-            test["speculative"]["rounds"] = 65
-            test["reps"][0]["speculative"]["rounds"] = 65
-        _, accounting = _validate_mtp_target_parity([extra_round, ordinary], 1)
-        self.assertEqual(
-            accounting["round_accounting"]["cells"]["whole-pp8192+tg256"]
-            ["repetitions"][0],
-            {
-                "repetition": 0, "observed_rounds": 65,
-                "theoretical_minimum_rounds": 64,
+    def test_whole_requires_one_exact_ordinary_ranking_report(self) -> None:
+        def row(tokens: int) -> dict:
+            return {
+                "label": f"whole-pp{tokens}+tg256", "kind": "whole",
+                "n_prompt": tokens, "n_gen": 256, "requested_output_tokens": 257,
+                "prepare_seconds_mean": 0.001, "prepare_seconds_stddev": 0.0,
+                "prefill_seconds_mean": 1.0, "prefill_seconds_stddev": 0.0,
+                "decode_seconds_mean": 2.0, "decode_seconds_stddev": 0.0,
+                "total_seconds_mean": 4.0, "total_seconds_stddev": 0.0,
+                "prefill_tok_s_mean": float(tokens), "prefill_tok_s_stddev": 0.0,
+                "decode_output_tok_s_mean": 128.0, "decode_output_tok_s_stddev": 0.0,
+                "decode_engine_tok_s_mean": 128.0, "decode_engine_tok_s_stddev": 0.0,
+                "whole_output_tok_s_mean": 64.25, "whole_output_tok_s_stddev": 0.0,
+                "speculative": {"enabled": False, "draft_window": 0, "rounds": 0,
+                                "drafted_tokens": 0, "accepted_tokens": 0,
+                                "fallback_steps": 0, "acceptance_rate": None,
+                                "acceptance_length": None, "accepted_per_position": []},
+                "reps": [{
+                    "generated_output_tokens": 257, "decode_output_tokens": 256,
+                    "decode_engine_tokens": 256,
+                    "timings": {"prepare_seconds": 0.001, "vision_seconds": 0,
+                                "prefill_seconds": 1.0, "decode_seconds": 2.0,
+                                "total_seconds": 4.0},
+                    "speculative": {"enabled": False, "draft_window": 0, "rounds": 0,
+                                    "drafted_tokens": 0, "accepted_tokens": 0,
+                                    "fallback_steps": 0, "acceptance_rate": None,
+                                    "acceptance_length": None, "accepted_per_position": []},
+                } for _ in range(3)],
+            }
+        ordinary = {
+            "config": {
+                "spec": "none", "draft_tokens": 0,
+                "speculative_execution": False, "proposal_head": "full",
             },
-        )
-        inconsistent = copy.deepcopy(mtp)
-        inconsistent["tests"][0]["speculative"]["rounds"] = 65
-        with self.assertRaisesRegex(ValueError, "aggregate counters do not equal repetitions"):
-            _validate_mtp_target_parity([inconsistent, ordinary], 1)
+            "tests": [row(tokens) for tokens in (8192, 32768)],
+        }
+        self.assertIs(_validate_ordinary_whole_report([ordinary], 1), ordinary)
+        c4 = copy.deepcopy(ordinary)
+        for test in c4["tests"]:
+            for field in (
+                "prefill_tok_s_mean", "decode_output_tok_s_mean",
+                "decode_engine_tok_s_mean", "whole_output_tok_s_mean",
+            ):
+                test[field] *= 4
+            for rep in test["reps"]:
+                rep["generated_output_tokens"] *= 4
+                rep["decode_output_tokens"] *= 4
+                rep["decode_engine_tokens"] *= 4
+        self.assertIs(_validate_ordinary_whole_report([c4], 4), c4)
+        with self.assertRaisesRegex(ValueError, "requires one ordinary ranking row"):
+            _validate_ordinary_whole_report([], 1)
+        mtp = copy.deepcopy(ordinary)
+        mtp["config"].update({
+            "spec": "mtp", "draft_tokens": 3,
+            "speculative_execution": True, "proposal_head": "optimized",
+        })
+        with self.assertRaisesRegex(ValueError, "not spec-none ordinary"):
+            _validate_ordinary_whole_report([mtp], 1)
+        missing = copy.deepcopy(ordinary)
+        missing["tests"].pop()
+        with self.assertRaisesRegex(ValueError, "wrong ranking geometry"):
+            _validate_ordinary_whole_report([missing], 1)
+        stale = copy.deepcopy(ordinary)
+        stale["tests"][0]["whole_output_tok_s_mean"] *= 1.01
+        with self.assertRaisesRegex(ValueError, "not derived from repetitions"):
+            _validate_ordinary_whole_report([stale], 1)
+        hidden_speculation = copy.deepcopy(ordinary)
+        hidden_speculation["tests"][0]["reps"][0]["speculative"]["rounds"] = 1
+        with self.assertRaisesRegex(ValueError, "invalid timing"):
+            _validate_ordinary_whole_report([hidden_speculation], 1)
 
     def test_chunk_selection_binds_candidate_artifact_bench_group_and_profile(self) -> None:
         artifact = {"weights_id": "r9700-q4g64-n16k16-eval", "sha256": "a" * 64, "file_size_bytes": 1}
@@ -538,6 +582,7 @@ class AssembleParetoTest(unittest.TestCase):
                 "sha256": "9" * 64,
                 "artifact_type": "ninfer_r9700_prefill_chunk_selection",
                 "schema_version": 2,
+                "base_chunk_profile": "spec-none-ordinary",
                 "selected_prefill_chunk": 4096,
             }
             roots = {}
@@ -550,13 +595,12 @@ class AssembleParetoTest(unittest.TestCase):
                     report.write_text("{}", encoding="utf-8")
                     report_records.append({
                         "suite": "pareto_effective_capacity",
-                        "case": "effective_capacity_mtp3",
+                        "case": "effective_capacity_ordinary",
                         "concurrency": concurrency,
                         "command": [
                             "bench", "--weights", "/model.ninfer",
                             "--max-ctx", "262144", "--concurrency", str(concurrency),
-                            "--kv-capacity", "auto", "--spec", "mtp",
-                            "--draft-tokens", "3", "--lm-head-draft",
+                            "--kv-capacity", "auto", "--draft-tokens", "0",
                             "--prefill-chunk", "4096", "--output-file", str(report),
                         ],
                         "report": str(report),
@@ -566,6 +610,12 @@ class AssembleParetoTest(unittest.TestCase):
                     "schema_version": MATRIX_SCHEMA_VERSION,
                     "preset": preset, "dry_run": False, "artifact": artifact, "bench": bench,
                     "selected_prefill_chunk": 4096,
+                    "base_capacity_profile": (
+                        "spec-none-ordinary" if preset == "pareto-capacity" else None
+                    ),
+                    "base_ranking_profile": (
+                        "spec-none-ordinary" if preset == "pareto-whole" else None
+                    ),
                     "prefill_chunk_authority": chunk_authority,
                     **({"post_chunk_capacity_gate": True}
                        if preset == "pareto-capacity" else {}),
@@ -601,32 +651,55 @@ class AssembleParetoTest(unittest.TestCase):
                     else:
                         rows = [{
                             "label": f"whole-pp{tokens}+tg256",
-                            "n_gen": 256,
-                            "prefill_tok_s_mean": 1.0,
-                            "decode_output_tok_s_mean": 2.0,
-                            "whole_output_tok_s_mean": 3.0,
-                            "speculative": {
-                                "rounds": 192 * concurrency,
-                                "drafted_tokens": 576 * concurrency,
-                                "accepted_tokens": 576 * concurrency,
-                                "fallback_steps": 0,
-                            },
+                            "kind": "whole", "n_prompt": tokens, "n_gen": 256,
+                            "requested_output_tokens": 257,
+                            "prepare_seconds_mean": 0.001,
+                            "prepare_seconds_stddev": 0.0,
+                            "prefill_seconds_mean": 1.0,
+                            "prefill_seconds_stddev": 0.0,
+                            "decode_seconds_mean": 2.0,
+                            "decode_seconds_stddev": 0.0,
+                            "total_seconds_mean": 4.0,
+                            "total_seconds_stddev": 0.0,
+                            "prefill_tok_s_mean": float(tokens * concurrency),
+                            "prefill_tok_s_stddev": 0.0,
+                            "decode_output_tok_s_mean": 128.0 * concurrency,
+                            "decode_output_tok_s_stddev": 0.0,
+                            "decode_engine_tok_s_mean": 128.0 * concurrency,
+                            "decode_engine_tok_s_stddev": 0.0,
+                            "whole_output_tok_s_mean": 64.25 * concurrency,
+                            "whole_output_tok_s_stddev": 0.0,
+                            "speculative": {"enabled": False, "draft_window": 0,
+                                            "rounds": 0, "drafted_tokens": 0,
+                                            "accepted_tokens": 0, "fallback_steps": 0,
+                                            "acceptance_rate": None,
+                                            "acceptance_length": None,
+                                            "accepted_per_position": []},
                             "reps": [{
-                                "generated_token_ids_by_lane": [
-                                    [tokens, repetition] for _ in range(concurrency)
-                                ],
-                                "speculative": {
-                                    "rounds": 64 * concurrency,
-                                    "drafted_tokens": 192 * concurrency,
-                                    "accepted_tokens": 192 * concurrency,
-                                    "fallback_steps": 0,
+                                "generated_output_tokens": 257 * concurrency,
+                                "decode_output_tokens": 256 * concurrency,
+                                "decode_engine_tokens": 256 * concurrency,
+                                "timings": {
+                                    "prepare_seconds": 0.001, "vision_seconds": 0,
+                                    "prefill_seconds": 1.0, "decode_seconds": 2.0,
+                                    "total_seconds": 4.0,
                                 },
-                            } for repetition in range(3)],
+                                "speculative": {"enabled": False, "draft_window": 0,
+                                                "rounds": 0, "drafted_tokens": 0,
+                                                "accepted_tokens": 0, "fallback_steps": 0,
+                                                "acceptance_rate": None,
+                                                "acceptance_length": None,
+                                                "accepted_per_position": []},
+                            } for _ in range(3)],
                         } for tokens in (8192, 32768)]
-                        output[concurrency] = [
-                            {"config": {"draft_tokens": 3}, "tests": copy.deepcopy(rows)},
-                            {"config": {"draft_tokens": 0}, "tests": copy.deepcopy(rows)},
-                        ]
+                        output[concurrency] = [{
+                            "config": {
+                                "spec": "none", "draft_tokens": 0,
+                                "speculative_execution": False,
+                                "proposal_head": "full",
+                            },
+                            "tests": copy.deepcopy(rows),
+                        }]
                 return output
 
             with patch("tools.ppl.assemble_pareto._reports", side_effect=reports), patch(
@@ -644,23 +717,16 @@ class AssembleParetoTest(unittest.TestCase):
                 )
             self.assertEqual(len(candidate["capacity_by_cell"]), 4)
             self.assertEqual(len(candidate["whole_inference_tokens_per_second"]), 24)
-            self.assertEqual(set(candidate["mtp_target_token_parity"]), {
-                "c1", "c2", "c3", "c4",
-            })
+            self.assertEqual(candidate["whole_inference_profile"], "spec-none-ordinary")
             self.assertNotIn("shortlist_head_precision_gate", candidate)
             self.assertEqual(
-                candidate["mtp_target_token_parity"]["c4"]["round_accounting"]["cells"]
-                ["whole-pp32768+tg256"]["theoretical_minimum_rounds_per_repetition"],
-                256,
+                candidate["whole_inference_tokens_per_second"]["prefill_8192_c1"], 8192.0
             )
             self.assertEqual(
-                candidate["whole_inference_tokens_per_second"]["prefill_8192_c1"], 1.0
+                candidate["whole_inference_tokens_per_second"]["decode_32768_c4"], 512.0
             )
             self.assertEqual(
-                candidate["whole_inference_tokens_per_second"]["decode_32768_c4"], 2.0
-            )
-            self.assertEqual(
-                candidate["whole_inference_tokens_per_second"]["whole_32768_c4"], 3.0
+                candidate["whole_inference_tokens_per_second"]["whole_32768_c4"], 257.0
             )
             self.assertEqual(
                 set(provenance["matrices"]), {"pareto-capacity", "pareto-whole"}
@@ -801,7 +867,7 @@ class AssembleParetoTest(unittest.TestCase):
             missing.unlink()
             logs = roots["pareto-capacity"] / "logs"
             logs.mkdir()
-            (logs / "pareto_effective_capacity.effective_capacity_mtp3.c4.stderr.txt").write_text(
+            (logs / "pareto_effective_capacity.effective_capacity_ordinary.c4.stderr.txt").write_text(
                 "[ninfer_bench] loading /model.ninfer (max_context=262144, concurrency=4, "
                 "kv_format=fp8-k-int4-v)\n"
                 "ninfer_bench: minimum Engine runtime reservation requires 10663212291 bytes "
@@ -809,7 +875,7 @@ class AssembleParetoTest(unittest.TestCase):
                 "11477728256 bytes are available after weights\n",
                 encoding="utf-8",
             )
-            (logs / "pareto_effective_capacity.effective_capacity_mtp3.c4.stdout.txt").write_text(
+            (logs / "pareto_effective_capacity.effective_capacity_ordinary.c4.stdout.txt").write_text(
                 "", encoding="utf-8"
             )
             with self.assertRaisesRegex(ValueError, "no failures.json"):
@@ -826,10 +892,10 @@ class AssembleParetoTest(unittest.TestCase):
                 "concurrency": 4,
                 "returncode": 1,
                 "stdout": str(
-                    logs / "pareto_effective_capacity.effective_capacity_mtp3.c4.stdout.txt"
+                    logs / "pareto_effective_capacity.effective_capacity_ordinary.c4.stdout.txt"
                 ),
                 "stderr": str(
-                    logs / "pareto_effective_capacity.effective_capacity_mtp3.c4.stderr.txt"
+                    logs / "pareto_effective_capacity.effective_capacity_ordinary.c4.stderr.txt"
                 ),
                 "command": missing_record["command"],
             }]), encoding="utf-8")
@@ -867,7 +933,7 @@ class AssembleParetoTest(unittest.TestCase):
             malformed_failure["campaign_failure"]["returncode"] = 139
             self.assertFalse(_valid_capacity_failure(malformed_failure))
             stderr_path = (
-                logs / "pareto_effective_capacity.effective_capacity_mtp3.c4.stderr.txt"
+                logs / "pareto_effective_capacity.effective_capacity_ordinary.c4.stderr.txt"
             )
             valid_stderr = stderr_path.read_text(encoding="utf-8")
             stderr_path.write_text("ninfer_bench: segmentation fault\n", encoding="utf-8")

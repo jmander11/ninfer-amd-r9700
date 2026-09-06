@@ -119,11 +119,12 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
 - [ ] Blocked at the explicit representation/context/performance-contract decision above. If that
       decision authorizes resumption, produce and retain matched whole-model benchmark artifacts for every capacity-eligible
       recipe/cache/execution candidate under the C=1..4 product cap. Bind each candidate's
-      completed 8K/32K quality sidecars to fresh exact C=1..4 capacity plus prefill/decode and
-      whole-inference throughput, acceptance, and relevant profiler attribution. The retained
+      completed 8K/32K quality sidecars to fresh exact C=1..4 ordinary capacity plus prefill/decode
+      and whole-inference throughput and relevant profiler attribution. The retained
       mixed-recipe C7/C8 failures are out-of-scope stress history and no longer exclude that recipe;
       it now requires the same matched admission evidence as all-Q4.
-      DFlash2 is the preferred and required speculative production path. Existing MTP3 rows remain
+      DFlash2 is the preferred and required speculative production path and owns downstream
+      acceptance evidence. Existing MTP3 rows remain
       useful only to preserve the already-supported MTP graph/eager, ordinary-target token,
       acceptance/state, cache, row-view, and draft-window semantics. Do not schedule the prepared
       MTP shortlist-head trace, alternate head precision, MTP-bulk tuning, or any other new MTP
@@ -144,8 +145,9 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
             revised before physical execution. The two retained schema-v13 all-Q4/G16 sparse
             manifests are therefore
             inadmissible. After the shared chunk is selected, acquire twelve exact capacity
-            outcomes (48 commands), retain measured failures as exclusions, and run the eight-report
-            `pareto-whole` matrix only for each capacity-eligible profile. Still-missing quality
+            outcomes (48 commands), retain measured failures as exclusions, and run the four-report
+            `pareto-whole` matrix (one report per C, eight workload rows total) only for each
+            capacity-eligible profile. Still-missing quality
             cells remain a separate prerequisite, and only the terminal selected route proceeds to
             required profiling and DFlash evidence.
       Classify cache-group/execution-profile dominance only over the complete matched objective set
@@ -1133,8 +1135,8 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
           three additions. Replacing those 144 objects in total adds `6,380,716,032` bytes and
           projects only `1,536.993` whole-P2048 tok/s; it cannot close the 2,000 tok/s floor alone.
           Its claimed `2,004,481`-byte P=8,192/G16/C4 remainder is invalid because the historical
-          capacity input omitted MTP plus optimized-head materialization and is not admission
-          evidence.
+          capacity input predates the current N16 artifact, selected chunk, and exact ordinary
+          physical-capacity contract and is not admission evidence.
           The owner refactor deliberately changed the shared qualifier source and rebuilt the gate
           and attention executables, so these retained reports no longer pass the live
           source/executable validator. Their numerical/performance result remains bounded design
@@ -1698,14 +1700,14 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
             `run_ninfer_bench_matrix.py --require-fp8-hybrid --prepare-only` now fails closed unless
             the real current artifact and adjacent conversion receipt validate, the selected dense
             G16 benchmark and shared-workspace runtime-planner executables exist and are hashed,
-            chunk 4,096 is explicit, and concurrency is exactly C=1,2,3,4. The compiled host
-            authority must report ordinary `{1,2,3,4,4096}` and MTP3
-            `{1,2,3,4,8,12,16,4096}` widths before either manifest is written. The existing
-            revised `pareto-whole` matrix supplies ranking spec-none ordinary rows; any matched MTP3
-            rows are diagnostic exact-token/state/graph regression only and cannot enter ranking.
+            chunk 4,096 is explicit, and concurrency is exactly C=1,2,3,4. The base capacity and
+            whole matrices use the ordinary planner widths and spec-none route. The existing
+            revised `pareto-whole` matrix supplies ranking spec-none ordinary rows; any separately
+            retained MTP3 rows are diagnostic exact-token/state/graph regression only and cannot
+            enter ranking.
             `pareto-capacity` supplies the base profile's product-capacity rows. Prepared manifests can
-            resume only after removing any stale MTP3 ranking requirement and revalidating input
-            identities, command coverage, and `auto` power.
+            resume only after revalidating the corrected ordinary-only command coverage, input
+            identities, and `auto` power.
             Exact commands are in `tools/bench/README.md`. This closes tooling preparation only;
             no GPU benchmark or performance/capacity admission is claimed.
 
@@ -2201,8 +2203,8 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         unchecked.
         Historical mixed C1..4 maxima were G16 262144/314112/301888/289664 and G32
         262144/326656/313984/301248 tokens; they justify restored eligibility but are not current
-        admission inputs. Before physical reuse, revise `pareto-whole` so only matched spec-none
-        ordinary rows enter base recipe/cache/attention ranking and MTP3 remains diagnostic.
+        admission inputs. The runner and schema now make `pareto-whole` exactly one matched
+        spec-none ordinary ranking row per C=1..4; MTP3 remains optional diagnostic evidence.
   - [ ] Blocked at the explicit representation/context/performance-contract decision above. If authorized, establish
         the final matched 8K/32K prefill quality authority for all three recipe branches,
         both attention profiles, and G16/G32.
@@ -2379,9 +2381,9 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
       branch and may not inherit the all-Q4 identity or companion. Run DFlash only for the
       companion of the selected base recipe;
       do not duplicate the shortlist and matrices for the losing recipe.
-      If the hybrid wins, first materialize its currently absent
-      `r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval` companion by byte-exactly copying the exact
-      authority-bound hybrid base and appending the registered 66-object Q4/BF16 DFlash inventory.
+      After selection, materialize the selected recipe's currently absent registered N16 DFlash2
+      companion by byte-exactly copying that exact authority-bound base and appending the registered
+      66-object Q4/BF16 DFlash inventory.
       Its conversion report must bind the base conversion-receipt digest plus recipe, selection,
       object-plan, source-index, and ranking hashes. Projected size/capacity arithmetic is not
       admission: fresh selected-K/W C=1..4 capacity and whole evidence is mandatory.
@@ -2389,8 +2391,11 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
       `profiles/bench/selected-dflash-prepare-20260905/prepare.sh`. It fails closed until the exact
       schema-v7 winner exists, accepts all-Q4, mixed, or four-role hybrid without a fallback, and
       binds the selected artifact/build/chunk/group/Text-prefill profile to exactly its registered
-      companion. Existing all-Q4 and mixed companions pass a byte/report/base-identity preflight;
-      the absent hybrid companion is converted only if the hybrid base wins. The staged future
+      companion. All three current-N16 companions are absent; exactly the winner's companion is
+      converted, while obsolete pre-N16 companions cannot satisfy the byte/report/base-identity
+      preflight. Conversion binds the exact ROCm Python launcher, its `pyvenv.cfg`, Torch/HIP and
+      safetensors identities, and the required ROCm library path; preparation fails before
+      publication if that environment is unavailable. The staged future
       command runs the fixed C1 shortlist, derives its K/W frontier, runs C1..4 capacity for every
       frontier tuple, runs `dflash-pareto` only for capacity-eligible tuples, and then invokes the
       no-overwrite schema-v2 owner. DFlash proposal and target verification remain dense, its 32
@@ -2836,12 +2841,9 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
               `profiles/bench/post-chunk-twelve-candidate-20260905` rerun both ON-profile capacity
               matrices with the rebuilt B16 consumer and then run each fresh schema-v14 whole
               matrix with the same group-specific executable and all-Q4 artifact bytes. Its four
-              spec-none ordinary timing commands per matrix supply the ranking rows. Any retained
-              MTP3 commands are diagnostic exact-token/state/graph regression only and replace the
-              stale 20260903 execution directories without entering ranking. Those MTP3
-              fresh-request rows retain separately timed prefill/decode phases, speculative
-              acceptance, and whole makespan; exact retained-token parity against the eight control
-              rows is required. The in-progress/retained standalone phase directories are diagnostic
+              spec-none ordinary timing commands per matrix supply the ranking rows. Any separately
+              retained MTP3 evidence is optional diagnostic exact-token/state/graph regression and
+              does not enter this matrix, its prerequisites, or ranking. The in-progress/retained standalone phase directories are diagnostic
               history and are not selection inputs. Whole-profile preparation is optional
               attribution only after a complete unprofiled whole matrix.
         - [ ] Complete matching current dense G16/G32 capacity and whole pairs and include all four
@@ -3495,12 +3497,14 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         dormant family Full-cache shape has its own two-plane BF16 owner rather than reusing the
         asymmetric three-plane cache.
 - [ ] Blocked at the explicit representation/context/performance-contract decision above. If authorized, produce
-      real FP8-K/INT4-V 8K and 32K paired quality, diagnostic greedy-token, graph/eager,
-      prefill/decode, and speculative acceptance evidence.
+      real FP8-K/INT4-V 8K and 32K paired quality, diagnostic greedy-token, graph/eager, and
+      spec-none ordinary prefill/decode evidence; after base selection, produce required DFlash
+      speculative acceptance evidence for the winner only.
       Missing candidate-local quality is owned by
-      `profiles/ppl/terminal-quality-recovery-20260905`; matched C1..4 whole and acceptance evidence
-      is owned by `profiles/bench/post-chunk-twelve-candidate-20260905`. Both remain blocked behind
-      the selected chunk and neither preparation closes this physical parent.
+      `profiles/ppl/terminal-quality-recovery-20260905`; matched C1..4 ordinary whole evidence is
+      owned by `profiles/bench/post-chunk-twelve-candidate-20260905`, while selected-only acceptance
+      is owned by the DFlash pipeline. These remain blocked behind the selected chunk and no CPU
+      preparation closes this physical parent.
   - [ ] Reconcile the completed four-role hybrid prefill-quality evidence with fresh
         selected-chunk capacity evidence.
         The fail-closed CPU report is
@@ -3582,8 +3586,8 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         24,090,686,464-byte file. No new evaluation conversion is needed before selection: the
         22,881,204,736-byte mixed evaluator and its conversion report already exist. A fresh
         production artifact remains blocked on the selected-chunk and six BF16-source quality
-        authorities, terminal schema-v7 recipe/cache/execution decision with exact C=1..4 whole
-        target-token parity, selected dense-control C1 P2048
+        authorities, terminal schema-v7 recipe/cache/execution decision with matched C=1..4
+        spec-none ordinary whole timing, selected dense-control C1 P2048
         admission at the 2,000 tok/s floor, selected-route NIAH admission, and schema-v2 DFlash
         decision. Only after all bind the same winner may cutover add the selected
         recipe's no-output CLI boundary, replace evaluation converter identities with the one final
@@ -3607,8 +3611,8 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         the exact v3 authority; all four fresh all-Q4 C=1..4
         capacity matrices and both fresh mixed dense and sparse capacity matrices are complete. The
         sparse all-Q4 and mixed dense/sparse PPL acquisition, all mixed and
-        all-Q4 whole matrices,
-        acceptance, and same-route execution evidence remain.
+        all-Q4 whole matrices, and ordinary same-route execution evidence remain. Speculative
+        acceptance belongs to the selected-only DFlash gate rather than base selection.
 - [ ] Blocked at the explicit representation/context/performance-contract decision above. If authorized, benchmark
       complete inference and concurrency C=1..4 with profiler attribution. The base
       closure is supplied by the same twelve schema-v14 capacity outcomes and corresponding
@@ -3749,7 +3753,8 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         for the selected-route comparisons rather than creating a second broad suite. The exact
         PPL/token owner is prepared at
         `profiles/ppl/post-terminal-exact-token-prepare-20260905`: it runs only the selected winner
-        at C1 and publishes only after all five existing same-route exact parity cells revalidate.
+        at C1 and publishes only after both required 8K/32K ordinary graph/eager exact-parity cells
+        revalidate. MTP comparisons are optional non-ranking diagnostics.
         Its schema-v7-dependent physical campaign and admission output remain absent.
         The source-BF16 Vision diagnostic is separately prepared at
         `profiles/bench/post-terminal-selected-vision-prepare-20260905`. It resolves only the

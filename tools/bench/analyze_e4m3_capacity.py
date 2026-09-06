@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Deterministic R9700 planner-capacity projection for the E4M3 evaluation artifact."""
+"""Historical MTP3 projection for the superseded 2026-09-03 E4M3 evaluation evidence.
+
+This standalone diagnostic is not an active base-capacity or selection authority. Current base
+admission uses fresh selected-chunk ``effective_capacity_ordinary`` C=1..4 matrices.
+"""
 
 from __future__ import annotations
 

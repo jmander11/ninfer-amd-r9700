@@ -10,13 +10,14 @@
     "concurrency": 1,
     "lengths": [8192, 32768],
     "schedule": "decode",
-    "spec": "mtp",
-    "draft_tokens": 3,
+    "device": 0,
+    "spec": "none",
+    "draft_tokens": 0,
     "selected_prefill_chunk": "resolved from schema-v7"
   },
-  "gate": "exact same-route I32 greedy-token identity and zero maximum absolute NLL delta for graph/eager and MTP3/ordinary at 8K and 32K, plus MTP3/MTP4 at 8K",
+  "gate": "exact same-route I32 greedy-token identity and zero maximum absolute NLL delta for selected-route ordinary graph/eager execution at 8K and 32K; MTP3/ordinary and MTP3/MTP4 are optional non-ranking diagnostics and are not admission prerequisites",
   "bf16_contract": "candidate-to-BF16 argmax mismatches remain diagnostic; the selected quality tier still gates NLL/severe positions. Preparation binds the validated 18-shard source receipt and repeats target-owned checkpoint preflight before GPU work.",
   "binding": "one schema-v7 winner, exact evaluation artifact/scorer bytes, selected G16/G32 cache and dense/tau0.9 profile, selected chunk, candidate-local quality authority, deterministic BF16 scorer/source/corpus, and hybrid receipt/planner when selected",
-  "publication": "Preparation rejects occupied output names under lexical lstat semantics, including dangling symlinks, and atomically publishes the complete staged command directory with renameat2(RENAME_NOREPLACE). Generated commands reject symlinked/occupied campaign and admission names, and the shared PPL runner refuses to write through a real or dangling output-directory symlink. The raw campaign directory is fresh evidence and never overwritten. Only the independently recomputed admission JSON is authoritative; it is fsynced to an exclusive pending inode, create-only hard-linked, read back, fully revalidated, directory-fsynced, and cleaned up or rolled back only when the path still names the owned inode.",
+  "publication": "Preparation rejects occupied output names under lexical lstat semantics, including dangling symlinks, and atomically publishes the complete staged command directory with renameat2(RENAME_NOREPLACE). Generated commands reject symlinked/occupied campaign and admission names, and the shared PPL runner refuses to write through a real or dangling output-directory symlink. The raw campaign directory is fresh evidence and never overwritten. The validator reconstructs every one of the six canonical weights/corpus/decode/spec-none/chunk/graph-or-eager commands and requires matching raw semantic fields before recomputing sidecar parity. Only the independently recomputed admission JSON is authoritative; it is fsynced to an exclusive pending inode, create-only hard-linked, read back, fully revalidated, directory-fsynced, and cleaned up or rolled back only when the path still names the owned inode.",
   "scope": "C1 only; no separate BF16-greedy identity threshold, generation suite, or candidate matrix"
 }

@@ -60,16 +60,15 @@ so it must not be encoded in either `weights_id`.
    - `profiles/ppl/post-terminal-selected-exact-token-20260905/admission.json`, prepared from the
      schema-v7 winner by `post-terminal-exact-token-prepare-20260905`. It must reopen the selected
      artifact/scorer, candidate-local quality authority, selected chunk/group/profile, and validated
-     18-shard BF16 source, then pass exact same-route graph/eager, MTP3/ordinary, and 8K MTP3/MTP4
-     I32-token plus zero-NLL-delta comparisons. Candidate-to-BF16 argmax differences remain
-     diagnostic and are not relabeled as this execution-parity gate;
+     18-shard BF16 source, then pass exact same-route graph/eager comparisons. MTP3/ordinary and
+     MTP3/MTP4 checks are optional diagnostic exact-token/state/graph regressions, not selection
+     prerequisites. Candidate-to-BF16 argmax differences remain diagnostic;
    - `profiles/bench/pareto-result-post-promotion-20260905.json`, whose bound schema-v4 input
      contains all twelve exact C=1..4 capacity outcomes and a C=1..4 whole matrix only for each
      capacity-eligible profile. Dense/XAttention capacity eligibility must match within every
      recipe/cache-group pair before whole acquisition begins. The eligible whole rows must pass
-     exact per-repetition/lane generated-target-token parity between MTP3
-     and ordinary draft-off controls; BF16 argmax flips in PPL remain diagnostic rather than being
-     mislabeled as that runtime token gate;
+     spec-none ordinary fresh-request timing rows; MTP3 does not enter base ranking. BF16 argmax
+     flips in PPL remain diagnostic, and DFlash is the required downstream speculative gate;
    - `profiles/bench/low-context-prefill-evaluation-20260905.json`, recomputed from the selected
      dense-control C1 ladder with `passes_p2048_gate=true` at the user's 2,000 tok/s floor. A valid
      below-floor diagnostic may guide profiling but is not production admission;

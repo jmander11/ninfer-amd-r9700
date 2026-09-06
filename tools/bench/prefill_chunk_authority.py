@@ -66,6 +66,7 @@ def validate_prefill_chunk_authority(
         "sha256": before,
         "artifact_type": selection.get("artifact_type"),
         "schema_version": selection.get("schema_version"),
+        "base_chunk_profile": selection.get("base_chunk_profile"),
         "selected_prefill_chunk": selected,
     }, selection)
 

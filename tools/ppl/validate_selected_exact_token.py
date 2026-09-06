@@ -14,6 +14,7 @@ from tools.ppl.pareto import load_payload, validate_terminal_production_authorit
 from tools.ppl.run import cell_ok, file_sha256, load_argmax, load_nlls, sidecar_parity
 
 HYBRID_WEIGHTS_ID = "r9700-q4g64-f8e4m3-four-role-n16k16-eval"
+RUNNER = Path(__file__).resolve().with_name("run.py")
 
 
 def _identity(path: Path) -> tuple[int, int]:
@@ -35,6 +36,58 @@ def _unlink_if_owned(path: Path, owner: tuple[int, int] | None) -> bool:
         return False
 
 
+def _expected_raw_command(
+    *, scorer_prefix: list[str], weights: str, ids: str, scheme: str, tokens: int,
+    prefill_chunk: int, output: Path, eager: bool,
+) -> list[str]:
+    command = [
+        *scorer_prefix,
+        "--weights", weights,
+        "--ids", ids,
+        "--scheme", scheme,
+        "--schedule", "decode",
+        "--skip", "half",
+        "--tokens", str(tokens),
+        "--prefill-chunk", str(prefill_chunk),
+        "--device", "0",
+        "--out-json", str(output),
+    ]
+    if eager:
+        command.append("--no-device-graph")
+    return command
+
+
+def _expected_plan_command(plan: dict, *, hybrid: bool) -> list[str]:
+    route = plan["terminal_route"]
+    profile = plan["candidate_profile"]
+    group_flag = "--g16" if profile == "r9700-g16" else "--g32"
+    command = [
+        plan["python"]["launcher_path"], str(RUNNER),
+        "--bf16-reference-ppl-bin", plan["bf16_scorer"]["path"],
+        "--bf16-reference-weights", plan["bf16_source"]["path"],
+        f"{group_flag}-ppl-bin", plan["candidate_scorer"]["path"],
+        f"{group_flag}-weights", route["artifact"]["path"],
+        "--ids", plan["corpus"]["path"],
+        "--profiles", f"bf16-reference,{profile}",
+        "--quality-tier", plan["quality_tier"],
+        "--gate", f"{profile}={plan['quality_mean_nll_gate']}",
+        "--schedule", "decode",
+        "--prefill-chunk", str(route["selected_prefill_chunk"]),
+        "--device", "0",
+        "--spec", "none",
+        "--execution-parity-max-abs-nll", "0",
+        "--no-position-extras",
+        "--expected-q4-activation-bits", "8",
+        "--expected-w8-activation-bits", "8",
+        "--expected-fp8-qk-wmma", "1",
+        "--expected-xattention-profile", route["execution_profile"]["xattention_profile"],
+    ]
+    if hybrid:
+        command.append("--require-fp8-hybrid")
+    command.extend(["--out", plan["outputs"]["campaign"]])
+    return command
+
+
 def validate(plan_path: Path, campaign_path: Path) -> dict:
     if plan_path.is_symlink() or campaign_path.is_symlink() or campaign_path.parent.is_symlink():
         raise ValueError("exact-token plan/campaign authority must not be symlinked")
@@ -46,10 +99,14 @@ def validate(plan_path: Path, campaign_path: Path) -> dict:
         plan.get("artifact_type") != "ninfer_r9700_selected_exact_token_plan"
         or plan.get("schema_version") != 1 or plan.get("status") != "command_only_not_executed"
         or workload != {"concurrency": 1, "lengths": [8192, 32768], "schedule": "decode",
-                           "spec": "mtp", "draft_tokens": 3,
+                           "spec": "none", "draft_tokens": 0, "device": 0,
                            "execution_parity_max_abs_nll": 0.0}
         or profile not in ("r9700-g16", "r9700-g32")
         or not isinstance(plan.get("command"), list)
+        or plan["command"].count("--spec") != 1
+        or plan["command"].index("--spec") + 1 >= len(plan["command"])
+        or plan["command"][plan["command"].index("--spec") + 1] != "none"
+        or "--draft-tokens" in plan["command"]
         or plan["command"].count("--no-position-extras") != 1
     ):
         raise ValueError("malformed selected exact-token plan")
@@ -78,6 +135,8 @@ def validate(plan_path: Path, campaign_path: Path) -> dict:
         or (not hybrid and hybrid_tool is not None)
     ):
         raise ValueError("plan hybrid identity/planner contract differs from selected route")
+    if plan["command"] != _expected_plan_command(plan, hybrid=hybrid):
+        raise ValueError("selected exact-token plan command differs from bound inputs")
     if hybrid:
         hybrid_path = Path(hybrid_tool.get("path", ""))
         if not hybrid_path.is_file() or file_sha256(hybrid_path) != hybrid_tool.get("sha256"):
@@ -99,6 +158,7 @@ def validate(plan_path: Path, campaign_path: Path) -> dict:
     corpus_binding = plan.get("corpus", {})
     corpus_path = Path(corpus_binding.get("path", ""))
     corpus_manifest_path = Path(corpus_binding.get("manifest_path", ""))
+    outputs = plan.get("outputs", {})
     if (
         not artifact_path.is_file() or file_sha256(artifact_path) != route["artifact"].get("sha256")
         or not scorer_path.is_file() or file_sha256(scorer_path) != scorer_binding.get("sha256")
@@ -107,16 +167,25 @@ def validate(plan_path: Path, campaign_path: Path) -> dict:
         or not corpus_path.is_file() or file_sha256(corpus_path) != corpus_binding.get("sha256")
         or not corpus_manifest_path.is_file()
         or file_sha256(corpus_manifest_path) != corpus_binding.get("manifest_sha256")
+        or not isinstance(outputs, dict)
+        or Path(outputs.get("campaign", "")).resolve() != campaign_path.parent.resolve()
+        or not isinstance(outputs.get("admission"), str) or not outputs["admission"]
     ):
         raise ValueError("selected artifact, scorer, or corpus bytes changed")
     if (
         campaign.get("artifact_type") != "ninfer_r9700_ppl_campaign"
         or campaign.get("schema_version") != 6 or campaign.get("pass") is not True
         or campaign.get("model_id") != "qwen3.8-27b"
+        or campaign.get("reference_weights_id") != "bf16-source"
         or campaign.get("lengths") != [8192, 32768]
         or campaign.get("schedules") != ["decode"]
+        or campaign.get("skip") != "half"
+        or campaign.get("spec") != "none" or campaign.get("draft_tokens") != 0
         or campaign.get("prefill_chunk") != plan["terminal_route"]["selected_prefill_chunk"]
         or set(campaign.get("weights_inputs", {})) != {"bf16-reference", profile}
+        or campaign.get("weights_inputs", {}).get("bf16-reference")
+        != plan["bf16_source"]["path"]
+        or campaign.get("weights_inputs", {}).get(profile) != str(artifact_path)
         or set(campaign.get("scorers", {})) != {"bf16-reference", profile}
         or campaign.get("quality_tier") != plan["quality_tier"]
         or campaign.get("execution_parity_max_abs_nll") != 0.0
@@ -157,32 +226,31 @@ def validate(plan_path: Path, campaign_path: Path) -> dict:
         or len(reference.get("shards_sha256", {})) != 18
     ):
         raise ValueError("campaign BF16 source differs from validated checkpoint")
-    required = {(8192, "device_graph_parity"), (8192, "spec_parity"),
-                (8192, "draft_window_parity"), (32768, "device_graph_parity"),
-                (32768, "spec_parity")}
+    required = {(8192, "device_graph_parity"), (32768, "device_graph_parity")}
     expected_files = {
         (8192, None): f"8192.decode.{profile}.json",
         (32768, None): f"32768.decode.{profile}.json",
         (8192, "device_graph_parity"): f"8192.decode.{profile}.eager.json",
         (32768, "device_graph_parity"): f"32768.decode.{profile}.eager.json",
-        (8192, "spec_parity"): f"8192.decode.{profile}.ordinary.json",
-        (32768, "spec_parity"): f"32768.decode.{profile}.ordinary.json",
-        (8192, "draft_window_parity"): f"8192.decode.{profile}.mtp.json",
     }
     observed: dict[tuple[int, str], dict] = {}
     campaign_root = campaign_path.parent.resolve()
     primary: dict[int, Path] = {}
     candidate_cells: list[tuple[dict, Path]] = []
     cells = campaign.get("cells", [])
-    if not isinstance(cells, list) or len(cells) != 9:
-        raise ValueError("campaign must contain exactly two BF16 and seven candidate cells")
+    if not isinstance(cells, list) or len(cells) != 6:
+        raise ValueError("campaign must contain exactly two BF16 and four candidate cells")
     baseline_tokens: set[int] = set()
     observed_files: set[str] = set()
     for cell in cells:
         if not isinstance(cell, dict) or cell.get("scheme") not in {"bf16-reference", profile}:
             raise ValueError("campaign contains an unexpected cell profile")
         command = cell.get("command")
-        if not isinstance(command, list) or command.count("--out-json") != 1:
+        if (
+            not isinstance(command, list)
+            or any(not isinstance(part, str) for part in command)
+            or command.count("--out-json") != 1
+        ):
             raise ValueError("candidate cell lacks one output identity")
         raw_path = Path(command[command.index("--out-json") + 1]).resolve()
         if raw_path.parent != campaign_root or not raw_path.is_file():
@@ -197,11 +265,26 @@ def validate(plan_path: Path, campaign_path: Path) -> dict:
         if not cell_ok(cell, load_nlls(raw_path), load_argmax(raw_path)):
             raise ValueError("campaign sidecars are incomplete, nonfinite, or unaligned")
         if cell.get("scheme") == "bf16-reference":
-            if command[:2] != [plan["python"]["launcher_path"], str(bf16_scorer_path)]:
-                raise ValueError("BF16 raw command uses a different scorer environment")
             tokens = cell.get("prompt_tokens")
             if raw_path.name != f"{tokens}.decode.bf16-reference.json" or tokens in baseline_tokens:
                 raise ValueError("campaign has unexpected or duplicate BF16 primary evidence")
+            expected_command = _expected_raw_command(
+                scorer_prefix=[plan["python"]["launcher_path"], str(bf16_scorer_path)],
+                weights=plan["bf16_source"]["path"], ids=str(corpus_path),
+                scheme="bf16-reference", tokens=tokens,
+                prefill_chunk=route["selected_prefill_chunk"], output=raw_path, eager=False,
+            )
+            expected_semantics = {
+                "weights": plan["bf16_source"]["path"], "model_id": "qwen3.8-27b",
+                "weights_id": "bf16-source", "schedule": "decode",
+                "spec": "none", "draft_tokens": 0, "device_graph": False,
+                "prefill_chunk": route["selected_prefill_chunk"], "prompt_tokens": tokens,
+                "skip_tokens": tokens // 2,
+            }
+            if command != expected_command or any(
+                cell.get(key) != value for key, value in expected_semantics.items()
+            ):
+                raise ValueError("BF16 raw command/semantics differ from ordinary decode")
             expected_reference = campaign["reference_source"]
             if (
                 cell.get("source_config_sha256") != expected_reference["config_sha256"]
@@ -214,27 +297,31 @@ def validate(plan_path: Path, campaign_path: Path) -> dict:
             baseline_tokens.add(tokens)
             continue
         candidate_cells.append((cell, raw_path))
-        if command[:1] != [str(scorer_path)]:
-            raise ValueError("candidate raw command uses a different scorer")
         tokens = cell.get("prompt_tokens")
-        parity_keys = [key for key in ("device_graph_parity", "spec_parity",
-                                       "draft_window_parity") if key in cell]
+        parity_keys = [key for key in ("device_graph_parity",) if key in cell]
         if len(parity_keys) > 1:
             raise ValueError("candidate variant carries multiple parity identities")
         identity = (tokens, parity_keys[0] if parity_keys else None)
         if expected_files.get(identity) != raw_path.name or raw_path.name in observed_files:
             raise ValueError("candidate cell differs from exact execution inventory")
         observed_files.add(raw_path.name)
-        flags = command[command.index("--out-json") + 2:]
-        expected_flags = {
-            None: ["--spec", "mtp", "--draft-tokens", "3"],
-            "device_graph_parity": ["--spec", "mtp", "--draft-tokens", "3",
-                                      "--no-device-graph"],
-            "spec_parity": [],
-            "draft_window_parity": ["--spec", "mtp", "--draft-tokens", "4"],
-        }[identity[1]]
-        if flags != expected_flags:
-            raise ValueError("candidate execution variant command differs from exact gate")
+        eager = identity[1] == "device_graph_parity"
+        expected_command = _expected_raw_command(
+            scorer_prefix=[str(scorer_path)], weights=str(artifact_path),
+            ids=str(corpus_path), scheme=profile, tokens=tokens,
+            prefill_chunk=route["selected_prefill_chunk"], output=raw_path, eager=eager,
+        )
+        expected_semantics = {
+            "weights": str(artifact_path), "model_id": "qwen3.8-27b",
+            "weights_id": route["artifact"]["weights_id"], "schedule": "decode", "spec": "none",
+            "draft_tokens": 0, "device_graph": not eager,
+            "prefill_chunk": route["selected_prefill_chunk"], "prompt_tokens": tokens,
+            "skip_tokens": tokens // 2,
+        }
+        if command != expected_command or any(
+            cell.get(key) != value for key, value in expected_semantics.items()
+        ):
+            raise ValueError("candidate raw command/semantics differ from exact ordinary gate")
         if raw_path.name == f"{tokens}.decode.{profile}.json":
             if tokens in primary:
                 raise ValueError("duplicate primary candidate cell")
@@ -243,7 +330,7 @@ def validate(plan_path: Path, campaign_path: Path) -> dict:
             or observed_files != set(expected_files.values())):
         raise ValueError("campaign lacks the exact BF16/candidate execution inventory")
     for cell, raw_path in candidate_cells:
-        for parity_key in ("device_graph_parity", "spec_parity", "draft_window_parity"):
+        for parity_key in ("device_graph_parity",):
             if parity_key not in cell:
                 continue
             key = (cell.get("prompt_tokens"), parity_key)
@@ -274,7 +361,8 @@ def validate(plan_path: Path, campaign_path: Path) -> dict:
         "quality_authority": plan["quality_authority"],
         "campaign": {"path": str(campaign_path.resolve()), "sha256": file_sha256(campaign_path)},
         "concurrency": 1, "compared_parity_cells": len(required),
-        "criterion": "exact same-route I32 greedy-token identity and zero maximum absolute NLL delta",
+        "criterion": "exact selected-route ordinary graph/eager I32 greedy-token identity and zero maximum absolute NLL delta",
+        "mtp_diagnostics": "optional_non_ranking_not_supplied",
         "bf16_argmax_identity": "diagnostic_only",
     }
 

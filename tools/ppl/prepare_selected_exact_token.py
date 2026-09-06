@@ -140,7 +140,8 @@ def prepare(selection: Path, output: Path) -> dict:
         "--ids", str(IDS), "--profiles", f"bf16-reference,{profile}",
         "--quality-tier", tier, "--gate", f"{profile}={gate}",
         "--schedule", "decode", "--prefill-chunk", str(route["selected_prefill_chunk"]),
-        "--spec", "mtp", "--draft-tokens", "3", "--execution-parity-max-abs-nll", "0",
+        "--device", "0",
+        "--spec", "none", "--execution-parity-max-abs-nll", "0",
         "--no-position-extras",
         "--expected-q4-activation-bits", "8", "--expected-w8-activation-bits", "8",
         "--expected-fp8-qk-wmma", "1", "--expected-xattention-profile", xattention,
@@ -167,12 +168,12 @@ def prepare(selection: Path, output: Path) -> dict:
                        "manifest_path": str(IDS.with_name(f"{IDS.stem}.manifest.json")),
                        "manifest_sha256": sha(IDS.with_name(f"{IDS.stem}.manifest.json"))},
             "workload": {"concurrency": 1, "lengths": list(LENGTHS), "schedule": "decode",
-                         "spec": "mtp", "draft_tokens": 3,
+                         "spec": "none", "draft_tokens": 0, "device": 0,
                          "execution_parity_max_abs_nll": 0.0},
             "quality_tier": tier, "quality_mean_nll_gate": gate,
             "candidate_profile": profile, "command": command,
             "outputs": {"campaign": str(campaign), "admission": str(admission)},
-            "gate": "exact I32 greedy-token and zero-NLL-delta parity for graph/eager, MTP3/ordinary, and the 8K MTP3/MTP4 draft-window pair; BF16 argmax differences remain diagnostic",
+            "gate": "exact I32 greedy-token and zero-NLL-delta parity for selected-route ordinary graph/eager execution at 8K and 32K; BF16 argmax differences remain diagnostic and MTP comparisons are optional non-admission diagnostics",
         }
         plan_path = staged / "plan.json"
         plan_path.write_text(json.dumps(plan, indent=2) + "\n", encoding="utf-8")

@@ -17,7 +17,11 @@ from tools.bench.assemble_dflash_selection import (
     assemble,
     main,
 )
-from tools.bench.run_ninfer_bench_matrix import BenchCase, MATRIX_SCHEMA_VERSION
+from tools.bench.run_ninfer_bench_matrix import (
+    BenchCase,
+    MATRIX_SCHEMA_VERSION,
+    R9700_POWER_PROFILE,
+)
 from tools.ppl.pareto import _file_sha256, classify
 
 CHUNK_SELECTION = {
@@ -66,6 +70,12 @@ class DFlashSelectionTest(unittest.TestCase):
         "model_id": "qwen3.8-27b", "weights_id": "r9700-q4g64-n16k16-dflash2-q4-eval",
     }
     bench = {"path": "/ninfer_bench", "file_size_bytes": 300, "sha256": "e" * 64}
+    auto_power = {
+        "required": "auto",
+        "sysfs_path": str(R9700_POWER_PROFILE),
+        "observed": "auto",
+        "rechecked_after": "auto",
+    }
 
     @staticmethod
     def write(path: Path, value: dict) -> None:
@@ -97,6 +107,8 @@ class DFlashSelectionTest(unittest.TestCase):
                         "fp8_qk_wmma_profile": "t1-ge64-t2-ge320-t3plus-stream-v1",
                         "xattention_profile": profile,
                     },
+                    "whole_inference_profile": "spec-none-ordinary",
+                    "base_capacity_profile": "spec-none-ordinary",
                     "quality": {
                         "eligible": True, "tier": "accuracy", "mean_nll_delta": 0.001,
                         "complete_finite_aligned": True, "scored_positions": 10000,
@@ -122,6 +134,8 @@ class DFlashSelectionTest(unittest.TestCase):
             "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
             "required_speed_workloads": ["whole_8k_c1"],
             "require_single_static_profile_selection": True,
+            "base_ranking_profile": "spec-none-ordinary",
+            "base_capacity_profile": "spec-none-ordinary",
             "selected_prefill_chunk": 4096,
             "prefill_chunk_selection": CHUNK_SELECTION,
             "candidates": candidates, "source_provenance": provenance,
@@ -162,6 +176,7 @@ class DFlashSelectionTest(unittest.TestCase):
         self.write(shortlist / "manifest.json", {
             "artifact_type": "ninfer_bench_matrix_run", "schema_version": MATRIX_SCHEMA_VERSION,
             "preset": "dflash-shortlist", "dry_run": False,
+            "power_profile": self.auto_power,
             "artifact": self.artifact, "bench": self.bench,
             "expected_kv_value_group": 16, "expected_q4_activation_bits": 8,
             "expected_w8_activation_bits": 8, "expected_fp8_qk_wmma_enabled": True,
@@ -210,6 +225,7 @@ class DFlashSelectionTest(unittest.TestCase):
                 self.write(pareto / "manifest.json", {
                     "artifact_type": "ninfer_bench_matrix_run", "schema_version": MATRIX_SCHEMA_VERSION,
                     "preset": "dflash-pareto", "dry_run": False,
+                    "power_profile": self.auto_power,
                     "artifact": self.artifact, "bench": self.bench,
                     "expected_kv_value_group": 16, "expected_q4_activation_bits": 8,
                     "expected_w8_activation_bits": 8, "expected_fp8_qk_wmma_enabled": True,
@@ -230,6 +246,8 @@ class DFlashSelectionTest(unittest.TestCase):
             "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
             "required_speed_workloads": ["whole_8k_c1"],
             "require_single_static_profile_selection": True,
+            "base_ranking_profile": "spec-none-ordinary",
+            "base_capacity_profile": "spec-none-ordinary",
             "selected_prefill_chunk": 4096,
             "prefill_chunk_selection": CHUNK_SELECTION,
             "candidates": candidates, "source_provenance": self.base_candidate_provenance,
@@ -364,6 +382,52 @@ class DFlashSelectionTest(unittest.TestCase):
             _same_campaign(
                 manifest, self.artifact, self.bench, group, profile, 4096, None
             )
+
+    def test_timing_campaign_requires_exact_auto_power_before_and_after(self) -> None:
+        manifest = {
+            "preset": "dflash-pareto",
+            "artifact": self.artifact, "bench": self.bench,
+            "expected_kv_value_group": 16,
+            "expected_q4_activation_bits": 8, "expected_w8_activation_bits": 8,
+            "expected_fp8_qk_wmma_enabled": True,
+            "expected_xattention_profile": "dense",
+            "power_profile": self.auto_power,
+        }
+        _same_campaign(
+            manifest, self.artifact, self.bench, 16, "dense", 4096, None
+        )
+        for field, value in (
+            ("observed", "profile_standard"),
+            ("rechecked_after", "profile_standard"),
+            ("sysfs_path", "/different/device"),
+        ):
+            changed = json.loads(json.dumps(manifest))
+            changed["power_profile"][field] = value
+            with self.subTest(field=field), self.assertRaisesRegex(
+                ValueError, "stable auto power"
+            ):
+                _same_campaign(
+                    changed, self.artifact, self.bench, 16, "dense", 4096, None
+                )
+        missing = json.loads(json.dumps(manifest))
+        del missing["power_profile"]
+        with self.assertRaisesRegex(ValueError, "stable auto power"):
+            _same_campaign(
+                missing, self.artifact, self.bench, 16, "dense", 4096, None
+            )
+
+    def test_capacity_campaign_does_not_claim_timing_power_admission(self) -> None:
+        manifest = {
+            "preset": "dflash-capacity",
+            "artifact": self.artifact, "bench": self.bench,
+            "expected_kv_value_group": 16,
+            "expected_q4_activation_bits": 8, "expected_w8_activation_bits": 8,
+            "expected_fp8_qk_wmma_enabled": True,
+            "expected_xattention_profile": "dense",
+        }
+        _same_campaign(
+            manifest, self.artifact, self.bench, 16, "dense", 4096, None
+        )
 
     def test_campaign_rejects_rebound_hybrid_planner(self) -> None:
         authority = {

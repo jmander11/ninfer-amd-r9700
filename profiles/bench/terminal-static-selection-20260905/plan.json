@@ -2,7 +2,7 @@
   "artifact_type": "ninfer_r9700_terminal_static_selection_plan",
   "schema_version": 1,
   "status": "blocked-on-complete-quality-and-post-chunk-evidence",
-  "scope": "exact twelve-candidate recipe/cache-group/attention-profile schema-v7 decision",
+  "scope": "exact twelve-candidate recipe/cache-group/attention-profile schema-v7 decision ranked by spec-none ordinary whole inference",
   "prefill_chunk_selection": "profiles/bench/prefill-chunk-selection-receipt-bound-n16k16-20260905.json",
   "post_chunk_capacity_validation": "profiles/bench/post-chunk-twelve-candidate-20260905/executed-capacity-validation.json",
   "pareto_input": "profiles/bench/pareto-input-post-promotion-20260905.json",
@@ -30,5 +30,5 @@
   ],
   "command": "bash profiles/bench/terminal-static-selection-20260905/assemble-and-select.sh ALL_Q4_DENSE_QUALITY ALL_Q4_XATTENTION_QUALITY MIXED_DENSE_QUALITY MIXED_XATTENTION_QUALITY FOUR_ROLE_DENSE_QUALITY FOUR_ROLE_XATTENTION_QUALITY",
   "publication": "The four pending/final namespaces must be absent under lstat semantics, including dangling symlinks. Schema-v4 input binds the freshly rebuilt executed post-chunk capacity validation and uses '-' only for its capacity-ineligible symmetric dense/XAttention pairs. Schema-v4 input and schema-v7 result are fully constructed at package-private pending paths; immediately before publication the package closures and starting selected-chunk hash are revalidated. One create-only transaction fsyncs both pending files, hard-links the input without overwrite, recomputes the result against that published input, hard-links and revalidates the result, rechecks the selected-chunk guard before and after directory fsync, and rolls back only the transaction-owned inodes on failure.",
-  "note": "The entry point accepts only six explicit profile-level quality paths; one campaign must cover both G16 and G32 for its recipe/profile. It consumes only the three exact N16/K16 recipe identities and the fresh -n16k16 post-chunk capacity/whole roots; legacy RowSplit identities, selection authority, and result roots remain historical and are never resumed. It never chooses a quality file by glob or timestamp."
+  "note": "The entry point accepts only six explicit profile-level quality paths; one campaign must cover both G16 and G32 for its recipe/profile. It consumes only the three exact N16/K16 recipe identities and fresh spec-none ordinary -n16k16 post-chunk capacity/whole roots; MTP3 is optional diagnostic regression evidence and cannot satisfy or influence selection. DFlash remains required downstream speculative admission. Legacy RowSplit identities, selection authority, and result roots remain historical and are never resumed. It never chooses a quality file by glob or timestamp."
 }

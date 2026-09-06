@@ -56,13 +56,12 @@ REQUIRED_PROFILES = ("dense", "b128-s16-tau900")
 RULE = "global_maximin_normalized_prefill_then_workspace_then_smaller_chunk_v2"
 MEASUREMENT_SEMANTICS = {
     "requested_output_tokens": 1,
-    "configured_speculative_backend": "mtp",
-    "configured_mtp_draft_window": 3,
-    "mtp_bulk_state_prefill": True,
-    "initial_mtp_proposal_extent": 0,
+    "base_chunk_profile": "spec-none-ordinary",
+    "configured_speculative_backend": "none",
+    "configured_draft_window": 0,
     "proposal_head_executed": False,
     "decode_rounds": 0,
-    "timed_scope": "text_prefill_target_bonus_sampling_and_mtp_bulk_state_prefill",
+    "timed_scope": "ordinary_text_prefill_target_and_sampling",
 }
 
 
@@ -114,21 +113,21 @@ def _validated_prefill_measurement(
     """Recompute the point estimate that drives selection from retained repetitions."""
     speculative = test.get("speculative")
     expected_speculative = {
-        "enabled": True,
-        "draft_window": 3,
+        "enabled": False,
+        "draft_window": 0,
         "rounds": 0,
         "drafted_tokens": 0,
         "accepted_tokens": 0,
         "fallback_steps": 0,
         "acceptance_rate": None,
         "acceptance_length": None,
-        "accepted_per_position": [0, 0, 0],
+        "accepted_per_position": [],
     }
     if not isinstance(speculative, dict) or any(
         speculative.get(key) != value for key, value in expected_speculative.items()
     ):
         raise ValueError(
-            f"{report_path} is not the zero-proposal, zero-decode MTP bulk-prefill protocol"
+            f"{report_path} is not the spec-none ordinary prefill protocol"
         )
     reps = test.get("reps")
     if not isinstance(reps, list) or len(reps) != 3:
@@ -189,6 +188,7 @@ def _manifest(root: Path, prompt: int, chunks: Sequence[int]) -> tuple[dict[str,
         value.get("artifact_type") != "ninfer_bench_matrix_run"
         or value.get("schema_version") != MATRIX_SCHEMA_VERSION
         or value.get("preset") != "prefill-chunk"
+        or value.get("base_chunk_profile") != "spec-none-ordinary"
         or value.get("dry_run") is not False
         or value.get("failures")
         or value.get("concurrency") != [1]
@@ -281,7 +281,7 @@ def _report_sources(rows: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _same_candidate(screen: dict[str, Any], final: dict[str, Any]) -> None:
     fields = (
-        "artifact", "bench", "corpus_sha256", "expected_kv_value_group",
+        "artifact", "bench", "corpus_sha256", "base_chunk_profile", "expected_kv_value_group",
         "expected_kv_plane_layouts", "expected_q4_activation_bits",
         "expected_w8_activation_bits", "expected_fp8_qk_wmma_enabled",
         "expected_fp8_qk_wmma_profile", "expected_xattention_profile",
@@ -401,6 +401,7 @@ def build_selection(candidate_roots: Sequence[tuple[Path, Path]]) -> dict[str, A
         "artifact_type": ARTIFACT_TYPE,
         "schema_version": SCHEMA_VERSION,
         "selection_rule": RULE,
+        "base_chunk_profile": "spec-none-ordinary",
         "measurement_semantics": MEASUREMENT_SEMANTICS,
         "candidate_count": 12,
         "screen_prompt_tokens": 8192,
