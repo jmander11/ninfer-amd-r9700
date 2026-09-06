@@ -18,9 +18,14 @@ Immediate execution priority: the user stopped the queued whole-model/chunk/prof
 2,000 tok/s hard gate. The current route reaches `1,847.942898 tok/s`; scalar-base failed its
 fixed operator gate, A4 failed quality, M96N256 lost physically, and the final materially distinct
 exact-Q4 M64xN192/scalar-base compound candidate failed its frozen practical gate despite improving
-all three isolated cells. No adjacent Q4 topology sweep is authorized. The next action is an
-explicit representation/context/performance-contract decision; until that decision selects and
-authorizes a new bounded direction, keep every downstream chunk/capacity/whole campaign held.
+all three isolated cells. On 2026-09-05 the user selected the exact-format continuation: preserve
+the literal dense Q4G64/A8G64 contract and the 2,000 tok/s floor, but retire the fixed `>=25 ms`
+per-candidate worthiness threshold and the blanket no-adjacent-sweep stop. Pursue a bounded sequence
+of measured, mutually composable smaller Q4 improvements, admit no regression hidden by aggregate
+weighting, and confirm accumulated gains at the whole-P2048 boundary. This does not authorize an
+unbounded topology search, FP8 substitution, Q4G128/A8G128 representation change, XAttention as a
+dense-floor surrogate, or any downstream chunk/capacity/whole campaign before the dense gate and
+practical-ceiling conditions pass.
 The 2,000 tok/s P2048 value is an acceptance floor based on an existing llama.cpp observation, not
 an optimization target or a performance ceiling for this fixed-model, fixed-R9700 engine. Crossing
 it permits the dependent campaign to resume but does not close prefill performance work: continue
@@ -116,8 +121,9 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
       graph/eager, MTP/ordinary, and draft-window variants; compare prefill/decode schedules under
       an explicit finite aligned NLL bound with their flips diagnostic. BF16 flip count/rate is
       likewise diagnostic. Schema-v5 campaign output and focused tests cover the new contract.
-- [ ] Blocked at the explicit representation/context/performance-contract decision above. If that
-      decision authorizes resumption, produce and retain matched whole-model benchmark artifacts for every capacity-eligible
+- [ ] Held behind the immediate dense C1/P2048/spec-none `>=2,000 tok/s` floor and
+      practical-ceiling gate above; the user-authorized smaller-gain exact-Q4 continuation does not
+      authorize this downstream campaign. After those gates pass, produce and retain matched whole-model benchmark artifacts for every capacity-eligible
       recipe/cache/execution candidate under the C=1..4 product cap. Bind each candidate's
       completed 8K/32K quality sidecars to fresh exact C=1..4 ordinary capacity plus prefill/decode
       and whole-inference throughput and relevant profiler attribution. The retained
@@ -173,8 +179,9 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
       closure is not a completed cutover receipt. This chain remains held at its first physical step by the immediate P2048 floor
       above; it does not authorize resuming the stopped broad campaign. These are prepared
       boundaries, not completed physical evidence.
-  - [ ] Blocked at the explicit representation/context/performance-contract decision above. If that
-        decision authorizes resumption, select the production text-prefill chunk instead of treating the current 4,096-token
+  - [ ] Held behind the immediate dense C1/P2048/spec-none `>=2,000 tok/s` floor and
+        practical-ceiling gate above; the user-authorized smaller-gain exact-Q4 continuation does not
+        authorize this downstream campaign. After those gates pass, select the production text-prefill chunk instead of treating the current 4,096-token
         campaign control as final. After localizing the unexpectedly low native prefill throughput,
         sweep the supported aligned chunks 1,024, 2,048, 4,096, and 8,192 at 8K, then confirm the
         same two global finalists at 32K for all twelve candidates; qualify numerical behavior and workspace/capacity,
@@ -501,7 +508,9 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         measured `28.56x/32.40x` and `28.81x/32.72x` dense-over-sparse at 8K/32K on the concentrated
         fixture. Reports with executable/source hashes are retained under
         `profiles/bench/r9700-xattention-b16-requal-s16-tau900-g{16,32}/`.
-  - [ ] Blocked at the explicit representation/context/performance-contract decision above. If authorized, validate
+  - [ ] Held behind the immediate dense C1/P2048/spec-none `>=2,000 tok/s` floor and
+        practical-ceiling gate above; the user-authorized smaller-gain exact-Q4 continuation does not
+        authorize this downstream campaign. After those gates pass, validate
         the redesigned consumer at real 8K/32K model keep distributions, select the
         production prefill chunk, and rerun affected whole evidence. The concentrated 11.72%-keep
         qualifier corpus and the current-tree 16.2502%-keep production-scale refresh establish
@@ -513,7 +522,9 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         `profiles/bench/prefill-chunk-screen-twelve-candidate-20260905` plus
         `profiles/bench/prefill-chunk-selection-pipeline-20260905`; operator refresh evidence is
         complete, but no model-distribution screen or terminal selection row is credited here.
-  - [ ] Blocked at the explicit representation/context/performance-contract decision above. If authorized, obtain
+  - [ ] Held behind the immediate dense C1/P2048/spec-none `>=2,000 tok/s` floor and
+        practical-ceiling gate above; the user-authorized smaller-gain exact-Q4 continuation does not
+        authorize this downstream campaign. After those gates pass, obtain
         matched rebuilt real-model attribution and terminal whole-selection evidence for
         the already-promoted production-extent multi-wave A8Q4 prefill CTA. The retained 32K `auto`
         trace that motivated the completed operator replacement attributes
@@ -721,6 +732,51 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
           unchanged, qualification-only code is removed, and no adjacent M64xN160/N224 sweep is
           authorized. This closes the final bounded exact-Q4 topology and returns prefill work to
           the explicit representation/context/performance-contract decision above.
+        - [ ] Apply the user-authorized smaller-gain continuation without reopening rejected
+          representations or topology families. A mechanism enters the composition pool only after
+          the independent represented-format oracle, incumbent BF16 parity, status/tail/alias/guard,
+          graph, and loaded-ISA/resource gates pass; every exact P2048 shape must have robust
+          candidate/control upper ratio `<=1.01`, and the exact call-weighted robust saving lower
+          bound must be at least `5 ms`. Permit one frozen-byte repeat only for instability or
+          interval overlap, never to rescue a stable miss. Savings touching the same kernel, call
+          set, addressing, LDS, or schedule are non-additive and require a directly measured
+          compound. Trigger whole-P2048 confirmation at a directly measured `>=10 ms` robust
+          operator lower bound, after three pool additions, or whenever a point estimate could
+          cross the remaining floor deficit. Production promotion requires positive robust whole
+          improvement of at least `10 ms`, no semantic/workspace/dispatch regression, and rebasing
+          every later comparison on the promoted source. Stop after two consecutive stable compound
+          misses, a remaining non-overlapping credible whole bound below `10 ms`, or selected Q4
+          service at `>=120` useful TMAC/s or an equivalent physical ceiling bound.
+          The first candidate is the scalar-base/u32-voffset addressing mechanism because its two
+          retained sessions agree on about `23.8 ms` point / `22.8 ms` robust-lower Q4 saving while
+          preserving the exact arithmetic, LDS, grid, ABI, and Q4G64/A8G64 representation. Integrate
+          it into the actual product source, prove unsigned-offset bounds over every admitted
+          shape/extent while retaining `size_t` output addressing, requalify the actual wrapper and
+          loaded object, run one fresh exact `48/64/64` operator A/B, and immediately run a
+          source-matched dense C1/P2048/chunk4096/spec-none whole A/B if it passes. Do not combine it
+          with M64xN192: the retained compound's `8.625 ms` robust lower demonstrates destructive
+          interaction. No other previously rejected mechanism is silently reopened; a subsequent
+          candidate must be a new, predeclared hypothesis informed by the post-promotion loaded ISA
+          and physical attribution.
+          The product-source scalar-base candidate passed on `auto`: the actual-wrapper/static gate
+          reports 88 logical/allocated VGPR, 17,152-byte LDS, eight native signed-IU4 sites, zero
+          scratch/spills, exact scalar-base/single-VGPR-voffset loads, all 32 admitted shape/extent
+          bounds, full-bit incumbent parity, represented-FP64 samples, graph/status/guard coverage,
+          and a `21.057251555 ms` exact-call-weighted robust saving lower. Its immutable operator
+          report is
+          `profiles/bench/r9700-a8q4-n16k16-scalar-base-product-p2048-ab-20260905.json`
+          (SHA-256 `325cad2e3c53b620f2864014bd16d3f4e510fdeb846b19a2c33ad31ee7c28fd8`).
+          The source/emitted-compile-matched OFF/ON whole gate also passed promotion: control versus
+          candidate median total was `1097.650069/1075.475953 ms`, robust total saving lower was
+          `20.306733144 ms`, robust ratio upper was `0.9811942024`, all sixteen token vectors were
+          exactly `[[271]]`, and workspace/environment identities matched. Its immutable report is
+          `profiles/bench/r9700-scalar-base-production-p2048-c1-ab-20260905.json` (SHA-256
+          `08463f48aae28aa0dd5ad4f5f05155a11deacda2d458db38e2f512a974be8e9f`). The candidate
+          prefill median is `1075.438603 ms` / `1904.339303 tok/s`, so the 2,000 tok/s floor remains
+          open by `51.438603 ms`. Promote scalar-base as the canonical exact-Q4 product route,
+          remove the qualification selector/duplicate full-tile path, reverify the final loaded
+          canonical object, and use its post-promotion ISA/physical bound to predeclare the next
+          composable mechanism or close the practical ceiling under the bounded stop rule.
         - [x] Record the initial design rejection of direct signed-A8 by unpacked-signed-Q4 IU8
           WMMA. The
           gfx1201 builtin is K16 with signedness controls `(true, A, true, B, C, false)`. A G64
@@ -1753,7 +1809,9 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
           `a41e2a2ad65809ade16b629e698244834d2c2da065335f8fab62869813aaef5b`.
           Both rejected M64xN256 executable/tooling paths are removed, M64xN128 ping/pong remains
           production, and the bounded stop rule excludes an adjacent N256 or cache-hint sweep.
-  - [ ] Blocked at the explicit representation/context/performance-contract decision above. If authorized, obtain
+  - [ ] Held behind the immediate dense C1/P2048/spec-none `>=2,000 tok/s` floor and
+        practical-ceiling gate above; the user-authorized smaller-gain exact-Q4 continuation does not
+        authorize this downstream campaign. After those gates pass, obtain
         the matched rebuilt mixed-artifact trace and whole-selection evidence for the
         already-promoted target-specific A8W8G32 prefill CTA. The W8 implementation remains separate
         from A8Q4 and owns its distinct G32 signed-I8 payload, two native
@@ -2121,7 +2179,9 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         producer/finalizer tooling are removed rather than retained as a dormant product lane. The ordinary-decode package reports
         only supported relative cache/activity proxies and fails closed on unavailable or zero
         counters; it does not claim physical HBM bandwidth.
-  - [ ] Blocked at the explicit representation/context/performance-contract decision above. If authorized, use the
+  - [ ] Held behind the immediate dense C1/P2048/spec-none `>=2,000 tok/s` floor and
+        practical-ceiling gate above; the user-authorized smaller-gain exact-Q4 continuation does not
+        authorize this downstream campaign. After those gates pass, use the
         four rebuilt static compile profiles to run all twelve recipe/cache/attention
         prefill-chunk screens, then rerun both globally selected finalists for all twelve candidates
         before selecting one chunk. After selection, run all 48 post-promotion capacity cells
@@ -2205,7 +2265,9 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         262144/326656/313984/301248 tokens; they justify restored eligibility but are not current
         admission inputs. The runner and schema now make `pareto-whole` exactly one matched
         spec-none ordinary ranking row per C=1..4; MTP3 remains optional diagnostic evidence.
-  - [ ] Blocked at the explicit representation/context/performance-contract decision above. If authorized, establish
+  - [ ] Held behind the immediate dense C1/P2048/spec-none `>=2,000 tok/s` floor and
+        practical-ceiling gate above; the user-authorized smaller-gain exact-Q4 continuation does not
+        authorize this downstream campaign. After those gates pass, establish
         the final matched 8K/32K prefill quality authority for all three recipe branches,
         both attention profiles, and G16/G32.
         Historical two-recipe acquisition is complete: its eight candidate cells have finite, complete, index-aligned
@@ -2498,7 +2560,9 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         two Text layers and one MTP layer through fragmented source/destination maps without an
         external host fence, proves both mismatch paths leave every destination byte unchanged,
         and exercises safe in-flight FIFO eviction.
-- [ ] Blocked at the explicit representation/context/performance-contract decision above. If authorized, select one
+- [ ] Held behind the immediate dense C1/P2048/spec-none `>=2,000 tok/s` floor and
+      practical-ceiling gate above; the user-authorized smaller-gain exact-Q4 continuation does not
+      authorize this downstream campaign. After those gates pass, select one
       G16/G32 plus dense/B128-S16-tau900 static profile only from the full matched
       quality, capacity, separately timed prefill/decode, and whole-inference Pareto gate. During
       the subsequent production
@@ -2528,7 +2592,9 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         schema-v18/v11 `pareto-capacity-max-*` campaigns remain superseded historical evidence and
         cannot enter the final C=1..4 frontier. Exact current values and hashes are retained in the
         candidate children below and `docs/performance.md`.
-  - [ ] Blocked at the explicit representation/context/performance-contract decision above. If authorized, complete
+  - [ ] Held behind the immediate dense C1/P2048/spec-none `>=2,000 tok/s` floor and
+        practical-ceiling gate above; the user-authorized smaller-gain exact-Q4 continuation does not
+        authorize this downstream campaign. After those gates pass, complete
         the twelve schema-v14 capacity outcomes named in the XAttention admission
         children below plus the corresponding whole matrix for every capacity-eligible profile,
         then assemble one schema-v7 Pareto decision against each candidate's matched quality
@@ -2738,7 +2804,9 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
 
 ### XAttention prefill sparsity
 
-- [ ] Blocked at the explicit representation/context/performance-contract decision above. If authorized, complete
+- [ ] Held behind the immediate dense C1/P2048/spec-none `>=2,000 tok/s` floor and
+      practical-ceiling gate above; the user-authorized smaller-gain exact-Q4 continuation does not
+      authorize this downstream campaign. After those gates pass, complete
       the native gfx1201 XAttention prefill admission gate over both G16/G32 instances of
       the typed FP8-E4M3FN-K/INT4-V/FP16-scale cache. Keep ordinary T=1 decode, MTP/DFlash verification,
       tree masks, and GDN layers on their qualified dense paths. The evaluator must use an
@@ -3496,7 +3564,9 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         The physical qualifier passes an exact all-layer lane-1 capture/clear/restore oracle; the
         dormant family Full-cache shape has its own two-plane BF16 owner rather than reusing the
         asymmetric three-plane cache.
-- [ ] Blocked at the explicit representation/context/performance-contract decision above. If authorized, produce
+- [ ] Held behind the immediate dense C1/P2048/spec-none `>=2,000 tok/s` floor and
+      practical-ceiling gate above; the user-authorized smaller-gain exact-Q4 continuation does not
+      authorize this downstream campaign. After those gates pass, produce
       real FP8-K/INT4-V 8K and 32K paired quality, diagnostic greedy-token, graph/eager, and
       spec-none ordinary prefill/decode evidence; after base selection, produce required DFlash
       speculative acceptance evidence for the winner only.
@@ -3613,7 +3683,9 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         sparse all-Q4 and mixed dense/sparse PPL acquisition, all mixed and
         all-Q4 whole matrices, and ordinary same-route execution evidence remain. Speculative
         acceptance belongs to the selected-only DFlash gate rather than base selection.
-- [ ] Blocked at the explicit representation/context/performance-contract decision above. If authorized, benchmark
+- [ ] Held behind the immediate dense C1/P2048/spec-none `>=2,000 tok/s` floor and
+      practical-ceiling gate above; the user-authorized smaller-gain exact-Q4 continuation does not
+      authorize this downstream campaign. After those gates pass, benchmark
       complete inference and concurrency C=1..4 with profiler attribution. The base
       closure is supplied by the same twelve schema-v14 capacity outcomes and corresponding
       eligible whole matrices used by

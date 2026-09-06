@@ -44,6 +44,14 @@ endif()
 add_compile_definitions(
   NINFER_R9700_Q4_ACTIVATION_BITS=${NINFER_R9700_Q4_ACTIVATION_BITS})
 
+# Private build-only switch for source-matched scalar-base qualification. It is
+# deliberately absent from the CLI/artifact/runtime contracts.
+option(NINFER_R9700_Q4_SCALAR_BASE_QUALIFICATION
+  "Route selected Q4 prefill calls through the scalar-base qualifier" OFF)
+if(NINFER_R9700_Q4_SCALAR_BASE_QUALIFICATION)
+  add_compile_definitions(NINFER_R9700_Q4_SCALAR_BASE_QUALIFICATION=1)
+endif()
+
 # The selected W8G32 profile uses dynamic A8G32 only at measured winning shapes/token extents and
 # retains exact represented-BF16 activation below each crossover. The explicit A16 build is the
 # matched quality/performance control over identical persistent W8G32 bytes.

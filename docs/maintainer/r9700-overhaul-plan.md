@@ -1637,10 +1637,38 @@ Replace functional routes with measured gfx1201 families:
   two independent robust point estimates
   and computed intervals above remain below `3 ms`, but instability prevents treating them as a
   physical speed bound; the permitted repeat is exhausted and admits no product path. The residual
-  audit therefore leaves no live represented-format or exact-format `>=25 ms` hypothesis. The
-  P2048 floor/practical-ceiling item is blocked on an explicit product-contract decision; do not
-  replace that decision with unbounded candidate search or a chunk/capacity sweep.
-- [ ] Rerun all 48 post-promotion capacity cells (dense/XAttention times
+  audit therefore leaves no live represented-format or exact-format `>=25 ms` hypothesis. On
+  2026-09-05 the user preserved the literal dense Q4G64/A8G64 contract and 2,000 tok/s floor while
+  retiring the fixed per-candidate `>=25 ms` worthiness threshold and blanket adjacent-Q4 stop.
+  Continue with a bounded sequence of measured, mutually composable smaller exact-Q4 gains and
+  confirm their accumulated effect at whole P2048. This does not authorize unbounded candidate
+  search, a representation change, XAttention as a dense-floor surrogate, or a chunk/capacity
+  sweep before the dense floor and practical-ceiling conditions pass.
+  Use a `5 ms` robust-lower exact-call-weighted threshold for the qualification-only composition
+  pool, direct compound measurement for mechanisms that touch the same kernel or calls, and a
+  `10 ms` robust whole-P2048 promotion threshold. The first reopened candidate is only the retained
+  scalar-base/u32-voffset addressing mechanism, whose two sessions consistently indicated about
+  `23.8 ms` point / `22.8 ms` robust-lower Q4 service saving without changing representation,
+  arithmetic, LDS, grid, or ABI. It must be integrated into the actual product source, prove u32
+  bounds for every admitted shape/extent, pass actual-wrapper and loaded-object qualification, and
+  then pass fresh operator and source-matched whole-P2048 A/Bs. The destructive M64xN192 compound
+  and every other previously rejected mechanism remain closed. Stop after two stable compound
+  misses, a remaining non-overlapping credible whole bound below `10 ms`, or the existing selected
+  Q4 physical-ceiling condition.
+  The product-source scalar-base qualification then passed: its exact-call-weighted robust operator
+  saving lower was `21.057251555 ms`, and the source/emitted-compile-matched whole P2048 A/B reduced
+  median total time from `1097.650069` to `1075.475953 ms` with a `20.306733144 ms` robust saving
+  lower, exact token identity, and unchanged workspace/environment. The immutable operator/whole
+  reports are `profiles/bench/r9700-a8q4-n16k16-scalar-base-product-p2048-ab-20260905.json`
+  (SHA-256 `325cad2e3c53b620f2864014bd16d3f4e510fdeb846b19a2c33ad31ee7c28fd8`) and
+  `profiles/bench/r9700-scalar-base-production-p2048-c1-ab-20260905.json` (SHA-256
+  `08463f48aae28aa0dd5ad4f5f05155a11deacda2d458db38e2f512a974be8e9f`). Promote the
+  scalar-base addressing route as canonical and rebase later exact-Q4 work on it. Its
+  `1075.438603 ms` / `1904.339303 tok/s` median prefill remains below the 2,000 tok/s floor, so this
+  promotion is one bounded composable gain rather than closure of the dense floor or practical
+  ceiling.
+- [ ] After the dense C1/P2048/spec-none floor and practical-ceiling gate passes and the shared
+  chunk is selected, rerun all 48 post-promotion capacity cells (dense/XAttention times
   all-Q4/mixed/four-role-hybrid times G16/G32, each at C=1..4). Bind the newly measured Device Graph
   executable allocation; this is
   still required even though the aliased split scratch does not raise the modeled global arena.

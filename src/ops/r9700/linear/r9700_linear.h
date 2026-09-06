@@ -354,6 +354,16 @@ struct A8Q4G64KernelResources {
 // admits it only for the exact qualified tuples/extents; tails use the named regression control.
 [[nodiscard]] hipError_t a8q4g64_linear_prefill_cta(const A8Q4G64LinearArgs& args,
                                                     hipStream_t stream) noexcept;
+#if defined(NINFER_R9700_Q4_SCALAR_BASE_QUALIFICATION)
+// Qualification-only product-source candidate for scalar-base plus U32-voffset
+// global loads. Exact tiles use the candidate; every other valid prefill tuple
+// delegates to the unchanged production entry and its regression fallback.
+[[nodiscard]] hipError_t a8q4g64_linear_prefill_cta_scalar_base_qualification(
+    const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept;
+#endif
+[[nodiscard]] bool a8q4g64_scalar_base_u32_offsets_fit(
+    std::uint32_t tokens, std::uint32_t rows,
+    std::uint32_t padded_columns) noexcept;
 // Superseded single-bank M64xN128 route retained only for direct regression and production-tail
 // correctness. No exact qualified product tuple dispatches here.
 [[nodiscard]] hipError_t a8q4g64_linear_prefill_cta_m64n128_regression(
