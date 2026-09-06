@@ -208,6 +208,7 @@ def check(recipe: str, mode: str, assembly: Path, metadata: Path) -> dict[str, i
         raise ValueError(
             f"{recipe}: occupancy {occupancy}, expected exactly {profile.occupancy}")
     n16_weight_b64_sites = 0
+    scalar_base_load_sites = 0
     if pipelined:
         opcode_lines = re.findall(
             rf"^\s*{re.escape(profile.opcode)}[^\n]*$", assembly_body,
@@ -225,6 +226,23 @@ def check(recipe: str, mode: str, assembly: Path, metadata: Path) -> dict[str, i
             raise ValueError(
                 "q4: expected prologue+successor pairs of two activation b32 and one N16/K16 weight b64 load")
         n16_weight_b64_sites = 2
+        global_loads = re.findall(
+            r"^\s*(global_load_(?:b32|b64|d16_b16))\s+"
+            r"v(?:\[\d+:\d+\]|\d+),\s+v\d+,\s+(s\[\d+:\d+\])\s*$",
+            assembly_body, flags=re.MULTILINE,
+        )
+        expected_loads = [
+            ("global_load_b32", "s[4:5]"),
+            ("global_load_b32", "s[6:7]"),
+            ("global_load_b64", "s[16:17]"),
+            ("global_load_d16_b16", "s[8:9]"),
+            ("global_load_d16_b16", "s[18:19]"),
+        ] * 2
+        if global_loads != expected_loads:
+            raise ValueError(
+                "q4: production loads must retain exact scalar-base role/order "
+                "with one VGPR U32 offset and default cache policy")
+        scalar_base_load_sites = len(global_loads)
         overlap_window = assembly_body[loads[-3].start():first_wmma]
         overlap_widths = re.findall(r"^\s*global_load_b(32|64)(?:\s|$)",
                                     overlap_window, flags=re.MULTILINE)
@@ -247,6 +265,7 @@ def check(recipe: str, mode: str, assembly: Path, metadata: Path) -> dict[str, i
         "maximum_workgroup_size": maximum_workgroup,
         "occupancy": occupancy,
         "n16_weight_b64_sites": n16_weight_b64_sites,
+        "scalar_base_load_sites": scalar_base_load_sites,
     }
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:

@@ -16,13 +16,8 @@ static_assert(NINFER_R9700_Q4_ACTIVATION_BITS == 4 ||
               "R9700 Q4 activation width must be A4 or A8");
 inline constexpr std::uint32_t kQ4ActivationBits = NINFER_R9700_Q4_ACTIVATION_BITS;
 
-#if defined(NINFER_R9700_Q4_SCALAR_BASE_QUALIFICATION)
 inline constexpr std::string_view kQ4PrefillCtaProfile =
-    "m64n128-pingpong-n16-k16-scalar-base-qualification";
-#else
-inline constexpr std::string_view kQ4PrefillCtaProfile =
-    "m64n128-pingpong-n16-k16-production";
-#endif
+    "m64n128-pingpong-n16-k16-scalar-base-production";
 
 enum class A8Q4PrefillRoute : std::uint8_t {
     Wmma32,

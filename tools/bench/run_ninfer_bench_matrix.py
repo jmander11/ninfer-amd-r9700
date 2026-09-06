@@ -1712,7 +1712,7 @@ def load_bench_report(
         )
     q4_prefill_cta_profile = config.get("q4_prefill_cta_profile")
     if q4_prefill_cta_profile not in (
-        "m64n128-pingpong-production",
+        "m64n128-pingpong-n16-k16-scalar-base-production",
     ):
         raise ValueError(
             "benchmark report has invalid q4_prefill_cta_profile="

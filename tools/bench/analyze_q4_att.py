@@ -405,7 +405,8 @@ def analyze(plan_path: Path, source_database_path: Path, source_attribution_path
                 ("max_context", 2048), ("prefill_chunk", 4096),
                 ("kv_value_group", 16), ("concurrency", 1), ("spec", "none"),
                 ("draft_tokens", 0), ("xattention_qualification", False),
-                ("q4_prefill_cta_profile", "m64n128-pingpong-production"),
+                ("q4_prefill_cta_profile",
+                 "m64n128-pingpong-n16-k16-scalar-base-production"),
             ))):
         raise ValueError("benchmark report is not the exact selected C1/P2048 workload")
     _, att = _read_att(att_stats_path)

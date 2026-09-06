@@ -24,9 +24,11 @@ class PrefillCtaStaticTest(unittest.TestCase):
         global_inv = ("\n\tglobal_inv scope:SCOPE_SE"
                       if incumbent and profile.incumbent_global_inv_count else "")
         prefetch_count = 6 if recipe == "q4" and not incumbent else 0
-        pipeline_prefetch = (("\tglobal_load_b32 v0, v[0:1], off\n"
-                              "\tglobal_load_b32 v1, v[0:1], off\n"
-                              "\tglobal_load_b64 v[2:3], v[0:1], off\n") * 2
+        pipeline_prefetch = (("\tglobal_load_b32 v0, v0, s[4:5]\n"
+                              "\tglobal_load_b32 v1, v0, s[6:7]\n"
+                              "\tglobal_load_b64 v[2:3], v1, s[16:17]\n"
+                              "\tglobal_load_d16_b16 v4, v2, s[8:9]\n"
+                              "\tglobal_load_d16_b16 v5, v3, s[18:19]\n") * 2
                              if prefetch_count else "")
         pipeline_publish = ("\ts_wait_loadcnt 0x0\n" +
                             "\tds_store_b32 v0, v1\n" * 3
@@ -71,6 +73,7 @@ class PrefillCtaStaticTest(unittest.TestCase):
             self.assertEqual(result["lds_bytes"], 17152)
             self.assertEqual(result["global_inv_count"], 0)
             self.assertEqual(result["n16_weight_b64_sites"], 2)
+            self.assertEqual(result["scalar_base_load_sites"], 10)
 
     def test_q4_production_requires_n16_weight_load_and_signed_plane_topology(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -83,6 +86,18 @@ class PrefillCtaStaticTest(unittest.TestCase):
             assembly.write_text(text.replace("neg_lo:[0,1,0]", "neg_lo:[1,1,0]", 1),
                                 encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "unsigned-low"):
+                check("q4", "lds-scope", assembly, metadata)
+
+    def test_q4_production_requires_scalar_base_u32_loads(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            assembly, metadata = self.fixture(Path(directory), "q4")
+            text = assembly.read_text(encoding="utf-8")
+            assembly.write_text(
+                text.replace("global_load_b32 v0, v0, s[4:5]",
+                             "global_load_b32 v0, v[0:1], off", 1),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "scalar-base role/order"):
                 check("q4", "lds-scope", assembly, metadata)
 
     def test_accepts_exact_m128n128_challenger(self) -> None:

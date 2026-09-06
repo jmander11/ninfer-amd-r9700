@@ -56,7 +56,8 @@ def weights_source() -> dict[str, object]:
                 "value_scale": "feature-fastest-page-major",
             },
             "q4_activation_bits": 8,
-            "q4_prefill_cta_profile": "m64n128-pingpong-n16-k16-production",
+            "q4_prefill_cta_profile":
+                "m64n128-pingpong-n16-k16-scalar-base-production",
             "xattention_qualification": False,
         },
         "environment": {

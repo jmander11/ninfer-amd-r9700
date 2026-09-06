@@ -327,7 +327,8 @@ class SelectedDecodeMemoryAnalysisTest(unittest.TestCase):
                            "fp8_qk_wmma_profile": "t1-ge64-t2-ge320-t3plus-stream-v1",
                            "fp8_qk_wmma_t1_min_context": 64,
                            "fp8_qk_wmma_t2_min_context": 320,
-                           "q4_prefill_cta_profile": "m64n128-pingpong-production",
+                           "q4_prefill_cta_profile":
+                               "m64n128-pingpong-n16-k16-scalar-base-production",
                            "xattention_qualification": False,
                            "repetitions": 1, "warmup": 1},
                 "tests": [{"kind": "whole", "n_prompt": 8192, "n_gen": 256,
@@ -350,7 +351,8 @@ class SelectedDecodeMemoryAnalysisTest(unittest.TestCase):
                         "fp8_qk_wmma_profile": "t1-ge64-t2-ge320-t3plus-stream-v1",
                         "fp8_qk_wmma_t1_min_context": 64,
                         "fp8_qk_wmma_t2_min_context": 320,
-                        "q4_prefill_cta_profile": "m64n128-pingpong-production"}}
+                        "q4_prefill_cta_profile":
+                            "m64n128-pingpong-n16-k16-scalar-base-production"}}
             result = validate_benchmark_report(
                 report, {"benchmark_command": command}, plan, 2
             )

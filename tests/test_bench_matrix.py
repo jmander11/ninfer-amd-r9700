@@ -55,7 +55,8 @@ def test_current_report_is_flattened_for_matrix_summary(tmp_path) -> None:
                     "kv_value_group": 16,
                     "kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
                     "q4_activation_bits": 8,
-                    "q4_prefill_cta_profile": "m64n128-pingpong-production",
+                    "q4_prefill_cta_profile":
+                        "m64n128-pingpong-n16-k16-scalar-base-production",
                     "w8_activation_bits": 16,
                     "fp8_qk_wmma_enabled": True,
                     "fp8_qk_wmma_profile": "t1-ge64-t2-ge320-t3plus-stream-v1",
@@ -142,7 +143,9 @@ def test_current_report_is_flattened_for_matrix_summary(tmp_path) -> None:
     assert row["kv_value_group"] == 16
     assert row["kv_plane_layouts"] == R9700_KV_PLANE_LAYOUTS
     assert row["q4_activation_bits"] == 8
-    assert row["q4_prefill_cta_profile"] == "m64n128-pingpong-production"
+    assert row["q4_prefill_cta_profile"] == (
+        "m64n128-pingpong-n16-k16-scalar-base-production"
+    )
     assert row["w8_activation_bits"] == 16
     assert row["fp8_qk_wmma_enabled"] is True
     assert row["fp8_qk_wmma_t1_min_context"] == 64

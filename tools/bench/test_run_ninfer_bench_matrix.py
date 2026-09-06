@@ -198,7 +198,8 @@ class CompiledKvGroupTest(unittest.TestCase):
                         "kv_value_group": group,
                         "kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
                         "q4_activation_bits": 8,
-                        "q4_prefill_cta_profile": "m64n128-pingpong-production",
+                        "q4_prefill_cta_profile":
+                            "m64n128-pingpong-n16-k16-scalar-base-production",
                         "w8_activation_bits": w8_activation_bits,
                         "fp8_qk_wmma_enabled": fp8_qk_wmma,
                         "fp8_qk_wmma_profile": "t1-ge64-t2-ge320-t3plus-stream-v1",
@@ -525,7 +526,7 @@ class CompiledKvGroupTest(unittest.TestCase):
             self.write_report(report, 16)
             self.assertEqual(
                 load_bench_report(report)["config"]["q4_prefill_cta_profile"],
-                "m64n128-pingpong-production",
+                "m64n128-pingpong-n16-k16-scalar-base-production",
             )
             payload = json.loads(report.read_text(encoding="utf-8"))
             payload["config"]["q4_prefill_cta_profile"] = "m64n128-production"
@@ -1795,7 +1796,8 @@ class CompiledKvGroupTest(unittest.TestCase):
                 json.dumps({"config": {
                     "kv_cache_format": "fp8-k-int4-v", "kv_value_group": 16,
                     "q4_activation_bits": 8,
-                    "q4_prefill_cta_profile": "m64n128-pingpong-production",
+                    "q4_prefill_cta_profile":
+                        "m64n128-pingpong-n16-k16-scalar-base-production",
                     "w8_activation_bits": 8,
                     "fp8_qk_wmma_enabled": True,
                     "fp8_qk_wmma_profile": "t1-ge64-t2-ge320-t3plus-stream-v1",

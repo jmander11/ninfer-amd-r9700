@@ -1662,11 +1662,16 @@ Replace functional routes with measured gfx1201 families:
   reports are `profiles/bench/r9700-a8q4-n16k16-scalar-base-product-p2048-ab-20260905.json`
   (SHA-256 `325cad2e3c53b620f2864014bd16d3f4e510fdeb846b19a2c33ad31ee7c28fd8`) and
   `profiles/bench/r9700-scalar-base-production-p2048-c1-ab-20260905.json` (SHA-256
-  `08463f48aae28aa0dd5ad4f5f05155a11deacda2d458db38e2f512a974be8e9f`). Promote the
-  scalar-base addressing route as canonical and rebase later exact-Q4 work on it. Its
-  `1075.438603 ms` / `1904.339303 tok/s` median prefill remains below the 2,000 tok/s floor, so this
-  promotion is one bounded composable gain rather than closure of the dense floor or practical
-  ceiling.
+  `08463f48aae28aa0dd5ad4f5f05155a11deacda2d458db38e2f512a974be8e9f`). Scalar-base addressing
+  is now the sole canonical exact-Q4 ping/pong body under profile
+  `m64n128-pingpong-n16-k16-scalar-base-production`; the qualification selector and duplicate
+  full-tile path are removed, and the predicated `size_t` M64xN128 kernel remains the complete
+  tail/large-offset fallback. Its `1075.438603 ms` / `1904.339303 tok/s` median prefill remains
+  below the 2,000 tok/s floor, so this promotion is one bounded composable gain rather than closure
+  of the dense floor or practical ceiling. Future bounded prefill work is limited to the exact LDS
+  remap `f=[0,0,16,16,8,8,24,24]` and complete dual-FMAC pairing under the live 5 ms composition
+  gate. Immediate optimization moves to ordinary non-speculative decode, followed by DFlash2;
+  MTP3 remains diagnostic and is not an optimization or ranking route.
 - [ ] After the dense C1/P2048/spec-none floor and practical-ceiling gate passes and the shared
   chunk is selected, rerun all 48 post-promotion capacity cells (dense/XAttention times
   all-Q4/mixed/four-role-hybrid times G16/G32, each at C=1..4). Bind the newly measured Device Graph

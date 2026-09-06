@@ -13,19 +13,15 @@ GPU nor creates conflicting edits. Do not invent low-value work merely to occupy
 Global execution cap: never schedule, generate, benchmark, profile, or require a product cell above
 `C=4`. All active matrices are exactly `C=1..4`; retained `C=5..8` rows are historical evidence
 only and must not be reused as an active command or product requirement.
-Immediate execution priority: the user stopped the queued whole-model/chunk/profiling campaign on
-2026-09-04. Do not resume those slow downstream rows while dense P2048 prefill remains below the
-2,000 tok/s hard gate. The current route reaches `1,847.942898 tok/s`; scalar-base failed its
-fixed operator gate, A4 failed quality, M96N256 lost physically, and the final materially distinct
-exact-Q4 M64xN192/scalar-base compound candidate failed its frozen practical gate despite improving
-all three isolated cells. On 2026-09-05 the user selected the exact-format continuation: preserve
-the literal dense Q4G64/A8G64 contract and the 2,000 tok/s floor, but retire the fixed `>=25 ms`
-per-candidate worthiness threshold and the blanket no-adjacent-sweep stop. Pursue a bounded sequence
-of measured, mutually composable smaller Q4 improvements, admit no regression hidden by aggregate
-weighting, and confirm accumulated gains at the whole-P2048 boundary. This does not authorize an
-unbounded topology search, FP8 substitution, Q4G128/A8G128 representation change, XAttention as a
-dense-floor surrogate, or any downstream chunk/capacity/whole campaign before the dense gate and
-practical-ceiling conditions pass.
+Immediate execution priority: scalar-base/U32-voffset addressing is now the sole canonical dense
+Q4G64/A8G64 ping/pong route. Its source-matched whole result is `1,904.339303 tok/s`, still below
+the 2,000 tok/s hard gate, so do not resume the dependent chunk/capacity/whole campaign. The next
+active optimization priority is ordinary non-speculative decode, whose retained 8K+256 result is
+`8.354689 tok/s`; after that, implement and optimize DFlash2. Do not schedule MTP optimization:
+existing MTP support may remain, but its `19.244583 tok/s` MTP3 result is diagnostic only and does
+not rank a product route. Dense prefill remains open for the two bounded future mechanisms recorded
+below, without reopening an unbounded topology search, FP8 substitution, Q4G128/A8G128
+representation change, or XAttention as a dense-floor surrogate.
 The 2,000 tok/s P2048 value is an acceptance floor based on an existing llama.cpp observation, not
 an optimization target or a performance ceiling for this fixed-model, fixed-R9700 engine. Crossing
 it permits the dependent campaign to resume but does not close prefill performance work: continue
@@ -732,7 +728,7 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
           unchanged, qualification-only code is removed, and no adjacent M64xN160/N224 sweep is
           authorized. This closes the final bounded exact-Q4 topology and returns prefill work to
           the explicit representation/context/performance-contract decision above.
-        - [ ] Apply the user-authorized smaller-gain continuation without reopening rejected
+        - [x] Apply the user-authorized smaller-gain continuation without reopening rejected
           representations or topology families. A mechanism enters the composition pool only after
           the independent represented-format oracle, incumbent BF16 parity, status/tail/alias/guard,
           graph, and loaded-ISA/resource gates pass; every exact P2048 shape must have robust
@@ -771,12 +767,25 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
           `20.306733144 ms`, robust ratio upper was `0.9811942024`, all sixteen token vectors were
           exactly `[[271]]`, and workspace/environment identities matched. Its immutable report is
           `profiles/bench/r9700-scalar-base-production-p2048-c1-ab-20260905.json` (SHA-256
-          `08463f48aae28aa0dd5ad4f5f05155a11deacda2d458db38e2f512a974be8e9f`). The candidate
+          `08463f48aae28aa0dd5ad4f5f05155a11deacda2d458db38e2f512a974be8e9f`). The promoted
           prefill median is `1075.438603 ms` / `1904.339303 tok/s`, so the 2,000 tok/s floor remains
-          open by `51.438603 ms`. Promote scalar-base as the canonical exact-Q4 product route,
-          remove the qualification selector/duplicate full-tile path, reverify the final loaded
-          canonical object, and use its post-promotion ISA/physical bound to predeclare the next
-          composable mechanism or close the practical ceiling under the bounded stop rule.
+          open by `51.438603 ms`. Scalar-base is now the canonical exact-Q4 product body under the
+          final `m64n128-pingpong-n16-k16-scalar-base-production` profile. The qualification build
+          selector, duplicate full-tile kernel/wrapper, and terminal qualification runners are
+          removed; the authoritative 8-shape x 4-extent predicate plus exact four-plane U32 bound
+          selects it, while every other valid direct tuple uses the predicated `size_t` fallback.
+          The default final object retains 88 VGPR, 17,152-byte LDS, occupancy 16, zero
+          scratch/spills, eight IU4 WMMAs, and ten scalar-base/single-U32-voffset loads.
+          Two non-overlapping mechanisms are recorded for bounded future prefill work after the
+          ordinary-decode and DFlash2 priorities. First, remap the canonical LDS index by adding
+          word bit 2 to row bit 3 while retaining word bit 1 to row bit 4, giving
+          `f=[0,0,16,16,8,8,24,24]`; the mapping is bijective, preserves two-address strides,
+          reduces activation publication from 8 banks x 4 lanes to 16 x 2, and has an optimistic
+          `8.39 ms` whole-weighted envelope at 2.5 GHz over 671,088,640 iterations. Second, pair the
+          complete eligible accumulation stream with dual-FMAC, whose optimistic envelope is
+          `5.84`--`7.18 ms`. Each remains future-only and must independently satisfy the existing
+          `5 ms` exact-call-weighted robust-lower composition gate with every-cell upper ratio
+          `<=1.01`; neither reopens the rejected topology or representation families.
         - [x] Record the initial design rejection of direct signed-A8 by unpacked-signed-Q4 IU8
           WMMA. The
           gfx1201 builtin is K16 with signedness controls `(true, A, true, B, C, false)`. A G64
@@ -1796,8 +1805,9 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
           `0.9044400` time ratio select ping/pong despite the preserved earlier `>=1.5x`
           operator-only rejection. Ping/pong is now the sole exact eight-shape by
           P=1,024/2,048/4,096/8,192 production route; the single-bank M64xN128 kernel is explicitly
-          regression/tail-only. The temporary compile selector and alternate identity are removed;
-          all builds report `m64n128-pingpong-production`.
+          regression/tail-only. The temporary compile selector and alternate identity were removed.
+          The later scalar-base promotion below preserves this topology while superseding that
+          profile identity with `m64n128-pingpong-n16-k16-scalar-base-production`.
         - [x] Reject and remove the trace-selected 32-wave M64xN256 MLP-down challenger. Its static
           gate passed with eight IU4 WMMAs, 87 VGPR, 25,856-byte LDS, a 1,024-thread workgroup,
           and zero private/scratch storage, while preserving full bit parity, status poisoning,
@@ -1869,6 +1879,15 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         selected-artifact whole-prefill timing at prompt lengths `selected_chunk+129`,
         `selected_chunk+257`, and `selected_chunk+1,023` before closing the gap. This token-tail
         matrix does not qualify the mixed MTP-only W8 [5,120,10,240] or [1,024,5,120] shapes.
+  - [ ] Optimize ordinary non-speculative decode immediately from the retained exact C1 8K+256
+        diagnostic (`8.354688852` output tok/s, `30.64198944 s` decode). This work is explicitly
+        exempt from the still-open dense-prefill floor and from the held chunk/capacity campaign:
+        identify the dominant ordinary-only kernels and host/launch gaps, qualify bounded direct
+        changes against the fixed cache and exact output semantics, and confirm wins on ordinary
+        whole decode. Do not optimize or rank MTP; its `19.24458338` tok/s MTP3 row remains a
+        diagnostic comparator only. After ordinary decode, the next implementation priority is
+        DFlash2. Final selected-route profiling and roof accounting remain in the dependent item
+        below because they require the eventual selected chunk/profile authority.
   - [ ] After chunk and terminal static-profile selection, profile only the ultimately selected 8K
         and 32K prefill and decode routes, including the admitted speculative mode; candidate
         screens used to make those selections are not a second terminal profiling campaign. First

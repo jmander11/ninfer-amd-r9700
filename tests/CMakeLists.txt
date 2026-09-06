@@ -75,16 +75,6 @@ ninfer_add_r9700_test(ninfer_r9700_a8q4_scalar_base_bounds_test
   LIBRARIES ninfer_r9700_core)
 set_tests_properties(ninfer_r9700_a8q4_scalar_base_bounds_test PROPERTIES LABELS "host")
 
-# Built explicitly for the root-owned physical qualification. It calls the
-# two actual product-source wrappers and is not part of the ordinary CTest run.
-if(NINFER_R9700_Q4_SCALAR_BASE_QUALIFICATION)
-  add_executable(ninfer_r9700_a8q4_scalar_base_product_qual EXCLUDE_FROM_ALL
-    ${PROJECT_SOURCE_DIR}/tools/r9700/a8q4_n16k16_scalar_base_harness.hip)
-  target_include_directories(ninfer_r9700_a8q4_scalar_base_product_qual PRIVATE
-    ${PROJECT_SOURCE_DIR}/src)
-  target_link_libraries(ninfer_r9700_a8q4_scalar_base_product_qual PRIVATE
-    ninfer_r9700_core hip::host)
-endif()
 ninfer_add_r9700_test(ninfer_r9700_fp8_activation_contract_test
   SOURCES test_r9700_fp8_activation_contract.cpp
   LIBRARIES ninfer_r9700_core)

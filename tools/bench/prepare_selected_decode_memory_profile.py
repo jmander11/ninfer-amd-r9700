@@ -214,7 +214,8 @@ def prepare(selection_path: Path, receipt_path: Path, out: Path) -> dict:
         "fp8_qk_wmma_profile": FP8_QK_WMMA_PROFILE,
         "fp8_qk_wmma_t1_min_context": FP8_QK_WMMA_T1_MIN_CONTEXT,
         "fp8_qk_wmma_t2_min_context": FP8_QK_WMMA_T2_MIN_CONTEXT,
-        "q4_prefill_cta_profile": "m64n128-pingpong-production",
+        "q4_prefill_cta_profile":
+            "m64n128-pingpong-n16-k16-scalar-base-production",
     }
     if (
         manifest.get("artifact_type") != "ninfer_bench_matrix_run"

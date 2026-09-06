@@ -57,8 +57,6 @@ INT4_WMMA_TARGET := $(BUILD_DIR)/int4_wmma_qual
 W8A8_WMMA_TARGET := $(BUILD_DIR)/w8a8_wmma_linear_qual
 Q4G64_LINEAR_TARGET := $(BUILD_DIR)/q4g64_linear_qual
 A8Q4_SHAPE_SWEEP_TARGET := $(BUILD_DIR)/a8q4_shape_sweep_qual
-A8Q4_SCALAR_BASE_SHAPE_TARGET := $(BUILD_DIR)/a8q4_scalar_base_shape_qual
-A8Q4_SCALAR_BASE_PRODUCT_ASSEMBLY := $(BUILD_DIR)/r9700_linear_scalar_base_product.s
 A4Q4_PREFILL_TARGET := $(BUILD_DIR)/a4q4_prefill_qual
 Q4_TENSOR_A4_TARGET := $(BUILD_DIR)/q4_tensor_dispatch_a4_qual
 Q4_TENSOR_A8_TARGET := $(BUILD_DIR)/q4_tensor_dispatch_a8_qual
@@ -409,22 +407,6 @@ $(A8Q4_SHAPE_SWEEP_TARGET): $(A8Q4_SHAPE_SWEEP_SOURCE) $(LINEAR_IMPL) $(LINEAR_H
 	mkdir -p $(BUILD_DIR)
 	$(HIPCC) $(CXXFLAGS) -DNINFER_SOURCE_DIR='"$(abspath ../..)"' \
 		$(A8Q4_SHAPE_SWEEP_SOURCE) $(LINEAR_IMPL) $(LDFLAGS) -o $@
-
-$(A8Q4_SCALAR_BASE_SHAPE_TARGET): $(A8Q4_SHAPE_SWEEP_SOURCE) $(LINEAR_IMPL) \
-		$(LINEAR_HEADER) $(Q4_ACTIVATION_PROFILE) Makefile
-	mkdir -p $(BUILD_DIR)
-	$(HIPCC) $(CXXFLAGS) -DNINFER_SOURCE_DIR='"$(abspath ../..)"' \
-		-DNINFER_R9700_Q4_SCALAR_BASE_QUALIFICATION=1 \
-		$(A8Q4_SHAPE_SWEEP_SOURCE) $(LINEAR_IMPL) $(LDFLAGS) -o $@
-
-a8q4-scalar-base-product-regression: $(A8Q4_SCALAR_BASE_SHAPE_TARGET)
-	./$(A8Q4_SCALAR_BASE_SHAPE_TARGET) --prefill-cta-scalar-base-regression
-
-$(A8Q4_SCALAR_BASE_PRODUCT_ASSEMBLY): $(LINEAR_IMPL) $(LINEAR_HEADER) \
-		$(Q4_ACTIVATION_PROFILE) Makefile
-	mkdir -p $(BUILD_DIR)
-	$(HIPCC) $(CXXFLAGS) -Wno-unused-command-line-argument --offload-device-only -S \
-		-DNINFER_R9700_Q4_SCALAR_BASE_QUALIFICATION=1 $(LINEAR_IMPL) -o $@
 
 $(A4Q4_PREFILL_TARGET): a4q4_prefill_qual.hip $(A8Q4_SHAPE_SWEEP_SOURCE) $(LINEAR_IMPL) $(LINEAR_HEADER) Makefile
 	mkdir -p $(BUILD_DIR)

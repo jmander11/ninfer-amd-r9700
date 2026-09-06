@@ -107,8 +107,9 @@ promotions, a matched all-Q4/G16 P2048 C1 run under `auto`, with speculative exe
 measures `1,214.498278` prefill tok/s and `1.686293799 s` mean prefill with `0.001380049 s`
 standard deviation across three repetitions. The retained report is
 `profiles/bench/prefill-p2048-post-k256-rmsnorm-20260904.json`, SHA-256
-`fe0598f603b9a3d3e5d25475b27c39da897ed0b4069566495053f04c1246b6b4`. This is the
-authoritative current low-context baseline, but it does not satisfy the explicit P2048 floor of
+`fe0598f603b9a3d3e5d25475b27c39da897ed0b4069566495053f04c1246b6b4`. This is retained as a
+historical low-context baseline and is superseded by the scalar-base production result below; it
+did not satisfy the explicit P2048 floor of
 `2,000` prefill tok/s (`1.024 s`). A matched current mixed-Q4/W8 diagnostic, using A8 activation
 coding, C1, chunk 4,096, and no speculative execution, is slower at `920.8914604` prefill tok/s
 and `2.223935366 s`. Its report is
@@ -141,8 +142,7 @@ at `2.585003 ms` or 0.1495% of measured kernel service, belongs to the measured 
 service is excluded from steady
 prefill attribution. Because the trace predates the gated-RMSNorm, split-view SiLU, and K256
 RMSNorm promotions visible in the current executable, those rows explain the completed changes but
-do not supersede the current 1,214.498278 tok/s whole-prefill authority or establish current
-residual timings.
+do not establish current residual timings.
 
 The initial prefill-chunk screen then found a metadata boundary missed by the admission fixture. A
 T=1 attention call at visible frontier 8,192 carried a device active-row pointer; the former
@@ -828,6 +828,18 @@ measured `1348.188927 tok/s` in `1.519077416 s`. That is a `1.105657x` throughpu
 `0.9044400` elapsed-time ratio, saving `0.160500399 s` at the whole-prefill scope. Ping/pong is now
 the sole production Q4 CTA for the exact eight-shape by P=1,024/2,048/4,096/8,192 predicate; the
 single-bank M64xN128 implementation remains only as an explicit regression/tail control.
+
+The later source/emitted-compile-matched scalar-base/U32-voffset promotion preserves the same
+Q4G64/A8G64 representation, arithmetic, LDS topology, grid, ABI, and exact production predicate.
+Its actual-wrapper operator gate passed with a `21.057251555 ms` exact-call-weighted robust saving
+lower; the whole P2048 C1/chunk4096/spec-none gate reduced median total from `1097.650069` to
+`1075.475953 ms`, with a `20.306733144 ms` robust saving lower and exact token identity. The final
+production profile is `m64n128-pingpong-n16-k16-scalar-base-production`, with no build/runtime
+selector or duplicate full-tile path. Its `1075.438603 ms` prefill median is `1904.339303 tok/s`,
+which is the current dense authority but remains below the 2,000 tok/s floor. The immutable
+operator and whole reports are
+`profiles/bench/r9700-a8q4-n16k16-scalar-base-product-p2048-ab-20260905.json` and
+`profiles/bench/r9700-scalar-base-production-p2048-c1-ab-20260905.json`.
 
 The structural M64xN256 plus ping/pong follow-up also passed its exact/FP64 oracle and every tuple
 was nonregressing, but it likewise failed the fixed `>=1.5x` gate. Weighted P2048 fell from

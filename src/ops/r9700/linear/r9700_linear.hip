@@ -1545,206 +1545,9 @@ void a8q4g64_linear_prefill_cta_m64n128_regression_kernel(
 #endif
 }
 
-// Selected software pipeline for the exact M64xN128 geometry. Four global
-// dwords for K group g+1 remain in registers while the waves consume group g,
-// then are published into the alternate 8576-byte LDS bank with one
-// workgroup-scoped handoff.
-__global__ __launch_bounds__(kA8Q4PrefillThreads)
-void a8q4g64_linear_prefill_cta_kernel(
-    const std::uint8_t* activation_low_codes,
-    const std::uint8_t* activation_high_codes,
-    const std::uint16_t* activation_scales,
-    const std::uint32_t* activation_status,
-    const std::uint8_t* weight_codes, const std::uint16_t* weight_scales,
-    hip_bfloat16* output, std::uint32_t tokens, std::uint32_t rows,
-    std::uint32_t columns, std::uint32_t padded_columns) {
-#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
-    (void)tokens;
-    (void)columns;
-    __shared__ A8Q4PrefillN128PingPongTile tiles;
-    const std::uint32_t thread = threadIdx.x;
-    const std::uint32_t lane = thread & (kWaveSize - 1U);
-    const std::uint32_t wave = thread / kWaveSize;
-    const std::uint32_t axis = lane & 15U;
-    const std::uint32_t lane_group = lane >> 4U;
-    const std::uint32_t wave_token_tile = wave / 4U;
-    const std::uint32_t wave_row_tile = wave & 3U;
-    const std::uint32_t token_tile = blockIdx.y;
-    const std::uint32_t row_tile = blockIdx.x;
-    const std::uint32_t cta_token_base = token_tile * kA8Q4PrefillTokenTile;
-    const std::uint32_t cta_row_base = row_tile * (2U * kA8Q4PrefillRowTile);
-    const std::uint32_t token_base = cta_token_base + wave_token_tile * kWmmaTile;
-
-    if (*activation_status != Q4G64ActivationOk) {
-#pragma unroll
-        for (std::uint32_t row_half = 0; row_half < 2U; ++row_half) {
-#pragma unroll
-            for (std::uint32_t element = 0; element < 8U; ++element) {
-                const std::uint32_t token = token_base + lane_group * 8U + element;
-                const std::uint32_t row = cta_row_base + row_half * kA8Q4PrefillRowTile +
-                                          wave_row_tile * kWmmaTile + axis;
-                output[static_cast<std::size_t>(token) * rows + row] =
-                    conspicuous_bf16_nan();
-            }
-        }
-        return;
-    }
-
-    const std::uint32_t groups = padded_columns / kQ4Group;
-    const std::uint32_t activation_row = thread / 8U;
-    const std::uint32_t word = thread & 7U;
-    const std::uint32_t token = cta_token_base + activation_row;
-    const std::uint32_t activation_lds =
-        a8q4_lds_word_index(activation_row, word, kA8Q4PrefillTokenTile);
-    const std::uint32_t load_tile = thread >> 6U;
-    const std::uint32_t load_pair = (thread >> 4U) & 3U;
-    const std::uint32_t load_lane = thread & 15U;
-    const std::uint32_t load_row_local = load_tile * 16U + load_lane;
-    const std::uint32_t load_row = cta_row_base + load_row_local;
-    const std::uint32_t load_word = load_pair * 2U;
-
-    // Prologue: publish K group zero into bank zero.
-    std::size_t activation_element =
-        static_cast<std::size_t>(token) * padded_columns + word * 8U;
-    tiles.bank[0].activation_low[activation_lds] =
-        load_q4x8(activation_low_codes, activation_element);
-    tiles.bank[0].activation_high[activation_lds] =
-        load_q4x8(activation_high_codes, activation_element);
-    const std::uint64_t weight_pair0 = load_q4_n16k16_pair(
-        weight_codes, load_row, 0U, load_pair, groups);
-    tiles.bank[0].weights[a8q4_lds_word_index(
-        load_row_local, load_word, 2U * kA8Q4PrefillRowTile)] =
-        static_cast<std::uint32_t>(weight_pair0);
-    tiles.bank[0].weights[a8q4_lds_word_index(
-        load_row_local, load_word + 1U, 2U * kA8Q4PrefillRowTile)] =
-        static_cast<std::uint32_t>(weight_pair0 >> 32U);
-    if (thread < kA8Q4PrefillTokenTile) {
-        tiles.bank[0].activation_scales[thread] =
-            activation_scales[static_cast<std::size_t>(cta_token_base + thread) * groups];
-    }
-    if (thread < 2U * kA8Q4PrefillRowTile) {
-        tiles.bank[0].weight_scales[thread] =
-            weight_scales[q4_n16k16_scale_index(cta_row_base + thread, 0U, groups)];
-    }
-    prefill_cta_barrier<true>();
-
-    WmmaF32Fragment totals[2]{};
-    for (std::uint32_t group = 0; group < groups; ++group) {
-        const bool has_next = group + 1U < groups;
-        const std::uint32_t next_group = group + 1U;
-        std::uint32_t next_activation_low = 0U;
-        std::uint32_t next_activation_high = 0U;
-        std::uint64_t next_weight = 0U;
-        if (has_next) {
-            activation_element = static_cast<std::size_t>(token) * padded_columns +
-                                 next_group * kQ4Group + word * 8U;
-            next_activation_low = load_q4x8(activation_low_codes, activation_element);
-            next_activation_high = load_q4x8(activation_high_codes, activation_element);
-            next_weight = load_q4_n16k16_pair(
-                weight_codes, load_row, next_group, load_pair, groups);
-        }
-
-        A8Q4PrefillN128Tile& current = tiles.bank[group & 1U];
-        WmmaI32x8 low_dot[2]{};
-        WmmaI32x8 high_dot[2]{};
-#pragma unroll
-        for (std::uint32_t half = 0; half < 2U; ++half) {
-            WmmaI32x2 a_low{};
-            WmmaI32x2 a_high{};
-            WmmaI32x2 b[2]{};
-            const std::uint32_t fragment_word = half * 4U + lane_group * 2U;
-            const std::uint32_t activation_fragment_row =
-                wave_token_tile * kWmmaTile + axis;
-            const std::uint32_t a_index = a8q4_lds_word_index(
-                activation_fragment_row, fragment_word, kA8Q4PrefillTokenTile);
-            a_low[0] = static_cast<int>(current.activation_low[a_index]);
-            a_low[1] = static_cast<int>(current.activation_low[a8q4_lds_word_index(
-                activation_fragment_row, fragment_word + 1U, kA8Q4PrefillTokenTile)]);
-            a_high[0] = static_cast<int>(current.activation_high[a_index]);
-            a_high[1] = static_cast<int>(current.activation_high[a8q4_lds_word_index(
-                activation_fragment_row, fragment_word + 1U, kA8Q4PrefillTokenTile)]);
-#pragma unroll
-            for (std::uint32_t row_half = 0; row_half < 2U; ++row_half) {
-                const std::uint32_t weight_fragment_row =
-                    row_half * kA8Q4PrefillRowTile + wave_row_tile * kWmmaTile + axis;
-                const std::uint32_t b_index = a8q4_lds_word_index(
-                    weight_fragment_row, fragment_word, 2U * kA8Q4PrefillRowTile);
-                b[row_half][0] = static_cast<int>(current.weights[b_index]);
-                b[row_half][1] = static_cast<int>(current.weights[a8q4_lds_word_index(
-                    weight_fragment_row, fragment_word + 1U,
-                    2U * kA8Q4PrefillRowTile)]);
-            }
-            low_dot[0] = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
-                false, a_low, true, b[0], low_dot[0], false);
-            high_dot[0] = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
-                true, a_high, true, b[0], high_dot[0], false);
-            low_dot[1] = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
-                false, a_low, true, b[1], low_dot[1], false);
-            high_dot[1] = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
-                true, a_high, true, b[1], high_dot[1], false);
-        }
-#pragma unroll
-        for (std::uint32_t row_half = 0; row_half < 2U; ++row_half) {
-            const std::uint32_t fragment_row = row_half * kA8Q4PrefillRowTile +
-                                               wave_row_tile * kWmmaTile + axis;
-            const float w_scale = __half2float(__ushort_as_half(
-                current.weight_scales[fragment_row]));
-#pragma unroll
-            for (std::uint32_t element = 0; element < 8U; ++element) {
-                const std::uint32_t fragment_token =
-                    wave_token_tile * kWmmaTile + lane_group * 8U + element;
-                const float a_scale = __half2float(__ushort_as_half(
-                    current.activation_scales[fragment_token]));
-                const std::int32_t combined =
-                    low_dot[row_half][element] + 16 * high_dot[row_half][element];
-                totals[row_half][element] = fmaf(
-                    static_cast<float>(combined), a_scale * w_scale,
-                    totals[row_half][element]);
-            }
-        }
-
-        if (has_next) {
-            A8Q4PrefillN128Tile& next = tiles.bank[next_group & 1U];
-            next.activation_low[activation_lds] = next_activation_low;
-            next.activation_high[activation_lds] = next_activation_high;
-            next.weights[a8q4_lds_word_index(
-                load_row_local, load_word, 2U * kA8Q4PrefillRowTile)] =
-                static_cast<std::uint32_t>(next_weight);
-            next.weights[a8q4_lds_word_index(
-                load_row_local, load_word + 1U, 2U * kA8Q4PrefillRowTile)] =
-                static_cast<std::uint32_t>(next_weight >> 32U);
-            if (thread < kA8Q4PrefillTokenTile) {
-                next.activation_scales[thread] = activation_scales[
-                    static_cast<std::size_t>(cta_token_base + thread) * groups +
-                    next_group];
-            }
-            if (thread < 2U * kA8Q4PrefillRowTile) {
-                next.weight_scales[thread] = weight_scales[q4_n16k16_scale_index(
-                    cta_row_base + thread, next_group, groups)];
-            }
-            prefill_cta_barrier<true>();
-        }
-    }
-
-#pragma unroll
-    for (std::uint32_t row_half = 0; row_half < 2U; ++row_half) {
-#pragma unroll
-        for (std::uint32_t element = 0; element < 8U; ++element) {
-            const std::uint32_t token_out = token_base + lane_group * 8U + element;
-            const std::uint32_t row = cta_row_base + row_half * kA8Q4PrefillRowTile +
-                                      wave_row_tile * kWmmaTile + axis;
-            output[static_cast<std::size_t>(token_out) * rows + row] =
-                static_cast<hip_bfloat16>(totals[row_half][element]);
-        }
-    }
-#else
-    (void)activation_low_codes; (void)activation_high_codes; (void)activation_scales;
-    (void)activation_status; (void)weight_codes; (void)weight_scales; (void)output;
-    (void)tokens; (void)rows; (void)columns; (void)padded_columns;
-#endif
-}
-
-#if defined(NINFER_R9700_Q4_SCALAR_BASE_QUALIFICATION)
+// Selected software pipeline for exact qualified M64xN128 tuples. Immutable
+// global pointers remain scalar bases while all byte cursors are host-proven
+// zero-extendable U32 offsets.
 [[maybe_unused]] __device__ __forceinline__ std::uint32_t scalar_base_load_u32(
     const std::uint8_t* base, std::uint32_t offset) {
     return *reinterpret_cast<const std::uint32_t*>(base + offset);
@@ -1761,12 +1564,8 @@ void a8q4g64_linear_prefill_cta_kernel(
         reinterpret_cast<const std::uint8_t*>(base) + offset);
 }
 
-// Product-source qualification candidate. This is intentionally the selected
-// M64xN128 computation and staging topology with only global address formation
-// changed: immutable pointers remain scalar bases and byte cursors are proven
-// zero-extendable U32 values by the host wrapper.
-extern "C" __global__ __launch_bounds__(kA8Q4PrefillThreads)
-void a8q4g64_linear_prefill_cta_scalar_base_qualification_kernel(
+__global__ __launch_bounds__(kA8Q4PrefillThreads)
+void a8q4g64_linear_prefill_cta_kernel(
     const std::uint8_t* activation_low_codes,
     const std::uint8_t* activation_high_codes,
     const std::uint16_t* activation_scales,
@@ -1971,7 +1770,6 @@ void a8q4g64_linear_prefill_cta_scalar_base_qualification_kernel(
     (void)columns; (void)padded_columns;
 #endif
 }
-#endif
 
 __global__ __launch_bounds__(kA8Q4M128PrefillThreads)
 void a8q4g64_linear_prefill_cta_m128n128_qualification_kernel(
@@ -2765,12 +2563,14 @@ hipError_t a8q4g64_linear_prefill_cta(
     if (!valid_a8q4_linear_args(args) || args.tokens <= 128U) {
         return hipErrorInvalidValue;
     }
-    // The pipelined kernel deliberately removes per-element tail predicates.
-    // Keep the direct regression boundary complete for non-full CTA or
-    // logical-K tail tuples; production dispatch selects only exact shapes.
-    if (args.columns != args.padded_columns ||
+    // Scalar-base loads deliberately use U32 byte cursors and remove all tile
+    // predicates. The size_t-addressed single-bank kernel remains the complete
+    // direct-call fallback for every tuple outside the qualified inventory.
+    if (!use_a8q4_prefill_cta(args.tokens, args.rows, args.columns) ||
+        args.columns != args.padded_columns ||
         args.tokens % kA8Q4PrefillTokenTile != 0U ||
-        args.rows % (2U * kA8Q4PrefillRowTile) != 0U) {
+        args.rows % (2U * kA8Q4PrefillRowTile) != 0U ||
+        !scalar_base_offsets_fit(args.tokens, args.rows, args.padded_columns)) {
         return a8q4g64_linear_prefill_cta_m64n128_regression(args, stream);
     }
 #if defined(__HIPCC__)
@@ -2788,49 +2588,6 @@ hipError_t a8q4g64_linear_prefill_cta(
     return hipErrorNotSupported;
 #endif
 }
-
-#if defined(NINFER_R9700_Q4_SCALAR_BASE_QUALIFICATION)
-hipError_t a8q4g64_linear_prefill_cta_scalar_base_qualification(
-    const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept {
-    if (!valid_a8q4_linear_args(args) || args.tokens <= 128U) {
-        return hipErrorInvalidValue;
-    }
-    // Preserve the production wrapper for every tuple outside the exact
-    // 8-shape x 4-extent qualification inventory, including all tails.
-    if (!use_a8q4_prefill_cta(args.tokens, args.rows, args.columns) ||
-        args.columns != args.padded_columns ||
-        args.tokens % kA8Q4PrefillTokenTile != 0U ||
-        args.rows % (2U * kA8Q4PrefillRowTile) != 0U ||
-        !scalar_base_offsets_fit(args.tokens, args.rows, args.padded_columns)) {
-        return a8q4g64_linear_prefill_cta(args, stream);
-    }
-#if defined(__HIPCC__)
-    const dim3 grid(args.rows / (2U * kA8Q4PrefillRowTile),
-                    args.tokens / kA8Q4PrefillTokenTile);
-    hipLaunchKernelGGL(a8q4g64_linear_prefill_cta_scalar_base_qualification_kernel,
-                       grid, dim3(kA8Q4PrefillThreads), 0, stream,
-                       args.activation_low_codes, args.activation_high_codes,
-                       args.activation_scales, args.activation_status,
-                       args.weight_codes, args.weight_scales, args.output, args.tokens,
-                       args.rows, args.columns, args.padded_columns);
-    return hipGetLastError();
-#else
-    (void)stream;
-    return hipErrorNotSupported;
-#endif
-}
-#endif
-
-namespace {
-hipError_t selected_a8q4g64_linear_prefill_cta(
-    const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept {
-#if defined(NINFER_R9700_Q4_SCALAR_BASE_QUALIFICATION)
-    return a8q4g64_linear_prefill_cta_scalar_base_qualification(args, stream);
-#else
-    return a8q4g64_linear_prefill_cta(args, stream);
-#endif
-}
-} // namespace
 
 hipError_t a8q4g64_linear_candidate(const A8Q4G64CandidateArgs& args,
                                     hipStream_t stream) noexcept {
@@ -2870,7 +2627,7 @@ hipError_t a8q4g64_linear_candidate(const A8Q4G64CandidateArgs& args,
     if (quantized != hipSuccess) return quantized;
     switch (select_a8q4_prefill_route(args.tokens, args.rows, args.columns)) {
     case A8Q4PrefillRoute::M64N128PingPongProduction:
-        return selected_a8q4g64_linear_prefill_cta(linear_args, stream);
+        return a8q4g64_linear_prefill_cta(linear_args, stream);
     case A8Q4PrefillRoute::Wmma32:
         return a8q4g64_linear_wmma32(linear_args, stream);
     }
@@ -2919,7 +2676,7 @@ hipError_t fused_silu_a8q4g64_down(
     if (!valid_a8q4_linear_args(linear_args)) return hipErrorInvalidValue;
     hipError_t result = fused_silu_a8g64_prepare(args.gate_up, workspace, stream);
     if (result != hipSuccess) return result;
-    return selected_a8q4g64_linear_prefill_cta(linear_args, stream);
+    return a8q4g64_linear_prefill_cta(linear_args, stream);
 }
 
 hipError_t fused_silu_a8g64_prepare(

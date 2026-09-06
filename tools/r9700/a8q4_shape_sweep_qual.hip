@@ -486,12 +486,10 @@ PrefillResult run_prefill_case(Shape shape, std::uint32_t tokens,
                                LdsScopeTiming* lds_scope_timing = nullptr,
                                bool compare_n128 = false,
                                bool compare_m128n128 = false,
-                               bool compare_pingpong = false,
-                               bool compare_scalar_base = false) {
+                               bool compare_pingpong = false) {
     if (static_cast<unsigned>(compare_lds_scope) + static_cast<unsigned>(compare_n128) +
             static_cast<unsigned>(compare_m128n128) +
-            static_cast<unsigned>(compare_pingpong) +
-            static_cast<unsigned>(compare_scalar_base) > 1U) {
+            static_cast<unsigned>(compare_pingpong) > 1U) {
         fail("prefill comparison routes are exclusive");
     }
     const std::uint32_t padded_columns = (shape.columns + 127U) / 128U * 128U;
@@ -599,19 +597,7 @@ PrefillResult run_prefill_case(Shape shape, std::uint32_t tokens,
     const auto launch_pingpong = [&] {
         return linear::a8q4g64_linear_prefill_cta(args, nullptr);
     };
-    const auto launch_scalar_base_args = [&](const linear::A8Q4G64LinearArgs& value) {
-#if defined(NINFER_R9700_Q4_SCALAR_BASE_QUALIFICATION)
-        return linear::a8q4g64_linear_prefill_cta_scalar_base_qualification(value, nullptr);
-#else
-        (void)value;
-        return hipErrorNotSupported;
-#endif
-    };
-    const auto launch_scalar_base = [&] {
-        return launch_scalar_base_args(args);
-    };
     const auto launch_comparison = [&] {
-        if (compare_scalar_base) return launch_scalar_base();
         if (compare_pingpong) return launch_pingpong();
         if (compare_m128n128) return launch_m128n128();
         return compare_n128 ? launch_m64n64_regression() : launch_global_inv_incumbent();
@@ -623,11 +609,8 @@ PrefillResult run_prefill_case(Shape shape, std::uint32_t tokens,
             hipErrorInvalidValue) {
             fail("A8Q4 prefill CTA accepted a non-dword-aligned packed code plane");
         }
-        if ((compare_lds_scope || compare_n128 || compare_m128n128 || compare_pingpong ||
-             compare_scalar_base) &&
-            (compare_scalar_base
-                 ? launch_scalar_base_args(misaligned)
-             : compare_pingpong
+        if ((compare_lds_scope || compare_n128 || compare_m128n128 || compare_pingpong) &&
+            (compare_pingpong
                  ? linear::a8q4g64_linear_prefill_cta(misaligned, nullptr)
                  : compare_m128n128
                  ? linear::a8q4g64_linear_prefill_cta_m128n128_qualification(
@@ -654,8 +637,7 @@ PrefillResult run_prefill_case(Shape shape, std::uint32_t tokens,
             })) {
             fail("A8Q4 prefill CTA did not poison every T>128 output for nonzero status");
         }
-        if (compare_lds_scope || compare_n128 || compare_m128n128 || compare_pingpong ||
-            compare_scalar_base) {
+        if (compare_lds_scope || compare_n128 || compare_m128n128 || compare_pingpong) {
             HIP_CHECK(hipMemset(d_output.get(), 0, d_output.bytes()));
             HIP_CHECK(launch_comparison());
             HIP_CHECK(hipDeviceSynchronize());
@@ -680,7 +662,7 @@ PrefillResult run_prefill_case(Shape shape, std::uint32_t tokens,
     std::array<double, kTrials> cooperative_samples{};
     if (collect_timing) {
         if (lds_scope_timing != nullptr && !compare_lds_scope && !compare_n128 &&
-            !compare_m128n128 && !compare_pingpong && !compare_scalar_base) {
+            !compare_m128n128 && !compare_pingpong) {
             fail("prefill timing requires an explicit comparison route");
         }
         HIP_CHECK(launch_cooperative());
@@ -689,28 +671,24 @@ PrefillResult run_prefill_case(Shape shape, std::uint32_t tokens,
         if (lds_scope_timing != nullptr) {
             for (std::size_t trial = 0; trial < kTrials; ++trial) {
                 lds_scope_timing->incumbent_forward[trial] =
-                    (compare_m128n128 || compare_pingpong || compare_scalar_base)
+                    (compare_m128n128 || compare_pingpong)
                     ? event_ms(1U, launch_m64n128_regression, 0U)
                     : compare_n128 ? event_ms(1U, launch_m64n64_regression, 0U)
                                    : event_ms(1U, launch_global_inv_incumbent, 0U);
-                lds_scope_timing->challenger_forward[trial] = compare_scalar_base
-                    ? event_ms(1U, launch_scalar_base, 0U)
-                    : compare_pingpong
+                lds_scope_timing->challenger_forward[trial] = compare_pingpong
                     ? event_ms(1U, launch_pingpong, 0U)
                     : compare_n128
                     ? event_ms(1U, launch_m64n128_regression, 0U)
                     : compare_m128n128 ? event_ms(1U, launch_m128n128, 0U)
                     : event_ms(1U, launch_m64n64_regression, 0U);
-                lds_scope_timing->challenger_reverse[trial] = compare_scalar_base
-                    ? event_ms(1U, launch_scalar_base, 0U)
-                    : compare_pingpong
+                lds_scope_timing->challenger_reverse[trial] = compare_pingpong
                     ? event_ms(1U, launch_pingpong, 0U)
                     : compare_n128
                     ? event_ms(1U, launch_m64n128_regression, 0U)
                     : compare_m128n128 ? event_ms(1U, launch_m128n128, 0U)
                     : event_ms(1U, launch_m64n64_regression, 0U);
                 lds_scope_timing->incumbent_reverse[trial] =
-                    (compare_m128n128 || compare_pingpong || compare_scalar_base)
+                    (compare_m128n128 || compare_pingpong)
                     ? event_ms(1U, launch_m64n128_regression, 0U)
                     : compare_n128 ? event_ms(1U, launch_m64n64_regression, 0U)
                                    : event_ms(1U, launch_global_inv_incumbent, 0U);
@@ -752,8 +730,7 @@ PrefillResult run_prefill_case(Shape shape, std::uint32_t tokens,
     std::vector<hip_bfloat16> output(static_cast<std::size_t>(tokens) * shape.rows);
     HIP_CHECK(hipMemcpy(output.data(), d_output.get(), output.size() * sizeof(hip_bfloat16),
                         hipMemcpyDeviceToHost));
-    if (compare_lds_scope || compare_n128 || compare_m128n128 || compare_pingpong ||
-        compare_scalar_base) {
+    if (compare_lds_scope || compare_n128 || compare_m128n128 || compare_pingpong) {
         constexpr std::size_t kComparisonElements = 1U << 20U;
         std::vector<hip_bfloat16> challenger(
             std::min(kComparisonElements, output.size()));
@@ -1185,18 +1162,11 @@ int main(int argc, char** argv) {
     const bool pingpong_benchmark =
         argc == 4 && std::string_view(argv[1]) == "--prefill-cta-pingpong-benchmark" &&
         std::string_view(argv[2]) == "--out-json";
-#if defined(NINFER_R9700_Q4_SCALAR_BASE_QUALIFICATION)
-    const bool scalar_base_regression =
-        argc == 2 && std::string_view(argv[1]) ==
-                         "--prefill-cta-scalar-base-regression";
-#else
-    constexpr bool scalar_base_regression = false;
-#endif
     const bool shape_sweep = argc == 3 && std::string_view(argv[1]) == "--out-json";
     if (!prefill_regression && !lds_scope_regression && !lds_scope_benchmark &&
         !n128_regression && !n128_benchmark && !m128n128_regression &&
         !m128n128_benchmark && !pingpong_regression && !pingpong_benchmark &&
-        !scalar_base_regression && !shape_sweep) {
+        !shape_sweep) {
         std::cerr << "usage: a8q4_shape_sweep_qual "
                      "--out-json PATH | --prefill-cta-regression | "
                      "--prefill-cta-lds-scope-regression | "
@@ -1205,11 +1175,7 @@ int main(int argc, char** argv) {
                      "--prefill-cta-m128n128-regression | "
                      "--prefill-cta-m128n128-benchmark --out-json FRESH.json | "
                      "--prefill-cta-pingpong-regression | "
-                     "--prefill-cta-pingpong-benchmark --out-json FRESH.json"
-#if defined(NINFER_R9700_Q4_SCALAR_BASE_QUALIFICATION)
-                     " | --prefill-cta-scalar-base-regression"
-#endif
-                     "\n";
+                     "--prefill-cta-pingpong-benchmark --out-json FRESH.json\n";
         return 2;
     }
     try {
@@ -1263,8 +1229,7 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipDriverGetVersion(&driver_version));
         if (prefill_regression || lds_scope_regression || lds_scope_benchmark ||
             n128_regression || n128_benchmark || m128n128_regression ||
-            m128n128_benchmark || pingpong_regression || pingpong_benchmark ||
-            scalar_base_regression) {
+            m128n128_benchmark || pingpong_regression || pingpong_benchmark) {
             linear::A8Q4G64KernelResources resources{};
             HIP_CHECK(linear::a8q4g64_kernel_resources(&resources));
             if (resources.prefill_cta_registers > 96 ||
@@ -1311,27 +1276,24 @@ int main(int argc, char** argv) {
                 Shape{34816, 5120, 0, 0}, Shape{5120, 17408, 0, 0},
                 Shape{5120, 10240, 0, 0}, Shape{1024, 5120, 0, 0}};
             std::vector<PrefillResult> tail_qualifications;
-            if (pingpong_regression || pingpong_benchmark || scalar_base_regression) {
-                // Exercise the actual predicate-free fast kernel (including
-                // nonzero status poisoning) under the complete FP64 oracle.
+            if (pingpong_regression || pingpong_benchmark) {
+                // Exercise direct-call fallback and nonzero status poisoning
+                // under the complete FP64 oracle.
                 tail_qualifications.push_back(run_prefill_case(
                     Shape{128U, 256U, 0, 0}, 192U, true, false,
                     false, nullptr, false, false,
-                    pingpong_regression || pingpong_benchmark, scalar_base_regression));
+                    pingpong_regression || pingpong_benchmark));
             }
-#if defined(NINFER_R9700_Q4_SCALAR_BASE_QUALIFICATION)
-            if (scalar_base_regression) {
+            if (pingpong_regression) {
                 // These valid off-inventory tuples must delegate through the
-                // unchanged production wrapper and remain bit-identical. They
-                // separately exercise an unqualified extent and logical-K tail.
+                // size_t-addressed fallback and remain bit-identical.
                 tail_qualifications.push_back(run_prefill_case(
                     Shape{128U, 256U, 0, 0}, 2047U, false, false,
-                    false, nullptr, false, false, false, true));
+                    false, nullptr, false, false, true));
                 tail_qualifications.push_back(run_prefill_case(
                     Shape{1024U, 5056U, 0, 0}, 1024U, false, false,
-                    false, nullptr, false, false, false, true));
+                    false, nullptr, false, false, true));
             }
-#endif
             const std::array<std::pair<std::uint32_t, std::uint32_t>, 3> tail_shapes{{
                 // N16/K16 storage requires N divisible by 16. These retain
                 // non-full N128 tiles plus odd T and logical-K tails.
@@ -1343,8 +1305,7 @@ int main(int argc, char** argv) {
                     lds_scope_regression || lds_scope_benchmark, nullptr,
                     n128_regression || n128_benchmark,
                     m128n128_regression || m128n128_benchmark,
-                    pingpong_regression || pingpong_benchmark,
-                    scalar_base_regression));
+                    pingpong_regression || pingpong_benchmark));
             }
             std::vector<LdsScopeEvidence> evidence;
             for (const Shape shape : prefill_shapes) {
@@ -1354,8 +1315,7 @@ int main(int argc, char** argv) {
                         lds_scope_regression || lds_scope_benchmark, nullptr,
                         n128_regression || n128_benchmark,
                         m128n128_regression || m128n128_benchmark,
-                        pingpong_regression || pingpong_benchmark,
-                        scalar_base_regression);
+                        pingpong_regression || pingpong_benchmark);
                     if (result.maximum_bf16_steps > 2U) {
                         fail("prefill CTA numerical regression differs");
                     }
@@ -1409,8 +1369,6 @@ int main(int argc, char** argv) {
                               ? "A8Q4 M64xN64/production N128 CTA bit-exact regression: PASS ("
                               : lds_scope_regression
                               ? "A8Q4 LDS-scope/production CTA bit-exact regression: PASS ("
-                          : scalar_base_regression
-                              ? "A8Q4 scalar-base product-wrapper regression: PASS ("
                               : "A8Q4 cooperative prefill CTA regression: PASS (")
                       << "exact tail case and six Text plus two MTP shapes at four token extents)\n";
             return 0;

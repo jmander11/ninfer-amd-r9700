@@ -332,13 +332,17 @@ improved only from `1126.778368` to `914.413888 ms` (`0.8115295`, `1.23224x`, sa
 `profiles/bench/r9700-a8q4-prefill-cta-pingpong-ab-20260904.json`, SHA-256
 `06a2846e1ae5ba90989dcb401e578a1b96479a8e472b7aa0d5befdcbcf6281f7`.
 That fixed operator gate remains a valid rejection at its claimed scope. A later matched
-whole-P2048 gate nevertheless selected the otherwise-unused `212.364480 ms` aggregate operator
-saving: the single-bank control measured `1219.355187 tok/s` in `1.679577815 s`, while ping/pong
-measured `1348.188927 tok/s` in `1.519077416 s` (`1.105657x` throughput, `0.9044400` elapsed-time
-ratio). Ping/pong is therefore the sole production route for the exact eight-shape by
-P=1,024/2,048/4,096/8,192 predicate, reports
-`q4_prefill_cta_profile=m64n128-pingpong-production`, and the former production kernel is retained
-only as the explicit M64xN128 regression/tail control. There is no build or runtime selector.
+whole-P2048 gate nevertheless selected its aggregate operator saving and promoted ping/pong. The
+subsequent source-matched scalar-base/U32-voffset qualification improved the exact 48/64/64
+operator aggregate by a robust-lower `21.057251555 ms` and whole P2048 by a robust-lower
+`20.306733144 ms`, with exact token identity and unchanged workspace/environment. Scalar-base
+addressing is therefore part of the sole production ping/pong route for the exact eight-shape by
+P=1,024/2,048/4,096/8,192 predicate. It reports
+`q4_prefill_cta_profile=m64n128-pingpong-n16-k16-scalar-base-production`; every other valid direct
+tuple delegates to the predicated, `size_t`-addressed M64xN128 fallback. There is no build or runtime
+selector or duplicate full-tile production kernel. The retained scalar operator and whole reports
+are `profiles/bench/r9700-a8q4-n16k16-scalar-base-product-p2048-ab-20260905.json` and
+`profiles/bench/r9700-scalar-base-production-p2048-c1-ab-20260905.json`.
 
 Two M64xN256 Q4 prefill experiments are terminal rejections and their executable paths have been
 removed. The 16-wave/512-thread variant passed numerical qualification and improved the weighted

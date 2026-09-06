@@ -121,7 +121,8 @@ def build(selection_path: Path, output: Path) -> dict:
         "fp8_qk_wmma_enabled": True,
         "fp8_qk_wmma_profile": "t1-ge64-t2-ge320-t3plus-stream-v1",
         "fp8_qk_wmma_t1_min_context": 64, "fp8_qk_wmma_t2_min_context": 320,
-        "q4_prefill_cta_profile": "m64n128-pingpong-production",
+        "q4_prefill_cta_profile":
+            "m64n128-pingpong-n16-k16-scalar-base-production",
     }
     selected_route = {
         "winner": terminal["winner"], "artifact": terminal["winner_artifact"],
