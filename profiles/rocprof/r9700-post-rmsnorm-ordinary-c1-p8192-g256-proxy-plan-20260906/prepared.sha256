@@ -1,0 +1,4 @@
+3dc54c796ea3015470e1dd953f5e0fcd305bd4d0a0f736b31c9e68989e7b02fb  tools/bench/prepare_post_rmsnorm_decode_proxy.py
+77c503329ac140dacce37450365476feaf8b24eb72cdb7b34cbbcfb86d3600e3  tools/bench/analyze_post_rmsnorm_decode_proxy.py
+4de2e66095f5a90a0242e89e7b205f74bd2fe27c80ad85f96f0d2676dd2d63bd  profiles/rocprof/r9700-post-rmsnorm-ordinary-c1-p8192-g256-proxy-plan-20260906/plan.json
+6262a8cc04075be2f97354f2d84b1b24653115514dc2030e3e99439032bee5c6  profiles/rocprof/r9700-post-rmsnorm-ordinary-c1-p8192-g256-proxy-plan-20260906/commands.sh
