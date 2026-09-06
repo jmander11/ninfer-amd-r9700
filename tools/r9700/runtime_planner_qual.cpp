@@ -170,6 +170,49 @@ void qualify_host_split512_routing() {
             "split-512 Device Graph topology classes are incomplete");
     std::printf("r9700_runtime_planner: PASS host split-512 production routing\n");
 }
+
+void qualify_host_dflash_graph_allowance() {
+    namespace runtime =
+        ninfer::targets::qwen3::detail::qwen3_8_27b_r9700;
+    constexpr std::size_t kExpectedObservedBytes = 68ULL * 1024ULL * 1024ULL;
+    const runtime::SequencePlanningInputs inputs{
+        .weights_profile =
+            Variant::WeightsProfile::R9700Q4G64DFlash2Q4Evaluation,
+        .capacity = 8459U,
+        .max_concurrency = 1U,
+        .prefill_chunk = 4096U,
+        .draft_window = 4U,
+        .dflash_verify_width = 5U,
+        .speculative_backend = ninfer::SpeculativeBackend::DFlash,
+        .proposal_head = ninfer::ProposalHead::Optimized,
+        .features = {.vision = false,
+                     .speculative = ninfer::SpeculativeBackend::DFlash,
+                     .proposal_head = ninfer::ProposalHead::Optimized},
+        .use_device_graph = true,
+        .device = 0,
+        .kv_ram_capacity_bytes = 0U,
+        .context_checkpoint_marks = {},
+    };
+    const auto plan = runtime::build_sequence_candidate_for_qualification(inputs, 133U);
+    require(plan->capacity == 8459U && plan->kv_capacity == 8512U,
+            "DFlash C1 authority geometry changed");
+    const auto profiles = Variant::dflash_graph_profiles(8459U, 4U, 1U, 5U);
+    std::vector<std::uint32_t> topology_classes;
+    for (const auto profile : profiles) {
+        if (std::find(topology_classes.begin(), topology_classes.end(),
+                      profile.topology_class) == topology_classes.end()) {
+            topology_classes.push_back(profile.topology_class);
+        }
+    }
+    require(plan->dflash_verify_width == 5U &&
+                plan->graph_definition_count == profiles.size() &&
+                plan->graph_executable_count == topology_classes.size() &&
+                topology_classes.size() == 1U,
+            "DFlash C1 K4/W5 graph topology inventory changed");
+    require(plan->graph_allowance_bytes == kExpectedObservedBytes,
+            "DFlash C1 K4/W5 allowance does not cover the exact observed 68 MiB residency");
+    std::printf("r9700_runtime_planner: PASS host DFlash C1/K4/W5 68 MiB graph allowance\n");
+}
 using WeightsProfile = ninfer::targets::qwen3_8_27b::detail::WeightsProfile;
 
 constexpr std::uint32_t kCapacityEnvelopeContext = 262144U;
@@ -328,7 +371,7 @@ std::size_t qualify_plan(ninfer::DeviceContext& device, std::uint32_t concurrenc
     }
     if (use_device_graph && backend == ninfer::SpeculativeBackend::DFlash) {
         constexpr std::size_t kMiB                   = 1024ULL * 1024ULL;
-        constexpr std::size_t kDFlashFamilyBytes     = 40ULL * kMiB;
+        constexpr std::size_t kDFlashFamilyBytes     = 42ULL * kMiB;
         constexpr std::size_t kDFlashExecutableBytes = 26ULL * kMiB;
         constexpr std::size_t kDFlashK1FusedBytes    = 10ULL * kMiB;
         constexpr std::size_t kDFlashK1WmmaBytes     = 18ULL * kMiB;
@@ -481,6 +524,10 @@ int main(int argc, char** argv) {
             qualify_host_split512_routing();
             return 0;
         }
+        if (argc == 2 && std::string_view(argv[1]) == "--host-dflash-graph-allowance") {
+            qualify_host_dflash_graph_allowance();
+            return 0;
+        }
         if (argc == 2 && std::string_view(argv[1]) == "--host-hybrid-capacity-csv") {
             print_host_hybrid_capacity_authority();
             return 0;
@@ -493,7 +540,8 @@ int main(int argc, char** argv) {
             throw std::invalid_argument(
                 "usage: ninfer_r9700_runtime_planner_qual "
                 "[--host-xattention-capacity-envelope|--host-request-lane-cap|"
-                "--host-split512-routing|--host-hybrid-capacity-csv|"
+                "--host-split512-routing|--host-dflash-graph-allowance|"
+                "--host-hybrid-capacity-csv|"
                 "--host-hybrid-widths-csv PREFILL MAX_CONCURRENCY MTP_WIDTH DFLASH_WIDTH]");
         }
         ninfer::DeviceContext device(0);

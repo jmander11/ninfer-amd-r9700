@@ -37,11 +37,13 @@ constexpr std::size_t kR9700MtpGraphFamilyBytes     = 22ULL * kMiB;
 constexpr std::size_t kR9700MtpGraphExecutableBytes = 26ULL * kMiB;
 constexpr std::size_t kR9700OrdinaryGraphFamilyBytes     = 20ULL * kMiB;
 constexpr std::size_t kR9700OrdinaryGraphExecutableBytes = 24ULL * kMiB;
-// DFlash graph residency has one fixed 40 MiB family image. Every K>=2 topology owns 26 MiB per
-// exact-B executable. K=1 has two attention topologies at normal contexts: its fused executable
-// owns 10 MiB and its FP8-Q/K WMMA executable owns 18 MiB. These terms reproduce the physical
-// C=1..4 curves for the resolved K=1..11/W schedules on ROCm 10 gfx1201.
-constexpr std::size_t kR9700DFlashGraphFamilyBytes           = 40ULL * kMiB;
+// A fresh ROCm 10 gfx1201 C1/K4/W5 intercept resolves the DFlash fixed family image to 42 MiB:
+// the prior 40 MiB term under-planned P8192/G256 preparation by exactly 2 MiB (68 MiB consumed
+// versus 66 MiB reserved). Retain the previously calibrated per-executable terms: every K>=2
+// topology owns 26 MiB, while K=1 normal-context fused and FP8-Q/K-WMMA topologies own 10 MiB
+// and 18 MiB respectively. Current C=2..4 physical confirmation of the revised fixed term is
+// pending; the planner applies the one fixed family term rather than multiplying it by C.
+constexpr std::size_t kR9700DFlashGraphFamilyBytes           = 42ULL * kMiB;
 constexpr std::size_t kR9700DFlashGraphExecutableBytes       = 26ULL * kMiB;
 constexpr std::size_t kR9700DFlashK1FusedExecutableBytes     = 10ULL * kMiB;
 constexpr std::size_t kR9700DFlashK1WmmaExecutableBytes      = 18ULL * kMiB;
