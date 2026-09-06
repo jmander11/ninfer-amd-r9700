@@ -1556,31 +1556,48 @@ Replace functional routes with measured gfx1201 families:
   represented activation codes, incumbent bit parity and the prior paired A8G128/Q4G128 quality
   result cannot authorize this profile. No separate BF16 gate, workspace format, producer,
   consumer, or GPU qualifier follows.
-  One final exact-format instruction-level candidate remains live: replace the four full 64-bit
+  One final exact-format instruction-level candidate was qualified: replace the four full 64-bit
   VGPR payload cursors with exact unsigned 32-bit byte offsets and use the native gfx1201
   scalar-base-plus-`voffset` forms for the unchanged A-low/A-high b32, packed-W b64, A-scale d16,
-  and W-scale d16 loads. The exact maximum spans are only 17.83 MiB, 44.56 MiB, 1.12 MiB, and
-  2.79 MiB respectively, so no offset can wrap. This can remove nine vector address/carry
+  and W-scale d16 loads. The exact maximum spans are only `17,825,792`, `44,564,480`, `1,114,112`,
+  and `2,785,280` bytes respectively, so no offset can wrap. This can remove nine vector address/carry
   instructions and six associated carry-dependency waits per G64 iteration. Across the exact
   `48/64/64` P2048 inventory, nine issue slots bound at `~16.16 ms`; granting one issue-equivalent
   cycle to each dependency gate raises the optimistic ceiling to `~26.93 ms`, barely above the
   `25 ms` threshold. It is distinct from the terminal hand-FIFO, prefetch, epilogue-scheduling,
-  cache-policy, and swizzle families. Admit exactly one disconnected qualifier: preserve the
+  cache-policy, and swizzle families. The one disconnected qualifier had to preserve the
   production 11-argument ABI, load widths/order/policies, successor issue point, `17,152`-byte LDS,
   barriers, eight IU4 sites, reconstruction, scale, FP32 accumulation, and output; require at most
   92 logical/96 architectural VGPR, occupancy 16, zero scratch/spills, complete represented-format
   correctness/status/tails/guards, every shape `<=1.01x`, and at least `25 ms` weighted saving. The
-  disconnected wrapper must reject every shape outside the exact three P2048 tuples because a
+  disconnected wrapper had to reject every shape outside the exact three P2048 tuples because a
   later generic production route would need checked span arithmetic and fallback before using
-  32-bit offsets. This is an incremental physical-ceiling probe, not by itself a credible floor
+  32-bit offsets. This was an incremental physical-ceiling probe, not by itself a credible floor
   closer: its `~26.93 ms` generous estimate projects only `~1,893 tok/s`, whereas opening the floor
-  requires a directly confirmed `84.835254 ms` whole saving. The first physical miss is terminal;
-  no address-form variant or sweep follows.
+  requires a directly confirmed `84.835254 ms` whole saving. A direct qualifier pass would permit only
+  matched whole confirmation; unless that whole result closes the full deficit and satisfies the
+  practical-ceiling conditions above, the broad item still requires a product-contract decision.
+  The first run was valid but inconclusive because the GDN-output control interval failed the
+  frozen range-stability gate. It nevertheless showed the same directional gain in all cells:
+  robust candidate/control upper bounds were `0.936782`, `0.939132`, and `0.939203`; the weighted
+  point saving was `23.812737 ms`, uncertainty `0.979192 ms`, and robust lower bound
+  `22.833545 ms`. Its immutable report is
+  `profiles/bench/r9700-a8q4-n16k16-scalar-base-p2048-ab-20260905.json` (SHA-256
+  `1941b3c6a262a61928d3971fc2b0afe06f7dac16db68a4221e79ae42940afb9b`). The sole fresh,
+  frozen-byte, independently judged, unpooled repeat was also inconclusive, this time because the
+  MLP-down arm failed stability. Its robust upper ratios were `0.935613`, `0.939195`, and
+  `0.940472`; the weighted point saving was `23.880331 ms`, uncertainty `1.114011 ms`, and robust
+  lower bound `22.766320 ms`. Its immutable report is
+  `profiles/bench/r9700-a8q4-n16k16-scalar-base-p2048-ab-repeat1-20260905.json` (SHA-256
+  `6501bc10d6dcbfb7638fd3ad977555231e263e3642b184ad15151f3feb9714dc`). Neither run reaches the
+  `25 ms` robust lower-bound gate; the repeat allowance is exhausted, so there is no admission,
+  pooling, tolerance change, third run, address-form variant, production cutover, or whole run.
   The existing A4Q4 route is also terminal as implemented: its retained relevant P2048 cells saved
   `40.295811 ms` before N16, but current fused MLP-down has no fused-SiLU-to-A4 producer, leaving
   only a projected `18.360 ms` saving on the routes it can actually replace. Global A4 quality is
   already rejected (`+0.135526` all-Q4 mean NLL and `+0.046148` mixed). All 18 BF16 source shards
-  are now locally present, which made A4 the sole remaining live `>=25 ms` hypothesis.
+  are now locally present, which made A4 the sole remaining represented-format `>=25 ms`
+  hypothesis at that checkpoint.
   - [x] Run the frozen numerical-first exact four-role N16 8K gate at
     `profiles/ppl/four-role-n16k16-a4-8k-prepare-20260905`: require mean NLL delta
     `<=0.048790164` and at most 11 new positions with NLL `>=10`. Only a pass can authorize a new
@@ -1590,16 +1607,15 @@ Replace functional routes with measured gfx1201 families:
     positions were `7/11`, but both gates are required. Its immutable schema-v6
     report is `profiles/ppl/four-role-n16k16-a4-8k-20260905/results.json` (SHA-256
     `cd449ecddbf7f2d260fb43d630b1274ae986631114bf6114c99f3253f0c6b8f5`). A4 is terminal with no
-    fused-A4 or physical qualifier. If the single scalar-base/32-bit-offset qualifier above also
-    misses, the broad P2048 item is blocked pending an explicit product-contract decision rather
-    than authorizing unbounded hypothesis search.
+    fused-A4 or physical qualifier.
   The activation-inclusive A8G128-by-Q4G128 represented-format
   contingency was the final represented-format hypothesis before these two bounded follow-ups. Its
   two independent robust point estimates
   and computed intervals above remain below `3 ms`, but instability prevents treating them as a
   physical speed bound; the permitted repeat is exhausted and admits no product path. The residual
-  audit therefore leaves no live represented-format hypothesis; only the single exact-format
-  address-generation qualifier above remains.
+  audit therefore leaves no live represented-format or exact-format `>=25 ms` hypothesis. The
+  P2048 floor/practical-ceiling item is blocked on an explicit product-contract decision; do not
+  replace that decision with unbounded candidate search or a chunk/capacity sweep.
 - [ ] Rerun all 48 post-promotion capacity cells (dense/XAttention times
   all-Q4/mixed/four-role-hybrid times G16/G32, each at C=1..4). Bind the newly measured Device Graph
   executable allocation; this is

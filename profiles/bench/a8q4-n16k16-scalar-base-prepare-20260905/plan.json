@@ -1,0 +1,14 @@
+{
+  "schema": "ninfer.r9700.a8q4-n16k16-scalar-base-preparation.v1",
+  "status": "cpu_static_ready_gpu_not_run",
+  "scope": {
+    "tokens": 2048,
+    "exact_shapes": [[12288, 5120, 48], [5120, 6144, 64], [5120, 17408, 64]],
+    "candidate": "32-bit zero-extended voffset plus frozen scalar base for the five production A8/Q4/scale streams",
+    "unchanged": "production 72-byte/11-argument ABI, M64N128 N16/K16 math, load widths/order/default policy, ping-pong LDS, waits/barriers, eight signed-IU4 sites, FP32 accumulation, status and output"
+  },
+  "resources": {"logical_vgpr_max": 92, "architectural_vgpr_max": 96, "lds_bytes": 17152, "occupancy_waves_per_eu": 16, "scratch_bytes": 0, "spills": 0, "max_voffset": 44564472},
+  "admission": {"every_cell_robust_ratio_upper_max": 1.01, "robust_weighted_saving_lower_ms_min": 25.0, "robust_mad_factor": 4.4478, "weights": [48, 64, 64], "timing": "eight paired samples in exact AB/BA balance after ABBA warmup; 128 calls per same-stream interval", "first_stable_timing_miss_is_terminal": true, "unstable_timing": "inconclusive"},
+  "commands": {"cpu_build_static": "bash profiles/bench/a8q4-n16k16-scalar-base-prepare-20260905/build.sh", "root_only_gpu_gate": "bash profiles/bench/a8q4-n16k16-scalar-base-prepare-20260905/run.sh"},
+  "output": "profiles/bench/r9700-a8q4-n16k16-scalar-base-p2048-ab-20260905.json"
+}
