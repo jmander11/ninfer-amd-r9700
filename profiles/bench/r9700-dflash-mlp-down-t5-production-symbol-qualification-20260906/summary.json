@@ -1,0 +1,36 @@
+{
+  "artifact_type": "ninfer_r9700_dflash_mlp_down_t5_production_symbol_qualification",
+  "schema_version": 1,
+  "status": "accepted",
+  "production_eligible": false,
+  "production_routing_authorized": false,
+  "source_commit": "d1a9b6fb33a843363fba3ad46d6569071df1ab66",
+  "shape": {
+    "tokens": 5,
+    "rows": 5120,
+    "columns": 17408
+  },
+  "decision": {
+    "criterion": "both launch-order medians faster, two-standard-error paired ratio upper below one, order ratio delta at most 0.02",
+    "incumbent_median_ms": 0.20738589763641357,
+    "candidate_median_ms": 0.057679951190948486,
+    "candidate_over_incumbent": 0.2781286087835744,
+    "incumbent_forward_median_ms": 0.20766780376434327,
+    "candidate_forward_median_ms": 0.057571899890899655,
+    "incumbent_reverse_median_ms": 0.20693581104278563,
+    "candidate_reverse_median_ms": 0.05771999955177307,
+    "forward_ratio_median": 0.2718662633079913,
+    "reverse_ratio_median": 0.2783157464725641,
+    "paired_ratio_mean": 0.2740825879845844,
+    "paired_ratio_standard_deviation": 0.005229490928336078,
+    "paired_ratio_upper": 0.2768778684647381,
+    "order_ratio_delta": 0.006449483164572778,
+    "maximum_order_ratio_delta": 0.02,
+    "accepted": true
+  },
+  "limitations": [
+    "standalone represented-input qualification only",
+    "does not establish whole-DFlash performance or token parity",
+    "does not authorize production routing"
+  ]
+}
