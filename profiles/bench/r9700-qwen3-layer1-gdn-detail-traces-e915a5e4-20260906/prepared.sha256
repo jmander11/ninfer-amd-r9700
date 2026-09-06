@@ -1,0 +1,6 @@
+c277094d47a3aef862c9898785e1c93ff66d3764653fdeee80b87156355c6ebb  profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/analyze.py
+38f7f3e7532833fa3c011eae93d9551aefbab7e8d59739e88ade7640bdf34f9a  profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/build-provenance.json
+6d9fadcbd5ba63fec65bc1be9bccc03ed2dee9000b6cd559462a6148879828d6  profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/commands.sh
+a680bcd7dc3e78dc3ee94dc4e08cbf4642dd85d35348e54943f8497933aff989  profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/plan.json
+f21a77d50cc5aa36d6db7eca9ec407c06d105553195ab888a5aeeac4c1ac6f08  profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/run.py
+9f0737bab2a4f294d64ef4cee49b5b5dbf841fa068d0c511ca4b40fab0b0e9a4  profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/test_analyze.py

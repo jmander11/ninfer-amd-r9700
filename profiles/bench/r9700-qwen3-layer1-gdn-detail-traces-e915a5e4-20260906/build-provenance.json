@@ -1,0 +1,25 @@
+{
+  "artifact_type": "ninfer_qwen3_layer1_gdn_detail_trace_build",
+  "schema_version": 1,
+  "source": {"commit": "e915a5e45a51c07784b36aede8650352bfe5e374", "tree": "8f447301e37f1263ab6431164276731ded6a12f1", "worktree": "/ssdpool2nvme/local_llm/ninfer-amd-r9700-layer1-gdn-src-e915a5e4"},
+  "build_directory": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-layer1-gdn-e915a5e4-20260906",
+  "configure": ["cmake", "-S", "/ssdpool2nvme/local_llm/ninfer-amd-r9700-layer1-gdn-src-e915a5e4", "-B", "build-r9700-layer1-gdn-e915a5e4-20260906", "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_HIP_COMPILER=/opt/rocm/llvm/bin/clang++", "-DNINFER_BUILD_BENCHMARKS=ON", "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON", "-DGPU_BUILD_TARGETS=gfx1201", "-DNINFER_R9700_KV_VALUE_GROUP=16", "-DNINFER_R9700_Q4_ACTIVATION_BITS=8", "-DNINFER_R9700_W8_ACTIVATION_BITS=8", "-DNINFER_R9700_FP8_QK_WMMA=1", "-DNINFER_R9700_DFLASH_SMALL_T_CANDIDATE=0", "-DNINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE=1", "-DNINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE=1", "-DNINFER_R9700_XATTENTION_QUALIFICATION=OFF", "-DNINFER_R9700_XATTENTION_STRIDE=16", "-DNINFER_R9700_XATTENTION_TAU_PERMILLE=1000"],
+  "build": ["cmake", "--build", "build-r9700-layer1-gdn-e915a5e4-20260906", "--target", "ninfer_bench", "ninfer_qwen3_runtime_mechanisms_test", "ninfer_qwen3_decision_trace_test", "ninfer_qwen3_prefill_tail_trace_path_test", "-j", "16"],
+  "profile": {"GPU_BUILD_TARGETS":"gfx1201", "NINFER_R9700_KV_VALUE_GROUP":"16", "NINFER_R9700_Q4_ACTIVATION_BITS":"8", "NINFER_R9700_W8_ACTIVATION_BITS":"8", "NINFER_R9700_FP8_QK_WMMA":"1", "NINFER_R9700_DFLASH_SMALL_T_CANDIDATE":"0", "NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE":"1", "NINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE":"1", "NINFER_R9700_XATTENTION_QUALIFICATION":"OFF", "NINFER_R9700_XATTENTION_STRIDE":"16", "NINFER_R9700_XATTENTION_TAU_PERMILLE":"1000"},
+  "outputs": {
+    "benchmark": {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-layer1-gdn-e915a5e4-20260906/bench/ninfer_bench","bytes":5202400,"sha256":"9a89482688672fcf9eae6bf3bb4f06baeccafa8d7468f2bf513134533c359155"},
+    "cmake_cache": {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-layer1-gdn-e915a5e4-20260906/CMakeCache.txt","bytes":33919,"sha256":"7725e1867e31388ddbd5ab9f30d56274edfc053f8c32caffe9dd53c360c17466"},
+    "compile_commands": {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-layer1-gdn-e915a5e4-20260906/compile_commands.json","bytes":247402,"sha256":"04b5fd13af8a21a3336af2540703c08f374091719bd7741ceafc905525acb46b"},
+    "runtime_test": {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-layer1-gdn-e915a5e4-20260906/tests/ninfer_qwen3_runtime_mechanisms_test","bytes":285672,"sha256":"911dac88626f22c91800a7df556269b16e5b9c9190dabeff7b749e65a0a92a29"},
+    "decision_trace_test": {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-layer1-gdn-e915a5e4-20260906/tests/ninfer_qwen3_decision_trace_test","bytes":109928,"sha256":"22cd2ca7121607f4ef833dc6088648ceff8f23d3b371a099fc720d5adfe2d87a"},
+    "path_test": {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-layer1-gdn-e915a5e4-20260906/tests/ninfer_qwen3_prefill_tail_trace_path_test","bytes":27936,"sha256":"d6ec4c54654c9ebfd1c414304e9c9a2caca28bcc67e3dc88f5532097cf8268eb"}
+  },
+  "toolchain_runtime": {
+    "cxx": {"path":"/usr/bin/x86_64-linux-gnu-g++-13","bytes":1027128,"sha256":"1353e9bdd29a7295c7226bf6c63abccce056d8cac31f112e5cdbecc3f28c2769"},
+    "hip_compiler": {"path":"/opt/rocm/core-10.0/lib/llvm/bin/clang-23","bytes":201136,"sha256":"241bf4da7ec39bc00b68ed74f6be751516d9892ed990e8c7fa372bad18500247"},
+    "hipcc": {"path":"/opt/rocm/core-10.0/bin/hipcc","bytes":644120,"sha256":"7b95d430bb8c4d4237f9b4935dbd6440e2067fde0979cc69bffb26ebd021464c"},
+    "python": {"path":"/usr/bin/python3.12","bytes":8020928,"sha256":"1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118"},
+    "hipblaslt": {"path":"/opt/rocm/core-10.0/lib/libhipblaslt.so.1.4","bytes":9081728,"sha256":"1e8545626323f9b22c65d36492e1686b831cb85c8f7c8be3fc21c0d6cbb0d055"},
+    "amdhip": {"path":"/opt/rocm/core-10.0/lib/libamdhip64.so.7.15.26333-0000000","bytes":28216272,"sha256":"817aeadfd9f62b68831ad89993163c7f1f470f30595e7e0da5fdc942193142a8"}
+  }
+}
