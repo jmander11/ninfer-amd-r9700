@@ -1,0 +1,2 @@
+symbol=_ZN6ninfer3ops5r97005eager12_GLOBAL__N_130rmsnorm_k5120_rows4_cta_kernelEPK12hip_bfloat16S6_PS4_fb vgprs=17 lds=32 occupancy=16 maximum_workgroup=256 global_loads=15 shuffle_ops=8 barrier_pairs=2 global_invalidations=2
+qualification_only=true features=5120 rows=5,6 production_selector_unchanged=true

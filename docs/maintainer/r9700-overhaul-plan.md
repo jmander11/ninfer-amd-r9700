@@ -1856,6 +1856,17 @@ Replace functional routes with measured gfx1201 families:
   represented-input operator evidence only: no generated-token parity, whole-DFlash speed, recipe,
   or production-routing claim follows. T6 failed its static resource gate before timing and retains
   incumbent WMMA.
+  The existing one-row-per-CTA K5120 RMSNorm kernel is also standalone-qualified for exact DFlash
+  rows 5 and 6 by
+  `profiles/bench/r9700-rmsnorm-dflash-rows56-qualification-20260906/summary.json` (SHA-256
+  `6deb3a0571c80107d81a5773cfe8ae1d4f927ad05c37aa33e5769d96fbb88cde`), with result closure
+  `0884f1042e707b9a1601d808679910aa8399b6affb9a53f4c0f9accd89401a82`. Direct FP64-to-BF16
+  oracle error is at most one BF16 step for incumbent and challenger. Rows 5 measure 0.104653 ms
+  versus 0.008648 ms (ratio 0.082685), and rows 6 measure 0.103696 ms versus 0.008631 ms (ratio
+  0.083335); both launch orders and two-standard-error gates pass with order deltas below 0.00015.
+  Exact static facts remain 17 VGPR, 32-byte LDS, occupancy 16, wave32, and no private/scratch
+  allocation. Production still selects only rows 1--4. Rows 5/6 admission requires exact semantic
+  parity and matched whole-DFlash evidence; this standalone result is not a decode-speed claim.
   The earlier all-Q4 owner trace does not transfer its target-gate/up conclusion to this four-role
   artifact: all 64 Text gate/up matrices are FP8 and bypass A8Q4. Only the five Q4 DFlash proposal
   gate/up matrices use the small-T route per round, for an expected whole saving of about 7.1 ms at

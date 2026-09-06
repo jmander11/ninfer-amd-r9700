@@ -50,7 +50,9 @@ above, not an executable task. Conditional tasks retain their explicit `if:` cla
   N5120/K17408 MLP-down candidate is standalone-qualified but remains off by default. Require
   current-companion whole A/B, token parity, and a material end-to-end win before any route change.
   The exact T5/T6 FP8 target gate/up challenger is terminally rejected at 3.77x/3.64x incumbent
-  time; do not rerun it without a changed source mechanism.
+  time; do not rerun it without a changed source mechanism. The K5120 one-CTA RMSNorm route is
+  standalone-qualified at rows5/6 near 0.083x incumbent time but remains outside production until
+  semantic parity and matched whole evidence admit an exact static width set.
 
 - [ ] `DFLASH-TEXT-P129` Localize the shared Text append-versus-fresh dependence for the identical
   effective P129 history. Compare exact final normalized tail hidden and output-head top-two margin;
