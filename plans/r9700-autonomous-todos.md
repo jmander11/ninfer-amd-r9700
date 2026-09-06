@@ -2782,10 +2782,14 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         proposal/service Q4 Linear. The repaired asynchronous-drain attribution is bound by
         `analysis-repair.json` SHA-256
         `95d652a9c0a2bce16d6e3e24d488b88dfe8b4b0735a2471347765118f9fc6fbc`.
-        This trace supports optimizing the target N34816/K5120 gate/up owner. It used the legacy
-        RowSplit all-Q4/G32 artifact, eager P128/G64 execution, and profiler interception, so its
-        timings are attribution only: they are not N16 speed evidence, a bandwidth/cache/stall
-        measurement, quality or acceptance evidence, or a production recipe/routing decision.
+        This trace identifies the target N34816/K5120 gate/up owner only for that legacy all-Q4
+        execution. It does not transfer to the current four-role companion: all 64 Text gate/up
+        matrices there are FP8 and bypass A8Q4, while only the five Q4 DFlash proposal gate/up
+        matrices use the small-T route per round. Direct-cell medians predict about 7.1 ms per K4
+        run and 5.3 ms per K5 run (roughly 0.15--0.19%), consistent with the near-neutral whole
+        screen. The legacy eager/profile-intercept trace is not current-N16 speed evidence, a
+        bandwidth/cache/stall measurement, quality or acceptance evidence, or a production
+        recipe/routing decision.
       - [x] Audit the proposed `prepare_ragged_prefix` Wceil compaction before spending GPU time.
         The startup-fixed product already plans persistent `pending_features`, round tensors,
         append positions, and append workspace at the one resolved verify width, so K4 and K5

@@ -567,10 +567,14 @@ Q4 Linear consumes 2707.578/2647.628 ms across 40/39 verification rounds, versus
 `dd8ffd1eb031b8c7c5004c0d45690d2d08aaa4c05eab5d82845c72a9cc397ad8` and
 `094139b10b607db827b6782dbe6b1a02dd2b5bee16771a35aa4211df19e11fe1`; asynchronous-drain repair
 SHA-256 is `95d652a9c0a2bce16d6e3e24d488b88dfe8b4b0735a2471347765118f9fc6fbc`.
-This selects target N34816/K5120 gate/up as the optimization owner, not a production route. The
-trace used a legacy RowSplit all-Q4/G32 artifact, eager P128/G64 execution, and profiler
-interception; its durations are attribution only, with no N16 performance, bandwidth/cache/stall,
-quality, acceptance, or whole-inference claim.
+This identifies target N34816/K5120 gate/up only for that legacy all-Q4 execution, not for the
+current four-role companion. In the current artifact all 64 Text gate/up matrices are FP8 and
+bypass A8Q4; only the five Q4 DFlash proposal gate/up matrices use the selected small-T route per
+round. Direct-cell medians therefore predict only about 7.1 ms per K4 run and 5.3 ms per K5 run
+(roughly 0.15--0.19%), consistent with the near-neutral whole screen. The trace used a legacy
+RowSplit all-Q4/G32 artifact, eager P128/G64 execution, and profiler interception; its durations are
+attribution only, with no current-N16 performance, bandwidth/cache/stall, quality, acceptance, or
+whole-inference claim.
 
 Independent represented-input oracle, exact gfx1201 ISA/resources, and current-companion
 whole-DFlash A/B remain required. The proposed `prepare_ragged_prefix` Wceil=12

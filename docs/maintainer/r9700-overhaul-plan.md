@@ -1811,6 +1811,10 @@ Replace functional routes with measured gfx1201 families:
   4 packed-W4 loads, 6 scale loads, 33 VGPR, occupancy 16, and no LDS/private/scratch or spills.
   This synthetic single-cell result does not establish whole-DFlash speed or authorize production
   routing. T6 failed its static resource gate before timing and retains incumbent WMMA.
+  The earlier all-Q4 owner trace does not transfer its target-gate/up conclusion to this four-role
+  artifact: all 64 Text gate/up matrices are FP8 and bypass A8Q4. Only the five Q4 DFlash proposal
+  gate/up matrices use the small-T route per round, for an expected whole saving of about 7.1 ms at
+  K4 and 5.3 ms at K5 (roughly 0.15--0.19%).
   The first ordinary-decode promotion is the canonical native-dot8 T=1 A8Q4 Linear route. Its
   exact domain is seven full-K matrix tuples selected by shape, not caller identity;
   `[5120,17408]` and `[34816,5120]` also occur in DFlash2, while every off-inventory T=1 call,
