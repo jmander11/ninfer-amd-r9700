@@ -1800,17 +1800,36 @@ Replace functional routes with measured gfx1201 families:
   post-seed decode first differs from ordinary at output index 55 and then diverges in its tail,
   identically in candidate and control. Therefore the current evidence does not assign the
   mismatch to the small-T selector, and no candidate timing or promotion claim is admissible.
-  Root-cause diagnosis and a discriminating experiment remain pending.
-  The separate direct packed-W4 qualifier for the exact DFlash MLP-down N5120/K17408, T5 cell is
-  accepted as standalone operator evidence under
-  `profiles/bench/r9700-dflash-mlp-down-t5-qualification-20260906`: its independent represented-input
-  oracle reports zero BF16 steps for both routes and bit-exact pairwise output, while balanced
-  medians are 0.205274 ms incumbent and 0.057066 ms candidate (candidate/incumbent 0.2780, about
+  The retained P129 discriminator under
+  `profiles/bench/r9700-dflash-p129-isolation-discriminator-20260906/results` (result-closure
+  SHA-256 `fa8a7b8d7def4c59fc17370947373979ce920ef35fd1ca68f5315ad125267c56`)
+  separates the confounds. All eager/graph ordinary/DFlash seed authorities emit token 24178, and eager is exact
+  with graph in every arm. Ordinary and DFlash append-versus-fresh execution first differ at
+  generated index 21 (128415 versus 96723). Independently, fresh-P129 ordinary versus DFlash first
+  differs at index 27 (95946 versus 98003), while the isolated pair first differs at index 55
+  (112522 versus 100730). Thus graph capture is excluded, but both the shared append path and the
+  DFlash target/accept/commit path require focused semantic localization. No timing or routing
+  conclusion follows.
+  The direct packed-W4 qualifier for the exact DFlash MLP-down N5120/K17408, T5 cell now executes
+  the production entry symbol. Its accepted summary is
+  `profiles/bench/r9700-dflash-mlp-down-t5-production-symbol-qualification-20260906/summary.json`
+  (SHA-256 `a10d6789b6df7914d32774bf5492e50be58645d6f6483a5904f28cab58a9381a`), with result closure
+  `profiles/bench/r9700-dflash-mlp-down-t5-production-symbol-qualification-20260906/result.sha256`
+  (SHA-256 `50e39c0ed6e5bf70c162a7e69d7fc819bddc2f458f06d090869f693f2ee555d2`).
+  Its independent represented-input oracle reports zero BF16 steps for incumbent and candidate;
+  balanced medians are 0.207386 ms and 0.057680 ms respectively, for a 0.278129 ratio (about
   3.60x faster). Both launch orders win, the paired-ratio two-standard-error upper bound is
-  0.277851, and order-ratio delta is 0.003028. The emitted gfx1201 proof has 80 dot8 instructions,
-  4 packed-W4 loads, 6 scale loads, 33 VGPR, occupancy 16, and no LDS/private/scratch or spills.
-  This synthetic single-cell result does not establish whole-DFlash speed or authorize production
-  routing. T6 failed its static resource gate before timing and retains incumbent WMMA.
+  0.276878, and order-ratio delta is 0.006449. Independent review passed the source/binary/static,
+  raw-decision, hardware, and closure bindings. Matched Engine builds are retained by
+  `profiles/bench/r9700-dflash-mlp-down-t5-matched-builds-20260906/build-receipt.json` (SHA-256
+  `aa20148816786691eac0d7916201e13e3f489b8a9c78a9a24e1a309a210cf574`) at source commit
+  `d1a9b6fb33a843363fba3ad46d6569071df1ab66`; their control/candidate benchmark SHA-256 values are
+  `db248587690acc76a2d4dd2e74a3a5fccd4d8558d3cb66a80082a36ff8c75949` and
+  `1a6977420a4ddb460d0acea901ea10824ec90c798912d823f0b4c01fb24dc0f2`, and the existing gate/up
+  selector is off in both arms. The MLP-down selector remains off by default. This is standalone
+  represented-input operator evidence only: no generated-token parity, whole-DFlash speed, recipe,
+  or production-routing claim follows. T6 failed its static resource gate before timing and retains
+  incumbent WMMA.
   The earlier all-Q4 owner trace does not transfer its target-gate/up conclusion to this four-role
   artifact: all 64 Text gate/up matrices are FP8 and bypass A8Q4. Only the five Q4 DFlash proposal
   gate/up matrices use the small-T route per round, for an expected whole saving of about 7.1 ms at

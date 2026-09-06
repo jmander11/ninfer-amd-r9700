@@ -2750,27 +2750,54 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
           benchmark SHA-256 `6dbb09fcc75185ee1a09c0261c1a2dbbccbaa29021eb6f303f883b70350f469f`;
           normalized compile commands differ only in the candidate selector. Whole-DFlash A/B is
           still required and this receipt is not routing or production authority.
-        - [ ] Resolve the attempt-3 isolated-token discriminator before consuming any candidate
+        - [x] Run the attempt-3 isolated-token discriminator before consuming any candidate
           timing. The graph-allowance-fixed attempt is exact across all three repetitions, and
           candidate/control are token-exact with each other for both K4/W5 and K5/W6. Its
           fresh-prompt whole output is token-exact with the fresh exact ordinary control, but the
           isolated post-seed output first differs from ordinary at index 55 and then takes a
           different tail. Because control and candidate produce the same isolated sequence, this
-          evidence does not implicate the small-T selector. Candidate speed is inadmissible until
-          the ordinary-parity failure is diagnosed and a discriminating experiment passes; the
-          diagnosis and exact discriminator are pending.
+          evidence does not implicate the small-T selector. The retained P129 result under
+          `profiles/bench/r9700-dflash-p129-isolation-discriminator-20260906/results`, with
+          result-closure SHA-256
+          `fa8a7b8d7def4c59fc17370947373979ce920ef35fd1ca68f5315ad125267c56`, proves all
+          four eager/graph ordinary/DFlash seed authorities emit token 24178 and every eager arm is
+          exact with graph. Ordinary and DFlash append-versus-fresh execution both first differ at
+          generated index 21 (128415 versus 96723). Fresh-P129 ordinary versus DFlash independently
+          first differs at index 27 (95946 versus 98003), while the isolated pair first differs at
+          index 55 (112522 versus 100730). Graph capture is excluded; this functional-only result
+          authorizes no timing, winner, or routing claim.
+        - [ ] Localize the shared Text append-versus-fresh dependence on the identical effective
+          P129 history, starting with final tail hidden and output-head top-two margin, then the
+          first differing attention/GDN layer boundary only if needed. Do not attribute a stale
+          state defect until the first differing semantic boundary proves it.
+        - [ ] On the fresh-P129 common prefix through generated index 26, localize the first
+          ordinary-versus-DFlash difference. Retain target-verification top-two/argmax by column,
+          accepted column, licensed tokens, and next frontier to distinguish target arithmetic,
+          acceptance selection, and post-commit state. Exact public greedy-token parity remains
+          required; diagnostic logit margins do not waive it.
         - [x] Run the direct packed-W4 screen for the DFlash MLP-down matrix at exact
-          N5120/K17408, T5. The retained standalone qualification under
-          `profiles/bench/r9700-dflash-mlp-down-t5-qualification-20260906` passes the independent
-          represented-input oracle with zero BF16 steps for both routes and bit-exact pairwise
-          output. Balanced medians are 0.205274 ms incumbent and 0.057066 ms candidate
-          (candidate/incumbent 0.2780, about 3.60x faster); both launch orders win, the
-          paired-ratio two-standard-error upper bound is 0.277851, and order-ratio delta is
-          0.003028. The emitted gfx1201 proof has 80 native dot8 instructions, 4 packed-W4 loads,
-          6 scale loads, 33 VGPR, occupancy 16, and no LDS/private/scratch or register spills.
-          This synthetic operator result does not establish whole-DFlash speed or authorize
-          production routing. T6 failed its static resource gate before timing and retains
-          incumbent WMMA.
+          N5120/K17408, T5, then repeat it through the production entry symbol. The current
+          accepted summary is
+          `profiles/bench/r9700-dflash-mlp-down-t5-production-symbol-qualification-20260906/summary.json`
+          (SHA-256 `a10d6789b6df7914d32774bf5492e50be58645d6f6483a5904f28cab58a9381a`), with result closure
+          `profiles/bench/r9700-dflash-mlp-down-t5-production-symbol-qualification-20260906/result.sha256`
+          (SHA-256 `50e39c0ed6e5bf70c162a7e69d7fc819bddc2f458f06d090869f693f2ee555d2`).
+          Its independent represented-input oracle reports zero BF16 steps for incumbent and
+          candidate. Balanced medians are 0.207386 ms and 0.057680 ms respectively
+          (candidate/incumbent 0.278129, about 3.60x faster); both launch orders win, the
+          paired-ratio two-standard-error upper bound is 0.276878, and order-ratio delta is
+          0.006449. Independent review passed the exact source/binary/assembly/static bindings,
+          hardware and power-state checks, raw-decision recomputation, and closure. Matched Engine
+          builds are bound by
+          `profiles/bench/r9700-dflash-mlp-down-t5-matched-builds-20260906/build-receipt.json`
+          (SHA-256 `aa20148816786691eac0d7916201e13e3f489b8a9c78a9a24e1a309a210cf574`) at source commit
+          `d1a9b6fb33a843363fba3ad46d6569071df1ab66`; control/candidate benchmark SHA-256 values are
+          `db248587690acc76a2d4dd2e74a3a5fccd4d8558d3cb66a80082a36ff8c75949` and
+          `1a6977420a4ddb460d0acea901ea10824ec90c798912d823f0b4c01fb24dc0f2`, with the existing
+          gate/up selector off in both arms. The MLP-down selector remains off by default. This is
+          standalone represented-input operator evidence only and establishes no generated-token
+          parity, whole-DFlash speed, recipe selection, or production routing. T6 failed its static
+          resource gate before timing and retains incumbent WMMA.
       - [x] Profile the current whole DFlash round enough to separate proposal/head service from
         dense target verification. The selected-region owner trace at
         `profiles/rocprof/r9700-dflash-q4-c1-k4k5-owner-trace-plan-20260906` retains independently

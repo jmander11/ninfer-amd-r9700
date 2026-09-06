@@ -545,20 +545,39 @@ whole output is also token-exact with the fresh exact ordinary control. The isol
 decode instead first differs from ordinary at output index 55 and then follows a different tail.
 This does not identify the small-T selector as the cause: the same isolated sequence is produced
 by candidate and control. Candidate timing from this attempt is inadmissible because the required
-isolated ordinary-parity gate did not pass. Diagnosis and a discriminating experiment remain
-pending; there is no speed, winner, or routing conclusion from attempt 3.
+isolated ordinary-parity gate did not pass. There is no speed, winner, or routing conclusion from
+attempt 3. The follow-up retained under
+`profiles/bench/r9700-dflash-p129-isolation-discriminator-20260906/results`, with result closure
+SHA-256 `fa8a7b8d7def4c59fc17370947373979ce920ef35fd1ca68f5315ad125267c56`, makes all four
+eager/graph ordinary/DFlash P128 seed authorities exact at token 24178 and reproduces each eager
+sequence exactly under Device Graph. Ordinary and DFlash append-versus-fresh execution both first
+differ at generated index 21 (128415 versus 96723). Fresh-P129 ordinary versus DFlash separately
+first differs at index 27 (95946 versus 98003); the isolated cross-mode pair differs at index 55
+(112522 versus 100730). The result is functional classification only: graph capture is excluded,
+while shared append execution and DFlash target/accept/commit behavior remain separate localization
+owners. It provides no admissible timing or routing claim.
 
-A second packed-W4 candidate has passed standalone qualification for the exact DFlash MLP-down
-N5120/K17408, T5 cell. The retained result is
-`profiles/bench/r9700-dflash-mlp-down-t5-qualification-20260906`: its independent represented-input
-oracle reports zero BF16 steps for both routes and bit-exact pairwise output. Balanced medians are
-0.205274 ms incumbent and 0.057066 ms candidate, a candidate/incumbent ratio of 0.2780 (about 3.60x
-faster). Both launch orders win; the paired-ratio two-standard-error upper bound is 0.277851 and the
-order-ratio delta is 0.003028. The emitted T5 kernel has 80 native dot8 instructions, 4 packed-W4
-loads, 6 scale loads, 33 VGPR, occupancy 16, and no LDS, private segment, scratch, or register spills.
-This is synthetic single-cell evidence only: production routing is unchanged and whole-DFlash speed
-remains unproven. The corresponding T6 candidate failed its static resource gate before timing and
-remains on incumbent WMMA.
+A second packed-W4 candidate has passed standalone qualification through the production entry symbol
+for the exact DFlash MLP-down N5120/K17408, T5 cell. The retained summary is
+`profiles/bench/r9700-dflash-mlp-down-t5-production-symbol-qualification-20260906/summary.json`
+(SHA-256 `a10d6789b6df7914d32774bf5492e50be58645d6f6483a5904f28cab58a9381a`), with result closure
+`profiles/bench/r9700-dflash-mlp-down-t5-production-symbol-qualification-20260906/result.sha256`
+(SHA-256 `50e39c0ed6e5bf70c162a7e69d7fc819bddc2f458f06d090869f693f2ee555d2`).
+Its independent represented-input oracle reports zero BF16 steps for incumbent and candidate.
+Balanced medians are 0.207386 ms and 0.057680 ms respectively, a candidate/incumbent ratio of
+0.278129 (about 3.60x faster). Both launch orders win; the paired-ratio two-standard-error upper
+bound is 0.276878 and the order-ratio delta is 0.006449. Independent review passed the exact
+source/binary/assembly/static bindings, hardware and power-state checks, raw-decision recomputation,
+and closure. The corresponding matched Engine builds are bound by
+`profiles/bench/r9700-dflash-mlp-down-t5-matched-builds-20260906/build-receipt.json` (SHA-256
+`aa20148816786691eac0d7916201e13e3f489b8a9c78a9a24e1a309a210cf574`) at source commit
+`d1a9b6fb33a843363fba3ad46d6569071df1ab66`. Its control and candidate benchmark SHA-256 values are
+`db248587690acc76a2d4dd2e74a3a5fccd4d8558d3cb66a80082a36ff8c75949` and
+`1a6977420a4ddb460d0acea901ea10824ec90c798912d823f0b4c01fb24dc0f2`; the separate gate/up selector
+is off in both arms. The MLP-down selector remains off by default. This is standalone
+represented-input evidence only: it establishes neither generated-token parity nor whole-DFlash
+speed, recipe selection, or production routing. The corresponding T6 candidate failed its static
+resource gate before timing and remains on incumbent WMMA.
 
 The owner trace under `profiles/rocprof/r9700-dflash-q4-c1-k4k5-owner-trace-plan-20260906`
 attributes 84.95%/85.27% of summed K4/W5 and K5/W6 decode service to target verification. Target
