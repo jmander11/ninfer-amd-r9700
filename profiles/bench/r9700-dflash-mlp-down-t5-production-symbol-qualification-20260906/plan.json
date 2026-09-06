@@ -1,0 +1,15 @@
+{
+  "artifact_type": "ninfer_r9700_dflash_mlp_down_t5_production_symbol_qualification_plan",
+  "schema_version": 1,
+  "status": "prepared_no_gpu_execution",
+  "claim": "standalone post-integration qualification of the exact production-owned A8Q4G64 MLP-down T5 symbol; no production routing or whole-DFlash claim",
+  "source_commit": "d1a9b6fb33a843363fba3ad46d6569071df1ab66",
+  "source_tree": "557bbda04f2926319bf7c25f26eb9ec193d74824",
+  "shape": {"tokens": 5, "rows": 5120, "columns": 17408, "padded_columns": 17408},
+  "hardware": {"device": 0, "pci_vendor_device": "1002:7551", "architecture": "gfx1201", "wavefront_width": 32, "power_profile": "auto"},
+  "numeric": {"oracle": "independent FP64 represented A8G64 x Q4G64 formula", "maximum_bf16_steps": 2, "guards_and_rejections": true},
+  "static": {"dot8": 80, "packed_weight_b64_loads": 4, "scale_loads": 6, "vgpr": 33, "sgpr": 102, "occupancy": 16, "lds": 0, "private": 0, "scratch": 0, "spills": 0, "wave32": true, "t6_present": false},
+  "timing": {"method": "unprofiled HIP events", "iterations_per_sample": 10, "forward_reverse_pairs": 7, "criterion": "both launch-order medians faster, two-standard-error paired ratio upper below one, order ratio delta at most 0.02"},
+  "production_routing_authorized": false,
+  "outputs": {"cell": "cell-t5-production.json", "summary": "summary.json", "static": "static.stdout"}
+}
