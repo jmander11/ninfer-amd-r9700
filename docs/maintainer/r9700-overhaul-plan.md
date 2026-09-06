@@ -1878,9 +1878,11 @@ Replace functional routes with measured gfx1201 families:
   Exact static facts remain 17 VGPR, 32-byte LDS, occupancy 16, wave32, and no private/scratch
   allocation. An off-by-default compile selector now admits only K5120 rows 5/6 and reports its
   identity; selector-off and selector-on production harnesses cover public eager rows 1--6 and
-  graph replay at rows 5/6. Production remains selector-off until its clean committed matched
-  builds pass the numerical gate and then exact semantic parity and matched whole-DFlash evidence;
-  this standalone result is not a decode-speed claim.
+  graph replay at rows 5/6. Their committed matched build receipt and GPU numerical result are
+  retained under `profiles/bench/r9700-dflash-rmsnorm-rows56-matched-builds-20260906`: each arm
+  passes 108 eager cases at at most one BF16 step, rows5/6 graph replay, canaries, and malformed
+  inputs. Production remains selector-off until exact W1-versus-W5/W6 semantic parity and matched
+  whole-DFlash evidence pass; this result is not a decode-speed claim.
   The earlier all-Q4 owner trace does not transfer its target-gate/up conclusion to this four-role
   artifact: all 64 Text gate/up matrices are FP8 and bypass A8Q4. Only the five Q4 DFlash proposal
   gate/up matrices use the small-T route per round, for an expected whole saving of about 7.1 ms at

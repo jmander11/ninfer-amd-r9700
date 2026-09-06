@@ -52,7 +52,8 @@ above, not an executable task. Conditional tasks retain their explicit `if:` cla
   The exact T5/T6 FP8 target gate/up challenger is terminally rejected at 3.77x/3.64x incumbent
   time; do not rerun it without a changed source mechanism. The K5120 one-CTA RMSNorm route is
   standalone-qualified at rows5/6 near 0.083x incumbent time and integrated behind an off-by-default
-  exact compile selector. Finish its clean matched-build numerical receipt, then require semantic
+  exact compile selector. Its clean matched builds pass 108-case eager and rows5/6 graph numerical
+  gates in both selector states at at most one BF16 step. Require exact W1-versus-W5/W6 semantic
   parity and matched whole evidence before admitting that static width set.
 
 - [ ] `DFLASH-TEXT-P129` Localize the shared Text append-versus-fresh dependence for the identical
