@@ -53,7 +53,9 @@ above, not an executable task. Conditional tasks retain their explicit `if:` cla
   time; do not rerun it without a changed source mechanism. The K5120 one-CTA RMSNorm route is
   standalone-qualified at rows5/6 near 0.083x incumbent time and integrated behind an off-by-default
   exact compile selector. Its clean matched builds pass 108-case eager and rows5/6 graph numerical
-  gates in both selector states at at most one BF16 step. Require exact W1-versus-W5/W6 semantic
+  gates in both selector states at at most one BF16 step, but selector-on fails the exact P129 token
+  gate earlier at index21 and remains off. Use the layer1 normalized-input trace to distinguish the
+  expected row-independent CTA equality from downstream GDN state/record behavior; require exact
   parity and matched whole evidence before admitting that static width set.
 
 - [ ] `DFLASH-TEXT-P129` Localize the shared Text append-versus-fresh dependence for the identical
@@ -69,9 +71,10 @@ above, not an executable task. Conditional tasks retain their explicit `if:` cla
   accepted column, licensed tokens, and next frontier so target arithmetic, acceptance selection,
   and post-commit state remain distinct. Target logits already differ at the first generated step;
   exact boundary tracing is equal through layer0 MLP and first differs after the layer1 GDN mixer
-  in 1,219/5,120 elements. Now discriminate normalized input/controls, projection-convolution,
-  recurrence/state, gated norm, and output projection there. Eager already equals graph; that does
-  not waive parity.
+  in 1,219/5,120 elements. The rows5 CTA candidate changes the generated trajectory at index21 and
+  does not restore parity. Now use the selector-on layer1 trace to discriminate normalized
+  input/controls, projection-convolution, recurrence/state, gated norm, and output projection there.
+  Eager already equals graph; that does not waive parity.
 
 - [ ] `DFLASH-RECIPE` [depends: TERMINAL-SELECTION, CHUNK-SELECT] Select DFlash matrices from the
   real BF16 DFlash2 checkpoint rather than inheriting the base recipe. Compare canonical Q4G64,

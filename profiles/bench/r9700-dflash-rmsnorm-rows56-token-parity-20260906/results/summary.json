@@ -1,0 +1,87 @@
+{
+  "artifact_type": "ninfer_r9700_dflash_rmsnorm_rows56_token_parity_evidence",
+  "schema_version": 1,
+  "status": "not_restored",
+  "timing_evidence_eligible": false,
+  "production_routing_authorized": false,
+  "source_commit": "c8e1bc418b80c23364460801b7c0c017bdab87b8",
+  "authority": {
+    "matched_build_receipt": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-rmsnorm-rows56-matched-builds-20260906/build-receipt.json",
+      "bytes": 5100,
+      "sha256": "d3fc4c9b238390849c08ef5f61fa4695c024e0a676e67aa8245d4face418d9ee"
+    },
+    "matched_gpu_numerical_authority": {
+      "result": {
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-rmsnorm-rows56-matched-builds-20260906/gpu-numerical-result.json",
+        "bytes": 1399,
+        "sha256": "41a31b36e459877a5ccdb0ef5e9b6443dcc444aba23f57b43987416b3e4ef60b"
+      },
+      "closure": {
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-rmsnorm-rows56-matched-builds-20260906/result.sha256",
+        "bytes": 311,
+        "sha256": "4a84530ded75e34e214814a27666d6dd20520cc69ef2c98b45a0370617966890"
+      }
+    },
+    "prior_capture_closure": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-semantic-traces-aebd5f82-20260906/results/result.sha256",
+      "bytes": 4801,
+      "sha256": "d517d347a5bec7721c8fb043bd4937b266879779526404e59ec2330ce2218bfe"
+    },
+    "prior_analysis_closure": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-semantic-traces-aebd5f82-20260906/analysis-result.sha256",
+      "bytes": 875,
+      "sha256": "e3aa333e5c2bceade0d72fda7ef725107f431b1957af522726a0211b9b3f9f25"
+    },
+    "layer_analysis_closure": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer-boundary-traces-43e5e4cc-20260906/analysis-result.sha256",
+      "bytes": 905,
+      "sha256": "b8096ffe54b6b51ead578c51a9357d96346073c64a37f27ef6fea91799569ec2"
+    }
+  },
+  "baseline_reproduced": true,
+  "selector_on_matches_ordinary_all_28_tokens": false,
+  "candidate_first_difference_index": 21,
+  "ordinary_index27": 95946,
+  "selector_off_dflash_index27": 98003,
+  "candidate_index27": 96843,
+  "reports": {
+    "control-ordinary": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-rmsnorm-rows56-token-parity-20260906/results/control-ordinary.json",
+      "bytes": 6079,
+      "sha256": "6de48d934d2a6c2a368d7356ff505e9919fad809f230c5690fe1f06895721012"
+    },
+    "control-dflash": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-rmsnorm-rows56-token-parity-20260906/results/control-dflash.json",
+      "bytes": 6204,
+      "sha256": "0651c6f052a35dccd0c6c6b846aa2c7aab67646590c31ef9e3b8514666c7e009"
+    },
+    "candidate-dflash": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-rmsnorm-rows56-token-parity-20260906/results/candidate-dflash.json",
+      "bytes": 6204,
+      "sha256": "845b296ac5d02857638bfd767380a7bb0dbb38f9e6f7f0b5190e9992d3d47296"
+    }
+  },
+  "processes": {
+    "control-ordinary": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-rmsnorm-rows56-token-parity-20260906/results/control-ordinary.process.json",
+      "bytes": 1891,
+      "sha256": "3b6532f41ff2acd837d141a6d648fc336b9eddc3c990399e5da55f9335b5234e"
+    },
+    "control-dflash": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-rmsnorm-rows56-token-parity-20260906/results/control-dflash.process.json",
+      "bytes": 1974,
+      "sha256": "500bf23677538ba802c6e5e1a7286e0008539d169a483c77bce4f6699a785807"
+    },
+    "candidate-dflash": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-rmsnorm-rows56-token-parity-20260906/results/candidate-dflash.process.json",
+      "bytes": 1984,
+      "sha256": "91c04983407104a13f41c15c0fe9909a6c08e5c8612a421a103aaa6e123b81ea"
+    }
+  },
+  "limitations": [
+    "functional token parity only; timings are ineligible",
+    "does not prove hidden-state exactness or performance",
+    "does not authorize production routing"
+  ]
+}

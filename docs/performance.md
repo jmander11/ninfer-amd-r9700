@@ -569,6 +569,17 @@ T129 column128 versus append T1 column0 differs in 142/5,120. The capture locali
 visible divergence to one mixer but does not yet identify its primitive cause, establish a
 semantic failure threshold, or provide timing evidence.
 
+The off-by-default K5120 rows5/6 RMSNorm selector passes its matched public numerical and graph
+gate in both selector states, but the focused P129 token experiment under
+`profiles/bench/r9700-dflash-rmsnorm-rows56-token-parity-20260906/results` rejects parity
+restoration. Its result closure SHA-256 is
+`03e10a9f92b64ac8f49de81796750fb28b3eb138399508fb0fec14444eb34337` and summary SHA-256 is
+`7fcd118d8a010c6162671a47700e27b743a2baf4f67b0af1d1b1ad2f6a2b6144`. Fresh ordinary and
+selector-off DFlash exactly reproduce their prior 28-token authorities and differ only at index 27
+(95946 versus 98003). Selector-on first differs from both at index 21 (128415 versus 96723), so its
+index-27 token 96843 is on a different generated history and cannot establish repair of the prior
+index-27 mismatch. The selector remains off; these functional runs contain no admissible timing.
+
 A second packed-W4 candidate has passed standalone qualification through the production entry symbol
 for the exact DFlash MLP-down N5120/K17408, T5 cell. The retained summary is
 `profiles/bench/r9700-dflash-mlp-down-t5-production-symbol-qualification-20260906/summary.json`

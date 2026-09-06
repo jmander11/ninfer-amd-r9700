@@ -1881,8 +1881,16 @@ Replace functional routes with measured gfx1201 families:
   graph replay at rows 5/6. Their committed matched build receipt and GPU numerical result are
   retained under `profiles/bench/r9700-dflash-rmsnorm-rows56-matched-builds-20260906`: each arm
   passes 108 eager cases at at most one BF16 step, rows5/6 graph replay, canaries, and malformed
-  inputs. Production remains selector-off until exact W1-versus-W5/W6 semantic parity and matched
-  whole-DFlash evidence pass; this result is not a decode-speed claim.
+  inputs. The ensuing three-arm P129 token gate is retained under
+  `profiles/bench/r9700-dflash-rmsnorm-rows56-token-parity-20260906/results`, with closure SHA-256
+  `03e10a9f92b64ac8f49de81796750fb28b3eb138399508fb0fec14444eb34337` and summary SHA-256
+  `7fcd118d8a010c6162671a47700e27b743a2baf4f67b0af1d1b1ad2f6a2b6144`. Its fresh ordinary and
+  selector-off DFlash arms reproduce the retained authorities exactly, including their first
+  difference at index 27 (95946 versus 98003). Selector-on DFlash instead first differs from both
+  at index 21 (128415 versus 96723) and follows a different history through index 27, where it emits
+  96843. The selector therefore does not restore exact token parity and remains off. Layer-one
+  normalized-input tracing now tests the expected row-independent CTA equality before localizing
+  the next GDN primitive. No decode-speed or production-routing claim follows.
   The earlier all-Q4 owner trace does not transfer its target-gate/up conclusion to this four-role
   artifact: all 64 Text gate/up matrices are FP8 and bypass A8Q4. Only the five Q4 DFlash proposal
   gate/up matrices use the small-T route per round, for an expected whole saving of about 7.1 ms at

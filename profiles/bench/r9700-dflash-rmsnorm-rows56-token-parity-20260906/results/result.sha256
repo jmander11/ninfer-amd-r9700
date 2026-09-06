@@ -1,0 +1,13 @@
+845b296ac5d02857638bfd767380a7bb0dbb38f9e6f7f0b5190e9992d3d47296  /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-rmsnorm-rows56-token-parity-20260906/results/candidate-dflash.json
+91c04983407104a13f41c15c0fe9909a6c08e5c8612a421a103aaa6e123b81ea  /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-rmsnorm-rows56-token-parity-20260906/results/candidate-dflash.process.json
+e72ed1b98ceb9b80c976b99740ebcdceb931373c3d0ca0434d5c3d55d5cf82c2  /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-rmsnorm-rows56-token-parity-20260906/results/candidate-dflash.stderr
+26e7a4d7effbb1d69982cab1804499d172ca541989a78241686019ad1fea24b2  /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-rmsnorm-rows56-token-parity-20260906/results/candidate-dflash.stdout
+0651c6f052a35dccd0c6c6b846aa2c7aab67646590c31ef9e3b8514666c7e009  /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-rmsnorm-rows56-token-parity-20260906/results/control-dflash.json
+500bf23677538ba802c6e5e1a7286e0008539d169a483c77bce4f6699a785807  /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-rmsnorm-rows56-token-parity-20260906/results/control-dflash.process.json
+e72ed1b98ceb9b80c976b99740ebcdceb931373c3d0ca0434d5c3d55d5cf82c2  /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-rmsnorm-rows56-token-parity-20260906/results/control-dflash.stderr
+d6c06b5843c607c6adefbe94b53fe6c0e6d2b1de9cc392eff53ec08153f24a16  /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-rmsnorm-rows56-token-parity-20260906/results/control-dflash.stdout
+6de48d934d2a6c2a368d7356ff505e9919fad809f230c5690fe1f06895721012  /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-rmsnorm-rows56-token-parity-20260906/results/control-ordinary.json
+3b6532f41ff2acd837d141a6d648fc336b9eddc3c990399e5da55f9335b5234e  /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-rmsnorm-rows56-token-parity-20260906/results/control-ordinary.process.json
+b4f0218aab5f055f7ffd7e0da94342cbd382cadc88f04ad2b2903af22879a396  /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-rmsnorm-rows56-token-parity-20260906/results/control-ordinary.stderr
+e87f037caf519376fe6efaf65f69744408907c43efc2300b383e9d7104814546  /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-rmsnorm-rows56-token-parity-20260906/results/control-ordinary.stdout
+7fcd118d8a010c6162671a47700e27b743a2baf4f67b0af1d1b1ad2f6a2b6144  /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-rmsnorm-rows56-token-parity-20260906/results/summary.json
