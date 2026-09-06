@@ -1785,9 +1785,32 @@ Replace functional routes with measured gfx1201 families:
   `fb657164b9a9dc2987542ca4578b2bf75d79092a3efa8b7b1776520b4959f61f`.
   Matched control/candidate builds are bound by
   `profiles/bench/r9700-dflash-small-t-n16-matched-builds-20260906/build-receipt.json` (SHA-256
-  `8d0dfc424ea0592eaa0f28654a477e4c1ef4f29bc93581606e4b96d991ef2c8c`) at source commit
-  `ca2b58c5728de0fc52916796a2ac5ef6cee5e5f9`. These facts enable the bounded whole-DFlash A/B;
-  they do not select a DFlash matrix recipe or authorize production routing.
+  `cedb40ad2a995dceb339d81f530eddda17629bed211ae83033252e923a81b8ec`) at source commit
+  `cd966d72ed18e1b5b7b57b664572b3c8aa1e02ce`, which corrects the DFlash fixed-family Device Graph
+  allowance from 40 MiB to 42 MiB (68 MiB total for the observed C1/K4/W5 topology). The receipt
+  binds control benchmark SHA-256
+  `04122c7da1e262f0fc0ba5a3a2065b1e1750dadd64df3337038b54c3d85a1f75` and candidate benchmark
+  SHA-256 `6dbb09fcc75185ee1a09c0261c1a2dbbccbaa29021eb6f303f883b70350f469f` with normalized compile
+  commands differing only in the candidate selector. These facts enable the bounded whole-DFlash
+  A/B; they do not select a DFlash matrix recipe or authorize production routing.
+  Attempt 3 clears the fixed-family graph-residency startup failure but is terminally
+  inadmissible for speed at its current functional gate. Candidate and control are token-exact
+  with each other for both K4/W5 and K5/W6, including exact three-repetition self-consistency;
+  fresh-prompt whole output is token-exact with the fresh exact ordinary control. Isolated
+  post-seed decode first differs from ordinary at output index 55 and then diverges in its tail,
+  identically in candidate and control. Therefore the current evidence does not assign the
+  mismatch to the small-T selector, and no candidate timing or promotion claim is admissible.
+  Root-cause diagnosis and a discriminating experiment remain pending.
+  The separate direct packed-W4 qualifier for the exact DFlash MLP-down N5120/K17408, T5 cell is
+  accepted as standalone operator evidence under
+  `profiles/bench/r9700-dflash-mlp-down-t5-qualification-20260906`: its independent represented-input
+  oracle reports zero BF16 steps for both routes and bit-exact pairwise output, while balanced
+  medians are 0.205274 ms incumbent and 0.057066 ms candidate (candidate/incumbent 0.2780, about
+  3.60x faster). Both launch orders win, the paired-ratio two-standard-error upper bound is
+  0.277851, and order-ratio delta is 0.003028. The emitted gfx1201 proof has 80 dot8 instructions,
+  4 packed-W4 loads, 6 scale loads, 33 VGPR, occupancy 16, and no LDS/private/scratch or spills.
+  This synthetic single-cell result does not establish whole-DFlash speed or authorize production
+  routing. T6 failed its static resource gate before timing and retains incumbent WMMA.
   The first ordinary-decode promotion is the canonical native-dot8 T=1 A8Q4 Linear route. Its
   exact domain is seven full-K matrix tuples selected by shape, not caller identity;
   `[5120,17408]` and `[34816,5120]` also occur in DFlash2, while every off-inventory T=1 call,

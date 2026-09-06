@@ -2742,12 +2742,35 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
           promotion. Exact predicate tests cover both compile profiles; the retained assembly/resource
           gate remains the emitted kernel proof. The matched-build authority at
           `profiles/bench/r9700-dflash-small-t-n16-matched-builds-20260906/build-receipt.json`
-          (SHA-256 `8d0dfc424ea0592eaa0f28654a477e4c1ef4f29bc93581606e4b96d991ef2c8c`)
-          binds detached source commit `ca2b58c5728de0fc52916796a2ac5ef6cee5e5f9`, control benchmark
-          SHA-256 `9093368e17434b520515a0ef82f4b16de317ea349302e994f3a93a52f6973f32`, and candidate
-          benchmark SHA-256 `08f4a3caa8cf11fb0f3e7914cfcb4364c1e33510b7821cfd3d9a22e457c91677`;
+          (SHA-256 `cedb40ad2a995dceb339d81f530eddda17629bed211ae83033252e923a81b8ec`)
+          binds detached source commit `cd966d72ed18e1b5b7b57b664572b3c8aa1e02ce`, including the DFlash fixed-family
+          Device Graph allowance correction from 40 MiB to 42 MiB (68 MiB total for the observed
+          C1/K4/W5 topology), control benchmark SHA-256
+          `04122c7da1e262f0fc0ba5a3a2065b1e1750dadd64df3337038b54c3d85a1f75`, and candidate
+          benchmark SHA-256 `6dbb09fcc75185ee1a09c0261c1a2dbbccbaa29021eb6f303f883b70350f469f`;
           normalized compile commands differ only in the candidate selector. Whole-DFlash A/B is
           still required and this receipt is not routing or production authority.
+        - [ ] Resolve the attempt-3 isolated-token discriminator before consuming any candidate
+          timing. The graph-allowance-fixed attempt is exact across all three repetitions, and
+          candidate/control are token-exact with each other for both K4/W5 and K5/W6. Its
+          fresh-prompt whole output is token-exact with the fresh exact ordinary control, but the
+          isolated post-seed output first differs from ordinary at index 55 and then takes a
+          different tail. Because control and candidate produce the same isolated sequence, this
+          evidence does not implicate the small-T selector. Candidate speed is inadmissible until
+          the ordinary-parity failure is diagnosed and a discriminating experiment passes; the
+          diagnosis and exact discriminator are pending.
+        - [x] Run the direct packed-W4 screen for the DFlash MLP-down matrix at exact
+          N5120/K17408, T5. The retained standalone qualification under
+          `profiles/bench/r9700-dflash-mlp-down-t5-qualification-20260906` passes the independent
+          represented-input oracle with zero BF16 steps for both routes and bit-exact pairwise
+          output. Balanced medians are 0.205274 ms incumbent and 0.057066 ms candidate
+          (candidate/incumbent 0.2780, about 3.60x faster); both launch orders win, the
+          paired-ratio two-standard-error upper bound is 0.277851, and order-ratio delta is
+          0.003028. The emitted gfx1201 proof has 80 native dot8 instructions, 4 packed-W4 loads,
+          6 scale loads, 33 VGPR, occupancy 16, and no LDS/private/scratch or register spills.
+          This synthetic operator result does not establish whole-DFlash speed or authorize
+          production routing. T6 failed its static resource gate before timing and retains
+          incumbent WMMA.
       - [x] Profile the current whole DFlash round enough to separate proposal/head service from
         dense target verification. The selected-region owner trace at
         `profiles/rocprof/r9700-dflash-q4-c1-k4k5-owner-trace-plan-20260906` retains independently

@@ -529,10 +529,36 @@ its conversion report has SHA-256
 `fb657164b9a9dc2987542ca4578b2bf75d79092a3efa8b7b1776520b4959f61f`. The matched control and
 candidate benchmark receipt is
 `profiles/bench/r9700-dflash-small-t-n16-matched-builds-20260906/build-receipt.json` (SHA-256
-`8d0dfc424ea0592eaa0f28654a477e4c1ef4f29bc93581606e4b96d991ef2c8c`); it binds source commit
-`ca2b58c5728de0fc52916796a2ac5ef6cee5e5f9` and binaries that differ only in the compile-selected
-candidate. These are evaluation inputs, not a production recipe or routing decision, and the
-matched whole-DFlash A/B remains open.
+`cedb40ad2a995dceb339d81f530eddda17629bed211ae83033252e923a81b8ec`); it binds source commit
+`cd966d72ed18e1b5b7b57b664572b3c8aa1e02ce`, including the DFlash fixed-family Device Graph
+allowance correction from 40 MiB to 42 MiB (68 MiB total for the observed C1/K4/W5 topology),
+control binary SHA-256
+`04122c7da1e262f0fc0ba5a3a2065b1e1750dadd64df3337038b54c3d85a1f75`, and candidate binary
+SHA-256 `6dbb09fcc75185ee1a09c0261c1a2dbbccbaa29021eb6f303f883b70350f469f`; normalized compile
+commands differ only in the compile-selected candidate. These are evaluation inputs, not a
+production recipe or routing decision, and the matched whole-DFlash A/B remains open.
+
+The third bounded whole-A/B attempt cleared the graph-residency startup failure but stopped at
+functional qualification. Within each K4/W5 and K5/W6 role, both candidate runs are token-exact
+with both control runs, and every report is exact across its three repetitions. The fresh-prompt
+whole output is also token-exact with the fresh exact ordinary control. The isolated post-seed
+decode instead first differs from ordinary at output index 55 and then follows a different tail.
+This does not identify the small-T selector as the cause: the same isolated sequence is produced
+by candidate and control. Candidate timing from this attempt is inadmissible because the required
+isolated ordinary-parity gate did not pass. Diagnosis and a discriminating experiment remain
+pending; there is no speed, winner, or routing conclusion from attempt 3.
+
+A second packed-W4 candidate has passed standalone qualification for the exact DFlash MLP-down
+N5120/K17408, T5 cell. The retained result is
+`profiles/bench/r9700-dflash-mlp-down-t5-qualification-20260906`: its independent represented-input
+oracle reports zero BF16 steps for both routes and bit-exact pairwise output. Balanced medians are
+0.205274 ms incumbent and 0.057066 ms candidate, a candidate/incumbent ratio of 0.2780 (about 3.60x
+faster). Both launch orders win; the paired-ratio two-standard-error upper bound is 0.277851 and the
+order-ratio delta is 0.003028. The emitted T5 kernel has 80 native dot8 instructions, 4 packed-W4
+loads, 6 scale loads, 33 VGPR, occupancy 16, and no LDS, private segment, scratch, or register spills.
+This is synthetic single-cell evidence only: production routing is unchanged and whole-DFlash speed
+remains unproven. The corresponding T6 candidate failed its static resource gate before timing and
+remains on incumbent WMMA.
 
 The owner trace under `profiles/rocprof/r9700-dflash-q4-c1-k4k5-owner-trace-plan-20260906`
 attributes 84.95%/85.27% of summed K4/W5 and K5/W6 decode service to target verification. Target
