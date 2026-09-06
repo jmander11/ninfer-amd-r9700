@@ -41,8 +41,8 @@ LINEAR_TARGET := $(BUILD_DIR)/linear_op_qual
 EAGER_TARGET := $(BUILD_DIR)/eager_op_qual
 RMSNORM_PREFILL_TARGET := $(BUILD_DIR)/rmsnorm_prefill_qual
 RMSNORM_K256_PREFILL_TARGET := $(BUILD_DIR)/rmsnorm_k256_prefill_qual
-RMSNORM_DECODE_TARGET := $(BUILD_DIR)/rmsnorm_decode_qual
-RMSNORM_DECODE_SELECTION_TARGET := $(BUILD_DIR)/test_rmsnorm_decode_selection
+RMSNORM_DECODE_PRODUCTION_TARGET := $(BUILD_DIR)/rmsnorm_decode_production
+RMSNORM_DECODE_ROUTING_TARGET := $(BUILD_DIR)/test_rmsnorm_decode_routing
 GATED_RMSNORM_PREFILL_TARGET := $(BUILD_DIR)/gated_rmsnorm_prefill_qual
 SILU_MUL_SPLIT_PREFILL_TARGET := $(BUILD_DIR)/silu_mul_split_prefill_qual
 GDN_TARGET := $(BUILD_DIR)/gdn_op_qual
@@ -73,7 +73,7 @@ LINEAR_SOURCE := linear_op_qual.hip
 EAGER_SOURCE := eager_op_qual.hip
 RMSNORM_PREFILL_SOURCE := rmsnorm_prefill_qual.hip
 RMSNORM_K256_PREFILL_SOURCE := rmsnorm_k256_prefill_qual.hip
-RMSNORM_DECODE_SOURCE := rmsnorm_decode_qual.hip
+RMSNORM_DECODE_PRODUCTION_SOURCE := rmsnorm_decode_production.hip
 GATED_RMSNORM_PREFILL_SOURCE := gated_rmsnorm_prefill_qual.hip
 SILU_MUL_SPLIT_PREFILL_SOURCE := silu_mul_split_prefill_qual.hip
 GDN_SOURCE := gdn_op_qual.hip
@@ -154,7 +154,7 @@ CXXFLAGS := -O3 -std=c++20 --offload-arch=$(ARCH) -I../../src $(SYSTEM_INCLUDES)
 LDFLAGS := -L$(ROCM_ROOT)/lib -Wl,-rpath,$(ROCM_ROOT)/lib
 
 
-.PHONY: all clean hbm fp8-hipblaslt-probe int4-wmma int4-wmma-isa int4-wmma-resources w8a8-wmma w8a8-prefill-cta-regression w8a8-prefill-cta-lds-scope-regression w8a8-prefill-cta-lds-scope-benchmark w8a8-prefill-cta-lds-scope-report w8a8-wmma-isa w8a8-wmma-resources prefill-cta-static-q4 prefill-cta-static-w8 prefill-cta-static-incumbent-diagnostic q4g64-linear a8q4-shape-sweep a8q4-prefill-cta-regression a8q4-prefill-cta-lds-scope-regression a8q4-prefill-cta-lds-scope-benchmark a8q4-prefill-cta-lds-scope-report a8q4-prefill-cta-m64n64-regression q4g64-linear-isa q4g64-linear-resources xattention-isa xattention-resources xattention-reports split512-attention split512-attention-isa split512-attention-resources dense-prefill-attention dense-prefill-attention-full-score-isa dense-prefill-attention-full-score-static dense-prefill-attention-static-test isa kv-resources linear-isa linear-resources eager-isa rmsnorm-prefill-static rmsnorm-prefill-static-test rmsnorm-prefill-benchmark rmsnorm-k256-prefill-static rmsnorm-k256-prefill-static-test rmsnorm-k256-prefill-benchmark rmsnorm-decode-static rmsnorm-decode-static-test rmsnorm-decode-selection-test rmsnorm-decode-benchmark gated-rmsnorm-prefill-static gated-rmsnorm-prefill-static-test gated-rmsnorm-prefill-path-test gated-rmsnorm-prefill-benchmark gated-rmsnorm-k128-production-static gated-rmsnorm-k128-production-static-test silu-mul-split-prefill-static silu-mul-split-prefill-static-test silu-mul-split-prefill-benchmark gdn-isa gdn-prefill-benchmark gdn-prefill-static gdn-prefill-static-test gdn-recurrence-resources sampling-isa rope-resources run sanitize rocm-tool-audit rocm-tool-audit-test profile-trace profile-attention-trace profile-pmc
+.PHONY: all clean hbm fp8-hipblaslt-probe int4-wmma int4-wmma-isa int4-wmma-resources w8a8-wmma w8a8-prefill-cta-regression w8a8-prefill-cta-lds-scope-regression w8a8-prefill-cta-lds-scope-benchmark w8a8-prefill-cta-lds-scope-report w8a8-wmma-isa w8a8-wmma-resources prefill-cta-static-q4 prefill-cta-static-w8 prefill-cta-static-incumbent-diagnostic q4g64-linear a8q4-shape-sweep a8q4-prefill-cta-regression a8q4-prefill-cta-lds-scope-regression a8q4-prefill-cta-lds-scope-benchmark a8q4-prefill-cta-lds-scope-report a8q4-prefill-cta-m64n64-regression q4g64-linear-isa q4g64-linear-resources xattention-isa xattention-resources xattention-reports split512-attention split512-attention-isa split512-attention-resources dense-prefill-attention dense-prefill-attention-full-score-isa dense-prefill-attention-full-score-static dense-prefill-attention-static-test isa kv-resources linear-isa linear-resources eager-isa rmsnorm-prefill-static rmsnorm-prefill-static-test rmsnorm-prefill-benchmark rmsnorm-k256-prefill-static rmsnorm-k256-prefill-static-test rmsnorm-k256-prefill-benchmark rmsnorm-decode-production-static rmsnorm-decode-production-static-test rmsnorm-decode-production-routing-test rmsnorm-decode-production-regression gated-rmsnorm-prefill-static gated-rmsnorm-prefill-static-test gated-rmsnorm-prefill-path-test gated-rmsnorm-prefill-benchmark gated-rmsnorm-k128-production-static gated-rmsnorm-k128-production-static-test silu-mul-split-prefill-static silu-mul-split-prefill-static-test silu-mul-split-prefill-benchmark gdn-isa gdn-prefill-benchmark gdn-prefill-static gdn-prefill-static-test gdn-recurrence-resources sampling-isa rope-resources run sanitize rocm-tool-audit rocm-tool-audit-test profile-trace profile-attention-trace profile-pmc
 
 all: $(PROBE_TARGET) $(KV_TARGET) $(HIP_DEVICE_TARGET) $(LINEAR_TARGET) $(EAGER_TARGET) $(GDN_TARGET) $(GDN_RECURRENCE_TARGET) $(SAMPLING_TARGET) $(ROPE_TARGET) $(SERVE_ENV_TARGET)
 
@@ -244,13 +244,13 @@ $(RMSNORM_K256_PREFILL_TARGET): $(RMSNORM_K256_PREFILL_SOURCE) $(EAGER_IMPL) $(E
 	mkdir -p $(BUILD_DIR)
 	$(HIPCC) $(CXXFLAGS) $(RMSNORM_K256_PREFILL_SOURCE) $(EAGER_IMPL) $(LDFLAGS) -o $@
 
-$(RMSNORM_DECODE_TARGET): $(RMSNORM_DECODE_SOURCE) $(EAGER_IMPL) $(EAGER_HEADER) Makefile
+$(RMSNORM_DECODE_PRODUCTION_TARGET): $(RMSNORM_DECODE_PRODUCTION_SOURCE) $(EAGER_IMPL) $(EAGER_HEADER) Makefile
 	mkdir -p $(BUILD_DIR)
-	$(HIPCC) $(CXXFLAGS) $(RMSNORM_DECODE_SOURCE) $(EAGER_IMPL) $(LDFLAGS) -o $@
+	$(HIPCC) $(CXXFLAGS) $(RMSNORM_DECODE_PRODUCTION_SOURCE) $(EAGER_IMPL) $(LDFLAGS) -o $@
 
-$(RMSNORM_DECODE_SELECTION_TARGET): test_rmsnorm_decode_selection.cpp $(EAGER_HEADER) Makefile
+$(RMSNORM_DECODE_ROUTING_TARGET): test_rmsnorm_decode_routing.cpp $(EAGER_HEADER) Makefile
 	mkdir -p $(BUILD_DIR)
-	$(HIPCC) $(CXXFLAGS) test_rmsnorm_decode_selection.cpp $(LDFLAGS) -o $@
+	$(HIPCC) $(CXXFLAGS) test_rmsnorm_decode_routing.cpp $(LDFLAGS) -o $@
 
 $(GATED_RMSNORM_PREFILL_TARGET): $(GATED_RMSNORM_PREFILL_SOURCE) $(EAGER_IMPL) $(EAGER_HEADER) Makefile
 	mkdir -p $(BUILD_DIR)
@@ -591,20 +591,18 @@ rmsnorm-k256-prefill-benchmark: $(RMSNORM_K256_PREFILL_TARGET) rmsnorm-k256-pref
 	test -n "$(RMSNORM_K256_PREFILL_JSON)"
 	./$(RMSNORM_K256_PREFILL_TARGET) --benchmark --out-json "$(RMSNORM_K256_PREFILL_JSON)"
 
-rmsnorm-decode-static: $(BUILD_DIR)/eager_ops.s
+rmsnorm-decode-production-static: $(BUILD_DIR)/eager_ops.s
 	$(PYTHON) check_rmsnorm_decode_static.py $<
 
-rmsnorm-decode-static-test:
+rmsnorm-decode-production-static-test:
 	cd ../.. && $(PYTHON) -m unittest tools.r9700.test_check_rmsnorm_decode_static
 
-rmsnorm-decode-selection-test: $(RMSNORM_DECODE_SELECTION_TARGET)
-	./$(RMSNORM_DECODE_SELECTION_TARGET)
+rmsnorm-decode-production-routing-test: $(RMSNORM_DECODE_ROUTING_TARGET)
+	./$(RMSNORM_DECODE_ROUTING_TARGET)
 
-rmsnorm-decode-benchmark: $(RMSNORM_DECODE_TARGET) rmsnorm-decode-static rmsnorm-decode-selection-test
-	test -n "$(RMSNORM_DECODE_JSON)"
-	set +e; ./$(RMSNORM_DECODE_TARGET) --benchmark --out-json "$(RMSNORM_DECODE_JSON)"; \
-		qualifier_status=$$?; $(PYTHON) check_rmsnorm_decode_report.py "$(RMSNORM_DECODE_JSON)"; \
-		checker_status=$$?; test $$qualifier_status -eq 0 -a $$checker_status -eq 0
+rmsnorm-decode-production-regression: $(RMSNORM_DECODE_PRODUCTION_TARGET) \
+		rmsnorm-decode-production-static rmsnorm-decode-production-routing-test
+	./$(RMSNORM_DECODE_PRODUCTION_TARGET)
 
 gated-rmsnorm-prefill-static: $(BUILD_DIR)/eager_ops.s
 	$(PYTHON) check_gated_rmsnorm_prefill_static.py $<
@@ -802,4 +800,4 @@ profile-pmc: $(KV_TARGET)
 		--timing-only --group 16 --key-order token --value-order feature --scale-order feature
 
 clean:
-	rm -f $(PROBE_TARGET) $(KV_TARGET) $(HIP_DEVICE_TARGET) $(HIP_DEVICE_SANITIZE_TARGET) $(LINEAR_TARGET) $(EAGER_TARGET) $(RMSNORM_K256_PREFILL_TARGET) $(RMSNORM_DECODE_TARGET) $(RMSNORM_DECODE_SELECTION_TARGET) $(GATED_RMSNORM_PREFILL_TARGET) $(SILU_MUL_SPLIT_PREFILL_TARGET) $(GDN_TARGET) $(GDN_RECURRENCE_TARGET) $(SAMPLING_TARGET) $(ROPE_TARGET) $(SERVE_ENV_TARGET) $(INT4_WMMA_TARGET) $(Q4_HARDWARE_PEAK_TARGET) $(W8A8_WMMA_TARGET) $(Q4G64_LINEAR_TARGET) $(Q4_TENSOR_A4_TARGET) $(Q4_TENSOR_A8_TARGET) $(BUILD_DIR)/r9700_qual.s $(BUILD_DIR)/kv_append.s $(BUILD_DIR)/linear_op_qual.s $(BUILD_DIR)/w8a8_wmma_linear_qual.s $(BUILD_DIR)/q4g64_linear.s $(BUILD_DIR)/q4_hardware_peak_probe.s $(BUILD_DIR)/eager_ops.s $(BUILD_DIR)/gdn_ops.s $(BUILD_DIR)/gdn_recurrence.s $(BUILD_DIR)/sampling_ops.s $(BUILD_DIR)/rope_ops.s $(BUILD_DIR)/int4_wmma_qual.s
+	rm -f $(PROBE_TARGET) $(KV_TARGET) $(HIP_DEVICE_TARGET) $(HIP_DEVICE_SANITIZE_TARGET) $(LINEAR_TARGET) $(EAGER_TARGET) $(RMSNORM_K256_PREFILL_TARGET) $(RMSNORM_DECODE_PRODUCTION_TARGET) $(RMSNORM_DECODE_ROUTING_TARGET) $(GATED_RMSNORM_PREFILL_TARGET) $(SILU_MUL_SPLIT_PREFILL_TARGET) $(GDN_TARGET) $(GDN_RECURRENCE_TARGET) $(SAMPLING_TARGET) $(ROPE_TARGET) $(SERVE_ENV_TARGET) $(INT4_WMMA_TARGET) $(Q4_HARDWARE_PEAK_TARGET) $(W8A8_WMMA_TARGET) $(Q4G64_LINEAR_TARGET) $(Q4_TENSOR_A4_TARGET) $(Q4_TENSOR_A8_TARGET) $(BUILD_DIR)/r9700_qual.s $(BUILD_DIR)/kv_append.s $(BUILD_DIR)/linear_op_qual.s $(BUILD_DIR)/w8a8_wmma_linear_qual.s $(BUILD_DIR)/q4g64_linear.s $(BUILD_DIR)/q4_hardware_peak_probe.s $(BUILD_DIR)/eager_ops.s $(BUILD_DIR)/gdn_ops.s $(BUILD_DIR)/gdn_recurrence.s $(BUILD_DIR)/sampling_ops.s $(BUILD_DIR)/rope_ops.s $(BUILD_DIR)/int4_wmma_qual.s

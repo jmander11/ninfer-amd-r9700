@@ -45,11 +45,11 @@ def fixture(*, vgprs: int = 24, lds: int = 32, occupancy: int = 16,
 class StaticCheckTest(unittest.TestCase):
     def run_check(self, text: str):
         with TemporaryDirectory() as directory:
-            path = Path(directory) / "candidate.s"
+            path = Path(directory) / "production.s"
             path.write_text(text, encoding="utf-8")
             return check(path)
 
-    def test_accepts_exact_candidate(self):
+    def test_accepts_exact_production_kernel(self):
         result = self.run_check(fixture())
         self.assertEqual(result["lds"], 32)
         self.assertEqual(result["maximum_workgroup"], 256)

@@ -125,26 +125,22 @@ static_assert(!rmsnorm_k256_token8_selected(5120U, 2048U));
 [[nodiscard]] hipError_t rmsnorm_k5120_token8_qualification(
     const hip_bfloat16* input, const hip_bfloat16* weight, hip_bfloat16* output,
     std::uint32_t rows, float eps, bool unit_offset, hipStream_t stream) noexcept;
-
-// Qualification-only ordinary-decode boundary. The fixed K5120 candidate assigns one row to one
-// 256-thread CTA and reduces the FP32 sum of squares across all eight wave32 waves. Production
-// dispatch remains unchanged until the operator and whole-inference gates admit this route.
-[[nodiscard]] constexpr bool rmsnorm_k5120_rows4_qualification_selected(
-    std::uint32_t features, std::uint32_t rows) noexcept {
-    return features == 5120U && rows >= 1U && rows <= 4U;
-}
-static_assert(rmsnorm_k5120_rows4_qualification_selected(5120U, 1U));
-static_assert(rmsnorm_k5120_rows4_qualification_selected(5120U, 4U));
-static_assert(!rmsnorm_k5120_rows4_qualification_selected(5120U, 0U));
-static_assert(!rmsnorm_k5120_rows4_qualification_selected(5120U, 5U));
-static_assert(!rmsnorm_k5120_rows4_qualification_selected(256U, 4U));
-[[nodiscard]] hipError_t rmsnorm_k5120_rows4_qualification(
-    const hip_bfloat16* input, const hip_bfloat16* weight, hip_bfloat16* output,
-    std::uint32_t rows, float eps, bool unit_offset, hipStream_t stream) noexcept;
 [[nodiscard]] hipError_t rmsnorm_incumbent_qualification(
     const hip_bfloat16* input, const hip_bfloat16* weight, hip_bfloat16* output,
     std::uint32_t features, std::uint32_t rows, float eps, bool unit_offset,
     hipStream_t stream) noexcept;
+
+// The fixed K5120 ordinary-decode route assigns one row to one 256-thread CTA and reduces the
+// FP32 sum of squares across all eight wave32 waves. Other shapes retain the established routes.
+[[nodiscard]] constexpr bool rmsnorm_k5120_rows4_selected(
+    std::uint32_t features, std::uint32_t rows) noexcept {
+    return features == 5120U && rows >= 1U && rows <= 4U;
+}
+static_assert(rmsnorm_k5120_rows4_selected(5120U, 1U));
+static_assert(rmsnorm_k5120_rows4_selected(5120U, 4U));
+static_assert(!rmsnorm_k5120_rows4_selected(5120U, 0U));
+static_assert(!rmsnorm_k5120_rows4_selected(5120U, 5U));
+static_assert(!rmsnorm_k5120_rows4_selected(256U, 4U));
 // Direct regression boundary for the production fixed-K256 token8 route. It retains the incumbent
 // feature-order FP32 FMA chain and BF16 result while assigning one logical row to each wave.
 [[nodiscard]] hipError_t rmsnorm_k256_token8_qualification(

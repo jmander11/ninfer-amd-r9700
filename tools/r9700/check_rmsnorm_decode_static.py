@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail-closed gfx1201 static gate for the K5120 rows1..4 RMSNorm candidate."""
+"""Fail-closed gfx1201 static gate for production K5120 rows1..4 RMSNorm."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ def check(path: Path) -> dict[str, int | str]:
     marker = "rmsnorm_k5120_rows4_cta_kernel"
     selected = [(symbol, body) for symbol, body in functions if marker in symbol]
     if len(selected) != 1:
-        raise ValueError(f"expected one exact qualification symbol, found {len(selected)}")
+        raise ValueError(f"expected one exact production symbol, found {len(selected)}")
     symbol, body = selected[0]
     records = [record for record in re.split(r"(?=^  - \.args:)", text, flags=re.MULTILINE)
                if re.search(rf"^    \.name:\s+{re.escape(symbol)}$", record,
@@ -56,15 +56,15 @@ def check(path: Path) -> dict[str, int | str]:
     waits = positions("s_barrier_wait -1")
     invalidations = positions("global_inv scope:SCOPE_SE")
     if global_loads < 1:
-        raise ValueError("candidate lacks a distributed vector-addressed global input load")
+        raise ValueError("production kernel lacks a distributed vector-addressed global input load")
     if shuffle_ops < 1:
-        raise ValueError("candidate lacks a wave32 shuffle reduction")
+        raise ValueError("production kernel lacks a wave32 shuffle reduction")
     forbidden = re.findall(
         r"^\s*(?:s_load_u16|s_fmac_f32|s_barrier(?:\s|$)|v_wmma_\S*|"
         r"(?:global|buffer|flat)_atomic_\S*|scratch_(?:load|store)\S*)",
         body, re.MULTILINE)
     if forbidden:
-        raise ValueError(f"candidate contains forbidden instructions: {forbidden}")
+        raise ValueError(f"production kernel contains forbidden instructions: {forbidden}")
     if lds != 32 or private != 0 or scratch != 0:
         raise ValueError(f"LDS/private/scratch fail {lds}/32 {private}/0 {scratch}/0")
     if vgprs > 48 or occupancy != 16:
@@ -94,7 +94,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (OSError, UnicodeError, ValueError) as error:
         raise SystemExit(str(error)) from error
     print(" ".join(f"{key}={value}" for key, value in result.items()))
-    print("qualification_only=true features=5120 rows=1..4 production_cutover=false")
+    print("production=true features=5120 rows=1..4")
     return 0
 
 

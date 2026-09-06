@@ -1685,8 +1685,32 @@ Replace functional routes with measured gfx1201 families:
   `19278ca8c8df5d417bbd5d36ce1689760e3cb6dbe606c3a597a6b2f0b847fee1`). The private selector and
   terminal qualification tooling are removed; the retained production regression uses varied
   exact-N16/K16 signed codes/scales, dense activations, complete WMMA parity, independent FP64
-  checks, status poisoning, full rewrites, and output canaries. Ordinary decode remains open with
-  RMSNorm as the next bounded target before DFlash2.
+  checks, status poisoning, full rewrites, and output canaries. That promotion left ordinary decode
+  open for the trace-selected RMSNorm candidate.
+  The parallel K5120 RMSNorm CTA then passed its complete represented-BF16/FP64 oracle and all four
+  rows 1..4 operator cells. The immutable operator report is
+  `profiles/bench/r9700-rmsnorm-k5120-rows4-qualification-8192i-20260906.json` (SHA-256
+  `e58b2e56980fb083548f1c357c26fc98a8a5bae27b1723ccf712451eaf4b8103`); its minimum robust
+  ordinary-round saving lower bound was `11.7782198046 ms`. Production selects the CTA for exactly
+  K5120 rows 1..4. K5120 rows 5..127 retain generic RMSNorm, K5120 rows >=128 retain token8, and
+  other feature widths retain their existing specialized or generic routes. The four-pair
+  C1/P8192+G256 whole gate reduced median decode from `12.521242570 s` to `9.467485694 s`, with a
+  robust ratio upper of `0.7598847464`, saving lower of `11.72510638 ms/token`, prefill ratio upper
+  of `1.0029548902`, and exact generated tokens. Its immutable report is
+  `profiles/bench/r9700-rmsnorm-rows4-whole-p8192-g256-full-20260906.json` (SHA-256
+  `3f5c7a678f29b09537b46ebf7692e6f8d9b422e08f9ffe656367815932b2d0f6`). The next ordinary step is
+  one bounded grouped-PV probe after the selected-route trace. This internal optimization
+  sequence neither opens the held prefill campaign nor substitutes for the selected-recipe DFlash2
+  gates, which remain behind their existing dependencies.
+  The selector-free final smoke measured `9.461402437 s` for 256 decode tokens
+  (`27.05729956 tok/s`) and retained all 257 generated IDs. Its report SHA-256 is
+  `b05db0068a4f1c73ce9c2092443b42f9f48b0fdb80ff8b3335db60cd5bdca74b`; the executable SHA-256 is
+  `a7c9303bd213fa3dbdb29ca0cee73addef1de8ab6a6e6b231509e25239776425`. A selected-region trace of
+  that executable records exactly 129 CTA dispatches and 32 legitimate generic RMSNorm dispatches,
+  proving the selected K5120 calls did not fall back. The trace database SHA-256 is
+  `8fe71be97e77c2651cb0c75fe203cedb13f200f8ac76082e4310bbfb855e5370`. The extracted loaded gfx1201
+  object SHA-256 is `c3dcad45559a112f42f07b1d7e87fbd1d494d1d024083efc0498500ee678cd72`;
+  its kernel uses 17 VGPR, 32 bytes LDS, wave32, occupancy 16, and zero scratch/spills.
 - [ ] After the dense C1/P2048/spec-none floor and practical-ceiling gate passes and the shared
   chunk is selected, rerun all 48 post-promotion capacity cells (dense/XAttention times
   all-Q4/mixed/four-role-hybrid times G16/G32, each at C=1..4). Bind the newly measured Device Graph

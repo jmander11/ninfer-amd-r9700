@@ -971,9 +971,9 @@ saving lower was `17.0000856399 ms/token`, and the prefill upper ratio was `1.00
 generated tokens and configuration, environment, artifact, and workspace identities matched. The
 immutable report is `profiles/bench/r9700-a8q4-t1-dot8-whole-p8192-g256-full-20260905.json`, SHA-256
 `19278ca8c8df5d417bbd5d36ce1689760e3cb6dbe606c3a597a6b2f0b847fee1`. There is no build or runtime
-selector. T=1 calls outside the seven exact full-K tuples retain WMMA. Ordinary decode remains open
-with RMSNorm as its next bounded target, followed by DFlash2. MTP remains supported regression
-behavior and is not an optimization target.
+selector. T=1 calls outside the seven exact full-K tuples retain WMMA. That promotion left ordinary
+decode open for the trace-selected RMSNorm candidate. MTP remains supported regression behavior
+and is not an optimization target.
 
 A fresh selector-free production build retained exact 257 generated IDs for P8192+G256 and measured
 `20.45440879 tok/s` (`12.51563918 s` decode) in
@@ -982,6 +982,40 @@ A fresh selector-free production build retained exact 257 generated IDs for P819
 code object has SHA-256 `6a4e9eed7804da2321e112a3c520f65eb3d6a1b88e8352c39f9b364a30033312`
 and contains exactly 16 `v_dot8_i32_iu4` instructions and no WMMA in the selected kernel, with 18
 VGPR, zero LDS/private/spills, wave32, and a 256-thread maximum workgroup.
+
+The subsequent ordinary-decode promotion is the parallel K5120 RMSNorm CTA at exactly rows 1
+through 4.
+The immutable operator report
+`profiles/bench/r9700-rmsnorm-k5120-rows4-qualification-8192i-20260906.json` (SHA-256
+`e58b2e56980fb083548f1c357c26fc98a8a5bae27b1723ccf712451eaf4b8103`) passed the independent
+complete-formula FP64 oracle, both gain modes, three epsilon values, ordinary/zero/mixed-magnitude
+inputs, Device Graph replay, invalid-input no-write checks, and every row-count timing gate. Its
+minimum robust ordinary-round saving lower bound was `11.7782198046 ms`. Production selects this
+route only for K5120 rows 1..4; rows 5..127 retain generic RMSNorm, rows >=128 retain the K5120
+token8 prefill route, and other feature widths retain their existing routes.
+
+The four-pair source-matched C1/P8192+G256 Device Graph gate reduced median decode from
+`12.521242570 s` (`20.44525522 tok/s`) to `9.467485694 s` (`27.03991411 tok/s`). The robust
+candidate/control upper ratio was `0.7598847464`, the robust saving lower was
+`11.72510638 ms/token`, and the robust prefill upper ratio was `1.0029548902`; generated tokens
+were exact in every pair. The immutable report is
+`profiles/bench/r9700-rmsnorm-rows4-whole-p8192-g256-full-20260906.json`, SHA-256
+`3f5c7a678f29b09537b46ebf7692e6f8d9b422e08f9ffe656367815932b2d0f6`. Ordinary-decode work now
+continues with one bounded grouped-PV probe after the selected-route trace. That internal probe
+does not open the held prefill campaign or satisfy the selected-recipe DFlash2 gates; those remain
+behind their existing prefill/base-selection dependencies.
+
+The fresh selector-free build then measured `9.461402437 s` for 256 decode tokens
+(`27.05729956 tok/s`) with all 257 generated token IDs retained. The final report is
+`profiles/bench/r9700-rmsnorm-production-final-p8192-g256-c1-20260906.json` (SHA-256
+`b05db0068a4f1c73ce9c2092443b42f9f48b0fdb80ff8b3335db60cd5bdca74b`) and its executable SHA-256
+is `a7c9303bd213fa3dbdb29ca0cee73addef1de8ab6a6e6b231509e25239776425`. A selected-region trace of
+that executable records exactly 129 rows1..4 CTA dispatches and 32 legitimate generic RMSNorm
+dispatches, so none of the 129 K5120 ordinary-decode calls fell back. The trace database is
+`profiles/rocprof/r9700-rmsnorm-production-selected-trace-20260906/raw/rmsnorm-production-selected_results.db`
+(SHA-256 `8fe71be97e77c2651cb0c75fe203cedb13f200f8ac76082e4310bbfb855e5370`). The extracted loaded
+gfx1201 code object has SHA-256 `c3dcad45559a112f42f07b1d7e87fbd1d494d1d024083efc0498500ee678cd72`;
+the selected kernel uses 17 VGPR, 32 bytes LDS, wave32, occupancy 16, and zero scratch/spills.
 
 The existing MTP shortlist head remains Q4G64 with A8G64 activations. MTP stays in exact-output,
 state, cache, row-view, and whole-route regression coverage, but a new shortlist-head trace,

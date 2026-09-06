@@ -899,25 +899,47 @@ make -C tools/r9700 rmsnorm-k256-prefill-benchmark \
   RMSNORM_K256_PREFILL_JSON=../../profiles/bench/EXPLICIT-FRESH-rmsnorm-k256-token8.json
 ```
 
-`rmsnorm_decode_qual` is the qualification-only ordinary-decode candidate for fixed K5120 and
-rows 1 through 4, the complete supported concurrency domain. One 256-thread CTA owns each row:
+The canonical ordinary-decode RMSNorm route covers exactly K5120 and rows 1 through 4, the
+complete supported concurrency domain. One 256-thread CTA owns each row:
 every lane accumulates 20 represented BF16 values in FP32, wave32 shuffles reduce each wave, and
 eight LDS partials complete the CTA reduction before BF16 publication. The numerical gate compares
 the complete result directly with an independent CPU FP64 formula across ordinary, zero, and
 mixed-magnitude inputs, both gain modes, three epsilon values, every selected row count, and two
-Device Graph replays. The product dispatcher is deliberately unchanged. Check the host selection
-boundary and gfx1201 resources without GPU execution with:
+Device Graph replays. K5120 rows 5 through 127 retain the generic route, K5120 rows at or above
+128 retain the token8 prefill route, and every other feature width retains its existing specialized
+or generic fallback. Check the host selection boundary and gfx1201 resources without GPU execution
+with:
 
 ```bash
-make -C tools/r9700 rmsnorm-decode-selection-test rmsnorm-decode-static-test \
-  rmsnorm-decode-static
+make -C tools/r9700 rmsnorm-decode-production-routing-test \
+  rmsnorm-decode-production-static-test rmsnorm-decode-production-static
 ```
 
-A fresh physical operator report requires an explicit path:
+The immutable operator report is
+`profiles/bench/r9700-rmsnorm-k5120-rows4-qualification-8192i-20260906.json`, SHA-256
+`e58b2e56980fb083548f1c357c26fc98a8a5bae27b1723ccf712451eaf4b8103`. All four rows passed; the
+minimum robust ordinary-round saving lower bound was `11.7782198046 ms`.
+
+The four-pair source-matched C1/P8192+G256 whole gate reduced median decode from
+`12.521242570 s` (`20.44525522 tok/s`) to `9.467485694 s` (`27.03991411 tok/s`). Its robust
+candidate/control upper ratio was `0.7598847464`, robust saving lower was
+`11.72510638 ms/token`, and prefill upper ratio was `1.0029548902`; every generated-token vector
+was exact. The immutable whole report is
+`profiles/bench/r9700-rmsnorm-rows4-whole-p8192-g256-full-20260906.json`, SHA-256
+`3f5c7a678f29b09537b46ebf7692e6f8d9b422e08f9ffe656367815932b2d0f6`.
+The fresh selector-free production smoke measured `27.05729956 tok/s` and retained all 257
+generated token IDs. Its report is
+`profiles/bench/r9700-rmsnorm-production-final-p8192-g256-c1-20260906.json`, SHA-256
+`b05db0068a4f1c73ce9c2092443b42f9f48b0fdb80ff8b3335db60cd5bdca74b`; the executable SHA-256 is
+`a7c9303bd213fa3dbdb29ca0cee73addef1de8ab6a6e6b231509e25239776425`. The extracted loaded
+gfx1201 object SHA-256 is `c3dcad45559a112f42f07b1d7e87fbd1d494d1d024083efc0498500ee678cd72`;
+the selected kernel uses 17 VGPR, 32 bytes LDS, wave32, occupancy 16, and zero scratch/spills.
+
+A direct GPU regression of the canonical route against its independent FP64 oracle, including
+output guards and Device Graph replay, is available with:
 
 ```bash
-make -C tools/r9700 rmsnorm-decode-benchmark \
-  RMSNORM_DECODE_JSON=../../profiles/bench/EXPLICIT-FRESH-rmsnorm-k5120-rows4.json
+make -C tools/r9700 rmsnorm-decode-production-regression
 ```
 
 `gated_rmsnorm_prefill_qual` retains the direct regression boundary for the production K6144

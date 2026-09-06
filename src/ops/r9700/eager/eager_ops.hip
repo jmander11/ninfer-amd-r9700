@@ -940,6 +940,11 @@ hipError_t rmsnorm_bf16(const hip_bfloat16* input, const hip_bfloat16* weight,
         input != nullptr && weight != nullptr && output != nullptr && features != 0 && rows != 0 &&
             std::isfinite(eps) && eps > 0.0F && valid_stream(stream),
         [&] {
+            if (rmsnorm_k5120_rows4_selected(features, rows)) {
+                hipLaunchKernelGGL(rmsnorm_k5120_rows4_cta_kernel, dim3(rows), dim3(kBlock), 0,
+                                   stream, input, weight, output, eps, unit_offset);
+                return;
+            }
             if (features == 5120U && rows >= 128U) {
                 constexpr std::uint32_t tokens_per_block = kBlock / 32U;
                 hipLaunchKernelGGL(rmsnorm_k5120_token8_kernel,
@@ -971,19 +976,6 @@ hipError_t rmsnorm_k5120_token8_qualification(
                                dim3((rows + tokens_per_block - 1U) / tokens_per_block),
                                dim3(kBlock), 0, stream, input, weight, output, rows, eps,
                                unit_offset);
-        });
-}
-
-hipError_t rmsnorm_k5120_rows4_qualification(
-    const hip_bfloat16* input, const hip_bfloat16* weight, hip_bfloat16* output,
-    std::uint32_t rows, float eps, bool unit_offset, hipStream_t stream) noexcept {
-    return checked_launch(
-        input != nullptr && weight != nullptr && output != nullptr &&
-            rmsnorm_k5120_rows4_qualification_selected(5120U, rows) &&
-            std::isfinite(eps) && eps > 0.0F && valid_stream(stream),
-        [&] {
-            hipLaunchKernelGGL(rmsnorm_k5120_rows4_cta_kernel, dim3(rows), dim3(kBlock), 0,
-                               stream, input, weight, output, eps, unit_offset);
         });
 }
 

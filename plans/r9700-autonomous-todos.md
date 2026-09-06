@@ -16,8 +16,10 @@ only and must not be reused as an active command or product requirement.
 Immediate execution priority: scalar-base/U32-voffset addressing is now the sole canonical dense
 Q4G64/A8G64 ping/pong route. Its source-matched whole result is `1,904.339303 tok/s`, still below
 the 2,000 tok/s hard gate, so do not resume the dependent chunk/capacity/whole campaign. The next
-active optimization priority is ordinary non-speculative decode. Its selected native-dot8 C1
-8K+256 matched result is `20.430701 tok/s`; RMSNorm is the next bounded ordinary target.
+active optimization priority is ordinary non-speculative decode. Native dot8 and the exact K5120
+rows1..4 RMSNorm CTA are canonical; the latter's source-matched C1 8K+256 decode median is
+`9.467485694 s` (`27.03991411 tok/s`), and its selector-free final smoke is `27.05729956 tok/s`.
+The selected-route trace is complete; run one bounded grouped-PV probe next.
 After ordinary decode, implement and optimize DFlash2. Do not schedule MTP optimization:
 existing MTP support may remain, but its `19.244583 tok/s` MTP3 result is diagnostic only and does
 not rank a product route. Dense prefill remains open for the two bounded future mechanisms recorded
@@ -1916,14 +1918,36 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         `19278ca8c8df5d417bbd5d36ce1689760e3cb6dbe606c3a597a6b2f0b847fee1`). Native dot8 is now
         canonical for those tuples with no selector; off-inventory T=1 and logical-K tails retain
         WMMA. The strengthened production regression covers varied N16/K16 weights/scales, dense
-        activations, complete output parity, FP64 checks, poisoning, rewrites, and canaries. Continue
-        ordinary decode with RMSNorm next. Do not optimize or rank MTP; its `19.24458338` tok/s MTP3
-        row remains diagnostic. After ordinary decode, the next implementation priority is DFlash2.
+        activations, complete output parity, FP64 checks, poisoning, rewrites, and canaries.
         A fresh selector-free production build then measured `20.45440879 tok/s` with exact 257
         generated IDs in `profiles/bench/r9700-dot8-production-final-p8192-g256-c1-20260906.json`
         (SHA-256 `c341f1eeb2f5d5597272dbecc532982b008701c7ff6a22d946541f98c9c94b2c`); its extracted loaded
         gfx1201 object (SHA-256 `6a4e9eed7804da2321e112a3c520f65eb3d6a1b88e8352c39f9b364a30033312`)
         has exactly 16 native dot8 instructions, no WMMA, 18 VGPR, and zero LDS/private/spills.
+        The parallel K5120 RMSNorm CTA subsequently passed every rows1..4 operator cell. Its
+        immutable report is
+        `profiles/bench/r9700-rmsnorm-k5120-rows4-qualification-8192i-20260906.json` (SHA-256
+        `e58b2e56980fb083548f1c357c26fc98a8a5bae27b1723ccf712451eaf4b8103`), with a
+        `11.7782198046 ms` minimum robust ordinary-round saving lower bound. The exact K5120
+        rows1..4 domain is now canonical; K5120 rows5..127 retain generic RMSNorm, K5120 rows>=128
+        retain token8, and other widths retain their existing routes. Its four-pair source-matched
+        whole gate reduced median decode from `12.521242570 s` to `9.467485694 s`, robust ratio
+        upper `0.7598847464`, robust saving lower `11.72510638 ms/token`, and prefill ratio upper
+        `1.0029548902`, with exact generated tokens. The immutable whole report is
+        `profiles/bench/r9700-rmsnorm-rows4-whole-p8192-g256-full-20260906.json` (SHA-256
+        `3f5c7a678f29b09537b46ebf7692e6f8d9b422e08f9ffe656367815932b2d0f6`). The selector-free final
+        smoke measured `9.461402437 s` (`27.05729956 tok/s`) with all 257 IDs retained; its report
+        SHA-256 is `b05db0068a4f1c73ce9c2092443b42f9f48b0fdb80ff8b3335db60cd5bdca74b` and executable SHA-256 is
+        `a7c9303bd213fa3dbdb29ca0cee73addef1de8ab6a6e6b231509e25239776425`. The selected-region trace
+        records exactly 129 CTA dispatches plus 32 legitimate generic RMSNorm dispatches; its
+        database SHA-256 is `8fe71be97e77c2651cb0c75fe203cedb13f200f8ac76082e4310bbfb855e5370`.
+        The extracted loaded gfx1201 object SHA-256 is
+        `c3dcad45559a112f42f07b1d7e87fbd1d494d1d024083efc0498500ee678cd72`; the selected kernel uses
+        17 VGPR, 32 bytes LDS, wave32, occupancy 16, and zero scratch/spills.
+        Continue ordinary decode with one bounded grouped-PV probe. This internal
+        work does not open the held prefill campaign or discharge the selected-recipe DFlash2
+        gates. Do not optimize or rank MTP; its `19.24458338` tok/s MTP3 row remains diagnostic.
+        After ordinary decode, the next implementation priority is DFlash2.
         Final selected-route profiling and roof accounting remain in the dependent item below
         because they require the eventual selected chunk/profile authority.
   - [ ] After chunk and terminal static-profile selection, profile only the ultimately selected 8K
