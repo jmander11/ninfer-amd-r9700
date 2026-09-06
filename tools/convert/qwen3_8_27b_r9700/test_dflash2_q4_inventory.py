@@ -7,6 +7,7 @@ import unittest
 
 from tools.convert.qwen3.common.inventory import TensorSpec
 from tools.convert.qwen3_8_27b_r9700 import dflash2_q4_inventory as inventory
+from tools.convert.qwen3_8_27b_r9700 import dflash2_matrix_recipes as recipes
 
 
 class DFlash2Q4InventoryTest(unittest.TestCase):
@@ -68,6 +69,23 @@ class DFlash2Q4InventoryTest(unittest.TestCase):
                 tuple(spec.name for spec in inventory.TENSOR_SPECS),
             )
             self.assertTrue(all(isinstance(spec, TensorSpec) for spec in combined[-66:]))
+
+    def test_three_bf16_source_matrix_recipes_are_inventory_complete(self) -> None:
+        self.assertEqual(
+            tuple(recipe.key for recipe in recipes.RECIPES),
+            (
+                "canonical-q4g64",
+                "source-mse-q4g64",
+                "source-mse-w8g32",
+            ),
+        )
+        for recipe in recipes.RECIPES:
+            bindings = inventory.source_bindings_for_recipe(recipe.key)
+            self.assertEqual(len(bindings), 66)
+            self.assertEqual(
+                tuple(name for binding in bindings for name in binding.sources),
+                inventory.SOURCE_NAMES,
+            )
 
 
 if __name__ == "__main__":

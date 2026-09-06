@@ -34,11 +34,12 @@ from tools.artifact.container import (
 from tools.artifact.layouts import align_up
 from tools.convert.qwen3.common.inventory import ResourceSpec, TensorSpec
 
-from . import dflash2_q4_inventory as inventory
+from . import dflash2_matrix_recipes, dflash2_q4_inventory as inventory
 from . import fp8_hybrid_inventory, q4_inventory, q4_w8_mse_inventory
 
 
 _COPY_CHUNK = 64 * 1024 * 1024
+_CANONICAL_RECIPE = dflash2_matrix_recipes.CANONICAL_Q4G64
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,6 +233,12 @@ def preflight_summary(checked: Preflight, output: Path | None = None) -> dict[st
             **checked.source,
         },
         "dflash_plan": {
+            "recipe": inventory.matrix_recipe_summary(_CANONICAL_RECIPE),
+            "candidate_matrix_recipes": tuple(
+                recipe
+                for recipe in inventory.MATRIX_RECIPE_SUMMARIES
+                if recipe["key"] != _CANONICAL_RECIPE
+            ),
             "source_tensors": len(inventory.SOURCE_NAMES),
             "appended_objects": len(inventory.TENSOR_SPECS),
             "combined_objects": len(checked.objects),
@@ -325,6 +332,14 @@ def _report_value(
     output_sha256: str,
     converter: dict[str, object],
 ) -> dict[str, object]:
+    recipe = dict(inventory.matrix_recipe_summary(_CANONICAL_RECIPE))
+    recipe.update(
+        {
+            "activation_profile": "compile_selected_adaptive_A8G64",
+            "objects": len(inventory.TENSOR_SPECS),
+            "source_tensors": len(inventory.SOURCE_NAMES),
+        }
+    )
     return {
         "identity": _identity_record(checked.output_identity),
         "target_key": inventory.TARGET_KEY,
@@ -342,17 +357,7 @@ def _report_value(
             "payload_copy": "byte_exact",
         },
         "dflash_source": checked.source,
-        "dflash_recipe": {
-            "matrix_format": "Q4G64_F16S",
-            "activation_profile": "compile_selected_adaptive_A8G64",
-            "selector_codebook_format": "BF16",
-            "objects": len(inventory.TENSOR_SPECS),
-            "source_tensors": len(inventory.SOURCE_NAMES),
-            "format_counts": inventory.FORMAT_COUNTS,
-            "format_encoded_bytes": inventory.FORMAT_ENCODED_BYTES,
-            "tensor_encoded_bytes": inventory.TENSOR_ENCODED_BYTES,
-            "runtime_repack": False,
-        },
+        "dflash_recipe": recipe,
         "artifact": {
             "path": str(output),
             "bytes": output.stat().st_size,
@@ -428,6 +433,7 @@ def convert(
             ),
         },
         "dflash_source": checked.source,
+        "dflash_matrix_recipe": inventory.matrix_recipe_summary(_CANONICAL_RECIPE),
         "converter": {
             "mode": "convert",
             "device_requested": device,
@@ -446,11 +452,16 @@ def convert(
                     raise RuntimeError("DFlash2 writer plan differs from completed preflight")
                 for obj in source_artifact.objects:
                     writer.write(obj.name, _chunks(source_artifact.payload(obj)))
-                for binding in inventory.SOURCE_BINDINGS:
+                for binding in inventory.source_bindings_for_recipe(_CANONICAL_RECIPE):
                     tensor = _load_source_tensor(binding, reader, torch)
-                    payload = family_conversion.encode_tensor_payload(
-                        tensor, binding.artifact, resolved_device
-                    )
+                    if binding.artifact.format == "BF16":
+                        payload = family_conversion.encode_tensor_payload(
+                            tensor, binding.artifact, resolved_device
+                        )
+                    else:
+                        payload = dflash2_matrix_recipes.encode_matrix_payload(
+                            tensor, binding.artifact, _CANONICAL_RECIPE, resolved_device
+                        )
                     writer.write(binding.artifact.name, payload)
                     del payload, tensor
 
@@ -503,6 +514,8 @@ def finalize_report(
             or pending_base.get("authority")
             != _base_authority(checked.base_path, checked.base_identity, base_sha256)
             or pending.get("dflash_source") != checked.source
+            or pending.get("dflash_matrix_recipe")
+            != inventory.matrix_recipe_summary(_CANONICAL_RECIPE)
         ):
             raise ValueError("DFlash2 pending conversion receipt differs from current preflight")
         pending_artifact = pending.get("artifact")

@@ -17,7 +17,7 @@ import struct
 from tools.artifact.layouts import encoded_size
 from tools.convert.qwen3.common.inventory import BF16, Q4, TensorSpec, tensor_spec
 
-from . import fp8_hybrid_inventory, q4_inventory, q4_w8_mse_inventory
+from . import dflash2_matrix_recipes, fp8_hybrid_inventory, q4_inventory, q4_w8_mse_inventory
 
 
 MODEL_ID = "qwen3.8-27b"
@@ -126,6 +126,26 @@ FORMAT_ENCODED_BYTES = {
     for numeric_format in sorted(FORMAT_COUNTS)
 }
 TENSOR_ENCODED_BYTES = sum(FORMAT_ENCODED_BYTES.values())
+
+
+def source_bindings_for_recipe(recipe: str) -> tuple[SourceBinding, ...]:
+    """Return the same source topology with only matrix storage changed by recipe."""
+
+    specs = dflash2_matrix_recipes.tensor_specs(TENSOR_SPECS, recipe)
+    return tuple(
+        SourceBinding(spec, binding.sources)
+        for spec, binding in zip(specs, SOURCE_BINDINGS, strict=True)
+    )
+
+
+def matrix_recipe_summary(recipe: str) -> dict[str, object]:
+    return dflash2_matrix_recipes.summary(TENSOR_SPECS, recipe)
+
+
+MATRIX_RECIPE_SUMMARIES = tuple(
+    matrix_recipe_summary(recipe.key) for recipe in dflash2_matrix_recipes.RECIPES
+)
+
 
 ALL_Q4_OBJECT_SPECS = q4_inventory.OBJECT_SPECS + TENSOR_SPECS
 MIXED_OBJECT_SPECS = q4_w8_mse_inventory.OBJECT_SPECS + TENSOR_SPECS
@@ -254,6 +274,16 @@ def validate_inventory() -> None:
         raise ValueError(f"DFlash2 encoded byte totals differ: {FORMAT_ENCODED_BYTES}")
     if TENSOR_ENCODED_BYTES != 1_209_469_440:
         raise ValueError("DFlash2 tensor byte total differs")
+    if RECIPE_ID != dflash2_matrix_recipes.get_recipe(
+        dflash2_matrix_recipes.CANONICAL_Q4G64
+    ).recipe_id:
+        raise ValueError("canonical DFlash2 recipe identity differs")
+    for recipe in dflash2_matrix_recipes.RECIPES:
+        candidate = source_bindings_for_recipe(recipe.key)
+        if tuple(binding.sources for binding in candidate) != tuple(
+            binding.sources for binding in SOURCE_BINDINGS
+        ):
+            raise ValueError(f"{recipe.key}: DFlash2 source topology differs")
     if any(len(specs) != 1190 for specs in (
         ALL_Q4_OBJECT_SPECS, MIXED_OBJECT_SPECS, HYBRID_OBJECT_SPECS,
     )):
@@ -287,6 +317,7 @@ __all__ = [
     "MIXED_OBJECT_SPECS",
     "MIXED_TENSOR_BYTES",
     "MIXED_WEIGHTS_ID",
+    "MATRIX_RECIPE_SUMMARIES",
     "MODEL_ID",
     "RECIPE_ID",
     "SOURCE_BINDINGS",
@@ -294,6 +325,8 @@ __all__ = [
     "TARGET_KEY",
     "TENSOR_ENCODED_BYTES",
     "TENSOR_SPECS",
+    "matrix_recipe_summary",
+    "source_bindings_for_recipe",
     "validate_inventory",
     "validate_source",
 ]

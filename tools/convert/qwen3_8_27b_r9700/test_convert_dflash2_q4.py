@@ -75,6 +75,23 @@ class DFlash2ConversionPublicationTest(unittest.TestCase):
             )
             result = preflight_summary(checked, output)
             self.assertEqual(result["base"]["sha256"], _sha256(base))
+            self.assertEqual(
+                tuple(
+                    recipe["key"]
+                    for recipe in result["dflash_plan"]["candidate_matrix_recipes"]
+                ),
+                ("source-mse-q4g64", "source-mse-w8g32"),
+            )
+            self.assertEqual(
+                result["dflash_plan"]["recipe"]["materialization"],
+                "existing-canonical-converter-route",
+            )
+            self.assertTrue(
+                all(
+                    recipe["materialization"] == "disabled-until-base-selection"
+                    for recipe in result["dflash_plan"]["candidate_matrix_recipes"]
+                )
+            )
             self.assertEqual(len(result["combined_plan"]["sha256"]), 64)
             self.assertEqual(result["publication"]["artifact_path"], str(output.resolve()))
             self.assertFalse(result["publication"]["destination_exists"])
@@ -155,6 +172,9 @@ class DFlash2ConversionPublicationTest(unittest.TestCase):
                         "sha256": _sha256(base_path),
                     },
                     "dflash_source": checked.source,
+                    "dflash_matrix_recipe": conversion.inventory.matrix_recipe_summary(
+                        conversion._CANONICAL_RECIPE
+                    ),
                     "artifact": {"sha256": output_sha256},
                     "converter": {"mode": "convert", "device_resolved": "cuda"},
                 },
