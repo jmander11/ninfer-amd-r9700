@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail-closed gfx1201 static gate for the Q4/W8 prefill CTA memory pipeline."""
+"""Fail-closed gfx1201 static gates for selected packed-linear candidates."""
 
 from __future__ import annotations
 
@@ -27,6 +27,11 @@ class Profile:
     occupancy: int = 0
 
 PROFILES = {
+    "q4-dot8": Profile(
+        "",
+        "_ZN6ninfer3ops5r97006linear12_GLOBAL__N_150a8q4g64_linear_decode_dot8_t1_qualification_kernelEPKhS5_PKtPKjS5_S7_P12hip_bfloat16jj",
+        "v_dot8_i32_iu4", 16, 0, 64, 0, 0, 0, 0, 256,
+    ),
     "q4": Profile(
         "_ZN6ninfer3ops5r97006linear12_GLOBAL__N_152a8q4g64_linear_prefill_cta_m64n128_regression_kernelEPKhS5_PKtPKjS5_S7_P12hip_bfloat16jjjj",
         "_ZN6ninfer3ops5r97006linear12_GLOBAL__N_133a8q4g64_linear_prefill_cta_kernelEPKhS5_PKtPKjS5_S7_P12hip_bfloat16jjjj",
@@ -94,13 +99,15 @@ def _kernel_metadata_record(text: str, symbol: str) -> str:
     return text[starts[-1]:len(text) if end < 0 else end]
 
 def check(recipe: str, mode: str, assembly: Path, metadata: Path) -> dict[str, int | str]:
-    if mode not in ("lds-scope", "m128n128", "a4-m64n128",
+    if mode not in ("decode-dot8", "lds-scope", "m128n128", "a4-m64n128",
                     "incumbent-diagnostic"):
         raise ValueError(f"unsupported static-gate mode: {mode}")
     if (recipe == "q4-m128n128") != (mode == "m128n128"):
         raise ValueError("q4-m128n128 recipe and mode must be selected together")
     if (recipe == "q4-a4-m64n128") != (mode == "a4-m64n128"):
         raise ValueError("q4-a4-m64n128 recipe and mode must be selected together")
+    if (recipe == "q4-dot8") != (mode == "decode-dot8"):
+        raise ValueError("q4-dot8 recipe and decode-dot8 mode must be selected together")
     profile = PROFILES[recipe]
     symbol = (profile.incumbent_symbol if mode == "incumbent-diagnostic"
               else profile.production_symbol)
@@ -115,6 +122,45 @@ def check(recipe: str, mode: str, assembly: Path, metadata: Path) -> dict[str, i
         raise ValueError(
             f"{recipe}: {profile.opcode} count {opcode_count}, expected {expected_opcode_count}"
         )
+    if mode == "decode-dot8":
+        opcode_lines = re.findall(
+            rf"^\s*{re.escape(profile.opcode)}[^\n]*$", assembly_body, flags=re.MULTILINE)
+        unsigned = sum("neg_lo:[0,1,0]" in line for line in opcode_lines)
+        signed = sum("neg_lo:[1,1,0]" in line for line in opcode_lines)
+        if unsigned != 8 or signed != 8:
+            raise ValueError(
+                "q4-dot8: requires eight unsigned-A/signed-W and eight "
+                f"signed-A/signed-W dot8 instructions, got {unsigned} and {signed}")
+        forbidden = re.findall(
+            r"^\s*(v_wmma\S*|ds_\S*|s_barrier\S*|global_inv)(?:\s|$)",
+            assembly_body, flags=re.MULTILINE)
+        if forbidden:
+            raise ValueError(f"q4-dot8: forbidden instructions in selected symbol: {forbidden}")
+        lds = _one_integer(metadata_body,
+                           r"^\s*\.amdhsa_group_segment_fixed_size\s+(\d+)", "LDS size")
+        private = _one_integer(metadata_body,
+                               r"^\s*\.amdhsa_private_segment_fixed_size\s+(\d+)",
+                               "private segment size")
+        vgpr = _one_integer(metadata_body,
+                            r"^\s*\.amdhsa_next_free_vgpr\s+(\d+)", "VGPR count")
+        flat_scratch = _one_integer(
+            metadata_body, r"^\s*\.set\s+\S+\.uses_flat_scratch,\s*(\d+)",
+            "flat-scratch use")
+        scratch = _one_integer(metadata_body, r"^;\s*ScratchSize:\s*(\d+)", "scratch size")
+        maximum_workgroup = _maximum_workgroup(metadata.read_text(encoding="utf-8"), symbol)
+        if lds != 0 or private != 0 or flat_scratch != 0 or scratch != 0:
+            raise ValueError(
+                f"q4-dot8: requires zero LDS/private/scratch, got "
+                f"lds={lds} private={private} flat={flat_scratch} scratch={scratch}")
+        if vgpr > profile.vgpr_ceiling:
+            raise ValueError(f"q4-dot8: VGPR count {vgpr} exceeds {profile.vgpr_ceiling}")
+        if maximum_workgroup != profile.maximum_workgroup_size:
+            raise ValueError(
+                f"q4-dot8: maximum workgroup {maximum_workgroup}, expected "
+                f"{profile.maximum_workgroup_size}")
+        return {"recipe": recipe, "mode": mode, "opcode_count": opcode_count,
+                "vgpr": vgpr, "lds": lds, "private": private,
+                "scratch": scratch, "maximum_workgroup": maximum_workgroup}
     if mode == "a4-m64n128":
         opcode_lines = re.findall(
             rf"^\s*{re.escape(profile.opcode)}[^\n]*$", assembly_body, flags=re.MULTILINE)
@@ -273,7 +319,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--recipe", required=True, choices=tuple(PROFILES))
     parser.add_argument(
         "--mode", required=True,
-        choices=("lds-scope", "m128n128", "a4-m64n128",
+        choices=("decode-dot8", "lds-scope", "m128n128", "a4-m64n128",
                  "incumbent-diagnostic"),
         help="LDS-scope mode selects the promoted production symbol; incumbent mode is diagnostic.",
     )
@@ -289,9 +335,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit(str(error)) from error
     print(" ".join(f"{key}={value}" for key, value in result.items()))
     print("diagnostic_only=true admission=false" if args.mode == "incumbent-diagnostic"
+          else ("decode_dot8_challenger_static_gate=passed" if args.mode == "decode-dot8"
           else ("a4_m64n128_challenger_static_gate=passed" if args.mode == "a4-m64n128"
                 else "m128n128_challenger_static_gate=passed" if args.mode == "m128n128"
-                else "lds_scope_production_static_gate=passed"))
+                else "lds_scope_production_static_gate=passed")))
     return 0
 
 if __name__ == "__main__":

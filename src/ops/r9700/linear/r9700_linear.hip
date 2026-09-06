@@ -993,6 +993,55 @@ __global__ __launch_bounds__(kWaveSize) void a8q4g64_linear_wmma32_kernel(
 #endif
 }
 
+__global__ __launch_bounds__(kThreads)
+void a8q4g64_linear_decode_dot8_t1_qualification_kernel(
+    const std::uint8_t* activation_low_codes,
+    const std::uint8_t* activation_high_codes,
+    const std::uint16_t* activation_scales,
+    const std::uint32_t* activation_status,
+    const std::uint8_t* weight_codes, const std::uint16_t* weight_scales,
+    hip_bfloat16* output, std::uint32_t rows, std::uint32_t padded_columns) {
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
+    const std::uint32_t row = blockIdx.x * blockDim.x + threadIdx.x;
+    if (row >= rows) return;
+    if (*activation_status != Q4G64ActivationOk) {
+        output[row] = conspicuous_bf16_nan();
+        return;
+    }
+    const std::uint32_t groups = padded_columns / kQ4Group;
+    float total = 0.0F;
+    for (std::uint32_t group = 0; group < groups; ++group) {
+        int low_dot = 0;
+        int high_dot = 0;
+#pragma unroll
+        for (std::uint32_t word = 0; word < 8U; ++word) {
+            const std::size_t element =
+                static_cast<std::size_t>(group) * kQ4Group + word * 8U;
+            const int low = load_q4x8(activation_low_codes, element);
+            const int high = load_q4x8(activation_high_codes, element);
+            const int weight =
+                load_q4_n16k16_x8(weight_codes, row, group, word, groups);
+            low_dot = __builtin_amdgcn_sudot8(
+                false, low, true, weight, low_dot, false);
+            high_dot = __builtin_amdgcn_sudot8(
+                true, high, true, weight, high_dot, false);
+        }
+        const std::int32_t combined = low_dot + 16 * high_dot;
+        const float activation_scale = __half2float(
+            __ushort_as_half(activation_scales[group]));
+        const float weight_scale = __half2float(__ushort_as_half(
+            weight_scales[q4_n16k16_scale_index(row, group, groups)]));
+        total = fmaf(static_cast<float>(combined),
+                     activation_scale * weight_scale, total);
+    }
+    output[row] = static_cast<hip_bfloat16>(total);
+#else
+    (void)activation_low_codes; (void)activation_high_codes;
+    (void)activation_scales; (void)activation_status; (void)weight_codes;
+    (void)weight_scales; (void)output; (void)rows; (void)padded_columns;
+#endif
+}
+
 // A fragment-major LDS map avoids the 4-way conflicts produced by a logical
 // [row][packed-K-word] staging image. Bit 4 separates the two WMMA lane groups
 // onto disjoint banks while preserving contiguous rows within each group. The
@@ -2204,6 +2253,19 @@ bool a8q4g64_scalar_base_u32_offsets_fit(
     return scalar_base_offsets_fit(tokens, rows, padded_columns);
 }
 
+bool a8q4g64_decode_dot8_t1_qualification_shape(
+    std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns,
+    std::uint32_t padded_columns) noexcept {
+    return tokens == 1U && columns == padded_columns &&
+        ((rows == 4096U && columns == 5120U) ||
+         (rows == 5120U && columns == 6144U) ||
+         (rows == 5120U && columns == 17408U) ||
+         (rows == 7168U && columns == 5120U) ||
+         (rows == 12288U && columns == 5120U) ||
+         (rows == 34816U && columns == 5120U) ||
+         (rows == 248320U && columns == 5120U));
+}
+
 std::size_t q4g64_activation_workspace_capacity_bytes(std::uint32_t tokens,
                                                        std::uint32_t columns) noexcept {
     std::uint32_t padded = 0;
@@ -2468,6 +2530,26 @@ hipError_t a8q4g64_linear_wmma32(const A8Q4G64LinearArgs& args,
 #endif
 }
 
+hipError_t a8q4g64_linear_decode_dot8_t1_qualification(
+    const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept {
+    if (!valid_a8q4_linear_args(args) || args.tokens != 1U) {
+        return hipErrorInvalidValue;
+    }
+#if defined(__HIPCC__)
+    const dim3 grid((args.rows + kThreads - 1U) / kThreads);
+    hipLaunchKernelGGL(a8q4g64_linear_decode_dot8_t1_qualification_kernel,
+                       grid, dim3(kThreads), 0, stream,
+                       args.activation_low_codes, args.activation_high_codes,
+                       args.activation_scales, args.activation_status,
+                       args.weight_codes, args.weight_scales, args.output,
+                       args.rows, args.padded_columns);
+    return hipGetLastError();
+#else
+    (void)stream;
+    return hipErrorNotSupported;
+#endif
+}
+
 hipError_t a8q4g64_linear_prefill_cta_m64n128_regression(
     const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept {
     if (!valid_a8q4_linear_args(args) || args.tokens <= 128U) {
@@ -2625,6 +2707,16 @@ hipError_t a8q4g64_linear_candidate(const A8Q4G64CandidateArgs& args,
     if (!valid_a8q4_linear_args(linear_args)) return hipErrorInvalidValue;
     const hipError_t quantized = a8g64_quantize_activation({args.input, workspace}, stream);
     if (quantized != hipSuccess) return quantized;
+#if defined(NINFER_R9700_A8Q4_T1_DOT8_QUALIFICATION)
+    // In the fixed ordinary Qwen3.8-27B Text round this boundary is reached by
+    // exactly 321 T=1 Q4 linears (320 layer projections plus lm_head). The
+    // T=2048 fused-SiLU/down prefill boundary below prepares and invokes its
+    // cooperative CTA directly, so this private cutover cannot affect it.
+    if (a8q4g64_decode_dot8_t1_qualification_shape(
+            args.tokens, args.rows, args.columns, args.padded_columns)) {
+        return a8q4g64_linear_decode_dot8_t1_qualification(linear_args, stream);
+    }
+#endif
     switch (select_a8q4_prefill_route(args.tokens, args.rows, args.columns)) {
     case A8Q4PrefillRoute::M64N128PingPongProduction:
         return a8q4g64_linear_prefill_cta(linear_args, stream);
@@ -2922,6 +3014,7 @@ hipError_t a8q4g64_kernel_resources(A8Q4G64KernelResources* resources) noexcept 
     if (resources == nullptr) return hipErrorInvalidValue;
     hipFuncAttributes quantize{};
     hipFuncAttributes wmma{};
+    hipFuncAttributes decode_dot8_t1_qualification{};
     hipFuncAttributes prefill_cta{};
     hipFuncAttributes prefill_cta_global_inv_qualification{};
     hipFuncAttributes prefill_cta_m64n64_regression{};
@@ -2932,6 +3025,10 @@ hipError_t a8q4g64_kernel_resources(A8Q4G64KernelResources* resources) noexcept 
     if (result != hipSuccess) return result;
     result = hipFuncGetAttributes(
         &wmma, reinterpret_cast<const void*>(a8q4g64_linear_wmma32_kernel));
+    if (result != hipSuccess) return result;
+    result = hipFuncGetAttributes(
+        &decode_dot8_t1_qualification, reinterpret_cast<const void*>(
+            a8q4g64_linear_decode_dot8_t1_qualification_kernel));
     if (result != hipSuccess) return result;
     result = hipFuncGetAttributes(
         &prefill_cta,
@@ -2957,6 +3054,10 @@ hipError_t a8q4g64_kernel_resources(A8Q4G64KernelResources* resources) noexcept 
         quantize.numRegs, static_cast<int>(quantize.sharedSizeBytes),
         static_cast<int>(quantize.localSizeBytes), wmma.numRegs,
         static_cast<int>(wmma.sharedSizeBytes), static_cast<int>(wmma.localSizeBytes),
+        decode_dot8_t1_qualification.numRegs,
+        static_cast<int>(decode_dot8_t1_qualification.sharedSizeBytes),
+        static_cast<int>(decode_dot8_t1_qualification.localSizeBytes),
+        decode_dot8_t1_qualification.maxThreadsPerBlock,
         prefill_cta.numRegs, static_cast<int>(prefill_cta.sharedSizeBytes),
         static_cast<int>(prefill_cta.localSizeBytes),
         prefill_cta_global_inv_qualification.numRegs,

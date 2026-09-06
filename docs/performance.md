@@ -932,6 +932,36 @@ tok/s over `64.84022237 s`. The raw report SHA-256 is
 `a2ce50522910bd1442156383c85f359315c33bc5964578ba3ca28bf9685e104a`. The previously retained
 `19.24458338` tok/s result is the MTP3 speculative cell, not ordinary decode.
 
+The current dense all-Q4 G16 ordinary baseline supersedes that `8.354688852` tok/s row for active
+optimization decisions. At C1/P8192+G256, spec-none, Device Graph, and one measured repetition, it
+reaches `15.13345066` decode output tok/s in `16.91616841 s`. This is a diagnostic baseline until a
+source-matched whole A/B supplies repeated candidate/control evidence. The report is
+`profiles/bench/ordinary-none-dense-all-q4-g16-c1-8k-current-20260905.json`, SHA-256
+`829d19d4eff2364e0d782f0da3cfe7dfa7c3bee313614799f5aa53a333e17f7f`.
+
+The corresponding one-round ordinary trace has a `78.193701 ms` ordinary host marker and 1,806
+dispatches with the exact ordinary-range association. Their independent durations sum to
+`64.388840 ms`: Q4 WMMA contributes `42.301380 ms` across 321 calls, RMSNorm `13.642834 ms` across
+161, split512 PV `4.276113 ms` across 16, and QK `1.030131 ms` across 16. The benchmark report is
+`profiles/rocprof/ordinary-decode-c1-one-round-trace-20260905/benchmark-report.json` (SHA-256
+`7d9da725902c04e208525ae2d02dd33fc696ab452ad6673579a730f6e8f7eee6`), the ROCPD database is
+`profiles/rocprof/ordinary-decode-c1-one-round-trace-20260905/raw/ordinary-decode-c1-one-round_results.db`
+(SHA-256 `2cae81419c0cf360eb032537ca95a4030a1c80df1e9221dc5d6dfcd06f3aa0ff`), and the corrected analysis
+is `profiles/rocprof/ordinary-decode-c1-one-round-trace-20260905/analysis-v2.json` (SHA-256
+`ca8937876bc16259aeaf793a1c6070c5b99dac74d71f2eca4b348ff0b2f7a9d1`). A dispatch-interval union
+means only the union of rocprofiler kernel start/end records. Graph dispatch intervals overlap, and
+the union is not GPU-active time, GPU wall time, utilization, or CU occupancy; it must not be
+subtracted from host-marker time to assign a physical idle fraction. It directs attention first to
+the source-matched Q4 Linear candidate and then RMSNorm, with whole A/B as the decision authority.
+
+The native dot8 T=1 Q4 Linear operator gate passes every cell and reports a robust exact-call-weighted
+saving lower bound of `14.1025415618 ms` per token. Its report is
+`profiles/bench/r9700-a8q4-t1-native-dot8-all-text-20260905.json`, SHA-256
+`300626f0d45b5b9bb8f6b420f44b7e5652e3a848738c636959f02f3448d2b5b0`. This is operator evidence,
+not a production promotion; the next gate is a source-matched ordinary whole candidate/control A/B.
+Ordinary decode remains the immediate priority, followed by DFlash2. MTP remains supported
+regression behavior and is not an optimization target.
+
 The existing MTP shortlist head remains Q4G64 with A8G64 activations. MTP stays in exact-output,
 state, cache, row-view, and whole-route regression coverage, but a new shortlist-head trace,
 alternate head precision, acceptance campaign, or MTP performance optimization is not a final

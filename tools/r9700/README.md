@@ -168,6 +168,36 @@ requested-byte service and instruction rates; an HBM bus rating is not a valid r
 bound when caches serve loads. The calculator has no implicit hardware defaults. Run
 `python3 tools/r9700/test_a8q4_prefill_traffic.py` for its focused tile-accounting checks.
 
+The qualification-only T=1 A8Q4 native-dot8 challenger can be checked without changing product
+routing. Its static gate requires the exact sixteen mixed-sign `v_dot8_i32_iu4` sites, no WMMA,
+at most 64 VGPR, and zero LDS/private/scratch. The physical A/B covers all seven ordinary Text Q4
+shapes using their exact per-token call weights and publishes a terminal create-only report. It
+accepts only when every cell's `(challenger median + 4.4478*MAD) / (incumbent median -
+4.4478*MAD)` is at most 1.01 and the exact-call-weighted saving lower bound is at least 5 ms/token.
+
+```sh
+make -C tools/r9700 a8q4-decode-dot8-static
+make -C tools/r9700 a8q4-decode-dot8-regression
+make -C tools/r9700 a8q4-decode-dot8-benchmark \
+  A8Q4_DECODE_DOT8_OUT=profiles/bench/FRESH.json
+make -C tools/r9700 a8q4-decode-dot8-report \
+  A8Q4_DECODE_DOT8_OUT=profiles/bench/FRESH.json
+```
+
+After the operator gate passes, `tools/bench/run_a8q4_t1_dot8_whole_ab.py` builds source-matched
+control and candidate `ninfer_bench` executables. The only admitted compile difference is the
+private, default-OFF `NINFER_R9700_A8Q4_T1_DOT8_QUALIFICATION` definition. It runs four balanced
+AB/BA pairs at C1, P8192+G256, ordinary graph decode; requires exact generated-token, environment,
+artifact, workspace, and configuration parity; and publishes its create-only terminal report
+before returning a rejection status. The private option, qualification entry, runner, and report
+machinery are temporary and must be removed when the route is promoted or rejected.
+The candidate switch admits only the seven operator-qualified ordinary Text shapes at T=1 with
+logical K equal to padded K; every tail and off-inventory call retains WMMA.
+`--pairs 1 --decode-tokens 32` provides a non-promoting screen; omitting both options runs the
+only promotion-eligible four-pair, G256 gate. The retained report includes every process role and
+raw prefill/decode duration, generated-token digest/count, artifact digest, and exact control and
+candidate CMake cache identities.
+
 The G16 and G32 S16/tau900 XAttention build variants each expose a production-scale admission
 control at context 8,192/T=4,096. Run each configured binary with `--benchmark
 --production-scale --iterations 10 --out-json FRESH.json`, then validate it with `python3
@@ -873,6 +903,27 @@ incumbent below that boundary and for all other widths. Run
 ```bash
 make -C tools/r9700 rmsnorm-k256-prefill-benchmark \
   RMSNORM_K256_PREFILL_JSON=../../profiles/bench/EXPLICIT-FRESH-rmsnorm-k256-token8.json
+```
+
+`rmsnorm_decode_qual` is the qualification-only ordinary-decode candidate for fixed K5120 and
+rows 1 through 4, the complete supported concurrency domain. One 256-thread CTA owns each row:
+every lane accumulates 20 represented BF16 values in FP32, wave32 shuffles reduce each wave, and
+eight LDS partials complete the CTA reduction before BF16 publication. The numerical gate compares
+the complete result directly with an independent CPU FP64 formula across ordinary, zero, and
+mixed-magnitude inputs, both gain modes, three epsilon values, every selected row count, and two
+Device Graph replays. The product dispatcher is deliberately unchanged. Check the host selection
+boundary and gfx1201 resources without GPU execution with:
+
+```bash
+make -C tools/r9700 rmsnorm-decode-selection-test rmsnorm-decode-static-test \
+  rmsnorm-decode-static
+```
+
+A fresh physical operator report requires an explicit path:
+
+```bash
+make -C tools/r9700 rmsnorm-decode-benchmark \
+  RMSNORM_DECODE_JSON=../../profiles/bench/EXPLICIT-FRESH-rmsnorm-k5120-rows4.json
 ```
 
 `gated_rmsnorm_prefill_qual` retains the direct regression boundary for the production K6144

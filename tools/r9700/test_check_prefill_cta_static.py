@@ -16,7 +16,9 @@ class PrefillCtaStaticTest(unittest.TestCase):
         lds = profile.incumbent_lds_ceiling if incumbent else profile.lds_ceiling
         vgpr = profile.incumbent_vgpr_ceiling if incumbent else profile.vgpr_ceiling
         control = " neg_lo:[1,1,0]" if recipe == "q4-a4-m64n128" else ""
-        controls = ([" neg_lo:[0,1,0]"] * 4 + [" neg_lo:[1,1,0]"] * 4
+        controls = ([" neg_lo:[0,1,0]"] * 8 + [" neg_lo:[1,1,0]"] * 8
+                    if recipe == "q4-dot8" else
+                    [" neg_lo:[0,1,0]"] * 4 + [" neg_lo:[1,1,0]"] * 4
                     if recipe == "q4" and not incumbent else [control] * opcode_count)
         opcodes = "\n".join(
             f"\t{profile.opcode} v[0:7], v[8:9], v[10:11], 0{control}"
@@ -33,13 +35,13 @@ class PrefillCtaStaticTest(unittest.TestCase):
         pipeline_publish = ("\ts_wait_loadcnt 0x0\n" +
                             "\tds_store_b32 v0, v1\n" * 3
                             if prefetch_count else "")
+        barriers_before = "" if recipe == "q4-dot8" else "\ts_barrier_signal -1\n\ts_barrier_wait -1"
+        barriers_after = "" if recipe == "q4-dot8" else "\ts_barrier_signal -1\n\ts_barrier_wait -1"
         body = f"""\t.globl {symbol} ; -- Begin function {symbol}
 {symbol}:
-\ts_barrier_signal -1
-\ts_barrier_wait -1{global_inv}
+{barriers_before}{global_inv}
 {pipeline_prefetch}{opcodes}
-{pipeline_publish}\ts_barrier_signal -1
-\ts_barrier_wait -1{global_inv}
+{pipeline_publish}{barriers_after}{global_inv}
 \t.amdhsa_kernel {symbol}
 \t\t.amdhsa_group_segment_fixed_size {lds}
 \t\t.amdhsa_private_segment_fixed_size 0
@@ -65,6 +67,29 @@ class PrefillCtaStaticTest(unittest.TestCase):
                 result = check(recipe, "lds-scope", *self.fixture(Path(directory), recipe))
                 self.assertEqual(result["global_inv_count"], 0)
                 self.assertEqual(result["barrier_pair_count"], 2)
+
+    def test_accepts_t1_mixed_sign_dot8_without_wmma_or_memory_resources(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            result = check("q4-dot8", "decode-dot8",
+                           *self.fixture(Path(directory), "q4-dot8"))
+            self.assertEqual(result["opcode_count"], 16)
+            self.assertEqual(result["vgpr"], 64)
+            self.assertEqual(result["lds"], 0)
+            self.assertEqual(result["scratch"], 0)
+
+    def test_dot8_rejects_wrong_sign_control_and_lds(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            assembly, metadata = self.fixture(Path(directory), "q4-dot8")
+            assembly.write_text(assembly.read_text(encoding="utf-8").replace(
+                "neg_lo:[0,1,0]", "neg_lo:[1,1,0]", 1), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "eight unsigned-A"):
+                check("q4-dot8", "decode-dot8", assembly, metadata)
+            assembly, metadata = self.fixture(Path(directory), "q4-dot8")
+            metadata.write_text(metadata.read_text(encoding="utf-8").replace(
+                ".amdhsa_group_segment_fixed_size 0",
+                ".amdhsa_group_segment_fixed_size 4", 1), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "zero LDS"):
+                check("q4-dot8", "decode-dot8", assembly, metadata)
 
     def test_q4_production_is_pingpong_and_single_bank_n128_is_diagnostic(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

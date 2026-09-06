@@ -268,6 +268,51 @@ __global__ __launch_bounds__(kBlock) void rmsnorm_k5120_token8_kernel(
     }
 }
 
+__global__ __launch_bounds__(kBlock) void rmsnorm_k5120_rows4_cta_kernel(
+    const hip_bfloat16* input, const hip_bfloat16* weight, hip_bfloat16* output,
+    float eps, bool unit_offset) {
+    constexpr std::uint32_t features = 5120U;
+    constexpr std::uint32_t wave_size = 32U;
+    constexpr std::uint32_t waves = kBlock / wave_size;
+    const std::uint32_t lane = threadIdx.x & (wave_size - 1U);
+    const std::uint32_t wave = threadIdx.x / wave_size;
+    const std::size_t base = static_cast<std::size_t>(blockIdx.x) * features;
+
+    float sumsq = 0.0F;
+#pragma unroll
+    for (std::uint32_t feature = threadIdx.x; feature < features; feature += kBlock) {
+        const float value = static_cast<float>(input[base + feature]);
+        sumsq = fmaf(value, value, sumsq);
+    }
+#pragma unroll
+    for (std::uint32_t width = wave_size / 2U; width != 0U; width >>= 1U) {
+        sumsq += __shfl_down(sumsq, width, wave_size);
+    }
+
+    __shared__ float wave_sums[waves];
+    if (lane == 0U) wave_sums[wave] = sumsq;
+    __syncthreads();
+    if (wave == 0U) {
+        float block_sum = lane < waves ? wave_sums[lane] : 0.0F;
+#pragma unroll
+        for (std::uint32_t width = wave_size / 2U; width != 0U; width >>= 1U) {
+            block_sum += __shfl_down(block_sum, width, wave_size);
+        }
+        if (lane == 0U) {
+            wave_sums[0] = rsqrtf(block_sum / static_cast<float>(features) + eps);
+        }
+    }
+    __syncthreads();
+    const float inverse = wave_sums[0];
+#pragma unroll
+    for (std::uint32_t feature = threadIdx.x; feature < features; feature += kBlock) {
+        const float gain = static_cast<float>(weight[feature]) +
+            (unit_offset ? 1.0F : 0.0F);
+        output[base + feature] = hip_bfloat16(
+            static_cast<float>(input[base + feature]) * inverse * gain);
+    }
+}
+
 __global__ __launch_bounds__(kBlock) void rmsnorm_k256_token8_kernel(
     const hip_bfloat16* input, const hip_bfloat16* weight, hip_bfloat16* output,
     std::uint32_t rows, float eps, bool unit_offset) {
@@ -926,6 +971,19 @@ hipError_t rmsnorm_k5120_token8_qualification(
                                dim3((rows + tokens_per_block - 1U) / tokens_per_block),
                                dim3(kBlock), 0, stream, input, weight, output, rows, eps,
                                unit_offset);
+        });
+}
+
+hipError_t rmsnorm_k5120_rows4_qualification(
+    const hip_bfloat16* input, const hip_bfloat16* weight, hip_bfloat16* output,
+    std::uint32_t rows, float eps, bool unit_offset, hipStream_t stream) noexcept {
+    return checked_launch(
+        input != nullptr && weight != nullptr && output != nullptr &&
+            rmsnorm_k5120_rows4_qualification_selected(5120U, rows) &&
+            std::isfinite(eps) && eps > 0.0F && valid_stream(stream),
+        [&] {
+            hipLaunchKernelGGL(rmsnorm_k5120_rows4_cta_kernel, dim3(rows), dim3(kBlock), 0,
+                               stream, input, weight, output, eps, unit_offset);
         });
 }
 

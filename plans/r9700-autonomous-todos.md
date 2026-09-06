@@ -16,8 +16,10 @@ only and must not be reused as an active command or product requirement.
 Immediate execution priority: scalar-base/U32-voffset addressing is now the sole canonical dense
 Q4G64/A8G64 ping/pong route. Its source-matched whole result is `1,904.339303 tok/s`, still below
 the 2,000 tok/s hard gate, so do not resume the dependent chunk/capacity/whole campaign. The next
-active optimization priority is ordinary non-speculative decode, whose retained 8K+256 result is
-`8.354689 tok/s`; after that, implement and optimize DFlash2. Do not schedule MTP optimization:
+active optimization priority is ordinary non-speculative decode. Its current one-repetition C1
+8K+256 diagnostic is `15.133451 tok/s`; this supersedes the older `8.354689 tok/s` result for
+current optimization decisions but still requires a matched A/B before supporting a promotion.
+After ordinary decode, implement and optimize DFlash2. Do not schedule MTP optimization:
 existing MTP support may remain, but its `19.244583 tok/s` MTP3 result is diagnostic only and does
 not rank a product route. Dense prefill remains open for the two bounded future mechanisms recorded
 below, without reopening an unbounded topology search, FP8 substitution, Q4G128/A8G128
@@ -1879,13 +1881,37 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         selected-artifact whole-prefill timing at prompt lengths `selected_chunk+129`,
         `selected_chunk+257`, and `selected_chunk+1,023` before closing the gap. This token-tail
         matrix does not qualify the mixed MTP-only W8 [5,120,10,240] or [1,024,5,120] shapes.
-  - [ ] Optimize ordinary non-speculative decode immediately from the retained exact C1 8K+256
-        diagnostic (`8.354688852` output tok/s, `30.64198944 s` decode). This work is explicitly
-        exempt from the still-open dense-prefill floor and from the held chunk/capacity campaign:
+  - [ ] Optimize ordinary non-speculative decode immediately from the current dense all-Q4 G16
+        exact C1 P8192+G256 spec-none Device Graph diagnostic. Its one measured repetition is
+        `15.13345066` output tok/s over `16.91616841 s` of decode in
+        `profiles/bench/ordinary-none-dense-all-q4-g16-c1-8k-current-20260905.json` (SHA-256
+        `829d19d4eff2364e0d782f0da3cfe7dfa7c3bee313614799f5aa53a333e17f7f`). It supersedes the
+        older `8.354688852` tok/s result for current optimization decisions, but remains a
+        one-repetition diagnostic until a source-matched whole A/B confirms a candidate. This work
+        is explicitly exempt from the still-open dense-prefill floor and from the held
+        chunk/capacity campaign:
         identify the dominant ordinary-only kernels and host/launch gaps, qualify bounded direct
         changes against the fixed cache and exact output semantics, and confirm wins on ordinary
-        whole decode. Do not optimize or rank MTP; its `19.24458338` tok/s MTP3 row remains a
-        diagnostic comparator only. After ordinary decode, the next implementation priority is
+        whole decode. The one-round trace report is
+        `profiles/rocprof/ordinary-decode-c1-one-round-trace-20260905/benchmark-report.json`
+        (SHA-256 `7d9da725902c04e208525ae2d02dd33fc696ab452ad6673579a730f6e8f7eee6`), its ROCPD database is
+        `profiles/rocprof/ordinary-decode-c1-one-round-trace-20260905/raw/ordinary-decode-c1-one-round_results.db`
+        (SHA-256 `2cae81419c0cf360eb032537ca95a4030a1c80df1e9221dc5d6dfcd06f3aa0ff`), and the corrected
+        analysis is `profiles/rocprof/ordinary-decode-c1-one-round-trace-20260905/analysis-v2.json`
+        (SHA-256 `ca8937876bc16259aeaf793a1c6070c5b99dac74d71f2eca4b348ff0b2f7a9d1`). The ordinary host
+        marker spans `78.193701 ms` and has 1,806 exact-associated dispatches totaling
+        `64.388840 ms` of independent dispatch duration. The leading contributors are Q4 WMMA
+        (`42.301380 ms`, 321 calls), RMSNorm (`13.642834 ms`, 161 calls), split512 PV
+        (`4.276113 ms`, 16 calls), and QK (`1.030131 ms`, 16 calls). Dispatch-interval union is
+        only a union of rocprofiler start/end intervals: it is not GPU-active time, GPU wall time,
+        utilization, or CU occupancy, so optimization follows source-matched whole A/B rather than
+        converting that union into a physical claim. The native dot8 T=1 operator gate passes with
+        a `14.1025415618 ms` robust exact-call-weighted saving per token in
+        `profiles/bench/r9700-a8q4-t1-native-dot8-all-text-20260905.json` (SHA-256
+        `300626f0d45b5b9bb8f6b420f44b7e5652e3a848738c636959f02f3448d2b5b0`); run its
+        source-matched ordinary whole A/B next before promotion. Do not optimize or rank MTP; its
+        `19.24458338` tok/s MTP3 row remains a diagnostic comparator only. After ordinary decode,
+        the next implementation priority is
         DFlash2. Final selected-route profiling and roof accounting remain in the dependent item
         below because they require the eventual selected chunk/profile authority.
   - [ ] After chunk and terminal static-profile selection, profile only the ultimately selected 8K
