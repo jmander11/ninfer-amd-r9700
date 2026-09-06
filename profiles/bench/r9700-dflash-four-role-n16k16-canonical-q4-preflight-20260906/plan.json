@@ -1,0 +1,87 @@
+{
+  "artifact_type": "ninfer_r9700_dflash_eval_companion_conversion_plan",
+  "schema_version": 1,
+  "status": "prepared_not_executed",
+  "purpose": "registered canonical-Q4 DFlash evaluation control only",
+  "production_selection_bypassed": false,
+  "weight_recipe_selected": false,
+  "path_correction": {
+    "rejected_legacy_path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-eval.ninfer",
+    "rejected_legacy_bytes": 21553545216,
+    "rejected_legacy_sha256": "1dfe9626fd6412592f87480a2f6934e8494a4b267693a25831dff490959542ce",
+    "reason": "the requested SHA-256 040c6e7e belongs to the migrated N16/K16 sibling, not this legacy RowSplit artifact"
+  },
+  "base": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer",
+    "model_id": "qwen3.8-27b",
+    "weights_id": "r9700-q4g64-f8e4m3-four-role-n16k16-eval",
+    "bytes": 21553549312,
+    "sha256": "040c6e7ed29c856718a638c00181975710d987b7d5f49f4cafbdf68911f7e7d2",
+    "objects": 1124,
+    "authority": {
+      "receipt": {
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer.conversion.json",
+        "sha256": "2c5cb9f405ba581f685a96b1a2965ad3ff49b31280ebdd15d19158b6f4779c59"
+      },
+      "recipe_id": "r9700-q4g64-f8e4m3-four-role-n16k16-eval-v1",
+      "object_plan_sha256": "82692559ecd3293e68b3ea3e19df8b93b690d046bb764a476bf59178bd637227",
+      "source_artifact_sha256": "1dfe9626fd6412592f87480a2f6934e8494a4b267693a25831dff490959542ce",
+      "source_receipt_sha256": "a3bea3a6866b83bdb6ad9a382ca44b98ad009674c19a585d67ddb0f6a1ea9df7",
+      "transcoder_sha256": "e988d0ecc7d20a12728aa8313a71221eeea9c30dfff5d998020a826baab52801",
+      "selection_sha256": "b2ceeb63c581c0f26aab5a4d8c0958da34d836fcc5c47d377bce709eaf37e3e8",
+      "source_index_sha256": "77042094076611b69791a610065f28b7013b8c621795fa86ddccc8bac7d1b9df",
+      "source_ranking_sha256": "205b2d6c5b58d946c87b425578da13b5cfc32a0abe1ff201e95b47d032bf004e"
+    }
+  },
+  "dflash_source": {
+    "path": "/ssdpool2nvme/local_llm/models/qwen3.8-27b-dflash2",
+    "tensor_count": 81,
+    "safetensors_bytes": 3848817896,
+    "safetensors_sha256": "67fc76d68dc5a9415511a4f394ef744d67510cd20e93b37cc2cc7d28e4bab65c",
+    "config_sha256": "873e3556509b0da06e29654ba00d4944888d4b5e8a33afde25f7eb27d321e980",
+    "readme_sha256": "0c06405ffff835f4da26115114a6dd7bb4a8b8a6881c17edd3a1086a99281269"
+  },
+  "recipe": {
+    "key": "canonical-q4g64",
+    "recipe_id": "r9700-dflash2-all-q4g64-n16k16-bf16-codebook-eval-v1",
+    "matrix_format": "Q4G64_F16S",
+    "matrix_objects": 32,
+    "preserved_bf16_objects": 34,
+    "selector_codebook_format": "BF16",
+    "tensor_encoded_bytes": 1209469440,
+    "runtime_repack": false
+  },
+  "combined_plan": {
+    "objects": 1190,
+    "sha256": "5fb0a726e0af5eeb2bc8c704dcbcc17154f18dff40941f9012dbf1ebb698b501"
+  },
+  "output": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval.ninfer",
+    "model_id": "qwen3.8-27b",
+    "weights_id": "r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval",
+    "projected_file_bytes": 22763026944,
+    "projected_device_arena_bytes": 22750001152,
+    "minimum_free_filesystem_bytes": 28131736064,
+    "free_filesystem_bytes_at_prepare": 1931608195072,
+    "writer": "atomic-no-replace",
+    "pending_receipt_schema": 1
+  },
+  "converter": {
+    "git_commit_at_prepare": "ca2b58c5728de0fc52916796a2ac5ef6cee5e5f9",
+    "module": "tools.convert.qwen3_8_27b_r9700.convert_dflash2_q4",
+    "source_sha256": "974a1c4b28df0afe805e91f5db6c58d152d7af0f9fed5b3d90a253e42a913544",
+    "inventory_sha256": "2da3b6d764c64235713c5acbdf8114afd6a47d59d2cc963084ab6d367b88c0a5",
+    "recipe_source_sha256": "e1c008dbf6bf24d75824c9b547af33642f26a23bb26cdaea905bf4cf4bad4491"
+  },
+  "environment": {
+    "launcher": "/ssdpool2nvme/local_llm/.venv-ninfer-r9700/bin/python",
+    "launcher_sha256": "1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118",
+    "pyvenv_cfg": "/ssdpool2nvme/local_llm/.venv-ninfer-r9700/pyvenv.cfg",
+    "pyvenv_cfg_sha256": "8c965ee220f150c026b55c0c01075b1441cb43e709790ddfb8384c9ffb596d4c",
+    "python": "3.12.3",
+    "torch": "2.9.1+rocm7.2.4.git39497456",
+    "torch_hip": "7.2.53211-97f5574fe2",
+    "safetensors": "0.8.0",
+    "LD_LIBRARY_PATH": "/opt/rocm/lib:/opt/rocm/core-10.0/lib"
+  }
+}

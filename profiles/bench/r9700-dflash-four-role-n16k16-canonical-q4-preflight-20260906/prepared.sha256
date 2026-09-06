@@ -1,0 +1,11 @@
+59b051e07ab69e87e0370e0bc837c52c7d67c0bc0d1cf777a16846b6f7eebed4  profiles/bench/r9700-dflash-four-role-n16k16-canonical-q4-preflight-20260906/plan.json
+6c0e50b4fbbc5688494e22081d0322fca028372ba0eeac87a958dae0639fd1ea  profiles/bench/r9700-dflash-four-role-n16k16-canonical-q4-preflight-20260906/validate.py
+351163064887e32e2e20069e26b208e77be151f898b2266a1de2124e6fd2321d  profiles/bench/r9700-dflash-four-role-n16k16-canonical-q4-preflight-20260906/commands.sh
+974a1c4b28df0afe805e91f5db6c58d152d7af0f9fed5b3d90a253e42a913544  tools/convert/qwen3_8_27b_r9700/convert_dflash2_q4.py
+2da3b6d764c64235713c5acbdf8114afd6a47d59d2cc963084ab6d367b88c0a5  tools/convert/qwen3_8_27b_r9700/dflash2_q4_inventory.py
+e1c008dbf6bf24d75824c9b547af33642f26a23bb26cdaea905bf4cf4bad4491  tools/convert/qwen3_8_27b_r9700/dflash2_matrix_recipes.py
+2c5cb9f405ba581f685a96b1a2965ad3ff49b31280ebdd15d19158b6f4779c59  out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer.conversion.json
+873e3556509b0da06e29654ba00d4944888d4b5e8a33afde25f7eb27d321e980  /ssdpool2nvme/local_llm/models/qwen3.8-27b-dflash2/config.json
+0c06405ffff835f4da26115114a6dd7bb4a8b8a6881c17edd3a1086a99281269  /ssdpool2nvme/local_llm/models/qwen3.8-27b-dflash2/README.md
+1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118  /ssdpool2nvme/local_llm/.venv-ninfer-r9700/bin/python
+8c965ee220f150c026b55c0c01075b1441cb43e709790ddfb8384c9ffb596d4c  /ssdpool2nvme/local_llm/.venv-ninfer-r9700/pyvenv.cfg
