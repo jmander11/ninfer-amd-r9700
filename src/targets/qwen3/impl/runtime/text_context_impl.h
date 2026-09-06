@@ -806,6 +806,7 @@ void TextContext::ordinary_decode_batch(const Tensor& ids, const Tensor& cache_p
                  .rope       = &rope_positions},
                 stream);
             layer_boundary_trace::Tap tap{trace};
+            tap.begin(x);
             run_layers(x, Phase::Verify, tap);
             trace.finish();
         } else {
