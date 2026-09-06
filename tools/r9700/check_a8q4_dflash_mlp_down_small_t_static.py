@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 
 
-MARKER = "mlp_down_qual16candidate_kernelILj5EE"
+MARKER = "a8q4g64_linear_dflash_mlp_down_t5_kernel"
 
 
 def _one(pattern: str, text: str, label: str) -> int:
@@ -20,7 +20,7 @@ def _one(pattern: str, text: str, label: str) -> int:
 
 def check(assembly: str) -> dict[str, int]:
     symbols = re.findall(
-        r"; -- Begin function ([^\n]*mlp_down_qual16candidate_kernelILj(\d+)EE[^\n]*)",
+        r"; -- Begin function ([^\n]*a8q4g64_linear_dflash_mlp_down_t(\d+)_kernel[^\n]*)",
         assembly,
     )
     if len(symbols) != 1 or symbols[0][1] != "5":

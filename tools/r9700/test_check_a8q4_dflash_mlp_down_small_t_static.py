@@ -20,7 +20,7 @@ class MlpDownSmallTStaticTest(unittest.TestCase):
         self.assertEqual(result["vgpr"], 33)
 
     def test_sgpr_spill_is_rejected(self) -> None:
-        marker = "mlp_down_qual16candidate_kernelILj5EE"
+        marker = "a8q4g64_linear_dflash_mlp_down_t5_kernel"
         begin = self.assembly.find(".name:", self.assembly.find(".name:", 0))
         begin = self.assembly.find(".name:", self.assembly.find(marker, begin) - 80)
         spill = self.assembly.find(".sgpr_spill_count: 0", begin)
@@ -33,7 +33,7 @@ class MlpDownSmallTStaticTest(unittest.TestCase):
 
     def test_extra_t6_candidate_is_rejected(self) -> None:
         mutated = self.assembly + (
-            "\n; -- Begin function fake_mlp_down_qual16candidate_kernelILj6EE\n"
+            "\n; -- Begin function fake_a8q4g64_linear_dflash_mlp_down_t6_kernel\n"
         )
         with self.assertRaisesRegex(ValueError, "only the T5"):
             check(mutated)

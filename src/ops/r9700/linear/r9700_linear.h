@@ -365,6 +365,8 @@ struct A8Q4G64KernelResources {
 // still required before any unconditional product selection.
 [[nodiscard]] hipError_t a8q4g64_linear_dflash_small_t_qualification(
     const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept;
+[[nodiscard]] hipError_t a8q4g64_linear_dflash_mlp_down_t5_qualification(
+    const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept;
 // Direct 64-token x 128-row ping/pong cooperative-LDS production route. The candidate boundary
 // admits it only for the exact qualified tuples/extents; tails use the named regression control.
 [[nodiscard]] hipError_t a8q4g64_linear_prefill_cta(const A8Q4G64LinearArgs& args,

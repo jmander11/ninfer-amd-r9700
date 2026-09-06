@@ -453,13 +453,12 @@ $(A8Q4_DFLASH_MLP_DOWN_SMALL_T_TARGET): $(A8Q4_DFLASH_MLP_DOWN_SMALL_T_SOURCE) \
 
 a8q4-dflash-mlp-down-small-t-build: $(A8Q4_DFLASH_MLP_DOWN_SMALL_T_TARGET)
 
-$(BUILD_DIR)/a8q4_dflash_mlp_down_small_t.s: $(A8Q4_DFLASH_MLP_DOWN_SMALL_T_SOURCE) \
-		$(A8Q4_DFLASH_SMALL_T_SOURCE) $(A8Q4_SHAPE_SWEEP_SOURCE) $(LINEAR_HEADER) \
+$(BUILD_DIR)/a8q4_dflash_mlp_down_small_t.s: $(LINEAR_IMPL) $(LINEAR_HEADER) \
 		$(Q4_ACTIVATION_PROFILE) Makefile
 	mkdir -p $(BUILD_DIR)
 	$(HIPCC) $(CXXFLAGS) -Wno-unused-function -Wno-unused-command-line-argument \
-		-DNINFER_SOURCE_DIR='"$(abspath ../..)"' --offload-device-only -S \
-		$(A8Q4_DFLASH_MLP_DOWN_SMALL_T_SOURCE) -o $@
+		-DNINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE=1 --offload-device-only -S \
+		$(LINEAR_IMPL) -o $@
 
 a8q4-dflash-mlp-down-small-t-static: $(BUILD_DIR)/a8q4_dflash_mlp_down_small_t.s
 	$(PYTHON) $(A8Q4_DFLASH_MLP_DOWN_SMALL_T_STATIC_CHECK) $<

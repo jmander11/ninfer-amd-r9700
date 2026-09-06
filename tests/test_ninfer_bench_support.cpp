@@ -538,6 +538,9 @@ int test_report_contract() {
     failures += expect(report.at("config").at("dflash_small_t_candidate") ==
                            ninfer::ops::r9700::linear::kDFlashSmallTCandidateEnabled,
                        "compiled DFlash small-token candidate profile");
+    failures += expect(report.at("config").at("dflash_mlp_down_t5_candidate") ==
+                           ninfer::ops::r9700::linear::kDFlashMlpDownT5CandidateEnabled,
+                       "compiled DFlash MLP-down T5 candidate profile");
     failures += expect(report.at("config").at("w8_activation_bits") ==
                            ninfer::ops::r9700::linear::kW8ActivationBits,
                        "compiled W8 activation width");
@@ -640,6 +643,12 @@ int test_human_and_csv_reports() {
                                                                                   "false")) !=
             std::string::npos,
         "table DFlash small-token candidate profile");
+    failures += expect(
+        table.find(std::string("dflash_mlp_down_t5_candidate=") +
+                       (ninfer::ops::r9700::linear::kDFlashMlpDownT5CandidateEnabled ? "true" :
+                                                                                     "false")) !=
+            std::string::npos,
+        "table DFlash MLP-down T5 candidate profile");
     failures +=
         expect(table.find("decode eng t/s") != std::string::npos, "table engine throughput");
     failures += expect(table.find("work peak") != std::string::npos, "table workspace peak");
@@ -662,7 +671,8 @@ int test_human_and_csv_reports() {
     for (const std::string_view field :
          {"proposal_head", "kv_value_group", "kv_key_plane_layout",
           "kv_value_plane_layout", "kv_value_scale_plane_layout", "q4_activation_bits",
-          "q4_prefill_cta_profile", "dflash_small_t_candidate", "w8_activation_bits",
+          "q4_prefill_cta_profile", "dflash_small_t_candidate",
+          "dflash_mlp_down_t5_candidate", "w8_activation_bits",
           "fp8_qk_wmma_enabled", "fp8_qk_wmma_profile",
           "fp8_qk_wmma_t1_min_context", "fp8_qk_wmma_t2_min_context", "kv_payload_bytes",
           "load_host_to_device_bytes", "request_transient_capacity_bytes",

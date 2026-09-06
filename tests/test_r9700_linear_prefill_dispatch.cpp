@@ -67,6 +67,22 @@ static_assert(!linear::is_a8q4_dflash_small_t_eligible(12U, 34816U, 5120U, 5248U
 static_assert(!linear::use_a8q4_dflash_small_t(15U, 34816U, 5120U, 5120U));
 static_assert(!linear::use_a8q4_dflash_small_t(12U, 4096U, 5120U, 5120U));
 
+static_assert(linear::is_a8q4_dflash_mlp_down_t5_eligible(
+    5U, 5120U, 17408U, 17408U));
+static_assert(linear::use_a8q4_dflash_mlp_down_t5(5U, 5120U, 17408U, 17408U) ==
+              (linear::kDFlashMlpDownT5CandidateEnabled &&
+               linear::kQ4ActivationBits == 8U));
+static_assert(!linear::is_a8q4_dflash_mlp_down_t5_eligible(
+    4U, 5120U, 17408U, 17408U));
+static_assert(!linear::is_a8q4_dflash_mlp_down_t5_eligible(
+    6U, 5120U, 17408U, 17408U));
+static_assert(!linear::is_a8q4_dflash_mlp_down_t5_eligible(
+    5U, 5121U, 17408U, 17408U));
+static_assert(!linear::is_a8q4_dflash_mlp_down_t5_eligible(
+    5U, 5120U, 17409U, 17536U));
+static_assert(!linear::is_a8q4_dflash_mlp_down_t5_eligible(
+    5U, 5120U, 17408U, 17536U));
+
 static_assert(linear::select_a8q4_prefill_route(2048U, 7168U, 5120U) ==
               linear::A8Q4PrefillRoute::M64N128PingPongProduction);
 static_assert(linear::select_a8q4_prefill_route(512U, 7168U, 5120U) ==

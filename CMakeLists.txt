@@ -59,6 +59,20 @@ endif()
 add_compile_definitions(
   NINFER_R9700_DFLASH_SMALL_T_CANDIDATE=${NINFER_R9700_DFLASH_SMALL_T_CANDIDATE})
 
+# Qualification-selected exact DFlash MLP-down route. This compile-time selector admits only
+# N5120/K17408/T5 and is separately buildable for matched control/candidate verification.
+set(NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE "0" CACHE STRING
+  "Enable the exact qualified R9700 DFlash MLP-down T5 Linear candidate")
+set_property(CACHE NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE PROPERTY STRINGS 0 1)
+if(NOT NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE STREQUAL "0" AND
+   NOT NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE STREQUAL "1")
+  message(FATAL_ERROR
+    "NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE must be 0 or 1; got "
+    "'${NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE}'")
+endif()
+add_compile_definitions(
+  NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE=${NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE})
+
 # The selected W8G32 profile uses dynamic A8G32 only at measured winning shapes/token extents and
 # retains exact represented-BF16 activation below each crossover. The explicit A16 build is the
 # matched quality/performance control over identical persistent W8G32 bytes.

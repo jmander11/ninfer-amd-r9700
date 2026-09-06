@@ -25,6 +25,29 @@ static_assert(NINFER_R9700_DFLASH_SMALL_T_CANDIDATE == 0 ||
 inline constexpr bool kDFlashSmallTCandidateEnabled =
     NINFER_R9700_DFLASH_SMALL_T_CANDIDATE == 1;
 
+#ifndef NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE
+#define NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE 0
+#endif
+static_assert(NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE == 0 ||
+                  NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE == 1,
+              "R9700 DFlash MLP-down T5 candidate selector must be zero or one");
+inline constexpr bool kDFlashMlpDownT5CandidateEnabled =
+    NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE == 1;
+
+[[nodiscard]] constexpr bool is_a8q4_dflash_mlp_down_t5_eligible(
+    std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns,
+    std::uint32_t padded_columns) noexcept {
+    return tokens == 5U && rows == 5120U && columns == 17408U &&
+           padded_columns == columns;
+}
+
+[[nodiscard]] constexpr bool use_a8q4_dflash_mlp_down_t5(
+    std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns,
+    std::uint32_t padded_columns) noexcept {
+    return kDFlashMlpDownT5CandidateEnabled && kQ4ActivationBits == 8U &&
+           is_a8q4_dflash_mlp_down_t5_eligible(tokens, rows, columns, padded_columns);
+}
+
 inline constexpr std::string_view kQ4PrefillCtaProfile =
     "m64n128-pingpong-n16-k16-scalar-base-production";
 

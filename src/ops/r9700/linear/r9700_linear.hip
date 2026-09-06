@@ -1122,6 +1122,72 @@ void a8q4g64_linear_dflash_small_t_kernel(
 #endif
 }
 
+// Exact qualification-selected DFlash MLP-down cell. Keeping N, K, and T compile-time constants
+// preserves the accepted instruction/resource shape; the public Linear boundary still owns all
+// pointer, extent, overlap, codec-status, and stream semantics.
+__global__ __launch_bounds__(kThreads)
+void a8q4g64_linear_dflash_mlp_down_t5_kernel(
+    const std::uint8_t* activation_low_codes,
+    const std::uint8_t* activation_high_codes,
+    const std::uint16_t* activation_scales,
+    const std::uint32_t* activation_status,
+    const std::uint8_t* weight_codes, const std::uint16_t* weight_scales,
+    hip_bfloat16* output) {
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
+    constexpr std::uint32_t tokens = 5U;
+    constexpr std::uint32_t rows = 5120U;
+    constexpr std::uint32_t columns = 17408U;
+    constexpr std::uint32_t groups = columns / kQ4Group;
+    const std::uint32_t row = blockIdx.x * blockDim.x + threadIdx.x;
+    if (row >= rows) return;
+    if (*activation_status != Q4G64ActivationOk) {
+#pragma unroll
+        for (std::uint32_t token = 0; token < tokens; ++token) {
+            output[static_cast<std::size_t>(token) * rows + row] = conspicuous_bf16_nan();
+        }
+        return;
+    }
+    float totals[tokens]{};
+    for (std::uint32_t group = 0; group < groups; ++group) {
+        int low_dots[tokens]{};
+        int high_dots[tokens]{};
+#pragma unroll
+        for (std::uint32_t word = 0; word < 8U; ++word) {
+            const int weight = load_q4_n16k16_x8(weight_codes, row, group, word, groups);
+#pragma unroll
+            for (std::uint32_t token = 0; token < tokens; ++token) {
+                const std::size_t element = static_cast<std::size_t>(token) * columns +
+                    static_cast<std::size_t>(group) * kQ4Group + word * 8U;
+                low_dots[token] = __builtin_amdgcn_sudot8(
+                    false, load_q4x8(activation_low_codes, element), true, weight,
+                    low_dots[token], false);
+                high_dots[token] = __builtin_amdgcn_sudot8(
+                    true, load_q4x8(activation_high_codes, element), true, weight,
+                    high_dots[token], false);
+            }
+        }
+        const float weight_scale = __half2float(__ushort_as_half(
+            weight_scales[q4_n16k16_scale_index(row, group, groups)]));
+#pragma unroll
+        for (std::uint32_t token = 0; token < tokens; ++token) {
+            const float activation_scale = __half2float(__ushort_as_half(
+                activation_scales[static_cast<std::size_t>(token) * groups + group]));
+            totals[token] = fmaf(static_cast<float>(low_dots[token] + 16 * high_dots[token]),
+                                 activation_scale * weight_scale, totals[token]);
+        }
+    }
+#pragma unroll
+    for (std::uint32_t token = 0; token < tokens; ++token) {
+        output[static_cast<std::size_t>(token) * rows + row] =
+            static_cast<hip_bfloat16>(totals[token]);
+    }
+#else
+    (void)activation_low_codes; (void)activation_high_codes;
+    (void)activation_scales; (void)activation_status; (void)weight_codes;
+    (void)weight_scales; (void)output;
+#endif
+}
+
 // A fragment-major LDS map avoids the 4-way conflicts produced by a logical
 // [row][packed-K-word] staging image. Bit 4 separates the two WMMA lane groups
 // onto disjoint banks while preserving contiguous rows within each group. The
@@ -2715,6 +2781,27 @@ hipError_t a8q4g64_linear_dflash_small_t_qualification(
 #endif
 }
 
+hipError_t a8q4g64_linear_dflash_mlp_down_t5_qualification(
+    const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept {
+    if (!valid_a8q4_linear_args(args) ||
+        !is_a8q4_dflash_mlp_down_t5_eligible(
+            args.tokens, args.rows, args.columns, args.padded_columns)) {
+        return hipErrorInvalidValue;
+    }
+#if defined(__HIPCC__)
+    const dim3 grid((args.rows + kThreads - 1U) / kThreads);
+    hipLaunchKernelGGL(a8q4g64_linear_dflash_mlp_down_t5_kernel,
+                       grid, dim3(kThreads), 0, stream,
+                       args.activation_low_codes, args.activation_high_codes,
+                       args.activation_scales, args.activation_status,
+                       args.weight_codes, args.weight_scales, args.output);
+    return hipGetLastError();
+#else
+    (void)stream;
+    return hipErrorNotSupported;
+#endif
+}
+
 hipError_t a8q4g64_linear_prefill_cta_m64n128_regression(
     const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept {
     if (!valid_a8q4_linear_args(args) || args.tokens <= 128U) {
@@ -2879,6 +2966,10 @@ hipError_t a8q4g64_linear_candidate(const A8Q4G64CandidateArgs& args,
     if (use_a8q4_dflash_small_t(
             args.tokens, args.rows, args.columns, args.padded_columns)) {
         return a8q4g64_linear_dflash_small_t_qualification(linear_args, stream);
+    }
+    if (use_a8q4_dflash_mlp_down_t5(
+            args.tokens, args.rows, args.columns, args.padded_columns)) {
+        return a8q4g64_linear_dflash_mlp_down_t5_qualification(linear_args, stream);
     }
     switch (select_a8q4_prefill_route(args.tokens, args.rows, args.columns)) {
     case A8Q4PrefillRoute::M64N128PingPongProduction:
