@@ -1,0 +1,71 @@
+{
+  "artifact_type": "ninfer_r9700_fp8_target_gate_up_t5t6_qualification_plan",
+  "schema_version": 1,
+  "status": "prepared_no_gpu_execution",
+  "source_commit": "337940345d20cd0211fccd10bc4f7e9d0181bc2d",
+  "source_tree": "69601f7080e187f4c33d51b9cc7c232bad1581f6",
+  "scope": "standalone complete BF16 activation quantize plus FP8 target gate-up matmul at exact N34816/K5120 for T5 and T6",
+  "production_routing_authorized": false,
+  "whole_dflash_authority": false,
+  "hardware": {
+    "device": 0,
+    "name": "AMD Radeon AI PRO R9700",
+    "architecture": "gfx1201",
+    "wavefront_width": 32,
+    "pci_bus": "0000:13:00.0",
+    "pci_vendor_device": "1002:7551",
+    "power_profile": "auto"
+  },
+  "cells": [
+    {"tokens": 5, "rows": 34816, "columns": 5120},
+    {"tokens": 6, "rows": 34816, "columns": 5120}
+  ],
+  "numeric": {
+    "oracle": "independent BF16-source E4M3 quantization plus complete represented-E4M3 FP64 dot formula",
+    "coverage": "all activation codes/scales, every output written, one full-K row per N256 CTA and explicit rows 0/63/64/255/256/34815 for every token",
+    "maximum_bf16_steps": 1,
+    "regression_before_timing": true
+  },
+  "static": {
+    "logical_vgpr": 54,
+    "logical_sgpr": 19,
+    "emitted_total_sgpr": 21,
+    "wmma_fp8_sites": 4,
+    "global_load_b64_sites": 5,
+    "occupancy": 16,
+    "wavefront_width": 32,
+    "maximum_workgroup": 128,
+    "lds_bytes": 0,
+    "private_bytes": 0,
+    "scratch_bytes": 0,
+    "sgpr_spills": 0,
+    "vgpr_spills": 0
+  },
+  "timing": {
+    "method": "unprofiled HIP events",
+    "samples_per_cell": 14,
+    "launch_order": "even incumbent-then-challenger; odd challenger-then-incumbent",
+    "criterion": "both cells require overall candidate/incumbent median ratio at most 0.90, each launch-order median ratio at most 0.92, paired-ratio mean plus two standard errors below 0.95, launch-order median-ratio delta at most 0.03, and positive projected 64-call saving"
+  },
+  "limitations": [
+    "standalone represented-input operator qualification only",
+    "does not establish whole-DFlash performance, exact-token parity, or production eligibility",
+    "a passing result only justifies a separately reviewed production integration"
+  ],
+  "outputs": {
+    "regression_stdout": "regression.stdout",
+    "regression_stderr": "regression.stderr",
+    "regression_exit": "regression.exit",
+    "benchmark_stdout": "benchmark.stdout",
+    "benchmark_stderr": "benchmark.stderr",
+    "benchmark_exit": "benchmark.exit",
+    "static": "static.stdout",
+    "hardware": "hardware.txt",
+    "power_before": "power-before.txt",
+    "power_after": "power-after.txt",
+    "cell_t5": "cell-t5.json",
+    "cell_t6": "cell-t6.json",
+    "summary": "summary.json",
+    "result_closure": "result.sha256"
+  }
+}

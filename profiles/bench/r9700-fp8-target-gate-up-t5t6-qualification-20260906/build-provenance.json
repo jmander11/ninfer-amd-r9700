@@ -1,0 +1,55 @@
+{
+  "artifact_type": "ninfer_r9700_fp8_target_gate_up_t5t6_build_provenance",
+  "schema_version": 1,
+  "source": {
+    "commit": "337940345d20cd0211fccd10bc4f7e9d0181bc2d",
+    "tree": "69601f7080e187f4c33d51b9cc7c232bad1581f6"
+  },
+  "build_recipe": "make -f tools/r9700/fp8_gate_up_small_t.mk fp8_gate_up_small_t_build fp8_gate_up_small_t_static",
+  "compiler_driver": {
+    "path": "/opt/rocm/bin/hipcc",
+    "resolved_path": "/opt/rocm/core-10.0/bin/hipcc",
+    "bytes": 644120,
+    "sha256": "7b95d430bb8c4d4237f9b4935dbd6440e2067fde0979cc69bffb26ebd021464c"
+  },
+  "compiler": {
+    "path": "/opt/rocm/core-10.0/lib/llvm/bin/clang++",
+    "resolved_path": "/opt/rocm/core-10.0/lib/llvm/bin/clang-23",
+    "bytes": 201136,
+    "sha256": "241bf4da7ec39bc00b68ed74f6be751516d9892ed990e8c7fa372bad18500247",
+    "version": "AMD clang version 23.0.0git 8f497e0992fb7513f7f78a6f6b6f1056c375e961"
+  },
+  "analyzer_python": {
+    "path": "/usr/bin/python3",
+    "resolved_path": "/usr/bin/python3.12",
+    "bytes": 8020928,
+    "sha256": "1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118"
+  },
+  "sources": {
+    "tools/r9700/fp8_gate_up_small_t_harness.hip": "b44a0e49e164859c5024763f30f2712a01876acde11a00f26e19d642a1521c8f",
+    "tools/r9700/fp8_gate_up_small_t_qual.h": "7738df35c35dd729b34779bc6563abd2b11c0e5ac9d31dbaa298533070a19233",
+    "tools/r9700/fp8_gate_up_small_t_qual.hip": "cd7609d1b4de036a1a8753ef58752bc77d566e5b9cf5f1b0015d9b03ab5c7c8b",
+    "tools/r9700/check_fp8_gate_up_small_t_static.py": "9c6e4a8a3a0e08d21ca6c03e1cb715d400f8ee6f54879b025b7bf8f6dc070523",
+    "tools/r9700/test_check_fp8_gate_up_small_t_static.py": "7a400b4d363c9f28426377f2b8a96c130a2971f661f72bb69b3974f8dfac90e8",
+    "tools/r9700/fp8_gate_up_small_t.mk": "e12de03d170bd45985a31e936bf2a4b0ca853a44a94c06cdfd53d5e625c05bc1",
+    "src/ops/r9700/linear/fp8_activation.hip": "573ea63a73a2429c615d58efae90d84cd23baf8a4ed465fdddb894ac2f31f1d9",
+    "src/ops/r9700/linear/linear_execution.hip": "93f6e593d8d6e35a523f23e67b1cb950f33168286e8052c542d250c9177a81da"
+  },
+  "outputs": {
+    "binary": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/build/fp8_gate_up_small_t_qual",
+      "bytes": 113272,
+      "sha256": "4611e36dc2f1a5324a94a0da7f00c402b052f986dbf8ac4c504831d4327f4ece"
+    },
+    "assembly": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/build/fp8_gate_up_small_t.s",
+      "bytes": 63959,
+      "sha256": "a463e37e04512213013302769fa946c2fd1a57565533782f60797f107f46071d"
+    }
+  },
+  "runtime": {
+    "ld_library_path": "/opt/rocm/lib",
+    "libhipblaslt": {"resolved_path": "/opt/rocm/core-10.0/lib/libhipblaslt.so.1.4", "bytes": 9081728, "sha256": "1e8545626323f9b22c65d36492e1686b831cb85c8f7c8be3fc21c0d6cbb0d055"},
+    "libamdhip64": {"resolved_path": "/opt/rocm/core-10.0/lib/libamdhip64.so.7.15.26333-0000000", "bytes": 28216272, "sha256": "817aeadfd9f62b68831ad89993163c7f1f470f30595e7e0da5fdc942193142a8"}
+  }
+}
