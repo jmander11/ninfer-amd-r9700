@@ -5,13 +5,24 @@
 
 namespace {
 
+#ifndef NINFER_DFLASH_SMALL_T_ROWS
+#define NINFER_DFLASH_SMALL_T_ROWS 34816U
+#define NINFER_DFLASH_SMALL_T_COLUMNS 5120U
+#define NINFER_DFLASH_SMALL_T_WIDTHS 4U, 5U, 6U, 8U, 10U, 12U, 15U, 16U, 18U, 20U, 24U
+#define NINFER_DFLASH_SMALL_T_CALL(args) \
+    linear::a8q4g64_linear_dflash_small_t_qualification((args), nullptr)
+#define NINFER_DFLASH_SMALL_T_SCOPE \
+    "N34816/K5120 flattened K4/W5 and K5/W6 widths through C4 only"
+#define NINFER_DFLASH_SMALL_T_SCHEMA "ninfer.r9700.a8q4-dflash-small-t-cell.v3"
+#define NINFER_DFLASH_SMALL_T_LABEL "small-T"
+#define NINFER_DFLASH_SMALL_T_QUALIFIER_SOURCE "tools/r9700/a8q4_dflash_small_t_qual.hip"
+#endif
+
 constexpr std::array<Shape, 1> kDFlashSmallTShapes{{
-    {34816, 5120, 0, 0},
+    {NINFER_DFLASH_SMALL_T_ROWS, NINFER_DFLASH_SMALL_T_COLUMNS, 0, 0},
 }};
 
-constexpr std::array<std::uint32_t, 11> kDFlashSmallTWidths{{
-    4U, 5U, 6U, 8U, 10U, 12U, 15U, 16U, 18U, 20U, 24U,
-}};
+constexpr std::array kDFlashSmallTWidths{NINFER_DFLASH_SMALL_T_WIDTHS};
 
 bool exact_shape(Shape shape) {
     return std::any_of(kDFlashSmallTShapes.begin(), kDFlashSmallTShapes.end(),
@@ -67,7 +78,7 @@ DeviceIdentity select_one_r9700_auto() {
 bool run_case(Shape shape, std::uint32_t tokens, const std::filesystem::path& output_path,
               const DeviceIdentity& device) {
     if (!exact_shape(shape) || !exact_width(tokens)) {
-        fail("small-T qualifier requires N34816/K5120 and one exact K4/W5 or K5/W6 width");
+        fail(NINFER_DFLASH_SMALL_T_LABEL " qualifier received an unqualified shape/width");
     }
     const std::uint32_t padded = (shape.columns + 127U) / 128U * 128U;
     const std::uint32_t groups = padded / kGroup;
@@ -98,39 +109,52 @@ bool run_case(Shape shape, std::uint32_t tokens, const std::filesystem::path& ou
         d_weight_scales.get(), d_weight_scales.bytes(), d_output.get() + 1U,
         tokens, shape.rows, shape.columns, padded};
     const auto candidate = [&] {
-        return linear::a8q4g64_linear_dflash_small_t_qualification(args, nullptr);
+        return NINFER_DFLASH_SMALL_T_CALL(args);
     };
     const auto incumbent = [&] { return linear::a8q4g64_linear_wmma32(args, nullptr); };
 
     linear::A8Q4G64LinearArgs invalid = args;
     invalid.rows = 4096U;
-    if (linear::a8q4g64_linear_dflash_small_t_qualification(invalid, nullptr) !=
-        hipErrorInvalidValue) {
+    if (NINFER_DFLASH_SMALL_T_CALL(invalid) != hipErrorInvalidValue) {
         fail("small-T candidate accepted a C1-rejected matrix shape");
     }
     invalid = args;
     invalid.tokens = 3U;
-    if (linear::a8q4g64_linear_dflash_small_t_qualification(invalid, nullptr) !=
-        hipErrorInvalidValue) {
+    if (NINFER_DFLASH_SMALL_T_CALL(invalid) != hipErrorInvalidValue) {
         fail("small-T candidate accepted T=3");
     }
     invalid = args;
     invalid.tokens = 7U;
-    if (linear::a8q4g64_linear_dflash_small_t_qualification(invalid, nullptr) !=
-        hipErrorInvalidValue) {
+    if (NINFER_DFLASH_SMALL_T_CALL(invalid) != hipErrorInvalidValue) {
         fail("small-T candidate accepted T=7");
     }
+#ifdef NINFER_DFLASH_MLP_DOWN_T5_ONLY
+    invalid = args;
+    invalid.tokens = 6U;
+    if (NINFER_DFLASH_SMALL_T_CALL(invalid) != hipErrorInvalidValue) {
+        fail("MLP-down small-T candidate accepted spill-rejected T=6");
+    }
+#endif
     invalid = args;
     invalid.tokens = 9U;
-    if (linear::a8q4g64_linear_dflash_small_t_qualification(invalid, nullptr) !=
-        hipErrorInvalidValue) {
+    if (NINFER_DFLASH_SMALL_T_CALL(invalid) != hipErrorInvalidValue) {
         fail("small-T candidate accepted T=9");
     }
     invalid = args;
     ++invalid.activation_low_codes;
-    if (linear::a8q4g64_linear_dflash_small_t_qualification(invalid, nullptr) !=
-        hipErrorInvalidValue) {
+    if (NINFER_DFLASH_SMALL_T_CALL(invalid) != hipErrorInvalidValue) {
         fail("small-T candidate accepted a misaligned activation plane");
+    }
+    invalid = args;
+    --invalid.weight_code_bytes;
+    if (NINFER_DFLASH_SMALL_T_CALL(invalid) != hipErrorInvalidValue) {
+        fail("small-T candidate accepted an undersized weight plane");
+    }
+    invalid = args;
+    invalid.output = reinterpret_cast<hip_bfloat16*>(
+        const_cast<std::uint8_t*>(invalid.activation_low_codes));
+    if (NINFER_DFLASH_SMALL_T_CALL(invalid) != hipErrorInvalidValue) {
+        fail("small-T candidate accepted output/input aliasing");
     }
 
     std::vector<hip_bfloat16> guarded(static_cast<std::size_t>(tokens) * shape.rows + 2U);
@@ -285,10 +309,10 @@ bool run_case(Shape shape, std::uint32_t tokens, const std::filesystem::path& ou
     const std::filesystem::path source_root = std::filesystem::canonical(NINFER_SOURCE_DIR);
     std::ostringstream out;
     out << std::setprecision(17)
-        << "{\n  \"schema\": \"ninfer.r9700.a8q4-dflash-small-t-cell.v3\",\n"
+        << "{\n  \"schema\": \"" NINFER_DFLASH_SMALL_T_SCHEMA "\",\n"
         << "  \"status\": \"" << (accepted ? "passed" : "rejected") << "\",\n"
         << "  \"production_dispatch_changed\": false,\n"
-        << "  \"scope\": \"N34816/K5120 flattened K4/W5 and K5/W6 widths through C4 only\",\n"
+        << "  \"scope\": \"" NINFER_DFLASH_SMALL_T_SCOPE "\",\n"
         << "  \"hardware\": {\"device\": \"" << json_escape(device.properties.name)
         << "\", \"architecture\": \"" << json_escape(device.properties.gcnArchName)
         << "\", \"pci_bus_id\": \"" << json_escape(device.pci_bus_id)
@@ -339,7 +363,11 @@ bool run_case(Shape shape, std::uint32_t tokens, const std::filesystem::path& ou
         << "\", \"contract\": \""
         << sha256_file(source_root / "src/ops/r9700/linear/r9700_linear.h")
         << "\", \"qualifier\": \""
-        << sha256_file(source_root / "tools/r9700/a8q4_dflash_small_t_qual.hip")
+        << sha256_file(source_root / NINFER_DFLASH_SMALL_T_QUALIFIER_SOURCE)
+#ifdef NINFER_DFLASH_SMALL_T_SHARED_HARNESS_SOURCE
+        << "\", \"shared_harness\": \""
+        << sha256_file(source_root / NINFER_DFLASH_SMALL_T_SHARED_HARNESS_SOURCE)
+#endif
         << "\"}\n}\n";
     const std::string report = out.str();
     const int descriptor =
