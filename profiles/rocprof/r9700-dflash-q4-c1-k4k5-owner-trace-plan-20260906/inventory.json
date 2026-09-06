@@ -1,0 +1,35 @@
+{
+  "artifact_type": "ninfer_r9700_dflash_evaluation_inventory",
+  "schema_version": 1,
+  "status": "exact-local-inventory-no-production-selection",
+  "legacy_row_split_canonical_q4_companions": [
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-dflash2-q4-eval.ninfer",
+      "weights_id": "r9700-q4g64-dflash2-q4-eval",
+      "file_size_bytes": 16382310912,
+      "sha256": "ba39608b8a70e78e038e29154983c45017437803d9a77ea308a288c7908f9cdc",
+      "conversion_report_sha256": "b9d5511eb2f14f089091c9ae2c2cdc40626bcca4702fd5ac6f70b21a285973c5"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4-w8-mse-dflash2-q4-eval.ninfer",
+      "weights_id": "r9700-q4-w8-mse-dflash2-q4-eval",
+      "file_size_bytes": 24090686464,
+      "sha256": "c2dcb265beae6a08052bb83b4e0fc1ef9e19eb743e0c1d58675477129379a43c",
+      "conversion_report_sha256": "76a33d4c83c61bafaa215294a872ba1356d21bc7f79625340d8c5f5e1faebc03"
+    }
+  ],
+  "compatible_retained_legacy_builds": [
+    {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dense-selection-g32/bench/ninfer_bench", "sha256": "62853a231c801bbfe696fad8d42bb566ae683bb230d4f52b6349b0fbc2132cf6", "file_size_bytes": 4937248, "kv_value_group": 32},
+    {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-g32/bench/ninfer_bench", "sha256": "2c9bb5a64f0e25a307f3f2b783a527ed6b42d1671c6e826d7ca98545052e9b31", "file_size_bytes": 4305384, "kv_value_group": 32},
+    {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-w8a8/bench/ninfer_bench", "sha256": "de6989d7b9fdd6677ace311cfa5f33d5f32cdeb92ce204dd02abffc862a36b8e", "file_size_bytes": 4292000, "kv_value_group": 16},
+    {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-q4-pingpong-whole/bench/ninfer_bench", "sha256": "7e6be3fe30a5808b6682a9e993001cf4a512c51ec246c7be616856f753b87d21", "file_size_bytes": 4963008, "kv_value_group": 16},
+    {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-xattention-model-s16-tau900-g32/bench/ninfer_bench", "sha256": "5209481b69406da7833bc291b3a8724571de11c66695c10d8d9dc74d7c0b4782", "file_size_bytes": 5269264, "kv_value_group": 32}
+  ],
+  "current_n16_state": {
+    "retained_production_executable": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-rmsnorm-production-final-20260906/bench/ninfer_bench",
+    "executable_sha256": "a7c9303bd213fa3dbdb29ca0cee73addef1de8ab6a6e6b231509e25239776425",
+    "accepted_dflash_identity_suffix": "-n16k16-dflash2-q4-eval",
+    "matching_companion_present": false,
+    "reason": "the two present companions retain legacy row-split Q4 identities/layouts and are rejected by the current N16/K16 artifact contract"
+  }
+}
