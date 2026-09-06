@@ -580,6 +580,19 @@ selector-off DFlash exactly reproduce their prior 28-token authorities and diffe
 index-27 token 96843 is on a different generated history and cannot establish repair of the prior
 index-27 mismatch. The selector remains off; these functional runs contain no admissible timing.
 
+The selector-on internal follow-up under
+`profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/results` has result-closure
+SHA-256 `2a3a95672f323ac9fbcbf16a3914c4496baa8eb0e0cf8cb92da3ccdd58126907` and summary SHA-256
+`93518da3aef2845594512d1800d8c08ad39352cdd15189257966f62f7728749b`. Target ordinary W1 and
+DFlash W5 are byte-exact for every captured layer-one GDN field from normalized h through final
+mixer residual x; their first visible residual difference moves to layer three, the first
+full-attention mixer, at 2,796/5,120 BF16 values. Text fresh T129 and append T1 are exact through
+h, controls, and q/k/v/z, then first differ in recurrence output o at 106/6,144 BF16 values with
+maximum absolute difference 0.000003814697265625. Gated normalization and the mixer residual inherit
+that difference. This excludes layer-one RMSNorm, control, and input projection/convolution for the
+selected Text column, but the trace does not distinguish an FP32 recurrence-state input mismatch
+from different wide-prefill/append recurrence arithmetic. It is functional evidence only.
+
 A second packed-W4 candidate has passed standalone qualification through the production entry symbol
 for the exact DFlash MLP-down N5120/K17408, T5 cell. The retained summary is
 `profiles/bench/r9700-dflash-mlp-down-t5-production-symbol-qualification-20260906/summary.json`

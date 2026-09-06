@@ -61,8 +61,10 @@ above, not an executable task. Conditional tasks retain their explicit `if:` cla
 - [ ] `DFLASH-TEXT-P129` Localize the shared Text append-versus-fresh dependence for the identical
   effective P129 history. The tail differs in 4,978/5,120 BF16 elements; exact boundary tracing is
   equal through layer0 MLP and first differs after the layer1 GDN mixer in 142/5,120 elements. Now
-  discriminate normalized input/controls, projection-convolution, recurrence/state, gated norm,
-  and output projection at layer1. Do not call this stale state without that primitive boundary.
+  detail tracing is exact through h, controls, and q/k/v/z, then first differs at layer1 recurrence
+  output o (106/6,144 elements). Compare the FP32 recurrent state immediately before the selected
+  transition to distinguish state input from wide-prefill/append recurrence arithmetic. Do not call
+  this stale state without that state boundary.
   Evidence is under `profiles/bench/r9700-dflash-semantic-traces-aebd5f82-20260906/results` and
   `profiles/bench/r9700-qwen3-layer-boundary-traces-43e5e4cc-20260906/results`.
 
@@ -72,9 +74,10 @@ above, not an executable task. Conditional tasks retain their explicit `if:` cla
   and post-commit state remain distinct. Target logits already differ at the first generated step;
   exact boundary tracing is equal through layer0 MLP and first differs after the layer1 GDN mixer
   in 1,219/5,120 elements. The rows5 CTA candidate changes the generated trajectory at index21 and
-  does not restore parity. Now use the selector-on layer1 trace to discriminate normalized
-  input/controls, projection-convolution, recurrence/state, gated norm, and output projection there.
-  Eager already equals graph; that does not waive parity.
+  does not restore overall parity, but selector-on makes every captured layer1 GDN field byte-exact
+  and moves the first visible target residual difference to the layer3 full-attention mixer
+  (2,796/5,120). Localize that attention projection/cache/attention/output boundary next. Eager
+  already equals graph; that does not waive parity.
 
 - [ ] `DFLASH-RECIPE` [depends: TERMINAL-SELECTION, CHUNK-SELECT] Select DFlash matrices from the
   real BF16 DFlash2 checkpoint rather than inheriting the base recipe. Compare canonical Q4G64,

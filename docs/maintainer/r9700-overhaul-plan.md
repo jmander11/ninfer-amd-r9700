@@ -1889,8 +1889,18 @@ Replace functional routes with measured gfx1201 families:
   difference at index 27 (95946 versus 98003). Selector-on DFlash instead first differs from both
   at index 21 (128415 versus 96723) and follows a different history through index 27, where it emits
   96843. The selector therefore does not restore exact token parity and remains off. Layer-one
-  normalized-input tracing now tests the expected row-independent CTA equality before localizing
-  the next GDN primitive. No decode-speed or production-routing claim follows.
+  detail evidence under
+  `profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/results` has result-closure
+  SHA-256 `2a3a95672f323ac9fbcbf16a3914c4496baa8eb0e0cf8cb92da3ccdd58126907` and summary SHA-256
+  `93518da3aef2845594512d1800d8c08ad39352cdd15189257966f62f7728749b`. With the selector on,
+  target W1 and DFlash W5 are byte-exact across layer-one h, g, beta, z, q, k, v, recurrence o,
+  gated-normalized on, and final mixer x; their first visible residual difference moves to the
+  first full-attention mixer at layer three (2,796/5,120 BF16 elements). For Text fresh T129 versus
+  append T1, h through v are exact and recurrence o first differs in 106/6,144 BF16 elements
+  (first element 154, maximum absolute difference 0.000003814697265625); the resulting mixer x
+  differs in 142/5,120. The next Text discriminator compares the layer-one FP32 recurrence state
+  immediately before the selected transition, while the next target discriminator enters the
+  layer-three full-attention mixer. No decode-speed or production-routing claim follows.
   The earlier all-Q4 owner trace does not transfer its target-gate/up conclusion to this four-role
   artifact: all 64 Text gate/up matrices are FP8 and bypass A8Q4. Only the five Q4 DFlash proposal
   gate/up matrices use the small-T route per round, for an expected whole saving of about 7.1 ms at

@@ -1,0 +1,25 @@
+{
+  "artifact_type": "ninfer_qwen3_layer1_gdn_detail_comparison",
+  "schema_version": 1,
+  "diagnostic_only": true,
+  "timing_evidence_eligible": false,
+  "production_routing_authorized": false,
+  "diagnostic": "text",
+  "classification": "first_difference_gdn_recurrence",
+  "first_difference": {
+    "field": "o",
+    "dtype": "bf16",
+    "first_element_index": 154,
+    "mismatch_count": 106,
+    "left_bits": 14405,
+    "right_bits": 14406,
+    "left_value": 4.696846008300781e-05,
+    "right_value": 4.7206878662109375e-05,
+    "maximum_absolute_difference": 3.814697265625e-06,
+    "preceding_fields_exact": true
+  },
+  "limitations": [
+    "captures one selected column and does not capture persistent convolution or recurrence state",
+    "the first differing field localizes a stage boundary, not necessarily the primitive operation"
+  ]
+}
