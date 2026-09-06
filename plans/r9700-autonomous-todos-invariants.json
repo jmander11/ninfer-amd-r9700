@@ -1,0 +1,87 @@
+{
+  "schema": 1,
+  "ledger": "plans/r9700-autonomous-todos.md",
+  "rewrite_source": {
+    "commit": "aebd5f82b91a756429651b2795e3ad24c1058cb3",
+    "ledger_sha256": "f5a174c5c93a2367a277590581493da3f18da933271bbc2137f864c03d2c7c16",
+    "unchecked_count": 34,
+    "removed_meta_item": "Perform a requirements-preserving conciseness pass on this live ledger."
+  },
+  "rewritten_unchecked_count": 33,
+  "unchecked_ids": [
+    "DFLASH-SCHEDULE",
+    "DFLASH-TEXT-P129",
+    "DFLASH-TARGET-P129",
+    "DFLASH-RECIPE",
+    "DFLASH-QUALITY",
+    "DFLASH-WHOLE",
+    "WHOLE-MATRIX",
+    "CHUNK-PHYSICAL-12",
+    "CHUNK-SELECT",
+    "XATT-KEEP-DIST",
+    "Q4-CTA-TERMINAL",
+    "W8-CTA-TERMINAL",
+    "QUALITY-8K32K",
+    "POSTCHUNK-ON",
+    "ALLQ4-PAIRS",
+    "MIXED-PAIRS",
+    "FOURROLE-CAPACITY",
+    "CAPACITY-WHOLE-12",
+    "MODEL-EVIDENCE",
+    "XATT-ADMISSION",
+    "WHOLE-PARETO",
+    "TERMINAL-SELECTION",
+    "LOWCTX-LADDER",
+    "PREFILL-TAIL-CONDITIONAL",
+    "SELECTED-PROFILE",
+    "XATT-G32-SCALE-CONDITIONAL",
+    "SELECTED-NIAH",
+    "XATT-CUTOVER-CONDITIONAL",
+    "BF16-PARITY",
+    "SELECTED-PARITY-VISION",
+    "FINAL-ARTIFACT",
+    "E2E-PROFILE",
+    "FINAL-SUITE"
+  ],
+  "external_dependencies": [
+    "DENSE-FLOOR-DECISION"
+  ],
+  "conditional_ids": [
+    "PREFILL-TAIL-CONDITIONAL",
+    "XATT-G32-SCALE-CONDITIONAL",
+    "XATT-CUTOVER-CONDITIONAL"
+  ],
+  "required_literals": [
+    "C=1..4",
+    "1904.339303",
+    "2,000 tok/s",
+    "27.05729956",
+    "K4/W5",
+    "K5/W6",
+    "auto",
+    "G16/G32",
+    "B128/S16/tau900",
+    "FP8 E4M3FN keys",
+    "signed INT4 values",
+    "FP16 value scales"
+  ],
+  "required_active_owner_paths": [
+    "profiles/bench/prefill-chunk-selection-pipeline-20260905",
+    "profiles/ppl/terminal-quality-recovery-20260905",
+    "profiles/bench/post-chunk-twelve-candidate-20260905",
+    "profiles/bench/terminal-static-selection-20260905",
+    "profiles/bench/low-context-selected-ladder-20260905",
+    "profiles/bench/post-terminal-selected-hardware-use-20260905",
+    "profiles/rocprof/selected-ordinary-decode-profile-build-20260905",
+    "profiles/rocprof/selected-ordinary-decode-memory-prepare-20260905",
+    "profiles/bench/post-terminal-niah-prepare-20260905",
+    "profiles/bench/post-terminal-focused-verification-20260905",
+    "profiles/ppl/post-terminal-exact-token-prepare-20260905",
+    "profiles/bench/post-terminal-selected-vision-prepare-20260905",
+    "profiles/bench/final-artifact-cutover-admission-prepare-20260905"
+  ],
+  "required_historical_nonrunnable_owner_paths": [
+    "profiles/bench/prefill-chunk-screen-twelve-candidate-20260905",
+    "profiles/bench/selected-dflash-prepare-20260905"
+  ]
+}
