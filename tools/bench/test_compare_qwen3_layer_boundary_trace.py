@@ -72,6 +72,17 @@ class CompareTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "hash"):
                 compare(left, right, "target")
 
+    def test_rejects_duplicate_and_nonfinite_json(self):
+        for payload, message in (("{\"role\":1,\"role\":2}", "duplicate"),
+                                 ("{\"value\":NaN}", "nonfinite")):
+            with self.subTest(message=message), tempfile.TemporaryDirectory() as raw:
+                directory = Path(raw)
+                left = self.fixture(directory, ROLES["target"][0])
+                right = self.fixture(directory, ROLES["target"][1])
+                right.write_text(payload)
+                with self.assertRaisesRegex(RuntimeError, message):
+                    compare(left, right, "target")
+
 
 if __name__ == "__main__":
     unittest.main()

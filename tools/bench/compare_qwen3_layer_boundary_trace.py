@@ -37,6 +37,15 @@ def fail(message: str) -> None:
     raise RuntimeError(message)
 
 
+def pairs(items):
+    result = {}
+    for key, value in items:
+        if key in result:
+            fail(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
+
+
 def integer(value: object, label: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         fail(f"{label} must be an integer")
@@ -52,7 +61,8 @@ def fnv1a64(data: bytes) -> str:
 
 
 def load(path: Path, expected: tuple[str, int, int, int, int]) -> tuple[dict, bytes]:
-    value = json.loads(path.read_text())
+    value = json.loads(path.read_text(), object_pairs_hook=pairs,
+                       parse_constant=lambda token: fail(f"nonfinite JSON: {token}"))
     if not isinstance(value, dict) or set(value) != MANIFEST_KEYS:
         fail(f"manifest keys differ: {path}")
     role, width, column, frontier, position = expected
@@ -83,7 +93,9 @@ def load(path: Path, expected: tuple[str, int, int, int, int]) -> tuple[dict, by
     if not 0 <= token < 248077:
         fail(f"token is outside the Text token domain: {path}")
     sidecar = Path(value.get("sidecar_path")) if isinstance(value.get("sidecar_path"), str) else None
-    if sidecar is None or not sidecar.is_absolute() or sidecar.is_symlink() or not sidecar.is_file():
+    expected_sidecar = path.with_suffix(".bin")
+    if (sidecar is None or sidecar != expected_sidecar or not sidecar.is_absolute() or
+            sidecar.is_symlink() or not sidecar.is_file()):
         fail(f"sidecar identity is invalid: {path}")
     data = sidecar.read_bytes()
     if len(data) != PAYLOAD_BYTES or value.get("sidecar_fnv1a64") != fnv1a64(data):
