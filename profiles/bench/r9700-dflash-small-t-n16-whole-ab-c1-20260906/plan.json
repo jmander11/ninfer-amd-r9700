@@ -1,0 +1,75 @@
+{
+  "artifact_type": "ninfer_r9700_dflash_small_t_whole_ab_plan",
+  "schema_version": 1,
+  "status": "prepared_waiting_for_conversion_and_matched_builds",
+  "claim": "matched evaluation screen only; no production routing or DFlash recipe selection",
+  "production_routing_authorized": false,
+  "production_recipe_selected": false,
+  "prerequisites": {
+    "conversion_plan": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-four-role-n16k16-canonical-q4-preflight-20260906/plan.json",
+    "conversion_plan_sha256": "59b051e07ab69e87e0370e0bc837c52c7d67c0bc0d1cf777a16846b6f7eebed4",
+    "base_artifact": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer",
+    "dflash_source": "/ssdpool2nvme/local_llm/models/qwen3.8-27b-dflash2",
+    "companion_artifact": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval.ninfer",
+    "conversion_report": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval.ninfer.conversion.json",
+    "matched_build_receipt": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-small-t-n16-matched-builds-20260906/build-receipt.json"
+  },
+  "expected_artifact": {
+    "model_id": "qwen3.8-27b",
+    "weights_id": "r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval",
+    "bytes": 22763026944,
+    "sha256": "d8fc77c36cf17c92e96d67b9a6b5a1826a1ade4f59d59c003b2368fe981fc512",
+    "conversion_report_sha256": "fb657164b9a9dc2987542ca4578b2bf75d79092a3efa8b7b1776520b4959f61f",
+    "objects": 1190,
+    "combined_object_plan_sha256": "5fb0a726e0af5eeb2bc8c704dcbcc17154f18dff40941f9012dbf1ebb698b501",
+    "dflash_recipe": "canonical-q4g64",
+    "weight_recipe_selected": false
+  },
+  "matched_builds": {
+    "receipt_artifact_type": "ninfer_r9700_dflash_small_t_matched_build_receipt",
+    "receipt_schema_version": 1,
+    "source_commit": "ca2b58c5728de0fc52916796a2ac5ef6cee5e5f9",
+    "control_executable": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-small-t-n16-control-20260906/bench/ninfer_bench",
+    "candidate_executable": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-small-t-n16-candidate-20260906/bench/ninfer_bench",
+    "control_selector": false,
+    "candidate_selector": true
+  },
+  "workload": {
+    "device": 0,
+    "concurrency": [1],
+    "maximum_product_concurrency": 4,
+    "profiles": [
+      {"draft_tokens": 4, "verify_width": 5},
+      {"draft_tokens": 5, "verify_width": 6}
+    ],
+    "prompt_tokens": 8192,
+    "decode_steps": 256,
+    "requested_output_tokens": 257,
+    "prefill_chunk": 4096,
+    "device_graph": true,
+    "proposal_head": "optimized",
+    "repetitions_per_process": 3,
+    "warmup_per_process": 1,
+    "launch_orders": {
+      "K4_W5": ["control", "candidate", "candidate", "control"],
+      "K5_W6": ["candidate", "control", "control", "candidate"]
+    },
+    "tests_per_process": ["isolated_decode", "fresh_prompt_whole_inference"],
+    "corpus": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids",
+    "corpus_sha256": "27e4f63c17efe3f89b5cf278b3b1a42a737316ed4044d7d0d1d52437059d1002"
+  },
+  "timing": {
+    "profiled": false,
+    "power_profile": "auto",
+    "samples_per_route_and_test": 6,
+    "screen_criterion": "candidate median below control in both control-first and candidate-first launch orders, paired-ratio mean plus two standard errors below one, and launch-order median-ratio delta at most 0.02",
+    "screen_is_not_production_admission": true
+  },
+  "correctness": {
+    "ordinary_control_required": true,
+    "exact_generated_tokens_across_repetitions_routes_and_ordinary": true,
+    "exact_speculative_accounting_across_control_and_candidate": true,
+    "required_speculative_fields": ["rounds", "drafted_tokens", "accepted_tokens", "fallback_steps", "accepted_per_position"]
+  },
+  "results_directory": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-small-t-n16-whole-ab-c1-20260906/results"
+}
