@@ -1833,9 +1833,20 @@ Replace functional routes with measured gfx1201 families:
   therefore present in target arithmetic before acceptance selection. Separately, fresh
   base0/T129 versus append base128/T1 differs in 4,978 of 5,120 final normalized-tail BF16 elements
   (first hidden index zero, maximum absolute difference 0.75), although both immediate heads still
-  select 96558. The next diagnostic is an exact per-layer anchor-column boundary trace: ordinary
-  W1 versus DFlash W5 column0 at frontier 130, and fresh column128 versus append column0 at the
-  shared P129 tail. These functional traces are timing-ineligible and authorize no route change.
+  select 96558. The exact per-layer anchor-column capture under
+  `profiles/bench/r9700-qwen3-layer-boundary-traces-43e5e4cc-20260906/results` has raw closure
+  `bab590a7a40307a6f440a2bb41bd4c4135987eb7e67d8bac4ca5b58a38aa0d00`, analysis closure
+  `b8096ffe54b6b51ead578c51a9357d96346073c64a37f27ef6fea91799569ec2`, and summary SHA-256
+  `ffaf7dc9a0ea43be5c81e617680d0b5b842c2323778b38e350da45d40990c3c0`. Both comparisons are
+  exact through the input, layer-zero mixer, and layer-zero MLP, then first differ after the
+  layer-one GDN mixer. Ordinary W1 versus DFlash W5 differs in 1,219/5,120 BF16 residual elements
+  (first hidden index one, bits 48443 versus 48444); fresh T129 column128 versus append T1 column0
+  differs in 142/5,120 (first hidden index two, bits 14995 versus 14994). This excludes later
+  layers and the final norm/head as the first cause, but not yet the primitive within the GDN
+  mixer. The next discriminator captures layer-one normalized input and controls, projected and
+  convolved q/k/v/z, recurrent output, gated normalization, and output projection, with
+  role-appropriate state evidence. These functional traces are timing-ineligible and authorize no
+  route change.
   The direct packed-W4 qualifier for the exact DFlash MLP-down N5120/K17408, T5 cell now executes
   the production entry symbol. Its accepted summary is
   `profiles/bench/r9700-dflash-mlp-down-t5-production-symbol-qualification-20260906/summary.json`
@@ -1865,8 +1876,11 @@ Replace functional routes with measured gfx1201 families:
   versus 0.008648 ms (ratio 0.082685), and rows 6 measure 0.103696 ms versus 0.008631 ms (ratio
   0.083335); both launch orders and two-standard-error gates pass with order deltas below 0.00015.
   Exact static facts remain 17 VGPR, 32-byte LDS, occupancy 16, wave32, and no private/scratch
-  allocation. Production still selects only rows 1--4. Rows 5/6 admission requires exact semantic
-  parity and matched whole-DFlash evidence; this standalone result is not a decode-speed claim.
+  allocation. An off-by-default compile selector now admits only K5120 rows 5/6 and reports its
+  identity; selector-off and selector-on production harnesses cover public eager rows 1--6 and
+  graph replay at rows 5/6. Production remains selector-off until its clean committed matched
+  builds pass the numerical gate and then exact semantic parity and matched whole-DFlash evidence;
+  this standalone result is not a decode-speed claim.
   The earlier all-Q4 owner trace does not transfer its target-gate/up conclusion to this four-role
   artifact: all 64 Text gate/up matrices are FP8 and bypass A8Q4. Only the five Q4 DFlash proposal
   gate/up matrices use the small-T route per round, for an expected whole saving of about 7.1 ms at

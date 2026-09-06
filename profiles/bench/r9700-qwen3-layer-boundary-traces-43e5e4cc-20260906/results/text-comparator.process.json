@@ -1,0 +1,25 @@
+{
+  "command": [
+    "/usr/bin/python3",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/bench/compare_qwen3_layer_boundary_trace.py",
+    "--left",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer-boundary-traces-43e5e4cc-20260906/results/text-fresh.trace.json",
+    "--right",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer-boundary-traces-43e5e4cc-20260906/results/text-append.trace.json",
+    "--diagnostic",
+    "text",
+    "--out",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer-boundary-traces-43e5e4cc-20260906/results/text-comparison.json"
+  ],
+  "exit_code": 0,
+  "stdout": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer-boundary-traces-43e5e4cc-20260906/results/text-comparator.stdout",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "stderr": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer-boundary-traces-43e5e4cc-20260906/results/text-comparator.stderr",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

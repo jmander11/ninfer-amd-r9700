@@ -13,6 +13,7 @@ from pathlib import Path
 PACKAGE = Path(__file__).resolve().parent
 ROOT = Path("/ssdpool2nvme/local_llm/ninfer-amd-r9700")
 RESULTS = PACKAGE / "results"
+REPAIR = PACKAGE / "analysis-repair.json"
 EXE = ROOT / "build-r9700-layer-boundary-43e5e4cc-20260906/bench/ninfer_bench"
 ARTIFACT = ROOT / "out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval.ninfer"
 HISTORY = ROOT / "profiles/bench/r9700-dflash-p129-isolation-discriminator-20260906/history-p129.ids"
@@ -102,6 +103,62 @@ def validate_trace_input_token(stem: str, value: object) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value != expected:
         fail(f"trace selected input token differs: {stem}")
     return value
+
+
+def validate_speculative(spec: object, expected_spec: bool, stem: str, scope: str) -> None:
+    spec_keys = {"enabled", "draft_window", "rounds", "drafted_tokens", "accepted_tokens",
+                 "fallback_steps", "acceptance_rate", "acceptance_length",
+                 "accepted_per_position"}
+    if not isinstance(spec, dict) or set(spec) != spec_keys or \
+            spec.get("enabled") is not expected_spec:
+        fail(f"speculative report keys differ: {stem}/{scope}")
+    if not expected_spec:
+        if spec != {"enabled": False, "draft_window": 0, "rounds": 0,
+                    "drafted_tokens": 0, "accepted_tokens": 0, "fallback_steps": 0,
+                    "acceptance_rate": None, "acceptance_length": None,
+                    "accepted_per_position": []}:
+            fail(f"ordinary speculative report differs: {stem}/{scope}")
+        return
+    for key in ("draft_window", "rounds", "drafted_tokens", "accepted_tokens",
+                "fallback_steps"):
+        if isinstance(spec.get(key), bool) or not isinstance(spec.get(key), int) or spec[key] < 0:
+            fail(f"speculative integer differs: {stem}/{scope}/{key}")
+    if spec["draft_window"] != 4 or \
+            spec["rounds"] + spec["accepted_tokens"] + spec["fallback_steps"] != 1:
+        fail(f"speculative accounting differs: {stem}/{scope}")
+    if spec["drafted_tokens"] == 0:
+        if (spec["rounds"] != 0 or spec["accepted_tokens"] != 0 or
+                spec["fallback_steps"] != 1 or spec["acceptance_rate"] is not None or
+                spec["acceptance_length"] is not None or
+                spec["accepted_per_position"] != [0, 0, 0, 0]):
+            fail(f"zero-draft speculative report differs: {stem}/{scope}")
+        return
+    for key in ("acceptance_rate", "acceptance_length"):
+        if isinstance(spec.get(key), bool) or not isinstance(spec.get(key), (int, float)) or \
+                not math.isfinite(spec[key]):
+            fail(f"speculative rate differs: {stem}/{scope}/{key}")
+
+
+def validate_analysis_repair() -> dict:
+    repair = load(REPAIR)
+    expected_keys = {"artifact_type", "schema_version", "status", "cause", "gpu_rerun",
+                     "capture_prepared_closure", "capture_result_closure",
+                     "capture_analyzer", "repaired_analyzer"}
+    if (set(repair) != expected_keys or
+            repair.get("artifact_type") != "ninfer_qwen3_layer_boundary_trace_analysis_repair" or
+            repair.get("schema_version") != 1 or
+            repair.get("status") != "analysis_only_no_gpu_rerun" or
+            repair.get("cause") !=
+            "the capture analyzer required finite DFlash acceptance metrics when zero drafted tokens correctly serialize undefined rates as null" or
+            repair.get("gpu_rerun") is not False or
+            repair.get("capture_prepared_closure") != identity(PACKAGE / "prepared.sha256") or
+            repair.get("capture_result_closure") != identity(RESULTS / "result.sha256") or
+            repair.get("capture_analyzer") != {
+                "path": str(PACKAGE / "analyze.py"), "bytes": 19381,
+                "sha256": "e04839b3ad51f417a8b5a341f4cac7c481e1353bc479388c18df93244a402c1d"} or
+            repair.get("repaired_analyzer") != identity(Path(__file__))):
+        fail("analysis-only repair provenance differs")
+    return identity(REPAIR)
 
 
 def validate_process(stem: str, expected_command: list[str], manifest: Path,
@@ -255,24 +312,8 @@ def validate_report(stem: str) -> tuple[dict, list[int]]:
     expected_tokens = 2
     if len(lanes[0]) != expected_tokens:
         fail(f"retained token count differs: {stem}")
-    spec_keys = {"enabled", "draft_window", "rounds", "drafted_tokens", "accepted_tokens",
-                 "fallback_steps", "acceptance_rate", "acceptance_length", "accepted_per_position"}
     for label_spec, spec in (("test", test.get("speculative")), ("rep", rep.get("speculative"))):
-        if not isinstance(spec, dict) or set(spec) != spec_keys or spec.get("enabled") is not expected_spec:
-            fail(f"speculative report keys differ: {stem}/{label_spec}")
-        if expected_spec:
-            for key in ("draft_window", "rounds", "drafted_tokens", "accepted_tokens", "fallback_steps"):
-                if isinstance(spec.get(key), bool) or not isinstance(spec.get(key), int) or spec[key] < 0:
-                    fail(f"speculative integer differs: {stem}/{label_spec}/{key}")
-            if spec["draft_window"] != 4 or spec["rounds"] + spec["accepted_tokens"] + spec["fallback_steps"] != 1:
-                fail(f"speculative accounting differs: {stem}/{label_spec}")
-            for key in ("acceptance_rate", "acceptance_length"):
-                if isinstance(spec.get(key), bool) or not isinstance(spec.get(key), (int, float)) or not math.isfinite(spec[key]):
-                    fail(f"speculative rate differs: {stem}/{label_spec}/{key}")
-        elif spec != {"enabled": False, "draft_window": 0, "rounds": 0, "drafted_tokens": 0,
-                     "accepted_tokens": 0, "fallback_steps": 0, "acceptance_rate": None,
-                     "acceptance_length": None, "accepted_per_position": []}:
-            fail(f"ordinary speculative report differs: {stem}/{label_spec}")
+        validate_speculative(spec, expected_spec, stem, label_spec)
     return identity(path), validate_output_tokens(stem, lanes[0])
 
 
@@ -297,6 +338,7 @@ def validate_comparator(label: str, left: str, right: str, expected: dict) -> di
 def analyze(summary_path: Path) -> dict:
     if summary_path != RESULTS / "summary.json" or summary_path.exists() or summary_path.is_symlink():
         fail("summary output must be the exact fresh path")
+    analysis_repair = validate_analysis_repair()
     reports = {}
     processes = {}
     tokens = {}
@@ -325,6 +367,7 @@ def analyze(summary_path: Path) -> dict:
         "timing_evidence_eligible": False,
         "production_routing_authorized": False,
         "source_commit": "43e5e4ccb3212aa43717104aa5f45ef717ad97b8",
+        "analysis_repair": analysis_repair,
         "reports": reports,
         "processes": processes,
         "manifests": manifests,

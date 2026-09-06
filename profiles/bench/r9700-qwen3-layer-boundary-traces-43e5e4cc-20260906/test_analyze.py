@@ -50,6 +50,30 @@ class AnalyzeTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "selected input token"):
                 ANALYZE.validate_trace_input_token(stem, 96558)
 
+    def test_zero_draft_dflash_rates_are_exact_null(self):
+        value = {"enabled": True, "draft_window": 4, "rounds": 0,
+                 "drafted_tokens": 0, "accepted_tokens": 0, "fallback_steps": 1,
+                 "acceptance_rate": None, "acceptance_length": None,
+                 "accepted_per_position": [0, 0, 0, 0]}
+        ANALYZE.validate_speculative(value, True, "target-dflash", "rep")
+        for key, mutation in (("acceptance_rate", 0.0),
+                              ("acceptance_length", 0.0),
+                              ("accepted_per_position", [0, 0, 0, 1])):
+            changed = dict(value)
+            changed[key] = mutation
+            with self.subTest(key=key), self.assertRaisesRegex(RuntimeError, "zero-draft"):
+                ANALYZE.validate_speculative(changed, True, "target-dflash", "rep")
+
+    def test_drafted_dflash_rates_must_be_finite(self):
+        value = {"enabled": True, "draft_window": 4, "rounds": 1,
+                 "drafted_tokens": 4, "accepted_tokens": 0, "fallback_steps": 0,
+                 "acceptance_rate": 0.0, "acceptance_length": 1.0,
+                 "accepted_per_position": [0, 0, 0, 0]}
+        ANALYZE.validate_speculative(value, True, "target-dflash", "rep")
+        value["acceptance_rate"] = None
+        with self.assertRaisesRegex(RuntimeError, "speculative rate"):
+            ANALYZE.validate_speculative(value, True, "target-dflash", "rep")
+
 
 if __name__ == "__main__":
     unittest.main()

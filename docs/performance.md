@@ -557,6 +557,18 @@ first differs at index 27 (95946 versus 98003); the isolated cross-mode pair dif
 while shared append execution and DFlash target/accept/commit behavior remain separate localization
 owners. It provides no admissible timing or routing claim.
 
+The follow-up exact layer-boundary capture is retained under
+`profiles/bench/r9700-qwen3-layer-boundary-traces-43e5e4cc-20260906/results`. Its unchanged raw
+closure is `bab590a7a40307a6f440a2bb41bd4c4135987eb7e67d8bac4ca5b58a38aa0d00`; the analysis-only
+zero-draft-report repair is bound by closure
+`b8096ffe54b6b51ead578c51a9357d96346073c64a37f27ef6fea91799569ec2`, and the summary SHA-256 is
+`ffaf7dc9a0ea43be5c81e617680d0b5b842c2323778b38e350da45d40990c3c0`. Both comparisons are exact
+through input, layer-zero mixer, and layer-zero MLP, then first differ after the layer-one GDN
+mixer. Ordinary W1 versus DFlash W5 differs in 1,219/5,120 represented BF16 residual values; fresh
+T129 column128 versus append T1 column0 differs in 142/5,120. The capture localizes the first
+visible divergence to one mixer but does not yet identify its primitive cause, establish a
+semantic failure threshold, or provide timing evidence.
+
 A second packed-W4 candidate has passed standalone qualification through the production entry symbol
 for the exact DFlash MLP-down N5120/K17408, T5 cell. The retained summary is
 `profiles/bench/r9700-dflash-mlp-down-t5-production-symbol-qualification-20260906/summary.json`

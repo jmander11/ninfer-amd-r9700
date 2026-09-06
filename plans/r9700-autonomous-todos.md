@@ -51,22 +51,26 @@ above, not an executable task. Conditional tasks retain their explicit `if:` cla
   current-companion whole A/B, token parity, and a material end-to-end win before any route change.
   The exact T5/T6 FP8 target gate/up challenger is terminally rejected at 3.77x/3.64x incumbent
   time; do not rerun it without a changed source mechanism. The K5120 one-CTA RMSNorm route is
-  standalone-qualified at rows5/6 near 0.083x incumbent time but remains outside production until
-  semantic parity and matched whole evidence admit an exact static width set.
+  standalone-qualified at rows5/6 near 0.083x incumbent time and integrated behind an off-by-default
+  exact compile selector. Finish its clean matched-build numerical receipt, then require semantic
+  parity and matched whole evidence before admitting that static width set.
 
 - [ ] `DFLASH-TEXT-P129` Localize the shared Text append-versus-fresh dependence for the identical
-  effective P129 history. Compare exact final normalized tail hidden and output-head top-two margin;
-  the tail differs in 4,978/5,120 BF16 elements, so now trace fresh column128 versus append column0
-  at the shared frontier through the first differing mixer/MLP boundary. Do not call this stale
-  state without that semantic boundary. Evidence is under
-  `profiles/bench/r9700-dflash-semantic-traces-aebd5f82-20260906/results`.
+  effective P129 history. The tail differs in 4,978/5,120 BF16 elements; exact boundary tracing is
+  equal through layer0 MLP and first differs after the layer1 GDN mixer in 142/5,120 elements. Now
+  discriminate normalized input/controls, projection-convolution, recurrence/state, gated norm,
+  and output projection at layer1. Do not call this stale state without that primitive boundary.
+  Evidence is under `profiles/bench/r9700-dflash-semantic-traces-aebd5f82-20260906/results` and
+  `profiles/bench/r9700-qwen3-layer-boundary-traces-43e5e4cc-20260906/results`.
 
 - [ ] `DFLASH-TARGET-P129` On the fresh-P129 common prefix through generated index 26, localize the
   first ordinary-versus-DFlash difference. Retain target-verification top-two/argmax by column,
   accepted column, licensed tokens, and next frontier so target arithmetic, acceptance selection,
   and post-commit state remain distinct. Target logits already differ at the first generated step;
-  trace ordinary W1 versus DFlash W5 column0 at frontier130 through the first differing mixer/MLP
-  boundary. Eager already equals graph; that does not waive parity.
+  exact boundary tracing is equal through layer0 MLP and first differs after the layer1 GDN mixer
+  in 1,219/5,120 elements. Now discriminate normalized input/controls, projection-convolution,
+  recurrence/state, gated norm, and output projection there. Eager already equals graph; that does
+  not waive parity.
 
 - [ ] `DFLASH-RECIPE` [depends: TERMINAL-SELECTION, CHUNK-SELECT] Select DFlash matrices from the
   real BF16 DFlash2 checkpoint rather than inheriting the base recipe. Compare canonical Q4G64,
