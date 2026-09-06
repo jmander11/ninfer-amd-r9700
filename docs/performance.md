@@ -1000,10 +1000,21 @@ candidate/control upper ratio was `0.7598847464`, the robust saving lower was
 `11.72510638 ms/token`, and the robust prefill upper ratio was `1.0029548902`; generated tokens
 were exact in every pair. The immutable report is
 `profiles/bench/r9700-rmsnorm-rows4-whole-p8192-g256-full-20260906.json`, SHA-256
-`3f5c7a678f29b09537b46ebf7692e6f8d9b422e08f9ffe656367815932b2d0f6`. Ordinary-decode work now
-continues with one bounded grouped-PV probe after the selected-route trace. That internal probe
-does not open the held prefill campaign or satisfy the selected-recipe DFlash2 gates; those remain
-behind their existing prefill/base-selection dependencies.
+`3f5c7a678f29b09537b46ebf7692e6f8d9b422e08f9ffe656367815932b2d0f6`.
+
+The next bounded grouped-PV experiment did not promote. Its reduced fixed-fixture mechanism report,
+`profiles/bench/r9700-split512-grouped-pv-qualification-v2-20260906.json` (SHA-256
+`f690accdc47bd85096aa412aa415e3f55446e8d9b737b9928cef671b1054ea6d`), is screen-only. The
+product-integrated route nevertheless passed exact numerical, rejection, and fixed-address Device
+Graph qualification in `profiles/bench/r9700-split512-grouped-t1-direct-20260906.json` (SHA-256
+`958b38efaced4b671222c32de93ce72264df6a58aa6fbb5797f0738e965ba65b`). The source-matched
+C1/P8192+G32 whole screen then measured a `1.0038023342` candidate/control decode ratio,
+`-0.141697625 ms/token` saving, and `1.0033795393` prefill ratio with exact generated tokens. The
+rejected report is `profiles/bench/r9700-split512-grouped-t1-whole-p8192-g32-screen-v2-20260906.json`
+(SHA-256 `bcd24621462dbb404ecc77b79a6b324f0c4d4b67a7e0afdcbacc69281cd1d9f2`). No full gate was run;
+the selector and challenger were removed. Ordinary-decode work proceeds to bounded
+bandwidth/stall-proxy profiling and a roof decision, not another grouped-PV variant. This work does
+not open the held prefill campaign or satisfy the selected-recipe DFlash2 gates.
 
 The fresh selector-free build then measured `9.461402437 s` for 256 decode tokens
 (`27.05729956 tok/s`) with all 257 generated token IDs retained. The final report is

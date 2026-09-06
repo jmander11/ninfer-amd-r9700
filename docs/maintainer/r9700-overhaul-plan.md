@@ -1698,8 +1698,18 @@ Replace functional routes with measured gfx1201 families:
   robust ratio upper of `0.7598847464`, saving lower of `11.72510638 ms/token`, prefill ratio upper
   of `1.0029548902`, and exact generated tokens. Its immutable report is
   `profiles/bench/r9700-rmsnorm-rows4-whole-p8192-g256-full-20260906.json` (SHA-256
-  `3f5c7a678f29b09537b46ebf7692e6f8d9b422e08f9ffe656367815932b2d0f6`). The next ordinary step is
-  one bounded grouped-PV probe after the selected-route trace. This internal optimization
+  `3f5c7a678f29b09537b46ebf7692e6f8d9b422e08f9ffe656367815932b2d0f6`). The subsequent grouped-PV
+  mechanism report, `profiles/bench/r9700-split512-grouped-pv-qualification-v2-20260906.json`
+  (SHA-256 `f690accdc47bd85096aa412aa415e3f55446e8d9b737b9928cef671b1054ea6d`), is only a reduced-fixture
+  screen. The integrated route passed exact numerical, rejection, and Device Graph qualification in
+  `profiles/bench/r9700-split512-grouped-t1-direct-20260906.json` (SHA-256
+  `958b38efaced4b671222c32de93ce72264df6a58aa6fbb5797f0738e965ba65b`), but its C1/P8192+G32
+  whole screen produced decode ratio `1.0038023342`, saving `-0.141697625 ms/token`, and prefill
+  ratio `1.0033795393` with exact generated tokens. The rejected whole report is
+  `profiles/bench/r9700-split512-grouped-t1-whole-p8192-g32-screen-v2-20260906.json` (SHA-256
+  `bcd24621462dbb404ecc77b79a6b324f0c4d4b67a7e0afdcbacc69281cd1d9f2`). No full gate was run;
+  the selector, challenger, and temporary tooling were removed. The next ordinary action is bounded
+  bandwidth/stall-proxy profiling and its roof decision, not another grouped-PV variant. This
   sequence neither opens the held prefill campaign nor substitutes for the selected-recipe DFlash2
   gates, which remain behind their existing dependencies.
   The selector-free final smoke measured `9.461402437 s` for 256 decode tokens

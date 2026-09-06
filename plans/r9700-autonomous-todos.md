@@ -19,7 +19,10 @@ the 2,000 tok/s hard gate, so do not resume the dependent chunk/capacity/whole c
 active optimization priority is ordinary non-speculative decode. Native dot8 and the exact K5120
 rows1..4 RMSNorm CTA are canonical; the latter's source-matched C1 8K+256 decode median is
 `9.467485694 s` (`27.03991411 tok/s`), and its selector-free final smoke is `27.05729956 tok/s`.
-The selected-route trace is complete; run one bounded grouped-PV probe next.
+The grouped-PV mechanism passed its reduced screen and exact direct product qualification but lost
+the C1/P8192+G32 whole screen at decode ratio `1.0038023342` and was removed without a full gate.
+Run bounded bandwidth/stall-proxy profiling next and make the ordinary-decode roof decision; do not
+open another grouped-PV variant.
 After ordinary decode, implement and optimize DFlash2. Do not schedule MTP optimization:
 existing MTP support may remain, but its `19.244583 tok/s` MTP3 result is diagnostic only and does
 not rank a product route. Dense prefill remains open for the two bounded future mechanisms recorded
@@ -1944,9 +1947,20 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         The extracted loaded gfx1201 object SHA-256 is
         `c3dcad45559a112f42f07b1d7e87fbd1d494d1d024083efc0498500ee678cd72`; the selected kernel uses
         17 VGPR, 32 bytes LDS, wave32, occupancy 16, and zero scratch/spills.
-        Continue ordinary decode with one bounded grouped-PV probe. This internal
-        work does not open the held prefill campaign or discharge the selected-recipe DFlash2
-        gates. Do not optimize or rank MTP; its `19.24458338` tok/s MTP3 row remains diagnostic.
+        The following grouped-PV mechanism report is screen-only:
+        `profiles/bench/r9700-split512-grouped-pv-qualification-v2-20260906.json` (SHA-256
+        `f690accdc47bd85096aa412aa415e3f55446e8d9b737b9928cef671b1054ea6d`). The integrated product
+        route passed exact numerical, rejection, and Device Graph qualification in
+        `profiles/bench/r9700-split512-grouped-t1-direct-20260906.json` (SHA-256
+        `958b38efaced4b671222c32de93ce72264df6a58aa6fbb5797f0738e965ba65b`). Its C1/P8192+G32 whole
+        screen nevertheless rejected it at decode ratio `1.0038023342`, saving
+        `-0.141697625 ms/token`, and prefill ratio `1.0033795393`, with exact generated tokens. The
+        report is `profiles/bench/r9700-split512-grouped-t1-whole-p8192-g32-screen-v2-20260906.json`
+        (SHA-256 `bcd24621462dbb404ecc77b79a6b324f0c4d4b67a7e0afdcbacc69281cd1d9f2`). No full gate was run;
+        the selector, challenger, and temporary tools were removed. Continue ordinary decode with
+        bounded bandwidth/stall-proxy profiling and its roof decision, not another grouped-PV
+        variant. This work does not open the held prefill campaign or discharge the selected-recipe
+        DFlash2 gates. Do not optimize or rank MTP; its `19.24458338` tok/s MTP3 row remains diagnostic.
         After ordinary decode, the next implementation priority is DFlash2.
         Final selected-route profiling and roof accounting remain in the dependent item below
         because they require the eventual selected chunk/profile authority.

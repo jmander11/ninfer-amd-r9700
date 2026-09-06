@@ -734,6 +734,53 @@ void qualify_page_rows_and_t1_positions(ninfer::DeviceContext& gpu,
     }
 }
 
+void qualify_t1_nonfinite_and_status(ninfer::DeviceContext& gpu,
+                                     const StoredFixture& fixture,
+                                     DeviceFixture& device) {
+    constexpr std::size_t context = 513U;
+    constexpr std::size_t elements = kQueryHeads * kHeadDim;
+    std::vector<float> finite_queries = make_queries(1U, 419U);
+    std::vector<float> nonfinite_queries = finite_queries;
+    nonfinite_queries[0] = std::numeric_limits<float>::quiet_NaN();
+    const std::vector<hip_bfloat16> represented = as_bf16(nonfinite_queries);
+    device.queries.copy_from_host(represented.data(), represented.size() * sizeof(hip_bfloat16));
+    kv::Fp8Int4KvAttentionArgs args = make_args(device, fixture, 1U, context);
+    const std::size_t workspace_bytes =
+        kv::fp8_int4_kv_attention_split512_workspace_capacity_bytes(1U, context);
+    HIP_CHECK(kv::fp8_int4_kv_attention_split512(
+        args, device.workspace.data(), workspace_bytes, gpu.stream));
+    gpu.synchronize();
+    std::vector<float> actual(elements);
+    device.output.copy_to_host(actual.data(), actual.size() * sizeof(float));
+    if (!std::all_of(actual.begin(), actual.begin() + kHeadDim,
+                     [](float value) { return std::isnan(value); })) {
+        fail("nonfinite T=1 query head did not poison its complete output");
+    }
+    const std::vector<double> expected = attention_oracle(
+        fixture, finite_queries, 1U, context, nullptr, nullptr, nullptr,
+        std::numeric_limits<std::size_t>::max(), true);
+    for (std::size_t index = kHeadDim; index < elements; ++index) {
+        const double absolute = std::abs(static_cast<double>(actual[index]) - expected[index]);
+        const double relative = absolute / std::max(std::abs(expected[index]), 1.0e-6);
+        if (absolute > 5.0e-3 && relative > 5.0e-3) {
+            fail("nonfinite T=1 query contaminated a neighboring query head");
+        }
+    }
+
+    constexpr std::uint8_t poison = 0xa5U;
+    device.output.fill(poison);
+    std::vector<std::uint8_t> before(device.output.size());
+    device.output.copy_to_host(before.data(), before.size());
+    args.output = nullptr;
+    require_invalid(kv::fp8_int4_kv_attention_split512(
+                        args, device.workspace.data(), workspace_bytes, gpu.stream),
+                    "null T=1 output");
+    gpu.synchronize();
+    std::vector<std::uint8_t> after(device.output.size());
+    device.output.copy_to_host(after.data(), after.size());
+    if (after != before) fail("rejected T=1 call changed the output allocation");
+}
+
 void qualify_graph(ninfer::DeviceContext& gpu, const StoredFixture& fixture,
                    DeviceFixture& device) {
     constexpr std::size_t context = 513U;
@@ -1280,6 +1327,7 @@ int main(int argc, char** argv) {
             qualify_matrix(gpu, fixture, device);
             qualify_real_context_samples(gpu, fixture, device);
             qualify_page_rows_and_t1_positions(gpu, fixture, device);
+            qualify_t1_nonfinite_and_status(gpu, fixture, device);
             qualify_graph(gpu, fixture, device);
             qualify_rejections(gpu, fixture, device);
         }

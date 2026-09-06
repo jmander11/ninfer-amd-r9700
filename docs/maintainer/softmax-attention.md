@@ -92,6 +92,12 @@ explicit BF16 cast where the next semantic boundary requires it. Inactive fixed-
 exact positive zero. Invalid represented position/tree/count/table-row metadata remains
 conspicuous as NaN in the affected contract-defined rows.
 
+The split-512 PV producer remains query-head-owned. A T=1 grouped-KV-head challenger that reused
+each decoded V value across six query heads passed exact direct numerical, rejection, and Device
+Graph qualification, but its C1/P8192+G32 whole screen regressed decode (`1.0038023342` ratio;
+`-0.141697625 ms/token` saving). It was rejected without a full gate and removed together with its
+selector; it is not a dormant production route or queued alternative.
+
 ### Qualification-only XAttention prefill evaluator
 
 The sparse-prefill candidate follows Algorithm 1 of Xu et al., *XAttention: Block Sparse

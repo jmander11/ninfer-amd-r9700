@@ -677,6 +677,21 @@ python3 tools/r9700/check_split512_report.py \
   --executable build-r9700/src/ninfer_r9700_split512_attention_qual "$OUT"
 ```
 
+A later grouped-KV-head T=1 PV experiment was rejected at the whole-runtime screen. The standalone
+mechanism report, `profiles/bench/r9700-split512-grouped-pv-qualification-v2-20260906.json`
+(SHA-256 `f690accdc47bd85096aa412aa415e3f55446e8d9b737b9928cef671b1054ea6d`), is screen-only:
+it establishes that V reuse can accelerate its reduced fixed fixture, not that the production leaf
+is faster. The product-integrated direct qualifier then passed the complete numerical, rejection,
+and Device Graph suite in `profiles/bench/r9700-split512-grouped-t1-direct-20260906.json`
+(SHA-256 `958b38efaced4b671222c32de93ce72264df6a58aa6fbb5797f0738e965ba65b`). Despite that exact
+correctness, the C1/P8192+G32 whole screen rejected the route: candidate/control decode ratio
+`1.0038023342`, saving `-0.141697625 ms/token`, and prefill ratio `1.0033795393`, with exact
+generated tokens. Its report is
+`profiles/bench/r9700-split512-grouped-t1-whole-p8192-g32-screen-v2-20260906.json` (SHA-256
+`bcd24621462dbb404ecc77b79a6b324f0c4d4b67a7e0afdcbacc69281cd1d9f2`). No full gate was run;
+the challenger, selector, and temporary qualification tooling were removed. The retained
+per-query-head split-512 producer remains production.
+
 The separate `kv_op_qual --timing-only` mode preserves device append, raw-ABI rejection,
 fragmented-map, and timing work but omits its repeated host FP64/QK/PV output comparisons. It is
 allowed only after that identical shape/layout route has passed a recorded full-oracle run, and
