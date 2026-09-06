@@ -10,8 +10,10 @@ checker="$repo/tools/r9700/check_a8q4_dflash_mlp_down_small_t_static.py"
 test "$PWD" = "$repo"
 test "$#" -eq 0
 sha256sum -c "$package/prepared.sha256"
-test "$(git rev-parse HEAD)" = 8bd921d757e08a576c59e5d7401c4ea36f1fbc9c
-git diff --quiet HEAD -- tools/r9700/a8q4_dflash_mlp_down_small_t_qual.hip \
+source_commit=8bd921d757e08a576c59e5d7401c4ea36f1fbc9c
+test "$(git rev-parse "$source_commit^{commit}")" = "$source_commit"
+test "$(git rev-parse "$source_commit^{tree}")" = a90cf4b424f57aa0a431557f53c54f2ad7a65c07
+git diff --quiet "$source_commit" -- tools/r9700/a8q4_dflash_mlp_down_small_t_qual.hip \
   tools/r9700/a8q4_dflash_small_t_qual.hip tools/r9700/a8q4_shape_sweep_qual.hip \
   tools/r9700/check_a8q4_dflash_mlp_down_small_t_static.py \
   src/ops/r9700/linear/r9700_linear.hip src/ops/r9700/linear/r9700_linear.h
