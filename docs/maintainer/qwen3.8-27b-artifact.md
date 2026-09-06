@@ -234,7 +234,7 @@ reopen confirmed the exact ordered 1,124-object selected inventory and 295 Q4 de
 logical Q4 code/scale hashes and every non-Q4 payload hash matched the source, which remained
 unchanged.
 
-The three explicit DFlash2 evaluation identities are
+The three currently registered DFlash2 evaluation identities are
 `qwen3.8-27b/r9700-q4g64-n16k16-dflash2-q4-eval` and
 `qwen3.8-27b/r9700-q4-w8-mse-n16k16-dflash2-q4-eval`, plus
 `qwen3.8-27b/r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval`. They extend their named base inventories with the
@@ -245,19 +245,34 @@ calls use the same compile-selected adaptive A8G64 execution intermediate and ca
 workspace as base Q4 calls; K=25600 determines the enlarged workspace maximum. The binder requires
 the complete DFlash inventory for these identities and admits no DFlash objects under other
 registered evaluation identities, preventing a byte-compatible base artifact from being silently
-reinterpreted as a DFlash package. DFlash grouped-convolution and selector child projections use
+reinterpreted as a DFlash package. DFlash grouped-convolution and selector child projections in
+these evaluator identities use
 the profile-derived Q4 type and the same caller-owned workspace; neither child may invoke the
 workspace-free Linear overload.
-The DFlash companion corresponding to the recipe selected by the base C=1..4 Pareto decision is
-eligible for physical DFlash shortlist, capacity, phase, and whole-inference campaigns. The other
-converted companions remain valid provenance and binder evidence but receive no duplicate
-physical campaign. The hybrid companion is not yet materialized; if selected, its conversion must
-bind the exact hybrid base receipt before those fresh DFlash gates begin.
-The production DFlash K/W is not encoded in either evaluation artifact and cannot be chosen from a
-filename or shortlist rank. It is selected only by the schema-v3 provenance-bound record emitted by
-`tools/bench/assemble_dflash_selection.py` after the base schema-v7
-`terminal_production_selection`, complete
-shortlist-frontier C=1..4 capacity accounting, and every capacity-eligible 22-point DFlash matrix.
+
+These fixed canonical-Q4 companions are converter, binder, and historical evaluator controls;
+they do not select the production DFlash matrix recipe. After the base C=1..4 decision, a
+recipe-aware converter must append matrices derived directly from the real BF16 DFlash2
+checkpoint. The first candidate set is canonical Q4G64, source-MSE-refined Q4G64, and
+source-MSE-refined W8G32. Row-scaled E4M3 FP8 is conditional on exact-shape R9700 timing and
+DFlash-quality evidence and also requires DFlash-owned prepared Linear execution before it is
+runnable. Direct BF16 remains the mathematical/control representation, not the intended
+persistent production matrix recipe. Every candidate preserves both selector codebooks and all
+private persistent DFlash state as model-specified BF16 and performs no runtime repack.
+
+The matrix payload sizes derived from the exact 32-matrix inventory are 954,654,720 bytes for Q4,
+1,909,309,440 for W8G32, 1,798,093,824 for row-scaled E4M3, and 3,593,994,240 for direct BF16. The
+unchanged 34 BF16 objects add 254,814,720 bytes to each companion. Recipe selection therefore
+accounts for quality, physical small-width speed, and capacity rather than inferring a winner from
+format peak throughput.
+
+The production DFlash K/W is not encoded in an evaluation artifact and cannot be chosen from a
+filename or old shortlist rank. Active R9700 selection is restricted to K4/W5 and K5/W6, both
+one-block chains. The prior fixed-Q4 K1..11 preparation and schema-v3 assembler contract are
+superseded and must be regenerated as a recipe-aware two-width authority after the base schema-v7
+`terminal_production_selection` and receipt-bound chunk selection. Only that replacement
+authority, after C1..4 capacity, parity, determinism, acceptance, generated-quality, and matched
+whole-speed evidence, may select the production companion and width.
 
 The ranking is exactly one 248,320-column little-endian I64 total-frequency row. The builder accepts
 explicit `.ids` paths, discovers each sibling manifest, and validates Qwen3.8 tokenizer identity,

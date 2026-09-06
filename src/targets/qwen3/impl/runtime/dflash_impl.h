@@ -732,29 +732,17 @@ auto dflash_decode_batch_body(DFlashBatchContext& state, std::int32_t batch_size
         [[maybe_unused]] Tensor fold_path        = frame.fold_path.slice(0, 0, vw).slice(1, 0, batch_size);
 
         state.execution.work.reset();
-        const std::int32_t w_ceil = frame.verify_ids.ne[0];
-        const bool compact        = vw < w_ceil; // LLD Capture/run: no extra nodes when W(k)==W_ceil
-        // pending_features is stored at W_ceil. prepare_ragged_prefix requires dest.ne[1]
-        // == source.ne[1]; compact the live W(k) prefix only for append/verify consumers.
-        Tensor prepare_positions =
-            frame.append_positions.slice(0, 0, w_ceil).slice(1, 0, batch_size);
-        Tensor prefix_features = state.execution.work.alloc(
-            DType::BF16, {Variant::DFlashConfig::feature_rows, w_ceil, batch_size});
-        ops::prepare_ragged_prefix(dflash_state(state).pending_features, lanes, context_starts,
-                                   frontiers, prefix_features, prepare_positions, append_counts,
-                                   state.execution.device.stream);
-        Tensor append_features   = prefix_features;
-        Tensor append_positions  = prepare_positions;
-        if (compact) {
-            append_features = state.execution.work.alloc(
-                DType::BF16, {Variant::DFlashConfig::feature_rows, vw, batch_size});
-            qwen3::copy_strided_width_panel(append_features, prefix_features,
-                                              state.execution.device.stream);
-            Tensor packed_append = state.execution.work.alloc(DType::I32, {vw, batch_size});
-            qwen3::copy_i32_panel(packed_append, prepare_positions.slice(0, 0, vw),
-                                    state.execution.device.stream);
-            append_positions = packed_append;
+        if (frame.verify_ids.ne[0] != vw ||
+            dflash_state(state).pending_features.ne[1] != vw) {
+            throw std::logic_error("DFlash decode buffers do not match the startup verify width");
         }
+        Tensor append_positions =
+            frame.append_positions.slice(0, 0, vw).slice(1, 0, batch_size);
+        Tensor append_features = state.execution.work.alloc(
+            DType::BF16, {Variant::DFlashConfig::feature_rows, vw, batch_size});
+        ops::prepare_ragged_prefix(dflash_state(state).pending_features, lanes, context_starts,
+                                   frontiers, append_features, append_positions, append_counts,
+                                   state.execution.device.stream);
         append_context_impl<Variant>(state, append_features, append_positions, append_counts,
                                      lanes, dflash_rows, envelopes.append);
 
@@ -774,39 +762,6 @@ auto dflash_decode_batch_body(DFlashBatchContext& state, std::int32_t batch_size
         licensed_tokens =
             frame.licensed_tokens.slice(0, 0, vw).slice(1, 0, batch_size);
         fold_path = frame.fold_path.slice(0, 0, vw).slice(1, 0, batch_size);
-        if (compact) {
-            // Overlay prefix/propose scratch. Compact verify panels stay live through
-            // accept (reset_workspace=false) without stacking on the proposal peak.
-            state.execution.work.reset();
-            auto copy_panel = [&](const Tensor& src, std::int32_t rows) {
-                Tensor dst = state.execution.work.alloc(DType::I32, {rows, batch_size});
-                qwen3::copy_i32_panel(dst, src, state.execution.device.stream);
-                return dst;
-            };
-            drafts          = copy_panel(drafts, static_cast<std::int32_t>(k));
-            verify_ids      = copy_panel(verify_ids, vw);
-            parent_index    = copy_panel(parent_index, vw);
-            ancestor_mask   = copy_panel(ancestor_mask, vw);
-            // DFlash append has already consumed append_positions on this ordered stream. Reuse
-            // its persistent storage for the packed target positions so Program-owned typed Text
-            // transactions never depend on a resettable workspace address.
-            Tensor packed_cache_positions = frame.append_positions
-                                                .view({static_cast<std::int32_t>(
-                                                    frame.append_positions.numel())})
-                                                .slice(0, 0, vw * batch_size)
-                                                .view({vw, batch_size});
-            qwen3::copy_i32_panel(packed_cache_positions, cache_positions,
-                                    state.execution.device.stream);
-            cache_positions = packed_cache_positions;
-            rope_positions  = copy_panel(rope_positions, vw);
-            target_tokens   = state.execution.work.alloc(DType::I32, {vw, batch_size});
-            licensed_tokens = state.execution.work.alloc(DType::I32, {vw, batch_size});
-            fold_path       = state.execution.work.alloc(DType::I32, {vw, batch_size});
-            target_hidden   = state.execution.work.alloc(
-                DType::BF16, {TextConfig::hidden, vw, batch_size});
-            target_logits = state.execution.work.alloc(
-                DType::BF16, {TextConfig::output_rows, vw, batch_size});
-        }
         const bool use_tree = dflash_uses_tree_verify(k, verify_width);
         if (!use_tree) {
             // Chain verify writes ids only unless positions are filled here. Tree select
@@ -882,18 +837,9 @@ auto dflash_decode_batch_body(DFlashBatchContext& state, std::int32_t batch_size
                 all_counts + row);
         }
         target_verify_accept(state.execution, state.continuation_hidden_store, card, verify_frame,
-                             !compact);
+                             true);
         for (qwen3::PagedKVTransaction* transaction : state.text_kv_transactions) {
             transaction->end_device_segment(state.execution.device.stream);
-        }
-        if (compact) {
-            qwen3::copy_i32_panel(
-                frame.licensed_tokens.slice(0, 0, vw).slice(1, 0, batch_size), licensed_tokens,
-                state.execution.device.stream);
-            qwen3::copy_i32_panel(frame.fold_path.slice(0, 0, vw).slice(1, 0, batch_size),
-                                    fold_path, state.execution.device.stream);
-            qwen3::copy_strided_width_panel(frame.target_hidden.slice(2, 0, batch_size),
-                                              target_hidden, state.execution.device.stream);
         }
         HIP_CHECK(hipMemcpyAsync(&state.host_egress, frame.egress.data,
                                    sizeof(qwen3::DFlashDecodeEgress), hipMemcpyDeviceToHost,

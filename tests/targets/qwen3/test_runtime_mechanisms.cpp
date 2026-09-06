@@ -22,6 +22,7 @@
 #include <span>
 #include <stdexcept>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -174,6 +175,29 @@ void test_round_layout() {
            "K=15 DFlash storage is backend-owned");
     expect(!dflash.mtp.has_value() && !dflash.mtp_decode.has_value(),
            "DFlash layout does not allocate MTP storage");
+
+    for (const auto [drafts, width] :
+         std::array<std::pair<std::uint32_t, std::uint32_t>, 2>{{{4, 5}, {5, 6}}}) {
+        ninfer::LayoutBuilder width_builder;
+        q3::RoundStateLayout live = q3::begin_round_state_layout(
+            width_builder,
+            q3::RoundStateSpec{.hidden = 32,
+                               .output_rows = 128,
+                               .batch_capacity = 4,
+                               .draft_window = drafts,
+                               .dflash_verify_width = width,
+                               .enable_dflash = true});
+        q3::complete_round_state_layout(width_builder, live);
+        (void)width_builder.finish(256);
+        expect(live.dflash_decode.has_value() &&
+                   live.dflash_decode->proposal_ids.shape[0] ==
+                       static_cast<std::int32_t>(width) &&
+                   live.dflash_decode->append_positions.shape[0] ==
+                       static_cast<std::int32_t>(width) &&
+                   live.dflash_decode->target_hidden.shape[1] ==
+                       static_cast<std::int32_t>(width),
+               "K4/W5 and K5/W6 round storage uses the exact startup verify width");
+    }
 }
 
 void test_mtp_alignment() {

@@ -359,6 +359,12 @@ struct A8Q4G64KernelResources {
 // seven full-K production tuples are rejected; the candidate boundary retains WMMA.
 [[nodiscard]] hipError_t a8q4g64_linear_decode_dot8_t1(
     const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept;
+// Qualification-only small-T packed-W4 challenger for DFlash proposal and target verification.
+// One thread owns one output row and reuses each persistent Q4 word across T=4,5,6. This entry is
+// deliberately absent from candidate/product dispatch until exact-shape oracle, ISA/resource,
+// direct timing, and whole-DFlash gates admit it.
+[[nodiscard]] hipError_t a8q4g64_linear_dflash_small_t_qualification(
+    const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept;
 // Direct 64-token x 128-row ping/pong cooperative-LDS production route. The candidate boundary
 // admits it only for the exact qualified tuples/extents; tails use the named regression control.
 [[nodiscard]] hipError_t a8q4g64_linear_prefill_cta(const A8Q4G64LinearArgs& args,

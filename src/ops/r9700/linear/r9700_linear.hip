@@ -221,6 +221,17 @@ bool valid_a8q4_linear_args(const A8Q4G64LinearArgs& args) noexcept {
     return true;
 }
 
+bool dflash_small_t_qualification_shape(std::uint32_t rows,
+                                        std::uint32_t columns) noexcept {
+    return (columns == 5120U &&
+            (rows == 256U || rows == 1280U || rows == 4096U || rows == 6144U ||
+             rows == 7168U || rows == 12288U || rows == 34816U || rows == 131072U ||
+             rows == 248320U)) ||
+           (rows == 5120U &&
+            (columns == 4096U || columns == 6144U || columns == 17408U ||
+             columns == 25600U));
+}
+
 bool scalar_base_offsets_fit(std::uint32_t tokens, std::uint32_t rows,
                              std::uint32_t padded_columns) noexcept {
     if (tokens == 0U || rows == 0U || padded_columns == 0U ||
@@ -1035,6 +1046,71 @@ void a8q4g64_linear_decode_dot8_t1_kernel(
                      activation_scale * weight_scale, total);
     }
     output[row] = static_cast<hip_bfloat16>(total);
+#else
+    (void)activation_low_codes; (void)activation_high_codes;
+    (void)activation_scales; (void)activation_status; (void)weight_codes;
+    (void)weight_scales; (void)output; (void)rows; (void)padded_columns;
+#endif
+}
+
+template <std::uint32_t Tokens>
+__global__ __launch_bounds__(kThreads)
+void a8q4g64_linear_dflash_small_t_kernel(
+    const std::uint8_t* activation_low_codes,
+    const std::uint8_t* activation_high_codes,
+    const std::uint16_t* activation_scales,
+    const std::uint32_t* activation_status,
+    const std::uint8_t* weight_codes, const std::uint16_t* weight_scales,
+    hip_bfloat16* output, std::uint32_t rows, std::uint32_t padded_columns) {
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
+    static_assert(Tokens >= 4U && Tokens <= 6U);
+    const std::uint32_t row = blockIdx.x * blockDim.x + threadIdx.x;
+    if (row >= rows) return;
+    if (*activation_status != Q4G64ActivationOk) {
+#pragma unroll
+        for (std::uint32_t token = 0; token < Tokens; ++token) {
+            output[static_cast<std::size_t>(token) * rows + row] = conspicuous_bf16_nan();
+        }
+        return;
+    }
+    const std::uint32_t groups = padded_columns / kQ4Group;
+    float totals[Tokens]{};
+    for (std::uint32_t group = 0; group < groups; ++group) {
+        int low_dots[Tokens]{};
+        int high_dots[Tokens]{};
+#pragma unroll
+        for (std::uint32_t word = 0; word < 8U; ++word) {
+            const int weight =
+                load_q4_n16k16_x8(weight_codes, row, group, word, groups);
+#pragma unroll
+            for (std::uint32_t token = 0; token < Tokens; ++token) {
+                const std::size_t element =
+                    static_cast<std::size_t>(token) * padded_columns +
+                    static_cast<std::size_t>(group) * kQ4Group + word * 8U;
+                const int low = load_q4x8(activation_low_codes, element);
+                const int high = load_q4x8(activation_high_codes, element);
+                low_dots[token] = __builtin_amdgcn_sudot8(
+                    false, low, true, weight, low_dots[token], false);
+                high_dots[token] = __builtin_amdgcn_sudot8(
+                    true, high, true, weight, high_dots[token], false);
+            }
+        }
+        const float weight_scale = __half2float(__ushort_as_half(
+            weight_scales[q4_n16k16_scale_index(row, group, groups)]));
+#pragma unroll
+        for (std::uint32_t token = 0; token < Tokens; ++token) {
+            const std::int32_t combined = low_dots[token] + 16 * high_dots[token];
+            const float activation_scale = __half2float(__ushort_as_half(
+                activation_scales[static_cast<std::size_t>(token) * groups + group]));
+            totals[token] = fmaf(static_cast<float>(combined),
+                                 activation_scale * weight_scale, totals[token]);
+        }
+    }
+#pragma unroll
+    for (std::uint32_t token = 0; token < Tokens; ++token) {
+        output[static_cast<std::size_t>(token) * rows + row] =
+            static_cast<hip_bfloat16>(totals[token]);
+    }
 #else
     (void)activation_low_codes; (void)activation_high_codes;
     (void)activation_scales; (void)activation_status; (void)weight_codes;
@@ -2532,6 +2608,45 @@ hipError_t a8q4g64_linear_decode_dot8_t1(
                        args.activation_scales, args.activation_status,
                        args.weight_codes, args.weight_scales, args.output,
                        args.rows, args.padded_columns);
+    return hipGetLastError();
+#else
+    (void)stream;
+    return hipErrorNotSupported;
+#endif
+}
+
+hipError_t a8q4g64_linear_dflash_small_t_qualification(
+    const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept {
+    if (!valid_a8q4_linear_args(args) || args.tokens < 4U || args.tokens > 6U ||
+        !dflash_small_t_qualification_shape(args.rows, args.columns)) {
+        return hipErrorInvalidValue;
+    }
+#if defined(__HIPCC__)
+    const dim3 grid((args.rows + kThreads - 1U) / kThreads);
+    switch (args.tokens) {
+    case 4U:
+        hipLaunchKernelGGL((a8q4g64_linear_dflash_small_t_kernel<4U>), grid,
+                           dim3(kThreads), 0, stream, args.activation_low_codes,
+                           args.activation_high_codes, args.activation_scales,
+                           args.activation_status, args.weight_codes, args.weight_scales,
+                           args.output, args.rows, args.padded_columns);
+        break;
+    case 5U:
+        hipLaunchKernelGGL((a8q4g64_linear_dflash_small_t_kernel<5U>), grid,
+                           dim3(kThreads), 0, stream, args.activation_low_codes,
+                           args.activation_high_codes, args.activation_scales,
+                           args.activation_status, args.weight_codes, args.weight_scales,
+                           args.output, args.rows, args.padded_columns);
+        break;
+    case 6U:
+        hipLaunchKernelGGL((a8q4g64_linear_dflash_small_t_kernel<6U>), grid,
+                           dim3(kThreads), 0, stream, args.activation_low_codes,
+                           args.activation_high_codes, args.activation_scales,
+                           args.activation_status, args.weight_codes, args.weight_scales,
+                           args.output, args.rows, args.padded_columns);
+        break;
+    default: return hipErrorInvalidValue;
+    }
     return hipGetLastError();
 #else
     (void)stream;

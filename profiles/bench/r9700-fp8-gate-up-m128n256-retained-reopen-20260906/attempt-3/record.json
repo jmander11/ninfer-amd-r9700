@@ -1,0 +1,14 @@
+{
+  "schema": "ninfer.r9700.fp8_gate_up_m128n256_retained_attempt.v1",
+  "attempt": 3,
+  "resource_diagnostic_reached": true,
+  "correctness_reached": false,
+  "timing_reached": false,
+  "resource_exit_code": 0,
+  "finding": "hipFuncAttributes.numRegs reported 101; this runtime-reported value is distinct from static logical next_free_vgpr 97 and descriptor allocation-rounded VGPR 104",
+  "resource_report_sha256": "44d18cf16f13a482074e85fd6c87950eb7b811579b897ac1fdbbe1d7d2e7e584",
+  "resource_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "resource_exit_code_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+  "executable_receipt_sha256": "649e1d6c400fe955fe7aff8e2cecd6824f99f29a8982c324a5e0b7494a100d99",
+  "ldd_sha256": "b4ec73a3bc6d3a7d94aaeb8000176be3d23044e46959df1bf9a7e0ffdb988421"
+}

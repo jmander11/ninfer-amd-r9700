@@ -1314,6 +1314,12 @@ K 保留额外 graph、workspace 或 host policy state。未来的 automatic-K p
 artifact 上，对每个候选 K 和 C=1..4 完成 same-candidate execution parity、acceptance 与 whole-round time gate；其他
 cache/weight profile 的标定不能作为证据。
 
+当前 R9700 DFlash 生产选择只比较 K4/W5 与 K5/W6，二者均为 single-block chain；W 包含 target
+anchor。旧的 K1..11 broad shortlist 不再运行。DFlash companion 也不自动继承固定 Q4 recipe：它从真实
+BF16 DFlash2 checkpoint 独立比较 canonical Q4G64、source-MSE Q4G64 与 source-MSE W8G32，只有物理
+small-width speed 和 quality 同时支持时才加入 row-scaled E4M3。所有 recipe 保留 BF16 selector codebooks
+和 private BF16 state。
+
 该 round 内部执行：
 
 ```text

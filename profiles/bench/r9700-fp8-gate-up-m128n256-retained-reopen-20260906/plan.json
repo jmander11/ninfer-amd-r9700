@@ -1,0 +1,49 @@
+{
+  "schema": "ninfer.r9700.fp8_gate_up_m128n256_retained_plan.v1",
+  "purpose": "One bounded direct qualification reopened because the prior <=64 VGPR static rejection was not a gfx1201 legality condition.",
+  "scope": {
+    "device": "device 0 AMD Radeon AI PRO R9700, gfx1201, wave32, power profile auto",
+    "shape_N_K_T": [34816, 5120, 2048],
+    "candidate": "exact preserved M128N256 qualification object; no reconstruction and no production routing",
+    "incumbent": "hipBLASLt solution 123104 on the same represented FP8 inputs",
+    "runs": "one correctness qualification followed by one balanced direct timing qualification; no sweep"
+  },
+  "retained_identity": {
+    "assembly": "profiles/bench/r9700-fp8-gate-up-m128n256-retained-reopen-20260906/retained-fp8-gate-up-m128n256.s",
+    "assembly_sha256": "f84b82472e7d1b944927020abf2550ba1cd2051c2f0e71f3e3d32cf7ddfbcd85",
+    "object": "profiles/bench/r9700-fp8-gate-up-m128n256-retained-reopen-20260906/retained-fp8-gate-up-m128n256.hip.o",
+    "object_sha256": "a853adcd8282ff5410e69069bdafe1f808b1869e76b224b984520569001d318c",
+    "resources": {"static_logical_vgpr": 97, "descriptor_allocation_rounded_vgpr": 104, "runtime_reported_vgpr": 101, "static_lds_bytes": 24576, "private_bytes": 0, "maximum_threads": 1024, "minimum_active_blocks_per_wgp": 1}
+  },
+  "correctness": {
+    "oracle": "independent complete FP64 dot times represented stored FP32 scales, rounded directly from double to BF16",
+    "coverage": "one full-K coordinate in every 128x256 CTA tile plus 16 boundary probes, eager and captured/replayed; incumbent checked independently",
+    "additional": ["malformed shape rejection", "output alias rejection", "rejection no-clobber", "real status ownership and poison", "output prefix/suffix canaries", "same-address graph replay"]
+  },
+  "timing": {
+    "samples": "seven forward incumbent-then-candidate pairs and seven reverse candidate-then-incumbent pairs",
+    "order_stability_max_relative_delta": 0.05,
+    "candidate_matrix_max_ms": 3.18103603125,
+    "fixed_complete_overhead_ms": 0.09993415625,
+    "projected_complete_max_ms": 3.2809701875,
+    "minimum_projected_64_call_saving_ms": 51.438603,
+    "minimum_useful_tflops_at_matrix_gate": 229.530390
+  },
+  "decision": "A rejection closes this retained candidate. A pass permits only one matched whole-P2048 confirmation; it does not admit or route production.",
+  "terminal_result": {
+    "verdict": "reject",
+    "decision_sha256": "f2510b2587bb56a18c175e8d1fcc456c3cb7ad38890b9805acfd7b159c913e9b",
+    "candidate_matrix_median_ms": 49.380744934,
+    "incumbent_matrix_median_ms": 3.499504089,
+    "candidate_useful_tflops": 14.786015101551769,
+    "projected_64_call_saving_ms": -2936.39941408,
+    "return_condition": "Do not rerun this retained object or an adjacent tile sweep. Reopen M128N256 only for a materially different source-level mechanism with independent numerical/static qualification and a concrete bound supporting <=3.18103603125 ms per matrix and >=51.438603 ms projected whole-P2048 saving."
+  },
+  "attempts": {
+    "attempt_1": "Immutable loader failure before process/GPU startup, preserved under attempt-1-loader-failure/ and closure-bound.",
+    "attempt_2": "Immutable pre-timing resource-gate failure caused by comparing runtime-reported numRegs with static logical next_free_vgpr.",
+    "attempt_3": "Immutable diagnostic: hipFuncAttributes.numRegs reported 101, distinct from logical 97 and descriptor allocation-rounded 104; stopped before correctness/timing.",
+    "attempt_4": "Only authorized qualification run; exact-gates the separately named static logical, descriptor allocation-rounded, and runtime-reported resource facts."
+  },
+  "outputs": ["attempt-4/resource-report.json", "attempt-4/resource-stderr.log", "attempt-4/resource-exit-code.txt", "attempt-4/report.json", "attempt-4/stderr.log", "attempt-4/exit-code.txt", "attempt-4/qualification-executable.sha256", "attempt-4/ldd.txt", "attempt-4/decision.json"]
+}

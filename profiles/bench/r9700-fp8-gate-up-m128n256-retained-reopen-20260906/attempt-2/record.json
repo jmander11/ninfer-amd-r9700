@@ -1,0 +1,13 @@
+{
+  "schema": "ninfer.r9700.fp8_gate_up_m128n256_retained_attempt.v1",
+  "attempt": 2,
+  "qualification_reached": true,
+  "timing_reached": false,
+  "exit_code": 1,
+  "failure": "runtime resource gate failed before correctness or timing; runtime hipFuncAttributes.numRegs was incorrectly compared with static logical next_free_vgpr",
+  "report_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_sha256": "aa11d6b2fb5fe3c9e7df150c1381338588e1d6b4e19e6771efb63153e8da3a26",
+  "exit_code_sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+  "executable_receipt_sha256": "e43506c1c4648cffef81d92be139f45080c314d80889763266449d40410a5b1e",
+  "ldd_sha256": "fb4e03a8fe5568219b402e51c853c9c4c2e590e84191e426f0dc20114b7708d3"
+}

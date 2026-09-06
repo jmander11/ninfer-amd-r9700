@@ -1050,11 +1050,13 @@ Replace functional routes with measured gfx1201 families:
   stalls or stall freedom, admit profiled throughput, or close the practical ceiling. The
   completed FP8 audit below admits no floor-closing experiment; the next action is the explicit
   product-contract/user decision, not another optimization selection.
-- [ ] Restore retained-production dense C1/P2048/spec-none prefill to at least `2,000 tok/s`, then
-  establish that the retained low-context path is near its practical optimization ceiling before
-  resuming chunk selection or post-promotion qualification. Crossing `2,000 tok/s` is a minimum
-  recovery milestone, not completion: the crossing candidate still requires a focused whole-P2048
-  confirmation followed by fresh whole-path attribution/roofline review. Continue low-context
+- [x] Terminally close the bounded retained-production dense C1/P2048/spec-none optimization phase.
+  The route remains `1904.339303 tok/s`, below the `2,000 tok/s` acceptance floor, and the evidence
+  does not prove a practical ceiling. The explicit bounded candidate list is exhausted, so dependent
+  chunk/capacity selection stays held while active optimization moves to recipe-independent DFlash2.
+  Crossing `2,000 tok/s` would have been a minimum recovery milestone rather than completion: any
+  future crossing candidate still requires focused whole-P2048 confirmation and fresh whole-path
+  attribution/roofline review. Resume low-context
   optimization while a dominant component retains a credible material gap to its measured
   hardware/service ceiling, including unexplained stalls, low matrix utilization, avoidable data
   movement, or an unqualified instruction path. Resume the long-context chunk decision only after
@@ -1264,7 +1266,9 @@ Replace functional routes with measured gfx1201 families:
   installed gate/up entries have already reduced to ten supported solutions and all ten were timed;
   selected solution 123104 remains best, while the nearest solution saves only a projected
   `0.212524 ms` over 64 calls. The qualified custom M128xN128 native-FP8 route regressed by
-  `258.24 ms` over those calls and M128xN256 is resource-terminal. The two smaller-shape families
+  `258.24 ms` over those calls. M128xN256's initial resource rejection was subsequently corrected;
+  its terminal direct qualification below rejected it at `49.380744934 ms` versus the
+  `3.499504089 ms` incumbent. The two smaller-shape families
   total only `52.353114 ms`; saving 25 ms would require `326.60` TFLOP/s including outer scales and
   BF16 publication, versus the observed `168`--`173`. Even complete elimination of the downstream
   gate/up SiLU/A8 consumer is bounded at `20.761231 ms`, and the installed library has no fused
@@ -1735,12 +1739,21 @@ Replace functional routes with measured gfx1201 families:
   supply the `51.438603 ms` whole deficit, while gate/up alone would require `229.531` TFLOP/s.
   The two smaller shapes cannot close that deficit even at the retained architectural issue
   reference. All ten supported zero-workspace gate/up catalog solutions were already timed; the
-  nearest alternate projects only `0.212524 ms` saving across 64 calls. Custom M128xN128 regressed,
-  M128xN256 is resource-terminal, and complete downstream SiLU/A8 removal is bounded near
-  `20.76 ms`. No FP8 catalog, custom-matrix, adjacent-fusion, or diagnostic-counter experiment is
+  nearest alternate projects only `0.212524 ms` saving across 64 calls. Custom M128xN128 regressed.
+  The retained M128xN256 route was reopened after correcting its former resource interpretation and
+  passed complete-FP64, status/alias/canary, graph, FP8-ISA/resource, and order-stability gates, but
+  regressed from `3.499504089 ms` to `49.380744934 ms` (`14.7860151` useful TFLOP/s), projecting
+  `-2936.39941408 ms` saving over 64 calls. Its terminal decision is
+  `profiles/bench/r9700-fp8-gate-up-m128n256-retained-reopen-20260906/attempt-4/decision.json`
+  (SHA-256 `f2510b2587bb56a18c175e8d1fcc456c3cb7ad38890b9805acfd7b159c913e9b`). Static logical97,
+  HIP runtime-reported101, and descriptor allocation-rounded104 VGPR are distinct. Complete
+  downstream SiLU/A8 removal is bounded near `20.76 ms`. No FP8 catalog, custom-matrix,
+  adjacent-fusion, or diagnostic-counter experiment is
   admitted as a credible floor closer. P2048 therefore remains `1904.339303 tok/s`: the floor is
-  not passed, practical-ceiling closure is not proved, and retaining or revising the floor is now
-  a product-contract/user decision rather than permission for another unbounded search.
+  not passed and practical-ceiling closure is not proved. Do not rerun the retained object or an
+  adjacent tile sweep; M128N256 may return only for a materially different source mechanism with
+  independent numerical/static evidence and a concrete `<=3.18103603125 ms` per-matrix and
+  `>=51.438603 ms` whole-P2048 saving bound. Active work transitions to recipe-independent DFlash2.
   The explicit bounded candidate list is exhausted. A targeted audit of the canonical loaded ISA
   and retained trace found no new mechanism outside the rejected topology/representation families
   with a credible `>=35.9 ms` whole-P2048 saving. That is a `10.08%` reduction of the retained
@@ -1749,9 +1762,9 @@ Replace functional routes with measured gfx1201 families:
   ceiling, arithmetic-encoding cleanup is independently bounded below `14.3 ms`, and the concrete
   second-payload overlap schedule needs the nine additional VGPRs rejected above. These are
   overlapping same-kernel bounds and cannot be composed. This exhaustion does not establish a
-  practical ceiling, which remains open. Ordinary non-speculative decode is now closed at its
-  bounded roof below; the next action is the P2048 floor/product-contract decision. Dependent
-  chunk/base selection remains blocked before DFlash2;
+  practical ceiling, which remains open. Ordinary non-speculative decode and bounded dense prefill
+  are now closed; active work moves to recipe-independent DFlash2 while dependent chunk/base
+  selection remains blocked;
   MTP3 remains diagnostic and is not an optimization or ranking route.
   The first ordinary-decode promotion is the canonical native-dot8 T=1 A8Q4 Linear route. Its
   exact domain is seven full-K matrix tuples selected by shape, not caller identity;

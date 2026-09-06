@@ -1,0 +1,11 @@
+{
+  "schema": "ninfer.r9700.fp8_gate_up_m128n256_retained_attempt.v1",
+  "attempt": 1,
+  "gpu_reached": false,
+  "exit_code": 127,
+  "failure": "ELF loader could not resolve libhipblaslt.so.1 before process startup",
+  "report_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_sha256": "6d410acfdd3c61b2b83ff96ef4897c7f7e7b9c47a363dca976f4ea0748de30d8",
+  "exit_code_sha256": "743c7850cccfba5e53a9002663ec1ddd1079315a98bdbfdde10e6044f56abefe",
+  "executable_receipt_sha256": "991d475adaa2970868fb0c79fbe7b120addee75a39e87c62e33a79d69f8b4d3d"
+}

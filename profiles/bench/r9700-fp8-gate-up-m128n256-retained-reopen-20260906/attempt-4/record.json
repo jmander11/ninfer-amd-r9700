@@ -1,0 +1,20 @@
+{
+  "schema": "ninfer.r9700.fp8_gate_up_m128n256_retained_attempt.v1",
+  "attempt": 4,
+  "terminal": true,
+  "verdict": "reject",
+  "correctness": "pass: 2192 independent complete-FP64 probes at zero BF16 steps in eager, graph replay, and incumbent; alias/status/canary checks pass",
+  "candidate_matrix_median_ms": 49.380744934,
+  "incumbent_matrix_median_ms": 3.499504089,
+  "candidate_useful_tflops": 14.786015101551769,
+  "projected_64_call_saving_ms": -2936.39941408,
+  "decision_sha256": "f2510b2587bb56a18c175e8d1fcc456c3cb7ad38890b9805acfd7b159c913e9b",
+  "report_sha256": "e3b680af33ee80d56e12965f92969b32df303bc7d31f12eecfa1102d3b2a512d",
+  "stderr_sha256": "ebe63449e1349bb4b255917fbdee5cc2c5c21fe79561e3f26edf8ebeb81854bb",
+  "exit_code_sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+  "resource_report_sha256": "8969bb9a6d1beb84402a7a76b21616a5bdae335c0107f5c4bbc0087eba535aa8",
+  "resource_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "resource_exit_code_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+  "executable_receipt_sha256": "9c0b5988238fad2a612e19babf536ff9c3c63228164861a8993f84ab5c1ed7e8",
+  "ldd_sha256": "ee27e4ebdb9e3e6c271e0f35535fceed80b9a90e78fe99952ae62dfe8a61d535"
+}

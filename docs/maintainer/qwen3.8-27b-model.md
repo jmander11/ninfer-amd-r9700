@@ -380,6 +380,13 @@ One propose block:
    maximum k=11 route performs two MASK blocks (7+4) before one W=12 chain verify. Production K is
    selected only from matched whole-round acceptance and throughput evidence.
 
+The broader schedules above remain runtime semantics, not the active R9700 product search. The
+current production campaign admits only K4/W5 and K5/W6: four or five predicted drafts from one
+masked block, followed by chain verification whose width includes the anchor. Their companion
+matrix recipe is independently selected from the real BF16 DFlash2 checkpoint among canonical
+Q4G64, source-MSE Q4G64, and source-MSE W8G32, with row-scaled E4M3 conditional on physical and
+quality evidence. Both selector codebooks and all private persistent DFlash state remain BF16.
+
 `GroupedDynamicCausalConv` is grouped size-16, kernel 2, left-padded (causal along the query
 block): `prepare` before the sublayer on the pre-norm hidden, `finish` on that sublayer's output.
 

@@ -59,6 +59,7 @@ INT4_WMMA_TARGET := $(BUILD_DIR)/int4_wmma_qual
 W8A8_WMMA_TARGET := $(BUILD_DIR)/w8a8_wmma_linear_qual
 Q4G64_LINEAR_TARGET := $(BUILD_DIR)/q4g64_linear_qual
 A8Q4_SHAPE_SWEEP_TARGET := $(BUILD_DIR)/a8q4_shape_sweep_qual
+A8Q4_DFLASH_SMALL_T_TARGET := $(BUILD_DIR)/a8q4_dflash_small_t_qual
 A4Q4_PREFILL_TARGET := $(BUILD_DIR)/a4q4_prefill_qual
 Q4_TENSOR_A4_TARGET := $(BUILD_DIR)/q4_tensor_dispatch_a4_qual
 Q4_TENSOR_A8_TARGET := $(BUILD_DIR)/q4_tensor_dispatch_a8_qual
@@ -90,6 +91,7 @@ INT4_WMMA_SOURCE := int4_wmma_qual.hip
 W8A8_WMMA_SOURCE := w8a8_wmma_linear_qual.hip
 Q4G64_LINEAR_SOURCE := q4g64_linear_qual.hip
 A8Q4_SHAPE_SWEEP_SOURCE := a8q4_shape_sweep_qual.hip
+A8Q4_DFLASH_SMALL_T_SOURCE := a8q4_dflash_small_t_qual.hip
 Q4_TENSOR_SOURCE := q4_tensor_dispatch_qual.hip
 SERVE_LOG_IMPL := ../../src/serve/request_log.cpp
 SERVE_LOG_HEADER := ../../src/serve/request_log.h
@@ -154,7 +156,7 @@ CXXFLAGS := -O3 -std=c++20 --offload-arch=$(ARCH) -I../../src $(SYSTEM_INCLUDES)
 LDFLAGS := -L$(ROCM_ROOT)/lib -Wl,-rpath,$(ROCM_ROOT)/lib
 
 
-.PHONY: all clean hbm fp8-hipblaslt-probe int4-wmma int4-wmma-isa int4-wmma-resources w8a8-wmma w8a8-prefill-cta-regression w8a8-prefill-cta-lds-scope-regression w8a8-prefill-cta-lds-scope-benchmark w8a8-prefill-cta-lds-scope-report w8a8-wmma-isa w8a8-wmma-resources prefill-cta-static-q4 prefill-cta-static-w8 prefill-cta-static-incumbent-diagnostic q4g64-linear a8q4-shape-sweep a8q4-prefill-cta-regression a8q4-prefill-cta-lds-scope-regression a8q4-prefill-cta-lds-scope-benchmark a8q4-prefill-cta-lds-scope-report a8q4-prefill-cta-m64n64-regression q4g64-linear-isa q4g64-linear-resources xattention-isa xattention-resources xattention-reports split512-attention split512-attention-isa split512-attention-resources dense-prefill-attention dense-prefill-attention-full-score-isa dense-prefill-attention-full-score-static dense-prefill-attention-static-test isa kv-resources linear-isa linear-resources eager-isa rmsnorm-prefill-static rmsnorm-prefill-static-test rmsnorm-prefill-benchmark rmsnorm-k256-prefill-static rmsnorm-k256-prefill-static-test rmsnorm-k256-prefill-benchmark rmsnorm-decode-production-static rmsnorm-decode-production-static-test rmsnorm-decode-production-routing-test rmsnorm-decode-production-regression gated-rmsnorm-prefill-static gated-rmsnorm-prefill-static-test gated-rmsnorm-prefill-path-test gated-rmsnorm-prefill-benchmark gated-rmsnorm-k128-production-static gated-rmsnorm-k128-production-static-test silu-mul-split-prefill-static silu-mul-split-prefill-static-test silu-mul-split-prefill-benchmark gdn-isa gdn-prefill-benchmark gdn-prefill-static gdn-prefill-static-test gdn-recurrence-resources sampling-isa rope-resources run sanitize rocm-tool-audit rocm-tool-audit-test profile-trace profile-attention-trace profile-pmc
+.PHONY: all clean hbm fp8-hipblaslt-probe int4-wmma int4-wmma-isa int4-wmma-resources w8a8-wmma w8a8-prefill-cta-regression w8a8-prefill-cta-lds-scope-regression w8a8-prefill-cta-lds-scope-benchmark w8a8-prefill-cta-lds-scope-report w8a8-wmma-isa w8a8-wmma-resources prefill-cta-static-q4 prefill-cta-static-w8 prefill-cta-static-incumbent-diagnostic q4g64-linear a8q4-shape-sweep a8q4-dflash-small-t-build a8q4-dflash-small-t-static a8q4-dflash-small-t-test a8q4-prefill-cta-regression a8q4-prefill-cta-lds-scope-regression a8q4-prefill-cta-lds-scope-benchmark a8q4-prefill-cta-lds-scope-report a8q4-prefill-cta-m64n64-regression q4g64-linear-isa q4g64-linear-resources xattention-isa xattention-resources xattention-reports split512-attention split512-attention-isa split512-attention-resources dense-prefill-attention dense-prefill-attention-full-score-isa dense-prefill-attention-full-score-static dense-prefill-attention-static-test isa kv-resources linear-isa linear-resources eager-isa rmsnorm-prefill-static rmsnorm-prefill-static-test rmsnorm-prefill-benchmark rmsnorm-k256-prefill-static rmsnorm-k256-prefill-static-test rmsnorm-k256-prefill-benchmark rmsnorm-decode-production-static rmsnorm-decode-production-static-test rmsnorm-decode-production-routing-test rmsnorm-decode-production-regression gated-rmsnorm-prefill-static gated-rmsnorm-prefill-static-test gated-rmsnorm-prefill-path-test gated-rmsnorm-prefill-benchmark gated-rmsnorm-k128-production-static gated-rmsnorm-k128-production-static-test silu-mul-split-prefill-static silu-mul-split-prefill-static-test silu-mul-split-prefill-benchmark gdn-isa gdn-prefill-benchmark gdn-prefill-static gdn-prefill-static-test gdn-recurrence-resources sampling-isa rope-resources run sanitize rocm-tool-audit rocm-tool-audit-test profile-trace profile-attention-trace profile-pmc
 
 all: $(PROBE_TARGET) $(KV_TARGET) $(HIP_DEVICE_TARGET) $(LINEAR_TARGET) $(EAGER_TARGET) $(GDN_TARGET) $(GDN_RECURRENCE_TARGET) $(SAMPLING_TARGET) $(ROPE_TARGET) $(SERVE_ENV_TARGET)
 
@@ -426,6 +428,23 @@ $(A8Q4_SHAPE_SWEEP_TARGET): $(A8Q4_SHAPE_SWEEP_SOURCE) $(LINEAR_IMPL) $(LINEAR_H
 	mkdir -p $(BUILD_DIR)
 	$(HIPCC) $(CXXFLAGS) -DNINFER_SOURCE_DIR='"$(abspath ../..)"' \
 		$(A8Q4_SHAPE_SWEEP_SOURCE) $(LINEAR_IMPL) $(LDFLAGS) -o $@
+
+$(A8Q4_DFLASH_SMALL_T_TARGET): $(A8Q4_DFLASH_SMALL_T_SOURCE) $(A8Q4_SHAPE_SWEEP_SOURCE) \
+		$(LINEAR_IMPL) $(LINEAR_HEADER) $(Q4_ACTIVATION_PROFILE) Makefile
+	mkdir -p $(BUILD_DIR)
+	$(HIPCC) $(CXXFLAGS) -Wno-unused-function -DNINFER_SOURCE_DIR='"$(abspath ../..)"' \
+		$(A8Q4_DFLASH_SMALL_T_SOURCE) \
+		$(LINEAR_IMPL) $(LDFLAGS) -o $@
+
+a8q4-dflash-small-t-build: $(A8Q4_DFLASH_SMALL_T_TARGET)
+
+a8q4-dflash-small-t-static: $(BUILD_DIR)/q4g64_linear.s
+	$(PYTHON) check_a8q4_dflash_small_t_static.py $<
+
+a8q4-dflash-small-t-test:
+	cd ../.. && $(PYTHON) -m unittest \
+		tools.r9700.test_check_a8q4_dflash_small_t_static \
+		tools.r9700.test_run_a8q4_dflash_small_t_gate
 
 $(A4Q4_PREFILL_TARGET): a4q4_prefill_qual.hip $(A8Q4_SHAPE_SWEEP_SOURCE) $(LINEAR_IMPL) $(LINEAR_HEADER) Makefile
 	mkdir -p $(BUILD_DIR)

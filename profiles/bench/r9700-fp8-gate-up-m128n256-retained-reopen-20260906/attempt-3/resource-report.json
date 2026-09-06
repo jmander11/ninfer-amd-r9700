@@ -1,0 +1,1 @@
+{"schema":"ninfer.r9700.fp8_gate_up.resources.v1","runtime_allocated_vgpr":101,"static_lds_bytes":24576,"private_bytes":0,"maximum_threads":1024,"active_blocks_per_wgp":1}

@@ -467,22 +467,36 @@ artifact is used for both when the experiment holds the weight recipe constant.
 
 ## DFlash2 and Vision
 
-DFlash K/W selection begins only after the schema-v7 `terminal_production_selection` fixes the
-weight recipe, cache group, and execution profile. The fixed
-C=1 shortlist retains all exact-output candidates on its speed/acceptance/fallback/repair frontier;
-it does not itself choose a production K/W. Every shortlist-frontier tuple then receives a
-schema-v14 `dflash-capacity` campaign over all C=1..4. Missing capacity is an exclusion only when
-the exact failed command and logs are retained; excluded tuples receive no phase/whole campaign.
-Every capacity-eligible tuple receives the complete 22-point `dflash-pareto` matrix: matched
-8K/32K prefill, DFlash decode plus ordinary decode control, and retained-token fresh-prompt DFlash
-whole inference plus its exact spec-none ordinary whole control at C=1..4, with two isolated C=1
-proposal diagnostics.
+DFlash recipe-independent scheduling work and synthetic exact-shape operator qualification are now
+active after the terminal dense C1/P2048 prefill rejection; they do not wait for the terminal base
+or chunk. Physical companion, acceptance, capacity,
+and whole-inference campaigns begin only after schema-v7 `terminal_production_selection` fixes the
+base weight recipe, cache group, and execution profile and the receipt-bound shared chunk is
+selected. The companion is then produced directly from the real BF16 DFlash2 checkpoint; it does
+not automatically inherit the currently implemented all-Q4 evaluator recipe. Recipe selection
+first compares canonical Q4G64,
+source-MSE-refined Q4G64, and source-MSE-refined W8G32. Row-scaled E4M3 FP8 is conditional on
+exact-shape R9700 speed and DFlash quality evidence because it adds storage and currently lacks
+DFlash-owned prepared Linear execution. Every recipe keeps both selector codebooks and the private
+DFlash state in model-specified BF16.
 
-The sole decision authority is the schema-v3 output from
-`tools/bench/assemble_dflash_selection.py`. It binds the base decision through the conversion
-report to the exact terminal winner's companion artifact, executable, cache group, and K/W; reopens every schema-v20
-report; and recomputes shortlist, exact ordinary-output parity, exact repeated proposal/target
-determinism, and generated-quality evidence. Whole parity covers the complete requested generation
+The active proposal set contains exactly K4/W5 and K5/W6. K is the number of predicted drafts and
+W includes the target anchor, so these are respectively four predictions verified in a width-five
+one-block chain and five predictions verified in a width-six one-block chain. The former K1..11
+C=1 shortlist and its derived broad frontier/capacity campaign are superseded; do not run or
+regenerate them. After a short recipe screen, each surviving recipe/K pair receives exact
+ordinary-output parity, proposal determinism, generated-quality, acceptance, whole-throughput, and
+C=1..4 capacity evidence. Missing capacity excludes only the exact recipe/K pair when its failed
+command and logs are retained. Matched 8K/32K DFlash decode and retained-token fresh-prompt whole
+inference use exact spec-none ordinary controls at C=1..4.
+
+The replacement decision authority must bind the base decision through each conversion report to
+the exact terminal winner, BF16 DFlash source, DFlash matrix recipe, companion artifact,
+executable, cache group, and K/W. It must reopen every retained report and recompute recipe
+eligibility, exact ordinary-output parity, exact repeated proposal/target determinism, and
+generated-quality evidence. The current schema-v3 assembler and selected-DFlash preparation are
+fixed-Q4/K1..11 implementations and are not valid authorities for this replacement campaign until
+regenerated consistently. Whole parity covers the complete requested generation
 including its first output token; isolated decode parity covers all 257 post-seed outputs, with seed
 equality inherited from deterministic whole-route parity. Before frontier ranking, every K/W must provide at least
 `1.02x` raw-mean speedup and a strictly positive two-standard-deviation conservative speedup over
@@ -494,6 +508,17 @@ then worst normalized matched acceptance length. Numeric `(K, W)` resolves only 
 No average or workload weighting may replace this rule. The DFlash gate closes only when this
 record passes; a shortlist row, capacity summary, or manually chosen frontier member is not a
 selection result.
+
+The first kernel hypothesis after prefill closes is a packed-W4 small-T route. Current A8Q4 WMMA
+uses a 16-token tile, so C1 K4/K5 proposal/head calls and W5/W6 DFlash/target calls leave most token
+lanes inactive. Qualification starts at T4..6 on every reachable exact Text and DFlash matrix
+shape, then covers flattened K*C and W*C through C=4. It requires an independent represented-input
+oracle, gfx1201 ISA/resources, direct timing against current WMMA, and current-companion whole
+DFlash A/B evidence. The proposed `prepare_ragged_prefix` Wceil=12 compaction is not a live
+optimization: startup planning already sizes persistent features, round tensors, append positions,
+and workspace to the one resolved W5 or W6, and the Op writes that width directly. Its unreachable
+Wceil/copy branch is removed rather than generalized. Physical profiling, not static traffic alone,
+selects the next kernel.
 
 Selected qualified Op results:
 
@@ -928,13 +953,25 @@ dominant gate/up family supplied it, that family would need `229.531` useful TFL
 `400.835`-TFLOP/s issue reference they can save at most `29.998424 ms`. The installed gate/up
 catalog has already reduced 791 entries to ten supported zero-workspace solutions and timed all
 ten; the nearest alternate projects only `0.212524 ms` saving over 64 calls. The exact custom
-M128xN128 route regressed from `3.605496` to `7.640492 ms` per call, M128xN256 failed its resource
-gate, and complete removal of the downstream SiLU/A8 stage is bounded near `20.76 ms`. Therefore
+M128xN128 route regressed from `3.605496` to `7.640492 ms` per call. The retained M128xN256 route
+was reopened after separating static logical (`97`), HIP runtime-reported (`101`), and descriptor
+allocation-rounded (`104`) VGPR. It passed the complete-FP64 oracle at all 2,192 probes,
+status/alias/canary and graph checks, exact FP8-ISA/resource checks, and launch-order stability,
+but terminally regressed from the solution-123104 incumbent median `3.499504089 ms` to
+`49.380744934 ms` (`14.7860151` useful TFLOP/s). Projected complete time is
+`49.48067909025 ms`, and projected 64-call saving is `-2936.39941408 ms`. The immutable decision
+is `profiles/bench/r9700-fp8-gate-up-m128n256-retained-reopen-20260906/attempt-4/decision.json`
+(SHA-256 `f2510b2587bb56a18c175e8d1fcc456c3cb7ad38890b9805acfd7b159c913e9b`). Complete removal
+of the downstream SiLU/A8 stage is bounded near `20.76 ms`. Therefore
 no FP8 catalog, custom-matrix, adjacent-fusion, or counter-only experiment is admitted as a
 credible `>=51.439 ms` mechanism. Canonical dense P2048 remains `1904.339303 tok/s`; the floor has
 not passed, practical-ceiling closure has not been proved, and choosing whether to retain or revise
-that floor is now a product-contract/user decision rather than an authorization for another
-unbounded optimization sweep.
+that floor is now a product-contract decision rather than authorization for another unbounded
+optimization sweep. The bounded prefill phase is closed and work transitions to recipe-independent
+DFlash2 scheduling and exact-shape operators. Do not rerun this object or an adjacent tile sweep.
+M128N256 may return only for a materially different source-level mechanism with independent
+numerical/static evidence and a concrete bound for at most `3.18103603125 ms` per matrix and at
+least `51.438603 ms` projected whole-P2048 saving.
 
 This exhausts the explicit bounded candidate list. A targeted audit of the canonical loaded ISA and
 retained P2048 trace found no new mechanism outside the rejected topology and representation

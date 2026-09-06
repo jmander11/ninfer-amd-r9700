@@ -13,9 +13,9 @@ GPU nor creates conflicting edits. Do not invent low-value work merely to occupy
 Global execution cap: never schedule, generate, benchmark, profile, or require a product cell above
 `C=4`. All active matrices are exactly `C=1..4`; retained `C=5..8` rows are historical evidence
 only and must not be reused as an active command or product requirement.
-Immediate execution priority: scalar-base/U32-voffset addressing is now the sole canonical dense
+Immediate execution priority: scalar-base/U32-voffset addressing is the sole canonical dense
 Q4G64/A8G64 ping/pong route. Its source-matched whole result is `1,904.339303 tok/s`, still below
-the 2,000 tok/s hard gate, so do not resume the dependent chunk/capacity/whole campaign. Ordinary
+the 2,000 tok/s hard gate, so the dependent chunk/capacity/whole campaign remains held. Ordinary
 non-speculative decode has completed its bounded optimization sequence. Native dot8 and the exact K5120
 rows1..4 RMSNorm CTA are canonical; the latter's source-matched C1 8K+256 decode median is
 `9.467485694 s` (`27.03991411 tok/s`), and its selector-free final smoke is `27.05729956 tok/s`.
@@ -27,21 +27,26 @@ The private route and temporary tooling are removed. Ordinary base decode is the
 the bounded practical ceiling represented by the selector-free `27.05729956 tok/s` smoke. This is
 neither an absolute hardware ceiling nor evidence of physical bandwidth saturation or stall
 freedom.
-With ordinary decode closed, resolve the P2048 floor/product-contract decision before its dependent
-chunk/base selection and DFlash2. Complete dual-FMAC pairing passed its corrected
+With ordinary decode closed, the bounded dense-P2048 phase is also terminally closed below its
+acceptance floor. Complete dual-FMAC pairing passed its corrected
 operator gate but was terminally rejected by the whole-P2048 gate and has been removed. The final
 explicitly scheduled two-entry register-FIFO candidate then failed its loaded-object resource gate
 at `97` VGPR versus the canonical `88` and absolute `96` limits and was removed without GPU work.
 The explicit bounded prefill-candidate list is exhausted. Canonical P2048 remains
-`1075.438603 ms` / `1904.339303 tok/s`; this does not close the practical-ceiling question, but no
-new implementation experiment is admitted without a fresh mechanism having a credible
-`>=35.9 ms` whole-P2048 bound. Do not schedule
+`1075.438603 ms` / `1904.339303 tok/s`; this does not prove a practical ceiling, but no new
+prefill experiment is admitted without the explicit return condition recorded below. Do not schedule
 MTP optimization:
 existing MTP support may remain, but its `19.244583 tok/s` MTP3 result is diagnostic only and does
-not rank a product route. Dense prefill remains open only as an unresolved practical-ceiling
-decision recorded below, without reopening an unbounded topology search, FP8 substitution,
+not rank a product route. Dense prefill retains an unresolved practical-ceiling limitation rather
+than active work, without reopening an unbounded topology search, FP8 substitution,
 Q4G128/A8G128
 representation change, or XAttention as a dense-floor surrogate.
+The final dense-prefill qualifier is closed by the terminal M128N256 rejection below. Pause further
+prefill optimization and broad chunk-size work. Begin recipe-independent DFlash scheduling and
+synthetic exact-shape operator work. Physical companion conversion, acceptance, capacity, and
+whole-inference measurement remain fail-closed until schema-v7 selects the base and a receipt-bound
+shared chunk exists. Production DFlash selection tests exactly K4/W5 and K5/W6; do not resume the
+superseded broad K1..11 campaign and do not optimize MTP instead.
 - [x] Capture and validate the fresh retained-production dense C1/P2048/G0/chunk4096/spec-none
   attribution trace before choosing another prefill mechanism. The validated evidence is
   `profiles/rocprof/r9700-retained-production-p2048-trace-plan-20260906/evidence.json`, SHA-256
@@ -74,13 +79,24 @@ representation change, or XAttention as a dense-floor surrogate.
   `217.542` useful TFLOP/s (`1.20103x`); gate/up alone would need `229.531` TFLOP/s
   (`1.25266x`). The two smaller families cannot close it even at the retained architectural issue
   reference. All ten supported zero-workspace gate/up catalog solutions were timed, the nearest
-  projects only `0.212524 ms` saving over 64 calls, custom M128xN128 regressed, custom M128xN256
-  is resource-terminal, and downstream fusion is bounded below the deficit. No FP8 catalog,
+  projects only `0.212524 ms` saving over 64 calls and custom M128xN128 regressed. The retained
+  M128xN256 route was reopened after correcting its former static-resource interpretation. It
+  passed 2,192-probe complete-FP64 correctness, status/alias/canary, graph, exact FP8-ISA/resource,
+  and order-stability gates, but regressed from incumbent `3.499504089 ms` to `49.380744934 ms`
+  (`14.7860151` useful TFLOP/s), with projected complete `49.48067909025 ms` and projected
+  64-call saving `-2936.39941408 ms`. Its terminal decision is
+  `profiles/bench/r9700-fp8-gate-up-m128n256-retained-reopen-20260906/attempt-4/decision.json`
+  (SHA-256 `f2510b2587bb56a18c175e8d1fcc456c3cb7ad38890b9805acfd7b159c913e9b`). Static logical97,
+  HIP runtime-reported101, and descriptor allocation-rounded104 VGPR are distinct exact facts.
+  Downstream fusion is bounded below the deficit. No FP8 catalog,
   custom-matrix, adjacent-fusion, or diagnostic-counter run is admitted as a credible
   `>=51.439 ms` experiment. Dense P2048 remains `1075.438603 ms` / `1904.339303 tok/s`; do not
-  mark the floor passed or resume dependent campaigns. With the bounded performance mechanisms
-  exhausted but practical-ceiling proof still absent, the next action is a product-contract/user
-  decision on retaining or revising the floor.
+  mark the floor passed or resume dependent campaigns. Do not rerun the retained object or an
+  adjacent tile sweep. Reopen M128N256 only for a materially different source mechanism with
+  independent numerical/static evidence and a concrete `<=3.18103603125 ms` per-matrix and
+  `>=51.438603 ms` whole-P2048 saving bound. The bounded dense-prefill phase is closed without a
+  practical-ceiling claim; active work transitions to recipe-independent DFlash2 scheduling and
+  exact-shape operators.
 The 2,000 tok/s P2048 value is an acceptance floor based on an existing llama.cpp observation, not
 an optimization target or a performance ceiling for this fixed-model, fixed-R9700 engine. Crossing
 it permits the dependent campaign to resume but does not close prefill performance work: continue
@@ -2090,8 +2106,8 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         throughput. This closure does not open the held chunk/capacity campaign or discharge the
         selected-recipe DFlash2 gates. Do not optimize or rank MTP; its `19.24458338` tok/s MTP3
         row remains diagnostic.
-        With ordinary decode closed, the next action is the P2048 floor/product-contract decision;
-        dependent chunk/base selection remains blocked before DFlash2.
+        With ordinary decode and bounded dense prefill closed, recipe-independent DFlash2 is next;
+        dependent chunk/base selection remains blocked.
         Final selected-route profiling and roof accounting remain in the dependent item below
         because they require the eventual selected chunk/profile authority.
   - [ ] After chunk and terminal static-profile selection, profile only the ultimately selected 8K
@@ -2632,7 +2648,7 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
                 dense/sparse acquisition, matched whole evidence, and schema-v7 selection remain
                 open under the parent.
 
-## Active: DFlash2 companion for the selected base A8 profile
+## Active: optimized BF16-source DFlash2 companion and K4/K5 production routes
 
 - [x] Implement an explicit R9700 DFlash2 evaluation artifact identity and converter from the
       source safetensors inventory, retaining the model-specified BF16 selector codebook and using
@@ -2650,7 +2666,9 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         output `c2dcb265...a43c` (24,090,686,464 bytes) to their exact base and source hashes;
         both actual sizes equal the projected sizes. The companion matching the base recipe chosen
         by the C=1..4 Pareto gate remains eligible for the draft-quality, acceptance, capacity, and
-        whole-inference gates below; the other remains exact conversion provenance.
+        whole-inference gates below; the other remains exact conversion provenance. These
+        canonical-Q4 companions are retained converter/binder controls, not an automatic production
+        DFlash matrix-recipe decision.
 - [x] Qualify every added DFlash2 integer Linear route at its real shapes with canonical represented
       BF16-to-A8 activation codecs, independent exact packed-code and FP64 formula oracles, malformed/
       alias/nonfinite coverage, native gfx1201 ISA/resources, and interleaved timing against the
@@ -2662,41 +2680,73 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         steps and retains seven-trial interleaved timing samples. Physical composite qualifiers
         additionally pass Q4 through grouped dynamic-convolution prepare and both DFlash selector
         chain/tree arena routes, including mapped selection and malformed Q4 plane rejection.
-- [ ] Select the base recipe before DFlash GPU execution. The earlier mixed G16 C7/C8 and G32 C8
-      failures remain exact out-of-scope stress provenance, but cannot exclude the mixed recipe
-      under the C=1..4 product cap. The four-role FP8/Q4 recipe remains a distinct eligible third
-      branch and may not inherit the all-Q4 identity or companion. Run DFlash only for the
-      companion of the selected base recipe;
-      do not duplicate the shortlist and matrices for the losing recipe.
-      After selection, materialize the selected recipe's currently absent registered N16 DFlash2
-      companion by byte-exactly copying that exact authority-bound base and appending the registered
-      66-object Q4/BF16 DFlash inventory.
-      Its conversion report must bind the base conversion-receipt digest plus recipe, selection,
-      object-plan, source-index, and ranking hashes. Projected size/capacity arithmetic is not
-      admission: fresh selected-K/W C=1..4 capacity and whole evidence is mandatory.
-      The prepared entry point is
-      `profiles/bench/selected-dflash-prepare-20260905/prepare.sh`. It fails closed until the exact
-      schema-v7 winner exists, accepts all-Q4, mixed, or four-role hybrid without a fallback, and
-      binds the selected artifact/build/chunk/group/Text-prefill profile to exactly its registered
-      companion. All three current-N16 companions are absent; exactly the winner's companion is
-      converted, while obsolete pre-N16 companions cannot satisfy the byte/report/base-identity
-      preflight. Conversion binds the exact ROCm Python launcher, its `pyvenv.cfg`, Torch/HIP and
-      safetensors identities, and the required ROCm library path; preparation fails before
-      publication if that environment is unavailable. The staged future
-      command runs the fixed C1 shortlist, derives its K/W frontier, runs C1..4 capacity for every
-      frontier tuple, runs `dflash-pareto` only for capacity-eligible tuples, and then invokes the
-      no-overwrite schema-v3 owner. DFlash proposal and target verification remain dense, its 32
-      persistent matrices are Q4G64 with dynamic A8G64 activations, all 34 non-matrix/codebook
-      objects remain source BF16, and the separate fixed runtime state remains private BF16.
-- [ ] Run and retain matched DFlash2 quality evidence for the selected base recipe's companion under
+- [ ] Now that the terminal dense-prefill qualifier is closed, optimize the two production DFlash
+      schedules without waiting for terminal base/chunk selection. This is the active transition.
+      Test exactly K4/W5 and K5/W6:
+      K is the number of predicted draft tokens and W includes the target anchor, so these are
+      four- and five-token prediction with one-block chain verification. Keep the delivered K1..11
+      runtime input contract unchanged, but do not run its old broad production shortlist.
+      - First qualify a packed-W4 small-T route against the current 16-token WMMA route, beginning
+        with C1 T=4,5,6 across every reachable exact Text and DFlash matrix shape, then the flattened
+        proposal/head widths K*C and verification widths W*C through C=4. Require the independent
+        represented-input oracle, native gfx1201 ISA/resource proof, and interleaved direct timing;
+        retain only a physically faster qualified route. Once a current companion is available,
+        require a whole-DFlash A/B before production promotion.
+        - [x] Implement the isolated T4/T5/T6 qualification candidate without production routing.
+          One output-row thread reuses four packed-W4 pair loads per K64 group across every live
+          token and evaluates the existing low/high A8 decomposition with 16*T native mixed-sign
+          dot8 instructions. The exact 13-shape union covers target Text, full/optimized heads, and
+          all seven DFlash-owned matrix shapes. The compiled gfx1201 kernels are wave32, use
+          26/29/41 VGPR for T4/T5/T6, zero LDS/private/scratch, and contain no WMMA. The focused
+          harness checks candidate and incumbent separately against the independent represented-
+          format FP64 oracle across all 16 N16 row residues plus tile/boundary rows; full pairwise
+          parity is diagnostic only. It also owns canaries/status/malformed-input checks and seven
+          forward/reverse timing pairs. Each cell passes only when both launch-order medians win,
+          the two-standard-error paired-ratio upper bound is below one, and order-ratio drift is at
+          most 0.02. The fail-closed owner requires all 13 shapes at each C1 T4/T5/T6 (39 cells),
+          retaining rejects; flattened C2..4 widths remain a later gate. GPU numerical/timing and
+          whole-DFlash admission remain unchecked; the route is qualification-only.
+      - Profile the current whole DFlash round first enough to separate proposal/head service from
+        dense target verification; optimize the measured owner rather than assuming the proposal
+        path dominates.
+      - [x] Audit the proposed `prepare_ragged_prefix` Wceil compaction before spending GPU time.
+        The startup-fixed product already plans persistent `pending_features`, round tensors,
+        append positions, and append workspace at the one resolved verify width, so K4 and K5
+        already write W5/W6 directly. The apparent Wceil/copy branch was unreachable under every
+        delivered K1..11 configuration and is removed; a narrower-destination Op would add unused
+        dynamic-width generality and cannot save production traffic. Focused CPU layout checks
+        retain exact W5/W6 round shapes. Eager and Device Graph continue to capture the same direct
+        Op sequence; physical timing is neither needed nor claimed for this rejected mechanism.
+- [ ] Select the DFlash matrix recipe directly from the real BF16 DFlash2 checkpoint after the
+      terminal base and receipt-bound shared chunk exist; do not inherit canonical Q4 merely from
+      the selected base. Compare canonical Q4G64, source-MSE-refined Q4G64, and
+      source-MSE-refined W8G32. Admit row-scaled E4M3 only if exact-shape physical speed and DFlash
+      quality support it and after DFlash-owned prepared FP8 Linear execution exists. Preserve both
+      model-specified selector codebooks, all non-matrix/private persistent DFlash state, and fixed
+      runtime state in BF16. Direct BF16 is the mathematical/control representation, not a required
+      persistent candidate. Capacity inputs for the exact 32 matrices are 954,654,720 bytes Q4,
+      1,909,309,440 bytes W8G32, and 1,798,093,824 bytes row-scaled E4M3; the unchanged 34 BF16
+      objects add 254,814,720 bytes.
+      - Materialize only recipe survivors on the schema-v7 winner by byte-exactly copying that
+        authority-bound N16 base and appending the recipe-aware 66-object DFlash inventory. Every
+        conversion report must bind the base conversion-receipt digest plus BF16 DFlash source,
+        recipe, selection, object-plan, source-index, and ranking hashes. Projected size is not
+        admission; fresh K4/W5 and K5/W6 C=1..4 capacity and whole evidence is mandatory.
+      - `profiles/bench/selected-dflash-prepare-20260905` and the current schema-v3 assembler are
+        fixed-Q4/K1..11 historical implementation support, not runnable selection authorities.
+        Replace them with fresh receipt-bound, recipe-aware namespaces and a two-width owner; do not
+        resume, rebind, or treat their old reports as production evidence.
+- [ ] Run and retain matched DFlash2 quality evidence for each surviving matrix recipe on the
+      selected base companion under
       the cache group carried by the schema-v7 `terminal_production_selection`. DFlash itself
       remains on its qualified dense attention boundary: retain aligned target/draft outputs,
       deterministic proposal and final target tokens, exact ordinary-target output parity, and
       exact artifact/profile provenance. Target-model NLL is not applicable because DFlash changes
       proposal execution rather than the teacher-forced target distribution; the base artifact PPL
       campaign owns that numerical gate. Do not select a recipe from standalone synthetic error.
-- [ ] Run and retain DFlash2 acceptance and whole-inference evidence for the selected base recipe and cache group at the
-      startup-fixed C=1..4 workload, including resolved verify width, accepted tokens per round,
+- [ ] Run and retain DFlash2 acceptance and whole-inference evidence for every quality- and
+      capacity-eligible recipe at exactly K4/W5 and K5/W6 on the selected base recipe and cache
+      group at the startup-fixed C=1..4 workload, including resolved verify width, accepted tokens per round,
       fallback/repair behavior, prefill and graph decode throughput, capacity/headroom, and focused
       profiler attribution for any unresolved bottleneck before choosing the production companion.
       - [x] Add the focused `dflash-pareto` C=1..4 8K/32K matrix. It requires explicit startup K,
@@ -2715,8 +2765,11 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
             provenance and compile-matched inventories for every actual
             resolved DFlash verification width at C=1..4; an MTP-width inventory cannot stand in for
             that evidence. Physical candidate runs remain unchecked.
-      - [x] Add the schema-v3 provenance-bound DFlash selection owner. The authoritative command is
-            `python3 tools/bench/assemble_dflash_selection.py`; it consumes the selected base
+            This implemented runner remains reusable support only; its former K1..11 frontier does
+            not define the new recipe-aware K4/W5 and K5/W6 production campaign.
+      - [x] Add the former fixed-Q4/K1..11 schema-v3 provenance-bound DFlash selection owner. Its
+            retained implementation command is `python3 tools/bench/assemble_dflash_selection.py`;
+            it consumes the selected base
             schema-v7 record, companion conversion report, physical shortlist, one C=1..4 capacity
             campaign for every shortlist-frontier K/W (including exact failure provenance), and a
             complete 22-point `dflash-pareto` campaign only for each capacity-eligible K/W. It
@@ -2729,10 +2782,11 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
             cell; equality, uncertainty overlap, or any material regression excludes that K/W. Among
             speed-eligible profiles it preserves the full frontier and selects one static K/W by
             maximin whole throughput, capacity, acceptance, then numeric K/W only for a complete
-            tie. The open parent items close only when the retained
-            recipe/group-qualified DFlash selection record passes and its winner
-            supplies the production companion K/W; no individual matrix or manual frontier choice
-            closes them.
+            tie. This implementation remains useful validation/assembly support, but it is not the
+            authority for the new campaign. The open parent items close only when its fresh
+            recipe-aware two-width replacement publishes a recipe/group-qualified selection record
+            and the winner supplies the production companion K/W; no individual matrix or manual
+            frontier choice closes them.
 
 ## Active: typed growing-cache ABI
 
@@ -3374,7 +3428,8 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
       identity, and materialize the fresh final artifact.
       Selection is owned by the prepared schema-v7 terminal package, after which
       `post-terminal-focused-verification-20260905`, `post-terminal-niah-prepare-20260905`, and
-      `selected-dflash-prepare-20260905` must pass for that same winner before the cutover plan may
+      the fresh receipt-bound recipe-aware DFlash preparation/selection successor (not the
+      superseded `selected-dflash-prepare-20260905`) must pass for that same winner before the cutover plan may
       rename or materialize anything. The machine-joined owner at
       `profiles/bench/final-artifact-cutover-admission-prepare-20260905` is implemented and
       closure-bound, but its final admission JSON remains absent until all of those physical gates,
@@ -3921,14 +3976,16 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         sparse all-Q4 and mixed dense/sparse PPL acquisition, all mixed and
         all-Q4 whole matrices, and ordinary same-route execution evidence remain. Speculative
         acceptance belongs to the selected-only DFlash gate rather than base selection.
-- [ ] Held behind the immediate dense C1/P2048/spec-none `>=2,000 tok/s` floor and
-      practical-ceiling gate above; the user-authorized smaller-gain exact-Q4 continuation does not
-      authorize this downstream campaign. After those gates pass, benchmark
+- [ ] Held behind the terminal base/chunk authorities above. The dense C1/P2048/spec-none qualifier
+      is closed, so DFlash's recipe-independent scheduling and synthetic exact-shape optimization
+      proceed under its dedicated item, but this physical base campaign remains blocked. After the
+      terminal dependencies pass, benchmark
       complete inference and concurrency C=1..4 with profiler attribution. The base
       closure is supplied by the same twelve schema-v14 capacity outcomes and corresponding
       eligible whole matrices used by
       the schema-v7 `terminal_production_selection`; do not schedule a duplicate C=1..4 campaign. DFlash
-      and any bottleneck-specific profiler evidence remain downstream of that selection. The
+      physical DFlash companion/acceptance/capacity/whole campaign remains downstream of that
+      selection; recipe-independent DFlash operator profiling does not. The
       prepared owners are `post-chunk-twelve-candidate-20260905` before selection and the selected
       hardware-use and ordinary-decode-memory packages afterward; none has supplied the
       pending physical evidence.
