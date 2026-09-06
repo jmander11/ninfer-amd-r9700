@@ -73,7 +73,14 @@ EXPECTED_LIMITATIONS = [
     "a missing semantic marker.",
     "The trace contains no performance counters and makes no memory-bandwidth, cache-hit, or "
     "stall claim.",
+    "A bounded terminal selected-region asynchronous GPU drain/reordering after the measured host "
+    "marker is retained rather than discarded; empty-region rows remain conservatively "
+    "unattributed service.",
 ]
+MAX_TERMINAL_ASYNC_DRAIN_CALLS = 32
+MAX_TERMINAL_ASYNC_DRAIN_DISPATCH_WINDOW = 128
+MAX_TERMINAL_ASYNC_DRAIN_TAIL_NS = 5_000_000
+MAX_TERMINAL_ASYNC_DRAIN_SUM_NS = 1_000_000
 
 
 def _sha256(path: Path) -> str:
@@ -130,6 +137,48 @@ def _matches_exact_fields(actual: Any, expected: dict[str, Any]) -> bool:
         elif candidate != value:
             return False
     return True
+
+
+def _validate_kernel_intervals(
+    rows: Sequence[Any], measured: tuple[int, int]
+) -> dict[str, Any]:
+    parsed: list[tuple[int, int, int, int]] = []
+    tail: list[tuple[int, int, int, int]] = []
+    for row in rows:
+        dispatch_id = int(row["dispatch_id"])
+        begin, end, duration = int(row["start"]), int(row["end"]), int(row["duration"])
+        if duration <= 0 or duration != end - begin or begin < measured[0]:
+            raise ValueError("kernel interval differs or precedes measured range")
+        item = (dispatch_id, begin, end, duration)
+        parsed.append(item)
+        if end > measured[1]:
+            tail.append(item)
+    if not tail:
+        return {
+            "calls": 0,
+            "summed_duration_ns": 0,
+            "max_completion_after_measured_ns": 0,
+            "dispatch_id_span_to_capture_end": 0,
+            "crossing_calls": 0,
+            "wholly_post_marker_calls": 0,
+            "dispatch_ids": [],
+        }
+    maximum_dispatch = max(item[0] for item in parsed)
+    if (len(tail) > MAX_TERMINAL_ASYNC_DRAIN_CALLS or
+            maximum_dispatch - min(item[0] for item in tail) >
+            MAX_TERMINAL_ASYNC_DRAIN_DISPATCH_WINDOW or
+            max(item[2] for item in tail) - measured[1] > MAX_TERMINAL_ASYNC_DRAIN_TAIL_NS or
+            sum(item[3] for item in tail) > MAX_TERMINAL_ASYNC_DRAIN_SUM_NS):
+        raise ValueError("terminal selected-region async drain exceeds bounded allowance")
+    return {
+        "calls": len(tail),
+        "summed_duration_ns": sum(item[3] for item in tail),
+        "max_completion_after_measured_ns": max(item[2] for item in tail) - measured[1],
+        "dispatch_id_span_to_capture_end": maximum_dispatch - min(item[0] for item in tail),
+        "crossing_calls": sum(item[1] < measured[1] for item in tail),
+        "wholly_post_marker_calls": sum(item[1] >= measured[1] for item in tail),
+        "dispatch_ids": [item[0] for item in tail],
+    }
 
 
 def _validate_verify_ranges(
@@ -446,12 +495,12 @@ def analyze(plan_path: Path, cell_name: str) -> dict[str, Any]:
             if previous_outer_end is not None and outer_interval[0] < previous_outer_end:
                 raise ValueError("prefill layer outer ranges overlap or differ in order")
             previous_outer_end = outer_interval[1]
+        async_drain = _validate_kernel_intervals(kernel_rows, measured[0])
         stage_stats: dict[str, list[int]] = defaultdict(lambda: [0, 0])
         symbols: dict[tuple[str, str], list[int]] = defaultdict(lambda: [0, 0])
+        async_drain_rows: list[dict[str, Any]] = []
         for row in kernel_rows:
             begin, end, duration = int(row["start"]), int(row["end"]), int(row["duration"])
-            if duration <= 0 or duration != end - begin or begin < measured[0][0] or end > measured[0][1]:
-                raise ValueError("kernel interval differs or escapes measured range")
             region = row["region"]
             if region and region not in known_messages:
                 raise ValueError(f"kernel has unknown region association: {region}")
@@ -475,6 +524,17 @@ def analyze(plan_path: Path, cell_name: str) -> dict[str, Any]:
             stage_stats[stage][0] += 1; stage_stats[stage][1] += duration
             family = _symbol_family(row["name"])
             symbols[(stage, family)][0] += 1; symbols[(stage, family)][1] += duration
+            if end > measured[0][1]:
+                async_drain_rows.append({
+                    "dispatch_id": int(row["dispatch_id"]),
+                    "duration_ns": duration,
+                    "completion_after_measured_ns": end - measured[0][1],
+                    "start_relation": ("crossing" if begin < measured[0][1]
+                                       else "wholly-post-marker"),
+                    "region": region,
+                    "symbol": row["name"],
+                    "attributed_stage": stage,
+                })
         copy_rows = list(connection.execute('select nid,pid,start,"end",duration,size,name,coalesce(region_name,"") region from memory_copies order by start'))
         for row in copy_rows:
             if ((row["nid"], row["pid"]) != (process_nid, process_pid) or
@@ -504,6 +564,20 @@ def analyze(plan_path: Path, cell_name: str) -> dict[str, Any]:
                       "decode_engine_tok_s_profiled": test["decode_engine_tok_s_mean"],
                       "profiled_timing_admissible_for_selection": False},
         "target_verification_rounds": verify_rounds,
+        "bounded_terminal_selected_region_async_drain": {
+            **async_drain,
+            "bounds": {
+                "maximum_calls": MAX_TERMINAL_ASYNC_DRAIN_CALLS,
+                "maximum_dispatch_id_window": MAX_TERMINAL_ASYNC_DRAIN_DISPATCH_WINDOW,
+                "maximum_completion_tail_ns": MAX_TERMINAL_ASYNC_DRAIN_TAIL_NS,
+                "maximum_summed_duration_ns": MAX_TERMINAL_ASYNC_DRAIN_SUM_NS,
+            },
+            "interpretation": (
+                "bounded selected-region asynchronous GPU drain/reordering after the measured "
+                "host marker; global dispatch IDs may interleave independent streams"
+            ),
+            "rows": async_drain_rows,
+        },
         "stages": [{"stage": stage, "calls": values[0], "summed_duration_ms": values[1]/1e6}
                    for stage, values in sorted(stage_stats.items())],
         "operator_families": [

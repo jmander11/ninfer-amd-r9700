@@ -17,6 +17,7 @@ from tools.bench.analyze_dflash_trace import (
     GDN_LAYERS,
     MEASURED,
     analyze,
+    _validate_kernel_intervals,
     _validate_report,
     _validate_verify_ranges,
 )
@@ -201,6 +202,11 @@ class DFlashTraceMarkerTest(unittest.TestCase):
             result = analyze(root / "plan.json", "k4w5")
             self.assertEqual(result["target_verification_rounds"], 1)
             self.assertEqual(result["benchmark"]["decode_engine_tok_s_profiled"], 3.0)
+            connection = sqlite3.connect(database)
+            connection.execute("update kernels set region='unknown' where dispatch_id=1")
+            connection.commit(); connection.close()
+            with self.assertRaisesRegex(ValueError, "unknown region"):
+                analyze(root / "plan.json", "k4w5")
 
     def test_exact_two_round_topology(self):
         rounds, families = _validate_verify_ranges(fixture(2), (0, 1_000_000))
@@ -234,6 +240,45 @@ class DFlashTraceMarkerTest(unittest.TestCase):
                 for begin, end, value in rows]
         with self.assertRaisesRegex(ValueError, "overlap"):
             _validate_verify_ranges(sorted(rows), (0, 1_000_000))
+
+    def test_bounded_terminal_async_drain_is_retained(self):
+        rows = [
+            {"dispatch_id": 1, "start": 110, "end": 120, "duration": 10},
+            {"dispatch_id": 2, "start": 210, "end": 220, "duration": 10},
+            {"dispatch_id": 3, "start": 150, "end": 160, "duration": 10},
+        ]
+        actual = _validate_kernel_intervals(rows, (100, 200))
+        self.assertEqual(actual["calls"], 1)
+        self.assertEqual(actual["dispatch_id_span_to_capture_end"], 1)
+        self.assertEqual(actual["wholly_post_marker_calls"], 1)
+
+    def test_nonterminal_post_measured_timestamp_fails(self):
+        rows = [
+            {"dispatch_id": 1, "start": 210, "end": 220, "duration": 10},
+            {"dispatch_id": 200, "start": 110, "end": 120, "duration": 10},
+        ]
+        with self.assertRaisesRegex(ValueError, "bounded allowance"):
+            _validate_kernel_intervals(rows, (100, 200))
+
+    def test_bounded_crossing_async_drain_is_retained_and_prestart_fails(self):
+        crossing = [{"dispatch_id": 1, "start": 190, "end": 210, "duration": 20}]
+        actual = _validate_kernel_intervals(crossing, (100, 200))
+        self.assertEqual(actual["crossing_calls"], 1)
+        before = [{"dispatch_id": 1, "start": 90, "end": 99, "duration": 9}]
+        with self.assertRaisesRegex(ValueError, "precedes"):
+            _validate_kernel_intervals(before, (100, 200))
+
+    def test_terminal_async_drain_call_cap_fails(self):
+        rows = []
+        for index in range(33):
+            rows.extend((
+                {"dispatch_id": 2 * index, "start": 210 + index,
+                 "end": 211 + index, "duration": 1},
+                {"dispatch_id": 2 * index + 1, "start": 110 + index,
+                 "end": 111 + index, "duration": 1},
+            ))
+        with self.assertRaisesRegex(ValueError, "bounded allowance"):
+            _validate_kernel_intervals(rows, (100, 200))
 
 
 if __name__ == "__main__":
