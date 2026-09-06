@@ -250,6 +250,18 @@ these evaluator identities use
 the profile-derived Q4 type and the same caller-owned workspace; neither child may invoke the
 workspace-free Linear overload.
 
+The four-role N16 canonical-Q4 control is materialized at
+`out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval.ninfer`, identity
+`qwen3.8-27b/r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval`, 22,763,026,944 bytes, SHA-256
+`d8fc77c36cf17c92e96d67b9a6b5a1826a1ade4f59d59c003b2368fe981fc512`. Its sibling conversion
+report has SHA-256 `fb657164b9a9dc2987542ca4578b2bf75d79092a3efa8b7b1776520b4959f61f`
+and binds base SHA-256 `040c6e7ed29c856718a638c00181975710d987b7d5f49f4cafbdf68911f7e7d2`
+and BF16 DFlash source SHA-256
+`67fc76d68dc5a9415511a4f394ef744d67510cd20e93b37cc2cc7d28e4bab65c`. The artifact reopens as
+the exact 1,124-object base plus 32 canonical-Q4 matrices and 34 preserved BF16 selector/private
+objects, for 1,190 objects total. This is an evaluation control only; it neither selects the
+production DFlash matrix recipe nor authorizes production routing.
+
 These fixed canonical-Q4 companions are converter, binder, and historical evaluator controls;
 they do not select the production DFlash matrix recipe. After the base C=1..4 decision, a
 recipe-aware converter must append matrices derived directly from the real BF16 DFlash2

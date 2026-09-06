@@ -211,16 +211,24 @@ completed on 2026-09-03: the all-Q4 artifact is 16,382,310,912 bytes with SHA-25
 evaluation identities: draft-token quality, acceptance, resolved capacity, and whole-inference
 speed remain open selection gates.
 
-The two existing complete canonical-Q4 conversions are below. These commands do not select or
-produce the future recipe-aware production companion. The hybrid fixed-Q4 evaluator remains
-intentionally unmaterialized until schema-v7 selects its base branch; it may then be converted from
-those exact hybrid bytes only if needed as a control and must bind their conversion receipt before
-use.
+The three existing complete canonical-Q4 conversions are below. These commands do not select or
+produce the future recipe-aware production companion. The four-role fixed-Q4 control is now
+materialized from the exact N16 base for matched recipe-independent DFlash evaluation; it remains
+an evaluation control and does not anticipate schema-v7 base or recipe selection.
 
 ```text
 python3 -m tools.convert.qwen3_8_27b_r9700.convert_dflash2_q4 --base out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer --dflash-model /ssdpool2nvme/local_llm/models/qwen3.8-27b-dflash2 --out out/qwen3.8-27b-r9700-q4g64-n16k16-dflash2-q4-eval.ninfer --device cuda
 python3 -m tools.convert.qwen3_8_27b_r9700.convert_dflash2_q4 --base out/qwen3.8-27b-r9700-q4-w8-mse-n16k16-eval.ninfer --dflash-model /ssdpool2nvme/local_llm/models/qwen3.8-27b-dflash2 --out out/qwen3.8-27b-r9700-q4-w8-mse-n16k16-dflash2-q4-eval.ninfer --device cuda
+python3 -m tools.convert.qwen3_8_27b_r9700.convert_dflash2_q4 --base out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer --dflash-model /ssdpool2nvme/local_llm/models/qwen3.8-27b-dflash2 --out out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval.ninfer --device cuda
 ```
+
+The four-role control is 22,763,026,944 bytes with SHA-256
+`d8fc77c36cf17c92e96d67b9a6b5a1826a1ade4f59d59c003b2368fe981fc512`; its conversion report
+has SHA-256 `fb657164b9a9dc2987542ca4578b2bf75d79092a3efa8b7b1776520b4959f61f`.
+It binds base SHA-256 `040c6e7ed29c856718a638c00181975710d987b7d5f49f4cafbdf68911f7e7d2`
+and source SHA-256 `67fc76d68dc5a9415511a4f394ef744d67510cd20e93b37cc2cc7d28e4bab65c`,
+and contains the exact 1,190-object plan: the 1,124-object base plus 32 canonical-Q4 matrices and
+34 model-specified BF16 selector/private objects.
 
 Before artifact publication the converter atomically writes a sibling
 `.conversion.pending.json` receipt containing the exact base hash, source hashes, output identity,

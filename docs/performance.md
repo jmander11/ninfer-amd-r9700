@@ -522,7 +522,31 @@ The SHA-bound flattened screen then admits T8/T10/T12/T18/T20 at balanced-median
 An off-by-default compile-selected candidate profile routes exactly those cells through packed dot8
 for matched whole-DFlash A/B while the control build and all rejected/unlisted cells retain WMMA.
 The selector changes no caller-owned workspace or graph-stable addresses and is not production
-promotion. Independent represented-input oracle, exact gfx1201 ISA/resources, and current-companion
+promotion. The current N16 four-role canonical-Q4 control companion is materialized at
+`out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval.ninfer`, 22,763,026,944
+bytes with SHA-256 `d8fc77c36cf17c92e96d67b9a6b5a1826a1ade4f59d59c003b2368fe981fc512`;
+its conversion report has SHA-256
+`fb657164b9a9dc2987542ca4578b2bf75d79092a3efa8b7b1776520b4959f61f`. The matched control and
+candidate benchmark receipt is
+`profiles/bench/r9700-dflash-small-t-n16-matched-builds-20260906/build-receipt.json` (SHA-256
+`8d0dfc424ea0592eaa0f28654a477e4c1ef4f29bc93581606e4b96d991ef2c8c`); it binds source commit
+`ca2b58c5728de0fc52916796a2ac5ef6cee5e5f9` and binaries that differ only in the compile-selected
+candidate. These are evaluation inputs, not a production recipe or routing decision, and the
+matched whole-DFlash A/B remains open.
+
+The owner trace under `profiles/rocprof/r9700-dflash-q4-c1-k4k5-owner-trace-plan-20260906`
+attributes 84.95%/85.27% of summed K4/W5 and K5/W6 decode service to target verification. Target
+Q4 Linear consumes 2707.578/2647.628 ms across 40/39 verification rounds, versus
+497.823/472.893 ms for proposal/service Q4 Linear. K4/W5 and K5/W6 evidence SHA-256 are
+`dd8ffd1eb031b8c7c5004c0d45690d2d08aaa4c05eab5d82845c72a9cc397ad8` and
+`094139b10b607db827b6782dbe6b1a02dd2b5bee16771a35aa4211df19e11fe1`; asynchronous-drain repair
+SHA-256 is `95d652a9c0a2bce16d6e3e24d488b88dfe8b4b0735a2471347765118f9fc6fbc`.
+This selects target N34816/K5120 gate/up as the optimization owner, not a production route. The
+trace used a legacy RowSplit all-Q4/G32 artifact, eager P128/G64 execution, and profiler
+interception; its durations are attribution only, with no N16 performance, bandwidth/cache/stall,
+quality, acceptance, or whole-inference claim.
+
+Independent represented-input oracle, exact gfx1201 ISA/resources, and current-companion
 whole-DFlash A/B remain required. The proposed `prepare_ragged_prefix` Wceil=12
 compaction is not a live
 optimization: startup planning already sizes persistent features, round tensors, append positions,

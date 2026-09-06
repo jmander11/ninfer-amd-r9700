@@ -1766,6 +1766,28 @@ Replace functional routes with measured gfx1201 families:
   are now closed; active work moves to recipe-independent DFlash2 while dependent chunk/base
   selection remains blocked;
   MTP3 remains diagnostic and is not an optimization or ranking route.
+  The first DFlash owner trace is retained under
+  `profiles/rocprof/r9700-dflash-q4-c1-k4k5-owner-trace-plan-20260906`. Across 40 K4/W5 and 39
+  K5/W6 verification rounds, target verification accounts for 84.95%/85.27% of summed decode
+  service; target Q4 Linear is 2707.578/2647.628 ms versus 497.823/472.893 ms for
+  proposal/service Q4 Linear. The exact evidence SHA-256 values are
+  `dd8ffd1eb031b8c7c5004c0d45690d2d08aaa4c05eab5d82845c72a9cc397ad8` and
+  `094139b10b607db827b6782dbe6b1a02dd2b5bee16771a35aa4211df19e11fe1`; repaired asynchronous
+  attribution is SHA-256 `95d652a9c0a2bce16d6e3e24d488b88dfe8b4b0735a2471347765118f9fc6fbc`.
+  This evidence directs small-T work to target N34816/K5120 gate/up. Because the trace used the
+  legacy RowSplit all-Q4/G32 artifact, eager P128/G64 execution, and profiler interception, it is
+  attribution rather than N16 timing and establishes no bandwidth/cache/stall, quality,
+  acceptance, recipe, routing, or production result.
+  The current four-role N16 canonical-Q4 evaluation companion is now materialized at
+  `out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval.ninfer`, 22,763,026,944
+  bytes with SHA-256 `d8fc77c36cf17c92e96d67b9a6b5a1826a1ade4f59d59c003b2368fe981fc512`;
+  its conversion report SHA-256 is
+  `fb657164b9a9dc2987542ca4578b2bf75d79092a3efa8b7b1776520b4959f61f`.
+  Matched control/candidate builds are bound by
+  `profiles/bench/r9700-dflash-small-t-n16-matched-builds-20260906/build-receipt.json` (SHA-256
+  `8d0dfc424ea0592eaa0f28654a477e4c1ef4f29bc93581606e4b96d991ef2c8c`) at source commit
+  `ca2b58c5728de0fc52916796a2ac5ef6cee5e5f9`. These facts enable the bounded whole-DFlash A/B;
+  they do not select a DFlash matrix recipe or authorize production routing.
   The first ordinary-decode promotion is the canonical native-dot8 T=1 A8Q4 Linear route. Its
   exact domain is seven full-K matrix tuples selected by shape, not caller identity;
   `[5120,17408]` and `[34816,5120]` also occur in DFlash2, while every off-inventory T=1 call,

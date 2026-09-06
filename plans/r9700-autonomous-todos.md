@@ -2660,8 +2660,17 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
         A8G64 workspace are implemented. Publication is recoverable: atomic pending/final reports
         retain source/base/output SHA-256 provenance, and report finalization validates an existing
         completed artifact without reconversion. Both real base artifacts pass preflight. Actual
-        multi-GiB conversions are complete for the all-Q4 and mixed base profiles; the hybrid
-        companion remains deliberately absent pending base selection. The retained atomic
+        multi-GiB conversions are complete for the all-Q4 and mixed base profiles. The current
+        N16 four-role canonical-Q4 control is also materialized at
+        `out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval.ninfer`:
+        22,763,026,944 bytes, SHA-256
+        `d8fc77c36cf17c92e96d67b9a6b5a1826a1ade4f59d59c003b2368fe981fc512`, with conversion-report
+        SHA-256 `fb657164b9a9dc2987542ca4578b2bf75d79092a3efa8b7b1776520b4959f61f`.
+        It byte-exactly extends base SHA-256
+        `040c6e7ed29c856718a638c00181975710d987b7d5f49f4cafbdf68911f7e7d2` to 1,190 objects with
+        32 canonical-Q4 matrices and 34 preserved BF16 objects from DFlash source SHA-256
+        `67fc76d68dc5a9415511a4f394ef744d67510cd20e93b37cc2cc7d28e4bab65c`.
+        The retained atomic
         conversion reports bind all-Q4 output `ba39608b...9cdc` (16,382,310,912 bytes) and mixed
         output `c2dcb265...a43c` (24,090,686,464 bytes) to their exact base and source hashes;
         both actual sizes equal the projected sizes. The companion matching the base recipe chosen
@@ -2731,10 +2740,29 @@ cache/HBM bytes remain unavailable because the gfx1201 request-size buckets are 
           layout remains invalid at the existing candidate API boundary. No allocation, workspace,
           output address, or graph-capture contract changes, and this is not unconditional production
           promotion. Exact predicate tests cover both compile profiles; the retained assembly/resource
-          gate remains the emitted kernel proof. Whole-DFlash A/B is still required.
-      - Profile the current whole DFlash round first enough to separate proposal/head service from
-        dense target verification; optimize the measured owner rather than assuming the proposal
-        path dominates.
+          gate remains the emitted kernel proof. The matched-build authority at
+          `profiles/bench/r9700-dflash-small-t-n16-matched-builds-20260906/build-receipt.json`
+          (SHA-256 `8d0dfc424ea0592eaa0f28654a477e4c1ef4f29bc93581606e4b96d991ef2c8c`)
+          binds detached source commit `ca2b58c5728de0fc52916796a2ac5ef6cee5e5f9`, control benchmark
+          SHA-256 `9093368e17434b520515a0ef82f4b16de317ea349302e994f3a93a52f6973f32`, and candidate
+          benchmark SHA-256 `08f4a3caa8cf11fb0f3e7914cfcb4364c1e33510b7821cfd3d9a22e457c91677`;
+          normalized compile commands differ only in the candidate selector. Whole-DFlash A/B is
+          still required and this receipt is not routing or production authority.
+      - [x] Profile the current whole DFlash round enough to separate proposal/head service from
+        dense target verification. The selected-region owner trace at
+        `profiles/rocprof/r9700-dflash-q4-c1-k4k5-owner-trace-plan-20260906` retains independently
+        validated K4/W5 and K5/W6 evidence with SHA-256
+        `dd8ffd1eb031b8c7c5004c0d45690d2d08aaa4c05eab5d82845c72a9cc397ad8` and
+        `094139b10b607db827b6782dbe6b1a02dd2b5bee16771a35aa4211df19e11fe1`.
+        Across 40/39 verification rounds, target verification is 84.95%/85.27% of summed decode
+        service; target Q4 Linear alone is 2707.578/2647.628 ms versus 497.823/472.893 ms for
+        proposal/service Q4 Linear. The repaired asynchronous-drain attribution is bound by
+        `analysis-repair.json` SHA-256
+        `95d652a9c0a2bce16d6e3e24d488b88dfe8b4b0735a2471347765118f9fc6fbc`.
+        This trace supports optimizing the target N34816/K5120 gate/up owner. It used the legacy
+        RowSplit all-Q4/G32 artifact, eager P128/G64 execution, and profiler interception, so its
+        timings are attribution only: they are not N16 speed evidence, a bandwidth/cache/stall
+        measurement, quality or acceptance evidence, or a production recipe/routing decision.
       - [x] Audit the proposed `prepare_ragged_prefix` Wceil compaction before spending GPU time.
         The startup-fixed product already plans persistent `pending_features`, round tensors,
         append positions, and append workspace at the one resolved verify width, so K4 and K5
