@@ -1,6 +1,7 @@
-7c52ba8b8be1e7cca9c11a64db349e3579119a20f196f22cf3a5d7fa4598cb90  profiles/bench/r9700-dflash-mlp-down-t5-production-symbol-qualification-20260906/plan.json
-8c6342ef3e707b0787b65098672bdc9df77749f06bea43e8d04d635cc2c780a8  profiles/bench/r9700-dflash-mlp-down-t5-production-symbol-qualification-20260906/commands.sh
-d9c7e6919a5843751e4edda20bc69f54871ec56cd2f9d0e07a7bf5d23726eafe  profiles/bench/r9700-dflash-mlp-down-t5-production-symbol-qualification-20260906/analyze.py
+82f33c54264d23e489afa20ca01619a5c83a42e8034ca8ffc27d55533cc85a82  profiles/bench/r9700-dflash-mlp-down-t5-production-symbol-qualification-20260906/plan.json
+019d5988abe9895600b904c305a93818813bd39b5ab5328bb42d9f4e08be5bc2  profiles/bench/r9700-dflash-mlp-down-t5-production-symbol-qualification-20260906/build-provenance.json
+26fc5edfb1f8d8e85305d5889f92d3288064fa9b2a4d5dfc72bb9172422ccd1c  profiles/bench/r9700-dflash-mlp-down-t5-production-symbol-qualification-20260906/commands.sh
+a418b3f1d37b90efef04fb8c9f12511f99a11bb92beb804c9e4d5276b37d0d18  profiles/bench/r9700-dflash-mlp-down-t5-production-symbol-qualification-20260906/analyze.py
 1d78c5dc52921edc6021cd5d4e2697b80a4b82263677a6e52e8d94a315b687dd  profiles/bench/r9700-dflash-mlp-down-t5-production-symbol-qualification-20260906/test_analyze.py
 fd3649675bc1adb4693b9f987247ca53e27ec77efc2672b032ffef7157c681f7  CMakeLists.txt
 d22c780e18964c8206c1718a2478732766814fbf6e5471995fb2086e86c99bd2  src/ops/r9700/linear/r9700_linear.h

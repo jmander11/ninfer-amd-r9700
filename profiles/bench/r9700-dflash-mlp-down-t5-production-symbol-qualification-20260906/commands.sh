@@ -29,7 +29,7 @@ for injected in HSA_TOOLS_LIB ROCPROFILER_TOOL_LIBRARIES ROCP_TOOL_LIBRARIES \
   ROCPROFILER_OUTPUT_PATH ROCPROFILER_OUTPUT_FILE_NAME LD_PRELOAD; do
   test -z "${!injected-}"
 done
-if env | grep -Eq '^(ROCPROF|ROCPROFILER|HSA_TOOLS|ROCTX|HIP_TRACE|LD_PRELOAD)'; then
+if env | grep -Eq '^(LD_PRELOAD|LD_AUDIT|HIP_FORCE_QUEUE_PROFILING|AMD_SERIALIZE_KERNEL|AMD_SERIALIZE_COPY|GPU_DUMP_CODE_OBJECT|ROCPROF|ROCP_|ROCTRACER_|ROCTX_|HSA_TOOLS_|HIP_TRACE_|AQLPROFILE_|ATT_PROFILE)'; then
   echo 'profiling/injection environment is incompatible with unprofiled HIP-event authority' >&2
   exit 2
 fi
@@ -37,7 +37,7 @@ test "$(cat /sys/class/drm/card2/device/vendor)" = 0x1002
 test "$(cat /sys/class/drm/card2/device/device)" = 0x7551
 test "$(cat /sys/class/drm/card2/device/power_dpm_force_performance_level)" = auto
 for output in cell-t5-production.json cell-t5-production.stdout cell-t5-production.stderr \
-  cell-t5-production.exit summary.json static.stdout; do
+  cell-t5-production.exit summary.json static.stdout result.sha256; do
   test ! -e "$package/$output"
 done
 /usr/bin/python3 "$checker" "$assembly" > "$package/static.stdout"
@@ -55,4 +55,8 @@ set +e
 analysis_status=$?
 set -e
 test "$analysis_status" -eq "$status"
+sha256sum "$package/cell-t5-production.json" "$package/cell-t5-production.stdout" \
+  "$package/cell-t5-production.stderr" "$package/cell-t5-production.exit" \
+  "$package/static.stdout" "$package/summary.json" > "$package/result.sha256"
+sha256sum -c --strict "$package/result.sha256"
 exit "$analysis_status"

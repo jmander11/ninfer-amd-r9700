@@ -1,0 +1,27 @@
+{
+  "artifact_type": "ninfer_r9700_dflash_mlp_down_t5_production_symbol_build_provenance",
+  "schema_version": 1,
+  "source_commit": "d1a9b6fb33a843363fba3ad46d6569071df1ab66",
+  "source_tree": "557bbda04f2926319bf7c25f26eb9ec193d74824",
+  "build_working_directory": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700",
+  "binary_build_target": "make a8q4-dflash-mlp-down-small-t-build",
+  "assembly_build_target": "make a8q4-dflash-mlp-down-small-t-static",
+  "compiler": {
+    "path": "/opt/rocm/llvm/bin/clang++",
+    "sha256": "241bf4da7ec39bc00b68ed74f6be751516d9892ed990e8c7fa372bad18500247"
+  },
+  "inputs": {
+    "tools/r9700/Makefile": "32f99468a4fcd903bbed303419a5e567c4936b171463f2288018d054b19ad613",
+    "tools/r9700/a8q4_dflash_mlp_down_small_t_qual.hip": "75edc21e02d9c87af959a973be7a794dbd8f23f80a6e039bbdcb783dfdf4a3b1",
+    "tools/r9700/a8q4_dflash_small_t_qual.hip": "69af9a07e18bf331a175dfae6c02fb12db71baebad5e63552bf5744116612486",
+    "tools/r9700/a8q4_shape_sweep_qual.hip": "0a119f1924f9e5ab659d33b5e4779c79c65d492f7c0284abfbf2b98400aaab81",
+    "src/ops/r9700/linear/r9700_linear.h": "d22c780e18964c8206c1718a2478732766814fbf6e5471995fb2086e86c99bd2",
+    "src/ops/r9700/linear/r9700_linear.hip": "d27f969b2e0e760d276798daf51c3cc5acbf9e056ffb92badbbc604ee9b6052d",
+    "src/ops/r9700/linear/r9700_q4_activation_profile.h": "6ca8646036a45bb3e39f0aaee831e7509a6afd5a94add3bcc30a6f42a9fcb49e"
+  },
+  "outputs": {
+    "tools/r9700/build/a8q4_dflash_mlp_down_small_t_qual": "2add29d2c5065ff22215a7ffd76fd80ce65020fe6c99ebd80ba58bfde45d95b6",
+    "tools/r9700/build/a8q4_dflash_mlp_down_small_t.s": "bc04258672694a512128300a3303f72a1975bce1b89c80c3b0326eead6a9639a"
+  },
+  "interpretation": "The binary and assembly were built from the exact d1a9b6fb source bytes before the evidence package was committed; later branch-tip or package-only changes are not build inputs."
+}

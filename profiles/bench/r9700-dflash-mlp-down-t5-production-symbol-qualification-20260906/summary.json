@@ -28,6 +28,33 @@
     "maximum_order_ratio_delta": 0.02,
     "accepted": true
   },
+  "raw_evidence": {
+    "report": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-mlp-down-t5-production-symbol-qualification-20260906/cell-t5-production.json",
+      "bytes": 3606,
+      "sha256": "645f5c8fd7765c795894b89daa33f39fa3b96aacd575dc4a0cae8d35d276016a"
+    },
+    "stdout": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-mlp-down-t5-production-symbol-qualification-20260906/cell-t5-production.stdout",
+      "bytes": 116,
+      "sha256": "a37bc783ab9bad55b63ab9e18c6c2098a52737d9a20f35cefa2745366029eec9"
+    },
+    "stderr": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-mlp-down-t5-production-symbol-qualification-20260906/cell-t5-production.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "exit": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-mlp-down-t5-production-symbol-qualification-20260906/cell-t5-production.exit",
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    "static": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-mlp-down-t5-production-symbol-qualification-20260906/static.stdout",
+      "bytes": 170,
+      "sha256": "17681839f9ffd18c0c059d2c6e9c63fb2c95304aadd081fa1482e83eb1c29f5c"
+    }
+  },
   "limitations": [
     "standalone represented-input qualification only",
     "does not establish whole-DFlash performance or token parity",

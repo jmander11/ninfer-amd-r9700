@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -38,6 +39,15 @@ def load(path: Path) -> dict:
     if not isinstance(value, dict):
         raise ValueError("report is not a JSON object")
     return value
+
+
+def identity(path: Path) -> dict:
+    resolved = path.resolve(strict=True)
+    if not resolved.is_file():
+        raise ValueError(f"evidence path is not a file: {resolved}")
+    with resolved.open("rb") as stream:
+        digest = hashlib.file_digest(stream, "sha256").hexdigest()
+    return {"path": str(resolved), "bytes": resolved.stat().st_size, "sha256": digest}
 
 
 def finite(value: object, label: str) -> float:
@@ -132,7 +142,19 @@ def main() -> int:
     if args.report != PACKAGE / "cell-t5-production.json" or args.summary != PACKAGE / "summary.json" or args.summary.exists():
         raise ValueError("paths are not fresh immutable package outputs")
     result = validate(load(args.report))
-    summary = {"artifact_type": "ninfer_r9700_dflash_mlp_down_t5_production_symbol_qualification", "schema_version": 1, "status": "accepted" if result["accepted"] else "rejected", "production_eligible": False, "production_routing_authorized": False, "source_commit": "d1a9b6fb33a843363fba3ad46d6569071df1ab66", "shape": {"tokens": 5, "rows": 5120, "columns": 17408}, "decision": result["decision"], "limitations": ["standalone represented-input qualification only", "does not establish whole-DFlash performance or token parity", "does not authorize production routing"]}
+    expected_exit = "0\n" if result["accepted"] else "1\n"
+    if (PACKAGE / "cell-t5-production.exit").read_text() != expected_exit:
+        raise ValueError("recorded qualifier exit differs from decision")
+    if (PACKAGE / "cell-t5-production.stderr").read_bytes() != b"":
+        raise ValueError("qualifier stderr is nonempty")
+    expected_static = "a8q4_dflash_mlp_down_small_t_static=passed T5:dot8=80,wloads=4,scale_loads=6,vgpr=33,sgpr=102,occupancy=16 lds=0 private=0 scratch=0 sgpr_spills=0 vgpr_spills=0 wave32=1\n"
+    if (PACKAGE / "static.stdout").read_text() != expected_static:
+        raise ValueError("static evidence differs")
+    raw_evidence = {name: identity(PACKAGE / filename) for name, filename in {
+        "report": "cell-t5-production.json", "stdout": "cell-t5-production.stdout",
+        "stderr": "cell-t5-production.stderr", "exit": "cell-t5-production.exit",
+        "static": "static.stdout"}.items()}
+    summary = {"artifact_type": "ninfer_r9700_dflash_mlp_down_t5_production_symbol_qualification", "schema_version": 1, "status": "accepted" if result["accepted"] else "rejected", "production_eligible": False, "production_routing_authorized": False, "source_commit": "d1a9b6fb33a843363fba3ad46d6569071df1ab66", "shape": {"tokens": 5, "rows": 5120, "columns": 17408}, "decision": result["decision"], "raw_evidence": raw_evidence, "limitations": ["standalone represented-input qualification only", "does not establish whole-DFlash performance or token parity", "does not authorize production routing"]}
     args.summary.write_text(json.dumps(summary, indent=2, allow_nan=False) + "\n")
     return 0 if result["accepted"] else 1
 
