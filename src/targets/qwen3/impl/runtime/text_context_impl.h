@@ -1,4 +1,5 @@
 #include "targets/qwen3/impl/runtime/instance.h"
+#include "targets/qwen3/impl/runtime/layer_boundary_trace.h"
 #include "targets/qwen3/impl/runtime/panel_copy.h"
 #include "targets/qwen3/impl/runtime/prefill_tail_trace.h"
 #include "targets/qwen3/impl/runtime/text_context.h"
@@ -793,8 +794,24 @@ void TextContext::ordinary_decode_batch(const Tensor& ids, const Tensor& cache_p
 
         Tensor x = work_.alloc(DType::BF16, {kCfg.hidden, batch});
         ops::embedding(ids, *embed_, x, stream);
-        NullTap tap;
-        run_layers(x, Phase::Verify, tap);
+        if (layer_boundary_trace::matches(layer_boundary_trace::Role::TargetOrdinary)) {
+            layer_boundary_trace::Session trace(
+                {.role       = layer_boundary_trace::Role::TargetOrdinary,
+                 .width      = 1,
+                 .batch      = batch,
+                 .column     = 0,
+                 .frontier   = 130,
+                 .ids        = &ids,
+                 .positions  = &cache_positions,
+                 .rope       = &rope_positions},
+                stream);
+            layer_boundary_trace::Tap tap{trace};
+            run_layers(x, Phase::Verify, tap);
+            trace.finish();
+        } else {
+            NullTap tap;
+            run_layers(x, Phase::Verify, tap);
+        }
         ops::rmsnorm(x, *final_norm_, kCfg.rms_eps, true, hidden, stream);
         run_linear(hidden, *lm_head_, logits, stream);
     }
@@ -855,8 +872,25 @@ void TextContext::target_verify_batch_impl(const Tensor& ids, const Tensor& cach
         Tensor x        = work_.alloc(DType::BF16, {kCfg.hidden, columns});
         Tensor flat_ids = ids.view({columns});
         ops::embedding(flat_ids, *embed_, x, stream);
-        if constexpr (Tap::enabled) { tap.begin(x); }
-        run_layers(x, Phase::Verify, tap);
+        if (layer_boundary_trace::matches(layer_boundary_trace::Role::TargetDFlash)) {
+            layer_boundary_trace::Session trace(
+                {.role       = layer_boundary_trace::Role::TargetDFlash,
+                 .width      = width,
+                 .batch      = batch,
+                 .column     = 0,
+                 .frontier   = 130,
+                 .ids        = &ids,
+                 .positions  = &cache_positions,
+                 .rope       = &rope_positions},
+                stream);
+            layer_boundary_trace::CompositeTap<Tap> combined{tap, trace};
+            combined.begin(x);
+            run_layers(x, Phase::Verify, combined);
+            trace.finish();
+        } else {
+            if constexpr (Tap::enabled) { tap.begin(x); }
+            run_layers(x, Phase::Verify, tap);
+        }
         if constexpr (requires { tap.capture_positions(cache_positions, stream); }) {
             tap.capture_positions(cache_positions, stream);
         }
@@ -1242,6 +1276,9 @@ void TextContext::run_layers(Tensor& x, Phase ph, Tap& tap) {
                 auto mixer_scope = work_.scope();
                 attn_mix(full, x, fidx, layer, ph);
             }
+            if constexpr (requires { tap.capture_mixer(layer, x, ctx_.stream); }) {
+                tap.capture_mixer(layer, x, ctx_.stream);
+            }
             {
                 roctx::ScopedRange post_mixer_range(
                     prefill ? roctx::Name::PrefillPostMixer : roctx::Name::VerifyPostMixer,
@@ -1262,6 +1299,9 @@ void TextContext::run_layers(Tensor& x, Phase ph, Tap& tap) {
                     static_cast<std::uint64_t>(layer));
                 auto mixer_scope = work_.scope();
                 gdn_mix(gdn, x, gidx, layer, ph);
+            }
+            if constexpr (requires { tap.capture_mixer(layer, x, ctx_.stream); }) {
+                tap.capture_mixer(layer, x, ctx_.stream);
             }
             {
                 roctx::ScopedRange post_mixer_range(
@@ -1431,8 +1471,32 @@ TextContext::prefill_impl(std::span<const int> ids, const TextPrefill* text_pref
                     1, visual_begin, static_cast<std::int32_t>(local_scatter_indices.size()));
                 ops::scatter(embeddings, indices_device, x, s);
             }
-            if constexpr (Tap::enabled) { tap.begin(x); }
-            run_layers(x, Phase::Prefill, tap);
+            const bool trace_fresh =
+                layer_boundary_trace::matches(layer_boundary_trace::Role::TextFresh) &&
+                base == 0U && T == 129 && t0 == 0 && len == 129;
+            const bool trace_append =
+                layer_boundary_trace::matches(layer_boundary_trace::Role::TextAppend) &&
+                base == 128U && T == 1 && t0 == 0 && len == 1;
+            if (trace_fresh || trace_append) {
+                layer_boundary_trace::Session trace(
+                    {.role       = trace_fresh ? layer_boundary_trace::Role::TextFresh
+                                               : layer_boundary_trace::Role::TextAppend,
+                     .width      = len,
+                     .batch      = 1,
+                     .column     = len - 1,
+                     .frontier   = 129,
+                     .ids        = &ids_device,
+                     .positions  = &positions,
+                     .rope       = &rope_positions},
+                    s);
+                layer_boundary_trace::CompositeTap<Tap> combined{tap, trace};
+                combined.begin(x);
+                run_layers(x, Phase::Prefill, combined);
+                trace.finish();
+            } else {
+                if constexpr (Tap::enabled) { tap.begin(x); }
+                run_layers(x, Phase::Prefill, tap);
+            }
             const std::uint32_t expected_frontier =
                 static_cast<std::uint32_t>(base_i + t0 + len);
             if (text_kv_transaction->commit() != expected_frontier) {

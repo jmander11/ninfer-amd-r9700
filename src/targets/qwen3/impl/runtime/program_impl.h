@@ -1,5 +1,6 @@
 #include "targets/qwen3/impl/runtime/dflash_candidate_stats.h"
 #include "targets/qwen3/impl/runtime/decision_trace.h"
+#include "targets/qwen3/impl/runtime/layer_boundary_trace.h"
 #include "targets/qwen3/impl/runtime/instance.h"
 #include "targets/qwen3/impl/runtime/program.h"
 
@@ -541,6 +542,7 @@ runtime::PrefillStepResult ProgramImplCore::start_prefill_lane(std::uint32_t lan
                                                                PreparedPromptData&& prompt,
                                                                RequestPlan&& plan,
                                                                runtime::TransientRegion transient) {
+    layer_boundary_trace::require_eager(use_device_graph);
     if (lane >= max_concurrency) { throw std::out_of_range("request lane is out of range"); }
     SequenceState& sequence = sequences[lane];
     RequestControl& request = requests[lane];
@@ -3127,6 +3129,7 @@ ProgramImplCore::decode_ordinary_batch(std::span<const std::uint32_t> lanes,
         throw std::invalid_argument("ordinary batch membership is invalid");
     }
     decision_trace::require_eager(use_device_graph);
+    layer_boundary_trace::require_eager(use_device_graph);
 
     std::uint32_t maximum_frontier = 0;
     for (std::size_t row = 0; row < lanes.size(); ++row) {
@@ -3497,6 +3500,7 @@ ProgramImplCore::decode_dflash_batch(std::span<const std::uint32_t> lanes,
         throw std::invalid_argument("DFlash batch membership is invalid");
     }
     decision_trace::require_eager(use_device_graph);
+    layer_boundary_trace::require_eager(use_device_graph);
 
     const std::uint32_t width           = dflash_verify_width;
     std::uint32_t maximum_frontier      = 0;
