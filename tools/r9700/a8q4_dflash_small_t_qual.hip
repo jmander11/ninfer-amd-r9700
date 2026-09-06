@@ -276,14 +276,15 @@ bool run_case(Shape shape, std::uint32_t tokens, const std::filesystem::path& ou
     const std::filesystem::path source_root = std::filesystem::canonical(NINFER_SOURCE_DIR);
     std::ostringstream out;
     out << std::setprecision(17)
-        << "{\n  \"schema\": \"ninfer.r9700.a8q4-dflash-small-t-cell.v1\",\n"
+        << "{\n  \"schema\": \"ninfer.r9700.a8q4-dflash-small-t-cell.v2\",\n"
         << "  \"status\": \"" << (accepted ? "passed" : "rejected") << "\",\n"
         << "  \"production_dispatch_changed\": false,\n"
         << "  \"scope\": \"C1 T4/T5/T6 screen only; flattened C2..4 widths remain unqualified\",\n"
         << "  \"hardware\": {\"device\": \"" << json_escape(device.properties.name)
         << "\", \"architecture\": \"" << json_escape(device.properties.gcnArchName)
         << "\", \"pci_bus_id\": \"" << json_escape(device.pci_bus_id)
-        << "\", \"power_profile_before_after\": \"auto\"},\n"
+        << "\", \"pci_vendor_device\": \"1002:7551\", \"integrated\": false, "
+           "\"wavefront_width\": 32, \"power_profile_before_after\": \"auto\"},\n"
         << "  \"shape\": {\"rows\": " << shape.rows << ", \"columns\": "
         << shape.columns << ", \"tokens\": " << tokens << "},\n"
         << "  \"numeric\": {\"oracle\": \"independent FP64 represented A8G64 x Q4G64 formula\", "
