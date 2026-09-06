@@ -602,7 +602,9 @@ rmsnorm-decode-selection-test: $(RMSNORM_DECODE_SELECTION_TARGET)
 
 rmsnorm-decode-benchmark: $(RMSNORM_DECODE_TARGET) rmsnorm-decode-static rmsnorm-decode-selection-test
 	test -n "$(RMSNORM_DECODE_JSON)"
-	./$(RMSNORM_DECODE_TARGET) --benchmark --out-json "$(RMSNORM_DECODE_JSON)"
+	set +e; ./$(RMSNORM_DECODE_TARGET) --benchmark --out-json "$(RMSNORM_DECODE_JSON)"; \
+		qualifier_status=$$?; $(PYTHON) check_rmsnorm_decode_report.py "$(RMSNORM_DECODE_JSON)"; \
+		checker_status=$$?; test $$qualifier_status -eq 0 -a $$checker_status -eq 0
 
 gated-rmsnorm-prefill-static: $(BUILD_DIR)/eager_ops.s
 	$(PYTHON) check_gated_rmsnorm_prefill_static.py $<

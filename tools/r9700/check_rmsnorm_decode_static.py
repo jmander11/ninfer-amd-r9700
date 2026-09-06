@@ -46,23 +46,43 @@ def check(path: Path) -> dict[str, int | str]:
                                   body, re.MULTILINE))
     shuffle_ops = len(re.findall(r"^\s*(?:ds_bpermute_b32|v_permlane\S*|v_mov_b32_dpp)",
                                  body, re.MULTILINE))
+    instructions = [line.strip() for line in body.splitlines()
+                    if line.strip() and not line.lstrip().startswith((";", "."))]
+    positions = lambda prefix: [index for index, line in enumerate(instructions)
+                                if line.startswith(prefix)]
+    stores = positions("ds_store_b32")
+    loads = positions("ds_load_b32")
+    signals = positions("s_barrier_signal -1")
+    waits = positions("s_barrier_wait -1")
+    invalidations = positions("global_inv scope:SCOPE_SE")
     if global_loads < 1:
         raise ValueError("candidate lacks a distributed vector-addressed global input load")
     if shuffle_ops < 1:
         raise ValueError("candidate lacks a wave32 shuffle reduction")
-    forbidden = re.findall(r"^\s*(?:s_load_u16|s_fmac_f32)(?:\s|$)", body, re.MULTILINE)
+    forbidden = re.findall(
+        r"^\s*(?:s_load_u16|s_fmac_f32|s_barrier(?:\s|$)|v_wmma_\S*|"
+        r"(?:global|buffer|flat)_atomic_\S*|scratch_(?:load|store)\S*)",
+        body, re.MULTILINE)
     if forbidden:
-        raise ValueError(f"candidate retains scalar feature reduction instructions: {forbidden}")
-    if lds > 32 or private != 0 or scratch != 0:
+        raise ValueError(f"candidate contains forbidden instructions: {forbidden}")
+    if lds != 32 or private != 0 or scratch != 0:
         raise ValueError(f"LDS/private/scratch fail {lds}/32 {private}/0 {scratch}/0")
-    if vgprs > 48 or occupancy < 8:
-        raise ValueError(f"resources fail vgprs={vgprs}/48 occupancy={occupancy}/8")
+    if vgprs > 48 or occupancy != 16:
+        raise ValueError(f"resources fail vgprs={vgprs}/48 occupancy={occupancy}/16")
     if wave32 != 1 or wgp != 1 or maximum_workgroup != 256:
         raise ValueError(
             f"execution geometry fails wave32={wave32} WGP={wgp} maxWG={maximum_workgroup}")
+    if not (len(stores) == len(loads) == len(signals) == len(waits) ==
+            len(invalidations) == 2):
+        raise ValueError(
+            "barrier/LDS protocol requires exactly two store/signal/wait/global_inv/load groups")
+    if not (stores[0] < signals[0] < waits[0] < invalidations[0] < loads[0] <
+            stores[1] < signals[1] < waits[1] < invalidations[1] < loads[1]):
+        raise ValueError("barrier/LDS protocol ordering drift")
     return {"symbol": symbol, "vgprs": vgprs, "lds": lds, "occupancy": occupancy,
             "maximum_workgroup": maximum_workgroup, "global_loads": global_loads,
-            "shuffle_ops": shuffle_ops}
+            "shuffle_ops": shuffle_ops, "barrier_pairs": len(signals),
+            "global_invalidations": len(invalidations)}
 
 
 def main(argv: Sequence[str] | None = None) -> int:
