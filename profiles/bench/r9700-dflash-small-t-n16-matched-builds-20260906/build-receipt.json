@@ -1,0 +1,67 @@
+{
+  "artifact_type": "ninfer_r9700_dflash_small_t_matched_build_receipt",
+  "schema_version": 1,
+  "status": "cpu-build-and-host-checks-passed-no-gpu-execution",
+  "source": {
+    "commit": "ca2b58c5728de0fc52916796a2ac5ef6cee5e5f9",
+    "tree": "adafc7167dd59740923808df86edba9929d237a8",
+    "detached_checkout": "/ssdpool2nvme/local_llm/ninfer-amd-r9700-ca2b58c5-dflash-build-source"
+  },
+  "builds": {
+    "control": {
+      "directory": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-small-t-n16-control-20260906",
+      "NINFER_R9700_DFLASH_SMALL_T_CANDIDATE": 0,
+      "benchmark_executable": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-small-t-n16-control-20260906/bench/ninfer_bench", "bytes": 5114624, "sha256": "9093368e17434b520515a0ef82f4b16de317ea349302e994f3a93a52f6973f32"},
+      "cmake_cache": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-small-t-n16-control-20260906/CMakeCache.txt", "bytes": 33733, "sha256": "f9486957d229442b3405a93ca838d2cfdb9ec893c140b74ea3bf56358ad7bf4f"},
+      "compile_commands": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-small-t-n16-control-20260906/compile_commands.json", "bytes": 235262, "sha256": "7c1b40338675949e559c1eb98e2171ca8dfbd707160438d7b285345323e536e4"},
+      "normalized_compile_commands": {"bytes": 222878, "sha256": "8be44dc8a6663bff7876259b8532222f72b0ac80c40e1232722ec27a36d76965"},
+      "cpu_checks": {"ninfer_bench_support_test": "passed", "ninfer_r9700_linear_prefill_dispatch_test": "passed"}
+    },
+    "candidate": {
+      "directory": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-small-t-n16-candidate-20260906",
+      "NINFER_R9700_DFLASH_SMALL_T_CANDIDATE": 1,
+      "benchmark_executable": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-small-t-n16-candidate-20260906/bench/ninfer_bench", "bytes": 5114696, "sha256": "08f4a3caa8cf11fb0f3e7914cfcb4364c1e33510b7821cfd3d9a22e457c91677"},
+      "cmake_cache": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-small-t-n16-candidate-20260906/CMakeCache.txt", "bytes": 33741, "sha256": "77deef40b9761ffb67eae0d77743255185c5661c820cdeec4a67191e85ecdf86"},
+      "compile_commands": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-small-t-n16-candidate-20260906/compile_commands.json", "bytes": 235606, "sha256": "7b5125a25be2dd0fa0e725986f64a9426fe7b38c0718e60348e207edb643ef85"},
+      "normalized_compile_commands": {"bytes": 222878, "sha256": "8be44dc8a6663bff7876259b8532222f72b0ac80c40e1232722ec27a36d76965"},
+      "cpu_checks": {"ninfer_bench_support_test": "passed", "ninfer_r9700_linear_prefill_dispatch_test": "passed"}
+    }
+  },
+  "configs_differ_only_in_dflash_small_t_candidate": true,
+  "shared_configuration": {
+    "CMAKE_BUILD_TYPE": "Release",
+    "CMAKE_GENERATOR": "Unix Makefiles",
+    "CMAKE_HIP_ARCHITECTURES": "gfx1201",
+    "CMAKE_HIP_COMPILER": "/opt/rocm/llvm/bin/clang++",
+    "NINFER_BUILD_APPS": true,
+    "NINFER_BUILD_BENCHMARKS": true,
+    "NINFER_BUILD_R9700_CORE_QUALIFIER": true,
+    "NINFER_R9700_KV_VALUE_GROUP": 16,
+    "NINFER_R9700_Q4_ACTIVATION_BITS": 8,
+    "NINFER_R9700_W8_ACTIVATION_BITS": 8,
+    "NINFER_R9700_FP8_QK_WMMA": 1,
+    "NINFER_R9700_XATTENTION_QUALIFICATION": false,
+    "NINFER_R9700_XATTENTION_STRIDE": 16,
+    "NINFER_R9700_XATTENTION_TAU_PERMILLE": 1000
+  },
+  "expected_benchmark_profile": {
+    "kv_cache_format": "fp8-k-int4-v",
+    "kv_value_group": 16,
+    "q4_activation_bits": 8,
+    "q4_prefill_cta_profile": "m64n128-pingpong-n16-k16-scalar-base-production",
+    "w8_activation_bits": 8,
+    "fp8_qk_wmma_enabled": true,
+    "fp8_qk_wmma_profile": "t1-ge64-t2-ge320-t3plus-stream-v1",
+    "fp8_qk_wmma_t1_min_context": 64,
+    "fp8_qk_wmma_t2_min_context": 320,
+    "xattention_qualification": false
+  },
+  "toolchain": {
+    "cmake": {"path": "/usr/bin/cmake", "bytes": 11796472, "sha256": "1c5227af4edd22d8d689def545e18ee458260c0fd579eba2187967f38817e638", "version": "cmake version 3.28.3"},
+    "make": {"path": "/usr/bin/make", "bytes": 259808, "sha256": "d78b8f1d099fbcfb6f2f49ab87223b9b68fb3956642f92d6ec6de812e8afa965", "version": "GNU Make 4.3"},
+    "hip_compiler": {"path": "/opt/rocm/llvm/bin/clang++", "bytes": 201136, "sha256": "241bf4da7ec39bc00b68ed74f6be751516d9892ed990e8c7fa372bad18500247", "version_prefix": "AMD clang version 23.0.0git"},
+    "host_compiler": {"path": "/usr/bin/c++", "bytes": 1027128, "sha256": "1353e9bdd29a7295c7226bf6c63abccce056d8cac31f112e5cdbecc3f28c2769", "version_prefix": "c++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0"}
+  },
+  "benchmark_execution": "not-run",
+  "maximum_supported_benchmark_concurrency": 4
+}
