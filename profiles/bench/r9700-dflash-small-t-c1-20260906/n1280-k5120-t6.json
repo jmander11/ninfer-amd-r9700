@@ -1,0 +1,22 @@
+{
+  "schema": "ninfer.r9700.a8q4-dflash-small-t-cell.v2",
+  "status": "rejected",
+  "production_dispatch_changed": false,
+  "scope": "C1 T4/T5/T6 screen only; flattened C2..4 widths remain unqualified",
+  "hardware": {"device": "AMD Radeon AI PRO R9700", "architecture": "gfx1201", "pci_bus_id": "0000:13:00.0", "pci_vendor_device": "1002:7551", "integrated": false, "wavefront_width": 32, "power_profile_before_after": "auto"},
+  "shape": {"rows": 1280, "columns": 5120, "tokens": 6},
+  "numeric": {"oracle": "independent FP64 represented A8G64 x Q4G64 formula", "maximum_bf16_steps_allowed": 2, "candidate_maximum_bf16_steps": 0, "incumbent_maximum_bf16_steps": 0, "pairwise_bit_exact_diagnostic": true},
+  "timing": {"method": "unprofiled HIP events", "iterations_per_sample": 10, "forward_reverse_pairs": 7,
+    "incumbent_forward_ms": [0.082477700710296628,0.080313301086425787,0.079573297500610346,0.073853200674057012,0.070749199390411383,0.071005201339721685,0.070173102617263797],
+    "candidate_forward_ms": [0.1017421007156372,0.10182960033416748,0.099481600522994998,0.090433502197265619,0.088573402166366583,0.089549499750137332,0.088545399904251101],
+    "candidate_reverse_ms": [0.10161360502243041,0.101345694065094,0.097265499830245974,0.088581401109695437,0.08865739703178406,0.088641500473022466,0.089117401838302607],
+    "incumbent_reverse_ms": [0.080149298906326299,0.079769301414489749,0.074589198827743536,0.070249199867248535,0.070737200975418094,0.070617097616195681,0.070613098144531247],
+    "incumbent_balanced_ms": [0.081313499808311457,0.080041301250457775,0.077081248164176941,0.072051200270652774,0.070743200182914745,0.07081114947795869,0.070393100380897522],
+    "candidate_balanced_ms": [0.1016778528690338,0.10158764719963073,0.098373550176620486,0.089507451653480535,0.088615399599075328,0.089095500111579906,0.088831400871276861],
+    "forward_candidate_over_incumbent": [1.2335710117939258,1.2679045557421158,1.2501882371059456,1.2245034930359207,1.2519350456193419,1.2611681688175371,1.2618139515248881],
+    "reverse_candidate_over_incumbent": [1.2678040408212468,1.2704849142214625,1.3040158811045972,1.2609595735907266,1.2533348197166214,1.2552413433187175,1.2620520013991832]
+  },
+  "decision": {"criterion": "both launch-order medians faster, two-standard-error paired ratio upper below one, order ratio delta at most 0.02", "incumbent_median_ms": 0.072051200270652774, "candidate_median_ms": 0.089507451653480535, "candidate_over_incumbent": 1.2422756500551717, "incumbent_forward_median_ms": 0.073853200674057012, "candidate_forward_median_ms": 0.090433502197265619, "incumbent_reverse_median_ms": 0.070737200975418094, "candidate_reverse_median_ms": 0.089117401838302607, "forward_ratio_median": 1.2519350456193419, "reverse_ratio_median": 1.2620520013991832, "paired_ratio_mean": 1.2589269312723024, "paired_ratio_standard_deviation": 0.018295142640776575, "paired_ratio_upper": 1.2687060963585801, "order_ratio_delta": 0.010116955779841286, "maximum_order_ratio_delta": 0.02, "accepted": false},
+  "executable": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/build/a8q4_dflash_small_t_qual", "sha256": "9a5a5df9dfc8d7f93bf10c72c91cc35fc57b3f76672df4f3df12e94c5a8b03a8"},
+  "sources": {"kernel": "81eb59b5ab65064b1e49d9c9cca1c0fd92b1e9245803452e9962cddc3eedd2f3", "contract": "de6941345d4fd34d1a9ab2ab86337f37277bd3be2dc8d6eb54659358797bcd95", "qualifier": "b4fe09ccb849c3383791b057a9eccb26cbe4bf0854312c683c3d97d0ba70e50d"}
+}

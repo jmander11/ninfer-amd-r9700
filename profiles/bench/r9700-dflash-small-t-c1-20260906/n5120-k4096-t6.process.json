@@ -1,0 +1,13 @@
+{
+  "command": [
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/build/a8q4_dflash_small_t_qual",
+    "5120",
+    "4096",
+    "6",
+    "--out-json",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-small-t-c1-20260906/n5120-k4096-t6.json"
+  ],
+  "returncode": 1,
+  "stderr": "",
+  "stdout": "A8Q4 DFlash small-T qualification: REJECTED rows=5120 columns=4096 tokens=6 incumbent_ms=0.062013 candidate_ms=0.0786452\n"
+}
