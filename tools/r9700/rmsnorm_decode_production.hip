@@ -79,6 +79,39 @@ std::uint32_t bf16_steps(std::uint16_t lhs, std::uint16_t rhs) {
     return a > b ? a - b : b - a;
 }
 
+std::uint64_t round_ties_even(double value) {
+    const double base = std::floor(value);
+    const double tail = value - base;
+    auto integer = static_cast<std::uint64_t>(base);
+    if (tail > 0.5 || (tail == 0.5 && (integer & 1U) != 0U)) ++integer;
+    return integer;
+}
+
+std::uint16_t bf16_bits_direct(double value) {
+    if (!std::isfinite(value)) fail("nonfinite FP64 oracle value");
+    const std::uint16_t sign = std::signbit(value) ? 0x8000U : 0U;
+    const double magnitude = std::abs(value);
+    if (magnitude == 0.0) return sign;
+    int exponent = 0;
+    const double fraction = std::frexp(magnitude, &exponent);
+    int biased = exponent - 1 + 127;
+    if (biased <= 0) {
+        const auto mantissa = round_ties_even(std::ldexp(magnitude, 133));
+        if (mantissa == 0U) return sign;
+        if (mantissa >= 128U) return static_cast<std::uint16_t>(sign | 0x0080U);
+        return static_cast<std::uint16_t>(sign | mantissa);
+    }
+    auto significand = round_ties_even(std::ldexp(fraction, 8));
+    if (significand == 256U) {
+        significand = 128U;
+        ++biased;
+    }
+    if (biased >= 255) return static_cast<std::uint16_t>(sign | 0x7f80U);
+    return static_cast<std::uint16_t>(
+        sign | (static_cast<std::uint16_t>(biased) << 7U) |
+        static_cast<std::uint16_t>(significand - 128U));
+}
+
 template <class T> void upload(DeviceBuffer<T>& destination, const std::vector<T>& source) {
     if (destination.size() < source.size()) fail("upload extent mismatch");
     HIP_CHECK(hipMemcpy(destination.get(), source.data(), source.size() * sizeof(T),
@@ -152,6 +185,9 @@ std::vector<hip_bfloat16> make_input(std::uint32_t rows, std::uint32_t fixture) 
             static constexpr std::array<float, 8> values{
                 0.0F, -0.0F, 0x1p-14F, -0x1p-14F, 0.03125F, -0.5F, 8.0F, -31.75F};
             value = values[index % values.size()];
+        } else {
+            const auto code = static_cast<std::int32_t>((index * 97U + 11U) % 8191U) - 4095;
+            value = static_cast<float>(code) / 64.0F;
         }
         result[index] = bf16(value);
     }
@@ -198,7 +234,7 @@ Error require_oracle(const std::vector<hip_bfloat16>& actual,
             squared_reference += expected * expected;
             error.max_bf16_steps = std::max(
                 error.max_bf16_steps,
-                bf16_steps(actual[index].data, bf16_bits(static_cast<float>(expected))));
+                bf16_steps(actual[index].data, bf16_bits_direct(expected)));
         }
     }
     error.relative_l2 = std::sqrt(squared_error / std::max(1.0e-30, squared_reference));
@@ -226,7 +262,8 @@ void run_regression(hipStream_t stream) {
     upload(d_weight, weight);
     Error maximum;
     std::uint32_t cases = 0;
-    for (const std::uint32_t rows : {1U, 2U, 3U, 4U}) {
+    constexpr std::uint32_t maximum_rows = 6U;
+    for (std::uint32_t rows = 1U; rows <= maximum_rows; ++rows) {
         for (const std::uint32_t fixture : {0U, 1U, 2U}) {
             const auto input = make_input(rows, fixture);
             DeviceBuffer<hip_bfloat16> d_input(input.size());
@@ -250,24 +287,30 @@ void run_regression(hipStream_t stream) {
         }
     }
 
-    const auto graph_input = make_input(4U, 0U);
-    DeviceBuffer<hip_bfloat16> d_input(graph_input.size());
-    DeviceBuffer<hip_bfloat16> d_output(graph_input.size() + 2U * kGuardElements);
-    upload(d_input, graph_input);
-    poison_output(d_output, stream);
-    hipGraph_t graph = nullptr;
-    hipGraphExec_t executable = nullptr;
-    HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
-    launch_production(d_input, d_weight, d_output, 4U, kModelEps, true, stream);
-    HIP_CHECK(hipStreamEndCapture(stream, &graph));
-    HIP_CHECK(hipGraphInstantiate(&executable, graph, nullptr, nullptr, 0));
-    for (int replay = 0; replay < 2; ++replay) HIP_CHECK(hipGraphLaunch(executable, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
-    (void)require_oracle(checked_output(d_output, graph_input.size()), graph_input, weight, 4U,
-                         kModelEps, true);
-    HIP_CHECK(hipGraphExecDestroy(executable));
-    HIP_CHECK(hipGraphDestroy(graph));
+    for (const std::uint32_t graph_rows : {5U, 6U}) {
+        const auto graph_input = make_input(graph_rows, 0U);
+        DeviceBuffer<hip_bfloat16> d_input(graph_input.size());
+        DeviceBuffer<hip_bfloat16> d_output(graph_input.size() + 2U * kGuardElements);
+        upload(d_input, graph_input);
+        poison_output(d_output, stream);
+        hipGraph_t graph = nullptr;
+        hipGraphExec_t executable = nullptr;
+        HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+        launch_production(d_input, d_weight, d_output, graph_rows, kModelEps, true, stream);
+        HIP_CHECK(hipStreamEndCapture(stream, &graph));
+        HIP_CHECK(hipGraphInstantiate(&executable, graph, nullptr, nullptr, 0));
+        for (int replay = 0; replay < 2; ++replay) HIP_CHECK(hipGraphLaunch(executable, stream));
+        HIP_CHECK(hipStreamSynchronize(stream));
+        (void)require_oracle(checked_output(d_output, graph_input.size()), graph_input, weight,
+                             graph_rows, kModelEps, true);
+        HIP_CHECK(hipGraphExecDestroy(executable));
+        HIP_CHECK(hipGraphDestroy(graph));
+    }
 
+    const auto malformed_input = make_input(6U, 0U);
+    DeviceBuffer<hip_bfloat16> d_input(malformed_input.size());
+    DeviceBuffer<hip_bfloat16> d_output(malformed_input.size() + 2U * kGuardElements);
+    upload(d_input, malformed_input);
     auto reject_without_write = [&](const hip_bfloat16* in, const hip_bfloat16* gain,
                                     hip_bfloat16* out, std::uint32_t features,
                                     std::uint32_t rows, float eps, hipStream_t test_stream) {
@@ -295,9 +338,14 @@ void run_regression(hipStream_t stream) {
                          std::numeric_limits<float>::infinity(), stream);
     reject_without_write(d_input.get(), d_weight.get(), out, kFeatures, 1U, kModelEps, nullptr);
 
-    std::cout << "r9700 production RMSNorm K5120 rows1..4: PASS cases=" << cases
+    std::cout << "r9700 production RMSNorm K5120 rows1.." << maximum_rows
+              << ": PASS cases=" << cases
               << " max_bf16_steps=" << maximum.max_bf16_steps
-              << " graph_replays=2 output_canaries=true malformed_cases=10\n";
+              << " graph_rows=5,6 graph_replays_per_row=2 output_canaries=true malformed_cases=10"
+              << " dflash_rows56_candidate="
+              << (ninfer::ops::r9700::eager::kDFlashRmsnormRows56CandidateEnabled ? "true" :
+                                                                                     "false")
+              << '\n';
 }
 } // namespace
 
@@ -311,7 +359,7 @@ int main(int argc, char**) {
         HIP_CHECK(hipStreamDestroy(stream));
         return 0;
     } catch (const std::exception& error) {
-        std::cerr << "r9700 production RMSNorm K5120 rows1..4: FAIL: " << error.what() << '\n';
+        std::cerr << "r9700 production RMSNorm K5120: FAIL: " << error.what() << '\n';
         return 1;
     }
 }

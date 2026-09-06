@@ -42,7 +42,11 @@ EAGER_TARGET := $(BUILD_DIR)/eager_op_qual
 RMSNORM_PREFILL_TARGET := $(BUILD_DIR)/rmsnorm_prefill_qual
 RMSNORM_K256_PREFILL_TARGET := $(BUILD_DIR)/rmsnorm_k256_prefill_qual
 RMSNORM_DECODE_PRODUCTION_TARGET := $(BUILD_DIR)/rmsnorm_decode_production
+RMSNORM_DFLASH_PRODUCTION_OFF_TARGET := $(BUILD_DIR)/rmsnorm_dflash_rows56_production_off
+RMSNORM_DFLASH_PRODUCTION_ON_TARGET := $(BUILD_DIR)/rmsnorm_dflash_rows56_production_on
 RMSNORM_DECODE_ROUTING_TARGET := $(BUILD_DIR)/test_rmsnorm_decode_routing
+RMSNORM_DFLASH_ROUTING_OFF_TARGET := $(BUILD_DIR)/test_rmsnorm_dflash_rows56_routing_off
+RMSNORM_DFLASH_ROUTING_ON_TARGET := $(BUILD_DIR)/test_rmsnorm_dflash_rows56_routing_on
 RMSNORM_DFLASH_ROWS56_TARGET := $(BUILD_DIR)/rmsnorm_dflash_rows56_qual
 GATED_RMSNORM_PREFILL_TARGET := $(BUILD_DIR)/gated_rmsnorm_prefill_qual
 SILU_MUL_SPLIT_PREFILL_TARGET := $(BUILD_DIR)/silu_mul_split_prefill_qual
@@ -113,6 +117,7 @@ W8_ACTIVATION_PROFILE := ../../src/ops/r9700/linear/r9700_w8_activation_profile.
 Q4_ACTIVATION_PROFILE := ../../src/ops/r9700/linear/r9700_q4_activation_profile.h
 EAGER_IMPL := ../../src/ops/r9700/eager/eager_ops.hip
 EAGER_HEADER := ../../src/ops/r9700/eager/eager_ops.h
+RMSNORM_PROFILE := ../../src/ops/r9700/eager/r9700_rmsnorm_profile.h
 EAGER_TENSOR_IMPL := ../../src/ops/r9700/eager/eager_tensor_ops.cpp
 MTP_PACK_HEADER := ../../include/ninfer/ops/mtp_pack.h
 GDN_IMPL := ../../src/ops/r9700/gdn/gdn_ops.hip
@@ -164,7 +169,7 @@ CXXFLAGS := -O3 -std=c++20 --offload-arch=$(ARCH) -I../../src $(SYSTEM_INCLUDES)
 LDFLAGS := -L$(ROCM_ROOT)/lib -Wl,-rpath,$(ROCM_ROOT)/lib
 
 
-.PHONY: all clean hbm fp8-hipblaslt-probe int4-wmma int4-wmma-isa int4-wmma-resources w8a8-wmma w8a8-prefill-cta-regression w8a8-prefill-cta-lds-scope-regression w8a8-prefill-cta-lds-scope-benchmark w8a8-prefill-cta-lds-scope-report w8a8-wmma-isa w8a8-wmma-resources prefill-cta-static-q4 prefill-cta-static-w8 prefill-cta-static-incumbent-diagnostic q4g64-linear a8q4-shape-sweep a8q4-dflash-small-t-build a8q4-dflash-small-t-static a8q4-dflash-small-t-test a8q4-dflash-small-t-screen a8q4-dflash-mlp-down-small-t-build a8q4-dflash-mlp-down-small-t-static a8q4-dflash-mlp-down-small-t-static-test a8q4-prefill-cta-regression a8q4-prefill-cta-lds-scope-regression a8q4-prefill-cta-lds-scope-benchmark a8q4-prefill-cta-lds-scope-report a8q4-prefill-cta-m64n64-regression q4g64-linear-isa q4g64-linear-resources xattention-isa xattention-resources xattention-reports split512-attention split512-attention-isa split512-attention-resources dense-prefill-attention dense-prefill-attention-full-score-isa dense-prefill-attention-full-score-static dense-prefill-attention-static-test isa kv-resources linear-isa linear-resources eager-isa rmsnorm-prefill-static rmsnorm-prefill-static-test rmsnorm-prefill-benchmark rmsnorm-k256-prefill-static rmsnorm-k256-prefill-static-test rmsnorm-k256-prefill-benchmark rmsnorm-decode-production-static rmsnorm-decode-production-static-test rmsnorm-decode-production-routing-test rmsnorm-decode-production-regression rmsnorm-dflash-rows56-build rmsnorm-dflash-rows56-static rmsnorm-dflash-rows56-static-test rmsnorm-dflash-rows56-screen gated-rmsnorm-prefill-static gated-rmsnorm-prefill-static-test gated-rmsnorm-prefill-path-test gated-rmsnorm-prefill-benchmark gated-rmsnorm-k128-production-static gated-rmsnorm-k128-production-static-test silu-mul-split-prefill-static silu-mul-split-prefill-static-test silu-mul-split-prefill-benchmark gdn-isa gdn-prefill-benchmark gdn-prefill-static gdn-prefill-static-test gdn-recurrence-resources sampling-isa rope-resources run sanitize rocm-tool-audit rocm-tool-audit-test profile-trace profile-attention-trace profile-pmc
+.PHONY: all clean hbm fp8-hipblaslt-probe int4-wmma int4-wmma-isa int4-wmma-resources w8a8-wmma w8a8-prefill-cta-regression w8a8-prefill-cta-lds-scope-regression w8a8-prefill-cta-lds-scope-benchmark w8a8-prefill-cta-lds-scope-report w8a8-wmma-isa w8a8-wmma-resources prefill-cta-static-q4 prefill-cta-static-w8 prefill-cta-static-incumbent-diagnostic q4g64-linear a8q4-shape-sweep a8q4-dflash-small-t-build a8q4-dflash-small-t-static a8q4-dflash-small-t-test a8q4-dflash-small-t-screen a8q4-dflash-mlp-down-small-t-build a8q4-dflash-mlp-down-small-t-static a8q4-dflash-mlp-down-small-t-static-test a8q4-prefill-cta-regression a8q4-prefill-cta-lds-scope-regression a8q4-prefill-cta-lds-scope-benchmark a8q4-prefill-cta-lds-scope-report a8q4-prefill-cta-m64n64-regression q4g64-linear-isa q4g64-linear-resources xattention-isa xattention-resources xattention-reports split512-attention split512-attention-isa split512-attention-resources dense-prefill-attention dense-prefill-attention-full-score-isa dense-prefill-attention-full-score-static dense-prefill-attention-static-test isa kv-resources linear-isa linear-resources eager-isa rmsnorm-prefill-static rmsnorm-prefill-static-test rmsnorm-prefill-benchmark rmsnorm-k256-prefill-static rmsnorm-k256-prefill-static-test rmsnorm-k256-prefill-benchmark rmsnorm-decode-production-static rmsnorm-decode-production-static-test rmsnorm-decode-production-routing-test rmsnorm-decode-production-regression rmsnorm-dflash-rows56-build rmsnorm-dflash-rows56-static rmsnorm-dflash-rows56-static-test rmsnorm-dflash-rows56-routing-test rmsnorm-dflash-rows56-production-build rmsnorm-dflash-rows56-screen gated-rmsnorm-prefill-static gated-rmsnorm-prefill-static-test gated-rmsnorm-prefill-path-test gated-rmsnorm-prefill-benchmark gated-rmsnorm-k128-production-static gated-rmsnorm-k128-production-static-test silu-mul-split-prefill-static silu-mul-split-prefill-static-test silu-mul-split-prefill-benchmark gdn-isa gdn-prefill-benchmark gdn-prefill-static gdn-prefill-static-test gdn-recurrence-resources sampling-isa rope-resources run sanitize rocm-tool-audit rocm-tool-audit-test profile-trace profile-attention-trace profile-pmc
 
 all: $(PROBE_TARGET) $(KV_TARGET) $(HIP_DEVICE_TARGET) $(LINEAR_TARGET) $(EAGER_TARGET) $(GDN_TARGET) $(GDN_RECURRENCE_TARGET) $(SAMPLING_TARGET) $(ROPE_TARGET) $(SERVE_ENV_TARGET)
 
@@ -254,13 +259,43 @@ $(RMSNORM_K256_PREFILL_TARGET): $(RMSNORM_K256_PREFILL_SOURCE) $(EAGER_IMPL) $(E
 	mkdir -p $(BUILD_DIR)
 	$(HIPCC) $(CXXFLAGS) $(RMSNORM_K256_PREFILL_SOURCE) $(EAGER_IMPL) $(LDFLAGS) -o $@
 
-$(RMSNORM_DECODE_PRODUCTION_TARGET): $(RMSNORM_DECODE_PRODUCTION_SOURCE) $(EAGER_IMPL) $(EAGER_HEADER) Makefile
+$(RMSNORM_DECODE_PRODUCTION_TARGET): $(RMSNORM_DECODE_PRODUCTION_SOURCE) $(EAGER_IMPL) $(EAGER_HEADER) $(RMSNORM_PROFILE) Makefile
 	mkdir -p $(BUILD_DIR)
 	$(HIPCC) $(CXXFLAGS) $(RMSNORM_DECODE_PRODUCTION_SOURCE) $(EAGER_IMPL) $(LDFLAGS) -o $@
 
-$(RMSNORM_DECODE_ROUTING_TARGET): test_rmsnorm_decode_routing.cpp $(EAGER_HEADER) Makefile
+$(RMSNORM_DFLASH_PRODUCTION_OFF_TARGET): $(RMSNORM_DECODE_PRODUCTION_SOURCE) $(EAGER_IMPL) \
+		$(EAGER_HEADER) $(RMSNORM_PROFILE) Makefile
+	mkdir -p $(BUILD_DIR)
+	$(HIPCC) $(CXXFLAGS) -DNINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE=0 \
+		$(RMSNORM_DECODE_PRODUCTION_SOURCE) $(EAGER_IMPL) $(LDFLAGS) -o $@
+
+$(RMSNORM_DFLASH_PRODUCTION_ON_TARGET): $(RMSNORM_DECODE_PRODUCTION_SOURCE) $(EAGER_IMPL) \
+		$(EAGER_HEADER) $(RMSNORM_PROFILE) Makefile
+	mkdir -p $(BUILD_DIR)
+	$(HIPCC) $(CXXFLAGS) -DNINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE=1 \
+		$(RMSNORM_DECODE_PRODUCTION_SOURCE) $(EAGER_IMPL) $(LDFLAGS) -o $@
+
+rmsnorm-dflash-rows56-production-build: $(RMSNORM_DFLASH_PRODUCTION_OFF_TARGET) \
+		$(RMSNORM_DFLASH_PRODUCTION_ON_TARGET) rmsnorm-dflash-rows56-routing-test
+
+$(RMSNORM_DECODE_ROUTING_TARGET): test_rmsnorm_decode_routing.cpp $(EAGER_HEADER) $(RMSNORM_PROFILE) Makefile
 	mkdir -p $(BUILD_DIR)
 	$(HIPCC) $(CXXFLAGS) test_rmsnorm_decode_routing.cpp $(LDFLAGS) -o $@
+
+$(RMSNORM_DFLASH_ROUTING_OFF_TARGET): test_rmsnorm_decode_routing.cpp $(EAGER_HEADER) $(RMSNORM_PROFILE) Makefile
+	mkdir -p $(BUILD_DIR)
+	$(HIPCC) $(CXXFLAGS) -DNINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE=0 \
+		test_rmsnorm_decode_routing.cpp $(LDFLAGS) -o $@
+
+$(RMSNORM_DFLASH_ROUTING_ON_TARGET): test_rmsnorm_decode_routing.cpp $(EAGER_HEADER) $(RMSNORM_PROFILE) Makefile
+	mkdir -p $(BUILD_DIR)
+	$(HIPCC) $(CXXFLAGS) -DNINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE=1 \
+		test_rmsnorm_decode_routing.cpp $(LDFLAGS) -o $@
+
+rmsnorm-dflash-rows56-routing-test: $(RMSNORM_DFLASH_ROUTING_OFF_TARGET) \
+		$(RMSNORM_DFLASH_ROUTING_ON_TARGET)
+	./$(RMSNORM_DFLASH_ROUTING_OFF_TARGET)
+	./$(RMSNORM_DFLASH_ROUTING_ON_TARGET)
 
 $(RMSNORM_DFLASH_ROWS56_TARGET): $(RMSNORM_DFLASH_ROWS56_SOURCE) $(EAGER_IMPL) $(EAGER_HEADER) Makefile
 	mkdir -p $(BUILD_DIR)
@@ -268,7 +303,8 @@ $(RMSNORM_DFLASH_ROWS56_TARGET): $(RMSNORM_DFLASH_ROWS56_SOURCE) $(EAGER_IMPL) $
 
 rmsnorm-dflash-rows56-build: $(RMSNORM_DFLASH_ROWS56_TARGET)
 
-rmsnorm-dflash-rows56-static: $(BUILD_DIR)/eager_ops.s rmsnorm-decode-production-routing-test
+rmsnorm-dflash-rows56-static: $(BUILD_DIR)/eager_ops.s rmsnorm-decode-production-routing-test \
+		rmsnorm-dflash-rows56-routing-test
 	$(PYTHON) $(RMSNORM_DFLASH_ROWS56_STATIC_CHECK) $<
 
 rmsnorm-dflash-rows56-static-test:

@@ -940,7 +940,8 @@ hipError_t rmsnorm_bf16(const hip_bfloat16* input, const hip_bfloat16* weight,
         input != nullptr && weight != nullptr && output != nullptr && features != 0 && rows != 0 &&
             std::isfinite(eps) && eps > 0.0F && valid_stream(stream),
         [&] {
-            if (rmsnorm_k5120_rows4_selected(features, rows)) {
+            if (rmsnorm_k5120_rows4_selected(features, rows) ||
+                use_rmsnorm_k5120_rows56_candidate(features, rows)) {
                 hipLaunchKernelGGL(rmsnorm_k5120_rows4_cta_kernel, dim3(rows), dim3(kBlock), 0,
                                    stream, input, weight, output, eps, unit_offset);
                 return;

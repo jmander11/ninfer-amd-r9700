@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ops/r9700/eager/r9700_rmsnorm_profile.h"
+
 #include <hip/hip_bfloat16.h>
 #include <hip/hip_runtime_api.h>
 
@@ -148,6 +150,10 @@ static_assert(rmsnorm_k5120_rows4_selected(5120U, 4U));
 static_assert(!rmsnorm_k5120_rows4_selected(5120U, 0U));
 static_assert(!rmsnorm_k5120_rows4_selected(5120U, 5U));
 static_assert(!rmsnorm_k5120_rows4_selected(256U, 4U));
+static_assert(is_rmsnorm_k5120_rows56_candidate_eligible(5120U, 5U));
+static_assert(is_rmsnorm_k5120_rows56_candidate_eligible(5120U, 6U));
+static_assert(!is_rmsnorm_k5120_rows56_candidate_eligible(5120U, 4U));
+static_assert(!is_rmsnorm_k5120_rows56_candidate_eligible(5120U, 7U));
 // Direct regression boundary for the production fixed-K256 token8 route. It retains the incumbent
 // feature-order FP32 FMA chain and BF16 result while assigning one logical row to each wave.
 [[nodiscard]] hipError_t rmsnorm_k256_token8_qualification(

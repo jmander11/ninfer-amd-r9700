@@ -73,6 +73,20 @@ endif()
 add_compile_definitions(
   NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE=${NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE})
 
+# Qualification-selected exact DFlash RMSNorm route. Zero retains the ordinary rows1..4 CTA
+# domain; one additionally admits only the independently qualified K5120 rows5/6 cells.
+set(NINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE "0" CACHE STRING
+  "Enable the exact qualified R9700 DFlash RMSNorm rows5/6 candidate")
+set_property(CACHE NINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE PROPERTY STRINGS 0 1)
+if(NOT NINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE STREQUAL "0" AND
+   NOT NINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE STREQUAL "1")
+  message(FATAL_ERROR
+    "NINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE must be 0 or 1; got "
+    "'${NINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE}'")
+endif()
+add_compile_definitions(
+  NINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE=${NINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE})
+
 # The selected W8G32 profile uses dynamic A8G32 only at measured winning shapes/token extents and
 # retains exact represented-BF16 activation below each crossover. The explicit A16 build is the
 # matched quality/performance control over identical persistent W8G32 bytes.
