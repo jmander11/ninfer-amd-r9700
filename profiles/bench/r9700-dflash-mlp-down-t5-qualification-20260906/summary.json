@@ -1,0 +1,36 @@
+{
+  "schema": "ninfer.r9700.dflash-mlp-down-t5-qualification-summary.v1",
+  "status": "accepted",
+  "production_eligible": false,
+  "production_dispatch_changed": false,
+  "scope": {
+    "rows": 5120,
+    "columns": 17408,
+    "tokens": 5,
+    "cells": 1
+  },
+  "t6": "prior-static-rejection-not-executed; exact retained T5 assembly contains no T6 kernel",
+  "decision": {
+    "criterion": "both launch-order medians faster, two-standard-error paired ratio upper below one, order ratio delta at most 0.02",
+    "incumbent_median_ms": 0.20527405738830568,
+    "candidate_median_ms": 0.05706599950790406,
+    "candidate_over_incumbent": 0.2779990819782718,
+    "incumbent_forward_median_ms": 0.20519609451293946,
+    "candidate_forward_median_ms": 0.057055997848510745,
+    "incumbent_reverse_median_ms": 0.20520410537719727,
+    "candidate_reverse_median_ms": 0.057076001167297365,
+    "forward_ratio_median": 0.27493010387109595,
+    "reverse_ratio_median": 0.2779578314557832,
+    "paired_ratio_mean": 0.27493391033180975,
+    "paired_ratio_standard_deviation": 0.0054579540498649205,
+    "paired_ratio_upper": 0.2778513094871454,
+    "order_ratio_delta": 0.003027727584687223,
+    "maximum_order_ratio_delta": 0.02,
+    "accepted": true
+  },
+  "limitations": [
+    "standalone synthetic represented-input qualification only",
+    "does not establish whole-DFlash or production performance",
+    "does not authorize production routing"
+  ]
+}
