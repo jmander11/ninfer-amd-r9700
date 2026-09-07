@@ -1,0 +1,15 @@
+{
+  "artifact_type": "ninfer_r9700_fp8_prefix_retained_build_receipt",
+  "schema_version": 1,
+  "source": {"commit": "408bf59bcedda20d1294e613714fe81c43545f02", "tree": "b286ec6984f4b10e42a551a26b1e8eba1fc0ff15"},
+  "source_files": {
+    "tools/r9700/fp8_linear_prefix_discriminator.hip": {"bytes":23366,"sha256":"6cc59fbe1684b921013b2aa057b8ff779ec61f3a19732764f2ac7b7ad867dde8"},
+    "tools/bench/test_fp8_linear_prefix_discriminator.py": {"bytes":1444,"sha256":"a73ff0206b0e29aa29fefc10ce96fd157ad3f32ee38b8c4cd6a81d68b0da1592"},
+    "src/CMakeLists.txt": {"bytes":32974,"sha256":"0b65413ed537a2bfce9885caf28fcb111395caa4a1e05866320cb62665a8d970"}
+  },
+  "build_records": {"cmake_cache":{"path":"retained-build/CMakeCache.txt","bytes":34889,"sha256":"ae19c4108c2be5f2b9654a43b6ee6feb83e4b01fa4b914843ae1b85c94766f78"},"compile_commands":{"path":"retained-build/compile_commands.json","bytes":221432,"sha256":"34b27a80056a49d13e01550736a21db107a97d6df53cc3d5cebef7bc966ffb85"},"contract_test":{"path":"retained-build/test_fp8_linear_prefix_discriminator.py","bytes":1444,"sha256":"a73ff0206b0e29aa29fefc10ce96fd157ad3f32ee38b8c4cd6a81d68b0da1592"}},
+  "compile_profile": {"compiler":"/opt/rocm/llvm/bin/clang++","optimization":"-O3 -DNDEBUG","hip_architecture":"gfx1201","dflash_small_t_candidate":0,"dflash_mlp_down_t5_candidate":0,"dflash_rmsnorm_rows56_candidate":0,"fp8_qk_wmma":1,"gdn_verify_wave_qk_candidate":0,"kv_value_group":16,"q4_activation_bits":8,"w8_activation_bits":8},
+  "outputs": {"executable":{"path":"retained-bin/fp8_linear_prefix_discriminator","bytes":275568,"sha256":"54e649d3186832002ff9079b382e11608d96f4e024aa434bbb5956e061e55374"},"describe":{"path":"retained-bin/describe.json","bytes":203,"sha256":"d8c0b03412a5fad2aeb571c414e909227be5348c290b554e033a6eedeb9eea8f"},"format_self_test":{"path":"retained-bin/format-self-test.json","bytes":943,"sha256":"1d10693a53a2ed8a6a61e55ed7167a4d07b9925256ab11a6c8b1bf94a793e588"}},
+  "toolchain_runtime": {"hip_compiler":{"path":"/opt/rocm/core-10.0/lib/llvm/bin/clang-23","bytes":201136,"sha256":"241bf4da7ec39bc00b68ed74f6be751516d9892ed990e8c7fa372bad18500247"},"python":{"path":"/usr/bin/python3.12","bytes":8020928,"sha256":"1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118"},"amdhip":{"path":"/opt/rocm/core-10.0/lib/libamdhip64.so.7.15.26333-0000000","bytes":28216272,"sha256":"817aeadfd9f62b68831ad89993163c7f1f470f30595e7e0da5fdc942193142a8"},"hipblaslt":{"path":"/opt/rocm/core-10.0/lib/libhipblaslt.so.1.4","bytes":9081728,"sha256":"1e8545626323f9b22c65d36492e1686b831cb85c8f7c8be3fc21c0d6cbb0d055"},"roctx":{"path":"/opt/rocm/core-10.0/lib/librocprofiler-sdk-roctx.so.1.3.5","bytes":845320,"sha256":"07ab9ebdd0785c8a2f01b06c54bdebfcd70a9aa3ac7f6fb791045362dce6395c"}},
+  "relationship": "the retained binary predates the commit by 86 seconds; its exact source, generated compile record, target link rule, dependency-light identity output, and committed source bytes are all retained and agree"
+}

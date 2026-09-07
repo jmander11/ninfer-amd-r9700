@@ -1,0 +1,19 @@
+{
+  "artifact_type": "ninfer_r9700_fp8_prefix_real_weight_result_authority",
+  "schema_version": 1,
+  "status": "complete_retained_authority",
+  "source": {"commit": "408bf59bcedda20d1294e613714fe81c43545f02", "tree": "b286ec6984f4b10e42a551a26b1e8eba1fc0ff15"},
+  "executable_sha256": "54e649d3186832002ff9079b382e11608d96f4e024aa434bbb5956e061e55374",
+  "artifact_sha256": "d8fc77c36cf17c92e96d67b9a6b5a1826a1ade4f59d59c003b2368fe981fc512",
+  "prepared_closure_sha256": "5934247ac5a973fcafd6537b19e528358f16a2fd99c29b6c1bce4dd73f135d91",
+  "result_closure_sha256": "9a469841e3f259db947d1f046992981b0e0d7943c7b699a9e2d5004b4adf4300",
+  "result_sha256": "3baf333d56c6b674bf5034fc675a9965a9b4fbf42da8b24b59c02003ed3177f2",
+  "summary_sha256": "e2f8213945843b9de26404d0b534fb894fe55df5074b138939f62dd93350df9e",
+  "process_sha256": "f6f830c04b6feaa59437be38cf3052f743cf13e60810250478a36866fa77425a",
+  "capture": {"exit_code": 0, "power_before": "auto", "power_after": "auto", "stdout_bytes": 0, "stderr_bytes": 0},
+  "classification": "gate_up_width_dependent_bf16_prefix_only",
+  "gate_up": {"shape": [34816,5120], "prefix_mismatch_count": 291, "first_output_mismatch": {"flat_index":2231847,"token":64,"row":3623,"p128_bits":14790,"p129_bits":14789}, "t128_fingerprint":"e2e00100000000000000000000000000", "t129_fingerprint":"dde00100000000000000000000000000"},
+  "query_key": {"shape": [4096,5120], "prefix_mismatch_count": 0, "t128_fingerprint":"dde00100000000000000000000000000", "t129_fingerprint":"dde00100000000000000000000000000"},
+  "interpretation": "the exact rerun supplies the process and auto-power provenance absent from the byte-identical preliminary result; layer0 gate_up is the localized Text prefix divergence owner",
+  "limitations": ["functional operator diagnostic only; timings are ineligible", "both width-specific outputs satisfy the represented-operation FP64 oracle", "no production routing claim"]
+}

@@ -1,0 +1,1 @@
+{"artifact_type":"ninfer_r9700_fp8_linear_prefix_discriminator","schema_version":1,"device":"gfx1201","tokens":[128,129],"shapes":[[34816,5120],[4096,5120]],"requires_real_production_fp8_artifact":true}

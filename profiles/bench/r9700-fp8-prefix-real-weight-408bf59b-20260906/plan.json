@@ -1,0 +1,16 @@
+{
+  "artifact_type": "ninfer_r9700_fp8_prefix_real_weight_plan",
+  "schema_version": 1,
+  "status": "prepared_exact_rerun_required_for_process_and_auto_provenance",
+  "claim": "functional-only T128/T129 prefix discriminator for exact real layer0 FP8 gate_up and query_key weights",
+  "production_routing_authorized": false,
+  "timing_evidence_eligible": false,
+  "source": {"commit": "408bf59bcedda20d1294e613714fe81c43545f02", "tree": "b286ec6984f4b10e42a551a26b1e8eba1fc0ff15"},
+  "executable": {"path": "retained-bin/fp8_linear_prefix_discriminator", "bytes": 275568, "sha256": "54e649d3186832002ff9079b382e11608d96f4e024aa434bbb5956e061e55374"},
+  "artifact": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval.ninfer", "bytes": 22763026944, "sha256": "d8fc77c36cf17c92e96d67b9a6b5a1826a1ade4f59d59c003b2368fe981fc512", "model_id": "qwen3.8-27b", "weights_id": "r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval"},
+  "hardware": {"device": 0, "name": "AMD Radeon AI PRO R9700", "architecture": "gfx1201", "wave_size": 32, "pci_bus": "0000:13:00.0", "pci_vendor_device": "1002:7551", "power_profile": "auto"},
+  "workload": {"tokens": [128,129], "cells": [{"weight_name":"text/layers/0/mlp/gate_up","rows":34816,"columns":5120},{"weight_name":"text/layers/0/gdn/query_key","rows":4096,"columns":5120}], "input_contract": "one identical represented-BF16 128-column prefix plus one appended column; independent per-token E4M3 outer scale"},
+  "expected_preliminary_result": {"path":"preliminary/result.json","bytes":2931,"sha256":"3baf333d56c6b674bf5034fc675a9965a9b4fbf42da8b24b59c02003ed3177f2","gate_up_prefix_mismatches":291,"gate_up_first":{"flat_index":2231847,"token":64,"row":3623,"p128_bits":14790,"p129_bits":14789},"query_key_prefix_mismatches":0},
+  "limitations": ["the retained preliminary result lacked process and power endpoint receipts and is not the final immutable authority", "the create-only rerun is functional evidence only; timings are inadmissible", "pairwise BF16 prefix mismatch localizes a width-dependent library result but does not imply either output violates the represented-operation oracle", "no production routing claim"],
+  "results_directory": "results"
+}

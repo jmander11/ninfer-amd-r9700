@@ -1921,8 +1921,24 @@ Replace functional routes with measured gfx1201 families:
   `0590bf20498136400478b69595c0703fa47c25a1fac77d61647fe60b1756b0bc`). Layer-zero state exactness
   combined with the layer-one state difference narrows the Text owner to the layer-zero FP8
   gate/up output feeding layer one or the layer-one FP8 query/key projection. The next bounded
-  Text discriminator compares those two T128/T129 FP8 prefix operations directly; the target
-  discriminator enters the layer-three full-attention mixer. The layer-zero capture was imported
+  Text discriminator compares those two T128/T129 FP8 prefix operations directly. Its exact
+  real-weight result is retained under
+  `profiles/bench/r9700-fp8-prefix-real-weight-408bf59b-20260906/results`, with result-closure
+  SHA-256 `9a469841e3f259db947d1f046992981b0e0d7943c7b699a9e2d5004b4adf4300`
+  and summary SHA-256 `e2f8213945843b9de26404d0b534fb894fe55df5074b138939f62dd93350df9e`.
+  It is bound to source commit `408bf59b`, executable SHA-256
+  `54e649d3186832002ff9079b382e11608d96f4e024aa434bbb5956e061e55374`, the exact four-role
+  artifact, device-zero R9700/gfx1201/wave32, and auto power before and after execution. For
+  layer-zero FP8
+  gate/up `[N=34816,K=5120]`, the represented activation codes and scales remain exact but 291
+  BF16 prefix outputs differ; the first is token 64, row 3,623 (bits 14,790 versus 14,789).
+  hipBLASLt selects fingerprint `e2e00100000000000000000000000000` at T128 and
+  `dde00100000000000000000000000000` at T129. Layer-one FP8 query/key
+  `[N=4096,K=5120]` instead retains fingerprint `dde00100000000000000000000000000`
+  and is bit-exact across the entire output prefix. Both executions pass the independent
+  represented-operation FP64 error bound. This identifies the width-dependent layer-zero FP8
+  gate/up library algorithm as the Text prefix-divergence owner. The target discriminator
+  enters the layer-three full-attention mixer. The layer-zero state capture was imported
   from the exact maintainer run without process receipts or a retained power endpoint, so it and
   all related traces are timing-ineligible and authorize no decode-speed or production-routing
   claim.

@@ -1,0 +1,29 @@
+{
+  "argv": [
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-prefix-real-weight-408bf59b-20260906/retained-bin/fp8_linear_prefix_discriminator",
+    "--artifact",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval.ninfer",
+    "--output",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-prefix-real-weight-408bf59b-20260906/results/result.json"
+  ],
+  "artifact_type": "ninfer_fp8_prefix_process_receipt",
+  "executable": {
+    "bytes": 275568,
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-prefix-real-weight-408bf59b-20260906/retained-bin/fp8_linear_prefix_discriminator",
+    "sha256": "54e649d3186832002ff9079b382e11608d96f4e024aa434bbb5956e061e55374"
+  },
+  "exit_code": 0,
+  "power_after": "auto",
+  "power_before": "auto",
+  "schema_version": 1,
+  "stderr": {
+    "bytes": 0,
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-prefix-real-weight-408bf59b-20260906/results/stderr",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "stdout": {
+    "bytes": 0,
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-prefix-real-weight-408bf59b-20260906/results/stdout",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}
