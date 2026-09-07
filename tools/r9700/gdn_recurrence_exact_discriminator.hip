@@ -8,6 +8,7 @@
 #include "ops/r9700/gdn_recurrence/gdn_verify_profile.h"
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cmath>
 #include <cstddef>
@@ -114,16 +115,24 @@ std::vector<hip_bfloat16> adversarial_normalization_row() {
     return result;
 }
 
-Inputs make_adversarial_inputs() {
-    Inputs result = make_inputs(1, 857);
+Inputs make_adversarial_inputs(int width = 1) {
+    Inputs result = make_inputs(width, 857);
     const std::vector<hip_bfloat16> row = adversarial_normalization_row();
-    for (int head = 0; head < kQHeads; ++head) {
-        std::copy(row.begin(), row.end(), result.q.begin() + head * kDim);
-        std::copy(row.begin(), row.end(), result.k.begin() + head * kDim);
+    for (int token = 0; token < width; ++token) {
+        for (int head = 0; head < kQHeads; ++head) {
+            const std::size_t base =
+                (static_cast<std::size_t>(token) * kQHeads + head) * kDim;
+            std::copy(row.begin(), row.end(), result.q.begin() + base);
+            std::copy(row.begin(), row.end(), result.k.begin() + base);
+        }
     }
-    for (int head = 0; head < kValueHeads; ++head) {
-        result.g[head] = -0.125F;
-        result.beta[head] = 0.75F;
+    for (int token = 0; token < width; ++token) {
+        for (int head = 0; head < kValueHeads; ++head) {
+            const std::size_t control =
+                static_cast<std::size_t>(token) * kValueHeads + head;
+            result.g[control] = -0.125F - 0.00390625F * static_cast<float>(token);
+            result.beta[control] = 0.75F - 0.015625F * static_cast<float>(token % 3);
+        }
     }
     return result;
 }
@@ -361,6 +370,25 @@ Metrics require_oracle(const std::vector<hip_bfloat16>& output,
     return metrics;
 }
 
+void require_output_oracle(const std::vector<hip_bfloat16>& output,
+                           const std::vector<double>& expected, const std::string& label) {
+    if (output.size() != expected.size()) { fail(label + ": output oracle extent mismatch"); }
+    double maximum = 0.0;
+    double error2 = 0.0;
+    double oracle2 = 0.0;
+    for (std::size_t index = 0; index < output.size(); ++index) {
+        const double error = static_cast<double>(fp32(output[index])) - expected[index];
+        maximum = std::max(maximum, std::abs(error));
+        error2 += error * error;
+        oracle2 += expected[index] * expected[index];
+    }
+    const double relative = std::sqrt(error2 / std::max(oracle2, 1.0e-30));
+    if (!std::isfinite(maximum) || !std::isfinite(relative) || maximum > 0.025 ||
+        relative > 0.02) {
+        fail(label + ": independent FP64 output oracle criterion failed");
+    }
+}
+
 struct ExactComparison {
     bool exact;
     std::size_t mismatch_count;
@@ -400,6 +428,14 @@ struct RunResult {
     std::vector<hip_bfloat16> output;
     std::vector<float> state;
     Metrics metrics;
+};
+
+struct RecordResult {
+    std::vector<hip_bfloat16> output;
+    std::vector<hip_bfloat16> key_record;
+    std::vector<hip_bfloat16> value_record;
+    std::vector<float> gate_record;
+    std::vector<float> tree_states;
 };
 
 RunResult run_ordinary(const Inputs& in, const std::vector<float>& initial,
@@ -491,6 +527,223 @@ RunResult run_snapshot(const Inputs& in, const std::vector<float>& initial,
     return result;
 }
 
+RecordResult run_record(const Inputs& in, const std::vector<float>& initial,
+                        const std::vector<std::int32_t>* parents, hipStream_t stream,
+                        const std::string& label) {
+    if (in.width < 2 || in.width > 16) { fail(label + ": record width is outside [2,16]"); }
+    if (parents != nullptr && parents->size() != static_cast<std::size_t>(in.width)) {
+        fail(label + ": parent extent mismatch");
+    }
+    DeviceInputs device(in);
+    GuardedBuffer states(initial);
+    const std::vector<std::int32_t> valid{in.width};
+    const std::vector<std::int32_t> initial_slot{0};
+    GuardedBuffer dvalid(valid);
+    GuardedBuffer dinitial(initial_slot);
+    GuardedBuffer key_record(in.k.size() * sizeof(hip_bfloat16));
+    GuardedBuffer value_record(in.v.size() * sizeof(hip_bfloat16));
+    GuardedBuffer gate_record(in.g.size() * 2U * sizeof(float));
+    GuardedBuffer output(in.v.size() * sizeof(hip_bfloat16));
+    key_record.fill_payload(0xff);
+    value_record.fill_payload(0xff);
+    gate_record.fill_payload(0xff);
+    output.fill_payload(0xff);
+    ninfer::Tensor tstates(states.data(), ninfer::DType::FP32,
+                           {kDim, kDim, kValueHeads, 1});
+    ninfer::Tensor tvalid(dvalid.data(), ninfer::DType::I32, {1});
+    ninfer::Tensor tinitial(dinitial.data(), ninfer::DType::I32, {1});
+    ninfer::Tensor tkey(key_record.data(), ninfer::DType::BF16,
+                        {kDim, kQHeads, in.width, 1});
+    ninfer::Tensor tvalue(value_record.data(), ninfer::DType::BF16,
+                          {kDim, kValueHeads, in.width, 1});
+    ninfer::Tensor tgate(gate_record.data(), ninfer::DType::FP32,
+                         {2, kValueHeads, in.width, 1});
+    ninfer::Tensor tout(output.data(), ninfer::DType::BF16,
+                        {kDim, kValueHeads, in.width, 1});
+
+    GuardedBuffer dparents(parents == nullptr ? std::vector<std::int32_t>{0} : *parents);
+    ninfer::Tensor tparents(dparents.data(), ninfer::DType::I32,
+                            {parents == nullptr ? 1 : in.width, 1});
+    const std::size_t tree_state_count =
+        static_cast<std::size_t>(in.width) * initial.size();
+    GuardedBuffer tree_storage(parents == nullptr ? sizeof(float)
+                                                  : tree_state_count * sizeof(float));
+    tree_storage.fill_payload(0xff);
+    ninfer::WorkspaceArena tree_workspace(
+        ninfer::DeviceSpan{tree_storage.data(),
+                           parents == nullptr ? sizeof(float)
+                                              : tree_state_count * sizeof(float)});
+    ninfer::ops::gated_delta_net_replay_record(
+        device.tq, device.tk, device.tv, device.tg, device.tbeta, kScale, tstates, tvalid,
+        tinitial, tkey, tvalue, tgate, tout, stream,
+        parents == nullptr ? nullptr : &tparents,
+        parents == nullptr ? nullptr : &tree_workspace);
+    HIP_CHECK(hipStreamSynchronize(stream));
+
+    RecordResult result{
+        output.copy<hip_bfloat16>(in.v.size()),
+        key_record.copy<hip_bfloat16>(in.k.size()),
+        value_record.copy<hip_bfloat16>(in.v.size()),
+        gate_record.copy<float>(in.g.size() * 2U),
+        parents == nullptr ? std::vector<float>{}
+                           : tree_storage.copy<float>(tree_state_count)};
+    if (states.copy<float>(initial.size()) != initial) {
+        fail(label + ": source state mutated");
+    }
+    std::vector<float> expected_gate(in.g.size() * 2U);
+    for (std::size_t index = 0; index < in.g.size(); ++index) {
+        expected_gate[2U * index] = in.g[index];
+        expected_gate[2U * index + 1U] = in.beta[index];
+    }
+    if (!compare_exact(result.key_record, in.k).exact ||
+        !compare_exact(result.value_record, in.v).exact ||
+        !compare_exact(result.gate_record, expected_gate).exact) {
+        fail(label + ": replay record payload is not a bit-preserving semantic copy");
+    }
+    if (std::any_of(result.output.begin(), result.output.end(), [](hip_bfloat16 value) {
+            return value.data == kBf16Poison;
+        })) {
+        fail(label + ": output retained poison");
+    }
+    if (parents != nullptr && std::any_of(result.tree_states.begin(), result.tree_states.end(),
+                                          [](float value) {
+                                              return std::bit_cast<std::uint32_t>(value) ==
+                                                     kFp32Poison;
+                                          })) {
+        fail(label + ": tree state retained poison");
+    }
+    device.require_unchanged(in, label);
+    states.require_guards(label + " states");
+    dvalid.require_guards(label + " valid");
+    dinitial.require_guards(label + " initial_slot");
+    dparents.require_guards(label + " parents");
+    key_record.require_guards(label + " key_record");
+    value_record.require_guards(label + " value_record");
+    gate_record.require_guards(label + " gate_record");
+    output.require_guards(label + " output");
+    tree_storage.require_guards(label + " tree_states");
+    return result;
+}
+
+struct TreeReference {
+    std::vector<hip_bfloat16> output;
+    std::vector<float> states;
+    std::vector<double> oracle_output;
+    std::vector<double> oracle_states;
+};
+
+TreeReference tree_reference(const Inputs& in, const std::vector<float>& initial,
+                             const std::vector<std::int32_t>& parents,
+                             hipStream_t stream, const std::string& label);
+
+struct RecordEvidence {
+    int width = 0;
+    ExactComparison sequential_output{};
+    ExactComparison sequential_key_record{};
+    ExactComparison sequential_value_record{};
+    ExactComparison sequential_gate_record{};
+    ExactComparison tree_output{};
+    ExactComparison tree_states{};
+    ExactComparison tree_key_record{};
+    ExactComparison tree_value_record{};
+    ExactComparison tree_gate_record{};
+};
+
+std::vector<float> expected_gate_record(const Inputs& in) {
+    std::vector<float> result(in.g.size() * 2U);
+    for (std::size_t index = 0; index < in.g.size(); ++index) {
+        result[2U * index] = in.g[index];
+        result[2U * index + 1U] = in.beta[index];
+    }
+    return result;
+}
+
+RecordEvidence exercise_record_width(int width, const std::vector<float>& initial,
+                                     hipStream_t stream) {
+    const Inputs in = make_adversarial_inputs(width);
+    const Oracle sequential_oracle = oracle(in, initial);
+    const RunResult ordinary = run_ordinary(
+        in, initial, sequential_oracle, stream,
+        "record_reference_ordinary_w" + std::to_string(width));
+    const RecordResult sequential = run_record(
+        in, initial, nullptr, stream, "record_sequential_w" + std::to_string(width));
+    require_output_oracle(sequential.output, sequential_oracle.outputs,
+                          "record_sequential_w" + std::to_string(width));
+
+    std::vector<std::int32_t> parents = {-1, 0, 0, 2, 1};
+    if (width == 6) parents.push_back(4);
+    if (width != 5 && width != 6) { fail("record discriminator width must be 5 or 6"); }
+    const TreeReference reference = tree_reference(
+        in, initial, parents, stream, "record_tree_reference_w" + std::to_string(width));
+    const RecordResult tree = run_record(
+        in, initial, &parents, stream, "record_tree_w" + std::to_string(width));
+    (void)require_oracle(tree.output, reference.oracle_output, tree.tree_states,
+                         reference.oracle_states,
+                         "record_tree_w" + std::to_string(width));
+    const std::vector<float> expected_gate = expected_gate_record(in);
+
+    RecordEvidence evidence{
+        .width = width,
+        .sequential_output = compare_exact(ordinary.output, sequential.output),
+        .sequential_key_record = compare_exact(in.k, sequential.key_record),
+        .sequential_value_record = compare_exact(in.v, sequential.value_record),
+        .sequential_gate_record = compare_exact(expected_gate, sequential.gate_record),
+        .tree_output = compare_exact(reference.output, tree.output),
+        .tree_states = compare_exact(reference.states, tree.tree_states),
+        .tree_key_record = compare_exact(in.k, tree.key_record),
+        .tree_value_record = compare_exact(in.v, tree.value_record),
+        .tree_gate_record = compare_exact(expected_gate, tree.gate_record),
+    };
+    const bool selector = ninfer::ops::r9700::gdn_recurrence::kVerifyWaveQkCandidate;
+    if (evidence.sequential_output.exact != selector ||
+        (evidence.tree_output.exact && evidence.tree_states.exact) != selector) {
+        fail("record adversarial exactness does not match the compiled verify-wave selector");
+    }
+    if (!evidence.sequential_key_record.exact || !evidence.sequential_value_record.exact ||
+        !evidence.sequential_gate_record.exact || !evidence.tree_key_record.exact ||
+        !evidence.tree_value_record.exact || !evidence.tree_gate_record.exact) {
+        fail("record semantic payload comparison failed");
+    }
+    return evidence;
+}
+
+TreeReference tree_reference(const Inputs& in, const std::vector<float>& initial,
+                             const std::vector<std::int32_t>& parents,
+                             hipStream_t stream, const std::string& label) {
+    if (parents.size() != static_cast<std::size_t>(in.width)) {
+        fail(label + ": reference parent extent mismatch");
+    }
+    TreeReference result;
+    result.output.reserve(in.v.size());
+    result.states.reserve(static_cast<std::size_t>(in.width) * initial.size());
+    result.oracle_output.reserve(in.v.size());
+    result.oracle_states.reserve(static_cast<std::size_t>(in.width) * initial.size());
+    for (int token = 0; token < in.width; ++token) {
+        const int parent = parents[static_cast<std::size_t>(token)];
+        if ((token == 0 && parent != -1) ||
+            (token > 0 && (parent < 0 || parent >= token))) {
+            fail(label + ": invalid parent topology");
+        }
+        std::vector<float> parent_state = initial;
+        if (parent >= 0) {
+            const auto begin = result.states.begin() +
+                static_cast<std::ptrdiff_t>(parent) * static_cast<std::ptrdiff_t>(initial.size());
+            parent_state.assign(begin, begin + static_cast<std::ptrdiff_t>(initial.size()));
+        }
+        const Inputs one = slice(in, token, 1);
+        const Oracle expected = oracle(one, parent_state);
+        const RunResult node = run_ordinary(one, parent_state, expected, stream,
+                                            label + "_node" + std::to_string(token));
+        result.output.insert(result.output.end(), node.output.begin(), node.output.end());
+        result.states.insert(result.states.end(), node.state.begin(), node.state.end());
+        result.oracle_output.insert(result.oracle_output.end(), expected.outputs.begin(),
+                                    expected.outputs.end());
+        result.oracle_states.insert(result.oracle_states.end(), expected.state.begin(),
+                                    expected.state.end());
+    }
+    return result;
+}
+
 void require_alias_rejection(hipStream_t stream) {
     const Inputs in = make_inputs(1, 901);
     DeviceInputs device(in);
@@ -553,13 +806,15 @@ int select_r9700() {
 int main(int argc, char** argv) try {
     if (argc == 2 && std::string(argv[1]) == "--describe") {
         std::cout << "{\"artifact_type\":\"gdn_recurrence_exact_discriminator\","
-                     "\"schema_version\":1,\"device\":\"gfx1201-wave32\","
+                     "\"schema_version\":2,\"device\":\"gfx1201-wave32\","
                      "\"verify_wave_qk_candidate\":"
                   << (ninfer::ops::r9700::gdn_recurrence::kVerifyWaveQkCandidate ? 1 : 0)
                   << ","
                      "\"normalize_qk\":true,\"cases\":[\"ordinary-t1-vs-snapshot-b1w1\","
                      "\"adversarial-ordinary-t1-vs-snapshot-b1w1\","
-                     "\"ordinary-t129-vs-ordinary-t128-plus-snapshot-b1w1\"],"
+                     "\"ordinary-t129-vs-ordinary-t128-plus-snapshot-b1w1\","
+                     "\"adversarial-sequential-record-b1w5-w6\","
+                     "\"adversarial-tree-record-b1w5-w6\"],"
                      "\"claim\":\"diagnostic-only-no-performance-or-production-claim\"}\n";
         return 0;
     }
@@ -632,12 +887,16 @@ int main(int argc, char** argv) try {
     const ExactComparison prefix_output = compare_exact(full_prefix, ordinary_prefix.output);
     const ExactComparison composed_output = compare_exact(full_last, snapshot_tail.output);
     const ExactComparison composed_state = compare_exact(ordinary_full.state, snapshot_tail.state);
+    const std::array<RecordEvidence, 2> record_evidence{
+        exercise_record_width(5, adversarial_initial, stream),
+        exercise_record_width(6, adversarial_initial, stream),
+    };
     require_alias_rejection(stream);
     HIP_CHECK(hipStreamDestroy(stream));
 
     std::cout.precision(std::numeric_limits<double>::max_digits10);
     std::cout << "{\n  \"artifact_type\": \"gdn_recurrence_exact_discriminator_result\",\n"
-                 "  \"schema_version\": 1,\n  \"device\": \"gfx1201-wave32\",\n"
+                 "  \"schema_version\": 2,\n  \"device\": \"gfx1201-wave32\",\n"
               << "  \"verify_wave_qk_candidate\": "
               << (ninfer::ops::r9700::gdn_recurrence::kVerifyWaveQkCandidate ? 1 : 0)
               << ",\n"
@@ -662,7 +921,26 @@ int main(int argc, char** argv) try {
     print_metrics("ordinary_t129_oracle", ordinary_full.metrics, true);
     print_metrics("ordinary_t128_oracle", ordinary_prefix.metrics, true);
     print_metrics("snapshot_tail_oracle", snapshot_tail.metrics, false);
-    std::cout << "  },\n  \"guards_and_alias_checks\": \"pass\",\n"
+    std::cout << "  },\n  \"record_w5_w6\": {\n"
+                 "    \"topology\": \"B1; W5 [-1,0,0,2,1]; W6 [-1,0,0,2,1,4]\",\n"
+                 "    \"widths\": [\n";
+    for (std::size_t index = 0; index < record_evidence.size(); ++index) {
+        const RecordEvidence& evidence = record_evidence[index];
+        std::cout << "      {\n        \"width\": " << evidence.width << ",\n";
+        print_exact("sequential_output_vs_ordinary", evidence.sequential_output, true);
+        print_exact("sequential_key_record", evidence.sequential_key_record, true);
+        print_exact("sequential_value_record", evidence.sequential_value_record, true);
+        print_exact("sequential_gate_record", evidence.sequential_gate_record, true);
+        print_exact("tree_output_vs_wave_reference", evidence.tree_output, true);
+        print_exact("tree_states_vs_wave_reference", evidence.tree_states, true);
+        print_exact("tree_key_record", evidence.tree_key_record, true);
+        print_exact("tree_value_record", evidence.tree_value_record, true);
+        print_exact("tree_gate_record", evidence.tree_gate_record, false);
+        std::cout << "      }" << (index + 1U == record_evidence.size() ? "\n" : ",\n");
+    }
+    std::cout << "    ],\n"
+                 "    \"independent_oracle\": \"each ordinary sequential/tree reference transition passed the represented-input FP64 criterion\"\n"
+                 "  },\n  \"guards_and_alias_checks\": \"pass\",\n"
                  "  \"claim\": \"diagnostic-only-no-performance-or-production-claim\"\n}\n";
     return 0;
 } catch (const std::exception& error) {
