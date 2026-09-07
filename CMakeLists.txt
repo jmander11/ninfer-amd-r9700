@@ -87,6 +87,21 @@ endif()
 add_compile_definitions(
   NINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE=${NINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE})
 
+# Qualification-only normalization association selector. Zero retains the snapshot/replay
+# 128-element shared-memory tree; one makes those verify paths use the ordinary wave32/FMA
+# association. Ordinary execution is unchanged in both builds.
+set(NINFER_R9700_GDN_VERIFY_WAVE_QK_CANDIDATE "0" CACHE STRING
+  "Enable canonical ordinary-wave Q/K normalization in R9700 GDN verify paths")
+set_property(CACHE NINFER_R9700_GDN_VERIFY_WAVE_QK_CANDIDATE PROPERTY STRINGS 0 1)
+if(NOT NINFER_R9700_GDN_VERIFY_WAVE_QK_CANDIDATE STREQUAL "0" AND
+   NOT NINFER_R9700_GDN_VERIFY_WAVE_QK_CANDIDATE STREQUAL "1")
+  message(FATAL_ERROR
+    "NINFER_R9700_GDN_VERIFY_WAVE_QK_CANDIDATE must be 0 or 1; got "
+    "'${NINFER_R9700_GDN_VERIFY_WAVE_QK_CANDIDATE}'")
+endif()
+add_compile_definitions(
+  NINFER_R9700_GDN_VERIFY_WAVE_QK_CANDIDATE=${NINFER_R9700_GDN_VERIFY_WAVE_QK_CANDIDATE})
+
 # The selected W8G32 profile uses dynamic A8G32 only at measured winning shapes/token extents and
 # retains exact represented-BF16 activation below each crossover. The explicit A16 build is the
 # matched quality/performance control over identical persistent W8G32 bytes.

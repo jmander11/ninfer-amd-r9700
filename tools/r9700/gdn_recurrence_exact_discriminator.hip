@@ -5,6 +5,7 @@
 #include "core/device.h"
 #include "core/tensor.h"
 #include "ninfer/ops/gated_delta_net.h"
+#include "ops/r9700/gdn_recurrence/gdn_verify_profile.h"
 
 #include <algorithm>
 #include <bit>
@@ -553,6 +554,9 @@ int main(int argc, char** argv) try {
     if (argc == 2 && std::string(argv[1]) == "--describe") {
         std::cout << "{\"artifact_type\":\"gdn_recurrence_exact_discriminator\","
                      "\"schema_version\":1,\"device\":\"gfx1201-wave32\","
+                     "\"verify_wave_qk_candidate\":"
+                  << (ninfer::ops::r9700::gdn_recurrence::kVerifyWaveQkCandidate ? 1 : 0)
+                  << ","
                      "\"normalize_qk\":true,\"cases\":[\"ordinary-t1-vs-snapshot-b1w1\","
                      "\"adversarial-ordinary-t1-vs-snapshot-b1w1\","
                      "\"ordinary-t129-vs-ordinary-t128-plus-snapshot-b1w1\"],"
@@ -598,6 +602,11 @@ int main(int argc, char** argv) try {
         compare_exact(adversarial_ordinary.output, adversarial_snapshot.output);
     const ExactComparison adversarial_state =
         compare_exact(adversarial_ordinary.state, adversarial_snapshot.state);
+    const bool adversarial_exact = adversarial_output.exact && adversarial_state.exact;
+    if (adversarial_exact !=
+        ninfer::ops::r9700::gdn_recurrence::kVerifyWaveQkCandidate) {
+        fail("adversarial exactness does not match the compiled verify-wave selector");
+    }
 
     const Inputs full = make_inputs(129, 829);
     const Inputs prefix = slice(full, 0, 128);
@@ -629,6 +638,9 @@ int main(int argc, char** argv) try {
     std::cout.precision(std::numeric_limits<double>::max_digits10);
     std::cout << "{\n  \"artifact_type\": \"gdn_recurrence_exact_discriminator_result\",\n"
                  "  \"schema_version\": 1,\n  \"device\": \"gfx1201-wave32\",\n"
+              << "  \"verify_wave_qk_candidate\": "
+              << (ninfer::ops::r9700::gdn_recurrence::kVerifyWaveQkCandidate ? 1 : 0)
+              << ",\n"
                  "  \"w1\": {\n";
     print_exact("output", one_output, true);
     print_exact("state", one_state, true);

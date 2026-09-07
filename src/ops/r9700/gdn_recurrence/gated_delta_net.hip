@@ -4,6 +4,7 @@
 
 #include "core/device.h"
 #include "ops/r9700/gdn_recurrence/gdn_prefill_scale_sidecar.h"
+#include "ops/r9700/gdn_recurrence/gdn_verify_profile.h"
 
 #include <hip/hip_bfloat16.h>
 
@@ -260,7 +261,11 @@ void snapshot_kernel(const hip_bfloat16* q, const hip_bfloat16* k, const hip_bfl
     for (int token = 0; token < valid; ++token) {
         const std::size_t column = static_cast<std::size_t>(batch) * width + token;
         const std::size_t qk_base = (column * kQHeads + q_head) * kDim;
-        stage_qk<Normalize>(q, k, qk_base, staged_q, staged_k, reduction);
+        if constexpr (Normalize && r9700::gdn_recurrence::kVerifyWaveQkCandidate) {
+            stage_qk_ordinary<true>(q, k, qk_base, staged_q, staged_k, reduction);
+        } else {
+            stage_qk<Normalize>(q, k, qk_base, staged_q, staged_k, reduction);
+        }
         const std::size_t vh = column * kValueHeads + value_head;
         transition(local, staged_q, staged_k, static_cast<float>(v[vh * kDim + value_row]),
                    expf(g[vh]), beta[vh], scale, sublane,
@@ -330,7 +335,11 @@ void record_kernel(const hip_bfloat16* q, const hip_bfloat16* k, const hip_bfloa
             }
         }
         const std::size_t qk_base = (column * kQHeads + q_head) * kDim;
-        stage_qk<true>(q, k, qk_base, staged_q, staged_k, reduction);
+        if constexpr (r9700::gdn_recurrence::kVerifyWaveQkCandidate) {
+            stage_qk_ordinary<true>(q, k, qk_base, staged_q, staged_k, reduction);
+        } else {
+            stage_qk<true>(q, k, qk_base, staged_q, staged_k, reduction);
+        }
         const std::size_t vh = column * kValueHeads + value_head;
         if (tid < kDim) {
             value_record[vh * kDim + tid] = v[vh * kDim + tid];
