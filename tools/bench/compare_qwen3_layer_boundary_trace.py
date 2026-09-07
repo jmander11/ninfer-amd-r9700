@@ -227,13 +227,16 @@ def load_recurrent_state(path: Path, role: str) -> tuple[dict, bytes]:
     point = ("wide-prefill-state-after-prefix-128-before-selected-column-128"
              if role == "text-fresh-frontier129-column128" else
              "restored-append-state-before-selected-column-0")
+    layer = integer(value.get("text_layer"), "recurrent-state text_layer")
+    if layer not in (0, 1) or value.get("gdn_index") != layer:
+        fail(f"recurrent-state layer/GDN index differs: {path}")
     exact = {
-        "artifact_type": "ninfer_qwen3_layer1_gdn_recurrent_state_trace",
-        "schema_version": 1, "diagnostic_only": True, "timing_evidence_eligible": False,
+        "artifact_type": "ninfer_qwen3_gdn_recurrent_state_trace",
+        "schema_version": 2, "diagnostic_only": True, "timing_evidence_eligible": False,
         "production_routing_authorized": False, "execution": "eager", "role": role,
         "capture_point": point, "selected_token": 24178, "selected_cache_position": 128,
         "selected_rope_position": 128, "state_frontier": 128, "linear_state_slot": 0,
-        "text_layer": 1, "gdn_index": 1, "dtype": "fp32", "shape": [128,128,48],
+        "text_layer": layer, "gdn_index": layer, "dtype": "fp32", "shape": [128,128,48],
         "elements": RECURRENT_STATE_ELEMENTS, "sidecar_bytes": RECURRENT_STATE_BYTES,
         "layout": "little-endian-fp32:key,value,value_head",
     }
@@ -382,19 +385,22 @@ def compare_gdn(left_path: Path, right_path: Path, diagnostic: str) -> dict:
 
 
 def compare_recurrent_state(left_path: Path, right_path: Path) -> dict:
-    _, left_data = load_recurrent_state(left_path, "text-fresh-frontier129-column128")
-    _, right_data = load_recurrent_state(right_path, "text-append-frontier129-column0")
+    left, left_data = load_recurrent_state(left_path, "text-fresh-frontier129-column128")
+    right, right_data = load_recurrent_state(right_path, "text-append-frontier129-column0")
+    if left["text_layer"] != right["text_layer"] or left["gdn_index"] != right["gdn_index"]:
+        fail("paired recurrent-state layer identity differs")
+    layer = left["text_layer"]
     left_bits = struct.unpack(f"<{RECURRENT_STATE_ELEMENTS}I", left_data)
     right_bits = struct.unpack(f"<{RECURRENT_STATE_ELEMENTS}I", right_data)
     mismatches = [index for index, pair in enumerate(zip(left_bits, right_bits))
                   if pair[0] != pair[1]]
     detail = None
-    classification = "layer1_recurrent_prefix_state_exact"
+    classification = f"layer{layer}_recurrent_prefix_state_exact"
     if mismatches:
         first = mismatches[0]
         left_values = struct.unpack(f"<{RECURRENT_STATE_ELEMENTS}f", left_data)
         right_values = struct.unpack(f"<{RECURRENT_STATE_ELEMENTS}f", right_data)
-        classification = "first_difference_layer1_recurrent_prefix_state"
+        classification = f"first_difference_layer{layer}_recurrent_prefix_state"
         detail = {
             "first_element_index": first, "mismatch_count": len(mismatches),
             "left_bits": left_bits[first], "right_bits": right_bits[first],
@@ -403,12 +409,13 @@ def compare_recurrent_state(left_path: Path, right_path: Path) -> dict:
                                                 for a, b in zip(left_values, right_values)),
         }
     return {
-        "artifact_type": "ninfer_qwen3_layer1_gdn_recurrent_state_comparison",
-        "schema_version": 1, "diagnostic_only": True, "timing_evidence_eligible": False,
+        "artifact_type": "ninfer_qwen3_gdn_recurrent_state_comparison",
+        "schema_version": 2, "diagnostic_only": True, "timing_evidence_eligible": False,
         "production_routing_authorized": False, "diagnostic": "text-prefix-state",
-        "classification": classification, "first_difference": detail,
+        "text_layer": layer, "gdn_index": layer, "classification": classification,
+        "first_difference": detail,
         "limitations": [
-            "compares the exact layer1 FP32 state frontier and does not localize an earlier update",
+            "compares one exact GDN FP32 state frontier and does not localize an earlier update",
             "does not authorize production routing or a performance claim",
         ],
     }

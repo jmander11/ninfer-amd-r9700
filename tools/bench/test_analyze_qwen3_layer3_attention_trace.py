@@ -47,7 +47,7 @@ class Layer3AttentionTraceTest(unittest.TestCase):
                      "sequence_width": width, "transaction_position_count": width,
                      "live_width": width},
             "cache_read": {"valid_for_stream": True, "pending": True,
-                           "visible_frontier": frontier, "mapped_pages": 1,
+                           "visible_frontier": frontier, "mapped_pages": 3,
                            "head_dim": 256, "kv_heads": 4, "value_group": 16,
                            "key_layout": "token-fastest-head-major",
                            "value_layout": "feature-fastest-page-major",

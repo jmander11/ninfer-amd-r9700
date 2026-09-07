@@ -57,6 +57,7 @@ add_library(ninfer_r9700_core STATIC
   ops/r9700/schedule/scalar_schedule_ops.hip
   ops/r9700/kv/fp8_int4_kv_append.hip
   ops/r9700/kv/fp8_int4_kv_compact.hip
+  ops/r9700/kv/fp8_int4_kv_trace.hip
   ops/r9700/kv/fp8_int4_kv_attention.hip
   ops/r9700/linear/linear_tensor_op.cpp
   ops/r9700/linear/fp8_activation.hip

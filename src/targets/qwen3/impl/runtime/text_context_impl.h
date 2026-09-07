@@ -965,7 +965,9 @@ void TextContext::mtp_propose_batch(const Tensor& hidden, Tensor& logits, Tensor
     proposal_argmax(hidden, logits, draft_tokens);
 }
 
-void TextContext::attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_layer, Phase ph) {
+template <class Tap>
+void TextContext::attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_layer, Phase ph,
+                           Tap& tap) {
     hipStream_t s = ctx_.stream;
     const int T    = x.ne[1];
     const std::int32_t sequence_batch = active_sequence_batch_ != 0 ? active_sequence_batch_ : 1;
@@ -995,7 +997,13 @@ void TextContext::attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_la
 
     const auto projection = workspace_recipe::text_attention_projection<TextConfig>(work_, T);
     Tensor h              = projection.hidden;
+    if constexpr (requires { tap.capture_attention_stage(text_layer, "input_x", x, s); }) {
+        tap.capture_attention_stage(text_layer, "input_x", x, s);
+    }
     ops::rmsnorm(x, *w.input_norm, kCfg.rms_eps, true, h, s);
+    if constexpr (requires { tap.capture_attention_stage(text_layer, "norm_h", h, s); }) {
+        tap.capture_attention_stage(text_layer, "norm_h", h, s);
+    }
 
     Tensor q         = projection.query.view({kCfg.head_dim, kCfg.n_q, T});
     Tensor gate      = projection.gate.view({kCfg.head_dim, kCfg.n_q, T});
@@ -1009,18 +1017,32 @@ void TextContext::attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_la
         packed_route_tokens(active_sequence_batch_, active_sequence_width_);
     Variant::attention_projection(h, *w.projection, q_flat, gate_flat, k_flat, v_flat, ph, work_,
                                   s, route_tokens, linear_execution_, text_layer);
+    if constexpr (requires { tap.capture_attention_stage(text_layer, "projection_q", q, s); }) {
+        tap.capture_attention_stage(text_layer, "projection_q", q, s);
+        tap.capture_attention_stage(text_layer, "projection_gate", gate, s);
+        tap.capture_attention_stage(text_layer, "projection_k", k, s);
+        tap.capture_attention_stage(text_layer, "projection_v", v, s);
+    }
 
     const auto results = workspace_recipe::text_attention_results<TextConfig>(work_, T);
     Tensor qn          = results.normalized_query.view({kCfg.head_dim, kCfg.n_q, T});
     Tensor kn          = results.normalized_key.view({kCfg.head_dim, kCfg.n_kv, T});
     ops::rmsnorm(q, *w.q_norm, kCfg.rms_eps, true, qn, s);
     ops::rmsnorm(k, *w.k_norm, kCfg.rms_eps, true, kn, s);
+    if constexpr (requires {
+                      tap.capture_attention_qk_stage(text_layer, "normalized_qk", qn, kn, s);
+                  }) {
+        tap.capture_attention_qk_stage(text_layer, "normalized_qk", qn, kn, s);
+    }
     const Tensor& cache_positions =
         active_cache_positions_ != nullptr ? *active_cache_positions_ : io_.pos;
     const Tensor& rope_positions =
         active_rope_positions_ != nullptr ? *active_rope_positions_ : io_.rope_pos;
     Tensor rope_for_op = active_sequence_batch_ != 0 ? rope_positions.view({T}) : rope_positions;
     ops::rope(rope_for_op, kCfg.rotary_dim, kCfg.rope_theta, qn, kn, s);
+    if constexpr (requires { tap.capture_attention_qk_stage(text_layer, "rope_qk", qn, kn, s); }) {
+        tap.capture_attention_qk_stage(text_layer, "rope_qk", qn, kn, s);
+    }
 
     Tensor attention_fp32 = results.attention_fp32.view({kCfg.head_dim, kCfg.n_q, T});
     const auto* all_keys = static_cast<const hip_bfloat16*>(kn.data);
@@ -1070,6 +1092,13 @@ void TextContext::attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_la
             ancestor_panel_ptr = &ancestor_panel;
             prefix_panel_ptr = &prefix_panel;
         }
+        if constexpr (requires {
+                          tap.capture_attention_cache(text_layer, cache_read, ancestor_panel_ptr,
+                                                      prefix_panel_ptr, s);
+                      }) {
+            tap.capture_attention_cache(text_layer, cache_read, ancestor_panel_ptr,
+                                        prefix_panel_ptr, s);
+        }
 #if defined(NINFER_R9700_XATTENTION_QUALIFICATION)
         if (ph == Phase::Prefill) {
             Variant::text_prefill_attention(query_panel, cache_read, position_panel,
@@ -1081,13 +1110,27 @@ void TextContext::attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_la
                                     work_, s, ancestor_panel_ptr, prefix_panel_ptr, nullptr);
         }
     }
+    if constexpr (requires {
+                      tap.capture_attention_stage(text_layer, "attention_fp32", attention_fp32, s);
+                  }) {
+        tap.capture_attention_stage(text_layer, "attention_fp32", attention_fp32, s);
+    }
     Tensor a = results.attention.view({kCfg.head_dim, kCfg.n_q, T});
     ops::cast_fp32_to_bf16(attention_fp32, a, s);
+    if constexpr (requires { tap.capture_attention_stage(text_layer, "attention_bf16", a, s); }) {
+        tap.capture_attention_stage(text_layer, "attention_bf16", a, s);
+    }
     ops::sigmoid_mul(gate, a, s);
+    if constexpr (requires { tap.capture_attention_stage(text_layer, "gated_attention", a, s); }) {
+        tap.capture_attention_stage(text_layer, "gated_attention", a, s);
+    }
 
     Tensor a_flat = a.view({kCfg.q_size, T});
     Variant::attention_output_projection(a_flat, *w.o_proj, x, ph, work_, s, route_tokens,
                                          linear_execution_);
+    if constexpr (requires { tap.capture_attention_stage(text_layer, "residual_x", x, s); }) {
+        tap.capture_attention_stage(text_layer, "residual_x", x, s);
+    }
 }
 
 template <class Tap>
@@ -1318,7 +1361,7 @@ void TextContext::run_layers(Tensor& x, Phase ph, Tap& tap) {
                     prefill ? roctx::Name::PrefillAttention : roctx::Name::VerifyAttention,
                     roctx::Category::Attention, static_cast<std::uint64_t>(layer));
                 auto mixer_scope = work_.scope();
-                attn_mix(full, x, fidx, layer, ph);
+                attn_mix(full, x, fidx, layer, ph, tap);
             }
             if constexpr (requires { tap.capture_mixer(layer, x, ctx_.stream); }) {
                 tap.capture_mixer(layer, x, ctx_.stream);

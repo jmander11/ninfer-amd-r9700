@@ -65,7 +65,8 @@ class CompareTest(unittest.TestCase):
         }))
         return manifest
 
-    def recurrent_state_fixture(self, directory: Path, role: str, suffix: str, mutate=None):
+    def recurrent_state_fixture(self, directory: Path, role: str, suffix: str, mutate=None,
+                                layer=1):
         data = bytearray(RECURRENT_STATE_BYTES)
         if mutate is not None:
             element, bits = mutate
@@ -77,13 +78,13 @@ class CompareTest(unittest.TestCase):
                  if role == ROLES["text"][0][0] else
                  "restored-append-state-before-selected-column-0")
         manifest.write_text(json.dumps({
-            "artifact_type": "ninfer_qwen3_layer1_gdn_recurrent_state_trace",
-            "schema_version": 1, "diagnostic_only": True,
+            "artifact_type": "ninfer_qwen3_gdn_recurrent_state_trace",
+            "schema_version": 2, "diagnostic_only": True,
             "timing_evidence_eligible": False, "production_routing_authorized": False,
             "execution": "eager", "role": role, "capture_point": point,
             "selected_token": 24178, "selected_cache_position": 128,
             "selected_rope_position": 128, "state_frontier": 128,
-            "linear_state_slot": 0, "text_layer": 1, "gdn_index": 1, "dtype": "fp32",
+            "linear_state_slot": 0, "text_layer": layer, "gdn_index": layer, "dtype": "fp32",
             "shape": [128, 128, 48], "elements": RECURRENT_STATE_ELEMENTS,
             "sidecar_path": str(sidecar), "sidecar_bytes": RECURRENT_STATE_BYTES,
             "sidecar_fnv1a64": fnv1a64(data),
@@ -220,6 +221,13 @@ class CompareTest(unittest.TestCase):
             self.assertEqual(result["first_difference"]["mismatch_count"], 1)
             self.assertEqual(result["first_difference"]["right_value"], 1.0)
             self.assertEqual(result["first_difference"]["maximum_absolute_difference"], 1.0)
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            left = self.recurrent_state_fixture(directory, ROLES["text"][0][0], "left", layer=0)
+            right = self.recurrent_state_fixture(directory, ROLES["text"][1][0], "right", layer=0)
+            result = compare_recurrent_state(left, right)
+            self.assertEqual(result["classification"], "layer0_recurrent_prefix_state_exact")
+            self.assertEqual(result["text_layer"], 0)
 
     def test_recurrent_state_rejects_frontier_role_hash_and_nonfinite(self):
         mutations = (("state_frontier", 127, "field differs"),

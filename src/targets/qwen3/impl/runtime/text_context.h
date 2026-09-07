@@ -261,7 +261,9 @@ private:
     }
 
     [[nodiscard]] const MtpW& mtp_weights() const;
-    void attn_mix(const FullLayerW& weights, Tensor& x, int index, int text_layer, Phase phase);
+    template <class Tap>
+    void attn_mix(const FullLayerW& weights, Tensor& x, int index, int text_layer, Phase phase,
+                  Tap& tap);
     template <class Tap>
     void gdn_mix(const GdnLayerW& weights, Tensor& x, int index, int text_layer, Phase phase,
                  Tap& tap);

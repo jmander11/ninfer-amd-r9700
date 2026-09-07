@@ -272,7 +272,7 @@ def _load(path: Path, kind: str) -> tuple[dict, bytes, list[int]]:
         if cache.get(key) != expected:
             fail(f"{kind} cache-read {key} differs")
     mapped = _integer(cache.get("mapped_pages"), f"{kind} mapped_pages", 1)
-    if mapped * 256 < frontier:
+    if mapped * 64 < frontier:
         fail(f"{kind} mapped pages do not cover the frontier")
     stride = _integer(cache.get("pool_table_row_stride"), f"{kind} table stride", 1)
     rows = _integer(cache.get("pool_table_row_count"), f"{kind} table rows", 1)
