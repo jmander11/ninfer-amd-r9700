@@ -28,11 +28,8 @@ class Layer3AttentionTraceTest(unittest.TestCase):
             data[field["offset"] + byte_index] = value
         sidecar = (directory / suffix).with_suffix(".bin")
         sidecar.write_bytes(data)
-        visibility = ({"row_position": 129, "ancestor_masks": None,
-                       "prefix_lengths": None, "prefix_length_stride": 1}
-                      if kind == "ordinary" else
-                      {"row_position": 129, "ancestor_masks": [1, 3, 7, 15, 31],
-                       "prefix_lengths": [129], "prefix_length_stride": 0})
+        visibility = {"row_position": 129, "ancestor_masks": None,
+                      "prefix_lengths": None, "prefix_length_stride": 1}
         if visibility_override is not None:
             visibility = visibility_override
         manifest = (directory / suffix).with_suffix(".json")
@@ -99,8 +96,8 @@ class Layer3AttentionTraceTest(unittest.TestCase):
                           "prefix_lengths": [129], "prefix_length_stride": 0}
             dflash = self.fixture(directory, "dflash", "dflash",
                                   ("key_fp8", 0, 1), visibility_override=visibility)
-            self.assertEqual(analyze(ordinary, dflash)["classification"],
-                             "tree_visibility_difference")
+            with self.assertRaisesRegex(RuntimeError, "chain visibility"):
+                analyze(ordinary, dflash)
         key = next(field for field in FIELDS if field["name"] == "key_fp8")
         token_stride = key["bytes"] // 130
         for byte_index, expected in ((0, "prior_cache_state_difference"),
@@ -151,11 +148,11 @@ class Layer3AttentionTraceTest(unittest.TestCase):
             value = json.loads(dflash.read_text())
             value["visibility"]["ancestor_masks"] = [1]
             dflash.write_text(json.dumps(value))
-            with self.assertRaisesRegex(RuntimeError, "ancestor"):
+            with self.assertRaisesRegex(RuntimeError, "chain visibility"):
                 analyze(ordinary, dflash)
             value["visibility"]["ancestor_masks"] = [32, 3, 7, 15, 31]
             dflash.write_text(json.dumps(value))
-            with self.assertRaisesRegex(RuntimeError, "ancestor"):
+            with self.assertRaisesRegex(RuntimeError, "chain visibility"):
                 analyze(ordinary, dflash)
             dflash.write_text('{"role": 1, "role": 2}')
             with self.assertRaisesRegex(RuntimeError, "duplicate"):

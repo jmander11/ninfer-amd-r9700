@@ -181,33 +181,9 @@ def _visible_positions(value: dict, kind: str) -> list[int]:
     masks = value["ancestor_masks"]
     prefixes = value["prefix_lengths"]
     stride = _integer(value["prefix_length_stride"], f"{kind} prefix stride", 0)
-    if kind == "ordinary":
-        if masks is not None or prefixes is not None or stride != 1:
-            fail("ordinary visibility metadata differs")
-        return list(range(row + 1))
-    if (not isinstance(masks, list) or len(masks) != 5 or
-            any(isinstance(item, bool) or not isinstance(item, int) or item < 0 or item >= 2**5
-                for item in masks)):
-        fail("DFlash ancestor masks are invalid")
-    if stride not in (0, 1) or not isinstance(prefixes, list) or len(prefixes) != (1 if stride == 0 else 5):
-        fail("DFlash prefix metadata is invalid")
-    if any(isinstance(item, bool) or not isinstance(item, int) or item < 0 for item in prefixes):
-        fail("DFlash prefix values are invalid")
-    if any(item != POSITION for item in prefixes):
-        fail("DFlash prefix values differ from the bound history frontier")
-    prefix = prefixes[0]
-    mask = masks[0]
-    visible = list(range(prefix))
-    for bit in range(31):
-        if mask & (1 << bit):
-            visible.append(prefix + bit)
-    if len(visible) != len(set(visible)):
-        fail("DFlash visibility contains duplicates")
-    visible = sorted(visible)
-    frontier = ROLES[kind][2]
-    if any(position >= frontier for position in visible):
-        fail("DFlash visibility exceeds the pending cache frontier")
-    return visible
+    if masks is not None or prefixes is not None or stride != 1:
+        fail(f"{kind} K4/W5 chain visibility metadata differs")
+    return list(range(row + 1))
 
 
 def _decode_finite(data: bytes, dtype: str, elements: int, label: str) -> tuple[tuple[int, ...], tuple[float, ...]]:

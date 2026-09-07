@@ -493,14 +493,10 @@ public:
             throw std::logic_error("layer3 attention cache capture order/read differs");
         }
         const bool dflash = call_.role == Role::TargetDFlash;
-        if ((!dflash && (ancestor_masks != nullptr || prefix_lengths != nullptr)) ||
-            (dflash && (ancestor_masks == nullptr || prefix_lengths == nullptr))) {
+        // This diagnostic binds the delivered K4/W5 chain verifier. W == K + 1
+        // deliberately uses ordinary causal attention and therefore owns no tree metadata.
+        if (ancestor_masks != nullptr || prefix_lengths != nullptr) {
             throw std::logic_error("layer3 attention visibility metadata differs");
-        }
-        if (dflash && (ancestor_masks->dtype != DType::I32 || prefix_lengths->dtype != DType::I32 ||
-                       !ancestor_masks->is_contiguous() || !prefix_lengths->is_contiguous() ||
-                       ancestor_masks->numel() != 5 || prefix_lengths->numel() != 1)) {
-            throw std::logic_error("layer3 attention DFlash visibility tensor differs");
         }
         const auto& cache = read.layer();
         if (cache.head_dim != 256 || cache.num_kv_heads != 4 || cache.value_group != 16 ||
@@ -536,12 +532,6 @@ public:
                  payload + kAttentionStageBytes + 199680U),
              .status = status},
             stream_));
-        if (dflash) {
-            HIP_CHECK(hipMemcpyAsync(attention_aux(), ancestor_masks->data, 5U * sizeof(std::int32_t),
-                                     hipMemcpyDeviceToDevice, stream_));
-            HIP_CHECK(hipMemcpyAsync(attention_aux() + 20U, prefix_lengths->data,
-                                     sizeof(std::int32_t), hipMemcpyDeviceToDevice, stream_));
-        }
         attention_visible_frontier_ = read.visible_frontier();
         attention_mapped_pages_ = read.mapped_pages();
         attention_table_stride_ = read.pool_table_row_stride();
@@ -870,17 +860,6 @@ private:
         if (aux[6] != 0) {
             throw std::logic_error("layer3 attention canonical cache gather failed");
         }
-        const bool dflash = call_.role == Role::TargetDFlash;
-        if (dflash) {
-            if (aux[5] != 129) {
-                throw std::logic_error("layer3 attention prefix differs");
-            }
-            for (int row = 0; row < 5; ++row) {
-                if (aux[row] < 0 || aux[row] >= 32) {
-                    throw std::logic_error("layer3 attention ancestor mask differs");
-                }
-            }
-        }
         write_exclusive(attention_sidecar_path(), payload, kAttentionPayloadBytes,
                         "layer3 attention sidecar");
         const std::uint64_t hash = fnv1a64(payload, kAttentionPayloadBytes);
@@ -915,16 +894,7 @@ private:
                  << attention_table_stride_ << ",\"pool_table_row_count\":"
                  << attention_table_rows_ << ",\"active_query_rows_present\":false},\n"
                  << "  \"visibility\": {\"row_position\":129,\"ancestor_masks\":";
-        if (dflash) {
-            manifest << '[';
-            for (int row = 0; row < 5; ++row) {
-                if (row != 0) manifest << ',';
-                manifest << aux[row];
-            }
-            manifest << "],\"prefix_lengths\":[129],\"prefix_length_stride\":0},\n";
-        } else {
-            manifest << "null,\"prefix_lengths\":null,\"prefix_length_stride\":1},\n";
-        }
+        manifest << "null,\"prefix_lengths\":null,\"prefix_length_stride\":1},\n";
         manifest << "  \"provenance\": {"
                  << "\"source_commit\":\"" << required_provenance("NINFER_QWEN3_LAYER3_TRACE_SOURCE_COMMIT")
                  << "\",\"source_tree\":\"" << required_provenance("NINFER_QWEN3_LAYER3_TRACE_SOURCE_TREE")
