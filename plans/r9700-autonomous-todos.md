@@ -107,16 +107,17 @@ the next agent never has to infer CLI flags from prose.
 
 ### After parity: determine whether K4/W5 can beat base decode
 
-Prepare a reviewed, parity-hash-bound package with selector-off ordinary and selector-on DFlash
-executables from the same source commit for one matched C1/P129+G27 K4/W5 screen. Use one warmup
-and the minimum repetitions needed for a directional result. Recompute acceptance and retain exact
-tokens. Historical `69/123 = 0.56097561` accepted drafts/round gives
-`1.56097561` useful tokens/round, so base `27.05729956 tok/s` implies a diagnostic break-even below
-`57.6915 ms/round`. Require a material conservative whole win and order-stable/eager-graph evidence.
-Retain engine/phase throughput, per-position acceptance, fallback/repair, and exact output. Do not
-run C2..4, longer generation, capacity, chunk, or profiling at this stage.
-K5/W6 is conditional: its historical 72/591 drafts over 120 rounds accepted no fifth-position
-draft, so run it only if new K4 evidence could make K5 decision-relevant.
+**CLOSED (2026-09-06, 6fe53d53 build).** The C1/P129+G27 K4/W5 screen passed: DFlash K4/W5
+beats base decode by a material margin (total 1.3178 s vs 1.6830 s, ratio 0.783; whole-output
+21.25 vs 16.64 tok/s; decode-output 23.98 vs 18.07 tok/s). Both arms produce the identical
+28-token sequence (exact match). DFlash speculative accounting: 15 rounds, 59 drafted, 11
+accepted, 1 fallback, acceptance rate 0.186 (vs historical 0.561), acceptance length 1.733,
+per-position [6,5,0,0]. The low acceptance rate (18.6% vs 56.1%) is below the historical
+break-even assumption, yet DFlash still wins because multi-token-per-round processing
+outweighs the low acceptance. Evidence:
+`profiles/bench/r9700-dflash-k4w5-after-parity-screen-6fe53d53-20260906` (committed).
+K5/W6 remains conditional: its historical 72/591 drafts over 120 rounds accepted no
+fifth-position draft, so run it only if new K4 evidence could make K5 decision-relevant.
 
 ### If K4 fails or is marginal
 

@@ -1,0 +1,9 @@
+59c3e706dca666333f9e61f7bd53c203cb9c732221231c63934b496ae4c899db  /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-k4w5-after-parity-screen-6fe53d53-20260906/results/base-decode.json
+4fcf53ff1a62579bd08beaba0fa35b684b7dbc2bc03b2fbde4b2d249becc451a  /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-k4w5-after-parity-screen-6fe53d53-20260906/results/base-decode.process.json
+7c7dd4537ec4fdfe39c6afd5ed57daffb1df977c2b478441e6501ea659ba9fec  /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-k4w5-after-parity-screen-6fe53d53-20260906/results/base-decode.stderr
+79a04a69dea4dfe7c9ee664e0fe92a1e296e865e496e73264bfb40257e03cbe7  /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-k4w5-after-parity-screen-6fe53d53-20260906/results/base-decode.stdout
+0a84f473830450852ef2dc0801e3be592883f75dd753888d7813a4e6bf4ab581  /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-k4w5-after-parity-screen-6fe53d53-20260906/results/dflash-k4w5.json
+5b4519784f06b8ecfd97639d0281f85d1cb9786ae60088cd74b7690f5b087b6b  /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-k4w5-after-parity-screen-6fe53d53-20260906/results/dflash-k4w5.process.json
+5511d5015e18b27ac654306b45f8df08433fdd1b9859c2de109d15f2e678eb45  /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-k4w5-after-parity-screen-6fe53d53-20260906/results/dflash-k4w5.stderr
+8efdf65751a56d54872c138f3747c6a60413f0c337e7fee3c4215cbc929385e8  /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-k4w5-after-parity-screen-6fe53d53-20260906/results/dflash-k4w5.stdout
+ae3c8c7c56818bf930adc9d67b8d064987da52b39d6a3cb40defe030825d2a2d  /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-k4w5-after-parity-screen-6fe53d53-20260906/results/summary.json
