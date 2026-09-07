@@ -1,0 +1,13 @@
+f6f21d05fa67b7c723fc7306701515a1a0be323376b79a422467f6aac97460b8  profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/plan.json
+ffdc23ea98b3dcf67a0ebee15bb0d2271fd95e469593e0d87459e63da1de83a6  profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/build-provenance.json
+d3bc7355dcc569839a52e7ec9f8a32cf2853338afbc08e30f11c577d07da8f2e  profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/analyze.py
+48ce0acd2ca7cc5bbc6eddcfce072c4d8e9fab88600b9965301aa50ab8d880a0  profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/run.py
+c28f08649465d49b7d77b1eacb44a4413678d6d1d02ee66a5320a64be4a6b6e7  profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/commands.sh
+42d28ff9f8459eaaa7cef880a4e48fdda2ac6de8b409b9bd1239e0b6f933b18b  profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/test_analyze.py
+c366b96d5b3cd56bb69d4bef516e9c09bd008660b84486275d7c5173c06565c1  profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/configure.final.stdout
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/configure.final.stderr
+3cd6e7b9632da5d6302c30b68b9a6150c6d85646c5234f1266c59c7921a8588e  profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/configure.final.process
+2d8454800e6247f9e6398f8811c4d7caa2e3839f9675ef6ec4974e6caa63da1e  profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/build.final.stdout
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/build.final.stderr
+40c4096c49002bded6f906e453283b026fa75a0255eac184c59894475f195d8b  profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/build.final.process
+a78060b06ed1a5922d28c2acfb14c2baed6e22a8521c4238d35327a937d76d04  profiles/bench/r9700-dflash-semantic-traces-aebd5f82-20260906/analyze.py

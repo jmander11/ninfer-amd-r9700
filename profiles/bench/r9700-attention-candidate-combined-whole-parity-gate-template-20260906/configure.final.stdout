@@ -1,0 +1,36 @@
+-- The C compiler identification is GNU 13.3.0
+-- The CXX compiler identification is GNU 13.3.0
+-- The HIP compiler identification is Clang 23.0.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Detecting HIP compiler ABI info
+-- Detecting HIP compiler ABI info - done
+-- Check for working HIP compiler: /opt/rocm/llvm/bin/clang++ - skipped
+-- Detecting HIP compile features
+-- Detecting HIP compile features - done
+-- HIP: Using hipcc from relative path: /opt/rocm/bin/hipcc
+-- HIP_PLATFORM using hip_HIPCONFIG_EXECUTABLE: amd
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
+-- Found Threads: TRUE  
+-- Found rocprofiler-sdk-roctx: /opt/rocm (found version "1.3.5")  
+-- Found PkgConfig: /usr/bin/pkg-config (found version "1.8.1") 
+-- Checking for module 'libcurl'
+--   Found libcurl, version 8.5.0
+-- Checking for modules 'libavcodec;libavformat;libavutil;libswscale'
+--   Found libavcodec, version 60.31.102
+--   Found libavformat, version 60.16.100
+--   Found libavutil, version 58.29.100
+--   Found libswscale, version 7.5.100
+-- Found Python3: /usr/bin/python3 (found version "3.12.3") found components: Interpreter 
+-- Configuring done (1.6s)
+-- Generating done (0.1s)
+-- Build files have been written to: /ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-attention-whole-parity-6fe53d53-fresh-20260906

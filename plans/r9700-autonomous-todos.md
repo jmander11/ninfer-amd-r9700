@@ -105,23 +105,29 @@ triangle, so check outer canaries and complete output, not full scratch overwrit
 ### Whole-model parity gate after the focused candidate
 
 The prepared package is
-`profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906`. It is
-currently intentionally non-runnable. This command validates only its structure and must exit
-successfully without touching the GPU:
+`profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906`; the
+historical `-template-` directory name is retained, but the package is now fully bound and runnable.
+Its non-mutating CPU preflight command is:
 
 ```sh
 bash profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/commands.sh \
-  --validate-template
+  --preflight-only
 ```
 
-The next step is currently an engineering handoff, not a mechanically executable GPU task. Do not
-replace placeholders or invent commands ad hoc. A package owner must bind the committed
-source/tree, a fresh selector-combination build receipt, benchmark hash, linked ROCm identities,
-exact prior authority objects, and a reviewed prepared-execution closure. The combined build must enable
-FP8-prefix-e2, GDN-wave-QK, DFlash-MLP-down-T5, DFlash-RMSNorm-rows56, and attention parity; it must
-leave DFlash-small-T off. Convert `run.py` from a refusal stub only after its preflight enforces
-device0 R9700/gfx1201/wave32, `auto`, absence of profiler/injection/remapping variables, exclusive
-output creation, and exact artifact/corpus hashes. Preserve three and only three model loads:
+Prepared-closure file SHA-256 is
+`54cb3d6df8d4edc7521918ed8f1f4837e8a5101630ab933ba7b16b809bb06d0c`. Independent review and the
+full CPU preflight pass. Results must be absent before launch. Run the exact three-load GPU gate
+with this command and no other arguments:
+
+```sh
+bash profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/commands.sh
+```
+
+The bound build enables FP8-prefix-e2, GDN-wave-QK, DFlash-MLP-down-T5,
+DFlash-RMSNorm-rows56, and attention parity, and leaves DFlash-small-T off. The runner enforces
+device0 R9700/gfx1201/wave32, `auto`, absence of profiler/injection/remapping variables,
+create-only outputs, exact source/build/artifact/corpus/prior-authority identities, and exactly
+three model loads:
 
 - ordinary fresh P129/G27, shared by Text-fresh and target-ordinary comparisons;
 - ordinary append P128/G27 with isolated prompt/decode;
