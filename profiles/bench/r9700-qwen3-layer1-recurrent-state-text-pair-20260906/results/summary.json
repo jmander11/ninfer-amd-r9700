@@ -1,0 +1,190 @@
+{
+  "artifact_type": "ninfer_qwen3_layer1_recurrent_state_text_pair_evidence",
+  "schema_version": 1,
+  "status": "valid_functional_state_comparison",
+  "timing_evidence_eligible": false,
+  "production_routing_authorized": false,
+  "claim": "functional-only comparison of the exact layer1 FP32 recurrent state at frontier 128 and the existing selected-column GDN boundaries",
+  "authorities": {
+    "plan": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-recurrent-state-text-pair-20260906/plan.json",
+      "bytes": 4149,
+      "sha256": "6931c2d603be5eece31ab90993bb33dc169de3dce8ff3cdf159637b0bc4ffb2e"
+    },
+    "build_provenance": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-recurrent-state-text-pair-20260906/build-provenance.json",
+      "bytes": 4903,
+      "sha256": "cc8b26c43a306bc916155d90db3f6b41f2c1669cdad69d70a8e152ba0605a840"
+    },
+    "prepared_closure": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-recurrent-state-text-pair-20260906/prepared.sha256",
+      "bytes": 888,
+      "sha256": "c861f0b19a9beddb9e2f78cd780390bbd2d12d84fd5ccfae435f066530d95608"
+    },
+    "comparator": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700-recurrent-state-src-c3d44daa/tools/bench/compare_qwen3_layer_boundary_trace.py",
+      "bytes": 19833,
+      "sha256": "40b808a503d8ed3a4a16f773eeb0ffef5cc24748f1d730a07e7e6b6b0dc42699"
+    }
+  },
+  "reports": {
+    "text-fresh": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-recurrent-state-text-pair-20260906/results/text-fresh.json",
+      "bytes": 5737,
+      "sha256": "544004bb080c294ca0fe78f3c78b24c2842789ea5a38e1723d111e00fb2a2ce2"
+    },
+    "text-append": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-recurrent-state-text-pair-20260906/results/text-append.json",
+      "bytes": 5622,
+      "sha256": "17c3757ae84f283f2f90447339d902485abdb6e166f0036c41157bc6b23958be"
+    }
+  },
+  "processes": {
+    "text-fresh": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-recurrent-state-text-pair-20260906/results/text-fresh.process.json",
+      "bytes": 2713,
+      "sha256": "da28d3f38478c97b2c34451debaf148f57f7ea3c68e14e10a55ceb260bb909fe"
+    },
+    "text-append": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-recurrent-state-text-pair-20260906/results/text-append.process.json",
+      "bytes": 2693,
+      "sha256": "926942cca58c86f6bac018e3fac0aeadb894e65adcb3f185da3154ce37e250ed"
+    }
+  },
+  "manifests": {
+    "text-fresh": {
+      "layer": {
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-recurrent-state-text-pair-20260906/results/text-fresh.trace.json",
+        "bytes": 787,
+        "sha256": "089509e75d8711de07694a016724bf6ef4bc3018f21e6b7c227f398389b06070"
+      },
+      "gdn": {
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-recurrent-state-text-pair-20260906/results/text-fresh.gdn.json",
+        "bytes": 1522,
+        "sha256": "452e41e75b55e8616166b556d24f4f2fe49c5dea5a2b75a22f046791c3d0fe0b"
+      },
+      "state": {
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-recurrent-state-text-pair-20260906/results/text-fresh.state.json",
+        "bytes": 887,
+        "sha256": "7194a50144fccadda5855b1563578f779c8298d995f1c5466869a06b6b888b52"
+      }
+    },
+    "text-append": {
+      "layer": {
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-recurrent-state-text-pair-20260906/results/text-append.trace.json",
+        "bytes": 783,
+        "sha256": "c4c1438de2941921d7792a32bcdb06edbd0b4402b0c8e95c1ccc0da2b4cf8689"
+      },
+      "gdn": {
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-recurrent-state-text-pair-20260906/results/text-append.gdn.json",
+        "bytes": 1518,
+        "sha256": "f3e41dc2aa5884e175c787f6c610716b3dad9dfcb024e430ae943b56aed59369"
+      },
+      "state": {
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-recurrent-state-text-pair-20260906/results/text-append.state.json",
+        "bytes": 871,
+        "sha256": "4aaddce2e91f0fcb7d323a3b79c3018739c6de59de5d28e03299f00f0eec2ab0"
+      }
+    }
+  },
+  "sidecars": {
+    "text-fresh": {
+      "trace": {
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-recurrent-state-text-pair-20260906/results/text-fresh.trace.bin",
+        "bytes": 1320960,
+        "sha256": "79c020efee91a2124d391c6b6c18fc6d4403267ef1dec68da59f7950980ec23b"
+      },
+      "gdn": {
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-recurrent-state-text-pair-20260906/results/text-fresh.gdn.bin",
+        "bytes": 78208,
+        "sha256": "21ae26563b9cb528abc68cd75793d71d42a11bcd64c10a41baa58370b874b39f"
+      },
+      "state": {
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-recurrent-state-text-pair-20260906/results/text-fresh.state.bin",
+        "bytes": 3145728,
+        "sha256": "6b623dd6829a698de92591214a7fe684a7ce35b57a88e5c4dd2ae860f675d893"
+      }
+    },
+    "text-append": {
+      "trace": {
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-recurrent-state-text-pair-20260906/results/text-append.trace.bin",
+        "bytes": 1320960,
+        "sha256": "2b6822c352c102210fa9f5afbdcf58c474576258b6e9b811731a7066ecd881b2"
+      },
+      "gdn": {
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-recurrent-state-text-pair-20260906/results/text-append.gdn.bin",
+        "bytes": 78208,
+        "sha256": "4a9a4f6a4e57ca558cf4188071c965c96c219a95d59e9cd8217a324d19b617ff"
+      },
+      "state": {
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-recurrent-state-text-pair-20260906/results/text-append.state.bin",
+        "bytes": 3145728,
+        "sha256": "7f724b46aa151c8feb74da4d11a8b2e97f1e18c03276d10654b2ac35c6a4df36"
+      }
+    }
+  },
+  "comparator_processes": {
+    "gdn": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-recurrent-state-text-pair-20260906/results/text-gdn-comparator.process.json",
+      "bytes": 1278,
+      "sha256": "c9975baf6bc818584d025d504b2a5cf053f1ee5a250a23b53f7b61bd938a3b1d"
+    },
+    "state": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-recurrent-state-text-pair-20260906/results/text-state-comparator.process.json",
+      "bytes": 1293,
+      "sha256": "09860e1c1279ea0a4d992647c97f84ecc53c0504a79e485b295e2f88c5b7df1a"
+    }
+  },
+  "gdn_comparison": {
+    "artifact_type": "ninfer_qwen3_layer1_gdn_detail_comparison",
+    "schema_version": 1,
+    "diagnostic_only": true,
+    "timing_evidence_eligible": false,
+    "production_routing_authorized": false,
+    "diagnostic": "text",
+    "classification": "first_difference_gdn_recurrence",
+    "first_difference": {
+      "field": "o",
+      "dtype": "bf16",
+      "first_element_index": 154,
+      "mismatch_count": 106,
+      "left_bits": 14405,
+      "right_bits": 14406,
+      "left_value": 4.696846008300781e-05,
+      "right_value": 4.7206878662109375e-05,
+      "maximum_absolute_difference": 3.814697265625e-06,
+      "preceding_fields_exact": true
+    },
+    "limitations": [
+      "captures one selected column and does not capture persistent convolution or recurrence state",
+      "the first differing field localizes a stage boundary, not necessarily the primitive operation"
+    ]
+  },
+  "recurrent_state_comparison": {
+    "artifact_type": "ninfer_qwen3_layer1_gdn_recurrent_state_comparison",
+    "schema_version": 1,
+    "diagnostic_only": true,
+    "timing_evidence_eligible": false,
+    "production_routing_authorized": false,
+    "diagnostic": "text-prefix-state",
+    "classification": "first_difference_layer1_recurrent_prefix_state",
+    "first_difference": {
+      "first_element_index": 599,
+      "mismatch_count": 402925,
+      "left_bits": 950422399,
+      "right_bits": 950422400,
+      "left_value": 7.929559069452807e-05,
+      "right_value": 7.929559797048569e-05,
+      "maximum_absolute_difference": 4.652887582778931e-05
+    },
+    "limitations": [
+      "compares the exact layer1 FP32 state frontier and does not localize an earlier update",
+      "does not authorize production routing or a performance claim"
+    ]
+  },
+  "limitations": [
+    "diagnostic eager execution and final synchronous D2H make all timings ineligible",
+    "state equality or divergence localizes the recurrence frontier but does not by itself identify an earlier transition",
+    "no production routing or performance claim"
+  ]
+}

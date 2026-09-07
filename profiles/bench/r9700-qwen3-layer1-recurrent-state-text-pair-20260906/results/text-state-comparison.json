@@ -1,0 +1,22 @@
+{
+  "artifact_type": "ninfer_qwen3_layer1_gdn_recurrent_state_comparison",
+  "schema_version": 1,
+  "diagnostic_only": true,
+  "timing_evidence_eligible": false,
+  "production_routing_authorized": false,
+  "diagnostic": "text-prefix-state",
+  "classification": "first_difference_layer1_recurrent_prefix_state",
+  "first_difference": {
+    "first_element_index": 599,
+    "mismatch_count": 402925,
+    "left_bits": 950422399,
+    "right_bits": 950422400,
+    "left_value": 7.929559069452807e-05,
+    "right_value": 7.929559797048569e-05,
+    "maximum_absolute_difference": 4.652887582778931e-05
+  },
+  "limitations": [
+    "compares the exact layer1 FP32 state frontier and does not localize an earlier update",
+    "does not authorize production routing or a performance claim"
+  ]
+}

@@ -1898,9 +1898,21 @@ Replace functional routes with measured gfx1201 families:
   first full-attention mixer at layer three (2,796/5,120 BF16 elements). For Text fresh T129 versus
   append T1, h through v are exact and recurrence o first differs in 106/6,144 BF16 elements
   (first element 154, maximum absolute difference 0.000003814697265625); the resulting mixer x
-  differs in 142/5,120. The next Text discriminator compares the layer-one FP32 recurrence state
-  immediately before the selected transition, while the next target discriminator enters the
-  layer-three full-attention mixer. No decode-speed or production-routing claim follows.
+  differs in 142/5,120. The follow-up exact Text state capture under
+  `profiles/bench/r9700-qwen3-layer1-recurrent-state-text-pair-20260906/results` is bound to the
+  deliberately retained diagnostic source commit `c3d44daa` even though current HEAD has advanced;
+  its result-closure SHA-256 is
+  `457f4c1d2b65566bc3a3678830185d05fa1ac0013b680c28d63e2b76b9f85977` and summary SHA-256 is
+  `70dcacf5a6eb5fbfb2c1986177420d3f8f4a84e7a27870f163bb41ba12c4e2a8`. Fresh-T129 state after
+  the first 128 transitions differs from the restored append pre-T1 state in 402,925/786,432 FP32
+  elements; the first difference is element 599 (bits 950422399 versus 950422400) and maximum
+  absolute difference is 0.000046528875827789307. The same capture reproduces the selected-column
+  recurrence-o result above exactly. Therefore the layer-one state already differs before the
+  selected transition: this excludes that transition as the first Text divergence, but it does
+  not yet distinguish earlier layer-one prefix inputs from their recurrence updates. The next
+  bounded Text discriminator compares layer-zero and layer-one prefix/restored states; the target
+  discriminator enters the layer-three full-attention mixer. These traces are timing-ineligible
+  and authorize no decode-speed or production-routing claim.
   The earlier all-Q4 owner trace does not transfer its target-gate/up conclusion to this four-role
   artifact: all 64 Text gate/up matrices are FP8 and bypass A8Q4. Only the five Q4 DFlash proposal
   gate/up matrices use the small-T route per round, for an expected whole saving of about 7.1 ms at

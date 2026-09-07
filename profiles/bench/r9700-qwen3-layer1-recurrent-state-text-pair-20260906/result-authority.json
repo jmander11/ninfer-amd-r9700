@@ -1,0 +1,14 @@
+{
+  "artifact_type": "ninfer_qwen3_layer1_recurrent_state_text_pair_result_authority",
+  "schema_version": 1,
+  "status": "completed_valid_functional_state_comparison",
+  "source": {"commit": "c3d44daaa41448c8a899ea8b6eee478eb1f5bdc8", "tree": "7dba466a7d48ae8fe54b00497f01f1582ee4223d"},
+  "prepared_closure": {"path": "profiles/bench/r9700-qwen3-layer1-recurrent-state-text-pair-20260906/prepared.sha256", "bytes": 888, "sha256": "c861f0b19a9beddb9e2f78cd780390bbd2d12d84fd5ccfae435f066530d95608"},
+  "result_closure": {"path": "profiles/bench/r9700-qwen3-layer1-recurrent-state-text-pair-20260906/results/result.sha256", "bytes": 5993, "sha256": "457f4c1d2b65566bc3a3678830185d05fa1ac0013b680c28d63e2b76b9f85977"},
+  "summary": {"path": "profiles/bench/r9700-qwen3-layer1-recurrent-state-text-pair-20260906/results/summary.json", "bytes": 9023, "sha256": "70dcacf5a6eb5fbfb2c1986177420d3f8f4a84e7a27870f163bb41ba12c4e2a8"},
+  "recurrent_state": {"classification": "first_difference_layer1_recurrent_prefix_state", "elements": 786432, "mismatch_count": 402925, "first_element_index": 599, "fresh_bits": 950422399, "append_bits": 950422400, "maximum_absolute_difference": 0.000046528875827789307},
+  "selected_column_gdn": {"classification": "first_difference_gdn_recurrence", "field": "o", "elements": 6144, "mismatch_count": 106, "first_element_index": 154, "fresh_bits": 14405, "append_bits": 14406, "maximum_absolute_difference": 0.000003814697265625},
+  "timing_evidence_eligible": false,
+  "production_routing_authorized": false,
+  "interpretation": "the layer1 state already differs before the selected transition; this excludes the selected-column recurrence transition as the first Text divergence but does not distinguish earlier layer1 prefix inputs from their recurrence updates"
+}
