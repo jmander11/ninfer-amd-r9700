@@ -576,6 +576,16 @@ set_target_properties(ninfer_r9700_full_attention_qual PROPERTIES
   HIP_ARCHITECTURES gfx1201)
 target_link_libraries(ninfer_r9700_full_attention_qual PRIVATE ninfer_r9700_core hip::host)
 
+# Standalone arithmetic discriminator for ordinary W1 versus DFlash-chain W5 attention. It calls
+# the two raw leaves directly and cannot alter the production row/context classifier.
+add_executable(ninfer_r9700_dflash_attention_route_discriminator
+  ${PROJECT_SOURCE_DIR}/tools/r9700/dflash_attention_route_discriminator.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_dflash_attention_route_discriminator)
+set_target_properties(ninfer_r9700_dflash_attention_route_discriminator PROPERTIES
+  HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_dflash_attention_route_discriminator
+  PRIVATE ninfer_r9700_core hip::host)
+
 # Retained numerical and physical regression harness for the admitted split-512 long-context
 # production route. It calls the semantic entry point directly to compare both implementations.
 add_executable(ninfer_r9700_split512_attention_qual
