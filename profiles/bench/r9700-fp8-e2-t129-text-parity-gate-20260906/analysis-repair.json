@@ -1,0 +1,14 @@
+{
+  "artifact_type": "ninfer_analysis_only_repair",
+  "schema_version": 1,
+  "gpu_rerun": false,
+  "cause": "the predeclared analyzer treated any non-exact transformer residual stack as a gate exception and therefore could not publish the valid partial-success localization captured by all four completed arms",
+  "historical_prepared_sha256": "31e66ada2ecc74f0797f0f9fe751fe11e40441361bf089df6591c652817158d3",
+  "historical_analyzer_sha256": "e2d2d71a479a0cfc28366e8ab91e9275898b93063d6cb8661ca03871f9cba210",
+  "historical_plan_sha256": "ccfee388199a2e7d91905221ed3bef4b23e1dc60ee7a65a6777f78495c0da2be",
+  "unchanged_capture_result": {"path": "results/result.sha256", "bytes": 7864, "sha256": "987a4e4646daf4c68ad74c6b5b536460078266dadad249a40aee7e34a2d6a385"},
+  "repaired_analyzer": {"path": "analyze.py", "bytes": 16209, "sha256": "5e48ec1f3368a38ac0e5444c8ccb021184bee06aa9ed4d73916072b76b1cc0b1"},
+  "repaired_plan": {"path": "plan.json", "bytes": 5593, "sha256": "1694e38b17fff710bef2d24d4ea0e7f13fbfdbf03b655fc39ae688f1e53e389f"},
+  "summary": {"path": "results/summary.json", "bytes": 7164, "sha256": "94d8cc6ad12f15859a122f1deb51b5e3de208771a8b72ba905f8a2d7125734e3"},
+  "interpretation": "the exact selector-one combined build makes layer0/layer1 recurrent states and layer1 GDN boundaries exact; the first visible residual mismatch is layer3 post-mixer, so whole Text parity remains blocked at the first full-attention layer"
+}

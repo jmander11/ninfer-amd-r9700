@@ -1,0 +1,140 @@
+{
+  "artifact_type": "ninfer_r9700_fp8_e2_t129_text_parity_gate_plan",
+  "schema_version": 2,
+  "status": "completed_partial_success_whole_text_parity_blocked",
+  "claim": "functional-only localization of the exact selector-one combined candidate build: public tokens and layer0/layer1 GDN state are exact while the first residual difference is layer3 post-mixer",
+  "timing_evidence_eligible": false,
+  "production_routing_authorized": false,
+  "source": {
+    "commit": "25a27bb293e6a32134fbc6b66cecff5444739ccc",
+    "tree": "40703b4636e339604728e37f080225a78960495c",
+    "worktree": "/ssdpool2nvme/local_llm/ninfer-amd-r9700-fp8-e2-text-parity-src-25a27bb2"
+  },
+  "build_receipt": "build-provenance.json",
+  "candidate": {
+    "semantic_identity": "e2-at-t129",
+    "algorithm_fingerprint": "e2e00100000000000000000000000000",
+    "matrix_shape": [
+      34816,
+      5120
+    ],
+    "selected_tokens": [
+      129
+    ],
+    "unchanged_default_tokens": [
+      128
+    ],
+    "selector_cmake_key": "NINFER_R9700_FP8_PREFIX_COMMON_ALGO_CANDIDATE",
+    "selector_value": "1",
+    "scope_contract": "T128 exact-validates and retains default e2; only N34816/K5120/T129 selects the same exact viable e2; every other shape and width retains default selection"
+  },
+  "artifact": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval.ninfer",
+    "bytes": 22763026944,
+    "sha256": "d8fc77c36cf17c92e96d67b9a6b5a1826a1ade4f59d59c003b2368fe981fc512",
+    "weights_id": "r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval"
+  },
+  "history": {
+    "source_corpus": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids",
+      "bytes": 333620,
+      "sha256": "27e4f63c17efe3f89b5cf278b3b1a42a737316ed4044d7d0d1d52437059d1002"
+    },
+    "p129_fixture": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-p129-isolation-discriminator-20260906/history-p129.ids",
+      "bytes": 811,
+      "sha256": "34e9bc09b99ae4efc06049e744e8b43ac5794a9dab76fcf43de43e31f5db4515"
+    },
+    "seed_token": 24178,
+    "rule": "source corpus tokens [0,128) followed by retained fresh-P128 ordinary greedy seed"
+  },
+  "prior_control_authorities": {
+    "layer0_state_result": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer0-recurrent-state-text-pair-20260906/results/result.sha256",
+      "bytes": 1924,
+      "sha256": "6ebff8b5c82e0de2726fe942f1964df4f21738fbc05cb8cac4c38a6dff28c63e"
+    },
+    "layer1_state_result": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-recurrent-state-text-pair-20260906/results/result.sha256",
+      "bytes": 5993,
+      "sha256": "457f4c1d2b65566bc3a3678830185d05fa1ac0013b680c28d63e2b76b9f85977"
+    },
+    "real_weight_owner_result": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-prefix-real-weight-408bf59b-20260906/results/result.sha256",
+      "bytes": 937,
+      "sha256": "9a469841e3f259db947d1f046992981b0e0d7943c7b699a9e2d5004b4adf4300"
+    },
+    "e2_operator_result": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-prefix-common-e2-diagnostic-20260906/result.sha256",
+      "bytes": 399,
+      "sha256": "4cefa690dd471c70b6def9f40c3318ab8d39c20145cc96f3537157dc96cd3ce3"
+    }
+  },
+  "hardware": {
+    "device": 0,
+    "name": "AMD Radeon AI PRO R9700",
+    "architecture": "gfx1201",
+    "wave_size": 32,
+    "pci": "0000:13:00.0",
+    "power_profile": "auto"
+  },
+  "workload": {
+    "concurrency": 1,
+    "maximum_product_concurrency": 4,
+    "prefill_chunk": 4096,
+    "warmup": 0,
+    "repetitions": 1,
+    "device_graph": false,
+    "spec": "none",
+    "draft_tokens": 0,
+    "retain_token_ids": true
+  },
+  "arms": {
+    "layer0-fresh": {
+      "history": "fresh-T129",
+      "trace_role": "text-fresh-frontier129-column128",
+      "state_layer": 0,
+      "selected_column": 128
+    },
+    "layer0-append": {
+      "history": "append-P128-plus-T1",
+      "trace_role": "text-append-frontier129-column0",
+      "state_layer": 0,
+      "selected_column": 0
+    },
+    "layer1-fresh": {
+      "history": "fresh-T129",
+      "trace_role": "text-fresh-frontier129-column128",
+      "state_layer": 1,
+      "selected_column": 128
+    },
+    "layer1-append": {
+      "history": "append-P128-plus-T1",
+      "trace_role": "text-append-frontier129-column0",
+      "state_layer": 1,
+      "selected_column": 0
+    }
+  },
+  "acceptance": {
+    "all_report_tokens": [
+      [
+        96558,
+        96917
+      ]
+    ],
+    "layer0_recurrent_state": "exact",
+    "layer1_recurrent_state": "exact",
+    "selected_column_layer_boundaries": "first_visible_post_mixer_layer_3",
+    "selected_column_layer1_gdn_fields": "exact",
+    "repeat_sidecars": "exact"
+  },
+  "limitations": [
+    "four candidate captures are required because the committed trace emits one selected recurrent-state layer per process",
+    "prior operator and owner evidence motivates e2, but this gate proves only exact parity of the combined selector-one build and does not isolate e2 causality",
+    "functional eager C1 diagnostic only; trace D2H invalidates all timing",
+    "the result is consistent with e2 removing the prior layer0/layer1 divergence, but the combined-build experiment does not isolate e2 causality",
+    "whole Text parity remains blocked at the first full-attention layer3 post-mixer",
+    "no production routing or performance claim"
+  ],
+  "results_directory": "results"
+}

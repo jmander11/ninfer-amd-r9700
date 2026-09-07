@@ -1,0 +1,97 @@
+[1/97] Building CXX object src/CMakeFiles/ninfer_r9700_core.dir/core/dtype.cpp.o
+[2/97] Building CXX object src/CMakeFiles/ninfer_r9700_core.dir/core/tensor.cpp.o
+[3/97] Building CXX object src/CMakeFiles/ninfer_r9700_core.dir/core/gdn_replay_records.cpp.o
+[4/97] Building CXX object src/CMakeFiles/ninfer_r9700_core.dir/targets/qwen3/impl/state/decoder_state.cpp.o
+[5/97] Building CXX object src/CMakeFiles/ninfer_r9700_core.dir/core/layout.cpp.o
+[6/97] Building CXX object src/CMakeFiles/ninfer_r9700_core.dir/core/fp8_int4_paged_kv_cache.cpp.o
+[7/97] Building CXX object src/CMakeFiles/ninfer_r9700_core.dir/core/cyclic_kv_cache.cpp.o
+[8/97] Building CXX object src/CMakeFiles/ninfer_r9700_core.dir/core/linear_attention_state.cpp.o
+[9/97] Building CXX object src/CMakeFiles/ninfer_r9700_core.dir/runtime/engine/request_memory.cpp.o
+[10/97] Building CXX object src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/gdn/causal_conv1d_silu.cpp.o
+[11/97] Building CXX object src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/gdn/gdn_gating.cpp.o
+[12/97] Building CXX object src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/eager/eager_tensor_ops.cpp.o
+[13/97] Building CXX object src/CMakeFiles/ninfer_r9700_core.dir/core/paged_kv_cache.cpp.o
+[14/97] Building CXX object src/CMakeFiles/ninfer_r9700_core.dir/targets/qwen3/impl/runtime/prefix_identity.cpp.o
+[15/97] Building CXX object src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/gdn_recurrence/gdn_replay_fold.cpp.o
+[16/97] Building HIP object src/CMakeFiles/ninfer_r9700_core.dir/core/device.hip.o
+[17/97] Building HIP object src/CMakeFiles/ninfer_r9700_core.dir/core/decode_graph.hip.o
+[18/97] Building HIP object src/CMakeFiles/ninfer_r9700_core.dir/targets/qwen3/impl/state/decoder_state_transaction.hip.o
+[19/97] Building HIP object src/CMakeFiles/ninfer_r9700_core.dir/core/arena.hip.o
+[20/97] Building CXX object src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/dflash/dflash2_path_select.cpp.o
+[21/97] Building HIP object src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/gdn_recurrence/gdn_prefill_scale_sidecar.hip.o
+[22/97] Building CXX object src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/dflash/bidirectional_gqa_attention.cpp.o
+[23/97] Building HIP object src/CMakeFiles/ninfer_r9700_core.dir/targets/qwen3_8_27b/impl/r9700_full_attention.hip.o
+[24/97] Building CXX object src/CMakeFiles/ninfer_r9700_core.dir/targets/qwen3/impl/runtime/kv_ram_cache.cpp.o
+[25/97] Building HIP object src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/gdn_recurrence/gdn_replay_fold.hip.o
+[26/97] Building HIP object src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/eager/eager_ops.hip.o
+[27/97] Building CXX object src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/dflash/kv_cache_append_prefix.cpp.o
+[28/97] Building HIP object src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/vision/vision_pos_embed.hip.o
+[29/97] Building HIP object src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/gdn/gdn_ops.hip.o
+[30/97] Building HIP object src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/gdn_recurrence/gated_delta_net.hip.o
+[31/97] Building CXX object src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/dflash/grouped_dynamic_conv.cpp.o
+[32/97] Building HIP object src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/dflash/bidirectional_gqa_attention.hip.o
+[33/97] Building CXX object src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/dflash/swa.cpp.o
+[34/97] Building HIP object src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/rope/rope.hip.o
+[35/97] Building HIP object src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/vision/vision_attention.hip.o
+[36/97] Building CXX object src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/schedule/scalar_schedule_tensor_ops.cpp.o
+[37/97] Building HIP object src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/dflash/dflash2_path_select.hip.o
+[38/97] Building HIP object src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/dflash/kv_cache_append_prefix.hip.o
+[39/97] Building CXX object src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/linear/linear_tensor_op.cpp.o
+[40/97] Building HIP object src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/sampling/sampling.hip.o
+[41/97] Building HIP object src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/dflash/swa.hip.o
+[42/97] Building CXX object src/CMakeFiles/ninfer_runtime_capacity.dir/runtime/engine/kv_capacity.cpp.o
+[43/97] Building HIP object src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/dflash/grouped_dynamic_conv.hip.o
+[44/97] Linking CXX static library src/libninfer_runtime_capacity.a
+[45/97] Building HIP object src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/speculative/mtp_round.hip.o
+[46/97] Building HIP object src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/kv/fp8_int4_kv_trace.hip.o
+[47/97] Building CXX object src/CMakeFiles/ninfer_artifact.dir/artifact/storage_layouts.cpp.o
+[48/97] Building CXX object src/CMakeFiles/ninfer_artifact.dir/artifact/binder.cpp.o
+[49/97] Building HIP object src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/schedule/scalar_schedule_ops.hip.o
+[50/97] Building HIP object src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/kv/fp8_int4_kv_compact.hip.o
+[51/97] Building HIP object src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/kv/fp8_int4_kv_append.hip.o
+[52/97] Building CXX object src/CMakeFiles/ninfer_artifact.dir/artifact/typed_binding.cpp.o
+[53/97] Building CXX object src/CMakeFiles/ninfer_r9700_text.dir/text/unicode.cpp.o
+[54/97] Building CXX object src/CMakeFiles/ninfer_r9700_target_bindings.dir/targets/qwen3/impl/frontend/resources.cpp.o
+[55/97] Building HIP object src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/speculative/speculative_round.hip.o
+[56/97] Building HIP object src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/linear/fp8_activation.hip.o
+[57/97] Building CXX object src/CMakeFiles/ninfer_artifact.dir/artifact/materializer.cpp.o
+[58/97] Building C object src/CMakeFiles/ninfer_r9700_text.dir/__/third_party/utf8proc/utf8proc.c.o
+[59/97] Linking CXX static library src/libninfer_r9700_text.a
+[60/97] Building CXX object src/CMakeFiles/ninfer_r9700_target_bindings.dir/targets/qwen3_8_27b/impl/package_identity.cpp.o
+[61/97] Building CXX object src/CMakeFiles/ninfer_r9700_qwen3_8_27b_runtime.dir/targets/qwen3/impl/frontend/digest.cpp.o
+[62/97] Building CXX object src/CMakeFiles/ninfer_media_decode.dir/media/decode/decode.cpp.o
+[63/97] Building CXX object src/CMakeFiles/ninfer_r9700_target_bindings.dir/targets/qwen3/impl/vision/bindings.cpp.o
+[64/97] Linking CXX static library src/libninfer_media_decode.a
+[65/97] Building CXX object src/CMakeFiles/ninfer_r9700_qwen3_8_27b_runtime.dir/targets/qwen3/impl/runtime/visual_scatter.cpp.o
+[66/97] Building HIP object src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/linear/linear_execution.hip.o
+[67/97] Building CXX object src/CMakeFiles/ninfer_r9700_qwen3_8_27b_runtime.dir/targets/qwen3/impl/frontend/encoded_history_cache.cpp.o
+[68/97] Building CXX object src/CMakeFiles/ninfer_r9700_target_bindings.dir/targets/qwen3_8_27b/impl/variant.cpp.o
+[69/97] Building CXX object src/CMakeFiles/ninfer_r9700_qwen3_8_27b_runtime.dir/targets/qwen3/impl/state/round_state.cpp.o
+[70/97] Building CXX object src/CMakeFiles/ninfer_engine.dir/runtime/contract/sampling.cpp.o
+[71/97] Building CXX object src/CMakeFiles/ninfer_engine.dir/runtime/engine/admission_policy.cpp.o
+[72/97] Building CXX object src/CMakeFiles/ninfer_artifact.dir/artifact/reader.cpp.o
+[73/97] Building CXX object src/CMakeFiles/ninfer_r9700_target_bindings.dir/targets/qwen3_8_27b/impl/load/bindings.cpp.o
+[74/97] Building CXX object src/CMakeFiles/ninfer_engine.dir/runtime/engine/public_types.cpp.o
+[75/97] Building CXX object src/CMakeFiles/ninfer_r9700_qwen3_8_27b_runtime.dir/targets/qwen3/impl/vision/control.cpp.o
+[76/97] Building CXX object src/CMakeFiles/ninfer_r9700_qwen3_8_27b_runtime.dir/targets/qwen3/impl/frontend/processor.cpp.o
+[77/97] Building CXX object tests/CMakeFiles/ninfer_qwen3_prefill_tail_trace_path_test.dir/targets/qwen3/test_prefill_tail_trace_path.cpp.o
+[78/97] Linking CXX executable tests/ninfer_qwen3_prefill_tail_trace_path_test
+[79/97] Building CXX object src/CMakeFiles/ninfer_engine.dir/targets/qwen3_8_27b/impl/package.cpp.o
+[80/97] Building HIP object src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/linear/r9700_linear.hip.o
+[81/97] Building CXX object src/CMakeFiles/ninfer_engine.dir/targets/registry.cpp.o
+[82/97] Building CXX object bench/CMakeFiles/ninfer_bench.dir/targets/qwen3_8_27b/ninfer_bench.cpp.o
+[83/97] Building CXX object tests/CMakeFiles/ninfer_qwen3_runtime_mechanisms_test.dir/targets/qwen3/test_runtime_mechanisms.cpp.o
+[84/97] Building CXX object bench/CMakeFiles/ninfer_bench.dir/targets/qwen3_8_27b/ninfer_bench_support.cpp.o
+[85/97] Building CXX object src/CMakeFiles/ninfer_r9700_qwen3_8_27b_runtime.dir/targets/qwen3/impl/frontend/chat_template.cpp.o
+[86/97] Building CXX object src/CMakeFiles/ninfer_engine.dir/runtime/engine/engine.cpp.o
+[87/97] Building CXX object src/CMakeFiles/ninfer_r9700_qwen3_8_27b_runtime.dir/targets/qwen3/impl/frontend/frontend.cpp.o
+[88/97] Building CXX object src/CMakeFiles/ninfer_r9700_qwen3_8_27b_runtime.dir/targets/qwen3/impl/frontend/tokenizer.cpp.o
+[89/97] Building HIP object src/CMakeFiles/ninfer_r9700_qwen3_8_27b_runtime.dir/targets/qwen3_8_27b/impl/runtime.hip.o
+[90/97] Building HIP object src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/kv/fp8_int4_kv_attention.hip.o
+[91/97] Linking HIP static library src/libninfer_r9700_core.a
+[92/97] Linking HIP static library src/libninfer_artifact.a
+[93/97] Linking HIP static library src/libninfer_r9700_target_bindings.a
+[94/97] Linking HIP static library src/libninfer_r9700_qwen3_8_27b_runtime.a
+[95/97] Linking HIP static library src/libninfer_engine.a
+[96/97] Linking HIP executable tests/ninfer_qwen3_runtime_mechanisms_test
+[97/97] Linking HIP executable bench/ninfer_bench

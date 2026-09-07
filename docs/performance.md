@@ -606,6 +606,17 @@ difference is full-attention FP32 output element 0: bits 1052023983 versus 10520
 absolute difference 0.02367246150970459. This localizes the first owner to full-attention route
 arithmetic; it is not an independent numerical oracle, timing evidence, or a routing decision.
 
+The exact selector-one Text follow-up under
+`profiles/bench/r9700-fp8-e2-t129-text-parity-gate-20260906/results` retains four C1 eager arms for
+the same P129 history. All four emit `[96558,96917]`; fresh and append are byte-exact for both the
+layer-zero and layer-one FP32 recurrent states and for every captured layer-one GDN field. The first
+visible residual difference moves to layer-three post-mixer: 3,467/5,120 BF16 elements differ, first
+at hidden 0 (bits 48413 versus 48414), with the preceding boundary exact. This combined-build result
+is consistent with the e2 T129 algorithm removing the earlier layer-zero/layer-one difference, but
+does not isolate e2 causality from the other bound selectors. It is functional and timing-ineligible;
+whole Text parity remains blocked at the same first full-attention layer implicated by the target
+trace above.
+
 A second packed-W4 candidate has passed standalone qualification through the production entry symbol
 for the exact DFlash MLP-down N5120/K17408, T5 cell. The retained summary is
 `profiles/bench/r9700-dflash-mlp-down-t5-production-symbol-qualification-20260906/summary.json`

@@ -63,10 +63,16 @@ above, not an executable task. Conditional tasks retain their explicit `if:` cla
   equal through layer0 MLP and first differs after the layer1 GDN mixer in 142/5,120 elements. Now
   detail tracing is exact through h, controls, and q/k/v/z, then first differs at layer1 recurrence
   output o (106/6,144 elements). Compare the FP32 recurrent state immediately before the selected
-  transition to distinguish state input from wide-prefill/append recurrence arithmetic. Do not call
-  this stale state without that state boundary.
+  transition to distinguish state input from wide-prefill/append recurrence arithmetic. The exact
+  selector-one combined build now makes both layer-zero and layer-one frontier states and every
+  captured layer-one GDN boundary byte-exact; its first visible residual difference is instead
+  layer-three post-mixer (3,467/5,120 BF16 elements, first hidden 0 bits 48413 versus 48414, exact
+  predecessor). This is consistent with the e2 T129 choice removing the earlier layer-zero/layer-one
+  path difference, but the combined build is not a matched isolated-causality test. Text now converges
+  with the target result on the first full-attention layer as the remaining arithmetic owner.
   Evidence is under `profiles/bench/r9700-dflash-semantic-traces-aebd5f82-20260906/results` and
-  `profiles/bench/r9700-qwen3-layer-boundary-traces-43e5e4cc-20260906/results`.
+  `profiles/bench/r9700-qwen3-layer-boundary-traces-43e5e4cc-20260906/results`, and the current
+  selector-one result is under `profiles/bench/r9700-fp8-e2-t129-text-parity-gate-20260906/results`.
 
 - [ ] `DFLASH-TARGET-P129` On the fresh-P129 common prefix through generated index 26, localize the
   first ordinary-versus-DFlash difference. Retain target-verification top-two/argmax by column,

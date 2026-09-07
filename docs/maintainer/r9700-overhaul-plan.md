@@ -1968,7 +1968,15 @@ Replace functional routes with measured gfx1201 families:
   `0.578439 ms` versus
   `0.546119 ms` (`1.059181x`, `+0.032320 ms`) in that screen. These timing values lack retained
   process and external power receipts and are diagnostic only. The operator fix is not a
-  production promotion: matched whole-Text fresh-versus-append parity remains the next gate.
+  production promotion. The exact combined selector-one Text gate under
+  `profiles/bench/r9700-fp8-e2-t129-text-parity-gate-20260906/results` retains four C1 eager arms:
+  all emit `[96558,96917]`, layer-zero and layer-one FP32 recurrent states are byte-exact, and every
+  captured layer-one GDN boundary is byte-exact. Whole parity is not restored: the first residual
+  difference is layer-three post-mixer in 3,467/5,120 BF16 elements, first hidden 0 bits 48413 versus
+  48414, with its predecessor exact. This is consistent with e2 removing the earlier layer-zero and
+  layer-one divergence, but the combined build does not isolate e2 causality. Text and target
+  localization therefore converge on the first full-attention layer; qualify and unify that route's
+  arithmetic before another public-token promotion gate.
   The earlier all-Q4 owner trace does not transfer its target-gate/up conclusion to this four-role
   artifact: all 64 Text gate/up matrices are FP8 and bypass A8Q4. Only the five Q4 DFlash proposal
   gate/up matrices use the small-T route per round, for an expected whole saving of about 7.1 ms at
