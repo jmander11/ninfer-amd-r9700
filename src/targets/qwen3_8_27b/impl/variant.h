@@ -107,10 +107,11 @@ struct Variant {
                                WorkspaceArena& workspace, hipStream_t stream,
                                const Tensor* ancestor_masks = nullptr,
                                const Tensor* prefix_lengths = nullptr,
-                               const Tensor* active_query_rows = nullptr);
+                               const Tensor* active_query_rows = nullptr,
+                               bool dflash_target_verify = false);
     [[nodiscard]] static std::size_t full_attention_workspace_capacity_bytes(
         std::int32_t maximum_query_rows, std::uint32_t maximum_visible_context,
-        bool tree_or_device_count);
+        bool tree_or_device_count, bool dflash_target_verify = false);
 #if defined(NINFER_R9700_XATTENTION_QUALIFICATION)
     // Compile-isolated model-gate leaf. The ordinary target library has neither this declaration
     // nor its sparse Op object, so no runtime selector or disabled-path branch reaches production.

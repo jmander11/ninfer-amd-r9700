@@ -825,7 +825,8 @@ void TextContext::target_verify_batch_impl(const Tensor& ids, const Tensor& cach
                                            const Tensor& valid_columns, const Tensor& kv_table_rows,
                                            const Tensor& linear_state_slots, Tensor& hidden,
                                            Tensor& logits, Tensor& target_tokens, Tap& tap,
-                                           bool reset_workspace) {
+                                           bool reset_workspace,
+                                           bool dflash_target_verify) {
     const std::int32_t width = ids.ne[0];
     const std::int32_t batch = ids.ne[1];
     if (width <= 0 || width > static_cast<std::int32_t>(kDFlashDecodeMaximumWidth) || batch <= 0 ||
@@ -869,6 +870,8 @@ void TextContext::target_verify_batch_impl(const Tensor& ids, const Tensor& cach
         ScopedValue<const Tensor*> valid_binding(active_valid_columns_, &valid_columns);
         ScopedValue<std::int32_t> batch_binding(active_sequence_batch_, batch);
         ScopedValue<std::int32_t> width_binding(active_sequence_width_, width);
+        ScopedValue<bool> dflash_verify_binding(active_dflash_target_verify_,
+                                                dflash_target_verify);
 
         Tensor x        = work_.alloc(DType::BF16, {kCfg.hidden, columns});
         Tensor flat_ids = ids.view({columns});
@@ -909,21 +912,22 @@ void TextContext::target_verify_batch(const Tensor& ids, const Tensor& cache_pos
                                       const Tensor& rope_positions, const Tensor& valid_columns,
                                       const Tensor& kv_table_rows, const Tensor& linear_state_slots,
                                       Tensor& hidden, Tensor& logits, Tensor& target_tokens,
-                                      bool reset_workspace) {
+                                      bool reset_workspace, bool dflash_target_verify) {
     NullTap tap;
     target_verify_batch_impl(ids, cache_positions, rope_positions, valid_columns, kv_table_rows,
                              linear_state_slots, hidden, logits, target_tokens, tap,
-                             reset_workspace);
+                             reset_workspace, dflash_target_verify);
 }
 
 void TextContext::target_verify_batch(const Tensor& ids, const Tensor& cache_positions,
                                       const Tensor& rope_positions, const Tensor& valid_columns,
                                       const Tensor& kv_table_rows, const Tensor& linear_state_slots,
                                       Tensor& hidden, Tensor& logits, Tensor& target_tokens,
-                                      DFlashFeatureSink& sink, bool reset_workspace) {
+                                      DFlashFeatureSink& sink, bool reset_workspace,
+                                      bool dflash_target_verify) {
     target_verify_batch_impl(ids, cache_positions, rope_positions, valid_columns, kv_table_rows,
                              linear_state_slots, hidden, logits, target_tokens, sink,
-                             reset_workspace);
+                             reset_workspace, dflash_target_verify);
 }
 
 void TextContext::mtp_forward_decode_batch(const Tensor& ids, const Tensor& hidden,
@@ -1107,7 +1111,8 @@ void TextContext::attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_la
 #endif
         {
             Variant::full_attention(query_panel, cache_read, position_panel, attention_panel,
-                                    work_, s, ancestor_panel_ptr, prefix_panel_ptr, nullptr);
+                                    work_, s, ancestor_panel_ptr, prefix_panel_ptr, nullptr,
+                                    active_dflash_target_verify_);
         }
     }
     if constexpr (requires {

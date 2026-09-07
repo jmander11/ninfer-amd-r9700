@@ -160,6 +160,89 @@ __global__ void qk_wmma_kernel(const hip_bfloat16* query, const std::uint8_t* ke
     (void)q_to_kv; (void)attention_scale; (void)scores;
 #endif
 }
+
+template <bool TokenFastest>
+__global__ void qk_wmma_batched_w5_kernel(
+    const hip_bfloat16* query, const std::uint8_t* key_codes,
+    const std::uint32_t* page_table, const std::int32_t* page_table_row,
+    std::uint32_t page_table_row_stride, std::uint32_t page_table_row_count,
+    std::size_t context, std::size_t physical_tokens, std::uint32_t kv_heads,
+    std::uint32_t q_to_kv,
+    float attention_scale, float* scores) {
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
+    const std::uint32_t lane = threadIdx.x & 31U;
+    const std::uint32_t k_half = lane >> 4U;
+    const std::uint32_t axis = lane & 15U;
+    const std::uint32_t row = blockIdx.y / kv_heads;
+    const std::uint32_t kv_head = blockIdx.y % kv_heads;
+    const std::size_t tile = static_cast<std::size_t>(blockIdx.x) * 16U;
+    float* row_scores = scores + static_cast<std::size_t>(row) * kv_heads * q_to_kv * context;
+    if (page_table_row != nullptr) {
+        const std::int32_t represented_row = *page_table_row;
+        if (represented_row < 0 ||
+            static_cast<std::uint32_t>(represented_row) >= page_table_row_count) {
+            for (std::uint32_t j = 0; j < 8; ++j) {
+                const std::uint32_t qrow = (lane >> 4U) * 8U + j;
+                const std::size_t logical = tile + axis;
+                if (qrow < q_to_kv && logical < context) {
+                    const std::uint32_t query_head = kv_head * q_to_kv + qrow;
+                    row_scores[static_cast<std::size_t>(query_head) * context + logical] =
+                        __builtin_nanf("");
+                }
+            }
+            return;
+        }
+        page_table += static_cast<std::size_t>(represented_row) * page_table_row_stride;
+    }
+    F32x8 accum = {0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F};
+    for (std::uint32_t chunk = 0; chunk < kHeadDim / 16U; ++chunk) {
+        std::uint8_t a_bytes[8];
+        std::uint8_t b_bytes[8];
+        const std::uint32_t query_head = kv_head * q_to_kv + axis;
+        for (std::uint32_t j = 0; j < 8; ++j) {
+            const std::uint32_t feature = chunk * 16U + k_half * 8U + j;
+            a_bytes[j] = query_head < kv_heads * q_to_kv
+                             ? __hip_cvt_float_to_fp8(
+                                   static_cast<float>(query[
+                                       (static_cast<std::size_t>(row) * kv_heads * q_to_kv +
+                                        query_head) * kHeadDim + feature]),
+                                   __HIP_SATFINITE, __HIP_E4M3)
+                             : 0U;
+            const std::size_t logical = tile + axis;
+            if (logical < context) {
+                const std::size_t physical =
+                    static_cast<std::size_t>(page_table[logical / kPageSize]) * kPageSize +
+                    logical % kPageSize;
+                b_bytes[j] = physical < physical_tokens
+                                 ? key_codes[key_offset<TokenFastest>(
+                                       physical, kv_head, feature, kv_heads, physical_tokens)]
+                                 : 0U;
+            } else {
+                b_bytes[j] = 0U;
+            }
+        }
+        const I32x2 a = {pack_fp8x4(a_bytes), pack_fp8x4(a_bytes + 4)};
+        const I32x2 b = {pack_fp8x4(b_bytes), pack_fp8x4(b_bytes + 4)};
+        accum = __builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8_w32_gfx12(a, b, accum);
+    }
+    for (std::uint32_t j = 0; j < 8; ++j) {
+        const std::uint32_t qrow = (lane >> 4U) * 8U + j;
+        const std::uint32_t query_head = kv_head * q_to_kv + qrow;
+        const std::size_t logical = tile + axis;
+        if (qrow < q_to_kv && logical < context) {
+            const std::size_t physical =
+                static_cast<std::size_t>(page_table[logical / kPageSize]) * kPageSize +
+                logical % kPageSize;
+            row_scores[static_cast<std::size_t>(query_head) * context + logical] =
+                physical < physical_tokens ? accum[j] * attention_scale : __builtin_nanf("");
+        }
+    }
+#else
+    (void)query; (void)key_codes; (void)page_table; (void)page_table_row;
+    (void)page_table_row_stride; (void)page_table_row_count; (void)context;
+    (void)physical_tokens; (void)kv_heads; (void)q_to_kv; (void)attention_scale; (void)scores;
+#endif
+}
 } // namespace
 
 hipError_t fp8_kv_qk_vector(const Fp8KvQkArgs& a, hipStream_t stream) noexcept {
@@ -261,6 +344,52 @@ __global__ void pv_vector_kernel(const float* probabilities, const std::uint8_t*
                    static_cast<float>(code) * __half2float(__ushort_as_half(bits)), sum);
     }
     output[static_cast<std::size_t>(qh) * kHeadDim + feature] = sum;
+}
+
+template <std::uint32_t Group, bool VToken, bool SToken>
+__global__ void pv_vector_batched_w5_kernel(
+    const float* probabilities, const std::uint8_t* values, const std::uint16_t* scales,
+    const std::uint32_t* pages, const std::int32_t* page_table_row,
+    std::uint32_t page_table_row_stride, std::uint32_t page_table_row_count,
+    std::size_t context, std::size_t physical_tokens, std::uint32_t q_to_kv,
+    float* output) {
+    const std::uint32_t qh = blockIdx.x;
+    const std::uint32_t row = blockIdx.y;
+    const std::uint32_t feature = threadIdx.x;
+    const std::uint32_t kvh = qh / q_to_kv;
+    const std::size_t heads = gridDim.x;
+    if (page_table_row != nullptr) {
+        const std::int32_t represented_row = *page_table_row;
+        if (represented_row < 0 ||
+            static_cast<std::uint32_t>(represented_row) >= page_table_row_count) {
+            output[(static_cast<std::size_t>(row) * heads + qh) * kHeadDim + feature] =
+                __builtin_nanf("");
+            return;
+        }
+        pages += static_cast<std::size_t>(represented_row) * page_table_row_stride;
+    }
+    const float* row_probabilities =
+        probabilities + static_cast<std::size_t>(row) * heads * context;
+    float sum = 0.0F;
+    for (std::size_t logical = 0; logical < context; ++logical) {
+        const std::size_t physical =
+            static_cast<std::size_t>(pages[logical / kPageSize]) * kPageSize +
+            logical % kPageSize;
+        if (physical >= physical_tokens) {
+            output[(static_cast<std::size_t>(row) * heads + qh) * kHeadDim + feature] =
+                __builtin_nanf("");
+            return;
+        }
+        const std::uint8_t packed = values[int4_offset<Group, VToken, SToken>(
+            physical, kvh, feature, gridDim.x / q_to_kv, physical_tokens, false)];
+        int code = static_cast<int>((packed >> ((feature & 1U) * 4U)) & 0x0fU);
+        code = code >= 8 ? code - 16 : code;
+        const std::uint16_t bits = scales[int4_offset<Group, VToken, SToken>(
+            physical, kvh, feature, gridDim.x / q_to_kv, physical_tokens, true)];
+        sum = fmaf(row_probabilities[static_cast<std::size_t>(qh) * context + logical],
+                   static_cast<float>(code) * __half2float(__ushort_as_half(bits)), sum);
+    }
+    output[(static_cast<std::size_t>(row) * heads + qh) * kHeadDim + feature] = sum;
 }
 
 template <std::uint32_t G, bool V, bool S> hipError_t pv_launch(const Int4KvPvArgs& a, hipStream_t stream) {
@@ -1248,6 +1377,85 @@ __global__ void softmax_wmma_scores_in_place_kernel(
     }
 }
 
+__global__ void softmax_wmma_scores_batched_w5_in_place_kernel(
+    float* scores, std::size_t context, const std::int32_t* row_positions) {
+    const std::uint32_t qh = blockIdx.x;
+    const std::uint32_t row = blockIdx.y;
+    const std::uint32_t thread = threadIdx.x;
+    const std::uint32_t lane = thread & 31U;
+    const std::uint32_t wave = thread >> 5U;
+    const std::int32_t row_position = row_positions[row];
+    const bool invalid_row = row_position < 0 || static_cast<std::size_t>(row_position) >= context;
+    const std::size_t row_context = invalid_row ? context :
+        static_cast<std::size_t>(row_position) + 1U;
+    float* head_scores = scores +
+        (static_cast<std::size_t>(row) * gridDim.x + qh) * context;
+    __shared__ float wave_values[kHeadDim / 32U];
+    __shared__ std::uint32_t wave_invalid[kHeadDim / 32U];
+    __shared__ float block_max;
+    __shared__ float denominator;
+    __shared__ std::uint32_t invalid;
+
+    float local_max = -INFINITY;
+    std::uint32_t local_invalid = invalid_row || row_context == 0U || row_context > context;
+    if (local_invalid == 0U) {
+        for (std::size_t logical = thread; logical < row_context; logical += blockDim.x) {
+            const float score = head_scores[logical];
+            if (!isfinite(score)) local_invalid = 1U;
+            else local_max = fmaxf(local_max, score);
+        }
+    }
+    for (std::uint32_t stride = 16U; stride != 0U; stride >>= 1U) {
+        local_max = fmaxf(local_max, __shfl_down(local_max, stride, 32));
+    }
+    const std::uint32_t invalid_lanes = __ballot(local_invalid != 0U);
+    if (lane == 0U) {
+        wave_values[wave] = local_max;
+        wave_invalid[wave] = invalid_lanes != 0U;
+    }
+    __syncthreads();
+    if (thread == 0U) {
+        float maximum = wave_values[0];
+        std::uint32_t bad = wave_invalid[0];
+        for (std::uint32_t index = 1U; index < kHeadDim / 32U; ++index) {
+            maximum = fmaxf(maximum, wave_values[index]);
+            bad |= wave_invalid[index];
+        }
+        block_max = maximum;
+        invalid = bad;
+    }
+    __syncthreads();
+    if (invalid != 0U) {
+        for (std::size_t logical = thread; logical < context; logical += blockDim.x) {
+            head_scores[logical] = __builtin_nanf("");
+        }
+        return;
+    }
+    float local_sum = 0.0F;
+    for (std::size_t logical = thread; logical < row_context; logical += blockDim.x) {
+        local_sum += __expf(head_scores[logical] - block_max);
+    }
+    for (std::uint32_t stride = 16U; stride != 0U; stride >>= 1U) {
+        local_sum += __shfl_down(local_sum, stride, 32);
+    }
+    if (lane == 0U) wave_values[wave] = local_sum;
+    __syncthreads();
+    if (thread == 0U) {
+        float sum = 0.0F;
+        for (std::uint32_t index = 0U; index < kHeadDim / 32U; ++index) {
+            sum += wave_values[index];
+        }
+        denominator = sum;
+    }
+    __syncthreads();
+    for (std::size_t logical = thread; logical < row_context; logical += blockDim.x) {
+        head_scores[logical] = __expf(head_scores[logical] - block_max) / denominator;
+    }
+    for (std::size_t logical = row_context + thread; logical < context; logical += blockDim.x) {
+        head_scores[logical] = 0.0F;
+    }
+}
+
 template <std::uint32_t G, bool V, bool S>
 hipError_t softmax_pv_from_wmma_scores_launch(const Fp8Int4KvAttentionArgs& a,
                                                std::uint32_t row, hipStream_t stream) {
@@ -1446,6 +1654,74 @@ hipError_t fp8_int4_kv_attention_wmma(const Fp8Int4KvAttentionArgs& a,
         if (error != hipSuccess) { return error; }
     }
     return hipSuccess;
+}
+
+std::size_t fp8_int4_kv_attention_wmma_batched_w5_workspace_bytes(
+    std::size_t context) noexcept {
+    constexpr std::size_t elements_per_token = 5U * 24U;
+    return context != 0U && context <= std::numeric_limits<std::size_t>::max() /
+                                        (elements_per_token * sizeof(float))
+               ? context * elements_per_token * sizeof(float)
+               : 0U;
+}
+
+template <std::uint32_t Group, bool VToken, bool SToken>
+hipError_t batched_w5_pv_launch(const Fp8Int4KvAttentionArgs& a, hipStream_t stream) {
+    hipLaunchKernelGGL((pv_vector_batched_w5_kernel<Group, VToken, SToken>),
+                       dim3(a.query_heads, 5U), dim3(kHeadDim), 0, stream,
+                       a.score_workspace, a.value_codes, a.value_scale_bits, a.page_table,
+                       a.page_table_row, a.page_table_row_stride, a.page_table_row_count,
+                       a.context, a.physical_tokens, a.q_to_kv, a.output);
+    return hipGetLastError();
+}
+
+template <std::uint32_t Group>
+hipError_t batched_w5_pv_dispatch(const Fp8Int4KvAttentionArgs& a, hipStream_t stream) {
+    const unsigned layout =
+        (a.value_layout == Fp8Int4KvPlaneLayout::TokenFastest ? 1U : 0U) |
+        (a.value_scale_layout == Fp8Int4KvPlaneLayout::TokenFastest ? 2U : 0U);
+    switch (layout) {
+    case 0: return batched_w5_pv_launch<Group, false, false>(a, stream);
+    case 1: return batched_w5_pv_launch<Group, true, false>(a, stream);
+    case 2: return batched_w5_pv_launch<Group, false, true>(a, stream);
+    default: return batched_w5_pv_launch<Group, true, true>(a, stream);
+    }
+}
+
+hipError_t fp8_int4_kv_attention_wmma_batched_w5(
+    const Fp8Int4KvAttentionArgs& a, hipStream_t stream) noexcept {
+    if (!a.query || !a.key_codes || !a.value_codes || !a.value_scale_bits || !a.page_table ||
+        !a.page_table_pages || !a.context || !a.physical_tokens ||
+        a.physical_tokens % kPageSize || a.query_heads != 24U || a.kv_heads != 4U ||
+        a.q_to_kv != 6U || a.query_rows != 5U || !a.row_positions || !a.score_workspace ||
+        !a.output || !std::isfinite(a.attention_scale) || !(a.attention_scale > 0.0F) ||
+        (a.page_table_row != nullptr &&
+         (a.page_table_row_stride < a.page_table_pages || a.page_table_row_count == 0U)) ||
+        a.key_layout != Fp8Int4KvPlaneLayout::TokenFastest ||
+        a.value_layout != Fp8Int4KvPlaneLayout::FeatureFastest ||
+        a.value_scale_layout != Fp8Int4KvPlaneLayout::FeatureFastest ||
+        a.ancestor_masks != nullptr ||
+        a.prefix_lengths != nullptr || a.active_query_rows != nullptr ||
+        a.prefix_length_stride > 1U ||
+        a.page_table_pages < (a.context + kPageSize - 1U) / kPageSize ||
+        a.value_group != 16U) {
+        return hipErrorInvalidValue;
+    }
+    const dim3 qk_grid(static_cast<unsigned>((a.context + 15U) / 16U),
+                       a.query_rows * a.kv_heads);
+    hipLaunchKernelGGL((qk_wmma_batched_w5_kernel<true>), qk_grid, dim3(32), 0, stream,
+                       a.query, a.key_codes, a.page_table, a.page_table_row,
+                       a.page_table_row_stride, a.page_table_row_count, a.context,
+                       a.physical_tokens, a.kv_heads, a.q_to_kv, a.attention_scale,
+                       a.score_workspace);
+    hipError_t error = hipGetLastError();
+    if (error != hipSuccess) return error;
+    hipLaunchKernelGGL(softmax_wmma_scores_batched_w5_in_place_kernel,
+                       dim3(a.query_heads, a.query_rows), dim3(kHeadDim), 0, stream,
+                       a.score_workspace, a.context, a.row_positions);
+    error = hipGetLastError();
+    if (error != hipSuccess) return error;
+    return batched_w5_pv_launch<16U, false, false>(a, stream);
 }
 
 namespace {

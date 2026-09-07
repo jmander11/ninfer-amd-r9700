@@ -1,0 +1,76 @@
+{
+  "artifact_type": "ninfer_r9700_attention_parity_candidate_focused_summary",
+  "schema_version": 1,
+  "status": "focused_operator_candidate_pass",
+  "production_routing_authorized": false,
+  "timing_evidence_eligible": false,
+  "source": {
+    "base_commit": "f3c1a766",
+    "tree_state": "uncommitted_candidate_checkpoint",
+    "selector": "NINFER_R9700_ATTENTION_PARITY_CANDIDATE=1"
+  },
+  "executable": {
+    "path": "build-r9700-attention-parity-on/src/ninfer_r9700_dflash_attention_route_discriminator",
+    "bytes": 1497568,
+    "sha256": "2971cf86cd1fe45f4478e2e783e5d4c7ef1fb19dd24d8613a5a19f95bf75e1d0"
+  },
+  "hardware": {
+    "device": 0,
+    "name": "AMD Radeon AI PRO R9700",
+    "architecture": "gfx1201",
+    "wave_size": 32,
+    "pci": "0000:13:00.0"
+  },
+  "geometry": {
+    "query_heads": 24,
+    "kv_heads": 4,
+    "head_dim": 256,
+    "value_group": 16,
+    "text": "T129/C129",
+    "ordinary": "W1/C130/position129",
+    "dflash": "W5/C134/positions129..133"
+  },
+  "functional": {
+    "independent_public_and_fp8_q_oracles_pass": true,
+    "status_canary_and_complete_observable_output_checks_pass": true,
+    "text_dense_prefix_rows_0_127_preserved_bit_exact": true,
+    "text_overwritten_tail_exact_to_standalone_w1": true,
+    "dflash_batched_w5_exact_to_serial_w5_all_rows": true,
+    "dflash_batched_w5_graph_exact_to_eager": true,
+    "ordinary_w1_exact_to_dflash_selected_row0": true,
+    "incumbent_fused_w5_row0_mismatches_vs_ordinary_w1": 6144,
+    "incumbent_fused_w5_row0_max_abs_vs_ordinary_w1": 0.0059923455119132996
+  },
+  "static": {
+    "gfx1201_native_fp8_wmma": true,
+    "wave32": true,
+    "occupancy": 16,
+    "spills": 0,
+    "qualified_profile": "G16/token-fastest-K/feature-fastest-V-and-scale"
+  },
+  "diagnostic_timing_ms": {
+    "ordinary_w1_wmma_median": 0.06213910102844238,
+    "dflash_w5_batched_wmma_median": 0.06228868007659912,
+    "dflash_w5_fused_incumbent_median": 0.09549903869628906,
+    "dflash_w5_batched_over_fused_ratio": 0.652244054,
+    "text_dense_p129_median": 0.18740209579467773,
+    "text_dense_plus_tail_median": 0.24577241897583008,
+    "text_tail_overwrite_overhead": 0.058370323181152345
+  },
+  "cpu_checks": {
+    "selector_off_build": "pass",
+    "selector_on_build": "pass",
+    "host_routing_and_capacity": "pass",
+    "benchmark_schema": "pass",
+    "static_checker_and_mutation_tests": "pass",
+    "git_diff_check": "pass",
+    "independent_review": "pass"
+  },
+  "limitations": [
+    "Operator-level focused qualification only; no public-token or whole-inference claim.",
+    "Timing is diagnostic because no retained auto-power endpoints or immutable process receipt were captured.",
+    "The compile selector remains default-off pending the three-load exact whole-model parity gate.",
+    "The DFlash route is admitted only for focused qualification, not production promotion."
+  ],
+  "next": "Bind and execute the prepared three-load Text/target whole-model parity gate; run a short K4/W5 DFlash speed screen only if exact parity passes."
+}

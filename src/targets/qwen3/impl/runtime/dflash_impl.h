@@ -791,6 +791,7 @@ auto dflash_decode_batch_body(DFlashBatchContext& state, std::int32_t batch_size
             .target_hidden   = target_hidden,
             .target_logits   = target_logits,
             .target_tokens   = target_tokens,
+            .dflash_target_verify = true,
             .drafts          = drafts,
             .current_extents = extents,
             .frontiers       = frontiers,

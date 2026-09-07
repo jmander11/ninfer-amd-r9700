@@ -95,7 +95,7 @@ std::size_t r9700_full_attention_score_workspace_capacity_bytes(
 
 std::size_t r9700_full_attention_workspace_capacity_bytes(
     std::uint32_t query_rows, std::size_t visible_context,
-    bool tree_or_device_count) noexcept {
+    bool tree_or_device_count, bool dflash_target_verify) noexcept {
     std::size_t required = 0U;
     if (ops::r9700::kv::use_split512_attention(
             query_rows, visible_context, tree_or_device_count)) {
@@ -104,6 +104,16 @@ std::size_t r9700_full_attention_workspace_capacity_bytes(
     } else if (!tree_or_device_count &&
                ops::r9700::kv::use_fp8_qk_wmma(query_rows, visible_context)) {
         required = r9700_full_attention_score_workspace_capacity_bytes(visible_context);
+    }
+    if (ops::r9700::kv::kAttentionParityCandidate && dflash_target_verify &&
+        !tree_or_device_count &&
+        query_rows == 5U && visible_context >= ops::r9700::kv::kFp8QkWmmaT1MinimumContext) {
+        const std::size_t candidate_context = std::min<std::size_t>(
+            visible_context, ops::r9700::kv::kSplit512MinimumContext - 1U);
+        required = std::max(
+            required,
+            ops::r9700::kv::fp8_int4_kv_attention_wmma_batched_w5_workspace_bytes(
+                candidate_context));
     }
     // The planner supplies envelope maxima, not necessarily one exact call. Reserve the largest
     // initial-prefix dense score plane reachable anywhere inside that envelope. Runtime dispatch
@@ -240,8 +250,28 @@ static hipError_t launch_r9700_attention(
         if (required == 0U || a.workspace == nullptr || a.workspace_bytes < required) {
             return hipErrorInvalidValue;
         }
-        return ops::r9700::kv::fp8_int4_kv_attention_dense_prefill_full_score(
+        hipError_t error = ops::r9700::kv::fp8_int4_kv_attention_dense_prefill_full_score(
             raw, a.workspace, required, stream);
+        if (error != hipSuccess || !ops::r9700::kv::use_text_p129_wmma_tail(
+                                       static_cast<std::uint32_t>(rows), raw.context)) {
+            return error;
+        }
+        const std::size_t tail_score_bytes =
+            r9700_full_attention_score_workspace_capacity_bytes(raw.context);
+        if (tail_score_bytes == 0U || tail_score_bytes > required) {
+            return hipErrorInvalidValue;
+        }
+        // The dense consumers are enqueued first on this same stream, so its workspace front can
+        // be reused by the following W1 launches. Overwrite only the final output row, leaving the
+        // 128-row prefix byte-for-byte on the original dense route.
+        auto tail = raw;
+        constexpr std::size_t row_elements = kQueryHeads * kHeadDim;
+        tail.query += 128U * row_elements;
+        tail.query_rows = 1U;
+        tail.row_positions += 128U;
+        tail.score_workspace = static_cast<float*>(a.workspace);
+        tail.output += 128U * row_elements;
+        return ops::r9700::kv::fp8_int4_kv_attention_wmma(tail, stream);
     }
     const bool split512 = ops::r9700::kv::use_split512_attention(
         static_cast<std::uint32_t>(rows), raw.context, tree_or_device_count);
@@ -253,6 +283,18 @@ static hipError_t launch_r9700_attention(
         }
         return ops::r9700::kv::fp8_int4_kv_attention_split512(
             raw, a.workspace, required, stream);
+    }
+    if (ops::r9700::kv::use_dflash_w5_batched_wmma(
+            static_cast<std::uint32_t>(rows), raw.context, tree_or_device_count,
+            a.dflash_target_verify)) {
+        const std::size_t required =
+            ops::r9700::kv::fp8_int4_kv_attention_wmma_batched_w5_workspace_bytes(raw.context);
+        if (required == 0U || a.workspace == nullptr || a.workspace_bytes < required) {
+            return hipErrorInvalidValue;
+        }
+        auto wmma = raw;
+        wmma.score_workspace = static_cast<float*>(a.workspace);
+        return ops::r9700::kv::fp8_int4_kv_attention_wmma_batched_w5(wmma, stream);
     }
     const bool ordinary_wmma =
         ops::r9700::kv::use_fp8_qk_wmma(static_cast<std::uint32_t>(rows), raw.context) &&

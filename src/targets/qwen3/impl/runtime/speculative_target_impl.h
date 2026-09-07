@@ -27,12 +27,13 @@ void target_verify_accept(ExecutionCore& execution, Tensor& continuation_hidden_
         card.target_verify_batch(frame.ids, frame.cache_positions, frame.rope_positions,
                                  frame.valid_columns, frame.kv_table_rows, frame.lanes,
                                  frame.target_hidden, frame.target_logits, frame.target_tokens,
-                                 *frame.feature_sink, reset_workspace);
+                                 *frame.feature_sink, reset_workspace,
+                                 frame.dflash_target_verify);
     } else {
         card.target_verify_batch(frame.ids, frame.cache_positions, frame.rope_positions,
                                  frame.valid_columns, frame.kv_table_rows, frame.lanes,
                                  frame.target_hidden, frame.target_logits, frame.target_tokens,
-                                 reset_workspace);
+                                 reset_workspace, frame.dflash_target_verify);
     }
     if (tree) {
         ops::speculative_accept_tree_drafts(

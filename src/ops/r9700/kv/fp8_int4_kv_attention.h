@@ -147,6 +147,13 @@ enum class DensePrefillFullScoreStage : std::uint32_t {
 [[nodiscard]] hipError_t fp8_int4_kv_attention_wmma(const Fp8Int4KvAttentionArgs& args,
                                                      hipStream_t stream) noexcept;
 
+// Qualification-only K4/W5 chain candidate. The caller owns five independent FP32 score planes;
+// QK, stable Softmax, and exact INT4/FP16 PV each launch once across all five causal rows.
+[[nodiscard]] std::size_t fp8_int4_kv_attention_wmma_batched_w5_workspace_bytes(
+    std::size_t context) noexcept;
+[[nodiscard]] hipError_t fp8_int4_kv_attention_wmma_batched_w5(
+    const Fp8Int4KvAttentionArgs& args, hipStream_t stream) noexcept;
+
 // Production long-context decode leaf for the one selected R9700 cache layout. T=1 keeps the
 // qualified FP8-Q/FP8-K WMMA score profile; fixed-width T=4 uses represented-BF16 Q and shares one
 // decoded 16-token K tile across all four rows and six query heads of each KV head. Both feed

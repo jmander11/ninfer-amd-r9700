@@ -22,6 +22,14 @@ inline constexpr std::uint32_t kSplit512MinimumContext = 8192U;
 inline constexpr std::uint32_t kDensePrefillMinimumRows = 128U;
 inline constexpr std::uint32_t kDensePrefillMaximumRows = 4096U;
 
+#ifndef NINFER_R9700_ATTENTION_PARITY_CANDIDATE
+#define NINFER_R9700_ATTENTION_PARITY_CANDIDATE 0
+#endif
+static_assert(NINFER_R9700_ATTENTION_PARITY_CANDIDATE == 0 ||
+                  NINFER_R9700_ATTENTION_PARITY_CANDIDATE == 1,
+              "R9700 Text/DFlash attention parity candidate must be zero or one");
+inline constexpr bool kAttentionParityCandidate = NINFER_R9700_ATTENTION_PARITY_CANDIDATE == 1;
+
 // Physical selection covered complete initial-prefix calls at P=128/512/1024/2048/4096. Do not
 // extrapolate the route to later chunks with a longer visible frontier without matched evidence.
 [[nodiscard]] constexpr bool use_dense_prefill_attention(
@@ -35,6 +43,20 @@ inline constexpr std::uint32_t kDensePrefillMaximumRows = 4096U;
     return kFp8QkWmmaDecode &&
            ((query_rows == 1U && visible_context >= kFp8QkWmmaT1MinimumContext) ||
             (query_rows == 2U && visible_context >= kFp8QkWmmaT2MinimumContext));
+}
+
+[[nodiscard]] constexpr bool use_dflash_w5_batched_wmma(
+    std::uint32_t query_rows, std::size_t visible_context,
+    bool tree_or_device_count, bool dflash_target_verify) noexcept {
+    return kAttentionParityCandidate && dflash_target_verify && query_rows == 5U &&
+           !tree_or_device_count &&
+           visible_context >= kFp8QkWmmaT1MinimumContext &&
+           visible_context < kSplit512MinimumContext;
+}
+
+[[nodiscard]] constexpr bool use_text_p129_wmma_tail(std::uint32_t query_rows,
+                                                      std::size_t visible_context) noexcept {
+    return kAttentionParityCandidate && query_rows == 129U && visible_context == 129U;
 }
 
 // T=1 split attention has no device-selected inactive-row or tree form; those fixed-address

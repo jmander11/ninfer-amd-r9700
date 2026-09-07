@@ -234,13 +234,15 @@ public:
                              const Tensor& rope_positions, const Tensor& valid_columns,
                              const Tensor& kv_table_rows, const Tensor& linear_state_slots,
                              Tensor& hidden, Tensor& logits, Tensor& target_tokens,
-                             bool reset_workspace = true);
+                             bool reset_workspace = true,
+                             bool dflash_target_verify = false);
     void target_verify_batch(const Tensor& ids, const Tensor& cache_positions,
                              const Tensor& rope_positions, const Tensor& valid_columns,
                              const Tensor& kv_table_rows, const Tensor& linear_state_slots,
                              Tensor& hidden, Tensor& logits, Tensor& target_tokens,
                              DFlashFeatureSink& sink,
-                             bool reset_workspace = true);
+                             bool reset_workspace = true,
+                             bool dflash_target_verify = false);
     void mtp_forward_decode_batch(const Tensor& ids, const Tensor& hidden,
                                   const Tensor& cache_positions, const Tensor& rope_positions,
                                   const Tensor& valid_columns, const Tensor& kv_table_rows,
@@ -277,7 +279,7 @@ private:
                                   const Tensor& rope_positions, const Tensor& valid_columns,
                                   const Tensor& kv_table_rows, const Tensor& linear_state_slots,
                                   Tensor& hidden, Tensor& logits, Tensor& target_tokens, Tap& tap,
-                                  bool reset_workspace);
+                                  bool reset_workspace, bool dflash_target_verify);
 
     void mtp_forward_stem(const Tensor& ids, const Tensor& hidden, const Tensor* input_embeddings,
                           Tensor& x, Tensor& ah);
@@ -344,6 +346,7 @@ private:
     std::span<qwen3::PagedKVTransaction* const> mtp_kv_transactions_;
     std::int32_t active_sequence_batch_                   = 0;
     std::int32_t active_sequence_width_                   = 0;
+    bool active_dflash_target_verify_                     = false;
     std::int32_t rope_delta_                              = 0;
     std::int32_t linear_state_current_slot_               = 0;
     std::int32_t linear_state_rewrite_checkpoint_slot_    = 0;

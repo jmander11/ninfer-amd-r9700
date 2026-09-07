@@ -171,6 +171,39 @@ void qualify_host_split512_routing() {
     std::printf("r9700_runtime_planner: PASS host split-512 production routing\n");
 }
 
+void qualify_host_attention_parity_routing() {
+    namespace kv = ninfer::ops::r9700::kv;
+    namespace q27 = ninfer::targets::qwen3_8_27b::detail;
+    constexpr std::size_t kW5C134Bytes = 5U * 24U * 134U * sizeof(float);
+    constexpr std::size_t kW5C140Bytes = 5U * 24U * 140U * sizeof(float);
+    constexpr std::size_t kTextP129Bytes = (129U * 24U * 129U + 129U * 24U) * sizeof(float);
+    const bool enabled = kv::kAttentionParityCandidate;
+    require(kv::use_dflash_w5_batched_wmma(5U, 134U, false, true) == enabled &&
+                kv::use_text_p129_wmma_tail(129U, 129U) == enabled &&
+                !kv::use_dflash_w5_batched_wmma(5U, 134U, false, false) &&
+                !kv::use_dflash_w5_batched_wmma(4U, 134U, false, true) &&
+                !kv::use_dflash_w5_batched_wmma(6U, 134U, false, true) &&
+                !kv::use_dflash_w5_batched_wmma(5U, 134U, true, true) &&
+                !kv::use_text_p129_wmma_tail(128U, 128U) &&
+                !kv::use_text_p129_wmma_tail(129U, 130U),
+            "attention parity selectors escaped their exact Text/DFlash cells");
+    require(q27::r9700_full_attention_workspace_capacity_bytes(5U, 134U, false, false) == 0U &&
+                q27::r9700_full_attention_workspace_capacity_bytes(5U, 134U, false, true) ==
+                    (enabled ? kW5C134Bytes : 0U) &&
+                q27::r9700_full_attention_workspace_capacity_bytes(5U, 140U, false, true) ==
+                    (enabled ? kW5C140Bytes : 0U) &&
+                q27::r9700_full_attention_workspace_capacity_bytes(5U, 8191U, false, true) ==
+                    (enabled ? 5U * 24U * 8191U * sizeof(float) : 0U) &&
+                q27::r9700_full_attention_workspace_capacity_bytes(5U, 134U, true, true) == 0U &&
+                q27::r9700_full_attention_workspace_capacity_bytes(6U, 134U, false, true) == 0U,
+            "DFlash W5 candidate workspace escaped width/tree/candidate selection");
+    require(q27::r9700_full_attention_workspace_capacity_bytes(129U, 129U, false) ==
+                kTextP129Bytes,
+            "Text P129 tail candidate changed the dense caller-owned workspace peak");
+    std::printf("r9700_runtime_planner: PASS host attention parity routing/capacity selector=%u\n",
+                enabled ? 1U : 0U);
+}
+
 void qualify_host_dflash_graph_allowance() {
     namespace runtime =
         ninfer::targets::qwen3::detail::qwen3_8_27b_r9700;
@@ -528,6 +561,10 @@ int main(int argc, char** argv) {
             qualify_host_dflash_graph_allowance();
             return 0;
         }
+        if (argc == 2 && std::string_view(argv[1]) == "--host-attention-parity-routing") {
+            qualify_host_attention_parity_routing();
+            return 0;
+        }
         if (argc == 2 && std::string_view(argv[1]) == "--host-hybrid-capacity-csv") {
             print_host_hybrid_capacity_authority();
             return 0;
@@ -541,6 +578,7 @@ int main(int argc, char** argv) {
                 "usage: ninfer_r9700_runtime_planner_qual "
                 "[--host-xattention-capacity-envelope|--host-request-lane-cap|"
                 "--host-split512-routing|--host-dflash-graph-allowance|"
+                "--host-attention-parity-routing|"
                 "--host-hybrid-capacity-csv|"
                 "--host-hybrid-widths-csv PREFILL MAX_CONCURRENCY MTP_WIDTH DFLASH_WIDTH]");
         }

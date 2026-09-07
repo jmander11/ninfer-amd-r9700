@@ -319,4 +319,7 @@ if(TARGET ninfer_r9700_runtime_planner_qual)
   add_test(NAME ninfer_r9700_dflash_graph_allowance_host
     COMMAND ninfer_r9700_runtime_planner_qual --host-dflash-graph-allowance)
   set_tests_properties(ninfer_r9700_dflash_graph_allowance_host PROPERTIES LABELS "host")
+  add_test(NAME ninfer_r9700_attention_parity_routing_host
+    COMMAND ninfer_r9700_runtime_planner_qual --host-attention-parity-routing)
+  set_tests_properties(ninfer_r9700_attention_parity_routing_host PROPERTIES LABELS "host")
 endif()

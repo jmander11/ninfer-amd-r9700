@@ -87,6 +87,20 @@ endif()
 add_compile_definitions(
   NINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE=${NINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE})
 
+# Qualification-only attention parity routes. Default zero preserves every production route; one
+# admits only the exact Text P129 tail overwrite and DFlash K4/W5 batched-WMMA cells.
+set(NINFER_R9700_ATTENTION_PARITY_CANDIDATE "0" CACHE STRING
+  "Enable the exact R9700 Text-tail and DFlash W5 attention parity candidate")
+set_property(CACHE NINFER_R9700_ATTENTION_PARITY_CANDIDATE PROPERTY STRINGS 0 1)
+if(NOT NINFER_R9700_ATTENTION_PARITY_CANDIDATE STREQUAL "0" AND
+   NOT NINFER_R9700_ATTENTION_PARITY_CANDIDATE STREQUAL "1")
+  message(FATAL_ERROR
+    "NINFER_R9700_ATTENTION_PARITY_CANDIDATE must be 0 or 1; got "
+    "'${NINFER_R9700_ATTENTION_PARITY_CANDIDATE}'")
+endif()
+add_compile_definitions(
+  NINFER_R9700_ATTENTION_PARITY_CANDIDATE=${NINFER_R9700_ATTENTION_PARITY_CANDIDATE})
+
 # Qualification-only normalization association selector. Zero retains the snapshot/replay
 # 128-element shared-memory tree; one makes those verify paths use the ordinary wave32/FMA
 # association. Ordinary execution is unchanged in both builds.

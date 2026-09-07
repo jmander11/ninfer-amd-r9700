@@ -41,6 +41,128 @@ in `docs/performance.md` and `docs/maintainer/r9700-overhaul-plan.md`, not here.
 Dependency notation is `[depends: ...]`. `DENSE-FLOOR-DECISION` is the external blocker described
 above, not an executable task. Conditional tasks retain their explicit `if:` clause.
 
+## Mechanical continuation protocol
+
+This section is the command-level handoff for an agent that should execute bounded work rather
+than redesign the campaign. Run every command from
+`/ssdpool2nvme/local_llm/ninfer-amd-r9700`. Never run two GPU processes concurrently. CPU builds,
+static inspection, package preparation, and report review may be delegated while the primary agent
+owns the GPU. Before any timing run, require device 0 to be the R9700/gfx1201 and the power profile
+to be `auto`; do not change clocks, power, fan, or temperature policy. Stop a package on its first
+failed prerequisite and retain the failure instead of continuing to timing.
+
+### Current bounded task: attention arithmetic parity candidate
+
+The current source candidate has two independent changes behind the default-off
+`NINFER_R9700_ATTENTION_PARITY_CANDIDATE` selector:
+
+1. Dense Text T129/C129 retains dense rows 0..127 and overwrites only row 128 with the existing
+   W1/C129 FP8-Q WMMA arithmetic.
+2. DFlash K4/W5 target verification uses one three-launch batched W5 FP8-Q WMMA route. The route
+   must receive explicit DFlash identity from the DFlash caller; ordinary Text and MTP must remain
+   false. Runtime selection and workspace-capacity planning must use the same identity. The exact
+   admitted physical profile is G16, token-fastest FP8 keys, feature-fastest INT4 values, and
+   feature-fastest FP16 value scales for context 64..8191. Tree verification and every other width
+   retain their existing route.
+
+Configure and build the focused selector-on qualifier with:
+
+```sh
+cmake -S . -B build-r9700-attention-parity-on -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_HIP_ARCHITECTURES=gfx1201 \
+  -DNINFER_R9700_ATTENTION_PARITY_CANDIDATE=1
+cmake --build build-r9700-attention-parity-on -j4 --target \
+  ninfer_r9700_dflash_attention_route_discriminator \
+  ninfer_r9700_runtime_planner_qual \
+  ninfer_bench_support_test
+```
+
+Run the CPU/static checks before occupying the GPU:
+
+```sh
+git diff --check
+PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 \
+  tools/r9700/test_check_attention_parity_static.py
+ctest --test-dir build-r9700-attention-parity-on --output-on-failure \
+  -R 'ninfer_bench_support|attention_parity_routing|runtime_planner'
+```
+
+Then run exactly one focused GPU process and capture its JSON rather than copying terminal text:
+
+```sh
+mkdir -p profiles/bench/r9700-attention-parity-candidate-focused-20260906/results
+build-r9700-attention-parity-on/src/ninfer_r9700_dflash_attention_route_discriminator \
+  > profiles/bench/r9700-attention-parity-candidate-focused-20260906/results/qualifier.json
+```
+
+Do not interpret the JSON as a promotion by itself. It must establish all of the following before
+the source is committed as a qualified candidate: exact oracle/status/canary checks; dense Text
+rows 0..127 unchanged; overwritten Text row 128 bit-exact to standalone W1/C129; batched W5 all
+rows bit-exact to serial W5 WMMA; eager/graph replay identity; exact G16/static gfx1201 resource
+contract; no ordinary/MTP/tree selector escape; and a consistent DFlash-only runtime/capacity
+predicate. Workspace poison is not a semantic output: the dense score plane writes only its causal
+triangle, so check outer canaries and complete output, not full scratch overwrite.
+
+If the focused qualifier passes, make and push one WIP checkpoint before preparing model runs:
+
+```sh
+git status --short
+git diff --check
+git add CMakeLists.txt bench src tests tools plans/r9700-autonomous-todos.md
+git commit -m "wip: qualify text and dflash attention parity candidate"
+git push origin experimental
+```
+
+Inspect the staged set before committing and omit unrelated user-owned changes. Do not promote the
+selector default in this checkpoint.
+
+### Whole-model parity gate after the focused candidate
+
+The prepared package is
+`profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906`. It is
+currently intentionally non-runnable. This command validates only its structure and must exit
+successfully without touching the GPU:
+
+```sh
+bash profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/commands.sh \
+  --validate-template
+```
+
+Before any model load, replace the package's unbound placeholders with the committed source/tree,
+a fresh selector-combination build receipt, benchmark hash, linked ROCm identities, exact prior
+authority objects, and a reviewed prepared-execution closure. The combined build must enable
+FP8-prefix-e2, GDN-wave-QK, DFlash-MLP-down-T5, DFlash-RMSNorm-rows56, and attention parity; it must
+leave DFlash-small-T off. Convert `run.py` from a refusal stub only after its preflight enforces
+device0 R9700/gfx1201/wave32, `auto`, absence of profiler/injection/remapping variables, exclusive
+output creation, and exact artifact/corpus hashes. Preserve three and only three model loads:
+
+- ordinary fresh P129/G27, shared by Text-fresh and target-ordinary comparisons;
+- ordinary append P128/G27 with isolated prompt/decode;
+- DFlash fresh P129/G27 at K4/W5.
+
+The whole gate passes only if the full 28-token ordinary-fresh sequence exactly equals both the
+ordinary-append and DFlash-fresh sequences, the Text tail traces are exact, and the DFlash decision
+trace reconstructs every licensed token, accepted position, fallback, frontier transition, and
+report counter. Any public-token mismatch keeps timing inadmissible and returns to the first
+divergent recorded boundary; do not launch a speed sweep.
+
+### First admissible DFlash speed screen
+
+Only after the whole-model parity gate passes, create a fresh immutable package with matched
+selector-off ordinary and selector-on DFlash executables from the same source commit. Run C1,
+P129+G27, K4/W5 first, with one warmup and the minimum repetitions needed for a directional screen.
+Retain token IDs and require exact parity again. Compare engine decode throughput, target-verify
+time, proposal time, acceptance per round and by draft position, fallbacks, and graph/eager
+identity. Do not run K5/W6 unless K4/W5 is valid and the result could change the decision. Do not
+run C2..4, long generation, chunk selection, capacity matrices, or profilers at this stage.
+
+Every future physical experiment must be launched through a reviewed package-local `commands.sh`,
+not an ad-hoc reconstructed command. A package is runnable only when its plan contains no
+`UNBOUND`, its runner has a non-mutating preflight mode, and `commands.sh --validate-template` or
+the package-equivalent validation passes. Record the exact invocation in that package's plan so
+the next agent never has to infer CLI flags from prose.
+
 ## Active now: DFlash semantic and schedule work
 
 - [ ] `DFLASH-SCHEDULE` Finish recipe-independent
@@ -90,7 +212,14 @@ above, not an executable task. Conditional tasks retain their explicit `if:` cla
   W1 and DFlash W5 full-attention arithmetic directly against the independent represented-input
   oracle and identify the route/reduction difference; pairwise parity remains supplementary, but
   the final public greedy-token gate remains exact. Eager already equals graph; that does not waive
-  parity.
+  parity. The default-off combined attention candidate has now passed its focused physical
+  qualifier: batched W5 is all-row bit-exact to serial W5 WMMA and graph replay, its selected row0
+  is exact to ordinary W1, and it measures a diagnostic `0.06228868 ms` versus `0.09549904 ms` for
+  incumbent fused W5. The Text P129 dense prefix is unchanged and its overwritten tail is exact to
+  append W1. The concise result is
+  `profiles/bench/r9700-attention-parity-candidate-focused-20260906/summary.json`. This is not yet
+  public-token or whole-inference evidence; execute the three-load exact parity gate described
+  above before any speed screen or route promotion.
 
 - [ ] `DFLASH-RECIPE` [depends: TERMINAL-SELECTION, CHUNK-SELECT] Select DFlash matrices from the
   real BF16 DFlash2 checkpoint rather than inheriting the base recipe. Compare canonical Q4G64,

@@ -332,7 +332,9 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
 #endif
         {
         scratch(layout, Variant::full_attention_workspace_capacity_bytes(
-                            max_width, envelope.max_visible_keys, tree_verify));
+                            max_width, envelope.max_visible_keys, tree_verify,
+                            phase == qwen3::TextPhase::Verify &&
+                                plan.features.speculative == SpeculativeBackend::DFlash));
         }
         (void)batch_size;
         (void)min_width;

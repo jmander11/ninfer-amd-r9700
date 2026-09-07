@@ -560,7 +560,8 @@ void Variant::full_attention(const Tensor& normalized_query,
                              WorkspaceArena& workspace, hipStream_t stream,
                              const Tensor* ancestor_masks,
                              const Tensor* prefix_lengths,
-                             const Tensor* active_query_rows) {
+                             const Tensor* active_query_rows,
+                             bool dflash_target_verify) {
     if (cache_positions.dtype != DType::I32 || cache_positions.data == nullptr ||
         !cache_positions.is_contiguous() || cache_positions.ne[0] != normalized_query.ne[2] ||
         cache_positions.ne[1] != 1 || cache_positions.ne[2] != 1 ||
@@ -595,7 +596,8 @@ void Variant::full_attention(const Tensor& normalized_query,
         r9700_full_attention_workspace_capacity_bytes(
             static_cast<std::uint32_t>(normalized_query.ne[2]),
             cache_read.visible_frontier(),
-            ancestor_masks != nullptr || active_query_rows != nullptr);
+            ancestor_masks != nullptr || active_query_rows != nullptr,
+            dflash_target_verify);
     DeviceSpan attention_workspace{};
     if (attention_workspace_bytes != 0U) {
         attention_workspace = workspace.alloc_bytes(attention_workspace_bytes);
@@ -618,6 +620,7 @@ void Variant::full_attention(const Tensor& normalized_query,
                 active_query_rows == nullptr
                     ? nullptr
                     : static_cast<const std::int32_t*>(active_query_rows->data),
+            .dflash_target_verify = dflash_target_verify,
             .workspace = attention_workspace.data,
             .workspace_bytes = attention_workspace.bytes,
             .output = attention_fp32,
@@ -627,13 +630,13 @@ void Variant::full_attention(const Tensor& normalized_query,
 
 std::size_t Variant::full_attention_workspace_capacity_bytes(
     std::int32_t maximum_query_rows, std::uint32_t maximum_visible_context,
-    bool tree_or_device_count) {
+    bool tree_or_device_count, bool dflash_target_verify) {
     if (maximum_query_rows <= 0) {
         return 0U;
     }
     return r9700_full_attention_workspace_capacity_bytes(
         static_cast<std::uint32_t>(maximum_query_rows), maximum_visible_context,
-        tree_or_device_count);
+        tree_or_device_count, dflash_target_verify);
 }
 
 #if defined(NINFER_R9700_XATTENTION_QUALIFICATION)
@@ -675,7 +678,7 @@ std::size_t Variant::text_prefill_attention_workspace_capacity_bytes(
     if (maximum_query_rows <= 0) return 0U;
     // A nominal prefill envelope can still end in a one-row remainder, which follows the
     // ordinary dense T=1 leaf.  Size that possible leaf independently of the envelope's maximum
-    // width; full_attention_workspace_capacity_bytes intentionally rejects widths above two.
+    // width; size the one-row remainder independently of any candidate-only wider route.
     const std::size_t dense =
         full_attention_workspace_capacity_bytes(1, maximum_visible_context, false);
     const std::size_t sparse =

@@ -120,6 +120,7 @@ struct TargetVerifyFrameView {
     Tensor target_hidden;
     Tensor target_logits;
     Tensor target_tokens;
+    bool dflash_target_verify = false;
     Tensor drafts;
     Tensor current_extents;
     Tensor frontiers;
