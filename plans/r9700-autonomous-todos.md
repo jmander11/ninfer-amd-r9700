@@ -8,6 +8,22 @@ in `docs/performance.md` and `docs/maintainer/r9700-overhaul-plan.md`, not here.
 
 - Keep useful independent subagent work active whenever it exists, while the primary agent owns
   serialized R9700 execution and coordinates shared-file edits. Do not invent work to fill a slot.
+- For each bounded implementation or experiment package, assign one owner and a separate
+  independent reviewer. The reviewer does not edit the owner's files or use the GPU; it checks the
+  semantic contract, routing/admission scope, workspace and Device Graph invariants, numerical
+  oracle, static ISA/resources, command safety, provenance, and pass/fail logic that are material
+  to that change. A `NO-SHIP` finding returns only the concrete defects to the owner. After repair,
+  the same reviewer rechecks those defects and must report `SHIP` before the primary agent runs the
+  focused GPU qualifier or experiment.
+- The primary agent alone serializes GPU work, independently reproduces the relevant preflight and
+  result decision, then makes and pushes a coherent WIP checkpoint. Never launch a whole-model or
+  timing run while an owner is editing its source/package, while review is unresolved, or merely
+  because a build exists. Keep other available agents on non-overlapping useful CPU work such as
+  build receipts, static inspection, package preparation, result analysis, or documentation audit.
+- At handoff, the next agent reads this ledger, checks `git status` and the pushed branch head, and
+  inspects any package-local `results/summary.json`, process receipts, and closure before deciding
+  whether to run, diagnose, or advance. Persisted results replace pasted terminal output; a failed
+  package is evidence to inspect, not permission to overwrite and rerun it.
 - The product workload is exactly one R9700 and startup-fixed `C=1..4`. Never schedule or require an
   active `C>4` cell. Retained `C=5..8` rows are historical only.
 - Performance-admission timing requires device 0, Radeon AI PRO R9700, `gfx1201`, wave32, and power
