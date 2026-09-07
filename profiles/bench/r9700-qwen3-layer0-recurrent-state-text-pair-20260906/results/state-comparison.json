@@ -1,0 +1,16 @@
+{
+  "artifact_type": "ninfer_qwen3_gdn_recurrent_state_comparison",
+  "schema_version": 2,
+  "diagnostic_only": true,
+  "timing_evidence_eligible": false,
+  "production_routing_authorized": false,
+  "diagnostic": "text-prefix-state",
+  "text_layer": 0,
+  "gdn_index": 0,
+  "classification": "layer0_recurrent_prefix_state_exact",
+  "first_difference": null,
+  "limitations": [
+    "compares one exact GDN FP32 state frontier and does not localize an earlier update",
+    "does not authorize production routing or a performance claim"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "artifact_type": "ninfer_qwen3_layer0_recurrent_state_text_pair_plan",
+  "schema_version": 1,
+  "status": "completed_imported_exact_capture",
+  "claim": "functional-only exact comparison of layer0 FP32 recurrent state at frontier128 between Text fresh-T129 and append-P128+T1",
+  "production_routing_authorized": false,
+  "timing_evidence_eligible": false,
+  "source": {"commit": "fda2d17ad115bd9857ea848f5f068b0d67ddc100", "tree": "b1e8b47ba90f8a3b1d476e163df97a3d5dc225ef"},
+  "benchmark": {"path": "retained-bin/ninfer_bench", "bytes": 5264472, "sha256": "f36b75bf00daad9dcf3228f3ae4df553b4809ba123f1e33e5656c2472a0f315f"},
+  "artifact": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval.ninfer", "bytes": 22763026944, "sha256": "d8fc77c36cf17c92e96d67b9a6b5a1826a1ade4f59d59c003b2368fe981fc512", "weights_id": "r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval"},
+  "history": {"p129_fixture": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-p129-isolation-discriminator-20260906/history-p129.ids", "bytes": 811, "sha256": "34e9bc09b99ae4efc06049e744e8b43ac5794a9dab76fcf43de43e31f5db4515"}, "source_corpus": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids", "bytes": 333620, "sha256": "27e4f63c17efe3f89b5cf278b3b1a42a737316ed4044d7d0d1d52437059d1002"}, "seed_token": 24178},
+  "workload": {"device": 0, "concurrency": 1, "maximum_product_concurrency": 4, "execution": "eager", "prefill_chunk": 4096, "draft_tokens": 0, "fresh": "whole-pg129,1", "append": "isolated-pg128,1"},
+  "trace": {"schema_version": 2, "text_layer": 0, "gdn_index": 0, "state_frontier": 128, "linear_state_slot": 0, "shape": [128,128,48], "dtype": "fp32", "sidecar_bytes": 3145728, "expected_classification": "layer0_recurrent_prefix_state_exact"},
+  "hardware": {"name": "AMD Radeon AI PRO R9700", "architecture": "gfx1201", "wavefront_width": 32, "pci_bus": "0000:13:00.0", "power_profile_for_reproduction": "auto"},
+  "capture": {"kind": "maintainer-provided manual exact capture imported without rerun", "original_directory": "/tmp/ninfer-gdn-state-layer0-fda2d17a.MOBqmy", "power_endpoint_was_not_retained": true},
+  "limitations": ["manual capture did not retain process receipts or a power endpoint sample; report, manifest, sidecar, executable, source, artifact, and command identities are retained", "all benchmark timing is ineligible", "exact layer0 state plus differing layer1 state narrows but does not alone choose between layer0 FP8 gate/up and layer1 FP8 query/key", "no production routing claim"]
+}

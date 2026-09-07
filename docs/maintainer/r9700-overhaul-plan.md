@@ -1909,10 +1909,23 @@ Replace functional routes with measured gfx1201 families:
   absolute difference is 0.000046528875827789307. The same capture reproduces the selected-column
   recurrence-o result above exactly. Therefore the layer-one state already differs before the
   selected transition: this excludes that transition as the first Text divergence, but it does
-  not yet distinguish earlier layer-one prefix inputs from their recurrence updates. The next
-  bounded Text discriminator compares layer-zero and layer-one prefix/restored states; the target
-  discriminator enters the layer-three full-attention mixer. These traces are timing-ineligible
-  and authorize no decode-speed or production-routing claim.
+  not yet distinguish earlier layer-one prefix inputs from their recurrence updates. The exact
+  layer-zero follow-up is retained under
+  `profiles/bench/r9700-qwen3-layer0-recurrent-state-text-pair-20260906/results`, bound to source
+  commit `fda2d17a` and benchmark SHA-256
+  `f36b75bf00daad9dcf3228f3ae4df553b4809ba123f1e33e5656c2472a0f315f`; its result-closure
+  SHA-256 is `6ebff8b5c82e0de2726fe942f1964df4f21738fbc05cb8cac4c38a6dff28c63e`
+  and summary SHA-256 is `fb8ad5021699e3eefa3a7d74f612e64ef8a5c64767ca47291b9da6e2057631c7`.
+  Fresh-T129 and append-P128+T1 layer-zero frontier-128 states are bit-exact across all 786,432
+  FP32 elements (shared sidecar SHA-256
+  `0590bf20498136400478b69595c0703fa47c25a1fac77d61647fe60b1756b0bc`). Layer-zero state exactness
+  combined with the layer-one state difference narrows the Text owner to the layer-zero FP8
+  gate/up output feeding layer one or the layer-one FP8 query/key projection. The next bounded
+  Text discriminator compares those two T128/T129 FP8 prefix operations directly; the target
+  discriminator enters the layer-three full-attention mixer. The layer-zero capture was imported
+  from the exact maintainer run without process receipts or a retained power endpoint, so it and
+  all related traces are timing-ineligible and authorize no decode-speed or production-routing
+  claim.
   The earlier all-Q4 owner trace does not transfer its target-gate/up conclusion to this four-role
   artifact: all 64 Text gate/up matrices are FP8 and bypass A8Q4. Only the five Q4 DFlash proposal
   gate/up matrices use the small-T route per round, for an expected whole saving of about 7.1 ms at

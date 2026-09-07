@@ -1,0 +1,23 @@
+{
+  "artifact_type": "ninfer_qwen3_layer_boundary_trace",
+  "schema_version": 1,
+  "diagnostic_only": true,
+  "timing_evidence_eligible": false,
+  "production_routing_authorized": false,
+  "execution": "eager",
+  "role": "text-fresh-frontier129-column128",
+  "width": 129,
+  "selected_column": 128,
+  "absolute_frontier": 129,
+  "token": 24178,
+  "cache_position": 128,
+  "rope_position": 128,
+  "hidden": 5120,
+  "layers": 64,
+  "snapshot_count": 129,
+  "snapshot_bytes": 10240,
+  "sidecar_path": "/tmp/ninfer-gdn-state-layer0-fda2d17a.MOBqmy/fresh.layer.bin",
+  "sidecar_bytes": 1320960,
+  "sidecar_fnv1a64": "2fd3a9aa8c95101e",
+  "layout": "little-endian-u16: input, then layer0..63 post_mixer,post_mlp"
+}

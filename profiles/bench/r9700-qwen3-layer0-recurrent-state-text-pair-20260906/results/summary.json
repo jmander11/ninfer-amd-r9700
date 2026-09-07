@@ -1,0 +1,59 @@
+{
+  "artifact_type": "ninfer_qwen3_layer0_recurrent_state_text_pair_summary",
+  "benchmark": {
+    "bytes": 5264472,
+    "path": "retained-bin/ninfer_bench",
+    "sha256": "f36b75bf00daad9dcf3228f3ae4df553b4809ba123f1e33e5656c2472a0f315f"
+  },
+  "capture_provenance": {
+    "bytes": 518,
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer0-recurrent-state-text-pair-20260906/capture-provenance.json",
+    "sha256": "fa589fc6021e84fb6580a651c1ec459aec72a87f848a45afbbec769dfecd25ac"
+  },
+  "classification": "layer0_recurrent_prefix_state_exact",
+  "conclusion": "layer0 state is exact while retained layer1 state differs; next discriminate layer0 FP8 gate/up T128/T129 from layer1 FP8 query/key T128/T129",
+  "limitations": [
+    "manual capture did not retain process receipts or a power endpoint sample; report, manifest, sidecar, executable, source, artifact, and command identities are retained",
+    "all benchmark timing is ineligible",
+    "exact layer0 state plus differing layer1 state narrows but does not alone choose between layer0 FP8 gate/up and layer1 FP8 query/key",
+    "no production routing claim"
+  ],
+  "manifests": {
+    "append": {
+      "bytes": 786,
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer0-recurrent-state-text-pair-20260906/results/append.state.json",
+      "sha256": "3d6204b9bfc114c278766c799a3840f2ea320cd8062b0bdf375ab8519564ad85"
+    },
+    "fresh": {
+      "bytes": 802,
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer0-recurrent-state-text-pair-20260906/results/fresh.state.json",
+      "sha256": "f1dfa564e1a8c1182c47ebe41f77454561215ef5b23f58e98660a67e037cebfe"
+    }
+  },
+  "reports": {
+    "append": {
+      "bytes": 5461,
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer0-recurrent-state-text-pair-20260906/results/append.report.json",
+      "sha256": "0037724719910f869f20d835536b9187bf0205d6b04c2400591f5b7bf278832b"
+    },
+    "fresh": {
+      "bytes": 5576,
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer0-recurrent-state-text-pair-20260906/results/fresh.report.json",
+      "sha256": "248ee3f34eef875e523dc4afe87192f55b9c3116d0b1f3e0b3b712a35a89f596"
+    }
+  },
+  "schema_version": 1,
+  "source": {
+    "commit": "fda2d17ad115bd9857ea848f5f068b0d67ddc100",
+    "tree": "b1e8b47ba90f8a3b1d476e163df97a3d5dc225ef"
+  },
+  "state": {
+    "elements": 786432,
+    "gdn_index": 0,
+    "mismatch_count": 0,
+    "sha256": "0590bf20498136400478b69595c0703fa47c25a1fac77d61647fe60b1756b0bc",
+    "state_frontier": 128,
+    "text_layer": 0
+  },
+  "status": "pass"
+}

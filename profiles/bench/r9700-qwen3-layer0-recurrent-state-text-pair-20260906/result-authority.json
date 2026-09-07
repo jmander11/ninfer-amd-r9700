@@ -1,0 +1,14 @@
+{
+  "artifact_type": "ninfer_qwen3_layer0_recurrent_state_text_pair_result_authority",
+  "schema_version": 1,
+  "status": "complete",
+  "source": {"commit": "fda2d17ad115bd9857ea848f5f068b0d67ddc100", "tree": "b1e8b47ba90f8a3b1d476e163df97a3d5dc225ef"},
+  "benchmark_sha256": "f36b75bf00daad9dcf3228f3ae4df553b4809ba123f1e33e5656c2472a0f315f",
+  "prepared_closure_sha256": "5c6e653700283f7ae4a3ccbd44559f7c58fdac539dcaaaa290027fcf6d6a94cc",
+  "result_closure_sha256": "6ebff8b5c82e0de2726fe942f1964df4f21738fbc05cb8cac4c38a6dff28c63e",
+  "summary_sha256": "fb8ad5021699e3eefa3a7d74f612e64ef8a5c64767ca47291b9da6e2057631c7",
+  "classification": "layer0_recurrent_prefix_state_exact",
+  "state": {"text_layer": 0, "gdn_index": 0, "state_frontier": 128, "elements": 786432, "mismatch_count": 0, "sidecar_sha256": "0590bf20498136400478b69595c0703fa47c25a1fac77d61647fe60b1756b0bc"},
+  "conclusion": "layer0 recurrent state is bit-exact while the separately retained layer1 state differs; the next bounded discriminator is layer0 FP8 gate/up versus layer1 FP8 query/key at T128/T129",
+  "limitations": ["functional evidence only", "manual capture has no process receipt or retained power endpoint", "no timing or production-routing authority"]
+}

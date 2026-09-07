@@ -1,0 +1,11 @@
+{
+  "artifact_type": "ninfer_imported_manual_capture_receipt",
+  "schema_version": 1,
+  "original_directory": "/tmp/ninfer-gdn-state-layer0-fda2d17a.MOBqmy",
+  "benchmark_sha256": "f36b75bf00daad9dcf3228f3ae4df553b4809ba123f1e33e5656c2472a0f315f",
+  "source_commit": "fda2d17ad115bd9857ea848f5f068b0d67ddc100",
+  "capture_complete": true,
+  "process_receipts_retained": false,
+  "power_endpoint_retained": false,
+  "interpretation": "functional exact-state evidence only; timing and power behavior are inadmissible"
+}
