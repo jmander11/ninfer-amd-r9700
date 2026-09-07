@@ -1,0 +1,12 @@
+{
+  "artifact_type": "ninfer_qwen3_layer3_attention_trace_historical_attempts",
+  "schema_version": 1,
+  "status": "superseded_after_source_trace_contract_repair",
+  "source_commit": "72cebe82315a1df19ba55d6540508e13b5cda96e",
+  "attempt_closures": [
+    {"path":"results-failed-attempt1/result.sha256","bytes":544,"sha256":"bb997f5739709bff756c49d3839cb5330dc64fe42893270617749beb7787aca7"},
+    {"path":"results-failed-attempt2/result.sha256","bytes":817,"sha256":"2e09340114e702927df716c88fa4eb5dba7b0e09465981d11dd3a542dfe60417"},
+    {"path":"results-failed-attempt3/result.sha256","bytes":1084,"sha256":"c082e8d0ddb667d6393e90bbc7454e27053023815594e3c0445f340c776de6c1"}
+  ],
+  "active_replacement": "../r9700-qwen3-layer3-attention-trace-617672eb-20260906"
+}

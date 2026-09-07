@@ -1,0 +1,13 @@
+{
+  "command": [
+    "/usr/bin/python3",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700-layer3-attention-src-617672eb/tools/bench/analyze_qwen3_layer3_attention_trace.py",
+    "--ordinary",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer3-attention-trace-617672eb-20260906/results/target-ordinary.attention.json",
+    "--dflash",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer3-attention-trace-617672eb-20260906/results/target-dflash.attention.json",
+    "--output",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer3-attention-trace-617672eb-20260906/results/attention-comparison.json"
+  ],
+  "exit_code": 0
+}

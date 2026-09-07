@@ -76,8 +76,15 @@ above, not an executable task. Conditional tasks retain their explicit `if:` cla
   in 1,219/5,120 elements. The rows5 CTA candidate changes the generated trajectory at index21 and
   does not restore overall parity, but selector-on makes every captured layer1 GDN field byte-exact
   and moves the first visible target residual difference to the layer3 full-attention mixer
-  (2,796/5,120). Localize that attention projection/cache/attention/output boundary next. Eager
-  already equals graph; that does not waive parity.
+  (2,796/5,120). The exact two-arm layer3 trace under
+  `profiles/bench/r9700-qwen3-layer3-attention-trace-617672eb-20260906/results` now proves the
+  selected column is byte-exact through input, RMSNorm, q/gate/k/v projection, q/k normalization,
+  RoPE, causal visibility, and canonical cache positions 0--129; the first difference is
+  attention_fp32 element 0 (maximum absolute difference 0.02367246150970459). Qualify the ordinary
+  W1 and DFlash W5 full-attention arithmetic directly against the independent represented-input
+  oracle and identify the route/reduction difference; pairwise parity remains supplementary, but
+  the final public greedy-token gate remains exact. Eager already equals graph; that does not waive
+  parity.
 
 - [ ] `DFLASH-RECIPE` [depends: TERMINAL-SELECTION, CHUNK-SELECT] Select DFlash matrices from the
   real BF16 DFlash2 checkpoint rather than inheriting the base recipe. Compare canonical Q4G64,

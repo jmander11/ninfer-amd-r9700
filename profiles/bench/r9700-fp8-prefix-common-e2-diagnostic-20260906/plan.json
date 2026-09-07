@@ -1,0 +1,58 @@
+{
+  "artifact_type": "ninfer_r9700_fp8_prefix_common_e2_diagnostic_plan",
+  "schema_version": 1,
+  "claim": "operator-level real-weight FP8 T128/T129 prefix qualification only",
+  "production_routing_authorized": false,
+  "timing_evidence_eligible": false,
+  "source": {
+    "commit": "25a27bb293e6a32134fbc6b66cecff5444739ccc",
+    "tree": "40703b4636e339604728e37f080225a78960495c"
+  },
+  "executable": {
+    "path": "retained-bin/fp8_linear_prefix_discriminator",
+    "bytes": 317712,
+    "sha256": "28d9937f7a3c966b3b49eb3f62449df52dad9d6c22a3e604b42d2ef087c76eff"
+  },
+  "artifact": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval.ninfer",
+    "bytes": 22763026944,
+    "sha256": "d8fc77c36cf17c92e96d67b9a6b5a1826a1ade4f59d59c003b2368fe981fc512"
+  },
+  "results": {
+    "e2": {
+      "path": "results/e2-selector1.json",
+      "bytes": 26580,
+      "sha256": "e1d349b972baf48dc4c1174caac5d497533a7cf2c18ef5b16fd00894a9ad08ae"
+    },
+    "catalog_preliminary": {
+      "path": "results/catalog-selector1-preliminary.json",
+      "bytes": 26571,
+      "sha256": "b51468755fd9f8c65e7e4af8df9bbd26df46521d292efa296a8af78619a4bb9c"
+    }
+  },
+  "hardware": {
+    "device": 0,
+    "name": "AMD Radeon AI PRO R9700",
+    "architecture": "gfx1201",
+    "wave_size": 32,
+    "pci_bus": "0000:13:00.0",
+    "power_profile_reported_by_tool": "auto"
+  },
+  "decision": {
+    "fingerprint": "e2e00100000000000000000000000000",
+    "t128_action": "preserve_default",
+    "t129_action": "select_same_viable_identity",
+    "selection_score": "arithmetic_mean_of_t128_and_t129_selected_over_default",
+    "ranking": "ascending_selection_score_then_ascending_fingerprint",
+    "expected_rank": 1,
+    "whole_text_parity": "pending"
+  },
+  "provenance_limitations": [
+    "no retained shell-history command, process exit receipt, stdout, stderr, or independent timestamp receipt exists",
+    "no retained build transcript independently proves the asserted source-commit to executable association; both identities are retained exactly",
+    "the result self-reports exact hardware and auto power but lacks an external power/process receipt",
+    "all timing values are diagnostic and cannot support a production performance claim",
+    "the preliminary catalog is retained only to explain selection among the exact eight returned identities",
+    "operator prefix exactness does not establish whole-Text append-versus-fresh parity"
+  ]
+}

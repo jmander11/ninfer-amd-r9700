@@ -1,0 +1,23 @@
+{
+  "artifact_type": "ninfer_qwen3_layer_boundary_trace",
+  "schema_version": 1,
+  "diagnostic_only": true,
+  "timing_evidence_eligible": false,
+  "production_routing_authorized": false,
+  "execution": "eager",
+  "role": "target-ordinary-frontier130",
+  "width": 1,
+  "selected_column": 0,
+  "absolute_frontier": 130,
+  "token": 96558,
+  "cache_position": 129,
+  "rope_position": 129,
+  "hidden": 5120,
+  "layers": 64,
+  "snapshot_count": 129,
+  "snapshot_bytes": 10240,
+  "sidecar_path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer3-attention-trace-617672eb-20260906/results/target-ordinary.trace.bin",
+  "sidecar_bytes": 1320960,
+  "sidecar_fnv1a64": "98cb8c8e65a51f81",
+  "layout": "little-endian-u16: input, then layer0..63 post_mixer,post_mlp"
+}

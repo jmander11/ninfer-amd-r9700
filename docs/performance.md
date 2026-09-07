@@ -593,6 +593,19 @@ that difference. This excludes layer-one RMSNorm, control, and input projection/
 selected Text column, but the trace does not distinguish an FP32 recurrence-state input mismatch
 from different wide-prefill/append recurrence arithmetic. It is functional evidence only.
 
+The next exact target trace is retained under
+`profiles/bench/r9700-qwen3-layer3-attention-trace-617672eb-20260906/results`. Its immutable raw
+capture closure is `815307ab0a04a6e834eb19cc670c75e6d1f2c4c60c693f8861d0e7fb0b8eb79f`;
+an offline tuple-order repair changed no captured bytes, and the recovered summary and final result
+closure are `37fd48842066ce1150cccdad6ed00ad49e383759620f7ff96b0e1ee2c6b3013a` and
+`68ae75bc83ef4044148e594ca36cbc3eaa8a605c95be2aca3424eaad959ab3c2`. With small-T gate/up off
+and the qualified MLP-down, RMSNorm rows5/6, and GDN wave-normalization selectors on, target ordinary
+W1 and DFlash K4/W5 are byte-exact through the layer3 input, input RMSNorm, q/gate/k/v projections,
+q/k normalization, RoPE, causal visibility, and canonical cache positions 0--129. Their first
+difference is full-attention FP32 output element 0: bits 1052023983 versus 1052080823, with maximum
+absolute difference 0.02367246150970459. This localizes the first owner to full-attention route
+arithmetic; it is not an independent numerical oracle, timing evidence, or a routing decision.
+
 A second packed-W4 candidate has passed standalone qualification through the production entry symbol
 for the exact DFlash MLP-down N5120/K17408, T5 cell. The retained summary is
 `profiles/bench/r9700-dflash-mlp-down-t5-production-symbol-qualification-20260906/summary.json`

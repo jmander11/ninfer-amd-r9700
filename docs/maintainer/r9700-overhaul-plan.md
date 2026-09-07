@@ -1898,7 +1898,16 @@ Replace functional routes with measured gfx1201 families:
   first full-attention mixer at layer three (2,796/5,120 BF16 elements). For Text fresh T129 versus
   append T1, h through v are exact and recurrence o first differs in 106/6,144 BF16 elements
   (first element 154, maximum absolute difference 0.000003814697265625); the resulting mixer x
-  differs in 142/5,120. The follow-up exact Text state capture under
+  differs in 142/5,120. The repaired exact target-attention capture under
+  `profiles/bench/r9700-qwen3-layer3-attention-trace-617672eb-20260906/results` has immutable raw
+  closure `815307ab0a04a6e834eb19cc670c75e6d1f2c4c60c693f8861d0e7fb0b8eb79f`, recovered summary
+  `37fd48842066ce1150cccdad6ed00ad49e383759620f7ff96b0e1ee2c6b3013a`, and final result closure
+  `68ae75bc83ef4044148e594ca36cbc3eaa8a605c95be2aca3424eaad959ab3c2`. Target ordinary W1 and
+  DFlash K4/W5 are byte-exact through layer3 input, normalization, projections, q/k normalization,
+  RoPE, chain-causal visibility, and canonical cache positions 0--129; the first difference is
+  full-attention FP32 element 0 (bits 1052023983 versus 1052080823, maximum absolute difference
+  0.02367246150970459). This is a functional owner localization, not an oracle, timing result, or
+  route admission. The follow-up exact Text state capture under
   `profiles/bench/r9700-qwen3-layer1-recurrent-state-text-pair-20260906/results` is bound to the
   deliberately retained diagnostic source commit `c3d44daa` even though current HEAD has advanced;
   its result-closure SHA-256 is
@@ -1942,6 +1951,24 @@ Replace functional routes with measured gfx1201 families:
   from the exact maintainer run without process receipts or a retained power endpoint, so it and
   all related traces are timing-ineligible and authorize no decode-speed or production-routing
   claim.
+  The exact eight-identity follow-up and selected `e2e00100000000000000000000000000`
+  confirmation are retained under
+  `profiles/bench/r9700-fp8-prefix-common-e2-diagnostic-20260906`, bound to source commit
+  `25a27bb2`, executable SHA-256
+  `28d9937f7a3c966b3b49eb3f62449df52dad9d6c22a3e604b42d2ef087c76eff`, result-closure
+  SHA-256 `4cefa690dd471c70b6def9f40c3318ab8d39c20145cc96f3537157dc96cd3ce3`, and summary
+  SHA-256 `9131eb358edbf1496b61c7b606f777ac1a664c50a46fc60ae3b456c3b99f2f0f`.
+  No retained build transcript independently proves the asserted source-commit-to-executable
+  association; the package retains both identities exactly and states that limitation.
+  All eight common identities preserve the activation and BF16 output prefixes and pass the
+  direct represented-operation FP64 oracle. `e2e001...` is selected because it leaves the T128
+  default unchanged (`0.538019 ms` selected versus `0.538059 ms` control, `0.999926x`) and had
+  rank one under the predeclared arithmetic mean of the T128 and T129 selected/control median
+  ratios, with ascending fingerprint as the deterministic tie-break; at T129 it measured
+  `0.578439 ms` versus
+  `0.546119 ms` (`1.059181x`, `+0.032320 ms`) in that screen. These timing values lack retained
+  process and external power receipts and are diagnostic only. The operator fix is not a
+  production promotion: matched whole-Text fresh-versus-append parity remains the next gate.
   The earlier all-Q4 owner trace does not transfer its target-gate/up conclusion to this four-role
   artifact: all 64 Text gate/up matrices are FP8 and bypass A8Q4. Only the five Q4 DFlash proposal
   gate/up matrices use the small-T route per round, for an expected whole saving of about 7.1 ms at

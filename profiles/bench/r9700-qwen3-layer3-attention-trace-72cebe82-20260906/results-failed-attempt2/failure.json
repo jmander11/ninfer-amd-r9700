@@ -1,0 +1,10 @@
+{
+  "artifact_type": "ninfer_qwen3_layer3_attention_trace_failed_attempt",
+  "schema_version": 1,
+  "status": "invalid_orchestration_after_successful_ordinary_arm",
+  "cause": "runner incorrectly required benchmark status stdout to equal the benchmark-owned JSON report",
+  "completed_arm": "target-ordinary",
+  "usable_as_functional_comparison_evidence": false,
+  "missing": ["DFlash arm", "comparison", "summary"],
+  "action": "preserved complete ordinary arm; repaired runner validates exact status stdout; fresh results namespace required"
+}

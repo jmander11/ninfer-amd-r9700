@@ -1,0 +1,10 @@
+{
+  "artifact_type": "ninfer_qwen3_layer3_attention_trace_failed_attempt",
+  "schema_version": 1,
+  "status": "invalid_orchestration_after_successful_ordinary_arm",
+  "cause": "runner attempted O_EXCL creation of the benchmark-owned --output-file report",
+  "completed_arm": "target-ordinary",
+  "usable_as_functional_comparison_evidence": false,
+  "missing": ["stdout", "stderr", "process record", "DFlash arm", "comparison", "summary"],
+  "action": "preserved raw outputs; repaired runner uses benchmark report as authority; fresh results namespace required"
+}
