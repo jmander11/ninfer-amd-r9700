@@ -18,6 +18,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <cstdio>
 #include <iomanip>
 #include <iostream>
@@ -43,6 +44,17 @@ constexpr std::array<std::string_view, 2> kNames{
 };
 constexpr std::array<std::uint32_t, 2> kRows{34816, 4096};
 constexpr std::array<std::uint32_t, 4> kProbeTokens{0, 63, 127, 128};
+constexpr std::array<std::uint8_t, 16> kQualifiedCommonAlgorithm{
+    0xe2U, 0xe0U, 0x01U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+    0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U};
+constexpr std::array<std::string_view, 8> kExpectedGateUpCommonCatalog{
+    "dbe00100000000000000000000000000", "dce00100000000000000000000000000",
+    "dde00100000000000000000000000000", "dee00100000000000000000000000000",
+    "dfe00100000000000000000000000000", "e0e00100000000000000000000000000",
+    "e1e00100000000000000000000000000", "e2e00100000000000000000000000000"};
+constexpr std::string_view kPciBusId = "0000:13:00.0";
+constexpr std::string_view kPowerPath =
+    "/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level";
 
 [[noreturn]] void fail(const std::string& message) { throw std::runtime_error(message); }
 void require(bool condition, const std::string& message) {
@@ -52,6 +64,12 @@ struct Stream {
     hipStream_t value = nullptr;
     Stream() { HIP_CHECK(hipStreamCreate(&value)); }
     ~Stream() { if (value != nullptr) (void)hipStreamDestroy(value); }
+};
+
+struct Event {
+    hipEvent_t value = nullptr;
+    Event() { HIP_CHECK(hipEventCreate(&value)); }
+    ~Event() { if (value != nullptr) (void)hipEventDestroy(value); }
 };
 
 template <class T>
@@ -111,6 +129,17 @@ std::string sha256_file(const std::filesystem::path& path) {
     return digest;
 }
 
+std::string read_trimmed(const std::filesystem::path& path) {
+    std::ifstream input(path);
+    require(input.good(), "cannot read required system identity: " + path.string());
+    std::string value;
+    std::getline(input, value);
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back()))) {
+        value.pop_back();
+    }
+    return value;
+}
+
 void write_new(const std::filesystem::path& path, const std::string& contents) {
     const int descriptor = ::open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
     if (descriptor < 0) fail("refusing non-new report path");
@@ -144,6 +173,59 @@ float decode_e4m3(std::uint8_t bits) {
         : std::ldexp(1.0F + static_cast<float>(mantissa) / 8.0F,
                      static_cast<int>(exponent) - 7);
     return (bits & 0x80U) != 0U ? -value : value;
+}
+
+std::uint64_t round_ties_even_nonnegative(double value) {
+    require(std::isfinite(value) && value >= 0.0,
+            "direct BF16 rounding received an invalid magnitude");
+    const double lower_value = std::floor(value);
+    const auto lower = static_cast<std::uint64_t>(lower_value);
+    const double remainder = value - lower_value;
+    return lower + (remainder > 0.5 ||
+                    (remainder == 0.5 && (lower & 1U) != 0U) ? 1U : 0U);
+}
+
+std::uint16_t round_fp64_to_bf16(double value) {
+    require(!std::isnan(value), "direct BF16 oracle cannot round NaN");
+    const std::uint16_t sign = std::signbit(value) ? 0x8000U : 0U;
+    const double magnitude = std::abs(value);
+    if (magnitude == 0.0) return sign;
+    if (std::isinf(magnitude)) return sign | 0x7f80U;
+
+    int exponent = 0;
+    (void)std::frexp(magnitude, &exponent);
+    int unbiased = exponent - 1;
+    if (unbiased < -126) {
+        const std::uint64_t significand =
+            round_ties_even_nonnegative(std::ldexp(magnitude, 133));
+        return static_cast<std::uint16_t>(sign | std::min<std::uint64_t>(significand, 128U));
+    }
+    std::uint64_t significand =
+        round_ties_even_nonnegative(std::ldexp(magnitude, 7 - unbiased));
+    if (significand == 256U) {
+        significand = 128U;
+        ++unbiased;
+    }
+    if (unbiased >= 128) return sign | 0x7f80U;
+    require(significand >= 128U && significand < 256U,
+            "direct BF16 oracle derived an invalid normal significand");
+    const auto biased = static_cast<std::uint16_t>(unbiased + 127);
+    return static_cast<std::uint16_t>(sign | (biased << 7U) |
+                                      static_cast<std::uint16_t>(significand - 128U));
+}
+
+void check_direct_bf16_rounding_edges() {
+    constexpr double even_midpoint = 1.0 + 0x1p-8;
+    constexpr double above_midpoint = even_midpoint + 0x1p-30;
+    constexpr double odd_midpoint = 1.0 + 3.0 * 0x1p-8;
+    require(round_fp64_to_bf16(even_midpoint) == 0x3f80U &&
+                round_fp64_to_bf16(above_midpoint) == 0x3f81U &&
+                round_fp64_to_bf16(odd_midpoint) == 0x3f82U &&
+                round_fp64_to_bf16(-above_midpoint) == 0xbf81U,
+            "direct FP64-to-BF16 ties-even edge regression");
+    require(std::bit_cast<std::uint16_t>(hip_bfloat16(static_cast<float>(above_midpoint))) ==
+                0x3f80U,
+            "double-round discriminator edge no longer distinguishes the old oracle");
 }
 
 std::vector<hip_bfloat16> make_input() {
@@ -221,9 +303,16 @@ struct Run {
 };
 
 Run run(ninfer::ops::LinearExecution& execution, std::uint32_t tokens,
-        const DeviceArray<hip_bfloat16>& input, std::uint32_t rows, hipStream_t stream) {
+        const DeviceArray<hip_bfloat16>& input, std::uint32_t rows, hipStream_t stream,
+        bool use_default = false,
+        const std::array<std::uint8_t, 16>* fingerprint = nullptr) {
     DeviceArray<hip_bfloat16> output(static_cast<std::size_t>(tokens) * rows);
-    const auto status = execution.run(tokens, input.value, output.value, stream);
+    HIP_CHECK(hipMemset(output.value, 0xff, output.count * sizeof(hip_bfloat16)));
+    const auto status = fingerprint != nullptr
+        ? execution.run_qualified_algorithm(tokens, *fingerprint, input.value, output.value, stream)
+        : use_default
+            ? execution.run_default_heuristic(tokens, input.value, output.value, stream)
+            : execution.run(tokens, input.value, output.value, stream);
     require(status.ok(), "LinearExecution launch failed");
     HIP_CHECK(hipStreamSynchronize(stream));
     const linear::Fp8ActivationWorkspace* activation = execution.activation_workspace(tokens);
@@ -266,7 +355,116 @@ struct CellResult {
     std::uint64_t first_output_mismatch = 0;
     std::uint16_t first_p128_bits = 0;
     std::uint16_t first_p129_bits = 0;
+    std::uint64_t default_output_prefix_mismatches = 0;
+    std::array<float, 14> p128_default_ms{};
+    std::array<float, 14> p128_selected_ms{};
+    std::array<float, 14> p129_default_ms{};
+    std::array<float, 14> p129_selected_ms{};
+    struct CommonResult {
+        std::array<std::uint8_t, 16> fingerprint{};
+        std::uint64_t output_prefix_mismatches = 0;
+        std::uint32_t oracle_probes = 0;
+        std::uint32_t oracle_max_steps = 0;
+        double oracle_max_bound_ratio = 0.0;
+        std::array<float, 14> p128_default_ms{};
+        std::array<float, 14> p128_common_ms{};
+        std::array<float, 14> p129_default_ms{};
+        std::array<float, 14> p129_common_ms{};
+    };
+    std::vector<CommonResult> common_algorithms;
 };
+
+void time_pair(ninfer::ops::LinearExecution& execution, std::uint32_t tokens,
+               const DeviceArray<hip_bfloat16>& input, DeviceArray<hip_bfloat16>& output,
+               hipStream_t stream, std::array<float, 14>& defaults,
+               std::array<float, 14>& selected,
+               const std::array<std::uint8_t, 16>* fingerprint = nullptr) {
+    Event begin;
+    Event end;
+    const auto launch = [&](bool use_default) {
+        const auto status = !use_default && fingerprint != nullptr
+            ? execution.run_qualified_algorithm(tokens, *fingerprint, input.value,
+                                                output.value, stream)
+            : use_default
+            ? execution.run_default_heuristic(tokens, input.value, output.value, stream)
+            : execution.run(tokens, input.value, output.value, stream);
+        require(status.ok(), "timed LinearExecution launch failed");
+    };
+    launch(true);
+    launch(false);
+    HIP_CHECK(hipStreamSynchronize(stream));
+    const auto sample = [&](bool use_default, float& milliseconds) {
+        HIP_CHECK(hipEventRecord(begin.value, stream));
+        launch(use_default);
+        HIP_CHECK(hipEventRecord(end.value, stream));
+        HIP_CHECK(hipEventSynchronize(end.value));
+        HIP_CHECK(hipEventElapsedTime(&milliseconds, begin.value, end.value));
+    };
+    for (std::size_t pair = 0; pair < 7; ++pair) {
+        sample(true, defaults[2 * pair]);
+        sample(false, selected[2 * pair]);
+        sample(false, selected[2 * pair + 1]);
+        sample(true, defaults[2 * pair + 1]);
+    }
+    require(std::all_of(defaults.begin(), defaults.end(), [](float value) {
+                return std::isfinite(value) && value > 0.0F;
+            }) &&
+                std::all_of(selected.begin(), selected.end(), [](float value) {
+                    return std::isfinite(value) && value > 0.0F;
+                }),
+            "balanced timing produced a nonpositive/nonfinite sample");
+}
+
+double median(std::array<float, 14> values) {
+    std::sort(values.begin(), values.end());
+    return (static_cast<double>(values[6]) + static_cast<double>(values[7])) / 2.0;
+}
+
+void check_oracle(const BoundWeight& bound, std::uint32_t rows,
+                  const Run& r128, const Run& r129,
+                  std::uint32_t& probe_count, std::uint32_t& maximum_steps,
+                  double& maximum_bound_ratio) {
+    const auto codes = reinterpret_cast<const std::uint8_t*>(bound.payload.data.data());
+    const auto scales = reinterpret_cast<const float*>(bound.payload.data.data() +
+                                                        bound.geometry.scale_plane_offset);
+    const std::array<std::uint32_t, 4> probe_rows{0U, 17U, rows / 2U, rows - 1U};
+    for (std::uint32_t token : kProbeTokens) {
+        for (std::uint32_t row : probe_rows) {
+            double dot = 0.0;
+            double absolute_sum = 0.0;
+            for (std::uint32_t column = 0; column < kColumns; ++column) {
+                const double product =
+                    static_cast<double>(decode_e4m3(
+                        r129.codes[static_cast<std::size_t>(token) * kColumns + column])) *
+                    static_cast<double>(r129.scales[token]) *
+                    static_cast<double>(decode_e4m3(
+                        codes[static_cast<std::size_t>(row) * kColumns + column])) *
+                    static_cast<double>(scales[row]);
+                dot += product;
+                absolute_sum += std::abs(product);
+            }
+            const std::uint16_t expected = round_fp64_to_bf16(dot);
+            const std::size_t index = static_cast<std::size_t>(token) * rows + row;
+            const double unit_roundoff = std::ldexp(1.0, -24);
+            const double gamma = kColumns * unit_roundoff /
+                                 (1.0 - kColumns * unit_roundoff);
+            const double expected_value =
+                static_cast<float>(std::bit_cast<hip_bfloat16>(expected));
+            const double bound_value =
+                std::abs(expected_value - dot) + gamma * absolute_sum + 1.0e-30;
+            const auto check_actual = [&](std::uint16_t actual) {
+                maximum_steps = std::max(maximum_steps, steps(actual, expected));
+                const double actual_value =
+                    static_cast<float>(std::bit_cast<hip_bfloat16>(actual));
+                maximum_bound_ratio = std::max(
+                    maximum_bound_ratio, std::abs(actual_value - dot) / bound_value);
+                ++probe_count;
+            };
+            check_actual(r129.output[index]);
+            if (token < kPrefix) check_actual(r128.output[index]);
+        }
+    }
+}
 
 CellResult evaluate(const artifact::Reader& reader, std::string_view name, std::uint32_t rows,
                     const std::vector<hip_bfloat16>& represented, hipStream_t stream) {
@@ -286,8 +484,17 @@ CellResult evaluate(const artifact::Reader& reader, std::string_view name, std::
                                            matmul.value, matmul.count);
     const auto& p128 = execution.prepare(kPrefix);
     const auto& p129 = execution.prepare(kExtended);
+#if NINFER_R9700_FP8_PREFIX_COMMON_ALGO_CANDIDATE
+    if (rows == 34816U) {
+        require(p128.selected_algorithm_fingerprint == kQualifiedCommonAlgorithm &&
+                    p129.selected_algorithm_fingerprint == kQualifiedCommonAlgorithm,
+                "selected profiles differ from qualified common FP8 fingerprint");
+    }
+#endif
     const Run r128 = run(execution, kPrefix, input128, rows, stream);
     const Run r129 = run(execution, kExtended, input129, rows, stream);
+    const Run default128 = run(execution, kPrefix, input128, rows, stream, true);
+    const Run default129 = run(execution, kExtended, input129, rows, stream, true);
     require(r128.codes == std::vector<std::uint8_t>(r129.codes.begin(),
                                                      r129.codes.begin() + r128.codes.size()),
             "T128/T129 activation FP8 code prefix differs");
@@ -297,10 +504,6 @@ CellResult evaluate(const artifact::Reader& reader, std::string_view name, std::
                                   std::bit_cast<std::uint32_t>(rhs);
                        }),
             "T128/T129 activation scale prefix differs");
-    const auto codes = reinterpret_cast<const std::uint8_t*>(bound.payload.data.data());
-    const auto scales = reinterpret_cast<const float*>(bound.payload.data.data() +
-                                                        bound.geometry.scale_plane_offset);
-    const std::array<std::uint32_t, 4> probe_rows{0U, 17U, rows / 2U, rows - 1U};
     CellResult result{std::string(name), rows, p128, p129};
     for (std::size_t index = 0; index < r128.output.size(); ++index) {
         if (r128.output[index] == r129.output[index]) continue;
@@ -311,46 +514,84 @@ CellResult evaluate(const artifact::Reader& reader, std::string_view name, std::
         }
         ++result.output_prefix_mismatches;
     }
-    for (std::uint32_t token : kProbeTokens) {
-        for (std::uint32_t row : probe_rows) {
-            double dot = 0.0;
-            double absolute_sum = 0.0;
-            for (std::uint32_t column = 0; column < kColumns; ++column) {
-                const double product =
-                    static_cast<double>(decode_e4m3(
-                        r129.codes[static_cast<std::size_t>(token) * kColumns + column])) *
-                    static_cast<double>(r129.scales[token]) *
-                    static_cast<double>(decode_e4m3(
-                        codes[static_cast<std::size_t>(row) * kColumns + column])) *
-                    static_cast<double>(scales[row]);
-                dot += product;
-                absolute_sum += std::abs(product);
+    for (std::size_t index = 0; index < default128.output.size(); ++index) {
+        result.default_output_prefix_mismatches +=
+            default128.output[index] != default129.output[index] ? 1U : 0U;
+    }
+#if NINFER_R9700_FP8_PREFIX_COMMON_ALGO_CANDIDATE
+    require(result.output_prefix_mismatches == 0U,
+            "selected common FP8 algorithm did not preserve exact BF16 output prefix");
+    if (rows == 34816U) {
+        require(p128.selected_algorithm_fingerprint == p129.selected_algorithm_fingerprint,
+                "selected T128/T129 algorithm fingerprint differs");
+    }
+#endif
+    check_oracle(bound, rows, r128, r129, result.oracle_probes,
+                 result.oracle_max_steps, result.oracle_max_bound_ratio);
+    require(result.oracle_max_bound_ratio <= 1.05,
+            "selected real-weight output differs from represented-operation FP64 oracle");
+    DeviceArray<hip_bfloat16> timed_output(static_cast<std::size_t>(kExtended) * rows);
+    time_pair(execution, kPrefix, input128, timed_output, stream,
+              result.p128_default_ms, result.p128_selected_ms);
+    time_pair(execution, kExtended, input129, timed_output, stream,
+              result.p129_default_ms, result.p129_selected_ms);
+    if (rows == 34816U) {
+        require(p128.heuristic_result_count == 8 && p129.heuristic_result_count == 8 &&
+                    p128.viable_algorithms.size() == 8U &&
+                    p129.viable_algorithms.size() == 8U,
+                "fixed eight-entry gate/up heuristic catalogs differ");
+        std::vector<std::array<std::uint8_t, 16>> common;
+        for (const auto& lhs : p128.viable_algorithms) {
+            const auto same = [&](const auto& rhs) { return lhs.fingerprint == rhs.fingerprint; };
+            require(std::count_if(p128.viable_algorithms.begin(),
+                                  p128.viable_algorithms.end(), same) == 1 &&
+                        std::count_if(p129.viable_algorithms.begin(),
+                                      p129.viable_algorithms.end(), same) == 1,
+                    "gate/up heuristic fingerprint catalog is not unique/common");
+            common.push_back(lhs.fingerprint);
+        }
+        require(common.size() == 8U,
+                "gate/up T128/T129 common heuristic catalog is not exactly eight");
+        std::vector<std::string> catalog;
+        for (const auto& fingerprint : common) catalog.push_back(algorithm_hex(fingerprint));
+        std::sort(catalog.begin(), catalog.end());
+        require(std::equal(catalog.begin(), catalog.end(),
+                           kExpectedGateUpCommonCatalog.begin(),
+                           kExpectedGateUpCommonCatalog.end()),
+                "gate/up common heuristic fingerprint catalog differs");
+        for (const auto& fingerprint : common) {
+            const Run common128 = run(execution, kPrefix, input128, rows, stream,
+                                      false, &fingerprint);
+            const Run common129 = run(execution, kExtended, input129, rows, stream,
+                                      false, &fingerprint);
+            require(common128.codes ==
+                        std::vector<std::uint8_t>(common129.codes.begin(),
+                                                  common129.codes.begin() +
+                                                      common128.codes.size()) &&
+                        std::equal(common128.scales.begin(), common128.scales.end(),
+                                   common129.scales.begin(), [](float lhs, float rhs) {
+                                       return std::bit_cast<std::uint32_t>(lhs) ==
+                                              std::bit_cast<std::uint32_t>(rhs);
+                                   }),
+                    "common algorithm activation prefix differs");
+            CellResult::CommonResult common_result;
+            common_result.fingerprint = fingerprint;
+            for (std::size_t index = 0; index < common128.output.size(); ++index) {
+                common_result.output_prefix_mismatches +=
+                    common128.output[index] != common129.output[index] ? 1U : 0U;
             }
-            const auto expected =
-                std::bit_cast<std::uint16_t>(hip_bfloat16(static_cast<float>(dot)));
-            const std::size_t index = static_cast<std::size_t>(token) * rows + row;
-            const double unit_roundoff = std::ldexp(1.0, -24);
-            const double gamma = kColumns * unit_roundoff /
-                                 (1.0 - kColumns * unit_roundoff);
-            const double expected_value =
-                static_cast<float>(std::bit_cast<hip_bfloat16>(expected));
-            const double bound =
-                std::abs(expected_value - dot) + gamma * absolute_sum + 1.0e-30;
-            const auto check_actual = [&](std::uint16_t actual) {
-                result.oracle_max_steps =
-                    std::max(result.oracle_max_steps, steps(actual, expected));
-                const double actual_value =
-                    static_cast<float>(std::bit_cast<hip_bfloat16>(actual));
-                result.oracle_max_bound_ratio = std::max(
-                    result.oracle_max_bound_ratio, std::abs(actual_value - dot) / bound);
-                ++result.oracle_probes;
-            };
-            check_actual(r129.output[index]);
-            if (token < kPrefix) check_actual(r128.output[index]);
+            check_oracle(bound, rows, common128, common129,
+                         common_result.oracle_probes, common_result.oracle_max_steps,
+                         common_result.oracle_max_bound_ratio);
+            time_pair(execution, kPrefix, input128, timed_output, stream,
+                      common_result.p128_default_ms, common_result.p128_common_ms,
+                      &fingerprint);
+            time_pair(execution, kExtended, input129, timed_output, stream,
+                      common_result.p129_default_ms, common_result.p129_common_ms,
+                      &fingerprint);
+            result.common_algorithms.push_back(std::move(common_result));
         }
     }
-    require(result.oracle_max_bound_ratio <= 1.05,
-            "real-weight output differs from represented-operation FP64 oracle");
     return result;
 }
 
@@ -366,7 +607,43 @@ void print_profile(std::ostringstream& output,
            << ",\"heuristic_result_count\":" << profile.heuristic_result_count
            << ",\"waves_count\":" << profile.selected_waves_count
            << ",\"algorithm_fingerprint\":"
-           << json_string(algorithm_hex(profile.selected_algorithm_fingerprint)) << '}';
+           << json_string(algorithm_hex(profile.selected_algorithm_fingerprint))
+           << ",\"viable_algorithms\":[";
+    for (std::size_t index = 0; index < profile.viable_algorithms.size(); ++index) {
+        const auto& algorithm = profile.viable_algorithms[index];
+        output << (index == 0U ? "" : ",")
+               << "{\"heuristic_rank\":" << algorithm.heuristic_rank
+               << ",\"matmul_workspace_bytes\":" << algorithm.matmul_workspace_bytes
+               << ",\"algorithm_max_workspace_bytes\":"
+               << algorithm.algorithm_max_workspace_bytes
+               << ",\"waves_count\":" << algorithm.waves_count
+               << ",\"algorithm_fingerprint\":"
+               << json_string(algorithm_hex(algorithm.fingerprint)) << '}';
+    }
+    output << "]}";
+}
+
+void print_samples(std::ostringstream& output, const std::array<float, 14>& samples) {
+    output << '[';
+    for (std::size_t index = 0; index < samples.size(); ++index) {
+        output << (index == 0U ? "" : ",") << samples[index];
+    }
+    output << ']';
+}
+
+void print_timing(std::ostringstream& output, std::uint32_t tokens,
+                  const std::array<float, 14>& defaults,
+                  const std::array<float, 14>& selected) {
+    const double default_median = median(defaults);
+    const double selected_median = median(selected);
+    output << "{\"tokens\":" << tokens << ",\"default_ms\":";
+    print_samples(output, defaults);
+    output << ",\"selected_ms\":";
+    print_samples(output, selected);
+    output << ",\"default_median_ms\":" << default_median
+           << ",\"selected_median_ms\":" << selected_median
+           << ",\"selected_over_default\":"
+           << (default_median == 0.0 ? 0.0 : selected_median / default_median) << '}';
 }
 
 void print_cell(std::ostringstream& report, const CellResult& cell) {
@@ -378,6 +655,8 @@ void print_cell(std::ostringstream& report, const CellResult& cell) {
            << (cell.output_prefix_mismatches == 0U ? "true" : "false") << ','
            << "\"bf16_output_prefix_mismatch_count\":"
            << cell.output_prefix_mismatches << ','
+           << "\"default_bf16_output_prefix_mismatch_count\":"
+           << cell.default_output_prefix_mismatches << ','
            << "\"first_output_mismatch\":";
     if (cell.output_prefix_mismatches == 0U) {
         report << "null,";
@@ -395,17 +674,72 @@ void print_cell(std::ostringstream& report, const CellResult& cell) {
     print_profile(report, cell.p128);
     report << ',';
     print_profile(report, cell.p129);
+    report << "],\"common_viable_algorithm_fingerprints\":[";
+    bool first_common = true;
+    for (const auto& lhs : cell.p128.viable_algorithms) {
+        const bool common = std::any_of(
+            cell.p129.viable_algorithms.begin(), cell.p129.viable_algorithms.end(),
+            [&](const auto& rhs) { return lhs.fingerprint == rhs.fingerprint; });
+        if (!common) continue;
+        report << (first_common ? "" : ",") << json_string(algorithm_hex(lhs.fingerprint));
+        first_common = false;
+    }
+    report << "],\"balanced_timings\":[";
+    print_timing(report, kPrefix, cell.p128_default_ms, cell.p128_selected_ms);
+    report << ',';
+    print_timing(report, kExtended, cell.p129_default_ms, cell.p129_selected_ms);
+    report << "],\"common_algorithm_trials\":[";
+    for (std::size_t index = 0; index < cell.common_algorithms.size(); ++index) {
+        const auto& trial = cell.common_algorithms[index];
+        report << (index == 0U ? "" : ",")
+               << "{\"algorithm_fingerprint\":"
+               << json_string(algorithm_hex(trial.fingerprint))
+               << ",\"bf16_output_prefix_exact\":"
+               << (trial.output_prefix_mismatches == 0U ? "true" : "false")
+               << ",\"bf16_output_prefix_mismatch_count\":"
+               << trial.output_prefix_mismatches
+               << ",\"eligible\":"
+               << (trial.output_prefix_mismatches == 0U &&
+                           trial.oracle_max_bound_ratio <= 1.05
+                       ? "true" : "false")
+               << ",\"represented_fp64_oracle\":{\"probe_count\":"
+               << trial.oracle_probes << ",\"maximum_bf16_steps\":"
+               << trial.oracle_max_steps << ",\"maximum_error_bound_ratio\":"
+               << trial.oracle_max_bound_ratio << "},\"balanced_timings\":[";
+        print_timing(report, kPrefix, trial.p128_default_ms, trial.p128_common_ms);
+        report << ',';
+        print_timing(report, kExtended, trial.p129_default_ms, trial.p129_common_ms);
+        report << "]}";
+    }
     report << "]}";
 }
 
 } // namespace
 
 int main(int argc, char** argv) try {
+    check_direct_bf16_rounding_edges();
+    if (argc == 2 && std::string_view(argv[1]) == "--rounding-self-test") {
+        constexpr double midpoint = 1.0 + 0x1p-8;
+        constexpr double above = midpoint + 0x1p-30;
+        std::cout << "{\"direct_midpoint_bits\":" << round_fp64_to_bf16(midpoint)
+                  << ",\"direct_above_midpoint_bits\":" << round_fp64_to_bf16(above)
+                  << ",\"legacy_double_rounded_bits\":"
+                  << std::bit_cast<std::uint16_t>(hip_bfloat16(static_cast<float>(above)))
+                  << "}\n";
+        return 0;
+    }
     if (argc == 2 && std::string_view(argv[1]) == "--describe") {
         std::cout << "{\"artifact_type\":\"ninfer_r9700_fp8_linear_prefix_discriminator\","
-                     "\"schema_version\":1,\"device\":\"gfx1201\",\"tokens\":[128,129],"
+                     "\"schema_version\":2,\"device\":\"gfx1201\",\"tokens\":[128,129],"
                      "\"shapes\":[[34816,5120],[4096,5120]],"
-                     "\"requires_real_production_fp8_artifact\":true}\n";
+                     "\"requires_real_production_fp8_artifact\":true,"
+                     "\"qualified_common_algorithm_fingerprint\":"
+                  << json_string(algorithm_hex(kQualifiedCommonAlgorithm)) << ','
+                  << "\"qualified_selection\":\"preserve_t128_default_select_t129_viable\","
+                  << "\"oracle_rounding\":\"direct_fp64_to_bf16_ties_even\","
+                     "\"functional_output_prepoison\":\"bf16_nan_full_scan\","
+                     "\"common_algorithm_candidate_selector\":"
+                  << NINFER_R9700_FP8_PREFIX_COMMON_ALGO_CANDIDATE << "}\n";
         return 0;
     }
     if (argc == 2 && std::string_view(argv[1]) == "--format-self-test") {
@@ -442,6 +776,12 @@ int main(int argc, char** argv) try {
                 std::string_view(properties.gcnArchName) == "gfx1201" &&
                 properties.warpSize == 32,
             "discriminator requires device0 R9700 gfx1201 wave32");
+    char pci_bus_id[32]{};
+    HIP_CHECK(hipDeviceGetPCIBusId(pci_bus_id, sizeof(pci_bus_id), device));
+    require(std::string_view(pci_bus_id) == kPciBusId,
+            "discriminator requires exact R9700 PCI identity");
+    require(read_trimmed(kPowerPath) == "auto",
+            "discriminator requires auto performance level before execution");
 
     artifact::Reader reader(artifact_path);
     require(reader.identity().model_id == "qwen3.8-27b",
@@ -454,21 +794,35 @@ int main(int argc, char** argv) try {
         evaluate(reader, kNames[0], kRows[0], represented, stream.value),
         evaluate(reader, kNames[1], kRows[1], represented, stream.value),
     };
+    require(read_trimmed(kPowerPath) == "auto",
+            "discriminator requires auto performance level after execution");
 
     std::ostringstream report;
     report << std::setprecision(std::numeric_limits<double>::max_digits10)
            << "{\n  \"artifact_type\": \"ninfer_r9700_fp8_linear_prefix_discriminator_result\",\n"
-           << "  \"schema_version\": 1,\n  \"diagnostic_only\": true,\n"
+           << "  \"schema_version\": 2,\n  \"diagnostic_only\": true,\n"
            << "  \"timing_evidence_eligible\": false,\n"
            << "  \"production_routing_authorized\": false,\n"
+           << "  \"common_algorithm_candidate_selector\": "
+           << NINFER_R9700_FP8_PREFIX_COMMON_ALGO_CANDIDATE << ",\n"
+           << "  \"qualified_common_algorithm_fingerprint\": "
+           << json_string(algorithm_hex(kQualifiedCommonAlgorithm)) << ",\n"
+           << "  \"gate_up_common_catalog_contract\": [";
+    for (std::size_t index = 0; index < kExpectedGateUpCommonCatalog.size(); ++index) {
+        report << (index == 0U ? "" : ",")
+               << json_string(kExpectedGateUpCommonCatalog[index]);
+    }
+    report << "],\n"
            << "  \"artifact\": {\"path\":" << json_string(artifact_path.string())
            << ",\"bytes\":" << artifact_bytes
            << ",\"sha256\":" << json_string(artifact_sha256)
            << ",\"model_id\":" << json_string(reader.identity().model_id)
            << ",\"weights_id\":" << json_string(reader.identity().weights_id) << "},\n"
            << "  \"device\": {\"ordinal\":0,\"name\":" << json_string(properties.name)
-           << ",\"architecture\":\"gfx1201\",\"wave_size\":32},\n"
+           << ",\"architecture\":\"gfx1201\",\"wave_size\":32,\"pci_bus_id\":"
+           << json_string(pci_bus_id) << ",\"performance_level\":\"auto\"},\n"
            << "  \"input_contract\": \"one identical represented-BF16 128-column prefix plus one appended column; independent per-token E4M3 outer scale\",\n"
+           << "  \"timing_contract\": \"one warmup per route then seven ABBA pairs per width; full activation quantize plus hipBLASLt matmul and status consumer\",\n"
            << "  \"cells\": [\n";
     for (std::size_t index = 0; index < cells.size(); ++index) {
         const CellResult& cell = cells[index];

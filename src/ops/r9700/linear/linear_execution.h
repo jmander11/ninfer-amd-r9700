@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 namespace ninfer::ops {
 
@@ -31,6 +32,14 @@ public:
         }
     };
 
+    struct AlgorithmProfile {
+        std::size_t matmul_workspace_bytes = 0;
+        std::size_t algorithm_max_workspace_bytes = 0;
+        float waves_count = 0.0F;
+        int heuristic_rank = -1;
+        std::array<std::uint8_t, 16> fingerprint{};
+    };
+
     struct PreparedProfile {
         std::uint32_t tokens = 0;
         std::size_t activation_workspace_bytes = 0;
@@ -40,6 +49,7 @@ public:
         int selected_heuristic_rank = -1;
         int heuristic_result_count = 0;
         std::array<std::uint8_t, 16> selected_algorithm_fingerprint{};
+        std::vector<AlgorithmProfile> viable_algorithms;
     };
 
     // The weight and caller-owned activation region, plus any non-empty matmul
@@ -60,8 +70,10 @@ public:
     [[nodiscard]] static std::size_t activation_workspace_capacity_bytes(
         std::uint32_t tokens, std::uint32_t columns) noexcept;
 
-    // Idempotently creates immutable descriptors and selects the first
-    // supported heuristic fitting the retained matmul workspace.
+    // Idempotently creates immutable descriptors and enumerates the returned
+    // supported heuristics fitting the retained matmul workspace. The default
+    // build selects the first; an exact-shape qualification build may require
+    // and select a predeclared common identity.
     [[nodiscard]] const PreparedProfile& prepare(std::uint32_t tokens);
     [[nodiscard]] const PreparedProfile* prepared_profile(
         std::uint32_t tokens) const noexcept;
@@ -76,6 +88,18 @@ public:
     // consumer that poisons the complete BF16 output on nonfinite input.
     [[nodiscard]] LaunchStatus run(std::uint32_t tokens, const hip_bfloat16* input,
                                    hip_bfloat16* output, hipStream_t stream) noexcept;
+
+    // Qualification-only control using the first viable heuristic while preserving the same
+    // activation quantizer, descriptors, weight bytes, and output/status boundary.
+    [[nodiscard]] LaunchStatus run_default_heuristic(
+        std::uint32_t tokens, const hip_bfloat16* input, hip_bfloat16* output,
+        hipStream_t stream) noexcept;
+
+    // Qualification-only execution of one exact fingerprint from the fixed
+    // returned viable-heuristic catalog for this prepared width.
+    [[nodiscard]] LaunchStatus run_qualified_algorithm(
+        std::uint32_t tokens, const std::array<std::uint8_t, 16>& fingerprint,
+        const hip_bfloat16* input, hip_bfloat16* output, hipStream_t stream) noexcept;
 
 private:
     struct Impl;

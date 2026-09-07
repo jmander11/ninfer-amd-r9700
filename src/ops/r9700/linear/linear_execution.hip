@@ -19,6 +19,15 @@ constexpr std::uint16_t kCanonicalBf16QuietNan = 0x7FC0U;
 constexpr std::uint32_t kPoisonBlockSize       = 256U;
 constexpr std::uint32_t kColumnAlignment       = 128U;
 constexpr std::size_t kPlaneAlignment          = 256U;
+constexpr std::array<std::uint8_t, 16> kQualifiedPrefixCommonAlgorithm{
+    0xe2U, 0xe0U, 0x01U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+    0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U};
+
+#ifndef NINFER_R9700_FP8_PREFIX_COMMON_ALGO_CANDIDATE
+#define NINFER_R9700_FP8_PREFIX_COMMON_ALGO_CANDIDATE 0
+#endif
+static_assert(NINFER_R9700_FP8_PREFIX_COMMON_ALGO_CANDIDATE == 0 ||
+              NINFER_R9700_FP8_PREFIX_COMMON_ALGO_CANDIDATE == 1);
 
 [[noreturn]] void fail_hipblaslt(const char* operation, hipblasStatus_t status) {
     std::ostringstream message;
@@ -135,12 +144,19 @@ __global__ void poison_nonfinite_output(const std::uint32_t* status,
 
 struct LinearExecution::Impl {
     struct Profile {
+        struct ViableAlgorithm {
+            hipblasLtMatmulAlgo_t algorithm{};
+            std::size_t workspace_bytes = 0;
+        };
         PreparedProfile public_profile{};
         r9700::linear::Fp8ActivationWorkspace activation{};
         hipblasLtMatmulDesc_t operation       = nullptr;
         hipblasLtMatrixLayout_t activation_layout = nullptr;
         hipblasLtMatrixLayout_t output_layout = nullptr;
         hipblasLtMatmulAlgo_t algorithm{};
+        hipblasLtMatmulAlgo_t default_algorithm{};
+        std::size_t default_workspace_bytes = 0;
+        std::vector<ViableAlgorithm> viable_algorithms;
 
         ~Profile() {
             if (output_layout != nullptr) (void)hipblasLtMatrixLayoutDestroy(output_layout);
@@ -329,19 +345,67 @@ const LinearExecution::PreparedProfile& LinearExecution::prepare(std::uint32_t t
     for (int index = 0; index < result_count; ++index) {
         if (results[index].state == HIPBLAS_STATUS_SUCCESS &&
             results[index].workspaceSize <= impl_->matmul_workspace_bytes) {
-            selected = &results[index];
-            profile->public_profile.selected_heuristic_rank = index;
-            break;
+            LinearExecution::AlgorithmProfile candidate;
+            candidate.matmul_workspace_bytes = results[index].workspaceSize;
+            candidate.algorithm_max_workspace_bytes = results[index].algo.max_workspace_bytes;
+            candidate.waves_count = results[index].wavesCount;
+            candidate.heuristic_rank = index;
+            std::copy(std::begin(results[index].algo.data), std::end(results[index].algo.data),
+                      candidate.fingerprint.begin());
+            profile->public_profile.viable_algorithms.push_back(candidate);
+            profile->viable_algorithms.push_back(
+                Impl::Profile::ViableAlgorithm{results[index].algo,
+                                               results[index].workspaceSize});
+            if (selected == nullptr) selected = &results[index];
         }
     }
     if (selected == nullptr) {
         throw std::runtime_error("no supported row-scaled E4M3 hipBLASLt algorithm");
+    }
+    profile->default_algorithm = selected->algo;
+    profile->default_workspace_bytes = selected->workspaceSize;
+    if constexpr (NINFER_R9700_FP8_PREFIX_COMMON_ALGO_CANDIDATE == 1) {
+        if (impl_->rows == 34816U && impl_->columns == 5120U && tokens == 128U) {
+            std::array<std::uint8_t, 16> fingerprint{};
+            std::copy(std::begin(selected->algo.data), std::end(selected->algo.data),
+                      fingerprint.begin());
+            if (fingerprint != kQualifiedPrefixCommonAlgorithm) {
+                throw std::runtime_error(
+                    "T128 default FP8 algorithm differs from qualified common fingerprint");
+            }
+        } else if (impl_->rows == 34816U && impl_->columns == 5120U && tokens == 129U) {
+            if (impl_->find(128U) == nullptr) (void)prepare(128U);
+            const Impl::Profile* reference = impl_->find(128U);
+            if (reference == nullptr ||
+                reference->public_profile.selected_algorithm_fingerprint !=
+                    kQualifiedPrefixCommonAlgorithm) {
+                throw std::logic_error("internal qualified T128 preparation failed");
+            }
+            selected = nullptr;
+            for (int index = 0; index < result_count; ++index) {
+                std::array<std::uint8_t, 16> fingerprint{};
+                std::copy(std::begin(results[index].algo.data), std::end(results[index].algo.data),
+                          fingerprint.begin());
+                if (results[index].state == HIPBLAS_STATUS_SUCCESS &&
+                    results[index].workspaceSize <= impl_->matmul_workspace_bytes &&
+                    fingerprint == kQualifiedPrefixCommonAlgorithm) {
+                    selected = &results[index];
+                    break;
+                }
+            }
+            if (selected == nullptr) {
+                throw std::runtime_error(
+                    "T129 heuristic set lacks qualified common FP8 algorithm fingerprint");
+            }
+        }
     }
     profile->algorithm = selected->algo;
     profile->public_profile.selected_matmul_workspace_bytes = selected->workspaceSize;
     profile->public_profile.selected_algorithm_max_workspace_bytes =
         selected->algo.max_workspace_bytes;
     profile->public_profile.selected_waves_count = selected->wavesCount;
+    profile->public_profile.selected_heuristic_rank =
+        static_cast<int>(selected - results.data());
     profile->public_profile.heuristic_result_count = result_count;
     std::copy(std::begin(selected->algo.data), std::end(selected->algo.data),
               profile->public_profile.selected_algorithm_fingerprint.begin());
@@ -427,6 +491,54 @@ LinearExecution::LaunchStatus LinearExecution::run(std::uint32_t tokens,
     hipLaunchKernelGGL(poison_nonfinite_output, dim3(1), dim3(kPoisonBlockSize), 0,
                        stream, profile->activation.status, output, output_elements);
     return {hipGetLastError(), HIPBLAS_STATUS_SUCCESS};
+}
+
+LinearExecution::LaunchStatus LinearExecution::run_default_heuristic(
+    std::uint32_t tokens, const hip_bfloat16* input, hip_bfloat16* output,
+    hipStream_t stream) noexcept {
+    Impl::Profile* profile = impl_ == nullptr ? nullptr : impl_->find(tokens);
+    if (profile == nullptr) return {hipErrorInvalidValue, HIPBLAS_STATUS_SUCCESS};
+    const hipblasLtMatmulAlgo_t selected = profile->algorithm;
+    const std::size_t selected_workspace =
+        profile->public_profile.selected_matmul_workspace_bytes;
+    profile->algorithm = profile->default_algorithm;
+    profile->public_profile.selected_matmul_workspace_bytes = profile->default_workspace_bytes;
+    const LaunchStatus status = run(tokens, input, output, stream);
+    profile->algorithm = selected;
+    profile->public_profile.selected_matmul_workspace_bytes = selected_workspace;
+    return status;
+}
+
+LinearExecution::LaunchStatus LinearExecution::run_qualified_algorithm(
+    std::uint32_t tokens, const std::array<std::uint8_t, 16>& fingerprint,
+    const hip_bfloat16* input, hip_bfloat16* output, hipStream_t stream) noexcept {
+    Impl::Profile* profile = impl_ == nullptr ? nullptr : impl_->find(tokens);
+    if (profile == nullptr ||
+        profile->viable_algorithms.size() != profile->public_profile.viable_algorithms.size()) {
+        return {hipErrorInvalidValue, HIPBLAS_STATUS_SUCCESS};
+    }
+    std::size_t found = profile->viable_algorithms.size();
+    for (std::size_t index = 0; index < profile->public_profile.viable_algorithms.size(); ++index) {
+        if (profile->public_profile.viable_algorithms[index].fingerprint == fingerprint) {
+            if (found != profile->viable_algorithms.size()) {
+                return {hipErrorInvalidValue, HIPBLAS_STATUS_SUCCESS};
+            }
+            found = index;
+        }
+    }
+    if (found == profile->viable_algorithms.size()) {
+        return {hipErrorInvalidValue, HIPBLAS_STATUS_SUCCESS};
+    }
+    const hipblasLtMatmulAlgo_t selected = profile->algorithm;
+    const std::size_t selected_workspace =
+        profile->public_profile.selected_matmul_workspace_bytes;
+    profile->algorithm = profile->viable_algorithms[found].algorithm;
+    profile->public_profile.selected_matmul_workspace_bytes =
+        profile->viable_algorithms[found].workspace_bytes;
+    const LaunchStatus status = run(tokens, input, output, stream);
+    profile->algorithm = selected;
+    profile->public_profile.selected_matmul_workspace_bytes = selected_workspace;
+    return status;
 }
 
 } // namespace ninfer::ops
