@@ -336,6 +336,16 @@ add_custom_command(TARGET ninfer_r9700_fp8_gate_up_qual POST_BUILD
           -P ${PROJECT_SOURCE_DIR}/tools/cmake/write_sha256.cmake
   VERBATIM)
 
+# Real-artifact T128/T129 exact-prefix discriminator for the two production row-FP8 shapes.
+# It is diagnostic-only and has no target routing edge.
+add_executable(ninfer_r9700_fp8_linear_prefix_discriminator
+  ${PROJECT_SOURCE_DIR}/tools/r9700/fp8_linear_prefix_discriminator.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_fp8_linear_prefix_discriminator)
+set_target_properties(ninfer_r9700_fp8_linear_prefix_discriminator PROPERTIES
+  HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_fp8_linear_prefix_discriminator PRIVATE
+  ninfer_artifact ninfer_r9700_core hip::host roc::hipblaslt)
+
 # Exact-shape catalog probe for the retained FP8 gate/up projection. This is intentionally
 # disconnected from production dispatch: it enumerates every installed hipBLASLt algorithm before
 # a bounded, independently checked timing qualifier admits any non-default algorithm.
