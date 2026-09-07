@@ -1,0 +1,53 @@
+{
+  "command": [
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-attention-whole-parity-6fe53d53-fresh-20260906/bench/ninfer_bench",
+    "--weights",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval.ninfer",
+    "--corpus",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids",
+    "--device",
+    "0",
+    "--concurrency",
+    "1",
+    "-pg",
+    "128,1",
+    "--prefill-chunk",
+    "4096",
+    "--kv-capacity",
+    "workload",
+    "--draft-tokens",
+    "0",
+    "--retain-token-ids",
+    "--isolate-prompt-decode",
+    "--no-device-graph",
+    "--output",
+    "json",
+    "--output-file",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-text-layer-boundary-traces-6fe53d53-20260906/results/text-append.json",
+    "-r",
+    "1",
+    "--warmup",
+    "0"
+  ],
+  "trace_environment": {
+    "NINFER_QWEN3_LAYER_BOUNDARY_TRACE_ROLE": "text-append-frontier129-column0",
+    "NINFER_QWEN3_LAYER_BOUNDARY_TRACE_MANIFEST": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-text-layer-boundary-traces-6fe53d53-20260906/results/text-append.trace.json",
+    "NINFER_QWEN3_LAYER_BOUNDARY_TRACE_SIDECAR": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-text-layer-boundary-traces-6fe53d53-20260906/results/text-append.trace.bin"
+  },
+  "exit_code": 0,
+  "started_unix_ns": 1788752820212669989,
+  "finished_unix_ns": 1788752850749365863,
+  "power_before": "auto",
+  "power_after": "auto",
+  "instrumentation_environment_present": [],
+  "stdout": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-text-layer-boundary-traces-6fe53d53-20260906/results/text-append.stdout",
+    "bytes": 138,
+    "sha256": "c763cee9cf52c5ecea29f48118be4e9cc1a0da6e5670b7069d783c3065dc4d16"
+  },
+  "stderr": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-text-layer-boundary-traces-6fe53d53-20260906/results/text-append.stderr",
+    "bytes": 247,
+    "sha256": "c338eb8b27fb4e6a644df8e44ddcc6c74838eca84dd8c510b2fc73aacee94002"
+  }
+}

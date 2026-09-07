@@ -148,7 +148,7 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   Rows5/6 RMSNorm is qualified but stays off. Consume the retained failed three-load gate; do not
   rerun it. Schedule speed work remains blocked while `DFLASH-TEXT-P129` closes Text parity.
 
-- [ ] `DFLASH-TEXT-P129` Close append-versus-fresh P129 parity. The retained combined-selector gate
+- [x] `DFLASH-TEXT-P129` Close append-versus-fresh P129 parity. The retained combined-selector gate
   has exact public continuations but its final normalized tail differs in 4,908/5,120 BF16 values.
   Its ordinary-append arm captured only the tail, so it cannot localize this failure. Prepare a
   reviewed Text-pair layer-boundary package on the same build and find the first current divergent
@@ -156,6 +156,16 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   `profiles/bench/r9700-dflash-semantic-traces-aebd5f82-20260906/results`,
   `profiles/bench/r9700-qwen3-layer-boundary-traces-43e5e4cc-20260906/results`, and
   `profiles/bench/r9700-fp8-e2-t129-text-parity-gate-20260906/results`, plus the retained gate above.
+  CLOSED 2026-09-06 on the retained 6fe53d53 combined-selector build: the reviewed Text-pair
+  layer-boundary package
+  (`profiles/bench/r9700-text-layer-boundary-traces-6fe53d53-20260906`) ran both arms on the R9700.
+  Token-level parity is closed — fresh (whole-pp129+tg1) and append (pp128+tg1) both produce the
+  retained P129 ordinary control `[96558, 96917]`. The first visible intermediate divergence is
+  layer 13 post_mixer (snapshot 27): 202/5,120 hidden units differ by one BF16 bit (48683 vs
+  48682), predecessor boundary exact. The previous layer3 frontier did not survive the attention
+  change; the divergence now localizes to layer 13. This is a silent association-order difference
+  between the prefill (all-129-in-one-chunk) and append (128-prefix + 1-decode) routes; it does not
+  change the generated tokens and does not authorize production routing or performance claims.
 
 - [x] `DFLASH-TARGET-P129` The retained gate closes ordinary-W1 versus DFlash-W5 target semantics:
   all 28 public tokens, the DFlash decision/accept/commit reconstruction, and layer3 attention are

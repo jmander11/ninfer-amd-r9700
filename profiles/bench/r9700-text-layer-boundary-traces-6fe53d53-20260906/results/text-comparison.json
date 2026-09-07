@@ -1,0 +1,23 @@
+{
+  "artifact_type": "ninfer_qwen3_layer_boundary_comparison",
+  "schema_version": 1,
+  "diagnostic_only": true,
+  "timing_evidence_eligible": false,
+  "production_routing_authorized": false,
+  "diagnostic": "text",
+  "classification": "first_visible_post_mixer_layer_13",
+  "first_difference": {
+    "snapshot_index": 27,
+    "layer": 13,
+    "half": "post_mixer",
+    "first_hidden_index": 53,
+    "mismatch_count": 202,
+    "left_bf16_bits": 48683,
+    "right_bf16_bits": 48682,
+    "preceding_boundary_exact": true
+  },
+  "limitations": [
+    "localizes the first visible represented-BF16 residual boundary, not the primitive root cause",
+    "an exact transformer residual stack leaves final RMSNorm and LM head untested"
+  ]
+}
