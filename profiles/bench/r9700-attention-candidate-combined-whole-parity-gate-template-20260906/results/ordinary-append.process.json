@@ -1,0 +1,53 @@
+{
+  "command": [
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-attention-whole-parity-6fe53d53-fresh-20260906/bench/ninfer_bench",
+    "--weights",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval.ninfer",
+    "--corpus",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids",
+    "--device",
+    "0",
+    "--concurrency",
+    "1",
+    "-pg",
+    "128,27",
+    "--prefill-chunk",
+    "4096",
+    "--kv-capacity",
+    "workload",
+    "--draft-tokens",
+    "0",
+    "--retain-token-ids",
+    "--isolate-prompt-decode",
+    "--no-device-graph",
+    "--output",
+    "json",
+    "--output-file",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/results/ordinary-append.json",
+    "-r",
+    "1",
+    "--warmup",
+    "0"
+  ],
+  "trace_environment": {
+    "NINFER_DFLASH_DECISION_TRACE_OUT": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/results/ordinary-append.decision.json",
+    "NINFER_QWEN3_PREFILL_P129_TRACE": "1",
+    "NINFER_QWEN3_PREFILL_P129_TRACE_OUT": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/results/ordinary-append.tail.json"
+  },
+  "exit_code": 0,
+  "started_unix_ns": 1788750321820987100,
+  "finished_unix_ns": 1788750349888058458,
+  "power_before": "auto",
+  "power_after": "auto",
+  "injection_environment": [],
+  "stdout": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/results/ordinary-append.stdout",
+    "bytes": 162,
+    "sha256": "d85eb084454657a7483eb7931dc41d8594a06f4692c306018144610d46d8a968"
+  },
+  "stderr": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/results/ordinary-append.stderr",
+    "bytes": 248,
+    "sha256": "a22265537e1eaa631710d32f3950a4654a7f92ba0e1962766a9f01799f308f60"
+  }
+}

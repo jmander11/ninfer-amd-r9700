@@ -13,6 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 INVARIANTS = ROOT / "plans/r9700-autonomous-todos-invariants.json"
 TASK = re.compile(r"^- \[ \] `([^`]+)`([^\n]*(?:\n  [^\n]*)*)", re.MULTILINE)
+COMPLETED_TASK = re.compile(r"^- \[x\] `([^`]+)`", re.MULTILINE)
 
 
 def require(condition: bool, message: str) -> None:
@@ -26,9 +27,14 @@ def main() -> None:
     ledger = ledger_path.read_text()
     rows = TASK.findall(ledger)
     ids = [task_id for task_id, _ in rows]
+    completed_ids = COMPLETED_TASK.findall(ledger)
 
     require(ids == contract["unchecked_ids"], "unchecked task IDs/order changed")
-    require(len(ids) == contract["rewritten_unchecked_count"], "unchecked task count changed")
+    require(len(ids) == contract["current_unchecked_count"], "unchecked task count changed")
+    require(
+        completed_ids == contract["completed_ids_after_rewrite"],
+        "completed task IDs/order changed",
+    )
 
     dependencies: dict[str, list[str]] = {}
     conditional_ids: list[str] = []
@@ -42,7 +48,7 @@ def main() -> None:
     require(dependencies == contract["dependencies"], "task dependency graph changed")
     require(conditional_ids == contract["conditional_ids"], "conditional task set changed")
 
-    known = set(ids) | set(contract["external_dependencies"])
+    known = set(ids) | set(completed_ids) | set(contract["external_dependencies"])
     require(
         all(dep in known for values in dependencies.values() for dep in values),
         "task graph contains an unknown dependency",
@@ -71,10 +77,27 @@ def main() -> None:
         + contract["required_historical_nonrunnable_owner_paths"]
     ):
         require(owner in ledger, f"required owner path missing: {owner}")
-    require(ledger.count(contract["next_command"]) == 1, "next command must occur exactly once")
+    next_command = contract["next_command"]
+    if next_command is None:
+        require(
+            "No GPU action is currently prepared" in ledger,
+            "missing explicit no-prepared-GPU-action state",
+        )
+    else:
+        require(ledger.count(next_command) == 1, "next command must occur exactly once")
+    for command in contract["obsolete_commands"]:
+        require(command not in ledger, f"obsolete command remains runnable: {command}")
+    retained_path = ROOT / contract["retained_result_path"]
+    closure = retained_path / "result.sha256"
+    require(closure.is_file(), "retained result closure is missing")
     require(
-        ledger.count(contract["prepared_closure_sha256"]) == 1,
-        "prepared closure SHA-256 must occur exactly once",
+        hashlib.sha256(closure.read_bytes()).hexdigest()
+        == contract["retained_result_closure_sha256"],
+        "retained result closure SHA-256 changed",
+    )
+    require(
+        ledger.count(contract["retained_result_closure_sha256"]) == 1,
+        "retained result closure SHA-256 must occur exactly once",
     )
 
     source = contract["rewrite_source"]
@@ -89,9 +112,11 @@ def main() -> None:
         hashlib.sha256(baseline).hexdigest() == source["ledger_sha256"],
         "rewrite-source ledger hash does not match its commit",
     )
-    require(source["unchecked_count"] == len(contract["unchecked_ids"]),
-            "rewrite-source task count does not match preserved IDs")
-    print(f"validated {len(ids)} tasks, {len(conditional_ids)} conditionals, and an acyclic DAG")
+    require(source["unchecked_count"] == 33, "rewrite-source task count changed")
+    print(
+        f"validated {len(ids)} open tasks, {len(completed_ids)} completed task, "
+        f"{len(conditional_ids)} conditionals, and an acyclic DAG"
+    )
 
 
 if __name__ == "__main__":

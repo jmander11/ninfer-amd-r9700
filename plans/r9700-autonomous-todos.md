@@ -79,26 +79,23 @@ the conditional scale/cutover tasks. A chunk whose first absolute query position
 intentionally uses exact dense attention; never locally reanchor its estimator. No new XAttention
 task is needed.
 
-### Whole-model parity gate after the focused candidate
+### Retained whole-model parity result
 
-The next GPU action is the fully bound three-load package below. Its prepared-closure SHA-256 is
-`54cb3d6df8d4edc7521918ed8f1f4837e8a5101630ab933ba7b16b809bb06d0c`; independent review and CPU
-preflight passed. With results absent, run exactly:
+The reviewed three-load gate ran once and is retained under
+`profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/results`;
+the SHA-256 of its complete `result.sha256` closure is
+`3e262f85e9807ef2e72f3e76524624835293f2f358c4defe1d47b581d64fba06`.
+It ended `text_parity_failed`: all three 28-token continuations match; target tokens, DFlash
+decision reconstruction, and layer3 attention are exact; the Text final normalized tail differs
+in 4,908/5,120 BF16 values (first index 0; maximum absolute difference 1.0). This is completed
+diagnostic evidence. Never rerun it or use its synchronous traces for timing.
 
-```sh
-bash profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/commands.sh
-```
-
-For a read-only check, append `--preflight-only`. The runner enforces the exact source/build,
-artifact, prior authorities, selectors, device0 R9700/gfx1201/wave32, `auto`, clean injection
-environment, create-only outputs, and these C1 eager arms: ordinary fresh P129/G27, ordinary append
-P128/G27, and DFlash fresh P129/G27 K4/W5.
-
-Pass requires exact 28-token equality across both Text and target pairs, exact Text-tail traces,
-and complete DFlash decision reconstruction. On failure, inspect the retained first divergent
-boundary; timing, K5/W6, C2..4, profiling, and speed sweeps remain forbidden.
-Freeze a passing report before performance work; a combined pass does not assign causal credit to
-an individual selector.
+Next, diagnose source/CPU state and prepare an independently reviewed, create-only Text
+append-versus-fresh layer-boundary package using the retained combined-selector build. Capture or
+bisect enough Text-pair boundaries to locate the first current divergence without assuming the
+previous frontier still applies.
+No GPU action is currently prepared.
+Timing, K5/W6, C2..4, profiling, and speed sweeps remain forbidden.
 
 Every future physical experiment must be launched through a reviewed package-local `commands.sh`,
 not an ad-hoc reconstructed command. A package is runnable only when its plan contains no
@@ -148,25 +145,22 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   T=4,5,6,8,10,12,18,20; T15/T16/T24 and unlisted shapes remain WMMA. Qualified T5
   N5120/K17408 MLP-down stays default-off pending exact current-companion whole evidence and a
   material win. Do not rerun the rejected FP8 T5/T6 target gate/up route (3.77x/3.64x incumbent).
-  Rows5/6 RMSNorm is qualified but stays off; later traces moved the unresolved owner to layer3
-  full attention. Execute the three-load parity gate, returning only to its first divergent boundary.
+  Rows5/6 RMSNorm is qualified but stays off. Consume the retained failed three-load gate; do not
+  rerun it. Schedule speed work remains blocked while `DFLASH-TEXT-P129` closes Text parity.
 
-- [ ] `DFLASH-TEXT-P129` Close append-versus-fresh P129 parity. The combined selector makes layer0/1
-  frontier state and captured GDN boundaries exact; the first visible difference is layer3
-  post-mixer (3,467/5,120 BF16 values; hidden0 bits 48413/48414; predecessor exact), converging on
-  full attention as the target trace's remaining owner. Gate exact public tokens and tail traces,
-  and on failure resume at the first boundary. Evidence:
+- [ ] `DFLASH-TEXT-P129` Close append-versus-fresh P129 parity. The retained combined-selector gate
+  has exact public continuations but its final normalized tail differs in 4,908/5,120 BF16 values.
+  Its ordinary-append arm captured only the tail, so it cannot localize this failure. Prepare a
+  reviewed Text-pair layer-boundary package on the same build and find the first current divergent
+  boundary; do not assume the previous layer3 frontier survived the attention change. Evidence:
   `profiles/bench/r9700-dflash-semantic-traces-aebd5f82-20260906/results`,
   `profiles/bench/r9700-qwen3-layer-boundary-traces-43e5e4cc-20260906/results`, and
-  `profiles/bench/r9700-fp8-e2-t129-text-parity-gate-20260906/results`.
+  `profiles/bench/r9700-fp8-e2-t129-text-parity-gate-20260906/results`, plus the retained gate above.
 
-- [ ] `DFLASH-TARGET-P129` Close ordinary-W1 versus DFlash-W5 target parity while keeping target
-  arithmetic, selection, and commit state distinct. The layer3 trace is exact through input,
-  RMSNorm, projections, q/k normalization, RoPE, visibility, and cache positions 0--129; the first
-  difference is attention_fp32 element0 (max abs `0.02367246150970459`). The focused W1/W5 candidate
-  passes direct arithmetic qualification. Execute the public-token/decision/accept/commit gate;
-  on failure resume at the first divergent boundary. Evidence:
-  `profiles/bench/r9700-qwen3-layer3-attention-trace-617672eb-20260906/results`.
+- [x] `DFLASH-TARGET-P129` The retained gate closes ordinary-W1 versus DFlash-W5 target semantics:
+  all 28 public tokens, the DFlash decision/accept/commit reconstruction, and layer3 attention are
+  exact. A supplementary residual trace first differs at layer10 post-mixer (252/5,120 values;
+  predecessor exact), which does not invalidate the represented target contract.
 
 - [ ] `DFLASH-RECIPE` [depends: TERMINAL-SELECTION, CHUNK-SELECT] Select DFlash matrices from the
   real BF16 DFlash2 checkpoint rather than inheriting the base recipe. Compare canonical Q4G64,
@@ -179,7 +173,7 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   `profiles/bench/selected-dflash-prepare-20260905` and fixed-Q4/K1..11 schema-v3 owner are
   historical and non-runnable; create a fresh receipt-bound recipe-aware two-width successor.
 
-- [ ] `DFLASH-QUALITY` [depends: DFLASH-RECIPE, DFLASH-TEXT-P129, DFLASH-TARGET-P129] For each
+- [ ] `DFLASH-QUALITY` [depends: DFLASH-RECIPE, DFLASH-TEXT-P129] For each
   surviving companion retain aligned target/draft outputs, deterministic proposals and final target
   tokens, exact ordinary-target parity, per-position acceptance, accepted drafts/round, repair and
   fallback counts, and exact artifact/profile provenance under the selected cache group. Base-model
