@@ -6,7 +6,8 @@
   "timing_evidence_eligible": false,
   "source": {
     "base_commit": "f3c1a766",
-    "tree_state": "uncommitted_candidate_checkpoint",
+    "candidate_source_commit": "6fe53d531072dfd6069b951b64006603ef976ad9",
+    "tree_state": "committed_candidate_source",
     "selector": "NINFER_R9700_ATTENTION_PARITY_CANDIDATE=1"
   },
   "executable": {
