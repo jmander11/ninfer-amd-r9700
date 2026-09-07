@@ -6,29 +6,21 @@ in `docs/performance.md` and `docs/maintainer/r9700-overhaul-plan.md`, not here.
 
 ## Fixed execution and product constraints
 
-- Keep useful independent subagent work active whenever it exists, while the primary agent owns
-  serialized R9700 execution and coordinates shared-file edits. Do not invent work to fill a slot.
-- For each bounded implementation or experiment package, assign one owner and a separate
-  independent reviewer. The reviewer does not edit the owner's files or use the GPU; it checks the
-  semantic contract, routing/admission scope, workspace and Device Graph invariants, numerical
-  oracle, static ISA/resources, command safety, provenance, and pass/fail logic that are material
-  to that change. A `NO-SHIP` finding returns only the concrete defects to the owner. After repair,
-  the same reviewer rechecks those defects and must report `SHIP` before the primary agent runs the
-  focused GPU qualifier or experiment.
-- The primary agent alone serializes GPU work, independently reproduces the relevant preflight and
-  result decision, then makes and pushes a coherent WIP checkpoint. Never launch a whole-model or
-  timing run while an owner is editing its source/package, while review is unresolved, or merely
-  because a build exists. Keep other available agents on non-overlapping useful CPU work such as
-  build receipts, static inspection, package preparation, result analysis, or documentation audit.
-- At handoff, the next agent reads this ledger, checks `git status` and the pushed branch head, and
-  inspects any package-local `results/summary.json`, process receipts, and closure before deciding
-  whether to run, diagnose, or advance. Persisted results replace pasted terminal output; a failed
-  package is evidence to inspect, not permission to overwrite and rerun it.
+- Keep useful, non-overlapping subagent work active when it exists; do not invent work to fill a
+  slot. Give each bounded implementation or experiment one owner and an independent read-only,
+  CPU-only reviewer. Review the material semantics, scope, graph/workspace invariants, oracle,
+  ISA/resources, command safety, provenance, and decision logic; repair `NO-SHIP` findings and
+  require the same reviewer to report `SHIP` before GPU qualification.
+- The primary agent alone serializes R9700 work, reproduces preflight and result decisions, and
+  pushes coherent WIP checkpoints. Never launch while its owner is editing or review is unresolved.
+  At handoff, inspect this ledger, `git status`, pushed HEAD, and retained package summaries,
+  receipts, and closure. Never overwrite a failed package; its persisted result is evidence.
 - The product workload is exactly one R9700 and startup-fixed `C=1..4`. Never schedule or require an
   active `C>4` cell. Retained `C=5..8` rows are historical only.
 - Performance-admission timing requires device 0, Radeon AI PRO R9700, `gfx1201`, wave32, and power
   profile `auto`. Profiled timing is attribution-only. Do not monitor temperature or fan speed
-  unless observed evidence first indicates throttling.
+  unless observed evidence first indicates throttling. Do not change clocks, power, fan, or
+  temperature policy.
 - The only growing cache is FP8 E4M3FN keys, signed INT4 values, and FP16 value scales. Candidate
   selection remains all-Q4, mixed Q4/W8, and four-role FP8/Q4, crossed with G16/G32 and dense or
   B128/S16/tau900 Text prefill. There is no runtime cache or artifact-recipe selector.
@@ -59,327 +51,146 @@ above, not an executable task. Conditional tasks retain their explicit `if:` cla
 
 ## Mechanical continuation protocol
 
-This section is the command-level handoff for an agent that should execute bounded work rather
-than redesign the campaign. Run every command from
-`/ssdpool2nvme/local_llm/ninfer-amd-r9700`. Never run two GPU processes concurrently. CPU builds,
-static inspection, package preparation, and report review may be delegated while the primary agent
-owns the GPU. Before any timing run, require device 0 to be the R9700/gfx1201 and the power profile
-to be `auto`; do not change clocks, power, fan, or temperature policy. Stop a package on its first
-failed prerequisite and retain the failure instead of continuing to timing.
+Run from `/ssdpool2nvme/local_llm/ninfer-amd-r9700`. Stop at the first failed prerequisite and
+retain it; never continue a failed package to timing. The fixed GPU, delegation, and power rules
+above apply to every command.
 
-### Completed checkpoint: attention arithmetic parity candidate
+### Current checkpoint
 
-The current source candidate has two independent changes behind the default-off
-`NINFER_R9700_ATTENTION_PARITY_CANDIDATE` selector:
+Commits `6fe53d53` and `dce80877` retain the default-off attention-parity candidate and focused
+qualification. Dense T129 keeps rows 0..127 and overwrites row 128 with canonical W1 arithmetic;
+DFlash K4/W5 uses a DFlash-only, G16, three-launch batched W5 WMMA route. Both semantic rows, graph
+replay, independent oracles, routing/capacity scope, and gfx1201 resources passed. Diagnostic W5
+time is `0.06228868 ms` versus `0.09549904 ms` fused. Authority:
+`profiles/bench/r9700-attention-parity-candidate-focused-20260906/summary.json`. Do not rerun it.
 
-1. Dense Text T129/C129 retains dense rows 0..127 and overwrites only row 128 with the existing
-   W1/C129 FP8-Q WMMA arithmetic.
-2. DFlash K4/W5 target verification uses one three-launch batched W5 FP8-Q WMMA route. The route
-   must receive explicit DFlash identity from the DFlash caller; ordinary Text and MTP must remain
-   false. Runtime selection and workspace-capacity planning must use the same identity. The exact
-   admitted physical profile is G16, token-fastest FP8 keys, feature-fastest INT4 values, and
-   feature-fastest FP16 value scales for context 64..8191. Tree verification and every other width
-   retain their existing route.
+### XAttention checkpoint
 
-This checkpoint is complete at candidate source commit `6fe53d53` with provenance follow-up
-`dce80877`; do not rerun it as continuation work. The commands below record how it was built and
-checked, and are retained for diagnosis only:
-
-```sh
-cmake -S . -B build-r9700-attention-parity-on -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_HIP_ARCHITECTURES=gfx1201 \
-  -DNINFER_R9700_ATTENTION_PARITY_CANDIDATE=1
-cmake --build build-r9700-attention-parity-on -j4 --target \
-  ninfer_r9700_dflash_attention_route_discriminator \
-  ninfer_r9700_runtime_planner_qual \
-  ninfer_bench_support_test
-```
-
-Run the CPU/static checks before occupying the GPU:
-
-```sh
-git diff --check
-make -C tools/r9700 build/kv_op_qual.s
-PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 \
-  tools/r9700/check_attention_parity_static.py tools/r9700/build/kv_op_qual.s
-PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 \
-  tools/r9700/test_check_attention_parity_static.py
-ctest --test-dir build-r9700-attention-parity-on --output-on-failure \
-  -R '^(ninfer_bench_support_test|ninfer_r9700_attention_parity_routing_host)$'
-```
-
-The completed GPU result is summarized at
-`profiles/bench/r9700-attention-parity-candidate-focused-20260906/summary.json`. Do not overwrite
-or regenerate it. It establishes exact oracle/status/canary checks; dense Text
-rows 0..127 unchanged; overwritten Text row 128 bit-exact to standalone W1/C129; batched W5 all
-rows bit-exact to serial W5 WMMA; eager/graph replay identity; exact G16/static gfx1201 resource
-contract; no ordinary/MTP/tree selector escape; and a consistent DFlash-only runtime/capacity
-predicate. Workspace poison is not a semantic output: the dense score plane writes only its causal
-triangle, so check outer canaries and complete output, not full scratch overwrite.
+XAttention is implemented as a compile-isolated, qualification-only ordinary Text-prefill leaf;
+the default build does not link it and decode, DFlash verification/proposal, MTP, and GDN remain
+dense. The corrected B128/S16/tau900 ranker and Bq16 sparse consumer use the fixed typed cache and
+passed G16/G32 physical FP64-oracle gates. Concentrated-fixture 8K/32K operator speedups were
+28.56x/32.40x for G16 and 28.81x/32.72x for G32, but are not whole-model admission. Current status
+and evidence are in `docs/maintainer/softmax-attention.md`,
+`profiles/bench/r9700-xattention-b16-requal-s16-tau900-g16`, and
+`profiles/bench/r9700-xattention-b16-requal-s16-tau900-g32`. Remaining work is owned by
+`XATT-KEEP-DIST`, the matched quality/capacity/whole chain, `XATT-ADMISSION`, `SELECTED-NIAH`, and
+the conditional scale/cutover tasks. A chunk whose first absolute query position is not B128-aligned
+intentionally uses exact dense attention; never locally reanchor its estimator. No new XAttention
+task is needed.
 
 ### Whole-model parity gate after the focused candidate
 
-The prepared package is
-`profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906`; the
-historical `-template-` directory name is retained, but the package is now fully bound and runnable.
-Its non-mutating CPU preflight command is:
-
-```sh
-bash profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/commands.sh \
-  --preflight-only
-```
-
-Prepared-closure file SHA-256 is
-`54cb3d6df8d4edc7521918ed8f1f4837e8a5101630ab933ba7b16b809bb06d0c`. Independent review and the
-full CPU preflight pass. Results must be absent before launch. Run the exact three-load GPU gate
-with this command and no other arguments:
+The next GPU action is the fully bound three-load package below. Its prepared-closure SHA-256 is
+`54cb3d6df8d4edc7521918ed8f1f4837e8a5101630ab933ba7b16b809bb06d0c`; independent review and CPU
+preflight passed. With results absent, run exactly:
 
 ```sh
 bash profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/commands.sh
 ```
 
-The bound build enables FP8-prefix-e2, GDN-wave-QK, DFlash-MLP-down-T5,
-DFlash-RMSNorm-rows56, and attention parity, and leaves DFlash-small-T off. The runner enforces
-device0 R9700/gfx1201/wave32, `auto`, absence of profiler/injection/remapping variables,
-create-only outputs, exact source/build/artifact/corpus/prior-authority identities, and exactly
-three model loads:
+For a read-only check, append `--preflight-only`. The runner enforces the exact source/build,
+artifact, prior authorities, selectors, device0 R9700/gfx1201/wave32, `auto`, clean injection
+environment, create-only outputs, and these C1 eager arms: ordinary fresh P129/G27, ordinary append
+P128/G27, and DFlash fresh P129/G27 K4/W5.
 
-- ordinary fresh P129/G27, shared by Text-fresh and target-ordinary comparisons;
-- ordinary append P128/G27 with isolated prompt/decode;
-- DFlash fresh P129/G27 at K4/W5.
-
-The whole gate passes only if the full 28-token ordinary-fresh sequence exactly equals both the
-ordinary-append and DFlash-fresh sequences, the Text tail traces are exact, and the DFlash decision
-trace reconstructs every licensed token, accepted position, fallback, frontier transition, and
-report counter. Any public-token mismatch keeps timing inadmissible and returns to the first
-divergent recorded boundary; do not launch a speed sweep.
-
-### First admissible DFlash speed screen
-
-This is also an engineering handoff until an exact reviewed package-local `commands.sh` exists.
-Only after the whole-model parity gate passes may a package owner create a fresh immutable package with matched
-selector-off ordinary and selector-on DFlash executables from the same source commit. Run C1,
-P129+G27, K4/W5 first, with one warmup and the minimum repetitions needed for a directional screen.
-Retain token IDs and require exact parity again. Compare engine decode throughput, target-verify
-time, proposal time, acceptance per round and by draft position, fallbacks, and graph/eager
-identity. Do not run K5/W6 unless K4/W5 is valid and the result could change the decision. Do not
-run C2..4, long generation, chunk selection, capacity matrices, or profilers at this stage.
+Pass requires exact 28-token equality across both Text and target pairs, exact Text-tail traces,
+and complete DFlash decision reconstruction. On failure, inspect the retained first divergent
+boundary; timing, K5/W6, C2..4, profiling, and speed sweeps remain forbidden.
+Freeze a passing report before performance work; a combined pass does not assign causal credit to
+an individual selector.
 
 Every future physical experiment must be launched through a reviewed package-local `commands.sh`,
 not an ad-hoc reconstructed command. A package is runnable only when its plan contains no
-`UNBOUND`, its runner has a non-mutating preflight mode, and `commands.sh --validate-template` or
-the package-equivalent validation passes. Record the exact invocation in that package's plan so
+`UNBOUND`, its runner has a non-mutating preflight mode, and its package validation passes. Record
+the exact invocation in that package's plan so
 the next agent never has to infer CLI flags from prose.
 
-## Prioritized future-work decision tree
+## After-parity router
 
-This is a routing guide for future agents, not a second set of ledger checkboxes. The task IDs in
-the sections below remain the only completion ledger. Follow the first applicable branch and stop
-when its decision is resolved; do not turn the list into parallel GPU sweeps.
+### After parity: determine whether K4/W5 can beat base decode
 
-### Priority 0: establish one exact semantic baseline
+Prepare a reviewed, parity-hash-bound package with selector-off ordinary and selector-on DFlash
+executables from the same source commit for one matched C1/P129+G27 K4/W5 screen. Use one warmup
+and the minimum repetitions needed for a directional result. Recompute acceptance and retain exact
+tokens. Historical `69/123 = 0.56097561` accepted drafts/round gives
+`1.56097561` useful tokens/round, so base `27.05729956 tok/s` implies a diagnostic break-even below
+`57.6915 ms/round`. Require a material conservative whole win and order-stable/eager-graph evidence.
+Retain engine/phase throughput, per-position acceptance, fallback/repair, and exact output. Do not
+run C2..4, longer generation, capacity, chunk, or profiling at this stage.
+K5/W6 is conditional: its historical 72/591 drafts over 120 rounds accepted no fifth-position
+draft, so run it only if new K4 evidence could make K5 decision-relevant.
 
-Finish the three-load combined parity package and execute it once at C1/P129/G27/K4/W5. This is the
-only useful next GPU experiment. It answers whether the accumulated e2/GDN/MLP-down/RMSNorm/
-attention candidate profile makes both semantic pairs exact:
+### If K4 fails or is marginal
 
-- fresh dense T129 versus append P128+T1;
-- ordinary target W1 versus DFlash target-verification W5, including acceptance and commit.
-
-If either pair differs, retain the first divergent token and already-requested boundary traces.
-Change only the first differing owner; do not time, widen context, run K5/W6, or test C2..4. If both
-pairs are exact, freeze that report before any performance work. A combined pass establishes a
-usable semantic baseline but does not assign causal credit to an individual selector.
-
-### Priority 1: determine whether K4/W5 can beat base decode
-
-Create one matched, package-owned C1 screen using the exact passing source and current canonical-Q4
-evaluation companion. Measure ordinary base and DFlash K4/W5 at the same history and retain full
-token identity. Recompute acceptance rather than copying the historical value. The historical K4
-rate was 69 accepted drafts over 123 rounds, or `0.56097561` accepted drafts per round. Including
-the target token gives `1.56097561` useful tokens per round; against base `27.05729956 tok/s`, a
-DFlash round would need to finish below about `57.6915 ms` merely to break even. This is a routing
-bound, not a new acceptance authority.
-
-Require a material conservative whole speedup, not just a faster kernel. If the short screen is
-slower, retain it and proceed to one current-build phase attribution. If it wins, repeat only enough
-to establish order-stable matched evidence, then check eager/graph C1. C2..4, 8K/32K, capacity, and
-recipe ranking remain downstream of the selected base/chunk dependencies.
-
-K5/W6 is secondary. Its historical acceptance was 72/591 drafts over 120 rounds
-(`0.6000` accepted drafts per round), and draft position five was never accepted. Do not test it
-unless K4/W5 is valid and either the new acceptance distribution or a concrete scheduling result
-could make K5 win.
-
-### Priority 2: attribute only a failed or marginal K4 result
-
-Use one unprofiled whole run first. Profile only when its phase accounting cannot explain the loss.
-The next attribution must use the current four-role N16 companion and exact passing selector build;
-the legacy all-Q4/G32 trace cannot rank current target kernels. Split round service into proposal,
-target verification, acceptance/repair/commit, host gaps, copies, and graph launch. Then rank only
-owners large enough to change the `57.6915 ms` break-even decision.
-
-The current bounded mechanisms, in priority order, are:
-
-1. **Target verification Linear at W5.** Rebuild the exact current four-role call inventory before
-   choosing a kernel. The retained legacy trace assigned about 85% of service to target verify, but
-   its target gate/up matrices were Q4 whereas the current artifact's 64 Text gate/up matrices are
-   FP8. Never transfer that old owner ranking to the current artifact.
-2. **Already-qualified MLP-down T5.** N5120/K17408 improved from `0.207386 ms` to `0.057680 ms` in
-   its operator gate. Across 64 target layers the optimistic direct sum is about `9.5812 ms` per
-   verification round. The combined parity/whole run decides whether that saving survives; do not
-   rerun its standalone tile search.
-3. **Attention W5.** The exact batched route improved fused W5 from `0.09549904 ms` to
-   `0.06228868 ms`. Across 16 full-attention layers its direct optimistic saving is only about
-   `0.5314 ms` per round. It is primarily a parity repair and cannot by itself rescue a large
-   whole-round deficit.
-4. **Rows5 RMSNorm and GDN association candidates.** They are part of the semantic-baseline build.
-   Keep them only if the whole parity gate passes; measure contribution with matched selector
-   ablation only when the whole speed result is marginal enough for the answer to matter.
-5. **Launch/schedule overhead.** Inspect graph round boundaries, synchronization, and kernel gaps
-   only after device work is attributed. Admit a fusion only when it preserves the independent Op
-   oracle and graph-stable storage; do not fuse acceptance/commit state transitions merely to lower
-   launch count.
+Use a current-four-role unprofiled run first; the legacy all-Q4/G32 trace cannot rank the FP8 target
+path. If phase accounting is insufficient, profile proposal, target verification,
+acceptance/repair/commit, host/copy gaps, and graph launch, then pursue only an owner able to change
+the `57.6915 ms` bound. Current leverage is target-verification Linear first: qualified T5
+N5120/K17408 MLP-down changed `0.207386→0.057680 ms` (optimistic `9.5812 ms` over 64 layers), while
+W5 attention changed `0.09549904→0.06228868 ms` (only `0.5314 ms` over 16 layers). Ablate RMSNorm,
+GDN, or launch scheduling only if whole performance is marginal; preserve Op oracles, state
+transactions, and graph-stable storage.
 
 Do not reopen the rejected FP8 T5/T6 target gate/up challenger, the serial fifteen-launch W5 WMMA
 route, adjacent M128N256 prefill tiles, non-temporal dot8, grouped-PV split512, or K1..11 DFlash
 shortlist without a materially different source mechanism and a bound showing it can change the
 end-to-end decision.
 
-### Priority 3: improve acceptance through the real DFlash companion
-
-Performance tuning cannot compensate indefinitely for low acceptance. After
-`TERMINAL-SELECTION` and `CHUNK-SELECT`, make DFlash recipe selection the next quality lever:
-
-- convert from the real BF16 DFlash2 checkpoint and compare canonical Q4G64, source-MSE Q4G64,
-  and source-MSE W8G32 on the same base and cache group;
-- keep both selector codebooks and private DFlash state BF16;
-- keep the optimized 131072-row shortlist head Q4G64 with its exact I32 token map, and verify its
-  mapping and output directly rather than reintroducing a full unquantized head;
-- rank recipes by admission-qualified acceptance and whole throughput, never synthetic matrix MSE
-  alone;
-- consider row-scaled E4M3 only after it has DFlash-owned prepared Linear execution, exact-shape
-  gfx1201 speed, storage accounting, and generated-quality evidence.
-
-For each surviving recipe, report per-position acceptance, accepted drafts per round, repair and
-fallback counts, proposal determinism, exact target outputs, and K4/W5 whole throughput. Reject a
-recipe that raises acceptance but loses the conservative whole objective.
-
-### Priority 4: concurrency and production admission
-
-Only a valid, materially faster C1 K4/W5 route advances. After the base artifact and shared chunk
-are selected, run DFlash C1..4 and never above C4. At each concurrency retain graph startup/replay,
-resolved workspace and fixed-family graph allocation, capacity/headroom, exact ordinary output,
-acceptance, prefill, decode, and whole throughput. A capacity failure excludes that exact
-recipe/K/W/C cell and does not authorize lowering correctness or changing cache format.
-
-### Priority 5: deferred base work
-
-Ordinary base decode is closed at the bounded `27.05729956 tok/s` practical ceiling. Do not resume
-random decode microkernels. After final selection, `SELECTED-PROFILE` still must verify expected
-native INT4/FP8 instructions, useful memory streaming/bandwidth where applicable, absence of
-material stalls, and GL2/TCP behavior on the loaded final executable.
-
-Dense P2048 remains `1904.339303 tok/s`, below the user's 2,000 floor, and no practical ceiling was
-proved. Do not launch chunk selection or the 48-cell capacity campaign. Prefill may reopen only for
-a materially new mechanism that independently supports at most `3.18103603125 ms` per affected
-matrix and at least `51.438603 ms` whole-P2048 saving, or if the user explicitly changes the floor.
-Record further speculative prefill ideas as hypotheses, not executable tasks, until they meet that
-return bound.
-
-### Delegated package-owner engineering queue
-
-Package preparation is useful parallel CPU work and never authorizes GPU execution by itself:
-
-1. Bind and review the current three-load exact parity package.
-2. Prepare, but keep fail-closed, a matched K4/W5 C1 speed-screen package whose runner requires the
-   parity result hash before preflight can pass.
-3. Prepare a current-four-role K4/W5 phase-attribution package that requires a retained marginal or
-   losing speed result; it must refuse execution after a clear win.
-4. After terminal base/chunk selection only, regenerate the recipe-aware two-width DFlash
-   conversion, quality, capacity, and Pareto packages.
-5. For every package, provide `--preflight`, exact hashes, source/build receipts, `auto` endpoints,
-   profiler/injection rejection, exclusive result creation, process receipts, analysis tests, and
-   a closure. Put the literal launch command in its own `commands.sh`; until that exists, label the
-   step an engineering handoff rather than an experiment.
+Recipe/acceptance, C1..4 admission, selected hardware profiling, and held prefill work are owned by
+the corresponding unchecked tasks below. Package owners may prepare their fail-closed CPU artifacts
+in parallel, but no prepared package bypasses its dependency or authorizes GPU execution.
 
 ## Active now: DFlash semantic and schedule work
 
-- [ ] `DFLASH-SCHEDULE` Finish recipe-independent
-  schedule and exact-shape work for only K4/W5 and K5/W6. Retain the delivered K1..11 input
-  contract but no broad shortlist. The qualified packed-Q4 route remains limited to N34816/K5120
-  at T=4,5,6,8,10,12,18,20; T15/T16/T24 and every unlisted shape stay on WMMA. The T5
-  N5120/K17408 MLP-down candidate is standalone-qualified but remains off by default. Require
-  current-companion whole A/B, token parity, and a material end-to-end win before any route change.
-  The exact T5/T6 FP8 target gate/up challenger is terminally rejected at 3.77x/3.64x incumbent
-  time; do not rerun it without a changed source mechanism. The K5120 one-CTA RMSNorm route is
-  standalone-qualified at rows5/6 near 0.083x incumbent time and integrated behind an off-by-default
-  exact compile selector. Its clean matched builds pass 108-case eager and rows5/6 graph numerical
-  gates in both selector states at at most one BF16 step, but selector-on fails the exact P129 token
-  gate earlier at index21 and remains off. Subsequent state and boundary traces resolved that
-  diagnostic frontier and moved the common remaining owner to layer3 full attention. Bind and
-  execute the three-load whole-parity gate; on failure return only to its first divergent boundary.
+- [ ] `DFLASH-SCHEDULE` Finish recipe-independent exact-shape work only for K4/W5 and K5/W6; retain
+  the K1..11 input contract, not its campaign. Packed Q4 is qualified only for N34816/K5120 at
+  T=4,5,6,8,10,12,18,20; T15/T16/T24 and unlisted shapes remain WMMA. Qualified T5
+  N5120/K17408 MLP-down stays default-off pending exact current-companion whole evidence and a
+  material win. Do not rerun the rejected FP8 T5/T6 target gate/up route (3.77x/3.64x incumbent).
+  Rows5/6 RMSNorm is qualified but stays off; later traces moved the unresolved owner to layer3
+  full attention. Execute the three-load parity gate, returning only to its first divergent boundary.
 
-- [ ] `DFLASH-TEXT-P129` Localize the shared Text append-versus-fresh dependence for the identical
-  effective P129 history. The tail differs in 4,978/5,120 BF16 elements; exact boundary tracing is
-  equal through layer0 MLP and first differs after the layer1 GDN mixer in 142/5,120 elements. Now
-  detail tracing is exact through h, controls, and q/k/v/z, then first differs at layer1 recurrence
-  output o (106/6,144 elements). The subsequent FP32-state discriminator is complete. The exact
-  selector-one combined build makes both layer-zero and layer-one frontier states and every
-  captured layer-one GDN boundary byte-exact; its first visible residual difference is instead
-  layer-three post-mixer (3,467/5,120 BF16 elements, first hidden 0 bits 48413 versus 48414, exact
-  predecessor). This is consistent with the e2 T129 choice removing the earlier layer-zero/layer-one
-  path difference, but the combined build is not a matched isolated-causality test. Text now converges
-  with the target result on the first full-attention layer as the remaining arithmetic owner.
-  Evidence is under `profiles/bench/r9700-dflash-semantic-traces-aebd5f82-20260906/results` and
-  `profiles/bench/r9700-qwen3-layer-boundary-traces-43e5e4cc-20260906/results`, and the current
-  selector-one result is under `profiles/bench/r9700-fp8-e2-t129-text-parity-gate-20260906/results`.
+- [ ] `DFLASH-TEXT-P129` Close append-versus-fresh P129 parity. The combined selector makes layer0/1
+  frontier state and captured GDN boundaries exact; the first visible difference is layer3
+  post-mixer (3,467/5,120 BF16 values; hidden0 bits 48413/48414; predecessor exact), converging on
+  full attention as the target trace's remaining owner. Gate exact public tokens and tail traces,
+  and on failure resume at the first boundary. Evidence:
+  `profiles/bench/r9700-dflash-semantic-traces-aebd5f82-20260906/results`,
+  `profiles/bench/r9700-qwen3-layer-boundary-traces-43e5e4cc-20260906/results`, and
+  `profiles/bench/r9700-fp8-e2-t129-text-parity-gate-20260906/results`.
 
-- [ ] `DFLASH-TARGET-P129` On the fresh-P129 common prefix through generated index 26, localize the
-  first ordinary-versus-DFlash difference. Retain target-verification top-two/argmax by column,
-  accepted column, licensed tokens, and next frontier so target arithmetic, acceptance selection,
-  and post-commit state remain distinct. Target logits already differ at the first generated step;
-  exact boundary tracing is equal through layer0 MLP and first differs after the layer1 GDN mixer
-  in 1,219/5,120 elements. The rows5 CTA candidate changes the generated trajectory at index21 and
-  does not restore overall parity, but selector-on makes every captured layer1 GDN field byte-exact
-  and moves the first visible target residual difference to the layer3 full-attention mixer
-  (2,796/5,120). The exact two-arm layer3 trace under
-  `profiles/bench/r9700-qwen3-layer3-attention-trace-617672eb-20260906/results` now proves the
-  selected column is byte-exact through input, RMSNorm, q/gate/k/v projection, q/k normalization,
-  RoPE, causal visibility, and canonical cache positions 0--129; the first difference is
-  attention_fp32 element 0 (maximum absolute difference 0.02367246150970459). The direct ordinary
-  W1/DFlash W5 arithmetic qualifier is complete; pairwise parity remains supplementary and the
-  final public greedy-token gate remains exact. The default-off combined attention candidate passed its focused physical
-  qualifier: batched W5 is all-row bit-exact to serial W5 WMMA and graph replay, its selected row0
-  is exact to ordinary W1, and it measures a diagnostic `0.06228868 ms` versus `0.09549904 ms` for
-  incumbent fused W5. The Text P129 dense prefix is unchanged and its overwritten tail is exact to
-  append W1. The concise result is
-  `profiles/bench/r9700-attention-parity-candidate-focused-20260906/summary.json`. This is not yet
-  public-token or whole-inference evidence; execute the three-load exact parity gate described
-  above before any speed screen or route promotion.
+- [ ] `DFLASH-TARGET-P129` Close ordinary-W1 versus DFlash-W5 target parity while keeping target
+  arithmetic, selection, and commit state distinct. The layer3 trace is exact through input,
+  RMSNorm, projections, q/k normalization, RoPE, visibility, and cache positions 0--129; the first
+  difference is attention_fp32 element0 (max abs `0.02367246150970459`). The focused W1/W5 candidate
+  passes direct arithmetic qualification. Execute the public-token/decision/accept/commit gate;
+  on failure resume at the first divergent boundary. Evidence:
+  `profiles/bench/r9700-qwen3-layer3-attention-trace-617672eb-20260906/results`.
 
 - [ ] `DFLASH-RECIPE` [depends: TERMINAL-SELECTION, CHUNK-SELECT] Select DFlash matrices from the
   real BF16 DFlash2 checkpoint rather than inheriting the base recipe. Compare canonical Q4G64,
-  source-MSE Q4G64, and source-MSE W8G32. Admit row-scaled E4M3 only after exact-shape speed,
-  DFlash quality, and DFlash-owned prepared Linear execution exist. Materialize survivors by
+  source-MSE Q4G64, and source-MSE W8G32 while preserving BF16 selector codebooks and private state.
+  Keep the optimized 131072-row Q4G64 head with its exact I32 token map. Admit row-scaled E4M3 only
+  after exact-shape speed, DFlash quality, storage, and DFlash-owned prepared Linear execution.
+  Rank by qualified acceptance and whole throughput, not matrix MSE. Materialize survivors by
   byte-exactly extending the selected N16 base with the recipe-aware 66-object inventory and bind
   base receipt, BF16 source, recipe, plan, index, and ranking. The old
   `profiles/bench/selected-dflash-prepare-20260905` and fixed-Q4/K1..11 schema-v3 owner are
   historical and non-runnable; create a fresh receipt-bound recipe-aware two-width successor.
 
-- [ ] `DFLASH-QUALITY` [depends: DFLASH-RECIPE, DFLASH-TEXT-P129, DFLASH-TARGET-P129] Retain matched
-  quality for every surviving companion
-  under the selected cache group: aligned target/draft outputs, deterministic proposal and final
-  target tokens, exact ordinary-target parity, and exact artifact/profile provenance. Base-model
-  PPL owns target NLL; synthetic operator error cannot select a DFlash recipe.
+- [ ] `DFLASH-QUALITY` [depends: DFLASH-RECIPE, DFLASH-TEXT-P129, DFLASH-TARGET-P129] For each
+  surviving companion retain aligned target/draft outputs, deterministic proposals and final target
+  tokens, exact ordinary-target parity, per-position acceptance, accepted drafts/round, repair and
+  fallback counts, and exact artifact/profile provenance under the selected cache group. Base-model
+  PPL owns target NLL; synthetic operator error cannot select a recipe.
 
-- [ ] `DFLASH-WHOLE` [depends: DFLASH-QUALITY, DFLASH-SCHEDULE] Retain K4/W5 and K5/W6 acceptance,
-  exact output,
-  capacity, and whole-inference evidence at C1..4: resolved W, per-position acceptance, fallback and
-  repair, prefill/graph-decode throughput, capacity/headroom, and focused attribution when needed.
-  Select only with fresh recipe-aware two-width evidence and a material conservative win over the
-  exact spec-none ordinary controls; no individual matrix or manual frontier closes this task.
+- [ ] `DFLASH-WHOLE` [depends: DFLASH-QUALITY, DFLASH-SCHEDULE] Advance only a valid, materially
+  faster C1 K4/W5 route, then retain fresh recipe-aware K4/W5 and decision-relevant K5/W6 evidence
+  at C1..4: exact output, resolved W, per-position acceptance, fallback/repair, prefill/graph-decode
+  throughput, graph startup/replay, resolved workspace and fixed-family graph allocation, and
+  capacity/headroom. A capacity failure excludes that exact recipe/K/W/C cell. Compare with exact
+  spec-none controls; no matrix result or manual frontier closes this task.
 
 ## Blocked terminal-selection chain
 
