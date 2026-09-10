@@ -57,11 +57,29 @@ above apply to every command.
 
 ### Current checkpoint
 
-Commits `6fe53d53` and `dce80877` retain the default-off attention-parity candidate and focused
-qualification. Dense T129 keeps rows 0..127 and overwrites row 128 with canonical W1 arithmetic;
-DFlash K4/W5 uses a DFlash-only, G16, three-launch batched W5 WMMA route. Both semantic rows, graph
-replay, independent oracles, routing/capacity scope, and gfx1201 resources passed. Diagnostic W5
-time is `0.06228868 ms` versus `0.09549904 ms` fused. Authority:
+`DFLASH-SCHEDULE` closed 2026-09-08: the small-T packed-Q4 candidate (N34816/K5120 + MLP-down T5,
+`NINFER_R9700_DFLASH_SMALL_T_CANDIDATE`) was A/B-tested on the 6fe53d53 combined companion
+(C1/P129+G27, K4/W5 + K5/W6, eager, 3 reps) and found to have no material decode-speed effect
+(K4/W5 candidate/control ratio 0.9993, K5/W6 ratio 0.9977, both within noise); it stays
+default-off. The matched-A/B parity gate caught a K5/W6 verify-context correctness bug (emits
+109600 where base decode emits 96917 at token index 5; deterministic, pre-existing), filed as
+`DFLASH-K5W6-VERIFY`. Investigation in progress: ruled out position-filling and the two_block
+path; overturned the initial "5th column" hypothesis (the emitted terminal is the target's argmax
+at column count ≤2, not a specific 5th column); the fault is in the target-verify context (KV
+cache or attention mask). Next lead: phantom-entry hypothesis — examine the KV transaction
+segment logic (how many KV entries are actually appended vs. the emitted count). Until the bug is
+fixed, K5/W6 is not production-admissible; only K4/W5 passes parity. Evidence:
+`profiles/bench/r9700-dflash-small-t-whole-ab-6fe53d53-20260906` (sealed). Prior:
+`DFLASH-TEXT-P129` append-versus-fresh Text parity closed (token-level exact; first intermediate
+divergence at layer 13 post_mixer, one BF16 bit, no generated-token change) and the
+mechanical-protocol K4/W5 directional screen closed with a material win; both are recorded under
+their task items and the after-parity router.
+
+Prior checkpoint (commits `6fe53d53` and `dce80877`): retained the default-off attention-parity
+candidate and focused qualification. Dense T129 keeps rows 0..127 and overwrites row 128 with
+canonical W1 arithmetic; DFlash K4/W5 uses a DFlash-only, G16, three-launch batched W5 WMMA route.
+Both semantic rows, graph replay, independent oracles, routing/capacity scope, and gfx1201
+resources passed. Diagnostic W5 time is `0.06228868 ms` versus `0.09549904 ms` fused. Authority:
 `profiles/bench/r9700-attention-parity-candidate-focused-20260906/summary.json`. Do not rerun it.
 
 ### XAttention checkpoint
@@ -90,12 +108,12 @@ decision reconstruction, and layer3 attention are exact; the Text final normaliz
 in 4,908/5,120 BF16 values (first index 0; maximum absolute difference 1.0). This is completed
 diagnostic evidence. Never rerun it or use its synchronous traces for timing.
 
-Next, diagnose source/CPU state and prepare an independently reviewed, create-only Text
-append-versus-fresh layer-boundary package using the retained combined-selector build. Capture or
-bisect enough Text-pair boundaries to locate the first current divergence without assuming the
-previous frontier still applies.
+The create-only Text append-versus-fresh layer-boundary package it prescribed was prepared,
+reviewed, and run as `profiles/bench/r9700-text-layer-boundary-traces-6fe53d53-20260906`, closing
+`DFLASH-TEXT-P129`; the mechanical-protocol K4/W5 directional screen closed as well (see the
+after-parity router).
 No GPU action is currently prepared.
-Timing, K5/W6, C2..4, profiling, and speed sweeps remain forbidden.
+K4/W5 screen timing remains directional only; K5/W6, C2..4, profiling, and speed sweeps remain forbidden.
 
 Every future physical experiment must be launched through a reviewed package-local `commands.sh`,
 not an ad-hoc reconstructed command. A package is runnable only when its plan contains no
@@ -141,13 +159,40 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
 
 ## Active now: DFlash semantic and schedule work
 
-- [ ] `DFLASH-SCHEDULE` Finish recipe-independent exact-shape work only for K4/W5 and K5/W6; retain
+- [x] `DFLASH-SCHEDULE` Finish recipe-independent exact-shape work only for K4/W5 and K5/W6; retain
   the K1..11 input contract, not its campaign. Packed Q4 is qualified only for N34816/K5120 at
   T=4,5,6,8,10,12,18,20; T15/T16/T24 and unlisted shapes remain WMMA. Qualified T5
   N5120/K17408 MLP-down stays default-off pending exact current-companion whole evidence and a
   material win. Do not rerun the rejected FP8 T5/T6 target gate/up route (3.77x/3.64x incumbent).
   Rows5/6 RMSNorm is qualified but stays off. Consume the retained failed three-load gate; do not
-  rerun it. Schedule speed work remains blocked while `DFLASH-TEXT-P129` closes Text parity.
+  rerun it. Text parity closed 2026-09-06 (`DFLASH-TEXT-P129`), unblocking the schedule speed
+  work above. CLOSED 2026-09-08: the small-T packed-Q4 candidate (N34816/K5120 + MLP-down T5,
+  `NINFER_R9700_DFLASH_SMALL_T_CANDIDATE`) was A/B-tested on the 6fe53d53 combined companion
+  (C1/P129+G27, K4/W5 + K5/W6, eager, 3 reps) and found to have no material decode-speed effect
+  (K4/W5 candidate/control ratio 0.9993, K5/W6 ratio 0.9977, both within noise over 3 reps); it
+  stays default-off. The matched-A/B parity gate also caught a K5/W6 5th-column verify-context
+  correctness bug, filed as `DFLASH-K5W6-VERIFY`. Evidence:
+  `profiles/bench/r9700-dflash-small-t-whole-ab-6fe53d53-20260906` (sealed).
+
+- [ ] `DFLASH-K5W6-VERIFY` Fix the K5/W6 verify-context correctness bug. The greedy K5/W6 DFlash
+  path (draft_window=5, verify_width=6, chain-verify) emits a wrong token: at C1/P129+G27 on
+  6fe53d53 it produces token 109600 where the base (ordinary) decode produces 96917 (token index
+  5 of the 28-token sequence; all other 27 positions match). Both the small-T control and
+  candidate builds diverge identically, so it is deterministic and pre-existing (not caused by the
+  small-T selector). Investigation progress (2026-09-08): (1) Ruled out position-filling —
+  `prepare_verify_kernel` correctly fills all 6 columns when extent=5 (positions = base+c for
+  c≤extent). (2) Ruled out the two_block path — `two_block_first=7`, so k=5 is single-block, not
+  two-block. (3) Overturned the initial "5th column" hypothesis — `accepted_per_position=[6,5,0,0,0]`
+  means the chain breaks at position 2, so the emitted terminal is the target's argmax at column
+  count (≤2), not a specific 5th column; the fault is in the target-verify context (KV cache or
+  attention mask), not in a specific column. Next lead: phantom-entry hypothesis — examine the KV
+  transaction segment logic (how many KV entries are actually appended vs. the emitted count).
+  Suspected locations: `dflash_impl.h:765-772` (speculative_prepare_verify_inputs),
+  `speculative_round.hip:479-500` (prepare_verify_kernel), `speculative_round.hip:427-441`
+  (chain_commit_greedy). Fix the verify-context bug, qualify against the base decode (exact
+  greedy-token parity), and re-run the K5/W6 parity. Until fixed, K5/W6 is not
+  production-admissible; only K4/W5 passes parity. Evidence:
+  `profiles/bench/r9700-dflash-small-t-whole-ab-6fe53d53-20260906/results` (sealed).
 
 - [x] `DFLASH-TEXT-P129` Close append-versus-fresh P129 parity. The retained combined-selector gate
   has exact public continuations but its final normalized tail differs in 4,908/5,120 BF16 values.

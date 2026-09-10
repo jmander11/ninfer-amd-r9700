@@ -7,13 +7,14 @@
     "unchecked_count": 33,
     "removed_meta_item": "Perform a requirements-preserving conciseness pass on this live ledger."
   },
-  "current_unchecked_count": 32,
+  "current_unchecked_count": 31,
   "completed_ids_after_rewrite": [
+    "DFLASH-SCHEDULE",
+    "DFLASH-TEXT-P129",
     "DFLASH-TARGET-P129"
   ],
   "unchecked_ids": [
-    "DFLASH-SCHEDULE",
-    "DFLASH-TEXT-P129",
+    "DFLASH-K5W6-VERIFY",
     "DFLASH-RECIPE",
     "DFLASH-QUALITY",
     "DFLASH-WHOLE",
@@ -54,8 +55,7 @@
     "XATT-CUTOVER-CONDITIONAL"
   ],
   "dependencies": {
-    "DFLASH-SCHEDULE": [],
-    "DFLASH-TEXT-P129": [],
+    "DFLASH-K5W6-VERIFY": [],
     "DFLASH-RECIPE": ["TERMINAL-SELECTION", "CHUNK-SELECT"],
     "DFLASH-QUALITY": ["DFLASH-RECIPE", "DFLASH-TEXT-P129"],
     "DFLASH-WHOLE": ["DFLASH-QUALITY", "DFLASH-SCHEDULE"],
@@ -115,11 +115,10 @@
     "ceil(0.0025 * scored_positions)",
     "Do not change clocks, power, fan, or",
     "require the same reviewer to report `SHIP`",
-    "Timing, K5/W6, C2..4, profiling, and speed sweeps remain forbidden",
+    "K4/W5 screen timing remains directional only; K5/W6, C2..4, profiling, and speed sweeps remain forbidden.",
     "No GPU action is currently prepared",
     "Never rerun it or use its synchronous traces for timing",
     "4,908/5,120 BF16",
-    "selector-off ordinary and selector-on DFlash",
     "resolved workspace and fixed-family graph allocation",
     "serial fifteen-launch W5 WMMA",
     "adjacent M128N256 prefill tiles",
