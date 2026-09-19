@@ -79,6 +79,7 @@ def validate_plan() -> tuple[dict, dict, Path]:
             plan.get("retained_token_authority") != reviewed["retained_token_authority"] or
             plan.get("expected_tokens") != reviewed["expected_tokens"] or
             plan.get("admission") != reviewed["admission"] or
+            plan.get("exact_invocation") != package["exact_invocation"] or
             plan.get("vram_gate") != package["vram_gate"] or
             plan.get("campaign") != {"fresh_complete_six_role_campaign": True,
                                      "partial_pair_resume_allowed": False}):

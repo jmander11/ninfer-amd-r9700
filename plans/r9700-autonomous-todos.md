@@ -131,14 +131,23 @@ after-parity router).
 The bounded DFlash verify-down split-K task is closed default-off: S=8 and S=2 both failed exact
 public-token parity, and S=4 has no mechanism for restoring the incumbent serial-FMA semantics.
 Do not rerun either sealed package or infer an S=4 command. The reviewed selector-free
-BASE-DECODE-BW measurement completed. The BF16 GDN projection/control and all-Q4 T1 attention
-paired-projection direct qualifiers also completed and admitted their respective fused routes;
-their production implementations and separate whole-model A/Bs are now CPU-only work. The repaired
-all-Q4 C2..4 paired-WMMA direct qualifier also completed and admitted its route for a product
-candidate plus whole A/B. The BF16 GDN whole gate retained an environmental OOM attempt described
-below, and device 0 now requires a maintainer GPU reset before more physical work.
-No GPU action is currently prepared. Every other remaining unchecked task depends directly or
-transitively on the external `DENSE-FLOOR-DECISION`.
+BASE-DECODE-BW measurement completed. The BF16 GDN, all-Q4 T1 attention, and all-Q4 C2..4
+paired-projection *design* qualifiers completed and admitted production candidates; none of those
+later candidates is promoted merely by its design result. The BF16 GDN production symbol is
+direct-qualified, but its first whole gate retained an environmental OOM attempt, and device 0 now
+requires a maintainer GPU reset before more physical work. The deterministic queue after reset is:
+
+1. run the complete six-role BF16 GDN whole gate from `profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-retry-20260919`;
+2. direct-qualify T1 attention with `profiles/bench/r9700-attention-projection-t1-production-qualification-20260919`, then prepare/review/run `profiles/bench/r9700-attention-q4-pair-t1-whole-ab-20260919`;
+3. direct-qualify C2..4 with `profiles/bench/r9700-paired-projection-c2c4-production-qualification-20260919`, then prepare/review/run `profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919`;
+4. resolve the BF16 GDN and both paired-route promotion decisions, then run `profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919`.
+
+Do not promote or remove any candidate selector anywhere between queue items 1 through 3 because
+doing so invalidates downstream cache and source authorities. No GPU action is currently runnable: execution
+policy prohibits every GPU package invocation until a maintainer reset lowers device-0 VRAM to at
+most both 1 GiB and 5%; individual downstream packages need not implement that global queue gate.
+Every other remaining unchecked task depends
+directly or transitively on this queue or the external `DENSE-FLOOR-DECISION`.
 
 Every future physical experiment must be launched through a reviewed package-local `commands.sh`,
 not an ad-hoc reconstructed command. A package is runnable only when its plan contains no
@@ -294,7 +303,7 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   retained failure and all original authorities, reruns all six roles, and refuses plan/results or
   any role unless PCI-derived device-0 VRAM is at most both 1 GiB and 5% with power `auto`. Its
   current preflight correctly fails at 28,413,235,200/34,208,743,424 bytes. After reset and only
-  after the low-VRAM preflight passes, its exact measurement command is recorded in its plan.
+  after the low-VRAM preflight passes, run the exact package invocations recorded in its plan.
 
   The all-Q4 T1 attention paired-projection direct gate compared the two
   complete N7168/K5120 Q4 linears plus four incumbent extracts against one shared A8G64
@@ -310,6 +319,12 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   a production-symbol candidate and matched selector-off/on whole C1 A/B with exact public tokens;
   it does not authorize promotion. Select only T1 with both exact all-Q4 Q4G64_F16S bindings;
   mixed weights and T2..4 retain their existing routes until separately qualified.
+  The compile-gated production implementation exists. Its direct production-symbol package is
+  `profiles/bench/r9700-attention-projection-t1-production-qualification-20260919`, and the dependent
+  whole package is `profiles/bench/r9700-attention-q4-pair-t1-whole-ab-20260919`. Independent review
+  reported `SHIP` for the direct package's create-only hardening and the whole package's complete
+  cache, source, and exact-invocation authorities. The whole package must not be prepared until the
+  direct qualification receipt exists.
 
   The independently reviewed C2..4 paired-WMMA direct gate covers both the GDN N4096+N12288 pair
   (48 calls/round) and attention N7168+N7168 pair (16 calls/round). It compares two complete
@@ -337,11 +352,15 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   production-symbol package is
   `profiles/bench/r9700-paired-projection-c2c4-production-qualification-20260919`; its non-GPU gate
   passes native IU4/wave32 at 57 VGPR, 32 SGPR, and no LDS/scratch/spills. The separately reviewed
-  whole package is `profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919`. Physical
-  qualification remains queued behind the required device-0 reset and the GDN whole retry.
+  Independent review reported `SHIP` for the whole package at
+  `profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919`; no separate review artifact was
+  created. Physical
+  qualification remains queued behind the required device-0 reset, the GDN whole retry, and the
+  T1 attention campaign. Do not prepare the whole package before its direct receipt exists.
 
-  After the admitted paired routes are resolved, the next bounded mechanism is all-Q4 T1
-  projected-residual fusion for N5120/K6144 and N5120/K17408. These are respectively the 16
+  After the admitted paired routes are resolved, the reviewed-ready direct package
+  `profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919` is the next bounded mechanism:
+  all-Q4 T1 projected-residual fusion for N5120/K6144 and N5120/K17408. These are respectively the 16
   attention-output plus 48 GDN-output projections and 64 MLP-down projections: exactly 128
   residual publications/token. The retained ordinary C1 trace measures the removable residual-add
   family at `0.2114 ms/token` (`0.20956 ms` interval union); fusing the exact

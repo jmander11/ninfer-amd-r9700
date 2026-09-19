@@ -10,6 +10,7 @@ import subprocess
 
 ROOT = Path("/ssdpool2nvme/local_llm/ninfer-amd-r9700")
 PACKAGE = Path(__file__).resolve().parent
+PACKAGE_PLAN = PACKAGE / "package-plan.json"
 PLAN = PACKAGE / "plan.json"
 DIRECT = ROOT / "profiles/bench/r9700-paired-projection-c2c4-production-qualification-20260919/qualification.json"
 ARTIFACT = ROOT / "out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer"
@@ -30,6 +31,11 @@ ORDER = [
     {"concurrency": 3, "role": "control"}, {"concurrency": 3, "role": "candidate"},
     {"concurrency": 4, "role": "control"}, {"concurrency": 4, "role": "candidate"},
 ]
+EXACT_INVOCATION = {
+    "prepare": "bash profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919/commands.sh --prepare",
+    "preflight": "bash profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919/commands.sh --preflight",
+    "measure": "bash profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919/commands.sh --measure",
+}
 COMMON_CACHE = {
     "CMAKE_BUILD_TYPE": "Release", "CMAKE_HIP_ARCHITECTURES": "gfx1201",
     "NINFER_BUILD_APPS": "ON", "NINFER_BUILD_BENCHMARKS": "ON",
@@ -58,7 +64,7 @@ SOURCES = [ROOT / path for path in (
     "bench/targets/qwen3_8_27b/ninfer_bench_support.cpp",
     "tools/r9700/target_variant_pair_c2c4_qual.cpp",
 )] + [PACKAGE / name for name in
-      ("README.md", "commands.sh", "prepare.py", "validate.py", "run.py")]
+      ("README.md", "package-plan.json", "commands.sh", "prepare.py", "validate.py", "run.py")]
 
 
 def fail(message: str) -> None: raise RuntimeError(message)
@@ -71,6 +77,17 @@ def digest(path: Path) -> str:
 def identity(path: Path) -> dict:
     path = path.resolve(strict=True)
     return {"path": str(path), "bytes": path.stat().st_size, "sha256": digest(path)}
+
+
+def package_authority() -> dict:
+    authority = json.loads(PACKAGE_PLAN.read_text())
+    if (authority.get("schema") !=
+            "ninfer.r9700.paired-projection-c2c4-whole-ab-package.v1" or
+            authority.get("status") != "reviewed_ready" or
+            authority.get("production_routing_authorized") is not False or
+            authority.get("exact_invocation") != EXACT_INVOCATION):
+        fail("package invocation authority differs")
+    return authority
 
 
 def require_identity(item: dict, label: str) -> Path:
@@ -205,6 +222,7 @@ def configure(role: str, selector: int) -> dict:
 
 def main() -> int:
     if Path.cwd() != ROOT: fail(f"prepare must run from {ROOT}")
+    authority = package_authority()
     if PLAN.exists() or PLAN.is_symlink(): fail("plan already exists; never overwrite")
     for role, directory in BUILDS.items():
         if directory.exists() or directory.is_symlink():
@@ -228,6 +246,8 @@ def main() -> int:
         "schema": "ninfer.r9700.paired-projection-c2c4-whole-ab-plan.v1",
         "status": "prepared_awaiting_independent_review", "production_routing_authorized": False,
         "claim": "Matched selector-off/on whole ordinary decode A/B at C2, C3, and C4.",
+        "package_authority": identity(PACKAGE_PLAN),
+        "exact_invocation": authority["exact_invocation"],
         "workload": {"device": 0, "concurrency": [2, 3, 4], "whole_pg": "8192,256",
                      "prefill_chunk": 4096, "kv_capacity": "workload", "spec": "none",
                      "draft_tokens": 0, "device_graph": True, "retain_token_ids": True,

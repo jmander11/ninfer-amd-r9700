@@ -14,6 +14,7 @@ ROOT = Path("/ssdpool2nvme/local_llm/ninfer-amd-r9700")
 PACKAGE = Path(__file__).resolve().parent
 PLAN_PATH = PACKAGE / "plan.json"
 RESULTS = PACKAGE / "results"
+INVOCATION_AUTHORITY = PACKAGE / "invocation-authority.json"
 
 
 def fail(message: str) -> None:
@@ -38,6 +39,23 @@ def identity(path: Path) -> dict:
 def write_exclusive(path: Path, text: str) -> None:
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, 0o644)
     with os.fdopen(descriptor, "w") as stream: stream.write(text)
+
+
+def require_exact_invocation(plan: dict) -> None:
+    authority = load(INVOCATION_AUTHORITY)
+    expected = {
+        "schema": "ninfer.r9700.attention-q4-pair-t1-whole-ab-invocation-authority.v1",
+        "prepare": "bash profiles/bench/r9700-attention-q4-pair-t1-whole-ab-20260919/commands.sh --prepare",
+        "preflight": "bash profiles/bench/r9700-attention-q4-pair-t1-whole-ab-20260919/commands.sh --preflight",
+        "measure": "bash profiles/bench/r9700-attention-q4-pair-t1-whole-ab-20260919/commands.sh --measure",
+    }
+    if authority != expected or plan.get("exact_invocation") != authority:
+        fail("invocation authority differs")
+    bound = [item for item in plan.get("sources", [])
+             if item.get("path") == str(INVOCATION_AUTHORITY)]
+    if (len(bound) != 1 or not INVOCATION_AUTHORITY.is_file() or
+            INVOCATION_AUTHORITY.is_symlink() or identity(INVOCATION_AUTHORITY) != bound[0]):
+        fail("bound invocation authority identity differs")
 
 
 def command(stem: str, role: str) -> list[str]:
@@ -153,6 +171,7 @@ def close_results() -> None:
 
 
 def main() -> int:
+    require_exact_invocation(load(PLAN_PATH))
     if RESULTS.exists() or RESULTS.is_symlink(): fail("results already exists; never overwrite")
     RESULTS.mkdir()
     try:

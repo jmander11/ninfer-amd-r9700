@@ -40,6 +40,11 @@ def main() -> int:
             plan.get("status") != "reviewed_ready" or
             plan.get("production_routing_authorized") is not False):
         fail("plan disposition differs")
+    if plan.get("exact_invocation") != {
+        "preflight": "bash profiles/bench/r9700-paired-projection-c2c4-production-qualification-20260919/commands.sh --preflight",
+        "measure": "bash profiles/bench/r9700-paired-projection-c2c4-production-qualification-20260919/commands.sh --measure",
+    }:
+        fail("exact invocation differs")
     if plan.get("domain") != {
         "tokens": [2, 3, 4], "columns": 5120,
         "gdn_rows": [4096, 12288], "attention_rows": [7168, 7168],

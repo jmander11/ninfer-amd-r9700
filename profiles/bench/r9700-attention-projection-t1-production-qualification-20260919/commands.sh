@@ -36,7 +36,7 @@ case "${1:-}" in
     python3 "$package/preflight.py"
     test ! -e "$report"
     test ! -L "$report"
-    mkdir -p "$build"
+    mkdir "$build"
     compile_host "$build/qual"
     compile_device "$build/op.s"
     python3 "$root/tools/r9700/check_attention_projection_t1_op_static.py" \

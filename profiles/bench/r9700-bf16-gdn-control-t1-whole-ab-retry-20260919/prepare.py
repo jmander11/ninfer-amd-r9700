@@ -232,6 +232,11 @@ def validate_authorities(require_fresh: bool, require_low_vram: bool = True) -> 
             "ninfer.r9700.bf16-gdn-control-t1-whole-ab-retry-package.v1" or
             package.get("status") != "reviewed_ready_after_gpu_reset" or
             package.get("production_routing_authorized") is not False or
+            package.get("exact_invocation") != {
+                "preflight":
+                    "bash profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-retry-20260919/commands.sh --preflight",
+                "measure":
+                    "bash profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-retry-20260919/commands.sh --measure"} or
             package.get("order") !=
             ["control", "candidate", "candidate", "control", "control", "candidate"]):
         fail("retry package disposition differs")
@@ -277,6 +282,7 @@ def write_plan() -> None:
             "retained_token_authority": reviewed["retained_token_authority"],
             "expected_tokens": reviewed["expected_tokens"],
             "admission": reviewed["admission"],
+            "exact_invocation": package["exact_invocation"],
             "vram_gate": package["vram_gate"], "preflight_vram": vram,
             "campaign": {"fresh_complete_six_role_campaign": True,
                          "partial_pair_resume_allowed": False}}

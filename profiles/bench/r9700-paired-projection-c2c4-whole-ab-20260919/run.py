@@ -13,8 +13,14 @@ import time
 
 ROOT = Path("/ssdpool2nvme/local_llm/ninfer-amd-r9700")
 PACKAGE = Path(__file__).resolve().parent
+PACKAGE_PLAN = PACKAGE / "package-plan.json"
 PLAN_PATH = PACKAGE / "plan.json"
 RESULTS = PACKAGE / "results"
+EXPECTED_INVOCATION = {
+    "prepare": "bash profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919/commands.sh --prepare",
+    "preflight": "bash profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919/commands.sh --preflight",
+    "measure": "bash profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919/commands.sh --measure",
+}
 
 
 def fail(message: str) -> None: raise RuntimeError(message)
@@ -31,6 +37,18 @@ def require_identity(item: dict, path: Path, label: str) -> None:
 def exclusive(path: Path, text: str) -> None:
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, 0o644)
     with os.fdopen(descriptor, "w") as stream: stream.write(text)
+
+
+def validate_invocation_authority(plan: dict) -> None:
+    authority = load(PACKAGE_PLAN)
+    if (authority.get("schema") !=
+            "ninfer.r9700.paired-projection-c2c4-whole-ab-package.v1" or
+            authority.get("status") != "reviewed_ready" or
+            authority.get("production_routing_authorized") is not False or
+            authority.get("exact_invocation") != EXPECTED_INVOCATION or
+            plan.get("exact_invocation") != EXPECTED_INVOCATION or
+            plan.get("package_authority") != identity(PACKAGE_PLAN)):
+        fail("package invocation authority differs")
 
 
 def command(stem: str, role: str, concurrency: int) -> list[str]:
@@ -150,6 +168,7 @@ def close_results() -> None:
 
 
 def main() -> int:
+    validate_invocation_authority(load(PLAN_PATH))
     if RESULTS.exists() or RESULTS.is_symlink(): fail("results already exists; never overwrite")
     RESULTS.mkdir()
     try:

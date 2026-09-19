@@ -12,6 +12,7 @@ ROOT = Path("/ssdpool2nvme/local_llm/ninfer-amd-r9700")
 PACKAGE = ROOT / "profiles/bench/r9700-attention-projection-t1-production-qualification-20260919"
 PLAN = PACKAGE / "plan.json"
 REPORT = PACKAGE / "qualification.json"
+BUILD = PACKAGE / "build"
 HIPCC = Path("/opt/rocm/bin/hipcc")
 
 
@@ -43,15 +44,30 @@ def main() -> int:
         "layout": "Q4N16K16", "group": 64, "scale_dtype": "FP16",
     }:
         fail("exact domain differs")
-    for item in plan.get("bound_inputs", []):
+    expected_inputs = {
+        ROOT / "tools/r9700/attention_projection_t1_op_qual.hip",
+        ROOT / "tools/r9700/a8q4_attention_pair_t1_qual.hip",
+        ROOT / "tools/r9700/a8q4_shape_sweep_qual.hip",
+        ROOT / "tools/r9700/check_attention_projection_t1_op_static.py",
+        ROOT / "include/ninfer/ops/attention_projection.h",
+        ROOT / "src/ops/r9700/attention_projection/attention_projection.h",
+        ROOT / "src/ops/r9700/attention_projection/attention_projection.hip",
+        ROOT / "src/ops/r9700/linear/r9700_linear.hip",
+        PACKAGE / "commands.sh",
+        PACKAGE / "preflight.py",
+    }
+    if (len(plan.get("bound_inputs", [])) != len(expected_inputs) or
+            {Path(item["path"]) for item in plan.get("bound_inputs", [])} != expected_inputs):
+        fail("bound input inventory differs")
+    for item in plan["bound_inputs"]:
         path = Path(item["path"])
         if (not path.is_file() or path.is_symlink() or path.stat().st_size != item["bytes"] or
                 digest(path) != item["sha256"]):
             fail(f"bound input changed: {path}")
-    if len(plan.get("bound_inputs", [])) != 8:
-        fail("bound input inventory differs")
+    if BUILD.exists() or BUILD.is_symlink():
+        fail("qualification build path is not fresh")
     if REPORT.exists() or REPORT.is_symlink():
-        fail("qualification output is not fresh")
+        fail("qualification report path is not fresh")
     with tempfile.TemporaryDirectory(prefix="ninfer-attention-projection-t1-preflight-") as name:
         build = Path(name)
         binary = build / "qual"

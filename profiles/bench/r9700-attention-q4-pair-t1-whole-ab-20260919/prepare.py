@@ -11,6 +11,7 @@ import subprocess
 ROOT = Path("/ssdpool2nvme/local_llm/ninfer-amd-r9700")
 PACKAGE = Path(__file__).resolve().parent
 PLAN = PACKAGE / "plan.json"
+INVOCATION_AUTHORITY = PACKAGE / "invocation-authority.json"
 DIRECT = ROOT / "profiles/bench/r9700-attention-projection-t1-production-qualification-20260919/qualification.json"
 ARTIFACT = ROOT / "out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer"
 CORPUS = ROOT / "bench/fixtures/bench_corpus.ids"
@@ -20,7 +21,8 @@ BUILDS = {
     "candidate": ROOT / "build-r9700-attention-q4-pair-t1-candidate",
 }
 COMMON_CACHE = {
-    "CMAKE_HIP_ARCHITECTURES": "gfx1201", "NINFER_BUILD_BENCHMARKS": "ON",
+    "CMAKE_BUILD_TYPE": "Release", "CMAKE_HIP_ARCHITECTURES": "gfx1201",
+    "NINFER_BUILD_APPS": "ON", "NINFER_BUILD_BENCHMARKS": "ON",
     "NINFER_R9700_KV_VALUE_GROUP": "16", "NINFER_R9700_Q4_ACTIVATION_BITS": "8",
     "NINFER_R9700_W8_ACTIVATION_BITS": "8", "NINFER_R9700_FP8_QK_WMMA": "1",
     "NINFER_R9700_XATTENTION_QUALIFICATION": "OFF",
@@ -31,7 +33,11 @@ COMMON_CACHE = {
     "NINFER_R9700_TEXT_P129_WMMA_TAIL_CANDIDATE": "0",
     "NINFER_R9700_GDN_VERIFY_WAVE_QK_CANDIDATE": "0",
     "NINFER_R9700_BF16_GDN_CONTROL_T1_CANDIDATE": "0",
+    "NINFER_R9700_Q4_PAIR_WMMA_C2C4_CANDIDATE": "0",
     "NINFER_R9700_FP8_PREFIX_COMMON_ALGO_CANDIDATE": "0",
+    "NINFER_R9700_DFLASH_DOWN_SPLITK_FACTOR": "8",
+    "NINFER_R9700_XATTENTION_STRIDE": "16",
+    "NINFER_R9700_XATTENTION_TAU_PERMILLE": "1000",
 }
 SOURCES = [
     ROOT / "CMakeLists.txt", ROOT / "src/CMakeLists.txt",
@@ -42,7 +48,9 @@ SOURCES = [
     ROOT / "src/targets/qwen3_8_27b/impl/variant.cpp",
     ROOT / "bench/targets/qwen3_8_27b/ninfer_bench_support.cpp",
     ROOT / "tools/r9700/target_variant_attention_projection_qual.cpp",
-    PACKAGE / "commands.sh", PACKAGE / "prepare.py", PACKAGE / "validate.py", PACKAGE / "run.py",
+    PACKAGE / "README.md", PACKAGE / "invocation-authority.json",
+    PACKAGE / "commands.sh", PACKAGE / "prepare.py",
+    PACKAGE / "validate.py", PACKAGE / "run.py",
 ]
 
 
@@ -60,11 +68,37 @@ def identity(path: Path) -> dict:
     return {"path": str(path), "bytes": path.stat().st_size, "sha256": digest(path)}
 
 
+def cache(path: Path) -> dict[str, str]:
+    result = {}
+    for line in path.read_text().splitlines():
+        if (not line or line.startswith(("#", "//")) or "=" not in line or
+                ":" not in line.split("=", 1)[0]):
+            continue
+        lhs, value = line.split("=", 1)
+        result[lhs.split(":", 1)[0]] = value
+    return result
+
+
 def write_exclusive(path: Path, payload: dict) -> None:
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, 0o644)
     with os.fdopen(descriptor, "w") as stream:
         json.dump(payload, stream, indent=2)
         stream.write("\n")
+
+
+def exact_invocation() -> dict:
+    if not INVOCATION_AUTHORITY.is_file() or INVOCATION_AUTHORITY.is_symlink():
+        fail("invocation authority is absent or unsafe")
+    authority = json.loads(INVOCATION_AUTHORITY.read_text())
+    expected = {
+        "schema": "ninfer.r9700.attention-q4-pair-t1-whole-ab-invocation-authority.v1",
+        "prepare": "bash profiles/bench/r9700-attention-q4-pair-t1-whole-ab-20260919/commands.sh --prepare",
+        "preflight": "bash profiles/bench/r9700-attention-q4-pair-t1-whole-ab-20260919/commands.sh --preflight",
+        "measure": "bash profiles/bench/r9700-attention-q4-pair-t1-whole-ab-20260919/commands.sh --measure",
+    }
+    if authority != expected:
+        fail("invocation authority differs")
+    return authority
 
 
 def retained_tokens() -> tuple[int, str]:
@@ -85,22 +119,10 @@ def retained_tokens() -> tuple[int, str]:
 
 def configure(role: str, selector: int) -> dict:
     directory = BUILDS[role]
-    subprocess.run([
-        "cmake", "-S", str(ROOT), "-B", str(directory), "-GNinja",
-        "-DNINFER_BUILD_BENCHMARKS=ON", "-DCMAKE_HIP_ARCHITECTURES=gfx1201",
-        "-DNINFER_R9700_KV_VALUE_GROUP=16", "-DNINFER_R9700_Q4_ACTIVATION_BITS=8",
-        "-DNINFER_R9700_W8_ACTIVATION_BITS=8", "-DNINFER_R9700_FP8_QK_WMMA=1",
-        f"-DNINFER_R9700_ATTENTION_Q4_PAIR_T1_CANDIDATE={selector}",
-        "-DNINFER_R9700_XATTENTION_QUALIFICATION=OFF",
-        "-DNINFER_R9700_DFLASH_SMALL_T_CANDIDATE=0",
-        "-DNINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE=0",
-        "-DNINFER_R9700_DFLASH_DOWN_SPLITK_CANDIDATE=0",
-        "-DNINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE=0",
-        "-DNINFER_R9700_TEXT_P129_WMMA_TAIL_CANDIDATE=0",
-        "-DNINFER_R9700_GDN_VERIFY_WAVE_QK_CANDIDATE=0",
-        "-DNINFER_R9700_BF16_GDN_CONTROL_T1_CANDIDATE=0",
-        "-DNINFER_R9700_FP8_PREFIX_COMMON_ALGO_CANDIDATE=0",
-    ], cwd=ROOT, check=True)
+    args = ["cmake", "-S", str(ROOT), "-B", str(directory), "-GNinja"] + [
+        f"-D{key}={value}" for key, value in COMMON_CACHE.items()] + [
+        f"-DNINFER_R9700_ATTENTION_Q4_PAIR_T1_CANDIDATE={selector}"]
+    subprocess.run(args, cwd=ROOT, check=True)
     subprocess.run(["cmake", "--build", str(directory), "-j2", "--target", "ninfer_bench"],
                    cwd=ROOT, check=True)
     executable = directory / "bench/ninfer_bench"
@@ -110,15 +132,21 @@ def configure(role: str, selector: int) -> dict:
     present = " U ninfer::ops::full_attention_projection_t1(" in symbols
     if present != bool(selector):
         fail(f"selector symbol receipt differs: {role}")
-    expected_cache = dict(COMMON_CACHE)
-    expected_cache["NINFER_R9700_ATTENTION_Q4_PAIR_T1_CANDIDATE"] = str(selector)
-    cache_text = (directory / "CMakeCache.txt").read_text()
-    for key, value in expected_cache.items():
-        if not any(line.startswith(key + ":") and line.endswith("=" + value)
-                   for line in cache_text.splitlines()):
+    raw_cache = cache(directory / "CMakeCache.txt")
+    required = dict(COMMON_CACHE)
+    required["NINFER_R9700_ATTENTION_Q4_PAIR_T1_CANDIDATE"] = str(selector)
+    for key, value in required.items():
+        if raw_cache.get(key) != value:
             fail(f"cache value differs for {role}: {key}")
+    cache_keys = sorted({"CMAKE_BUILD_TYPE", "CMAKE_HIP_ARCHITECTURES",
+                         "CMAKE_HIP_COMPILER", "CMAKE_HIP_FLAGS", "CMAKE_HIP_FLAGS_RELEASE",
+                         "CMAKE_CXX_COMPILER", "CMAKE_CXX_FLAGS", "CMAKE_CXX_FLAGS_RELEASE",
+                         "CMAKE_EXE_LINKER_FLAGS", "CMAKE_EXE_LINKER_FLAGS_RELEASE",
+                         "NINFER_BUILD_APPS", "NINFER_BUILD_BENCHMARKS"} |
+                        {key for key in raw_cache if key.startswith("NINFER_R9700_")})
+    cache_values = {key: raw_cache.get(key, "") for key in cache_keys}
     return {"selector": selector, "directory": str(directory),
-            "cache_values": expected_cache,
+            "cache_values": cache_values,
             "cache": identity(directory / "CMakeCache.txt"),
             "executable": identity(executable),
             "symbol_receipt": {"object": identity(obj),
@@ -130,6 +158,10 @@ def main() -> int:
         fail(f"prepare must run from {ROOT}")
     if PLAN.exists() or PLAN.is_symlink():
         fail("plan already exists; never overwrite")
+    invocation = exact_invocation()
+    for role, directory in BUILDS.items():
+        if directory.exists() or directory.is_symlink():
+            fail(f"{role} build directory is not fresh; never reuse or overwrite")
     direct = json.loads(DIRECT.read_text())
     if (direct.get("schema") != "ninfer.r9700.attention-projection-t1-production-qualification.v1" or
             direct.get("status") != "qualified_for_whole_inference_ab" or
@@ -147,6 +179,14 @@ def main() -> int:
         fail("device-0-derived power profile path is absent or unsafe")
     token_count, token_hash = retained_tokens()
     builds = {"control": configure("control", 0), "candidate": configure("candidate", 1)}
+    control_cache = builds["control"]["cache_values"]
+    candidate_cache = builds["candidate"]["cache_values"]
+    if set(control_cache) != set(candidate_cache):
+        fail("build cache inventories differ")
+    for key, value in control_cache.items():
+        if (key != "NINFER_R9700_ATTENTION_Q4_PAIR_T1_CANDIDATE" and
+                candidate_cache.get(key) != value):
+            fail(f"source-matched build caches differ at {key}")
     plan = {
         "schema": "ninfer.r9700.attention-q4-pair-t1-whole-ab-plan.v1",
         "status": "prepared_awaiting_independent_review", "production_routing_authorized": False,
@@ -157,6 +197,7 @@ def main() -> int:
                      "independent_pairs": 3, "repetitions_per_process": 1,
                      "warmup_per_process": 1, "required_power": "auto"},
         "order": ["control", "candidate", "candidate", "control", "control", "candidate"],
+        "exact_invocation": invocation,
         "hardware": {"device": 0, "name": device["name"],
                      "architecture": device["architecture"], "wave_size": device["wave_size"],
                      "pci": pci, "power_path": str(power_path), "required_power": "auto"},

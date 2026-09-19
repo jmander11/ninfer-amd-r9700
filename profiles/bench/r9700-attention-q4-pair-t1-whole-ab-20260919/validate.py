@@ -11,6 +11,7 @@ PACKAGE = Path(__file__).resolve().parent
 PLAN = PACKAGE / "plan.json"
 RESULTS = PACKAGE / "results"
 ROOT = Path("/ssdpool2nvme/local_llm/ninfer-amd-r9700")
+INVOCATION_AUTHORITY = PACKAGE / "invocation-authority.json"
 EXPECTED_ORDER = ["control", "candidate", "candidate", "control", "control", "candidate"]
 EXPECTED_WORKLOAD = {
     "device": 0, "concurrency": 1, "whole_pg": "8192,256", "prefill_chunk": 4096,
@@ -25,7 +26,8 @@ EXPECTED_ADMISSION = {
 }
 EXPECTED_LIMITATIONS = ["Unprofiled whole-model timing does not prove physical HBM bandwidth."]
 COMMON_CACHE = {
-    "CMAKE_HIP_ARCHITECTURES": "gfx1201", "NINFER_BUILD_BENCHMARKS": "ON",
+    "CMAKE_BUILD_TYPE": "Release", "CMAKE_HIP_ARCHITECTURES": "gfx1201",
+    "NINFER_BUILD_APPS": "ON", "NINFER_BUILD_BENCHMARKS": "ON",
     "NINFER_R9700_KV_VALUE_GROUP": "16", "NINFER_R9700_Q4_ACTIVATION_BITS": "8",
     "NINFER_R9700_W8_ACTIVATION_BITS": "8", "NINFER_R9700_FP8_QK_WMMA": "1",
     "NINFER_R9700_XATTENTION_QUALIFICATION": "OFF",
@@ -36,7 +38,11 @@ COMMON_CACHE = {
     "NINFER_R9700_TEXT_P129_WMMA_TAIL_CANDIDATE": "0",
     "NINFER_R9700_GDN_VERIFY_WAVE_QK_CANDIDATE": "0",
     "NINFER_R9700_BF16_GDN_CONTROL_T1_CANDIDATE": "0",
+    "NINFER_R9700_Q4_PAIR_WMMA_C2C4_CANDIDATE": "0",
     "NINFER_R9700_FP8_PREFIX_COMMON_ALGO_CANDIDATE": "0",
+    "NINFER_R9700_DFLASH_DOWN_SPLITK_FACTOR": "8",
+    "NINFER_R9700_XATTENTION_STRIDE": "16",
+    "NINFER_R9700_XATTENTION_TAU_PERMILLE": "1000",
 }
 
 
@@ -54,6 +60,21 @@ def check(item: dict) -> None:
     if (not path.is_file() or path.is_symlink() or path.stat().st_size != item["bytes"] or
             digest(path) != item["sha256"]):
         fail(f"bound identity changed: {path}")
+
+
+def exact_invocation() -> dict:
+    if not INVOCATION_AUTHORITY.is_file() or INVOCATION_AUTHORITY.is_symlink():
+        fail("invocation authority is absent or unsafe")
+    authority = json.loads(INVOCATION_AUTHORITY.read_text())
+    expected = {
+        "schema": "ninfer.r9700.attention-q4-pair-t1-whole-ab-invocation-authority.v1",
+        "prepare": "bash profiles/bench/r9700-attention-q4-pair-t1-whole-ab-20260919/commands.sh --prepare",
+        "preflight": "bash profiles/bench/r9700-attention-q4-pair-t1-whole-ab-20260919/commands.sh --preflight",
+        "measure": "bash profiles/bench/r9700-attention-q4-pair-t1-whole-ab-20260919/commands.sh --measure",
+    }
+    if authority != expected:
+        fail("invocation authority differs")
+    return authority
 
 
 def authority_tokens(item: dict) -> tuple[int, str]:
@@ -85,6 +106,8 @@ def main() -> int:
         fail("plan disposition differs")
     if plan.get("claim") != "Whole ordinary-decode A/B for the exact all-Q4 T1 attention projection candidate.":
         fail("claim differs")
+    if plan.get("exact_invocation") != exact_invocation():
+        fail("plan invocation authority differs")
     if plan.get("workload") != EXPECTED_WORKLOAD or plan.get("order") != EXPECTED_ORDER:
         fail("workload or six-role order differs")
     if plan.get("admission") != EXPECTED_ADMISSION or plan.get("limitations") != EXPECTED_LIMITATIONS:
@@ -107,22 +130,28 @@ def main() -> int:
         ROOT / "src/targets/qwen3_8_27b/impl/variant.cpp",
         ROOT / "bench/targets/qwen3_8_27b/ninfer_bench_support.cpp",
         ROOT / "tools/r9700/target_variant_attention_projection_qual.cpp",
-        PACKAGE / "commands.sh", PACKAGE / "prepare.py", PACKAGE / "validate.py", PACKAGE / "run.py",
+        PACKAGE / "README.md", PACKAGE / "invocation-authority.json",
+        PACKAGE / "commands.sh", PACKAGE / "prepare.py",
+        PACKAGE / "validate.py", PACKAGE / "run.py",
     }
-    if {Path(item["path"]) for item in plan.get("sources", [])} != expected_sources:
+    if (len(plan.get("sources", [])) != len(expected_sources) or
+            {Path(item["path"]) for item in plan["sources"]} != expected_sources):
         fail("bound source inventory differs")
     for item in plan["sources"] + [plan["direct_qualification"], plan["artifact"],
                                     plan["corpus"], plan["retained_token_authority"]]:
         check(item)
     if set(plan.get("builds", {})) != {"control", "candidate"}:
         fail("build role inventory differs")
+    live_cache_values = {}
     for role, expected in (("control", False), ("candidate", True)):
         build = plan["builds"][role]
         expected_cache = dict(COMMON_CACHE)
         expected_cache["NINFER_R9700_ATTENTION_Q4_PAIR_T1_CANDIDATE"] = str(int(expected))
+        values = build.get("cache_values")
         if (build.get("selector") != int(expected) or
                 build.get("directory") != str(ROOT / f"build-r9700-attention-q4-pair-t1-{role}") or
-                build.get("cache_values") != expected_cache or
+                not isinstance(values, dict) or
+                any(values.get(key) != value for key, value in expected_cache.items()) or
                 build.get("symbol_receipt", {}).get("attention_op_undefined_reference") is not expected):
             fail(f"bound selector differs: {role}")
         check(build["cache"]); check(build["executable"]); check(build["symbol_receipt"]["object"])
@@ -131,10 +160,21 @@ def main() -> int:
             if not any(line.startswith(key + ":") and line.endswith("=" + value)
                        for line in cache_text.splitlines()):
                 fail(f"live cache value differs for {role}: {key}")
+        for key, value in values.items():
+            if not any(line.startswith(key + ":") and line.endswith("=" + value)
+                       for line in cache_text.splitlines()):
+                fail(f"bound live cache value differs for {role}: {key}")
+        live_cache_values[role] = values
         output = subprocess.run(["nm", "-C", build["symbol_receipt"]["object"]["path"]],
                                 check=True, capture_output=True, text=True).stdout
         if (" U ninfer::ops::full_attention_projection_t1(" in output) is not expected:
             fail(f"live selector symbol differs: {role}")
+    if set(live_cache_values["control"]) != set(live_cache_values["candidate"]):
+        fail("build cache inventories differ")
+    for key, value in live_cache_values["control"].items():
+        if (key != "NINFER_R9700_ATTENTION_Q4_PAIR_T1_CANDIDATE" and
+                live_cache_values["candidate"].get(key) != value):
+            fail(f"source-matched build caches differ at {key}")
     direct = json.loads(Path(plan["direct_qualification"]["path"]).read_text())
     if (direct.get("status") != "qualified_for_whole_inference_ab" or
             direct.get("correctness", {}).get("complete_outputs_bit_exact_to_serial_plus_four_extracts") is not True or

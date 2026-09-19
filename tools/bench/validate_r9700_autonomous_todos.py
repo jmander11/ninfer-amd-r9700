@@ -80,11 +80,32 @@ def main() -> None:
     next_command = contract["next_command"]
     if next_command is None:
         require(
-            "No GPU action is currently prepared" in ledger,
-            "missing explicit no-prepared-GPU-action state",
+            "No GPU action is currently runnable" in ledger,
+            "missing explicit no-runnable-GPU-action state",
         )
     else:
         require(ledger.count(next_command) == 1, "next command must occur exactly once")
+    reset_policy = contract["gpu_reset_execution_policy"]
+    require(
+        ledger.replace("\n", " ").count(reset_policy) == 1,
+        "GPU-reset execution policy or threshold changed",
+    )
+    queue_marker = "The deterministic queue after reset is:\n\n"
+    require(ledger.count(queue_marker) == 1, "post-reset queue marker differs")
+    queue_tail = ledger.split(queue_marker, 1)[1]
+    for ordinal, expected in enumerate(contract["post_reset_queue"], 1):
+        prefix = f"{ordinal}. "
+        require(queue_tail.startswith(prefix), f"post-reset queue item {ordinal} is absent")
+        line, separator, queue_tail = queue_tail.partition("\n")
+        require(separator == "\n", f"post-reset queue item {ordinal} is unterminated")
+        require(line == prefix + expected, f"post-reset queue item {ordinal} changed")
+    require(queue_tail.startswith("\n"), "post-reset queue has an unbound extra item")
+    queue_text = "\n".join(
+        f"{ordinal}. {item}" for ordinal, item in enumerate(contract["post_reset_queue"], 1)
+    )
+    for path in contract["post_reset_key_paths"]:
+        require(queue_text.count(f"`{path}`") == 1,
+                f"post-reset queue path is absent or duplicated: {path}")
     for command in contract["obsolete_commands"]:
         require(command not in ledger, f"obsolete command remains runnable: {command}")
     retained_path = ROOT / contract["retained_result_path"]

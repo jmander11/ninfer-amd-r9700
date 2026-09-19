@@ -31,6 +31,10 @@
     "maximum_used_fraction_permille": 50,
     "minimum_total_bytes": 32000000000
   },
+  "exact_invocation": {
+    "preflight": "bash profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-retry-20260919/commands.sh --preflight",
+    "measure": "bash profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-retry-20260919/commands.sh --measure"
+  },
   "order": ["control", "candidate", "candidate", "control", "control", "candidate"],
   "note": "The retry reuses the exact reviewed builds and authorities, never resumes retained pairs, and refuses to create plan/results unless device-0 VRAM is below both limits."
 }

@@ -10,6 +10,7 @@ import subprocess
 
 ROOT = Path("/ssdpool2nvme/local_llm/ninfer-amd-r9700")
 PACKAGE = Path(__file__).resolve().parent
+PACKAGE_PLAN = PACKAGE / "package-plan.json"
 PLAN = PACKAGE / "plan.json"
 RESULTS = PACKAGE / "results"
 EXPECTED_ORDER = [
@@ -30,6 +31,11 @@ EXPECTED_WORKLOAD = {"device": 0, "concurrency": [2, 3, 4], "whole_pg": "8192,25
 EXPECTED_ADMISSION = {"exact_public_tokens": True, "every_paired_ratio_below_one": True,
     "paired_mean_upper_2se_below_one": True, "median_candidate_over_control_at_most": 0.99}
 EXPECTED_LIMITATIONS = ["Unprofiled whole-model timing does not prove physical HBM bandwidth."]
+EXPECTED_INVOCATION = {
+    "prepare": "bash profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919/commands.sh --prepare",
+    "preflight": "bash profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919/commands.sh --preflight",
+    "measure": "bash profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919/commands.sh --measure",
+}
 COMMON_CACHE = {
     "CMAKE_BUILD_TYPE": "Release", "CMAKE_HIP_ARCHITECTURES": "gfx1201",
     "NINFER_BUILD_APPS": "ON", "NINFER_BUILD_BENCHMARKS": "ON",
@@ -96,11 +102,22 @@ def direct_ok(report: dict) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(); parser.add_argument("--require-fresh", action="store_true")
     args = parser.parse_args(); plan = json.loads(PLAN.read_text())
+    authority = json.loads(PACKAGE_PLAN.read_text())
+    if (authority.get("schema") !=
+            "ninfer.r9700.paired-projection-c2c4-whole-ab-package.v1" or
+            authority.get("status") != "reviewed_ready" or
+            authority.get("production_routing_authorized") is not False or
+            authority.get("exact_invocation") != EXPECTED_INVOCATION):
+        fail("package invocation authority differs")
     if (plan.get("schema") != "ninfer.r9700.paired-projection-c2c4-whole-ab-plan.v1" or
             plan.get("status") != "prepared_awaiting_independent_review" or
             plan.get("production_routing_authorized") is not False or
             plan.get("claim") != "Matched selector-off/on whole ordinary decode A/B at C2, C3, and C4."):
         fail("plan disposition differs")
+    if (plan.get("package_authority", {}).get("path") != str(PACKAGE_PLAN) or
+            plan.get("exact_invocation") != EXPECTED_INVOCATION):
+        fail("plan invocation authority differs")
+    check(plan["package_authority"])
     if (plan.get("workload") != EXPECTED_WORKLOAD or plan.get("order") != EXPECTED_ORDER or
             plan.get("admission") != EXPECTED_ADMISSION or
             plan.get("limitations") != EXPECTED_LIMITATIONS): fail("plan contract differs")
@@ -119,7 +136,8 @@ def main() -> int:
         "bench/targets/qwen3_8_27b/ninfer_bench_support.cpp",
         "tools/r9700/target_variant_pair_c2c4_qual.cpp")}
     expected_sources |= {PACKAGE / name for name in
-                         ("README.md", "commands.sh", "prepare.py", "validate.py", "run.py")}
+                         ("README.md", "package-plan.json", "commands.sh", "prepare.py",
+                          "validate.py", "run.py")}
     if len(plan.get("sources", [])) != len(expected_sources) or {Path(x["path"]) for x in plan["sources"]} != expected_sources:
         fail("source inventory differs")
     for item in plan["sources"]: check(item)

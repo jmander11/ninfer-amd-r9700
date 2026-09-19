@@ -1,0 +1,6 @@
+{
+  "schema": "ninfer.r9700.attention-q4-pair-t1-whole-ab-invocation-authority.v1",
+  "prepare": "bash profiles/bench/r9700-attention-q4-pair-t1-whole-ab-20260919/commands.sh --prepare",
+  "preflight": "bash profiles/bench/r9700-attention-q4-pair-t1-whole-ab-20260919/commands.sh --preflight",
+  "measure": "bash profiles/bench/r9700-attention-q4-pair-t1-whole-ab-20260919/commands.sh --measure"
+}

@@ -91,6 +91,21 @@
     "FINAL-SUITE": ["FINAL-ARTIFACT", "E2E-PROFILE", "BF16-PARITY", "SELECTED-PARITY-VISION", "XATT-CUTOVER-CONDITIONAL"]
   },
   "next_command": null,
+  "gpu_reset_execution_policy": "No GPU action is currently runnable: execution policy prohibits every GPU package invocation until a maintainer reset lowers device-0 VRAM to at most both 1 GiB and 5%; individual downstream packages need not implement that global queue gate.",
+  "post_reset_queue": [
+    "run the complete six-role BF16 GDN whole gate from `profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-retry-20260919`;",
+    "direct-qualify T1 attention with `profiles/bench/r9700-attention-projection-t1-production-qualification-20260919`, then prepare/review/run `profiles/bench/r9700-attention-q4-pair-t1-whole-ab-20260919`;",
+    "direct-qualify C2..4 with `profiles/bench/r9700-paired-projection-c2c4-production-qualification-20260919`, then prepare/review/run `profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919`;",
+    "resolve the BF16 GDN and both paired-route promotion decisions, then run `profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919`."
+  ],
+  "post_reset_key_paths": [
+    "profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-retry-20260919",
+    "profiles/bench/r9700-attention-projection-t1-production-qualification-20260919",
+    "profiles/bench/r9700-attention-q4-pair-t1-whole-ab-20260919",
+    "profiles/bench/r9700-paired-projection-c2c4-production-qualification-20260919",
+    "profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919",
+    "profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919"
+  ],
   "obsolete_commands": [
     "bash profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/commands.sh"
   ],
