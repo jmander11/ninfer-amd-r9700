@@ -1,0 +1,70 @@
+{
+  "schema": "ninfer.r9700.bf16-gdn-control-t1-plan.v1",
+  "status": "prepared_awaiting_independent_review",
+  "production_routing_authorized": false,
+  "claim": "Direct T1 comparison of serial, combined-grid, and fused BF16 GDN a/b projections plus control at the exact 48-head by 5120-column shape.",
+  "contract": {
+    "device": "one AMD Radeon AI PRO R9700",
+    "architecture": "gfx1201",
+    "wave_size": 32,
+    "tokens": 1,
+    "heads": 48,
+    "columns": 5120,
+    "layers_per_base_decode_token": 48,
+    "weight_format": "BF16",
+    "intermediate_boundary": "each projection rounds once to BF16 before control",
+    "required_power_profile": "auto"
+  },
+  "layer0": {
+    "classification": "launch and cross-Op materialization",
+    "logical_incumbent_bytes_per_layer": 1004672,
+    "logical_combined_bytes_per_layer": 994432,
+    "logical_fused_bytes_per_layer": 994240,
+    "logical_fused_avoidable_bytes_per_layer": 10432,
+    "unavoidable_two_weight_bytes_per_layer": 983040,
+    "limitation": "Logical Op-boundary accounting is not a physical HBM-traffic measurement."
+  },
+  "identities": {
+    "qualifier": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/bf16_gdn_control_t1_qual.hip",
+      "sha256": "01d4f15a73408801e61ad83568a1a5ba09f1db70e23d7da5a4ef11dd33c2ab27"
+    },
+    "static_checker": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/check_bf16_gdn_control_t1_static.py",
+      "sha256": "d77d5c0033d072083e8c352bade23d2ea048ea1656793cd15ee330cae67f5354"
+    }
+  },
+  "commands": {
+    "preflight": "bash profiles/bench/r9700-bf16-gdn-control-t1-20260919/commands.sh --preflight",
+    "measure": "bash profiles/bench/r9700-bf16-gdn-control-t1-20260919/commands.sh --measure",
+    "compile_executable": "/opt/rocm/bin/hipcc -std=c++20 -O3 --offload-arch=gfx1201 -Wall -Wextra -Werror tools/r9700/bf16_gdn_control_t1_qual.hip -o profiles/bench/r9700-bf16-gdn-control-t1-20260919/artifacts/bf16_gdn_control_t1_qual",
+    "compile_assembly": "/opt/rocm/bin/hipcc -std=c++20 -O3 --offload-arch=gfx1201 -S tools/r9700/bf16_gdn_control_t1_qual.hip -o profiles/bench/r9700-bf16-gdn-control-t1-20260919/artifacts/bf16_gdn_control_t1_qual.s",
+    "static_check": "python3 tools/r9700/check_bf16_gdn_control_t1_static.py profiles/bench/r9700-bf16-gdn-control-t1-20260919/artifacts/bf16_gdn_control_t1_qual.s > profiles/bench/r9700-bf16-gdn-control-t1-20260919/artifacts/static-receipt.txt",
+    "run": "profiles/bench/r9700-bf16-gdn-control-t1-20260919/artifacts/bf16_gdn_control_t1_qual --output profiles/bench/r9700-bf16-gdn-control-t1-20260919/report.json --assembly profiles/bench/r9700-bf16-gdn-control-t1-20260919/artifacts/bf16_gdn_control_t1_qual.s --static-receipt profiles/bench/r9700-bf16-gdn-control-t1-20260919/artifacts/static-receipt.txt"
+  },
+  "measurement": {
+    "report": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-20260919/report.json",
+    "create_only": true,
+    "trials": 12,
+    "all_six_route_orders_repeated": 2,
+    "disjoint_weight_copies": 3,
+    "samples_per_route_copy": 4,
+    "eviction_bytes_before_each_timed_event": 100663296,
+    "selection_timing": "unprofiled HIP events"
+  },
+  "correctness": {
+    "oracle": "independent sequential FP64 projection and complete represented-BF16 control formula",
+    "projection_max_abs_tolerance": 0.0625,
+    "control_max_abs_tolerance": 0.0003,
+    "candidate_serial_bit_parity": true,
+    "canaries": true,
+    "malformed_and_alias_rejection": true,
+    "static_requirements": "exact AMDGPU kernel symbols, gfx1201 wave32, role-specific FP32 FMA/control evidence, resources, and no scratch"
+  },
+  "admission": {
+    "minimum_whole_token_saving_ms": 0.2,
+    "formula": "48 * (serial per-layer median - best candidate per-layer median)",
+    "next_if_admitted": "prepare a separately reviewed whole-model gate before any production promotion",
+    "next_if_rejected": "record the direct result and remove the losing standalone candidate"
+  }
+}

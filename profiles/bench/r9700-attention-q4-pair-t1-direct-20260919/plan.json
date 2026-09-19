@@ -1,0 +1,86 @@
+{
+  "schema": "ninfer.r9700.a8q4-attention-pair-t1-direct-plan.v1",
+  "status": "prepared_awaiting_independent_review",
+  "production_routing_authorized": false,
+  "claim": "Direct all-Q4 T1 full-attention paired projection qualification before whole-inference integration.",
+  "route": {
+    "incumbent": "two complete N7168/K5120 Q4 linears plus four BF16 extracts",
+    "challenger": "one shared A8G64 quantization plus one combined 14336-row native-IU4 direct scatter",
+    "outputs": ["query_bf16_6144", "key_bf16_1024", "gate_bf16_6144", "value_bf16_1024"]
+  },
+  "compile_contract": {
+    "architecture": "gfx1201",
+    "optimization": "O3",
+    "language": "c++20",
+    "hipcc": "/opt/rocm/bin/hipcc",
+    "source_root": "/ssdpool2nvme/local_llm/ninfer-amd-r9700"
+  },
+  "bound_inputs": [
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/a8q4_attention_pair_t1_qual.hip",
+      "bytes": 32490,
+      "sha256": "2bb17f8f15af3bfc83eb81ff39ee75a8cbc2951fb5221e047f88ff92fc08b5ea"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/a8q4_shape_sweep_qual.hip",
+      "bytes": 97355,
+      "sha256": "b8f85a76b2f431ba4ea50fb0e3f28ece55a5501c69197e978df9516c98506be2"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/check_a8q4_attention_pair_t1_static.py",
+      "bytes": 2901,
+      "sha256": "e29de95ae52a5a774312ea4bff7d4b3315f37be28937936917846fc5fdc6a372"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/linear/r9700_linear.h",
+      "bytes": 23638,
+      "sha256": "07a76b945ed82efc5e470fd517dfbf4bc2ca09b565cbd636dd8269f85b972514"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/linear/r9700_linear.hip",
+      "bytes": 192174,
+      "sha256": "5d28cce1938b7bae7ba5dc236813be3394bdadbb60585f5db0c4f687ce2e1b49"
+    }
+  ],
+  "correctness_gate": {
+    "complete_bf16_outputs_bit_exact_to_incumbent": true,
+    "independent_fp64_represented_weight_oracle_max_bf16_steps": 2,
+    "canaries": true,
+    "nonfinite_status_poisoning": true,
+    "malformed_extent_alignment_alias_rejection": true
+  },
+  "static_gate": {
+    "exact_challenger_symbol": true,
+    "native_iu4_dot8": true,
+    "wave_size": 32,
+    "maximum_vgpr": 32,
+    "maximum_sgpr": 64,
+    "lds_bytes": 0,
+    "scratch_bytes": 0,
+    "spill_count": 0
+  },
+  "timing_gate": {
+    "trials_per_arm": 12,
+    "disjoint_weight_pair_allocations": 3,
+    "arm_order_balanced": true,
+    "allocation_balanced": true,
+    "every_allocation_minimum_speedup_percent": 1.0
+  },
+  "whole_admission": {
+    "all_q4_full_attention_layers": 16,
+    "selector_free_base_decode_tokens_per_second": 27.0281083,
+    "base_decode_milliseconds_per_token": 36.99850948579397,
+    "minimum_credible_whole_gain_percent": 1.0,
+    "formula": "100 * 16 * (serial_median_ms - challenger_median_ms) / 36.99850948579397"
+  },
+  "exact_invocation": {
+    "preflight": "bash profiles/bench/r9700-attention-q4-pair-t1-direct-20260919/commands.sh --preflight",
+    "measure": "bash profiles/bench/r9700-attention-q4-pair-t1-direct-20260919/commands.sh --measure"
+  },
+  "output": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-attention-q4-pair-t1-direct-20260919/qualification.json",
+    "create_only": true,
+    "measurement_requires_power": "auto"
+  },
+  "decision_boundary": "Passing authorizes preparation of a selector-off/on whole-inference A/B only; it does not authorize production routing."
+}
