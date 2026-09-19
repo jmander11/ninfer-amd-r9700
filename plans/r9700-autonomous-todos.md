@@ -131,9 +131,9 @@ after-parity router).
 The bounded DFlash verify-down split-K task is closed default-off: S=8 and S=2 both failed exact
 public-token parity, and S=4 has no mechanism for restoring the incumbent serial-FMA semantics.
 Do not rerun either sealed package or infer an S=4 command. The reviewed selector-free
-BASE-DECODE-BW measurement completed. The independently reviewed paired-GDN whole A/B below is the
-only prepared GPU action; every other remaining unchecked task depends directly or transitively on
-the external `DENSE-FLOOR-DECISION`.
+BASE-DECODE-BW measurement completed. No GPU action is currently prepared; the admitted paired-GDN
+route is being promoted and every other remaining unchecked task depends directly or transitively
+on the external `DENSE-FLOOR-DECISION`.
 
 Every future physical experiment must be launched through a reviewed package-local `commands.sh`,
 not an ad-hoc reconstructed command. A package is runnable only when its plan contains no
@@ -231,8 +231,11 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   ceiling; this is not physical HBM traffic or stall-freedom proof. The optional profile is not
   needed for the live paired-projection decision. Its balanced direct gate passed with exact serial
   outputs and a zero-step represented-weight FP64 result; the allocation-balanced medians were
-  `0.1303605 ms` serial and `0.1024000 ms` paired. The whole-A/B package passed independent review.
-  Run exactly `bash profiles/bench/r9700-gdn-q4-pair-t1-whole-ab-20260919/commands.sh --measure`.
+  `0.1303605 ms` serial and `0.1024000 ms` paired. The independently reviewed whole A/B passed exact
+  public-token parity in all six processes. Its three candidate/control decode-time ratios were
+  `0.9784431`, `0.9794007`, and `0.9784902` (mean `0.9787780`, upper two-standard-error bound
+  `0.9794013`); candidate rates were `27.9897`, `27.6197`, and `27.6044 tok/s`. This authorizes
+  selector-free promotion of the exact all-Q4 T1 pair, not a physical-HBM saturation claim.
 
 ## Active now: DFlash semantic and schedule work
 
