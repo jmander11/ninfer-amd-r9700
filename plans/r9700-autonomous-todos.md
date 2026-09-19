@@ -330,7 +330,15 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   9.5162%, and 8.5119% against the retained C2, C3, and C4 round medians. Evidence:
   `profiles/bench/r9700-a8q4-pair-wmma-c2c4-design-20260919/qualification.json`. This admits a
   distinct exact-C2..4 all-Q4 production candidate and matched whole C2..4 A/B; it does not
-  authorize promotion or extend the route to mixed weights, T1, or another token width.
+  authorize promotion or extend the route to mixed weights, T1, or another token width. The
+  compile-gated production implementation is now independently reviewed: one shared raw WMMA
+  kernel feeds semantically owned attention direct outputs and GDN query-key/value-z outputs, with
+  exact T2..4 plus both-Q4G64_F16S routing and unchanged T1/mixed/other-width fallbacks. The direct
+  production-symbol package is
+  `profiles/bench/r9700-paired-projection-c2c4-production-qualification-20260919`; its non-GPU gate
+  passes native IU4/wave32 at 57 VGPR, 32 SGPR, and no LDS/scratch/spills. The separately reviewed
+  whole package is `profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919`. Physical
+  qualification remains queued behind the required device-0 reset and the GDN whole retry.
 
   After the admitted paired routes are resolved, the next bounded mechanism is all-Q4 T1
   projected-residual fusion for N5120/K6144 and N5120/K17408. These are respectively the 16

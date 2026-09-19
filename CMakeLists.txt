@@ -173,6 +173,21 @@ endif()
 add_compile_definitions(
   NINFER_R9700_ATTENTION_Q4_PAIR_T1_CANDIDATE=${NINFER_R9700_ATTENTION_Q4_PAIR_T1_CANDIDATE})
 
+# Qualification-only all-Q4 paired-WMMA selector for ordinary compact decode batches C=2..4.
+# Zero retains the two complete Linear calls at each semantic boundary; one quantizes the shared
+# represented activation once and publishes both projections directly from one combined grid.
+set(NINFER_R9700_Q4_PAIR_WMMA_C2C4_CANDIDATE "0" CACHE STRING
+  "Enable the exact R9700 all-Q4 paired-WMMA C2-C4 candidate")
+set_property(CACHE NINFER_R9700_Q4_PAIR_WMMA_C2C4_CANDIDATE PROPERTY STRINGS 0 1)
+if(NOT NINFER_R9700_Q4_PAIR_WMMA_C2C4_CANDIDATE STREQUAL "0" AND
+   NOT NINFER_R9700_Q4_PAIR_WMMA_C2C4_CANDIDATE STREQUAL "1")
+  message(FATAL_ERROR
+    "NINFER_R9700_Q4_PAIR_WMMA_C2C4_CANDIDATE must be 0 or 1; got "
+    "'${NINFER_R9700_Q4_PAIR_WMMA_C2C4_CANDIDATE}'")
+endif()
+add_compile_definitions(
+  NINFER_R9700_Q4_PAIR_WMMA_C2C4_CANDIDATE=${NINFER_R9700_Q4_PAIR_WMMA_C2C4_CANDIDATE})
+
 # Qualification-only exact-shape hipBLASLt selector. One preserves the qualified e2e001... T128
 # default and requires the same identity as a viable T129 choice, independent of prepare order.
 set(NINFER_R9700_FP8_PREFIX_COMMON_ALGO_CANDIDATE "0" CACHE STRING

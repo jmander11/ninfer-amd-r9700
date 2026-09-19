@@ -42,6 +42,7 @@ add_library(ninfer_r9700_core STATIC
   ops/r9700/vision/vision_attention.hip
   ops/r9700/vision/vision_pos_embed.hip
   ops/r9700/attention_projection/attention_projection.hip
+  ops/r9700/paired_projection/paired_projection.hip
   ops/r9700/dflash/dflash2_path_select.cpp
   ops/r9700/dflash/dflash2_path_select.hip
   ops/r9700/dflash/bidirectional_gqa_attention.cpp
@@ -627,6 +628,16 @@ set_target_properties(ninfer_r9700_target_variant_gdn_qual PROPERTIES
   HIP_ARCHITECTURES gfx1201
   LINKER_LANGUAGE HIP)
 target_link_libraries(ninfer_r9700_target_variant_gdn_qual PRIVATE
+  ninfer_r9700_target_bindings hip::host)
+
+# Compile-time routing contract for the qualification-only C2-C4 paired-projection selector.
+add_executable(ninfer_r9700_target_variant_pair_c2c4_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/target_variant_pair_c2c4_qual.cpp)
+ninfer_r9700_internal_includes(ninfer_r9700_target_variant_pair_c2c4_qual)
+set_target_properties(ninfer_r9700_target_variant_pair_c2c4_qual PROPERTIES
+  HIP_ARCHITECTURES gfx1201
+  LINKER_LANGUAGE HIP)
+target_link_libraries(ninfer_r9700_target_variant_pair_c2c4_qual PRIVATE
   ninfer_r9700_target_bindings hip::host)
 
 # Exact MTP next-round state transition for the complete fixed product domain K=1..5/B=1..4.

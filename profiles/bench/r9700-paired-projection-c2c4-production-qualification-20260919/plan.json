@@ -1,0 +1,23 @@
+{
+  "schema": "ninfer.r9700.paired-projection-c2c4-production-plan.v1",
+  "status": "reviewed_ready",
+  "production_routing_authorized": false,
+  "claim": "Direct production-symbol qualification of both C2-C4 all-Q4 paired-projection semantic boundaries.",
+  "bound_inputs": [
+    {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/paired_projection_c2c4_op_qual.hip","bytes":88,"sha256":"b041da3d367e63b9f2b37d60b4823bf69606412b3cfe54947c7b9d6bbfc8453d"},
+    {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/a8q4_pair_wmma_c2c4_qual.hip","bytes":51558,"sha256":"62320bc8ddb12ade4fd0397ef95e0e1623292fed0edeb52c31ced5eb1e9a7f67"},
+    {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/a8q4_shape_sweep_qual.hip","bytes":97355,"sha256":"b8f85a76b2f431ba4ea50fb0e3f28ece55a5501c69197e978df9516c98506be2"},
+    {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/check_paired_projection_c2c4_op_static.py","bytes":3424,"sha256":"e9aee93fb5572c6f47b5148b36cc5168d3c7708bd7922891d1b0985f82aef401"},
+    {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/include/ninfer/ops/attention_projection.h","bytes":2007,"sha256":"2e2bf5a984025c21614488fbdbdd912a653506606261e0b477020a76ba745fd3"},
+    {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/include/ninfer/ops/gdn_projection.h","bytes":920,"sha256":"3f6e8c18af0bf97fe1b040fa17028387aaa93e32e762666f711bf5b652e54a32"},
+    {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/paired_projection/paired_projection.h","bytes":1539,"sha256":"513243eec8c9d62fb8068863ab8ecadfd0381fcd069882e3bb8c874a43793199"},
+    {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/paired_projection/paired_projection.hip","bytes":19194,"sha256":"570532412e962e25fa04012e7df9d3e75ccc3c33548bc4d11eaac28736738c31"},
+    {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/linear/r9700_linear.hip","bytes":192174,"sha256":"5d28cce1938b7bae7ba5dc236813be3394bdadbb60585f5db0c4f687ce2e1b49"},
+    {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-pair-wmma-c2c4-design-20260919/whole-baselines.json","bytes":702,"sha256":"4a57f1e280bdc7f734ce11c1ef42245af661f88004438eece19ab691b11e656e"},
+    {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-paired-projection-c2c4-production-qualification-20260919/commands.sh","bytes":1895,"sha256":"5b27a4cde7e59a39ba7a84bc38bb8e13d7c8c4181a803de9684d33ef3febfed1"},
+    {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-paired-projection-c2c4-production-qualification-20260919/preflight.py","bytes":4395,"sha256":"36e467cfc89631ce25831b9ea79bb4e4c6bdbf448a016e7623f782ba74cdf6ed"}
+  ],
+  "domain": {"tokens":[2,3,4],"columns":5120,"gdn_rows":[4096,12288],"attention_rows":[7168,7168],"qtype":"Q4G64_F16S","layout":"Q4N16K16","group":64,"scale_dtype":"FP16","gdn_calls":48,"attention_calls":16},
+  "admission": {"complete_three_arm_bf16_bit_exact":true,"independent_fp64_represented_oracle_max_bf16_steps":2,"every_combined_cold_allocation_nonregressing":true,"minimum_credible_whole_gain_percent_each_width":1.0,"passing_authorizes":"selector-off/on whole C2-C4 A/B only"},
+  "output": {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-paired-projection-c2c4-production-qualification-20260919/qualification.json","create_only":true}
+}

@@ -26,4 +26,17 @@ void full_attention_projection_t1(const Tensor& hidden, const Weight& query_key,
                                   const DeviceSpan& activation_workspace,
                                   hipStream_t stream);
 
+/**
+ * Computes the same full-attention projection for a compact T=2..4 decode batch.
+ *
+ * Tensor columns are the compact token dimension. Both weights must be canonical
+ * Q4G64_F16S Q4N16K16 [7168,5120]. The caller owns stable activation workspace and
+ * the four disjoint BF16 outputs; the implementation allocates and repacks nothing.
+ */
+void full_attention_projection_decode(const Tensor& hidden, const Weight& query_key,
+                                      const Weight& gate_value, Tensor& query, Tensor& key,
+                                      Tensor& gate, Tensor& value,
+                                      const DeviceSpan& activation_workspace,
+                                      hipStream_t stream);
+
 } // namespace ninfer::ops

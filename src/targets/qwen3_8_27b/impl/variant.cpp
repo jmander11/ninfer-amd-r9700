@@ -5,6 +5,7 @@
 #include "ninfer/ops/attention_projection.h"
 #include "ninfer/ops/linear.h"
 #include "ninfer/ops/gdn_gating.h"
+#include "ninfer/ops/gdn_projection.h"
 #include "ninfer/ops/mtp_pack.h"
 #include "ninfer/ops/residual_add.h"
 #include "ninfer/ops/rmsnorm.h"
@@ -187,6 +188,11 @@ void project_gdn_inputs(const Tensor& hidden, const Variant::GdnProjectionWeight
     const std::int32_t tokens = hidden.ne[1] * hidden.ne[2];
     Tensor hidden_flat = hidden.view({hidden.ne[0], tokens});
     if (execution != nullptr && execution->gdn_q4_pair_t1(
+            hidden_flat, weights.input_projection.query_key,
+            weights.input_projection.value_z, query_key, value_z, stream)) {
+        return;
+    }
+    if (execution != nullptr && execution->gdn_q4_pair_c2c4(
             hidden_flat, weights.input_projection.query_key,
             weights.input_projection.value_z, query_key, value_z, stream)) {
         return;
@@ -485,6 +491,59 @@ bool Variant::ExecutionState::attention_q4_pair_t1(
     return true;
 }
 
+bool Variant::ExecutionState::gdn_q4_pair_c2c4(
+    const Tensor& input, const Weight& query_key, const Weight& value_z,
+    Tensor& query_key_output, Tensor& value_z_output, hipStream_t stream) {
+    if (input.ne[1] <= 0 || input.ne[2] <= 0 || input.ne[3] != 1 ||
+        input.ne[1] > std::numeric_limits<std::int32_t>::max() / input.ne[2] ||
+        !q4_pair_c2c4_selected(
+            static_cast<std::uint32_t>(input.ne[1] * input.ne[2]),
+            query_key.qtype, value_z.qtype)) {
+        return false;
+    }
+    if (impl_ == nullptr) {
+        throw std::invalid_argument("R9700 GDN paired projection execution state is absent");
+    }
+    const auto tokens = static_cast<std::uint32_t>(input.ne[1] * input.ne[2]);
+    const std::size_t required = ops::linear_workspace_capacity_bytes(
+        QType::Q4G64_F16S, static_cast<std::int32_t>(tokens), TextConfig::hidden);
+    if (required == 0U || impl_->activation.data == nullptr ||
+        impl_->activation.bytes < required) {
+        throw std::invalid_argument("R9700 GDN paired projection activation region is too small");
+    }
+    ops::gdn_input_projection_decode(input, query_key, value_z,
+                                     query_key_output, value_z_output,
+                                     {impl_->activation.data, required}, stream);
+    return true;
+}
+
+bool Variant::ExecutionState::attention_q4_pair_c2c4(
+    const Tensor& hidden, const Weight& query_key, const Weight& gate_value,
+    Tensor& query, Tensor& key, Tensor& gate, Tensor& value, hipStream_t stream) {
+    if (hidden.ne[1] <= 0 || hidden.ne[2] <= 0 || hidden.ne[3] != 1 ||
+        hidden.ne[1] > std::numeric_limits<std::int32_t>::max() / hidden.ne[2] ||
+        !q4_pair_c2c4_selected(
+            static_cast<std::uint32_t>(hidden.ne[1] * hidden.ne[2]),
+            query_key.qtype, gate_value.qtype)) {
+        return false;
+    }
+    if (impl_ == nullptr) {
+        throw std::invalid_argument("R9700 attention paired projection execution state is absent");
+    }
+    const auto tokens = static_cast<std::uint32_t>(hidden.ne[1] * hidden.ne[2]);
+    const std::size_t required = ops::linear_workspace_capacity_bytes(
+        QType::Q4G64_F16S, static_cast<std::int32_t>(tokens), TextConfig::hidden);
+    if (required == 0U || impl_->activation.data == nullptr ||
+        impl_->activation.bytes < required) {
+        throw std::invalid_argument(
+            "R9700 attention paired projection activation region is too small");
+    }
+    ops::full_attention_projection_decode(
+        hidden, query_key, gate_value, query, key, gate, value,
+        {impl_->activation.data, required}, stream);
+    return true;
+}
+
 Variant::ExecutionState::~ExecutionState() = default;
 
 std::vector<std::uint32_t> Variant::ExecutionState::eager_widths(
@@ -642,6 +701,11 @@ void Variant::attention_projection(const Tensor& hidden,
                                    WorkspaceArena& workspace, hipStream_t stream, std::int32_t,
                                    ExecutionState* execution, std::int32_t text_layer) {
     if (execution != nullptr && execution->attention_q4_pair_t1(
+            hidden, weights.query_key, weights.gate_value,
+            query, key, gate, value, stream)) {
+        return;
+    }
+    if (execution != nullptr && execution->attention_q4_pair_c2c4(
             hidden, weights.query_key, weights.gate_value,
             query, key, gate, value, stream)) {
         return;

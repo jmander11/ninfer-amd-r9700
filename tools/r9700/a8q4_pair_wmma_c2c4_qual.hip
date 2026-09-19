@@ -1,6 +1,10 @@
 #define NINFER_A8Q4_QUAL_NO_MAIN
 #include "a8q4_shape_sweep_qual.hip"
 
+#if defined(NINFER_PAIR_WMMA_C2C4_PRODUCTION_QUAL)
+#include "ops/r9700/paired_projection/paired_projection.h"
+#endif
+
 #include <functional>
 #include <map>
 #include <regex>
@@ -314,6 +318,27 @@ linear::A8Q4G64LinearArgs wmma_args(
 }
 
 hipError_t launch_combined(const PairArgs& args, hipStream_t stream = nullptr) {
+#if defined(NINFER_PAIR_WMMA_C2C4_PRODUCTION_QUAL)
+    using ninfer::ops::r9700::paired_projection::WeightView;
+    if (args.kind == PairKind::Attention) {
+        return ninfer::ops::r9700::paired_projection::launch_attention(
+            {args.input,
+             WeightView{args.weight0_codes, args.weight0_code_bytes,
+                        args.weight0_scales, args.weight0_scale_bytes},
+             WeightView{args.weight1_codes, args.weight1_code_bytes,
+                        args.weight1_scales, args.weight1_scale_bytes},
+             args.workspace, args.workspace_bytes, args.output0, args.output1,
+             args.output2, args.output3, args.tokens}, stream);
+    }
+    return ninfer::ops::r9700::paired_projection::launch_gdn(
+        {args.input,
+         WeightView{args.weight0_codes, args.weight0_code_bytes,
+                    args.weight0_scales, args.weight0_scale_bytes},
+         WeightView{args.weight1_codes, args.weight1_code_bytes,
+                    args.weight1_scales, args.weight1_scale_bytes},
+         args.workspace, args.workspace_bytes, args.output0, args.output1,
+         args.tokens}, stream);
+#else
     linear::A8G64ActivationWorkspace workspace{};
     hipError_t status = bind_and_quantize(args, &workspace, stream);
     if (status != hipSuccess) return status;
@@ -325,6 +350,7 @@ hipError_t launch_combined(const PairArgs& args, hipStream_t stream = nullptr) {
                        args.output2, args.output3, args.tokens, args.rows0, args.rows1,
                        args.kind == PairKind::Attention ? 1U : 0U);
     return hipGetLastError();
+#endif
 }
 
 hipError_t extract(const hip_bfloat16* source, hip_bfloat16* destination,
@@ -435,10 +461,21 @@ std::array<std::vector<hip_bfloat16>, 4> download_outputs(
 
 int represented_code(const DecodeDot8Weights& weights, std::uint32_t row,
                      std::uint32_t group, std::uint32_t lane) {
-    const std::size_t word = pair_index(row, group, lane >> 4U);
+    const std::size_t word =
+        (row / 16U) * static_cast<std::size_t>(kGroups) * 4U * 16U +
+        static_cast<std::size_t>(group) * 4U * 16U +
+        static_cast<std::size_t>(lane / 16U) * 16U + row % 16U;
     const std::size_t byte = word * 8U + ((lane & 15U) >> 1U);
     const unsigned code = (weights.codes[byte] >> ((lane & 1U) * 4U)) & 15U;
     return code >= 8U ? static_cast<int>(code) - 16 : static_cast<int>(code);
+}
+
+float represented_scale(const DecodeDot8Weights& weights, std::uint32_t row,
+                        std::uint32_t group) {
+    const std::size_t offset =
+        (row / 16U) * static_cast<std::size_t>(kGroups) * 16U +
+        static_cast<std::size_t>(group) * 16U + row % 16U;
+    return half_value(weights.scales[offset]);
 }
 
 void salt_second_matrix(DecodeDot8Weights& weights) {
@@ -484,7 +521,7 @@ std::uint64_t check_oracle(const PairShape& shape, std::uint32_t tokens,
                     sum = std::fma(static_cast<double>(dot),
                         static_cast<double>(half_value(activation.scales[
                             static_cast<std::size_t>(token) * kGroups + group])) *
-                        half_value(weights.scales[scale_index(row, group)]), sum);
+                        represented_scale(weights, row, group), sum);
                 }
                 std::size_t part = matrix;
                 std::uint32_t part_row = row;
@@ -579,8 +616,10 @@ CaseResult run_case(const PairShape& shape, std::uint32_t tokens) {
     malformed = args;
     malformed.input = reinterpret_cast<const hip_bfloat16*>(malformed.weight0_codes);
     if (launch_combined(malformed) != hipErrorInvalidValue) fail("paired WMMA accepted input alias");
+#if !defined(NINFER_PAIR_WMMA_C2C4_PRODUCTION_QUAL)
     malformed = args; malformed.rows0 -= 16U;
     if (launch_combined(malformed) != hipErrorInvalidValue) fail("paired WMMA accepted wrong rows");
+#endif
 
     guard_outputs(serial, tokens, 0x7fc2U);
     guard_outputs(shared, tokens, 0x7fc3U);
@@ -720,8 +759,13 @@ int main(int argc, char** argv) {
         require_fresh_output(output);
         const auto whole = read_round_baselines(baselines);
         const std::filesystem::path root = std::filesystem::canonical(NINFER_SOURCE_DIR);
-        const std::filesystem::path checker = std::filesystem::canonical(
-            root / "tools/r9700/check_a8q4_pair_wmma_c2c4_static.py");
+        const std::filesystem::path checker = std::filesystem::canonical(root /
+#if defined(NINFER_PAIR_WMMA_C2C4_PRODUCTION_QUAL)
+            "tools/r9700/check_paired_projection_c2c4_op_static.py"
+#else
+            "tools/r9700/check_a8q4_pair_wmma_c2c4_static.py"
+#endif
+        );
         const std::string static_command = "python3 " + shell_quote(checker.string()) + " " +
                                            shell_quote(assembly.string()) +
                                            " --expect-receipt " +
@@ -730,8 +774,14 @@ int main(int argc, char** argv) {
         const std::string static_text = read_text(static_receipt);
         std::smatch static_match;
         const std::regex static_expression(
+#if defined(NINFER_PAIR_WMMA_C2C4_PRODUCTION_QUAL)
+            "paired_projection_c2c4_op_static: PASS .*vgpr=([0-9]+) sgpr=([0-9]+) "
+            "wave32=true lds=0 scratch=0 spills=0 native_iu4_wmma=true"
+#else
             "a8q4_pair_wmma_c2c4_static: PASS .*vgpr=([0-9]+) sgpr=([0-9]+) "
-            "wave32=true lds=0 scratch=0 spills=0");
+            "wave32=true lds=0 scratch=0 spills=0"
+#endif
+        );
         if (!std::regex_match(static_text, static_match, static_expression))
             fail("bound paired WMMA static receipt differs");
         const std::uint32_t static_vgpr = static_cast<std::uint32_t>(
@@ -775,15 +825,31 @@ int main(int argc, char** argv) {
 
         std::ostringstream report;
         const std::filesystem::path executable = std::filesystem::canonical("/proc/self/exe");
-        const std::array<std::pair<const char*, const char*>, 5> source_specs{{
-            {"qualifier", "tools/r9700/a8q4_pair_wmma_c2c4_qual.hip"},
-            {"shared_qualifier", "tools/r9700/a8q4_shape_sweep_qual.hip"},
-            {"static_checker", "tools/r9700/check_a8q4_pair_wmma_c2c4_static.py"},
-            {"linear_contract", "src/ops/r9700/linear/r9700_linear.h"},
-            {"linear_implementation", "src/ops/r9700/linear/r9700_linear.hip"},
-        }};
+        const std::array source_specs{
+#if defined(NINFER_PAIR_WMMA_C2C4_PRODUCTION_QUAL)
+            std::pair{"qualifier_entry", "tools/r9700/paired_projection_c2c4_op_qual.hip"},
+            std::pair{"qualifier_body", "tools/r9700/a8q4_pair_wmma_c2c4_qual.hip"},
+            std::pair{"shared_qualifier", "tools/r9700/a8q4_shape_sweep_qual.hip"},
+            std::pair{"static_checker", "tools/r9700/check_paired_projection_c2c4_op_static.py"},
+            std::pair{"attention_contract", "include/ninfer/ops/attention_projection.h"},
+            std::pair{"gdn_contract", "include/ninfer/ops/gdn_projection.h"},
+            std::pair{"raw_contract", "src/ops/r9700/paired_projection/paired_projection.h"},
+            std::pair{"op_implementation", "src/ops/r9700/paired_projection/paired_projection.hip"},
+            std::pair{"linear_primitive", "src/ops/r9700/linear/r9700_linear.hip"},
+#else
+            std::pair{"qualifier", "tools/r9700/a8q4_pair_wmma_c2c4_qual.hip"},
+            std::pair{"shared_qualifier", "tools/r9700/a8q4_shape_sweep_qual.hip"},
+            std::pair{"static_checker", "tools/r9700/check_a8q4_pair_wmma_c2c4_static.py"},
+            std::pair{"linear_contract", "src/ops/r9700/linear/r9700_linear.h"},
+            std::pair{"linear_implementation", "src/ops/r9700/linear/r9700_linear.hip"},
+#endif
+        };
         report << std::setprecision(17)
+#if defined(NINFER_PAIR_WMMA_C2C4_PRODUCTION_QUAL)
+               << "{\n  \"schema\": \"ninfer.r9700.paired-projection-c2c4-production-qualification.v1\",\n"
+#else
                << "{\n  \"schema\": \"ninfer.r9700.a8q4-pair-wmma-c2c4-qualification.v1\",\n"
+#endif
                << "  \"status\": \"qualified_for_whole_ab_only\",\n"
                << "  \"production_routing_authorized\": false,\n"
                << "  \"invocation\": {\"argv\":[\"" << json_escape(executable.string())

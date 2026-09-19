@@ -68,6 +68,12 @@ struct Variant {
         [[nodiscard]] bool attention_q4_pair_t1(
             const Tensor& hidden, const Weight& query_key, const Weight& gate_value,
             Tensor& query, Tensor& key, Tensor& gate, Tensor& value, hipStream_t stream);
+        [[nodiscard]] bool gdn_q4_pair_c2c4(
+            const Tensor& input, const Weight& query_key, const Weight& value_z,
+            Tensor& query_key_output, Tensor& value_z_output, hipStream_t stream);
+        [[nodiscard]] bool attention_q4_pair_c2c4(
+            const Tensor& hidden, const Weight& query_key, const Weight& gate_value,
+            Tensor& query, Tensor& key, Tensor& gate, Tensor& value, hipStream_t stream);
         [[nodiscard]] static constexpr bool attention_q4_pair_t1_selected(
             std::uint32_t tokens, QType query_key, QType gate_value) noexcept {
             return NINFER_R9700_ATTENTION_Q4_PAIR_T1_CANDIDATE != 0 && tokens == 1U &&
@@ -76,6 +82,12 @@ struct Variant {
         [[nodiscard]] static constexpr bool gdn_q4_pair_t1_selected(
             std::uint32_t tokens, QType weight0, QType weight1) noexcept {
             return tokens == 1U && weight0 == QType::Q4G64_F16S &&
+                   weight1 == QType::Q4G64_F16S;
+        }
+        [[nodiscard]] static constexpr bool q4_pair_c2c4_selected(
+            std::uint32_t tokens, QType weight0, QType weight1) noexcept {
+            return NINFER_R9700_Q4_PAIR_WMMA_C2C4_CANDIDATE != 0 && tokens >= 2U &&
+                   tokens <= 4U && weight0 == QType::Q4G64_F16S &&
                    weight1 == QType::Q4G64_F16S;
         }
         [[nodiscard]] static constexpr bool fused_mlp_down_selected(
