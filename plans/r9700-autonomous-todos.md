@@ -134,9 +134,9 @@ Do not rerun either sealed package or infer an S=4 command. The reviewed selecto
 BASE-DECODE-BW measurement completed. The BF16 GDN projection/control and all-Q4 T1 attention
 paired-projection direct qualifiers also completed and admitted their respective fused routes;
 their production implementations and separate whole-model A/Bs are now CPU-only work. The repaired
-and same-review-approved all-Q4 C2..4 paired-WMMA direct qualifier below is the only prepared GPU
-action. Every other remaining unchecked task depends directly or transitively on the external
-`DENSE-FLOOR-DECISION`.
+all-Q4 C2..4 paired-WMMA direct qualifier also completed and admitted its route for a product
+candidate plus whole A/B. No GPU action is currently prepared. Every other remaining unchecked
+task depends directly or transitively on the external `DENSE-FLOOR-DECISION`.
 
 Every future physical experiment must be launched through a reviewed package-local `commands.sh`,
 not an ad-hoc reconstructed command. A package is runnable only when its plan contains no
@@ -299,8 +299,15 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   authorized invocation stopped before HIP device selection or timing: a stream-state check
   incorrectly rejected a successful baseline-file iterator read. No qualification report was
   created; the failure is retained in `attempt-1-read-failure.json`. The reader now rejects only
-  `badbit`; rebound identity and non-GPU preflight passed same-review approval. Run exactly
-  `bash profiles/bench/r9700-a8q4-pair-wmma-c2c4-design-20260919/commands.sh --measure`.
+  `badbit`; rebound identity and non-GPU preflight passed same-review approval. The final direct
+  gate passed all six cases with complete three-arm BF16 parity, independent represented-weight
+  FP64 error of at most one BF16 step, native IU4/wave32, 57 VGPR, 32 SGPR, and no LDS,
+  scratch, or spills. Every candidate allocation beat its paired serial allocation. Exact
+  layer-weighted savings are `6.1705039`, `6.5730799`, and `6.7305520 ms/round`, or 9.9227%,
+  9.5162%, and 8.5119% against the retained C2, C3, and C4 round medians. Evidence:
+  `profiles/bench/r9700-a8q4-pair-wmma-c2c4-design-20260919/qualification.json`. This admits a
+  distinct exact-C2..4 all-Q4 production candidate and matched whole C2..4 A/B; it does not
+  authorize promotion or extend the route to mixed weights, T1, or another token width.
 
   After the admitted paired routes are resolved, the next bounded mechanism is all-Q4 T1
   projected-residual fusion for N5120/K6144 and N5120/K17408. These are respectively the 16

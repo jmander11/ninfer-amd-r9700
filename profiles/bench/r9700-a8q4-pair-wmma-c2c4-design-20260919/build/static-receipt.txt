@@ -1,0 +1,1 @@
+a8q4_pair_wmma_c2c4_static: PASS symbol=_ZN12_GLOBAL__N_129a8q4g64_pair_wmma_c2c4_kernelEPKhS1_PKtPKjS1_S3_S1_S3_P12hip_bfloat16S7_S7_S7_jjjj vgpr=57 sgpr=32 wave32=true lds=0 scratch=0 spills=0
