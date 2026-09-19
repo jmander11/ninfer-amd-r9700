@@ -127,14 +127,11 @@ The create-only Text append-versus-fresh layer-boundary package it prescribed wa
 reviewed, and run as `profiles/bench/r9700-text-layer-boundary-traces-6fe53d53-20260906`, closing
 `DFLASH-TEXT-P129`; the mechanical-protocol K4/W5 directional screen closed as well (see the
 after-parity router).
-The S=8 split-K standalone qualification and matched whole A/B are complete; do not rerun either.
-S=8 failed exact public-token parity deterministically despite its speed win.
-The next GPU action is the reviewed S=2 eager exact-token discriminator at C1/P128+G64 for K4/W5 and K5/W6. Do not run an
-inferred benchmark command: the exact package-local `commands.sh` becomes authoritative only after
-its independent review says `SHIP`. Exact invocation after that review:
-`bash profiles/bench/r9700-dflash-down-splitk-s2-eager-parity-20260919/commands.sh`.
-S=4, another full Device-Graph campaign, C2..4, profiling, and unrelated speed sweeps remain
-forbidden until the S=2 discriminator decides the next branch.
+The bounded DFlash verify-down split-K task is closed default-off: S=8 and S=2 both failed exact
+public-token parity, and S=4 has no mechanism for restoring the incumbent serial-FMA semantics.
+Do not rerun either sealed package or infer an S=4 command. No GPU action is currently prepared;
+every remaining unchecked task depends directly or transitively on the external
+`DENSE-FLOOR-DECISION`.
 
 Every future physical experiment must be launched through a reviewed package-local `commands.sh`,
 not an ad-hoc reconstructed command. A package is runnable only when its plan contains no
@@ -302,7 +299,7 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   rewrite with a full oracle + ISA + timing qualification. Evidence:
   `/tmp/opencode/k5w6-w5w6/dflash-draft-attn-layer0.md`.
 
-- [ ] `DFLASH-VERIFY-DOWN-SPLITK` [active] Pursue the verify-stage Q4 GEMM owner (57% of the
+- [x] `DFLASH-VERIFY-DOWN-SPLITK` Pursue the verify-stage Q4 GEMM owner (57% of the
   DFlash round per the retained owner-trace) via a fresh Layer-0 mechanism + roofline, NOT another
   blind small-T variant. LAYER-0 BOUND (2026-09-12, unprofiled event timing, auto power, exact
   T=5/6 shapes, standalone probe `/tmp/opencode/q4-verify-roofline/q4_verify_roofline`): the
@@ -346,6 +343,16 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   operator win); only if exact may it advance to a fresh matched Device-Graph whole A/B. Test S=4
   only if S=2 fails and a concrete rounding-direction rationale remains; otherwise close the
   mechanism default-off.
+  CLOSED DEFAULT-OFF 2026-09-19. The reviewed S=2 eager discriminator also failed exact parity:
+  ordinary and both controls were exact, while both K4/W5 and K5/W6 candidates changed only token
+  index 31 (`100131` -> `101642`). Evidence:
+  `profiles/bench/r9700-dflash-down-splitk-s2-eager-parity-20260919/results` (sealed failure).
+  Because S=2 is the least-reassociated split and still crosses a real target decision, S=4 has no
+  correctness rationale and is not run. Keep the candidate selector default-off; no production
+  routing changes. CONDITIONAL FUTURE HYPOTHESIS (not active): an exact-order two-stage design could
+  store every per-G64 integer dot in parallel, then replay the incumbent's 272 FP32 FMAs in group
+  order. Reopen only after a Layer-0 bound includes the full integer-dot workspace traffic and
+  serial reduction and still proves a material whole-round ceiling.
 
 ## Durable decision rule (added 2026-09-12)
 

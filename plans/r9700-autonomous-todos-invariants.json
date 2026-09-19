@@ -7,16 +7,16 @@
     "unchecked_count": 33,
     "removed_meta_item": "Perform a requirements-preserving conciseness pass on this live ledger."
   },
-  "current_unchecked_count": 31,
+  "current_unchecked_count": 30,
   "completed_ids_after_rewrite": [
     "DFLASH-SCHEDULE",
     "DFLASH-K5W6-VERIFY",
     "DFLASH-DRAFT-ATTN-LAYER0",
+    "DFLASH-VERIFY-DOWN-SPLITK",
     "DFLASH-TEXT-P129",
     "DFLASH-TARGET-P129"
   ],
   "unchecked_ids": [
-    "DFLASH-VERIFY-DOWN-SPLITK",
     "DFLASH-RECIPE",
     "DFLASH-QUALITY",
     "DFLASH-WHOLE",
@@ -57,7 +57,6 @@
     "XATT-CUTOVER-CONDITIONAL"
   ],
   "dependencies": {
-    "DFLASH-VERIFY-DOWN-SPLITK": [],
     "DFLASH-RECIPE": ["TERMINAL-SELECTION", "CHUNK-SELECT"],
     "DFLASH-QUALITY": ["DFLASH-RECIPE", "DFLASH-TEXT-P129"],
     "DFLASH-WHOLE": ["DFLASH-QUALITY", "DFLASH-SCHEDULE", "DFLASH-VERIFY-DOWN-SPLITK"],
@@ -89,7 +88,7 @@
     "E2E-PROFILE": ["FINAL-ARTIFACT", "SELECTED-PROFILE"],
     "FINAL-SUITE": ["FINAL-ARTIFACT", "E2E-PROFILE", "BF16-PARITY", "SELECTED-PARITY-VISION", "XATT-CUTOVER-CONDITIONAL"]
   },
-  "next_command": "bash profiles/bench/r9700-dflash-down-splitk-s2-eager-parity-20260919/commands.sh",
+  "next_command": null,
   "obsolete_commands": [
     "bash profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/commands.sh"
   ],
@@ -118,8 +117,7 @@
     "Do not change clocks, power, fan, or",
     "require the same reviewer to report `SHIP`",
     "compile flag controls independently owned routes",
-    "S=4, another full Device-Graph campaign, C2..4, profiling, and unrelated speed sweeps remain",
-    "The next GPU action is the reviewed S=2 eager exact-token discriminator",
+    "No GPU action is currently prepared",
     "Never rerun it or use its synchronous traces for timing",
     "4,908/5,120 BF16",
     "resolved workspace and fixed-family graph allocation",
