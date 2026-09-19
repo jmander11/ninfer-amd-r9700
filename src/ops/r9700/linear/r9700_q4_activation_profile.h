@@ -34,6 +34,35 @@ static_assert(NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE == 0 ||
 inline constexpr bool kDFlashMlpDownT5CandidateEnabled =
     NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE == 1;
 
+#ifndef NINFER_R9700_DFLASH_DOWN_SPLITK_CANDIDATE
+#define NINFER_R9700_DFLASH_DOWN_SPLITK_CANDIDATE 0
+#endif
+static_assert(NINFER_R9700_DFLASH_DOWN_SPLITK_CANDIDATE == 0 ||
+                  NINFER_R9700_DFLASH_DOWN_SPLITK_CANDIDATE == 1,
+              "R9700 DFlash down split-K candidate selector must be zero or one");
+inline constexpr bool kDFlashDownSplitkCandidateEnabled =
+    NINFER_R9700_DFLASH_DOWN_SPLITK_CANDIDATE == 1;
+
+// DFlash verify down-GEMM split-K challenger. Splits the K=17408 reduction across
+// S z-blocks to raise wave count for the low-occupancy [5120,17408] shape at the
+// exact DFlash verify widths. The split factor is fixed at compile time; the
+// bounded qualifier sweep (S in {2,4,8}) selected 8 as the fastest factor.
+inline constexpr std::uint32_t kDFlashDownSplitkFactor = 8U;
+
+[[nodiscard]] constexpr bool is_a8q4_dflash_down_splitk_eligible(
+    std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns,
+    std::uint32_t padded_columns) noexcept {
+    return (tokens == 5U || tokens == 6U) && rows == 5120U && columns == 17408U &&
+           padded_columns == columns;
+}
+
+[[nodiscard]] constexpr bool use_a8q4_dflash_down_splitk(
+    std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns,
+    std::uint32_t padded_columns) noexcept {
+    return kDFlashDownSplitkCandidateEnabled && kQ4ActivationBits == 8U &&
+           is_a8q4_dflash_down_splitk_eligible(tokens, rows, columns, padded_columns);
+}
+
 [[nodiscard]] constexpr bool is_a8q4_dflash_mlp_down_t5_eligible(
     std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns,
     std::uint32_t padded_columns) noexcept {

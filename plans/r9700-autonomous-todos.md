@@ -15,6 +15,16 @@ in `docs/performance.md` and `docs/maintainer/r9700-overhaul-plan.md`, not here.
   pushes coherent WIP checkpoints. Never launch while its owner is editing or review is unresolved.
   At handoff, inspect this ledger, `git status`, pushed HEAD, and retained package summaries,
   receipts, and closure. Never overwrite a failed package; its persisted result is evidence.
+- Resolve implementation and promotion questions from the product contract, semantic ownership,
+  and retained evidence without asking the user when they determine one strongest route. When one
+  compile flag controls independently owned routes, split it at the ownership boundary: promote
+  only the route with complete correctness and performance admission, leave unrelated candidates
+  unpromoted, and rename or remove the residual flag so its scope is exact. Never extend admission
+  from a shared flag to an unqualified shape, layout, group, phase, or caller; preserve its fallback.
+  Make routing, workspace planning, reports, tests, and active documentation agree. Record the
+  selected predicate, evidence, excluded behavior, and final closure gate in the owning ledger item.
+  Ask the user only when the choice changes the product contract or qualified alternatives retain a
+  material unresolved tradeoff.
 - The product workload is exactly one R9700 and startup-fixed `C=1..4`. Never schedule or require an
   active `C>4` cell. Retained `C=5..8` rows are historical only.
 - Performance-admission timing requires device 0, Radeon AI PRO R9700, `gfx1201`, wave32, and power
@@ -63,12 +73,17 @@ above apply to every command.
 (K4/W5 candidate/control ratio 0.9993, K5/W6 ratio 0.9977, both within noise); it stays
 default-off. The matched-A/B parity gate caught a K5/W6 verify-context correctness bug (emits
 109600 where base decode emits 96917 at token index 5; deterministic, pre-existing), filed as
-`DFLASH-K5W6-VERIFY`. Investigation in progress: ruled out position-filling and the two_block
-path; overturned the initial "5th column" hypothesis (the emitted terminal is the target's argmax
-at column count ≤2, not a specific 5th column); the fault is in the target-verify context (KV
-cache or attention mask). Next lead: phantom-entry hypothesis — examine the KV transaction
-segment logic (how many KV entries are actually appended vs. the emitted count). Until the bug is
-fixed, K5/W6 is not production-admissible; only K4/W5 passes parity. Evidence:
+`DFLASH-K5W6-VERIFY`. Investigation (2026-09-09) found the index-5 root cause: the fused
+attention leaf (the only W=6 verify route) used a full-precision BF16->FP32 query while the
+ordinary/W5-WMMA routes quantize the query to FP8 E4M3FN; the fused leaf now round-trips its
+query through the FP8 codec (uncommitted, `fp8_int4_kv_attention.hip:503`), and K5/W6 now matches
+ordinary for 17 tokens. A residual index-17 divergence remained because the default build
+(`NINFER_R9700_TEXT_P129_WMMA_TAIL_CANDIDATE=0`, formerly `ATTENTION_PARITY_CANDIDATE`) routed
+BOTH K4/W5 and K5/W6 to the fused leaf; the sealed A/B ran with `=1` (K4/W5 on the W5 WMMA leaf,
+which matched ordinary). RESOLVED by option (b) (generalize the W5 batched-WMMA route to W5/W6
+and promote it to a production route); see the closed `DFLASH-K5W6-VERIFY` item. K5/W6 is now
+production-admissible and matches ordinary exactly on the default build.
+Evidence:
 `profiles/bench/r9700-dflash-small-t-whole-ab-6fe53d53-20260906` (sealed). Prior:
 `DFLASH-TEXT-P129` append-versus-fresh Text parity closed (token-level exact; first intermediate
 divergence at layer 13 post_mixer, one BF16 bit, no generated-token change) and the
@@ -112,8 +127,13 @@ The create-only Text append-versus-fresh layer-boundary package it prescribed wa
 reviewed, and run as `profiles/bench/r9700-text-layer-boundary-traces-6fe53d53-20260906`, closing
 `DFLASH-TEXT-P129`; the mechanical-protocol K4/W5 directional screen closed as well (see the
 after-parity router).
-No GPU action is currently prepared.
-K4/W5 screen timing remains directional only; K5/W6, C2..4, profiling, and speed sweeps remain forbidden.
+The split-K standalone qualification is complete; do not rerun it.
+The next GPU action is the reviewed, matched Engine-level control/candidate package for exact-token and whole-DFlash A/B at
+C1/P128+G64, K4/W5 and K5/W6, with Device Graph enabled. Do not run an inferred benchmark command:
+the exact package-local `commands.sh` becomes authoritative only after its independent review says
+`SHIP`. Exact invocation after that review:
+`bash profiles/bench/r9700-dflash-down-splitk-whole-ab-20260919/commands.sh`.
+C2..4, profiling, and unrelated speed sweeps remain forbidden until this task closes.
 
 Every future physical experiment must be launched through a reviewed package-local `commands.sh`,
 not an ad-hoc reconstructed command. A package is runnable only when its plan contains no
@@ -174,25 +194,153 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   correctness bug, filed as `DFLASH-K5W6-VERIFY`. Evidence:
   `profiles/bench/r9700-dflash-small-t-whole-ab-6fe53d53-20260906` (sealed).
 
-- [ ] `DFLASH-K5W6-VERIFY` Fix the K5/W6 verify-context correctness bug. The greedy K5/W6 DFlash
+- [x] `DFLASH-K5W6-VERIFY` Fix the K5/W6 verify-context correctness bug. The greedy K5/W6 DFlash
   path (draft_window=5, verify_width=6, chain-verify) emits a wrong token: at C1/P129+G27 on
   6fe53d53 it produces token 109600 where the base (ordinary) decode produces 96917 (token index
   5 of the 28-token sequence; all other 27 positions match). Both the small-T control and
   candidate builds diverge identically, so it is deterministic and pre-existing (not caused by the
-  small-T selector). Investigation progress (2026-09-08): (1) Ruled out position-filling —
-  `prepare_verify_kernel` correctly fills all 6 columns when extent=5 (positions = base+c for
-  c≤extent). (2) Ruled out the two_block path — `two_block_first=7`, so k=5 is single-block, not
-  two-block. (3) Overturned the initial "5th column" hypothesis — `accepted_per_position=[6,5,0,0,0]`
-  means the chain breaks at position 2, so the emitted terminal is the target's argmax at column
-  count (≤2), not a specific 5th column; the fault is in the target-verify context (KV cache or
-  attention mask), not in a specific column. Next lead: phantom-entry hypothesis — examine the KV
-  transaction segment logic (how many KV entries are actually appended vs. the emitted count).
-  Suspected locations: `dflash_impl.h:765-772` (speculative_prepare_verify_inputs),
-  `speculative_round.hip:479-500` (prepare_verify_kernel), `speculative_round.hip:427-441`
-  (chain_commit_greedy). Fix the verify-context bug, qualify against the base decode (exact
-  greedy-token parity), and re-run the K5/W6 parity. Until fixed, K5/W6 is not
-  production-admissible; only K4/W5 passes parity. Evidence:
-  `profiles/bench/r9700-dflash-small-t-whole-ab-6fe53d53-20260906/results` (sealed).
+  small-T selector).
+
+  Investigation progress (2026-09-09, current HEAD 437881fc, build-r9700):
+  (1) INDEX-5 ROOT CAUSE FOUND + FIXED (uncommitted): the fused attention leaf
+  (`fp8_int4_kv_attention_fused`, the only route the W=6 verify takes) used a full-precision
+  BF16->FP32 query, while the ordinary decode and the W5 batched-WMMA route quantize the query to
+  FP8 E4M3FN before the QK dot product. The fused leaf now round-trips its query through the same
+  FP8 codec (`fp8_int4_kv_attention.hip:503`). On the rebuilt binary, K5/W6 now matches ordinary
+  for the first 17 tokens (index 5 is 96917, was 109600).
+   (2) RESIDUAL INDEX-17 DIVERGENCE — RESOLVED (option b): the default build had
+   `NINFER_R9700_ATTENTION_PARITY_CANDIDATE=0` (now `NINFER_R9700_TEXT_P129_WMMA_TAIL_CANDIDATE`),
+   which gated off the W5 batched-WMMA route, so BOTH K4/W5 and K5/W6 fell through to the fused
+   leaf and emitted identical tokens that diverged from ordinary at index 17 (118178 vs 96560).
+   The sealed A/B ran with `=1`, where K4/W5 used the W5 WMMA leaf (matched ordinary for all 28
+   tokens) and only K5/W6 used the fused leaf. So the residual divergence was a second, deeper
+   numerical inconsistency in the fused leaf (its reduction tree differs from the WMMA leaves'),
+   not the query-precision issue fixed in (1), and not the DFlash verify logic (the sealed A/B's
+   K4/W5 proved that correct on the W5 WMMA leaf).
+   DECISION (made 2026-09-10, user chose (b)):
+     (a) Rebuild with the flag `=1` (the sealed A/B config): K4/W5 -> W5 WMMA leaf (matches
+         ordinary); K5/W6 stays on the fused leaf and still diverges at index 17 unless (b) or (c)
+         is also done. Fastest way to confirm the diagnosis on the GPU.
+     (b) Add a W6 batched-WMMA route (generalize the W5 WMMA leaf to W=6) so both widths run on the
+         same WMMA numerics as ordinary. Cleanest correctness fix; new kernel + qualification.
+         CHOSEN.
+     (c) Make the fused leaf's reduction tree match the WMMA leaves' (changes a production kernel's
+         numerics, including the short-context decode fallback). Hardest.
+   The earlier "phantom-entry" and "suspected locations" leads (dflash_impl.h:765-772,
+   speculative_round.hip:479-500/427-441) are SUPERSEDED by (1)/(2): the fault was in the
+   attention leaf's numerics, not the KV transaction or verify position-filling. RESOLVED by (b):
+   K5/W6 now runs on the W5/W6 batched-WMMA route and matches ordinary exactly (see the closure
+   note below). Evidence:
+   `profiles/bench/r9700-dflash-small-t-whole-ab-6fe53d53-20260906/results` (sealed); fresh
+   pre-fix runs in `/tmp/opencode/k5w6-fix-test/` (ordinary/k4w5/k5w6 .json).
+
+   OPTION (b) IMPLEMENTED (2026-09-10, HEAD 437881fc + uncommitted W5W6 generalization): the user
+   chose (b). The W5 batched-WMMA route was generalized to W5/W6: `use_dflash_w5_batched_wmma`
+   -> `use_dflash_w5w6_batched_wmma` (admits query_rows in {5,6}); the three kernels renamed
+   `*_batched_w5*` -> `*_batched_w5w6*` (grid-parameterized, no hard-coded 5); the PV-launch and
+   QK grids now use `a.query_rows`; workspace sizing is parameterized by `rows`; routing +
+   workspace planning in `r9700_full_attention.hip` admit 5 or 6 rows. The diagnostic fused-query
+   FP8 round-trip from (1) was REVERTED (diagnostic-only, not the production solution; K5/W6 no
+   longer needs it because it now runs on the WMMA route). VERIFIED: on a build matching the
+   sealed control's four candidate flags (DFLASH_MLP_DOWN_T5 / DFLASH_RMSNORM_ROWS56 /
+    FP8_PREFIX_COMMON_ALGO / GDN_VERIFY_WAVE_QK all =1, plus the attention-parity flag =1,
+    since renamed `NINFER_R9700_TEXT_P129_WMMA_TAIL_CANDIDATE`), the
+   ordinary arm reproduces the sealed reference exactly AND K5/W6 (W6 WMMA) matches the ordinary
+   arm for all 28 tokens (96560@17; the pre-fix index-5 109600 is gone). The earlier ordinary-arm
+   divergence (118178@17) was a build-config difference (those four candidate flags OFF in the
+   plain build), not a source regression. REMAINING: full W6 qualification (FP64 oracle / serial
+    W1 / canaries / eager+graph / ISA / route-rejection), W6-vs-fused speed measurement, and
+    promotion of the direct route (remove the qualification-only branch) if it passes. Evidence:
+    `/tmp/opencode/k5w6-w5w6/` (matched-ordinary.json, matched-k5w6.json, noedit-*.json,
+    sealed-ordinary.json).
+
+    CLOSED 2026-09-12 (HEAD 437881fc + uncommitted W5W6 generalization + promotion). All remaining
+    work is done and verified:
+    (3) FULL W6 QUALIFICATION PASSED (discriminator tool, exit 0, no stderr): route-rejection
+    accepts W5/W6 and rejects W4/W7/tree/out-of-range; W6 batched WMMA matches the FP8-Q profile
+    oracle to 1.01e-7 (max_abs) and is bit-exact to serial WMMA and to graph-capture replay;
+    canaries intact. Diagnostic W6-vs-fused: batched 0.0617 ms vs fused 0.0955 ms (~1.55x win).
+    ISA/static check (`check_attention_parity_static.py` on `build/kv_op_qual.s`) PASS.
+    (4) SURGICAL PROMOTION: `use_dflash_w5w6_batched_wmma` is now a PRODUCTION route (no flag
+    gate) for the exact qualified cell — DFlash target verification, rows 5 or 6, non-tree,
+    context 64-8191, G16, token-fastest FP8 keys, feature-fastest INT4 values/FP16 scales. The
+    G16/layout predicate is enforced at the routing site in `r9700_full_attention.hip`; G32,
+    wrong-layout, tree, and out-of-range cells retain the fused fallback. Workspace planning
+    reserves the W5W6 workspace on shape conditions (no flag gate). The umbrella
+    `NINFER_R9700_ATTENTION_PARITY_CANDIDATE` flag was renamed to
+    `NINFER_R9700_TEXT_P129_WMMA_TAIL_CANDIDATE` (CMake cache var, `kTextP129WmmaTailCandidate`,
+    bench report field `text_p129_wmma_tail_candidate`, planner/discriminator/bench-support
+    tests) and now gates ONLY `use_text_p129_wmma_tail`.
+    (5) BOTH FLAG STATES SELECT IDENTICAL W5/W6 ROUTING: discriminator exit 0 on flag=0
+    (`build-r9700`) and flag=1 (`build-r9700-w5w6`); `dflash_w5w6_route_is_production=true` in
+    both, `compiled_text_p129_candidate_enabled` flips with the flag. W6 numerics clean in both
+    (FP8-Q profile 1.01e-7, bit-exact to serial + graph).
+    (6) DEFAULT-BUILD K4/W5 AND K5/W6 EXACT WHOLE-TOKEN PARITY (build-r9700, flag=0,
+    --whole-pg 129,27, lane 0): ordinary (`--spec mtp --draft-tokens 0`) == K4/W5
+    (`--draft-tokens 4 --dflash-verify-width 5`) == K5/W6 (`--draft-tokens 5
+    --dflash-verify-width 6`), all 28 tokens. Evidence: `/tmp/opencode/k5w6-w5w6/parity-{ordinary,
+    k4w5,k5w6}.json` and `discriminator-{promoted,flag0}.json`.
+    SELECTED PREDICATE: production W5W6 batched-WMMA route for the qualified DFlash cell (above),
+    fused fallback preserved for G32/wrong-layout/tree/out-of-range; the renamed flag controls
+    only Text P129. K5/W6 is now production-admissible.
+
+- [x] `DFLASH-DRAFT-ATTN-LAYER0` Evaluate a kernel-iteration challenger for the DFlash draft
+  (proposal) attention `bidirectional_gqa_bf16_kernel` (D128/Hq32/Hkv8/group4/page64, the
+  recipe-independent DFlash lane). LAYER-0 REJECTED 2026-09-12 (no challenger implemented).
+  Baseline (auto, 200-event median, `ninfer_r9700_bidirectional_gqa_qual`): tree T12/B2 = 0.0921 ms,
+  chain T5/B2 = 0.0110 ms; FP64 oracle passes (max_abs 0.00098). The kernel is a serial per-key
+  online-softmax (one KV head/block, 4 waves, one query head/wave), occupancy-16, real context =
+  the DFlash Full-BF16 cyclic capacity (2048). The verify-side W5W6 WMMA trick does NOT transfer:
+  the 16x16x16 WMMA computes 16 query rows (M-dim) at once, but each wave owns exactly one query
+  head (group 4), so the M-dim is wasted and the QK dot is still a per-key scalar reduce — no
+  issue-cost win. The mechanism that would help is split-KV / flash-tiling (parallelize the
+  ~2048-key loop across more waves/CTAs and merge partial online-softmax states), but that is a
+  larger, higher-risk rewrite of a single draft-attention Op, not a whole-model bottleneck.
+  CONDITIONAL FUTURE HYPOTHESIS (not an active task): if whole-DFlash phase attribution later shows
+  the draft-attention Op owns a material whole-inference ceiling, revisit a split-KV/flash-tiling
+  rewrite with a full oracle + ISA + timing qualification. Evidence:
+  `/tmp/opencode/k5w6-w5w6/dflash-draft-attn-layer0.md`.
+
+- [ ] `DFLASH-VERIFY-DOWN-SPLITK` [active] Pursue the verify-stage Q4 GEMM owner (57% of the
+  DFlash round per the retained owner-trace) via a fresh Layer-0 mechanism + roofline, NOT another
+  blind small-T variant. LAYER-0 BOUND (2026-09-12, unprofiled event timing, auto power, exact
+  T=5/6 shapes, standalone probe `/tmp/opencode/q4-verify-roofline/q4_verify_roofline`): the
+  production `a8q4g64_linear_wmma32` route (grid=(rows/16,tokens/16), block=32, N16K16 tiled
+  Q4G64 weights) achieves **gate_up [34816,5120] = 430 GB/s** (2176 waves, 90.3 MiB, 68% of the
+  retained 633 GB/s pure-stream ceiling) but **down [5120,17408] = 230 GB/s** (320 waves, 45.2 MiB,
+  **36% of ceiling**). The down GEMM is the weak owner: only 320 waves (vs 2176) cannot hide HBM
+  latency, so it sits at 36% of the stream ceiling — a 64% gap, the largest in the family. The
+  prior small-T candidate (N34816/K5120 one-row-per-thread) exhausts only that mechanism and the
+  gate_up shape; it never touched the low-occupancy down shape.
+  MECHANISM (tile/wave remapping = split-K): split the down GEMM's K=17408 reduction across more
+  waves to raise occupancy toward the gate_up's 430 GB/s. Projected saving: down at 430 GB/s saves
+  ~99 us/GEMM x 64 layers ~= **6.3 ms/round ~= 5.3% of the ~118 ms round** (material, clears the
+  whole-inference admission margin). BOUND THE SPLIT-FACTOR SWEEP (e.g. K-split in {2,4,8}); do
+  not sweep unbounded. GATES before promotion (stop immediately on any failure): (1) independent
+  FP64 oracle at the exact down shape; (2) canaries; (3) gfx1201 ISA/resources; (4) graph/workspace
+  safety (Device-Graph address stability, arena lifetime); (5) direct paired unprofiled timing at
+  the exact T=5/6 shapes; (6) exact public-token parity (K4/W5 and K5/W6 vs ordinary); (7) matched
+  whole-DFlash A/B. Do NOT begin the gate_up remap unless this task closes AND gate_up
+  independently proves a material remaining bound.
+  OPERATOR QUALIFICATION PASSED 2026-09-19 on the physical R9700 at `auto`: S=8 was best and is
+  bit-exact to the incumbent and the independent represented-input FP64 oracle at T=5 and T=6;
+  output/partial canaries, alias rejection, two Device-Graph replays, wave32/native-IU4 ISA, zero
+  LDS/private/scratch/spills, and occupancy 16 all passed. T5 median fell 0.20543 -> 0.07451 ms
+  (upper paired ratio 0.3658); T6 fell 0.21545 -> 0.08024 ms (upper paired ratio 0.3733). Evidence:
+  `profiles/bench/r9700-dflash-down-splitk-qualification-20260919/results/summary.json`. Remaining
+  before promotion: exact public-token parity and matched whole-DFlash Engine A/B for both K4/W5
+  and K5/W6 with Device Graph. Use fresh `--whole-pg 128,64`, the optimized proposal head, and
+  balanced control/candidate launch orders; do not add the known-non-equivalent isolated-decode
+  diagnostic stream. The candidate remains compile-gated and default-off.
+
+## Durable decision rule (added 2026-09-12)
+
+A failed candidate exhausts only its mechanism and qualified cells, not the attributed owner. When
+exact-shape Layer-0 evidence identifies one new mechanism whose conservative bound clears the
+whole-inference admission margin, autonomously pursue the single highest-ceiling mechanism through
+qualification and matched whole A/B; do not ask the user merely because implementation is
+substantial. Do not bundle a secondary mechanism. Ask only when alternatives retain a material
+unresolved tradeoff or the product contract must change.
 
 - [x] `DFLASH-TEXT-P129` Close append-versus-fresh P129 parity. The retained combined-selector gate
   has exact public continuations but its final normalized tail differs in 4,908/5,120 BF16 values.
@@ -235,7 +383,7 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   fallback counts, and exact artifact/profile provenance under the selected cache group. Base-model
   PPL owns target NLL; synthetic operator error cannot select a recipe.
 
-- [ ] `DFLASH-WHOLE` [depends: DFLASH-QUALITY, DFLASH-SCHEDULE] Advance only a valid, materially
+- [ ] `DFLASH-WHOLE` [depends: DFLASH-QUALITY, DFLASH-SCHEDULE, DFLASH-VERIFY-DOWN-SPLITK] Advance only a valid, materially
   faster C1 K4/W5 route, then retain fresh recipe-aware K4/W5 and decision-relevant K5/W6 evidence
   at C1..4: exact output, resolved W, per-position acceptance, fallback/repair, prefill/graph-decode
   throughput, graph startup/replay, resolved workspace and fixed-family graph allocation, and

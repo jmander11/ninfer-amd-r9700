@@ -39,10 +39,12 @@ constexpr std::uint32_t kGroups = kHeadDim / kValueGroup;
 constexpr std::uint32_t kPageSize = 64U;
 constexpr std::uint32_t kW1 = 1U;
 constexpr std::uint32_t kW5 = 5U;
+constexpr std::uint32_t kW6 = 6U;
 constexpr std::uint32_t kTextRows = 129U;
 constexpr std::size_t kTextContext = 129U;
 constexpr std::size_t kW1Context = 130U;
 constexpr std::size_t kW5Context = 134U;
+constexpr std::size_t kW6Context = 135U;
 constexpr std::size_t kPhysicalPages = 4U;
 constexpr std::size_t kPhysicalTokens = kPhysicalPages * kPageSize;
 constexpr float kAttentionScale = 1.0F / 16.0F;
@@ -51,6 +53,7 @@ constexpr int kTrials = 7;
 constexpr int kTimingIterations = 50;
 static_assert(kQueryHeads * kW1Context * sizeof(float) == 12480U);
 static_assert(kQueryHeads * kW5Context * sizeof(float) == 12864U);
+static_assert(kQueryHeads * kW6Context * sizeof(float) == 12960U);
 static_assert(kQueryHeads * kTextContext * sizeof(float) == 12384U);
 
 [[noreturn]] void fail(const std::string& message) { throw std::runtime_error(message); }
@@ -131,8 +134,8 @@ struct Fixture {
 };
 
 Fixture make_fixture() {
-    std::vector<float> query(kW5 * kQueryHeads * kHeadDim);
-    for (std::uint32_t row = 0; row < kW5; ++row) {
+    std::vector<float> query(kW6 * kQueryHeads * kHeadDim);
+    for (std::uint32_t row = 0; row < kW6; ++row) {
         for (std::uint32_t head = 0; head < kQueryHeads; ++head) {
             for (std::uint32_t feature = 0; feature < kHeadDim; ++feature) {
                 const int value = static_cast<int>((row * 37U + head * 19U +
@@ -142,9 +145,9 @@ Fixture make_fixture() {
             }
         }
     }
-    std::vector<float> keys(kW5Context * kKvHeads * kHeadDim);
+    std::vector<float> keys(kW6Context * kKvHeads * kHeadDim);
     std::vector<float> values(keys.size());
-    for (std::size_t token = 0; token < kW5Context; ++token) {
+    for (std::size_t token = 0; token < kW6Context; ++token) {
         for (std::uint32_t head = 0; head < kKvHeads; ++head) {
             for (std::uint32_t feature = 0; feature < kHeadDim; ++feature) {
                 const std::size_t index = (token * kKvHeads + head) * kHeadDim + feature;
@@ -159,13 +162,13 @@ Fixture make_fixture() {
     }
     Fixture fixture{
         .queries = std::move(query),
-        .logical_keys = oracle::encode_keys(keys, kW5Context * kKvHeads, kHeadDim),
-        .logical_values = oracle::encode_values(values, kW5Context * kKvHeads,
+        .logical_keys = oracle::encode_keys(keys, kW6Context * kKvHeads, kHeadDim),
+        .logical_values = oracle::encode_values(values, kW6Context * kKvHeads,
                                                  kHeadDim, kValueGroup),
         .physical_keys = std::vector<std::uint8_t>(kPhysicalTokens * kKvHeads * kHeadDim),
         .physical_values = std::vector<std::uint8_t>(kPhysicalTokens * kKvHeads * kHeadDim / 2U),
         .physical_scales = std::vector<std::uint16_t>(kPhysicalTokens * kKvHeads * kGroups)};
-    for (std::size_t logical = 0; logical < kW5Context; ++logical) {
+    for (std::size_t logical = 0; logical < kW6Context; ++logical) {
         const std::size_t physical = physical_token(logical, fixture.pages);
         for (std::uint32_t head = 0; head < kKvHeads; ++head) {
             const std::size_t represented = logical * kKvHeads + head;
@@ -389,15 +392,23 @@ int main() {
             kv::use_fp8_qk_wmma(kW5, kW5Context)) {
             fail("production attention classifier does not retain W1-WMMA/W5-fused selection");
         }
-        const bool expected_selected = kv::kAttentionParityCandidate;
-        if (kv::use_dflash_w5_batched_wmma(kW5, kW5Context, false, true) != expected_selected ||
-            kv::use_text_p129_wmma_tail(kTextRows, kTextContext) != expected_selected ||
-            kv::use_dflash_w5_batched_wmma(kW5, kW5Context, false, false) ||
-            kv::use_dflash_w5_batched_wmma(4U, kW5Context, false, true) ||
-            kv::use_dflash_w5_batched_wmma(6U, kW5Context, false, true) ||
-            kv::use_dflash_w5_batched_wmma(kW5, kW5Context, true, true) ||
-            kv::use_dflash_w5_batched_wmma(kW5, 63U, false, true) ||
-            kv::use_dflash_w5_batched_wmma(kW5, 8192U, false, true) ||
+        const bool w5w6_selected = true;
+        const bool text_selected = kv::kTextP129WmmaTailCandidate;
+        if (kv::use_dflash_w5w6_batched_wmma(kW5, kW5Context, false, true) !=
+                w5w6_selected ||
+            kv::use_dflash_w5w6_batched_wmma(kW6, kW6Context, false, true) !=
+                w5w6_selected ||
+            kv::use_text_p129_wmma_tail(kTextRows, kTextContext) != text_selected ||
+            kv::use_dflash_w5w6_batched_wmma(kW5, kW5Context, false, false) ||
+            kv::use_dflash_w5w6_batched_wmma(kW6, kW6Context, false, false) ||
+            kv::use_dflash_w5w6_batched_wmma(4U, kW5Context, false, true) ||
+            kv::use_dflash_w5w6_batched_wmma(7U, kW6Context, false, true) ||
+            kv::use_dflash_w5w6_batched_wmma(kW5, kW5Context, true, true) ||
+            kv::use_dflash_w5w6_batched_wmma(kW6, kW6Context, true, true) ||
+            kv::use_dflash_w5w6_batched_wmma(kW5, 63U, false, true) ||
+            kv::use_dflash_w5w6_batched_wmma(kW6, 63U, false, true) ||
+            kv::use_dflash_w5w6_batched_wmma(kW5, 8192U, false, true) ||
+            kv::use_dflash_w5w6_batched_wmma(kW6, 8192U, false, true) ||
             kv::use_text_p129_wmma_tail(128U, kTextContext) ||
             kv::use_text_p129_wmma_tail(kTextRows, 130U)) {
             fail("attention parity selector escaped its exact Text/DFlash cells");
@@ -435,6 +446,7 @@ int main() {
         const std::vector<std::int32_t> w1_positions{129};
         const std::vector<std::int32_t> text_w1_positions{128};
         const std::vector<std::int32_t> w5_positions{129, 130, 131, 132, 133};
+        const std::vector<std::int32_t> w6_positions{129, 130, 131, 132, 133, 134};
         std::vector<std::int32_t> text_positions(kTextRows);
         for (std::uint32_t row = 0; row < kTextRows; ++row) {
             text_positions[row] = static_cast<std::int32_t>(row);
@@ -451,6 +463,7 @@ int main() {
         DeviceArray<std::int32_t> d_text_w1_positions(text_w1_positions.size());
         upload(d_text_w1_positions, text_w1_positions);
         DeviceArray<std::int32_t> d_w5_positions(w5_positions.size()); upload(d_w5_positions, w5_positions);
+        DeviceArray<std::int32_t> d_w6_positions(w6_positions.size()); upload(d_w6_positions, w6_positions);
         DeviceArray<std::int32_t> d_text_positions(text_positions.size());
         upload(d_text_positions, text_positions);
         const std::size_t row_elements = kQueryHeads * kHeadDim;
@@ -459,10 +472,16 @@ int main() {
         DeviceArray<float> d_w5_wmma_output(kW5 * row_elements + 2U);
         DeviceArray<float> d_w5_batched_output(kW5 * row_elements + 2U);
         DeviceArray<float> d_w5_fused_output(kW5 * row_elements + 2U);
+        DeviceArray<float> d_w6_wmma_output(kW6 * row_elements + 2U);
+        DeviceArray<float> d_w6_batched_output(kW6 * row_elements + 2U);
+        DeviceArray<float> d_w6_fused_output(kW6 * row_elements + 2U);
         DeviceArray<float> d_w1_scores(kQueryHeads * kW1Context + 2U);
         DeviceArray<float> d_w5_scores(kQueryHeads * kW5Context + 2U);
+        DeviceArray<float> d_w6_scores(kQueryHeads * kW6Context + 2U);
         const std::size_t batched_workspace_elements = kW5 * kQueryHeads * kW5Context;
         DeviceArray<float> d_w5_batched_scores(batched_workspace_elements + 2U);
+        const std::size_t w6_batched_workspace_elements = kW6 * kQueryHeads * kW6Context;
+        DeviceArray<float> d_w6_batched_scores(w6_batched_workspace_elements + 2U);
         const std::size_t text_dense_workspace_bytes =
             kv::fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(kTextRows);
         if (text_dense_workspace_bytes != 1609920U ||
@@ -507,6 +526,14 @@ int main() {
         auto w5_batched = w5_wmma;
         w5_batched.score_workspace = d_w5_batched_scores.get() + 1;
         w5_batched.output = d_w5_batched_output.get() + 1;
+        auto w6_wmma = args(kW6, kW6Context, d_w6_positions.get(), d_w6_scores.get() + 1,
+                            d_w6_wmma_output.get() + 1);
+        auto w6_fused = w6_wmma;
+        w6_fused.score_workspace = nullptr;
+        w6_fused.output = d_w6_fused_output.get() + 1;
+        auto w6_batched = w6_wmma;
+        w6_batched.score_workspace = d_w6_batched_scores.get() + 1;
+        w6_batched.output = d_w6_batched_output.get() + 1;
         auto text_dense = args(kTextRows, kTextContext, d_text_positions.get(), nullptr,
                                d_text_dense_output.get() + 1);
         text_dense.query = d_text_query.get();
@@ -520,29 +547,54 @@ int main() {
         missing_workspace.score_workspace = nullptr;
         if (kv::fp8_int4_kv_attention_wmma(missing_workspace, device.stream) !=
             hipErrorInvalidValue) fail("WMMA accepted a missing exact score workspace");
-        if (kv::fp8_int4_kv_attention_wmma_batched_w5(missing_workspace, device.stream) !=
+        if (kv::fp8_int4_kv_attention_wmma_batched_w5w6(missing_workspace, device.stream) !=
             hipErrorInvalidValue) fail("batched W5 WMMA accepted a missing score workspace");
+        auto w6_missing_workspace = w6_wmma;
+        w6_missing_workspace.score_workspace = nullptr;
+        if (kv::fp8_int4_kv_attention_wmma_batched_w5w6(w6_missing_workspace, device.stream) !=
+            hipErrorInvalidValue) fail("batched W6 WMMA accepted a missing score workspace");
         auto wrong_width = w5_batched;
         wrong_width.query_rows = 4U;
-        if (kv::fp8_int4_kv_attention_wmma_batched_w5(wrong_width, device.stream) !=
-            hipErrorInvalidValue) fail("batched W5 WMMA accepted W4");
+        if (kv::fp8_int4_kv_attention_wmma_batched_w5w6(wrong_width, device.stream) !=
+            hipErrorInvalidValue) fail("batched W5/W6 WMMA accepted W4");
+        auto wrong_width_w7 = w6_batched;
+        wrong_width_w7.query_rows = 7U;
+        if (kv::fp8_int4_kv_attention_wmma_batched_w5w6(wrong_width_w7, device.stream) !=
+            hipErrorInvalidValue) fail("batched W5/W6 WMMA accepted W7");
         auto missing_positions = w5_batched;
         missing_positions.row_positions = nullptr;
-        if (kv::fp8_int4_kv_attention_wmma_batched_w5(missing_positions, device.stream) !=
+        if (kv::fp8_int4_kv_attention_wmma_batched_w5w6(missing_positions, device.stream) !=
             hipErrorInvalidValue) fail("batched W5 WMMA accepted missing causal positions");
+        auto w6_missing_positions = w6_batched;
+        w6_missing_positions.row_positions = nullptr;
+        if (kv::fp8_int4_kv_attention_wmma_batched_w5w6(w6_missing_positions, device.stream) !=
+            hipErrorInvalidValue) fail("batched W6 WMMA accepted missing causal positions");
         auto tree = w5_batched;
         tree.ancestor_masks = d_w5_positions.get();
         tree.prefix_lengths = d_w5_positions.get();
-        if (kv::fp8_int4_kv_attention_wmma_batched_w5(tree, device.stream) !=
+        if (kv::fp8_int4_kv_attention_wmma_batched_w5w6(tree, device.stream) !=
             hipErrorInvalidValue) fail("batched W5 WMMA accepted tree metadata");
+        auto w6_tree = w6_batched;
+        w6_tree.ancestor_masks = d_w6_positions.get();
+        w6_tree.prefix_lengths = d_w6_positions.get();
+        if (kv::fp8_int4_kv_attention_wmma_batched_w5w6(w6_tree, device.stream) !=
+            hipErrorInvalidValue) fail("batched W6 WMMA accepted tree metadata");
         auto wrong_group = w5_batched;
         wrong_group.value_group = 32U;
-        if (kv::fp8_int4_kv_attention_wmma_batched_w5(wrong_group, device.stream) !=
+        if (kv::fp8_int4_kv_attention_wmma_batched_w5w6(wrong_group, device.stream) !=
             hipErrorInvalidValue) fail("batched W5 WMMA accepted unqualified G32 values");
+        auto w6_wrong_group = w6_batched;
+        w6_wrong_group.value_group = 32U;
+        if (kv::fp8_int4_kv_attention_wmma_batched_w5w6(w6_wrong_group, device.stream) !=
+            hipErrorInvalidValue) fail("batched W6 WMMA accepted unqualified G32 values");
         auto wrong_layout = w5_batched;
         wrong_layout.value_layout = kv::Fp8Int4KvPlaneLayout::TokenFastest;
-        if (kv::fp8_int4_kv_attention_wmma_batched_w5(wrong_layout, device.stream) !=
+        if (kv::fp8_int4_kv_attention_wmma_batched_w5w6(wrong_layout, device.stream) !=
             hipErrorInvalidValue) fail("batched W5 WMMA accepted an unqualified cache layout");
+        auto w6_wrong_layout = w6_batched;
+        w6_wrong_layout.value_layout = kv::Fp8Int4KvPlaneLayout::TokenFastest;
+        if (kv::fp8_int4_kv_attention_wmma_batched_w5w6(w6_wrong_layout, device.stream) !=
+            hipErrorInvalidValue) fail("batched W6 WMMA accepted an unqualified cache layout");
         auto malformed = w5_fused;
         malformed.query_rows = 0U;
         if (kv::fp8_int4_kv_attention_fused(malformed, device.stream) != hipErrorInvalidValue) {
@@ -577,9 +629,14 @@ int main() {
         fill_guarded(d_w5_wmma_output, kW5 * row_elements);
         fill_guarded(d_w5_batched_output, kW5 * row_elements);
         fill_guarded(d_w5_fused_output, kW5 * row_elements);
+        fill_guarded(d_w6_wmma_output, kW6 * row_elements);
+        fill_guarded(d_w6_batched_output, kW6 * row_elements);
+        fill_guarded(d_w6_fused_output, kW6 * row_elements);
         fill_guarded(d_w1_scores, kQueryHeads * kW1Context);
         fill_guarded(d_w5_scores, kQueryHeads * kW5Context);
+        fill_guarded(d_w6_scores, kQueryHeads * kW6Context);
         fill_guarded(d_w5_batched_scores, batched_workspace_elements);
+        fill_guarded(d_w6_batched_scores, w6_batched_workspace_elements);
         fill_guarded(d_text_dense_output, static_cast<std::size_t>(kTextRows) * row_elements);
         fill_guarded(d_text_candidate_output,
                      static_cast<std::size_t>(kTextRows) * row_elements);
@@ -590,9 +647,13 @@ int main() {
         hip_check(kv::fp8_int4_kv_attention_wmma(w1, device.stream), "W1 WMMA");
         hip_check(kv::fp8_int4_kv_attention_fused(w1_fused, device.stream), "W1 fused");
         hip_check(kv::fp8_int4_kv_attention_wmma(w5_wmma, device.stream), "W5 serial WMMA");
-        hip_check(kv::fp8_int4_kv_attention_wmma_batched_w5(w5_batched, device.stream),
+        hip_check(kv::fp8_int4_kv_attention_wmma_batched_w5w6(w5_batched, device.stream),
                   "W5 batched WMMA");
         hip_check(kv::fp8_int4_kv_attention_fused(w5_fused, device.stream), "W5 fused");
+        hip_check(kv::fp8_int4_kv_attention_wmma(w6_wmma, device.stream), "W6 serial WMMA");
+        hip_check(kv::fp8_int4_kv_attention_wmma_batched_w5w6(w6_batched, device.stream),
+                  "W6 batched WMMA");
+        hip_check(kv::fp8_int4_kv_attention_fused(w6_fused, device.stream), "W6 fused");
         hip_check(launch_text_dense(text_dense, d_text_dense_workspace.get() + 1),
                   "Text P129 dense");
         hip_check(launch_text_candidate(), "Text P129 dense plus W1-tail overwrite");
@@ -608,6 +669,12 @@ int main() {
             read_guarded(d_w5_batched_output, kW5 * row_elements, "W5 batched WMMA");
         const std::vector<float> actual_w5_fused =
             read_guarded(d_w5_fused_output, kW5 * row_elements, "W5 fused");
+        const std::vector<float> actual_w6_wmma =
+            read_guarded(d_w6_wmma_output, kW6 * row_elements, "W6 serial WMMA");
+        const std::vector<float> actual_w6_batched =
+            read_guarded(d_w6_batched_output, kW6 * row_elements, "W6 batched WMMA");
+        const std::vector<float> actual_w6_fused =
+            read_guarded(d_w6_fused_output, kW6 * row_elements, "W6 fused");
         const std::vector<float> actual_text_dense = read_guarded(
             d_text_dense_output, static_cast<std::size_t>(kTextRows) * row_elements,
             "Text P129 dense");
@@ -618,8 +685,11 @@ int main() {
             read_guarded(d_text_w1_output, row_elements, "Text standalone W1 at C129");
         (void)read_guarded(d_w1_scores, kQueryHeads * kW1Context, "W1 score workspace");
         (void)read_guarded(d_w5_scores, kQueryHeads * kW5Context, "W5 score workspace");
+        (void)read_guarded(d_w6_scores, kQueryHeads * kW6Context, "W6 score workspace");
         (void)read_guarded(d_w5_batched_scores, batched_workspace_elements,
                            "W5 batched score workspace");
+        (void)read_guarded(d_w6_batched_scores, w6_batched_workspace_elements,
+                           "W6 batched score workspace");
         // The dense QK plane intentionally does not materialize masked future-score cells.
         // Its contract is bounded scratch, not a fully written observable output.
         require_guard_canaries(d_text_dense_workspace, "Text P129 dense workspace");
@@ -647,6 +717,27 @@ int main() {
                                    std::bit_cast<std::uint32_t>(right);
                         })) {
             fail("W5 batched WMMA is not bit-exact to serial WMMA");
+        }
+        if (!std::equal(actual_w1.begin(), actual_w1.end(), actual_w6_wmma.begin(),
+                        [](float left, float right) {
+                            return std::bit_cast<std::uint32_t>(left) ==
+                                   std::bit_cast<std::uint32_t>(right);
+                        })) {
+            fail("W1 and W6 serial-WMMA selected rows are not bit-exact");
+        }
+        if (!std::equal(actual_w1_fused.begin(), actual_w1_fused.end(),
+                        actual_w6_fused.begin(), [](float left, float right) {
+                            return std::bit_cast<std::uint32_t>(left) ==
+                                   std::bit_cast<std::uint32_t>(right);
+                        })) {
+            fail("W1 and W6 fused selected rows are not bit-exact");
+        }
+        if (!std::equal(actual_w6_wmma.begin(), actual_w6_wmma.end(),
+                        actual_w6_batched.begin(), [](float left, float right) {
+                            return std::bit_cast<std::uint32_t>(left) ==
+                                   std::bit_cast<std::uint32_t>(right);
+                        })) {
+            fail("W6 batched WMMA is not bit-exact to serial WMMA");
         }
         if (!std::equal(actual_text_dense.begin(),
                         actual_text_dense.begin() + 128U * row_elements,
@@ -685,10 +776,14 @@ int main() {
             attention_oracle(fixture, fixture.queries, kW1, w1_positions);
         const std::vector<double> oracle_w5 =
             attention_oracle(fixture, fixture.queries, kW5, w5_positions);
+        const std::vector<double> oracle_w6 =
+            attention_oracle(fixture, fixture.queries, kW6, w6_positions);
         const std::vector<double> fp8_profile_oracle_w1 =
             attention_oracle(fixture, fp8_profile_queries, kW1, w1_positions);
         const std::vector<double> fp8_profile_oracle_w5 =
             attention_oracle(fixture, fp8_profile_queries, kW5, w5_positions);
+        const std::vector<double> fp8_profile_oracle_w6 =
+            attention_oracle(fixture, fp8_profile_queries, kW6, w6_positions);
         const std::vector<double> oracle_text_dense =
             attention_oracle(fixture, text_query_values, kTextRows, text_positions);
         const std::vector<float> text_tail_query(
@@ -730,6 +825,21 @@ int main() {
         const Error w5_fused_error = require_oracle(actual_w5_fused, oracle_w5,
                                                      kImplementationLimit,
                                                      "W5 fused");
+        const Error w6_wmma_profile_error = require_oracle(
+            actual_w6_wmma, fp8_profile_oracle_w6, kImplementationLimit,
+            "W6 serial WMMA FP8-Q profile");
+        const Error w6_wmma_error = require_profile_bound(
+            actual_w6_wmma, oracle_w6, fp8_profile_oracle_w6, kImplementationLimit,
+            "W6 serial WMMA");
+        const Error w6_batched_profile_error = require_oracle(
+            actual_w6_batched, fp8_profile_oracle_w6, kImplementationLimit,
+            "W6 batched WMMA FP8-Q profile");
+        const Error w6_batched_error = require_profile_bound(
+            actual_w6_batched, oracle_w6, fp8_profile_oracle_w6, kImplementationLimit,
+            "W6 batched WMMA");
+        const Error w6_fused_error = require_oracle(actual_w6_fused, oracle_w6,
+                                                     kImplementationLimit,
+                                                     "W6 fused");
         const Error text_dense_error = require_oracle(
             actual_text_dense, oracle_text_dense, kDenseImplementationLimit,
             "Text P129 dense BF16-Q");
@@ -762,7 +872,16 @@ int main() {
             return kv::fp8_int4_kv_attention_fused(w5_fused, device.stream);
         };
         const auto launch_batched = [&] {
-            return kv::fp8_int4_kv_attention_wmma_batched_w5(w5_batched, device.stream);
+            return kv::fp8_int4_kv_attention_wmma_batched_w5w6(w5_batched, device.stream);
+        };
+        const auto launch_w6_wmma = [&] {
+            return kv::fp8_int4_kv_attention_wmma(w6_wmma, device.stream);
+        };
+        const auto launch_w6_fused = [&] {
+            return kv::fp8_int4_kv_attention_fused(w6_fused, device.stream);
+        };
+        const auto launch_w6_batched = [&] {
+            return kv::fp8_int4_kv_attention_wmma_batched_w5w6(w6_batched, device.stream);
         };
 
         fill_guarded(d_w5_batched_output, kW5 * row_elements);
@@ -786,6 +905,28 @@ int main() {
                                    std::bit_cast<std::uint32_t>(right);
                         })) {
             fail("captured W5 batched WMMA is not bit-exact to serial WMMA");
+        }
+        fill_guarded(d_w6_batched_output, kW6 * row_elements);
+        fill_guarded(d_w6_batched_scores, w6_batched_workspace_elements);
+        ninfer::DecodeGraphDefinition w6_graph_definition;
+        w6_graph_definition.capture(device.stream, [&] {
+            hip_check(launch_w6_batched(), "capture W6 batched WMMA");
+        });
+        ninfer::DecodeGraphExecutable w6_graph_executable;
+        w6_graph_executable.instantiate(w6_graph_definition);
+        w6_graph_executable.upload(device.stream);
+        w6_graph_executable.launch(device.stream);
+        device.synchronize();
+        const std::vector<float> graph_w6_batched =
+            read_guarded(d_w6_batched_output, kW6 * row_elements, "graph W6 batched WMMA");
+        (void)read_guarded(d_w6_batched_scores, w6_batched_workspace_elements,
+                           "graph W6 batched score workspace");
+        if (!std::equal(actual_w6_wmma.begin(), actual_w6_wmma.end(),
+                        graph_w6_batched.begin(), [](float left, float right) {
+                            return std::bit_cast<std::uint32_t>(left) ==
+                                   std::bit_cast<std::uint32_t>(right);
+                        })) {
+            fail("captured W6 batched WMMA is not bit-exact to serial WMMA");
         }
         fill_guarded(d_text_candidate_output,
                      static_cast<std::size_t>(kTextRows) * row_elements);
@@ -816,6 +957,9 @@ int main() {
         std::array<double, kTrials> batched_samples{};
         std::array<double, kTrials> w1_wmma_samples{};
         std::array<double, kTrials> w1_fused_samples{};
+        std::array<double, kTrials> w6_wmma_samples{};
+        std::array<double, kTrials> w6_fused_samples{};
+        std::array<double, kTrials> w6_batched_samples{};
         std::array<double, kTrials> text_dense_samples{};
         std::array<double, kTrials> text_candidate_samples{};
         for (int trial = 0; trial < kTrials; ++trial) {
@@ -830,6 +974,9 @@ int main() {
                 wmma_samples[trial] = time_ms(device.stream, launch_wmma);
                 batched_samples[trial] = time_ms(device.stream, launch_batched);
                 fused_samples[trial] = time_ms(device.stream, launch_fused);
+                w6_wmma_samples[trial] = time_ms(device.stream, launch_w6_wmma);
+                w6_batched_samples[trial] = time_ms(device.stream, launch_w6_batched);
+                w6_fused_samples[trial] = time_ms(device.stream, launch_w6_fused);
                 text_dense_samples[trial] = time_ms(device.stream, [&] {
                     return launch_text_dense(text_dense, d_text_dense_workspace.get() + 1);
                 });
@@ -839,6 +986,9 @@ int main() {
                 text_dense_samples[trial] = time_ms(device.stream, [&] {
                     return launch_text_dense(text_dense, d_text_dense_workspace.get() + 1);
                 });
+                w6_fused_samples[trial] = time_ms(device.stream, launch_w6_fused);
+                w6_batched_samples[trial] = time_ms(device.stream, launch_w6_batched);
+                w6_wmma_samples[trial] = time_ms(device.stream, launch_w6_wmma);
                 fused_samples[trial] = time_ms(device.stream, launch_fused);
                 batched_samples[trial] = time_ms(device.stream, launch_batched);
                 wmma_samples[trial] = time_ms(device.stream, launch_wmma);
@@ -852,32 +1002,43 @@ int main() {
         }
         const Json report{
             {"schema_version", 2},
-            {"qualification", "text_p129_and_dflash_w5_attention_parity_discriminator"},
-            {"selector", {{"name", "NINFER_R9700_ATTENTION_PARITY_CANDIDATE"},
-                           {"compiled", kv::kAttentionParityCandidate},
+            {"qualification", "text_p129_and_dflash_w5w6_attention_parity_discriminator"},
+            {"selector", {{"name", "NINFER_R9700_TEXT_P129_WMMA_TAIL_CANDIDATE"},
+                           {"compiled", kv::kTextP129WmmaTailCandidate},
                            {"default", false}}},
             {"hardware", {{"device", 0}, {"name", device.props.name},
                            {"architecture", "gfx1201"}, {"wave_size", 32},
                            {"pci_bus_id", pci.data()}}},
             {"geometry", {{"query_heads", 24}, {"kv_heads", 4}, {"head_dim", 256},
-                          {"value_group", 16}, {"w1_context", 130}, {"w5_context", 134},
-                          {"w1_score_workspace_bytes", 12480},
-                          {"w5_serial_score_workspace_bytes", 12864},
-                          {"w5_batched_score_workspace_bytes",
-                           batched_workspace_elements * sizeof(float)},
-                          {"text_rows", 129}, {"text_context", 129},
-                          {"text_w1_score_workspace_bytes", 12384},
-                          {"text_dense_workspace_bytes", text_dense_workspace_bytes}}},
+                           {"value_group", 16}, {"w1_context", 130}, {"w5_context", 134},
+                           {"w6_context", 135},
+                           {"w1_score_workspace_bytes", 12480},
+                           {"w5_serial_score_workspace_bytes", 12864},
+                           {"w6_serial_score_workspace_bytes", 12960},
+                           {"w5_batched_score_workspace_bytes",
+                            batched_workspace_elements * sizeof(float)},
+                           {"w6_batched_score_workspace_bytes",
+                            w6_batched_workspace_elements * sizeof(float)},
+                           {"text_rows", 129}, {"text_context", 129},
+                           {"text_w1_score_workspace_bytes", 12384},
+                           {"text_dense_workspace_bytes", text_dense_workspace_bytes}}},
             {"target_pair", {{"ordinary", "W1/C130/position129 FP8-Q WMMA"},
-                              {"dflash_candidate", "W5/C134/positions129..133 batched FP8-Q WMMA"},
-                              {"serial_wmma_same_route_row0_bit_exact", true},
-                              {"fused_same_route_row0_bit_exact", true},
-                              {"batched_serial_all_rows_bit_exact", true},
-                              {"batched_graph_all_rows_bit_exact", true},
-                              {"current_production_cross_route_row0_bit_exact", false},
-                              {"current_production_cross_route_row0_mismatches", fused_mismatches},
-                              {"current_production_cross_route_row0_max_abs",
-                               fused_pair_maximum_absolute}}},
+                               {"dflash_candidate", "W5/C134/positions129..133 batched FP8-Q WMMA"},
+                               {"serial_wmma_same_route_row0_bit_exact", true},
+                               {"fused_same_route_row0_bit_exact", true},
+                               {"batched_serial_all_rows_bit_exact", true},
+                               {"batched_graph_all_rows_bit_exact", true},
+                               {"current_production_cross_route_row0_bit_exact", false},
+                               {"current_production_cross_route_row0_mismatches", fused_mismatches},
+                               {"current_production_cross_route_row0_max_abs",
+                                fused_pair_maximum_absolute}}},
+            {"target_pair_w6", {{"ordinary", "W1/C130/position129 FP8-Q WMMA"},
+                                 {"dflash_candidate",
+                                  "W6/C135/positions129..134 batched FP8-Q WMMA"},
+                                 {"serial_wmma_same_route_row0_bit_exact", true},
+                                 {"fused_same_route_row0_bit_exact", true},
+                                 {"batched_serial_all_rows_bit_exact", true},
+                                 {"batched_graph_all_rows_bit_exact", true}}},
             {"text_pair", {{"fresh", "dense T129/C129 plus W1 tail overwrite"},
                             {"append", "W1/C129/position128 FP8-Q WMMA"},
                             {"dense_prefix_rows0_127_preserved_bit_exact", true},
@@ -908,6 +1069,20 @@ int main() {
                          w5_batched_profile_error.maximum_relative},
                         {"w5_fused_max_abs", w5_fused_error.maximum_absolute},
                         {"w5_fused_max_rel", w5_fused_error.maximum_relative},
+                        {"w6_wmma_max_abs", w6_wmma_error.maximum_absolute},
+                        {"w6_wmma_max_rel", w6_wmma_error.maximum_relative},
+                        {"w6_wmma_fp8_q_profile_max_abs",
+                         w6_wmma_profile_error.maximum_absolute},
+                        {"w6_wmma_fp8_q_profile_max_rel",
+                         w6_wmma_profile_error.maximum_relative},
+                        {"w6_batched_max_abs", w6_batched_error.maximum_absolute},
+                        {"w6_batched_max_rel", w6_batched_error.maximum_relative},
+                        {"w6_batched_fp8_q_profile_max_abs",
+                         w6_batched_profile_error.maximum_absolute},
+                        {"w6_batched_fp8_q_profile_max_rel",
+                         w6_batched_profile_error.maximum_relative},
+                        {"w6_fused_max_abs", w6_fused_error.maximum_absolute},
+                        {"w6_fused_max_rel", w6_fused_error.maximum_relative},
                         {"text_dense_bf16_q_max_abs", text_dense_error.maximum_absolute},
                         {"text_dense_bf16_q_max_rel", text_dense_error.maximum_relative},
                         {"text_tail_w1_max_abs", text_tail_error.maximum_absolute},
@@ -928,6 +1103,9 @@ int main() {
                         {"w5_serial_wmma_median_ms", median(wmma_samples)},
                         {"w5_batched_wmma_median_ms", median(batched_samples)},
                         {"w5_fused_median_ms", median(fused_samples)},
+                        {"w6_serial_wmma_median_ms", median(w6_wmma_samples)},
+                        {"w6_batched_wmma_median_ms", median(w6_batched_samples)},
+                        {"w6_fused_median_ms", median(w6_fused_samples)},
                         {"text_dense_p129_median_ms", median(text_dense_samples)},
                         {"text_dense_plus_tail_median_ms", median(text_candidate_samples)},
                         {"text_tail_overwrite_median_overhead_ms",
@@ -937,16 +1115,19 @@ int main() {
                         {"w5_serial_wmma_samples_ms", wmma_samples},
                         {"w5_batched_wmma_samples_ms", batched_samples},
                         {"w5_fused_samples_ms", fused_samples},
+                        {"w6_serial_wmma_samples_ms", w6_wmma_samples},
+                        {"w6_batched_wmma_samples_ms", w6_batched_samples},
+                        {"w6_fused_samples_ms", w6_fused_samples},
                         {"text_dense_p129_samples_ms", text_dense_samples},
                         {"text_dense_plus_tail_samples_ms", text_candidate_samples},
                         {"launch_order", "ABBA by trial"}}},
             {"default_production_routing_changed", false},
-            {"compiled_candidate_routing_enabled", kv::kAttentionParityCandidate},
-            {"production_route_authorized", false}};
+            {"compiled_text_p129_candidate_enabled", kv::kTextP129WmmaTailCandidate},
+            {"dflash_w5w6_route_is_production", true}};
         const std::string serialized = report.dump(2);
         const Json parsed = Json::parse(serialized);
         if (parsed != report || parsed.at("timing").at("evidence_eligible") != false ||
-            parsed.at("production_route_authorized") != false ||
+            parsed.at("dflash_w5w6_route_is_production") != true ||
             parsed.at("target_pair").at("current_production_cross_route_row0_mismatches") !=
                 fused_mismatches ||
             parsed.at("text_pair").at("original_dense_tail_append_w1_mismatches") !=

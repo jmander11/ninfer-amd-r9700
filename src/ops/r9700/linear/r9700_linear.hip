@@ -1006,6 +1006,136 @@ __global__ __launch_bounds__(kWaveSize) void a8q4g64_linear_wmma32_kernel(
 #endif
 }
 
+// DFlash verify down-GEMM split-K challenger. Splits the K reduction across S z-blocks
+// to raise wave count for the low-occupancy [5120,17408] shape. Each z-block accumulates
+// its K-slice into a float partial-sum plane; a follow-up reduce kernel combines the S
+// planes into the BF16 output.
+template <std::uint32_t S>
+__global__ __launch_bounds__(kWaveSize) void a8q4g64_linear_down_splitk_kernel(
+    const std::uint8_t* activation_low_codes,
+    const std::uint8_t* activation_high_codes,
+    const std::uint16_t* activation_scales,
+    const std::uint32_t* activation_status,
+    const std::uint8_t* weight_codes, const std::uint16_t* weight_scales,
+    float* partial_sums, std::uint32_t tokens, std::uint32_t rows,
+    std::uint32_t padded_columns) {
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
+    const std::uint32_t lane = threadIdx.x;
+    const std::uint32_t axis = lane & 15U;
+    const std::uint32_t lane_group = lane >> 4U;
+    const std::uint32_t token_base = blockIdx.y * kWmmaTile;
+    const std::uint32_t row_base = blockIdx.x * kWmmaTile;
+    if (*activation_status != Q4G64ActivationOk) {
+#pragma unroll
+        for (std::uint32_t element = 0; element < 8U; ++element) {
+            const std::uint32_t token = token_base + lane_group * 8U + element;
+            const std::uint32_t row = row_base + axis;
+            if (token < tokens && row < rows) {
+                partial_sums[static_cast<std::size_t>(blockIdx.z) * tokens * rows +
+                             static_cast<std::size_t>(token) * rows + row] =
+                    __uint_as_float(0x7fc10000U);
+            }
+        }
+        return;
+    }
+    const std::uint32_t groups = padded_columns / kQ4Group;
+    const std::uint32_t groups_per_split = groups / S;
+    const std::uint32_t group_start = blockIdx.z * groups_per_split;
+    const std::uint32_t group_end = group_start + groups_per_split;
+    WmmaF32Fragment total{};
+    for (std::uint32_t group = group_start; group < group_end; ++group) {
+        WmmaI32x8 low_dot{};
+        WmmaI32x8 high_dot{};
+#pragma unroll
+        for (std::uint32_t half = 0; half < 2U; ++half) {
+            const std::uint32_t k_base = group * kQ4Group + half * 32U + lane_group * 16U;
+            WmmaI32x2 a_low{};
+            WmmaI32x2 a_high{};
+            WmmaI32x2 b{};
+            const std::uint32_t token = token_base + axis;
+            const std::uint32_t row = row_base + axis;
+            if (token < tokens) {
+                const std::size_t element =
+                    static_cast<std::size_t>(token) * padded_columns + k_base;
+                a_low[0] = load_q4x8(activation_low_codes, element);
+                a_low[1] = load_q4x8(activation_low_codes, element + 8U);
+                a_high[0] = load_q4x8(activation_high_codes, element);
+                a_high[1] = load_q4x8(activation_high_codes, element + 8U);
+            }
+            if (row < rows) {
+                const std::uint32_t word = (k_base & (kQ4Group - 1U)) / 8U;
+                b[0] = load_q4_n16k16_x8(weight_codes, row, group, word, groups);
+                b[1] = load_q4_n16k16_x8(weight_codes, row, group, word + 1U, groups);
+            }
+            low_dot = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
+                false, a_low, true, b, low_dot, false);
+            high_dot = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
+                true, a_high, true, b, high_dot, false);
+        }
+        const std::uint32_t row = row_base + axis;
+        const float w_scale = row < rows
+                                  ? __half2float(__ushort_as_half(weight_scales[
+                                        q4_n16k16_scale_index(row, group, groups)]))
+                                  : 0.0F;
+#pragma unroll
+        for (std::uint32_t element = 0; element < 8U; ++element) {
+            const std::uint32_t token = token_base + lane_group * 8U + element;
+            const float a_scale = token < tokens
+                                      ? __half2float(__ushort_as_half(activation_scales[
+                                            static_cast<std::size_t>(token) * groups + group]))
+                                      : 0.0F;
+            const std::int32_t combined = low_dot[element] + 16 * high_dot[element];
+            total[element] = fmaf(static_cast<float>(combined),
+                                  a_scale * w_scale, total[element]);
+        }
+    }
+#pragma unroll
+    for (std::uint32_t element = 0; element < 8U; ++element) {
+        const std::uint32_t token = token_base + lane_group * 8U + element;
+        const std::uint32_t row = row_base + axis;
+        if (token < tokens && row < rows) {
+            partial_sums[static_cast<std::size_t>(blockIdx.z) * tokens * rows +
+                         static_cast<std::size_t>(token) * rows + row] = total[element];
+        }
+    }
+#else
+    (void)activation_low_codes; (void)activation_high_codes; (void)activation_scales;
+    (void)activation_status;
+    (void)weight_codes; (void)weight_scales; (void)partial_sums; (void)tokens;
+    (void)rows; (void)padded_columns;
+#endif
+}
+
+template <std::uint32_t S>
+__global__ __launch_bounds__(kWaveSize) void a8q4g64_linear_down_splitk_reduce_kernel(
+    const float* partial_sums, hip_bfloat16* output, std::uint32_t tokens,
+    std::uint32_t rows) {
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
+    const std::uint32_t lane = threadIdx.x;
+    const std::uint32_t axis = lane & 15U;
+    const std::uint32_t lane_group = lane >> 4U;
+    const std::uint32_t token_base = blockIdx.y * kWmmaTile;
+    const std::uint32_t row_base = blockIdx.x * kWmmaTile;
+#pragma unroll
+    for (std::uint32_t element = 0; element < 8U; ++element) {
+        const std::uint32_t token = token_base + lane_group * 8U + element;
+        const std::uint32_t row = row_base + axis;
+        if (token < tokens && row < rows) {
+            float total = 0.0F;
+#pragma unroll
+            for (std::uint32_t s = 0; s < S; ++s) {
+                total += partial_sums[static_cast<std::size_t>(s) * tokens * rows +
+                                      static_cast<std::size_t>(token) * rows + row];
+            }
+            output[static_cast<std::size_t>(token) * rows + row] =
+                static_cast<hip_bfloat16>(total);
+        }
+    }
+#else
+    (void)partial_sums; (void)output; (void)tokens; (void)rows;
+#endif
+}
+
 __global__ __launch_bounds__(kThreads)
 void a8q4g64_linear_decode_dot8_t1_kernel(
     const std::uint8_t* activation_low_codes,
@@ -2646,7 +2776,7 @@ hipError_t a8g64_quantize_activation(const A8G64ActivationQuantizeArgs& args,
 }
 
 hipError_t a8q4g64_linear_wmma32(const A8Q4G64LinearArgs& args,
-                                 hipStream_t stream) noexcept {
+                                  hipStream_t stream) noexcept {
     if (!valid_a8q4_linear_args(args)) return hipErrorInvalidValue;
 #if defined(__HIPCC__)
     const dim3 grid((args.rows + kWmmaTile - 1U) / kWmmaTile,
@@ -2662,6 +2792,77 @@ hipError_t a8q4g64_linear_wmma32(const A8Q4G64LinearArgs& args,
     return hipErrorNotSupported;
 #endif
 }
+
+template <std::uint32_t S>
+hipError_t a8q4g64_linear_dflash_down_splitk_t(const A8Q4G64LinearArgs& args,
+                                               hipStream_t stream) noexcept {
+    if (!valid_a8q4_linear_args(args) ||
+        !is_a8q4_dflash_down_splitk_eligible(
+            args.tokens, args.rows, args.columns, args.padded_columns) ||
+        args.partial_sums == nullptr ||
+        args.partial_sum_bytes == 0U) {
+        return hipErrorInvalidValue;
+    }
+    const std::uint32_t groups = args.padded_columns / kQ4Group;
+    if (groups % S != 0U) return hipErrorInvalidValue;
+    const std::size_t required =
+        static_cast<std::size_t>(S) * args.tokens * args.rows * sizeof(float);
+    std::size_t output_elements = 0U, output_bytes = 0U;
+    if (args.partial_sum_bytes < required ||
+        reinterpret_cast<std::uintptr_t>(args.partial_sums) % alignof(float) != 0U ||
+        !checked_mul(args.tokens, args.rows, &output_elements) ||
+        !checked_mul(output_elements, sizeof(hip_bfloat16), &output_bytes)) {
+        return hipErrorInvalidValue;
+    }
+    const void* const protected_pointers[] = {
+        args.activation_low_codes, args.activation_high_codes, args.activation_scales,
+        args.activation_status, args.weight_codes, args.weight_scales, args.output};
+    const std::size_t protected_sizes[] = {
+        args.activation_low_code_bytes, args.activation_high_code_bytes,
+        args.activation_scale_bytes, sizeof(std::uint32_t), args.weight_code_bytes,
+        args.weight_scale_bytes, output_bytes};
+    for (std::size_t index = 0U; index < 7U; ++index) {
+        if (ranges_overlap(args.partial_sums, required,
+                           protected_pointers[index], protected_sizes[index])) {
+            return hipErrorInvalidValue;
+        }
+    }
+#if defined(__HIPCC__)
+    const dim3 grid((args.rows + kWmmaTile - 1U) / kWmmaTile,
+                    (args.tokens + kWmmaTile - 1U) / kWmmaTile, S);
+    hipLaunchKernelGGL(a8q4g64_linear_down_splitk_kernel<S>, grid, dim3(kWaveSize), 0,
+                       stream, args.activation_low_codes, args.activation_high_codes,
+                       args.activation_scales, args.activation_status, args.weight_codes,
+                       args.weight_scales, args.partial_sums, args.tokens, args.rows,
+                       args.padded_columns);
+    hipError_t result = hipGetLastError();
+    if (result != hipSuccess) return result;
+    const dim3 reduce_grid((args.rows + kWmmaTile - 1U) / kWmmaTile,
+                           (args.tokens + kWmmaTile - 1U) / kWmmaTile);
+    hipLaunchKernelGGL(a8q4g64_linear_down_splitk_reduce_kernel<S>, reduce_grid,
+                       dim3(kWaveSize), 0, stream, args.partial_sums, args.output,
+                       args.tokens, args.rows);
+    return hipGetLastError();
+#else
+    (void)stream;
+    return hipErrorNotSupported;
+#endif
+}
+
+hipError_t a8q4g64_linear_dflash_down_splitk(const A8Q4G64LinearArgs& args,
+                                             hipStream_t stream) noexcept {
+    return a8q4g64_linear_dflash_down_splitk_t<kDFlashDownSplitkFactor>(args, stream);
+}
+
+// Explicit instantiations for the bounded qualifier sweep. The production route
+// fixes S at kDFlashDownSplitkFactor; the standalone sweep evidence instantiates
+// the bounded factor set.
+template hipError_t a8q4g64_linear_dflash_down_splitk_t<2U>(const A8Q4G64LinearArgs&,
+                                                             hipStream_t) noexcept;
+template hipError_t a8q4g64_linear_dflash_down_splitk_t<4U>(const A8Q4G64LinearArgs&,
+                                                             hipStream_t) noexcept;
+template hipError_t a8q4g64_linear_dflash_down_splitk_t<8U>(const A8Q4G64LinearArgs&,
+                                                             hipStream_t) noexcept;
 
 hipError_t a8q4g64_linear_decode_dot8_t1(
     const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept {
@@ -2955,13 +3156,17 @@ hipError_t a8q4g64_linear_candidate(const A8Q4G64CandidateArgs& args,
         workspace.status,
         args.weight_codes, args.weight_code_bytes, args.weight_scales,
         args.weight_scale_bytes, args.output, args.tokens, args.rows, args.columns,
-        args.padded_columns};
+        args.padded_columns, args.partial_sums, args.partial_sum_bytes};
     if (!valid_a8q4_linear_args(linear_args)) return hipErrorInvalidValue;
     const hipError_t quantized = a8g64_quantize_activation({args.input, workspace}, stream);
     if (quantized != hipSuccess) return quantized;
     if (use_a8q4_decode_dot8_t1(
             args.tokens, args.rows, args.columns, args.padded_columns)) {
         return a8q4g64_linear_decode_dot8_t1(linear_args, stream);
+    }
+    if (args.dflash_target_verify_down && use_a8q4_dflash_down_splitk(
+            args.tokens, args.rows, args.columns, args.padded_columns)) {
+        return a8q4g64_linear_dflash_down_splitk(linear_args, stream);
     }
     if (use_a8q4_dflash_small_t(
             args.tokens, args.rows, args.columns, args.padded_columns)) {

@@ -1348,7 +1348,7 @@ void TextContext::mlp_tail(const Tensor* post_norm, const MlpW& m, Tensor& x,
 
     Variant::post_mixer(h, *m.payload, x, ph, work_, s,
                         packed_route_tokens(active_sequence_batch_, active_sequence_width_),
-                        linear_execution_, text_layer);
+                        linear_execution_, text_layer, active_dflash_target_verify_);
 }
 
 template <class Tap>

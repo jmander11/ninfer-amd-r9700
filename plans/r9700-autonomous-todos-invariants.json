@@ -10,11 +10,13 @@
   "current_unchecked_count": 31,
   "completed_ids_after_rewrite": [
     "DFLASH-SCHEDULE",
+    "DFLASH-K5W6-VERIFY",
+    "DFLASH-DRAFT-ATTN-LAYER0",
     "DFLASH-TEXT-P129",
     "DFLASH-TARGET-P129"
   ],
   "unchecked_ids": [
-    "DFLASH-K5W6-VERIFY",
+    "DFLASH-VERIFY-DOWN-SPLITK",
     "DFLASH-RECIPE",
     "DFLASH-QUALITY",
     "DFLASH-WHOLE",
@@ -55,10 +57,10 @@
     "XATT-CUTOVER-CONDITIONAL"
   ],
   "dependencies": {
-    "DFLASH-K5W6-VERIFY": [],
+    "DFLASH-VERIFY-DOWN-SPLITK": [],
     "DFLASH-RECIPE": ["TERMINAL-SELECTION", "CHUNK-SELECT"],
     "DFLASH-QUALITY": ["DFLASH-RECIPE", "DFLASH-TEXT-P129"],
-    "DFLASH-WHOLE": ["DFLASH-QUALITY", "DFLASH-SCHEDULE"],
+    "DFLASH-WHOLE": ["DFLASH-QUALITY", "DFLASH-SCHEDULE", "DFLASH-VERIFY-DOWN-SPLITK"],
     "WHOLE-MATRIX": ["CHUNK-SELECT", "QUALITY-8K32K", "CAPACITY-WHOLE-12"],
     "CHUNK-PHYSICAL-12": ["DENSE-FLOOR-DECISION"],
     "CHUNK-SELECT": ["CHUNK-PHYSICAL-12"],
@@ -87,7 +89,7 @@
     "E2E-PROFILE": ["FINAL-ARTIFACT", "SELECTED-PROFILE"],
     "FINAL-SUITE": ["FINAL-ARTIFACT", "E2E-PROFILE", "BF16-PARITY", "SELECTED-PARITY-VISION", "XATT-CUTOVER-CONDITIONAL"]
   },
-  "next_command": null,
+  "next_command": "bash profiles/bench/r9700-dflash-down-splitk-whole-ab-20260919/commands.sh",
   "obsolete_commands": [
     "bash profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/commands.sh"
   ],
@@ -115,8 +117,9 @@
     "ceil(0.0025 * scored_positions)",
     "Do not change clocks, power, fan, or",
     "require the same reviewer to report `SHIP`",
-    "K4/W5 screen timing remains directional only; K5/W6, C2..4, profiling, and speed sweeps remain forbidden.",
-    "No GPU action is currently prepared",
+    "compile flag controls independently owned routes",
+    "C2..4, profiling, and unrelated speed sweeps remain forbidden until this task closes.",
+    "The next GPU action is the reviewed, matched Engine-level control/candidate package",
     "Never rerun it or use its synchronous traces for timing",
     "4,908/5,120 BF16",
     "resolved workspace and fixed-family graph allocation",

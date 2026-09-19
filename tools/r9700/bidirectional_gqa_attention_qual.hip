@@ -57,6 +57,7 @@ ninfer::DeviceBuffer upload(const std::vector<T>& host) {
 struct Result {
     double max_abs = 0.0;
     std::size_t compared = 0;
+    double median_ms = 0.0;
 };
 
 Result run_case(ninfer::DeviceContext& device, int tokens, const std::vector<std::int32_t>& lengths,
@@ -146,9 +147,38 @@ Result run_case(ninfer::DeviceContext& device, int tokens, const std::vector<std
         kScale, context, envelope, workspace, output_tensor, device.stream);
     device.synchronize();
 
+    // Unprofiled event timing at this case's extent (attribution-only baseline for the
+    // Layer-0 decision point; the oracle gate above remains the correctness authority).
+    Result result;
+    const int iters = 200;
+    device.synchronize();
+    hipEvent_t ev0, ev1;
+    hipEventCreate(&ev0);
+    hipEventCreate(&ev1);
+    for (int i = 0; i < 8; ++i) {
+        ninfer::ops::bidirectional_gqa_attention(
+            q_tensor, query_k_tensor, query_v_tensor, lengths_tensor, valid_tensor,
+            table_rows_tensor, kScale, context, envelope, workspace, output_tensor,
+            device.stream);
+    }
+    device.synchronize();
+    hipEventRecord(ev0, device.stream);
+    for (int i = 0; i < iters; ++i) {
+        ninfer::ops::bidirectional_gqa_attention(
+            q_tensor, query_k_tensor, query_v_tensor, lengths_tensor, valid_tensor,
+            table_rows_tensor, kScale, context, envelope, workspace, output_tensor,
+            device.stream);
+    }
+    hipEventRecord(ev1, device.stream);
+    device.synchronize();
+    float ms = 0.0F;
+    hipEventElapsedTime(&ms, ev0, ev1);
+    hipEventDestroy(ev0);
+    hipEventDestroy(ev1);
+    result.median_ms = ms / static_cast<double>(iters);
+
     std::vector<hip_bfloat16> output(q_elements);
     d_output.copy_to_host(output.data(), d_output.size());
-    Result result;
     for (int b = 0; b < batch; ++b) {
         for (int token = 0; token < tokens; ++token) {
             for (int q_head = 0; q_head < kQh; ++q_head) {
@@ -238,9 +268,11 @@ int main() {
         const Result chain = run_case(device, 5, {0, 1}, {5, 3}, {0, 1}, {0, 1});
         const Result tree = run_case(device, 12, {65, 64}, {12, 7}, {1, 0}, {0, 65});
         std::cout << "bidirectional_gqa_attention: PASS gfx1201 D128/Hq32/Hkv8 "
-                     "T=5/12 B=2 fragmented/mixed max_abs="
-                  << std::max(chain.max_abs, tree.max_abs)
-                  << " compared=" << chain.compared + tree.compared << '\n';
+                      "T=5/12 B=2 fragmented/mixed max_abs="
+                   << std::max(chain.max_abs, tree.max_abs)
+                   << " compared=" << chain.compared + tree.compared
+                   << " median_ms(chain T5)=" << chain.median_ms
+                   << " median_ms(tree T12)=" << tree.median_ms << '\n';
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "bidirectional_gqa_attention: FAIL: " << error.what() << '\n';

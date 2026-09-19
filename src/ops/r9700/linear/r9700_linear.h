@@ -246,6 +246,10 @@ struct A8Q4G64LinearArgs {
     std::uint32_t rows = 0;
     std::uint32_t columns = 0;
     std::uint32_t padded_columns = 0;
+    // Split-K partial-sum plane [S,T,N] floats; null unless the down split-K route is
+    // selected. Owned by the caller's arena scope.
+    float* partial_sums = nullptr;
+    std::size_t partial_sum_bytes = 0;
 };
 
 struct A8Q4G64CandidateArgs {
@@ -261,6 +265,11 @@ struct A8Q4G64CandidateArgs {
     std::uint32_t rows = 0;
     std::uint32_t columns = 0;
     std::uint32_t padded_columns = 0;
+    // Split-K partial-sum plane [S,T,N] floats; null unless the down split-K route is
+    // selected. Owned by the caller's arena scope.
+    float* partial_sums = nullptr;
+    std::size_t partial_sum_bytes = 0;
+    bool dflash_target_verify_down = false;
 };
 
 // Fixed Text-MLP boundary. The input is the concatenated BF16
@@ -366,6 +375,18 @@ struct A8Q4G64KernelResources {
 [[nodiscard]] hipError_t a8q4g64_linear_dflash_small_t_qualification(
     const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept;
 [[nodiscard]] hipError_t a8q4g64_linear_dflash_mlp_down_t5_qualification(
+    const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept;
+// DFlash verify down-GEMM split-K challenger. Splits the K=17408 reduction across
+// kDFlashDownSplitkFactor z-blocks to raise wave count for the low-occupancy
+// [5120,17408] shape at the exact DFlash verify widths. Requires a caller-owned
+// partial-sum plane [S,T,N] floats in args.partial_sums.
+[[nodiscard]] hipError_t a8q4g64_linear_dflash_down_splitk(
+    const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept;
+// Split-factor-parameterized form for the bounded qualifier sweep. The production
+// route above fixes S at kDFlashDownSplitkFactor; this form is retained for the
+// standalone sweep evidence only.
+template <std::uint32_t S>
+[[nodiscard]] hipError_t a8q4g64_linear_dflash_down_splitk_t(
     const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept;
 // Direct 64-token x 128-row ping/pong cooperative-LDS production route. The candidate boundary
 // admits it only for the exact qualified tuples/extents; tails use the named regression control.

@@ -58,7 +58,8 @@ struct Variant {
                                const Tensor& input, const Weight& weight, Tensor& output,
                                hipStream_t stream);
         void linear(const Tensor& input, const Weight& weight, Tensor& output,
-                    WorkspaceArena& fallback_workspace, hipStream_t stream);
+                    WorkspaceArena& fallback_workspace, hipStream_t stream,
+                    bool dflash_target_verify_down = false);
         void fused_mlp_down(const Tensor& gate_up, const Weight& down,
                             Tensor& output, hipStream_t stream);
         [[nodiscard]] static constexpr bool fused_mlp_down_selected(
@@ -190,7 +191,8 @@ struct Variant {
                            qwen3::TextPhase phase, WorkspaceArena& workspace,
                            hipStream_t stream, std::int32_t route_tokens = 0,
                            ExecutionState* execution = nullptr,
-                           std::int32_t text_layer = -1);
+                           std::int32_t text_layer = -1,
+                           bool dflash_target_verify = false);
     static void mtp_post_mixer(const Tensor& hidden, const MtpPostMixerWeights& weights,
                                Tensor& residual, WorkspaceArena& workspace, hipStream_t stream,
                                std::int32_t route_tokens = 0,

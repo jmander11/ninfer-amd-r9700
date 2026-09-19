@@ -542,12 +542,15 @@ int test_report_contract() {
     failures += expect(report.at("config").at("dflash_mlp_down_t5_candidate") ==
                            ninfer::ops::r9700::linear::kDFlashMlpDownT5CandidateEnabled,
                        "compiled DFlash MLP-down T5 candidate profile");
+    failures += expect(report.at("config").at("dflash_down_splitk_candidate") ==
+                           ninfer::ops::r9700::linear::kDFlashDownSplitkCandidateEnabled,
+                       "compiled DFlash down split-K candidate profile");
     failures += expect(report.at("config").at("dflash_rmsnorm_rows56_candidate") ==
                            ninfer::ops::r9700::eager::kDFlashRmsnormRows56CandidateEnabled,
                        "compiled DFlash RMSNorm rows5/6 candidate profile");
-    failures += expect(report.at("config").at("attention_parity_candidate") ==
-                           ninfer::ops::r9700::kv::kAttentionParityCandidate,
-                       "compiled Text/DFlash attention parity candidate profile");
+    failures += expect(report.at("config").at("text_p129_wmma_tail_candidate") ==
+                           ninfer::ops::r9700::kv::kTextP129WmmaTailCandidate,
+                       "compiled Text P129 WMMA tail candidate profile");
     failures += expect(report.at("config").at("w8_activation_bits") ==
                            ninfer::ops::r9700::linear::kW8ActivationBits,
                        "compiled W8 activation width");
@@ -657,15 +660,20 @@ int test_human_and_csv_reports() {
             std::string::npos,
         "table DFlash MLP-down T5 candidate profile");
     failures += expect(
+        table.find(std::string("dflash_down_splitk_candidate=") +
+                       (ninfer::ops::r9700::linear::kDFlashDownSplitkCandidateEnabled ?
+                            "true" : "false")) != std::string::npos,
+        "table DFlash down split-K candidate profile");
+    failures += expect(
         table.find(std::string("dflash_rmsnorm_rows56_candidate=") +
                        (ninfer::ops::r9700::eager::kDFlashRmsnormRows56CandidateEnabled ?
                             "true" : "false")) != std::string::npos,
         "table DFlash RMSNorm rows5/6 candidate profile");
     failures += expect(
-        table.find(std::string("attention_parity_candidate=") +
-                       (ninfer::ops::r9700::kv::kAttentionParityCandidate ? "true" : "false")) !=
+        table.find(std::string("text_p129_wmma_tail_candidate=") +
+                       (ninfer::ops::r9700::kv::kTextP129WmmaTailCandidate ? "true" : "false")) !=
             std::string::npos,
-        "table Text/DFlash attention parity candidate profile");
+        "table Text P129 WMMA tail candidate profile");
     failures +=
         expect(table.find("decode eng t/s") != std::string::npos, "table engine throughput");
     failures += expect(table.find("work peak") != std::string::npos, "table workspace peak");
@@ -689,9 +697,10 @@ int test_human_and_csv_reports() {
          {"proposal_head", "kv_value_group", "kv_key_plane_layout",
           "kv_value_plane_layout", "kv_value_scale_plane_layout", "q4_activation_bits",
           "q4_prefill_cta_profile", "dflash_small_t_candidate",
-          "dflash_mlp_down_t5_candidate", "dflash_rmsnorm_rows56_candidate",
-          "attention_parity_candidate",
-          "w8_activation_bits",
+           "dflash_mlp_down_t5_candidate", "dflash_down_splitk_candidate",
+           "dflash_rmsnorm_rows56_candidate",
+           "text_p129_wmma_tail_candidate",
+           "w8_activation_bits",
           "fp8_qk_wmma_enabled", "fp8_qk_wmma_profile",
           "fp8_qk_wmma_t1_min_context", "fp8_qk_wmma_t2_min_context", "kv_payload_bytes",
           "load_host_to_device_bytes", "request_transient_capacity_bytes",
@@ -708,21 +717,26 @@ int test_human_and_csv_reports() {
 int test_attention_parity_selector_scope() {
     namespace kv = ninfer::ops::r9700::kv;
     int failures = 0;
-    const bool enabled = kv::kAttentionParityCandidate;
-    failures += expect(kv::use_text_p129_wmma_tail(129U, 129U) == enabled,
+    const bool text_enabled = kv::kTextP129WmmaTailCandidate;
+    failures += expect(kv::use_text_p129_wmma_tail(129U, 129U) == text_enabled,
                        "Text P129 tail candidate exact selected cell");
     failures += expect(!kv::use_text_p129_wmma_tail(128U, 128U) &&
                            !kv::use_text_p129_wmma_tail(129U, 130U),
                        "Text tail candidate rejects adjacent cells");
-    failures += expect(kv::use_dflash_w5_batched_wmma(5U, 134U, false, true) == enabled,
-                       "DFlash W5 batched candidate exact selected cell");
-    failures += expect(!kv::use_dflash_w5_batched_wmma(5U, 134U, false, false) &&
-                           !kv::use_dflash_w5_batched_wmma(4U, 134U, false, true) &&
-                           !kv::use_dflash_w5_batched_wmma(6U, 134U, false, true) &&
-                           !kv::use_dflash_w5_batched_wmma(5U, 134U, true, true) &&
-                           !kv::use_dflash_w5_batched_wmma(5U, 63U, false, true) &&
-                           !kv::use_dflash_w5_batched_wmma(5U, 8192U, false, true),
-                       "DFlash batched candidate rejects unqualified width/tree/context cells");
+    failures += expect(kv::use_dflash_w5w6_batched_wmma(5U, 134U, false, true) &&
+                           kv::use_dflash_w5w6_batched_wmma(6U, 135U, false, true),
+                       "DFlash W5/W6 batched route exact selected cells (production)");
+    failures += expect(!kv::use_dflash_w5w6_batched_wmma(5U, 134U, false, false) &&
+                           !kv::use_dflash_w5w6_batched_wmma(6U, 135U, false, false) &&
+                           !kv::use_dflash_w5w6_batched_wmma(4U, 134U, false, true) &&
+                           !kv::use_dflash_w5w6_batched_wmma(7U, 135U, false, true) &&
+                           !kv::use_dflash_w5w6_batched_wmma(5U, 134U, true, true) &&
+                           !kv::use_dflash_w5w6_batched_wmma(6U, 135U, true, true) &&
+                           !kv::use_dflash_w5w6_batched_wmma(5U, 63U, false, true) &&
+                           !kv::use_dflash_w5w6_batched_wmma(6U, 63U, false, true) &&
+                           !kv::use_dflash_w5w6_batched_wmma(5U, 8192U, false, true) &&
+                           !kv::use_dflash_w5w6_batched_wmma(6U, 8192U, false, true),
+                       "DFlash batched route rejects unqualified width/tree/context cells");
     return failures;
 }
 

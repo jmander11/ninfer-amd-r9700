@@ -105,15 +105,16 @@ std::size_t r9700_full_attention_workspace_capacity_bytes(
                ops::r9700::kv::use_fp8_qk_wmma(query_rows, visible_context)) {
         required = r9700_full_attention_score_workspace_capacity_bytes(visible_context);
     }
-    if (ops::r9700::kv::kAttentionParityCandidate && dflash_target_verify &&
+    if (dflash_target_verify &&
         !tree_or_device_count &&
-        query_rows == 5U && visible_context >= ops::r9700::kv::kFp8QkWmmaT1MinimumContext) {
+        (query_rows == 5U || query_rows == 6U) &&
+        visible_context >= ops::r9700::kv::kFp8QkWmmaT1MinimumContext) {
         const std::size_t candidate_context = std::min<std::size_t>(
             visible_context, ops::r9700::kv::kSplit512MinimumContext - 1U);
         required = std::max(
             required,
-            ops::r9700::kv::fp8_int4_kv_attention_wmma_batched_w5_workspace_bytes(
-                candidate_context));
+            ops::r9700::kv::fp8_int4_kv_attention_wmma_batched_w5w6_workspace_bytes(
+                candidate_context, query_rows));
     }
     // The planner supplies envelope maxima, not necessarily one exact call. Reserve the largest
     // initial-prefix dense score plane reachable anywhere inside that envelope. Runtime dispatch
@@ -284,17 +285,22 @@ static hipError_t launch_r9700_attention(
         return ops::r9700::kv::fp8_int4_kv_attention_split512(
             raw, a.workspace, required, stream);
     }
-    if (ops::r9700::kv::use_dflash_w5_batched_wmma(
+    if (ops::r9700::kv::use_dflash_w5w6_batched_wmma(
             static_cast<std::uint32_t>(rows), raw.context, tree_or_device_count,
-            a.dflash_target_verify)) {
+            a.dflash_target_verify) &&
+        raw.value_group == 16U &&
+        raw.key_layout == ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest &&
+        raw.value_layout == ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest &&
+        raw.value_scale_layout == ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest) {
         const std::size_t required =
-            ops::r9700::kv::fp8_int4_kv_attention_wmma_batched_w5_workspace_bytes(raw.context);
+            ops::r9700::kv::fp8_int4_kv_attention_wmma_batched_w5w6_workspace_bytes(
+                raw.context, static_cast<std::uint32_t>(rows));
         if (required == 0U || a.workspace == nullptr || a.workspace_bytes < required) {
             return hipErrorInvalidValue;
         }
         auto wmma = raw;
         wmma.score_workspace = static_cast<float*>(a.workspace);
-        return ops::r9700::kv::fp8_int4_kv_attention_wmma_batched_w5(wmma, stream);
+        return ops::r9700::kv::fp8_int4_kv_attention_wmma_batched_w5w6(wmma, stream);
     }
     const bool ordinary_wmma =
         ops::r9700::kv::use_fp8_qk_wmma(static_cast<std::uint32_t>(rows), raw.context) &&

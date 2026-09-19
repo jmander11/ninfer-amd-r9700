@@ -73,6 +73,21 @@ endif()
 add_compile_definitions(
   NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE=${NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE})
 
+# DFlash verify down-GEMM split-K challenger. Splits the K=17408 reduction across
+# kDFlashDownSplitkFactor z-blocks to raise wave count for the low-occupancy
+# [5120,17408] shape at the exact DFlash verify widths.
+set(NINFER_R9700_DFLASH_DOWN_SPLITK_CANDIDATE "0" CACHE STRING
+  "Enable the exact qualified R9700 DFlash down split-K Linear candidate")
+set_property(CACHE NINFER_R9700_DFLASH_DOWN_SPLITK_CANDIDATE PROPERTY STRINGS 0 1)
+if(NOT NINFER_R9700_DFLASH_DOWN_SPLITK_CANDIDATE STREQUAL "0" AND
+   NOT NINFER_R9700_DFLASH_DOWN_SPLITK_CANDIDATE STREQUAL "1")
+  message(FATAL_ERROR
+    "NINFER_R9700_DFLASH_DOWN_SPLITK_CANDIDATE must be 0 or 1; got "
+    "'${NINFER_R9700_DFLASH_DOWN_SPLITK_CANDIDATE}'")
+endif()
+add_compile_definitions(
+  NINFER_R9700_DFLASH_DOWN_SPLITK_CANDIDATE=${NINFER_R9700_DFLASH_DOWN_SPLITK_CANDIDATE})
+
 # Qualification-selected exact DFlash RMSNorm route. Zero retains the ordinary rows1..4 CTA
 # domain; one additionally admits only the independently qualified K5120 rows5/6 cells.
 set(NINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE "0" CACHE STRING
@@ -87,19 +102,20 @@ endif()
 add_compile_definitions(
   NINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE=${NINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE})
 
-# Qualification-only attention parity routes. Default zero preserves every production route; one
-# admits only the exact Text P129 tail overwrite and DFlash K4/W5 batched-WMMA cells.
-set(NINFER_R9700_ATTENTION_PARITY_CANDIDATE "0" CACHE STRING
-  "Enable the exact R9700 Text-tail and DFlash W5 attention parity candidate")
-set_property(CACHE NINFER_R9700_ATTENTION_PARITY_CANDIDATE PROPERTY STRINGS 0 1)
-if(NOT NINFER_R9700_ATTENTION_PARITY_CANDIDATE STREQUAL "0" AND
-   NOT NINFER_R9700_ATTENTION_PARITY_CANDIDATE STREQUAL "1")
+# Qualification-only Text P129 WMMA tail candidate. Default zero retains the dense P129 route; one
+# admits only the exact Text P129 tail overwrite. The DFlash W5/W6 batched-WMMA route is a
+# production route and is not gated by this flag.
+set(NINFER_R9700_TEXT_P129_WMMA_TAIL_CANDIDATE "0" CACHE STRING
+  "Enable the exact R9700 Text P129 WMMA tail candidate")
+set_property(CACHE NINFER_R9700_TEXT_P129_WMMA_TAIL_CANDIDATE PROPERTY STRINGS 0 1)
+if(NOT NINFER_R9700_TEXT_P129_WMMA_TAIL_CANDIDATE STREQUAL "0" AND
+   NOT NINFER_R9700_TEXT_P129_WMMA_TAIL_CANDIDATE STREQUAL "1")
   message(FATAL_ERROR
-    "NINFER_R9700_ATTENTION_PARITY_CANDIDATE must be 0 or 1; got "
-    "'${NINFER_R9700_ATTENTION_PARITY_CANDIDATE}'")
+    "NINFER_R9700_TEXT_P129_WMMA_TAIL_CANDIDATE must be 0 or 1; got "
+    "'${NINFER_R9700_TEXT_P129_WMMA_TAIL_CANDIDATE}'")
 endif()
 add_compile_definitions(
-  NINFER_R9700_ATTENTION_PARITY_CANDIDATE=${NINFER_R9700_ATTENTION_PARITY_CANDIDATE})
+  NINFER_R9700_TEXT_P129_WMMA_TAIL_CANDIDATE=${NINFER_R9700_TEXT_P129_WMMA_TAIL_CANDIDATE})
 
 # Qualification-only normalization association selector. Zero retains the snapshot/replay
 # 128-element shared-memory tree; one makes those verify paths use the ordinary wave32/FMA

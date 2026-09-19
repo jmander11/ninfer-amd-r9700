@@ -60,17 +60,17 @@ def main() -> int:
     args = parser.parse_args()
     text = args.assembly.read_text(encoding="utf-8")
     expected = {
-        "qk_wmma_batched_w5_kernelILb1EE": (0, 0, 32, 24, 32, 1024),
-        "softmax_wmma_scores_batched_w5_in_place_kernel": (76, 0, 20, 23, 32, 1024),
-        "pv_vector_batched_w5_kernelILj16ELb0ELb0EE": (0, 0, 42, 15, 32, 1024),
+        "qk_wmma_batched_w5w6_kernelILb1EE": (0, 0, 32, 24, 32, 1024),
+        "softmax_wmma_scores_batched_w5w6_in_place_kernel": (76, 0, 20, 23, 32, 1024),
+        "pv_vector_batched_w5w6_kernelILj16ELb0ELb0EE": (0, 0, 42, 15, 32, 1024),
     }
     for symbol, wanted in expected.items():
         actual = resources(text, symbol)
         require(actual == wanted, f"{symbol} resources {actual} != {wanted}")
         require(occupancy(text, symbol) == 16, f"{symbol} occupancy is not 16")
-    require("qk_wmma_batched_w5_kernelILb0EE" not in text,
+    require("qk_wmma_batched_w5w6_kernelILb0EE" not in text,
             "unqualified feature-fastest K specialization was emitted")
-    for symbol in ("qk_wmma_batched_w5_kernelILb1EE",):
+    for symbol in ("qk_wmma_batched_w5w6_kernelILb1EE",):
         body = section(text, symbol)
         require(body.count("v_wmma_f32_16x16x16_fp8_fp8") == 1,
                 f"{symbol} does not use native gfx1201 FP8 WMMA")
