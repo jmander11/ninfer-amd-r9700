@@ -1,0 +1,40 @@
+{
+  "schema": "ninfer.r9700.base-decode-bandwidth-baseline-summary.v1",
+  "status": "passed",
+  "source_commit": "3db868e386d58f8edd8226f81023478984f8e9ce",
+  "exact_public_tokens_across_processes": true,
+  "decode_seconds": [
+    9.479411739,
+    9.415017182,
+    9.471621069
+  ],
+  "decode_output_tok_s": [
+    27.00589520199551,
+    27.190603591189497,
+    27.028108296886092
+  ],
+  "median_decode_output_tok_s": 27.028108296886092,
+  "logical_useful_bytes_per_round": 13609999780,
+  "median_logical_useful_byte_rate_gbps": 367.85254797443594,
+  "same_session_stream_ceiling_gbps": 635.9,
+  "same_session_stream_peak_fraction": 0.9940000000000001,
+  "logical_useful_rate_fraction_of_stream_ceiling": 0.5784754646555055,
+  "physical_hbm_bandwidth_gbps": null,
+  "stall_freedom": null,
+  "stream_probe_stdout": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-base-decode-bandwidth-baseline-20260919/results-unprofiled/stream-probe.stdout",
+    "bytes": 1348,
+    "sha256": "087b309a8c7706dbae84d5e778710544958de0adb67e7e6cd19f8dfd6258f74e"
+  },
+  "retained_cold_block_sweep": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-base-decode-dot8-cold-block-sweep-20260919.json",
+    "bytes": 8562,
+    "sha256": "a2802bc7e9f69ed75b06249f4e533fa5cf5fbd7524e7539acba3eaa1e86def06"
+  },
+  "retained_cold_block_sweep_status": "qualified",
+  "limitations": [
+    "logical useful-byte rate is not physical HBM traffic",
+    "the stream probe is an isolated same-session ceiling, not inference traffic",
+    "the retained disjoint-rotation Op timing is not physical HBM traffic and cannot prove whole-inference saturation"
+  ]
+}

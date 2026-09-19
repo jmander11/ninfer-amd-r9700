@@ -90,13 +90,14 @@
     "E2E-PROFILE": ["FINAL-ARTIFACT", "SELECTED-PROFILE"],
     "FINAL-SUITE": ["FINAL-ARTIFACT", "E2E-PROFILE", "BF16-PARITY", "SELECTED-PARITY-VISION", "XATT-CUTOVER-CONDITIONAL"]
   },
-  "next_command": "bash profiles/bench/r9700-base-decode-bandwidth-baseline-20260919/commands.sh --measure",
+  "next_command": null,
   "obsolete_commands": [
     "bash profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/commands.sh"
   ],
   "retained_result_path": "profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/results",
   "retained_result_closure_sha256": "3e262f85e9807ef2e72f3e76524624835293f2f358c4defe1d47b581d64fba06",
   "required_literals": [
+    "No GPU action is currently prepared",
     "C=1..4",
     "1904.339303",
     "2,000 tok/s",

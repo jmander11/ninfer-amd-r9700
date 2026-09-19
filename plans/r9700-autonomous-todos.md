@@ -130,9 +130,9 @@ reviewed, and run as `profiles/bench/r9700-text-layer-boundary-traces-6fe53d53-2
 after-parity router).
 The bounded DFlash verify-down split-K task is closed default-off: S=8 and S=2 both failed exact
 public-token parity, and S=4 has no mechanism for restoring the incumbent serial-FMA semantics.
-Do not rerun either sealed package or infer an S=4 command. Independent review authorized only the
-unprivileged selector-free BASE-DECODE-BW measurement below; every other remaining unchecked task
-depends directly or transitively on the external `DENSE-FLOOR-DECISION`.
+Do not rerun either sealed package or infer an S=4 command. The reviewed selector-free
+BASE-DECODE-BW measurement completed. No GPU action is currently prepared; every other remaining
+unchecked task depends directly or transitively on the external `DENSE-FLOOR-DECISION`.
 
 Every future physical experiment must be launched through a reviewed package-local `commands.sh`,
 not an ad-hoc reconstructed command. A package is runnable only when its plan contains no
@@ -224,10 +224,12 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   retain it default-off and close it with the measured bound. A physical bandwidth-saturation or
   stall-freedom claim additionally requires reliable hardware counters; if gfx1201 counters remain
   unavailable, report useful payload rate and whole speed only, with profiled timing used solely for
-  attribution. The bound package passed static validation, non-mutating preflight, and independent
-  review. The sole next GPU command is
-  `bash profiles/bench/r9700-base-decode-bandwidth-baseline-20260919/commands.sh --measure`.
-  Its optional privileged `--profile` action remains unauthorized pending its exact-dispatch gate.
+  attribution. The bound selector-free package completed three authority-matching exact-token
+  runs at `27.0059`, `27.1906`, and `27.0281 tok/s` (median `27.0281083 tok/s`). Its exact logical
+  Linear-boundary rate is `367.8525 GB/s`, or `57.85%` of the same-session `635.9 GB/s` stream
+  ceiling; this is not physical HBM traffic or stall-freedom proof. The optional profile is not
+  needed for the live paired-projection decision. Keep `next_command` null until that challenger
+  has balanced direct evidence and a separately reviewed whole-A/B package.
 
 ## Active now: DFlash semantic and schedule work
 

@@ -1,0 +1,24 @@
+{
+  "command": [
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-base-decode-tools-3db868e3-20260919/hbm_bandwidth_probe",
+    "--size-gib",
+    "4",
+    "--trials",
+    "5"
+  ],
+  "exit_code": 0,
+  "started_unix_ns": 1789841871586780684,
+  "finished_unix_ns": 1789841881049837502,
+  "power_before": "auto",
+  "power_after": "auto",
+  "stdout": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-base-decode-bandwidth-baseline-20260919/results-unprofiled/stream-probe.stdout",
+    "bytes": 1348,
+    "sha256": "087b309a8c7706dbae84d5e778710544958de0adb67e7e6cd19f8dfd6258f74e"
+  },
+  "stderr": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-base-decode-bandwidth-baseline-20260919/results-unprofiled/stream-probe.stderr",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}
