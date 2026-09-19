@@ -180,7 +180,23 @@ complete-K FP64 checks, status poisoning, full rewrites, and output canaries.
 ```sh
 make -C tools/r9700 a8q4-decode-dot8-static
 make -C tools/r9700 a8q4-decode-dot8-regression
+make -C tools/r9700 build/a8q4_shape_sweep_qual
+tools/r9700/build/a8q4_shape_sweep_qual \
+  --decode-dot8-t1-cold-block-sweep --out-json FRESH.json
 ```
+
+The create-only cold block-size sweep compares 32/64/128/256-thread CTAs on all seven selected
+tuples while rotating disjoint immutable weight copies so more than 64 MiB of other weights
+intervene between samples. It retains the complete FP64/full-output bit-exact/status gate used by
+the production regression. The physical `auto` result in
+`profiles/bench/r9700-base-decode-dot8-cold-block-sweep-20260919.json` rejects block-size selection:
+only N4096/K5120 favors 64 threads (`0.9824215` of the 256-thread median), while every other tuple
+ties or loses and the call-weighted whole-decode bound is below `0.1%`. Production therefore keeps
+its one 256-thread launch geometry; do not infer a per-shape selector from this report. The same
+report closes the distinct one-group-ahead source-pipeline attempt: all seven cold ratios are
+within `0.99712..1.02449` of production, and ISA placed the proposed next-group B64 loads after the
+current dot8 sequence. The generated kernel therefore provided no intended overlap or material
+speedup, and its losing implementation was removed.
 
 The completed operator gate passed every tuple with a `14.1025415618 ms/token` robust weighted
 saving lower. The source-matched C1/P8192+G256 ordinary Device Graph gate then reduced median decode
@@ -203,8 +219,8 @@ upper. Its immutable report is
 `profiles/bench/r9700-dot8-weight-nt-whole-p8192-g32-screen-20260906.json` (SHA-256
 `c6a1dea0f0e94d9dfcd461145c83d9161e35313e17e2fe9b0ca041a9b405e31c`). No G256 gate was run;
 the private selector, implementation, and temporary tools are gone while the reports and raw
-evidence remain. Ordinary base decode is closed at the selector-free `27.05729956 tok/s` bounded
-practical ceiling, not a physical or absolute hardware ceiling.
+evidence remain. The selector-free retained baseline is `27.05729956 tok/s`; memory-throughput
+work is reopened separately, and this is not a physical or absolute hardware ceiling.
 
 The G16 and G32 S16/tau900 XAttention build variants each expose a production-scale admission
 control at context 8,192/T=4,096. Run each configured binary with `--benchmark

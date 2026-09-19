@@ -2886,6 +2886,30 @@ hipError_t a8q4g64_linear_decode_dot8_t1(
 #endif
 }
 
+hipError_t a8q4g64_linear_decode_dot8_block_t1_qualification(
+    const A8Q4G64LinearArgs& args, std::uint32_t threads,
+    hipStream_t stream) noexcept {
+    if (!valid_a8q4_linear_args(args) ||
+        !use_a8q4_decode_dot8_t1(
+            args.tokens, args.rows, args.columns, args.padded_columns) ||
+        (threads != 32U && threads != 64U && threads != 128U && threads != 256U)) {
+        return hipErrorInvalidValue;
+    }
+#if defined(__HIPCC__)
+    const dim3 grid((args.rows + threads - 1U) / threads);
+    hipLaunchKernelGGL(a8q4g64_linear_decode_dot8_t1_kernel,
+                       grid, dim3(threads), 0, stream,
+                       args.activation_low_codes, args.activation_high_codes,
+                       args.activation_scales, args.activation_status,
+                       args.weight_codes, args.weight_scales, args.output,
+                       args.rows, args.padded_columns);
+    return hipGetLastError();
+#else
+    (void)stream;
+    return hipErrorNotSupported;
+#endif
+}
+
 hipError_t a8q4g64_linear_dflash_small_t_qualification(
     const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept {
     if (!valid_a8q4_linear_args(args) ||

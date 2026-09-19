@@ -19,6 +19,7 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -409,11 +410,19 @@ struct Result {
 struct DecodeDot8Result {
     Shape shape{};
     std::uint64_t maximum_bf16_steps = 0;
+    std::array<double, 4> block_ms{};
+    std::array<std::array<double, kTrials>, 4> block_samples{};
+    std::size_t weight_copy_count = 1U;
+    std::uint64_t aggregate_weight_bytes = 0U;
+    std::uint64_t intervening_weight_bytes = 0U;
 };
+
+constexpr std::array<std::uint32_t, 4> kDecodeBlockThreads{32U, 64U, 128U, 256U};
 
 void write_samples(std::ostream& out, const std::array<double, kTrials>& values);
 
-DecodeDot8Result run_decode_dot8_case(Shape shape, bool exercise_guards) {
+DecodeDot8Result run_decode_dot8_case(Shape shape, bool exercise_guards,
+                                      bool cold_disjoint) {
     constexpr std::uint32_t tokens = 1U;
     const std::uint32_t padded_columns = (shape.columns + 127U) / 128U * 128U;
     const std::uint32_t groups = padded_columns / kGroup;
@@ -436,6 +445,32 @@ DecodeDot8Result run_decode_dot8_case(Shape shape, bool exercise_guards) {
                         hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d_weight_scales.get(), weights.scales.data(),
                         d_weight_scales.bytes(), hipMemcpyHostToDevice));
+    constexpr std::uint64_t cache_capacity_bytes = 64ULL * 1024ULL * 1024ULL;
+    const std::uint64_t weight_bytes = d_weight_codes.bytes() + d_weight_scales.bytes();
+    const std::size_t weight_copy_count = cold_disjoint
+        ? static_cast<std::size_t>(cache_capacity_bytes / weight_bytes) + 2U
+        : 1U;
+    if (cold_disjoint && (weight_copy_count - 1U) * weight_bytes <= cache_capacity_bytes) {
+        fail("cold block sweep did not exceed cache capacity between weight revisits");
+    }
+    std::vector<std::unique_ptr<DeviceBuffer<std::uint8_t>>> extra_weight_codes;
+    std::vector<std::unique_ptr<DeviceBuffer<std::uint16_t>>> extra_weight_scales;
+    for (std::size_t copy = 1U; copy < weight_copy_count; ++copy) {
+        extra_weight_codes.push_back(
+            std::make_unique<DeviceBuffer<std::uint8_t>>(d_weight_codes.bytes()));
+        extra_weight_scales.push_back(
+            std::make_unique<DeviceBuffer<std::uint16_t>>(weight_scale_count));
+        HIP_CHECK(hipMemcpy(extra_weight_codes.back()->get(), d_weight_codes.get(),
+                            d_weight_codes.bytes(), hipMemcpyDeviceToDevice));
+        HIP_CHECK(hipMemcpy(extra_weight_scales.back()->get(), d_weight_scales.get(),
+                            d_weight_scales.bytes(), hipMemcpyDeviceToDevice));
+    }
+    const auto weight_code_pointer = [&](std::size_t copy) {
+        return copy == 0U ? d_weight_codes.get() : extra_weight_codes[copy - 1U]->get();
+    };
+    const auto weight_scale_pointer = [&](std::size_t copy) {
+        return copy == 0U ? d_weight_scales.get() : extra_weight_scales[copy - 1U]->get();
+    };
     linear::A8G64ActivationWorkspace workspace{};
     HIP_CHECK(linear::a8q4g64_bind_activation_workspace(
         d_workspace.get(), workspace_bytes, tokens, shape.columns, &workspace));
@@ -449,6 +484,13 @@ DecodeDot8Result run_decode_dot8_case(Shape shape, bool exercise_guards) {
     const auto launch_wmma = [&] { return linear::a8q4g64_linear_wmma32(args, nullptr); };
     const auto launch_dot8 = [&] {
         return linear::a8q4g64_linear_decode_dot8_t1(args, nullptr);
+    };
+    const auto launch_block_dot8 = [&](std::uint32_t threads, std::size_t copy = 0U) {
+        linear::A8Q4G64LinearArgs rotated = args;
+        rotated.weight_codes = weight_code_pointer(copy);
+        rotated.weight_scales = weight_scale_pointer(copy);
+        return linear::a8q4g64_linear_decode_dot8_block_t1_qualification(
+            rotated, threads, nullptr);
     };
 
     std::vector<hip_bfloat16> guarded_output(static_cast<std::size_t>(shape.rows) + 2U);
@@ -471,10 +513,22 @@ DecodeDot8Result run_decode_dot8_case(Shape shape, bool exercise_guards) {
         bad_tokens.tokens = 2U;
         if (linear::a8q4g64_linear_decode_dot8_t1(bad_tokens, nullptr) !=
             hipErrorInvalidValue) fail("decode dot8 accepted T!=1");
+        if (linear::a8q4g64_linear_decode_dot8_block_t1_qualification(
+                bad_tokens, 64U, nullptr) != hipErrorInvalidValue) {
+            fail("decode block-size dot8 accepted T!=1");
+        }
         linear::A8Q4G64LinearArgs misaligned = args;
         ++misaligned.activation_low_codes;
         if (linear::a8q4g64_linear_decode_dot8_t1(misaligned, nullptr) !=
             hipErrorInvalidValue) fail("decode dot8 accepted a misaligned code plane");
+        if (linear::a8q4g64_linear_decode_dot8_block_t1_qualification(
+                misaligned, 64U, nullptr) != hipErrorInvalidValue) {
+            fail("decode block-size dot8 accepted a misaligned code plane");
+        }
+        if (linear::a8q4g64_linear_decode_dot8_block_t1_qualification(
+                args, 48U, nullptr) != hipErrorInvalidValue) {
+            fail("decode block-size dot8 accepted a non-wave-sweep block size");
+        }
         const std::uint32_t bad_status = linear::Q4G64ActivationNonfinite;
         HIP_CHECK(hipMemcpy(workspace.status, &bad_status, sizeof(bad_status),
                             hipMemcpyHostToDevice));
@@ -483,8 +537,17 @@ DecodeDot8Result run_decode_dot8_case(Shape shape, bool exercise_guards) {
         HIP_CHECK(hipDeviceSynchronize());
         read_guarded_output(0x7fc2U, "nonfinite-status path");
         if (!std::all_of(output.begin(), output.end(), [](hip_bfloat16 value) {
-                return value.data == 0x7fc1U;
-            })) fail("decode dot8 did not poison every output for nonzero status");
+            return value.data == 0x7fc1U;
+        })) fail("decode dot8 did not poison every output for nonzero status");
+        for (const std::uint32_t threads : kDecodeBlockThreads) {
+            initialize_guarded_output(0x7fc5U);
+            HIP_CHECK(launch_block_dot8(threads));
+            HIP_CHECK(hipDeviceSynchronize());
+            read_guarded_output(0x7fc5U, "block-size nonfinite-status path");
+            if (!std::all_of(output.begin(), output.end(), [](hip_bfloat16 value) {
+                    return value.data == 0x7fc1U;
+                })) fail("decode block-size dot8 did not poison every output");
+        }
         HIP_CHECK(linear::a8g64_quantize_activation({d_input.get(), workspace}, nullptr));
     }
 
@@ -495,30 +558,56 @@ DecodeDot8Result run_decode_dot8_case(Shape shape, bool exercise_guards) {
     if (std::any_of(output.begin(), output.end(), [](hip_bfloat16 value) {
             return value.data == 0x7fc2U;
         })) fail("decode dot8 did not rewrite every active output");
-    std::uint64_t maximum_steps = 0;
     const std::array<std::uint32_t, 8> rows{
         0U, 1U, 15U, 16U, shape.rows / 3U, shape.rows / 2U,
         shape.rows - 2U, shape.rows - 1U};
-    for (const std::uint32_t row : rows) {
-        double sum = 0.0;
-        for (std::uint32_t group = 0; group < groups; ++group) {
-            std::int32_t integer_dot = 0;
-            for (std::uint32_t lane = 0; lane < kGroup; ++lane) {
-                const std::size_t index = static_cast<std::size_t>(group) * kGroup + lane;
-                const int activation_code = unsigned_nibble(expected.low, index) +
-                                            16 * signed_nibble(expected.high, index);
-                const int weight_code = decode_dot8_weight_code(row, group, lane);
-                integer_dot += activation_code * weight_code;
+    const auto check_fp64_oracle = [&](const std::vector<hip_bfloat16>& actual,
+                                       const char* route) {
+        std::uint64_t maximum_steps = 0;
+        for (const std::uint32_t row : rows) {
+            double sum = 0.0;
+            for (std::uint32_t group = 0; group < groups; ++group) {
+                std::int32_t integer_dot = 0;
+                for (std::uint32_t lane = 0; lane < kGroup; ++lane) {
+                    const std::size_t index = static_cast<std::size_t>(group) * kGroup + lane;
+                    const int activation_code = unsigned_nibble(expected.low, index) +
+                                                16 * signed_nibble(expected.high, index);
+                    const int weight_code = decode_dot8_weight_code(row, group, lane);
+                    integer_dot += activation_code * weight_code;
+                }
+                sum = std::fma(static_cast<double>(integer_dot),
+                               static_cast<double>(half_value(expected.scales[group])) *
+                                   half_value(decode_dot8_weight_scale_bits(row, group)), sum);
             }
-            sum = std::fma(static_cast<double>(integer_dot),
-                           static_cast<double>(half_value(expected.scales[group])) *
-                               half_value(decode_dot8_weight_scale_bits(row, group)), sum);
+            const hip_bfloat16 oracle(static_cast<float>(sum));
+            maximum_steps = std::max(maximum_steps, bf16_steps(actual[row], oracle));
+            if (bf16_steps(actual[row], oracle) > 2U) {
+                fail(std::string(route) + " FP64 oracle mismatch");
+            }
         }
-        const hip_bfloat16 oracle(static_cast<float>(sum));
-        maximum_steps = std::max(maximum_steps, bf16_steps(output[row], oracle));
-        if (bf16_steps(output[row], oracle) > 2U) fail("decode dot8 FP64 oracle mismatch");
-    }
+        return maximum_steps;
+    };
+    const std::uint64_t production_maximum_steps =
+        check_fp64_oracle(output, "decode production dot8");
     const std::vector<hip_bfloat16> dot8_output = output;
+    std::uint64_t maximum_steps = production_maximum_steps;
+    for (const std::uint32_t threads : kDecodeBlockThreads) {
+        initialize_guarded_output(0x7fc4U);
+        HIP_CHECK(launch_block_dot8(threads));
+        HIP_CHECK(hipDeviceSynchronize());
+        read_guarded_output(0x7fc4U, "block-size dot8 path");
+        if (std::any_of(output.begin(), output.end(), [](hip_bfloat16 value) {
+                return value.data == 0x7fc4U;
+            })) fail("decode block-size dot8 did not rewrite every active output");
+        maximum_steps = std::max(
+            maximum_steps, check_fp64_oracle(output, "decode block-size dot8"));
+        if (!std::equal(output.begin(), output.end(), dot8_output.begin(), dot8_output.end(),
+                        [](hip_bfloat16 lhs, hip_bfloat16 rhs) {
+                            return lhs.data == rhs.data;
+                        })) {
+            fail("decode block-size dot8 is not bit-exact with production dot8");
+        }
+    }
     initialize_guarded_output(0x7fc3U);
     HIP_CHECK(launch_wmma());
     HIP_CHECK(hipDeviceSynchronize());
@@ -531,7 +620,49 @@ DecodeDot8Result run_decode_dot8_case(Shape shape, bool exercise_guards) {
         fail("decode dot8 is not bit-exact with the WMMA incumbent");
     }
 
-    return DecodeDot8Result{shape, maximum_steps};
+    std::array<std::array<double, kTrials>, kDecodeBlockThreads.size()> samples{};
+    const unsigned iterations = shape.rows >= 248320U ? 8U : 40U;
+    for (std::size_t trial = 0; trial < kTrials; ++trial) {
+        for (std::size_t slot = 0; slot < kDecodeBlockThreads.size(); ++slot) {
+            const std::size_t route = (trial & 1U) == 0U
+                                          ? slot
+                                          : kDecodeBlockThreads.size() - 1U - slot;
+            std::size_t next_copy = 0U;
+            samples[route][trial] = event_ms(iterations, [&] {
+                const std::size_t copy = next_copy;
+                next_copy = (next_copy + 1U) % weight_copy_count;
+                return launch_block_dot8(kDecodeBlockThreads[route], copy);
+            });
+        }
+    }
+    std::array<double, kDecodeBlockThreads.size()> block_ms{};
+    for (std::size_t route = 0; route < kDecodeBlockThreads.size(); ++route) {
+        block_ms[route] = median(samples[route]);
+    }
+    const std::uint64_t minimum_kernel_payload_bytes =
+        static_cast<std::uint64_t>(shape.rows) * padded_columns / 2U +
+        static_cast<std::uint64_t>(shape.rows) * groups * sizeof(std::uint16_t) +
+        padded_columns + static_cast<std::uint64_t>(groups) * sizeof(std::uint16_t) +
+        static_cast<std::uint64_t>(shape.rows) * sizeof(hip_bfloat16) +
+        sizeof(std::uint32_t);
+    for (std::size_t route = 0; route < kDecodeBlockThreads.size(); ++route) {
+        std::cout << std::fixed << std::setprecision(6)
+                  << "decode-dot8-block-size N=" << shape.rows << " K=" << shape.columns
+                  << " threads=" << kDecodeBlockThreads[route]
+                  << " median_ms=" << block_ms[route]
+                  << " over_block256=" << block_ms[route] / block_ms.back()
+                  << " minimum_kernel_payload_bytes=" << minimum_kernel_payload_bytes
+                  << " weight_copies=" << weight_copy_count
+                  << " aggregate_weight_bytes=" << weight_bytes * weight_copy_count
+                  << " intervening_weight_bytes="
+                  << weight_bytes * (weight_copy_count - 1U)
+                  << " timing_scope="
+                  << (cold_disjoint ? "rotating-disjoint-weight-allocations"
+                                    : "repeated-buffer-cache-hot-preliminary") << '\n';
+    }
+    return DecodeDot8Result{shape, maximum_steps, block_ms, samples,
+                            weight_copy_count, weight_bytes * weight_copy_count,
+                            weight_bytes * (weight_copy_count - 1U)};
 }
 
 std::vector<Result> run_shape(Shape shape) {
@@ -1326,12 +1457,101 @@ bool write_lds_scope_report(const std::filesystem::path& output,
     return accepted;
 }
 
+void write_decode_cold_block_report(
+    const std::filesystem::path& output,
+    const std::vector<DecodeDot8Result>& results,
+    const std::filesystem::path& executable,
+    std::string_view executable_sha256,
+    const std::array<SourceIdentity, 4>& sources,
+    const hipDeviceProp_t& device, int runtime_version, int driver_version) {
+    std::ostringstream out;
+    out << std::fixed << std::setprecision(9)
+        << "{\n  \"schema\": \"ninfer.r9700.decode-dot8-cold-block-sweep.v1\",\n"
+        << "  \"status\": \"qualified\",\n"
+        << "  \"power_profile_before\": \"auto\",\n"
+        << "  \"power_profile_after\": \"auto\",\n"
+        << "  \"device\": {\"name\": \"" << device.name
+        << "\", \"architecture\": \"" << device.gcnArchName
+        << "\", \"hip_multi_processor_count\": " << device.multiProcessorCount
+        << ", \"wave_size\": " << device.warpSize << "},\n"
+        << "  \"runtime\": {\"hip_runtime_version\": " << runtime_version
+        << ", \"hip_driver_version\": " << driver_version << "},\n"
+        << "  \"executable\": {\"path\": \"" << executable.string()
+        << "\", \"sha256\": \"" << executable_sha256 << "\"},\n"
+        << "  \"command\": \"" << executable.string()
+        << " --decode-dot8-t1-cold-block-sweep --out-json "
+        << output.string() << "\",\n"
+        << "  \"sources\": [\n";
+    for (std::size_t index = 0; index < sources.size(); ++index) {
+        out << "    {\"role\": \"" << sources[index].role
+            << "\", \"path\": \"" << sources[index].path.string()
+            << "\", \"sha256\": \"" << sources[index].sha256 << "\"}"
+            << (index + 1U == sources.size() ? "\n" : ",\n");
+    }
+    out << "  ],\n"
+        << "  \"timing_scope\": \"disjoint-rotation-over-64MiB-cache-coldness-proxy\",\n"
+        << "  \"timing_policy\": {\"trials\": " << kTrials
+        << ", \"order\": \"forward-reverse\", \"iterations\": "
+           "\"40 except N248320 uses 8; each route resets identical copy rotation\"},\n"
+        << "  \"minimum_intervening_weight_bytes_exclusive\": 67108864,\n"
+        << "  \"block_threads\": [32, 64, 128, 256],\n"
+        << "  \"shapes\": [\n";
+    for (std::size_t index = 0; index < results.size(); ++index) {
+        const DecodeDot8Result& result = results[index];
+        out << "    {\"rows\": " << result.shape.rows
+            << ", \"columns\": " << result.shape.columns
+            << ", \"maximum_bf16_steps\": " << result.maximum_bf16_steps
+            << ", \"weight_copy_count\": " << result.weight_copy_count
+            << ", \"aggregate_weight_bytes\": " << result.aggregate_weight_bytes
+            << ", \"intervening_weight_bytes\": " << result.intervening_weight_bytes
+            << ", \"routes\": [";
+        for (std::size_t route = 0; route < kDecodeBlockThreads.size(); ++route) {
+            out << "{\"threads\": " << kDecodeBlockThreads[route]
+                << ", \"median_ms\": " << result.block_ms[route]
+                << ", \"samples_ms\": [";
+            for (std::size_t sample = 0; sample < kTrials; ++sample) {
+                if (sample != 0U) out << ", ";
+                out << result.block_samples[route][sample];
+            }
+            out << "]}";
+            if (route + 1U != kDecodeBlockThreads.size()) out << ", ";
+        }
+        out << "]}";
+        if (index + 1U != results.size()) out << ',';
+        out << '\n';
+    }
+    out << "  ]\n}\n";
+    const std::string bytes = out.str();
+    const int descriptor = ::open(output.c_str(),
+                                  O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
+    if (descriptor < 0) fail("cannot exclusively create decode cold-block report");
+    std::size_t offset = 0U;
+    while (offset < bytes.size()) {
+        const ssize_t written = ::write(
+            descriptor, bytes.data() + offset, bytes.size() - offset);
+        if (written <= 0) {
+            (void)::close(descriptor);
+            (void)::unlink(output.c_str());
+            fail("cannot write decode cold-block report");
+        }
+        offset += static_cast<std::size_t>(written);
+    }
+    if (::close(descriptor) != 0) {
+        (void)::unlink(output.c_str());
+        fail("cannot close decode cold-block report");
+    }
+}
+
 } // namespace
 
 #ifndef NINFER_A8Q4_QUAL_NO_MAIN
 int main(int argc, char** argv) {
     const bool decode_dot8_regression =
         argc == 2 && std::string_view(argv[1]) == "--decode-dot8-t1-regression";
+    const bool decode_dot8_cold_block_sweep =
+        argc == 4 &&
+        std::string_view(argv[1]) == "--decode-dot8-t1-cold-block-sweep" &&
+        std::string_view(argv[2]) == "--out-json";
     const bool prefill_regression =
         argc == 2 && std::string_view(argv[1]) == "--prefill-cta-regression";
     const bool lds_scope_regression =
@@ -1355,13 +1575,14 @@ int main(int argc, char** argv) {
         argc == 4 && std::string_view(argv[1]) == "--prefill-cta-pingpong-benchmark" &&
         std::string_view(argv[2]) == "--out-json";
     const bool shape_sweep = argc == 3 && std::string_view(argv[1]) == "--out-json";
-    if (!decode_dot8_regression && !prefill_regression &&
+    if (!decode_dot8_regression && !decode_dot8_cold_block_sweep && !prefill_regression &&
         !lds_scope_regression && !lds_scope_benchmark &&
         !n128_regression && !n128_benchmark && !m128n128_regression &&
         !m128n128_benchmark && !pingpong_regression && !pingpong_benchmark &&
         !shape_sweep) {
         std::cerr << "usage: a8q4_shape_sweep_qual "
                      "--out-json PATH | --decode-dot8-t1-regression | "
+                     "--decode-dot8-t1-cold-block-sweep --out-json FRESH.json | "
                      "--prefill-cta-regression | "
                      "--prefill-cta-lds-scope-regression | "
                      "--prefill-cta-lds-scope-benchmark --out-json FRESH.json | "
@@ -1378,13 +1599,10 @@ int main(int argc, char** argv) {
         std::filesystem::path source_root;
         std::string executable_sha256;
         std::array<SourceIdentity, 4> source_identities{};
-        if (lds_scope_benchmark || n128_benchmark || m128n128_benchmark ||
+        if (decode_dot8_cold_block_sweep || lds_scope_benchmark || n128_benchmark ||
             pingpong_benchmark) {
             benchmark_output = argv[3];
             require_fresh_output(benchmark_output);
-            if (read_text(kPowerProfilePath) != "auto") {
-                fail("prefill CTA physical A/B requires auto power before device construction");
-            }
             executable = std::filesystem::canonical("/proc/self/exe");
             source_root = std::filesystem::canonical(NINFER_SOURCE_DIR);
             executable_sha256 = sha256_file(executable);
@@ -1398,6 +1616,13 @@ int main(int argc, char** argv) {
                 const auto path = std::filesystem::canonical(source_root / source_specs[index].second);
                 source_identities[index] =
                     SourceIdentity{source_specs[index].first, path, sha256_file(path)};
+            }
+        }
+        if (decode_dot8_regression || decode_dot8_cold_block_sweep ||
+            lds_scope_benchmark || n128_benchmark ||
+            m128n128_benchmark || pingpong_benchmark) {
+            if (read_text(kPowerProfilePath) != "auto") {
+                fail("physical Linear A/B requires auto power before device construction");
             }
         }
         int count = 0;
@@ -1421,7 +1646,7 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipRuntimeGetVersion(&runtime_version));
         int driver_version = 0;
         HIP_CHECK(hipDriverGetVersion(&driver_version));
-        if (decode_dot8_regression) {
+        if (decode_dot8_regression || decode_dot8_cold_block_sweep) {
             linear::A8Q4G64KernelResources resources{};
             HIP_CHECK(linear::a8q4g64_kernel_resources(&resources));
             if (resources.decode_dot8_t1_registers > 64 ||
@@ -1441,13 +1666,32 @@ int main(int argc, char** argv) {
             }};
             std::vector<DecodeDot8Result> results;
             for (std::size_t index = 0; index < shapes.size(); ++index) {
-                results.push_back(run_decode_dot8_case(shapes[index], index == 0U));
+                results.push_back(run_decode_dot8_case(
+                    shapes[index], index == 0U, decode_dot8_cold_block_sweep));
             }
             if (!std::all_of(results.begin(), results.end(), [](const DecodeDot8Result& result) {
                     return result.maximum_bf16_steps <= 2U;
                 })) fail("decode dot8 represented-formula regression differs");
-            std::cout << "A8Q4 T1 native dot8 production regression: PASS "
-                         "(seven selected Q4 tuples; two overlap DFlash2)\n";
+            if (read_text(kPowerProfilePath) != "auto") {
+                fail("decode dot8 physical A/B did not retain auto power");
+            }
+            if (decode_dot8_cold_block_sweep) {
+                const std::filesystem::path output = argv[3];
+                require_fresh_output(output);
+                if (sha256_file(executable) != executable_sha256) {
+                    fail("decode cold-block executable changed during timing");
+                }
+                for (const SourceIdentity& source : source_identities) {
+                    if (sha256_file(source.path) != source.sha256) {
+                        fail("decode cold-block source changed during timing");
+                    }
+                }
+                write_decode_cold_block_report(
+                    output, results, executable, executable_sha256,
+                    source_identities, device, runtime_version, driver_version);
+            }
+            std::cout << "A8Q4 T1 native dot8 block-size regression: PASS "
+                         "(seven selected Q4 tuples; all block sizes bit-exact to production)\n";
             return 0;
         }
         if (prefill_regression || lds_scope_regression || lds_scope_benchmark ||

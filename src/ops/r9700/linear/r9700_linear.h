@@ -368,6 +368,10 @@ struct A8Q4G64KernelResources {
 // seven full-K production tuples are rejected; the candidate boundary retains WMMA.
 [[nodiscard]] hipError_t a8q4g64_linear_decode_dot8_t1(
     const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept;
+// Qualification-only block-size sweep of the unchanged one-row/thread T=1 kernel.
+[[nodiscard]] hipError_t a8q4g64_linear_decode_dot8_block_t1_qualification(
+    const A8Q4G64LinearArgs& args, std::uint32_t threads,
+    hipStream_t stream) noexcept;
 // Direct small-T packed-W4 route retained across the exact N34816/K5120 screen domain. The
 // compile-selected candidate boundary calls it only for the eight direct-screen winners; rejected
 // widths remain directly callable solely for retained qualification evidence. Whole-DFlash A/B is

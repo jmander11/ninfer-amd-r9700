@@ -191,6 +191,19 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   Do not rerun the rejected simple non-temporal dot8, grouped-PV split512, or split-K candidates
   unless a materially different source mechanism and end-to-end bound first justify one.
 
+  Block-size selection is closed and must not be rerun. The `auto` cold sweep in
+  `profiles/bench/r9700-base-decode-dot8-cold-block-sweep-20260919.json` passed the independent
+  FP64/full-output bit-exact/status checks for all seven tuples and rotated more than 64 MiB of
+  disjoint weight bytes between samples. Only N4096/K5120 favored 64 over the production
+  256-thread block (`0.9824215` ratio); the other six tuples tied or lost and the call-weighted
+  whole-decode bound is below `0.1%`. The same retained cold report also rejects the
+  one-group-ahead source pipeline: its seven candidate/control ratios are `1.02449`, `1.00173`,
+  `1.01111`, `1.01236`, `0.99819`, `0.99712`, and `1.00147`. ISA retained native dot8 with 26
+  VGPR, 32 SGPR, and no LDS or scratch, but scheduled the next group's B64 loads after the current
+  dot8 sequence and therefore did not implement the intended overlap. The losing pipeline is
+  removed. Retain one production geometry, do not add a block-size selector, and require a
+  materially different mechanism with a new whole-decode bound before further kernel work.
+
   Before GPU execution, prepare the normal create-only package and obtain independent `SHIP` review.
   Qualification must include the independent mathematical oracle at real shapes and the applicable
   exact comparison, gfx1201 ISA/resource/static routing evidence, cold and repeated direct-shape
