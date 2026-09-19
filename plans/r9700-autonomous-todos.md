@@ -135,8 +135,9 @@ BASE-DECODE-BW measurement completed. The BF16 GDN projection/control and all-Q4
 paired-projection direct qualifiers also completed and admitted their respective fused routes;
 their production implementations and separate whole-model A/Bs are now CPU-only work. The repaired
 all-Q4 C2..4 paired-WMMA direct qualifier also completed and admitted its route for a product
-candidate plus whole A/B. The independently reviewed BF16 GDN production-symbol qualifier below
-is the only prepared GPU action. Every other remaining unchecked task depends directly or
+candidate plus whole A/B. The BF16 GDN whole gate retained an environmental OOM attempt described
+below, and device 0 now requires a maintainer GPU reset before more physical work.
+No GPU action is currently prepared. Every other remaining unchecked task depends directly or
 transitively on the external `DENSE-FLOOR-DECISION`.
 
 Every future physical experiment must be launched through a reviewed package-local `commands.sh`,
@@ -282,8 +283,13 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   BF16 stores. All retained device, process, source, executable, assembly, and receipt identities
   passed independent audit. Evidence:
   `profiles/bench/r9700-bf16-gdn-control-t1-production-qualification-20260919/report.json`. Run the
-  separately reviewed matched whole gate exactly:
-  `bash profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-20260919/commands.sh --measure`.
+  separately reviewed matched whole gate began but stopped at run 3/6 before inference with
+  `hipMalloc arena: hipErrorOutOfMemory`. Runs 1 control and 2 candidate completed; run 3 candidate
+  retained the failure. After process exit, device 0 remained at 83% VRAM with no KFD PID, proving
+  stale ROCm allocation rather than candidate execution failure. Preserve this package/results;
+  never rerun or append it. Further GPU work requires the maintainer to run
+  `sudo /opt/rocm/bin/rocm-smi --gpureset -d 0` and a separate reviewed create-only retry package
+  must rerun the complete balanced six-role campaign from the start.
 
   The all-Q4 T1 attention paired-projection direct gate compared the two
   complete N7168/K5120 Q4 linears plus four incumbent extracts against one shared A8G64

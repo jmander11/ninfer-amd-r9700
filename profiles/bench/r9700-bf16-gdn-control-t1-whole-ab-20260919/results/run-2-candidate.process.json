@@ -1,0 +1,61 @@
+{
+  "stem": "run-2-candidate",
+  "role": "candidate",
+  "command": [
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-bf16-gdn-control-t1-candidate/bench/ninfer_bench",
+    "--weights",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer",
+    "--corpus",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids",
+    "--device",
+    "0",
+    "--concurrency",
+    "1",
+    "--whole-pg",
+    "8192,256",
+    "--prefill-chunk",
+    "4096",
+    "--kv-capacity",
+    "workload",
+    "--spec",
+    "mtp",
+    "--draft-tokens",
+    "0",
+    "--retain-token-ids",
+    "--output",
+    "json",
+    "--output-file",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-20260919/results/run-2-candidate.json",
+    "-r",
+    "1",
+    "--warmup",
+    "1"
+  ],
+  "cwd": "/ssdpool2nvme/local_llm/ninfer-amd-r9700",
+  "exit_code": 0,
+  "started_unix_ns": 1789855179659016367,
+  "finished_unix_ns": 1789855291171820355,
+  "power_profile_path": "/sys/devices/pci0000:00/0000:00:02.1/0000:03:00.0/0000:04:08.0/0000:0a:00.0/0000:0b:08.0/0000:11:00.0/0000:12:00.0/0000:13:00.0/power_dpm_force_performance_level",
+  "power_before": "auto",
+  "power_after": "auto",
+  "executable": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-bf16-gdn-control-t1-candidate/bench/ninfer_bench",
+    "bytes": 5360504,
+    "sha256": "72169cfd4bf1704b49595ebeaa64d2adc7238f2a382763f3030efef7df3b4b3f"
+  },
+  "stdout": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-20260919/results/run-2-candidate.stdout",
+    "bytes": 135,
+    "sha256": "72c2a6c7bc332891978f47aac5bfea92f03e09953be91692dc86034841d203f3"
+  },
+  "stderr": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-20260919/results/run-2-candidate.stderr",
+    "bytes": 229,
+    "sha256": "50942399b1606b484818fa248fcb24c3013495c90f99a40e74971c85ad38eadb"
+  },
+  "benchmark_report": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-20260919/results/run-2-candidate.json",
+    "bytes": 7414,
+    "sha256": "06e42eb4b8a162879d15d14d412a6d014e995589b6d75440d402523f2e391d2d"
+  }
+}

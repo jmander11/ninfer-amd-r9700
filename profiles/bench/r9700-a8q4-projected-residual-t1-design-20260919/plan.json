@@ -1,6 +1,6 @@
 {
   "schema": "ninfer.r9700.a8q4-projected-residual-t1-plan.v1",
-  "status": "prepared_awaiting_independent_review",
+  "status": "reviewed_ready",
   "production_routing_authorized": false,
   "claim": "Direct all-Q4 T1 projection-plus-residual qualification before product integration.",
   "bound_inputs": [
@@ -13,7 +13,7 @@
     {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/eager/eager_ops.hip","bytes":71794,"sha256":"47579f025fc96eee9c2e483137320b518efad85a874682533b143cb40203d96f"},
     {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/rocprof/ordinary-decode-c1-one-round-trace-20260905/analysis-v2.json","bytes":25873,"sha256":"ca8937876bc16259aeaf793a1c6070c5b99dac74d71f2eca4b348ff0b2f7a9d1"},
     {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919/commands.sh","bytes":468,"sha256":"e7dd521f69d4e1b81484e4436949d99fc1edc9096d40d8535f8eae922df1dfb2"},
-    {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919/preflight.py","bytes":5335,"sha256":"0ce908961d681cee3ae9ec7684f222ab378640103179f5d2b5b12ed81b73d599"},
+    {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919/preflight.py","bytes":5313,"sha256":"56162db6a1e986b656a1fe5c2cdb42e7af0c925e2fbfcc8b8c1dbee06fa39322"},
     {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919/measure.py","bytes":4009,"sha256":"ac680b260f0100b682445937acf78d3a9d08094c2fcc106b2dd37a12984b2a5d"}
   ],
   "compile_contract": {
