@@ -1,0 +1,17 @@
+{
+  "schema": "ninfer.r9700.a8q4-pair-wmma-c2c4-failed-attempt.v1",
+  "status": "failed_before_gpu",
+  "command": "bash profiles/bench/r9700-a8q4-pair-wmma-c2c4-design-20260919/commands.sh --measure",
+  "completed_stages": [
+    "non_gpu_preflight",
+    "host_build",
+    "device_assembly_build",
+    "static_receipt_generation"
+  ],
+  "failed_stage": "qualifier_baseline_receipt_read_before_static_validation_or_hip_device_selection",
+  "error": "A8Q4 paired WMMA C2-C4 qualification: FAIL: cannot read whole baseline receipt",
+  "root_cause": "istreambuf_iterator completed successfully but the reader incorrectly required eofbit instead of rejecting only badbit",
+  "qualification_report_created": false,
+  "gpu_opened": false,
+  "measurement_started": false
+}

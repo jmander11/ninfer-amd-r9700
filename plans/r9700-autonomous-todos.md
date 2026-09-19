@@ -133,8 +133,8 @@ public-token parity, and S=4 has no mechanism for restoring the incumbent serial
 Do not rerun either sealed package or infer an S=4 command. The reviewed selector-free
 BASE-DECODE-BW measurement completed. The BF16 GDN projection/control and all-Q4 T1 attention
 paired-projection direct qualifiers also completed and admitted their respective fused routes;
-their production implementations and separate whole-model A/Bs are now CPU-only work. The
-independently reviewed all-Q4 C2..4 paired-WMMA direct qualifier below is the only prepared GPU
+their production implementations and separate whole-model A/Bs are now CPU-only work. The repaired
+and same-review-approved all-Q4 C2..4 paired-WMMA direct qualifier below is the only prepared GPU
 action. Every other remaining unchecked task depends directly or transitively on the external
 `DENSE-FLOOR-DECISION`.
 
@@ -295,7 +295,11 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   decoder-based FP64 oracle. Its fail-closed bound uses the retained selector-free confirmation
   round medians `62.1857104`, `69.0723372`, and `79.0718535 ms` for C2, C3, and C4. Source and
   wrapper reviews passed after fixing role indistinguishability, balanced warmup coverage,
-  create-only report writes, and retained device/power/invocation/static provenance. Run exactly
+  create-only report writes, and retained device/power/invocation/static provenance. Its first
+  authorized invocation stopped before HIP device selection or timing: a stream-state check
+  incorrectly rejected a successful baseline-file iterator read. No qualification report was
+  created; the failure is retained in `attempt-1-read-failure.json`. The reader now rejects only
+  `badbit`; rebound identity and non-GPU preflight passed same-review approval. Run exactly
   `bash profiles/bench/r9700-a8q4-pair-wmma-c2c4-design-20260919/commands.sh --measure`.
 
   After the admitted paired routes are resolved, the next bounded mechanism is all-Q4 T1

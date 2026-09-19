@@ -681,7 +681,7 @@ std::map<std::uint32_t, double> read_round_baselines(const std::filesystem::path
     if (!input) fail("cannot open whole baseline receipt");
     const std::string text((std::istreambuf_iterator<char>(input)),
                            std::istreambuf_iterator<char>());
-    if (!input.eof()) fail("cannot read whole baseline receipt");
+    if (input.bad()) fail("cannot read whole baseline receipt");
     std::map<std::uint32_t, double> result;
     for (std::uint32_t c : kTokenWidths) {
         const std::regex expression("\\\"c" + std::to_string(c) +

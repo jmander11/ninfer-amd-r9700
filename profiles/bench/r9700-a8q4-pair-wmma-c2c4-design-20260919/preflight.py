@@ -41,7 +41,7 @@ def main() -> int:
         fail(f"preflight must run from {ROOT}")
     plan = json.loads(PLAN.read_text(encoding="utf-8"))
     if (plan.get("schema") != "ninfer.r9700.a8q4-pair-wmma-c2c4-plan.v1" or
-            plan.get("status") != "reviewed_ready" or
+            plan.get("status") != "reviewed_ready_after_reader_repair" or
             plan.get("production_routing_authorized") is not False or
             len(plan.get("bound_inputs", [])) != 6):
         fail("bound plan differs")

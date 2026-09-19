@@ -45,4 +45,7 @@ Prepared sources:
 - `tools/r9700/a8q4_pair_wmma_c2c4_qual.hip`
 - `tools/r9700/check_a8q4_pair_wmma_c2c4_static.py`
 
-The fresh create-only output is `qualification.json`; no GPU measurement has been run.
+The fresh create-only output is `qualification.json`. The first authorized invocation stopped
+before static validation, HIP device selection, or timing because the baseline stream reader
+mistook a successful iterator read for failure. `attempt-1-read-failure.json` retains that result.
+The repaired reader and rebound package require independent re-review before another invocation.
