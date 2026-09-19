@@ -131,9 +131,9 @@ after-parity router).
 The bounded DFlash verify-down split-K task is closed default-off: S=8 and S=2 both failed exact
 public-token parity, and S=4 has no mechanism for restoring the incumbent serial-FMA semantics.
 Do not rerun either sealed package or infer an S=4 command. The reviewed selector-free
-BASE-DECODE-BW measurement completed. The independently reviewed selector-free paired-GDN C1..4
-production confirmation below is the only prepared GPU action. Every other remaining unchecked
-task depends directly or transitively on the external `DENSE-FLOOR-DECISION`.
+BASE-DECODE-BW measurement completed. The independently reviewed BF16 GDN projection/control
+direct qualifier below is the only prepared GPU action. Every other remaining unchecked task
+depends directly or transitively on the external `DENSE-FLOOR-DECISION`.
 
 Every future physical experiment must be launched through a reviewed package-local `commands.sh`,
 not an ad-hoc reconstructed command. A package is runnable only when its plan contains no
@@ -241,11 +241,19 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   the unchanged query-key selected-Linear plus serialized value-z fallback, and the following
   snapshot convolution/state boundary is unchanged. Compile-time route receipts cover C1 selection,
   C2..4 rejection, and both mixed-weight orders. The create-only selector-free confirmation at
-  `profiles/bench/r9700-gdn-q4-pair-t1-production-confirmation-20260919` passed independent review;
-  it binds the retained direct/whole evidence, checks C1 exact authority tokens and retained speed
-  over three processes, and exercises the unchanged C2..4 fallback twice each with exact
-  repeat-token parity. Run exactly
-  `bash profiles/bench/r9700-gdn-q4-pair-t1-production-confirmation-20260919/commands.sh --measure`.
+  `profiles/bench/r9700-gdn-q4-pair-t1-production-confirmation-20260919` passed independent review
+  and confirmation. All C1 runs matched the retained token authority and reproduced the admitted
+  speed (`9.266168907 s` median, `27.6274 tok/s`, production/retained time ratio `0.9997211`). The
+  unchanged C2..4 fallback repeated exact tokens, with median aggregate rates `32.1617`, `43.4327`,
+  and `50.5869 tok/s`. This closes promotion of the T1 GDN Q4 pair but not BASE-DECODE-BW.
+
+  The next reviewed direct gate is recipe-independent T1 BF16 GDN projected control: fuse the two
+  N48/K5120 projections and control formula while preserving each BF16 projection cast boundary.
+  Its corrected logical saving is 10,432 bytes/layer; the retained service ceiling is about
+  `0.701 ms/token`. The package compares serial, combined-grid, and fused routes with an independent
+  FP64 oracle, exact represented-boundary parity, balanced cold timing, and exact gfx1201 static
+  evidence. Run exactly
+  `bash profiles/bench/r9700-bf16-gdn-control-t1-20260919/commands.sh --measure`.
 
 ## Active now: DFlash semantic and schedule work
 
