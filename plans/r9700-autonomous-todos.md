@@ -289,7 +289,12 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   stale ROCm allocation rather than candidate execution failure. Preserve this package/results;
   never rerun or append it. Further GPU work requires the maintainer to run
   `sudo /opt/rocm/bin/rocm-smi --gpureset -d 0` and a separate reviewed create-only retry package
-  must rerun the complete balanced six-role campaign from the start.
+  must rerun the complete balanced six-role campaign from the start. That independently reviewed
+  package is `profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-retry-20260919`. It rebinds the
+  retained failure and all original authorities, reruns all six roles, and refuses plan/results or
+  any role unless PCI-derived device-0 VRAM is at most both 1 GiB and 5% with power `auto`. Its
+  current preflight correctly fails at 28,413,235,200/34,208,743,424 bytes. After reset and only
+  after the low-VRAM preflight passes, its exact measurement command is recorded in its plan.
 
   The all-Q4 T1 attention paired-projection direct gate compared the two
   complete N7168/K5120 Q4 linears plus four incumbent extracts against one shared A8G64
