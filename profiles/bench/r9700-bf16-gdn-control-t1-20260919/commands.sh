@@ -43,7 +43,7 @@ case "${1:-}" in
     preflight
     mkdir "$artifacts"
     /opt/rocm/bin/hipcc -std=c++20 -O3 --offload-arch=gfx1201 -Wall -Wextra -Werror \
-      "$source_file" -o "$executable"
+      "$source_file" -L/opt/rocm/lib -Wl,-rpath,/opt/rocm/lib -o "$executable"
     /opt/rocm/bin/hipcc -std=c++20 -O3 --offload-arch=gfx1201 -S \
       "$source_file" -o "$assembly"
     python3 "$checker" "$assembly" >"$receipt"

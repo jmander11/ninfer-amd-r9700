@@ -37,7 +37,7 @@
   "commands": {
     "preflight": "bash profiles/bench/r9700-bf16-gdn-control-t1-20260919/commands.sh --preflight",
     "measure": "bash profiles/bench/r9700-bf16-gdn-control-t1-20260919/commands.sh --measure",
-    "compile_executable": "/opt/rocm/bin/hipcc -std=c++20 -O3 --offload-arch=gfx1201 -Wall -Wextra -Werror tools/r9700/bf16_gdn_control_t1_qual.hip -o profiles/bench/r9700-bf16-gdn-control-t1-20260919/artifacts/bf16_gdn_control_t1_qual",
+    "compile_executable": "/opt/rocm/bin/hipcc -std=c++20 -O3 --offload-arch=gfx1201 -Wall -Wextra -Werror tools/r9700/bf16_gdn_control_t1_qual.hip -L/opt/rocm/lib -Wl,-rpath,/opt/rocm/lib -o profiles/bench/r9700-bf16-gdn-control-t1-20260919/artifacts/bf16_gdn_control_t1_qual",
     "compile_assembly": "/opt/rocm/bin/hipcc -std=c++20 -O3 --offload-arch=gfx1201 -S tools/r9700/bf16_gdn_control_t1_qual.hip -o profiles/bench/r9700-bf16-gdn-control-t1-20260919/artifacts/bf16_gdn_control_t1_qual.s",
     "static_check": "python3 tools/r9700/check_bf16_gdn_control_t1_static.py profiles/bench/r9700-bf16-gdn-control-t1-20260919/artifacts/bf16_gdn_control_t1_qual.s > profiles/bench/r9700-bf16-gdn-control-t1-20260919/artifacts/static-receipt.txt",
     "run": "profiles/bench/r9700-bf16-gdn-control-t1-20260919/artifacts/bf16_gdn_control_t1_qual --output profiles/bench/r9700-bf16-gdn-control-t1-20260919/report.json --assembly profiles/bench/r9700-bf16-gdn-control-t1-20260919/artifacts/bf16_gdn_control_t1_qual.s --static-receipt profiles/bench/r9700-bf16-gdn-control-t1-20260919/artifacts/static-receipt.txt"

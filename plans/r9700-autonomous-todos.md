@@ -131,7 +131,7 @@ after-parity router).
 The bounded DFlash verify-down split-K task is closed default-off: S=8 and S=2 both failed exact
 public-token parity, and S=4 has no mechanism for restoring the incumbent serial-FMA semantics.
 Do not rerun either sealed package or infer an S=4 command. The reviewed selector-free
-BASE-DECODE-BW measurement completed. The independently reviewed BF16 GDN projection/control
+BASE-DECODE-BW measurement completed. The independently re-reviewed BF16 GDN projection/control
 direct qualifier below is the only prepared GPU action. Every other remaining unchecked task
 depends directly or transitively on the external `DENSE-FLOOR-DECISION`.
 
@@ -252,7 +252,9 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   Its corrected logical saving is 10,432 bytes/layer; the retained service ceiling is about
   `0.701 ms/token`. The package compares serial, combined-grid, and fused routes with an independent
   FP64 oracle, exact represented-boundary parity, balanced cold timing, and exact gfx1201 static
-  evidence. Run exactly
+  evidence. Its first wrapper invocation did not reach the GPU because the linked executable could
+  not locate `libamdhip64.so.7`; no report was created. The corrected wrapper adds the ROCm runtime
+  search path, and independent re-review proved that all ROCm dependencies resolve. Run exactly
   `bash profiles/bench/r9700-bf16-gdn-control-t1-20260919/commands.sh --measure`.
 
 ## Active now: DFlash semantic and schedule work
