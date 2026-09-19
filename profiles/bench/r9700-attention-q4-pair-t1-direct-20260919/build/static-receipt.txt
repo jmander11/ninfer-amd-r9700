@@ -1,0 +1,1 @@
+a8q4_attention_pair_t1_static: PASS symbol=_ZN12_GLOBAL__N_139a8q4g64_attention_pair_t1_direct_kernelEPKhS1_PKtPKjS1_S3_S1_S3_P12hip_bfloat16S7_S7_S7_ vgpr=20 sgpr=24 wave32=true lds=0 scratch=0 spills=0

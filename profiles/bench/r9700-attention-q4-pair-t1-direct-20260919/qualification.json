@@ -1,0 +1,23 @@
+{
+  "schema": "ninfer.r9700.a8q4-attention-pair-t1-qualification.v1",
+  "status": "qualified_for_whole_inference_ab",
+  "command": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-attention-q4-pair-t1-direct-20260919/build/a8q4_attention_pair_t1_qual --out-json /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-attention-q4-pair-t1-direct-20260919/qualification.json --assembly /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-attention-q4-pair-t1-direct-20260919/build/a8q4_attention_pair_t1_qual.s",
+  "route": "two_q4_n7168_k5120_to_q6144_k1024_gate6144_v1024",
+  "executable": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-attention-q4-pair-t1-direct-20260919/build/a8q4_attention_pair_t1_qual", "bytes": 489568, "sha256": "8533d2a1b8492a7422b4c2fc6bad160cba20f1422f9f311f65ab0978c3918fb1"},
+  "sources": [
+    {"role": "qualifier", "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/a8q4_attention_pair_t1_qual.hip", "bytes": 32490, "sha256": "2bb17f8f15af3bfc83eb81ff39ee75a8cbc2951fb5221e047f88ff92fc08b5ea"},
+    {"role": "shared_qualifier", "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/a8q4_shape_sweep_qual.hip", "bytes": 97355, "sha256": "b8f85a76b2f431ba4ea50fb0e3f28ece55a5501c69197e978df9516c98506be2"},
+    {"role": "linear_contract", "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/linear/r9700_linear.h", "bytes": 23638, "sha256": "07a76b945ed82efc5e470fd517dfbf4bc2ca09b565cbd636dd8269f85b972514"},
+    {"role": "linear_implementation", "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/linear/r9700_linear.hip", "bytes": 192174, "sha256": "5d28cce1938b7bae7ba5dc236813be3394bdadbb60585f5db0c4f687ce2e1b49"}
+  ],
+  "device": {"name": "AMD Radeon AI PRO R9700", "architecture": "gfx1201", "pci_bus_id": "0000:13:00.0", "wave_size": 32, "hip_runtime_version": 71526333, "hip_driver_version": 71526333},
+  "power_profile_before_after": "auto",
+  "static": {"status": "passed", "assembly_sha256": "8b88e20f9cc5826e109f2e88f7b18f7518b70598fcedb552bcce9612961a1e7a", "checker_sha256": "e29de95ae52a5a774312ea4bff7d4b3315f37be28937936917846fc5fdc6a372", "native_iu4_dot8": true, "wave32": true, "lds_bytes": 0, "scratch_bytes": 0, "spill_count": 0},
+  "correctness": {"complete_outputs_bit_exact_to_serial_plus_four_extracts": true, "independent_fp64_represented_weight_oracle": true, "maximum_bf16_steps": 0, "canaries": true, "status_poisoning": true, "malformed_extent_alignment_alias_rejection": true},
+  "timing": {"scope": "two complete production linears plus four extracts versus quantize-once combined direct scatter", "trials_per_arm": 12, "disjoint_weight_copies": 3, "weight_pair_bytes": 38993920, "intervening_weight_bytes": 77987840, "arm_order_balanced": true, "allocation_balanced": true,
+    "serial_samples_ms": [0.15972000360488892,0.15683899819850922,0.1619189977645874,0.36831799149513245,0.15059900283813477,0.15155899524688721,0.12963999807834625,0.1265999972820282,0.12643900513648987,0.12296000123023987,0.11956000328063965,0.12251900136470795],
+    "paired_samples_ms": [0.12312000244855881,0.12375900149345398,0.12423999607563019,0.11156000196933746,0.11184000223875046,0.096358999609947205,0.091559998691082001,0.091798998415470123,0.091679997742176056,0.25547900795936584,0.084358997642993927,0.084679998457431793],
+    "serial_copy_medians_ms": [0.15515950322151184,0.12803950160741806,0.13967899978160858], "paired_copy_medians_ms": [0.10765950009226799,0.11734000220894814,0.094078999012708664], "serial_median_ms": 0.14011950045824051, "paired_median_ms": 0.10395950078964233, "speedup": 1.347827754019004},
+  "whole_bound": {"all_q4_attention_layers": 16, "base_decode_ms_per_token": 36.99851979651865, "saved_ms_per_token": 0.5785599946975708, "credible_whole_percent": 1.5637382194733369, "admission_minimum_percent": 1.0, "passed": true},
+  "decision": "prepare_selector_off_on_whole_inference_ab"
+}

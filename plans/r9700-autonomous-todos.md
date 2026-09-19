@@ -131,11 +131,11 @@ after-parity router).
 The bounded DFlash verify-down split-K task is closed default-off: S=8 and S=2 both failed exact
 public-token parity, and S=4 has no mechanism for restoring the incumbent serial-FMA semantics.
 Do not rerun either sealed package or infer an S=4 command. The reviewed selector-free
-BASE-DECODE-BW measurement completed. The BF16 GDN projection/control direct qualifier also
-completed and admitted its fused route; its production implementation and separate whole-model
-A/B are now CPU-only work. The independently reviewed all-Q4 T1 attention paired-projection direct
-qualifier below is the only prepared GPU action. Every other remaining unchecked task depends
-directly or transitively on the external `DENSE-FLOOR-DECISION`.
+BASE-DECODE-BW measurement completed. The BF16 GDN projection/control and all-Q4 T1 attention
+paired-projection direct qualifiers also completed and admitted their respective fused routes;
+their production implementations and separate whole-model A/Bs are now CPU-only work.
+No GPU action is currently prepared. Every other remaining unchecked task depends directly or
+transitively on the external `DENSE-FLOOR-DECISION`.
 
 Every future physical experiment must be launched through a reviewed package-local `commands.sh`,
 not an ad-hoc reconstructed command. A package is runnable only when its plan contains no
@@ -272,12 +272,20 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   promotion. Preserve the explicit BF16 rounding boundary in registers, exact T1-only routing,
   and the existing T2..4 fallback/workspace.
 
-  The next reviewed direct gate is the all-Q4 T1 attention paired projection. It compares the two
+  The all-Q4 T1 attention paired-projection direct gate compared the two
   complete N7168/K5120 Q4 linears plus four incumbent extracts against one shared A8G64
   quantization and one combined N14336 native-IU4 kernel. Independent review passed after correcting
   the whole-token bound to the 16 full-attention layers and giving the query-key and gate-value
-  matrices distinct represented weights. Run exactly
-  `bash profiles/bench/r9700-attention-q4-pair-t1-direct-20260919/commands.sh --measure`.
+  matrices distinct represented weights. The final gate passed with complete BF16 output parity,
+  zero BF16 steps against the represented-weight FP64 oracle, native IU4/wave32, 20 VGPR, 24 SGPR,
+  and no LDS/scratch/spills. Allocation-balanced serial and paired medians were `0.1401195` and
+  `0.1039595 ms/layer`; all three disjoint weight allocations favored paired by at least 8.4%.
+  Across exactly 16 full-attention layers the observed saving is `0.5785600 ms/token`, or 1.5637%
+  of the retained 36.99852 ms/token baseline. Evidence:
+  `profiles/bench/r9700-attention-q4-pair-t1-direct-20260919/qualification.json`. This admits only
+  a production-symbol candidate and matched selector-off/on whole C1 A/B with exact public tokens;
+  it does not authorize promotion. Select only T1 with both exact all-Q4 Q4G64_F16S bindings;
+  mixed weights and T2..4 retain their existing routes until separately qualified.
 
 ## Active now: DFlash semantic and schedule work
 
