@@ -1,0 +1,25 @@
+{
+  "command": [
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-bf16-gdn-control-t1-direct/src/ninfer_r9700_gdn_qual",
+    "--device-info"
+  ],
+  "cwd": "/ssdpool2nvme/local_llm/ninfer-amd-r9700",
+  "started_unix_ns": 1789854592279205704,
+  "finished_unix_ns": 1789854592385057790,
+  "exit_code": 0,
+  "executable": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-bf16-gdn-control-t1-direct/src/ninfer_r9700_gdn_qual",
+    "bytes": 915424,
+    "sha256": "d85ec6742d72233e7fe6258b0436d397b9d7cc51831b351befc691aa784a4602"
+  },
+  "stdout": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-production-qualification-20260919/artifacts/device.stdout",
+    "bytes": 168,
+    "sha256": "32fa92630677bb0d6237fd8ba4281a0ee8bb6bfba8493bccef95303fddb4f7ea"
+  },
+  "stderr": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-production-qualification-20260919/artifacts/device.stderr",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

@@ -90,7 +90,7 @@
     "E2E-PROFILE": ["FINAL-ARTIFACT", "SELECTED-PROFILE"],
     "FINAL-SUITE": ["FINAL-ARTIFACT", "E2E-PROFILE", "BF16-PARITY", "SELECTED-PARITY-VISION", "XATT-CUTOVER-CONDITIONAL"]
   },
-  "next_command": null,
+  "next_command": "bash profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-20260919/commands.sh --measure",
   "obsolete_commands": [
     "bash profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/commands.sh"
   ],

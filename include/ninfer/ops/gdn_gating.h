@@ -21,4 +21,31 @@ namespace ninfer::ops {
 void gdn_gating(const Tensor& a, const Tensor& b, const Tensor& A_log, const Tensor& dt_bias,
                 Tensor& g, Tensor& beta, hipStream_t stream);
 
+/**
+ * Op: BF16 projected Gated DeltaNet controls at the R9700 decode cell.
+ *
+ * Math / indexing:
+ *   ar[h] = BF16(sum_k hidden[k] * a_weight[h,k])
+ *   br[h] = BF16(sum_k hidden[k] * b_weight[h,k])
+ *   g[h] = -exp(A_log[h]) * softplus(FP32(ar[h]) + dt_bias[h])
+ *   beta[h] = sigmoid(FP32(br[h])).
+ *
+ * Logical shapes and supported domain:
+ *   hidden is contiguous BF16 [5120,1], both weights are contiguous BF16_CTRL [48,5120],
+ *   A_log/dt_bias are contiguous FP32 [48], and g/beta are contiguous FP32 [48,1].
+ *
+ * Numeric / effects:
+ *   Each dot product accumulates in FP32 and has an observable explicit BF16 rounding boundary
+ *   before the control formula. Only g and beta are published. All inputs and outputs are
+ *   mutually non-overlapping; there is no workspace or persistent state effect.
+ *
+ * Execution:
+ *   The caller supplies a non-null stream. The fixed T=1 domain is the qualified decode cell;
+ *   wider token extents remain compositions of Linear and gdn_gating.
+ */
+void bf16_gdn_projected_gating_t1(const Tensor& hidden, const Weight& a_weight,
+                                  const Weight& b_weight, const Tensor& A_log,
+                                  const Tensor& dt_bias, Tensor& g, Tensor& beta,
+                                  hipStream_t stream);
+
 } // namespace ninfer::ops

@@ -1,0 +1,20 @@
+{
+  "schema": "ninfer.r9700.bf16-gdn-control-t1-production-qualification-plan.v1",
+  "status": "reviewed_ready",
+  "production_routing_authorized": false,
+  "claim": "Direct production-symbol qualification of the exact-T1 BF16 projected GDN control candidate.",
+  "candidate": {
+    "symbol": "ninfer::ops::r9700::gdn::bf16_projected_control_t1",
+    "shape": {"tokens": 1, "columns": 5120, "heads": 48},
+    "represented_boundary": "FP32 dot accumulation, explicit BF16 rounding in registers, FP32 control outputs",
+    "materialized_intermediates": []
+  },
+  "checks": {
+    "independent_fp64_oracle": {"g_absolute": 0.0625, "g_relative": 0.001, "beta_absolute": 0.0003, "beta_relative": 0.00003},
+    "serial_reference": "bit-exact FP32 g and beta against two production BF16 baseline projections plus production control gating",
+    "malformed_inputs": true,
+    "isa": ["gfx1201", "wave32", "FP32 FMA", "exponential", "reciprocal", "no scratch", "exactly two FP32 stores", "no BF16 global stores"]
+  },
+  "device_binding": "The qualifier reports the exact HIP-selected PCI/runtime/driver identity; the runner derives that PCI device's sysfs power profile and records auto before and after the exact invocation.",
+  "selection": "This package qualifies correctness and code generation only; whole-model A/B is required before promotion."
+}

@@ -41,6 +41,7 @@ add_library(ninfer_r9700_core STATIC
   ops/r9700/rope/rope.hip
   ops/r9700/vision/vision_attention.hip
   ops/r9700/vision/vision_pos_embed.hip
+  ops/r9700/attention_projection/attention_projection.hip
   ops/r9700/dflash/dflash2_path_select.cpp
   ops/r9700/dflash/dflash2_path_select.hip
   ops/r9700/dflash/bidirectional_gqa_attention.cpp

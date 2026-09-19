@@ -1,0 +1,1 @@
+PASS kernel=bf16_projected_control_t1_kernel vgpr=11 sgpr=22 lds=2048 scratch=0 stores_fp32=2 stores_bf16=0

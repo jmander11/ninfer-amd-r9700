@@ -94,6 +94,14 @@ namespace ninfer::ops::r9700::gdn {
                                             float* beta, std::uint32_t value_heads,
                                             std::uint32_t tokens, hipStream_t stream) noexcept;
 
+// Exact Qwen3.8 decode cell for two BF16 [48,5120] projections followed by the control formula.
+// The projection values are rounded to BF16 in registers and are not materialized. This raw
+// boundary is also the direct production-symbol qualification seam.
+[[nodiscard]] hipError_t bf16_projected_control_t1(
+    const hip_bfloat16* hidden, const hip_bfloat16* a_weight,
+    const hip_bfloat16* b_weight, const float* a_log, const float* dt_bias,
+    float* g, float* beta, hipStream_t stream) noexcept;
+
 // Exact FP32 state movement for transaction/checkpoint publication. Source/destination are
 // non-overlapping FP32 elements and count is positive.
 [[nodiscard]] hipError_t copy_state_fp32(const float* source, float* destination,

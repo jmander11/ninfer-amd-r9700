@@ -1,0 +1,10 @@
+{
+  "schema": "ninfer.r9700.bf16-gdn-control-t1-whole-ab-package.v1",
+  "status": "reviewed_contingent_on_direct_qualification",
+  "production_routing_authorized": false,
+  "claim": "Matched whole ordinary-decode A/B for the direct-qualified exact-T1 BF16 projected GDN control candidate.",
+  "workload": {"concurrency": 1, "whole_pg": "8192,256", "prefill_chunk": 4096, "spec": "none", "draft_tokens": 0, "device_graph": true},
+  "order": ["control", "candidate", "candidate", "control", "control", "candidate"],
+  "admission": {"exact_public_tokens": true, "every_paired_ratio_below_one": true, "paired_mean_upper_2se_below_one": true, "median_candidate_over_control_at_most": 0.99},
+  "note": "commands.sh --measure requires absent build directories, creates source-matched Release builds, and writes a provenance-bound plan before running. run.py revalidates every bound source, direct report, build, artifact, corpus, and token authority immediately before execution. Nothing is overwritten."
+}

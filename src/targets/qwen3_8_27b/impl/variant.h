@@ -65,6 +65,14 @@ struct Variant {
         [[nodiscard]] bool gdn_q4_pair_t1(
             const Tensor& input, const Weight& weight0, const Weight& weight1,
             Tensor& output0, Tensor& output1, hipStream_t stream);
+        [[nodiscard]] bool attention_q4_pair_t1(
+            const Tensor& hidden, const Weight& query_key, const Weight& gate_value,
+            Tensor& query, Tensor& key, Tensor& gate, Tensor& value, hipStream_t stream);
+        [[nodiscard]] static constexpr bool attention_q4_pair_t1_selected(
+            std::uint32_t tokens, QType query_key, QType gate_value) noexcept {
+            return NINFER_R9700_ATTENTION_Q4_PAIR_T1_CANDIDATE != 0 && tokens == 1U &&
+                   query_key == QType::Q4G64_F16S && gate_value == QType::Q4G64_F16S;
+        }
         [[nodiscard]] static constexpr bool gdn_q4_pair_t1_selected(
             std::uint32_t tokens, QType weight0, QType weight1) noexcept {
             return tokens == 1U && weight0 == QType::Q4G64_F16S &&

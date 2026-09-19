@@ -2,7 +2,9 @@
 
 #include "core/device.h"
 #include "core/layout.h"
+#include "ninfer/ops/attention_projection.h"
 #include "ninfer/ops/linear.h"
+#include "ninfer/ops/gdn_gating.h"
 #include "ninfer/ops/mtp_pack.h"
 #include "ninfer/ops/residual_add.h"
 #include "ninfer/ops/rmsnorm.h"
@@ -458,6 +460,31 @@ bool Variant::ExecutionState::gdn_q4_pair_t1(
     return true;
 }
 
+bool Variant::ExecutionState::attention_q4_pair_t1(
+    const Tensor& hidden, const Weight& query_key, const Weight& gate_value,
+    Tensor& query, Tensor& key, Tensor& gate, Tensor& value, hipStream_t stream) {
+    if (hidden.ne[1] <= 0 || hidden.ne[2] <= 0 || hidden.ne[3] != 1 ||
+        hidden.ne[1] > std::numeric_limits<std::int32_t>::max() / hidden.ne[2] ||
+        !attention_q4_pair_t1_selected(
+            static_cast<std::uint32_t>(hidden.ne[1] * hidden.ne[2]),
+            query_key.qtype, gate_value.qtype)) {
+        return false;
+    }
+    if (impl_ == nullptr) {
+        throw std::invalid_argument("R9700 attention projection execution state is absent");
+    }
+    const std::size_t required =
+        ops::linear_workspace_capacity_bytes(QType::Q4G64_F16S, 1, TextConfig::hidden);
+    if (required == 0U || impl_->activation.data == nullptr ||
+        impl_->activation.bytes < required) {
+        throw std::invalid_argument("R9700 attention projection activation region is too small");
+    }
+    ops::full_attention_projection_t1(
+        hidden, query_key, gate_value, query, key, gate, value,
+        {impl_->activation.data, required}, stream);
+    return true;
+}
+
 Variant::ExecutionState::~ExecutionState() = default;
 
 std::vector<std::uint32_t> Variant::ExecutionState::eager_widths(
@@ -614,6 +641,11 @@ void Variant::attention_projection(const Tensor& hidden,
                                    Tensor& gate, Tensor& key, Tensor& value, qwen3::TextPhase,
                                    WorkspaceArena& workspace, hipStream_t stream, std::int32_t,
                                    ExecutionState* execution, std::int32_t text_layer) {
+    if (execution != nullptr && execution->attention_q4_pair_t1(
+            hidden, weights.query_key, weights.gate_value,
+            query, key, gate, value, stream)) {
+        return;
+    }
     {
         auto query_scope = workspace.scope();
         Tensor query_key = workspace.alloc(DType::BF16, {7168, hidden.ne[1]});
@@ -967,6 +999,16 @@ void Variant::gdn_norm_control_projection(const Tensor& residual, const Tensor& 
                                           WorkspaceArena& workspace, hipStream_t stream,
                                           ExecutionState* execution) {
     ops::rmsnorm(residual, norm_weight, eps, true, hidden, stream);
+#if NINFER_R9700_BF16_GDN_CONTROL_T1_CANDIDATE
+    if (residual.ne[1] == 1 && residual.ne[2] == 1 && residual.ne[3] == 1 &&
+        weights.a_projection.qtype == QType::BF16_CTRL &&
+        weights.b_projection.qtype == QType::BF16_CTRL) {
+        ops::bf16_gdn_projected_gating_t1(hidden, weights.a_projection,
+                                          weights.b_projection, weights.a_log,
+                                          weights.dt_bias, g, beta, stream);
+        return;
+    }
+#endif
     auto scope = workspace.scope();
     Tensor a = workspace.alloc(DType::BF16, {TextConfig::gdn_value_heads, residual.ne[1]});
     Tensor b = workspace.alloc(DType::BF16, {TextConfig::gdn_value_heads, residual.ne[1]});

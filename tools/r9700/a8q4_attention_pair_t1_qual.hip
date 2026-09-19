@@ -1,7 +1,12 @@
 #define NINFER_A8Q4_QUAL_NO_MAIN
 #include "a8q4_shape_sweep_qual.hip"
 
+#if defined(NINFER_ATTENTION_PROJECTION_PRODUCTION_QUAL)
+#include "ops/r9700/attention_projection/attention_projection.h"
+#endif
+
 #include <functional>
+#include <regex>
 
 namespace {
 
@@ -160,6 +165,26 @@ bool overlap(const void* a, std::size_t as, const void* b, std::size_t bs) {
 }
 
 hipError_t launch_pair(const PairArgs& args, hipStream_t stream = nullptr) {
+#if defined(NINFER_ATTENTION_PROJECTION_PRODUCTION_QUAL)
+    return ninfer::ops::r9700::attention_projection::launch(
+        {.hidden = args.input,
+         .query_key_codes = args.weight0_codes,
+         .query_key_code_bytes = args.weight0_code_bytes,
+         .query_key_scales = args.weight0_scales,
+         .query_key_scale_bytes = args.weight0_scale_bytes,
+         .gate_value_codes = args.weight1_codes,
+         .gate_value_code_bytes = args.weight1_code_bytes,
+         .gate_value_scales = args.weight1_scales,
+         .gate_value_scale_bytes = args.weight1_scale_bytes,
+         .activation_workspace = args.workspace,
+         .activation_workspace_bytes = args.workspace_bytes,
+         .query = args.query,
+         .key = args.key,
+         .gate = args.gate,
+         .value = args.value,
+         .tokens = args.tokens,
+         .columns = args.columns}, stream);
+#else
     const std::size_t code_bytes = static_cast<std::size_t>(kRows) * kColumns / 2U;
     const std::size_t scale_bytes = static_cast<std::size_t>(kRows) * kGroups * 2U;
     const std::size_t workspace_bytes =
@@ -202,6 +227,7 @@ hipError_t launch_pair(const PairArgs& args, hipStream_t stream = nullptr) {
                        args.weight1_codes, args.weight1_scales, args.query, args.key,
                        args.gate, args.value);
     return hipGetLastError();
+#endif
 }
 
 linear::A8Q4G64CandidateArgs serial_args(const hip_bfloat16* input,
@@ -340,22 +366,54 @@ void require_invalid(PairArgs args, const char* label) {
 
 int main(int argc, char** argv) {
     try {
+#if defined(NINFER_ATTENTION_PROJECTION_PRODUCTION_QUAL)
+        if (argc != 7 || std::string_view(argv[1]) != "--out-json" ||
+            std::string_view(argv[3]) != "--assembly" ||
+            std::string_view(argv[5]) != "--static-receipt") {
+            std::cerr << "usage: attention_projection_t1_op_qual --out-json NEW.json "
+                         "--assembly FILE.s --static-receipt RECEIPT.txt\n";
+            return 2;
+        }
+#else
         if (argc != 5 || std::string_view(argv[1]) != "--out-json" ||
             std::string_view(argv[3]) != "--assembly") {
             std::cerr << "usage: a8q4_attention_pair_t1_qual --out-json NEW.json "
                          "--assembly FILE.s\n";
             return 2;
         }
+#endif
         const std::filesystem::path output_path = argv[2];
         const std::filesystem::path assembly = std::filesystem::canonical(argv[4]);
+#if defined(NINFER_ATTENTION_PROJECTION_PRODUCTION_QUAL)
+        const std::filesystem::path static_receipt = std::filesystem::canonical(argv[6]);
+#endif
         require_fresh_output(output_path);
         const std::filesystem::path root = std::filesystem::canonical(NINFER_SOURCE_DIR);
         const std::filesystem::path executable = std::filesystem::canonical("/proc/self/exe");
+#if defined(NINFER_ATTENTION_PROJECTION_PRODUCTION_QUAL)
+        const std::filesystem::path checker = std::filesystem::canonical(
+            root / "tools/r9700/check_attention_projection_t1_op_static.py");
+#else
         const std::filesystem::path checker = std::filesystem::canonical(
             root / "tools/r9700/check_a8q4_attention_pair_t1_static.py");
+#endif
         const std::string static_command = "python3 " + shell_quote(checker.string()) + " " +
-                                           shell_quote(assembly.string());
+                                           shell_quote(assembly.string())
+#if defined(NINFER_ATTENTION_PROJECTION_PRODUCTION_QUAL)
+                                           + " --expect-receipt " +
+                                           shell_quote(static_receipt.string())
+#endif
+                                           ;
         if (std::system(static_command.c_str()) != 0) fail("attention pair static gate failed");
+#if defined(NINFER_ATTENTION_PROJECTION_PRODUCTION_QUAL)
+        const std::string static_text = read_text(static_receipt);
+        std::smatch static_match;
+        if (!std::regex_match(static_text, static_match, std::regex(
+                "attention_projection_t1_op_static: PASS .*vgpr=([0-9]+) sgpr=([0-9]+) "
+                "wave32=true lds=0 scratch=0 spills=0 native_mixed_iu4_dot8=true"))) {
+            fail("production attention projection static receipt differs");
+        }
+#endif
 
         HIP_CHECK(hipSetDevice(0));
         hipDeviceProp_t properties{};
@@ -488,14 +546,31 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipRuntimeGetVersion(&runtime_version));
         HIP_CHECK(hipDriverGetVersion(&driver_version));
         std::ostringstream report;
+#if defined(NINFER_ATTENTION_PROJECTION_PRODUCTION_QUAL)
+        const std::array<std::pair<const char*, const char*>, 8> source_specs{{
+            {"qualifier_entry", "tools/r9700/attention_projection_t1_op_qual.hip"},
+            {"qualifier_body", "tools/r9700/a8q4_attention_pair_t1_qual.hip"},
+            {"shared_qualifier", "tools/r9700/a8q4_shape_sweep_qual.hip"},
+            {"op_contract", "include/ninfer/ops/attention_projection.h"},
+            {"raw_contract", "src/ops/r9700/attention_projection/attention_projection.h"},
+            {"op_implementation", "src/ops/r9700/attention_projection/attention_projection.hip"},
+            {"static_checker", "tools/r9700/check_attention_projection_t1_op_static.py"},
+            {"linear_primitive", "src/ops/r9700/linear/r9700_linear.hip"},
+        }};
+#else
         const std::array<std::pair<const char*, const char*>, 4> source_specs{{
             {"qualifier", "tools/r9700/a8q4_attention_pair_t1_qual.hip"},
             {"shared_qualifier", "tools/r9700/a8q4_shape_sweep_qual.hip"},
             {"linear_contract", "src/ops/r9700/linear/r9700_linear.h"},
             {"linear_implementation", "src/ops/r9700/linear/r9700_linear.hip"},
         }};
+#endif
         report << std::setprecision(17)
+#if defined(NINFER_ATTENTION_PROJECTION_PRODUCTION_QUAL)
+               << "{\n  \"schema\": \"ninfer.r9700.attention-projection-t1-production-qualification.v1\",\n"
+#else
                << "{\n  \"schema\": \"ninfer.r9700.a8q4-attention-pair-t1-qualification.v1\",\n"
+#endif
                << "  \"status\": \"qualified_for_whole_inference_ab\",\n"
                << "  \"command\": \"";
         for (int index = 0; index < argc; ++index) {
@@ -516,17 +591,24 @@ int main(int argc, char** argv) {
                    << sha256_file(path) << "\"}" << (i + 1U == source_specs.size() ? "\n" : ",\n");
         }
         report << "  ],\n"
-               << "  \"device\": {\"name\": \"" << json_escape(properties.name)
+               << "  \"device\": {\"index\": 0, \"name\": \"" << json_escape(properties.name)
                << "\", \"architecture\": \"" << json_escape(properties.gcnArchName)
                << "\", \"pci_bus_id\": \"" << json_escape(pci)
                << "\", \"wave_size\": " << properties.warpSize
                << ", \"hip_runtime_version\": " << runtime_version
                << ", \"hip_driver_version\": " << driver_version << "},\n"
-               << "  \"power_profile_before_after\": \"auto\",\n"
+               << "  \"power_profile\": {\"path\": \"" << json_escape(power.string())
+               << "\", \"required\": \"auto\", \"before\": \"auto\", \"after\": \"auto\"},\n"
                << "  \"static\": {\"status\": \"passed\", \"assembly_sha256\": \""
                << sha256_file(assembly) << "\", \"checker_sha256\": \"" << sha256_file(checker)
-               << "\", \"native_iu4_dot8\": true, \"wave32\": true, \"lds_bytes\": 0, "
-                  "\"scratch_bytes\": 0, \"spill_count\": 0},\n"
+               << "\", \"native_iu4_dot8\": true, \"wave32\": true, "
+#if defined(NINFER_ATTENTION_PROJECTION_PRODUCTION_QUAL)
+               << "\"vgpr\": " << static_match[1].str()
+               << ", \"sgpr\": " << static_match[2].str()
+               << ", \"receipt_sha256\": \"" << sha256_file(static_receipt)
+               << "\", \"receipt\": \"" << json_escape(static_text) << "\", "
+#endif
+               << "\"lds_bytes\": 0, \"scratch_bytes\": 0, \"spill_count\": 0},\n"
                << "  \"correctness\": {\"complete_outputs_bit_exact_to_serial_plus_four_extracts\": true, "
                   "\"independent_fp64_represented_weight_oracle\": true, \"maximum_bf16_steps\": "
                << max_steps << ", \"canaries\": true, \"status_poisoning\": true, "
@@ -552,10 +634,22 @@ int main(int argc, char** argv) {
                << ", \"credible_whole_percent\": " << whole_percent
                << ", \"admission_minimum_percent\": 1.0, \"passed\": true},\n"
                << "  \"decision\": \"prepare_selector_off_on_whole_inference_ab\"\n}\n";
-        std::ofstream output(output_path, std::ios::binary | std::ios::out);
-        if (!output) fail("cannot open attention pair report");
-        output << report.str(); output.close();
-        if (!output) fail("cannot finish attention pair report");
+        const std::string payload = report.str();
+        const int descriptor = ::open(output_path.c_str(),
+                                      O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
+        if (descriptor < 0) fail("cannot create attention pair report exclusively");
+        FILE* output = fdopen(descriptor, "wb");
+        if (output == nullptr) {
+            (void)::close(descriptor);
+            (void)::unlink(output_path.c_str());
+            fail("cannot bind attention pair report stream");
+        }
+        const bool wrote = fwrite(payload.data(), 1U, payload.size(), output) == payload.size();
+        const bool closed = fclose(output) == 0;
+        if (!wrote || !closed) {
+            (void)::unlink(output_path.c_str());
+            fail("cannot finish attention pair report");
+        }
         std::cout << std::fixed << std::setprecision(6)
                   << "attention-pair qualification=PASS serial_ms=" << serial_ms
                   << " paired_ms=" << paired_ms << " speedup=" << serial_ms / paired_ms

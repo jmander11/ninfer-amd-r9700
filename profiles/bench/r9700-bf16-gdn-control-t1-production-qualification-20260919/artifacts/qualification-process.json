@@ -1,0 +1,32 @@
+{
+  "command": [
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-bf16-gdn-control-t1-direct/src/ninfer_r9700_gdn_qual"
+  ],
+  "cwd": "/ssdpool2nvme/local_llm/ninfer-amd-r9700",
+  "started_unix_ns": 1789854592386858406,
+  "finished_unix_ns": 1789854593921531414,
+  "exit_code": 0,
+  "power_profile_path": "/sys/devices/pci0000:00/0000:00:02.1/0000:03:00.0/0000:04:08.0/0000:0a:00.0/0000:0b:08.0/0000:11:00.0/0000:12:00.0/0000:13:00.0/power_dpm_force_performance_level",
+  "power_before": "auto",
+  "power_after": "auto",
+  "device_identity": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-production-qualification-20260919/artifacts/device.json",
+    "bytes": 386,
+    "sha256": "f7be131f59019bbefa6b95dad0e760f2e969f84ed77d8de9a392566d3fd52ac4"
+  },
+  "executable": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-bf16-gdn-control-t1-direct/src/ninfer_r9700_gdn_qual",
+    "bytes": 915424,
+    "sha256": "d85ec6742d72233e7fe6258b0436d397b9d7cc51831b351befc691aa784a4602"
+  },
+  "stdout": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-production-qualification-20260919/artifacts/qualification.stdout",
+    "bytes": 242,
+    "sha256": "f50d85382059a0693eff6c040aa4484b5667a38d1a854bd9224e481476493ab0"
+  },
+  "stderr": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-production-qualification-20260919/artifacts/qualification.stderr",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

@@ -22,6 +22,8 @@ constexpr std::uint32_t kProjectionChannels =
 constexpr std::uint32_t kProjectionPrefillTokens = 2048;
 constexpr std::uint32_t kMaximumVerifyWidth = 16;
 constexpr std::uint32_t kMaximumBatch = kMaximumConcurrency;
+constexpr std::uint32_t kControlHeads = 48;
+constexpr std::uint32_t kControlColumns = 5120;
 
 [[nodiscard]] bool valid_stream(hipStream_t stream) noexcept { return stream != nullptr; }
 
@@ -399,6 +401,42 @@ __global__ void control_gates_kernel(const hip_bfloat16* a, const hip_bfloat16* 
     beta[index] = 1.0F / (1.0F + expf(-bv));
 }
 
+__global__ __launch_bounds__(kBlock) void bf16_projected_control_t1_kernel(
+    const hip_bfloat16* hidden, const hip_bfloat16* a_weight,
+    const hip_bfloat16* b_weight, const float* a_log, const float* dt_bias,
+    float* g, float* beta) {
+    const std::uint32_t head = blockIdx.x;
+    const std::size_t base = static_cast<std::size_t>(head) * kControlColumns;
+    float a_partial = 0.0F;
+    float b_partial = 0.0F;
+    for (std::uint32_t k = threadIdx.x; k < kControlColumns; k += blockDim.x) {
+        const float x = static_cast<float>(hidden[k]);
+        a_partial = fmaf(x, static_cast<float>(a_weight[base + k]), a_partial);
+        b_partial = fmaf(x, static_cast<float>(b_weight[base + k]), b_partial);
+    }
+    __shared__ float a_reduction[kBlock];
+    __shared__ float b_reduction[kBlock];
+    a_reduction[threadIdx.x] = a_partial;
+    b_reduction[threadIdx.x] = b_partial;
+    __syncthreads();
+    for (std::uint32_t width = kBlock / 2U; width != 0U; width >>= 1U) {
+        if (threadIdx.x < width) {
+            a_reduction[threadIdx.x] += a_reduction[threadIdx.x + width];
+            b_reduction[threadIdx.x] += b_reduction[threadIdx.x + width];
+        }
+        __syncthreads();
+    }
+    if (threadIdx.x == 0U) {
+        const hip_bfloat16 ar = static_cast<hip_bfloat16>(a_reduction[0]);
+        const hip_bfloat16 br = static_cast<hip_bfloat16>(b_reduction[0]);
+        const float av = static_cast<float>(ar) + dt_bias[head];
+        const float softplus = av > 20.0F ? av : log1pf(expf(av));
+        g[head] = -expf(a_log[head]) * softplus;
+        const float bv = static_cast<float>(br);
+        beta[head] = 1.0F / (1.0F + expf(-bv));
+    }
+}
+
 __global__ void copy_fp32_kernel(const float* source, float* destination, std::size_t count) {
     const std::size_t index = static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
     if (index < count) { destination[index] = source[index]; }
@@ -675,6 +713,38 @@ hipError_t control_gates_bf16(const hip_bfloat16* a, const hip_bfloat16* b, cons
                               valid_count(count) && valid_stream(stream),
                           [&] { hipLaunchKernelGGL(control_gates_kernel, linear_grid(count), dim3(kBlock), 0,
                                                    stream, a, b, a_log, dt_bias, g, beta, count, value_heads); });
+}
+
+hipError_t bf16_projected_control_t1(
+    const hip_bfloat16* hidden, const hip_bfloat16* a_weight,
+    const hip_bfloat16* b_weight, const float* a_log, const float* dt_bias,
+    float* g, float* beta, hipStream_t stream) noexcept {
+    constexpr std::size_t hidden_bytes = kControlColumns * sizeof(hip_bfloat16);
+    constexpr std::size_t weight_bytes =
+        static_cast<std::size_t>(kControlHeads) * kControlColumns * sizeof(hip_bfloat16);
+    constexpr std::size_t vector_bytes = kControlHeads * sizeof(float);
+    const bool pointers_valid = hidden != nullptr && a_weight != nullptr && b_weight != nullptr &&
+        a_log != nullptr && dt_bias != nullptr && g != nullptr && beta != nullptr &&
+        valid_stream(stream);
+    if (!pointers_valid) { return hipErrorInvalidValue; }
+    const std::array<ByteRange, 7> ranges{
+        byte_range(hidden, hidden_bytes / sizeof(hip_bfloat16)),
+        byte_range(a_weight, weight_bytes / sizeof(hip_bfloat16)),
+        byte_range(b_weight, weight_bytes / sizeof(hip_bfloat16)),
+        byte_range(a_log, vector_bytes / sizeof(float)),
+        byte_range(dt_bias, vector_bytes / sizeof(float)),
+        byte_range(g, vector_bytes / sizeof(float)),
+        byte_range(beta, vector_bytes / sizeof(float)),
+    };
+    for (std::size_t first = 0; first < ranges.size(); ++first) {
+        for (std::size_t second = first + 1; second < ranges.size(); ++second) {
+            if (overlaps(ranges[first], ranges[second])) return hipErrorInvalidValue;
+        }
+    }
+    return checked_launch(true, [&] {
+        hipLaunchKernelGGL(bf16_projected_control_t1_kernel, dim3(kControlHeads), dim3(kBlock),
+                           0, stream, hidden, a_weight, b_weight, a_log, dt_bias, g, beta);
+    });
 }
 
 hipError_t copy_state_fp32(const float* source, float* destination, std::size_t count,

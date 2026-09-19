@@ -144,6 +144,35 @@ endif()
 add_compile_definitions(
   NINFER_R9700_GDN_VERIFY_WAVE_QK_CANDIDATE=${NINFER_R9700_GDN_VERIFY_WAVE_QK_CANDIDATE})
 
+# Qualification-only exact-T1 BF16 GDN projected-control selector. Zero retains two represented
+# BF16 Linear outputs followed by GDN gating; one computes the same two FP32 reductions, preserves
+# the explicit BF16 rounding seam in registers, and publishes only the observable FP32 controls.
+set(NINFER_R9700_BF16_GDN_CONTROL_T1_CANDIDATE "0" CACHE STRING
+  "Enable the exact R9700 BF16 GDN projected-control T1 candidate")
+set_property(CACHE NINFER_R9700_BF16_GDN_CONTROL_T1_CANDIDATE PROPERTY STRINGS 0 1)
+if(NOT NINFER_R9700_BF16_GDN_CONTROL_T1_CANDIDATE STREQUAL "0" AND
+   NOT NINFER_R9700_BF16_GDN_CONTROL_T1_CANDIDATE STREQUAL "1")
+  message(FATAL_ERROR
+    "NINFER_R9700_BF16_GDN_CONTROL_T1_CANDIDATE must be 0 or 1; got "
+    "'${NINFER_R9700_BF16_GDN_CONTROL_T1_CANDIDATE}'")
+endif()
+add_compile_definitions(
+  NINFER_R9700_BF16_GDN_CONTROL_T1_CANDIDATE=${NINFER_R9700_BF16_GDN_CONTROL_T1_CANDIDATE})
+
+# Qualification-only exact-T1 all-Q4 full-attention input-projection selector. Zero retains two
+# complete Linear calls and four extracts; one quantizes once and directly publishes Q/K/Gate/V.
+set(NINFER_R9700_ATTENTION_Q4_PAIR_T1_CANDIDATE "0" CACHE STRING
+  "Enable the exact R9700 all-Q4 attention paired-projection T1 candidate")
+set_property(CACHE NINFER_R9700_ATTENTION_Q4_PAIR_T1_CANDIDATE PROPERTY STRINGS 0 1)
+if(NOT NINFER_R9700_ATTENTION_Q4_PAIR_T1_CANDIDATE STREQUAL "0" AND
+   NOT NINFER_R9700_ATTENTION_Q4_PAIR_T1_CANDIDATE STREQUAL "1")
+  message(FATAL_ERROR
+    "NINFER_R9700_ATTENTION_Q4_PAIR_T1_CANDIDATE must be 0 or 1; got "
+    "'${NINFER_R9700_ATTENTION_Q4_PAIR_T1_CANDIDATE}'")
+endif()
+add_compile_definitions(
+  NINFER_R9700_ATTENTION_Q4_PAIR_T1_CANDIDATE=${NINFER_R9700_ATTENTION_Q4_PAIR_T1_CANDIDATE})
+
 # Qualification-only exact-shape hipBLASLt selector. One preserves the qualified e2e001... T128
 # default and requires the same identity as a viable T129 choice, independent of prepare order.
 set(NINFER_R9700_FP8_PREFIX_COMMON_ALGO_CANDIDATE "0" CACHE STRING

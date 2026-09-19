@@ -135,8 +135,9 @@ BASE-DECODE-BW measurement completed. The BF16 GDN projection/control and all-Q4
 paired-projection direct qualifiers also completed and admitted their respective fused routes;
 their production implementations and separate whole-model A/Bs are now CPU-only work. The repaired
 all-Q4 C2..4 paired-WMMA direct qualifier also completed and admitted its route for a product
-candidate plus whole A/B. No GPU action is currently prepared. Every other remaining unchecked
-task depends directly or transitively on the external `DENSE-FLOOR-DECISION`.
+candidate plus whole A/B. The independently reviewed BF16 GDN production-symbol qualifier below
+is the only prepared GPU action. Every other remaining unchecked task depends directly or
+transitively on the external `DENSE-FLOOR-DECISION`.
 
 Every future physical experiment must be launched through a reviewed package-local `commands.sh`,
 not an ad-hoc reconstructed command. A package is runnable only when its plan contains no
@@ -271,7 +272,18 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   `profiles/bench/r9700-bf16-gdn-control-t1-20260919/report.json`. This admits a production-symbol
   no-a/b candidate and then a separate matched whole-model C1 A/B; it does not itself authorize
   promotion. Preserve the explicit BF16 rounding boundary in registers, exact T1-only routing,
-  and the existing T2..4 fallback/workspace.
+  and the existing T2..4 fallback/workspace. The compile-gated production candidate, direct
+  production-symbol qualifier, and whole C1 A/B package are now implemented. Independent review
+  found the semantic Op/raw kernel and exact BF16 seam coherent, and accepted the repaired direct
+  device/PCI/power/invocation/artifact receipts plus the identity-closed future whole wrapper. The
+  direct production-symbol run passed: the candidate is bit-exact to the two-production-linear
+  control path, passes the independent FP64 oracle and malformed boundaries, and the exact symbol
+  is wave32 with 11 VGPR, 22 SGPR, 2 KiB LDS, no scratch/spills, exactly two FP32 stores, and no
+  BF16 stores. All retained device, process, source, executable, assembly, and receipt identities
+  passed independent audit. Evidence:
+  `profiles/bench/r9700-bf16-gdn-control-t1-production-qualification-20260919/report.json`. Run the
+  separately reviewed matched whole gate exactly:
+  `bash profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-20260919/commands.sh --measure`.
 
   The all-Q4 T1 attention paired-projection direct gate compared the two
   complete N7168/K5120 Q4 linears plus four incumbent extracts against one shared A8G64
