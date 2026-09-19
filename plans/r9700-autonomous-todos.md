@@ -254,7 +254,11 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   FP64 oracle, exact represented-boundary parity, balanced cold timing, and exact gfx1201 static
   evidence. Its first wrapper invocation did not reach the GPU because the linked executable could
   not locate `libamdhip64.so.7`; no report was created. The corrected wrapper adds the ROCm runtime
-  search path, and independent re-review proved that all ROCm dependencies resolve. Run exactly
+  search path, and independent re-review proved that all ROCm dependencies resolve. A second
+  pre-kernel attempt exposed an invalid assumption that only one HIP device is visible; the
+  corrected qualifier explicitly selects device 0, verifies its exact R9700/gfx1201 identity, and
+  derives the checked power node from its HIP PCI identity. No report has been created; independent
+  re-review passed. Run exactly
   `bash profiles/bench/r9700-bf16-gdn-control-t1-20260919/commands.sh --measure`.
 
 ## Active now: DFlash semantic and schedule work

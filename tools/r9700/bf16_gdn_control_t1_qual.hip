@@ -5,6 +5,7 @@
 #include <array>
 #include <bit>
 #include <cmath>
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -489,6 +490,7 @@ std::string read_line(const char* path) {
 
 void write_json(const std::string& path, const std::string& assembly_path,
                 const std::string& static_receipt_path, const std::string& profile,
+                const std::string& power_path,
                 const hipDeviceProp_t& properties, int runtime_version,
                 const Correctness& correctness,
                 const std::array<std::vector<float>, 3>& samples,
@@ -592,7 +594,7 @@ void write_json(const std::string& path, const std::string& assembly_path,
             << (index + 1 == records.size() ? "\n" : ",\n");
     }
     out << "  ],\n  \"power_profile_after\": \""
-        << read_line("/sys/class/drm/card2/device/power_dpm_force_performance_level") << "\"\n}\n";
+        << read_line(power_path.c_str()) << "\"\n}\n";
     write_create_only(path, out.str());
 }
 
@@ -605,14 +607,27 @@ int main(int argc, char** argv) try {
                   << " --output REPORT.json --assembly FILE.s --static-receipt FILE.txt\n";
         return 2;
     }
-    const std::string profile = read_line("/sys/class/drm/card2/device/power_dpm_force_performance_level");
-    if (profile != "auto") fail("performance admission requires power profile auto before HIP initialization");
     int count = 0;
     HIP_CHECK(hipGetDeviceCount(&count));
-    if (count != 1) fail("qualifier requires exactly one visible GPU");
+    if (count < 1) fail("qualifier requires device 0");
+    HIP_CHECK(hipSetDevice(0));
     hipDeviceProp_t properties{};
     HIP_CHECK(hipGetDeviceProperties(&properties, 0));
-    if (std::string(properties.gcnArchName).rfind("gfx1201", 0) != 0) fail("qualifier requires gfx1201");
+    if (std::string(properties.name) != "AMD Radeon AI PRO R9700" ||
+        std::string(properties.gcnArchName).rfind("gfx1201", 0) != 0) {
+        fail("qualifier requires R9700 gfx1201 at device 0");
+    }
+    char pci_bus_id[32]{};
+    HIP_CHECK(hipDeviceGetPCIBusId(pci_bus_id, sizeof(pci_bus_id), 0));
+    std::string pci = pci_bus_id;
+    if (pci.size() == 7U) pci = "0000:" + pci;
+    std::transform(pci.begin(), pci.end(), pci.begin(), [](unsigned char value) {
+        return static_cast<char>(std::tolower(value));
+    });
+    const std::string power_path =
+        "/sys/bus/pci/devices/" + pci + "/power_dpm_force_performance_level";
+    const std::string profile = read_line(power_path.c_str());
+    if (profile != "auto") fail("performance admission requires device-0 power profile auto");
     int runtime_version = 0;
     HIP_CHECK(hipRuntimeGetVersion(&runtime_version));
 
@@ -690,9 +705,9 @@ int main(int argc, char** argv) try {
             records.push_back({trial, trial % orders.size(), position, route, copy, elapsed});
         }
     }
-    if (read_line("/sys/class/drm/card2/device/power_dpm_force_performance_level") != "auto")
+    if (read_line(power_path.c_str()) != "auto")
         fail("power profile changed during timing");
-    write_json(argv[2], argv[4], argv[6], profile, properties, runtime_version,
+    write_json(argv[2], argv[4], argv[6], profile, power_path, properties, runtime_version,
                correctness, samples, records);
     std::cout << "PASS wrote " << argv[2] << '\n';
     return 0;

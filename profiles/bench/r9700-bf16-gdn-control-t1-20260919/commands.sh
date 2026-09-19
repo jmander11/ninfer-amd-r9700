@@ -11,7 +11,7 @@ assembly="$artifacts/bf16_gdn_control_t1_qual.s"
 receipt="$artifacts/static-receipt.txt"
 report="$package/report.json"
 profile=/sys/class/drm/card2/device/power_dpm_force_performance_level
-source_sha=01d4f15a73408801e61ad83568a1a5ba09f1db70e23d7da5a4ef11dd33c2ab27
+source_sha=f36ca18822abc91123623d2940651cb7b5575dedcdcff514eb9536db4c5ccdf8
 checker_sha=d77d5c0033d072083e8c352bade23d2ea048ea1656793cd15ee330cae67f5354
 
 preflight() {

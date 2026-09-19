@@ -27,7 +27,7 @@
   "identities": {
     "qualifier": {
       "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/bf16_gdn_control_t1_qual.hip",
-      "sha256": "01d4f15a73408801e61ad83568a1a5ba09f1db70e23d7da5a4ef11dd33c2ab27"
+      "sha256": "f36ca18822abc91123623d2940651cb7b5575dedcdcff514eb9536db4c5ccdf8"
     },
     "static_checker": {
       "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/check_bf16_gdn_control_t1_static.py",
