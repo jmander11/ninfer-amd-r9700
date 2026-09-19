@@ -46,8 +46,17 @@ inline constexpr bool kDFlashDownSplitkCandidateEnabled =
 // DFlash verify down-GEMM split-K challenger. Splits the K=17408 reduction across
 // S z-blocks to raise wave count for the low-occupancy [5120,17408] shape at the
 // exact DFlash verify widths. The split factor is fixed at compile time; the
-// bounded qualifier sweep (S in {2,4,8}) selected 8 as the fastest factor.
-inline constexpr std::uint32_t kDFlashDownSplitkFactor = 8U;
+// bounded qualifier sweep covers S in {2,4,8}; the factor remains explicit while
+// real-model exact-token qualification determines whether any factor is admissible.
+#ifndef NINFER_R9700_DFLASH_DOWN_SPLITK_FACTOR
+#define NINFER_R9700_DFLASH_DOWN_SPLITK_FACTOR 8
+#endif
+static_assert(NINFER_R9700_DFLASH_DOWN_SPLITK_FACTOR == 2 ||
+                  NINFER_R9700_DFLASH_DOWN_SPLITK_FACTOR == 4 ||
+                  NINFER_R9700_DFLASH_DOWN_SPLITK_FACTOR == 8,
+              "R9700 DFlash down split-K factor must be 2, 4, or 8");
+inline constexpr std::uint32_t kDFlashDownSplitkFactor =
+    NINFER_R9700_DFLASH_DOWN_SPLITK_FACTOR;
 
 [[nodiscard]] constexpr bool is_a8q4_dflash_down_splitk_eligible(
     std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns,

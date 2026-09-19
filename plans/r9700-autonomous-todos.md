@@ -127,13 +127,14 @@ The create-only Text append-versus-fresh layer-boundary package it prescribed wa
 reviewed, and run as `profiles/bench/r9700-text-layer-boundary-traces-6fe53d53-20260906`, closing
 `DFLASH-TEXT-P129`; the mechanical-protocol K4/W5 directional screen closed as well (see the
 after-parity router).
-The split-K standalone qualification is complete; do not rerun it.
-The next GPU action is the reviewed, matched Engine-level control/candidate package for exact-token and whole-DFlash A/B at
-C1/P128+G64, K4/W5 and K5/W6, with Device Graph enabled. Do not run an inferred benchmark command:
-the exact package-local `commands.sh` becomes authoritative only after its independent review says
-`SHIP`. Exact invocation after that review:
-`bash profiles/bench/r9700-dflash-down-splitk-whole-ab-20260919/commands.sh`.
-C2..4, profiling, and unrelated speed sweeps remain forbidden until this task closes.
+The S=8 split-K standalone qualification and matched whole A/B are complete; do not rerun either.
+S=8 failed exact public-token parity deterministically despite its speed win.
+The next GPU action is the reviewed S=2 eager exact-token discriminator at C1/P128+G64 for K4/W5 and K5/W6. Do not run an
+inferred benchmark command: the exact package-local `commands.sh` becomes authoritative only after
+its independent review says `SHIP`. Exact invocation after that review:
+`bash profiles/bench/r9700-dflash-down-splitk-s2-eager-parity-20260919/commands.sh`.
+S=4, another full Device-Graph campaign, C2..4, profiling, and unrelated speed sweeps remain
+forbidden until the S=2 discriminator decides the next branch.
 
 Every future physical experiment must be launched through a reviewed package-local `commands.sh`,
 not an ad-hoc reconstructed command. A package is runnable only when its plan contains no
@@ -332,6 +333,19 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   and K5/W6 with Device Graph. Use fresh `--whole-pg 128,64`, the optimized proposal head, and
   balanced control/candidate launch orders; do not add the known-non-equivalent isolated-decode
   diagnostic stream. The candidate remains compile-gated and default-off.
+  S=8 WHOLE GATE FAILED 2026-09-19. The sealed C1/P128+G64 production-graph campaign found every
+  ordinary/control repetition exact, while every S=8 candidate repetition deterministically first
+  diverged at retained token index 6 (`96917` control versus `109600` candidate), identically for
+  K4/W5 and K5/W6 and both launch orders; 11/65 public tokens differed. Its whole timing is therefore
+  semantically confounded, though per-speculative-round decode remained about 12--13% faster.
+  Root cause is FP32 reassociation: the incumbent has one serial 272-group FMA chain, while S=8 has
+  eight 34-group chains plus a plain-add reduction. The sparse synthetic qualifier did not expose
+  the real dense-activation rounding boundary. Evidence:
+  `profiles/bench/r9700-dflash-down-splitk-whole-ab-20260919/results` (sealed failure). Do not
+  promote S=8. Screen already-qualified S=2 eagerly next (least reassociation, retained ~1.77x
+  operator win); only if exact may it advance to a fresh matched Device-Graph whole A/B. Test S=4
+  only if S=2 fails and a concrete rounding-direction rationale remains; otherwise close the
+  mechanism default-off.
 
 ## Durable decision rule (added 2026-09-12)
 

@@ -712,6 +712,8 @@ std::string format_table(const BenchEnvironment& env, const std::vector<TestResu
         << (ninfer::ops::r9700::linear::kDFlashMlpDownT5CandidateEnabled ? "true" : "false")
         << " dflash_down_splitk_candidate="
         << (ninfer::ops::r9700::linear::kDFlashDownSplitkCandidateEnabled ? "true" : "false")
+        << " dflash_down_splitk_factor="
+        << ninfer::ops::r9700::linear::kDFlashDownSplitkFactor
         << " dflash_rmsnorm_rows56_candidate="
         << (ninfer::ops::r9700::eager::kDFlashRmsnormRows56CandidateEnabled ? "true" :
                                                                                  "false")
@@ -858,6 +860,8 @@ std::string format_json(const BenchEnvironment& env, const std::string& command,
          << "    \"dflash_down_splitk_candidate\": "
          << (ninfer::ops::r9700::linear::kDFlashDownSplitkCandidateEnabled ? "true" : "false")
          << ",\n"
+         << "    \"dflash_down_splitk_factor\": "
+         << ninfer::ops::r9700::linear::kDFlashDownSplitkFactor << ",\n"
          << "    \"dflash_rmsnorm_rows56_candidate\": "
          << (ninfer::ops::r9700::eager::kDFlashRmsnormRows56CandidateEnabled ? "true" :
                                                                                   "false")
@@ -989,7 +993,8 @@ std::string format_csv(const BenchEnvironment& env, const std::vector<TestResult
            "kv_value_group,kv_key_plane_layout,kv_value_plane_layout,"
            "kv_value_scale_plane_layout,q4_activation_bits,q4_prefill_cta_profile,"
            "dflash_small_t_candidate,dflash_mlp_down_t5_candidate,"
-           "dflash_down_splitk_candidate,dflash_rmsnorm_rows56_candidate,"
+           "dflash_down_splitk_candidate,dflash_down_splitk_factor,"
+           "dflash_rmsnorm_rows56_candidate,"
            "text_p129_wmma_tail_candidate,w8_activation_bits,"
            "fp8_qk_wmma_enabled,"
            "fp8_qk_wmma_profile,fp8_qk_wmma_t1_min_context,fp8_qk_wmma_t2_min_context,"
@@ -1037,6 +1042,7 @@ std::string format_csv(const BenchEnvironment& env, const std::vector<TestResult
             << ','
             << (ninfer::ops::r9700::linear::kDFlashDownSplitkCandidateEnabled ? "true" : "false")
             << ','
+            << ninfer::ops::r9700::linear::kDFlashDownSplitkFactor << ','
             << (ninfer::ops::r9700::eager::kDFlashRmsnormRows56CandidateEnabled ? "true" :
                                                                                    "false")
             << ','

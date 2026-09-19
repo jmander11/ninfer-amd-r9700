@@ -545,6 +545,9 @@ int test_report_contract() {
     failures += expect(report.at("config").at("dflash_down_splitk_candidate") ==
                            ninfer::ops::r9700::linear::kDFlashDownSplitkCandidateEnabled,
                        "compiled DFlash down split-K candidate profile");
+    failures += expect(report.at("config").at("dflash_down_splitk_factor") ==
+                           ninfer::ops::r9700::linear::kDFlashDownSplitkFactor,
+                       "compiled DFlash down split-K factor");
     failures += expect(report.at("config").at("dflash_rmsnorm_rows56_candidate") ==
                            ninfer::ops::r9700::eager::kDFlashRmsnormRows56CandidateEnabled,
                        "compiled DFlash RMSNorm rows5/6 candidate profile");
@@ -665,6 +668,11 @@ int test_human_and_csv_reports() {
                             "true" : "false")) != std::string::npos,
         "table DFlash down split-K candidate profile");
     failures += expect(
+        table.find("dflash_down_splitk_factor=" +
+                   std::to_string(ninfer::ops::r9700::linear::kDFlashDownSplitkFactor)) !=
+            std::string::npos,
+        "table DFlash down split-K factor");
+    failures += expect(
         table.find(std::string("dflash_rmsnorm_rows56_candidate=") +
                        (ninfer::ops::r9700::eager::kDFlashRmsnormRows56CandidateEnabled ?
                             "true" : "false")) != std::string::npos,
@@ -698,6 +706,7 @@ int test_human_and_csv_reports() {
           "kv_value_plane_layout", "kv_value_scale_plane_layout", "q4_activation_bits",
           "q4_prefill_cta_profile", "dflash_small_t_candidate",
            "dflash_mlp_down_t5_candidate", "dflash_down_splitk_candidate",
+           "dflash_down_splitk_factor",
            "dflash_rmsnorm_rows56_candidate",
            "text_p129_wmma_tail_candidate",
            "w8_activation_bits",
