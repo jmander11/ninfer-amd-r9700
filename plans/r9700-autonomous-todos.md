@@ -130,10 +130,9 @@ reviewed, and run as `profiles/bench/r9700-text-layer-boundary-traces-6fe53d53-2
 after-parity router).
 The bounded DFlash verify-down split-K task is closed default-off: S=8 and S=2 both failed exact
 public-token parity, and S=4 has no mechanism for restoring the incumbent serial-FMA semantics.
-Do not rerun either sealed package or infer an S=4 command. No GPU action is currently prepared;
-`BASE-DECODE-BW` must first produce and pass review of a fail-closed package, while every other
-remaining unchecked task depends directly or transitively on the external
-`DENSE-FLOOR-DECISION`.
+Do not rerun either sealed package or infer an S=4 command. Independent review authorized only the
+unprivileged selector-free BASE-DECODE-BW measurement below; every other remaining unchecked task
+depends directly or transitively on the external `DENSE-FLOOR-DECISION`.
 
 Every future physical experiment must be launched through a reviewed package-local `commands.sh`,
 not an ad-hoc reconstructed command. A package is runnable only when its plan contains no
@@ -204,6 +203,18 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   removed. Retain one production geometry, do not add a block-size selector, and require a
   materially different mechanism with a new whole-decode bound before further kernel work.
 
+  The next admitted mechanism is the T1 GDN paired-Q4 projection: the N4096/K5120 query-key and
+  N12288/K5120 value-z matrices consume the identical represented BF16 hidden vector, so one
+  A8G64 quantization and one combined row grid can replace two quantize/Linear launches without
+  changing either represented BF16 projection or the following snapshot convolution/state Op.
+  The retained cold medians bound the pair at about `4.365 ms/token`; streaming the combined
+  weights at the gate-up route's observed rate plus eliminating 48 duplicate quantizations and
+  launches predicts roughly `0.75 ms/token` before ancillary savings. Qualify the complete paired
+  boundary against the independent represented-weight FP64 oracle and both serial outputs, then
+  require a cold complete-sequence win before any compile-gated whole-Engine C1 A/B. Select only
+  T1 with both exact Q4N16K16/G64/FP16-scale shapes; mixed FP8/Q4 profiles and T>1 retain their
+  existing routes. Do not direct-scatter past the convolution/state boundary in this challenger.
+
   Before GPU execution, prepare the normal create-only package and obtain independent `SHIP` review.
   Qualification must include the independent mathematical oracle at real shapes and the applicable
   exact comparison, gfx1201 ISA/resource/static routing evidence, cold and repeated direct-shape
@@ -213,8 +224,10 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   retain it default-off and close it with the measured bound. A physical bandwidth-saturation or
   stall-freedom claim additionally requires reliable hardware counters; if gfx1201 counters remain
   unavailable, report useful payload rate and whole speed only, with profiled timing used solely for
-  attribution. Keep `next_command` null and the statement `No GPU action is currently prepared`
-  until the package has no `UNBOUND`, passes non-mutating preflight/validation, and is reviewed.
+  attribution. The bound package passed static validation, non-mutating preflight, and independent
+  review. The sole next GPU command is
+  `bash profiles/bench/r9700-base-decode-bandwidth-baseline-20260919/commands.sh --measure`.
+  Its optional privileged `--profile` action remains unauthorized pending its exact-dispatch gate.
 
 ## Active now: DFlash semantic and schedule work
 
