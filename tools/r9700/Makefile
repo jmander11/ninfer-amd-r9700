@@ -69,6 +69,7 @@ A8Q4_SHAPE_SWEEP_TARGET := $(BUILD_DIR)/a8q4_shape_sweep_qual
 A8Q4_DFLASH_SMALL_T_TARGET := $(BUILD_DIR)/a8q4_dflash_small_t_qual
 A8Q4_DFLASH_MLP_DOWN_SMALL_T_TARGET := $(BUILD_DIR)/a8q4_dflash_mlp_down_small_t_qual
 A8Q4_DFLASH_DOWN_SPLITK_TARGET := $(BUILD_DIR)/a8q4_dflash_down_splitk_qual
+A8Q4_GDN_PAIR_T1_TARGET := $(BUILD_DIR)/a8q4_gdn_pair_t1_qual
 DFLASH_SMALL_T_OUTPUT_DIR ?=
 DFLASH_SMALL_T_C1_SUMMARY ?= $(abspath ../..)/profiles/bench/r9700-dflash-small-t-c1-20260906/summary.json
 A4Q4_PREFILL_TARGET := $(BUILD_DIR)/a4q4_prefill_qual
@@ -108,6 +109,7 @@ A8Q4_SHAPE_SWEEP_SOURCE := a8q4_shape_sweep_qual.hip
 A8Q4_DFLASH_SMALL_T_SOURCE := a8q4_dflash_small_t_qual.hip
 A8Q4_DFLASH_MLP_DOWN_SMALL_T_SOURCE := a8q4_dflash_mlp_down_small_t_qual.hip
 A8Q4_DFLASH_DOWN_SPLITK_SOURCE := a8q4_dflash_down_splitk_qual.hip
+A8Q4_GDN_PAIR_T1_SOURCE := a8q4_gdn_pair_t1_qual.hip
 A8Q4_DFLASH_DOWN_SPLITK_STATIC_CHECK := check_a8q4_dflash_down_splitk_static.py
 A8Q4_DFLASH_MLP_DOWN_SMALL_T_STATIC_CHECK := check_a8q4_dflash_mlp_down_small_t_static.py
 Q4_TENSOR_SOURCE := q4_tensor_dispatch_qual.hip
@@ -179,7 +181,7 @@ CXXFLAGS := -O3 -std=c++20 --offload-arch=$(ARCH) -I../../src $(SYSTEM_INCLUDES)
 LDFLAGS := -L$(ROCM_ROOT)/lib -Wl,-rpath,$(ROCM_ROOT)/lib
 
 
-.PHONY: all clean hbm fp8-hipblaslt-probe int4-wmma int4-wmma-isa int4-wmma-resources w8a8-wmma w8a8-prefill-cta-regression w8a8-prefill-cta-lds-scope-regression w8a8-prefill-cta-lds-scope-benchmark w8a8-prefill-cta-lds-scope-report w8a8-wmma-isa w8a8-wmma-resources prefill-cta-static-q4 prefill-cta-static-w8 prefill-cta-static-incumbent-diagnostic q4g64-linear a8q4-shape-sweep a8q4-dflash-small-t-build a8q4-dflash-small-t-static a8q4-dflash-small-t-test a8q4-dflash-small-t-screen a8q4-dflash-mlp-down-small-t-build a8q4-dflash-mlp-down-small-t-static a8q4-dflash-mlp-down-small-t-static-test a8q4-prefill-cta-regression a8q4-prefill-cta-lds-scope-regression a8q4-prefill-cta-lds-scope-benchmark a8q4-prefill-cta-lds-scope-report a8q4-prefill-cta-m64n64-regression q4g64-linear-isa q4g64-linear-resources xattention-isa xattention-resources xattention-reports split512-attention split512-attention-isa split512-attention-resources dense-prefill-attention dense-prefill-attention-full-score-isa dense-prefill-attention-full-score-static dense-prefill-attention-static-test isa kv-resources linear-isa linear-resources eager-isa rmsnorm-prefill-static rmsnorm-prefill-static-test rmsnorm-prefill-benchmark rmsnorm-k256-prefill-static rmsnorm-k256-prefill-static-test rmsnorm-k256-prefill-benchmark rmsnorm-decode-production-static rmsnorm-decode-production-static-test rmsnorm-decode-production-routing-test rmsnorm-decode-production-regression rmsnorm-dflash-rows56-build rmsnorm-dflash-rows56-static rmsnorm-dflash-rows56-static-test rmsnorm-dflash-rows56-routing-test rmsnorm-dflash-rows56-production-build rmsnorm-dflash-rows56-screen gated-rmsnorm-prefill-static gated-rmsnorm-prefill-static-test gated-rmsnorm-prefill-path-test gated-rmsnorm-prefill-benchmark gated-rmsnorm-k128-production-static gated-rmsnorm-k128-production-static-test silu-mul-split-prefill-static silu-mul-split-prefill-static-test silu-mul-split-prefill-benchmark gdn-isa gdn-prefill-benchmark gdn-prefill-static gdn-prefill-static-test gdn-recurrence-resources gdn-recurrence-exact-discriminator gdn-verify-wave-static sampling-isa rope-resources run sanitize rocm-tool-audit rocm-tool-audit-test profile-trace profile-attention-trace profile-pmc
+.PHONY: all clean hbm fp8-hipblaslt-probe int4-wmma int4-wmma-isa int4-wmma-resources w8a8-wmma w8a8-prefill-cta-regression w8a8-prefill-cta-lds-scope-regression w8a8-prefill-cta-lds-scope-benchmark w8a8-prefill-cta-lds-scope-report w8a8-wmma-isa w8a8-wmma-resources prefill-cta-static-q4 prefill-cta-static-w8 prefill-cta-static-incumbent-diagnostic q4g64-linear a8q4-shape-sweep a8q4-gdn-pair-t1 a8q4-gdn-pair-t1-static a8q4-dflash-small-t-build a8q4-dflash-small-t-static a8q4-dflash-small-t-test a8q4-dflash-small-t-screen a8q4-dflash-mlp-down-small-t-build a8q4-dflash-mlp-down-small-t-static a8q4-dflash-mlp-down-small-t-static-test a8q4-prefill-cta-regression a8q4-prefill-cta-lds-scope-regression a8q4-prefill-cta-lds-scope-benchmark a8q4-prefill-cta-lds-scope-report a8q4-prefill-cta-m64n64-regression q4g64-linear-isa q4g64-linear-resources xattention-isa xattention-resources xattention-reports split512-attention split512-attention-isa split512-attention-resources dense-prefill-attention dense-prefill-attention-full-score-isa dense-prefill-attention-full-score-static dense-prefill-attention-static-test isa kv-resources linear-isa linear-resources eager-isa rmsnorm-prefill-static rmsnorm-prefill-static-test rmsnorm-prefill-benchmark rmsnorm-k256-prefill-static rmsnorm-k256-prefill-static-test rmsnorm-k256-prefill-benchmark rmsnorm-decode-production-static rmsnorm-decode-production-static-test rmsnorm-decode-production-routing-test rmsnorm-decode-production-regression rmsnorm-dflash-rows56-build rmsnorm-dflash-rows56-static rmsnorm-dflash-rows56-static-test rmsnorm-dflash-rows56-routing-test rmsnorm-dflash-rows56-production-build rmsnorm-dflash-rows56-screen gated-rmsnorm-prefill-static gated-rmsnorm-prefill-static-test gated-rmsnorm-prefill-path-test gated-rmsnorm-prefill-benchmark gated-rmsnorm-k128-production-static gated-rmsnorm-k128-production-static-test silu-mul-split-prefill-static silu-mul-split-prefill-static-test silu-mul-split-prefill-benchmark gdn-isa gdn-prefill-benchmark gdn-prefill-static gdn-prefill-static-test gdn-recurrence-resources gdn-recurrence-exact-discriminator gdn-verify-wave-static sampling-isa rope-resources run sanitize rocm-tool-audit rocm-tool-audit-test profile-trace profile-attention-trace profile-pmc
 
 all: $(PROBE_TARGET) $(KV_TARGET) $(HIP_DEVICE_TARGET) $(LINEAR_TARGET) $(EAGER_TARGET) $(GDN_TARGET) $(GDN_RECURRENCE_TARGET) $(SAMPLING_TARGET) $(ROPE_TARGET) $(SERVE_ENV_TARGET)
 
@@ -523,6 +525,24 @@ $(A8Q4_SHAPE_SWEEP_TARGET): $(A8Q4_SHAPE_SWEEP_SOURCE) $(LINEAR_IMPL) $(LINEAR_H
 	mkdir -p $(BUILD_DIR)
 	$(HIPCC) $(CXXFLAGS) -DNINFER_SOURCE_DIR='"$(abspath ../..)"' \
 		$(A8Q4_SHAPE_SWEEP_SOURCE) $(LINEAR_IMPL) $(LDFLAGS) -o $@
+
+$(A8Q4_GDN_PAIR_T1_TARGET): $(A8Q4_GDN_PAIR_T1_SOURCE) $(A8Q4_SHAPE_SWEEP_SOURCE) \
+		$(LINEAR_IMPL) $(LINEAR_HEADER) $(Q4_ACTIVATION_PROFILE) Makefile
+	mkdir -p $(BUILD_DIR)
+	$(HIPCC) $(CXXFLAGS) -Wno-unused-function -DNINFER_SOURCE_DIR='"$(abspath ../..)"' \
+		$(A8Q4_GDN_PAIR_T1_SOURCE) \
+		$(LINEAR_IMPL) $(LDFLAGS) -o $@
+
+$(BUILD_DIR)/a8q4_gdn_pair_t1.s: $(LINEAR_IMPL) $(LINEAR_HEADER) Makefile
+	mkdir -p $(BUILD_DIR)
+	$(HIPCC) $(CXXFLAGS) -Wno-unused-command-line-argument --offload-device-only -S \
+		$(LINEAR_IMPL) -o $@
+
+a8q4-gdn-pair-t1-static: $(BUILD_DIR)/a8q4_gdn_pair_t1.s
+	$(PYTHON) check_a8q4_gdn_pair_t1_static.py $<
+
+a8q4-gdn-pair-t1: $(A8Q4_GDN_PAIR_T1_TARGET) a8q4-gdn-pair-t1-static
+	$(A8Q4_GDN_PAIR_T1_TARGET)
 
 $(A8Q4_DFLASH_SMALL_T_TARGET): $(A8Q4_DFLASH_SMALL_T_SOURCE) $(A8Q4_SHAPE_SWEEP_SOURCE) \
 		$(LINEAR_IMPL) $(LINEAR_HEADER) $(Q4_ACTIVATION_PROFILE) Makefile

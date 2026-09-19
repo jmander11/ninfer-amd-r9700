@@ -1,0 +1,206 @@
+{
+  "schema": "ninfer.r9700.gdn-q4-pair-t1-whole-ab-plan.v1",
+  "status": "prepared_awaiting_independent_review",
+  "production_routing_authorized": false,
+  "claim": "Whole ordinary-decode A/B for exact T1 paired GDN Q4 projections after direct qualification.",
+  "workload": {
+    "device": 0,
+    "concurrency": 1,
+    "whole_pg": "8192,256",
+    "prefill_chunk": 4096,
+    "kv_capacity": "workload",
+    "spec": "none",
+    "draft_tokens": 0,
+    "device_graph": true,
+    "retain_token_ids": true,
+    "independent_pairs": 3,
+    "repetitions_per_process": 1,
+    "warmup_per_process": 1,
+    "required_power": "auto"
+  },
+  "order": [
+    "control",
+    "candidate",
+    "candidate",
+    "control",
+    "control",
+    "candidate"
+  ],
+  "builds": {
+    "control": {
+      "selector": 0,
+      "directory": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-gdn-q4-pair-t1-control",
+      "cache": {
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-gdn-q4-pair-t1-control/CMakeCache.txt",
+        "bytes": 35717,
+        "sha256": "a70d671dc374698396ac0cd3e4f29aa4cc5587a836452d5bb28cf7587d46cb72"
+      },
+      "cache_values": {
+        "CMAKE_BUILD_TYPE": "",
+        "CMAKE_HIP_ARCHITECTURES": "gfx1201",
+        "NINFER_BUILD_BENCHMARKS": "ON",
+        "NINFER_R9700_KV_VALUE_GROUP": "16",
+        "NINFER_R9700_Q4_ACTIVATION_BITS": "8",
+        "NINFER_R9700_W8_ACTIVATION_BITS": "8",
+        "NINFER_R9700_FP8_QK_WMMA": "1",
+        "NINFER_R9700_XATTENTION_QUALIFICATION": "OFF",
+        "NINFER_R9700_DFLASH_SMALL_T_CANDIDATE": "0",
+        "NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE": "0",
+        "NINFER_R9700_DFLASH_DOWN_SPLITK_CANDIDATE": "0",
+        "NINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE": "0",
+        "NINFER_R9700_TEXT_P129_WMMA_TAIL_CANDIDATE": "0",
+        "NINFER_R9700_GDN_VERIFY_WAVE_QK_CANDIDATE": "0",
+        "NINFER_R9700_FP8_PREFIX_COMMON_ALGO_CANDIDATE": "0",
+        "NINFER_R9700_GDN_Q4_PAIR_T1_CANDIDATE": "0"
+      },
+      "executable": {
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-gdn-q4-pair-t1-control/bench/ninfer_bench",
+        "bytes": 5343064,
+        "sha256": "e7147e4759932e3d21de19f018421048560e63a0835a4ffbd36ac94d64f5b0ca"
+      },
+      "symbol_receipt": {
+        "object": {
+          "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-gdn-q4-pair-t1-control/src/CMakeFiles/ninfer_r9700_target_bindings.dir/targets/qwen3_8_27b/impl/variant.cpp.o",
+          "bytes": 119952,
+          "sha256": "f3ec4f4ba268392bec98753a1a4d19da83dbd17796cd09b6cd4bc60b69d30427"
+        },
+        "paired_op_undefined_reference": false
+      }
+    },
+    "candidate": {
+      "selector": 1,
+      "directory": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-gdn-q4-pair-t1",
+      "cache": {
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-gdn-q4-pair-t1/CMakeCache.txt",
+        "bytes": 35685,
+        "sha256": "5feb6a5cff7290955926bcf1c972d107ca962cf7df8848fdd1723ed86342ac9b"
+      },
+      "cache_values": {
+        "CMAKE_BUILD_TYPE": "",
+        "CMAKE_HIP_ARCHITECTURES": "gfx1201",
+        "NINFER_BUILD_BENCHMARKS": "ON",
+        "NINFER_R9700_KV_VALUE_GROUP": "16",
+        "NINFER_R9700_Q4_ACTIVATION_BITS": "8",
+        "NINFER_R9700_W8_ACTIVATION_BITS": "8",
+        "NINFER_R9700_FP8_QK_WMMA": "1",
+        "NINFER_R9700_XATTENTION_QUALIFICATION": "OFF",
+        "NINFER_R9700_DFLASH_SMALL_T_CANDIDATE": "0",
+        "NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE": "0",
+        "NINFER_R9700_DFLASH_DOWN_SPLITK_CANDIDATE": "0",
+        "NINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE": "0",
+        "NINFER_R9700_TEXT_P129_WMMA_TAIL_CANDIDATE": "0",
+        "NINFER_R9700_GDN_VERIFY_WAVE_QK_CANDIDATE": "0",
+        "NINFER_R9700_FP8_PREFIX_COMMON_ALGO_CANDIDATE": "0",
+        "NINFER_R9700_GDN_Q4_PAIR_T1_CANDIDATE": "1"
+      },
+      "executable": {
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-gdn-q4-pair-t1/bench/ninfer_bench",
+        "bytes": 5348624,
+        "sha256": "e8fea2d1503c5930ae4c0bc76c48afc83ededb2e83a739bdc0357fd4fe018529"
+      },
+      "symbol_receipt": {
+        "object": {
+          "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-gdn-q4-pair-t1/src/CMakeFiles/ninfer_r9700_target_bindings.dir/targets/qwen3_8_27b/impl/variant.cpp.o",
+          "bytes": 124376,
+          "sha256": "447e2545d3903b9476b940c3c94cbade8ee454529aaac9daa6042bcbf92d8874"
+        },
+        "paired_op_undefined_reference": true
+      }
+    }
+  },
+  "sources": [
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/CMakeLists.txt",
+      "bytes": 15332,
+      "sha256": "f713d45cc6460f0a1766726eb45d9550f3f5c95ca8caf67cf67645bcbbfa6ffb"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/linear/r9700_linear.h",
+      "bytes": 23663,
+      "sha256": "e667f49c33601df59de2da4d9abce6f10ea35822d36378c20690875fb0690716"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/linear/r9700_linear.hip",
+      "bytes": 192188,
+      "sha256": "b456c041d9980bf5cfad29b41ad69e50562efebb34a296af800446519e6e854d"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/targets/qwen3_8_27b/impl/variant.h",
+      "bytes": 17772,
+      "sha256": "8f2e762cbec18bfd781e0899b1da228d24ebcd34a12da51e536f77945f278d61"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/targets/qwen3_8_27b/impl/variant.cpp",
+      "bytes": 68191,
+      "sha256": "380334e0dd10a3d483d3fadb768623e8790753c4875b9917b5aeb82a4e81db09"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/targets/qwen3_8_27b/ninfer_bench_support.cpp",
+      "bytes": 57052,
+      "sha256": "e1304e20b90fd9e7e240ee9a71d6e6a4cc8eb19f151c6939526bb3bfc9cf7da1"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/a8q4_gdn_pair_t1_qual.hip",
+      "bytes": 24885,
+      "sha256": "1101e597721a7318b6d346fcbd35556c13a7d560a96364c2be4c97238be769d4"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/check_a8q4_gdn_pair_t1_static.py",
+      "bytes": 3055,
+      "sha256": "8adf5dc6422a2c30e0c602636aac17809ddd9f80dd0d4e37d13f4c04fbd1d855"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gdn-q4-pair-t1-whole-ab-20260919/commands.sh",
+      "bytes": 566,
+      "sha256": "84926ec4aba4e9824653115816cb07bee481e5906f77eabd88aaf5ac5faf8216"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gdn-q4-pair-t1-whole-ab-20260919/prepare.py",
+      "bytes": 6905,
+      "sha256": "56c9de7f04a279b83fd90f7cdfa830ac36ec6cdd44f5beb0995a5b04e5804810"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gdn-q4-pair-t1-whole-ab-20260919/validate.py",
+      "bytes": 3317,
+      "sha256": "6cda192cf8477c6e2aa339d86b721df4498d9e28b1d7248ee76f711dd5b36d46"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gdn-q4-pair-t1-whole-ab-20260919/run.py",
+      "bytes": 8790,
+      "sha256": "047802328808b35270738a5ff61d52d9e5ee86e1118b0f6720c82ffe129726f0"
+    }
+  ],
+  "direct_qualification": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-gdn-pair-t1-qualification-20260919.json",
+    "bytes": 3657,
+    "sha256": "4f3999c46b31cd467bee33d217cd24c8cf299a06d77dc3fe328014b5cd71c01a"
+  },
+  "artifact": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer",
+    "bytes": 15172833280,
+    "sha256": "60719c5d5bfe978376c7de94db460bcd82d965ec447870cc47f0a02bf8d59953"
+  },
+  "corpus": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids",
+    "bytes": 333620,
+    "sha256": "27e4f63c17efe3f89b5cf278b3b1a42a737316ed4044d7d0d1d52437059d1002"
+  },
+  "retained_token_authority": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-rmsnorm-production-final-p8192-g256-c1-20260906.json",
+    "bytes": 6750,
+    "sha256": "b05db0068a4f1c73ce9c2092443b42f9f48b0fdb80ff8b3335db60cd5bdca74b"
+  },
+  "expected_tokens": {
+    "count": 257,
+    "sha256": "eb9241c6cc2a7547fa3c744dfe7b647e20a6e290dbf7241341b76ab524b89403"
+  },
+  "admission": {
+    "exact_public_tokens": true,
+    "every_paired_ratio_below_one": true,
+    "paired_mean_upper_2se_below_one": true,
+    "median_candidate_over_control_at_most": 0.99
+  },
+  "limitations": [
+    "This is an unprofiled whole-model timing gate; it does not prove physical HBM bandwidth."
+  ]
+}

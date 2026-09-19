@@ -1185,6 +1185,66 @@ void a8q4g64_linear_decode_dot8_t1_kernel(
 #endif
 }
 
+__global__ __launch_bounds__(kThreads)
+void a8q4g64_gdn_pair_t1_kernel(
+    const std::uint8_t* activation_low_codes,
+    const std::uint8_t* activation_high_codes,
+    const std::uint16_t* activation_scales,
+    const std::uint32_t* activation_status,
+    const std::uint8_t* weight0_codes, const std::uint16_t* weight0_scales,
+    hip_bfloat16* output0,
+    const std::uint8_t* weight1_codes, const std::uint16_t* weight1_scales,
+    hip_bfloat16* output1) {
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
+    constexpr std::uint32_t kRows0 = 4096U;
+    constexpr std::uint32_t kRows1 = 12288U;
+    constexpr std::uint32_t kColumns = 5120U;
+    constexpr std::uint32_t kGroups = kColumns / kQ4Group;
+    const std::uint32_t combined_row = blockIdx.x * blockDim.x + threadIdx.x;
+    if (combined_row >= kRows0 + kRows1) return;
+    const bool second = combined_row >= kRows0;
+    const std::uint32_t row = second ? combined_row - kRows0 : combined_row;
+    hip_bfloat16* const output = second ? output1 : output0;
+    if (*activation_status != Q4G64ActivationOk) {
+        output[row] = conspicuous_bf16_nan();
+        return;
+    }
+    const std::uint8_t* const weight_codes = second ? weight1_codes : weight0_codes;
+    const std::uint16_t* const weight_scales = second ? weight1_scales : weight0_scales;
+    float total = 0.0F;
+    for (std::uint32_t group = 0; group < kGroups; ++group) {
+        int low_dot = 0;
+        int high_dot = 0;
+#pragma unroll
+        for (std::uint32_t word = 0; word < 8U; ++word) {
+            const std::size_t element =
+                static_cast<std::size_t>(group) * kQ4Group + word * 8U;
+            const int low = load_q4x8(activation_low_codes, element);
+            const int high = load_q4x8(activation_high_codes, element);
+            const int weight =
+                load_q4_n16k16_x8(weight_codes, row, group, word, kGroups);
+            low_dot = __builtin_amdgcn_sudot8(
+                false, low, true, weight, low_dot, false);
+            high_dot = __builtin_amdgcn_sudot8(
+                true, high, true, weight, high_dot, false);
+        }
+        const std::int32_t combined = low_dot + 16 * high_dot;
+        const float activation_scale = __half2float(
+            __ushort_as_half(activation_scales[group]));
+        const float weight_scale = __half2float(__ushort_as_half(
+            weight_scales[q4_n16k16_scale_index(row, group, kGroups)]));
+        total = fmaf(static_cast<float>(combined),
+                     activation_scale * weight_scale, total);
+    }
+    output[row] = static_cast<hip_bfloat16>(total);
+#else
+    (void)activation_low_codes; (void)activation_high_codes;
+    (void)activation_scales; (void)activation_status; (void)weight0_codes;
+    (void)weight0_scales; (void)output0; (void)weight1_codes;
+    (void)weight1_scales; (void)output1;
+#endif
+}
+
 template <std::uint32_t Tokens>
 __global__ __launch_bounds__(kThreads)
 void a8q4g64_linear_dflash_small_t_kernel(
@@ -2882,6 +2942,100 @@ hipError_t a8q4g64_linear_decode_dot8_t1(
     return hipGetLastError();
 #else
     (void)stream;
+    return hipErrorNotSupported;
+#endif
+}
+
+hipError_t a8q4g64_gdn_pair_t1(
+    const A8Q4G64GdnPairArgs& args, hipStream_t stream) noexcept {
+    constexpr std::uint32_t kRows0 = 4096U;
+    constexpr std::uint32_t kRows1 = 12288U;
+    constexpr std::uint32_t kColumns = 5120U;
+    constexpr std::uint32_t kPaddedColumns = 5120U;
+    const std::size_t required_workspace =
+        a8q4g64_activation_workspace_capacity_bytes(1U, kColumns);
+    std::size_t input_bytes = 0U;
+    if (args.input == nullptr || args.tokens != 1U || args.columns != kColumns ||
+        args.activation_workspace == nullptr ||
+        args.activation_workspace_bytes != required_workspace ||
+        !checked_mul(kColumns, sizeof(hip_bfloat16), &input_bytes)) {
+        return hipErrorInvalidValue;
+    }
+    A8G64ActivationWorkspace workspace{};
+    if (a8q4g64_bind_activation_workspace(
+            args.activation_workspace, args.activation_workspace_bytes, 1U,
+            kColumns, &workspace) != hipSuccess ||
+        workspace.padded_columns != kPaddedColumns) {
+        return hipErrorInvalidValue;
+    }
+    const A8Q4G64LinearArgs linear0{
+        workspace.low_codes, workspace.low_code_bytes, workspace.high_codes,
+        workspace.high_code_bytes, workspace.scales, workspace.scale_bytes,
+        workspace.status, args.weight0_codes, args.weight0_code_bytes,
+        args.weight0_scales, args.weight0_scale_bytes, args.output0, 1U, kRows0,
+        kColumns, kPaddedColumns};
+    const A8Q4G64LinearArgs linear1{
+        workspace.low_codes, workspace.low_code_bytes, workspace.high_codes,
+        workspace.high_code_bytes, workspace.scales, workspace.scale_bytes,
+        workspace.status, args.weight1_codes, args.weight1_code_bytes,
+        args.weight1_scales, args.weight1_scale_bytes, args.output1, 1U, kRows1,
+        kColumns, kPaddedColumns};
+    if (!valid_a8q4_linear_args(linear0) ||
+        !valid_a8q4_linear_args(linear1)) {
+        return hipErrorInvalidValue;
+    }
+    constexpr std::size_t kOutput0Bytes =
+        static_cast<std::size_t>(kRows0) * sizeof(hip_bfloat16);
+    constexpr std::size_t kOutput1Bytes =
+        static_cast<std::size_t>(kRows1) * sizeof(hip_bfloat16);
+    const void* pointers[] = {
+        args.input, args.activation_workspace,
+        args.weight0_codes, args.weight0_scales, args.output0,
+        args.weight1_codes, args.weight1_scales, args.output1};
+    const std::size_t sizes[] = {
+        input_bytes, args.activation_workspace_bytes,
+        args.weight0_code_bytes, args.weight0_scale_bytes, kOutput0Bytes,
+        args.weight1_code_bytes, args.weight1_scale_bytes, kOutput1Bytes};
+    for (unsigned index = 0U; index < 8U; ++index) {
+        for (unsigned other = index + 1U; other < 8U; ++other) {
+            if (ranges_overlap(pointers[index], sizes[index],
+                               pointers[other], sizes[other])) {
+                return hipErrorInvalidValue;
+            }
+        }
+    }
+    const hipError_t quantized =
+        a8g64_quantize_activation({args.input, workspace}, stream);
+    if (quantized != hipSuccess) return quantized;
+#if defined(__HIPCC__)
+    constexpr std::uint32_t kRows = kRows0 + kRows1;
+    const dim3 grid((kRows + kThreads - 1U) / kThreads);
+    hipLaunchKernelGGL(
+        a8q4g64_gdn_pair_t1_kernel, grid, dim3(kThreads), 0, stream,
+        workspace.low_codes, workspace.high_codes, workspace.scales,
+        workspace.status, args.weight0_codes, args.weight0_scales, args.output0,
+        args.weight1_codes, args.weight1_scales, args.output1);
+    return hipGetLastError();
+#else
+    (void)stream;
+    return hipErrorNotSupported;
+#endif
+}
+
+hipError_t a8q4g64_gdn_pair_t1_qualification_resources(
+    A8Q4G64GdnPairResources* resources) noexcept {
+    if (resources == nullptr) return hipErrorInvalidValue;
+#if defined(__HIPCC__)
+    hipFuncAttributes attributes{};
+    const hipError_t result = hipFuncGetAttributes(
+        &attributes,
+        reinterpret_cast<const void*>(a8q4g64_gdn_pair_t1_kernel));
+    if (result != hipSuccess) return result;
+    *resources = A8Q4G64GdnPairResources{
+        attributes.numRegs, static_cast<int>(attributes.sharedSizeBytes),
+        static_cast<int>(attributes.localSizeBytes), attributes.maxThreadsPerBlock};
+    return hipSuccess;
+#else
     return hipErrorNotSupported;
 #endif
 }

@@ -62,6 +62,9 @@ struct Variant {
                     bool dflash_target_verify_down = false);
         void fused_mlp_down(const Tensor& gate_up, const Weight& down,
                             Tensor& output, hipStream_t stream);
+        [[nodiscard]] bool gdn_q4_pair_t1(
+            const Tensor& input, const Weight& weight0, const Weight& weight1,
+            Tensor& output0, Tensor& output1, hipStream_t stream);
         [[nodiscard]] static constexpr bool fused_mlp_down_selected(
             QType gate_up, QType down, std::uint32_t tokens,
             std::int32_t text_layer) noexcept {

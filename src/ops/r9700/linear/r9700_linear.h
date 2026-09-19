@@ -272,6 +272,35 @@ struct A8Q4G64CandidateArgs {
     bool dflash_target_verify_down = false;
 };
 
+// Qualification-only complete GDN T1 projection pair. The represented BF16
+// [1,5120] input is quantized once into caller-owned storage, then one combined
+// row grid evaluates the N4096 query/key and N12288 value/z matrices. Both
+// persistent matrices retain the production Q4N16K16/G64 layout.
+struct A8Q4G64GdnPairArgs {
+    const hip_bfloat16* input = nullptr;
+    const std::uint8_t* weight0_codes = nullptr;
+    std::size_t weight0_code_bytes = 0;
+    const std::uint16_t* weight0_scales = nullptr;
+    std::size_t weight0_scale_bytes = 0;
+    hip_bfloat16* output0 = nullptr;
+    const std::uint8_t* weight1_codes = nullptr;
+    std::size_t weight1_code_bytes = 0;
+    const std::uint16_t* weight1_scales = nullptr;
+    std::size_t weight1_scale_bytes = 0;
+    hip_bfloat16* output1 = nullptr;
+    void* activation_workspace = nullptr;
+    std::size_t activation_workspace_bytes = 0;
+    std::uint32_t tokens = 0;
+    std::uint32_t columns = 0;
+};
+
+struct A8Q4G64GdnPairResources {
+    int registers = 0;
+    int static_shared_bytes = 0;
+    int local_bytes = 0;
+    int max_threads_per_block = 0;
+};
+
 // Fixed Text-MLP boundary. The input is the concatenated BF16
 // [T,2K] gate/up result. The fused preparation explicitly rounds SiLU(gate)*up
 // to BF16 before applying the ordinary signed-A8G64 codec, then invokes the
@@ -368,6 +397,10 @@ struct A8Q4G64KernelResources {
 // seven full-K production tuples are rejected; the candidate boundary retains WMMA.
 [[nodiscard]] hipError_t a8q4g64_linear_decode_dot8_t1(
     const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept;
+[[nodiscard]] hipError_t a8q4g64_gdn_pair_t1(
+    const A8Q4G64GdnPairArgs& args, hipStream_t stream) noexcept;
+[[nodiscard]] hipError_t a8q4g64_gdn_pair_t1_qualification_resources(
+    A8Q4G64GdnPairResources* resources) noexcept;
 // Qualification-only block-size sweep of the unchanged one-row/thread T=1 kernel.
 [[nodiscard]] hipError_t a8q4g64_linear_decode_dot8_block_t1_qualification(
     const A8Q4G64LinearArgs& args, std::uint32_t threads,

@@ -26,6 +26,13 @@
 #include <string>
 #include <vector>
 
+#ifndef NINFER_R9700_GDN_Q4_PAIR_T1_CANDIDATE
+#define NINFER_R9700_GDN_Q4_PAIR_T1_CANDIDATE 0
+#endif
+static_assert(NINFER_R9700_GDN_Q4_PAIR_T1_CANDIDATE == 0 ||
+              NINFER_R9700_GDN_Q4_PAIR_T1_CANDIDATE == 1,
+              "NINFER_R9700_GDN_Q4_PAIR_T1_CANDIDATE must be 0 or 1");
+
 namespace ninfer::targets::qwen3_8_27b::detail {
 namespace {
 
@@ -184,6 +191,11 @@ void project_gdn_inputs(const Tensor& hidden, const Variant::GdnProjectionWeight
     }
     const std::int32_t tokens = hidden.ne[1] * hidden.ne[2];
     Tensor hidden_flat = hidden.view({hidden.ne[0], tokens});
+    if (execution != nullptr && execution->gdn_q4_pair_t1(
+            hidden_flat, weights.input_projection.query_key,
+            weights.input_projection.value_z, query_key, value_z, stream)) {
+        return;
+    }
     selected_linear(execution, Variant::SelectedLinearRole::GdnQueryKey, text_layer, hidden_flat,
                     weights.input_projection.query_key, query_key, workspace, stream);
     serialized_linear(execution, hidden_flat, weights.input_projection.value_z, value_z,
@@ -391,6 +403,69 @@ void Variant::ExecutionState::fused_mlp_down(const Tensor& gate_up, const Weight
          .columns = columns,
          .padded_columns = columns},
         stream));
+}
+
+bool Variant::ExecutionState::gdn_q4_pair_t1(
+    const Tensor& input, const Weight& weight0, const Weight& weight1,
+    Tensor& output0, Tensor& output1, hipStream_t stream) {
+    if constexpr (NINFER_R9700_GDN_Q4_PAIR_T1_CANDIDATE == 0) {
+        (void)input; (void)weight0; (void)weight1; (void)output0; (void)output1;
+        (void)stream;
+        return false;
+    }
+    if (input.ne[1] != 1 || input.ne[2] != 1 || input.ne[3] != 1 ||
+        weight0.qtype != QType::Q4G64_F16S ||
+        weight1.qtype != QType::Q4G64_F16S) {
+        return false;
+    }
+    constexpr std::int32_t kColumns = TextConfig::hidden;
+    constexpr std::int32_t kRows0 = 2 * TextConfig::key_dim;
+    constexpr std::int32_t kRows1 = 2 * TextConfig::value_dim;
+    const auto valid_tensor = [](const Tensor& tensor, std::int32_t rows) {
+        return tensor.dtype == DType::BF16 && tensor.data != nullptr &&
+               tensor.is_contiguous() && tensor.ne[0] == rows && tensor.ne[1] == 1 &&
+               tensor.ne[2] == 1 && tensor.ne[3] == 1;
+    };
+    const auto valid_weight = [](const Weight& weight, std::int32_t rows) {
+        return weight.qtype == QType::Q4G64_F16S && weight.ndim == 2U &&
+               weight.n == rows && weight.k == kColumns && weight.shape[0] == rows &&
+               weight.shape[1] == kColumns && weight.padded_shape[0] == rows &&
+               weight.padded_shape[1] == kColumns &&
+               weight.layout == QuantLayout::Q4N16K16 && weight.group == 64 &&
+               weight.group_size == 64U && weight.scale_dtype == DType::FP16 &&
+               weight.qdata != nullptr && weight.scales != nullptr &&
+               weight.qhigh == nullptr && weight.high_plane_bytes == 0U;
+    };
+    if (impl_ == nullptr || input.dtype != DType::BF16 || input.data == nullptr ||
+        !input.is_contiguous() || input.ne[0] != kColumns ||
+        !valid_tensor(output0, kRows0) || !valid_tensor(output1, kRows1) ||
+        !valid_weight(weight0, kRows0) || !valid_weight(weight1, kRows1)) {
+        throw std::invalid_argument("R9700 paired GDN T1 binding differs from qualified shape");
+    }
+    const std::size_t required =
+        ops::r9700::linear::a8q4g64_activation_workspace_capacity_bytes(1U, kColumns);
+    if (required == 0U || impl_->activation.data == nullptr ||
+        impl_->activation.bytes < required) {
+        throw std::invalid_argument("R9700 paired GDN T1 activation region is too small");
+    }
+    HIP_CHECK(ops::r9700::linear::a8q4g64_gdn_pair_t1(
+        {.input = static_cast<const hip_bfloat16*>(input.data),
+         .weight0_codes = static_cast<const std::uint8_t*>(weight0.qdata),
+         .weight0_code_bytes = static_cast<std::size_t>(weight0.qdata_bytes),
+         .weight0_scales = static_cast<const std::uint16_t*>(weight0.scales),
+         .weight0_scale_bytes = static_cast<std::size_t>(weight0.scale_bytes),
+         .output0 = static_cast<hip_bfloat16*>(output0.data),
+         .weight1_codes = static_cast<const std::uint8_t*>(weight1.qdata),
+         .weight1_code_bytes = static_cast<std::size_t>(weight1.qdata_bytes),
+         .weight1_scales = static_cast<const std::uint16_t*>(weight1.scales),
+         .weight1_scale_bytes = static_cast<std::size_t>(weight1.scale_bytes),
+         .output1 = static_cast<hip_bfloat16*>(output1.data),
+         .activation_workspace = impl_->activation.data,
+         .activation_workspace_bytes = required,
+         .tokens = 1U,
+         .columns = static_cast<std::uint32_t>(kColumns)},
+        stream));
+    return true;
 }
 
 Variant::ExecutionState::~ExecutionState() = default;

@@ -131,8 +131,9 @@ after-parity router).
 The bounded DFlash verify-down split-K task is closed default-off: S=8 and S=2 both failed exact
 public-token parity, and S=4 has no mechanism for restoring the incumbent serial-FMA semantics.
 Do not rerun either sealed package or infer an S=4 command. The reviewed selector-free
-BASE-DECODE-BW measurement completed. No GPU action is currently prepared; every other remaining
-unchecked task depends directly or transitively on the external `DENSE-FLOOR-DECISION`.
+BASE-DECODE-BW measurement completed. The independently reviewed paired-GDN whole A/B below is the
+only prepared GPU action; every other remaining unchecked task depends directly or transitively on
+the external `DENSE-FLOOR-DECISION`.
 
 Every future physical experiment must be launched through a reviewed package-local `commands.sh`,
 not an ad-hoc reconstructed command. A package is runnable only when its plan contains no
@@ -228,8 +229,10 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   runs at `27.0059`, `27.1906`, and `27.0281 tok/s` (median `27.0281083 tok/s`). Its exact logical
   Linear-boundary rate is `367.8525 GB/s`, or `57.85%` of the same-session `635.9 GB/s` stream
   ceiling; this is not physical HBM traffic or stall-freedom proof. The optional profile is not
-  needed for the live paired-projection decision. Keep `next_command` null until that challenger
-  has balanced direct evidence and a separately reviewed whole-A/B package.
+  needed for the live paired-projection decision. Its balanced direct gate passed with exact serial
+  outputs and a zero-step represented-weight FP64 result; the allocation-balanced medians were
+  `0.1303605 ms` serial and `0.1024000 ms` paired. The whole-A/B package passed independent review.
+  Run exactly `bash profiles/bench/r9700-gdn-q4-pair-t1-whole-ab-20260919/commands.sh --measure`.
 
 ## Active now: DFlash semantic and schedule work
 
