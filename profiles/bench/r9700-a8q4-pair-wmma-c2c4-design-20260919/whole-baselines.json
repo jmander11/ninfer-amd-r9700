@@ -1,0 +1,16 @@
+{
+  "schema": "ninfer.r9700.a8q4-pair-wmma-c2c4-whole-baselines.v1",
+  "status": "bound_from_selector_free_production_confirmation",
+  "source": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gdn-q4-pair-t1-production-confirmation-20260919/results/summary.json",
+    "bytes": 1047,
+    "sha256": "1940c87f95323ec6910e7fc722be2792ec32290317eef10e66f6a0ad4b29dae5"
+  },
+  "tokens_per_request": 256,
+  "c2_decode_seconds": [15.91140377, 15.92767997],
+  "c3_decode_seconds": [17.68192614, 17.6831105],
+  "c4_decode_seconds": [20.24795819, 20.23683081],
+  "c2_round_median_ms": 62.1857104296875,
+  "c3_round_median_ms": 69.0723371875,
+  "c4_round_median_ms": 79.071853515625
+}

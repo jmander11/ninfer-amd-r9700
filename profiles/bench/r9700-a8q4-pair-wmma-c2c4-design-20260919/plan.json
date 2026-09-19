@@ -1,0 +1,55 @@
+{
+  "schema": "ninfer.r9700.a8q4-pair-wmma-c2c4-plan.v1",
+  "status": "reviewed_ready",
+  "production_routing_authorized": false,
+  "claim": "Direct C2-C4 all-Q4 GDN and attention paired-WMMA qualification before whole-inference integration.",
+  "bound_inputs": [
+    {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/a8q4_pair_wmma_c2c4_qual.hip", "bytes": 48350, "sha256": "545ba6c5274f19f7881bea9562c5b24ce2de15c1b5c285d4b4ea0fa775e465ff"},
+    {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/a8q4_shape_sweep_qual.hip", "bytes": 97355, "sha256": "b8f85a76b2f431ba4ea50fb0e3f28ece55a5501c69197e978df9516c98506be2"},
+    {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/check_a8q4_pair_wmma_c2c4_static.py", "bytes": 3333, "sha256": "c848a2653fd1854d26b2c12c6bd6c687e0e23e0e707dcc49eebb12b2b5772a7d"},
+    {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/linear/r9700_linear.h", "bytes": 23638, "sha256": "07a76b945ed82efc5e470fd517dfbf4bc2ca09b565cbd636dd8269f85b972514"},
+    {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/linear/r9700_linear.hip", "bytes": 192174, "sha256": "5d28cce1938b7bae7ba5dc236813be3394bdadbb60585f5db0c4f687ce2e1b49"},
+    {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gdn-q4-pair-t1-production-confirmation-20260919/results/summary.json", "bytes": 1047, "sha256": "1940c87f95323ec6910e7fc722be2792ec32290317eef10e66f6a0ad4b29dae5"}
+  ],
+  "workload": {
+    "device": 0,
+    "tokens": [2, 3, 4],
+    "gdn_pair": [4096, 12288, 5120],
+    "attention_pair": [7168, 7168, 5120],
+    "gdn_calls_per_round": 48,
+    "attention_calls_per_round": 16,
+    "disjoint_weight_copies": 3,
+    "trials_per_arm": 12,
+    "required_power": "auto"
+  },
+  "arms": [
+    "complete_serial_two_quantize_wmma_plus_attention_extracts",
+    "shared_quantize_two_production_wmma_diagnostic",
+    "shared_quantize_combined_wmma_direct_candidate"
+  ],
+  "admission": {
+    "complete_three_arm_bf16_bit_exact": true,
+    "independent_fp64_represented_oracle_max_bf16_steps": 2,
+    "every_combined_cold_allocation_nonregressing": true,
+    "minimum_credible_whole_gain_percent_each_width": 1.0,
+    "passing_authorizes": "selector-off/on whole C2-C4 A/B only"
+  },
+  "static_contract": {
+    "architecture": "gfx1201",
+    "native_iu4_wmma": true,
+    "wave_size": 32,
+    "maximum_vgpr": 64,
+    "maximum_sgpr": 64,
+    "lds_bytes": 0,
+    "scratch_bytes": 0,
+    "spill_count": 0
+  },
+  "exact_invocation": {
+    "preflight": "bash profiles/bench/r9700-a8q4-pair-wmma-c2c4-design-20260919/commands.sh --preflight",
+    "measure": "bash profiles/bench/r9700-a8q4-pair-wmma-c2c4-design-20260919/commands.sh --measure"
+  },
+  "output": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-pair-wmma-c2c4-design-20260919/qualification.json",
+    "create_only": true
+  }
+}

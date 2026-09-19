@@ -133,9 +133,10 @@ public-token parity, and S=4 has no mechanism for restoring the incumbent serial
 Do not rerun either sealed package or infer an S=4 command. The reviewed selector-free
 BASE-DECODE-BW measurement completed. The BF16 GDN projection/control and all-Q4 T1 attention
 paired-projection direct qualifiers also completed and admitted their respective fused routes;
-their production implementations and separate whole-model A/Bs are now CPU-only work.
-No GPU action is currently prepared. Every other remaining unchecked task depends directly or
-transitively on the external `DENSE-FLOOR-DECISION`.
+their production implementations and separate whole-model A/Bs are now CPU-only work. The
+independently reviewed all-Q4 C2..4 paired-WMMA direct qualifier below is the only prepared GPU
+action. Every other remaining unchecked task depends directly or transitively on the external
+`DENSE-FLOOR-DECISION`.
 
 Every future physical experiment must be launched through a reviewed package-local `commands.sh`,
 not an ad-hoc reconstructed command. A package is runnable only when its plan contains no
@@ -286,6 +287,30 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   a production-symbol candidate and matched selector-off/on whole C1 A/B with exact public tokens;
   it does not authorize promotion. Select only T1 with both exact all-Q4 Q4G64_F16S bindings;
   mixed weights and T2..4 retain their existing routes until separately qualified.
+
+  The independently reviewed C2..4 paired-WMMA direct gate covers both the GDN N4096+N12288 pair
+  (48 calls/round) and attention N7168+N7168 pair (16 calls/round). It compares two complete
+  production WMMA linears against shared-quantize/two-WMMA and shared-quantize/combined-grid
+  routes using distinct role-salted packed weights, complete exact BF16 outputs, and an independent
+  decoder-based FP64 oracle. Its fail-closed bound uses the retained selector-free confirmation
+  round medians `62.1857104`, `69.0723372`, and `79.0718535 ms` for C2, C3, and C4. Source and
+  wrapper reviews passed after fixing role indistinguishability, balanced warmup coverage,
+  create-only report writes, and retained device/power/invocation/static provenance. Run exactly
+  `bash profiles/bench/r9700-a8q4-pair-wmma-c2c4-design-20260919/commands.sh --measure`.
+
+  After the admitted paired routes are resolved, the next bounded mechanism is all-Q4 T1
+  projected-residual fusion for N5120/K6144 and N5120/K17408. These are respectively the 16
+  attention-output plus 48 GDN-output projections and 64 MLP-down projections: exactly 128
+  residual publications/token. The retained ordinary C1 trace measures the removable residual-add
+  family at `0.2114 ms/token` (`0.20956 ms` interval union); fusing the exact
+  `delta=BF16(dot); x=BF16(FP32(x)+FP32(delta))` boundary into the native-IU4 epilogue also removes
+  2.62144 MB/token of delta store/read traffic. Qualify both complete Linear-plus-residual
+  boundaries with distinct actual packed weights, an independent represented-weight FP64 oracle,
+  exact residual bits, three-copy balanced cold timing, and exact-symbol native-IU4 static evidence.
+  Require `64*(saving_N5120K6144+saving_N5120K17408) >= 0.2 ms/token` before whole C1 A/B; keep
+  mixed weights and T>1 on the current path. If admitted, the next ranked mechanism is T1
+  RMSNorm+A8G64 preparation fusion. Do not reopen geometry remapping or split-K; an explicit
+  gate-up prefetch challenger is later work only if ISA proves early loads and wait scheduling.
 
 ## Active now: DFlash semantic and schedule work
 
