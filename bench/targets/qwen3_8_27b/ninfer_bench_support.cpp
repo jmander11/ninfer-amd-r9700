@@ -18,12 +18,6 @@
 #include <stdexcept>
 #include <system_error>
 
-#ifndef NINFER_R9700_GDN_Q4_PAIR_T1_CANDIDATE
-#define NINFER_R9700_GDN_Q4_PAIR_T1_CANDIDATE 0
-#endif
-static_assert(NINFER_R9700_GDN_Q4_PAIR_T1_CANDIDATE == 0 ||
-              NINFER_R9700_GDN_Q4_PAIR_T1_CANDIDATE == 1);
-
 namespace ninfer::bench {
 namespace {
 
@@ -720,8 +714,6 @@ std::string format_table(const BenchEnvironment& env, const std::vector<TestResu
         << (ninfer::ops::r9700::linear::kDFlashDownSplitkCandidateEnabled ? "true" : "false")
         << " dflash_down_splitk_factor="
         << ninfer::ops::r9700::linear::kDFlashDownSplitkFactor
-        << " gdn_q4_pair_t1_candidate="
-        << (NINFER_R9700_GDN_Q4_PAIR_T1_CANDIDATE ? "true" : "false")
         << " dflash_rmsnorm_rows56_candidate="
         << (ninfer::ops::r9700::eager::kDFlashRmsnormRows56CandidateEnabled ? "true" :
                                                                                  "false")
@@ -870,8 +862,6 @@ std::string format_json(const BenchEnvironment& env, const std::string& command,
          << ",\n"
          << "    \"dflash_down_splitk_factor\": "
          << ninfer::ops::r9700::linear::kDFlashDownSplitkFactor << ",\n"
-         << "    \"gdn_q4_pair_t1_candidate\": "
-         << (NINFER_R9700_GDN_Q4_PAIR_T1_CANDIDATE ? "true" : "false") << ",\n"
          << "    \"dflash_rmsnorm_rows56_candidate\": "
          << (ninfer::ops::r9700::eager::kDFlashRmsnormRows56CandidateEnabled ? "true" :
                                                                                   "false")
@@ -1004,7 +994,6 @@ std::string format_csv(const BenchEnvironment& env, const std::vector<TestResult
            "kv_value_scale_plane_layout,q4_activation_bits,q4_prefill_cta_profile,"
            "dflash_small_t_candidate,dflash_mlp_down_t5_candidate,"
            "dflash_down_splitk_candidate,dflash_down_splitk_factor,"
-           "gdn_q4_pair_t1_candidate,"
            "dflash_rmsnorm_rows56_candidate,"
            "text_p129_wmma_tail_candidate,w8_activation_bits,"
            "fp8_qk_wmma_enabled,"
@@ -1054,7 +1043,6 @@ std::string format_csv(const BenchEnvironment& env, const std::vector<TestResult
             << (ninfer::ops::r9700::linear::kDFlashDownSplitkCandidateEnabled ? "true" : "false")
             << ','
             << ninfer::ops::r9700::linear::kDFlashDownSplitkFactor << ','
-            << (NINFER_R9700_GDN_Q4_PAIR_T1_CANDIDATE ? "true" : "false") << ','
             << (ninfer::ops::r9700::eager::kDFlashRmsnormRows56CandidateEnabled ? "true" :
                                                                                    "false")
             << ','

@@ -37,6 +37,18 @@ static_assert(!Variant::gdn_input_projection_prefill_p2048_selected(
     ninfer::targets::qwen3::TextPhase::Prefill, 4096));
 static_assert(!Variant::gdn_input_projection_prefill_p2048_selected(
     ninfer::targets::qwen3::TextPhase::Verify, 2048));
+static_assert(Variant::ExecutionState::gdn_q4_pair_t1_selected(
+    1U, QType::Q4G64_F16S, QType::Q4G64_F16S));
+static_assert(!Variant::ExecutionState::gdn_q4_pair_t1_selected(
+    2U, QType::Q4G64_F16S, QType::Q4G64_F16S));
+static_assert(!Variant::ExecutionState::gdn_q4_pair_t1_selected(
+    3U, QType::Q4G64_F16S, QType::Q4G64_F16S));
+static_assert(!Variant::ExecutionState::gdn_q4_pair_t1_selected(
+    4U, QType::Q4G64_F16S, QType::Q4G64_F16S));
+static_assert(!Variant::ExecutionState::gdn_q4_pair_t1_selected(
+    1U, QType::W8G32_F16S, QType::Q4G64_F16S));
+static_assert(!Variant::ExecutionState::gdn_q4_pair_t1_selected(
+    1U, QType::Q4G64_F16S, QType::W8G32_F16S));
 constexpr std::int32_t kHidden = 5120;
 constexpr std::int32_t kQueryRows = 2048;
 constexpr std::int32_t kKeyRows = 2048;

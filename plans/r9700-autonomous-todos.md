@@ -131,9 +131,9 @@ after-parity router).
 The bounded DFlash verify-down split-K task is closed default-off: S=8 and S=2 both failed exact
 public-token parity, and S=4 has no mechanism for restoring the incumbent serial-FMA semantics.
 Do not rerun either sealed package or infer an S=4 command. The reviewed selector-free
-BASE-DECODE-BW measurement completed. No GPU action is currently prepared; the admitted paired-GDN
-route is being promoted and every other remaining unchecked task depends directly or transitively
-on the external `DENSE-FLOOR-DECISION`.
+BASE-DECODE-BW measurement completed. The independently reviewed selector-free paired-GDN C1..4
+production confirmation below is the only prepared GPU action. Every other remaining unchecked
+task depends directly or transitively on the external `DENSE-FLOOR-DECISION`.
 
 Every future physical experiment must be launched through a reviewed package-local `commands.sh`,
 not an ad-hoc reconstructed command. A package is runnable only when its plan contains no
@@ -235,7 +235,17 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   public-token parity in all six processes. Its three candidate/control decode-time ratios were
   `0.9784431`, `0.9794007`, and `0.9784902` (mean `0.9787780`, upper two-standard-error bound
   `0.9794013`); candidate rates were `27.9897`, `27.6197`, and `27.6044 tok/s`. This authorizes
-  selector-free promotion of the exact all-Q4 T1 pair, not a physical-HBM saturation claim.
+  selector-free promotion of the exact all-Q4 T1 pair, not a physical-HBM saturation claim. The
+  qualification selector and benchmark-report field are now removed: production selects the pair
+  only for one token with both exact Q4G64_F16S projection bindings; mixed weights and T>1 retain
+  the unchanged query-key selected-Linear plus serialized value-z fallback, and the following
+  snapshot convolution/state boundary is unchanged. Compile-time route receipts cover C1 selection,
+  C2..4 rejection, and both mixed-weight orders. The create-only selector-free confirmation at
+  `profiles/bench/r9700-gdn-q4-pair-t1-production-confirmation-20260919` passed independent review;
+  it binds the retained direct/whole evidence, checks C1 exact authority tokens and retained speed
+  over three processes, and exercises the unchanged C2..4 fallback twice each with exact
+  repeat-token parity. Run exactly
+  `bash profiles/bench/r9700-gdn-q4-pair-t1-production-confirmation-20260919/commands.sh --measure`.
 
 ## Active now: DFlash semantic and schedule work
 

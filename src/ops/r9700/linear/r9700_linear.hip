@@ -3022,7 +3022,7 @@ hipError_t a8q4g64_gdn_pair_t1(
 #endif
 }
 
-hipError_t a8q4g64_gdn_pair_t1_qualification_resources(
+hipError_t a8q4g64_gdn_pair_t1_resources(
     A8Q4G64GdnPairResources* resources) noexcept {
     if (resources == nullptr) return hipErrorInvalidValue;
 #if defined(__HIPCC__)

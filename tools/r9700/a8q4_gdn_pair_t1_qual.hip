@@ -339,7 +339,7 @@ int main(int argc, char** argv) {
             }
         }
         linear::A8Q4G64GdnPairResources resources{};
-        HIP_CHECK(linear::a8q4g64_gdn_pair_t1_qualification_resources(&resources));
+        HIP_CHECK(linear::a8q4g64_gdn_pair_t1_resources(&resources));
         if (resources.local_bytes != 0 || resources.static_shared_bytes != 0 ||
             resources.max_threads_per_block < 256) {
             fail("paired GDN kernel resource envelope is unsuitable");
@@ -360,9 +360,9 @@ int main(int argc, char** argv) {
         }};
         std::ostringstream report;
         report << std::setprecision(17)
-               << "{\n  \"schema\": \"ninfer.r9700.a8q4-gdn-pair-t1-qualification.v1\",\n"
-               << "  \"status\": \"qualified_for_whole_ab_only\",\n"
-               << "  \"production_routing_authorized\": false,\n"
+               << "{\n  \"schema\": \"ninfer.r9700.a8q4-gdn-pair-t1-production-regression.v1\",\n"
+               << "  \"status\": \"production_route_direct_regression_passed\",\n"
+               << "  \"production_routing_selected\": true,\n"
                << "  \"command\": \"";
         for (int index = 0; index < argc; ++index) {
             if (index != 0) report << ' ';
@@ -418,7 +418,7 @@ int main(int argc, char** argv) {
                << ", \"paired_median_ms\": " << paired_ms
                << ", \"speedup\": " << serial_ms / paired_ms
                << ", \"all_copy_medians_clear_one_percent\": true},\n"
-               << "  \"decision\": \"direct_gate_passed_whole_ab_required\"\n}\n";
+               << "  \"decision\": \"production_direct_regression_passed\"\n}\n";
         std::ofstream output(output_path, std::ios::binary | std::ios::out);
         if (!output) fail("cannot open paired GDN qualification report");
         output << report.str();

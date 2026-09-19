@@ -65,6 +65,11 @@ struct Variant {
         [[nodiscard]] bool gdn_q4_pair_t1(
             const Tensor& input, const Weight& weight0, const Weight& weight1,
             Tensor& output0, Tensor& output1, hipStream_t stream);
+        [[nodiscard]] static constexpr bool gdn_q4_pair_t1_selected(
+            std::uint32_t tokens, QType weight0, QType weight1) noexcept {
+            return tokens == 1U && weight0 == QType::Q4G64_F16S &&
+                   weight1 == QType::Q4G64_F16S;
+        }
         [[nodiscard]] static constexpr bool fused_mlp_down_selected(
             QType gate_up, QType down, std::uint32_t tokens,
             std::int32_t text_layer) noexcept {

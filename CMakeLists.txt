@@ -100,21 +100,6 @@ endif()
 add_compile_definitions(
   NINFER_R9700_DFLASH_DOWN_SPLITK_FACTOR=${NINFER_R9700_DFLASH_DOWN_SPLITK_FACTOR})
 
-# Qualification-only whole-model selector for the exact ordinary-decode GDN
-# Q4 projection pair. One quantizes the shared T1/K5120 activation once and
-# dispatches the N4096 and N12288 matrices through one combined row grid.
-set(NINFER_R9700_GDN_Q4_PAIR_T1_CANDIDATE "0" CACHE STRING
-  "Enable the exact R9700 GDN paired-Q4 T1 projection candidate")
-set_property(CACHE NINFER_R9700_GDN_Q4_PAIR_T1_CANDIDATE PROPERTY STRINGS 0 1)
-if(NOT NINFER_R9700_GDN_Q4_PAIR_T1_CANDIDATE STREQUAL "0" AND
-   NOT NINFER_R9700_GDN_Q4_PAIR_T1_CANDIDATE STREQUAL "1")
-  message(FATAL_ERROR
-    "NINFER_R9700_GDN_Q4_PAIR_T1_CANDIDATE must be 0 or 1; got "
-    "'${NINFER_R9700_GDN_Q4_PAIR_T1_CANDIDATE}'")
-endif()
-add_compile_definitions(
-  NINFER_R9700_GDN_Q4_PAIR_T1_CANDIDATE=${NINFER_R9700_GDN_Q4_PAIR_T1_CANDIDATE})
-
 # Qualification-selected exact DFlash RMSNorm route. Zero retains the ordinary rows1..4 CTA
 # domain; one additionally admits only the independently qualified K5120 rows5/6 cells.
 set(NINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE "0" CACHE STRING

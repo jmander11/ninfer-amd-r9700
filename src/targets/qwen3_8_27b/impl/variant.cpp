@@ -26,13 +26,6 @@
 #include <string>
 #include <vector>
 
-#ifndef NINFER_R9700_GDN_Q4_PAIR_T1_CANDIDATE
-#define NINFER_R9700_GDN_Q4_PAIR_T1_CANDIDATE 0
-#endif
-static_assert(NINFER_R9700_GDN_Q4_PAIR_T1_CANDIDATE == 0 ||
-              NINFER_R9700_GDN_Q4_PAIR_T1_CANDIDATE == 1,
-              "NINFER_R9700_GDN_Q4_PAIR_T1_CANDIDATE must be 0 or 1");
-
 namespace ninfer::targets::qwen3_8_27b::detail {
 namespace {
 
@@ -408,14 +401,11 @@ void Variant::ExecutionState::fused_mlp_down(const Tensor& gate_up, const Weight
 bool Variant::ExecutionState::gdn_q4_pair_t1(
     const Tensor& input, const Weight& weight0, const Weight& weight1,
     Tensor& output0, Tensor& output1, hipStream_t stream) {
-    if constexpr (NINFER_R9700_GDN_Q4_PAIR_T1_CANDIDATE == 0) {
-        (void)input; (void)weight0; (void)weight1; (void)output0; (void)output1;
-        (void)stream;
-        return false;
-    }
-    if (input.ne[1] != 1 || input.ne[2] != 1 || input.ne[3] != 1 ||
-        weight0.qtype != QType::Q4G64_F16S ||
-        weight1.qtype != QType::Q4G64_F16S) {
+    if (input.ne[1] <= 0 || input.ne[2] <= 0 || input.ne[3] != 1 ||
+        input.ne[1] > std::numeric_limits<std::int32_t>::max() / input.ne[2] ||
+        !gdn_q4_pair_t1_selected(
+            static_cast<std::uint32_t>(input.ne[1] * input.ne[2]),
+            weight0.qtype, weight1.qtype)) {
         return false;
     }
     constexpr std::int32_t kColumns = TextConfig::hidden;

@@ -272,7 +272,7 @@ struct A8Q4G64CandidateArgs {
     bool dflash_target_verify_down = false;
 };
 
-// Qualification-only complete GDN T1 projection pair. The represented BF16
+// Exact production GDN T1 projection pair. The represented BF16
 // [1,5120] input is quantized once into caller-owned storage, then one combined
 // row grid evaluates the N4096 query/key and N12288 value/z matrices. Both
 // persistent matrices retain the production Q4N16K16/G64 layout.
@@ -399,7 +399,7 @@ struct A8Q4G64KernelResources {
     const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept;
 [[nodiscard]] hipError_t a8q4g64_gdn_pair_t1(
     const A8Q4G64GdnPairArgs& args, hipStream_t stream) noexcept;
-[[nodiscard]] hipError_t a8q4g64_gdn_pair_t1_qualification_resources(
+[[nodiscard]] hipError_t a8q4g64_gdn_pair_t1_resources(
     A8Q4G64GdnPairResources* resources) noexcept;
 // Qualification-only block-size sweep of the unchanged one-row/thread T=1 kernel.
 [[nodiscard]] hipError_t a8q4g64_linear_decode_dot8_block_t1_qualification(
