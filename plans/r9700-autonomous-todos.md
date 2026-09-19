@@ -131,9 +131,11 @@ after-parity router).
 The bounded DFlash verify-down split-K task is closed default-off: S=8 and S=2 both failed exact
 public-token parity, and S=4 has no mechanism for restoring the incumbent serial-FMA semantics.
 Do not rerun either sealed package or infer an S=4 command. The reviewed selector-free
-BASE-DECODE-BW measurement completed. The independently re-reviewed BF16 GDN projection/control
-direct qualifier below is the only prepared GPU action. Every other remaining unchecked task
-depends directly or transitively on the external `DENSE-FLOOR-DECISION`.
+BASE-DECODE-BW measurement completed. The BF16 GDN projection/control direct qualifier also
+completed and admitted its fused route; its production implementation and separate whole-model
+A/B are now CPU-only work. The independently reviewed all-Q4 T1 attention paired-projection direct
+qualifier below is the only prepared GPU action. Every other remaining unchecked task depends
+directly or transitively on the external `DENSE-FLOOR-DECISION`.
 
 Every future physical experiment must be launched through a reviewed package-local `commands.sh`,
 not an ad-hoc reconstructed command. A package is runnable only when its plan contains no
@@ -247,19 +249,35 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   unchanged C2..4 fallback repeated exact tokens, with median aggregate rates `32.1617`, `43.4327`,
   and `50.5869 tok/s`. This closes promotion of the T1 GDN Q4 pair but not BASE-DECODE-BW.
 
-  The next reviewed direct gate is recipe-independent T1 BF16 GDN projected control: fuse the two
+  The recipe-independent T1 BF16 GDN projected-control direct gate fused the two
   N48/K5120 projections and control formula while preserving each BF16 projection cast boundary.
   Its corrected logical saving is 10,432 bytes/layer; the retained service ceiling is about
-  `0.701 ms/token`. The package compares serial, combined-grid, and fused routes with an independent
+  `0.701 ms/token`. The package compared serial, combined-grid, and fused routes with an independent
   FP64 oracle, exact represented-boundary parity, balanced cold timing, and exact gfx1201 static
   evidence. Its first wrapper invocation did not reach the GPU because the linked executable could
   not locate `libamdhip64.so.7`; no report was created. The corrected wrapper adds the ROCm runtime
   search path, and independent re-review proved that all ROCm dependencies resolve. A second
   pre-kernel attempt exposed an invalid assumption that only one HIP device is visible; the
   corrected qualifier explicitly selects device 0, verifies its exact R9700/gfx1201 identity, and
-  derives the checked power node from its HIP PCI identity. No report has been created; independent
-  re-review passed. Run exactly
-  `bash profiles/bench/r9700-bf16-gdn-control-t1-20260919/commands.sh --measure`.
+  derives the checked power node from its HIP PCI identity. The final measurement passed: serial,
+  combined-grid, and fused medians were `0.0337600`, `0.0240800`, and `0.0209200 ms/layer`;
+  every one of the three disjoint allocation copies favored fused. The observed fused saving is
+  `0.0128400 ms/layer`, or `0.6163200 ms/token` across 48 layers, exceeding the `0.2 ms/token`
+  admission threshold by 3.08x. The represented BF16 projection/control outputs are bit-exact to
+  serial; independent FP64 maxima are `0.031108081` for projection and `1.19e-7` for control.
+  Static evidence reports wave32, no scratch/spills, and fused resources of 11 VGPR, 25 SGPR, and
+  2 KiB LDS. Evidence:
+  `profiles/bench/r9700-bf16-gdn-control-t1-20260919/report.json`. This admits a production-symbol
+  no-a/b candidate and then a separate matched whole-model C1 A/B; it does not itself authorize
+  promotion. Preserve the explicit BF16 rounding boundary in registers, exact T1-only routing,
+  and the existing T2..4 fallback/workspace.
+
+  The next reviewed direct gate is the all-Q4 T1 attention paired projection. It compares the two
+  complete N7168/K5120 Q4 linears plus four incumbent extracts against one shared A8G64
+  quantization and one combined N14336 native-IU4 kernel. Independent review passed after correcting
+  the whole-token bound to the 16 full-attention layers and giving the query-key and gate-value
+  matrices distinct represented weights. Run exactly
+  `bash profiles/bench/r9700-attention-q4-pair-t1-direct-20260919/commands.sh --measure`.
 
 ## Active now: DFlash semantic and schedule work
 
