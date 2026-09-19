@@ -7,7 +7,7 @@
     "unchecked_count": 33,
     "removed_meta_item": "Perform a requirements-preserving conciseness pass on this live ledger."
   },
-  "current_unchecked_count": 30,
+  "current_unchecked_count": 31,
   "completed_ids_after_rewrite": [
     "DFLASH-SCHEDULE",
     "DFLASH-K5W6-VERIFY",
@@ -17,6 +17,7 @@
     "DFLASH-TARGET-P129"
   ],
   "unchecked_ids": [
+    "BASE-DECODE-BW",
     "DFLASH-RECIPE",
     "DFLASH-QUALITY",
     "DFLASH-WHOLE",
@@ -57,6 +58,7 @@
     "XATT-CUTOVER-CONDITIONAL"
   ],
   "dependencies": {
+    "BASE-DECODE-BW": [],
     "DFLASH-RECIPE": ["TERMINAL-SELECTION", "CHUNK-SELECT"],
     "DFLASH-QUALITY": ["DFLASH-RECIPE", "DFLASH-TEXT-P129"],
     "DFLASH-WHOLE": ["DFLASH-QUALITY", "DFLASH-SCHEDULE", "DFLASH-VERIFY-DOWN-SPLITK"],
@@ -99,6 +101,9 @@
     "1904.339303",
     "2,000 tok/s",
     "27.05729956",
+    "367.956 GB/s",
+    "57.9%",
+    "635.9 GB/s",
     "3.18103603125 ms",
     "51.438603 ms",
     "57.6915 ms",

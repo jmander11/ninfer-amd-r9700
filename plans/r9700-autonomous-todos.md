@@ -46,8 +46,9 @@ in `docs/performance.md` and `docs/maintainer/r9700-overhaul-plan.md`, not here.
   source mechanism satisfies the recorded M128N256 return bound: at most `3.18103603125 ms` per
   matrix and at least `51.438603 ms` whole-P2048 saving with independent numerical/static evidence.
   Crossing 2,000 permits the dependent campaign; it does not itself prove an optimization ceiling.
-- Ordinary non-speculative decode is closed at the bounded selector-free
-  `27.05729956 tok/s` result. This is not proof of bandwidth saturation or stall freedom.
+- Ordinary non-speculative decode retains the selector-free `27.05729956 tok/s` result, but the
+  user's 2026-09-19 direction reopens only its memory-throughput optimization as
+  `BASE-DECODE-BW`. This baseline is not proof of bandwidth saturation or stall freedom.
 - DFlash2 is the required speculative direction. Test production choices only at K4/W5 and K5/W6;
   do not resume the K1..11 shortlist or optimize MTP. Preserve both selector codebooks and private
   DFlash state in BF16. Exact public greedy-token parity is mandatory and cannot be waived by logit
@@ -130,7 +131,8 @@ after-parity router).
 The bounded DFlash verify-down split-K task is closed default-off: S=8 and S=2 both failed exact
 public-token parity, and S=4 has no mechanism for restoring the incumbent serial-FMA semantics.
 Do not rerun either sealed package or infer an S=4 command. No GPU action is currently prepared;
-every remaining unchecked task depends directly or transitively on the external
+`BASE-DECODE-BW` must first produce and pass review of a fail-closed package, while every other
+remaining unchecked task depends directly or transitively on the external
 `DENSE-FLOOR-DECISION`.
 
 Every future physical experiment must be launched through a reviewed package-local `commands.sh`,
@@ -174,6 +176,32 @@ end-to-end decision.
 Recipe/acceptance, C1..4 admission, selected hardware profiling, and held prefill work are owned by
 the corresponding unchecked tasks below. Package owners may prepare their fail-closed CPU artifacts
 in parallel, but no prepared package bypasses its dependency or authorizes GPU execution.
+
+## Active now: selector-free base decode bandwidth
+
+- [ ] `BASE-DECODE-BW` Usefully maximize selector-free base-decode memory throughput on the fixed
+  R9700 at `C=1..4`; do not optimize or schedule a `C>4` cell. The retained production baseline is
+  `27.05729956 tok/s` at C1/P8192+G256 with Device Graph. Its decoded packed-weight payload divided
+  by wall time is `367.956 GB/s`, or `57.9%` of the same-session `635.9 GB/s` stream ceiling. Treat
+  this only as a defensible *useful payload rate*: it omits other reads/writes and cache effects and
+  is not a physical HBM-bandwidth measurement. Existing attribution makes the T1 native-dot8 Q4
+  family the material owner; begin at Layer 0 with its real decode shapes and a wave-cooperative
+  challenger whose bound can materially improve whole decode by raising useful memory-level
+  parallelism while preserving the stored N16/K16 contract and serial semantic accumulation order.
+  Do not rerun the rejected simple non-temporal dot8, grouped-PV split512, or split-K candidates
+  unless a materially different source mechanism and end-to-end bound first justify one.
+
+  Before GPU execution, prepare the normal create-only package and obtain independent `SHIP` review.
+  Qualification must include the independent mathematical oracle at real shapes and the applicable
+  exact comparison, gfx1201 ISA/resource/static routing evidence, cold and repeated direct-shape
+  candidate/control timing, then a production Device-Graph whole C1 A/B at P8192+G256 with exact
+  public-token parity. Extend whole admission through C2..4 only after C1 wins materially. Promote
+  only a qualified, physically faster candidate that improves selector-free whole decode; otherwise
+  retain it default-off and close it with the measured bound. A physical bandwidth-saturation or
+  stall-freedom claim additionally requires reliable hardware counters; if gfx1201 counters remain
+  unavailable, report useful payload rate and whole speed only, with profiled timing used solely for
+  attribution. Keep `next_command` null and the statement `No GPU action is currently prepared`
+  until the package has no `UNBOUND`, passes non-mutating preflight/validation, and is reviewed.
 
 ## Active now: DFlash semantic and schedule work
 
