@@ -29,7 +29,7 @@ def main() -> int:
         fail(f"preflight must run from {ROOT}")
     plan = json.loads(PLAN.read_text(encoding="utf-8"))
     if (plan.get("schema") != "ninfer.r9700.attention-projection-t1-production-plan.v1" or
-            plan.get("status") != "prepared_awaiting_independent_review" or
+            plan.get("status") != "reviewed_ready" or
             plan.get("production_routing_authorized") is not False):
         fail("plan disposition differs")
     if plan.get("exact_invocation") != {
