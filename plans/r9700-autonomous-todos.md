@@ -137,13 +137,13 @@ later candidates is promoted merely by its design result. The BF16 GDN productio
 whole C1 gate are now qualified, with promotion deliberately deferred until the attention campaigns
 finish. The deterministic queue after reset is:
 
-1. direct-qualify T1 attention with `profiles/bench/r9700-attention-projection-t1-production-qualification-20260919`, then prepare/review/run `profiles/bench/r9700-attention-q4-pair-t1-whole-ab-20260919`;
+1. prepare/review/run the T1 attention whole gate from `profiles/bench/r9700-attention-q4-pair-t1-whole-ab-20260919` after its completed direct production qualification;
 2. direct-qualify C2..4 with `profiles/bench/r9700-paired-projection-c2c4-production-qualification-20260919`, then prepare/review/run `profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919`;
 3. resolve the BF16 GDN and both paired-route promotion decisions, then run `profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919`.
 
 Do not promote or remove any candidate selector anywhere between queue items 1 and 2 because doing
 so invalidates downstream cache and source authorities. The exact next action is
-`bash profiles/bench/r9700-attention-projection-t1-production-qualification-20260919/commands.sh --measure`.
+`bash profiles/bench/r9700-attention-q4-pair-t1-whole-ab-20260919/commands.sh --prepare`.
 Every other remaining unchecked task depends
 directly or transitively on this queue or the external `DENSE-FLOOR-DECISION`.
 
@@ -340,7 +340,15 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   whole package is `profiles/bench/r9700-attention-q4-pair-t1-whole-ab-20260919`. Independent review
   reported `SHIP` for the direct package's create-only hardening and the whole package's complete
   cache, source, and exact-invocation authorities. The whole package must not be prepared until the
-  direct qualification receipt exists.
+  direct qualification receipt exists. That direct production-symbol qualification now passes:
+  complete outputs are bit-exact to serial plus four extracts, the independent represented-weight
+  FP64 oracle is zero BF16 steps, and all guards pass. Static evidence is native mixed-IU4 dot8,
+  wave32, 20 VGPR, 24 SGPR, and no LDS/scratch/spills. Allocation ratios are `0.613515`, `0.842832`,
+  and `0.648888`; the global median changes `0.126980→0.092000 ms/layer` (1.380217x), bounding
+  `0.559680 ms/token` or `1.512709%` of whole decode. Evidence:
+  `profiles/bench/r9700-attention-projection-t1-production-qualification-20260919/qualification.json`
+  (SHA-256 `8bfebf95b5b4a6e47db7e5d41dff686e5b145e41b75850ef669de80d06e95d74`).
+  This authorizes only preparing the dependent whole gate, not promotion.
 
   The independently reviewed C2..4 paired-WMMA direct gate covers both the GDN N4096+N12288 pair
   (48 calls/round) and attention N7168+N7168 pair (16 calls/round). It compares two complete
