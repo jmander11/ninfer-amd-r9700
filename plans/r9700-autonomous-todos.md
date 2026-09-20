@@ -137,15 +137,15 @@ later candidates is promoted merely by its design result. The BF16 GDN productio
 direct-qualified, but its first whole gate retained an environmental OOM attempt, and device 0 now
 requires a maintainer GPU reset before more physical work. The deterministic queue after reset is:
 
-1. run the complete six-role BF16 GDN whole gate from `profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-retry-20260919`;
+1. prepare, review, and run a complete six-role BF16 GDN whole gate from `profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-retry2-20260920`, binding the sealed retry failure;
 2. direct-qualify T1 attention with `profiles/bench/r9700-attention-projection-t1-production-qualification-20260919`, then prepare/review/run `profiles/bench/r9700-attention-q4-pair-t1-whole-ab-20260919`;
 3. direct-qualify C2..4 with `profiles/bench/r9700-paired-projection-c2c4-production-qualification-20260919`, then prepare/review/run `profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919`;
 4. resolve the BF16 GDN and both paired-route promotion decisions, then run `profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919`.
 
 Do not promote or remove any candidate selector anywhere between queue items 1 through 3 because
-doing so invalidates downstream cache and source authorities. The maintainer reset lowered device-0
-VRAM below both 1 GiB and 5%; the exact next action is
-`bash profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-retry-20260919/commands.sh --measure`.
+doing so invalidates downstream cache and source authorities. No GPU action is currently runnable:
+the sealed BF16 retry exposed an immediate post-process VRAM-reclamation race, and its fresh retry2
+package requires independent review before execution.
 Every other remaining unchecked task depends
 directly or transitively on this queue or the external `DENSE-FLOOR-DECISION`.
 
@@ -294,16 +294,22 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   `profiles/bench/r9700-bf16-gdn-control-t1-production-qualification-20260919/report.json`. Run the
   separately reviewed matched whole gate began but stopped at run 3/6 before inference with
   `hipMalloc arena: hipErrorOutOfMemory`. Runs 1 control and 2 candidate completed; run 3 candidate
-  retained the failure. After process exit, device 0 remained at 83% VRAM with no KFD PID, proving
-  stale ROCm allocation rather than candidate execution failure. Preserve this package/results;
+  retained the failure. After process exit, device 0 remained at 83% VRAM with no KFD PID; the
+  maintainer later identified a stopped llama.cpp Vulkan container as the owner. Preserve this package/results;
   never rerun or append it. Further GPU work requires the maintainer to run
   `sudo /opt/rocm/bin/rocm-smi --gpureset -d 0` and a separate reviewed create-only retry package
   must rerun the complete balanced six-role campaign from the start. That independently reviewed
   package is `profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-retry-20260919`. It rebinds the
   retained failure and all original authorities, reruns all six roles, and refuses plan/results or
   any role unless PCI-derived device-0 VRAM is at most both 1 GiB and 5% with power `auto`. Its
-  current preflight correctly fails at 28,413,235,200/34,208,743,424 bytes. After reset and only
-  after the low-VRAM preflight passes, run the exact package invocations recorded in its plan.
+  reset preflight passed at 59,912,192/34,208,743,424 bytes, but its first control process exposed a
+  wrapper teardown race: inference exited 0 with the exact retained 257-token hash at
+  `9.258297426 s` decode (`27.65087232 tok/s`) and power `auto`, while the immediate post-exit sample
+  still saw 14,536,441,856 bytes. VRAM then settled to 59,912,192 bytes without another reset. The
+  four retained files match `results/result.sha256`; no candidate run or pair exists. Seal this
+  retry package and never append or rerun it. A fresh retry2 package must bind this failure, rerun
+  all six roles, and preserve the same thresholds while polling post-exit VRAM for bounded
+  asynchronous reclamation before deciding that the device is dirty.
 
   The all-Q4 T1 attention paired-projection direct gate compared the two
   complete N7168/K5120 Q4 linears plus four incumbent extracts against one shared A8G64

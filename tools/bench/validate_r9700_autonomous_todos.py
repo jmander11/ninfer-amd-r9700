@@ -83,10 +83,10 @@ def main() -> None:
             "No GPU action is currently runnable" in ledger,
             "missing explicit no-runnable-GPU-action state",
         )
-        reset_policy = contract["gpu_reset_execution_policy"]
+        no_gpu_action_policy = contract["no_gpu_action_policy"]
         require(
-            ledger.replace("\n", " ").count(reset_policy) == 1,
-            "GPU-reset execution policy or threshold changed",
+            ledger.replace("\n", " ").count(no_gpu_action_policy) == 1,
+            "no-GPU-action policy changed",
         )
     else:
         require(ledger.count(next_command) == 1, "next command must occur exactly once")
