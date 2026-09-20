@@ -143,7 +143,7 @@ finish. The deterministic queue after reset is:
 
 Do not promote or remove any candidate selector anywhere between queue items 1 and 2 because doing
 so invalidates downstream cache and source authorities. The exact next action is
-`bash profiles/bench/r9700-attention-q4-pair-t1-whole-ab-20260919/commands.sh --prepare`.
+`bash profiles/bench/r9700-attention-q4-pair-t1-whole-ab-20260919/commands.sh --measure`.
 Every other remaining unchecked task depends
 directly or transitively on this queue or the external `DENSE-FLOOR-DECISION`.
 
@@ -349,6 +349,9 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   `profiles/bench/r9700-attention-projection-t1-production-qualification-20260919/qualification.json`
   (SHA-256 `8bfebf95b5b4a6e47db7e5d41dff686e5b145e41b75850ef669de80d06e95d74`).
   This authorizes only preparing the dependent whole gate, not promotion.
+  That whole gate is now prepared and two independent reviews reported `SHIP`; its complete live
+  caches differ only at the T1 attention selector, while BF16 GDN and C2..4 paired selectors remain
+  off. Its non-GPU preflight passes and its results path is fresh.
 
   The independently reviewed C2..4 paired-WMMA direct gate covers both the GDN N4096+N12288 pair
   (48 calls/round) and attention N7168+N7168 pair (16 calls/round). It compares two complete
