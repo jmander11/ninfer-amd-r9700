@@ -143,9 +143,9 @@ requires a maintainer GPU reset before more physical work. The deterministic que
 4. resolve the BF16 GDN and both paired-route promotion decisions, then run `profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919`.
 
 Do not promote or remove any candidate selector anywhere between queue items 1 through 3 because
-doing so invalidates downstream cache and source authorities. No GPU action is currently runnable:
-the sealed BF16 retry exposed an immediate post-process VRAM-reclamation race, and its fresh retry2
-package requires independent review before execution.
+doing so invalidates downstream cache and source authorities. The fresh retry2 package passed
+independent review; the exact next action is
+`bash profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-retry2-20260920/commands.sh --measure`.
 Every other remaining unchecked task depends
 directly or transitively on this queue or the external `DENSE-FLOOR-DECISION`.
 
@@ -309,7 +309,10 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   four retained files match `results/result.sha256`; no candidate run or pair exists. Seal this
   retry package and never append or rerun it. A fresh retry2 package must bind this failure, rerun
   all six roles, and preserve the same thresholds while polling post-exit VRAM for bounded
-  asynchronous reclamation before deciding that the device is dirty.
+  asynchronous reclamation before deciding that the device is dirty. That create-only package is
+  `profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-retry2-20260920`; two independent reviews
+  reported `SHIP` after strict-deadline, telemetry-failure, power/capacity-drift, helper-binding,
+  and non-mutating-preflight checks.
 
   The all-Q4 T1 attention paired-projection direct gate compared the two
   complete N7168/K5120 Q4 linears plus four incumbent extracts against one shared A8G64
