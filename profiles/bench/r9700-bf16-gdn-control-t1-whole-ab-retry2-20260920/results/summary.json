@@ -1,0 +1,50 @@
+{
+  "schema": "ninfer.r9700.bf16-gdn-control-t1-whole-ab-retry2-summary.v1",
+  "status": "passed",
+  "production_routing_authorized": true,
+  "fresh_complete_six_role_campaign": true,
+  "measurement_limitations": "Low pre/post-run VRAM and auto power do not prove absence of external GPU activity during inference; the operator must keep competing GPU containers and applications stopped throughout this campaign.",
+  "exact_public_token_parity": true,
+  "pairs": [
+    {
+      "order": [
+        "control",
+        "candidate"
+      ],
+      "control_seconds": 9.263296576,
+      "candidate_seconds": 9.149285128,
+      "candidate_over_control": 0.9876921302190207
+    },
+    {
+      "order": [
+        "candidate",
+        "control"
+      ],
+      "control_seconds": 9.262407243,
+      "candidate_seconds": 9.142896433,
+      "candidate_over_control": 0.987097219236358
+    },
+    {
+      "order": [
+        "control",
+        "candidate"
+      ],
+      "control_seconds": 9.268089445,
+      "candidate_seconds": 9.146077044,
+      "candidate_over_control": 0.9868352154212513
+    }
+  ],
+  "paired_ratio_mean": 0.98720818829221,
+  "paired_ratio_upper_2se": 0.9877152206267168,
+  "paired_ratio_median": 0.987097219236358,
+  "control_decode_output_tok_s": [
+    27.63594989102074,
+    27.638603365606734,
+    27.621658327661944
+  ],
+  "candidate_decode_output_tok_s": [
+    27.98032812602493,
+    27.99987967445458,
+    27.99014252432313
+  ]
+}

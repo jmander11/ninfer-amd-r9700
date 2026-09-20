@@ -133,19 +133,17 @@ public-token parity, and S=4 has no mechanism for restoring the incumbent serial
 Do not rerun either sealed package or infer an S=4 command. The reviewed selector-free
 BASE-DECODE-BW measurement completed. The BF16 GDN, all-Q4 T1 attention, and all-Q4 C2..4
 paired-projection *design* qualifiers completed and admitted production candidates; none of those
-later candidates is promoted merely by its design result. The BF16 GDN production symbol is
-direct-qualified, but its first whole gate retained an environmental OOM attempt, and device 0 now
-requires a maintainer GPU reset before more physical work. The deterministic queue after reset is:
+later candidates is promoted merely by its design result. The BF16 GDN production symbol and its
+whole C1 gate are now qualified, with promotion deliberately deferred until the attention campaigns
+finish. The deterministic queue after reset is:
 
-1. prepare, review, and run a complete six-role BF16 GDN whole gate from `profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-retry2-20260920`, binding the sealed retry failure;
-2. direct-qualify T1 attention with `profiles/bench/r9700-attention-projection-t1-production-qualification-20260919`, then prepare/review/run `profiles/bench/r9700-attention-q4-pair-t1-whole-ab-20260919`;
-3. direct-qualify C2..4 with `profiles/bench/r9700-paired-projection-c2c4-production-qualification-20260919`, then prepare/review/run `profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919`;
-4. resolve the BF16 GDN and both paired-route promotion decisions, then run `profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919`.
+1. direct-qualify T1 attention with `profiles/bench/r9700-attention-projection-t1-production-qualification-20260919`, then prepare/review/run `profiles/bench/r9700-attention-q4-pair-t1-whole-ab-20260919`;
+2. direct-qualify C2..4 with `profiles/bench/r9700-paired-projection-c2c4-production-qualification-20260919`, then prepare/review/run `profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919`;
+3. resolve the BF16 GDN and both paired-route promotion decisions, then run `profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919`.
 
-Do not promote or remove any candidate selector anywhere between queue items 1 through 3 because
-doing so invalidates downstream cache and source authorities. The fresh retry2 package passed
-independent review; the exact next action is
-`bash profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-retry2-20260920/commands.sh --measure`.
+Do not promote or remove any candidate selector anywhere between queue items 1 and 2 because doing
+so invalidates downstream cache and source authorities. The exact next action is
+`bash profiles/bench/r9700-attention-projection-t1-production-qualification-20260919/commands.sh --measure`.
 Every other remaining unchecked task depends
 directly or transitively on this queue or the external `DENSE-FLOOR-DECISION`.
 
@@ -295,10 +293,9 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   separately reviewed matched whole gate began but stopped at run 3/6 before inference with
   `hipMalloc arena: hipErrorOutOfMemory`. Runs 1 control and 2 candidate completed; run 3 candidate
   retained the failure. After process exit, device 0 remained at 83% VRAM with no KFD PID; the
-  maintainer later identified a stopped llama.cpp Vulkan container as the owner. Preserve this package/results;
-  never rerun or append it. Further GPU work requires the maintainer to run
-  `sudo /opt/rocm/bin/rocm-smi --gpureset -d 0` and a separate reviewed create-only retry package
-  must rerun the complete balanced six-role campaign from the start. That independently reviewed
+  maintainer later identified a stopped llama.cpp Vulkan container as the owner. Preserve this
+  package/results; never rerun or append it. The maintainer reset device 0, and a separate reviewed
+  create-only retry package reran the complete balanced campaign from the start. That independently reviewed
   package is `profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-retry-20260919`. It rebinds the
   retained failure and all original authorities, reruns all six roles, and refuses plan/results or
   any role unless PCI-derived device-0 VRAM is at most both 1 GiB and 5% with power `auto`. Its
@@ -312,7 +309,17 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   asynchronous reclamation before deciding that the device is dirty. That create-only package is
   `profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-retry2-20260920`; two independent reviews
   reported `SHIP` after strict-deadline, telemetry-failure, power/capacity-drift, helper-binding,
-  and non-mutating-preflight checks.
+  and non-mutating-preflight checks. Its complete six-role campaign passed exact 257-token parity.
+  Candidate/control decode-time ratios were `0.9876921`, `0.9870972`, and `0.9868352`; the median
+  was `0.9870972` and mean-plus-two-standard-errors was `0.9877152`. Candidate rates were
+  `27.9803`, `27.9999`, and `27.9901 tok/s` versus control `27.6359`, `27.6386`, and
+  `27.6217 tok/s`. Every process exited 0 with power `auto`; each immediate ~14.536 GB post-exit
+  sample drained to 59,912,192 bytes in 0.10074--0.10109 seconds within the unchanged gates.
+  Evidence: `profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-retry2-20260920/results`; the
+  SHA-256 of `result.sha256` is
+  `e6fb6b0cf14aa8a28273e5a32b35f76fba7700dd31a971a35a9d4a016ad69569`. This admits production
+  promotion, but do not promote it until both attention campaigns finish because their control
+  authorities bind this selector off.
 
   The all-Q4 T1 attention paired-projection direct gate compared the two
   complete N7168/K5120 Q4 linears plus four incumbent extracts against one shared A8G64
