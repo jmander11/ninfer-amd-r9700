@@ -90,7 +90,7 @@
     "E2E-PROFILE": ["FINAL-ARTIFACT", "SELECTED-PROFILE"],
     "FINAL-SUITE": ["FINAL-ARTIFACT", "E2E-PROFILE", "BF16-PARITY", "SELECTED-PARITY-VISION", "XATT-CUTOVER-CONDITIONAL"]
   },
-  "next_command": null,
+  "next_command": "bash profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-retry-20260919/commands.sh --measure",
   "gpu_reset_execution_policy": "No GPU action is currently runnable: execution policy prohibits every GPU package invocation until a maintainer reset lowers device-0 VRAM to at most both 1 GiB and 5%; individual downstream packages need not implement that global queue gate.",
   "post_reset_queue": [
     "run the complete six-role BF16 GDN whole gate from `profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-retry-20260919`;",

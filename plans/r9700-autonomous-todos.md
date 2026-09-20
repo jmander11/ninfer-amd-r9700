@@ -143,9 +143,9 @@ requires a maintainer GPU reset before more physical work. The deterministic que
 4. resolve the BF16 GDN and both paired-route promotion decisions, then run `profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919`.
 
 Do not promote or remove any candidate selector anywhere between queue items 1 through 3 because
-doing so invalidates downstream cache and source authorities. No GPU action is currently runnable: execution
-policy prohibits every GPU package invocation until a maintainer reset lowers device-0 VRAM to at
-most both 1 GiB and 5%; individual downstream packages need not implement that global queue gate.
+doing so invalidates downstream cache and source authorities. The maintainer reset lowered device-0
+VRAM below both 1 GiB and 5%; the exact next action is
+`bash profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-retry-20260919/commands.sh --measure`.
 Every other remaining unchecked task depends
 directly or transitively on this queue or the external `DENSE-FLOOR-DECISION`.
 

@@ -83,13 +83,15 @@ def main() -> None:
             "No GPU action is currently runnable" in ledger,
             "missing explicit no-runnable-GPU-action state",
         )
+        reset_policy = contract["gpu_reset_execution_policy"]
+        require(
+            ledger.replace("\n", " ").count(reset_policy) == 1,
+            "GPU-reset execution policy or threshold changed",
+        )
     else:
         require(ledger.count(next_command) == 1, "next command must occur exactly once")
-    reset_policy = contract["gpu_reset_execution_policy"]
-    require(
-        ledger.replace("\n", " ").count(reset_policy) == 1,
-        "GPU-reset execution policy or threshold changed",
-    )
+        require("No GPU action is currently runnable" not in ledger,
+                "stale no-runnable-GPU-action state")
     queue_marker = "The deterministic queue after reset is:\n\n"
     require(ledger.count(queue_marker) == 1, "post-reset queue marker differs")
     queue_tail = ledger.split(queue_marker, 1)[1]
