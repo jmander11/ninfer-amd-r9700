@@ -1,0 +1,2 @@
+[ninfer_bench] loading /ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer (max_context=262144, concurrency=4, kv_format=fp8-k-int4-v)
+Hip error: 'out of memory'(2) at /__w/rockrel/rockrel/rocm-libraries/projects/hipblaslt/library/src/amd_detail/hipblaslt.cpp:164

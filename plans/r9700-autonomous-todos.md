@@ -1003,8 +1003,10 @@ unresolved tradeoff or the product contract must change.
   W5/W6 and K4/K5 row extents derive from C1..4 call sites; feature/QKV also cover chunk2048.
   The selector oracle now retains full FP64 projection/Markov arithmetic rather than copying
   private BF16 staging. All three targets compile; six CPU tests and independent review SHIP.
-  Root will run this bounded required qualification after the current capacity stage; no physical
-  numerical result or companion admission is implied by preparation.
+  Physical qualification now PASS: all66 cases completed with empty stderr; Linear maximum
+  normalized error0.148498 (limit1), convolution maximum relativeL2 error0.00257126.
+  Independent result audit SHIP. Retain `physical/result.json`; never rerun this completed package.
+  This admits represented-W8 public Ops only, not real companion binding, recipe quality or speed.
   Python 3.11 CPU conversion dependencies are available without installation via
   `PYTHONPATH=/ssdpool2nvme/local_llm/ninfer/out/numerical-reference-venv/lib/python3.11/site-packages`
   with `/home/battlefront/.local/bin/python3.11` (explicit CPU only; torch is CUDA, not ROCm).
@@ -1107,6 +1109,15 @@ prefill review, preserving their remaining data dependencies.
   Root review SHIP after
   repairing tuple/list capacity identities; 25 focused CPU checks pass. No physical result is
   implied. Old post-chunk/terminal 20260905 launchers are historical; do not republish chunk selection.
+  STOPPED: all eight all-Q4/mixed profiles completed C1..4 capacity, but four-role C2+ fails
+  unstructured hipBLASLt OOM. C1 planned slack5,244,103,936 bytes becomes1,314,914,304 after startup.
+  All144 FP8 projections create separate library handles after capacity planning; this is an
+  ownership/accounting defect, not a valid capacity exclusion. `capacity/closure.json` seals the
+  original package, interrupted during the last hybrid profile's C2. Do not resume it or run its
+  whole/select stages. Repair one explicit shared target-owned FP8 library context created before
+  the authoritative free-memory snapshot, qualify actual allocation/graph behavior, then use a
+  fresh recovery package. Reuse the eight valid capacity matrices and numerical/chunk evidence
+  when the resource-only change preserves arithmetic; bind fresh hybrid benchmark/planner bytes.
 
 - [ ] `ALLQ4-PAIRS` [depends: CHUNK-SELECT] Complete current dense and XAttention G16/G32 capacity
   and whole pairs and admit all four all-Q4 candidates to the same schema-v7 Pareto decision.

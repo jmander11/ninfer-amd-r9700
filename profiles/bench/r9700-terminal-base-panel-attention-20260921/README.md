@@ -1,5 +1,11 @@
 # Current terminal-base continuation
 
+STOPPED: capacity found unaccounted FP8 library allocations and was interrupted.
+See `capacity/closure.json`. Preserve this namespace; do not run its capacity,
+whole, controls or select commands. A fresh resource-accounting recovery package
+will reuse the eight completed non-hybrid capacity matrices. The commands below
+describe the retained package, not the current next launch.
+
 Prepared commands, not measured capacity, whole results, or terminal admission.
 Run only after root review and publication of the six current quality authorities.
 No DFlash companion, artifact conversion, final materialization, or XAttention

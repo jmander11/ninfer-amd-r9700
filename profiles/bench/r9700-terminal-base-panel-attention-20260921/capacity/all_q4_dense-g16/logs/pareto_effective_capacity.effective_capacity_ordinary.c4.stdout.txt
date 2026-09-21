@@ -1,0 +1,1 @@
+wrote /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-terminal-base-panel-attention-20260921/capacity/all_q4_dense-g16/json/pareto_effective_capacity/c4/effective_capacity_ordinary.json

@@ -1,0 +1,5 @@
+{
+  "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/prefill-chunk-selection-panel-attention-20260921.json": "3e762ec81d5e740946b61132ea040404e13100a6d2b6449bd2e38ce1b61fabe7",
+  "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-chunk-selection-panel-attention-20260921/inputs.json": "8637ec11a36b331fd9c10c6f46f988c5dbc7010252e1f615a335cb950b307bf9",
+  "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/ppl/r9700-terminal-quality-receipt-bound-n16k16-20260921/quality-authorities-receipt-bound-n16k16.json": "adc839c5c30ae95b2933eeb37f7df3808baf0ce7fe8594d79d3b3a7c6c1d4c42"
+}

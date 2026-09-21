@@ -1,0 +1,6 @@
+[1/4] run pareto_effective_capacity/effective_capacity_ordinary C=1
+[2/4] run pareto_effective_capacity/effective_capacity_ordinary C=2
+[3/4] run pareto_effective_capacity/effective_capacity_ordinary C=3
+[4/4] run pareto_effective_capacity/effective_capacity_ordinary C=4
+completed 4 points across 1 cases
+summary: /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-terminal-base-panel-attention-20260921/capacity/all_q4_xattention-g16/summary.csv

@@ -1,0 +1,80 @@
+{
+  "artifact_type": "ninfer_r9700_dflash_companion_op_qualification",
+  "schema_version": 1,
+  "status": "passed_public_op_qualification",
+  "production_selected": false,
+  "inputs": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-companion-ops-20260921/physical/inputs.json",
+    "sha256": "0098bd2c93fab5a4eb0dbafaaf61db2345b5c6a740f32be9f12a65496c53086c"
+  },
+  "results": [
+    {
+      "name": "linear",
+      "qualified_cases": 42
+    },
+    {
+      "name": "conv-w5-c1",
+      "qualified_cases": 1
+    },
+    {
+      "name": "selector-k4-c1",
+      "qualified_cases": 2
+    },
+    {
+      "name": "conv-w5-c2",
+      "qualified_cases": 1
+    },
+    {
+      "name": "selector-k4-c2",
+      "qualified_cases": 2
+    },
+    {
+      "name": "conv-w5-c3",
+      "qualified_cases": 1
+    },
+    {
+      "name": "selector-k4-c3",
+      "qualified_cases": 2
+    },
+    {
+      "name": "conv-w5-c4",
+      "qualified_cases": 1
+    },
+    {
+      "name": "selector-k4-c4",
+      "qualified_cases": 2
+    },
+    {
+      "name": "conv-w6-c1",
+      "qualified_cases": 1
+    },
+    {
+      "name": "selector-k5-c1",
+      "qualified_cases": 2
+    },
+    {
+      "name": "conv-w6-c2",
+      "qualified_cases": 1
+    },
+    {
+      "name": "selector-k5-c2",
+      "qualified_cases": 2
+    },
+    {
+      "name": "conv-w6-c3",
+      "qualified_cases": 1
+    },
+    {
+      "name": "selector-k5-c3",
+      "qualified_cases": 2
+    },
+    {
+      "name": "conv-w6-c4",
+      "qualified_cases": 1
+    },
+    {
+      "name": "selector-k5-c4",
+      "qualified_cases": 2
+    }
+  ]
+}

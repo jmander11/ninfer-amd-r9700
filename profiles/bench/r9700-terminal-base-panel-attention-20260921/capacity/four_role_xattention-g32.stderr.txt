@@ -1,0 +1,26 @@
+  failed with rc=1; see /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-terminal-base-panel-attention-20260921/capacity/four_role_xattention-g32/logs/pareto_effective_capacity.effective_capacity_ordinary.c2.stderr.txt
+Traceback (most recent call last):
+  File "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/bench/run_ninfer_bench_matrix.py", line 4065, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/bench/run_ninfer_bench_matrix.py", line 3822, in main
+    rc = run_command(
+         ^^^^^^^^^^^^
+  File "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/bench/run_ninfer_bench_matrix.py", line 3117, in run_command
+    process = subprocess.run(
+              ^^^^^^^^^^^^^^^
+  File "/ssdpool2nvme/local_llm/ninfer-sandbox/out/python/cpython-3.11.16-linux-x86_64-gnu/lib/python3.11/subprocess.py", line 550, in run
+    stdout, stderr = process.communicate(input, timeout=timeout)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/ssdpool2nvme/local_llm/ninfer-sandbox/out/python/cpython-3.11.16-linux-x86_64-gnu/lib/python3.11/subprocess.py", line 1201, in communicate
+    self.wait()
+  File "/ssdpool2nvme/local_llm/ninfer-sandbox/out/python/cpython-3.11.16-linux-x86_64-gnu/lib/python3.11/subprocess.py", line 1264, in wait
+    return self._wait(timeout=timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/ssdpool2nvme/local_llm/ninfer-sandbox/out/python/cpython-3.11.16-linux-x86_64-gnu/lib/python3.11/subprocess.py", line 2053, in _wait
+    (pid, sts) = self._try_wait(0)
+                 ^^^^^^^^^^^^^^^^^
+  File "/ssdpool2nvme/local_llm/ninfer-sandbox/out/python/cpython-3.11.16-linux-x86_64-gnu/lib/python3.11/subprocess.py", line 2011, in _try_wait
+    (pid, sts) = os.waitpid(self.pid, wait_flags)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+KeyboardInterrupt

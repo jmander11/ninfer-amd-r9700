@@ -1,0 +1,1 @@
+dflash-companion-conv: PASS W=5 C=2 graph_replays=2 full_FP64_projection_and_conv_oracle max_abs=1.64211e-05 relative_l2=0.00256993 workspace_bytes=80132
