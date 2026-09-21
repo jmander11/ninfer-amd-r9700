@@ -157,7 +157,21 @@ def reference(selection, python):
     validate_checkpoint_files(CHECKPOINT)
     authority, repeat = reference_paths(chunk)
     first, second = authority.parent, PACKAGE / f"bf16-chunk{chunk}-b"
-    absent([first, second, repeat])
+    probe = PACKAGE / f"bf16-chunk{chunk}-gdn-full-span.json"
+    absent([first, second, repeat, probe])
+    unchanged(selection)
+    subprocess.run([str(python), str(SCORER.with_name("gdn_full_span_probe.py")),
+                    "--device", "0", "--out-json", str(probe)], check=True)
+    report = json.loads(probe.read_text(encoding="utf-8"))
+    if (report.get("all_pass") is not True
+            or report.get("geometry", {}).get("row_extents") != [4095, 4096]):
+        raise ValueError(f"full-span GDN numerical qualification failed: {probe}")
+    execution = report.get("provenance", {}).get("execution", {})
+    recorded_python = execution.get("python_executable")
+    if (not isinstance(recorded_python, str)
+            or Path(recorded_python).resolve() != python.resolve()
+            or execution.get("python_executable_sha256") != run.file_sha256(python)):
+        raise ValueError(f"full-span GDN interpreter provenance differs: {probe}")
     for output in (first, second):
         unchanged(selection)
         subprocess.run(common(chunk, python) + ["--profiles", "bf16-reference",

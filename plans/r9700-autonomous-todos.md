@@ -1069,7 +1069,11 @@ prefill review, preserving their remaining data dependencies.
   `python311-rocm-wheel-plan.md` records the conditional isolated CP311 ROCm setup and mandatory
   full-span GDN oracle command with explicit JSON `all_pass` gating before fresh references.
   Interpreter-prefixed repeat comparison is repaired and covered by 61 focused CPU tests;
-  no new reference environment or GPU reference result is implied. Preserve all candidate failures
+  the isolated `/ssdpool2nvme/local_llm/.venv-ninfer-r9700-py311/bin/python` now passes dependency
+  and CPU import/gfx1201 checks (ROCm torch2.9.1, Triton3.5.1). The reviewed reference stage now
+  automatically runs and gates the same-interpreter full-span GDN oracle before A/B scoring;
+  eight package CPU tests pass. Fresh chunk2048 `commands.sh reference --reference-python`
+  using that interpreter is active; no GPU reference result is claimed yet. Preserve all candidate failures
   for diagnosis. The 20260905 recovery script is historical; its dense-Q4 history does not replace
   this current-build campaign. No numerical result is claimed by preparing the package.
 

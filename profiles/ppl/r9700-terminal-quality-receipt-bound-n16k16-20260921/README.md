@@ -28,20 +28,31 @@ before retrying. No in-place resume or automatic cleanup is performed.
 
 At chunk 4096, `reference` validates the retained deterministic 20260904 BF16
 campaign and its fresh-process repeat comparison, including the reused cells and
-sidecars. It launches no reference execution. Other selected chunks require two
+sidecars. It launches no reference execution. Other selected chunks first run the
+full-span GDN oracle probe under the explicit reference interpreter. The stage
+requires `all_pass is True`, row extents `[4095,4096]`, and matching interpreter
+path/hash provenance before scoring. Its create-only
+`bf16-chunk{selected_chunk}-gdn-full-span.json` remains preserved even on failure;
+an existing probe blocks another attempt. Do not run a duplicate manual probe.
+After this gate, the stage requires two
 fresh deterministic BF16 campaigns followed by `compare_bf16_repeats.py`, before
 candidate quality can execute. For those chunks, supply an existing suitable
 interpreter explicitly to the reference stage:
 
 ```sh
-bash profiles/ppl/r9700-terminal-quality-receipt-bound-n16k16-20260921/commands.sh reference --reference-python /path/to/python3.11
+env -u PYTHONPATH LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/core-10.0/lib \
+  bash profiles/ppl/r9700-terminal-quality-receipt-bound-n16k16-20260921/commands.sh reference \
+  --reference-python /ssdpool2nvme/local_llm/.venv-ninfer-r9700-py311/bin/python
 ```
 
 The selected CPU interpreter `/home/battlefront/.local/bin/python3.11` has no torch
 and is sufficient for retained-reference reuse, candidate orchestration, and
-publication. The available `/ssdpool2nvme/local_llm/.venv-ninfer-r9700/bin/python`
-is Python 3.12 with ROCm torch 2.9.1 (requiring its library environment); it does not
-satisfy the requested Python 3.11 fresh-reference prerequisite. This package does
+publication. Root installed `/ssdpool2nvme/local_llm/.venv-ninfer-r9700-py311/bin/python`
+with Python 3.11.16, ROCm torch 2.9.1+rocm7.2.4.git39497456, and Triton
+3.5.1+rocm7.2.4.gita272dfa8. `pip check` and CPU-only imports passed;
+gfx1201 is listed and GPU initialization remained false. GPU qualification has not
+run; the reference command must wait for review and root's exclusive GPU lease.
+This package does
 not install dependencies or change a Python or shared-library environment.
 
 `quality` runs six separate all-Q4, mixed-Q4/W8, and four-role Q4/FP8 campaigns,

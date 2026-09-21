@@ -1,8 +1,12 @@
 # Python 3.11 ROCm reference dependency plan
 
-Research date: 2026-09-21. No wheels were downloaded, installed, or built, and no
-GPU was initialized. This is a prerequisite plan, not reference qualification or
-permission to launch a new reference campaign.
+Research date: 2026-09-21. Initial research did not download or install wheels.
+Root subsequently installed `/ssdpool2nvme/local_llm/.venv-ninfer-r9700-py311`:
+`pip check` and CPU-only imports passed with Python 3.11.16, torch
+2.9.1+rocm7.2.4.git39497456, Triton 3.5.1+rocm7.2.4.gita272dfa8,
+numpy 2.4.6, and safetensors 0.8.0. Static target flags include gfx1201;
+GPU remained uninitialized. GPU qualification has not run. Launch remains subject
+to root review and exclusive GPU ownership.
 
 ## Exact available pair
 
@@ -55,7 +59,7 @@ Safetensors==0.8.0 uses an abi3 wheel compatible with Python 3.11. Torch's ordin
 dependencies (filelock, typing-extensions, sympy, networkx, jinja2, fsspec) remain
 resolved normally. This scorer does not require torchvision or torchaudio.
 
-## Proposed setup commands — not executed
+## Setup commands — retained installation recipe
 
 Create an isolated environment only when selected chunk !=4096 and this dependency
 installation is authorized.
@@ -102,31 +106,23 @@ static-target query was the actual no-device probe performed during this researc
 FLA was inspected through installed metadata and source, not imported here.
 
 After installation, only for selected chunk !=4096 and when the GPU is exclusively
-available, execute the mandatory full-span GDN numerical probe once in the new
-environment, then the selected-chunk fresh-process BF16 A/B reference stage:
+available after review, execute the reference stage. It runs the mandatory
+full-span GDN numerical probe before selected-chunk fresh-process BF16 A/B scoring:
 
 ```bash
 set -euo pipefail
 cd /ssdpool2nvme/local_llm/ninfer-amd-r9700
 reference_env=/ssdpool2nvme/local_llm/.venv-ninfer-r9700-py311
 quality_package=profiles/ppl/r9700-terminal-quality-receipt-bound-n16k16-20260921
-probe_report="$quality_package/bf16-gdn-full-span-py311-20260921.json"
-test ! -e "$probe_report"
-env -u PYTHONPATH LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/core-10.0/lib \
-  "$reference_env/bin/python" tools/reference/qwen3_8_27b_bf16/gdn_full_span_probe.py \
-  --device 0 --out-json "$probe_report"
-/home/battlefront/.local/bin/python3.11 - "$probe_report" <<'PY'
-import json, sys
-with open(sys.argv[1]) as stream:
-    report = json.load(stream)
-assert report['geometry']['row_extents'] == [4095, 4096]
-assert report['all_pass'] is True, 'GDN full-span numerical qualification failed'
-PY
 env -u PYTHONPATH LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/core-10.0/lib \
   bash "$quality_package/commands.sh" reference --reference-python "$reference_env/bin/python"
 ```
 
-The probe can exit zero with `all_pass=false`; the explicit JSON gate is required.
+Do not run a duplicate manual probe. The stage creates
+`bf16-chunk{selected_chunk}-gdn-full-span.json` and refuses existing output,
+including failed probes. The probe can exit zero with `all_pass=false`; the stage
+explicitly gates `all_pass is True`, exact row extents `[4095,4096]`, and matching
+interpreter path/hash provenance before either reference campaign.
 Its independent sampled FP64 oracle is not replaced by the campaign's repeat
 comparison. The reference stage already runs both 8K/32K A/B processes and the
 exact sidecar comparison; no additional GDN determinism/PV diagnostic campaign is

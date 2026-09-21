@@ -130,6 +130,52 @@ class CampaignTest(unittest.TestCase):
                     campaign.quality({"selected_prefill_chunk": 2048})
             self.assertEqual(list(root.iterdir()), [])
 
+    def test_fresh_reference_requires_matching_passing_probe_before_scoring(self):
+        for failure in (None, "oracle", "geometry", "interpreter", "interpreter-hash", "existing"):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                python = root / "python3.11"
+                python.write_bytes(b"reference interpreter")
+                probe = root / "bf16-chunk2048-gdn-full-span.json"
+                if failure == "existing":
+                    probe.write_text("previous failed probe")
+                stages = []
+
+                def execute(command, **kwargs):
+                    if command[1] == "-c":
+                        stages.append("environment")
+                    elif command[1].endswith("gdn_full_span_probe.py"):
+                        stages.append("probe")
+                        report = {
+                            "all_pass": failure != "oracle",
+                            "geometry": {"row_extents": [4095] if failure == "geometry" else [4095, 4096]},
+                            "provenance": {"execution": {
+                                "python_executable": str(root / "other") if failure == "interpreter" else str(python),
+                                "python_executable_sha256": "changed" if failure == "interpreter-hash" else campaign.run.file_sha256(python),
+                            }},
+                        }
+                        self.assertEqual(command[0], str(python))
+                        probe.write_text(json.dumps(report))
+                    else:
+                        self.assertTrue(probe.exists())
+                        stages.append("compare" if command[1].endswith("compare_bf16_repeats.py") else "score")
+
+                with patch.object(campaign, "PACKAGE", root), \
+                        patch.object(campaign, "validate_checkpoint_files"), \
+                        patch.object(campaign, "validate_reference"), \
+                        patch.object(campaign, "unchanged"), \
+                        patch.object(campaign.subprocess, "run", side_effect=execute):
+                    if failure is None:
+                        campaign.reference({"selected_prefill_chunk": 2048}, python)
+                        self.assertEqual(stages, ["environment", "probe", "score", "score", "compare"])
+                    else:
+                        with self.assertRaises(ValueError):
+                            campaign.reference({"selected_prefill_chunk": 2048}, python)
+                        self.assertEqual(stages, ["environment"] if failure == "existing" else ["environment", "probe"])
+                        self.assertTrue(probe.exists())
+                        if failure == "existing":
+                            self.assertEqual(probe.read_text(), "previous failed probe")
+
 
 if __name__ == "__main__":
     unittest.main()
