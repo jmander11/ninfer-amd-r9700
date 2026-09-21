@@ -1168,7 +1168,9 @@ def validate_xattention_dense_controls(
 
 def validate_chunk_candidate_bindings(
     chunk_selection: dict[str, Any], provenance: list[dict[str, Any]],
+    resource_recovery: dict[str, Any] | None = None,
 ) -> None:
+    from tools.ppl.fp8_context_recovery import resolved_benchmark
     sources = chunk_selection.get("sources")
     if not isinstance(sources, list) or len(sources) != len(provenance):
         raise ValueError("prefill-chunk selection does not cover every Pareto candidate")
@@ -1194,10 +1196,13 @@ def validate_chunk_candidate_bindings(
         if (
             bound is None
             or bound.get("artifact") != artifact
-            or bound.get("benchmark_executable") != source.get("benchmark_executable")
+            or resolved_benchmark(bound, resource_recovery) != source.get("benchmark_executable")
         ):
             raise ValueError("Pareto candidate does not match its prefill-chunk selection identity")
         actual.add(key)
+        if resource_recovery is not None:
+            from tools.ppl.fp8_context_recovery import validate_recovered_capacity
+            validate_recovered_capacity(source, resource_recovery)
     if actual != set(expected):
         raise ValueError("prefill-chunk selection and Pareto candidate sets differ")
 
@@ -1266,6 +1271,8 @@ def main() -> int:
         help="executed twelve-matrix capacity validation controlling whole eligibility",
     )
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--fp8-context-recovery", type=Path,
+                        help="qualified allocation-only hybrid build bridge; never a capacity waiver")
     args = parser.parse_args()
     chunk_selection_path = args.prefill_chunk_selection.resolve()
     prefill_chunk_authority, chunk_selection = validate_prefill_chunk_authority(
@@ -1284,7 +1291,14 @@ def main() -> int:
         provenance.append(source)
     if args.require_xattention_dense_controls:
         validate_xattention_dense_controls(candidates, provenance)
-        validate_chunk_candidate_bindings(chunk_selection, provenance)
+        recovery = None
+        if args.fp8_context_recovery is not None:
+            from tools.ppl.fp8_context_recovery import identity, validate_bridge
+            recovery = validate_bridge(args.fp8_context_recovery, chunk_selection)
+            binding = identity(args.fp8_context_recovery)
+            for source in provenance:
+                source["fp8_context_resource_recovery"] = binding
+        validate_chunk_candidate_bindings(chunk_selection, provenance, recovery)
         if args.post_chunk_capacity_validation is None:
             raise SystemExit(
                 "static profile selection requires --post-chunk-capacity-validation"
@@ -1298,7 +1312,7 @@ def main() -> int:
         )
         for source in provenance:
             source["post_chunk_capacity_validation"] = capacity_binding
-    elif args.post_chunk_capacity_validation is not None:
+    elif args.post_chunk_capacity_validation is not None or args.fp8_context_recovery is not None:
         raise SystemExit(
             "--post-chunk-capacity-validation requires --require-xattention-dense-controls"
         )
