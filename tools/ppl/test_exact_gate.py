@@ -1100,6 +1100,63 @@ class CampaignOrchestrationTest(unittest.TestCase):
             self.assertEqual(result["reference_source"], campaign_payload["reference_source"])
             self.assertEqual(result["cells"][0]["nll_sha256"], cell["nll_sha256"])
 
+            # Decode's mathematical reference reuses the original prefill
+            # descriptor, not a forged decode command or another source run.
+            decode_output = root / "decode-reused-output"
+            decode_argv = list(argv)
+            decode_argv[decode_argv.index("--schedule") + 1] = "decode"
+            decode_argv[decode_argv.index("--out") + 1] = str(decode_output)
+            decode_argv.append("--no-position-extras")
+            with (
+                mock.patch.object(sys, "argv", decode_argv),
+                mock.patch.object(run, "validate_corpus", return_value=corpus),
+                mock.patch.object(run, "validate_cell_report"),
+                mock.patch.object(run, "validate_bf16_repeat_comparison", return_value={}),
+                mock.patch.object(run.subprocess, "run", side_effect=AssertionError("no BF16 rerun")),
+            ):
+                self.assertEqual(run.main(), 0)
+            decoded = json.loads((decode_output / "results.json").read_text())
+            self.assertEqual(decoded["schedules"], ["decode"])
+            self.assertEqual(decoded["cells"][0]["schedule"], "prefill")
+            self.assertEqual(decoded["cells"][0]["command"], cell["command"])
+            self.assertEqual(decoded["cells"][0]["nll_sha256"], cell["nll_sha256"])
+            with self.assertRaisesRegex(SystemExit, "identical scored positions"):
+                run.require_bf16_decode_reuse_alignment([4], "0")
+
+            paired_output = root / "decode-paired-output"
+            paired_argv = list(decode_argv)
+            paired_argv.remove("--no-extras")
+            paired_argv[paired_argv.index("--profiles") + 1] = f"{run.BASELINE},r9700-g16"
+            paired_argv[paired_argv.index("--out") + 1] = str(paired_output)
+            paired_argv += ["--g16-weights", str(candidate), "--g16-ppl-bin", str(scorer),
+                            "--gate", "r9700-g16=0.02"]
+
+            def candidate_execution(*args):
+                self.assertEqual(args[3], "r9700-g16")
+                self.assertEqual(args[4], "decode")
+                output_path = args[9]
+                value = {**candidate_raw, "scheme": "r9700-g16", "schedule": "decode", "ppl": math.e}
+                output_path.write_text(json.dumps(value))
+                output_path.with_suffix(".nllf32").write_bytes(struct.pack("<f", 1.0))
+                output_path.with_suffix(".argmaxi32").write_bytes(struct.pack("<i", 7))
+                return value
+
+            with (
+                mock.patch.object(sys, "argv", paired_argv),
+                mock.patch.object(run, "validate_corpus", return_value=corpus),
+                mock.patch.object(run, "validate_cell_report"),
+                mock.patch.object(run, "validate_bf16_repeat_comparison", return_value={}),
+                mock.patch.object(run, "inspect_candidate_artifact", return_value=artifact),
+                mock.patch.object(run, "run_cell", side_effect=candidate_execution) as execute_candidate,
+            ):
+                self.assertEqual(run.main(), 0)
+            self.assertEqual(execute_candidate.call_count, 2)
+            self.assertEqual(execute_candidate.call_args_list[0].args[10], [])
+            self.assertEqual(execute_candidate.call_args_list[1].args[10], ["--no-device-graph"])
+            paired = json.loads((paired_output / "results.json").read_text())
+            self.assertTrue(paired["cells"][-1]["device_graph_parity"]["pass"])
+            self.assertEqual(paired["cells"][-1]["reference_cell"], str(cell_path))
+
             campaign_payload["cells"][0]["command"] = [
                 campaign_payload["cells"][0]["execution_provenance"]["python_executable"],
                 *campaign_payload["cells"][0]["command"],

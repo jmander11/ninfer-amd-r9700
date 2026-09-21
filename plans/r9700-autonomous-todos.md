@@ -1271,6 +1271,11 @@ prefill review, preserving their remaining data dependencies.
   against `profiles/bench/r9700-terminal-base-phase-sum-20260921/select/result.json`
   (exact preparation command in `tools/ppl/README.md`). The historical focused-verification
   launcher runs host/Op tests, not BF16 model parity, and is not this gate's producer.
+  The selected launcher now reuses the bound BF16 prefill reference and fresh-process repeat
+  proof: its layer-major formula, chunk spans and half-score positions are identical under the
+  decode label. Original reports remain prefill evidence; candidate T1 decode and graph/eager
+  comparisons still run fresh. Independent review and64 focused tests pass; all24 retained
+  quality cells replay unchanged. Do not rerun the invariant BF16 reference for this gate.
   Per-Op represented-input oracles are already complete but do not replace selected-model evidence.
 
 - [ ] `SELECTED-PARITY-VISION` [depends: BF16-PARITY] Complete selected-artifact decode and

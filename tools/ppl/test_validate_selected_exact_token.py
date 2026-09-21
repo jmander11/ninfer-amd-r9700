@@ -288,6 +288,48 @@ class ValidateSelectedExactTokenTest(unittest.TestCase):
         campaign["scorers"]["bf16-reference"] = {
             "path": str(bf16_scorer), "sha256": file_sha256(bf16_scorer),
             "bytes": bf16_scorer.stat().st_size}
+        # External reference replay is tested by test_exact_gate; these fixtures
+        # retain real raw/sidecar IO and the exact-token admission boundary.
+        reference_dir = root / "retained-reference"
+        reference_dir.mkdir()
+        reference_path = reference_dir / "results.json"
+        repeat_path = root / "repeat.json"
+        reference_path.write_text("{}")
+        repeat_path.write_text("{}")
+        reference_binding = {"path": str(reference_path), "sha256": file_sha256(reference_path)}
+        repeat_binding = {"path": str(repeat_path), "sha256": file_sha256(repeat_path)}
+        retained = {}
+        for cell in cells:
+            if cell["scheme"] != "bf16-reference":
+                continue
+            old_raw = Path(cell["command"][-1])
+            new_raw = reference_dir / f"{cell['prompt_tokens']}.prefill.bf16-reference.json"
+            raw = json.loads(old_raw.read_text())
+            raw["schedule"] = "prefill"
+            new_raw.write_text(json.dumps(raw))
+            for suffix in (".nllf32", ".argmaxi32"):
+                old_raw.with_suffix(suffix).rename(new_raw.with_suffix(suffix))
+            old_raw.unlink()
+            cell["schedule"] = "prefill"
+            cell["command"][cell["command"].index("--schedule") + 1] = "prefill"
+            cell["command"][-1] = str(new_raw)
+            cell["reused_bf16_campaign"] = reference_binding
+            retained[cell["prompt_tokens"]] = (dict(cell), new_raw)
+        for name, value in (("load_reused_bf16_cells", retained),
+                            ("validate_bf16_repeat_comparison", repeat_binding)):
+            patcher = patch.object(validator_module, name, return_value=value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        quality_path = Path(plan["quality_authority"]["path"])
+        quality_path.write_text(json.dumps({"reused_bf16_campaign": reference_binding,
+                                            "bf16_repeat_comparison": repeat_binding}))
+        plan["quality_authority"]["sha256"] = file_sha256(quality_path)
+        plan["bf16_reference_authority"] = reference_binding
+        plan["bf16_repeat_authority"] = repeat_binding
+        plan["command"] = validator_module._expected_plan_command(plan, hybrid=False)
+        plan_path.write_text(json.dumps(plan))
+        campaign["reused_bf16_campaign"] = reference_binding
+        campaign["bf16_repeat_comparison"] = repeat_binding
         campaign_path = campaign_dir / "results.json"
         campaign_path.write_text(json.dumps(campaign), encoding="utf-8")
         return plan_path, campaign_path

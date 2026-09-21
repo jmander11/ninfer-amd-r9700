@@ -1543,6 +1543,19 @@ def load_reused_bf16_cells(
     return selected
 
 
+def require_bf16_decode_reuse_alignment(lengths: list[int], skip: str) -> None:
+    """The source layer-major formula is identical only at the same scored positions.
+
+    protocol.layer_spans uses the same chunk spans for both labels. Unlike the
+    reference, candidate decode really executes T=1 and must never be imported.
+    """
+    from tools.reference.qwen3_8_27b_bf16.protocol import resolve_score_begin
+
+    for tokens in lengths:
+        if resolve_score_begin(tokens, "prefill", skip) != resolve_score_begin(tokens, "decode", skip):
+            raise SystemExit("BF16 prefill/decode reuse requires identical scored positions")
+
+
 def load_reused_candidate_cells(
     campaign_path: Path,
     *,
@@ -2151,7 +2164,7 @@ def main() -> int:
 
     reused_bf16: dict[int, tuple[dict, Path]] = {}
     bf16_repeat_comparison = None
-    if args.reuse_bf16_campaign is not None or args.reuse_candidate_campaign:
+    if args.reuse_candidate_campaign:
         if (
             schedules != ["prefill"]
             or spec != "none"
@@ -2159,6 +2172,13 @@ def main() -> int:
             raise SystemExit(
                 "campaign reuse requires a prefill-only non-speculative campaign"
             )
+    if args.reuse_bf16_campaign is not None:
+        if spec != "none" or schedules not in (["prefill"], ["decode"]):
+            raise SystemExit("BF16 reuse requires one non-speculative schedule")
+        if schedules == ["decode"]:
+            if not args.no_position_extras:
+                raise SystemExit("BF16 decode reuse requires --no-position-extras")
+            require_bf16_decode_reuse_alignment(lengths, args.skip)
     if (args.reuse_bf16_campaign is None) != (args.bf16_repeat_comparison is None):
         raise SystemExit(
             "--reuse-bf16-campaign and --bf16-repeat-comparison are required together"
@@ -2309,7 +2329,10 @@ def main() -> int:
         """Pair a candidate execution variant without rerunning invariant BF16 math."""
 
         nonlocal failed
-        reference_path = out_dir / f"{tokens}.decode.{BASELINE}.json"
+        reference_path = (
+            reused_bf16[tokens][1] if tokens in reused_bf16
+            else out_dir / f"{tokens}.decode.{BASELINE}.json"
+        )
         reference_cell = json.loads(reference_path.read_text(encoding="utf-8"))
         reference_nlls = load_nlls(reference_path)
         reference_argmax = load_argmax(reference_path)

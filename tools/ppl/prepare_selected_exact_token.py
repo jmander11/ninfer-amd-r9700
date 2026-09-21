@@ -15,7 +15,7 @@ from pathlib import Path
 
 from tools.bench.run_ninfer_bench_matrix import inspect_executable
 from tools.ppl.pareto import load_payload, validate_terminal_production_authority
-from tools.ppl.run import QUALITY_TIERS
+from tools.ppl.run import QUALITY_TIERS, validate_bf16_repeat_comparison
 from tools.reference.qwen3_8_27b_bf16.protocol import validate_checkpoint_files
 
 REPO = Path(__file__).resolve().parents[2]
@@ -105,6 +105,14 @@ def prepare(selection: Path, output: Path) -> dict:
     route = resolve_route(selection)
     group = route["cache_profile"]["value_group"]
     quality, selected = selected_quality(selection, route["winner"], group, route)
+    quality_campaign = json.loads(Path(quality["path"]).read_text(encoding="utf-8"))
+    reference = quality_campaign.get("reused_bf16_campaign", {})
+    repeat = quality_campaign.get("bf16_repeat_comparison", {})
+    for binding in (reference, repeat):
+        path = Path(binding.get("path", ""))
+        if not path.is_file() or sha(path) != binding.get("sha256"):
+            raise ValueError("selected quality lacks its unchanged BF16 reference/repeat authority")
+    validate_bf16_repeat_comparison(Path(repeat["path"]), Path(reference["path"]))
     artifact = Path(route["artifact"]["path"]).resolve(strict=True)
     scorer = Path(route["build_directory"]).resolve(strict=True) / "apps/ninfer-ppl"
     scorer_identity = inspect_executable(scorer)
@@ -143,6 +151,8 @@ def prepare(selection: Path, output: Path) -> dict:
         "--device", "0",
         "--spec", "none", "--execution-parity-max-abs-nll", "0",
         "--no-position-extras",
+        "--reuse-bf16-campaign", reference["path"],
+        "--bf16-repeat-comparison", repeat["path"],
         "--expected-q4-activation-bits", "8", "--expected-w8-activation-bits", "8",
         "--expected-fp8-qk-wmma", "1", "--expected-xattention-profile", xattention,
         "--out", str(campaign),
@@ -159,6 +169,8 @@ def prepare(selection: Path, output: Path) -> dict:
             "terminal_selection": {"path": str(selection), "sha256": sha(selection)},
             "quality_authority": quality, "bf16_source_receipt": {
                 "path": str(BF16_RECEIPT), "sha256": sha(BF16_RECEIPT)},
+            "bf16_reference_authority": reference,
+            "bf16_repeat_authority": {"path": repeat["path"], "sha256": repeat["sha256"]},
             "bf16_source": {"path": str(BF16_SOURCE), "shard_count": 18},
             "python": {"launcher_path": str(PYTHON), "sha256": sha(PYTHON),
                        "pyvenv_cfg": {"path": str(pyvenv), "sha256": sha(pyvenv)}},
@@ -203,6 +215,7 @@ def prepare(selection: Path, output: Path) -> dict:
         closure = [Path(__file__).resolve(), VALIDATOR, RUNNER, RESOLVER, BF16_SCORER,
                    BF16_PROTOCOL, PYTHON, pyvenv,
                    BF16_RECEIPT, IDS, selection, Path(quality["path"]), artifact, scorer,
+                   Path(reference["path"]), Path(repeat["path"]),
                    plan_path, commands]
         if route.get("hybrid_width_tool"):
             closure.append(Path(route["hybrid_width_tool"]["path"]))

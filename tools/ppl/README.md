@@ -84,8 +84,13 @@ GPU lease. Preparation requires the published selection and `apps/ninfer-ppl` in
 build root. The fresh phase-sum roots initially contain bench/planner but not that scorer;
 the resource bridge preserves old prefill quality, not a claim that an old executable exercises
 the new selected runtime. Do not silently substitute the original panel scorer or rebuild a
-frozen root from this launcher. The reference runs under the installed
+frozen root from this launcher. The launcher runs under the installed
 `/ssdpool2nvme/local_llm/.venv-ninfer-r9700-py311/bin/python` with the ROCm library paths exported.
+It reuses the selected quality campaign's bound BF16 prefill reference and exact repeat proof,
+without rerunning the source model. The layer-major oracle uses identical chunk spans and
+`skip=half` scored positions under either schedule label; original prefill reports and sidecars
+remain unchanged. Only the candidate executes the real T=1 decode schedule, freshly in both
+graph and eager modes (4,095 and 16,383 rounds respectively at 8K and 32K per mode).
 The required physical campaign covers
 8K and 32K same-route graph/eager exact-I32-token and zero-NLL-delta checks. MTP3/ordinary and
 MTP3/MTP4 comparisons are optional diagnostic exact-token/state/graph regressions, not base or
@@ -1101,7 +1106,9 @@ or matrix must never be relabeled as dense evidence. `--reuse-bf16-campaign` may
 cells across candidate recipes, dense/sparse routes, and quality tiers because none of those
 choices changes the independent BF16 reference. It revalidates schema/model identity, BF16
   source/scorer, corpus, lengths, prefill schedule, skip/chunk/device settings, raw reports, and
-  sidecars. The raw BF16 cells must also carry the mandatory hipBLAS/no-atomics/strict-deterministic
+  sidecars. A non-speculative decode-only campaign with `--no-position-extras` may reuse those
+  reference cells when prefill/decode scored starts match exactly; candidate cross-schedule reuse
+  remains forbidden. The raw BF16 cells must also carry the mandatory hipBLAS/no-atomics/strict-deterministic
 execution profile, and every cell must match the campaign's exact `reference_execution` object;
 that object binds the complete scorer/FLA implementation and interpreter/package/runtime/device
 environment. The required v3 profile additionally binds the structured full-attention PV identity:

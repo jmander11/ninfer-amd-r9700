@@ -75,6 +75,14 @@ class PrepareSelectedExactTokenTest(unittest.TestCase):
             for path in (selection, artifact, scorer, quality):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(path.name, encoding="utf-8")
+            reference = root / "reference.json"
+            repeat = root / "repeat.json"
+            reference.write_text("{}")
+            repeat.write_text("{}")
+            quality.write_text(json.dumps({
+                "reused_bf16_campaign": {"path": str(reference), "sha256": sha(reference)},
+                "bf16_repeat_comparison": {"path": str(repeat), "sha256": sha(repeat)},
+            }))
             route = {
                 "winner": "selected-g32-dense",
                 "artifact": {"path": str(artifact), "weights_id": "r9700-q4g64-n16k16-eval",
@@ -85,7 +93,7 @@ class PrepareSelectedExactTokenTest(unittest.TestCase):
             }
             output = root / "prepared"
             shards = {f"tensor{i}": f"model-{i:05d}-of-00018.safetensors" for i in range(1, 19)}
-            with patch("tools.ppl.prepare_selected_exact_token.resolve_route", return_value=route), patch(
+            with patch("tools.ppl.prepare_selected_exact_token.validate_bf16_repeat_comparison"), patch("tools.ppl.prepare_selected_exact_token.resolve_route", return_value=route), patch(
                 "tools.ppl.prepare_selected_exact_token.selected_quality",
                 return_value=({"path": str(quality), "sha256": "b" * 64},
                               {"tier": "capacity-speed", "profile": "r9700-g32"}),
@@ -101,6 +109,7 @@ class PrepareSelectedExactTokenTest(unittest.TestCase):
             self.assertEqual(plan["candidate_profile"], "r9700-g32")
             self.assertIn("--execution-parity-max-abs-nll", plan["command"])
             self.assertEqual(plan["command"].count("--no-position-extras"), 1)
+            self.assertEqual(plan["command"][plan["command"].index("--reuse-bf16-campaign") + 1], str(reference))
             self.assertNotIn("--require-fp8-hybrid", plan["command"])
             self.assertTrue((output / "prepared.sha256").is_file())
             commands = (output / "commands.sh").read_text(encoding="utf-8")

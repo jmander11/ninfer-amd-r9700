@@ -11,10 +11,15 @@ import stat
 from pathlib import Path
 
 from tools.ppl.pareto import load_payload, validate_terminal_production_authority
-from tools.ppl.run import cell_ok, file_sha256, load_argmax, load_nlls, sidecar_parity
+from tools.ppl.run import (
+    cell_ok, file_sha256, load_argmax, load_nlls, sidecar_parity,
+    load_reused_bf16_cells, validate_bf16_repeat_comparison,
+    require_bf16_decode_reuse_alignment,
+)
 
 HYBRID_WEIGHTS_ID = "r9700-q4g64-f8e4m3-four-role-n16k16-eval"
 RUNNER = Path(__file__).resolve().with_name("run.py")
+LENGTHS = (8192, 32768)
 
 
 def _identity(path: Path) -> tuple[int, int]:
@@ -77,6 +82,8 @@ def _expected_plan_command(plan: dict, *, hybrid: bool) -> list[str]:
         "--spec", "none",
         "--execution-parity-max-abs-nll", "0",
         "--no-position-extras",
+        "--reuse-bf16-campaign", plan["bf16_reference_authority"]["path"],
+        "--bf16-repeat-comparison", plan["bf16_repeat_authority"]["path"],
         "--expected-q4-activation-bits", "8",
         "--expected-w8-activation-bits", "8",
         "--expected-fp8-qk-wmma", "1",
@@ -110,7 +117,8 @@ def validate(plan_path: Path, campaign_path: Path) -> dict:
         or plan["command"].count("--no-position-extras") != 1
     ):
         raise ValueError("malformed selected exact-token plan")
-    for key in ("terminal_selection", "quality_authority", "bf16_source_receipt"):
+    for key in ("terminal_selection", "quality_authority", "bf16_source_receipt",
+                "bf16_reference_authority", "bf16_repeat_authority"):
         binding = plan.get(key, {})
         path = Path(binding.get("path", ""))
         if not path.is_file() or file_sha256(path) != binding.get("sha256"):
@@ -233,6 +241,27 @@ def validate(plan_path: Path, campaign_path: Path) -> dict:
         (8192, "device_graph_parity"): f"8192.decode.{profile}.eager.json",
         (32768, "device_graph_parity"): f"32768.decode.{profile}.eager.json",
     }
+    quality = json.loads(Path(plan["quality_authority"]["path"]).read_text(encoding="utf-8"))
+    if (quality.get("reused_bf16_campaign") != plan["bf16_reference_authority"]
+            or any(quality.get("bf16_repeat_comparison", {}).get(key) != value
+                   for key, value in plan["bf16_repeat_authority"].items())
+            or campaign.get("reused_bf16_campaign") != plan["bf16_reference_authority"]):
+        raise ValueError("decode reference is not the selected quality BF16 authority")
+    reference_path = Path(plan["bf16_reference_authority"]["path"])
+    try:
+        repeat = validate_bf16_repeat_comparison(
+            Path(plan["bf16_repeat_authority"]["path"]), reference_path)
+        require_bf16_decode_reuse_alignment(list(LENGTHS), "half")
+        reused_reference = load_reused_bf16_cells(
+            reference_path, bf16_weights=Path(plan["bf16_source"]["path"]),
+            bf16_scorer=bf16_scorer_path, scorer_identity=reference_scorer,
+            ids=corpus_path, corpus_provenance=campaign["corpus"],
+            lengths=list(LENGTHS), skip="half", prefill_chunk=route["selected_prefill_chunk"], device=0,
+        )
+    except SystemExit as error:
+        raise ValueError(f"retained BF16 reference does not revalidate: {error}") from error
+    if campaign.get("bf16_repeat_comparison") != repeat:
+        raise ValueError("campaign repeat authority differs from its replay")
     observed: dict[tuple[int, str], dict] = {}
     campaign_root = campaign_path.parent.resolve()
     primary: dict[int, Path] = {}
@@ -253,7 +282,8 @@ def validate(plan_path: Path, campaign_path: Path) -> dict:
         ):
             raise ValueError("candidate cell lacks one output identity")
         raw_path = Path(command[command.index("--out-json") + 1]).resolve()
-        if raw_path.parent != campaign_root or not raw_path.is_file():
+        baseline = cell.get("scheme") == "bf16-reference"
+        if ((not baseline and raw_path.parent != campaign_root) or not raw_path.is_file()):
             raise ValueError("candidate raw cell escapes or is missing from campaign")
         raw = json.loads(raw_path.read_text(encoding="utf-8"))
         if any(cell.get(key) != value for key, value in raw.items()):
@@ -266,17 +296,15 @@ def validate(plan_path: Path, campaign_path: Path) -> dict:
             raise ValueError("campaign sidecars are incomplete, nonfinite, or unaligned")
         if cell.get("scheme") == "bf16-reference":
             tokens = cell.get("prompt_tokens")
-            if raw_path.name != f"{tokens}.decode.bf16-reference.json" or tokens in baseline_tokens:
+            if tokens not in reused_reference or tokens in baseline_tokens:
                 raise ValueError("campaign has unexpected or duplicate BF16 primary evidence")
-            expected_command = _expected_raw_command(
-                scorer_prefix=[plan["python"]["launcher_path"], str(bf16_scorer_path)],
-                weights=plan["bf16_source"]["path"], ids=str(corpus_path),
-                scheme="bf16-reference", tokens=tokens,
-                prefill_chunk=route["selected_prefill_chunk"], output=raw_path, eager=False,
-            )
+            retained, retained_path = reused_reference[tokens]
+            expected_command = retained["command"]
+            if raw_path != retained_path.resolve() or cell.get("reused_bf16_campaign") != plan["bf16_reference_authority"]:
+                raise ValueError("BF16 cell differs from the retained reference identity")
             expected_semantics = {
                 "weights": plan["bf16_source"]["path"], "model_id": "qwen3.8-27b",
-                "weights_id": "bf16-source", "schedule": "decode",
+                "weights_id": "bf16-source", "schedule": "prefill",
                 "spec": "none", "draft_tokens": 0, "device_graph": False,
                 "prefill_chunk": route["selected_prefill_chunk"], "prompt_tokens": tokens,
                 "skip_tokens": tokens // 2,
@@ -284,7 +312,7 @@ def validate(plan_path: Path, campaign_path: Path) -> dict:
             if command != expected_command or any(
                 cell.get(key) != value for key, value in expected_semantics.items()
             ):
-                raise ValueError("BF16 raw command/semantics differ from ordinary decode")
+                raise ValueError("BF16 raw command/semantics differ from aligned retained reference")
             expected_reference = campaign["reference_source"]
             if (
                 cell.get("source_config_sha256") != expected_reference["config_sha256"]
