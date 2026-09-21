@@ -134,49 +134,6 @@ ninfer::GenerationResult consume_generation(ninfer::GenerationResult generated,
     return generated;
 }
 
-ninfer::bench::RepTiming fold_lane_results(const std::vector<ninfer::GenerationResult>& generated,
-                                           std::uint32_t expected_per_lane) {
-    ninfer::bench::RepTiming timing;
-    timing.timings                 = generated.front().timings;
-    timing.speculative             = generated.front().speculative;
-    timing.generated_output_tokens = expected_per_lane;
-    timing.generated_token_ids_by_lane.reserve(generated.size());
-    for (const ninfer::GenerationResult& lane : generated) {
-        timing.generated_token_ids_by_lane.push_back(lane.generated_token_ids);
-    }
-    if (generated.size() == 1) { return timing; }
-
-    timing.generated_output_tokens = expected_per_lane * static_cast<std::uint32_t>(generated.size());
-    for (std::size_t i = 1; i < generated.size(); ++i) {
-        const ninfer::GenerationResult& result = generated[i];
-        timing.timings.prepare_seconds =
-            std::max(timing.timings.prepare_seconds, result.timings.prepare_seconds);
-        timing.timings.vision_seconds =
-            std::max(timing.timings.vision_seconds, result.timings.vision_seconds);
-        timing.timings.prefill_seconds =
-            std::max(timing.timings.prefill_seconds, result.timings.prefill_seconds);
-        timing.timings.decode_seconds =
-            std::max(timing.timings.decode_seconds, result.timings.decode_seconds);
-        timing.timings.total_seconds =
-            std::max(timing.timings.total_seconds, result.timings.total_seconds);
-        const ninfer::SpeculativeStats& in = result.speculative;
-        timing.speculative.enabled         = timing.speculative.enabled || in.enabled;
-        timing.speculative.draft_window =
-            std::max(timing.speculative.draft_window, in.draft_window);
-        timing.speculative.rounds += in.rounds;
-        timing.speculative.drafted_tokens += in.drafted_tokens;
-        timing.speculative.accepted_tokens += in.accepted_tokens;
-        timing.speculative.fallback_steps += in.fallback_steps;
-        if (timing.speculative.accepted_per_position.size() < in.accepted_per_position.size()) {
-            timing.speculative.accepted_per_position.resize(in.accepted_per_position.size());
-        }
-        for (std::size_t j = 0; j < in.accepted_per_position.size(); ++j) {
-            timing.speculative.accepted_per_position[j] += in.accepted_per_position[j];
-        }
-    }
-    return timing;
-}
-
 ninfer::bench::RepTiming run_repetition(ninfer::Engine& engine,
                                         const ninfer::bench::BenchTest& test,
                                         const std::vector<ninfer::TokenId>& corpus,
@@ -194,7 +151,7 @@ ninfer::bench::RepTiming run_repetition(ninfer::Engine& engine,
         const ninfer::RequestOptions request = benchmark_request(test, false);
         auto prompt = engine.prepare_tokens(ninfer::bench::prompt_slice(corpus, prompt_tokens),
                                             false);
-        return fold_lane_results(
+        return ninfer::bench::fold_lane_results(
             {consume_generation(engine.generate(std::move(prompt), request), test, expected, "")},
             expected);
     }
@@ -239,7 +196,7 @@ ninfer::bench::RepTiming run_repetition(ninfer::Engine& engine,
             }
             generated.push_back(std::move(result));
         }
-        ninfer::bench::RepTiming timing = fold_lane_results(generated, expected);
+        ninfer::bench::RepTiming timing = ninfer::bench::fold_lane_results(generated, expected);
         timing.timings.prefill_seconds  = 0.0;
         return timing;
     }
@@ -258,7 +215,7 @@ ninfer::bench::RepTiming run_repetition(ninfer::Engine& engine,
     for (auto& handle : handles) {
         generated.push_back(consume_generation(handle.wait(), test, expected, ""));
     }
-    ninfer::bench::RepTiming timing = fold_lane_results(generated, expected);
+    ninfer::bench::RepTiming timing = ninfer::bench::fold_lane_results(generated, expected);
     if (test.kind == ninfer::bench::TestKind::WholeInference) {
         timing.timings.total_seconds = std::chrono::duration<double>(
             std::chrono::steady_clock::now() - whole_start).count();

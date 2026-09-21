@@ -615,6 +615,42 @@ std::vector<double> prefill_tok_s_series(const TestResult& result) {
     return out;
 }
 
+RepTiming fold_lane_results(const std::vector<GenerationResult>& generated,
+                            std::uint32_t expected_per_lane) {
+    RepTiming timing;
+    timing.timings                 = generated.front().timings;
+    timing.speculative             = generated.front().speculative;
+    timing.generated_output_tokens = expected_per_lane * static_cast<std::uint32_t>(generated.size());
+    timing.generated_token_ids_by_lane.reserve(generated.size());
+    for (const GenerationResult& lane : generated) {
+        timing.generated_token_ids_by_lane.push_back(lane.generated_token_ids);
+    }
+    for (std::size_t i = 1; i < generated.size(); ++i) {
+        const GenerationResult& result = generated[i];
+        timing.timings.prepare_seconds += result.timings.prepare_seconds;
+        timing.timings.vision_seconds += result.timings.vision_seconds;
+        timing.timings.prefill_seconds += result.timings.prefill_seconds;
+        timing.timings.decode_seconds =
+            std::max(timing.timings.decode_seconds, result.timings.decode_seconds);
+        timing.timings.total_seconds =
+            std::max(timing.timings.total_seconds, result.timings.total_seconds);
+        const SpeculativeStats& in = result.speculative;
+        timing.speculative.enabled = timing.speculative.enabled || in.enabled;
+        timing.speculative.draft_window = std::max(timing.speculative.draft_window, in.draft_window);
+        timing.speculative.rounds += in.rounds;
+        timing.speculative.drafted_tokens += in.drafted_tokens;
+        timing.speculative.accepted_tokens += in.accepted_tokens;
+        timing.speculative.fallback_steps += in.fallback_steps;
+        if (timing.speculative.accepted_per_position.size() < in.accepted_per_position.size()) {
+            timing.speculative.accepted_per_position.resize(in.accepted_per_position.size());
+        }
+        for (std::size_t j = 0; j < in.accepted_per_position.size(); ++j) {
+            timing.speculative.accepted_per_position[j] += in.accepted_per_position[j];
+        }
+    }
+    return timing;
+}
+
 std::vector<double> decode_output_tok_s_series(const TestResult& result) {
     std::vector<double> out;
     if (!result.test.has_decode()) { return out; }
@@ -779,6 +815,7 @@ std::string format_json(const BenchEnvironment& env, const std::string& command,
     std::ostringstream out;
     out << "{\n"
         << "  \"schema_version\": " << kSchemaVersion << ",\n"
+        << "  \"phase_timing_semantics\": \"" << kPhaseTimingSemantics << "\",\n"
         << "  \"artifact_type\": \"" << kArtifactType << "\",\n"
         << "  \"tool\": \"ninfer_bench\",\n"
         << "  \"command\": \"" << json_escape(command) << "\",\n"

@@ -483,6 +483,57 @@ qb::BenchEnvironment sample_environment() {
     return env;
 }
 
+int test_lane_service_fold() {
+    int failures = 0;
+    ninfer::GenerationResult first, second;
+    first.timings  = timings(0.125, 2.0, 5.0, 8.0);
+    second.timings = timings(0.375, 3.0, 7.0, 12.0);
+    first.timings.vision_seconds = 0.25;
+    second.timings.vision_seconds = 0.75;
+    first.generated_token_ids = {11, 12, 13};
+    second.generated_token_ids = {21, 22, 23};
+    first.speculative = speculative(2, 4, 3, 1, {2, 1});
+    second.speculative = speculative(3, 6, 4, 2, {3, 1, 0});
+    auto folded = qb::fold_lane_results({first, second}, 3);
+    failures += expect_near(folded.timings.prepare_seconds, 0.5, "lane preparation service sum");
+    failures += expect_near(folded.timings.vision_seconds, 1.0, "lane vision service sum");
+    failures += expect_near(folded.timings.prefill_seconds, 5.0, "unequal lane prefill service sum");
+    failures += expect_near(folded.timings.decode_seconds, 7.0, "shared batched decode maximum");
+    failures += expect_near(folded.timings.total_seconds, 12.0, "lane elapsed maximum unchanged");
+    failures += expect_u32(folded.generated_output_tokens, 6, "aggregate generated tokens");
+    failures += expect(folded.generated_token_ids_by_lane ==
+                           std::vector<std::vector<ninfer::TokenId>>{{11, 12, 13}, {21, 22, 23}},
+                       "lane exact outputs retained");
+    failures += expect(folded.speculative.rounds == 5 && folded.speculative.drafted_tokens == 10 &&
+                           folded.speculative.accepted_tokens == 7 && folded.speculative.fallback_steps == 3 &&
+                           folded.speculative.accepted_per_position == std::vector<std::uint64_t>{5, 2, 0},
+                       "speculative fold unchanged");
+    auto single = qb::fold_lane_results({first}, 3);
+    failures += expect_near(single.timings.prefill_seconds, 2.0, "C1 prefill unchanged");
+
+    qb::TestResult whole;
+    whole.test = {qb::TestKind::WholeInference, 100, 2, "unequal-lanes"};
+    whole.concurrency = 2;
+    // The caller replaces total_seconds with its independently measured whole wall,
+    // not a sum of service phases (which can overlap host preparation and decode).
+    folded.timings.total_seconds = 15.0;
+    whole.reps = {folded};
+    auto env = sample_environment();
+    env.concurrency = 2;
+    env.repetitions = 1;
+    const auto report = Json::parse(qb::format_json(env, "fixture", {whole}));
+    const auto& row = report.at("tests").at(0);
+    failures += expect_near(row.at("prefill_tok_s_mean").get<double>(), 40.0,
+                           "aggregate prefill divides200 tokens by5 seconds, not3");
+    failures += expect_near(row.at("decode_output_tok_s_mean").get<double>(), 4.0 / 7.0,
+                           "decode rate keeps shared round maximum");
+    failures += expect_near(row.at("whole_output_tok_s_mean").get<double>(), 0.4,
+                           "whole rate keeps independently measured wall");
+    failures += expect_near(row.at("reps").at(0).at("timings").at("vision_seconds").get<double>(),
+                           1.0, "report retains summed vision service");
+    return failures;
+}
+
 int test_report_contract() {
     int failures                   = 0;
     const qb::BenchEnvironment env = sample_environment();
@@ -495,7 +546,10 @@ int test_report_contract() {
         return fail(std::string("invalid benchmark JSON: ") + error.what());
     }
 
-    failures += expect(report.at("schema_version") == 20, "report schema v20");
+    failures += expect(report.at("schema_version") == 21, "report schema v21");
+    failures += expect(report.at("phase_timing_semantics") ==
+                           "serial-lane-service-sum_shared-decode-max_v1",
+                       "report explicitly versions phase aggregation semantics");
     failures += expect(report.at("artifact_type") == "ninfer_bench_report", "report identity");
     failures += expect(report.at("artifact").at("path") == "model.ninfer", "artifact path");
     failures += expect(report.at("load").at("target") == "qwen3_8_27b_r9700", "load target");
@@ -741,6 +795,7 @@ int main() {
     failures += test_roctx_profiler_region();
     failures += test_measurement_contract();
     failures += test_report_contract();
+    failures += test_lane_service_fold();
     failures += test_human_and_csv_reports();
     failures += test_attention_parity_selector_scope();
     return failures == 0 ? 0 : fail("ninfer_bench support contract failed");

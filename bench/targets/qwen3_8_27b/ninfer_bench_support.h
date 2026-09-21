@@ -15,7 +15,9 @@
 
 namespace ninfer::bench {
 
-inline constexpr int kSchemaVersion                   = 20;
+inline constexpr int kSchemaVersion                   = 21;
+inline constexpr std::string_view kPhaseTimingSemantics =
+    "serial-lane-service-sum_shared-decode-max_v1";
 inline constexpr std::string_view kArtifactType       = "ninfer_bench_report";
 inline constexpr std::string_view kDefaultCorpusPath  = "bench/fixtures/bench_corpus.ids";
 inline constexpr int kDecodeSeedTokens                = 1;
@@ -91,6 +93,12 @@ struct RepTiming {
     std::uint32_t generated_output_tokens = 0;
     std::vector<std::vector<TokenId>> generated_token_ids_by_lane;
 };
+
+// Prepare/vision/prefill are per-request service costs, summed across serial lane work.
+// Decode includes shared batched rounds and remains a maximum. These costs are not
+// an additive wall-time decomposition; whole inference separately measures elapsed time.
+RepTiming fold_lane_results(const std::vector<GenerationResult>& generated,
+                            std::uint32_t expected_per_lane);
 
 struct TestResult {
     BenchTest test;
