@@ -1019,7 +1019,7 @@ prefill review, preserving their remaining data dependencies.
   Reopen exact commands, artifacts, executables, receipts, planner bytes, and `auto` endpoints.
   MTP rows are optional regression diagnostics and never rank or block the base selection.
 
-- [ ] `CHUNK-PHYSICAL-12` [depends: DENSE-FLOOR-DECISION, PREFILL-CHUNK-ATTENTION] Create fresh receipt-bound N16/K16
+- [x] `CHUNK-PHYSICAL-12` [depends: DENSE-FLOOR-DECISION, PREFILL-CHUNK-ATTENTION] Create fresh receipt-bound N16/K16
   no-overwrite screen/finalist/campaign owners and run all twelve candidates at C1 over aligned
   chunks 1024, 2048, 4096, and 8192 at 8K, then both global finalists at 32K. The old
   `profiles/bench/prefill-chunk-screen-twelve-candidate-20260905` is non-runnable history.
@@ -1033,20 +1033,20 @@ prefill review, preserving their remaining data dependencies.
   Its README gives the exact ordered commands. The shared runner now checks the R9700 PCI
   identity and matching HIP ordinal rather than unstable DRM card numbering. No timing is
   credited until each report passes the existing matrix and selector validation.
-  All 48 C1/8K screen cells completed successfully on 2026-09-21; the validated screening
-  record selects global finalists 2048 and 4096. `commands.sh finalists` is the active
-  continuation. Do not rerun the completed screen or edit its frozen inputs.
-  Finalists checkpoint: the four all-Q4 profiles and mixed G16 dense/XAttention have completed
-  both 32K cells; all six favor 2048. The remaining mixed G32 and four-role profiles are pending.
-  This is not final chunk selection. Continue the existing finalist package, then `commands.sh select`.
+  All 48 C1/8K screens and 24 C1/32K finalists completed successfully on 2026-09-21.
+  Independent reconstruction and frozen-input review reported SHIP. Do not rerun this completed
+  campaign or rebuild its binaries; its results admit chunk selection, not numerical quality.
 
-- [ ] `CHUNK-SELECT` [depends: CHUNK-PHYSICAL-12] Publish one shared startup chunk through
+- [x] `CHUNK-SELECT` [depends: CHUNK-PHYSICAL-12] Publish one shared startup chunk through
   the successor `r9700-chunk-selection-panel-attention-20260921` package, maximizing the worst normalized
   throughput across the complete candidate/prompt objective set, then workspace and smaller-chunk
   tie-breaks. Bind each N16 migration receipt and the four-role planner identity. Current 4096 rows
   remain diagnostic unless selected.
   Publish to `profiles/bench/prefill-chunk-selection-panel-attention-20260921.json`;
   the 20260905 selection pipeline remains historical and is never resumed.
+  Selected 2048: global maximin 0.9959696531 versus 4096's 0.8884210782; maximum workspace
+  608,387,072 versus 813,924,352 bytes. It wins all twelve 32K pairs. Independent review SHIP.
+  Fresh chunk2048 BF16 references are required; chunk4096 references cannot be substituted.
 
 - [ ] `XATT-KEEP-DIST` [depends: CHUNK-SELECT] Validate the redesigned sparse consumer on real
   8K/32K model keep distributions and rerun affected whole evidence. Synthetic concentration and

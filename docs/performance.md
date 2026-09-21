@@ -78,7 +78,26 @@ The original package retains passed raw qualification and the subsequently repai
 fixture failure. Deferred driver VRAM teardown interrupted the first whole sequence; its completed
 8K result was retained, and only the missing P2048 pair was measured in `whole-completion`.
 These results admit the bounded-panel mechanism, not a terminal weight recipe, shared chunk,
-model-quality gate, or DFlash performance claim. The fresh twelve-profile chunk campaign follows.
+model-quality gate, or DFlash performance claim.
+
+The subsequent C1 ordinary-prefill campaign completed 48 8K screen cells (chunks 1024/2048/4096/8192)
+and 24 32K finalist cells (2048/4096), crossing all-Q4, mixed Q4/W8, and four-role FP8/Q4 with
+G16/G32 and dense/XAttention B128/S16/tau900. Each cell used one warmup and three unprofiled
+repetitions under `auto`. Shared chunk **2048** wins the complete maximin-normalized objective
+(`0.9959696531` versus `0.8884210782` for 4096), with maximum workspace 608,387,072 versus
+813,924,352 bytes. It wins eleven of twelve 8K profiles and all twelve 32K finalist pairs.
+Authority: `profiles/bench/prefill-chunk-selection-panel-attention-20260921.json`.
+
+Representative matched C1/G16/chunk2048 prefill rates (tok/s):
+
+| Recipe | 8K dense | 8K XAttention | 32K dense | 32K XAttention |
+| --- | ---: | ---: | ---: | ---: |
+| All-Q4 | 1189.0 | 1138.7 | 402.2 | 572.0 |
+| Four-role FP8/Q4 | 1302.2 | 1260.5 | 414.6 | 608.8 |
+
+XAttention is slower here at 8K but faster at 32K; these timing results do not admit its numerical
+quality or select a production recipe/group. No decode rounds or draft head execute in these
+measurements. Fresh BF16 references at chunk2048 are required before the terminal quality gate.
 
 ### Retained cache and attention evidence
 

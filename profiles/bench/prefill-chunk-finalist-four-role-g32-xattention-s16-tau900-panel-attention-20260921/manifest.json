@@ -1,0 +1,228 @@
+{
+  "artifact_type": "ninfer_bench_matrix_run",
+  "schema_version": 14,
+  "created_at_utc": "2026-09-21T20:01:09.704175+00:00",
+  "preset": "prefill-chunk",
+  "base_ranking_profile": null,
+  "base_capacity_profile": null,
+  "base_chunk_profile": "spec-none-ordinary",
+  "mtp_diagnostic_only": false,
+  "dflash_draft_tokens": null,
+  "dflash_verify_width_requested": 0,
+  "dflash_verify_width": 0,
+  "dflash_shortlist_profiles": [],
+  "repo_root": "/ssdpool2nvme/local_llm/ninfer-amd-r9700",
+  "bench": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-selection-panel-xattention-g32-20260921/bench/ninfer_bench",
+    "file_size_bytes": 5746248,
+    "sha256": "f36c8ea871ab593fa29f02d71e49a6743f9cf93a8c3ddc425f8f0005c0772e10"
+  },
+  "artifact": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer",
+    "file_size_bytes": 21553549312,
+    "sha256": "040c6e7ed29c856718a638c00181975710d987b7d5f49f4cafbdf68911f7e7d2",
+    "model_id": "qwen3.8-27b",
+    "weights_id": "r9700-q4g64-f8e4m3-four-role-n16k16-eval",
+    "conversion_receipt": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer.conversion.json",
+      "sha256": "2c5cb9f405ba581f685a96b1a2965ad3ff49b31280ebdd15d19158b6f4779c59",
+      "recipe_id": "r9700-q4g64-f8e4m3-four-role-n16k16-eval-v1",
+      "object_plan_sha256": "82692559ecd3293e68b3ea3e19df8b93b690d046bb764a476bf59178bd637227",
+      "source_artifact_sha256": "1dfe9626fd6412592f87480a2f6934e8494a4b267693a25831dff490959542ce",
+      "source_receipt_sha256": "a3bea3a6866b83bdb6ad9a382ca44b98ad009674c19a585d67ddb0f6a1ea9df7",
+      "transcoder_sha256": "e988d0ecc7d20a12728aa8313a71221eeea9c30dfff5d998020a826baab52801",
+      "selection_sha256": "b2ceeb63c581c0f26aab5a4d8c0958da34d836fcc5c47d377bce709eaf37e3e8",
+      "source_index_sha256": "77042094076611b69791a610065f28b7013b8c621795fa86ddccc8bac7d1b9df",
+      "source_ranking_sha256": "205b2d6c5b58d946c87b425578da13b5cfc32a0abe1ff201e95b47d032bf004e"
+    }
+  },
+  "required_candidate_identity": "fp8-hybrid-selection-authority",
+  "hybrid_shared_workspace_authority": {
+    "tool": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-selection-panel-xattention-g32-20260921/src/ninfer_r9700_runtime_planner_qual",
+      "file_size_bytes": 5300328,
+      "sha256": "d0bbedcb42211f72f6ca7c0e3ea35db5d63f5ce0ef8cf0e52f3031078243a450"
+    },
+    "build": {
+      "root": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-selection-panel-xattention-g32-20260921",
+      "cmake_cache": {
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-selection-panel-xattention-g32-20260921/CMakeCache.txt",
+        "file_size_bytes": 34732,
+        "sha256": "bdc097b056d421e7b36edbc0bd883b76978f0d4efedf6b6c373f48479e9c21e3"
+      },
+      "compile_commands": {
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-selection-panel-xattention-g32-20260921/compile_commands.json",
+        "file_size_bytes": 275070,
+        "sha256": "7e47c4bf7040f382e60a0a1311193c6e32a31d92b8ab55da5f4f8d660cca513b"
+      }
+    },
+    "maximum_concurrency": 4,
+    "prefill_chunks": [
+      2048,
+      4096
+    ],
+    "inventories_by_prefill_chunk": {
+      "2048": {
+        "ordinary": [
+          1,
+          2,
+          3,
+          4,
+          2048
+        ],
+        "mtp3": [
+          1,
+          2,
+          3,
+          4,
+          8,
+          12,
+          16,
+          2048
+        ]
+      },
+      "4096": {
+        "ordinary": [
+          1,
+          2,
+          3,
+          4,
+          4096
+        ],
+        "mtp3": [
+          1,
+          2,
+          3,
+          4,
+          8,
+          12,
+          16,
+          4096
+        ]
+      }
+    }
+  },
+  "corpus": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids",
+  "corpus_tokens": 65536,
+  "corpus_sha256": "27e4f63c17efe3f89b5cf278b3b1a42a737316ed4044d7d0d1d52437059d1002",
+  "dry_run": false,
+  "prepare_only": false,
+  "selected_prefill_chunk": null,
+  "power_profile": {
+    "required": "auto",
+    "sysfs_path": "/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level",
+    "observed": "auto",
+    "rechecked_after": "auto"
+  },
+  "expected_kv_value_group": 32,
+  "expected_kv_plane_layouts": {
+    "key": "token-fastest-head-major",
+    "value": "feature-fastest-page-major",
+    "value_scale": "feature-fastest-page-major"
+  },
+  "expected_q4_activation_bits": 8,
+  "expected_w8_activation_bits": 8,
+  "expected_fp8_qk_wmma_enabled": true,
+  "expected_fp8_qk_wmma_profile": "t1-ge64-t2-ge320-t3plus-stream-v1",
+  "expected_fp8_qk_wmma_t1_min_context": 64,
+  "expected_fp8_qk_wmma_t2_min_context": 320,
+  "expected_xattention_profile": "b128-s16-tau900",
+  "concurrency": [
+    1
+  ],
+  "resume": true,
+  "case_count": 2,
+  "point_count": 2,
+  "commands": [
+    {
+      "suite": "production_prefill_chunk",
+      "case": "prefill_p32768_chunk2048_ordinary",
+      "concurrency": 1,
+      "report": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/prefill-chunk-finalist-four-role-g32-xattention-s16-tau900-panel-attention-20260921/json/production_prefill_chunk/c1/prefill_p32768_chunk2048_ordinary.json",
+      "notes": "C1 spec-none ordinary Text-prefill chunk selection",
+      "performance_eligible": true,
+      "parity_role": null,
+      "dflash_draft_tokens": 0,
+      "dflash_verify_width_requested": 0,
+      "dflash_verify_width_resolved": 0,
+      "dflash_topology": null,
+      "environment": {},
+      "raw_diagnostic": null,
+      "bound_diagnostic": null,
+      "command": [
+        "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-selection-panel-xattention-g32-20260921/bench/ninfer_bench",
+        "--weights",
+        "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer",
+        "--corpus",
+        "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids",
+        "--device",
+        "0",
+        "--concurrency",
+        "1",
+        "-p",
+        "32768",
+        "--prefill-chunk",
+        "2048",
+        "--draft-tokens",
+        "0",
+        "--output",
+        "json",
+        "--output-file",
+        "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/prefill-chunk-finalist-four-role-g32-xattention-s16-tau900-panel-attention-20260921/json/production_prefill_chunk/c1/prefill_p32768_chunk2048_ordinary.json",
+        "-r",
+        "3",
+        "--warmup",
+        "1"
+      ]
+    },
+    {
+      "suite": "production_prefill_chunk",
+      "case": "prefill_p32768_chunk4096_ordinary",
+      "concurrency": 1,
+      "report": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/prefill-chunk-finalist-four-role-g32-xattention-s16-tau900-panel-attention-20260921/json/production_prefill_chunk/c1/prefill_p32768_chunk4096_ordinary.json",
+      "notes": "C1 spec-none ordinary Text-prefill chunk selection",
+      "performance_eligible": true,
+      "parity_role": null,
+      "dflash_draft_tokens": 0,
+      "dflash_verify_width_requested": 0,
+      "dflash_verify_width_resolved": 0,
+      "dflash_topology": null,
+      "environment": {},
+      "raw_diagnostic": null,
+      "bound_diagnostic": null,
+      "command": [
+        "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-selection-panel-xattention-g32-20260921/bench/ninfer_bench",
+        "--weights",
+        "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer",
+        "--corpus",
+        "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids",
+        "--device",
+        "0",
+        "--concurrency",
+        "1",
+        "-p",
+        "32768",
+        "--prefill-chunk",
+        "4096",
+        "--draft-tokens",
+        "0",
+        "--output",
+        "json",
+        "--output-file",
+        "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/prefill-chunk-finalist-four-role-g32-xattention-s16-tau900-panel-attention-20260921/json/production_prefill_chunk/c1/prefill_p32768_chunk4096_ordinary.json",
+        "-r",
+        "3",
+        "--warmup",
+        "1"
+      ]
+    }
+  ],
+  "notes": [
+    "MTP rows are optional diagnostics and never base chunk/capacity/whole ranking inputs.",
+    "Use context_decode and mtp_sweep rows only for MTP diagnostics.",
+    "tg rows use a one-token seed and report G decode tokens after the begin token.",
+    "DFlash proposal diagnostics synchronize device-to-host copies and are never timing evidence.",
+    "DFlash parity covers complete whole generations including first output, plus isolated post-seed decode IDs.",
+    "DFlash shortlist ranking admits exact-parity rows only and retains a multi-objective frontier."
+  ]
+}
