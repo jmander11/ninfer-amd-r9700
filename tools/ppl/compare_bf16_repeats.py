@@ -81,7 +81,23 @@ def load_campaign(path: Path) -> tuple[dict, dict[int, tuple[dict, Path]]]:
     command = reference_cells[0].get("command")
     if not isinstance(command, list) or not command or not isinstance(command[0], str):
         raise ValueError(f"{path} has a malformed BF16 scorer command")
-    scorer = Path(command[0])
+    identity = payload["scorers"][run.BASELINE]
+    if not isinstance(identity, dict) or not isinstance(identity.get("path"), str):
+        raise ValueError(f"{path} has a malformed BF16 scorer identity")
+    scorer = Path(identity["path"])
+    if Path(command[0]).resolve() != scorer.resolve():
+        execution = reference_cells[0].get("execution_provenance")
+        if not (
+            len(command) >= 2
+            and isinstance(command[1], str)
+            and Path(command[1]).resolve() == scorer.resolve()
+            and Path(command[0]).name.startswith("python")
+            and isinstance(execution, dict)
+            and isinstance(execution.get("python_executable"), str)
+            and Path(command[0]).resolve()
+            == Path(execution["python_executable"]).resolve()
+        ):
+            raise ValueError(f"{path} BF16 scorer command differs from its identity")
     if not scorer.is_file():
         raise ValueError(f"{path} BF16 scorer is missing: {scorer}")
     scorer_identity = {
@@ -102,7 +118,7 @@ def load_campaign(path: Path) -> tuple[dict, dict[int, tuple[dict, Path]]]:
         cells = run.load_reused_bf16_cells(
             path,
             bf16_weights=Path(_flag(command, "--weights")),
-            bf16_scorer=Path(command[0]),
+            bf16_scorer=scorer,
             scorer_identity=scorer_identity,
             ids=ids,
             corpus_provenance=corpus,

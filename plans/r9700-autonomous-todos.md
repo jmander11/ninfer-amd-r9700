@@ -1051,7 +1051,11 @@ prefill review, preserving their remaining data dependencies.
   `profiles/ppl/r9700-terminal-quality-receipt-bound-n16k16-20260921`; its independently reviewed
   `commands.sh` provides preflight, reference, quality and publish stages. Bind the measured chunk
   campaign's exact artifacts and current PPL builds. Reuse the validated 4096 BF16 reference only
-  if 4096 wins; another chunk requires fresh BF16/repeat evidence. Preserve all candidate failures
+  if 4096 wins; another chunk requires fresh BF16/repeat evidence. The package's
+  `python311-rocm-wheel-plan.md` records the conditional isolated CP311 ROCm setup and mandatory
+  full-span GDN oracle command with explicit JSON `all_pass` gating before fresh references.
+  Interpreter-prefixed repeat comparison is repaired and covered by 61 focused CPU tests;
+  no new reference environment or GPU reference result is implied. Preserve all candidate failures
   for diagnosis. The 20260905 recovery script is historical; its dense-Q4 history does not replace
   this current-build campaign. No numerical result is claimed by preparing the package.
 

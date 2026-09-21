@@ -201,6 +201,54 @@ class CompareBf16RepeatsTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "distinct fresh campaign"):
                 compare._require_distinct_campaigns(campaign, hardlink)
 
+    def test_load_campaign_resolves_scorer_under_explicit_interpreter(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            scorer = root / "ppl.py"
+            scorer.write_text("# reference scorer\n", encoding="utf-8")
+            interpreter = root / "python3.11"
+            interpreter.write_bytes(b"interpreter, not scorer")
+            campaign = root / "results.json"
+            command = [str(interpreter), str(scorer), "--weights", str(root / "weights"),
+                       "--ids", str(root / "corpus.ids"), "--device", "0"]
+            value = self.payload()
+            value.update({
+                "artifact_type": run.CAMPAIGN_ARTIFACT_TYPE,
+                "schema_version": run.CAMPAIGN_SCHEMA_VERSION,
+                "pass": True, "candidate_artifact": None,
+                "weights_inputs": {run.BASELINE: str(root / "weights")},
+                "scorers": {run.BASELINE: {
+                    "path": str(scorer.resolve()), "bytes": scorer.stat().st_size,
+                    "sha256": run.file_sha256(scorer),
+                }},
+                "cells": [
+                    {"scheme": run.BASELINE, "command": command,
+                     "execution_provenance": {"python_executable": str(interpreter)}}
+                    for _ in value["lengths"]
+                ],
+            })
+            campaign.write_text(json.dumps(value), encoding="utf-8")
+            with patch.object(run, "validate_corpus", return_value=value["corpus"]), \
+                    patch.object(run, "load_reused_bf16_cells", return_value={}) as load:
+                compare.load_campaign(campaign)
+                self.assertEqual(load.call_args.kwargs["bf16_scorer"], scorer)
+                self.assertEqual(load.call_args.kwargs["scorer_identity"],
+                                 value["scorers"][run.BASELINE])
+                # Interpreter and scorer identities must not be interchangeable.
+                for replacement in (str(root / "python-other"), str(root / "other.py")):
+                    changed = copy.deepcopy(value)
+                    index = 0 if "python-other" in replacement else 1
+                    changed["cells"][0]["command"][index] = replacement
+                    campaign.write_text(json.dumps(changed), encoding="utf-8")
+                    with self.subTest(replacement=replacement), self.assertRaisesRegex(
+                        ValueError, "scorer command differs"
+                    ):
+                        compare.load_campaign(campaign)
+                campaign.write_text(json.dumps(value), encoding="utf-8")
+                scorer.write_text("# changed scorer\n", encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "scorer bytes differ"):
+                    compare.load_campaign(campaign)
+
     def test_output_must_not_alias_either_input_campaign(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
