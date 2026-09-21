@@ -7,7 +7,9 @@ both mixed-XAttention numerical exclusions. Run only the ten eligible whole matr
 then all-repetition graph versus one eager public-token control at each eligible cell.
 
 Root owns physical execution and the separate `build.sh`; this owner never builds or reconverts.
-After all four phase-sum builds and the reviewed reporter-only source record exist:
+All four builds, host checks and bridge freeze are complete and independently reviewed. Whole
+execution is active; do not rerun its launch, host checks or freeze. The ordered producer commands
+below are retained for interpretation; the remaining stages are controls, then selection.
 
 ```sh
 bash profiles/bench/r9700-terminal-base-phase-sum-20260921/commands.sh host-checks
@@ -31,3 +33,8 @@ The retained `reporter-smoke/report.json` is the completed C2 P128+G2/schema21 i
 (chunk2048, spec-none, one repetition/no warmup, two lanes with three retained tokens each).
 The native reader accepted the corrected semantics; auto was checked before/after. This short run
 is timing-ineligible and is not a whole-campaign measurement or a reason to repeat qualification.
+
+First completed whole cell: all-Q4 dense/G16 C1, one warmup and three repetitions. Prefill/decode
+means are1196.781277/29.18881888 tok/s at8K and401.3593254/23.33524809 tok/s at32K. Every public
+token in all repetitions matches the stopped attempt's valid C1 report exactly. The native report
+is under `whole/all_q4_dense-g16/json/pareto_whole_inference/c1/`; this is not terminal selection.
