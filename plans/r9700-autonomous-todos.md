@@ -40,12 +40,12 @@ in `docs/performance.md` and `docs/maintainer/r9700-overhaul-plan.md`, not here.
   `global_maximin_whole_then_capacity_then_quality_then_canonical_v1` over the complete matched
   candidate set; quality is an admission gate, not the speed objective.
 - Canonical dense Q4 uses scalar-base/U32-voffset N16/K16 ping/pong. Its source-matched
-  C1/P2048/G0/chunk4096/spec-none result is `1904.339303 tok/s`, below the hard `2,000 tok/s` floor.
-  The bounded candidate list is exhausted and no practical ceiling was proved. The terminal
-  selection chain remains blocked until the user changes that product gate or a materially new
-  source mechanism satisfies the recorded M128N256 return bound: at most `3.18103603125 ms` per
-  matrix and at least `51.438603 ms` whole-P2048 saving with independent numerical/static evidence.
-  Crossing 2,000 permits the dependent campaign; it does not itself prove an optimization ceiling.
+  C1/P2048/G0/chunk4096/spec-none result is `1904.339303 tok/s`. On 2026-09-21 the user accepted
+  this speed and authorized one bounded review for overlooked large prefill gains, followed by
+  numerical accuracy and DFlash optimization. The 2,000+ tok/s target and unproved practical
+  ceiling no longer block chunk, accuracy, or artifact selection. Implement another prefill
+  candidate only for a concrete new mechanism with credible whole-prefill benefit; unexplained
+  theoretical headroom alone does not justify an extended search.
 - Ordinary non-speculative decode retains the selector-free `27.05729956 tok/s` result, but the
   user's 2026-09-19 direction reopens only its memory-throughput optimization as
   `BASE-DECODE-BW`. This baseline is not proof of bandwidth saturation or stall freedom.
@@ -57,8 +57,8 @@ in `docs/performance.md` and `docs/maintainer/r9700-overhaul-plan.md`, not here.
 - Dense remains the product Text-prefill route until XAttention passes matched quality, capacity,
   whole-inference, selected-profile NIAH, and cutover gates.
 
-Dependency notation is `[depends: ...]`. `DENSE-FLOOR-DECISION` is the external blocker described
-above, not an executable task. Conditional tasks retain their explicit `if:` clause.
+Dependency notation is `[depends: ...]`. `DENSE-FLOOR-DECISION` is satisfied by the user's
+2026-09-21 acceptance above. Conditional tasks retain their explicit `if:` clause.
 
 ## Mechanical continuation protocol
 
@@ -161,8 +161,8 @@ physical bandwidth saturation or stall freedom.
 
 The deterministic queue after reset is:
 
-1. finish numerical-accuracy and terminal base-artifact selection once `DENSE-FLOOR-DECISION`
-   opens that chain;
+1. complete `PREFILL-BOUNDED-REVIEW`, then the chunk selection needed for numerical accuracy and
+   terminal base-artifact selection; the accepted current speed opens this chain;
 2. immediately make `DFLASH-RECIPE`, `DFLASH-QUALITY`, and `DFLASH-WHOLE` the primary performance
    work, targeting at least `60 decode-output tok/s` at C1 with exact public greedy-token parity;
 3. retain only clearly reusable recipe-independent DFlash work while the selected artifact is
@@ -175,7 +175,22 @@ whole result proves that kernel savings alone cannot approach the terminal targe
 acceptance. Select another pre-recipe experiment only when exact retained attribution identifies a
 distinct owner and a conservative whole-round bound that can materially change the decision; use a
 fresh independently reviewed create-only package. Other remaining unchecked tasks retain their
-declared dependencies or the external `DENSE-FLOOR-DECISION`.
+declared dependencies. No absolute prefill-ceiling proof is required before proceeding.
+
+- [x] `PREFILL-BOUNDED-REVIEW` Review retained whole-prefill attribution and exhausted candidates
+  once for an overlooked large concrete gain. Record either one new mechanism with a quantitative
+  whole-prefill bound, or that no immediate implementation is justified. In the latter case proceed
+  directly to chunk selection and numerical accuracy. Preserve reusable BF16 references; later
+  changes rerun only the numerical/quality evidence affected by their arithmetic or representation.
+  CLOSED 2026-09-21: independent CPU review found no new large implementable gain. Retained Text
+  attribution is Q4 `334.763 ms`, FP8 `307.311 ms`, attention `147.247 ms`, GDN `139.397 ms`.
+  Larger Q4 tiles/pipelines, FP8 library/custom paths, fused attention and GDN alternatives already
+  have negative timing or resource evidence. Dual-FMAC's `8.144 ms` saving is an exhausted small
+  result; hypothetical peak substitution supplies no new mechanism. Evidence:
+  `profiles/rocprof/r9700-retained-production-p2048-trace-plan-20260906/evidence.json`,
+  `profiles/bench/r9700-q4-prefill-dual-fmac-whole-p2048-c1-full-v2-20260906/report.json`, and
+  `profiles/bench/r9700-fp8-gate-up-m128n256-retained-reopen-20260906/attempt-4/decision.json`.
+  Proceed to the current-build chunk campaign and numerical accuracy. No ceiling claim follows.
 
 Every future physical experiment must be launched through a reviewed package-local `commands.sh`,
 not an ad-hoc reconstructed command. A package is runnable only when its plan contains no
@@ -957,9 +972,10 @@ unresolved tradeoff or the product contract must change.
   base and exact public greedy-token parity; 60+ is the optimization target, not permission to
   waive either gate. This work targets DFlash, not MTP.
 
-## Blocked terminal-selection chain
+## Terminal-selection chain
 
-All tasks in this section directly or transitively depend on `DENSE-FLOOR-DECISION`.
+The former `DENSE-FLOOR-DECISION` prerequisite is satisfied. Execute these tasks after the bounded
+prefill review, preserving their remaining data dependencies.
 
 - [ ] `WHOLE-MATRIX` [depends: CHUNK-SELECT, QUALITY-8K32K, CAPACITY-WHOLE-12] Retain matched
   schema-v20/spec-none ordinary 8K+256 and 32K+256 whole reports for each capacity-eligible profile
@@ -1038,8 +1054,8 @@ All tasks in this section directly or transitively depend on `DENSE-FLOOR-DECISI
 
 - [ ] `LOWCTX-LADDER` [depends: TERMINAL-SELECTION] Run the exact selected dense C1/spec-none/auto
   ladder at P=128,512,1024,2048,4096 using the selected chunk through
-  `profiles/bench/low-context-selected-ladder-20260905`. Require at least 2,000 tok/s at P2048;
-  retain a complete failing result for diagnosis and do not substitute a per-repeat cutoff.
+  `profiles/bench/low-context-selected-ladder-20260905`. Record progress toward 2,000+ tok/s at
+  P2048; this performance target no longer blocks accuracy, DFlash, or artifact admission.
 
 - [ ] `PREFILL-TAIL-CONDITIONAL` [depends: SELECTED-PROFILE] [if: selected profiling shows
   nonqualified final-chunk Linear fallback is material] Qualify arbitrary-tail extensions of the

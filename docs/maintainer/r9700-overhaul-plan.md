@@ -6,6 +6,14 @@ references.
 
 ## Deliverable and decision
 
+Current priority decision (2026-09-21): the user accepts retained dense P2048 prefill at
+`1904.339303 tok/s`. Review existing attribution once for an overlooked large, concrete speed
+mechanism, then proceed to chunk selection, numerical accuracy, terminal base selection, and
+DFlash recipe/acceptance/whole optimization. The 2,000+ tok/s target remains desirable, but neither
+it nor an absolute/practical ceiling proof blocks that sequence. This decision supersedes the
+historical floor/ceiling holds and package-regeneration prohibitions recorded below. Reuse valid
+BF16 references; repeat only quality evidence affected by subsequent arithmetic or format changes.
+
 Replace the RTX 5090/CUDA implementation with one from-scratch Radeon AI PRO R9700 implementation.
 The delivered engine remains a single-GPU, single-resident-model, startup-fixed C=1..4 Qwen3.8-27B
 product. It is compiled only for RDNA 4 `gfx1201` and uses ROCm/HIP throughout. CUDA is removed;
