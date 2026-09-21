@@ -652,16 +652,27 @@ run_mixed_selection_pair 32 build-r9700-dense-selection-g32 \
 # the base recipe.
 # The selected binary applies XAttention only to ordinary Phase::Prefill (including DFlash feature
 # capture); DFlash proposal attention and target/tree verification remain dense in every build.
-# Prepare only after real terminal base and receipt-bound chunk selection. The fresh benchmark
+# Prepare only after real terminal base and receipt-bound chunk selection. The evaluator benchmark
 # and planner must include all nine evaluation companion identities and match selected G/profile.
 # The selected base's own evaluator may be reused when it already admits those recipes;
 # a different executable hash is neither required nor proof of recipe support.
+# Existing recipe-capable accounted builds work for every base recipe, including nonhybrid
+# winners whose original panel executable predates the companion IDs. Match the selected profile:
+# dense G16 -> build-r9700-fp8-accounted-g16-20260921
+# dense G32 -> build-r9700-fp8-accounted-g32-20260921
+# b128-s16-tau900 G16 -> build-r9700-fp8-accounted-xattention-g16-20260921
+# b128-s16-tau900 G32 -> build-r9700-fp8-accounted-xattention-g32-20260921
+# Use that root's bench/ninfer_bench and src/ninfer_r9700_runtime_planner_qual below;
+# no rebuild is needed. Preserve the original terminal selection and frozen panel binaries.
+# Both DFlash and matched spec-none/token-parity controls run in the chosen evaluator;
+# the old selected binary remains base-selection provenance, not the new speed control.
+# Configuration/host-planner checks do not replace actual companion loading and parity gates.
 # Conversion is explicitly CPU-only Python 3.11; provide a local dependency path if necessary.
 # Output is a new recipe-separated namespace. Preparation does not materialize or launch a GPU run.
 /home/battlefront/.local/bin/python3.11 -m tools.bench.prepare_selected_dflash prepare \
   --selection /absolute/path/to/terminal-base.json \
-  --bench /absolute/path/to/fresh-build/bench/ninfer_bench \
-  --planner /absolute/path/to/fresh-build/src/ninfer_r9700_runtime_planner_qual \
+  --bench /absolute/path/to/matching-accounted-build/bench/ninfer_bench \
+  --planner /absolute/path/to/matching-accounted-build/src/ninfer_r9700_runtime_planner_qual \
   --conversion-python /home/battlefront/.local/bin/python3.11 \
   --conversion-pythonpath /absolute/path/to/cpu-python311/site-packages \
   --out /absolute/path/to/new-dflash-campaign

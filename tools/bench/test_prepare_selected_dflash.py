@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from tools.bench import prepare_selected_dflash as prep
+from tools.bench import run_ninfer_bench_matrix as matrix
 
 
 class PreparationTest(unittest.TestCase):
@@ -86,6 +87,33 @@ class PreparationTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "overwrite"):
                 prep._write_script(output, ["false"])
             self.assertIn("true", output.read_text())
+
+    def test_new_evaluator_owns_speculative_and_ordinary_controls(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = self.plan(root)
+            old = str(root / "original-panel/bench/ninfer_bench")
+            evaluator = str(root / "accounted/bench/ninfer_bench")
+            plan["route"]["base_benchmark"] = {"path": old, "sha256": "original"}
+            plan["build"]["benchmark"] = {"path": evaluator, "sha256": "recipe-aware"}
+            for preset in ("dflash-shortlist", "dflash-pareto"):
+                output = root / preset
+                command = prep._common(plan, prep.RECIPES[0], preset, output,
+                                       4, 5, [1])
+                argv = command[command.index("tools.bench.run_ninfer_bench_matrix") + 1:]
+                self.assertEqual(matrix.main([*argv, "--dry-run"]), 0)
+                manifest = json.loads((output / "manifest.json").read_text())
+                controls = [row for row in manifest["commands"] if "control" in row["suite"]]
+                self.assertTrue(controls)
+                for row in manifest["commands"]:
+                    self.assertEqual(row["command"][0], evaluator)
+                    self.assertNotIn(old, row["command"])
+                for row in controls:
+                    args = row["command"]
+                    self.assertEqual(args[args.index("--draft-tokens") + 1], "0")
+                    self.assertNotIn("--spec", args)
+                    self.assertIn("--retain-token-ids", args)
+            self.assertEqual(plan["route"]["base_benchmark"]["path"], old)
 
     def test_existing_failed_matrix_is_preserved_without_running_or_resuming(self):
         with tempfile.TemporaryDirectory() as directory:
