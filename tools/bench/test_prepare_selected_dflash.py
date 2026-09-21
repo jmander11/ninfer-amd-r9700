@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from tools.bench import prepare_selected_dflash as prep
 from tools.bench import run_ninfer_bench_matrix as matrix
+from tools.bench import assemble_dflash_selection as selection
 
 
 class PreparationTest(unittest.TestCase):
@@ -43,8 +44,8 @@ class PreparationTest(unittest.TestCase):
         self.assertEqual(command[command.index("--prefill-chunk")+1], "2048")
         with self.assertRaises(ValueError):
             prep._common(plan, prep.RECIPES[0], "dflash-pareto", Path("/out"), 4, 6, [1])
-        with self.assertRaises(ValueError):
-            prep._common(plan, prep.RECIPES[0], "dflash-pareto", Path("/out"), 4, 5, [2])
+        followup = prep._common(plan, prep.RECIPES[0], "dflash-pareto", Path("/out"), 4, 5, [2])
+        self.assertEqual(followup[followup.index("--concurrency") + 1], "2")
 
     def test_terminal_gate_precedes_output_creation(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -115,6 +116,48 @@ class PreparationTest(unittest.TestCase):
                     self.assertIn("--retain-token-ids", args)
             self.assertEqual(plan["route"]["base_benchmark"]["path"], old)
 
+    def test_followup_dry_run_has_only_declared_non_c1_points(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "followup"
+            command = prep._common(self.plan(root), prep.RECIPES[0], "dflash-pareto",
+                                   output, 4, 5, [2, 3, 4])
+            argv = command[command.index("tools.bench.run_ninfer_bench_matrix") + 1:]
+            self.assertEqual(matrix.main([*argv, "--dry-run"]), 0)
+            manifest = json.loads((output / "manifest.json").read_text())
+            self.assertEqual(manifest["concurrency"], [2, 3, 4])
+            self.assertEqual(len(manifest["commands"]), 15)
+            self.assertEqual({row["concurrency"] for row in manifest["commands"]}, {2, 3, 4})
+            self.assertNotIn("dflash_selector_diagnostic", {row["suite"] for row in manifest["commands"]})
+            # Replay the real runner's manifest/command corpus shape. Only raw GPU
+            # result validation is replaced; no benchmark executable is launched.
+            manifest["dry_run"] = False
+            (output / "manifest.json").write_text(json.dumps(manifest))
+            def rows(path, case, group, a4, a8, fp8, c, *args):
+                if case.suite == "dflash_pareto_prefill":
+                    return []
+                phase = "whole_output" if "whole" in case.suite else "decode_output"
+                mean = 100. if "control" in case.suite else 130.
+                return [{"suite": case.suite, "label": str(prompt), "n_prompt": prompt,
+                         "n_gen": 256, "concurrency": c, "requested_output_tokens": 257,
+                         f"{phase}_tok_s_mean": mean, f"{phase}_tok_s_stddev": .1,
+                         "spec_acceptance_length": 3.} for prompt in (8192, 32768)]
+            with patch.object(selection, "_same_campaign"), \
+                 patch.object(selection, "_records"), \
+                 patch.object(selection, "_auxiliary", return_value={"parity": {}}), \
+                 patch.object(selection, "report_rows", side_effect=rows):
+                evidence = {"artifact": {}, "benchmark": {}}
+                result = selection.performance_cells(self.plan(root)["route"], evidence,
+                                                     4, 5, output, [2, 3, 4])
+                self.assertEqual(result["corpus"]["sha256"], manifest["corpus_sha256"])
+                self.assertEqual(result["declared_concurrency"], [2, 3, 4])
+                self.assertTrue(all(row["pass"] for row in result["matched_speed_by_concurrency"].values()))
+                manifest["corpus_sha256"] = "0" * 64
+                (output / "manifest.json").write_text(json.dumps(manifest))
+                with self.assertRaisesRegex(ValueError, "corpus differs"):
+                    selection.performance_cells(self.plan(root)["route"], evidence,
+                                                4, 5, output, [2, 3, 4])
+
     def test_existing_failed_matrix_is_preserved_without_running_or_resuming(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -142,10 +185,27 @@ class PreparationTest(unittest.TestCase):
                  patch.object(prep, "performance_cells", return_value={"matched_speed_by_concurrency": {"1": {"pass": True}}}):
                 prep.advance_pareto(root / "plan.json")
             script = (root / "pareto-and-select.sh").read_text()
-            self.assertIn("--concurrency 1 --concurrency 3", script)
+            self.assertIn("--concurrency 3", script)
+            self.assertNotIn("--concurrency 1", script)
             self.assertNotIn("--concurrency 2", script)
             self.assertEqual(script.count("--pareto "), 6)
             self.assertEqual(script.count("--capacity "), 6)
+
+    def test_c1_only_capacity_reuses_screen_without_empty_followup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = self.plan(root)
+            cells = [(recipe, k, w, {"eligible_concurrency": [1]})
+                     for recipe in prep.RECIPES for k, w in prep.DFLASH_PRODUCTION_PROFILES]
+            with patch.object(prep, "_load_plan", return_value=(plan, root)), \
+                 patch.object(prep, "_evidence", return_value={recipe: {} for recipe in prep.RECIPES}), \
+                 patch.object(prep, "_cells", return_value=cells), \
+                 patch.object(prep, "performance_cells", return_value={"matched_speed_by_concurrency": {"1": {"pass": True}}}):
+                prep.advance_pareto(root / "plan.json")
+            script = (root / "pareto-and-select.sh").read_text()
+            self.assertNotIn("--pareto ", script)
+            self.assertNotIn("--preset dflash-pareto", script)
+            self.assertEqual(script.count("--c1 "), 6)
 
     def test_no_k4_material_win_cannot_schedule_full_followup(self):
         with tempfile.TemporaryDirectory() as directory:

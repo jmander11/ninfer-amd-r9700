@@ -38,14 +38,17 @@ class Campaign:
             for k, w in selection.DFLASH_PRODUCTION_PROFILES:
                 chosen = recipe == self.chosen and k == 4
                 parent = root / recipe / f'k{k}-w{w}'
-                eligible = [c for c in (1, 2, 3, 4) if not (chosen and c == missing_c)]
+                missing = missing_c if isinstance(missing_c, tuple) else (missing_c,)
+                eligible = [c for c in (1, 2, 3, 4) if not (chosen and c in missing)]
                 self.write(parent / 'capacity/manifest.json', {'recipe': recipe, 'k': k, 'w': w,
                                                              'eligible': eligible})
                 self.capacities.append((recipe, k, w, parent / 'capacity'))
                 if 1 not in eligible:
                     continue
                 screen_pass = not (chosen and failed_screen)
-                for stage, concurrency in (('c1', [1]), ('pareto', eligible)):
+                for stage, concurrency in (('c1', [1]), ('pareto', [c for c in eligible if c != 1])):
+                    if not concurrency:
+                        continue
                     means = {str(c): (130. if chosen and c == 1 else 110. if chosen else 120.)
                              for c in concurrency}
                     if chosen and stage == 'pareto' and slow_c in concurrency:
@@ -53,11 +56,12 @@ class Campaign:
                     if stage == 'c1' and not screen_pass:
                         means['1'] = 101.
                     self.write(parent / stage / 'manifest.json', {
-                        'recipe': recipe, 'k': k, 'w': w, 'concurrency': concurrency, 'means': means})
+                        'recipe': recipe, 'k': k, 'w': w, 'concurrency': concurrency, 'means': means,
+                        'corpus': {'sha256': 'c' * 64, 'path': '/corpus'}})
                     for name in ('parity', 'determinism', 'generated_quality'):
                         self.write(parent / stage / f'{name}.json', {'pass': True})
                 self.screens.append((recipe, k, w, parent / 'c1'))
-                if screen_pass:
+                if screen_pass and any(c != 1 for c in eligible):
                     self.followups.append((recipe, k, w, parent / 'pareto'))
 
     @staticmethod
@@ -96,7 +100,7 @@ class Campaign:
         if value['concurrency'] != concurrency:
             raise ValueError('missing declared concurrency')
         aux = {}
-        for name in ('parity', 'determinism', 'generated_quality'):
+        for name in (('parity', 'determinism', 'generated_quality') if 1 in concurrency else ('parity',)):
             path = root / f'{name}.json'
             if json.loads(path.read_text()).get('pass') is not True:
                 raise ValueError(f'raw {name} failed')
@@ -117,6 +121,7 @@ class Campaign:
                                  f'{phase}_tok_s_stddev': .1})
             gates[str(c)] = selection._matched_ordinary_speed_gate(rows, [c])
         return {'matrix': selection._identity(root / 'manifest.json'), 'declared_concurrency': concurrency,
+                'corpus': value['corpus'],
                 'matched_speed_by_concurrency': gates, **aux,
                 'objectives': {str(c): {'whole': {'8K': value['means'][str(c)], '32K': value['means'][str(c)]},
                                       'acceptance': {'8K': 3., '32K': 3.}} for c in concurrency}}
@@ -136,6 +141,42 @@ class Campaign:
 
 
 class ResidentAdmissionTest(unittest.TestCase):
+    def test_c1_only_capacity_reuses_exact_screen_but_cannot_admit_resident(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = Campaign(Path(directory), missing_c=(2, 3, 4))
+            with fixture.patched():
+                path, value = fixture.evaluate()
+                row = next(row for row in value['candidates']
+                           if row['key'] == selection.candidate_key(fixture.chosen, 4, 5))
+                self.assertEqual(row['qualified_concurrency'], [1])
+                self.assertIsNone(row['performance']['sources']['followup'])
+                self.assertEqual(row['performance']['sources']['c1_screen'], row['c1_screen'])
+                self.assertEqual(row['performance']['objectives'], row['c1_screen']['objectives'])
+                self.assertEqual(selection.revalidate_evaluation(path), value)
+                with self.assertRaisesRegex(ValueError, 'every C1..4'):
+                    selection.admit_single_resident(path, fixture.chosen, 4, 5)
+
+    def test_missing_or_repeated_c1_followup_and_changed_corpus_rejected(self):
+        for change in ('missing', 'repeat_c1', 'corpus'):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as directory:
+                fixture = Campaign(Path(directory))
+                with fixture.patched():
+                    if change == 'missing':
+                        fixture.followups.pop(0)
+                        expected = 'lacks declared-concurrency followup'
+                    else:
+                        path = Path(directory) / fixture.chosen / 'k4-w5/pareto/manifest.json'
+                        value = json.loads(path.read_text())
+                        if change == 'repeat_c1':
+                            value['concurrency'] = [1, 2, 3, 4]
+                            expected = 'missing declared concurrency'
+                        else:
+                            value['corpus']['sha256'] = 'd' * 64
+                            expected = 'different corpora'
+                        fixture.write(path, value)
+                    with self.assertRaisesRegex(ValueError, expected):
+                        fixture.evaluate()
+
     def test_explicit_resident_all_four_even_when_not_each_frontier_winner(self):
         with tempfile.TemporaryDirectory() as directory:
             fixture = Campaign(Path(directory))
@@ -145,6 +186,9 @@ class ResidentAdmissionTest(unittest.TestCase):
                 self.assertEqual(evaluation['per_concurrency']['1']['winner'], key)
                 self.assertNotEqual(evaluation['per_concurrency']['4']['winner'], key)
                 self.assertFalse(evaluation['production_selected'])
+                chosen = next(row for row in evaluation['candidates'] if row['key'] == key)
+                self.assertEqual(chosen['performance']['sources']['followup']['declared_concurrency'], [2, 3, 4])
+                self.assertEqual(chosen['performance']['sources']['c1_screen'], chosen['c1_screen'])
                 output = Path(directory) / 'resident.json'
                 selection.main(['admit', '--evaluation', str(path), '--recipe', fixture.chosen,
                                 '--draft-tokens', '4', '--verify-width', '5', '--out', str(output)])
@@ -189,7 +233,8 @@ class ResidentAdmissionTest(unittest.TestCase):
                     path, _ = fixture.evaluate()
                     result = selection.admit_single_resident(path, fixture.chosen, 4, 5)
                     output = fixture.write(Path(directory) / 'resident.json', result)
-                    fixture.write(Path(directory) / fixture.chosen / 'k4-w5/pareto' / f'{proof}.json', {'pass': False})
+                    stage = 'pareto' if proof == 'parity' else 'c1'
+                    fixture.write(Path(directory) / fixture.chosen / f'k4-w5/{stage}' / f'{proof}.json', {'pass': False})
                     with self.assertRaisesRegex(ValueError, f'raw {proof} failed'):
                         cutover.revalidate_dflash(output)
 

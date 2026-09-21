@@ -109,8 +109,6 @@ def _common(plan: dict, recipe: str, preset: str, out: Path,
         candidate_key(recipe, k, w)
         if not concurrency or concurrency != sorted(set(concurrency)) or any(c not in (1,2,3,4) for c in concurrency):
             raise ValueError("explicit declared concurrency is required")
-        if preset == "dflash-pareto" and 1 not in concurrency:
-            raise ValueError("performance requires declared C1")
         command += ["--dflash-draft-tokens", str(k), "--dflash-verify-width", str(w)]
         command += [item for c in concurrency for item in ("--concurrency", str(c))]
     return command
@@ -252,6 +250,9 @@ def advance_pareto(path: Path) -> None:
     licensed = any(k == 4 for _, k, _, _ in survivors)
     lines = [_stage(plan, root, "validate-plan")]
     for recipe, k, w, concurrency in survivors if licensed else []:
+        concurrency = [c for c in concurrency if c != 1]
+        if not concurrency:
+            continue
         output = root / recipe / f"pareto-k{k}-w{w}"
         lines += [_matrix_shell(_common(plan, recipe, "dflash-pareto", output, k, w, concurrency), output)]
         assembly += ["--pareto", recipe, str(k), str(w), str(output)]

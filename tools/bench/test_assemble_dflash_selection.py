@@ -106,7 +106,7 @@ class DFlashSelectionTest(unittest.TestCase):
         def performance(route, evidence, k, w, root, declared):
             # Canonical K4 is C1 winner but slower at C2, without erasing its C1 result.
             fastest = evidence["recipe"] == selection.RECIPES[0] and k == 4
-            return {"declared_concurrency": declared,
+            return {"declared_concurrency": declared, "corpus": {"sha256": "same"},
                 "matched_speed_by_concurrency": {str(c): {"pass": c1_win and not (fastest and c == 2)} for c in declared},
                 "objectives": {str(c): {"whole": {"8K": 150 if fastest else 120, "32K": 150 if fastest else 120},
                             "acceptance": {"8K": 3., "32K": 3.}} for c in declared}}

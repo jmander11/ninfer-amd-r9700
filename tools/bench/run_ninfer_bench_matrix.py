@@ -738,10 +738,10 @@ def validate_fp8_hybrid_performance_contract(args: argparse.Namespace) -> None:
                 or args.prefill_chunk[0] not in PRODUCTION_PREFILL_CHUNKS):
             raise SystemExit(f"hybrid {args.preset} requires one selected prefill chunk")
     elif args.preset == "dflash-pareto":
-        if (not args.concurrency or 1 not in args.concurrency
+        if (not args.concurrency
                 or sorted(set(args.concurrency)) != args.concurrency
                 or any(c not in PRODUCT_CONCURRENCIES for c in args.concurrency)):
-            raise SystemExit("hybrid DFlash Pareto requires a declared sorted C subset including C1")
+            raise SystemExit("hybrid DFlash Pareto requires a declared sorted product C subset")
         if (
             not args.prefill_chunk
             or len(args.prefill_chunk) != 1
@@ -3981,7 +3981,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
 
     determinism_payload: dict[str, Any] | None = None
-    if args.preset == "dflash-pareto":
+    if args.preset == "dflash-pareto" and 1 in args.concurrency:
         try:
             determinism_payload, determinism_failures = write_dflash_determinism(
                 out_dir, command_records, artifact=artifact_provenance, bench=bench_provenance

@@ -11,7 +11,7 @@ import pytest
 from tools.bench import validate_final_cutover_admission as gate
 
 
-@pytest.mark.parametrize("schema", [3, 4])
+@pytest.mark.parametrize("schema", [3, 4, 5])
 def test_dflash_evaluation_cannot_admit_one_resident_production_companion(tmp_path, schema):
     path = tmp_path / "dflash.json"
     path.write_text(json.dumps({"artifact_type": "ninfer_r9700_dflash_selection",

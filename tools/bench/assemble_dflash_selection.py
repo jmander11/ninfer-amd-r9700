@@ -50,7 +50,7 @@ from tools.ppl.pareto import validate_terminal_production_authority
 
 
 ARTIFACT_TYPE = "ninfer_r9700_dflash_selection"
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 RULE = "qualified_recipe_kw_primary_c1_and_per_concurrency_maximin_v4"
 MATERIAL_SPEEDUP = 1.02
 UNCERTAINTY_SIGMAS = 2.0
@@ -404,8 +404,8 @@ def _auxiliary(
     parity_path = root / "greedy-token-parity.json"
     determinism_path = root / "dflash-proposal-determinism.json"
     quality_path = root / "dflash-generated-quality.json"
-    parity, determinism, quality = map(_load, (parity_path, determinism_path, quality_path))
-    for value in (parity, determinism, quality):
+    parity = _load(parity_path)
+    for value in (parity,):
         if value.get("artifact") != artifact or value.get("benchmark_executable") != bench:
             raise ValueError("DFlash auxiliary evidence provenance mismatch")
         if value.get("pass") is not True:
@@ -425,6 +425,22 @@ def _auxiliary(
                for row in comparisons)
     ):
         raise ValueError("DFlash ordinary-output parity is incomplete")
+    # C2..4-only followups retain their own exact public-output parity. The C1
+    # screen owns the two proposal traces and their generated-quality proof;
+    # assembly replays that screen rather than repeating unchanged GPU work.
+    if 1 not in required_concurrency:
+        with tempfile.TemporaryDirectory() as directory:
+            recomputed, failures = write_dflash_greedy_parity(
+                Path(directory), manifest["commands"], artifact=artifact, bench=bench)
+        if failures or recomputed != parity:
+            raise ValueError("DFlash followup parity differs from recomputed raw reports")
+        return {"parity": _identity(parity_path)}
+    determinism, quality = map(_load, (determinism_path, quality_path))
+    for value in (determinism, quality):
+        if value.get("artifact") != artifact or value.get("benchmark_executable") != bench:
+            raise ValueError("DFlash auxiliary evidence provenance mismatch")
+        if value.get("pass") is not True:
+            raise ValueError("DFlash auxiliary evidence did not pass")
     det_rows = determinism.get("comparisons")
     if (
         determinism.get("artifact_type") != "ninfer_dflash_proposal_determinism"
@@ -736,13 +752,20 @@ def performance_cells(route: dict, evidence: dict, k: int, w: int, root: Path,
                       concurrency: Sequence[int]) -> dict:
     """Declared capacity decisions define completeness; successful reports never define it."""
     concurrency = list(concurrency)
-    if not concurrency or 1 not in concurrency:
-        raise ValueError("DFlash advancement requires eligible C1")
+    if (not concurrency or concurrency != sorted(set(concurrency))
+            or any(type(c) is not int or c not in PRODUCT_CONCURRENCIES for c in concurrency)):
+        raise ValueError("DFlash performance requires a declared sorted product C subset")
     chunk = route["selected_prefill_chunk"]
     manifest = _matrix(root, "dflash-pareto", k, w, prefill_chunk=chunk)
     _same_campaign(manifest, evidence["artifact"], evidence["benchmark"], route["cache_group"],
                    route["text_prefill_attention_profile"], chunk,
                    route["hybrid_base_authority"], [w])
+    corpus = _identity(Path(manifest["corpus"]))
+    if (manifest.get("corpus_sha256") != corpus["sha256"]
+            or any([value for key, value in zip(record["command"], record["command"][1:])
+                       if key == "--corpus"] != [corpus["path"]]
+                   for record in manifest["commands"])):
+        raise ValueError("DFlash performance corpus differs from its bound commands")
     _records(root, manifest, "dflash-pareto", k, w, chunk, required_concurrency=concurrency)
     aux = _auxiliary(root, manifest, evidence["artifact"], evidence["benchmark"], k, w, concurrency)
     cases = {(case.suite, case.name): case for case in
@@ -767,7 +790,8 @@ def performance_cells(route: dict, evidence: dict, k: int, w: int, root: Path,
                        or value < 1 or value > k + 1 for value in acceptance.values())):
             raise ValueError("declared performance cell lacks complete finite whole/acceptance evidence")
         objectives[str(c)] = {"whole": whole, "acceptance": acceptance}
-    return {"matrix": _identity(root / "manifest.json"), "declared_concurrency": concurrency,
+    return {"matrix": _identity(root / "manifest.json"), "corpus": corpus,
+            "declared_concurrency": concurrency,
             "matched_speed_by_concurrency": gates, "objectives": objectives, **aux}
 
 
@@ -838,10 +862,25 @@ def assemble(base_selection: Path,
                 screen = screens[key]
                 row["c1_screen"] = screen
                 if screen["matched_speed_by_concurrency"]["1"]["pass"] and has_material_k4:
-                    expected_pareto.add(key)
-                    if key not in paretos:
-                        raise ValueError("C1 material survivor lacks declared-concurrency followup")
-                    performance = performance_cells(route, recipes[recipe], k, w, paretos[key], declared)
+                    remaining = [c for c in declared if c != 1]
+                    followup = None
+                    if remaining:
+                        expected_pareto.add(key)
+                        if key not in paretos:
+                            raise ValueError("C1 material survivor lacks declared-concurrency followup")
+                        followup = performance_cells(route, recipes[recipe], k, w,
+                                                     paretos[key], remaining)
+                        if followup["corpus"] != screen["corpus"]:
+                            raise ValueError("DFlash C1 screen and followup use different corpora")
+                    performance = {
+                        "sources": {"c1_screen": screen, "followup": followup},
+                        "declared_concurrency": declared,
+                        "matched_speed_by_concurrency": {
+                            **screen["matched_speed_by_concurrency"],
+                            **(followup["matched_speed_by_concurrency"] if followup else {})},
+                        "objectives": {**screen["objectives"],
+                                       **(followup["objectives"] if followup else {})},
+                    }
                     row["performance"] = performance
                     for c in declared:
                         gate = performance["matched_speed_by_concurrency"][str(c)]
@@ -889,7 +928,7 @@ def _bound_evidence_path(binding: dict, label: str) -> Path:
 
 
 def revalidate_evaluation(path: Path) -> dict:
-    """Rebuild schema-v4 from its original inputs, including all raw numerical gates."""
+    """Rebuild schema-v5 from its original inputs, including all raw numerical gates."""
     path = path.resolve(strict=True)
     before = _identity(path)
     value = _load(path)
@@ -897,7 +936,7 @@ def revalidate_evaluation(path: Path) -> dict:
             or value.get("schema_version") != SCHEMA_VERSION
             or value.get("production_selected") is not False
             or value.get("selection_rule") != RULE):
-        raise ValueError("single-resident admission requires current evaluation-only schema-v4")
+        raise ValueError("single-resident admission requires current evaluation-only schema-v5")
     try:
         base = _bound_evidence_path(value["selected_base"]["terminal_selection"], "base selection")
         recipes = value["recipes"]
@@ -920,10 +959,15 @@ def revalidate_evaluation(path: Path) -> dict:
             if row["key"] != key or key in observed:
                 raise ValueError("DFlash evaluation has duplicate or mixed recipe/K/W identities")
             observed.add(key)
-            for field in inputs:
+            for field in ("capacity", "c1_screen"):
                 if field == "capacity" or field in row:
                     root = _bound_evidence_path(row[field]["matrix"], field).parent
                     inputs[field].append((recipe, k, w, root))
+            if "performance" in row:
+                followup = row["performance"]["sources"]["followup"]
+                if followup is not None:
+                    root = _bound_evidence_path(followup["matrix"], "followup").parent
+                    inputs["performance"].append((recipe, k, w, root))
         if observed != expected:
             raise ValueError("DFlash evaluation candidate inventory changed")
         rebuilt = assemble(base, recipe_inputs, inputs["capacity"], inputs["c1_screen"],

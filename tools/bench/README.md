@@ -681,6 +681,8 @@ run_mixed_selection_pair 32 build-r9700-dense-selection-g32 \
 # 131072-row head/token map, BF16 selector codebooks and private BF16 state.
 # Exactly K4/W5 and K5/W6 are screened. Capacity declares per-cell eligible concurrency;
 # C1 material screens precede full followups. No K4 C1 win means no full followup.
+# A passing screen is reused unchanged: followups run only capacity-eligible C2..4.
+# C1-only capacity needs no further run; its screen remains the complete C1 evidence.
 # Generated execution is create-only: it never resumes or overwrites an existing failed matrix.
 # Preserve failed attempts; use a fresh campaign namespace for another physical attempt.
 # Historical profiles/bench/selected-dflash-prepare-20260905 is superseded: never resume it.
@@ -1143,6 +1145,73 @@ acceptance/throughput as regression evidence. DFlash is the only speculative bac
 optimization and admission work; no standalone MTP shortlist-head trace or precision branch is
 scheduled or accepted as terminal evidence.
 
+For the current selected route, use fresh namespaces rather than the dated 20260905 launchers.
+After schema-v7 selection exists, the following commands prepare evidence without launching a GPU
+workload (the decode build command compiles a separate attribution-only binary):
+
+```bash
+NINFER_PROFILE_SELECTION=profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921/select/result.json
+NINFER_PROFILE_PYTHON=/home/battlefront/.local/bin/python3.11
+"$NINFER_PROFILE_PYTHON" -m tools.bench.prepare_selected_static_audit \
+  --selection "$NINFER_PROFILE_SELECTION" \
+  --out profiles/bench/r9700-selected-hardware-static-20260921.json
+"$NINFER_PROFILE_PYTHON" -m tools.bench.prepare_selected_hardware_trace \
+  --selection "$NINFER_PROFILE_SELECTION" \
+  --out profiles/rocprof/r9700-selected-hardware-trace-20260921
+mkdir profiles/rocprof/r9700-selected-decode-profile-build-20260921
+"$NINFER_PROFILE_PYTHON" -m tools.bench.build_selected_decode_profile \
+  --selection "$NINFER_PROFILE_SELECTION" \
+  --out profiles/rocprof/r9700-selected-decode-profile-build-20260921/receipt.json
+"$NINFER_PROFILE_PYTHON" -m tools.bench.prepare_selected_decode_memory_profile \
+  --selection "$NINFER_PROFILE_SELECTION" \
+  --profile-build-receipt profiles/rocprof/r9700-selected-decode-profile-build-20260921/receipt.json \
+  --out profiles/rocprof/r9700-selected-decode-memory-20260921
+```
+
+Prepare the selected C1 8K/32K whole traces from their measured ordinary matrix (no GPU launch):
+
+```bash
+/home/battlefront/.local/bin/python3.11 - <<'PY'
+import json
+from pathlib import Path
+from tools.bench.verify_selected_hardware_use import selected_route
+from tools.bench.prepare_whole_profile import prepare
+selection = Path('profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921/select/result.json').resolve()
+route = selected_route(selection)
+sources = json.loads(selection.read_text())['source_provenance']
+source = next(row for row in sources if row['candidate'] == route['winner'])
+matrix = Path(source['matrices']['pareto-whole']['path']).parent
+for prompt in (8192, 32768):
+    prepare(matrix, Path(f'profiles/rocprof/r9700-selected-whole-p{prompt}-20260921'),
+        concurrency=1, prompt_tokens=prompt, generated_tokens=256, kind='trace',
+        question='Separate selected prefill, ordinary decode, host gaps and transfers',
+        expected_weights_id=route['weights_id'], expected_kv_value_group=route['kv_value_group'],
+        expected_xattention_profile=route['xattention_profile'],
+        expected_prefill_chunk=route['prefill_chunk'])
+PY
+```
+
+Run each generated whole-trace `commands.sh` serially under `auto` only after preparation.
+The admitted DFlash route is profiled later from its own measured `dflash-pareto` matrix and exact
+selected K/W; these ordinary controls do not substitute for speculative-route evidence.
+
+The static producer safely extracts only the selected binary's gfx1201 code objects and records
+exact symbol intervals, opcodes and emitted resources. Its selected-only audit replaces the old
+twelve-candidate audit; the hardware verifier re-extracts and recomputes these proofs. Dense P2048
+uses BK32 (32 BF16 WMMA sites), not the old BK16 proof. Emitted VGPR counts are not physical
+occupancy claims. ISA presence does not prove execution, appended-panel correctness, or speed;
+the separate trace/reconciliation and retained numerical qualification supply those distinct
+claims. Pass the fresh audit to `verify_selected_hardware_use --static-audit` with the actual
+selected reconciliation and, for hybrid weights, both matching loaded-FP8 proofs.
+
+With exclusive GPU ownership, `bash profiles/rocprof/r9700-selected-hardware-trace-20260921/commands.sh`
+collects the auto-mode P2048 hardware trace. The decode-memory `commands.sh` is a separate C1..4
+8K+256 attribution capture: it requires `sudo -v` and explicit authorization to temporarily write
+`profile_standard` to the R9700 PCI power path, then restores and verifies `auto`. Do not execute
+that script without the required privilege/authorization. Its timings cannot admit a performance
+route; all performance authorities remain unprofiled `auto` measurements. Known-unavailable
+absolute GDDR6 bandwidth and complete stall-freedom counters remain unavailable, not zero.
+
 The hardware-use evidence assembler rehashes every nested file snapshot again after all reads,
 refuses an existing or dangling output path, and assigns every reconciled dispatch to exactly one
 static report. Modeled, unmodeled, and unsupported dispatches all require intended-hardware
@@ -1241,7 +1310,7 @@ applicable: DFlash changes proposal execution rather than the teacher-forced tar
 whose BF16-source comparison remains owned by the base artifact PPL campaign. Diagnostic timing is
 explicitly ineligible for performance comparison.
 
-The schema-v4 assembler reopens all raw reports and manifests. Inputs are keyed by recipe/K/W:
+The schema-v5 assembler reopens all raw reports and manifests. Inputs are keyed by recipe/K/W:
 three `--recipe RECIPE CONVERSION SHORTLIST` bindings, six `--capacity RECIPE K W DIR` bindings,
 and `--c1` / `--pareto` bindings with the same four arguments for the explicitly advanced cells.
 Capacity errors retain exact failed command/log evidence; they exclude only the affected C cell.
@@ -1249,7 +1318,12 @@ The preparation stages are `advance-capacity`, `advance-c1`, and `advance-pareto
 `--plan plan.json`. The latter generates the complete assembly command. They never infer an
 eligible subset from successful measurement files. All declared phase/control/diagnostic points,
 exact ordinary-output parity, repeated proposal/licensed-target determinism and generated-quality
-evidence are mandatory.
+evidence are mandatory. The C1 screen already measures the same complete `dflash-pareto` workload,
+so it is reused, not repeated. Followups declare only capacity-eligible C2..4 and write their own
+exact ordinary-token parity; the C1-only proposal/generated-quality proof stays in the screen.
+Schema-v5 retains both original source manifests and merges their per-C speed/objective cells
+only after replaying those gates under the same artifact, evaluator, profile, chunk and corpus.
+If capacity admits only C1, omit `--pareto`: the screen alone supplies that evaluation cell.
 
 At each C, both 8K/32K whole and isolated-decode means must exceed same-build ordinary controls
 by at least 1.02x, with a strictly positive two-standard-deviation conservative speedup.
@@ -1268,7 +1342,7 @@ Mixing per-C recipes/widths or selecting a narrower supported concurrency contra
 
 ```sh
 /home/battlefront/.local/bin/python3.11 -m tools.bench.assemble_dflash_selection admit \
-  --evaluation /absolute/path/to/schema-v4-dflash-evaluation.json \
+  --evaluation /absolute/path/to/schema-v5-dflash-evaluation.json \
   --recipe source-mse-w8g32 --draft-tokens 4 --verify-width 5 \
   --out /absolute/path/to/single-resident-admission.json
 /home/battlefront/.local/bin/python3.11 -m tools.bench.assemble_dflash_selection validate-admission \
@@ -1280,7 +1354,7 @@ and reconstructs its original bound inputs and raw gates; it writes a distinct s
 `ninfer_r9700_dflash_single_resident_admission` authority exclusively. The validation action is
 read-only and repeats that evidence replay. Pass this admission path as the final-cutover plan's
 `dflash` input. The consumer recomputes it and binds the exact terminal base/artifact, cache group,
-attention profile and chunk. Bare historical schema-v3 and evaluation-only schema-v4 records remain
+attention profile and chunk. Historical evaluations and bare evaluation-only schema-v5 records remain
 rejected. This authorizes one resident companion profile, not final artifact publication by itself.
 
 The `concurrency` preset is a phase decomposition, not a whole-request latency measurement. Its

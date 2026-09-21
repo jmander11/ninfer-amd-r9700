@@ -573,7 +573,7 @@ eligibility, exact ordinary-output parity, exact repeated proposal/target determ
 generated-quality evidence. `prepare_selected_dflash.py` now prepares three recipe-separated,
 create-only CPU conversions using an explicit Python 3.11 environment and a fresh matching
 benchmark/planner build. Its schema-v2 plan validates the real terminal base and chunk before
-conversion. The schema-v4 `assemble_dflash_selection.py` recomputes the resulting evidence;
+conversion. The schema-v5 `assemble_dflash_selection.py` recomputes the resulting evidence;
 historical fixed-Q4/K1..11 packages remain superseded. Whole parity covers the complete requested generation
 including its first output token; isolated decode parity covers all 257 post-seed outputs, with seed
 equality inherited from deterministic whole-route parity. Before frontier ranking, each admitted cell must provide at least
@@ -588,15 +588,17 @@ all exclusions, including a primary winner that is unsupported or slower at C2..
 dynamic recipe switching, an all-C production claim, or final production promotion.
 
 The assembler's separate `admit` action requires an explicit recipe and K/W pair. It reopens
-schema-v4 evaluation and reconstructs all conversion, shortlist, capacity, C1-screen and followup
+schema-v5 evaluation and reconstructs all conversion, shortlist, capacity, C1-screen and followup
 inputs, then recomputes the raw gates. One chosen companion must qualify for every supported
 startup concurrency C1..4: complete capacity, exact ordinary-output parity, proposal determinism,
 generated-quality evidence, a material C1 win, and the existing matched 8K/32K whole/decode speed
 gates at all four C values. A candidate need not win every per-C frontier, but cells from different
 recipes or K/W pairs cannot be combined and the supported concurrency contract cannot be reduced.
 The distinct schema-v1 single-resident admission binds that explicit resident to the terminal base
-and all qualified evidence; schema-v4 stays evaluation-only. Final cutover revalidates this
-admission instead of accepting a bare historical schema-v3 or schema-v4 evaluation. Admission
+and all qualified evidence; schema-v5 stays evaluation-only. Its C1 screen is reused unchanged;
+only remaining capacity-eligible C2..4 run followups. Both original manifests are retained,
+with screen-owned proposal/generated-quality proof and per-stage raw ordinary-token parity.
+Final cutover revalidates this admission instead of accepting a bare evaluation. Admission
 does not rename/materialize a production artifact or satisfy the other final-cutover gates.
 
 The first kernel hypothesis after prefill closes is a packed-W4 small-T route. Current A8Q4 WMMA

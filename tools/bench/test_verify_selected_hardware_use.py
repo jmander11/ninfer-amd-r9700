@@ -15,7 +15,7 @@ from tools.bench.verify_selected_hardware_use import sha, snapshot, verify
 Q4_CTA = "_Z_a8q4g64_linear_prefill_cta_kernel"
 Q4_WAVE = "_ZN6ninfer3ops5r97006linear12_GLOBAL__N_128a8q4g64_linear_wmma32_kernelEPKhS5_PKtPKjS5_S7_P12hip_bfloat16jjj"
 W8_CTA = "_Z_a8w8g32_linear_prefill_cta_kernel"
-DENSE_QK = "_Z_dense_full_score_qk_kernel"
+DENSE_QK = "_Z_dense_full_score_qk_bk32_kernel"
 XRANK = "_Z_xattention_rank_kernel"
 XCONSUMER = "_Z_xattention_flash_consumer_kernel"
 FP8_GATE = "Cijk_fp8_gate"
@@ -91,6 +91,8 @@ class SelectedHardwareUseTest(unittest.TestCase):
                            else ("w8_linear" if symbol == W8_CTA else "other"),
                            "resources": ({"vgpr_count": 88, "lds_bytes": 17152,
                                           "scratch_bytes": 0} if symbol == Q4_CTA else
+                                         {"vgpr_count": 65, "lds_bytes": 0,
+                                          "scratch_bytes": 0} if symbol == Q4_WAVE else
                                          {"vgpr_count": 50, "lds_bytes": 4352,
                                           "scratch_bytes": 0} if symbol == W8_CTA else
                                          {"sgpr_count": 128, "vgpr_count": 192,
@@ -118,7 +120,7 @@ class SelectedHardwareUseTest(unittest.TestCase):
                                "scratch_bytes": 0},
             "q4_wave32": {"code_symbol": Q4_WAVE,
                             "opcode": "v_wmma_i32_16x16x32_iu4", "opcode_sites": 4,
-                            "vgpr": 64, "lds_bytes": 0, "private_bytes": 0},
+                            "vgpr": 65, "lds_bytes": 0, "private_bytes": 0},
             "w8_p2048_cta": {"code_symbol": W8_CTA,
                               "opcode": "v_wmma_i32_16x16x16_iu8", "opcode_sites": 2,
                               "vgpr": 50, "lds_bytes": 4352, "private_bytes": 0,
@@ -127,18 +129,18 @@ class SelectedHardwareUseTest(unittest.TestCase):
                                   "fp8_wmma_sites": 1,
                                   "packed_fp8_conversion_opcode": "v_cvt_pk_fp8_f32",
                                   "packed_fp8_conversion_sites": 8},
-            "dense_initial_prefix_qk": {"code_symbol": DENSE_QK,
+            "dense_panel_qk": {"code_symbol": DENSE_QK,
                                          "opcode": "v_wmma_f32_16x16x16_bf16",
-                                         "opcode_sites": 16},
+                                         "opcode_sites": 32},
             "xattention_rank": {"code_symbol": XRANK,
                                   "opcode": "v_wmma_f32_16x16x16_bf16",
                                   "opcode_sites": 2},
-            "xattention_flash_consumer": {"g16_code_symbol": XCONSUMER,
+            "xattention_flash_consumer": {"code_symbol": XCONSUMER,
                                             "opcode": "v_wmma_f32_16x16x16_bf16",
-                                            "opcode_sites_each": 16},
+                                            "opcode_sites": 16},
         }
         audit = self.write(root / "audit.json", {
-            "schema": "ninfer.r9700.twelve_candidate_hardware_path_static_audit.v1",
+            "schema": "ninfer.r9700.selected_hardware_path_static_audit.v1",
             "status": "static_preflight_pass_terminal_dispatch_proof_pending",
             "benchmark_executables": [{"profile": profile,
                                         "sha256": route["executable"]["sha256"]}],
@@ -313,7 +315,7 @@ class SelectedHardwareUseTest(unittest.TestCase):
             value["dispatches"] = [row for row in value["dispatches"]
                                    if Q4_WAVE not in row["symbol"]]
             self.write(fixture["reconciliation"], value)
-            with self.assertRaisesRegex(ValueError, "required symbol"):
+            with self.assertRaisesRegex(ValueError, "Q4 wave32 resources"):
                 self.run_fixture(fixture)
 
     def test_rejects_recipe_inconsistent_operation_and_conditional_proof_drift(self) -> None:

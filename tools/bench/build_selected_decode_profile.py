@@ -23,9 +23,6 @@ from tools.bench.run_ninfer_bench_matrix import inspect_executable
 from tools.ppl.pareto import load_payload, validate_terminal_production_authority
 
 REPO = Path(__file__).resolve().parents[2]
-EXPECTED_RECEIPT = (
-    REPO / "profiles/rocprof/selected-ordinary-decode-profile-build-20260905/receipt.json"
-)
 FINALIST_TOKEN = "prefill-chunk-selection-pipeline-20260905/run-finalists.sh"
 
 
@@ -101,8 +98,8 @@ def publish(path: Path, value: dict, validator: Callable[[Path], None]) -> None:
 def build(selection_path: Path, output: Path) -> dict:
     selection_path = selection_path.resolve(strict=True)
     output = lexical_absolute(output)
-    if output != EXPECTED_RECEIPT or not output.parent.is_dir() or output.parent.is_symlink():
-        raise ValueError("profile-build receipt must use its fixed prepared package path")
+    if not output.parent.is_dir() or output.parent.is_symlink():
+        raise ValueError("profile-build receipt requires an existing regular parent directory")
     if os.path.lexists(output):
         raise ValueError("profile-build receipt namespace is already occupied")
     if finalist_campaign_is_live():

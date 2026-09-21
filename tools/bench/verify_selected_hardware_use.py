@@ -24,7 +24,7 @@ from tools.bench.run_ninfer_bench_matrix import (
 )
 
 
-AUDIT_SCHEMA = "ninfer.r9700.twelve_candidate_hardware_path_static_audit.v1"
+AUDIT_SCHEMA = "ninfer.r9700.selected_hardware_path_static_audit.v1"
 RECONCILIATION_SCHEMA = "ninfer_qwen3_8_27b_dispatch_reconciliation"
 OUTPUT_SCHEMA = "ninfer_r9700_selected_hardware_use"
 HYBRID_ID = "r9700-q4g64-f8e4m3-four-role-n16k16-eval"
@@ -64,6 +64,7 @@ def _machine_interval(path: Path, symbol: str) -> dict[str, Any]:
 
 def _selected_embedded_static(executable: Path, profile: str, audit: dict[str, Any],
                               proofs: dict[str, Any], required: list[str]) -> dict[str, Any]:
+    from tools.bench.prepare_selected_static_audit import inspect_symbol
     embedded = audit.get("embedded_code_objects")
     if not isinstance(embedded, dict):
         raise ValueError("static audit lacks selected embedded code-object identities")
@@ -71,7 +72,7 @@ def _selected_embedded_static(executable: Path, profile: str, audit: dict[str, A
         ("linear_by_profile", "q4_p2048_cta",
          ["q4_p2048_cta", "q4_wave32", "w8_p2048_cta"]),
         ("attention_by_profile", "ordinary_fp8_qk",
-         ["ordinary_fp8_qk", "dense_initial_prefix_qk"]),
+         ["ordinary_fp8_qk", "dense_panel_qk"]),
     ]
     if profile.startswith("xattention-"):
         groups.append(("xattention_by_profile", "xattention_rank",
@@ -90,17 +91,13 @@ def _selected_embedded_static(executable: Path, profile: str, audit: dict[str, A
                 if name not in required and name not in ("ordinary_fp8_qk", "q4_p2048_cta"):
                     continue
                 proof = proofs[name]
-                symbol = (proof.get(f"g{16 if profile.endswith('g16') else 32}_code_symbol")
-                          if name == "xattention_flash_consumer" else proof.get("code_symbol"))
+                symbol = proof.get("code_symbol")
                 if not isinstance(symbol, str):
                     raise ValueError(f"static proof {name} lacks selected code symbol")
                 actual = _machine_interval(code, symbol)
-                expected_sha = (proof.get("g16_machine_sha256")
-                                if name == "xattention_flash_consumer" and profile.endswith("g16")
-                                else proof.get("g32_machine_sha256")
-                                if name == "xattention_flash_consumer"
-                                else proof.get("machine_sha256_all_four",
-                                               proof.get("machine_sha256_both_sparse_builds")))
+                if inspect_symbol(code, symbol, name) != proof:
+                    raise ValueError(f"selected {name} ISA/resources differ from static audit")
+                expected_sha = proof.get("machine_sha256")
                 if (not isinstance(expected_sha, str) or actual["machine_sha256"] != expected_sha
                         or ("machine_bytes" in proof
                             and actual["machine_bytes"] != proof["machine_bytes"])):
@@ -350,7 +347,7 @@ def verify(selection_path: Path, reconciliation_path: Path, audit_path: Path,
     if route["weights_id"] == "r9700-q4-w8-mse-n16k16-eval":
         required.append("w8_p2048_cta"); symbol_tokens.append("a8w8g32_linear_prefill_cta_kernel")
     if route["xattention_profile"] == "dense":
-        required.append("dense_initial_prefix_qk"); symbol_tokens.append("dense_full_score_qk")
+        required.append("dense_panel_qk"); symbol_tokens.append("dense_full_score_qk")
     else:
         required.extend(("xattention_rank", "xattention_flash_consumer"))
         symbol_tokens.extend(("xattention_rank_kernel", "xattention_flash_consumer_kernel"))
@@ -374,9 +371,18 @@ def verify(selection_path: Path, reconciliation_path: Path, audit_path: Path,
         raise ValueError("executed Q4 CTA resources differ from selected ELF/ISA proof")
     wave = proofs["q4_wave32"]
     if (wave.get("opcode") != "v_wmma_i32_16x16x32_iu4"
-            or wave.get("opcode_sites") != 4 or wave.get("vgpr") != 64
+            or wave.get("opcode_sites") != 4 or type(wave.get("vgpr")) is not int
+            or wave["vgpr"] <= 0
             or wave.get("lds_bytes") != 0 or wave.get("private_bytes") != 0):
         raise ValueError("selected Q4 wave32 static proof has the wrong IU4/resources")
+    wave_dispatches = [row for row in dispatches
+                       if row.get("symbol", "").removesuffix(".kd") == wave.get("code_symbol")]
+    if not wave_dispatches or any(
+            row.get("resources", {}).get("vgpr_count") != wave["vgpr"]
+            or row.get("resources", {}).get("lds_bytes") != wave["lds_bytes"]
+            or row.get("resources", {}).get("scratch_bytes") != wave["private_bytes"]
+            for row in wave_dispatches):
+        raise ValueError("executed Q4 wave32 resources differ from selected ELF/ISA proof")
     ordinary_qk = proofs.get("ordinary_fp8_qk")
     if (not isinstance(ordinary_qk, dict)
             or ordinary_qk.get("fp8_wmma_opcode") != "v_wmma_f32_16x16x16_fp8_fp8"
@@ -399,22 +405,26 @@ def verify(selection_path: Path, reconciliation_path: Path, audit_path: Path,
                 for row in w8_dispatches)):
             raise ValueError("executed W8 CTA resources differ from selected ELF/ISA proof")
     if route["xattention_profile"] == "dense":
-        dense = proofs["dense_initial_prefix_qk"]
+        dense = proofs["dense_panel_qk"]
         if (dense.get("opcode") != "v_wmma_f32_16x16x16_bf16"
-                or dense.get("opcode_sites") != 16):
+                or dense.get("opcode_sites") != 32
+                or "dense_full_score_qk_bk32_kernel" not in dense.get("code_symbol", "")):
             raise ValueError("selected dense attention proof lacks BF16 WMMA")
     else:
         rank, consumer = proofs["xattention_rank"], proofs["xattention_flash_consumer"]
-        selected_symbol = consumer.get(f"g{route['kv_value_group']}_code_symbol")
+        selected_symbol = consumer.get("code_symbol")
         if (rank.get("opcode") != "v_wmma_f32_16x16x16_bf16"
                 or rank.get("opcode_sites") != 2
                 or consumer.get("opcode") != "v_wmma_f32_16x16x16_bf16"
-                or consumer.get("opcode_sites_each") != 16
+                or consumer.get("opcode_sites") != 16
                 or not isinstance(selected_symbol, str)):
             raise ValueError("selected XAttention proof lacks its G16/G32 BF16 WMMA path")
     for token in symbol_tokens:
         if not any(token in symbol for symbol in symbols):
             raise ValueError(f"selected inventory did not execute required symbol {token}")
+    for name in required:
+        if proofs[name]["code_symbol"] not in {symbol.removesuffix(".kd") for symbol in symbols}:
+            raise ValueError(f"selected inventory did not execute exact proved symbol {name}")
 
     hybrid = route["weights_id"] == HYBRID_ID
     if hybrid != (len(fp8_paths) == 2):

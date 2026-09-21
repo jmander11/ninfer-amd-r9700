@@ -268,7 +268,9 @@ class CompiledKvGroupTest(unittest.TestCase):
         args.concurrency = [1, 3]
         validate_fp8_hybrid_performance_contract(args)
         args.concurrency = [2, 3]
-        with self.assertRaisesRegex(SystemExit, "including C1"):
+        validate_fp8_hybrid_performance_contract(args)
+        args.concurrency = [3, 2]
+        with self.assertRaisesRegex(SystemExit, "sorted product C subset"):
             validate_fp8_hybrid_performance_contract(args)
         args.concurrency = [1, 2, 3, 4]
         validate_fp8_hybrid_performance_contract(args)
@@ -2082,6 +2084,22 @@ class CompiledKvGroupTest(unittest.TestCase):
             from tools.bench.assemble_dflash_selection import _auxiliary
             self.assertIn("generated_quality", _auxiliary(root,
                 {"commands": [*records, *parity_records]}, artifact, bench, 1, 2, [1, 3]))
+            # A C2..4 followup owns only its public-output parity. C1 proposal
+            # diagnostics remain in the separately replayed screen, never rerun.
+            followup = root / "followup"
+            followup.mkdir()
+            followup_records = [row for row in parity_records if row["concurrency"] == 3]
+            _, failures = write_dflash_greedy_parity(
+                followup, followup_records, artifact=artifact, bench=bench)
+            self.assertFalse(failures)
+            self.assertEqual(set(_auxiliary(followup, {"commands": followup_records},
+                                           artifact, bench, 1, 2, [3])), {"parity"})
+            changed_path = Path(followup_records[-1]["report"])
+            changed = json.loads(changed_path.read_text())
+            changed["tests"][0]["reps"][0]["generated_token_ids_by_lane"][0][0] = 99
+            changed_path.write_text(json.dumps(changed))
+            with self.assertRaisesRegex(ValueError, "recomputed raw reports"):
+                _auxiliary(followup, {"commands": followup_records}, artifact, bench, 1, 2, [3])
             malformed_parity = json.loads(json.dumps(parity))
             malformed_parity["comparisons"][0]["includes_seed"] = True
             _, malformed_failures = write_dflash_quality_evidence(
