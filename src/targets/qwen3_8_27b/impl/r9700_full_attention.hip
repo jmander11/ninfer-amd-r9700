@@ -4,6 +4,9 @@
 #include "ops/r9700/kv/r9700_attention_profile.h"
 #if defined(NINFER_R9700_XATTENTION_QUALIFICATION)
 #include "ops/r9700/kv/fp8_int4_kv_xattention.h"
+#if defined(NINFER_R9700_XATTENTION_KEEP_DIAGNOSTIC)
+#include "xattention_keep_trace.h"
+#endif
 #endif
 #include "targets/qwen3_8_27b/impl/config.h"
 
@@ -224,10 +227,17 @@ static hipError_t launch_r9700_attention(
             a.active_query_rows != nullptr || rows < 2) {
             return hipErrorInvalidValue;
         }
+#if defined(NINFER_R9700_XATTENTION_KEEP_DIAGNOSTIC)
+        const ops::r9700::kv::Fp8Int4KvXAttentionArgs traced{
+            raw, xattention_workspace, xattention_workspace_bytes};
+        const auto status = ops::r9700::kv::fp8_int4_kv_xattention_prefill(traced, stream);
+        return status == hipSuccess ? trace_xattention_keep(traced, stream) : status;
+#else
         return ops::r9700::kv::fp8_int4_kv_xattention_prefill(
             ops::r9700::kv::Fp8Int4KvXAttentionArgs{
                 raw, xattention_workspace, xattention_workspace_bytes},
             stream);
+#endif
     }
 #endif
     const bool tree_or_device_count =
