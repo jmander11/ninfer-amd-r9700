@@ -1,0 +1,53 @@
+{
+  "argv": [
+    "/opt/rocm/llvm/bin/clang++",
+    "-DHIPBLASLT_USE_ROCROLLER",
+    "-DNINFER_R9700_DFLASH_DOWN_SPLITK_CANDIDATE=0",
+    "-DNINFER_R9700_DFLASH_DOWN_SPLITK_FACTOR=8",
+    "-DNINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE=0",
+    "-DNINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE=0",
+    "-DNINFER_R9700_DFLASH_SMALL_T_CANDIDATE=0",
+    "-DNINFER_R9700_FP8_PREFIX_COMMON_ALGO_CANDIDATE=0",
+    "-DNINFER_R9700_FP8_QK_WMMA=1",
+    "-DNINFER_R9700_GDN_VERIFY_WAVE_QK_CANDIDATE=0",
+    "-DNINFER_R9700_KV_VALUE_GROUP=16",
+    "-DNINFER_R9700_Q4_ACTIVATION_BITS=8",
+    "-DNINFER_R9700_TEXT_P129_WMMA_TAIL_CANDIDATE=0",
+    "-DNINFER_R9700_W8_ACTIVATION_BITS=8",
+    "-DNINFER_SOURCE_DIR=\"/ssdpool2nvme/local_llm/ninfer-amd-r9700\"",
+    "-DUSE_PROF_API=1",
+    "-D__HIP_PLATFORM_AMD__=1",
+    "-D__HIP_ROCclr__=1",
+    "-I/ssdpool2nvme/local_llm/ninfer-amd-r9700/include",
+    "-I/ssdpool2nvme/local_llm/ninfer-amd-r9700/src",
+    "-I/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/targets/qwen3/export",
+    "-I/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/targets/qwen3_8_27b/export",
+    "-I/ssdpool2nvme/local_llm/ninfer-amd-r9700/third_party",
+    "-O3",
+    "-DNDEBUG",
+    "-std=gnu++20",
+    "--offload-arch=gfx1201",
+    "-x",
+    "hip",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/linear/a8q4_gate_up_prefetch_qualification.hip",
+    "--offload-device-only",
+    "-S",
+    "-o",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gate-up-prefetch-qualification-20260920/attempt-1/qual.s"
+  ],
+  "cwd": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700",
+  "started_unix_ns": 1789968194041980457,
+  "exit_code": 0,
+  "error": null,
+  "finished_unix_ns": 1789968194634450391,
+  "stdout": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gate-up-prefetch-qualification-20260920/attempt-1/device-compile.stdout",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "stderr": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gate-up-prefetch-qualification-20260920/attempt-1/device-compile.stderr",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

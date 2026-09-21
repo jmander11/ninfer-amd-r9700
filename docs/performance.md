@@ -1415,22 +1415,27 @@ candidate median. Evidence is
 Independent confirmation result audit reported `SHIP`, closing this scoped promotion. These
 timings do not establish physical bandwidth saturation or stall freedom.
 
-The qualification-only explicit next-group prefetch consumer for T1 N34816/K5120 gate/up passed
-CPU/static feasibility and independent review (`SHIP`). Emitted gfx1201 ISA issues four g+1 B64
-loads before all 16 g native dot8 instructions and the single serial FP32 FMA, with no load wait
-draining that overlap. The dependency checker covers two loop iterations and the terminal group,
-including VMEM and terminal scalar-activation waits. The 79 pipelined iterations plus terminal
-group retain serial accumulation and the N16/K16 layout at 26 VGPR, 36 SGPR, occupancy 16,
-wave32, 256 threads, and zero LDS/scratch/spills. CPU evidence is reproducible with
-`make -C tools/r9700 a8q4-gate-up-prefetch-static`. Production routing is unchanged; neither
-numerical correctness nor a speed improvement has been measured for this challenger.
-Its retained incumbent `0.159816480 ms` and `94,699,520 B/call` imply `592.55 GB/s` useful
-payload rate. The `635.9 GB/s` stream proxy gives a `0.148922032 ms` floor, leaving an optimistic
-`0.697245 ms/token` across 64 calls (about `2.04%` at current speed). This bound is neither a
-physical traffic measurement nor a demonstrated saving. Next prepare and independently review a
-linked numerical qualification and complete normalized-linear boundary timing package with cold
-address-distinct weights. Whole C1 A/B requires at least `0.2 ms/token` measured weighted saving
-at that complete boundary. No physical command is runnable until the package passes review.
+The explicit next-group prefetch challenger for T1 N34816/K5120 gate/up was numerically and
+statically qualified, then rejected on complete normalized-linear boundary timing. On the R9700
+in `auto`, three disjoint weight allocations and 24 balanced graph timing pairs measured
+`0.2361795→0.2369395 ms` (control→candidate), or `-0.0486398 ms/token` weighted saving over 64
+calls. Every allocation was slower; paired ratio mean plus two standard errors was `1.0094922`.
+This fails the `0.2 ms/token` gate and does not justify a whole C1 A/B. The independent FP64
+oracle passed with zero BF16-step error and maximum relative L2 `0.001801662`; codec and public
+control parity were exact. Embedded native-IU4 ISA confirmed four successor B64 loads ahead of
+current compute, at 26 VGPR, 36 SGPR, occupancy 16 and zero LDS/scratch/spills. Correct instruction
+overlap did not produce a useful gain at the complete boundary. Independent review accepted the
+rejection; production routing was never changed, and temporary qualification ownership is removed.
+Sealed evidence is `profiles/bench/r9700-gate-up-prefetch-qualification-20260920/attempt-1`;
+`result.sha256` digest is `5ea1c61d7d02fdeb971c151ded538872cf46121c31d299686bf0b42390b68e15`,
+closure SHA-256 is `8e08b7a134601a6dddb5c16c5a74b7b19ed6f635bf435f50ee50b742c75ac4db`.
+Its scripts are retained provenance, not rerunnable commands. The next Layer-0 task is CPU/static
+feasibility for a GDN projection/control heterogeneous grid, with the complete contract and gate
+in `plans/r9700-autonomous-todos.md`. Retained Q4-pair/control timings are `0.102400/0.020920 ms`
+per layer; overlapping controls with the pair has an ideal `0.896 ms/token` saving after an
+estimated `0.002259 ms/layer` extra streaming cost across 48 layers. This is an unmeasured bound;
+the admission margin needs `4.167 us/layer` complete-boundary saving. Normalization fusion is the
+second mechanism. No new physical command is admitted.
 
 The existing MTP shortlist head remains Q4G64 with A8G64 activations. MTP stays in exact-output,
 state, cache, row-view, and whole-route regression coverage, but a new shortlist-head trace,

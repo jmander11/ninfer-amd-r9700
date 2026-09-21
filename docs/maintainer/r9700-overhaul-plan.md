@@ -2070,14 +2070,26 @@ Replace functional routes with measured gfx1201 families:
   `f28d5a0e89bc8cfaa438d7c7ef86405c5eb486c650838c57bf086d9b40c2aebb`. Independent confirmation
   result audit reported `SHIP`, closing this scoped promotion. No saturation or stall-freedom
   claim follows from these timings.
-  Next, screen explicit T1 N34816/K5120 gate/up prefetch in emitted ISA before physical work.
-  Retained `94,699,520 B/call` at `0.159816480 ms` means `592.55 GB/s` useful rate; the
-  `635.9 GB/s` stream proxy gives `0.148922032 ms` and at most `0.697245 ms/token` saving across
-  64 calls (about `2.04%` at current speed). Require g+1 B64 loads before g native dot8, correct
-  waits, no spills and acceptable occupancy, then independent qualification and at least
-  `0.2 ms/token` direct saving at the complete normalized-linear boundary before whole C1 A/B.
-  The bound does not reopen rejected geometry remaps, source-only pipeline, non-temporal dot8,
-  grouped-PV split512, or split-K mechanisms.
+  The subsequent explicit T1 N34816/K5120 gate/up prefetch challenger passed independent FP64,
+  exact codec/control, and embedded native-IU4 overlap qualification but was rejected on complete
+  normalized-linear boundary timing: `0.2361795→0.2369395 ms`, or `-0.0486398 ms/token` saving,
+  every allocation slower, paired ratio mean plus two standard errors `1.0094922`. Independent
+  result review accepted the rejection; no whole C1 A/B is justified and production was unchanged.
+  Temporary qualifier/kernel/checker ownership is removed. Sealed evidence is
+  `profiles/bench/r9700-gate-up-prefetch-qualification-20260920/attempt-1`; `result.sha256` digest
+  is `5ea1c61d7d02fdeb971c151ded538872cf46121c31d299686bf0b42390b68e15`, closure SHA-256
+  `8e08b7a134601a6dddb5c16c5a74b7b19ed6f635bf435f50ee50b742c75ac4db`. Historical package scripts
+  are not rerunnable. Next establish CPU/static feasibility for one qualification-only GDN
+  projection/control Op combining the existing 48-CTA BF16 control and 64-CTA paired-Q4 branches
+  in a heterogeneous grid. It takes the same represented BF16 hidden input and exposes QK,
+  value-Z, g, and beta; convolution/state remain after the boundary, through the existing GDN
+  leaf family, with explicit caller-owned scratch. Scope is ordinary base Text T1 exact
+  Q4+BF16_CTRL. The detailed native-IU4, BF16 reduction/seam, branch/barrier, LDS/resource gate
+  and `0.896 ms/token` ideal bound are in `plans/r9700-autonomous-todos.md`; full
+  control+quantize+pair qualification/timing follows only after static feasibility and review.
+  Normalization fusion remains second. No GPU action is currently admitted.
+  Reopening prefetch, geometry remaps, non-temporal dot8, grouped-PV split512,
+  or split-K requires a distinct mechanism and new bound.
 - [ ] After the dense C1/P2048/spec-none floor and practical-ceiling gate passes and the shared
   chunk is selected, rerun all 48 post-promotion capacity cells (dense/XAttention times
   all-Q4/mixed/four-role-hybrid times G16/G32, each at C=1..4). Bind the newly measured Device Graph

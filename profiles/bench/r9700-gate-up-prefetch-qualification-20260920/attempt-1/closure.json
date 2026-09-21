@@ -1,0 +1,122 @@
+{
+  "schema": "ninfer.r9700.gate-up-prefetch-closure.v1",
+  "status": "completed",
+  "disposition": "rejected",
+  "error": null,
+  "started_unix_ns": 1789968194041736586,
+  "finished_unix_ns": 1789968199467303480,
+  "plan": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gate-up-prefetch-qualification-20260920/plan.json",
+    "bytes": 13570,
+    "sha256": "e82d0d511215e3867c0852a5ac0dc9a0cfee3c8cc7aafdfb68ed919a38c386fb"
+  },
+  "create_only": true,
+  "production_routing_authorized": false,
+  "artifacts": [
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gate-up-prefetch-qualification-20260920/attempt-1/analyzer.process.json",
+      "bytes": 1017,
+      "sha256": "8b6c90455277d4e50041ebb1f8709cfe68614f7a6be68adce50fcfe72ebfa5bc"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gate-up-prefetch-qualification-20260920/attempt-1/analyzer.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gate-up-prefetch-qualification-20260920/attempt-1/analyzer.stdout",
+      "bytes": 403,
+      "sha256": "fe43c9d345366d9d6fc3bd7c7607db91a9817e981a74e89ed89889ee1b14b5e4"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gate-up-prefetch-qualification-20260920/attempt-1/device-compile.process.json",
+      "bytes": 2254,
+      "sha256": "917476d19415128a5e11a5e55e6ca1753cab394ffadd9951a032d72661b06689"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gate-up-prefetch-qualification-20260920/attempt-1/device-compile.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gate-up-prefetch-qualification-20260920/attempt-1/device-compile.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gate-up-prefetch-qualification-20260920/attempt-1/embedded/candidate.hsaco",
+      "bytes": 5408,
+      "sha256": "31c04f1032a8ed3e7aa705d787de46da1b71ef3ed3de871c6ab88623cb58f479"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gate-up-prefetch-qualification-20260920/attempt-1/embedded/checked-assembly.o",
+      "bytes": 4608,
+      "sha256": "10e023171956fce582348d9a3ce1153fb4e62c9749548182f90ee2198b611630"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gate-up-prefetch-qualification-20260920/attempt-1/embedded/production/a8g64_normalized_prepare_t1_kernel.hsaco",
+      "bytes": 306152,
+      "sha256": "4d2bd4ac7e8a61336a718385613cedc7ff5fbf33eefe267dca0140cdd7964cc5"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gate-up-prefetch-qualification-20260920/attempt-1/embedded/production/a8q4g64_linear_decode_dot8_t1_kernel.hsaco",
+      "bytes": 306152,
+      "sha256": "4d2bd4ac7e8a61336a718385613cedc7ff5fbf33eefe267dca0140cdd7964cc5"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gate-up-prefetch-qualification-20260920/attempt-1/embedded/production.s",
+      "bytes": 1686201,
+      "sha256": "20d642b266877e28b562b8e214c6e60d2d600b5c35af4f6a2e6da2c40bf2f2c5"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gate-up-prefetch-qualification-20260920/attempt-1/plan-identity.json",
+      "bytes": 226,
+      "sha256": "d7d8cc1db052b4bd9079b43d49e5e1453fd29d19d65a7af2acdd4efd3939b74a"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gate-up-prefetch-qualification-20260920/attempt-1/qual.s",
+      "bytes": 13419,
+      "sha256": "e6feabc1a0ca0e6375ed36f4ba54edc39ad0430f126af3b38add6594275b242a"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gate-up-prefetch-qualification-20260920/attempt-1/qualification.json",
+      "bytes": 3417,
+      "sha256": "c870df4365a32d9b87c0130ba366681f91958447e272e71eb15b08fbfb292c4e"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gate-up-prefetch-qualification-20260920/attempt-1/qualifier.process.json",
+      "bytes": 973,
+      "sha256": "f80ae45b5f8ace5a264bfefadc5525ffd765bd290fd91b81bafb86ea1fcf6c3f"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gate-up-prefetch-qualification-20260920/attempt-1/qualifier.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gate-up-prefetch-qualification-20260920/attempt-1/qualifier.stdout",
+      "bytes": 75,
+      "sha256": "2c1a420c6383a5acc12a214106ae5db5753fcedd523f1ea0d703254a53bb2c90"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gate-up-prefetch-qualification-20260920/attempt-1/static-embedded-check.process.json",
+      "bytes": 1301,
+      "sha256": "a650019695fa09fee68cffbe9f64db588653051e3c860e0ecac6e55da3672960"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gate-up-prefetch-qualification-20260920/attempt-1/static-embedded-check.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gate-up-prefetch-qualification-20260920/attempt-1/static-embedded-check.stdout",
+      "bytes": 4944,
+      "sha256": "165d220b4213d9c9840eff1153c1f83db5d9d8333857a9d9d091baf8624c7bfe"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gate-up-prefetch-qualification-20260920/attempt-1/summary.json",
+      "bytes": 403,
+      "sha256": "fe43c9d345366d9d6fc3bd7c7607db91a9817e981a74e89ed89889ee1b14b5e4"
+    }
+  ]
+}

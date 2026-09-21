@@ -1,0 +1,22 @@
+{
+  "argv": [
+    "/home/battlefront/.local/bin/python3.11",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gate-up-prefetch-qualification-20260920/analyze.py",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gate-up-prefetch-qualification-20260920/attempt-1/qualification.json"
+  ],
+  "cwd": "/ssdpool2nvme/local_llm/ninfer-amd-r9700",
+  "started_unix_ns": 1789968199446716167,
+  "exit_code": 0,
+  "error": null,
+  "finished_unix_ns": 1789968199466886629,
+  "stdout": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gate-up-prefetch-qualification-20260920/attempt-1/analyzer.stdout",
+    "bytes": 403,
+    "sha256": "fe43c9d345366d9d6fc3bd7c7607db91a9817e981a74e89ed89889ee1b14b5e4"
+  },
+  "stderr": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gate-up-prefetch-qualification-20260920/attempt-1/analyzer.stderr",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

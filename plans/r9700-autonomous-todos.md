@@ -161,9 +161,9 @@ physical bandwidth saturation or stall freedom.
 
 The deterministic queue after reset is:
 
-1. prepare and independently review a linked numerical qualification and complete normalized-linear boundary timing package for the statically reviewed T1 N34816/K5120 gate/up prefetch challenger; require independent FP64/codec correctness, emitted dependency/resource checks, cold address-distinct weights, and at least `0.2 ms/token` direct weighted saving before whole C1 A/B. Retain the SHIP confirmation at `profiles/bench/r9700-normalized-linear-t1-production-confirmation-20260920/attempt-1` and the qualification-only scope of the challenger.
+1. establish CPU/static feasibility for the BASE-DECODE-BW GDN projection/control heterogeneous-grid challenger described below: one closed Op combining the existing 48-CTA BF16 control and 64-CTA paired-Q4 branches. Keep normalization fusion second. Retain the terminally rejected gate/up prefetch evidence and SHIP normalized-linear production confirmation at `profiles/bench/r9700-normalized-linear-t1-production-confirmation-20260920/attempt-1`; no physical run is admitted yet.
 
-No GPU action is currently runnable. Prepare and independently review the linked gate/up prefetch numerical and complete-boundary timing package before another physical attempt; static SHIP alone does not authorize measurement.
+No GPU action is currently runnable. Resolve the GDN projection/control CPU/static feasibility gate, then require an independently reviewed complete-boundary qualification package before another physical attempt.
 
 Every other remaining unchecked task depends directly or transitively on this queue or the
 external `DENSE-FLOOR-DECISION`.
@@ -481,24 +481,47 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   result audit reported `SHIP`, closing this scoped promotion. Do not rerun these sealed attempts.
   No result proves physical bandwidth saturation or stall freedom.
 
-  The next bounded mechanism is ISA-first explicit prefetch for the exact T1 N34816/K5120 gate/up
-  consumer. Retained Layer-0 timing is `0.159816480 ms` for `94,699,520 B/call`, a `592.55 GB/s`
-  useful payload rate. The `635.9 GB/s` stream proxy gives a `0.148922032 ms` floor and at most
-  `0.697245 ms/token` across 64 calls (about `2.04%` at current `29.31 tok/s`); this is a screening
-  bound, not physical traffic or a proved achievable gain. CPU/static feasibility and independent
-  review now report `SHIP` for the qualification-only consumer. The emitted gfx1201 loop issues
-  four g+1 B64 loads before all 16 g native dot8 instructions and its single serial FP32 FMA,
-  without a load wait draining the overlap. The dependency checker covers two loop iterations
-  and the terminal group, including VMEM and terminal scalar-activation waits. Resources are
-  26 VGPR, 36 SGPR, occupancy 16, wave32, 256 threads, zero LDS/scratch/spills. The 79 pipelined
-  iterations plus terminal group preserve the stored N16/K16 layout and serial accumulation.
-  Reproduce CPU-only evidence with `make -C tools/r9700 a8q4-gate-up-prefetch-static`; this is
-  neither numerical qualification nor a speed result, and production routing is unchanged.
-  Next prepare and independently review a linked numerical and timing package for the complete
-  normalized-linear boundary with cold address-distinct weights; require at least
-  `0.2 ms/token` direct weighted saving before whole C1 A/B. The prior source pipeline failed to
-  emit this overlap; do not repeat it or reopen rejected geometry remapping, non-temporal loads,
-  or split-K without a distinct mechanism and new bound.
+  The explicit next-group prefetch challenger for T1 N34816/K5120 gate/up is terminally rejected.
+  Its linked complete normalized-linear boundary qualified numerically and in embedded gfx1201
+  ISA, but measured `0.2361795→0.2369395 ms` (control→candidate), a weighted saving of
+  `-0.0486398 ms/token`, with every allocation slower and paired ratio mean plus two standard
+  errors `1.0094922`. This fails the `0.2 ms/token` admission gate; no whole C1 A/B is justified.
+  Evidence is sealed at `profiles/bench/r9700-gate-up-prefetch-qualification-20260920/attempt-1`;
+  `result.sha256` digest is
+  `5ea1c61d7d02fdeb971c151ded538872cf46121c31d299686bf0b42390b68e15`, closure SHA-256
+  `8e08b7a134601a6dddb5c16c5a74b7b19ed6f635bf435f50ee50b742c75ac4db`.
+  The independent FP64 oracle had zero BF16-step error and maximum relative L2 `0.001801662`;
+  codec and public-control parity were exact. Embedded native-IU4 ISA preserved four successor
+  B64 loads ahead of current compute at 26 VGPR, 36 SGPR, occupancy 16, zero LDS/scratch/spills.
+  Correct overlap therefore did not deliver a useful complete-boundary gain on this workload.
+  Independent result review accepted the rejection. Removed the temporary qualifier/kernel/checker
+  ownership; retained assembly, embedded objects, receipts, and package scripts are historical
+  evidence, not rerunnable commands. Production was never changed by this challenger. Do not
+  reopen this overlap, geometry
+  remapping, non-temporal loads, or split-K without a distinct mechanism and new bound.
+
+  **Next: GDN projection/control combined grid, CPU/static feasibility first.** Define one
+  semantically closed qualification-only Op from the same represented BF16 hidden input to
+  explicit QK, value-Z, g, and beta outputs. Combine the existing 48-CTA BF16 projected-control
+  branch and 64-CTA paired-Q4 branch in one heterogeneous grid; keep convolution and persistent
+  state transitions after the Op boundary. Ownership remains in `src/ops`, called through the
+  existing GDN execution-leaf family. Scope is ordinary base Text T1 with exact Q4+BF16_CTRL
+  weights. Any scratch is caller-owned and explicit; do not introduce hidden prepared workspace.
+  This is projection/control overlap, not normalization fusion; evaluate normalization fusion
+  only as the second mechanism after this task's decision.
+
+  Retained Layer-0 bounds are `0.102400 ms/layer` for the Q4 pair and `0.020920 ms/layer` for
+  controls, with `44,564,480` Q4 bytes and `983,040` BF16 bytes. Estimated additional streaming
+  costs `0.002259 ms/layer`; ideal overlap saves about `0.896 ms/token` across 48 layers.
+  This is a feasibility bound, not a measured gain. Clearing the `0.2 ms/token` admission margin
+  requires only `4.167 us/layer` complete-boundary saving. First establish native IU4 legality,
+  unchanged BF16 control reduction and output seam, CTA-uniform branch confinement and safe
+  barriers, and the combined kernel's at-most-2-KiB LDS allocation, registers, scratch, and
+  occupancy. The larger branch resource allocation applies to the whole kernel and must not
+  erase the proposed overlap. Only after this static gate and independent review, prepare full
+  control+quantize+pair numerical qualification against independent mathematical/codec oracles,
+  graph/workspace checks, and complete-boundary timing in a reviewed package. Neither a branch
+  microbenchmark nor this bound admits whole-inference testing or production promotion.
   The first reviewed package,
   `profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919`, passed compile/static preflight
   but stopped on the first K6144 incumbent launch before candidate parity or timing:

@@ -1115,21 +1115,25 @@ result audit reported `SHIP`, closing this scoped promotion. Scope remains the 6
 ordinary base Text C1 MLP boundaries, with all other predicates retaining their fallbacks. No
 sealed package is rerunnable, and these timings do not prove physical bandwidth saturation.
 
-The qualification-only T1 N34816/K5120 gate/up prefetch consumer passed CPU/static feasibility
-and independent review (`SHIP`). Run `make -C tools/r9700 a8q4-gate-up-prefetch-static` for the
-compile, emitted-ISA dependency/resource checks, and mutation tests; this command runs no GPU work.
-Its gfx1201 loop issues four g+1 B64 loads before all 16 g native dot8 instructions and one serial
-FP32 FMA, with no load wait draining that overlap. The checker covers two loop iterations and
-the terminal group, including VMEM and terminal scalar-activation waits. The 79 pipelined
-iterations plus terminal group use 26 VGPR, 36 SGPR, occupancy 16, wave32, 256 threads, and zero
-LDS/scratch/spills. Stored N16/K16 layout and serial accumulation remain intact. This is no
-numerical or speed claim, and the consumer is not linked into production.
-The retained `94,699,520 B/call` and `0.159816480 ms` imply `592.55 GB/s` useful rate; the
-`635.9 GB/s` proxy floor is `0.148922032 ms`, an optimistic `0.697245 ms/token` upper saving.
-Next prepare and independently review a linked numerical and complete normalized-linear boundary
-timing package with cold address-distinct weights; at least `0.2 ms/token` direct weighted saving
-is required before whole C1 A/B. No physical command is runnable yet. Do not rerun the
-rejected source-only pipeline, geometry remaps, non-temporal path, or split-K on this bound alone.
+The T1 N34816/K5120 gate/up prefetch challenger is terminally rejected. Independent FP64/codec
+qualification and embedded native-IU4 instruction checks passed, including actual successor-load
+overlap at 26 VGPR, 36 SGPR, occupancy 16 and zero LDS/scratch/spills. Complete normalized-linear
+boundary timing measured `0.2361795→0.2369395 ms`, a weighted saving of `-0.0486398 ms/token`;
+all three allocations were slower and paired ratio mean plus two standard errors was `1.0094922`.
+Independent result review accepted rejection. The qualifier, private kernel, static checker/tests,
+and build targets are removed; production routing was never changed.
+Sealed evidence is `profiles/bench/r9700-gate-up-prefetch-qualification-20260920/attempt-1`;
+`result.sha256` digest is `5ea1c61d7d02fdeb971c151ded538872cf46121c31d299686bf0b42390b68e15`,
+closure SHA-256 is `8e08b7a134601a6dddb5c16c5a74b7b19ed6f635bf435f50ee50b742c75ac4db`.
+Retained assembly, embedded objects, receipts and scripts explain the completed experiment;
+the historical package is not rerunnable. No whole C1 A/B is justified. The next CPU/static task
+is the GDN projection/control heterogeneous-grid feasibility gate in
+`plans/r9700-autonomous-todos.md`: combine the existing 48-CTA BF16 control and 64-CTA paired-Q4
+branches as one closed Op with explicit outputs. Require native IU4, preserved BF16 control
+reduction/seam, safe branch/barrier confinement, and combined LDS/register/occupancy evidence
+before preparing complete control+quantize+pair qualification/timing. Normalization fusion is
+second. No physical command is currently runnable. Reopening a rejected mechanism requires a
+distinct mechanism and new bound.
 
 A direct GPU regression of the canonical K5120 RMSNorm route against its independent FP64 oracle, including
 output guards and Device Graph replay, is available with:

@@ -1,0 +1,13 @@
+{
+  "status": "rejected",
+  "control_median_ms": 0.23617950081825256,
+  "candidate_median_ms": 0.23693949729204178,
+  "saved_ms_per_token": -0.048639774322509766,
+  "ratio_mean_plus_2se": 1.009492212495412,
+  "allocation_median_ratios": [
+    1.0124767085367847,
+    1.0014361277706492,
+    1.005099839628262
+  ],
+  "passing_authorizes": "independent result review then whole C1 A/B preparation only"
+}
