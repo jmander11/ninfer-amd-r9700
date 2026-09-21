@@ -1062,6 +1062,11 @@ cmake --build build-r9700 --target \
 
 These whole timings do not prove physical HBM saturation or stall freedom, and the separately
 measured singleton gains must not be added as a combined performance claim.
+The selector-free composition confirmation at
+`profiles/bench/r9700-three-route-production-confirmation-20260920/results` retained exact tokens
+and measured aggregate decode rates of `28.3855`, `34.8110`, `46.8271`, and `54.1913 tok/s` at
+C1 through C4. Its closure digest is
+`9be2f67ff0f74f92e509bbfa6bb0909e7feb5e38993aed184d71ce1cd7033148`.
 
 A direct GPU regression of the canonical route against its independent FP64 oracle, including
 output guards and Device Graph replay, is available with:

@@ -1356,6 +1356,13 @@ singleton all-Q4 attention projection pairs, and all-Q4 projection pairs at exac
 four tokens. Mixed weights and other token widths retain their prior routes. These unprofiled
 whole timings establish useful decode-speed gains, not physical HBM saturation or stall freedom,
 and the two separately measured C1 gains are not added to make a combined claim.
+The fresh selector-free composition run then reproduced exact retained tokens at every supported
+concurrency. Its C1 through C4 decode times were `9.0186748`, `14.7080029`, `16.4007540`, and
+`18.8960216 s`, corresponding to aggregate rates `28.3855`, `34.8110`, `46.8271`, and
+`54.1913 tok/s`. The retained-candidate timing ratios were `0.9865955`, `0.9997177`, `1.0002975`,
+and `1.0000448`. Evidence is
+`profiles/bench/r9700-three-route-production-confirmation-20260920/results`; the SHA-256 of its
+`result.sha256` closure is `9be2f67ff0f74f92e509bbfa6bb0909e7feb5e38993aed184d71ce1cd7033148`.
 
 The existing MTP shortlist head remains Q4G64 with A8G64 activations. MTP stays in exact-output,
 state, cache, row-view, and whole-route regression coverage, but a new shortlist-head trace,

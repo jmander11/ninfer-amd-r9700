@@ -135,13 +135,12 @@ BASE-DECODE-BW measurement completed. The BF16 GDN T1, all-Q4 attention T1, and 
 direct and whole gates all passed, and independent result audits admitted their exact production
 routes. Their three qualification selectors were removed together after independent code review;
 exact predicates and mixed/other-width fallbacks remain. A fresh selector-free C1..4 production
-confirmation is prepared and independently reviewed at
-`profiles/bench/r9700-three-route-production-confirmation-20260920`. The exact next action is
-`bash profiles/bench/r9700-three-route-production-confirmation-20260920/commands.sh --measure`.
+confirmation at `profiles/bench/r9700-three-route-production-confirmation-20260920` passed exact
+tokens at C1..4 and reproduced the admitted performance. The exact next action is
+`bash profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919/commands.sh --measure`.
 The deterministic queue after reset is:
 
-1. run the independently reviewed selector-free C1..4 composition gate at `profiles/bench/r9700-three-route-production-confirmation-20260920`;
-2. after it passes, run `profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919`.
+1. run the independently reviewed direct projected-residual gate at `profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919`.
 
 Every other remaining unchecked task depends directly or transitively on this queue or the
 external `DENSE-FLOOR-DECISION`.
@@ -406,8 +405,13 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   T1, all-Q4 attention T1, and C2..4 paired selectors and benchmark fields are now removed; exact
   predicates and all fallbacks remain. Focused selector-free builds and routing qualifiers passed,
   and independent code review reported `SHIP`. The fresh composition package
-  `profiles/bench/r9700-three-route-production-confirmation-20260920` is prepared, independently
-  reviewed, and awaiting its four C1..4 measurements.
+  `profiles/bench/r9700-three-route-production-confirmation-20260920` passed exact retained tokens
+  at C1..4. Decode times were `9.0186748`, `14.7080029`, `16.4007540`, and `18.8960216 s`, or
+  aggregate rates `28.3855`, `34.8110`, `46.8271`, and `54.1913 tok/s`; ratios to the retained
+  candidate medians were `0.9865955`, `0.9997177`, `1.0002975`, and `1.0000448`. All process,
+  power, VRAM-drain, identity, and closure checks passed. The SHA-256 of `result.sha256` is
+  `9be2f67ff0f74f92e509bbfa6bb0909e7feb5e38993aed184d71ce1cd7033148`. This closes the
+  three-route promotion composition gate, not physical HBM saturation or a new A/B claim.
 
   After the admitted paired routes are resolved, the reviewed-ready direct package
   `profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919` is the next bounded mechanism:
