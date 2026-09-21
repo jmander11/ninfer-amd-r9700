@@ -29,6 +29,7 @@ class QualityRecoveryIoTest(unittest.TestCase):
             campaign.write_text(json.dumps({"profile": profile}), encoding="utf-8")
             receipt = {"recipe_id": weights_id, "authority": f"receipt-{weights_id}"}
             authorities[name] = {
+                "eligibility_by_group": {"16": True, "32": True},
                 "path": str(campaign.resolve()),
                 "sha256": hashlib.sha256(campaign.read_bytes()).hexdigest(),
                 "artifact": {
@@ -55,7 +56,7 @@ class QualityRecoveryIoTest(unittest.TestCase):
 
     @staticmethod
     def campaign_source(campaign, weights_id, group, chunk):
-        return {}, {
+        return {label: {"eligible": True} for label in ("8k", "32k")}, {
             "weights_id": weights_id,
             "sha256": hashlib.sha256(weights_id.encode()).hexdigest(),
             "file_size_bytes": len(weights_id),
@@ -112,6 +113,26 @@ class QualityRecoveryIoTest(unittest.TestCase):
                         self.assertRaisesRegex(ValueError, "N16 artifact binding changed"),
                     ):
                         validate_authority_map(path)
+
+    def test_map_preserves_replayed_group_exclusion_and_rejects_forged_eligibility(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path, value = self.make_authority_map(Path(directory))
+            entry = value['authorities']['MIXED_XATTENTION_QUALITY']
+            entry['eligibility_by_group'] = {'16': True, '32': False}
+            def replay(campaign, weights_id, group, chunk):
+                cells, source = self.campaign_source(campaign, weights_id, group, chunk)
+                if weights_id == 'r9700-q4-w8-mse-n16k16-eval' and campaign['profile'] != 'dense' and group == 32:
+                    cells['32k']['eligible'] = False
+                return cells, source
+            with patch('tools.bench.prefill_chunk_authority.validate_prefill_chunk_authority',
+                       return_value=({**value['selected_prefill_chunk_authority'], 'selected_prefill_chunk': 4096}, {})), \
+                    patch('tools.ppl.assemble_pareto._campaign_quality_candidate', side_effect=replay):
+                path.write_text(json.dumps(value))
+                self.assertEqual(validate_authority_map(path), value)
+                entry['eligibility_by_group']['32'] = True
+                path.write_text(json.dumps(value))
+                with self.assertRaisesRegex(ValueError, 'eligibility differs'):
+                    validate_authority_map(path)
 
     def test_preflight_rejects_dangling_output_and_validates_checkpoint(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

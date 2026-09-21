@@ -1064,10 +1064,11 @@ def build_cases(
                 "pareto_whole_inference",
                 "whole_p8192_p32768_g256_ordinary_graph",
                 ("--whole-pg", "8192,256;32768,256", "--prefill-chunk",
-                 str(production_prefill_chunk), "--draft-tokens", "0"),
+                 str(production_prefill_chunk), "--draft-tokens", "0", "--retain-token-ids"),
                 3,
                 1,
                 "ranking spec-none ordinary fresh-prompt 8K/32K whole-inference throughput",
+                retain_token_ids=True,
                 parity_role="ordinary",
             ),
         ]

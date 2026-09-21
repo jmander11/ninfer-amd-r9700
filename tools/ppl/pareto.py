@@ -137,6 +137,10 @@ def _quality_objective(quality: object, label: str) -> tuple[dict | None, list[s
     tier = quality.get("tier")
     if tier not in QUALITY_TIERS:
         reasons.append(f"missing_explicit_quality_tier:{label}")
+    mean_limit = quality.get("maximum_mean_nll_delta", QUALITY_TIERS.get(tier, {}).get("maximum_mean_nll_delta"))
+    if (not _finite_number(mean_limit) or (tier in QUALITY_TIERS
+            and mean_limit > QUALITY_TIERS[tier]["maximum_mean_nll_delta"])):
+        reasons.append(f"invalid_quality_mean_nll_limit:{label}")
     mean_delta = quality.get("mean_nll_delta")
     scored_positions = quality.get("scored_positions")
     new_severe_positions = quality.get("new_severe_positions")
@@ -161,6 +165,8 @@ def _quality_objective(quality: object, label: str) -> tuple[dict | None, list[s
         and type(new_severe_positions) is int
         and new_severe_positions >= 0
         and complete
+        and _finite_number(mean_limit)
+        and mean_limit <= QUALITY_TIERS[tier]["maximum_mean_nll_delta"]
     ):
         spec = QUALITY_TIERS[tier]
         severe_rate = new_severe_positions / scored_positions
@@ -169,7 +175,7 @@ def _quality_objective(quality: object, label: str) -> tuple[dict | None, list[s
             math.ceil(spec["maximum_new_severe_rate"] * scored_positions),
         )
         computed_eligible = (
-            float(mean_delta) <= spec["maximum_mean_nll_delta"]
+            float(mean_delta) <= mean_limit
             and new_severe_positions <= severe_budget
         )
         if not computed_eligible:
@@ -182,6 +188,7 @@ def _quality_objective(quality: object, label: str) -> tuple[dict | None, list[s
     return {
         "quality_tier": tier,
         "mean_nll_delta": float(mean_delta),
+        "maximum_mean_nll_delta": mean_limit,
         "new_severe_position_rate": severe_rate,
         "new_severe_positions": new_severe_positions,
         "scored_positions": scored_positions,
@@ -724,6 +731,22 @@ def classify(payload: dict) -> dict:
                 raise ValueError(
                     f"candidate {name} has invalid capacity-failure provenance"
                 )
+            malformed_quality = [reason for reason in reasons if (
+                "quality" in reason or "nll" in reason or "scored_positions" in reason
+                or "severe_positions" in reason) and not reason.startswith("quality_guardrails_not_met:")]
+            if malformed_quality:
+                raise ValueError(f"candidate {name} has malformed numerical quality: {malformed_quality}")
+            capacity_reasons = [reason for reason in reasons if "capacity" in reason]
+            expected_capacity_reasons = {
+                f"missing_resolved_effective_maximum_capacity:c{failure['concurrency']}"
+                for failure in capacity_failures or []
+            }
+            if set(capacity_reasons) != expected_capacity_reasons:
+                raise ValueError(f"candidate {name} has unmatched dense/sparse capacity eligibility provenance")
+            valid_exclusion = bool(capacity_reasons or any(
+                reason.startswith("quality_guardrails_not_met:") for reason in reasons))
+            if reasons and not valid_exclusion:
+                raise ValueError(f"eligible candidate {name} lacks complete whole-inference evidence")
         if require_single_selection and "shortlist_head_precision_gate" in record:
             raise ValueError("static selection rejects the retired MTP shortlist-head gate")
         if require_single_selection and (
@@ -747,6 +770,11 @@ def classify(payload: dict) -> dict:
             "weight_storage_profile": weight_storage_profile,
             "whole_inference_profile": record.get("whole_inference_profile"),
             "base_capacity_profile": record.get("base_capacity_profile"),
+            "quality_cells": (record.get("quality_cells") if quality_cells
+                              else {"quality": record.get("quality")}),
+            "capacity_by_cell": (record.get("capacity_by_cell") if capacity_cells
+                                 else {"capacity": record.get("capacity")}),
+            "capacity_eligible": not any("capacity" in reason for reason in reasons),
             "comparable": objective is not None,
             "reasons": reasons,
         })
@@ -820,7 +848,7 @@ def classify(payload: dict) -> dict:
                 cache_group = result["cache_profile"]["value_group"]
                 profile = result["execution_profile"]["xattention_profile"]
                 eligibility_by_cache_group.setdefault(cache_group, {})[profile] = (
-                    result["comparable"]
+                    result["capacity_eligible"]
                 )
             if any(
                 set(profiles) != set(XATTENTION_PROFILES)
@@ -866,6 +894,26 @@ def classify(payload: dict) -> dict:
         "source_provenance": provenance,
         "candidates": results,
     }
+
+
+def _revalidate_numerical_quality(row: dict, source: dict) -> None:
+    """Reopen measured quality, including complete but numerically failed gates."""
+    from tools.ppl.assemble_pareto import _campaign_quality_candidate
+    quality = source.get("quality")
+    if not isinstance(quality, dict) or not isinstance(quality.get("path"), str):
+        raise ValueError("schema-v7 candidate lacks bound numerical quality evidence")
+    path = Path(quality["path"])
+    if not path.is_file() or _file_sha256(path) != quality.get("sha256"):
+        raise ValueError("schema-v7 numerical quality campaign changed")
+    cells, actual = _campaign_quality_candidate(json.loads(path.read_text()),
+        row["weight_recipe"]["weights_id"], row["cache_profile"]["value_group"], row["prefill_chunk"])
+    if (cells != row["quality_cells"] or cells != quality.get("measurements")
+            or actual["cells"] != quality.get("cells")
+            or actual["representation"] != quality.get("representation")
+            or actual["campaign_identity"] != quality.get("campaign_identity")
+            or {key: actual[key] for key in ("weights_id", "sha256", "file_size_bytes")}
+            != quality.get("artifact")):
+        raise ValueError("schema-v7 numerical quality measurements differ from bound sidecars")
 
 
 def validate_terminal_production_authority(value: object) -> tuple[dict, dict]:
@@ -929,6 +977,20 @@ def validate_terminal_production_authority(value: object) -> tuple[dict, dict]:
         capacity_failures = (
             source.get("capacity_failures") if isinstance(source, dict) else None
         )
+        quality_cells = row.get("quality_cells")
+        if not isinstance(quality_cells, dict) or set(quality_cells) != {"8k", "32k"}:
+            raise ValueError("schema-v7 authority lacks retained numerical quality measurements")
+        quality_reasons = [reason for label, cell in quality_cells.items()
+                           for reason in _quality_objective(cell, label)[1]]
+        if any(not reason.startswith("quality_guardrails_not_met:") for reason in quality_reasons):
+            raise ValueError("schema-v7 authority has malformed numerical quality measurements")
+        capacity_cells = row.get("capacity_by_cell")
+        if not isinstance(capacity_cells, dict):
+            raise ValueError("schema-v7 authority lacks capacity measurements")
+        capacity_reasons = [reason for c in (1, 2, 3, 4)
+                            for reason in _capacity_objective(capacity_cells.get(f"c{c}"), f"c{c}")[1]]
+        if row.get("capacity_eligible") is not (not capacity_reasons):
+            raise ValueError("schema-v7 capacity eligibility differs from measured capacity")
         if (
             type(comparable) is not bool
             or not isinstance(reasons, list)
@@ -960,7 +1022,7 @@ def validate_terminal_production_authority(value: object) -> tuple[dict, dict]:
             or set(matrices) != expected_matrices
             or not isinstance(capacity_failures, list)
             or (comparable and capacity_failures)
-            or (not comparable and not capacity_failures)
+            or (not comparable and not capacity_failures and not quality_reasons)
         ):
             raise ValueError(
                 "schema-v7 capacity eligibility disagrees with matrix/failure provenance"
@@ -982,14 +1044,19 @@ def validate_terminal_production_authority(value: object) -> tuple[dict, dict]:
                 for workload in workloads
             }
             if (
-                not capacity_reason_concurrency
-                or capacity_reason_concurrency != failure_concurrency
+                capacity_reason_concurrency != failure_concurrency
                 or len(failure_concurrency) != len(capacity_failures)
-                or not expected_speed_reasons.issubset(reasons)
+                or set(capacity_reasons) != {
+                    f"missing_resolved_effective_maximum_capacity:c{c}" for c in failure_concurrency}
+                or set(reasons) != set(quality_reasons) | set(capacity_reasons) | expected_speed_reasons
+                or any(not _valid_capacity_failure(failure) for failure in capacity_failures)
             ):
                 raise ValueError(
-                    "schema-v7 excluded candidate lacks bound capacity-failure reasons"
+                    "schema-v7 excluded candidate lacks bound quality/capacity-failure reasons"
                 )
+        elif quality_reasons or capacity_reasons:
+            raise ValueError("schema-v7 comparable candidate fails quality or capacity")
+        _revalidate_numerical_quality(row, source)
         weights_id = recipe["weights_id"]
         prior = recipe_identities.setdefault(weights_id, recipe)
         if prior != recipe:
@@ -1015,7 +1082,7 @@ def validate_terminal_production_authority(value: object) -> tuple[dict, dict]:
         ]
         for group in (16, 32):
             eligibility = {
-                row["execution_profile"]["xattention_profile"]: row["comparable"]
+                row["execution_profile"]["xattention_profile"]: row["capacity_eligible"]
                 for row in recipe_rows
                 if row["cache_profile"]["value_group"] == group
             }

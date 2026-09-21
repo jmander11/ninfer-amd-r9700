@@ -170,8 +170,16 @@ def capacity_evidence(state):
     return actual
 
 
+def whole_eligible(state):
+    capacity_ids = capacity_evidence(state)['whole_eligible_identities']
+    return [identity(case) for case in candidates()
+            if identity(case) in capacity_ids
+            and state['quality']['authorities'][case['quality_name']]
+                ['eligibility_by_group'][str(case['group'])]]
+
+
 def whole(state):
-    eligible = capacity_evidence(state)['whole_eligible_identities']
+    eligible = whole_eligible(state)
     root = create_stage('whole', state)
     for case in candidates():
         if identity(case) not in eligible:
@@ -184,7 +192,9 @@ def whole(state):
 
 
 def select(state):
-    eligible = capacity_evidence(state)['whole_eligible_identities']
+    import controls
+    controls.validate_completed()
+    eligible = whole_eligible(state)
     require_stage_bindings('whole', state)
     root = create_stage('select', state)
     pending_input, final_input = root / 'input.pending.json', root / 'pareto-input.json'

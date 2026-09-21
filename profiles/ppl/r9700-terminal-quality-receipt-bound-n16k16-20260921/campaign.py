@@ -185,6 +185,7 @@ def reference(selection, python):
 
 
 def quality(selection):
+    from tools.ppl.assemble_pareto import _campaign_quality_candidate
     chunk = selection["selected_prefill_chunk"]
     validate_reference(chunk)
     absent([FINAL, PENDING, *(output for *_, output in campaigns())])
@@ -192,8 +193,19 @@ def quality(selection):
     for name, weights_id, profile, binaries, output in campaigns():
         unchanged(selection)
         completed = subprocess.run(quality_command(chunk, weights_id, profile, binaries, output))
-        if completed.returncode:
-            failed.append(name)
+        try:
+            report = json.loads((output / "results.json").read_text())
+            eligibility = []
+            for group in (16, 32):
+                cells, _ = _campaign_quality_candidate(report, weights_id, group, chunk)
+                eligibility.append(all(cells[label]["eligible"] for label in ("8k", "32k")))
+            expected_returncode = 0 if all(eligibility) else 1
+            if completed.returncode != expected_returncode:
+                raise ValueError("runner exit differs from replayed quality outcome")
+            if not all(eligibility):
+                print(f"{name}: retained measured quality exclusion; eligibility G16/G32={eligibility}")
+        except (OSError, ValueError) as error:
+            failed.append(f"{name}: {error}")
     unchanged(selection)
     if failed:
         raise ValueError("quality campaigns failed; inspect their reports: " + ", ".join(failed))
@@ -207,15 +219,17 @@ def publication(selection):
         path = output / "results.json"
         campaign = json.loads(path.read_text())
         identities = []
+        eligibility = {}
         for group in (16, 32):
-            _, source = _campaign_quality_candidate(
+            cells, source = _campaign_quality_candidate(
                 campaign, weights_id, group, selection["selected_prefill_chunk"])
+            eligibility[str(group)] = all(cells[label]["eligible"] for label in ("8k", "32k"))
             identities.append({key: source[key] for key in (
                 "weights_id", "sha256", "file_size_bytes", "conversion_receipt")})
         if identities[0] != identities[1]:
             raise ValueError(f"{name}: G16/G32 artifact identities differ")
         entries[name] = {"path": str(path), "sha256": run.file_sha256(path),
-                         "artifact": identities[0]}
+                         "artifact": identities[0], "eligibility_by_group": eligibility}
     unchanged(selection)
     payload = {"artifact_type": "ninfer_r9700_terminal_quality_authority_map",
                "schema_version": 2, "selected_prefill_chunk": selection["selected_prefill_chunk"],

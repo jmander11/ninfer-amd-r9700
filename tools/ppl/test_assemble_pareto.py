@@ -21,11 +21,17 @@ from tools.ppl.assemble_pareto import (
     validate_xattention_dense_controls,
 )
 from tools.bench.run_ninfer_bench_matrix import BenchCase, file_sha256
-from tools.bench.run_ninfer_bench_matrix import MATRIX_SCHEMA_VERSION, R9700_KV_PLANE_LAYOUTS
+from tools.bench.run_ninfer_bench_matrix import MATRIX_SCHEMA_VERSION, R9700_KV_PLANE_LAYOUTS, R9700_POWER_PROFILE
 from tools.bench.prefill_chunk_authority import validate_prefill_chunk_authority
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pareto import _valid_capacity_failure, classify
+
+
+def passing_quality_cells():
+    return {label: {"eligible": True, "tier": "accuracy", "mean_nll_delta": .01,
+        "complete_finite_aligned": True, "scored_positions": 4095,
+        "new_severe_positions": 0} for label in ("8k", "32k")}
 
 
 class AssembleParetoTest(unittest.TestCase):
@@ -174,6 +180,7 @@ class AssembleParetoTest(unittest.TestCase):
             {
                 "name": f"g{group}-{profile}",
                 "prefill_chunk": 4096,
+                "quality_cells": passing_quality_cells(),
                 "cache_profile": {"value_group": group},
                 "execution_profile": {"xattention_profile": profile},
             }
@@ -325,6 +332,7 @@ class AssembleParetoTest(unittest.TestCase):
         candidates = [
             {
                 "name": f"g{group}-{profile}",
+                "quality_cells": passing_quality_cells(),
                 "cache_profile": {"value_group": group},
                 "execution_profile": {"xattention_profile": profile},
             }
@@ -354,6 +362,7 @@ class AssembleParetoTest(unittest.TestCase):
         candidates = [
             {
                 "name": f"g{group}-{profile}",
+                "quality_cells": passing_quality_cells(),
                 "cache_profile": {"value_group": group},
                 "execution_profile": {"xattention_profile": profile},
             }
@@ -393,7 +402,8 @@ class AssembleParetoTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "capacity and whole matrices"):
             validate_xattention_dense_controls(candidates, provenance)
 
-    def test_native_ppl_campaign_is_direct_quality_input(self) -> None:
+    @patch("tools.ppl.assemble_pareto._replay_campaign_quality")
+    def test_native_ppl_campaign_profile_and_sidecar_bindings(self, _replay) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             cells = []
@@ -417,6 +427,7 @@ class AssembleParetoTest(unittest.TestCase):
                     "prefill_chunk": 4096,
                     "prompt_tokens": tokens, "tokens_scored": tokens - 1,
                     "quality_tier": "capacity-speed", "pass": True,
+                    "gate": 0.048790164169432,
                     "quality_eligible": True, "complete_finite_aligned": True,
                     "delta_mean_nll": 0.01, "new_severe_positions": 1,
                     "command": ["ppl", "--out-json", str(path)],
@@ -465,7 +476,8 @@ class AssembleParetoTest(unittest.TestCase):
                     "cells": cells,
                 }, "weights", 16, 2048)
 
-    def test_native_ppl_campaign_rejects_changed_raw_cell(self) -> None:
+    @patch("tools.ppl.assemble_pareto._replay_campaign_quality")
+    def test_native_ppl_campaign_rejects_changed_raw_cell(self, _replay) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             path = root / "8192.prefill.r9700-g16.json"
@@ -483,6 +495,7 @@ class AssembleParetoTest(unittest.TestCase):
                 "xattention_qualification": False,
                 "prompt_tokens": 8192, "tokens_scored": 8191,
                 "quality_tier": "capacity-speed", "pass": True,
+                "gate": 0.048790164169432,
                 "quality_eligible": True, "complete_finite_aligned": True,
                 "delta_mean_nll": 0.01, "new_severe_positions": 1,
                 "command": ["ppl", "--out-json", str(path)],
@@ -628,10 +641,7 @@ class AssembleParetoTest(unittest.TestCase):
                     "concurrency": list(range(1, 5)),
                     "power_profile": ({
                         "required": "auto",
-                        "sysfs_path": (
-                            "/sys/class/drm/card2/device/"
-                            "power_dpm_force_performance_level"
-                        ),
+                        "sysfs_path": str(R9700_POWER_PROFILE),
                         "observed": "auto",
                         "rechecked_after": "auto",
                     } if preset == "pareto-whole" else None),

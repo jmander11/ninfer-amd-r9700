@@ -76,7 +76,7 @@ def validate_authority_map(path: Path) -> dict[str, Any]:
     from tools.ppl.assemble_pareto import _campaign_quality_candidate
     for name, (weights_id, profile) in EXPECTED_AUTHORITIES.items():
         entry = value["authorities"][name]
-        if not isinstance(entry, dict) or set(entry) != {"path", "sha256", "artifact"}:
+        if not isinstance(entry, dict) or set(entry) != {"path", "sha256", "artifact", "eligibility_by_group"}:
             raise ValueError(f"quality authority {name} schema is invalid")
         campaign_path = Path(entry.get("path", ""))
         if (
@@ -90,9 +90,16 @@ def validate_authority_map(path: Path) -> dict[str, Any]:
         except json.JSONDecodeError as error:
             raise ValueError(f"quality authority {name} campaign is invalid JSON") from error
         sources = []
+        eligibility = {}
         for group in (16, 32):
-            _, source = _campaign_quality_candidate(campaign, weights_id, group, chunk)
+            cells, source = _campaign_quality_candidate(campaign, weights_id, group, chunk)
+            eligibility[str(group)] = all(cells[label]["eligible"] for label in ("8k", "32k"))
             sources.append(source)
+        declared = entry["eligibility_by_group"]
+        if (not isinstance(declared, dict) or set(declared) != {"16", "32"}
+                or any(type(value) is not bool for value in declared.values())
+                or declared != eligibility):
+            raise ValueError(f"quality authority {name} eligibility differs from replayed gates")
         identities = [{
             "weights_id": source.get("weights_id"),
             "sha256": source.get("sha256"),

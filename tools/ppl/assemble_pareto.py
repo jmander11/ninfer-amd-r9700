@@ -8,6 +8,7 @@ fresh-request makespan, so one physical matrix owns all three speed objectives.
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import math
 import re
@@ -530,6 +531,112 @@ def _quality_candidate(
     }
 
 
+def _replay_campaign_quality(campaign: dict, weights_id: str) -> None:
+    """Distinguish a complete measured gate failure from invalid campaign evidence."""
+    from tools.ppl import compare_bf16_repeats
+
+    tier = "accuracy" if weights_id == "r9700-q4-w8-mse-n16k16-eval" else "capacity-speed"
+    limits = ppl_run.QUALITY_TIERS[tier]
+    gates = campaign.get("gates")
+    if (not isinstance(gates, dict) or set(gates) != {"r9700-g16", "r9700-g32"}
+            or any(type(value) not in (int, float) or not math.isfinite(value)
+                   or value > limits["maximum_mean_nll_delta"] for value in gates.values())):
+        raise ValueError("PPL campaign loosens the fixed recipe quality gates")
+    contract = campaign.get("quality_gate_contract", {})
+    expected_contract = {
+        "complete_finite_aligned_sidecars": True,
+        "maximum_mean_nll_delta_by_profile": gates,
+        "severe_nll_threshold": ppl_run.TERRIBLE_NLL,
+        "tier": tier,
+        "tier_maximum_mean_nll_delta": limits["maximum_mean_nll_delta"],
+        "maximum_new_severe_rate": limits["maximum_new_severe_rate"],
+        "minimum_new_severe_budget": limits["minimum_new_severe_budget"],
+    }
+    if (campaign.get("quality_tier") != tier
+            or not isinstance(contract, dict)
+            or any(contract.get(key) != value for key, value in expected_contract.items())):
+        raise ValueError("PPL campaign differs from the fixed recipe quality gates")
+    reused = campaign.get("reused_bf16_campaign")
+    repeat = campaign.get("bf16_repeat_comparison")
+    if (not isinstance(reused, dict) or not isinstance(reused.get("path"), str)
+            or not isinstance(repeat, dict) or not isinstance(repeat.get("path"), str)):
+        raise ValueError("PPL campaign lacks its aligned BF16 authority and repeat")
+    reference_path = Path(reused["path"])
+    if file_sha256(reference_path) != reused.get("sha256"):
+        raise ValueError("PPL BF16 authority changed")
+    try:
+        reference, reference_cells = compare_bf16_repeats.load_campaign(reference_path)
+        if ppl_run.validate_bf16_repeat_comparison(Path(repeat["path"]), reference_path) != repeat:
+            raise ValueError("PPL BF16 repeat authority changed")
+    except SystemExit as error:
+        raise ValueError(f"PPL BF16 authority is invalid: {error}") from error
+    for key in ("model_id", "reference_weights_id", "reference_source", "reference_execution",
+                "corpus", "lengths", "skip", "prefill_chunk", "schedules", "spec",
+                "draft_tokens", "terrible_nll"):
+        if key not in campaign or campaign[key] != reference.get(key):
+            raise ValueError(f"PPL campaign differs from BF16 {key}")
+    if campaign.get("scorers", {}).get(ppl_run.BASELINE) != reference["scorers"][ppl_run.BASELINE]:
+        raise ValueError("PPL campaign BF16 scorer differs from its authority")
+    cells = campaign.get("cells")
+    expected = {(scheme, tokens) for scheme in (ppl_run.BASELINE, *gates)
+                for tokens in (8192, 32768)}
+    if (not isinstance(cells, list) or len(cells) != len(expected)
+            or any(not isinstance(cell, dict) for cell in cells)
+            or {(cell.get("scheme"), cell.get("prompt_tokens")) for cell in cells} != expected):
+        raise ValueError("PPL campaign lacks the complete BF16/G16/G32 cell inventory")
+    for cell in cells:
+        baseline, baseline_path = reference_cells[cell["prompt_tokens"]]
+        if cell["scheme"] == ppl_run.BASELINE:
+            if (cell.get("pass") is not True
+                    or any(key not in cell or cell[key] != baseline.get(key)
+                           for key in ppl_run.BF16_SCORER_REPORT_FIELDS)):
+                raise ValueError("PPL campaign BF16 cell differs from authority")
+            continue
+        command = cell.get("command")
+        if not isinstance(command, list) or command.count("--out-json") != 1:
+            raise ValueError("PPL quality cell lacks its raw report command")
+        index = command.index("--out-json")
+        if index + 1 >= len(command) or not isinstance(command[index + 1], str):
+            raise ValueError("PPL quality cell has a malformed raw report command")
+        for flag, value in (("--ids", campaign["corpus"]["path"]),
+                            ("--tokens", str(cell["prompt_tokens"])),
+                            ("--skip", campaign["skip"]),
+                            ("--prefill-chunk", str(campaign["prefill_chunk"]))):
+            if (command.count(flag) != 1 or command.index(flag) + 1 >= len(command)
+                    or command[command.index(flag) + 1] != value):
+                raise ValueError("PPL quality command differs from aligned corpus geometry")
+        path = Path(command[index + 1])
+        if not path.is_absolute():
+            path = REPO_ROOT / path
+        raw = json.loads(path.read_text())
+        if not isinstance(raw, dict) or any(cell.get(key) != value for key, value in raw.items()):
+            raise ValueError("PPL quality raw json differs from its campaign")
+        for suffix, key in (("nllf32", "nll_sha256"), ("argmaxi32", "argmax_sha256")):
+            if file_sha256(path.with_suffix("." + suffix)) != cell.get(key):
+                raise ValueError("PPL quality sidecar bytes changed")
+        try:
+            nll, argmax = ppl_run.load_nlls(path), ppl_run.load_argmax(path)
+            base_nll, base_argmax = ppl_run.load_nlls(baseline_path), ppl_run.load_argmax(baseline_path)
+            if (not ppl_run.cell_ok(cell, nll, argmax)
+                    or not ppl_run.cell_ok(baseline, base_nll, base_argmax)
+                    or cell.get("skip_tokens") != baseline.get("skip_tokens")
+                    or cell.get("tokens_scored") != baseline.get("tokens_scored")
+                    or cell.get("terrible_nll") != ppl_run.TERRIBLE_NLL):
+                raise ValueError("PPL quality sidecars are not complete finite aligned")
+            # Scorer aggregates are mathematical summaries of the represented FP32 sidecars.
+            compare_bf16_repeats._validate_sidecar_content("candidate", cell["prompt_tokens"], cell, path)
+            rebuilt = copy.deepcopy(cell)
+            ppl_run.apply_baseline(rebuilt, nll, baseline["mean_nll"], gates, cell["scheme"],
+                base_nll, argmax, base_argmax, baseline["terrible_tokens"],
+                limits["maximum_new_severe_rate"], limits["minimum_new_severe_budget"])
+        except SystemExit as error:
+            raise ValueError(f"PPL quality sidecars are malformed: {error}") from error
+        if cell.get("quality_tier") != tier or rebuilt != cell:
+            raise ValueError("PPL quality gate does not recompute from aligned sidecars")
+    if type(campaign.get("pass")) is not bool or campaign["pass"] != all(cell.get("pass") is True for cell in cells):
+        raise ValueError("PPL campaign pass differs from measured cell outcomes")
+
+
 def _campaign_quality_candidate(
     campaign: dict[str, Any], weights_id: str, group: int, prefill_chunk: int | None,
 ) -> tuple[dict, dict]:
@@ -543,7 +650,8 @@ def _campaign_quality_candidate(
     }
     hybrid = weights_id == HYBRID_WEIGHTS_ID
     if (
-        campaign.get("pass") is not True
+        campaign.get("artifact_type") != ppl_run.CAMPAIGN_ARTIFACT_TYPE
+        or campaign.get("schema_version") != ppl_run.CAMPAIGN_SCHEMA_VERSION
         or campaign.get("model_id") != "qwen3.8-27b"
         or campaign.get("schedules") != ["prefill"]
         or campaign.get("lengths") not in ([8192, 32768], [32768, 8192])
@@ -563,6 +671,7 @@ def _campaign_quality_candidate(
         != ("fp8-hybrid-selection-authority" if hybrid else None)
     ):
         raise ValueError("PPL campaign has an unsupported identity or execution profile")
+    _replay_campaign_quality(campaign, weights_id)
     conversion_receipt = _quality_migration_receipt(artifact, weights_id)
     cells: dict[str, Any] = {}
     sources: dict[str, Any] = {}
@@ -659,8 +768,8 @@ def _campaign_quality_candidate(
         tier = cell.get("quality_tier")
         if (
             tier not in ("accuracy", "capacity-speed")
-            or cell.get("pass") is not True
-            or cell.get("quality_eligible") is not True
+            or type(cell.get("pass")) is not bool
+            or cell.get("quality_eligible") is not cell["pass"]
             or cell.get("complete_finite_aligned") is not True
             or type(cell.get("tokens_scored")) is not int
             or cell["tokens_scored"] <= 0
@@ -670,11 +779,12 @@ def _campaign_quality_candidate(
             or not isinstance(cell.get("delta_mean_nll"), (int, float))
             or not math.isfinite(float(cell["delta_mean_nll"]))
         ):
-            raise ValueError(f"PPL campaign {weights_id}/G{group}/{label} failed quality")
+            raise ValueError(f"PPL campaign {weights_id}/G{group}/{label} has invalid quality evidence")
         cells[label] = {
-            "eligible": True,
+            "eligible": cell["quality_eligible"],
             "tier": tier,
             "mean_nll_delta": cell["delta_mean_nll"],
+            "maximum_mean_nll_delta": cell["gate"],
             "complete_finite_aligned": True,
             "scored_positions": cell["tokens_scored"],
             "new_severe_positions": cell["new_severe_positions"],
@@ -704,6 +814,17 @@ def _campaign_quality_candidate(
     }
 
 
+def _quality_cells_eligible(cells: dict) -> bool:
+    from tools.ppl.pareto import _quality_objective
+    if not isinstance(cells, dict) or set(cells) != {"8k", "32k"}:
+        raise ValueError("terminal candidate lacks complete numerical quality measurements")
+    reasons = [reason for label, cell in cells.items()
+               for reason in _quality_objective(cell, label)[1]]
+    if any(not reason.startswith("quality_guardrails_not_met:") for reason in reasons):
+        raise ValueError("terminal candidate has malformed numerical quality measurements")
+    return not reasons
+
+
 def assemble_candidate(
     name: str, weights_id: str, group: int, quality_path: Path,
     capacity_root: Path, whole_root: Path | None, prefill_chunk: int,
@@ -719,8 +840,9 @@ def assemble_candidate(
     capacity_failures = _missing_capacity_provenance(
         capacity_root, manifests["pareto-capacity"]
     )
-    if not capacity_failures and whole_root is None:
-        raise ValueError("capacity-eligible candidate requires a whole matrix")
+    quality_eligible = _quality_cells_eligible(quality_cells)
+    if not capacity_failures and quality_eligible and whole_root is None:
+        raise ValueError("capacity- and quality-eligible candidate requires a whole matrix")
     if whole_root is not None:
         manifests["pareto-whole"] = _manifest(whole_root, "pareto-whole")
     for preset, manifest in manifests.items():
@@ -855,6 +977,7 @@ def assemble_candidate(
             },
             "representation": quality_source["representation"],
             "cells": quality_source["cells"],
+            "measurements": quality_cells,
             "campaign_identity": quality_source.get("campaign_identity"),
         },
         "matrices": {
@@ -938,9 +1061,10 @@ def validate_xattention_dense_controls(
         if not isinstance(capacity_failures, list):
             raise ValueError("XAttention capacity failure provenance is malformed")
         capacity_eligible = not capacity_failures
+        quality_eligible = _quality_cells_eligible(candidate.get("quality_cells"))
         expected_matrices = (
             {"pareto-capacity", "pareto-whole"}
-            if capacity_eligible else {"pareto-capacity"}
+            if capacity_eligible and quality_eligible else {"pareto-capacity"}
         )
         if not isinstance(matrices, dict) or set(matrices) != expected_matrices:
             raise ValueError(

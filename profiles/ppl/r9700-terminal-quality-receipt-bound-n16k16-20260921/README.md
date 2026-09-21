@@ -1,12 +1,16 @@
 # Selected-chunk numerical quality campaign
 
-Prepared commands only; no numerical results or selection are asserted by this package.
+Reference and all six quality campaigns completed on2026-09-21. Ten of twelve profiles pass;
+mixed XAttention fails its strict accuracy severe-position budget at32K for G16/G32.
+The original quality stage exited1 and its results are preserved. Do not rerun reference
+or quality: the repaired publisher validates measured exclusions alongside passing evidence.
+This is numerical eligibility, not final production selection.
 All stages require the real, validated
 `profiles/bench/prefill-chunk-selection-panel-attention-20260921.json` authority.
 The scripts never choose or substitute a chunk. Candidate scorers come from
 `build-r9700-selection-panel-{dense,xattention}-g{16,32}-20260921/apps/ninfer-ppl`.
 
-Run from the repository root:
+Stage commands from the repository root (reference/quality are completed, not restart commands):
 
 ```sh
 bash profiles/ppl/r9700-terminal-quality-receipt-bound-n16k16-20260921/commands.sh preflight
@@ -50,8 +54,8 @@ and is sufficient for retained-reference reuse, candidate orchestration, and
 publication. Root installed `/ssdpool2nvme/local_llm/.venv-ninfer-r9700-py311/bin/python`
 with Python 3.11.16, ROCm torch 2.9.1+rocm7.2.4.git39497456, and Triton
 3.5.1+rocm7.2.4.gita272dfa8. `pip check` and CPU-only imports passed;
-gfx1201 is listed and GPU initialization remained false. GPU qualification has not
-run; the reference command must wait for review and root's exclusive GPU lease.
+gfx1201 is listed. The full-span GDN oracle and fresh chunk2048 BF16 A/B have now
+passed on the GPU; both lengths have exactly matching NLL/token sidecars.
 This package does
 not install dependencies or change a Python or shared-library environment.
 
@@ -61,10 +65,12 @@ token lengths. The mixed recipe uses the accuracy tier (0.02 mean-NLL gate);
 all-Q4 and four-role use capacity-speed (log(1.05)). Every campaign uses freshly
 executed candidate scores and the validated BF16 authority, fixed FP8-K/INT4-V
 cache, prefill-only, spec-none execution. Failed campaigns retain their reports;
-the stage tries all six and returns failure if any fails.
+the repaired stage distinguishes replay-validated numerical exclusions from malformed
+or incomplete evidence. A numerical exclusion cannot be reclassified into a looser tier.
 
 `publish` reopens each campaign through the existing Pareto quality validator,
-binds both groups to the exact artifact receipt and selected chunk, and uses the
+recomputes finite aligned sidecar metrics and original fixed-tier gates, retains each
+group's true eligibility, binds the exact artifact receipt and selected chunk, and uses the
 existing exclusive quality authority publisher. It writes
 `quality-authorities-receipt-bound-n16k16.json` only after validation.
 

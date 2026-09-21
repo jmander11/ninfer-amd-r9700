@@ -39,6 +39,11 @@ in `docs/performance.md` and `docs/maintainer/r9700-overhaul-plan.md`, not here.
   and `ceil(0.0025 * scored_positions)` for capacity-speed. Schema-v7 terminal selection uses
   `global_maximin_whole_then_capacity_then_quality_then_canonical_v1` over the complete matched
   candidate set; quality is an admission gate, not the speed objective.
+  A complete finite measured quality failure is a retained candidate exclusion, not a reason to
+  loosen its tier, rerun unchanged measurements, or reject the complete evidence set. Preserve
+  all twelve identities and failing sidecars; do not time a quality-ineligible candidate. Dense/
+  sparse capacity symmetry does not require identical quality eligibility: a failed sparse route
+  must not discard its passing dense control. Malformed or incomplete evidence still blocks selection.
 - Canonical dense Q4 uses scalar-base/U32-voffset N16/K16 ping/pong. Its source-matched
   C1/P2048/G0/chunk4096/spec-none result is `1904.339303 tok/s`. On 2026-09-21 the user accepted
   this speed and authorized one bounded review for overlooked large prefill gains, followed by
@@ -1019,8 +1024,9 @@ The former `DENSE-FLOOR-DECISION` prerequisite is satisfied. Execute these tasks
 prefill review, preserving their remaining data dependencies.
 
 - [ ] `WHOLE-MATRIX` [depends: CHUNK-SELECT, QUALITY-8K32K, CAPACITY-WHOLE-12] Retain matched
-  schema-v20/spec-none ordinary 8K+256 and 32K+256 whole reports for each capacity-eligible profile
-  at every C1..4. A measured capacity failure is a retained exclusion with no whole objective.
+  schema-v20/spec-none ordinary 8K+256 and 32K+256 whole reports for each quality- and
+  capacity-eligible profile at every C1..4. A measured quality or capacity failure is a retained
+  exclusion with no whole objective.
   Reopen exact commands, artifacts, executables, receipts, planner bytes, and `auto` endpoints.
   MTP rows are optional regression diagnostics and never rank or block the base selection.
 
@@ -1081,8 +1087,14 @@ prefill review, preserving their remaining data dependencies.
   FP64 oracle passed at 4095/4096 rows, and independent A/B semantic fields plus NLL/token sidecars
   match exactly at both lengths. BF16 PPL is 6.463887635 at 8K and 5.632510588 at 32K; authority
   `bf16-chunk2048-a/results.json` and `bf16-chunk2048-repeat.json` are inside the package.
-  `commands.sh quality` is now active across all six candidate campaigns. Preserve all candidate failures
-  for diagnosis. The 20260905 recovery script is historical; its dense-Q4 history does not replace
+  All six quality campaigns are complete and committed in `df325432`. Ten profiles pass;
+  mixed XAttention fails strict accuracy at32K: G16/G32 introduce19/18 severe positions against
+  budget17, despite passing mean-NLL deltas. Retain both exclusions without tier changes; never
+  rerun this completed campaign. The campaign-to-selection adapter/schema7 repair now preserves
+  genuine numerical exclusions separately from capacity failures and replays all finite aligned
+  sidecar metrics. All24 actual cells revalidate; independent implementation review is SHIP,
+  including133 focused tests and a full real-data authority-map replay. Publication is active.
+  Preserve all candidate failures for diagnosis. The 20260905 recovery script is historical; its dense-Q4 history does not replace
   this current-build campaign. No numerical result is claimed by preparing the package.
 
 - [ ] `POSTCHUNK-ON` [depends: CHUNK-SELECT] Through
@@ -1091,7 +1103,12 @@ prefill review, preserving their remaining data dependencies.
   group-specific executable and artifact.
   The fresh package provides preflight/capacity/whole/select commands, binds the published six
   quality authorities and frozen panel artifacts/builds, collects all twelve capacity outcomes,
-  and runs only eligible whole profiles before schema-v7 publication. Root review SHIP after
+  and runs only quality- and capacity-eligible whole profiles before schema-v7 publication.
+  Whole reports retain public tokens without changing timed work. After whole, run its reviewed
+  `controls.sh preflight` and `controls.sh run`: exact ordinary8K/32K graph/eager tokens atC1..4
+  are required before select can create output. All graph repetitions/lanes are compared with one
+  eager execution; failure outputs are create-only. Controls review SHIP; eight CPU tests pass.
+  Root review SHIP after
   repairing tuple/list capacity identities; 25 focused CPU checks pass. No physical result is
   implied. Old post-chunk/terminal 20260905 launchers are historical; do not republish chunk selection.
 
@@ -1126,7 +1143,8 @@ prefill review, preserving their remaining data dependencies.
 
 - [ ] `TERMINAL-SELECTION` [depends: WHOLE-PARETO] Publish exactly one schema-v7 artifact, cache
   group, static Text-prefill profile, and selected chunk through
-  `profiles/bench/terminal-static-selection-20260905`. Preserve every measured exclusion and do
+  `profiles/bench/r9700-terminal-base-panel-attention-20260921`. The20260905 launcher is historical.
+  Preserve every measured exclusion and do
   not materialize the final artifact or cut over XAttention here.
 
 ## Post-selection, conditional, and final gates

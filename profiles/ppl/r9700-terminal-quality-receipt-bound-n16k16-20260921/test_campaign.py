@@ -176,6 +176,53 @@ class CampaignTest(unittest.TestCase):
                         if failure == "existing":
                             self.assertEqual(probe.read_text(), "previous failed probe")
 
+    def test_quality_retains_measured_exclusion_but_rejects_malformed_or_wrong_exit(self):
+        for malformed, returncode in ((False, 1), (True, 1), (False, 0)):
+            with self.subTest(malformed=malformed, returncode=returncode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                output = root / 'mixed'
+                case = ('MIXED_XATTENTION_QUALITY', 'r9700-q4-w8-mse-n16k16-eval',
+                        'b128-s16-tau900', {16: Path('g16'), 32: Path('g32')}, output)
+                def execute(*args, **kwargs):
+                    output.mkdir()
+                    (output / 'results.json').write_text('{"pass": false}')
+                    return subprocess.CompletedProcess([], returncode)
+                replay = {'8k': {'eligible': True}, '32k': {'eligible': False}}
+                with patch.object(campaign, 'campaigns', return_value=[case]), \
+                        patch.object(campaign, 'FINAL', root / 'final.json'), \
+                        patch.object(campaign, 'PENDING', root / 'pending.json'), \
+                        patch.object(campaign, 'validate_reference'), patch.object(campaign, 'unchanged'), \
+                        patch.object(campaign.subprocess, 'run', side_effect=execute), \
+                        patch('tools.ppl.assemble_pareto._campaign_quality_candidate',
+                              side_effect=ValueError('malformed sidecar') if malformed else None,
+                              return_value=(replay, {})):
+                    if malformed or returncode != 1:
+                        with self.assertRaisesRegex(ValueError, 'quality campaigns failed'):
+                            campaign.quality({'selected_prefill_chunk': 2048})
+                    else:
+                        campaign.quality({'selected_prefill_chunk': 2048})
+                    self.assertEqual(json.loads((output / 'results.json').read_text()), {'pass': False})
+
+    def test_publication_retains_group_specific_replayed_eligibility(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / 'mixed'; output.mkdir()
+            (output / 'results.json').write_text('{"pass": false}')
+            case = ('MIXED_XATTENTION_QUALITY', 'recipe', 'b128-s16-tau900', {}, output)
+            def replay(_campaign, _weights, group, _chunk):
+                return ({'8k': {'eligible': True}, '32k': {'eligible': group == 16}},
+                        {'weights_id': 'recipe', 'sha256': 'artifact', 'file_size_bytes': 1,
+                         'conversion_receipt': {}})
+            with patch.object(campaign, 'campaigns', return_value=[case]), \
+                    patch.object(campaign, 'FINAL', root / 'final.json'), \
+                    patch.object(campaign, 'PENDING', root / 'pending.json'), \
+                    patch.object(campaign, 'unchanged'), patch.object(campaign, 'publish') as publish, \
+                    patch('tools.ppl.assemble_pareto._campaign_quality_candidate', side_effect=replay):
+                campaign.publication({'selected_prefill_chunk': 2048, 'path': 'selection', 'sha256': 'hash'})
+                publish.assert_called_once()
+                result = json.loads((root / 'pending.json').read_text())
+                self.assertEqual(result['authorities'][case[0]]['eligibility_by_group'], {'16': True, '32': False})
+
 
 if __name__ == "__main__":
     unittest.main()

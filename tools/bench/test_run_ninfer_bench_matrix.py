@@ -1035,7 +1035,7 @@ class CompiledKvGroupTest(unittest.TestCase):
             "spec": "none", "draft_tokens": 0, "speculative_execution": False,
             "dflash_verify_width_requested": 0, "dflash_verify_width": 0,
             "proposal_head": "full", "use_device_graph": True,
-            "retain_token_ids": False, "repetitions": 3, "warmup": 1,
+            "retain_token_ids": True, "repetitions": 3, "warmup": 1,
             "prefill_chunk": 4096, "concurrency": 1,
         }
         validate_case_profile(config, case)
@@ -1057,11 +1057,17 @@ class CompiledKvGroupTest(unittest.TestCase):
                     "acceptance_rate": None, "acceptance_length": None,
                     "accepted_per_position": [],
                 },
-                "reps": [{} for _ in range(3)],
+                "reps": [{"generated_token_ids_by_lane": [[7] * 257]} for _ in range(3)],
             }
 
         report = {"config": config, "tests": [whole_row(8192), whole_row(32768)]}
         validate_report_tests(report, case)
+        report["tests"][0]["reps"][0].pop("generated_token_ids_by_lane")
+        with self.assertRaisesRegex(ValueError, "does not retain every concurrency lane"):
+            validate_report_tests(report, case)
+        report["tests"][0]["reps"][0]["generated_token_ids_by_lane"] = [[7] * 256]
+        with self.assertRaisesRegex(ValueError, "invalid retained token IDs"):
+            validate_report_tests(report, case)
 
     def test_dflash_controls_require_exact_spec_none_ordinary_execution(self) -> None:
         for preset in ("dflash-shortlist", "dflash-pareto"):
@@ -1248,7 +1254,8 @@ class CompiledKvGroupTest(unittest.TestCase):
         whole = build_cases("pareto-whole")
         self.assertEqual(len(whole), 1)
         self.assertEqual([case.parity_role for case in whole], ["ordinary"])
-        self.assertFalse(whole[0].retain_token_ids)
+        self.assertTrue(whole[0].retain_token_ids)
+        self.assertIn("--retain-token-ids", whole[0].args)
         self.assertIn("--whole-pg", whole[0].args)
         self.assertEqual(
             whole[0].args[whole[0].args.index("--whole-pg") + 1],

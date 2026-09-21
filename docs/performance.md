@@ -134,11 +134,11 @@ layout and attention oracles after the coherent ROCm update.
 The provisional latency leader is G16 with token-fastest K, feature-fastest V, and feature-fastest
 V scales: mean normalized latency `1.004041`, mean rank `2.188`, and 14 wins. This is not yet the
 permanent ABI: the retained real 8K comparison measured both G16 and G32 within their quality tier
-and favored G16 on NLL error against one historical BF16 realization. The exact v3 BF16 authority
-is now closed and the dense all-Q4 sidecars pass their offline rebase; current mixed and sparse
-quality evidence, matched phase, and whole-inference speed evidence remain incomplete. The
-pre-promotion C=1..4 capacity matrices below are retained, but split-512 promotion and final
-prefill-chunk selection require a fresh 32-cell capacity rerun before selection.
+and favored G16 on NLL error against one historical BF16 realization. Current chunk2048 numerical
+eligibility is recorded above; matched capacity, phase, graph/eager, and whole-inference evidence
+still precede terminal selection. The older C=1..4 capacity matrices below remain historical.
+The current continuation retains all twelve profile capacity outcomes at C=1..4 and times only
+quality- and capacity-eligible profiles.
 
 The production leaf uses two measured crossovers. At context 8,192 and above, ordinary T=1 and
 fixed-width T=4 select the three-stage split-512 leaf; T=4 includes causal, packed-tree, and

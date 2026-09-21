@@ -11,6 +11,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import pareto
@@ -856,7 +857,47 @@ class ParetoTest(unittest.TestCase):
             failed_pair_result["pareto_input"] = {
                 "path": str(input_path), "sha256": pareto._file_sha256(input_path),
             }
-            pareto.validate_terminal_production_authority(failed_pair_result)
+            with patch.object(pareto, "_revalidate_numerical_quality"):
+                pareto.validate_terminal_production_authority(failed_pair_result)
+
+            # A complete sparse quality rejection must not erase its passing dense
+            # control. Real capacity symmetry remains independent of that rejection.
+            quality_payload = copy.deepcopy(failed_pair_payload)
+            rejected = []
+            for row, source in zip(quality_payload["candidates"], quality_payload["source_provenance"], strict=True):
+                if (row["cache_profile"]["value_group"] == 16
+                        and row["execution_profile"]["xattention_profile"] == "b128-s16-tau900"
+                        and not row["name"].startswith("r9700-q4g64-n16k16-eval-")):
+                    row["quality_cells"]["32k"].update({"eligible": False,
+                        "mean_nll_delta": .017, "scored_positions": 16383,
+                        "new_severe_positions": 19})
+                    row["whole_inference_tokens_per_second"] = {}
+                    source["matrices"].pop("pareto-whole", None)
+                    rejected.append(row["name"])
+            quality_result = pareto.classify(quality_payload)
+            by_name = {row["name"]: row for row in quality_result["candidates"]}
+            self.assertEqual(len(by_name), 12)
+            for name in rejected:
+                self.assertFalse(by_name[name]["comparable"])
+                self.assertIn("quality_guardrails_not_met:32k", by_name[name]["reasons"])
+            mixed_sparse = next(name for name in rejected if name.startswith("r9700-q4-w8-mse-"))
+            self.assertTrue(by_name[mixed_sparse]["capacity_eligible"])
+            self.assertTrue(by_name[mixed_sparse.replace("b128-s16-tau900", "dense")]["comparable"])
+            input_path.write_text(json.dumps(quality_payload), encoding="utf-8")
+            quality_result["pareto_input"] = {"path": str(input_path), "sha256": pareto._file_sha256(input_path)}
+            with patch.object(pareto, "_revalidate_numerical_quality"):
+                pareto.validate_terminal_production_authority(quality_result)
+            for mutation in ({"eligible": True}, {"complete_finite_aligned": False},
+                             {"mean_nll_delta": float("nan")}):
+                malformed = copy.deepcopy(quality_payload)
+                next(row for row in malformed["candidates"] if row["name"] == mixed_sparse)["quality_cells"]["32k"].update(mutation)
+                with self.assertRaisesRegex(ValueError, "malformed numerical quality"):
+                    pareto.classify(malformed)
+
+            missing_whole = copy.deepcopy(failed_pair_payload)
+            next(row for row in missing_whole["candidates"] if row["name"] == mixed_sparse)["whole_inference_tokens_per_second"] = {}
+            with self.assertRaisesRegex(ValueError, "lacks complete whole-inference evidence"):
+                pareto.classify(missing_whole)
 
         unmatched_rows = list(failed_pair_rows)
         restore_index = next(

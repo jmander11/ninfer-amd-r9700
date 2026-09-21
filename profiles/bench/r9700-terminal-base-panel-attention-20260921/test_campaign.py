@@ -15,7 +15,7 @@ class CampaignTest(unittest.TestCase):
     def state(self):
         return {'bindings': {}, 'authority': {'selected_prefill_chunk': 2048, 'sha256': 'selection'},
                 'quality': {'authorities': {
-                    key: {'path': f'/quality/{key}/results.json'}
+                    key: {'path': f'/quality/{key}/results.json', 'eligibility_by_group': {'16': True, '32': True}}
                     for key in campaign.EXPECTED_AUTHORITIES}}}
 
     def test_missing_quality_preflight_is_read_only(self):
@@ -183,6 +183,23 @@ class CampaignTest(unittest.TestCase):
                     campaign.capacity_evidence(self.state())
                 validate.assert_not_called()
 
+    def test_quality_exclusion_skips_whole_without_removing_dense_or_capacity_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = self.state()
+            state['quality']['authorities']['MIXED_XATTENTION_QUALITY']['eligibility_by_group'] = {'16': False, '32': True}
+            eligible = [campaign.identity(case) for case in campaign.candidates()]
+            with patch.object(campaign, 'PACKAGE', root), \
+                    patch.object(campaign, 'capacity_evidence', return_value={'whole_eligible_identities': eligible}), \
+                    patch.object(campaign, 'execute', return_value=0) as execute:
+                campaign.whole(state)
+                names = [call.args[2] for call in execute.call_args_list]
+                self.assertEqual(len(names), 11)
+                self.assertNotIn('mixed_xattention-g16', names)
+                self.assertIn('mixed_dense-g16', names)
+                self.assertIn('mixed_xattention-g32', names)
+                self.assertEqual(len(eligible), 12)
+
     def test_select_passes_all_candidates_with_exclusions_and_exclusive_publication(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -198,6 +215,7 @@ class CampaignTest(unittest.TestCase):
             with patch.object(campaign, 'PACKAGE', root), \
                     patch.object(campaign, 'capacity_evidence', return_value={'whole_eligible_identities': eligible}), \
                     patch.object(campaign, 'require_stage_bindings'), \
+                    patch('controls.validate_completed'), \
                     patch.object(campaign, 'execute', side_effect=execute), \
                     patch.object(campaign.pareto, 'load_payload', return_value={}), \
                     patch.object(campaign.pareto, 'classify', return_value={'schema_version': 7}), \
@@ -210,6 +228,15 @@ class CampaignTest(unittest.TestCase):
                 self.assertEqual(result['pareto_input']['sha256'], campaign.run.file_sha256(pending_input))
                 self.assertEqual(final_result, root / 'select/result.json')
                 self.assertEqual(publish.call_args.kwargs['guard_sha256'], 'selection')
+
+    def test_selection_blocks_before_outputs_without_exact_graph_eager_controls(self):
+        with patch('controls.validate_completed', side_effect=ValueError('missing controls')), \
+                patch.object(campaign, 'create_stage') as create, \
+                patch.object(campaign, 'execute') as execute:
+            with self.assertRaisesRegex(ValueError, 'missing controls'):
+                campaign.select(self.state())
+        create.assert_not_called()
+        execute.assert_not_called()
 
 
 if __name__ == '__main__':
