@@ -1342,6 +1342,21 @@ This selector-free `27.05729956 tok/s` result is the bounded practical ceiling u
 ordinary base-decode work. It is explicitly not an absolute hardware or physical ceiling and does
 not claim the maximum achievable throughput of the R9700.
 
+Base-decode bandwidth work was subsequently reopened and admitted three exact projection fusions.
+At C1, the BF16 GDN control fusion's whole-model candidate/control decode-time ratios were
+`0.9876921`, `0.9870972`, and `0.9868352`; the all-Q4 attention input-projection fusion's ratios
+were `0.9887575`, `0.9873370`, and `0.9869812`. At C2, C3, and C4, the shared-quantize paired-Q4
+route passed three whole-model pairs per concurrency with median ratios `0.9246617`, `0.9272089`,
+and `0.9341644`, and upper-two-standard-error bounds `0.9250822`, `0.9283767`, and `0.9342851`.
+Every process retained exact public tokens. The C2--C4 result closure is
+`profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919/results`, whose
+`result.sha256` digest is `26c4ae49e7a24ce97d1f56c891e841942507678aaab8a0df0ada315996e93cda`.
+These gates authorize selector-free production routing only for singleton BF16 GDN controls,
+singleton all-Q4 attention projection pairs, and all-Q4 projection pairs at exactly two through
+four tokens. Mixed weights and other token widths retain their prior routes. These unprofiled
+whole timings establish useful decode-speed gains, not physical HBM saturation or stall freedom,
+and the two separately measured C1 gains are not added to make a combined claim.
+
 The existing MTP shortlist head remains Q4G64 with A8G64 activations. MTP stays in exact-output,
 state, cache, row-view, and whole-route regression coverage, but a new shortlist-head trace,
 alternate head precision, acceptance campaign, or MTP performance optimization is not a final

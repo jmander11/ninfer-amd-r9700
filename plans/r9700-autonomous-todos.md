@@ -131,20 +131,20 @@ after-parity router).
 The bounded DFlash verify-down split-K task is closed default-off: S=8 and S=2 both failed exact
 public-token parity, and S=4 has no mechanism for restoring the incumbent serial-FMA semantics.
 Do not rerun either sealed package or infer an S=4 command. The reviewed selector-free
-BASE-DECODE-BW measurement completed. The BF16 GDN, all-Q4 T1 attention, and all-Q4 C2..4
-paired-projection *design* qualifiers completed and admitted production candidates; none of those
-later candidates is promoted merely by its design result. The BF16 GDN production symbol and its
-whole C1 gate are now qualified, with promotion deliberately deferred until the attention campaigns
-finish. The deterministic queue after reset is:
+BASE-DECODE-BW measurement completed. The BF16 GDN T1, all-Q4 attention T1, and all-Q4 C2..4
+direct and whole gates all passed, and independent result audits admitted their exact production
+routes. Their three qualification selectors were removed together after independent code review;
+exact predicates and mixed/other-width fallbacks remain. A fresh selector-free C1..4 production
+confirmation is prepared and independently reviewed at
+`profiles/bench/r9700-three-route-production-confirmation-20260920`. The exact next action is
+`bash profiles/bench/r9700-three-route-production-confirmation-20260920/commands.sh --measure`.
+The deterministic queue after reset is:
 
-1. direct-qualify C2..4 with `profiles/bench/r9700-paired-projection-c2c4-production-qualification-20260919`, then prepare/review/run `profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919`;
-2. resolve the BF16 GDN and both paired-route promotion decisions, then run `profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919`.
+1. run the independently reviewed selector-free C1..4 composition gate at `profiles/bench/r9700-three-route-production-confirmation-20260920`;
+2. after it passes, run `profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919`.
 
-Do not promote or remove any candidate selector before queue item 1 completes because doing so
-invalidates its cache and source authorities. The exact next action is
-`bash profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919/commands.sh --measure`.
-Every other remaining unchecked task depends
-directly or transitively on this queue or the external `DENSE-FLOOR-DECISION`.
+Every other remaining unchecked task depends directly or transitively on this queue or the
+external `DENSE-FLOOR-DECISION`.
 
 Every future physical experiment must be launched through a reviewed package-local `commands.sh`,
 not an ad-hoc reconstructed command. A package is runnable only when its plan contains no
@@ -316,9 +316,9 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   sample drained to 59,912,192 bytes in 0.10074--0.10109 seconds within the unchanged gates.
   Evidence: `profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-retry2-20260920/results`; the
   SHA-256 of `result.sha256` is
-  `e6fb6b0cf14aa8a28273e5a32b35f76fba7700dd31a971a35a9d4a016ad69569`. This admits production
-  promotion, but do not promote it until both attention campaigns finish because their control
-  authorities bind this selector off.
+  `e6fb6b0cf14aa8a28273e5a32b35f76fba7700dd31a971a35a9d4a016ad69569`. This admitted production
+  promotion. The selector is now removed after both attention campaigns completed; the fresh
+  selector-free C1..4 confirmation named below is the remaining composition gate.
 
   The all-Q4 T1 attention paired-projection direct gate compared the two
   complete N7168/K5120 Q4 linears plus four incumbent extracts against one shared A8G64
@@ -356,8 +356,8 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   versus control `27.6671`, `27.6504`, and `27.6442 tok/s`. Evidence:
   `profiles/bench/r9700-attention-q4-pair-t1-whole-ab-20260919/results`; the SHA-256 of
   `result.sha256` is `9054b308fb675b236532b847c72b7774165824dce1e43bceff4cbe83c0db17f1`.
-  This admits production promotion, deferred until the C2..4 campaign finishes; do not rerun it or
-  claim physical HBM bandwidth from the unprofiled timing.
+  This admitted production promotion. The selector is now removed after the C2..4 campaign
+  completed; do not rerun this gate or claim physical HBM bandwidth from its unprofiled timing.
 
   The independently reviewed C2..4 paired-WMMA direct gate covers both the GDN N4096+N12288 pair
   (48 calls/round) and attention N7168+N7168 pair (16 calls/round). It compares two complete
@@ -394,10 +394,20 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   authorizes only whole-package preparation, not promotion. Independent review reported `SHIP` for
   the whole package at
   `profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919`; no separate review artifact was
-  created. The reset, GDN gate, and T1 attention campaign are complete. A reviewed lexical PCI
-  power-path repair removed a false symlink-resolution rejection; do not prepare the whole package
-  before its direct receipt exists. The whole package is now prepared; two independent reviews
-  reported `SHIP`, its non-GPU preflight passes, and its results path is fresh.
+  created. A reviewed lexical PCI power-path repair removed a false symlink-resolution rejection.
+  The complete 18-process campaign passed exact 257-token parity. Its C2 pair ratios were
+  `0.9250746`, `0.9245411`, and `0.9246617`; C3 ratios were `0.9283638`, `0.9272089`, and
+  `0.9269505`; C4 ratios were `0.9338502`, `0.9341644`, and `0.9341877`. The corresponding
+  mean-plus-two-standard-error bounds were `0.9250822`, `0.9283767`, and `0.9342851`. Evidence:
+  `profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919/results`; the SHA-256 of
+  `result.sha256` is `26c4ae49e7a24ce97d1f56c891e841942507678aaab8a0df0ada315996e93cda`.
+  Two independent result audits reported `SHIP`. This admitted production promotion for exactly
+  all-Q4 T2..4, not mixed weights or another width and not a physical-bandwidth claim. The BF16 GDN
+  T1, all-Q4 attention T1, and C2..4 paired selectors and benchmark fields are now removed; exact
+  predicates and all fallbacks remain. Focused selector-free builds and routing qualifiers passed,
+  and independent code review reported `SHIP`. The fresh composition package
+  `profiles/bench/r9700-three-route-production-confirmation-20260920` is prepared, independently
+  reviewed, and awaiting its four C1..4 measurements.
 
   After the admitted paired routes are resolved, the reviewed-ready direct package
   `profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919` is the next bounded mechanism:

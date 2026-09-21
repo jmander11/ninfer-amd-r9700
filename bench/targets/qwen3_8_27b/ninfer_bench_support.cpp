@@ -866,15 +866,6 @@ std::string format_json(const BenchEnvironment& env, const std::string& command,
          << (ninfer::ops::r9700::eager::kDFlashRmsnormRows56CandidateEnabled ? "true" :
                                                                                   "false")
          << ",\n"
-         << "    \"bf16_gdn_control_t1_candidate\": "
-         << (NINFER_R9700_BF16_GDN_CONTROL_T1_CANDIDATE ? "true" : "false")
-         << ",\n"
-         << "    \"attention_q4_pair_t1_candidate\": "
-         << (NINFER_R9700_ATTENTION_Q4_PAIR_T1_CANDIDATE ? "true" : "false")
-         << ",\n"
-         << "    \"q4_pair_wmma_c2c4_candidate\": "
-         << (NINFER_R9700_Q4_PAIR_WMMA_C2C4_CANDIDATE ? "true" : "false")
-         << ",\n"
           << "    \"text_p129_wmma_tail_candidate\": "
           << (ninfer::ops::r9700::kv::kTextP129WmmaTailCandidate ? "true" : "false")
          << ",\n"

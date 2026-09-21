@@ -3,17 +3,14 @@
 using ninfer::QType;
 using Variant = ninfer::targets::qwen3_8_27b::detail::Variant;
 
-#if NINFER_R9700_Q4_PAIR_WMMA_C2C4_CANDIDATE
 static_assert(Variant::ExecutionState::q4_pair_c2c4_selected(
     2U, QType::Q4G64_F16S, QType::Q4G64_F16S));
 static_assert(Variant::ExecutionState::q4_pair_c2c4_selected(
     3U, QType::Q4G64_F16S, QType::Q4G64_F16S));
 static_assert(Variant::ExecutionState::q4_pair_c2c4_selected(
     4U, QType::Q4G64_F16S, QType::Q4G64_F16S));
-#else
 static_assert(!Variant::ExecutionState::q4_pair_c2c4_selected(
-    2U, QType::Q4G64_F16S, QType::Q4G64_F16S));
-#endif
+    0U, QType::Q4G64_F16S, QType::Q4G64_F16S));
 static_assert(!Variant::ExecutionState::q4_pair_c2c4_selected(
     1U, QType::Q4G64_F16S, QType::Q4G64_F16S));
 static_assert(!Variant::ExecutionState::q4_pair_c2c4_selected(

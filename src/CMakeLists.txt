@@ -630,7 +630,16 @@ set_target_properties(ninfer_r9700_target_variant_gdn_qual PROPERTIES
 target_link_libraries(ninfer_r9700_target_variant_gdn_qual PRIVATE
   ninfer_r9700_target_bindings hip::host)
 
-# Compile-time routing contract for the qualification-only C2-C4 paired-projection selector.
+# Compile-time routing contracts for the production all-Q4 paired-projection routes.
+add_executable(ninfer_r9700_target_variant_attention_projection_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/target_variant_attention_projection_qual.cpp)
+ninfer_r9700_internal_includes(ninfer_r9700_target_variant_attention_projection_qual)
+set_target_properties(ninfer_r9700_target_variant_attention_projection_qual PROPERTIES
+  HIP_ARCHITECTURES gfx1201
+  LINKER_LANGUAGE HIP)
+target_link_libraries(ninfer_r9700_target_variant_attention_projection_qual PRIVATE
+  ninfer_r9700_target_bindings hip::host)
+
 add_executable(ninfer_r9700_target_variant_pair_c2c4_qual
   ${PROJECT_SOURCE_DIR}/tools/r9700/target_variant_pair_c2c4_qual.cpp)
 ninfer_r9700_internal_includes(ninfer_r9700_target_variant_pair_c2c4_qual)

@@ -1,0 +1,70 @@
+{
+  "stem": "run-17-c4-control",
+  "role": "control",
+  "concurrency": 4,
+  "command": [
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-paired-projection-c2c4-control/bench/ninfer_bench",
+    "--weights",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer",
+    "--corpus",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids",
+    "--device",
+    "0",
+    "--concurrency",
+    "4",
+    "--whole-pg",
+    "8192,256",
+    "--prefill-chunk",
+    "4096",
+    "--kv-capacity",
+    "workload",
+    "--spec",
+    "mtp",
+    "--draft-tokens",
+    "0",
+    "--retain-token-ids",
+    "--output",
+    "json",
+    "--output-file",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919/results/run-17-c4-control.json",
+    "-r",
+    "1",
+    "--warmup",
+    "1"
+  ],
+  "cwd": "/ssdpool2nvme/local_llm/ninfer-amd-r9700",
+  "exit_code": 0,
+  "started_unix_ns": 1789953926600151298,
+  "finished_unix_ns": 1789954264439784326,
+  "device": {
+    "device": 0,
+    "name": "AMD Radeon AI PRO R9700",
+    "architecture": "gfx1201",
+    "wave_size": 32,
+    "pci": "0000:13:00.0",
+    "power_path": "/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level",
+    "required_power": "auto"
+  },
+  "power_before": "auto",
+  "power_after": "auto",
+  "executable": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-paired-projection-c2c4-control/bench/ninfer_bench",
+    "bytes": 5355224,
+    "sha256": "b71ad04a4a8f8854a3f5f1c29937d01852f565062981dcb6fa544fd2fc23a51a"
+  },
+  "stdout": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919/results/run-17-c4-control.stdout",
+    "bytes": 140,
+    "sha256": "4e6c83dac713aa789f1ecfbff1e665658e8f0615cf52494db52c0a146b3a17a7"
+  },
+  "stderr": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919/results/run-17-c4-control.stderr",
+    "bytes": 229,
+    "sha256": "75d170f8c4b544ee5b5f2cd723a6b09e82759a92d49e1d03c28eb3e7fd75d596"
+  },
+  "benchmark_report": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919/results/run-17-c4-control.json",
+    "bytes": 11902,
+    "sha256": "744364f184210525abf21d66bdcff24b5d32cf578ba4eb57e96c531ca90c7c92"
+  }
+}

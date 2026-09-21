@@ -1044,6 +1044,25 @@ generated token IDs. Its report is
 gfx1201 object SHA-256 is `c3dcad45559a112f42f07b1d7e87fbd1d494d1d024083efc0498500ee678cd72`;
 the selected kernel uses 17 VGPR, 32 bytes LDS, wave32, occupancy 16, and zero scratch/spills.
 
+The later projection-fusion promotion is selector-free and has three exact domains: singleton
+BF16 GDN controls, singleton all-Q4 attention input pairs, and all-Q4 paired projections at two
+through four tokens. Mixed weights and all other widths retain their serialized routes. The
+retained whole-model gates measured median candidate/control decode-time ratios of `0.9870972`
+for BF16 GDN C1, `0.9873370` for attention C1, and `0.9246617`, `0.9272089`, and `0.9341644` for
+C2, C3, and C4. Every run preserved exact public tokens. Check the selector-free host routing
+contracts without GPU execution with:
+
+```bash
+cmake --build build-r9700 --target \
+  ninfer_r9700_target_variant_attention_projection_qual \
+  ninfer_r9700_target_variant_pair_c2c4_qual
+./build-r9700/src/ninfer_r9700_target_variant_attention_projection_qual
+./build-r9700/src/ninfer_r9700_target_variant_pair_c2c4_qual
+```
+
+These whole timings do not prove physical HBM saturation or stall freedom, and the separately
+measured singleton gains must not be added as a combined performance claim.
+
 A direct GPU regression of the canonical route against its independent FP64 oracle, including
 output guards and Device Graph replay, is available with:
 
