@@ -141,12 +141,14 @@ stopped before candidate qualification because its local incumbent harness passe
 an eager Op requiring an explicit stream; preserve its `attempt-1` and never rerun that package.
 The reviewed fresh retry owned one explicit stream and completed qualification, but its report
 embedded raw newlines and failed strict JSON parsing after the qualifier exited 0. Preserve that
-sealed diagnostic attempt. Retry2 fixes only standards-compliant JSON escaping and adds a strict
-CPU serializer regression. The exact next action is
-`bash profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920/commands.sh --measure`.
+sealed diagnostic attempt. Retry2 passed strict JSON, complete numerical qualification, static
+checks, and the direct timing bound. Its sealed result authorizes preparation of the selector-off/on
+whole C1 A/B. Preserve all three attempts; never rerun them. No GPU action is currently runnable;
+first implement and independently review the exact all-Q4 T1 projected-residual candidate, qualify
+its production symbols, and prepare the matched whole C1 A/B package.
 The deterministic queue after reset is:
 
-1. run the independently reviewed direct projected-residual retry2 at `profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920`.
+1. prepare the exact all-Q4 T1 projected-residual production candidate and reviewed whole C1 A/B from the accepted direct result at `profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920/attempt-1`; qualify production symbols before whole measurement and retain mixed-weight/T>1 fallbacks.
 
 Every other remaining unchecked task depends directly or transitively on this queue or the
 external `DENSE-FLOOR-DECISION`.
@@ -454,6 +456,17 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   `profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920` changes only JSON control
   escaping, binds both prior evidence inventories, passes exact strict-JSON round-trip for every
   control byte plus quote/backslash/UTF-8, and retains the unchanged explicit-stream/static gate.
+  Retry2 passed with strict JSON and a complete verified closure. N5120/K6144 improved
+  `0.0765195→0.0695995 ms` and N5120/K17408 improved `0.1424995→0.1350995 ms`; every allocation
+  median beat its incumbent. Both delta and residual had zero BF16-step error, complete residual
+  bits matched exactly, and all guards passed. Native IU4/wave32 used 18 VGPR, 32 SGPR, and no
+  LDS/scratch/spills under `auto`. Weighted saving was `0.9164801 ms/token`, exceeding the
+  `0.2 ms/token` gate. Evidence:
+  `profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920/attempt-1`; the SHA-256 of
+  `result.sha256` is `0583ef9e618ba2bc8b80a91a8312425f2035a109991a9743e71c9e4cc38c1b0d`.
+  This admits only the exact all-Q4 T1 candidate and preparation of matched whole C1 A/B;
+  production-symbol qualification, exact public tokens, and whole-inference performance admission
+  remain required before promotion.
 
 ## Active now: DFlash semantic and schedule work
 
