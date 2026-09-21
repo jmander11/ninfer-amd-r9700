@@ -168,6 +168,13 @@ the identical Q4/W8 formats, layouts, byte counts, and runtime arithmetic while 
 per-group source-weight squared error. Row-scaled E4M3 FP8 is conditional: it is admitted only if
 exact DFlash shapes show a physical speed/quality benefit, and it first needs DFlash-owned prepared
 FP8 Linear instances because the current execution owner registers only selected Text FP8 roles.
+The selected Text projections borrow one explicit device-bound `LinearExecutionContext` owned by
+the loaded target. It is created before the final free-memory capacity snapshot, so hipBLASLt's
+opaque device resources are already resident when automatic KV capacity is resolved. Per-weight
+descriptors and algorithms remain Program-owned; their activation/matmul region and library
+context are used serially. There is no per-projection library handle or assumed opaque-memory
+constant. Fresh physical startup evidence must still verify actual remaining headroom; a library
+OOM after planning is not a structured capacity exclusion.
 Rolewise W8 promotion follows only if Q4 acceptance or generated-quality evidence identifies a
 sensitive family. Both selector codebooks, norms, convolution base kernels, and private persistent
 DFlash state stay BF16 in every recipe.

@@ -319,15 +319,18 @@ Variant::ExecutionState::ExecutionState(const ModelView& model, DeviceSpan seria
                              : static_cast<void*>(base + activation_region);
 
     const auto install = [&](SelectedLinearRole role, std::int32_t layer,
-                             const Weight& weight) {
+                             const Weight& weight, ops::LinearExecutionContext* context) {
         if (weight.qtype != QType::F8E4M3_ROW_F32S) return;
+        if (context == nullptr) {
+            throw std::invalid_argument("R9700 FP8 selected projection lacks its loaded context");
+        }
         Impl::Slot& slot = impl_->slots[Impl::index(role, layer)];
         if (slot.execution != nullptr) {
             throw std::logic_error("R9700 FP8 selected projection slot is duplicated");
         }
         slot.weight = &weight;
         slot.execution = std::make_unique<ops::LinearExecution>(
-            weight, base, activation_bytes, matmul, kSelectedMatmulWorkspaceBytes);
+            *context, weight, base, activation_bytes, matmul, kSelectedMatmulWorkspaceBytes);
         for (const std::uint32_t width : prepared_widths) {
             (void)slot.execution->prepare(width);
         }
@@ -339,16 +342,19 @@ Variant::ExecutionState::ExecutionState(const ModelView& model, DeviceSpan seria
             const auto& weights = model.full_layers[static_cast<std::size_t>(
                 TextConfig::full_attention_index(layer))];
             install(SelectedLinearRole::AttentionQueryKey, layer,
-                    weights.projection.query_key);
+                    weights.projection.query_key, weights.projection.linear_context);
             install(SelectedLinearRole::AttentionGateValue, layer,
-                    weights.projection.gate_value);
-            install(SelectedLinearRole::MlpGateUp, layer, weights.post_mixer.gate_up);
+                    weights.projection.gate_value, weights.projection.linear_context);
+            install(SelectedLinearRole::MlpGateUp, layer, weights.post_mixer.gate_up,
+                    weights.post_mixer.linear_context);
         } else {
             const auto& weights = model.gdn_layers[static_cast<std::size_t>(
                 TextConfig::gdn_index(layer))];
             install(SelectedLinearRole::GdnQueryKey, layer,
-                    weights.projection.input_projection.query_key);
-            install(SelectedLinearRole::MlpGateUp, layer, weights.post_mixer.gate_up);
+                    weights.projection.input_projection.query_key,
+                    weights.projection.input_projection.linear_context);
+            install(SelectedLinearRole::MlpGateUp, layer, weights.post_mixer.gate_up,
+                    weights.post_mixer.linear_context);
         }
     }
     if (impl_->selected != 0U && impl_->selected != kSelectedProjectionCount) {

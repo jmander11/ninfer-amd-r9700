@@ -142,6 +142,14 @@ __global__ void poison_nonfinite_output(const std::uint32_t* status,
 
 } // namespace
 
+LinearExecutionContext::LinearExecutionContext() {
+    check_hipblaslt("hipblasLtCreate", hipblasLtCreate(&handle_));
+}
+
+LinearExecutionContext::~LinearExecutionContext() {
+    if (handle_ != nullptr) (void)hipblasLtDestroy(handle_);
+}
+
 struct LinearExecution::Impl {
     struct Profile {
         struct ViableAlgorithm {
@@ -188,7 +196,6 @@ struct LinearExecution::Impl {
         profiles.clear();
         if (preference != nullptr) (void)hipblasLtMatmulPreferenceDestroy(preference);
         if (weight_layout != nullptr) (void)hipblasLtMatrixLayoutDestroy(weight_layout);
-        if (handle != nullptr) (void)hipblasLtDestroy(handle);
     }
 
     [[nodiscard]] Profile* find(std::uint32_t tokens) noexcept {
@@ -206,7 +213,8 @@ struct LinearExecution::Impl {
     }
 };
 
-LinearExecution::LinearExecution(const Weight& weight, void* activation_storage,
+LinearExecution::LinearExecution(LinearExecutionContext& context, const Weight& weight,
+                                 void* activation_storage,
                                  std::size_t activation_storage_capacity_bytes,
                                  void* matmul_workspace,
                                  std::size_t matmul_workspace_bytes)
@@ -241,7 +249,7 @@ LinearExecution::LinearExecution(const Weight& weight, void* activation_storage,
     impl_->matmul_workspace = matmul_workspace;
     impl_->matmul_workspace_bytes = matmul_workspace_bytes;
 
-    check_hipblaslt("hipblasLtCreate", hipblasLtCreate(&impl_->handle));
+    impl_->handle = context.handle_;
     check_hipblaslt("hipblasLtGetVersion",
                     hipblasLtGetVersion(impl_->handle, &impl_->hipblaslt_version));
     check_hipblaslt("hipblasLtMatrixLayoutCreate(weight)",

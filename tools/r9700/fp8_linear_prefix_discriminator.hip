@@ -466,7 +466,8 @@ void check_oracle(const BoundWeight& bound, std::uint32_t rows,
     }
 }
 
-CellResult evaluate(const artifact::Reader& reader, std::string_view name, std::uint32_t rows,
+CellResult evaluate(ninfer::ops::LinearExecutionContext& context,
+                    const artifact::Reader& reader, std::string_view name, std::uint32_t rows,
                     const std::vector<hip_bfloat16>& represented, hipStream_t stream) {
     BoundWeight bound(reader, name, rows);
     const std::size_t activation_bytes =
@@ -480,7 +481,7 @@ CellResult evaluate(const artifact::Reader& reader, std::string_view name, std::
     HIP_CHECK(hipMemcpy(input129.value, represented.data(), input129.count * sizeof(hip_bfloat16),
                         hipMemcpyHostToDevice));
 
-    ninfer::ops::LinearExecution execution(bound.weight, activation.value, activation.count,
+    ninfer::ops::LinearExecution execution(context, bound.weight, activation.value, activation.count,
                                            matmul.value, matmul.count);
     const auto& p128 = execution.prepare(kPrefix);
     const auto& p129 = execution.prepare(kExtended);
@@ -790,9 +791,10 @@ int main(int argc, char** argv) try {
     const std::uintmax_t artifact_bytes = std::filesystem::file_size(artifact_path);
     const std::string artifact_sha256 = sha256_file(artifact_path);
     Stream stream;
+    ninfer::ops::LinearExecutionContext context;
     std::array<CellResult, 2> cells{
-        evaluate(reader, kNames[0], kRows[0], represented, stream.value),
-        evaluate(reader, kNames[1], kRows[1], represented, stream.value),
+        evaluate(context, reader, kNames[0], kRows[0], represented, stream.value),
+        evaluate(context, reader, kNames[1], kRows[1], represented, stream.value),
     };
     require(read_trimmed(kPowerPath) == "auto",
             "discriminator requires auto performance level after execution");

@@ -261,11 +261,192 @@ void require_launch(ops::LinearExecution::LaunchStatus status) {
     throw std::runtime_error(message.str());
 }
 
+std::size_t free_device_bytes() {
+    HIP_CHECK(hipDeviceSynchronize());
+    std::size_t available = 0, total = 0;
+    HIP_CHECK(hipMemGetInfo(&available, &total));
+    return available;
+}
+
+// Real selected gate-up and GDN-QK geometries. Both executions borrow the
+// same context and activation region, as in the serialized target Program.
+struct SharedContextCell {
+    static constexpr std::uint32_t columns = 5120U;
+    static constexpr std::uint32_t maximum_tokens = 2048U;
+    std::uint32_t rows;
+    DeviceBuffer<std::byte> payload;
+    DeviceBuffer<hip_bfloat16> output;
+    std::vector<std::uint8_t> codes;
+    std::vector<float> scales;
+    ninfer::Weight weight{};
+    std::unique_ptr<ops::LinearExecution> execution;
+
+    explicit SharedContextCell(std::uint32_t row_count)
+        : rows(row_count), payload(std::size_t(rows) * (columns + sizeof(float))),
+          output(std::size_t(rows) * maximum_tokens),
+          codes(std::size_t(rows) * columns), scales(rows) {
+        constexpr std::array<std::uint8_t, 4> values{0x38U, 0x40U, 0x30U, 0xB8U};
+        for (std::size_t row = 0; row < rows; ++row) {
+            scales[row] = std::ldexp(1.0F, static_cast<int>(row % 3U) - 2);
+            for (std::size_t k = 0; k < columns; ++k)
+                codes[row * columns + k] = values[(row + k / 16U) % values.size()];
+        }
+        HIP_CHECK(hipMemcpy(payload.get(), codes.data(), codes.size(), hipMemcpyHostToDevice));
+        HIP_CHECK(hipMemcpy(payload.get() + codes.size(), scales.data(),
+                            scales.size() * sizeof(float), hipMemcpyHostToDevice));
+        weight.payload = payload.get();
+        weight.payload_bytes = payload.bytes();
+        weight.qtype = ninfer::QType::F8E4M3_ROW_F32S;
+        weight.qdata = payload.get();
+        weight.qdata_bytes = codes.size();
+        weight.scales = payload.get() + codes.size();
+        weight.scale_bytes = scales.size() * sizeof(float);
+        weight.n = rows;
+        weight.k = columns;
+        weight.layout = ninfer::QuantLayout::RowScaled;
+        weight.scale_dtype = ninfer::DType::FP32;
+        weight.scale_ne[0] = rows;
+        weight.scale_nb[0] = sizeof(float);
+        weight.ndim = 2;
+        weight.shape[0] = weight.padded_shape[0] = rows;
+        weight.shape[1] = weight.padded_shape[1] = columns;
+    }
+
+    std::uint32_t check(std::uint32_t tokens, const std::vector<hip_bfloat16>& input) const {
+        std::uint32_t maximum_steps = 0;
+        for (const std::uint32_t token : {0U, tokens / 2U, tokens - 1U}) {
+            for (const std::uint32_t row : {0U, rows / 2U, rows - 1U}) {
+                double dot = 0.0;
+                for (std::size_t k = 0; k < columns; ++k)
+                    dot += static_cast<double>(static_cast<float>(input[std::size_t(token) * columns + k])) *
+                           decode_e4m3(codes[std::size_t(row) * columns + k]) * scales[row];
+                hip_bfloat16 actual;
+                HIP_CHECK(hipMemcpy(&actual, output.get() + std::size_t(token) * rows + row,
+                                    sizeof(actual), hipMemcpyDeviceToHost));
+                const hip_bfloat16 expected(static_cast<float>(dot));
+                require(std::isfinite(static_cast<float>(actual)) && std::isfinite(dot),
+                        "shared context produced nonfinite oracle output");
+                const auto ordered = [](hip_bfloat16 value) {
+                    const auto bits = std::bit_cast<std::uint16_t>(value);
+                    return (bits & 0x8000U) ? 0x8000U - (bits & 0x7fffU) : 0x8000U + bits;
+                };
+                const auto a = ordered(actual), b = ordered(expected);
+                maximum_steps = std::max(maximum_steps, a > b ? a - b : b - a);
+            }
+        }
+        require(maximum_steps <= 1U, "shared context output differs from represented FP64 oracle");
+        return maximum_steps;
+    }
+};
+
+void qualify_shared_context(const std::string& report_path) {
+    const auto device = require_device_zero_auto();
+    constexpr std::array<std::uint32_t, 5> widths{1U, 2U, 3U, 4U, 2048U};
+    const auto before_context = free_device_bytes();
+    ops::LinearExecutionContext context;
+    const auto after_context = free_device_bytes();
+    SharedContextCell gate_up(34816U), gdn_qk(4096U);
+    DeviceBuffer<std::byte> activation(
+        ops::LinearExecution::activation_workspace_capacity_bytes(2048U, 5120U));
+    DeviceBuffer<hip_bfloat16> input(2048U * 5120U);
+    std::vector<hip_bfloat16> input_host(2048U * 5120U);
+    constexpr std::array<float, 4> values{1.0F, -0.5F, 0.25F, -0.125F};
+    for (std::size_t i = 0; i < input_host.size(); ++i)
+        input_host[i] = hip_bfloat16(values[(i / 5120U + i / 8U) % values.size()]);
+    HIP_CHECK(hipMemcpy(input.get(), input_host.data(), input.bytes(), hipMemcpyHostToDevice));
+    Stream stream;
+    const auto before_prepare = free_device_bytes();
+    for (auto* cell : {&gate_up, &gdn_qk}) {
+        cell->execution = std::make_unique<ops::LinearExecution>(
+            context, cell->weight, activation.get(), activation.bytes(), nullptr, 0U);
+        for (const auto width : widths) (void)cell->execution->prepare(width);
+    }
+    const auto after_prepare = free_device_bytes();
+    // Compare all startup-width algorithm identities with independent contexts,
+    // not merely two calls sharing the same context's heuristic cache.
+    for (auto* cell : {&gate_up, &gdn_qk}) {
+        ops::LinearExecutionContext independent_context;
+        ops::LinearExecution independent(independent_context, cell->weight,
+                                          activation.get(), activation.bytes(), nullptr, 0U);
+        for (const auto width : widths) {
+            const auto& reference = independent.prepare(width);
+            const auto* shared = cell->execution->prepared_profile(width);
+            require(shared->selected_algorithm_fingerprint == reference.selected_algorithm_fingerprint &&
+                        shared->selected_matmul_workspace_bytes == reference.selected_matmul_workspace_bytes,
+                    "shared context changed selected algorithm identity");
+        }
+    }
+    std::uint32_t maximum_steps = 0;
+    for (const auto width : {4U, 2048U}) {
+        for (auto* cell : {&gate_up, &gdn_qk}) {
+            require_launch(cell->execution->run(width, input.get(), cell->output.get(), stream.get()));
+            HIP_CHECK(hipStreamSynchronize(stream.get()));
+            maximum_steps = std::max(maximum_steps, cell->check(width, input_host));
+        }
+        hipGraph_t graph = nullptr;
+        hipGraphExec_t executable = nullptr;
+        HIP_CHECK(hipStreamBeginCapture(stream.get(), hipStreamCaptureModeGlobal));
+        for (auto* cell : {&gate_up, &gdn_qk})
+            require_launch(cell->execution->run(width, input.get(), cell->output.get(), stream.get()));
+        HIP_CHECK(hipStreamEndCapture(stream.get(), &graph));
+        HIP_CHECK(hipGraphInstantiate(&executable, graph, nullptr, nullptr, 0));
+        for (int replay = 0; replay < 2; ++replay) {
+            // A replay must write its own outputs, not inherit eager/previous replay values.
+            for (auto* cell : {&gate_up, &gdn_qk})
+                HIP_CHECK(hipMemsetAsync(cell->output.get(), 0xff,
+                                        std::size_t(width) * cell->rows * sizeof(hip_bfloat16),
+                                        stream.get()));
+            HIP_CHECK(hipGraphLaunch(executable, stream.get()));
+            HIP_CHECK(hipStreamSynchronize(stream.get()));
+            for (auto* cell : {&gate_up, &gdn_qk})
+                maximum_steps = std::max(maximum_steps, cell->check(width, input_host));
+        }
+        HIP_CHECK(hipGraphExecDestroy(executable));
+        HIP_CHECK(hipGraphDestroy(graph));
+    }
+    const auto after_execution = free_device_bytes();
+    require(read_text(device.power_path) == "auto", "DPM profile changed during shared-context qualification");
+    std::ostringstream report;
+    report << "{\"schema_version\":1,\"artifact_type\":\"ninfer_r9700_fp8_shared_context_qualification\","
+           << "\"pci_bus_id\":" << json_string(device.pci_bus_id)
+           << ",\"hip_runtime_version\":" << device.runtime_version
+           << ",\"hipblaslt_version\":" << gate_up.execution->hipblaslt_version()
+           << ",\"rows\":[34816,4096],\"columns\":5120,\"prepared_widths\":[1,2,3,4,2048],"
+           << "\"oracle_widths\":[4,2048],\"graph_replays_per_width\":2,"
+           << "\"oracle\":\"fp64_public_bf16_times_exact_e4m3_weight_and_stored_fp32_scale\","
+           << "\"graph_outputs_poisoned_before_replay\":true,"
+           << "\"independent_context_fingerprints_match\":true,\"maximum_bf16_steps\":" << maximum_steps
+           << ",\"free_before_context\":" << before_context
+           << ",\"free_after_context\":" << after_context
+           << ",\"free_before_prepare\":" << before_prepare
+           << ",\"free_after_prepare\":" << after_prepare
+           << ",\"free_after_execution\":" << after_execution << ",\"profiles\":[";
+    bool first = true;
+    for (auto* cell : {&gate_up, &gdn_qk}) {
+        for (const auto width : widths) {
+            if (!first) report << ',';
+            first = false;
+            const auto* profile = cell->execution->prepared_profile(width);
+            report << "{\"rows\":" << cell->rows << ",\"tokens\":" << width
+                   << ",\"fingerprint\":" << json_string(algorithm_hex(profile->selected_algorithm_fingerprint))
+                   << ",\"matmul_workspace_bytes\":" << profile->selected_matmul_workspace_bytes << '}';
+        }
+    }
+    report << "],\"pass\":true}\n";
+    publish_exclusive(report_path, report.str());
+    std::cout << report.str();
+}
+
 } // namespace
 
 int main(int argc, char** argv) try {
+    if (argc == 4 && std::string_view(argv[1]) == "--shared-context" &&
+        std::string_view(argv[2]) == "--output") {
+        qualify_shared_context(argv[3]);
+        return 0;
+    }
     require(argc == 3 && std::string_view(argv[1]) == "--output",
-            "usage: ninfer_r9700_fp8_gate_up_qual --output NEW_REPORT.json");
+            "usage: ninfer_r9700_fp8_gate_up_qual [--shared-context] --output NEW_REPORT.json");
     const std::string report_path = argv[2];
     require(!report_path.empty(), "retained report path is empty");
     constexpr std::size_t tokens  = 2048U;
@@ -278,6 +459,7 @@ int main(int argc, char** argv) try {
     constexpr std::size_t output_elements = tokens * rows;
 
     const DeviceIdentity device = require_device_zero_auto();
+    ops::LinearExecutionContext context;
 
     DeviceBuffer<std::byte> weight_storage(code_bytes + scale_bytes);
     const std::size_t activation_bytes =
@@ -354,7 +536,7 @@ int main(int argc, char** argv) try {
     bool malformed_rejected = false;
     try {
         ops::LinearExecution rejected(
-            malformed_weight, activation_storage.get(), activation_storage.bytes(),
+            context, malformed_weight, activation_storage.get(), activation_storage.bytes(),
             matmul_workspace.get(), matmul_workspace.bytes());
     } catch (const std::invalid_argument&) {
         malformed_rejected = true;
@@ -364,7 +546,7 @@ int main(int argc, char** argv) try {
     bool undersized_rejected = false;
     try {
         ops::LinearExecution undersized(
-            weight, activation_storage.get(), activation_storage.bytes() - 1U,
+            context, weight, activation_storage.get(), activation_storage.bytes() - 1U,
             matmul_workspace.get(), matmul_workspace.bytes());
         (void)undersized.prepare(tokens);
     } catch (const std::invalid_argument&) {
@@ -373,7 +555,7 @@ int main(int argc, char** argv) try {
     require(undersized_rejected, "undersized FP8 activation workspace was accepted");
 
     ops::LinearExecution execution(
-        weight, activation_storage.get(), activation_storage.bytes(), matmul_workspace.get(),
+        context, weight, activation_storage.get(), activation_storage.bytes(), matmul_workspace.get(),
         matmul_workspace.bytes());
     require(execution.rows() == rows && execution.columns() == columns,
             "prepared Linear execution did not derive the bound Weight geometry");

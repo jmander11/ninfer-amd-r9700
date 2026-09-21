@@ -188,7 +188,7 @@ struct Cell {
         bound.scale_ne[0] = candidate::kRows;
         bound.scale_nb[0] = sizeof(float);
         incumbent = std::make_unique<ninfer::ops::LinearExecution>(
-            bound, incumbent_storage.get(), incumbent_storage.bytes(), nullptr, 0U);
+            context, bound, incumbent_storage.get(), incumbent_storage.bytes(), nullptr, 0U);
         (void)incumbent->prepare(tokens);
     }
 
@@ -212,6 +212,7 @@ struct Cell {
     fp8::Fp8ActivationWorkspace incumbent_activation{};
     fp8::Fp8ActivationWorkspace candidate_activation{};
     std::unique_ptr<DeviceBuffer<std::uint8_t>> incumbent_weight;
+    ninfer::ops::LinearExecutionContext context;
     std::unique_ptr<ninfer::ops::LinearExecution> incumbent;
 };
 

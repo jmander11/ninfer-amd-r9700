@@ -198,9 +198,11 @@ row-scale vector, B the T-element token-scale vector, both with
 `HIPBLAS_COMPUTE_32F`.
 
 hipBLASLt lifecycle is explicit rather than a function-static cache. A repository-internal
-`ops::LinearExecution` owns the handle, descriptors, heuristic results, and selected algorithms;
-the Qwen Program owns one instance and threads it through Text, MTP, DFlash, Vision, and scoring
-linear calls alongside the existing arena and stream. It prepares fixed decode/speculative widths
+`ops::LinearExecutionContext` owns one device-bound handle, created by the loaded target before
+the final free-memory capacity snapshot. Each selected Text projection has a Program-owned
+`ops::LinearExecution` that borrows that context and owns its descriptors, heuristic results, and
+selected algorithms. Target-private leaf payloads carry the borrowed context; neither family
+runtime nor core device ownership depends on hipBLASLt. It prepares fixed decode/speculative widths
 at Program construction and explicitly prepares each realized prefill width before entering that
 chunk, so no descriptor creation, heuristic search, allocation, or weight transformation occurs
 inside a captured or timed Linear call. Its workspace contract is the aligned sum of the live
@@ -208,7 +210,10 @@ E4M3 activation image, T FP32 scales, and the selected heuristic's `workspaceSiz
 planner reserves the declared conservative maximum and `LinearExecution` rejects any selected
 heuristic that exceeds it. Small-T may select a separately qualified
 direct-E4M3 custom leaf, but it consumes the identical stored bytes and is not a second artifact
-path.
+path. Opaque library device resources are separate from this caller-owned workspace and must be
+resident before final capacity resolution; zero allowed matmul workspace does not mean zero
+library allocation. Physical startup qualification checks remaining headroom and any later
+preparation allocation instead of assuming a fixed library-memory allowance.
 
 The first fixed-shape owner retains the directly bound weight and caller-owned activation and
 hipBLASLt workspace addresses. Those regions, its represented-BF16 input, and its BF16 output are

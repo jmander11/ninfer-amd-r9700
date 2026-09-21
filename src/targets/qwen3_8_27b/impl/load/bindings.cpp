@@ -441,6 +441,10 @@ LoadedModelData::LoadedModelData(BindingPlan plan, artifact::MaterializedArtifac
             target.input_norm            = artifact::materialized_tensor(backing, source.input_norm,
                                                                          NumericFormat::BF16, {5120});
             target.projection            = load_attention_projection(source.attention, backing);
+            if (target.projection.query_key.qtype == QType::F8E4M3_ROW_F32S) {
+                if (!linear_context) linear_context = std::make_unique<ops::LinearExecutionContext>();
+                target.projection.linear_context = linear_context.get();
+            }
             target.query_norm = artifact::materialized_tensor(backing, source.attention.query_norm,
                                                               NumericFormat::BF16, {256});
             target.key_norm   = artifact::materialized_tensor(backing, source.attention.key_norm,
@@ -449,6 +453,7 @@ LoadedModelData::LoadedModelData(BindingPlan plan, artifact::MaterializedArtifac
             target.post_attention_norm = artifact::materialized_tensor(
                 backing, source.post_attention_norm, NumericFormat::BF16, {5120});
             target.post_mixer = load_mlp(source.mlp, backing);
+            target.post_mixer.linear_context = linear_context.get();
         } else {
             GdnWeights& target = gdn_layers.at(gdn_index++);
             target.input_norm  = artifact::materialized_tensor(backing, source.input_norm,
@@ -464,12 +469,17 @@ LoadedModelData::LoadedModelData(BindingPlan plan, artifact::MaterializedArtifac
             target.projection.b_projection = artifact::materialized_weight(
                 backing, source.gdn.b_projection, NumericFormat::BF16, 48, 5120);
             target.projection.input_projection = load_gdn_input_projection(source.gdn, backing);
+            if (target.projection.input_projection.query_key.qtype == QType::F8E4M3_ROW_F32S) {
+                if (!linear_context) linear_context = std::make_unique<ops::LinearExecutionContext>();
+                target.projection.input_projection.linear_context = linear_context.get();
+            }
             target.norm =
                 artifact::materialized_tensor(backing, source.gdn.norm, NumericFormat::BF16, {128});
             target.output = materialized_weight(backing, source.gdn.output, 5120, 6144);
             target.post_attention_norm = artifact::materialized_tensor(
                 backing, source.post_attention_norm, NumericFormat::BF16, {5120});
             target.post_mixer = load_mlp(source.mlp, backing);
+            target.post_mixer.linear_context = linear_context.get();
         }
     }
     if (full_index != full_layers.size() || gdn_index != gdn_layers.size()) {

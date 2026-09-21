@@ -15,10 +15,26 @@
 
 namespace ninfer::ops {
 
+// Explicit device-bound library lifetime shared by serialized prepared Linears.
+// Construct before the caller's final device-memory capacity snapshot. The
+// context must outlive all borrowing executions and their submitted device work.
+class LinearExecutionContext final {
+public:
+    LinearExecutionContext();
+    ~LinearExecutionContext();
+    LinearExecutionContext(const LinearExecutionContext&) = delete;
+    LinearExecutionContext& operator=(const LinearExecutionContext&) = delete;
+    LinearExecutionContext(LinearExecutionContext&&) = delete;
+    LinearExecutionContext& operator=(LinearExecutionContext&&) = delete;
+
+private:
+    friend class LinearExecution;
+    hipblasLtHandle_t handle_ = nullptr;
+};
+
 // Prepared row-scaled-E4M3 Linear implementation profile. N and K are fixed by
 // the directly bound Weight; each T must be prepared explicitly before run().
-// This owner remains qualification-only until the target Program owns and
-// threads it through selected role calls.
+// Library state is borrowed; descriptors and per-width algorithms are owned.
 class LinearExecution final {
 public:
     static constexpr std::size_t kMaximumMatmulWorkspaceBytes = std::size_t{512} << 20U;
@@ -56,8 +72,8 @@ public:
     // workspace, must be mutually disjoint and remain stable until submitted work completes.
     // A null/zero matmul workspace explicitly restricts preparation to zero-workspace algorithms.
     // Multiple owners may reference the same externally serialized workspace
-    // regions; one owner itself must not be used concurrently.
-    LinearExecution(const Weight& weight, void* activation_storage,
+    // regions; executions sharing a context must be externally serialized.
+    LinearExecution(LinearExecutionContext& context, const Weight& weight, void* activation_storage,
                     std::size_t activation_storage_capacity_bytes,
                     void* matmul_workspace, std::size_t matmul_workspace_bytes);
     ~LinearExecution();

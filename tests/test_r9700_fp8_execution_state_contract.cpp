@@ -90,6 +90,12 @@ int main() {
         normalized_route_contract();
         static_assert(!std::is_copy_constructible_v<Variant::ExecutionState>);
         static_assert(!std::is_move_constructible_v<Variant::ExecutionState>);
+        // Prepared executions borrow a stable, explicitly owned device context.
+        static_assert(!std::is_copy_constructible_v<ninfer::ops::LinearExecutionContext>);
+        static_assert(!std::is_move_constructible_v<ninfer::ops::LinearExecutionContext>);
+        static_assert(std::is_constructible_v<ninfer::ops::LinearExecution,
+            ninfer::ops::LinearExecutionContext&, const ninfer::Weight&, void*,
+            std::size_t, void*, std::size_t>);
         static_assert(Variant::ExecutionState::fused_mlp_down_selected(
             ninfer::QType::F8E4M3_ROW_F32S, ninfer::QType::Q4G64_F16S, 2048U, 63));
         static_assert(!Variant::ExecutionState::fused_mlp_down_selected(

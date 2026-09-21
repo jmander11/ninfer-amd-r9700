@@ -9,6 +9,7 @@
 #include "artifact/binder.h"
 #include "artifact/materializer.h"
 #include "core/tensor.h"
+#include "ops/r9700/linear/linear_execution.h"
 
 #include <array>
 #include <cstddef>
@@ -143,16 +144,19 @@ ArtifactLoadPlan bind_artifact(artifact::Binder& binder, WeightsProfile weights_
 struct DensePostMixerPayload {
     Weight gate_up;
     Weight down;
+    ops::LinearExecutionContext* linear_context = nullptr;
 };
 
 struct FullAttentionProjectionPayload {
     Weight query_key;
     Weight gate_value;
+    ops::LinearExecutionContext* linear_context = nullptr;
 };
 
 struct GdnInputProjectionPayload {
     Weight query_key;
     Weight value_z;
+    ops::LinearExecutionContext* linear_context = nullptr;
 };
 
 struct GdnProjectionPayload {
@@ -190,6 +194,9 @@ public:
     LoadedModelData& operator=(LoadedModelData&&)      = delete;
 
     artifact::MaterializedArtifact backing;
+    // Library-owned device resources are live before the registry's final
+    // capacity snapshot; borrowed by the Program's serialized FP8 projections.
+    std::unique_ptr<ops::LinearExecutionContext> linear_context;
     qwen3::FrontendResources frontend;
     RuntimeModelView runtime;
 };

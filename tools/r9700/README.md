@@ -455,6 +455,15 @@ loaded-ELF proofs of native gfx1201 `v_wmma_f32_16x16x16_fp8_fp8`; both use 192 
 zero private/scratch, and 25,088 or 12,544 bytes LDS. Do not confuse these row-scaled E4M3 FP8
 roles with the separate A8W8/IU8 CTA implementation.
 
+The shared-library-context startup regression uses
+`BUILD/src/ninfer_r9700_fp8_gate_up_qual --shared-context --output NEW_REPORT.json`.
+It compares the two production FP8 shapes (N34816/N4096, K5120) at startup widths
+1/2/3/4/2048 against independent-context algorithm fingerprints, and checks sampled outputs
+against the represented-format FP64 oracle in eager and twice-replayed Device Graph execution
+at T4/T2048. Both projections share one context and serialized activation region. Memory snapshots
+separate context creation from preparation and later execution; they are diagnostics, not a
+substitute for real Engine startup headroom/capacity evidence. Reports are create-only.
+
 All ten supported zero-workspace gate/up catalog solutions have been timed, the closest alternate
 saves only a projected `0.212524 ms` over 64 calls, M128xN128 regressed, M128xN256 is
 resource-terminal, and adjacent consumer fusion is bounded below the floor deficit. No additional

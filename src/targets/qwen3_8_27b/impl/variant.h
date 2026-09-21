@@ -40,8 +40,9 @@ struct Variant {
     };
 
     // Program-owned prepared state for the decision-selected row-scaled-E4M3 Text projections.
-    // The implementation owns only descriptors/handles; all device storage remains in the one
-    // stable serialized region supplied by ProgramImplCore.
+    // Owns per-weight descriptors, borrowing the loaded target's shared library context.
+    // Explicit activation/matmul storage remains in ProgramImplCore's serialized region;
+    // opaque library resources are already resident at the final capacity snapshot.
     class ExecutionState final {
     public:
         ExecutionState(const ModelView& model, DeviceSpan serialized_storage,
