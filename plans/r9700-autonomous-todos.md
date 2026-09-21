@@ -1074,10 +1074,11 @@ prefill review, preserving their remaining data dependencies.
   the isolated `/ssdpool2nvme/local_llm/.venv-ninfer-r9700-py311/bin/python` now passes dependency
   and CPU import/gfx1201 checks (ROCm torch2.9.1, Triton3.5.1). The reviewed reference stage now
   automatically runs and gates the same-interpreter full-span GDN oracle before A/B scoring;
-  eight package CPU tests pass. Fresh chunk2048 `commands.sh reference --reference-python`
-  using that interpreter is active. Its full-span GDN sampled FP64 oracle passed at 4095/4096 rows;
-  first 8K BF16 PPL is 6.463887635, first 32K scoring is active. Neither reference is admitted before
-  the fresh second campaign and exact-repeat gate. Preserve all candidate failures
+  eight package CPU tests pass. Fresh chunk2048 references completed: the full-span GDN sampled
+  FP64 oracle passed at 4095/4096 rows, and independent A/B semantic fields plus NLL/token sidecars
+  match exactly at both lengths. BF16 PPL is 6.463887635 at 8K and 5.632510588 at 32K; authority
+  `bf16-chunk2048-a/results.json` and `bf16-chunk2048-repeat.json` are inside the package.
+  `commands.sh quality` is now active across all six candidate campaigns. Preserve all candidate failures
   for diagnosis. The 20260905 recovery script is historical; its dense-Q4 history does not replace
   this current-build campaign. No numerical result is claimed by preparing the package.
 
