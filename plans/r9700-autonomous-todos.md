@@ -161,8 +161,8 @@ physical bandwidth saturation or stall freedom.
 
 The deterministic queue after reset is:
 
-1. complete `PREFILL-BOUNDED-REVIEW`, then the chunk selection needed for numerical accuracy and
-   terminal base-artifact selection; the accepted current speed opens this chain;
+1. resolve `PREFILL-CHUNK-ATTENTION`, discovered by the first current 8K screen, then resume chunk
+   selection needed for numerical accuracy and terminal base-artifact selection;
 2. immediately make `DFLASH-RECIPE`, `DFLASH-QUALITY`, and `DFLASH-WHOLE` the primary performance
    work, targeting at least `60 decode-output tok/s` at C1 with exact public greedy-token parity;
 3. retain only clearly reusable recipe-independent DFlash work while the selected artifact is
@@ -191,6 +191,18 @@ declared dependencies. No absolute prefill-ceiling proof is required before proc
   `profiles/bench/r9700-q4-prefill-dual-fmac-whole-p2048-c1-full-v2-20260906/report.json`, and
   `profiles/bench/r9700-fp8-gate-up-m128n256-retained-reopen-20260906/attempt-4/decision.json`.
   Proceed to the current-build chunk campaign and numerical accuracy. No ceiling claim follows.
+
+- [ ] `PREFILL-CHUNK-ATTENTION` The first current 8K dense all-Q4 G16 screen at chunk1024
+  measured `184.8640144 tok/s` (`44.313842 s`, three stable repetitions), exposing a major gap
+  outside the reviewed P2048 initial-prefix workload. Q4 CTAs admit all four chunks, but dense
+  attention admits its tiled path only when context equals query rows and rows are at most4096.
+  Later chunks fall back to serial per-key attention; chunk8192 also falls back on the first call.
+  Pause the broad screen, retain its results, quantify the owner with one bounded selected-region
+  trace, then qualify a bounded-workspace tiled dense attention extension for appended chunks and
+  large query extents. Preserve absolute causal positions, page mapping, represented-input
+  FP64 oracle, G16/G32, and graph/workspace correctness. Require whole8K confirmation before
+  rebuilding/rebinding the affected chunk campaign. This concrete mechanism reopens bounded
+  prefill work; the accepted P2048 target itself remains unblocked.
 
 Every future physical experiment must be launched through a reviewed package-local `commands.sh`,
 not an ad-hoc reconstructed command. A package is runnable only when its plan contains no
@@ -992,7 +1004,7 @@ prefill review, preserving their remaining data dependencies.
   Reopen exact commands, artifacts, executables, receipts, planner bytes, and `auto` endpoints.
   MTP rows are optional regression diagnostics and never rank or block the base selection.
 
-- [ ] `CHUNK-PHYSICAL-12` [depends: DENSE-FLOOR-DECISION] Create fresh receipt-bound N16/K16
+- [ ] `CHUNK-PHYSICAL-12` [depends: DENSE-FLOOR-DECISION, PREFILL-CHUNK-ATTENTION] Create fresh receipt-bound N16/K16
   no-overwrite screen/finalist/campaign owners and run all twelve candidates at C1 over aligned
   chunks 1024, 2048, 4096, and 8192 at 8K, then both global finalists at 32K. The old
   `profiles/bench/prefill-chunk-screen-twelve-candidate-20260905` is non-runnable history.

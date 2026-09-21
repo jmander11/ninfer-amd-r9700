@@ -1,0 +1,11 @@
+{
+  "status": "paused_for_attention_dispatch_fix",
+  "date": "2026-09-21",
+  "completed_cell": "all-q4/g16/dense/8192",
+  "completed_chunks": [1024, 2048],
+  "prefill_tokens_per_second": [184.8640144, 194.8000609],
+  "reason": "Dense tiled attention requires visible context equal to query rows and rows<=4096. Appended chunks use serial per-key fused attention. Broad selection is deferred for focused attribution and bounded query-panel extension.",
+  "process_handling": "Matrix orchestrator stopped before its next launch. The active chunk2048 child finished and wrote its report. The stopped orchestrator was then terminated; both complete benchmark reports remain intact.",
+  "selection_published": false,
+  "continuation": "Do not mix changed executables into these frozen matrices. After qualification and whole confirmation, prepare a separate current-build selection campaign."
+}

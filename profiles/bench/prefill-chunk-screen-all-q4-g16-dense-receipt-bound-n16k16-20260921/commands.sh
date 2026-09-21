@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+test "$(cat /sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level)" = auto
+
+env /ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-selection-dense-g16-20260921/bench/ninfer_bench --weights /ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer --corpus /ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids --device 0 --concurrency 1 -p 8192 --prefill-chunk 1024 --draft-tokens 0 --output json --output-file /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/prefill-chunk-screen-all-q4-g16-dense-receipt-bound-n16k16-20260921/json/production_prefill_chunk/c1/prefill_p8192_chunk1024_ordinary.json -r 3 --warmup 1
+
+env /ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-selection-dense-g16-20260921/bench/ninfer_bench --weights /ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer --corpus /ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids --device 0 --concurrency 1 -p 8192 --prefill-chunk 2048 --draft-tokens 0 --output json --output-file /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/prefill-chunk-screen-all-q4-g16-dense-receipt-bound-n16k16-20260921/json/production_prefill_chunk/c1/prefill_p8192_chunk2048_ordinary.json -r 3 --warmup 1
+
+env /ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-selection-dense-g16-20260921/bench/ninfer_bench --weights /ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer --corpus /ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids --device 0 --concurrency 1 -p 8192 --prefill-chunk 4096 --draft-tokens 0 --output json --output-file /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/prefill-chunk-screen-all-q4-g16-dense-receipt-bound-n16k16-20260921/json/production_prefill_chunk/c1/prefill_p8192_chunk4096_ordinary.json -r 3 --warmup 1
+
+env /ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-selection-dense-g16-20260921/bench/ninfer_bench --weights /ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer --corpus /ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids --device 0 --concurrency 1 -p 8192 --prefill-chunk 8192 --draft-tokens 0 --output json --output-file /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/prefill-chunk-screen-all-q4-g16-dense-receipt-bound-n16k16-20260921/json/production_prefill_chunk/c1/prefill_p8192_chunk8192_ordinary.json -r 3 --warmup 1
+
+test "$(cat /sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level)" = auto
