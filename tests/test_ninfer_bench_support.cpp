@@ -536,9 +536,6 @@ int test_report_contract() {
     failures += expect(report.at("config").at("q4_prefill_cta_profile") ==
                            ninfer::ops::r9700::linear::kQ4PrefillCtaProfile,
                        "compiled Q4 prefill CTA profile");
-    failures += expect(report.at("config").at("normalized_linear_t1_candidate") ==
-                           ninfer::ops::r9700::linear::kNormalizedLinearT1CandidateEnabled,
-                       "compiled normalized Linear T1 candidate profile");
     failures += expect(report.at("config").at("dflash_small_t_candidate") ==
                            ninfer::ops::r9700::linear::kDFlashSmallTCandidateEnabled,
                        "compiled DFlash small-token candidate profile");
@@ -654,11 +651,6 @@ int test_human_and_csv_reports() {
             std::string::npos,
         "table Q4 prefill CTA profile");
     failures += expect(
-        table.find(std::string("normalized_linear_t1_candidate=") +
-                       (ninfer::ops::r9700::linear::kNormalizedLinearT1CandidateEnabled ?
-                            "true" : "false")) != std::string::npos,
-        "table normalized Linear T1 candidate profile");
-    failures += expect(
         table.find(std::string("dflash_small_t_candidate=") +
                        (ninfer::ops::r9700::linear::kDFlashSmallTCandidateEnabled ? "true" :
                                                                                   "false")) !=
@@ -712,8 +704,7 @@ int test_human_and_csv_reports() {
     for (const std::string_view field :
          {"proposal_head", "kv_value_group", "kv_key_plane_layout",
           "kv_value_plane_layout", "kv_value_scale_plane_layout", "q4_activation_bits",
-          "q4_prefill_cta_profile", "normalized_linear_t1_candidate",
-          "dflash_small_t_candidate",
+          "q4_prefill_cta_profile", "dflash_small_t_candidate",
            "dflash_mlp_down_t5_candidate", "dflash_down_splitk_candidate",
            "dflash_down_splitk_factor",
            "dflash_rmsnorm_rows56_candidate",

@@ -16,14 +16,6 @@ static_assert(NINFER_R9700_Q4_ACTIVATION_BITS == 4 ||
               "R9700 Q4 activation width must be A4 or A8");
 inline constexpr std::uint32_t kQ4ActivationBits = NINFER_R9700_Q4_ACTIVATION_BITS;
 
-#ifndef NINFER_R9700_NORMALIZED_LINEAR_T1_CANDIDATE
-#define NINFER_R9700_NORMALIZED_LINEAR_T1_CANDIDATE 0
-#endif
-static_assert(NINFER_R9700_NORMALIZED_LINEAR_T1_CANDIDATE == 0 ||
-              NINFER_R9700_NORMALIZED_LINEAR_T1_CANDIDATE == 1);
-inline constexpr bool kNormalizedLinearT1CandidateEnabled =
-    NINFER_R9700_NORMALIZED_LINEAR_T1_CANDIDATE == 1;
-
 #ifndef NINFER_R9700_DFLASH_SMALL_T_CANDIDATE
 #define NINFER_R9700_DFLASH_SMALL_T_CANDIDATE 0
 #endif

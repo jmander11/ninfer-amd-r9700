@@ -417,7 +417,7 @@ int main(int argc,char** argv) {
         const bool admitted=every_copy&&upper<1.0&&saving>=0.2;
         std::ofstream report(argv[2]);report<<std::setprecision(17);
         report<<"{\"schema\":\"ninfer.r9700.normalized-linear-t1-qualification.v1\",\"status\":\""
-              <<(admitted?"qualified_for_whole_ab_only":"direct_timing_rejected")
+              <<(admitted?"qualified_for_selector_free_production_confirmation":"direct_timing_rejected")
               <<"\",\"shape\":{\"tokens\":1,\"rows\":34816,\"columns\":5120},"
               <<"\"correctness\":{\"criterion\":\"normalized_linear_a8q4_fp64_rel_l2_1e-2_bf16_steps_2_v1\","
               <<"\"maximum_bf16_steps\":"<<maximum_error.maximum_bf16_steps

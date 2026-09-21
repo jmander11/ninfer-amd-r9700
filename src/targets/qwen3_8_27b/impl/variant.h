@@ -84,12 +84,11 @@ struct Variant {
         [[nodiscard]] static bool normalized_linear_t1_inventory_q4(
             const ModelView& model) noexcept;
         [[nodiscard]] static constexpr bool normalized_linear_t1_selected(
-            bool candidate_enabled, std::uint32_t activation_bits,
-            bool all_q4_text_inventory, qwen3::TextPhase phase, bool ordinary_decode,
+            std::uint32_t activation_bits, bool all_q4_text_inventory,
+            qwen3::TextPhase phase, bool ordinary_decode,
             std::int32_t text_layer, std::uint32_t tokens, std::uint32_t rows,
             std::uint32_t columns, QType weight) noexcept {
-            return candidate_enabled && activation_bits == 8U &&
-                   all_q4_text_inventory && ordinary_decode &&
+            return activation_bits == 8U && all_q4_text_inventory && ordinary_decode &&
                    phase == qwen3::TextPhase::Verify && text_layer >= 0 &&
                    text_layer < TextConfig::layers && tokens == 1U &&
                    rows == 2U * TextConfig::intermediate && columns == TextConfig::hidden &&

@@ -21,35 +21,34 @@ void require(bool condition, const char* message) {
 }
 
 constexpr bool normalized_selected(
-    bool enabled = true, std::uint32_t bits = 8U, bool inventory = true,
+    std::uint32_t bits = 8U, bool inventory = true,
     ninfer::targets::qwen3::TextPhase phase = ninfer::targets::qwen3::TextPhase::Verify,
     bool ordinary = true, std::int32_t layer = 0, std::uint32_t tokens = 1U,
     std::uint32_t rows = 34816U, std::uint32_t columns = 5120U,
     ninfer::QType weight = ninfer::QType::Q4G64_F16S) {
     return detail::Variant::ExecutionState::normalized_linear_t1_selected(
-        enabled, bits, inventory, phase, ordinary, layer, tokens, rows, columns, weight);
+        bits, inventory, phase, ordinary, layer, tokens, rows, columns, weight);
 }
 
 void normalized_route_contract() {
     using Phase = ninfer::targets::qwen3::TextPhase;
     static_assert(normalized_selected());
-    static_assert(normalized_selected(true, 8U, true, Phase::Verify, true, 63));
-    static_assert(!normalized_selected(false));
-    static_assert(!normalized_selected(true, 4U));
-    static_assert(!normalized_selected(true, 8U, false));
-    static_assert(!normalized_selected(true, 8U, true, Phase::Prefill));
+    static_assert(normalized_selected(8U, true, Phase::Verify, true, 63));
+    static_assert(!normalized_selected(4U));
+    static_assert(!normalized_selected(8U, false));
+    static_assert(!normalized_selected(8U, true, Phase::Prefill));
     // A speculative target verify can also be width one: phase/shape cannot select this route.
-    static_assert(!normalized_selected(true, 8U, true, Phase::Verify, false));
-    static_assert(!normalized_selected(true, 8U, true, Phase::Verify, true, -1));
-    static_assert(!normalized_selected(true, 8U, true, Phase::Verify, true, 64));
-    static_assert(!normalized_selected(true, 8U, true, Phase::Verify, true, 0, 2U));
-    static_assert(!normalized_selected(true, 8U, true, Phase::Verify, true, 0, 4U));
-    static_assert(!normalized_selected(true, 8U, true, Phase::Verify, true, 0, 1U, 17408U));
-    static_assert(!normalized_selected(true, 8U, true, Phase::Verify, true, 0, 1U, 34816U,
+    static_assert(!normalized_selected(8U, true, Phase::Verify, false));
+    static_assert(!normalized_selected(8U, true, Phase::Verify, true, -1));
+    static_assert(!normalized_selected(8U, true, Phase::Verify, true, 64));
+    static_assert(!normalized_selected(8U, true, Phase::Verify, true, 0, 2U));
+    static_assert(!normalized_selected(8U, true, Phase::Verify, true, 0, 4U));
+    static_assert(!normalized_selected(8U, true, Phase::Verify, true, 0, 1U, 17408U));
+    static_assert(!normalized_selected(8U, true, Phase::Verify, true, 0, 1U, 34816U,
                                       6144U));
-    static_assert(!normalized_selected(true, 8U, true, Phase::Verify, true, 0, 1U, 34816U,
+    static_assert(!normalized_selected(8U, true, Phase::Verify, true, 0, 1U, 34816U,
                                       5120U, ninfer::QType::F8E4M3_ROW_F32S));
-    static_assert(!normalized_selected(true, 8U, true, Phase::Verify, true, 0, 1U, 34816U,
+    static_assert(!normalized_selected(8U, true, Phase::Verify, true, 0, 1U, 34816U,
                                       5120U, ninfer::QType::W8G32_F16S));
 
     detail::Variant::ModelView model{};

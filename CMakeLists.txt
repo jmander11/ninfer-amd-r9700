@@ -44,15 +44,6 @@ endif()
 add_compile_definitions(
   NINFER_R9700_Q4_ACTIVATION_BITS=${NINFER_R9700_Q4_ACTIVATION_BITS})
 
-set(NINFER_R9700_NORMALIZED_LINEAR_T1_CANDIDATE "0" CACHE STRING
-  "Qualification-only RMSNorm plus A8 preparation for base Text gate/up")
-set_property(CACHE NINFER_R9700_NORMALIZED_LINEAR_T1_CANDIDATE PROPERTY STRINGS 0 1)
-if(NOT NINFER_R9700_NORMALIZED_LINEAR_T1_CANDIDATE MATCHES "^[01]$")
-  message(FATAL_ERROR "NINFER_R9700_NORMALIZED_LINEAR_T1_CANDIDATE must be 0 or 1")
-endif()
-add_compile_definitions(
-  NINFER_R9700_NORMALIZED_LINEAR_T1_CANDIDATE=${NINFER_R9700_NORMALIZED_LINEAR_T1_CANDIDATE})
-
 # Qualification-only matched whole-DFlash A/B selector. Zero is the ordinary WMMA control; one
 # admits only the exact small-token N34816/K5120 cells selected by the two retained direct screens.
 # This is a separately compiled candidate profile, not a runtime, CLI, or artifact selector.

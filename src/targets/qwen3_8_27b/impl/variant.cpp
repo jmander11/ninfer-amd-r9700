@@ -614,7 +614,6 @@ bool Variant::ExecutionState::normalized_linear_t1(
         input.ne[2] == 1 && input.ne[3] == 1 && output.ne[0] == 2 * TextConfig::intermediate &&
         output.ne[1] == 1 && output.ne[2] == 1 && output.ne[3] == 1;
     if (impl_ == nullptr || !exact_shape || !normalized_linear_t1_selected(
-            ops::r9700::linear::kNormalizedLinearT1CandidateEnabled,
             ops::r9700::linear::kQ4ActivationBits, impl_->normalized_linear_inventory_q4,
             phase, ordinary_decode, text_layer, 1U, static_cast<std::uint32_t>(weight.n),
             static_cast<std::uint32_t>(weight.k), weight.qtype)) {
