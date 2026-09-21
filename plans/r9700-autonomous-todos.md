@@ -73,6 +73,17 @@ above apply to every command.
 
 ### Current checkpoint
 
+2026-09-21: bounded prefill optimization, chunk selection (2048), and all24 numerical-quality
+cells are complete. Twenty-two quality cells pass; mixed XAttention G16/G32 are excluded at32K.
+All48 base capacity cells now pass after the qualified FP8 ownership/accounting fix. Active owner:
+`profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921`; its numerical/chunk bridge
+and capacity validation are closed. Next: finish real-model XAttention keep distributions, run
+the ten quality-eligible whole matrices and graph/eager controls, publish base selection, then
+materialize and optimize the three DFlash recipes at K4/W5 and K5/W6. Do not restart completed
+chunk, quality, reference, or capacity campaigns. See terminal-selection tasks for exact authorities.
+
+### Retained DFlash history
+
 `DFLASH-SCHEDULE` closed 2026-09-08: the small-T packed-Q4 candidate (N34816/K5120 + MLP-down T5,
 `NINFER_R9700_DFLASH_SMALL_T_CANDIDATE`) was A/B-tested on the 6fe53d53 combined companion
 (C1/P129+G27, K4/W5 + K5/W6, eager, 3 reps) and found to have no material decode-speed effect
@@ -1138,7 +1149,9 @@ prefill review, preserving their remaining data dependencies.
   and `startup-accounted` results retain actual free5,213,519,872 versus planned5,202,160,896 bytes.
   The11,358,976-byte surplus equals unused graph reserve plus the rounding bound minus actual
   arena rounding. No unexplained startup allocation remains. Do not rerun either completed proof;
-  freeze the reviewed recovery bridge and run the four fresh hybrid capacity matrices next.
+  The reviewed bridge is frozen and all16 new hybrid capacity cells pass. Combined with32
+  retained nonhybrid cells, `capacity/validation.json` records48/48 successes across12 matrices.
+  Quality intersection still admits only10 whole matrices; mixed XAttention remains excluded.
 
 - [ ] `ALLQ4-PAIRS` [depends: CHUNK-SELECT] Complete current dense and XAttention G16/G32 capacity
   and whole pairs and admit all four all-Q4 candidates to the same schema-v7 Pareto decision.
@@ -1146,9 +1159,11 @@ prefill review, preserving their remaining data dependencies.
 - [ ] `MIXED-PAIRS` [depends: CHUNK-SELECT, QUALITY-8K32K] Complete dense and XAttention G16/G32
   mixed-recipe PPL plus fresh exact C1..4 capacity/whole pairs using compile-bound binaries.
 
-- [ ] `FOURROLE-CAPACITY` [depends: CHUNK-SELECT] Reconcile the admitted four-role 8K/32K quality
+- [x] `FOURROLE-CAPACITY` [depends: CHUNK-SELECT] Reconcile the admitted four-role 8K/32K quality
   with fresh selected-chunk C1..4 capacity. The old report's feature-materialization accounting is
-  invalid; measured failed cells must be retained and broad prepared matrices remain unlaunched.
+  invalid; its failed cells remain retained. All four accounted G16/G32 dense/sparse matrices
+  now pass C1..4 with actual startup free memory above planned slack; recovery proof and capacity
+  reports reside in `profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921`.
 
 - [ ] `CAPACITY-WHOLE-12` [depends: POSTCHUNK-ON, ALLQ4-PAIRS, MIXED-PAIRS, FOURROLE-CAPACITY]
   Complete the twelve schema-v14 capacity outcomes and corresponding whole matrices only for
@@ -1171,7 +1186,8 @@ prefill review, preserving their remaining data dependencies.
 
 - [ ] `TERMINAL-SELECTION` [depends: WHOLE-PARETO] Publish exactly one schema-v7 artifact, cache
   group, static Text-prefill profile, and selected chunk through
-  `profiles/bench/r9700-terminal-base-panel-attention-20260921`. The20260905 launcher is historical.
+  `profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921`. The panel-attention package
+  is sealed failed history; the20260905 launcher is historical.
   Preserve every measured exclusion and do
   not materialize the final artifact or cut over XAttention here.
 
