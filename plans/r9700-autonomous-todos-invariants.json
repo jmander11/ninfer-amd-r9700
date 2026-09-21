@@ -91,15 +91,12 @@
     "FINAL-SUITE": ["FINAL-ARTIFACT", "E2E-PROFILE", "BF16-PARITY", "SELECTED-PARITY-VISION", "XATT-CUTOVER-CONDITIONAL"]
   },
   "next_command": null,
-  "no_gpu_action_policy": "Prepare and review the selector-free qualification and C1 confirmation packages after implementation review; do not rerun sealed attempts.",
+  "no_gpu_action_policy": "Complete and independently review the normalized-linear implementation, qualifier, and fail-closed package before the first physical attempt.",
   "post_reset_queue": [
-    "complete and independently review selector-free promotion of the exact all-Q4/A8 base Text T1 projected-residual route admitted by `profiles/bench/r9700-projected-residual-t1-whole-ab-20260920/attempt-1`; preserve mixed inventory, MTP, prefill, T>1, and A4 exclusions.",
-    "prepare and review fresh linked public-Op qualification and selector-free C1 production confirmation packages, binding the passing numerical authority at `profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry2-20260920/attempt-1`; require direct oracle/graph qualification and retained exact public tokens with reproduced whole performance before closing promotion.",
-    "after projected-residual closure, screen T1 RMSNorm+A8G64 preparation fusion at the 64 MLP normalized-linear boundaries, requiring an independent public-Op oracle, native-dot8 static evidence, and complete-boundary graph timing with at least `0.2 ms/token` weighted saving before whole C1 A/B preparation; the 128-boundary opportunity is a hypothesis, not a measured gain."
+    "complete and review `profiles/bench/r9700-normalized-linear-t1-qualification-20260920`, then screen T1 RMSNorm+A8G64 preparation fusion at the 64 MLP normalized-linear boundaries with an independent public-Op oracle, native-dot8 static evidence, and at least `0.2 ms/token` weighted complete-boundary graph saving before whole C1 A/B; the 128-boundary opportunity is a hypothesis, not a measured gain."
   ],
   "post_reset_key_paths": [
-    "profiles/bench/r9700-projected-residual-t1-whole-ab-20260920/attempt-1",
-    "profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry2-20260920/attempt-1"
+    "profiles/bench/r9700-normalized-linear-t1-qualification-20260920"
   ],
   "obsolete_commands": [
     "bash profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/commands.sh",

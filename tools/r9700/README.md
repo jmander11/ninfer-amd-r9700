@@ -1080,12 +1080,16 @@ The subsequent whole C1/P8192+G256 gate passed exact retained public tokens and 
 with candidate rates `29.0009861`, `29.0069622`, and `28.9849878 tok/s`, median paired decode-time
 ratio `0.9787724938`, and upper-two-standard-error bound `0.9792961944`. Its sealed evidence is
 `profiles/bench/r9700-projected-residual-t1-whole-ab-20260920/attempt-1`, closure digest
-`e7337ec8e9bc19d8519f52f06ffcb50359270fa47a4416ff859a4aee8afa9b79`. The independent result audit
-admits promotion review only for all-Q4/A8 base Text T1 residual projections; MTP, mixed inventory,
-prefill, T>1, and A4 are excluded. Selector-free implementation review, fresh linked public-Op
-qualification, and C1 production confirmation remain. Do not rerun these sealed packages;
-the live ledger owns the next reviewed invocation. These timings do not prove physical bandwidth
-saturation or stall freedom.
+`e7337ec8e9bc19d8519f52f06ffcb50359270fa47a4416ff859a4aee8afa9b79`. Selector-free implementation
+review and fresh linked public-Op qualification passed. The production C1 confirmation retained all
+257 public tokens at a `29.0015 tok/s` mean and measured a `0.9788658` median decode-time ratio to
+the retained control. Evidence is
+`profiles/bench/r9700-projected-residual-t1-production-confirmation-retry1-20260920/attempt-1`, whose
+`result.sha256` digest is
+`f629374d5dba788ba93837ee06b74eab6be1650f95d05772694af848d37c9d5a`. Independent audit reported
+`SHIP`, closing production promotion only for all-Q4/A8 base Text T1 residual projections; MTP,
+mixed inventory, prefill, T>1, and A4 remain excluded. Do not rerun the sealed packages. These
+timings do not prove physical bandwidth saturation or stall freedom.
 
 A direct GPU regression of the canonical K5120 RMSNorm route against its independent FP64 oracle, including
 output guards and Device Graph replay, is available with:

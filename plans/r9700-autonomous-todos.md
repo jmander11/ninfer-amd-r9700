@@ -149,16 +149,22 @@ validation. The reviewed whole C1 A/B now passes, and its independent result aud
 exact all-Q4/A8 base Text T1 projected-residual route for promotion review. All six runs preserve
 the retained 257 public tokens; candidate decode is about `29.00 tok/s`, with median paired
 decode-time ratio `0.9787725`. Preserve its sealed `attempt-1`; never rerun it. Selector removal,
-implementation review, fresh linked public-Op qualification, and selector-free C1 production
-confirmation remain before this promotion is closed.
-
-No GPU action is currently runnable. Prepare and review the selector-free qualification and C1 confirmation packages after implementation review; do not rerun sealed attempts.
+implementation review, and fresh linked public-Op qualification then passed. The selector-free
+C1 production confirmation at
+`profiles/bench/r9700-projected-residual-t1-production-confirmation-retry1-20260920/attempt-1`
+retained all 257 tokens and measured `28.9947`, `29.0153`, and `28.9945 tok/s`; its median decode
+time was `0.9788658` of the retained control and within `0.0225%` of the admitted candidate median.
+Independent audit reported `SHIP`, closing promotion for exactly the all-Q4/A8 base Text T1 route.
+The `result.sha256` digest is
+`f629374d5dba788ba93837ee06b74eab6be1650f95d05772694af848d37c9d5a`. This does not prove
+physical bandwidth saturation or stall freedom.
 
 The deterministic queue after reset is:
 
-1. complete and independently review selector-free promotion of the exact all-Q4/A8 base Text T1 projected-residual route admitted by `profiles/bench/r9700-projected-residual-t1-whole-ab-20260920/attempt-1`; preserve mixed inventory, MTP, prefill, T>1, and A4 exclusions.
-2. prepare and review fresh linked public-Op qualification and selector-free C1 production confirmation packages, binding the passing numerical authority at `profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry2-20260920/attempt-1`; require direct oracle/graph qualification and retained exact public tokens with reproduced whole performance before closing promotion.
-3. after projected-residual closure, screen T1 RMSNorm+A8G64 preparation fusion at the 64 MLP normalized-linear boundaries, requiring an independent public-Op oracle, native-dot8 static evidence, and complete-boundary graph timing with at least `0.2 ms/token` weighted saving before whole C1 A/B preparation; the 128-boundary opportunity is a hypothesis, not a measured gain.
+1. complete and review `profiles/bench/r9700-normalized-linear-t1-qualification-20260920`, then screen T1 RMSNorm+A8G64 preparation fusion at the 64 MLP normalized-linear boundaries with an independent public-Op oracle, native-dot8 static evidence, and at least `0.2 ms/token` weighted complete-boundary graph saving before whole C1 A/B; the 128-boundary opportunity is a hypothesis, not a measured gain.
+
+No GPU action is currently runnable. Complete and independently review the normalized-linear
+implementation, qualifier, and fail-closed package before the first physical attempt.
 
 Every other remaining unchecked task depends directly or transitively on this queue or the
 external `DENSE-FLOOR-DECISION`.
@@ -510,11 +516,16 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   every-pair/upper-bound `<1` and median `<=0.99` gates. Evidence:
   `profiles/bench/r9700-projected-residual-t1-whole-ab-20260920/attempt-1`; `result.sha256` SHA-256
   is `e7337ec8e9bc19d8519f52f06ffcb50359270fa47a4416ff859a4aee8afa9b79`.
-  The independent result audit admits promotion review for exactly all-Q4/A8 base Text T1,
-  N5120/K6144 or K17408. Mixed inventory, MTP, prefill, T>1, and A4 remain excluded. Complete
-  selector removal and implementation review, then fresh linked public-Op qualification and
-  selector-free C1 confirmation before closing promotion. This whole speed gain establishes
-  neither physical memory-bandwidth saturation nor stall freedom.
+  The independent result audit admitted promotion for exactly all-Q4/A8 base Text T1,
+  N5120/K6144 or K17408. Mixed inventory, MTP, prefill, T>1, and A4 remain excluded. Selector
+  removal and implementation review passed. Fresh linked public-Op qualification then passed with
+  `0.8704314 ms/token` weighted direct saving. The selector-free C1 production confirmation at
+  `profiles/bench/r9700-projected-residual-t1-production-confirmation-retry1-20260920/attempt-1`
+  retained all 257 tokens and measured a `29.0015 tok/s` mean; its median decode time was
+  `0.9788658` of the retained control and all three runs stayed within `1.01` of the admitted
+  candidate median. Independent audit reported `SHIP`; the `result.sha256` digest is
+  `f629374d5dba788ba93837ee06b74eab6be1650f95d05772694af848d37c9d5a`. Promotion is closed.
+  This whole speed gain establishes neither physical memory-bandwidth saturation nor stall freedom.
 
 ## Active now: DFlash semantic and schedule work
 

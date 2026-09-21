@@ -1373,11 +1373,17 @@ preserved the retained 257 public token IDs. The paired candidate/control decode
 bound `0.9792961944`, and median `0.9787724938`. Evidence is
 `profiles/bench/r9700-projected-residual-t1-whole-ab-20260920/attempt-1`; its `result.sha256`
 digest is `e7337ec8e9bc19d8519f52f06ffcb50359270fa47a4416ff859a4aee8afa9b79`.
-The independent result audit admits promotion review only for all-Q4/A8 base Text T1 at
-N5120/K6144 or K17408; mixed inventory, MTP, prefill, T>1, and A4 retain the incumbent composition.
-Selector-free implementation review, fresh linked public-Op qualification, and C1 production
-confirmation remain before promotion closure. This measured decode gain does not establish
-physical memory-bandwidth saturation or stall freedom.
+The independent result audit admitted promotion only for all-Q4/A8 base Text T1 at N5120/K6144 or
+K17408; mixed inventory, MTP, prefill, T>1, and A4 retain the incumbent composition. Selector-free
+implementation review and fresh linked public-Op qualification passed. The subsequent selector-free
+C1 confirmation retained all 257 public tokens and measured `28.9947`, `29.0153`, and
+`28.9945 tok/s`, a `29.0015 tok/s` mean. Its median decode time was `0.9788658` of the retained
+control and every run stayed within `1.01` of the admitted candidate median. Evidence is
+`profiles/bench/r9700-projected-residual-t1-production-confirmation-retry1-20260920/attempt-1`;
+its `result.sha256` digest is
+`f629374d5dba788ba93837ee06b74eab6be1650f95d05772694af848d37c9d5a`. Independent audit reported
+`SHIP`, closing this exact promotion. The result does not establish physical memory-bandwidth
+saturation or stall freedom.
 
 The existing MTP shortlist head remains Q4G64 with A8G64 activations. MTP stays in exact-output,
 state, cache, row-view, and whole-route regression coverage, but a new shortlist-head trace,

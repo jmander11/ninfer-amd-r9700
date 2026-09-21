@@ -1,0 +1,4 @@
+{
+  "status": "failed",
+  "error": "RuntimeError: HIP device identity query failed"
+}
