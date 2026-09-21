@@ -77,9 +77,15 @@ above apply to every command.
 cells are complete. Twenty-two quality cells pass; mixed XAttention G16/G32 are excluded at32K.
 All48 base capacity cells now pass after the qualified FP8 ownership/accounting fix. Active owner:
 `profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921`; its numerical/chunk bridge
-and capacity validation are closed. Real-model XAttention keep distributions also pass; the
-ten quality-eligible whole matrices are running. Next: finish whole and graph/eager controls,
-publish base selection, then
+and capacity validation are closed. Real-model XAttention keep distributions also pass.
+Whole timing is PAUSED after all-Q4 dense G16 C1/C2: schema20 inflates C>1 aggregate prefill
+throughput by using max lane service time with all lanes' token counts. Whole wall and decode
+measurements remain valid, but phase objectives must not use that prefill metric. The owned
+campaign was stopped during C3; `whole/closure.json` preserves the exact scope. Correct the
+benchmark to schema21 serial-lane prefill-service sums, retain the existing24 phase/whole
+objective policy, and continue through a fresh reporting-corrected owner without rerunning
+completed chunk, quality, capacity or resource qualification. Then finish graph/eager controls,
+publish base selection, and
 materialize and optimize the three DFlash recipes at K4/W5 and K5/W6. Do not restart completed
 chunk, quality, reference, or capacity campaigns. See terminal-selection tasks for exact authorities.
 
@@ -1007,12 +1013,14 @@ unresolved tradeoff or the product contract must change.
   binaries lack new IDs but stay frozen as selection provenance; no new build is required.
   New evaluator runs both DFlash and matched ordinary/token-parity controls; exact profile mapping
   is in `tools/bench/README.md`. All four configuration/host-only W5/W6 planner checks pass.
-  Final cutover rejects superseded schema3 and evaluation-only schema4: separately qualify one
+  Final cutover rejects superseded evaluations and evaluation-only schema5: separately qualify one
   resident companion and its supported capacity before final admission. Base PPL owns target NLL;
   DFlash evaluation owns acceptance/generated output. Never add companions to base Pareto candidates.
   The explicit single-resident `admit`/`validate-admission` workflow is now implemented and reviewed
   (`a9111d2e`): one recipe/K/W must qualify acrossC1..4; per-C frontier winners cannot be mixed.
-  Final cutover recomputes the distinct resident authority, while schema4 remains evaluation-only.
+  Final cutover recomputes the distinct resident authority, while schema5 remains evaluation-only.
+  Schema5 retains the passing C1 screen and a separate C2..4 followup without rerunning C1;
+  both raw namespaces, their common corpus and public-token checks are independently replayed.
   A recipe-capable selected-base benchmark may also evaluate companions (`5133c7b6`); different
   executable hashes are not a capability requirement. Exact recipe/identity/parity gates remain.
   W8 feature/QKV/output/conv/selector shapes currently use existing BF16×W8 execution, not
