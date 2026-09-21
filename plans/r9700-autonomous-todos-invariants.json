@@ -91,12 +91,12 @@
     "FINAL-SUITE": ["FINAL-ARTIFACT", "E2E-PROFILE", "BF16-PARITY", "SELECTED-PARITY-VISION", "XATT-CUTOVER-CONDITIONAL"]
   },
   "next_command": null,
-  "no_gpu_action_policy": "Complete and independently review selector-free normalized-linear promotion and its fresh qualification/confirmation packages before another physical attempt.",
+  "no_gpu_action_policy": "Independently review explicit gate/up prefetch ISA feasibility and its complete-boundary qualification package before another physical attempt.",
   "post_reset_queue": [
-    "promote selector-free normalized-linear routing for exactly the 64 all-Q4/A8 ordinary base Text C1 MLP gate/up boundaries admitted by `profiles/bench/r9700-normalized-linear-t1-whole-ab-20260920/attempt-1`, independently review it, then require fresh linked public-Op qualification and selector-free C1 production confirmation; preserve prefill, verify/DFlash, MTP, C2..4, mixed inventory, A4, attention, and GDN fallbacks."
+    "retain the SHIP confirmation at `profiles/bench/r9700-normalized-linear-t1-production-confirmation-20260920/attempt-1` and pursue CPU-only ISA feasibility for explicit next-group prefetch in the T1 N34816/K5120 gate/up consumer; require g+1 B64 loads before g dot8, correct waits, no spills and acceptable occupancy before preparing a reviewed complete-normalized-boundary qualification package with at least `0.2 ms/token` direct saving required before whole C1 A/B."
   ],
   "post_reset_key_paths": [
-    "profiles/bench/r9700-normalized-linear-t1-whole-ab-20260920/attempt-1"
+    "profiles/bench/r9700-normalized-linear-t1-production-confirmation-20260920/attempt-1"
   ],
   "obsolete_commands": [
     "bash profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/commands.sh",

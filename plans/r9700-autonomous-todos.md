@@ -161,10 +161,9 @@ physical bandwidth saturation or stall freedom.
 
 The deterministic queue after reset is:
 
-1. promote selector-free normalized-linear routing for exactly the 64 all-Q4/A8 ordinary base Text C1 MLP gate/up boundaries admitted by `profiles/bench/r9700-normalized-linear-t1-whole-ab-20260920/attempt-1`, independently review it, then require fresh linked public-Op qualification and selector-free C1 production confirmation; preserve prefill, verify/DFlash, MTP, C2..4, mixed inventory, A4, attention, and GDN fallbacks.
+1. retain the SHIP confirmation at `profiles/bench/r9700-normalized-linear-t1-production-confirmation-20260920/attempt-1` and pursue CPU-only ISA feasibility for explicit next-group prefetch in the T1 N34816/K5120 gate/up consumer; require g+1 B64 loads before g dot8, correct waits, no spills and acceptable occupancy before preparing a reviewed complete-normalized-boundary qualification package with at least `0.2 ms/token` direct saving required before whole C1 A/B.
 
-No GPU action is currently runnable. Complete and independently review selector-free
-normalized-linear promotion and its fresh qualification/confirmation packages before another physical attempt.
+No GPU action is currently runnable. Independently review explicit gate/up prefetch ISA feasibility and its complete-boundary qualification package before another physical attempt.
 
 Every other remaining unchecked task depends directly or transitively on this queue or the
 external `DENSE-FLOOR-DECISION`.
@@ -462,18 +461,37 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   `0.2 ms/token` gate. Independent audit reported `SHIP` for whole C1 A/B preparation only. The
   `result.sha256` digest is
   `01e1e0571d92541311195202df919d3750759f3bcedf7033944f604bcf2baf2c`; closure SHA-256 is
-  `71576628e039d62dcdc3a31d17c60804765e95c859ec2118d16602ae2bd64dc4`. Production routing remains
-  unchanged until matched exact-token whole evidence admits it. That reviewed whole C1 A/B at
+  `71576628e039d62dcdc3a31d17c60804765e95c859ec2118d16602ae2bd64dc4`. The subsequent reviewed whole C1 A/B at
   `profiles/bench/r9700-normalized-linear-t1-whole-ab-20260920/attempt-1` retained all 257 tokens.
   Candidate/control decode-time ratios were `0.9895615`, `0.9896042`, and `0.9897497`; median
   `0.9896042` and mean plus two standard errors `0.9897524` passed the gate. Mean decode improved
   `29.0050→29.3087 tok/s` (about `1.05%`). Independent audit reported `SHIP` for scoped promotion
   review; the `result.sha256` digest is
-  `2484b71a86314ec8bf4b116fe0b5caecb707d77747666a41dec5f2ee95ee32ee`. Remove only this route's
-  selector, independently review, then require fresh linked public-Op qualification and selector-free
-  C1 confirmation before closing promotion. The result does not prove bandwidth saturation.
-  Do not reopen geometry remapping or split-K; an explicit
-  gate-up prefetch challenger is later work only if ISA proves early loads and wait scheduling.
+  `2484b71a86314ec8bf4b116fe0b5caecb707d77747666a41dec5f2ee95ee32ee`. Selector removal and independent
+  implementation review passed for exactly these 64 all-Q4/A8 ordinary base Text C1 MLP boundaries;
+  prefill, verify/DFlash, MTP, C2..4, mixed inventory, A4, attention, and GDN retain their fallbacks.
+  Fresh linked public-Op qualification at
+  `profiles/bench/r9700-normalized-linear-t1-promoted-qualification-20260920/attempt-1` passed with
+  `0.3647995 ms/token` direct saving. Selector-free C1 confirmation at
+  `profiles/bench/r9700-normalized-linear-t1-production-confirmation-20260920/attempt-1` retained
+  all 257 tokens and measured `29.3174`, `29.3157`, and `29.3116 tok/s`; median decode-time ratio
+  to the retained control is `0.9893966`, with every run faster than the admitted candidate median.
+  Its `result.sha256` digest is
+  `f28d5a0e89bc8cfaa438d7c7ef86405c5eb486c650838c57bf086d9b40c2aebb`. Independent confirmation
+  result audit reported `SHIP`, closing this scoped promotion. Do not rerun these sealed attempts.
+  No result proves physical bandwidth saturation or stall freedom.
+
+  The next bounded mechanism is ISA-first explicit prefetch for the exact T1 N34816/K5120 gate/up
+  consumer. Retained Layer-0 timing is `0.159816480 ms` for `94,699,520 B/call`, a `592.55 GB/s`
+  useful payload rate. The `635.9 GB/s` stream proxy gives a `0.148922032 ms` floor and at most
+  `0.697245 ms/token` across 64 calls (about `2.04%` at current `29.31 tok/s`); this is a screening
+  bound, not physical traffic or a proved achievable gain. Require actual g+1 B64 loads before g
+  native dot8 in emitted ISA, correct wait dependencies, no spills, and acceptable occupancy before
+  any GPU attempt. Preserve the stored N16/K16 layout and serial accumulation. Qualify and time the
+  complete normalized-linear boundary with cold address-distinct weights; require at least
+  `0.2 ms/token` direct weighted saving before whole C1 A/B. The prior source pipeline failed to
+  emit this overlap; do not repeat it or reopen rejected geometry remapping, non-temporal loads,
+  or split-K without a distinct mechanism and new bound.
   The first reviewed package,
   `profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919`, passed compile/static preflight
   but stopped on the first K6144 incumbent launch before candidate parity or timing:

@@ -2040,9 +2040,11 @@ Replace functional routes with measured gfx1201 families:
   `profiles/bench/r9700-dot8-weight-nt-whole-p8192-g32-screen-20260906.json` (SHA-256
   `c6a1dea0f0e94d9dfcd461145c83d9161e35313e17e2fe9b0ca041a9b405e31c`). No G256 gate was run;
   the selector, challenger, and temporary qualification tooling were removed while the reports
-  and raw evidence remain immutable. Ordinary base decode is closed at the bounded practical
-  ceiling represented by the selector-free `27.05729956 tok/s` smoke. This is not a physical or
-  absolute ceiling and makes no bandwidth-saturation or stall-freedom claim.
+  and raw evidence remain immutable. This experiment sequence closed at the bounded practical
+  ceiling represented by the selector-free `27.05729956 tok/s` smoke; the user's later
+  `BASE-DECODE-BW` direction reopened memory-throughput work, as recorded below and in the live
+  ledger. This is not a physical or absolute ceiling and makes no bandwidth-saturation or
+  stall-freedom claim.
   This sequence neither opens the held chunk/capacity campaign nor substitutes for the selected-recipe
   DFlash2 gates, which remain behind their existing dependencies.
   The selector-free final smoke measured `9.461402437 s` for 256 decode tokens
@@ -2054,6 +2056,28 @@ Replace functional routes with measured gfx1201 families:
   `8fe71be97e77c2651cb0c75fe203cedb13f200f8ac76082e4310bbfb855e5370`. The extracted loaded gfx1201
   object SHA-256 is `c3dcad45559a112f42f07b1d7e87fbd1d494d1d024083efc0498500ee678cd72`;
   its kernel uses 17 VGPR, 32 bytes LDS, wave32, occupancy 16, and zero scratch/spills.
+  The 2026-09-20 normalized-linear promotion fuses K5120 RMSNorm and exact A8G64 preparation
+  across exactly the 64 all-Q4/A8 ordinary base Text C1 MLP gate/up boundaries, preserving the
+  explicit BF16 seam and native-IU4 consumer. Prefill, verify/DFlash, MTP, C2..4, mixed inventory,
+  A4, attention, and GDN keep their existing routes. Matched whole A/B passed exact 257-token
+  parity and improved mean decode `29.0050→29.3087 tok/s`. Selector removal and independent
+  implementation review passed; fresh linked qualification at
+  `profiles/bench/r9700-normalized-linear-t1-promoted-qualification-20260920/attempt-1` passed
+  with `0.3647995 ms/token` direct saving. Production confirmation at
+  `profiles/bench/r9700-normalized-linear-t1-production-confirmation-20260920/attempt-1` retained
+  all 257 tokens and measured mean `29.3149 tok/s`, median decode-time ratio `0.9893966` to the
+  retained control. Its `result.sha256` digest is
+  `f28d5a0e89bc8cfaa438d7c7ef86405c5eb486c650838c57bf086d9b40c2aebb`. Independent confirmation
+  result audit reported `SHIP`, closing this scoped promotion. No saturation or stall-freedom
+  claim follows from these timings.
+  Next, screen explicit T1 N34816/K5120 gate/up prefetch in emitted ISA before physical work.
+  Retained `94,699,520 B/call` at `0.159816480 ms` means `592.55 GB/s` useful rate; the
+  `635.9 GB/s` stream proxy gives `0.148922032 ms` and at most `0.697245 ms/token` saving across
+  64 calls (about `2.04%` at current speed). Require g+1 B64 loads before g native dot8, correct
+  waits, no spills and acceptable occupancy, then independent qualification and at least
+  `0.2 ms/token` direct saving at the complete normalized-linear boundary before whole C1 A/B.
+  The bound does not reopen rejected geometry remaps, source-only pipeline, non-temporal dot8,
+  grouped-PV split512, or split-K mechanisms.
 - [ ] After the dense C1/P2048/spec-none floor and practical-ceiling gate passes and the shared
   chunk is selected, rerun all 48 post-promotion capacity cells (dense/XAttention times
   all-Q4/mixed/four-role-hybrid times G16/G32, each at C=1..4). Bind the newly measured Device Graph

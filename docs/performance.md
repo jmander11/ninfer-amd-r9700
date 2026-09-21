@@ -1394,18 +1394,34 @@ normalization-to-BF16-to-exact-A8-to-signed-Q4 oracle passed with maximum relati
 `0.00187542`, zero BF16-step error, exact public-control parity, and captured graph recovery.
 Evidence is `profiles/bench/r9700-normalized-linear-t1-qualification-20260920/attempt-1`; the
 `result.sha256` digest is `01e1e0571d92541311195202df919d3750759f3bcedf7033944f604bcf2baf2c`.
-Independent audit admits matched whole C1 A/B preparation only; this is not yet a whole-decode gain
-or a bandwidth-saturation claim.
+Independent audit admitted matched whole C1 A/B preparation; this direct result alone does not
+establish a whole-decode gain or bandwidth saturation.
 
 The matched ordinary Device Graph C1/P8192+G256 whole A/B then retained all 257 public tokens in
 six balanced runs. Candidate/control decode-time ratios were `0.9895615`, `0.9896042`, and
 `0.9897497`; median `0.9896042` and mean plus two standard errors `0.9897524` passed the admission
 gate. Mean decode improved `29.0050→29.3087 tok/s`, about `1.05%`. Evidence is
 `profiles/bench/r9700-normalized-linear-t1-whole-ab-20260920/attempt-1`; its `result.sha256` digest
-is `2484b71a86314ec8bf4b116fe0b5caecb707d77747666a41dec5f2ee95ee32ee`. Independent audit admits
+is `2484b71a86314ec8bf4b116fe0b5caecb707d77747666a41dec5f2ee95ee32ee`. Independent audit admitted
 promotion review only for all-Q4/A8 ordinary base Text C1 MLP gate/up boundaries. Selector-free
-implementation review and fresh production qualification/confirmation remain. This result does not
-establish bandwidth saturation.
+implementation review then passed, and fresh linked public-Op qualification at
+`profiles/bench/r9700-normalized-linear-t1-promoted-qualification-20260920/attempt-1` passed with
+`0.3647995 ms/token` direct saving. The selector-free production confirmation retained all 257
+tokens and measured `29.3174`, `29.3157`, and `29.3116 tok/s` (mean `29.3149 tok/s`). Its median
+decode-time ratio to the retained control was `0.9893966`; every run was faster than the admitted
+candidate median. Evidence is
+`profiles/bench/r9700-normalized-linear-t1-production-confirmation-20260920/attempt-1`; its
+`result.sha256` digest is `f28d5a0e89bc8cfaa438d7c7ef86405c5eb486c650838c57bf086d9b40c2aebb`.
+Independent confirmation result audit reported `SHIP`, closing this scoped promotion. These
+timings do not establish physical bandwidth saturation or stall freedom.
+
+The next ISA feasibility screen concerns explicit next-group prefetch in the T1 N34816/K5120
+gate/up consumer. Its retained `0.159816480 ms` and `94,699,520 B/call` imply `592.55 GB/s` useful
+payload rate. The `635.9 GB/s` stream proxy gives a `0.148922032 ms` floor, leaving an optimistic
+`0.697245 ms/token` across 64 calls (about `2.04%` at current speed). This bound is neither a
+physical traffic measurement nor a demonstrated saving. GPU qualification requires emitted g+1 B64
+loads before g dot8, correct waits, no spills and acceptable occupancy; whole C1 A/B requires at
+least `0.2 ms/token` measured saving at the complete normalized-linear boundary.
 
 The existing MTP shortlist head remains Q4G64 with A8G64 activations. MTP stays in exact-output,
 state, cache, row-view, and whole-route regression coverage, but a new shortlist-head trace,

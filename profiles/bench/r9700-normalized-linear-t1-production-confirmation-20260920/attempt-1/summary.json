@@ -1,0 +1,28 @@
+{
+  "status": "passed",
+  "selector_free_production_confirmed": true,
+  "exact_public_token_parity": true,
+  "records": [
+    {
+      "stem": "run-1-production",
+      "decode_seconds": 8.732028052,
+      "decode_output_tok_s": 29.3173588627404
+    },
+    {
+      "stem": "run-2-production",
+      "decode_seconds": 8.732509683,
+      "decode_output_tok_s": 29.315741899303887
+    },
+    {
+      "stem": "run-3-production",
+      "decode_seconds": 8.733737455,
+      "decode_output_tok_s": 29.31162074873706
+    }
+  ],
+  "seconds_over_admitted_candidate_median": [
+    0.9995881946828835,
+    0.9996433288005164,
+    0.9997838764934067
+  ],
+  "median_seconds_over_retained_control": 0.98939663930656
+}

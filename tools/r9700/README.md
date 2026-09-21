@@ -1097,14 +1097,31 @@ fallback, malformed/alias handling, and captured graph recovery. The retained di
 `profiles/bench/r9700-normalized-linear-t1-qualification-20260920/attempt-1` improved
 `0.2406990→0.2347595 ms`, estimating `0.3801284 ms/token` across the 64 base Text MLP boundaries.
 Source and embedded code retain native IU4 in the consumer with no scratch or spills. Independent
-audit admits whole C1 A/B preparation only; target routing and production promotion require their
-own matched evidence. Do not rerun the sealed attempt.
+audit admitted whole C1 A/B preparation; the subsequent matched evidence below owns production
+admission. Do not rerun the sealed attempt.
 The matched whole C1/P8192+G256 gate then retained all 257 public tokens and measured candidate over
 control decode-time ratios `0.9895615`, `0.9896042`, and `0.9897497`, with mean candidate speed
 `29.3087 tok/s`. Evidence is
 `profiles/bench/r9700-normalized-linear-t1-whole-ab-20260920/attempt-1`; the `result.sha256` digest
-is `2484b71a86314ec8bf4b116fe0b5caecb707d77747666a41dec5f2ee95ee32ee`. Independent audit admits
-scoped promotion review, not production routing or a bandwidth-saturation claim.
+is `2484b71a86314ec8bf4b116fe0b5caecb707d77747666a41dec5f2ee95ee32ee`. Selector-free implementation
+review and fresh linked public-Op qualification then passed; the latter is retained at
+`profiles/bench/r9700-normalized-linear-t1-promoted-qualification-20260920/attempt-1`, with
+`0.3647995 ms/token` direct saving. Selector-free C1 confirmation at
+`profiles/bench/r9700-normalized-linear-t1-production-confirmation-20260920/attempt-1` retained
+all 257 tokens, measured mean `29.3149 tok/s`, and achieved median decode-time ratio `0.9893966`
+to the retained control. Its `result.sha256` digest is
+`f28d5a0e89bc8cfaa438d7c7ef86405c5eb486c650838c57bf086d9b40c2aebb`. Independent confirmation
+result audit reported `SHIP`, closing this scoped promotion. Scope remains the 64 all-Q4/A8
+ordinary base Text C1 MLP boundaries, with all other predicates retaining their fallbacks. No
+sealed package is rerunnable, and these timings do not prove physical bandwidth saturation.
+
+The next gate/up prefetch task starts with CPU-only emitted-ISA feasibility at T1 N34816/K5120:
+prove g+1 B64 loads issue before g dot8 with correct waits, no spills and acceptable occupancy.
+The retained `94,699,520 B/call` and `0.159816480 ms` imply `592.55 GB/s` useful rate; the
+`635.9 GB/s` proxy floor is `0.148922032 ms`, an optimistic `0.697245 ms/token` upper saving.
+Only after static review may a new reviewed package qualify and time the complete normalized-linear
+boundary; at least `0.2 ms/token` direct saving is required before whole C1 A/B. Do not rerun the
+rejected source-only pipeline, geometry remaps, non-temporal path, or split-K on this bound alone.
 
 A direct GPU regression of the canonical K5120 RMSNorm route against its independent FP64 oracle, including
 output guards and Device Graph replay, is available with:

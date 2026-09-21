@@ -1,0 +1,22 @@
+{
+  "argv": [
+    "/home/battlefront/.local/bin/python3.11",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-normalized-linear-t1-promoted-qualification-20260920/analyze.py",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-normalized-linear-t1-promoted-qualification-20260920/attempt-1/qualification.json"
+  ],
+  "cwd": "/ssdpool2nvme/local_llm/ninfer-amd-r9700",
+  "started_unix_ns": 1789965966738510894,
+  "exit_code": 0,
+  "error": null,
+  "finished_unix_ns": 1789965966759242588,
+  "stdout": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-normalized-linear-t1-promoted-qualification-20260920/attempt-1/analyzer.stdout",
+    "bytes": 401,
+    "sha256": "be5a0b222c4f7c14adeda9eec4729ce09dd986b3f367b2d103cf34c6ab9a5072"
+  },
+  "stderr": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-normalized-linear-t1-promoted-qualification-20260920/attempt-1/analyzer.stderr",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}
