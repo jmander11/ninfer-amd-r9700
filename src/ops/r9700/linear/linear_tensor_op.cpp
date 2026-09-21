@@ -1,5 +1,7 @@
 #include "ninfer/ops/linear.h"
+#include "ninfer/ops/normalized_linear.h"
 #include "ninfer/ops/projected_residual.h"
+#include "ninfer/ops/rmsnorm.h"
 
 #include "core/device.h"
 #include "ops/r9700/linear/r9700_linear.h"
@@ -9,6 +11,7 @@
 #include <hip/hip_bfloat16.h>
 
 #include <cstddef>
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
@@ -322,6 +325,90 @@ void dflash_verify_down_linear(const Tensor& x, const Weight& weight, Tensor& ou
                                         ? DeviceSpan{}
                                         : workspace.alloc_bytes(partial_sum_bytes);
     linear_with_workspace(x, weight, output, activation, partial_sums, stream, true);
+}
+
+std::size_t normalized_linear_workspace_capacity_bytes(
+    std::int32_t tokens, std::int32_t columns, std::int32_t rows) {
+    checked_extent(tokens, "T");
+    if (columns != 5120 || rows != 34816)
+        throw std::invalid_argument("normalized linear: unsupported projection shape");
+    const std::size_t activation = linear_workspace_capacity_bytes(QType::Q4G64_F16S, tokens, columns);
+    if (tokens == 1 && r9700::linear::kQ4ActivationBits == 8) return activation;
+    // K5120 BF16 rows are already multiples of the 256-byte workspace alignment.
+    const std::uint64_t hidden = checked_mul(
+        checked_mul(static_cast<std::uint64_t>(tokens), 5120U, "normalized hidden"),
+        sizeof(hip_bfloat16), "normalized hidden");
+    if (hidden > std::numeric_limits<std::size_t>::max() - activation)
+        throw std::overflow_error("normalized linear: complete workspace overflows");
+    return static_cast<std::size_t>(hidden) + activation;
+}
+
+void normalized_linear(const Tensor& input, const Tensor& norm, float eps,
+                       bool unit_offset, const Weight& weight, Tensor& output,
+                       const DeviceSpan& workspace, hipStream_t stream) {
+    if (input.dtype != DType::BF16 || norm.dtype != DType::BF16 ||
+        output.dtype != DType::BF16 || input.ne[0] != 5120 ||
+        input.ne[1] <= 0 || input.ne[2] != 1 || input.ne[3] != 1 ||
+        norm.ne[0] != 5120 || norm.ne[1] != 1 || norm.ne[2] != 1 || norm.ne[3] != 1 ||
+        output.ne[0] != 34816 || output.ne[1] != input.ne[1] ||
+        output.ne[2] != 1 || output.ne[3] != 1 ||
+        !input.is_contiguous() || !norm.is_contiguous() || !output.is_contiguous() ||
+        !(eps > 0.0F) || !std::isfinite(eps) || weight.qtype != QType::Q4G64_F16S ||
+        weight.ndim != 2 || weight.n != 34816 || weight.k != 5120 ||
+        weight.shape[0] != 34816 || weight.shape[1] != 5120 ||
+        weight.padded_shape[0] != 34816 || weight.padded_shape[1] != 5120 ||
+        weight.layout != QuantLayout::Q4N16K16 || weight.group != 64 ||
+        weight.group_size != 64 || weight.scale_dtype != DType::FP16 ||
+        weight.qhigh != nullptr || weight.high_plane_bytes != 0U) {
+        throw std::invalid_argument("normalized linear: malformed represented inputs");
+    }
+    const std::size_t required = normalized_linear_workspace_capacity_bytes(
+        input.ne[1], input.ne[0], output.ne[0]);
+    constexpr std::size_t code_bytes = 34816U * 5120U / 2U;
+    constexpr std::size_t scale_bytes = 34816U * 80U * sizeof(std::uint16_t);
+    if (weight.qdata_bytes != code_bytes || weight.scale_bytes != scale_bytes ||
+        workspace.bytes != required)
+        throw std::invalid_argument("normalized linear: plane or workspace extent differs");
+    const auto tokens = static_cast<std::uint32_t>(input.ne[1]);
+    const void* pointers[]{input.data, norm.data, weight.qdata, weight.scales,
+                           output.data, workspace.data};
+    const std::size_t sizes[]{static_cast<std::size_t>(tokens) * 5120U * sizeof(hip_bfloat16),
+                              5120U * sizeof(hip_bfloat16), code_bytes, scale_bytes,
+                              static_cast<std::size_t>(tokens) * 34816U * sizeof(hip_bfloat16),
+                              required};
+    const std::size_t alignments[]{alignof(hip_bfloat16), alignof(hip_bfloat16),
+                                   alignof(std::uint64_t), alignof(std::uint16_t),
+                                   alignof(hip_bfloat16), alignof(std::uint32_t)};
+    ByteRange ranges[6]{};
+    for (std::size_t index = 0U; index < 6U; ++index) {
+        const auto first = reinterpret_cast<std::uintptr_t>(pointers[index]);
+        if (pointers[index] == nullptr || first % alignments[index] != 0U ||
+            first > std::numeric_limits<std::uintptr_t>::max() - sizes[index])
+            throw std::invalid_argument("normalized linear: invalid plane address or alignment");
+        ranges[index] = {first, first + sizes[index]};
+        for (std::size_t other = 0U; other < index; ++other)
+            if (overlaps(ranges[index], ranges[other]))
+                throw std::invalid_argument("normalized linear: planes must be disjoint");
+    }
+    if (tokens == 1U && r9700::linear::kQ4ActivationBits == 8) {
+        HIP_CHECK(r9700::linear::a8q4g64_normalized_linear_t1(
+            {.input = static_cast<const hip_bfloat16*>(input.data),
+             .weight_codes = static_cast<const std::uint8_t*>(weight.qdata),
+             .weight_code_bytes = code_bytes,
+             .weight_scales = static_cast<const std::uint16_t*>(weight.scales),
+             .weight_scale_bytes = scale_bytes,
+             .activation_workspace = workspace.data, .activation_workspace_bytes = required,
+             .output = static_cast<hip_bfloat16*>(output.data),
+             .tokens = 1U, .rows = 34816U, .columns = 5120U, .padded_columns = 5120U},
+            static_cast<const hip_bfloat16*>(norm.data), eps, unit_offset, stream));
+        return;
+    }
+    Tensor hidden(workspace.data, DType::BF16, {5120, input.ne[1]});
+    const std::size_t hidden_bytes = sizes[0];
+    const DeviceSpan activation{static_cast<std::uint8_t*>(workspace.data) + hidden_bytes,
+                                required - hidden_bytes};
+    rmsnorm(input, norm, eps, unit_offset, hidden, stream);
+    linear(hidden, weight, output, activation, stream);
 }
 
 std::size_t projected_residual_t1_workspace_capacity_bytes(

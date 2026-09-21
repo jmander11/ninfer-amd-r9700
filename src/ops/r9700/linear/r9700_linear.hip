@@ -524,6 +524,82 @@ __global__ __launch_bounds__(kWaveSize) void a8g64_quantize_activation_kernel(
                                                    ((high1 & 0x0f) << 4));
 }
 
+// One cooperative RMSNorm row followed by eight independent G64 codec waves.
+// The BF16 conversion is the public normalization seam, before the exact codec.
+__global__ __launch_bounds__(kThreads) void a8g64_normalized_prepare_t1_kernel(
+    const hip_bfloat16* input, const hip_bfloat16* norm, float eps, bool unit_offset,
+    std::uint8_t* low_codes, std::uint8_t* high_codes, std::uint16_t* scale_words,
+    std::uint32_t* status) {
+    constexpr std::uint32_t columns = 5120U;
+    constexpr std::uint32_t waves = kThreads / kWaveSize;
+    const std::uint32_t lane = threadIdx.x % kWaveSize;
+    const std::uint32_t wave = threadIdx.x / kWaveSize;
+    float sumsq = 0.0F;
+#pragma unroll
+    for (std::uint32_t column = threadIdx.x; column < columns; column += kThreads) {
+        const float value = static_cast<float>(input[column]);
+        sumsq = fmaf(value, value, sumsq);
+    }
+#pragma unroll
+    for (std::uint32_t width = kWaveSize / 2U; width != 0U; width >>= 1U)
+        sumsq += __shfl_down(sumsq, width, kWaveSize);
+    __shared__ float wave_sums[waves];
+    if (lane == 0U) wave_sums[wave] = sumsq;
+    if (threadIdx.x == 0U) *status = 0U;
+    __syncthreads();
+    if (wave == 0U) {
+        float block_sum = lane < waves ? wave_sums[lane] : 0.0F;
+#pragma unroll
+        for (std::uint32_t width = kWaveSize / 2U; width != 0U; width >>= 1U)
+            block_sum += __shfl_down(block_sum, width, kWaveSize);
+        if (lane == 0U) wave_sums[0] = rsqrtf(block_sum / static_cast<float>(columns) + eps);
+    }
+    __syncthreads();
+    const float inverse = wave_sums[0];
+    for (std::uint32_t group = wave; group < columns / kQ4Group; group += waves) {
+        const std::uint32_t column = group * kQ4Group + lane * 2U;
+        auto normalized = [&](std::uint32_t index) {
+            const float gain = static_cast<float>(norm[index]) + (unit_offset ? 1.0F : 0.0F);
+            float value = static_cast<float>(hip_bfloat16(
+                static_cast<float>(input[index]) * inverse * gain));
+            if (!isfinite(value)) {
+                atomicOr(status, static_cast<std::uint32_t>(Q4G64ActivationNonfinite));
+                value = 0.0F;
+            }
+            return value;
+        };
+        const float value0 = normalized(column);
+        const float value1 = normalized(column + 1U);
+        float maximum = fmaxf(fabsf(value0), fabsf(value1));
+#pragma unroll
+        for (std::uint32_t width = kWaveSize / 2U; width != 0U; width >>= 1U)
+            maximum = fmaxf(maximum, __shfl_down(maximum, width, kWaveSize));
+        std::uint16_t scale_bits = 0U;
+        if (lane == 0U) {
+            if (maximum != 0.0F) {
+                scale_bits = __half_as_ushort(__float2half_rn(maximum / 127.0F));
+                if (scale_bits == 0U) scale_bits = 1U;
+                if (!isfinite(__half2float(__ushort_as_half(scale_bits)))) {
+                    atomicOr(status, static_cast<std::uint32_t>(Q4G64ActivationScaleOverflow));
+                    scale_bits = 0U;
+                }
+            }
+            scale_words[group] = scale_bits;
+        }
+        scale_bits = static_cast<std::uint16_t>(
+            __shfl(static_cast<unsigned>(scale_bits), 0, kWaveSize));
+        const float scale = __half2float(__ushort_as_half(scale_bits));
+        const int code0 = scale != 0.0F ? max(-127, min(127, __float2int_rn(value0 / scale))) : 0;
+        const int code1 = scale != 0.0F ? max(-127, min(127, __float2int_rn(value1 / scale))) : 0;
+        const int low0 = code0 & 0x0f;
+        const int low1 = code1 & 0x0f;
+        const int high0 = (code0 - low0) / 16;
+        const int high1 = (code1 - low1) / 16;
+        low_codes[column / 2U] = static_cast<std::uint8_t>(low0 | (low1 << 4));
+        high_codes[column / 2U] = static_cast<std::uint8_t>((high0 & 0x0f) | ((high1 & 0x0f) << 4));
+    }
+}
+
 __global__ __launch_bounds__(kWaveSize) void fused_silu_a8g64_quantize_kernel(
     const hip_bfloat16* gate_up, std::uint8_t* low_codes, std::uint8_t* high_codes,
     std::uint16_t* scale_words, std::uint32_t* status) {
@@ -3345,6 +3421,59 @@ hipError_t a8q4g64_linear_prefill_cta(
                        args.rows, args.columns, args.padded_columns);
     return hipGetLastError();
 #else
+    (void)stream;
+    return hipErrorNotSupported;
+#endif
+}
+
+hipError_t a8q4g64_normalized_linear_t1(
+    const A8Q4G64CandidateArgs& args, const hip_bfloat16* norm, float eps,
+    bool unit_offset, hipStream_t stream) noexcept {
+    if (args.tokens != 1U || args.rows != 34816U || args.columns != 5120U ||
+        args.padded_columns != 5120U || !(eps > 0.0F) ||
+        eps > std::numeric_limits<float>::max()) return hipErrorInvalidValue;
+    constexpr std::size_t input_bytes = 5120U * sizeof(hip_bfloat16);
+    constexpr std::size_t code_bytes = 34816U * 5120U / 2U;
+    constexpr std::size_t scale_bytes = 34816U * 80U * sizeof(std::uint16_t);
+    constexpr std::size_t output_bytes = 34816U * sizeof(hip_bfloat16);
+    const std::size_t workspace_bytes = a8q4g64_activation_workspace_capacity_bytes(1U, 5120U);
+    if (args.weight_code_bytes != code_bytes || args.weight_scale_bytes != scale_bytes ||
+        args.activation_workspace_bytes != workspace_bytes || args.partial_sums != nullptr ||
+        args.partial_sum_bytes != 0U || args.dflash_target_verify_down)
+        return hipErrorInvalidValue;
+    const void* pointers[]{args.input, norm, args.weight_codes, args.weight_scales,
+                           args.output, args.activation_workspace};
+    const std::size_t sizes[]{input_bytes, input_bytes, code_bytes, scale_bytes,
+                              output_bytes, workspace_bytes};
+    const std::size_t alignments[]{2U, 2U, 8U, 2U, 2U, 4U};
+    for (std::size_t index = 0U; index < 6U; ++index) {
+        const auto first = reinterpret_cast<std::uintptr_t>(pointers[index]);
+        if (pointers[index] == nullptr || first % alignments[index] != 0U ||
+            first > std::numeric_limits<std::uintptr_t>::max() - sizes[index])
+            return hipErrorInvalidValue;
+        for (std::size_t other = 0U; other < index; ++other)
+            if (ranges_overlap(pointers[index], sizes[index], pointers[other], sizes[other]))
+                return hipErrorInvalidValue;
+    }
+    A8G64ActivationWorkspace workspace{};
+    if (a8q4g64_bind_activation_workspace(args.activation_workspace, workspace_bytes,
+                                         1U, 5120U, &workspace) != hipSuccess)
+        return hipErrorInvalidValue;
+    const A8Q4G64LinearArgs linear_args{
+        workspace.low_codes, workspace.low_code_bytes, workspace.high_codes,
+        workspace.high_code_bytes, workspace.scales, workspace.scale_bytes, workspace.status,
+        args.weight_codes, code_bytes, args.weight_scales, scale_bytes, args.output,
+        1U, 34816U, 5120U, 5120U};
+    if (!valid_a8q4_linear_args(linear_args)) return hipErrorInvalidValue;
+#if defined(__HIPCC__)
+    hipLaunchKernelGGL(a8g64_normalized_prepare_t1_kernel, dim3(1U), dim3(kThreads), 0,
+                       stream, args.input, norm, eps, unit_offset, workspace.low_codes,
+                       workspace.high_codes, workspace.scales, workspace.status);
+    const hipError_t prepared = hipGetLastError();
+    if (prepared != hipSuccess) return prepared;
+    return a8q4g64_linear_decode_dot8_t1(linear_args, stream);
+#else
+    (void)unit_offset;
     (void)stream;
     return hipErrorNotSupported;
 #endif

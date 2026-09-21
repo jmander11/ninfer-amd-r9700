@@ -272,6 +272,11 @@ struct A8Q4G64CandidateArgs {
     bool dflash_target_verify_down = false;
 };
 
+// Complete private normalized projection; prepared activation planes never cross the Op boundary.
+[[nodiscard]] hipError_t a8q4g64_normalized_linear_t1(
+    const A8Q4G64CandidateArgs& args, const hip_bfloat16* norm, float eps,
+    bool unit_offset, hipStream_t stream) noexcept;
+
 // Fixed T1 projected-residual boundary: quantize represented BF16 input with the
 // signed-A8G64 codec, evaluate the packed Q4N16K16/G64 projection, round that
 // projection to BF16, then publish BF16(residual + projection) in place.

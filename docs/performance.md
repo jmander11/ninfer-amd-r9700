@@ -1385,6 +1385,18 @@ its `result.sha256` digest is
 `SHIP`, closing this exact promotion. The result does not establish physical memory-bandwidth
 saturation or stall freedom.
 
+The next normalized-linear direct screen fused the cooperative K5120 RMSNorm and exact A8G64
+preparation while preserving the explicit BF16 normalization seam and unchanged native-IU4
+N34816/K5120 consumer. Its complete public boundary improved `0.2406990→0.2347595 ms`; every one of
+three address-distinct allocations won, the paired-ratio mean plus two standard errors was
+`0.9790384`, and the 64-MLP-boundary estimate saved `0.3801284 ms/token`. The independent FP64
+normalization-to-BF16-to-exact-A8-to-signed-Q4 oracle passed with maximum relative L2
+`0.00187542`, zero BF16-step error, exact public-control parity, and captured graph recovery.
+Evidence is `profiles/bench/r9700-normalized-linear-t1-qualification-20260920/attempt-1`; the
+`result.sha256` digest is `01e1e0571d92541311195202df919d3750759f3bcedf7033944f604bcf2baf2c`.
+Independent audit admits matched whole C1 A/B preparation only; this is not yet a whole-decode gain
+or a bandwidth-saturation claim.
+
 The existing MTP shortlist head remains Q4G64 with A8G64 activations. MTP stays in exact-output,
 state, cache, row-view, and whole-route regression coverage, but a new shortlist-head trace,
 alternate head precision, acceptance campaign, or MTP performance optimization is not a final

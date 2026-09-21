@@ -1091,6 +1091,15 @@ the retained control. Evidence is
 mixed inventory, prefill, T>1, and A4 remain excluded. Do not rerun the sealed packages. These
 timings do not prove physical bandwidth saturation or stall freedom.
 
+`ninfer_r9700_a8q4_normalized_linear_t1_qual` qualifies the complete public K5120 RMSNorm-to-A8G64
+N34816 Q4 projection boundary, including its explicit BF16 seam, exact activation codec, T2 public
+fallback, malformed/alias handling, and captured graph recovery. The retained direct result at
+`profiles/bench/r9700-normalized-linear-t1-qualification-20260920/attempt-1` improved
+`0.2406990→0.2347595 ms`, estimating `0.3801284 ms/token` across the 64 base Text MLP boundaries.
+Source and embedded code retain native IU4 in the consumer with no scratch or spills. Independent
+audit admits whole C1 A/B preparation only; target routing and production promotion require their
+own matched evidence. Do not rerun the sealed attempt.
+
 A direct GPU regression of the canonical K5120 RMSNorm route against its independent FP64 oracle, including
 output guards and Device Graph replay, is available with:
 

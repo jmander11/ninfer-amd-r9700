@@ -669,6 +669,17 @@ target_compile_definitions(ninfer_r9700_a8q4_projected_residual_t1_qual PRIVATE
 target_link_libraries(ninfer_r9700_a8q4_projected_residual_t1_qual PRIVATE
   ninfer_r9700_core hip::host)
 
+# Complete public RMSNorm-to-Q4 projection boundary, including its explicit BF16 seam.
+add_executable(ninfer_r9700_a8q4_normalized_linear_t1_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/a8q4_normalized_linear_t1_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_a8q4_normalized_linear_t1_qual)
+set_target_properties(ninfer_r9700_a8q4_normalized_linear_t1_qual PROPERTIES
+  HIP_ARCHITECTURES gfx1201)
+target_compile_definitions(ninfer_r9700_a8q4_normalized_linear_t1_qual PRIVATE
+  NINFER_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+target_link_libraries(ninfer_r9700_a8q4_normalized_linear_t1_qual PRIVATE
+  ninfer_r9700_core hip::host)
+
 # Exact MTP next-round state transition for the complete fixed product domain K=1..5/B=1..4.
 # The qualifier checks every output element, pitched padding, input immutability, and public
 # shape/stride rejection against an independent host integer oracle on physical gfx1201.

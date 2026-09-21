@@ -161,10 +161,10 @@ physical bandwidth saturation or stall freedom.
 
 The deterministic queue after reset is:
 
-1. complete and review `profiles/bench/r9700-normalized-linear-t1-qualification-20260920`, then screen T1 RMSNorm+A8G64 preparation fusion at the 64 MLP normalized-linear boundaries with an independent public-Op oracle, native-dot8 static evidence, and at least `0.2 ms/token` weighted complete-boundary graph saving before whole C1 A/B; the 128-boundary opportunity is a hypothesis, not a measured gain.
+1. integrate selector-on normalized-linear routing for exactly the 64 all-Q4/A8 base Text T1 MLP gate/up boundaries admitted by `profiles/bench/r9700-normalized-linear-t1-qualification-20260920/attempt-1`, independently review it, then prepare a matched whole C1 A/B; preserve prefill, verify/DFlash, MTP, T>1, mixed inventory, A4, attention, and GDN fallbacks.
 
-No GPU action is currently runnable. Complete and independently review the normalized-linear
-implementation, qualifier, and fail-closed package before the first physical attempt.
+No GPU action is currently runnable. Complete and independently review normalized-linear target
+routing and its fail-closed whole C1 A/B package before the first whole-inference attempt.
 
 Every other remaining unchecked task depends directly or transitively on this queue or the
 external `DENSE-FLOOR-DECISION`.
@@ -453,6 +453,17 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   the admitted native-dot8 consumer. Screen the complete boundary under Device Graph against an
   independent oracle and require at least `0.2 ms/token` weighted direct saving before preparing
   a whole C1 A/B. Neither the 128-boundary count nor eliminated staging proves a speed gain.
+  The reviewed direct public-Op qualification at
+  `profiles/bench/r9700-normalized-linear-t1-qualification-20260920/attempt-1` passed the independent
+  FP64 normalization-to-BF16-to-exact-A8-to-signed-Q4 oracle with zero BF16-step error, exact codec
+  and public-control parity, graph recovery, and native-IU4 embedded ISA. The complete-boundary
+  median improved `0.2406990→0.2347595 ms`; all three allocations won, mean paired ratio plus two
+  standard errors was `0.9790384`, and the 64-call estimate saved `0.3801284 ms/token`, clearing the
+  `0.2 ms/token` gate. Independent audit reported `SHIP` for whole C1 A/B preparation only. The
+  `result.sha256` digest is
+  `01e1e0571d92541311195202df919d3750759f3bcedf7033944f604bcf2baf2c`; closure SHA-256 is
+  `71576628e039d62dcdc3a31d17c60804765e95c859ec2118d16602ae2bd64dc4`. Production routing remains
+  unchanged until matched exact-token whole evidence admits it.
   Do not reopen geometry remapping or split-K; an explicit
   gate-up prefetch challenger is later work only if ISA proves early loads and wait scheduling.
   The first reviewed package,
