@@ -142,7 +142,7 @@ finish. The deterministic queue after reset is:
 
 Do not promote or remove any candidate selector before queue item 1 completes because doing so
 invalidates its cache and source authorities. The exact next action is
-`bash profiles/bench/r9700-paired-projection-c2c4-production-qualification-20260919/commands.sh --measure`.
+`bash profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919/commands.sh --prepare`.
 Every other remaining unchecked task depends
 directly or transitively on this queue or the external `DENSE-FLOOR-DECISION`.
 
@@ -384,8 +384,15 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   exact T2..4 plus both-Q4G64_F16S routing and unchanged T1/mixed/other-width fallbacks. The direct
   production-symbol package is
   `profiles/bench/r9700-paired-projection-c2c4-production-qualification-20260919`; its non-GPU gate
-  passes native IU4/wave32 at 57 VGPR, 32 SGPR, and no LDS/scratch/spills. The separately reviewed
-  Independent review reported `SHIP` for the whole package at
+  passes native IU4/wave32 at 57 VGPR, 32 SGPR, and no LDS/scratch/spills. Its production-symbol
+  qualification now passes all six GDN/attention T2..4 cases: complete three-arm BF16 parity,
+  independent FP64 error at most one BF16 step, every guard, and all 18 allocation medians faster
+  than serial. Weighted savings are `6.2195198`, `6.4822403`, and `6.7388880 ms/round`, bounding
+  `10.0015%`, `9.3847%`, and `8.5225%` gains at C2, C3, and C4. Evidence:
+  `profiles/bench/r9700-paired-projection-c2c4-production-qualification-20260919/qualification.json`
+  (SHA-256 `d884a7a97fdbc694ef08ad57c5b3f6cc57323c3e2c6f98fe404802fe5b4c0b06`). This
+  authorizes only whole-package preparation, not promotion. Independent review reported `SHIP` for
+  the whole package at
   `profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919`; no separate review artifact was
   created. The reset, GDN gate, and T1 attention campaign are complete. A reviewed lexical PCI
   power-path repair removed a false symlink-resolution rejection; do not prepare the whole package
