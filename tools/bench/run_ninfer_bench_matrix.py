@@ -77,7 +77,9 @@ CONTEXT_CORE = ((512, 512), (2048, 512), (8192, 512))
 CONTEXT_FULL_EXTRA = ((32768, 256), (65536, 128))
 PRIMARY_KS = (0, 3, 5)
 SWEEP_KS = (0, 1, 2, 3, 4, 5)
-REPORT_SCHEMA_VERSION = 20
+REPORT_SCHEMA_VERSION = 21
+PHASE_TIMING_SEMANTICS = "serial-lane-service-sum_shared-decode-max_v1"
+LEGACY_PHASE_TIMING_SEMANTICS = "legacy-lane-max_v20"
 REPORT_ARTIFACT_TYPE = "ninfer_bench_report"
 REPORT_TOOL = "ninfer_bench"
 DFLASH_SHORTLIST_SCHEMA_VERSION = 2
@@ -1795,6 +1797,26 @@ def validate_report_tests(report: dict[str, Any], case: BenchCase) -> None:
         )
 
 
+def validate_report_phase_timing(report: dict[str, Any]) -> str:
+    """Interpret retained v20 separately from corrected serial-service v21 reports."""
+    version = report.get("schema_version")
+    if type(version) is not int:
+        raise ValueError("benchmark report lacks an integer timing schema")
+    if version == 21 and report.get("phase_timing_semantics") == PHASE_TIMING_SEMANTICS:
+        return PHASE_TIMING_SEMANTICS
+    if version == 20 and "phase_timing_semantics" not in report:
+        return LEGACY_PHASE_TIMING_SEMANTICS
+    raise ValueError("unsupported benchmark phase timing schema or semantics marker")
+
+
+def prefill_timing_eligible(report: dict[str, Any], concurrency: int | None = None) -> bool:
+    semantics = validate_report_phase_timing(report)
+    if concurrency is None:
+        concurrency = report.get("config", {}).get("concurrency")
+    return type(concurrency) is int and concurrency in PRODUCT_CONCURRENCIES and (
+        concurrency == 1 or semantics == PHASE_TIMING_SEMANTICS)
+
+
 def load_bench_report(
     report_path: Path,
     expected_kv_value_group: int | None = None,
@@ -1820,8 +1842,9 @@ def load_bench_report(
         report.get("artifact_type"),
         report.get("tool"),
     )
-    expected = (REPORT_SCHEMA_VERSION, REPORT_ARTIFACT_TYPE, REPORT_TOOL)
-    if identity != expected:
+    validate_report_phase_timing(report)
+    expected = ("20 (legacy) or 21 (corrected)", REPORT_ARTIFACT_TYPE, REPORT_TOOL)
+    if identity[1:] != expected[1:]:
         raise ValueError(
             "unsupported benchmark report identity: "
             f"schema_version={identity[0]!r}, artifact_type={identity[1]!r}, "
@@ -2021,6 +2044,8 @@ def report_rows(
         else None
     )
     rows = []
+    phase_timing_semantics = validate_report_phase_timing(report)
+    prefill_eligible = prefill_timing_eligible(report)
     for test in report.get("tests", []):
         speculative = test.get("speculative", {})
         performance_eligible = not case.diagnostic
@@ -2040,6 +2065,9 @@ def report_rows(
             "diagnostic_timings_discarded": case.diagnostic,
             "parity_role": case.parity_role,
             "report": str(report_path),
+            "report_schema_version": report["schema_version"],
+            "phase_timing_semantics": phase_timing_semantics,
+            "prefill_timing_eligible": performance_eligible and prefill_eligible,
             "label": test.get("label"),
             "kind": test.get("kind"),
             "n_prompt": test.get("n_prompt"),
@@ -2127,9 +2155,10 @@ def report_rows(
             "planned_slack_bytes": memory.get("planned_slack_bytes"),
             "workspace_peak_bytes": test.get("workspace_peak_bytes"),
             "workspace_allocator_peak_bytes": test.get("workspace_allocator_peak_bytes"),
-            "prefill_tok_s_mean": test.get("prefill_tok_s_mean") if performance_eligible else None,
+            "prefill_tok_s_mean": (test.get("prefill_tok_s_mean")
+                                   if performance_eligible and prefill_eligible else None),
             "prefill_tok_s_stddev": (test.get("prefill_tok_s_stddev")
-                                      if performance_eligible else None),
+                                      if performance_eligible and prefill_eligible else None),
             "decode_output_tok_s_mean": (test.get("decode_output_tok_s_mean")
                                           if performance_eligible else None),
             "decode_output_tok_s_stddev": (test.get("decode_output_tok_s_stddev")

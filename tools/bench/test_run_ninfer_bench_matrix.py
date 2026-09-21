@@ -18,6 +18,10 @@ from tools.bench.run_ninfer_bench_matrix import (
     NINFER_PREFIX,
     MATRIX_SCHEMA_VERSION,
     REPORT_SCHEMA_VERSION,
+    PHASE_TIMING_SEMANTICS,
+    LEGACY_PHASE_TIMING_SEMANTICS,
+    validate_report_phase_timing,
+    prefill_timing_eligible,
     POWER_BOUND_PRESETS,
     POWER_RECHECK_PRESETS,
     R9700_KV_PLANE_LAYOUTS,
@@ -34,6 +38,7 @@ from tools.bench.run_ninfer_bench_matrix import (
     inspect_artifact,
     inspect_prefill_chunk_authority,
     load_bench_report,
+    report_rows,
     main,
     manifest_owned_path,
     require_auto_power_profile,
@@ -62,6 +67,47 @@ from tools.ppl.run import validate_n16_receipt_summary
 
 
 class CompiledKvGroupTest(unittest.TestCase):
+    def test_phase_timing_versions_are_distinct_and_marker_bound(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "report.json"
+            self.write_report(path, 16, concurrency=4)
+            current = json.loads(path.read_text())
+            self.assertEqual(validate_report_phase_timing(load_bench_report(path)), PHASE_TIMING_SEMANTICS)
+            self.assertTrue(prefill_timing_eligible(current))
+            legacy = {key: value for key, value in current.items() if key != "phase_timing_semantics"}
+            legacy["schema_version"] = 20
+            path.write_text(json.dumps(legacy))
+            self.assertEqual(validate_report_phase_timing(load_bench_report(path)), LEGACY_PHASE_TIMING_SEMANTICS)
+            self.assertFalse(prefill_timing_eligible(legacy))
+            self.assertTrue(prefill_timing_eligible(legacy, 1))
+            for changed in ({**current, "phase_timing_semantics": "lane-max"},
+                            {key: value for key, value in current.items() if key != "phase_timing_semantics"},
+                            {**legacy, "phase_timing_semantics": PHASE_TIMING_SEMANTICS},
+                            {**current, "schema_version": 19}):
+                with self.subTest(changed=changed["schema_version"]):
+                    path.write_text(json.dumps(changed))
+                    with self.assertRaisesRegex(ValueError, "timing schema|semantics marker"):
+                        load_bench_report(path)
+
+    def test_legacy_multilane_prefill_is_unusable_but_decode_and_wall_are_retained(self):
+        report = {"schema_version": 20, "config": {"concurrency": 4},
+                  "tests": [{"prefill_tok_s_mean": 8000., "prefill_tok_s_stddev": 1.,
+                             "decode_output_tok_s_mean": 50., "whole_output_tok_s_mean": 40.}]}
+        case = BenchCase("whole", "fixture", (), 1, 0, "fixture")
+        with mock.patch("tools.bench.run_ninfer_bench_matrix.load_bench_report", return_value=report):
+            legacy, = report_rows(Path("retained.json"), case)
+            self.assertFalse(legacy["prefill_timing_eligible"])
+            self.assertIsNone(legacy["prefill_tok_s_mean"])
+            self.assertIsNone(legacy["prefill_tok_s_stddev"])
+            self.assertEqual(legacy["decode_output_tok_s_mean"], 50.)
+            self.assertEqual(legacy["whole_output_tok_s_mean"], 40.)
+            self.assertEqual(legacy["phase_timing_semantics"], LEGACY_PHASE_TIMING_SEMANTICS)
+            report["schema_version"] = 21
+            report["phase_timing_semantics"] = PHASE_TIMING_SEMANTICS
+            current, = report_rows(Path("corrected.json"), case)
+            self.assertTrue(current["prefill_timing_eligible"])
+            self.assertEqual(current["prefill_tok_s_mean"], 8000.)
+
     def test_post_chunk_capacity_requires_exact_product_geometry(self) -> None:
         args = SimpleNamespace(
             require_post_chunk_capacity=True,
@@ -193,6 +239,7 @@ class CompiledKvGroupTest(unittest.TestCase):
             json.dumps(
                 {
                     "schema_version": REPORT_SCHEMA_VERSION,
+                    "phase_timing_semantics": PHASE_TIMING_SEMANTICS,
                     "artifact_type": "ninfer_bench_report",
                     "tool": "ninfer_bench",
                     "command": command,

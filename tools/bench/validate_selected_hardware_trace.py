@@ -11,7 +11,7 @@ from typing import Any, Sequence
 from tools.bench.analyze_whole_profile import analyze
 from tools.bench.prepare_whole_profile import ROCPROFV3
 from tools.bench.reconcile_qwen3_8_27b_dispatches import _publish, _snapshot
-from tools.bench.run_ninfer_bench_matrix import REPORT_SCHEMA_VERSION
+from tools.bench.run_ninfer_bench_matrix import validate_report_phase_timing
 from tools.bench.validate_profile_trace import _parse_database
 from tools.bench.verify_selected_hardware_use import selected_route
 from tools.bench.selected_loaded_code_objects import selected_loaded_fp8
@@ -118,8 +118,8 @@ def validate(plan_path: Path, report_path: Path, database_path: Path,
         raise ValueError("selected trace lacks auto power endpoints")
     report = json.loads(Path(snapshots["benchmark_report"]["path"]).read_text(encoding="utf-8"))
     config, tests, environment = report.get("config"), report.get("tests"), report.get("environment")
+    validate_report_phase_timing(report)
     if (report.get("artifact_type") != "ninfer_bench_report"
-            or report.get("schema_version") != REPORT_SCHEMA_VERSION
             or report.get("command") != " ".join(command)
             or Path(str(report.get("artifact", {}).get("path", ""))).resolve()
             != Path(snapshots["artifact"]["path"])

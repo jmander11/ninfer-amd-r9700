@@ -14,7 +14,7 @@ import tempfile
 from pathlib import Path
 from typing import Callable
 
-from tools.bench.run_ninfer_bench_matrix import REPORT_SCHEMA_VERSION
+from tools.bench.run_ninfer_bench_matrix import validate_report_phase_timing
 from tools.bench.validate_profile_trace import _parse_database
 
 REPO = Path(__file__).resolve().parents[2]
@@ -157,9 +157,9 @@ def _validate_engine_trace(route: dict, command: list[str], report_path: Path,
     tests = report.get("tests")
     expected_sparse = route["execution_profile"]["xattention_profile"] != "dense"
     expected_command = " ".join(command)
+    validate_report_phase_timing(report)
     if (
         report.get("artifact_type") != "ninfer_bench_report"
-        or report.get("schema_version") != REPORT_SCHEMA_VERSION
         or report.get("command") != expected_command
         or Path(str(artifact.get("path", ""))).resolve() != Path(route["artifact"]["path"])
         or artifact.get("file_size_bytes") != route["artifact"]["file_size_bytes"]

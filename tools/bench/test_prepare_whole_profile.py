@@ -14,6 +14,7 @@ from tools.bench.prepare_whole_profile import main, prepare, prepare_low_context
 from tools.bench.run_ninfer_bench_matrix import (
     MATRIX_SCHEMA_VERSION,
     REPORT_SCHEMA_VERSION,
+    PHASE_TIMING_SEMANTICS,
     R9700_KV_PLANE_LAYOUTS,
 )
 
@@ -29,6 +30,7 @@ class PrepareWholeProfileTest(unittest.TestCase):
         report = matrix / "whole.json"
         report.write_text(json.dumps({
             "artifact_type": "ninfer_bench_report", "schema_version": REPORT_SCHEMA_VERSION,
+            "phase_timing_semantics": PHASE_TIMING_SEMANTICS,
             "load": {"weights_id": "selected"},
             "config": {"concurrency": 4, "kv_value_group": 16,
                        "prefill_chunk": 4096,
@@ -89,6 +91,7 @@ class PrepareWholeProfileTest(unittest.TestCase):
         }
         report.write_text(json.dumps({
             "artifact_type": "ninfer_bench_report", "schema_version": REPORT_SCHEMA_VERSION,
+            "phase_timing_semantics": PHASE_TIMING_SEMANTICS,
             "config": {
                 "concurrency": 1, "prefill_chunk": 2048, "kv_value_group": 16,
                 "spec": "none", "draft_tokens": 0, "xattention_qualification": False,

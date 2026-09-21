@@ -218,6 +218,8 @@ def matrix_inventory(selection: dict) -> list[dict[str, Any]]:
         candidate.get("name"): candidate
         for candidate in candidates if isinstance(candidate, dict)
     }
+    from tools.ppl.benchmark_reporting_recovery import bound_bridge, expected_benchmark
+    reporting_recovery = bound_bridge(sources)
     if len(candidates_by_name) != 12 or None in candidates_by_name:
         raise ValueError("schema-v7 matrix inventory has malformed candidate identities")
     inventory = []
@@ -257,7 +259,8 @@ def matrix_inventory(selection: dict) -> list[dict[str, Any]]:
             manifest = load_regular(path, f"{preset} matrix")
             if bound.get("sha256") != sha(path) or manifest.get("concurrency") != PRODUCT_CONCURRENCIES:
                 raise ValueError(f"{preset} matrix bytes or C1..4 inventory differ")
-            if manifest.get("artifact") != source["artifact"] or manifest.get("bench") != source["benchmark_executable"]:
+            if (manifest.get("artifact") != source["artifact"]
+                    or manifest.get("bench") != expected_benchmark(source, preset, reporting_recovery)):
                 raise ValueError(f"{preset} matrix physical identity differs")
             inventory.append({"candidate": source["candidate"], "preset": preset,
                               "manifest": {"path": str(path.resolve()), "sha256": sha(path)},

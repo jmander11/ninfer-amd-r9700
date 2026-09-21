@@ -134,6 +134,12 @@ def resolve(selection_path: Path, test_python: Path | None = None) -> dict:
     if len(candidates) != 1 or len(sources) != 1:
         raise ValueError("terminal winner lacks unique candidate/source provenance")
     candidate, source = candidates[0], sources[0]
+    from tools.ppl.benchmark_reporting_recovery import (
+        bound_bridge, expected_benchmark, validate_source_matrices,
+    )
+    reporting_recovery = bound_bridge([source])
+    if reporting_recovery is not None:
+        validate_source_matrices(source, reporting_recovery)
     recipe = terminal["winner_artifact"]
     cache_profile = terminal["winner_cache_profile"]
     execution = terminal["winner_execution_profile"]
@@ -168,14 +174,15 @@ def resolve(selection_path: Path, test_python: Path | None = None) -> dict:
             or manifest.get("expected_kv_value_group") != cache_profile["value_group"]
             or manifest.get("expected_xattention_profile") != execution["xattention_profile"]
             or manifest.get("artifact") != source.get("artifact")
-            or manifest.get("bench") != source.get("benchmark_executable")
+            or manifest.get("bench") != expected_benchmark(source, preset, reporting_recovery)
         ):
             raise ValueError("terminal winner matrix differs from selected route")
         manifests[preset] = manifest
         bound_paths.append((path, binding["sha256"]))
     if manifests["pareto-capacity"]["artifact"] != manifests["pareto-whole"]["artifact"]:
         raise ValueError("terminal winner matrices bind different artifacts")
-    if manifests["pareto-capacity"]["bench"] != manifests["pareto-whole"]["bench"]:
+    if (reporting_recovery is None
+            and manifests["pareto-capacity"]["bench"] != manifests["pareto-whole"]["bench"]):
         raise ValueError("terminal winner matrices bind different executables")
 
     manifest = manifests["pareto-whole"]
@@ -193,12 +200,12 @@ def resolve(selection_path: Path, test_python: Path | None = None) -> dict:
             authorities.append(validate_hybrid_shared_workspace_authority(
                 matrix.get("hybrid_shared_workspace_authority"), [chunk]
             ))
-        if authorities[0] != authorities[1]:
+        if reporting_recovery is None and authorities[0] != authorities[1]:
             raise ValueError("terminal winner matrices bind different hybrid planners")
-        planner_path = Path(authorities[0]["tool"]["path"]).resolve(strict=True)
-        if inspect_executable(planner_path) != authorities[0]["tool"]:
+        planner_path = Path(authorities[-1]["tool"]["path"]).resolve(strict=True)
+        if inspect_executable(planner_path) != authorities[-1]["tool"]:
             raise ValueError("terminal winner hybrid planner bytes changed")
-        planner = authorities[0]["tool"]
+        planner = authorities[-1]["tool"]
     elif any(
         matrix.get("required_candidate_identity") is not None
         or matrix.get("hybrid_shared_workspace_authority") is not None

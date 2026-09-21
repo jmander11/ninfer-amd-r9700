@@ -20,7 +20,7 @@ from tools.bench.prepare_selected_decode_memory_profile import (
     PROFILE_ROUTE_RESOLVER, profile_build_commands, sha, validate_profile_build_receipt,
 )
 from tools.bench.run_ninfer_bench_matrix import inspect_executable
-from tools.bench.run_ninfer_bench_matrix import REPORT_SCHEMA_VERSION
+from tools.bench.run_ninfer_bench_matrix import REPORT_SCHEMA_VERSION, PHASE_TIMING_SEMANTICS
 
 
 class SelectedDecodeMemoryAnalysisTest(unittest.TestCase):
@@ -311,6 +311,7 @@ class SelectedDecodeMemoryAnalysisTest(unittest.TestCase):
             value = {
                 "artifact_type": "ninfer_bench_report",
                 "schema_version": REPORT_SCHEMA_VERSION,
+                "phase_timing_semantics": PHASE_TIMING_SEMANTICS,
                 "command": " ".join(command),
                 "environment": {"gpu_name": "AMD Radeon AI PRO R9700",
                                 "architecture_name": "gfx1201"},
@@ -392,7 +393,7 @@ class SelectedDecodeMemoryAnalysisTest(unittest.TestCase):
                                        "execution_profile": {"xattention_profile": "dense"}},
                     "artifact": {"path": "/weights", "file_size_bytes": 123,
                                  "weights_id": "weights"}}
-            with self.assertRaisesRegex(ValueError, "ordinary route"):
+            with self.assertRaisesRegex(ValueError, "timing schema"):
                 validate_benchmark_report(report, {"benchmark_command": command}, plan, 1)
 
 

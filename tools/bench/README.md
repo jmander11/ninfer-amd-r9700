@@ -358,7 +358,7 @@ from pathlib import Path
 import subprocess, sys
 from tools.bench.validate_low_context_prefill import resolve_selected_dense_route
 
-selection = Path('profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921/select/result.json').resolve()
+selection = Path('profiles/bench/r9700-terminal-base-phase-sum-20260921/select/result.json').resolve()
 route = resolve_selected_dense_route(selection)
 output = Path('profiles/bench/r9700-selected-low-context-20260921')
 evaluation = Path('profiles/bench/r9700-selected-low-context-20260921-evaluation.json')
@@ -396,7 +396,7 @@ NINFER_SELECTED_DENSE_BENCH=$(/home/battlefront/.local/bin/python3.11 -c 'import
 /home/battlefront/.local/bin/python3.11 -m tools.bench.prepare_whole_profile \
   --low-context-manifest profiles/bench/r9700-selected-low-context-20260921/manifest.json \
   --low-context-evaluation profiles/bench/r9700-selected-low-context-20260921-evaluation.json \
-  --terminal-selection profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921/select/result.json \
+  --terminal-selection profiles/bench/r9700-terminal-base-phase-sum-20260921/select/result.json \
   --executable "$NINFER_SELECTED_DENSE_BENCH" --artifact "$NINFER_SELECTED_ARTIFACT" \
   --concurrency 1 --prompt-tokens 2048 --generated-tokens 0 \
   --expected-weights-id "$NINFER_SELECTED_WEIGHTS_ID" --expected-kv-value-group "$NINFER_SELECTED_GROUP" \
@@ -411,7 +411,7 @@ NINFER_SELECTED_DENSE_BENCH=$(/home/battlefront/.local/bin/python3.11 -c 'import
 /home/battlefront/.local/bin/python3.11 -m tools.bench.prepare_whole_profile \
   --low-context-manifest profiles/bench/r9700-selected-low-context-20260921/manifest.json \
   --low-context-evaluation profiles/bench/r9700-selected-low-context-20260921-evaluation.json \
-  --terminal-selection profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921/select/result.json \
+  --terminal-selection profiles/bench/r9700-terminal-base-phase-sum-20260921/select/result.json \
   --executable "$NINFER_SELECTED_DENSE_BENCH" --artifact "$NINFER_SELECTED_ARTIFACT" \
   --concurrency 1 --prompt-tokens 2048 --generated-tokens 0 \
   --expected-weights-id "$NINFER_SELECTED_WEIGHTS_ID" --expected-kv-value-group "$NINFER_SELECTED_GROUP" \
@@ -440,7 +440,7 @@ python3 -m tools.bench.validate_profile_trace \
   --database /explicit/path/to/trace-results.db \
   --power-before profiles/rocprof/selected-dense-p2048-trace-20260921/power-profile-before.txt \
   --power-after profiles/rocprof/selected-dense-p2048-trace-20260921/power-profile-after.txt \
-  --terminal-selection profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921/select/result.json \
+  --terminal-selection profiles/bench/r9700-terminal-base-phase-sum-20260921/select/result.json \
   --artifact "$NINFER_SELECTED_ARTIFACT" --executable "$NINFER_SELECTED_DENSE_BENCH" \
   --corpus bench/fixtures/bench_corpus.ids \
   --out profiles/rocprof/selected-dense-p2048-trace-20260921/evidence.json
@@ -448,7 +448,7 @@ python3 -m tools.bench.validate_profile_trace \
 
 The schema-v1 `ninfer_r9700_selected_profile_trace` authority mirrors the PMC validator's complete
 low-context provenance checks, but requires the exact marker/kernel/memory-copy trace command and
-`auto` endpoint evidence. It reopens and rehashes the plan, schema-v20 capture report, database,
+`auto` endpoint evidence. It reopens and rehashes the plan, timing-schema-validated capture report, database,
 terminal selection, selected artifact and executable, corpus, low-context manifest/evaluation, and
 unprofiled P2048 3/1 report. The database must contain one R9700/gfx1201 process running the exact
 planned command. Every kernel dispatch is retained without model-role inference: stable trace and
@@ -472,7 +472,7 @@ python3 -m tools.bench.validate_profile_pmc \
   --database /explicit/path/to/results.db \
   --power-before profiles/rocprof/selected-dense-p2048-pmc-20260921/power-profile-before.txt \
   --power-after profiles/rocprof/selected-dense-p2048-pmc-20260921/power-profile-after.txt \
-  --terminal-selection profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921/select/result.json \
+  --terminal-selection profiles/bench/r9700-terminal-base-phase-sum-20260921/select/result.json \
   --artifact "$NINFER_SELECTED_ARTIFACT" --executable "$NINFER_SELECTED_DENSE_BENCH" \
   --corpus bench/fixtures/bench_corpus.ids \
   --out profiles/rocprof/selected-dense-p2048-pmc-20260921/evidence.json
@@ -656,12 +656,12 @@ run_mixed_selection_pair 32 build-r9700-dense-selection-g32 \
 # and planner must include all nine evaluation companion identities and match selected G/profile.
 # The selected base's own evaluator may be reused when it already admits those recipes;
 # a different executable hash is neither required nor proof of recipe support.
-# Existing recipe-capable accounted builds work for every base recipe, including nonhybrid
+# Existing recipe-capable phase-sum builds work for every base recipe, including nonhybrid
 # winners whose original panel executable predates the companion IDs. Match the selected profile:
-# dense G16 -> build-r9700-fp8-accounted-g16-20260921
-# dense G32 -> build-r9700-fp8-accounted-g32-20260921
-# b128-s16-tau900 G16 -> build-r9700-fp8-accounted-xattention-g16-20260921
-# b128-s16-tau900 G32 -> build-r9700-fp8-accounted-xattention-g32-20260921
+# dense G16 -> build-r9700-phase-sum-g16-20260921
+# dense G32 -> build-r9700-phase-sum-g32-20260921
+# b128-s16-tau900 G16 -> build-r9700-phase-sum-xattention-g16-20260921
+# b128-s16-tau900 G32 -> build-r9700-phase-sum-xattention-g32-20260921
 # Use that root's bench/ninfer_bench and src/ninfer_r9700_runtime_planner_qual below;
 # no rebuild is needed. Preserve the original terminal selection and frozen panel binaries.
 # Both DFlash and matched spec-none/token-parity controls run in the chosen evaluator;
@@ -671,8 +671,8 @@ run_mixed_selection_pair 32 build-r9700-dense-selection-g32 \
 # Output is a new recipe-separated namespace. Preparation does not materialize or launch a GPU run.
 /home/battlefront/.local/bin/python3.11 -m tools.bench.prepare_selected_dflash prepare \
   --selection /absolute/path/to/terminal-base.json \
-  --bench /absolute/path/to/matching-accounted-build/bench/ninfer_bench \
-  --planner /absolute/path/to/matching-accounted-build/src/ninfer_r9700_runtime_planner_qual \
+  --bench /absolute/path/to/matching-phase-sum-build/bench/ninfer_bench \
+  --planner /absolute/path/to/matching-phase-sum-build/src/ninfer_r9700_runtime_planner_qual \
   --conversion-python /home/battlefront/.local/bin/python3.11 \
   --conversion-pythonpath /absolute/path/to/cpu-python311/site-packages \
   --out /absolute/path/to/new-dflash-campaign
@@ -697,7 +697,7 @@ python3 tools/bench/run_ninfer_bench_matrix.py --preset concurrency \
   --concurrency 1 --concurrency 2 --concurrency 3 --concurrency 4
 ```
 
-The `prefill-chunk` preset writes schema-v20 raw reports and a schema-v14 manifest, binding prompt,
+The `prefill-chunk` preset writes schema-v21 raw reports and a schema-v14 manifest, binding prompt,
 chunk, artifact, executable, corpus, cache group, and attention profile. The selection owner first
 normalizes each chunk's 8K throughput to that candidate's best result and advances the two chunks
 with the greatest minimum ratio across all twelve candidates. Every candidate measures those same
@@ -792,7 +792,7 @@ python3 -m tools.bench.prepare_whole_profile \
 ```
 
 The CPU-only preparation validates the schema-v14 matrix, absence of `failures.json`, exact
-artifact/executable bytes, schema-v20 source report, group, plane-layout, compile-bound XAttention
+artifact/executable bytes, timing-schema-validated source report, group, plane-layout, compile-bound XAttention
 identity, selected prefill chunk, the source timing's pre/post `auto` power state, concurrency, and
 measured geometry. It writes
 one command rather than running it. The explicit selected weights identity and cache group prevent
@@ -840,7 +840,8 @@ python3 -m tools.bench.analyze_whole_profile \
   --out-json profiles/rocprof/EXPLICIT-TRACE/prefill-attribution.json
 ```
 
-This also accepts a one-test prefill-only (`pp`) schema-v20 report. Kernel and memory-copy stage
+This also accepts a one-test prefill-only (`pp`) report with schema-v21 timing semantics, or an
+explicitly interpreted retained schema-v20 report. Kernel and memory-copy stage
 ownership comes from rocprof's captured ROCTX `region` association, not temporal containment in
 asynchronous host ranges. The output separates base Text, MTP, prefill orchestration, unattributed
 prefill work, and measured non-prefill work; compares marker and symbol families; and reports top
@@ -1150,7 +1151,7 @@ After schema-v7 selection exists, the following commands prepare evidence withou
 workload (the decode build command compiles a separate attribution-only binary):
 
 ```bash
-NINFER_PROFILE_SELECTION=profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921/select/result.json
+NINFER_PROFILE_SELECTION=profiles/bench/r9700-terminal-base-phase-sum-20260921/select/result.json
 NINFER_PROFILE_PYTHON=/home/battlefront/.local/bin/python3.11
 "$NINFER_PROFILE_PYTHON" -m tools.bench.prepare_selected_static_audit \
   --selection "$NINFER_PROFILE_SELECTION" \
@@ -1176,7 +1177,7 @@ import json
 from pathlib import Path
 from tools.bench.verify_selected_hardware_use import selected_route
 from tools.bench.prepare_whole_profile import prepare
-selection = Path('profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921/select/result.json').resolve()
+selection = Path('profiles/bench/r9700-terminal-base-phase-sum-20260921/select/result.json').resolve()
 route = selected_route(selection)
 sources = json.loads(selection.read_text())['source_provenance']
 source = next(row for row in sources if row['candidate'] == route['winner'])
@@ -1231,7 +1232,14 @@ gdn-recurrence-resources` for GDN, or `make -C tools/r9700 sampling-isa rope-res
 named sampling/RoPE boundary. Do not run this list speculatively or use unavailable VALU/LDS/cache
 counters.
 
-Each raw report must be `ninfer_bench_report` schema v20. Its config records concurrency, the
+Current raw reports are `ninfer_bench_report` schema v21 with exact
+`phase_timing_semantics=serial-lane-service-sum_shared-decode-max_v1`: serial lane service is
+summed for prefill; shared decode uses its maximum. The reader also interprets retained schema-v20
+reports explicitly as legacy lane-max timing, never as corrected v21. Legacy C1 prefill and
+capacity evidence remain replayable; C>1 legacy prefill throughput is marked ineligible/null in
+derived rows and cannot enter terminal selection's 24 phase/whole objectives. Retained legacy
+decode/whole-wall results remain readable for diagnostics. Missing/wrong v21 markers fail closed.
+The config records concurrency, the
 compiled G16/G32 KV value group, exact K/V/V-scale plane layouts, compile-selected Q4 and W8
 activation profiles, and the exact
 FP8-Q/K WMMA classifier (`T1 >= 64`, `T2 >= 320`, `T >= 3` streaming). The W8 field names the
@@ -1535,7 +1543,7 @@ prefixes cannot turn later cells into suffix prefills.
 PYTHONDONTWRITEBYTECODE=1 \
 PYTHONPATH=/ssdpool2nvme/local_llm/ninfer/out/numerical-reference-venv/lib/python3.11/site-packages \
 /home/battlefront/.local/bin/python3.11 -m tools.bench.prepare_selected_niah \
-  --selection profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921/select/result.json \
+  --selection profiles/bench/r9700-terminal-base-phase-sum-20260921/select/result.json \
   --out profiles/bench/r9700-selected-niah-20260921
 
 # Serialized physical-GPU admission: starts/stops the selected server; never resumes old outputs.

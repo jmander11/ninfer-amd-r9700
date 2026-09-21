@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 
 from tools.bench.prepare_whole_profile import DISPATCH_COUNTERS
-from tools.bench.run_ninfer_bench_matrix import REPORT_SCHEMA_VERSION
+from tools.bench.run_ninfer_bench_matrix import REPORT_SCHEMA_VERSION, PHASE_TIMING_SEMANTICS
 from tools.bench.validate_profile_pmc import main, validate
 
 
@@ -70,6 +70,7 @@ class ValidateProfilePmcTest(unittest.TestCase):
         }), encoding="utf-8")
         report.write_text(json.dumps({
             "artifact_type": "ninfer_bench_report", "schema_version": REPORT_SCHEMA_VERSION,
+            "phase_timing_semantics": PHASE_TIMING_SEMANTICS,
             "tool": "ninfer_bench", "command": " ".join(command),
             "environment": {"gpu_name": "AMD Radeon AI PRO R9700",
                             "architecture_name": "gfx1201"},

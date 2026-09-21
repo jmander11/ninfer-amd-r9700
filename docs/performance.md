@@ -17,6 +17,16 @@ tokens per second. Final production selection requires a complete model artifact
 quality guardrails, same-candidate graph/eager parity, resolved capacity, and end-to-end C=1..4
 measurements on an otherwise idle R9700.
 
+Benchmark schema 21 sums each request's active prepare, Vision and prefill service time across
+lanes. Aggregate prefill throughput divides all prompt tokens by that summed prefill service
+time. Batched decode retains the maximum shared lane duration; complete inference separately
+measures elapsed wall time. Service costs are not an additive wall-time decomposition.
+Schema 20 instead used the maximum lane prefill duration and overstated aggregate C>1 prefill
+throughput. Those concurrent prefill fields are ineligible for selection; retained C1, capacity,
+decode and independently measured whole-wall evidence remain valid in their respective scopes.
+The stopped attempt and valid raw results are retained in
+`profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921/whole/closure.json`.
+
 ## Platform
 
 The latest accepted measurements use:

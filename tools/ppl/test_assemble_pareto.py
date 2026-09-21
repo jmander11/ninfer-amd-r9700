@@ -90,6 +90,7 @@ class AssembleParetoTest(unittest.TestCase):
                 } for _ in range(3)],
             }
         ordinary = {
+            "schema_version": 20,
             "config": {
                 "spec": "none", "draft_tokens": 0,
                 "speculative_execution": False, "proposal_head": "full",
@@ -98,6 +99,8 @@ class AssembleParetoTest(unittest.TestCase):
         }
         self.assertIs(_validate_ordinary_whole_report([ordinary], 1), ordinary)
         c4 = copy.deepcopy(ordinary)
+        c4["schema_version"] = 21
+        c4["phase_timing_semantics"] = "serial-lane-service-sum_shared-decode-max_v1"
         for test in c4["tests"]:
             for field in (
                 "prefill_tok_s_mean", "decode_output_tok_s_mean",
@@ -109,6 +112,15 @@ class AssembleParetoTest(unittest.TestCase):
                 rep["decode_output_tokens"] *= 4
                 rep["decode_engine_tokens"] *= 4
         self.assertIs(_validate_ordinary_whole_report([c4], 4), c4)
+        legacy_c4 = copy.deepcopy(c4)
+        legacy_c4["schema_version"] = 20
+        legacy_c4.pop("phase_timing_semantics")
+        with self.assertRaisesRegex(ValueError, "corrected schema-v21"):
+            _validate_ordinary_whole_report([legacy_c4], 4)
+        missing_marker = copy.deepcopy(c4)
+        missing_marker.pop("phase_timing_semantics")
+        with self.assertRaisesRegex(ValueError, "semantics marker"):
+            _validate_ordinary_whole_report([missing_marker], 4)
         with self.assertRaisesRegex(ValueError, "requires one ordinary ranking row"):
             _validate_ordinary_whole_report([], 1)
         mtp = copy.deepcopy(ordinary)
@@ -703,6 +715,8 @@ class AssembleParetoTest(unittest.TestCase):
                             } for _ in range(3)],
                         } for tokens in (8192, 32768)]
                         output[concurrency] = [{
+                            "schema_version": 21,
+                            "phase_timing_semantics": "serial-lane-service-sum_shared-decode-max_v1",
                             "config": {
                                 "spec": "none", "draft_tokens": 0,
                                 "speculative_execution": False,

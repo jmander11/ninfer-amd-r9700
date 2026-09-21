@@ -16,7 +16,7 @@ from tools.bench.run_ninfer_bench_matrix import (
     FP8_QK_WMMA_T2_MIN_CONTEXT,
     MATRIX_SCHEMA_VERSION,
     PRODUCT_CONCURRENCIES,
-    REPORT_SCHEMA_VERSION,
+    validate_report_phase_timing,
     bind_n16_migration_receipt,
     inspect_artifact,
     inspect_executable,
@@ -315,9 +315,9 @@ def prepare(selection_path: Path, receipt_path: Path, out: Path) -> dict:
             and config.get("xattention_stride") == 16
             and config.get("xattention_tau_permille") == 900
         )
+        validate_report_phase_timing(value)
         if (
             value.get("artifact_type") != "ninfer_bench_report"
-            or value.get("schema_version") != REPORT_SCHEMA_VERSION
             or value.get("command") != " ".join(matches[0]["command"])
             or config.get("concurrency") != concurrency or config.get("spec") != "none"
             or config.get("draft_tokens") != 0 or config.get("prefill_chunk") != chunk

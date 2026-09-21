@@ -81,10 +81,13 @@ and capacity validation are closed. Real-model XAttention keep distributions als
 Whole timing is PAUSED after all-Q4 dense G16 C1/C2: schema20 inflates C>1 aggregate prefill
 throughput by using max lane service time with all lanes' token counts. Whole wall and decode
 measurements remain valid, but phase objectives must not use that prefill metric. The owned
-campaign was stopped during C3; `whole/closure.json` preserves the exact scope. Correct the
-benchmark to schema21 serial-lane prefill-service sums, retain the existing24 phase/whole
-objective policy, and continue through a fresh reporting-corrected owner without rerunning
-completed chunk, quality, capacity or resource qualification. Then finish graph/eager controls,
+campaign was stopped during C3; `whole/closure.json` preserves the exact scope. Reporter fix
+`5eff7490` now emits schema21 serial-lane prefill-service sums; all four fresh builds, host
+tests/planners and a short C2 real-model reporting check pass. The reviewed successor is
+`profiles/bench/r9700-terminal-base-phase-sum-20260921`: freeze its reporting-only bridge,
+then run `commands.sh whole`, `commands.sh controls`, and `commands.sh select` in that order.
+Keep the existing24 phase/whole objective policy. Do not rerun completed chunk, quality,
+capacity, resource qualification, host checks or the timing-ineligible reporting smoke. Finish graph/eager controls,
 publish base selection, and
 materialize and optimize the three DFlash recipes at K4/W5 and K5/W6. Do not restart completed
 chunk, quality, reference, or capacity campaigns. See terminal-selection tasks for exact authorities.
@@ -1008,7 +1011,7 @@ unresolved tradeoff or the product contract must change.
   runtime recipe switching or all-C production admission. Independent review SHIP; 102 unit and
   14 cutover tests pass, including actual diagnostic writer/validator roundtrips and failed-output
   preservation. Exact commands are in `tools/bench/README.md`. Physical launch still needs the real
-  terminal base and the matching existing `build-r9700-fp8-accounted-{g16,g32,xattention-g16,xattention-g32}-20260921`
+  terminal base and the matching existing `build-r9700-phase-sum-{g16,g32,xattention-g16,xattention-g32}-20260921`
   benchmark/planner pair, which supports all nine companions for every base recipe. Old panel
   binaries lack new IDs but stay frozen as selection provenance; no new build is required.
   New evaluator runs both DFlash and matched ordinary/token-parity controls; exact profile mapping
@@ -1064,9 +1067,12 @@ The former `DENSE-FLOOR-DECISION` prerequisite is satisfied. Execute these tasks
 prefill review, preserving their remaining data dependencies.
 
 - [ ] `WHOLE-MATRIX` [depends: CHUNK-SELECT, QUALITY-8K32K, CAPACITY-WHOLE-12] Retain matched
-  schema-v20/spec-none ordinary 8K+256 and 32K+256 whole reports for each quality- and
+  schema-v21/spec-none ordinary 8K+256 and 32K+256 whole reports for each quality- and
   capacity-eligible profile at every C1..4. A measured quality or capacity failure is a retained
   exclusion with no whole objective.
+  Require `phase_timing_semantics=serial-lane-service-sum_shared-decode-max_v1` for corrected
+  serial-prefill accounting; retained schema20 C>1 prefill cannot supply selection objectives.
+  Completed schema20 C1 chunk and capacity evidence remains valid and replayable without reruns.
   Reopen exact commands, artifacts, executables, receipts, planner bytes, and `auto` endpoints.
   MTP rows are optional regression diagnostics and never rank or block the base selection.
 
@@ -1107,7 +1113,7 @@ prefill review, preserving their remaining data dependencies.
   recipe/group/length cases cover1,280 dispatches and491,520 head/query-block slots. Mean keep
   fractions are about60.8%/51.4% for all-Q4 and59.3%/49.9% for four-role at8K/32K.
   These traced runs are timing-ineligible; do not rerun them. Only affected uninstrumented whole
-  evidence remains for this item; the recovery whole campaign is now active.
+  evidence remains for this item; the phase-sum whole successor owns it.
 
 - [ ] `Q4-CTA-TERMINAL` [depends: CHUNK-SELECT] Retain rebuilt selected-route attribution and whole
   evidence for the promoted production-extent A8Q4 prefill CTA; historical direct screens do not
@@ -1210,8 +1216,10 @@ prefill review, preserving their remaining data dependencies.
 
 - [ ] `TERMINAL-SELECTION` [depends: WHOLE-PARETO] Publish exactly one schema-v7 artifact, cache
   group, static Text-prefill profile, and selected chunk through
-  `profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921`. The panel-attention package
-  is sealed failed history; the20260905 launcher is historical.
+  `profiles/bench/r9700-terminal-base-phase-sum-20260921`. Its reporting-only bridge retains
+  all48 completed capacity cells and the numerical/chunk authorities. The preceding FP8 recovery
+  whole attempt is sealed for its schema20 concurrent-prefill reporting defect; the panel-attention
+  package and20260905 launcher are historical.
   Preserve every measured exclusion and do
   not materialize the final artifact or cut over XAttention here.
 
@@ -1259,7 +1267,7 @@ prefill review, preserving their remaining data dependencies.
 - [ ] `BF16-PARITY` [depends: TERMINAL-SELECTION] Complete BF16-source model parity for the selected
   integer artifact: retain the completed teacher-forced prefill quality authority and run the
   selected C1 8K/32K decode BF16 comparison using `tools.ppl.prepare_selected_exact_token`
-  against `profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921/select/result.json`
+  against `profiles/bench/r9700-terminal-base-phase-sum-20260921/select/result.json`
   (exact preparation command in `tools/ppl/README.md`). The historical focused-verification
   launcher runs host/Op tests, not BF16 model parity, and is not this gate's producer.
   Per-Op represented-input oracles are already complete but do not replace selected-model evidence.

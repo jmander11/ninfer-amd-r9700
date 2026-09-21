@@ -72,7 +72,7 @@ After schema-v7 selects one evaluation winner, prepare its separate exact same-r
 
 ```bash
 /home/battlefront/.local/bin/python3.11 -m tools.ppl.prepare_selected_exact_token \
-  --selection profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921/select/result.json \
+  --selection profiles/bench/r9700-terminal-base-phase-sum-20260921/select/result.json \
   --out profiles/ppl/r9700-selected-exact-token-20260921
 ```
 
@@ -81,7 +81,7 @@ B128/S16/tau900 profile, selected chunk, candidate-local quality authority, and 
 BF16 source. It emits one future C1 command under
 `profiles/ppl/r9700-selected-exact-token-20260921`; run its `commands.sh` only under the exclusive
 GPU lease. Preparation requires the published selection and `apps/ninfer-ppl` in its exact selected
-build root. The accounted hybrid roots initially contain bench/planner but not that scorer;
+build root. The fresh phase-sum roots initially contain bench/planner but not that scorer;
 the resource bridge preserves old prefill quality, not a claim that an old executable exercises
 the new selected runtime. Do not silently substitute the original panel scorer or rebuild a
 frozen root from this launcher. The reference runs under the installed
@@ -106,7 +106,7 @@ prepare a fresh package after selection with:
 
 ```bash
 /home/battlefront/.local/bin/python3.11 -m tools.bench.prepare_selected_vision_diagnostic \
-  --selection profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921/select/result.json \
+  --selection profiles/bench/r9700-terminal-base-phase-sum-20260921/select/result.json \
   --out profiles/bench/r9700-selected-vision-20260921
 ```
 
@@ -285,7 +285,7 @@ the retained A4 evidence. Leaving the option unset in any fresh build selects A8
 
 PPL verifies the target distribution under the MTP transaction, but it does not
 measure proposal acceptance or product throughput. Record acceptance and whole-path latency with the
-same candidate artifact in separately compiled schema-v20 benchmark runs:
+same candidate artifact in separately compiled schema-v21 benchmark runs:
 
 ```bash
 python3 tools/bench/run_ninfer_bench_matrix.py \
@@ -1120,7 +1120,7 @@ route, tier, gates, and campaign-wide pass are deliberately not BF16 reuse const
 
 Each `--candidate` takes exactly six values. The assembler requires schema-v14 complete matrices,
 all C=1..4 points, the same exact benchmark bytes across that candidate's two matrices, and
-artifact bytes matching its 8K/32K quality rows. It reopens and validates every schema-v20 raw
+artifact bytes matching its 8K/32K quality rows. It reopens and validates every raw benchmark
 report before emitting 24 matched speed cells and exactly four resolved effective-capacity cells.
 Each spec-none ordinary fresh-request whole row owns prefill throughput, decode throughput, and
 end-to-end throughput from the same repetitions; its speculative counters must be disabled and

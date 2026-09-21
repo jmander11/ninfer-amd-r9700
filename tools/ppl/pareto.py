@@ -965,6 +965,8 @@ def validate_terminal_production_authority(value: object) -> tuple[dict, dict]:
     if len(provenance_by_candidate) != 12:
         raise ValueError("schema-v7 authority has malformed source provenance")
     recovery_bindings = [source.get("fp8_context_resource_recovery") for source in source_provenance]
+    from tools.ppl.benchmark_reporting_recovery import bound_bridge
+    reporting_recovery = bound_bridge(source_provenance)
     if any(binding is not None for binding in recovery_bindings):
         from tools.ppl.fp8_context_recovery import checked_file, validate_bridge
         from tools.ppl.assemble_pareto import validate_chunk_candidate_bindings
@@ -977,7 +979,7 @@ def validate_terminal_production_authority(value: object) -> tuple[dict, dict]:
         }:
             raise ValueError("schema-v7 resource recovery differs from selected chunk authority")
         chunk_record = json.loads(checked_file(recovery["chunk_selection"]).read_text())
-        validate_chunk_candidate_bindings(chunk_record, source_provenance, recovery)
+        validate_chunk_candidate_bindings(chunk_record, source_provenance, recovery, reporting_recovery)
     for row in candidates:
         recipe = row.get("weight_recipe")
         cache = row.get("cache_profile")

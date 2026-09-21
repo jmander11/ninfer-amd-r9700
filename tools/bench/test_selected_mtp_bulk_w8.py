@@ -83,7 +83,8 @@ class SelectedMtpBulkW8Test(unittest.TestCase):
         outputs = plan["outputs"]
         self.raw(Path(outputs["operator"]), samples)
         Path(outputs["benchmark_report"]).write_text(json.dumps({
-            "artifact_type": "ninfer_bench_report", "schema_version": finalizer.REPORT_SCHEMA_VERSION,
+            "artifact_type": "ninfer_bench_report", "schema_version": 21,
+            "phase_timing_semantics": "serial-lane-service-sum_shared-decode-max_v1",
             "command": " ".join(plan["benchmark_command"]),
             "artifact": {"path": route["artifact"]["path"],
                          "file_size_bytes": route["artifact"]["file_size_bytes"]},

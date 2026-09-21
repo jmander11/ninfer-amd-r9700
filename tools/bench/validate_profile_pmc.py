@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 from tools.bench.prepare_whole_profile import DISPATCH_COUNTERS, ROCPROFV3
-from tools.bench.run_ninfer_bench_matrix import REPORT_SCHEMA_VERSION
+from tools.bench.run_ninfer_bench_matrix import validate_report_phase_timing
 
 
 ARTIFACT_TYPE = "ninfer_r9700_selected_profile_pmc"
@@ -417,9 +417,9 @@ def validate(
     report_artifact = report.get("artifact", {})
     report_load = report.get("load", {})
     tests = report.get("tests")
+    validate_report_phase_timing(report)
     if (
         report.get("artifact_type") != "ninfer_bench_report"
-        or report.get("schema_version") != REPORT_SCHEMA_VERSION
         or report.get("command") != " ".join(command)
         or environment.get("gpu_name") != EXPECTED_GPU
         or environment.get("architecture_name") != EXPECTED_ARCH

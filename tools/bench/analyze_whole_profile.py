@@ -162,9 +162,11 @@ def _ms(nanoseconds: int) -> float:
 
 
 def analyze(database: Path, benchmark_report: Path) -> dict[str, Any]:
+    from tools.bench.run_ninfer_bench_matrix import validate_report_phase_timing
     report = json.loads(benchmark_report.read_text(encoding="utf-8"))
-    if report.get("artifact_type") != "ninfer_bench_report" or report.get("schema_version") != 20:
-        raise ValueError("benchmark report must be ninfer_bench_report schema v20")
+    validate_report_phase_timing(report)
+    if report.get("artifact_type") != "ninfer_bench_report":
+        raise ValueError("benchmark report must be ninfer_bench_report")
     tests = report.get("tests")
     if not isinstance(tests, list) or len(tests) != 1 or not isinstance(tests[0], dict):
         raise ValueError("profile benchmark report must contain exactly one measured test")

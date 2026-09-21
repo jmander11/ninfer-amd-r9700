@@ -13,7 +13,7 @@ from typing import Any, Sequence
 from tools.bench.run_ninfer_bench_matrix import (
     MATRIX_SCHEMA_VERSION,
     PRODUCT_CONCURRENCIES,
-    REPORT_SCHEMA_VERSION,
+    validate_report_phase_timing,
     R9700_KV_PLANE_LAYOUTS,
 )
 from tools.bench.validate_low_context_prefill import validate_ladder
@@ -283,9 +283,9 @@ def prepare(
             "xattention_tau_permille": 900,
         }
     )
+    validate_report_phase_timing(source_report)
     if (
         source_report.get("artifact_type") != "ninfer_bench_report"
-        or source_report.get("schema_version") != REPORT_SCHEMA_VERSION
         or source_report.get("config", {}).get("concurrency") != concurrency
         or source_report.get("load", {}).get("weights_id") != artifact.get("weights_id")
         or source_report.get("config", {}).get("kv_value_group") != expected_kv_value_group
@@ -471,10 +471,9 @@ def prepare_low_context(
     source_report = _load_json(source_report_path)
     config = source_report.get("config")
     tests = source_report.get("tests")
+    validate_report_phase_timing(source_report)
     if (
         source_report.get("artifact_type") != "ninfer_bench_report"
-        or type(source_report.get("schema_version")) is not int
-        or source_report["schema_version"] != REPORT_SCHEMA_VERSION
         or not isinstance(config, dict)
         or type(config.get("concurrency")) is not int
         or config["concurrency"] != 1

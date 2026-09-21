@@ -18,7 +18,7 @@ from pathlib import Path
 from tools.bench.prepare_selected_decode_memory_profile import (
     COUNTERS, REPO, validate_profile_build_receipt,
 )
-from tools.bench.run_ninfer_bench_matrix import REPORT_SCHEMA_VERSION
+from tools.bench.run_ninfer_bench_matrix import validate_report_phase_timing
 
 ROUNDS = 256
 FIRST_FRONTIER = 8192
@@ -304,9 +304,9 @@ def validate_benchmark_report(path: Path, record: dict, plan: dict, concurrency:
         and config.get("xattention_stride") == 16
         and config.get("xattention_tau_permille") == 900
     )
+    validate_report_phase_timing(value)
     if (
         value.get("artifact_type") != "ninfer_bench_report"
-        or value.get("schema_version") != REPORT_SCHEMA_VERSION
         or value.get("command") != " ".join(record["benchmark_command"])
         or environment.get("gpu_name") != "AMD Radeon AI PRO R9700"
         or environment.get("architecture_name") != "gfx1201"
