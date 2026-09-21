@@ -987,12 +987,21 @@ prefill review, preserving their remaining data dependencies.
   no-overwrite screen/finalist/campaign owners and run all twelve candidates at C1 over aligned
   chunks 1024, 2048, 4096, and 8192 at 8K, then both global finalists at 32K. The old
   `profiles/bench/prefill-chunk-screen-twelve-candidate-20260905` is non-runnable history.
+  ACTIVE 2026-09-21: four fresh builds are complete under
+  `build-r9700-selection-{dense,xattention}-g{16,32}-20260921`. Independently reviewed package
+  `profiles/bench/r9700-chunk-selection-receipt-bound-n16k16-20260921` owns read-only preflight,
+  explicit input freeze, preparation, screens, finalists and selection through `commands.sh`.
+  Its README gives the exact ordered commands. The shared runner now checks the R9700 PCI
+  identity and matching HIP ordinal rather than unstable DRM card numbering. No timing is
+  credited until each report passes the existing matrix and selector validation.
 
 - [ ] `CHUNK-SELECT` [depends: CHUNK-PHYSICAL-12] Publish one shared startup chunk through
-  `profiles/bench/prefill-chunk-selection-pipeline-20260905`, maximizing the worst normalized
+  the current `r9700-chunk-selection-receipt-bound-n16k16-20260921` package, maximizing the worst normalized
   throughput across the complete candidate/prompt objective set, then workspace and smaller-chunk
   tie-breaks. Bind each N16 migration receipt and the four-role planner identity. Current 4096 rows
   remain diagnostic unless selected.
+  Publish to `profiles/bench/prefill-chunk-selection-receipt-bound-n16k16-20260921.json`;
+  the 20260905 selection pipeline remains historical and is never resumed.
 
 - [ ] `XATT-KEEP-DIST` [depends: CHUNK-SELECT] Validate the redesigned sparse consumer on real
   8K/32K model keep distributions and rerun affected whole evidence. Synthetic concentration and

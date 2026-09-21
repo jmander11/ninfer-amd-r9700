@@ -910,9 +910,14 @@ class CampaignOrchestrationTest(unittest.TestCase):
             with mock.patch.object(sys, "argv", argv), mock.patch.object(
                 run, "validate_weights_input"
             ), mock.patch.object(
-                run, "preflight_python_scorer", side_effect=SystemExit("bad Python")
-            ), self.assertRaisesRegex(SystemExit, "bad Python"):
+                run.subprocess, "run", return_value=subprocess.CompletedProcess(
+                    [], 1, stdout="", stderr="ModuleNotFoundError: No module named 'torch'"
+                )
+            ) as probe, self.assertRaisesRegex(SystemExit, "requires a ROCm PyTorch"):
                 run.main()
+            probe.assert_called_once()
+            self.assertEqual(probe.call_args.args[0][:2], [sys.executable, "-c"])
+            self.assertIn("import torch", probe.call_args.args[0][2])
             self.assertFalse(output.exists())
 
     def test_reused_bf16_campaign_is_hash_and_provenance_bound(self) -> None:
@@ -1063,6 +1068,38 @@ class CampaignOrchestrationTest(unittest.TestCase):
             with mock.patch.object(run, "validate_cell_report"):
                 reused = run.load_reused_bf16_cells(campaign, **options)
             self.assertEqual(set(reused), {4})
+
+            # A retained reference must remain usable by the campaign runner in
+            # an interpreter with no torch, without launching any Python probe or
+            # scorer. The loader still checks its actual report and sidecars.
+            output = root / "reused-output"
+            argv = [
+                "run.py", "--bf16-reference-weights", str(source),
+                "--bf16-reference-ppl-bin", str(scorer), "--ids", str(ids),
+                "--profiles", run.BASELINE, "--tokens", "4",
+                "--schedule", "prefill", "--spec", "none", "--no-extras",
+                "--quality-tier", "accuracy", "--reuse-bf16-campaign", str(campaign),
+                "--bf16-repeat-comparison", str(root / "repeat.json"),
+                "--out", str(output),
+            ]
+            with (
+                mock.patch.object(sys, "argv", argv),
+                mock.patch.object(run, "validate_corpus", return_value=corpus),
+                mock.patch.object(run, "validate_cell_report"),
+                mock.patch.object(run, "validate_bf16_repeat_comparison", return_value={}),
+                mock.patch.object(
+                    run.subprocess, "run",
+                    side_effect=AssertionError("retained BF16 must not execute a subprocess"),
+                ) as execute,
+                mock.patch.dict(sys.modules, {"torch": None}),
+            ):
+                self.assertEqual(run.main(), 0)
+            execute.assert_not_called()
+            result = json.loads((output / "results.json").read_text(encoding="utf-8"))
+            self.assertTrue(result["pass"])
+            self.assertEqual(result["reference_source"], campaign_payload["reference_source"])
+            self.assertEqual(result["cells"][0]["nll_sha256"], cell["nll_sha256"])
+
             campaign_payload["cells"][0]["command"] = [
                 campaign_payload["cells"][0]["execution_provenance"]["python_executable"],
                 *campaign_payload["cells"][0]["command"],

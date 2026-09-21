@@ -2101,7 +2101,9 @@ def main() -> int:
                 "--g16-ppl-bin" if name == "r9700-g16" else "--g32-ppl-bin"
             )
             raise SystemExit(f"scorer not found for {name}; pass {option}")
-        if PROFILES[name].reference:
+        # Reuse validates every requested BF16 cell below; it never executes the
+        # reference scorer and therefore needs no local PyTorch runtime.
+        if PROFILES[name].reference and args.reuse_bf16_campaign is None:
             preflight_python_scorer(scorer)
     scorer_provenance = {
         name: {

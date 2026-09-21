@@ -37,6 +37,8 @@ from tools.bench.run_ninfer_bench_matrix import (
     main,
     manifest_owned_path,
     require_auto_power_profile,
+    require_r9700_pci_identity,
+    require_hip_pci_device,
     require_fp8_hybrid_artifact,
     validate_fp8_hybrid_performance_contract,
     validate_post_chunk_capacity_contract,
@@ -855,7 +857,7 @@ class CompiledKvGroupTest(unittest.TestCase):
                 {
                     "required": "auto",
                     "sysfs_path": (
-                        "/sys/class/drm/card2/device/power_dpm_force_performance_level"
+                        "/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level"
                     ),
                     "observed": "not-checked-dry-run",
                     "rechecked_after": None,
@@ -865,7 +867,7 @@ class CompiledKvGroupTest(unittest.TestCase):
                 "bench/fixtures/bench_corpus.ids"
             )))
             power_guard = (
-                'test "$(cat /sys/class/drm/card2/device/'
+                'test "$(cat /sys/bus/pci/devices/0000:13:00.0/'
                 'power_dpm_force_performance_level)" = auto'
             )
             commands_script = (output / "commands.sh").read_text(encoding="utf-8")
@@ -942,7 +944,7 @@ class CompiledKvGroupTest(unittest.TestCase):
             self.assertEqual(manifest["expected_xattention_profile"], "dense")
             self.assertEqual(len({record["report"] for record in manifest["commands"]}), 5)
             power_guard = (
-                'test "$(cat /sys/class/drm/card2/device/'
+                'test "$(cat /sys/bus/pci/devices/0000:13:00.0/'
                 'power_dpm_force_performance_level)" = auto'
             )
             script = (output / "commands.sh").read_text(encoding="utf-8")
@@ -981,7 +983,7 @@ class CompiledKvGroupTest(unittest.TestCase):
             self.assertEqual(manifest["selected_prefill_chunk"], 2048)
             self.assertEqual(manifest["power_profile"], {
                 "required": "auto",
-                "sysfs_path": "/sys/class/drm/card2/device/power_dpm_force_performance_level",
+                "sysfs_path": "/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level",
                 "observed": "not-checked-dry-run", "rechecked_after": None,
             })
             self.assertTrue(all(
@@ -1002,7 +1004,7 @@ class CompiledKvGroupTest(unittest.TestCase):
                 for record in ordinary_records
             ))
             self.assertIn(
-                'test "$(cat /sys/class/drm/card2/device/'
+                'test "$(cat /sys/bus/pci/devices/0000:13:00.0/'
                 'power_dpm_force_performance_level)" = auto',
                 (output / "commands.sh").read_text(encoding="utf-8"),
             )
@@ -1106,7 +1108,7 @@ class CompiledKvGroupTest(unittest.TestCase):
             manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
             self.assertEqual(manifest["power_profile"], {
                 "required": "auto",
-                "sysfs_path": "/sys/class/drm/card2/device/power_dpm_force_performance_level",
+                "sysfs_path": "/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level",
                 "observed": "not-checked-dry-run", "rechecked_after": None,
             })
             command = manifest["commands"][0]["command"]
@@ -1114,7 +1116,7 @@ class CompiledKvGroupTest(unittest.TestCase):
             self.assertEqual(command[command.index("--concurrency") + 1], "1")
             self.assertIn("--whole-pg", command)
             self.assertIn(
-                'test "$(cat /sys/class/drm/card2/device/'
+                'test "$(cat /sys/bus/pci/devices/0000:13:00.0/'
                 'power_dpm_force_performance_level)" = auto',
                 (output / "commands.sh").read_text(encoding="utf-8"),
             )
@@ -1147,6 +1149,24 @@ class CompiledKvGroupTest(unittest.TestCase):
             profile.unlink()
             with self.assertRaisesRegex(ValueError, "cannot read R9700 power profile"):
                 require_auto_power_profile(profile)
+
+    def test_power_binding_rejects_integrated_gpu(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            device = Path(directory)
+            (device / "vendor").write_text("0x1002\n")
+            (device / "device").write_text("0x164e\n")
+            with self.assertRaisesRegex(ValueError, "expected AMD R9700 PCI identity"):
+                require_r9700_pci_identity(device)
+            (device / "device").write_text("0x7551\n")
+            require_r9700_pci_identity(device)
+
+    def test_hip_ordinal_must_match_power_device(self) -> None:
+        with mock.patch("tools.bench.run_ninfer_bench_matrix.subprocess.run") as run:
+            run.return_value = SimpleNamespace(returncode=0, stdout="0000:7c:00.0\n", stderr="")
+            with self.assertRaisesRegex(ValueError, "does not bind R9700 PCI"):
+                require_hip_pci_device(0)
+            run.return_value.stdout = "0000:13:00.0\n"
+            require_hip_pci_device(0)
 
     def test_dry_run_manifest_binds_xattention_profile(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

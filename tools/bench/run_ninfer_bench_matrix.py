@@ -69,7 +69,7 @@ PREFILL_CHUNKS = (128, 256, 512, 1024, 2048, 4096)
 PRODUCTION_PREFILL_PROMPTS = (8192, 32768)
 LOW_CONTEXT_PREFILL_PROMPTS = (128, 512, 1024, 2048, 4096)
 R9700_POWER_PROFILE = Path(
-    "/sys/class/drm/card2/device/power_dpm_force_performance_level"
+    "/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level"
 )
 PURE_DECODE_GENS = (16, 64, 128, 512, 2048)
 CONTEXT_CORE = ((512, 512), (2048, 512), (8192, 512))
@@ -160,6 +160,8 @@ def require_auto_power_profile(path: Path | None = None) -> str:
     """Fail closed before a chunk-speed campaign if the R9700 is not in auto mode."""
 
     profile_path = R9700_POWER_PROFILE if path is None else path
+    if path is None:
+        require_r9700_pci_identity(profile_path.parent)
     try:
         observed = profile_path.read_text(encoding="utf-8").strip()
     except OSError as error:
@@ -170,6 +172,33 @@ def require_auto_power_profile(path: Path | None = None) -> str:
             f"at {profile_path}"
         )
     return observed
+
+
+def require_r9700_pci_identity(device_path: Path) -> None:
+    """Bind this single-machine campaign to its physical R9700, independent of DRM numbering."""
+    try:
+        identity = tuple((device_path / name).read_text().strip().lower()
+                         for name in ("vendor", "device"))
+    except OSError as error:
+        raise ValueError(f"cannot read R9700 PCI identity: {device_path}: {error}") from error
+    if identity != ("0x1002", "0x7551"):
+        raise ValueError(f"expected AMD R9700 PCI identity at {device_path}; got {identity}")
+
+
+def require_hip_pci_device(device: int) -> None:
+    # A separate process releases HIP initialization before timing/model residency.
+    probe = (
+        "import ctypes,sys; h=ctypes.CDLL('/opt/rocm/lib/libamdhip64.so'); "
+        "b=ctypes.create_string_buffer(32); "
+        "s=h.hipDeviceGetPCIBusId(b,len(b),int(sys.argv[1])); "
+        "assert s==0, f'hipDeviceGetPCIBusId failed: {s}'; print(b.value.decode())"
+    )
+    result = subprocess.run([sys.executable, "-c", probe, str(device)],
+                            capture_output=True, text=True, check=False)
+    expected = R9700_POWER_PROFILE.parent.name.lower()
+    if result.returncode != 0 or result.stdout.strip().lower() != expected:
+        raise ValueError(f"HIP device {device} does not bind R9700 PCI {expected}: "
+                         f"{result.stdout.strip()} {result.stderr.strip()}")
 
 
 def mtp_args(k: int) -> tuple[str, ...]:
@@ -3424,6 +3453,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             try:
                 args.power_profile_observed = require_auto_power_profile()
+                require_hip_pci_device(args.device)
             except ValueError as error:
                 raise SystemExit(str(error)) from error
 
