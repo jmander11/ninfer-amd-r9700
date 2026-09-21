@@ -161,8 +161,8 @@ physical bandwidth saturation or stall freedom.
 
 The deterministic queue after reset is:
 
-1. run the fresh panel-attention chunk selection now that `PREFILL-CHUNK-ATTENTION` is closed,
-   then numerical accuracy and terminal base-artifact selection;
+1. complete numerical accuracy at the selected shared chunk2048, then terminal base-artifact
+   selection; bounded-panel attention and the full chunk-selection campaign are closed;
 2. immediately make `DFLASH-RECIPE`, `DFLASH-QUALITY`, and `DFLASH-WHOLE` the primary performance
    work, targeting at least `60 decode-output tok/s` at C1 with exact public greedy-token parity;
 3. retain only clearly reusable recipe-independent DFlash work while the selected artifact is
@@ -1075,14 +1075,21 @@ prefill review, preserving their remaining data dependencies.
   and CPU import/gfx1201 checks (ROCm torch2.9.1, Triton3.5.1). The reviewed reference stage now
   automatically runs and gates the same-interpreter full-span GDN oracle before A/B scoring;
   eight package CPU tests pass. Fresh chunk2048 `commands.sh reference --reference-python`
-  using that interpreter is active; no GPU reference result is claimed yet. Preserve all candidate failures
+  using that interpreter is active. Its full-span GDN sampled FP64 oracle passed at 4095/4096 rows;
+  first 8K BF16 PPL is 6.463887635, first 32K scoring is active. Neither reference is admitted before
+  the fresh second campaign and exact-repeat gate. Preserve all candidate failures
   for diagnosis. The 20260905 recovery script is historical; its dense-Q4 history does not replace
   this current-build campaign. No numerical result is claimed by preparing the package.
 
 - [ ] `POSTCHUNK-ON` [depends: CHUNK-SELECT] Through
-  `profiles/bench/post-chunk-twelve-candidate-20260905`, rerun both ON-profile capacity matrices
+  `profiles/bench/r9700-terminal-base-panel-attention-20260921`, run both ON-profile capacity matrices
   with the selected chunk and execute each eligible schema-v14 whole matrix with the same
   group-specific executable and artifact.
+  The fresh package provides preflight/capacity/whole/select commands, binds the published six
+  quality authorities and frozen panel artifacts/builds, collects all twelve capacity outcomes,
+  and runs only eligible whole profiles before schema-v7 publication. Root review SHIP after
+  repairing tuple/list capacity identities; 25 focused CPU checks pass. No physical result is
+  implied. Old post-chunk/terminal 20260905 launchers are historical; do not republish chunk selection.
 
 - [ ] `ALLQ4-PAIRS` [depends: CHUNK-SELECT] Complete current dense and XAttention G16/G32 capacity
   and whole pairs and admit all four all-Q4 candidates to the same schema-v7 Pareto decision.

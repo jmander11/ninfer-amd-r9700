@@ -1,0 +1,975 @@
+{
+  "all_pass": true,
+  "artifact_type": "ninfer_qwen3_8_27b_bf16_gdn_full_span_probe",
+  "cases": [
+    {
+      "fused_recurrent": {
+        "final_state_dtype": "torch.float32",
+        "final_state_finite": true,
+        "final_state_sha256": "921aace06fa02b3352e196de2596a07a9d72e3c5ae87211535abfd1f495aaa9e",
+        "output_dtype": "torch.bfloat16",
+        "output_finite": true,
+        "output_sha256": "bc15b8927f7652a7d39cc87ac5304cfdad84e6b8ca6f80553e4e3f4f17695b28",
+        "seconds": 1.02166083001066
+      },
+      "input": {
+        "combined_sha256": "40dae87f44def78884188649b68b35d6f16c1ef1b2b75e6f9a7ca343a0e3347f",
+        "tensors": {
+          "beta": {
+            "dtype": "torch.float32",
+            "sha256": "8536029b98528a46c214f4d73f43f2a5dd298ed93e0910adf25efabe44853668",
+            "shape": [
+              4095,
+              48
+            ]
+          },
+          "decay": {
+            "dtype": "torch.float32",
+            "sha256": "7f320aea64fe0e51cf27b82e102b1319f45ed258942dc956ddf99dce10b403ee",
+            "shape": [
+              4095,
+              48
+            ]
+          },
+          "k": {
+            "dtype": "torch.bfloat16",
+            "sha256": "b799e45352c795195f2cfbac74c133e0994c31c70b0cf3974c43a72488640bf0",
+            "shape": [
+              4095,
+              16,
+              128
+            ]
+          },
+          "q": {
+            "dtype": "torch.bfloat16",
+            "sha256": "a68057f7526000747aeb32b7478aeac1ec9ecf9a68507a93df187d41b22a7031",
+            "shape": [
+              4095,
+              16,
+              128
+            ]
+          },
+          "state": {
+            "dtype": "torch.float32",
+            "sha256": "09e42acf46277ef4b9e9fbe0ca4a4236648857874083206c4446cf445cf2ba0c",
+            "shape": [
+              48,
+              128,
+              128
+            ]
+          },
+          "value": {
+            "dtype": "torch.bfloat16",
+            "sha256": "6fe9736d55999d6c56de9c816ac12e8371080e65ffbdfb00c9fc1bbb14d8e184",
+            "shape": [
+              4095,
+              48,
+              128
+            ]
+          }
+        }
+      },
+      "rows": 4095,
+      "sampled_fp64_oracle": {
+        "columns": [
+          {
+            "final_state_column": {
+              "actual_fp32_sha256": "9466dd0db69b260aa058ca5d322292b8ef5df530ac090ad47aa6c55457c265ff",
+              "elements_checked": 128,
+              "max_absolute_error": 1.0234701564026949e-07,
+              "oracle_fp64_sha256": "0092876d537c4d88b05231688af684dca4a9e715fd9ac76d47c39531476a52d5",
+              "pass": true,
+              "worst": {
+                "absolute_error": 1.0234701564026949e-07,
+                "actual": 0.20719322562217712,
+                "key_feature": 88,
+                "oracle_fp64": 0.20719332796919276,
+                "pass": true,
+                "tolerance": 0.03621579983907578
+              }
+            },
+            "key_head": 0,
+            "output_rows": [
+              {
+                "absolute_error": 2.18058081622523e-07,
+                "actual": 6.914138793945312e-05,
+                "oracle_fp64": 6.89233298578306e-05,
+                "pass": true,
+                "row": 0,
+                "tolerance": 0.030002067699895735
+              },
+              {
+                "absolute_error": 4.7544058514648914e-07,
+                "actual": 0.001373291015625,
+                "oracle_fp64": 0.0013737664562101465,
+                "pass": true,
+                "row": 1,
+                "tolerance": 0.030041212993686305
+              },
+              {
+                "absolute_error": 2.2796604674028137e-05,
+                "actual": -0.0201416015625,
+                "oracle_fp64": -0.020118804957825972,
+                "pass": true,
+                "row": 2047,
+                "tolerance": 0.030603564148734778
+              },
+              {
+                "absolute_error": 3.329195701897228e-06,
+                "actual": 0.0106201171875,
+                "oracle_fp64": 0.010616787991798103,
+                "pass": true,
+                "row": 4093,
+                "tolerance": 0.03031850363975394
+              },
+              {
+                "absolute_error": 8.546293972809538e-06,
+                "actual": 0.01373291015625,
+                "oracle_fp64": 0.01374145645022281,
+                "pass": true,
+                "row": 4094,
+                "tolerance": 0.030412243693506685
+              }
+            ],
+            "value_feature": 0,
+            "value_head": 0
+          },
+          {
+            "final_state_column": {
+              "actual_fp32_sha256": "358e078bf894c27d31eebbd9ab812857683d1da78ad36717bacf145020bdae02",
+              "elements_checked": 128,
+              "max_absolute_error": 1.3657522182630721e-07,
+              "oracle_fp64_sha256": "74643604206807760be1a2dfc5533d2ae51fa708d7cf952258d75f4798490607",
+              "pass": true,
+              "worst": {
+                "absolute_error": 1.3657522182630721e-07,
+                "actual": 0.0780186578631401,
+                "key_feature": 27,
+                "oracle_fp64": 0.07801852128791828,
+                "pass": true,
+                "tolerance": 0.032340555638637546
+              }
+            },
+            "key_head": 1,
+            "output_rows": [
+              {
+                "absolute_error": 2.0677203936119923e-05,
+                "actual": -0.01422119140625,
+                "oracle_fp64": -0.01424186861018612,
+                "pass": true,
+                "row": 0,
+                "tolerance": 0.030427256058305582
+              },
+              {
+                "absolute_error": 4.5625045974346384e-06,
+                "actual": -0.004058837890625,
+                "oracle_fp64": -0.004054275386027565,
+                "pass": true,
+                "row": 1,
+                "tolerance": 0.030121628261580827
+              },
+              {
+                "absolute_error": 6.9773756656559e-05,
+                "actual": 0.044677734375,
+                "oracle_fp64": 0.04460796061834344,
+                "pass": true,
+                "row": 2047,
+                "tolerance": 0.0313382388185503
+              },
+              {
+                "absolute_error": 7.892997903318627e-05,
+                "actual": -0.0341796875,
+                "oracle_fp64": -0.034100757520966814,
+                "pass": true,
+                "row": 4093,
+                "tolerance": 0.031023022725629002
+              },
+              {
+                "absolute_error": 3.4299095755252473e-07,
+                "actual": -0.00092315673828125,
+                "oracle_fp64": -0.0009228137473236975,
+                "pass": true,
+                "row": 4094,
+                "tolerance": 0.03002768441241971
+              }
+            ],
+            "value_feature": 127,
+            "value_head": 5
+          },
+          {
+            "final_state_column": {
+              "actual_fp32_sha256": "dfc472564eb1a47663a72ba018ad9707fe68df33605808ffb907e1381a1b0bda",
+              "elements_checked": 128,
+              "max_absolute_error": 8.287007197127494e-08,
+              "oracle_fp64_sha256": "dae8b0b0d7659f4d760dd9a56ccc9d2646a333977cc52683d49f87b56c94299f",
+              "pass": true,
+              "worst": {
+                "absolute_error": 8.287007197127494e-08,
+                "actual": 0.21084964275360107,
+                "key_feature": 44,
+                "oracle_fp64": 0.2108495598835291,
+                "pass": true,
+                "tolerance": 0.03632548679650587
+              }
+            },
+            "key_head": 5,
+            "output_rows": [
+              {
+                "absolute_error": 1.5160748463862242e-05,
+                "actual": -0.009765625,
+                "oracle_fp64": -0.009750464251536138,
+                "pass": true,
+                "row": 0,
+                "tolerance": 0.03029251392754608
+              },
+              {
+                "absolute_error": 1.9387323044375154e-05,
+                "actual": 0.0126953125,
+                "oracle_fp64": 0.012714699823044375,
+                "pass": true,
+                "row": 1,
+                "tolerance": 0.03038144099469133
+              },
+              {
+                "absolute_error": 4.73692565283422e-05,
+                "actual": 0.022705078125,
+                "oracle_fp64": 0.022752447381528342,
+                "pass": true,
+                "row": 2047,
+                "tolerance": 0.030682573421445848
+              },
+              {
+                "absolute_error": 3.520426793028565e-06,
+                "actual": 0.00144195556640625,
+                "oracle_fp64": 0.0014454759931992786,
+                "pass": true,
+                "row": 4093,
+                "tolerance": 0.030043364279795978
+              },
+              {
+                "absolute_error": 8.351528730763357e-06,
+                "actual": -0.005157470703125,
+                "oracle_fp64": -0.005165822231855763,
+                "pass": true,
+                "row": 4094,
+                "tolerance": 0.030154974666955672
+              }
+            ],
+            "value_feature": 31,
+            "value_head": 17
+          },
+          {
+            "final_state_column": {
+              "actual_fp32_sha256": "452e3cb62bf84a38052105b8934b4485f3eee67dfdcf60ecf1c38440278a485b",
+              "elements_checked": 128,
+              "max_absolute_error": 1.1388027215675223e-07,
+              "oracle_fp64_sha256": "a2675654eb40b0314de311129f383cfbef6c8fb50c713bc9813e455b34f8dead",
+              "pass": true,
+              "worst": {
+                "absolute_error": 1.1388027215675223e-07,
+                "actual": 0.383639395236969,
+                "key_feature": 47,
+                "oracle_fp64": 0.38363950911724115,
+                "pass": true,
+                "tolerance": 0.041509185273517234
+              }
+            },
+            "key_head": 10,
+            "output_rows": [
+              {
+                "absolute_error": 6.735888172375607e-07,
+                "actual": -0.000728607177734375,
+                "oracle_fp64": -0.0007279335889171374,
+                "pass": true,
+                "row": 0,
+                "tolerance": 0.030021838007667515
+              },
+              {
+                "absolute_error": 3.3232397268091046e-06,
+                "actual": 0.0050048828125,
+                "oracle_fp64": 0.005008206052226809,
+                "pass": true,
+                "row": 1,
+                "tolerance": 0.030150246181566802
+              },
+              {
+                "absolute_error": 2.369796388819803e-06,
+                "actual": -0.01373291015625,
+                "oracle_fp64": -0.01373527995263882,
+                "pass": true,
+                "row": 2047,
+                "tolerance": 0.030412058398579165
+              },
+              {
+                "absolute_error": 1.1949341611390031e-05,
+                "actual": 0.0042724609375,
+                "oracle_fp64": 0.00428441027911139,
+                "pass": true,
+                "row": 4093,
+                "tolerance": 0.03012853230837334
+              },
+              {
+                "absolute_error": 2.7008015351825954e-05,
+                "actual": 0.0277099609375,
+                "oracle_fp64": 0.027736968952851826,
+                "pass": true,
+                "row": 4094,
+                "tolerance": 0.030832109068585554
+              }
+            ],
+            "value_feature": 64,
+            "value_head": 32
+          },
+          {
+            "final_state_column": {
+              "actual_fp32_sha256": "e74d0f209031c7fbb03c0ff851d05728101e17a6f801600fe96acc3e80f7d09b",
+              "elements_checked": 128,
+              "max_absolute_error": 9.155012570261079e-08,
+              "oracle_fp64_sha256": "4f51d215803c903a8c3f82c0a85c4498dc6b5361f78914cb1201d88feb1666db",
+              "pass": true,
+              "worst": {
+                "absolute_error": 9.155012570261079e-08,
+                "actual": 0.35824888944625854,
+                "key_feature": 122,
+                "oracle_fp64": 0.35824879789613284,
+                "pass": true,
+                "tolerance": 0.040747463936883985
+              }
+            },
+            "key_head": 15,
+            "output_rows": [
+              {
+                "absolute_error": 6.629490782047998e-06,
+                "actual": -0.006011962890625,
+                "oracle_fp64": -0.006018592381407048,
+                "pass": true,
+                "row": 0,
+                "tolerance": 0.03018055777144221
+              },
+              {
+                "absolute_error": 8.57551036434305e-07,
+                "actual": 0.006988525390625,
+                "oracle_fp64": 0.006989382941661434,
+                "pass": true,
+                "row": 1,
+                "tolerance": 0.030209681488249842
+              },
+              {
+                "absolute_error": 5.981337168091058e-05,
+                "actual": -0.021484375,
+                "oracle_fp64": -0.02142456162831909,
+                "pass": true,
+                "row": 2047,
+                "tolerance": 0.03064273684884957
+              },
+              {
+                "absolute_error": 2.8811307269796527e-05,
+                "actual": 0.0244140625,
+                "oracle_fp64": 0.024385251192730203,
+                "pass": true,
+                "row": 4093,
+                "tolerance": 0.030731557535781905
+              },
+              {
+                "absolute_error": 3.6395988772738863e-06,
+                "actual": 0.0224609375,
+                "oracle_fp64": 0.022464577098877274,
+                "pass": true,
+                "row": 4094,
+                "tolerance": 0.030673937312966318
+              }
+            ],
+            "value_feature": 126,
+            "value_head": 47
+          }
+        ],
+        "final_state_criterion": {
+          "atol": 0.03,
+          "rtol": 0.03
+        },
+        "output_criterion": {
+          "atol": 0.03,
+          "rtol": 0.03
+        },
+        "pass": true
+      }
+    },
+    {
+      "fused_recurrent": {
+        "final_state_dtype": "torch.float32",
+        "final_state_finite": true,
+        "final_state_sha256": "91acc86ea248baa61eb4a66d3529cdd5ab885d521856527a5295488395a755bf",
+        "output_dtype": "torch.bfloat16",
+        "output_finite": true,
+        "output_sha256": "23f346697750655712f0f1dc4dafe51b08e241716e2a25b193f0971140a7d857",
+        "seconds": 0.0059858199674636126
+      },
+      "input": {
+        "combined_sha256": "5c7269d81441de7fd5a064710e255cdb7153f242e1449ae3ef81fbd12e8f8e39",
+        "tensors": {
+          "beta": {
+            "dtype": "torch.float32",
+            "sha256": "2369a413cdda4639a9ccbfd6019cc169953dfb799f5ca86f3e80002930034e8b",
+            "shape": [
+              4096,
+              48
+            ]
+          },
+          "decay": {
+            "dtype": "torch.float32",
+            "sha256": "57518d72eaadffc9a15d52be124d69945837c1501ff5f4dff69c56fcade4b767",
+            "shape": [
+              4096,
+              48
+            ]
+          },
+          "k": {
+            "dtype": "torch.bfloat16",
+            "sha256": "4dd60a210f36cacaedb0db64c1ca5842120285b37559877e95cc127622c17864",
+            "shape": [
+              4096,
+              16,
+              128
+            ]
+          },
+          "q": {
+            "dtype": "torch.bfloat16",
+            "sha256": "9769deb14163799fc245265f65a9acab4a0a79d94b81e1b6ac15e89f690408ea",
+            "shape": [
+              4096,
+              16,
+              128
+            ]
+          },
+          "state": {
+            "dtype": "torch.float32",
+            "sha256": "09e42acf46277ef4b9e9fbe0ca4a4236648857874083206c4446cf445cf2ba0c",
+            "shape": [
+              48,
+              128,
+              128
+            ]
+          },
+          "value": {
+            "dtype": "torch.bfloat16",
+            "sha256": "2f39bc065be2381a521766592ff9b7a553132818820b3f8fbdccdff8734d5883",
+            "shape": [
+              4096,
+              48,
+              128
+            ]
+          }
+        }
+      },
+      "rows": 4096,
+      "sampled_fp64_oracle": {
+        "columns": [
+          {
+            "final_state_column": {
+              "actual_fp32_sha256": "2c5a16eba248745a232203fad1c58d06f519bdd33daeb5d6dc1f4f7e7ec97909",
+              "elements_checked": 128,
+              "max_absolute_error": 1.0437232414450826e-07,
+              "oracle_fp64_sha256": "1ec9f10972eed94f847d2ea20649fdca4b1ac06f4c9d2902ea9823bcc9581574",
+              "pass": true,
+              "worst": {
+                "absolute_error": 1.0437232414450826e-07,
+                "actual": 0.19771161675453186,
+                "key_feature": 88,
+                "oracle_fp64": 0.197711721126856,
+                "pass": true,
+                "tolerance": 0.03593135163380568
+              }
+            },
+            "key_head": 0,
+            "output_rows": [
+              {
+                "absolute_error": 2.18058081622523e-07,
+                "actual": 6.914138793945312e-05,
+                "oracle_fp64": 6.89233298578306e-05,
+                "pass": true,
+                "row": 0,
+                "tolerance": 0.030002067699895735
+              },
+              {
+                "absolute_error": 4.7544058514648914e-07,
+                "actual": 0.001373291015625,
+                "oracle_fp64": 0.0013737664562101465,
+                "pass": true,
+                "row": 1,
+                "tolerance": 0.030041212993686305
+              },
+              {
+                "absolute_error": 1.3470891481903724e-05,
+                "actual": 0.00604248046875,
+                "oracle_fp64": 0.006029009577268096,
+                "pass": true,
+                "row": 2048,
+                "tolerance": 0.030180870287318043
+              },
+              {
+                "absolute_error": 8.546293972809538e-06,
+                "actual": 0.01373291015625,
+                "oracle_fp64": 0.01374145645022281,
+                "pass": true,
+                "row": 4094,
+                "tolerance": 0.030412243693506685
+              },
+              {
+                "absolute_error": 1.4334599587993366e-05,
+                "actual": 0.006988525390625,
+                "oracle_fp64": 0.007002859990212993,
+                "pass": true,
+                "row": 4095,
+                "tolerance": 0.03021008579970639
+              }
+            ],
+            "value_feature": 0,
+            "value_head": 0
+          },
+          {
+            "final_state_column": {
+              "actual_fp32_sha256": "ae0b46d5cd6a9bc2530bf4bbdce33a527a618a70d1a23b7bb8efa09afc1c7b2c",
+              "elements_checked": 128,
+              "max_absolute_error": 1.3151855798171352e-07,
+              "oracle_fp64_sha256": "e0466bb84b5a8da921b7cdfe98c9e2790fa99a3f992b9303617c2f5942389054",
+              "pass": true,
+              "worst": {
+                "absolute_error": 1.3151855798171352e-07,
+                "actual": 0.02935078553855419,
+                "key_feature": 27,
+                "oracle_fp64": 0.02935065401999621,
+                "pass": true,
+                "tolerance": 0.030880519620599886
+              }
+            },
+            "key_head": 1,
+            "output_rows": [
+              {
+                "absolute_error": 2.0677203936119923e-05,
+                "actual": -0.01422119140625,
+                "oracle_fp64": -0.01424186861018612,
+                "pass": true,
+                "row": 0,
+                "tolerance": 0.030427256058305582
+              },
+              {
+                "absolute_error": 4.5625045974346384e-06,
+                "actual": -0.004058837890625,
+                "oracle_fp64": -0.004054275386027565,
+                "pass": true,
+                "row": 1,
+                "tolerance": 0.030121628261580827
+              },
+              {
+                "absolute_error": 6.963928640572881e-06,
+                "actual": 0.0147705078125,
+                "oracle_fp64": 0.014777471741140573,
+                "pass": true,
+                "row": 2048,
+                "tolerance": 0.030443324152234216
+              },
+              {
+                "absolute_error": 3.4299095755252473e-07,
+                "actual": -0.00092315673828125,
+                "oracle_fp64": -0.0009228137473236975,
+                "pass": true,
+                "row": 4094,
+                "tolerance": 0.03002768441241971
+              },
+              {
+                "absolute_error": 1.3819047753932737e-05,
+                "actual": 0.0152587890625,
+                "oracle_fp64": 0.015244970014746067,
+                "pass": true,
+                "row": 4095,
+                "tolerance": 0.03045734910044238
+              }
+            ],
+            "value_feature": 127,
+            "value_head": 5
+          },
+          {
+            "final_state_column": {
+              "actual_fp32_sha256": "5d0755b72999b78861a1e3ee8474402acee32d49eae3044a2cab0977973d1bcc",
+              "elements_checked": 128,
+              "max_absolute_error": 7.950207570051049e-08,
+              "oracle_fp64_sha256": "04ff4cf7877468967419996ebebc56f6213c9fad566ffeacb15942d9e88f96b3",
+              "pass": true,
+              "worst": {
+                "absolute_error": 7.950207570051049e-08,
+                "actual": 0.14926259219646454,
+                "key_feature": 44,
+                "oracle_fp64": 0.14926251269438884,
+                "pass": true,
+                "tolerance": 0.03447787538083166
+              }
+            },
+            "key_head": 5,
+            "output_rows": [
+              {
+                "absolute_error": 1.5160748463862242e-05,
+                "actual": -0.009765625,
+                "oracle_fp64": -0.009750464251536138,
+                "pass": true,
+                "row": 0,
+                "tolerance": 0.03029251392754608
+              },
+              {
+                "absolute_error": 1.9387323044375154e-05,
+                "actual": 0.0126953125,
+                "oracle_fp64": 0.012714699823044375,
+                "pass": true,
+                "row": 1,
+                "tolerance": 0.03038144099469133
+              },
+              {
+                "absolute_error": 1.2732458665408279e-05,
+                "actual": -0.00714111328125,
+                "oracle_fp64": -0.007153845739915408,
+                "pass": true,
+                "row": 2048,
+                "tolerance": 0.03021461537219746
+              },
+              {
+                "absolute_error": 8.351528730763357e-06,
+                "actual": -0.005157470703125,
+                "oracle_fp64": -0.005165822231855763,
+                "pass": true,
+                "row": 4094,
+                "tolerance": 0.030154974666955672
+              },
+              {
+                "absolute_error": 1.5052255965313822e-05,
+                "actual": 0.006072998046875,
+                "oracle_fp64": 0.006088050302840314,
+                "pass": true,
+                "row": 4095,
+                "tolerance": 0.030182641509085208
+              }
+            ],
+            "value_feature": 31,
+            "value_head": 17
+          },
+          {
+            "final_state_column": {
+              "actual_fp32_sha256": "23a2e45cb21e22a39d812b11faa7567a100d59554ddb5f2fc34890cc0577ccdf",
+              "elements_checked": 128,
+              "max_absolute_error": 1.3202331472506046e-07,
+              "oracle_fp64_sha256": "2d04455ac941dc92e9827d9549c661b331a642b7ead5dd8e1c30c17dfcb4a462",
+              "pass": true,
+              "worst": {
+                "absolute_error": 1.3202331472506046e-07,
+                "actual": 0.11190889775753021,
+                "key_feature": 47,
+                "oracle_fp64": 0.11190902978084494,
+                "pass": true,
+                "tolerance": 0.03335727089342535
+              }
+            },
+            "key_head": 10,
+            "output_rows": [
+              {
+                "absolute_error": 6.735888172375607e-07,
+                "actual": -0.000728607177734375,
+                "oracle_fp64": -0.0007279335889171374,
+                "pass": true,
+                "row": 0,
+                "tolerance": 0.030021838007667515
+              },
+              {
+                "absolute_error": 3.3232397268091046e-06,
+                "actual": 0.0050048828125,
+                "oracle_fp64": 0.005008206052226809,
+                "pass": true,
+                "row": 1,
+                "tolerance": 0.030150246181566802
+              },
+              {
+                "absolute_error": 1.1802117247260505e-05,
+                "actual": -0.0079345703125,
+                "oracle_fp64": -0.00794637242974726,
+                "pass": true,
+                "row": 2048,
+                "tolerance": 0.030238391172892416
+              },
+              {
+                "absolute_error": 2.7008015351825954e-05,
+                "actual": 0.0277099609375,
+                "oracle_fp64": 0.027736968952851826,
+                "pass": true,
+                "row": 4094,
+                "tolerance": 0.030832109068585554
+              },
+              {
+                "absolute_error": 8.544370045773103e-05,
+                "actual": 0.044921875,
+                "oracle_fp64": 0.04483643129954227,
+                "pass": true,
+                "row": 4095,
+                "tolerance": 0.03134509293898627
+              }
+            ],
+            "value_feature": 64,
+            "value_head": 32
+          },
+          {
+            "final_state_column": {
+              "actual_fp32_sha256": "0e3b35ebf8b1a44d43679feb91dce8230d4b4702f8a99943b0acd14bcda36464",
+              "elements_checked": 128,
+              "max_absolute_error": 8.125661926650096e-08,
+              "oracle_fp64_sha256": "a98a101b03df7480f5ba22734271b58e5995cd1de194a2146c3875c6887adbaf",
+              "pass": true,
+              "worst": {
+                "absolute_error": 8.125661926650096e-08,
+                "actual": -0.26246020197868347,
+                "key_feature": 110,
+                "oracle_fp64": -0.2624601207220642,
+                "pass": true,
+                "tolerance": 0.03787380362166193
+              }
+            },
+            "key_head": 15,
+            "output_rows": [
+              {
+                "absolute_error": 6.629490782047998e-06,
+                "actual": -0.006011962890625,
+                "oracle_fp64": -0.006018592381407048,
+                "pass": true,
+                "row": 0,
+                "tolerance": 0.03018055777144221
+              },
+              {
+                "absolute_error": 8.57551036434305e-07,
+                "actual": 0.006988525390625,
+                "oracle_fp64": 0.006989382941661434,
+                "pass": true,
+                "row": 1,
+                "tolerance": 0.030209681488249842
+              },
+              {
+                "absolute_error": 7.334308220266483e-06,
+                "actual": -0.044921875,
+                "oracle_fp64": -0.044914540691779734,
+                "pass": true,
+                "row": 2048,
+                "tolerance": 0.031347436220753394
+              },
+              {
+                "absolute_error": 3.6395988772738863e-06,
+                "actual": 0.0224609375,
+                "oracle_fp64": 0.022464577098877274,
+                "pass": true,
+                "row": 4094,
+                "tolerance": 0.030673937312966318
+              },
+              {
+                "absolute_error": 7.452307118990635e-06,
+                "actual": -0.004547119140625,
+                "oracle_fp64": -0.004554571447743991,
+                "pass": true,
+                "row": 4095,
+                "tolerance": 0.03013663714343232
+              }
+            ],
+            "value_feature": 126,
+            "value_head": 47
+          }
+        ],
+        "final_state_criterion": {
+          "atol": 0.03,
+          "rtol": 0.03
+        },
+        "output_criterion": {
+          "atol": 0.03,
+          "rtol": 0.03
+        },
+        "pass": true
+      }
+    }
+  ],
+  "generator": "integer-pattern-l2norm-bf16-v1",
+  "geometry": {
+    "key_dim": 128,
+    "key_heads": 16,
+    "row_extents": [
+      4095,
+      4096
+    ],
+    "sample_columns": [
+      [
+        0,
+        0
+      ],
+      [
+        5,
+        127
+      ],
+      [
+        17,
+        31
+      ],
+      [
+        32,
+        64
+      ],
+      [
+        47,
+        126
+      ]
+    ],
+    "sample_rows": "0,1,T//2,T-2,T-1",
+    "value_dim": 128,
+    "value_heads": 48
+  },
+  "oracle": {
+    "complete_rows": true,
+    "final_state_elements_checked": 640,
+    "implementation": "serial-sampled-column-fp64-v1",
+    "prediction_key_terms": 128,
+    "sampled_independent_value_columns": 5
+  },
+  "provenance": {
+    "execution": {
+      "attention_pv": {
+        "accumulation_dtype": "float32",
+        "accumulation_order": "ordered-in-place-add",
+        "final_partial_chunk": true,
+        "implementation": "torch-mm-source-row-chunked-v1",
+        "operand_dtype": "float32",
+        "source_row_chunk": 8192,
+        "source_row_order": "ascending-absolute"
+      },
+      "deterministic_algorithms": {
+        "enabled": true,
+        "warn_only": false
+      },
+      "device_arch": "gfx1201",
+      "device_index": 0,
+      "device_name": "AMD Radeon AI PRO R9700",
+      "distributions": {
+        "flash-linear-attention": {
+          "direct_url_sha256": null,
+          "record_sha256": "63d38b6955c9bf4974c47acebb3093423d0edc1fa82aeb7ecd8de6dd235c1e04",
+          "version": "0.5.2"
+        },
+        "safetensors": {
+          "direct_url_sha256": null,
+          "record_sha256": "e391ead4e7a61239f9bf73d68dfe326bc0d5ee15b8e384891a8d5e2590074599",
+          "version": "0.8.0"
+        },
+        "torch": {
+          "direct_url_sha256": "d582e1db4f12d16c3c5a8de771344af5190c4e5d1e50715fd61c4e8849ff2c47",
+          "record_sha256": "780a158a3f539ef3a0bc82635015552f889becf91f0ae06dfb6702fab4e651fc",
+          "version": "2.9.1+rocm7.2.4.lw.git39497456"
+        },
+        "triton": {
+          "direct_url_sha256": "762e4ac6aaecfb3e1cd443da342f3c1567beda0830803a513cd37a7f20022b15",
+          "record_sha256": "e639f32f503b71c3b45354d422e34ffa0fb4f1aade36a05c9162edfcb7a01114",
+          "version": "3.5.1+rocm7.2.4.gita272dfa8"
+        }
+      },
+      "environment": {
+        "AMD_SERIALIZE_COPY": "0",
+        "AMD_SERIALIZE_KERNEL": "0",
+        "CUDA_LAUNCH_BLOCKING": "0",
+        "FLA_CACHE_MODE": null,
+        "FLA_CACHE_RESULTS": null,
+        "FLA_CONFIG_DIR": null,
+        "FLA_DISABLE_BACKEND_DISPATCH": null,
+        "FLA_DISABLE_TENSOR_CACHE": null,
+        "FLA_USE_FAST_OPS": "0",
+        "HIP_LAUNCH_BLOCKING": "0",
+        "HIP_VISIBLE_DEVICES": null,
+        "LD_LIBRARY_PATH": "/opt/rocm/lib:/opt/rocm/core-10.0/lib",
+        "PYTORCH_ALLOC_CONF": null,
+        "PYTORCH_CUDA_ALLOC_CONF": null,
+        "PYTORCH_HIP_ALLOC_CONF": null,
+        "PYTORCH_NO_CUDA_MEMORY_CACHING": "0",
+        "PYTORCH_TUNABLEOP_ENABLED": "0",
+        "ROCBLAS_DEFAULT_ATOMICS_MODE": "0",
+        "ROCBLAS_TENSILE_GEMM_OVERRIDE_PATH": null,
+        "ROCBLAS_TENSILE_LIBPATH": null,
+        "ROCBLAS_USE_HIPBLASLT": "0",
+        "ROCBLAS_USE_HIPBLASLT_BATCHED": "0",
+        "ROCR_VISIBLE_DEVICES": null,
+        "TORCH_ALLOW_TF32_CUBLAS_OVERRIDE": "0",
+        "TORCH_BLAS_PREFER_HIPBLASLT": "0",
+        "TRITON_CACHE_DIR": null,
+        "TRITON_DEFAULT_FP_FUSION": "1",
+        "TRITON_INTERPRET": "0",
+        "TRITON_KERNEL_OVERRIDE": "0",
+        "TRITON_OVERRIDE_ARCH": null
+      },
+      "fla_python_tree_sha256": "757ae2d0030e062700c586af236899ab26f6349805556a161b6749ad22784077",
+      "gdn_recurrence": {
+        "dispatch": "T=1-project-explicit;T>1-fla-fused-recurrent",
+        "final_state_dtype": "float32",
+        "gate_state_input_dtype": "float32",
+        "multi_token_implementation": "fla.ops.gated_delta_rule.fused_recurrent_gated_delta_rule",
+        "output_dtype": "bfloat16",
+        "output_final_state": true,
+        "qkv_input_dtype": "bfloat16",
+        "scale": 0.08838834764831845,
+        "single_token_implementation": "project-explicit-fp32-recurrence-v1"
+      },
+      "hip": "7.2.53211-97f5574fe2",
+      "matmul_precision": "highest",
+      "matmul_reduction": {
+        "allow_bf16_reduced_precision_reduction": true,
+        "allow_fp16_accumulation": false,
+        "allow_fp16_reduced_precision_reduction": true,
+        "allow_tf32": false
+      },
+      "platform": "Linux-7.0.0-31-generic-x86_64-with-glibc2.39",
+      "preferred_blas_library": "hipblas",
+      "profile": "rocm-hipblas-no-atomics-strict-deterministic-pv-gdn-v3",
+      "python": "3.11.16 (main, Sep  1 2026, 14:18:37) [Clang 22.1.3 ]",
+      "python_executable": "/ssdpool2nvme/local_llm/ninfer-sandbox/out/python/cpython-3.11.16-linux-x86_64-gnu/bin/python3.11",
+      "python_executable_sha256": "1e761eb19d6f2594ab8dc64bd99ad4e1753589f3bf1ec199e4eef3aaa21e3930",
+      "scorer_python_tree_sha256": "b09714374eed958d9e508ba415c6a4b2b913e944bada39a8d177be4b8cb113b7",
+      "stage_trace_enabled": false,
+      "torch": "2.9.1+rocm7.2.4.git39497456",
+      "torch_git": "394974567f84664f30602e971570223925ffbcc1",
+      "triton_codegen": {
+        "amd_global_prefetch": 0,
+        "amd_local_prefetch": 0,
+        "amd_scalarize_packed_fops": false,
+        "amd_use_async_copy": false,
+        "amd_use_block_pingpong": false,
+        "amd_use_buffer_atomics": true,
+        "amd_use_buffer_ops": false,
+        "amd_use_in_thread_transpose": false,
+        "default_fp_fusion": true,
+        "interpret": false,
+        "kernel_override": false,
+        "override_arch": null,
+        "target_arch": "gfx1201",
+        "target_backend": "hip"
+      },
+      "tunable_op": {
+        "enabled": false
+      }
+    },
+    "sources": {
+      "backend.py": "9d99ddb622cf96d920ff5362388d8397509cfa068d7b4cdd1de1ca1f5ab13bd1",
+      "gdn_full_span_probe.py": "e6902b5ea62482c38404d8b7829848c0e56b910e926860a30385cd477055b2da"
+    }
+  },
+  "quality_evidence": false,
+  "route": {
+    "dispatch": "T=1-project-explicit;T>1-fla-fused-recurrent",
+    "final_state_dtype": "float32",
+    "gate_state_input_dtype": "float32",
+    "multi_token_implementation": "fla.ops.gated_delta_rule.fused_recurrent_gated_delta_rule",
+    "output_dtype": "bfloat16",
+    "output_final_state": true,
+    "qkv_input_dtype": "bfloat16",
+    "scale": 0.08838834764831845,
+    "single_token_implementation": "project-explicit-fp32-recurrence-v1"
+  },
+  "run": {
+    "id": "b4ffa441-7eae-4d73-bcc8-c1c231b67e76",
+    "process_id": 3295519
+  },
+  "schema_version": 1
+}
