@@ -53,14 +53,14 @@ class PreparationTest(unittest.TestCase):
                     prep.prepare(Path(directory), root, bench=Path("bench"), planner=Path("planner"))
             self.assertFalse(root.exists())
 
-    def test_generated_plan_roundtrips_and_revalidates_current_inputs(self):
+    def test_same_selected_base_evaluator_plan_roundtrips_and_revalidates_inputs(self):
         with tempfile.TemporaryDirectory() as directory:
             parent = Path(directory)
             root = parent / "campaign"
             selected = parent / "base.json"
             selected.write_text("{}")
             fixture = self.plan(root)
-            route = {**fixture["route"], "base_benchmark": {"sha256": "old"}}
+            route = {**fixture["route"], "base_benchmark": {"sha256": "fresh"}}
             build = {"benchmark": {"path": "/fresh/bench/ninfer_bench", "sha256": "fresh"}}
             with patch.object(prep, "selected_base_route", return_value=route), \
                  patch.object(prep, "benchmark_profile", return_value=build), \
@@ -68,6 +68,8 @@ class PreparationTest(unittest.TestCase):
                  patch.object(prep, "_source_identity", return_value=fixture["dflash_source"]), \
                  patch.object(prep, "_conversion_python_identity", return_value=fixture["conversion_python"]):
                 plan = prep.prepare(selected, root, bench=Path("bench"), planner=Path("planner"))
+                self.assertEqual(plan["build"]["benchmark"]["sha256"],
+                                 plan["route"]["base_benchmark"]["sha256"])
                 self.assertEqual(prep._load_plan(root / "plan.json"), (plan, root))
                 self.assertEqual(json.loads((root / "plan.json").read_text()), plan)
                 self.assertEqual(len(list(root.glob("*/companion.ninfer"))), 0)

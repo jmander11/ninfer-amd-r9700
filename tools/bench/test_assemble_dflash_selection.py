@@ -27,6 +27,48 @@ from tools.ppl.pareto import _file_sha256, classify
 from tools.bench import assemble_dflash_selection as selection
 
 class DFlashSelectionTest(unittest.TestCase):
+    def test_recipe_evidence_accepts_same_base_binary_and_keeps_evidence_gates(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            conversion = root / "conversion.json"
+            conversion.write_text("{}")
+            artifact = {**self.artifact, "dflash_base_artifact": {"weights_id": "r9700-q4g64-n16k16-eval"},
+                        "dflash_conversion_report": selection._identity(conversion)}
+            route = {"base_artifact": artifact["dflash_base_artifact"], "base_benchmark": self.bench,
+                     "cache_group": 16, "text_prefill_attention_profile": "dense",
+                     "selected_prefill_chunk": 2048, "hybrid_base_authority": None}
+            manifest = {"artifact_type": "ninfer_bench_matrix_run", "schema_version": MATRIX_SCHEMA_VERSION,
+                        "preset": "dflash-shortlist", "dry_run": False, "failures": [],
+                        "selected_prefill_chunk": 2048, "prefill_chunks": [2048],
+                        "artifact": artifact, "bench": self.bench, "expected_kv_value_group": 16,
+                        "expected_q4_activation_bits": 8, "expected_w8_activation_bits": 8,
+                        "expected_fp8_qk_wmma_enabled": True, "expected_xattention_profile": "dense",
+                        "power_profile": self.auto_power,
+                        "commands": [{"command": [self.bench["path"], "--prefill-chunk", "2048"]}]}
+            shortlist = {"artifact_type": "ninfer_dflash_shortlist",
+                         "schema_version": selection.DFLASH_SHORTLIST_SCHEMA_VERSION,
+                         "artifact": artifact, "benchmark_executable": self.bench, "pass": True,
+                         "candidates": [{"valid_for_ranking": True, "profile": {
+                             "draft_tokens_requested": k, "verify_width_resolved": w}}
+                             for k, w in selection.DFLASH_PRODUCTION_PROFILES]}
+            (root / "manifest.json").write_text(json.dumps(manifest))
+            (root / "dflash-shortlist.json").write_text(json.dumps(shortlist))
+            with patch.object(selection, "inspect_artifact", return_value=artifact), \
+                 patch.object(selection, "require_dflash_companion", return_value=artifact), \
+                 patch.object(selection, "benchmark_profile", return_value={"benchmark": self.bench}), \
+                 patch.object(selection, "_records") as records, \
+                 patch.object(selection, "_validate_shortlist_output") as validate_shortlist:
+                result = selection.recipe_evidence(route, selection.RECIPES[0], conversion, root)
+                self.assertEqual(result["benchmark"], route["base_benchmark"])
+                records.assert_called_once_with(root, manifest, "dflash-shortlist", 4, 5, 2048)
+                validate_shortlist.assert_called_once_with(root, manifest, shortlist,
+                                                           artifact, self.bench, 2048)
+                validate_shortlist.side_effect = ValueError("raw parity failed")
+                with self.assertRaisesRegex(ValueError, "raw parity failed"):
+                    selection.recipe_evidence(route, selection.RECIPES[0], conversion, root)
+                with self.assertRaisesRegex(ValueError, "recipe, base, or conversion receipt"):
+                    selection.recipe_evidence(route, selection.RECIPES[1], conversion, root)
+
     artifact = {
         "path": "/dflash.ninfer", "file_size_bytes": 200, "sha256": "d" * 64,
         "model_id": "qwen3.8-27b", "weights_id": "r9700-q4g64-n16k16-dflash2-q4-eval",

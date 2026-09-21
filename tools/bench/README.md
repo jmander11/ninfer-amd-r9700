@@ -623,6 +623,8 @@ run_mixed_selection_pair 32 build-r9700-dense-selection-g32 \
 # capture); DFlash proposal attention and target/tree verification remain dense in every build.
 # Prepare only after real terminal base and receipt-bound chunk selection. The fresh benchmark
 # and planner must include all nine evaluation companion identities and match selected G/profile.
+# The selected base's own evaluator may be reused when it already admits those recipes;
+# a different executable hash is neither required nor proof of recipe support.
 # Conversion is explicitly CPU-only Python 3.11; provide a local dependency path if necessary.
 # Output is a new recipe-separated namespace. Preparation does not materialize or launch a GPU run.
 /home/battlefront/.local/bin/python3.11 -m tools.bench.prepare_selected_dflash prepare \

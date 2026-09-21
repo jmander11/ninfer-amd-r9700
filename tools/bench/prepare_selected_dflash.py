@@ -149,8 +149,6 @@ def prepare(selection: Path, out: Path, *, bench: Path, planner: Path,
         raise ValueError(f"output directory already exists: {out}")
     route = selected_base_route(selection.resolve(strict=True))
     build = benchmark_profile(bench, route["cache_group"], route["text_prefill_attention_profile"])
-    if build["benchmark"]["sha256"] == route["base_benchmark"]["sha256"]:
-        raise ValueError("DFlash evaluator must be rebuilt with recipe-aware companion admission")
     plan = {"artifact_type": "ninfer_r9700_selected_dflash_campaign_plan", "schema_version": 2,
             "status": "prepared_not_executed", "route": route, "build": build,
             "planner": _planner(route, bench, planner), "dflash_source": _source_identity(source),

@@ -683,8 +683,6 @@ def recipe_evidence(route: dict, recipe: str, conversion: Path, root: Path) -> d
                               route["text_prefill_attention_profile"])
     if build["benchmark"] != bench:
         raise ValueError("DFlash benchmark changed")
-    if bench["sha256"] == route["base_benchmark"]["sha256"]:
-        raise ValueError("DFlash evaluator must be rebuilt with recipe-aware companion admission")
     _same_campaign(manifest, artifact, bench, route["cache_group"],
                    route["text_prefill_attention_profile"], chunk,
                    route["hybrid_base_authority"], [5, 6])
