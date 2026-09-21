@@ -7,6 +7,9 @@
 #include "ops/r9700/linear/r9700_linear.h"
 #include "ops/r9700/linear/r9700_q4_activation_profile.h"
 #include "ops/r9700/linear/r9700_w8_activation_profile.h"
+#if NINFER_R9700_DFLASH_DOWN_SCALE_GATHER_CANDIDATE
+#include "ops/r9700/linear/dflash_down_scale_gather_qualification.h"
+#endif
 
 #include <hip/hip_bfloat16.h>
 
@@ -264,6 +267,25 @@ void linear_with_workspace(const Tensor& x, const Weight& weight, Tensor& output
         throw std::invalid_argument("linear: external activation workspace is too small");
     }
     if constexpr (r9700::linear::kQ4ActivationBits == 8) {
+#if NINFER_R9700_DFLASH_DOWN_SCALE_GATHER_CANDIDATE
+        if (dflash_target_verify_down && (tokens == 5U || tokens == 6U) &&
+            rows == 5120U && columns == 17408U && padded == 17408U) {
+            // This complete launcher owns fresh A8 preparation. Dispatch before the
+            // generic launcher, never after it, and do not reuse split-K storage.
+            HIP_CHECK(r9700::linear::qualification::dflash_down_scale_gather(
+                {.input = static_cast<const hip_bfloat16*>(x.data),
+                 .weight_codes = static_cast<const std::uint8_t*>(weight.qdata),
+                 .weight_code_bytes = static_cast<std::size_t>(code_bytes),
+                 .weight_scales = static_cast<const std::uint16_t*>(weight.scales),
+                 .weight_scale_bytes = static_cast<std::size_t>(scale_bytes),
+                 .activation_workspace = activation.data,
+                 .activation_workspace_bytes = workspace_bytes,
+                 .output = static_cast<hip_bfloat16*>(output.data),
+                 .tokens = tokens, .rows = rows, .columns = columns,
+                 .padded_columns = padded}, stream));
+            return;
+        }
+#endif
         HIP_CHECK(r9700::linear::a8q4g64_linear_candidate(
             {.input = static_cast<const hip_bfloat16*>(x.data),
              .weight_codes = static_cast<const std::uint8_t*>(weight.qdata),

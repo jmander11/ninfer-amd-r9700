@@ -1186,7 +1186,8 @@ void post_mixer_body(const Tensor& hidden, const Variant::PostMixerWeights& weig
                     Tensor& residual, qwen3::TextPhase phase, WorkspaceArena& workspace,
                     hipStream_t stream, Variant::ExecutionState* execution,
                     std::int32_t text_layer, bool dflash_target_verify,
-                    const Tensor* norm, float eps, bool ordinary_decode) {
+                    const Tensor* norm, float eps, bool ordinary_decode,
+                    std::int32_t route_tokens) {
     auto outer = workspace.scope();
     const auto project_gate_up = [&](Tensor& gate_up) {
         if (norm != nullptr) {
@@ -1232,8 +1233,15 @@ void post_mixer_body(const Tensor& hidden, const Variant::PostMixerWeights& weig
             return;
         }
         Tensor delta = workspace.alloc(DType::BF16, {TextConfig::hidden, hidden.ne[1]});
-        serialized_linear(execution, activation, weights.down, delta, workspace, stream,
-                          phase == qwen3::TextPhase::Verify && dflash_target_verify);
+        bool verify_down = phase == qwen3::TextPhase::Verify && dflash_target_verify;
+        if constexpr (ops::r9700::linear::kDFlashDownScaleGatherCandidateEnabled) {
+            verify_down = Variant::ExecutionState::dflash_down_scale_gather_selected(
+                true, ops::r9700::linear::kQ4ActivationBits, phase, dflash_target_verify,
+                route_tokens, text_layer, static_cast<std::uint32_t>(activation.ne[1]),
+                static_cast<std::uint32_t>(weights.down.n),
+                static_cast<std::uint32_t>(weights.down.k), weights.down.qtype, weights.down.layout);
+        }
+        serialized_linear(execution, activation, weights.down, delta, workspace, stream, verify_down);
         ops::residual_add(delta, residual, stream);
     }
 }
@@ -1243,17 +1251,17 @@ void post_mixer_body(const Tensor& hidden, const Variant::PostMixerWeights& weig
 void Variant::post_mixer(const Tensor& norm, float eps, const Tensor& hidden,
                          const PostMixerWeights& weights, Tensor& residual,
                          qwen3::TextPhase phase, WorkspaceArena& workspace, hipStream_t stream,
-                         std::int32_t, ExecutionState* execution, std::int32_t text_layer,
+                         std::int32_t route_tokens, ExecutionState* execution, std::int32_t text_layer,
                          bool dflash_target_verify, bool ordinary_decode) {
     post_mixer_body(hidden, weights, residual, phase, workspace, stream, execution, text_layer,
-                    dflash_target_verify, &norm, eps, ordinary_decode);
+                    dflash_target_verify, &norm, eps, ordinary_decode, route_tokens);
 }
 
 void Variant::mtp_post_mixer(const Tensor& hidden, const MtpPostMixerWeights& weights,
                              Tensor& residual, WorkspaceArena& workspace, hipStream_t stream,
                              std::int32_t, ExecutionState* execution) {
     post_mixer_body(hidden, weights, residual, qwen3::TextPhase::Verify, workspace, stream,
-                    execution, -1, false, nullptr, 0.0F, false);
+                    execution, -1, false, nullptr, 0.0F, false, 0);
 }
 
 std::size_t Variant::mtp_attention_projection_workspace_capacity_bytes(std::int32_t first,

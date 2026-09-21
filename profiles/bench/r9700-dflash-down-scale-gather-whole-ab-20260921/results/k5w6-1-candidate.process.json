@@ -1,0 +1,50 @@
+{
+  "command": [
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-down-scale-gather-candidate-20260921/bench/ninfer_bench",
+    "--weights",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval.ninfer",
+    "--corpus",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids",
+    "--device",
+    "0",
+    "--concurrency",
+    "1",
+    "--whole-pg",
+    "128,64",
+    "--prefill-chunk",
+    "4096",
+    "--kv-capacity",
+    "workload",
+    "--retain-token-ids",
+    "--output",
+    "json",
+    "--output-file",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/k5w6-1-candidate.json",
+    "-r",
+    "3",
+    "--warmup",
+    "1",
+    "--spec",
+    "dflash",
+    "--draft-tokens",
+    "5",
+    "--dflash-verify-width",
+    "6",
+    "--lm-head-draft"
+  ],
+  "exit_code": 0,
+  "started_unix_ns": 1789972891090132146,
+  "finished_unix_ns": 1789972929553558752,
+  "power_before": "auto",
+  "power_after": "auto",
+  "stdout": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/k5w6-1-candidate.stdout",
+    "bytes": 141,
+    "sha256": "cc76360bf095d4a8db97627050e3cb48b468c93f0440b612765834d9ccd75d1f"
+  },
+  "stderr": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/k5w6-1-candidate.stderr",
+    "bytes": 254,
+    "sha256": "c9b4e72863e2249ae093e5446893755365acde37fb8be02c06c38b6a89a5d694"
+  }
+}

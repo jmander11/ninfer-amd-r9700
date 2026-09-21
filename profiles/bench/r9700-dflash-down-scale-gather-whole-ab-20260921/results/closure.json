@@ -1,0 +1,225 @@
+{
+  "status": "completed",
+  "disposition": "admitted",
+  "error": null,
+  "started_unix_ns": 1789972680253899586,
+  "finished_unix_ns": 1789973050719659022,
+  "plan": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/plan.json",
+    "bytes": 13686,
+    "sha256": "358f4bca0db93a0b3736b93b2e711e23d2350284972a60ee2796eb4e68434587"
+  },
+  "artifacts": [
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/k4w5-1-control.json",
+      "bytes": 9016,
+      "sha256": "700d12b30ce63c016abfa21f2872a19b1082e49a677345a2f50091ab35d2f2bb"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/k4w5-1-control.process.json",
+      "bytes": 1607,
+      "sha256": "7bfd68fd4e79daf38f87340732821adaace15b1c21c7cc4c4426163af6b1402a"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/k4w5-1-control.stderr",
+      "bytes": 254,
+      "sha256": "c3d5d233e355f16d34f13aaa711b177df22bbee9d89c7d4e97052ab6c341d0a3"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/k4w5-1-control.stdout",
+      "bytes": 139,
+      "sha256": "e849cbf0cd10cbf1e2502b94696eb2652c35cb167b9ac388e63aa2ffeb520ca1"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/k4w5-2-candidate.json",
+      "bytes": 9023,
+      "sha256": "7cc54d76b7837e2fa4cde18dcad2ea94d88f16041d4d641b318dbe35ad8849cc"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/k4w5-2-candidate.process.json",
+      "bytes": 1615,
+      "sha256": "eea374bb71cb616d6986d2576e3315df4654e9fa7d4ae906b59e6a5220c1b2d6"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/k4w5-2-candidate.stderr",
+      "bytes": 254,
+      "sha256": "c3d5d233e355f16d34f13aaa711b177df22bbee9d89c7d4e97052ab6c341d0a3"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/k4w5-2-candidate.stdout",
+      "bytes": 141,
+      "sha256": "dd7e04e35af551b5bf7bfd182c3461e0b2aed40544084eb12c31ba73a8d1b3ec"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/k4w5-3-candidate.json",
+      "bytes": 9021,
+      "sha256": "1e7f4ad59df3c71c0ba6b09b02f5450185614bd48393b670f7def18dcc626f98"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/k4w5-3-candidate.process.json",
+      "bytes": 1615,
+      "sha256": "778070723bf265137406fe8086eb31316662d9244a76c3f341e15003b70c0b43"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/k4w5-3-candidate.stderr",
+      "bytes": 254,
+      "sha256": "c3d5d233e355f16d34f13aaa711b177df22bbee9d89c7d4e97052ab6c341d0a3"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/k4w5-3-candidate.stdout",
+      "bytes": 141,
+      "sha256": "d2a3f0f35c6e3eb75db3a43c54c4a5c3a31be8ef0397cfa95fac94c31bd69140"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/k4w5-4-control.json",
+      "bytes": 9023,
+      "sha256": "3bcb5845e2298fc05001b08acd76f0242e8e8f3cb3f332a35ec3ec39b59c3224"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/k4w5-4-control.process.json",
+      "bytes": 1607,
+      "sha256": "61dc2a0b4857c4cf9d7226afc774f61fc719cb799c2ddb806a5af835d86e5c9a"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/k4w5-4-control.stderr",
+      "bytes": 254,
+      "sha256": "c3d5d233e355f16d34f13aaa711b177df22bbee9d89c7d4e97052ab6c341d0a3"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/k4w5-4-control.stdout",
+      "bytes": 139,
+      "sha256": "00c35d910880276d22f9416d94eb115cc5e1e279aa75d2310a3625b1f126db51"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/k5w6-1-candidate.json",
+      "bytes": 9010,
+      "sha256": "87768aecc86a3cc64f614d0717f9364bd7d5bf253871fe19e3358d5ca0eb91dd"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/k5w6-1-candidate.process.json",
+      "bytes": 1615,
+      "sha256": "bbb798772c57aca3d28b2500ebdb7e3f787b050d17f6d89375d428be129df690"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/k5w6-1-candidate.stderr",
+      "bytes": 254,
+      "sha256": "c9b4e72863e2249ae093e5446893755365acde37fb8be02c06c38b6a89a5d694"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/k5w6-1-candidate.stdout",
+      "bytes": 141,
+      "sha256": "cc76360bf095d4a8db97627050e3cb48b468c93f0440b612765834d9ccd75d1f"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/k5w6-2-control.json",
+      "bytes": 9002,
+      "sha256": "dd0bbc207c170e3896b65557fda6f22ba4273c96ea2cddeab5e29dcf749cc740"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/k5w6-2-control.process.json",
+      "bytes": 1607,
+      "sha256": "6e4aa09c95159f8de915aebc9340a5d4903223956a61dfbdd468bb66c8deb441"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/k5w6-2-control.stderr",
+      "bytes": 254,
+      "sha256": "c9b4e72863e2249ae093e5446893755365acde37fb8be02c06c38b6a89a5d694"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/k5w6-2-control.stdout",
+      "bytes": 139,
+      "sha256": "f01a24e973920393f79f0bf1d4ecbea436b00c2c12fc5bb94db66a9a588e684f"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/k5w6-3-control.json",
+      "bytes": 8997,
+      "sha256": "f298ded89e614b4b36b97a7a30cad17f5ed23144d18c78b2dc314d87e978cc1a"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/k5w6-3-control.process.json",
+      "bytes": 1607,
+      "sha256": "28e7b54da15c53899c7f4bd6bec2ef4f7197769fb83844c41b0c8d6b3b3a540c"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/k5w6-3-control.stderr",
+      "bytes": 254,
+      "sha256": "c9b4e72863e2249ae093e5446893755365acde37fb8be02c06c38b6a89a5d694"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/k5w6-3-control.stdout",
+      "bytes": 139,
+      "sha256": "80d31d8a77edf42d6b4e4c83603e7a4b5f8cd734de316b6f96ca275fc97ced17"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/k5w6-4-candidate.json",
+      "bytes": 9018,
+      "sha256": "0241de8fd73c82e7b2ae0fe0de3e2c67b9b0c587ae56e80962c2e8a86528cffb"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/k5w6-4-candidate.process.json",
+      "bytes": 1615,
+      "sha256": "463ac0b122716dff594a75da9e975e85f7fd5efff43d87f58ae8bee5f0727791"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/k5w6-4-candidate.stderr",
+      "bytes": 254,
+      "sha256": "c9b4e72863e2249ae093e5446893755365acde37fb8be02c06c38b6a89a5d694"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/k5w6-4-candidate.stdout",
+      "bytes": 141,
+      "sha256": "88ed2cd13209e9e701de5ae2e9c5a9f9510b41efadb97b68ed39be95992b5632"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/ordinary-candidate.json",
+      "bytes": 8845,
+      "sha256": "32951084dd4989258114f2413399f7307bb50d9df14ec09d8eb4ca60bec3ae98"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/ordinary-candidate.process.json",
+      "bytes": 1557,
+      "sha256": "277096e1e20493d56da044d84a8809abd04a4520c5be9ce9e4fdb18502954332"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/ordinary-candidate.stderr",
+      "bytes": 254,
+      "sha256": "bc720a01a0cc8cdd49f8ca1ec88d0298213c6dd32986eb244dbb6b17eb577568"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/ordinary-candidate.stdout",
+      "bytes": 143,
+      "sha256": "7878f7f2c58dd89c6351d499c2f0bbc079f441545c16e522b1ce4137132afeb7"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/ordinary-control.json",
+      "bytes": 8837,
+      "sha256": "2fbe85b80968d751569b562cf8ae7d252930db52e1f3966db31d16e6e380cb2d"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/ordinary-control.process.json",
+      "bytes": 1549,
+      "sha256": "3ab7b2743b06ca48dd0027eb3372533f56e7ae88134470a9d0183bde057a0cfa"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/ordinary-control.stderr",
+      "bytes": 254,
+      "sha256": "bc720a01a0cc8cdd49f8ca1ec88d0298213c6dd32986eb244dbb6b17eb577568"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/ordinary-control.stdout",
+      "bytes": 141,
+      "sha256": "037a870646683ba052cb8e98f15b61bfc39a8bf7e4d4dc77c6c2cba762453f5d"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/plan-identity.json",
+      "bytes": 229,
+      "sha256": "8545d11e05e0abaa70098b84fd4b7842e6a9962c1180d516a8ff9aa63a8e36cb"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results/summary.json",
+      "bytes": 5616,
+      "sha256": "879cbf033e95db1e35e40f14c28b43e3d769911f052e0ff9f125ef8b96a1ee95"
+    }
+  ],
+  "production_routing_authorized": false
+}

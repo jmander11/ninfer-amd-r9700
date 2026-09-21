@@ -83,6 +83,16 @@ struct Variant {
             std::int32_t text_layer, hipStream_t stream);
         [[nodiscard]] static bool normalized_linear_t1_inventory_q4(
             const ModelView& model) noexcept;
+        [[nodiscard]] static constexpr bool dflash_down_scale_gather_selected(
+            bool enabled, std::uint32_t activation_bits, qwen3::TextPhase phase,
+            bool dflash_target_verify, std::int32_t route_tokens, std::int32_t text_layer,
+            std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns,
+            QType weight, QuantLayout layout) noexcept {
+            return enabled && activation_bits == 8 && phase == qwen3::TextPhase::Verify &&
+                dflash_target_verify && route_tokens == 0 && text_layer >= 0 && text_layer < 64 &&
+                (tokens == 5 || tokens == 6) && rows == 5120 && columns == 17408 &&
+                weight == QType::Q4G64_F16S && layout == QuantLayout::Q4N16K16;
+        }
         [[nodiscard]] static constexpr bool normalized_linear_t1_selected(
             std::uint32_t activation_bits, bool all_q4_text_inventory,
             qwen3::TextPhase phase, bool ordinary_decode,

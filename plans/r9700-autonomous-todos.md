@@ -834,7 +834,7 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   `172bc3e277821cb3f2977c6edc8e9359a0b48cd15d67d8a7136ce8b6373ccf50`; independent result audit
   reported `SHIP` for exact-token and matched whole-graph preparation. Production is unchanged.
 
-- [ ] `DFLASH-DOWN-SCALE-GATHER-WHOLE` Integrate the exact qualified T5/T6 scale-gather route behind
+- [x] `DFLASH-DOWN-SCALE-GATHER-WHOLE` Integrate the exact qualified T5/T6 scale-gather route behind
   one build-bound candidate predicate for DFlash target-verify down only; do not reuse or widen the
   rejected split-K selector. Retain identical workspace planning because the route uses only the
   existing A8 scratch. Through one fresh reviewed create-only package, require ordinary controls
@@ -843,6 +843,27 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   proposal head. Admit production only if both widths remain materially faster at decode-output
   scope; otherwise remove the candidate route and retain the direct evidence as a rejected
   whole-level mechanism. Do not infer the `>=60 tok/s` terminal target from this gate.
+
+  CLOSED CANDIDATE GATE 2026-09-21. The reviewed campaign at
+  `profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results` retained exact 65-token
+  ordinary/K4W5/K5W6 parity in all 30 repetitions, exact per-width speculative accounting, and
+  unchanged workspace/graph capacity. K4/W5 decode improved `16.29055→17.37589 tok/s` with robust
+  ratio upper `0.97047898`; K5/W6 improved `16.38600→17.58698 tok/s` with upper `0.93464897`.
+  Whole-output gates and both launch orders also passed; all 12 paired decode and whole comparisons
+  won. Result-manifest SHA-256 is
+  `78ba0d0a95ff1888adc43d54044fd3b6b59cdfe052487c70d4b28ddb912bed30`; independent audit reported
+  `SHIP` for narrow in-mode production promotion. Matched ordinary decode remained about
+  `19.82 tok/s`, so this neither selects DFlash as default nor closes `DFLASH-WHOLE`.
+
+- [ ] `DFLASH-DOWN-SCALE-GATHER-PROMOTE` Promote only the exact admitted C1 base-Text Verify
+  K4/W5 and K5/W6 route. Move the kernel/launcher out of qualification naming into the owning
+  Linear Op, make the target-owned A8/Q4/T5/T6/`route_tokens==0` predicate unconditional, retain
+  one fresh A8 preparation and existing graph-stable workspace, and remove the temporary selector
+  and report fields. Retire the overlapping default-off split-K production selector, kernels,
+  partial-workspace planning and report fields because it owns the same cell and failed public-token
+  parity; preserve sealed historical evidence. Rebuild linked numerical/ISA qualification and run
+  one fresh exact-token production confirmation against the retained candidate/control. Do not
+  widen to C2..4 or treat this scoped promotion as the final recipe/acceptance decision.
 
 ## Durable decision rule (added 2026-09-12)
 

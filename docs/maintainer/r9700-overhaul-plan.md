@@ -2113,6 +2113,14 @@ Replace functional routes with measured gfx1201 families:
   whole Device-Graph A/B. At retained acceptance, eliminating all verify-down time predicts only
   about `19 tok/s`, so final companion recipe/quality selection must improve acceptance for the
   `>=60 decode-output tok/s` target.
+  Its subsequent reviewed C1/P128+G64 Device-Graph A/B retained exact 65-token parity and
+  speculative accounting across all 30 repetitions. K4/W5 decode improved
+  `16.29055→17.37589 tok/s`; K5/W6 improved `16.38600→17.58698 tok/s`; every paired comparison and
+  both whole-output gates won with unchanged workspace/graph capacity. Evidence is sealed at
+  `profiles/bench/r9700-dflash-down-scale-gather-whole-ab-20260921/results`; result-manifest SHA-256
+  is `78ba0d0a95ff1888adc43d54044fd3b6b59cdfe052487c70d4b28ddb912bed30`. Matched ordinary decode
+  remained about `19.82 tok/s`, so the result authorizes only surgical in-mode kernel promotion,
+  not default DFlash selection or closure of the recipe-aware DFlash gate.
 - [ ] After the dense C1/P2048/spec-none floor and practical-ceiling gate passes and the shared
   chunk is selected, rerun all 48 post-promotion capacity cells (dense/XAttention times
   all-Q4/mixed/four-role-hybrid times G16/G32, each at C=1..4). Bind the newly measured Device Graph

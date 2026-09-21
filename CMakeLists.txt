@@ -100,6 +100,24 @@ endif()
 add_compile_definitions(
   NINFER_R9700_DFLASH_DOWN_SPLITK_FACTOR=${NINFER_R9700_DFLASH_DOWN_SPLITK_FACTOR})
 
+# Qualification-only matched whole-DFlash scale-gather A/B. Its target owner admits
+# only C1 base-Text verification at W5/W6; ordinary Linear is never selected by shape alone.
+set(NINFER_R9700_DFLASH_DOWN_SCALE_GATHER_CANDIDATE "0" CACHE STRING
+  "Enable the qualified DFlash verify-down T5/T6 scale-gather candidate")
+set_property(CACHE NINFER_R9700_DFLASH_DOWN_SCALE_GATHER_CANDIDATE PROPERTY STRINGS 0 1)
+if(NOT NINFER_R9700_DFLASH_DOWN_SCALE_GATHER_CANDIDATE STREQUAL "0" AND
+   NOT NINFER_R9700_DFLASH_DOWN_SCALE_GATHER_CANDIDATE STREQUAL "1")
+  message(FATAL_ERROR "NINFER_R9700_DFLASH_DOWN_SCALE_GATHER_CANDIDATE must be 0 or 1")
+endif()
+if(NINFER_R9700_DFLASH_DOWN_SCALE_GATHER_CANDIDATE STREQUAL "1" AND
+   (NINFER_R9700_DFLASH_DOWN_SPLITK_CANDIDATE STREQUAL "1" OR
+    NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE STREQUAL "1" OR
+    NINFER_R9700_DFLASH_SMALL_T_CANDIDATE STREQUAL "1"))
+  message(FATAL_ERROR "DFlash scale-gather cannot be combined with another Q4 challenger")
+endif()
+add_compile_definitions(
+  NINFER_R9700_DFLASH_DOWN_SCALE_GATHER_CANDIDATE=${NINFER_R9700_DFLASH_DOWN_SCALE_GATHER_CANDIDATE})
+
 # Qualification-selected exact DFlash RMSNorm route. Zero retains the ordinary rows1..4 CTA
 # domain; one additionally admits only the independently qualified K5120 rows5/6 cells.
 set(NINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE "0" CACHE STRING
