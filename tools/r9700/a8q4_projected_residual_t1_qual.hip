@@ -12,6 +12,24 @@ namespace {
 
 namespace eager = ninfer::ops::r9700::eager;
 
+class ResidualStream {
+public:
+    ResidualStream() { HIP_CHECK(hipStreamCreateWithFlags(&stream_, hipStreamNonBlocking)); }
+    ~ResidualStream() { (void)hipStreamDestroy(stream_); }
+    ResidualStream(const ResidualStream&) = delete;
+    ResidualStream& operator=(const ResidualStream&) = delete;
+    hipStream_t get() const { return stream_; }
+private:
+    hipStream_t stream_ = nullptr;
+};
+
+void copy_ordered(void* destination, const void* source, std::size_t bytes,
+                  hipMemcpyKind kind, hipStream_t stream) {
+    HIP_CHECK(hipMemcpyAsync(destination, source, bytes, kind, stream));
+    // Host vectors and stack payloads can leave scope immediately after this call.
+    HIP_CHECK(hipStreamSynchronize(stream));
+}
+
 constexpr std::uint32_t kRows = 5120U;
 constexpr std::uint32_t kGroupCountFactor = 64U;
 constexpr std::size_t kCopies = 3U;
@@ -232,7 +250,7 @@ bool valid_candidate(const CandidateArgs& args) {
     return true;
 }
 
-hipError_t launch_candidate(const CandidateArgs& args, hipStream_t stream = nullptr) {
+hipError_t launch_candidate(const CandidateArgs& args, hipStream_t stream) {
     if (!valid_candidate(args)) return hipErrorInvalidValue;
     linear::A8G64ActivationWorkspace workspace{};
     if (linear::a8q4g64_bind_activation_workspace(
@@ -257,7 +275,7 @@ linear::A8Q4G64CandidateArgs incumbent_args(
 }
 
 hipError_t launch_incumbent(const CandidateArgs& args, hip_bfloat16* delta,
-                            hipStream_t stream = nullptr) {
+                            hipStream_t stream) {
     if (!valid_candidate(args) || overlap(delta, kRows * 2U, args.residual, kRows * 2U))
         return hipErrorInvalidValue;
     hipError_t status = linear::a8q4g64_linear_candidate(
@@ -266,22 +284,22 @@ hipError_t launch_incumbent(const CandidateArgs& args, hip_bfloat16* delta,
     return eager::residual_add_bf16(delta, args.residual, kRows, stream);
 }
 
-void scrub(DeviceBuffer<std::uint32_t>& buffer) {
+void scrub(DeviceBuffer<std::uint32_t>& buffer, hipStream_t stream) {
     constexpr std::uint32_t threads = 256U;
     const std::size_t count = buffer.bytes() / sizeof(std::uint32_t);
     hipLaunchKernelGGL(projected_residual_cache_scrub_kernel,
                        dim3(static_cast<unsigned>((count + threads - 1U) / threads)),
-                       dim3(threads), 0, nullptr, buffer.get(), count);
+                       dim3(threads), 0, stream, buffer.get(), count);
     HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipStreamSynchronize(stream));
 }
 
-double timed(const std::function<hipError_t()>& launch) {
+double timed(const std::function<hipError_t()>& launch, hipStream_t stream) {
     Event begin;
     Event end;
-    HIP_CHECK(hipEventRecord(begin.get()));
+    HIP_CHECK(hipEventRecord(begin.get(), stream));
     HIP_CHECK(launch());
-    HIP_CHECK(hipEventRecord(end.get()));
+    HIP_CHECK(hipEventRecord(end.get(), stream));
     HIP_CHECK(hipEventSynchronize(end.get()));
     float elapsed = 0.0F;
     HIP_CHECK(hipEventElapsedTime(&elapsed, begin.get(), end.get()));
@@ -295,24 +313,25 @@ template <std::size_t N> double even_median(std::array<double, N> values) {
 
 void fill_guarded(DeviceBuffer<hip_bfloat16>& buffer,
                   const std::vector<hip_bfloat16>& payload_values,
-                  std::uint16_t guard) {
+                  std::uint16_t guard, hipStream_t stream) {
     std::vector<hip_bfloat16> host(payload_values.size() + 2U);
     host.front().data = guard;
     host.back().data = guard;
     std::copy(payload_values.begin(), payload_values.end(), host.begin() + 1);
-    HIP_CHECK(hipMemcpy(buffer.get(), host.data(), buffer.bytes(), hipMemcpyHostToDevice));
+    copy_ordered(buffer.get(), host.data(), buffer.bytes(), hipMemcpyHostToDevice, stream);
 }
 
 std::vector<hip_bfloat16> download_guarded(const DeviceBuffer<hip_bfloat16>& buffer,
-                                           std::uint16_t guard, const char* label) {
+                                           std::uint16_t guard, const char* label,
+                                           hipStream_t stream) {
     std::vector<hip_bfloat16> host(kRows + 2U);
-    HIP_CHECK(hipMemcpy(host.data(), buffer.get(), buffer.bytes(), hipMemcpyDeviceToHost));
+    copy_ordered(host.data(), buffer.get(), buffer.bytes(), hipMemcpyDeviceToHost, stream);
     if (host.front().data != guard || host.back().data != guard)
         fail(std::string(label) + " changed a canary");
     return {host.begin() + 1, host.end() - 1};
 }
 
-CaseResult run_case(const ResidualShape& shape) {
+CaseResult run_case(const ResidualShape& shape, hipStream_t stream) {
     const std::uint32_t groups = shape.columns / kGroupCountFactor;
     const auto input = make_decode_dot8_input(shape.columns);
     const auto activation = quantize_host(input, 1U, shape.columns);
@@ -320,15 +339,15 @@ CaseResult run_case(const ResidualShape& shape) {
     distinguish_weights(weights, shape.columns);
     const auto initial_residual = make_residual(shape.columns);
     DeviceBuffer<hip_bfloat16> d_input(input.size());
-    HIP_CHECK(hipMemcpy(d_input.get(), input.data(), d_input.bytes(), hipMemcpyHostToDevice));
+    copy_ordered(d_input.get(), input.data(), d_input.bytes(), hipMemcpyHostToDevice, stream);
     std::array<DeviceWeights, kCopies> copies;
     for (auto& copy : copies) {
         copy.codes = std::make_unique<DeviceBuffer<std::uint8_t>>(weights.codes.size());
         copy.scales = std::make_unique<DeviceBuffer<std::uint16_t>>(weights.scales.size());
-        HIP_CHECK(hipMemcpy(copy.codes->get(), weights.codes.data(), copy.codes->bytes(),
-                            hipMemcpyHostToDevice));
-        HIP_CHECK(hipMemcpy(copy.scales->get(), weights.scales.data(), copy.scales->bytes(),
-                            hipMemcpyHostToDevice));
+        copy_ordered(copy.codes->get(), weights.codes.data(), copy.codes->bytes(),
+                     hipMemcpyHostToDevice, stream);
+        copy_ordered(copy.scales->get(), weights.scales.data(), copy.scales->bytes(),
+                     hipMemcpyHostToDevice, stream);
     }
     const std::size_t workspace_bytes =
         linear::a8q4g64_activation_workspace_capacity_bytes(1U, shape.columns);
@@ -337,7 +356,7 @@ CaseResult run_case(const ResidualShape& shape) {
     DeviceBuffer<hip_bfloat16> incumbent(kRows + 2U);
     DeviceBuffer<hip_bfloat16> candidate(kRows + 2U);
     DeviceBuffer<std::uint32_t> scrub_buffer(kScrubBytes / sizeof(std::uint32_t));
-    HIP_CHECK(hipMemset(scrub_buffer.get(), 0x5a, scrub_buffer.bytes()));
+    HIP_CHECK(hipMemsetAsync(scrub_buffer.get(), 0x5a, scrub_buffer.bytes(), stream));
     auto args_for = [&](std::size_t copy, hip_bfloat16* residual) {
         return CandidateArgs{d_input.get(), copies[copy].codes->get(), copies[copy].codes->bytes(),
             copies[copy].scales->get(), copies[copy].scales->bytes(), workspace.get(),
@@ -346,33 +365,33 @@ CaseResult run_case(const ResidualShape& shape) {
     auto valid = args_for(0U, candidate.get() + 1U);
     auto malformed = valid;
     malformed.tokens = 2U;
-    if (launch_candidate(malformed) != hipErrorInvalidValue) fail("projected residual accepted T2");
+    if (launch_candidate(malformed, stream) != hipErrorInvalidValue) fail("projected residual accepted T2");
     malformed = valid; malformed.rows = 4096U;
-    if (launch_candidate(malformed) != hipErrorInvalidValue) fail("projected residual accepted N4096");
+    if (launch_candidate(malformed, stream) != hipErrorInvalidValue) fail("projected residual accepted N4096");
     malformed = valid; malformed.columns = 5120U; malformed.padded_columns = 5120U;
-    if (launch_candidate(malformed) != hipErrorInvalidValue) fail("projected residual accepted K5120");
+    if (launch_candidate(malformed, stream) != hipErrorInvalidValue) fail("projected residual accepted K5120");
     malformed = valid; --malformed.weight_code_bytes;
-    if (launch_candidate(malformed) != hipErrorInvalidValue) fail("projected residual accepted short codes");
+    if (launch_candidate(malformed, stream) != hipErrorInvalidValue) fail("projected residual accepted short codes");
     malformed = valid; ++malformed.weight_codes;
-    if (launch_candidate(malformed) != hipErrorInvalidValue) fail("projected residual accepted misalignment");
+    if (launch_candidate(malformed, stream) != hipErrorInvalidValue) fail("projected residual accepted misalignment");
     malformed = valid; malformed.workspace = malformed.residual;
-    if (launch_candidate(malformed) != hipErrorInvalidValue) fail("projected residual accepted workspace alias");
+    if (launch_candidate(malformed, stream) != hipErrorInvalidValue) fail("projected residual accepted workspace alias");
     malformed = valid; malformed.input = reinterpret_cast<const hip_bfloat16*>(malformed.weight_codes);
-    if (launch_candidate(malformed) != hipErrorInvalidValue) fail("projected residual accepted input alias");
+    if (launch_candidate(malformed, stream) != hipErrorInvalidValue) fail("projected residual accepted input alias");
     malformed = valid; malformed.residual = const_cast<hip_bfloat16*>(malformed.input);
-    if (launch_candidate(malformed) != hipErrorInvalidValue) fail("projected residual accepted residual alias");
+    if (launch_candidate(malformed, stream) != hipErrorInvalidValue) fail("projected residual accepted residual alias");
 
-    fill_guarded(incumbent, initial_residual, 0x7fc2U);
-    fill_guarded(candidate, initial_residual, 0x7fc3U);
+    fill_guarded(incumbent, initial_residual, 0x7fc2U, stream);
+    fill_guarded(candidate, initial_residual, 0x7fc3U, stream);
     std::vector<hip_bfloat16> delta_seed(kRows);
     for (auto& value : delta_seed) value.data = 0x7fc4U;
-    fill_guarded(delta, delta_seed, 0x7fc4U);
-    HIP_CHECK(launch_incumbent(args_for(0U, incumbent.get() + 1U), delta.get() + 1U));
-    HIP_CHECK(launch_candidate(args_for(0U, candidate.get() + 1U)));
-    HIP_CHECK(hipDeviceSynchronize());
-    const auto incumbent_host = download_guarded(incumbent, 0x7fc2U, "incumbent residual");
-    const auto candidate_host = download_guarded(candidate, 0x7fc3U, "candidate residual");
-    const auto delta_host = download_guarded(delta, 0x7fc4U, "incumbent delta");
+    fill_guarded(delta, delta_seed, 0x7fc4U, stream);
+    HIP_CHECK(launch_incumbent(args_for(0U, incumbent.get() + 1U), delta.get() + 1U, stream));
+    HIP_CHECK(launch_candidate(args_for(0U, candidate.get() + 1U), stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+    const auto incumbent_host = download_guarded(incumbent, 0x7fc2U, "incumbent residual", stream);
+    const auto candidate_host = download_guarded(candidate, 0x7fc3U, "candidate residual", stream);
+    const auto delta_host = download_guarded(delta, 0x7fc4U, "incumbent delta", stream);
     if (!std::equal(incumbent_host.begin(), incumbent_host.end(), candidate_host.begin(),
                     [](hip_bfloat16 lhs, hip_bfloat16 rhs) { return lhs.data == rhs.data; }))
         fail("projected residual is not bit-exact to Linear plus residual-add");
@@ -407,15 +426,15 @@ CaseResult run_case(const ResidualShape& shape) {
 
     hip_bfloat16 nan{};
     nan.data = 0x7fc1U;
-    HIP_CHECK(hipMemcpy(d_input.get(), &nan, sizeof(nan), hipMemcpyHostToDevice));
-    fill_guarded(candidate, initial_residual, 0x7fc5U);
-    HIP_CHECK(launch_candidate(args_for(0U, candidate.get() + 1U)));
-    HIP_CHECK(hipDeviceSynchronize());
-    const auto poisoned = download_guarded(candidate, 0x7fc5U, "status-poison residual");
+    copy_ordered(d_input.get(), &nan, sizeof(nan), hipMemcpyHostToDevice, stream);
+    fill_guarded(candidate, initial_residual, 0x7fc5U, stream);
+    HIP_CHECK(launch_candidate(args_for(0U, candidate.get() + 1U), stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+    const auto poisoned = download_guarded(candidate, 0x7fc5U, "status-poison residual", stream);
     if (!std::all_of(poisoned.begin(), poisoned.end(), [](hip_bfloat16 value) {
             return value.data == 0x7fc1U;
         })) fail("projected residual did not poison every output");
-    HIP_CHECK(hipMemcpy(d_input.get(), input.data(), d_input.bytes(), hipMemcpyHostToDevice));
+    copy_ordered(d_input.get(), input.data(), d_input.bytes(), hipMemcpyHostToDevice, stream);
 
     CaseResult result{shape, maximum_delta_steps, maximum_residual_steps};
     std::array<std::array<double, kSamplesPerCopy>, kCopies> incumbent_by_copy{};
@@ -423,31 +442,31 @@ CaseResult run_case(const ResidualShape& shape) {
     std::array<std::size_t, kCopies> incumbent_count{}, candidate_count{};
     std::array<std::size_t, kCopies> incumbent_first_count{}, candidate_first_count{};
     for (std::size_t warm = 0U; warm < 6U; ++warm) {
-        fill_guarded(incumbent, initial_residual, 0x7fc2U);
+        fill_guarded(incumbent, initial_residual, 0x7fc2U, stream);
         HIP_CHECK(launch_incumbent(args_for(warm % kCopies, incumbent.get() + 1U),
-                                   delta.get() + 1U));
-        fill_guarded(candidate, initial_residual, 0x7fc3U);
-        HIP_CHECK(launch_candidate(args_for(warm % kCopies, candidate.get() + 1U)));
+                                   delta.get() + 1U, stream));
+        fill_guarded(candidate, initial_residual, 0x7fc3U, stream);
+        HIP_CHECK(launch_candidate(args_for(warm % kCopies, candidate.get() + 1U), stream));
     }
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipStreamSynchronize(stream));
     for (std::size_t trial = 0U; trial < kResidualTrials; ++trial) {
         const std::size_t incumbent_copy = trial % kCopies;
         const std::size_t candidate_copy = incumbent_copy;
         if (kIncumbentFirst[trial]) ++incumbent_first_count[incumbent_copy];
         else ++candidate_first_count[candidate_copy];
         const auto run_incumbent = [&] {
-            scrub(scrub_buffer);
-            fill_guarded(incumbent, initial_residual, 0x7fc2U);
+            scrub(scrub_buffer, stream);
+            fill_guarded(incumbent, initial_residual, 0x7fc2U, stream);
             const double value = timed([&] { return launch_incumbent(
-                args_for(incumbent_copy, incumbent.get() + 1U), delta.get() + 1U); });
+                args_for(incumbent_copy, incumbent.get() + 1U), delta.get() + 1U, stream); }, stream);
             result.incumbent_samples[trial] = value;
             incumbent_by_copy[incumbent_copy][incumbent_count[incumbent_copy]++] = value;
         };
         const auto run_candidate = [&] {
-            scrub(scrub_buffer);
-            fill_guarded(candidate, initial_residual, 0x7fc3U);
+            scrub(scrub_buffer, stream);
+            fill_guarded(candidate, initial_residual, 0x7fc3U, stream);
             const double value = timed([&] { return launch_candidate(
-                args_for(candidate_copy, candidate.get() + 1U)); });
+                args_for(candidate_copy, candidate.get() + 1U), stream); }, stream);
             result.candidate_samples[trial] = value;
             candidate_by_copy[candidate_copy][candidate_count[candidate_copy]++] = value;
         };
@@ -491,19 +510,21 @@ std::string read_all_text(const std::filesystem::path& path) {
 
 int main(int argc, char** argv) {
     try {
-        if (argc != 9 || std::string_view(argv[1]) != "--out-json" ||
+        if (argc != 11 || std::string_view(argv[1]) != "--out-json" ||
             std::string_view(argv[3]) != "--assembly" ||
             std::string_view(argv[5]) != "--static-receipt" ||
-            std::string_view(argv[7]) != "--compile-receipt") {
+            std::string_view(argv[7]) != "--compile-receipt" ||
+            std::string_view(argv[9]) != "--package") {
             std::cerr << "usage: a8q4_projected_residual_t1_qual --out-json NEW.json "
                          "--assembly FILE.s --static-receipt RECEIPT.txt "
-                         "--compile-receipt RECEIPT.json\n";
+                         "--compile-receipt RECEIPT.json --package DIRECTORY\n";
             return 2;
         }
         const std::filesystem::path output = argv[2];
         const std::filesystem::path assembly = std::filesystem::canonical(argv[4]);
         const std::filesystem::path static_receipt = std::filesystem::canonical(argv[6]);
         const std::filesystem::path compile_receipt = std::filesystem::canonical(argv[8]);
+        const std::filesystem::path package = std::filesystem::canonical(argv[10]);
         const std::string compile_receipt_text = read_all_text(compile_receipt);
         require_fresh_output(output);
         const std::filesystem::path root = std::filesystem::canonical(NINFER_SOURCE_DIR);
@@ -542,9 +563,10 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipRuntimeGetVersion(&runtime_version));
         HIP_CHECK(hipDriverGetVersion(&driver_version));
 
+        ResidualStream execution_stream;
         std::array<CaseResult, kResidualShapes.size()> results;
         for (std::size_t index = 0U; index < kResidualShapes.size(); ++index)
-            results[index] = run_case(kResidualShapes[index]);
+            results[index] = run_case(kResidualShapes[index], execution_stream.get());
         const std::string power_after = read_text(power);
         if (power_after != "auto") fail("power changed during projected residual qualification");
         double saved_ms = 0.0;
@@ -554,7 +576,7 @@ int main(int argc, char** argv) {
             fail("projected residual misses the 0.2 ms/token aggregate admission bound");
 
         const std::filesystem::path executable = std::filesystem::canonical("/proc/self/exe");
-        const std::array<std::pair<const char*, const char*>, 12> source_specs{{
+        const std::array<std::pair<const char*, std::filesystem::path>, 13> source_specs{{
             {"qualifier", "tools/r9700/a8q4_projected_residual_t1_qual.hip"},
             {"shared_qualifier", "tools/r9700/a8q4_shape_sweep_qual.hip"},
             {"static_checker", "tools/r9700/check_a8q4_projected_residual_t1_static.py"},
@@ -562,10 +584,11 @@ int main(int argc, char** argv) {
             {"linear_implementation", "src/ops/r9700/linear/r9700_linear.hip"},
             {"residual_contract", "src/ops/r9700/eager/eager_ops.h"},
             {"residual_implementation", "src/ops/r9700/eager/eager_ops.hip"},
-            {"plan", "profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919/plan.json"},
-            {"commands", "profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919/commands.sh"},
-            {"preflight", "profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919/preflight.py"},
-            {"measure", "profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919/measure.py"},
+            {"plan", package / "plan.json"},
+            {"commands", package / "commands.sh"},
+            {"prepare", package / "prepare.py"},
+            {"preflight", package / "preflight.py"},
+            {"measure", package / "measure.py"},
             {"layer_trace", "profiles/rocprof/ordinary-decode-c1-one-round-trace-20260905/analysis-v2.json"},
         }};
         std::ostringstream report;
@@ -578,7 +601,7 @@ int main(int argc, char** argv) {
                << "\",\"--assembly\",\"" << json_escape(assembly.string())
                << "\",\"--static-receipt\",\"" << json_escape(static_receipt.string())
                << "\",\"--compile-receipt\",\"" << json_escape(compile_receipt.string())
-               << "\"]},\n"
+               << "\",\"--package\",\"" << json_escape(package.string()) << "\"]},\n"
                << "  \"process_receipt\":{\"pid\":" << static_cast<long long>(::getpid())
                << ",\"executable_sha256\":\"" << sha256_file(executable)
                << "\",\"exact_argv_recorded\":true},\n"

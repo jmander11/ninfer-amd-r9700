@@ -136,11 +136,15 @@ direct and whole gates all passed, and independent result audits admitted their 
 routes. Their three qualification selectors were removed together after independent code review;
 exact predicates and mixed/other-width fallbacks remain. A fresh selector-free C1..4 production
 confirmation at `profiles/bench/r9700-three-route-production-confirmation-20260920` passed exact
-tokens at C1..4 and reproduced the admitted performance. The exact next action is
-`bash profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919/commands.sh --measure`.
+tokens at C1..4 and reproduced the admitted performance. The first projected-residual invocation
+stopped before candidate qualification because its local incumbent harness passed a null stream to
+an eager Op requiring an explicit stream; preserve its `attempt-1` and never rerun that package.
+The reviewed fresh retry owns one explicit stream and retains complete process receipts. The exact
+next action is
+`bash profiles/bench/r9700-a8q4-projected-residual-t1-design-retry-20260920/commands.sh --measure`.
 The deterministic queue after reset is:
 
-1. run the independently reviewed direct projected-residual gate at `profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919`.
+1. run the independently reviewed direct projected-residual retry at `profiles/bench/r9700-a8q4-projected-residual-t1-design-retry-20260920`.
 
 Every other remaining unchecked task depends directly or transitively on this queue or the
 external `DENSE-FLOOR-DECISION`.
@@ -413,8 +417,7 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   `9be2f67ff0f74f92e509bbfa6bb0909e7feb5e38993aed184d71ce1cd7033148`. This closes the
   three-route promotion composition gate, not physical HBM saturation or a new A/B claim.
 
-  After the admitted paired routes are resolved, the reviewed-ready direct package
-  `profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919` is the next bounded mechanism:
+  After the admitted paired routes are resolved, the direct projected-residual mechanism covers
   all-Q4 T1 projected-residual fusion for N5120/K6144 and N5120/K17408. These are respectively the 16
   attention-output plus 48 GDN-output projections and 64 MLP-down projections: exactly 128
   residual publications/token. The retained ordinary C1 trace measures the removable residual-add
@@ -427,6 +430,18 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   mixed weights and T>1 on the current path. If admitted, the next ranked mechanism is T1
   RMSNorm+A8G64 preparation fusion. Do not reopen geometry remapping or split-K; an explicit
   gate-up prefetch challenger is later work only if ISA proves early loads and wait scheduling.
+  The first reviewed package,
+  `profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919`, passed compile/static preflight
+  but stopped on the first K6144 incumbent launch before candidate parity or timing:
+  `launch_incumbent(...): invalid argument`. The qualifier had used a null stream while
+  `eager::residual_add_bf16` requires an explicit stream. This is a harness defect, not a candidate
+  rejection; `attempt-1` retains compile/assembly/static evidence but no qualifier stdout/stderr or
+  exit receipt. Never rerun or append it. The fresh package
+  `profiles/bench/r9700-a8q4-projected-residual-t1-design-retry-20260920` binds the original evidence,
+  threads one owned nonblocking stream through both arms, transfers, scrub, warmups, events, and
+  synchronization, and retains process output/exit/closure on every ordinary outcome. Its
+  compile/static preflight passed and independent review reported `SHIP`; no numerical, timing, or
+  admission criterion changed.
 
 ## Active now: DFlash semantic and schedule work
 
