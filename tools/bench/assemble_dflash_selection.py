@@ -55,6 +55,8 @@ RULE = "qualified_recipe_kw_primary_c1_and_per_concurrency_maximin_v4"
 MATERIAL_SPEEDUP = 1.02
 UNCERTAINTY_SIGMAS = 2.0
 RECIPES = tuple(recipe.key for recipe in dflash2_matrix_recipes.RECIPES)
+RESIDENT_ARTIFACT_TYPE = "ninfer_r9700_dflash_single_resident_admission"
+RESIDENT_RULE = "explicit_one_recipe_kw_all_product_concurrencies_v1"
 
 
 
@@ -874,7 +876,148 @@ def assemble(base_selection: Path,
             "winner_exclusions": winner_row["exclusions"] if winner_row else {}}
 
 
+def _bound_evidence_path(binding: dict, label: str) -> Path:
+    if (not isinstance(binding, dict) or set(binding) != {"path", "sha256"}
+            or not isinstance(binding.get("path"), str)
+            or not _valid_sha256(binding.get("sha256"))):
+        raise ValueError(f"DFlash {label} lacks a bound evidence file")
+    path = Path(binding["path"])
+    if (not path.is_absolute() or not path.is_file()
+            or _identity(path) != binding):
+        raise ValueError(f"DFlash {label} evidence changed")
+    return path
+
+
+def revalidate_evaluation(path: Path) -> dict:
+    """Rebuild schema-v4 from its original inputs, including all raw numerical gates."""
+    path = path.resolve(strict=True)
+    before = _identity(path)
+    value = _load(path)
+    if (value.get("artifact_type") != ARTIFACT_TYPE
+            or value.get("schema_version") != SCHEMA_VERSION
+            or value.get("production_selected") is not False
+            or value.get("selection_rule") != RULE):
+        raise ValueError("single-resident admission requires current evaluation-only schema-v4")
+    try:
+        base = _bound_evidence_path(value["selected_base"]["terminal_selection"], "base selection")
+        recipes = value["recipes"]
+        if not isinstance(recipes, dict) or set(recipes) != set(RECIPES):
+            raise ValueError("DFlash evaluation does not retain the three recipe inputs")
+        recipe_inputs = [(recipe,
+            _bound_evidence_path(recipes[recipe]["conversion_report"], "conversion"),
+            _bound_evidence_path(recipes[recipe]["shortlist"], "shortlist").parent)
+            for recipe in RECIPES]
+        candidates = value["candidates"]
+        expected = {candidate_key(recipe, k, w) for recipe in RECIPES
+                    for k, w in DFLASH_PRODUCTION_PROFILES}
+        if not isinstance(candidates, list) or len(candidates) != len(expected):
+            raise ValueError("DFlash evaluation does not retain all six recipe/K/W candidates")
+        inputs = {"capacity": [], "c1_screen": [], "performance": []}
+        observed = set()
+        for row in candidates:
+            recipe, k, w = row["recipe"], row["draft_tokens"], row["verify_width"]
+            key = candidate_key(recipe, k, w)
+            if row["key"] != key or key in observed:
+                raise ValueError("DFlash evaluation has duplicate or mixed recipe/K/W identities")
+            observed.add(key)
+            for field in inputs:
+                if field == "capacity" or field in row:
+                    root = _bound_evidence_path(row[field]["matrix"], field).parent
+                    inputs[field].append((recipe, k, w, root))
+        if observed != expected:
+            raise ValueError("DFlash evaluation candidate inventory changed")
+        rebuilt = assemble(base, recipe_inputs, inputs["capacity"], inputs["c1_screen"],
+                           inputs["performance"])
+    except (KeyError, TypeError) as error:
+        raise ValueError("DFlash evaluation input provenance is incomplete") from error
+    if rebuilt != value or _identity(path) != before:
+        raise ValueError("DFlash evaluation differs from recomputed raw evidence")
+    return rebuilt
+
+
+def admit_single_resident(evaluation: Path, recipe: str, k: int, w: int) -> dict:
+    """Explicitly choose one resident; a C1 recommendation never selects it implicitly."""
+    key = candidate_key(recipe, k, w)
+    evaluation = evaluation.resolve(strict=True)
+    value = revalidate_evaluation(evaluation)
+    row, = [row for row in value["candidates"] if row["key"] == key]
+    required = list(PRODUCT_CONCURRENCIES)
+    if (row["qualified_concurrency"] != required or row["exclusions"]
+            or row["capacity"]["eligible_concurrency"] != required):
+        raise ValueError("one resident DFlash candidate must qualify at every C1..4")
+    screen = row.get("c1_screen", {})
+    performance = row.get("performance", {})
+    if (screen.get("declared_concurrency") != [1]
+            or screen.get("matched_speed_by_concurrency", {}).get("1", {}).get("pass") is not True):
+        raise ValueError("resident DFlash candidate lacks its mandatory C1 material win")
+    gates = performance.get("matched_speed_by_concurrency", {})
+    if (performance.get("declared_concurrency") != required
+            or set(gates) != {str(c) for c in required}
+            or any(gates[str(c)].get("pass") is not True for c in required)):
+        raise ValueError("resident DFlash candidate lacks all-C matched whole/decode speed gates")
+    evidence = value["recipes"][recipe]
+    return {
+        "artifact_type": RESIDENT_ARTIFACT_TYPE, "schema_version": 1,
+        "status": "admitted", "selection_rule": RESIDENT_RULE,
+        "production_selected": True, "concurrency": required,
+        "scope": "one resident companion and one fixed K/W for C1..4; not final artifact cutover",
+        "evaluation": _identity(evaluation), "selected_base": value["selected_base"],
+        "resident": {"key": key, "recipe": recipe, "draft_tokens": k, "verify_width": w,
+                     "artifact": evidence["artifact"], "benchmark_executable": evidence["benchmark"]},
+        "recipe_evidence": evidence,
+        "qualified_evidence": {"capacity": row["capacity"], "c1_screen": screen,
+                               "performance": performance},
+    }
+
+
+def revalidate_single_resident(path: Path) -> dict:
+    path = path.resolve(strict=True)
+    before = _identity(path)
+    value = _load(path)
+    if (value.get("artifact_type") != RESIDENT_ARTIFACT_TYPE
+            or value.get("schema_version") != 1):
+        raise ValueError("final cutover requires single-resident companion/capacity admission")
+    try:
+        resident = value["resident"]
+        evaluation = _bound_evidence_path(value["evaluation"], "evaluation")
+        rebuilt = admit_single_resident(evaluation, resident["recipe"],
+                                        resident["draft_tokens"], resident["verify_width"])
+    except (KeyError, TypeError) as error:
+        raise ValueError("single-resident DFlash authority lacks its explicit resident/proof") from error
+    if value != rebuilt or _identity(path) != before:
+        raise ValueError("single-resident DFlash admission differs from recomputed evidence")
+    return rebuilt
+
+
+def _resident_main(argv: Sequence[str]) -> int:
+    parser = argparse.ArgumentParser(description="Explicit fixed C1..4 single-resident DFlash admission")
+    actions = parser.add_subparsers(dest="action", required=True)
+    admission = actions.add_parser("admit", help="admit one explicit recipe/K/W from revalidated evaluation")
+    admission.add_argument("--evaluation", type=Path, required=True)
+    admission.add_argument("--recipe", choices=RECIPES, required=True)
+    admission.add_argument("--draft-tokens", type=int, choices=(4, 5), required=True)
+    admission.add_argument("--verify-width", type=int, choices=(5, 6), required=True)
+    admission.add_argument("--out", type=Path, required=True)
+    validation = actions.add_parser("validate-admission", help="reopen all bound evidence; write nothing")
+    validation.add_argument("--admission", type=Path, required=True)
+    args = parser.parse_args(argv)
+    if args.action == "validate-admission":
+        revalidate_single_resident(args.admission)
+        print("single-resident DFlash admission revalidated for C1..4")
+        return 0
+    if os.path.lexists(args.out):
+        raise ValueError(f"refusing to overwrite existing output: {args.out}")
+    value = admit_single_resident(args.evaluation, args.recipe, args.draft_tokens, args.verify_width)
+    from tools.bench.prefill_chunk_authority import durable_create_json
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    durable_create_json(args.out, value)
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] in ("admit", "validate-admission"):
+        return _resident_main(argv)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-selection", type=Path, required=True)
     parser.add_argument("--recipe", action="append", nargs=3,

@@ -121,7 +121,8 @@ def test_converter_preflight_must_revalidate_against_exact_winner() -> None:
             gate.validate_converter_preflight(Path("receipt"), Path("selection"), changed)
 
 
-def test_matrix_inventory_omits_whole_only_for_capacity_ineligible_candidates() -> None:
+@pytest.mark.parametrize("quality_exclusion", [False, True])
+def test_matrix_inventory_omits_whole_for_valid_capacity_or_quality_exclusion(quality_exclusion) -> None:
     digest = "d" * 64
     manifests = {}
     candidates = []
@@ -142,11 +143,12 @@ def test_matrix_inventory_omits_whole_only_for_capacity_ineligible_candidates() 
                 "artifact": artifact, "bench": bench,
                 "concurrency": gate.PRODUCT_CONCURRENCIES,
             }
-        candidates.append({"name": name, "comparable": comparable})
+        candidates.append({"name": name, "comparable": comparable,
+                           "capacity_eligible": comparable or quality_exclusion})
         sources.append({
             "candidate": name, "artifact": artifact, "benchmark_executable": bench,
             "matrices": matrices,
-            "capacity_failures": [] if comparable else [{"memory_admission": {}}],
+            "capacity_failures": [] if comparable or quality_exclusion else [{"memory_admission": {}}],
         })
     selection = {"candidates": candidates, "source_provenance": sources}
 
@@ -169,10 +171,73 @@ def test_matrix_inventory_omits_whole_only_for_capacity_ineligible_candidates() 
         with pytest.raises(ValueError, match="matrix set disagrees"):
             gate.matrix_inventory(failed_with_whole)
 
-        missing_failure = json.loads(json.dumps(selection))
-        missing_failure["source_provenance"][0]["capacity_failures"] = []
+        mismatched_capacity = json.loads(json.dumps(selection))
+        mismatched_capacity["candidates"][0]["capacity_eligible"] = not quality_exclusion
         with pytest.raises(ValueError, match="capacity eligibility"):
-            gate.matrix_inventory(missing_failure)
+            gate.matrix_inventory(mismatched_capacity)
+
+
+def test_below_target_prefill_is_diagnostic_but_measured_route_still_required(tmp_path):
+    selected = route()
+    dense = {**selected, "artifact": {**selected['artifact'], 'path': '/weights'},
+             "executable": {**selected['executable'], 'path': '/dense-bench'}}
+    evaluation = dict(artifact=dense['artifact'], bench=dense['executable'],
+                      expected_kv_value_group=16, selected_prefill_chunk=2048,
+                      dense_control={'winner': 'winner', 'executable': dense['executable']},
+                      minimum_p2048_tok_s=2000., observed_p2048_tok_s=1904.339303,
+                      passes_p2048_gate=False, ladder=[128, 256, 512, 1024, 2048])
+    admission = tmp_path / 'low.json'
+    admission.write_text(json.dumps(evaluation))
+    with patch.object(gate, 'validate_ladder', return_value=evaluation) as validate:
+        progress = gate.validate_low_context(Path('manifest'), admission, Path('selection'), selected, dense)
+        assert progress == dict(target_tok_s=2000., observed_tok_s=1904.339303,
+                                target_met=False, admission_requirement=False)
+        validate.assert_called_once_with(Path('manifest'), 2000., Path('/dense-bench'),
+                                         Path('/weights'), Path('selection'))
+        changed = {**evaluation, 'bench': {'sha256': 'different', 'file_size_bytes': 12}}
+        validate.return_value = changed
+        admission.write_text(json.dumps(changed))
+        with pytest.raises(ValueError, match='measured dense-control ladder'):
+            gate.validate_low_context(Path('manifest'), admission, Path('selection'), selected, dense)
+        validate.side_effect = ValueError('incomplete ladder')
+        with pytest.raises(ValueError, match='incomplete ladder'):
+            gate.validate_low_context(Path('manifest'), admission, Path('selection'), selected, dense)
+
+
+def test_current_quality_map_retains_mixed_sparse_exclusion_without_waiver(tmp_path):
+    from tools.ppl.test_quality_recovery_io import QualityRecoveryIoTest
+    helper = QualityRecoveryIoTest()
+    path, value = helper.make_authority_map(tmp_path)
+    value['authorities']['MIXED_XATTENTION_QUALITY']['eligibility_by_group'] = {'16': False, '32': False}
+    path.write_text(json.dumps(value))
+    sources = []
+    for name, (weights_id, profile) in gate.EXPECTED_AUTHORITIES.items():
+        item = value['authorities'][name]
+        for group in (16, 32):
+            sources.append(dict(artifact=item['artifact'], cache_value_group=group,
+                quality=dict(path=item['path'], sha256=item['sha256'],
+                    representation={'xattention_profile': profile},
+                    measurements={'8k': {'eligible': True},
+                                  '32k': {'eligible': item['eligibility_by_group'][str(group)]}})))
+    selection = dict(source_provenance=sources,
+                     prefill_chunk_selection=value['selected_prefill_chunk_authority'])
+    def replay(campaign, weights_id, group, chunk):
+        cells, source = helper.campaign_source(campaign, weights_id, group, chunk)
+        if weights_id == gate.MIXED and campaign['profile'] != 'dense':
+            cells['32k']['eligible'] = False
+        return cells, source
+    with patch('tools.bench.prefill_chunk_authority.validate_prefill_chunk_authority',
+               return_value=({**value['selected_prefill_chunk_authority'], 'selected_prefill_chunk': 4096}, {})), \
+            patch('tools.ppl.assemble_pareto._campaign_quality_candidate', side_effect=replay):
+        assert gate.validate_quality_map(path, selection, 4096) == value
+        sources[0]['quality']['sha256'] = '0' * 64
+        with pytest.raises(ValueError, match='not bound'):
+            gate.validate_quality_map(path, selection, 4096)
+        sources[0]['quality']['sha256'] = value['authorities']['ALL_Q4_DENSE_QUALITY']['sha256']
+        value['authorities']['MIXED_XATTENTION_QUALITY']['eligibility_by_group']['16'] = True
+        path.write_text(json.dumps(value))
+        with pytest.raises(ValueError, match='eligibility differs'):
+            gate.validate_quality_map(path, selection, 4096)
 
 
 def test_publication_rollback_preserves_replacement_inode() -> None:

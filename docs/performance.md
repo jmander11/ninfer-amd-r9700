@@ -585,8 +585,19 @@ quality, and speed remain distinct gates. The primary evaluation winner is the C
 maximizing worst normalized 8K/32K whole throughput, then capacity, then matched acceptance;
 canonical recipe/K/W order breaks only a complete tie. Separate per-concurrency frontiers retain
 all exclusions, including a primary winner that is unsupported or slower at C2..4. This is not
-dynamic recipe switching, an all-C production claim, or final production promotion. Choosing the
-sole resident companion under a selected supported-capacity contract remains a separate decision.
+dynamic recipe switching, an all-C production claim, or final production promotion.
+
+The assembler's separate `admit` action requires an explicit recipe and K/W pair. It reopens
+schema-v4 evaluation and reconstructs all conversion, shortlist, capacity, C1-screen and followup
+inputs, then recomputes the raw gates. One chosen companion must qualify for every supported
+startup concurrency C1..4: complete capacity, exact ordinary-output parity, proposal determinism,
+generated-quality evidence, a material C1 win, and the existing matched 8K/32K whole/decode speed
+gates at all four C values. A candidate need not win every per-C frontier, but cells from different
+recipes or K/W pairs cannot be combined and the supported concurrency contract cannot be reduced.
+The distinct schema-v1 single-resident admission binds that explicit resident to the terminal base
+and all qualified evidence; schema-v4 stays evaluation-only. Final cutover revalidates this
+admission instead of accepting a bare historical schema-v3 or schema-v4 evaluation. Admission
+does not rename/materialize a production artifact or satisfy the other final-cutover gates.
 
 The first kernel hypothesis after prefill closes is a packed-W4 small-T route. Current A8Q4 WMMA
 uses a 16-token tile, so C1 K4/K5 proposal/head calls and W5/W6 DFlash/target calls leave most token

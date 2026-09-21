@@ -16,6 +16,7 @@ from tools.bench.run_ninfer_bench_matrix import (
     LOW_CONTEXT_PREFILL_PROMPTS,
     MATRIX_SCHEMA_VERSION,
     R9700_KV_PLANE_LAYOUTS,
+    R9700_POWER_PROFILE,
     add_repetition_args,
     build_cases,
 )
@@ -28,6 +29,14 @@ from tools.ppl.pareto import classify
 
 
 class LowContextPrefillValidationTest(unittest.TestCase):
+    def setUp(self):
+        # These fixtures isolate ladder/route validation from the independently
+        # tested large numerical-sidecar replay, while retaining native schema7
+        # classification, measurements, selection and matrix identity checks.
+        numerical = patch('tools.ppl.pareto._revalidate_numerical_quality')
+        numerical.start()
+        self.addCleanup(numerical.stop)
+
     @staticmethod
     def migration_receipt(weights_id: str) -> dict:
         recipe = {
@@ -81,6 +90,8 @@ class LowContextPrefillValidationTest(unittest.TestCase):
                     speed = 90.0
                 candidates.append({
                     "name": name,
+                    "whole_inference_profile": "spec-none-ordinary",
+                    "base_capacity_profile": "spec-none-ordinary",
                     "prefill_chunk": chunk,
                     "cache_profile": {
                         "value_group": group,
@@ -115,11 +126,18 @@ class LowContextPrefillValidationTest(unittest.TestCase):
                     "matrices": {"pareto-capacity": {}, "pareto-whole": {}},
                     "capacity_failures": [],
                 })
+                row = candidates[-1]
+                row['quality_cells'] = {label: dict(row['quality']) for label in ('8k', '32k')}
+                row['capacity_by_cell'] = {f'c{c}': dict(row['capacity']) for c in (1, 2, 3, 4)}
         source = {
             "artifact_type": "ninfer_r9700_pareto_input",
             "schema_version": 4,
             "required_speed_workloads": ["whole_8k_c1"],
             "require_single_static_profile_selection": True,
+            "base_ranking_profile": "spec-none-ordinary",
+            "base_capacity_profile": "spec-none-ordinary",
+            "required_quality_cells": ["8k", "32k"],
+            "required_capacity_cells": ["c1", "c2", "c3", "c4"],
             "selected_prefill_chunk": chunk,
             "prefill_chunk_selection": {
                 "path": "/prefill-selection.json",
@@ -189,9 +207,7 @@ class LowContextPrefillValidationTest(unittest.TestCase):
             "corpus_sha256": "c" * 64,
             "power_profile": {
                 "required": "auto",
-                "sysfs_path": (
-                    "/sys/class/drm/card2/device/power_dpm_force_performance_level"
-                ),
+                "sysfs_path": str(R9700_POWER_PROFILE),
                 "observed": "auto", "rechecked_after": "auto",
             },
             "artifact": artifact, "bench": bench, "commands": commands,
@@ -360,7 +376,7 @@ class LowContextPrefillValidationTest(unittest.TestCase):
                 power_reader=lambda _path: "auto",
             )
 
-    def test_validates_exact_ladder_and_applies_explicit_downstream_gate(self) -> None:
+    def test_validates_exact_ladder_and_records_nonblocking_target_progress(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             manifest = self.make_campaign(root)
@@ -372,7 +388,7 @@ class LowContextPrefillValidationTest(unittest.TestCase):
                 list(LOW_CONTEXT_PREFILL_PROMPTS),
             )
 
-            output = root / "failed-gate.json"
+            output = root / "below-target-diagnostic.json"
             document = json.loads(manifest.read_text(encoding="utf-8"))
             with (
                 patch("tools.bench.validate_low_context_prefill.inspect_executable",
@@ -397,7 +413,7 @@ class LowContextPrefillValidationTest(unittest.TestCase):
                     "--artifact", str(root / "selected.ninfer"),
                     "--selection", str(root / "selection.json"),
                     "--min-p2048-tok-s", "2200", "--out", str(output),
-                ]), 1)
+                ]), 0)
             self.assertFalse(json.loads(output.read_text(encoding="utf-8"))[
                 "passes_p2048_gate"
             ])

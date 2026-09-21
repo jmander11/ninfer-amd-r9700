@@ -19,7 +19,7 @@ from tools.bench.validate_low_context_prefill import validate_ladder
 from tools.bench.validate_selected_niah import validate as validate_niah
 from tools.bench.validate_selected_vision_diagnostic import validate as validate_vision
 from tools.bench.verify_selected_hardware_use import verify as verify_hardware
-from tools.ppl.assemble_pareto import _campaign_quality_candidate
+from tools.ppl.quality_recovery_io import EXPECTED_AUTHORITIES, validate_authority_map
 from tools.ppl.pareto import load_payload, validate_terminal_production_authority
 from tools.ppl.validate_selected_exact_token import validate as validate_exact_token
 
@@ -158,40 +158,52 @@ def validate_conditionals(route: dict[str, Any], hardware: dict[str, Any]) -> di
 
 
 def validate_quality_map(path: Path, selection: dict, chunk: int) -> dict:
-    value = load_regular(path, "quality authority map")
-    authorities = value.get("authorities")
-    if (
-        value.get("artifact_type") != "ninfer_r9700_terminal_quality_authority_map"
-        or value.get("schema_version") != 1
-        or value.get("selected_prefill_chunk") != chunk
-        or value.get("concurrency") != 1
-        or not isinstance(authorities, dict)
-        or len(authorities) != 6
-    ):
-        raise ValueError("quality authority map has invalid identity/inventory")
-    expected = {
-        (source["artifact"]["weights_id"], source["quality"]["representation"]["xattention_profile"]):
-            (source["quality"]["path"], source["quality"]["sha256"])
-        for source in selection["source_provenance"]
-    }
-    if len(expected) != 6:
-        raise ValueError("schema-v7 source provenance lacks six quality authorities")
+    # This replays finite sidecars and each campaign's unchanged strict tier,
+    # including legitimate measured exclusions. Do not reinterpret a false gate.
+    value = validate_authority_map(path)
+    selected = selection.get("prefill_chunk_selection", {})
+    if (value["selected_prefill_chunk"] != chunk or
+            value["selected_prefill_chunk_authority"] !=
+            {key: selected.get(key) for key in ("path", "sha256")}):
+        raise ValueError("quality authority map differs from terminal selected chunk")
+    entries = {key: value["authorities"][name] for name, key in EXPECTED_AUTHORITIES.items()}
     observed = set()
-    for item in authorities.values():
-        authority_path = Path(item.get("path", "")) if isinstance(item, dict) else Path()
-        campaign = load_regular(authority_path, "quality campaign")
-        if item.get("sha256") != sha(authority_path):
-            raise ValueError("quality campaign bytes changed")
-        matches = [key for key, bound in expected.items() if bound == (str(authority_path.resolve()), item["sha256"])]
-        if len(matches) != 1:
+    for source in selection["source_provenance"]:
+        key = (source["artifact"]["weights_id"],
+               source["quality"]["representation"]["xattention_profile"])
+        item = entries.get(key)
+        group = source["cache_value_group"]
+        if (item is None or group not in (16, 32) or (*key, group) in observed or
+                any(source["quality"].get(field) != item[field] for field in ("path", "sha256")) or
+                any(source["artifact"].get(field) != item["artifact"][field]
+                    for field in ("weights_id", "sha256", "file_size_bytes", "conversion_receipt"))):
             raise ValueError("quality map campaign is not bound by schema-v7")
-        weights_id, profile = matches[0]
-        for group in (16, 32):
-            _campaign_quality_candidate(campaign, weights_id, group, chunk)
-        observed.add((weights_id, profile))
-    if observed != set(expected):
-        raise ValueError("quality map does not cover all six recipe/profile authorities")
+        measured = source["quality"]["measurements"]
+        if (all(measured[label]["eligible"] for label in ("8k", "32k"))
+                is not item["eligibility_by_group"][str(group)]):
+            raise ValueError("terminal quality eligibility differs from replayed authority")
+        observed.add((*key, group))
+    if observed != {(*key, group) for key in entries for group in (16, 32)}:
+        raise ValueError("quality map does not cover all twelve recipe/profile/group candidates")
     return value
+
+
+def validate_low_context(manifest: Path, admission: Path, selection: Path,
+                         route: dict, dense_route: dict) -> dict:
+    low = validate_ladder(manifest, 2000.0, Path(dense_route["executable"]["path"]),
+                          Path(dense_route["artifact"]["path"]), selection)
+    control = low.get("dense_control", {})
+    if (low != load_regular(admission, "low-context evaluation")
+            or not _physical_matches(low.get("artifact"), dense_route["artifact"])
+            or not _physical_matches(low.get("bench"), dense_route["executable"])
+            or low.get("expected_kv_value_group") != route["cache_group"]
+            or low.get("selected_prefill_chunk") != route["prefill_chunk"]
+            or control.get("winner") != route["winner"]
+            or not _physical_matches(control.get("executable"), dense_route["executable"])):
+        raise ValueError("low-context measured dense-control ladder does not revalidate")
+    return {"target_tok_s": low["minimum_p2048_tok_s"],
+            "observed_tok_s": low["observed_p2048_tok_s"],
+            "target_met": low["passes_p2048_gate"], "admission_requirement": False}
 
 
 def matrix_inventory(selection: dict) -> list[dict[str, Any]]:
@@ -218,9 +230,12 @@ def matrix_inventory(selection: dict) -> list[dict[str, Any]]:
         if candidate is None or type(candidate.get("comparable")) is not bool:
             raise ValueError("schema-v7 matrix source does not bind one candidate")
         comparable = candidate["comparable"]
+        capacity_eligible = candidate.get("capacity_eligible")
         if (
             not isinstance(capacity_failures, list)
-            or comparable == bool(capacity_failures)
+            or type(capacity_eligible) is not bool
+            or capacity_eligible == bool(capacity_failures)
+            or (comparable and not capacity_eligible)
         ):
             raise ValueError(
                 "schema-v7 matrix shape disagrees with candidate capacity eligibility"
@@ -232,7 +247,7 @@ def matrix_inventory(selection: dict) -> list[dict[str, Any]]:
         matrices = source.get("matrices")
         if not isinstance(matrices, dict) or set(matrices) != expected_presets:
             raise ValueError(
-                "schema-v7 candidate matrix set disagrees with capacity eligibility"
+                "schema-v7 candidate matrix set disagrees with quality/capacity eligibility"
             )
         eligible_whole_count += int(comparable)
         for preset, bound in matrices.items():
@@ -275,10 +290,20 @@ def revalidate_dflash(path: Path) -> dict:
             and value.get("schema_version") == 3):
         raise ValueError("historical schema-v3 DFlash selection is superseded; final cutover requires "
                          "separate single-resident companion/capacity admission")
-    # Schema-v4 is explicitly evaluation-only. Do not turn a C1 recommendation or
-    # per-C frontier into admission of one resident production artifact.
-    raise ValueError("DFlash evaluation is not production admission; final cutover requires "
-                     "separate single-resident companion/capacity admission")
+    from tools.bench.assemble_dflash_selection import revalidate_single_resident
+    return revalidate_single_resident(path)
+
+
+def require_dflash_base(admission: dict, selection_snapshot: dict, route: dict) -> None:
+    base = admission.get("selected_base", {})
+    if (base.get("terminal_selection") != identity(selection_snapshot)
+            or base.get("winner") != route["winner"]
+            or base.get("cache_group") != route["cache_group"]
+            or base.get("text_prefill_attention_profile") != route["attention_profile"]
+            or base.get("selected_prefill_chunk") != route["prefill_chunk"]
+            or base.get("base_artifact") != route["artifact"]
+            or base.get("base_benchmark") != route["executable"]):
+        raise ValueError("DFlash companion does not bind the same base selection")
 
 
 def validate_converter_preflight(path: Path, selection: Path,
@@ -342,19 +367,8 @@ def assemble(plan_path: Path) -> dict[str, Any]:
         raise ValueError("schema-v7 lacks one winner-matched dense control")
     dense_route = {**route, "artifact": dense_sources[0]["artifact"],
                    "executable": dense_sources[0]["benchmark_executable"], "attention_profile": "dense"}
-    low_record = load_regular(paths["low_admission"], "low-context admission")
-    low = validate_ladder(paths["low_manifest"], 2000.0,
-                          Path(dense_route["executable"]["path"]),
-                          Path(dense_route["artifact"]["path"]), paths["selection"])
-    low_control = low.get("dense_control", {})
-    if (low != low_record or low.get("passes_p2048_gate") is not True
-            or not _physical_matches(low.get("artifact"), dense_route["artifact"])
-            or not _physical_matches(low.get("bench"), dense_route["executable"])
-            or low.get("expected_kv_value_group") != route["cache_group"]
-            or low.get("selected_prefill_chunk") != route["prefill_chunk"]
-            or low_control.get("winner") != route["winner"]
-            or not _physical_matches(low_control.get("executable"), dense_route["executable"])):
-        raise ValueError("low-context dense-control P2048 >=2000 tok/s admission does not revalidate")
+    low_progress = validate_low_context(paths["low_manifest"], paths["low_admission"],
+                                        paths["selection"], route, dense_route)
 
     niah = validate_niah(paths["niah_plan"], paths["niah_root"])
     if niah != load_regular(paths["niah_admission"], "NIAH admission"):
@@ -377,13 +391,7 @@ def assemble(plan_path: Path) -> dict[str, Any]:
     conditional_proofs = validate_conditionals(route, hardware)
 
     dflash = revalidate_dflash(paths["dflash"])
-    base = dflash.get("selected_base", {})
-    if (base.get("sha256") != selection_snapshot["sha256"]
-            or base.get("cache_group") != route["cache_group"]
-            or base.get("text_prefill_attention_profile") != route["attention_profile"]
-            or base.get("prefill_chunk") != route["prefill_chunk"]
-            or base.get("weight_recipe") != terminal["winner_artifact"]):
-        raise ValueError("DFlash companion does not bind the same base selection")
+    require_dflash_base(dflash, selection_snapshot, route)
 
     input_snapshots = {
         name: file_identity(path, name) for name, path in paths.items()
@@ -396,7 +404,8 @@ def assemble(plan_path: Path) -> dict[str, Any]:
         "selected_route": route, "terminal_selection": identity(selection_snapshot),
         "inputs": input_snapshots, "matrix_inventory": matrices,
         "quality_authority_count": 6, "capacity_matrix_count": 12,
-        "whole_matrix_count": 12, "concurrency": PRODUCT_CONCURRENCIES,
+        "whole_matrix_count": sum(row["preset"] == "pareto-whole" for row in matrices),
+        "concurrency": PRODUCT_CONCURRENCIES, "prefill_target_progress": low_progress,
         "conditional_proofs": conditional_proofs,
         "converter_preflight": input_snapshots["converter_preflight"],
         "cutover_plan": identity(plan_snapshot), "prepared_closure": prepared_closure,

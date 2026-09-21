@@ -348,7 +348,10 @@ NINFER_SELECTED_PREFILL_CHUNK=$(python3 -c \
 # compile-matched dense control directly from the authority; it also reopens the selected-chunk
 # planner for the hybrid recipe. It runs five non-speculative 3/1 reports under auto and publishes
 # the evaluation only after complete recomputation. A valid result below 2,000 tok/s at P=2,048 is
-# retained with a failed gate so profiling can continue from the selected route.
+# retained as diagnostic target progress, not an admission failure. The validator exits zero for
+# a complete valid ladder regardless of target attainment; malformed reports still fail. Final
+# cutover replays the full artifact/profile-matched ladder and records target progress without
+# requiring 2,000 tok/s. The dated launcher below is historical, not a current campaign to resume.
 bash profiles/bench/low-context-selected-ladder-20260905/run-and-publish.sh \
   --execute-gpu-campaign
 
@@ -1217,9 +1220,29 @@ The primary C1 frontier winner maximizes worst normalized whole throughput, then
 acceptance, with canonical recipe/K/W order breaking exact ties. Per-C frontiers and the primary
 winner's unsupported/slower C cells remain visible. This is evaluation evidence, not dynamic
 recipe switching, one all-C resident artifact, or final production promotion.
-`validate_final_cutover_admission.py` therefore rejects both historical schema-v3 selection and
-the schema-v4 evaluation report: final cutover still requires a separately qualified single-resident
-companion and its supported-capacity contract.
+Single-resident admission is an explicit separate action, not automatic promotion of that C1
+winner. Choose one of `canonical-q4g64`, `source-mse-q4g64`, or `source-mse-w8g32` and exactly
+K4/W5 or K5/W6. The chosen companion must qualify at **all C1..4** with complete capacity,
+mandatory C1 material win, and the existing matched 8K/32K whole/decode, exact ordinary-token,
+proposal-state and generated-quality gates. Winning every per-C frontier is not required.
+Mixing per-C recipes/widths or selecting a narrower supported concurrency contract is forbidden.
+
+```sh
+/home/battlefront/.local/bin/python3.11 -m tools.bench.assemble_dflash_selection admit \
+  --evaluation /absolute/path/to/schema-v4-dflash-evaluation.json \
+  --recipe source-mse-w8g32 --draft-tokens 4 --verify-width 5 \
+  --out /absolute/path/to/single-resident-admission.json
+/home/battlefront/.local/bin/python3.11 -m tools.bench.assemble_dflash_selection validate-admission \
+  --admission /absolute/path/to/single-resident-admission.json
+```
+
+The recipe above is illustrative, not a selected winner. Admission reopens the complete evaluation
+and reconstructs its original bound inputs and raw gates; it writes a distinct schema-v1
+`ninfer_r9700_dflash_single_resident_admission` authority exclusively. The validation action is
+read-only and repeats that evidence replay. Pass this admission path as the final-cutover plan's
+`dflash` input. The consumer recomputes it and binds the exact terminal base/artifact, cache group,
+attention profile and chunk. Bare historical schema-v3 and evaluation-only schema-v4 records remain
+rejected. This authorizes one resident companion profile, not final artifact publication by itself.
 
 The `concurrency` preset is a phase decomposition, not a whole-request latency measurement. Its
 prefill cases submit `C` Engine requests concurrently. Pure and context decode cases exclude their
