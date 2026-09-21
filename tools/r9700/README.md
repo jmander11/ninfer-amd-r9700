@@ -1099,6 +1099,12 @@ fallback, malformed/alias handling, and captured graph recovery. The retained di
 Source and embedded code retain native IU4 in the consumer with no scratch or spills. Independent
 audit admits whole C1 A/B preparation only; target routing and production promotion require their
 own matched evidence. Do not rerun the sealed attempt.
+The matched whole C1/P8192+G256 gate then retained all 257 public tokens and measured candidate over
+control decode-time ratios `0.9895615`, `0.9896042`, and `0.9897497`, with mean candidate speed
+`29.3087 tok/s`. Evidence is
+`profiles/bench/r9700-normalized-linear-t1-whole-ab-20260920/attempt-1`; the `result.sha256` digest
+is `2484b71a86314ec8bf4b116fe0b5caecb707d77747666a41dec5f2ee95ee32ee`. Independent audit admits
+scoped promotion review, not production routing or a bandwidth-saturation claim.
 
 A direct GPU regression of the canonical K5120 RMSNorm route against its independent FP64 oracle, including
 output guards and Device Graph replay, is available with:

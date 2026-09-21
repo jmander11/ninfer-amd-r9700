@@ -161,10 +161,10 @@ physical bandwidth saturation or stall freedom.
 
 The deterministic queue after reset is:
 
-1. integrate selector-on normalized-linear routing for exactly the 64 all-Q4/A8 base Text T1 MLP gate/up boundaries admitted by `profiles/bench/r9700-normalized-linear-t1-qualification-20260920/attempt-1`, independently review it, then prepare a matched whole C1 A/B; preserve prefill, verify/DFlash, MTP, T>1, mixed inventory, A4, attention, and GDN fallbacks.
+1. promote selector-free normalized-linear routing for exactly the 64 all-Q4/A8 ordinary base Text C1 MLP gate/up boundaries admitted by `profiles/bench/r9700-normalized-linear-t1-whole-ab-20260920/attempt-1`, independently review it, then require fresh linked public-Op qualification and selector-free C1 production confirmation; preserve prefill, verify/DFlash, MTP, C2..4, mixed inventory, A4, attention, and GDN fallbacks.
 
-No GPU action is currently runnable. Complete and independently review normalized-linear target
-routing and its fail-closed whole C1 A/B package before the first whole-inference attempt.
+No GPU action is currently runnable. Complete and independently review selector-free
+normalized-linear promotion and its fresh qualification/confirmation packages before another physical attempt.
 
 Every other remaining unchecked task depends directly or transitively on this queue or the
 external `DENSE-FLOOR-DECISION`.
@@ -463,7 +463,15 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   `result.sha256` digest is
   `01e1e0571d92541311195202df919d3750759f3bcedf7033944f604bcf2baf2c`; closure SHA-256 is
   `71576628e039d62dcdc3a31d17c60804765e95c859ec2118d16602ae2bd64dc4`. Production routing remains
-  unchanged until matched exact-token whole evidence admits it.
+  unchanged until matched exact-token whole evidence admits it. That reviewed whole C1 A/B at
+  `profiles/bench/r9700-normalized-linear-t1-whole-ab-20260920/attempt-1` retained all 257 tokens.
+  Candidate/control decode-time ratios were `0.9895615`, `0.9896042`, and `0.9897497`; median
+  `0.9896042` and mean plus two standard errors `0.9897524` passed the gate. Mean decode improved
+  `29.0050→29.3087 tok/s` (about `1.05%`). Independent audit reported `SHIP` for scoped promotion
+  review; the `result.sha256` digest is
+  `2484b71a86314ec8bf4b116fe0b5caecb707d77747666a41dec5f2ee95ee32ee`. Remove only this route's
+  selector, independently review, then require fresh linked public-Op qualification and selector-free
+  C1 confirmation before closing promotion. The result does not prove bandwidth saturation.
   Do not reopen geometry remapping or split-K; an explicit
   gate-up prefetch challenger is later work only if ISA proves early loads and wait scheduling.
   The first reviewed package,

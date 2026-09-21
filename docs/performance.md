@@ -1397,6 +1397,16 @@ Evidence is `profiles/bench/r9700-normalized-linear-t1-qualification-20260920/at
 Independent audit admits matched whole C1 A/B preparation only; this is not yet a whole-decode gain
 or a bandwidth-saturation claim.
 
+The matched ordinary Device Graph C1/P8192+G256 whole A/B then retained all 257 public tokens in
+six balanced runs. Candidate/control decode-time ratios were `0.9895615`, `0.9896042`, and
+`0.9897497`; median `0.9896042` and mean plus two standard errors `0.9897524` passed the admission
+gate. Mean decode improved `29.0050→29.3087 tok/s`, about `1.05%`. Evidence is
+`profiles/bench/r9700-normalized-linear-t1-whole-ab-20260920/attempt-1`; its `result.sha256` digest
+is `2484b71a86314ec8bf4b116fe0b5caecb707d77747666a41dec5f2ee95ee32ee`. Independent audit admits
+promotion review only for all-Q4/A8 ordinary base Text C1 MLP gate/up boundaries. Selector-free
+implementation review and fresh production qualification/confirmation remain. This result does not
+establish bandwidth saturation.
+
 The existing MTP shortlist head remains Q4G64 with A8G64 activations. MTP stays in exact-output,
 state, cache, row-view, and whole-route regression coverage, but a new shortlist-head trace,
 alternate head precision, acceptance campaign, or MTP performance optimization is not a final

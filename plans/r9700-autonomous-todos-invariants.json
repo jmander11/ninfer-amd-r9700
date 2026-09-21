@@ -91,12 +91,12 @@
     "FINAL-SUITE": ["FINAL-ARTIFACT", "E2E-PROFILE", "BF16-PARITY", "SELECTED-PARITY-VISION", "XATT-CUTOVER-CONDITIONAL"]
   },
   "next_command": null,
-  "no_gpu_action_policy": "Complete and independently review normalized-linear target routing and its fail-closed whole C1 A/B package before the first whole-inference attempt.",
+  "no_gpu_action_policy": "Complete and independently review selector-free normalized-linear promotion and its fresh qualification/confirmation packages before another physical attempt.",
   "post_reset_queue": [
-    "integrate selector-on normalized-linear routing for exactly the 64 all-Q4/A8 base Text T1 MLP gate/up boundaries admitted by `profiles/bench/r9700-normalized-linear-t1-qualification-20260920/attempt-1`, independently review it, then prepare a matched whole C1 A/B; preserve prefill, verify/DFlash, MTP, T>1, mixed inventory, A4, attention, and GDN fallbacks."
+    "promote selector-free normalized-linear routing for exactly the 64 all-Q4/A8 ordinary base Text C1 MLP gate/up boundaries admitted by `profiles/bench/r9700-normalized-linear-t1-whole-ab-20260920/attempt-1`, independently review it, then require fresh linked public-Op qualification and selector-free C1 production confirmation; preserve prefill, verify/DFlash, MTP, C2..4, mixed inventory, A4, attention, and GDN fallbacks."
   ],
   "post_reset_key_paths": [
-    "profiles/bench/r9700-normalized-linear-t1-qualification-20260920/attempt-1"
+    "profiles/bench/r9700-normalized-linear-t1-whole-ab-20260920/attempt-1"
   ],
   "obsolete_commands": [
     "bash profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/commands.sh",

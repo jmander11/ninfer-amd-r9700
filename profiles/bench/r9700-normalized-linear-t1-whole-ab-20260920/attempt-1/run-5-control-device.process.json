@@ -1,0 +1,41 @@
+{
+  "command": [
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-normalized-linear-whole-control-20260920/src/ninfer_r9700_gdn_qual",
+    "--device-info"
+  ],
+  "executable": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-normalized-linear-whole-control-20260920/src/ninfer_r9700_gdn_qual",
+    "bytes": 927672,
+    "sha256": "425ef0e172bb41dd5cbc76142586761d6e8d5ceb1ea4713ae69783e60251e5f6"
+  },
+  "cwd": "/ssdpool2nvme/local_llm/ninfer-amd-r9700",
+  "started_unix_ns": 1789965273983522858,
+  "before": {
+    "pci_bus_id": "0000:13:00.0",
+    "power": "auto",
+    "used_bytes": 59912192,
+    "total_bytes": 34208743424,
+    "vendor": "0x1002",
+    "device": "0x7551",
+    "low_vram": true
+  },
+  "exit_code": 0,
+  "finished_unix_ns": 1789965274087676519,
+  "drain_samples": [
+    {
+      "elapsed_seconds": 0.00011880998499691486,
+      "pci_bus_id": "0000:13:00.0",
+      "power": "auto",
+      "used_bytes": 59949056,
+      "total_bytes": 34208743424,
+      "vendor": "0x1002",
+      "device": "0x7551",
+      "low_vram": true
+    }
+  ],
+  "device_identity": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-normalized-linear-t1-whole-ab-20260920/attempt-1/run-5-control-device.json",
+    "bytes": 292,
+    "sha256": "ff158732be02feb8bb31d59fc7a791b20ef38d555933481cbad912ca5b4caac0"
+  }
+}
