@@ -510,6 +510,12 @@ std::string read_all_text(const std::filesystem::path& path) {
 
 int main(int argc, char** argv) {
     try {
+        if (argc == 3 && std::string_view(argv[1]) == "--serialize-json-text") {
+            // Exercise the report's actual string serializer without initializing HIP.
+            std::cout << "{\"text\":\"" << json_escape(read_all_text(argv[2])) << "\"}\n";
+            if (!std::cout) fail("failed writing serializer regression output");
+            return 0;
+        }
         if (argc != 11 || std::string_view(argv[1]) != "--out-json" ||
             std::string_view(argv[3]) != "--assembly" ||
             std::string_view(argv[5]) != "--static-receipt" ||
@@ -517,7 +523,8 @@ int main(int argc, char** argv) {
             std::string_view(argv[9]) != "--package") {
             std::cerr << "usage: a8q4_projected_residual_t1_qual --out-json NEW.json "
                          "--assembly FILE.s --static-receipt RECEIPT.txt "
-                         "--compile-receipt RECEIPT.json --package DIRECTORY\n";
+                         "--compile-receipt RECEIPT.json --package DIRECTORY\n"
+                         "       a8q4_projected_residual_t1_qual --serialize-json-text FILE\n";
             return 2;
         }
         const std::filesystem::path output = argv[2];

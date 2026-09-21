@@ -1192,9 +1192,15 @@ void write_json(const std::filesystem::path& path, const std::vector<Result>& re
 
 std::string json_escape(std::string_view value) {
     std::ostringstream out;
-    for (const char character : value) {
-        if (character == '\\' || character == '"') out << '\\';
-        out << character;
+    constexpr char hex[] = "0123456789abcdef";
+    for (const unsigned char character : value) {
+        if (character == '\\' || character == '"') {
+            out << '\\' << static_cast<char>(character);
+        } else if (character < 0x20U) {
+            out << "\\u00" << hex[character >> 4U] << hex[character & 0xfU];
+        } else {
+            out << static_cast<char>(character);
+        }
     }
     return out.str();
 }

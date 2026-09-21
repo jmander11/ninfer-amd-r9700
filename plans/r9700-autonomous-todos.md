@@ -139,12 +139,14 @@ confirmation at `profiles/bench/r9700-three-route-production-confirmation-202609
 tokens at C1..4 and reproduced the admitted performance. The first projected-residual invocation
 stopped before candidate qualification because its local incumbent harness passed a null stream to
 an eager Op requiring an explicit stream; preserve its `attempt-1` and never rerun that package.
-The reviewed fresh retry owns one explicit stream and retains complete process receipts. The exact
-next action is
-`bash profiles/bench/r9700-a8q4-projected-residual-t1-design-retry-20260920/commands.sh --measure`.
+The reviewed fresh retry owned one explicit stream and completed qualification, but its report
+embedded raw newlines and failed strict JSON parsing after the qualifier exited 0. Preserve that
+sealed diagnostic attempt. Retry2 fixes only standards-compliant JSON escaping and adds a strict
+CPU serializer regression. The exact next action is
+`bash profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920/commands.sh --measure`.
 The deterministic queue after reset is:
 
-1. run the independently reviewed direct projected-residual retry at `profiles/bench/r9700-a8q4-projected-residual-t1-design-retry-20260920`.
+1. run the independently reviewed direct projected-residual retry2 at `profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920`.
 
 Every other remaining unchecked task depends directly or transitively on this queue or the
 external `DENSE-FLOOR-DECISION`.
@@ -441,7 +443,17 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   threads one owned nonblocking stream through both arms, transfers, scrub, warmups, events, and
   synchronization, and retains process output/exit/closure on every ordinary outcome. Its
   compile/static preflight passed and independent review reported `SHIP`; no numerical, timing, or
-  admission criterion changed.
+  admission criterion changed. That qualifier then exited 0 and printed a `0.884448 ms/token` pass,
+  but the wrapper sealed the attempt failed because the shared JSON escape helper emitted literal
+  newlines inside the embedded compile receipt. A read-only diagnostic recovery found K6144
+  `0.0764400→0.0694605 ms` and K17408 `0.1420800→0.1352400 ms`, zero BF16 steps for both delta and
+  residual, exact complete residual parity, every allocation ratio below one, and aggregate saving
+  `0.8844481 ms/token`; this merits correction but cannot itself authorize a whole A/B because the
+  retained report is not strict JSON. Preserve the retry attempt and its closure; never rerun it.
+  The independently reviewed retry2 package at
+  `profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920` changes only JSON control
+  escaping, binds both prior evidence inventories, passes exact strict-JSON round-trip for every
+  control byte plus quote/backslash/UTF-8, and retains the unchanged explicit-stream/static gate.
 
 ## Active now: DFlash semantic and schedule work
 
