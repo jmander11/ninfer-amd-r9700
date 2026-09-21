@@ -20,7 +20,9 @@ inline constexpr std::uint32_t kFp8QkWmmaT1MinimumContext = 64U;
 inline constexpr std::uint32_t kFp8QkWmmaT2MinimumContext = 320U;
 inline constexpr std::uint32_t kSplit512MinimumContext = 8192U;
 inline constexpr std::uint32_t kDensePrefillMinimumRows = 128U;
-inline constexpr std::uint32_t kDensePrefillMaximumRows = 4096U;
+inline constexpr std::uint32_t kDensePrefillMaximumRows = 8192U;
+inline constexpr std::size_t kDensePrefillMaximumContext = 262144U;
+inline constexpr std::size_t kDensePrefillScoreElements = 24U * 2048U * 2048U;
 
 // Qualification-only Text P129 WMMA tail candidate. Zero retains the dense P129 route; one admits
 // the exact P129 tail overwrite. The DFlash W5/W6 batched-WMMA route is a production route and is
@@ -34,12 +36,21 @@ static_assert(NINFER_R9700_TEXT_P129_WMMA_TAIL_CANDIDATE == 0 ||
 inline constexpr bool kTextP129WmmaTailCandidate =
     NINFER_R9700_TEXT_P129_WMMA_TAIL_CANDIDATE == 1;
 
-// Physical selection covered complete initial-prefix calls at P=128/512/1024/2048/4096. Do not
-// extrapolate the route to later chunks with a longer visible frontier without matched evidence.
+// Causal prefill covers initial and appended chunks. Query panels bound the score plane while
+// preserving absolute positions and the complete visible cache frontier.
 [[nodiscard]] constexpr bool use_dense_prefill_attention(
     std::uint32_t query_rows, std::size_t visible_context) noexcept {
     return query_rows >= kDensePrefillMinimumRows &&
-           query_rows <= kDensePrefillMaximumRows && visible_context == query_rows;
+           query_rows <= kDensePrefillMaximumRows && visible_context >= query_rows &&
+           visible_context <= kDensePrefillMaximumContext;
+}
+
+[[nodiscard]] constexpr std::uint32_t dense_prefill_panel_rows(
+    std::uint32_t query_rows, std::size_t context) noexcept {
+    if (!use_dense_prefill_attention(query_rows, context)) return 0U;
+    const auto capacity = static_cast<std::uint32_t>(
+        (kDensePrefillScoreElements / (24U * context)) / 16U * 16U);
+    return query_rows < capacity ? query_rows : capacity;
 }
 
 [[nodiscard]] constexpr bool use_fp8_qk_wmma(std::uint32_t query_rows,

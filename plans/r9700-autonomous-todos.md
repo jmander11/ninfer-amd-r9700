@@ -210,6 +210,12 @@ declared dependencies. No absolute prefill-ceiling proof is required before proc
   incomplete flag is retained. Profiled times establish ownership, not speed admission.
   Implement bounded query panels with the existing tiled QK/max/PV arithmetic, then compare
   unprofiled whole8K against the retained baseline; no further owner-discovery trace is needed.
+  Raw G16/G32 FP64, panel/active-count/graph checks through context262144 and all five ISA
+  checks passed in `profiles/bench/r9700-chunked-attention-candidate-20260921/qualification`.
+  Its public-leaf harness then stopped with invalid workspace: the newly tiled T128/context257
+  fixture still supplied zero bytes. Preserve that attempt. A fixture-only correction and fresh
+  `profiles/bench/r9700-chunked-attention-candidate-leaf-retry1-20260921` reuse the unchanged
+  passed raw evidence, rerun the typed leaf, then own whole8K/P2048 admission.
 
 Every future physical experiment must be launched through a reviewed package-local `commands.sh`,
 not an ad-hoc reconstructed command. A package is runnable only when its plan contains no
@@ -1015,20 +1021,23 @@ prefill review, preserving their remaining data dependencies.
   no-overwrite screen/finalist/campaign owners and run all twelve candidates at C1 over aligned
   chunks 1024, 2048, 4096, and 8192 at 8K, then both global finalists at 32K. The old
   `profiles/bench/prefill-chunk-screen-twelve-candidate-20260905` is non-runnable history.
-  ACTIVE 2026-09-21: four fresh builds are complete under
-  `build-r9700-selection-{dense,xattention}-g{16,32}-20260921`. Independently reviewed package
-  `profiles/bench/r9700-chunk-selection-receipt-bound-n16k16-20260921` owns read-only preflight,
+  PAUSED predecessor: `build-r9700-selection-{dense,xattention}-g{16,32}-20260921` and
+  `profiles/bench/r9700-chunk-selection-receipt-bound-n16k16-20260921` retain two measured cells
+  and the discovered attention fallback; do not rebuild those frozen binaries or resume it.
+  Prepared successor `profiles/bench/r9700-chunk-selection-panel-attention-20260921` requires
+  admitted `PREFILL-CHUNK-ATTENTION` evidence and fresh
+  `build-r9700-selection-panel-{dense,xattention}-g{16,32}-20260921` binaries. It owns read-only preflight,
   explicit input freeze, preparation, screens, finalists and selection through `commands.sh`.
   Its README gives the exact ordered commands. The shared runner now checks the R9700 PCI
   identity and matching HIP ordinal rather than unstable DRM card numbering. No timing is
   credited until each report passes the existing matrix and selector validation.
 
 - [ ] `CHUNK-SELECT` [depends: CHUNK-PHYSICAL-12] Publish one shared startup chunk through
-  the current `r9700-chunk-selection-receipt-bound-n16k16-20260921` package, maximizing the worst normalized
+  the successor `r9700-chunk-selection-panel-attention-20260921` package, maximizing the worst normalized
   throughput across the complete candidate/prompt objective set, then workspace and smaller-chunk
   tie-breaks. Bind each N16 migration receipt and the four-role planner identity. Current 4096 rows
   remain diagnostic unless selected.
-  Publish to `profiles/bench/prefill-chunk-selection-receipt-bound-n16k16-20260921.json`;
+  Publish to `profiles/bench/prefill-chunk-selection-panel-attention-20260921.json`;
   the 20260905 selection pipeline remains historical and is never resumed.
 
 - [ ] `XATT-KEEP-DIST` [depends: CHUNK-SELECT] Validate the redesigned sparse consumer on real

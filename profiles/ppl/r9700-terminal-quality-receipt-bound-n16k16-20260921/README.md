@@ -2,9 +2,9 @@
 
 Prepared commands only; no numerical results or selection are asserted by this package.
 All stages require the real, validated
-`profiles/bench/prefill-chunk-selection-receipt-bound-n16k16-20260921.json` authority.
+`profiles/bench/prefill-chunk-selection-panel-attention-20260921.json` authority.
 The scripts never choose or substitute a chunk. Candidate scorers come from
-`build-r9700-selection-{dense,xattention}-g{16,32}-20260921/apps/ninfer-ppl`.
+`build-r9700-selection-panel-{dense,xattention}-g{16,32}-20260921/apps/ninfer-ppl`.
 
 Run from the repository root:
 
@@ -18,7 +18,7 @@ bash profiles/ppl/r9700-terminal-quality-receipt-bound-n16k16-20260921/commands.
 `preflight` is read-only, launches no subprocess, and validates the selected chunk,
 corpus, three receipt-bound N16/K16 artifacts, and available reference evidence.
 The actual artifacts and four PPL scorer hashes must match the chunk campaign's
-frozen `profiles/bench/r9700-chunk-selection-receipt-bound-n16k16-20260921/inputs.json`.
+frozen `profiles/bench/r9700-chunk-selection-panel-attention-20260921/inputs.json`.
 The selected-chunk source artifacts and benchmark identities must match that same
 receipt. Unrelated frozen tools are not prerequisites of this quality package.
 A missing selected-chunk authority stops it before these dependent checks.

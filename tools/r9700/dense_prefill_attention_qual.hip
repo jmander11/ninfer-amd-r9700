@@ -1,4 +1,5 @@
 #include "ops/r9700/kv/fp8_int4_kv_attention.h"
+#include "ops/r9700/kv/r9700_attention_profile.h"
 #include "../../tests/ops/fp8_int4_kv_oracle.h"
 
 #include <hip/hip_runtime.h>
@@ -22,9 +23,6 @@ constexpr std::uint32_t kD = 256U;
 constexpr std::uint32_t kHq = 24U;
 constexpr std::uint32_t kHkv = 4U;
 constexpr std::uint32_t kPage = 64U;
-constexpr std::uint32_t kMaxP = 4096U;
-constexpr std::uint32_t kPhysicalPages = kMaxP / kPage + 5U;
-constexpr std::size_t kPhysicalTokens = kPhysicalPages * kPage;
 constexpr float kScale = 1.0F / 16.0F;
 [[noreturn]] void fail(const std::string& message) { throw std::runtime_error(message); }
 
@@ -35,14 +33,23 @@ template <class T>
 class DeviceBuffer {
 public:
     explicit DeviceBuffer(std::size_t count) : count_(count) {
-        HIP_CHECK(hipMalloc(&pointer_, count * sizeof(T)));
+        HIP_CHECK(hipMalloc(&pointer_, (count + 32U) * sizeof(T)));
+        HIP_CHECK(hipMemset(pointer_, 0xa5, (count + 32U) * sizeof(T)));
     }
     ~DeviceBuffer() { if (pointer_ != nullptr) (void)hipFree(pointer_); }
     DeviceBuffer(const DeviceBuffer&) = delete;
     DeviceBuffer& operator=(const DeviceBuffer&) = delete;
-    T* get() { return pointer_; }
-    const T* get() const { return pointer_; }
+    T* get() { return pointer_ + 16U; }
+    const T* get() const { return pointer_ + 16U; }
     std::size_t bytes() const { return count_ * sizeof(T); }
+    void check_canaries() const {
+        std::array<unsigned char, 16U * sizeof(T)> guard{};
+        for (const T* address : {pointer_, pointer_ + 16U + count_}) {
+            HIP_CHECK(hipMemcpy(guard.data(), address, guard.size(), hipMemcpyDeviceToHost));
+            if (!std::all_of(guard.begin(), guard.end(), [](auto b) { return b == 0xa5; }))
+                fail("dense attention buffer canary changed");
+        }
+    }
 private:
     T* pointer_ = nullptr;
     std::size_t count_ = 0U;
@@ -59,9 +66,10 @@ private:
     hipEvent_t event_ = nullptr;
 };
 
-std::size_t key_offset(std::size_t physical, std::uint32_t head, std::uint32_t feature) {
+std::size_t key_offset(std::size_t physical, std::uint32_t head, std::uint32_t feature,
+                       std::size_t physical_pages) {
     const std::size_t page = physical / kPage, in_page = physical % kPage;
-    return in_page + kPage * (feature + kD * (page + kPhysicalPages * head));
+    return in_page + kPage * (feature + kD * (page + physical_pages * head));
 }
 
 std::size_t value_offset(std::size_t physical, std::uint32_t head, std::uint32_t feature) {
@@ -76,35 +84,38 @@ std::size_t scale_offset(std::size_t physical, std::uint32_t head, std::uint32_t
         (physical % kPage + kPage * (head + kHkv * (physical / kPage)));
 }
 
-std::vector<std::uint32_t> make_pages() {
-    std::vector<std::uint32_t> pages(kMaxP / kPage);
+std::vector<std::uint32_t> make_pages(std::uint32_t context) {
+    std::vector<std::uint32_t> pages((context + kPage - 1U) / kPage);
+    const auto physical_pages = pages.size() + 5U;
     for (std::uint32_t page = 0U; page < pages.size(); ++page) {
-        pages[page] = (page * 11U + 3U) % kPhysicalPages;
+        pages[page] = (page * (physical_pages - 1U) + 3U) % physical_pages;
     }
     return pages;
 }
 
 struct Fixture {
     std::uint32_t group;
+    std::size_t physical_tokens;
     std::vector<std::uint32_t> pages;
     std::vector<std::uint8_t> keys;
     std::vector<std::uint8_t> values;
     std::vector<std::uint16_t> scales;
 };
 
-Fixture make_fixture(std::uint32_t group) {
-    Fixture result{group, make_pages(),
-                   std::vector<std::uint8_t>(kPhysicalTokens * kHkv * kD),
-                   std::vector<std::uint8_t>(kPhysicalTokens * kHkv * kD / 2U),
-                   std::vector<std::uint16_t>(kPhysicalTokens * kHkv * (kD / group))};
+Fixture make_fixture(std::uint32_t group, std::uint32_t context) {
+    const std::size_t physical_tokens = ((context + kPage - 1U) / kPage + 5U) * kPage;
+    Fixture result{group, physical_tokens, make_pages(context),
+                   std::vector<std::uint8_t>(physical_tokens * kHkv * kD),
+                   std::vector<std::uint8_t>(physical_tokens * kHkv * kD / 2U),
+                   std::vector<std::uint16_t>(physical_tokens * kHkv * (kD / group))};
     constexpr std::array<std::uint8_t, 10> key_words{
         0x08U, 0x18U, 0x20U, 0x28U, 0x30U, 0x88U, 0x98U, 0xa0U, 0xa8U, 0xb0U};
     constexpr std::array<std::uint16_t, 6> scale_words{
         0x2c00U, 0x3000U, 0x3400U, 0x3800U, 0x3a00U, 0x3c00U};
-    for (std::size_t physical = 0U; physical < kPhysicalTokens; ++physical) {
+    for (std::size_t physical = 0U; physical < physical_tokens; ++physical) {
         for (std::uint32_t head = 0U; head < kHkv; ++head) {
             for (std::uint32_t feature = 0U; feature < kD; ++feature) {
-                result.keys[key_offset(physical, head, feature)] =
+                result.keys[key_offset(physical, head, feature, physical_tokens / kPage)] =
                     key_words[(physical * 5U + head * 7U + feature * 3U) % key_words.size()];
             }
             for (std::uint32_t feature = 0U; feature < kD; feature += 2U) {
@@ -151,9 +162,9 @@ hipError_t launch_selected_dense(const kv::Fp8Int4KvAttentionArgs& args,
         args, workspace, workspace_bytes, stream);
 }
 
-double expected(const Fixture& fixture, const std::vector<hip_bfloat16>& queries,
+std::array<double, kD> expected_vector(const Fixture& fixture, const std::vector<hip_bfloat16>& queries,
                 const std::vector<std::int32_t>& positions, std::uint32_t row,
-                std::uint32_t query_head, std::uint32_t feature) {
+                std::uint32_t query_head) {
     const std::uint32_t kv_head = query_head / 6U;
     const std::size_t visible = static_cast<std::size_t>(positions[row]) + 1U;
     std::vector<double> weights(visible);
@@ -165,7 +176,7 @@ double expected(const Fixture& fixture, const std::vector<hip_bfloat16>& queries
         for (std::uint32_t dimension = 0U; dimension < kD; ++dimension) {
             dot += static_cast<double>(static_cast<float>(queries[
                        (static_cast<std::size_t>(row) * kHq + query_head) * kD + dimension])) *
-                   oracle::decode_e4m3fn(fixture.keys[key_offset(physical, kv_head, dimension)]);
+                   oracle::decode_e4m3fn(fixture.keys[key_offset(physical, kv_head, dimension, fixture.physical_tokens / kPage)]);
         }
         weights[logical] = dot * static_cast<double>(kScale);
         maximum = std::max(maximum, weights[logical]);
@@ -175,18 +186,27 @@ double expected(const Fixture& fixture, const std::vector<hip_bfloat16>& queries
         weight = std::exp(weight - maximum);
         denominator += weight;
     }
-    double numerator = 0.0;
+    std::array<double, kD> numerator{};
     for (std::size_t logical = 0U; logical < visible; ++logical) {
         const std::size_t physical =
             static_cast<std::size_t>(fixture.pages[logical / kPage]) * kPage + logical % kPage;
+        for (std::uint32_t feature = 0U; feature < kD; ++feature) {
         const std::uint8_t packed = fixture.values[value_offset(physical, kv_head, feature)];
         const std::uint8_t nibble = (packed >> ((feature & 1U) * 4U)) & 15U;
         const int code = nibble >= 8U ? static_cast<int>(nibble) - 16 : nibble;
         const double value = static_cast<double>(code) * oracle::detail::fp16_to_fp32(
             fixture.scales[scale_offset(physical, kv_head, feature, fixture.group)]);
-        numerator += weights[logical] * value;
+        numerator[feature] += weights[logical] * value;
+        }
     }
-    return numerator / denominator;
+    for (double& value : numerator) value /= denominator;
+    return numerator;
+}
+
+double expected(const Fixture& fixture, const std::vector<hip_bfloat16>& queries,
+                const std::vector<std::int32_t>& positions, std::uint32_t row,
+                std::uint32_t head, std::uint32_t feature) {
+    return expected_vector(fixture, queries, positions, row, head)[feature];
 }
 
 double expected_score(const Fixture& fixture, const std::vector<hip_bfloat16>& queries,
@@ -199,15 +219,15 @@ double expected_score(const Fixture& fixture, const std::vector<hip_bfloat16>& q
     for (std::uint32_t dimension = 0U; dimension < kD; ++dimension) {
         dot += static_cast<double>(static_cast<float>(queries[
                    (static_cast<std::size_t>(row) * kHq + query_head) * kD + dimension])) *
-               oracle::decode_e4m3fn(fixture.keys[key_offset(physical, kv_head, dimension)]);
+               oracle::decode_e4m3fn(fixture.keys[key_offset(physical, kv_head, dimension, fixture.physical_tokens / kPage)]);
     }
     return dot * static_cast<double>(kScale);
 }
 
 void host_predicate_regression() {
-    if (kv::fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(127U) != 0U ||
-        kv::fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(4097U) != 0U ||
-        kv::fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(2048U) !=
+    if (kv::fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(127U, 128U) != 0U ||
+        kv::fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(8193U, 32768U) != 0U ||
+        kv::fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(2048U, 2048U) !=
             402849792U) {
         fail("full-score workspace capacity contract is incorrect");
     }
@@ -232,33 +252,43 @@ void host_predicate_regression() {
         if (launch_selected_dense(
                 candidate, reinterpret_cast<void*>(4096U),
                 kv::fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(
-                    candidate.query_rows), nullptr) != hipErrorInvalidValue) fail(label);
+                    candidate.query_rows, candidate.context), nullptr) != hipErrorInvalidValue) fail(label);
     };
     auto bad = args; bad.score_workspace = reinterpret_cast<float*>(1U);
     rejected(bad, "score workspace was accepted");
     bad = args; bad.key_layout = kv::Fp8Int4KvPlaneLayout::FeatureFastest;
     rejected(bad, "wrong K layout was accepted");
-    bad = args; bad.query_rows = 4097U;
-    bad.context = 4097U;
+    bad = args; bad.query_rows = 8193U;
+    bad.context = 8193U;
     rejected(bad, "oversized prefill was accepted");
     bad = args; bad.ancestor_masks = reinterpret_cast<const std::int32_t*>(1U);
     bad.prefix_lengths = reinterpret_cast<const std::int32_t*>(1U);
     rejected(bad, "tree metadata was accepted");
-    bad = args; bad.context = 2049U;
-    rejected(bad, "later-prefix context was accepted");
+    bad = args; bad.context = 2047U;
+    rejected(bad, "context shorter than query rows was accepted");
     const std::size_t required =
-        kv::fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(args.query_rows);
+        kv::fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(args.query_rows, args.context);
     if (kv::fp8_int4_kv_attention_dense_prefill_full_score(
             args, reinterpret_cast<void*>(4096U), required - 1U, nullptr) !=
         hipErrorInvalidValue) {
         fail("undersized full-score workspace was accepted");
     }
+    for (const auto rows : {128U, 1024U, 2048U, 4096U, 8192U}) {
+        for (const auto maximum : {8192U, 32768U, 262144U}) {
+            const auto envelope = kv::fp8_int4_kv_attention_dense_prefill_workspace_envelope_bytes(rows, maximum);
+            for (std::uint32_t context = rows; context <= maximum; ++context)
+                if (kv::fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(rows, context) > envelope)
+                    fail("dense workspace envelope underallocates an intermediate context");
+        }
+    }
 }
 
-void run_case(std::uint32_t rows, std::uint32_t group) {
-    const Fixture fixture = make_fixture(group);
+void run_case(std::uint32_t rows, std::uint32_t group, std::uint32_t context) {
+    const Fixture fixture = make_fixture(group, context);
     const auto queries = make_queries(rows);
-    const auto positions = make_positions(rows);
+    auto positions = make_positions(rows);
+    if (context > rows)
+        for (std::uint32_t row = 0; row < rows; ++row) positions[row] = context - rows + row;
     DeviceBuffer<hip_bfloat16> d_queries(queries.size());
     DeviceBuffer<std::uint8_t> d_keys(fixture.keys.size());
     DeviceBuffer<std::uint8_t> d_values(fixture.values.size());
@@ -267,7 +297,7 @@ void run_case(std::uint32_t rows, std::uint32_t group) {
     DeviceBuffer<std::int32_t> d_positions(positions.size());
     DeviceBuffer<float> d_output(static_cast<std::size_t>(rows) * kHq * kD);
     DeviceBuffer<std::uint8_t> d_workspace(
-        kv::fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(rows));
+        kv::fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(rows, context));
     HIP_CHECK(hipMemcpy(d_queries.get(), queries.data(), d_queries.bytes(), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d_keys.get(), fixture.keys.data(), d_keys.bytes(), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d_values.get(), fixture.values.data(), d_values.bytes(), hipMemcpyHostToDevice));
@@ -278,7 +308,7 @@ void run_case(std::uint32_t rows, std::uint32_t group) {
         .query=d_queries.get(), .key_codes=d_keys.get(), .value_codes=d_values.get(),
         .value_scale_bits=d_scales.get(), .page_table=d_pages.get(),
         .page_table_pages=static_cast<std::uint32_t>(fixture.pages.size()),
-        .context=rows, .physical_tokens=kPhysicalTokens, .query_heads=kHq, .kv_heads=kHkv,
+        .context=context, .physical_tokens=fixture.physical_tokens, .query_heads=kHq, .kv_heads=kHkv,
         .q_to_kv=6U, .value_group=group, .query_rows=rows,
         .row_positions=d_positions.get(), .attention_scale=kScale,
         .key_layout=kv::Fp8Int4KvPlaneLayout::TokenFastest,
@@ -291,13 +321,15 @@ void run_case(std::uint32_t rows, std::uint32_t group) {
     std::vector<float> output(static_cast<std::size_t>(rows) * kHq * kD);
     HIP_CHECK(hipMemcpy(output.data(), d_output.get(), d_output.bytes(), hipMemcpyDeviceToHost));
     const float* scores = reinterpret_cast<const float*>(d_workspace.get());
-    for (const auto row : {0U, rows / 3U, rows - 1U}) {
+    const auto panel_rows = kv::dense_prefill_panel_rows(rows, context);
+    const auto last_origin = ((rows - 1U) / panel_rows) * panel_rows;
+    for (const auto row : {last_origin, rows - 1U}) {
         const std::uint32_t visible = static_cast<std::uint32_t>(positions[row]) + 1U;
         for (const auto head : {0U, 7U, 23U}) {
             for (const auto logical : {0U, visible / 2U, visible - 1U}) {
                 float actual = 0.0F;
                 const std::size_t index =
-                    (static_cast<std::size_t>(row) * kHq + head) * rows + logical;
+                    (static_cast<std::size_t>(row - last_origin) * kHq + head) * context + logical;
                 HIP_CHECK(hipMemcpy(&actual, scores + index, sizeof(actual), hipMemcpyDeviceToHost));
                 const double reference = expected_score(fixture, queries, row, head, logical);
                 const double error = std::abs(static_cast<double>(actual) - reference);
@@ -309,12 +341,14 @@ void run_case(std::uint32_t rows, std::uint32_t group) {
             }
         }
     }
-    const std::array<std::uint32_t, 3> sampled_rows{0U, rows / 3U, rows - 1U};
-    constexpr std::array<std::uint32_t, 3> sampled_heads{0U, 7U, 23U};
-    constexpr std::array<std::uint32_t, 3> sampled_features{0U, 17U, 255U};
-    for (const auto row : sampled_rows) for (const auto head : sampled_heads)
-        for (const auto feature : sampled_features) {
-            const double reference = expected(fixture, queries, positions, row, head, feature);
+    const std::array<std::uint32_t, 5> sampled_rows{
+        0U, rows / 3U, std::min(panel_rows - 1U, rows - 1U),
+        std::min(panel_rows, rows - 1U), rows - 1U};
+    constexpr std::array<std::uint32_t, 4> sampled_heads{0U, 7U, 13U, 23U};
+    for (const auto row : sampled_rows) for (const auto head : sampled_heads) {
+        const auto references = expected_vector(fixture, queries, positions, row, head);
+        for (std::uint32_t feature = 0U; feature < kD; ++feature) {
+            const double reference = references[feature];
             const float actual = output[(static_cast<std::size_t>(row) * kHq + head) * kD + feature];
             const double error = std::abs(static_cast<double>(actual) - reference);
             if (!std::isfinite(reference) || !std::isfinite(actual) ||
@@ -324,10 +358,33 @@ void run_case(std::uint32_t rows, std::uint32_t group) {
                 fail("dense attention differs from independent FP64 oracle");
             }
         }
-    if (rows == 129U) {
+    }
+    if (rows == 1537U) {
+        hipStream_t stream{};
+        hipGraph_t graph{};
+        hipGraphExec_t executable{};
+        HIP_CHECK(hipStreamCreate(&stream));
+        HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+        HIP_CHECK(launch_selected_dense(args, d_workspace.get(), d_workspace.bytes(), stream));
+        HIP_CHECK(hipStreamEndCapture(stream, &graph));
+        HIP_CHECK(hipGraphInstantiate(&executable, graph, nullptr, nullptr, 0));
+        for (unsigned replay = 0; replay < 2; ++replay) {
+            HIP_CHECK(hipMemsetAsync(d_output.get(), 0xff, d_output.bytes(), stream));
+            HIP_CHECK(hipMemsetAsync(d_workspace.get(), 0xff, d_workspace.bytes(), stream));
+            HIP_CHECK(hipGraphLaunch(executable, stream));
+            HIP_CHECK(hipStreamSynchronize(stream));
+            std::vector<float> replay_output(output.size());
+            HIP_CHECK(hipMemcpy(replay_output.data(), d_output.get(), d_output.bytes(), hipMemcpyDeviceToHost));
+            if (replay_output != output) fail("panel Device Graph replay differs from eager output");
+        }
+        HIP_CHECK(hipGraphExecDestroy(executable));
+        HIP_CHECK(hipGraphDestroy(graph));
+        HIP_CHECK(hipStreamDestroy(stream));
+    }
+    if (rows == 129U || rows == 1537U) {
         const std::vector<float> baseline_output = output;
         DeviceBuffer<std::int32_t> d_active(1U);
-        std::int32_t active = 127;
+        std::int32_t active = rows == 129U ? 127 : static_cast<std::int32_t>(panel_rows + 3U);
         HIP_CHECK(hipMemcpy(d_active.get(), &active, sizeof(active), hipMemcpyHostToDevice));
         args.active_query_rows = d_active.get();
         HIP_CHECK(hipMemset(d_output.get(), 0xff, d_output.bytes()));
@@ -374,6 +431,13 @@ void run_case(std::uint32_t rows, std::uint32_t group) {
         if (!std::all_of(output.begin(), output.end(), [](float value) { return std::isnan(value); })) {
             fail("invalid device active-row status did not poison every row");
         }
+        active = static_cast<std::int32_t>(rows + 1U);
+        HIP_CHECK(hipMemcpy(d_active.get(), &active, sizeof(active), hipMemcpyHostToDevice));
+        HIP_CHECK(launch_selected_dense(args, d_workspace.get(), d_workspace.bytes(), nullptr));
+        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK(hipMemcpy(output.data(), d_output.get(), d_output.bytes(), hipMemcpyDeviceToHost));
+        if (!std::all_of(output.begin(), output.end(), [](float value) { return std::isnan(value); }))
+            fail("active count above whole-call rows did not poison every panel");
 
         args.active_query_rows = nullptr;
         auto malformed_positions = positions;
@@ -416,8 +480,9 @@ void run_case(std::uint32_t rows, std::uint32_t group) {
             const double reference = expected(fixture, queries, positions, row, 23U, 255U);
             const float actual = output[(static_cast<std::size_t>(row) * kHq + 23U) * kD + 255U];
             const double error = std::abs(static_cast<double>(actual) - reference);
-            if (error > 2.0e-3 &&
-                error / std::max(std::abs(reference), 1.0e-6) > 2.0e-3) {
+            if (!std::isfinite(actual) || !std::isfinite(reference) || !std::isfinite(error) ||
+                (error > 2.0e-3 &&
+                 error / std::max(std::abs(reference), 1.0e-6) > 2.0e-3)) {
                 fail("nonzero page-table row did not select the exact fragmented page sequence");
             }
         }
@@ -432,7 +497,7 @@ void run_case(std::uint32_t rows, std::uint32_t group) {
         }
 
         args.page_table_row_count = 2U;
-        page_rows[fixture.pages.size()] = static_cast<std::uint32_t>(kPhysicalPages);
+        page_rows[fixture.pages.size()] = static_cast<std::uint32_t>(fixture.physical_tokens / kPage);
         HIP_CHECK(hipMemcpy(d_page_rows.get(), page_rows.data(), d_page_rows.bytes(),
                             hipMemcpyHostToDevice));
         HIP_CHECK(launch_selected_dense(args, d_workspace.get(),
@@ -443,6 +508,15 @@ void run_case(std::uint32_t rows, std::uint32_t group) {
             fail("invalid physical page did not poison every dependent output row");
         }
     }
+    d_output.check_canaries();
+    d_workspace.check_canaries();
+    d_queries.check_canaries();
+    d_positions.check_canaries();
+    d_keys.check_canaries();
+    d_values.check_canaries();
+    d_scales.check_canaries();
+    std::cout << "rows=" << rows << " context=" << context << " group=" << group
+              << " panel=" << panel_rows << " oracle=FP64 complete-sampled-vectors PASS\n";
 }
 
 } // namespace
@@ -452,8 +526,14 @@ int main() {
         host_predicate_regression();
         for (const std::uint32_t group : {16U, 32U}) {
             for (const std::uint32_t rows : {128U, 129U, 512U, 1024U, 2048U, 4096U}) {
-                run_case(rows, group);
+                run_case(rows, group, rows);
             }
+            run_case(1024U, group, 8192U);
+            run_case(1537U, group, 8192U);
+            run_case(8192U, group, 8192U);
+            run_case(1025U, group, 32768U);
+            run_case(8192U, group, 32768U);
+            run_case(128U, group, 262144U);
         }
         std::cout << "production Bk16/Bk32 dense G16/G32 FP64 qualification: PASS\n";
         return 0;

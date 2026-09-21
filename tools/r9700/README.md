@@ -512,14 +512,17 @@ and N1024 regressed at all four extents by `1.21819x` through `1.35600x`. Its re
 `2ac938b230197384a476bd57ccfd39d72a1b73c03bee82c58bf3be9df7de5b1f`. Production remains A8;
 the already-rejected A4 quality profile was not reevaluated.
 
-The production low-context dense attention route is the selected three-stage full-score GQA6 path
-in `fp8_int4_kv_attention.hip`. It accepts only an initial-prefix P=128..4096 call with token-fastest
+The dense attention route is the three-stage full-score GQA6 path with bounded query panels
+in `fp8_int4_kv_attention.hip`. It accepts initial and appended P=128..8192 calls through a
+262144-token visible context with token-fastest
 FP8 K plus feature-fastest signed INT4 V and FP16 scales. QK uses Bk16 below P512 and the selected
-Bk32 schedule from P512 through P4096; each tile is shared across the six query heads of one KV
+Bk32 schedule for complete calls with at least 512 query rows, regardless of panel width;
+each tile is shared across the six query heads of one KV
 head and writes FP32 scores. A separate maximum pass validates each causal
 vector; PV forms FP32 probabilities and reuses each direct INT4/FP16-scale V tile across the same
 six heads. The caller-owned score/max workspace is reused across layers at its planner-stable arena
-address. P<128, later chunks, tree attention, and other layouts retain their prior routes.
+address. P<128, tree attention, and other layouts retain their prior routes. Device-active counts
+remain relative to the whole call; each panel clamps that count using its original row offset.
 
 After the serialized campaign permits a new build/GPU run, execute the independent FP64 harness:
 
@@ -527,20 +530,28 @@ After the serialized campaign permits a new build/GPU run, execute the independe
 make -C tools/r9700 dense-prefill-attention
 ```
 
-It covers the production G16/G32 full-score route at P128/512/1024/2048/4096 with fragmented
-physical pages, arbitrary device causal positions, and the exact stored cache planes.
+It covers G16/G32 initial prefixes, appended 8K/32K contexts, 8192 query rows, partial panels,
+and a 262144-context panel boundary with fragmented physical pages and exact stored cache planes.
+Independent FP64 scores are computed once per sampled row/head and validate all 256 output
+features across all four KV heads. It also checks workspace/output canaries, active counts crossing
+panels, invalid whole-call counts, and eager/Device Graph replay after poisoned scratch.
 `dense-prefill-attention-full-score-isa` prints both selected QK kernels plus maximum and PV. Invoke
 `dense-prefill-attention-full-score-static` with the exact selected mangled symbol and
 `DENSE_ATTN_STAGE=qk_bk16`, `qk_bk32`, `maximum`, or `pv`. The checker requires exactly sixteen
 BF16 WMMAs for Bk16 and 32 for Bk32, and forbids every WMMA opcode in maximum/PV. The emitted
-gfx1201 resources are Bk16 QK 29 VGPR/8,296-byte LDS/occupancy 15, Bk32 QK 97 next-free
+pre-panel gfx1201 resources were Bk16 QK 29 VGPR/8,296-byte LDS/occupancy 15, Bk32 QK 97 next-free
 VGPR/16,488-byte LDS/occupancy 11, maximum 17 VGPR/64-byte LDS/occupancy 16, and PV 116
 VGPR/occupancy 12 with 9,208-byte G16 or 8,952-byte G32 LDS. Every stage is wave32 WGP mode with
 zero private/scratch/flat-scratch and zero register spills; PV must contain native FP32 exp and
 FP32 FMA/FMAC.
 
 The full-score route uses a caller-owned reusable FP32 workspace of
-`(24*P*P + 24*P)*4` bytes (384.1875 MiB at P2048). Its 192-thread QK stage launches one Bq16 CTA
+`24*panel_rows*(visible_context+1)*4` bytes. Panel rows are the lesser of the query count and
+`floor(2048*2048/visible_context/16)*16`, bounding scores at 384 MiB and maxima at 192 KiB.
+P2048 remains one panel with its original 384.1875 MiB workspace. The planner uses a conservative
+envelope bound rather than the exact endpoint size because panel-size rounding introduces a
+sawtooth as context grows. All panels reuse one stable address on the owning stream.
+Its 192-thread QK stage launches one Bq16 CTA
 per KV head/query tile/key tile; Bk32 halves the key-tile workgroups and reuses each represented
 query fragment across two K16 WMMA fragments. Six query-head waves share each decoded FP8-K tile; its
 maximum stage validates and reduces each causal FP32 score vector; its 256-thread PV stage stages

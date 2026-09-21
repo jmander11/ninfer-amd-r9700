@@ -28,7 +28,7 @@ class CampaignTest(unittest.TestCase):
                             "sha256": campaign.run.file_sha256(weights)}
                 selected_artifact = dict(artifact)
                 selected_artifact["file_size_bytes"] = selected_artifact.pop("bytes")
-                bench_relative = "build-r9700-selection-dense-g16-20260921/bench/ninfer_bench"
+                bench_relative = "build-r9700-selection-panel-dense-g16-20260921/bench/ninfer_bench"
                 record = {"sources": [{"weights_id": "recipe", "kv_value_group": 16,
                           "xattention_profile": "dense", "artifact": selected_artifact,
                           "benchmark_executable": {"path": str(root / bench_relative), "sha256": "bench"}}]}
@@ -92,7 +92,7 @@ class CampaignTest(unittest.TestCase):
             for group in (16, 32):
                 binary = command[command.index(f"--g{group}-ppl-bin") + 1]
                 route = "dense" if profile == "dense" else "xattention"
-                self.assertIn(f"build-r9700-selection-{route}-g{group}-20260921/", binary)
+                self.assertIn(f"build-r9700-selection-panel-{route}-g{group}-20260921/", binary)
             self.assertEqual("--require-fp8-hybrid" in command, "four-role" in weights_id)
 
     def test_chunk4096_reference_reuses_without_a_python_dependency(self):

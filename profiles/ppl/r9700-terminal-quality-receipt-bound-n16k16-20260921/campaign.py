@@ -17,8 +17,8 @@ from tools.ppl.quality_recovery_io import EXPECTED_AUTHORITIES, publish
 from tools.reference.qwen3_8_27b_bf16.protocol import validate_checkpoint_files
 
 PACKAGE = Path(__file__).resolve().parent
-SELECTION = REPO / "profiles/bench/prefill-chunk-selection-receipt-bound-n16k16-20260921.json"
-FROZEN_INPUTS = REPO / "profiles/bench/r9700-chunk-selection-receipt-bound-n16k16-20260921/inputs.json"
+SELECTION = REPO / "profiles/bench/prefill-chunk-selection-panel-attention-20260921.json"
+FROZEN_INPUTS = REPO / "profiles/bench/r9700-chunk-selection-panel-attention-20260921/inputs.json"
 PYTHON = Path("/home/battlefront/.local/bin/python3.11")
 SCORER = REPO / "tools/reference/qwen3_8_27b_bf16/ppl.py"
 CHECKPOINT = Path("/ssdpool2nvme/local_llm/models/qwen3.8-27b-bf16")
@@ -31,7 +31,7 @@ def campaigns():
     for name, (weights_id, profile) in EXPECTED_AUTHORITIES.items():
         route = "dense" if profile == "dense" else "xattention"
         yield name, weights_id, profile, {
-            group: REPO / f"build-r9700-selection-{route}-g{group}-20260921/apps/ninfer-ppl"
+            group: REPO / f"build-r9700-selection-panel-{route}-g{group}-20260921/apps/ninfer-ppl"
             for group in (16, 32)
         }, PACKAGE / name.lower()
 
@@ -84,7 +84,7 @@ def verify_frozen_inputs(record):
         if source["artifact"] != expected:
             raise ValueError("selected-chunk artifact evidence differs from frozen campaign")
         route = "dense" if source["xattention_profile"] == "dense" else "xattention"
-        relative = (f"build-r9700-selection-{route}-g{source['kv_value_group']}-20260921/"
+        relative = (f"build-r9700-selection-panel-{route}-g{source['kv_value_group']}-20260921/"
                     "bench/ninfer_bench")
         benchmark = source["benchmark_executable"]
         if (benchmark["path"] != str(REPO / relative)

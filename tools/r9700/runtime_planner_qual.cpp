@@ -123,8 +123,10 @@ void qualify_host_split512_routing() {
     require(!kv::use_dense_prefill_attention(127U, 127U) &&
                 kv::use_dense_prefill_attention(128U, 128U) &&
                 kv::use_dense_prefill_attention(4096U, 4096U) &&
-                !kv::use_dense_prefill_attention(4097U, 4097U) &&
-                !kv::use_dense_prefill_attention(4096U, 8192U),
+                !kv::use_dense_prefill_attention(8193U, 8193U) &&
+                kv::use_dense_prefill_attention(4096U, 8192U) &&
+                kv::use_dense_prefill_attention(8192U, 32768U) &&
+                kv::use_dense_prefill_attention(128U, 262144U),
             "dense-prefill production selector differs from its admitted boundary");
     require(q27::r9700_full_attention_workspace_capacity_bytes(1U, 8192U, false) ==
                 kv::fp8_int4_kv_attention_split512_workspace_capacity_bytes(1U, 8192U) &&
@@ -136,9 +138,9 @@ void qualify_host_split512_routing() {
                 q27::r9700_full_attention_workspace_capacity_bytes(4U, 8191U, true) == 0U,
             "split-512 caller-owned workspace selection differs");
     require(q27::r9700_full_attention_workspace_capacity_bytes(2048U, 2048U, false) ==
-                kv::fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(2048U) &&
+                kv::fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(2048U, 2048U) &&
                 q27::r9700_full_attention_workspace_capacity_bytes(4096U, 262144U, false) ==
-                kv::fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(4096U),
+                kv::fp8_int4_kv_attention_dense_prefill_workspace_envelope_bytes(4096U, 262144U),
             "dense full-score caller-owned planner peak differs");
     const auto has_classes = [](const std::vector<Variant::GraphExecutionProfile>& profiles,
                                 std::initializer_list<std::uint32_t> wanted) {

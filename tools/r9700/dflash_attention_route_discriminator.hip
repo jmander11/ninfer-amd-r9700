@@ -483,7 +483,7 @@ int main() {
         const std::size_t w6_batched_workspace_elements = kW6 * kQueryHeads * kW6Context;
         DeviceArray<float> d_w6_batched_scores(w6_batched_workspace_elements + 2U);
         const std::size_t text_dense_workspace_bytes =
-            kv::fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(kTextRows);
+            kv::fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(kTextRows, kTextRows);
         if (text_dense_workspace_bytes != 1609920U ||
             text_dense_workspace_bytes % sizeof(float) != 0U) {
             fail("unexpected exact Text P129 dense workspace size");

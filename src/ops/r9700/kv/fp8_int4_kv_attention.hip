@@ -1,7 +1,9 @@
 #include "fp8_int4_kv_attention.h"
+#include "r9700_attention_profile.h"
 
 #include <hip/hip_fp8.h>
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 
@@ -677,6 +679,15 @@ inline constexpr std::uint32_t kDensePrefillQueryTile = 16U;
 inline constexpr std::uint32_t kDensePrefillThreads = 256U;
 inline constexpr std::uint32_t kDenseFullScoreQkThreads = 192U;
 
+// The device count belongs to the complete call, whereas score/output indexing is panel-local.
+__device__ std::int32_t dense_panel_active_rows(const std::int32_t* active,
+    std::uint32_t panel_rows, std::uint32_t origin, std::uint32_t whole_rows) {
+    const std::int32_t count = active[0];
+    if (count < 0 || static_cast<std::uint32_t>(count) > whole_rows) return -1;
+    const auto rows = static_cast<std::uint32_t>(count);
+    return rows <= origin ? 0 : static_cast<std::int32_t>(min(panel_rows, rows - origin));
+}
+
 struct DenseFullScoreQkShared {
     hip_bfloat16 keys[kHeadDim][16];
     std::uint32_t row_context[kDensePrefillQueryTile];
@@ -695,7 +706,7 @@ void dense_full_score_qk_kernel(
     const std::int32_t* page_table_row, std::uint32_t page_table_row_stride,
     std::uint32_t page_table_row_count, std::size_t context, std::size_t physical_tokens,
     const std::int32_t* row_positions, const std::int32_t* active_query_rows,
-    std::uint32_t total_query_rows, float attention_scale, float* scores) {
+    std::uint32_t total_query_rows, std::uint32_t panel_origin, std::uint32_t whole_rows, float attention_scale, float* scores) {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
     __shared__ DenseFullScoreQkShared shared;
     const std::uint32_t tid = threadIdx.x;
@@ -708,7 +719,7 @@ void dense_full_score_qk_kernel(
     const std::uint32_t tile_rows = min(kDensePrefillQueryTile,
                                         total_query_rows - query_base);
     if (tid == 0U) {
-        const std::int32_t active = DeviceActiveRows ? active_query_rows[0]
+        const std::int32_t active = DeviceActiveRows ? dense_panel_active_rows(active_query_rows, total_query_rows, panel_origin, whole_rows)
                                                      : static_cast<std::int32_t>(total_query_rows);
         shared.inactive_rows = 0U;
         shared.maximum_context = 0U;
@@ -805,7 +816,7 @@ void dense_full_score_qk_kernel(
     (void)query; (void)keys; (void)pages; (void)page_table_row;
     (void)page_table_row_stride; (void)page_table_row_count; (void)context;
     (void)physical_tokens; (void)row_positions; (void)active_query_rows;
-    (void)total_query_rows; (void)attention_scale; (void)scores;
+    (void)total_query_rows; (void)panel_origin; (void)whole_rows; (void)attention_scale; (void)scores;
 #endif
 }
 
@@ -831,7 +842,7 @@ void dense_full_score_qk_bk32_kernel(
     const std::int32_t* page_table_row, std::uint32_t page_table_row_stride,
     std::uint32_t page_table_row_count, std::size_t context, std::size_t physical_tokens,
     const std::int32_t* row_positions, const std::int32_t* active_query_rows,
-    std::uint32_t total_query_rows, float attention_scale, float* scores) {
+    std::uint32_t total_query_rows, std::uint32_t panel_origin, std::uint32_t whole_rows, float attention_scale, float* scores) {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
     __shared__ DenseFullScoreQkBk32Shared shared;
     const std::uint32_t tid = threadIdx.x;
@@ -844,7 +855,7 @@ void dense_full_score_qk_bk32_kernel(
     const std::uint32_t tile_rows = min(kDensePrefillQueryTile,
                                         total_query_rows - query_base);
     if (tid == 0U) {
-        const std::int32_t active = DeviceActiveRows ? active_query_rows[0]
+        const std::int32_t active = DeviceActiveRows ? dense_panel_active_rows(active_query_rows, total_query_rows, panel_origin, whole_rows)
                                                      : static_cast<std::int32_t>(total_query_rows);
         shared.inactive_rows = 0U;
         shared.maximum_context = 0U;
@@ -952,7 +963,7 @@ void dense_full_score_qk_bk32_kernel(
     (void)query; (void)keys; (void)pages; (void)page_table_row;
     (void)page_table_row_stride; (void)page_table_row_count; (void)context;
     (void)physical_tokens; (void)row_positions; (void)active_query_rows;
-    (void)total_query_rows; (void)attention_scale; (void)scores;
+    (void)total_query_rows; (void)panel_origin; (void)whole_rows; (void)attention_scale; (void)scores;
 #endif
 }
 
@@ -960,7 +971,8 @@ template <bool DeviceActiveRows>
 __global__ __launch_bounds__(kDensePrefillThreads)
 void dense_full_score_maximum_kernel(
     const float* scores, std::size_t context, const std::int32_t* row_positions,
-    const std::int32_t* active_query_rows, std::uint32_t query_rows, float* maxima) {
+    const std::int32_t* active_query_rows, std::uint32_t query_rows,
+    std::uint32_t panel_origin, std::uint32_t whole_rows, float* maxima) {
     const std::uint32_t tid = threadIdx.x;
     const std::uint32_t lane = tid & 31U;
     const std::uint32_t wave = tid >> 5U;
@@ -968,7 +980,7 @@ void dense_full_score_maximum_kernel(
     const std::uint32_t row = vector / 24U;
     __shared__ float wave_max[8];
     __shared__ std::uint32_t wave_bad[8];
-    const std::int32_t active = DeviceActiveRows ? active_query_rows[0]
+    const std::int32_t active = DeviceActiveRows ? dense_panel_active_rows(active_query_rows, query_rows, panel_origin, whole_rows)
                                                  : static_cast<std::int32_t>(query_rows);
     const bool inactive = active >= 0 && static_cast<std::uint32_t>(active) <= query_rows &&
                           row >= static_cast<std::uint32_t>(active);
@@ -1025,7 +1037,7 @@ void dense_full_score_pv_kernel(
     const std::int32_t* page_table_row, std::uint32_t page_table_row_stride,
     std::uint32_t page_table_row_count, std::size_t context, std::size_t physical_tokens,
     const std::int32_t* row_positions, const std::int32_t* active_query_rows,
-    std::uint32_t total_query_rows, float* output) {
+    std::uint32_t total_query_rows, std::uint32_t panel_origin, std::uint32_t whole_rows, float* output) {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
     __shared__ DenseFullScorePvShared<Group> shared;
     const std::uint32_t tid = threadIdx.x;
@@ -1034,7 +1046,7 @@ void dense_full_score_pv_kernel(
     const std::uint32_t tile_rows = min(kDensePrefillQueryTile,
                                         total_query_rows - query_base);
     if (tid == 0U) {
-        const std::int32_t active = DeviceActiveRows ? active_query_rows[0]
+        const std::int32_t active = DeviceActiveRows ? dense_panel_active_rows(active_query_rows, total_query_rows, panel_origin, whole_rows)
                                                      : static_cast<std::int32_t>(total_query_rows);
         shared.inactive_rows = 0U;
         shared.maximum_context = 0U;
@@ -1179,13 +1191,14 @@ void dense_full_score_pv_kernel(
     (void)scores; (void)maxima; (void)values; (void)scales; (void)pages;
     (void)page_table_row; (void)page_table_row_stride; (void)page_table_row_count;
     (void)context; (void)physical_tokens; (void)row_positions; (void)active_query_rows;
-    (void)total_query_rows; (void)output;
+    (void)total_query_rows; (void)panel_origin; (void)whole_rows; (void)output;
 #endif
 }
 
 template <std::uint32_t Group>
 hipError_t dense_full_score_launch(const Fp8Int4KvAttentionArgs& a, float* scores,
-                                   float* maxima, hipStream_t stream) noexcept {
+                                   float* maxima, std::uint32_t panel_origin,
+                                   std::uint32_t whole_rows, hipStream_t stream) noexcept {
     const dim3 pv_grid(4U, (a.query_rows + kDensePrefillQueryTile - 1U) /
                               kDensePrefillQueryTile);
     const dim3 qk_grid(pv_grid.x, pv_grid.y, (a.context + 15U) / 16U);
@@ -1194,14 +1207,14 @@ hipError_t dense_full_score_launch(const Fp8Int4KvAttentionArgs& a, float* score
                            dim3(kDenseFullScoreQkThreads), 0, stream, a.query, a.key_codes,
                            a.page_table, a.page_table_row, a.page_table_row_stride,
                            a.page_table_row_count, a.context, a.physical_tokens,
-                           a.row_positions, a.active_query_rows, a.query_rows,
+                           a.row_positions, a.active_query_rows, a.query_rows, panel_origin, whole_rows,
                            a.attention_scale, scores);
     } else {
         hipLaunchKernelGGL((dense_full_score_qk_kernel<false>), qk_grid,
                            dim3(kDenseFullScoreQkThreads), 0, stream, a.query, a.key_codes,
                            a.page_table, a.page_table_row, a.page_table_row_stride,
                            a.page_table_row_count, a.context, a.physical_tokens,
-                           a.row_positions, nullptr, a.query_rows, a.attention_scale, scores);
+                           a.row_positions, nullptr, a.query_rows, panel_origin, whole_rows, a.attention_scale, scores);
     }
     hipError_t error = hipGetLastError();
     if (error != hipSuccess) return error;
@@ -1209,11 +1222,11 @@ hipError_t dense_full_score_launch(const Fp8Int4KvAttentionArgs& a, float* score
     if (a.active_query_rows != nullptr) {
         hipLaunchKernelGGL((dense_full_score_maximum_kernel<true>), maximum_grid,
                            dim3(kDensePrefillThreads), 0, stream, scores, a.context,
-                           a.row_positions, a.active_query_rows, a.query_rows, maxima);
+                           a.row_positions, a.active_query_rows, a.query_rows, panel_origin, whole_rows, maxima);
     } else {
         hipLaunchKernelGGL((dense_full_score_maximum_kernel<false>), maximum_grid,
                            dim3(kDensePrefillThreads), 0, stream, scores, a.context,
-                           a.row_positions, nullptr, a.query_rows, maxima);
+                           a.row_positions, nullptr, a.query_rows, panel_origin, whole_rows, maxima);
     }
     error = hipGetLastError();
     if (error != hipSuccess) return error;
@@ -1223,18 +1236,19 @@ hipError_t dense_full_score_launch(const Fp8Int4KvAttentionArgs& a, float* score
                            a.value_codes, a.value_scale_bits, a.page_table, a.page_table_row,
                            a.page_table_row_stride, a.page_table_row_count, a.context,
                            a.physical_tokens, a.row_positions, a.active_query_rows,
-                           a.query_rows, a.output);
+                           a.query_rows, panel_origin, whole_rows, a.output);
     } else {
         hipLaunchKernelGGL((dense_full_score_pv_kernel<Group, false>), pv_grid,
                            dim3(kDensePrefillThreads), 0, stream, scores, maxima,
                            a.value_codes, a.value_scale_bits, a.page_table, a.page_table_row,
                            a.page_table_row_stride, a.page_table_row_count, a.context,
-                           a.physical_tokens, a.row_positions, nullptr, a.query_rows, a.output);
+                           a.physical_tokens, a.row_positions, nullptr, a.query_rows, panel_origin, whole_rows, a.output);
     }
     return hipGetLastError();
 }
 
 hipError_t dense_full_score_qk_bk32_launch(const Fp8Int4KvAttentionArgs& a, float* scores,
+                                           std::uint32_t panel_origin, std::uint32_t whole_rows,
                                            hipStream_t stream) noexcept {
     const dim3 qk_grid(4U, (a.query_rows + kDensePrefillQueryTile - 1U) /
                               kDensePrefillQueryTile,
@@ -1244,14 +1258,14 @@ hipError_t dense_full_score_qk_bk32_launch(const Fp8Int4KvAttentionArgs& a, floa
                            dim3(kDenseFullScoreQkThreads), 0, stream, a.query, a.key_codes,
                            a.page_table, a.page_table_row, a.page_table_row_stride,
                            a.page_table_row_count, a.context, a.physical_tokens,
-                           a.row_positions, a.active_query_rows, a.query_rows,
+                           a.row_positions, a.active_query_rows, a.query_rows, panel_origin, whole_rows,
                            a.attention_scale, scores);
     } else {
         hipLaunchKernelGGL((dense_full_score_qk_bk32_kernel<false>), qk_grid,
                            dim3(kDenseFullScoreQkThreads), 0, stream, a.query, a.key_codes,
                            a.page_table, a.page_table_row, a.page_table_row_stride,
                            a.page_table_row_count, a.context, a.physical_tokens,
-                           a.row_positions, nullptr, a.query_rows, a.attention_scale, scores);
+                           a.row_positions, nullptr, a.query_rows, panel_origin, whole_rows, a.attention_scale, scores);
     }
     return hipGetLastError();
 }
@@ -1259,8 +1273,8 @@ hipError_t dense_full_score_qk_bk32_launch(const Fp8Int4KvAttentionArgs& a, floa
 template <std::uint32_t Group>
 hipError_t dense_full_score_bk32_launch(
     const Fp8Int4KvAttentionArgs& a, float* scores, float* maxima,
-    hipStream_t stream) noexcept {
-    hipError_t error = dense_full_score_qk_bk32_launch(a, scores, stream);
+    std::uint32_t panel_origin, std::uint32_t whole_rows, hipStream_t stream) noexcept {
+    hipError_t error = dense_full_score_qk_bk32_launch(a, scores, panel_origin, whole_rows, stream);
     if (error != hipSuccess) return error;
     const dim3 pv_grid(4U, (a.query_rows + kDensePrefillQueryTile - 1U) /
                               kDensePrefillQueryTile);
@@ -1268,11 +1282,11 @@ hipError_t dense_full_score_bk32_launch(
     if (a.active_query_rows != nullptr) {
         hipLaunchKernelGGL((dense_full_score_maximum_kernel<true>), maximum_grid,
                            dim3(kDensePrefillThreads), 0, stream, scores, a.context,
-                           a.row_positions, a.active_query_rows, a.query_rows, maxima);
+                           a.row_positions, a.active_query_rows, a.query_rows, panel_origin, whole_rows, maxima);
     } else {
         hipLaunchKernelGGL((dense_full_score_maximum_kernel<false>), maximum_grid,
                            dim3(kDensePrefillThreads), 0, stream, scores, a.context,
-                           a.row_positions, nullptr, a.query_rows, maxima);
+                           a.row_positions, nullptr, a.query_rows, panel_origin, whole_rows, maxima);
     }
     error = hipGetLastError();
     if (error != hipSuccess) return error;
@@ -1282,13 +1296,13 @@ hipError_t dense_full_score_bk32_launch(
                            a.value_codes, a.value_scale_bits, a.page_table, a.page_table_row,
                            a.page_table_row_stride, a.page_table_row_count, a.context,
                            a.physical_tokens, a.row_positions, a.active_query_rows,
-                           a.query_rows, a.output);
+                           a.query_rows, panel_origin, whole_rows, a.output);
     } else {
         hipLaunchKernelGGL((dense_full_score_pv_kernel<Group, false>), pv_grid,
                            dim3(kDensePrefillThreads), 0, stream, scores, maxima,
                            a.value_codes, a.value_scale_bits, a.page_table, a.page_table_row,
                            a.page_table_row_stride, a.page_table_row_count, a.context,
-                           a.physical_tokens, a.row_positions, nullptr, a.query_rows, a.output);
+                           a.physical_tokens, a.row_positions, nullptr, a.query_rows, panel_origin, whole_rows, a.output);
     }
     return hipGetLastError();
 }
@@ -1523,23 +1537,34 @@ hipError_t fp8_int4_kv_attention_fused(const Fp8Int4KvAttentionArgs& a,
 }
 
 std::size_t fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(
-    std::uint32_t query_rows) noexcept {
-    if (query_rows < 128U || query_rows > 4096U) return 0U;
-    const std::size_t vectors = static_cast<std::size_t>(query_rows) * 24U;
-    return (vectors * query_rows + vectors) * sizeof(float);
+    std::uint32_t query_rows, std::size_t context) noexcept {
+    const std::size_t vectors = static_cast<std::size_t>(dense_prefill_panel_rows(query_rows, context)) * 24U;
+    return vectors * (context + 1U) * sizeof(float);
+}
+
+std::size_t fp8_int4_kv_attention_dense_prefill_workspace_envelope_bytes(
+    std::uint32_t maximum_query_rows, std::size_t maximum_context) noexcept {
+    const std::size_t rows = std::min<std::size_t>(
+        std::min<std::size_t>(maximum_query_rows, kDensePrefillMaximumRows), maximum_context);
+    if (rows < kDensePrefillMinimumRows) return 0U;
+    const auto context = std::min(maximum_context, kDensePrefillMaximumContext);
+    // Every exact plane is bounded by both its rectangular envelope and the fixed score budget.
+    // At most 2048 query rows fit because context >= query_rows; this also bounds maxima.
+    const auto scores = std::min(rows * 24U * context, kDensePrefillScoreElements);
+    return (scores + std::min<std::size_t>(rows, 2048U) * 24U) * sizeof(float);
 }
 
 hipError_t fp8_int4_kv_attention_dense_prefill_full_score(
     const Fp8Int4KvAttentionArgs& a, void* workspace, std::size_t workspace_bytes,
     hipStream_t stream) noexcept {
     const std::size_t required =
-        fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(a.query_rows);
+        fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(a.query_rows, a.context);
     if (!a.query || !a.key_codes || !a.value_codes || !a.value_scale_bits ||
         !a.page_table || !a.page_table_pages || !a.context ||
         a.context > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max()) ||
         !a.physical_tokens || a.physical_tokens % kPageSize || a.query_heads != 24U ||
         a.kv_heads != 4U || a.q_to_kv != 6U || a.query_rows < 128U ||
-        a.query_rows > 4096U || !a.row_positions || a.ancestor_masks || a.prefix_lengths ||
+        a.query_rows > kDensePrefillMaximumRows || !a.row_positions || a.ancestor_masks || a.prefix_lengths ||
         a.prefix_length_stride != 1U || a.score_workspace || !a.output ||
         !std::isfinite(a.attention_scale) || !(a.attention_scale > 0.0F) ||
         a.key_layout != Fp8Int4KvPlaneLayout::TokenFastest ||
@@ -1548,7 +1573,7 @@ hipError_t fp8_int4_kv_attention_dense_prefill_full_score(
         (a.page_table_row != nullptr &&
          (a.page_table_row_stride < a.page_table_pages ||
           a.page_table_row_count == 0U)) ||
-        a.context != a.query_rows || !workspace || required == 0U ||
+        !use_dense_prefill_attention(a.query_rows, a.context) || !workspace || required == 0U ||
         workspace_bytes < required ||
         reinterpret_cast<std::uintptr_t>(workspace) % alignof(float) != 0U ||
         a.page_table_pages < (a.context + kPageSize - 1U) / kPageSize ||
@@ -1557,13 +1582,27 @@ hipError_t fp8_int4_kv_attention_dense_prefill_full_score(
     }
 #if defined(__HIPCC__)
     auto* scores = static_cast<float*>(workspace);
-    float* maxima = scores + static_cast<std::size_t>(a.query_rows) * 24U * a.query_rows;
-    if (a.query_rows >= 512U) {
-        return a.value_group == 16U ? dense_full_score_bk32_launch<16U>(a, scores, maxima, stream)
-                                    : dense_full_score_bk32_launch<32U>(a, scores, maxima, stream);
+    const auto panel_rows = dense_prefill_panel_rows(a.query_rows, a.context);
+    float* maxima = scores + static_cast<std::size_t>(panel_rows) * 24U * a.context;
+    for (std::uint32_t origin = 0U; origin < a.query_rows; origin += panel_rows) {
+        auto panel = a;
+        panel.query_rows = std::min(panel_rows, a.query_rows - origin);
+        panel.query += static_cast<std::size_t>(origin) * 24U * kHeadDim;
+        panel.output += static_cast<std::size_t>(origin) * 24U * kHeadDim;
+        panel.row_positions += origin;
+        hipError_t error;
+        if (a.query_rows >= 512U) {
+            error = a.value_group == 16U
+                ? dense_full_score_bk32_launch<16U>(panel, scores, maxima, origin, a.query_rows, stream)
+                : dense_full_score_bk32_launch<32U>(panel, scores, maxima, origin, a.query_rows, stream);
+        } else {
+            error = a.value_group == 16U
+                ? dense_full_score_launch<16U>(panel, scores, maxima, origin, a.query_rows, stream)
+                : dense_full_score_launch<32U>(panel, scores, maxima, origin, a.query_rows, stream);
+        }
+        if (error != hipSuccess) return error;
     }
-    return a.value_group == 16U ? dense_full_score_launch<16U>(a, scores, maxima, stream)
-                                : dense_full_score_launch<32U>(a, scores, maxima, stream);
+    return hipSuccess;
 #else
     (void)workspace;
     (void)workspace_bytes;

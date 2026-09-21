@@ -122,9 +122,9 @@ struct DensePrefillWmmaResources {
     int local_bytes = 0;
 };
 
-// Production staged dense initial-prefix route. The caller owns one reusable workspace containing
-// the rectangular FP32 score plane and one FP32 maximum per (row, query head). QK uses Bk16 below
-// the selected P512 crossover and Bk32 from P512 through P4096 for both G16 and G32.
+// Staged causal prefill over bounded query panels. The caller owns one reusable FP32 score panel
+// and one FP32 maximum per (panel row, query head). QK uses Bk16 for calls below 512 rows and
+// Bk32 otherwise, independently of the private panel width. Row positions remain absolute.
 enum class DensePrefillFullScoreStage : std::uint32_t {
     QkBk16 = 0U,
     Maximum = 1U,
@@ -132,7 +132,11 @@ enum class DensePrefillFullScoreStage : std::uint32_t {
     QkBk32 = 3U,
 };
 [[nodiscard]] std::size_t fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(
-    std::uint32_t query_rows) noexcept;
+    std::uint32_t query_rows, std::size_t visible_context) noexcept;
+// Conservative envelope maximum; unlike the exact query above, this remains valid across the
+// sawtooth in panel widths as visible context grows.
+[[nodiscard]] std::size_t fp8_int4_kv_attention_dense_prefill_workspace_envelope_bytes(
+    std::uint32_t maximum_query_rows, std::size_t maximum_visible_context) noexcept;
 [[nodiscard]] hipError_t fp8_int4_kv_attention_dense_prefill_full_score(
     const Fp8Int4KvAttentionArgs& args, void* workspace, std::size_t workspace_bytes,
     hipStream_t stream) noexcept;

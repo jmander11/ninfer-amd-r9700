@@ -303,8 +303,9 @@ int main() {
         if (selects_dense_prefill(127U, 127U) ||
             !selects_dense_prefill(128U, 128U) ||
             !selects_dense_prefill(4096U, 4096U) ||
-            selects_dense_prefill(4097U, 4097U) ||
-            selects_dense_prefill(4096U, 8192U)) {
+            !selects_dense_prefill(8192U, 32768U) ||
+            selects_dense_prefill(8193U, 32768U) ||
+            !selects_dense_prefill(4096U, 8192U)) {
             fail("dense-prefill row/context classifier is not the admitted boundary");
         }
         if (ninfer::ops::r9700::kv::kFp8QkWmmaDecode) {
@@ -388,7 +389,9 @@ int main() {
         ninfer::DeviceBuffer d_prefix_lengths(
             kMaximumQualifiedRows * sizeof(std::int32_t));
         ninfer::DeviceBuffer d_active_query_rows(sizeof(std::int32_t));
-        ninfer::DeviceBuffer d_score_workspace(kQueryHeads * (kContext + 1U) * sizeof(float));
+        ninfer::DeviceBuffer d_score_workspace(
+            q27::r9700_full_attention_workspace_capacity_bytes(
+                kMaximumQualifiedRows, kContext + 1U, false));
         const ninfer::Fp8KInt4VPagedKVLayerView view =
             typed_cache.layer_view(0, allocation);
         if (view.key_fp8_pages.bytes() != cache.physical_keys.size() ||
@@ -436,9 +439,8 @@ int main() {
             d_row_positions.copy_from_host(positions.data(),
                                             positions.size() * sizeof(std::int32_t));
             const std::size_t score_workspace_bytes =
-                rows <= 2U
-                    ? q27::r9700_full_attention_score_workspace_capacity_bytes(kContext)
-                    : 0U;
+                q27::r9700_full_attention_workspace_capacity_bytes(
+                    static_cast<std::uint32_t>(rows), kContext, false);
             const bool uses_wmma = ninfer::ops::r9700::kv::use_fp8_qk_wmma(
                 static_cast<std::uint32_t>(rows), kContext);
             const q27::R9700FullAttentionArgs args{
@@ -472,7 +474,9 @@ int main() {
                     wmma_maximum_relative = std::max(wmma_maximum_relative, relative);
                 }
                 const double tolerance = uses_wmma ? 5.0e-3 : 2.0e-4;
-                if (absolute > tolerance && relative > tolerance) {
+                if (!std::isfinite(actual[index]) || !std::isfinite(expected[index]) ||
+                    !std::isfinite(absolute) || !std::isfinite(relative) ||
+                    (absolute > tolerance && relative > tolerance)) {
                     std::ostringstream out;
                     out << "T=" << rows << " FP64 attention mismatch at " << index
                         << ": actual=" << actual[index] << " expected=" << expected[index]

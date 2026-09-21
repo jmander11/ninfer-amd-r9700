@@ -138,18 +138,25 @@ signed-INT4 V, and FP16 V-scale planes as dense attention; it introduces no cach
 runtime selector. `tau=1` bypasses all estimator arithmetic and emits every causal page in dense
 order.
 
-Dense P2048 uses the physically selected production page-tiled route, not the sparse consumer and
-not the decode split-512 path. Its fixed Bk64 tile matches one cache page and Bq16 is the sole
-retained query tile. A 256-thread query-head CTA cooperatively decodes the
-token-fastest FP8 K page to BF16 LDS once, reuses that represented tile across its query rows, and
-uses native BF16 WMMA for QK. It retains increasing logical-key order, per-row causal positions,
-FP32 online softmax, and direct feature-fastest signed-INT4/FP16-scale V accumulation, with no
-global score or probability matrix. Fragmented physical page IDs affect only the cooperative page
-resolution. Production selects it only for initial-prefix P=128..4096 with the selected physical
-plane layouts; shorter contexts, later chunks, tree masks, and other layouts retain their existing
-routes.
+Dense prefill uses the staged GQA6 QK/maximum/PV operator. BF16 WMMA computes QK from represented
+BF16 queries and exactly decoded token-fastest FP8 keys; FP32 softmax and direct signed-INT4 times
+stored FP16-scale PV preserve the represented value precision. QK uses Bq16 and Bk16 below 512
+query rows, Bk32 otherwise. That choice uses the complete call's row count even when its last
+private panel is smaller. Initial and appended calls with 128..8192 query rows and visible
+context through 262144 use absolute per-row causal positions and the same fragmented page table.
+Shorter query calls, tree masks, and other layouts retain their separate routes.
 
-The static resource gate uses the combined gfx1201 residency envelope rather than an isolated
+The caller-owned FP32 score workspace is reused across query panels and layers. Panel width is
+`min(query_rows, floor(2048*2048/visible_context/16)*16)`; exact storage is
+`24*panel_rows*(visible_context+1)*4` bytes, capped at 384 MiB scores plus 192 KiB maxima.
+The planner reserves a conservative envelope bound that covers intermediate contexts despite the
+panel-width rounding sawtooth. This preserves arena and Device Graph addresses. Global device-active
+counts are validated against the original call and then clamped by panel origin; inactive rows
+publish positive zero and invalid counts poison every row. P2048 retains one panel and its original
+arithmetic decomposition. Appended-panel qualification and whole-request timing are required before
+crediting any performance improvement.
+
+The historical fused-online candidate's static resource gate used the combined gfx1201 residency envelope rather than an isolated
 register target: next-free VGPR must be at most 240, allocation-rounded LDS at most 43,520 bytes,
 reported occupancy at least 6, with wave32, a 256-thread maximum workgroup, WGP mode, and no
 private, scratch, or register-spill storage. Both G16/G32 Bq16 specializations report 217 next-free
@@ -163,7 +170,7 @@ P128/512/1024/2048/4096 cell. Its selected/incumbent median ratios are respectiv
 0.561224173/0.566735009/0.504308119/0.437316979/0.416703457 for G16 and
 0.546212923/0.554317816/0.495417690/0.429230227/0.417418378 for G32. Bq4/Bq8 were removed after
 selection. Post-promotion operator revalidation and the complete low-context whole ladder remain
-required; the operator A/B alone does not prove the 2,000 tok/s whole-prefill floor.
+required; the operator A/B alone does not establish whole-prefill throughput.
 
 The evaluator is scoped only to ordinary Text prefill. A DFlash-enabled request uses that selected
 ordinary prefill route while capturing its companion features; DFlash proposal attention and

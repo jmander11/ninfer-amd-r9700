@@ -116,17 +116,11 @@ std::size_t r9700_full_attention_workspace_capacity_bytes(
             ops::r9700::kv::fp8_int4_kv_attention_wmma_batched_w5w6_workspace_bytes(
                 candidate_context, query_rows));
     }
-    // The planner supplies envelope maxima, not necessarily one exact call. Reserve the largest
-    // initial-prefix dense score plane reachable anywhere inside that envelope. Runtime dispatch
-    // uses only the exact prefix width and therefore retains one stable address within this peak.
-    const std::uint32_t dense_rows = static_cast<std::uint32_t>(std::min<std::size_t>(
-        std::min<std::size_t>(query_rows, visible_context), 4096U));
-    if (dense_rows >= 128U) {
-        required = std::max(
-            required,
-            ops::r9700::kv::fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(
-                dense_rows));
-    }
+    // Exact panel sizing sawtooths at width transitions. The Op's conservative envelope owner
+    // bounds every intermediate context, preserving this single arena/Device Graph address.
+    required = std::max(required,
+        ops::r9700::kv::fp8_int4_kv_attention_dense_prefill_workspace_envelope_bytes(
+            query_rows, visible_context));
     return required;
 }
 
@@ -247,7 +241,7 @@ static hipError_t launch_r9700_attention(
     if (dense_prefill) {
         const std::size_t required =
             ops::r9700::kv::fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(
-                static_cast<std::uint32_t>(rows));
+                static_cast<std::uint32_t>(rows), raw.context);
         if (required == 0U || a.workspace == nullptr || a.workspace_bytes < required) {
             return hipErrorInvalidValue;
         }
