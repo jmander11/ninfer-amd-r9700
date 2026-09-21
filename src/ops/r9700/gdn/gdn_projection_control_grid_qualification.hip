@@ -1,15 +1,18 @@
-// Static-only feasibility probe. Not linked by any product target and not a public Op.
-// A future complete qualification entry must accept represented BF16 hidden, prepare
+// Qualification-only challenger. Not linked by any product target or public Op.
+// The complete qualification entry accepts represented BF16 hidden, prepares
 // its private A8G64 scratch on every invocation, then launch this 112 x 256 grid.
 // Its semantic outputs are QK[4096], value-Z[12288], g[48], beta[48]. Convolution
 // and recurrent state are outside this computation. No prepared scratch may escape
-// that complete boundary. This file itself is never launched by the static check.
+// that complete boundary. The static check never launches this file's kernels.
 #include <hip/hip_bfloat16.h>
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 
 #include <cstddef>
 #include <cstdint>
+#include <array>
+#include <limits>
+#include "gdn_projection_control_grid_qualification.h"
 
 namespace ninfer::ops::r9700::gdn::qualification {
 namespace {
@@ -127,5 +130,54 @@ void gdn_projection_control_grid_qualification_kernel(
     if (blockIdx.x < kQ4Blocks + kControlBlocks) {
         control(blockIdx.x - kQ4Blocks, hidden, a_weight, b_weight, a_log, dt_bias, g, beta);
     }
+}
+hipError_t projection_control_grid(const ProjectionControlArgs& args,
+                                  hipStream_t stream) noexcept {
+    const auto& p = args.projection;
+    const auto bytes = linear::a8q4g64_activation_workspace_capacity_bytes(1, 5120);
+    if (p.tokens != 1 || p.columns != 5120 ||
+        p.activation_workspace_bytes != bytes ||
+        p.weight0_code_bytes != 4096ULL*5120/2 ||
+        p.weight1_code_bytes != 12288ULL*5120/2 ||
+        p.weight0_scale_bytes != 4096ULL*80*2 ||
+        p.weight1_scale_bytes != 12288ULL*80*2 ||
+        args.control_weight_bytes != 48ULL*5120*2) return hipErrorInvalidValue;
+    struct Plane { const void* data; std::size_t size; std::size_t alignment; };
+    const std::array<Plane,14> planes{{
+        {p.input,5120*2,2}, {p.activation_workspace,bytes,256},
+        {p.weight0_codes,p.weight0_code_bytes,8},
+        {p.weight0_scales,p.weight0_scale_bytes,2}, {p.output0,4096*2,2},
+        {p.weight1_codes,p.weight1_code_bytes,8},
+        {p.weight1_scales,p.weight1_scale_bytes,2}, {p.output1,12288*2,2},
+        {args.a_weight,args.control_weight_bytes,2},
+        {args.b_weight,args.control_weight_bytes,2},
+        {args.a_log,48*4,4}, {args.dt_bias,48*4,4},
+        {args.g,48*4,4}, {args.beta,48*4,4}}};
+    for (std::size_t i=0;i<planes.size();++i) {
+        const auto begin=reinterpret_cast<std::uintptr_t>(planes[i].data);
+        if (!begin || begin%planes[i].alignment ||
+            begin>std::numeric_limits<std::uintptr_t>::max()-planes[i].size)
+            return hipErrorInvalidValue;
+        for (std::size_t j=0;j<i;++j) {
+            const auto other=reinterpret_cast<std::uintptr_t>(planes[j].data);
+            if (begin<other+planes[j].size && other<begin+planes[i].size)
+                return hipErrorInvalidValue;
+        }
+    }
+    unsigned flags=0;
+    if (stream==nullptr || hipStreamGetFlags(stream,&flags)!=hipSuccess)
+        return hipErrorInvalidValue;
+    linear::A8G64ActivationWorkspace workspace{};
+    auto status=linear::a8q4g64_bind_activation_workspace(
+        p.activation_workspace,bytes,1,5120,&workspace);
+    if (status!=hipSuccess) return status;
+    status=linear::a8g64_quantize_activation({p.input,workspace},stream);
+    if (status!=hipSuccess) return status;
+    hipLaunchKernelGGL(gdn_projection_control_grid_qualification_kernel,
+        dim3(112),dim3(256),0,stream,p.input,workspace.low_codes,workspace.high_codes,
+        workspace.scales,workspace.status,p.weight0_codes,p.weight0_scales,p.output0,
+        p.weight1_codes,p.weight1_scales,p.output1,args.a_weight,args.b_weight,
+        args.a_log,args.dt_bias,args.g,args.beta);
+    return hipGetLastError();
 }
 } // namespace ninfer::ops::r9700::gdn::qualification

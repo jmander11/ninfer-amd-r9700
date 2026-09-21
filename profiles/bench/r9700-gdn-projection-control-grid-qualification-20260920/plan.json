@@ -1,0 +1,178 @@
+{
+  "schema": "ninfer.r9700.gdn-projection-control-grid-plan.v1",
+  "status": "prepared_for_independent_review",
+  "create_only": true,
+  "production_routing_authorized": false,
+  "bound_inputs": [
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/Makefile",
+      "bytes": 57580,
+      "sha256": "0d247584faa302145540a9a08c51a67a6a8b5265b36ab3887e064d09cb9fb91d"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/gdn_projection_control_grid_qual.hip",
+      "bytes": 17121,
+      "sha256": "7c16380cf99046fa225b4b8378e94b5c9d611ee5a61ee036f5fdba90748cde85"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/a8q4_shape_sweep_qual.hip",
+      "bytes": 97624,
+      "sha256": "a4a041bc8d06bedb78bd21d0ccce8369559efb7c0d74326eb2fdc09024ac332f"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/check_gdn_projection_control_grid_static.py",
+      "bytes": 7646,
+      "sha256": "a26d63466a3f46bcfc5fdbe625224c59a5898d0342b349fa40f532dc132d64d0"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/check_a8q4_normalized_linear_t1_static.py",
+      "bytes": 5387,
+      "sha256": "0f4e0495723cd02ff112aeeb2e5c75786204d6c4c3efd6ea9fc671a598a3d0cf"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/bench/extract_embedded_code_object.py",
+      "bytes": 9909,
+      "sha256": "185228c36fd4e156ca3f5568a5c3e321b88ba802028d8234191c2193af6e098f"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/gdn/gdn_projection_control_grid_qualification.hip",
+      "bytes": 9275,
+      "sha256": "145abae8ce6fd4f5a39409626722b17ec6b40e6037ae7edf9ad6a283df96e49d"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/gdn/gdn_projection_control_grid_qualification.h",
+      "bytes": 900,
+      "sha256": "f99cb866f2c0e88258700305b4b17fe7ca700255f08f82cbc91028c220721e41"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/gdn/gdn_ops.h",
+      "bytes": 8921,
+      "sha256": "a49d66f1de5e492fc6eca7a4ee63ea4c7c084727a4b7b892fee5855de69dee15"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/gdn/gdn_ops.hip",
+      "bytes": 40328,
+      "sha256": "ad256339e4f812404b349bef860ffa15ceebcadea1b4791182bb7553226a8845"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/linear/r9700_linear.h",
+      "bytes": 25124,
+      "sha256": "1db61d5cb59f1a2f4933420e0cd9ca2e12f4c7d35a2021908538251035fa15f1"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/linear/r9700_linear.hip",
+      "bytes": 204165,
+      "sha256": "313899f5b4dc40b2956177cb81bb9bb988d2feab2bd3be9cd283d839b1ab4f44"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/linear/r9700_q4_activation_profile.h",
+      "bytes": 7373,
+      "sha256": "e8d08263030347f8ffdca69742b6c8f0464d9d5a511892dae13b21af206b27fa"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gdn-projection-control-grid-qualification-20260920/run.py",
+      "bytes": 9406,
+      "sha256": "2c105f47c147c1202ac2b751ecb48fba3d8db71f8b5545c34df70b135dc28e97"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gdn-projection-control-grid-qualification-20260920/static.py",
+      "bytes": 3308,
+      "sha256": "5cd7332f192428c21e2608b575808dee9935da25395170c97c6bb899c1c8c60b"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gdn-projection-control-grid-qualification-20260920/analyze.py",
+      "bytes": 2847,
+      "sha256": "be55553356671d7a4fff8abab068eeac348140d995f43a11554adfc6725de491"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gdn-projection-control-grid-qualification-20260920/test_analyze.py",
+      "bytes": 2002,
+      "sha256": "076ea85170c0d0dc9d53c1a0d91eba2b4bdbbf3ce3f6ea1e9ee90efada250760"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gdn-projection-control-grid-qualification-20260920/commands.sh",
+      "bytes": 211,
+      "sha256": "3ad18ff797248783fe8ea06a9e2e4984208b5035aa5dc8284c13ee2159cc60ee"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gdn-projection-control-grid-qualification-20260920/README.md",
+      "bytes": 2541,
+      "sha256": "f702a791db1cff876e865148554b640254c550b7b3100be8f5f287c53196e3a2"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/build/gdn_projection_control_grid_qual",
+      "bytes": 632328,
+      "sha256": "36f6df648404e32b4d27a9a470fde26e46e7346c19fc73174be266713e01040f"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/build/gdn_projection_control_grid_qualification.s",
+      "bytes": 32760,
+      "sha256": "071f54600558ef290dc461d58ba324a85ca0dfaecddf6371348267e0fa6b5fc5"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/build/a8q4_gdn_pair_t1.s",
+      "bytes": 1686201,
+      "sha256": "d49b42e4e0cae9a0debb8382a4accb03d0e91713d4a1b5cbbb57a24204cc513e"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/build/gdn_ops.s",
+      "bytes": 500651,
+      "sha256": "3085e637e6b8299bc9ad383a719650f0974beb387016d9c2667a2511808a313f"
+    }
+  ],
+  "compile_profile": "gfx1201 wave32 O3 C++20 A8 standalone qualification only",
+  "shape": {
+    "tokens": 1,
+    "columns": 5120,
+    "qk_rows": 4096,
+    "value_z_rows": 12288,
+    "control_heads": 48,
+    "grid": 112,
+    "threads": 256
+  },
+  "workload": {
+    "pci": "0000:13:00.0",
+    "power": "auto",
+    "copies": 3,
+    "paired_trials": 24,
+    "scrub_bytes": 83886080,
+    "layers": 48
+  },
+  "admission": {
+    "minimum_saved_ms_per_token": 0.2,
+    "every_allocation_wins": true,
+    "ratio_mean_plus_2se_below": 1.0
+  },
+  "oracle": {
+    "projection": "FP64 decoded signed Q4 times exact A8G64 represented values",
+    "projection_relative_l2": 0.01,
+    "projection_bf16_steps": 2,
+    "control": "FP64 BF16 dot -> explicit BF16 a/b -> FP64 control formula",
+    "control_g_absolute_tolerance": 0.0625,
+    "control_beta_absolute_tolerance": 0.0003,
+    "codec_and_status_exact": true,
+    "incumbent_exact": true
+  },
+  "qualification_command": [
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/build/gdn_projection_control_grid_qual",
+    "--out-json",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gdn-projection-control-grid-qualification-20260920/attempt-1/qualification.json"
+  ],
+  "static_command": [
+    "/home/battlefront/.local/bin/python3.11",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gdn-projection-control-grid-qualification-20260920/static.py",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/build/gdn_projection_control_grid_qual",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/build/gdn_projection_control_grid_qualification.s",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/build/a8q4_gdn_pair_t1.s",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/build/gdn_ops.s",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gdn-projection-control-grid-qualification-20260920/attempt-1/embedded"
+  ],
+  "analyzer_command": [
+    "/home/battlefront/.local/bin/python3.11",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gdn-projection-control-grid-qualification-20260920/analyze.py",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gdn-projection-control-grid-qualification-20260920/attempt-1/qualification.json"
+  ],
+  "attempt": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gdn-projection-control-grid-qualification-20260920/attempt-1",
+  "valid_loser": "completed/rejected with full immutable receipts",
+  "passing_authorizes": "whole-inference A/B preparation only"
+}

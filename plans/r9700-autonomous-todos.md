@@ -161,9 +161,14 @@ physical bandwidth saturation or stall freedom.
 
 The deterministic queue after reset is:
 
-1. prepare and independently review the complete numerical and timing package for the BASE-DECODE-BW GDN projection/control heterogeneous-grid challenger; CPU/static feasibility has independent SHIP. Include control+quantize+pair, graph/workspace qualification, and the merged activation-load issue-cost risk described below. Finish this bounded numerical/timing decision, then switch to recipe-independent DFlash optimization before another base-decode mechanism. Retain the terminally rejected gate/up prefetch evidence and SHIP normalized-linear production confirmation at `profiles/bench/r9700-normalized-linear-t1-production-confirmation-20260920/attempt-1`; no physical run is admitted yet.
+1. pursue one recipe-independent DFlash Layer-0 mechanism toward the C1 `>=60 decode-output tok/s`
+   target, after attributing the retained matched whole round and excluding the exhausted mechanisms
+   listed below. Do not start another base-decode mechanism. The qualified GDN combined-grid route
+   is preserved for a later matched whole C1 A/B but is not production-routed.
 
-No GPU action is currently runnable. GDN projection/control CPU/static feasibility has independent SHIP; require an independently reviewed complete-boundary numerical and timing package before another physical attempt.
+No GPU action is currently runnable. First select and independently review one bounded DFlash
+mechanism and its complete semantic boundary; any physical experiment must then use a fresh
+reviewed create-only package.
 
 Recipe-independent DFlash optimization follows this bounded decision; final DFlash recipe and
 quality binding still depend on numerical-accuracy/artifact selection. Other remaining unchecked
@@ -501,7 +506,7 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   reopen this overlap, geometry
   remapping, non-temporal loads, or split-K without a distinct mechanism and new bound.
 
-  **Next: GDN projection/control combined-grid numerical and timing package.** Define one
+  **GDN projection/control combined-grid direct decision closed; whole promotion deferred.** Define one
   semantically closed qualification-only Op from the same represented BF16 hidden input to
   explicit QK, value-Z, g, and beta outputs. Combine the existing 48-CTA BF16 projected-control
   branch and 64-CTA paired-Q4 branch in one heterogeneous grid; keep convolution and persistent
@@ -526,11 +531,19 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   An explicit unresolved risk is four vector B128 activation loads replacing the incumbent's
   two scalar B256 loads; their issue cost may erase the overlap benefit. Static evidence is
   reproducible through `make -C tools/r9700 gdn-projection-control-grid-static`. This is no
-  numerical-correctness or performance claim and does not authorize GPU work. Prepare and
-  independently review full control+quantize+pair qualification against independent
-  mathematical/codec oracles, graph/workspace checks, and complete-boundary timing; quantization
-  and scratch reset belong inside every measured invocation. Neither a branch microbenchmark
-  nor this bound admits whole-inference testing or production promotion.
+  numerical-correctness or performance claim by itself. The independently reviewed complete-boundary
+  package at `profiles/bench/r9700-gdn-projection-control-grid-qualification-20260920/attempt-1`
+  subsequently passed: control/candidate medians were `0.17841950/0.17215950 ms`, giving
+  `0.30048001 ms/token` projected saving across 48 layers; ratio mean plus two standard errors was
+  `0.98806244`, all three allocation medians won, and 23/24 individual pairs won. Removing the one
+  long control sample still gives `0.29380846 ms/token` and ratio upper `0.97378743`.
+  Projection relative L2 was `0.00154624` with zero BF16-step difference; codec, incumbent output,
+  graph replay/recovery, guards, and input immutability passed, and control errors were below
+  `7.18e-7`. Result-manifest SHA-256 is
+  `ccd4b33664c3be9bd4d35811debe81c4ec520ea7693e44addae9e03b6bd1e23c`; independent result audit
+  reported `SHIP` for whole C1 A/B preparation. Production routing remains unchanged. Preserve the
+  qualification-only route and defer its matched whole C1 A/B until base-decode work resumes;
+  recipe-independent DFlash optimization is active next, before any other base mechanism.
   The first reviewed package,
   `profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919`, passed compile/static preflight
   but stopped on the first K6144 incumbent launch before candidate parity or timing:

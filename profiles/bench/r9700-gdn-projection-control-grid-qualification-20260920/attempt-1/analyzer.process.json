@@ -1,0 +1,24 @@
+{
+  "argv": [
+    "/home/battlefront/.local/bin/python3.11",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gdn-projection-control-grid-qualification-20260920/analyze.py",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gdn-projection-control-grid-qualification-20260920/attempt-1/qualification.json"
+  ],
+  "cwd": "/ssdpool2nvme/local_llm/ninfer-amd-r9700",
+  "started_unix_ns": 1789970377121108040,
+  "exit_code": 0,
+  "error": null,
+  "finished_unix_ns": 1789970377139897073,
+  "outputs": [
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gdn-projection-control-grid-qualification-20260920/attempt-1/analyzer.stdout",
+      "bytes": 476,
+      "sha256": "677c935da042305575ae9bdb22866811ac3a14e070c6e29b74b2999f1952043e"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gdn-projection-control-grid-qualification-20260920/attempt-1/analyzer.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ]
+}

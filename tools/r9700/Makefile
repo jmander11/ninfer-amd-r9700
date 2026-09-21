@@ -1,6 +1,6 @@
 HIPCC ?= /opt/rocm/bin/hipcc
 
-# CPU/static-only probe: never linked into ninfer_r9700_core or launched here.
+# Qualification-only probe: never linked into ninfer_r9700_core; static target never launches HIP.
 GDN_PROJECTION_CONTROL_GRID_SOURCE := ../../src/ops/r9700/gdn/gdn_projection_control_grid_qualification.hip
 
 HIPCC_PATH := $(shell command -v $(HIPCC))
@@ -991,10 +991,14 @@ profile-pmc: $(KV_TARGET)
 		--timing-only --group 16 --key-order token --value-order feature --scale-order feature
 
 .PHONY: gdn-projection-control-grid-static
+$(BUILD_DIR)/gdn_projection_control_grid_qual: gdn_projection_control_grid_qual.hip a8q4_shape_sweep_qual.hip $(GDN_PROJECTION_CONTROL_GRID_SOURCE) ../../src/ops/r9700/gdn/gdn_projection_control_grid_qualification.h $(LINEAR_IMPL) $(LINEAR_HEADER) $(GDN_IMPL) $(GDN_HEADER) Makefile
+	mkdir -p $(BUILD_DIR)
+	$(HIPCC) $(CXXFLAGS) -I../../include -Wno-unused-function -DNINFER_R9700_Q4_ACTIVATION_BITS=8 -DNINFER_SOURCE_DIR=\"$(abspath ../..)\" gdn_projection_control_grid_qual.hip $(GDN_PROJECTION_CONTROL_GRID_SOURCE) $(LINEAR_IMPL) $(GDN_IMPL) $(LDFLAGS) -o $@
+
 gdn-projection-control-grid-static: $(BUILD_DIR)/gdn_projection_control_grid_qualification.s $(BUILD_DIR)/a8q4_gdn_pair_t1.s $(BUILD_DIR)/gdn_ops.s
 	$(PYTHON) check_gdn_projection_control_grid_static.py $^
 
-$(BUILD_DIR)/gdn_projection_control_grid_qualification.s: $(GDN_PROJECTION_CONTROL_GRID_SOURCE) Makefile
+$(BUILD_DIR)/gdn_projection_control_grid_qualification.s: $(GDN_PROJECTION_CONTROL_GRID_SOURCE) ../../src/ops/r9700/gdn/gdn_projection_control_grid_qualification.h $(LINEAR_HEADER) Makefile
 	mkdir -p $(BUILD_DIR)
 	$(HIPCC) $(CXXFLAGS) -Wno-unused-command-line-argument --offload-device-only -S $< -o $@
 

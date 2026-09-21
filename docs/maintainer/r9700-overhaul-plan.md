@@ -2088,8 +2088,18 @@ Replace functional routes with measured gfx1201 families:
   and `0.896 ms/token` ideal bound are in `plans/r9700-autonomous-todos.md`; full
   control+quantize+pair qualification/timing follows only after static feasibility and review.
   Normalization fusion remains second. No GPU action is currently admitted.
-  Reopening prefetch, geometry remaps, non-temporal dot8, grouped-PV split512,
-  or split-K requires a distinct mechanism and new bound.
+  The following GDN projection/control heterogeneous-grid direct qualification passed. The reviewed
+  complete control+fresh-A8+paired-Q4 boundary measured `0.17841950→0.17215950 ms`, equivalent to
+  `0.30048001 ms/token` over 48 layers, with all three allocation medians winning and robust ratio
+  upper `0.98806244`; removing the single long control sample leaves `0.29380846 ms/token` and
+  ratio upper `0.97378743`. Independent represented-input oracles, exact incumbent/codec parity,
+  graph recovery, guards, and embedded native-IU4/resource checks passed. Evidence is sealed at
+  `profiles/bench/r9700-gdn-projection-control-grid-qualification-20260920/attempt-1`; its result
+  manifest SHA-256 is `ccd4b33664c3be9bd4d35811debe81c4ec520ea7693e44addae9e03b6bd1e23c`.
+  Independent audit authorizes a future matched whole C1 A/B, not production promotion. Preserve
+  this qualification-only route while recipe-independent DFlash optimization takes priority; do
+  not start another base mechanism. Reopening prefetch, geometry remaps, non-temporal dot8,
+  grouped-PV split512, or split-K requires a distinct mechanism and new bound.
 - [ ] After the dense C1/P2048/spec-none floor and practical-ceiling gate passes and the shared
   chunk is selected, rerun all 48 post-promotion capacity cells (dense/XAttention times
   all-Q4/mixed/four-role-hybrid times G16/G32, each at C=1..4). Bind the newly measured Device Graph
