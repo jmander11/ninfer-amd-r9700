@@ -706,6 +706,8 @@ std::string format_table(const BenchEnvironment& env, const std::vector<TestResu
         << " q4_activation_bits=" << ninfer::ops::r9700::linear::kQ4ActivationBits
         << " q4_prefill_cta_profile="
         << ninfer::ops::r9700::linear::kQ4PrefillCtaProfile
+        << " normalized_linear_t1_candidate="
+        << (ninfer::ops::r9700::linear::kNormalizedLinearT1CandidateEnabled ? "true" : "false")
         << " dflash_small_t_candidate="
         << (ninfer::ops::r9700::linear::kDFlashSmallTCandidateEnabled ? "true" : "false")
         << " dflash_mlp_down_t5_candidate="
@@ -851,6 +853,9 @@ std::string format_json(const BenchEnvironment& env, const std::string& command,
          << ninfer::ops::r9700::linear::kQ4ActivationBits << ",\n"
          << "    \"q4_prefill_cta_profile\": \""
          << ninfer::ops::r9700::linear::kQ4PrefillCtaProfile << "\",\n"
+         << "    \"normalized_linear_t1_candidate\": "
+         << (ninfer::ops::r9700::linear::kNormalizedLinearT1CandidateEnabled ? "true" : "false")
+         << ",\n"
          << "    \"dflash_small_t_candidate\": "
          << (ninfer::ops::r9700::linear::kDFlashSmallTCandidateEnabled ? "true" : "false")
          << ",\n"
@@ -992,6 +997,7 @@ std::string format_csv(const BenchEnvironment& env, const std::vector<TestResult
            "spec,draft_tokens,dflash_verify_width_requested,dflash_verify_width,proposal_head,decode_path,kv_cache_format,"
            "kv_value_group,kv_key_plane_layout,kv_value_plane_layout,"
            "kv_value_scale_plane_layout,q4_activation_bits,q4_prefill_cta_profile,"
+           "normalized_linear_t1_candidate,"
            "dflash_small_t_candidate,dflash_mlp_down_t5_candidate,"
            "dflash_down_splitk_candidate,dflash_down_splitk_factor,"
            "dflash_rmsnorm_rows56_candidate,"
@@ -1036,6 +1042,8 @@ std::string format_csv(const BenchEnvironment& env, const std::vector<TestResult
             << ninfer::targets::qwen3::detail::kR9700TextKVValueScalePlaneLayoutName << ','
             << ninfer::ops::r9700::linear::kQ4ActivationBits << ','
             << ninfer::ops::r9700::linear::kQ4PrefillCtaProfile << ','
+            << (ninfer::ops::r9700::linear::kNormalizedLinearT1CandidateEnabled ? "true" : "false")
+            << ','
             << (ninfer::ops::r9700::linear::kDFlashSmallTCandidateEnabled ? "true" : "false")
             << ','
             << (ninfer::ops::r9700::linear::kDFlashMlpDownT5CandidateEnabled ? "true" : "false")

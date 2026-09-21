@@ -1,4 +1,6 @@
 #include "ops/r9700/linear/linear_execution.h"
+#include "ops/r9700/linear/r9700_q4_activation_profile.h"
+#include "ninfer/ops/normalized_linear.h"
 #include "targets/qwen3_8_27b/impl/variant.h"
 
 #include <algorithm>
@@ -18,11 +20,74 @@ void require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
 }
 
+constexpr bool normalized_selected(
+    bool enabled = true, std::uint32_t bits = 8U, bool inventory = true,
+    ninfer::targets::qwen3::TextPhase phase = ninfer::targets::qwen3::TextPhase::Verify,
+    bool ordinary = true, std::int32_t layer = 0, std::uint32_t tokens = 1U,
+    std::uint32_t rows = 34816U, std::uint32_t columns = 5120U,
+    ninfer::QType weight = ninfer::QType::Q4G64_F16S) {
+    return detail::Variant::ExecutionState::normalized_linear_t1_selected(
+        enabled, bits, inventory, phase, ordinary, layer, tokens, rows, columns, weight);
+}
+
+void normalized_route_contract() {
+    using Phase = ninfer::targets::qwen3::TextPhase;
+    static_assert(normalized_selected());
+    static_assert(normalized_selected(true, 8U, true, Phase::Verify, true, 63));
+    static_assert(!normalized_selected(false));
+    static_assert(!normalized_selected(true, 4U));
+    static_assert(!normalized_selected(true, 8U, false));
+    static_assert(!normalized_selected(true, 8U, true, Phase::Prefill));
+    // A speculative target verify can also be width one: phase/shape cannot select this route.
+    static_assert(!normalized_selected(true, 8U, true, Phase::Verify, false));
+    static_assert(!normalized_selected(true, 8U, true, Phase::Verify, true, -1));
+    static_assert(!normalized_selected(true, 8U, true, Phase::Verify, true, 64));
+    static_assert(!normalized_selected(true, 8U, true, Phase::Verify, true, 0, 2U));
+    static_assert(!normalized_selected(true, 8U, true, Phase::Verify, true, 0, 4U));
+    static_assert(!normalized_selected(true, 8U, true, Phase::Verify, true, 0, 1U, 17408U));
+    static_assert(!normalized_selected(true, 8U, true, Phase::Verify, true, 0, 1U, 34816U,
+                                      6144U));
+    static_assert(!normalized_selected(true, 8U, true, Phase::Verify, true, 0, 1U, 34816U,
+                                      5120U, ninfer::QType::F8E4M3_ROW_F32S));
+    static_assert(!normalized_selected(true, 8U, true, Phase::Verify, true, 0, 1U, 34816U,
+                                      5120U, ninfer::QType::W8G32_F16S));
+
+    detail::Variant::ModelView model{};
+    std::vector<ninfer::Weight*> matrices;
+    for (auto& layer : model.full_layers) {
+        matrices.insert(matrices.end(), {&layer.projection.query_key, &layer.projection.gate_value,
+            &layer.output, &layer.post_mixer.gate_up, &layer.post_mixer.down});
+    }
+    for (auto& layer : model.gdn_layers) {
+        matrices.insert(matrices.end(), {&layer.projection.input_projection.query_key,
+            &layer.projection.input_projection.value_z, &layer.output,
+            &layer.post_mixer.gate_up, &layer.post_mixer.down});
+    }
+    for (auto* weight : matrices) weight->qtype = ninfer::QType::Q4G64_F16S;
+    require(detail::Variant::ExecutionState::normalized_linear_t1_inventory_q4(model),
+            "all-Q4 base Text inventory did not select normalized-linear");
+    for (auto* weight : matrices) {
+        weight->qtype = ninfer::QType::F8E4M3_ROW_F32S;
+        require(!detail::Variant::ExecutionState::normalized_linear_t1_inventory_q4(model),
+                "mixed Text inventory selected normalized-linear");
+        weight->qtype = ninfer::QType::Q4G64_F16S;
+    }
+    if constexpr (ninfer::ops::r9700::linear::kQ4ActivationBits == 8U) {
+        const std::size_t required =
+            ninfer::ops::normalized_linear_workspace_capacity_bytes(1, 5120, 34816);
+        require(required == 5380U, "normalized-linear T1 activation extent changed");
+        require(detail::Variant::execution_state_capacity_bytes(
+                    detail::WeightsProfile::R9700Q4G64Evaluation, 1, 1) >= required,
+                "minimal serialized activation region cannot contain normalized-linear T1");
+    }
+}
+
 } // namespace
 
 int main() {
     try {
         using Variant = detail::Variant;
+        normalized_route_contract();
         static_assert(!std::is_copy_constructible_v<Variant::ExecutionState>);
         static_assert(!std::is_move_constructible_v<Variant::ExecutionState>);
         static_assert(Variant::ExecutionState::fused_mlp_down_selected(

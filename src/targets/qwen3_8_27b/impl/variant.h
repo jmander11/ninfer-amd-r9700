@@ -77,6 +77,24 @@ struct Variant {
         [[nodiscard]] bool projected_residual_t1(
             const Tensor& input, const Weight& weight, Tensor& residual,
             qwen3::TextPhase phase, bool base_text, hipStream_t stream);
+        [[nodiscard]] bool normalized_linear_t1(
+            const Tensor& input, const Tensor& norm, float eps, const Weight& weight,
+            Tensor& output, qwen3::TextPhase phase, bool ordinary_decode,
+            std::int32_t text_layer, hipStream_t stream);
+        [[nodiscard]] static bool normalized_linear_t1_inventory_q4(
+            const ModelView& model) noexcept;
+        [[nodiscard]] static constexpr bool normalized_linear_t1_selected(
+            bool candidate_enabled, std::uint32_t activation_bits,
+            bool all_q4_text_inventory, qwen3::TextPhase phase, bool ordinary_decode,
+            std::int32_t text_layer, std::uint32_t tokens, std::uint32_t rows,
+            std::uint32_t columns, QType weight) noexcept {
+            return candidate_enabled && activation_bits == 8U &&
+                   all_q4_text_inventory && ordinary_decode &&
+                   phase == qwen3::TextPhase::Verify && text_layer >= 0 &&
+                   text_layer < TextConfig::layers && tokens == 1U &&
+                   rows == 2U * TextConfig::intermediate && columns == TextConfig::hidden &&
+                   weight == QType::Q4G64_F16S;
+        }
         [[nodiscard]] static constexpr bool projected_residual_t1_selected(
             std::uint32_t activation_bits,
             bool all_q4_residual_inventory, qwen3::TextPhase phase, bool base_text,
@@ -230,12 +248,17 @@ struct Variant {
                                             Tensor& hidden, Tensor& g, Tensor& beta,
                                             WorkspaceArena& workspace, hipStream_t stream,
                                             ExecutionState* execution = nullptr);
-    static void post_mixer(const Tensor& hidden, const PostMixerWeights& weights, Tensor& residual,
+    // The family provides the normalization parameters and BF16 scratch; the leaf owns whether
+    // normalization is materialized or fused into the gate/up projection. ordinary_decode is
+    // supplied only by the family ordinary-decode entry point, never inferred from Verify/T1.
+    static void post_mixer(const Tensor& norm, float eps, const Tensor& hidden,
+                           const PostMixerWeights& weights, Tensor& residual,
                            qwen3::TextPhase phase, WorkspaceArena& workspace,
                            hipStream_t stream, std::int32_t route_tokens = 0,
                            ExecutionState* execution = nullptr,
                            std::int32_t text_layer = -1,
-                           bool dflash_target_verify = false);
+                           bool dflash_target_verify = false,
+                           bool ordinary_decode = false);
     static void mtp_post_mixer(const Tensor& hidden, const MtpPostMixerWeights& weights,
                                Tensor& residual, WorkspaceArena& workspace, hipStream_t stream,
                                std::int32_t route_tokens = 0,

@@ -347,6 +347,7 @@ private:
     std::int32_t active_sequence_batch_                   = 0;
     std::int32_t active_sequence_width_                   = 0;
     bool active_dflash_target_verify_                     = false;
+    bool active_ordinary_decode_                          = false;
     std::int32_t rope_delta_                              = 0;
     std::int32_t linear_state_current_slot_               = 0;
     std::int32_t linear_state_rewrite_checkpoint_slot_    = 0;

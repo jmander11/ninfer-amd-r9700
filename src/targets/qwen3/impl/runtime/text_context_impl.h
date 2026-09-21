@@ -791,6 +791,7 @@ void TextContext::ordinary_decode_batch(const Tensor& ids, const Tensor& cache_p
         ScopedValue<const Tensor*> state_binding(active_linear_state_slots_, &linear_state_slots);
         ScopedValue<std::int32_t> batch_binding(active_sequence_batch_, batch);
         ScopedValue<std::int32_t> width_binding(active_sequence_width_, 1);
+        ScopedValue<bool> ordinary_binding(active_ordinary_decode_, true);
 
         Tensor x = work_.alloc(DType::BF16, {kCfg.hidden, batch});
         ops::embedding(ids, *embed_, x, stream);
@@ -1344,11 +1345,11 @@ void TextContext::mlp_tail(const Tensor* post_norm, const MlpW& m, Tensor& x,
     hipStream_t s = ctx_.stream;
     const int T    = x.ne[1];
     Tensor h       = workspace_recipe::post_mixer_hidden<TextConfig>(work_, T);
-    ops::rmsnorm(x, *post_norm, kCfg.rms_eps, true, h, s);
 
-    Variant::post_mixer(h, *m.payload, x, ph, work_, s,
+    Variant::post_mixer(*post_norm, kCfg.rms_eps, h, *m.payload, x, ph, work_, s,
                         packed_route_tokens(active_sequence_batch_, active_sequence_width_),
-                        linear_execution_, text_layer, active_dflash_target_verify_);
+                        linear_execution_, text_layer, active_dflash_target_verify_,
+                        active_ordinary_decode_);
 }
 
 template <class Tap>

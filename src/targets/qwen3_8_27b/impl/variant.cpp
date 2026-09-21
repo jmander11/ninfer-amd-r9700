@@ -7,6 +7,7 @@
 #include "ninfer/ops/gdn_gating.h"
 #include "ninfer/ops/gdn_projection.h"
 #include "ninfer/ops/mtp_pack.h"
+#include "ninfer/ops/normalized_linear.h"
 #include "ninfer/ops/projected_residual.h"
 #include "ninfer/ops/residual_add.h"
 #include "ninfer/ops/rmsnorm.h"
@@ -259,6 +260,7 @@ struct Variant::ExecutionState::Impl {
     std::size_t selected = 0;
     DeviceSpan activation{};
     bool projected_residual_inventory_q4 = false;
+    bool normalized_linear_inventory_q4 = false;
 
     [[nodiscard]] static std::size_t index(SelectedLinearRole role,
                                            std::int32_t text_layer) {
@@ -297,6 +299,7 @@ Variant::ExecutionState::ExecutionState(const ModelView& model, DeviceSpan seria
     }
     auto* base = static_cast<std::byte*>(serialized_storage.data);
     impl_->activation = serialized_storage;
+    impl_->normalized_linear_inventory_q4 = normalized_linear_t1_inventory_q4(model);
     impl_->projected_residual_inventory_q4 = std::all_of(
         model.full_layers.begin(), model.full_layers.end(), [](const auto& layer) {
             return layer.output.qtype == QType::Q4G64_F16S &&
@@ -581,6 +584,50 @@ bool Variant::ExecutionState::projected_residual_t1(
     }
     ops::projected_residual_t1(input, weight, residual,
                                {impl_->activation.data, required}, stream);
+    return true;
+}
+
+bool Variant::ExecutionState::normalized_linear_t1_inventory_q4(
+    const ModelView& model) noexcept {
+    // Only the all-Q4 base Text matrix inventory is admitted. In particular, a mixed profile
+    // can retain Q4 gate/up while replacing an attention or GDN projection. BF16 GDN control
+    // projections, norms, embedding, output head, and speculative heads are separate roles.
+    return std::all_of(model.full_layers.begin(), model.full_layers.end(), [](const auto& layer) {
+        return layer.projection.query_key.qtype == QType::Q4G64_F16S &&
+               layer.projection.gate_value.qtype == QType::Q4G64_F16S &&
+               layer.output.qtype == QType::Q4G64_F16S &&
+               layer.post_mixer.gate_up.qtype == QType::Q4G64_F16S &&
+               layer.post_mixer.down.qtype == QType::Q4G64_F16S;
+    }) && std::all_of(model.gdn_layers.begin(), model.gdn_layers.end(), [](const auto& layer) {
+        return layer.projection.input_projection.query_key.qtype == QType::Q4G64_F16S &&
+               layer.projection.input_projection.value_z.qtype == QType::Q4G64_F16S &&
+               layer.output.qtype == QType::Q4G64_F16S &&
+               layer.post_mixer.gate_up.qtype == QType::Q4G64_F16S &&
+               layer.post_mixer.down.qtype == QType::Q4G64_F16S;
+    });
+}
+
+bool Variant::ExecutionState::normalized_linear_t1(
+    const Tensor& input, const Tensor& norm, float eps, const Weight& weight, Tensor& output,
+    qwen3::TextPhase phase, bool ordinary_decode, std::int32_t text_layer, hipStream_t stream) {
+    const bool exact_shape = input.ne[0] == TextConfig::hidden && input.ne[1] == 1 &&
+        input.ne[2] == 1 && input.ne[3] == 1 && output.ne[0] == 2 * TextConfig::intermediate &&
+        output.ne[1] == 1 && output.ne[2] == 1 && output.ne[3] == 1;
+    if (impl_ == nullptr || !exact_shape || !normalized_linear_t1_selected(
+            ops::r9700::linear::kNormalizedLinearT1CandidateEnabled,
+            ops::r9700::linear::kQ4ActivationBits, impl_->normalized_linear_inventory_q4,
+            phase, ordinary_decode, text_layer, 1U, static_cast<std::uint32_t>(weight.n),
+            static_cast<std::uint32_t>(weight.k), weight.qtype)) {
+        return false;
+    }
+    const std::size_t required = ops::normalized_linear_workspace_capacity_bytes(
+        1, TextConfig::hidden, 2 * TextConfig::intermediate);
+    if (required == 0U || impl_->activation.data == nullptr ||
+        impl_->activation.bytes < required) {
+        throw std::invalid_argument("R9700 normalized-linear T1 activation region is too small");
+    }
+    ops::normalized_linear(input, norm, eps, true, weight, output,
+                           {impl_->activation.data, required}, stream);
     return true;
 }
 
@@ -1134,21 +1181,36 @@ void Variant::gdn_norm_control_projection(const Tensor& residual, const Tensor& 
         static_cast<std::uint32_t>(residual.ne[1]), stream));
 }
 
-void Variant::post_mixer(const Tensor& hidden, const PostMixerWeights& weights, Tensor& residual,
-                         qwen3::TextPhase phase, WorkspaceArena& workspace, hipStream_t stream,
-                         std::int32_t, ExecutionState* execution, std::int32_t text_layer,
-                         bool dflash_target_verify) {
+namespace {
+
+void post_mixer_body(const Tensor& hidden, const Variant::PostMixerWeights& weights,
+                    Tensor& residual, qwen3::TextPhase phase, WorkspaceArena& workspace,
+                    hipStream_t stream, Variant::ExecutionState* execution,
+                    std::int32_t text_layer, bool dflash_target_verify,
+                    const Tensor* norm, float eps, bool ordinary_decode) {
     auto outer = workspace.scope();
+    const auto project_gate_up = [&](Tensor& gate_up) {
+        if (norm != nullptr) {
+            if (execution != nullptr && execution->normalized_linear_t1(
+                    residual, *norm, eps, weights.gate_up, gate_up, phase,
+                    ordinary_decode, text_layer, stream)) {
+                return;
+            }
+            Tensor normalized_hidden = hidden;
+            ops::rmsnorm(residual, *norm, eps, true, normalized_hidden, stream);
+        }
+        selected_linear(execution, Variant::SelectedLinearRole::MlpGateUp, text_layer,
+                        hidden, weights.gate_up, gate_up, workspace, stream);
+    };
     const bool fused_down = execution != nullptr && hidden.ne[1] > 0 &&
-        ExecutionState::fused_mlp_down_selected(
+        Variant::ExecutionState::fused_mlp_down_selected(
             weights.gate_up.qtype, weights.down.qtype,
             static_cast<std::uint32_t>(hidden.ne[1]), text_layer);
     if (fused_down) {
         Tensor gate_up = workspace.alloc(DType::BF16, {2 * TextConfig::intermediate,
                                                        hidden.ne[1]});
         Tensor delta = workspace.alloc(DType::BF16, {TextConfig::hidden, hidden.ne[1]});
-        selected_linear(execution, SelectedLinearRole::MlpGateUp, text_layer, hidden,
-                        weights.gate_up, gate_up, workspace, stream);
+        project_gate_up(gate_up);
         execution->fused_mlp_down(gate_up, weights.down, delta, stream);
         ops::residual_add(delta, residual, stream);
         return;
@@ -1158,8 +1220,7 @@ void Variant::post_mixer(const Tensor& hidden, const PostMixerWeights& weights, 
         auto gate_scope = workspace.scope();
         Tensor gate_up = workspace.alloc(DType::BF16, {2 * TextConfig::intermediate,
                                                        hidden.ne[1]});
-        selected_linear(execution, SelectedLinearRole::MlpGateUp, text_layer, hidden,
-                        weights.gate_up, gate_up, workspace, stream);
+        project_gate_up(gate_up);
         ops::silu_mul(gate_up.slice(0, 0, TextConfig::intermediate),
                       gate_up.slice(0, TextConfig::intermediate, TextConfig::intermediate),
                       activation, stream);
@@ -1178,11 +1239,22 @@ void Variant::post_mixer(const Tensor& hidden, const PostMixerWeights& weights, 
     }
 }
 
+} // namespace
+
+void Variant::post_mixer(const Tensor& norm, float eps, const Tensor& hidden,
+                         const PostMixerWeights& weights, Tensor& residual,
+                         qwen3::TextPhase phase, WorkspaceArena& workspace, hipStream_t stream,
+                         std::int32_t, ExecutionState* execution, std::int32_t text_layer,
+                         bool dflash_target_verify, bool ordinary_decode) {
+    post_mixer_body(hidden, weights, residual, phase, workspace, stream, execution, text_layer,
+                    dflash_target_verify, &norm, eps, ordinary_decode);
+}
+
 void Variant::mtp_post_mixer(const Tensor& hidden, const MtpPostMixerWeights& weights,
                              Tensor& residual, WorkspaceArena& workspace, hipStream_t stream,
-                             std::int32_t route_tokens, ExecutionState* execution) {
-    post_mixer(hidden, weights, residual, qwen3::TextPhase::Verify, workspace, stream,
-               route_tokens, execution, -1, false);
+                             std::int32_t, ExecutionState* execution) {
+    post_mixer_body(hidden, weights, residual, qwen3::TextPhase::Verify, workspace, stream,
+                    execution, -1, false, nullptr, 0.0F, false);
 }
 
 std::size_t Variant::mtp_attention_projection_workspace_capacity_bytes(std::int32_t first,
