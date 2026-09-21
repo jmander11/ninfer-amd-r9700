@@ -91,9 +91,9 @@
     "FINAL-SUITE": ["FINAL-ARTIFACT", "E2E-PROFILE", "BF16-PARITY", "SELECTED-PARITY-VISION", "XATT-CUTOVER-CONDITIONAL"]
   },
   "next_command": null,
-  "no_gpu_action_policy": "Resolve the GDN projection/control CPU/static feasibility gate, then require an independently reviewed complete-boundary qualification package before another physical attempt.",
+  "no_gpu_action_policy": "GDN projection/control CPU/static feasibility has independent SHIP; require an independently reviewed complete-boundary numerical and timing package before another physical attempt.",
   "post_reset_queue": [
-    "establish CPU/static feasibility for the BASE-DECODE-BW GDN projection/control heterogeneous-grid challenger described below: one closed Op combining the existing 48-CTA BF16 control and 64-CTA paired-Q4 branches. Keep normalization fusion second. Retain the terminally rejected gate/up prefetch evidence and SHIP normalized-linear production confirmation at `profiles/bench/r9700-normalized-linear-t1-production-confirmation-20260920/attempt-1`; no physical run is admitted yet."
+    "prepare and independently review the complete numerical and timing package for the BASE-DECODE-BW GDN projection/control heterogeneous-grid challenger; CPU/static feasibility has independent SHIP. Include control+quantize+pair, graph/workspace qualification, and the merged activation-load issue-cost risk described below. Finish this bounded numerical/timing decision, then switch to recipe-independent DFlash optimization before another base-decode mechanism. Retain the terminally rejected gate/up prefetch evidence and SHIP normalized-linear production confirmation at `profiles/bench/r9700-normalized-linear-t1-production-confirmation-20260920/attempt-1`; no physical run is admitted yet."
   ],
   "post_reset_key_paths": [
     "profiles/bench/r9700-normalized-linear-t1-production-confirmation-20260920/attempt-1"
@@ -121,6 +121,7 @@
     "57.6915 ms",
     "K4/W5",
     "K5/W6",
+    "60 decode-output tok/s",
     "auto",
     "G16/G32",
     "B128/S16/tau900",

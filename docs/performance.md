@@ -1429,19 +1429,33 @@ rejection; production routing was never changed, and temporary qualification own
 Sealed evidence is `profiles/bench/r9700-gate-up-prefetch-qualification-20260920/attempt-1`;
 `result.sha256` digest is `5ea1c61d7d02fdeb971c151ded538872cf46121c31d299686bf0b42390b68e15`,
 closure SHA-256 is `8e08b7a134601a6dddb5c16c5a74b7b19ed6f635bf435f50ee50b742c75ac4db`.
-Its scripts are retained provenance, not rerunnable commands. The next Layer-0 task is CPU/static
-feasibility for a GDN projection/control heterogeneous grid, with the complete contract and gate
-in `plans/r9700-autonomous-todos.md`. Retained Q4-pair/control timings are `0.102400/0.020920 ms`
+Its scripts are retained provenance, not rerunnable commands. A GDN projection/control
+heterogeneous grid has independently reviewed CPU/static feasibility (`SHIP`), with the complete
+contract and next qualification gate in `plans/r9700-autonomous-todos.md`. The `112x256` grid
+assigns CTAs `0..63` to paired Q4 and `64..111` to control heads `0..47`; CTA-uniform branches
+confine the nine control barriers. Emitted gfx1201 code preserves native IU4 and the incumbent
+control reduction/BF16 seams, using 34 VGPR, 52 SGPR, 2048 bytes LDS, compiler occupancy 16, and
+zero scratch/spills. Four vector B128 activation loads replace two scalar B256 loads, leaving
+an unresolved issue-cost risk. These static results establish neither numerical correctness nor
+performance. Retained Q4-pair/control timings are `0.102400/0.020920 ms`
 per layer; overlapping controls with the pair has an ideal `0.896 ms/token` saving after an
 estimated `0.002259 ms/layer` extra streaming cost across 48 layers. This is an unmeasured bound;
-the admission margin needs `4.167 us/layer` complete-boundary saving. Normalization fusion is the
-second mechanism. No new physical command is admitted.
+the admission margin needs `4.167 us/layer` complete-boundary saving. A complete
+control+quantize+pair numerical and timing package must receive independent review before GPU
+work; no new physical command is admitted. Finish this bounded decision, then switch to
+recipe-independent DFlash optimization before another base-decode mechanism; normalization
+fusion is deferred. Final DFlash recipe/quality binding still follows numerical-accuracy/artifact
+selection.
 
 The existing MTP shortlist head remains Q4G64 with A8G64 activations. MTP stays in exact-output,
 state, cache, row-view, and whole-route regression coverage, but a new shortlist-head trace,
 alternate head precision, acceptance campaign, or MTP performance optimization is not a final
 admission requirement. DFlash/DFlash2 is the preferred speculative path and the only speculative
 backend with remaining support and performance work.
+After final base/artifact dependencies, the C1 DFlash optimization target is at least 60
+decode-output tok/s in matched whole inference. Admission first requires a material win over the
+current production base with exact public greedy-token parity; the target does not relax either
+gate.
 Historical MTP diagnostics can retain the theoretical `64*C` round minimum because their counter
 sums request lanes, but schema-v7 terminal tooling does not consume or validate those rows.
 Extra rounds remain diagnostic acceptance evidence; they do not trigger an MTP head-precision

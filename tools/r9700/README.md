@@ -1126,14 +1126,20 @@ Sealed evidence is `profiles/bench/r9700-gate-up-prefetch-qualification-20260920
 `result.sha256` digest is `5ea1c61d7d02fdeb971c151ded538872cf46121c31d299686bf0b42390b68e15`,
 closure SHA-256 is `8e08b7a134601a6dddb5c16c5a74b7b19ed6f635bf435f50ee50b742c75ac4db`.
 Retained assembly, embedded objects, receipts and scripts explain the completed experiment;
-the historical package is not rerunnable. No whole C1 A/B is justified. The next CPU/static task
-is the GDN projection/control heterogeneous-grid feasibility gate in
-`plans/r9700-autonomous-todos.md`: combine the existing 48-CTA BF16 control and 64-CTA paired-Q4
-branches as one closed Op with explicit outputs. Require native IU4, preserved BF16 control
-reduction/seam, safe branch/barrier confinement, and combined LDS/register/occupancy evidence
-before preparing complete control+quantize+pair qualification/timing. Normalization fusion is
-second. No physical command is currently runnable. Reopening a rejected mechanism requires a
-distinct mechanism and new bound.
+the historical package is not rerunnable. No whole C1 A/B is justified. The GDN projection/control
+heterogeneous-grid CPU/static feasibility gate has independent `SHIP`. Reproduce only this static
+check with `make -C tools/r9700 gdn-projection-control-grid-static`. Its `112x256` grid assigns
+CTAs `0..63` to paired-Q4 QK/value-Z outputs and `64..111` to BF16 control heads `0..47`, with
+FP32 g/beta outputs; CTA-uniform branches isolate all nine control barriers. Emitted gfx1201 code
+retains native IU4 and exact control reduction/BF16 seams, at 34 VGPR, 52 SGPR, 2048 bytes LDS,
+compiler occupancy 16, and zero scratch/spills. Four vector B128 activation loads replace the
+incumbent's two scalar B256 loads; the issue-cost effect remains unmeasured. This static probe
+is not a complete public Op and makes no numerical-correctness or performance claim. Next prepare
+and independently review complete control+quantize+pair numerical, graph/workspace, and timing
+qualification as specified in `plans/r9700-autonomous-todos.md`. Finish this bounded decision,
+then switch to recipe-independent DFlash optimization before another base-decode mechanism;
+normalization fusion is deferred. No physical command is currently runnable. Reopening a rejected
+mechanism requires a distinct mechanism and new bound.
 
 A direct GPU regression of the canonical K5120 RMSNorm route against its independent FP64 oracle, including
 output guards and Device Graph replay, is available with:

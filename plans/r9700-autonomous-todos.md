@@ -161,12 +161,13 @@ physical bandwidth saturation or stall freedom.
 
 The deterministic queue after reset is:
 
-1. establish CPU/static feasibility for the BASE-DECODE-BW GDN projection/control heterogeneous-grid challenger described below: one closed Op combining the existing 48-CTA BF16 control and 64-CTA paired-Q4 branches. Keep normalization fusion second. Retain the terminally rejected gate/up prefetch evidence and SHIP normalized-linear production confirmation at `profiles/bench/r9700-normalized-linear-t1-production-confirmation-20260920/attempt-1`; no physical run is admitted yet.
+1. prepare and independently review the complete numerical and timing package for the BASE-DECODE-BW GDN projection/control heterogeneous-grid challenger; CPU/static feasibility has independent SHIP. Include control+quantize+pair, graph/workspace qualification, and the merged activation-load issue-cost risk described below. Finish this bounded numerical/timing decision, then switch to recipe-independent DFlash optimization before another base-decode mechanism. Retain the terminally rejected gate/up prefetch evidence and SHIP normalized-linear production confirmation at `profiles/bench/r9700-normalized-linear-t1-production-confirmation-20260920/attempt-1`; no physical run is admitted yet.
 
-No GPU action is currently runnable. Resolve the GDN projection/control CPU/static feasibility gate, then require an independently reviewed complete-boundary qualification package before another physical attempt.
+No GPU action is currently runnable. GDN projection/control CPU/static feasibility has independent SHIP; require an independently reviewed complete-boundary numerical and timing package before another physical attempt.
 
-Every other remaining unchecked task depends directly or transitively on this queue or the
-external `DENSE-FLOOR-DECISION`.
+Recipe-independent DFlash optimization follows this bounded decision; final DFlash recipe and
+quality binding still depend on numerical-accuracy/artifact selection. Other remaining unchecked
+tasks retain their declared dependencies or the external `DENSE-FLOOR-DECISION`.
 
 Every future physical experiment must be launched through a reviewed package-local `commands.sh`,
 not an ad-hoc reconstructed command. A package is runnable only when its plan contains no
@@ -500,28 +501,36 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   reopen this overlap, geometry
   remapping, non-temporal loads, or split-K without a distinct mechanism and new bound.
 
-  **Next: GDN projection/control combined grid, CPU/static feasibility first.** Define one
+  **Next: GDN projection/control combined-grid numerical and timing package.** Define one
   semantically closed qualification-only Op from the same represented BF16 hidden input to
   explicit QK, value-Z, g, and beta outputs. Combine the existing 48-CTA BF16 projected-control
   branch and 64-CTA paired-Q4 branch in one heterogeneous grid; keep convolution and persistent
   state transitions after the Op boundary. Ownership remains in `src/ops`, called through the
   existing GDN execution-leaf family. Scope is ordinary base Text T1 with exact Q4+BF16_CTRL
   weights. Any scratch is caller-owned and explicit; do not introduce hidden prepared workspace.
-  This is projection/control overlap, not normalization fusion; evaluate normalization fusion
-  only as the second mechanism after this task's decision.
+  This is projection/control overlap. Finish its bounded numerical/timing decision, then follow
+  the user's direction to recipe-independent DFlash optimization before another base-decode
+  mechanism; defer normalization fusion until base-decode work resumes.
 
   Retained Layer-0 bounds are `0.102400 ms/layer` for the Q4 pair and `0.020920 ms/layer` for
   controls, with `44,564,480` Q4 bytes and `983,040` BF16 bytes. Estimated additional streaming
   costs `0.002259 ms/layer`; ideal overlap saves about `0.896 ms/token` across 48 layers.
   This is a feasibility bound, not a measured gain. Clearing the `0.2 ms/token` admission margin
-  requires only `4.167 us/layer` complete-boundary saving. First establish native IU4 legality,
-  unchanged BF16 control reduction and output seam, CTA-uniform branch confinement and safe
-  barriers, and the combined kernel's at-most-2-KiB LDS allocation, registers, scratch, and
-  occupancy. The larger branch resource allocation applies to the whole kernel and must not
-  erase the proposed overlap. Only after this static gate and independent review, prepare full
-  control+quantize+pair numerical qualification against independent mathematical/codec oracles,
-  graph/workspace checks, and complete-boundary timing in a reviewed package. Neither a branch
-  microbenchmark nor this bound admits whole-inference testing or production promotion.
+  requires only `4.167 us/layer` complete-boundary saving. CPU/static feasibility now has
+  independent `SHIP`: the qualification-only `112x256` grid maps CTAs `0..63` to paired-Q4
+  QK/value-Z outputs and CTAs `64..111` to BF16 control heads `0..47`, publishing FP32 g/beta.
+  CTA-uniform branches keep all nine control barriers out of Q4 CTAs. Emitted gfx1201 code
+  preserves native IU4, the exact incumbent control reduction and both BF16 rounding seams;
+  the combined envelope is 34 VGPR, 52 SGPR, 2048 bytes LDS, compiler occupancy 16, and zero
+  scratch/spills. Compiler occupancy is a resource ceiling, not measured active occupancy.
+  An explicit unresolved risk is four vector B128 activation loads replacing the incumbent's
+  two scalar B256 loads; their issue cost may erase the overlap benefit. Static evidence is
+  reproducible through `make -C tools/r9700 gdn-projection-control-grid-static`. This is no
+  numerical-correctness or performance claim and does not authorize GPU work. Prepare and
+  independently review full control+quantize+pair qualification against independent
+  mathematical/codec oracles, graph/workspace checks, and complete-boundary timing; quantization
+  and scratch reset belong inside every measured invocation. Neither a branch microbenchmark
+  nor this bound admits whole-inference testing or production promotion.
   The first reviewed package,
   `profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919`, passed compile/static preflight
   but stopped on the first K6144 incumbent launch before candidate parity or timing:
@@ -828,7 +837,11 @@ unresolved tradeoff or the product contract must change.
   at C1..4: exact output, resolved W, per-position acceptance, fallback/repair, prefill/graph-decode
   throughput, graph startup/replay, resolved workspace and fixed-family graph allocation, and
   capacity/headroom. A capacity failure excludes that exact recipe/K/W/C cell. Compare with exact
-  spec-none controls; no matrix result or manual frontier closes this task.
+  spec-none controls; no matrix result or manual frontier closes this task. After final base/artifact
+  dependencies, the user's C1 DFlash optimization target is at least `60 decode-output tok/s` in
+  matched whole inference. Admission first requires a material win over the current production
+  base and exact public greedy-token parity; 60+ is the optimization target, not permission to
+  waive either gate. This work targets DFlash, not MTP.
 
 ## Blocked terminal-selection chain
 

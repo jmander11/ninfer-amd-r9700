@@ -1,4 +1,8 @@
 HIPCC ?= /opt/rocm/bin/hipcc
+
+# CPU/static-only probe: never linked into ninfer_r9700_core or launched here.
+GDN_PROJECTION_CONTROL_GRID_SOURCE := ../../src/ops/r9700/gdn/gdn_projection_control_grid_qualification.hip
+
 HIPCC_PATH := $(shell command -v $(HIPCC))
 ifeq ($(HIPCC_PATH),)
 $(error HIPCC '$(HIPCC)' was not found)
@@ -985,6 +989,14 @@ profile-pmc: $(KV_TARGET)
 	$(ROCPROFV3) --pmc SQ_BUSY_CYCLES SQ_WAVES -f rocpd \
 		-d $(PROFILE_DIR) -- ./$(KV_TARGET) --context 4096 --iterations 1 \
 		--timing-only --group 16 --key-order token --value-order feature --scale-order feature
+
+.PHONY: gdn-projection-control-grid-static
+gdn-projection-control-grid-static: $(BUILD_DIR)/gdn_projection_control_grid_qualification.s $(BUILD_DIR)/a8q4_gdn_pair_t1.s $(BUILD_DIR)/gdn_ops.s
+	$(PYTHON) check_gdn_projection_control_grid_static.py $^
+
+$(BUILD_DIR)/gdn_projection_control_grid_qualification.s: $(GDN_PROJECTION_CONTROL_GRID_SOURCE) Makefile
+	mkdir -p $(BUILD_DIR)
+	$(HIPCC) $(CXXFLAGS) -Wno-unused-command-line-argument --offload-device-only -S $< -o $@
 
 clean:
 	rm -f $(PROBE_TARGET) $(KV_TARGET) $(HIP_DEVICE_TARGET) $(HIP_DEVICE_SANITIZE_TARGET) $(LINEAR_TARGET) $(EAGER_TARGET) $(RMSNORM_K256_PREFILL_TARGET) $(RMSNORM_DECODE_PRODUCTION_TARGET) $(RMSNORM_DECODE_ROUTING_TARGET) $(GATED_RMSNORM_PREFILL_TARGET) $(SILU_MUL_SPLIT_PREFILL_TARGET) $(GDN_TARGET) $(GDN_RECURRENCE_TARGET) $(GDN_RECURRENCE_EXACT_TARGET) $(SAMPLING_TARGET) $(ROPE_TARGET) $(SERVE_ENV_TARGET) $(INT4_WMMA_TARGET) $(Q4_HARDWARE_PEAK_TARGET) $(W8A8_WMMA_TARGET) $(Q4G64_LINEAR_TARGET) $(Q4_TENSOR_A4_TARGET) $(Q4_TENSOR_A8_TARGET) $(BUILD_DIR)/r9700_qual.s $(BUILD_DIR)/kv_append.s $(BUILD_DIR)/linear_op_qual.s $(BUILD_DIR)/w8a8_wmma_linear_qual.s $(BUILD_DIR)/q4g64_linear.s $(BUILD_DIR)/q4_hardware_peak_probe.s $(BUILD_DIR)/eager_ops.s $(BUILD_DIR)/gdn_ops.s $(BUILD_DIR)/gdn_recurrence.s $(BUILD_DIR)/gdn_verify_wave_off.s $(BUILD_DIR)/gdn_verify_wave_on.s $(BUILD_DIR)/sampling_ops.s $(BUILD_DIR)/rope_ops.s $(BUILD_DIR)/int4_wmma_qual.s
