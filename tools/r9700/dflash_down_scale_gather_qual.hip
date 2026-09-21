@@ -1,6 +1,7 @@
 #define NINFER_A8Q4_QUAL_NO_MAIN
 #include "a8q4_shape_sweep_qual.hip"
-#include "ops/r9700/linear/dflash_down_scale_gather_qualification.h"
+#include "ops/r9700/linear/dflash_verify_down.h"
+#include "ninfer/ops/linear.h"
 #include <cstring>
 #include <functional>
 
@@ -52,7 +53,22 @@ linear::A8Q4G64CandidateArgs arguments(unsigned t,Guarded<hip_bfloat16>& x,Weigh
         y.scratch.data(),y.scratch.bytes(),y.value.data(),t,N,K,K};
 }
 void launch(bool candidate,const linear::A8Q4G64CandidateArgs& a,hipStream_t s) {
-    if(candidate)HIP_CHECK(linear::qualification::dflash_down_scale_gather(a,s));
+    if(candidate) {
+        ninfer::Tensor input(const_cast<hip_bfloat16*>(a.input), ninfer::DType::BF16,
+                             {static_cast<int>(K), static_cast<int>(a.tokens)});
+        ninfer::Tensor output(a.output, ninfer::DType::BF16,
+                              {static_cast<int>(N), static_cast<int>(a.tokens)});
+        ninfer::Weight weight{};
+        weight.qtype=ninfer::QType::Q4G64_F16S;weight.layout=ninfer::QuantLayout::Q4N16K16;
+        weight.ndim=2;weight.n=weight.shape[0]=weight.padded_shape[0]=N;
+        weight.k=weight.shape[1]=weight.padded_shape[1]=K;
+        weight.group=weight.group_size=64;weight.scale_dtype=ninfer::DType::FP16;
+        weight.qdata=const_cast<std::uint8_t*>(a.weight_codes);
+        weight.scales=const_cast<std::uint16_t*>(a.weight_scales);
+        weight.qdata_bytes=a.weight_code_bytes;weight.scale_bytes=a.weight_scale_bytes;
+        ninfer::ops::dflash_verify_down_linear(input,weight,output,
+            ninfer::DeviceSpan{a.activation_workspace,a.activation_workspace_bytes},s);
+    }
     else {
         linear::A8G64ActivationWorkspace w{};
         HIP_CHECK(linear::a8q4g64_bind_activation_workspace(a.activation_workspace,a.activation_workspace_bytes,a.tokens,K,&w));
@@ -137,13 +153,14 @@ void cell(unsigned t,hipStream_t s,std::ostream& out) {
     std::array<std::unique_ptr<Weights>,Copies> weights;
     for(auto& w:weights)w=std::make_unique<Weights>(host,s);
     const auto valid=arguments(t,input,*weights[0],candidate);unsigned malformed=0;
-    auto reject=[&](auto a,hipStream_t stream){if(linear::qualification::dflash_down_scale_gather(a,stream)!=hipErrorInvalidValue)fail("malformed accepted");++malformed;};
+    auto reject=[&](auto a,hipStream_t stream){if(linear::a8q4g64_dflash_verify_down(a,stream)!=hipErrorInvalidValue)fail("malformed accepted");++malformed;};
     reject(valid,nullptr);
     auto bad=valid;bad.tokens=4;reject(bad,s);bad=valid;bad.tokens=7;reject(bad,s);
     bad=valid;bad.rows=4096;reject(bad,s);bad=valid;bad.columns-=64;reject(bad,s);
     bad=valid;bad.padded_columns-=64;reject(bad,s);
     bad=valid;--bad.weight_code_bytes;reject(bad,s);bad=valid;--bad.weight_scale_bytes;reject(bad,s);
     bad=valid;--bad.activation_workspace_bytes;reject(bad,s);
+    bad=valid;++bad.activation_workspace_bytes;reject(bad,s);
     bad=valid;bad.input=nullptr;reject(bad,s);bad=valid;bad.weight_codes=nullptr;reject(bad,s);
     bad=valid;bad.weight_scales=nullptr;reject(bad,s);bad=valid;bad.output=nullptr;reject(bad,s);
     bad=valid;bad.activation_workspace=nullptr;reject(bad,s);
@@ -151,7 +168,6 @@ void cell(unsigned t,hipStream_t s,std::ostream& out) {
     bad=valid;bad.output=const_cast<hip_bfloat16*>(bad.input);reject(bad,s);
     bad=valid;bad.output=reinterpret_cast<hip_bfloat16*>(bad.activation_workspace);reject(bad,s);
     bad=valid;bad.weight_scales=reinterpret_cast<const std::uint16_t*>(bad.weight_codes);reject(bad,s);
-    bad=valid;bad.partial_sums=reinterpret_cast<float*>(bad.activation_workspace);reject(bad,s);
     std::array<std::unique_ptr<Graph>,Copies> cg,rg;
     for(unsigned i=0;i<Copies;++i) {
         cg[i]=std::make_unique<Graph>(s,[&]{launch(false,arguments(t,input,*weights[i],control),s);});

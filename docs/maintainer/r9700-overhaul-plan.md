@@ -2121,6 +2121,20 @@ Replace functional routes with measured gfx1201 families:
   is `78ba0d0a95ff1888adc43d54044fd3b6b59cdfe052487c70d4b28ddb912bed30`. Matched ordinary decode
   remained about `19.82 tok/s`, so the result authorizes only surgical in-mode kernel promotion,
   not default DFlash selection or closure of the recipe-aware DFlash gate.
+  That surgical production promotion is now closed. The owning Linear Op unconditionally links
+  the exact scale-gather kernel, while the target schedule selects it only for C1 base-Text
+  DFlash target verification at T5/T6, N5120/K17408, Q4N16K16/G64 and A8. Ordinary decode,
+  prefill, MTP, C2..4 and every other shape retain their previous routes and workspace capacity.
+  The temporary candidate/report surface and the overlapping failed split-K active implementation
+  were removed. Fresh linked qualification plus exact-token production confirmation at
+  `profiles/bench/r9700-dflash-verify-down-production-confirm-20260921/results` retained exact
+  speculative accounting and measured `17.40551875 tok/s` for K4/W5 and `17.60527624 tok/s` for
+  K5/W6. The production/candidate median decode-time ratios were `0.99829774/0.99896050`, and the
+  production/control ratios were `0.93594169/0.93074366`. Result-manifest SHA-256 is
+  `f981a79b0880185e19965a178265b639a3733f713cc9cae2e4f8dad8acc7839f`; closure SHA-256 is
+  `142abd07272548b1ba79140fde80f709e9031eeb1aa73caebcffe565e09107ca`. This does not close final
+  DFlash selection: after numerical-accuracy and terminal base-artifact selection, recipe,
+  acceptance-quality and whole DFlash work becomes the primary path to the C1 `>=60 tok/s` target.
 - [ ] After the dense C1/P2048/spec-none floor and practical-ceiling gate passes and the shared
   chunk is selected, rerun all 48 post-promotion capacity cells (dense/XAttention times
   all-Q4/mixed/four-role-hybrid times G16/G32, each at C=1..4). Bind the newly measured Device Graph

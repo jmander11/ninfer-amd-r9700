@@ -65,10 +65,7 @@ add_library(ninfer_r9700_core STATIC
   ops/r9700/linear/fp8_activation.hip
   ops/r9700/linear/linear_execution.hip
   ops/r9700/linear/r9700_linear.hip)
-if(NINFER_R9700_DFLASH_DOWN_SCALE_GATHER_CANDIDATE STREQUAL "1")
-  target_sources(ninfer_r9700_core PRIVATE
-    ops/r9700/linear/dflash_down_scale_gather_qualification.hip)
-endif()
+target_sources(ninfer_r9700_core PRIVATE ops/r9700/linear/dflash_verify_down.hip)
 if(NINFER_R9700_XATTENTION_QUALIFICATION)
   target_sources(ninfer_r9700_core PRIVATE
     ops/r9700/kv/fp8_int4_kv_xattention.hip)
@@ -670,6 +667,15 @@ set_target_properties(ninfer_r9700_target_variant_down_scale_gather_qual PROPERT
   HIP_ARCHITECTURES gfx1201 LINKER_LANGUAGE HIP)
 target_link_libraries(ninfer_r9700_target_variant_down_scale_gather_qual PRIVATE
   ninfer_r9700_target_bindings hip::host)
+
+add_executable(ninfer_r9700_dflash_verify_down_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/dflash_down_scale_gather_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_dflash_verify_down_qual)
+set_target_properties(ninfer_r9700_dflash_verify_down_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
+target_compile_definitions(ninfer_r9700_dflash_verify_down_qual PRIVATE
+  NINFER_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+target_compile_options(ninfer_r9700_dflash_verify_down_qual PRIVATE -Wno-unused-function)
+target_link_libraries(ninfer_r9700_dflash_verify_down_qual PRIVATE ninfer_r9700_core hip::host)
 
 add_executable(ninfer_r9700_a8q4_projected_residual_t1_qual
   ${PROJECT_SOURCE_DIR}/tools/r9700/a8q4_projected_residual_t1_qual.hip)

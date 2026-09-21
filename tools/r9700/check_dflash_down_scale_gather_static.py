@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bind scale-gather mechanism, unchanged IU4/FMA order and embedded resources."""
+"""Bind production verify-down scale-gather, unchanged IU4/FMA order and resources."""
 import argparse
 import collections
 import json

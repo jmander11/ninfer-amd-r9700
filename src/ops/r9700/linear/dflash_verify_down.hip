@@ -1,9 +1,9 @@
-#include "dflash_down_scale_gather_qualification.h"
+#include "dflash_verify_down.h"
 #include <hip/hip_fp16.h>
 #include <array>
 #include <limits>
 
-namespace ninfer::ops::r9700::linear::qualification {
+namespace ninfer::ops::r9700::linear {
 namespace {
 using I2 = int __attribute__((ext_vector_type(2)));
 using I8 = int __attribute__((ext_vector_type(8)));
@@ -63,13 +63,12 @@ __global__ __launch_bounds__(32) void dflash_down_scale_gather_kernel(
 }
 }
 
-hipError_t dflash_down_scale_gather(const A8Q4G64CandidateArgs& a,hipStream_t stream) noexcept {
+hipError_t a8q4g64_dflash_verify_down(const A8Q4G64CandidateArgs& a,hipStream_t stream) noexcept {
     const auto bytes=a8q4g64_activation_workspace_capacity_bytes(a.tokens,K);
     if((a.tokens!=5 && a.tokens!=6) || a.rows!=N || a.columns!=K ||
        a.padded_columns!=K || a.weight_code_bytes!=static_cast<std::size_t>(N)*K/2 ||
        a.weight_scale_bytes!=static_cast<std::size_t>(N)*G*2 ||
-       a.activation_workspace_bytes!=bytes || a.partial_sums!=nullptr ||
-       a.partial_sum_bytes!=0 || a.dflash_target_verify_down || stream==nullptr)return hipErrorInvalidValue;
+       a.activation_workspace_bytes!=bytes || stream==nullptr)return hipErrorInvalidValue;
     struct Plane {const void* p;std::size_t n,align;};
     const std::array<Plane,5> planes{{
         {a.input,static_cast<std::size_t>(a.tokens)*K*2,2},

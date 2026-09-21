@@ -72,7 +72,6 @@ Q4G64_LINEAR_TARGET := $(BUILD_DIR)/q4g64_linear_qual
 A8Q4_SHAPE_SWEEP_TARGET := $(BUILD_DIR)/a8q4_shape_sweep_qual
 A8Q4_DFLASH_SMALL_T_TARGET := $(BUILD_DIR)/a8q4_dflash_small_t_qual
 A8Q4_DFLASH_MLP_DOWN_SMALL_T_TARGET := $(BUILD_DIR)/a8q4_dflash_mlp_down_small_t_qual
-A8Q4_DFLASH_DOWN_SPLITK_TARGET := $(BUILD_DIR)/a8q4_dflash_down_splitk_qual
 A8Q4_GDN_PAIR_T1_TARGET := $(BUILD_DIR)/a8q4_gdn_pair_t1_qual
 DFLASH_SMALL_T_OUTPUT_DIR ?=
 DFLASH_SMALL_T_C1_SUMMARY ?= $(abspath ../..)/profiles/bench/r9700-dflash-small-t-c1-20260906/summary.json
@@ -112,9 +111,7 @@ Q4G64_LINEAR_SOURCE := q4g64_linear_qual.hip
 A8Q4_SHAPE_SWEEP_SOURCE := a8q4_shape_sweep_qual.hip
 A8Q4_DFLASH_SMALL_T_SOURCE := a8q4_dflash_small_t_qual.hip
 A8Q4_DFLASH_MLP_DOWN_SMALL_T_SOURCE := a8q4_dflash_mlp_down_small_t_qual.hip
-A8Q4_DFLASH_DOWN_SPLITK_SOURCE := a8q4_dflash_down_splitk_qual.hip
 A8Q4_GDN_PAIR_T1_SOURCE := a8q4_gdn_pair_t1_qual.hip
-A8Q4_DFLASH_DOWN_SPLITK_STATIC_CHECK := check_a8q4_dflash_down_splitk_static.py
 A8Q4_DFLASH_MLP_DOWN_SMALL_T_STATIC_CHECK := check_a8q4_dflash_mlp_down_small_t_static.py
 Q4_TENSOR_SOURCE := q4_tensor_dispatch_qual.hip
 SERVE_LOG_IMPL := ../../src/serve/request_log.cpp
@@ -567,26 +564,6 @@ $(A8Q4_DFLASH_MLP_DOWN_SMALL_T_TARGET): $(A8Q4_DFLASH_MLP_DOWN_SMALL_T_SOURCE) \
 
 a8q4-dflash-mlp-down-small-t-build: $(A8Q4_DFLASH_MLP_DOWN_SMALL_T_TARGET)
 
-$(A8Q4_DFLASH_DOWN_SPLITK_TARGET): $(A8Q4_DFLASH_DOWN_SPLITK_SOURCE) \
-		$(A8Q4_SHAPE_SWEEP_SOURCE) $(LINEAR_IMPL) $(LINEAR_HEADER) \
-		$(Q4_ACTIVATION_PROFILE) Makefile
-	mkdir -p $(BUILD_DIR)
-	$(HIPCC) $(CXXFLAGS) -Wno-unused-function -DNINFER_SOURCE_DIR='"$(abspath ../..)"' \
-		$(A8Q4_DFLASH_DOWN_SPLITK_SOURCE) \
-		$(LINEAR_IMPL) $(LDFLAGS) -o $@
-
-a8q4-dflash-down-splitk-build: $(A8Q4_DFLASH_DOWN_SPLITK_TARGET)
-
-$(BUILD_DIR)/a8q4_dflash_down_splitk.s: $(LINEAR_IMPL) $(LINEAR_HEADER) \
-		$(Q4_ACTIVATION_PROFILE) Makefile
-	mkdir -p $(BUILD_DIR)
-	$(HIPCC) $(CXXFLAGS) -Wno-unused-function -Wno-unused-command-line-argument \
-		-DNINFER_R9700_DFLASH_DOWN_SPLITK_CANDIDATE=1 --offload-device-only -S \
-		$(LINEAR_IMPL) -o $@
-
-a8q4-dflash-down-splitk-static: $(BUILD_DIR)/a8q4_dflash_down_splitk.s
-	$(PYTHON) $(A8Q4_DFLASH_DOWN_SPLITK_STATIC_CHECK) $<
-
 $(BUILD_DIR)/a8q4_dflash_mlp_down_small_t.s: $(LINEAR_IMPL) $(LINEAR_HEADER) \
 		$(Q4_ACTIVATION_PROFILE) Makefile
 	mkdir -p $(BUILD_DIR)
@@ -990,11 +967,12 @@ profile-pmc: $(KV_TARGET)
 		-d $(PROFILE_DIR) -- ./$(KV_TARGET) --context 4096 --iterations 1 \
 		--timing-only --group 16 --key-order token --value-order feature --scale-order feature
 
-DFLASH_DOWN_SCALE_GATHER_SOURCE := ../../src/ops/r9700/linear/dflash_down_scale_gather_qualification.hip
-DFLASH_DOWN_SCALE_GATHER_HEADER := ../../src/ops/r9700/linear/dflash_down_scale_gather_qualification.h
-$(BUILD_DIR)/dflash_down_scale_gather_qual: dflash_down_scale_gather_qual.hip a8q4_shape_sweep_qual.hip $(DFLASH_DOWN_SCALE_GATHER_SOURCE) $(DFLASH_DOWN_SCALE_GATHER_HEADER) $(LINEAR_IMPL) $(LINEAR_HEADER) Makefile
-	mkdir -p $(BUILD_DIR)
-	$(HIPCC) $(CXXFLAGS) -Wno-unused-function -DNINFER_R9700_Q4_ACTIVATION_BITS=8 -DNINFER_SOURCE_DIR=\"$(abspath ../..)\" dflash_down_scale_gather_qual.hip $(DFLASH_DOWN_SCALE_GATHER_SOURCE) $(LINEAR_IMPL) $(LDFLAGS) -o $@
+DFLASH_DOWN_SCALE_GATHER_SOURCE := ../../src/ops/r9700/linear/dflash_verify_down.hip
+DFLASH_DOWN_SCALE_GATHER_HEADER := ../../src/ops/r9700/linear/dflash_verify_down.h
+DFLASH_VERIFY_DOWN_BUILD ?= ../../build-r9700
+.PHONY: dflash-verify-down-build
+dflash-verify-down-build:
+	cmake --build $(DFLASH_VERIFY_DOWN_BUILD) --target ninfer_r9700_dflash_verify_down_qual
 
 $(BUILD_DIR)/dflash_down_scale_gather.s: $(DFLASH_DOWN_SCALE_GATHER_SOURCE) $(DFLASH_DOWN_SCALE_GATHER_HEADER) $(LINEAR_HEADER) Makefile
 	mkdir -p $(BUILD_DIR)

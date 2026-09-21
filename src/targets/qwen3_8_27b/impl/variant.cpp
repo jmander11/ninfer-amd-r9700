@@ -1233,14 +1233,11 @@ void post_mixer_body(const Tensor& hidden, const Variant::PostMixerWeights& weig
             return;
         }
         Tensor delta = workspace.alloc(DType::BF16, {TextConfig::hidden, hidden.ne[1]});
-        bool verify_down = phase == qwen3::TextPhase::Verify && dflash_target_verify;
-        if constexpr (ops::r9700::linear::kDFlashDownScaleGatherCandidateEnabled) {
-            verify_down = Variant::ExecutionState::dflash_down_scale_gather_selected(
-                true, ops::r9700::linear::kQ4ActivationBits, phase, dflash_target_verify,
+        const bool verify_down = Variant::ExecutionState::dflash_down_scale_gather_selected(
+                ops::r9700::linear::kQ4ActivationBits, phase, dflash_target_verify,
                 route_tokens, text_layer, static_cast<std::uint32_t>(activation.ne[1]),
                 static_cast<std::uint32_t>(weights.down.n),
                 static_cast<std::uint32_t>(weights.down.k), weights.down.qtype, weights.down.layout);
-        }
         serialized_linear(execution, activation, weights.down, delta, workspace, stream, verify_down);
         ops::residual_add(delta, residual, stream);
     }

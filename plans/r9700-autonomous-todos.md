@@ -161,18 +161,21 @@ physical bandwidth saturation or stall freedom.
 
 The deterministic queue after reset is:
 
-1. pursue one recipe-independent DFlash Layer-0 mechanism toward the C1 `>=60 decode-output tok/s`
-   target, after attributing the retained matched whole round and excluding the exhausted mechanisms
-   listed below. Do not start another base-decode mechanism. The qualified GDN combined-grid route
-   is preserved for a later matched whole C1 A/B but is not production-routed.
+1. finish numerical-accuracy and terminal base-artifact selection once `DENSE-FLOOR-DECISION`
+   opens that chain;
+2. immediately make `DFLASH-RECIPE`, `DFLASH-QUALITY`, and `DFLASH-WHOLE` the primary performance
+   work, targeting at least `60 decode-output tok/s` at C1 with exact public greedy-token parity;
+3. retain only clearly reusable recipe-independent DFlash work while the selected artifact is
+   unavailable. Do not start another base-decode mechanism. The qualified GDN combined-grid route
+   remains preserved for a later matched whole C1 A/B but is not production-routed.
 
-No GPU action is currently runnable. First select and independently review one bounded DFlash
-mechanism and its complete semantic boundary; any physical experiment must then use a fresh
-reviewed create-only package.
-
-Recipe-independent DFlash optimization follows this bounded decision; final DFlash recipe and
-quality binding still depend on numerical-accuracy/artifact selection. Other remaining unchecked
-tasks retain their declared dependencies or the external `DENSE-FLOOR-DECISION`.
+No additional recipe-independent DFlash GPU experiment is admitted merely because the final recipe
+is blocked. The retained down scale-gather promotion has exhausted its scoped mechanism, and its
+whole result proves that kernel savings alone cannot approach the terminal target at current
+acceptance. Select another pre-recipe experiment only when exact retained attribution identifies a
+distinct owner and a conservative whole-round bound that can materially change the decision; use a
+fresh independently reviewed create-only package. Other remaining unchecked tasks retain their
+declared dependencies or the external `DENSE-FLOOR-DECISION`.
 
 Every future physical experiment must be launched through a reviewed package-local `commands.sh`,
 not an ad-hoc reconstructed command. A package is runnable only when its plan contains no
@@ -855,7 +858,7 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   `SHIP` for narrow in-mode production promotion. Matched ordinary decode remained about
   `19.82 tok/s`, so this neither selects DFlash as default nor closes `DFLASH-WHOLE`.
 
-- [ ] `DFLASH-DOWN-SCALE-GATHER-PROMOTE` Promote only the exact admitted C1 base-Text Verify
+- [x] `DFLASH-DOWN-SCALE-GATHER-PROMOTE` Promote only the exact admitted C1 base-Text Verify
   K4/W5 and K5/W6 route. Move the kernel/launcher out of qualification naming into the owning
   Linear Op, make the target-owned A8/Q4/T5/T6/`route_tokens==0` predicate unconditional, retain
   one fresh A8 preparation and existing graph-stable workspace, and remove the temporary selector
@@ -864,6 +867,30 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   parity; preserve sealed historical evidence. Rebuild linked numerical/ISA qualification and run
   one fresh exact-token production confirmation against the retained candidate/control. Do not
   widen to C2..4 or treat this scoped promotion as the final recipe/acceptance decision.
+
+  CLOSED PRODUCTION PROMOTION 2026-09-21. The owning Linear Op now links the qualified kernel
+  unconditionally and the target schedule selects it only for C1 (`route_tokens==0`) base-Text
+  Verify, genuine DFlash target verification, layers 0..63, A8/Q4N16K16/G64 T5/T6
+  N5120/K17408. It performs one fresh A8 preparation in the unchanged graph-stable activation
+  workspace. Ordinary decode, MTP, prefill, C2..4 compact batches, other phases, shapes and
+  inventories retain their prior routes. The temporary scale-gather selector/report fields and
+  the overlapping failed split-K selector, workspace, kernels and active qualification tools are
+  removed; sealed historical evidence remains.
+
+  Fresh linked qualification and exact-token production confirmation are sealed at
+  `profiles/bench/r9700-dflash-verify-down-production-confirm-20260921/results`. K4/W5 production
+  decode was `17.40551875 tok/s`, with median decode time `0.99829774` of the retained admitted
+  candidate and `0.93594169` of its control. K5/W6 was `17.60527624 tok/s`, with ratios
+  `0.99896050` and `0.93074366`. Both widths retained exact 65-token output and exact speculative
+  accounting; ordinary tokens and workspace capacity were unchanged. The linked direct qualifier
+  retained independent numerical/static admission and measured T5 `0.3221000→0.2303795 ms` and
+  T6 `0.3316390→0.2307600 ms`. Plan SHA-256 is
+  `b7560805d482b6324b50e67f74b3fa5b2cfef1aa069fe6ebd16c925360c3817c`; result-manifest SHA-256 is
+  `f981a79b0880185e19965a178265b639a3733f713cc9cae2e4f8dad8acc7839f`; closure SHA-256 is
+  `142abd07272548b1ba79140fde80f709e9031eeb1aa73caebcffe565e09107ca`. Independent result audit
+  reported `SHIP`. This closes only the scoped kernel promotion. Matched ordinary remains about
+  `19.82 tok/s`; final DFlash recipe and acceptance selection remain responsible for the
+  `>=60 tok/s` target.
 
 ## Durable decision rule (added 2026-09-12)
 

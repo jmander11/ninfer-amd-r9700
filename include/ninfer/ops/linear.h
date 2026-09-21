@@ -33,6 +33,8 @@ namespace ninfer::ops {
                                                            std::int32_t columns);
 // Complete serialized workspace for the explicitly identified DFlash target-verify
 // MLP-down call. Generic Linear callers do not select this route by shape alone.
+// C1 T5/T6 Q4N16K16/G64 A8 uses scale-gather WMMA, with the ordinary activation
+// workspace only. Target schedule ownership excludes compact multi-request batches.
 [[nodiscard]] std::size_t dflash_verify_down_linear_workspace_capacity_bytes(
     QType qtype, std::int32_t tokens, std::int32_t columns, std::int32_t rows);
 void linear(const Tensor& x, const Weight& w, Tensor& out, WorkspaceArena& workspace,
@@ -42,7 +44,7 @@ void dflash_verify_down_linear(const Tensor& x, const Weight& w, Tensor& out,
 
 // Executes an integer linear against caller-owned serialized workspace. The span may
 // be larger than the exact requirement for this shape; the activation image consumes the
-// required prefix and qualified route-private storage follows it.
+// required prefix; no partial-sum storage follows it.
 // BF16 and exact-W8 routes ignore the span. This boundary lets a Program keep graph addresses
 // stable without reserving private activation storage inside each schedule's WorkspaceArena.
 void linear(const Tensor& x, const Weight& w, Tensor& out,

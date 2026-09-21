@@ -7,9 +7,7 @@
 #include "ops/r9700/linear/r9700_linear.h"
 #include "ops/r9700/linear/r9700_q4_activation_profile.h"
 #include "ops/r9700/linear/r9700_w8_activation_profile.h"
-#if NINFER_R9700_DFLASH_DOWN_SCALE_GATHER_CANDIDATE
-#include "ops/r9700/linear/dflash_down_scale_gather_qualification.h"
-#endif
+#include "ops/r9700/linear/dflash_verify_down.h"
 
 #include <hip/hip_bfloat16.h>
 
@@ -123,42 +121,16 @@ std::size_t linear_workspace_capacity_bytes(QType qtype, std::int32_t tokens,
     return bytes;
 }
 
-namespace {
-
-std::size_t linear_partial_sum_capacity_bytes(QType qtype, std::int32_t tokens,
-                                               std::int32_t columns,
-                                               std::int32_t rows) {
-    if (qtype != QType::Q4G64_F16S) return 0U;
-    const std::uint32_t checked_tokens = checked_extent(tokens, "T");
-    const std::uint32_t checked_columns = checked_extent(columns, "K");
-    const std::uint32_t checked_rows = checked_extent(rows, "N");
-    if (!r9700::linear::use_a8q4_dflash_down_splitk(
-            checked_tokens, checked_rows, checked_columns, checked_columns)) {
-        return 0U;
-    }
-    const std::uint32_t S = r9700::linear::kDFlashDownSplitkFactor;
-    return static_cast<std::size_t>(S) * static_cast<std::size_t>(checked_tokens) *
-           static_cast<std::size_t>(checked_rows) * sizeof(float);
-}
-
-} // namespace
-
 std::size_t dflash_verify_down_linear_workspace_capacity_bytes(
     QType qtype, std::int32_t tokens, std::int32_t columns, std::int32_t rows) {
-    const std::size_t activation_bytes =
-        linear_workspace_capacity_bytes(qtype, tokens, columns);
-    const std::size_t partial_sum_bytes = linear_partial_sum_capacity_bytes(
-        qtype, tokens, columns, rows);
-    if (activation_bytes > std::numeric_limits<std::size_t>::max() - partial_sum_bytes) {
-        throw std::overflow_error("linear: complete workspace overflows");
-    }
-    return activation_bytes + partial_sum_bytes;
+    (void)checked_extent(rows, "N");
+    return linear_workspace_capacity_bytes(qtype, tokens, columns);
 }
 
 namespace {
 
 void linear_with_workspace(const Tensor& x, const Weight& weight, Tensor& output,
-                            DeviceSpan activation, DeviceSpan partial_sums,
+                            DeviceSpan activation,
                             hipStream_t stream, bool dflash_target_verify_down = false) {
     if (weight.qtype == QType::W8G32_F16S) {
         const std::uint32_t tokens = checked_extent(x.ne[1], "T");
@@ -267,12 +239,11 @@ void linear_with_workspace(const Tensor& x, const Weight& weight, Tensor& output
         throw std::invalid_argument("linear: external activation workspace is too small");
     }
     if constexpr (r9700::linear::kQ4ActivationBits == 8) {
-#if NINFER_R9700_DFLASH_DOWN_SCALE_GATHER_CANDIDATE
         if (dflash_target_verify_down && (tokens == 5U || tokens == 6U) &&
             rows == 5120U && columns == 17408U && padded == 17408U) {
             // This complete launcher owns fresh A8 preparation. Dispatch before the
-            // generic launcher, never after it, and do not reuse split-K storage.
-            HIP_CHECK(r9700::linear::qualification::dflash_down_scale_gather(
+            // generic launcher, never after it; only the activation workspace is used.
+            HIP_CHECK(r9700::linear::a8q4g64_dflash_verify_down(
                 {.input = static_cast<const hip_bfloat16*>(x.data),
                  .weight_codes = static_cast<const std::uint8_t*>(weight.qdata),
                  .weight_code_bytes = static_cast<std::size_t>(code_bytes),
@@ -285,7 +256,6 @@ void linear_with_workspace(const Tensor& x, const Weight& weight, Tensor& output
                  .padded_columns = padded}, stream));
             return;
         }
-#endif
         HIP_CHECK(r9700::linear::a8q4g64_linear_candidate(
             {.input = static_cast<const hip_bfloat16*>(x.data),
              .weight_codes = static_cast<const std::uint8_t*>(weight.qdata),
@@ -298,10 +268,7 @@ void linear_with_workspace(const Tensor& x, const Weight& weight, Tensor& output
              .tokens = tokens,
              .rows = rows,
              .columns = columns,
-             .padded_columns = padded,
-             .partial_sums = static_cast<float*>(partial_sums.data),
-             .partial_sum_bytes = partial_sums.bytes,
-             .dflash_target_verify_down = dflash_target_verify_down},
+             .padded_columns = padded},
             stream));
     } else {
         HIP_CHECK(r9700::linear::q4g64_linear_candidate(
@@ -330,7 +297,7 @@ void linear(const Tensor& x, const Weight& weight, Tensor& output,
     auto scope = workspace.scope();
     const DeviceSpan activation = workspace_bytes == 0U ? DeviceSpan{}
                                                         : workspace.alloc_bytes(workspace_bytes);
-    linear_with_workspace(x, weight, output, activation, DeviceSpan{}, stream);
+    linear_with_workspace(x, weight, output, activation, stream);
 }
 
 void dflash_verify_down_linear(const Tensor& x, const Weight& weight, Tensor& output,
@@ -341,12 +308,7 @@ void dflash_verify_down_linear(const Tensor& x, const Weight& weight, Tensor& ou
     const DeviceSpan activation = activation_bytes == 0U
                                       ? DeviceSpan{}
                                       : workspace.alloc_bytes(activation_bytes);
-    const std::size_t partial_sum_bytes = linear_partial_sum_capacity_bytes(
-        weight.qtype, x.ne[1], x.ne[0], output.ne[0]);
-    const DeviceSpan partial_sums = partial_sum_bytes == 0U
-                                        ? DeviceSpan{}
-                                        : workspace.alloc_bytes(partial_sum_bytes);
-    linear_with_workspace(x, weight, output, activation, partial_sums, stream, true);
+    linear_with_workspace(x, weight, output, activation, stream, true);
 }
 
 std::size_t normalized_linear_workspace_capacity_bytes(
@@ -512,7 +474,7 @@ void projected_residual_t1(const Tensor& input, const Weight& weight, Tensor& re
 
 void linear(const Tensor& x, const Weight& weight, Tensor& output,
             const DeviceSpan& activation_workspace, hipStream_t stream) {
-    linear_with_workspace(x, weight, output, activation_workspace, DeviceSpan{}, stream);
+    linear_with_workspace(x, weight, output, activation_workspace, stream);
 }
 
 void dflash_verify_down_linear(const Tensor& x, const Weight& weight, Tensor& output,
@@ -520,24 +482,11 @@ void dflash_verify_down_linear(const Tensor& x, const Weight& weight, Tensor& ou
                                hipStream_t stream) {
     const std::size_t activation_bytes = linear_workspace_capacity_bytes(
         weight.qtype, x.ne[1], x.ne[0]);
-    const std::size_t partial_sum_bytes = linear_partial_sum_capacity_bytes(
-        weight.qtype, x.ne[1], x.ne[0], output.ne[0]);
-    DeviceSpan partial_sums{};
-    if (partial_sum_bytes != 0U) {
-        if (serialized_workspace.data == nullptr ||
-            serialized_workspace.bytes < activation_bytes ||
-            serialized_workspace.bytes - activation_bytes < partial_sum_bytes) {
-            throw std::invalid_argument("linear: serialized workspace is too small");
-        }
-        partial_sums = DeviceSpan{
-            static_cast<std::byte*>(serialized_workspace.data) + activation_bytes,
-            partial_sum_bytes};
-    }
     linear_with_workspace(
         x, weight, output,
         DeviceSpan{serialized_workspace.data,
                    std::min(serialized_workspace.bytes, activation_bytes)},
-        partial_sums, stream, true);
+        stream, true);
 }
 
 void linear(const Tensor& x, const Weight& weight, Tensor& output, hipStream_t stream) {

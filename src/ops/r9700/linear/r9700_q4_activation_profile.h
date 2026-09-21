@@ -16,14 +16,6 @@ static_assert(NINFER_R9700_Q4_ACTIVATION_BITS == 4 ||
               "R9700 Q4 activation width must be A4 or A8");
 inline constexpr std::uint32_t kQ4ActivationBits = NINFER_R9700_Q4_ACTIVATION_BITS;
 
-#ifndef NINFER_R9700_DFLASH_DOWN_SCALE_GATHER_CANDIDATE
-#define NINFER_R9700_DFLASH_DOWN_SCALE_GATHER_CANDIDATE 0
-#endif
-static_assert(NINFER_R9700_DFLASH_DOWN_SCALE_GATHER_CANDIDATE == 0 ||
-              NINFER_R9700_DFLASH_DOWN_SCALE_GATHER_CANDIDATE == 1);
-inline constexpr bool kDFlashDownScaleGatherCandidateEnabled =
-    NINFER_R9700_DFLASH_DOWN_SCALE_GATHER_CANDIDATE == 1;
-
 #ifndef NINFER_R9700_DFLASH_SMALL_T_CANDIDATE
 #define NINFER_R9700_DFLASH_SMALL_T_CANDIDATE 0
 #endif
@@ -41,44 +33,6 @@ static_assert(NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE == 0 ||
               "R9700 DFlash MLP-down T5 candidate selector must be zero or one");
 inline constexpr bool kDFlashMlpDownT5CandidateEnabled =
     NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE == 1;
-
-#ifndef NINFER_R9700_DFLASH_DOWN_SPLITK_CANDIDATE
-#define NINFER_R9700_DFLASH_DOWN_SPLITK_CANDIDATE 0
-#endif
-static_assert(NINFER_R9700_DFLASH_DOWN_SPLITK_CANDIDATE == 0 ||
-                  NINFER_R9700_DFLASH_DOWN_SPLITK_CANDIDATE == 1,
-              "R9700 DFlash down split-K candidate selector must be zero or one");
-inline constexpr bool kDFlashDownSplitkCandidateEnabled =
-    NINFER_R9700_DFLASH_DOWN_SPLITK_CANDIDATE == 1;
-
-// DFlash verify down-GEMM split-K challenger. Splits the K=17408 reduction across
-// S z-blocks to raise wave count for the low-occupancy [5120,17408] shape at the
-// exact DFlash verify widths. The split factor is fixed at compile time; the
-// bounded qualifier sweep covers S in {2,4,8}; the factor remains explicit while
-// real-model exact-token qualification determines whether any factor is admissible.
-#ifndef NINFER_R9700_DFLASH_DOWN_SPLITK_FACTOR
-#define NINFER_R9700_DFLASH_DOWN_SPLITK_FACTOR 8
-#endif
-static_assert(NINFER_R9700_DFLASH_DOWN_SPLITK_FACTOR == 2 ||
-                  NINFER_R9700_DFLASH_DOWN_SPLITK_FACTOR == 4 ||
-                  NINFER_R9700_DFLASH_DOWN_SPLITK_FACTOR == 8,
-              "R9700 DFlash down split-K factor must be 2, 4, or 8");
-inline constexpr std::uint32_t kDFlashDownSplitkFactor =
-    NINFER_R9700_DFLASH_DOWN_SPLITK_FACTOR;
-
-[[nodiscard]] constexpr bool is_a8q4_dflash_down_splitk_eligible(
-    std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns,
-    std::uint32_t padded_columns) noexcept {
-    return (tokens == 5U || tokens == 6U) && rows == 5120U && columns == 17408U &&
-           padded_columns == columns;
-}
-
-[[nodiscard]] constexpr bool use_a8q4_dflash_down_splitk(
-    std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns,
-    std::uint32_t padded_columns) noexcept {
-    return kDFlashDownSplitkCandidateEnabled && kQ4ActivationBits == 8U &&
-           is_a8q4_dflash_down_splitk_eligible(tokens, rows, columns, padded_columns);
-}
 
 [[nodiscard]] constexpr bool is_a8q4_dflash_mlp_down_t5_eligible(
     std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns,
