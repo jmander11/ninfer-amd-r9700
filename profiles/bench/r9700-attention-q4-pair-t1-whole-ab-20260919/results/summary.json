@@ -1,0 +1,41 @@
+{
+  "schema": "ninfer.r9700.attention-q4-pair-t1-whole-ab-summary.v1",
+  "status": "passed",
+  "production_routing_authorized": true,
+  "exact_public_token_parity": true,
+  "pairs": [
+    {
+      "order": [
+        "control",
+        "candidate"
+      ],
+      "control_seconds": 9.252875015,
+      "candidate_seconds": 9.148849118,
+      "candidate_over_control": 0.9887574514049565
+    },
+    {
+      "order": [
+        "candidate",
+        "control"
+      ],
+      "control_seconds": 9.258447799,
+      "candidate_seconds": 9.141208106,
+      "candidate_over_control": 0.9873370034000015
+    },
+    {
+      "order": [
+        "control",
+        "candidate"
+      ],
+      "control_seconds": 9.26053197,
+      "candidate_seconds": 9.139970856,
+      "candidate_over_control": 0.9869811891594819
+    }
+  ],
+  "paired_ratio_mean": 0.98769188132148,
+  "paired_ratio_upper_2se": 0.9887770729454428,
+  "paired_ratio_median": 0.9873370034000015,
+  "limitations": [
+    "Unprofiled whole-model timing does not prove physical HBM bandwidth."
+  ]
+}

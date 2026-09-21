@@ -137,13 +137,12 @@ later candidates is promoted merely by its design result. The BF16 GDN productio
 whole C1 gate are now qualified, with promotion deliberately deferred until the attention campaigns
 finish. The deterministic queue after reset is:
 
-1. prepare/review/run the T1 attention whole gate from `profiles/bench/r9700-attention-q4-pair-t1-whole-ab-20260919` after its completed direct production qualification;
-2. direct-qualify C2..4 with `profiles/bench/r9700-paired-projection-c2c4-production-qualification-20260919`, then prepare/review/run `profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919`;
-3. resolve the BF16 GDN and both paired-route promotion decisions, then run `profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919`.
+1. direct-qualify C2..4 with `profiles/bench/r9700-paired-projection-c2c4-production-qualification-20260919`, then prepare/review/run `profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919`;
+2. resolve the BF16 GDN and both paired-route promotion decisions, then run `profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919`.
 
-Do not promote or remove any candidate selector anywhere between queue items 1 and 2 because doing
-so invalidates downstream cache and source authorities. The exact next action is
-`bash profiles/bench/r9700-attention-q4-pair-t1-whole-ab-20260919/commands.sh --measure`.
+Do not promote or remove any candidate selector before queue item 1 completes because doing so
+invalidates its cache and source authorities. The exact next action is
+`bash profiles/bench/r9700-paired-projection-c2c4-production-qualification-20260919/commands.sh --measure`.
 Every other remaining unchecked task depends
 directly or transitively on this queue or the external `DENSE-FLOOR-DECISION`.
 
@@ -349,9 +348,16 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   `profiles/bench/r9700-attention-projection-t1-production-qualification-20260919/qualification.json`
   (SHA-256 `8bfebf95b5b4a6e47db7e5d41dff686e5b145e41b75850ef669de80d06e95d74`).
   This authorizes only preparing the dependent whole gate, not promotion.
-  That whole gate is now prepared and two independent reviews reported `SHIP`; its complete live
+  That whole gate was prepared and two independent reviews reported `SHIP`; its complete live
   caches differ only at the T1 attention selector, while BF16 GDN and C2..4 paired selectors remain
-  off. Its non-GPU preflight passes and its results path is fresh.
+  off. The complete six-role C1 campaign passed exact 257-token parity. Candidate/control ratios
+  were `0.9887575`, `0.9873370`, and `0.9869812`; median `0.9873370` and mean-plus-two-standard-errors
+  `0.9887771` clear every gate. Candidate rates were `27.9817`, `28.0051`, and `28.0088 tok/s`
+  versus control `27.6671`, `27.6504`, and `27.6442 tok/s`. Evidence:
+  `profiles/bench/r9700-attention-q4-pair-t1-whole-ab-20260919/results`; the SHA-256 of
+  `result.sha256` is `9054b308fb675b236532b847c72b7774165824dce1e43bceff4cbe83c0db17f1`.
+  This admits production promotion, deferred until the C2..4 campaign finishes; do not rerun it or
+  claim physical HBM bandwidth from the unprofiled timing.
 
   The independently reviewed C2..4 paired-WMMA direct gate covers both the GDN N4096+N12288 pair
   (48 calls/round) and attention N7168+N7168 pair (16 calls/round). It compares two complete
@@ -381,9 +387,9 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   passes native IU4/wave32 at 57 VGPR, 32 SGPR, and no LDS/scratch/spills. The separately reviewed
   Independent review reported `SHIP` for the whole package at
   `profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919`; no separate review artifact was
-  created. Physical
-  qualification remains queued behind the required device-0 reset, the GDN whole retry, and the
-  T1 attention campaign. Do not prepare the whole package before its direct receipt exists.
+  created. The reset, GDN gate, and T1 attention campaign are complete. A reviewed lexical PCI
+  power-path repair removed a false symlink-resolution rejection; do not prepare the whole package
+  before its direct receipt exists.
 
   After the admitted paired routes are resolved, the reviewed-ready direct package
   `profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919` is the next bounded mechanism:

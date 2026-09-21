@@ -164,7 +164,9 @@ def direct_ok(report: dict) -> None:
             not isinstance(pci, str)):
         fail("direct hardware identity differs")
     power = (Path("/sys/bus/pci/devices") / pci /
-             "power_dpm_force_performance_level").resolve(strict=True)
+             "power_dpm_force_performance_level")
+    if not power.is_file() or power.is_symlink():
+        fail("direct PCI/power binding differs")
     if report.get("power_profile") != {"path": str(power), "required": "auto",
                                         "before": "auto", "after": "auto"}:
         fail("direct PCI/power identity differs")
