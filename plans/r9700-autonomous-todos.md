@@ -84,8 +84,9 @@ measurements remain valid, but phase objectives must not use that prefill metric
 campaign was stopped during C3; `whole/closure.json` preserves the exact scope. Reporter fix
 `5eff7490` now emits schema21 serial-lane prefill-service sums; all four fresh builds, host
 tests/planners and a short C2 real-model reporting check pass. The reviewed successor is
-`profiles/bench/r9700-terminal-base-phase-sum-20260921`: freeze its reporting-only bridge,
-then run `commands.sh whole`, `commands.sh controls`, and `commands.sh select` in that order.
+`profiles/bench/r9700-terminal-base-phase-sum-20260921`: its reporting-only bridge is frozen
+and independently validated; `commands.sh whole` is active. After it completes, run
+`commands.sh controls` and `commands.sh select` in that order. Do not rerun freeze or whole.
 Keep the existing24 phase/whole objective policy. Do not rerun completed chunk, quality,
 capacity, resource qualification, host checks or the timing-ineligible reporting smoke. Finish graph/eager controls,
 publish base selection, and
