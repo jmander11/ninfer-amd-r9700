@@ -100,6 +100,27 @@ def cache_value(cache: Path, name: str) -> str:
     return rows[0].split("=", 1)[1]
 
 
+def validate_build_profile(cmake_cache: Path, group: int, sparse: bool) -> None:
+    expected_cache = {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_GENERATOR": "Ninja",
+        "NINFER_R9700_KV_VALUE_GROUP": str(group),
+        "NINFER_R9700_Q4_ACTIVATION_BITS": "8",
+        "NINFER_R9700_W8_ACTIVATION_BITS": "8",
+        "NINFER_R9700_FP8_QK_WMMA": "1",
+        "NINFER_R9700_XATTENTION_QUALIFICATION": "ON" if sparse else "OFF",
+    }
+    # Sparse-only parameters do not describe the compiled dense execution route.
+    if sparse:
+        expected_cache.update({
+            "NINFER_R9700_XATTENTION_STRIDE": "16",
+            "NINFER_R9700_XATTENTION_TAU_PERMILLE": "900",
+        })
+    for name, expected in expected_cache.items():
+        if cache_value(cmake_cache, name) != expected:
+            raise ValueError(f"selected build {name} differs from terminal execution profile")
+
+
 def resolve(selection_path: Path, test_python: Path | None = None) -> dict:
     test_python_identity = inspect_test_python(test_python) if test_python is not None else None
     selection_path = selection_path.resolve(strict=True)
@@ -195,20 +216,7 @@ def resolve(selection_path: Path, test_python: Path | None = None) -> dict:
     if not cmake_cache.is_file() or not ctest_file.is_file():
         raise ValueError("selected benchmark build lacks CMake/CTest identity")
     sparse = execution["xattention_profile"] == "b128-s16-tau900"
-    expected_cache = {
-        "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_GENERATOR": "Ninja",
-        "NINFER_R9700_KV_VALUE_GROUP": str(cache_profile["value_group"]),
-        "NINFER_R9700_Q4_ACTIVATION_BITS": "8",
-        "NINFER_R9700_W8_ACTIVATION_BITS": "8",
-        "NINFER_R9700_FP8_QK_WMMA": "1",
-        "NINFER_R9700_XATTENTION_QUALIFICATION": "ON" if sparse else "OFF",
-        "NINFER_R9700_XATTENTION_STRIDE": "16",
-        "NINFER_R9700_XATTENTION_TAU_PERMILLE": "900",
-    }
-    for name, expected in expected_cache.items():
-        if cache_value(cmake_cache, name) != expected:
-            raise ValueError(f"selected build {name} differs from terminal execution profile")
+    validate_build_profile(cmake_cache, cache_profile["value_group"], sparse)
     if file_sha256(selection_path) != selection_sha:
         raise ValueError("terminal selection changed while resolving verification route")
     if any(file_sha256(path) != digest for path, digest in bound_paths):

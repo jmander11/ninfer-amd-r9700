@@ -10,6 +10,7 @@ import importlib.util
 import json
 import os
 import shlex
+import sys
 import tempfile
 from pathlib import Path
 
@@ -107,6 +108,7 @@ def prepare(selection: Path, output: Path) -> dict:
             f"readonly root={shlex.quote(str(output))}\n"
             f"readonly serve={shlex.quote(str(serve))}\n"
             f"readonly artifact={shlex.quote(str(artifact))}\n"
+            f"readonly python={shlex.quote(sys.executable)}\n"
             'cd "' + str(REPO) + '"\n'
             'sha256sum --check --strict "$root/prepared.sha256"\n'
             'for path in "$root/server.requests.jsonl" "$root/server.stdout.log" '
@@ -122,7 +124,7 @@ def prepare(selection: Path, output: Path) -> dict:
             'readonly server_pid=$!\n'
             'cleanup() { kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true; }\n'
             'trap cleanup EXIT\n'
-            "NINFER_SERVER_PID=\"$server_pid\" python3 - <<'PY'\n"
+            "NINFER_SERVER_PID=\"$server_pid\" \"$python\" - <<'PY'\n"
             "import json, os, time, urllib.request\n"
             "pid = int(os.environ['NINFER_SERVER_PID'])\n"
             "deadline = time.monotonic() + 300\n"
@@ -142,14 +144,14 @@ def prepare(selection: Path, output: Path) -> dict:
             "else:\n"
             "    raise SystemExit(f'server health timeout: {last}')\n"
             "PY\n"
-            "python3 -m tools.bench.run_niah_check --base http://127.0.0.1:18081 "
+            "\"$python\" -m tools.bench.run_niah_check --base http://127.0.0.1:18081 "
             "--model qwen3.8-27b --key local-niah-gate --lengths 64k "
             "--positions start,q25,mid,q75,end --runs 1 --max-tokens 64 --exact-answer "
             '--server-log "$root/server.requests.jsonl" --artifact "$artifact" '
             f"--serve-bin \"$serve\" --selection {shlex.quote(str(selection))} "
             '--out "$root/niah.evidence.json"\n'
             'cleanup\ntrap - EXIT\n'
-            "python3 -m tools.bench.validate_selected_niah --plan \"$root/plan.json\" "
+            "\"$python\" -m tools.bench.validate_selected_niah --plan \"$root/plan.json\" "
             '--root "$root" --out "$root/admission.json"\n',
             encoding="utf-8",
         )

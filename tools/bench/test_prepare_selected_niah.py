@@ -76,8 +76,9 @@ def test_generated_commands_use_importable_repo_modules() -> None:
              mock.patch.object(preparer, "resolve_fixture", return_value=fixture):
             prepare(selection, output)
         commands = (output / "commands.sh").read_text(encoding="utf-8")
-        assert "python3 -m tools.bench.run_niah_check" in commands
-        assert "python3 -m tools.bench.validate_selected_niah" in commands
+        assert f"readonly python={sys.executable}" in commands
+        assert '"$python" -m tools.bench.run_niah_check' in commands
+        assert '"$python" -m tools.bench.validate_selected_niah' in commands
         assert "python3 /" not in commands
 
 

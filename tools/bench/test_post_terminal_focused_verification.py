@@ -21,6 +21,37 @@ def test_hybrid_identity_is_the_registered_n16_artifact() -> None:
     assert not MODULE.is_hybrid_weights("r9700-q4g64-f8e4m3-four-role-eval")
 
 
+def test_selected_dense_build_ignores_inactive_sparse_parameters(tmp_path: Path) -> None:
+    cache = tmp_path / "CMakeCache.txt"
+    settings = {
+        "CMAKE_BUILD_TYPE": "Release", "CMAKE_GENERATOR": "Ninja",
+        "NINFER_R9700_KV_VALUE_GROUP": "16",
+        "NINFER_R9700_Q4_ACTIVATION_BITS": "8",
+        "NINFER_R9700_W8_ACTIVATION_BITS": "8",
+        "NINFER_R9700_FP8_QK_WMMA": "1",
+        "NINFER_R9700_XATTENTION_QUALIFICATION": "OFF",
+        "NINFER_R9700_XATTENTION_STRIDE": "16",
+        "NINFER_R9700_XATTENTION_TAU_PERMILLE": "1000",
+    }
+
+    def write():
+        cache.write_text("".join(f"{key}:STRING={value}\n" for key, value in settings.items()))
+
+    write()
+    MODULE.validate_build_profile(cache, 16, False)
+    settings["NINFER_R9700_XATTENTION_QUALIFICATION"] = "ON"
+    write()
+    with pytest.raises(ValueError, match="TAU_PERMILLE"):
+        MODULE.validate_build_profile(cache, 16, True)
+    settings["NINFER_R9700_XATTENTION_TAU_PERMILLE"] = "900"
+    write()
+    MODULE.validate_build_profile(cache, 16, True)
+    settings["NINFER_R9700_XATTENTION_STRIDE"] = "8"
+    write()
+    with pytest.raises(ValueError, match="STRIDE"):
+        MODULE.validate_build_profile(cache, 16, True)
+
+
 def test_interpreter_identity_preserves_explicit_launcher() -> None:
     launcher = Path(sys.executable)
 

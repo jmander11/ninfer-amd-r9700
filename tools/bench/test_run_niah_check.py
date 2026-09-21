@@ -39,6 +39,11 @@ class NiahEvidenceTest(unittest.TestCase):
         return value
 
     def setUp(self) -> None:
+        # Numerical sidecar replay has independent integration coverage; retain
+        # actual classification and all server/NIAH route checks in this fixture.
+        numerical = mock.patch("tools.ppl.pareto._revalidate_numerical_quality")
+        numerical.start()
+        self.addCleanup(numerical.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         self.artifact = self.root / "model.ninfer"
@@ -72,6 +77,8 @@ class NiahEvidenceTest(unittest.TestCase):
                 selected = group == 16 and profile == "dense"
                 candidates.append({
                     "name": name,
+                    "whole_inference_profile": "spec-none-ordinary",
+                    "base_capacity_profile": "spec-none-ordinary",
                     "prefill_chunk": 4096,
                     "cache_profile": {**cache, "value_group": group},
                     "execution_profile": {**execution, "xattention_profile": profile},
@@ -95,10 +102,17 @@ class NiahEvidenceTest(unittest.TestCase):
                     "matrices": {"pareto-capacity": {}, "pareto-whole": {}},
                     "capacity_failures": [],
                 })
+        for row in candidates:
+            row["quality_cells"] = {label: dict(row["quality"]) for label in ("8k", "32k")}
+            row["capacity_by_cell"] = {f"c{c}": dict(row["capacity"]) for c in (1, 2, 3, 4)}
         source = {
             "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
             "required_speed_workloads": ["whole_8k_c1"],
             "require_single_static_profile_selection": True,
+            "base_ranking_profile": "spec-none-ordinary",
+            "base_capacity_profile": "spec-none-ordinary",
+            "required_quality_cells": ["8k", "32k"],
+            "required_capacity_cells": ["c1", "c2", "c3", "c4"],
             "selected_prefill_chunk": 4096,
             "prefill_chunk_selection": CHUNK_SELECTION,
             "candidates": candidates, "source_provenance": provenance,
@@ -148,6 +162,10 @@ class NiahEvidenceTest(unittest.TestCase):
             "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
             "required_speed_workloads": ["whole_8k_c1"],
             "require_single_static_profile_selection": True,
+            "base_ranking_profile": "spec-none-ordinary",
+            "base_capacity_profile": "spec-none-ordinary",
+            "required_quality_cells": ["8k", "32k"],
+            "required_capacity_cells": ["c1", "c2", "c3", "c4"],
             "selected_prefill_chunk": 4096,
             "prefill_chunk_selection": CHUNK_SELECTION,
             "candidates": candidates, "source_provenance": self.candidate_provenance,
@@ -250,6 +268,10 @@ class NiahEvidenceTest(unittest.TestCase):
             "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
             "required_speed_workloads": ["whole_8k_c1"],
             "require_single_static_profile_selection": True,
+            "base_ranking_profile": "spec-none-ordinary",
+            "base_capacity_profile": "spec-none-ordinary",
+            "required_quality_cells": ["8k", "32k"],
+            "required_capacity_cells": ["c1", "c2", "c3", "c4"],
             "selected_prefill_chunk": 2048,
             "prefill_chunk_selection": {
                 **CHUNK_SELECTION, "selected_prefill_chunk": 2048,
