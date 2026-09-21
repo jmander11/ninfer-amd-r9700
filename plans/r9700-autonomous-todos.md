@@ -142,7 +142,7 @@ finish. The deterministic queue after reset is:
 
 Do not promote or remove any candidate selector before queue item 1 completes because doing so
 invalidates its cache and source authorities. The exact next action is
-`bash profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919/commands.sh --prepare`.
+`bash profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919/commands.sh --measure`.
 Every other remaining unchecked task depends
 directly or transitively on this queue or the external `DENSE-FLOOR-DECISION`.
 
@@ -396,7 +396,8 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   `profiles/bench/r9700-paired-projection-c2c4-whole-ab-20260919`; no separate review artifact was
   created. The reset, GDN gate, and T1 attention campaign are complete. A reviewed lexical PCI
   power-path repair removed a false symlink-resolution rejection; do not prepare the whole package
-  before its direct receipt exists.
+  before its direct receipt exists. The whole package is now prepared; two independent reviews
+  reported `SHIP`, its non-GPU preflight passes, and its results path is fresh.
 
   After the admitted paired routes are resolved, the reviewed-ready direct package
   `profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919` is the next bounded mechanism:
