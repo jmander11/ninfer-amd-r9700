@@ -108,6 +108,9 @@ class PrepareSelectedExactTokenTest(unittest.TestCase):
             self.assertEqual(plan["python"]["launcher_path"],
                              "/ssdpool2nvme/local_llm/.venv-ninfer-r9700-py311/bin/python")
             self.assertIn("export LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/core-10.0/lib", commands)
+            self.assertIn("unset PYTHONPATH PYTHONHOME", commands)
+            self.assertLess(commands.index("unset PYTHONPATH PYTHONHOME"),
+                            commands.index(plan["python"]["launcher_path"]))
             self.assertIn("/sys/bus/pci/devices/0000:13:00.0/", commands)
             self.assertNotIn(str(REPO / "tools/ppl/validate_selected_exact_token.py"), commands)
 

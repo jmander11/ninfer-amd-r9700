@@ -184,6 +184,7 @@ def prepare(selection: Path, output: Path) -> dict:
             f"readonly root={shlex.quote(str(output))}\n"
             f"readonly power={shlex.quote(str(POWER))}\n"
             f"cd {shlex.quote(str(REPO))}\n"
+            "unset PYTHONPATH PYTHONHOME\n"
             "export LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/core-10.0/lib\n"
             'sha256sum --check --strict "$root/prepared.sha256"\n'
             'test "$(cat "$power")" = auto\n'
