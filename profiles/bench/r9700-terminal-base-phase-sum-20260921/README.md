@@ -38,3 +38,8 @@ First completed whole cell: all-Q4 dense/G16 C1, one warmup and three repetition
 means are1196.781277/29.18881888 tok/s at8K and401.3593254/23.33524809 tok/s at32K. Every public
 token in all repetitions matches the stopped attempt's valid C1 report exactly. The native report
 is under `whole/all_q4_dense-g16/json/pareto_whole_inference/c1/`; this is not terminal selection.
+
+C2 also completed native validation: aggregate prefill/decode means are1185.423540/34.59952286
+tok/s at8K and402.463434/27.28872475 tok/s at32K. All repetitions and both lanes preserve
+the stopped attempt's public tokens exactly. This confirms corrected concurrent service-sum
+reporting; old schema20 C2 prefill throughput is not an admissible comparison metric.
