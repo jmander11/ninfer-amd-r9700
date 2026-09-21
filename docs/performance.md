@@ -97,7 +97,33 @@ Representative matched C1/G16/chunk2048 prefill rates (tok/s):
 
 XAttention is slower here at 8K but faster at 32K; these timing results do not admit its numerical
 quality or select a production recipe/group. No decode rounds or draft head execute in these
-measurements. Fresh BF16 references at chunk2048 are required before the terminal quality gate.
+measurements. Fresh BF16 references and the six matched quality campaigns have now completed
+at chunk2048; their results follow.
+
+### Selected-chunk numerical quality (2026-09-21)
+
+The independent BF16 source run and repeat match exactly in NLL/token sidecars at both lengths.
+BF16 PPL is `6.463887635` at8K and `5.632510588` at32K, scoring4095 and16383 positions.
+The same Python3.11/ROCm reference environment first passed the sampled FP64 full-span GDN
+oracle at4095/4096 rows. The selected artifacts and frozen dense/sparse G16/G32 scorers then
+completed all24 candidate cells against that reference.
+
+| Recipe/profile | Assigned tier | G16 | G32 |
+| --- | --- | --- | --- |
+| All-Q4 dense | capacity-speed | pass | pass |
+| All-Q4 XAttention | capacity-speed | pass | pass |
+| Mixed Q4/W8 dense | accuracy | pass | pass |
+| Mixed Q4/W8 XAttention | accuracy | fail at32K | fail at32K |
+| Four-role FP8/Q4 dense | capacity-speed | pass | pass |
+| Four-role FP8/Q4 XAttention | capacity-speed | pass | pass |
+
+Mixed XAttention passes the mean-NLL limit but introduces19/18 new severe positions at32K,
+above its accuracy budget17. These are genuine measured exclusions, not missing evidence.
+Its passing dense controls remain eligible. No threshold or recipe tier is changed, and
+BF16 greedy-token differences remain diagnostic rather than an exact-quantized-model gate.
+Ten profiles proceed to capacity/whole eligibility; this is not final production selection.
+Evidence: `profiles/ppl/r9700-terminal-quality-receipt-bound-n16k16-20260921`, including the
+retained failed mixed-XAttention report and all aligned sidecars.
 
 ### Retained cache and attention evidence
 
