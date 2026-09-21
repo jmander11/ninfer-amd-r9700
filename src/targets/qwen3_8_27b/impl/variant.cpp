@@ -565,7 +565,6 @@ bool Variant::ExecutionState::projected_residual_t1(
         weight.n == kRows && (weight.k == TextConfig::query_size ||
                               weight.k == TextConfig::intermediate);
     if (impl_ == nullptr || !exact_shape || !projected_residual_t1_selected(
-            ops::r9700::linear::kProjectedResidualT1CandidateEnabled,
             ops::r9700::linear::kQ4ActivationBits,
             impl_->projected_residual_inventory_q4, phase, base_text, 1U,
             static_cast<std::uint32_t>(weight.n),

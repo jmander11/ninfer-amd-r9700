@@ -1364,6 +1364,21 @@ and `1.0000448`. Evidence is
 `profiles/bench/r9700-three-route-production-confirmation-20260920/results`; the SHA-256 of its
 `result.sha256` closure is `9be2f67ff0f74f92e509bbfa6bb0909e7feb5e38993aed184d71ce1cd7033148`.
 
+The subsequent projected-residual fusion passed the reviewed C1/P8192+G256 ordinary Device Graph
+A/B under `auto`, using the same Q4G64 artifact and fixed cache. In balanced execution order,
+control/candidate/candidate/control/control/candidate decode rates were `28.3689630`,
+`29.0009861`, `29.0069622`, `28.3912167`, `28.3819193`, and `28.9849878 tok/s`. Every process
+preserved the retained 257 public token IDs. The paired candidate/control decode-time ratios were
+`0.9782068408`, `0.9787724938`, and `0.9791937627`, with mean `0.9787243658`, upper two-standard-error
+bound `0.9792961944`, and median `0.9787724938`. Evidence is
+`profiles/bench/r9700-projected-residual-t1-whole-ab-20260920/attempt-1`; its `result.sha256`
+digest is `e7337ec8e9bc19d8519f52f06ffcb50359270fa47a4416ff859a4aee8afa9b79`.
+The independent result audit admits promotion review only for all-Q4/A8 base Text T1 at
+N5120/K6144 or K17408; mixed inventory, MTP, prefill, T>1, and A4 retain the incumbent composition.
+Selector-free implementation review, fresh linked public-Op qualification, and C1 production
+confirmation remain before promotion closure. This measured decode gain does not establish
+physical memory-bandwidth saturation or stall freedom.
+
 The existing MTP shortlist head remains Q4G64 with A8G64 activations. MTP stays in exact-output,
 state, cache, row-view, and whole-route regression coverage, but a new shortlist-head trace,
 alternate head precision, acceptance campaign, or MTP performance optimization is not a final

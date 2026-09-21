@@ -44,21 +44,6 @@ endif()
 add_compile_definitions(
   NINFER_R9700_Q4_ACTIVATION_BITS=${NINFER_R9700_Q4_ACTIVATION_BITS})
 
-# Qualification-only matched whole-decode selector for the exact A8/Q4 T=1
-# Linear-plus-residual boundary. Zero retains the two-kernel composition; one admits only the
-# qualified N5120/K6144 and N5120/K17408 shapes in an all-Q4 Text residual inventory.
-set(NINFER_R9700_PROJECTED_RESIDUAL_T1_CANDIDATE "0" CACHE STRING
-  "Enable the exact qualified R9700 projected-residual T1 candidate")
-set_property(CACHE NINFER_R9700_PROJECTED_RESIDUAL_T1_CANDIDATE PROPERTY STRINGS 0 1)
-if(NOT NINFER_R9700_PROJECTED_RESIDUAL_T1_CANDIDATE STREQUAL "0" AND
-   NOT NINFER_R9700_PROJECTED_RESIDUAL_T1_CANDIDATE STREQUAL "1")
-  message(FATAL_ERROR
-    "NINFER_R9700_PROJECTED_RESIDUAL_T1_CANDIDATE must be 0 or 1; got "
-    "'${NINFER_R9700_PROJECTED_RESIDUAL_T1_CANDIDATE}'")
-endif()
-add_compile_definitions(
-  NINFER_R9700_PROJECTED_RESIDUAL_T1_CANDIDATE=${NINFER_R9700_PROJECTED_RESIDUAL_T1_CANDIDATE})
-
 # Qualification-only matched whole-DFlash A/B selector. Zero is the ordinary WMMA control; one
 # admits only the exact small-token N34816/K5120 cells selected by the two retained direct screens.
 # This is a separately compiled candidate profile, not a runtime, CLI, or artifact selector.

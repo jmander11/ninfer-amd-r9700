@@ -78,11 +78,11 @@ struct Variant {
             const Tensor& input, const Weight& weight, Tensor& residual,
             qwen3::TextPhase phase, bool base_text, hipStream_t stream);
         [[nodiscard]] static constexpr bool projected_residual_t1_selected(
-            bool candidate_enabled, std::uint32_t activation_bits,
+            std::uint32_t activation_bits,
             bool all_q4_residual_inventory, qwen3::TextPhase phase, bool base_text,
             std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns,
             QType weight) noexcept {
-            return candidate_enabled && activation_bits == 8U &&
+            return activation_bits == 8U &&
                    all_q4_residual_inventory && phase == qwen3::TextPhase::Verify &&
                    base_text && tokens == 1U && rows == TextConfig::hidden &&
                    (columns == TextConfig::query_size ||

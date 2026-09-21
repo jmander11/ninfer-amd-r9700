@@ -145,19 +145,20 @@ sealed diagnostic attempt. Retry2 passed strict JSON, complete numerical qualifi
 checks, and the direct timing bound. The integrated public Op now also passes production-symbol
 qualification in the sealed production retry2 attempt. Preserve every prior attempt, including
 the production failures caused by unstable DRM card numbering and incomplete public malformed-input
-validation. The primary-agent result audit, package preparation, sealed-plan review, and package
-preflight now pass. The sealed whole plan SHA-256 is
-`4065a51c43c94c042973c8653bd9d0ea39c3ebe34db3e4ca634946f851f92fb0`; its create-only
-`attempt-1` is absent. The next command runs the reviewed whole C1 A/B. Exact tokens and whole
-performance remain required before promotion.
+validation. The reviewed whole C1 A/B now passes, and its independent result audit admits the
+exact all-Q4/A8 base Text T1 projected-residual route for promotion review. All six runs preserve
+the retained 257 public tokens; candidate decode is about `29.00 tok/s`, with median paired
+decode-time ratio `0.9787725`. Preserve its sealed `attempt-1`; never rerun it. Selector removal,
+implementation review, fresh linked public-Op qualification, and selector-free C1 production
+confirmation remain before this promotion is closed.
 
-```sh
-bash profiles/bench/r9700-projected-residual-t1-whole-ab-20260920/commands.sh --measure
-```
+No GPU action is currently runnable. Prepare and review the selector-free qualification and C1 confirmation packages after implementation review; do not rerun sealed attempts.
 
 The deterministic queue after reset is:
 
-1. run the reviewed sealed whole C1 A/B at `profiles/bench/r9700-projected-residual-t1-whole-ab-20260920`, bound to the passing production qualification at `profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry2-20260920/attempt-1`; require exact public-token parity and every whole-performance admission gate before promotion review.
+1. complete and independently review selector-free promotion of the exact all-Q4/A8 base Text T1 projected-residual route admitted by `profiles/bench/r9700-projected-residual-t1-whole-ab-20260920/attempt-1`; preserve mixed inventory, MTP, prefill, T>1, and A4 exclusions.
+2. prepare and review fresh linked public-Op qualification and selector-free C1 production confirmation packages, binding the passing numerical authority at `profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry2-20260920/attempt-1`; require direct oracle/graph qualification and retained exact public tokens with reproduced whole performance before closing promotion.
+3. after projected-residual closure, screen T1 RMSNorm+A8G64 preparation fusion at the 64 MLP normalized-linear boundaries, requiring an independent public-Op oracle, native-dot8 static evidence, and complete-boundary graph timing with at least `0.2 ms/token` weighted saving before whole C1 A/B preparation; the 128-boundary opportunity is a hypothesis, not a measured gain.
 
 Every other remaining unchecked task depends directly or transitively on this queue or the
 external `DENSE-FLOOR-DECISION`.
@@ -440,8 +441,13 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   boundaries with distinct actual packed weights, an independent represented-weight FP64 oracle,
   exact residual bits, three-copy balanced cold timing, and exact-symbol native-IU4 static evidence.
   Require `64*(saving_N5120K6144+saving_N5120K17408) >= 0.2 ms/token` before whole C1 A/B; keep
-  mixed weights and T>1 on the current path. If admitted, the next ranked mechanism is T1
-  RMSNorm+A8G64 preparation fusion. Do not reopen geometry remapping or split-K; an explicit
+  mixed weights and T>1 on the current path. After projected-residual closure, the next ranked
+  mechanism is T1 RMSNorm+A8G64 preparation fusion. Layer 0 identifies 128 potential normalization
+  boundaries/token; start with the 64 MLP boundaries through a public normalized-linear Op and
+  the admitted native-dot8 consumer. Screen the complete boundary under Device Graph against an
+  independent oracle and require at least `0.2 ms/token` weighted direct saving before preparing
+  a whole C1 A/B. Neither the 128-boundary count nor eliminated staging proves a speed gain.
+  Do not reopen geometry remapping or split-K; an explicit
   gate-up prefetch challenger is later work only if ISA proves early loads and wait scheduling.
   The first reviewed package,
   `profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919`, passed compile/static preflight
@@ -494,10 +500,21 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   `profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry2-20260920/attempt-1`;
   `result.sha256` SHA-256 is `206b15a42c9e1cb7df2150d834659b8ed3d167dd643fc74a771213a83b787e6d`,
   and `closure.json` SHA-256 is `9fbab6cfe0332847fcbd52f15c24dc95d80cc543349daaec67ed3be496533e03`.
-  This authorizes only the matched whole C1 A/B after primary-agent result audit and sealed-plan
-  review; production routing remains unauthorized. The whole package requires three adjacent
-  balanced pairs, exact retained public tokens, every decode-time ratio below one,
-  mean plus two standard errors below one, and median at most `0.99`.
+  The subsequent reviewed whole C1/P8192+G256 A/B at `auto` passed all three adjacent balanced
+  pairs with ordinary Device Graph and the fixed FP8-K/INT4-V cache. In execution order,
+  control/candidate/candidate/control/control/candidate rates were `28.3689630`, `29.0009861`,
+  `29.0069622`, `28.3912167`, `28.3819193`, and `28.9849878 tok/s`. All six retained 257-token
+  vectors matched both their pair and the selector-free C1 authority. Candidate/control decode-time
+  ratios were `0.9782068408`, `0.9787724938`, and `0.9791937627`; their mean was `0.9787243658`,
+  mean plus two standard errors `0.9792961944`, and median `0.9787724938`, passing the unchanged
+  every-pair/upper-bound `<1` and median `<=0.99` gates. Evidence:
+  `profiles/bench/r9700-projected-residual-t1-whole-ab-20260920/attempt-1`; `result.sha256` SHA-256
+  is `e7337ec8e9bc19d8519f52f06ffcb50359270fa47a4416ff859a4aee8afa9b79`.
+  The independent result audit admits promotion review for exactly all-Q4/A8 base Text T1,
+  N5120/K6144 or K17408. Mixed inventory, MTP, prefill, T>1, and A4 remain excluded. Complete
+  selector removal and implementation review, then fresh linked public-Op qualification and
+  selector-free C1 confirmation before closing promotion. This whole speed gain establishes
+  neither physical memory-bandwidth saturation nor stall freedom.
 
 ## Active now: DFlash semantic and schedule work
 

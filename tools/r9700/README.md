@@ -1068,7 +1068,26 @@ and measured aggregate decode rates of `28.3855`, `34.8110`, `46.8271`, and `54.
 C1 through C4. Its closure digest is
 `9be2f67ff0f74f92e509bbfa6bb0909e7feb5e38993aed184d71ce1cd7033148`.
 
-A direct GPU regression of the canonical route against its independent FP64 oracle, including
+`ninfer_r9700_a8q4_projected_residual_t1_qual` qualifies the public
+`ops::projected_residual_t1` boundary and its public A8G64 workspace-capacity query at
+N5120/K6144 and N5120/K17408. It checks represented-weight FP64 numerics, the observable BF16
+projection boundary and complete residual bits, malformed bindings, poisoning, canaries, and
+three captured graph replays per shape. The retained production qualification is
+`profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry2-20260920/attempt-1`;
+its balanced direct saving was `0.8818557 ms/token`, and the linked gfx1201 kernel used native
+IU4/wave32 with zero LDS/scratch/spills.
+The subsequent whole C1/P8192+G256 gate passed exact retained public tokens and all timing gates,
+with candidate rates `29.0009861`, `29.0069622`, and `28.9849878 tok/s`, median paired decode-time
+ratio `0.9787724938`, and upper-two-standard-error bound `0.9792961944`. Its sealed evidence is
+`profiles/bench/r9700-projected-residual-t1-whole-ab-20260920/attempt-1`, closure digest
+`e7337ec8e9bc19d8519f52f06ffcb50359270fa47a4416ff859a4aee8afa9b79`. The independent result audit
+admits promotion review only for all-Q4/A8 base Text T1 residual projections; MTP, mixed inventory,
+prefill, T>1, and A4 are excluded. Selector-free implementation review, fresh linked public-Op
+qualification, and C1 production confirmation remain. Do not rerun these sealed packages;
+the live ledger owns the next reviewed invocation. These timings do not prove physical bandwidth
+saturation or stall freedom.
+
+A direct GPU regression of the canonical K5120 RMSNorm route against its independent FP64 oracle, including
 output guards and Device Graph replay, is available with:
 
 ```bash
