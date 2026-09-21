@@ -1005,6 +1005,11 @@ unresolved tradeoff or the product contract must change.
   Final cutover rejects superseded schema3 and evaluation-only schema4: separately qualify one
   resident companion and its supported capacity before final admission. Base PPL owns target NLL;
   DFlash evaluation owns acceptance/generated output. Never add companions to base Pareto candidates.
+  The explicit single-resident `admit`/`validate-admission` workflow is now implemented and reviewed
+  (`a9111d2e`): one recipe/K/W must qualify acrossC1..4; per-C frontier winners cannot be mixed.
+  Final cutover recomputes the distinct resident authority, while schema4 remains evaluation-only.
+  A recipe-capable selected-base benchmark may also evaluate companions (`5133c7b6`); different
+  executable hashes are not a capability requirement. Exact recipe/identity/parity gates remain.
   W8 feature/QKV/output/conv/selector shapes currently use existing BF16×W8 execution, not
   unqualified A8 routes. Qualify exact DFlash shapes and widths before any speed/accuracy claim.
   The reviewed numerical-only package `profiles/bench/r9700-dflash-companion-ops-20260921`
@@ -1084,6 +1089,12 @@ prefill review, preserving their remaining data dependencies.
 - [ ] `XATT-KEEP-DIST` [depends: CHUNK-SELECT] Validate the redesigned sparse consumer on real
   8K/32K model keep distributions and rerun affected whole evidence. Synthetic concentration and
   standalone operator fixtures cannot replace this route-level evidence.
+  Real-model distribution evidence now PASS, independent review SHIP:
+  `profiles/bench/r9700-xattention-real-keep-distribution-20260921`. All8 eligible sparse
+  recipe/group/length cases cover1,280 dispatches and491,520 head/query-block slots. Mean keep
+  fractions are about60.8%/51.4% for all-Q4 and59.3%/49.9% for four-role at8K/32K.
+  These traced runs are timing-ineligible; do not rerun them. Only affected uninstrumented whole
+  evidence remains for this item; the recovery whole campaign is now active.
 
 - [ ] `Q4-CTA-TERMINAL` [depends: CHUNK-SELECT] Retain rebuilt selected-route attribution and whole
   evidence for the promoted production-extent A8Q4 prefill CTA; historical direct screens do not

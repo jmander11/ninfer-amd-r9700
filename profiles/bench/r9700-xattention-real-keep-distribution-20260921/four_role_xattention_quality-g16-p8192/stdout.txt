@@ -1,0 +1,1 @@
+wrote /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-xattention-real-keep-distribution-20260921/four_role_xattention_quality-g16-p8192/benchmark-diagnostic.json

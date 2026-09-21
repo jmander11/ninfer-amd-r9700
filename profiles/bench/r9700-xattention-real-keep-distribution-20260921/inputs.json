@@ -1,0 +1,91 @@
+{
+  "bindings": [
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/prefill-chunk-selection-panel-attention-20260921.json",
+      "sha256": "3e762ec81d5e740946b61132ea040404e13100a6d2b6449bd2e38ce1b61fabe7"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/ppl/r9700-terminal-quality-receipt-bound-n16k16-20260921/quality-authorities-receipt-bound-n16k16.json",
+      "sha256": "adc839c5c30ae95b2933eeb37f7df3808baf0ce7fe8594d79d3b3a7c6c1d4c42"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids",
+      "sha256": "27e4f63c17efe3f89b5cf278b3b1a42a737316ed4044d7d0d1d52437059d1002"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/targets/qwen3_8_27b/impl/r9700_full_attention.hip",
+      "sha256": "b8e1b5894c0589b83f06953bc30c8baac9f5b92a414873ee31362ae15817bdad"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/targets/qwen3_8_27b/impl/xattention_keep_trace.h",
+      "sha256": "90126a1158f860b5b8a8438a36daa15fdd93563a2394a4ed4d5a73c974fbbdd7"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-xattention-keep-diagnostic-g16-20260921/bench/ninfer_bench",
+      "sha256": "e69d8c03ce6a44c40c3a753af77a26f150125882cdbeac78505d0708d38754a0"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-xattention-keep-diagnostic-g32-20260921/bench/ninfer_bench",
+      "sha256": "26ea319468e1b55ecd207b4f94587a3b6e7cc2ec1c3f1f0de971d518a8e298f5"
+    }
+  ],
+  "cases": [
+    {
+      "name": "all_q4_xattention_quality-g16-p8192",
+      "group": 16,
+      "prompt": 8192,
+      "artifact": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer",
+      "executable": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-xattention-keep-diagnostic-g16-20260921/bench/ninfer_bench"
+    },
+    {
+      "name": "all_q4_xattention_quality-g16-p32768",
+      "group": 16,
+      "prompt": 32768,
+      "artifact": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer",
+      "executable": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-xattention-keep-diagnostic-g16-20260921/bench/ninfer_bench"
+    },
+    {
+      "name": "all_q4_xattention_quality-g32-p8192",
+      "group": 32,
+      "prompt": 8192,
+      "artifact": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer",
+      "executable": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-xattention-keep-diagnostic-g32-20260921/bench/ninfer_bench"
+    },
+    {
+      "name": "all_q4_xattention_quality-g32-p32768",
+      "group": 32,
+      "prompt": 32768,
+      "artifact": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer",
+      "executable": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-xattention-keep-diagnostic-g32-20260921/bench/ninfer_bench"
+    },
+    {
+      "name": "four_role_xattention_quality-g16-p8192",
+      "group": 16,
+      "prompt": 8192,
+      "artifact": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer",
+      "executable": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-xattention-keep-diagnostic-g16-20260921/bench/ninfer_bench"
+    },
+    {
+      "name": "four_role_xattention_quality-g16-p32768",
+      "group": 16,
+      "prompt": 32768,
+      "artifact": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer",
+      "executable": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-xattention-keep-diagnostic-g16-20260921/bench/ninfer_bench"
+    },
+    {
+      "name": "four_role_xattention_quality-g32-p8192",
+      "group": 32,
+      "prompt": 8192,
+      "artifact": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer",
+      "executable": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-xattention-keep-diagnostic-g32-20260921/bench/ninfer_bench"
+    },
+    {
+      "name": "four_role_xattention_quality-g32-p32768",
+      "group": 32,
+      "prompt": 32768,
+      "artifact": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer",
+      "executable": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-xattention-keep-diagnostic-g32-20260921/bench/ninfer_bench"
+    }
+  ],
+  "timing_eligible": false
+}
