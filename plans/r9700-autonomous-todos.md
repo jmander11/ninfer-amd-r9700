@@ -795,6 +795,55 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   order. Reopen only after a Layer-0 bound includes the full integer-dot workspace traffic and
   serial reduction and still proves a material whole-round ceiling.
 
+- [x] `DFLASH-DOWN-SCALE-GATHER` Qualify one recipe-independent exact-order T5/T6 verify-down
+  challenger for BF16 `[T,17408]` -> fresh A8G64 -> Q4N16K16/G64 `[5120,17408]` -> BF16
+  `[T,5120]`. The incumbent gfx1201 schedule executes five/six separately masked activation-scale
+  loads followed by `s_wait_loadcnt 0` for every G64 group. Load one scale per participating token
+  lane and distribute it with full-wave shuffles, removing four/five serialized load phases while
+  preserving every native-IU4 integer dot, FP16 conversion and scale product, the serial 272-group
+  FP32 `fmaf` order for each output, and final BF16 rounding. Token scales are 544 bytes apart, so
+  this is issue/dependency-wait consolidation, not contiguous coalescing or reduced weight traffic.
+  Static ISA/resource inspection must prove the gather/broadcast schedule before physical timing.
+  Then require a decoded signed-Q4 FP64 oracle on dense varied inputs, exact A8 codec/status and
+  exact incumbent BF16 outputs, guards/immutability and malformed rejection, captured
+  poison/stale/finite recovery, explicit stream ordering, and balanced cold complete-boundary T5/T6
+  timing across three allocations. Retained direct down medians are `0.205429/0.215447 ms`; a 1%
+  whole-round improvement needs about `0.01425/0.01453 ms` saved per call across 64 layers. This is
+  credible experiment headroom, not a guaranteed bound or current ownership attribution. Only a
+  material direct winner advances to ordinary/K4W5/K5W6 exact public-token parity and matched
+  Device-Graph whole A/B. Do not alter production routing or reopen split-K.
+
+  This mechanism cannot establish the user's `>=60 decode-output tok/s` target by itself. Retained
+  valid controls are about `16.16/16.35 tok/s` with `1.488/1.524` output tokens per roughly
+  `91.19/92.98 ms` round; making every down GEMM free predicts only about `19.07/19.24 tok/s` at
+  unchanged acceptance. Final companion recipe/quality work must materially improve acceptance;
+  at retained round time, even perfect K4/W5 acceptance is only about `54.3 tok/s`, whereas K5/W6
+  can theoretically exceed 60. Recipe-independent kernel work remains useful but must not be
+  represented as sufficient for the terminal target.
+
+  CLOSED DIRECT GATE 2026-09-21. The independently reviewed complete-boundary qualification at
+  `profiles/bench/r9700-dflash-down-scale-gather-qualification-20260921/attempt-1` passed both
+  widths with exact incumbent BF16 and codec results. T5 measured `0.32185949→0.23085950 ms`,
+  robust ratio upper `0.72017304`, and conservative 64-call round-saving lower `5.76329845 ms`;
+  T6 measured `0.33231950→0.23130000 ms`, ratio upper `0.69679859`, and lower saving
+  `6.44497011 ms`. All 48 pairs and every allocation/order subgroup won. FP64 relative errors were
+  `0.00171474/0.00166648`; graph recovery, guards, immutability, five finite cases, and 19 malformed
+  cases passed. The colder complete boundary includes fresh codec preparation, unlike the older
+  warm prepared-activation kernel medians, so their absolute latencies are not cross-compared.
+  Result-manifest SHA-256 is
+  `172bc3e277821cb3f2977c6edc8e9359a0b48cd15d67d8a7136ce8b6373ccf50`; independent result audit
+  reported `SHIP` for exact-token and matched whole-graph preparation. Production is unchanged.
+
+- [ ] `DFLASH-DOWN-SCALE-GATHER-WHOLE` Integrate the exact qualified T5/T6 scale-gather route behind
+  one build-bound candidate predicate for DFlash target-verify down only; do not reuse or widen the
+  rejected split-K selector. Retain identical workspace planning because the route uses only the
+  existing A8 scratch. Through one fresh reviewed create-only package, require ordinary controls
+  to match across builds, candidate K4/W5 and K5/W6 public tokens to match their corresponding
+  controls exactly, and balanced matched Device-Graph whole A/B at C1/P128+G64 with the optimized
+  proposal head. Admit production only if both widths remain materially faster at decode-output
+  scope; otherwise remove the candidate route and retain the direct evidence as a rejected
+  whole-level mechanism. Do not infer the `>=60 tok/s` terminal target from this gate.
+
 ## Durable decision rule (added 2026-09-12)
 
 A failed candidate exhausts only its mechanism and qualified cells, not the attributed owner. When

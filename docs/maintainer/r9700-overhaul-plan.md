@@ -2100,6 +2100,19 @@ Replace functional routes with measured gfx1201 families:
   this qualification-only route while recipe-independent DFlash optimization takes priority; do
   not start another base mechanism. Reopening prefetch, geometry remaps, non-temporal dot8,
   grouped-PV split512, or split-K requires a distinct mechanism and new bound.
+  The next recipe-independent DFlash decision replaces the verify-down WMMA kernel's five/six
+  serialized activation-scale load phases per G64 group with one lane-distributed load plus wave
+  broadcasts while retaining every native-IU4 dot and the exact 272-group FP32 FMA order. Its
+  reviewed direct complete-boundary gate passed T5 at `0.32185949→0.23085950 ms` and T6 at
+  `0.33231950→0.23130000 ms`; all 48 pairs won and conservative 64-layer round-saving lower bounds
+  were `5.76329845/6.44497011 ms`. Exact incumbent/codec parity, independent dense FP64 oracles,
+  graph recovery, guards, and embedded ISA/resources passed. Evidence is sealed at
+  `profiles/bench/r9700-dflash-down-scale-gather-qualification-20260921/attempt-1`; result-manifest
+  SHA-256 is `172bc3e277821cb3f2977c6edc8e9359a0b48cd15d67d8a7136ce8b6373ccf50`.
+  Production remains unchanged pending exact ordinary/K4W5/K5W6 public-token parity and matched
+  whole Device-Graph A/B. At retained acceptance, eliminating all verify-down time predicts only
+  about `19 tok/s`, so final companion recipe/quality selection must improve acceptance for the
+  `>=60 decode-output tok/s` target.
 - [ ] After the dense C1/P2048/spec-none floor and practical-ceiling gate passes and the shared
   chunk is selected, rerun all 48 post-promotion capacity cells (dense/XAttention times
   all-Q4/mixed/four-role-hybrid times G16/G32, each at C=1..4). Bind the newly measured Device Graph
