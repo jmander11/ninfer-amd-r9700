@@ -1071,31 +1071,18 @@ prefill review, preserving their remaining data dependencies.
   evidence for the target-specific A8W8G32 prefill CTA, preserving its separate exact fallback and
   crossover semantics.
 
-- [ ] `QUALITY-8K32K` [depends: DENSE-FLOOR-DECISION, CHUNK-SELECT] Complete deterministic BF16-source 8K/32K
-  quality for all three recipe branches, both attention profiles, and G16/G32. Use
-  `profiles/ppl/r9700-terminal-quality-receipt-bound-n16k16-20260921`; its independently reviewed
-  `commands.sh` provides preflight, reference, quality and publish stages. Bind the measured chunk
-  campaign's exact artifacts and current PPL builds. Reuse the validated 4096 BF16 reference only
-  if 4096 wins; another chunk requires fresh BF16/repeat evidence. The package's
-  `python311-rocm-wheel-plan.md` records the conditional isolated CP311 ROCm setup and mandatory
-  full-span GDN oracle command with explicit JSON `all_pass` gating before fresh references.
-  Interpreter-prefixed repeat comparison is repaired and covered by 61 focused CPU tests;
-  the isolated `/ssdpool2nvme/local_llm/.venv-ninfer-r9700-py311/bin/python` now passes dependency
-  and CPU import/gfx1201 checks (ROCm torch2.9.1, Triton3.5.1). The reviewed reference stage now
-  automatically runs and gates the same-interpreter full-span GDN oracle before A/B scoring;
-  eight package CPU tests pass. Fresh chunk2048 references completed: the full-span GDN sampled
-  FP64 oracle passed at 4095/4096 rows, and independent A/B semantic fields plus NLL/token sidecars
-  match exactly at both lengths. BF16 PPL is 6.463887635 at 8K and 5.632510588 at 32K; authority
-  `bf16-chunk2048-a/results.json` and `bf16-chunk2048-repeat.json` are inside the package.
-  All six quality campaigns are complete and committed in `df325432`. Ten profiles pass;
-  mixed XAttention fails strict accuracy at32K: G16/G32 introduce19/18 severe positions against
-  budget17, despite passing mean-NLL deltas. Retain both exclusions without tier changes; never
-  rerun this completed campaign. The campaign-to-selection adapter/schema7 repair now preserves
-  genuine numerical exclusions separately from capacity failures and replays all finite aligned
-  sidecar metrics. All24 actual cells revalidate; independent implementation review is SHIP,
-  including133 focused tests and a full real-data authority-map replay. Publication is active.
-  Preserve all candidate failures for diagnosis. The 20260905 recovery script is historical; its dense-Q4 history does not replace
-  this current-build campaign. No numerical result is claimed by preparing the package.
+- [x] `QUALITY-8K32K` CLOSED 2026-09-21. All three recipes, dense/XAttention and G16/G32
+  completed paired BF16-source 8K/32K quality at shared chunk2048. Fresh BF16 A/B sidecars match
+  exactly after full-span GDN FP64 qualification; PPL is6.463887635/5.632510588. Twenty-two of24
+  cells pass, yielding ten eligible profiles. Mixed XAttention fails strict accuracy at32K:
+  G16/G32 introduce19/18 new severe positions against budget17 despite passing mean-NLL deltas.
+  Both exclusions and all raw sidecars are retained in `df325432`; no tier changes or reruns.
+  Quality-exclusion publication/selection repair `1e3c0f5e` passed independent review and133
+  focused tests. All24 actual cells and the complete authority map replay successfully.
+  Published authority:
+  `profiles/ppl/r9700-terminal-quality-receipt-bound-n16k16-20260921/quality-authorities-receipt-bound-n16k16.json`.
+  The package retains exact commands, isolated CP311 ROCm setup, reference repeat and failed
+  original stage exit. Do not rerun reference, quality or publication. Continue terminal capacity.
 
 - [ ] `POSTCHUNK-ON` [depends: CHUNK-SELECT] Through
   `profiles/bench/r9700-terminal-base-panel-attention-20260921`, run both ON-profile capacity matrices
