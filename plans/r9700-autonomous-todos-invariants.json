@@ -90,17 +90,21 @@
     "E2E-PROFILE": ["FINAL-ARTIFACT", "SELECTED-PROFILE"],
     "FINAL-SUITE": ["FINAL-ARTIFACT", "E2E-PROFILE", "BF16-PARITY", "SELECTED-PARITY-VISION", "XATT-CUTOVER-CONDITIONAL"]
   },
-  "next_command": null,
-  "no_gpu_action_policy": "No GPU action is currently runnable; first implement and independently review the exact all-Q4 T1 projected-residual candidate, qualify its production symbols, and prepare the matched whole C1 A/B package.",
+  "next_command": "bash profiles/bench/r9700-projected-residual-t1-whole-ab-20260920/commands.sh --measure",
+  "no_gpu_action_policy": "The production result audit, sealed-plan review, and package preflight pass; the reviewed create-only whole C1 measurement is runnable.",
   "post_reset_queue": [
-    "prepare the exact all-Q4 T1 projected-residual production candidate and reviewed whole C1 A/B from the accepted direct result at `profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920/attempt-1`; qualify production symbols before whole measurement and retain mixed-weight/T>1 fallbacks."
+    "run the reviewed sealed whole C1 A/B at `profiles/bench/r9700-projected-residual-t1-whole-ab-20260920`, bound to the passing production qualification at `profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry2-20260920/attempt-1`; require exact public-token parity and every whole-performance admission gate before promotion review."
   ],
   "post_reset_key_paths": [
-    "profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920/attempt-1"
+    "profiles/bench/r9700-projected-residual-t1-whole-ab-20260920",
+    "profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry2-20260920/attempt-1"
   ],
   "obsolete_commands": [
     "bash profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/commands.sh",
-    "bash profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920/commands.sh --measure"
+    "bash profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920/commands.sh --measure",
+    "bash profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-20260920/commands.sh --measure",
+    "bash profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry1-20260920/commands.sh --measure",
+    "bash profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry2-20260920/commands.sh --measure"
   ],
   "retained_result_path": "profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/results",
   "retained_result_closure_sha256": "3e262f85e9807ef2e72f3e76524624835293f2f358c4defe1d47b581d64fba06",

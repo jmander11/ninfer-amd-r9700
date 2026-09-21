@@ -142,13 +142,22 @@ an eager Op requiring an explicit stream; preserve its `attempt-1` and never rer
 The reviewed fresh retry owned one explicit stream and completed qualification, but its report
 embedded raw newlines and failed strict JSON parsing after the qualifier exited 0. Preserve that
 sealed diagnostic attempt. Retry2 passed strict JSON, complete numerical qualification, static
-checks, and the direct timing bound. Its sealed result authorizes preparation of the selector-off/on
-whole C1 A/B. Preserve all three attempts; never rerun them. No GPU action is currently runnable;
-first implement and independently review the exact all-Q4 T1 projected-residual candidate, qualify
-its production symbols, and prepare the matched whole C1 A/B package.
+checks, and the direct timing bound. The integrated public Op now also passes production-symbol
+qualification in the sealed production retry2 attempt. Preserve every prior attempt, including
+the production failures caused by unstable DRM card numbering and incomplete public malformed-input
+validation. The primary-agent result audit, package preparation, sealed-plan review, and package
+preflight now pass. The sealed whole plan SHA-256 is
+`4065a51c43c94c042973c8653bd9d0ea39c3ebe34db3e4ca634946f851f92fb0`; its create-only
+`attempt-1` is absent. The next command runs the reviewed whole C1 A/B. Exact tokens and whole
+performance remain required before promotion.
+
+```sh
+bash profiles/bench/r9700-projected-residual-t1-whole-ab-20260920/commands.sh --measure
+```
+
 The deterministic queue after reset is:
 
-1. prepare the exact all-Q4 T1 projected-residual production candidate and reviewed whole C1 A/B from the accepted direct result at `profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920/attempt-1`; qualify production symbols before whole measurement and retain mixed-weight/T>1 fallbacks.
+1. run the reviewed sealed whole C1 A/B at `profiles/bench/r9700-projected-residual-t1-whole-ab-20260920`, bound to the passing production qualification at `profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry2-20260920/attempt-1`; require exact public-token parity and every whole-performance admission gate before promotion review.
 
 Every other remaining unchecked task depends directly or transitively on this queue or the
 external `DENSE-FLOOR-DECISION`.
@@ -467,6 +476,28 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   This admits only the exact all-Q4 T1 candidate and preparation of matched whole C1 A/B;
   production-symbol qualification, exact public tokens, and whole-inference performance admission
   remain required before promotion.
+  Production integration now uses the public `ops::projected_residual_t1` contract and its A8G64
+  workspace query; only selector-on, all-Q4 base Text T1 residual projections qualify. Mixed
+  inventory, MTP, prefill, T>1, and selector-off retain the incumbent path. The first production
+  package, `profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-20260920`, failed
+  before numerical qualification because hardcoded DRM `card2` identified the integrated GPU.
+  Production `-retry1-20260920` fixed power authority to PCI `0000:13:00.0` but aborted when a
+  malformed public binding reached `HIP_CHECK`. Production `-retry2-20260920` adds complete public
+  address/alignment/extent/alias rejection and host preflight with GPU visibility disabled.
+  Preserve both failures; never append or rerun them.
+  The passing production retry2 validates the actual public Op and linked production code object:
+  independent FP64 oracle and complete residual bits are exact, malformed/poison/canary checks
+  pass, and three captured graph replays per shape match eager output. At `auto`, K6144 improved
+  `0.0759595→0.0692600 ms`, K17408 `0.1423595→0.1352800 ms`, every allocation median improved,
+  and weighted saving was `0.8818557 ms/token` against the unchanged `0.2 ms/token` bound. Native
+  IU4/wave32 retains zero LDS/scratch/spills. Evidence:
+  `profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry2-20260920/attempt-1`;
+  `result.sha256` SHA-256 is `206b15a42c9e1cb7df2150d834659b8ed3d167dd643fc74a771213a83b787e6d`,
+  and `closure.json` SHA-256 is `9fbab6cfe0332847fcbd52f15c24dc95d80cc543349daaec67ed3be496533e03`.
+  This authorizes only the matched whole C1 A/B after primary-agent result audit and sealed-plan
+  review; production routing remains unauthorized. The whole package requires three adjacent
+  balanced pairs, exact retained public tokens, every decode-time ratio below one,
+  mean plus two standard errors below one, and median at most `0.99`.
 
 ## Active now: DFlash semantic and schedule work
 

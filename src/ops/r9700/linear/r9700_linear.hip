@@ -1185,6 +1185,54 @@ void a8q4g64_linear_decode_dot8_t1_kernel(
 #endif
 }
 
+__global__ __launch_bounds__(kThreads) void a8q4g64_projected_residual_t1_kernel(
+    const std::uint8_t* activation_low, const std::uint8_t* activation_high,
+    const std::uint16_t* activation_scales, const std::uint32_t* activation_status,
+    const std::uint8_t* weight_codes, const std::uint16_t* weight_scales,
+    hip_bfloat16* residual, std::uint32_t columns) {
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
+    const std::uint32_t row = blockIdx.x * blockDim.x + threadIdx.x;
+    if (row >= 5120U) return;
+    if (*activation_status != Q4G64ActivationOk) {
+        residual[row] = conspicuous_bf16_nan();
+        return;
+    }
+    const std::uint32_t groups = columns / kQ4Group;
+    float total = 0.0F;
+    for (std::uint32_t group = 0U; group < groups; ++group) {
+        int low_dot = 0;
+        int high_dot = 0;
+#pragma unroll
+        for (std::uint32_t word = 0U; word < 8U; ++word) {
+            const std::size_t element =
+                static_cast<std::size_t>(group) * kQ4Group + word * 8U;
+            const int low = load_q4x8(activation_low, element);
+            const int high = load_q4x8(activation_high, element);
+            const int weight =
+                load_q4_n16k16_x8(weight_codes, row, group, word, groups);
+            low_dot = __builtin_amdgcn_sudot8(false, low, true, weight, low_dot, false);
+            high_dot = __builtin_amdgcn_sudot8(true, high, true, weight, high_dot, false);
+        }
+        const int combined = low_dot + 16 * high_dot;
+        const float activation_scale =
+            __half2float(__ushort_as_half(activation_scales[group]));
+        const float weight_scale = __half2float(__ushort_as_half(
+            weight_scales[q4_n16k16_scale_index(row, group, groups)]));
+        total = fmaf(static_cast<float>(combined),
+                     activation_scale * weight_scale, total);
+    }
+    // This BF16 seam is part of the projected-residual boundary, even though
+    // the intermediate projection never needs a global-memory allocation.
+    const hip_bfloat16 delta = static_cast<hip_bfloat16>(total);
+    residual[row] = hip_bfloat16(static_cast<float>(residual[row]) +
+                                 static_cast<float>(delta));
+#else
+    (void)activation_low; (void)activation_high; (void)activation_scales;
+    (void)activation_status; (void)weight_codes; (void)weight_scales;
+    (void)residual; (void)columns;
+#endif
+}
+
 __global__ __launch_bounds__(kThreads)
 void a8q4g64_gdn_pair_t1_kernel(
     const std::uint8_t* activation_low_codes,
@@ -3295,6 +3343,53 @@ hipError_t a8q4g64_linear_prefill_cta(
                        args.activation_scales, args.activation_status,
                        args.weight_codes, args.weight_scales, args.output, args.tokens,
                        args.rows, args.columns, args.padded_columns);
+    return hipGetLastError();
+#else
+    (void)stream;
+    return hipErrorNotSupported;
+#endif
+}
+
+hipError_t a8q4g64_projected_residual_t1(
+    const A8Q4G64ProjectedResidualT1Args& args, hipStream_t stream) noexcept {
+    if (args.tokens != 1U || args.rows != 5120U ||
+        (args.columns != 6144U && args.columns != 17408U) ||
+        args.padded_columns != args.columns) return hipErrorInvalidValue;
+    const std::size_t input_bytes = args.columns * sizeof(hip_bfloat16);
+    const std::size_t code_bytes = static_cast<std::size_t>(args.rows) * args.columns / 2U;
+    const std::size_t scale_bytes =
+        static_cast<std::size_t>(args.rows) * (args.columns / kQ4Group) * sizeof(std::uint16_t);
+    const std::size_t residual_bytes = args.rows * sizeof(hip_bfloat16);
+    const std::size_t workspace_bytes =
+        a8q4g64_activation_workspace_capacity_bytes(1U, args.columns);
+    if (args.input == nullptr || args.weight_codes == nullptr ||
+        args.weight_scales == nullptr || args.activation_workspace == nullptr ||
+        args.residual == nullptr || args.weight_code_bytes != code_bytes ||
+        args.weight_scale_bytes != scale_bytes ||
+        args.activation_workspace_bytes != workspace_bytes ||
+        !aligned_qword(args.weight_codes)) return hipErrorInvalidValue;
+    const void* pointers[]{args.input, args.weight_codes, args.weight_scales,
+                           args.residual, args.activation_workspace};
+    const std::size_t sizes[]{input_bytes, code_bytes, scale_bytes,
+                              residual_bytes, workspace_bytes};
+    for (std::size_t index = 0U; index < 5U; ++index) {
+        for (std::size_t other = index + 1U; other < 5U; ++other) {
+            if (ranges_overlap(pointers[index], sizes[index], pointers[other], sizes[other]))
+                return hipErrorInvalidValue;
+        }
+    }
+    A8G64ActivationWorkspace workspace{};
+    if (a8q4g64_bind_activation_workspace(
+            args.activation_workspace, args.activation_workspace_bytes, 1U,
+            args.columns, &workspace) != hipSuccess) return hipErrorInvalidValue;
+    const hipError_t quantized = a8g64_quantize_activation({args.input, workspace}, stream);
+    if (quantized != hipSuccess) return quantized;
+#if defined(__HIPCC__)
+    hipLaunchKernelGGL(a8q4g64_projected_residual_t1_kernel,
+                       dim3(5120U / kThreads), dim3(kThreads), 0, stream,
+                       workspace.low_codes, workspace.high_codes, workspace.scales,
+                       workspace.status, args.weight_codes, args.weight_scales,
+                       args.residual, args.columns);
     return hipGetLastError();
 #else
     (void)stream;

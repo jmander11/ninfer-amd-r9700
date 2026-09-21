@@ -74,6 +74,21 @@ struct Variant {
         [[nodiscard]] bool attention_q4_pair_c2c4(
             const Tensor& hidden, const Weight& query_key, const Weight& gate_value,
             Tensor& query, Tensor& key, Tensor& gate, Tensor& value, hipStream_t stream);
+        [[nodiscard]] bool projected_residual_t1(
+            const Tensor& input, const Weight& weight, Tensor& residual,
+            qwen3::TextPhase phase, bool base_text, hipStream_t stream);
+        [[nodiscard]] static constexpr bool projected_residual_t1_selected(
+            bool candidate_enabled, std::uint32_t activation_bits,
+            bool all_q4_residual_inventory, qwen3::TextPhase phase, bool base_text,
+            std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns,
+            QType weight) noexcept {
+            return candidate_enabled && activation_bits == 8U &&
+                   all_q4_residual_inventory && phase == qwen3::TextPhase::Verify &&
+                   base_text && tokens == 1U && rows == TextConfig::hidden &&
+                   (columns == TextConfig::query_size ||
+                    columns == TextConfig::intermediate) &&
+                   weight == QType::Q4G64_F16S;
+        }
         [[nodiscard]] static constexpr bool attention_q4_pair_t1_selected(
             std::uint32_t tokens, QType query_key, QType gate_value) noexcept {
             return tokens == 1U &&

@@ -272,6 +272,31 @@ struct A8Q4G64CandidateArgs {
     bool dflash_target_verify_down = false;
 };
 
+// Fixed T1 projected-residual boundary: quantize represented BF16 input with the
+// signed-A8G64 codec, evaluate the packed Q4N16K16/G64 projection, round that
+// projection to BF16, then publish BF16(residual + projection) in place.
+// Domain: T=1, N=5120, K=padded_K in {6144,17408}. The input, both weight
+// planes, residual, and caller-owned activation workspace are pairwise disjoint.
+// Weight and workspace extents are exact. Any activation codec failure poisons
+// every residual element with BF16 NaN. No allocation or host synchronization.
+struct A8Q4G64ProjectedResidualT1Args {
+    const hip_bfloat16* input = nullptr;
+    const std::uint8_t* weight_codes = nullptr;
+    std::size_t weight_code_bytes = 0;
+    const std::uint16_t* weight_scales = nullptr;
+    std::size_t weight_scale_bytes = 0;
+    void* activation_workspace = nullptr;
+    std::size_t activation_workspace_bytes = 0;
+    hip_bfloat16* residual = nullptr;
+    std::uint32_t tokens = 0;
+    std::uint32_t rows = 0;
+    std::uint32_t columns = 0;
+    std::uint32_t padded_columns = 0;
+};
+
+[[nodiscard]] hipError_t a8q4g64_projected_residual_t1(
+    const A8Q4G64ProjectedResidualT1Args& args, hipStream_t stream) noexcept;
+
 // Exact production GDN T1 projection pair. The represented BF16
 // [1,5120] input is quantized once into caller-owned storage, then one combined
 // row grid evaluates the N4096 query/key and N12288 value/z matrices. Both

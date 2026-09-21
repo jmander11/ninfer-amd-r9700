@@ -1,4 +1,5 @@
 #include "ninfer/ops/linear.h"
+#include "ninfer/ops/projected_residual.h"
 
 #include "core/device.h"
 #include "ops/r9700/linear/r9700_linear.h"
@@ -321,6 +322,83 @@ void dflash_verify_down_linear(const Tensor& x, const Weight& weight, Tensor& ou
                                         ? DeviceSpan{}
                                         : workspace.alloc_bytes(partial_sum_bytes);
     linear_with_workspace(x, weight, output, activation, partial_sums, stream, true);
+}
+
+std::size_t projected_residual_t1_workspace_capacity_bytes(
+    std::int32_t columns) {
+    if (columns != 6144 && columns != 17408) {
+        throw std::invalid_argument("projected residual: unsupported projection width");
+    }
+    return r9700::linear::a8q4g64_activation_workspace_capacity_bytes(
+        1U, static_cast<std::uint32_t>(columns));
+}
+
+void projected_residual_t1(const Tensor& input, const Weight& weight, Tensor& residual,
+                           const DeviceSpan& activation_workspace, hipStream_t stream) {
+    constexpr std::uint32_t kRows = 5120U;
+    if (input.dtype != DType::BF16 || residual.dtype != DType::BF16 ||
+        input.data == nullptr || residual.data == nullptr || !input.is_contiguous() ||
+        !residual.is_contiguous() || input.ne[1] != 1 || input.ne[2] != 1 ||
+        input.ne[3] != 1 || residual.ne[0] != static_cast<std::int32_t>(kRows) ||
+        residual.ne[1] != 1 || residual.ne[2] != 1 || residual.ne[3] != 1 ||
+        weight.qtype != QType::Q4G64_F16S || weight.ndim != 2 ||
+        weight.n != static_cast<std::int32_t>(kRows) || weight.k != input.ne[0] ||
+        weight.shape[0] != static_cast<std::int32_t>(kRows) ||
+        weight.shape[1] != input.ne[0] ||
+        weight.padded_shape[0] != static_cast<std::int32_t>(kRows) ||
+        weight.padded_shape[1] != input.ne[0] || weight.layout != QuantLayout::Q4N16K16 ||
+        weight.group != 64 || weight.group_size != 64 || weight.scale_dtype != DType::FP16 ||
+        weight.qdata == nullptr || weight.scales == nullptr || weight.qhigh != nullptr ||
+        weight.high_plane_bytes != 0U) {
+        throw std::invalid_argument("projected residual: binding differs from qualified shape");
+    }
+    const std::uint32_t columns = checked_extent(input.ne[0], "K");
+    if (columns != 6144U && columns != 17408U) {
+        throw std::invalid_argument("projected residual: unsupported projection width");
+    }
+    const std::size_t required = projected_residual_t1_workspace_capacity_bytes(input.ne[0]);
+    const std::size_t code_bytes = static_cast<std::size_t>(kRows) * columns / 2U;
+    const std::size_t scale_bytes =
+        static_cast<std::size_t>(kRows) * (columns / 64U) * sizeof(std::uint16_t);
+    if (weight.qdata_bytes != code_bytes || weight.scale_bytes != scale_bytes ||
+        activation_workspace.bytes != required) {
+        throw std::invalid_argument("projected residual: plane or workspace extent differs");
+    }
+    const void* pointers[]{input.data, weight.qdata, weight.scales, residual.data,
+                           activation_workspace.data};
+    const std::size_t sizes[]{columns * sizeof(hip_bfloat16), code_bytes, scale_bytes,
+                              kRows * sizeof(hip_bfloat16), required};
+    const std::size_t alignments[]{alignof(hip_bfloat16), alignof(std::uint64_t),
+                                   alignof(std::uint16_t), alignof(hip_bfloat16),
+                                   alignof(std::uint32_t)};
+    ByteRange ranges[5]{};
+    for (std::size_t index = 0U; index < 5U; ++index) {
+        const auto first = reinterpret_cast<std::uintptr_t>(pointers[index]);
+        if (pointers[index] == nullptr || first % alignments[index] != 0U ||
+            first > std::numeric_limits<std::uintptr_t>::max() - sizes[index]) {
+            throw std::invalid_argument("projected residual: invalid plane address or alignment");
+        }
+        ranges[index] = {first, first + sizes[index]};
+        for (std::size_t other = 0U; other < index; ++other) {
+            if (overlaps(ranges[index], ranges[other])) {
+                throw std::invalid_argument("projected residual: planes must be disjoint");
+            }
+        }
+    }
+    HIP_CHECK(r9700::linear::a8q4g64_projected_residual_t1(
+        {.input = static_cast<const hip_bfloat16*>(input.data),
+         .weight_codes = static_cast<const std::uint8_t*>(weight.qdata),
+         .weight_code_bytes = static_cast<std::size_t>(weight.qdata_bytes),
+         .weight_scales = static_cast<const std::uint16_t*>(weight.scales),
+         .weight_scale_bytes = static_cast<std::size_t>(weight.scale_bytes),
+         .activation_workspace = activation_workspace.data,
+         .activation_workspace_bytes = required,
+         .residual = static_cast<hip_bfloat16*>(residual.data),
+         .tokens = 1U,
+         .rows = kRows,
+         .columns = columns,
+         .padded_columns = columns},
+        stream));
 }
 
 void linear(const Tensor& x, const Weight& weight, Tensor& output,

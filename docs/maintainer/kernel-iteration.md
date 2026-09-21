@@ -81,11 +81,14 @@ cache state, warmup, stream, event timing, and iteration count. Keep profiler in
 for selection. Report median or another declared robust statistic and enough repeated events to
 distinguish the expected change from noise.
 
-Performance-admission timing on the R9700 must fail closed unless
-`/sys/class/drm/card2/device/power_dpm_force_performance_level` is exactly `auto` before device
-construction. Recheck it after numerical qualification and after timing, and bind the observed
-value into retained evidence. A stable non-`auto` profile may be used for a focused counter
-diagnostic, but its durations are profiler controls and cannot select or admit a route.
+Performance-admission timing on the R9700 must fail closed unless the selected physical R9700 PCI
+function's `power_dpm_force_performance_level` is exactly `auto` before device construction. Bind
+the pre-initialization path through `/sys/bus/pci/devices`, verify its AMD/R9700 vendor and device
+IDs, and after HIP initialization require the selected HIP device to resolve to that same PCI
+function; DRM `cardN` ordinals are not stable identities. Recheck the power value after numerical
+qualification and after timing, and bind the observed path and value into retained evidence. A
+stable non-`auto` profile may be used for a focused counter diagnostic, but its durations are
+profiler controls and cannot select or admit a route.
 
 Sweep parameters within one coherent family first: workgroup shape, waves, tiles, staging depth,
 layout, vector width, fusion boundary, or a finite dispatch crossover. A temporary qualifier may

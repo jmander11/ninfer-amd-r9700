@@ -1,0 +1,40 @@
+{
+  "status": "passed",
+  "executable": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700/src/ninfer_r9700_a8q4_projected_residual_t1_qual",
+    "bytes": 912104,
+    "sha256": "8d3821ecb592870242de91b77ce310d8b572a84a8bdccb1dc1724b40f148154e"
+  },
+  "archive": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700/src/libninfer_r9700_core.a",
+    "bytes": 4261846,
+    "sha256": "b016b6e11d7cdfdc1eedf9d3bcd368520cba3ede7dff0c98abd2bad71d1130bb"
+  },
+  "cache": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700/CMakeCache.txt",
+    "bytes": 36969,
+    "sha256": "a80f84bc53834a17d2acb9f0169a1ee1c113ded244e794da52b80c3c7e5afc02"
+  },
+  "link_command": ": && /opt/rocm/llvm/bin/clang++ -O3 -DNDEBUG --offload-arch=gfx1201 --hip-link --rtlib=compiler-rt -unwindlib=libgcc src/CMakeFiles/ninfer_r9700_a8q4_projected_residual_t1_qual.dir/__/tools/r9700/a8q4_projected_residual_t1_qual.hip.o -o src/ninfer_r9700_a8q4_projected_residual_t1_qual  -Wl,-rpath,/opt/rocm/lib  src/libninfer_r9700_core.a  /opt/rocm/lib/libamdhip64.so.7.15.26333-0000000  /opt/rocm/core-10.0/lib/libamdhip64.so.7.15.26333-0000000  /opt/rocm/lib/libhipblaslt.so.1.4  /opt/rocm/lib/librocprofiler-sdk-roctx.so.1.3.5  -lgcc  -lgcc && :",
+  "embedded_code": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry2-20260920/attempt-1/production.hsaco",
+    "bytes": 301272,
+    "sha256": "6f0d62d10127fc8c8e5e4e4d6d94713483146305b1debf882a92361d2d5f56de"
+  },
+  "kernel_symbol": "_ZN6ninfer3ops5r97006linear12_GLOBAL__N_136a8q4g64_projected_residual_t1_kernelEPKhS5_PKtPKjS5_S7_P12hip_bfloat16j",
+  "native_iu4_dot8": true,
+  "resources": {
+    "group_segment_fixed_size": 0,
+    "private_segment_fixed_size": 0,
+    "sgpr_spill_count": 0,
+    "vgpr_spill_count": 0,
+    "vgpr_count": 18,
+    "sgpr_count": 34,
+    "wavefront_size": 32
+  },
+  "source_assembly": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry2-20260920/attempt-1/qual.s",
+    "bytes": 1659191,
+    "sha256": "6d4be0ae85986476e1c6b0ec80b051fb723734ff2b645328f3e16c3a7f3bb0d4"
+  }
+}

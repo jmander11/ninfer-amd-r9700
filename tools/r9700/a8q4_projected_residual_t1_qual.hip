@@ -2,6 +2,7 @@
 #include "a8q4_shape_sweep_qual.hip"
 
 #include "ops/r9700/eager/eager_ops.h"
+#include "ninfer/ops/projected_residual.h"
 
 #include <functional>
 #include <map>
@@ -37,6 +38,13 @@ constexpr std::size_t kResidualTrials = 12U;
 constexpr std::size_t kSamplesPerCopy = kResidualTrials / kCopies;
 constexpr std::size_t kScrubBytes = 80U * 1024U * 1024U;
 constexpr double kRequiredSavingMs = 0.2;
+const std::filesystem::path kPowerPath =
+    "/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level";
+
+void require_auto_power(const char* stage) {
+    if (read_text(kPowerPath) != "auto")
+        fail(std::string("projected residual requires auto power ") + stage);
+}
 constexpr std::array<bool, kResidualTrials> kIncumbentFirst{
     true, true, true, false, false, false, false, false, false, true, true, true};
 
@@ -50,20 +58,7 @@ constexpr std::array<ResidualShape, 2> kResidualShapes{{
     {17408U, "mlp_down"},
 }};
 
-struct CandidateArgs {
-    const hip_bfloat16* input = nullptr;
-    const std::uint8_t* weight_codes = nullptr;
-    std::size_t weight_code_bytes = 0U;
-    const std::uint16_t* weight_scales = nullptr;
-    std::size_t weight_scale_bytes = 0U;
-    void* workspace = nullptr;
-    std::size_t workspace_bytes = 0U;
-    hip_bfloat16* residual = nullptr;
-    std::uint32_t tokens = 1U;
-    std::uint32_t rows = kRows;
-    std::uint32_t columns = 0U;
-    std::uint32_t padded_columns = 0U;
-};
+using CandidateArgs = linear::A8Q4G64ProjectedResidualT1Args;
 
 struct DeviceWeights {
     std::unique_ptr<DeviceBuffer<std::uint8_t>> codes;
@@ -81,18 +76,6 @@ struct CaseResult {
     double incumbent_median_ms = 0.0;
     double candidate_median_ms = 0.0;
 };
-
-constexpr std::size_t packed_pair_index(std::uint32_t row, std::uint32_t group,
-                                        std::uint32_t pair, std::uint32_t groups) {
-    return (((static_cast<std::size_t>(row >> 4U) * groups + group) * 4U + pair) *
-            16U + (row & 15U));
-}
-
-constexpr std::size_t packed_scale_index(std::uint32_t row, std::uint32_t group,
-                                         std::uint32_t groups) {
-    return ((static_cast<std::size_t>(row >> 4U) * groups + group) * 16U +
-            (row & 15U));
-}
 
 int oracle_weight_code(const DecodeDot8Weights& weights, std::uint32_t row,
                        std::uint32_t group, std::uint32_t lane,
@@ -141,71 +124,6 @@ std::vector<hip_bfloat16> make_residual(std::uint32_t columns) {
     return values;
 }
 
-__device__ __forceinline__ int load_q4x8_residual(const std::uint8_t* codes,
-                                                   std::size_t element) {
-    return *reinterpret_cast<const int*>(codes + element / 2U);
-}
-
-__device__ __forceinline__ int load_weight_x8_residual(
-    const std::uint8_t* codes, std::uint32_t row, std::uint32_t group,
-    std::uint32_t word, std::uint32_t groups) {
-    const std::uint64_t pair = reinterpret_cast<const std::uint64_t*>(codes)[
-        packed_pair_index(row, group, word >> 1U, groups)];
-    return static_cast<int>((word & 1U) != 0U ? pair >> 32U : pair);
-}
-
-__device__ hip_bfloat16 conspicuous_nan() {
-    hip_bfloat16 value;
-    value.data = 0x7fc1U;
-    return value;
-}
-
-__global__ __launch_bounds__(256) void a8q4g64_projected_residual_t1_kernel(
-    const std::uint8_t* activation_low, const std::uint8_t* activation_high,
-    const std::uint16_t* activation_scales, const std::uint32_t* activation_status,
-    const std::uint8_t* weight_codes, const std::uint16_t* weight_scales,
-    hip_bfloat16* residual, std::uint32_t columns) {
-#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
-    const std::uint32_t row = blockIdx.x * blockDim.x + threadIdx.x;
-    if (row >= kRows) return;
-    if (*activation_status != 0U) {
-        residual[row] = conspicuous_nan();
-        return;
-    }
-    const std::uint32_t groups = columns / kGroupCountFactor;
-    float total = 0.0F;
-    for (std::uint32_t group = 0U; group < groups; ++group) {
-        int low_dot = 0;
-        int high_dot = 0;
-#pragma unroll
-        for (std::uint32_t word = 0U; word < 8U; ++word) {
-            const std::size_t element =
-                static_cast<std::size_t>(group) * kGroupCountFactor + word * 8U;
-            const int low = load_q4x8_residual(activation_low, element);
-            const int high = load_q4x8_residual(activation_high, element);
-            const int weight =
-                load_weight_x8_residual(weight_codes, row, group, word, groups);
-            low_dot = __builtin_amdgcn_sudot8(false, low, true, weight, low_dot, false);
-            high_dot = __builtin_amdgcn_sudot8(true, high, true, weight, high_dot, false);
-        }
-        const int combined = low_dot + 16 * high_dot;
-        const float activation_scale =
-            __half2float(__ushort_as_half(activation_scales[group]));
-        const float weight_scale = __half2float(__ushort_as_half(
-            weight_scales[packed_scale_index(row, group, groups)]));
-        total = fmaf(static_cast<float>(combined),
-                     activation_scale * weight_scale, total);
-    }
-    const hip_bfloat16 delta = static_cast<hip_bfloat16>(total);
-    residual[row] = hip_bfloat16(static_cast<float>(residual[row]) +
-                                 static_cast<float>(delta));
-#else
-    (void)activation_low; (void)activation_high; (void)activation_scales;
-    (void)activation_status; (void)weight_codes; (void)weight_scales;
-    (void)residual; (void)columns;
-#endif
-}
-
 __global__ void projected_residual_cache_scrub_kernel(std::uint32_t* values,
                                                        std::size_t count) {
     const std::size_t index = static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
@@ -220,63 +138,48 @@ bool overlap(const void* lhs, std::size_t lhs_bytes,
     return l < r + rhs_bytes && r < l + lhs_bytes;
 }
 
-bool valid_candidate(const CandidateArgs& args) {
-    const bool shape = args.tokens == 1U && args.rows == kRows &&
-        (args.columns == 6144U || args.columns == 17408U) &&
-        args.padded_columns == args.columns;
-    const std::uint32_t groups = args.columns / kGroupCountFactor;
-    const std::size_t input_bytes = static_cast<std::size_t>(args.columns) * 2U;
-    const std::size_t code_bytes = static_cast<std::size_t>(kRows) * args.columns / 2U;
-    const std::size_t scale_bytes = static_cast<std::size_t>(kRows) * groups * 2U;
-    const std::size_t residual_bytes = static_cast<std::size_t>(kRows) * 2U;
-    const std::size_t workspace_bytes =
-        linear::a8q4g64_activation_workspace_capacity_bytes(1U, args.columns);
-    if (!shape || args.input == nullptr || args.weight_codes == nullptr ||
-        args.weight_scales == nullptr || args.workspace == nullptr || args.residual == nullptr ||
-        args.weight_code_bytes != code_bytes || args.weight_scale_bytes != scale_bytes ||
-        args.workspace_bytes != workspace_bytes ||
-        (reinterpret_cast<std::uintptr_t>(args.weight_codes) & 7U) != 0U) return false;
-    const std::array<std::pair<const void*, std::size_t>, 4> regions{{
-        {args.input, input_bytes}, {args.weight_codes, code_bytes},
-        {args.weight_scales, scale_bytes}, {args.residual, residual_bytes}}};
-    for (std::size_t i = 0U; i < regions.size(); ++i) {
-        if (overlap(args.workspace, workspace_bytes, regions[i].first, regions[i].second))
-            return false;
-        for (std::size_t j = i + 1U; j < regions.size(); ++j) {
-            if (overlap(regions[i].first, regions[i].second,
-                        regions[j].first, regions[j].second)) return false;
-        }
-    }
-    return true;
-}
-
 hipError_t launch_candidate(const CandidateArgs& args, hipStream_t stream) {
-    if (!valid_candidate(args)) return hipErrorInvalidValue;
-    linear::A8G64ActivationWorkspace workspace{};
-    if (linear::a8q4g64_bind_activation_workspace(
-            args.workspace, args.workspace_bytes, 1U, args.columns,
-            &workspace) != hipSuccess) return hipErrorInvalidValue;
-    hipError_t status = linear::a8g64_quantize_activation({args.input, workspace}, stream);
-    if (status != hipSuccess) return status;
-    hipLaunchKernelGGL(a8q4g64_projected_residual_t1_kernel,
-                       dim3((kRows + 255U) / 256U), dim3(256U), 0, stream,
-                       workspace.low_codes, workspace.high_codes, workspace.scales,
-                       workspace.status, args.weight_codes, args.weight_scales,
-                       args.residual, args.columns);
-    return hipGetLastError();
+    try {
+        ninfer::Tensor input(const_cast<hip_bfloat16*>(args.input), ninfer::DType::BF16,
+                             {static_cast<std::int32_t>(args.columns),
+                              static_cast<std::int32_t>(args.tokens)});
+        ninfer::Tensor residual(args.residual, ninfer::DType::BF16,
+                                {static_cast<std::int32_t>(args.rows),
+                                 static_cast<std::int32_t>(args.tokens)});
+        ninfer::Weight weight;
+        weight.qtype = ninfer::QType::Q4G64_F16S;
+        weight.ndim = 2;
+        weight.n = weight.shape[0] = weight.padded_shape[0] = args.rows;
+        weight.k = weight.shape[1] = args.columns;
+        weight.padded_shape[1] = args.padded_columns;
+        weight.group_size = weight.group = 64;
+        weight.qdata = args.weight_codes;
+        weight.qdata_bytes = args.weight_code_bytes;
+        weight.scales = args.weight_scales;
+        weight.scale_bytes = args.weight_scale_bytes;
+        weight.layout = ninfer::QuantLayout::Q4N16K16;
+        weight.scale_dtype = ninfer::DType::FP16;
+        ninfer::ops::projected_residual_t1(input, weight, residual,
+            {args.activation_workspace, args.activation_workspace_bytes}, stream);
+        return hipSuccess;
+    } catch (const std::exception&) {
+        // Existing malformed-call checks expect HIP-style rejection; valid calls
+        // still fail immediately through HIP_CHECK if the public wrapper throws.
+        return hipErrorInvalidValue;
+    }
 }
 
 linear::A8Q4G64CandidateArgs incumbent_args(
     const CandidateArgs& args, hip_bfloat16* delta) {
     return {args.input, args.weight_codes, args.weight_code_bytes,
-            args.weight_scales, args.weight_scale_bytes, args.workspace,
-            args.workspace_bytes, delta, 1U, kRows, args.columns,
+            args.weight_scales, args.weight_scale_bytes, args.activation_workspace,
+            args.activation_workspace_bytes, delta, 1U, kRows, args.columns,
             args.padded_columns};
 }
 
 hipError_t launch_incumbent(const CandidateArgs& args, hip_bfloat16* delta,
                             hipStream_t stream) {
-    if (!valid_candidate(args) || overlap(delta, kRows * 2U, args.residual, kRows * 2U))
+    if (overlap(delta, kRows * 2U, args.residual, kRows * 2U))
         return hipErrorInvalidValue;
     hipError_t status = linear::a8q4g64_linear_candidate(
         incumbent_args(args, delta), stream);
@@ -350,7 +253,7 @@ CaseResult run_case(const ResidualShape& shape, hipStream_t stream) {
                      hipMemcpyHostToDevice, stream);
     }
     const std::size_t workspace_bytes =
-        linear::a8q4g64_activation_workspace_capacity_bytes(1U, shape.columns);
+        ninfer::ops::projected_residual_t1_workspace_capacity_bytes(shape.columns);
     DeviceBuffer<std::uint8_t> workspace(workspace_bytes);
     DeviceBuffer<hip_bfloat16> delta(kRows + 2U);
     DeviceBuffer<hip_bfloat16> incumbent(kRows + 2U);
@@ -374,7 +277,7 @@ CaseResult run_case(const ResidualShape& shape, hipStream_t stream) {
     if (launch_candidate(malformed, stream) != hipErrorInvalidValue) fail("projected residual accepted short codes");
     malformed = valid; ++malformed.weight_codes;
     if (launch_candidate(malformed, stream) != hipErrorInvalidValue) fail("projected residual accepted misalignment");
-    malformed = valid; malformed.workspace = malformed.residual;
+    malformed = valid; malformed.activation_workspace = malformed.residual;
     if (launch_candidate(malformed, stream) != hipErrorInvalidValue) fail("projected residual accepted workspace alias");
     malformed = valid; malformed.input = reinterpret_cast<const hip_bfloat16*>(malformed.weight_codes);
     if (launch_candidate(malformed, stream) != hipErrorInvalidValue) fail("projected residual accepted input alias");
@@ -435,6 +338,27 @@ CaseResult run_case(const ResidualShape& shape, hipStream_t stream) {
             return value.data == 0x7fc1U;
         })) fail("projected residual did not poison every output");
     copy_ordered(d_input.get(), input.data(), d_input.bytes(), hipMemcpyHostToDevice, stream);
+
+    // Capture exactly the linked production entry. Reset external state between
+    // replays so each replay is the same observable residual transaction.
+    hipGraph_t graph = nullptr;
+    hipGraphExec_t executable = nullptr;
+    HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+    HIP_CHECK(launch_candidate(args_for(0U, candidate.get() + 1U), stream));
+    HIP_CHECK(hipStreamEndCapture(stream, &graph));
+    HIP_CHECK(hipGraphInstantiate(&executable, graph, nullptr, nullptr, 0));
+    for (unsigned replay = 0; replay < 3U; ++replay) {
+        fill_guarded(candidate, initial_residual, 0x7fc3U, stream);
+        HIP_CHECK(hipGraphLaunch(executable, stream));
+        HIP_CHECK(hipStreamSynchronize(stream));
+        const auto replayed = download_guarded(candidate, 0x7fc3U, "graph residual", stream);
+        if (!std::equal(candidate_host.begin(), candidate_host.end(), replayed.begin(),
+                        [](hip_bfloat16 lhs, hip_bfloat16 rhs) { return lhs.data == rhs.data; }))
+            fail("captured production projected residual differs from eager result");
+    }
+    HIP_CHECK(hipGraphExecDestroy(executable));
+    HIP_CHECK(hipGraphDestroy(graph));
+    require_auto_power("after correctness and before timing");
 
     CaseResult result{shape, maximum_delta_steps, maximum_residual_steps};
     std::array<std::array<double, kSamplesPerCopy>, kCopies> incumbent_by_copy{};
@@ -548,6 +472,13 @@ int main(int argc, char** argv) {
             "wave32=true lds=0 scratch=0 spills=0");
         if (!std::regex_match(static_text, static_match, static_expression))
             fail("projected residual static receipt differs");
+        // DRM card ordinals can change across driver/container lifecycles. Bind
+        // the pre-HIP check to this machine's physical R9700 PCI function, then
+        // require HIP device 0 to resolve to that same function below.
+        if (read_text(kPowerPath.parent_path() / "vendor") != "0x1002" ||
+            read_text(kPowerPath.parent_path() / "device") != "0x7551")
+            fail("pre-initialization power device is not the R9700 PCI function");
+        require_auto_power("before HIP initialization");
         HIP_CHECK(hipSetDevice(0));
         hipDeviceProp_t properties{};
         HIP_CHECK(hipGetDeviceProperties(&properties, 0));
@@ -563,6 +494,9 @@ int main(int argc, char** argv) {
         });
         const std::filesystem::path power = std::filesystem::path("/sys/bus/pci/devices") /
             pci / "power_dpm_force_performance_level";
+        if (std::filesystem::canonical(power) != std::filesystem::canonical(kPowerPath))
+            fail("HIP device " + pci + " differs from pre-initialization power device " +
+                 kPowerPath.parent_path().filename().string());
         const std::string power_before = read_text(power);
         if (power_before != "auto") fail("projected residual qualification requires auto power");
         int runtime_version = 0;
@@ -624,6 +558,7 @@ int main(int argc, char** argv) {
                << ",\"hip_runtime_version\":" << runtime_version
                << ",\"hip_driver_version\":" << driver_version << "},\n"
                << "  \"power_profile\":{\"path\":\"" << json_escape(power.string())
+               << "\",\"before_hip_initialization\":\"auto\",\"after_correctness_before_timing\":\"auto"
                << "\",\"required\":\"auto\",\"before\":\""
                << json_escape(power_before) << "\",\"after\":\""
                << json_escape(power_after) << "\"},\n"
@@ -654,6 +589,8 @@ int main(int argc, char** argv) {
                << "  \"correctness\":{\"exact_complete_residual_bits\":true,"
                   "\"independent_fp64_represented_weight_oracle\":true,"
                   "\"status_poisoning\":true,\"canaries\":true,"
+                  "\"production_symbol\":\"ninfer::ops::projected_residual_t1\","
+                  "\"captured_graph_replays_per_shape\":3,\"graph_exact_eager_bits\":true,"
                   "\"malformed_alignment_alias_rejection\":true},\n"
                << "  \"timing\":{\"calls_per_shape_per_token\":64,"
                   "\"trials_per_arm\":12,\"disjoint_weight_copies\":3,"

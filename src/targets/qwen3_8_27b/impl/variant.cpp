@@ -7,6 +7,7 @@
 #include "ninfer/ops/gdn_gating.h"
 #include "ninfer/ops/gdn_projection.h"
 #include "ninfer/ops/mtp_pack.h"
+#include "ninfer/ops/projected_residual.h"
 #include "ninfer/ops/residual_add.h"
 #include "ninfer/ops/rmsnorm.h"
 #include "ninfer/ops/scatter.h"
@@ -16,6 +17,7 @@
 #include "ops/r9700/kv/r9700_attention_profile.h"
 #include "ops/r9700/linear/linear_execution.h"
 #include "ops/r9700/linear/r9700_linear.h"
+#include "ops/r9700/linear/r9700_q4_activation_profile.h"
 #include "targets/qwen3_8_27b/impl/r9700_full_attention.h"
 
 #include <algorithm>
@@ -256,6 +258,7 @@ struct Variant::ExecutionState::Impl {
     std::array<Slot, static_cast<std::size_t>(TextConfig::layers) * kSelectedRoleCount> slots{};
     std::size_t selected = 0;
     DeviceSpan activation{};
+    bool projected_residual_inventory_q4 = false;
 
     [[nodiscard]] static std::size_t index(SelectedLinearRole role,
                                            std::int32_t text_layer) {
@@ -294,6 +297,14 @@ Variant::ExecutionState::ExecutionState(const ModelView& model, DeviceSpan seria
     }
     auto* base = static_cast<std::byte*>(serialized_storage.data);
     impl_->activation = serialized_storage;
+    impl_->projected_residual_inventory_q4 = std::all_of(
+        model.full_layers.begin(), model.full_layers.end(), [](const auto& layer) {
+            return layer.output.qtype == QType::Q4G64_F16S &&
+                   layer.post_mixer.down.qtype == QType::Q4G64_F16S;
+        }) && std::all_of(model.gdn_layers.begin(), model.gdn_layers.end(), [](const auto& layer) {
+            return layer.output.qtype == QType::Q4G64_F16S &&
+                   layer.post_mixer.down.qtype == QType::Q4G64_F16S;
+        });
     void* const matmul = kSelectedMatmulWorkspaceBytes == 0U
                              ? nullptr
                              : static_cast<void*>(base + activation_region);
@@ -541,6 +552,36 @@ bool Variant::ExecutionState::attention_q4_pair_c2c4(
     ops::full_attention_projection_decode(
         hidden, query_key, gate_value, query, key, gate, value,
         {impl_->activation.data, required}, stream);
+    return true;
+}
+
+bool Variant::ExecutionState::projected_residual_t1(
+    const Tensor& input, const Weight& weight, Tensor& residual,
+    qwen3::TextPhase phase, bool base_text, hipStream_t stream) {
+    constexpr std::int32_t kRows = TextConfig::hidden;
+    const bool exact_shape = input.ne[0] == weight.k && input.ne[1] == 1 &&
+        input.ne[2] == 1 && input.ne[3] == 1 && residual.ne[0] == kRows &&
+        residual.ne[1] == 1 && residual.ne[2] == 1 && residual.ne[3] == 1 &&
+        weight.n == kRows && (weight.k == TextConfig::query_size ||
+                              weight.k == TextConfig::intermediate);
+    if (impl_ == nullptr || !exact_shape || !projected_residual_t1_selected(
+            ops::r9700::linear::kProjectedResidualT1CandidateEnabled,
+            ops::r9700::linear::kQ4ActivationBits,
+            impl_->projected_residual_inventory_q4, phase, base_text, 1U,
+            static_cast<std::uint32_t>(weight.n),
+            static_cast<std::uint32_t>(weight.k), weight.qtype)) {
+        return false;
+    }
+    const auto columns = static_cast<std::uint32_t>(weight.k);
+    const std::size_t required =
+        ops::projected_residual_t1_workspace_capacity_bytes(weight.k);
+    if (required == 0U || impl_->activation.data == nullptr ||
+        impl_->activation.bytes < required) {
+        throw std::invalid_argument(
+            "R9700 projected-residual T1 activation region is too small");
+    }
+    ops::projected_residual_t1(input, weight, residual,
+                               {impl_->activation.data, required}, stream);
     return true;
 }
 
@@ -863,9 +904,13 @@ std::size_t Variant::text_prefill_attention_workspace_capacity_bytes(
 #endif
 
 void Variant::attention_output_projection(const Tensor& attention, const Weight& weight,
-                                          Tensor& residual, qwen3::TextPhase,
+                                          Tensor& residual, qwen3::TextPhase phase,
                                           WorkspaceArena& workspace, hipStream_t stream,
                                           std::int32_t, ExecutionState* execution) {
+    if (execution != nullptr &&
+        execution->projected_residual_t1(attention, weight, residual, phase, true, stream)) {
+        return;
+    }
     auto scope = workspace.scope();
     Tensor delta = workspace.alloc(DType::BF16, {TextConfig::hidden, attention.ne[1]});
     serialized_linear(execution, attention, weight, delta, workspace, stream);
@@ -912,8 +957,10 @@ void Variant::mtp_fc(const Tensor& embedding_norm, const Tensor& hidden_norm, co
 void Variant::mtp_attention_output(const Tensor& attention, const Weight& weight, Tensor& residual,
                                    WorkspaceArena& workspace, hipStream_t stream, std::int32_t,
                                    ExecutionState* execution) {
-    attention_output_projection(attention, weight, residual, qwen3::TextPhase::Verify,
-                                workspace, stream, 0, execution);
+    auto scope = workspace.scope();
+    Tensor delta = workspace.alloc(DType::BF16, {TextConfig::hidden, attention.ne[1]});
+    serialized_linear(execution, attention, weight, delta, workspace, stream);
+    ops::residual_add(delta, residual, stream);
 }
 
 void Variant::gdn_input_projection(const Tensor& hidden, const GdnProjectionWeights& weights,
@@ -1048,9 +1095,13 @@ void Variant::gdn_input_projection_record(
 }
 
 void Variant::gdn_output_projection(const Tensor& hidden, const Weight& weight, Tensor& residual,
-                                    qwen3::TextPhase, WorkspaceArena& workspace,
+                                    qwen3::TextPhase phase, WorkspaceArena& workspace,
                                     hipStream_t stream, std::int32_t,
                                     ExecutionState* execution) {
+    if (execution != nullptr &&
+        execution->projected_residual_t1(hidden, weight, residual, phase, true, stream)) {
+        return;
+    }
     auto scope = workspace.scope();
     Tensor delta = workspace.alloc(DType::BF16, {TextConfig::hidden, hidden.ne[1]});
     serialized_linear(execution, hidden, weight, delta, workspace, stream);
@@ -1116,6 +1167,11 @@ void Variant::post_mixer(const Tensor& hidden, const PostMixerWeights& weights, 
     }
     {
         auto delta_scope = workspace.scope();
+        if (execution != nullptr && text_layer >= 0 &&
+            execution->projected_residual_t1(
+                activation, weights.down, residual, phase, true, stream)) {
+            return;
+        }
         Tensor delta = workspace.alloc(DType::BF16, {TextConfig::hidden, hidden.ne[1]});
         serialized_linear(execution, activation, weights.down, delta, workspace, stream,
                           phase == qwen3::TextPhase::Verify && dflash_target_verify);

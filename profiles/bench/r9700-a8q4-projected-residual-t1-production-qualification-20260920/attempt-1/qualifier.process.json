@@ -1,0 +1,31 @@
+{
+  "name": "qualifier",
+  "argv": [
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700/src/ninfer_r9700_a8q4_projected_residual_t1_qual",
+    "--out-json",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-20260920/attempt-1/qualification.json",
+    "--assembly",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-20260920/attempt-1/qual.s",
+    "--static-receipt",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-20260920/attempt-1/static-receipt.txt",
+    "--compile-receipt",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-20260920/attempt-1/compile-receipt.json",
+    "--package",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-20260920"
+  ],
+  "started_unix_ns": 1789959338967503222,
+  "exit_code": 1,
+  "pid": 1633718,
+  "error": "RuntimeError: qualifier exited 1",
+  "finished_unix_ns": 1789959339112362900,
+  "stdout": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-20260920/attempt-1/qualifier.stdout",
+    "bytes": 215,
+    "sha256": "2e925106872f692d5c8080088dd683df4ed266d24312bad280f3fd590dd98c78"
+  },
+  "stderr": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-20260920/attempt-1/qualifier.stderr",
+    "bytes": 104,
+    "sha256": "0e33da56b7c3534518e9c6d6ffa6dffb5368e138fc3b157e54f7373b07e74e7f"
+  }
+}

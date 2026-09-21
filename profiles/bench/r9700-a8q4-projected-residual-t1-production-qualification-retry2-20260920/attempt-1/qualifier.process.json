@@ -1,0 +1,30 @@
+{
+  "name": "qualifier",
+  "argv": [
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700/src/ninfer_r9700_a8q4_projected_residual_t1_qual",
+    "--out-json",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry2-20260920/attempt-1/qualification.json",
+    "--assembly",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry2-20260920/attempt-1/qual.s",
+    "--static-receipt",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry2-20260920/attempt-1/static-receipt.txt",
+    "--compile-receipt",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry2-20260920/attempt-1/compile-receipt.json",
+    "--package",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry2-20260920"
+  ],
+  "started_unix_ns": 1789960184571016459,
+  "exit_code": 0,
+  "pid": 1660851,
+  "finished_unix_ns": 1789960185147192684,
+  "stdout": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry2-20260920/attempt-1/qualifier.stdout",
+    "bytes": 276,
+    "sha256": "29aa935d134a49a14e5f6b68ac484db3e5abf5724b484810383b53b4f2e89c3c"
+  },
+  "stderr": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry2-20260920/attempt-1/qualifier.stderr",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

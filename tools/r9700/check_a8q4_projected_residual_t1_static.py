@@ -21,6 +21,8 @@ def main() -> int:
     require(len(symbols) == 1,
             f"expected one exact projected-residual kernel, found {len(symbols)}")
     symbol = symbols[0]
+    require(symbol.startswith("_ZN6ninfer3ops5r97006linear"),
+            "projected-residual kernel must be owned by the linked R9700 linear implementation")
     body_match = re.search(
         rf"^\s*\.globl\s+{re.escape(symbol)}.*?^\s*\.size\s+{re.escape(symbol)},",
         text, re.MULTILINE | re.DOTALL)
