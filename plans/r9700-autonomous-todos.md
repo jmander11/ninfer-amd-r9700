@@ -203,6 +203,13 @@ declared dependencies. No absolute prefill-ceiling proof is required before proc
   FP64 oracle, G16/G32, and graph/workspace correctness. Require whole8K confirmation before
   rebuilding/rebinding the affected chunk campaign. This concrete mechanism reopens bounded
   prefill work; the accepted P2048 target itself remains unblocked.
+  Attribution completed: `profiles/rocprof/r9700-chunked-prefill-attribution-20260921/run/closure.json`
+  records 112 serial causal-attention calls totaling `39087.580 ms` of `43838.812 ms`
+  Text-prefill wall time (89.16%); Q4 CTAs total `3237.931 ms`. Eight Text chunks and zero
+  MTP ranges are confirmed. Unattributed kernel time is only `0.294 ms`, but the analyzer's
+  incomplete flag is retained. Profiled times establish ownership, not speed admission.
+  Implement bounded query panels with the existing tiled QK/max/PV arithmetic, then compare
+  unprofiled whole8K against the retained baseline; no further owner-discovery trace is needed.
 
 Every future physical experiment must be launched through a reviewed package-local `commands.sh`,
 not an ad-hoc reconstructed command. A package is runnable only when its plan contains no
