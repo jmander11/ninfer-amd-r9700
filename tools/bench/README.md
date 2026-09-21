@@ -621,16 +621,25 @@ run_mixed_selection_pair 32 build-r9700-dense-selection-g32 \
 # the base recipe.
 # The selected binary applies XAttention only to ordinary Phase::Prefill (including DFlash feature
 # capture); DFlash proposal attention and target/tree verification remain dense in every build.
-## There is currently no runnable production DFlash campaign command. The old
-## `profiles/bench/selected-dflash-prepare-20260905` package hard-codes canonical Q4 and K1..11;
-## it is superseded and must not be run, resumed, or rebound. Its replacement must compare
-## canonical Q4G64, source-MSE Q4G64, and source-MSE W8G32 directly from the real BF16 DFlash2
-## checkpoint, admit row-scaled E4M3 only with supporting physical/quality evidence, preserve the
-## BF16 selector codebooks/private state, and schedule exactly K4/W5 and K5/W6 at C=1..4.
-
-# Do not run the old K7/W12 feasibility example. A recipe-aware replacement may add separate
-# K4/W5 and K5/W6 feasibility commands only after the current prefill qualifier and terminal
-# base/chunk dependencies close.
+# Prepare only after real terminal base and receipt-bound chunk selection. The fresh benchmark
+# and planner must include all nine evaluation companion identities and match selected G/profile.
+# Conversion is explicitly CPU-only Python 3.11; provide a local dependency path if necessary.
+# Output is a new recipe-separated namespace. Preparation does not materialize or launch a GPU run.
+/home/battlefront/.local/bin/python3.11 -m tools.bench.prepare_selected_dflash prepare \
+  --selection /absolute/path/to/terminal-base.json \
+  --bench /absolute/path/to/fresh-build/bench/ninfer_bench \
+  --planner /absolute/path/to/fresh-build/src/ninfer_r9700_runtime_planner_qual \
+  --conversion-python /home/battlefront/.local/bin/python3.11 \
+  --conversion-pythonpath /absolute/path/to/cpu-python311/site-packages \
+  --out /absolute/path/to/new-dflash-campaign
+# Inspect the generated commands.sh before explicit execution. It creates canonical Q4,
+# source-MSE Q4, and source-MSE W8 companions, each preserving base payloads, optimized
+# 131072-row head/token map, BF16 selector codebooks and private BF16 state.
+# Exactly K4/W5 and K5/W6 are screened. Capacity declares per-cell eligible concurrency;
+# C1 material screens precede full followups. No K4 C1 win means no full followup.
+# Generated execution is create-only: it never resumes or overwrites an existing failed matrix.
+# Preserve failed attempts; use a fresh campaign namespace for another physical attempt.
+# Historical profiles/bench/selected-dflash-prepare-20260905 is superseded: never resume it.
 
 # Run only the MTP draft-window sweep.
 python3 tools/bench/run_ninfer_bench_matrix.py --preset full --suite mtp_sweep \
@@ -1157,18 +1166,13 @@ the schema-v14 manifest and each raw command bind that same value. Capacity vali
 requires the runtime's nonzero Device Graph allowance and its measured allocation, rejects an
 observed allocation above the plan, and retains both byte values in the flattened row.
 
-The existing `dflash-pareto` preset is retained implementation support, not the current selection
-authority, because it and the assembler still encode the superseded fixed-Q4/K1..11 campaign.
-DFlash proposal quality is acceptance, not target PPL. A replacement preset requires an explicit
-startup-fixed K in `{4,5}`, records resolved W in `{5,6}`, and binds the independently selected
-BF16-source DFlash matrix recipe. The currently registered canonical-Q4 controls are:
-`qwen3.8-27b/r9700-q4g64-n16k16-dflash2-q4-eval` or
-`qwen3.8-27b/r9700-q4-w8-mse-n16k16-dflash2-q4-eval`, or
-`qwen3.8-27b/r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval`. These do not select the
-production DFlash recipe. The third control is intentionally absent until schema-v7 selects its
-authority-bound hybrid base; it may not reuse either existing companion. Dry runs remain path-only
-and cannot authorize a physical campaign.
-For each fixed C=1..4 it retains matched 8K/32K DFlash prefill and graph-decode throughput,
+The `dflash-pareto` preset admits the nine registered companions (three base recipes times
+canonical Q4G64, source-MSE Q4G64, and source-MSE W8G32 append recipes), using exactly K4/W5
+or K5/W6. Artifact inspection binds the append conversion to the exact terminal base and BF16
+DFlash source; artifact identity alone does not select a production recipe. Dry runs remain
+path-only and cannot authorize a physical campaign. Capacity decisions declare the eligible C
+subset including C1; missing reports for that subset fail rather than silently reducing it.
+For each declared fixed C it retains matched 8K/32K DFlash prefill and graph-decode throughput,
 per-position acceptance, and an ordinary greedy decode control over identical prompts. It also
 retains fresh-prompt DFlash whole inference and a separate exact spec-none ordinary `--whole-pg`
 control. Both controls use `--draft-tokens 0`, with no `--spec` or draft-head flag. Whole-route
@@ -1187,31 +1191,33 @@ first rejects, depth, and finite-logit health. Each also retains the ordered per
 IDs, parent topology, and aligned licensed target tokens. The runner binds both diagnostics to the
 exact artifact bytes, benchmark executable bytes, report hash, activation/attention profile,
 K/W/head, and concurrency, then requires exact proposal traces and final target outputs across the
-two executions. `dflash-generated-quality.json` binds those diagnostics and the C=1..4 ordinary
+two executions. `dflash-generated-quality.json` binds those diagnostics and the declared-C ordinary
 output parity artifact into one generated-behavior gate. It records target-model NLL as not
 applicable: DFlash changes proposal execution rather than the teacher-forced target distribution,
 whose BF16-source comparison remains owned by the base artifact PPL campaign. Diagnostic timing is
 explicitly ineligible for performance comparison.
 
-The replacement assembler must reopen the schema-v20 reports and schema-v14 manifests and bind the
-base, BF16 DFlash source, selected matrix recipe, companion, executable, cache group, and K/W. The
-current `assemble_dflash_selection.py` cannot publish the new decision until regenerated.
-Capacity inputs cover exactly K4/W5 and K5/W6 recipe pairs, including exact retained failure
-provenance for excluded pairs; performance inputs cover exactly the pairs with complete C=1..4
-effective maxima. Every eligible profile must retain all 22 phase/whole/control/diagnostic points,
-exact C=1..4 ordinary-output parity, exact repeated proposal and licensed-target traces, and the
-bound generated-quality gate. Capacity admission and generated-quality/acceptance remain separate
-from speed admission. For every capacity-eligible K/W, the assembler matches its DFlash and exact
-spec-none ordinary whole/decode rows by prompt, generated length, and C. It requires at least a
-`1.02x` raw-mean speedup and a strictly positive two-standard-deviation conservative speedup in
-every 8K/32K C=1..4 whole and decode cell; equality, noise-overlap, or one materially regressed cell
-rejects that K/W from promotion. The schema-v3 output preserves the
-speed-eligible objective frontier and chooses the static K/W by maximizing the worst normalized
-whole-inference throughput over all 8K/32K and C=1..4 cells, then worst normalized capacity over
-C=1..4, then worst normalized acceptance length over the matched decode cells. A complete numerical
-tie selects the first numeric `(K, W)` tuple. No workload weights are introduced: exact quality is
-mandatory, positive matched ordinary speed is mandatory, and acceptance breaks ties only after
-end-to-end throughput and supported capacity.
+The schema-v4 assembler reopens all raw reports and manifests. Inputs are keyed by recipe/K/W:
+three `--recipe RECIPE CONVERSION SHORTLIST` bindings, six `--capacity RECIPE K W DIR` bindings,
+and `--c1` / `--pareto` bindings with the same four arguments for the explicitly advanced cells.
+Capacity errors retain exact failed command/log evidence; they exclude only the affected C cell.
+The preparation stages are `advance-capacity`, `advance-c1`, and `advance-pareto`, each using
+`--plan plan.json`. The latter generates the complete assembly command. They never infer an
+eligible subset from successful measurement files. All declared phase/control/diagnostic points,
+exact ordinary-output parity, repeated proposal/licensed-target determinism and generated-quality
+evidence are mandatory.
+
+At each C, both 8K/32K whole and isolated-decode means must exceed same-build ordinary controls
+by at least 1.02x, with a strictly positive two-standard-deviation conservative speedup.
+Missing evidence fails the campaign; slower measured C cells retain explicit exclusions without
+erasing a valid C1 result. Full followups require an observed material K4/W5 C1 route.
+The primary C1 frontier winner maximizes worst normalized whole throughput, then capacity, then
+acceptance, with canonical recipe/K/W order breaking exact ties. Per-C frontiers and the primary
+winner's unsupported/slower C cells remain visible. This is evaluation evidence, not dynamic
+recipe switching, one all-C resident artifact, or final production promotion.
+`validate_final_cutover_admission.py` therefore rejects both historical schema-v3 selection and
+the schema-v4 evaluation report: final cutover still requires a separately qualified single-resident
+companion and its supported-capacity contract.
 
 The `concurrency` preset is a phase decomposition, not a whole-request latency measurement. Its
 prefill cases submit `C` Engine requests concurrently. Pure and context decode cases exclude their

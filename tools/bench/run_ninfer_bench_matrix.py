@@ -734,6 +734,14 @@ def validate_fp8_hybrid_performance_contract(args: argparse.Namespace) -> None:
     elif args.preset in ("low-context-prefill", "dflash-shortlist"):
         if args.concurrency != [1]:
             raise SystemExit(f"hybrid {args.preset} evidence requires exactly C=1")
+        if (not args.prefill_chunk or len(args.prefill_chunk) != 1
+                or args.prefill_chunk[0] not in PRODUCTION_PREFILL_CHUNKS):
+            raise SystemExit(f"hybrid {args.preset} requires one selected prefill chunk")
+    elif args.preset == "dflash-pareto":
+        if (not args.concurrency or 1 not in args.concurrency
+                or sorted(set(args.concurrency)) != args.concurrency
+                or any(c not in PRODUCT_CONCURRENCIES for c in args.concurrency)):
+            raise SystemExit("hybrid DFlash Pareto requires a declared sorted C subset including C1")
         if (
             not args.prefill_chunk
             or len(args.prefill_chunk) != 1
@@ -2398,7 +2406,8 @@ def validate_bound_diagnostic(
         "compiled": {
             key: json.loads(report_path.read_text(encoding="utf-8")).get("config", {}).get(key)
             for key in (
-                "kv_cache_format", "kv_value_group", "q4_activation_bits", "w8_activation_bits",
+                "kv_cache_format", "kv_value_group", "q4_activation_bits",
+                "q4_prefill_cta_profile", "w8_activation_bits",
                 "fp8_qk_wmma_enabled", "fp8_qk_wmma_profile",
                 "fp8_qk_wmma_t1_min_context", "fp8_qk_wmma_t2_min_context",
             )
@@ -2516,9 +2525,16 @@ def write_dflash_quality_evidence(
     *,
     artifact: dict[str, Any],
     bench: dict[str, Any],
+    required_concurrency: Sequence[int] = PRODUCT_CONCURRENCIES,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Assemble the generated-output DFlash quality gate from bound raw evidence."""
 
+    required_concurrency = list(required_concurrency)
+    if (not required_concurrency or 1 not in required_concurrency
+            or sorted(set(required_concurrency)) != required_concurrency
+            or any(type(c) is not int or c not in PRODUCT_CONCURRENCIES
+                   for c in required_concurrency)):
+        raise ValueError("DFlash quality requires a declared sorted C subset including C1")
     failures: list[dict[str, Any]] = []
     if parity.get("artifact") != artifact or parity.get("benchmark_executable") != bench:
         failures.append({"error": "ordinary/DFlash parity provenance mismatch"})
@@ -2530,7 +2546,7 @@ def write_dflash_quality_evidence(
         parity_rows = []
     expected_parity_cells = {
         (phase, concurrency) for phase in ("decode", "whole")
-        for concurrency in PRODUCT_CONCURRENCIES
+        for concurrency in required_concurrency
     }
     observed_parity_cells = {
         (row.get("phase"), row.get("concurrency")) for row in parity_rows
@@ -2540,7 +2556,7 @@ def write_dflash_quality_evidence(
         parity.get("artifact_type") == "ninfer_dflash_ordinary_greedy_parity"
         and parity.get("schema_version") == 2
         and parity.get("pass") is True
-        and len(parity_rows) == 2 * len(PRODUCT_CONCURRENCIES)
+        and len(parity_rows) == 2 * len(required_concurrency)
         and observed_parity_cells == expected_parity_cells
         and all(
             isinstance(row, dict)
@@ -2641,7 +2657,7 @@ def write_dflash_quality_evidence(
                 "exact ordinary/DFlash whole generation including first output and isolated "
                 "post-seed decode outputs for every repetition and lane"
             ),
-            "concurrency": list(PRODUCT_CONCURRENCIES),
+            "concurrency": required_concurrency,
             "evidence": {
                 "path": str(out_dir / "greedy-token-parity.json"),
                 "sha256": file_sha256(out_dir / "greedy-token-parity.json"),
@@ -3992,6 +4008,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 determinism_payload,
                 artifact=artifact_provenance,
                 bench=bench_provenance,
+                required_concurrency=args.concurrency,
             )
             failures.extend(
                 {"case": "dflash_generated_quality", **failure}

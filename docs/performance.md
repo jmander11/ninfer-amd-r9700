@@ -535,28 +535,32 @@ one-block chain and five predictions verified in a width-six one-block chain. Th
 C=1 shortlist and its derived broad frontier/capacity campaign are superseded; do not run or
 regenerate them. After a short recipe screen, each surviving recipe/K pair receives exact
 ordinary-output parity, proposal determinism, generated-quality, acceptance, whole-throughput, and
-C=1..4 capacity evidence. Missing capacity excludes only the exact recipe/K pair when its failed
-command and logs are retained. Matched 8K/32K DFlash decode and retained-token fresh-prompt whole
-inference use exact spec-none ordinary controls at C=1..4.
+C=1..4 capacity evidence. Missing capacity excludes only the exact recipe/K/concurrency cell when
+its failed command and logs are retained. Capacity decisions declare each candidate's eligible
+concurrency subset; it must include C1 to advance. Matched 8K/32K DFlash decode and retained-token
+fresh-prompt whole inference use same-build exact spec-none ordinary controls at every declared C.
 
 The replacement decision authority must bind the base decision through each conversion report to
 the exact terminal winner, BF16 DFlash source, DFlash matrix recipe, companion artifact,
 executable, cache group, and K/W. It must reopen every retained report and recompute recipe
 eligibility, exact ordinary-output parity, exact repeated proposal/target determinism, and
-generated-quality evidence. The current schema-v3 assembler and selected-DFlash preparation are
-fixed-Q4/K1..11 implementations and are not valid authorities for this replacement campaign until
-regenerated consistently. Whole parity covers the complete requested generation
+generated-quality evidence. `prepare_selected_dflash.py` now prepares three recipe-separated,
+create-only CPU conversions using an explicit Python 3.11 environment and a fresh matching
+benchmark/planner build. Its schema-v2 plan validates the real terminal base and chunk before
+conversion. The schema-v4 `assemble_dflash_selection.py` recomputes the resulting evidence;
+historical fixed-Q4/K1..11 packages remain superseded. Whole parity covers the complete requested generation
 including its first output token; isolated decode parity covers all 257 post-seed outputs, with seed
-equality inherited from deterministic whole-route parity. Before frontier ranking, every K/W must provide at least
+equality inherited from deterministic whole-route parity. Before frontier ranking, each admitted cell must provide at least
 `1.02x` raw-mean speedup and a strictly positive two-standard-deviation conservative speedup over
-its matching ordinary route in every 8K/32K C=1..4 whole and decode cell. Capacity, acceptance,
-quality, and speed remain distinct gates. Its retained frontier treats every whole-throughput,
-capacity, and acceptance cell as a separate maximize objective. The static winner maximizes the
-worst normalized 8K/32K C=1..4 whole-throughput ratio, then worst normalized C=1..4 capacity,
-then worst normalized matched acceptance length. Numeric `(K, W)` resolves only a complete tie.
-No average or workload weighting may replace this rule. The DFlash gate closes only when this
-record passes; a shortlist row, capacity summary, or manually chosen frontier member is not a
-selection result.
+its matching ordinary route in both 8K/32K whole and decode measurements. C1 material screens run
+first; no full followup is licensed without a material K4/W5 C1 route. Missing measurements for a
+declared eligible C are failures, never inferred capacity exclusions. Capacity, acceptance,
+quality, and speed remain distinct gates. The primary evaluation winner is the C1 frontier member
+maximizing worst normalized 8K/32K whole throughput, then capacity, then matched acceptance;
+canonical recipe/K/W order breaks only a complete tie. Separate per-concurrency frontiers retain
+all exclusions, including a primary winner that is unsupported or slower at C2..4. This is not
+dynamic recipe switching, an all-C production claim, or final production promotion. Choosing the
+sole resident companion under a selected supported-capacity contract remains a separate decision.
 
 The first kernel hypothesis after prefill closes is a packed-W4 small-T route. Current A8Q4 WMMA
 uses a 16-token tile, so C1 K4/K5 proposal/head calls and W5/W6 DFlash/target calls leave most token

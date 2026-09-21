@@ -291,11 +291,14 @@ format peak throughput.
 
 The production DFlash K/W is not encoded in an evaluation artifact and cannot be chosen from a
 filename or old shortlist rank. Active R9700 selection is restricted to K4/W5 and K5/W6, both
-one-block chains. The prior fixed-Q4 K1..11 preparation and schema-v3 assembler contract are
-superseded and must be regenerated as a recipe-aware two-width authority after the base schema-v7
-`terminal_production_selection` and receipt-bound chunk selection. Only that replacement
-authority, after C1..4 capacity, parity, determinism, acceptance, generated-quality, and matched
-whole-speed evidence, may select the production companion and width.
+one-block chains. The prior fixed-Q4 K1..11 preparation and schema-v3 assembler are superseded.
+The recipe-aware preparation requires the base schema-v7 `terminal_production_selection` and
+receipt-bound chunk selection, and produces three independent CPU conversion commands. Its
+schema-v4 assembler records the primary C1 evaluation winner and per-concurrency frontiers after
+capacity, parity, determinism, acceptance, generated-quality, and matched whole/decode-speed gates.
+Capacity excludes only individual recipe/K/W/concurrency cells; missing declared measurements
+fail closed. The report is evaluation-only, not dynamic recipe switching or final admission of
+one production companion across every concurrency.
 
 The ranking is exactly one 248,320-column little-endian I64 total-frequency row. The builder accepts
 explicit `.ids` paths, discovers each sibling manifest, and validates Qwen3.8 tokenizer identity,

@@ -978,20 +978,23 @@ unresolved tradeoff or the product contract must change.
   Benchmark admission now validates all nine companion identities against their exact base and
   recipe receipts; schema2 shortlist permits only K4/W5 and K5/W6. Independent review SHIP,
   80 focused benchmark/prefill CPU tests pass, and selected2048 authority revalidates unchanged.
-  This is a runner milestone, not a runnable end-to-end DFlash campaign. Active next-tool work:
-  explicit Python 3.11 CPU conversion and recipe-separated plans in
-  `prepare_selected_dflash.py`; recipe+K/W candidate keys and per-cell capacity exclusions in
-  `assemble_dflash_selection.py` (all under `tools/bench`). `tools/ppl/run.py` already accepts the
-  new identities: add distinct append-conversion provenance only where companion inspection needs
-  it, never classify companions as N16 migrations or base Pareto candidates. Protect recipe/format/
-  base-receipt mismatches, cross-recipe evidence mixing, and retained-report selection with the
-  existing focused tests. Base PPL owns target NLL; DFlash selection owns acceptance/generated output.
+  The selected successor tools are now implemented: `tools/bench/prepare_selected_dflash.py`
+  creates three recipe-separated CPU conversions and create-only two-width campaigns;
+  `assemble_dflash_selection.py` binds recipe+K/W, declared capacity-eligible C subsets, exact
+  public parity, and matched speed. Primary C1 winner/per-C frontiers are evaluation only, not
+  runtime recipe switching or all-C production admission. Independent review SHIP; 102 unit and
+  14 cutover tests pass, including actual diagnostic writer/validator roundtrips and failed-output
+  preservation. Exact commands are in `tools/bench/README.md`. Physical launch still needs the real
+  terminal base and a fresh recipe-aware benchmark/planner build (old panel binaries lack new IDs).
+  Final cutover rejects superseded schema3 and evaluation-only schema4: separately qualify one
+  resident companion and its supported capacity before final admission. Base PPL owns target NLL;
+  DFlash evaluation owns acceptance/generated output. Never add companions to base Pareto candidates.
   W8 feature/QKV/output/conv/selector shapes currently use existing BF16×W8 execution, not
   unqualified A8 routes. Qualify exact DFlash shapes and widths before any speed/accuracy claim.
   Python 3.11 CPU conversion dependencies are available without installation via
   `PYTHONPATH=/ssdpool2nvme/local_llm/ninfer/out/numerical-reference-venv/lib/python3.11/site-packages`
   with `/home/battlefront/.local/bin/python3.11` (explicit CPU only; torch is CUDA, not ROCm).
-  Fresh BF16 GPU reference still requires a Python 3.11 ROCm environment if chunk4096 is not selected.
+  The separate Python 3.11 ROCm reference environment is now installed and qualified; see QUALITY-8K32K.
 
 - [ ] `DFLASH-QUALITY` [depends: DFLASH-RECIPE, DFLASH-TEXT-P129] For each
   surviving companion retain aligned target/draft outputs, deterministic proposals and final target

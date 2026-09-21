@@ -34,48 +34,29 @@ from tools.bench.run_ninfer_bench_matrix import (
     write_dflash_greedy_parity,
     write_dflash_quality_evidence,
     write_dflash_shortlist,
+    DFLASH_COMPANIONS,
+    DFLASH_PRODUCTION_PROFILES,
+    DFLASH_SHORTLIST_SCHEMA_VERSION,
+    inspect_artifact,
+    inspect_executable,
+    bind_n16_migration_receipt,
+    require_dflash_companion,
 )
+from tools.bench.prefill_chunk_authority import validate_prefill_chunk_authority
+from tools.convert.qwen3_8_27b_r9700 import dflash2_matrix_recipes
 from tools.ppl.assemble_pareto import _missing_capacity_provenance
 from tools.ppl.assemble_pareto import _manifest_prefill_chunk
 from tools.ppl.pareto import validate_terminal_production_authority
 
 
 ARTIFACT_TYPE = "ninfer_r9700_dflash_selection"
-SCHEMA_VERSION = 3
-RULE = "material_conservative_matched_ordinary_speed_then_maximin_v3"
+SCHEMA_VERSION = 4
+RULE = "qualified_recipe_kw_primary_c1_and_per_concurrency_maximin_v4"
 MATERIAL_SPEEDUP = 1.02
 UNCERTAINTY_SIGMAS = 2.0
-DFLASH_RECIPE_ID = "r9700-dflash2-all-q4g64-n16k16-bf16-codebook-eval-v1"
-DFLASH_COMPANION_BY_BASE = {
-    "r9700-q4g64-n16k16-eval": "r9700-q4g64-n16k16-dflash2-q4-eval",
-    "r9700-q4-w8-mse-n16k16-eval": "r9700-q4-w8-mse-n16k16-dflash2-q4-eval",
-    "r9700-q4g64-f8e4m3-four-role-n16k16-eval":
-        "r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval",
-}
+RECIPES = tuple(recipe.key for recipe in dflash2_matrix_recipes.RECIPES)
 
 
-def _base_migration_authority(artifact: dict[str, Any]) -> dict[str, Any]:
-    receipt = artifact.get("conversion_receipt")
-    from tools.ppl.run import validate_n16_receipt_summary
-    validate_n16_receipt_summary(receipt, artifact.get("weights_id"))
-    fields = ("recipe_id", "object_plan_sha256", "source_artifact_sha256",
-              "source_receipt_sha256", "transcoder_sha256")
-    if (not isinstance(receipt, dict) or not isinstance(receipt.get("path"), str)
-            or not isinstance(receipt.get("sha256"), str)
-            or any(not isinstance(receipt.get(name), str) for name in fields)):
-        raise ValueError("selected N16 base lacks its migration authority")
-    result = {"receipt": {"path": receipt["path"], "sha256": receipt["sha256"]},
-              **{name: receipt[name] for name in fields}}
-    if artifact.get("weights_id") == "r9700-q4g64-f8e4m3-four-role-n16k16-eval":
-        hybrid = ("selection_sha256", "source_index_sha256", "source_ranking_sha256")
-        if any(not isinstance(receipt.get(name), str) for name in hybrid):
-            raise ValueError("selected hybrid base lacks its selection authority")
-        result.update({name: receipt[name] for name in hybrid})
-    else:
-        if not isinstance(receipt.get("receipt_producer_sha256"), str):
-            raise ValueError("selected N16 base lacks its receipt producer authority")
-        result["receipt_producer_sha256"] = receipt["receipt_producer_sha256"]
-    return result
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -122,7 +103,7 @@ def _matrix(root: Path, preset: str, k: int | None = None, w: int | None = None,
         or value.get("schema_version") != MATRIX_SCHEMA_VERSION
         or value.get("preset") != preset
         or value.get("dry_run") is not False
-        or value.get("failures")
+        or (not allow_failures and value.get("failures"))
         or (not allow_failures and (root / "failures.json").is_file())
     ):
         raise ValueError(f"{path} is not a physical schema-v{MATRIX_SCHEMA_VERSION} {preset} matrix")
@@ -192,7 +173,10 @@ def _same_campaign(
             raise ValueError("hybrid planner does not bind the benchmark build root")
         _validate_physical_identity(build["cmake_cache"], "hybrid CMake cache")
         _validate_physical_identity(build["compile_commands"], "hybrid compile commands")
-        if base_hybrid_shared_workspace_authority(observed) != hybrid_authority:
+        projected = base_hybrid_shared_workspace_authority(observed)
+        if any(projected[key] != hybrid_authority[key] for key in (
+            "maximum_concurrency", "prefill_chunks", "inventories_by_prefill_chunk",
+        )):
             raise ValueError("hybrid DFlash campaign planner differs from selected base")
     elif (
         manifest.get("required_candidate_identity") is not None
@@ -237,12 +221,16 @@ def _selected_hybrid_authority(
 
 
 def _records(root: Path, manifest: dict, preset: str, k: int, w: int,
-             prefill_chunk: int, *, allow_missing: bool = False) -> dict[int, list[dict]]:
+             prefill_chunk: int, *, allow_missing: bool = False,
+             required_concurrency: Sequence[int] = PRODUCT_CONCURRENCIES) -> dict[int, list[dict]]:
     cases = {
         (case.suite, case.name): case
         for case in build_cases(preset, k, w, production_prefill_chunk=prefill_chunk)
     }
-    expected_c = list(PRODUCT_CONCURRENCIES) if preset != "dflash-shortlist" else [1]
+    expected_c = list(required_concurrency) if preset != "dflash-shortlist" else [1]
+    if (not expected_c or sorted(set(expected_c)) != expected_c
+            or any(type(c) is not int or c not in PRODUCT_CONCURRENCIES for c in expected_c)):
+        raise ValueError("invalid declared concurrency set")
     if manifest.get("concurrency") != expected_c:
         raise ValueError(f"{root} does not bind the required concurrency set")
     expected = {
@@ -377,6 +365,7 @@ def _validate_shortlist_output(
             Path(record["report"]), cases[(record["suite"], record["case"])],
             manifest["expected_kv_value_group"], 8, 8, True, record["concurrency"],
             artifact, record["command"],
+            manifest["expected_xattention_profile"],
         ))
     parity_path = root / "greedy-token-parity.json"
     parity = _load(parity_path)
@@ -408,6 +397,7 @@ def _validate_shortlist_output(
 
 def _auxiliary(
     root: Path, manifest: dict, artifact: dict, bench: dict, k: int, w: int,
+    required_concurrency: Sequence[int] = PRODUCT_CONCURRENCIES,
 ) -> dict:
     parity_path = root / "greedy-token-parity.json"
     determinism_path = root / "dflash-proposal-determinism.json"
@@ -423,10 +413,10 @@ def _auxiliary(
         parity.get("artifact_type") != "ninfer_dflash_ordinary_greedy_parity"
         or parity.get("schema_version") != 2
         or not isinstance(comparisons, list)
-        or len(comparisons) != 2 * len(PRODUCT_CONCURRENCIES)
+        or len(comparisons) != 2 * len(required_concurrency)
         or {(row.get("phase"), row.get("concurrency")) for row in comparisons}
         != {(phase, concurrency) for phase in ("decode", "whole")
-            for concurrency in PRODUCT_CONCURRENCIES}
+            for concurrency in required_concurrency}
         or any(row.get("draft_tokens") != k or row.get("dflash_verify_width") != w
                or row.get("includes_seed") is not (row.get("phase") == "whole")
                or row.get("exact") is not True
@@ -445,6 +435,7 @@ def _auxiliary(
         quality.get("artifact_type") != "ninfer_dflash_generated_quality_evidence"
         or quality.get("schema_version") != 1
         or quality.get("target_output_gate", {}).get("pass") is not True
+        or quality.get("target_output_gate", {}).get("concurrency") != list(required_concurrency)
         or quality.get("proposal_gate", {}).get("pass") is not True
         or quality.get("target_output_gate", {}).get("evidence") != _identity(parity_path)
         or quality.get("proposal_gate", {}).get("determinism_evidence") != _identity(determinism_path)
@@ -461,6 +452,7 @@ def _auxiliary(
         recomputed_quality, quality_failures = write_dflash_quality_evidence(
             temporary, manifest["commands"], recomputed_parity, recomputed_determinism,
             artifact=artifact, bench=bench,
+            required_concurrency=required_concurrency,
         )
     recomputed_quality["target_output_gate"]["evidence"]["path"] = str(parity_path)
     recomputed_quality["proposal_gate"]["determinism_evidence"]["path"] = str(
@@ -503,7 +495,8 @@ def _normalized(name: str, values: dict[str, dict], frontier: list[str]) -> dict
     return result
 
 
-def _matched_ordinary_speed_gate(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
+def _matched_ordinary_speed_gate(rows: Sequence[dict[str, Any]],
+                                 required_concurrency: Sequence[int] = PRODUCT_CONCURRENCIES) -> dict[str, Any]:
     """Require material, uncertainty-separated whole and decode wins at every product cell."""
 
     suites = (
@@ -545,10 +538,10 @@ def _matched_ordinary_speed_gate(rows: Sequence[dict[str, Any]]) -> dict[str, An
     expected = {
         (prompt, 256, concurrency)
         for prompt in (8192, 32768)
-        for concurrency in PRODUCT_CONCURRENCIES
+        for concurrency in required_concurrency
     }
     if any(set(by_suite[suite]) != expected for suite in suites):
-        raise ValueError("DFlash matched speed gate lacks exact 8K/32K C1..4 cells")
+        raise ValueError("DFlash matched speed gate lacks exact declared 8K/32K concurrency cells")
 
     raw_ratios: dict[str, dict[str, float]] = {"whole": {}, "decode": {}}
     conservative: dict[str, dict[str, float]] = {"whole": {}, "decode": {}}
@@ -590,11 +583,11 @@ def _matched_ordinary_speed_gate(rows: Sequence[dict[str, Any]]) -> dict[str, An
         "criterion": (
             "at least 1.02x raw mean speedup and a strictly positive two-standard-deviation "
             "lower-bound speedup for both exact whole-request and isolated decode controls at "
-            "every 8K/32K C1..4 cell"
+            "every declared 8K/32K concurrency cell"
         ),
         "material_speedup": MATERIAL_SPEEDUP,
         "uncertainty_sigmas": UNCERTAINTY_SIGMAS,
-        "required_concurrency": list(PRODUCT_CONCURRENCIES),
+        "required_concurrency": list(required_concurrency),
         "required_prompt_tokens": [8192, 32768],
         "required_generated_tokens": 256,
         "raw_mean_speedup_by_phase_and_cell": raw_ratios,
@@ -606,306 +599,310 @@ def _matched_ordinary_speed_gate(rows: Sequence[dict[str, Any]]) -> dict[str, An
     }
 
 
-def assemble(
-    base_selection: Path, conversion_report: Path, shortlist_root: Path,
-    capacity_inputs: Sequence[tuple[int, int, Path]],
-    pareto_inputs: Sequence[tuple[int, int, Path]],
-) -> dict[str, Any]:
-    group, text_prefill_profile, base_recipe, base = _selected_base(base_selection)
-    prefill_chunk = base["selected_prefill_chunk"]
-    hybrid_authority = _selected_hybrid_authority(base, base_recipe, prefill_chunk)
-    shortlist_path = shortlist_root / "dflash-shortlist.json"
-    shortlist = _load(shortlist_path)
-    manifest = _matrix(
-        shortlist_root, "dflash-shortlist", prefill_chunk=prefill_chunk
-    )
+def selected_base_route(selection: Path) -> dict:
+    """Resolve actual terminal base and chunk authorities, never a filename convention."""
+    group, profile, recipe, base = _selected_base(selection)
+    chunk_binding = base["prefill_chunk_selection"]
+    chunk, _record = validate_prefill_chunk_authority(Path(chunk_binding["path"]))
+    if (chunk["sha256"] != chunk_binding["sha256"]
+            or chunk["selected_prefill_chunk"] != base["selected_prefill_chunk"]):
+        raise ValueError("terminal base differs from its selected chunk authority")
+    winner = base["terminal_production_selection"]["winner"]
+    sources = [source for source in base["source_provenance"]
+               if source.get("candidate") == winner]
+    if len(sources) != 1:
+        raise ValueError("terminal base lacks unique artifact provenance")
+    retained = sources[0]["artifact"]
+    artifact_path = Path(retained["path"])
+    artifact = bind_n16_migration_receipt(artifact_path, inspect_artifact(artifact_path))
+    if (artifact != retained or artifact["weights_id"] != recipe["weights_id"]
+            or artifact["sha256"] != recipe["sha256"]):
+        raise ValueError("terminal base artifact or conversion receipt changed")
+    return {"terminal_selection": _identity(selection), "winner": winner,
+            "base_artifact": artifact, "cache_group": group,
+            "base_benchmark": sources[0]["benchmark_executable"],
+            "text_prefill_attention_profile": profile,
+            "selected_prefill_chunk": chunk["selected_prefill_chunk"],
+            "prefill_chunk_authority": chunk,
+            "hybrid_base_authority": _selected_hybrid_authority(base, recipe, chunk["selected_prefill_chunk"])}
+
+
+def benchmark_profile(path: Path, group: int, profile: str) -> dict:
+    """Bind a fresh evaluator build to the selected static configuration."""
+    path = path.resolve(strict=True)
+    if path.name != "ninfer_bench" or path.parent.name != "bench":
+        raise ValueError("DFlash benchmark must identify an explicit build root")
+    cache = path.parent.parent / "CMakeCache.txt"
+    values = {}
+    for line in cache.read_text().splitlines():
+        if ":" in line and "=" in line and not line.startswith(("#", "//")):
+            name, value = line.split("=", 1)
+            values[name.split(":", 1)[0]] = value
+    expected = {"CMAKE_BUILD_TYPE": "Release", "CMAKE_HIP_ARCHITECTURES": "gfx1201",
+                "NINFER_R9700_KV_VALUE_GROUP": str(group),
+                "NINFER_R9700_Q4_ACTIVATION_BITS": "8",
+                "NINFER_R9700_W8_ACTIVATION_BITS": "8",
+                "NINFER_R9700_FP8_QK_WMMA": "1",
+                "NINFER_R9700_XATTENTION_QUALIFICATION":
+                    "ON" if profile == "b128-s16-tau900" else "OFF"}
+    if profile == "b128-s16-tau900":
+        expected.update({"NINFER_R9700_XATTENTION_STRIDE": "16",
+                         "NINFER_R9700_XATTENTION_TAU_PERMILLE": "900"})
+    if any(values.get(key) != value for key, value in expected.items()):
+        raise ValueError("DFlash evaluator build differs from selected base configuration")
+    return {"benchmark": inspect_executable(path), "cmake_cache": _identity(cache),
+            "configuration": expected}
+
+
+def candidate_key(recipe: str, k: int, w: int) -> str:
+    if recipe not in RECIPES or (k, w) not in DFLASH_PRODUCTION_PROFILES:
+        raise ValueError("unsupported recipe/K/W; expected owned recipe and K4/W5 or K5/W6")
+    return f"{recipe}/k{k}-w{w}"
+
+
+def recipe_evidence(route: dict, recipe: str, conversion: Path, root: Path) -> dict:
+    if recipe not in RECIPES:
+        raise ValueError("unknown DFlash recipe")
+    chunk = route["selected_prefill_chunk"]
+    manifest = _matrix(root, "dflash-shortlist", prefill_chunk=chunk)
+    shortlist = _load(root / "dflash-shortlist.json")
     artifact, bench = shortlist.get("artifact"), shortlist.get("benchmark_executable")
-    if shortlist.get("artifact_type") != "ninfer_dflash_shortlist" or shortlist.get("schema_version") != 1 or shortlist.get("pass") is not True:
-        raise ValueError("DFlash shortlist is not a passing schema-v1 record")
-    if not isinstance(artifact, dict) or not isinstance(bench, dict):
-        raise ValueError("DFlash shortlist lacks physical provenance")
-    _validate_physical_identity(artifact, "DFlash artifact", artifact=True)
-    _validate_physical_identity(bench, "DFlash benchmark")
-    _same_campaign(
-        manifest, artifact, bench, group, text_prefill_profile,
-        prefill_chunk, hybrid_authority,
-        sorted({row["verify_width_resolved"] for row in dflash_shortlist_profiles()}),
-    )
-    _records(shortlist_root, manifest, "dflash-shortlist", 1, 2, prefill_chunk)
-    _validate_shortlist_output(
-        shortlist_root, manifest, shortlist, artifact, bench, prefill_chunk
-    )
+    if (shortlist.get("artifact_type") != "ninfer_dflash_shortlist"
+            or shortlist.get("schema_version") != DFLASH_SHORTLIST_SCHEMA_VERSION
+            or shortlist.get("pass") is not True):
+        raise ValueError("DFlash recipe lacks passing two-width shortlist evidence")
+    _validate_physical_identity(artifact, "companion", artifact=True)
+    _validate_physical_identity(bench, "benchmark")
+    actual = require_dflash_companion(Path(artifact["path"]), inspect_artifact(Path(artifact["path"])))
+    if (actual != artifact or DFLASH_COMPANIONS[artifact["weights_id"]] !=
+            (route["base_artifact"]["weights_id"], recipe)
+            or actual["dflash_base_artifact"] != route["base_artifact"]
+            or actual["dflash_conversion_report"] != _identity(conversion.resolve())):
+        raise ValueError("recipe evidence changed artifact, recipe, base, or conversion receipt")
+    build = benchmark_profile(Path(bench["path"]), route["cache_group"],
+                              route["text_prefill_attention_profile"])
+    if build["benchmark"] != bench:
+        raise ValueError("DFlash benchmark changed")
+    if bench["sha256"] == route["base_benchmark"]["sha256"]:
+        raise ValueError("DFlash evaluator must be rebuilt with recipe-aware companion admission")
+    _same_campaign(manifest, artifact, bench, route["cache_group"],
+                   route["text_prefill_attention_profile"], chunk,
+                   route["hybrid_base_authority"], [5, 6])
+    _records(root, manifest, "dflash-shortlist", 4, 5, chunk)
+    _validate_shortlist_output(root, manifest, shortlist, artifact, bench, chunk)
+    profiles = {(row["profile"]["draft_tokens_requested"],
+                 row["profile"]["verify_width_resolved"])
+                for row in shortlist["candidates"] if row.get("valid_for_ranking")}
+    if profiles != set(DFLASH_PRODUCTION_PROFILES):
+        raise ValueError("recipe shortlist does not retain both qualified production widths")
+    return {"recipe": recipe, "artifact": artifact, "benchmark": bench, "build": build,
+            "conversion_report": _identity(conversion), "shortlist": _identity(root / "dflash-shortlist.json")}
 
-    conversion = _load(conversion_report)
-    expected_companion = DFLASH_COMPANION_BY_BASE.get(base_recipe.get("weights_id"))
-    winner_sources = [
-        source for source in base.get("source_provenance", [])
-        if isinstance(source, dict)
-        and source.get("candidate") == base["terminal_production_selection"]["winner"]
-    ]
-    if len(winner_sources) != 1:
-        raise ValueError("selected DFlash base lacks unique source provenance")
-    expected_base_authority = _base_migration_authority(winner_sources[0].get("artifact", {}))
-    if (
-        expected_companion is None
-        or conversion.get("target_key") != "qwen3_8_27b_r9700"
-        or conversion.get("recipe_id") != DFLASH_RECIPE_ID
-        or conversion.get("status") != "registered-evaluation-only"
-        or conversion.get("weight_recipe_selected") is not False
-        or conversion.get("identity", {}).get("model_id") != artifact.get("model_id")
-        or conversion.get("base", {}).get("identity", {}).get("weights_id") != base_recipe.get("weights_id")
-        or conversion.get("base", {}).get("sha256") != base_recipe.get("sha256")
-        or conversion.get("base", {}).get("authority") != expected_base_authority
-        or conversion.get("base", {}).get("payload_copy") != "byte_exact"
-        or conversion.get("artifact", {}).get("sha256") != artifact.get("sha256")
-        or conversion.get("artifact", {}).get("bytes") != artifact.get("file_size_bytes")
-        or not isinstance(conversion.get("artifact", {}).get("path"), str)
-        or Path(conversion["artifact"]["path"]).resolve()
-        != Path(artifact["path"]).resolve()
-        or conversion.get("identity", {}).get("weights_id") != artifact.get("weights_id")
-        or artifact.get("weights_id") != expected_companion
-        or conversion.get("dflash_recipe", {}).get("matrix_format") != "Q4G64_F16S"
-        or conversion.get("dflash_recipe", {}).get("selector_codebook_format") != "BF16"
-        or conversion.get("dflash_recipe", {}).get("objects") != 66
-        or conversion.get("dflash_recipe", {}).get("source_tensors") != 81
-        or conversion.get("dflash_recipe", {}).get("format_counts")
-        != {"BF16": 34, "Q4G64_F16S": 32}
-        or conversion.get("dflash_recipe", {}).get("format_encoded_bytes")
-        != {"BF16": 254_814_720, "Q4G64_F16S": 954_654_720}
-        or conversion.get("dflash_recipe", {}).get("tensor_encoded_bytes") != 1_209_469_440
-        or conversion.get("dflash_recipe", {}).get("runtime_repack") is not False
-    ):
-        raise ValueError("DFlash companion conversion does not bind the selected base/artifact")
 
-    frontier_rows = shortlist.get("non_dominated_candidates")
-    if not isinstance(frontier_rows, list) or not frontier_rows:
-        raise ValueError("DFlash shortlist has no retained frontier")
-    frontier_profiles = {
-        (row.get("draft_tokens"), row.get("verify_width_resolved")): row
-        for row in frontier_rows if isinstance(row, dict)
-    }
-    if (
-        len(frontier_profiles) != len(frontier_rows)
-        or any(type(k) is not int or type(w) is not int or k < 1 or w < 2
-               for k, w in frontier_profiles)
-    ):
-        raise ValueError("DFlash shortlist frontier has duplicate or malformed K/W profiles")
-    capacities = {(k, w): root for k, w, root in capacity_inputs}
-    paretos = {(k, w): root for k, w, root in pareto_inputs}
-    if len(capacities) != len(capacity_inputs) or set(capacities) != set(frontier_profiles):
-        raise ValueError("capacity inputs must exactly cover the shortlist K/W frontier")
-    if (
-        len(paretos) != len(pareto_inputs)
-        or not set(paretos).issubset(frontier_profiles)
-    ):
-        raise ValueError("Pareto inputs must be unique retained-shortlist K/W profiles")
+def capacity_cells(route: dict, evidence: dict, k: int, w: int, root: Path) -> dict:
+    chunk = route["selected_prefill_chunk"]
+    manifest = _matrix(root, "dflash-capacity", k, w, prefill_chunk=chunk, allow_failures=True)
+    _same_campaign(manifest, evidence["artifact"], evidence["benchmark"], route["cache_group"],
+                   route["text_prefill_attention_profile"], chunk,
+                   route["hybrid_base_authority"], [w])
+    reports = _records(root, manifest, "dflash-capacity", k, w, chunk, allow_missing=True)
+    failures = _missing_capacity_provenance(root, manifest)
+    failed = {row["concurrency"]: row for row in failures}
+    if len(failed) != len(failures) or set(reports) & set(failed):
+        raise ValueError("capacity cell has duplicate or conflicting outcomes")
+    if set(reports) | set(failed) != set(PRODUCT_CONCURRENCIES):
+        raise ValueError("every capacity cell needs either a valid report or a bound failure")
+    cells = {}
+    for concurrency in PRODUCT_CONCURRENCIES:
+        if concurrency in failed:
+            cells[str(concurrency)] = {"eligible": False, "exclusion": failed[concurrency]}
+            continue
+        if len(reports[concurrency]) != 1:
+            raise ValueError("capacity cell has duplicate reports")
+        classified = validate_automatic_feasibility(reports[concurrency][0])
+        if classified["measurement_kind"] != "resolved_effective_maximum":
+            raise ValueError("capacity cell is not an exact resolved maximum")
+        tokens = classified["resolved_effective_maximum_tokens"]
+        required_tokens = concurrency * ((32768 + 256 + 2 * w + 63) // 64) * 64
+        cells[str(concurrency)] = {"eligible": tokens >= required_tokens, "tokens": tokens,
+            **({"exclusion": {"status": "insufficient_32k_generation_capacity",
+                              "required_tokens": required_tokens, "resolved_tokens": tokens}}
+               if tokens < required_tokens else {})}
+    return {"matrix": _identity(root / "manifest.json"), "cells": cells,
+            "eligible_concurrency": [c for c in PRODUCT_CONCURRENCIES if cells[str(c)]["eligible"]]}
 
-    candidates, objective_values = [], {}
-    for profile in sorted(frontier_profiles):
-        k, w = profile
-        root = capacities[profile]
-        cap_manifest = _matrix(
-            root, "dflash-capacity", k, w, prefill_chunk=prefill_chunk,
-            allow_failures=True,
-        )
-        _same_campaign(
-            cap_manifest, artifact, bench, group, text_prefill_profile,
-            prefill_chunk, hybrid_authority, [w],
-        )
-        cap_reports = _records(
-            root, cap_manifest, "dflash-capacity", k, w, prefill_chunk,
-            allow_missing=True,
-        )
-        failures = _missing_capacity_provenance(root, cap_manifest)
-        capacity = {}
-        for concurrency, reports in cap_reports.items():
-            if len(reports) != 1:
-                raise ValueError(f"K{k}/W{w} C{concurrency} has duplicate capacity reports")
-            classified = validate_automatic_feasibility(reports[0])
-            if classified["measurement_kind"] != "resolved_effective_maximum":
-                raise ValueError(f"K{k}/W{w} C{concurrency} capacity is not an exact maximum")
-            capacity[f"c{concurrency}"] = classified["resolved_effective_maximum_tokens"]
-        eligible = len(capacity) == len(PRODUCT_CONCURRENCIES) and not failures
-        if eligible != (profile in paretos):
-            raise ValueError("Pareto inputs must exactly cover capacity-eligible K/W profiles")
-        row = {
-            "draft_tokens": k, "verify_width": w,
-            "capacity_eligible": eligible, "capacity_tokens_by_concurrency": capacity,
-            "capacity_failures": failures,
-            "capacity_matrix": _identity(root / "manifest.json"),
-        }
-        if eligible:
-            proot = paretos[profile]
-            pmanifest = _matrix(
-                proot, "dflash-pareto", k, w, prefill_chunk=prefill_chunk
-            )
-            _same_campaign(
-                pmanifest, artifact, bench, group, text_prefill_profile,
-                prefill_chunk, hybrid_authority, [w],
-            )
-            _records(proot, pmanifest, "dflash-pareto", k, w, prefill_chunk)
-            aux = _auxiliary(proot, pmanifest, artifact, bench, k, w)
-            rows = []
-            cases = {
-                (case.suite, case.name): case
-                for case in build_cases(
-                    "dflash-pareto", k, w, production_prefill_chunk=prefill_chunk
-                )
-            }
-            for record in pmanifest["commands"]:
-                rows.extend(report_rows(
-                    Path(record["report"]), cases[(record["suite"], record["case"])],
-                    group, 8, 8, True, record["concurrency"], artifact, record["command"],
-                    text_prefill_profile,
-                ))
-            whole = {
-                f"{item['label']}_c{item['concurrency']}": item["whole_output_tok_s_mean"]
-                for item in rows if item["suite"] == "dflash_pareto_whole_inference"
-            }
-            acceptance = {
-                f"{item['label']}_c{item['concurrency']}": item["spec_acceptance_length"]
-                for item in rows if item["suite"] == "dflash_pareto_decode"
-            }
-            if (
-                len(whole) != 2 * len(PRODUCT_CONCURRENCIES)
-                or len(acceptance) != 2 * len(PRODUCT_CONCURRENCIES)
+
+def performance_cells(route: dict, evidence: dict, k: int, w: int, root: Path,
+                      concurrency: Sequence[int]) -> dict:
+    """Declared capacity decisions define completeness; successful reports never define it."""
+    concurrency = list(concurrency)
+    if not concurrency or 1 not in concurrency:
+        raise ValueError("DFlash advancement requires eligible C1")
+    chunk = route["selected_prefill_chunk"]
+    manifest = _matrix(root, "dflash-pareto", k, w, prefill_chunk=chunk)
+    _same_campaign(manifest, evidence["artifact"], evidence["benchmark"], route["cache_group"],
+                   route["text_prefill_attention_profile"], chunk,
+                   route["hybrid_base_authority"], [w])
+    _records(root, manifest, "dflash-pareto", k, w, chunk, required_concurrency=concurrency)
+    aux = _auxiliary(root, manifest, evidence["artifact"], evidence["benchmark"], k, w, concurrency)
+    cases = {(case.suite, case.name): case for case in
+             build_cases("dflash-pareto", k, w, production_prefill_chunk=chunk)}
+    rows = []
+    for record in manifest["commands"]:
+        rows.extend(report_rows(Path(record["report"]), cases[(record["suite"], record["case"])],
+            route["cache_group"], 8, 8, True, record["concurrency"], evidence["artifact"],
+            record["command"], route["text_prefill_attention_profile"]))
+    gates = {str(c): _matched_ordinary_speed_gate(
+        [row for row in rows if row["concurrency"] == c], [c]) for c in concurrency}
+    objectives = {}
+    for c in concurrency:
+        whole = {row["label"]: row["whole_output_tok_s_mean"] for row in rows
+                 if row["suite"] == "dflash_pareto_whole_inference" and row["concurrency"] == c}
+        acceptance = {row["label"]: row["spec_acceptance_length"] for row in rows
+                      if row["suite"] == "dflash_pareto_decode" and row["concurrency"] == c}
+        if (len(whole) != 2 or len(acceptance) != 2
+                or any(type(value) not in (int, float) or not math.isfinite(value) or value <= 0
+                       for value in whole.values())
                 or any(type(value) not in (int, float) or not math.isfinite(value)
-                       or value <= 0 for value in whole.values())
-                or any(type(value) not in (int, float) or not math.isfinite(value)
-                       or value < 1 or value > k + 1 for value in acceptance.values())
-            ):
-                raise ValueError(f"K{k}/W{w} lacks complete positive whole/acceptance cells")
-            objectives = {
-                "whole": whole, "capacity": capacity, "acceptance": acceptance,
-            }
-            performance_gate = _matched_ordinary_speed_gate(rows)
-            if performance_gate["pass"]:
-                objective_values[f"k{k}-w{w}"] = objectives
-            row.update({
-                "pareto_matrix": _identity(proot / "manifest.json"),
-                "performance_eligible": performance_gate["pass"],
-                "matched_ordinary_speed_gate": performance_gate,
-                "objectives": objectives,
-                **aux,
-            })
-        candidates.append(row)
+                       or value < 1 or value > k + 1 for value in acceptance.values())):
+            raise ValueError("declared performance cell lacks complete finite whole/acceptance evidence")
+        objectives[str(c)] = {"whole": whole, "acceptance": acceptance}
+    return {"matrix": _identity(root / "manifest.json"), "declared_concurrency": concurrency,
+            "matched_speed_by_concurrency": gates, "objectives": objectives, **aux}
 
-    eligible_names = sorted(objective_values)
-    if not eligible_names:
-        raise ValueError(
-            "no capacity-eligible shortlist-frontier K/W has positive matched ordinary speed"
-        )
-    reference = objective_values[eligible_names[0]]
-    for name in eligible_names[1:]:
-        if any(set(objective_values[name][kind]) != set(reference[kind])
-               for kind in ("whole", "capacity", "acceptance")):
-            raise ValueError("eligible DFlash profiles have different objective cell sets")
-    frontier = [name for name in eligible_names if not any(
-        other != name and _dominates(objective_values[other], objective_values[name])
-        for other in eligible_names
-    )]
-    normalized = {name: _normalized(name, objective_values, frontier) for name in frontier}
-    remaining, decisive = frontier, "canonical_kw"
-    for stage, metric in (
-        ("maximin_whole_inference_throughput", "minimum_whole_ratio"),
-        ("maximin_resolved_capacity", "minimum_capacity_ratio"),
-        ("maximin_acceptance_length", "minimum_acceptance_ratio"),
-    ):
+
+def _rank_cells(values: dict[str, dict]) -> dict:
+    if not values:
+        return {"eligible_frontier": [], "winner": None, "normalized_objectives": {}}
+    frontier = sorted(name for name in values if not any(
+        other != name and _dominates(values[other], values[name]) for other in values))
+    normalized = {name: _normalized(name, values, frontier) for name in frontier}
+    remaining, decisive = frontier, "canonical_recipe_kw"
+    for stage, metric in (("maximin_whole_throughput", "minimum_whole_ratio"),
+                          ("maximin_capacity", "minimum_capacity_ratio"),
+                          ("maximin_acceptance", "minimum_acceptance_ratio")):
         best = max(normalized[name][metric] for name in remaining)
-        narrowed = [name for name in remaining if normalized[name][metric] == best]
-        if len(narrowed) == 1:
-            remaining, decisive = narrowed, stage
+        remaining = [name for name in remaining if normalized[name][metric] == best]
+        if len(remaining) == 1:
+            decisive = stage
             break
-        remaining = narrowed
-    winner = min(remaining, key=lambda name: tuple(map(int, name[1:].split("-w"))))
-    return {
-        "artifact_type": ARTIFACT_TYPE, "schema_version": SCHEMA_VERSION,
-        "status": "passed",
-        "selection_rule": RULE, "selected_cache_group": group,
-        "selected_prefill_chunk": prefill_chunk,
-        "selected_base": {
-            **_identity(base_selection),
-            "cache_group": group,
-            "text_prefill_attention_profile": text_prefill_profile,
-            "prefill_chunk": prefill_chunk,
-            "dflash_proposal_attention_profile": "dense",
-            "target_verification_attention_profile": "dense",
-            "weight_recipe": base_recipe,
-        },
-        "conversion_report": _identity(conversion_report),
-        "artifact": artifact, "benchmark_executable": bench,
-        "required_candidate_identity": (
-            "fp8-hybrid-selection-authority" if hybrid_authority is not None else None
-        ),
-        "hybrid_shared_workspace_authority": hybrid_authority,
-        "shortlist": _identity(shortlist_path), "candidates": candidates,
-        "capacity_eligible_profiles": sorted(
-            f"k{row['draft_tokens']}-w{row['verify_width']}"
-            for row in candidates if row["capacity_eligible"]
-        ),
-        "performance_eligible_profiles": eligible_names,
-        "eligible_frontier": frontier, "normalized_objectives": normalized,
-        "winner": winner, "decisive_stage": decisive,
-    }
+    return {"eligible_frontier": frontier, "winner": min(remaining),
+            "decisive_stage": decisive, "normalized_objectives": normalized}
+
+
+def assemble(base_selection: Path,
+             recipe_inputs: Sequence[tuple[str, Path, Path]],
+             capacity_inputs: Sequence[tuple[str, int, int, Path]],
+             c1_inputs: Sequence[tuple[str, int, int, Path]],
+             pareto_inputs: Sequence[tuple[str, int, int, Path]]) -> dict[str, Any]:
+    route = selected_base_route(base_selection)
+    recipes = {recipe: recipe_evidence(route, recipe, conversion, root)
+               for recipe, conversion, root in recipe_inputs}
+    if len(recipes) != len(recipe_inputs) or set(recipes) != set(RECIPES):
+        raise ValueError("selection requires all three recipe comparisons exactly once")
+    if len({json.dumps(value["benchmark"], sort_keys=True) for value in recipes.values()}) != 1:
+        raise ValueError("recipe comparison must use one fresh benchmark executable")
+    def index(inputs):
+        result = {candidate_key(recipe, k, w): root for recipe, k, w, root in inputs}
+        if len(result) != len(inputs):
+            raise ValueError("duplicate recipe/K/W evidence")
+        return result
+    capacities, c1, paretos = map(index, (capacity_inputs, c1_inputs, pareto_inputs))
+    expected = {candidate_key(recipe, k, w) for recipe in RECIPES
+                for k, w in DFLASH_PRODUCTION_PROFILES}
+    if set(capacities) != expected or not set(c1) <= expected or not set(paretos) <= expected:
+        raise ValueError("evidence does not cover the exact recipe/two-width candidate set")
+    capacity_evidence, screens = {}, {}
+    for recipe in RECIPES:
+        for k, w in DFLASH_PRODUCTION_PROFILES:
+            key = candidate_key(recipe, k, w)
+            capacity_evidence[key] = capacity_cells(route, recipes[recipe], k, w, capacities[key])
+            if 1 in capacity_evidence[key]["eligible_concurrency"]:
+                if key not in c1:
+                    raise ValueError("capacity-eligible C1 lacks its required material-win screen")
+                screens[key] = performance_cells(route, recipes[recipe], k, w, c1[key], [1])
+    has_material_k4 = any(key.endswith("/k4-w5") and
+        screen["matched_speed_by_concurrency"]["1"]["pass"] for key, screen in screens.items())
+    candidates, expected_c1, expected_pareto = [], set(screens), set()
+    values = {str(c): {} for c in PRODUCT_CONCURRENCIES}
+    for recipe in RECIPES:
+        for k, w in DFLASH_PRODUCTION_PROFILES:
+            key = candidate_key(recipe, k, w)
+            capacity = capacity_evidence[key]
+            row = {"key": key, "recipe": recipe, "draft_tokens": k, "verify_width": w,
+                   "capacity": capacity, "qualified_concurrency": [], "exclusions": {
+                       c: cell["exclusion"] for c, cell in capacity["cells"].items()
+                       if not cell["eligible"]}}
+            declared = capacity["eligible_concurrency"]
+            if 1 in declared:
+                screen = screens[key]
+                row["c1_screen"] = screen
+                if screen["matched_speed_by_concurrency"]["1"]["pass"] and has_material_k4:
+                    expected_pareto.add(key)
+                    if key not in paretos:
+                        raise ValueError("C1 material survivor lacks declared-concurrency followup")
+                    performance = performance_cells(route, recipes[recipe], k, w, paretos[key], declared)
+                    row["performance"] = performance
+                    for c in declared:
+                        gate = performance["matched_speed_by_concurrency"][str(c)]
+                        if gate["pass"]:
+                            row["qualified_concurrency"].append(c)
+                            values[str(c)][key] = {
+                                **performance["objectives"][str(c)],
+                                "capacity": {"tokens": capacity["cells"][str(c)]["tokens"]}}
+                        else:
+                            row["exclusions"][str(c)] = {"status": "no_material_matched_speed", "gate": gate}
+                else:
+                    for c in declared:
+                        row["exclusions"][str(c)] = {"status": "C1_material_gate_failed"
+                            if not screen["matched_speed_by_concurrency"]["1"]["pass"]
+                            else "no_material_K4_C1_route"}
+            else:
+                for c in declared:
+                    row["exclusions"][str(c)] = {"status": "C1_capacity_gate_failed"}
+            candidates.append(row)
+    if set(c1) != expected_c1 or set(paretos) != expected_pareto:
+        raise ValueError("followup evidence differs from declared capacity/C1 advancement decisions")
+    ranked = {c: _rank_cells(cells) for c, cells in values.items()}
+    winner = ranked["1"]["winner"]
+    winner_row = next((row for row in candidates if row["key"] == winner), None)
+    return {"artifact_type": ARTIFACT_TYPE, "schema_version": SCHEMA_VERSION,
+            "status": "evaluation_complete" if winner else "no_qualified_C1_winner",
+            "selection_rule": RULE, "production_selected": False,
+            "scope": "primary C1 evaluation recommendation; per-C evidence is not runtime recipe switching",
+            "selected_base": route, "recipes": recipes, "candidates": candidates,
+            "winner": winner, "per_concurrency": ranked,
+            "winner_qualified_concurrency": winner_row["qualified_concurrency"] if winner_row else [],
+            "winner_exclusions": winner_row["exclusions"] if winner_row else {}}
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-selection", type=Path, required=True)
-    parser.add_argument("--conversion-report", type=Path, required=True)
-    parser.add_argument("--shortlist-dir", type=Path, required=True)
-    parser.add_argument("--capacity", action="append", nargs=3, metavar=("K", "W", "DIR"), required=True)
-    parser.add_argument("--pareto", action="append", nargs=3, metavar=("K", "W", "DIR"), default=[])
+    parser.add_argument("--recipe", action="append", nargs=3,
+                        metavar=("RECIPE", "CONVERSION", "SHORTLIST"), required=True)
+    for name in ("capacity", "c1", "pareto"):
+        parser.add_argument("--" + name, action="append", nargs=4,
+                            metavar=("RECIPE", "K", "W", "DIR"), default=[])
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
     if os.path.lexists(args.out):
         raise SystemExit(f"refusing to overwrite existing output: {args.out}")
-    result = assemble(
-        args.base_selection.resolve(), args.conversion_report.resolve(), args.shortlist_dir.resolve(),
-        [(int(k), int(w), Path(root).resolve()) for k, w, root in args.capacity],
-        [(int(k), int(w), Path(root).resolve()) for k, w, root in args.pareto],
-    )
+    recipes = [(key, Path(conversion).resolve(), Path(root).resolve())
+               for key, conversion, root in args.recipe]
+    def inputs(name):
+        return [(key, int(k), int(w), Path(root).resolve())
+                for key, k, w, root in getattr(args, name)]
+    def result():
+        return assemble(args.base_selection.resolve(), recipes, inputs("capacity"),
+                        inputs("c1"), inputs("pareto"))
+    value = result()
+    from tools.bench.prefill_chunk_authority import durable_create_json
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    payload = (json.dumps(result, indent=2, allow_nan=False) + "\n").encode("utf-8")
-    descriptor, temporary = tempfile.mkstemp(prefix=f".{args.out.name}.", dir=args.out.parent)
-    published = False
-    durable = False
-    created_inode = None
-    try:
-        with os.fdopen(descriptor, "wb") as output:
-            output.write(payload)
-            output.flush()
-            os.fsync(output.fileno())
-        temporary_stat = os.stat(temporary, follow_symlinks=False)
-        created_inode = (temporary_stat.st_dev, temporary_stat.st_ino)
-        os.link(temporary, args.out)
-        published = True
-        output_stat = os.stat(args.out, follow_symlinks=False)
-        if (not stat.S_ISREG(output_stat.st_mode)
-                or (output_stat.st_dev, output_stat.st_ino) != created_inode):
-            raise ValueError("published DFlash selection inode changed")
-        if (_load(args.out) != result or assemble(
-                args.base_selection.resolve(), args.conversion_report.resolve(),
-                args.shortlist_dir.resolve(),
-                [(int(k), int(w), Path(root).resolve()) for k, w, root in args.capacity],
-                [(int(k), int(w), Path(root).resolve()) for k, w, root in args.pareto],
-        ) != result):
-            raise ValueError("published DFlash selection does not revalidate")
-        directory = os.open(args.out.parent, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
-        durable = True
-    finally:
-        Path(temporary).unlink(missing_ok=True)
-        if published and not durable and created_inode is not None:
-            try:
-                current = os.stat(args.out, follow_symlinks=False)
-                if (current.st_dev, current.st_ino) == created_inode:
-                    args.out.unlink()
-            except FileNotFoundError:
-                pass
+    # Recompute before publication, so a changed input never leaves a selected authority.
+    if result() != value:
+        raise ValueError("DFlash inputs changed during selection")
+    durable_create_json(args.out, value)
     return 0
 
 

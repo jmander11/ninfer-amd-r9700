@@ -11,6 +11,17 @@ import pytest
 from tools.bench import validate_final_cutover_admission as gate
 
 
+@pytest.mark.parametrize("schema", [3, 4])
+def test_dflash_evaluation_cannot_admit_one_resident_production_companion(tmp_path, schema):
+    path = tmp_path / "dflash.json"
+    path.write_text(json.dumps({"artifact_type": "ninfer_r9700_dflash_selection",
+        "schema_version": schema, "winner": "canonical-q4g64/k4-w5",
+        "status": "evaluation_complete", "production_selected": False,
+        "winner_qualified_concurrency": [1], "per_concurrency": {"1": {"winner": "a"}}}))
+    with pytest.raises(ValueError, match="single-resident companion/capacity admission"):
+        gate.revalidate_dflash(path)
+
+
 def route(weights_id: str = "r9700-q4g64-n16k16-eval", attention: str = "b128-s16-tau900") -> dict:
     return {
         "winner": "winner", "weights_id": weights_id,

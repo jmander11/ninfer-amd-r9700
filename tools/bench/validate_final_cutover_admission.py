@@ -12,7 +12,6 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from tools.bench.assemble_dflash_selection import assemble as assemble_dflash
 from tools.bench.focused_verification_io import validate_report as validate_focused
 from tools.bench.prepare_selected_converter_preflight import revalidate as revalidate_converter
 from tools.bench.select_prefill_chunk import validate_selection_record
@@ -272,22 +271,14 @@ def revalidate_hardware(path: Path, selection_path: Path) -> dict:
 
 def revalidate_dflash(path: Path) -> dict:
     value = load_regular(path, "DFlash selection")
-    capacities, paretos = [], []
-    for row in value.get("candidates", []):
-        name = row.get("name", "")
-        if not isinstance(name, str) or not name.startswith("k") or "-w" not in name:
-            raise ValueError("DFlash selection has malformed K/W candidate")
-        k, w = (int(part) for part in name[1:].split("-w", 1))
-        capacities.append((k, w, Path(row["capacity_matrix"]["path"]).parent))
-        if isinstance(row.get("pareto_matrix"), dict):
-            paretos.append((k, w, Path(row["pareto_matrix"]["path"]).parent))
-    rebuilt = assemble_dflash(
-        Path(value["selected_base"]["path"]), Path(value["conversion_report"]["path"]),
-        Path(value["shortlist"]["path"]).parent, capacities, paretos,
-    )
-    if rebuilt != value:
-        raise ValueError("DFlash selection does not revalidate")
-    return value
+    if (value.get("artifact_type") == "ninfer_r9700_dflash_selection"
+            and value.get("schema_version") == 3):
+        raise ValueError("historical schema-v3 DFlash selection is superseded; final cutover requires "
+                         "separate single-resident companion/capacity admission")
+    # Schema-v4 is explicitly evaluation-only. Do not turn a C1 recommendation or
+    # per-C frontier into admission of one resident production artifact.
+    raise ValueError("DFlash evaluation is not production admission; final cutover requires "
+                     "separate single-resident companion/capacity admission")
 
 
 def validate_converter_preflight(path: Path, selection: Path,

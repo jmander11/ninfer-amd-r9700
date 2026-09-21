@@ -47,6 +47,7 @@ from tools.bench.run_ninfer_bench_matrix import (
     validate_dflash_campaign_artifact,
     validate_dflash_ordinary_command,
     validate_dflash_diagnostic_raw,
+    validate_bound_diagnostic,
     validate_case_profile,
     validate_report_tests,
     validate_whole_ordinary_command,
@@ -257,7 +258,18 @@ class CompiledKvGroupTest(unittest.TestCase):
         args.preset = "dflash-shortlist"
         args.prefill_chunk = [2048]
         validate_fp8_hybrid_performance_contract(args)
+        for preset in ("dflash-shortlist", "low-context-prefill"):
+            args.preset = preset
+            args.prefill_chunk = [1024, 2048]
+            with self.assertRaisesRegex(SystemExit, "one selected prefill chunk"):
+                validate_fp8_hybrid_performance_contract(args)
+        args.prefill_chunk = [2048]
         args.preset = "dflash-pareto"
+        args.concurrency = [1, 3]
+        validate_fp8_hybrid_performance_contract(args)
+        args.concurrency = [2, 3]
+        with self.assertRaisesRegex(SystemExit, "including C1"):
+            validate_fp8_hybrid_performance_contract(args)
         args.concurrency = [1, 2, 3, 4]
         validate_fp8_hybrid_performance_contract(args)
         args.preset = "dflash-capacity"
@@ -1899,6 +1911,9 @@ class CompiledKvGroupTest(unittest.TestCase):
             )
             self.assertFalse(evidence["timing_eligible"])
             self.assertEqual(evidence["profile"]["dflash_verify_width"], 12)
+            self.assertEqual(validate_bound_diagnostic(
+                evidence_path, artifact=artifact, bench=bench, report_path=report_path,
+                case=case, concurrency=1), evidence)
             raw["proposal"]["hops"] = 0
             raw_path.write_text(json.dumps(raw), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "no proposal hops"):
@@ -2026,6 +2041,40 @@ class CompiledKvGroupTest(unittest.TestCase):
             self.assertEqual(
                 quality["proposal_gate"]["diagnostics"][0]["finite_logit_elements"], 2
             )
+            subset = json.loads(json.dumps(parity))
+            subset["comparisons"] = [row for row in subset["comparisons"] if row["concurrency"] in (1, 3)]
+            subset_quality, subset_failures = write_dflash_quality_evidence(
+                root, records, subset, result, artifact=artifact, bench=bench,
+                required_concurrency=[1, 3])
+            self.assertFalse(subset_failures)
+            self.assertEqual(subset_quality["target_output_gate"]["concurrency"], [1, 3])
+            _, missing_failures = write_dflash_quality_evidence(
+                root, records, subset, result, artifact=artifact, bench=bench,
+                required_concurrency=[1, 2, 3])
+            self.assertTrue(missing_failures)
+            # Exercise the actual writer -> persisted JSON -> assembler reconstruction seam.
+            parity_records = []
+            for c in (1, 3):
+                for phase in ("decode", "whole"):
+                    for role in ("ordinary", "dflash"):
+                        path = root / f"{phase}-{role}-c{c}.json"
+                        path.write_text(json.dumps({"config": {"draft_tokens": 1,
+                            "dflash_verify_width": 2}, "tests": [{"label": "fixture",
+                            "kind": "pp+tg", "n_prompt": 8192, "n_gen": 1,
+                            "requested_output_tokens": 2,
+                            "reps": [{"generated_token_ids_by_lane": [[8, 9] for _ in range(c)]}]}]}))
+                        parity_records.append({"parity_role": f"{role}_{phase}",
+                            "concurrency": c, "report": str(path)})
+            actual_parity, failures = write_dflash_greedy_parity(
+                root, parity_records, artifact=artifact, bench=bench)
+            self.assertFalse(failures)
+            actual_quality, failures = write_dflash_quality_evidence(
+                root, records, actual_parity, result, artifact=artifact, bench=bench,
+                required_concurrency=[1, 3])
+            self.assertFalse(failures)
+            from tools.bench.assemble_dflash_selection import _auxiliary
+            self.assertIn("generated_quality", _auxiliary(root,
+                {"commands": [*records, *parity_records]}, artifact, bench, 1, 2, [1, 3]))
             malformed_parity = json.loads(json.dumps(parity))
             malformed_parity["comparisons"][0]["includes_seed"] = True
             _, malformed_failures = write_dflash_quality_evidence(

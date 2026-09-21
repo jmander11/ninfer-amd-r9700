@@ -24,46 +24,7 @@ from tools.bench.run_ninfer_bench_matrix import (
     R9700_POWER_PROFILE,
 )
 from tools.ppl.pareto import _file_sha256, classify
-
-CHUNK_SELECTION = {
-    "path": "/chunk-selection.json", "sha256": "9" * 64,
-    "selection_rule": "global_maximin_normalized_prefill_then_workspace_then_smaller_chunk_v2",
-    "selected_prefill_chunk": 4096,
-}
-
-
-def migration_receipt(weights_id: str) -> dict:
-    recipe_id = {
-        "r9700-q4g64-n16k16-eval": "r9700-all-q4g64-n16k16-eval-v1",
-        "r9700-q4-w8-mse-n16k16-eval":
-            "r9700-source-q4-n16k16-promoted-w8-source-mse8-eval-v1",
-        "r9700-q4g64-f8e4m3-four-role-n16k16-eval":
-            "r9700-q4g64-f8e4m3-four-role-n16k16-eval-v1",
-    }[weights_id]
-    value = {"path": "/receipt.json", "sha256": "a" * 64, "recipe_id": recipe_id,
-             "object_plan_sha256": "b" * 64, "source_artifact_sha256": "c" * 64,
-             "source_receipt_sha256": "d" * 64, "transcoder_sha256": "e" * 64}
-    if "four-role" in weights_id:
-        value.update({"selection_sha256": "b2ceeb63c581c0f26aab5a4d8c0958da34d836fcc5c47d377bce709eaf37e3e8", "source_index_sha256": "2" * 64,
-                      "source_ranking_sha256": "3" * 64})
-    else:
-        value["receipt_producer_sha256"] = "4" * 64
-    return value
-
-
-def base_authority(receipt: dict) -> dict:
-    result = {"receipt": {"path": receipt["path"], "sha256": receipt["sha256"]},
-              "recipe_id": receipt["recipe_id"],
-              "object_plan_sha256": receipt["object_plan_sha256"],
-              "source_artifact_sha256": receipt["source_artifact_sha256"],
-              "source_receipt_sha256": receipt["source_receipt_sha256"],
-              "transcoder_sha256": receipt["transcoder_sha256"]}
-    for key in ("selection_sha256", "source_index_sha256", "source_ranking_sha256",
-                "receipt_producer_sha256"):
-        if key in receipt:
-            result[key] = receipt[key]
-    return result
-
+from tools.bench import assemble_dflash_selection as selection
 
 class DFlashSelectionTest(unittest.TestCase):
     artifact = {
@@ -83,270 +44,96 @@ class DFlashSelectionTest(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(value), encoding="utf-8")
 
-    def fixture(self, root: Path) -> tuple[Path, Path, Path, list, list]:
-        base = root / "base.json"
-        candidates, provenance = [], []
-        for recipe, digest, prefix, best_speed in (
-            ("r9700-q4g64-n16k16-eval", "b" * 64, "all-q4-", 120.0),
-            ("r9700-q4-w8-mse-n16k16-eval", "c" * 64, "mixed-", 110.0),
-            ("r9700-q4g64-f8e4m3-four-role-n16k16-eval", "f" * 64, "hybrid-", 105.0),
-        ):
-            for group, profile in (
-                (16, "dense"), (32, "dense"),
-                (16, "b128-s16-tau900"), (32, "b128-s16-tau900"),
-            ):
-                name = f"{prefix}g{group}-{profile}"
-                selected = group == 16 and profile == "dense"
-                candidates.append({
-                    "name": name,
-                    "prefill_chunk": 4096,
-                    "cache_profile": {"value_group": group, "plane_layouts": {
-                        "key": "k", "value": "v", "value_scale": "s",
-                    }},
-                    "execution_profile": {
-                        "q4_activation_bits": 8, "w8_activation_bits": 8,
-                        "fp8_qk_wmma_profile": "t1-ge64-t2-ge320-t3plus-stream-v1",
-                        "xattention_profile": profile,
-                    },
-                    "whole_inference_profile": "spec-none-ordinary",
-                    "base_capacity_profile": "spec-none-ordinary",
-                    "quality": {
-                        "eligible": True, "tier": "accuracy", "mean_nll_delta": 0.001,
-                        "complete_finite_aligned": True, "scored_positions": 10000,
-                        "new_severe_positions": 0,
-                    },
-                    "whole_inference_tokens_per_second": {
-                        "whole_8k_c1": best_speed if selected else 90.0,
-                    },
-                    "capacity": {
-                        "measurement_kind": "resolved_effective_maximum",
-                        "binding_constraint": "device_memory", "tokens": 1000,
-                    },
-                })
-                provenance.append({
-                    "candidate": name, "artifact": {
-                        "weights_id": recipe, "sha256": digest,
-                        "conversion_receipt": migration_receipt(recipe),
-                    },
-                    "matrices": {"pareto-capacity": {}, "pareto-whole": {}},
-                    "capacity_failures": [],
-                })
-        source = {
-            "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
-            "required_speed_workloads": ["whole_8k_c1"],
-            "require_single_static_profile_selection": True,
-            "base_ranking_profile": "spec-none-ordinary",
-            "base_capacity_profile": "spec-none-ordinary",
-            "selected_prefill_chunk": 4096,
-            "prefill_chunk_selection": CHUNK_SELECTION,
-            "candidates": candidates, "source_provenance": provenance,
-        }
-        self.base_input_path = root / "base-input.json"
-        self.write(self.base_input_path, source)
-        result = classify(source)
-        result["pareto_input"] = {
-            "path": str(self.base_input_path), "sha256": _file_sha256(self.base_input_path),
-        }
-        self.write(base, result)
-        self.base_candidate_inputs = candidates
-        self.base_candidate_provenance = provenance
-        conversion = root / "conversion.json"
-        self.write(conversion, {
-            "target_key": "qwen3_8_27b_r9700",
-            "recipe_id": "r9700-dflash2-all-q4g64-n16k16-bf16-codebook-eval-v1",
-            "status": "registered-evaluation-only", "weight_recipe_selected": False,
-            "identity": {"model_id": "qwen3.8-27b",
-                         "weights_id": self.artifact["weights_id"]},
-            "base": {"identity": {"weights_id": "r9700-q4g64-n16k16-eval"},
-                     "sha256": "b" * 64, "payload_copy": "byte_exact",
-                     "authority": base_authority(
-                         migration_receipt("r9700-q4g64-n16k16-eval"))},
-            "dflash_recipe": {
-                "matrix_format": "Q4G64_F16S", "selector_codebook_format": "BF16",
-                "objects": 66, "source_tensors": 81, "runtime_repack": False,
-                "format_counts": {"BF16": 34, "Q4G64_F16S": 32},
-                "format_encoded_bytes": {
-                    "BF16": 254_814_720, "Q4G64_F16S": 954_654_720,
-                },
-                "tensor_encoded_bytes": 1_209_469_440,
-            },
-            "artifact": {"path": self.artifact["path"], "bytes": 200,
-                         "sha256": "d" * 64},
-        })
-        shortlist = root / "shortlist"
-        self.write(shortlist / "manifest.json", {
-            "artifact_type": "ninfer_bench_matrix_run", "schema_version": MATRIX_SCHEMA_VERSION,
-            "preset": "dflash-shortlist", "dry_run": False,
-            "power_profile": self.auto_power,
-            "artifact": self.artifact, "bench": self.bench,
-            "expected_kv_value_group": 16, "expected_q4_activation_bits": 8,
-            "expected_w8_activation_bits": 8, "expected_fp8_qk_wmma_enabled": True,
-            "expected_xattention_profile": "dense",
-            "selected_prefill_chunk": 4096,
-            "commands": [{"command": ["bench", "--prefill-chunk", "4096"]}],
-        })
-        self.write(shortlist / "dflash-shortlist.json", {
-            "artifact_type": "ninfer_dflash_shortlist", "schema_version": 1, "pass": True,
-            "artifact": self.artifact, "benchmark_executable": self.bench,
-            "non_dominated_candidates": [
-                {"draft_tokens": 1, "verify_width_resolved": 2},
-                {"draft_tokens": 2, "verify_width_resolved": 3},
-                {"draft_tokens": 3, "verify_width_resolved": 4},
-            ],
-        })
-        capacities, paretos = [], []
-        for k, w, eligible in ((1, 2, True), (2, 3, True), (3, 4, False)):
-            capacity = root / f"capacity-k{k}"
-            self.write(capacity / "manifest.json", {
-                "artifact_type": "ninfer_bench_matrix_run", "schema_version": MATRIX_SCHEMA_VERSION,
-                "preset": "dflash-capacity", "dry_run": False,
-                "artifact": self.artifact, "bench": self.bench,
-                "expected_kv_value_group": 16, "expected_q4_activation_bits": 8,
-                "expected_w8_activation_bits": 8, "expected_fp8_qk_wmma_enabled": True,
-                "expected_xattention_profile": "dense",
-                "dflash_draft_tokens": k, "dflash_verify_width": w,
-                "selected_prefill_chunk": 4096,
-                "commands": [{"command": ["bench", "--prefill-chunk", "4096"]}],
-            })
-            capacities.append((k, w, capacity))
-            if eligible:
-                pareto = root / f"pareto-k{k}"
-                commands = []
-                for concurrency in range(1, 5):
-                    commands.extend((
-                        {"suite": "dflash_pareto_whole_inference",
-                         "case": "whole_p8192_p32768_g256_dflash_graph",
-                         "concurrency": concurrency, "report": str(pareto / f"whole-c{concurrency}"),
-                         "command": ["whole", str(k), "--prefill-chunk", "4096"]},
-                        {"suite": "dflash_pareto_decode",
-                         "case": "context_p8192_p32768_g256_dflash_graph",
-                         "concurrency": concurrency, "report": str(pareto / f"decode-c{concurrency}"),
-                         "command": ["decode", str(k), "--prefill-chunk", "4096"]},
-                        {"suite": "dflash_pareto_control",
-                         "case": "context_p8192_p32768_g256_ordinary_graph",
-                         "concurrency": concurrency,
-                         "report": str(pareto / f"control-c{concurrency}"),
-                         "command": ["control", "0", "--prefill-chunk", "4096"]},
-                        {"suite": "dflash_pareto_whole_control",
-                         "case": "whole_p8192_p32768_g256_ordinary_graph",
-                         "concurrency": concurrency,
-                         "report": str(pareto / f"whole-control-c{concurrency}"),
-                         "command": ["whole-control", "0", "--prefill-chunk", "4096"]},
-                    ))
-                self.write(pareto / "manifest.json", {
-                    "artifact_type": "ninfer_bench_matrix_run", "schema_version": MATRIX_SCHEMA_VERSION,
-                    "preset": "dflash-pareto", "dry_run": False,
-                    "power_profile": self.auto_power,
-                    "artifact": self.artifact, "bench": self.bench,
-                    "expected_kv_value_group": 16, "expected_q4_activation_bits": 8,
-                    "expected_w8_activation_bits": 8, "expected_fp8_qk_wmma_enabled": True,
-                    "expected_xattention_profile": "dense",
-                    "dflash_draft_tokens": k, "dflash_verify_width": w, "commands": commands,
-                    "selected_prefill_chunk": 4096,
-                })
-                paretos.append((k, w, pareto))
-        return base, conversion, shortlist, capacities, paretos
+    def campaign(self, *, missing=None, c1_win=True):
+        recipes = [(recipe, Path("receipt"), Path(recipe)) for recipe in selection.RECIPES]
+        capacity = [(recipe, k, w, Path(f"{recipe}/capacity"))
+                    for recipe in selection.RECIPES for k, w in selection.DFLASH_PRODUCTION_PROFILES]
+        c1 = [(recipe, k, w, Path(f"{recipe}/c1")) for recipe, k, w, _ in capacity]
+        pareto = [(recipe, k, w, Path(f"{recipe}/pareto")) for recipe, k, w, _ in capacity]
+        if missing == "c1": c1.pop()
+        if missing == "pareto": pareto.pop()
+        if not c1_win: pareto = []
+        def evidence(route, recipe, *_):
+            return {"recipe": recipe, "benchmark": self.bench}
+        def cells(*_):
+            return {"eligible_concurrency": [1, 2], "cells": {
+                "1": {"eligible": True, "tokens": 40000},
+                "2": {"eligible": True, "tokens": 34000},
+                "3": {"eligible": False, "exclusion": {"status": "capacity_failure", "reason": "arena exhausted"}},
+                "4": {"eligible": False, "exclusion": {"status": "insufficient_capacity"}}}}
+        def performance(route, evidence, k, w, root, declared):
+            # Canonical K4 is C1 winner but slower at C2, without erasing its C1 result.
+            fastest = evidence["recipe"] == selection.RECIPES[0] and k == 4
+            return {"declared_concurrency": declared,
+                "matched_speed_by_concurrency": {str(c): {"pass": c1_win and not (fastest and c == 2)} for c in declared},
+                "objectives": {str(c): {"whole": {"8K": 150 if fastest else 120, "32K": 150 if fastest else 120},
+                            "acceptance": {"8K": 3., "32K": 3.}} for c in declared}}
+        with patch.object(selection, "selected_base_route", return_value={}), \
+             patch.object(selection, "recipe_evidence", side_effect=evidence), \
+             patch.object(selection, "capacity_cells", side_effect=cells), \
+             patch.object(selection, "performance_cells", side_effect=performance):
+            return assemble(Path("base"), recipes, capacity, c1, pareto)
 
-    def select_base_winner(self, name: str) -> dict:
-        candidates = json.loads(json.dumps(self.base_candidate_inputs))
-        for row in candidates:
-            row["whole_inference_tokens_per_second"]["whole_8k_c1"] = (
-                200.0 if row["name"] == name else 90.0
-            )
-        source = {
-            "artifact_type": "ninfer_r9700_pareto_input", "schema_version": 4,
-            "required_speed_workloads": ["whole_8k_c1"],
-            "require_single_static_profile_selection": True,
-            "base_ranking_profile": "spec-none-ordinary",
-            "base_capacity_profile": "spec-none-ordinary",
-            "selected_prefill_chunk": 4096,
-            "prefill_chunk_selection": CHUNK_SELECTION,
-            "candidates": candidates, "source_provenance": self.base_candidate_provenance,
-        }
-        self.write(self.base_input_path, source)
-        result = classify(source)
-        result["pareto_input"] = {
-            "path": str(self.base_input_path), "sha256": _file_sha256(self.base_input_path),
-        }
-        return result
+    def test_primary_c1_survives_c2_slow_and_capacity_exclusions(self):
+        result = self.campaign()
+        winner = f"{selection.RECIPES[0]}/k4-w5"
+        self.assertEqual(result["winner"], winner)
+        self.assertEqual(result["winner_qualified_concurrency"], [1])
+        self.assertNotEqual(result["per_concurrency"]["2"]["winner"], winner)
+        self.assertEqual(result["winner_exclusions"]["3"]["reason"], "arena exhausted")
+        self.assertFalse(result["production_selected"])
 
-    def test_selection_binds_exclusion_and_uses_maximin_whole_speed(self) -> None:
+    def test_missing_declared_survivor_is_failure_not_exclusion(self):
+        for missing in ("c1", "pareto"):
+            with self.subTest(missing=missing), self.assertRaisesRegex(ValueError, "lacks"):
+                self.campaign(missing=missing)
+
+    def test_no_material_c1_win_does_not_publish_production_choice(self):
+        result = self.campaign(c1_win=False)
+        self.assertIsNone(result["winner"])
+        self.assertEqual(result["status"], "no_qualified_C1_winner")
+
+    def test_missing_declared_report_does_not_shrink_subset(self):
+        case = BenchCase("suite", "case", (), 1, 0, "fixture")
+        manifest = {"concurrency": [1, 2], "expected_kv_value_group": 16,
+            "expected_xattention_profile": "dense", "artifact": self.artifact,
+            "bench": self.bench, "commands": [{"suite": "suite", "case": "case",
+                "concurrency": 1, "report": "/report", "command": ["bench"]}]}
+        with patch.object(selection, "build_cases", return_value=[case]), \
+             patch.object(selection, "load_bench_report", return_value={}):
+            with self.assertRaisesRegex(ValueError, "exact dflash-pareto point set"):
+                _records(Path("matrix"), manifest, "dflash-pareto", 4, 5, 2048,
+                         required_concurrency=[1, 2])
+
+    def test_capacity_retains_each_bound_failure_not_entire_profile(self):
+        route = {"selected_prefill_chunk": 2048, "cache_group": 16,
+                 "text_prefill_attention_profile": "dense", "hybrid_base_authority": None}
+        with patch.object(selection, "_matrix", return_value={}), \
+             patch.object(selection, "_same_campaign"), \
+             patch.object(selection, "_records", return_value={1: [{}], 2: [{}]}), \
+             patch.object(selection, "_missing_capacity_provenance", return_value=[
+                 {"concurrency": 3, "reason": "arena"}, {"concurrency": 4, "reason": "arena"}]), \
+             patch.object(selection, "validate_automatic_feasibility", side_effect=[
+                 {"measurement_kind": "resolved_effective_maximum", "resolved_effective_maximum_tokens": 40000},
+                 {"measurement_kind": "resolved_effective_maximum", "resolved_effective_maximum_tokens": 32000}]), \
+             patch.object(selection, "_identity", return_value={}):
+            result = selection.capacity_cells(route, {"artifact": {}, "benchmark": {}}, 4, 5, Path("cap"))
+        self.assertEqual(result["eligible_concurrency"], [1])
+        self.assertEqual(result["cells"]["2"]["exclusion"]["status"], "insufficient_32k_generation_capacity")
+        self.assertEqual(result["cells"]["3"]["exclusion"]["reason"], "arena")
+
+    def test_create_only_selection_revalidates_before_publication(self):
         with tempfile.TemporaryDirectory() as directory:
-            base, conversion, shortlist, capacities, paretos = self.fixture(Path(directory))
-
-            def records(root: Path, _manifest: dict, preset: str, k: int, _w: int,
-                        _prefill_chunk: int, **_options: object) -> dict:
-                if preset == "dflash-capacity":
-                    end = 3 if k == 3 else 4
-                    return {c: [{"k": k, "tokens": (100 if k == 1 else 120)}]
-                            for c in range(1, end + 1)}
-                return {c: [{}] for c in range(1, 5)}
-
-            def rows(path: Path, *_args: object, **_kwargs: object) -> list[dict]:
-                k = int(_args[-2][1])
-                concurrency = int(path.name.split("c")[-1])
-                speed = 100.0 if k == 1 else 80.0
-                acceptance = 1.0 if k == 1 else 2.0
-                if "whole-control" in path.name:
-                    return [{"suite": "dflash_pareto_whole_control",
-                             "label": f"whole-{tokens}", "n_prompt": tokens, "n_gen": 256,
-                             "requested_output_tokens": 257, "concurrency": concurrency,
-                             "whole_output_tok_s_mean": 50.0,
-                             "whole_output_tok_s_stddev": 0.1}
-                            for tokens in (8192, 32768)]
-                if "whole" in path.name:
-                    return [{"suite": "dflash_pareto_whole_inference",
-                             "label": f"whole-{tokens}", "n_prompt": tokens, "n_gen": 256,
-                             "requested_output_tokens": 257, "concurrency": concurrency,
-                             "whole_output_tok_s_mean": speed,
-                             "whole_output_tok_s_stddev": 0.1}
-                            for tokens in (8192, 32768)]
-                if "control" in path.name:
-                    return [{"suite": "dflash_pareto_control", "label": f"control-{tokens}",
-                             "n_prompt": tokens, "n_gen": 256,
-                             "requested_output_tokens": 257,
-                             "concurrency": concurrency, "decode_output_tok_s_mean": 50.0,
-                             "decode_output_tok_s_stddev": 0.1}
-                            for tokens in (8192, 32768)]
-                return [{"suite": "dflash_pareto_decode", "label": f"decode-{tokens}",
-                         "n_prompt": tokens, "n_gen": 256,
-                         "requested_output_tokens": 257,
-                         "concurrency": concurrency, "spec_acceptance_length": acceptance,
-                         "decode_output_tok_s_mean": speed, "decode_output_tok_s_stddev": 0.1}
-                        for tokens in (8192, 32768)]
-
-            with patch("tools.bench.assemble_dflash_selection._records", side_effect=records), patch(
-                "tools.bench.assemble_dflash_selection._validate_shortlist_output",
-            ), patch(
-                "tools.bench.assemble_dflash_selection._missing_capacity_provenance",
-                side_effect=lambda root, _manifest: ([{"failure": "C4"}]
-                                                     if "capacity-k3" in str(root) else []),
-            ), patch(
-                "tools.bench.assemble_dflash_selection.validate_automatic_feasibility",
-                side_effect=lambda report: {"measurement_kind": "resolved_effective_maximum",
-                                            "resolved_effective_maximum_tokens": report["tokens"]},
-            ), patch(
-                "tools.bench.assemble_dflash_selection._auxiliary",
-                return_value={"quality": "bound"},
-            ), patch(
-                "tools.bench.assemble_dflash_selection.report_rows", side_effect=rows,
-            ):
-                result = assemble(base, conversion, shortlist, capacities, paretos)
-            self.assertEqual(result["eligible_frontier"], ["k1-w2", "k2-w3"])
-            self.assertEqual(result["capacity_eligible_profiles"], ["k1-w2", "k2-w3"])
-            self.assertEqual(result["performance_eligible_profiles"], ["k1-w2", "k2-w3"])
-            self.assertEqual(result["status"], "passed")
-            self.assertEqual(result["schema_version"], 3)
-            self.assertEqual(result["winner"], "k1-w2")
-            self.assertEqual(result["selected_prefill_chunk"], 4096)
-            self.assertEqual(result["selected_base"]["prefill_chunk"], 4096)
-            self.assertEqual(result["decisive_stage"], "maximin_whole_inference_throughput")
-            excluded = next(row for row in result["candidates"] if row["draft_tokens"] == 3)
-            self.assertFalse(excluded["capacity_eligible"])
-            self.assertEqual(excluded["capacity_failures"], [{"failure": "C4"}])
-            admitted = next(row for row in result["candidates"] if row["draft_tokens"] == 1)
-            self.assertTrue(admitted["performance_eligible"])
-            self.assertTrue(admitted["matched_ordinary_speed_gate"]["pass"])
+            output = Path(directory) / "selection.json"
+            argv = ["--base-selection", "base", "--recipe", selection.RECIPES[0], "receipt", "shortlist",
+                    "--out", str(output)]
+            with patch.object(selection, "assemble", side_effect=[{"winner": "a"}, {"winner": "b"}]):
+                with self.assertRaisesRegex(ValueError, "changed"):
+                    main(argv)
+            self.assertFalse(output.exists())
+            with patch.object(selection, "assemble", return_value={"winner": "a"}):
+                main(argv)
+                with self.assertRaises(SystemExit): main(argv)
 
     def test_matched_ordinary_speed_gate_is_strict_and_fail_closed(self) -> None:
         rows = []
@@ -384,78 +171,6 @@ class DFlashSelectionTest(unittest.TestCase):
         malformed[0]["whole_output_tok_s_mean"] = float("inf")
         with self.assertRaisesRegex(ValueError, "malformed"):
             _matched_ordinary_speed_gate(malformed)
-
-    def test_matrix_requires_selected_base_prefill_chunk(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            _base, _conversion, shortlist, _capacities, _paretos = self.fixture(
-                Path(directory)
-            )
-            manifest_path = shortlist / "manifest.json"
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            manifest["selected_prefill_chunk"] = 2048
-            self.write(manifest_path, manifest)
-            with self.assertRaisesRegex(ValueError, "does not bind selected prefill chunk"):
-                _matrix(shortlist, "dflash-shortlist", prefill_chunk=2048)
-            manifest["commands"][0]["command"][-1] = "2048"
-            self.write(manifest_path, manifest)
-            self.assertEqual(
-                _matrix(shortlist, "dflash-shortlist", prefill_chunk=2048)[
-                    "selected_prefill_chunk"
-                ],
-                2048,
-            )
-
-    def test_rejects_pareto_input_for_capacity_excluded_profile(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            base, conversion, shortlist, capacities, paretos = self.fixture(Path(directory))
-            paretos.append((3, 4, Path(directory) / "unused"))
-            with patch("tools.bench.assemble_dflash_selection._records", return_value={}), patch(
-                "tools.bench.assemble_dflash_selection._validate_shortlist_output",
-            ), patch(
-                "tools.bench.assemble_dflash_selection._missing_capacity_provenance",
-                return_value=[{"failure": "C1"}],
-            ):
-                with self.assertRaisesRegex(ValueError, "exactly cover capacity-eligible"):
-                    assemble(base, conversion, shortlist, capacities, paretos)
-
-    def test_rejects_unretained_pareto_input_instead_of_ignoring_it(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            base, conversion, shortlist, capacities, paretos = self.fixture(Path(directory))
-            paretos.append((99, 100, Path(directory) / "unretained"))
-            with patch("tools.bench.assemble_dflash_selection._records", return_value={}), patch(
-                "tools.bench.assemble_dflash_selection._validate_shortlist_output",
-            ):
-                with self.assertRaisesRegex(ValueError, "unique retained-shortlist"):
-                    assemble(base, conversion, shortlist, capacities, paretos)
-
-    def test_rejects_malformed_selected_base_recipe_provenance(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            base, conversion, shortlist, capacities, paretos = self.fixture(Path(directory))
-            payload = json.loads(base.read_text(encoding="utf-8"))
-            payload["terminal_production_selection"]["winner_artifact"][
-                "sha256"
-            ] = "not-a-sha256"
-            self.write(base, payload)
-            with self.assertRaisesRegex(ValueError, "does not recompute exactly"):
-                assemble(base, conversion, shortlist, capacities, paretos)
-
-    def test_dflash_campaign_matches_selected_text_prefill_but_keeps_verify_dense(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            base, _conversion, shortlist, _capacities, _paretos = self.fixture(Path(directory))
-            payload = self.select_base_winner("all-q4-g16-b128-s16-tau900")
-            self.write(base, payload)
-            group, profile, _recipe, _value = _selected_base(base)
-            self.assertEqual((group, profile), (16, "b128-s16-tau900"))
-
-            manifest = json.loads((shortlist / "manifest.json").read_text())
-            with self.assertRaisesRegex(ValueError, "selected Text-prefill"):
-                _same_campaign(
-                    manifest, self.artifact, self.bench, group, profile, 4096, None
-                )
-            manifest["expected_xattention_profile"] = profile
-            _same_campaign(
-                manifest, self.artifact, self.bench, group, profile, 4096, None
-            )
 
     def test_timing_campaign_requires_exact_auto_power_before_and_after(self) -> None:
         manifest = {
@@ -503,7 +218,7 @@ class DFlashSelectionTest(unittest.TestCase):
             manifest, self.artifact, self.bench, 16, "dense", 4096, None
         )
 
-    def test_campaign_rejects_rebound_hybrid_planner(self) -> None:
+    def test_campaign_accepts_fresh_semantically_equal_hybrid_planner(self) -> None:
         authority = {
             "tool": {"path": "/planner", "file_size_bytes": 10, "sha256": "a" * 64},
             "build": {"root": "/build",
@@ -530,10 +245,7 @@ class DFlashSelectionTest(unittest.TestCase):
                 **authority, "tool": {**authority["tool"], "sha256": "b" * 64},
             },
         }
-        with self.assertRaisesRegex(ValueError, "planner differs"):
-            _same_campaign(
-                manifest, self.artifact, self.bench, 16, "dense", 4096, authority
-            )
+        _same_campaign(manifest, self.artifact, self.bench, 16, "dense", 4096, authority)
 
     def test_hybrid_dflash_campaign_binds_its_real_verify_width(self) -> None:
         authority = {
@@ -635,7 +347,7 @@ class DFlashSelectionTest(unittest.TestCase):
             self.write(root / "dflash-generated-quality.json", {
                 "artifact_type": "ninfer_dflash_generated_quality_evidence", "schema_version": 1,
                 "artifact": self.artifact, "benchmark_executable": self.bench, "pass": True,
-                "target_output_gate": {"pass": True, "evidence": {
+                "target_output_gate": {"pass": True, "concurrency": [1, 2, 3, 4], "evidence": {
                     "path": str(parity_path), "sha256": __import__("hashlib").sha256(
                         parity_path.read_bytes()).hexdigest()}},
                 "proposal_gate": {"pass": True, "determinism_evidence": {
@@ -662,27 +374,6 @@ class DFlashSelectionTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "parity is incomplete"):
                 _auxiliary(root, {"commands": []}, self.artifact, self.bench, 7, 12)
 
-    def test_main_publishes_durably_and_rolls_back_owned_inode_on_revalidation_failure(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            output = root / "selection.json"
-            argv = ["--base-selection", str(root / "base.json"),
-                    "--conversion-report", str(root / "conversion.json"),
-                    "--shortlist-dir", str(root / "shortlist"),
-                    "--capacity", "7", "12", str(root / "capacity"),
-                    "--out", str(output)]
-            result = {"artifact_type": "fixture", "status": "passed"}
-            with patch("tools.bench.assemble_dflash_selection.assemble",
-                       side_effect=(result, result)):
-                main(argv)
-            self.assertEqual(json.loads(output.read_text()), result)
-
-            output.unlink()
-            with patch("tools.bench.assemble_dflash_selection.assemble",
-                       side_effect=(result, {**result, "status": "changed"})):
-                with self.assertRaisesRegex(ValueError, "does not revalidate"):
-                    main(argv)
-            self.assertFalse(output.exists())
 
 
 if __name__ == "__main__":
