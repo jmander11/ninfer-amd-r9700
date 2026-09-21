@@ -974,10 +974,12 @@ unresolved tradeoff or the product contract must change.
   implemented; 14 CPU Python tests (including real encoder byte-oracles) and the isolated host
   registry/execution-workspace tests pass. This is not physical companion admission. Remaining:
   real artifact binding/graph qualification, recipe-aware selected companion preparation and
-  selection at K4/W5 and K5/W6; shared benchmark/PPL admission updates wait until the frozen base
-  campaign finishes. Preserve the base's 131072-row draft head and exact token map byte-for-byte.
-  Next shared-tool edits: recipe-aware admission/receipts and exactly two widths in
-  `run_ninfer_bench_matrix.py`; explicit Python 3.11 CPU conversion and recipe-separated plans in
+  selection at K4/W5 and K5/W6. Preserve the base's 131072-row draft head and exact token map byte-for-byte.
+  Benchmark admission now validates all nine companion identities against their exact base and
+  recipe receipts; schema2 shortlist permits only K4/W5 and K5/W6. Independent review SHIP,
+  80 focused benchmark/prefill CPU tests pass, and selected2048 authority revalidates unchanged.
+  This is a runner milestone, not a runnable end-to-end DFlash campaign. Active next-tool work:
+  explicit Python 3.11 CPU conversion and recipe-separated plans in
   `prepare_selected_dflash.py`; recipe+K/W candidate keys and per-cell capacity exclusions in
   `assemble_dflash_selection.py` (all under `tools/bench`). `tools/ppl/run.py` already accepts the
   new identities: add distinct append-conversion provenance only where companion inspection needs

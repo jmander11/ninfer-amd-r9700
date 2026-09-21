@@ -9,7 +9,7 @@ The matrix is intentionally layered instead of fully factorial:
 * Device Graph is compared only for decode-bearing tests.
 * Prefill-only tests sweep length and chunk size, but not graph on/off.
 * The concurrency preset decomposes primary MTP3 prefill and decode at C=1..4.
-* The DFlash shortlist preset compares explicit K=1..11/W/topology profiles at 8K.
+* The DFlash shortlist preset compares exactly K4/W5 and K5/W6 at 8K.
 * The DFlash Pareto preset binds one explicit K/W profile to matched speed,
   acceptance, proposal/selector diagnostics, and exact ordinary-token parity.
 * The Pareto feasibility preset proves the required 32K workload fits at every
@@ -59,6 +59,7 @@ from tools.bench.matrix_contract import (
 from tools.bench.prefill_chunk_authority import inspect_prefill_chunk_authority
 from tools.ppl import run as ppl_run
 from tools.ppl.validate_fp8_hybrid_execution_gate import query_widths
+from tools.convert.qwen3_8_27b_r9700 import dflash2_matrix_recipes, dflash2_q4_inventory
 
 DEFAULT_BENCH = REPO_ROOT / "build-r9700/bench/ninfer_bench"
 DEFAULT_CORPUS = REPO_ROOT / "bench/fixtures/bench_corpus.ids"
@@ -79,8 +80,9 @@ SWEEP_KS = (0, 1, 2, 3, 4, 5)
 REPORT_SCHEMA_VERSION = 20
 REPORT_ARTIFACT_TYPE = "ninfer_bench_report"
 REPORT_TOOL = "ninfer_bench"
-DFLASH_SHORTLIST_SCHEMA_VERSION = 1
-DFLASH_SHORTLIST_K_ORDER = (1, 11, 2, 10, 3, 9, 4, 8, 5, 7, 6)
+DFLASH_SHORTLIST_SCHEMA_VERSION = 2
+DFLASH_PRODUCTION_PROFILES = ((4, 5), (5, 6))
+DFLASH_SHORTLIST_K_ORDER = (4, 5)
 MODEL_ID = "qwen3.8-27b"
 TARGET_ID = "qwen3_8_27b_r9700"
 FP8_QK_WMMA_PROFILE = "t1-ge64-t2-ge320-t3plus-stream-v1"
@@ -95,11 +97,14 @@ KV_PAGE_TOKENS = 64
 AUTOMATIC_KV_HEADROOM_BYTES = 1024 * 1024 * 1024
 MODEL_NATIVE_CONTEXT = 262144
 PUBLIC_TOKEN_DOMAIN = 248077
-DFLASH_CAMPAIGN_WEIGHTS_IDS = frozenset({
-    "r9700-q4g64-n16k16-dflash2-q4-eval",
-    "r9700-q4-w8-mse-n16k16-dflash2-q4-eval",
-    "r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval",
-})
+DFLASH_COMPANIONS = {
+    dflash2_q4_inventory.companion_weights_id(base, recipe.key): (base, recipe.key)
+    for base in (dflash2_q4_inventory.ALL_Q4_BASE_WEIGHTS_ID,
+                 dflash2_q4_inventory.MIXED_BASE_WEIGHTS_ID,
+                 dflash2_q4_inventory.HYBRID_BASE_WEIGHTS_ID)
+    for recipe in dflash2_matrix_recipes.RECIPES
+}
+DFLASH_CAMPAIGN_WEIGHTS_IDS = frozenset(DFLASH_COMPANIONS)
 DFLASH_CAMPAIGN_PRESETS = frozenset({
     "dflash-shortlist", "dflash-pareto", "dflash-feasibility", "dflash-capacity",
 })
@@ -107,8 +112,6 @@ HYBRID_DFLASH_PRESETS = frozenset({
     "dflash-shortlist", "dflash-pareto", "dflash-capacity",
 })
 HYBRID_BASE_WEIGHTS_ID = "r9700-q4g64-f8e4m3-four-role-n16k16-eval"
-HYBRID_DFLASH_WEIGHTS_ID = "r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval"
-DFLASH_RECIPE_ID = "r9700-dflash2-all-q4g64-n16k16-bf16-codebook-eval-v1"
 DFLASH_SOURCE_RECEIPT = {
     "config_sha256": "873e3556509b0da06e29654ba00d4944888d4b5e8a33afde25f7eb27d321e980",
     "readme_sha256": "0c06405ffff835f4da26115114a6dd7bb4a8b8a6881c17edd3a1086a99281269",
@@ -241,8 +244,7 @@ def resolved_dflash_topology(draft_tokens: int, verify_width: int) -> str:
 
 def dflash_shortlist_profiles() -> list[dict[str, Any]]:
     profiles = []
-    for k in range(1, 12):
-        width = resolved_dflash_verify_width(k, 0)
+    for k, width in DFLASH_PRODUCTION_PROFILES:
         profiles.append({
             "draft_tokens_requested": k,
             "verify_width_requested": width,
@@ -577,98 +579,102 @@ def _receipt_path(value: object, label: str) -> Path:
     return (candidate if candidate.is_absolute() else REPO_ROOT / candidate).resolve(strict=True)
 
 
-def _hybrid_base_authority(receipt: dict[str, Any]) -> dict[str, Any]:
-    fields = (
-        "recipe_id", "selection_sha256", "object_plan_sha256",
-        "source_index_sha256", "source_ranking_sha256",
-    )
-    if (
-        not isinstance(receipt.get("path"), str)
-        or not isinstance(receipt.get("sha256"), str)
-        or any(not isinstance(receipt.get(field), str) for field in fields)
-    ):
-        raise SystemExit("hybrid base lacks its exact conversion authority")
-    return {
-        "receipt": {"path": receipt["path"], "sha256": receipt["sha256"]},
-        **{field: receipt[field] for field in fields},
-    }
-
-
-def require_fp8_hybrid_dflash_companion(
-    path: Path, artifact: dict[str, Any]
+def require_dflash_companion(
+    path: Path, artifact: dict[str, Any], *, require_hybrid: bool = False,
 ) -> dict[str, Any]:
-    """Bind a four-role DFlash companion back to the exact selected hybrid base."""
+    """Bind one registered append conversion to its exact base and matrix recipe."""
 
-    if artifact.get("weights_id") != HYBRID_DFLASH_WEIGHTS_ID:
-        raise SystemExit("hybrid DFlash evidence requires the four-role DFlash companion")
+    profile = DFLASH_COMPANIONS.get(artifact.get("weights_id"))
+    if profile is None or (require_hybrid and profile[0] != HYBRID_BASE_WEIGHTS_ID):
+        raise SystemExit("DFlash evidence requires a registered companion of the expected base")
+    base_id, matrix_recipe = profile
+    expected_recipe = dflash2_q4_inventory.matrix_recipe_summary(matrix_recipe)
     report_path = Path(str(path.resolve()) + ".conversion.json")
     if report_path.is_symlink() or not report_path.is_file():
-        raise SystemExit("hybrid DFlash companion lacks a regular conversion report")
+        raise SystemExit("DFlash companion lacks a regular conversion report")
     try:
         report = json.loads(report_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
-        raise SystemExit(f"hybrid DFlash conversion report is invalid: {error}") from error
+        raise SystemExit(f"DFlash conversion report is invalid: {error}") from error
     base = report.get("base") if isinstance(report, dict) else None
     converted = report.get("artifact") if isinstance(report, dict) else None
     recipe = report.get("dflash_recipe") if isinstance(report, dict) else None
     source = report.get("dflash_source") if isinstance(report, dict) else None
     identity = report.get("identity") if isinstance(report, dict) else None
     if not all(isinstance(value, dict) for value in (base, converted, recipe, source, identity)):
-        raise SystemExit("hybrid DFlash conversion report is incomplete")
-    base_path = _receipt_path(base.get("path"), "hybrid DFlash base")
+        raise SystemExit("DFlash conversion report is incomplete")
+    base_path = _receipt_path(base.get("path"), "DFlash base")
     base_artifact = inspect_artifact(base_path)
-    hybrid = ppl_run.inspect_candidate_artifact(base_path, digest=base_artifact["sha256"])
-    ppl_run.require_fp8_hybrid_candidate(hybrid)
+    inspected = ppl_run.inspect_candidate_artifact(base_path, digest=base_artifact["sha256"])
+    if base_id == HYBRID_BASE_WEIGHTS_ID:
+        ppl_run.require_fp8_hybrid_candidate(inspected)
     if (
-        hybrid["path"] != base_artifact["path"]
-        or hybrid["bytes"] != base_artifact["file_size_bytes"]
-        or hybrid["sha256"] != base_artifact["sha256"]
-        or hybrid["weights_id"] != HYBRID_BASE_WEIGHTS_ID
+        inspected["path"] != base_artifact["path"]
+        or inspected["bytes"] != base_artifact["file_size_bytes"]
+        or inspected["sha256"] != base_artifact["sha256"]
+        or inspected["weights_id"] != base_id
+        or not isinstance(inspected.get("conversion_receipt"), dict)
     ):
-        raise SystemExit("hybrid DFlash base inspection differs from benchmark provenance")
-    base_artifact = {**base_artifact, "conversion_receipt": hybrid["conversion_receipt"]}
-    expected_authority = _hybrid_base_authority(hybrid["conversion_receipt"])
+        raise SystemExit("DFlash base inspection differs from benchmark provenance")
+    receipt = inspected["conversion_receipt"]
+    fields = ("recipe_id", "object_plan_sha256", "source_artifact_sha256",
+              "source_receipt_sha256", "transcoder_sha256")
+    fields += (("selection_sha256", "source_index_sha256", "source_ranking_sha256")
+               if base_id == HYBRID_BASE_WEIGHTS_ID else ("receipt_producer_sha256",))
+    if any(not isinstance(receipt.get(key), str) or not receipt[key]
+           for key in ("path", "sha256", *fields)):
+        raise SystemExit("DFlash base lacks its exact conversion authority")
+    expected_authority = {
+        "receipt": {"path": receipt["path"], "sha256": receipt["sha256"]},
+        **{key: receipt[key] for key in fields},
+    }
+    base_artifact = {**base_artifact, "conversion_receipt": receipt}
+    recipe_fields = ("key", "recipe_id", "matrix_format", "scale_objective",
+                     "represented_source", "selector_codebook_format", "format_counts",
+                     "format_encoded_bytes", "tensor_encoded_bytes", "runtime_repack")
+    expected_activation = ("compile_selected_W8G32"
+                           if expected_recipe["matrix_format"] == "W8G32_F16S"
+                           else "compile_selected_adaptive_A8G64")
     if (
         report.get("status") != "registered-evaluation-only"
         or report.get("target_key") != TARGET_ID
-        or report.get("recipe_id") != DFLASH_RECIPE_ID
+        or report.get("recipe_id") != expected_recipe["recipe_id"]
         or report.get("weight_recipe_selected") is not False
-        or identity.get("model_id") != MODEL_ID
-        or identity.get("weights_id") != artifact["weights_id"]
-        or base.get("identity") != {
-            "model_id": MODEL_ID, "weights_id": HYBRID_BASE_WEIGHTS_ID,
-        }
+        or identity != {"model_id": MODEL_ID, "weights_id": artifact["weights_id"]}
+        or base.get("identity") != {"model_id": MODEL_ID, "weights_id": base_id}
         or base.get("bytes") != base_artifact["file_size_bytes"]
         or base.get("sha256") != base_artifact["sha256"]
         or base.get("payload_copy") != "byte_exact"
         or base.get("authority") != expected_authority
-        or _receipt_path(converted.get("path"), "hybrid DFlash artifact") != path.resolve()
+        or _receipt_path(converted.get("path"), "DFlash artifact") != path.resolve()
         or converted.get("bytes") != artifact["file_size_bytes"]
         or converted.get("sha256") != artifact["sha256"]
         or converted.get("projected_bytes") != artifact["file_size_bytes"]
         or type(converted.get("projected_device_arena_bytes")) is not int
         or converted["projected_device_arena_bytes"] <= 0
         or _artifact_object_count(path) != 1190
-        or recipe.get("matrix_format") != "Q4G64_F16S"
-        or recipe.get("activation_profile") != "compile_selected_adaptive_A8G64"
-        or recipe.get("selector_codebook_format") != "BF16"
+        or any(recipe.get(key) != expected_recipe[key] for key in recipe_fields)
+        or recipe.get("activation_profile") != expected_activation
         or recipe.get("objects") != 66
         or recipe.get("source_tensors") != 81
-        or recipe.get("format_counts") != {"BF16": 34, "Q4G64_F16S": 32}
-        or recipe.get("format_encoded_bytes")
-        != {"BF16": 254_814_720, "Q4G64_F16S": 954_654_720}
-        or recipe.get("tensor_encoded_bytes") != 1_209_469_440
-        or recipe.get("runtime_repack") is not False
         or any(source.get(key) != value for key, value in DFLASH_SOURCE_RECEIPT.items())
     ):
-        raise SystemExit("hybrid DFlash companion does not bind the exact hybrid base")
+        raise SystemExit("DFlash companion does not bind the exact base and matrix recipe")
     return {
         **artifact,
         "dflash_conversion_report": {
             "path": str(report_path), "sha256": file_sha256(report_path),
         },
-        "hybrid_base_artifact": base_artifact,
+        "dflash_matrix_recipe": expected_recipe,
+        "dflash_base_artifact": base_artifact,
+        **({"hybrid_base_artifact": base_artifact} if base_id == HYBRID_BASE_WEIGHTS_ID else {}),
     }
+
+
+def require_fp8_hybrid_dflash_companion(
+    path: Path, artifact: dict[str, Any]
+) -> dict[str, Any]:
+    return require_dflash_companion(path, artifact, require_hybrid=True)
 
 
 def require_fp8_hybrid_artifact(
@@ -2815,6 +2821,10 @@ def write_dflash_shortlist(
         if record.get("suite") == "dflash_shortlist_repair_diagnostic"
         and record.get("concurrency") == 1
     }
+    expected_ks = {k for k, _width in DFLASH_PRODUCTION_PROFILES}
+    if (set(parity_by_k) != expected_ks or set(performance_by_k) != expected_ks
+            or set(diagnostic_by_k) != expected_ks):
+        failures.append({"error": "shortlist evidence must cover exactly K4/W5 and K5/W6"})
     controls = [
         row for row in rows
         if row.get("suite") == "dflash_shortlist_control"
@@ -3073,7 +3083,8 @@ def write_dflash_shortlist(
                 "to one scalar"
             ),
         },
-        "pass": not failures and provenance_stable and len(valid_candidates) == 11,
+        "pass": (not failures and provenance_stable
+                 and len(valid_candidates) == len(DFLASH_PRODUCTION_PROFILES)),
     }
     durable_replace_json(out_dir / "dflash-shortlist.json", payload)
     return payload, failures
@@ -3232,12 +3243,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="prompt length for --preset prefill-chunk (default: 8192)",
     )
     parser.add_argument(
-        "--dflash-draft-tokens", type=int, choices=range(1, 12),
+        "--dflash-draft-tokens", type=int, choices=(4, 5),
         help="required startup-fixed DFlash K for DFlash Pareto/capacity presets",
     )
     parser.add_argument(
-        "--dflash-verify-width", type=int, choices=(0, *range(2, 17)), default=0,
-        help="DFlash verify W for DFlash presets (0 = package default; explicit values must be 2..16)",
+        "--dflash-verify-width", type=int, choices=(0, 5, 6), default=0,
+        help="DFlash verify W: exactly K4/W5 or K5/W6 (0 resolves to K+1)",
     )
     parser.add_argument(
         "--concurrency",
@@ -3325,6 +3336,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit("--prepare-only requires a fresh output directory")
     if args.preset in ("dflash-pareto", "dflash-feasibility", "dflash-capacity") and args.dflash_draft_tokens is None:
         raise SystemExit(f"--preset {args.preset} requires --dflash-draft-tokens")
+    if args.preset in DFLASH_CAMPAIGN_PRESETS and args.dflash_draft_tokens is not None:
+        pair = (args.dflash_draft_tokens,
+                resolved_dflash_verify_width(args.dflash_draft_tokens, args.dflash_verify_width))
+        if pair not in DFLASH_PRODUCTION_PROFILES:
+            raise SystemExit("production DFlash campaigns require exactly K4/W5 or K5/W6")
     if args.preset not in ("dflash-pareto", "dflash-feasibility", "dflash-capacity") and (
         args.dflash_draft_tokens is not None or args.dflash_verify_width != 0
     ):
@@ -3441,6 +3457,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     validate_dflash_campaign_artifact(
         args.preset, artifact_provenance, dry_run=args.dry_run
     )
+    if (not args.dry_run and args.preset in DFLASH_CAMPAIGN_PRESETS
+            and "dflash_conversion_report" not in artifact_provenance):
+        artifact_provenance = require_dflash_companion(args.weights, artifact_provenance)
     corpus_tokens = count_corpus_tokens(args.corpus)
 
     args.power_profile_observed = None
@@ -3878,6 +3897,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             finished_artifact = require_fp8_hybrid_artifact(
                 args.weights, finished_artifact, args.preset
             )
+    if (args.preset in DFLASH_CAMPAIGN_PRESETS
+            and "dflash_conversion_report" not in finished_artifact):
+        finished_artifact = require_dflash_companion(args.weights, finished_artifact)
     if finished_artifact != artifact_provenance:
         failures.append(
             {

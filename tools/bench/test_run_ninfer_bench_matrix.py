@@ -380,6 +380,11 @@ class CompiledKvGroupTest(unittest.TestCase):
                 load_bench_report(report, 32, 8, 16, True)
 
     def test_dflash_campaign_accepts_each_terminal_recipe_companion(self) -> None:
+        from tools.bench.run_ninfer_bench_matrix import DFLASH_COMPANIONS
+        self.assertEqual(len(DFLASH_COMPANIONS), 9)
+        for weights_id in DFLASH_COMPANIONS:
+            validate_dflash_campaign_artifact("dflash-pareto",
+                {"model_id": "qwen3.8-27b", "weights_id": weights_id}, dry_run=False)
         mixed = {
             "model_id": "qwen3.8-27b",
             "weights_id": "r9700-q4-w8-mse-n16k16-dflash2-q4-eval",
@@ -405,104 +410,98 @@ class CompiledKvGroupTest(unittest.TestCase):
                 dry_run=False,
             )
 
-    def test_hybrid_dflash_companion_binds_exact_base_receipt(self) -> None:
+    def test_all_dflash_companions_bind_recipe_and_exact_base_receipt(self) -> None:
+        from tools.bench.run_ninfer_bench_matrix import (
+            DFLASH_COMPANIONS, DFLASH_SOURCE_RECEIPT, HYBRID_BASE_WEIGHTS_ID,
+            dflash2_q4_inventory, require_dflash_companion,
+        )
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            base = root / "base.ninfer"
-            companion = root / "companion.ninfer"
-            self.write_artifact(base, "r9700-q4g64-f8e4m3-four-role-n16k16-eval")
-            self.write_artifact(
-                companion, "r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval", 1190
-            )
-            base_artifact = inspect_artifact(base)
-            companion_artifact = inspect_artifact(companion)
-            receipt = {
-                "path": str(root / "base.conversion.json"),
-                "sha256": "1" * 64,
-                "recipe_id": "recipe",
-                "selection_sha256": "2" * 64,
-                "object_plan_sha256": "3" * 64,
-                "source_index_sha256": "4" * 64,
-                "source_ranking_sha256": "5" * 64,
-            }
-            authority = {
-                "receipt": {"path": receipt["path"], "sha256": receipt["sha256"]},
-                **{key: receipt[key] for key in (
-                    "recipe_id", "selection_sha256", "object_plan_sha256",
-                    "source_index_sha256", "source_ranking_sha256",
-                )},
-            }
-            report = {
-                "target_key": "qwen3_8_27b_r9700",
-                "recipe_id": "r9700-dflash2-all-q4g64-n16k16-bf16-codebook-eval-v1",
-                "status": "registered-evaluation-only",
-                "weight_recipe_selected": False,
-                "identity": {
-                    "model_id": "qwen3.8-27b",
-                    "weights_id": companion_artifact["weights_id"],
-                },
-                "base": {
-                    "path": str(base),
-                    "identity": {
-                        "model_id": "qwen3.8-27b",
-                        "weights_id": base_artifact["weights_id"],
-                    },
-                    "bytes": base_artifact["file_size_bytes"],
-                    "sha256": base_artifact["sha256"],
-                    "payload_copy": "byte_exact",
-                    "authority": authority,
-                },
-                "artifact": {
-                    "path": str(companion),
-                    "bytes": companion_artifact["file_size_bytes"],
-                    "sha256": companion_artifact["sha256"],
-                    "projected_bytes": companion_artifact["file_size_bytes"],
-                    "projected_device_arena_bytes": 1,
-                },
-                "dflash_recipe": {
-                    "matrix_format": "Q4G64_F16S",
-                    "activation_profile": "compile_selected_adaptive_A8G64",
-                    "selector_codebook_format": "BF16",
-                    "objects": 66,
-                    "source_tensors": 81,
-                    "format_counts": {"BF16": 34, "Q4G64_F16S": 32},
-                    "format_encoded_bytes": {
-                        "BF16": 254_814_720, "Q4G64_F16S": 954_654_720,
-                    },
-                    "tensor_encoded_bytes": 1_209_469_440,
-                    "runtime_repack": False,
-                },
-                "dflash_source": {
-                    "config_sha256": "873e3556509b0da06e29654ba00d4944888d4b5e8a33afde25f7eb27d321e980",
-                    "readme_sha256": "0c06405ffff835f4da26115114a6dd7bb4a8b8a6881c17edd3a1086a99281269",
-                    "tensor_count": 81,
-                    "safetensors_bytes": 3_848_817_896,
-                    "safetensors_sha256": "67fc76d68dc5a9415511a4f394ef744d67510cd20e93b37cc2cc7d28e4bab65c",
-                },
-            }
-            report_path = Path(str(companion) + ".conversion.json")
-            report_path.write_text(json.dumps(report), encoding="utf-8")
-            hybrid = {
-                "path": str(base.resolve()), "bytes": base_artifact["file_size_bytes"],
-                "sha256": base_artifact["sha256"], "model_id": "qwen3.8-27b",
-                "weights_id": base_artifact["weights_id"], "conversion_receipt": receipt,
-            }
-            with mock.patch(
-                "tools.bench.run_ninfer_bench_matrix.ppl_run.inspect_candidate_artifact",
-                return_value=hybrid,
-            ), mock.patch(
-                "tools.bench.run_ninfer_bench_matrix.ppl_run.require_fp8_hybrid_candidate"
-            ):
-                bound = require_fp8_hybrid_artifact(
-                    companion, companion_artifact, "dflash-pareto"
-                )
-                self.assertEqual(bound["hybrid_base_artifact"]["conversion_receipt"], receipt)
-                report["base"]["authority"]["selection_sha256"] = "f" * 64
-                report_path.write_text(json.dumps(report), encoding="utf-8")
-                with self.assertRaisesRegex(SystemExit, "does not bind"):
-                    require_fp8_hybrid_artifact(
-                        companion, companion_artifact, "dflash-pareto"
-                    )
+            for companion_id, (base_id, key) in DFLASH_COMPANIONS.items():
+                with self.subTest(companion=companion_id):
+                    base = root / "base.ninfer"
+                    companion = root / "companion.ninfer"
+                    self.write_artifact(base, base_id)
+                    self.write_artifact(companion, companion_id, 1190)
+                    base_artifact = inspect_artifact(base)
+                    artifact = inspect_artifact(companion)
+                    receipt = {
+                        "path": str(root / "base.conversion.json"), "sha256": "1" * 64,
+                        "recipe_id": "base-recipe", "object_plan_sha256": "2" * 64,
+                        "source_artifact_sha256": "3" * 64, "source_receipt_sha256": "4" * 64,
+                        "transcoder_sha256": "5" * 64,
+                    }
+                    receipt.update(
+                        {"selection_sha256": "6" * 64, "source_index_sha256": "7" * 64,
+                         "source_ranking_sha256": "8" * 64}
+                        if base_id == HYBRID_BASE_WEIGHTS_ID
+                        else {"receipt_producer_sha256": "9" * 64})
+                    authority = {
+                        "receipt": {name: receipt[name] for name in ("path", "sha256")},
+                        **{name: value for name, value in receipt.items()
+                           if name not in ("path", "sha256")},
+                    }
+                    recipe = dflash2_q4_inventory.matrix_recipe_summary(key)
+                    report = {
+                        "target_key": "qwen3_8_27b_r9700", "recipe_id": recipe["recipe_id"],
+                        "status": "registered-evaluation-only", "weight_recipe_selected": False,
+                        "identity": {"model_id": "qwen3.8-27b", "weights_id": companion_id},
+                        "base": {"path": str(base), "identity": {
+                            "model_id": "qwen3.8-27b", "weights_id": base_id},
+                            "bytes": base_artifact["file_size_bytes"],
+                            "sha256": base_artifact["sha256"], "payload_copy": "byte_exact",
+                            "authority": authority},
+                        "artifact": {"path": str(companion), "bytes": artifact["file_size_bytes"],
+                            "sha256": artifact["sha256"],
+                            "projected_bytes": artifact["file_size_bytes"],
+                            "projected_device_arena_bytes": 1},
+                        "dflash_recipe": {**recipe, "objects": 66, "source_tensors": 81,
+                            "activation_profile": ("compile_selected_W8G32"
+                                if key == "source-mse-w8g32"
+                                else "compile_selected_adaptive_A8G64")},
+                        "dflash_source": dict(DFLASH_SOURCE_RECEIPT),
+                    }
+                    report_path = Path(str(companion) + ".conversion.json")
+                    inspected = {**base_artifact, "bytes": base_artifact["file_size_bytes"],
+                                 "conversion_receipt": receipt}
+                    with mock.patch(
+                        "tools.bench.run_ninfer_bench_matrix.ppl_run.inspect_candidate_artifact",
+                        return_value=inspected,
+                    ), mock.patch(
+                        "tools.bench.run_ninfer_bench_matrix.ppl_run.require_fp8_hybrid_candidate"
+                    ) as hybrid_check:
+                        report_path.write_text(json.dumps(report))
+                        bound = require_dflash_companion(companion, artifact)
+                        self.assertEqual(bound["dflash_base_artifact"]["conversion_receipt"], receipt)
+                        self.assertEqual(bound["dflash_matrix_recipe"], recipe)
+                        self.assertEqual(bound["dflash_conversion_report"]["sha256"],
+                                         file_sha256(report_path))
+                        self.assertEqual(hybrid_check.called, base_id == HYBRID_BASE_WEIGHTS_ID)
+                        if base_id == HYBRID_BASE_WEIGHTS_ID:
+                            self.assertEqual(require_fp8_hybrid_artifact(
+                                companion, artifact, "dflash-pareto"), bound)
+                        else:
+                            with self.assertRaisesRegex(SystemExit, "expected base"):
+                                require_fp8_hybrid_artifact(companion, artifact, "dflash-pareto")
+                        for section, field, bad in (
+                            (None, "recipe_id", "different-recipe"),
+                            ("dflash_recipe", "key", "different-recipe"),
+                            ("dflash_recipe", "matrix_format", "BF16"),
+                            ("dflash_recipe", "selector_codebook_format", "Q4G64_F16S"),
+                            ("base", "authority", {}),
+                            ("base", "sha256", "0" * 64),
+                            ("base", "payload_copy", "requantized"),
+                            ("artifact", "sha256", "0" * 64),
+                            ("dflash_source", "safetensors_sha256", "0" * 64),
+                        ):
+                            changed = json.loads(json.dumps(report))
+                            (changed if section is None else changed[section])[field] = bad
+                            report_path.write_text(json.dumps(changed))
+                            with self.assertRaisesRegex(SystemExit, "does not bind"):
+                                require_dflash_companion(companion, artifact)
+                        report_path.unlink()
+                        with self.assertRaisesRegex(SystemExit, "lacks a regular conversion"):
+                            require_dflash_companion(companion, artifact)
 
     def test_unrecognized_compiled_group_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1501,8 +1500,8 @@ class CompiledKvGroupTest(unittest.TestCase):
             argv = [
                 "--preset", "dflash-pareto",
                 "--prefill-chunk", "2048",
-                "--dflash-draft-tokens", "7",
-                "--dflash-verify-width", "12",
+                "--dflash-draft-tokens", "4",
+                "--dflash-verify-width", "5",
                 "--weights", str(root / "eventual-dflash.ninfer"),
                 "--output-dir", str(output),
                 "--dry-run",
@@ -1512,8 +1511,8 @@ class CompiledKvGroupTest(unittest.TestCase):
             self.assertEqual(main(argv), 0)
             manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
             self.assertEqual(manifest["schema_version"], MATRIX_SCHEMA_VERSION)
-            self.assertEqual(manifest["dflash_draft_tokens"], 7)
-            self.assertEqual(manifest["dflash_verify_width"], 12)
+            self.assertEqual(manifest["dflash_draft_tokens"], 4)
+            self.assertEqual(manifest["dflash_verify_width"], 5)
             self.assertEqual(manifest["selected_prefill_chunk"], 2048)
             self.assertEqual(manifest["case_count"], 7)
             self.assertEqual(manifest["point_count"], 22)
@@ -1589,19 +1588,29 @@ class CompiledKvGroupTest(unittest.TestCase):
                     "--prefill-chunk", "2048", "--prefill-chunk", "4096",
                 ])
 
+    def test_dflash_production_widths_reject_crossed_pairs(self) -> None:
+        for k, width in ((4, 6), (5, 5)):
+            with self.assertRaisesRegex(SystemExit, "exactly K4/W5 or K5/W6"):
+                main(["--preset", "dflash-pareto", "--weights", "unused.ninfer",
+                      "--prefill-chunk", "2048", "--dry-run",
+                      "--dflash-draft-tokens", str(k), "--dflash-verify-width", str(width)])
+
     def test_dflash_shortlist_is_complete_explicit_and_compact(self) -> None:
         cases = build_cases("dflash-shortlist")
-        self.assertEqual(len(cases), 23)
+        self.assertEqual(len(cases), 5)
         self.assertEqual(sum(case.parity_role == "ordinary" for case in cases), 1)
         candidates = [case for case in cases if case.parity_role == "dflash"]
         diagnostics = [case for case in cases if case.diagnostic]
-        self.assertEqual(len(candidates), 11)
-        self.assertEqual(len(diagnostics), 11)
+        self.assertEqual(len(candidates), 2)
+        self.assertEqual(len(diagnostics), 2)
         self.assertTrue(all((case.repetitions, case.warmup) == (2, 1)
                             for case in candidates))
         self.assertTrue(all((case.repetitions, case.warmup) == (1, 0)
                             for case in diagnostics))
         expected_profiles = dflash_shortlist_profiles()
+        self.assertEqual([(row["draft_tokens_requested"], row["verify_width_resolved"])
+                          for row in expected_profiles], [(4, 5), (5, 6)])
+        self.assertTrue(all(row["topology"] == "single-block-chain" for row in expected_profiles))
         expected = {
             profile["draft_tokens_requested"]: profile for profile in expected_profiles
         }
@@ -1625,15 +1634,15 @@ class CompiledKvGroupTest(unittest.TestCase):
             self.assertEqual(main(argv), 0)
             manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
             self.assertEqual(manifest["schema_version"], MATRIX_SCHEMA_VERSION)
-            self.assertEqual(manifest["case_count"], 23)
-            self.assertEqual(manifest["point_count"], 23)
+            self.assertEqual(manifest["case_count"], 5)
+            self.assertEqual(manifest["point_count"], 5)
             self.assertEqual(manifest["selected_prefill_chunk"], 2048)
             self.assertEqual(manifest["dflash_shortlist_profiles"], expected_profiles)
             self.assertEqual(manifest["commands"][0]["concurrency"], 1)
             records = manifest["commands"]
             self.assertEqual(
                 {record["dflash_draft_tokens"] for record in records if record["parity_role"] == "dflash"},
-                set(range(1, 12)),
+                {4, 5},
             )
             self.assertTrue(all(record["concurrency"] == 1 for record in records))
             self.assertTrue(all(
@@ -1796,15 +1805,23 @@ class CompiledKvGroupTest(unittest.TestCase):
             )
             self.assertFalse(failures)
             self.assertTrue(payload["pass"])
-            self.assertEqual(len(payload["speed_ranking_exact_parity_only"]), 11)
+            self.assertEqual(payload["schema_version"], 2)
+            self.assertEqual(len(payload["speed_ranking_exact_parity_only"]), 2)
             self.assertEqual(
-                payload["speed_ranking_exact_parity_only"][0]["draft_tokens"], 11
+                payload["speed_ranking_exact_parity_only"][0]["draft_tokens"], 5
             )
             self.assertTrue(payload["non_dominated_candidates"])
             self.assertEqual(payload["followup"]["concurrency"], list(range(1, 5)))
             diagnostic = payload["candidates"][0]["first_reject_repair_diagnostic"]
             self.assertFalse(diagnostic["timing_eligible"])
             self.assertNotIn("seconds", diagnostic)
+            extra_parity = {**parity, "comparisons": [*comparisons,
+                {"concurrency": 1, "draft_tokens": 7, "dflash_verify_width": 12,
+                 "exact": True}]}
+            rejected, reasons = write_dflash_shortlist(root, records, rows, extra_parity,
+                                                       artifact=artifact, bench=bench)
+            self.assertFalse(rejected["pass"])
+            self.assertIn("exactly K4/W5 and K5/W6", reasons[0]["error"])
 
     def test_dflash_diagnostic_validation_and_provenance_binding(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
