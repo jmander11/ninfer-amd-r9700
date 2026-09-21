@@ -219,7 +219,7 @@ Recipe/acceptance, C1..4 admission, selected hardware profiling, and held prefil
 the corresponding unchecked tasks below. Package owners may prepare their fail-closed CPU artifacts
 in parallel, but no prepared package bypasses its dependency or authorizes GPU execution.
 
-## Active now: selector-free base decode bandwidth
+## Deferred: selector-free base decode bandwidth
 
 - [ ] `BASE-DECODE-BW` Usefully maximize selector-free base-decode memory throughput on the fixed
   R9700 at `C=1..4`; do not optimize or schedule a `C>4` cell. The retained production baseline is
@@ -227,7 +227,11 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   by wall time is `367.956 GB/s`, or `57.9%` of the same-session `635.9 GB/s` stream ceiling. Treat
   this only as a defensible *useful payload rate*: it omits other reads/writes and cache effects and
   is not a physical HBM-bandwidth measurement. Existing attribution makes the T1 native-dot8 Q4
-  family the material owner; begin at Layer 0 with its real decode shapes and a wave-cooperative
+  family the material owner. DEFERRED by the deterministic queue above: do not start another base
+  mechanism before the numerical-accuracy, terminal-selection, and DFlash sequence. The saturation
+  objective remains unchecked because reliable physical counters are unavailable and the retained
+  result does not establish saturation or stall freedom. When explicitly resumed, begin at Layer 0
+  with its real decode shapes and a wave-cooperative
   challenger whose bound can materially improve whole decode by raising useful memory-level
   parallelism while preserving the stored N16/K16 contract and serial semantic accumulation order.
   Do not rerun the rejected simple non-temporal dot8, grouped-PV split512, or split-K candidates
@@ -986,7 +990,7 @@ All tasks in this section directly or transitively depend on `DENSE-FLOOR-DECISI
   evidence for the target-specific A8W8G32 prefill CTA, preserving its separate exact fallback and
   crossover semantics.
 
-- [ ] `QUALITY-8K32K` [depends: DENSE-FLOOR-DECISION] Complete deterministic BF16-source 8K/32K
+- [ ] `QUALITY-8K32K` [depends: DENSE-FLOOR-DECISION, CHUNK-SELECT] Complete deterministic BF16-source 8K/32K
   quality for all three recipe branches, both attention profiles, and G16/G32. Use
   `profiles/ppl/terminal-quality-recovery-20260905`; dense all-Q4 is already rebased, while sparse
   all-Q4 and mixed dense/sparse remain open.
