@@ -535,7 +535,7 @@ int main(int argc, char** argv) {
         std::ostringstream report;
         report << std::setprecision(17)
                << "{\n  \"schema\":\"ninfer.r9700.a8q4-projected-residual-t1-qualification.v1\",\n"
-               << "  \"status\":\"qualified_for_whole_ab_only\",\n"
+               << "  \"status\":\"qualified_for_selector_free_production_confirmation\",\n"
                << "  \"production_routing_authorized\":false,\n"
                << "  \"invocation\":{\"argv\":[\"" << json_escape(executable.string())
                << "\",\"--out-json\",\"" << json_escape(output.string())
@@ -619,7 +619,7 @@ int main(int argc, char** argv) {
                   "\"saved_ms_per_token\":" << saved_ms
                << ",\"minimum_ms_per_token\":" << kRequiredSavingMs
                << ",\"passed\":true},\n"
-               << "  \"decision\":\"prepare_selector_off_on_whole_c1_ab\"\n}\n";
+               << "  \"decision\":\"prepare_selector_free_whole_c1_confirmation\"\n}\n";
         const std::string payload = report.str();
         const int descriptor = ::open(output.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC,
                                       0644);
