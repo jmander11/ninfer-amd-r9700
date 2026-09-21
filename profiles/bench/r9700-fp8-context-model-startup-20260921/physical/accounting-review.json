@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "status": "startup_succeeded_accounting_review_pending",
+  "benchmark_returncode": 0,
+  "automatic_feasibility_pass": true,
+  "wrapper_returncode": 1,
+  "planned_slack_bytes": 5214743808,
+  "available_after_startup_bytes": 5213519872,
+  "shortfall_bytes": 1223936,
+  "graph_allowance_bytes": 71303168,
+  "graph_observed_bytes": 60817408,
+  "decision": "retain successful raw report; explain remaining preparation or allocator overhead before admitting capacity; do not rerun this diagnostic"
+}

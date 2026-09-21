@@ -1118,6 +1118,19 @@ prefill review, preserving their remaining data dependencies.
   the authoritative free-memory snapshot, qualify actual allocation/graph behavior, then use a
   fresh recovery package. Reuse the eight valid capacity matrices and numerical/chunk evidence
   when the resource-only change preserves arithmetic; bind fresh hybrid benchmark/planner bytes.
+  Recovery implementation `7d4eb810` shares one loaded-target context before the final capacity
+  snapshot; all four fresh recovery builds match their original compiled profiles. Independent
+  source and physical qualification review SHIP: public-input FP64 sampled outputs match exactly,
+  two poisoned graph replays pass, and all ten startup algorithm fingerprints remain unchanged.
+  Context allocation is172MiB, two-execution preparation8MiB, later execution6MiB; this does not
+  establish full-model startup accounting. Retained proof is under
+  `profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921/qualification`.
+  The single-model check in `profiles/bench/r9700-fp8-context-model-startup-20260921` must establish
+  actual startup free memory at least planned slack before fresh hybrid capacity proceeds.
+  First startup succeeds but its strict accounting gate fails: actual free5,213,519,872 versus
+  planned slack5,214,743,808 bytes. The1,223,936-byte shortfall reconciles exactly to8MiB library
+  preparation plus3,321,088 bytes of arena rounding minus10MiB unused graph reserve. Preserve this
+  diagnostic; finish explicit physical-cost accounting before the successor capacity campaign.
 
 - [ ] `ALLQ4-PAIRS` [depends: CHUNK-SELECT] Complete current dense and XAttention G16/G32 capacity
   and whole pairs and admit all four all-Q4 candidates to the same schema-v7 Pareto decision.

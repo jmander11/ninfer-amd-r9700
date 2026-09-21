@@ -1,0 +1,46 @@
+{
+  "executable": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-fp8-context-recovery-g16-20260921/src/ninfer_r9700_fp8_gate_up_qual",
+    "sha256": "2fd4eeb51e7718b2db4efa5809b8ee923c266d5b182611959552191bba2b4c4a"
+  },
+  "command": [
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-fp8-context-recovery-g16-20260921/src/ninfer_r9700_fp8_gate_up_qual",
+    "--shared-context",
+    "--output",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921/qualification/shared-context.json"
+  ],
+  "sources": [
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/linear/linear_execution.h",
+      "sha256": "efee17f585f9b6a26d3b64d74ebd7ef474f28bbf01602b1bec5de62e40b1a5aa"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/linear/linear_execution.hip",
+      "sha256": "e94f59f7790a1ac61007e9865cd61f73976447bb130cc9a7c6dd64a6d22af557"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/targets/qwen3_8_27b/impl/load/bindings.h",
+      "sha256": "8dbb06e4bb8e5ba5cf8d3a19d4b769aa2ccc7289382568a7c0f2d22ed460960f"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/targets/qwen3_8_27b/impl/load/bindings.cpp",
+      "sha256": "3f45096c86430aed02120c1e177907a4bce66f1cf6ba765f8e783c2e4c15f31c"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/targets/qwen3_8_27b/impl/variant.h",
+      "sha256": "fb3e77e28229298fd9d8f7f50adae935efa7867112aed2023e01fa3ba2031fc2"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/targets/qwen3_8_27b/impl/variant.cpp",
+      "sha256": "3f4b76e3c655b0386d65e5a773189d3681b079b4dabbb4b1f1cdaebfedf6d3c3"
+    }
+  ],
+  "qualifier_source": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/fp8_gate_up_qual.hip",
+    "sha256": "e8feda5f7389fbea0c3616ea021f721330c9f0c23159214c67ed021cc14d3d41"
+  },
+  "build_cache": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-fp8-context-recovery-g16-20260921/CMakeCache.txt",
+    "sha256": "be02eaf3497a90c371624b39bc15315a22aa0954cef064b9c0f3ef0a63dc6ecf"
+  }
+}
