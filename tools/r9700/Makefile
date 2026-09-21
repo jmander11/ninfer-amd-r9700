@@ -185,6 +185,19 @@ LDFLAGS := -L$(ROCM_ROOT)/lib -Wl,-rpath,$(ROCM_ROOT)/lib
 
 all: $(PROBE_TARGET) $(KV_TARGET) $(HIP_DEVICE_TARGET) $(LINEAR_TARGET) $(EAGER_TARGET) $(GDN_TARGET) $(GDN_RECURRENCE_TARGET) $(SAMPLING_TARGET) $(ROPE_TARGET) $(SERVE_ENV_TARGET)
 
+.PHONY: a8q4-gate-up-prefetch-static
+a8q4-gate-up-prefetch-static: $(BUILD_DIR)/a8q4_gate_up_prefetch_qualification.s $(BUILD_DIR)/a8q4_gate_up_prefetch_qualification.o
+	$(PYTHON) check_a8q4_gate_up_prefetch_static.py $<
+	$(PYTHON) test_check_a8q4_gate_up_prefetch_static.py $<
+
+$(BUILD_DIR)/a8q4_gate_up_prefetch_qualification.s: ../../src/ops/r9700/linear/a8q4_gate_up_prefetch_qualification.hip ../../src/ops/r9700/linear/a8q4_gate_up_prefetch_qualification.h Makefile
+	mkdir -p $(BUILD_DIR)
+	$(HIPCC) $(CXXFLAGS) -Wno-unused-command-line-argument --cuda-device-only -S $< -o $@
+
+$(BUILD_DIR)/a8q4_gate_up_prefetch_qualification.o: ../../src/ops/r9700/linear/a8q4_gate_up_prefetch_qualification.hip ../../src/ops/r9700/linear/a8q4_gate_up_prefetch_qualification.h Makefile
+	mkdir -p $(BUILD_DIR)
+	$(HIPCC) $(CXXFLAGS) -c $< -o $@
+
 $(FP8_HIPBLASLT_TARGET): $(FP8_HIPBLASLT_SOURCE) Makefile
 	mkdir -p $(BUILD_DIR)
 	$(HIPCC) $(CXXFLAGS) $< $(LDFLAGS) -lhipblaslt -o $@

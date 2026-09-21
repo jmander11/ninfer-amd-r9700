@@ -161,9 +161,9 @@ physical bandwidth saturation or stall freedom.
 
 The deterministic queue after reset is:
 
-1. retain the SHIP confirmation at `profiles/bench/r9700-normalized-linear-t1-production-confirmation-20260920/attempt-1` and pursue CPU-only ISA feasibility for explicit next-group prefetch in the T1 N34816/K5120 gate/up consumer; require g+1 B64 loads before g dot8, correct waits, no spills and acceptable occupancy before preparing a reviewed complete-normalized-boundary qualification package with at least `0.2 ms/token` direct saving required before whole C1 A/B.
+1. prepare and independently review a linked numerical qualification and complete normalized-linear boundary timing package for the statically reviewed T1 N34816/K5120 gate/up prefetch challenger; require independent FP64/codec correctness, emitted dependency/resource checks, cold address-distinct weights, and at least `0.2 ms/token` direct weighted saving before whole C1 A/B. Retain the SHIP confirmation at `profiles/bench/r9700-normalized-linear-t1-production-confirmation-20260920/attempt-1` and the qualification-only scope of the challenger.
 
-No GPU action is currently runnable. Independently review explicit gate/up prefetch ISA feasibility and its complete-boundary qualification package before another physical attempt.
+No GPU action is currently runnable. Prepare and independently review the linked gate/up prefetch numerical and complete-boundary timing package before another physical attempt; static SHIP alone does not authorize measurement.
 
 Every other remaining unchecked task depends directly or transitively on this queue or the
 external `DENSE-FLOOR-DECISION`.
@@ -485,10 +485,17 @@ in parallel, but no prepared package bypasses its dependency or authorizes GPU e
   consumer. Retained Layer-0 timing is `0.159816480 ms` for `94,699,520 B/call`, a `592.55 GB/s`
   useful payload rate. The `635.9 GB/s` stream proxy gives a `0.148922032 ms` floor and at most
   `0.697245 ms/token` across 64 calls (about `2.04%` at current `29.31 tok/s`); this is a screening
-  bound, not physical traffic or a proved achievable gain. Require actual g+1 B64 loads before g
-  native dot8 in emitted ISA, correct wait dependencies, no spills, and acceptable occupancy before
-  any GPU attempt. Preserve the stored N16/K16 layout and serial accumulation. Qualify and time the
-  complete normalized-linear boundary with cold address-distinct weights; require at least
+  bound, not physical traffic or a proved achievable gain. CPU/static feasibility and independent
+  review now report `SHIP` for the qualification-only consumer. The emitted gfx1201 loop issues
+  four g+1 B64 loads before all 16 g native dot8 instructions and its single serial FP32 FMA,
+  without a load wait draining the overlap. The dependency checker covers two loop iterations
+  and the terminal group, including VMEM and terminal scalar-activation waits. Resources are
+  26 VGPR, 36 SGPR, occupancy 16, wave32, 256 threads, zero LDS/scratch/spills. The 79 pipelined
+  iterations plus terminal group preserve the stored N16/K16 layout and serial accumulation.
+  Reproduce CPU-only evidence with `make -C tools/r9700 a8q4-gate-up-prefetch-static`; this is
+  neither numerical qualification nor a speed result, and production routing is unchanged.
+  Next prepare and independently review a linked numerical and timing package for the complete
+  normalized-linear boundary with cold address-distinct weights; require at least
   `0.2 ms/token` direct weighted saving before whole C1 A/B. The prior source pipeline failed to
   emit this overlap; do not repeat it or reopen rejected geometry remapping, non-temporal loads,
   or split-K without a distinct mechanism and new bound.

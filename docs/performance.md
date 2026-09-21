@@ -1415,13 +1415,22 @@ candidate median. Evidence is
 Independent confirmation result audit reported `SHIP`, closing this scoped promotion. These
 timings do not establish physical bandwidth saturation or stall freedom.
 
-The next ISA feasibility screen concerns explicit next-group prefetch in the T1 N34816/K5120
-gate/up consumer. Its retained `0.159816480 ms` and `94,699,520 B/call` imply `592.55 GB/s` useful
+The qualification-only explicit next-group prefetch consumer for T1 N34816/K5120 gate/up passed
+CPU/static feasibility and independent review (`SHIP`). Emitted gfx1201 ISA issues four g+1 B64
+loads before all 16 g native dot8 instructions and the single serial FP32 FMA, with no load wait
+draining that overlap. The dependency checker covers two loop iterations and the terminal group,
+including VMEM and terminal scalar-activation waits. The 79 pipelined iterations plus terminal
+group retain serial accumulation and the N16/K16 layout at 26 VGPR, 36 SGPR, occupancy 16,
+wave32, 256 threads, and zero LDS/scratch/spills. CPU evidence is reproducible with
+`make -C tools/r9700 a8q4-gate-up-prefetch-static`. Production routing is unchanged; neither
+numerical correctness nor a speed improvement has been measured for this challenger.
+Its retained incumbent `0.159816480 ms` and `94,699,520 B/call` imply `592.55 GB/s` useful
 payload rate. The `635.9 GB/s` stream proxy gives a `0.148922032 ms` floor, leaving an optimistic
 `0.697245 ms/token` across 64 calls (about `2.04%` at current speed). This bound is neither a
-physical traffic measurement nor a demonstrated saving. GPU qualification requires emitted g+1 B64
-loads before g dot8, correct waits, no spills and acceptable occupancy; whole C1 A/B requires at
-least `0.2 ms/token` measured saving at the complete normalized-linear boundary.
+physical traffic measurement nor a demonstrated saving. Next prepare and independently review a
+linked numerical qualification and complete normalized-linear boundary timing package with cold
+address-distinct weights. Whole C1 A/B requires at least `0.2 ms/token` measured weighted saving
+at that complete boundary. No physical command is runnable until the package passes review.
 
 The existing MTP shortlist head remains Q4G64 with A8G64 activations. MTP stays in exact-output,
 state, cache, row-view, and whole-route regression coverage, but a new shortlist-head trace,

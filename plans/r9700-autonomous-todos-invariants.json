@@ -91,9 +91,9 @@
     "FINAL-SUITE": ["FINAL-ARTIFACT", "E2E-PROFILE", "BF16-PARITY", "SELECTED-PARITY-VISION", "XATT-CUTOVER-CONDITIONAL"]
   },
   "next_command": null,
-  "no_gpu_action_policy": "Independently review explicit gate/up prefetch ISA feasibility and its complete-boundary qualification package before another physical attempt.",
+  "no_gpu_action_policy": "Prepare and independently review the linked gate/up prefetch numerical and complete-boundary timing package before another physical attempt; static SHIP alone does not authorize measurement.",
   "post_reset_queue": [
-    "retain the SHIP confirmation at `profiles/bench/r9700-normalized-linear-t1-production-confirmation-20260920/attempt-1` and pursue CPU-only ISA feasibility for explicit next-group prefetch in the T1 N34816/K5120 gate/up consumer; require g+1 B64 loads before g dot8, correct waits, no spills and acceptable occupancy before preparing a reviewed complete-normalized-boundary qualification package with at least `0.2 ms/token` direct saving required before whole C1 A/B."
+    "prepare and independently review a linked numerical qualification and complete normalized-linear boundary timing package for the statically reviewed T1 N34816/K5120 gate/up prefetch challenger; require independent FP64/codec correctness, emitted dependency/resource checks, cold address-distinct weights, and at least `0.2 ms/token` direct weighted saving before whole C1 A/B. Retain the SHIP confirmation at `profiles/bench/r9700-normalized-linear-t1-production-confirmation-20260920/attempt-1` and the qualification-only scope of the challenger."
   ],
   "post_reset_key_paths": [
     "profiles/bench/r9700-normalized-linear-t1-production-confirmation-20260920/attempt-1"
