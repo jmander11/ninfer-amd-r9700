@@ -71,19 +71,51 @@ candidate.
 After schema-v7 selects one evaluation winner, prepare its separate exact same-route token gate:
 
 ```bash
-bash profiles/ppl/post-terminal-exact-token-prepare-20260905/prepare.sh
+/home/battlefront/.local/bin/python3.11 -m tools.ppl.prepare_selected_exact_token \
+  --selection profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921/select/result.json \
+  --out profiles/ppl/r9700-selected-exact-token-20260921
 ```
 
 That CPU-only step resolves and binds the winner's artifact, G16/G32 scorer, dense or
 B128/S16/tau900 profile, selected chunk, candidate-local quality authority, and validated 18-shard
 BF16 source. It emits one future C1 command under
-`profiles/ppl/post-terminal-selected-exact-token-20260905`. The required physical campaign covers
+`profiles/ppl/r9700-selected-exact-token-20260921`; run its `commands.sh` only under the exclusive
+GPU lease. Preparation requires the published selection and `apps/ninfer-ppl` in its exact selected
+build root. The accounted hybrid roots initially contain bench/planner but not that scorer;
+the resource bridge preserves old prefill quality, not a claim that an old executable exercises
+the new selected runtime. Do not silently substitute the original panel scorer or rebuild a
+frozen root from this launcher. The reference runs under the installed
+`/ssdpool2nvme/local_llm/.venv-ninfer-r9700-py311/bin/python` with the ROCm library paths exported.
+The required physical campaign covers
 8K and 32K same-route graph/eager exact-I32-token and zero-NLL-delta checks. MTP3/ordinary and
 MTP3/MTP4 comparisons are optional diagnostic exact-token/state/graph regressions, not base or
 DFlash admission prerequisites. Its final admission JSON is atomically published only after
 recomputing required comparisons from the raw sidecars and matching every raw cell's complete
 weights/corpus/schedule/spec/chunk/graph command and semantic identity. Candidate-to-BF16 greedy flips remain
 diagnostic; no zero-flip BF16 threshold is added.
+
+The completed 24 candidate/group/length quality cells are teacher-forced **prefill** evidence
+(including measured quality exclusions), not selected decode evidence. The historical
+`post-terminal-focused-verification-20260905/run.sh` runs host/Op tests and rebuilds its selected
+root; it neither produces BF16 model parity nor replaces this decode campaign. Existing selected
+whole graph/eager controls cover C1..4 public generated tokens separately; do not repeat them as
+an additional blanket qualifier sweep. MTP and DFlash retain their separate stated contracts.
+
+For the separate artifact-backed Python Vision versus source-BF16 finite/shape diagnostic,
+prepare a fresh package after selection with:
+
+```bash
+/home/battlefront/.local/bin/python3.11 -m tools.bench.prepare_selected_vision_diagnostic \
+  --selection profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921/select/result.json \
+  --out profiles/bench/r9700-selected-vision-20260921
+```
+
+That tool checks its explicit frontend and GPU Python dependencies and prepares one CPU image
+fixture; it does not run the GPU until the emitted `commands.sh` is invoked. Its existing
+frontend/ROCm environments are distinct from the text scorer's Python 3.11 environment. Missing
+dependencies are a prerequisite to report, not permission to install them. The artifact-backed
+Python VisionEncoder comparison is not C++ Engine Vision execution proof and has no numerical
+admission threshold.
 
 ## Required artifacts and executables
 

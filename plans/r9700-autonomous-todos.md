@@ -77,8 +77,9 @@ above apply to every command.
 cells are complete. Twenty-two quality cells pass; mixed XAttention G16/G32 are excluded at32K.
 All48 base capacity cells now pass after the qualified FP8 ownership/accounting fix. Active owner:
 `profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921`; its numerical/chunk bridge
-and capacity validation are closed. Next: finish real-model XAttention keep distributions, run
-the ten quality-eligible whole matrices and graph/eager controls, publish base selection, then
+and capacity validation are closed. Real-model XAttention keep distributions also pass; the
+ten quality-eligible whole matrices are running. Next: finish whole and graph/eager controls,
+publish base selection, then
 materialize and optimize the three DFlash recipes at K4/W5 and K5/W6. Do not restart completed
 chunk, quality, reference, or capacity campaigns. See terminal-selection tasks for exact authorities.
 
@@ -1001,7 +1002,11 @@ unresolved tradeoff or the product contract must change.
   runtime recipe switching or all-C production admission. Independent review SHIP; 102 unit and
   14 cutover tests pass, including actual diagnostic writer/validator roundtrips and failed-output
   preservation. Exact commands are in `tools/bench/README.md`. Physical launch still needs the real
-  terminal base and a fresh recipe-aware benchmark/planner build (old panel binaries lack new IDs).
+  terminal base and the matching existing `build-r9700-fp8-accounted-{g16,g32,xattention-g16,xattention-g32}-20260921`
+  benchmark/planner pair, which supports all nine companions for every base recipe. Old panel
+  binaries lack new IDs but stay frozen as selection provenance; no new build is required.
+  New evaluator runs both DFlash and matched ordinary/token-parity controls; exact profile mapping
+  is in `tools/bench/README.md`. All four configuration/host-only W5/W6 planner checks pass.
   Final cutover rejects superseded schema3 and evaluation-only schema4: separately qualify one
   resident companion and its supported capacity before final admission. Base PPL owns target NLL;
   DFlash evaluation owns acceptance/generated output. Never add companions to base Pareto candidates.
@@ -1244,14 +1249,20 @@ prefill review, preserving their remaining data dependencies.
   runtime selector.
 
 - [ ] `BF16-PARITY` [depends: TERMINAL-SELECTION] Complete BF16-source model parity for the selected
-  integer artifact and every supported schedule through
-  `profiles/bench/post-terminal-focused-verification-20260905`. Per-Op represented-input oracles
-  are already complete but do not replace selected-model evidence.
+  integer artifact: retain the completed teacher-forced prefill quality authority and run the
+  selected C1 8K/32K decode BF16 comparison using `tools.ppl.prepare_selected_exact_token`
+  against `profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921/select/result.json`
+  (exact preparation command in `tools/ppl/README.md`). The historical focused-verification
+  launcher runs host/Op tests, not BF16 model parity, and is not this gate's producer.
+  Per-Op represented-input oracles are already complete but do not replace selected-model evidence.
 
 - [ ] `SELECTED-PARITY-VISION` [depends: BF16-PARITY] Complete selected-artifact decode and
   same-route graph/eager comparisons plus the source-BF16 Vision diagnostic where applicable.
-  Use `profiles/ppl/post-terminal-exact-token-prepare-20260905` and
-  `profiles/bench/post-terminal-selected-vision-prepare-20260905`; MTP comparisons remain optional
+  Use fresh `profiles/ppl/r9700-selected-exact-token-20260921` and
+  `profiles/bench/r9700-selected-vision-20260921` prepared from that same published selection;
+  retain the selected whole C1..4 graph/eager controls rather than repeating them.
+  The Vision producer is an artifact-backed Python/source-BF16 comparison, not C++ Engine Vision
+  evidence. MTP comparisons remain optional
   non-ranking diagnostics and Vision remains a finite/shape diagnostic without a numeric threshold.
 
 - [ ] `FINAL-ARTIFACT` [depends: TERMINAL-SELECTION, LOWCTX-LADDER, SELECTED-PROFILE,

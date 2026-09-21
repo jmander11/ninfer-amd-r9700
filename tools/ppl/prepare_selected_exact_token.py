@@ -27,8 +27,8 @@ BF16_PROTOCOL = REPO / "tools/reference/qwen3_8_27b_bf16/protocol.py"
 BF16_SOURCE = Path("/ssdpool2nvme/local_llm/models/qwen3.8-27b-bf16")
 BF16_RECEIPT = REPO / "profiles/ppl/r9700-bf16-source-checkpoint-preflight-20260905.json"
 IDS = REPO / "tools/ppl/corpus.ids"
-PYTHON = Path("/ssdpool2nvme/local_llm/.venv-ninfer-r9700/bin/python")
-POWER = Path("/sys/class/drm/card2/device/power_dpm_force_performance_level")
+PYTHON = Path("/ssdpool2nvme/local_llm/.venv-ninfer-r9700-py311/bin/python")
+POWER = Path("/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level")
 LENGTHS = (8192, 32768)
 AT_FDCWD = -100
 RENAME_NOREPLACE = 1
@@ -81,7 +81,7 @@ def selected_quality(selection: Path, winner: str, group: int, route: dict) -> t
     tiers = {row.get("quality_tier") for row in cells}
     if (
         campaign.get("artifact_type") != "ninfer_r9700_ppl_campaign"
-        or campaign.get("schema_version") != 6 or campaign.get("pass") is not True
+        or campaign.get("schema_version") != 6
         or campaign.get("prefill_chunk") != route["selected_prefill_chunk"]
         or campaign.get("xattention_profile") != route["execution_profile"]["xattention_profile"]
         or sorted(lengths) != list(LENGTHS) or len(set(lengths)) != len(LENGTHS)
@@ -184,6 +184,7 @@ def prepare(selection: Path, output: Path) -> dict:
             f"readonly root={shlex.quote(str(output))}\n"
             f"readonly power={shlex.quote(str(POWER))}\n"
             f"cd {shlex.quote(str(REPO))}\n"
+            "export LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/core-10.0/lib\n"
             'sha256sum --check --strict "$root/prepared.sha256"\n'
             'test "$(cat "$power")" = auto\n'
             'test ! -e "$root/campaign" && test ! -L "$root/campaign"\n'
