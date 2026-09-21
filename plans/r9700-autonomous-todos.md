@@ -954,6 +954,15 @@ unresolved tradeoff or the product contract must change.
   base receipt, BF16 source, recipe, plan, index, and ranking. The old
   `profiles/bench/selected-dflash-prepare-20260905` and fixed-Q4/K1..11 schema-v3 owner are
   historical and non-runnable; create a fresh receipt-bound recipe-aware two-width successor.
+  CPU prerequisite audit 2026-09-21: local source
+  `/ssdpool2nvme/local_llm/models/qwen3.8-27b-dflash2` validates all 81 BF16 tensors and both
+  selector codebooks. `tools/convert/qwen3_8_27b_r9700/dflash2_matrix_recipes.py` already implements
+  all three encoders (32 matrices plus 34 unchanged BF16 objects). Remaining implementation is
+  recipe-aware conversion/receipts and registered identities, C++ binder/Variant format admission,
+  and selected companion preparation/selection at K4/W5 and K5/W6. Current converter and runtime
+  admit only canonical Q4; no three-recipe comparison is runnable yet. Preserve the base's
+  131072-row draft head and exact token map when extending it. Selected Python 3.11 lacks the
+  conversion dependencies; resolve that environment when materialization is required.
 
 - [ ] `DFLASH-QUALITY` [depends: DFLASH-RECIPE, DFLASH-TEXT-P129] For each
   surviving companion retain aligned target/draft outputs, deterministic proposals and final target
@@ -1017,8 +1026,12 @@ prefill review, preserving their remaining data dependencies.
 
 - [ ] `QUALITY-8K32K` [depends: DENSE-FLOOR-DECISION, CHUNK-SELECT] Complete deterministic BF16-source 8K/32K
   quality for all three recipe branches, both attention profiles, and G16/G32. Use
-  `profiles/ppl/terminal-quality-recovery-20260905`; dense all-Q4 is already rebased, while sparse
-  all-Q4 and mixed dense/sparse remain open.
+  `profiles/ppl/r9700-terminal-quality-receipt-bound-n16k16-20260921`; its independently reviewed
+  `commands.sh` provides preflight, reference, quality and publish stages. Bind the measured chunk
+  campaign's exact artifacts and current PPL builds. Reuse the validated 4096 BF16 reference only
+  if 4096 wins; another chunk requires fresh BF16/repeat evidence. Preserve all candidate failures
+  for diagnosis. The 20260905 recovery script is historical; its dense-Q4 history does not replace
+  this current-build campaign. No numerical result is claimed by preparing the package.
 
 - [ ] `POSTCHUNK-ON` [depends: CHUNK-SELECT] Through
   `profiles/bench/post-chunk-twelve-candidate-20260905`, rerun both ON-profile capacity matrices
