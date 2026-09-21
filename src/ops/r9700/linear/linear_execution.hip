@@ -192,6 +192,19 @@ struct LinearExecution::Impl {
     std::size_t matmul_workspace_bytes = 0;
     std::vector<std::unique_ptr<Profile>> profiles;
 
+    void bind_profile(Profile& profile) {
+        const auto status = r9700::linear::fp8_bind_activation_workspace(
+            activation_storage, profile.public_profile.activation_workspace_bytes,
+            profile.public_profile.tokens, columns, &profile.activation);
+        if (status != hipSuccess) {
+            throw std::invalid_argument("invalid row-scaled E4M3 activation workspace");
+        }
+        const void* token_scale = profile.activation.scales;
+        check_hipblaslt("hipblasLtMatmulDescSetAttribute(B_SCALE_POINTER)",
+            hipblasLtMatmulDescSetAttribute(profile.operation,
+                HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER, &token_scale, sizeof(token_scale)));
+    }
+
     ~Impl() {
         profiles.clear();
         if (preference != nullptr) (void)hipblasLtMatmulPreferenceDestroy(preference);
@@ -214,39 +227,20 @@ struct LinearExecution::Impl {
 };
 
 LinearExecution::LinearExecution(LinearExecutionContext& context, const Weight& weight,
-                                 void* activation_storage,
                                  std::size_t activation_storage_capacity_bytes,
-                                 void* matmul_workspace,
                                  std::size_t matmul_workspace_bytes)
     : impl_(std::make_unique<Impl>()) {
     if (!valid_weight(weight, &impl_->rows, &impl_->columns,
                       &impl_->padded_columns) ||
-        activation_storage == nullptr || activation_storage_capacity_bytes == 0U ||
-        reinterpret_cast<std::uintptr_t>(activation_storage) % kPlaneAlignment != 0U ||
-        matmul_workspace_bytes > kMaximumMatmulWorkspaceBytes ||
-        (matmul_workspace_bytes != 0U &&
-         (matmul_workspace == nullptr ||
-          reinterpret_cast<std::uintptr_t>(matmul_workspace) % 16U != 0U))) {
+        activation_storage_capacity_bytes == 0U ||
+        matmul_workspace_bytes > kMaximumMatmulWorkspaceBytes) {
         throw std::invalid_argument("invalid row-scaled E4M3 Linear execution binding");
-    }
-    const bool matmul_overlaps =
-        matmul_workspace_bytes != 0U &&
-        (ranges_overlap(weight.payload, weight.payload_bytes, matmul_workspace,
-                        matmul_workspace_bytes) ||
-         ranges_overlap(activation_storage, activation_storage_capacity_bytes,
-                        matmul_workspace, matmul_workspace_bytes));
-    if (ranges_overlap(weight.payload, weight.payload_bytes, activation_storage,
-                       activation_storage_capacity_bytes) ||
-        matmul_overlaps) {
-        throw std::invalid_argument("row-scaled E4M3 Linear retained regions overlap");
     }
     impl_->weight_payload = weight.payload;
     impl_->weight_payload_bytes = static_cast<std::size_t>(weight.payload_bytes);
     impl_->weight_codes = weight.qdata;
     impl_->weight_scales = weight.scales;
-    impl_->activation_storage = activation_storage;
     impl_->activation_storage_capacity_bytes = activation_storage_capacity_bytes;
-    impl_->matmul_workspace = matmul_workspace;
     impl_->matmul_workspace_bytes = matmul_workspace_bytes;
 
     impl_->handle = context.handle_;
@@ -264,6 +258,31 @@ LinearExecution::LinearExecution(LinearExecutionContext& context, const Weight& 
         hipblasLtMatmulPreferenceSetAttribute(impl_->preference,
                                               HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
                                               &workspace_limit, sizeof(workspace_limit)));
+}
+
+void LinearExecution::bind_storage(void* activation_storage,
+                                    std::size_t activation_storage_capacity_bytes,
+                                    void* matmul_workspace, std::size_t matmul_workspace_bytes) {
+    if (impl_ == nullptr || impl_->activation_storage != nullptr || activation_storage == nullptr ||
+        activation_storage_capacity_bytes < impl_->activation_storage_capacity_bytes ||
+        matmul_workspace_bytes != impl_->matmul_workspace_bytes ||
+        reinterpret_cast<std::uintptr_t>(activation_storage) % kPlaneAlignment != 0U ||
+        (matmul_workspace_bytes != 0U && (matmul_workspace == nullptr ||
+         reinterpret_cast<std::uintptr_t>(matmul_workspace) % 16U != 0U))) {
+        throw std::invalid_argument("invalid row-scaled E4M3 delayed storage binding");
+    }
+    if (ranges_overlap(impl_->weight_payload, impl_->weight_payload_bytes, activation_storage,
+                       activation_storage_capacity_bytes) ||
+        (matmul_workspace_bytes != 0U &&
+         (ranges_overlap(impl_->weight_payload, impl_->weight_payload_bytes, matmul_workspace,
+                         matmul_workspace_bytes) ||
+          ranges_overlap(activation_storage, activation_storage_capacity_bytes,
+                         matmul_workspace, matmul_workspace_bytes)))) {
+        throw std::invalid_argument("row-scaled E4M3 Linear retained regions overlap");
+    }
+    impl_->activation_storage = activation_storage;
+    impl_->matmul_workspace = matmul_workspace;
+    for (auto& profile : impl_->profiles) impl_->bind_profile(*profile);
 }
 
 LinearExecution::~LinearExecution() = default;
@@ -292,12 +311,6 @@ const LinearExecution::PreparedProfile& LinearExecution::prepare(std::uint32_t t
     auto profile = std::make_unique<Impl::Profile>();
     profile->public_profile.tokens = tokens;
     profile->public_profile.activation_workspace_bytes = activation_bytes;
-    const hipError_t bind_status = r9700::linear::fp8_bind_activation_workspace(
-        impl_->activation_storage, activation_bytes, tokens, impl_->columns,
-        &profile->activation);
-    if (bind_status != hipSuccess) {
-        throw std::invalid_argument("invalid row-scaled E4M3 activation workspace");
-    }
 
     check_hipblaslt("hipblasLtMatmulDescCreate",
                     hipblasLtMatmulDescCreate(&profile->operation,
@@ -321,17 +334,12 @@ const LinearExecution::PreparedProfile& LinearExecution::prepare(std::uint32_t t
                                         HIPBLASLT_MATMUL_DESC_B_SCALE_MODE,
                                         &outer_scale, sizeof(outer_scale)));
     const void* weight_scale = impl_->weight_scales;
-    const void* token_scale = profile->activation.scales;
     check_hipblaslt(
         "hipblasLtMatmulDescSetAttribute(A_SCALE_POINTER)",
         hipblasLtMatmulDescSetAttribute(profile->operation,
                                         HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER,
                                         &weight_scale, sizeof(weight_scale)));
-    check_hipblaslt(
-        "hipblasLtMatmulDescSetAttribute(B_SCALE_POINTER)",
-        hipblasLtMatmulDescSetAttribute(profile->operation,
-                                        HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER,
-                                        &token_scale, sizeof(token_scale)));
+    if (impl_->activation_storage != nullptr) impl_->bind_profile(*profile);
     check_hipblaslt("hipblasLtMatrixLayoutCreate(activation)",
                     hipblasLtMatrixLayoutCreate(&profile->activation_layout,
                                                 HIP_R_8F_E4M3, impl_->columns,
@@ -431,7 +439,7 @@ const LinearExecution::PreparedProfile* LinearExecution::prepared_profile(
 
 const r9700::linear::Fp8ActivationWorkspace* LinearExecution::activation_workspace(
     std::uint32_t tokens) const noexcept {
-    if (impl_ == nullptr) return nullptr;
+    if (impl_ == nullptr || impl_->activation_storage == nullptr) return nullptr;
     const Impl::Profile* profile = impl_->find(tokens);
     return profile == nullptr ? nullptr : &profile->activation;
 }
@@ -457,7 +465,7 @@ LinearExecution::LaunchStatus LinearExecution::run(std::uint32_t tokens,
     std::size_t output_elements = 0;
     std::size_t input_bytes = 0;
     std::size_t output_bytes = 0;
-    if (profile == nullptr || input == nullptr || output == nullptr ||
+    if (profile == nullptr || impl_->activation_storage == nullptr || input == nullptr || output == nullptr ||
         !checked_mul(tokens, impl_->columns, &input_elements) ||
         !checked_mul(input_elements, sizeof(hip_bfloat16), &input_bytes) ||
         !checked_mul(tokens, impl_->rows, &output_elements) ||

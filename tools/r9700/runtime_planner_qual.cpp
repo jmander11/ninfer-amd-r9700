@@ -216,6 +216,35 @@ void qualify_host_attention_parity_routing() {
                 text_enabled ? 1U : 0U);
 }
 
+void qualify_host_hybrid_allocation_bound() {
+    namespace runtime = ninfer::targets::qwen3::detail::qwen3_8_27b_r9700;
+    for (const auto profile : {Variant::WeightsProfile::R9700Q4G64Evaluation,
+                              Variant::WeightsProfile::R9700Q4W8Evaluation,
+                              Variant::WeightsProfile::R9700Q4G64Fp8FourRoleN16K16Evaluation}) {
+        runtime::SequencePlanningInputs inputs{};
+        inputs.weights_profile = profile;
+        inputs.capacity = 262144U;
+        inputs.max_concurrency = 4U;
+        inputs.prefill_chunk = 2048U;
+        inputs.speculative_backend = ninfer::SpeculativeBackend::None;
+        inputs.features = {.vision = false, .speculative = ninfer::SpeculativeBackend::None};
+        inputs.use_device_graph = true;
+        const auto minimum = runtime::build_sequence_candidate_for_qualification(inputs, 4096U);
+        const auto adjacent = runtime::build_sequence_candidate_for_qualification(inputs, 4097U);
+        const auto distant = runtime::build_sequence_candidate_for_qualification(inputs, 4233U);
+        const std::size_t logical = minimum->persistent.bytes + minimum->workspace.capacity +
+            minimum->request_transient_capacity_bytes + minimum->graph_allowance_bytes;
+        const auto expected_bound = profile ==
+            Variant::WeightsProfile::R9700Q4G64Fp8FourRoleN16K16Evaluation ? 4U << 20U : 0U;
+        require(minimum->device_reservation_bytes == logical + expected_bound,
+                "hybrid physical arena bound missing or changed nonhybrid reservation");
+        const auto increment = adjacent->device_reservation_bytes - minimum->device_reservation_bytes;
+        require(distant->device_reservation_bytes == minimum->device_reservation_bytes + 137U * increment,
+                "physical arena bound made the KV reservation curve non-affine");
+    }
+    std::printf("r9700_runtime_planner: PASS host hybrid arena bound/nonhybrid affine capacity\n");
+}
+
 void qualify_host_dflash_graph_allowance() {
     namespace runtime =
         ninfer::targets::qwen3::detail::qwen3_8_27b_r9700;
@@ -355,7 +384,7 @@ std::size_t qualify_plan(ninfer::DeviceContext& device, std::uint32_t concurrenc
     }
     const std::uint32_t expected_dflash_width =
         backend == ninfer::SpeculativeBackend::DFlash
-            ? ninfer::targets::qwen3::detail::qwen3_8_27b_r9700::dflash_verify_width(
+            ? ninfer::targets::qwen3::dflash_verify_width<Variant::DFlashConfig>(
                   drafts, dflash_verify_width)
             : 0U;
     require(plan.impl_->dflash_verify_width == expected_dflash_width,
@@ -567,6 +596,7 @@ int main(int argc, char** argv) {
         }
         if (argc == 2 && std::string_view(argv[1]) == "--host-split512-routing") {
             qualify_host_split512_routing();
+            qualify_host_hybrid_allocation_bound();
             return 0;
         }
         if (argc == 2 && std::string_view(argv[1]) == "--host-dflash-graph-allowance") {

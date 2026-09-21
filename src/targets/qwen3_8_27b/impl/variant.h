@@ -39,8 +39,8 @@ struct Variant {
         MlpGateUp,
     };
 
-    // Program-owned prepared state for the decision-selected row-scaled-E4M3 Text projections.
-    // Owns per-weight descriptors, borrowing the loaded target's shared library context.
+    // Program-owned bindings for loaded-target-prepared row-scaled-E4M3 Text projections.
+    // Borrows per-weight descriptors and the loaded target's shared library context.
     // Explicit activation/matmul storage remains in ProgramImplCore's serialized region;
     // opaque library resources are already resident at the final capacity snapshot.
     class ExecutionState final {
@@ -326,6 +326,18 @@ struct Variant {
     [[nodiscard]] static std::size_t execution_state_capacity_bytes(
         WeightsProfile weights_profile, std::uint32_t prefill_tokens,
         std::uint32_t maximum_graph_tokens);
+
+    // gfx1201/ROCm hipMalloc rounds the two Program arenas to at most 2 MiB
+    // units. Keep this physical-allocation bound separate from logical arenas
+    // and graph allowance; it is independent of KV pages, preserving affinity.
+    [[nodiscard]] static constexpr std::size_t runtime_allocation_overhead_bound(
+        WeightsProfile profile) noexcept {
+        return profile == WeightsProfile::R9700Q4G64Fp8FourRoleN16K16Evaluation ||
+               profile == WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4Evaluation ||
+               profile == WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4MseEvaluation ||
+               profile == WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2W8MseEvaluation
+            ? std::size_t{4} << 20U : 0U;
+    }
 
     [[nodiscard]] static std::vector<GraphExecutionProfile>
     ordinary_graph_profiles(std::uint32_t capacity);

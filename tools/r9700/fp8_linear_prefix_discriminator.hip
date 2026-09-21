@@ -481,8 +481,8 @@ CellResult evaluate(ninfer::ops::LinearExecutionContext& context,
     HIP_CHECK(hipMemcpy(input129.value, represented.data(), input129.count * sizeof(hip_bfloat16),
                         hipMemcpyHostToDevice));
 
-    ninfer::ops::LinearExecution execution(context, bound.weight, activation.value, activation.count,
-                                           matmul.value, matmul.count);
+    ninfer::ops::LinearExecution execution(context, bound.weight, activation.count, matmul.count);
+    execution.bind_storage(activation.value, activation.count, matmul.value, matmul.count);
     const auto& p128 = execution.prepare(kPrefix);
     const auto& p129 = execution.prepare(kExtended);
 #if NINFER_R9700_FP8_PREFIX_COMMON_ALGO_CANDIDATE

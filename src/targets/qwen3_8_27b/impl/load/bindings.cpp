@@ -432,6 +432,21 @@ LoadedModelData::LoadedModelData(BindingPlan plan, artifact::MaterializedArtifac
     auto& output_head     = runtime.output_head;
 
     token_embedding        = materialized_weight(backing, plan.token_embedding, 248320, 5120);
+    const auto prepare_linear = [&](const Weight& weight) -> ops::LinearExecution* {
+        if (weight.qtype != QType::F8E4M3_ROW_F32S) return nullptr;
+        if (plan.linear_prepared_widths.empty())
+            throw std::invalid_argument("FP8 load plan has no startup preparation widths");
+        if (!linear_context) linear_context = std::make_unique<ops::LinearExecutionContext>();
+        const auto maximum = *std::max_element(plan.linear_prepared_widths.begin(),
+                                               plan.linear_prepared_widths.end());
+        auto execution = std::make_unique<ops::LinearExecution>(
+            *linear_context, weight,
+            ops::LinearExecution::activation_workspace_capacity_bytes(maximum, weight.k), 0U);
+        for (const auto width : plan.linear_prepared_widths) (void)execution->prepare(width);
+        auto* borrowed = execution.get();
+        prepared_linears.push_back(std::move(execution));
+        return borrowed;
+    };
     std::size_t full_index = 0;
     std::size_t gdn_index  = 0;
     for (std::size_t layer = 0; layer < kTextLayers; ++layer) {
@@ -441,10 +456,8 @@ LoadedModelData::LoadedModelData(BindingPlan plan, artifact::MaterializedArtifac
             target.input_norm            = artifact::materialized_tensor(backing, source.input_norm,
                                                                          NumericFormat::BF16, {5120});
             target.projection            = load_attention_projection(source.attention, backing);
-            if (target.projection.query_key.qtype == QType::F8E4M3_ROW_F32S) {
-                if (!linear_context) linear_context = std::make_unique<ops::LinearExecutionContext>();
-                target.projection.linear_context = linear_context.get();
-            }
+            target.projection.query_key_execution = prepare_linear(target.projection.query_key);
+            target.projection.gate_value_execution = prepare_linear(target.projection.gate_value);
             target.query_norm = artifact::materialized_tensor(backing, source.attention.query_norm,
                                                               NumericFormat::BF16, {256});
             target.key_norm   = artifact::materialized_tensor(backing, source.attention.key_norm,
@@ -453,7 +466,7 @@ LoadedModelData::LoadedModelData(BindingPlan plan, artifact::MaterializedArtifac
             target.post_attention_norm = artifact::materialized_tensor(
                 backing, source.post_attention_norm, NumericFormat::BF16, {5120});
             target.post_mixer = load_mlp(source.mlp, backing);
-            target.post_mixer.linear_context = linear_context.get();
+            target.post_mixer.gate_up_execution = prepare_linear(target.post_mixer.gate_up);
         } else {
             GdnWeights& target = gdn_layers.at(gdn_index++);
             target.input_norm  = artifact::materialized_tensor(backing, source.input_norm,
@@ -469,17 +482,15 @@ LoadedModelData::LoadedModelData(BindingPlan plan, artifact::MaterializedArtifac
             target.projection.b_projection = artifact::materialized_weight(
                 backing, source.gdn.b_projection, NumericFormat::BF16, 48, 5120);
             target.projection.input_projection = load_gdn_input_projection(source.gdn, backing);
-            if (target.projection.input_projection.query_key.qtype == QType::F8E4M3_ROW_F32S) {
-                if (!linear_context) linear_context = std::make_unique<ops::LinearExecutionContext>();
-                target.projection.input_projection.linear_context = linear_context.get();
-            }
+            target.projection.input_projection.query_key_execution =
+                prepare_linear(target.projection.input_projection.query_key);
             target.norm =
                 artifact::materialized_tensor(backing, source.gdn.norm, NumericFormat::BF16, {128});
             target.output = materialized_weight(backing, source.gdn.output, 5120, 6144);
             target.post_attention_norm = artifact::materialized_tensor(
                 backing, source.post_attention_norm, NumericFormat::BF16, {5120});
             target.post_mixer = load_mlp(source.mlp, backing);
-            target.post_mixer.linear_context = linear_context.get();
+            target.post_mixer.gate_up_execution = prepare_linear(target.post_mixer.gate_up);
         }
     }
     if (full_index != full_layers.size() || gdn_index != gdn_layers.size()) {

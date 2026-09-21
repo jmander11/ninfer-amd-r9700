@@ -457,11 +457,12 @@ roles with the separate A8W8/IU8 CTA implementation.
 
 The shared-library-context startup regression uses
 `BUILD/src/ninfer_r9700_fp8_gate_up_qual --shared-context --output NEW_REPORT.json`.
-It compares the two production FP8 shapes (N34816/N4096, K5120) at startup widths
-1/2/3/4/2048 against independent-context algorithm fingerprints, and checks sampled outputs
+It prepares all three production FP8 shapes (N34816/N7168/N4096, K5120) before storage binding
+at startup widths 1/2/3/4/2048, rejects unbound execution, then compares against independent-context
+algorithm fingerprints prepared after binding (the former order). It checks sampled outputs
 against the represented-format FP64 oracle in eager and twice-replayed Device Graph execution
-at T4/T2048. Both projections share one context and serialized activation region. Memory snapshots
-separate context creation from preparation and later execution; they are diagnostics, not a
+at T4/T2048. All projections share one context and serialized activation region. Memory snapshots
+separate context creation, preparation, storage binding and later execution; they are diagnostics, not a
 substitute for real Engine startup headroom/capacity evidence. Reports are create-only.
 
 All ten supported zero-workspace gate/up catalog solutions have been timed, the closest alternate

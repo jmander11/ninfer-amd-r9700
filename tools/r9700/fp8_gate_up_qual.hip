@@ -268,7 +268,7 @@ std::size_t free_device_bytes() {
     return available;
 }
 
-// Real selected gate-up and GDN-QK geometries. Both executions borrow the
+// Real selected gate-up, attention-QK/GV and GDN-QK geometries. Executions borrow the
 // same context and activation region, as in the serialized target Program.
 struct SharedContextCell {
     static constexpr std::uint32_t columns = 5120U;
@@ -345,7 +345,7 @@ void qualify_shared_context(const std::string& report_path) {
     const auto before_context = free_device_bytes();
     ops::LinearExecutionContext context;
     const auto after_context = free_device_bytes();
-    SharedContextCell gate_up(34816U), gdn_qk(4096U);
+    SharedContextCell gate_up(34816U), attention(7168U), gdn_qk(4096U);
     DeviceBuffer<std::byte> activation(
         ops::LinearExecution::activation_workspace_capacity_bytes(2048U, 5120U));
     DeviceBuffer<hip_bfloat16> input(2048U * 5120U);
@@ -356,18 +356,26 @@ void qualify_shared_context(const std::string& report_path) {
     HIP_CHECK(hipMemcpy(input.get(), input_host.data(), input.bytes(), hipMemcpyHostToDevice));
     Stream stream;
     const auto before_prepare = free_device_bytes();
-    for (auto* cell : {&gate_up, &gdn_qk}) {
+    for (auto* cell : {&gate_up, &attention, &gdn_qk}) {
         cell->execution = std::make_unique<ops::LinearExecution>(
-            context, cell->weight, activation.get(), activation.bytes(), nullptr, 0U);
+            context, cell->weight, activation.bytes(), 0U);
         for (const auto width : widths) (void)cell->execution->prepare(width);
+        require(cell->execution->activation_workspace(4U) == nullptr &&
+                    !cell->execution->run(4U, input.get(), cell->output.get(), stream.get()).ok(),
+                "unbound prepared Linear accepted execution or exposed activation storage");
     }
     const auto after_prepare = free_device_bytes();
+    for (auto* cell : {&gate_up, &attention, &gdn_qk})
+        cell->execution->bind_storage(activation.get(), activation.bytes(), nullptr, 0U);
+    const auto after_binding = free_device_bytes();
     // Compare all startup-width algorithm identities with independent contexts,
     // not merely two calls sharing the same context's heuristic cache.
-    for (auto* cell : {&gate_up, &gdn_qk}) {
+    for (auto* cell : {&gate_up, &attention, &gdn_qk}) {
         ops::LinearExecutionContext independent_context;
         ops::LinearExecution independent(independent_context, cell->weight,
-                                          activation.get(), activation.bytes(), nullptr, 0U);
+                                          activation.bytes(), 0U);
+        // The control binds before preparation, preserving the former order.
+        independent.bind_storage(activation.get(), activation.bytes(), nullptr, 0U);
         for (const auto width : widths) {
             const auto& reference = independent.prepare(width);
             const auto* shared = cell->execution->prepared_profile(width);
@@ -378,7 +386,7 @@ void qualify_shared_context(const std::string& report_path) {
     }
     std::uint32_t maximum_steps = 0;
     for (const auto width : {4U, 2048U}) {
-        for (auto* cell : {&gate_up, &gdn_qk}) {
+        for (auto* cell : {&gate_up, &attention, &gdn_qk}) {
             require_launch(cell->execution->run(width, input.get(), cell->output.get(), stream.get()));
             HIP_CHECK(hipStreamSynchronize(stream.get()));
             maximum_steps = std::max(maximum_steps, cell->check(width, input_host));
@@ -386,19 +394,19 @@ void qualify_shared_context(const std::string& report_path) {
         hipGraph_t graph = nullptr;
         hipGraphExec_t executable = nullptr;
         HIP_CHECK(hipStreamBeginCapture(stream.get(), hipStreamCaptureModeGlobal));
-        for (auto* cell : {&gate_up, &gdn_qk})
+        for (auto* cell : {&gate_up, &attention, &gdn_qk})
             require_launch(cell->execution->run(width, input.get(), cell->output.get(), stream.get()));
         HIP_CHECK(hipStreamEndCapture(stream.get(), &graph));
         HIP_CHECK(hipGraphInstantiate(&executable, graph, nullptr, nullptr, 0));
         for (int replay = 0; replay < 2; ++replay) {
             // A replay must write its own outputs, not inherit eager/previous replay values.
-            for (auto* cell : {&gate_up, &gdn_qk})
+            for (auto* cell : {&gate_up, &attention, &gdn_qk})
                 HIP_CHECK(hipMemsetAsync(cell->output.get(), 0xff,
                                         std::size_t(width) * cell->rows * sizeof(hip_bfloat16),
                                         stream.get()));
             HIP_CHECK(hipGraphLaunch(executable, stream.get()));
             HIP_CHECK(hipStreamSynchronize(stream.get()));
-            for (auto* cell : {&gate_up, &gdn_qk})
+            for (auto* cell : {&gate_up, &attention, &gdn_qk})
                 maximum_steps = std::max(maximum_steps, cell->check(width, input_host));
         }
         HIP_CHECK(hipGraphExecDestroy(executable));
@@ -411,7 +419,8 @@ void qualify_shared_context(const std::string& report_path) {
            << "\"pci_bus_id\":" << json_string(device.pci_bus_id)
            << ",\"hip_runtime_version\":" << device.runtime_version
            << ",\"hipblaslt_version\":" << gate_up.execution->hipblaslt_version()
-           << ",\"rows\":[34816,4096],\"columns\":5120,\"prepared_widths\":[1,2,3,4,2048],"
+           << ",\"rows\":[34816,7168,4096],\"columns\":5120,\"prepared_widths\":[1,2,3,4,2048],"
+           << "\"prepared_before_binding\":true,\"unbound_run_rejected\":true,"
            << "\"oracle_widths\":[4,2048],\"graph_replays_per_width\":2,"
            << "\"oracle\":\"fp64_public_bf16_times_exact_e4m3_weight_and_stored_fp32_scale\","
            << "\"graph_outputs_poisoned_before_replay\":true,"
@@ -420,9 +429,10 @@ void qualify_shared_context(const std::string& report_path) {
            << ",\"free_after_context\":" << after_context
            << ",\"free_before_prepare\":" << before_prepare
            << ",\"free_after_prepare\":" << after_prepare
+           << ",\"free_after_binding\":" << after_binding
            << ",\"free_after_execution\":" << after_execution << ",\"profiles\":[";
     bool first = true;
-    for (auto* cell : {&gate_up, &gdn_qk}) {
+    for (auto* cell : {&gate_up, &attention, &gdn_qk}) {
         for (const auto width : widths) {
             if (!first) report << ',';
             first = false;
@@ -536,8 +546,7 @@ int main(int argc, char** argv) try {
     bool malformed_rejected = false;
     try {
         ops::LinearExecution rejected(
-            context, malformed_weight, activation_storage.get(), activation_storage.bytes(),
-            matmul_workspace.get(), matmul_workspace.bytes());
+            context, malformed_weight, activation_storage.bytes(), matmul_workspace.bytes());
     } catch (const std::invalid_argument&) {
         malformed_rejected = true;
     }
@@ -546,8 +555,7 @@ int main(int argc, char** argv) try {
     bool undersized_rejected = false;
     try {
         ops::LinearExecution undersized(
-            context, weight, activation_storage.get(), activation_storage.bytes() - 1U,
-            matmul_workspace.get(), matmul_workspace.bytes());
+            context, weight, activation_storage.bytes() - 1U, matmul_workspace.bytes());
         (void)undersized.prepare(tokens);
     } catch (const std::invalid_argument&) {
         undersized_rejected = true;
@@ -555,8 +563,9 @@ int main(int argc, char** argv) try {
     require(undersized_rejected, "undersized FP8 activation workspace was accepted");
 
     ops::LinearExecution execution(
-        context, weight, activation_storage.get(), activation_storage.bytes(), matmul_workspace.get(),
-        matmul_workspace.bytes());
+        context, weight, activation_storage.bytes(), matmul_workspace.bytes());
+    execution.bind_storage(activation_storage.get(), activation_storage.bytes(),
+                           matmul_workspace.get(), matmul_workspace.bytes());
     require(execution.rows() == rows && execution.columns() == columns,
             "prepared Linear execution did not derive the bound Weight geometry");
     require(!execution.run(tokens, input.get(), fp8_output.get(), nullptr).ok(),

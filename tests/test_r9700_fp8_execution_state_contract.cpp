@@ -94,8 +94,14 @@ int main() {
         static_assert(!std::is_copy_constructible_v<ninfer::ops::LinearExecutionContext>);
         static_assert(!std::is_move_constructible_v<ninfer::ops::LinearExecutionContext>);
         static_assert(std::is_constructible_v<ninfer::ops::LinearExecution,
-            ninfer::ops::LinearExecutionContext&, const ninfer::Weight&, void*,
-            std::size_t, void*, std::size_t>);
+            ninfer::ops::LinearExecutionContext&, const ninfer::Weight&,
+            std::size_t, std::size_t>);
+        static_assert(Variant::runtime_allocation_overhead_bound(
+            detail::WeightsProfile::R9700Q4G64Fp8FourRoleN16K16Evaluation) == (4U << 20U));
+        static_assert(Variant::runtime_allocation_overhead_bound(
+            detail::WeightsProfile::R9700Q4G64Evaluation) == 0U);
+        static_assert(Variant::runtime_allocation_overhead_bound(
+            detail::WeightsProfile::R9700Q4W8Evaluation) == 0U);
         static_assert(Variant::ExecutionState::fused_mlp_down_selected(
             ninfer::QType::F8E4M3_ROW_F32S, ninfer::QType::Q4G64_F16S, 2048U, 63));
         static_assert(!Variant::ExecutionState::fused_mlp_down_selected(

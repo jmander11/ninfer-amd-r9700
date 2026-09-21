@@ -188,7 +188,8 @@ struct Cell {
         bound.scale_ne[0] = candidate::kRows;
         bound.scale_nb[0] = sizeof(float);
         incumbent = std::make_unique<ninfer::ops::LinearExecution>(
-            context, bound, incumbent_storage.get(), incumbent_storage.bytes(), nullptr, 0U);
+            context, bound, incumbent_storage.bytes(), 0U);
+        incumbent->bind_storage(incumbent_storage.get(), incumbent_storage.bytes(), nullptr, 0U);
         (void)incumbent->prepare(tokens);
     }
 

@@ -170,10 +170,15 @@ exact DFlash shapes show a physical speed/quality benefit, and it first needs DF
 FP8 Linear instances because the current execution owner registers only selected Text FP8 roles.
 The selected Text projections borrow one explicit device-bound `LinearExecutionContext` owned by
 the loaded target. It is created before the final free-memory capacity snapshot, so hipBLASLt's
-opaque device resources are already resident when automatic KV capacity is resolved. Per-weight
-descriptors and algorithms remain Program-owned; their activation/matmul region and library
-context are used serially. There is no per-projection library handle or assumed opaque-memory
-constant. Fresh physical startup evidence must still verify actual remaining headroom; a library
+opaque device resources are already resident when automatic KV capacity is resolved. Actual
+per-weight descriptors and startup-width algorithms are also prepared and retained by the loaded
+target before that snapshot; Program construction only binds their caller-owned activation/matmul
+region. Unbound prepared instances cannot execute. The region and library context are used serially.
+There is no per-projection library handle or assumed opaque-memory constant. The hybrid reservation
+adds a separate 4 MiB physical allocation bound: each of its two Program arenas can waste less than
+one measured 2 MiB hipMalloc allocation unit. The page-independent bound preserves the affine KV
+curve and leaves nonhybrid reservations unchanged. Fresh physical startup evidence must still
+verify actual remaining headroom; a library
 OOM after planning is not a structured capacity exclusion.
 Rolewise W8 promotion follows only if Q4 acceptance or generated-quality evidence identifies a
 sensitive family. Both selector codebooks, norms, convolution base kernels, and private persistent

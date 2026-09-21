@@ -199,11 +199,13 @@ row-scale vector, B the T-element token-scale vector, both with
 
 hipBLASLt lifecycle is explicit rather than a function-static cache. A repository-internal
 `ops::LinearExecutionContext` owns one device-bound handle, created by the loaded target before
-the final free-memory capacity snapshot. Each selected Text projection has a Program-owned
+the final free-memory capacity snapshot. Each selected Text projection has a loaded-target-owned
 `ops::LinearExecution` that borrows that context and owns its descriptors, heuristic results, and
-selected algorithms. Target-private leaf payloads carry the borrowed context; neither family
-runtime nor core device ownership depends on hipBLASLt. It prepares fixed decode/speculative widths
-at Program construction and explicitly prepares each realized prefill width before entering that
+selected algorithms. Target-private leaf payloads carry borrowed executions; neither family
+runtime nor core device ownership depends on hipBLASLt. It prepares fixed decode/speculative and
+full prefill widths at target loading, before the final snapshot. Program construction binds the
+stable caller-owned activation region without rerunning heuristics. Execution before binding is
+rejected. It explicitly prepares any remaining realized prefill width before entering that
 chunk, so no descriptor creation, heuristic search, allocation, or weight transformation occurs
 inside a captured or timed Linear call. Its workspace contract is the aligned sum of the live
 E4M3 activation image, T FP32 scales, and the selected heuristic's `workspaceSize`; the static

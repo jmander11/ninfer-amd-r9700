@@ -1,0 +1,50 @@
+{
+  "artifact_type": "ninfer_r9700_fp8_context_source_review",
+  "schema_version": 1,
+  "status": "unchanged_arithmetic",
+  "scope": "shared_fp8_library_context_before_capacity_snapshot",
+  "arithmetic_changed": false,
+  "kernel_or_recipe_changed": false,
+  "sources": [
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/linear/linear_execution.h",
+      "sha256": "ba41aec5691b449839e09418d1ad1924c96db3e8467b65c8210e757dc891cc2e"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/linear/linear_execution.hip",
+      "sha256": "9e87adda143eb9f440738c07c2860eba123d09773c762bd1c657578ba10df311"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/targets/qwen3_8_27b/impl/load/bindings.h",
+      "sha256": "c454d2159009884959868485bf99a5dab9ed7ea1a6c52a233cb5e216974e5aa3"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/targets/qwen3_8_27b/impl/load/bindings.cpp",
+      "sha256": "95a2ca92ef3e64798a080c2160807c9dfdb6dc789464c38cf3d6d0494cbb22b2"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/targets/qwen3_8_27b/impl/variant.h",
+      "sha256": "d54e32c6f7ed0e2b25121da4431eaeb19e0f9c57d452ac405a2aa336c82d39be"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/targets/qwen3_8_27b/impl/variant.cpp",
+      "sha256": "6de4aaf02ee880cfdf846db5ab8eeebaaadef76277d1095e17f07c07cded2451"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/targets/qwen3_8_27b/impl/package.cpp",
+      "sha256": "45b9b755b491632bfcb1ba6f4ac9cae20f9b8137755c043ed2614f7280403ce3"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/targets/qwen3/impl/runtime/layouts_impl.h",
+      "sha256": "9566b8bfa6ee990930127cf67ff2a5c994d75523aeff049843f91ee55b8fc618"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/targets/qwen3/impl/runtime/instance.h",
+      "sha256": "92e50c7ea599a6551324df921ca3056da95471aa3d6563a7f6f0b5765d5b2e58"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/targets/qwen3/export/ninfer/targets/qwen3/startup_features.h",
+      "sha256": "5674fd94e8228cca8e21bc750bf7c8bc195ca96596ada6cbeae89d85bd1ed05f"
+    }
+  ]
+}

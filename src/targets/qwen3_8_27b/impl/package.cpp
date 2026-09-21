@@ -6,6 +6,7 @@
 #include "targets/qwen3_8_27b/impl/load/bindings.h"
 #include "targets/qwen3_8_27b/impl/variant.h"
 
+#include <algorithm>
 #include <stdexcept>
 #include <utility>
 
@@ -40,9 +41,15 @@ LoadedModel::~LoadedModel() = default;
 namespace ninfer::targets::qwen3_8_27b {
 Package::LoadPlan Package::plan_load(artifact::Binder& binder, const EngineOptions& options,
                                      WeightsProfile weights_profile) {
+    const auto features = qwen3::startup_features(options);
+    auto plan = detail::bind_artifact(binder, weights_profile, features);
+    plan.bindings.linear_prepared_widths = detail::Variant::ExecutionState::eager_widths(
+        std::min(options.prefill_chunk, options.max_context), options.max_concurrency,
+        features.mtp() ? options.speculative.draft_tokens + 1U : 0U,
+        features.dflash() ? qwen3::dflash_verify_width<detail::DFlashConfig>(
+            options.speculative.draft_tokens, options.speculative.dflash_verify_width) : 0U);
     return LoadPlan(std::make_unique<LoadPlan::Impl>(
-        weights_profile,
-        detail::bind_artifact(binder, weights_profile, qwen3::startup_features(options))));
+        weights_profile, std::move(plan)));
 }
 
 std::unique_ptr<Package::LoadedModel>

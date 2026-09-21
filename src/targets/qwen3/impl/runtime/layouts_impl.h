@@ -749,7 +749,7 @@ std::unique_ptr<SequencePlanImpl> build_sequence_candidate(const SequencePlannin
     impl->draft_window        = inputs.draft_window;
     impl->dflash_verify_width =
         inputs.speculative_backend == SpeculativeBackend::DFlash
-            ? dflash_verify_width(inputs.draft_window, inputs.dflash_verify_width)
+            ? qwen3::dflash_verify_width<DFlashConfig>(inputs.draft_window, inputs.dflash_verify_width)
             : 0U;
     impl->speculative_backend = inputs.speculative_backend;
     impl->proposal_head       = inputs.proposal_head;
@@ -854,7 +854,9 @@ std::unique_ptr<SequencePlanImpl> build_sequence_candidate(const SequencePlannin
         checked_add(
             checked_add(impl->persistent.bytes, impl->workspace.capacity, "sequence memory plan"),
             impl->request_transient_capacity_bytes, "request transient reservation"),
-        impl->graph_allowance_bytes, "sequence graph allowance");
+        checked_add(impl->graph_allowance_bytes,
+                    Variant::runtime_allocation_overhead_bound(impl->weights_profile),
+                    "sequence physical allocation bound"), "sequence graph allowance");
     return impl;
 }
 

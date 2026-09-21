@@ -32,4 +32,22 @@ struct StartupFeatures {
     };
 }
 
+// Shared by load-time Linear preparation and the sequence planner. Keep the
+// native tree/chain default in one place so both prepare identical widths.
+template <class DFlashConfig>
+[[nodiscard]] inline constexpr std::uint32_t dflash_verify_width(
+    std::uint32_t draft_window, std::uint32_t override_width = 0) {
+    if (override_width != 0) return override_width;
+    if constexpr (!DFlashConfig::tree_verify) {
+        return draft_window + 1U;
+    } else {
+        if constexpr (DFlashConfig::two_block_first > 0) {
+            if (draft_window > static_cast<std::uint32_t>(DFlashConfig::two_block_first))
+                return draft_window + 1U;
+        }
+        if (draft_window <= 5U) return draft_window + 1U;
+        return static_cast<std::uint32_t>(DFlashConfig::verify_width);
+    }
+}
+
 } // namespace ninfer::targets::qwen3

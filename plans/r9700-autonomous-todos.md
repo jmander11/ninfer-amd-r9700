@@ -1131,6 +1131,14 @@ prefill review, preserving their remaining data dependencies.
   planned slack5,214,743,808 bytes. The1,223,936-byte shortfall reconciles exactly to8MiB library
   preparation plus3,321,088 bytes of arena rounding minus10MiB unused graph reserve. Preserve this
   diagnostic; finish explicit physical-cost accounting before the successor capacity campaign.
+  Accounted successor now PASS: loaded-target preparation precedes capacity resolution; workspace
+  binding allocates zero bytes, and a hybrid-only4MiB bound covers two arenas' allocation rounding
+  without changing nonhybrid plans. Fifteen prebind/bind-first algorithm fingerprints match;
+  public-input FP64 sampled eager/graph outputs match exactly. The fresh `qualification-accounted`
+  and `startup-accounted` results retain actual free5,213,519,872 versus planned5,202,160,896 bytes.
+  The11,358,976-byte surplus equals unused graph reserve plus the rounding bound minus actual
+  arena rounding. No unexplained startup allocation remains. Do not rerun either completed proof;
+  freeze the reviewed recovery bridge and run the four fresh hybrid capacity matrices next.
 
 - [ ] `ALLQ4-PAIRS` [depends: CHUNK-SELECT] Complete current dense and XAttention G16/G32 capacity
   and whole pairs and admit all four all-Q4 candidates to the same schema-v7 Pareto decision.

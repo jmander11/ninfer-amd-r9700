@@ -259,7 +259,7 @@ void require_gdn_conv_operands(const Tensor& hidden, const Tensor& conv_weight,
 struct Variant::ExecutionState::Impl {
     struct Slot {
         const Weight* weight = nullptr;
-        std::unique_ptr<ops::LinearExecution> execution;
+        ops::LinearExecution* execution = nullptr;
     };
 
     std::array<Slot, static_cast<std::size_t>(TextConfig::layers) * kSelectedRoleCount> slots{};
@@ -319,21 +319,22 @@ Variant::ExecutionState::ExecutionState(const ModelView& model, DeviceSpan seria
                              : static_cast<void*>(base + activation_region);
 
     const auto install = [&](SelectedLinearRole role, std::int32_t layer,
-                             const Weight& weight, ops::LinearExecutionContext* context) {
+                             const Weight& weight, ops::LinearExecution* execution) {
         if (weight.qtype != QType::F8E4M3_ROW_F32S) return;
-        if (context == nullptr) {
-            throw std::invalid_argument("R9700 FP8 selected projection lacks its loaded context");
+        if (execution == nullptr) {
+            throw std::invalid_argument("R9700 FP8 selected projection lacks loaded preparation");
         }
         Impl::Slot& slot = impl_->slots[Impl::index(role, layer)];
         if (slot.execution != nullptr) {
             throw std::logic_error("R9700 FP8 selected projection slot is duplicated");
         }
         slot.weight = &weight;
-        slot.execution = std::make_unique<ops::LinearExecution>(
-            *context, weight, base, activation_bytes, matmul, kSelectedMatmulWorkspaceBytes);
+        slot.execution = execution;
         for (const std::uint32_t width : prepared_widths) {
-            (void)slot.execution->prepare(width);
+            if (slot.execution->prepared_profile(width) == nullptr)
+                throw std::logic_error("R9700 loaded FP8 preparation omits a startup width");
         }
+        slot.execution->bind_storage(base, activation_bytes, matmul, kSelectedMatmulWorkspaceBytes);
         ++impl_->selected;
     };
 
@@ -342,19 +343,19 @@ Variant::ExecutionState::ExecutionState(const ModelView& model, DeviceSpan seria
             const auto& weights = model.full_layers[static_cast<std::size_t>(
                 TextConfig::full_attention_index(layer))];
             install(SelectedLinearRole::AttentionQueryKey, layer,
-                    weights.projection.query_key, weights.projection.linear_context);
+                    weights.projection.query_key, weights.projection.query_key_execution);
             install(SelectedLinearRole::AttentionGateValue, layer,
-                    weights.projection.gate_value, weights.projection.linear_context);
+                    weights.projection.gate_value, weights.projection.gate_value_execution);
             install(SelectedLinearRole::MlpGateUp, layer, weights.post_mixer.gate_up,
-                    weights.post_mixer.linear_context);
+                    weights.post_mixer.gate_up_execution);
         } else {
             const auto& weights = model.gdn_layers[static_cast<std::size_t>(
                 TextConfig::gdn_index(layer))];
             install(SelectedLinearRole::GdnQueryKey, layer,
                     weights.projection.input_projection.query_key,
-                    weights.projection.input_projection.linear_context);
+                    weights.projection.input_projection.query_key_execution);
             install(SelectedLinearRole::MlpGateUp, layer, weights.post_mixer.gate_up,
-                    weights.post_mixer.linear_context);
+                    weights.post_mixer.gate_up_execution);
         }
     }
     if (impl_->selected != 0U && impl_->selected != kSelectedProjectionCount) {

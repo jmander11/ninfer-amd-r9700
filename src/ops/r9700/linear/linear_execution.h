@@ -68,20 +68,25 @@ public:
         std::vector<AlgorithmProfile> viable_algorithms;
     };
 
-    // The weight and caller-owned activation region, plus any non-empty matmul
-    // workspace, must be mutually disjoint and remain stable until submitted work completes.
-    // A null/zero matmul workspace explicitly restricts preparation to zero-workspace algorithms.
-    // Multiple owners may reference the same externally serialized workspace
-    // regions; executions sharing a context must be externally serialized.
-    LinearExecution(LinearExecutionContext& context, const Weight& weight, void* activation_storage,
+    // Preparation owns no activation buffer: immutable weight/width descriptors
+    // and library allocations can become resident before capacity resolution.
+    // A zero matmul limit restricts preparation to zero-workspace algorithms.
+    LinearExecution(LinearExecutionContext& context, const Weight& weight,
                     std::size_t activation_storage_capacity_bytes,
-                    void* matmul_workspace, std::size_t matmul_workspace_bytes);
+                    std::size_t matmul_workspace_bytes);
     ~LinearExecution();
 
     LinearExecution(const LinearExecution&)            = delete;
     LinearExecution& operator=(const LinearExecution&) = delete;
     LinearExecution(LinearExecution&&) noexcept;
     LinearExecution& operator=(LinearExecution&&) noexcept;
+
+    // Bind once, after the caller's arena is allocated and before any launch.
+    // Regions must be disjoint from weights and each other and stable until all
+    // submitted work completes. Borrowers of one context/region are serialized.
+    // This updates descriptor pointers only; it performs no heuristic search.
+    void bind_storage(void* activation_storage, std::size_t activation_storage_capacity_bytes,
+                      void* matmul_workspace, std::size_t matmul_workspace_bytes);
 
     [[nodiscard]] static std::size_t activation_workspace_capacity_bytes(
         std::uint32_t tokens, std::uint32_t columns) noexcept;

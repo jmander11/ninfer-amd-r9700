@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <optional>
 #include <utility>
+#include <vector>
 
 namespace ninfer::targets::qwen3_8_27b::detail {
 
@@ -116,6 +117,7 @@ struct DFlash2Plan {
 struct BindingPlan {
     qwen3::FrontendResourcePlan frontend;
     qwen3::StartupFeatures features;
+    std::vector<std::uint32_t> linear_prepared_widths;
 
     WeightPlan token_embedding;
     std::array<TextLayerPlan, kTextLayers> text_layers;
@@ -144,19 +146,20 @@ ArtifactLoadPlan bind_artifact(artifact::Binder& binder, WeightsProfile weights_
 struct DensePostMixerPayload {
     Weight gate_up;
     Weight down;
-    ops::LinearExecutionContext* linear_context = nullptr;
+    ops::LinearExecution* gate_up_execution = nullptr;
 };
 
 struct FullAttentionProjectionPayload {
     Weight query_key;
     Weight gate_value;
-    ops::LinearExecutionContext* linear_context = nullptr;
+    ops::LinearExecution* query_key_execution = nullptr;
+    ops::LinearExecution* gate_value_execution = nullptr;
 };
 
 struct GdnInputProjectionPayload {
     Weight query_key;
     Weight value_z;
-    ops::LinearExecutionContext* linear_context = nullptr;
+    ops::LinearExecution* query_key_execution = nullptr;
 };
 
 struct GdnProjectionPayload {
@@ -197,6 +200,7 @@ public:
     // Library-owned device resources are live before the registry's final
     // capacity snapshot; borrowed by the Program's serialized FP8 projections.
     std::unique_ptr<ops::LinearExecutionContext> linear_context;
+    std::vector<std::unique_ptr<ops::LinearExecution>> prepared_linears;
     qwen3::FrontendResources frontend;
     RuntimeModelView runtime;
 };
