@@ -976,6 +976,14 @@ unresolved tradeoff or the product contract must change.
   real artifact binding/graph qualification, recipe-aware selected companion preparation and
   selection at K4/W5 and K5/W6; shared benchmark/PPL admission updates wait until the frozen base
   campaign finishes. Preserve the base's 131072-row draft head and exact token map byte-for-byte.
+  Next shared-tool edits: recipe-aware admission/receipts and exactly two widths in
+  `run_ninfer_bench_matrix.py`; explicit Python 3.11 CPU conversion and recipe-separated plans in
+  `prepare_selected_dflash.py`; recipe+K/W candidate keys and per-cell capacity exclusions in
+  `assemble_dflash_selection.py` (all under `tools/bench`). `tools/ppl/run.py` already accepts the
+  new identities: add distinct append-conversion provenance only where companion inspection needs
+  it, never classify companions as N16 migrations or base Pareto candidates. Protect recipe/format/
+  base-receipt mismatches, cross-recipe evidence mixing, and retained-report selection with the
+  existing focused tests. Base PPL owns target NLL; DFlash selection owns acceptance/generated output.
   W8 feature/QKV/output/conv/selector shapes currently use existing BF16×W8 execution, not
   unqualified A8 routes. Qualify exact DFlash shapes and widths before any speed/accuracy claim.
   Python 3.11 CPU conversion dependencies are available without installation via
@@ -1028,6 +1036,9 @@ prefill review, preserving their remaining data dependencies.
   All 48 C1/8K screen cells completed successfully on 2026-09-21; the validated screening
   record selects global finalists 2048 and 4096. `commands.sh finalists` is the active
   continuation. Do not rerun the completed screen or edit its frozen inputs.
+  Finalists checkpoint: the four all-Q4 profiles and mixed G16 dense/XAttention have completed
+  both 32K cells; all six favor 2048. The remaining mixed G32 and four-role profiles are pending.
+  This is not final chunk selection. Continue the existing finalist package, then `commands.sh select`.
 
 - [ ] `CHUNK-SELECT` [depends: CHUNK-PHYSICAL-12] Publish one shared startup chunk through
   the successor `r9700-chunk-selection-panel-attention-20260921` package, maximizing the worst normalized
