@@ -996,6 +996,15 @@ unresolved tradeoff or the product contract must change.
   DFlash evaluation owns acceptance/generated output. Never add companions to base Pareto candidates.
   W8 feature/QKV/output/conv/selector shapes currently use existing BF16×W8 execution, not
   unqualified A8 routes. Qualify exact DFlash shapes and widths before any speed/accuracy claim.
+  The reviewed numerical-only package `profiles/bench/r9700-dflash-companion-ops-20260921`
+  now provides CPU-only `commands.sh preflight` and create-only `commands.sh run` for the
+  fresh three-qualifier build. It covers42 sampled full-K FP64 Linear cases,16 full-formula
+  selector cases and8 convolution cases, each eager plus two poisoned-workspace graph replays.
+  W5/W6 and K4/K5 row extents derive from C1..4 call sites; feature/QKV also cover chunk2048.
+  The selector oracle now retains full FP64 projection/Markov arithmetic rather than copying
+  private BF16 staging. All three targets compile; six CPU tests and independent review SHIP.
+  Root will run this bounded required qualification after the current capacity stage; no physical
+  numerical result or companion admission is implied by preparation.
   Python 3.11 CPU conversion dependencies are available without installation via
   `PYTHONPATH=/ssdpool2nvme/local_llm/ninfer/out/numerical-reference-venv/lib/python3.11/site-packages`
   with `/home/battlefront/.local/bin/python3.11` (explicit CPU only; torch is CUDA, not ROCm).

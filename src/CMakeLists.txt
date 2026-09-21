@@ -445,6 +445,12 @@ set_target_properties(ninfer_r9700_dflash2_select_qual PROPERTIES
   HIP_ARCHITECTURES gfx1201)
 target_link_libraries(ninfer_r9700_dflash2_select_qual PRIVATE ninfer_r9700_core hip::host)
 
+add_executable(ninfer_r9700_linear_op_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/linear_op_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_linear_op_qual)
+set_target_properties(ninfer_r9700_linear_op_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_linear_op_qual PRIVATE ninfer_r9700_core hip::host)
+
 add_executable(ninfer_r9700_bidirectional_gqa_qual
   ${PROJECT_SOURCE_DIR}/tools/r9700/bidirectional_gqa_attention_qual.hip)
 ninfer_r9700_internal_includes(ninfer_r9700_bidirectional_gqa_qual)

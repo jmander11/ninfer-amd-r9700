@@ -2,10 +2,12 @@
 #include <hip/hip_runtime.h>
 
 #include "ops/r9700/linear/r9700_linear.h"
+#include "ops/r9700/linear/r9700_w8_activation_profile.h"
 #include "ninfer/ops/argmax.h"
 #include "ninfer/ops/linear.h"
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cctype>
 #include <cmath>
@@ -60,6 +62,8 @@ public:
     DeviceBuffer& operator=(const DeviceBuffer&) = delete;
     ~DeviceBuffer() { if (data_ != nullptr) (void)hipFree(data_); }
     [[nodiscard]] T* get() const { return data_; }
+    [[nodiscard]] std::size_t count() const { return count_; }
+    [[nodiscard]] std::size_t bytes() const { return count_ * sizeof(T); }
 
 private:
     std::size_t count_ = 0;
@@ -556,6 +560,113 @@ void run_public_tensor_case(std::uint32_t tokens) {
     std::cout << "public-linear: T=" << tokens << " BF16/W8/row-view/rejection PASS\n";
 }
 
+// DFlash uses W=K+1 rows in both proposal and pending-context append. The
+// represented-weight oracle remains BF16 input x signed W8 x stored FP16 scale;
+// the down route's private A8 arithmetic is not substituted into that oracle.
+void run_dflash_companion_shape(std::uint32_t rows, std::uint32_t columns,
+                                bool context_projection) {
+    const auto weights = make_weights(rows, columns, false);
+    const W8Payload encoded = encode_w8g32_independent(weights, rows, columns);
+    DeviceBuffer<std::uint8_t> d_weights(encoded.bytes.size());
+    HIP_CHECK(hipMemcpy(d_weights.get(), encoded.bytes.data(), encoded.bytes.size(), hipMemcpyHostToDevice));
+    ninfer::Weight weight{};
+    weight.payload = d_weights.get();
+    weight.payload_bytes = encoded.bytes.size();
+    weight.qdata = d_weights.get();
+    weight.qdata_bytes = static_cast<std::size_t>(rows) * encoded.padded_columns;
+    weight.scales = d_weights.get() + encoded.scale_offset;
+    weight.scale_bytes = encoded.bytes.size() - encoded.scale_offset;
+    weight.qtype = ninfer::QType::W8G32_F16S;
+    weight.layout = ninfer::QuantLayout::RowSplit;
+    weight.scale_dtype = ninfer::DType::FP16;
+    weight.group_size = weight.group = kGroup;
+    weight.n = weight.shape[0] = weight.padded_shape[0] = rows;
+    weight.k = weight.shape[1] = columns;
+    weight.padded_shape[1] = encoded.padded_columns;
+    weight.ndim = 2;
+    std::vector<std::uint32_t> widths{5, 6, 10, 12, 15, 18, 20, 24};
+    if (context_projection) widths.push_back(2048);
+    hipStream_t stream{};
+    HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    for (const std::uint32_t tokens : widths) {
+        const auto input = make_input(tokens, columns);
+        DeviceBuffer<hip_bfloat16> d_input(input.size());
+        DeviceBuffer<hip_bfloat16> d_output(static_cast<std::size_t>(rows) * tokens);
+        HIP_CHECK(hipMemcpy(d_input.get(), input.data(), input.size() * sizeof(hip_bfloat16), hipMemcpyHostToDevice));
+        const auto workspace_bytes = ninfer::ops::linear_workspace_capacity_bytes(weight.qtype, tokens, columns);
+        DeviceBuffer<std::uint8_t> d_workspace(std::max<std::size_t>(workspace_bytes, 1));
+        const ninfer::DeviceSpan workspace{d_workspace.get(), workspace_bytes};
+        ninfer::Tensor x(d_input.get(), ninfer::DType::BF16,
+                         {static_cast<int>(columns), static_cast<int>(tokens)});
+        ninfer::Tensor output(d_output.get(), ninfer::DType::BF16,
+                              {static_cast<int>(rows), static_cast<int>(tokens)});
+        const bool lossy = rows == 5120U && columns == 17408U;
+        const double absolute_tolerance = lossy ? .01 : .001;
+        const double relative_tolerance = lossy ? .03 : .0079;
+        std::vector<std::uint32_t> sampled_tokens;
+        if (tokens <= 24U) {
+            for (std::uint32_t token = 0; token < tokens; ++token) sampled_tokens.push_back(token);
+        } else {
+            // Include distinct period-31 input patterns as well as tile boundaries.
+            sampled_tokens = {0U, 17U, 31U, 32U, tokens / 2U - 1U, tokens / 2U + 1U, tokens - 1U};
+        }
+        const std::array<std::uint32_t, 9> sampled_rows{0U, 1U, 7U, 8U, 15U, 16U, rows / 2U, rows - 2U, rows - 1U};
+        std::vector<double> expected;
+        for (const auto token : sampled_tokens) {
+            for (const auto row : sampled_rows) {
+                double sum = 0.;
+                for (std::uint32_t column = 0; column < columns; ++column) {
+                    sum = std::fma(static_cast<double>(static_cast<float>(input[static_cast<std::size_t>(token) * columns + column])),
+                                   decode_w8_weight(encoded, row, column), sum);
+                }
+                expected.push_back(sum);
+            }
+        }
+        double worst_absolute = 0., worst_normalized = 0.;
+        std::uint32_t worst_token = 0, worst_row = 0;
+        const auto check = [&] {
+            HIP_CHECK(hipStreamSynchronize(stream));
+            std::vector<hip_bfloat16> actual(d_output.count());
+            HIP_CHECK(hipMemcpy(actual.data(), d_output.get(), d_output.bytes(), hipMemcpyDeviceToHost));
+            for (auto value : actual) if (!std::isfinite(static_cast<float>(value))) fail("DFlash W8 nonfinite output");
+            std::size_t sample = 0;
+            for (const auto token : sampled_tokens) for (const auto row : sampled_rows) {
+                const double oracle = expected[sample++];
+                const double error = std::abs(static_cast<float>(actual[static_cast<std::size_t>(token) * rows + row]) - oracle);
+                const double normalized = error / (absolute_tolerance + relative_tolerance * std::abs(oracle));
+                worst_absolute = std::max(worst_absolute, error);
+                if (normalized > worst_normalized) { worst_normalized = normalized; worst_token = token; worst_row = row; }
+                if (!std::isfinite(oracle) || !std::isfinite(normalized) || normalized > 1.)
+                    fail("DFlash public W8 FP64 oracle mismatch N=" + std::to_string(rows) + " K=" + std::to_string(columns) + " T=" + std::to_string(tokens) + " token=" + std::to_string(token) + " row=" + std::to_string(row) + " error=" + std::to_string(error));
+            }
+        };
+        const auto invoke = [&] { ninfer::ops::linear(x, weight, output, workspace, stream); };
+        invoke();
+        check();
+        hipGraph_t graph{};
+        hipGraphExec_t executable{};
+        HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeThreadLocal));
+        invoke();
+        HIP_CHECK(hipStreamEndCapture(stream, &graph));
+        HIP_CHECK(hipGraphInstantiate(&executable, graph, nullptr, nullptr, 0));
+        for (int replay = 0; replay < 2; ++replay) {
+            HIP_CHECK(hipMemsetAsync(d_workspace.get(), 0xff, d_workspace.bytes(), stream));
+            HIP_CHECK(hipMemsetAsync(d_output.get(), 0xff, d_output.bytes(), stream));
+            HIP_CHECK(hipGraphLaunch(executable, stream));
+            check();
+        }
+        HIP_CHECK(hipGraphExecDestroy(executable));
+        HIP_CHECK(hipGraphDestroy(graph));
+        std::cout << "dflash-companion-linear: PASS N=" << rows << " K=" << columns << " T=" << tokens
+                  << " public_profile=" << (lossy ? "A8W8" : "BF16xW8")
+                  << " fp64_samples=" << expected.size() << " full_K=" << columns
+                  << " graph_replays=2 workspace_bytes=" << workspace_bytes
+                  << " max_abs=" << worst_absolute << " max_normalized=" << worst_normalized
+                  << " worst_token=" << worst_token << " worst_row=" << worst_row << '\n';
+    }
+    HIP_CHECK(hipStreamDestroy(stream));
+}
+
 std::int8_t product_head_code(std::uint32_t row, std::uint32_t column,
                               std::uint32_t contender, std::uint32_t winner) {
     if (column == 0U) {
@@ -944,8 +1055,10 @@ int parse_iterations(int argc, char** argv) {
             const long parsed = std::strtol(argv[++index], nullptr, 10);
             if (parsed <= 0 || parsed > 1000) fail("--iterations must be in [1,1000]");
             iterations = static_cast<int>(parsed);
+        } else if (argument == "--dflash-companion") {
+            // Selected by main; this mode never enters the old timing sweep.
         } else if (argument == "--help") {
-            std::cout << "usage: linear_op_qual [--iterations N]\n";
+            std::cout << "usage: linear_op_qual [--iterations N] [--dflash-companion]\n";
             std::exit(0);
         } else {
             fail("unknown or incomplete option: " + std::string(argument));
@@ -960,6 +1073,17 @@ int main(int argc, char** argv) {
     try {
         const int iterations = parse_iterations(argc, argv);
         select_r9700();
+        if (std::any_of(argv + 1, argv + argc, [](const char* arg) { return std::string_view(arg) == "--dflash-companion"; })) {
+            if (ninfer::ops::r9700::linear::kW8ActivationBits != 8U)
+                fail("DFlash companion qualification requires the production adaptive W8-A8 build");
+            for (const auto& shape : std::array<std::array<std::uint32_t, 3>, 5>{{
+                     {5120U, 25600U, 1U}, {6144U, 5120U, 1U}, {5120U, 4096U, 0U},
+                     {34816U, 5120U, 0U}, {5120U, 17408U, 0U}}}) {
+                run_dflash_companion_shape(shape[0], shape[1], shape[2] != 0U);
+            }
+            std::cout << "dflash-companion-linear: ALL PASS represented-BF16-input FP64 sampled oracle\n";
+            return 0;
+        }
         std::cout << "toolchain: HIP " << HIP_VERSION_MAJOR << '.' << HIP_VERSION_MINOR << '.'
                   << HIP_VERSION_PATCH << " compile_target=gfx1201\n";
         // Raw API rejections have no state and must be deterministic before valid launch checks.

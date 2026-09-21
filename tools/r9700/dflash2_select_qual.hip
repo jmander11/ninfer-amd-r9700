@@ -18,9 +18,10 @@
 
 namespace {
 
-constexpr int kV = ninfer::ops::kDflash2PathSelectCodebookRows;
-constexpr int kT = 2;
-constexpr int kB = 2;
+constexpr int kCodebookRows = ninfer::ops::kDflash2PathSelectCodebookRows;
+int kV = kCodebookRows;
+int kT = 2;
+int kB = 2;
 constexpr int kH = ninfer::ops::kDflash2PathSelectHidden;
 constexpr int kR = ninfer::ops::kDflash2PathSelectRank;
 constexpr int kTop = ninfer::ops::kDflash2PathSelectTopK;
@@ -234,10 +235,17 @@ void fill_code(std::vector<hip_bfloat16>& book, int token, int salt) {
 
 Corpus make_corpus() {
     Corpus result;
+    result.anchors.resize(kB);
+    result.positions.resize(kB);
+    for (int batch = 0; batch < kB; ++batch) {
+        result.anchors[batch] = 17 + 12 * batch;
+        result.positions[batch] = 101 + 3992 * batch;
+    }
     result.logits.assign(static_cast<std::size_t>(kV) * kT * kB, hip_bfloat16(-6.0F));
     result.hidden.resize(static_cast<std::size_t>(kH) * kT * kB);
-    result.predecessor.assign(static_cast<std::size_t>(kR) * kV, hip_bfloat16(0.0F));
-    result.successor.assign(static_cast<std::size_t>(kR) * kV, hip_bfloat16(0.0F));
+    result.predecessor.assign(static_cast<std::size_t>(kR) * kCodebookRows, hip_bfloat16(0.0F));
+    result.successor.assign(static_cast<std::size_t>(kR) * kCodebookRows, hip_bfloat16(0.0F));
+    for (int& row : result.special_rows) row %= kV;
     result.mapped_ids.resize(kV);
     for (int token = 0; token < kV; ++token) result.mapped_ids[token] = token;
 
@@ -264,7 +272,7 @@ Corpus make_corpus() {
     std::vector<int> code_tokens(result.anchors.begin(), result.anchors.end());
     for (int index = 0; index < 18; ++index) {
         const int row = result.special_rows[index];
-        const int mapped = 2000 + (index * 7) % 19;
+        const int mapped = (kV == 131072 ? 200000 : 2000) + (index * 7) % 19;
         result.mapped_ids[row] = mapped;
         code_tokens.push_back(row);
         code_tokens.push_back(mapped);
@@ -298,47 +306,17 @@ std::vector<Candidate> topk(const Corpus& corpus, int token, int batch, bool map
     return values;
 }
 
-std::vector<double> q4_activations(const Corpus& corpus) {
-    std::vector<double> result(static_cast<std::size_t>(kH) * kT * kB);
-    for (std::size_t column = 0; column < static_cast<std::size_t>(kT * kB); ++column) {
-        for (int group = 0; group < kH / kQ4Group; ++group) {
-            float maximum = 0.0F;
-            for (int lane = 0; lane < kQ4Group; ++lane) {
-                maximum = std::max(maximum, std::abs(static_cast<float>(
-                    corpus.hidden[column * kH + group * kQ4Group + lane])));
-            }
-            std::uint16_t bits = maximum == 0.0F ? 0U : half_bits(maximum / 127.0F);
-            if (maximum != 0.0F && bits == 0U) bits = 1U;
-            const double scale = half_value(bits);
-            for (int lane = 0; lane < kQ4Group; ++lane) {
-                const std::size_t index = column * kH + group * kQ4Group + lane;
-                const double value = bf16_value(corpus.hidden[index]);
-                const int code = bits == 0U
-                                     ? 0
-                                     : std::clamp(static_cast<int>(std::nearbyint(value / scale)),
-                                                  -127, 127);
-                result[index] = static_cast<double>(code) * scale;
-            }
-        }
-    }
-    return result;
-}
-
-std::vector<hip_bfloat16> project_hidden(const Corpus& corpus,
+std::vector<double> project_hidden(const Corpus& corpus,
                                          const ProjectionFixture& projection,
                                          ProjectionKind kind) {
-    std::vector<hip_bfloat16> result(static_cast<std::size_t>(kR) * kT * kB);
-    const std::vector<double> q4_input =
-        kind == ProjectionKind::Q4 ? q4_activations(corpus) : std::vector<double>{};
+    std::vector<double> result(static_cast<std::size_t>(kR) * kT * kB);
     for (int batch = 0; batch < kB; ++batch) {
         for (int token = 0; token < kT; ++token) {
             const std::size_t column = column_index(token, batch);
             for (int row = 0; row < kR; ++row) {
                 double sum = 0.0;
                 for (int feature = 0; feature < kH; ++feature) {
-                    const double input = kind == ProjectionKind::Q4
-                                             ? q4_input[column * kH + feature]
-                                             : bf16_value(corpus.hidden[column * kH + feature]);
+                    const double input = bf16_value(corpus.hidden[column * kH + feature]);
                     const double weight = kind == ProjectionKind::W8
                                               ? projection.w8_at(row, feature)
                                               : kind == ProjectionKind::Q4
@@ -346,19 +324,19 @@ std::vector<hip_bfloat16> project_hidden(const Corpus& corpus,
                                                     : projection.bf16_at(row, feature);
                     sum = std::fma(input, weight, sum);
                 }
-                result[column * kR + row] = hip_bfloat16(static_cast<float>(sum));
+                result[column * kR + row] = sum;
             }
         }
     }
     return result;
 }
 
-double markov_score(const Corpus& corpus, const std::vector<hip_bfloat16>& projected,
+double markov_score(const Corpus& corpus, const std::vector<double>& projected,
                     const Candidate& candidate, int previous, int token, int batch) {
     const std::size_t column = column_index(token, batch);
     double score = candidate.unary;
     for (int rank = 0; rank < kR; ++rank) {
-        const double h = bf16_value(projected[column * kR + rank]);
+        const double h = projected[column * kR + rank];
         const double pred = bf16_value(
             corpus.predecessor[static_cast<std::size_t>(previous) * kR + rank]);
         const double succ = bf16_value(
@@ -374,7 +352,7 @@ struct ChainOracle {
     std::vector<float> selector_q;
 };
 
-ChainOracle chain_oracle(const Corpus& corpus, const std::vector<hip_bfloat16>& projected,
+ChainOracle chain_oracle(const Corpus& corpus, const std::vector<double>& projected,
                          bool mapped) {
     ChainOracle out;
     out.path.resize(kT * kB);
@@ -411,7 +389,7 @@ struct TreeOracle {
     std::vector<std::int32_t> verify, parent, cache, rope, mask, live;
 };
 
-TreeOracle tree_oracle(const Corpus& corpus, const std::vector<hip_bfloat16>& projected,
+TreeOracle tree_oracle(const Corpus& corpus, const std::vector<double>& projected,
                        bool mapped) {
     TreeOracle out;
     out.verify.resize(kW * kB);
@@ -505,10 +483,10 @@ void require_equal(const std::vector<T>& actual, const std::vector<T>& expected,
 
 void require_workspace_peak(const ninfer::WorkspaceArena& workspace, ninfer::QType qtype,
                             const char* label) {
-    constexpr std::size_t columns = static_cast<std::size_t>(kT * kB);
-    constexpr std::size_t split = columns * 32U * kTop;
-    constexpr std::size_t merged = columns * kTop;
-    constexpr std::size_t topk_bytes =
+    const std::size_t columns = static_cast<std::size_t>(kT * kB);
+    const std::size_t split = columns * 32U * kTop;
+    const std::size_t merged = columns * kTop;
+    const std::size_t topk_bytes =
         (split + merged) * (sizeof(float) + sizeof(std::int32_t));
     const std::size_t expected = static_cast<std::size_t>(kR) * kT * kB * sizeof(std::uint16_t) +
         std::max(topk_bytes,
@@ -523,11 +501,11 @@ void require_workspace_peak(const ninfer::WorkspaceArena& workspace, ninfer::QTy
 
 void run_chain(ninfer::DeviceContext& device, const Corpus& corpus,
                const ProjectionFixture& projection, DeviceFixture& data, ProjectionKind kind,
-               bool mapped) {
+               bool mapped, bool qualify_graph = false) {
     ninfer::Tensor logits(data.logits.data(), ninfer::DType::BF16, {kV, kT, kB});
     ninfer::Tensor hidden(data.hidden.data(), ninfer::DType::BF16, {kH, kT, kB});
-    ninfer::Tensor pred(data.predecessor.data(), ninfer::DType::BF16, {kR, kV});
-    ninfer::Tensor succ(data.successor.data(), ninfer::DType::BF16, {kR, kV});
+    ninfer::Tensor pred(data.predecessor.data(), ninfer::DType::BF16, {kR, kCodebookRows});
+    ninfer::Tensor succ(data.successor.data(), ninfer::DType::BF16, {kR, kCodebookRows});
     ninfer::Tensor anchors(data.anchors.data(), ninfer::DType::I32, {kB});
     ninfer::Tensor positions(data.positions.data(), ninfer::DType::I32, {kB});
     ninfer::Tensor mapped_ids(data.mapped_ids.data(), ninfer::DType::I32, {kV});
@@ -542,26 +520,53 @@ void run_chain(ninfer::DeviceContext& device, const Corpus& corpus,
     const ChainOracle expected = chain_oracle(corpus, projected, mapped);
     ninfer::WorkspaceArena workspace(ninfer::ops::dflash2_path_select_workspace_capacity_bytes(
         weight.qtype, kT, kT, kB));
-    ninfer::ops::dflash2_path_select(
+    const auto invoke = [&] { ninfer::ops::dflash2_path_select(
         logits, hidden, weight, pred, succ, anchors, positions,
         static_cast<const ninfer::ops::SamplingConfig*>(data.configs.data()), path, workspace,
-        device.stream, mapped ? &mapped_ids : nullptr, &selector_ids, &selector_q);
-    device.synchronize();
-    require_equal(download<std::int32_t>(data.path, expected.path.size()), expected.path,
-                  "chain path");
-    require_equal(download<std::int32_t>(data.selector_ids, expected.selector_ids.size()),
-                  expected.selector_ids, "chain top-k support");
-    require_equal(download<float>(data.selector_q, expected.selector_q.size()),
-                  expected.selector_q, "chain selector q");
-    require_workspace_peak(workspace, weight.qtype, "chain");
+        device.stream, mapped ? &mapped_ids : nullptr, &selector_ids, &selector_q); };
+    const auto check = [&] {
+        device.synchronize();
+        require_equal(download<std::int32_t>(data.path, expected.path.size()), expected.path,
+                      "chain path");
+        require_equal(download<std::int32_t>(data.selector_ids, expected.selector_ids.size()),
+                      expected.selector_ids, "chain top-k support");
+        require_equal(download<float>(data.selector_q, expected.selector_q.size()),
+                      expected.selector_q, "chain selector q");
+        require_workspace_peak(workspace, weight.qtype, "chain");
+        if (workspace.used() != 0) fail("selector arena scope escaped");
+    };
+    invoke();
+    check();
+    if (qualify_graph) {
+        hipGraph_t graph{};
+        hipGraphExec_t executable{};
+        HIP_CHECK(hipStreamBeginCapture(device.stream, hipStreamCaptureModeThreadLocal));
+        invoke();
+        HIP_CHECK(hipStreamEndCapture(device.stream, &graph));
+        HIP_CHECK(hipGraphInstantiate(&executable, graph, nullptr, nullptr, 0));
+        for (int replay = 0; replay < 2; ++replay) {
+            HIP_CHECK(hipMemsetAsync(workspace.base(), 0xff, workspace.capacity(), device.stream));
+            data.path.fill_async(0xff, device.stream);
+            data.selector_ids.fill_async(0xff, device.stream);
+            data.selector_q.fill_async(0xff, device.stream);
+            HIP_CHECK(hipGraphLaunch(executable, device.stream));
+            check();
+        }
+        HIP_CHECK(hipGraphExecDestroy(executable));
+        HIP_CHECK(hipGraphDestroy(graph));
+        std::cout << "dflash-companion-selector: PASS K=" << kT << " C=" << kB
+                  << " mapped=" << mapped << " graph_replays=2 full_FP64_selector_oracle"
+                  << " logits_rows=" << kV << " bf16_codebook_rows=" << kCodebookRows
+                  << " workspace_bytes=" << workspace.capacity() << '\n';
+    }
 }
 
 void run_tree(ninfer::DeviceContext& device, const Corpus& corpus,
               const ProjectionFixture& projection, DeviceFixture& data, ProjectionKind kind) {
     ninfer::Tensor logits(data.logits.data(), ninfer::DType::BF16, {kV, kT, kB});
     ninfer::Tensor hidden(data.hidden.data(), ninfer::DType::BF16, {kH, kT, kB});
-    ninfer::Tensor pred(data.predecessor.data(), ninfer::DType::BF16, {kR, kV});
-    ninfer::Tensor succ(data.successor.data(), ninfer::DType::BF16, {kR, kV});
+    ninfer::Tensor pred(data.predecessor.data(), ninfer::DType::BF16, {kR, kCodebookRows});
+    ninfer::Tensor succ(data.successor.data(), ninfer::DType::BF16, {kR, kCodebookRows});
     ninfer::Tensor anchors(data.anchors.data(), ninfer::DType::I32, {kB});
     ninfer::Tensor frontiers(data.positions.data(), ninfer::DType::I32, {kB});
     ninfer::Tensor mapped_ids(data.mapped_ids.data(), ninfer::DType::I32, {kV});
@@ -615,8 +620,8 @@ void run_malformed_planes(ninfer::DeviceContext& device, const ProjectionFixture
                           DeviceFixture& data) {
     ninfer::Tensor logits(data.logits.data(), ninfer::DType::BF16, {kV, kT, kB});
     ninfer::Tensor hidden(data.hidden.data(), ninfer::DType::BF16, {kH, kT, kB});
-    ninfer::Tensor pred(data.predecessor.data(), ninfer::DType::BF16, {kR, kV});
-    ninfer::Tensor succ(data.successor.data(), ninfer::DType::BF16, {kR, kV});
+    ninfer::Tensor pred(data.predecessor.data(), ninfer::DType::BF16, {kR, kCodebookRows});
+    ninfer::Tensor succ(data.successor.data(), ninfer::DType::BF16, {kR, kCodebookRows});
     ninfer::Tensor anchors(data.anchors.data(), ninfer::DType::I32, {kB});
     ninfer::Tensor positions(data.positions.data(), ninfer::DType::I32, {kB});
     ninfer::Tensor path(data.path.data(), ninfer::DType::I32, {kT, kB});
@@ -669,12 +674,26 @@ void run_malformed_planes(ninfer::DeviceContext& device, const ProjectionFixture
 
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
     try {
+        const bool companion = argc == 4 && std::string(argv[1]) == "--dflash-companion";
+        if (companion) {
+            kT = std::stoi(argv[2]);
+            kB = std::stoi(argv[3]);
+            kV = 131072;
+            if ((kT != 4 && kT != 5) || kB < 1 || kB > 4) fail("expected K=4/5 and C=1..4");
+        } else if (argc != 1) {
+            fail("usage: dflash2_select_qual [--dflash-companion K C]");
+        }
         ninfer::DeviceContext device;
         const Corpus corpus = make_corpus();
         const ProjectionFixture projection = make_projection();
         DeviceFixture data(corpus);
+        if (companion) {
+            run_chain(device, corpus, projection, data, ProjectionKind::W8, false, true);
+            run_chain(device, corpus, projection, data, ProjectionKind::W8, true, true);
+            return 0;
+        }
         run_chain(device, corpus, projection, data, ProjectionKind::BF16, false);
         run_chain(device, corpus, projection, data, ProjectionKind::W8, false);
         run_chain(device, corpus, projection, data, ProjectionKind::W8, true);

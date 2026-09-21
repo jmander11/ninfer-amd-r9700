@@ -225,6 +225,8 @@ Error compare(const std::vector<hip_bfloat16>& actual, const std::vector<double>
     for (std::size_t index = 0; index < actual.size(); ++index) {
         const double got = static_cast<float>(actual[index]);
         const double error = got - expected[index];
+        if (!std::isfinite(got) || !std::isfinite(expected[index]) || !std::isfinite(error))
+            fail(std::string(label) + ": nonfinite oracle/output");
         result.max_abs = std::max(result.max_abs, std::abs(error));
         squared_error += error * error;
         squared_reference += expected[index] * expected[index];
@@ -238,7 +240,8 @@ Error compare(const std::vector<hip_bfloat16>& actual, const std::vector<double>
     return result;
 }
 
-Error run_prepare(ninfer::DeviceContext& device, WeightKind kind, int tokens, int batch) {
+Error run_prepare(ninfer::DeviceContext& device, WeightKind kind, int tokens, int batch,
+                  bool qualify_graph = false) {
     ProjectionWeight weight = make_weight(kind);
     const int columns = tokens * batch;
     std::vector<hip_bfloat16> hidden(static_cast<std::size_t>(kD) * columns);
@@ -335,6 +338,37 @@ Error run_prepare(ninfer::DeviceContext& device, WeightKind kind, int tokens, in
     d_finish.copy_to_host(actual_finish.data(), d_finish.size());
     Error result = compare(actual, expected, 0.04, 0.02, "prepare");
     (void)compare(actual_finish, expected_finish, 0.04, 0.02, "finish_dynamic");
+    if (qualify_graph) {
+        hipGraph_t graph{};
+        hipGraphExec_t executable{};
+        HIP_CHECK(hipStreamBeginCapture(device.stream, hipStreamCaptureModeThreadLocal));
+        ninfer::ops::grouped_dynamic_conv_prepare(hidden_tensor, base_tensor, weight.view,
+            prepared_tensor, finish_tensor, workspace, device.stream);
+        HIP_CHECK(hipStreamEndCapture(device.stream, &graph));
+        HIP_CHECK(hipGraphInstantiate(&executable, graph, nullptr, nullptr, 0));
+        for (int replay = 0; replay < 2; ++replay) {
+            HIP_CHECK(hipMemsetAsync(workspace.base(), 0xff, workspace.capacity(), device.stream));
+            d_prepared.fill_async(0xff, device.stream);
+            d_finish.fill_async(0xff, device.stream);
+            HIP_CHECK(hipGraphLaunch(executable, device.stream));
+            device.synchronize();
+            d_prepared.copy_to_host(actual.data(), d_prepared.size());
+            d_finish.copy_to_host(actual_finish.data(), d_finish.size());
+            const Error replay_error = compare(actual, expected, 0.04, 0.02, "prepare graph");
+            (void)compare(actual_finish, expected_finish, 0.04, 0.02, "finish_dynamic graph");
+            result.max_abs = std::max(result.max_abs, replay_error.max_abs);
+            result.relative_l2 = std::max(result.relative_l2, replay_error.relative_l2);
+            if (workspace.used() != 0 || workspace.peak_used() != workspace_bytes)
+                fail("grouped_dynamic_conv graph workspace ownership mismatch");
+        }
+        HIP_CHECK(hipGraphExecDestroy(executable));
+        HIP_CHECK(hipGraphDestroy(graph));
+        std::cout << "dflash-companion-conv: PASS W=" << tokens << " C=" << batch
+                  << " graph_replays=2 full_FP64_projection_and_conv_oracle"
+                  << " max_abs=" << result.max_abs << " relative_l2=" << result.relative_l2
+                  << " workspace_bytes=" << workspace_bytes << '\n';
+        return result;
+    }
     constexpr int iterations = 10;
     ninfer::DeviceEventTimer timer(device);
     timer.start();
@@ -394,9 +428,22 @@ Error run_finish(ninfer::DeviceContext& device) {
 
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
     try {
+        const bool companion = argc == 4 && std::string(argv[1]) == "--dflash-companion";
+        int tokens = 0, batch = 0;
+        if (companion) {
+            tokens = std::stoi(argv[2]);
+            batch = std::stoi(argv[3]);
+            if ((tokens != 5 && tokens != 6) || batch < 1 || batch > 4) fail("expected W=5/6 and C=1..4");
+        } else if (argc != 1) {
+            fail("usage: grouped_dynamic_conv_qual [--dflash-companion W C]");
+        }
         ninfer::DeviceContext device;
+        if (companion) {
+            (void)run_prepare(device, WeightKind::W8, tokens, batch, true);
+            return 0;
+        }
         const Error bf16 = run_prepare(device, WeightKind::BF16, 1, 1);
         const Error w8 = run_prepare(device, WeightKind::W8, 2, 2);
         const Error q4 = run_prepare(device, WeightKind::Q4, 2, 2);
