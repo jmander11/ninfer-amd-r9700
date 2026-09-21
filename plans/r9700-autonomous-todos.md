@@ -1025,6 +1025,9 @@ prefill review, preserving their remaining data dependencies.
   Its README gives the exact ordered commands. The shared runner now checks the R9700 PCI
   identity and matching HIP ordinal rather than unstable DRM card numbering. No timing is
   credited until each report passes the existing matrix and selector validation.
+  All 48 C1/8K screen cells completed successfully on 2026-09-21; the validated screening
+  record selects global finalists 2048 and 4096. `commands.sh finalists` is the active
+  continuation. Do not rerun the completed screen or edit its frozen inputs.
 
 - [ ] `CHUNK-SELECT` [depends: CHUNK-PHYSICAL-12] Publish one shared startup chunk through
   the successor `r9700-chunk-selection-panel-attention-20260921` package, maximizing the worst normalized
