@@ -343,54 +343,82 @@ python3 tools/bench/select_prefill_chunk.py \
 NINFER_SELECTED_PREFILL_CHUNK=$(python3 -c \
   'from pathlib import Path; from tools.bench.select_prefill_chunk import validate_selection_record; print(validate_selection_record(Path("profiles/bench/prefill-chunk-selection-20260904.json"))["selected_prefill_chunk"])')
 
-# After schema-v7 terminal selection, acquire and validate the separate dense C1 low-context
-# prefill ladder. This entry point resolves the winner's exact artifact/value group and its unique
-# compile-matched dense control directly from the authority; it also reopens the selected-chunk
-# planner for the hybrid recipe. It runs five non-speculative 3/1 reports under auto and publishes
-# the evaluation only after complete recomputation. A valid result below 2,000 tok/s at P=2,048 is
-# retained as diagnostic target progress, not an admission failure. The validator exits zero for
-# a complete valid ladder regardless of target attainment; malformed reports still fail. Final
-# cutover replays the full artifact/profile-matched ladder and records target progress without
-# requiring 2,000 tok/s. The dated launcher below is historical, not a current campaign to resume.
-bash profiles/bench/low-context-selected-ladder-20260905/run-and-publish.sh \
-  --execute-gpu-campaign
+```
 
-export NINFER_LOW_CONTEXT_EVALUATION=profiles/bench/low-context-prefill-evaluation-20260905.json
-NINFER_SELECTED_ARTIFACT=$(python3 -c 'import json,os; print(json.load(open(os.environ["NINFER_LOW_CONTEXT_EVALUATION"]))["artifact"]["path"])')
-NINFER_SELECTED_WEIGHTS_ID=$(python3 -c 'import json,os; print(json.load(open(os.environ["NINFER_LOW_CONTEXT_EVALUATION"]))["artifact"]["weights_id"])')
-NINFER_SELECTED_GROUP=$(python3 -c 'import json,os; print(json.load(open(os.environ["NINFER_LOW_CONTEXT_EVALUATION"]))["expected_kv_value_group"])')
-NINFER_SELECTED_PREFILL_CHUNK=$(python3 -c 'import json,os; print(json.load(open(os.environ["NINFER_LOW_CONTEXT_EVALUATION"]))["selected_prefill_chunk"])')
-NINFER_SELECTED_DENSE_BENCH=$(python3 -c 'import json,os; print(json.load(open(os.environ["NINFER_LOW_CONTEXT_EVALUATION"]))["bench"]["path"])')
+After the current terminal selection, use this fresh dense C1/spec-none/auto ladder at
+P128..4096 (fixed three repetitions and one warmup). The earlier dated chunk examples are not
+prerequisites to rerun; the completed shared chunk authority remains unchanged.
+
+```bash
+# Run from the repository root, with exclusive GPU ownership. Never resume dated outputs.
+export PYTHONDONTWRITEBYTECODE=1
+export PYTHONPATH=/ssdpool2nvme/local_llm/ninfer/out/numerical-reference-venv/lib/python3.11/site-packages
+/home/battlefront/.local/bin/python3.11 - <<'PY'
+from pathlib import Path
+import subprocess, sys
+from tools.bench.validate_low_context_prefill import resolve_selected_dense_route
+
+selection = Path('profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921/select/result.json').resolve()
+route = resolve_selected_dense_route(selection)
+output = Path('profiles/bench/r9700-selected-low-context-20260921')
+evaluation = Path('profiles/bench/r9700-selected-low-context-20260921-evaluation.json')
+if any(path.exists() or path.is_symlink() for path in (output, evaluation)):
+    raise SystemExit('fresh output namespace required')
+command = [sys.executable, '-m', 'tools.bench.run_ninfer_bench_matrix',
+    '--preset', 'low-context-prefill', '--bench', route['executable']['path'],
+    '--no-build', '--weights', route['artifact']['path'],
+    '--corpus', 'bench/fixtures/bench_corpus.ids',
+    '--prefill-chunk', str(route['selected_prefill_chunk']), '--device', '0',
+    '--concurrency', '1', '--expected-kv-value-group', str(route['value_group']),
+    '--expected-q4-activation-bits', '8', '--expected-w8-activation-bits', '8',
+    '--expected-fp8-qk-wmma', '1', '--expected-xattention-profile', 'dense',
+    '--output-dir', str(output)]
+if route['hybrid_width_tool']:
+    command += ['--require-fp8-hybrid', '--hybrid-width-tool', route['hybrid_width_tool']]
+subprocess.run(command, check=True)
+subprocess.run([sys.executable, '-m', 'tools.bench.validate_low_context_prefill',
+    '--manifest', str(output / 'manifest.json'), '--selection', str(selection),
+    '--executable', route['executable']['path'], '--artifact', route['artifact']['path'],
+    '--min-p2048-tok-s', '2000', '--out', str(evaluation)], check=True)
+PY
+
+# Below-target throughput remains diagnostic, not an admission failure; malformed evidence fails.
+export NINFER_LOW_CONTEXT_EVALUATION=profiles/bench/r9700-selected-low-context-20260921-evaluation.json
+NINFER_SELECTED_ARTIFACT=$(/home/battlefront/.local/bin/python3.11 -c 'import json,os; print(json.load(open(os.environ["NINFER_LOW_CONTEXT_EVALUATION"]))["artifact"]["path"])')
+NINFER_SELECTED_WEIGHTS_ID=$(/home/battlefront/.local/bin/python3.11 -c 'import json,os; print(json.load(open(os.environ["NINFER_LOW_CONTEXT_EVALUATION"]))["artifact"]["weights_id"])')
+NINFER_SELECTED_GROUP=$(/home/battlefront/.local/bin/python3.11 -c 'import json,os; print(json.load(open(os.environ["NINFER_LOW_CONTEXT_EVALUATION"]))["expected_kv_value_group"])')
+NINFER_SELECTED_PREFILL_CHUNK=$(/home/battlefront/.local/bin/python3.11 -c 'import json,os; print(json.load(open(os.environ["NINFER_LOW_CONTEXT_EVALUATION"]))["selected_prefill_chunk"])')
+NINFER_SELECTED_DENSE_BENCH=$(/home/battlefront/.local/bin/python3.11 -c 'import json,os; print(json.load(open(os.environ["NINFER_LOW_CONTEXT_EVALUATION"]))["bench"]["path"])')
 
 # If P2048 remains an unresolved selected-route bottleneck, prepare its one-repetition selected-
 # region trace from the exact validated ladder/evaluation/terminal-selection authorities. This
 # does not rerun the 3/1 timing authority or require that the explicit throughput gate passed.
-python3 -m tools.bench.prepare_whole_profile \
-  --low-context-manifest profiles/bench/low-context-prefill-selected-20260905/manifest.json \
-  --low-context-evaluation profiles/bench/low-context-prefill-evaluation-20260905.json \
-  --terminal-selection profiles/bench/pareto-result-post-promotion-20260905.json \
+/home/battlefront/.local/bin/python3.11 -m tools.bench.prepare_whole_profile \
+  --low-context-manifest profiles/bench/r9700-selected-low-context-20260921/manifest.json \
+  --low-context-evaluation profiles/bench/r9700-selected-low-context-20260921-evaluation.json \
+  --terminal-selection profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921/select/result.json \
   --executable "$NINFER_SELECTED_DENSE_BENCH" --artifact "$NINFER_SELECTED_ARTIFACT" \
   --concurrency 1 --prompt-tokens 2048 --generated-tokens 0 \
   --expected-weights-id "$NINFER_SELECTED_WEIGHTS_ID" --expected-kv-value-group "$NINFER_SELECTED_GROUP" \
   --expected-xattention-profile dense --expected-prefill-chunk "$NINFER_SELECTED_PREFILL_CHUNK" \
   --kind trace --question "which production kernel owns selected dense P2048 prefill?" \
-  --out profiles/rocprof/selected-dense-p2048-trace-20260905
+  --out profiles/rocprof/selected-dense-p2048-trace-20260921
 
 # Only after that trace names a material kernel family, prepare a fresh dispatch-scoped counter
 # plan. Replace the regex with the exact trace-observed family or bounded alternation. Its generated
 # script requires auto initially, temporarily selects profile_standard, and restores auto with an
 # EXIT trap; its duration is attribution-only.
-python3 -m tools.bench.prepare_whole_profile \
-  --low-context-manifest profiles/bench/low-context-prefill-selected-20260905/manifest.json \
-  --low-context-evaluation profiles/bench/low-context-prefill-evaluation-20260905.json \
-  --terminal-selection profiles/bench/pareto-result-post-promotion-20260905.json \
+/home/battlefront/.local/bin/python3.11 -m tools.bench.prepare_whole_profile \
+  --low-context-manifest profiles/bench/r9700-selected-low-context-20260921/manifest.json \
+  --low-context-evaluation profiles/bench/r9700-selected-low-context-20260921-evaluation.json \
+  --terminal-selection profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921/select/result.json \
   --executable "$NINFER_SELECTED_DENSE_BENCH" --artifact "$NINFER_SELECTED_ARTIFACT" \
   --concurrency 1 --prompt-tokens 2048 --generated-tokens 0 \
   --expected-weights-id "$NINFER_SELECTED_WEIGHTS_ID" --expected-kv-value-group "$NINFER_SELECTED_GROUP" \
   --expected-xattention-profile dense --expected-prefill-chunk "$NINFER_SELECTED_PREFILL_CHUNK" \
   --kind dispatch-pmc --kernel-include-regex 'TRACE_NAMED_KERNEL_FAMILY_REGEX' \
   --question "what are the selected P2048 kernel cache-hit ratios and wave count?" \
-  --out profiles/rocprof/selected-dense-p2048-pmc-20260905
+  --out profiles/rocprof/selected-dense-p2048-pmc-20260921
 ```
 
 Both preparation modes revalidate the full five-row schema-v14 ladder, schema-v1 evaluation, and
@@ -407,15 +435,15 @@ Validate the completed `auto` trace before analyzing or assigning any dispatch r
 
 ```bash
 python3 -m tools.bench.validate_profile_trace \
-  --plan profiles/rocprof/selected-dense-p2048-trace-20260905/plan.json \
-  --benchmark-report profiles/rocprof/selected-dense-p2048-trace-20260905/benchmark-report.json \
+  --plan profiles/rocprof/selected-dense-p2048-trace-20260921/plan.json \
+  --benchmark-report profiles/rocprof/selected-dense-p2048-trace-20260921/benchmark-report.json \
   --database /explicit/path/to/trace-results.db \
-  --power-before profiles/rocprof/selected-dense-p2048-trace-20260905/power-profile-before.txt \
-  --power-after profiles/rocprof/selected-dense-p2048-trace-20260905/power-profile-after.txt \
-  --terminal-selection profiles/bench/pareto-result-post-promotion-20260905.json \
+  --power-before profiles/rocprof/selected-dense-p2048-trace-20260921/power-profile-before.txt \
+  --power-after profiles/rocprof/selected-dense-p2048-trace-20260921/power-profile-after.txt \
+  --terminal-selection profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921/select/result.json \
   --artifact "$NINFER_SELECTED_ARTIFACT" --executable "$NINFER_SELECTED_DENSE_BENCH" \
   --corpus bench/fixtures/bench_corpus.ids \
-  --out profiles/rocprof/selected-dense-p2048-trace-20260905/evidence.json
+  --out profiles/rocprof/selected-dense-p2048-trace-20260921/evidence.json
 ```
 
 The schema-v1 `ninfer_r9700_selected_profile_trace` authority mirrors the PMC validator's complete
@@ -438,16 +466,16 @@ database must come from that same invocation; never pair either with the separat
 
 ```bash
 python3 -m tools.bench.validate_profile_pmc \
-  --plan profiles/rocprof/selected-dense-p2048-pmc-20260905/plan.json \
-  --benchmark-report profiles/rocprof/selected-dense-p2048-pmc-20260905/benchmark-report.json \
+  --plan profiles/rocprof/selected-dense-p2048-pmc-20260921/plan.json \
+  --benchmark-report profiles/rocprof/selected-dense-p2048-pmc-20260921/benchmark-report.json \
   --counter-csv /explicit/path/to/counter_collection.csv \
   --database /explicit/path/to/results.db \
-  --power-before profiles/rocprof/selected-dense-p2048-pmc-20260905/power-profile-before.txt \
-  --power-after profiles/rocprof/selected-dense-p2048-pmc-20260905/power-profile-after.txt \
-  --terminal-selection profiles/bench/pareto-result-post-promotion-20260905.json \
+  --power-before profiles/rocprof/selected-dense-p2048-pmc-20260921/power-profile-before.txt \
+  --power-after profiles/rocprof/selected-dense-p2048-pmc-20260921/power-profile-after.txt \
+  --terminal-selection profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921/select/result.json \
   --artifact "$NINFER_SELECTED_ARTIFACT" --executable "$NINFER_SELECTED_DENSE_BENCH" \
   --corpus bench/fixtures/bench_corpus.ids \
-  --out profiles/rocprof/selected-dense-p2048-pmc-20260905/evidence.json
+  --out profiles/rocprof/selected-dense-p2048-pmc-20260921/evidence.json
 ```
 
 The validator refuses overwrite, rehashes the complete authority/input chain, requires the exact
@@ -1415,17 +1443,24 @@ schema-v7-selected prefill chunk, and disabled-prefix-reuse envelope below. Disa
 prefixes cannot turn later cells into suffix prefills.
 
 ```bash
-# This fails before creating a campaign until the terminal schema-v7 authority exists.
-bash profiles/bench/post-terminal-niah-prepare-20260905/prepare.sh
+# Prerequisite: the winner's exact build already contains apps/ninfer-serve.
+# Build only that target after selection, and do not rebuild/change frozen bench/planner inputs.
+# If Ninja would do so, stop and establish a separately bound selected-build successor first.
+# Preparation requires the terminal schema-v7 authority and a fresh output directory.
+PYTHONDONTWRITEBYTECODE=1 \
+PYTHONPATH=/ssdpool2nvme/local_llm/ninfer/out/numerical-reference-venv/lib/python3.11/site-packages \
+/home/battlefront/.local/bin/python3.11 -m tools.bench.prepare_selected_niah \
+  --selection profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921/select/result.json \
+  --out profiles/bench/r9700-selected-niah-20260921
 
-# Future serialized physical-GPU admission run. It starts and stops the exact selected server.
-bash profiles/bench/post-terminal-niah-20260905/commands.sh
+# Serialized physical-GPU admission: starts/stops the selected server; never resumes old outputs.
+bash profiles/bench/r9700-selected-niah-20260921/commands.sh
 ```
 
 The preparer resolves the terminal winner rather than mapping filenames: it reopens both selected
 schema-v14 matrices and binds their artifact, benchmark/build, cache group, attention profile,
-selected chunk, and hybrid width planner when applicable. The generated command builds only
-`ninfer-serve` with parallelism four, uses one request lane, and publishes a separate admission
+selected chunk, and hybrid width planner when applicable. The generated command retains the
+explicit preparation interpreter, uses the already-built server and one request lane, and publishes a separate admission
 record only after all five responses and their fresh-prefill request-log records validate.
 
 **Gate semantics (read before interpreting matrix results).** The default check is the

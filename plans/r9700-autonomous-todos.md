@@ -1206,7 +1206,10 @@ prefill review, preserving their remaining data dependencies.
 
 - [ ] `LOWCTX-LADDER` [depends: TERMINAL-SELECTION] Run the exact selected dense C1/spec-none/auto
   ladder at P=128,512,1024,2048,4096 using the selected chunk through
-  `profiles/bench/low-context-selected-ladder-20260905`. Record progress toward 2,000+ tok/s at
+  `tools/bench/run_ninfer_bench_matrix.py --preset low-context-prefill` and
+  `tools/bench/validate_low_context_prefill.py`; use fresh
+  `profiles/bench/r9700-selected-low-context-20260921` and its sibling `-evaluation.json`.
+  Exact selected-route commands are in `tools/bench/README.md`. Record progress toward 2,000+ tok/s at
   P2048; this performance target no longer blocks accuracy, DFlash, or artifact admission.
 
 - [ ] `PREFILL-TAIL-CONDITIONAL` [depends: SELECTED-PROFILE] [if: selected profiling shows
@@ -1229,8 +1232,10 @@ prefill review, preserving their remaining data dependencies.
   and selected whole confirmation.
 
 - [ ] `SELECTED-NIAH` [depends: TERMINAL-SELECTION] Run the selected candidate's 64K five-position
-  long-context needle retrieval through `profiles/bench/post-terminal-niah-prepare-20260905` after
-  its matched model and whole evidence. Dense remains active until this passes.
+  long-context needle retrieval through `tools/bench/prepare_selected_niah.py` into fresh
+  `profiles/bench/r9700-selected-niah-20260921` after its matched model and whole evidence;
+  run the generated `commands.sh` (exact preparation command in `tools/bench/README.md`).
+  Dense remains active until this passes.
 
 - [ ] `XATT-CUTOVER-CONDITIONAL` [depends: XATT-ADMISSION, SELECTED-NIAH, TERMINAL-SELECTION,
   XATT-G32-SCALE-CONDITIONAL]
