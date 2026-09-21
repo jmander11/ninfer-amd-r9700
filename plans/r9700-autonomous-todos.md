@@ -969,12 +969,19 @@ unresolved tradeoff or the product contract must change.
   CPU prerequisite audit 2026-09-21: local source
   `/ssdpool2nvme/local_llm/models/qwen3.8-27b-dflash2` validates all 81 BF16 tensors and both
   selector codebooks. `tools/convert/qwen3_8_27b_r9700/dflash2_matrix_recipes.py` already implements
-  all three encoders (32 matrices plus 34 unchanged BF16 objects). Remaining implementation is
-  recipe-aware conversion/receipts and registered identities, C++ binder/Variant format admission,
-  and selected companion preparation/selection at K4/W5 and K5/W6. Current converter and runtime
-  admit only canonical Q4; no three-recipe comparison is runnable yet. Preserve the base's
-  131072-row draft head and exact token map when extending it. Selected Python 3.11 lacks the
-  conversion dependencies; resolve that environment when materialization is required.
+  all three encoders (32 matrices plus 34 unchanged BF16 objects). Recipe-aware conversion,
+  receipts, six additional evaluation identities and C++ binder/Variant storage planning are now
+  implemented; 14 CPU Python tests (including real encoder byte-oracles) and the isolated host
+  registry/execution-workspace tests pass. This is not physical companion admission. Remaining:
+  real artifact binding/graph qualification, recipe-aware selected companion preparation and
+  selection at K4/W5 and K5/W6; shared benchmark/PPL admission updates wait until the frozen base
+  campaign finishes. Preserve the base's 131072-row draft head and exact token map byte-for-byte.
+  W8 feature/QKV/output/conv/selector shapes currently use existing BF16×W8 execution, not
+  unqualified A8 routes. Qualify exact DFlash shapes and widths before any speed/accuracy claim.
+  Python 3.11 CPU conversion dependencies are available without installation via
+  `PYTHONPATH=/ssdpool2nvme/local_llm/ninfer/out/numerical-reference-venv/lib/python3.11/site-packages`
+  with `/home/battlefront/.local/bin/python3.11` (explicit CPU only; torch is CUDA, not ROCm).
+  Fresh BF16 GPU reference still requires a Python 3.11 ROCm environment if chunk4096 is not selected.
 
 - [ ] `DFLASH-QUALITY` [depends: DFLASH-RECIPE, DFLASH-TEXT-P129] For each
   surviving companion retain aligned target/draft outputs, deterministic proposals and final target

@@ -41,6 +41,12 @@ enum class WeightsProfile : std::uint8_t {
     R9700Q4G64DFlash2Q4Evaluation,
     R9700Q4W8MseDFlash2Q4Evaluation,
     R9700Q4G64Fp8FourRoleDFlash2Q4Evaluation,
+    R9700Q4G64DFlash2Q4MseEvaluation,
+    R9700Q4W8MseDFlash2Q4MseEvaluation,
+    R9700Q4G64Fp8FourRoleDFlash2Q4MseEvaluation,
+    R9700Q4G64DFlash2W8MseEvaluation,
+    R9700Q4W8MseDFlash2W8MseEvaluation,
+    R9700Q4G64Fp8FourRoleDFlash2W8MseEvaluation,
 };
 
 using Frontend       = qwen3::Frontend;

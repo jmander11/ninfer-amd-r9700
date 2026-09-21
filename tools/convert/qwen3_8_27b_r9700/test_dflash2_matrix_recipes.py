@@ -28,17 +28,8 @@ class DFlash2MatrixRecipesTest(unittest.TestCase):
             self.assertEqual(plan["format_counts"], {BF16: 34, matrix_format: 32})
             self.assertEqual(plan["format_encoded_bytes"][matrix_format], matrix_bytes)
             self.assertEqual(plan["tensor_encoded_bytes"], total_bytes)
-            if key == recipes.CANONICAL_Q4G64:
-                self.assertEqual(
-                    plan["selection_status"],
-                    "registered-evaluation-control-with-bound-artifact-identities",
-                )
-                self.assertEqual(plan["materialization"], "existing-canonical-converter-route")
-            else:
-                self.assertEqual(
-                    plan["selection_status"], "candidate-only-no-artifact-identity"
-                )
-                self.assertEqual(plan["materialization"], "disabled-until-base-selection")
+            self.assertEqual(plan["selection_status"], "registered-evaluation-only")
+            self.assertEqual(plan["materialization"], "recipe-aware-converter-route")
             self.assertEqual(
                 tuple((row.artifact.name, row.artifact.shape, row.sources) for row in bindings),
                 tuple((row.artifact.name, row.artifact.shape, row.sources) for row in canonical),

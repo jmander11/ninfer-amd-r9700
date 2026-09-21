@@ -89,8 +89,14 @@ void validate_profile(WeightsProfile profile) {
         profile != WeightsProfile::R9700Q4G64Evaluation &&
         profile != WeightsProfile::R9700Q4G64Fp8FourRoleN16K16Evaluation &&
         profile != WeightsProfile::R9700Q4W8Evaluation &&
+        profile != WeightsProfile::R9700Q4G64DFlash2Q4MseEvaluation &&
+        profile != WeightsProfile::R9700Q4G64DFlash2W8MseEvaluation &&
         profile != WeightsProfile::R9700Q4G64DFlash2Q4Evaluation &&
+        profile != WeightsProfile::R9700Q4W8MseDFlash2Q4MseEvaluation &&
+        profile != WeightsProfile::R9700Q4W8MseDFlash2W8MseEvaluation &&
         profile != WeightsProfile::R9700Q4W8MseDFlash2Q4Evaluation &&
+        profile != WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4MseEvaluation &&
+        profile != WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2W8MseEvaluation &&
         profile != WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4Evaluation) {
         throw std::invalid_argument("invalid R9700 target weight profile");
     }
@@ -1383,9 +1389,15 @@ QType Variant::dflash_matrix_qtype(WeightsProfile profile) {
     validate_profile(profile);
     switch (profile) {
     case WeightsProfile::R9700Q4G64DFlash2Q4Evaluation:
+    case WeightsProfile::R9700Q4G64DFlash2Q4MseEvaluation:
     case WeightsProfile::R9700Q4W8MseDFlash2Q4Evaluation:
+    case WeightsProfile::R9700Q4W8MseDFlash2Q4MseEvaluation:
     case WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4Evaluation:
+    case WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4MseEvaluation:
         return QType::Q4G64_F16S;
+    case WeightsProfile::R9700Q4G64DFlash2W8MseEvaluation:
+    case WeightsProfile::R9700Q4W8MseDFlash2W8MseEvaluation:
+    case WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2W8MseEvaluation:
     case WeightsProfile::R9700W8G32Candidate:
     case WeightsProfile::R9700W8Bf16EmbeddingEvaluation:
     case WeightsProfile::R9700W8Bf16AttentionQueryKeyEvaluation:
@@ -1401,7 +1413,18 @@ QType Variant::dflash_matrix_qtype(WeightsProfile profile) {
 std::size_t Variant::linear_workspace_capacity_bytes(WeightsProfile profile,
                                                      std::int32_t tokens) {
     validate_profile(profile);
+    // Companion activation storage is independent of the unchanged base recipe.
     switch (profile) {
+    case WeightsProfile::R9700Q4G64DFlash2W8MseEvaluation:
+    case WeightsProfile::R9700Q4W8MseDFlash2W8MseEvaluation:
+    case WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2W8MseEvaluation: {
+        const auto base = profile == WeightsProfile::R9700Q4W8MseDFlash2W8MseEvaluation
+            ? WeightsProfile::R9700Q4W8Evaluation
+            : WeightsProfile::R9700Q4G64Evaluation;
+        return std::max(linear_workspace_capacity_bytes(base, tokens),
+            ops::linear_workspace_capacity_bytes(QType::W8G32_F16S, tokens,
+                                                 DFlashConfig::feature_rows));
+    }
     case WeightsProfile::R9700W8G32Candidate:
     case WeightsProfile::R9700W8Bf16EmbeddingEvaluation:
     case WeightsProfile::R9700W8Bf16AttentionQueryKeyEvaluation:
@@ -1410,6 +1433,7 @@ std::size_t Variant::linear_workspace_capacity_bytes(WeightsProfile profile,
         return ops::linear_workspace_capacity_bytes(QType::W8G32_F16S, tokens,
                                                      TextConfig::intermediate);
     case WeightsProfile::R9700Q4W8MseDFlash2Q4Evaluation:
+    case WeightsProfile::R9700Q4W8MseDFlash2Q4MseEvaluation:
         // DFlash feature projection consumes [5120,25600], which is the largest K in the
         // companion or mixed base. Reserve its A8G64 image for every DFlash schedule.
         return ops::linear_workspace_capacity_bytes(QType::Q4G64_F16S, tokens,
@@ -1424,7 +1448,9 @@ std::size_t Variant::linear_workspace_capacity_bytes(WeightsProfile profile,
             ops::linear_workspace_capacity_bytes(QType::W8G32_F16S, tokens,
                                                    TextConfig::intermediate));
     case WeightsProfile::R9700Q4G64DFlash2Q4Evaluation:
+    case WeightsProfile::R9700Q4G64DFlash2Q4MseEvaluation:
     case WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4Evaluation:
+    case WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4MseEvaluation:
         return ops::linear_workspace_capacity_bytes(QType::Q4G64_F16S, tokens,
                                                      DFlashConfig::feature_rows);
     case WeightsProfile::R9700Q4G64Evaluation:
@@ -1449,6 +1475,8 @@ std::size_t Variant::vision_linear_workspace_capacity_bytes(WeightsProfile profi
                                                      VisionConfig::merger_hidden);
     case WeightsProfile::R9700Q4W8Evaluation:
     case WeightsProfile::R9700Q4W8MseDFlash2Q4Evaluation:
+    case WeightsProfile::R9700Q4W8MseDFlash2Q4MseEvaluation:
+    case WeightsProfile::R9700Q4W8MseDFlash2W8MseEvaluation:
         // Mixed Vision Q4 tops out at backbone hidden K; its W8 merger consumes the larger
         // merger-hidden K and therefore owns an A8 workspace in the A8 evaluator.
         return std::max(
@@ -1459,7 +1487,11 @@ std::size_t Variant::vision_linear_workspace_capacity_bytes(WeightsProfile profi
     case WeightsProfile::R9700Q4G64Evaluation:
     case WeightsProfile::R9700Q4G64Fp8FourRoleN16K16Evaluation:
     case WeightsProfile::R9700Q4G64DFlash2Q4Evaluation:
+    case WeightsProfile::R9700Q4G64DFlash2Q4MseEvaluation:
+    case WeightsProfile::R9700Q4G64DFlash2W8MseEvaluation:
     case WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4Evaluation:
+    case WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4MseEvaluation:
+    case WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2W8MseEvaluation:
         // All-Q4 includes the merger matrices, whose represented BF16 input is the largest
         // Vision K (4608, larger than backbone FC2's 4304).
         return ops::linear_workspace_capacity_bytes(QType::Q4G64_F16S, tokens,
@@ -1478,11 +1510,19 @@ std::size_t Variant::execution_state_capacity_bytes(WeightsProfile profile,
     const std::uint32_t tokens = std::max(prefill_tokens, maximum_graph_tokens);
     std::size_t bytes = linear_workspace_capacity_bytes(profile, static_cast<std::int32_t>(tokens));
     if (profile == WeightsProfile::R9700Q4G64Fp8FourRoleN16K16Evaluation ||
+        profile == WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4MseEvaluation ||
+        profile == WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2W8MseEvaluation ||
         profile == WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4Evaluation) {
         bytes = std::max(bytes, execution_storage_bytes(prefill_tokens, maximum_graph_tokens));
     }
-    if (profile == WeightsProfile::R9700Q4G64DFlash2Q4Evaluation ||
+    if (profile == WeightsProfile::R9700Q4G64DFlash2Q4MseEvaluation ||
+        profile == WeightsProfile::R9700Q4G64DFlash2W8MseEvaluation ||
+        profile == WeightsProfile::R9700Q4G64DFlash2Q4Evaluation ||
+        profile == WeightsProfile::R9700Q4W8MseDFlash2Q4MseEvaluation ||
+        profile == WeightsProfile::R9700Q4W8MseDFlash2W8MseEvaluation ||
         profile == WeightsProfile::R9700Q4W8MseDFlash2Q4Evaluation ||
+        profile == WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4MseEvaluation ||
+        profile == WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2W8MseEvaluation ||
         profile == WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4Evaluation) {
         bytes = std::max(
             bytes,

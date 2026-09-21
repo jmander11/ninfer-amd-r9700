@@ -30,6 +30,21 @@ HYBRID_WEIGHTS_ID = "r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval"
 TARGET_KEY = "qwen3_8_27b_r9700"
 RECIPE_ID = "r9700-dflash2-all-q4g64-n16k16-bf16-codebook-eval-v1"
 
+
+def companion_weights_id(base_weights_id: str, recipe: str) -> str:
+    """Registered evaluation identity; never selects a production recipe."""
+    if base_weights_id not in (
+        ALL_Q4_BASE_WEIGHTS_ID, MIXED_BASE_WEIGHTS_ID, HYBRID_BASE_WEIGHTS_ID
+    ):
+        raise ValueError(f"unsupported DFlash2 base identity: {base_weights_id}")
+    dflash2_matrix_recipes.get_recipe(recipe)
+    suffix = {
+        dflash2_matrix_recipes.CANONICAL_Q4G64: "q4",
+        dflash2_matrix_recipes.SOURCE_MSE_Q4G64: "q4-mse",
+        dflash2_matrix_recipes.SOURCE_MSE_W8G32: "w8-mse",
+    }[recipe]
+    return base_weights_id.removesuffix("-eval") + f"-dflash2-{suffix}-eval"
+
 DFLASH2_LAYERS = 5
 HIDDEN = 5120
 INTERMEDIATE = 17408

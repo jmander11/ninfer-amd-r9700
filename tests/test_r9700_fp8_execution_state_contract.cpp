@@ -1,6 +1,7 @@
 #include "ops/r9700/linear/linear_execution.h"
 #include "ops/r9700/linear/r9700_q4_activation_profile.h"
 #include "ninfer/ops/normalized_linear.h"
+#include "ninfer/ops/linear.h"
 #include "targets/qwen3_8_27b/impl/variant.h"
 
 #include <algorithm>
@@ -149,6 +150,44 @@ int main() {
                     kPrefillTokens, kGraphTokens) ==
                     (q4_activation + 255U) / 256U * 256U,
                 "Q4 execution region does not replace its former arena reserve");
+        using Profile = detail::WeightsProfile;
+        for (const auto profile : {Profile::R9700Q4G64DFlash2Q4MseEvaluation,
+                                  Profile::R9700Q4W8MseDFlash2Q4MseEvaluation,
+                                  Profile::R9700Q4G64Fp8FourRoleDFlash2Q4MseEvaluation}) {
+            require(Variant::dflash_matrix_qtype(profile) == ninfer::QType::Q4G64_F16S,
+                    "source-MSE Q4 companion lost its represented matrix format");
+        }
+        for (const auto profile : {Profile::R9700Q4G64DFlash2W8MseEvaluation,
+                                  Profile::R9700Q4W8MseDFlash2W8MseEvaluation,
+                                  Profile::R9700Q4G64Fp8FourRoleDFlash2W8MseEvaluation}) {
+            require(Variant::dflash_matrix_qtype(profile) == ninfer::QType::W8G32_F16S,
+                    "source-MSE W8 companion lost its represented matrix format");
+            const auto base = profile == Profile::R9700Q4W8MseDFlash2W8MseEvaluation
+                ? Profile::R9700Q4W8Evaluation : Profile::R9700Q4G64Evaluation;
+            for (const auto tokens : {1, 6, 12, 48, 128, 2048}) {
+                const auto expected_linear = std::max(
+                    Variant::linear_workspace_capacity_bytes(base, tokens),
+                    ninfer::ops::linear_workspace_capacity_bytes(ninfer::QType::W8G32_F16S,
+                        tokens, detail::DFlashConfig::feature_rows));
+                require(Variant::linear_workspace_capacity_bytes(profile, tokens) == expected_linear,
+                        "W8 companion workspace omits base storage or K25600 activation");
+                require(Variant::vision_linear_workspace_capacity_bytes(profile, tokens) ==
+                        Variant::vision_linear_workspace_capacity_bytes(base, tokens),
+                        "W8 companion changed the base Vision workspace");
+                auto expected_state = std::max(expected_linear,
+                    ninfer::ops::dflash_verify_down_linear_workspace_capacity_bytes(
+                        ninfer::QType::Q4G64_F16S, 6, detail::DFlashConfig::intermediate,
+                        detail::TextConfig::hidden));
+                if (profile == Profile::R9700Q4G64Fp8FourRoleDFlash2W8MseEvaluation) {
+                    expected_state = std::max(expected_state,
+                        ninfer::ops::LinearExecution::activation_workspace_capacity_bytes(
+                            tokens, detail::TextConfig::hidden));
+                }
+                expected_state = (expected_state + 255U) / 256U * 256U;
+                require(Variant::execution_state_capacity_bytes(profile, tokens, tokens) == expected_state,
+                        "W8 companion execution storage omits target verification or FP8 state");
+            }
+        }
         const std::size_t w8_activation = Variant::linear_workspace_capacity_bytes(
             detail::WeightsProfile::R9700W8G32Candidate, kPrefillTokens);
         require(Variant::execution_state_capacity_bytes(

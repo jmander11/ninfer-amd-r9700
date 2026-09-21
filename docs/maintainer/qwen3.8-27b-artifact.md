@@ -1,7 +1,7 @@
 # Qwen3.8-27B R9700 artifact
 
 The sole target owns 1,124 ordered objects: six exact frontend resources and 1,118 tensors. During
-migration it admits nine explicit evaluation identities under target key `qwen3_8_27b_r9700`:
+migration it admits explicit base evaluation identities under target key `qwen3_8_27b_r9700`:
 the all-W8 `r9700-int-candidate`, all-Q4 `r9700-q4g64-n16k16-eval`, and mixed
 `r9700-q4-w8-n16k16-eval`. The same-format `r9700-q4-w8-mse-n16k16-eval` retains that mixed plan and changes
 only its source-derived scale objective. `r9700-w8-bf16-embed-eval` retains all-W8 matrices except for a
@@ -11,6 +11,7 @@ full-attention gate/value and output Q5 role family. None is a final recipe sele
 `r9700-w8-bf16-gdn-qk-eval` restores GDN query/key in all 48 GDN layers.
 The same-size `r9700-w8g32-mse-eval` retains the all-W8 layout and runtime while selecting each
 stored FP16 group scale by a deterministic source-only decoded-weight SSE objective.
+The four-role FP8 base and the nine recipe-specific DFlash companions are described below.
 
 The provisional tensor counts are 582 BF16, 96 FP32, one I32, and 439 W8G32. Conversion starts only
 from the complete official BF16 source. It uses the target-owned inventory and source recipe under
@@ -234,7 +235,7 @@ reopen confirmed the exact ordered 1,124-object selected inventory and 295 Q4 de
 logical Q4 code/scale hashes and every non-Q4 payload hash matched the source, which remained
 unchanged.
 
-The three currently registered DFlash2 evaluation identities are
+The three canonical-Q4 DFlash2 evaluation identities are
 `qwen3.8-27b/r9700-q4g64-n16k16-dflash2-q4-eval` and
 `qwen3.8-27b/r9700-q4-w8-mse-n16k16-dflash2-q4-eval`, plus
 `qwen3.8-27b/r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval`. They extend their named base inventories with the
@@ -248,7 +249,14 @@ registered evaluation identities, preventing a byte-compatible base artifact fro
 reinterpreted as a DFlash package. DFlash grouped-convolution and selector child projections in
 these evaluator identities use
 the profile-derived Q4 type and the same caller-owned workspace; neither child may invoke the
-workspace-free Linear overload.
+workspace-free Linear overload. Each base also has explicit `-dflash2-q4-mse-eval` and
+`-dflash2-w8-mse-eval` identities in place of the canonical `-dflash2-q4-eval` suffix, for nine
+registered evaluation companions. Source-MSE Q4 retains the same Q4 layout; source-MSE W8 binds
+the 32 matrices as W8G32 row-split and derives child projection types from that identity.
+All 34 BF16 objects and every base payload, including the optimized 131072-row head and token map,
+are preserved. W8 workspace takes the maximum of the unchanged base and companion K25600
+requirements, retaining hybrid FP8 and target verification storage. W8 execution keeps existing
+shape-specific exact/A8 dispatch; registration alone makes no numerical or performance admission.
 
 The four-role N16 canonical-Q4 control is materialized at
 `out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval.ninfer`, identity
@@ -264,9 +272,12 @@ production DFlash matrix recipe nor authorizes production routing.
 
 These fixed canonical-Q4 companions are converter, binder, and historical evaluator controls;
 they do not select the production DFlash matrix recipe. After the base C=1..4 decision, a
-recipe-aware converter must append matrices derived directly from the real BF16 DFlash2
-checkpoint. The first candidate set is canonical Q4G64, source-MSE-refined Q4G64, and
-source-MSE-refined W8G32. Row-scaled E4M3 FP8 is conditional on exact-shape R9700 timing and
+recipe-aware converter can append matrices derived directly from the real BF16 DFlash2
+checkpoint. `convert_dflash2_q4 --matrix-recipe` selects `canonical-q4g64` (default),
+`source-mse-q4g64`, or `source-mse-w8g32` consistently for preflight, conversion, and
+`--finalize-report`; recovery rejects recipe mismatches. Real companion binding and graph/state
+qualification, generated quality, acceptance, capacity, and matched speed remain selection gates.
+Row-scaled E4M3 FP8 is conditional on exact-shape R9700 timing and
 DFlash-quality evidence and also requires DFlash-owned prepared Linear execution before it is
 runnable. Direct BF16 remains the mathematical/control representation, not the intended
 persistent production matrix recipe. Every candidate preserves both selector codebooks and all

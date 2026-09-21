@@ -137,21 +137,29 @@ compiled runtime profiles and may hold this exact candidate artifact constant.
 
 ## DFlash2 evaluation controls and production recipe gate
 
-Three explicit evaluation identities append the source DFlash2 checkpoint to the corresponding A8
-base artifact without changing its base matrix formats:
+Nine explicit evaluation identities append the source DFlash2 checkpoint to one of three
+base artifacts without changing any base payload. The canonical-Q4 identities are:
 
 - `qwen3.8-27b/r9700-q4g64-n16k16-dflash2-q4-eval` extends the all-Q4G64 base;
 - `qwen3.8-27b/r9700-q4-w8-mse-n16k16-dflash2-q4-eval` extends the source-MSE mixed Q4G64/W8G32 base.
 - `qwen3.8-27b/r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval` extends the
   authority-bound four-role rowwise-FP8/all-other-Q4G64 base without changing its 144 FP8 roles.
 
+For each base, replacing the final `-dflash2-q4-eval` with `-dflash2-q4-mse-eval` or
+`-dflash2-w8-mse-eval` identifies the source-MSE Q4G64 or W8G32 companion respectively.
+All nine are evaluation-only; registration does not select a production recipe or establish
+real-model numerical, acceptance, graph, capacity, or speed qualification.
+
 The source checkpoint has exactly 81 BF16 tensors. The currently implemented evaluation conversion
 fuses query/key/value and gate/up in
 the same semantic order consumed by the runtime, producing 66 DFlash objects: 32 persistent
-Q4G64-FP16-scale matrices and 34 direct BF16 tensors. The two selector codebooks remain the
+Q4G64- or W8G32-FP16-scale matrices and 34 direct BF16 tensors. The two selector codebooks remain the
 model-specified BF16 `[248320,256]` tables. Norms, convolution base kernels, and other non-matrix
 state also remain BF16. The evaluator Q4 matrices use the compile-selected adaptive A8G64 route;
 this is an activation intermediate and does not create a second persistent artifact format.
+W8 uses its existing compile-selected shape-specific dispatch: feature K25600, QKV, output,
+convolution projection, and selector projection retain represented-BF16-input W8 execution.
+Only previously admitted shapes use A8 at their existing crossovers (gate/up T32, down T3).
 
 That fixed canonical-Q4 plan is a control, not the production decision. Production recipe
 selection starts again from the real BF16 DFlash2 checkpoint and compares canonical Q4G64,
@@ -164,7 +172,7 @@ Rolewise W8 promotion follows only if Q4 acceptance or generated-quality evidenc
 sensitive family. Both selector codebooks, norms, convolution base kernels, and private persistent
 DFlash state stay BF16 in every recipe.
 
-The DFlash addition is 1,209,469,440 tensor bytes: 954,654,720 Q4 bytes plus 254,814,720 BF16
+The canonical/source-MSE Q4 DFlash addition is 1,209,469,440 tensor bytes: 954,654,720 Q4 bytes plus 254,814,720 BF16
 bytes. It is 56,156,288 bytes smaller than the inspected retired NVFP4 companion segment, which
 used the same 32-matrix/34-BF16-object split and occupied 1,265,625,728 bytes inside its
 19,589,713,920-byte artifact. The projected bound tensor arenas are 16,369,271,200 bytes for the
@@ -173,7 +181,7 @@ all-Q4 companion and
 16,369,285,120 and 24,077,660,672 bytes. The hybrid companion projects to a 22,750,001,152-byte
 device arena. Projected artifact file sizes are 16,382,310,912, 24,090,686,464, and
 22,763,026,944 bytes respectively. The largest DFlash Q4 activation is the `[5120,25600]` feature projection,
-so both profiles reserve caller-owned A8G64 codes, FP16 scales, and status for K=25600. The binder
+so all Q4 companion profiles reserve caller-owned A8G64 codes, FP16 scales, and status for K=25600. The binder
 rejects any DFlash identity when its complete companion inventory is absent. It binds packed
 weights and BF16 state directly and performs no runtime repack or hidden allocation. The grouped
 dynamic-convolution projection and both chain/tree selector projections admit Q4 explicitly, size
@@ -186,8 +194,9 @@ For recipe comparison, the exact 32 matrices occupy 1,909,309,440 bytes as W8G32
 254,814,720 BF16 bytes gives complete companion additions of 2,164,124,160, 2,052,908,544, and
 3,848,808,960 bytes respectively. These are capacity inputs, not performance predictions.
 
-Dependency-light preflight for the currently implemented canonical-Q4 controls validates the exact
-source/config identity and both base inventories before any output is opened:
+Dependency-light preflight validates the exact source/config identity and selected base inventory
+before any output is opened. `--matrix-recipe` accepts `canonical-q4g64` (default),
+`source-mse-q4g64`, or `source-mse-w8g32` in preflight, conversion, and report recovery:
 
 ```text
 python3 -m tools.convert.qwen3_8_27b_r9700.convert_dflash2_q4 --base out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer --dflash-model /ssdpool2nvme/local_llm/models/qwen3.8-27b-dflash2 --preflight-only
@@ -196,6 +205,14 @@ python3 -m tools.convert.qwen3_8_27b_r9700.convert_dflash2_q4 --base out/qwen3.8
 ```
 
 Remove `--preflight-only`, add an explicit `--out` and Torch `--device`, and run the conversion.
+Supply the same explicit `--matrix-recipe` when recovering its report. Pending and final receipts
+bind the selected recipe, output identity, format inventory, and base/source identities; recovery
+rejects a mismatched recipe even when two recipes share a byte-compatible Q4 layout. The optimized
+131072-row draft head and its token map are copied unchanged with every other base payload.
+W8 companion workspace is the maximum of the unchanged base requirement and W8 K25600 activation
+storage; hybrid FP8 state and target Q4 verification storage are retained separately. Registration
+has been checked with synthetic container publication and exact CPU encoder oracles; a real W8
+companion load and DFlash graph/state/numerical qualification remain required before selection.
 The converter copies the base payload byte-for-byte and
 encodes DFlash source BF16 directly into its final persistent representation. The source
 `model.safetensors` SHA-256 is
@@ -211,8 +228,8 @@ completed on 2026-09-03: the all-Q4 artifact is 16,382,310,912 bytes with SHA-25
 evaluation identities: draft-token quality, acceptance, resolved capacity, and whole-inference
 speed remain open selection gates.
 
-The three existing complete canonical-Q4 conversions are below. These commands do not select or
-produce the future recipe-aware production companion. The four-role fixed-Q4 control is now
+The three existing complete canonical-Q4 conversions are below. These commands do not
+select a production companion. The four-role fixed-Q4 control is now
 materialized from the exact N16 base for matched recipe-independent DFlash evaluation; it remains
 an evaluation control and does not anticipate schema-v7 base or recipe selection.
 

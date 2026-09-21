@@ -33,18 +33,32 @@ NumericFormat matrix_format(WeightsProfile profile, bool source_q4) {
     case WeightsProfile::R9700Q4G64Evaluation:
     case WeightsProfile::R9700Q4G64Fp8FourRoleN16K16Evaluation:
     case WeightsProfile::R9700Q4G64DFlash2Q4Evaluation:
+    case WeightsProfile::R9700Q4G64DFlash2Q4MseEvaluation:
+    case WeightsProfile::R9700Q4G64DFlash2W8MseEvaluation:
     case WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4Evaluation:
+    case WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4MseEvaluation:
+    case WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2W8MseEvaluation:
         return NumericFormat::Q4G64_F16S;
     case WeightsProfile::R9700Q4W8Evaluation:
     case WeightsProfile::R9700Q4W8MseDFlash2Q4Evaluation:
+    case WeightsProfile::R9700Q4W8MseDFlash2Q4MseEvaluation:
+    case WeightsProfile::R9700Q4W8MseDFlash2W8MseEvaluation:
         return source_q4 ? NumericFormat::Q4G64_F16S : NumericFormat::W8G32_F16S;
     }
     throw std::invalid_argument("qwen3_8_27b_r9700: invalid matrix profile");
 }
 
 NumericFormat dflash_matrix_format(WeightsProfile profile) {
-    if (profile == WeightsProfile::R9700Q4G64DFlash2Q4Evaluation ||
+    if (profile == WeightsProfile::R9700Q4G64DFlash2W8MseEvaluation ||
+        profile == WeightsProfile::R9700Q4W8MseDFlash2W8MseEvaluation ||
+        profile == WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2W8MseEvaluation) {
+        return NumericFormat::W8G32_F16S;
+    }
+    if (profile == WeightsProfile::R9700Q4G64DFlash2Q4MseEvaluation ||
+        profile == WeightsProfile::R9700Q4G64DFlash2Q4Evaluation ||
+        profile == WeightsProfile::R9700Q4W8MseDFlash2Q4MseEvaluation ||
         profile == WeightsProfile::R9700Q4W8MseDFlash2Q4Evaluation ||
+        profile == WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4MseEvaluation ||
         profile == WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4Evaluation) {
         return NumericFormat::Q4G64_F16S;
     }
@@ -70,6 +84,8 @@ NumericFormat full_attention_value_output_format(WeightsProfile profile) {
 NumericFormat selected_fp8_role_format(WeightsProfile profile, std::string_view name,
                                        NumericFormat fallback) {
     if (profile != WeightsProfile::R9700Q4G64Fp8FourRoleN16K16Evaluation &&
+        profile != WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4MseEvaluation &&
+        profile != WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2W8MseEvaluation &&
         profile != WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4Evaluation) {
         return fallback;
     }
@@ -335,8 +351,14 @@ ArtifactLoadPlan bind_artifact(artifact::Binder& binder, WeightsProfile weights_
 
     const bool has_dflash = binder.contains("dflash/feature_projection");
     const bool profile_requires_dflash =
+        weights_profile == WeightsProfile::R9700Q4G64DFlash2Q4MseEvaluation ||
+        weights_profile == WeightsProfile::R9700Q4G64DFlash2W8MseEvaluation ||
         weights_profile == WeightsProfile::R9700Q4G64DFlash2Q4Evaluation ||
+        weights_profile == WeightsProfile::R9700Q4W8MseDFlash2Q4MseEvaluation ||
+        weights_profile == WeightsProfile::R9700Q4W8MseDFlash2W8MseEvaluation ||
         weights_profile == WeightsProfile::R9700Q4W8MseDFlash2Q4Evaluation ||
+        weights_profile == WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4MseEvaluation ||
+        weights_profile == WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2W8MseEvaluation ||
         weights_profile == WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4Evaluation;
     if (profile_requires_dflash && !has_dflash) {
         throw artifact::ArtifactError(

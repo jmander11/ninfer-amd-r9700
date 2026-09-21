@@ -77,6 +77,30 @@ Package::WeightsProfile Package::resolve_weights(const artifact::ArtifactIdentit
         identity.weights_id == "r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval") {
         return WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4Evaluation;
     }
+    if (identity.model_id == model_id &&
+        identity.weights_id == "r9700-q4g64-n16k16-dflash2-q4-mse-eval") {
+        return WeightsProfile::R9700Q4G64DFlash2Q4MseEvaluation;
+    }
+    if (identity.model_id == model_id &&
+        identity.weights_id == "r9700-q4-w8-mse-n16k16-dflash2-q4-mse-eval") {
+        return WeightsProfile::R9700Q4W8MseDFlash2Q4MseEvaluation;
+    }
+    if (identity.model_id == model_id &&
+        identity.weights_id == "r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-mse-eval") {
+        return WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4MseEvaluation;
+    }
+    if (identity.model_id == model_id &&
+        identity.weights_id == "r9700-q4g64-n16k16-dflash2-w8-mse-eval") {
+        return WeightsProfile::R9700Q4G64DFlash2W8MseEvaluation;
+    }
+    if (identity.model_id == model_id &&
+        identity.weights_id == "r9700-q4-w8-mse-n16k16-dflash2-w8-mse-eval") {
+        return WeightsProfile::R9700Q4W8MseDFlash2W8MseEvaluation;
+    }
+    if (identity.model_id == model_id &&
+        identity.weights_id == "r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-w8-mse-eval") {
+        return WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2W8MseEvaluation;
+    }
     throw std::runtime_error("artifact identity '" + identity.model_id + "/" + identity.weights_id +
                              "' is not supported by target '" + std::string(target_key) + "'");
 }

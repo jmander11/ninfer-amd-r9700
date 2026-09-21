@@ -38,6 +38,23 @@ int main() {
         std::cerr << "registry did not preserve explicit DFlash2 evaluation identities\n";
         return 1;
     }
+    using Profile = Package::WeightsProfile;
+    const std::pair<const char*, Profile> mse_companions[] = {
+        {"r9700-q4g64-n16k16-dflash2-q4-mse-eval", Profile::R9700Q4G64DFlash2Q4MseEvaluation},
+        {"r9700-q4-w8-mse-n16k16-dflash2-q4-mse-eval", Profile::R9700Q4W8MseDFlash2Q4MseEvaluation},
+        {"r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-mse-eval",
+         Profile::R9700Q4G64Fp8FourRoleDFlash2Q4MseEvaluation},
+        {"r9700-q4g64-n16k16-dflash2-w8-mse-eval", Profile::R9700Q4G64DFlash2W8MseEvaluation},
+        {"r9700-q4-w8-mse-n16k16-dflash2-w8-mse-eval", Profile::R9700Q4W8MseDFlash2W8MseEvaluation},
+        {"r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-w8-mse-eval",
+         Profile::R9700Q4G64Fp8FourRoleDFlash2W8MseEvaluation},
+    };
+    for (const auto& [identity, expected] : mse_companions) {
+        if (Package::resolve_weights({std::string(Package::model_id), identity}) != expected) {
+            std::cerr << "registry did not bind the source-MSE companion identity\n";
+            return 1;
+        }
+    }
     std::cout << "target_registry: PASS model=" << Package::model_id
               << " target=" << *active << '\n';
     return 0;

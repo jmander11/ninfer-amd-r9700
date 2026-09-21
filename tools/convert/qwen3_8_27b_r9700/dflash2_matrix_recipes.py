@@ -127,16 +127,8 @@ def summary(
         "format_counts": counts,
         "format_encoded_bytes": by_format,
         "tensor_encoded_bytes": sum(by_format.values()),
-        "selection_status": (
-            "registered-evaluation-control-with-bound-artifact-identities"
-            if selected.key == CANONICAL_Q4G64
-            else "candidate-only-no-artifact-identity"
-        ),
-        "materialization": (
-            "existing-canonical-converter-route"
-            if selected.key == CANONICAL_Q4G64
-            else "disabled-until-base-selection"
-        ),
+        "selection_status": "registered-evaluation-only",
+        "materialization": "recipe-aware-converter-route",
         "calibration_inputs": "none",
         "preserved_bf16": "both-selector-codebooks-and-all-private-nonmatrix-state",
         "runtime_repack": False,
