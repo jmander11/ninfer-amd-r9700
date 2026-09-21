@@ -52,6 +52,36 @@ model or individual-Op throughput claim.
 
 ## Typed Text/MTP cache and attention
 
+### Bounded-panel dense prefill (2026-09-21)
+
+The all-Q4 N16/K16, G16, C1, spec-none P8192/chunk1024 benchmark improved from
+`184.8640144` to `1184.242683` prefill tok/s (`6.406x`). Three measured candidate durations
+were `6.870248486`, `6.901032133`, and `6.982186078 s`; median duration was `0.155599830`
+of the retained matched baseline. Each unprofiled cell used one warmup and three repetitions
+on the R9700 under `auto`. A fresh P2048/chunk4096 regression pair measured
+`1664.303599` versus `1659.247929 tok/s`, with candidate/baseline median duration `1.003513977`.
+This pair passes the 2% regression bound but does not reproduce the older `1904.339303 tok/s`
+measurement. Do not mix the historical value with this matched comparison.
+
+The old route used tiled attention only for initial prefixes, falling back to serial causal
+attention on appended chunks. A selected-region 8K trace attributed `39087.580 ms` of
+`43838.812 ms` Text-prefill wall time to that fallback. The new route reuses the existing
+BF16-WMMA QK and FP32 softmax/PV arithmetic in bounded query panels; score/max storage stays
+at most 384.1875 MiB. G16/G32 independent FP64 checks cover initial/appended contexts,
+partial panels, all KV heads, device-active rows, fragmented pages, graph replay, and the
+262144-token boundary. The typed leaf and all five ISA/resource checks pass; emitted resource
+counts and zero-spill status are unchanged.
+
+Admission and complete input bindings are retained in
+`profiles/bench/r9700-chunked-attention-candidate-leaf-retry1-20260921/whole/result.json`.
+The original package retains passed raw qualification and the subsequently repaired public-leaf
+fixture failure. Deferred driver VRAM teardown interrupted the first whole sequence; its completed
+8K result was retained, and only the missing P2048 pair was measured in `whole-completion`.
+These results admit the bounded-panel mechanism, not a terminal weight recipe, shared chunk,
+model-quality gate, or DFlash performance claim. The fresh twelve-profile chunk campaign follows.
+
+### Retained cache and attention evidence
+
 The growing cache stores FP8 E4M3FN K, signed INT4 V, and FP16 V scales. A 32-point sweep covering
 G16/G32, every K/V/scale plane order, T=1..8, and 1K/4K/8K/32K contexts passed the independent
 layout and attention oracles after the coherent ROCm update.
@@ -101,7 +131,7 @@ MTP3 graph tracks its max+6 MTP-cache and max+4 Text T=4 leaves independently as
 The 32 C=1..4 capacity cells therefore remain pending fresh post-promotion measurement even though
 modeled Text-prefill scratch still dominates the global arena.
 
-The production P128..4096 initial-prefix leaf now uses the physically selected three-stage
+The earlier production P128..4096 initial-prefix leaf used the physically selected three-stage
 full-score GQA6 route. After the gated-RMSNorm, split-view SiLU, and K256 token8 RMSNorm
 promotions, a matched all-Q4/G16 P2048 C1 run under `auto`, with speculative execution disabled,
 measures `1,214.498278` prefill tok/s and `1.686293799 s` mean prefill with `0.001380049 s`

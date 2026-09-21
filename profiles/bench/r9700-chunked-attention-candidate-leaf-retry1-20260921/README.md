@@ -1,5 +1,10 @@
 # Public-leaf fixture retry
 
+Stage entry waits at most ten seconds for an actual zero-busy, low-residency sample;
+transient activity samples do not trigger repeated artifact preflight. Sustained activity,
+occupied VRAM, or non-auto power still blocks launch. Owned-child VRAM teardown also has a
+bounded ten-second wait before subsequent model loads.
+
 The original bounded-panel package retains passing static, host-routing and full
 G16/G32 raw FP64 qualification. Its public-leaf fixture incorrectly supplied zero
 workspace for appended dense attention and failed with hipInvalidValue. Only that
@@ -41,3 +46,23 @@ No GPU execution occurs during package preparation or CPU tests:
 ```sh
 /home/battlefront/.local/bin/python3.11 profiles/bench/r9700-chunked-attention-candidate-leaf-retry1-20260921/test_retry.py
 ```
+
+The first whole stage completed candidate P8192 (1184.242683 mean tok/s;
+6.870248486, 6.901032133, 6.982186078 seconds), then stopped before baseline P2048
+because its exited child's VRAM was still being reclaimed. The retry wrapper now
+allows up to10 seconds, polling every0.1 seconds, for owned-child residency to
+fall below1 GiB while retaining the auto power requirement. Initial external idle
+checks remain strict. The original experiment implementation stays unchanged.
+
+Complete only the two missing P2048 runs with:
+
+```sh
+bash profiles/bench/r9700-chunked-attention-candidate-leaf-retry1-20260921/commands.sh finish-whole
+```
+
+This stage validates the retained whole inputs, qualification and completed P8192
+report, creates a new `whole-completion/` for baseline/candidate P2048 measurements,
+and combines them with the retained P8192 measurements using the original admission
+function. It creates the previously absent `whole/result.json`, including the
+continuation reason and evidence identities. It neither overwrites previous files
+nor reruns P8192, and refuses an existing completion directory or final result.

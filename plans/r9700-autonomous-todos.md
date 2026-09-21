@@ -161,8 +161,8 @@ physical bandwidth saturation or stall freedom.
 
 The deterministic queue after reset is:
 
-1. resolve `PREFILL-CHUNK-ATTENTION`, discovered by the first current 8K screen, then resume chunk
-   selection needed for numerical accuracy and terminal base-artifact selection;
+1. run the fresh panel-attention chunk selection now that `PREFILL-CHUNK-ATTENTION` is closed,
+   then numerical accuracy and terminal base-artifact selection;
 2. immediately make `DFLASH-RECIPE`, `DFLASH-QUALITY`, and `DFLASH-WHOLE` the primary performance
    work, targeting at least `60 decode-output tok/s` at C1 with exact public greedy-token parity;
 3. retain only clearly reusable recipe-independent DFlash work while the selected artifact is
@@ -192,31 +192,18 @@ declared dependencies. No absolute prefill-ceiling proof is required before proc
   `profiles/bench/r9700-fp8-gate-up-m128n256-retained-reopen-20260906/attempt-4/decision.json`.
   Proceed to the current-build chunk campaign and numerical accuracy. No ceiling claim follows.
 
-- [ ] `PREFILL-CHUNK-ATTENTION` The first current 8K dense all-Q4 G16 screen at chunk1024
-  measured `184.8640144 tok/s` (`44.313842 s`, three stable repetitions), exposing a major gap
-  outside the reviewed P2048 initial-prefix workload. Q4 CTAs admit all four chunks, but dense
-  attention admits its tiled path only when context equals query rows and rows are at most4096.
-  Later chunks fall back to serial per-key attention; chunk8192 also falls back on the first call.
-  Pause the broad screen, retain its results, quantify the owner with one bounded selected-region
-  trace, then qualify a bounded-workspace tiled dense attention extension for appended chunks and
-  large query extents. Preserve absolute causal positions, page mapping, represented-input
-  FP64 oracle, G16/G32, and graph/workspace correctness. Require whole8K confirmation before
-  rebuilding/rebinding the affected chunk campaign. This concrete mechanism reopens bounded
-  prefill work; the accepted P2048 target itself remains unblocked.
-  Attribution completed: `profiles/rocprof/r9700-chunked-prefill-attribution-20260921/run/closure.json`
-  records 112 serial causal-attention calls totaling `39087.580 ms` of `43838.812 ms`
-  Text-prefill wall time (89.16%); Q4 CTAs total `3237.931 ms`. Eight Text chunks and zero
-  MTP ranges are confirmed. Unattributed kernel time is only `0.294 ms`, but the analyzer's
-  incomplete flag is retained. Profiled times establish ownership, not speed admission.
-  Implement bounded query panels with the existing tiled QK/max/PV arithmetic, then compare
-  unprofiled whole8K against the retained baseline; no further owner-discovery trace is needed.
-  Raw G16/G32 FP64, panel/active-count/graph checks through context262144 and all five ISA
-  checks passed in `profiles/bench/r9700-chunked-attention-candidate-20260921/qualification`.
-  Its public-leaf harness then stopped with invalid workspace: the newly tiled T128/context257
-  fixture still supplied zero bytes. Preserve that attempt. A fixture-only correction and fresh
-  `profiles/bench/r9700-chunked-attention-candidate-leaf-retry1-20260921` reuse the unchanged
-  passed raw evidence, rerun the typed leaf, then own whole8K/P2048 admission.
-
+- [x] `PREFILL-CHUNK-ATTENTION` CLOSED 2026-09-21. Bounded query panels extend the existing
+  tiled dense route to appended chunks and 128..8192 query rows through context262144 while
+  retaining absolute causal positions, page mapping, and at most 384.1875 MiB score/max storage.
+  G16/G32 FP64, active-count/panel/graph, typed-leaf, host-planner and five ISA/resource gates pass.
+  Whole8K/chunk1024 improves `184.8640144 → 1184.242683 tok/s` (median duration ratio
+  `0.155599830`). The fresh matched P2048 pair is `1664.303599 → 1659.247929 tok/s`
+  (ratio `1.003513977`, within the 2% bound); the older1904 result was not reproduced.
+  Independent result audit: SHIP. Admission:
+  `profiles/bench/r9700-chunked-attention-candidate-leaf-retry1-20260921/whole/result.json`.
+  Preserve the original raw-pass/public-fixture-failure evidence and completed8K cell; the
+  corrected fixture and deferred-VRAM completion reran only missing checks. Full findings are in
+  `docs/performance.md`. Resume the fresh panel-attention chunk campaign, then accuracy/DFlash.
 Every future physical experiment must be launched through a reviewed package-local `commands.sh`,
 not an ad-hoc reconstructed command. A package is runnable only when its plan contains no
 `UNBOUND`, its runner has a non-mutating preflight mode, and its package validation passes. Record

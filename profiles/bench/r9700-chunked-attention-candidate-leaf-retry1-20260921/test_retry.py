@@ -12,6 +12,75 @@ spec.loader.exec_module(retry)
 
 
 class RetryTest(unittest.TestCase):
+    def test_initial_idle_requires_zero_busy_sample(self):
+        with patch.object(retry.base, "require_auto_power_profile"), patch.object(
+            Path, "read_text", side_effect=["59912192", "12", "59912192", "0"]
+        ), patch.object(retry.time, "sleep") as sleep:
+            retry.wait_for_idle()
+        sleep.assert_called_once()
+
+    def test_initial_idle_does_not_admit_sustained_busy_gpu(self):
+        with patch.object(retry.base, "require_auto_power_profile"), patch.object(
+            Path, "read_text", side_effect=["59912192", "12"]
+        ), patch.object(retry.time, "monotonic", side_effect=[0, 10]):
+            with self.assertRaisesRegex(ValueError, "idle wait timed out"):
+                retry.wait_for_idle()
+
+    def test_owned_release_waits_for_deferred_teardown(self):
+        with patch.object(retry.base, "require_auto_power_profile"), patch.object(
+            Path, "read_text", side_effect=[str(14 * 1024 ** 3), "1024"]
+        ), patch.object(retry.time, "sleep") as sleep:
+            retry.wait_for_release()
+        sleep.assert_called_once()
+        self.assertLessEqual(sleep.call_args.args[0], 0.1)
+
+    def test_owned_release_timeout_is_bounded(self):
+        with patch.object(retry.base, "require_auto_power_profile"), patch.object(
+            Path, "read_text", return_value=str(14 * 1024 ** 3)
+        ), patch.object(retry.time, "monotonic", side_effect=[0, 10]), patch.object(
+            retry.time, "sleep", side_effect=AssertionError("deadline passed")
+        ):
+            with self.assertRaisesRegex(ValueError, "10 seconds"):
+                retry.wait_for_release()
+
+    def test_completion_launches_only_two_missing_p2048_reports(self):
+        inputs = {"artifact": {}, "baseline": "baseline", "candidate": "candidate"}
+        launched = []
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            whole = root / "whole"
+            whole.mkdir()
+            (whole / "inputs.json").write_text(json.dumps(inputs))
+            (whole / "candidate-p8192.json").write_text("retained8k")
+            (root / "qualification").mkdir()
+            (root / "qualification/result.json").write_text(json.dumps({
+                "inputs": inputs, "pass": True, "static_complete": True, "numerical_complete": True,
+            }))
+
+            def identity(path):
+                return "baseline" if path == retry.base.BASELINE else (
+                    "candidate" if path == retry.base.CANDIDATE else str(path))
+
+            def report(path, _artifact, _command, prompt, _chunk):
+                seconds = 45 if path == retry.base.RETAINED else (7 if prompt == 8192 else 1)
+                return {"tests": [{"reps": [{"timings": {"prefill_seconds": seconds}}] * 3}]}
+
+            def run(command, _directory, name, **_kwargs):
+                launched.append((name, command[command.index("-p") + 1]))
+                Path(command[command.index("--output-file") + 1]).write_text("fresh2k")
+
+            with patch.object(retry, "PACKAGE", root), patch.object(retry, "preflight", return_value=inputs), patch.object(
+                retry.base, "identity", side_effect=identity
+            ), patch.object(retry.base, "report", side_effect=report), patch.object(
+                retry.base, "idle"
+            ), patch.object(retry.base, "require_hip_pci_device"), patch.object(
+                retry.base, "run_logged", side_effect=run
+            ):
+                retry.finish_whole(inputs)
+            self.assertEqual(launched, [("baseline-p2048", "2048"), ("candidate-p2048", "2048")])
+            self.assertEqual((whole / "candidate-p8192.json").read_text(), "retained8k")
+            self.assertEqual(json.loads((whole / "result.json").read_text())["status"], "admitted")
+
     def inputs(self):
         inputs = json.loads((retry.RETAINED / "inputs.json").read_text())
         inputs["public_leaf"]["sha256"] = "corrected-leaf"
