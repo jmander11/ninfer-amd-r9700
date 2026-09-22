@@ -6,7 +6,9 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <optional>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace ninfer::targets::qwen3::detail::NINFER_QWEN3_RUNTIME_NS {
@@ -34,9 +36,26 @@ ops::SamplingConfig translate_sampling(const ResolvedSamplingParameters& source)
     out.min_p             = source.min_p;
     out.presence_penalty  = source.presence_penalty;
     out.frequency_penalty = source.frequency_penalty;
+    out.p_less            = source.p_less ? 1 : 0;
     out.seed              = source.seed;
     out.token_counts      = nullptr;
     return out;
+}
+
+void install_suppressed_tokens(ops::SamplingConfig& destination,
+                               const runtime::ResolvedExecutionOptions& options) {
+    if (options.suppressed_token_count > destination.kMaximumSuppressedTokens) {
+        throw std::invalid_argument("too many suppressed sampling tokens");
+    }
+    destination.suppressed_token_count =
+        static_cast<std::int32_t>(options.suppressed_token_count);
+    for (std::uint32_t i = 0; i < options.suppressed_token_count; ++i) {
+        const TokenId token = options.suppressed_token_ids[i];
+        if (token < 0 || token >= TextConfig::token_domain) {
+            throw std::invalid_argument("suppressed sampling token is outside the vocabulary");
+        }
+        destination.suppressed_tokens[i] = token;
+    }
 }
 
 std::uint32_t pages_for_tokens(std::uint32_t tokens) noexcept {
@@ -48,9 +67,8 @@ std::uint64_t projected_service_work(const runtime::RequestPlanSummary& summary,
                                      std::size_t prefill_splits) noexcept {
     const std::uint32_t suffix = summary.prompt_tokens - reuse_base;
     const std::uint64_t prefill_units =
-        suffix == 0
-            ? 1ULL
-            : 1ULL + (static_cast<std::uint64_t>(suffix) - 1ULL) / prefill_chunk + prefill_splits;
+        suffix == 0 ? 1ULL
+                    : schedule::prefill_chunk_count(suffix, prefill_chunk) + prefill_splits;
     const std::uint64_t decode_units =
         summary.effective_output_tokens == 0 ? 0ULL : summary.effective_output_tokens - 1ULL;
     return prefill_units + decode_units;
@@ -98,7 +116,9 @@ ProgramImplCore::plan_request_base(const PreparedPromptData& prompt,
     base->summary.transient_alignment    = 1;
     base->summary.transient_bytes        = 0;
     base->sampling                       = translate_sampling(options.sampling);
+    install_suppressed_tokens(base->sampling, options);
     base->allow_prefix_reuse             = options.allow_prefix_reuse;
+    base->force_cold_prefill             = options.force_cold_prefill;
     base->capture_context_checkpoint     = options.capture_context_checkpoint;
     if (options.capture_context_checkpoint &&
         !ninfer::context_checkpoint_capture_available(options.allow_prefix_reuse,
@@ -141,7 +161,6 @@ ProgramImplCore::plan_request_base(const PreparedPromptData& prompt,
     if (prompt.has_media()) {
         auto control =
             std::make_shared<qwen3::VisionControl>(qwen3::build_vision_control(prompt));
-        std::size_t max_merged     = 0;
         std::uint32_t previous_end = 0;
         for (const qwen3::VisionItemControl& item : control->items) {
             if (item.scatter_indices.empty()) {
@@ -162,10 +181,8 @@ ProgramImplCore::plan_request_base(const PreparedPromptData& prompt,
                 throw std::invalid_argument("vision item exceeds the Program workspace envelope");
             }
             previous_end = end;
-            max_merged   = std::max(max_merged, item.merged_count);
         }
-        base->vision_transient_bytes = schedule::VisionContext::output_transient_bytes(max_merged);
-        base->vision_control         = std::move(control);
+        base->vision_control = std::move(control);
     }
 
     if (prompt.identity.rewrite_checkpoint) {
@@ -184,14 +201,18 @@ ProgramImplCore::plan_request_base(const PreparedPromptData& prompt,
              : 0ULL);
     base->summary.service_work_quanta =
         projected_service_work(base->summary, 0, prefill_chunk, cold_prefill_splits);
+    if (prompt.generation_recovery && base->sampling.p_less) {
+        base->summary.service_work_quanta += qwen3::GenerationRecoveryContext::maximum_attempts *
+            (schedule::prefill_chunk_count(reserved_context_tokens, prefill_chunk) + 2ULL);
+    }
     return RequestBasePlan(std::move(base));
 }
 
 void ProgramImplCore::apply_reuse_decision(RequestPlanImpl& plan, const ResidentStateView& view,
                                            const PreparedPromptData& prompt,
                                            const RequestBasePlanImpl& base) {
-    if (!base.allow_prefix_reuse || !prompt.identity.reusable || view.ledger == nullptr ||
-        view.identity == nullptr) {
+    if (!base.allow_prefix_reuse || base.force_cold_prefill || !prompt.identity.reusable ||
+        view.ledger == nullptr || view.identity == nullptr) {
         return;
     }
     std::vector<qwen3::detail::ContextCheckpointRef> heads;
@@ -250,16 +271,26 @@ void ProgramImplCore::finish_request_plan(RequestPlanImpl& plan, const ResidentS
     }
 
     if (plan.reuse == ReusePath::FullReset) {
-        plan.reuse_source  = PrefixReuseSource::None;
-        plan.ram_entry_id  = 0;
-        plan.reuse_base    = 0;
+        plan.reuse_source             = PrefixReuseSource::None;
+        plan.ram_entry_id             = 0;
+        plan.disk_entry_id            = 0;
+        plan.disk_hash_f              = {};
+        plan.disk_execution_frontier  = 0;
+        plan.disk_committed_generation = 0;
+        plan.reuse_base               = 0;
     } else if (plan.reuse_source == PrefixReuseSource::None) {
         plan.reuse_source = PrefixReuseSource::VramResident;
     }
 
-    plan.summary.reusable_prompt_tokens = plan.reuse_base;
-    plan.summary.ram_entry_id           = plan.ram_entry_id;
-    plan.summary.reuse_source           = plan.reuse_source;
+    plan.summary.reusable_prompt_tokens  = plan.reuse_base;
+    plan.summary.ram_entry_id            = plan.ram_entry_id;
+    plan.summary.disk_entry_id           = plan.disk_entry_id;
+    plan.summary.disk_hash_f_lo          = plan.disk_hash_f.lo;
+    plan.summary.disk_hash_f_hi          = plan.disk_hash_f.hi;
+    plan.summary.disk_execution_frontier = plan.disk_execution_frontier;
+    plan.summary.disk_committed_generation = plan.disk_committed_generation;
+    plan.summary.disk_reuse_path         = plan.reuse;
+    plan.summary.reuse_source            = plan.reuse_source;
     if (speculative_backend == SpeculativeBackend::Mtp) {
         if (plan.reuse == ReusePath::FullReset) {
             plan.prepare_mtp = true;
@@ -285,6 +316,7 @@ void ProgramImplCore::finish_request_plan(RequestPlanImpl& plan, const ResidentS
         VisionPrefillPlan vision;
         vision.control = base.vision_control;
         vision.uses.reserve(base.vision_control->items.size());
+        std::size_t total_merged = 0;
         for (std::size_t index = 0; index < base.vision_control->items.size(); ++index) {
             const qwen3::VisionItemControl& item = base.vision_control->items[index];
             const auto first          = static_cast<std::uint32_t>(item.scatter_indices.front());
@@ -292,11 +324,17 @@ void ProgramImplCore::finish_request_plan(RequestPlanImpl& plan, const ResidentS
             const std::uint32_t begin = plan.prepare_mtp && first != 0 ? first - 1 : first;
             const std::uint32_t end   = last + 1;
             if (end <= plan.reuse_base) { continue; }
-            vision.uses.push_back(VisionUseSpan{begin, end, static_cast<std::uint32_t>(index)});
+            vision.uses.push_back(VisionUseSpan{begin, end, static_cast<std::uint32_t>(index),
+                                                total_merged});
+            if (item.merged_count > std::numeric_limits<std::size_t>::max() - total_merged) {
+                throw std::overflow_error("Vision output extent overflows size_t");
+            }
+            total_merged += item.merged_count;
         }
         if (!vision.uses.empty()) {
             plan.summary.transient_alignment = 256;
-            plan.summary.transient_bytes     = base.vision_transient_bytes;
+            plan.summary.transient_bytes =
+                schedule::VisionContext::output_transient_bytes(total_merged);
             plan.vision                      = std::move(vision);
         }
     }
@@ -309,6 +347,12 @@ void ProgramImplCore::finish_request_plan(RequestPlanImpl& plan, const ResidentS
              : 0ULL);
     plan.summary.service_work_quanta =
         projected_service_work(plan.summary, plan.reuse_base, prefill_chunk, prefill_splits);
+    if (prompt.generation_recovery && plan.sampling.p_less) {
+        plan.summary.service_work_quanta += qwen3::GenerationRecoveryContext::maximum_attempts *
+            (schedule::prefill_chunk_count(plan.summary.prompt_tokens +
+                (plan.summary.effective_output_tokens == 0 ? 0U :
+                 plan.summary.effective_output_tokens - 1U), prefill_chunk) + 2ULL);
+    }
 }
 
 RequestPlan ProgramImplCore::plan_request_for_lane(std::uint32_t lane,
@@ -363,7 +407,8 @@ RequestPlan ProgramImplCore::plan_ram_reuse(const PreparedPromptData& prompt,
     plan->text_kv_page_entitlement    = base.text_kv_page_entitlement;
     plan->backend_kv_page_entitlement = base.backend_kv_page_entitlement;
 
-    if (!kv_ram_cache_ || !base.allow_prefix_reuse || !prompt.identity.reusable) {
+    if (!kv_ram_cache_ || !base.allow_prefix_reuse || base.force_cold_prefill ||
+        !prompt.identity.reusable) {
         finish_request_plan(*plan, nullptr, prompt, base);
         return RequestPlan(std::move(plan));
     }
@@ -406,6 +451,75 @@ RequestPlan ProgramImplCore::plan_ram_reuse(const PreparedPromptData& prompt,
     }
     plan->reuse_source  = PrefixReuseSource::HostRam;
     plan->ram_entry_id  = match->entry_id;
+    finish_request_plan(*plan, &view, prompt, base);
+    return RequestPlan(std::move(plan));
+}
+
+RequestPlan ProgramImplCore::plan_disk_reuse(const PreparedPromptData& prompt,
+                                             const RequestBasePlan& base_plan) {
+    if (base_plan.impl_ == nullptr) { throw std::logic_error("request base plan is empty"); }
+    const RequestBasePlanImpl& base = *base_plan.impl_;
+
+    auto plan                         = std::make_unique<RequestPlanImpl>();
+    plan->summary                     = base.summary;
+    plan->sampling                    = base.sampling;
+    plan->text_kv_page_entitlement    = base.text_kv_page_entitlement;
+    plan->backend_kv_page_entitlement = base.backend_kv_page_entitlement;
+
+    if (!kv_disk_cache_ || !base.allow_prefix_reuse || base.force_cold_prefill ||
+        !prompt.identity.reusable) {
+        finish_request_plan(*plan, nullptr, prompt, base);
+        return RequestPlan(std::move(plan));
+    }
+
+    const std::vector<qwen3::detail::PrefixHash128> chain =
+        qwen3::detail::prefix_hash_chain(prompt);
+    const std::optional<qwen3::detail::DiskMatch> match =
+        kv_disk_cache_->plan_match(prompt, chain,
+            qwen3::detail::ReuseBackendPolicy{speculative_backend,
+                decoder->mtp_cache() != nullptr, dflash.has_value(),
+                DFlashConfig::full_layers > 0});
+    if (!match || match->reuse_base == 0) {
+        finish_request_plan(*plan, nullptr, prompt, base);
+        return RequestPlan(std::move(plan));
+    }
+
+    const std::optional<qwen3::detail::DiskRestoredHost> loaded =
+        kv_disk_cache_->load_host(match->entry_id);
+    if (!loaded) {
+        finish_request_plan(*plan, nullptr, prompt, base);
+        return RequestPlan(std::move(plan));
+    }
+    qwen3::detail::DiskRestoredHost host = std::move(*loaded);
+    ResidentStateView view;
+    view.ledger                  = &host.ledger;
+    view.identity                = &host.identity;
+    view.execution_frontier      = host.execution_frontier;
+    view.rewrite_checkpoint      = RewriteCheckpoint{
+        .valid    = host.rewrite_valid,
+        .kind     = host.rewrite_kind,
+        .frontier = host.rewrite_frontier,
+    };
+    view.text_kv_valid           = host.text_kv_valid;
+    view.mtp_kv_valid            = host.mtp_kv_valid;
+    view.dflash_context_frontier = host.dflash_context_frontier;
+    view.tail_hidden_valid       = host.tail_hidden_valid;
+    view.backend_image_present   = host.backend_image_present;
+    view.context_checkpoints.reserve(host.ladders.size());
+    for (const qwen3::detail::RamLadderIndex& head : host.ladders) {
+        view.context_checkpoints.push_back(ContextCheckpointIndex{
+            .frontier = head.frontier, .hash = head.hash, .kind = head.kind});
+    }
+    apply_reuse_decision(*plan, view, prompt, base);
+    if (plan->reuse_base == 0) {
+        finish_request_plan(*plan, nullptr, prompt, base);
+        return RequestPlan(std::move(plan));
+    }
+    plan->reuse_source              = PrefixReuseSource::HostDisk;
+    plan->disk_entry_id             = match->entry_id;
+    plan->disk_hash_f               = match->hash_f;
+    plan->disk_execution_frontier   = match->execution_frontier;
+    plan->disk_committed_generation = match->committed_generation;
     finish_request_plan(*plan, &view, prompt, base);
     return RequestPlan(std::move(plan));
 }

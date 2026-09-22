@@ -490,7 +490,7 @@ void require_workspace_peak(const ninfer::WorkspaceArena& workspace, ninfer::QTy
         (split + merged) * (sizeof(float) + sizeof(std::int32_t));
     const std::size_t expected = static_cast<std::size_t>(kR) * kT * kB * sizeof(std::uint16_t) +
         std::max(topk_bytes,
-                 ninfer::ops::linear_workspace_capacity_bytes(qtype, kT * kB, kH));
+                 ninfer::ops::linear_workspace_capacity_bytes(qtype, kT, kH));
     if (workspace.peak_used() != expected || workspace.peak_used() > workspace.capacity()) {
         fail(std::string(label) + " workspace query/execution mismatch: peak=" +
              std::to_string(workspace.peak_used()) + " expected=" +
@@ -501,7 +501,14 @@ void require_workspace_peak(const ninfer::WorkspaceArena& workspace, ninfer::QTy
 
 void run_chain(ninfer::DeviceContext& device, const Corpus& corpus,
                const ProjectionFixture& projection, DeviceFixture& data, ProjectionKind kind,
-               bool mapped, bool qualify_graph = false) {
+               bool mapped, bool qualify_graph = false, bool p_less = false) {
+    std::vector<ninfer::ops::SamplingConfig> configs(kB);
+    for (int row = 0; row < kB; ++row) {
+        configs[row].temperature = p_less ? 2.0F : 0.0F;
+        configs[row].p_less = p_less ? 1 : 0;
+        configs[row].seed = 97 + row;
+    }
+    data.configs.copy_from_host(configs.data(), configs.size() * sizeof(configs[0]));
     ninfer::Tensor logits(data.logits.data(), ninfer::DType::BF16, {kV, kT, kB});
     ninfer::Tensor hidden(data.hidden.data(), ninfer::DType::BF16, {kH, kT, kB});
     ninfer::Tensor pred(data.predecessor.data(), ninfer::DType::BF16, {kR, kCodebookRows});
@@ -537,6 +544,30 @@ void run_chain(ninfer::DeviceContext& device, const Corpus& corpus,
     };
     invoke();
     check();
+    const auto packed_path = download<std::int32_t>(data.path, expected.path.size());
+    const auto packed_ids = download<std::int32_t>(data.selector_ids, expected.selector_ids.size());
+    const auto packed_q = download<float>(data.selector_q, expected.selector_q.size());
+    data.path.fill_async(0xff, device.stream);
+    data.selector_ids.fill_async(0xff, device.stream);
+    data.selector_q.fill_async(0xff, device.stream);
+    for (int sequence = 0; sequence < kB; ++sequence) {
+        auto sequence_path = path.slice(1, sequence, 1);
+        auto sequence_ids = selector_ids.slice(2, sequence, 1);
+        auto sequence_q = selector_q.slice(2, sequence, 1);
+        ninfer::ops::dflash2_path_select(
+            logits.slice(2, sequence, 1), hidden.slice(2, sequence, 1), weight, pred, succ,
+            anchors.slice(0, sequence, 1), positions.slice(0, sequence, 1),
+            static_cast<const ninfer::ops::SamplingConfig*>(data.configs.data()) + sequence,
+            sequence_path, workspace, device.stream, mapped ? &mapped_ids : nullptr,
+            &sequence_ids, &sequence_q);
+    }
+    device.synchronize();
+    require_equal(download<std::int32_t>(data.path, packed_path.size()), packed_path,
+                  "C1/packed chain path isolation");
+    require_equal(download<std::int32_t>(data.selector_ids, packed_ids.size()), packed_ids,
+                  "C1/packed chain support isolation");
+    require_equal(download<float>(data.selector_q, packed_q.size()), packed_q,
+                  "C1/packed chain probability isolation");
     if (qualify_graph) {
         hipGraph_t graph{};
         hipGraphExec_t executable{};
@@ -605,6 +636,41 @@ void run_tree(ninfer::DeviceContext& device, const Corpus& corpus,
     require_equal(download<std::int32_t>(d_live, expected.live.size()), expected.live,
                   "tree live columns");
     require_workspace_peak(workspace, weight.qtype, "tree");
+    const auto packed_verify = download<std::int32_t>(d_verify, expected.verify.size());
+    const auto packed_parent = download<std::int32_t>(d_parent, expected.parent.size());
+    const auto packed_cache = download<std::int32_t>(d_cache, expected.cache.size());
+    const auto packed_rope = download<std::int32_t>(d_rope, expected.rope.size());
+    const auto packed_mask = download<std::int32_t>(d_mask, expected.mask.size());
+    const auto packed_live = download<std::int32_t>(d_live, expected.live.size());
+    for (auto* buffer : {&d_verify, &d_parent, &d_cache, &d_rope, &d_mask, &d_live}) {
+        buffer->fill_async(0xff, device.stream);
+    }
+    for (int sequence = 0; sequence < kB; ++sequence) {
+        auto sequence_verify = verify.slice(1, sequence, 1);
+        auto sequence_parent = parent.slice(1, sequence, 1);
+        auto sequence_cache = cache.slice(1, sequence, 1);
+        auto sequence_rope = rope.slice(1, sequence, 1);
+        auto sequence_mask = mask.slice(1, sequence, 1);
+        auto sequence_live = live.slice(0, sequence, 1);
+        ninfer::ops::dflash2_tree_select(
+            logits.slice(2, sequence, 1), hidden.slice(2, sequence, 1), weight, pred, succ,
+            anchors.slice(0, sequence, 1), frontiers.slice(0, sequence, 1),
+            sequence_verify, sequence_parent, sequence_cache, sequence_rope, sequence_mask,
+            sequence_live, workspace, device.stream, &mapped_ids);
+    }
+    device.synchronize();
+    require_equal(download<std::int32_t>(d_verify, packed_verify.size()), packed_verify,
+                  "C1/packed tree verify isolation");
+    require_equal(download<std::int32_t>(d_parent, packed_parent.size()), packed_parent,
+                  "C1/packed tree parent isolation");
+    require_equal(download<std::int32_t>(d_cache, packed_cache.size()), packed_cache,
+                  "C1/packed tree cache isolation");
+    require_equal(download<std::int32_t>(d_rope, packed_rope.size()), packed_rope,
+                  "C1/packed tree rope isolation");
+    require_equal(download<std::int32_t>(d_mask, packed_mask.size()), packed_mask,
+                  "C1/packed tree mask isolation");
+    require_equal(download<std::int32_t>(d_live, packed_live.size()), packed_live,
+                  "C1/packed tree live isolation");
 }
 
 template <class Function>
@@ -690,8 +756,12 @@ int main(int argc, char** argv) {
         const ProjectionFixture projection = make_projection();
         DeviceFixture data(corpus);
         if (companion) {
+            run_chain(device, corpus, projection, data, ProjectionKind::BF16, false, true);
             run_chain(device, corpus, projection, data, ProjectionKind::W8, false, true);
             run_chain(device, corpus, projection, data, ProjectionKind::W8, true, true);
+            run_chain(device, corpus, projection, data, ProjectionKind::Q4, true, true);
+            run_tree(device, corpus, projection, data, ProjectionKind::W8);
+            run_tree(device, corpus, projection, data, ProjectionKind::Q4);
             return 0;
         }
         run_chain(device, corpus, projection, data, ProjectionKind::BF16, false);
@@ -699,6 +769,7 @@ int main(int argc, char** argv) {
         run_chain(device, corpus, projection, data, ProjectionKind::W8, true);
         run_chain(device, corpus, projection, data, ProjectionKind::Q4, false);
         run_chain(device, corpus, projection, data, ProjectionKind::Q4, true);
+        run_chain(device, corpus, projection, data, ProjectionKind::Q4, true, true, true);
         run_tree(device, corpus, projection, data, ProjectionKind::W8);
         run_tree(device, corpus, projection, data, ProjectionKind::Q4);
         run_malformed_planes(device, projection, data);

@@ -86,6 +86,7 @@ struct RewriteCheckpointByteSpec {
 struct RenderedChat {
     std::string text;
     std::optional<RewriteCheckpointByteSpec> rewrite_checkpoint;
+    std::optional<std::size_t> final_assistant_byte_begin;
 };
 
 enum class ChatTemplateSemantics : std::uint8_t {

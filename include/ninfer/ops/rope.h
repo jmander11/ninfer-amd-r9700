@@ -26,7 +26,8 @@ namespace ninfer::ops {
  * [head_dim,heads,T] with positive head counts, contiguous head features and heads, and an optional
  * padded token stride. The registered domains are the Qwen3.8 D256/R64 Text Q/K geometry 24/4,
  * D128/R128 1-D DFlash geometry 32/8, and Vision geometry 16/16. q and k must not
- * overlap one another or positions. The Op mutates only dimensions [0,rotary_dim) of the supplied
+ * overlap one another or positions. Disjoint token-interleaved Q/K payloads are legal even when
+ * their padded bounding spans intersect. The Op mutates only dimensions [0,rotary_dim) of the supplied
  * Q/K tensor storage. The oracle evaluates the rotated dimensions naively in FP64 from the
  * represented inputs. The updated BF16 values are promoted and compared directly with that result;
  * output storage rounding belongs to the Op's numerical criterion, not the oracle. Unrotated

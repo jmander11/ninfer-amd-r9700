@@ -186,6 +186,7 @@ public:
     void set_gdn_state_action(GdnStateAction action, const GdnReplayRecords* replay_records);
     void set_tree_verify(const Tensor* parent_index, const Tensor* ancestor_mask,
                          const Tensor* prefix_lengths);
+    void set_sequence_row(std::int32_t row) noexcept { active_sequence_row_ = row; }
 
     // One caller-owned transaction per packed sequence. The Program opens these transactions
     // against the sequence publications before entering the Text schedule and commits them only
@@ -227,6 +228,10 @@ public:
     [[nodiscard]] PrefillChunkResult
     prefill_chunk(const qwen3::PreparedPromptData& input, std::uint32_t begin,
                   std::uint32_t nominal_length, VisionPrefillSession& vision, bool finalize_at_end);
+    [[nodiscard]] PrefillChunkResult
+    prefill_chunk(const qwen3::PreparedPromptData& input, std::uint32_t begin,
+                  std::uint32_t nominal_length, VisionPrefillSession& vision, bool finalize_at_end,
+                  DFlashFeatureSink& sink);
     void ordinary_decode_batch(const Tensor& ids, const Tensor& cache_positions,
                                const Tensor& rope_positions, const Tensor& kv_table_rows,
                                const Tensor& linear_state_slots, Tensor& hidden, Tensor& logits);
@@ -348,6 +353,7 @@ private:
     std::int32_t active_sequence_width_                   = 0;
     bool active_dflash_target_verify_                     = false;
     bool active_ordinary_decode_                          = false;
+    std::int32_t active_sequence_row_                     = 0;
     std::int32_t rope_delta_                              = 0;
     std::int32_t linear_state_current_slot_               = 0;
     std::int32_t linear_state_rewrite_checkpoint_slot_    = 0;

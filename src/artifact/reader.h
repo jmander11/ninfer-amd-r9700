@@ -132,6 +132,7 @@ public:
     const ObjectDescriptor* find(std::string_view name) const noexcept;
 
     std::uint64_t file_bytes() const noexcept;
+    std::string file_identity() const;
     std::uint64_t payload_offset() const noexcept;
     PayloadSpan payload(const ObjectDescriptor& object) const;
     PayloadSpan payload(std::string_view name) const;

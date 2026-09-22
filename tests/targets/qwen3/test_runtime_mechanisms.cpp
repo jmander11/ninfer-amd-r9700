@@ -7,6 +7,11 @@
 #include <ninfer/targets/qwen3/vision_control.h>
 
 #include "targets/qwen3/impl/runtime/context_checkpoint.h"
+#include "targets/qwen3/impl/runtime/adaptive_draft.h"
+#include "targets/qwen3/impl/runtime/context_checkpoint_image.h"
+#include <atomic>
+#include <chrono>
+#include <future>
 #define NINFER_QWEN3_RUNTIME_NS mechanism_slots
 #include "targets/qwen3/impl/runtime/linear_state_slots.h"
 #undef NINFER_QWEN3_RUNTIME_NS
@@ -17,6 +22,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstring>
 #include <iostream>
 #include <optional>
 #include <span>
@@ -335,6 +341,26 @@ void test_prefix_identity() {
     ledger.resize(prompt_only.token_ids.size());
     expect(q3::detail::prefix_matches(prompt_only, ledger, resident, ledger.size()),
            "truncated multimodal continuation identity");
+
+    {
+        q3::detail::ResidentPrefixIdentity packed;
+        packed.assign(prompt_only);
+        std::vector<std::uint8_t> blob(packed.packed_bytes());
+        packed.pack(blob.data());
+        q3::detail::ResidentPrefixIdentity restored;
+        restored.unpack(blob.data(), blob.size());
+        expect(q3::detail::prefix_matches(prompt_only, ledger, restored, prompt_only.token_ids.size()),
+               "prefix identity pack/unpack roundtrip");
+        std::vector<std::uint8_t> huge_count(8, 0);
+        const std::uint32_t huge = 0xffffffffu;
+        std::memcpy(huge_count.data(), &huge, 4);
+        bool threw = false;
+        try {
+            q3::detail::ResidentPrefixIdentity poisoned;
+            poisoned.unpack(huge_count.data(), huge_count.size());
+        } catch (...) { threw = true; }
+        expect(threw, "prefix identity unpack rejects a huge token count in a tiny buffer");
+    }
 }
 
 void test_prefix_hash_and_dflash_gate() {
@@ -938,6 +964,34 @@ q3::detail::PrefillReuseSelection decide(const q3::detail::ResidentReuseState& s
                                                dflash_full_layers);
 }
 
+// Speculative cancellation folds GDN back to E but cannot restore current tail
+// hidden. DFlash context remains at E; an exact-prefix continuation must restore a
+// checkpoint or recompute, while a nonempty suffix can establish new tail hidden.
+void test_cancelled_dflash_exact_prefix_reuse() {
+    using Path = ninfer::PrefixReusePath;
+    using Backend = ninfer::SpeculativeBackend;
+    ResidentReuseFixture fixture;
+    auto state = fixture.state;
+    state.dflash_context_frontier = state.execution_frontier;
+    state.tail_hidden_valid = false;
+    const auto exact = text_prompt(state.execution_frontier);
+    auto selected = decide(state, exact, Backend::DFlash, false, true);
+    expect(selected.path == Path::FullReset && selected.frontier == 0,
+           "cancelled DFlash exact prefix without hidden must recompute");
+    selected = decide(state, fixture.prompt, Backend::DFlash, false, true);
+    expect(selected.path == Path::AppendAtFrontier && selected.frontier == 4,
+           "cancelled DFlash nonempty suffix can establish new hidden");
+    state.rewrite_valid = true;
+    state.rewrite_frontier = 2;
+    selected = decide(state, exact, Backend::DFlash, false, true);
+    expect(selected.path == Path::RestoreTurnCheckpoint && selected.frontier == 2,
+           "cancelled DFlash exact prefix restores an available earlier checkpoint");
+    state.tail_hidden_valid = true;
+    selected = decide(state, exact, Backend::DFlash, false, true);
+    expect(selected.path == Path::AppendAtFrontier && selected.frontier == 4,
+           "valid DFlash exact prefix still appends ahead of its checkpoint");
+}
+
 void test_resident_reuse_decision() {
     using Path    = ninfer::PrefixReusePath;
     using Kind    = q3::RewriteCheckpointKind;
@@ -1123,6 +1177,58 @@ void test_dflash_chain_verify_kv_headroom() {
            "frontier+W materialize needs verify-width headroom in Main KV entitlement");
 }
 
+void test_adaptive_capture_and_topology() {
+    using ninfer::SpeculativeBackend;
+    const auto same = [](const std::vector<std::uint32_t>& got,
+                         std::initializer_list<std::uint32_t> want, std::string_view msg) {
+        expect(got.size() == want.size() &&
+                   std::equal(got.begin(), got.end(), want.begin()),
+               msg);
+    };
+    same(q3::adaptive_draft_ks(SpeculativeBackend::Mtp, 5, false), {5}, "frozen MTP {N}");
+    same(q3::adaptive_draft_ks(SpeculativeBackend::Mtp, 5, true), {3, 4, 5}, "MTP adaptive set");
+    same(q3::adaptive_draft_ks(SpeculativeBackend::DFlash, 7, true), {3, 4, 5}, "DFlash {3,4,5}");
+    same(q3::adaptive_draft_ks(SpeculativeBackend::DFlash, 6, true), {3, 4, 5},
+         "DFlash N=6 still {3,4,5}");
+    const std::uint32_t c        = 3;
+    const std::uint32_t planned  = 0;
+    const std::uint32_t k_stride = q3::adaptive_k_stride(c, planned);
+    expect(k_stride == c, "27B planned class 0 → k_stride = C");
+    expect(q3::adaptive_topology_class(0, k_stride, planned, c, 2) == (2U - 1U),
+           "frozen k_index=0 matches planned*C+(B-1)");
+    expect(q3::adaptive_topology_class(1, k_stride, planned, c, 1) == k_stride,
+           "k_index folds before B");
+}
+
+void test_context_checkpoint_image_pool_policy() {
+    using q3::detail::ContextCheckpointImageLayout;
+    constexpr ContextCheckpointImageLayout mtp{.conv_bytes      = 64,
+                                               .recurrent_bytes = 128,
+                                               .hidden_bytes    = 32,
+                                               .dflash_bytes    = 0};
+    constexpr ContextCheckpointImageLayout dflash{.conv_bytes      = 64,
+                                                  .recurrent_bytes = 128,
+                                                  .hidden_bytes    = 32,
+                                                  .dflash_bytes    = 96};
+    expect(q3::detail::context_checkpoint_image_layout_matches(mtp, mtp),
+           "exact MTP checkpoint image layout reuses its host image");
+    expect(!q3::detail::context_checkpoint_image_layout_matches(mtp, dflash),
+           "MTP image must not reuse DFlash cyclic-state storage");
+    expect(!q3::detail::context_checkpoint_image_layout_matches(
+               mtp, ContextCheckpointImageLayout{64, 127, 32, 0}),
+           "recurrent-state size mismatch must not reuse a host image");
+    expect(!q3::detail::context_checkpoint_image_layout_matches(
+               mtp, ContextCheckpointImageLayout{63, 128, 32, 0}),
+           "convolution-state size mismatch must not reuse a host image");
+    expect(!q3::detail::context_checkpoint_image_layout_matches(
+               mtp, ContextCheckpointImageLayout{64, 128, 31, 0}),
+           "hidden-state size mismatch must not reuse a host image");
+    expect(q3::detail::context_checkpoint_image_pool_capacity(1, 0) == 1 &&
+               q3::detail::context_checkpoint_image_pool_capacity(1, 3) == 4 &&
+               q3::detail::context_checkpoint_image_pool_capacity(8, 16) == 136,
+           "pool high-water bound is one rollback plus every mark per lane");
+}
+
 int main() {
     test_topology();
     test_fp8_k_int4_v_decoder_layout();
@@ -1133,7 +1239,10 @@ int main() {
     test_prefix_hash_and_dflash_gate();
     test_prefill_context_marks();
     test_resident_reuse_decision();
+    test_cancelled_dflash_exact_prefix_reuse();
     test_dflash_chain_verify_kv_headroom();
+    test_adaptive_capture_and_topology();
+    test_context_checkpoint_image_pool_policy();
     if (failures != 0) {
         std::cerr << failures << " Qwen3 runtime mechanism checks failed\n";
         return 1;

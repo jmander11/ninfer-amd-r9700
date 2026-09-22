@@ -55,9 +55,23 @@ int main() {
     failures += check(ninfer::cli::usage_text("ninfer").find("--capture-context-checkpoint") !=
                           std::string::npos,
                       "CLI help omits --capture-context-checkpoint");
-    failures += check(ninfer::cli::usage_text("ninfer").find("--context-checkpoints") !=
+    failures += check(ninfer::cli::usage_text("ninfer").find("--no-p-less-sampling") !=
                           std::string::npos,
-                      "CLI help omits --context-checkpoints");
+                      "CLI help omits --no-p-less-sampling");
+
+    failures += check(defaults.sampling.p_less, "CLI did not enable p-less by default");
+    const ninfer::cli::Options production = parse(
+        {"ninfer", "model.ninfer", "--prompt", "hi", "--no-p-less-sampling", "--top-p", "0.5"});
+    failures += check(!production.sampling.p_less && production.sampling.top_p == 0.5F,
+                      "--no-p-less-sampling did not opt into the production sampler");
+
+    const ninfer::cli::Options dflash_vision =
+        parse({"ninfer", "model.ninfer", "--prompt", "hi", "--spec", "dflash",
+               "--draft-tokens", "3", "--vision"});
+    failures += check(dflash_vision.enable_vision &&
+                          dflash_vision.speculative.backend ==
+                              ninfer::SpeculativeBackend::DFlash,
+                      "CLI did not accept DFlash and Vision together");
 
     const ninfer::cli::Options eager =
         parse({"ninfer", "model.ninfer", "--prompt", "hi", "--no-device-graph"});
@@ -83,7 +97,7 @@ int main() {
         (void)parse({"ninfer", "model.ninfer", "--prompt", "hi", "--spec", "dflash",
                      "--draft-tokens", "11", "--vision"});
     } catch (const std::invalid_argument&) { dflash_vision_rejected = true; }
-    failures += check(dflash_vision_rejected, "DFlash and Vision were accepted together");
+    failures += check(dflash_vision_rejected, "DFlash accepted draft length above five");
 
     if (failures == 0) { std::cout << "ok\n"; }
     return failures == 0 ? 0 : 1;

@@ -4,6 +4,7 @@
 #include "product/prompt_input/prompt_input.h"
 
 #include "ninfer/engine.h"
+#include <nlohmann/json.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -93,7 +94,12 @@ std::string format_arena_peak(const ninfer::ArenaMemorySummary& arena) {
 std::string format_sampling(const ninfer::ResolvedSamplingParameters& sampling) {
     if (sampling.temperature <= 0.0F) { return "greedy (temperature 0)"; }
     std::ostringstream output;
-    output << std::fixed << std::setprecision(2) << "temp=" << sampling.temperature
+    output << std::fixed << std::setprecision(2);
+    if (sampling.p_less) {
+        output << "p-less temp=" << sampling.temperature << " seed=" << sampling.seed;
+        return output.str();
+    }
+    output << "temp=" << sampling.temperature
            << " top_p=" << sampling.top_p << " top_k=" << sampling.top_k
            << " min_p=" << sampling.min_p << " presence=" << sampling.presence_penalty
            << " freq=" << sampling.frequency_penalty << " seed=" << sampling.seed;
@@ -148,6 +154,8 @@ std::string format_prefix_reuse_source(ninfer::PrefixReuseSource source) {
         return "vram_resident";
     case ninfer::PrefixReuseSource::HostRam:
         return "host_ram";
+    case ninfer::PrefixReuseSource::HostDisk:
+        return "host_disk";
     }
     return "unknown";
 }
@@ -217,12 +225,18 @@ void print_generation_summary(const ninfer::GenerationResult& result,
     print_stage("generate", "vision", result.timings.vision_seconds);
     print_stage("generate", "text prefill", result.timings.prefill_seconds);
     print_stage("generate", "decode", result.timings.decode_seconds);
+    if (result.recovery.attempts != 0) {
+        print_stage("recovery", "prepare", result.recovery.prepare_seconds);
+        print_stage("recovery", "text prefill", result.recovery.prefill_seconds);
+        print_metric("recovery attempts", std::to_string(result.recovery.attempts));
+    }
     print_stage("generate", "total", result.timings.total_seconds);
 
     const std::size_t generated = result.generated_token_ids.size();
-    const std::size_t decoded   = generated == 0 ? 0 : generated - 1;
+    const std::size_t prefill_samples = 1 + result.recovery.prefill_samples;
+    const std::size_t decoded = generated > prefill_samples ? generated - prefill_samples : 0;
     const double model_seconds  = result.timings.vision_seconds + result.timings.prefill_seconds +
-                                 result.timings.decode_seconds;
+                                 result.timings.decode_seconds + result.recovery.prefill_seconds;
     print_metric("sampling", format_sampling(sampling));
     print_metric("finish reason", format_finish(result.finish_reason));
     print_metric("prompt tokens", std::to_string(result.prompt.prompt_tokens));
@@ -265,6 +279,21 @@ void print_generation_summary(const ninfer::GenerationResult& result,
                      " drops=" + std::to_string(stats.kv_ram_drops) +
                      " save=" + format_ms(result.kv_ram_save_seconds) +
                      " load=" + format_ms(result.kv_ram_load_seconds));
+    print_metric("KV disk capacity", memory.kv_disk_capacity_bytes == 0
+                                         ? "off"
+                                         : format_kv_ram_size(memory.kv_disk_capacity_bytes));
+    print_metric("KV disk used", memory.kv_disk_capacity_bytes == 0
+                                     ? "off"
+                                     : format_kv_ram_size(memory.kv_disk_used_bytes) + " / " +
+                                           std::to_string(memory.kv_disk_entry_count) + " entries");
+    print_metric("KV disk events",
+                 "captures=" + std::to_string(stats.kv_disk_captures) +
+                     " restores=" + std::to_string(stats.kv_disk_restores) +
+                     " evicts=" + std::to_string(stats.kv_disk_evictions) +
+                     " drops=" + std::to_string(stats.kv_disk_drops) +
+                     " save=" + format_ms(result.kv_disk_save_seconds) +
+                     " load=" + format_ms(result.kv_disk_load_seconds) +
+                     " h2d=" + format_ms(result.kv_disk_h2d_seconds));
     print_metric("gpu workspace peak", format_arena_peak(memory.workspace));
     print_metric("runtime reservation", format_bytes(memory.runtime_reservation_bytes));
     print_metric("free after weights", format_bytes(memory.available_after_weights_bytes));
@@ -315,6 +344,10 @@ int main(int argc, char** argv) {
             return 0;
         }
 
+        if (cli.sampling.p_less) {
+            std::cerr << ninfer::kPLessSamplingIgnoredParamsWarning << '\n';
+        }
+
         ninfer::PromptInput input =
             cli.messages_path.empty()
                 ? ninfer::product::prompt_from_text(cli.prompt, cli.enable_thinking)
@@ -339,6 +372,9 @@ int main(int argc, char** argv) {
         engine_options.max_context    = cli.max_context;
         engine_options.kv_capacity    = cli.kv_capacity;
         engine_options.kv_ram_capacity_bytes = cli.kv_ram_capacity_bytes;
+        engine_options.kv_disk_capacity_bytes = cli.kv_disk_capacity_bytes;
+        engine_options.kv_disk_location = cli.kv_disk_location;
+        engine_options.kv_disk_compress = cli.kv_disk_compress;
         engine_options.context_checkpoint_marks = cli.context_checkpoint_marks;
         engine_options.prefill_chunk  = cli.prefill_chunk;
         engine_options.speculative    = cli.speculative;
@@ -355,10 +391,20 @@ int main(int argc, char** argv) {
         ninfer::PreparedPrompt prompt = engine.prepare(std::move(input));
 
         StreamingSink sink;
-        ninfer::GenerationHandle generation = engine.submit(std::move(prompt), std::move(request));
+        ninfer::GenerationHandle generation = engine.submit(
+            std::move(prompt), std::move(request), ninfer::OutputDelivery::Streaming);
         const ninfer::ResolvedSamplingParameters sampling = generation.resolved_sampling();
         const ninfer::GenerationResult result             = generation.wait(&sink);
         sink.finish_streams();
+        if (!result.tool_calls.empty()) {
+            auto calls = nlohmann::ordered_json::array();
+            for (const auto& call : result.tool_calls) {
+                calls.push_back({{"id", call.id}, {"type", "function"},
+                                 {"function", {{"name", call.name},
+                                               {"arguments", call.arguments_json}}}});
+            }
+            std::cout << nlohmann::ordered_json{{"tool_calls", std::move(calls)}}.dump() << '\n';
+        }
 
         if (cli.print_token_ids) {
             std::cerr << std::left << std::setw(12) << "tokens" << std::setw(26) << "generated ids";

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import io
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -22,10 +25,46 @@ from tools.bench.run_serve_corpus import (
     summary_row,
     validate_server_start,
 )
-from tools.bench.run_serve_concurrency import parse_args as parse_concurrency_args
+from tools.bench.run_serve_concurrency import (
+    Job, receive_stream, parse_args as parse_concurrency_args,
+)
 
 
 class ServeCorpusTest(unittest.TestCase):
+    def test_streamed_output_and_terminal_usage(self) -> None:
+        events = [
+            {"choices": [{"delta": {"role": "assistant"}}]},
+            {"choices": [{"delta": {"reasoning_content": "think"}}]},
+            {"choices": [{"delta": {"content": "hello"}}]},
+            {"choices": [{"delta": {}, "finish_reason": "stop"}]},
+            {"choices": [], "usage": {"prompt_tokens": 7, "completion_tokens": 2}},
+        ]
+        wire = b"".join(("data: " + json.dumps(event) + "\n\n").encode()
+                        for event in events)
+        job = Job(0, 0, Fixture("stream", [], False, 2, "suite"), 7, 2)
+
+        class Connection:
+            def __init__(self, body):
+                self.response = io.BytesIO(body)
+                self.response.status = 200
+            def getresponse(self):
+                return self.response
+
+        with patch("tools.bench.run_serve_concurrency.time.monotonic",
+                   side_effect=[10.25, 10.75, 11.0]):
+            result = receive_stream(Connection(wire + b"data: [DONE]\n\n"), job, 10.0)
+        self.assertEqual((result.prompt_tokens, result.completion_tokens), (7, 2))
+        self.assertEqual((result.first_output_at, result.output_event_count), (10.25, 2))
+        self.assertEqual(result.max_output_gap_seconds, 0.5)
+        self.assertEqual(result.finish_reason, "stop")
+        self.assertEqual(result.content_sha256, hashlib.sha256(b"hello").hexdigest())
+        self.assertEqual(result.reasoning_sha256, hashlib.sha256(b"think").hexdigest())
+        with self.assertRaisesRegex(CampaignError, "before.*DONE"):
+            receive_stream(Connection(wire), job, 10.0)
+        without_usage = b"data: " + json.dumps(events[3]).encode() + b"\n\ndata: [DONE]\n\n"
+        with self.assertRaisesRegex(CampaignError, "no terminal usage"):
+            receive_stream(Connection(without_usage), job, 10.0)
+
     def test_corpus_campaign_requires_selected_prefill_chunk(self) -> None:
         common = [
             "--artifact", "/tmp/model.ninfer", "--output", "/tmp/out",
@@ -61,7 +100,7 @@ class ServeCorpusTest(unittest.TestCase):
         self.assertEqual(command[command.index("--max-concurrency") + 1], "1")
 
         start = {
-            "artifact_type": "ninfer_serve_request_log", "schema_version": 20,
+            "artifact_type": "ninfer_serve_request_log", "schema_version": 21,
             "event": "server_start", "server_instance_id": "server",
             "engine": {
                 "device": 0, "max_concurrency": 1,
@@ -72,7 +111,7 @@ class ServeCorpusTest(unittest.TestCase):
                 "proposal_head": "full", "kv_value_group": 16,
                 "xattention_qualification": False,
             },
-            "sampling_defaults": {"greedy": True},
+            "sampling_defaults": {"greedy": True, "server_overrides": {"p_less": False}},
             "artifact": {"target": spec.target, "weights_id": "weights"},
             "server": {"public_model_id": spec.model_id},
         }
@@ -107,15 +146,15 @@ class ServeCorpusTest(unittest.TestCase):
             with self.assertRaisesRegex(CampaignError, "prefill chunk differs"):
                 load_existing_records(path, {spec.key: spec}, 1, 16, "dense")
 
-    def test_request_log_v20_identity_is_accepted(self) -> None:
+    def test_request_log_v21_identity_is_accepted(self) -> None:
         current = {
             "artifact_type": "ninfer_serve_request_log",
-            "schema_version": 20,
+            "schema_version": 21,
             "event": "server_start",
         }
         require_server_log_identity(current, "server_start")
 
-        stale = dict(current, schema_version=9)
+        stale = dict(current, schema_version=20)
         with self.assertRaises(CampaignError):
             require_server_log_identity(stale, "server_start")
 

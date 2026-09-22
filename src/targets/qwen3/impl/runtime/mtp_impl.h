@@ -342,6 +342,7 @@ auto mtp_decode_batch_body(MtpBatchContext& state, std::int32_t batch_size, std:
                                  .selected_hidden = selected_hidden,
                                  .replay_records  = state.execution.replay_records,
                                  .sampling        = frame.sampling,
+                                 .tool_masks      = state.tool_masks,
                              },
                              !compact);
         end_transaction_segments(state.text_kv_transactions, state.execution.device.stream);

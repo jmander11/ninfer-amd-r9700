@@ -15,7 +15,7 @@
 
 namespace ninfer::bench {
 
-inline constexpr int kSchemaVersion                   = 21;
+inline constexpr int kSchemaVersion                   = 22;
 inline constexpr std::string_view kPhaseTimingSemantics =
     "serial-lane-service-sum_shared-decode-max_v1";
 inline constexpr std::string_view kArtifactType       = "ninfer_bench_report";
@@ -29,8 +29,8 @@ inline constexpr std::uint32_t kDefaultPrefillChunk   = ninfer::kDefaultPrefillC
 inline constexpr std::uint32_t kPrefillChunkAlignment = 128;
 inline constexpr std::uint32_t kKvPageTokens          = 64;
 inline constexpr std::uint32_t kMaxMtpDraftTokens     = 5;
-inline constexpr std::uint32_t kMaxDFlashDraftTokens  = 11;
-inline constexpr std::uint32_t kMaxDFlashVerifyWidth  = 16;
+inline constexpr std::uint32_t kMaxDFlashDraftTokens  = 5;
+inline constexpr std::uint32_t kMaxDFlashVerifyWidth  = 6;
 inline constexpr std::uint32_t kBenchmarkPendingTimeoutMs = 0xffffffffU;
 
 enum class TestKind { Prefill, Decode, PrefillDecode, WholeInference };
@@ -74,6 +74,7 @@ struct BenchOptions {
     std::uint32_t concurrency      = 1;
     SpeculativeBackend spec_backend    = SpeculativeBackend::Mtp;
     std::uint32_t draft_tokens         = 0;
+    bool adaptive_draft               = false;
     std::uint32_t dflash_verify_width  = 0;
     ProposalHead proposal_head         = ProposalHead::Full;
     int device                     = 0;
@@ -92,6 +93,10 @@ struct RepTiming {
     SpeculativeStats speculative;
     std::uint32_t generated_output_tokens = 0;
     std::vector<std::vector<TokenId>> generated_token_ids_by_lane;
+    // Host wall time from the first Engine submission until every request in the
+    // repetition resolves. Unlike per-request GenerationTimings, this includes
+    // scheduler queueing and is the denominator for pure-prefill wave throughput.
+    double wave_seconds = 0.0;
 };
 
 // Prepare/vision/prefill are per-request service costs, summed across serial lane work.
@@ -169,6 +174,7 @@ std::string speculative_backend_name(SpeculativeBackend backend);
 
 Stats compute_stats(const std::vector<double>& values);
 std::vector<double> prefill_tok_s_series(const TestResult& result);
+std::vector<double> prefill_active_tok_s_series(const TestResult& result);
 std::vector<double> decode_output_tok_s_series(const TestResult& result);
 std::vector<double> decode_engine_tok_s_series(const TestResult& result);
 std::vector<double> whole_output_tok_s_series(const TestResult& result);
@@ -176,6 +182,7 @@ std::vector<double> prepare_time_series(const TestResult& result);
 std::vector<double> prefill_time_series(const TestResult& result);
 std::vector<double> decode_time_series(const TestResult& result);
 std::vector<double> total_time_series(const TestResult& result);
+std::vector<double> wave_time_series(const TestResult& result);
 
 std::string format_table(const BenchEnvironment& env, const std::vector<TestResult>& results);
 std::string format_json(const BenchEnvironment& env, const std::string& command,

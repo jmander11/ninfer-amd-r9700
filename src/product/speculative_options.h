@@ -9,7 +9,7 @@
 namespace ninfer::product {
 
 inline constexpr std::uint32_t kMaximumMtpDraftTokens    = 5;
-inline constexpr std::uint32_t kMaximumDFlashDraftTokens = 11;
+inline constexpr std::uint32_t kMaximumDFlashDraftTokens = 5;
 
 [[nodiscard]] inline SpeculativeBackend parse_speculative_backend(std::string_view value) {
     if (value == "mtp") { return SpeculativeBackend::Mtp; }
@@ -33,9 +33,9 @@ inline void validate_speculative_cli_options(const SpeculativeOptions& options) 
     switch (options.backend) {
     case SpeculativeBackend::None:
         if (options.draft_tokens != 0 || options.proposal_head != ProposalHead::Full ||
-            options.dflash_verify_width != 0) {
+            options.dflash_verify_width != 0 || options.adaptive_draft) {
             throw std::invalid_argument(
-                "--draft-tokens, --lm-head-draft, and --dflash-verify-width require "
+                "--draft-tokens, --lm-head-draft, --dflash-verify-width, and --adaptive-draft require "
                 "--spec mtp|dflash");
         }
         return;
@@ -49,11 +49,11 @@ inline void validate_speculative_cli_options(const SpeculativeOptions& options) 
         return;
     case SpeculativeBackend::DFlash:
         if (options.draft_tokens == 0 || options.draft_tokens > kMaximumDFlashDraftTokens) {
-            throw std::invalid_argument("--spec dflash requires --draft-tokens in [1,11]");
+            throw std::invalid_argument("--spec dflash requires --draft-tokens in [1,5]");
         }
         if (options.dflash_verify_width != 0 &&
-            (options.dflash_verify_width < 2 || options.dflash_verify_width > 16)) {
-            throw std::invalid_argument("--dflash-verify-width must be in [2,16]");
+            options.dflash_verify_width != options.draft_tokens + 1) {
+            throw std::invalid_argument("DFlash2 requires chain --dflash-verify-width K+1");
         }
         return;
     }

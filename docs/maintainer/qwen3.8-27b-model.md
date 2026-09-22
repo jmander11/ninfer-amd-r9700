@@ -291,8 +291,9 @@ is off, and `2C+1` when MTP or DFlash is on:
   sets `dflash_context_frontier` to `F`.
 
 When MTP or DFlash is enabled, a separate Program-owned ReplaySSM arena holds `C` physical record
-rows for every GDN layer. Its startup-fixed width is `draft_window+1` for MTP and the resolved
-`dflash_verify_width` for DFlash. Records are pending-round scratch, not sequence state or
+rows for every GDN layer. Its startup-fixed storage width is the maximum captured `K+1` for MTP
+and the maximum resolved captured verify width for DFlash (just the configured width without
+adaptive drafting). Records are pending-round scratch, not sequence state or
 additional checkpoint slots.
 
 ## 6. Text prefill and decode
@@ -353,8 +354,9 @@ not context. There is no growing DFlash Full pool.
 
 One propose block:
 
-1. Query rows are the anchor embedding plus seven MASK embeddings (id **248070**) at positions
-   `E .. E+7`. `input_embedding_scale` is 1.0.
+1. Query rows are the anchor embedding plus the configured K MASK embeddings (id **248070**) at
+   positions `E .. E+K`. The R9700 product uses a single block, K<=5, within the checkpoint's native
+   block capacity. `input_embedding_scale` is 1.0.
 2. For each of the five layers, from pinned `Qwen3DFlashDecoderLayer`:
    - `h = RMSNorm(residual, input_norm)`
    - `h, attn_k1 = attention_conv.prepare(h)`
@@ -366,26 +368,38 @@ One propose block:
    - `o_proj` then `attention_conv.finish` on the 5120-d residual stream; residual add
    - `h = RMSNorm(residual, post_attention_norm)`
    - `h, mlp_k1 = mlp_conv.prepare(h)`; SiLU-GLU MLP; `mlp_conv.finish`; residual add
-3. Final RMSNorm → draft-head logits on the seven mask columns (not the anchor).
+3. Final RMSNorm → draft-head logits on the K mask columns (not the anchor).
 4. Path selector (`dflash2_path_select`): unsorted top-16 of those logits, then the Markov score
    `score = unary + ⟨pred_code(prev) ⊙ W_h h_t , succ_code(cand)⟩`. Greedy chooses the maximum;
-   sampling draws from the temperature-scaled 16-way distribution and retains that row as `q`.
+   ordinary truncated sampling draws from the temperature-scaled 16-way distribution and retains
+   that row as `q`. P-less always uses the greedy draft and records point-mass q; its temperature
+   controls the target distribution, not a nearly uniform draft shortlist.
    Selector RNG is keyed by request seed and absolute token position, independent of compact batch
    row. `--lm-head-draft` runs top-16 on the shortlist and gathers codebooks by token id.
 5. The 27B target verifies the chain in one causal forward of width `W=k+1`. Greedy accepts the
    matching prefix. Sampling uses Leviathan `min(1,p/q)` acceptance and samples the first correction
    from normalized `max(0,p-q)`; all-accepted rounds sample a target bonus. ReplaySSM Fold commits
-   the corresponding sequential prefix. The package default uses chain W=k+1 for k<=5, packed-tree
-   W=12 for k in {6,7}, and chain W=k+1 for k>=8. Thus k=7 uses W=12 tree verification and the
-   maximum k=11 route performs two MASK blocks (7+4) before one W=12 chain verify. Production K is
-   selected only from matched whole-round acceptance and throughput evidence.
+   the corresponding sequential prefix. Under p-less, verification uses point-mass q at each
+   drafted token regardless of a supplied selector-q buffer, full eligible-vocabulary target
+   support, and the first-position-only cycle-exit restriction. The R9700 package does not expose
+   packed-tree or two-block runtime schedules. Production performance claims require matched
+   whole-round acceptance and throughput evidence.
 
-The broader schedules above remain runtime semantics, not the active R9700 product search. The
-current production campaign admits only K4/W5 and K5/W6: four or five predicted drafts from one
+The fixed-policy production campaign compares K4/W5 and K5/W6: four or five predicted drafts from one
 masked block, followed by chain verification whose width includes the anchor. Their companion
 matrix recipe is independently selected from the real BF16 DFlash2 checkpoint among canonical
 Q4G64, source-MSE Q4G64, and source-MSE W8G32, with row-scaled E4M3 conditional on physical and
 quality evidence. Both selector codebooks and all private persistent DFlash state remain BF16.
+
+Optional adaptive drafting is fixed on/off at startup. It reserves and captures the supported
+K={3,4,5} graph set, chooses one live K per compact batch from measured round time and conditional
+acceptance, and respects row budgets. Storage and previous pending feature views keep the maximum
+captured width when K shrinks; only the live proposal/verification views shrink. This policy does
+not change the target sampling law or imply a measured advantage over fixed K.
+
+DFlash may consume features from a Vision-conditioned target prefill. Target verification converts
+each lane's logical proposal positions to that lane's MRoPE positions using its position delta;
+draft cyclic state remains the checkpoint-specified BF16 local state.
 
 `GroupedDynamicCausalConv` is grouped size-16, kernel 2, left-padded (causal along the query
 block): `prepare` before the sublayer on the pre-norm hidden, `finish` on that sublayer's output.
@@ -400,12 +414,27 @@ sampling mode both use chain rejection sampling against the represented target d
 draft therefore reduces acceptance and throughput; it must not change the distribution of emitted
 target tokens. DFlash2 differs by producing the whole candidate chain in one masked-block forward.
 
+P-less is a full eligible-domain softmax at positive temperature: retain probabilities at least
+`max(sum(p*p)*exp(-2*0.0625/T), 1/1024)` and renormalize. The epsilon relaxation does not lower the
+floor, and the route has no top-k=20 cap. Suppression and tool-schema masks define eligibility
+before this calculation. Legacy top-k/top-p/min-p and frequency/presence penalties are ignored;
+temperature zero remains exact eligible argmax. Thinking-cycle exclusion removes one atom after
+membership (with mode/runner-up fallback), and is applied only at the first round position.
+Transactional tool grammar advances only for published tokens, never for unverified draft paths.
+
 Target verification writes candidate KV into provisioned but unpublished extents. After the final
 per-row output prefix is known, one all-layer Fold commits the accepted sequential prefix into the
 lane's current state. The transaction trims rejected KV, commits continuation hidden and MTP or
 DFlash cyclic state, and only then advances the authoritative frontier and publishes output. Near
 context capacity, the Engine falls back to the one-token target path when a complete safe round
 does not fit.
+
+Rejected publication/recovery rounds restore typed Text/MTP publication to the round base, undo
+unpublished sampling-count/statistics changes, and invalidate speculative tail state. Reported
+accepted drafts count only the committed licensed prefix. A bounded repetition retry rebuilds
+complete state by cold prefill on the same admitted lane, not by arbitrary KV truncation with
+stale GDN recurrence. Its request budget and publication semantics are defined in
+`concurrent-inference-architecture.md`.
 
 ## 10. Vision preprocessing
 

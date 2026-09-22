@@ -10,6 +10,7 @@ product commands. Executable `--help` output is the exact authority for option s
 | `cli.md` | text, structured messages, media, sampling, MTP/DFlash2, context, and memory |
 | `serving.md` | OpenAI/Anthropic HTTP schemas, streaming, state, concurrency, and logging |
 | `performance.md` | R9700 measurement policy and admitted results |
+| `containers.md` | explicit ROCm/Python build contexts, dedicated R9700 containers, test runner and app deployment |
 | `../examples/cli/` | committed input examples |
 
 ## Active maintainer authorities

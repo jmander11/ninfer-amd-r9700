@@ -92,7 +92,7 @@ using WorkspaceArena = DeviceArena;
 
 class PinnedHostBuffer {
 public:
-    explicit PinnedHostBuffer(std::size_t size_bytes);
+    explicit PinnedHostBuffer(std::size_t size_bytes, std::size_t alignment = 256);
     ~PinnedHostBuffer();
     PinnedHostBuffer(const PinnedHostBuffer&) = delete;
     PinnedHostBuffer& operator=(const PinnedHostBuffer&) = delete;
@@ -102,6 +102,7 @@ public:
     [[nodiscard]] std::size_t size() const noexcept { return bytes_; }
 
 private:
+    void* allocation_ = nullptr;
     void* data_ = nullptr;
     std::size_t bytes_ = 0;
 };
@@ -126,6 +127,7 @@ private:
     void* base_ = nullptr;
     std::size_t capacity_ = 0;
     std::size_t used_ = 0;
+    std::size_t mapping_bytes_ = 0;
     std::vector<Span> free_;
     std::unordered_map<void*, Span> live_;
 };

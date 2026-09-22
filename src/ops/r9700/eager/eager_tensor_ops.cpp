@@ -267,6 +267,28 @@ void offset_i32_positions(const Tensor& source, const Tensor& delta, Tensor& des
         static_cast<std::size_t>(source.ne[0]), stream));
 }
 
+void offset_i32_position_rows(const Tensor& source, const Tensor& deltas, Tensor& destination,
+                              hipStream_t stream) {
+    constexpr const char* operation = "offset_i32_position_rows";
+    require_dtype(source, DType::I32, operation, "source");
+    require_dtype(destination, DType::I32, operation, "destination");
+    require_contiguous_nonnull(source, operation, "source");
+    require_contiguous_nonnull(destination, operation, "destination");
+    require_vector(deltas, DType::I32, operation, "deltas");
+    if (source.ne[0] <= 0 || source.ne[1] <= 0 || source.ne[1] > 4 ||
+        source.ne[2] != 1 || source.ne[3] != 1 || destination.ne[0] != source.ne[0] ||
+        destination.ne[1] != source.ne[1] || destination.ne[2] != 1 || destination.ne[3] != 1 ||
+        deltas.ne[0] != source.ne[1])
+        throw std::invalid_argument("offset_i32_position_rows: invalid [W,B] and [B] geometry");
+    const auto d = reinterpret_cast<std::uintptr_t>(deltas.data);
+    const auto out = reinterpret_cast<std::uintptr_t>(destination.data);
+    if (d < out + destination.bytes() && out < d + deltas.bytes())
+        throw std::invalid_argument("offset_i32_position_rows: deltas overlap destination");
+    HIP_CHECK(r9700::eager::i32_offset_rows(static_cast<const std::int32_t*>(source.data),
+        static_cast<const std::int32_t*>(deltas.data), static_cast<std::int32_t*>(destination.data),
+        source.ne[0], source.ne[1], stream));
+}
+
 void set_i32_scalar(Tensor& destination, std::int32_t value, hipStream_t stream) {
     require_scalar(destination, DType::I32, "set_i32_scalar", "destination");
     HIP_CHECK(r9700::eager::i32_fill(static_cast<std::int32_t*>(destination.data), 1, value,

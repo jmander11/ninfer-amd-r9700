@@ -548,6 +548,8 @@ const char* prefix_reuse_source_name(ninfer::PrefixReuseSource source) {
         return "vram_resident";
     case ninfer::PrefixReuseSource::HostRam:
         return "host_ram";
+    case ninfer::PrefixReuseSource::HostDisk:
+        return "host_disk";
     }
     return "unknown";
 }
@@ -605,6 +607,17 @@ Json usage_to_json(const CompletionUsage& usage, const CompletionTimings* timing
                      {"ms", json_decimal3(timings->predicted_ms)},
                      {"tok_s", json_decimal3(timings->predicted_per_second)},
                      {"ms_per_token", json_decimal3(timings->predicted_per_token_ms)}}}};
+    if (timings->recovery.discarded_tool_calls != 0 ||
+        timings->recovery.discarded_reasoning_tokens != 0) {
+        const auto& recovery = timings->recovery;
+        ninfer["recovery"] = {{"attempts", recovery.attempts},
+                              {"discarded_tool_calls", recovery.discarded_tool_calls},
+                              {"discarded_reasoning_tokens", recovery.discarded_reasoning_tokens},
+                              {"prefill_tokens", recovery.prefill_tokens},
+                              {"prefill_samples", recovery.prefill_samples},
+                              {"prepare_ms", json_decimal3(recovery.prepare_seconds * 1000.0)},
+                              {"prefill_ms", json_decimal3(recovery.prefill_seconds * 1000.0)}};
+    }
     if (timings->kv_ram_capacity_bytes != 0) {
         // Host KV RAM tier: live engine-wide gauges at request end, this request's
         // D2H/H2D copy time, and engine-lifetime cumulative counters.
@@ -617,6 +630,20 @@ Json usage_to_json(const CompletionUsage& usage, const CompletionTimings* timing
                               {"restores", timings->kv_ram_restores},
                               {"evictions", timings->kv_ram_evictions},
                               {"drops", timings->kv_ram_drops}}}};
+    }
+    if (timings->kv_disk_capacity_bytes != 0) {
+        // Host KV disk tier: live gauges, this request's SSD-to-host restore wall,
+        // post-disk H2D wall, and engine-lifetime cumulative counters.
+        ninfer["kv_disk"] = {{"used_bytes", timings->kv_disk_used_bytes},
+                             {"entry_count", timings->kv_disk_entry_count},
+                             {"save_ms", json_decimal3(timings->kv_disk_save_ms)},
+                             {"load_ms", json_decimal3(timings->kv_disk_load_ms)},
+                             {"h2d_ms", json_decimal3(timings->kv_disk_h2d_ms)},
+                             {"lifetime",
+                              {{"captures", timings->kv_disk_captures},
+                               {"restores", timings->kv_disk_restores},
+                               {"evictions", timings->kv_disk_evictions},
+                               {"drops", timings->kv_disk_drops}}}};
     }
     ptd["ninfer"] = std::move(ninfer);
     out["prompt_tokens_details"] = std::move(ptd);
@@ -636,8 +663,10 @@ CompletionTimings make_completion_timings(int prompt_tokens, int completion_toke
                                            double prefill_seconds, double decode_seconds,
                                            int draft_n, int draft_n_accepted,
                                            double prefill_tail_tok_s,
-                                           double prefill_tail_window_s, int prompt_reused) {
+                                           double prefill_tail_window_s, int prompt_reused,
+                                           const ninfer::GenerationRecoveryStats& recovery) {
     CompletionTimings out;
+    out.recovery = recovery;
     out.prompt_n            = prompt_tokens;
     out.prompt_reused_n     = std::max(0, std::min(prompt_reused, prompt_tokens));
     out.prompt_ms           = prefill_seconds * 1000.0;
@@ -653,7 +682,7 @@ CompletionTimings make_completion_timings(int prompt_tokens, int completion_toke
     out.prefill_tail_tok_s    = prefill_tail_tok_s;
     out.prefill_tail_window_s = prefill_tail_window_s;
     // First completion token is sampled during prefill; decode.ms is later rounds only.
-    const int decode_tokens = decode_eval_tokens(completion_tokens);
+    const int decode_tokens = decode_eval_tokens(completion_tokens, recovery.prefill_samples);
     out.predicted_n  = decode_tokens;
     out.predicted_ms = decode_seconds * 1000.0;
     out.predicted_per_token_ms =

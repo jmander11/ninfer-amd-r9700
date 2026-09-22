@@ -33,6 +33,9 @@ namespace ninfer::ops::r9700::eager {
 [[nodiscard]] hipError_t i32_add_scalars(const std::int32_t* lhs, const std::int32_t* rhs,
                                          std::int32_t* destination,
                                          hipStream_t stream) noexcept;
+[[nodiscard]] hipError_t i32_offset_rows(const std::int32_t* source, const std::int32_t* deltas,
+                                       std::int32_t* destination, std::size_t width,
+                                       std::size_t rows, hipStream_t stream) noexcept;
 [[nodiscard]] hipError_t i32_increment(std::int32_t* scalar, hipStream_t stream) noexcept;
 [[nodiscard]] hipError_t i64_increment(std::int64_t* scalar, hipStream_t stream) noexcept;
 

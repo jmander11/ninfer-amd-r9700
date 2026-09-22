@@ -26,7 +26,7 @@ from tools.bench.prepare_selected_vision_diagnostic import (
 )
 
 
-CAPTURES = ("block_00", "block_13", "block_26", "merger")
+from tools.parity.qwen3_8_27b.vision_contract import EXPECTED_TRACE_NAMES as CAPTURES, GATE, REPORT_FORMAT, CRITERIA, summarize, trace_shapes
 
 
 def validate_closure(root: Path, plan_path: Path) -> dict[Path, str]:
@@ -139,14 +139,14 @@ def validate(plan_path: Path, root: Path, *, route_resolver=resolve_route) -> di
         "maximum_concurrency": 1, "thinking": False, "prefix_reuse": False,
         "speculative_decode": False, "images": 1, "videos": 0,
         "capture_names": list(CAPTURES),
-        "gate": "diagnostic completion with finite exact-shape comparisons; no numeric threshold",
+        "gate": GATE,
     }
     expected_outputs = {
         "raw": str(root / "vision.raw.json"), "admission": str(root / "admission.json")
     }
     if (
         plan.get("artifact_type") != "ninfer_r9700_selected_vision_diagnostic_plan"
-        or plan.get("schema_version") != 1
+        or plan.get("schema_version") != 2
         or plan.get("status") != "command_only_not_executed"
         or plan.get("workload") != expected_workload
         or plan.get("outputs") != expected_outputs
@@ -162,59 +162,74 @@ def validate(plan_path: Path, root: Path, *, route_resolver=resolve_route) -> di
     raw_bytes = raw_path.read_bytes()
     raw = json.loads(raw_bytes)
     artifact = raw.get("artifact", {})
-    raw_input = raw.get("input", {})
-    execution = raw.get("execution")
+    expected_source = _expected_source()
+    tracer = plan.get("trace_executable", {})
+    tracer_path = Path(tracer.get("path", ""))
+    if (not tracer_path.is_file() or file_identity(tracer_path) != tracer or
+            tracer_path.resolve() not in closure):
+        raise ValueError("selected Vision tracer identity changed")
     if (
-        raw.get("format") != "ninfer_vision_bf16_comparison_v3"
-        or raw.get("scope") != "diagnostic-only"
-        or artifact.get("path") != route["artifact"]["path"]
-        or artifact.get("sha256") != route["artifact"]["sha256"]
-        or artifact.get("identity") != {
-            "model_id": route["artifact"]["model_id"],
-            "weights_id": route["artifact"]["weights_id"],
-        }
-        or raw.get("source") != _expected_source()
-        or raw_input.get("messages_path") != fixture["messages"]["path"]
-        or raw_input.get("messages_sha256") != fixture["messages"]["sha256"]
-        or raw_input.get("thinking") is not False
-        or raw_input.get("prepared_input") != {
-            "path": prepared["path"], "sha256": prepared["sha256"], "contract": contract
-        }
-        or execution != {
-            "maximum_concurrency": 1, "thinking": False, "prefix_reuse": False,
-            "speculative_decode": False,
-        }
-        or raw.get("image_grid_thw") != [grid]
-        or raw.get("video_grid_thw") is not None
+        raw.get("format") != REPORT_FORMAT
+        or raw.get("passed") is not True
+        or artifact != {"path": route["artifact"]["path"],
+                        "sha256": route["artifact"]["sha256"],
+                        "identity": {"model_id": route["artifact"]["model_id"],
+                                     "weights_id": route["artifact"]["weights_id"]}}
+        or raw.get("model_dir") != expected_source["path"]
+        or raw.get("source_provenance") != {k: v for k, v in expected_source.items() if k != "path"}
+        or raw.get("messages") != fixture["messages"]["path"]
+        or raw.get("messages_sha256") != fixture["messages"]["sha256"]
+        or raw.get("prepared_input") != {
+            "path": prepared["path"], "sha256": prepared["sha256"], "contract": contract}
+        or raw.get("trace_executable") != {"path": tracer["path"], "sha256": tracer["sha256"]}
     ):
         raise ValueError("Vision raw identity or execution contract differs")
-    stats = raw.get("vision", {})
-    if stats != {
-        "images": 1, "videos": 0, "raw_patches": patches,
-        "llm_tokens": tokens, "attention_pairs": grid[0] * (grid[1] * grid[2]) ** 2,
-    }:
-        raise ValueError("Vision raw geometry differs from prepared input")
-    comparisons = raw.get("comparisons")
-    if not isinstance(comparisons, dict) or list(comparisons) != list(CAPTURES):
-        raise ValueError("Vision raw report lacks exact capture inventory")
-    for name, row in comparisons.items():
-        expected_shape = [tokens, 5120] if name == "merger" else [patches, 1152]
-        if not isinstance(row, dict) or row.get("shape") != expected_shape:
-            raise ValueError(f"Vision capture {name} has wrong shape")
-        numeric = [row.get(key) for key in (
-            "rmse", "relative_rmse", "cosine", "actual_norm", "reference_norm"
-        )]
-        if not all(isinstance(value, (int, float)) and math.isfinite(value) for value in numeric):
-            raise ValueError(f"Vision capture {name} has nonfinite metrics")
-        if row["rmse"] < 0 or row["relative_rmse"] < 0 or row["actual_norm"] <= 0 \
-                or row["reference_norm"] <= 0 or not -1.000001 <= row["cosine"] <= 1.000001:
-            raise ValueError(f"Vision capture {name} has invalid metrics")
+    def finite(value):
+        if isinstance(value, float) and not math.isfinite(value):
+            raise ValueError("Vision report contains nonfinite metrics")
+        if isinstance(value, dict):
+            for member in value.values(): finite(member)
+        elif isinstance(value, list):
+            for member in value: finite(member)
+    finite(raw)
+    if raw.get("criteria") != CRITERIA:
+        raise ValueError("Vision numerical criteria differ from the active contract")
+    shapes = trace_shapes(patches, tokens)
+    for section in ("production_vs_artifact_reference", "production_local_op_oracles",
+                    "artifact_vs_source_bf16"):
+        report = raw.get(section, {})
+        rows = report.get("comparisons")
+        if report.get("passed") is not True or not isinstance(rows, list):
+            raise ValueError(f"Vision {section} did not pass its numerical criteria")
+        if len(rows) != len(CAPTURES) or {row.get("name") for row in rows} != set(CAPTURES):
+            raise ValueError(f"Vision {section} lacks exact capture inventory")
+        for row in rows:
+            if (row.get("item") != 0 or row.get("shape") != shapes[row["name"]] or
+                    row.get("actual_finite") is not True or row.get("reference_finite") is not True):
+                raise ValueError(f"Vision capture {row.get('name')} has wrong shape or nonfinite data")
+            for key in ("rmse", "relative_rmse", "max_absolute", "actual_rms", "reference_rms"):
+                if not isinstance(row.get(key), (int, float)) or row[key] < 0:
+                    raise ValueError("Vision capture has invalid metrics")
+            if not isinstance(row.get("cosine"), (int, float)) or not -1.000001 <= row["cosine"] <= 1.000001:
+                raise ValueError("Vision capture has invalid cosine")
+        profile = {"production_vs_artifact_reference": "production",
+                   "production_local_op_oracles": "local",
+                   "artifact_vs_source_bf16": "source"}[section]
+        try:
+            evaluated = summarize(rows, profile=profile)
+        except (KeyError, TypeError, RuntimeError) as error:
+            raise ValueError(f"Vision {section} has incomplete numerical metrics") from error
+        if not evaluated["passed"]:
+            raise ValueError(f"Vision {section} failed numerical criteria")
+    for section in ("preprocessing", "artifact_weights_vs_source_bf16", "source_manual_vs_hf_final"):
+        if raw.get(section, {}).get("passed") is not True:
+            raise ValueError(f"Vision {section} did not pass")
     if sha(plan_path) != hashlib_sha(plan_raw) or sha(raw_path) != hashlib_sha(raw_bytes):
         raise ValueError("Vision evidence changed while validating")
     return {
         "artifact_type": "ninfer_r9700_selected_vision_diagnostic_completion",
-        "schema_version": 1,
-        "status": "complete_diagnostic_no_numeric_threshold",
+        "schema_version": 2,
+        "status": "complete_intermediate_validation",
         "terminal_route": route,
         "campaign": {
             "plan": {"path": str(plan_path), "sha256": sha(plan_path)},
@@ -223,7 +238,7 @@ def validate(plan_path: Path, root: Path, *, route_resolver=resolve_route) -> di
         },
         "evidence": {"path": str(raw_path), "sha256": sha(raw_path)},
         "source_checkpoint": source_identity,
-        "gate": "finite_exact_shape_diagnostic_completed_without_numeric_threshold",
+        "gate": GATE,
     }
 
 

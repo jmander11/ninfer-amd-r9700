@@ -2,8 +2,8 @@
 
 `eval/` contains the repository-local capability evaluation coordinator. It can evaluate this
 project's server, another local OpenAI-compatible service, or a remote online model. The inference
-engine is only one possible target; its single-sequence limitation is represented by
-`max_concurrency: 1`, not built into the framework.
+engine is only one possible target. R9700 campaigns use one resident Engine at startup-fixed
+`max_concurrency: 1..4`; the evaluation coordinator itself is target-independent.
 
 EvalScope is the first real evaluation backend. The coordinator, configuration, logging, progress,
 resume, and result contracts do not import or depend on EvalScope. The deterministic `mock` backend
@@ -159,6 +159,28 @@ BFCL into an invented cross-benchmark score.
 
 A partial or failed job makes the run `partial` or `failed`; an incomplete BFCL run is never labeled
 as the official full BFCL score.
+
+## P-less comparison
+
+`configs/qwen3_8_27b_p_less_aime_temp.yaml` compares AIME25/AIME26 at temperatures
+0.6, 1.0, 1.5, and 2.0. The runner starts sequential opt-out and default-p-less
+servers at C=1, retaining the same client fields. It uses the fixed R9700 cache
+and MTP3; these results do not qualify DFlash.
+
+Run with explicit local prerequisites (no model download or capacity guessing):
+
+```bash
+NINFER_P_LESS_AIME_ARTIFACT=/absolute/path/to/selected.ninfer \
+NINFER_P_LESS_AIME_MAX_CONTEXT=32768 \
+bash eval/run_qwen3_8_27b_p_less_aime_temp.sh
+```
+
+Choose the context capacity qualified for that artifact. The runner requires the
+existing evaluation environment in `eval/.venv`; `NINFER_SERVE_BIN` selects a local
+server when not running in the builder. Use `--plan` to inspect the evaluation plan.
+No quality improvement is assumed: compare accuracy, completion length, and end-to-end rate.
+`python3.11 eval/compare_viewer.py --open` provides live paired transcript comparison
+from the retained evaluation JSONL.
 
 ## Adding Evaluations
 

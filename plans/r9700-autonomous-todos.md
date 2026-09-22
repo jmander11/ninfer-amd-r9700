@@ -73,6 +73,96 @@ above apply to every command.
 
 ### Current checkpoint
 
+ACTIVE FULL FEATURE PARITY (user-authorized 2026-09-21): port all applicable non-kernel
+features from upstream experimental `e04fad37`, including p-less/epsilon sampling and its
+1/1024 probability floor, tool constraints/reasoning recovery, scheduling/host overhead,
+durable SSD cache and startup improvements. Implement necessary HIP sampling semantics;
+evaluate upstream DFlash/GDN/attention kernel changes individually for porting. Preserve the
+sole Qwen3.8-27B/gfx1201 target, fixed FP8-K/INT4-V/FP16-scale growing cache, BF16 DFlash
+selector/private state, C<=4 and model artifacts. This explicitly authorizes the feature changes
+previously awaiting a product decision. Do not restore CUDA or additional model targets.
+
+- [x] Sampling/API: p-less, epsilon/floor, suppression, masks/cycle exclusion, ordinary and speculative correctness.
+- [ ] Host runtime: reasoning/tool generation and recovery, chain/adaptive DFlash, vision integration, scheduling/telemetry.
+- [x] Storage/startup: durable SSD cache, RAM recovery/ownership, parallel loading and pinned initialization.
+- [ ] Product/tooling: CLI/server contracts, xgrammar, Docker/build/test/evaluation tools and active documentation.
+- [x] Kernel delta assessment: DFlash/GDN/attention/projection mechanisms, equivalence/port/rejection evidence.
+- [ ] Integrated qualification and coherent commits/push; close all feature gaps or document an external blocker.
+
+Kernel assessment for `c450798c..e04fad37` (source review, not a performance claim):
+
+Integration verification checkpoint (2026-09-21, worktree
+`ninfer-amd-r9700-upstream-integration-20260921`, build
+`build-r9700-upstream-integration`): full build passed before the final diagnostic additions.
+R9700/auto physical sampling, speculative-round, selector and RoPE independent oracle qualifiers
+pass; fixed RAM/SSD exact-byte/raw/zstd/restart/Vision-identity/CRC test passes. Real C1 ordinary
+and DFlash K4 graph tool requests return the same schema-valid echo call. Positive-temperature
+p-less adaptive DFlash and image-chart Vision+DFlash K5 both complete. RoPE required an exact
+occupied-range alias check for interleaved Vision Q/K; FP64 output and untouched V are verified.
+C2 DFlash graph startup/tool isolation/disconnect/streaming now passes after distinguishing
+the W5/W6 attention topology change at 8192 visible keys. Short final-assistant PPL now scores
+four finite targets from the actual rendered token boundary. Public SSD restart restores
+38 tokens and matches all16 cold greedy output tokens; recovered statistics publish at startup.
+Native Vision traces capture471 boundaries for one image and942 for two, with exact aggregate
+versus individual outputs. Focused host suite17/17 and benchmark Python tests10/10 pass.
+Selected-Vision planner/validator now closes over the actual native tracer and requires all471
+captures in each profile, exact identities, finite metrics and replayed shared numerical gates;
+20 Python tests plus3 corruption subtests pass with independent source review.
+Remaining integration work: physically qualify per-sequence DFlash selector projection and rebind
+the MTP Device Graph allowance to the enlarged sampling/tool graph (C1/K3 measured58MiB versus old48MiB).
+Keep the strict memory guard; do not claim full parity or run a performance campaign until these
+and the remaining checklist close.
+
+- **Ported for feature correctness:** full-domain p-less ordinary/speculative sampling,
+  configured argmax eligibility, root-only cycle exclusion, DFlash p-less one-hot proposal,
+  and per-row position offsets. HIP uses wave32/hipCUB and device-scope release/acquire
+  completion counters with caller-owned shared-layout workspace. Independent CPU-only review
+  admits these sources to the sampling/speculative/path-select physical oracle qualifiers;
+  compile success alone does not qualify numerical results or speed.
+- **DFlash selector parallel merge: applicable optimization, retain incumbent for this port.**
+  Upstream `src/ops/kernel/dflash2_path_select.cuh` replaces thread-zero insertion of 512
+  split candidates with sixteen block-wide rank reductions. AMD
+  `src/ops/r9700/dflash/dflash2_path_select_kernels.h` still has the serial exact merge;
+  it is not already equivalent in performance. Both preserve value-descending/id-ascending
+  ordering, so no new public behavior requires replacement. The challenger adds sixteen
+  block reductions/barrier chains; NVIDIA improvement does not establish R9700 benefit.
+  No promotion or speed claim is made without matched physical selector and whole-DFlash
+  evidence. P-less greedy proposal semantics were ported independently of this optimization.
+- **DFlash selector per-sequence projection: applicable numerical isolation, ported.**
+  Both chain and tree wrappers now project one sequence's T columns at a time, reusing
+  caller-owned scratch. Flattening T*C could select a different BF16/W8 reduction route as
+  other requests entered the batch. Projection workspace is sized for T, while selector
+  scratch remains sized for T*C. The selector qualifier compares packed outputs exactly with
+  separate C1 calls (IDs, proposal probabilities and every tree state output), alongside the
+  independent FP64 oracle; companion K4/K5 C4 runs cover the width-dependent route boundaries.
+- **GDN replay/state: supported behavior already covered by the AMD route.** Upstream
+  recurrent `OverlayAccess` and replay changes use transient state overlays plus raw
+  key/value/gate records. AMD `gdn_recurrence/gated_delta_net.hip` and
+  `gdn_replay_fold.hip` already record raw BF16 K/V and FP32 gates and fold the committed
+  prefix into FP32 persistent state. Program retains its typed KV rollback/publication and
+  selected-path fold. Copying CUDA state addressing would replace this qualified ownership
+  design without adding a required host feature.
+- **GDN control/projection: retain AMD qualified leaves.** Upstream specializes packed BF16
+  control GEMV for T5/T6 and extends packed T to20, and adds FP8/projected-convolution paths.
+  AMD owns BF16 control in `gdn/gdn_ops.hip` and the package's
+  `Variant::gdn_norm_control_projection`; its integer/FP8 projection contracts and workspace
+  differ. Adaptive W4/W5/W6 uses these existing leaves, not NVIDIA dispatch. Fusing away
+  convolution scratch is not valid without replacing and qualifying the AMD leaf, so its
+  `GdnPrefillConvRoots.convolved` storage is deliberately retained.
+- **Chunked GDN precision: not a mechanical port.** Upstream adds FP16 W/U staging alongside
+  BF16 using `mma_f16`, `ldmatrix` and CUDA shared-memory layouts. AMD has independent
+  recurrence/affine-chunk implementations and numerical qualification. Importing the CUDA
+  intermediate precision would change the R9700 arithmetic profile without evidence;
+  host-feature parity neither requires that profile nor proves it faster or more accurate.
+- **Attention/projection: target-specific implementations retained.** Upstream sparse
+  prefill/rank-sort changes operate on its NVFP4/U8 cache route; AMD's only growing cache is
+  typed FP8-K/INT4-V/FP16-scale, consumed by `kv/fp8_int4_kv_attention.hip` and its separate
+  XAttention route. Upstream's minimum-length dispatch adjustment is not the AMD dense
+  product predicate. New FP8/NVFP4 linear/add/SwiGLU routes do not replace the selected
+  Q4/W8/FP8 AMD leaf implementations or BF16 selector codebooks. These are implementation
+  alternatives, not missing host semantics; no CUDA kernel or new weight/cache format was
+  admitted on an unsupported equivalence assumption.
+
 COMPLETED BOUNDED UPSTREAM INTEGRATION: upstream `experimental` fetched at `e04fad37`; AMD
 checkpoint `41e272ee` was preserved while integration was verified on
 `integration/upstream-experimental-20260921` in the sibling `ninfer-amd-r9700-upstream-integration-20260921`

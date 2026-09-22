@@ -14,6 +14,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -58,6 +59,8 @@ struct PersistentLayout {
     TensorLayout prefill_hidden;
     TensorLayout token_counts;
     TensorLayout sampling_config;
+    TensorLayout tool_token_masks;
+    TensorLayout tool_sampling_config;
     TensorLayout tail_hidden;
     TensorLayout rewrite_checkpoint_hidden;
     std::optional<TensorLayout> staging_hidden;
@@ -87,12 +90,19 @@ struct SequencePlanningInputs {
     std::uint32_t prefill_chunk            = 0;
     std::uint32_t draft_window             = 0;
     std::uint32_t dflash_verify_width      = 0;
+    bool adaptive_draft = false;
     SpeculativeBackend speculative_backend = SpeculativeBackend::None;
     ProposalHead proposal_head             = ProposalHead::Full;
     StartupFeatures features;
     bool use_device_graph = true;
     int device          = 0;
     std::size_t kv_ram_capacity_bytes = 0;
+    std::size_t kv_disk_capacity_bytes = 0;
+    std::filesystem::path kv_disk_location;
+    KvDiskCompress kv_disk_compress = KvDiskCompress::Off;
+    std::string model_id;
+    std::string weights_id;
+    std::string artifact_file_identity;
     std::vector<std::uint32_t> context_checkpoint_marks;
 };
 
@@ -110,12 +120,20 @@ struct SequencePlanImpl<NINFER_QWEN3_VARIANT> {
     std::uint32_t prefill_chunk            = 0;
     std::uint32_t draft_window             = 0;
     std::uint32_t dflash_verify_width      = 0;
+    bool adaptive_draft = false;
+    std::vector<std::uint32_t> captured_ks;
     SpeculativeBackend speculative_backend = SpeculativeBackend::None;
     ProposalHead proposal_head             = ProposalHead::Full;
     StartupFeatures features;
     bool use_device_graph = true;
     int device          = 0;
     std::size_t kv_ram_capacity_bytes = 0;
+    std::size_t kv_disk_capacity_bytes = 0;
+    std::filesystem::path kv_disk_location;
+    KvDiskCompress kv_disk_compress = KvDiskCompress::Off;
+    std::string model_id;
+    std::string weights_id;
+    std::string artifact_file_identity;
     std::vector<std::uint32_t> context_checkpoint_marks;
     NINFER_QWEN3_RUNTIME_NS::PersistentLayout persistent;
     NINFER_QWEN3_RUNTIME_NS::WorkspacePlan workspace;

@@ -221,6 +221,7 @@ ModelSamplingDefaults Engine::sampling_defaults() const {
 }
 
 GenerationHandle Engine::submit(PreparedPrompt prompt, RequestOptions options,
+                                OutputDelivery delivery,
                                 std::chrono::steady_clock::time_point pending_deadline,
                                 HostInputLease host_input) {
     if (impl_ == nullptr) { throw std::logic_error("Engine is moved from"); }
@@ -280,14 +281,16 @@ GenerationHandle Engine::submit(PreparedPrompt prompt, RequestOptions options,
     }
     auto submission = impl_->executor->submit(std::move(prompt.impl_->value), prompt_summary,
                                               prepare_seconds, std::move(resolved_options),
-                                              pending_deadline, std::move(host_input));
+                                              delivery, pending_deadline, std::move(host_input));
     return GenerationHandle(std::make_unique<GenerationHandle::Impl>(
         impl_, std::move(submission), resolved_sampling));
 }
 
 GenerationResult Engine::generate(PreparedPrompt prompt, RequestOptions options, OutputSink* sink,
                                   const CancellationView& cancellation) {
-    return submit(std::move(prompt), std::move(options)).wait(sink, cancellation);
+    const OutputDelivery delivery =
+        sink == nullptr ? OutputDelivery::TerminalOnly : OutputDelivery::Streaming;
+    return submit(std::move(prompt), std::move(options), delivery).wait(sink, cancellation);
 }
 
 ScoreResult Engine::score(PreparedPrompt prompt, ScoreOptions options) {

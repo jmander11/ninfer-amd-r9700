@@ -39,6 +39,27 @@ inline constexpr std::uint32_t kPrefillChunkAlignment    = Variant::prefill_chun
 inline constexpr std::uint32_t kMaximumMtpDraftTokens    = Variant::maximum_mtp_draft_tokens;
 inline constexpr std::uint32_t kMaximumDFlashDraftTokens = Variant::maximum_dflash_draft_tokens;
 
+// Auto verify width from k when --dflash-verify-width is omitted. Product DFlash is chain W=k+1.
+// A tree-capable package may still select a wider default for a native draft window.
+[[nodiscard]] inline constexpr std::uint32_t dflash_default_verify_width(std::uint32_t draft_window) {
+    if constexpr (!DFlashConfig::tree_verify) {
+        return draft_window + 1U;
+    } else {
+        if constexpr (DFlashConfig::two_block_first > 0) {
+            if (draft_window > static_cast<std::uint32_t>(DFlashConfig::two_block_first)) {
+                return draft_window + 1U;
+            }
+        }
+        if (draft_window <= 5U) { return draft_window + 1U; }
+        return static_cast<std::uint32_t>(DFlashConfig::verify_width);
+    }
+}
+
+[[nodiscard]] inline constexpr std::uint32_t dflash_verify_width(std::uint32_t draft_window,
+                                                                std::uint32_t override_width = 0) {
+    return override_width != 0 ? override_width : dflash_default_verify_width(draft_window);
+}
+
 // Packed-tree verify and GDN/KV path fold for a tree-capable package. W == k+1 is chain.
 [[nodiscard]] inline constexpr bool dflash_uses_tree_verify(std::uint32_t draft_window,
                                                             std::uint32_t verify_width) {
@@ -56,6 +77,28 @@ inline constexpr std::uint32_t kMaximumDFlashDraftTokens = Variant::maximum_dfla
     return true;
 }
 
+[[nodiscard]] inline constexpr std::uint32_t
+dflash_captured_verify_width(std::uint32_t k, std::uint32_t storage_ceil) {
+    const std::uint32_t live = dflash_verify_width(k, 0);
+    return live <= storage_ceil ? live : storage_ceil;
+}
+
+// Storage / ReplaySSM / pending-features width. Adaptive `{3,4,5}` is chain W<=6.
+// An explicit --dflash-verify-width still wins; chain-only packages require W=k+1.
+[[nodiscard]] inline std::uint32_t
+dflash_storage_verify_width(std::span<const std::uint32_t> captured_ks,
+                            std::uint32_t draft_window, std::uint32_t override_width) {
+    if (override_width != 0) {
+        return dflash_verify_width(draft_window, override_width);
+    }
+    std::uint32_t ceil = 0;
+    for (const std::uint32_t k : captured_ks) {
+        const std::uint32_t w = dflash_default_verify_width(k);
+        if (w > ceil) { ceil = w; }
+    }
+    return ceil != 0 ? ceil : dflash_default_verify_width(draft_window);
+}
+
 inline std::vector<GraphExecutionProfile> ordinary_graph_profiles(std::uint32_t capacity) {
     return Variant::ordinary_graph_profiles(capacity);
 }
@@ -70,6 +113,26 @@ inline std::vector<GraphExecutionProfile> dflash_graph_profiles(std::uint32_t ca
                                                                 std::uint32_t batch_size,
                                                                 std::uint32_t verify_width) {
     return Variant::dflash_graph_profiles(capacity, draft_window, batch_size, verify_width);
+}
+
+inline std::uint32_t speculative_graph_stride(std::uint32_t capacity,
+                                               std::uint32_t max_concurrency,
+                                               std::span<const std::uint32_t> ks,
+                                               SpeculativeBackend backend,
+                                               std::uint32_t storage_width) {
+    std::uint32_t maximum = 0;
+    for (const auto k : ks) {
+        for (std::uint32_t batch = 1; batch <= max_concurrency; ++batch) {
+            const auto profiles = backend == SpeculativeBackend::Mtp
+                ? mtp_graph_profiles(capacity, k)
+                : dflash_graph_profiles(capacity, k, batch,
+                                       dflash_captured_verify_width(k, storage_width));
+            for (const auto& profile : profiles) {
+                maximum = std::max(maximum, profile.topology_class);
+            }
+        }
+    }
+    return max_concurrency * (maximum + 1U);
 }
 
 } // namespace ninfer::targets::qwen3::detail::NINFER_QWEN3_RUNTIME_NS

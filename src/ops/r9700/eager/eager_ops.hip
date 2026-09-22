@@ -791,6 +791,23 @@ hipError_t i32_offset_scalar(const std::int32_t* source, const std::int32_t* del
                                                    destination, count); });
 }
 
+__global__ void offset_rows_kernel(const std::int32_t* source, const std::int32_t* deltas,
+                                   std::int32_t* destination, std::size_t width) {
+    const std::size_t column = blockIdx.x * blockDim.x + threadIdx.x;
+    const std::size_t row = blockIdx.y;
+    if (column < width) destination[row * width + column] = source[row * width + column] + deltas[row];
+}
+
+hipError_t i32_offset_rows(const std::int32_t* source, const std::int32_t* deltas,
+                            std::int32_t* destination, std::size_t width,
+                            std::size_t rows, hipStream_t stream) noexcept {
+    return checked_launch(source && deltas && destination && valid_linear_count(width) &&
+                              rows > 0 && rows <= 4 && valid_stream(stream), [&] {
+        hipLaunchKernelGGL(offset_rows_kernel, dim3((width + kBlock - 1) / kBlock, rows),
+                           dim3(kBlock), 0, stream, source, deltas, destination, width);
+    });
+}
+
 hipError_t i32_add_scalars(const std::int32_t* lhs, const std::int32_t* rhs,
                            std::int32_t* destination, hipStream_t stream) noexcept {
     return checked_launch(lhs != nullptr && rhs != nullptr && destination != nullptr &&

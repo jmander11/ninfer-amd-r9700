@@ -3,7 +3,9 @@
 NInfer is a from-scratch C++/HIP inference engine specialized for one AMD Radeon AI PRO R9700
 (`gfx1201`, wave32) and the Qwen3.8-27B model. It supports local CLI generation, OpenAI and
 Anthropic compatible HTTP serving, teacher-forced perplexity scoring, fixed concurrency from one to
-four requests, Vision input, MTP, DFlash2, prefix reuse, host-RAM prefix spill, and Device Graphs.
+four requests, Vision input (including DFlash2), MTP, DFlash2, prefix reuse, host-RAM prefix spill,
+optional persistent SSD prefix storage, and Device Graphs. Generation includes p-less sampling,
+schema-constrained tool calls, thinking-cycle exclusion, and bounded repetition recovery.
 
 There is no compatibility backend and no runtime cache-format selector. The growing
 Text/MTP cache has one fixed represented format:
@@ -172,6 +174,19 @@ MTP and DFlash2 are startup-fixed backends. DFlash2 is the preferred speculative
 R9700 product and is the only backend with remaining feature/performance work. MTP remains a
 supported, already-implemented path whose cache, row-view, state, and exact-execution behavior are
 kept under regression coverage; no new MTP optimization is required for product completion.
+
+DFlash uses a single-block chain with at most five drafts. Optional startup-enabled adaptive
+drafting captures the supported K-specific graphs in advance and chooses one K for the whole
+compact batch at a round boundary; it does not split requests into acceptance cohorts. P-less
+is the request default (explicit temperature zero remains greedy); top-k, top-p, min-p, and
+presence/frequency penalties are ignored in that mode. Tool eligibility and suppressed tokens
+still apply. Recovery can rebuild a repeating text-only thinking request on its existing lane,
+within its original budget, at most twice; it never retracts already streamed prose or reasoning.
+
+Optional SSD prefix storage requires a nonzero RAM tier and an explicit location and capacity.
+It stores exact fixed-format cache/checkpoint bytes, can restore across restarts with a matching
+model fingerprint, and never offloads an active request. See `docs/cli.md` and executable `--help`
+for the exact sampling, adaptive-draft, recovery, and cache options.
 
 ```sh
 build-r9700/apps/ninfer models/qwen3_8_27b_r9700_dflash_candidate.ninfer \

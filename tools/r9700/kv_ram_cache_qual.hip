@@ -195,7 +195,8 @@ int main() {
         source.stream = device.copy_stream;
 
         q3::detail::KVRamCache cache(8U << 20);
-        require(cache.capture(source), "Text+MTP KV RAM capture failed");
+        require(cache.capture(source).status == q3::detail::RamCaptureStatus::Captured,
+                "Text+MTP KV RAM capture failed");
         const auto match = cache.plan_match(prompt, q3::detail::prefix_hash_chain(prompt));
         require(match.has_value(), "captured KV RAM entry did not match its exact identity");
 
@@ -279,8 +280,15 @@ int main() {
         const std::size_t entry_bytes = cache.snapshot().used_bytes;
         require(entry_bytes != 0, "captured KV RAM entry has no storage");
         q3::detail::KVRamCache eviction_cache(entry_bytes + 255U);
-        require(eviction_cache.capture(source), "eviction probe first capture failed");
-        require(eviction_cache.capture(source), "eviction probe replacement capture failed");
+        require(eviction_cache.capture(source).status == q3::detail::RamCaptureStatus::Captured,
+                "eviction probe first capture failed");
+        require(eviction_cache.capture(source).status == q3::detail::RamCaptureStatus::NeedsEviction,
+                "full RAM cache did not request eviction");
+        const auto victim = eviction_cache.peek_oldest_unpinned();
+        require(victim && eviction_cache.evict_one_unpinned(*victim),
+                "eviction probe could not release the oldest entry");
+        require(eviction_cache.capture(source).status == q3::detail::RamCaptureStatus::Captured,
+                "eviction probe replacement capture failed");
         const auto eviction = eviction_cache.snapshot();
         require(eviction.entry_count == 1 && eviction.captures == 2 && eviction.evictions == 1,
                 "unpinned FIFO entry was not evicted for the replacement image");

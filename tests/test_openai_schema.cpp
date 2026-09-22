@@ -5,7 +5,6 @@
 
 #include "serve/openai_schema.h"
 #include "serve/request.h"
-#include "serve/tool_call_parser.h"
 #include "serve/translate.h"
 
 #include <nlohmann/json.hpp>
@@ -620,6 +619,13 @@ int test_response_serialization() {
     failures += check(ptd.at("cached_tokens") == 0, "ptd cached_tokens zero on cache miss");
     failures += check(ninfer_ptd.at("ttft_ms") == 358.025, "ttft_ms rounded to three decimals");
     failures += check(ninfer_ptd.at("reuse_source") == "host_ram", "reuse_source host_ram");
+    timings.prefix_reuse_source = ninfer::PrefixReuseSource::HostDisk;
+    const Json disk_source = Json::parse(
+        make_chat_completion_response("id-1d", "m", 111, "hello world", "", "stop", usage, &timings));
+    failures += check(disk_source.at("usage").at("prompt_tokens_details").at("ninfer").at("reuse_source") ==
+                          "host_disk",
+                      "reuse_source host_disk");
+    timings.prefix_reuse_source = ninfer::PrefixReuseSource::HostRam;
     failures += check(ninfer_ptd.at("prefix_reuse_path") == "full_reset",
                       "prefix_reuse_path defaults to full_reset");
     failures += check(ninfer_ptd.at("prefill").at("ms") == 250.0, "prefill ms");
@@ -643,6 +649,30 @@ int test_response_serialization() {
     failures += check(kv_ram.at("lifetime").at("evictions") == 0, "kv_ram lifetime evictions");
     failures += check(kv_ram.at("lifetime").at("drops") == 1, "kv_ram lifetime drops");
     failures += check(!kv_ram.contains("capacity_bytes"), "kv_ram serializes pin capacity");
+    timings.kv_disk_capacity_bytes = 2097152;
+    timings.kv_disk_used_bytes     = 1048576;
+    timings.kv_disk_entry_count    = 2;
+    timings.kv_disk_captures       = 5;
+    timings.kv_disk_restores       = 3;
+    timings.kv_disk_evictions      = 1;
+    timings.kv_disk_drops          = 0;
+    timings.kv_disk_save_ms        = 5.0;
+    timings.kv_disk_load_ms        = 9.0;
+    timings.kv_disk_h2d_ms         = 12.0;
+    const Json disk_usage = Json::parse(
+        make_chat_completion_response("id-1k", "m", 111, "hello world", "", "stop", usage, &timings));
+    const Json& kv_disk =
+        disk_usage.at("usage").at("prompt_tokens_details").at("ninfer").at("kv_disk");
+    failures += check(kv_disk.at("used_bytes") == 1048576, "kv_disk used_bytes gauge");
+    failures += check(kv_disk.at("load_ms") == 9.0, "kv_disk per-request load_ms");
+    failures += check(kv_disk.at("h2d_ms") == 12.0, "kv_disk per-request h2d_ms");
+    timings.kv_disk_h2d_ms = 0.0;
+    const Json disk_zero = Json::parse(
+        make_chat_completion_response("id-1kz", "m", 111, "hello world", "", "stop", usage, &timings));
+    failures += check(disk_zero.at("usage").at("prompt_tokens_details").at("ninfer").at("kv_disk").at(
+                          "h2d_ms") == 0.0,
+                      "kv_disk emits zero h2d_ms by default");
+    failures += check(kv_disk.at("lifetime").at("restores") == 3, "kv_disk lifetime restores");
 
     // completion_tokens_details carries only OpenAI-standard keys.
     const Json& ctd = usage_t.at("completion_tokens_details");
@@ -765,6 +795,29 @@ int test_response_serialization() {
     failures += check(decode_eval_tokens(0) == 0 && decode_eval_tokens(1) == 0 &&
                           decode_eval_tokens(2) == 1,
                       "decode_eval_tokens is max(0, n-1)");
+    ninfer::GenerationRecoveryStats recovery{.attempts = 1, .discarded_tool_calls = 1,
+        .prefill_samples = 1, .prefill_tokens = 7, .prepare_seconds = 0.1, .prefill_seconds = 0.2};
+    auto recovered = make_completion_timings(10, 8, 0.25, 1.0, 0, 0, 0, 0, 0, recovery);
+    const auto recovered_response = Json::parse(make_chat_completion_response(
+        "recovered", "m", 111, "done", "", "stop", CompletionUsage{10, 8}, &recovered));
+    const auto& recovery_details = recovered_response.at("usage").at("prompt_tokens_details").at("ninfer");
+    failures += check(recovered.predicted_n == 6 && recovery_details.at("decode").at("tokens") == 6,
+                      "recovery prefill samples were counted as decode tokens");
+    failures += check(recovered_response.at("usage").at("completion_tokens") == 8 &&
+                          recovery_details.at("recovery").at("prefill_tokens") == 7 &&
+                          recovery_details.at("recovery").at("prefill_ms") == 200.0,
+                      "recovery work was hidden or changed the completion ledger");
+    recovery.discarded_tool_calls = 0;
+    recovery.discarded_reasoning_tokens = 5;
+    recovered = make_completion_timings(10, 8, 0.25, 1.0, 0, 0, 0, 0, 0, recovery);
+    const auto reasoning_recovered = Json::parse(make_chat_completion_response(
+        "reasoning-recovered", "m", 111, "done", "visible earlier reasoning", "stop",
+        CompletionUsage{10, 8}, &recovered));
+    failures += check(reasoning_recovered.at("usage").at("prompt_tokens") == 10 &&
+                          reasoning_recovered.at("usage").at("completion_tokens") == 8 &&
+                          reasoning_recovered.at("usage").at("prompt_tokens_details").at("ninfer")
+                              .at("recovery").at("discarded_reasoning_tokens") == 5,
+                      "reasoning-only recovery lost accounting without a discarded tool");
     failures += check(prefill_eval_tokens(10, 6) == 4 && prefill_eval_tokens(4, 6) == 0,
                       "prefill_eval_tokens clamps reused to the prompt");
     CompletionTimings one_token = make_completion_timings(10, 1, 0.25, 1.0);
@@ -1163,8 +1216,8 @@ int run_sse_bench() {
 
 // Open WebUI chat fb0d11ba (2026-08-30): reasoning closed, then this answer text was
 // stored as output_text with no function_call item. Same model had executed
-// fetch_url as a native tool_call minutes earlier. GenerationService only parses
-// Qwen markup when the request uses_tools() or has tool history.
+// fetch_url as a native tool_call minutes earlier. The protocol adapter receives
+// typed calls from Engine only when current declarations enabled tool generation.
 int test_owui_youtube_fetch_url_logged_turn() {
     const std::string content =
         "I'll look up what that video is about so I can summarize it for you.\n\n"
@@ -1221,24 +1274,17 @@ int test_owui_youtube_fetch_url_logged_turn() {
         default_limits());
     failures += check(with_tools.uses_tools(), "logged request with fetch_url is tool-capable");
 
-    const ParsedToolCallOutput parsed = parse_qwen_tool_call_output(content, 64);
-    failures += check(parsed.is_tool_call_response, "logged xml parses when tools are on");
-    failures += check(parsed.content ==
-                          "I'll look up what that video is about so I can summarize it for you.",
-                      "tools-on content is the spoken prefix only");
-    failures += check(parsed.tool_calls.size() == 1 && parsed.tool_calls[0].name == "fetch_url",
-                      "tools-on tool name is fetch_url");
-    const Json args = Json::parse(parsed.tool_calls[0].arguments_json);
-    failures += check(args.at("url") == "https://www.youtube.com/watch?v=7cEdPWh9hqU",
-                      "tools-on url argument");
+    const std::string spoken =
+        "I'll look up what that video is about so I can summarize it for you.";
+    const std::vector<ToolCall> calls{{.id = "call_fixture_0", .name = "fetch_url",
+        .arguments_json = R"({"url":"https://www.youtube.com/watch?v=7cEdPWh9hqU"})"}};
 
     const Json native = Json::parse(make_chat_completion_tool_response(
-        "chatcmpl-owui", "qwen3.8-27b-r9700", 1788077000, parsed.content, reasoning,
-        parsed.tool_calls, usage));
+        "chatcmpl-owui", "qwen3.8-27b-r9700", 1788077000, spoken, reasoning, calls, usage));
     const Json& native_message = native.at("choices").at(0).at("message");
     failures += check(native.at("choices").at(0).at("finish_reason") == "tool_calls",
                       "tools-on finish_reason is tool_calls");
-    failures += check(native_message.at("content") == parsed.content,
+    failures += check(native_message.at("content") == spoken,
                       "tools-on serialized content has no xml");
     failures += check(native_message.at("content").get<std::string>().find("<tool_call>") ==
                           std::string::npos,
@@ -1249,11 +1295,6 @@ int test_owui_youtube_fetch_url_logged_turn() {
                           "fetch_url",
                       "tools-on wire tool name");
 
-    ToolCallStreamFilter filtered;
-    std::string streamed_with_tools = filtered.feed(content);
-    streamed_with_tools += filtered.finish(true);
-    failures += check(streamed_with_tools == parsed.content,
-                      "tools-on stream holds the xml out of chat");
     return failures;
 }
 

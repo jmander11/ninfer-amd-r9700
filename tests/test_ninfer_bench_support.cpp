@@ -366,13 +366,14 @@ int test_measurement_contract() {
         expect_u32(qb::decode_graph_prime_required_context(mtp5), 23, "MTP graph-prime context");
     const ninfer::SpeculativeOptions dflash4{.backend      = ninfer::SpeculativeBackend::DFlash,
                                              .draft_tokens = 4};
-    const ninfer::SpeculativeOptions dflash7{.backend      = ninfer::SpeculativeBackend::DFlash,
-                                             .draft_tokens = 7};
+    const ninfer::SpeculativeOptions dflash5{.backend      = ninfer::SpeculativeBackend::DFlash,
+                                             .draft_tokens = 5};
     failures += expect_u32(qb::resolved_dflash_verify_width(4, 0), 5, "DFlash k4 chain width");
-    failures += expect_u32(qb::resolved_dflash_verify_width(7, 0), 12, "DFlash k7 tree width");
-    failures += expect_u32(qb::resolved_dflash_verify_width(7, 9), 9, "explicit DFlash width");
+    failures += expect_u32(qb::resolved_dflash_verify_width(5, 0), 6, "DFlash k5 chain width");
+    failures += expect_throws<std::invalid_argument>(
+        [] { (void)qb::resolved_dflash_verify_width(5, 9); }, "reject non-chain DFlash width");
     failures += expect_u32(pp.required_context(dflash4), 522, "DFlash k4 pp context");
-    failures += expect_u32(pp.required_context(dflash7), 536, "DFlash k7 pp context");
+    failures += expect_u32(pp.required_context(dflash5), 524, "DFlash k5 pp context");
 
     const std::vector<qb::BenchTest> matrix = {pp, tg, combined};
     failures +=
@@ -426,6 +427,8 @@ std::vector<qb::TestResult> sample_results() {
                {timings(0.02, 0.25, 0.0, 0.28), speculative(0, 0, 0, 0, {0, 0, 0, 0, 0}), 1}};
     pp.reps[0].generated_token_ids_by_lane = {{10}};
     pp.reps[1].generated_token_ids_by_lane = {{10}};
+    pp.reps[0].wave_seconds = 0.5;
+    pp.reps[1].wave_seconds = 0.25;
     pp.workspace_peak_bytes           = 5ULL * 1024ULL * 1024ULL * 1024ULL;
     pp.workspace_allocator_peak_bytes = 4ULL * 1024ULL * 1024ULL;
 
@@ -546,7 +549,7 @@ int test_report_contract() {
         return fail(std::string("invalid benchmark JSON: ") + error.what());
     }
 
-    failures += expect(report.at("schema_version") == 21, "report schema v21");
+    failures += expect(report.at("schema_version") == 22, "report schema v22");
     failures += expect(report.at("phase_timing_semantics") ==
                            "serial-lane-service-sum_shared-decode-max_v1",
                        "report explicitly versions phase aggregation semantics");
@@ -643,6 +646,10 @@ int test_report_contract() {
     failures +=
         expect(pp.at("kind") == "pp" && pp.at("requested_output_tokens") == 1, "pp request shape");
     failures += expect_near(pp.at("prefill_tok_s_mean").get<double>(), 1536.0, "pp throughput");
+    failures += expect_near(pp.at("prefill_active_tok_s_mean").get<double>(), 1536.0,
+                            "pp active prefill throughput");
+    failures += expect_near(pp.at("wave_seconds_mean").get<double>(), 0.375,
+                            "pp measured wave duration");
     failures += expect(pp.at("decode_output_tok_s_mean").is_null(), "pp decode is null");
     failures += expect(pp.at("workspace_peak_bytes") == 5ULL * 1024ULL * 1024ULL * 1024ULL,
                        "pp workspace peak");
@@ -663,6 +670,17 @@ int test_report_contract() {
     const qb::Stats concurrent_engine       = qb::compute_stats(qb::decode_engine_tok_s_series(concurrent));
     failures += expect_near(concurrent_output.mean, 9.0, "C=2 decode output throughput");
     failures += expect_near(concurrent_engine.mean, 7.5, "C=2 decode engine throughput is not doubled");
+
+    qb::TestResult concurrent_pp = sample_results()[0];
+    concurrent_pp.concurrency = 2;
+    for (qb::RepTiming& rep : concurrent_pp.reps) {
+        rep.wave_seconds *= 3.0;
+        rep.timings.prefill_seconds *= 2.0;
+    }
+    failures += expect_near(qb::compute_stats(qb::prefill_tok_s_series(concurrent_pp)).mean,
+                            1024.0, "C=2 prefill throughput uses elapsed wave, not service sum");
+    failures += expect_near(qb::compute_stats(qb::prefill_active_tok_s_series(concurrent_pp)).mean,
+                            1536.0, "C=2 active throughput uses serial prefill service sum");
 
     failures += expect(tg.at("speculative").at("rounds") == 1, "speculative rounds");
     failures += expect(tg.at("speculative").at("fallback_steps") == 3, "speculative fallbacks");
@@ -752,7 +770,8 @@ int test_human_and_csv_reports() {
           "load_host_to_device_bytes", "request_transient_capacity_bytes",
           "device_graph_allowance_bytes", "workspace_peak_bytes",
           "workspace_allocator_peak_bytes", "spec_acceptance_rate",
-          "decode_output_tok_s_mean", "decode_engine_tok_s_mean", "total_seconds_mean"}) {
+          "decode_output_tok_s_mean", "decode_engine_tok_s_mean", "prefill_active_tok_s_mean",
+          "wave_seconds_mean", "total_seconds_mean"}) {
         failures += expect(csv.find(field) != std::string::npos,
                            std::string("CSV field ") + std::string(field));
     }

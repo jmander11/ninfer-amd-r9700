@@ -45,7 +45,8 @@ struct Qwen3_8_27BInstance {
 
     Qwen3_8_27BInstance(std::unique_ptr<LoadedQwen3_8_27B> stable_loaded,
                         runtime::KvCapacityResolution resolution,
-                        Package::SequencePlan sequence_plan, DeviceContext& device);
+                        Package::SequencePlan sequence_plan, DeviceContext& device,
+                        std::unique_ptr<HostPinnedArena> kv_ram_arena);
     ~Qwen3_8_27BInstance();
 
     Qwen3_8_27BInstance(const Qwen3_8_27BInstance&)            = delete;

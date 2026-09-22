@@ -116,6 +116,7 @@ struct Reader {
     const std::uint8_t* p   = nullptr;
     const std::uint8_t* end = nullptr;
 
+    [[nodiscard]] std::size_t remain() const { return static_cast<std::size_t>(end - p); }
     [[nodiscard]] std::uint8_t u8() {
         if (p >= end) { throw std::logic_error("prefix identity unpack overflow"); }
         return *p++;
@@ -285,6 +286,39 @@ bool ResidentPrefixIdentity::matches(const PreparedPromptData& prompt, std::size
     return true;
 }
 
+std::size_t longest_matching_prefix(
+    std::span<const TokenId> left_tokens, const ResidentPrefixIdentity& left,
+    std::span<const TokenId> right_tokens, const ResidentPrefixIdentity& right,
+    std::size_t limit) {
+    std::size_t count = std::min({limit, left_tokens.size(), right_tokens.size(),
+                                  left.size(), right.size()});
+    std::size_t matched = 0;
+    while (matched < count && left_tokens[matched] == right_tokens[matched] &&
+           left.token_types()[matched] == right.token_types()[matched] &&
+           left.positions(0)[matched] == right.positions(0)[matched] &&
+           left.positions(1)[matched] == right.positions(1)[matched] &&
+           left.positions(2)[matched] == right.positions(2)[matched]) {
+        ++matched;
+    }
+    count = matched;
+    const auto left_items = left.vision_items();
+    const auto right_items = right.vision_items();
+    for (std::size_t i = 0; i < std::max(left_items.size(), right_items.size()); ++i) {
+        const VisionItem* a = i < left_items.size() ? &left_items[i] : nullptr;
+        const VisionItem* b = i < right_items.size() ? &right_items[i] : nullptr;
+        const std::size_t a_begin = a ? a->token_spans.front().begin : count;
+        const std::size_t b_begin = b ? b->token_spans.front().begin : count;
+        const std::size_t begin = std::min(a_begin, b_begin);
+        if (begin >= count) { break; }
+        if (a == nullptr || b == nullptr || !same_item(*a, *b) ||
+            item_end(*a) > count || item_end(*b) > count) {
+            count = begin;
+            break;
+        }
+    }
+    return count;
+}
+
 bool prefix_items_complete_at(const std::vector<VisionItem>& items, std::size_t tokens) {
     std::size_t count = 0;
     return prefix_item_count(items, tokens, &count);
@@ -349,11 +383,22 @@ void ResidentPrefixIdentity::unpack(const void* src, std::size_t bytes) {
     Reader r{raw, raw + bytes};
     const std::uint32_t token_count = r.u32();
     const std::uint32_t item_count  = r.u32();
+    const std::uint64_t token_need =
+        static_cast<std::uint64_t>(token_count) +
+        3ULL * static_cast<std::uint64_t>(token_count) * sizeof(std::int32_t);
+    if ((token_count != 0 && token_need / token_count != 1ULL + 3ULL * sizeof(std::int32_t)) ||
+        r.remain() < token_need) {
+        throw std::logic_error("prefix identity unpack token payload is truncated");
+    }
     token_types_.resize(token_count);
     r.bytes(token_types_.data(), token_types_.size());
     for (std::size_t axis = 0; axis < 3; ++axis) {
         positions_[axis].resize(token_count);
         for (std::uint32_t i = 0; i < token_count; ++i) { positions_[axis][i] = r.i32(); }
+    }
+    constexpr std::uint64_t kMinVisionItemBytes = 1 + 12 + 16 + 32 + 4 + 4;
+    if (item_count != 0 && r.remain() / kMinVisionItemBytes < item_count) {
+        throw std::logic_error("prefix identity unpack vision list is truncated");
     }
     vision_items_.resize(item_count);
     for (VisionItem& item : vision_items_) {
@@ -365,9 +410,15 @@ void ResidentPrefixIdentity::unpack(const void* src, std::size_t bytes) {
         item.patch_count   = static_cast<std::size_t>(r.u64());
         r.bytes(item.content_digest.data(), item.content_digest.size());
         const std::uint32_t timestamp_count = r.u32();
+        if (timestamp_count != 0 && r.remain() / sizeof(double) < timestamp_count) {
+            throw std::logic_error("prefix identity unpack timestamps are truncated");
+        }
         item.timestamps.resize(timestamp_count);
         for (double& timestamp : item.timestamps) { timestamp = r.f64(); }
         const std::uint32_t span_count = r.u32();
+        if (span_count != 0 && r.remain() / 16 < span_count) {
+            throw std::logic_error("prefix identity unpack token spans are truncated");
+        }
         item.token_spans.resize(span_count);
         for (TokenSpan& span : item.token_spans) {
             span.begin = static_cast<std::size_t>(r.u64());

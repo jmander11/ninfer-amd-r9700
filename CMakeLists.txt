@@ -238,6 +238,11 @@ option(NINFER_BUILD_APPS "Build the R9700 CLI, server, and PPL applications" ON)
 option(NINFER_BUILD_BENCHMARKS "Build the R9700 whole-Engine benchmarks" OFF)
 include(CTest)
 
+find_package(Threads REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(NINFER_ZSTD REQUIRED IMPORTED_TARGET libzstd)
+include(cmake/xgrammar.cmake)
+
 add_subdirectory(src)
 if(NINFER_BUILD_APPS)
   add_subdirectory(apps)

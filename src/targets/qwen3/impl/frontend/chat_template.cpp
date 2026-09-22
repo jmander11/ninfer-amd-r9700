@@ -647,6 +647,7 @@ RenderedChat CompiledChatTemplate::render(const std::vector<ChatMessage>& messag
     if (messages.empty()) { throw std::invalid_argument("chat messages must not be empty"); }
 
     const bool effort_template = semantics_ == ChatTemplateSemantics::ReasoningEffort;
+    std::optional<std::size_t> final_assistant_byte_begin;
     const std::string_view reasoning_instructions =
         resolve_reasoning_instructions(semantics_, options);
 
@@ -733,6 +734,9 @@ RenderedChat CompiledChatTemplate::render(const std::vector<ChatMessage>& messag
 
         const bool keep_thinking = preserve_thinking || (static_cast<long>(i) > last_query_index);
         rendered += "<|im_start|>assistant\n";
+        if (!options.add_generation_prompt && i + 1 == messages.size()) {
+            final_assistant_byte_begin = rendered.size();
+        }
         if (!preserve_thinking && !rewrite_checkpoint && static_cast<long>(i) > last_query_index) {
             rewrite_checkpoint = RewriteCheckpointByteSpec{
                 .kind = RewriteCheckpointKind::TurnClosure, .offset = rendered.size()};
@@ -779,7 +783,8 @@ RenderedChat CompiledChatTemplate::render(const std::vector<ChatMessage>& messag
                 .kind = RewriteCheckpointKind::ResponseReplay, .offset = rendered.size()};
         }
     }
-    return RenderedChat{.text = std::move(rendered), .rewrite_checkpoint = rewrite_checkpoint};
+    return RenderedChat{.text = std::move(rendered), .rewrite_checkpoint = rewrite_checkpoint,
+                        .final_assistant_byte_begin = final_assistant_byte_begin};
 }
 
 } // namespace ninfer::targets::qwen3::frontend_internal

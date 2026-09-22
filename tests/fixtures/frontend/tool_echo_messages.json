@@ -1,0 +1,16 @@
+{
+  "tools": [{
+    "type": "function",
+    "function": {
+      "name": "echo",
+      "description": "Echo the supplied value",
+      "parameters": {
+        "type": "object",
+        "properties": {"value": {"type": "string", "enum": ["ok"]}},
+        "required": ["value"],
+        "additionalProperties": false
+      }
+    }
+  }],
+  "messages": [{"role": "user", "content": "Call echo with value ok. Do not answer in prose."}]
+}

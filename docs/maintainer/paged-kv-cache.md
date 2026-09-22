@@ -2,7 +2,7 @@
 
 This document defines the growing key/value state for the sole Qwen3.8-27B R9700 product. It is
 the storage and publication authority used by the fixed-concurrency runtime, attention Ops,
-prefix retention, and host-RAM spill. Kernel arithmetic is defined by the attention and Op
+prefix retention, host-RAM spill, and persistent SSD storage. Kernel arithmetic is defined by the attention and Op
 authorities; scheduling is defined by `concurrent-inference-architecture.md`.
 
 ## 1. Product contract
@@ -109,7 +109,8 @@ The runtime reports configured `S`, resolved `M*P`, page counts, reservation byt
 planned slack. Tail capacity created by page rounding is storage padding and never permits a
 sequence frontier beyond `S`.
 
-The MTP pool has `M + C*ceil((K-1)/P)` physical page groups for startup-fixed draft window `K`.
+The MTP pool has `M + C*ceil((K-1)/P)` physical page groups for startup-planned maximum draft
+window `K` (the configured K without adaptive drafting, otherwise the captured-set storage ceiling).
 The extra physical headroom supports provisional MTP growth; it does not increase any sequence's
 logical context ceiling. DFlash adds no growing pool.
 
@@ -298,7 +299,7 @@ are invalid until a later append fully overwrites the matching K code, V code, a
 MTP acceptance, cancellation, and prefix reuse therefore change cache visibility through a single
 transaction authority; direct frontier repair is prohibited.
 
-## 10. Prefix retention and host-RAM spill
+## 10. Prefix retention, host RAM, and SSD storage
 
 A reusable bundle includes every state component needed to continue, not just Text KV:
 
@@ -310,8 +311,10 @@ A reusable bundle includes every state component needed to continue, not just Te
 
 The optional pinned-host tier is an exclusive FIFO of completed retained bundles not currently on
 a device lane. Capture is D2H on the copy stream and keeps source pages mapped until its event
-completes. Restore validates the entire image before any H2D write, chooses a free lane/mapping,
-writes exact physical bytes, then orders compute after the copy event immediately before prefill.
+completes. Restore validates fixed codec and pool/state geometry before H2D, chooses a free
+lane/mapping, writes exact physical bytes, then orders compute after the copy event immediately
+before prefill. A later payload/checkpoint parse failure is fenced before the Program falls back
+to cold prefill; no incomplete restored state is published.
 
 Resident and RAM reuse candidates must satisfy the selected backend's readiness requirements
 before longest-prefix ranking; an unusable longer candidate cannot hide a usable shorter one.
@@ -328,6 +331,29 @@ rejects before any destination byte changes. Text and MTP fingerprints are indep
 Host capacity is fixed by `--kv-ram-capacity`; `off` disables retained FIFO spill but not live-lane
 checkpoint state. Captures that do not fit are dropped without blocking admission. Active requests
 are never offloaded. Logged occupancy counts live host residents, not retired in-flight buffers.
+
+RAM image version 6 binds both semantic and per-plane physical fingerprints. Capture explicitly
+returns captured, needs-eviction, or dropped; the caller owns spill/eviction decisions. Optional
+pinned allocation failure leaves the request able to proceed without retained cache capture.
+The startup pinned arena is mmap-backed, prefaulted, and registered independently of GPU compute;
+its preparation can overlap artifact materialization.
+
+`--kv-disk-capacity` and `--kv-disk-location` enable an inclusive persistent SSD tier; a nonzero RAM
+tier is required. Disk version 7 stores raw or Zstd-compressed exact logical-page payloads plus
+complete checkpoint state. Packing respects each of the three planes' slab and intra-page order;
+scatter restores represented bytes without dequantization. Durable identity binds model, weights,
+artifact, fixed codec semantics and Vision-aware prefix identity, but excludes pool allocation
+capacity so a compatible restart may resize the pool. RAM images retain their stricter physical
+fingerprint; disk restore reconstructs the current physical mapping rather than importing old page IDs.
+
+Ranking selects the longest complete usable frontier; ties keep VRAM before RAM before disk.
+Bounded reader/staging resources may overlap validated page copies with further reads, but a lane
+is not published until all state owners and the copy event complete. Cancellation drains I/O and
+releases the pinned entry generation without deleting its durable source. Emergency spill needed
+for admission excludes restore payload reads; idle spill rechecks its epoch and RAM residency.
+Durable publication orders pack namespace, map, entry and manifest before final synchronization.
+Orderly shutdown captures retained device state, flushes nondurable RAM and outstanding writes,
+then releases lanes. None of this adds active-request preemption or a second growing-cache format.
 
 ## 11. Fixed-concurrency and Device Graph rules
 

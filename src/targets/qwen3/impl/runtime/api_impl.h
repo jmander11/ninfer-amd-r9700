@@ -142,6 +142,12 @@ RequestPlan<Variant> Program<Variant>::plan_ram_reuse(const PreparedPrompt& prom
 }
 
 template <>
+RequestPlan<Variant> Program<Variant>::plan_disk_reuse(const PreparedPrompt& prompt,
+                                                       const RequestBasePlan<Variant>& base) {
+    return impl_->plan_disk_reuse(PreparedPromptAccess::view(prompt), base);
+}
+
+template <>
 bool Program<Variant>::can_admit_lane(std::uint32_t lane,
                                       const RequestPlan<Variant>& plan) const noexcept {
     return impl_->can_admit_lane(lane, plan);
@@ -169,9 +175,9 @@ template <>
 runtime::PrefillStepResult
 Program<Variant>::start_prefill_lane(std::uint32_t lane, PreparedPrompt&& prompt,
                                      RequestPlan<Variant>&& plan,
-                                     runtime::TransientRegion transient) {
+                                     runtime::TransientRegion transient, const OutputSession* output) {
     return impl_->start_prefill_lane(lane, PreparedPromptAccess::take(std::move(prompt)),
-                                     std::move(plan), transient);
+                                     std::move(plan), transient, output);
 }
 
 template <>
@@ -187,11 +193,28 @@ Program<Variant>::decode_batch(std::span<const std::uint32_t> lanes,
 }
 
 template <>
+void Program<Variant>::set_suppressed_tokens_lane(std::uint32_t lane,
+                                                  std::span<const TokenId> tokens) {
+    impl_->set_suppressed_tokens_lane(lane, tokens);
+}
+
+template <>
+void Program<Variant>::clear_suppressed_tokens_lane(std::uint32_t lane) {
+    impl_->clear_suppressed_tokens_lane(lane);
+}
+
+template <>
+void Program<Variant>::set_typical_cycle_reasoning_lane(std::uint32_t lane, bool enabled) {
+    impl_->set_typical_cycle_reasoning_lane(lane, enabled);
+}
+
+template <>
 void Program<Variant>::resolve_pending_batch(std::span<const std::uint32_t> lanes,
                                              std::span<const std::uint32_t> accepted_tokens,
                                              std::span<const std::uint8_t> terminal,
-                                             std::span<const std::uint8_t> cancelled) {
-    impl_->resolve_pending_batch(lanes, accepted_tokens, terminal, cancelled);
+                                             std::span<const std::uint8_t> cancelled,
+                                             std::span<const std::uint8_t> rejected) {
+    impl_->resolve_pending_batch(lanes, accepted_tokens, terminal, cancelled, rejected);
 }
 
 template <>
@@ -230,14 +253,20 @@ void Program<Variant>::evict_retained_lane(std::uint32_t lane) noexcept {
 }
 
 template <>
-bool Program<Variant>::capture_retained_lane(std::uint32_t lane) {
-    return impl_->capture_retained_lane(lane);
+bool Program<Variant>::capture_retained_lane(std::uint32_t lane, std::uint64_t* ram_entry_id) {
+    return impl_->capture_retained_lane(lane, ram_entry_id);
 }
 
 template <>
 void Program<Variant>::restore_ram_entry(std::uint32_t lane, std::uint64_t entry_id,
                                          const RequestPlan<Variant>& plan) {
     impl_->restore_ram_entry(lane, entry_id, plan);
+}
+
+template <>
+void Program<Variant>::restore_disk_entry(std::uint32_t lane, std::uint64_t entry_id,
+                                          const RequestPlan<Variant>& plan) {
+    impl_->restore_disk_entry(lane, entry_id, plan);
 }
 
 template <>
@@ -256,6 +285,68 @@ void Program<Variant>::consume_ram_entry(std::uint64_t entry_id) {
 }
 
 template <>
+bool Program<Variant>::claim_disk_entry(std::uint64_t entry_id, std::uint32_t expected_frontier,
+                                        std::uint64_t hash_lo, std::uint64_t hash_hi,
+                                        std::uint32_t expected_reuse_base,
+                                        PrefixReusePath expected_reuse,
+                                         std::uint64_t expected_committed_generation) {
+    return impl_->claim_disk_entry(entry_id, expected_frontier, hash_lo, hash_hi,
+                                   expected_reuse_base, expected_reuse, expected_committed_generation);
+}
+
+template <>
+void Program<Variant>::release_disk_entry(std::uint64_t entry_id) {
+    impl_->release_disk_entry(entry_id);
+}
+
+template <>
+void Program<Variant>::invalidate_disk_entry(std::uint64_t entry_id) {
+    impl_->invalidate_disk_entry(entry_id);
+}
+
+template <>
+void Program<Variant>::consume_disk_entry(std::uint64_t entry_id) {
+    impl_->consume_disk_entry(entry_id);
+}
+
+template <>
+void Program<Variant>::prefetch_disk_window(std::uint64_t entry_id, std::uint32_t text_pages,
+                                            std::uint32_t backend_pages) {
+    impl_->prefetch_disk_window(entry_id, text_pages, backend_pages);
+}
+
+template <>
+void Program<Variant>::prefetch_disk_plan(std::uint64_t entry_id,
+                                          const RequestPlan<Variant>& plan) {
+    impl_->prefetch_disk_plan(entry_id, plan);
+}
+
+template <>
+void Program<Variant>::pump_disk_restore() {
+    impl_->pump_disk_restore();
+}
+
+template <>
+void Program<Variant>::cancel_disk_restore() {
+    impl_->cancel_disk_restore();
+}
+
+template <>
+void Program<Variant>::discard_ram_capture(std::uint64_t ram_id) {
+    impl_->discard_ram_capture(ram_id);
+}
+
+template <>
+void Program<Variant>::shutdown_kv_tiers(LoadProgress progress) {
+    impl_->shutdown_kv_tiers(std::move(progress));
+}
+
+template <>
+void Program<Variant>::request_idle_spill() {
+    impl_->request_idle_spill();
+}
+
+template <>
 qwen3::detail::KvRamSnapshot Program<Variant>::kv_ram_snapshot() const noexcept {
     return impl_->kv_ram_snapshot();
 }
@@ -266,8 +357,33 @@ qwen3::detail::KvRamCopySeconds Program<Variant>::harvest_kv_ram_copy_seconds() 
 }
 
 template <>
+qwen3::detail::KvDiskSnapshot Program<Variant>::kv_disk_snapshot() const noexcept {
+    return impl_->kv_disk_snapshot();
+}
+
+template <>
+qwen3::detail::KvDiskCopySeconds Program<Variant>::harvest_kv_disk_copy_seconds() {
+    return impl_->harvest_kv_disk_copy_seconds();
+}
+
+template <>
 bool Program<Variant>::kv_ram_copies_ready() const {
     return impl_->kv_ram_copies_ready();
+}
+
+template <>
+bool Program<Variant>::kv_disk_copies_ready() const {
+    return impl_->kv_disk_copies_ready();
+}
+
+template <>
+bool Program<Variant>::kv_disk_restore_failed() const {
+    return impl_->kv_disk_restore_failed();
+}
+
+template <>
+bool Program<Variant>::kv_copies_ready() const {
+    return impl_->kv_copies_ready();
 }
 
 template <>
@@ -281,6 +397,16 @@ void Program<Variant>::wait_kv_ram_copies() {
 }
 
 template <>
+void Program<Variant>::wait_kv_disk_copies() {
+    impl_->wait_kv_disk_copies();
+}
+
+template <>
+std::uint64_t Program<Variant>::pending_disk_restore_ticket() const noexcept {
+    return impl_->pending_disk_restore_ticket();
+}
+
+template <>
 void Program<Variant>::synchronize_all() {
     impl_->synchronize_all();
 }
@@ -288,6 +414,11 @@ void Program<Variant>::synchronize_all() {
 template <>
 std::uint64_t Program<Variant>::kv_ram_index_version() const noexcept {
     return impl_->kv_ram_index_version();
+}
+
+template <>
+std::uint64_t Program<Variant>::kv_disk_index_version() const noexcept {
+    return impl_->kv_disk_index_version();
 }
 
 template <>
@@ -340,13 +471,15 @@ SequencePlanner<Variant> make_sequence_planner<Variant>(DeviceContext& device,
 template <>
 std::unique_ptr<Program<Variant>>
 create_program<Variant>(const Variant::ModelView& model, Variant::WeightsProfile weights_profile,
-                        SequencePlan<Variant>&& plan, DeviceContext& device) {
+                        SequencePlan<Variant>&& plan, DeviceContext& device,
+                        std::unique_ptr<HostPinnedArena> kv_ram_arena) {
     if (plan.impl_ == nullptr) { throw std::invalid_argument("sequence plan is empty"); }
     if (plan.impl_->weights_profile != weights_profile) {
         throw std::invalid_argument(
             "loaded model weights profile does not match the sequence plan");
     }
-    auto impl = std::make_unique<detail::ProgramImpl<Variant>>(model, *plan.impl_, device);
+    auto impl = std::make_unique<detail::ProgramImpl<Variant>>(
+        model, *plan.impl_, device, std::move(kv_ram_arena));
     plan.impl_.reset();
     return std::unique_ptr<Program<Variant>>(new Program<Variant>(std::move(impl)));
 }

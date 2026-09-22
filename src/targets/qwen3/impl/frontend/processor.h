@@ -95,6 +95,7 @@ struct ProcessedInput {
     std::vector<float> patches;
     std::vector<VisionItem> vision_items;
     std::optional<RewriteCheckpointSpec> rewrite_checkpoint;
+    std::optional<std::uint32_t> final_assistant_token_begin;
     PreprocessStats stats;
 
     [[nodiscard]] std::span<const std::int32_t> position_axis(int axis) const;
@@ -103,6 +104,7 @@ struct ProcessedInput {
 struct EncodedChat {
     std::vector<int> input_ids;
     std::optional<RewriteCheckpointSpec> rewrite_checkpoint;
+    std::optional<std::uint32_t> final_assistant_token_begin;
 };
 
 EncodedChat encode_rendered_chat(const Tokenizer& tokenizer, const RenderedChat& rendered);

@@ -17,6 +17,7 @@ add_library(ninfer_r9700_core STATIC
   core/tensor.cpp
   core/layout.cpp
   core/paged_kv_cache.cpp
+  core/paged_kv_scatter.hip
   core/fp8_int4_paged_kv_cache.cpp
   core/cyclic_kv_cache.cpp
   core/gdn_replay_records.cpp
@@ -25,6 +26,7 @@ add_library(ninfer_r9700_core STATIC
   runtime/engine/request_memory.cpp
   targets/qwen3/impl/runtime/prefix_identity.cpp
   targets/qwen3/impl/runtime/kv_ram_cache.cpp
+  targets/qwen3/impl/runtime/kv_disk_cache.cpp
   targets/qwen3/impl/state/decoder_state.cpp
   targets/qwen3/impl/state/decoder_state_transaction.hip
   targets/qwen3_8_27b/impl/r9700_full_attention.hip
@@ -172,10 +174,13 @@ add_library(ninfer_r9700_qwen3_8_27b_runtime STATIC
   targets/qwen3/impl/frontend/digest.cpp
   targets/qwen3/impl/frontend/encoded_history_cache.cpp
   targets/qwen3/impl/frontend/frontend.cpp
+  targets/qwen3/impl/frontend/generation_recovery.cpp
+  targets/qwen3/impl/frontend/tool_grammar.cpp
   targets/qwen3/impl/frontend/processor.cpp
   targets/qwen3/impl/frontend/tokenizer.cpp
   targets/qwen3/impl/state/round_state.cpp
   targets/qwen3/impl/runtime/visual_scatter.cpp
+  targets/qwen3/impl/runtime/tool_masks.cpp
   targets/qwen3/impl/vision/control.cpp)
 if(NINFER_R9700_XATTENTION_QUALIFICATION)
   target_compile_definitions(ninfer_r9700_qwen3_8_27b_runtime PUBLIC
@@ -187,6 +192,7 @@ ninfer_r9700_internal_includes(ninfer_r9700_qwen3_8_27b_runtime)
 set_target_properties(ninfer_r9700_qwen3_8_27b_runtime PROPERTIES
   HIP_ARCHITECTURES gfx1201)
 target_link_libraries(ninfer_r9700_qwen3_8_27b_runtime PUBLIC
+  ninfer_tool_grammar
   ninfer_r9700_target_bindings
   ninfer_r9700_core
   ninfer_r9700_text
@@ -238,6 +244,7 @@ target_link_libraries(ninfer_engine PUBLIC
   Threads::Threads
   hip::host)
 add_library(ninfer::engine ALIAS ninfer_engine)
+target_link_libraries(ninfer_r9700_core PUBLIC PkgConfig::NINFER_ZSTD)
 
 if(NINFER_BUILD_APPS)
   # HTTP protocol/product adapter. It depends on the one public Engine and owns no model
@@ -247,7 +254,6 @@ if(NINFER_BUILD_APPS)
     serve/responses_schema.cpp
     serve/anthropic_schema.cpp
     serve/response_store.cpp
-    serve/tool_call_parser.cpp
     serve/translate.cpp
     serve/console_log.cpp
     serve/generation_service.cpp

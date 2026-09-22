@@ -2,12 +2,14 @@
 
 #include <ninfer/targets/qwen3/frontend_resources.h>
 #include <ninfer/targets/qwen3/prepared_prompt.h>
+#include <ninfer/targets/qwen3/generation_recovery.h>
 
 #include "targets/qwen3/impl/frontend/chat_template.h"
 #include "targets/qwen3/impl/frontend/encoded_history_cache.h"
 #include "targets/qwen3/impl/frontend/processor.h"
 #include "targets/qwen3/impl/frontend/test_access.h"
 #include "targets/qwen3/impl/frontend/tokenizer.h"
+#include "targets/qwen3/impl/frontend/tool_grammar.h"
 #include "text/unicode.h"
 
 #include <nlohmann/json.hpp>
@@ -37,6 +39,8 @@ namespace fi = frontend_internal;
 
 constexpr std::size_t kPatchFeatures   = 1536;
 constexpr std::string_view kThinkClose = "</think>";
+constexpr std::string_view kToolOpen   = "<tool_call>";
+constexpr std::string_view kToolClose  = "</tool_call>";
 constexpr double kRescaleFactor        = 1.0 / 255.0;
 constexpr double kVideoFps             = 2.0;
 constexpr int kVideoMinFrames          = 4;
@@ -311,17 +315,28 @@ void assign_text_positions(PreparedPromptData& prompt) {
     prompt.rope_delta = 0;
 }
 
+bool enables_tool_output(const PromptInput& input) {
+    if (!input.options.tool_jsons.empty()) { return true; }
+    return std::any_of(input.messages.begin(), input.messages.end(), [](const ChatMessage& message) {
+        return message.role == ChatRole::Tool ||
+               (message.role == ChatRole::Assistant && !message.tool_calls.empty());
+    });
+}
+
 std::unique_ptr<PreparedPromptData> make_text_prompt_data(fi::EncodedChat encoded,
                                                           const PromptOptions& options,
+                                                          bool tool_output_enabled,
                                                           Clock::time_point start) {
     auto prepared              = std::make_unique<PreparedPromptData>();
     PreparedPromptData& result = *prepared;
     result.token_ids.assign(encoded.input_ids.begin(), encoded.input_ids.end());
     result.identity.rewrite_checkpoint = std::move(encoded.rewrite_checkpoint);
+    result.final_assistant_token_begin = encoded.final_assistant_token_begin;
     assign_text_positions(result);
     (void)checked_token_count(result.token_ids.size());
     result.identity.reusable   = true;
     result.starts_in_reasoning = options.add_generation_prompt && options.enable_thinking;
+    result.tool_output_enabled = tool_output_enabled;
     result.prepare.seconds     = std::chrono::duration<double>(Clock::now() - start).count();
     return prepared;
 }
@@ -330,6 +345,7 @@ VisionItem convert_vision_item(fi::VisionItem item);
 
 std::unique_ptr<PreparedPromptData> make_media_prompt_data(fi::ProcessedInput processed,
                                                            const PromptOptions& options,
+                                                           bool tool_output_enabled,
                                                            Clock::time_point start) {
     auto prepared              = std::make_unique<PreparedPromptData>();
     PreparedPromptData& result = *prepared;
@@ -348,9 +364,11 @@ std::unique_ptr<PreparedPromptData> make_media_prompt_data(fi::ProcessedInput pr
     result.prepare.attention_pairs     = processed.stats.attention_pairs;
     result.prepare.patch_bytes         = processed.stats.patch_bytes;
     result.identity.rewrite_checkpoint = processed.rewrite_checkpoint;
+    result.final_assistant_token_begin = processed.final_assistant_token_begin;
     (void)checked_token_count(result.token_ids.size());
     result.identity.reusable   = true;
     result.starts_in_reasoning = options.add_generation_prompt && options.enable_thinking;
+    result.tool_output_enabled = tool_output_enabled;
     result.prepare.seconds     = std::chrono::duration<double>(Clock::now() - start).count();
     return prepared;
 }
@@ -473,12 +491,68 @@ struct DecoderState {
     std::string utf8_pending;
     std::string think_marker_pending;
     std::array<std::string, 2> stop_pending;
-    bool in_reasoning              = false;
-    bool strip_content_leading     = false;
-    bool terminal                  = false;
-    std::uint64_t decoded_bytes    = 0;
-    std::uint32_t reasoning_tokens = 0;
+    bool in_reasoning               = false;
+    bool strip_content_leading      = false;
+    bool terminal                   = false;
+    bool require_initial_content    = false;
+    bool has_non_whitespace_content = false;
+    bool in_tool_call               = false;
+    std::string tool_marker_pending;
+    std::uint64_t decoded_bytes     = 0;
+    std::uint32_t reasoning_tokens  = 0;
 };
+
+void track_structured_content(DecoderState& state, std::string_view text, bool tool_output_enabled) {
+    if (text.empty()) { return; }
+    if (!state.has_non_whitespace_content) {
+        state.has_non_whitespace_content =
+            std::any_of(text.begin(), text.end(), [](unsigned char byte) {
+                return std::isspace(byte) == 0;
+            });
+    }
+    if (!tool_output_enabled) { return; }
+
+    state.tool_marker_pending.append(text);
+    for (;;) {
+        if (!state.in_tool_call) {
+            const std::size_t open = state.tool_marker_pending.find(kToolOpen);
+            if (open == std::string::npos) {
+                const std::size_t hold =
+                    longest_suffix_prefix(state.tool_marker_pending, kToolOpen);
+                state.tool_marker_pending.erase(0, state.tool_marker_pending.size() - hold);
+                break;
+            }
+            state.in_tool_call = true;
+            state.tool_marker_pending.erase(0, open + kToolOpen.size());
+            continue;
+        }
+        const std::size_t close = state.tool_marker_pending.find(kToolClose);
+        if (close != std::string::npos) {
+            state.in_tool_call = false;
+            state.tool_marker_pending.erase(0, close + kToolClose.size());
+            continue;
+        }
+        const std::size_t hold = longest_suffix_prefix(state.tool_marker_pending, kToolClose);
+        state.tool_marker_pending.erase(0, state.tool_marker_pending.size() - hold);
+        break;
+    }
+}
+
+bool has_ambiguous_tool_marker(const DecoderState& state, bool tool_output_enabled) {
+    if (!tool_output_enabled || state.in_tool_call) { return false; }
+    return !state.tool_marker_pending.empty();
+}
+
+bool in_tool_region(const DecoderState& state, bool tool_output_enabled) {
+    return state.in_tool_call || has_ambiguous_tool_marker(state, tool_output_enabled);
+}
+
+bool model_stop_allowed(const DecoderState& state, bool raw, bool tool_output_enabled) {
+    if (raw) { return true; }
+    if (state.in_reasoning) { return false; }
+    if (state.require_initial_content && !state.has_non_whitespace_content) { return false; }
+    return !in_tool_region(state, tool_output_enabled);
+}
 
 struct StopMatch {
     bool found                      = false;
@@ -559,7 +633,8 @@ void close_channel(DecoderState& state, OutputChannel channel, PublishedOutput& 
 }
 
 void feed_content(DecoderState& state, std::string text, const StopPolicy& policy,
-                  PublishedOutput& emitted, std::uint32_t committed_tokens, StopMatch* best_match) {
+                  PublishedOutput& emitted, std::uint32_t committed_tokens, StopMatch* best_match,
+                  bool tool_output_enabled) {
     if (state.strip_content_leading) {
         std::size_t begin = 0;
         while (begin < text.size() && std::isspace(static_cast<unsigned char>(text[begin])) != 0) {
@@ -568,15 +643,17 @@ void feed_content(DecoderState& state, std::string text, const StopPolicy& polic
         text.erase(0, begin);
         if (!text.empty()) { state.strip_content_leading = false; }
     }
+    track_structured_content(state, text, tool_output_enabled);
     feed_channel(state, OutputChannel::Content, text, policy, emitted, committed_tokens,
                  best_match);
 }
 
 void feed_decoded_text(DecoderState& state, std::string_view text, const StopPolicy& policy,
                        PublishedOutput& emitted, std::uint32_t committed_tokens,
-                       StopMatch* best_match) {
+                       StopMatch* best_match, bool tool_output_enabled) {
     if (!state.in_reasoning) {
-        feed_content(state, std::string(text), policy, emitted, committed_tokens, best_match);
+        feed_content(state, std::string(text), policy, emitted, committed_tokens, best_match,
+                     tool_output_enabled);
         return;
     }
 
@@ -591,7 +668,8 @@ void feed_decoded_text(DecoderState& state, std::string_view text, const StopPol
         state.think_marker_pending.clear();
         state.in_reasoning          = false;
         state.strip_content_leading = true;
-        feed_content(state, std::move(content), policy, emitted, committed_tokens, best_match);
+        feed_content(state, std::move(content), policy, emitted, committed_tokens, best_match,
+                     tool_output_enabled);
         return;
     }
 
@@ -605,24 +683,26 @@ void feed_decoded_text(DecoderState& state, std::string_view text, const StopPol
 
 void feed_token_bytes(DecoderState& state, std::string_view bytes, const StopPolicy& policy,
                       PublishedOutput& emitted, std::uint32_t committed_tokens,
-                      StopMatch* best_match) {
+                      StopMatch* best_match, bool tool_output_enabled) {
     state.utf8_pending.append(bytes);
     const std::size_t valid = valid_utf8_prefix_size(state.utf8_pending);
     if (valid == 0) { return; }
     const std::string_view text =
         std::string_view(state.utf8_pending).substr(0, valid);
-    feed_decoded_text(state, text, policy, emitted, committed_tokens, best_match);
+    feed_decoded_text(state, text, policy, emitted, committed_tokens, best_match,
+                      tool_output_enabled);
     state.utf8_pending.erase(0, valid);
 }
 
 void terminalize(DecoderState& state, const StopPolicy& policy, PublishedOutput& emitted,
-                 std::uint32_t committed_tokens) {
+                 std::uint32_t committed_tokens, bool tool_output_enabled) {
     if (!state.utf8_pending.empty()) {
         // A token budget can end between byte-level tokens of one code point.
         // Publish the standard replacement character rather than an invalid
         // UTF-8 suffix; the logical token prefix remains exact.
         state.utf8_pending.clear();
-        feed_decoded_text(state, "\xef\xbf\xbd", policy, emitted, committed_tokens, nullptr);
+        feed_decoded_text(state, "\xef\xbf\xbd", policy, emitted, committed_tokens, nullptr,
+                          tool_output_enabled);
     }
     if (state.in_reasoning) {
         feed_channel(state, OutputChannel::Reasoning, state.think_marker_pending, policy, emitted,
@@ -654,7 +734,7 @@ public:
               fi::TokenizerResources{.tokenizer_json         = resources.tokenizer_json,
                                      .tokenizer_config_json  = resources.tokenizer_config_json,
                                      .generation_config_json = resources.generation_config_json})),
-          processor(processor_options(resources)), vision_enabled(vision_enabled_) {
+          tool_grammar(tokenizer), processor(processor_options(resources)), vision_enabled(vision_enabled_) {
         if (registered_checkpoint) { validate_registered_tokenizer(*tokenizer); }
         for (const int token : tokenizer->default_stop_token_ids()) {
             if (!tokenizer->is_valid_token(token)) {
@@ -667,6 +747,7 @@ public:
 
     fi::CompiledChatTemplate chat_template;
     std::shared_ptr<const fi::Tokenizer> tokenizer;
+    mutable fi::ToolGrammarCompiler tool_grammar;
     fi::ProcessorOptions processor;
     StopPolicy defaults;
     bool vision_enabled = true;
@@ -674,20 +755,111 @@ public:
 
 class OutputSession::Impl {
 public:
+    struct ToolPublication {
+        std::string pending;
+        std::vector<ToolCall> calls;
+        void filter(PublishedOutput& output, const ToolGrammarData& grammar, bool terminal) {
+            PublishedOutput visible;
+            for (auto& delta : output) {
+                if (delta.channel == OutputChannel::Reasoning) {
+                    append_delta(visible, delta.channel, std::move(delta.text));
+                    continue;
+                }
+                pending += delta.text;
+                for (;;) {
+                    const auto open = pending.find(kToolOpen);
+                    if (open == std::string::npos) {
+                        if (!calls.empty() && std::all_of(pending.begin(), pending.end(),
+                                [](unsigned char c) { return std::isspace(c) != 0; })) {
+                            if (terminal) { pending.clear(); }
+                            break;
+                        }
+                        const auto suffix = longest_suffix_prefix(pending, kToolOpen);
+                        // The grammar reserves <tool_call before its final >.
+                        // Preserve shorter ambiguous prose (e.g. "a <"), but
+                        // never publish a confirmed trigger cut by a caller stop.
+                        const auto hold = !terminal || suffix == kToolOpen.size() - 1 ? suffix : 0;
+                        append_delta(visible, OutputChannel::Content,
+                                     pending.substr(0, pending.size() - hold));
+                        pending.erase(0, pending.size() - hold);
+                        break;
+                    }
+                    const bool separator = !calls.empty() &&
+                        std::all_of(pending.begin(), pending.begin() + open,
+                                    [](unsigned char c) { return std::isspace(c) != 0; });
+                    if (!separator) {
+                        append_delta(visible, OutputChannel::Content, pending.substr(0, open));
+                    }
+                    pending.erase(0, open);
+                    auto close = pending.find(kToolClose);
+                    bool completed = false;
+                    while (close != std::string::npos) {
+                        const auto end = close + kToolClose.size();
+                        if (auto call = grammar.decode_call(std::string_view(pending).substr(0, end))) {
+                            calls.push_back(std::move(*call));
+                            pending.erase(0, end);
+                            completed = true;
+                            break;
+                        }
+                        close = pending.find(kToolClose, end);
+                    }
+                    if (!completed) { break; }
+                }
+            }
+            // A caller stop/cancellation/output budget can interrupt a valid
+            // envelope. Never convert that partial call into an executable call
+            // or leak its markup into a streamed prose answer.
+            if (terminal) {
+                const bool separator = !calls.empty() &&
+                    std::all_of(pending.begin(), pending.end(),
+                                [](unsigned char c) { return std::isspace(c) != 0; });
+                if (!pending.starts_with("<tool_call") && !separator) {
+                    append_delta(visible, OutputChannel::Content, std::move(pending));
+                }
+                pending.clear();
+            }
+            output = std::move(visible);
+        }
+    };
     Impl(std::shared_ptr<const fi::Tokenizer> tokenizer_, StopPolicy policy_, OutputOptions output,
-         bool starts_in_reasoning)
+         bool starts_in_reasoning, bool tool_output_enabled_,
+         std::span<const TokenId> model_stop_tokens_,
+         std::shared_ptr<const ToolGrammarData> grammar,
+         std::shared_ptr<const GenerationRecoveryContext> recovery)
         : tokenizer(std::move(tokenizer_)), policy(std::move(policy_)),
-          preserve_special(output.raw || output.preserve_special_tokens) {
+          model_stop_tokens(model_stop_tokens_.begin(), model_stop_tokens_.end()),
+          preserve_special(output.raw || output.preserve_special_tokens), raw(output.raw),
+          tool_output_enabled(tool_output_enabled_) {
         state.in_reasoning = starts_in_reasoning && !output.raw;
+        state.require_initial_content = !output.raw && (state.in_reasoning || tool_output_enabled);
+        grammar_data = std::move(grammar);
+        recovery_context = std::move(recovery);
+        if (grammar_data) {
+            std::vector<TokenId> ignored;
+            for (const auto token : model_stop_tokens) {
+                if (std::find(policy.token_ids.begin(), policy.token_ids.end(), token) == policy.token_ids.end()) {
+                    ignored.push_back(token);
+                }
+            }
+            tool_grammar = std::make_unique<fi::ToolGrammarState>(grammar_data, std::move(ignored));
+        }
     }
 
     std::shared_ptr<const fi::Tokenizer> tokenizer;
     StopPolicy policy;
+    std::vector<TokenId> model_stop_tokens;
     bool preserve_special = false;
+    bool raw = false;
+    bool tool_output_enabled = false;
     DecoderState state;
     DecoderState preview_state;
     PublishedOutput preview_output;
     bool preview_ready = false;
+    std::unique_ptr<fi::ToolGrammarState> tool_grammar;
+    std::shared_ptr<const ToolGrammarData> grammar_data;
+    std::shared_ptr<const GenerationRecoveryContext> recovery_context;
+    ToolPublication tools;
+    ToolPublication preview_tools;
 };
 
 std::span<const std::int32_t> PreparedPromptData::position_axis(int axis) const {
@@ -710,7 +882,8 @@ PreparedPrompt& PreparedPrompt::operator=(PreparedPrompt&&) noexcept = default;
 PromptSummary PreparedPrompt::summary() const {
     if (data_ == nullptr) { throw std::logic_error("prepared prompt is empty"); }
     return PromptSummary{.prompt_tokens = checked_token_count(data_->token_ids.size()),
-                         .has_media     = data_->has_media()};
+                         .has_media     = data_->has_media(),
+                         .final_assistant_token_begin = data_->final_assistant_token_begin};
 }
 
 double PreparedPrompt::prepare_seconds() const noexcept {
@@ -769,9 +942,22 @@ runtime::OutputDecision OutputSession::preview(std::span<const TokenId> tokens,
     impl_->preview_state = impl_->state;
     impl_->preview_output.clear();
 
-    const auto complete = [&](std::uint32_t count, FinishReason reason) {
+    const bool stops_blocked_at_start =
+        !model_stop_allowed(impl_->state, impl_->raw, impl_->tool_output_enabled);
+    bool saw_tool_region = in_tool_region(impl_->state, impl_->tool_output_enabled);
+
+    const auto complete = [&](std::uint32_t count, FinishReason reason,
+                              bool reject_generated_round = false) {
+        if (impl_->tool_grammar) { impl_->tool_grammar->preview(tokens.first(count)); }
+        if (impl_->grammar_data && !impl_->raw) {
+            impl_->preview_tools = impl_->tools;
+            impl_->preview_tools.filter(impl_->preview_output, *impl_->grammar_data,
+                                         reason != FinishReason::None);
+        }
         impl_->preview_ready = true;
-        return runtime::OutputDecision{.accepted_tokens = count, .finish_reason = reason};
+        return runtime::OutputDecision{.accepted_tokens        = count,
+                                       .finish_reason          = reason,
+                                       .reject_generated_round = reject_generated_round};
     };
 
     for (std::size_t index = 0; index < tokens.size(); ++index) {
@@ -787,6 +973,15 @@ runtime::OutputDecision OutputSession::preview(std::span<const TokenId> tokens,
         const bool stop_token =
             std::find(impl_->policy.token_ids.begin(), impl_->policy.token_ids.end(), token) !=
             impl_->policy.token_ids.end();
+        const bool model_stop =
+            std::find(impl_->model_stop_tokens.begin(), impl_->model_stop_tokens.end(), token) !=
+            impl_->model_stop_tokens.end();
+        if (model_stop &&
+            !model_stop_allowed(impl_->preview_state, impl_->raw, impl_->tool_output_enabled)) {
+            impl_->preview_state = impl_->state;
+            impl_->preview_output.clear();
+            return complete(0, FinishReason::None, true);
+        }
         DecoderState before_state;
         PublishedOutput before_output;
         if (stop_token && !impl_->policy.publish_stop_token) {
@@ -798,7 +993,7 @@ runtime::OutputDecision OutputSession::preview(std::span<const TokenId> tokens,
         const std::string_view bytes =
             impl_->tokenizer->decode_token_bytes(token, !impl_->preserve_special);
         feed_token_bytes(impl_->preview_state, bytes, impl_->policy, impl_->preview_output, count,
-                         &match);
+                         &match, impl_->tool_output_enabled);
 
         if (match.found) {
             impl_->preview_state  = terminal_state(std::move(impl_->preview_state));
@@ -811,14 +1006,28 @@ runtime::OutputDecision OutputSession::preview(std::span<const TokenId> tokens,
                 impl_->preview_state  = std::move(before_state);
                 impl_->preview_output = std::move(before_output);
             }
-            terminalize(impl_->preview_state, impl_->policy, impl_->preview_output, count);
+            terminalize(impl_->preview_state, impl_->policy, impl_->preview_output, count,
+                        impl_->tool_output_enabled);
             return complete(count, FinishReason::StopToken);
+        }
+
+        saw_tool_region =
+            saw_tool_region || in_tool_region(impl_->preview_state, impl_->tool_output_enabled);
+        // A round sampled with model stops excluded cannot emit <|im_end|> after
+        // </tool_call>. Extra-accepted tokens past that close reopen another call
+        // and keep suppression on until the output budget. Commit only through the
+        // first completing close; the next round samples with stops eligible.
+        if (stops_blocked_at_start && saw_tool_region &&
+            model_stop_allowed(impl_->preview_state, impl_->raw, impl_->tool_output_enabled) &&
+            index + 1 < tokens.size()) {
+            return complete(count, FinishReason::None);
         }
     }
 
     const auto count = static_cast<std::uint32_t>(tokens.size());
     if (tokens.size() == budget_remaining) {
-        terminalize(impl_->preview_state, impl_->policy, impl_->preview_output, count);
+        terminalize(impl_->preview_state, impl_->policy, impl_->preview_output, count,
+                    impl_->tool_output_enabled);
         return complete(count, limit_reason);
     }
     return complete(count, FinishReason::None);
@@ -834,7 +1043,13 @@ runtime::OutputDecision OutputSession::preview_terminal(FinishReason reason) {
     }
     impl_->preview_state = impl_->state;
     impl_->preview_output.clear();
-    terminalize(impl_->preview_state, impl_->policy, impl_->preview_output, 0);
+    terminalize(impl_->preview_state, impl_->policy, impl_->preview_output, 0,
+                impl_->tool_output_enabled);
+    if (impl_->tool_grammar) { impl_->tool_grammar->preview({}); }
+    if (impl_->grammar_data && !impl_->raw) {
+        impl_->preview_tools = impl_->tools;
+        impl_->preview_tools.filter(impl_->preview_output, *impl_->grammar_data, true);
+    }
     impl_->preview_ready = true;
     return runtime::OutputDecision{.accepted_tokens = 0, .finish_reason = reason};
 }
@@ -842,6 +1057,8 @@ runtime::OutputDecision OutputSession::preview_terminal(FinishReason reason) {
 PublishedOutput OutputSession::commit_preview() noexcept {
     if (impl_ == nullptr || !impl_->preview_ready) { std::terminate(); }
     using std::swap;
+    if (impl_->tool_grammar) { impl_->tool_grammar->commit_preview(); }
+    if (impl_->grammar_data && !impl_->raw) { swap(impl_->tools, impl_->preview_tools); }
     swap(impl_->state, impl_->preview_state);
     PublishedOutput output = std::move(impl_->preview_output);
     impl_->preview_output.clear();
@@ -849,8 +1066,100 @@ PublishedOutput OutputSession::commit_preview() noexcept {
     return output;
 }
 
+void OutputSession::discard_preview() noexcept {
+    if (impl_ == nullptr || !impl_->preview_ready) { std::terminate(); }
+    if (impl_->tool_grammar) { impl_->tool_grammar->discard_preview(); }
+    impl_->preview_state = impl_->state;
+    impl_->preview_output.clear();
+    impl_->preview_ready = false;
+}
+
 std::uint32_t OutputSession::reasoning_tokens() const noexcept {
     return impl_ != nullptr ? impl_->state.reasoning_tokens : 0;
+}
+
+bool OutputSession::in_reasoning() const noexcept {
+    return impl_ != nullptr && impl_->state.in_reasoning;
+}
+
+bool OutputSession::model_stop_tokens_allowed() const noexcept {
+    return impl_ == nullptr ||
+           model_stop_allowed(impl_->state, impl_->raw, impl_->tool_output_enabled);
+}
+
+bool OutputSession::reasoning_cycle_exclusion_allowed(TokenId token) const {
+    if (!in_reasoning() || impl_->raw || token < 0) { return false; }
+    if (std::find(impl_->model_stop_tokens.begin(), impl_->model_stop_tokens.end(), token) !=
+        impl_->model_stop_tokens.end()) { return false; }
+    const auto candidate = impl_->state.think_marker_pending +
+                           std::string(impl_->tokenizer->decode_token_bytes(token));
+    return candidate.find(kThinkClose) == std::string::npos &&
+           longest_suffix_prefix(candidate, kThinkClose, true) == 0;
+}
+
+bool OutputSession::has_tool_grammar() const noexcept {
+    return impl_ && impl_->tool_grammar != nullptr;
+}
+
+std::vector<std::string> unconstrained_tool_call_names(std::string_view text,
+                                                       std::size_t max_name_length) {
+    const auto first = text.find(kToolOpen);
+    if (first == std::string_view::npos) { return {}; }
+    text.remove_prefix(first);
+    auto whitespace = [&] {
+        while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front()))) {
+            text.remove_prefix(1);
+        }
+    };
+    auto consume = [&](std::string_view marker) {
+        whitespace();
+        if (!text.starts_with(marker)) { return false; }
+        text.remove_prefix(marker.size());
+        return true;
+    };
+    std::vector<std::string> names;
+    while (!text.empty()) {
+        if (!consume(kToolOpen) || !consume("<function=")) { return {}; }
+        const auto end = text.find('>');
+        if (end == 0 || end == std::string_view::npos || end > max_name_length) { return {}; }
+        const auto name = text.substr(0, end);
+        if (!std::all_of(name.begin(), name.end(), [](unsigned char c) {
+                return std::isalnum(c) || c == '_' || c == '-';
+            })) { return {}; }
+        names.emplace_back(name);
+        text.remove_prefix(end + 1);
+        for (;;) {
+            whitespace();
+            if (text.starts_with("</function>")) { break; }
+            if (!consume("<parameter=")) { return {}; }
+            const auto key_end = text.find('>');
+            if (key_end == 0 || key_end == std::string_view::npos) { return {}; }
+            text.remove_prefix(key_end + 1);
+            const auto value_end = text.find("</parameter>");
+            if (value_end == std::string_view::npos) { return {}; }
+            text.remove_prefix(value_end + std::string_view("</parameter>").size());
+        }
+        if (!consume("</function>") || !consume(kToolClose)) { return {}; }
+        whitespace();
+    }
+    return names;
+}
+
+std::span<const ToolCall> OutputSession::tool_calls() const noexcept {
+    return impl_ ? std::span<const ToolCall>(impl_->tools.calls) : std::span<const ToolCall>{};
+}
+
+std::shared_ptr<const GenerationRecoveryContext> OutputSession::generation_recovery_context() const noexcept {
+    return impl_ ? impl_->recovery_context : nullptr;
+}
+
+bool OutputSession::terminal() const noexcept { return impl_ && impl_->state.terminal; }
+
+void OutputSession::fill_tool_masks(std::span<const TokenId> tokens,
+                                     std::span<const std::int32_t> parents,
+                                     std::span<std::uint32_t> words) const {
+    if (!has_tool_grammar()) { throw std::logic_error("output session has no tool grammar"); }
+    impl_->tool_grammar->fill_masks(tokens, parents, words);
 }
 
 Frontend::Frontend(std::shared_ptr<const Impl> impl) noexcept : impl_(std::move(impl)) {}
@@ -888,6 +1197,15 @@ const PreparedPromptData& FrontendTestAccess::inspect(const PreparedPrompt& prom
 PreparedPrompt Frontend::prepare(PromptInput input) const {
     const auto start                      = Clock::now();
     const PromptOptions options           = input.options;
+    const bool tool_output_enabled        = enables_tool_output(input);
+    const auto grammar = options.add_generation_prompt
+        ? impl_->tool_grammar.compile(options.tool_jsons, options.enable_thinking) : nullptr;
+    const auto recovery = GenerationRecoveryContext::analyze(input);
+    const auto finish = [&](std::unique_ptr<PreparedPromptData> data) {
+        data->tool_grammar = grammar;
+        data->generation_recovery = recovery;
+        return PreparedPrompt(std::move(data));
+    };
     std::vector<fi::ChatMessage> messages = convert_messages(std::move(input.messages));
     const bool has_media =
         std::any_of(messages.begin(), messages.end(),
@@ -902,12 +1220,14 @@ PreparedPrompt Frontend::prepare(PromptInput input) const {
         try {
             processed = processor.process(messages, render_options(options));
         } catch (const fi::ProcessorError& error) { throw_processor_error(error); }
-        return PreparedPrompt(make_media_prompt_data(std::move(processed), options, start));
+        return finish(make_media_prompt_data(std::move(processed), options,
+                                                     tool_output_enabled, start));
     }
     const fi::RenderedChat rendered =
         impl_->chat_template.render(messages, render_options(options));
     fi::EncodedChat encoded = fi::encode_rendered_chat(*impl_->tokenizer, rendered);
-    return PreparedPrompt(make_text_prompt_data(std::move(encoded), options, start));
+    return finish(
+        make_text_prompt_data(std::move(encoded), options, tool_output_enabled, start));
 }
 
 std::uint32_t Frontend::count_tokens(PromptInput input) const {
@@ -962,7 +1282,9 @@ OutputSession Frontend::make_output_session(const PreparedPrompt& prompt,
     StopPolicy policy = merge_stop_policy(*impl_->tokenizer, caller_stop);
     if (output.raw) { policy.publish_stop_token = true; }
     return OutputSession(std::make_unique<OutputSession::Impl>(
-        impl_->tokenizer, std::move(policy), output, prompt.data_->starts_in_reasoning));
+        impl_->tokenizer, std::move(policy), output, prompt.data_->starts_in_reasoning,
+        prompt.data_->tool_output_enabled, impl_->defaults.token_ids, prompt.data_->tool_grammar,
+        prompt.data_->generation_recovery));
 }
 
 const StopPolicy& Frontend::default_stop_policy() const noexcept { return impl_->defaults; }
@@ -971,6 +1293,15 @@ PreparedPrompt EncodedHistoryPrepare::prepare(const Frontend& frontend, PromptIn
                                               frontend_internal::EncodedHistoryCache& cache) {
     const auto start                      = Clock::now();
     const PromptOptions options           = input.options;
+    const bool tool_output_enabled        = enables_tool_output(input);
+    const auto grammar = options.add_generation_prompt
+        ? frontend.impl_->tool_grammar.compile(options.tool_jsons, options.enable_thinking) : nullptr;
+    const auto recovery = GenerationRecoveryContext::analyze(input);
+    const auto finish = [&](std::unique_ptr<PreparedPromptData> data) {
+        data->tool_grammar = grammar;
+        data->generation_recovery = recovery;
+        return PreparedPrompt(std::move(data));
+    };
     std::vector<fi::ChatMessage> messages = convert_messages(std::move(input.messages));
     const bool has_media =
         std::any_of(messages.begin(), messages.end(),
@@ -986,12 +1317,14 @@ PreparedPrompt EncodedHistoryPrepare::prepare(const Frontend& frontend, PromptIn
         try {
             processed = processor.process(messages, render_options(options));
         } catch (const fi::ProcessorError& error) { throw_processor_error(error); }
-        return PreparedPrompt(make_media_prompt_data(std::move(processed), options, start));
+        return finish(make_media_prompt_data(std::move(processed), options,
+                                                     tool_output_enabled, start));
     }
     fi::EncodedChat encoded =
         fi::encode_chat_with_cache(*frontend.impl_->tokenizer, frontend.impl_->chat_template,
                                    messages, render_options(options), cache);
-    return PreparedPrompt(make_text_prompt_data(std::move(encoded), options, start));
+    return finish(
+        make_text_prompt_data(std::move(encoded), options, tool_output_enabled, start));
 }
 
 std::uint32_t EncodedHistoryPrepare::count_tokens(const Frontend& frontend, PromptInput input,

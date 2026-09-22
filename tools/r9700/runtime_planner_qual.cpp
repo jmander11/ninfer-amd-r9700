@@ -170,6 +170,20 @@ void qualify_host_split512_routing() {
                 class_at(mtp, 8187U) == 1U && class_at(mtp, 8188U) == 3U &&
                 class_at(dflash, 8187U) == 0U && class_at(dflash, 8188U) == 2U,
             "split-512 Device Graph topology classes are incomplete");
+    for (const std::uint32_t width : {5U, 6U}) {
+        for (std::uint32_t batch = 1; batch <= 4; ++batch) {
+            const auto profiles = Variant::dflash_graph_profiles(16384U, width - 1U, batch, width);
+            const std::uint32_t short_class =
+                ninfer::targets::qwen3::detail::kR9700TextKVValueGroup == 16 ? 1U : 0U;
+            require(class_at(profiles, 8191U - width) == short_class &&
+                        class_at(profiles, 8192U - width) == 0U &&
+                        class_at(profiles, 16383U) == 0U,
+                    "DFlash W5/W6 graph key omitted the short WMMA / long fused boundary");
+            const auto tiny = Variant::dflash_graph_profiles(63U, width - 1U, batch, width);
+            require(class_at(tiny, 62U) == 0U,
+                    "DFlash graph key must use capacity-clipped visible context");
+        }
+    }
     std::printf("r9700_runtime_planner: PASS host split-512 production routing\n");
 }
 
@@ -248,7 +262,10 @@ void qualify_host_hybrid_allocation_bound() {
 void qualify_host_dflash_graph_allowance() {
     namespace runtime =
         ninfer::targets::qwen3::detail::qwen3_8_27b_r9700;
-    constexpr std::size_t kExpectedObservedBytes = 68ULL * 1024ULL * 1024ULL;
+    constexpr std::size_t expected_classes =
+        ninfer::targets::qwen3::detail::kR9700TextKVValueGroup == 16 ? 2U : 1U;
+    constexpr std::size_t expected_allowance =
+        (42ULL + 26ULL * expected_classes) * 1024ULL * 1024ULL;
     const runtime::SequencePlanningInputs inputs{
         .weights_profile =
             Variant::WeightsProfile::R9700Q4G64DFlash2Q4Evaluation,
@@ -281,11 +298,11 @@ void qualify_host_dflash_graph_allowance() {
     require(plan->dflash_verify_width == 5U &&
                 plan->graph_definition_count == profiles.size() &&
                 plan->graph_executable_count == topology_classes.size() &&
-                topology_classes.size() == 1U,
+                topology_classes.size() == expected_classes,
             "DFlash C1 K4/W5 graph topology inventory changed");
-    require(plan->graph_allowance_bytes == kExpectedObservedBytes,
-            "DFlash C1 K4/W5 allowance does not cover the exact observed 68 MiB residency");
-    std::printf("r9700_runtime_planner: PASS host DFlash C1/K4/W5 68 MiB graph allowance\n");
+    require(plan->graph_allowance_bytes == expected_allowance,
+            "DFlash C1 K4/W5 allowance must reserve each distinct executable topology");
+    std::printf("r9700_runtime_planner: PASS host DFlash C1/K4/W5 graph topology allowance\n");
 }
 using WeightsProfile = ninfer::targets::qwen3_8_27b::detail::WeightsProfile;
 

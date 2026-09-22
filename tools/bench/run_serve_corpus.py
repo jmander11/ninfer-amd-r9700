@@ -30,16 +30,14 @@ SPECULATIVE_MODES = {
     "mtp3": ("mtp", 3, 0),
     "mtp4": ("mtp", 4, 0),
     "mtp5": ("mtp", 5, 0),
+    "dflash1": ("dflash", 1, 0),
+    "dflash2": ("dflash", 2, 0),
     "dflash3": ("dflash", 3, 0),
     "dflash4": ("dflash", 4, 0),
-    "dflash4w6": ("dflash", 4, 6),
     "dflash5": ("dflash", 5, 0),
-    "dflash6": ("dflash", 6, 0),
-    "dflash7": ("dflash", 7, 0),
-    "dflash11": ("dflash", 11, 0),
 }
 DEFAULT_MODES = ("mtp0", "mtp3")
-SAMPLING_MODES = ("stochastic", "greedy")
+SAMPLING_MODES = ("stochastic", "p-less", "greedy")
 
 SEEDS = (
     7632647173703958409,
@@ -92,7 +90,7 @@ KV_CACHE_FORMAT = "fp8-k-int4-v"
 RUN_ARTIFACT_TYPE = "ninfer_serve_corpus_result"
 RUN_SCHEMA_VERSION = 6
 SERVER_LOG_ARTIFACT_TYPE = "ninfer_serve_request_log"
-SERVER_LOG_SCHEMA_VERSION = 20
+SERVER_LOG_SCHEMA_VERSION = 21
 STARTUP_TIMEOUT_SECONDS = 1800.0
 REQUEST_TIMEOUT_SECONDS = 24.0 * 60.0 * 60.0
 LOG_EVENT_TIMEOUT_SECONDS = 10.0
@@ -583,6 +581,9 @@ def validate_server_start(
         spec.sampling_mode == "greedy"
     ):
         raise CampaignError("server_start sampling mode does not match the campaign")
+    p_less = event.get("sampling_defaults", {}).get("server_overrides", {}).get("p_less")
+    if p_less != (spec.sampling_mode == "p-less"):
+        raise CampaignError("server_start p-less mode does not match the campaign")
     if event.get("artifact", {}).get("target") != spec.target:
         raise CampaignError(
             "loaded artifact target mismatch: "
@@ -830,12 +831,13 @@ def server_command(
         if spec.dflash_verify_width:
             command.extend(["--dflash-verify-width", str(spec.dflash_verify_width)])
     if spec.sampling_mode == "greedy":
-        command.append("--greedy")
-    else:
+        command.extend(["--greedy", "--no-p-less-sampling"])
+    elif spec.sampling_mode == "stochastic":
         # Published stochastic measurements use this explicit profile; they must not drift when
         # product defaults follow a newly registered model recommendation.
         command.extend(
             [
+                "--no-p-less-sampling",
                 "--temperature",
                 "0.6",
                 "--top-p",
@@ -1156,20 +1158,8 @@ def mode_display_name(mode_name: str) -> str:
         return "MTP0"
     if backend == "mtp":
         return f"MTP{draft_tokens}"
-    if mode_name == "dflash3":
-        return "DFlash k=3 W=4 chain"
-    if mode_name == "dflash4":
-        return "DFlash k=4 W=5 chain"
-    if mode_name == "dflash4w6":
-        return "DFlash k=4 W=6 tree"
-    if mode_name == "dflash5":
-        return "DFlash k=5 W=6 chain"
-    if mode_name == "dflash6":
-        return "DFlash k=6 W=12 tree"
-    if mode_name == "dflash7":
-        return "DFlash k=7 W=12 tree"
-    if mode_name == "dflash11":
-        return "DFlash k=11 W=12 chain"
+    if backend == "dflash":
+        return f"DFlash k={draft_tokens} W={draft_tokens + 1} chain"
     raise CampaignError(f"unsupported summary mode: {mode_name}")
 
 

@@ -136,6 +136,19 @@ std::size_t hidden_proj_bytes(std::int32_t tokens, std::int32_t batch) {
            static_cast<std::size_t>(batch) * sizeof(std::uint16_t);
 }
 
+void project_hidden(const Tensor& hidden, const Weight& weight, Tensor& projected,
+                    std::int32_t tokens, std::int32_t batch, WorkspaceArena& workspace,
+                    hipStream_t stream) {
+    const Tensor flat = hidden.view({kDflash2PathSelectHidden, tokens * batch});
+    // Preserve the C=1 arithmetic route: admission/removal of other sequences must
+    // not switch this sequence's projection reduction or activation profile.
+    for (std::int32_t sequence = 0; sequence < batch; ++sequence) {
+        Tensor output = projected.slice(1, sequence * tokens, tokens);
+        ops::linear(flat.slice(1, sequence * tokens, tokens), weight, output,
+                    workspace, stream);
+    }
+}
+
 constexpr int kTopkSplits = 32;
 
 std::size_t align_workspace(std::size_t bytes) {
@@ -189,9 +202,8 @@ std::size_t dflash2_path_select_workspace_capacity_bytes(QType qtype, std::int32
     if (qtype != QType::BF16_CTRL && !is_quantized_projection(qtype)) {
         throw std::invalid_argument("dflash2_path_select workspace: unsupported projection qtype");
     }
-    const std::int32_t columns = max_tokens * batch;
     const std::size_t linear_bytes =
-        linear_workspace_capacity_bytes(qtype, columns, kDflash2PathSelectHidden);
+        linear_workspace_capacity_bytes(qtype, max_tokens, kDflash2PathSelectHidden);
     return align_workspace(hidden_proj_bytes(max_tokens, batch)) +
            std::max(align_workspace(topk_scratch_bytes(max_tokens, batch)),
                     align_workspace(linear_bytes));
@@ -242,8 +254,7 @@ void dflash2_path_select(const Tensor& logits, const Tensor& hidden,
     auto scratch_scope           = workspace.scope();
     const DeviceSpan proj_span   = workspace.alloc_bytes(hidden_proj_bytes(tokens, batch));
     Tensor hidden_proj(proj_span.data, DType::BF16, {kDflash2PathSelectRank, tokens * batch});
-    Tensor hidden_flat           = hidden.view({kDflash2PathSelectHidden, tokens * batch});
-    ops::linear(hidden_flat, hidden_projection, hidden_proj, workspace, stream);
+    project_hidden(hidden, hidden_projection, hidden_proj, tokens, batch, workspace, stream);
     const TopkScratch topk = alloc_topk_scratch(workspace, tokens, batch);
     detail::dflash2_column_topk_launch(logits, topk.split_val, topk.split_idx, topk.cand_val,
                                        topk.cand_idx, logit_token_ids, stream);
@@ -309,8 +320,7 @@ void dflash2_tree_select(const Tensor& logits, const Tensor& hidden,
     auto scratch_scope         = workspace.scope();
     const DeviceSpan proj_span = workspace.alloc_bytes(hidden_proj_bytes(tokens, batch));
     Tensor hidden_proj(proj_span.data, DType::BF16, {kDflash2PathSelectRank, tokens * batch});
-    Tensor hidden_flat = hidden.view({kDflash2PathSelectHidden, tokens * batch});
-    ops::linear(hidden_flat, hidden_projection, hidden_proj, workspace, stream);
+    project_hidden(hidden, hidden_projection, hidden_proj, tokens, batch, workspace, stream);
     const TopkScratch topk = alloc_topk_scratch(workspace, tokens, batch);
     detail::dflash2_column_topk_launch(logits, topk.split_val, topk.split_idx, topk.cand_val,
                                        topk.cand_idx, logit_token_ids, stream);

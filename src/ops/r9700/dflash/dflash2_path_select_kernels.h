@@ -248,7 +248,8 @@ __launch_bounds__(kDflash2PathSelectBlock) __global__
     const int tid = static_cast<int>(threadIdx.x);
     if (b >= batch) { return; }
     const SamplingConfig cfg       = configs[b];
-    const float temperature        = force_greedy ? 0.0f : cfg.temperature;
+    // P-less temperature belongs to the target distribution; its draft proposal is a point mass.
+    const float temperature        = (force_greedy || cfg.p_less != 0) ? 0.0f : cfg.temperature;
     const unsigned long long seed  = cfg.seed ^ seed_xor;
 
     __shared__ float scores[kDflash2PathSelectK];

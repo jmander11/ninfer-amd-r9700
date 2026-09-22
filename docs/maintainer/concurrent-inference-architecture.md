@@ -129,6 +129,40 @@ Backfill 只改变 waiting request 的 admission order。它不取得 active req
 资源，不产生 partial admission，不抢占已经 admitted 的 request，也不建立第二套 decode priority。所有
 backfilled decode-ready requests 仍进入同一个 maximal compact batch。
 
+### 2.10 Constrained generation and bounded recovery
+
+The Qwen frontend owns compiled tool schemas, transactional grammar state, and typed completed
+calls. Program owns planner-accounted device eligibility masks and pinned exchange storage.
+Ordinary sampling uses one mask per compact row; speculative verification uses one per actual
+chain position or tree node. HIP Graph host nodes fork grammar state after proposal metadata
+arrives on the host, then upload target masks. Proposals do not advance committed grammar; only
+the accepted publication transaction does. Callback errors surface before publication.
+
+P-less sampling evaluates the eligible full-vocabulary softmax. With temperature T>0, collision
+mass L=sum(p²), and epsilon=0.0625, membership is p>=max(L*exp(-2*epsilon/T),1/1024).
+The floor is not relaxed and there is no top-20 support cap. Temperature and request seed remain
+active; top-k, top-p, min-p and presence/frequency penalties do not. Temperature zero remains
+eligible argmax with lower-token-id ties. A thinking-only cycle detector can exclude the predicted
+continuation of the least repeated suffix period 32..2048 (Hamming allowance floor(2p/512)).
+Exclusion removes an atom after the support decision, without recomputing L; an emptied support
+falls back to the eligible mode or its runner-up. Only the first position of a speculative round
+uses this cycle-exit restriction.
+
+For p-less, non-raw, text-only thinking requests, bounded recovery may withhold a repeated completed
+call or interrupt persistent reasoning at a committed round boundary. Reasoning retries additionally
+require positive temperature, three disjoint exact occurrences of a 256-token passage, and at least
+4096 distinct redundant tokens. This is not a reasoning-length limit. The detector resets per attempt.
+The family owns the original input and repairs it by removing failed/historical reasoning and adding
+a labeled system notice, without inventing a user turn or call result.
+
+At most two repairs consume reserved cold-prefill entitlement and the original remaining output
+budget. A retry keeps its lane/admission, leaves the decode-ready set, clears complete KV/GDN/
+speculative state, and prefills without prefix reuse or checkpoint capture. It cannot truncate KV
+while retaining stale recurrent state. Other requests keep maximal-batch scheduling outside that
+exclusive prefill. Calls remain unpublished until accepted; already streamed prose/reasoning cannot
+be retracted. Extra prefill work and recovery events are reported separately from original prompt
+usage. Exhaustion is a request error, not synthetic EOS, engine shutdown, or a promise of progress.
+
 ---
 
 ## 3. Overall architecture
@@ -834,8 +868,29 @@ the least-recently-admitted retained bundle, then lowest lane index. Page-reclai
 other free retained lanes uses the same recency order and never captures the selected lane twice.
 The admitted `RequestPlan` is the winner: RAM pass 1 keeps `evict_retained=false` even if the
 target lane is dirty, and restore captures that lane's old bundle. `GenerationResult` uses
-`prefix_reuse_source` for `none` / `vram_resident` / `host_ram`; `prefix_reuse_path` still describes
+`prefix_reuse_source` for `none` / `vram_resident` / `host_ram` / `host_disk`; `prefix_reuse_path` still describes
 only frontier/checkpoint semantics.
+
+### 6.6 Persistent SSD tier
+
+An explicitly enabled disk tier is inclusive beside the exclusive RAM FIFO and requires nonzero
+RAM capacity. Admission compares complete reusable frontiers, with equal reuse preferring VRAM,
+then RAM, then disk. For C=1, a disk restore does not enqueue its payload read until the retained
+VRAM victim has been evicted. Entries bind model/artifact identity and the exact AMD three-plane
+cache/checkpoint representation, including Vision-aware prefix identity; pool allocation capacity
+is not part of the durable fingerprint, allowing compatible restart resizing.
+
+One restore coordinator and a startup-fixed reader pool own bounded pinned/device staging. A claim
+pins the immutable entry and pack generation. Validated page H2D/scatter can overlap later reads,
+but no partially restored lane is published. Admission waits for state restoration and copy-stream
+completion before prefill. Cancellation drains outstanding owners and releases the claim without
+consuming the durable entry. Restore reads yield to an emergency spill required for admission;
+idle spill uses separate staging and rechecks its epoch and RAM residency before publishing.
+
+Durability publishes pack namespace, map, entry, then manifest with fsync ordering. Orderly shutdown
+captures retained VRAM, flushes nondurable RAM, waits for outstanding writes, and synchronizes the
+store before releasing lanes. Load-progress callbacks report the disk shutdown phases. Optional
+spill/allocation failure does not turn active requests into offloaded/preempted requests.
 
 ---
 
@@ -1188,14 +1243,15 @@ DFlash 不保留单独的 `B=1` concurrency route。
 shared frame、workspace 和 state-pool bases。它读取 typed controls 和 selectors，不读取 request/slot
 identity。
 
-Captured definition 和 replayable executable 不是一一对应。Exact `B` 是 executable 的结构键；同一
-`B` 内只有真实 Device Graph node topology 不同才增加 executable：
+Captured definition 和 replayable executable 不是一一对应。Exact `B` and, when adaptive drafting is
+enabled, captured K are structural keys. Within that pair, only genuinely different node topology
+requires another executable:
 
 ```text
-exact definitions[family,B,profile]
+exact definitions[family,B,K,profile]
           │ exact B + target-declared profile topology class
           ▼
-executable[family,B,topology class]
+executable[family,B,K,topology class]
 ```
 
 不同 context profiles 若在同一 exact `B` 下具有可更新的 node topology，共享一个 executable，并在 profile
@@ -1311,17 +1367,22 @@ R9700产品以DFlash/DFlash2作为首选且必须完成支持与优化的 specul
 backend；迁移与后续改动必须继续保护它现有的graph/eager语义、cache、row view、accept/commit状态和
 测试，但不再分配新的MTP feature、head-precision或性能优化工作，也不把这些工作作为发布门槛。
 
-同一 Engine 的全部 requests 使用相同 backend 和 proposal window。Scheduler 仍然只提交一个
+同一 Engine 的全部 requests 使用相同 backend。Scheduler 仍然只提交一个
 `DecodeRound(all decode-ready requests)`。
 
-Proposal window 是 startup-fixed contract。Runtime 只规划、capture 和执行配置的一个 K；DFlash 同样
-只保留该 K 对应的 resolved verify width。不得根据 request acceptance 在运行时切换 K，也不得为未选择的
-K 保留额外 graph、workspace 或 host policy state。未来的 automatic-K product change 必须先在选定 R9700
-artifact 上，对每个候选 K 和 C=1..4 完成 same-candidate execution parity、acceptance 与 whole-round time gate；其他
-cache/weight profile 的标定不能作为证据。
+Without adaptive drafting, the proposal window is startup-fixed and only that K is planned and
+captured. Startup-enabled adaptive drafting preplans the bounded supported K set (DFlash {3,4,5}),
+with separate K-specific graph definitions and accounted memory. At each round boundary one K is
+selected for the whole compact batch, constrained by each row's remaining budget. The policy uses
+observed conditional acceptance and measured round time at concurrency/context length to estimate
+tokens per second; it does not split acceptance cohorts or capture graphs during serving. A smaller
+live K does not shrink the backing storage or discard previous full-width pending DFlash features.
+These are functional scheduling semantics, not a claim that adaptive K beats a physically qualified
+fixed policy on a particular artifact.
 
-当前 R9700 DFlash 生产选择只比较 K4/W5 与 K5/W6，二者均为 single-block chain；W 包含 target
-anchor。旧的 K1..11 broad shortlist 不再运行。DFlash companion 也不自动继承固定 Q4 recipe：它从真实
+R9700 DFlash is chain-only, K<=5, W=K+1 including the target anchor; no packed-tree or two-block
+product schedule is exposed. The fixed-policy production comparison uses K4/W5 and K5/W6, not the
+retired K1..11 shortlist. DFlash companion 也不自动继承固定 Q4 recipe：它从真实
 BF16 DFlash2 checkpoint 独立比较 canonical Q4G64、source-MSE Q4G64 与 source-MSE W8G32，只有物理
 small-width speed 和 quality 同时支持时才加入 row-scaled E4M3。所有 recipe 保留 BF16 selector codebooks
 和 private BF16 state。
@@ -1353,8 +1414,9 @@ verify/accept view、per-row accepted-prefix result 和 target state transaction
 
 Engine capability 在 startup 时固定。MTP Engine 可以同时启用 Vision；MTP 的 shifted input 落在视觉列
 时使用与 target 相同的 Vision-composed embedding，prefix-reuse bridge 与正常 prefill 遵守同一输入
-语义。当前 DFlash companion checkpoint 是 text-only，因此 `DFlash + Vision` 在 Engine 构造时拒绝，
-不形成 request-level fallback。
+语义。DFlash also accepts Vision-conditioned target features. Its proposal cache positions remain
+logical text positions; target verification applies each lane's MRoPE position delta independently.
+This does not add a Vision encoder to the draft checkpoint or change the private BF16 draft cache.
 
 不同 request 可以接受不同数量的 proposals。Acceptance length 是 result metadata，不能据此拆分
 verification、重放 model 或形成 acceptance cohort。Target model 始终是 output authority，只有 accepted

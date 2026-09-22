@@ -10,7 +10,7 @@ from tools.bench.prepare_selected_vision_diagnostic import REPO, prepare
 
 class PrepareSelectedVisionDiagnosticTest(unittest.TestCase):
     def test_prepares_one_bound_command_package(self) -> None:
-        with tempfile.TemporaryDirectory(dir=REPO / "build-r9700") as directory:
+        with tempfile.TemporaryDirectory(dir=REPO) as directory:
             root = Path(directory)
             selection = root / "selection.json"
             artifact = root / "artifact.ninfer"
@@ -18,6 +18,10 @@ class PrepareSelectedVisionDiagnosticTest(unittest.TestCase):
             whole = root / "whole.json"
             cache = root / "CMakeCache.txt"
             ctest = root / "CTestTestfile.cmake"
+            tracer = root / "tests/ninfer_qwen3_8_27b_vision_trace"
+            tracer.parent.mkdir()
+            tracer.write_text("tracer")
+            tracer.chmod(0o755)
             for path in (selection, artifact, capacity, whole, cache, ctest):
                 path.write_text(path.name)
             output = root / "campaign"
@@ -51,6 +55,8 @@ class PrepareSelectedVisionDiagnosticTest(unittest.TestCase):
                 return subprocess.CompletedProcess(command, 0, json.dumps(contract) + "\n", "")
 
             with mock.patch(
+                "tools.bench.prepare_selected_vision_diagnostic.SOURCE_RECEIPT", selection
+            ), mock.patch(
                 "tools.bench.prepare_selected_vision_diagnostic.resolve_route",
                 return_value=route,
             ), mock.patch(
@@ -68,9 +74,12 @@ class PrepareSelectedVisionDiagnosticTest(unittest.TestCase):
             self.assertEqual(plan["prepared_input"]["contract"], contract)
             self.assertTrue((output / "commands.sh").is_file())
             self.assertTrue((output / "prepared.sha256").is_file())
+            command = (output / "commands.sh").read_text()
+            self.assertIn("--trace-exe " + str(tracer), command)
+            self.assertNotIn("--no-thinking", command)
 
     def test_rejects_dangling_output_before_route_resolution(self) -> None:
-        with tempfile.TemporaryDirectory(dir=REPO / "build-r9700") as directory:
+        with tempfile.TemporaryDirectory(dir=REPO) as directory:
             root = Path(directory)
             selection = root / "selection.json"
             selection.write_text("{}")

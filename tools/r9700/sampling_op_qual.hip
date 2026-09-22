@@ -5,6 +5,9 @@
 #include "core/device.h"
 #include "core/tensor.h"
 #include "ninfer/ops/sampling.h"
+#include "ninfer/ops/argmax.h"
+#include "ninfer/ops/position.h"
+#include "sampling_reference.h"
 #include "ninfer/types.h"
 
 #include <algorithm>
@@ -78,6 +81,7 @@ OracleResult oracle_sample(const hip_bfloat16* logits, int token_domain,
     std::vector<std::pair<float, int>> candidates;
     candidates.reserve(static_cast<std::size_t>(token_domain));
     for (int token = 0; token < token_domain; ++token) {
+        if (!sampling_reference::eligible(token, config)) continue;
         float value = bf16_to_float(logits[token]);
         if (config.temperature > 0.0F && counts != nullptr) {
             const int count = (*counts)[static_cast<std::size_t>(token)];
@@ -102,7 +106,7 @@ OracleResult oracle_sample(const hip_bfloat16* logits, int token_domain,
 
     int cap = 20;
     if (config.top_k > 0 && config.top_k < 20) { cap = config.top_k; }
-    cap = std::min(cap, token_domain);
+    cap = std::min(cap, static_cast<int>(candidates.size()));
     std::partial_sort(candidates.begin(), candidates.begin() + cap, candidates.end(), better);
     candidates.resize(static_cast<std::size_t>(cap));
 
@@ -318,7 +322,7 @@ void qualify_rng_and_small_route(ninfer::DeviceContext& device) {
     d_logits.copy_from_host(logits.data(), logits.size() * sizeof(hip_bfloat16));
     d_positions.copy_from_host(positions.data(), positions.size() * sizeof(int));
     d_configs.copy_from_host(configs.data(), configs.size() * sizeof(configs[0]));
-    ninfer::DeviceArena workspace(1);
+    ninfer::DeviceArena workspace(ninfer::ops::sampling_workspace_capacity_bytes(tokens, rows, rows));
     ninfer::Tensor logits_tensor(d_logits.data(), ninfer::DType::BF16, {tokens, rows});
     ninfer::Tensor out_tensor(d_out.data(), ninfer::DType::I32, {rows});
     ninfer::Tensor positions_tensor(d_positions.data(), ninfer::DType::I32, {rows});
@@ -330,6 +334,208 @@ void qualify_rng_and_small_route(ninfer::DeviceContext& device) {
     std::vector<int> actual(rows);
     d_out.copy_to_host(actual.data(), actual.size() * sizeof(int));
     if (actual != expected) { fail("small-route tie/counter-RNG result differs from FP64 oracle"); }
+}
+
+void qualify_p_less(ninfer::DeviceContext& device) {
+    // Probability is the public contract, not a particular inverse-CDF traversal/RNG mapping.
+    // Compare support and empirical frequencies to the full-domain FP64 oracle. Exact graph
+    // replay for fixed public inputs is checked separately inside each case.
+    constexpr int rows = 4;
+    constexpr int draws = 256;
+    for (int tokens : {127, 257, kTokenDomain}) {
+        for (int fixture = 0; fixture < 5; ++fixture) {
+            std::vector<hip_bfloat16> logits(static_cast<std::size_t>(tokens) * rows, bf16(-24));
+            std::vector<std::uint32_t> masks(static_cast<std::size_t>((tokens + 31) / 32) * rows,
+                                            ~std::uint32_t{0});
+            const int words = (tokens + 31) / 32;
+            std::vector<ninfer::ops::SamplingConfig> configs(rows);
+            std::vector<sampling_reference::Distribution> references;
+            std::vector<int> positions(rows), actual(rows), previous(rows);
+            std::vector<int> histogram(static_cast<std::size_t>(tokens) * rows);
+            for (int row = 0; row < rows; ++row) {
+                auto* column = logits.data() + static_cast<std::size_t>(row) * tokens;
+                // Wide support proves no inherited top-20 truncation. Two near-equal atoms
+                // distinguish the epsilon-relaxed gate from the old collision-only rule.
+                if (fixture == 0 || fixture == 4)
+                    for (int i = 0; i < 64; ++i) column[i] = bf16(0);
+                if (fixture == 1) { column[3] = bf16(0.125F); column[7] = bf16(0); }
+                if (fixture == 2) { column[3] = bf16(12); column[7] = bf16(0); }
+                if (fixture == 3) std::fill(column, column + tokens, bf16(0));
+                auto& cfg = configs[row];
+                cfg.temperature = 1;
+                cfg.p_less = 1;
+                cfg.top_k = 1; cfg.top_p = 0.01F; cfg.min_p = 0.99F;
+                cfg.presence_penalty = 100; cfg.frequency_penalty = 100;
+                cfg.seed = 0x13579ULL + row;
+                if (fixture == 2 || fixture == 3) cfg.typical_exclude = fixture == 2 ? 3 : 0;
+                if (fixture == 4) {
+                    cfg.suppressed_token_count = 2;
+                    cfg.suppressed_tokens[0] = 0; cfg.suppressed_tokens[1] = 1;
+                    for (int i = 0; i < tokens; ++i)
+                        if ((i + row) % 3 == 0) masks[row * words + i / 32] &= ~(1U << (i % 32));
+                    cfg.typical_exclude = 2;
+                    cfg.allowed_token_words = masks.data() + row * words;
+                }
+                std::vector<double> represented(tokens);
+                for (int i = 0; i < tokens; ++i) represented[i] = bf16_to_float(column[i]);
+                references.push_back(sampling_reference::p_less(represented, cfg));
+            }
+            ninfer::DeviceBuffer d_logits(logits.size() * sizeof(logits[0]));
+            ninfer::DeviceBuffer d_configs(configs.size() * sizeof(configs[0]));
+            ninfer::DeviceBuffer d_masks(masks.size() * sizeof(masks[0]));
+            ninfer::DeviceBuffer d_counts(histogram.size() * sizeof(int));
+            ninfer::DeviceBuffer d_positions(rows * sizeof(int)), d_out(rows * sizeof(int));
+            d_logits.copy_from_host(logits.data(), logits.size() * sizeof(logits[0]));
+            d_masks.copy_from_host(masks.data(), masks.size() * sizeof(masks[0]));
+            d_counts.copy_from_host(histogram.data(), histogram.size() * sizeof(int));
+            for (int row = 0; row < rows; ++row) {
+                configs[row].token_counts = static_cast<int*>(d_counts.data()) + row * tokens;
+                if (fixture == 4)
+                    configs[row].allowed_token_words = static_cast<std::uint32_t*>(d_masks.data()) + row * words;
+            }
+            d_configs.copy_from_host(configs.data(), configs.size() * sizeof(configs[0]));
+            ninfer::Tensor input(d_logits.data(), ninfer::DType::BF16, {tokens, rows});
+            ninfer::Tensor output(d_out.data(), ninfer::DType::I32, {rows});
+            ninfer::Tensor position(d_positions.data(), ninfer::DType::I32, {rows});
+            ninfer::DeviceArena workspace(std::max<std::size_t>(1,
+                ninfer::ops::sampling_workspace_capacity_bytes(tokens, rows, rows)));
+            const auto launch = [&] {
+                ninfer::ops::sample(input, output, tokens,
+                    static_cast<const ninfer::ops::SamplingConfig*>(d_configs.data()), position,
+                    ninfer::ops::kSamplePurposeDecode, workspace, device.stream);
+            };
+            hipGraph_t graph = nullptr;
+            hipGraphExec_t executable = nullptr;
+            HIP_CHECK(hipStreamBeginCapture(device.stream, hipStreamCaptureModeGlobal));
+            launch();
+            HIP_CHECK(hipStreamEndCapture(device.stream, &graph));
+            HIP_CHECK(hipGraphInstantiate(&executable, graph, nullptr, nullptr, 0));
+            for (int draw = 0; draw < draws; ++draw) {
+                for (int row = 0; row < rows; ++row) positions[row] = 1009 * draw + row;
+                d_positions.copy_from_host(positions.data(), positions.size() * sizeof(int));
+                HIP_CHECK(hipMemsetAsync(d_out.data(), 0xff, rows * sizeof(int), device.stream));
+                if (draw % 2 == 0) launch();
+                else HIP_CHECK(hipGraphLaunch(executable, device.stream));
+                device.synchronize();
+                d_out.copy_to_host(actual.data(), actual.size() * sizeof(int));
+                for (int row = 0; row < rows; ++row) {
+                    const auto& reference = references[row];
+                    if (std::find(reference.ids.begin(), reference.ids.end(), actual[row]) == reference.ids.end())
+                        fail("p-less emitted outside independent support, V=" + std::to_string(tokens) +
+                             " fixture=" + std::to_string(fixture));
+                    ++histogram[row * tokens + actual[row]];
+                }
+                if (draw == 0) {
+                    previous = actual;
+                    HIP_CHECK(hipMemsetAsync(d_out.data(), 0xff, rows * sizeof(int), device.stream));
+                    HIP_CHECK(hipGraphLaunch(executable, device.stream));
+                    device.synchronize();
+                    d_out.copy_to_host(actual.data(), actual.size() * sizeof(int));
+                    if (actual != previous) fail("p-less eager/graph fixed-input replay differs");
+                    for (int row = 0; row < rows; ++row) ++histogram[row * tokens + actual[row]];
+                }
+            }
+            HIP_CHECK(hipGraphExecDestroy(executable));
+            HIP_CHECK(hipGraphDestroy(graph));
+            std::vector<int> actual_counts(histogram.size());
+            d_counts.copy_to_host(actual_counts.data(), actual_counts.size() * sizeof(int));
+            if (actual_counts != histogram) fail("p-less token counts not exactly once per publication");
+            for (int row = 0; row < rows; ++row) {
+                const auto& reference = references[row];
+                int seen = 0;
+                for (std::size_t i = 0; i < reference.ids.size(); ++i) {
+                    const double p = reference.probabilities[i];
+                    const double mean = (draws + 1) * p;
+                    const int observed = histogram[row * tokens + reference.ids[i]];
+                    seen += observed > 0;
+                    if (std::abs(observed - mean) > 7 * std::sqrt((draws + 1) * p * (1 - p)) + 2)
+                        fail("p-less frequencies disagree with independent FP64 distribution");
+                }
+                if (fixture == 0 && seen <= 20) fail("p-less retained obsolete top-20 cap");
+            }
+        }
+    }
+}
+
+void qualify_eligibility_and_positions(ninfer::DeviceContext& device) {
+    constexpr int tokens = 67, columns = 8, rows = 4, per_row = 2;
+    std::vector<hip_bfloat16> logits(tokens * columns, bf16(-1));
+    std::vector<std::uint32_t> masks(rows * per_row * 3, 0);
+    std::vector<ninfer::ops::SamplingConfig> configs(rows);
+    std::vector<int> expected(columns);
+    for (int column = 0; column < columns; ++column) {
+        expected[column] = 5 + column;
+        masks[column * 3 + expected[column] / 32] |= 1U << (expected[column] % 32);
+        masks[column * 3] |= 1U;
+        logits[column * tokens] = bf16(100);
+        configs[column / per_row].suppressed_token_count = 1;
+        configs[column / per_row].suppressed_tokens[0] = 0;
+        configs[column / per_row].allowed_token_column_stride = 3;
+    }
+    ninfer::DeviceBuffer dl(logits.size() * sizeof(logits[0])), dm(masks.size() * sizeof(masks[0]));
+    ninfer::DeviceBuffer dc(configs.size() * sizeof(configs[0])), dout(columns * sizeof(int));
+    dl.copy_from_host(logits.data(), logits.size() * sizeof(logits[0]));
+    dm.copy_from_host(masks.data(), masks.size() * sizeof(masks[0]));
+    for (int row = 0; row < rows; ++row)
+        configs[row].allowed_token_words = static_cast<std::uint32_t*>(dm.data()) + row * per_row * 3;
+    dc.copy_from_host(configs.data(), configs.size() * sizeof(configs[0]));
+    ninfer::Tensor input(dl.data(), ninfer::DType::BF16, {tokens, columns});
+    ninfer::Tensor output(dout.data(), ninfer::DType::I32, {columns});
+    ninfer::ops::argmax(input, output, tokens,
+        static_cast<const ninfer::ops::SamplingConfig*>(dc.data()), per_row, device.stream);
+    device.synchronize();
+    std::vector<int> actual(columns);
+    dout.copy_to_host(actual.data(), actual.size() * sizeof(int));
+    if (actual != expected) fail("configured argmax lost suppression or per-column eligibility");
+    // Ordinary truncated sampling must obey the same eligibility domain (p-less is off).
+    for (auto& config : configs) {
+        config.temperature = 0.8F; config.top_k = 20;
+        config.top_p = 0.9F; config.min_p = 0.05F;
+    }
+    dc.copy_from_host(configs.data(), configs.size() * sizeof(configs[0]));
+    std::vector<int> sample_positions(rows, 32);
+    ninfer::DeviceBuffer dp(rows * sizeof(int));
+    dp.copy_from_host(sample_positions.data(), sample_positions.size() * sizeof(int));
+    ninfer::Tensor sample_input(dl.data(), ninfer::DType::BF16, {tokens, rows});
+    ninfer::Tensor sample_output(dout.data(), ninfer::DType::I32, {rows});
+    ninfer::Tensor positions(dp.data(), ninfer::DType::I32, {rows});
+    ninfer::DeviceArena sample_workspace(std::max<std::size_t>(1,
+        ninfer::ops::sampling_workspace_capacity_bytes(tokens, rows, rows)));
+    ninfer::ops::sample(sample_input, sample_output, tokens,
+        static_cast<const ninfer::ops::SamplingConfig*>(dc.data()), positions,
+        ninfer::ops::kSamplePurposeDecode, sample_workspace, device.stream);
+    device.synchronize();
+    dout.copy_to_host(actual.data(), rows * sizeof(int));
+    for (int row = 0; row < rows; ++row)
+        if (actual[row] != expected[row * per_row]) fail("truncated sampler lost eligibility/suppression");
+
+    constexpr int width = 259;
+    std::vector<int> source(width * rows), delta{19, -23, 0, 111}, shifted(source.size());
+    for (int row = 0; row < rows; ++row)
+        for (int j = 0; j < width; ++j) {
+            source[row * width + j] = 1000 * row + j;
+            shifted[row * width + j] = source[row * width + j] + delta[row];
+        }
+    ninfer::DeviceBuffer ds(source.size() * sizeof(int)), dd(delta.size() * sizeof(int));
+    ds.copy_from_host(source.data(), source.size() * sizeof(int));
+    dd.copy_from_host(delta.data(), delta.size() * sizeof(int));
+    ninfer::Tensor s(ds.data(), ninfer::DType::I32, {width, rows});
+    ninfer::Tensor d(dd.data(), ninfer::DType::I32, {rows});
+    hipGraph_t graph = nullptr; hipGraphExec_t executable = nullptr;
+    HIP_CHECK(hipStreamBeginCapture(device.stream, hipStreamCaptureModeGlobal));
+    ninfer::ops::offset_i32_position_rows(s, d, s, device.stream);
+    HIP_CHECK(hipStreamEndCapture(device.stream, &graph));
+    HIP_CHECK(hipGraphInstantiate(&executable, graph, nullptr, nullptr, 0));
+    for (int replay = 0; replay < 2; ++replay) {
+        ds.copy_from_host(source.data(), source.size() * sizeof(int));
+        if (replay == 0) ninfer::ops::offset_i32_position_rows(s, d, s, device.stream);
+        else HIP_CHECK(hipGraphLaunch(executable, device.stream));
+        device.synchronize();
+        std::vector<int> result(source.size());
+        ds.copy_to_host(result.data(), result.size() * sizeof(int));
+        if (result != shifted) fail("row-position transform differs from independent integer oracle");
+    }
+    HIP_CHECK(hipGraphExecDestroy(executable)); HIP_CHECK(hipGraphDestroy(graph));
 }
 
 void qualify_validation(ninfer::DeviceContext& device) {
@@ -419,6 +625,8 @@ int main() {
         qualify_validation(device);
         qualify_rng_and_small_route(device);
         qualify_batches(device);
+        qualify_p_less(device);
+        qualify_eligibility_and_positions(device);
         benchmark(device);
         std::cout << "PASS: R9700 sampling B=1..4, exact token/count publication, FP64 probability oracle\n";
         return 0;

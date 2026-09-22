@@ -244,6 +244,28 @@ bool overlaps(const void* a, std::size_t a_bytes, const void* b, std::size_t b_b
     return a_bytes != 0 && b_bytes != 0 && aa < bb + b_bytes && bb < aa + a_bytes;
 }
 
+bool tensor_payloads_overlap(const Tensor& a, const Tensor& b) {
+    if (!overlaps(a.data, storage_bytes(a), b.data, storage_bytes(b))) { return false; }
+    // Q/K may be disjoint planes of token-interleaved QKV. Their bounding spans include
+    // padding owned by the other planes, which this Op never reads or writes.
+    const auto a_width = static_cast<std::uintptr_t>(a.ne[1] * a.nb[1]);
+    const auto b_width = static_cast<std::uintptr_t>(b.ne[1] * b.nb[1]);
+    auto aa = reinterpret_cast<std::uintptr_t>(a.data);
+    auto bb = reinterpret_cast<std::uintptr_t>(b.data);
+    std::int32_t ai = 0, bi = 0;
+    while (ai < a.ne[2] && bi < b.ne[2]) {
+        if (aa < bb + b_width && bb < aa + a_width) { return true; }
+        if (aa + a_width <= bb) {
+            ++ai;
+            aa += a.nb[2];
+        } else {
+            ++bi;
+            bb += b.nb[2];
+        }
+    }
+    return false;
+}
+
 void require_common(const Tensor& positions, int rotary_dim, float theta) {
     if (positions.dtype != DType::I32) {
         throw std::invalid_argument("rope: positions must be I32");
@@ -308,7 +330,7 @@ void rope(const Tensor& positions, int rotary_dim, float theta, Tensor& q, Tenso
     const std::size_t p_bytes = positions.bytes();
     const std::size_t q_bytes = storage_bytes(q);
     const std::size_t k_bytes = storage_bytes(k);
-    if (overlaps(q.data, q_bytes, k.data, k_bytes) ||
+    if (tensor_payloads_overlap(q, k) ||
         overlaps(positions.data, p_bytes, q.data, q_bytes) ||
         overlaps(positions.data, p_bytes, k.data, k_bytes)) {
         throw std::invalid_argument("rope: positions, q, and k storage must not overlap");

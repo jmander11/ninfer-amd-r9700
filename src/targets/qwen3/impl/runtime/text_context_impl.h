@@ -904,7 +904,12 @@ void TextContext::target_verify_batch_impl(const Tensor& ids, const Tensor& cach
         Tensor flat_tokens = target_tokens.view({columns});
         ops::rmsnorm(x, *final_norm_, kCfg.rms_eps, true, flat_hidden, stream);
         run_linear(flat_hidden, *lm_head_, flat_logits, stream);
-        ops::argmax(flat_logits, flat_tokens, kCfg.token_domain, stream);
+        if (sampling_config_ != nullptr) {
+            ops::argmax(flat_logits, flat_tokens, kCfg.token_domain, sampling_config_, width,
+                        stream);
+        } else {
+            ops::argmax(flat_logits, flat_tokens, kCfg.token_domain, stream);
+        }
     }
     if (reset_workspace) { work_.reset(); }
 }
@@ -1185,7 +1190,8 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
             if (replay_records_ == nullptr) {
                 throw std::logic_error("Replay-record GDN has no record storage");
             }
-            persistent_records = replay_records_->layer(gidx, 0, active_sequence_batch_);
+            persistent_records = replay_records_->layer(gidx, active_sequence_row_,
+                                                        active_sequence_batch_);
             live_records       = persistent_records;
             if (pack_replay) {
                 // LLD Capture/run: GDN requires record.ne[2]==q.ne[2]; pack only when they differ.
@@ -1798,6 +1804,20 @@ PrefillChunkResult TextContext::prefill_chunk(const qwen3::PreparedPromptData& i
     const MultimodalPrefill multimodal{tokens, input.positions, &vision, begin, input.rope_delta};
     NullTap tap;
     return prefill_impl(tokens.subspan(begin, nominal_length), nullptr, &multimodal, tap,
+                        finalize_at_end);
+}
+
+PrefillChunkResult TextContext::prefill_chunk(const qwen3::PreparedPromptData& input,
+                                              std::uint32_t begin, std::uint32_t nominal_length,
+                                              VisionPrefillSession& vision, bool finalize_at_end,
+                                              DFlashFeatureSink& sink) {
+    if (begin >= input.token_ids.size() || nominal_length == 0 ||
+        nominal_length > input.token_ids.size() - begin) {
+        throw std::invalid_argument("multimodal prefill chunk is outside the prompt");
+    }
+    const std::span<const int> tokens(input.token_ids);
+    const MultimodalPrefill multimodal{tokens, input.positions, &vision, begin, input.rope_delta};
+    return prefill_impl(tokens.subspan(begin, nominal_length), nullptr, &multimodal, sink,
                         finalize_at_end);
 }
 

@@ -193,4 +193,46 @@ void unpack_paged_kv_allocation_from_host(PagedKVAllocation& allocation, const P
                                           const void* src, std::uint32_t src_page_count,
                                           std::uint32_t dst_extent, hipStream_t stream);
 
+// Immutable device scatter geometry for one packed logical page. The caller owns the device copy
+// of this table and the packed device staging buffer; the raw transfer path allocates neither.
+struct PagedKVScatterPlane {
+    unsigned char* base       = nullptr;
+    std::uint64_t packed_offset = 0;
+    std::uint64_t packed_bytes  = 0;
+    std::int64_t page_stride    = 0;
+    std::int64_t row_pitch      = 0;
+    std::uint32_t row_bytes     = 0;
+    std::uint32_t rows          = 0;
+};
+
+struct PagedKVScatterPlan {
+    std::vector<PagedKVScatterPlane> planes;
+    std::size_t page_bytes      = 0;
+    std::size_t max_plane_bytes = 0;
+};
+
+[[nodiscard]] std::size_t paged_kv_logical_page_bytes(const PagedKVPool& pool);
+
+void pack_paged_kv_logical_page_to_host(const PagedKVAllocation& allocation, const PagedKVPool& pool,
+                                        std::uint32_t logical_index, void* dst, hipStream_t stream);
+
+void unpack_paged_kv_logical_page_from_host(PagedKVAllocation& allocation, const PagedKVPool& pool,
+                                            const void* src, std::uint32_t logical_index,
+                                            hipStream_t stream);
+
+[[nodiscard]] PagedKVScatterPlan make_paged_kv_scatter_plan(const PagedKVPool& pool);
+
+void scatter_paged_kv_logical_page_from_device(
+    PagedKVAllocation& allocation, const PagedKVPool& pool, const void* device_staging,
+    const PagedKVScatterPlane* device_planes, std::size_t plane_count,
+    std::size_t max_plane_bytes, std::uint32_t logical_index, hipStream_t stream);
+
+void gather_logical_page_from_host_image(const void* image, const PagedKVPool& pool,
+                                         std::uint32_t src_page_count, std::uint32_t logical_index,
+                                         void* dst);
+
+void logical_page_host_slices(const void* image, const PagedKVPool& pool,
+                              std::uint32_t src_page_count, std::uint32_t logical_index,
+                              std::vector<std::pair<const void*, std::size_t>>& out);
+
 } // namespace ninfer

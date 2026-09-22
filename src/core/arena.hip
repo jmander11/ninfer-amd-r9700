@@ -1,6 +1,13 @@
 #include "arena.h"
 
 #include <algorithm>
+#include <cerrno>
+#include <cstdio>
+#include <cstring>
+#include <system_error>
+#include <thread>
+#include <sys/mman.h>
+#include <unistd.h>
 #include <limits>
 #include <new>
 #include <stdexcept>
@@ -8,6 +15,10 @@
 
 namespace ninfer {
 namespace {
+
+std::string arena_error_message(const char* label, hipError_t error) {
+    return std::string(label) + ": " + hipGetErrorString(error);
+}
 
 bool is_power_of_two(std::size_t value) { return value != 0 && (value & (value - 1U)) == 0; }
 
@@ -28,6 +39,80 @@ void free_pinned(void*& data) noexcept {
 [[noreturn]] void allocation_error(const char* what, hipError_t error) {
     throw std::runtime_error(std::string(what) + ": " + hipGetErrorName(error) + ": " +
                              hipGetErrorString(error));
+}
+
+constexpr std::size_t kMaximumHostPrefaultWorkers = 8;
+constexpr std::size_t kHostPrefaultBytesPerWorker = 64ULL * 1024ULL * 1024ULL;
+
+std::size_t system_page_size() {
+    const long page_size = ::sysconf(_SC_PAGESIZE);
+    if (page_size <= 0) { throw std::runtime_error("sysconf(_SC_PAGESIZE) failed"); }
+    return static_cast<std::size_t>(page_size);
+}
+
+std::size_t align_up_size(std::size_t value, std::size_t alignment) {
+    if (value > std::numeric_limits<std::size_t>::max() - (alignment - 1)) {
+        throw std::overflow_error("host arena capacity alignment overflow");
+    }
+    return (value + alignment - 1) / alignment * alignment;
+}
+
+void* allocate_registered_host(std::size_t capacity_bytes, std::size_t& mapping_bytes) {
+    const std::size_t page_size = system_page_size();
+    mapping_bytes               = align_up_size(capacity_bytes, page_size);
+    void* mapping =
+        ::mmap(nullptr, mapping_bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (mapping == MAP_FAILED) {
+        mapping_bytes = 0;
+        throw std::system_error(errno, std::generic_category(), "mmap HostPinnedArena");
+    }
+#ifdef MADV_NOHUGEPAGE
+    // HIP registration must pin every base page. Avoid first building transparent huge pages
+    // that the driver immediately has to split while registering the same range.
+    (void)::madvise(mapping, mapping_bytes, MADV_NOHUGEPAGE);
+#endif
+
+    const std::size_t requested_workers =
+        1 + (mapping_bytes - 1) / kHostPrefaultBytesPerWorker;
+    const std::size_t worker_count = std::min(kMaximumHostPrefaultWorkers, requested_workers);
+    const std::size_t page_count       = mapping_bytes / page_size;
+    const std::size_t pages_per_worker = 1 + (page_count - 1) / worker_count;
+    try {
+        std::vector<std::jthread> workers;
+        workers.reserve(worker_count);
+        for (std::size_t worker = 0; worker < worker_count; ++worker) {
+            const std::size_t begin_page = worker * pages_per_worker;
+            const std::size_t end_page   = std::min(page_count, begin_page + pages_per_worker);
+            if (begin_page == end_page) { break; }
+            workers.emplace_back([mapping, page_size, begin_page, end_page] {
+                auto* begin = static_cast<unsigned char*>(mapping) + begin_page * page_size;
+                std::memset(begin, 0, (end_page - begin_page) * page_size);
+            });
+        }
+    } catch (...) {
+        (void)::munmap(mapping, mapping_bytes);
+        mapping_bytes = 0;
+        throw;
+    }
+
+    const hipError_t registration =
+        hipHostRegister(mapping, mapping_bytes, hipHostRegisterDefault);
+    if (registration != hipSuccess) {
+        (void)::munmap(mapping, mapping_bytes);
+        mapping_bytes = 0;
+        allocation_error("hipHostRegister failed", registration);
+    }
+    return mapping;
+}
+
+void free_registered_host(void*& ptr, std::size_t& mapping_bytes) noexcept {
+    if (ptr == nullptr) { return; }
+    (void)hipHostUnregister(ptr);
+    if (::munmap(ptr, mapping_bytes) != 0) {
+        std::fprintf(stderr, "host arena cleanup failed during munmap: %s\n", std::strerror(errno));
+    }
+    ptr           = nullptr;
+    mapping_bytes = 0;
 }
 
 } // namespace
@@ -196,53 +281,81 @@ Tensor DeviceArena::alloc(DType dtype, std::initializer_list<std::int32_t> shape
 DeviceArena::Scope DeviceArena::scope() noexcept { return Scope(*this); }
 void DeviceArena::reset() noexcept { offset_ = 0; }
 
-PinnedHostBuffer::PinnedHostBuffer(std::size_t size_bytes) : bytes_(size_bytes) {
-    if (bytes_ == 0) { throw std::invalid_argument("PinnedHostBuffer size must be nonzero"); }
-    const hipError_t error = hipHostMalloc(&data_, bytes_, hipHostMallocDefault);
-    if (error != hipSuccess) { allocation_error("hipHostMalloc", error); }
+PinnedHostBuffer::PinnedHostBuffer(std::size_t size_bytes, std::size_t alignment) {
+    if (size_bytes == 0) { throw std::invalid_argument("PinnedHostBuffer size must be nonzero"); }
+    if (alignment == 0 || (alignment & (alignment - 1)) != 0) {
+        throw std::invalid_argument("PinnedHostBuffer alignment must be a power of two");
+    }
+    if (size_bytes > std::numeric_limits<std::size_t>::max() - (alignment - 1)) {
+        throw std::overflow_error("PinnedHostBuffer allocation size overflow");
+    }
+
+    void* ptr             = nullptr;
+    const hipError_t err = hipHostMalloc(&ptr, size_bytes + alignment - 1);
+    if (err != hipSuccess) {
+        if (err == hipErrorMemoryAllocation) {
+            const hipError_t pending = hipGetLastError();
+            if (pending != hipSuccess && pending != hipErrorMemoryAllocation) {
+                throw std::runtime_error(arena_error_message("hipHostMalloc pending error", pending));
+            }
+            throw std::bad_alloc();
+        }
+        throw std::runtime_error(arena_error_message("hipHostMalloc failed", err));
+    }
+
+    const auto address = reinterpret_cast<std::uintptr_t>(ptr);
+    allocation_ = ptr;
+    data_ = reinterpret_cast<void*>((address + alignment - 1) & ~(alignment - 1));
+    bytes_ = size_bytes;
 }
 
-PinnedHostBuffer::~PinnedHostBuffer() { free_pinned(data_); }
+PinnedHostBuffer::~PinnedHostBuffer() { free_pinned(allocation_); }
+
 PinnedHostBuffer::PinnedHostBuffer(PinnedHostBuffer&& other) noexcept
-    : data_(other.data_), bytes_(other.bytes_) {
+    : allocation_(other.allocation_), data_(other.data_), bytes_(other.bytes_) {
+    other.allocation_ = nullptr;
     other.data_ = nullptr;
     other.bytes_ = 0;
 }
+
 PinnedHostBuffer& PinnedHostBuffer::operator=(PinnedHostBuffer&& other) noexcept {
-    if (this != &other) {
-        free_pinned(data_);
-        data_ = other.data_;
-        bytes_ = other.bytes_;
-        other.data_ = nullptr;
-        other.bytes_ = 0;
-    }
+    if (this == &other) { return *this; }
+
+    free_pinned(allocation_);
+    allocation_ = other.allocation_;
+    data_ = other.data_;
+    bytes_ = other.bytes_;
+
+    other.allocation_ = nullptr;
+    other.data_ = nullptr;
+    other.bytes_ = 0;
     return *this;
 }
 
 HostPinnedArena::HostPinnedArena(std::size_t capacity_bytes) : capacity_(capacity_bytes) {
     if (capacity_ == 0) { throw std::invalid_argument("HostPinnedArena capacity must be nonzero"); }
     free_.push_back({0, capacity_});
-    const hipError_t error = hipHostMalloc(&base_, capacity_, hipHostMallocDefault);
-    if (error != hipSuccess) { allocation_error("hipHostMalloc arena", error); }
+    base_ = allocate_registered_host(capacity_, mapping_bytes_);
 }
 
-HostPinnedArena::~HostPinnedArena() { free_pinned(base_); }
+HostPinnedArena::~HostPinnedArena() { free_registered_host(base_, mapping_bytes_); }
 HostPinnedArena::HostPinnedArena(HostPinnedArena&& other) noexcept
-    : base_(other.base_), capacity_(other.capacity_), used_(other.used_), free_(std::move(other.free_)),
+    : base_(other.base_), capacity_(other.capacity_), used_(other.used_), mapping_bytes_(other.mapping_bytes_), free_(std::move(other.free_)),
       live_(std::move(other.live_)) {
     other.base_ = nullptr;
-    other.capacity_ = other.used_ = 0;
+    other.capacity_ = other.used_ = other.mapping_bytes_ = 0;
 }
 HostPinnedArena& HostPinnedArena::operator=(HostPinnedArena&& other) noexcept {
     if (this != &other) {
-        free_pinned(base_);
+        free_registered_host(base_, mapping_bytes_);
         base_ = other.base_;
         capacity_ = other.capacity_;
         used_ = other.used_;
+        mapping_bytes_ = other.mapping_bytes_;
         free_ = std::move(other.free_);
         live_ = std::move(other.live_);
         other.base_ = nullptr;
-        other.capacity_ = other.used_ = 0;
+        other.capacity_ = other.used_ = other.mapping_bytes_ = 0;
     }
     return *this;
 }

@@ -5,6 +5,7 @@
 #include "core/device.h"
 #include "core/tensor.h"
 #include "ninfer/ops/speculative_round.h"
+#include "sampling_reference.h"
 #include "ninfer/types.h"
 
 #include <algorithm>
@@ -121,13 +122,29 @@ struct Distribution {
     std::vector<double> probabilities;
 };
 
+ninfer::ops::SamplingConfig column_config(ninfer::ops::SamplingConfig config, int column) {
+    if (config.allowed_token_words)
+        config.allowed_token_words += column * config.allowed_token_column_stride;
+    // Cycle exit applies only to the first generated position of this round. Later chain
+    // hops and non-root tree nodes use the unmodified target p-less law (public Op contract).
+    if (column > 0) config.typical_exclude = -1;
+    return config;
+}
+
 Distribution distribution_oracle(const hip_bfloat16* logits, int token_domain,
                                  const ninfer::ops::SamplingConfig& config,
                                  const std::vector<int>* counts,
                                  const std::vector<int>& overlay) {
+    if (config.p_less != 0 && config.temperature > 0) {
+        std::vector<double> values(token_domain);
+        for (int i = 0; i < token_domain; ++i) values[i] = represented(logits[i]);
+        const auto result = sampling_reference::p_less(values, config);
+        return {result.ids, result.probabilities};
+    }
     std::vector<std::pair<float, int>> candidates;
     candidates.reserve(static_cast<std::size_t>(token_domain));
     for (int token = 0; token < token_domain; ++token) {
+        if (!sampling_reference::eligible(token, config)) continue;
         float value = represented(logits[token]);
         if (config.presence_penalty != 0.0F || config.frequency_penalty != 0.0F) {
             int count = counts == nullptr ? 0 : (*counts)[static_cast<std::size_t>(token)];
@@ -142,7 +159,7 @@ Distribution distribution_oracle(const hip_bfloat16* logits, int token_domain,
     };
     int cap = 20;
     if (config.top_k > 0 && config.top_k < cap) { cap = config.top_k; }
-    cap = std::min(cap, token_domain);
+    cap = std::min(cap, static_cast<int>(candidates.size()));
     std::partial_sort(candidates.begin(), candidates.begin() + cap, candidates.end(), better);
     candidates.resize(static_cast<std::size_t>(cap));
 
@@ -287,6 +304,8 @@ ChainExpected chain_oracle(
     for (int row = 0; row < batch; ++row) {
         const int extent = std::clamp(extents[static_cast<std::size_t>(row)], 0, k);
         const auto& config = configs[static_cast<std::size_t>(row)];
+        const auto* effective_ids = config.p_less != 0 ? nullptr : selector_ids;
+        const auto* effective_q = config.p_less != 0 ? nullptr : selector_q;
         int accepted = 0;
         int terminal = 0;
         if (!(config.temperature > 0.0F)) {
@@ -311,7 +330,7 @@ ChainExpected chain_oracle(
                 const Distribution distribution = distribution_oracle(
                     logits.data() +
                         (static_cast<std::size_t>(row) * columns + column) * token_domain,
-                    token_domain, config, counts, overlay);
+                    token_domain, column_config(config, column), counts, overlay);
                 if (column < extent) {
                     const int draft = drafts[static_cast<std::size_t>(row * k + column)];
                     double p = 0.0;
@@ -322,7 +341,7 @@ ChainExpected chain_oracle(
                         }
                     }
                     const int selector_base = selector_count * (column + row * k);
-                    const float q = q_probability(selector_ids, selector_q, selector_base,
+                    const float q = q_probability(effective_ids, effective_q, selector_base,
                                                   selector_count, draft);
                     const float draw = uniform(config.seed,
                                                initial_lengths[static_cast<std::size_t>(row)] +
@@ -333,7 +352,7 @@ ChainExpected chain_oracle(
                         continue;
                     }
                     terminal = pick_residual(
-                        distribution, selector_ids, selector_q, selector_base, selector_count,
+                        distribution, effective_ids, effective_q, selector_base, selector_count,
                         draft,
                         uniform(config.seed,
                                 initial_lengths[static_cast<std::size_t>(row)] + column + 1,
@@ -367,7 +386,7 @@ ChainExpected chain_oracle(
 }
 
 void run_chain_case(ninfer::DeviceContext& device, int token_domain, int k, int batch,
-                    bool all_greedy, bool use_selector) {
+                    bool all_greedy, bool use_selector, bool p_less = false) {
     const int columns = k + 1;
     std::vector<int> drafts(static_cast<std::size_t>(k) * batch);
     std::vector<int> targets(static_cast<std::size_t>(columns) * batch);
@@ -388,10 +407,25 @@ void run_chain_case(ninfer::DeviceContext& device, int token_domain, int k, int 
         targets[static_cast<std::size_t>(row * columns + k)] =
             (101 + row * 31 + k) % token_domain;
     }
-    const std::vector<hip_bfloat16> logits = make_logits(token_domain, columns, batch);
+    std::vector<hip_bfloat16> logits = make_logits(token_domain, columns, batch);
+    if (p_less) {
+        std::fill(logits.begin(), logits.end(), bf16(-24));
+        for (int row = 0; row < batch; ++row) {
+            extents[row] = k;
+            for (int column = 0; column < columns; ++column) {
+                for (int token = 0; token < 64; ++token)
+                    logits[(row * columns + column) * token_domain + token] = bf16(0);
+                if (column < k) drafts[row * k + column] = 7 + column;
+            }
+        }
+    }
     std::vector<int> counts(static_cast<std::size_t>(batch) * token_domain, 0);
     std::vector<ninfer::ops::SamplingConfig> configs(static_cast<std::size_t>(batch));
     std::vector<bool> has_counts(static_cast<std::size_t>(batch));
+    const int mask_words = (token_domain + 31) / 32;
+    std::vector<std::uint32_t> masks(static_cast<std::size_t>(batch) * columns * mask_words,
+                                    ~std::uint32_t{0});
+    ninfer::DeviceBuffer d_masks(masks.size() * sizeof(masks[0]));
     for (int row = 0; row < batch; ++row) {
         auto& config = configs[static_cast<std::size_t>(row)];
         const bool greedy = all_greedy || (batch > 1 && row == 0);
@@ -403,6 +437,30 @@ void run_chain_case(ninfer::DeviceContext& device, int token_domain, int k, int 
         config.presence_penalty = greedy ? 0.0F : (row % 2 == 0 ? 0.4F : 0.0F);
         config.frequency_penalty = greedy ? 0.0F : (row % 3 == 1 ? 0.2F : 0.0F);
         config.seed = 0x123456789abcdef0ULL + static_cast<unsigned long long>(row * 1009 + k);
+        if (p_less) {
+            config.p_less = 1; config.temperature = 1;
+            config.top_k = 1; config.top_p = 0.01F; config.min_p = 0.99F;
+            config.presence_penalty = 100; config.frequency_penalty = 100;
+            config.suppressed_token_count = 2;
+            config.suppressed_tokens[0] = 0; config.suppressed_tokens[1] = 1;
+            config.typical_exclude = 2;
+            config.allowed_token_column_stride = mask_words;
+            config.allowed_token_words = masks.data() + row * columns * mask_words;
+            for (int column = 0; column < columns; ++column)
+                for (int token = 0; token < 64; ++token)
+                    if ((token + column + row) % 5 == 0)
+                        masks[(row * columns + column) * mask_words + token / 32] &= ~(1U << (token % 32));
+            // Force meaningful q-contract distinctions: row1 records q(d)=0 but must accept
+            // under p-less point-mass q; row2's draw rejects under q=1, not under recorded .35.
+            if (row < 3) {
+                for (;;) {
+                    const float draw = uniform(config.seed, lengths[row] + 1,
+                        ninfer::ops::kSamplePurposeSpeculativeAccept);
+                    if ((row < 2 && draw < 0.005F) || (row == 2 && draw > 0.03F && draw < 0.04F)) break;
+                    ++config.seed;
+                }
+            }
+        }
         has_counts[static_cast<std::size_t>(row)] = !greedy && row % 4 != 3;
         counts[static_cast<std::size_t>(row) * token_domain + (13 + row * 503) % token_domain] =
             2 + row;
@@ -459,11 +517,14 @@ void run_chain_case(ninfer::DeviceContext& device, int token_domain, int k, int 
                 ? static_cast<int*>(d_counts.data()) + static_cast<std::size_t>(row) * token_domain
                 : nullptr;
     }
-    d_configs.copy_from_host(configs.data(), configs.size() * sizeof(configs[0]));
     const ChainExpected expected = chain_oracle(
         token_domain, k, batch, targets, logits, drafts, extents, lengths, configs, has_counts,
         counts, use_selector ? &selector_ids : nullptr, use_selector ? &selector_q : nullptr,
         use_selector ? selector_count : 0);
+    d_masks.copy_from_host(masks.data(), masks.size() * sizeof(masks[0]));
+    for (int row = 0; p_less && row < batch; ++row)
+        configs[row].allowed_token_words = static_cast<std::uint32_t*>(d_masks.data()) + row * columns * mask_words;
+    d_configs.copy_from_host(configs.data(), configs.size() * sizeof(configs[0]));
 
     ninfer::Tensor target_tensor(d_targets.data(), ninfer::DType::I32, {columns, batch});
     ninfer::Tensor logits_tensor(d_logits.data(), ninfer::DType::BF16,
@@ -518,6 +579,31 @@ void run_chain_case(ninfer::DeviceContext& device, int token_domain, int k, int 
     }
     require(workspace.used() == 0 && workspace.peak_used() == workspace_bytes,
             label + " workspace high-water differs from sizing query");
+    if (p_less) {
+        hipGraph_t graph = nullptr; hipGraphExec_t executable = nullptr;
+        HIP_CHECK(hipStreamBeginCapture(device.stream, hipStreamCaptureModeGlobal));
+        ninfer::ops::speculative_accept_greedy_drafts(
+            target_tensor, logits_tensor, draft_tensor, extent_tensor, length_tensor, anchor_tensor,
+            licensed_tensor, licensed_count_tensor, accepted_tensor, token_domain,
+            static_cast<const ninfer::ops::SamplingConfig*>(d_configs.data()), workspace,
+            device.stream, use_selector ? &selector_ids_tensor : nullptr,
+            use_selector ? &selector_q_tensor : nullptr);
+        HIP_CHECK(hipStreamEndCapture(device.stream, &graph));
+        HIP_CHECK(hipGraphInstantiate(&executable, graph, nullptr, nullptr, 0));
+        for (int replay = 0; replay < 2; ++replay) {
+            d_lengths.copy_from_host(lengths.data(), lengths.size() * sizeof(int));
+            d_counts.copy_from_host(counts.data(), counts.size() * sizeof(int));
+            HIP_CHECK(hipMemsetAsync(d_licensed.data(), 0xff, columns * batch * sizeof(int), device.stream));
+            HIP_CHECK(hipMemsetAsync(d_accepted.data(), 0xff, batch * sizeof(int), device.stream));
+            HIP_CHECK(hipGraphLaunch(executable, device.stream));
+            device.synchronize();
+            require_equal(copy_from<int>(d_licensed, columns * batch), expected.licensed, label + " graph licensed");
+            require_equal(copy_from<int>(d_accepted, batch), expected.accepted, label + " graph accepted");
+            require_equal(copy_from<int>(d_lengths, batch), expected.lengths, label + " graph lengths");
+            require_equal(copy_from<int>(d_counts, counts.size()), expected.counts, label + " graph counts");
+        }
+        HIP_CHECK(hipGraphExecDestroy(executable)); HIP_CHECK(hipGraphDestroy(graph));
+    }
 }
 
 void qualify_prepare(ninfer::DeviceContext& device) {
@@ -668,7 +754,7 @@ TreeExpected tree_oracle(int token_domain, int width, int batch,
                 const Distribution distribution = distribution_oracle(
                     logits.data() +
                         (static_cast<std::size_t>(row) * width + node) * token_domain,
-                    token_domain, config, counts, overlay);
+                    token_domain, column_config(config, node), counts, overlay);
                 const int sampled = pick(
                     distribution, -1,
                     uniform(config.seed,
@@ -706,7 +792,7 @@ TreeExpected tree_oracle(int token_domain, int width, int batch,
 }
 
 void run_tree_case(ninfer::DeviceContext& device, int token_domain, int width, int batch,
-                   bool all_greedy) {
+                   bool all_greedy, bool p_less = false) {
     std::vector<int> ids(static_cast<std::size_t>(width) * batch);
     std::vector<int> parents(ids.size());
     std::vector<int> targets(ids.size());
@@ -755,9 +841,33 @@ void run_tree_case(ninfer::DeviceContext& device, int token_domain, int width, i
         config.presence_penalty = greedy ? 0.0F : 0.2F;
         config.frequency_penalty = greedy ? 0.0F : 0.1F;
         config.seed = 0x5bd1e995ULL + static_cast<unsigned long long>(row * 997 + width);
+        if (p_less) {
+            config.p_less = 1; config.temperature = 1;
+            config.top_k = 1; config.top_p = 0.01F; config.min_p = 0.99F;
+            config.presence_penalty = 100; config.frequency_penalty = 100;
+        }
         has_counts[static_cast<std::size_t>(row)] = !greedy && row % 4 != 3;
         counts[static_cast<std::size_t>(row) * token_domain +
                ids[static_cast<std::size_t>(row * width + 1)]] = 2;
+    }
+
+    const int mask_words = (token_domain + 31) / 32;
+    std::vector<std::uint32_t> masks(static_cast<std::size_t>(batch) * width * mask_words, 0);
+    ninfer::DeviceBuffer d_masks(masks.size() * sizeof(masks[0]));
+    if (p_less) {
+        // Each node has its own eligible singleton; a depth-indexed rather than node-indexed
+        // mask will produce the wrong licensed path once the traversal reaches column 3.
+        for (int row = 0; row < batch; ++row) {
+            extents[row] = width - 1;
+            valid[row] = width;
+            configs[row].allowed_token_column_stride = mask_words;
+            configs[row].allowed_token_words = masks.data() + row * width * mask_words;
+            for (int node = 0; node < width; ++node) {
+                const int child = 2 * node + 1;
+                const int token = child < width ? ids[row * width + child] : (101 + node) % token_domain;
+                masks[(row * width + node) * mask_words + token / 32] |= 1U << (token % 32);
+            }
+        }
     }
 
     ninfer::DeviceBuffer d_targets(targets.size() * sizeof(int));
@@ -789,10 +899,13 @@ void run_tree_case(ninfer::DeviceContext& device, int token_domain, int width, i
                 ? static_cast<int*>(d_counts.data()) + static_cast<std::size_t>(row) * token_domain
                 : nullptr;
     }
-    d_configs.copy_from_host(configs.data(), configs.size() * sizeof(configs[0]));
     const TreeExpected expected = tree_oracle(token_domain, width, batch, targets, logits, ids,
                                               parents, valid, extents, lengths, configs,
                                               has_counts, counts);
+    d_masks.copy_from_host(masks.data(), masks.size() * sizeof(masks[0]));
+    for (int row = 0; p_less && row < batch; ++row)
+        configs[row].allowed_token_words = static_cast<std::uint32_t*>(d_masks.data()) + row * width * mask_words;
+    d_configs.copy_from_host(configs.data(), configs.size() * sizeof(configs[0]));
 
     ninfer::Tensor target_tensor(d_targets.data(), ninfer::DType::I32, {width, batch});
     ninfer::Tensor logits_tensor(d_logits.data(), ninfer::DType::BF16,
@@ -842,7 +955,31 @@ void run_tree_case(ninfer::DeviceContext& device, int token_domain, int width, i
                   label + " logits immutable");
     require(workspace.used() == 0 && workspace.peak_used() == workspace_bytes,
             label + " workspace high-water differs from sizing query");
-    if (token_domain == kRealVocabulary) {
+    if (p_less) {
+        hipGraph_t graph = nullptr; hipGraphExec_t executable = nullptr;
+        HIP_CHECK(hipStreamBeginCapture(device.stream, hipStreamCaptureModeGlobal));
+        ninfer::ops::speculative_accept_tree_drafts(
+            target_tensor, logits_tensor, ids_tensor, parents_tensor, valid_tensor, extents_tensor,
+            lengths_tensor, anchors_tensor, licensed_tensor, licensed_counts_tensor, accepted_tensor,
+            accepted_column_tensor, path_tensor, token_domain,
+            static_cast<const ninfer::ops::SamplingConfig*>(d_configs.data()), workspace, device.stream);
+        HIP_CHECK(hipStreamEndCapture(device.stream, &graph));
+        HIP_CHECK(hipGraphInstantiate(&executable, graph, nullptr, nullptr, 0));
+        for (int replay = 0; replay < 2; ++replay) {
+            d_lengths.copy_from_host(lengths.data(), lengths.size() * sizeof(int));
+            d_counts.copy_from_host(counts.data(), counts.size() * sizeof(int));
+            HIP_CHECK(hipMemsetAsync(d_licensed.data(), 0xff, width * batch * sizeof(int), device.stream));
+            HIP_CHECK(hipMemsetAsync(d_path.data(), 0xff, width * batch * sizeof(int), device.stream));
+            HIP_CHECK(hipGraphLaunch(executable, device.stream));
+            device.synchronize();
+            require_equal(copy_from<int>(d_licensed, width * batch), expected.licensed, label + " graph licensed");
+            require_equal(copy_from<int>(d_path, width * batch), expected.path, label + " graph path");
+            require_equal(copy_from<int>(d_lengths, batch), expected.lengths, label + " graph lengths");
+            require_equal(copy_from<int>(d_counts, counts.size()), expected.counts, label + " graph counts");
+        }
+        HIP_CHECK(hipGraphExecDestroy(executable)); HIP_CHECK(hipGraphDestroy(graph));
+    }
+    if (token_domain == kRealVocabulary && !p_less) {
         for (int warmup = 0; warmup < 3; ++warmup) {
             ninfer::ops::speculative_accept_tree_drafts(
                 target_tensor, logits_tensor, ids_tensor, parents_tensor, valid_tensor,
@@ -1204,6 +1341,10 @@ int main() {
         run_chain_case(device, 4099, 8, static_cast<int>(ninfer::kMaximumConcurrency), false, true);
         run_chain_case(device, kRealVocabulary, 8,
                        static_cast<int>(ninfer::kMaximumConcurrency), false, true);
+        for (int tokens : {127, 257, kRealVocabulary}) {
+            run_chain_case(device, tokens, 5, 4, false, true, true);
+            run_chain_case(device, tokens, 4, 4, false, false, true);
+        }
         for (int width = 2; width <= 16; ++width) {
             for (int batch = 1; batch <= static_cast<int>(ninfer::kMaximumConcurrency); ++batch) {
                 run_tree_case(device, 64, width, batch, true);
@@ -1213,6 +1354,8 @@ int main() {
         run_tree_case(device, 4099, 16, static_cast<int>(ninfer::kMaximumConcurrency), false);
         run_tree_case(device, kRealVocabulary, 12,
                       static_cast<int>(ninfer::kMaximumConcurrency), false);
+        for (int tokens : {127, 257, kRealVocabulary})
+            run_tree_case(device, tokens, 6, 4, false, true);
         qualify_hidden_and_remap(device);
         qualify_graph_replay(device);
         qualify_validation(device);

@@ -25,10 +25,14 @@ buffer are not allocated, and media
 requests and token-count requests fail with HTTP 400 `vision_disabled`. Add `--vision` when the
 server must accept image or video input. Speculative residency is likewise frozen by
 `--spec mtp|dflash` and `--draft-tokens`; omitting `--spec` loads neither backend.
-`--lm-head-draft` additionally loads the optimized proposal head. DFlash is text-only: Qwen3.8-27B
-DFlash2 when `dflash/` is present, and it cannot be combined with
-`--vision`. The native Qwen3.8-27B DFlash2 runtime uses qualified chain and packed-tree schedules;
-the final R9700 draft-window recommendation remains pending real-artifact end-to-end measurement.
+`--lm-head-draft` additionally loads the optimized proposal head. Qwen3.8-27B DFlash2 is available
+when `dflash/` is present and can be combined with `--vision`; the text-only companion consumes
+Vision-composed target hidden features. Verify is chain `W=k+1` for `k` in `1..5`; R9700 draft-window recommendations require local end-to-end measurements.
+`--adaptive-draft` picks live k in `{3,4,5}` after each round by locking
+`argmax E[Y(k)] / T(k,C,L)` from nested hop-survival `r_i` and online least-squares round time
+(shared slope, per-k intercept). An unmeasured k is probed at most once and dropped when
+dominated; switching k costs 1 ms. That is a sticky policy, not a once-per-launch latch: see
+[adaptive draft length](maintainer/qwen3.8-27b-model.md#81-adaptive-draft-length). Frozen `--draft-tokens 4` stays `{4}`.
 A later request cannot enable a capability omitted at startup.
 
 ## Endpoints
@@ -67,13 +71,15 @@ The endpoint supports:
 - `system`, `developer`, `user`, `assistant`, and `tool` history;
 - string content and ordered text, `image_url`, and `video_url` parts;
 - `max_completion_tokens` and the legacy `max_tokens` spelling;
-- `temperature`, `top_p`, `top_k`, presence/frequency penalties, and a nonnegative `seed`;
+- `temperature`, `top_p`, `top_k`, presence/frequency penalties, and a nonnegative `seed`
+  (top-p/top-k/penalties are ignored by default p-less; `--no-p-less-sampling` opts out);
 - one stop string or an array of stop strings;
 - non-streaming responses and server-sent event streams;
 - `stream_options.include_usage`;
 - function tools, tool choices, assistant tool-call history, and tool-result messages.
-  Qwen `<tool_call>` markup becomes `tool_calls` only when the request includes tools and
-  `tool_choice` is not `none`, or the conversation already has tool-call history. Markup on a
+  Engine-owned constrained generation produces `tool_calls` only when the request includes
+  current tool declarations and `tool_choice` is not `none`. Tool history alone does not
+  authorize a new function. Markup on a
   tools-off request stays in `content` and ninfer-serve logs a warning.
 - the top-level `reasoning_effort` field;
 - the `enable_thinking` extension;
@@ -85,6 +91,20 @@ regardless of the identifier and echoes the requested value back (llama.cpp-comp
 advertised alias is the artifact `identity.model_id` by default, or the explicit `--model-id`
 override. Reasoning is returned separately as `reasoning_content`; answer
 text remains in `content`.
+
+For structured Qwen output, registered model stop tokens are excluded from selection while reasoning
+is open and after `</think>` until non-whitespace answer content begins. Tools-enabled output also
+excludes them for an ambiguous `<tool_call>` prefix and until its matching `</tool_call>` is
+complete; this applies independently to consecutive parallel calls. Model stop tokens become
+eligible after ordinary answer content or a complete tool call. If one speculative round crosses
+into a protected state before selecting a model stop token, NInfer rejects that uncommitted round
+and retries with the registered model stop tokens excluded. If a round sampled with those tokens
+excluded later completes a tool call, NInfer commits only through that close and lets the next
+round sample with model stops eligible, so extra-accepted tokens cannot immediately open another
+call.
+
+Other request-provided stop conditions remain active, and raw-output requests do not apply this
+structured-output guard.
 
 Message roles retain their input order through schema translation. The Qwen family frontend maps
 both `system` and `developer` to system-class ChatML blocks at their original positions; it does not
@@ -162,7 +182,9 @@ duplicates, no Ollama-compat aliases):
 When `--kv-ram-capacity` is enabled, the `ninfer` namespace also carries a `kv_ram` object — the
 same live host-KV figures as the serve `[req] done` line: engine-wide gauges `used_bytes` /
 `entry_count`, this request's D2H/H2D `save_ms` / `load_ms`, and engine-lifetime cumulative
-`lifetime.{captures,restores,evictions,drops}`. It is omitted when the RAM tier is off.
+`lifetime.{captures,restores,evictions,drops}`. It is omitted when the RAM tier is off. When
+`--kv-disk-capacity` is enabled, `kv_disk` is the same gauges plus this request's SSD-to-host
+`load_ms` and post-disk `h2d_ms`.
 
 ### Multimodal request
 
@@ -315,15 +337,136 @@ Responses function definitions are flat rather than Chat Completions' nested `fu
 }
 ```
 
-NInfer renders these definitions in the Qwen prompt and parses model output into separate
-`function_call` output Items. Parsing runs only when the request includes tools and `tool_choice`
-is not `none`, or the conversation already has tool-call history. If the model emits Qwen
+NInfer renders these definitions in the Qwen prompt. The Engine constrains Qwen tool envelopes
+and supported argument schemas during ordinary and speculative target sampling, validates
+completed calls, and returns typed values for separate `function_call` output Items. This runs
+only when the request includes current tools and `tool_choice` is not `none`. If the model emits Qwen
 `<tool_call>` markup on a tools-off request, NInfer leaves it in the answer text and logs a
-warning; it does not invent a structured tool call. Each parsed output has a protocol Item `id`
+warning; it does not invent a structured tool call. Each completed output has a protocol Item `id`
 (`fc_...`) and a distinct `call_id` (`call_...`). The client executes the function and sends a
-`function_call_output` Item in a later request. NInfer does not execute functions or enforce JSON
-Schema through constrained decoding, so `strict:true`, `tool_choice:required`, named tool choice,
+`function_call_output` Item in a later request. NInfer does not execute functions. Its schema
+subset supports scalar/container types, properties/required/additionalProperties, array bounds,
+numeric bounds, string patterns/length bounds, enums/constants, local references, and supported
+`anyOf` forms. A string `pattern` combined with `minLength` or `maxLength` is not
+supported: the compiler would otherwise ignore the length bound. Unsupported assertions
+or assertion combinations are rejected during preparation
+rather than silently ignored, with HTTP 400, `code: invalid_tool_schema`, and
+`param: tools` on the OpenAI error surface. Malformed schemas, patterns and unresolved
+references use the same classification and retain the compiler diagnostic.
+This is not full JSON Schema or OpenAI strict-tool parity:
+`strict:true`, `tool_choice:required`, named tool choice,
 hosted tools, MCP tools, and custom free-form tools are rejected.
+
+Qwen argument framing uses exactly one LF before and after each parameter value.
+Declared arguments may appear in any order, independently of the order of
+`properties` in the supplied schema or its HTTP JSON normalization. The grammar
+tracks which named keys have been emitted: it cannot close before the required
+keys are present, repeat a named key, or bypass a named value's constraints through
+`additionalProperties`. Property-count bounds still apply. Nested schema-defined
+JSON objects use the same order-independent rules, including through local
+references and supported alternatives. Completed-call validation rejects duplicate
+keys (including in nested JSON values); arbitrary additional key names are checked
+for duplication during this final validation, not by the finite named-key grammar.
+In nested JSON, an escaped alias of a declared key can also pass the library's
+additional-key grammar; final validation decodes the key before checking its
+value and uniqueness, and never publishes a call that fails those checks.
+These rules apply on ordinary and every speculative target position, with grammar
+state committed only for published tokens. They do not shorten reasoning, force an
+end-of-turn after a call, or change sampling/recovery settings.
+Only those framing bytes are removed; indentation, trailing newlines and literal
+XML-looking text inside a string are preserved. For schemas admitting both a raw
+string and a JSON value, the lossless raw-string interpretation is preferred when
+the complete argument object satisfies the schema.
+
+With declared tools, the free-text region after reasoning reserves the protocol prefixes
+`</invoke`, `</parameter`, `</function`, `</tool_call`, `<invoke`, `<parameter`, and
+`<function`. The prefix `<tool_call` must continue into a canonical declared call.
+These prefixes cannot be sampled as orphan prose before, between, or after calls;
+omitting `>` or appending whitespace/`= null` does not evade the constraint.
+Legitimate Qwen call frames and these literal strings inside schema-valid tool arguments
+remain allowed. The restriction
+is part of the grammar domain on ordinary and speculative target positions, not a
+post-response text scrubber or a recovery retry. While reasoning is open, `<tool_call`
+is also excluded: a real call must follow `</think>` rather than being rehearsed inside
+reasoning. Natural-language reasoning, XML tags outside these reserved prefixes,
+inter-call prose, and tools-off/raw output remain
+allowed. The engine never promotes reasoning markup into executable calls. Literal discussion of these reserved delimiters in
+tool-enabled answer prose must use an escaped representation rather than the exact strings.
+Likewise, literal discussion of the tool opener inside reasoning must escape that opener.
+
+For default p-less sampling, Engine can withhold an unproductive repeated call and
+retry internally before publishing it. The detector requires two consecutive previous
+single-call rounds with the same parsed arguments, unchanged associated text results,
+and an identical 64-word reasoning passage; the new proposal must repeat the call and
+reasoning as well. Different results, changed arguments, an intervening user turn,
+media, or ordinary short polling do not meet that evidence. This conservative detector
+does not recognize every multi-tool cycle or infer arbitrary external state changes.
+
+Recovery preserves real conversation content/results, removes closed assistant reasoning
+from the internal retry prompt, and adds feedback explicitly stating that the rejected
+proposal was not executed. It permits at most two retries within the original completion
+token budget and resource reservation. It neither executes tools nor forces EOS. Already
+streamed reasoning/prose remains visible; rejected calls are never published. A novel valid
+call is not a guarantee that the model has made useful progress.
+
+Text-only p-less thinking requests can also retry persistent generated reasoning before
+a tool call exists. Three non-overlapping occurrences of an identical 256-token reasoning
+passage must appear within the current generated attempt. Their separation may differ;
+this catches multi-paragraph loops whose periods change after a one-token intervention.
+In addition, repeated passages must cover at least 4,096 distinct redundant tokens;
+overlapping windows cannot count the same tokens twice. This conservative threshold
+allows shorter loops to escape naturally without an expensive full-context retry.
+It does not cap reasoning at 4,096 tokens.
+Hashes only locate candidates; exact generated-token comparison proves the match. Prompt
+tokens and previous attempts cannot supply occurrences. Two copies alone do not trigger
+a retry. It is not a reasoning-length
+timeout. The retry discards the failed attempt's reasoning from its internal context,
+removes closed historical reasoning, preserves the original task and completed tool results,
+and appends an explicitly labeled engine system notice. It creates no assistant tool call,
+tool result, or user message. Already streamed reasoning remains visible, separated from
+the retry by a blank line, and charged to
+completion usage. Both recovery causes share the same maximum of two retries. Requests
+with media, raw output, disabled thinking, or non-p-less sampling do not use reasoning retries.
+Temperature-zero generation does not trigger the reasoning detector.
+
+Explicit caller string/token stops and cancellation terminate without a recovery retry.
+A natural model end-of-turn can still expose a confirmed duplicate call and trigger recovery.
+
+If a confirmed repeat cannot be recovered within those bounds, the request fails with
+`generation_recovery_exhausted` (`server_error`, HTTP 500 before streaming headers, or
+the protocol's stream error after headers). The engine remains available. When recovery
+occurs, vendor usage at `prompt_tokens_details.ninfer.recovery` reports attempts,
+discarded calls, `discarded_reasoning_tokens` (omitted internally, not retracted), additional
+prefill tokens/samples, and preparation/prefill milliseconds.
+Completion usage includes tokens spent on discarded attempts; original prompt usage is
+unchanged. Raw output does not use internal recovery.
+
+For an unintervened diagnostic baseline, launch with `--no-generation-recovery`.
+This startup-only option disables both repetition-driven token exclusions and internal
+reasoning/duplicate-tool retries for every request. It leaves tool grammar, p-less sampling
+at all speculative target positions, and ordinary stopping/cancellation/budgets unchanged.
+Omit the flag to restore the default enabled policy. Disabled recovery can allow a loop
+to consume the entire output budget; it is not recommended as a general cure for loops.
+The startup log explicitly records when recovery is disabled.
+
+Wire captures remain accurate with recovery enabled, but streamed reasoning can contain
+multiple attempts. Correlate them with the server's request-scoped recovery logs. A missing
+`prompt_tokens_details.ninfer.recovery` object does not establish zero cycle exclusions:
+that object reports discarded-generation retries, whereas cycle exclusions are logged.
+
+The server emits live `[req N] recovery` console records for streaming and non-streaming
+requests on all three HTTP surfaces. `retry_triggered` identifies `repeated_reasoning` or
+`duplicate_tool_call`; `retry_started` marks the cold-context rebuild, and
+`retry_prefill_complete` marks its completion. `exhausted` is a warning before the request
+error. `finished` reports the terminal outcome (including cancellation or output limits),
+not a claim that the task succeeded. Records include started attempt count,
+cumulative discarded reasoning/tool counts, generated tokens and remaining output budget.
+`cycle_exclusion` means one root-token exclusion was armed for sampling, not that a retry
+occurred or that it changed the counterfactual draw. To bound traffic these records appear
+at counts 1, 2, 4, 8, ...; terminal recovery records include the exact cumulative count.
+These diagnostics contain no prompt, reasoning, tool arguments, or token text, and never
+enter HTTP model-output chunks. Tool grammar is continuously enforced rather than a
+recovery trigger; its normal operation does not emit recovery events.
 
 ### Response object and usage
 
@@ -380,7 +523,9 @@ Function arguments use `response.function_call_arguments.delta` and `.done`. IDs
 and content indices remain stable, and concatenated deltas equal the terminal Item. Responses SSE
 does not emit the Chat Completions `[DONE]` sentinel. With tools enabled, ordinary answer text still
 streams immediately; only an ambiguous `<tool_call>` suffix or the structured tool region is held.
-Malformed tool markup is flushed back as ordinary text without losing bytes.
+An interrupted declared-tool envelope (caller stop, cancellation, or output budget) is not
+published as a call or flushed into prose. Already completed calls are kept separate from text.
+Long reasoning is not by itself a loop or a reason to truncate output.
 
 ### Local response state and resources
 
@@ -502,6 +647,9 @@ curl http://127.0.0.1:8080/v1/models \
 | `--max-context N` | logical context ceiling of each sequence | `8192` |
 | `--kv-capacity N\|auto` | explicit shared Main Text KV capacity, or maximize it from remaining GPU memory; omitted means `--max-context` | `8192` |
 | `--kv-ram-capacity off\|N` | pinned host KV prefix-cache capacity in MiB; `off` disables the tier | `off` |
+| `--kv-disk-capacity off\|N` | SSD KV prefix-cache unique-object capacity in MiB; `off` disables the tier | `off` |
+| `--kv-disk-location PATH` | directory for the SSD page store; required iff `--kv-disk-capacity` is enabled | unset |
+| `--kv-disk-compress off\|zstd` | zstd-1 on new GDN/hidden/cyclic writes; KV pages stay uncompressed | `off` |
 | `--max-concurrency N` | maximum admitted requests; valid range `1..4` | `1` |
 | `--max-pending-requests N` | additional requests allowed to wait for admission | `16` |
 | `--pending-timeout-ms N` | maximum preparation-plus-admission wait | `30000` |
@@ -513,8 +661,9 @@ curl http://127.0.0.1:8080/v1/models \
 | `--response-store-max-records N` | maximum locally retained Responses objects | `1024` |
 | `--response-store-max-mib N` | total local Response envelope/Item/context budget | `256` |
 | `--spec mtp\|dflash` | speculative backend | off |
-| `--draft-tokens N` | MTP `1..5`; DFlash2 `1..11` | unset |
-| `--dflash-verify-width N` | Qwen3.8 DFlash2 verify width `2..16`; auto uses chain `W=k+1` for `k<=5`, packed-tree `W=12` for `k` in `{6,7}`, and chain `W=k+1` for `k>=8` | auto |
+| `--draft-tokens N` | MTP and DFlash2 `1..5` | unset |
+| `--adaptive-draft` | pick live draft K in `{3,4,5}` by locking `E[Y]/T(k,C,L)` (nested `r_i`; least-squares T; at most one probe of an unmeasured k; 1 ms switch cost). `--draft-tokens 4` stays `{4}` | off |
+| `--dflash-verify-width N` | DFlash2 chain verify width `W=k+1`, `2..6` | auto |
 | `--lm-head-draft` | optimized proposal head | off |
 | `--default-max-tokens N` | output limit when omitted by a request | `8192` |
 | `--vision` | enable media input and load Vision GPU allocations | off |
@@ -533,6 +682,7 @@ curl http://127.0.0.1:8080/v1/models \
 | `--frequency-penalty F` | process-level frequency-penalty override | unset |
 | `--seed N` | fixed seed when a request omits one | fresh random seed per request |
 | `--greedy` | force exact argmax for all requests | off |
+| `--no-p-less-sampling` | opt out of p-less and use top-p/top-k/min-p/penalties | p-less on |
 
 The configured `--draft-tokens` value is fixed for the server lifetime. Startup creates only the
 matching speculative Device Graph profiles; requests cannot select a different live K. An
@@ -540,10 +690,21 @@ automatic K policy requires fresh same-candidate execution-parity, acceptance, a
 the selected R9700 artifact at each supported concurrency before it can become a product option.
 
 Engine selects sampling defaults from the loaded model and the request's resolved thinking mode.
-Qwen3.8-27B uses presence penalty `0` in both modes (`0.6/0.95/20/0/0` thinking,
-`0.7/0.80/20/0/0` non-thinking). Frequency penalty is `0` for all registered presets. Process
-flags override registered values, request
-fields override process flags, and `--greedy` finally forces temperature `0`.
+Qwen3.8-27B uses temperature `2.0` and presence penalty `0` in both modes
+(`2.0/0.95/20/0/0` thinking, `2.0/0.80/20/0/0` non-thinking).
+Frequency penalty is `0` for all registered presets. Process flags override
+registered values, request fields override process flags, and `--greedy` finally forces
+temperature `0`. P-less is enabled by default; it keeps temperature and seed and ignores top-p,
+top-k, min-p, and presence/frequency penalties from both process flags and request bodies. Startup
+logs a one-time warning. Ignored request fields must still satisfy their normal input ranges before
+sampler resolution.
+`--no-p-less-sampling` opts into the registered production sampler. Combined with `--greedy`,
+p-less remains exact argmax. P-less membership is `p_v ≥ max(L·exp(-2ε/T), 1/M)` with
+`ε = 1/16` and `M = 1024`; L is the unperturbed collision probability, and an empty set
+falls back to the eligible mode. Under MTP or DFlash2, p-less applies at every hop (chain Leviathan with
+one-hot draft `q`) and to the bonus. A thinking-cycle exclusion affects only the next token,
+not later hops in the same speculative round. There is
+no OpenAI or Anthropic schema field for this mode.
 
 Run `./build-r9700/apps/ninfer-serve --help` for the exact option contract.
 
@@ -559,16 +720,16 @@ is also rejected if it resolves to the model artifact.
   --request-log-jsonl profiles/bench/run/server.requests.jsonl
 ```
 
-Every line is one `ninfer_serve_request_log` schema-v20 JSON object. All events carry
+Every line is one `ninfer_serve_request_log` schema-v21 JSON object. All events carry
 `timestamp_unix_ms` and a process-unique `server_instance_id`; request IDs are monotonic only within
 that server instance.
 
 | Event | Contents |
 |---|---|
 | `server_start` | target/weights identity and artifact, resolved Engine, compile-bound Text-prefill/XAttention identity, registered thinking/non-thinking sampler defaults plus process overrides, thinking-history defaults, weights/sequence/workspace/request-transient arenas, KV sizing ledger, pinned-host KV RAM capacity/occupancy, Device Graph observed/allowance bytes, HIP/GPU environment, and redacted argv |
-| `request_start` | protocol, resolved sampler and seed, thinking modes, Responses semantic-change flag, output budget, stream/message/tool shape |
+| `request_start` | protocol, resolved sampler and seed (including `p_less`), thinking modes, Responses semantic-change flag, output budget, stream/message/tool shape |
 | `request_rejected` | parsed request shape, media-item count, `phase: "prepare"`, and the exact HTTP status/type/code/parameter/message for a synchronous preparation rejection |
-| `request_done` | finish reason, prompt/completion/cache/computed-prefill tokens, prefix reuse path, `reuse_source` (`none` / `vram_resident` / `host_ram`), `context_checkpoint` (`restored_tokens` / `captured_tokens`), unrounded phase seconds including `kv_ram_save` / `kv_ram_load`, complete speculative-decoding counters, `tool_call_count`, and `ignored_qwen_tool_call_names` (empty unless a tools-off completion contained parseable Qwen `<tool_call>` markup) |
+| `request_done` | finish reason, prompt/completion/cache/computed-prefill tokens, prefix reuse path, `reuse_source` (`none` / `vram_resident` / `host_ram` / `host_disk`), `context_checkpoint` (`restored_tokens` / `captured_tokens`), unrounded phase seconds including `kv_ram_save` / `kv_ram_load` / `kv_disk_save` / `kv_disk_load` / `kv_disk_h2d`, complete speculative-decoding counters, `tool_call_count`, and `ignored_qwen_tool_call_names` (empty unless a tools-off completion contained parseable Qwen `<tool_call>` markup) |
 | `request_error` | the resolved request configuration and generation error message |
 | `throughput` | interval token deltas and rates, scheduler occupancy, interval `timings_seconds.kv_ram_save` / `kv_ram_load`, and decode-round batch statistics |
 
@@ -647,6 +808,29 @@ and is not divided evenly among request lanes. `--kv-ram-capacity` is a separate
 in MiB for completed prefix bundles and does not change GPU pool sizing. One long MTP chat with five
 context-checkpoint heads is about 6 GiB in that FIFO; `off` still keeps same-lane GDN rollback on
 the live pinned log, but other-lane restore after eviction needs the FIFO.
+`--kv-disk-capacity` is a third-tier SSD budget in unique object bytes. It requires
+`--kv-ram-capacity > 0` and `--kv-disk-location`. Disk is inclusive of VRAM/RAM hits; equal reuse
+length prefers VRAM, then RAM, then disk. `--kv-disk-compress` is not part of the directory
+fingerprint and affects new GDN/hidden/cyclic writes only.
+Runtime cache capacity or optional capture-allocation failures skip the capture and do not reject
+generation. Optional cache-lookup allocation failure leaves normal cold admission available.
+If a disk cache read or optional RAM/disk restore metadata or HIP-event allocation fails before
+prefill, the Engine drains the partial restore,
+excludes that entry from reuse, and recomputes the prompt without prefix reuse. The same request
+returns through normal capacity admission; its original queue deadline does not expire this
+already-admitted recovery. This cache fallback does not produce `service_unavailable`.
+Disk format v6 fingerprints canonical logical KV pages rather than the current GPU pool capacity,
+so one location can reopen across `--vision` on/off and automatic resident-capacity changes. Media
+content remains part of each entry identity. The fingerprint also binds the opened artifact's
+local file generation (device, inode, byte length, nanosecond modification/change times), not just
+its shared model/weights names. Replaced or modified artifacts require a fresh cache directory;
+even a byte-identical copy is conservatively a different file. Artifacts must remain immutable
+while an Engine is using them. Pre-v6 locations fail startup: select a new directory and retain
+the old one until its contents are no longer needed. KV dtype, speculative backend, and
+persistent-state incompatibilities also fail startup.
+On stop, orderly shutdown copies active chats into the host cache, saves cache entries that are not
+yet on SSD, and finishes outstanding disk writes. The progress renderer prints `kv-disk`
+`copy active chats` / `save cache entries` / `finish disk writes` counts while shutdown runs.
 
 Automatic sizing evaluates the complete target runtime layout for the chosen concurrency, fixed
 FP8-K/INT4-V growing-cache format, speculative backend, draft window, Vision setting, workspace,
@@ -657,9 +841,14 @@ slack, actual free memory after complete startup, observed Graph memory, and pin
 occupancy in MiB. When `--kv-ram-capacity` is enabled, a post-warmup line reprints occupancy,
 periodic throughput lines print live host-resident `kv-ram=` used bytes plus `n=` / `restores=` /
 `evicts=` / `drops=` / `save=` / `load=`, and each `[req] done` line includes `reuse_source=` plus
-the same occupancy and counters. `kv-ram=` / `n=` count chats still in the host FIFO, not chats
-already consumed after a restore onto a KV lane. `save=` / `load=` are HIP D2H/H2D elapsed for
-that request or the throughput interval. `restores=` / `evicts=` / `drops=` are lifetime counters
+the same occupancy and counters. When `--kv-disk-capacity` is enabled, those lines also print
+`kv-disk=` occupancy and counters. `kv-ram=` / `n=` count chats still in the host FIFO, not chats
+already consumed after a restore onto a KV lane. RAM `save=` / `load=` are HIP D2H/H2D elapsed for
+that request or the throughput interval. Disk `save=` is spill-session wall harvested onto the
+request; disk `load=` is the host wall from the first live SSD read of that restore until the last
+page or state object has arrived in the pinned host window. Disk `h2d=` is the host wall from that
+last host arrival until the restore's page and state H2D complete (extra copy time after SSD is
+idle, not the overlapping first-to-last copy span). `restores=` / `evicts=` / `drops=` are lifetime counters
 on both human lines; lifetime capture counts stay in JSONL.
 Exact RAM byte occupancy remains in `server_start`, `request_done`, and `throughput` JSONL; set
 `NINFER_KV_RAM_LOG_BYTES=1` to print those byte values on the human lines. A new capture may still

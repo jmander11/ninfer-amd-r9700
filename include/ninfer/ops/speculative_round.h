@@ -3,17 +3,14 @@
 #include "core/tensor.h"
 #include "ninfer/ops/sampling.h"
 
-#include <hip/hip_runtime_api.h>
+#include <hip/hip_runtime.h>
 
-#include <cstddef>
 #include <cstdint>
 
 namespace ninfer::ops {
 
 // Caller-owned transient capacity for every draft-count and batch-size pair in the inclusive
-// domains. token_domain is the fixed sampling profile; K is in [1,15], B is in [1,4], and
-// invalid domains throw. The returned capacity includes every partial and normalized
-// distribution byte required by the native gfx1201 route.
+// domains. token_domain is the fixed sampling profile; invalid domains throw.
 [[nodiscard]] std::size_t speculative_accept_greedy_drafts_workspace_capacity_bytes(
     std::int32_t token_domain, std::int32_t min_drafts, std::int32_t max_drafts,
     std::int32_t min_batch, std::int32_t max_batch);
@@ -37,8 +34,7 @@ namespace ninfer::ops {
  * Logical shapes:
  *   All tensors are contiguous I32. anchors/base_positions/current_extents are [B], drafts is
  *   [K,B] with K>=1 and B>=1, and verify_ids/positions are [K+1,B]. Each current extent is in
- *   [0,K]. K is in [1,15], B is in [1,4], inputs and outputs do not overlap, and stream is
- *   non-null.
+ *   [0,K]. Inputs and outputs do not overlap.
  *
  * Effects:
  *   Writes every physical output element, including safe invalid-tail values. Inputs remain
@@ -70,7 +66,17 @@ void speculative_prepare_verify_ids(const Tensor& anchors, const Tensor& drafts,
  *   probability min(1, p_i(d)/q_i(d)) (Leviathan), samples from max(0, p-q) on first rejection,
  *   and samples a bonus from column Pcur[b] when every available draft is accepted. Null
  *   selector_ids/selector_q is the one-hot draft convention: accept iff u < p_i(d) and the
- *   residual excludes d. Greedy mode ignores q.
+ *   residual excludes d. Greedy mode ignores q. When configs[b].p_less is set, p is the p-less
+ *   distribution from sampling.h rather than the top-k/top-p/min-p truncation, and selector q is
+ *   ignored (one-hot at the realized drafted token, same as MTP). Every hop applies that
+ *   Leviathan test to its own target p-less distribution, and the bonus samples its own column.
+ *   Only hop 0 applies the cycle-exit restriction p' of sampling.h (V without a typical exclude,
+ *   or Dirac on the runner-up when V is that singleton); typical_exclude is cleared for later
+ *   hops because it describes one next-token decision, not a sequence-wide token ban. A
+ *   p-less residual whose mass is numerically zero draws from p' rather than re-emitting the
+ *   rejected draft. If admitted p' mass is zero, or a residual inverse-CDF with positive mass does
+ *   not land on a survivor, the correction is the cycle-exit fallback (runner-up when V is the
+ *   excluded singleton, otherwise the packed-column argmax).
  *   RNG domains are the speculative accept/correction/bonus SamplePurpose values and logical
  *   positions derived from the old length.
  *
@@ -81,10 +87,16 @@ void speculative_prepare_verify_ids(const Tensor& anchors, const Tensor& drafts,
  *   is FP32 [C,K,B] with C>=1 (product C=16); both null or both non-null. token_domain is in
  *   [1,physical_rows], K>=1, B>=1, and configs points to a device-resident SamplingConfig[B].
  *   Tensor arguments, configs, and configs[b].token_counts do not overlap except for the
- *   explicitly mutated objects. K is in [1,15], B is in [1,4], and stream is non-null.
+ *   explicitly mutated objects.
  *
  * Numeric:
  *   Sampling filtering, penalties, normalization, and RNG semantics are those of sampling.h.
+ *   Each verification column uses its own allowed_token_words slice, including
+ *   correction and bonus draws. Tree masks are indexed by node, not traversal depth.
+ *   The caller supplies masks for the corresponding verified token histories;
+ *   unreachable nodes need not constrain a different history. Every evaluated
+ *   column must have at least one eligible token after explicit suppression.
+ *   Greedy target_tokens must already be selected using these same masks.
  *
  * Effects:
  *   For each row, let A be the accepted draft count and L=A+1. licensed_tokens[0:A,b] receives
@@ -112,23 +124,24 @@ void speculative_accept_greedy_drafts(const Tensor& target_tokens, const Tensor&
  * Op: speculative_accept_tree_drafts
  *
  * Greedy: from packed column 0, walk to the unique child whose token equals the target argmax;
- * otherwise emit that argmax as the correction. Sampling: at node u sample x from the truncated
- * target distribution; if x is a child of u, accept and continue, else emit x as correction
- * (SpecInfer membership). Walks at most current_extents[b] accepted hops (same budget as chain
- * verify). fold_path lists packed columns of the processed path including the root;
- * accepted_column is the last processed packed index (hidden selector). licensed_tokens are
- * time-ordered accepted child ids plus the correction. accepted is the accepted draft count.
- * Sampling increments configs[b].token_counts for each produced token when that pointer is
- * non-null; greedy does not. Large-vocabulary sampling uses the same partial/group pipeline as
- * chain accept, with a parent-walk penalty overlay at each packed column, then the SpecInfer
- * walk over the stored truncated distributions.
+ * otherwise emit that argmax as the correction. Sampling with p_less==0: at node u sample x from
+ * the truncated target distribution; if x is a child of u, accept and continue, else emit x as
+ * correction (SpecInfer membership). When configs[b].p_less is set, every visited node draws
+ * from its own target p-less distribution using that membership rule. Only hop 0 applies the
+ * cycle-exit restriction; later hops clear typical_exclude. Walks at most current_extents[b] accepted hops
+ * (same budget as chain verify). fold_path lists packed columns of the processed path including
+ * the root; accepted_column is the last processed packed index (hidden selector).
+ * licensed_tokens are time-ordered accepted child ids plus the correction. accepted is the
+ * accepted draft count. Sampling increments configs[b].token_counts for each produced token when
+ * that pointer is non-null; greedy does not. Large-vocabulary sampling uses the same
+ * partial/group pipeline as chain accept, with a parent-walk penalty overlay at each packed
+ * column, then a membership walk over the stored p-less moments.
  *
  * verify_ids/parent_index/fold_path/licensed_tokens are I32 [W,B]. target_tokens is I32 [W,B].
  * logits is BF16 [physical_rows,W,B]. current_extents/valid_columns and the other vectors are
- * I32 [B]. W is the packed verify width in [2,16] (product k=7 uses 12). lengths[b] is the
+ * I32 [B]. W is the packed verify width in [2,16] (tree-select W=12 is historical). lengths[b] is the
  * pre-round sequence length and is incremented by the produced count; it must not alias the
- * packed-window base consumed by the typed FP8-K/INT4-V publication compaction transition
- * (E+path[i] -> E+i). B is in [1,4] and stream is non-null.
+ * packed-window base used by gqa_kv_compact_path (E+path[i] → E+i).
  *
  * Workspace:
  *   Caller-owned transient storage reported by
@@ -151,9 +164,8 @@ void speculative_accept_tree_drafts(const Tensor& target_tokens, const Tensor& l
  *
  * Shape / numeric / effects:
  *   hidden is contiguous BF16 [D,T,B], selectors is contiguous I32 [B] with every value in [0,T),
- *   and out is distinct contiguous BF16 [D,B]. T is in [1,16], B is in [1,4], and stream is
- *   non-null. The Op exactly copies BF16 bits, writes all of out, and uses no workspace or other
- *   state.
+ *   and out is distinct contiguous BF16 [D,B]. The Op exactly copies BF16 bits, writes all of out,
+ *   and uses no workspace or other state.
  */
 void speculative_select_accepted_hidden(const Tensor& hidden, const Tensor& selectors, Tensor& out,
                                         hipStream_t stream);
@@ -167,7 +179,7 @@ void speculative_select_accepted_hidden(const Tensor& hidden, const Tensor& sele
  * Effects:
  *   Updates the contiguous non-empty I32 proposal_tokens vector in place; every input id is in
  *   [0,count), and id_map is a distinct device I32 array [count]. There is no workspace or other
- *   state side effect. stream is non-null.
+ *   state side effect.
  */
 void proposal_remap_token_ids(Tensor& proposal_tokens, const std::int32_t* id_map,
                               std::int32_t count, hipStream_t stream);

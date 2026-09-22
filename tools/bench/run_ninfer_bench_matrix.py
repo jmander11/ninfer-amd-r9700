@@ -77,7 +77,7 @@ CONTEXT_CORE = ((512, 512), (2048, 512), (8192, 512))
 CONTEXT_FULL_EXTRA = ((32768, 256), (65536, 128))
 PRIMARY_KS = (0, 3, 5)
 SWEEP_KS = (0, 1, 2, 3, 4, 5)
-REPORT_SCHEMA_VERSION = 21
+REPORT_SCHEMA_VERSION = 22
 PHASE_TIMING_SEMANTICS = "serial-lane-service-sum_shared-decode-max_v1"
 LEGACY_PHASE_TIMING_SEMANTICS = "legacy-lane-max_v20"
 REPORT_ARTIFACT_TYPE = "ninfer_bench_report"
@@ -225,23 +225,16 @@ def dflash_args(k: int, verify_width: int) -> tuple[str, ...]:
 def resolved_dflash_verify_width(draft_tokens: int, requested_width: int) -> int:
     if draft_tokens == 0:
         return 0
-    if requested_width:
-        return requested_width
-    if draft_tokens <= 5 or draft_tokens >= 8:
-        return draft_tokens + 1
-    return 12
+    if not 1 <= draft_tokens <= 5 or requested_width not in (0, draft_tokens + 1):
+        raise ValueError("DFlash requires chain K in [1, 5] and W=K+1")
+    return draft_tokens + 1
 
 
 def resolved_dflash_topology(draft_tokens: int, verify_width: int) -> str:
-    if not 1 <= draft_tokens <= 11:
-        raise ValueError("DFlash topology requires K in [1, 11]")
-    if not 2 <= verify_width <= 16:
-        raise ValueError("DFlash topology requires W in [2, 16]")
-    proposal = "single-block" if draft_tokens <= 7 else "two-block"
-    verification = (
-        "packed-tree" if draft_tokens <= 7 and verify_width != draft_tokens + 1 else "chain"
-    )
-    return f"{proposal}-{verification}"
+    resolved_dflash_verify_width(draft_tokens, verify_width)
+    if draft_tokens == 0 or verify_width != draft_tokens + 1:
+        raise ValueError("DFlash topology requires resolved chain W=K+1")
+    return "single-block-chain"
 
 
 def dflash_shortlist_profiles() -> list[dict[str, Any]]:
@@ -1802,7 +1795,7 @@ def validate_report_phase_timing(report: dict[str, Any]) -> str:
     version = report.get("schema_version")
     if type(version) is not int:
         raise ValueError("benchmark report lacks an integer timing schema")
-    if version == 21 and report.get("phase_timing_semantics") == PHASE_TIMING_SEMANTICS:
+    if version in (21, 22) and report.get("phase_timing_semantics") == PHASE_TIMING_SEMANTICS:
         return PHASE_TIMING_SEMANTICS
     if version == 20 and "phase_timing_semantics" not in report:
         return LEGACY_PHASE_TIMING_SEMANTICS
@@ -1843,7 +1836,7 @@ def load_bench_report(
         report.get("tool"),
     )
     validate_report_phase_timing(report)
-    expected = ("20 (legacy) or 21 (corrected)", REPORT_ARTIFACT_TYPE, REPORT_TOOL)
+    expected = ("20 (legacy), 21 (phase sums), or 22 (wave timing)", REPORT_ARTIFACT_TYPE, REPORT_TOOL)
     if identity[1:] != expected[1:]:
         raise ValueError(
             "unsupported benchmark report identity: "
@@ -2159,6 +2152,10 @@ def report_rows(
                                    if performance_eligible and prefill_eligible else None),
             "prefill_tok_s_stddev": (test.get("prefill_tok_s_stddev")
                                       if performance_eligible and prefill_eligible else None),
+            "prefill_active_tok_s_mean": (test.get("prefill_active_tok_s_mean")
+                                         if performance_eligible and prefill_eligible else None),
+            "prefill_active_tok_s_stddev": (test.get("prefill_active_tok_s_stddev")
+                                           if performance_eligible and prefill_eligible else None),
             "decode_output_tok_s_mean": (test.get("decode_output_tok_s_mean")
                                           if performance_eligible else None),
             "decode_output_tok_s_stddev": (test.get("decode_output_tok_s_stddev")
@@ -2179,6 +2176,8 @@ def report_rows(
                                      if performance_eligible else None),
             "total_seconds_mean": (test.get("total_seconds_mean")
                                     if performance_eligible else None),
+            "wave_seconds_mean": (test.get("wave_seconds_mean")
+                                   if performance_eligible else None),
             "spec_acceptance_rate": speculative.get("acceptance_rate"),
             "spec_acceptance_length": speculative.get("acceptance_length"),
             "spec_rounds": speculative.get("rounds"),

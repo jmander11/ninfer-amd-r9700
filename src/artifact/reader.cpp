@@ -213,6 +213,7 @@ public:
         fd_   = fd;
         data_ = static_cast<const std::byte*>(mapping);
         size_ = size;
+        status_ = status;
     }
 
     ~MappedFile() {
@@ -226,6 +227,15 @@ public:
     const std::byte* data() const noexcept { return data_; }
 
     std::size_t size() const noexcept { return size_; }
+
+    std::string file_identity() const {
+        return "linux-file-v1:" + std::to_string(status_.st_dev) + ":" +
+               std::to_string(status_.st_ino) + ":" + std::to_string(status_.st_size) + ":" +
+               std::to_string(status_.st_mtim.tv_sec) + ":" +
+               std::to_string(status_.st_mtim.tv_nsec) + ":" +
+               std::to_string(status_.st_ctim.tv_sec) + ":" +
+               std::to_string(status_.st_ctim.tv_nsec);
+    }
 
     std::size_t read_direct(std::uint64_t absolute_offset, std::span<std::byte> destination) const {
         constexpr std::size_t alignment = Reader::direct_io_alignment;
@@ -253,6 +263,7 @@ private:
     int fd_                = -1;
     const std::byte* data_ = nullptr;
     std::size_t size_      = 0;
+    struct stat status_ {};
 };
 
 } // namespace
@@ -373,6 +384,8 @@ const ObjectDescriptor* Reader::find(std::string_view name) const noexcept {
 }
 
 std::uint64_t Reader::file_bytes() const noexcept { return impl_->file.size(); }
+
+std::string Reader::file_identity() const { return impl_->file.file_identity(); }
 
 std::uint64_t Reader::payload_offset() const noexcept { return impl_->payload_start; }
 

@@ -16,6 +16,7 @@ from pathlib import Path
 
 from tools.bench.prepare_selected_niah import resolve_route
 from tools.reference.qwen3_8_27b_bf16.protocol import validate_checkpoint_files
+from tools.parity.qwen3_8_27b.vision_contract import EXPECTED_TRACE_NAMES, GATE
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -31,6 +32,8 @@ FRONTEND_PYTHON = Path("/ssdpool2nvme/local_llm/ninfer-dylan2/eval/.venv/bin/pyt
 GPU_PYTHON = Path("/ssdpool2nvme/local_llm/.venv-ninfer-r9700/bin/python")
 POWER = Path("/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level")
 REFERENCE_AUTHORITIES = tuple(REPO / path for path in (
+    "tools/parity/qwen3_8_27b/vision_contract.py",
+    "tests/targets/qwen3_8_27b/vision_trace_real.cpp",
     "tools/reference/qwen3_8_27b/bindings.py",
     "tools/reference/qwen3_8_27b/weights.py",
     "tools/reference/qwen3_8_27b/vision.py",
@@ -138,6 +141,10 @@ def prepare(selection: Path, output: Path) -> dict[str, object]:
     messages = file_identity(MESSAGES)
     media = file_identity(MEDIA)
     artifact = Path(route["artifact"]["path"])
+    tracer = Path(route["build_identity"]["cmake_cache"]["path"]).parent / "tests/ninfer_qwen3_8_27b_vision_trace"
+    tracer_identity = file_identity(tracer)
+    if not os.access(tracer, os.X_OK):
+        raise ValueError("selected build Vision tracer is not executable; build its explicit target")
     with tempfile.TemporaryDirectory(prefix=f".{output.name}.prepare-", dir=output.parent) as temp:
         staged = Path(temp) / output.name
         staged.mkdir()
@@ -157,7 +164,7 @@ def prepare(selection: Path, output: Path) -> dict[str, object]:
         }
         plan = {
             "artifact_type": "ninfer_r9700_selected_vision_diagnostic_plan",
-            "schema_version": 1,
+            "schema_version": 2,
             "status": "command_only_not_executed",
             "terminal_route": route,
             "source_checkpoint": source,
@@ -165,11 +172,12 @@ def prepare(selection: Path, output: Path) -> dict[str, object]:
             "gpu_python": gpu_python,
             "fixture": {"messages": messages, "media": media},
             "prepared_input": prepared_input,
+            "trace_executable": tracer_identity,
             "workload": {
                 "maximum_concurrency": 1, "thinking": False, "prefix_reuse": False,
                 "speculative_decode": False, "images": 1, "videos": 0,
-                "capture_names": ["block_00", "block_13", "block_26", "merger"],
-                "gate": "diagnostic completion with finite exact-shape comparisons; no numeric threshold",
+                "capture_names": list(EXPECTED_TRACE_NAMES),
+                "gate": GATE,
             },
             "outputs": {
                 "raw": str(output / "vision.raw.json"),
@@ -192,7 +200,7 @@ def prepare(selection: Path, output: Path) -> dict[str, object]:
             f"{shlex.quote(str(GPU_PYTHON))} -m tools.parity.qwen3_8_27b.vision "
             f"--weights {shlex.quote(str(artifact))} --model-dir {shlex.quote(str(SOURCE))} "
             f"--messages {shlex.quote(str(MESSAGES))} --prepared-input \"$root/prepared-input.safetensors\" "
-            '--device cuda:0 --no-thinking --output "$root/vision.raw.json"\n'
+            f'--trace-exe {shlex.quote(str(tracer))} --device cuda:0 --output "$root/vision.raw.json"\n'
             'test "$(cat "$power")" = auto\n'
             f"python3 -m tools.bench.validate_selected_vision_diagnostic --plan \"$root/plan.json\" "
             '--root "$root" --out "$root/admission.json"\n',
@@ -201,7 +209,7 @@ def prepare(selection: Path, output: Path) -> dict[str, object]:
         os.chmod(commands_path, 0o755)
         closure_sources = [
             Path(__file__).resolve(), VALIDATOR, PREPARE_INPUT, VISION, PROTOCOL,
-            selection, artifact, MESSAGES, MEDIA, SOURCE_RECEIPT,
+            selection, artifact, tracer, MESSAGES, MEDIA, SOURCE_RECEIPT,
             Path(route["source_matrices"]["pareto-capacity"]["path"]),
             Path(route["source_matrices"]["pareto-whole"]["path"]),
             Path(route["build_identity"]["cmake_cache"]["path"]),

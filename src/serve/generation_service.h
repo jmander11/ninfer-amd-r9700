@@ -2,7 +2,7 @@
 
 // Product-side adapter between HTTP protocol requests and the public NInfer
 // engine. It owns one Engine and keeps protocol concerns (aliases, usage,
-// streaming callbacks, and tool-call parsing) outside the target package.
+// streaming callbacks, and typed tool-call protocol translation) outside the target package.
 
 #include "ninfer/engine.h"
 #include "serve/request.h"
@@ -23,6 +23,7 @@ struct RequestCapacity;
 struct MediaInputCapacity;
 
 struct GenerationMetrics {
+    ninfer::GenerationRecoveryStats recovery;
     double prepare_seconds = 0.0;
     double ttft_seconds    = 0.0;
     double vision_seconds  = 0.0;
@@ -53,6 +54,16 @@ struct GenerationMetrics {
     std::uint64_t kv_ram_drops        = 0;
     double kv_ram_save_seconds        = 0;
     double kv_ram_load_seconds        = 0;
+    std::size_t kv_disk_capacity_bytes = 0;
+    std::size_t kv_disk_used_bytes     = 0;
+    std::size_t kv_disk_entry_count    = 0;
+    std::uint64_t kv_disk_captures     = 0;
+    std::uint64_t kv_disk_restores     = 0;
+    std::uint64_t kv_disk_evictions    = 0;
+    std::uint64_t kv_disk_drops        = 0;
+    double kv_disk_save_seconds        = 0;
+    double kv_disk_load_seconds        = 0;
+    double kv_disk_h2d_seconds         = 0;
 };
 
 struct GenerationOutcome {
@@ -125,7 +136,7 @@ public:
                                           std::function<bool()> is_cancelled = {}) const;
 
     // Consumes prepared.generation. A PreparedRequest is single-use.
-    GenerationOutcome run(PreparedRequest& prepared, const StreamSink* sink,
+    GenerationOutcome run(PreparedRequest& prepared, std::uint64_t request_id, const StreamSink* sink,
                           std::function<bool()> is_cancelled = {});
 
     void warmup();

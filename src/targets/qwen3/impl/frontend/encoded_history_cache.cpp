@@ -213,7 +213,7 @@ EncodedChat encode_chat_with_cache(const Tokenizer& tokenizer,
     const RenderedChat full =
         options.add_generation_prompt ? chat_template.render(messages, options) : committed;
 
-    if (!full.text.starts_with(committed.text)) {
+    if (full.final_assistant_byte_begin || !full.text.starts_with(committed.text)) {
         return encode_rendered_chat(tokenizer, full);
     }
 

@@ -361,6 +361,16 @@ RenderedChat expand_placeholders(RenderedChat rendered, const std::vector<Vision
             throw std::invalid_argument("chat media order does not match rendered placeholders");
         }
         const std::string replacement = placeholder(item);
+        if (rendered.final_assistant_byte_begin) {
+            const std::size_t boundary = *rendered.final_assistant_byte_begin;
+            const std::size_t end = position + needle.size();
+            if (position < boundary && boundary < end) {
+                throw std::logic_error("assistant boundary intersects a media placeholder");
+            }
+            if (end <= boundary) {
+                rendered.final_assistant_byte_begin = boundary - needle.size() + replacement.size();
+            }
+        }
         if (rendered.rewrite_checkpoint) {
             const std::size_t boundary = rendered.rewrite_checkpoint->offset;
             const std::size_t end      = position + needle.size();
@@ -518,9 +528,35 @@ std::span<const std::int32_t> ProcessedInput::position_axis(int axis) const {
 
 EncodedChat encode_rendered_chat(const Tokenizer& tokenizer, const RenderedChat& rendered) {
     EncodedChat encoded;
+    const auto finish = [&]() -> EncodedChat {
+        if (!rendered.final_assistant_byte_begin) { return std::move(encoded); }
+        // Tokenize the actual completed turn, never a hypothetical generation prologue.
+        const auto offset = *rendered.final_assistant_byte_begin;
+        if (offset > rendered.text.size()) {
+            throw std::logic_error("assistant byte boundary exceeds rendered chat");
+        }
+        std::size_t byte_begin = 0;
+        for (std::size_t i = 0; i < encoded.input_ids.size(); ++i) {
+            const auto bytes = tokenizer.decode_token_bytes(encoded.input_ids[i]);
+            if (std::string_view(rendered.text).substr(byte_begin, bytes.size()) != bytes) {
+                throw std::logic_error("assistant token prefix differs from rendered bytes");
+            }
+            if (byte_begin + bytes.size() > offset) {
+                if (i > std::numeric_limits<std::uint32_t>::max()) {
+                    throw std::overflow_error("assistant token boundary exceeds uint32");
+                }
+                // A token may straddle the header/body boundary. Score that complete
+                // represented token rather than retokenizing or skipping answer bytes.
+                encoded.final_assistant_token_begin = static_cast<std::uint32_t>(i);
+                return std::move(encoded);
+            }
+            byte_begin += bytes.size();
+        }
+        throw std::logic_error("assistant boundary has no represented target token");
+    };
     if (!rendered.rewrite_checkpoint) {
         encoded.input_ids = tokenizer.encode(rendered.text);
-        return encoded;
+        return finish();
     }
     if (rendered.rewrite_checkpoint->offset > rendered.text.size()) {
         throw std::logic_error("rewrite checkpoint byte offset exceeds rendered chat");
@@ -547,7 +583,7 @@ EncodedChat encode_rendered_chat(const Tokenizer& tokenizer, const RenderedChat&
         .kind     = rendered.rewrite_checkpoint->kind,
         .frontier = frontier,
     };
-    return encoded;
+    return finish();
 }
 
 Processor::Processor(const Tokenizer& tokenizer, const CompiledChatTemplate& chat_template,
@@ -617,6 +653,7 @@ ProcessedInput Processor::process(const std::vector<ChatMessage>& messages,
     EncodedChat encoded       = encode_rendered_chat(tokenizer_, rendered);
     output.input_ids          = std::move(encoded.input_ids);
     output.rewrite_checkpoint = encoded.rewrite_checkpoint;
+    output.final_assistant_token_begin = encoded.final_assistant_token_begin;
     output.token_types.resize(output.input_ids.size(), 0);
     for (std::size_t i = 0; i < output.input_ids.size(); ++i) {
         if (output.input_ids[i] == kImageToken) {

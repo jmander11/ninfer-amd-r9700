@@ -253,11 +253,11 @@ std::uint32_t BenchTest::required_context(const SpeculativeOptions& spec) const 
     if (spec.draft_tokens != 0 && spec.backend == SpeculativeBackend::Mtp) {
         margin = 2ULL * spec.draft_tokens;
     } else if (spec.draft_tokens != 0 && spec.backend == SpeculativeBackend::DFlash) {
-        // 27B DFlash2 default verify width: 12-column tree at k<=7 (two-block Spark), chain
-        // width k+1 beyond that; an explicit dflash_verify_width wins. Two verify-widths of
-        // headroom cover the transient uncommitted round state.
-        const std::uint32_t width =
-            resolved_dflash_verify_width(spec.draft_tokens, spec.dflash_verify_width);
+        // 27B DFlash2 is chain W=k+1. An explicit dflash_verify_width wins. Two
+        // verify-widths of headroom cover the transient uncommitted round state.
+        const std::uint32_t width = spec.dflash_verify_width != 0
+                                       ? spec.dflash_verify_width
+                                       : spec.draft_tokens + 1U;
         margin = 2ULL * width;
     }
     return checked_context(prompt + decode + margin, "benchmark context requirement");
@@ -267,7 +267,8 @@ std::string usage_text(std::string_view program) {
     if (program.empty()) { program = "ninfer_bench"; }
     std::ostringstream out;
     out << "Usage: " << program << " --weights <artifact.ninfer> [options]\n\n"
-        << "Product-route throughput benchmark over ninfer::Engine. pp measures Engine prefill;\n"
+        << "Product-route throughput benchmark over ninfer::Engine. pp throughput is aggregate\n"
+        << "prompt tokens over request-wave wall time; active pp throughput excludes queueing.\n"
         << "tg measures G generated tokens after an untimed one-token seed prefill.\n\n"
         << "Options:\n"
         << "  --weights <path>            required .ninfer artifact\n"
@@ -292,10 +293,11 @@ std::string usage_text(std::string_view program) {
         << "                              pending deadline; the product default is unchanged\n"
          << "  --spec <mtp|dflash>       speculative backend (default: mtp); dflash requires\n"
          << "                              the artifact to contain dflash/ objects\n"
-         << "  --draft-tokens <0..11>    speculative draft window: mtp [0,5] (0 = none),\n"
-         << "                              dflash [1,11] (default: 0)\n"
-         << "  --dflash-verify-width <2..16> DFlash packed verify width; 0 = k-dependent\n"
-         << "                              default (dflash only)\n"
+         << "  --draft-tokens <0..5>     speculative draft window: mtp [0,5] (0 = none),\n"
+         << "                              dflash [1,5] (default: 0)\n"
+         << "  --adaptive-draft            pick live K in {3,4,5} by locking E[Y]/T(k,C,L); requires --spec mtp|dflash\n"
+         << "  --dflash-verify-width <0|2..6> DFlash chain width; 0 = K+1; explicit width\n"
+         << "                              must equal K+1 (dflash only)\n"
          << "  --lm-head-draft             use the optimized proposal head; requires --draft-tokens\n"
          << "                              greater than zero\n"
         << "  --device <id>               HIP device ordinal (default: 0)\n"
@@ -375,16 +377,18 @@ BenchOptions parse_args(int argc, char** argv) {
             } else {
                 throw std::invalid_argument("--spec must be mtp or dflash");
             }
+        } else if (arg == "--adaptive-draft") {
+            options.adaptive_draft = true;
         } else if (arg == "--draft-tokens") {
             options.draft_tokens = parse_u32(value("--draft-tokens"), "draft-tokens", true);
             if (options.draft_tokens > kMaxDFlashDraftTokens) {
-                throw std::invalid_argument("--draft-tokens must be in [0,11]");
+                throw std::invalid_argument("--draft-tokens must be in [0,5]");
             }
         } else if (arg == "--dflash-verify-width") {
             options.dflash_verify_width =
                 parse_u32(value("--dflash-verify-width"), "dflash-verify-width", true);
             if (options.dflash_verify_width > kMaxDFlashVerifyWidth) {
-                throw std::invalid_argument("--dflash-verify-width must be in [2,16]");
+                throw std::invalid_argument("--dflash-verify-width must be 0 or chain K+1 in [2,6]");
             }
         } else if (arg == "--lm-head-draft") {
             options.proposal_head = ProposalHead::Optimized;
@@ -425,13 +429,19 @@ BenchOptions parse_args(int argc, char** argv) {
     }
     if (options.spec_backend == SpeculativeBackend::DFlash &&
         (options.draft_tokens == 0 || options.draft_tokens > kMaxDFlashDraftTokens)) {
-        throw std::invalid_argument("--spec dflash requires --draft-tokens in [1,11]");
+        throw std::invalid_argument("--spec dflash requires --draft-tokens in [1,5]");
     }
     if (options.dflash_verify_width != 0 && options.spec_backend != SpeculativeBackend::DFlash) {
         throw std::invalid_argument("--dflash-verify-width requires --spec dflash");
     }
     if (options.dflash_verify_width != 0 && options.dflash_verify_width < 2) {
-        throw std::invalid_argument("--dflash-verify-width must be in [2,16]");
+        throw std::invalid_argument("--dflash-verify-width must be 0 or chain K+1 in [2,6]");
+    }
+    if (options.spec_backend == SpeculativeBackend::DFlash) {
+        (void)resolved_dflash_verify_width(options.draft_tokens, options.dflash_verify_width);
+    }
+    if (options.adaptive_draft && options.draft_tokens == 0) {
+        throw std::invalid_argument("--adaptive-draft requires an active speculative backend");
     }
     if (options.proposal_head == ProposalHead::Optimized && options.draft_tokens == 0) {
         throw std::invalid_argument(
@@ -566,9 +576,11 @@ std::string decode_path_name(bool use_device_graph, const SpeculativeOptions& sp
 std::uint32_t resolved_dflash_verify_width(std::uint32_t draft_tokens,
                                            std::uint32_t requested_width) {
     if (draft_tokens == 0) { return 0; }
-    if (requested_width != 0) { return requested_width; }
-    if (draft_tokens <= 5 || draft_tokens >= 8) { return draft_tokens + 1; }
-    return 12;
+    if (draft_tokens > 5) { throw std::invalid_argument("DFlash2 requires K in [1,5]"); }
+    if (requested_width != 0 && requested_width != draft_tokens + 1) {
+        throw std::invalid_argument("DFlash2 requires chain W=K+1");
+    }
+    return draft_tokens + 1;
 }
 
 std::uint32_t decode_graph_prime_output_tokens(const SpeculativeOptions& spec) {
@@ -604,6 +616,21 @@ Stats compute_stats(const std::vector<double>& values) {
 }
 
 std::vector<double> prefill_tok_s_series(const TestResult& result) {
+    std::vector<double> out;
+    if (!result.test.has_prefill()) { return out; }
+    for (const RepTiming& rep : result.reps) {
+        const double seconds = result.test.kind == TestKind::Prefill
+                                   ? rep.wave_seconds
+                                   : rep.timings.prefill_seconds;
+        if (seconds > 0.0) {
+            out.push_back(static_cast<double>(result.test.n_prompt) * result.concurrency /
+                          seconds);
+        }
+    }
+    return out;
+}
+
+std::vector<double> prefill_active_tok_s_series(const TestResult& result) {
     std::vector<double> out;
     if (!result.test.has_prefill()) { return out; }
     for (const RepTiming& rep : result.reps) {
@@ -713,6 +740,13 @@ std::vector<double> total_time_series(const TestResult& result) {
     return timing_series<&GenerationTimings::total_seconds>(result);
 }
 
+std::vector<double> wave_time_series(const TestResult& result) {
+    std::vector<double> out;
+    out.reserve(result.reps.size());
+    for (const RepTiming& rep : result.reps) { out.push_back(rep.wave_seconds); }
+    return out;
+}
+
 std::string format_table(const BenchEnvironment& env, const std::vector<TestResult>& results) {
     std::ostringstream out;
     out << "ninfer_bench product throughput report\n"
@@ -771,10 +805,10 @@ std::string format_table(const BenchEnvironment& env, const std::vector<TestResu
                 : "n/a")
         << " repetitions=" << env.repetitions << " warmup=" << env.warmup << "\n\n";
 
-    constexpr std::size_t cols                   = 9;
+    constexpr std::size_t cols                   = 10;
     const std::array<std::string, cols> headings = {
-        "test",           "n_prompt", "n_gen",         "prefill t/s", "decode out t/s",
-        "decode eng t/s", "spec acc", "spec round/fb", "work peak"};
+        "test",           "n_prompt", "n_gen",         "prefill t/s", "active pp t/s",
+        "decode out t/s", "decode eng t/s", "spec acc", "spec round/fb", "work peak"};
     std::vector<std::array<std::string, cols>> rows;
     for (const TestResult& result : results) {
         const SpeculativeStats spec  = aggregate_speculative(result);
@@ -787,6 +821,7 @@ std::string format_table(const BenchEnvironment& env, const std::vector<TestResu
                          : "n/a";
         rows.push_back({result.test.label, std::to_string(result.test.n_prompt),
                         std::to_string(result.test.n_gen), rate_cell(prefill_tok_s_series(result)),
+                        rate_cell(prefill_active_tok_s_series(result)),
                         rate_cell(decode_output_tok_s_series(result)),
                         rate_cell(decode_engine_tok_s_series(result)), acceptance, rounds,
                         format_bytes(result.workspace_peak_bytes)});
@@ -961,6 +996,8 @@ std::string format_json(const BenchEnvironment& env, const std::string& command,
             << ",\n";
         append_stat(out, "prefill_tok_s", prefill_tok_s_series(result), "      ");
         out << ",\n";
+        append_stat(out, "prefill_active_tok_s", prefill_active_tok_s_series(result), "      ");
+        out << ",\n";
         append_stat(out, "decode_output_tok_s", decode_output_tok_s_series(result), "      ");
         out << ",\n";
         append_stat(out, "decode_engine_tok_s", decode_engine_tok_s_series(result), "      ");
@@ -974,6 +1011,8 @@ std::string format_json(const BenchEnvironment& env, const std::string& command,
         append_stat(out, "decode_seconds", decode_time_series(result), "      ");
         out << ",\n";
         append_stat(out, "total_seconds", total_time_series(result), "      ");
+        out << ",\n";
+        append_stat(out, "wave_seconds", wave_time_series(result), "      ");
         out << ",\n      \"workspace_peak_bytes\": " << result.workspace_peak_bytes
             << ",\n      \"workspace_allocator_peak_bytes\": "
             << result.workspace_allocator_peak_bytes << ",\n";
@@ -1003,6 +1042,7 @@ std::string format_json(const BenchEnvironment& env, const std::string& command,
                 }
                 out << "],\n";
             }
+            out << "          \"wave_seconds\": " << number(rep.wave_seconds) << ",\n";
             append_timings_json(out, rep.timings, "          ");
             out << ",\n";
             append_speculative_json(out, rep.speculative, "          ");
@@ -1030,10 +1070,12 @@ std::string format_csv(const BenchEnvironment& env, const std::vector<TestResult
            "request_transient_capacity_bytes,device_graph_allowance_bytes,"
            "workspace_peak_bytes,workspace_allocator_peak_bytes,"
            "spec_rounds,spec_fallback_steps,spec_acceptance_rate,"
-           "repetitions,prefill_tok_s_mean,prefill_tok_s_stddev,decode_output_tok_s_mean,"
+           "repetitions,prefill_tok_s_mean,prefill_tok_s_stddev,prefill_active_tok_s_mean,"
+           "prefill_active_tok_s_stddev,decode_output_tok_s_mean,"
            "decode_output_tok_s_stddev,decode_engine_tok_s_mean,decode_engine_tok_s_stddev,"
            "whole_output_tok_s_mean,whole_output_tok_s_stddev,"
-           "prepare_seconds_mean,prefill_seconds_mean,decode_seconds_mean,total_seconds_mean\n";
+           "prepare_seconds_mean,prefill_seconds_mean,decode_seconds_mean,total_seconds_mean,"
+           "wave_seconds_mean\n";
     const auto mean = [](const std::vector<double>& values) {
         return values.empty() ? std::string() : number(compute_stats(values).mean);
     };
@@ -1084,6 +1126,8 @@ std::string format_csv(const BenchEnvironment& env, const std::vector<TestResult
             << result.workspace_allocator_peak_bytes << ',' << spec.rounds << ','
             << spec.fallback_steps << ',' << acceptance << ',' << result.reps.size() << ','
             << mean(prefill_tok_s_series(result)) << ',' << stddev(prefill_tok_s_series(result))
+            << ',' << mean(prefill_active_tok_s_series(result)) << ','
+            << stddev(prefill_active_tok_s_series(result))
             << ',' << mean(decode_output_tok_s_series(result)) << ','
             << stddev(decode_output_tok_s_series(result)) << ','
             << mean(decode_engine_tok_s_series(result)) << ','
@@ -1091,7 +1135,8 @@ std::string format_csv(const BenchEnvironment& env, const std::vector<TestResult
             << mean(whole_output_tok_s_series(result)) << ','
             << stddev(whole_output_tok_s_series(result)) << ','
             << mean(prepare_time_series(result)) << ',' << mean(prefill_time_series(result)) << ','
-            << mean(decode_time_series(result)) << ',' << mean(total_time_series(result)) << '\n';
+            << mean(decode_time_series(result)) << ',' << mean(total_time_series(result)) << ','
+            << mean(wave_time_series(result)) << '\n';
     }
     return out.str();
 }

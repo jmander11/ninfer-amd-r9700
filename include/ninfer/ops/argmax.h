@@ -1,10 +1,11 @@
 #pragma once
 
 #include "core/tensor.h"
+#include "ninfer/ops/sampling.h"
 
 #include <cstdint>
 
-#include <hip/hip_runtime_api.h>
+#include <hip/hip_runtime.h> // hipStream_t
 
 namespace ninfer::ops {
 
@@ -19,5 +20,12 @@ namespace ninfer::ops {
  * The Op has no workspace and changes no state other than writing all of `out`.
  */
 void argmax(const Tensor& logits, Tensor& out, std::int32_t valid_rows, hipStream_t stream);
+
+// Greedy selection with row-local suppression and per-column eligibility bitsets.
+// Config b owns each consecutive
+// `columns_per_config` columns; temperature, filters, penalties, RNG, and counts are ignored.
+// Each row's config must leave at least one token in valid_rows eligible.
+void argmax(const Tensor& logits, Tensor& out, std::int32_t valid_rows,
+            const SamplingConfig* configs, std::int32_t columns_per_config, hipStream_t stream);
 
 } // namespace ninfer::ops

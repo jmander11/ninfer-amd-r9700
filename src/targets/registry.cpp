@@ -8,6 +8,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <future>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -53,6 +54,8 @@ void validate_options(const EngineOptions& options) {
     if (options.max_pending_requests == 0 || options.pending_timeout_ms == 0) {
         throw std::invalid_argument("Engine pending request capacity and timeout must be nonzero");
     }
+    validate_kv_disk_options(options.kv_ram_capacity_bytes, options.kv_disk_capacity_bytes,
+                             options.kv_disk_location);
 }
 
 artifact::LoadProgress artifact_progress(const LoadProgress& progress) {
@@ -91,13 +94,27 @@ ConstructedTarget construct_registered(const EngineOptions& options, DeviceConte
     const ModelSamplingDefaults sampling_defaults = Target::sampling_defaults(identity.model_id);
 
     artifact::Binder binder(reader);
-    auto load_plan        = Target::plan_load(binder, options, weights_profile);
-    auto sequence_planner = Target::make_sequence_planner(device, options, weights_profile);
+    EngineOptions planned = options;
+    planned.model_id = identity.model_id;
+    planned.weights_id = identity.weights_id;
+    planned.artifact_file_identity = reader.file_identity();
+    auto load_plan        = Target::plan_load(binder, planned, weights_profile);
+    auto sequence_planner = Target::make_sequence_planner(device, planned, weights_profile);
     const runtime::SequenceCapacityCurve curve = sequence_planner.capacity_curve();
     const std::size_t preflight_runtime_bytes =
         runtime_bytes_after_planned_weights(device,
                                             load_plan.materialization().device_capacity_bytes);
     (void)runtime::resolve_kv_capacity(options.kv_capacity, curve, preflight_runtime_bytes);
+
+    std::future<std::unique_ptr<HostPinnedArena>> kv_ram_future;
+    if (options.kv_ram_capacity_bytes != 0) {
+        const int device_index = device.device;
+        const std::size_t ram_bytes = options.kv_ram_capacity_bytes;
+        kv_ram_future = std::async(std::launch::async, [device_index, ram_bytes] {
+            HIP_CHECK(hipSetDevice(device_index));
+            return std::make_unique<HostPinnedArena>(ram_bytes);
+        });
+    }
 
     auto progress     = artifact_progress(options.load_progress);
     auto materialized = artifact::materialize(reader, load_plan.materialization(), device,
@@ -115,8 +132,11 @@ ConstructedTarget construct_registered(const EngineOptions& options, DeviceConte
         throw std::logic_error("resolved KV capacity does not match the finalized target plan");
     }
     auto loaded   = std::make_unique<Loaded>(std::move(model));
+    std::unique_ptr<HostPinnedArena> kv_ram_arena;
+    if (kv_ram_future.valid()) { kv_ram_arena = kv_ram_future.get(); }
     auto instance = std::make_unique<Instance>(std::move(loaded), capacity_resolution,
-                                               std::move(sequence_plan), device);
+                                               std::move(sequence_plan), device,
+                                               std::move(kv_ram_arena));
     device.synchronize();
     instance->kv_capacity_resolution.available_after_startup_bytes =
         current_free_device_bytes(device);
@@ -148,11 +168,13 @@ LoadedQwen3_8_27B::~LoadedQwen3_8_27B() = default;
 Qwen3_8_27BInstance::Qwen3_8_27BInstance(std::unique_ptr<LoadedQwen3_8_27B> stable_loaded,
                                          runtime::KvCapacityResolution resolution,
                                          Qwen3_8_27BInstance::Package::SequencePlan sequence_plan,
-                                         DeviceContext& device)
+                                         DeviceContext& device,
+                                         std::unique_ptr<HostPinnedArena> kv_ram_arena)
     : loaded(std::move(stable_loaded)), kv_capacity_resolution(resolution),
       request_memory(device, sequence_plan.request_transient_capacity_bytes()),
       capacity(sequence_plan.capacity()),
-      program(Package::create_program(*loaded->model, std::move(sequence_plan), device)) {}
+      program(Package::create_program(*loaded->model, std::move(sequence_plan), device,
+                                      std::move(kv_ram_arena))) {}
 
 Qwen3_8_27BInstance::~Qwen3_8_27BInstance() = default;
 

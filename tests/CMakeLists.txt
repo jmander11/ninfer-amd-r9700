@@ -1,5 +1,16 @@
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
+# Explicit-artifact diagnostic, invoked by tools.parity.qwen3_8_27b.vision.
+add_executable(ninfer_qwen3_8_27b_vision_trace
+  targets/qwen3_8_27b/vision_trace_real.cpp)
+target_include_directories(ninfer_qwen3_8_27b_vision_trace PRIVATE
+  ${PROJECT_SOURCE_DIR}/include ${PROJECT_SOURCE_DIR}/src
+  ${PROJECT_SOURCE_DIR}/third_party
+  ${PROJECT_SOURCE_DIR}/src/targets/qwen3/export
+  ${PROJECT_SOURCE_DIR}/src/targets/qwen3_8_27b/export)
+target_link_libraries(ninfer_qwen3_8_27b_vision_trace PRIVATE
+  ninfer_engine ninfer_product_prompt_input ninfer_artifact ninfer_r9700_core hip::host)
+
 function(ninfer_add_r9700_test name)
   cmake_parse_arguments(arg "" "" "SOURCES;LIBRARIES" ${ARGN})
   add_executable(${name} ${arg_SOURCES})
@@ -16,6 +27,14 @@ function(ninfer_add_r9700_test name)
   target_link_libraries(${name} PRIVATE ${arg_LIBRARIES})
   add_test(NAME ${name} COMMAND ${name})
 endfunction()
+
+ninfer_add_r9700_test(ninfer_kv_disk_cache_test
+  SOURCES test_kv_disk_cache.cpp
+  LIBRARIES ninfer_engine ninfer_r9700_core)
+set_tests_properties(ninfer_kv_disk_cache_test PROPERTIES
+  LABELS "r9700" RESOURCE_LOCK r9700_device TIMEOUT 300)
+add_test(NAME ninfer_kv_disk_crc_host_test COMMAND ninfer_kv_disk_cache_test --crc-only)
+set_tests_properties(ninfer_kv_disk_crc_host_test PROPERTIES LABELS "host")
 
 # The public headers must remain independent of repository-private and device headers.
 add_executable(ninfer_public_api_test test_public_api.cpp)
@@ -64,6 +83,8 @@ ninfer_add_r9700_test(ninfer_tensor_test
 ninfer_add_r9700_test(ninfer_pinned_arena_recovery_test
   SOURCES test_pinned_arena_recovery.cpp
   LIBRARIES ninfer_r9700_core)
+set_tests_properties(ninfer_pinned_arena_recovery_test PROPERTIES
+  LABELS "r9700" RESOURCE_LOCK r9700_device)
 ninfer_add_r9700_test(ninfer_admission_policy_test
   SOURCES test_admission_policy.cpp
   LIBRARIES ninfer_engine ninfer_r9700_core)
@@ -88,6 +109,20 @@ ninfer_add_r9700_test(ninfer_r9700_fp8_execution_state_contract_test
   LIBRARIES ninfer_r9700_target_bindings ninfer_r9700_core)
 
 # Family CPU behavior retained by the sole Qwen3.8-27B target.
+ninfer_add_r9700_test(ninfer_typical_cycle_test
+  SOURCES test_typical_cycle.cpp)
+ninfer_add_r9700_test(ninfer_generation_recovery_test
+  SOURCES targets/qwen3/test_generation_recovery.cpp
+  LIBRARIES ninfer_engine)
+ninfer_add_r9700_test(ninfer_tool_grammar_test
+  SOURCES targets/qwen3/test_tool_grammar.cpp
+  LIBRARIES ninfer_engine)
+ninfer_add_r9700_test(ninfer_frontend_test
+  SOURCES targets/qwen3/test_frontend.cpp
+  LIBRARIES ninfer_engine)
+target_compile_definitions(ninfer_frontend_test PRIVATE NINFER_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+ninfer_add_r9700_test(ninfer_qwen3_adaptive_draft_test
+  SOURCES targets/qwen3/test_adaptive_draft.cpp)
 ninfer_add_r9700_test(ninfer_qwen3_runtime_mechanisms_test
   SOURCES targets/qwen3/test_runtime_mechanisms.cpp
   LIBRARIES ninfer_engine ninfer_r9700_core)
@@ -107,7 +142,6 @@ if(TARGET ninfer_serve)
       responses_schema
       response_store
       anthropic_schema
-      tool_call_parser
       serve_options
       request_log)
     ninfer_add_r9700_test(ninfer_${contract}_test

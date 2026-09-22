@@ -32,6 +32,30 @@ int check(bool condition, const char* message) {
 int main() {
     int failures = 0;
 
+    ninfer::RecoveryEvent recovery_event{
+        .kind = ninfer::RecoveryEventKind::RetryTriggered,
+        .cause = "repeated_reasoning", .attempts = 1, .cycle_exclusions = 17,
+        .discarded_tool_calls = 0, .discarded_reasoning_tokens = 6568,
+        .generated_tokens = 7000, .remaining_tokens = 25000};
+    failures += check(format_recovery_event(103, recovery_event) ==
+        "[req 103] recovery event=retry_triggered cause=repeated_reasoning attempts=1"
+        " cycle_exclusions=17 discarded_tool_calls=0 discarded_reasoning_tokens=6568"
+        " gen=7000 remaining=25000", "reasoning recovery log lost request identity or accounting");
+    for (const auto& [kind, name] : std::vector<std::pair<ninfer::RecoveryEventKind, std::string>>{
+             {ninfer::RecoveryEventKind::CycleExclusion, "cycle_exclusion"},
+             {ninfer::RecoveryEventKind::RetryStarted, "retry_started"},
+             {ninfer::RecoveryEventKind::RetryPrefillComplete, "retry_prefill_complete"},
+             {ninfer::RecoveryEventKind::Finished, "finished"},
+             {ninfer::RecoveryEventKind::Exhausted, "exhausted"}}) {
+        recovery_event.kind = kind;
+        recovery_event.cause = "duplicate_tool_call";
+        recovery_event.discarded_tool_calls = 1;
+        const auto record = format_recovery_event(104, recovery_event);
+        failures += check(record.find("event=" + name + " cause=duplicate_tool_call") != std::string::npos &&
+                          record.find("discarded_tool_calls=1") != std::string::npos,
+                          "recovery log stage or duplicate-call accounting missing");
+    }
+
     bool protected_artifact_rejected = false;
     try {
         JsonlRequestLog unsafe("same-path.ninfer", "same-path.ninfer");
@@ -113,7 +137,7 @@ int main() {
                       "server record artifact type mismatch");
     failures += check(server.at("schema_version") == kRequestLogSchemaVersion,
                       "server record schema mismatch");
-    failures += check(kRequestLogSchemaVersion == 20, "request-log schema is not version 20");
+    failures += check(kRequestLogSchemaVersion == 21, "request-log schema is not version 21");
     failures += check(server.at("event") == "server_start", "server event mismatch");
     failures += check(server.at("server").at("public_model_id") == "deployment-alias",
                       "resolved public model id missing");
@@ -159,6 +183,10 @@ int main() {
         check(server.at("engine").at("prefix_reuse") == false, "prefix-reuse state missing");
     failures += check(server.at("engine").at("kv_ram_capacity_bytes") == 0,
                       "KV RAM capacity missing from server_start engine object");
+    failures += check(server.at("engine").at("kv_disk_capacity_bytes") == 0 &&
+                          server.at("engine").at("kv_disk_used_bytes") == 0 &&
+                          server.at("engine").at("kv_disk_entry_count") == 0,
+                      "KV disk occupancy missing from server_start engine object");
     failures += check(server.at("engine").at("kv_ram_used_bytes") == 0 &&
                           server.at("engine").at("kv_ram_entry_count") == 0,
                       "KV RAM occupancy missing from server_start engine object");
@@ -240,6 +268,8 @@ int main() {
                       "resolved preserve-thinking metadata missing");
     failures += check(started.at("request").at("sampling").at("seed") == 7632647173703958409ULL,
                       "resolved seed missing");
+    failures += check(started.at("request").at("sampling").at("p_less") == false,
+                      "resolved p_less missing");
 
     ApiError preparation_error;
     preparation_error.status = 400;
@@ -369,6 +399,11 @@ int main() {
         Json::parse(format_request_done_json("serve-test", 3002, context, outcome));
     failures += check(ram_hit.at("result").at("reuse_source") == "host_ram",
                       "host_ram reuse_source missing");
+    outcome.metrics.prefix_reuse_source = ninfer::PrefixReuseSource::HostDisk;
+    const Json disk_hit =
+        Json::parse(format_request_done_json("serve-test", 3006, context, outcome));
+    failures += check(disk_hit.at("result").at("reuse_source") == "host_disk",
+                      "host_disk reuse_source missing");
     outcome.metrics.prefix_reuse_source = ninfer::PrefixReuseSource::VramResident;
     const Json vram_hit =
         Json::parse(format_request_done_json("serve-test", 3003, context, outcome));
@@ -392,6 +427,28 @@ int main() {
                           ram_done.at("timings_seconds").at("kv_ram_save") == 0.008 &&
                           ram_done.at("timings_seconds").at("kv_ram_load") == 0.014,
                       "request_done JSON omitted live KV RAM occupancy");
+    outcome.metrics.kv_disk_capacity_bytes = 2ULL * 1024ULL * 1024ULL;
+    outcome.metrics.kv_disk_used_bytes     = 1024ULL * 1024ULL;
+    outcome.metrics.kv_disk_entry_count    = 2;
+    outcome.metrics.kv_disk_captures       = 3;
+    outcome.metrics.kv_disk_restores       = 1;
+    outcome.metrics.kv_disk_drops          = 0;
+    outcome.metrics.kv_disk_save_seconds   = 0.005;
+    outcome.metrics.kv_disk_load_seconds   = 0.009;
+    outcome.metrics.kv_disk_h2d_seconds    = 0.012;
+    const Json disk_done =
+        Json::parse(format_request_done_json("serve-test", 3007, context, outcome));
+    failures += check(disk_done.at("result").at("kv_disk_capacity_bytes") == 2097152 &&
+                          disk_done.at("result").at("kv_disk_used_bytes") == 1048576 &&
+                          disk_done.at("timings_seconds").at("kv_disk_save") == 0.005 &&
+                          disk_done.at("timings_seconds").at("kv_disk_load") == 0.009 &&
+                          disk_done.at("timings_seconds").at("kv_disk_h2d") == 0.012,
+                      "request_done JSON omitted live KV disk occupancy");
+    failures += check(format_request_done(context, outcome).find("kv-disk=1 MiB n=2 restores=1") !=
+                              std::string::npos &&
+                          format_request_done(context, outcome).find("h2d=12ms") !=
+                              std::string::npos,
+                      "human request log omits KV disk occupancy when the tier is enabled");
     failures += check(format_request_done(context, outcome).find("kv-ram=0.5 MiB n=1 restores=2") !=
                               std::string::npos &&
                           format_request_done(context, outcome).find("evicts=0 drops=1") !=
@@ -584,7 +641,17 @@ int main() {
                           human_ram_throughput.find("evicts=0 drops=0") != std::string::npos &&
                           human_ram_throughput.find("save=8ms load=14ms") != std::string::npos &&
                           human_ram_throughput.find("ram_captures=") == std::string::npos,
-                      "enabled KV RAM occupancy missing from human throughput");
+                      "human RAM throughput occupancy mismatch");
+    ram_throughput.kv_disk_capacity_bytes = 2ULL * 1024ULL * 1024ULL;
+    ram_throughput.kv_disk_used_bytes     = 1024ULL * 1024ULL;
+    ram_throughput.kv_disk_entry_count    = 1;
+    ram_throughput.scheduler.kv_disk_restores = 4;
+    ram_throughput.kv_disk_save_seconds       = 0.005;
+    ram_throughput.kv_disk_load_seconds       = 0.009;
+    const std::string human_disk_throughput   = format_throughput(ram_throughput);
+    failures += check(human_disk_throughput.find("kv-disk=1 MiB n=1 restores=4") !=
+                              std::string::npos,
+                      "human throughput omits KV disk occupancy");
     const Json ram_throughput_json =
         Json::parse(format_throughput_json("serve-test", 5001, ram_throughput));
     failures += check(ram_throughput_json.at("scheduler").at("kv_ram_capacity_bytes") == 1048576 &&

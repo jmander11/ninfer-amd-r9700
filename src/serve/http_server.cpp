@@ -56,7 +56,7 @@ CompletionTimings completion_timings_from_outcome(const GenerationOutcome& outco
         static_cast<int>(outcome.metrics.speculative_draft_tokens),
         static_cast<int>(outcome.metrics.speculative_accepted_tokens),
         outcome.metrics.prefill_tail_tok_s, outcome.metrics.prefill_tail_window_s,
-        outcome.metrics.prefix_cache_hit_tokens);
+        outcome.metrics.prefix_cache_hit_tokens, outcome.metrics.recovery);
     timings.prefix_reuse_path     = outcome.metrics.prefix_reuse_path;
     timings.prefix_reuse_source   = outcome.metrics.prefix_reuse_source;
     timings.captured_context_checkpoint_tokens =
@@ -74,6 +74,16 @@ CompletionTimings completion_timings_from_outcome(const GenerationOutcome& outco
     timings.kv_ram_drops          = outcome.metrics.kv_ram_drops;
     timings.kv_ram_save_ms        = outcome.metrics.kv_ram_save_seconds * 1000.0;
     timings.kv_ram_load_ms        = outcome.metrics.kv_ram_load_seconds * 1000.0;
+    timings.kv_disk_capacity_bytes = outcome.metrics.kv_disk_capacity_bytes;
+    timings.kv_disk_used_bytes     = outcome.metrics.kv_disk_used_bytes;
+    timings.kv_disk_entry_count    = outcome.metrics.kv_disk_entry_count;
+    timings.kv_disk_captures       = outcome.metrics.kv_disk_captures;
+    timings.kv_disk_restores       = outcome.metrics.kv_disk_restores;
+    timings.kv_disk_evictions      = outcome.metrics.kv_disk_evictions;
+    timings.kv_disk_drops          = outcome.metrics.kv_disk_drops;
+    timings.kv_disk_save_ms        = outcome.metrics.kv_disk_save_seconds * 1000.0;
+    timings.kv_disk_load_ms        = outcome.metrics.kv_disk_load_seconds * 1000.0;
+    timings.kv_disk_h2d_ms         = outcome.metrics.kv_disk_h2d_seconds * 1000.0;
     return timings;
 }
 
@@ -115,11 +125,12 @@ ThroughputReport make_throughput_report(const ninfer::RuntimeStats& previous,
         .scheduler         = current,
         .kv_ram_save_seconds = current.kv_ram_save_seconds - previous.kv_ram_save_seconds,
         .kv_ram_load_seconds = current.kv_ram_load_seconds - previous.kv_ram_load_seconds,
+        .kv_disk_save_seconds = current.kv_disk_save_seconds - previous.kv_disk_save_seconds,
+        .kv_disk_load_seconds = current.kv_disk_load_seconds - previous.kv_disk_load_seconds,
     };
 }
 
-bool report_has_activity(const ThroughputReport& report, const ninfer::RuntimeStats& previous,
-                         std::size_t previous_used, std::size_t previous_entries) {
+bool report_has_activity(const ThroughputReport& report, const ninfer::RuntimeStats& previous) {
     return report.computed_prefill_tokens != 0 || report.committed_decode_tokens != 0 ||
            report.decode_rounds != 0 || report.scheduler.running_requests != 0 ||
            report.scheduler.waiting_requests != 0 ||
@@ -128,8 +139,15 @@ bool report_has_activity(const ThroughputReport& report, const ninfer::RuntimeSt
            report.scheduler.kv_ram_evictions != previous.kv_ram_evictions ||
            report.scheduler.kv_ram_drops != previous.kv_ram_drops ||
            report.kv_ram_save_seconds != 0.0 || report.kv_ram_load_seconds != 0.0 ||
-           report.kv_ram_used_bytes != previous_used ||
-           report.kv_ram_entry_count != previous_entries;
+           report.kv_ram_used_bytes != previous.kv_ram_used_bytes ||
+           report.kv_ram_entry_count != previous.kv_ram_entry_count ||
+           report.scheduler.kv_disk_captures != previous.kv_disk_captures ||
+           report.scheduler.kv_disk_restores != previous.kv_disk_restores ||
+           report.scheduler.kv_disk_evictions != previous.kv_disk_evictions ||
+           report.scheduler.kv_disk_drops != previous.kv_disk_drops ||
+           report.kv_disk_save_seconds != 0.0 || report.kv_disk_load_seconds != 0.0 ||
+           report.kv_disk_used_bytes != previous.kv_disk_used_bytes ||
+           report.kv_disk_entry_count != previous.kv_disk_entry_count;
 }
 
 std::string_view unstreamed_content(const GenerationOutcome& outcome) {
@@ -206,9 +224,8 @@ void HttpServer::log_throughput(const ThroughputReport& report) {
 }
 
 void HttpServer::run_stats_reporter() {
-    using Clock                     = std::chrono::steady_clock;
-    ninfer::RuntimeStats previous   = service_->runtime_stats();
-    ninfer::MemorySummary previous_memory = service_->memory_summary();
+    using Clock                   = std::chrono::steady_clock;
+    ninfer::RuntimeStats previous = service_->runtime_stats();
     Clock::time_point previous_time = Clock::now();
     const auto interval             = std::chrono::milliseconds(options_.log_stats_interval_ms);
 
@@ -219,30 +236,32 @@ void HttpServer::run_stats_reporter() {
         }
 
         const ninfer::RuntimeStats current = service_->runtime_stats();
-        const ninfer::MemorySummary memory = service_->memory_summary();
         const Clock::time_point now        = Clock::now();
         ThroughputReport report            = make_throughput_report(
             previous, current, std::chrono::duration<double>(now - previous_time).count());
-        report.kv_ram_capacity_bytes = memory.kv_ram_capacity_bytes;
-        report.kv_ram_used_bytes     = memory.kv_ram_used_bytes;
-        report.kv_ram_entry_count    = memory.kv_ram_entry_count;
-        if (report_has_activity(report, previous, previous_memory.kv_ram_used_bytes,
-                                previous_memory.kv_ram_entry_count)) {
+        report.kv_ram_capacity_bytes = current.kv_ram_capacity_bytes;
+        report.kv_ram_used_bytes     = current.kv_ram_used_bytes;
+        report.kv_ram_entry_count    = current.kv_ram_entry_count;
+        report.kv_disk_capacity_bytes = current.kv_disk_capacity_bytes;
+        report.kv_disk_used_bytes     = current.kv_disk_used_bytes;
+        report.kv_disk_entry_count    = current.kv_disk_entry_count;
+        if (report_has_activity(report, previous)) {
             log_throughput(report);
         }
         previous      = current;
         previous_time = now;
-        previous_memory = memory;
     }
 
     const ninfer::RuntimeStats current = service_->runtime_stats();
-    const ninfer::MemorySummary memory = service_->memory_summary();
     const Clock::time_point now        = Clock::now();
     ThroughputReport tail              = make_throughput_report(
         previous, current, std::chrono::duration<double>(now - previous_time).count());
-    tail.kv_ram_capacity_bytes = memory.kv_ram_capacity_bytes;
-    tail.kv_ram_used_bytes     = memory.kv_ram_used_bytes;
-    tail.kv_ram_entry_count    = memory.kv_ram_entry_count;
+    tail.kv_ram_capacity_bytes = current.kv_ram_capacity_bytes;
+    tail.kv_ram_used_bytes     = current.kv_ram_used_bytes;
+    tail.kv_ram_entry_count    = current.kv_ram_entry_count;
+    tail.kv_disk_capacity_bytes = current.kv_disk_capacity_bytes;
+    tail.kv_disk_used_bytes     = current.kv_disk_used_bytes;
+    tail.kv_disk_entry_count    = current.kv_disk_entry_count;
     if (tail.computed_prefill_tokens != 0 || tail.committed_decode_tokens != 0 ||
         tail.decode_rounds != 0) {
         log_throughput(tail);
@@ -433,7 +452,7 @@ void HttpServer::handle_chat_completions(const httplib::Request& req, httplib::R
 
     if (!request.stream) {
         try {
-            const GenerationOutcome outcome = service_->run(prepared, nullptr, [&req] {
+            const GenerationOutcome outcome = service_->run(prepared, log_context.id, nullptr, [&req] {
                 return req.is_connection_alive && !req.is_connection_alive();
             });
             log_request_done(log_context, outcome);
@@ -494,7 +513,7 @@ void HttpServer::handle_chat_completions(const httplib::Request& req, httplib::R
                            (sink.is_writable && !sink.is_writable());
                 };
 
-                const GenerationOutcome outcome = service_->run(stream->prepared, &output);
+                const GenerationOutcome outcome = service_->run(stream->prepared, log_context.id, &output);
                 log_request_done(log_context, outcome);
                 const CompletionTimings timings = completion_timings_from_outcome(outcome);
                 const std::string_view remaining = unstreamed_content(outcome);
@@ -654,7 +673,7 @@ void HttpServer::handle_messages(const httplib::Request& req, httplib::Response&
 
     if (!request.stream) {
         try {
-            const GenerationOutcome outcome = service_->run(prepared, nullptr, [&req] {
+            const GenerationOutcome outcome = service_->run(prepared, log_context.id, nullptr, [&req] {
                 return req.is_connection_alive && !req.is_connection_alive();
             });
             log_request_done(log_context, outcome);
@@ -732,7 +751,7 @@ void HttpServer::handle_messages(const httplib::Request& req, httplib::Response&
                            (sink.is_writable && !sink.is_writable());
                 };
 
-                const GenerationOutcome outcome = service_->run(stream->prepared, &output);
+                const GenerationOutcome outcome = service_->run(stream->prepared, log_context.id, &output);
                 log_request_done(log_context, outcome);
                 const std::string_view remaining = unstreamed_content(outcome);
 

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <exception>
+#include <filesystem>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -64,18 +65,80 @@ public:
     bool requested = false;
 };
 
+int qualify_disk_restart(const std::filesystem::path& artifact,
+                         const std::filesystem::path& directory) {
+    require(std::filesystem::is_regular_file(artifact), "explicit artifact is not a regular file");
+    // The result directory is retained as evidence, including on failure. Never open
+    // an existing cache or remove caller-owned data during qualification.
+    require(std::filesystem::create_directory(directory),
+            "SSD qualification requires a new, nonexistent output directory");
+    const auto options = [&] {
+        ninfer::EngineOptions value;
+        value.artifact_path = artifact;
+        value.max_context = 256;
+        value.kv_capacity = ninfer::KvCapacityPolicy::explicit_capacity(256);
+        value.max_concurrency = 1;
+        value.kv_ram_capacity_bytes = 1ULL << 30;
+        value.kv_disk_capacity_bytes = 1ULL << 30;
+        value.kv_disk_location = directory;
+        value.speculative.backend = ninfer::SpeculativeBackend::None;
+        return value;
+    };
+    std::vector<ninfer::TokenId> continued;
+    {
+        ninfer::Engine engine(options());
+        const auto prompt = prompt_tokens(engine, "List the integers from one to twenty, in order.");
+        const auto other = prompt_tokens(engine, "Describe how a sailboat moves across a lake.");
+        const auto saved = engine.generate(engine.prepare_tokens(prompt), request_options(false));
+        require(saved.generated_token_ids.size() == 16, "SSD seed did not produce 16 tokens");
+        continued = continuation(prompt, saved);
+        const auto before = engine.runtime_stats();
+        (void)engine.generate(engine.prepare_tokens(other), request_options(false));
+        require(engine.runtime_stats().kv_ram_captures > before.kv_ram_captures,
+                "unrelated request did not capture A into RAM");
+        // Public Engine destruction drains the scheduler and persists nondurable RAM
+        // plus retained lanes. No private spill API or timing sleep is required.
+    }
+    {
+        ninfer::Engine engine(options());
+        const auto before = engine.runtime_stats();
+        require(before.kv_disk_entry_count > 0, "restart did not recover durable SSD entries");
+        require(before.kv_ram_restores == 0, "fresh Engine already restored RAM state");
+        const auto restored = engine.generate(engine.prepare_tokens(continued), request_options());
+        require(restored.prefix_reuse_source == ninfer::PrefixReuseSource::HostDisk &&
+                    restored.reused_prompt_tokens > 0,
+                "fresh Engine continuation did not exercise SSD restore");
+        require(engine.runtime_stats().kv_disk_restores > before.kv_disk_restores,
+                "SSD restore counter did not advance");
+        const auto cold = engine.generate(engine.prepare_tokens(continued), request_options(false));
+        require_same_output(restored, cold);
+        std::cout << "engine_cache_disk: PASS ordinary C1 greedy; SSD_reused="
+                  << restored.reused_prompt_tokens << " output_tokens="
+                  << restored.generated_token_ids.size() << " retained_directory="
+                  << directory.string() << '\n';
+    }
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc != 2 || std::string_view(argv[1]) == "--help") {
+    if ((argc != 2 && argc != 4) || std::string_view(argv[1]) == "--help") {
         std::cout << "usage: ninfer_r9700_engine_cache_cancel_qual ARTIFACT.ninfer\n"
+                     "       ninfer_r9700_engine_cache_cancel_qual ARTIFACT.ninfer --disk-dir NEW_DIRECTORY\n"
                      "Manual real-model check: ordinary greedy C1, 16-token requests, "
                      "1 GiB RAM cache.\n"
                      "Cancellation starts after the first nonempty stream delta; "
-                     "its exact GPU phase is not forced.\n";
+                     "its exact GPU phase is not forced.\n"
+                     "Disk mode instead checks durable restart/HostDisk reuse against cold output;\n"
+                     "uses 1 GiB RAM + 1 GiB SSD and retains the new directory.\n";
         return argc == 2 ? 0 : 2;
     }
     try {
+        if (argc == 4) {
+            require(std::string_view(argv[2]) == "--disk-dir", "expected --disk-dir NEW_DIRECTORY");
+            return qualify_disk_restart(argv[1], argv[3]);
+        }
         ninfer::EngineOptions options;
         options.artifact_path = argv[1];
         options.max_context = 256;

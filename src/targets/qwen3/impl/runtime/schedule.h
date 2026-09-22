@@ -13,13 +13,15 @@
 #include <ninfer/targets/qwen3/prepared_prompt.h>
 #include <ninfer/targets/qwen3/decoder_state.h>
 #include "targets/qwen3/impl/runtime/text_context.h"
+#include "targets/qwen3/impl/runtime/tool_masks.h"
 #include "targets/qwen3/impl/runtime/dflash_context.h"
 #include "targets/qwen3/impl/runtime/vision_context.h"
 #include "targets/qwen3/impl/runtime/vision_prefill.h"
 
+#include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
-#include <array>
 #include <functional>
 #include <optional>
 #include <span>
@@ -28,6 +30,31 @@ namespace ninfer::targets::qwen3::detail::NINFER_QWEN3_RUNTIME_NS::schedule {
 
 using qwen3::PreparedPromptData;
 using qwen3::PromptModality;
+
+// Large aligned extents use the full 8192-token workspace efficiently. A large unaligned tail
+// sends every major projection through its remainder schedule; cap that unit at 4096 so only the
+// smaller final unit pays the tail cost. Explicit smaller chunks retain their requested policy.
+inline constexpr std::uint32_t kIrregularPrefillSplit = 4096;
+
+[[nodiscard]] inline std::uint32_t select_prefill_chunk(std::uint32_t remaining,
+                                                        std::uint32_t maximum) noexcept {
+    const std::uint32_t nominal = std::min(remaining, maximum);
+    if (maximum > kIrregularPrefillSplit && nominal > kIrregularPrefillSplit &&
+        nominal % kPrefillChunkAlignment != 0) {
+        return kIrregularPrefillSplit;
+    }
+    return nominal;
+}
+
+[[nodiscard]] inline std::uint64_t prefill_chunk_count(std::uint32_t tokens,
+                                                       std::uint32_t maximum) noexcept {
+    std::uint64_t count = 0;
+    while (tokens != 0) {
+        tokens -= select_prefill_chunk(tokens, maximum);
+        ++count;
+    }
+    return count;
+}
 
 struct ExecutionCore {
     DeviceContext& device;
@@ -86,6 +113,7 @@ struct MtpBatchContext {
     // One round-scoped segmented authority per compact row. The same fixed-address transaction
     // spans alignment and every AR append and is resolved by Program once after execution.
     std::span<qwen3::PagedKVTransaction* const> mtp_kv_transactions{};
+    qwen3::ToolMaskExchange* tool_masks = nullptr;
 };
 
 struct DFlashBatchContext {
@@ -97,6 +125,7 @@ struct DFlashBatchContext {
     qwen3::DFlashDecodeEgress& host_egress;
     Tensor& continuation_hidden_store;
     std::span<qwen3::PagedKVTransaction* const> text_kv_transactions{};
+    qwen3::ToolMaskExchange* tool_masks = nullptr;
 };
 
 struct DFlashAppendContext {
@@ -140,6 +169,7 @@ struct TargetVerifyFrameView {
     const GdnReplayRecords* replay_records = nullptr;
     const ops::SamplingConfig* sampling    = nullptr;
     DFlashFeatureSink* feature_sink        = nullptr;
+    qwen3::ToolMaskExchange* tool_masks = nullptr;
 };
 
 void configure_text_card(TextContext& card, const ExecutionCore& execution,

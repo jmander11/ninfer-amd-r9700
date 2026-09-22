@@ -151,9 +151,14 @@ ninfer::bench::RepTiming run_repetition(ninfer::Engine& engine,
         const ninfer::RequestOptions request = benchmark_request(test, false);
         auto prompt = engine.prepare_tokens(ninfer::bench::prompt_slice(corpus, prompt_tokens),
                                             false);
-        return ninfer::bench::fold_lane_results(
-            {consume_generation(engine.generate(std::move(prompt), request), test, expected, "")},
-            expected);
+        const auto wave_start = std::chrono::steady_clock::now();
+        ninfer::GenerationResult result = engine.generate(std::move(prompt), request);
+        const auto wave_end             = std::chrono::steady_clock::now();
+        std::vector<ninfer::GenerationResult> generated;
+        generated.push_back(consume_generation(std::move(result), test, expected, ""));
+        ninfer::bench::RepTiming timing = ninfer::bench::fold_lane_results(generated, expected);
+        timing.wave_seconds = std::chrono::duration<double>(wave_end - wave_start).count();
+        return timing;
     }
 
     if (isolate_batched_decode) {
@@ -173,17 +178,28 @@ ninfer::bench::RepTiming run_repetition(ninfer::Engine& engine,
         }
 
         const ninfer::RequestOptions decode = benchmark_request(test, true);
+        std::vector<ninfer::PreparedPrompt> prompts;
+        prompts.reserve(concurrency);
+        for (std::uint32_t lane = 0; lane < concurrency; ++lane) {
+            prompts.push_back(engine.prepare_tokens(histories[lane], true));
+        }
         std::vector<ninfer::GenerationHandle> handles;
         handles.reserve(concurrency);
+        const auto wave_start = std::chrono::steady_clock::now();
         for (std::uint32_t lane = 0; lane < concurrency; ++lane) {
-            handles.push_back(engine.submit(engine.prepare_tokens(histories[lane], true), decode,
-                                            kBenchmarkPendingDeadline));
+            handles.push_back(engine.submit(std::move(prompts[lane]), decode, ninfer::OutputDelivery::TerminalOnly, kBenchmarkPendingDeadline));
         }
         std::vector<ninfer::GenerationResult> generated;
         generated.reserve(concurrency);
+        auto wave_end = wave_start;
         for (std::uint32_t lane = 0; lane < concurrency; ++lane) {
-            ninfer::GenerationResult result =
-                consume_generation(handles[lane].wait(), test, expected, " decode");
+            ninfer::GenerationResult result = handles[lane].wait();
+            if (lane + 1 == concurrency) { wave_end = std::chrono::steady_clock::now(); }
+            generated.push_back(std::move(result));
+        }
+        for (std::uint32_t lane = 0; lane < concurrency; ++lane) {
+            ninfer::GenerationResult& result = generated[lane];
+            result = consume_generation(std::move(result), test, expected, " decode");
             if (result.prefix_reuse_path == ninfer::PrefixReusePath::FullReset ||
                 result.reused_prompt_tokens < static_cast<std::uint32_t>(prompt_tokens)) {
                 throw std::runtime_error(
@@ -194,32 +210,45 @@ ninfer::bench::RepTiming run_repetition(ninfer::Engine& engine,
                     " prompt=" + std::to_string(prompt_tokens) +
                     " history=" + std::to_string(histories[lane].size()) + ")");
             }
-            generated.push_back(std::move(result));
         }
         ninfer::bench::RepTiming timing = ninfer::bench::fold_lane_results(generated, expected);
         timing.timings.prefill_seconds  = 0.0;
+        timing.wave_seconds =
+            std::chrono::duration<double>(wave_end - wave_start).count();
         return timing;
     }
 
     const ninfer::RequestOptions request = benchmark_request(test, false);
     const auto whole_start = std::chrono::steady_clock::now();
+    std::vector<ninfer::PreparedPrompt> prompts;
+    prompts.reserve(concurrency);
+    for (std::uint32_t lane = 0; lane < concurrency; ++lane) {
+        prompts.push_back(engine.prepare_tokens(
+            ninfer::bench::prompt_slice(corpus, prompt_tokens, lane), false));
+    }
     std::vector<ninfer::GenerationHandle> handles;
     handles.reserve(concurrency);
+    const auto wave_start = std::chrono::steady_clock::now();
     for (std::uint32_t lane = 0; lane < concurrency; ++lane) {
-        handles.push_back(engine.submit(
-            engine.prepare_tokens(ninfer::bench::prompt_slice(corpus, prompt_tokens, lane), false),
-            request, kBenchmarkPendingDeadline));
+        handles.push_back(engine.submit(std::move(prompts[lane]), request, ninfer::OutputDelivery::TerminalOnly, kBenchmarkPendingDeadline));
     }
     std::vector<ninfer::GenerationResult> generated;
     generated.reserve(concurrency);
+    auto wave_end = wave_start;
     for (auto& handle : handles) {
-        generated.push_back(consume_generation(handle.wait(), test, expected, ""));
+        ninfer::GenerationResult result = handle.wait();
+        if (&handle == &handles.back()) { wave_end = std::chrono::steady_clock::now(); }
+        generated.push_back(std::move(result));
+    }
+    for (ninfer::GenerationResult& result : generated) {
+        result = consume_generation(std::move(result), test, expected, "");
     }
     ninfer::bench::RepTiming timing = ninfer::bench::fold_lane_results(generated, expected);
     if (test.kind == ninfer::bench::TestKind::WholeInference) {
         timing.timings.total_seconds = std::chrono::duration<double>(
             std::chrono::steady_clock::now() - whole_start).count();
     }
+    timing.wave_seconds = std::chrono::duration<double>(wave_end - wave_start).count();
     return timing;
 }
 
@@ -273,7 +302,7 @@ int main(int argc, char** argv) {
         ninfer::bench::validate_prompt_lengths(tests, corpus.size());
         const ninfer::SpeculativeOptions spec_options{
             options.spec_backend, options.draft_tokens, options.proposal_head,
-            options.dflash_verify_width};
+            options.dflash_verify_width, options.adaptive_draft};
         const std::uint32_t max_context = ninfer::bench::resolve_max_context(
             tests, options.max_context, spec_options, options.use_device_graph,
             options.isolate_prompt_decode);
@@ -295,6 +324,7 @@ int main(int argc, char** argv) {
                                                        ? ninfer::SpeculativeBackend::None
                                                        : options.spec_backend;
         engine_options.speculative.draft_tokens  = options.draft_tokens;
+        engine_options.speculative.adaptive_draft = options.adaptive_draft;
         engine_options.speculative.proposal_head = options.proposal_head;
         engine_options.speculative.dflash_verify_width = options.dflash_verify_width;
         engine_options.use_device_graph          = options.use_device_graph;

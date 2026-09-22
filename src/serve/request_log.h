@@ -17,7 +17,7 @@
 
 namespace ninfer::serve {
 
-inline constexpr int kRequestLogSchemaVersion        = 20;
+inline constexpr int kRequestLogSchemaVersion        = 21;
 inline constexpr const char* kRequestLogArtifactType = "ninfer_serve_request_log";
 
 struct RequestLogContext {
@@ -78,6 +78,11 @@ struct ThroughputReport {
     std::size_t kv_ram_entry_count    = 0;
     double kv_ram_save_seconds        = 0;
     double kv_ram_load_seconds        = 0;
+    std::size_t kv_disk_capacity_bytes = 0;
+    std::size_t kv_disk_used_bytes     = 0;
+    std::size_t kv_disk_entry_count    = 0;
+    double kv_disk_save_seconds        = 0;
+    double kv_disk_load_seconds        = 0;
 };
 
 RequestLogContext make_request_log_context(std::uint64_t id, std::string protocol,
@@ -90,6 +95,7 @@ RequestRejectionLogContext make_request_rejection_log_context(std::uint64_t id,
 
 // Compact console records retained for operator visibility.
 std::string format_request_start(const RequestLogContext& context);
+std::string format_recovery_event(std::uint64_t request_id, const ninfer::RecoveryEvent& event);
 std::string format_request_rejected(const RequestRejectionLogContext& context);
 std::string format_request_done(const RequestLogContext& context, const GenerationOutcome& outcome);
 std::string format_ignored_qwen_tool_call_markup(const RequestLogContext& context,
@@ -101,6 +107,7 @@ std::string format_throughput(const ThroughputReport& report);
 // exact_bytes=true, or set NINFER_KV_RAM_LOG_BYTES=1 at the occupancy helper, for debug lines.
 std::string format_kv_ram_size(std::uint64_t bytes, bool exact_bytes);
 std::string format_kv_ram_occupancy(const ninfer::MemorySummary& memory);
+std::string format_kv_disk_occupancy(const ninfer::MemorySummary& memory);
 
 // Pure JSON formatters are public to repository tests. Each return value is one complete JSON
 // object without a trailing newline.

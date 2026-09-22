@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <memory>
 #include <span>
+#include <string_view>
 #include <vector>
 
 namespace ninfer::targets::qwen3 {
@@ -20,6 +21,7 @@ class Frontend;
 class FrontendTestAccess;
 class PreparedPromptAccess;
 class EncodedHistoryPrepare;
+class GenerationRecoveryContext;
 
 class PreparedPrompt {
 public:
@@ -95,7 +97,20 @@ public:
                                                   FinishReason limit_reason);
     [[nodiscard]] runtime::OutputDecision preview_terminal(FinishReason reason);
     [[nodiscard]] PublishedOutput commit_preview() noexcept;
+    void discard_preview() noexcept;
     [[nodiscard]] std::uint32_t reasoning_tokens() const noexcept;
+    [[nodiscard]] bool in_reasoning() const noexcept;
+    [[nodiscard]] bool model_stop_tokens_allowed() const noexcept;
+    [[nodiscard]] bool reasoning_cycle_exclusion_allowed(TokenId token) const;
+    [[nodiscard]] bool has_tool_grammar() const noexcept;
+    [[nodiscard]] std::span<const ToolCall> tool_calls() const noexcept;
+    [[nodiscard]] std::shared_ptr<const GenerationRecoveryContext> generation_recovery_context() const noexcept;
+    [[nodiscard]] bool terminal() const noexcept;
+    // Read-only snapshot of committed grammar, node-major. Node zero is the
+    // committed root; other nodes consume their token from an earlier parent.
+    void fill_tool_masks(std::span<const TokenId> tokens,
+                         std::span<const std::int32_t> parents,
+                         std::span<std::uint32_t> words) const;
 
 private:
     class Impl;
@@ -134,5 +149,10 @@ private:
 };
 
 [[nodiscard]] Frontend make_frontend(const FrontendResources& resources, bool vision_enabled);
+
+// Diagnostic only for requests without declared tools. Recognizes complete
+// envelopes but never produces executable calls or guesses argument types.
+[[nodiscard]] std::vector<std::string>
+unconstrained_tool_call_names(std::string_view text, std::size_t max_name_length);
 
 } // namespace ninfer::targets::qwen3

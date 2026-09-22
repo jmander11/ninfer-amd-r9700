@@ -20,6 +20,7 @@
 #include "ops/r9700/linear/r9700_linear.h"
 #include "ops/r9700/linear/r9700_q4_activation_profile.h"
 #include "targets/qwen3_8_27b/impl/r9700_full_attention.h"
+#include "targets/qwen3/impl/runtime/r9700_cache_profile.h"
 
 #include <algorithm>
 #include <array>
@@ -806,11 +807,22 @@ std::vector<GraphExecutionProfile> Variant::dflash_graph_profiles(std::uint32_t 
     std::vector<GraphExecutionProfile> profiles = graph_profiles_through(capacity - 1, ends);
     for (GraphExecutionProfile& profile : profiles) {
         const std::size_t maximum_visible =
-            static_cast<std::size_t>(profile.max) + block;
+            std::min<std::size_t>(capacity, static_cast<std::size_t>(profile.max) + block);
+        // DFlash W5/W6 has a distinct admitted WMMA route, not the ordinary T1/T2
+        // predicate. At 8192 visible keys it returns to fused attention. Definitions
+        // across that boundary cannot share a HIP executable update topology.
+        constexpr auto planes = qwen3::detail::kR9700TextKVPlaneLayouts;
+        const bool dflash_wmma = qwen3::detail::kR9700TextKVValueGroup == 16 &&
+            planes.key == Fp8KInt4VPlaneLayout::TokenFastestHeadMajor &&
+            planes.value == Fp8KInt4VPlaneLayout::FeatureFastestPageMajor &&
+            planes.value_scale == Fp8KInt4VPlaneLayout::FeatureFastestPageMajor &&
+            ops::r9700::kv::use_dflash_w5w6_batched_wmma(
+                block, maximum_visible, false, true);
         profile.topology_class =
             ops::r9700::kv::use_split512_attention(block, maximum_visible)
                 ? 2U
-                : (ops::r9700::kv::use_fp8_qk_wmma(block, maximum_visible) ? 1U : 0U);
+                : ((dflash_wmma || ops::r9700::kv::use_fp8_qk_wmma(block, maximum_visible))
+                       ? 1U : 0U);
     }
     return profiles;
 }
