@@ -1308,8 +1308,9 @@ WMMA operations form one G32 dot, which is multiplied by the activation and weig
 accumulated in FP32 before one BF16 output rounding. The activation codec matches an independent
 host RNE implementation byte for byte over the complete T128 real-shape input. The complete
 represented formula passes spread FP64 checks at `[7168,5120]` for T1--8/16/32/64/128 with zero
-observed BF16 error. LLVM emits native `v_wmma_i32_16x16x16_iu8`; the quantizer is 10 VGPR and the
-matrix kernel 83 VGPR, both with zero LDS/scratch and reported occupancy 16.
+observed BF16 error. LLVM emits native `v_wmma_i32_16x16x16_iu8`; the quantizer is 10 VGPR. The
+original matrix kernel used 83 VGPR; the 2026-09-22 packed-operand route uses 61 VGPR with
+four B64 operand loads per G32 instead of 32 byte loads, still with zero LDS/scratch.
 
 An interleaved five-round ROCm 10 sweep covers all 13 unique W8 shapes and all 256 occurrences in
 the mixed artifact. The adaptive evaluator selects A8 from T3 for `[7168,5120]`, `[12288,5120]`,
@@ -1322,6 +1323,21 @@ material, so this result admits the adaptive profile to matched real-model quali
 not select it. `make -C tools/r9700 w8a8-wmma` regenerates the complete raw evidence;
 `w8a8-wmma-tensor` checks the production boundary without repeating the sweep. ISA/resources use
 `w8a8-wmma-isa` and `w8a8-wmma-resources`.
+
+The linked packed-operand regression checks the W8 wave route at the vocabulary-head
+shape `[248320,5120]`, T5/T6, and `[17,193]` tails at T1/T5/T6/T17:
+
+```bash
+cmake --build build-r9700 --target ninfer_r9700_w8a8_wmma_linear_qual
+build-r9700/src/ninfer_r9700_w8a8_wmma_linear_qual --packed-load-regression /tmp/w8-packed-fresh
+```
+
+The output directory must not exist. The check binds PCI `0000:13:00.0` and requires `auto`;
+it verifies initialized weights, the independent A8 codec, original BF16-input FP64 accuracy,
+four-byte-but-not-eight-byte code alignment, tails, guards, and poisoned graph replay. Complete
+BF16 outputs permit exact comparison with a retained control linked against the same fixture.
+Its event timings cover the prepared-A8 kernel only, not the complete Linear Op or inference;
+whole-Engine A/B evidence is required for a DFlash throughput claim.
 
 `gdn_op_qual` owns the native gfx1201 Gated DeltaNet semantic kernels. Its feature-fastest
 convolution weight/history indexing matches Tensor `[channels,4]` and `[channels,3]` layout rather

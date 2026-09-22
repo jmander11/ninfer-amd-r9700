@@ -73,12 +73,13 @@ above apply to every command.
 
 ### Current checkpoint
 
-ACTIVE DFLASH SPEED GOAL (2026-09-22): improve matched end-to-end DFlash output throughput,
-pursuing60+ tok/s without assuming it is achievable with kernel changes alone. Other prefill,
-XAttention and broad recipe campaigns stay paused; companion changes are in scope only when
-directly needed for this goal. Main owns serialized GPU runs; independent agents review sources.
+COMPLETED DFLASH SPEED CHECKPOINT (2026-09-22): established matched baselines, attributed
+verification, and qualified a material end-to-end improvement. Chat K5 now measures39.00 tok/s;
+60+ remains an unmet aspiration, not an established result. Other prefill, XAttention and broad
+recipe campaigns remain explicitly paused. Main owns serialized GPU runs; independent agents
+review sources.
 
-- [ ] Measure current ordinary/K4/K5 on identical target weights, prompt, greedy sampling,
+- [x] Measure current ordinary/K4/K5 on identical target weights, prompt, greedy sampling,
   context/cache and graph configuration; retain tokens and acceptance. Use the new
   selective-protected base: add its missing DFlash companion without changing base payloads,
   then measure all modes on that same combined artifact. The four-role screen at
@@ -94,15 +95,48 @@ directly needed for this goal. Main owns serialized GPU runs; independent agents
   Both speculative widths emit1.65789 tokens/round; service-inclusive decode/round is96.18/97.53ms.
   This raw-text corpus is not chat-templated; add one representative matched chat case before
   assigning low acceptance to quantization. Fixed-order screen is not challenger admission.
-- [ ] Attribute draft, verify and other round costs on the measured workload; distinguish low
+  Chat check now complete at `profiles/bench/r9700-dflash-selective-chat-20260922/summary.json`:
+  P89+G128/context1024, exact129tokens across all9runs. Ordinary24.77555,K4 35.89543,K5 35.97194
+  decode-output tok/s; acceptance lengths3.36842/3.45946. Raw-text poor acceptance does not alone
+  establish a quantization problem. Combined artifact/support checkpoint: `f1160deb`.
+- [x] Attribute draft, verify and other round costs on the measured workload; distinguish low
   accepted/output tokens per round from slow verification. Graph markers alone are insufficient.
-- [ ] Evaluate base-decode mechanisms at verify T5/T6. T1-only predicates must not be widened
+  Source-mapped graph trace `profiles/rocprof/r9700-dflash-selective-k5-20260922/attribution.json`
+  matches tokens/accounting and covers39graphs (38rounds plus one full-graph zero-extent fallback).
+  Profiled kernel means: target layers68.616ms, target head17.394ms, draft layers5.155ms,
+  append0.953ms, proposal head0.686ms, selector0.423ms. Intercepted durations are attribution only.
+- [x] Evaluate base-decode mechanisms at verify T5/T6. T1-only predicates must not be widened
   blindly. Initial source audit ranks exact-order gate/up scale gather ahead of normalization/
   codec and residual fusions, conditional on current attribution; retain rejected split-K and
   small-T remap evidence rather than repeating them.
-- [ ] Implement and qualify the strongest supported mechanism, address acceptance if limiting,
+  Fresh attribution supersedes that initial ranking: W8 full target head is the largest single
+  kernel owner. Actual linked ISA contains32 scalar byte-load sites and41 load waits per G32,
+  versus two IU8 WMMA instructions. First challenger packs the same eight operand bytes into two
+  dword loads using the existing4-byte alignment contract; no weight/codec/math-order change,
+  no scale-gather bundle. Preserve old linked control under
+  `profiles/bench/r9700-w8-packed-loads-20260922/control/`; qualify tails/4-not8 alignment,
+  public numerical oracle, graph replay and exact output bits before matched whole A/B.
+- [x] Implement and qualify the strongest supported mechanism, address acceptance if limiting,
   and verify a material matched whole-inference gain with exact greedy-token parity. Record
   actual rates and remaining bottlenecks; commit at natural checkpoints.
+  Selected packed W8 operand loads:32byte sites→4B64,41load waits→11,83VGPR→61, same2IU8WMMA,
+  no scratch/LDS or arithmetic changes. Ordered control/candidate FP64, exactcodec, tails,
+  4-mod8 alignment and poisonedgraph tests pass; all6complete output tensors match exactly.
+  Retained initial fixture failures were a default/nonblocking-stream initialization race,
+  repaired without changing tolerances. Balanced24run wholeA/B passes all12paired comparisons
+  and exacttokens/accounting: rawK4 17.50045→18.52400, rawK5 17.24277→18.38723,
+  chatK4 35.02727→37.96226, chatK5 36.35116→39.00057 decode tok/s. ChatK5 wholeoutput36.06263.
+  Ordinary chat regression preserves all129tokens (one repetition24.36863 tok/s; baseline3rep
+  mean24.77555). CLI/server/PPL relinked to selected core. Evidence/commands:
+  `profiles/bench/r9700-w8-packed-loads-20260922/whole-summary.json` and adjacent runners;
+  stable result and limitations in `docs/performance.md`.
+
+For a subsequent DFlash speed task, reattribute the selected build before choosing another
+mechanism. Pre-change target layers were68.616ms/graph, versus5.155ms draft; Q4 gate/up,
+normalization, Q4 down and protected BF16 projections remain candidates, not measured new wins.
+Do not repeat rejected split-K/remap experiments without a new bound/mechanism. Raw-text
+acceptance is independently limiting; unchanged outputs/accounting show this load optimization
+improves round execution, not acceptance. C2–4 performance and60+tok/s remain unclaimed.
 
 COMPLETED FULL FEATURE PARITY (user-authorized 2026-09-21): port all applicable non-kernel
 features from upstream experimental `e04fad37`, including p-less/epsilon sampling and its

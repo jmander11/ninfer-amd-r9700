@@ -1195,9 +1195,239 @@ void write_mtp_bulk_json(
     }
 }
 
+// Same fixture can link either retained incumbent Linear or the candidate. Its
+// complete public outputs are persisted for external byte-exact comparison;
+// there is no second implementation or incumbent branch in production code.
+void qualify_packed_loads(const std::filesystem::path& directory) {
+    if (!std::filesystem::create_directory(directory)) fail("packed-load output directory exists");
+    constexpr const char* power =
+        "/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level";
+    if (read_text("/sys/bus/pci/devices/0000:13:00.0/vendor") != "0x1002" ||
+        read_text("/sys/bus/pci/devices/0000:13:00.0/device") != "0x7551")
+        fail("packed-load qualification requires AMD R9700 at 0000:13:00.0");
+    if (read_text(power) != "auto") fail("packed-load qualification requires auto power");
+    const auto device = select_r9700();
+    (void)device;
+    int ordinal = -1;
+    char pci[32]{};
+    HIP_CHECK(hipGetDevice(&ordinal));
+    HIP_CHECK(hipDeviceGetPCIBusId(pci, sizeof(pci), ordinal));
+    if (std::string_view(pci) != "0000:13:00.0") fail("HIP device differs from checked R9700 PCI function");
+    hipStream_t stream{};
+    HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    std::ofstream report(directory / "report.json");
+    report << std::setprecision(17);
+    report << "{\"schema\":\"ninfer.r9700.w8-packed-load.v1\","
+              "\"public_oracle\":\"full-K FP64 represented BF16 times signed W8 with stored FP16 scales\","
+              "\"public_criterion\":{\"per_token_relative_rms\":0.02,\"per_token_gross_scaled_error\":0.10},"
+              "\"code_alignment_bytes\":4,\"poisoned_graph_replays\":2,\"cases\":[";
+    bool first = true;
+    for (const auto shape : {Shape{17, 193, 0, "tail"}, Shape{248320, 5120, 0, "head"}}) {
+      const auto padded = padded_columns(shape.columns);
+      const auto code_bytes = static_cast<std::size_t>(shape.rows) * padded;
+      DeviceBuffer<std::int8_t> weights(code_bytes + 8U);
+      DeviceBuffer<std::uint16_t> scales(static_cast<std::size_t>(shape.rows) * (padded / kGroup));
+      HIP_CHECK(hipMemsetAsync(weights.get(), 0xa5, weights.bytes(), stream));
+      hipLaunchKernelGGL(initialize_weight_codes, dim3((code_bytes + 255U) / 256U), dim3(256),
+          0, stream, weights.get() + 4, shape.rows, shape.columns, padded);
+      hipLaunchKernelGGL(initialize_weight_scales, dim3((scales.count() + 255U) / 256U), dim3(256),
+          0, stream, scales.get(), shape.rows, padded / kGroup);
+      HIP_CHECK(hipGetLastError());
+      HIP_CHECK(hipStreamSynchronize(stream));
+      const std::vector<std::uint32_t> rows = shape.rows == 17 ?
+          std::vector<std::uint32_t>{0, 1, 7, 15, 16} :
+          std::vector<std::uint32_t>{0, 1, 15, 16, 124160, 248076, 248077, 248319};
+      for (auto row : rows) {
+          std::vector<std::int8_t> initialized_codes(padded);
+          std::vector<std::uint16_t> initialized_scales(padded / kGroup);
+          HIP_CHECK(hipMemcpy(initialized_codes.data(), weights.get() + 4 +
+              static_cast<std::size_t>(row) * padded, initialized_codes.size(), hipMemcpyDeviceToHost));
+          HIP_CHECK(hipMemcpy(initialized_scales.data(), scales.get() +
+              static_cast<std::size_t>(row) * initialized_scales.size(),
+              initialized_scales.size() * sizeof(std::uint16_t), hipMemcpyDeviceToHost));
+          for (std::uint32_t k = 0; k < padded; ++k)
+              if (initialized_codes[k] != weight_code(row, k, shape.columns))
+                  fail("weight fixture code initialization differs from independent oracle");
+          for (std::uint32_t g = 0; g < initialized_scales.size(); ++g)
+              if (initialized_scales[g] != weight_scale_bits(row, g))
+                  fail("weight fixture scale initialization differs from independent oracle");
+      }
+      const std::vector<std::uint32_t> widths = shape.rows == 17 ?
+          std::vector<std::uint32_t>{1, 5, 6, 17} : std::vector<std::uint32_t>{5, 6};
+      for (const auto tokens : widths) {
+        const auto input = make_input(tokens, shape.columns);
+        const auto host = host_quantize(input, tokens, shape.columns, padded);
+        DeviceBuffer<hip_bfloat16> original(input.size());
+        HIP_CHECK(hipMemcpyAsync(original.get(), input.data(), original.bytes(),
+                                hipMemcpyHostToDevice, stream));
+        DeviceBuffer<std::uint8_t> workspace_storage(
+            ninfer::ops::r9700::linear::a8w8g32_activation_workspace_capacity_bytes(tokens, shape.columns));
+        ninfer::ops::r9700::linear::A8G32ActivationWorkspace workspace{};
+        HIP_CHECK(ninfer::ops::r9700::linear::a8w8g32_bind_activation_workspace(
+            workspace_storage.get(), workspace_storage.bytes(), tokens, shape.columns, &workspace));
+        HIP_CHECK(ninfer::ops::r9700::linear::a8g32_quantize_activation({original.get(), workspace}, stream));
+        HIP_CHECK(hipStreamSynchronize(stream));
+        std::vector<std::int8_t> actual_codes(host.codes.size());
+        std::vector<std::uint16_t> actual_scales(host.scales.size());
+        std::uint32_t status = 1;
+        HIP_CHECK(hipMemcpy(actual_codes.data(), workspace.codes, workspace.code_bytes, hipMemcpyDeviceToHost));
+        HIP_CHECK(hipMemcpy(actual_scales.data(), workspace.scales, workspace.scale_bytes, hipMemcpyDeviceToHost));
+        HIP_CHECK(hipMemcpy(&status, workspace.status, sizeof(status), hipMemcpyDeviceToHost));
+        if (status || actual_codes != host.codes || actual_scales != host.scales)
+            fail("packed-load A8 codec differs from independent oracle");
+        DeviceBuffer<std::int8_t> codes(host.codes.size() + 8U);
+        HIP_CHECK(hipMemsetAsync(codes.get(), 0xa5, codes.bytes(), stream));
+        HIP_CHECK(hipMemcpyAsync(codes.get() + 4, host.codes.data(), host.codes.size(),
+                                hipMemcpyHostToDevice, stream));
+        const auto count = static_cast<std::size_t>(tokens) * shape.rows;
+        DeviceBuffer<hip_bfloat16> output(count + 2U);
+        const auto args = ninfer::ops::r9700::linear::A8W8G32LinearArgs{
+            codes.get() + 4, host.codes.size(), workspace.scales, workspace.scale_bytes,
+            workspace.status, weights.get() + 4, code_bytes, scales.get(), scales.bytes(),
+            output.get() + 1, tokens, shape.rows, shape.columns, padded};
+        const auto invoke = [&] { HIP_CHECK(ninfer::ops::r9700::linear::a8w8g32_linear_wmma32(args, stream)); };
+        const auto poison = [&] { HIP_CHECK(hipMemsetAsync(output.get(), 0xa5, output.bytes(), stream)); };
+        std::vector<hip_bfloat16> eager(count);
+        const auto check = [&](bool compare) {
+            std::vector<hip_bfloat16> all(count + 2U);
+            HIP_CHECK(hipMemcpy(all.data(), output.get(), output.bytes(), hipMemcpyDeviceToHost));
+            if (all.front().data != 0xa5a5 || all.back().data != 0xa5a5) fail("output canary changed");
+            for (std::size_t i = 0; i < count; ++i) {
+                if (!std::isfinite(static_cast<float>(all[i + 1]))) fail("nonfinite packed-load output");
+                if (compare && eager[i].data != all[i + 1].data) fail("graph output differs from eager");
+                if (!compare) eager[i] = all[i + 1];
+            }
+        };
+        // Complete private candidate boundary owns BF16-input quantization; its
+        // numerical oracle is the public Linear formula, not its staging image.
+        const ninfer::ops::r9700::linear::A8W8G32CandidateArgs public_args{
+            original.get(), weights.get() + 4, code_bytes, scales.get(), scales.bytes(),
+            workspace_storage.get(), workspace_storage.bytes(), output.get() + 1,
+            tokens, shape.rows, shape.columns, padded};
+        poison();
+        HIP_CHECK(ninfer::ops::r9700::linear::a8w8g32_linear_candidate(public_args, stream));
+        HIP_CHECK(hipStreamSynchronize(stream)); check(false);
+        poison(); invoke(); HIP_CHECK(hipStreamSynchronize(stream)); check(true);
+        double max_error = 0, source_relative_rmse = 0, source_gross_scaled_error = 0;
+        // A8W8 public-Linear criterion: per-token sampled-row relative RMS <=2%,
+        // maximum error <=10% of that token's reference RMS; all outputs finite.
+        // This includes activation quantization, unlike the supplementary codec oracle.
+        for (std::uint32_t t = 0; t < tokens; ++t) {
+          double source_squared = 0, error_squared = 0, largest_error = 0;
+          for (auto row : rows) {
+            const double expected = represented_oracle(host, input, t, row, shape.columns, padded, true);
+            const double actual = static_cast<float>(eager[t * shape.rows + row]);
+            const double error = std::abs(actual - expected);
+            if (!std::isfinite(expected) || error > std::max(0.03125, std::abs(expected) * 0.0079)) {
+                std::ostringstream message;
+                message << std::setprecision(17)
+                        << "packed-load independent full-K FP64 oracle mismatch: N=" << shape.rows
+                        << " K=" << shape.columns << " paddedK=" << padded << " T=" << tokens
+                        << " token=" << t << " row=" << row << " actual=" << actual
+                        << " expected=" << expected << " error=" << error
+                        << " limit=" << std::max(0.03125, std::abs(expected) * 0.0079);
+                std::vector<std::int8_t> stored_codes(padded);
+                std::vector<std::uint16_t> stored_scales(padded / kGroup);
+                HIP_CHECK(hipMemcpy(stored_codes.data(), weights.get() + 4 +
+                    static_cast<std::size_t>(row) * padded, stored_codes.size(), hipMemcpyDeviceToHost));
+                HIP_CHECK(hipMemcpy(stored_scales.data(), scales.get() +
+                    static_cast<std::size_t>(row) * stored_scales.size(),
+                    stored_scales.size() * sizeof(std::uint16_t), hipMemcpyDeviceToHost));
+                std::size_t code_mismatches = 0, scale_mismatches = 0;
+                for (std::uint32_t k = 0; k < padded; ++k)
+                    code_mismatches += stored_codes[k] != weight_code(row, k, shape.columns);
+                for (std::uint32_t g = 0; g < stored_scales.size(); ++g)
+                    scale_mismatches += stored_scales[g] != weight_scale_bits(row, g);
+                message << " initialized_code_mismatches=" << code_mismatches
+                        << " initialized_scale_mismatches=" << scale_mismatches;
+                fail(message.str());
+            }
+            max_error = std::max(max_error, error);
+            double source = 0;
+            for (std::uint32_t k = 0; k < shape.columns; ++k) {
+                const double x = static_cast<float>(input[t * shape.columns + k]);
+                const double w = weight_code(row, k, shape.columns) *
+                                 static_cast<double>(half_value(weight_scale_bits(row, k / kGroup)));
+                source = std::fma(x, w, source);
+            }
+            if (!std::isfinite(source)) fail("nonfinite public BF16-input FP64 oracle");
+            source_squared += source * source;
+            error_squared += (actual - source) * (actual - source);
+            largest_error = std::max(largest_error, std::abs(actual - source));
+          }
+          const double reference_rms = std::sqrt(source_squared / rows.size());
+          const double relative = std::sqrt(error_squared / rows.size()) / std::max(reference_rms, 1e-12);
+          const double gross = largest_error / std::max(reference_rms, 1e-12);
+          if (relative > 0.02 || gross > 0.10) fail("public BF16-times-W8 FP64 criterion failed");
+          source_relative_rmse = std::max(source_relative_rmse, relative);
+          source_gross_scaled_error = std::max(source_gross_scaled_error, gross);
+        }
+        hipGraph_t graph{}; hipGraphExec_t executable{};
+        HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+        invoke();
+        HIP_CHECK(hipStreamEndCapture(stream, &graph));
+        HIP_CHECK(hipGraphInstantiate(&executable, graph, nullptr, nullptr, 0));
+        for (int repeat = 0; repeat < 2; ++repeat) {
+            poison(); HIP_CHECK(hipGraphLaunch(executable, stream));
+            HIP_CHECK(hipStreamSynchronize(stream)); check(true);
+        }
+        HIP_CHECK(hipGraphExecDestroy(executable)); HIP_CHECK(hipGraphDestroy(graph));
+        auto invalid = args; invalid.activation_codes += 1;
+        if (ninfer::ops::r9700::linear::a8w8g32_linear_wmma32(invalid, stream) != hipErrorInvalidValue)
+            fail("unaligned activation code base accepted");
+        invalid = args; invalid.weight_codes += 1;
+        if (ninfer::ops::r9700::linear::a8w8g32_linear_wmma32(invalid, stream) != hipErrorInvalidValue)
+            fail("unaligned weight code base accepted");
+        for (const auto plane : {std::pair{codes.get(), host.codes.size()}, std::pair{weights.get(), code_bytes}}) {
+            std::array<unsigned char, 8> guards{};
+            HIP_CHECK(hipMemcpy(guards.data(), plane.first, 4, hipMemcpyDeviceToHost));
+            HIP_CHECK(hipMemcpy(guards.data() + 4, plane.first + 4 + plane.second, 4, hipMemcpyDeviceToHost));
+            if (!std::all_of(guards.begin(), guards.end(), [](auto v) { return v == 0xa5; })) fail("code canary changed");
+        }
+        const auto name = std::string(shape.role) + "-t" + std::to_string(tokens) + ".bf16";
+        std::ofstream bytes(directory / name, std::ios::binary);
+        bytes.write(reinterpret_cast<const char*>(eager.data()), eager.size() * sizeof(hip_bfloat16));
+        if (!bytes) fail("could not save exact public outputs");
+        std::vector<double> samples;
+        if (read_text(power) != "auto") fail("packed-load power changed before timing");
+        for (int i = 0; i < 7; ++i) {
+            Event begin, end;
+            HIP_CHECK(hipEventRecord(begin.get(), stream)); invoke();
+            HIP_CHECK(hipEventRecord(end.get(), stream));
+            HIP_CHECK(hipEventSynchronize(end.get()));
+            float milliseconds = 0;
+            HIP_CHECK(hipEventElapsedTime(&milliseconds, begin.get(), end.get()));
+            samples.push_back(milliseconds);
+        }
+        if (read_text(power) != "auto") fail("packed-load power changed after timing");
+        if (!first) report << ',';
+        first = false;
+        report << "{\"name\":\"" << name << "\",\"rows\":" << shape.rows
+               << ",\"columns\":" << shape.columns << ",\"tokens\":" << tokens
+               << ",\"code_base_mod8\":4,\"oracle_max_error\":" << max_error
+               << ",\"public_source_max_relative_rmse\":" << source_relative_rmse
+               << ",\"public_source_max_scaled_error\":" << source_gross_scaled_error
+               << ",\"median_ms\":" << median(samples) << ",\"samples_ms\":[";
+        for (std::size_t i = 0; i < samples.size(); ++i) {
+            if (i) report << ',';
+            report << samples[i];
+        }
+        report << "],\"passed\":true}";
+      }
+    }
+    if (read_text(power) != "auto") fail("packed-load qualification power changed");
+    report << "],\"passed\":true}\n";
+    if (!report) fail("could not save packed-load report");
+    HIP_CHECK(hipStreamDestroy(stream));
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
+    if (argc == 3 && std::string_view(argv[1]) == "--packed-load-regression") {
+        try { qualify_packed_loads(argv[2]); return 0; }
+        catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
+    }
     const bool tensor_only = argc == 4 && std::string_view(argv[1]) == "--tensor-only" &&
                              std::string_view(argv[2]) == "--out-json";
     const bool prefill_regression =
@@ -1213,7 +1443,7 @@ int main(int argc, char** argv) {
     if (!tensor_only && !prefill_regression && !lds_scope_regression &&
         !lds_scope_benchmark && !mtp_bulk &&
         (argc != 3 || std::string_view(argv[1]) != "--out-json")) {
-        std::cerr << "usage: w8a8_wmma_linear_qual "
+        std::cerr << "usage: w8a8_wmma_linear_qual --packed-load-regression FRESH_DIRECTORY or "
                      "{[--tensor-only] --out-json PATH|--prefill-cta-regression|"
                      "--prefill-cta-lds-scope-regression|"
                      "--prefill-cta-lds-scope-benchmark --out-json FRESH.json|"

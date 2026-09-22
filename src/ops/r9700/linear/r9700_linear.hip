@@ -2311,15 +2311,16 @@ void a8q4g64_linear_prefill_cta_m128n128_qualification_kernel(
 
 __device__ __attribute__((unused)) WmmaI32x2 load_i8x8(
     const std::int8_t* values, std::size_t begin, bool valid) {
-    union Packed {
-        WmmaI32x2 words;
-        signed char bytes[8];
-    } packed{};
-#pragma unroll
-    for (std::uint32_t element = 0; element < 8U; ++element) {
-        packed.bytes[element] = valid ? values[begin + element] : 0;
+    WmmaI32x2 packed{};
+    if (valid) {
+        // The public launcher requires dword-aligned code planes; every G32/K16
+        // fragment offset is a multiple of eight. Do not require 8-byte base
+        // alignment or read beyond this exact eight-byte fragment.
+        const auto* words = reinterpret_cast<const std::int32_t*>(values + begin);
+        packed[0] = words[0];
+        packed[1] = words[1];
     }
-    return packed.words;
+    return packed;
 }
 
 __global__ __launch_bounds__(kWaveSize) void a8w8g32_linear_wmma32_kernel(

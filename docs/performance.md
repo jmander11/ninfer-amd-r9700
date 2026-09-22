@@ -60,6 +60,51 @@ expected value exactly.
 Copy bus rate counts both the read and write traffic. This is the hardware bandwidth bound, not a
 model or individual-Op throughput claim.
 
+## Selective-protected DFlash decode (2026-09-22)
+
+The combined evaluation artifact is
+`/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-q4-selective-protected-dflash2-q4/qwen3.8-27b-r9700-q4-selective-protected-n16k16-dflash2-q4-eval.ninfer`
+(18,887,772,672 bytes). All 1124 base objects are unchanged from the selective-protected base;
+the companion adds 32 Q4G64 matrices and 34 BF16 objects, retaining both selector codebooks.
+This is AMD Q4, not NVIDIA NVFP4, and does not establish cross-platform quality equivalence.
+
+Matched ordinary/K4/K5 baselines use C1, context 1024, chunk 4096, G16, Device Graph, greedy
+sampling and one warmup. The 89-token chat prompt generates 128 decode tokens; ordinary decode
+measured 24.77555 tok/s. Raw corpus P128+G64 has much lower acceptance: 1.65789 output tokens
+per speculative round versus chat K4/K5's 3.36842/3.45946. It is not evidence by itself that
+companion quantization is defective.
+
+The selected W8 wave-kernel change packs identical operand bytes into wide loads without changing
+scales, arithmetic, reduction order, or dispatch. Exact embedded gfx1201 ISA changes 32 byte-load
+sites to four B64 loads, 41 load waits to 11, and 83 VGPRs to 61; two signed IU8 WMMA sites and
+zero LDS/private storage remain. Independent original-BF16-input FP64 checks, exact A8 codec,
+tails, four-mod-eight code alignment and poisoned graph replay pass. All six complete output
+tensors are byte-identical to the retained incumbent. An initial qualifier initialization race
+was repaired before admission; numerical thresholds were unchanged.
+
+Balanced whole-Engine A/B uses three fresh-process pairs per cell, both launch orders, one warmup
+and one measured repetition each, under `auto`. Every pair improves, each cell exceeds the
+predeclared 2% mean paired decode-throughput gain, and all 24 runs preserve exact tokens and
+speculative accounting:
+
+| Workload | Draft width | Control decode tok/s | Selected decode tok/s | Mean paired gain |
+|---|---|---:|---:|---:|
+| Raw text | K4 | 17.50045 | 18.52400 | 5.85% |
+| Raw text | K5 | 17.24277 | 18.38723 | 6.64% |
+| Chat | K4 | 35.02727 | 37.96226 | 8.41% |
+| Chat | K5 | 36.35116 | 39.00057 | 7.29% |
+
+Chat K5 whole-output throughput, including prefill, is 36.06263 tok/s. These are workload-specific
+C1 results, not a 60 tok/s claim, C2–4 admission, or terminal artifact selection. Evidence and
+reproduction runners are under `profiles/bench/r9700-w8-packed-loads-20260922/`; matched baseline
+packages are `r9700-dflash-selective-baseline-20260922` and `r9700-dflash-selective-chat-20260922`.
+
+The pre-change graph trace attributes 68.616 ms to target layers, 17.394 ms to the target final
+norm/head, and 5.155 ms to draft layers per graph. Its largest remaining target-layer families
+are Q4 gate/up, normalization, Q4 down and protected BF16 projections. These intercepted durations
+are attribution only; they must not be reported as post-change timing. Reattribute before choosing
+a subsequent kernel mechanism. Raw-text acceptance remains a separate limitation.
+
 ## Typed Text/MTP cache and attention
 
 ### Bounded-panel dense prefill (2026-09-21)
