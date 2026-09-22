@@ -1,7 +1,7 @@
 {
   "artifact_type": "ninfer_bench_matrix_run",
   "schema_version": 14,
-  "created_at_utc": "2026-09-21T23:12:48.352525+00:00",
+  "created_at_utc": "2026-09-22T00:22:25.544556+00:00",
   "preset": "pareto-whole",
   "base_ranking_profile": "spec-none-ordinary",
   "base_capacity_profile": null,
@@ -54,7 +54,7 @@
     "required": "auto",
     "sysfs_path": "/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level",
     "observed": "auto",
-    "rechecked_after": null
+    "rechecked_after": "auto"
   },
   "expected_kv_value_group": 16,
   "expected_kv_plane_layouts": {

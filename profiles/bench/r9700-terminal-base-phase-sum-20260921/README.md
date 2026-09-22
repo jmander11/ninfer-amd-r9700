@@ -43,3 +43,10 @@ C2 also completed native validation: aggregate prefill/decode means are1185.4235
 tok/s at8K and402.463434/27.28872475 tok/s at32K. All repetitions and both lanes preserve
 the stopped attempt's public tokens exactly. This confirms corrected concurrent service-sum
 reporting; old schema20 C2 prefill throughput is not an admissible comparison metric.
+
+The complete all-Q4 dense/G16 whole matrix now passes its native owner validation at C1..4.
+C3 aggregate prefill/decode means are1184.824171/46.40229132 tok/s at8K and
+402.1617451/33.63155633 at32K; C4 gives1193.200936/53.75830520 and
+403.3075828/37.92118897 respectively. C3/C4 public tokens repeat exactly across all three
+measurements. Graph/eager controls remain pending. The campaign has advanced to dense/G32;
+this first completed profile alone cannot select the base artifact.
