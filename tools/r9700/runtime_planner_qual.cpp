@@ -304,6 +304,53 @@ void qualify_host_dflash_graph_allowance() {
             "DFlash C1 K4/W5 allowance must reserve each distinct executable topology");
     std::printf("r9700_runtime_planner: PASS host DFlash C1/K4/W5 graph topology allowance\n");
 }
+void qualify_host_mtp_graph_allowance() {
+    namespace runtime = ninfer::targets::qwen3::detail::qwen3_8_27b_r9700;
+    struct Case {
+        std::uint32_t context, concurrency, drafts;
+        bool adaptive;
+        std::size_t definitions, executables, updates;
+    };
+    // Includes singleton (no update), the reproduced short-context failure, full
+    // context profiles/split topologies, and all three independently captured Ks.
+    for (const auto c : {
+             Case{64, 1, 3, false, 1, 1, 0},
+             Case{1024, 1, 3, false, 3, 1, 3},
+             Case{1024, 4, 5, false, 12, 4, 12},
+             Case{262144, 1, 3, false, 11, 3, 11},
+             Case{262144, 4, 5, false, 32, 4, 32},
+             Case{262144, 4, 5, true, 108, 20, 108}}) {
+        runtime::SequencePlanningInputs inputs{
+            .weights_profile = Variant::WeightsProfile::R9700Q4G64Evaluation,
+            .capacity = c.context,
+            .max_concurrency = c.concurrency,
+            .prefill_chunk = std::min(c.context, 2048U),
+            .draft_window = c.drafts,
+            .adaptive_draft = c.adaptive,
+            .speculative_backend = ninfer::SpeculativeBackend::Mtp,
+            .proposal_head = ninfer::ProposalHead::Full,
+            .features = {.vision = false, .speculative = ninfer::SpeculativeBackend::Mtp,
+                         .proposal_head = ninfer::ProposalHead::Full},
+            .use_device_graph = true,
+        };
+        const auto plan = runtime::build_sequence_candidate_for_qualification(
+            inputs, c.concurrency * ((c.context + 63U) / 64U));
+        require(plan->graph_definition_count == c.definitions &&
+                    plan->graph_executable_count == c.executables,
+                "MTP fixed/adaptive graph inventory differs from its captured K/B profiles");
+        const auto expected = (46ULL + 4ULL * (c.executables + c.updates)) * 1024ULL * 1024ULL;
+        require(plan->graph_allowance_bytes == expected,
+                "MTP allowance omitted profile update/restore residency");
+        inputs.use_device_graph = false;
+        const auto eager = runtime::build_sequence_candidate_for_qualification(
+            inputs, c.concurrency * ((c.context + 63U) / 64U));
+        require(eager->graph_allowance_bytes == 0 && eager->graph_definition_count == 0 &&
+                    eager->graph_executable_count == 0,
+                "eager MTP reserves graph residency");
+    }
+    std::printf("r9700_runtime_planner: PASS host MTP graph instantiate/update allowance\n");
+}
+
 using WeightsProfile = ninfer::targets::qwen3_8_27b::detail::WeightsProfile;
 
 constexpr std::uint32_t kCapacityEnvelopeContext = 262144U;
@@ -408,8 +455,7 @@ std::size_t qualify_plan(ninfer::DeviceContext& device, std::uint32_t concurrenc
             "plan did not preserve its fixed DFlash verify width");
     if (use_device_graph && backend == ninfer::SpeculativeBackend::Mtp) {
         constexpr std::size_t kMiB                     = 1024ULL * 1024ULL;
-        constexpr std::size_t kMtpGraphFamilyBytes     = 22ULL * kMiB;
-        constexpr std::size_t kMtpGraphExecutableBytes = 26ULL * kMiB;
+        constexpr std::size_t kMtpGraphFamilyBytes     = 46ULL * kMiB;
         const auto profiles = Variant::mtp_graph_profiles(max_context, drafts);
         const std::size_t definitions =
             profiles.size() * static_cast<std::size_t>(concurrency);
@@ -428,9 +474,15 @@ std::size_t qualify_plan(ninfer::DeviceContext& device, std::uint32_t concurrenc
                 "MTP graph plan omitted a reachable exact-B/profile definition");
         require(plan.impl_->graph_executable_count == topology_classes.size(),
                 "MTP graph plan executable inventory does not match reachable topologies");
+        std::size_t operations = topology_classes.size();
+        for (const auto topology : topology_classes) {
+            const auto count = std::count_if(profiles.begin(), profiles.end(), [&](const auto& p) {
+                return p.topology_class == topology / concurrency;
+            });
+            if (count > 1) operations += static_cast<std::size_t>(count);
+        }
         require(plan.impl_->graph_allowance_bytes ==
-                    kMtpGraphFamilyBytes +
-                        kMtpGraphExecutableBytes * topology_classes.size(),
+                    kMtpGraphFamilyBytes + 4ULL * kMiB * operations,
                 "MTP graph allowance does not match its ROCm family/executable inventory");
     }
     if (use_device_graph && backend == ninfer::SpeculativeBackend::None) {
@@ -620,6 +672,10 @@ int main(int argc, char** argv) {
             qualify_host_dflash_graph_allowance();
             return 0;
         }
+        if (argc == 2 && std::string_view(argv[1]) == "--host-mtp-graph-allowance") {
+            qualify_host_mtp_graph_allowance();
+            return 0;
+        }
         if (argc == 2 && std::string_view(argv[1]) == "--host-attention-parity-routing") {
             qualify_host_attention_parity_routing();
             return 0;
@@ -636,7 +692,7 @@ int main(int argc, char** argv) {
             throw std::invalid_argument(
                 "usage: ninfer_r9700_runtime_planner_qual "
                 "[--host-xattention-capacity-envelope|--host-request-lane-cap|"
-                "--host-split512-routing|--host-dflash-graph-allowance|"
+                "--host-split512-routing|--host-dflash-graph-allowance|--host-mtp-graph-allowance|"
                 "--host-attention-parity-routing|"
                 "--host-hybrid-capacity-csv|"
                 "--host-hybrid-widths-csv PREFILL MAX_CONCURRENCY MTP_WIDTH DFLASH_WIDTH]");

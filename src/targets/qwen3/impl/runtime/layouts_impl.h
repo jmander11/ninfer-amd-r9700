@@ -887,9 +887,9 @@ std::unique_ptr<SequencePlanImpl> build_sequence_candidate(const SequencePlannin
             schedule::VisionContext::output_transient_bytes(merged);
     }
     if (impl->use_device_graph) {
-        // Allowance is per instantiated executable. The fixed speculative width and exact batch
-        // size are folded into topology_class, so graph_topology_allowance is not multiplied by C
-        // again.
+        // Allowance groups executable residency by topology, including MTP's retained
+        // profile-update allocations. Speculative K and exact batch size are already
+        // folded into topology_class; do not multiply the result by C again.
         if (impl->speculative_backend == SpeculativeBackend::None) {
             std::vector<GraphExecutionProfile> expanded;
             const auto profiles = ordinary_graph_profiles(impl->capacity);

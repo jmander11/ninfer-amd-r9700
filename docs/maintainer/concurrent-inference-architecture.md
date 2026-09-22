@@ -1344,6 +1344,16 @@ graph key。Graph-off mode 按相同顺序 eager 提交这些动作。
 不得为每个 `B`、profile 或 captured definition 复制 logits、hidden、workspace 或 per-sequence state。
 Model/control ingress、forward 和 result egress 不存在 per-row device submission；跨 page 时的 table
 publication 属于 state substrate materialization。Serving 期间不 capture、instantiate 或扩展 graph family。
+MTP graph memory on ROCm 10/gfx1201 includes retained allocations from executable updates,
+not just instantiated topology count. The startup planner reserves a calibrated 46 MiB
+family term and 4 MiB per instantiate/update operation. For a topology with D definitions,
+startup performs one instantiate and, when D > 1, D updates (install subsequent profiles,
+then restore the first). Adaptive K uses the full K-specific inventory. September 21
+selective-protected probes measured 58/92 MiB for K3/C1 and K5/C4 at 1K context, and
+84/148 MiB at native context; individual operations retained at most 4 MiB. These are
+toolchain-specific allocation bounds, not performance results or general HIP guarantees.
+The observed-allocation startup guard remains mandatory.
+
 Startup graph allowance 必须计入全部 reachable exact-`B` definitions，以及每个 exact `B`、每个实际
 topology class 的一份 executable，不能沿用只覆盖 `B=1` definitions 的 reservation。
 
