@@ -137,6 +137,15 @@ compiled runtime profiles and may hold this exact candidate artifact constant.
 
 ## DFlash2 evaluation controls and production recipe gate
 
+The current DFlash target is the newly source-derived selective-protected base, not the older
+four-role baseline. Its sole initial companion is
+`qwen3.8-27b/r9700-q4-selective-protected-n16k16-dflash2-q4-eval`: canonical Q4G64
+matrices, unchanged BF16 selector codebooks/non-matrix state, and every base payload copied
+byte-exact. The converter admits no source-MSE variant for this base before acceptance evidence.
+Its complete 1,190-object plan projects to an 18,874,746,880-byte tensor arena; source remains
+the explicit local BF16 checkpoint `/ssdpool2nvme/local_llm/models/qwen3.8-27b-dflash2`.
+The existing selective base and its conversion receipt are preserved.
+
 Nine explicit evaluation identities append the source DFlash2 checkpoint to one of three
 base artifacts without changing any base payload. The canonical-Q4 identities are:
 

@@ -24,13 +24,21 @@ from tools.convert.qwen3_8_27b_r9700.convert_dflash2_q4 import (
 
 class DFlash2ConversionPublicationTest(unittest.TestCase):
     def test_recipe_conversion_copies_base_and_bf16_payloads_exactly(self) -> None:
+        self._check_payload_copy(conversion.inventory.ALL_Q4_BASE_WEIGHTS_ID,
+                                 conversion.dflash2_matrix_recipes.RECIPES)
+
+    def test_selective_companion_copies_base_and_bf16_codebook_exactly(self) -> None:
+        self._check_payload_copy(conversion.inventory.SELECTIVE_BASE_WEIGHTS_ID,
+                                 (conversion.dflash2_matrix_recipes.get_recipe("canonical-q4g64"),))
+
+    def _check_payload_copy(self, base_weights_id, recipes) -> None:
         # Exercise the real container/publication path with small represented payloads.
         # Numeric encoders have their independent exact oracle in test_dflash2_matrix_recipes.
         inv = conversion.inventory
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
             base = root / "base.ninfer"
-            identity = ArtifactIdentity(inv.MODEL_ID, inv.ALL_Q4_BASE_WEIGHTS_ID)
+            identity = ArtifactIdentity(inv.MODEL_ID, base_weights_id)
             base_specs = (
                 TensorSpec("text/draft_head", (2, 2), "BF16", "contiguous-le-v1"),
                 TensorSpec("text/draft_head_token_ids", (2,), "I32", "contiguous-le-v1"),
@@ -49,7 +57,7 @@ class DFlash2ConversionPublicationTest(unittest.TestCase):
             family = ModuleType("tools.convert.qwen3.common.conversion")
             preserved = b"\x80\x3f\x00\x40"
             family.encode_tensor_payload = MagicMock(return_value=preserved)
-            for recipe in conversion.dflash2_matrix_recipes.RECIPES:
+            for recipe in recipes:
                 output = root / (recipe.key + ".ninfer")
                 matrix = conversion.dflash2_matrix_recipes.tensor_spec(
                     "dflash/feature_projection", (16, 128), recipe.matrix_format)
@@ -154,6 +162,37 @@ class DFlash2ConversionPublicationTest(unittest.TestCase):
                 )
             self.assertEqual(authority["selection_sha256"], receipt["selection_sha256"])
             self.assertEqual(authority["receipt"]["sha256"], receipt["sha256"])
+
+    def test_selective_base_authority_rejects_mismatched_payload_receipt(self) -> None:
+        with TemporaryDirectory() as temporary:
+            base = Path(temporary) / "selective.ninfer"
+            base.write_bytes(b"represented selective base")
+            identity = ArtifactIdentity(conversion.inventory.MODEL_ID,
+                                        conversion.inventory.SELECTIVE_BASE_WEIGHTS_ID)
+            receipt = {
+                "artifact_type": "ninfer_r9700_selective_protected_conversion",
+                "schema_version": 1, "identity": conversion._identity_record(identity),
+                "recipe_id": conversion.selective_protected_inventory.RECIPE_ID,
+                "weight_recipe_selected": False,
+                "changed_formats": conversion.selective_protected_inventory.CHANGED_FORMATS,
+                "source": {"model_path": "explicit-source"}, "base": {"sha256": "base"},
+                "artifact": {"path": str(base.resolve()), "bytes": base.stat().st_size,
+                             "sha256": _sha256(base)},
+            }
+            receipt_path = Path(str(base) + ".conversion.json")
+            receipt_path.write_text(json.dumps(receipt))
+            authority = conversion._base_authority(base, identity, _sha256(base))
+            self.assertEqual(authority["receipt"]["sha256"], _sha256(receipt_path))
+            self.assertEqual(authority["source"], receipt["source"])
+            with self.assertRaisesRegex(ValueError, "authority differs"):
+                conversion._base_authority(base, identity, "0" * 64)
+
+    def test_selective_base_maps_to_its_exact_inventory(self) -> None:
+        expected, output, arena = conversion._expected_base(ArtifactIdentity(
+            conversion.inventory.MODEL_ID, conversion.inventory.SELECTIVE_BASE_WEIGHTS_ID))
+        self.assertEqual(expected, conversion.selective_protected_inventory.OBJECT_SPECS)
+        self.assertEqual(output.weights_id, conversion.inventory.SELECTIVE_WEIGHTS_ID)
+        self.assertEqual(arena, 18_874_746_880)
 
     def test_hybrid_base_maps_to_its_own_companion(self) -> None:
         expected, output, arena = conversion._expected_base(ArtifactIdentity(

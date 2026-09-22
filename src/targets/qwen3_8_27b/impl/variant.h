@@ -335,7 +335,7 @@ struct Variant {
     [[nodiscard]] static constexpr std::size_t runtime_allocation_overhead_bound(
         WeightsProfile profile) noexcept {
         return profile == WeightsProfile::R9700Q4G64Fp8FourRoleN16K16Evaluation ||
-               profile == WeightsProfile::R9700Q4SelectiveProtectedN16K16Evaluation ||
+               is_selective_protected_profile(profile) ||
                profile == WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4Evaluation ||
                profile == WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4MseEvaluation ||
                profile == WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2W8MseEvaluation

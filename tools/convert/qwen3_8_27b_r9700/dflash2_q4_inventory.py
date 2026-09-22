@@ -17,13 +17,16 @@ import struct
 from tools.artifact.layouts import encoded_size
 from tools.convert.qwen3.common.inventory import BF16, Q4, TensorSpec, tensor_spec
 
-from . import dflash2_matrix_recipes, fp8_hybrid_inventory, q4_inventory, q4_w8_mse_inventory
+from . import (dflash2_matrix_recipes, fp8_hybrid_inventory, q4_inventory,
+              q4_w8_mse_inventory, selective_protected_inventory)
 
 
 MODEL_ID = "qwen3.8-27b"
 ALL_Q4_BASE_WEIGHTS_ID = q4_inventory.WEIGHTS_ID
 MIXED_BASE_WEIGHTS_ID = q4_w8_mse_inventory.WEIGHTS_ID
 HYBRID_BASE_WEIGHTS_ID = fp8_hybrid_inventory.WEIGHTS_ID
+SELECTIVE_BASE_WEIGHTS_ID = selective_protected_inventory.WEIGHTS_ID
+SELECTIVE_WEIGHTS_ID = "r9700-q4-selective-protected-n16k16-dflash2-q4-eval"
 ALL_Q4_WEIGHTS_ID = "r9700-q4g64-n16k16-dflash2-q4-eval"
 MIXED_WEIGHTS_ID = "r9700-q4-w8-mse-n16k16-dflash2-q4-eval"
 HYBRID_WEIGHTS_ID = "r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval"
@@ -34,10 +37,14 @@ RECIPE_ID = "r9700-dflash2-all-q4g64-n16k16-bf16-codebook-eval-v1"
 def companion_weights_id(base_weights_id: str, recipe: str) -> str:
     """Registered evaluation identity; never selects a production recipe."""
     if base_weights_id not in (
-        ALL_Q4_BASE_WEIGHTS_ID, MIXED_BASE_WEIGHTS_ID, HYBRID_BASE_WEIGHTS_ID
+        ALL_Q4_BASE_WEIGHTS_ID, MIXED_BASE_WEIGHTS_ID, HYBRID_BASE_WEIGHTS_ID,
+        SELECTIVE_BASE_WEIGHTS_ID,
     ):
         raise ValueError(f"unsupported DFlash2 base identity: {base_weights_id}")
     dflash2_matrix_recipes.get_recipe(recipe)
+    if (base_weights_id == SELECTIVE_BASE_WEIGHTS_ID
+            and recipe != dflash2_matrix_recipes.CANONICAL_Q4G64):
+        raise ValueError("selective-protected DFlash2 currently admits only canonical-q4g64")
     suffix = {
         dflash2_matrix_recipes.CANONICAL_Q4G64: "q4",
         dflash2_matrix_recipes.SOURCE_MSE_Q4G64: "q4-mse",
@@ -165,6 +172,8 @@ MATRIX_RECIPE_SUMMARIES = tuple(
 ALL_Q4_OBJECT_SPECS = q4_inventory.OBJECT_SPECS + TENSOR_SPECS
 MIXED_OBJECT_SPECS = q4_w8_mse_inventory.OBJECT_SPECS + TENSOR_SPECS
 HYBRID_OBJECT_SPECS = fp8_hybrid_inventory.OBJECT_SPECS + TENSOR_SPECS
+SELECTIVE_OBJECT_SPECS = selective_protected_inventory.OBJECT_SPECS + TENSOR_SPECS
+SELECTIVE_DEVICE_ARENA_BYTES = selective_protected_inventory.DEVICE_ARENA_BYTES + TENSOR_ENCODED_BYTES
 ALL_Q4_TENSOR_BYTES = q4_inventory.TENSOR_ENCODED_BYTES + TENSOR_ENCODED_BYTES
 MIXED_TENSOR_BYTES = q4_w8_mse_inventory.TENSOR_ENCODED_BYTES + TENSOR_ENCODED_BYTES
 HYBRID_TENSOR_BYTES = fp8_hybrid_inventory.TENSOR_ENCODED_BYTES + TENSOR_ENCODED_BYTES
@@ -300,7 +309,7 @@ def validate_inventory() -> None:
         ):
             raise ValueError(f"{recipe.key}: DFlash2 source topology differs")
     if any(len(specs) != 1190 for specs in (
-        ALL_Q4_OBJECT_SPECS, MIXED_OBJECT_SPECS, HYBRID_OBJECT_SPECS,
+        ALL_Q4_OBJECT_SPECS, MIXED_OBJECT_SPECS, HYBRID_OBJECT_SPECS, SELECTIVE_OBJECT_SPECS,
     )):
         raise ValueError("DFlash2 combined object inventory is incomplete")
     if ALL_Q4_DEVICE_ARENA_BYTES != 16_369_285_120:
@@ -315,6 +324,10 @@ validate_inventory()
 
 
 __all__ = [
+    "SELECTIVE_BASE_WEIGHTS_ID",
+    "SELECTIVE_WEIGHTS_ID",
+    "SELECTIVE_OBJECT_SPECS",
+    "SELECTIVE_DEVICE_ARENA_BYTES",
     "ALL_Q4_BASE_WEIGHTS_ID",
     "ALL_Q4_DEVICE_ARENA_BYTES",
     "ALL_Q4_OBJECT_SPECS",

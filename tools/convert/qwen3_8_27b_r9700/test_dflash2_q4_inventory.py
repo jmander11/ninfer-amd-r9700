@@ -11,6 +11,18 @@ from tools.convert.qwen3_8_27b_r9700 import dflash2_matrix_recipes as recipes
 
 
 class DFlash2Q4InventoryTest(unittest.TestCase):
+    def test_selective_protected_has_only_canonical_companion(self) -> None:
+        from tools.convert.qwen3_8_27b_r9700 import selective_protected_inventory as base
+        self.assertEqual(inventory.SELECTIVE_OBJECT_SPECS[:1124], base.OBJECT_SPECS)
+        self.assertEqual(inventory.SELECTIVE_OBJECT_SPECS[1124:], inventory.TENSOR_SPECS)
+        self.assertEqual(inventory.SELECTIVE_DEVICE_ARENA_BYTES,
+                         base.DEVICE_ARENA_BYTES + 1_209_469_440)
+        self.assertEqual(inventory.companion_weights_id(base.WEIGHTS_ID, "canonical-q4g64"),
+                         inventory.SELECTIVE_WEIGHTS_ID)
+        for recipe in ("source-mse-q4g64", "source-mse-w8g32"):
+            with self.assertRaisesRegex(ValueError, "only canonical"):
+                inventory.companion_weights_id(base.WEIGHTS_ID, recipe)
+
     def test_exact_fused_and_source_inventory(self) -> None:
         inventory.validate_inventory()
         self.assertEqual(len(inventory.SOURCE_BINDINGS), 66)

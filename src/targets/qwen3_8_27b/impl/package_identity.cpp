@@ -36,6 +36,10 @@ ModelSamplingDefaults Package::sampling_defaults(std::string_view model) {
 
 Package::WeightsProfile Package::resolve_weights(const artifact::ArtifactIdentity& identity) {
     if (identity.model_id == model_id &&
+        identity.weights_id == "r9700-q4-selective-protected-n16k16-dflash2-q4-eval") {
+        return WeightsProfile::R9700Q4SelectiveProtectedDFlash2Q4Evaluation;
+    }
+    if (identity.model_id == model_id &&
         identity.weights_id == "r9700-q4-selective-protected-n16k16-eval") {
         return WeightsProfile::R9700Q4SelectiveProtectedN16K16Evaluation;
     }

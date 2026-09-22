@@ -161,6 +161,32 @@ int main() {
                 "protected profile changes Vision scratch");
         require(Variant::runtime_allocation_overhead_bound(protected_profile) == (4U << 20U),
                 "protected FP8 profile omits physical arena rounding bound");
+        const auto protected_dflash = detail::WeightsProfile::R9700Q4SelectiveProtectedDFlash2Q4Evaluation;
+        require(Variant::dflash_matrix_qtype(protected_dflash) == ninfer::QType::Q4G64_F16S,
+                "protected companion does not bind canonical Q4 DFlash matrices");
+        for (const auto tokens : {1, 5, 6, 24, 2048}) {
+            const auto base = Variant::linear_workspace_capacity_bytes(protected_profile, tokens);
+            const auto companion = ninfer::ops::linear_workspace_capacity_bytes(
+                ninfer::QType::Q4G64_F16S, tokens, detail::DFlashConfig::feature_rows);
+            require(Variant::linear_workspace_capacity_bytes(protected_dflash, tokens) ==
+                        std::max(base, companion),
+                    "protected companion omits W8 endpoint or Q4 K25600 scratch");
+            auto state = std::max(std::max(base, companion),
+                ninfer::ops::LinearExecution::activation_workspace_capacity_bytes(
+                    tokens, detail::TextConfig::intermediate));
+            state = std::max(state,
+                ninfer::ops::dflash_verify_down_linear_workspace_capacity_bytes(
+                    ninfer::QType::Q4G64_F16S, 6, detail::DFlashConfig::intermediate,
+                    detail::TextConfig::hidden));
+            require(Variant::execution_state_capacity_bytes(protected_dflash, tokens, tokens) ==
+                        (state + 255U) / 256U * 256U,
+                    "protected companion loses FP8 K17408 or verify-down workspace");
+            require(Variant::vision_linear_workspace_capacity_bytes(protected_dflash, tokens) ==
+                        Variant::vision_linear_workspace_capacity_bytes(protected_profile, tokens),
+                    "protected companion changes base Vision workspace");
+        }
+        require(Variant::runtime_allocation_overhead_bound(protected_dflash) == (4U << 20U),
+                "protected companion omits FP8 arena rounding bound");
         require(Variant::execution_state_capacity_bytes(
                     detail::WeightsProfile::R9700Q4G64Fp8FourRoleN16K16Evaluation,
                     kPrefillTokens, kGraphTokens) == expected,

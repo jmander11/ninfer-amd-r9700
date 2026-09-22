@@ -11,10 +11,10 @@ full-attention gate/value and output Q5 role family. None is a final recipe sele
 `r9700-w8-bf16-gdn-qk-eval` restores GDN query/key in all 48 GDN layers.
 The same-size `r9700-w8g32-mse-eval` retains the all-W8 layout and runtime while selecting each
 stored FP16 group scale by a deterministic source-only decoded-weight SSE objective.
-The four-role FP8 base and the nine recipe-specific DFlash companions are described below.
+The four-role FP8 base and registered DFlash companions are described below.
 
-`r9700-q4-selective-protected-n16k16-eval` is a separate source-derived evaluation recipe,
-not a production selection or DFlash companion. It starts from the exact all-Q4 N16K16 artifact
+`r9700-q4-selective-protected-n16k16-eval` is a separate source-derived evaluation base,
+not a production selection. It starts from the exact all-Q4 N16K16 artifact
 and replaces 28 physical objects: W8G32 token embedding/output head; BF16 attention query_key
 and gate_value at layers 3,7,11,15,19,23, attention output at 3,7, and GDN output at 4;
 row-scaled FP8 attention output at 11, query_key/gate_value at 27,31,51, and MLP gate_up/down
@@ -34,6 +34,23 @@ python3 -m tools.convert.qwen3_8_27b_r9700.convert_selective_protected \
 the converter's `validate(path, base, model)` reopens the completed output and verifies unchanged
 payloads against the base. Matched dense/G16 PPL evidence lives under
 `profiles/ppl/r9700-selective-protected-comparison-20260921`.
+
+The current DFlash integration target is its canonical-Q4 companion,
+`r9700-q4-selective-protected-n16k16-dflash2-q4-eval`. It preserves all 1,124 base
+object payloads byte-exact and appends the existing 66-object DFlash plan: 32 Q4G64
+matrices and 34 direct BF16 objects, including both model-specified selector codebooks.
+The projected tensor arena is 18,874,746,880 bytes. Only `canonical-q4g64` is admitted
+for this base; source-MSE companion recipes await acceptance evidence. The converter binds
+the selective base's conversion receipt to its exact artifact hash and never replaces the base.
+
+```bash
+python3.11 -m tools.convert.qwen3_8_27b_r9700.convert_dflash2_q4 \
+  --base out/qwen3.8-27b-r9700-q4-selective-protected-n16k16-eval.ninfer \
+  --dflash-model /ssdpool2nvme/local_llm/models/qwen3.8-27b-dflash2 --preflight-only
+```
+
+Materialization uses the same arguments plus an explicit fresh `--out` and `--device cpu`.
+Registration is not a numerical, acceptance, graph, or performance qualification.
 
 The provisional tensor counts are 582 BF16, 96 FP32, one I32, and 439 W8G32. Conversion starts only
 from the complete official BF16 source. It uses the target-owned inventory and source recipe under
@@ -257,7 +274,8 @@ reopen confirmed the exact ordered 1,124-object selected inventory and 295 Q4 de
 logical Q4 code/scale hashes and every non-Q4 payload hash matched the source, which remained
 unchanged.
 
-The three canonical-Q4 DFlash2 evaluation identities are
+In addition to the selective-protected canonical-Q4 companion above, the three older
+canonical-Q4 DFlash2 evaluation identities are
 `qwen3.8-27b/r9700-q4g64-n16k16-dflash2-q4-eval` and
 `qwen3.8-27b/r9700-q4-w8-mse-n16k16-dflash2-q4-eval`, plus
 `qwen3.8-27b/r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval`. They extend their named base inventories with the
@@ -266,14 +284,14 @@ BF16 selector codebooks. Base objects retain their identity-owned Q4G64/W8G32 or
 four-role rowwise-FP8 formats. DFlash Q4
 calls use the same compile-selected adaptive A8G64 execution intermediate and caller-owned
 workspace as base Q4 calls; K=25600 determines the enlarged workspace maximum. The binder requires
-the complete DFlash inventory for these identities and admits no DFlash objects under other
+the complete DFlash inventory for the explicit companion identities and admits no DFlash objects under base-only
 registered evaluation identities, preventing a byte-compatible base artifact from being silently
 reinterpreted as a DFlash package. DFlash grouped-convolution and selector child projections in
 these evaluator identities use
 the profile-derived Q4 type and the same caller-owned workspace; neither child may invoke the
 workspace-free Linear overload. Each base also has explicit `-dflash2-q4-mse-eval` and
 `-dflash2-w8-mse-eval` identities in place of the canonical `-dflash2-q4-eval` suffix, for nine
-registered evaluation companions. Source-MSE Q4 retains the same Q4 layout; source-MSE W8 binds
+older evaluation companions, plus the canonical-only selective-protected companion. Source-MSE Q4 retains the same Q4 layout; source-MSE W8 binds
 the 32 matrices as W8G32 row-split and derives child projection types from that identity.
 All 34 BF16 objects and every base payload, including the optimized 131072-row head and token map,
 are preserved. W8 workspace takes the maximum of the unchanged base and companion K25600

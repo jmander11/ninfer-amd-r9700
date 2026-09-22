@@ -37,6 +37,7 @@ enum class WeightsProfile : std::uint8_t {
     R9700W8Bf16GdnQueryKeyEvaluation,
     R9700Q4G64Evaluation,
     R9700Q4SelectiveProtectedN16K16Evaluation,
+    R9700Q4SelectiveProtectedDFlash2Q4Evaluation,
     R9700Q4G64Fp8FourRoleN16K16Evaluation,
     R9700Q4W8Evaluation,
     R9700Q4G64DFlash2Q4Evaluation,
@@ -49,6 +50,11 @@ enum class WeightsProfile : std::uint8_t {
     R9700Q4W8MseDFlash2W8MseEvaluation,
     R9700Q4G64Fp8FourRoleDFlash2W8MseEvaluation,
 };
+
+[[nodiscard]] constexpr bool is_selective_protected_profile(WeightsProfile profile) noexcept {
+    return profile == WeightsProfile::R9700Q4SelectiveProtectedN16K16Evaluation ||
+           profile == WeightsProfile::R9700Q4SelectiveProtectedDFlash2Q4Evaluation;
+}
 
 using Frontend       = qwen3::Frontend;
 using PreparedPrompt = qwen3::PreparedPrompt;

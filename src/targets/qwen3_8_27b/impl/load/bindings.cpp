@@ -33,6 +33,7 @@ NumericFormat matrix_format(WeightsProfile profile, bool source_q4) {
         return NumericFormat::W8G32_F16S;
     case WeightsProfile::R9700Q4G64Evaluation:
     case WeightsProfile::R9700Q4SelectiveProtectedN16K16Evaluation:
+    case WeightsProfile::R9700Q4SelectiveProtectedDFlash2Q4Evaluation:
     case WeightsProfile::R9700Q4G64Fp8FourRoleN16K16Evaluation:
     case WeightsProfile::R9700Q4G64DFlash2Q4Evaluation:
     case WeightsProfile::R9700Q4G64DFlash2Q4MseEvaluation:
@@ -56,7 +57,8 @@ NumericFormat dflash_matrix_format(WeightsProfile profile) {
         profile == WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2W8MseEvaluation) {
         return NumericFormat::W8G32_F16S;
     }
-    if (profile == WeightsProfile::R9700Q4G64DFlash2Q4MseEvaluation ||
+    if (profile == WeightsProfile::R9700Q4SelectiveProtectedDFlash2Q4Evaluation ||
+        profile == WeightsProfile::R9700Q4G64DFlash2Q4MseEvaluation ||
         profile == WeightsProfile::R9700Q4G64DFlash2Q4Evaluation ||
         profile == WeightsProfile::R9700Q4W8MseDFlash2Q4MseEvaluation ||
         profile == WeightsProfile::R9700Q4W8MseDFlash2Q4Evaluation ||
@@ -70,7 +72,7 @@ NumericFormat dflash_matrix_format(WeightsProfile profile) {
 }
 
 NumericFormat token_embedding_format(WeightsProfile profile) {
-    if (profile == WeightsProfile::R9700Q4SelectiveProtectedN16K16Evaluation)
+    if (is_selective_protected_profile(profile))
         return NumericFormat::W8G32_F16S;
     if (profile == WeightsProfile::R9700W8Bf16EmbeddingEvaluation) {
         return NumericFormat::BF16;
@@ -87,7 +89,7 @@ NumericFormat full_attention_value_output_format(WeightsProfile profile) {
 
 NumericFormat selected_fp8_role_format(WeightsProfile profile, std::string_view name,
                                        NumericFormat fallback) {
-    if (profile == WeightsProfile::R9700Q4SelectiveProtectedN16K16Evaluation)
+    if (is_selective_protected_profile(profile))
         return selective_protected::matrix_format(name);
     if (profile != WeightsProfile::R9700Q4G64Fp8FourRoleN16K16Evaluation &&
         profile != WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4MseEvaluation &&
@@ -221,7 +223,7 @@ void bind_r9700_text_layers(artifact::Binder& binder, BindingPlan& out,
             target.attention.key_norm = artifact::bind_device_tensor(
                 binder, prefix + "attention/key_norm", NumericFormat::BF16, {256});
             target.attention.output = bind_weight(binder, prefix + "attention/output",
-                                                  profile == WeightsProfile::R9700Q4SelectiveProtectedN16K16Evaluation
+                                                  is_selective_protected_profile(profile)
                                                       ? selective_protected::matrix_format(prefix + "attention/output")
                                                       : full_attention_value_output_format(profile),
                                                   {5120, 6144});
@@ -247,7 +249,7 @@ void bind_r9700_text_layers(artifact::Binder& binder, BindingPlan& out,
                                                            NumericFormat::BF16, {128});
             target.gdn.output =
                 bind_weight(binder, prefix + "gdn/output",
-                            profile == WeightsProfile::R9700Q4SelectiveProtectedN16K16Evaluation
+                            is_selective_protected_profile(profile)
                                 ? selective_protected::matrix_format(prefix + "gdn/output")
                                 : matrix_format(profile, false),
                             {5120, 6144});
@@ -260,7 +262,7 @@ void bind_r9700_text_layers(artifact::Binder& binder, BindingPlan& out,
                         {34816, 5120});
         target.mlp.down =
             bind_weight(binder, prefix + "mlp/down",
-                        profile == WeightsProfile::R9700Q4SelectiveProtectedN16K16Evaluation
+                        is_selective_protected_profile(profile)
                             ? selective_protected::matrix_format(prefix + "mlp/down")
                             : matrix_format(profile, false), {5120, 17408});
     }
@@ -302,7 +304,7 @@ ArtifactLoadPlan bind_artifact(artifact::Binder& binder, WeightsProfile weights_
     out.final_norm =
         artifact::bind_device_tensor(binder, "text/final_norm", NumericFormat::BF16, {5120});
     out.output_head = bind_weight(binder, "text/output_head",
-                                  weights_profile == WeightsProfile::R9700Q4SelectiveProtectedN16K16Evaluation
+                                  is_selective_protected_profile(weights_profile)
                                       ? NumericFormat::W8G32_F16S : matrix_format(weights_profile, false),
                                   {248320, 5120});
     const artifact::TensorPlacement proposal_placement =
@@ -367,6 +369,7 @@ ArtifactLoadPlan bind_artifact(artifact::Binder& binder, WeightsProfile weights_
 
     const bool has_dflash = binder.contains("dflash/feature_projection");
     const bool profile_requires_dflash =
+        weights_profile == WeightsProfile::R9700Q4SelectiveProtectedDFlash2Q4Evaluation ||
         weights_profile == WeightsProfile::R9700Q4G64DFlash2Q4MseEvaluation ||
         weights_profile == WeightsProfile::R9700Q4G64DFlash2W8MseEvaluation ||
         weights_profile == WeightsProfile::R9700Q4G64DFlash2Q4Evaluation ||

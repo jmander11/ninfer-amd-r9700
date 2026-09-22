@@ -84,6 +84,16 @@ directly needed for this goal. Main owns serialized GPU runs; independent agents
   then measure all modes on that same combined artifact. The four-role screen at
   `profiles/bench/r9700-dflash-post-port-baseline-20260922/` was stopped after the user clarified
   the intended model; retain partial evidence, but do not use it as this goal's primary baseline.
+  The selective companion is now created in
+  `/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-q4-selective-protected-dflash2-q4/`:
+  18,887,772,672 bytes; all1124 base and66 canonical-Q4/BF16 companion objects verified byte-exact.
+  Independent source review,14 Python tests, C++ registry/workspace tests and real graph execution
+  pass. C1/P128+G64/context1024 screen at
+  `profiles/bench/r9700-dflash-selective-baseline-20260922/summary.json` retains exact65tokens
+  across all9 measured runs: ordinary24.78694,K4 17.51063,K5 17.26805 decode-output tok/s.
+  Both speculative widths emit1.65789 tokens/round; service-inclusive decode/round is96.18/97.53ms.
+  This raw-text corpus is not chat-templated; add one representative matched chat case before
+  assigning low acceptance to quantization. Fixed-order screen is not challenger admission.
 - [ ] Attribute draft, verify and other round costs on the measured workload; distinguish low
   accepted/output tokens per round from slow verification. Graph markers alone are insufficient.
 - [ ] Evaluate base-decode mechanisms at verify T5/T6. T1-only predicates must not be widened

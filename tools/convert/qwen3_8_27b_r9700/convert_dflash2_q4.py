@@ -1,7 +1,8 @@
 """Append an explicit integer/BF16-codebook DFlash2 evaluator to an R9700 base.
 
 Accepted bases are exactly the all-Q4G64 evaluator, the source-MSE mixed Q4/W8 evaluator, and
-the authority-bound four-role rowwise-FP8/all-other-Q4 evaluator.
+the authority-bound four-role rowwise-FP8/all-other-Q4 evaluator, and the selective-protected
+evaluator (canonical-Q4 companion only).
 Every existing payload byte is copied unchanged; only the 66 source-derived DFlash2 objects are
 encoded and appended under a new identity.
 """
@@ -35,7 +36,7 @@ from tools.artifact.layouts import align_up
 from tools.convert.qwen3.common.inventory import ResourceSpec, TensorSpec
 
 from . import dflash2_matrix_recipes, dflash2_q4_inventory as inventory
-from . import fp8_hybrid_inventory, q4_inventory, q4_w8_mse_inventory
+from . import fp8_hybrid_inventory, q4_inventory, q4_w8_mse_inventory, selective_protected_inventory
 
 
 _COPY_CHUNK = 64 * 1024 * 1024
@@ -65,6 +66,12 @@ def _artifact_spec(obj: ArtifactObject) -> ArtifactResourceSpec | ArtifactTensor
 
 
 def _expected_base(identity: ArtifactIdentity):
+    if identity == ArtifactIdentity(inventory.MODEL_ID, inventory.SELECTIVE_BASE_WEIGHTS_ID):
+        return (
+            selective_protected_inventory.OBJECT_SPECS,
+            ArtifactIdentity(inventory.MODEL_ID, inventory.SELECTIVE_WEIGHTS_ID),
+            inventory.SELECTIVE_DEVICE_ARENA_BYTES,
+        )
     if identity == ArtifactIdentity(inventory.MODEL_ID, inventory.ALL_Q4_BASE_WEIGHTS_ID):
         return (
             q4_inventory.OBJECT_SPECS,
@@ -87,7 +94,8 @@ def _expected_base(identity: ArtifactIdentity):
         "DFlash2 Q4 evaluator base must be qwen3.8-27b/"
         f"{inventory.ALL_Q4_BASE_WEIGHTS_ID} or qwen3.8-27b/"
         f"{inventory.MIXED_BASE_WEIGHTS_ID}, or qwen3.8-27b/"
-        f"{inventory.HYBRID_BASE_WEIGHTS_ID}; got {identity.model_id}/{identity.weights_id}"
+        f"{inventory.HYBRID_BASE_WEIGHTS_ID}, or qwen3.8-27b/"
+        f"{inventory.SELECTIVE_BASE_WEIGHTS_ID}; got {identity.model_id}/{identity.weights_id}"
     )
 
 
@@ -159,6 +167,21 @@ def _sha256(path: Path) -> str:
 
 
 def _base_authority(path: Path, identity: ArtifactIdentity, artifact_sha256: str) -> dict | None:
+    if identity.weights_id == inventory.SELECTIVE_BASE_WEIGHTS_ID:
+        receipt_path = Path(str(path.resolve()) + ".conversion.json")
+        receipt = json.loads(receipt_path.read_text())
+        if (receipt.get("artifact_type") != "ninfer_r9700_selective_protected_conversion"
+                or receipt.get("schema_version") != 1
+                or receipt.get("identity") != _identity_record(identity)
+                or receipt.get("recipe_id") != selective_protected_inventory.RECIPE_ID
+                or receipt.get("weight_recipe_selected") is not False
+                or receipt.get("changed_formats") != selective_protected_inventory.CHANGED_FORMATS
+                or receipt.get("artifact") != {"path": str(path.resolve()),
+                    "bytes": path.stat().st_size, "sha256": artifact_sha256}):
+            raise ValueError("selective-protected base conversion authority differs")
+        return {"receipt": {"path": str(receipt_path), "sha256": _sha256(receipt_path)},
+                "recipe_id": receipt["recipe_id"], "source": receipt["source"],
+                "base": receipt["base"]}
     from tools.ppl.run import N16_MIGRATION_PROFILES
     if identity.weights_id not in N16_MIGRATION_PROFILES:
         return None
@@ -246,6 +269,7 @@ def preflight_summary(checked: Preflight, output: Path | None = None) -> dict[st
                 recipe
                 for recipe in inventory.MATRIX_RECIPE_SUMMARIES
                 if recipe["key"] != checked.matrix_recipe
+                and checked.base_identity.weights_id != inventory.SELECTIVE_BASE_WEIGHTS_ID
             ),
             "source_tensors": len(inventory.SOURCE_NAMES),
             "appended_objects": len(inventory.TENSOR_SPECS),

@@ -73,12 +73,10 @@ int main() {
         selective::matrix_format("mtp/layer/mlp/down") != NumericFormat::Q4G64_F16S ||
         selective::matrix_format("vision/merger/fc2") != NumericFormat::Q4G64_F16S)
         throw std::runtime_error("protected inventory changes unselected roles");
-    bool companion_rejected = false;
-    try {
-        (void)Package::resolve_weights({std::string(Package::model_id),
-            "r9700-q4-selective-protected-n16k16-dflash2-q4-eval"});
-    } catch (const std::runtime_error&) { companion_rejected = true; }
-    if (!companion_rejected) throw std::runtime_error("unregistered protected companion admitted");
+    if (Package::resolve_weights({std::string(Package::model_id),
+            "r9700-q4-selective-protected-n16k16-dflash2-q4-eval"}) !=
+            Profile::R9700Q4SelectiveProtectedDFlash2Q4Evaluation)
+        throw std::runtime_error("protected canonical Q4 companion identity not registered");
     const std::pair<const char*, Profile> mse_companions[] = {
         {"r9700-q4g64-n16k16-dflash2-q4-mse-eval", Profile::R9700Q4G64DFlash2Q4MseEvaluation},
         {"r9700-q4-w8-mse-n16k16-dflash2-q4-mse-eval", Profile::R9700Q4W8MseDFlash2Q4MseEvaluation},
