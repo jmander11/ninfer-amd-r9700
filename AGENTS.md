@@ -122,6 +122,17 @@ routing map, not a mandatory reading list:
   gfx1201 legality, qualified Op sweep, physical profiling, production path);
 - `include/ninfer/engine.h` and `include/ninfer/types.h`: in-tree C++ product interface.
 
+## Upstream synchronization
+
+Upstream `experimental` is reconciled through `e04fad3728573a0109236929f5d473475a8657f2`
+via custom AMD ports (`7187d95d`, `2eab0a50`, `49c896dd`), not merged ancestry.
+Unsupported NVIDIA paths were excluded; decisions are in `plans/r9700-autonomous-todos.md`.
+For future syncs, review upstream changes after this baseline against current AMD behavior,
+not `HEAD..upstream`; re-establish the baseline if upstream history was rewritten. Record
+source commits and advance the baseline only after each change is ported, already equivalent,
+or explicitly dispositioned. Do not fabricate ancestry with an `ours` merge or rewrite
+published history merely to mark upstream merged.
+
 ## Product and ownership boundaries
 
 These boundaries govern ordinary implementation work; an explicit architecture task may revise

@@ -73,6 +73,27 @@ above apply to every command.
 
 ### Current checkpoint
 
+ACTIVE DFLASH SPEED GOAL (2026-09-22): improve matched end-to-end DFlash output throughput,
+pursuing60+ tok/s without assuming it is achievable with kernel changes alone. Other prefill,
+XAttention and broad recipe campaigns stay paused; companion changes are in scope only when
+directly needed for this goal. Main owns serialized GPU runs; independent agents review sources.
+
+- [ ] Measure current ordinary/K4/K5 on identical target weights, prompt, greedy sampling,
+  context/cache and graph configuration; retain tokens and acceptance. Use the new
+  selective-protected base: add its missing DFlash companion without changing base payloads,
+  then measure all modes on that same combined artifact. The four-role screen at
+  `profiles/bench/r9700-dflash-post-port-baseline-20260922/` was stopped after the user clarified
+  the intended model; retain partial evidence, but do not use it as this goal's primary baseline.
+- [ ] Attribute draft, verify and other round costs on the measured workload; distinguish low
+  accepted/output tokens per round from slow verification. Graph markers alone are insufficient.
+- [ ] Evaluate base-decode mechanisms at verify T5/T6. T1-only predicates must not be widened
+  blindly. Initial source audit ranks exact-order gate/up scale gather ahead of normalization/
+  codec and residual fusions, conditional on current attribution; retain rejected split-K and
+  small-T remap evidence rather than repeating them.
+- [ ] Implement and qualify the strongest supported mechanism, address acceptance if limiting,
+  and verify a material matched whole-inference gain with exact greedy-token parity. Record
+  actual rates and remaining bottlenecks; commit at natural checkpoints.
+
 COMPLETED FULL FEATURE PARITY (user-authorized 2026-09-21): port all applicable non-kernel
 features from upstream experimental `e04fad37`, including p-less/epsilon sampling and its
 1/1024 probability floor, tool constraints/reasoning recovery, scheduling/host overhead,
