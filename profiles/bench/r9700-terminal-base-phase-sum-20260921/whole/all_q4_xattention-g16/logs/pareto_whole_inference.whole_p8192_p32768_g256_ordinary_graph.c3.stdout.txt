@@ -1,0 +1,1 @@
+wrote /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-terminal-base-phase-sum-20260921/whole/all_q4_xattention-g16/json/pareto_whole_inference/c3/whole_p8192_p32768_g256_ordinary_graph.json

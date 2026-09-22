@@ -1,5 +1,12 @@
 # Corrected phase-reporting terminal base campaign
 
+PAUSED BY USER 2026-09-21. The owned whole process group was stopped with SIGINT (exit130)
+during all-Q4 XAttention/G16 C4. Complete dense G16/G32 C1..4 and sparse G16 C1..3 are retained;
+the interrupted C4 is not evidence. No terminal selection or graph/eager controls have run.
+See `whole/closure.json`. Do not launch the commands below during this pause, resume this
+create-only namespace, or discard valid completed cells. Any future continuation requires an
+explicitly resumed task and a reviewed missing-cell producer that reuses retained evidence.
+
 Create-only successor to the stopped FP8-context whole campaign. No old package is resumed.
 Reopen its resource bridge, published chunk2048 and quality authorities, and all48 validated
 capacity reports (32 original nonhybrid plus16 accounted hybrid). Preserve all12 candidates and
@@ -8,8 +15,8 @@ then all-repetition graph versus one eager public-token control at each eligible
 
 Root owns physical execution and the separate `build.sh`; this owner never builds or reconverts.
 All four builds, host checks and bridge freeze are complete and independently reviewed. Whole
-execution is active; do not rerun its launch, host checks or freeze. The ordered producer commands
-below are retained for interpretation; the remaining stages are controls, then selection.
+execution is stopped; do not rerun its launch, host checks or freeze. The ordered producer commands
+below are retained for interpretation, not execution against the incomplete matrix.
 
 ```sh
 bash profiles/bench/r9700-terminal-base-phase-sum-20260921/commands.sh host-checks

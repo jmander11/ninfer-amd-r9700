@@ -73,6 +73,27 @@ above apply to every command.
 
 ### Current checkpoint
 
+USER PAUSE 2026-09-21: wrap up current work; pause XAttention. All active work is now stopped,
+including the whole-comparison queue. Unchecked tasks below are retained future work, not an
+instruction to restart during this pause. No GPU or agent job should remain active. The corrected
+phase-sum owner retains complete all-Q4 dense G16/G32 C1..4 and XAttention G16 C1..3. XAttention
+G16 C4 was interrupted by the user pause and has no admissible completed report. See
+`profiles/bench/r9700-terminal-base-phase-sum-20260921/whole/closure.json`. Do not rerun that
+create-only whole stage or execute controls/select against its incomplete matrix. On explicit
+resumption, reuse completed valid cells and create a reviewed missing-cell continuation; do not
+repeat completed chunk, numerical quality, capacity or whole cells. No terminal base is selected.
+Latest confirmed DFlash production evidence remains K4/W5 `17.40551875 tok/s` and K5/W6
+`17.60527624 tok/s`, versus matched ordinary about `19.82 tok/s`, under the retained scoped
+production-confirmation workload. No new selected-recipe DFlash benchmark has run.
+Priority correction: the main objective is DFlash throughput. Recent base/reporting work has not
+advanced that throughput. On resumption, first resolve the minimum base decision needed for a
+matched DFlash experiment using retained evidence; do not automatically restart the broad base/
+XAttention campaign. If that requires changing the current terminal-selection dependency or
+ranking contract, surface that explicit decision rather than silently claiming a final base or
+spending another long campaign on preparation. Preserve exact public-token and numerical gates.
+
+Retained pre-pause context:
+
 2026-09-21: bounded prefill optimization, chunk selection (2048), and all24 numerical-quality
 cells are complete. Twenty-two quality cells pass; mixed XAttention G16/G32 are excluded at32K.
 All48 base capacity cells now pass after the qualified FP8 ownership/accounting fix. Active owner:
@@ -85,8 +106,8 @@ campaign was stopped during C3; `whole/closure.json` preserves the exact scope. 
 `5eff7490` now emits schema21 serial-lane prefill-service sums; all four fresh builds, host
 tests/planners and a short C2 real-model reporting check pass. The reviewed successor is
 `profiles/bench/r9700-terminal-base-phase-sum-20260921`: its reporting-only bridge is frozen
-and independently validated; `commands.sh whole` is active. After it completes, run
-`commands.sh controls` and `commands.sh select` in that order. Do not rerun freeze or whole.
+and independently validated; `commands.sh whole` was stopped at the user pause above.
+Controls and selection have not run. Do not rerun freeze or whole.
 Keep the existing24 phase/whole objective policy. Do not rerun completed chunk, quality,
 capacity, resource qualification, host checks or the timing-ineligible reporting smoke. Finish graph/eager controls,
 publish base selection, and
