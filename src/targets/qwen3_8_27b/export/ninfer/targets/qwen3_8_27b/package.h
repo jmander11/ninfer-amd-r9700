@@ -36,6 +36,7 @@ enum class WeightsProfile : std::uint8_t {
     R9700W8Bf16AttentionValueOutputEvaluation,
     R9700W8Bf16GdnQueryKeyEvaluation,
     R9700Q4G64Evaluation,
+    R9700Q4SelectiveProtectedN16K16Evaluation,
     R9700Q4G64Fp8FourRoleN16K16Evaluation,
     R9700Q4W8Evaluation,
     R9700Q4G64DFlash2Q4Evaluation,

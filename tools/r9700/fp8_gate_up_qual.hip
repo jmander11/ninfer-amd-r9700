@@ -271,7 +271,7 @@ std::size_t free_device_bytes() {
 // Real selected gate-up, attention-QK/GV and GDN-QK geometries. Executions borrow the
 // same context and activation region, as in the serialized target Program.
 struct SharedContextCell {
-    static constexpr std::uint32_t columns = 5120U;
+    std::uint32_t columns;
     static constexpr std::uint32_t maximum_tokens = 2048U;
     std::uint32_t rows;
     DeviceBuffer<std::byte> payload;
@@ -281,8 +281,8 @@ struct SharedContextCell {
     ninfer::Weight weight{};
     std::unique_ptr<ops::LinearExecution> execution;
 
-    explicit SharedContextCell(std::uint32_t row_count)
-        : rows(row_count), payload(std::size_t(rows) * (columns + sizeof(float))),
+    explicit SharedContextCell(std::uint32_t row_count, std::uint32_t column_count = 5120U)
+        : columns(column_count), rows(row_count), payload(std::size_t(rows) * (columns + sizeof(float))),
           output(std::size_t(rows) * maximum_tokens),
           codes(std::size_t(rows) * columns), scales(rows) {
         constexpr std::array<std::uint8_t, 4> values{0x38U, 0x40U, 0x30U, 0xB8U};
@@ -338,6 +338,69 @@ struct SharedContextCell {
         return maximum_steps;
     }
 };
+
+void qualify_selective_protected(const std::string& report_path) {
+    const auto device = require_device_zero_auto();
+    ops::LinearExecutionContext context;
+    const auto capacity = ops::LinearExecution::activation_workspace_capacity_bytes(2048U, 17408U);
+    DeviceBuffer<std::byte> activation(capacity);
+    Stream stream;
+    std::ostringstream cases;
+    bool first = true;
+    for (const std::uint32_t columns : {6144U, 17408U}) {
+        SharedContextCell cell(5120U, columns);
+        std::vector<hip_bfloat16> input_host(std::size_t(2048U) * columns);
+        constexpr std::array<float, 4> values{1.0F, 0.5F, -1.0F, 2.0F};
+        for (std::size_t i = 0; i < input_host.size(); ++i)
+            input_host[i] = hip_bfloat16(values[(i / columns + i / 8U) % values.size()]);
+        DeviceBuffer<hip_bfloat16> input(input_host.size());
+        HIP_CHECK(hipMemcpy(input.get(), input_host.data(), input.bytes(), hipMemcpyHostToDevice));
+        cell.execution = std::make_unique<ops::LinearExecution>(context, cell.weight, capacity, 0U);
+        for (const auto width : {1U, 2047U, 2048U}) (void)cell.execution->prepare(width);
+        cell.execution->bind_storage(activation.get(), capacity, nullptr, 0U);
+        for (const auto width : {1U, 2047U, 2048U}) {
+            std::uint32_t maximum_steps = 0;
+            const auto check = [&] {
+                HIP_CHECK(hipStreamSynchronize(stream.get()));
+                maximum_steps = std::max(maximum_steps, cell.check(width, input_host));
+                std::vector<hip_bfloat16> host(std::size_t(width) * cell.rows);
+                HIP_CHECK(hipMemcpy(host.data(), cell.output.get(), host.size() * sizeof(hip_bfloat16),
+                                    hipMemcpyDeviceToHost));
+                for (const auto value : host)
+                    require(std::isfinite(static_cast<float>(value)), "protected FP8 produced nonfinite output");
+            };
+            require_launch(cell.execution->run(width, input.get(), cell.output.get(), stream.get()));
+            check();
+            hipGraph_t graph = nullptr;
+            hipGraphExec_t executable = nullptr;
+            HIP_CHECK(hipStreamBeginCapture(stream.get(), hipStreamCaptureModeGlobal));
+            require_launch(cell.execution->run(width, input.get(), cell.output.get(), stream.get()));
+            HIP_CHECK(hipStreamEndCapture(stream.get(), &graph));
+            HIP_CHECK(hipGraphInstantiate(&executable, graph, nullptr, nullptr, 0));
+            for (int replay = 0; replay < 2; ++replay) {
+                HIP_CHECK(hipMemsetAsync(cell.output.get(), 0xff,
+                    std::size_t(width) * cell.rows * sizeof(hip_bfloat16), stream.get()));
+                HIP_CHECK(hipGraphLaunch(executable, stream.get()));
+                check();
+            }
+            HIP_CHECK(hipGraphExecDestroy(executable));
+            HIP_CHECK(hipGraphDestroy(graph));
+            if (!first) cases << ',';
+            first = false;
+            cases << "{\"rows\":5120,\"columns\":" << columns << ",\"tokens\":" << width
+                  << ",\"maximum_bf16_steps\":" << maximum_steps << ",\"pass\":true}";
+        }
+    }
+    require(read_text(device.power_path) == "auto", "DPM changed during protected FP8 qualification");
+    std::ostringstream report;
+    report << "{\"schema_version\":1,\"artifact_type\":\"ninfer_r9700_selective_protected_fp8_qualification\","
+           << "\"pci_bus_id\":" << json_string(device.pci_bus_id)
+           << ",\"oracle\":\"sampled_full_k_fp64_public_bf16_times_exact_e4m3_and_stored_fp32_scale\","
+           << "\"all_outputs_finite\":true,\"graph_replays\":2,\"graph_outputs_poisoned_before_replay\":true,"
+           << "\"cases\":[" << cases.str() << "],\"pass\":true}\n";
+    publish_exclusive(report_path, report.str());
+    std::cout << report.str();
+}
 
 void qualify_shared_context(const std::string& report_path) {
     const auto device = require_device_zero_auto();
@@ -450,13 +513,18 @@ void qualify_shared_context(const std::string& report_path) {
 } // namespace
 
 int main(int argc, char** argv) try {
+    if (argc == 4 && std::string_view(argv[1]) == "--selective-protected" &&
+        std::string_view(argv[2]) == "--output") {
+        qualify_selective_protected(argv[3]);
+        return 0;
+    }
     if (argc == 4 && std::string_view(argv[1]) == "--shared-context" &&
         std::string_view(argv[2]) == "--output") {
         qualify_shared_context(argv[3]);
         return 0;
     }
     require(argc == 3 && std::string_view(argv[1]) == "--output",
-            "usage: ninfer_r9700_fp8_gate_up_qual [--shared-context] --output NEW_REPORT.json");
+            "usage: ninfer_r9700_fp8_gate_up_qual [--shared-context|--selective-protected] --output NEW_REPORT.json");
     const std::string report_path = argv[2];
     require(!report_path.empty(), "retained report path is empty");
     constexpr std::size_t tokens  = 2048U;

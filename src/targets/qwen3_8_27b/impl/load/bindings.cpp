@@ -2,6 +2,7 @@
 
 #include "artifact/typed_binding.h"
 #include "targets/qwen3_8_27b/impl/load/fp8_hybrid_selection.h"
+#include "targets/qwen3_8_27b/impl/load/selective_protected.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -31,6 +32,7 @@ NumericFormat matrix_format(WeightsProfile profile, bool source_q4) {
     case WeightsProfile::R9700W8Bf16GdnQueryKeyEvaluation:
         return NumericFormat::W8G32_F16S;
     case WeightsProfile::R9700Q4G64Evaluation:
+    case WeightsProfile::R9700Q4SelectiveProtectedN16K16Evaluation:
     case WeightsProfile::R9700Q4G64Fp8FourRoleN16K16Evaluation:
     case WeightsProfile::R9700Q4G64DFlash2Q4Evaluation:
     case WeightsProfile::R9700Q4G64DFlash2Q4MseEvaluation:
@@ -68,6 +70,8 @@ NumericFormat dflash_matrix_format(WeightsProfile profile) {
 }
 
 NumericFormat token_embedding_format(WeightsProfile profile) {
+    if (profile == WeightsProfile::R9700Q4SelectiveProtectedN16K16Evaluation)
+        return NumericFormat::W8G32_F16S;
     if (profile == WeightsProfile::R9700W8Bf16EmbeddingEvaluation) {
         return NumericFormat::BF16;
     }
@@ -83,6 +87,8 @@ NumericFormat full_attention_value_output_format(WeightsProfile profile) {
 
 NumericFormat selected_fp8_role_format(WeightsProfile profile, std::string_view name,
                                        NumericFormat fallback) {
+    if (profile == WeightsProfile::R9700Q4SelectiveProtectedN16K16Evaluation)
+        return selective_protected::matrix_format(name);
     if (profile != WeightsProfile::R9700Q4G64Fp8FourRoleN16K16Evaluation &&
         profile != WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4MseEvaluation &&
         profile != WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2W8MseEvaluation &&
@@ -215,7 +221,9 @@ void bind_r9700_text_layers(artifact::Binder& binder, BindingPlan& out,
             target.attention.key_norm = artifact::bind_device_tensor(
                 binder, prefix + "attention/key_norm", NumericFormat::BF16, {256});
             target.attention.output = bind_weight(binder, prefix + "attention/output",
-                                                  full_attention_value_output_format(profile),
+                                                  profile == WeightsProfile::R9700Q4SelectiveProtectedN16K16Evaluation
+                                                      ? selective_protected::matrix_format(prefix + "attention/output")
+                                                      : full_attention_value_output_format(profile),
                                                   {5120, 6144});
         } else {
             target.gdn.a_log       = artifact::bind_device_tensor(binder, prefix + "gdn/a_log",
@@ -238,7 +246,10 @@ void bind_r9700_text_layers(artifact::Binder& binder, BindingPlan& out,
             target.gdn.norm = artifact::bind_device_tensor(binder, prefix + "gdn/norm",
                                                            NumericFormat::BF16, {128});
             target.gdn.output =
-                bind_weight(binder, prefix + "gdn/output", matrix_format(profile, false),
+                bind_weight(binder, prefix + "gdn/output",
+                            profile == WeightsProfile::R9700Q4SelectiveProtectedN16K16Evaluation
+                                ? selective_protected::matrix_format(prefix + "gdn/output")
+                                : matrix_format(profile, false),
                             {5120, 6144});
         }
         target.post_attention_norm = artifact::bind_device_tensor(
@@ -248,7 +259,10 @@ void bind_r9700_text_layers(artifact::Binder& binder, BindingPlan& out,
                         mlp_gate_up_format(profile, prefix + "mlp/gate_up"),
                         {34816, 5120});
         target.mlp.down =
-            bind_weight(binder, prefix + "mlp/down", matrix_format(profile, false), {5120, 17408});
+            bind_weight(binder, prefix + "mlp/down",
+                        profile == WeightsProfile::R9700Q4SelectiveProtectedN16K16Evaluation
+                            ? selective_protected::matrix_format(prefix + "mlp/down")
+                            : matrix_format(profile, false), {5120, 17408});
     }
 }
 
@@ -287,7 +301,9 @@ ArtifactLoadPlan bind_artifact(artifact::Binder& binder, WeightsProfile weights_
     bind_r9700_text_layers(binder, out, weights_profile);
     out.final_norm =
         artifact::bind_device_tensor(binder, "text/final_norm", NumericFormat::BF16, {5120});
-    out.output_head = bind_weight(binder, "text/output_head", matrix_format(weights_profile, false),
+    out.output_head = bind_weight(binder, "text/output_head",
+                                  weights_profile == WeightsProfile::R9700Q4SelectiveProtectedN16K16Evaluation
+                                      ? NumericFormat::W8G32_F16S : matrix_format(weights_profile, false),
                                   {248320, 5120});
     const artifact::TensorPlacement proposal_placement =
         features.optimized_proposal() ? artifact::TensorPlacement::Device
@@ -463,10 +479,12 @@ LoadedModelData::LoadedModelData(BindingPlan plan, artifact::MaterializedArtifac
             target.key_norm   = artifact::materialized_tensor(backing, source.attention.key_norm,
                                                               NumericFormat::BF16, {256});
             target.output     = materialized_weight(backing, source.attention.output, 5120, 6144);
+            target.projection.output_execution = prepare_linear(target.output);
             target.post_attention_norm = artifact::materialized_tensor(
                 backing, source.post_attention_norm, NumericFormat::BF16, {5120});
             target.post_mixer = load_mlp(source.mlp, backing);
             target.post_mixer.gate_up_execution = prepare_linear(target.post_mixer.gate_up);
+            target.post_mixer.down_execution = prepare_linear(target.post_mixer.down);
         } else {
             GdnWeights& target = gdn_layers.at(gdn_index++);
             target.input_norm  = artifact::materialized_tensor(backing, source.input_norm,
@@ -491,6 +509,7 @@ LoadedModelData::LoadedModelData(BindingPlan plan, artifact::MaterializedArtifac
                 backing, source.post_attention_norm, NumericFormat::BF16, {5120});
             target.post_mixer = load_mlp(source.mlp, backing);
             target.post_mixer.gate_up_execution = prepare_linear(target.post_mixer.gate_up);
+            target.post_mixer.down_execution = prepare_linear(target.post_mixer.down);
         }
     }
     if (full_index != full_layers.size() || gdn_index != gdn_layers.size()) {

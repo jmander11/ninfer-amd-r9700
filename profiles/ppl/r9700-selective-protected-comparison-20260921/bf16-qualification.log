@@ -1,0 +1,8 @@
+device: arch=gfx1201 wave=32 vram_mib=32624
+selective-protected-bf16: PASS N=7168 K=5120 T=1 fp64_samples=9 full_K=5120 eager=PASS graph_replays=2 abs_tolerance=1e-05 rel_tolerance=0.0079 max_abs=6.10352e-05 max_normalized=0.225847
+selective-protected-bf16: PASS N=7168 K=5120 T=2047 fp64_samples=90 full_K=5120 eager=PASS graph_replays=2 abs_tolerance=1e-05 rel_tolerance=0.0079 max_abs=9.15527e-05 max_normalized=0.372587
+selective-protected-bf16: PASS N=7168 K=5120 T=2048 fp64_samples=90 full_K=5120 eager=PASS graph_replays=2 abs_tolerance=1e-05 rel_tolerance=0.0079 max_abs=6.10352e-05 max_normalized=0.372587
+selective-protected-bf16: PASS N=5120 K=6144 T=1 fp64_samples=9 full_K=6144 eager=PASS graph_replays=2 abs_tolerance=1e-05 rel_tolerance=0.0079 max_abs=9.15527e-05 max_normalized=0.455759
+selective-protected-bf16: PASS N=5120 K=6144 T=2047 fp64_samples=90 full_K=6144 eager=PASS graph_replays=2 abs_tolerance=1e-05 rel_tolerance=0.0079 max_abs=9.15527e-05 max_normalized=0.455759
+selective-protected-bf16: PASS N=5120 K=6144 T=2048 fp64_samples=90 full_K=6144 eager=PASS graph_replays=2 abs_tolerance=1e-05 rel_tolerance=0.0079 max_abs=9.15527e-05 max_normalized=0.455759
+selective-protected-bf16: ALL PASS represented BF16 inputs/weights full-K FP64 oracle

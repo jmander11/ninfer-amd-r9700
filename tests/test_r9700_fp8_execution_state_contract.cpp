@@ -144,6 +144,23 @@ int main() {
             detail::WeightsProfile::R9700Q4G64Evaluation, kPrefillTokens);
         const std::size_t expected =
             (std::max(fp8_activation, q4_activation) + 255U) / 256U * 256U;
+        const auto protected_profile = detail::WeightsProfile::R9700Q4SelectiveProtectedN16K16Evaluation;
+        const auto protected_linear = std::max(q4_activation,
+            ninfer::ops::linear_workspace_capacity_bytes(ninfer::QType::W8G32_F16S,
+                kPrefillTokens, detail::TextConfig::hidden));
+        const auto protected_fp8 = ninfer::ops::LinearExecution::activation_workspace_capacity_bytes(
+            kPrefillTokens, detail::TextConfig::intermediate);
+        require(Variant::linear_workspace_capacity_bytes(protected_profile, kPrefillTokens) ==
+                    protected_linear, "protected profile loses Q4 down or W8 head scratch");
+        require(Variant::execution_state_capacity_bytes(protected_profile, kPrefillTokens, kGraphTokens) ==
+                    (std::max(protected_linear, protected_fp8) + 255U) / 256U * 256U,
+                "protected FP8 down activation K17408 is not covered");
+        require(Variant::vision_linear_workspace_capacity_bytes(protected_profile, kPrefillTokens) ==
+                    Variant::vision_linear_workspace_capacity_bytes(
+                        detail::WeightsProfile::R9700Q4G64Evaluation, kPrefillTokens),
+                "protected profile changes Vision scratch");
+        require(Variant::runtime_allocation_overhead_bound(protected_profile) == (4U << 20U),
+                "protected FP8 profile omits physical arena rounding bound");
         require(Variant::execution_state_capacity_bytes(
                     detail::WeightsProfile::R9700Q4G64Fp8FourRoleN16K16Evaluation,
                     kPrefillTokens, kGraphTokens) == expected,

@@ -13,6 +13,28 @@ The same-size `r9700-w8g32-mse-eval` retains the all-W8 layout and runtime while
 stored FP16 group scale by a deterministic source-only decoded-weight SSE objective.
 The four-role FP8 base and the nine recipe-specific DFlash companions are described below.
 
+`r9700-q4-selective-protected-n16k16-eval` is a separate source-derived evaluation recipe,
+not a production selection or DFlash companion. It starts from the exact all-Q4 N16K16 artifact
+and replaces 28 physical objects: W8G32 token embedding/output head; BF16 attention query_key
+and gate_value at layers 3,7,11,15,19,23, attention output at 3,7, and GDN output at 4;
+row-scaled FP8 attention output at 11, query_key/gate_value at 27,31,51, and MLP gate_up/down
+at 62,63. All other objects, including draft-head shortlist/map, MTP and Vision, are copied
+byte-exact. Its file is 17,678,295,040 bytes; the tensor arena is 17,665,277,440 bytes,
+excluding runtime workspace and caches. Conversion is CPU-only and create-only:
+
+```bash
+python3 -m tools.convert.qwen3_8_27b_r9700.convert_selective_protected \
+  --base out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer \
+  --model /ssdpool2nvme/local_llm/models/qwen3.8-27b-bf16 \
+  --out out/qwen3.8-27b-r9700-q4-selective-protected-n16k16-eval.ninfer
+```
+
+`--validate-only` checks source metadata and projected inventory without writing. The adjacent
+`.conversion.json` records source/base provenance and copied/re-encoded object payloads;
+the converter's `validate(path, base, model)` reopens the completed output and verifies unchanged
+payloads against the base. Matched dense/G16 PPL evidence lives under
+`profiles/ppl/r9700-selective-protected-comparison-20260921`.
+
 The provisional tensor counts are 582 BF16, 96 FP32, one I32, and 439 W8G32. Conversion starts only
 from the complete official BF16 source. It uses the target-owned inventory and source recipe under
 `tools/convert/qwen3_8_27b_r9700`, validates checkpoint dimensions, all source tensors and shards,

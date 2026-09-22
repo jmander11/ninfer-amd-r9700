@@ -1132,7 +1132,7 @@ void TextContext::attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_la
     }
 
     Tensor a_flat = a.view({kCfg.q_size, T});
-    Variant::attention_output_projection(a_flat, *w.o_proj, x, ph, work_, s, route_tokens,
+    Variant::attention_output_projection(a_flat, *w.o_proj, x, ph, work_, s, text_layer,
                                          linear_execution_);
     if constexpr (requires { tap.capture_attention_stage(text_layer, "residual_x", x, s); }) {
         tap.capture_attention_stage(text_layer, "residual_x", x, s);

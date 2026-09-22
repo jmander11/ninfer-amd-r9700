@@ -1047,18 +1047,109 @@ void run_prefill_timings(int iterations) {
     }
 }
 
+// Numerical admission for the selectively restored source-BF16 projection
+// families. Public inputs are BF16 X and BF16 W; the oracle sums every K in
+// FP64, independently of the production reduction and staging arithmetic.
+void run_selective_protected_bf16_shape(std::uint32_t rows, std::uint32_t columns) {
+    const auto weights = make_weights(rows, columns, false);
+    DeviceBuffer<hip_bfloat16> d_weights(weights.size());
+    HIP_CHECK(hipMemcpy(d_weights.get(), weights.data(), d_weights.bytes(), hipMemcpyHostToDevice));
+    ninfer::Weight weight{};
+    weight.payload = weight.qdata = d_weights.get();
+    weight.payload_bytes = weight.qdata_bytes = d_weights.bytes();
+    weight.qtype = ninfer::QType::BF16_CTRL;
+    weight.layout = ninfer::QuantLayout::Contiguous;
+    weight.n = weight.shape[0] = weight.padded_shape[0] = rows;
+    weight.k = weight.shape[1] = weight.padded_shape[1] = columns;
+    weight.ndim = 2;
+    hipStream_t stream{};
+    HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    for (const std::uint32_t tokens : {1U, 2047U, 2048U}) {
+        const auto input = make_input(tokens, columns);
+        DeviceBuffer<hip_bfloat16> d_input(input.size());
+        DeviceBuffer<hip_bfloat16> d_output(static_cast<std::size_t>(tokens) * rows);
+        HIP_CHECK(hipMemcpy(d_input.get(), input.data(), d_input.bytes(), hipMemcpyHostToDevice));
+        ninfer::Tensor x(d_input.get(), ninfer::DType::BF16,
+                         {static_cast<int>(columns), static_cast<int>(tokens)});
+        ninfer::Tensor output(d_output.get(), ninfer::DType::BF16,
+                              {static_cast<int>(rows), static_cast<int>(tokens)});
+        std::vector<std::uint32_t> sampled_tokens{0U};
+        if (tokens > 1U) sampled_tokens = {0U, 1U, 15U, 16U, 31U, 32U,
+                                           1023U, 1024U, tokens - 2U, tokens - 1U};
+        const std::array<std::uint32_t, 9> sampled_rows{
+            0U, 1U, 7U, 8U, 15U, 16U, rows / 2U, rows - 2U, rows - 1U};
+        std::vector<double> expected;
+        for (const auto token : sampled_tokens) for (const auto row : sampled_rows) {
+            double sum = 0.;
+            for (std::uint32_t column = 0; column < columns; ++column) {
+                sum = std::fma(
+                    static_cast<double>(static_cast<float>(input[static_cast<std::size_t>(token) * columns + column])),
+                    static_cast<double>(static_cast<float>(weights[static_cast<std::size_t>(row) * columns + column])), sum);
+            }
+            expected.push_back(sum);
+        }
+        constexpr double absolute_tolerance = .00001;
+        constexpr double relative_tolerance = .0079; // At most about one BF16 output step.
+        double maximum_absolute = 0., maximum_normalized = 0.;
+        const auto check = [&] {
+            HIP_CHECK(hipStreamSynchronize(stream));
+            std::vector<hip_bfloat16> actual(d_output.count());
+            HIP_CHECK(hipMemcpy(actual.data(), d_output.get(), d_output.bytes(), hipMemcpyDeviceToHost));
+            for (auto value : actual)
+                if (!std::isfinite(static_cast<float>(value))) fail("selective BF16 nonfinite/unwritten output");
+            std::size_t sample = 0;
+            for (const auto token : sampled_tokens) for (const auto row : sampled_rows) {
+                const double oracle = expected[sample++];
+                const double error = std::abs(static_cast<float>(actual[static_cast<std::size_t>(token) * rows + row]) - oracle);
+                const double normalized = error / (absolute_tolerance + relative_tolerance * std::abs(oracle));
+                maximum_absolute = std::max(maximum_absolute, error);
+                maximum_normalized = std::max(maximum_normalized, normalized);
+                if (!std::isfinite(oracle) || !std::isfinite(normalized) || normalized > 1.)
+                    fail("selective BF16 FP64 mismatch N=" + std::to_string(rows) + " K=" + std::to_string(columns)
+                         + " T=" + std::to_string(tokens) + " token=" + std::to_string(token) + " row=" + std::to_string(row));
+            }
+        };
+        const auto invoke = [&] { ninfer::ops::linear(x, weight, output, stream); };
+        HIP_CHECK(hipMemsetAsync(d_output.get(), 0xff, d_output.bytes(), stream));
+        invoke();
+        check();
+        hipGraph_t graph{};
+        hipGraphExec_t executable{};
+        HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeThreadLocal));
+        invoke();
+        HIP_CHECK(hipStreamEndCapture(stream, &graph));
+        HIP_CHECK(hipGraphInstantiate(&executable, graph, nullptr, nullptr, 0));
+        for (int replay = 0; replay < 2; ++replay) {
+            HIP_CHECK(hipMemsetAsync(d_output.get(), 0xff, d_output.bytes(), stream));
+            HIP_CHECK(hipGraphLaunch(executable, stream));
+            check();
+        }
+        HIP_CHECK(hipGraphExecDestroy(executable));
+        HIP_CHECK(hipGraphDestroy(graph));
+        std::cout << "selective-protected-bf16: PASS N=" << rows << " K=" << columns << " T=" << tokens
+                  << " fp64_samples=" << expected.size() << " full_K=" << columns
+                  << " eager=PASS graph_replays=2 abs_tolerance=" << absolute_tolerance
+                  << " rel_tolerance=" << relative_tolerance << " max_abs=" << maximum_absolute
+                  << " max_normalized=" << maximum_normalized << '\n';
+    }
+    HIP_CHECK(hipStreamDestroy(stream));
+}
+
 int parse_iterations(int argc, char** argv) {
     int iterations = 3;
+    bool numerical_mode = false;
     for (int index = 1; index < argc; ++index) {
         const std::string_view argument(argv[index]);
         if (argument == "--iterations" && index + 1 < argc) {
             const long parsed = std::strtol(argv[++index], nullptr, 10);
             if (parsed <= 0 || parsed > 1000) fail("--iterations must be in [1,1000]");
             iterations = static_cast<int>(parsed);
-        } else if (argument == "--dflash-companion") {
+        } else if (argument == "--dflash-companion" || argument == "--selective-protected-bf16") {
             // Selected by main; this mode never enters the old timing sweep.
+            if (numerical_mode) fail("select exactly one numerical qualification mode");
+            numerical_mode = true;
         } else if (argument == "--help") {
-            std::cout << "usage: linear_op_qual [--iterations N] [--dflash-companion]\n";
+            std::cout << "usage: linear_op_qual [--iterations N] [--dflash-companion | --selective-protected-bf16]\n";
             std::exit(0);
         } else {
             fail("unknown or incomplete option: " + std::string(argument));
@@ -1073,6 +1164,12 @@ int main(int argc, char** argv) {
     try {
         const int iterations = parse_iterations(argc, argv);
         select_r9700();
+        if (std::any_of(argv + 1, argv + argc, [](const char* arg) { return std::string_view(arg) == "--selective-protected-bf16"; })) {
+            run_selective_protected_bf16_shape(7168U, 5120U);
+            run_selective_protected_bf16_shape(5120U, 6144U);
+            std::cout << "selective-protected-bf16: ALL PASS represented BF16 inputs/weights full-K FP64 oracle\n";
+            return 0;
+        }
         if (std::any_of(argv + 1, argv + argc, [](const char* arg) { return std::string_view(arg) == "--dflash-companion"; })) {
             if (ninfer::ops::r9700::linear::kW8ActivationBits != 8U)
                 fail("DFlash companion qualification requires the production adaptive W8-A8 build");

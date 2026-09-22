@@ -37,6 +37,8 @@ struct Variant {
         AttentionGateValue,
         GdnQueryKey,
         MlpGateUp,
+        AttentionOutput,
+        MlpDown,
     };
 
     // Program-owned bindings for loaded-target-prepared row-scaled-E4M3 Text projections.
@@ -197,7 +199,7 @@ struct Variant {
     static void attention_output_projection(const Tensor& attention, const Weight& weight,
                                             Tensor& residual, qwen3::TextPhase phase,
                                             WorkspaceArena& workspace, hipStream_t stream,
-                                            std::int32_t route_tokens = 0,
+                                            std::int32_t text_layer,
                                             ExecutionState* execution = nullptr);
     static void mtp_attention_projection(const Tensor& hidden,
                                          const MtpAttentionProjectionWeights& weights,
@@ -333,6 +335,7 @@ struct Variant {
     [[nodiscard]] static constexpr std::size_t runtime_allocation_overhead_bound(
         WeightsProfile profile) noexcept {
         return profile == WeightsProfile::R9700Q4G64Fp8FourRoleN16K16Evaluation ||
+               profile == WeightsProfile::R9700Q4SelectiveProtectedN16K16Evaluation ||
                profile == WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4Evaluation ||
                profile == WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4MseEvaluation ||
                profile == WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2W8MseEvaluation

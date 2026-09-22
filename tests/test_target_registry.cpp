@@ -1,6 +1,7 @@
 #include "targets/registry.h"
 
 #include "artifact/reader.h"
+#include "targets/qwen3_8_27b/impl/load/selective_protected.h"
 
 #include <iostream>
 #include <string>
@@ -39,6 +40,45 @@ int main() {
         return 1;
     }
     using Profile = Package::WeightsProfile;
+    if (Package::resolve_weights({std::string(Package::model_id),
+            "r9700-q4-selective-protected-n16k16-eval"}) !=
+            Profile::R9700Q4SelectiveProtectedN16K16Evaluation)
+        throw std::runtime_error("selective protected identity not registered");
+    using ninfer::artifact::NumericFormat;
+    namespace selective = ninfer::targets::qwen3_8_27b::detail::selective_protected;
+    std::size_t bf16_count = 0, fp8_count = 0;
+    for (int layer = 0; layer < 64; ++layer) {
+        const std::string prefix = "text/layers/" + std::to_string(layer) + "/";
+        const bool full = layer % 4 == 3;
+        const auto qk = selective::matrix_format(prefix + (full ? "attention/query_key" : "gdn/query_key"));
+        const auto gv = selective::matrix_format(prefix + (full ? "attention/gate_value" : "gdn/value_z"));
+        const auto output = selective::matrix_format(prefix + (full ? "attention/output" : "gdn/output"));
+        const auto gate_up = selective::matrix_format(prefix + "mlp/gate_up");
+        const auto down = selective::matrix_format(prefix + "mlp/down");
+        for (const auto format : {qk, gv, output, gate_up, down}) {
+            bf16_count += format == NumericFormat::BF16;
+            fp8_count += format == NumericFormat::F8E4M3_ROW_F32S;
+        }
+        const auto qk_expected = full && layer <= 23 ? NumericFormat::BF16 :
+            (layer == 27 || layer == 31 || layer == 51 ? NumericFormat::F8E4M3_ROW_F32S : NumericFormat::Q4G64_F16S);
+        if (qk != qk_expected || gv != qk_expected ||
+            gate_up != (layer >= 62 ? NumericFormat::F8E4M3_ROW_F32S : NumericFormat::Q4G64_F16S) ||
+            down != gate_up)
+            throw std::runtime_error("protected per-layer recipe differs");
+    }
+    if (bf16_count != 15 || fp8_count != 11 ||
+        selective::matrix_format("text/token_embedding") != NumericFormat::W8G32_F16S ||
+        selective::matrix_format("text/output_head") != NumericFormat::W8G32_F16S ||
+        selective::matrix_format("text/draft_head") != NumericFormat::Q4G64_F16S ||
+        selective::matrix_format("mtp/layer/mlp/down") != NumericFormat::Q4G64_F16S ||
+        selective::matrix_format("vision/merger/fc2") != NumericFormat::Q4G64_F16S)
+        throw std::runtime_error("protected inventory changes unselected roles");
+    bool companion_rejected = false;
+    try {
+        (void)Package::resolve_weights({std::string(Package::model_id),
+            "r9700-q4-selective-protected-n16k16-dflash2-q4-eval"});
+    } catch (const std::runtime_error&) { companion_rejected = true; }
+    if (!companion_rejected) throw std::runtime_error("unregistered protected companion admitted");
     const std::pair<const char*, Profile> mse_companions[] = {
         {"r9700-q4g64-n16k16-dflash2-q4-mse-eval", Profile::R9700Q4G64DFlash2Q4MseEvaluation},
         {"r9700-q4-w8-mse-n16k16-dflash2-q4-mse-eval", Profile::R9700Q4W8MseDFlash2Q4MseEvaluation},

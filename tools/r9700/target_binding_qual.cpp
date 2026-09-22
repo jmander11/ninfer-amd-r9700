@@ -5,6 +5,7 @@
 #include "ops/r9700/linear/r9700_w8_activation_profile.h"
 #include "targets/qwen3_8_27b/impl/load/bindings.h"
 #include "targets/qwen3_8_27b/impl/load/fp8_hybrid_selection.h"
+#include "targets/qwen3_8_27b/impl/load/selective_protected.h"
 #include "targets/qwen3_8_27b/impl/variant.h"
 
 #include <ninfer/targets/qwen3_8_27b/package.h>
@@ -750,6 +751,47 @@ ArtifactLoadPlan bind_fp8_q4_hybrid(const std::filesystem::path& path) {
 
 int main(int argc, char** argv) {
     try {
+        if (argc == 4 && std::string_view(argv[1]) == "--selective-protected") {
+            const auto bind = [](const char* path) {
+                ninfer::artifact::Reader reader(path);
+                require(Package::resolve_weights(reader.identity()) ==
+                    WeightsProfile::R9700Q4SelectiveProtectedN16K16Evaluation,
+                    "wrong protected identity");
+                ninfer::artifact::Binder binder(reader);
+                return ninfer::targets::qwen3_8_27b::detail::bind_artifact(binder,
+                    WeightsProfile::R9700Q4SelectiveProtectedN16K16Evaluation,
+                    {.vision = true, .speculative = ninfer::SpeculativeBackend::Mtp,
+                     .proposal_head = ninfer::ProposalHead::Optimized});
+            };
+            const auto plan = bind(argv[2]);
+            require(plan.materialization.object_count == 1124 &&
+                    plan.materialization.device_objects.size() == 1118 &&
+                    plan.materialization.device_capacity_bytes == 17'665'277'440ULL,
+                    "protected exact inventory/arena differs");
+            namespace selective = ninfer::targets::qwen3_8_27b::detail::selective_protected;
+            for (std::size_t layer = 0; layer < 64; ++layer) {
+                const auto& bound = plan.bindings.text_layers[layer];
+                const std::string prefix = "text/layers/" + std::to_string(layer) + "/";
+                require(bound.mlp.gate_up.format == selective::matrix_format(prefix + "mlp/gate_up") &&
+                        bound.mlp.down.format == selective::matrix_format(prefix + "mlp/down"),
+                        "protected MLP differs");
+                if (bound.is_full_attention) {
+                    require(bound.attention.projection.query_key.format == selective::matrix_format(prefix + "attention/query_key") &&
+                            bound.attention.projection.gate_value.format == selective::matrix_format(prefix + "attention/gate_value") &&
+                            bound.attention.output.format == selective::matrix_format(prefix + "attention/output"),
+                            "protected attention differs");
+                } else {
+                    require(bound.gdn.output.format == selective::matrix_format(prefix + "gdn/output"),
+                            "protected GDN differs");
+                }
+            }
+            bool rejected = false;
+            try { (void)bind(argv[3]); }
+            catch (const ninfer::artifact::ArtifactError&) { rejected = true; }
+            require(rejected, "protected binder accepted Q4 in an FP8-only selected role");
+            std::cout << "r9700_target_binding: PASS selective protected all1124objects, wrongFP8role rejected\n";
+            return 0;
+        }
         if (argc != 14) {
             throw std::invalid_argument(
                 "usage: target_binding_qual W8 INVALID_FORMAT Q4 Q4_W8 Q4_W8_MSE "

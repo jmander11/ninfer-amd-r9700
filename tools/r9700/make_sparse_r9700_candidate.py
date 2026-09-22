@@ -26,6 +26,7 @@ from tools.convert.qwen3_8_27b_r9700 import (
     q4_inventory,
     q4_w8_inventory,
     q4_w8_mse_inventory,
+    selective_protected_inventory,
     w8_bf16_attention_qk_inventory,
     w8_bf16_attention_vo_inventory,
     w8_bf16_embedding_inventory,
@@ -45,6 +46,9 @@ def align_up(value: int, alignment: int) -> int:
 
 
 def encoded_size(layout: str, numeric_format: str, shape: tuple[int, ...]) -> int:
+    if layout == "r9700-q4g64-n16-k16-v1":
+        from tools.artifact.layouts import encoded_size as storage_encoded_size
+        return storage_encoded_size(layout, numeric_format, shape)
     if layout == "contiguous-le-v1":
         word_bytes = {"BF16": 2, "FP32": 4, "I32": 4}[numeric_format]
         return prod(shape) * word_bytes
@@ -71,10 +75,14 @@ def encoded_size(layout: str, numeric_format: str, shape: tuple[int, ...]) -> in
     return scale_offset + scale_bytes
 
 
-def build_objects(specs: tuple[object, ...], *, wrong_token_format: bool) -> tuple[dict[str, object], ...]:
+def build_objects(specs: tuple[object, ...], *, wrong_token_format: bool,
+                  wrong_selected_format: bool = False) -> tuple[dict[str, object], ...]:
     objects: list[dict[str, object]] = []
     cursor = 0
     for spec in specs:
+        if wrong_selected_format and spec.name == "text/layers/63/mlp/down":
+            from tools.convert.qwen3.common.inventory import tensor_spec
+            spec = tensor_spec(spec.name, spec.shape, "Q4G64_F16S")
         if hasattr(spec, "format"):
             numeric_format = spec.format
             if wrong_token_format and spec.name == "text/token_embedding":
@@ -104,10 +112,13 @@ def build_objects(specs: tuple[object, ...], *, wrong_token_format: bool) -> tup
     return tuple(objects)
 
 
-def write_sparse(path: Path, *, profile: str, wrong_token_format: bool) -> None:
+def write_sparse(path: Path, *, profile: str, wrong_token_format: bool,
+                 wrong_selected_format: bool = False) -> None:
     if path.exists():
         raise FileExistsError(f"refusing to overwrite sparse qualifier artifact: {path}")
     model_id, weights_id, object_specs = {
+        "selective-protected": (selective_protected_inventory.MODEL_ID,
+            selective_protected_inventory.WEIGHTS_ID, selective_protected_inventory.OBJECT_SPECS),
         "w8": (inventory.MODEL_ID, inventory.WEIGHTS_ID, inventory.OBJECT_SPECS),
         "w8-mse": (w8_mse_inventory.MODEL_ID, w8_mse_inventory.WEIGHTS_ID,
                     w8_mse_inventory.OBJECT_SPECS),
@@ -156,7 +167,8 @@ def write_sparse(path: Path, *, profile: str, wrong_token_format: bool) -> None:
             dflash2_q4_inventory.MIXED_OBJECT_SPECS,
         ),
     }[profile]
-    objects = build_objects(object_specs, wrong_token_format=wrong_token_format)
+    objects = build_objects(object_specs, wrong_token_format=wrong_token_format,
+                            wrong_selected_format=wrong_selected_format)
     directory = json.dumps(
         {
             "identity": {
@@ -192,6 +204,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--wrong-token-format", action="store_true")
+    parser.add_argument("--wrong-selected-format", action="store_true")
     parser.add_argument(
         "--profile",
         choices=(
@@ -202,6 +215,7 @@ def main() -> None:
             "w8-bf16-attention-vo",
             "w8-bf16-gdn-qk",
             "q4",
+            "selective-protected",
             "fp8-q4-hybrid",
             "q4-w8",
             "q4-w8-mse",
@@ -218,7 +232,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.replace:
         args.out.unlink(missing_ok=True)
-    write_sparse(args.out, profile=args.profile, wrong_token_format=args.wrong_token_format)
+    write_sparse(args.out, profile=args.profile, wrong_token_format=args.wrong_token_format,
+                 wrong_selected_format=args.wrong_selected_format)
 
 
 if __name__ == "__main__":

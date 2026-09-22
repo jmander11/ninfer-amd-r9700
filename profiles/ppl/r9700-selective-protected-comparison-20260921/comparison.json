@@ -1,0 +1,284 @@
+{
+  "status": "completed",
+  "scope": "dense_g16_prefill_ppl_chunk2048_skip_half",
+  "production_selection": false,
+  "reference": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/ppl/r9700-terminal-quality-receipt-bound-n16k16-20260921/bf16-chunk2048-a/results.json",
+  "reference_sha256": "dd75a88491b3d5474ec5232ad2e9fde9fa79846104b559bf9a654e645f406457",
+  "candidates": {
+    "all_q4": {
+      "campaign": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/ppl/r9700-terminal-quality-receipt-bound-n16k16-20260921/all_q4_dense_quality/results.json",
+      "campaign_sha256": "ebb519506d0a150d2d76e94e7c9cc510ec378da4b12a7a2c9f2e0139fa419ed2",
+      "artifact": {
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer",
+        "bytes": 15172833280,
+        "sha256": "60719c5d5bfe978376c7de94db460bcd82d965ec447870cc47f0a02bf8d59953",
+        "model_id": "qwen3.8-27b",
+        "weights_id": "r9700-q4g64-n16k16-eval",
+        "conversion_receipt": {
+          "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer.conversion.json",
+          "sha256": "a8567a6b25176aac1f2106bcac3131b74d887e1a5be2c98da23c38a3a7870e54",
+          "recipe_id": "r9700-all-q4g64-n16k16-eval-v1",
+          "object_plan_sha256": "bff624cbfda357d7c8b355530824682b1625c68c1f909ddb8b4241c2b3d21ec6",
+          "source_artifact_sha256": "19d029a89c1ef1cf87420067555021a7c7b435c31a92bea7c64ccf42c03d80e9",
+          "source_receipt_sha256": "aa6861cc31c7db6aa06335b111507f4802d702c6e83ef8fc96c0714b9dc477f9",
+          "transcoder_sha256": "e988d0ecc7d20a12728aa8313a71221eeea9c30dfff5d998020a826baab52801",
+          "receipt_producer_sha256": "3fb4f58e376e5c8dbd333f06ef146796410eb7829de4130c408d8adc5a615d64"
+        },
+        "g16_path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer",
+        "g32_path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer"
+      },
+      "results": {
+        "8192": {
+          "raw_report": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/ppl/r9700-terminal-quality-receipt-bound-n16k16-20260921/all_q4_dense_quality/8192.prefill.r9700-g16.json",
+          "tokens_scored": 4095,
+          "mean_nll": 1.9055686231061215,
+          "ppl": 6.723229524577947,
+          "delta_mean_nll_vs_bf16": 0.03933768522753966,
+          "ppl_ratio_vs_bf16": 1.0401216580723884,
+          "paired_delta_standard_error": 0.005054551389185127,
+          "bf16_greedy_diagnostic": {
+            "argmax_exact": false,
+            "argmax_compared": 4095,
+            "argmax_mismatches": 433,
+            "argmax_first_mismatch": 7,
+            "argmax_flip_rate": 0.10573870573870574
+          },
+          "quality_tiers": {
+            "accuracy": {
+              "maximum_mean_nll_delta": 0.02,
+              "new_severe_positions": 7,
+              "new_severe_position_budget": 5,
+              "pass": false
+            },
+            "capacity-speed": {
+              "maximum_mean_nll_delta": 0.04879016416943205,
+              "new_severe_positions": 7,
+              "new_severe_position_budget": 11,
+              "pass": true
+            }
+          }
+        },
+        "32768": {
+          "raw_report": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/ppl/r9700-terminal-quality-receipt-bound-n16k16-20260921/all_q4_dense_quality/32768.prefill.r9700-g16.json",
+          "tokens_scored": 16383,
+          "mean_nll": 1.7735936573440467,
+          "ppl": 5.89198915132765,
+          "delta_mean_nll_vs_bf16": 0.04503838422060784,
+          "ppl_ratio_vs_bf16": 1.0460680116434453,
+          "paired_delta_standard_error": 0.0028149203186632675,
+          "bf16_greedy_diagnostic": {
+            "argmax_exact": false,
+            "argmax_compared": 16383,
+            "argmax_mismatches": 1676,
+            "argmax_first_mismatch": 26,
+            "argmax_flip_rate": 0.10230116584264176
+          },
+          "quality_tiers": {
+            "accuracy": {
+              "maximum_mean_nll_delta": 0.02,
+              "new_severe_positions": 36,
+              "new_severe_position_budget": 17,
+              "pass": false
+            },
+            "capacity-speed": {
+              "maximum_mean_nll_delta": 0.04879016416943205,
+              "new_severe_positions": 36,
+              "new_severe_position_budget": 41,
+              "pass": true
+            }
+          }
+        }
+      }
+    },
+    "four_role": {
+      "campaign": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/ppl/r9700-terminal-quality-receipt-bound-n16k16-20260921/four_role_dense_quality/results.json",
+      "campaign_sha256": "39d705c2914192f6be19771e847f59c32556b436e49f3f11c520eab3f4f157d6",
+      "artifact": {
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer",
+        "bytes": 21553549312,
+        "sha256": "040c6e7ed29c856718a638c00181975710d987b7d5f49f4cafbdf68911f7e7d2",
+        "model_id": "qwen3.8-27b",
+        "weights_id": "r9700-q4g64-f8e4m3-four-role-n16k16-eval",
+        "conversion_receipt": {
+          "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer.conversion.json",
+          "sha256": "2c5cb9f405ba581f685a96b1a2965ad3ff49b31280ebdd15d19158b6f4779c59",
+          "recipe_id": "r9700-q4g64-f8e4m3-four-role-n16k16-eval-v1",
+          "object_plan_sha256": "82692559ecd3293e68b3ea3e19df8b93b690d046bb764a476bf59178bd637227",
+          "source_artifact_sha256": "1dfe9626fd6412592f87480a2f6934e8494a4b267693a25831dff490959542ce",
+          "source_receipt_sha256": "a3bea3a6866b83bdb6ad9a382ca44b98ad009674c19a585d67ddb0f6a1ea9df7",
+          "transcoder_sha256": "e988d0ecc7d20a12728aa8313a71221eeea9c30dfff5d998020a826baab52801",
+          "selection_sha256": "b2ceeb63c581c0f26aab5a4d8c0958da34d836fcc5c47d377bce709eaf37e3e8",
+          "source_index_sha256": "77042094076611b69791a610065f28b7013b8c621795fa86ddccc8bac7d1b9df",
+          "source_ranking_sha256": "205b2d6c5b58d946c87b425578da13b5cfc32a0abe1ff201e95b47d032bf004e"
+        },
+        "g16_path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer",
+        "g32_path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer"
+      },
+      "results": {
+        "8192": {
+          "raw_report": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/ppl/r9700-terminal-quality-receipt-bound-n16k16-20260921/four_role_dense_quality/8192.prefill.r9700-g16.json",
+          "tokens_scored": 4095,
+          "mean_nll": 1.8891888684842175,
+          "ppl": 6.614001679457627,
+          "delta_mean_nll_vs_bf16": 0.022957930605635685,
+          "ppl_ratio_vs_bf16": 1.0232234922491188,
+          "paired_delta_standard_error": 0.0040810220330783666,
+          "bf16_greedy_diagnostic": {
+            "argmax_exact": false,
+            "argmax_compared": 4095,
+            "argmax_mismatches": 378,
+            "argmax_first_mismatch": 7,
+            "argmax_flip_rate": 0.09230769230769231
+          },
+          "quality_tiers": {
+            "accuracy": {
+              "maximum_mean_nll_delta": 0.02,
+              "new_severe_positions": 5,
+              "new_severe_position_budget": 5,
+              "pass": false
+            },
+            "capacity-speed": {
+              "maximum_mean_nll_delta": 0.04879016416943205,
+              "new_severe_positions": 5,
+              "new_severe_position_budget": 11,
+              "pass": true
+            }
+          }
+        },
+        "32768": {
+          "raw_report": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/ppl/r9700-terminal-quality-receipt-bound-n16k16-20260921/four_role_dense_quality/32768.prefill.r9700-g16.json",
+          "tokens_scored": 16383,
+          "mean_nll": 1.7574053339226767,
+          "ppl": 5.7973756088707855,
+          "delta_mean_nll_vs_bf16": 0.028850060799237843,
+          "ppl_ratio_vs_bf16": 1.0292702549452524,
+          "paired_delta_standard_error": 0.00217545324034294,
+          "bf16_greedy_diagnostic": {
+            "argmax_exact": false,
+            "argmax_compared": 16383,
+            "argmax_mismatches": 1399,
+            "argmax_first_mismatch": 33,
+            "argmax_flip_rate": 0.08539339559299274
+          },
+          "quality_tiers": {
+            "accuracy": {
+              "maximum_mean_nll_delta": 0.02,
+              "new_severe_positions": 28,
+              "new_severe_position_budget": 17,
+              "pass": false
+            },
+            "capacity-speed": {
+              "maximum_mean_nll_delta": 0.04879016416943205,
+              "new_severe_positions": 28,
+              "new_severe_position_budget": 41,
+              "pass": true
+            }
+          }
+        }
+      }
+    },
+    "selective_protected": {
+      "campaign": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/ppl/r9700-selective-protected-comparison-20260921/candidate/results.json",
+      "campaign_sha256": "8e6f0b329ddb0a42676f5d8f3e9d5ed19dc0a2e68bebd1d9646c0f44799e993c",
+      "artifact": {
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4-selective-protected-n16k16-eval.ninfer",
+        "bytes": 17678295040,
+        "sha256": "42fede52c8cd8ddcb77db68f00bca285c097df9c0f0dca1cedd89f1dd9adbd9a",
+        "model_id": "qwen3.8-27b",
+        "weights_id": "r9700-q4-selective-protected-n16k16-eval"
+      },
+      "results": {
+        "8192": {
+          "raw_report": "profiles/ppl/r9700-selective-protected-comparison-20260921/candidate/8192.prefill.r9700-g16.json",
+          "tokens_scored": 4095,
+          "mean_nll": 1.8933155292701953,
+          "ppl": 6.64135181437841,
+          "delta_mean_nll_vs_bf16": 0.027084591391613486,
+          "ppl_ratio_vs_bf16": 1.0274547129114975,
+          "paired_delta_standard_error": 0.004419499792250083,
+          "bf16_greedy_diagnostic": {
+            "argmax_exact": false,
+            "argmax_compared": 4095,
+            "argmax_mismatches": 342,
+            "argmax_first_mismatch": 11,
+            "argmax_flip_rate": 0.08351648351648351
+          },
+          "quality_tiers": {
+            "accuracy": {
+              "maximum_mean_nll_delta": 0.02,
+              "new_severe_positions": 9,
+              "new_severe_position_budget": 5,
+              "pass": false
+            },
+            "capacity-speed": {
+              "maximum_mean_nll_delta": 0.04879016416943205,
+              "new_severe_positions": 9,
+              "new_severe_position_budget": 11,
+              "pass": true
+            }
+          }
+        },
+        "32768": {
+          "raw_report": "profiles/ppl/r9700-selective-protected-comparison-20260921/candidate/32768.prefill.r9700-g16.json",
+          "tokens_scored": 16383,
+          "mean_nll": 1.7586633144030093,
+          "ppl": 5.804673183364658,
+          "delta_mean_nll_vs_bf16": 0.030108041279570476,
+          "ppl_ratio_vs_bf16": 1.0305658715943267,
+          "paired_delta_standard_error": 0.0024133198335103702,
+          "bf16_greedy_diagnostic": {
+            "argmax_exact": false,
+            "argmax_compared": 16383,
+            "argmax_mismatches": 1216,
+            "argmax_first_mismatch": 80,
+            "argmax_flip_rate": 0.0742232802295062
+          },
+          "quality_tiers": {
+            "accuracy": {
+              "maximum_mean_nll_delta": 0.02,
+              "new_severe_positions": 26,
+              "new_severe_position_budget": 17,
+              "pass": false
+            },
+            "capacity-speed": {
+              "maximum_mean_nll_delta": 0.04879016416943205,
+              "new_severe_positions": 26,
+              "new_severe_position_budget": 41,
+              "pass": true
+            }
+          }
+        }
+      }
+    }
+  },
+  "paired": {
+    "selective_minus_all_q4": {
+      "8192": {
+        "tokens": 4095,
+        "mean_delta_nll": -0.012253093835926172,
+        "mean_abs_delta_nll": 0.1271035947788038,
+        "max_abs_delta_nll": 3.0577964782714844
+      },
+      "32768": {
+        "tokens": 16383,
+        "mean_delta_nll": -0.014930342941037364,
+        "mean_abs_delta_nll": 0.13178677201773129,
+        "max_abs_delta_nll": 2.530292510986328
+      }
+    },
+    "selective_minus_four_role": {
+      "8192": {
+        "tokens": 4095,
+        "mean_delta_nll": 0.004126660785977803,
+        "mean_abs_delta_nll": 0.1573575202653114,
+        "max_abs_delta_nll": 2.888935089111328
+      },
+      "32768": {
+        "tokens": 16383,
+        "mean_delta_nll": 0.0012579804803326345,
+        "mean_abs_delta_nll": 0.16146107374264745,
+        "max_abs_delta_nll": 3.156553268432617
+      }
+    }
+  }
+}

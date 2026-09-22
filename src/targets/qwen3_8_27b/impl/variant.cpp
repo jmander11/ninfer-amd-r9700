@@ -36,7 +36,7 @@ namespace ninfer::targets::qwen3_8_27b::detail {
 namespace {
 
 constexpr std::size_t kExecutionAlignment = 256U;
-constexpr std::size_t kSelectedRoleCount  = 4U;
+constexpr std::size_t kSelectedRoleCount  = 6U;
 constexpr std::size_t kSelectedMatmulWorkspaceBytes = 0U;
 constexpr std::size_t kSelectedProjectionCount =
     3U * static_cast<std::size_t>(TextConfig::full_attention_layers()) +
@@ -54,11 +54,12 @@ std::size_t align_up(std::size_t value, std::size_t alignment, const char* label
 }
 
 std::size_t execution_activation_bytes(std::uint32_t prefill_tokens,
-                                       std::uint32_t maximum_graph_tokens) {
+                                       std::uint32_t maximum_graph_tokens,
+                                       std::uint32_t columns = TextConfig::hidden) {
     const std::uint32_t tokens = std::max(prefill_tokens, maximum_graph_tokens);
     if (tokens == 0U) return 0U;
     const std::size_t bytes =
-        ops::LinearExecution::activation_workspace_capacity_bytes(tokens, TextConfig::hidden);
+        ops::LinearExecution::activation_workspace_capacity_bytes(tokens, columns);
     if (bytes == 0U) {
         throw std::overflow_error("R9700 FP8 execution activation capacity overflows");
     }
@@ -66,9 +67,10 @@ std::size_t execution_activation_bytes(std::uint32_t prefill_tokens,
 }
 
 std::size_t execution_storage_bytes(std::uint32_t prefill_tokens,
-                                    std::uint32_t maximum_graph_tokens) {
+                                    std::uint32_t maximum_graph_tokens,
+                                    std::uint32_t columns = TextConfig::hidden) {
     const std::size_t activation = align_up(
-        execution_activation_bytes(prefill_tokens, maximum_graph_tokens), kExecutionAlignment,
+        execution_activation_bytes(prefill_tokens, maximum_graph_tokens, columns), kExecutionAlignment,
         "R9700 FP8 execution activation alignment overflows");
     return checked_add(activation, kSelectedMatmulWorkspaceBytes,
                        "R9700 FP8 execution storage capacity overflows");
@@ -87,6 +89,7 @@ void validate_profile(WeightsProfile profile) {
         profile != WeightsProfile::R9700W8Bf16AttentionValueOutputEvaluation &&
         profile != WeightsProfile::R9700W8Bf16GdnQueryKeyEvaluation &&
         profile != WeightsProfile::R9700Q4G64Evaluation &&
+        profile != WeightsProfile::R9700Q4SelectiveProtectedN16K16Evaluation &&
         profile != WeightsProfile::R9700Q4G64Fp8FourRoleN16K16Evaluation &&
         profile != WeightsProfile::R9700Q4W8Evaluation &&
         profile != WeightsProfile::R9700Q4G64DFlash2Q4MseEvaluation &&
@@ -293,12 +296,23 @@ Variant::ExecutionState::ExecutionState(const ModelView& model, DeviceSpan seria
         throw std::overflow_error("R9700 FP8 execution graph width overflows");
     }
     const auto maximum_graph_tokens = static_cast<std::uint32_t>(maximum_graph_tokens64);
+    std::uint32_t maximum_fp8_columns = TextConfig::hidden;
+    const auto include_fp8_columns = [&](const Weight& weight) {
+        if (weight.qtype == QType::F8E4M3_ROW_F32S)
+            maximum_fp8_columns = std::max(maximum_fp8_columns, static_cast<std::uint32_t>(weight.k));
+    };
+    for (const auto& layer : model.full_layers) {
+        include_fp8_columns(layer.output);
+        include_fp8_columns(layer.post_mixer.down);
+    }
+    for (const auto& layer : model.gdn_layers) include_fp8_columns(layer.post_mixer.down);
     const std::size_t activation_bytes =
-        execution_activation_bytes(prefill_tokens, maximum_graph_tokens);
+        execution_activation_bytes(prefill_tokens, maximum_graph_tokens, maximum_fp8_columns);
     const std::size_t activation_region = align_up(
         activation_bytes, kExecutionAlignment,
         "R9700 FP8 execution activation alignment overflows");
-    const std::size_t required = execution_storage_bytes(prefill_tokens, maximum_graph_tokens);
+    const std::size_t required = execution_storage_bytes(prefill_tokens, maximum_graph_tokens,
+                                                        maximum_fp8_columns);
     if (serialized_storage.data == nullptr || serialized_storage.bytes < required ||
         reinterpret_cast<std::uintptr_t>(serialized_storage.data) % kExecutionAlignment != 0U) {
         throw std::invalid_argument("R9700 FP8 execution serialized region is invalid");
@@ -348,6 +362,10 @@ Variant::ExecutionState::ExecutionState(const ModelView& model, DeviceSpan seria
                     weights.projection.gate_value, weights.projection.gate_value_execution);
             install(SelectedLinearRole::MlpGateUp, layer, weights.post_mixer.gate_up,
                     weights.post_mixer.gate_up_execution);
+            install(SelectedLinearRole::AttentionOutput, layer, weights.output,
+                    weights.projection.output_execution);
+            install(SelectedLinearRole::MlpDown, layer, weights.post_mixer.down,
+                    weights.post_mixer.down_execution);
         } else {
             const auto& weights = model.gdn_layers[static_cast<std::size_t>(
                 TextConfig::gdn_index(layer))];
@@ -356,9 +374,12 @@ Variant::ExecutionState::ExecutionState(const ModelView& model, DeviceSpan seria
                     weights.projection.input_projection.query_key_execution);
             install(SelectedLinearRole::MlpGateUp, layer, weights.post_mixer.gate_up,
                     weights.post_mixer.gate_up_execution);
+            install(SelectedLinearRole::MlpDown, layer, weights.post_mixer.down,
+                    weights.post_mixer.down_execution);
         }
     }
-    if (impl_->selected != 0U && impl_->selected != kSelectedProjectionCount) {
+    if (impl_->selected != 0U && impl_->selected != kSelectedProjectionCount &&
+        impl_->selected != 11U) {
         throw std::invalid_argument(
             "R9700 FP8 execution state has an incomplete selected inventory");
     }
@@ -964,14 +985,19 @@ std::size_t Variant::text_prefill_attention_workspace_capacity_bytes(
 void Variant::attention_output_projection(const Tensor& attention, const Weight& weight,
                                           Tensor& residual, qwen3::TextPhase phase,
                                           WorkspaceArena& workspace, hipStream_t stream,
-                                          std::int32_t, ExecutionState* execution) {
+                                          std::int32_t text_layer, ExecutionState* execution) {
     if (execution != nullptr &&
         execution->projected_residual_t1(attention, weight, residual, phase, true, stream)) {
         return;
     }
     auto scope = workspace.scope();
     Tensor delta = workspace.alloc(DType::BF16, {TextConfig::hidden, attention.ne[1]});
-    serialized_linear(execution, attention, weight, delta, workspace, stream);
+    if (weight.qtype == QType::F8E4M3_ROW_F32S) {
+        selected_linear(execution, SelectedLinearRole::AttentionOutput, text_layer,
+                        attention, weight, delta, workspace, stream);
+    } else {
+        serialized_linear(execution, attention, weight, delta, workspace, stream);
+    }
     ops::residual_add(delta, residual, stream);
 }
 
@@ -1251,7 +1277,12 @@ void post_mixer_body(const Tensor& hidden, const Variant::PostMixerWeights& weig
                 route_tokens, text_layer, static_cast<std::uint32_t>(activation.ne[1]),
                 static_cast<std::uint32_t>(weights.down.n),
                 static_cast<std::uint32_t>(weights.down.k), weights.down.qtype, weights.down.layout);
-        serialized_linear(execution, activation, weights.down, delta, workspace, stream, verify_down);
+        if (weights.down.qtype == QType::F8E4M3_ROW_F32S) {
+            selected_linear(execution, Variant::SelectedLinearRole::MlpDown, text_layer,
+                            activation, weights.down, delta, workspace, stream);
+        } else {
+            serialized_linear(execution, activation, weights.down, delta, workspace, stream, verify_down);
+        }
         ops::residual_add(delta, residual, stream);
     }
 }
@@ -1422,6 +1453,10 @@ std::size_t Variant::linear_workspace_capacity_bytes(WeightsProfile profile,
     validate_profile(profile);
     // Companion activation storage is independent of the unchanged base recipe.
     switch (profile) {
+    case WeightsProfile::R9700Q4SelectiveProtectedN16K16Evaluation:
+        return std::max(
+            ops::linear_workspace_capacity_bytes(QType::Q4G64_F16S, tokens, TextConfig::intermediate),
+            ops::linear_workspace_capacity_bytes(QType::W8G32_F16S, tokens, TextConfig::hidden));
     case WeightsProfile::R9700Q4G64DFlash2W8MseEvaluation:
     case WeightsProfile::R9700Q4W8MseDFlash2W8MseEvaluation:
     case WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2W8MseEvaluation: {
@@ -1473,6 +1508,8 @@ std::size_t Variant::vision_linear_workspace_capacity_bytes(WeightsProfile profi
                                                              std::int32_t tokens) {
     validate_profile(profile);
     switch (profile) {
+    case WeightsProfile::R9700Q4SelectiveProtectedN16K16Evaluation:
+        return vision_linear_workspace_capacity_bytes(WeightsProfile::R9700Q4G64Evaluation, tokens);
     case WeightsProfile::R9700W8G32Candidate:
     case WeightsProfile::R9700W8Bf16EmbeddingEvaluation:
     case WeightsProfile::R9700W8Bf16AttentionQueryKeyEvaluation:
@@ -1516,6 +1553,10 @@ std::size_t Variant::execution_state_capacity_bytes(WeightsProfile profile,
     }
     const std::uint32_t tokens = std::max(prefill_tokens, maximum_graph_tokens);
     std::size_t bytes = linear_workspace_capacity_bytes(profile, static_cast<std::int32_t>(tokens));
+    if (profile == WeightsProfile::R9700Q4SelectiveProtectedN16K16Evaluation) {
+        bytes = std::max(bytes, execution_storage_bytes(prefill_tokens, maximum_graph_tokens,
+                                                        TextConfig::intermediate));
+    }
     if (profile == WeightsProfile::R9700Q4G64Fp8FourRoleN16K16Evaluation ||
         profile == WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4MseEvaluation ||
         profile == WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2W8MseEvaluation ||

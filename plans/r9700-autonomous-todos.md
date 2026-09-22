@@ -73,6 +73,17 @@ above apply to every command.
 
 ### Current checkpoint
 
+COMPLETED NARROW TASK: created `r9700-q4-selective-protected-n16k16-eval`, exactly
+17,678,295,040 bytes, from all-Q4 with 2 W8 vocabulary endpoints,15 BF16 protections and11
+selective FP8 objects; all other payloads copied byte-exact. Source/runtime review, CPU format
+checks, actual-artifact binding and new-shape FP64/eager/graph checks passed. Matched dense/G16,
+chunk2048,C1,skip-half PPL at8K/32K: selective6.641352/5.804673, all-Q4 6.723230/5.891989,
+four-role6.614002/5.797376. All three pass capacity-speed quality and fail strict accuracy.
+Selective is17.98% smaller than four-role; no speed or production-selection claim. Exact
+commands, reports, sidecars and comparison are in
+`profiles/ppl/r9700-selective-protected-comparison-20260921`. This bounded user request is
+complete and does not resume the paused speed/XAttention/DFlash campaigns below.
+
 USER PAUSE 2026-09-21: wrap up current work; pause XAttention. All active work is now stopped,
 including the whole-comparison queue. Unchecked tasks below are retained future work, not an
 instruction to restart during this pause. No GPU or agent job should remain active. The corrected
