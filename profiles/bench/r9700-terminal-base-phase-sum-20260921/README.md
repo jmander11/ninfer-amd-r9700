@@ -50,3 +50,9 @@ C3 aggregate prefill/decode means are1184.824171/46.40229132 tok/s at8K and
 403.3075828/37.92118897 respectively. C3/C4 public tokens repeat exactly across all three
 measurements. Graph/eager controls remain pending. The campaign has advanced to dense/G32;
 this first completed profile alone cannot select the base artifact.
+
+All-Q4 dense/G32 also completes C1..4 with native validation and exact tokens across repetitions.
+Its C1 prefill/decode means are1199.992919/29.08939875 tok/s at8K and
+404.5819924/23.39672884 at32K; C4 gives1186.881760/53.76687820 and
+405.1108418/38.03353668. Both dense groups are close at these workloads. The active campaign
+has advanced to all-Q4 XAttention/G16; token controls and terminal selection remain pending.
