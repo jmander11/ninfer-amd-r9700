@@ -56,3 +56,9 @@ Its C1 prefill/decode means are1199.992919/29.08939875 tok/s at8K and
 404.5819924/23.39672884 at32K; C4 gives1186.881760/53.76687820 and
 405.1108418/38.03353668. Both dense groups are close at these workloads. The active campaign
 has advanced to all-Q4 XAttention/G16; token controls and terminal selection remain pending.
+
+First XAttention/G16 C1 whole cell passes native validation and exact repeated tokens.
+Prefill/decode means are1139.201347/29.16810187 tok/s at8K and571.0339222/23.29515977
+at32K. Relative to matched dense/G16 C1, prefill is0.951887675x at8K and1.422749855x at32K:
+sparse prefill has a measured context-length tradeoff, not a universal win. This remains
+evaluation evidence, not XAttention production admission.
