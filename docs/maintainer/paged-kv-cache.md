@@ -313,6 +313,14 @@ a device lane. Capture is D2H on the copy stream and keeps source pages mapped u
 completes. Restore validates the entire image before any H2D write, chooses a free lane/mapping,
 writes exact physical bytes, then orders compute after the copy event immediately before prefill.
 
+Resident and RAM reuse candidates must satisfy the selected backend's readiness requirements
+before longest-prefix ranking; an unusable longer candidate cannot hide a usable shorter one.
+An exact ordinary hit requires valid tail hidden state. Each staged checkpoint's lifetime event
+covers both its capture and subsequent H2D readers, so releasing the head waits for its last use,
+not just its initial D2H capture. Retired RAM storage transfers ownership only after its retirement
+record is allocated. Pinned-arena allocation failure leaves existing allocations/free space intact;
+releasing valid blocks requires no metadata allocation.
+
 The RAM image version binds an FP8-K/INT4-V semantic fingerprint containing codec version, page
 size, physical/logical capacity, layer/head geometry, value group, and all plane orders. A mismatch
 rejects before any destination byte changes. Text and MTP fingerprints are independent.

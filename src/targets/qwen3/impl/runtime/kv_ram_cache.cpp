@@ -454,18 +454,15 @@ KVRamCache::KVRamCache(std::size_t capacity_bytes) : arena_(capacity_bytes) {}
 
 KVRamCache::~KVRamCache() {
     reap_retired(true);
-    std::vector<std::uint64_t> ids(fifo_.begin(), fifo_.end());
-    for (std::uint64_t id : ids) {
-        auto it = records_.find(id);
-        if (it == records_.end()) { continue; }
-        if (it->second.copies_start != nullptr) {
-            (void)hipEventDestroy(it->second.copies_start);
-            it->second.copies_start = nullptr;
+    for (auto& [id, record] : records_) {
+        if (record.copies_start != nullptr) {
+            (void)hipEventDestroy(record.copies_start);
+            record.copies_start = nullptr;
         }
-        if (it->second.copies_done != nullptr) {
-            (void)hipEventSynchronize(it->second.copies_done);
-            (void)hipEventDestroy(it->second.copies_done);
-            it->second.copies_done = nullptr;
+        if (record.copies_done != nullptr) {
+            (void)hipEventSynchronize(record.copies_done);
+            (void)hipEventDestroy(record.copies_done);
+            record.copies_done = nullptr;
         }
     }
     records_.clear();
@@ -623,9 +620,9 @@ void KVRamCache::retire_record(Record& record) {
     RetiredCopy item;
     item.block       = record.block;
     item.copies_done = record.copies_done;
+    retired_.push_back(item);
     record.block     = nullptr;
     record.copies_done = nullptr;
-    retired_.push_back(item);
 }
 
 void KVRamCache::reap_retired(bool block) {
@@ -712,7 +709,8 @@ void KVRamCache::consume(std::uint64_t entry_id) {
 }
 
 std::optional<RamMatch> KVRamCache::plan_match(const PreparedPromptData& prompt,
-                                               std::span<const PrefixHash128> hash_chain) {
+                                               std::span<const PrefixHash128> hash_chain,
+                                               const ReuseBackendPolicy& policy) {
     std::optional<RamMatch> best;
     for (std::uint64_t id : fifo_) {
         const Record& record = require(id);
@@ -736,8 +734,15 @@ std::optional<RamMatch> KVRamCache::plan_match(const PreparedPromptData& prompt,
         const RamRestoredHost host = host_from_header(record.block, header);
         RamMatch candidate;
         candidate.entry_id = id;
+        const ResidentReuseState state{
+            .mtp_kv_valid = host.mtp_kv_valid,
+            .dflash_context_frontier = host.dflash_context_frontier,
+            .tail_hidden_valid = host.tail_hidden_valid,
+            .backend_image_present = host.backend_image_present,
+        };
         const auto consider = [&](PrefixReusePath path, std::uint32_t base) {
-            if (base == 0) { return; }
+            if (base == 0 || !reuse_candidate_ready(state, path, base,
+                                                     prompt.token_ids.size(), policy)) { return; }
             ++exact_comparisons_;
             if (!prefix_matches(prompt, host.ledger, host.identity, base)) { return; }
             if (base > candidate.reuse_base) {

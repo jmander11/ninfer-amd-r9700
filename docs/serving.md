@@ -588,6 +588,8 @@ VRAM-resident restore that unpacks already-pinned lane GDN are not included. Thr
 those two keys as interval sums. Its `speculative` object contains `backend`, `draft_window`, `rounds`,
 `drafted_tokens`, `accepted_tokens`, `fallback_steps`, and `accepted_per_position`. Rates can be
 derived downstream from raw token counts and seconds instead of rounded stderr strings.
+When a stop cuts a licensed speculative round short, accepted-token counters include only the
+committed drafts; rounds and drafted-token counters still include the work performed.
 
 The JSONL file contains no generated response text and never records an API-key value; `argv`
 replaces that value with `<redacted>`. The existing stderr summaries remain available for operators

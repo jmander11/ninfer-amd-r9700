@@ -161,7 +161,8 @@ public:
     KVRamCache& operator=(KVRamCache&&)      = delete;
 
     [[nodiscard]] std::optional<RamMatch> plan_match(const PreparedPromptData& prompt,
-                                                     std::span<const PrefixHash128> hash_chain);
+                                                     std::span<const PrefixHash128> hash_chain,
+                                                     const ReuseBackendPolicy& policy);
 
     void claim(std::uint64_t entry_id);
     void release(std::uint64_t entry_id);

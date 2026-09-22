@@ -53,11 +53,16 @@ set_tests_properties(ninfer_fp8_gate_up_hardware_proof_host_test PROPERTIES
   WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
 # Model-independent framing and supported host/runtime policies.
+ninfer_add_r9700_test(ninfer_speculative_stats_test
+  SOURCES test_speculative_stats.cpp)
 ninfer_add_r9700_test(ninfer_artifact_reader_test
   SOURCES test_ninfer_artifact_reader.cpp
   LIBRARIES ninfer_artifact)
 ninfer_add_r9700_test(ninfer_tensor_test
   SOURCES test_tensor.cpp
+  LIBRARIES ninfer_r9700_core)
+ninfer_add_r9700_test(ninfer_pinned_arena_recovery_test
+  SOURCES test_pinned_arena_recovery.cpp
   LIBRARIES ninfer_r9700_core)
 ninfer_add_r9700_test(ninfer_admission_policy_test
   SOURCES test_admission_policy.cpp

@@ -73,6 +73,34 @@ above apply to every command.
 
 ### Current checkpoint
 
+COMPLETED BOUNDED UPSTREAM INTEGRATION: upstream `experimental` fetched at `e04fad37`; AMD
+checkpoint `41e272ee` was preserved while integration was verified on
+`integration/upstream-experimental-20260921` in the sibling `ninfer-amd-r9700-upstream-integration-20260921`
+worktree. This is selective porting, not a wholesale rebase or a claim of full upstream parity.
+Current batch preserves existing product behavior: prelaunch cancellation, speculative tail
+validity/committed statistics, resident/RAM reuse readiness, host-image DMA lifetime and pinned
+allocator exception safety. Latest upstream semantics take precedence over reverted intermediate
+fixes. New p-less defaults, constrained-tool/reasoning recovery and SSD-cache features require a
+separate product decision; CUDA kernel optimizations and startup parallelization are not part of
+this correctness batch. Existing performance campaigns remain paused.
+
+Source provenance: `c075cc38` prelaunch filtering with `64840a95`'s corrected ordinary
+postlaunch semantics (clear, do not fabricate rollback); `0412f177` speculative tail invalidation;
+`b2b1b7e4` committed-prefix statistics; `64840a95` RAM readiness/ownership fixes adapted to HIP.
+Independent review passed. Fresh build `build-r9700-upstream-integration` builds Engine/PPL;
+host runtime/admission/statistics tests pass, and pinned-arena injected allocation failures and
+allocation-free fragmented release pass. Manual `ninfer_r9700_engine_cache_cancel_qual ARTIFACT`
+passed on the saved selective model: C1 greedy, cancelled after one published token, exact cold
+continuation parity, confirmed RAM restore of39 tokens with advancing capture/restore counters.
+This does not force a specific cancellation race or physically qualify speculative cancellation
+and every checkpoint-reader interleaving. No kernel arithmetic, sampling defaults or model bytes
+changed; no PPL/performance campaign was repeated. Optional cache-allocation cold-fallback
+recovery and startup loading parallelization remain separate, unported work, not claims of this batch.
+
+The exact selective artifact is also saved under
+`/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-q4-selective-protected/` with a README and original
+conversion provenance. Destination SHA-256 matches the tested artifact; no requantization occurred.
+
 COMPLETED NARROW TASK: created `r9700-q4-selective-protected-n16k16-eval`, exactly
 17,678,295,040 bytes, from all-Q4 with 2 W8 vocabulary endpoints,15 BF16 protections and11
 selective FP8 objects; all other payloads copied byte-exact. Source/runtime review, CPU format

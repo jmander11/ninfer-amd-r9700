@@ -3,6 +3,7 @@
 #include "targets/qwen3/impl/runtime/layer_boundary_trace.h"
 #include "targets/qwen3/impl/runtime/instance.h"
 #include "targets/qwen3/impl/runtime/program.h"
+#include "targets/qwen3/impl/runtime/speculative_stats.h"
 
 #include "targets/qwen3/impl/runtime/schedule.h"
 #include "ninfer/ops/argmax.h"
@@ -887,7 +888,20 @@ void ProgramImplCore::resolve_pending_batch(std::span<const std::uint32_t> lanes
                 throw std::logic_error("ordinary pending batch no longer matches Program state");
             }
             if (cancelled[row]) {
-                clear_lane(sequences[lane], requests[lane]);
+                SequenceState& sequence = sequences[lane];
+                RequestControl& request = requests[lane];
+                const PendingCandidate pending = request.pending;
+                if (pending.produced != 1 || sequence.ledger.size() != pending.base_S + 1 ||
+                    sequence.ledger_frontier != pending.base_S ||
+                    sequence.execution_frontier != pending.base_E) {
+                    throw std::logic_error(
+                        "cancelled ordinary pending round is not a single staged token");
+                }
+                // Ordinary decode overwrote current GDN and tail-hidden state.
+                // No snapshot exists for pending.base_E, so truncating the ledger
+                // cannot roll back this provisional round. Release this lane;
+                // published output remains unchanged and peers retain their state.
+                clear_lane(sequence, request);
             } else {
                 resolve_non_speculative_pending(sequences[lane], requests[lane],
                                                 accepted_tokens[row], terminal[row] != 0);
@@ -1150,6 +1164,7 @@ void ProgramImplCore::resolve_pending_batch(std::span<const std::uint32_t> lanes
             SequenceState& sequence = sequences[lanes[row]];
             RequestControl& request = requests[lanes[row]];
             if (cancelled[row]) {
+                sequence.tail_hidden_valid = false;
                 retain_committed_sequence(sequence, request);
                 continue;
             }
@@ -1169,6 +1184,8 @@ void ProgramImplCore::resolve_pending_batch(std::span<const std::uint32_t> lanes
                     "speculative Text KV resolution did not publish the committed frontier");
             }
             sequence.tail_hidden_valid  = true;
+
+            trim_speculative_stats_to_commit(request.speculative_stats, pending.produced, committed);
 
             if (speculative_backend == SpeculativeBackend::Mtp) {
                 if (sequence.mtp_kv_publication.valid_frontier != sequence.execution_frontier) {
@@ -1479,6 +1496,7 @@ void ProgramImplCore::reload_turn_rollback_into_staging(std::uint32_t lane,
         HIP_CHECK(hipEventCreateWithFlags(&staging_.copies_done, hipEventDisableTiming));
     }
     HIP_CHECK(hipEventRecord(staging_.copies_done, device.copy_stream));
+    HIP_CHECK(hipEventRecord(head->copies_done, device.copy_stream));
     staging_.occupied = true;
     staging_.lane     = lane;
     staging_.frontier = frontier;
@@ -1516,6 +1534,7 @@ void ProgramImplCore::install_ram_context_checkpoints(
     heads.reserve(host.ladder_images.size());
     for (const qwen3::detail::RamLadderImage& image : host.ladder_images) {
         ContextCheckpointHead head;
+        head.prepare_copy_event();
         head.frontier = image.frontier;
         head.hash     = image.hash;
         head.kind     = image.kind;
@@ -1572,6 +1591,7 @@ void ProgramImplCore::restore_dflash_cyclic_from_head(SequenceState& sequence,
     }
     dflash->local.copy_lane_from_host(head.dflash->data(), static_cast<std::int32_t>(sequence.lane),
                                       device.stream);
+    HIP_CHECK(hipEventRecord(head.copies_done, device.stream));
     sequence.dflash_context_frontier = head.frontier;
 }
 
@@ -1611,6 +1631,7 @@ void ProgramImplCore::restore_context_checkpoint_state(SequenceState& sequence,
         sequence.tail_hidden_valid = true;
     }
     restore_dflash_cyclic_from_head(sequence, *head);
+    HIP_CHECK(hipEventRecord(head->copies_done, device.stream));
 }
 
 void ProgramImplCore::maybe_capture_turn_rollback(SequenceState& sequence, RequestControl& request,
@@ -1641,6 +1662,8 @@ void ProgramImplCore::maybe_capture_turn_rollback(SequenceState& sequence, Reque
     head.hash     = hash;
     head.kind     = qwen3::detail::ContextCheckpointKind::TurnRollback;
     try {
+        head.prepare_copy_event();
+        sequence.context_checkpoints.reserve(sequence.context_checkpoints.size() + 1);
         head.conv.emplace(decoder->linear_attention.conv_host_image_bytes());
         head.recurrent.emplace(decoder->linear_attention.recurrent_host_image_bytes());
         head.hidden.emplace(staging_hidden.bytes());
@@ -1675,7 +1698,6 @@ void ProgramImplCore::maybe_capture_turn_rollback(SequenceState& sequence, Reque
     staging_.frontier = base;
     staging_.hash     = hash;
     staging_.kind     = qwen3::detail::ContextCheckpointKind::TurnRollback;
-    HIP_CHECK(hipEventCreateWithFlags(&head.copies_done, hipEventDisableTiming));
     HIP_CHECK(hipStreamWaitEvent(device.copy_stream, staging_.d2d_done, 0));
     decoder->linear_attention.pack_slot_to_host(staging, head.conv->data(), head.recurrent->data(),
                                                 device.copy_stream);
@@ -1719,6 +1741,8 @@ void ProgramImplCore::maybe_freeze_context_checkpoint(SequenceState& sequence,
     head.hash     = hash;
     head.kind     = qwen3::detail::ContextCheckpointKind::Ladder;
     try {
+        head.prepare_copy_event();
+        sequence.context_checkpoints.reserve(sequence.context_checkpoints.size() + 1);
         head.conv.emplace(decoder->linear_attention.conv_host_image_bytes());
         head.recurrent.emplace(decoder->linear_attention.recurrent_host_image_bytes());
         head.hidden.emplace(staging_hidden.bytes());
@@ -1765,7 +1789,6 @@ void ProgramImplCore::maybe_freeze_context_checkpoint(SequenceState& sequence,
         staging_.hash     = hash;
         staging_.kind     = qwen3::detail::ContextCheckpointKind::Ladder;
     }
-    HIP_CHECK(hipEventCreateWithFlags(&head.copies_done, hipEventDisableTiming));
     HIP_CHECK(hipStreamWaitEvent(device.copy_stream, staging_.d2d_done, 0));
     decoder->linear_attention.pack_slot_to_host(staging, head.conv->data(), head.recurrent->data(),
                                                 device.copy_stream);

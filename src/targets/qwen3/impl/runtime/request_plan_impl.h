@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdio>
 #include <limits>
 #include <stdexcept>
 #include <vector>
@@ -221,24 +220,8 @@ void ProgramImplCore::apply_reuse_decision(RequestPlanImpl& plan, const Resident
     plan.reuse      = selected.path;
     plan.reuse_base = selected.frontier;
 
-    // Unexpected-state diagnostic: the resident execution frontier matches the prompt, so a
-    // healthy MTP lane should append; the MTP continuation state instead says it cannot. This
-    // is the checkpoint/FullReset-fallback case the append gate was added for, so surface it
-    // rather than let the fallback happen silently.
-    if (speculative_backend == ninfer::SpeculativeBackend::Mtp && state.execution_frontier != 0 &&
-        qwen3::detail::prefix_matches(prompt, *state.ledger, *state.identity,
-                                       state.execution_frontier) &&
-        !qwen3::detail::mtp_prefix_reuse_ready(ninfer::PrefixReusePath::AppendAtFrontier,
-                                                  state.execution_frontier, state.mtp_kv_valid,
-                                                  state.tail_hidden_valid, mtp_cache_present)) {
-        std::fprintf(stderr,
-                     "[ninfer ERROR] qwen3 MTP prefix-reuse: execution frontier %u matches "
-                     "the prompt but MTP append is not ready (tail_hidden_valid=%d "
-                     "mtp_kv_valid=%u mtp_cache=%d); using %s@%u instead of append_frontier\n",
-                     state.execution_frontier, state.tail_hidden_valid ? 1 : 0, state.mtp_kv_valid,
-                     mtp_cache_present ? 1 : 0,
-                     qwen3::detail::reuse_path_name(selected.path), selected.frontier);
-    }
+    // Cancellation may invalidate the tail hidden while retaining committed KV.
+    // The reuse policy selects an earlier usable checkpoint or cold prefill.
 }
 
 void ProgramImplCore::finish_request_plan(RequestPlanImpl& plan, const ResidentStateView* view,
@@ -387,7 +370,10 @@ RequestPlan ProgramImplCore::plan_ram_reuse(const PreparedPromptData& prompt,
 
     const std::vector<qwen3::detail::PrefixHash128> chain =
         qwen3::detail::prefix_hash_chain(prompt);
-    const std::optional<qwen3::detail::RamMatch> match = kv_ram_cache_->plan_match(prompt, chain);
+    const std::optional<qwen3::detail::RamMatch> match = kv_ram_cache_->plan_match(
+        prompt, chain, qwen3::detail::ReuseBackendPolicy{
+            speculative_backend, decoder->mtp_cache() != nullptr,
+            dflash.has_value(), DFlashConfig::full_layers > 0});
     if (!match || match->reuse_base == 0) {
         finish_request_plan(*plan, nullptr, prompt, base);
         return RequestPlan(std::move(plan));

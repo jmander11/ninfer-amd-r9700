@@ -171,6 +171,12 @@ struct ContextCheckpointHead {
     }
     ~ContextCheckpointHead() { release(); }
 
+    void prepare_copy_event() {
+        if (copies_done == nullptr) {
+            HIP_CHECK(hipEventCreateWithFlags(&copies_done, hipEventDisableTiming));
+        }
+    }
+
     void wait_copies() const {
         if (copies_done != nullptr) { HIP_CHECK(hipEventSynchronize(copies_done)); }
     }

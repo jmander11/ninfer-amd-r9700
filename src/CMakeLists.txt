@@ -285,6 +285,14 @@ target_link_libraries(ninfer_r9700_engine_boundary_qual PRIVATE
   Threads::Threads
   hip::host)
 
+# Manual public-Engine cancellation and RAM restore qualification; requires an explicit artifact.
+add_executable(ninfer_r9700_engine_cache_cancel_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/engine_cache_cancel_qual.cpp)
+ninfer_r9700_internal_includes(ninfer_r9700_engine_cache_cancel_qual)
+set_target_properties(ninfer_r9700_engine_cache_cancel_qual PROPERTIES
+  HIP_ARCHITECTURES gfx1201 LINKER_LANGUAGE HIP)
+target_link_libraries(ninfer_r9700_engine_cache_cancel_qual PRIVATE ninfer_engine)
+
 # Sole-target selection and startup device-memory/capacity planning. This compile-only object
 # boundary checks the registry against native HIP and the Qwen3.8-27B R9700 package identity
 # without claiming that the still excluded package schedule and Engine are linkable.

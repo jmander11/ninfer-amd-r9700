@@ -1009,6 +1009,44 @@ void test_resident_reuse_decision() {
                "matching staged head beats a shorter rewrite checkpoint");
     }
 
+    // A longer hash match that lacks backend state must not hide a usable head.
+    state.mtp_kv_valid = 1;
+    {
+        const auto sel = decide(state, prompt, Backend::Mtp);
+        expect(sel.path == Path::RestoreTurnCheckpoint && sel.frontier == 2,
+               "unready longer staged MTP head cannot hide a shorter rewrite checkpoint");
+    }
+    state.rewrite_frontier = 4;
+    state.context_checkpoints = {
+        {2, q3::detail::prefix_hash_at(fixture.ledger, fixture.identity, 2),
+         q3::detail::ContextCheckpointKind::Ladder}};
+    {
+        const auto sel = decide(state, prompt, Backend::Mtp);
+        expect(sel.path == Path::RestoreContextCheckpoint && sel.frontier == 2,
+               "unready longer MTP rewrite cannot hide a shorter staged checkpoint");
+    }
+    state.dflash_context_frontier = 1;
+    {
+        const auto sel = decide(state, prompt, Backend::DFlash, true, true, true);
+        expect(sel.path == Path::RestoreContextCheckpoint && sel.frontier == 2,
+               "unready DFlash rewrite cannot hide a complete staged checkpoint");
+    }
+
+    // An exact append needs its saved hidden state even without speculation.
+    state = fixture.state;
+    const auto exact_prompt = text_prompt(4);
+    {
+        const auto sel = decide(state, exact_prompt, Backend::None);
+        expect(sel.path == Path::FullReset,
+               "exact ordinary reuse without tail hidden must cold prefill");
+    }
+    state.tail_hidden_valid = true;
+    {
+        const auto sel = decide(state, exact_prompt, Backend::None);
+        expect(sel.path == Path::AppendAtFrontier && sel.frontier == 4,
+               "exact ordinary reuse with tail hidden can append");
+    }
+
     // The checkpoint kind determines the restore path.
     state          = fixture.state;
     state.rewrite_valid    = true;

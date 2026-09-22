@@ -221,9 +221,9 @@ PinnedHostBuffer& PinnedHostBuffer::operator=(PinnedHostBuffer&& other) noexcept
 
 HostPinnedArena::HostPinnedArena(std::size_t capacity_bytes) : capacity_(capacity_bytes) {
     if (capacity_ == 0) { throw std::invalid_argument("HostPinnedArena capacity must be nonzero"); }
+    free_.push_back({0, capacity_});
     const hipError_t error = hipHostMalloc(&base_, capacity_, hipHostMallocDefault);
     if (error != hipSuccess) { allocation_error("hipHostMalloc arena", error); }
-    free_.push_back({0, capacity_});
 }
 
 HostPinnedArena::~HostPinnedArena() { free_pinned(base_); }
@@ -260,11 +260,19 @@ void* HostPinnedArena::try_alloc(std::size_t bytes, std::size_t align) {
         if (lead > span.bytes || bytes > span.bytes - lead) { continue; }
         const std::size_t offset = span.offset + lead;
         const std::size_t tail = span.bytes - lead - bytes;
+        // N live blocks separate at most N+1 free spans. Prepare all metadata
+        // before mutating the free list, and reserve for allocation-free release.
+        const std::size_t spans = live_.size() + 2;
+        if (free_.capacity() < spans) {
+            free_.reserve(std::max(spans, free_.capacity() * 2));
+        }
+        void* result = static_cast<std::uint8_t*>(base_) + offset;
+        if (!live_.emplace(result, Span{offset, bytes}).second) {
+            throw std::logic_error("pinned arena allocation overlaps a live block");
+        }
         free_.erase(free_.begin() + static_cast<std::ptrdiff_t>(index));
         if (lead != 0) { insert_free(span.offset, lead); }
         if (tail != 0) { insert_free(offset + bytes, tail); }
-        void* result = static_cast<std::uint8_t*>(base_) + offset;
-        live_.emplace(result, Span{offset, bytes});
         used_ += bytes;
         return result;
     }

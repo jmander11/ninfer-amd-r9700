@@ -946,6 +946,12 @@ base：该处若有 turn-rollback 或 ladder head 则 restore 该 head；否则�
 
 因此 cancellation 最多等待一个 membership 已固定的 GPU unit，再加一次 boundary processing。
 
+Ordinary decode is the exception to postlaunch cancel-retain: its in-flight step overwrites
+GDN/tail-hidden state without a snapshot of the preceding frontier. Such a cancelled lane is
+cleared rather than retaining a falsely rolled-back state. Cancellation observed before launch
+retains the committed lane and removes its request from the live batch. Speculative cancellation
+can restore its committed frontier, but invalidates the provisional tail-hidden value before reuse.
+
 Waiting protected head 或 backfill candidate 的 cancellation 在 §7.2 control cleanup 中移除；protected head
 离队会原子清空 epoch，下一最老 entry 不继承 shadow state。Frozen donor 的 cancellation 只有在其 active
 state 真正释放后才缩短 frontier；若该 boundary 不是 admission turn，则在下一合法 turn 先触发 head retry。
