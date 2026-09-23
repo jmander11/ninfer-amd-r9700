@@ -76,6 +76,26 @@ above apply to every command.
 
 ### Current checkpoint
 
+ACTIVE USER GOAL (2026-09-23): optimize the saved Q4/FP8 selective-cap model to at least
+30 output tok/s ordinary decode and 60 output tok/s DFlash at C1; continue past these targets
+when bounded profiling identifies clear material wins. This explicitly reopens kernel work,
+recipe-specific DFlash integration, and mixed-A4 cooperative prefill, with decode first.
+Historical rates on other artifacts/workloads are motivation, not matched baselines or ceilings.
+- [ ] Establish matched C1 baseline and whole-inference attribution for the installed selective-cap
+  artifact; determine whether mixed-recipe dispatch bypasses admitted Q4 fused routes.
+- [ ] Qualify and optimize base-decode bottlenecks toward >=30 tok/s; measure whole inference.
+- [ ] Bind a correctly quantized DFlash companion retaining BF16 codebooks/private state; qualify
+  greedy-token/state correctness and optimize K4/K5 toward >=60 output tok/s at C1.
+- [ ] Implement a well-motivated cooperative mixed-A4 prefill challenger, qualify against the
+  public-input oracle and retained quality samples, and promote only whole-prefill wins over A8.
+- [ ] Evaluate remaining clearly evidenced material wins, record achieved rates and limitations,
+  and commit coherent implementation/results at natural milestones.
+Preserve the immutable 5090 reference and selected near-NVFP4 quality; distinguish the <=2%
+per-text PPL comparison from the separate BF16-source admission gate and report severe positions.
+Use matched commands, prompt/context, graph mode, auto power, and C<=4. Do not silently substitute
+another model, speculative throughput for ordinary decode, or profiler timing for admission.
+Unrelated XAttention and broad capacity campaigns remain paused.
+
 COMPLETED USER REQUEST (2026-09-23): identify a smaller Q4/FP8 recipe close to the retained
 5090 NVFP4 PPL, then establish where A4 can replace A8 without unacceptable quality loss.
 This reopens only bounded recipe/activation selection; unrelated XAttention/capacity work stays
