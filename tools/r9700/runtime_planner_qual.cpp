@@ -235,18 +235,40 @@ void qualify_host_ordinary_graph_allowance() {
     runtime::SequencePlanningInputs inputs{};
     inputs.weights_profile =
         Variant::WeightsProfile::R9700Q4SelectiveProtectedDFlash2Q4Evaluation;
-    inputs.capacity = 1024U;
-    inputs.max_concurrency = 1U;
-    inputs.prefill_chunk = 4096U;
+    inputs.prefill_chunk = 2048U;
     inputs.speculative_backend = ninfer::SpeculativeBackend::None;
     inputs.features = {.vision = false, .speculative = ninfer::SpeculativeBackend::None};
-    inputs.use_device_graph = true;
-    const auto plan = runtime::build_sequence_candidate_for_qualification(inputs, 16U);
-    require(plan->graph_executable_count == 1U &&
-                plan->graph_allowance_bytes == 47ULL * 1024ULL * 1024ULL &&
-                plan->graph_allowance_bytes >= 48234496ULL,
-            "ordinary selective-protected allowance misses measured preparation residency");
-    std::printf("r9700_runtime_planner: PASS host ordinary C1/context1024 allowance\n");
+    for (const std::uint32_t capacity : {1024U, 4096U, 4224U}) {
+        const std::size_t definitions = capacity == 1024U ? 3U : capacity == 4096U ? 4U : 5U;
+        for (const std::uint32_t concurrency : {1U, 2U, 3U, 4U}) {
+            inputs.capacity = capacity;
+            inputs.max_concurrency = concurrency;
+            inputs.use_device_graph = true;
+            const auto page_size = static_cast<std::uint32_t>(ninfer::kPagedKVPageSize);
+            const std::uint32_t physical_pages = concurrency *
+                ((capacity + page_size - 1U) / page_size);
+            const auto plan = runtime::build_sequence_candidate_for_qualification(
+                inputs, physical_pages);
+            const std::size_t expected = (23ULL + concurrency *
+                (24ULL + 4ULL * (definitions - 3U))) * 1024ULL * 1024ULL;
+            require(plan->graph_definition_count == definitions * concurrency &&
+                        plan->graph_executable_count == concurrency &&
+                        plan->graph_allowance_bytes == expected,
+                    "ordinary allowance omitted same-topology profile updates");
+            if (capacity == 4224U && concurrency == 1U) {
+                require(plan->graph_allowance_bytes >= 54525952ULL,
+                        "ordinary allowance misses observed 52 MiB tiled preparation");
+            }
+            inputs.use_device_graph = false;
+            const auto eager = runtime::build_sequence_candidate_for_qualification(
+                inputs, physical_pages);
+            require(eager->graph_allowance_bytes == 0U &&
+                        eager->graph_definition_count == 0U &&
+                        eager->graph_executable_count == 0U,
+                    "eager ordinary plan reserves graph residency");
+        }
+    }
+    std::printf("r9700_runtime_planner: PASS host ordinary C1..4/context1024,4096,4224 allowance\n");
 }
 
 void qualify_host_hybrid_allocation_bound() {
@@ -541,9 +563,17 @@ std::size_t qualify_plan(ninfer::DeviceContext& device, std::uint32_t concurrenc
                 "ordinary graph plan omitted a reachable exact-B/profile definition");
         require(plan.impl_->graph_executable_count == topology_classes.size(),
                 "ordinary graph plan executable inventory does not match reachable topologies");
+        std::size_t update_bytes = 0U;
+        for (const auto topology : topology_classes) {
+            const std::size_t count = static_cast<std::size_t>(std::count_if(
+                profiles.begin(), profiles.end(), [&](const auto profile) {
+                    return profile.topology_class == topology / concurrency;
+                }));
+            if (count > 3U) update_bytes += (count - 3U) * 4ULL * kMiB;
+        }
         require(plan.impl_->graph_allowance_bytes ==
                     kOrdinaryGraphFamilyBytes +
-                        kOrdinaryGraphExecutableBytes * topology_classes.size(),
+                        kOrdinaryGraphExecutableBytes * topology_classes.size() + update_bytes,
                 "ordinary graph allowance does not match its ROCm family/executable inventory");
     }
     if (use_device_graph && backend == ninfer::SpeculativeBackend::DFlash) {

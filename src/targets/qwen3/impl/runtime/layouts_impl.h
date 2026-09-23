@@ -46,6 +46,14 @@ constexpr std::size_t kR9700MtpGraphOperationBytes = 4ULL * kMiB;
 // candidate consumed 72 MiB, within its previous 92 MiB bound.
 constexpr std::size_t kR9700OrdinaryGraphFamilyBytes     = 23ULL * kMiB;
 constexpr std::size_t kR9700OrdinaryGraphExecutableBytes = 24ULL * kMiB;
+// The ordinary 1K calibration includes three definitions per executable. Larger
+// frontiers install additional definitions even when topology is unchanged.
+// Charge their retained updates using the measured ROCm operation bound above;
+// do not infer a smaller bound from aggregate preparation deltas. At context4224,
+// five definitions consumed 52 MiB for the deployed selective tiled profile;
+// 23 + 24 + 2*4 = 55 MiB covers that preparation without changing the 1K budget.
+constexpr std::size_t kR9700OrdinaryCalibratedDefinitions = 3U;
+constexpr std::size_t kR9700OrdinaryGraphUpdateBytes = 4ULL * kMiB;
 // ROCm 10 gfx1201, 2026-09-22: selective-protected BF16 staging, tiled W8 head
 // and Q4 projection gathering consume 73 MiB for C1/K4 at context1024. The
 // fixed-family 48 plus per-executable 26 MiB reserves 74 MiB (1 MiB headroom).
@@ -911,7 +919,22 @@ std::unique_ptr<SequencePlanImpl> build_sequence_candidate(const SequencePlannin
             }
             const GraphAllowance allowance = graph_topology_allowance(
                 expanded,
-                [&](GraphExecutionProfile) { return kR9700OrdinaryGraphExecutableBytes; },
+                [&](GraphExecutionProfile profile) {
+                    const auto definitions = static_cast<std::size_t>(std::count_if(
+                        expanded.begin(), expanded.end(), [&](const auto& other) {
+                            return other.topology_class == profile.topology_class;
+                        }));
+                    // D>1 definitions perform D updates, including restoration
+                    // of the first definition. The calibrated three already
+                    // cover that restore; each extra definition adds one update.
+                    const std::size_t extra_updates = definitions >
+                            kR9700OrdinaryCalibratedDefinitions
+                        ? definitions - kR9700OrdinaryCalibratedDefinitions : 0U;
+                    return checked_add(kR9700OrdinaryGraphExecutableBytes,
+                        checked_mul(extra_updates, kR9700OrdinaryGraphUpdateBytes,
+                                    "ordinary graph profile update allowance"),
+                        "ordinary graph executable allowance");
+                },
                 "ordinary graph allowance");
             impl->graph_definition_count = expanded.size();
             impl->graph_executable_count = allowance.executable_count;

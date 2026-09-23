@@ -1354,6 +1354,18 @@ selective-protected probes measured 58/92 MiB for K3/C1 and K5/C4 at 1K context,
 toolchain-specific allocation bounds, not performance results or general HIP guarantees.
 The observed-allocation startup guard remains mandatory.
 
+Ordinary graph preparation also retains profile-update allocations. Its calibrated
+23 MiB family plus 24 MiB per executable covers up to three definitions per topology
+(the 1024-context calibration). For each additional definition in that exact-B
+topology, reserve another 4 MiB using the existing measured ROCm update bound. Startup
+installs all definitions and restores the first, so each extra definition adds one
+update without necessarily adding an executable. Context 4096 has four definitions;
+4224 has five: C1 allowances are 51 and 55 MiB respectively, while context1024 stays
+47 MiB. The deployed selective tiled profile measured 52 MiB of complete preparation
+at context4224/P4096/G128/chunk2048. This is aggregate toolchain-specific residency,
+not isolated graph-storage measurement or a universal HIP bound; the strict observed
+allocation guard is unchanged. Eager execution reserves no graph allowance.
+
 Startup graph allowance 必须计入全部 reachable exact-`B` definitions，以及每个 exact `B`、每个实际
 topology class 的一份 executable，不能沿用只覆盖 `B=1` definitions 的 reservation。
 
