@@ -311,7 +311,7 @@ __device__ std::size_t int4_offset(std::size_t token, std::uint32_t head, std::u
 }
 
 template <std::uint32_t Group, bool VToken, bool SToken>
-__global__ void pv_vector_kernel(const float* probabilities, const std::uint8_t* values,
+__device__ __forceinline__ void pv_vector_body(const float* probabilities, const std::uint8_t* values,
                                  const std::uint16_t* scales, const std::uint32_t* pages,
                                  const std::int32_t* page_table_row,
                                  std::uint32_t page_table_row_stride,
@@ -379,49 +379,32 @@ __global__ void pv_vector_kernel(const float* probabilities, const std::uint8_t*
 }
 
 template <std::uint32_t Group, bool VToken, bool SToken>
+__global__ void pv_vector_kernel(const float* probabilities, const std::uint8_t* values,
+    const std::uint16_t* scales, const std::uint32_t* pages,
+    const std::int32_t* page_table_row, std::uint32_t page_table_row_stride,
+    std::uint32_t page_table_row_count, std::size_t context, std::size_t physical_tokens,
+    std::uint32_t q_to_kv, float* output) {
+    pv_vector_body<Group, VToken, SToken>(probabilities, values, scales, pages,
+        page_table_row, page_table_row_stride, page_table_row_count, context,
+        physical_tokens, q_to_kv, output);
+}
+
+template <std::uint32_t Group, bool VToken, bool SToken>
 __global__ void pv_vector_batched_w5w6_kernel(
     const float* probabilities, const std::uint8_t* values, const std::uint16_t* scales,
     const std::uint32_t* pages, const std::int32_t* page_table_row,
     std::uint32_t page_table_row_stride, std::uint32_t page_table_row_count,
     std::size_t context, std::size_t physical_tokens, std::uint32_t q_to_kv,
     float* output) {
-    const std::uint32_t qh = blockIdx.x;
-    const std::uint32_t row = blockIdx.y;
-    const std::uint32_t feature = threadIdx.x;
-    const std::uint32_t kvh = qh / q_to_kv;
+    const std::uint32_t row = blockIdx.z;
     const std::size_t heads = gridDim.x;
-    if (page_table_row != nullptr) {
-        const std::int32_t represented_row = *page_table_row;
-        if (represented_row < 0 ||
-            static_cast<std::uint32_t>(represented_row) >= page_table_row_count) {
-            output[(static_cast<std::size_t>(row) * heads + qh) * kHeadDim + feature] =
-                __builtin_nanf("");
-            return;
-        }
-        pages += static_cast<std::size_t>(represented_row) * page_table_row_stride;
-    }
-    const float* row_probabilities =
-        probabilities + static_cast<std::size_t>(row) * heads * context;
-    float sum = 0.0F;
-    for (std::size_t logical = 0; logical < context; ++logical) {
-        const std::size_t physical =
-            static_cast<std::size_t>(pages[logical / kPageSize]) * kPageSize +
-            logical % kPageSize;
-        if (physical >= physical_tokens) {
-            output[(static_cast<std::size_t>(row) * heads + qh) * kHeadDim + feature] =
-                __builtin_nanf("");
-            return;
-        }
-        const std::uint8_t packed = values[int4_offset<Group, VToken, SToken>(
-            physical, kvh, feature, gridDim.x / q_to_kv, physical_tokens, false)];
-        int code = static_cast<int>((packed >> ((feature & 1U) * 4U)) & 0x0fU);
-        code = code >= 8 ? code - 16 : code;
-        const std::uint16_t bits = scales[int4_offset<Group, VToken, SToken>(
-            physical, kvh, feature, gridDim.x / q_to_kv, physical_tokens, true)];
-        sum = fmaf(row_probabilities[static_cast<std::size_t>(qh) * context + logical],
-                   static_cast<float>(code) * __half2float(__ushort_as_half(bits)), sum);
-    }
-    output[(static_cast<std::size_t>(row) * heads + qh) * kHeadDim + feature] = sum;
+    // Rows share the same represented KV cache; only probabilities and outputs
+    // have a row stride. Keep the exact per-feature FMA order of ordinary PV.
+    pv_vector_body<Group, VToken, SToken>(
+        probabilities + static_cast<std::size_t>(row) * heads * context,
+        values, scales, pages, page_table_row, page_table_row_stride,
+        page_table_row_count, context, physical_tokens, q_to_kv,
+        output + static_cast<std::size_t>(row) * heads * kHeadDim);
 }
 
 template <std::uint32_t G, bool V, bool S> hipError_t pv_launch(const Int4KvPvArgs& a, hipStream_t stream) {
@@ -1738,7 +1721,7 @@ std::size_t fp8_int4_kv_attention_wmma_batched_w5w6_workspace_bytes(
 template <std::uint32_t Group, bool VToken, bool SToken>
 hipError_t batched_w5w6_pv_launch(const Fp8Int4KvAttentionArgs& a, hipStream_t stream) {
     hipLaunchKernelGGL((pv_vector_batched_w5w6_kernel<Group, VToken, SToken>),
-                       dim3(a.query_heads, a.query_rows), dim3(kHeadDim), 0, stream,
+                       dim3(a.query_heads, kHeadDim / 32U, a.query_rows), dim3(32), 0, stream,
                        a.score_workspace, a.value_codes, a.value_scale_bits, a.page_table,
                        a.page_table_row, a.page_table_row_stride, a.page_table_row_count,
                        a.context, a.physical_tokens, a.q_to_kv, a.output);

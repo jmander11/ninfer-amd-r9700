@@ -72,15 +72,36 @@ fallback; K5 has39 rounds/88 accepted/one fallback. These rates exceed the reque
 targets for this workload, not every context or concurrency. Evidence:
 `profiles/bench/r9700-compact-decode-20260923/dflash-loadstage4-chat/`.
 
-The matched code P4096/G128 baseline20.2346 ordinary tok/s improves to26.3124 with local-Q4
+The matched base-only code P4096/G128 baseline20.2346 ordinary tok/s improves to29.7623 with local-Q4
 normalization/residual fusion and ordered attention-PV load staging; all repeated output tokens
 remain exact. Further staging experiments are active, so this is a checkpoint, not a ceiling.
 Mixed recipes now select the existing fused Q4 operations per local format/shape; explicit
 ordinary-decode intent excludes speculativeT1 rather than testing unrelated matrix inventories.
 PV retains its exact serial FP32 FMA order and decoded INT4/FP16 values; page lookup is hoisted
 and independent reads staged before accumulation. Full represented-input FP64 plus supplementary
-exact serial checks pass at4096 and64–67; context3 fails an unrelated FP8-query attention
+exact serial checks pass at4096 and64–67, with final32-load staging checked across all16layouts
+at65; context3 fails an unrelated FP8-query attention
 comparison afterPVpasses and is retained without relaxing that criterion.
+
+The matched **companion** at P4096/G128/chunk2048/context4240 subsequently measures
+28.6544 ordinary,68.8281 K4 and83.2839 K5 outputtok/s, warm1/reps3 and exactordinarytokens
+throughout. K4 has29rounds/99acceptedtokens; K5 has24rounds/104acceptedtokens, nofallbacks.
+This is not the same resident artifact/capacity as the base-only29.7623 row. Additional graph
+frontier-update accounting fixes the reproduced75MiB-versus74MiB startup deficit; observed
+allocation checks remain unchanged. Evidence: `dflash-graph-updates-code/` under the package above.
+A measured-region graph-only trace attributes27.77% of K5 decode-kernel time to batchedPV.
+Sharing the ordinary ordered-load-staging body improves complete attention W5/W6 at4101/4102
+from0.9007/0.9436ms to0.2818/0.3450ms. Independent completeFP64, all-row serial-bit parity,
+Device Graph exactness and guard checks pass at short and long context. ISA:111VGPR,
+48SGPR, noLDS/scratch, occupancy12. Matched wholecompanion ordinary/K4/K5 now measures
+29.8313/89.6352/104.8799 outputtok/s with identical tokens and acceptance in all3repetitions.
+Evidence: `dflash-attention-{long,short}-staged32/` and `dflash-staged32-code/` in the package.
+These are workload-specific C1 results, not a proven ceiling or a C2–4 admission.
+
+Mixed-A4 cooperative single-bank gate/up preserves all six prior mixed-precision NLL sidecars
+byte-for-byte, but wholeprefill1376–1389tok/s remains belowuniformA8. ExactN34816/K5120/T2048
+completequantize+matrix timing gives A4 7.4804ms versus A8 5.6684ms; public-input qualification
+and represented-code FP64 both pass. Retain uniformA8 while evaluating A4 ping/pong staging.
 
 The companion is produced with `compose_fp8_capped_dflash`, preserving every selected base
 payload and copying only the donor's66 DFlash objects (32Q4/34BF16). Both selector codebooks

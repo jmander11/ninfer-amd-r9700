@@ -42,18 +42,15 @@ constexpr std::uint32_t kW5 = 5U;
 constexpr std::uint32_t kW6 = 6U;
 constexpr std::uint32_t kTextRows = 129U;
 constexpr std::size_t kTextContext = 129U;
-constexpr std::size_t kW1Context = 130U;
-constexpr std::size_t kW5Context = 134U;
-constexpr std::size_t kW6Context = 135U;
-constexpr std::size_t kPhysicalPages = 4U;
-constexpr std::size_t kPhysicalTokens = kPhysicalPages * kPageSize;
+std::size_t kW1Context = 130U;
+std::size_t kW5Context = 134U;
+std::size_t kW6Context = 135U;
+std::size_t kPhysicalPages = 4U;
+std::size_t kPhysicalTokens = kPhysicalPages * kPageSize;
 constexpr float kAttentionScale = 1.0F / 16.0F;
 constexpr std::uint32_t kGuard = 0x7fc01234U;
 constexpr int kTrials = 7;
 constexpr int kTimingIterations = 50;
-static_assert(kQueryHeads * kW1Context * sizeof(float) == 12480U);
-static_assert(kQueryHeads * kW5Context * sizeof(float) == 12864U);
-static_assert(kQueryHeads * kW6Context * sizeof(float) == 12960U);
 static_assert(kQueryHeads * kTextContext * sizeof(float) == 12384U);
 
 [[noreturn]] void fail(const std::string& message) { throw std::runtime_error(message); }
@@ -102,7 +99,7 @@ std::vector<T> download(const DeviceArray<T>& source) {
 }
 
 std::size_t physical_token(std::size_t logical,
-                           const std::array<std::uint32_t, 3>& pages) {
+                           const std::vector<std::uint32_t>& pages) {
     return static_cast<std::size_t>(pages.at(logical / kPageSize)) * kPageSize +
            logical % kPageSize;
 }
@@ -124,7 +121,7 @@ std::size_t scale_offset(std::size_t token, std::uint32_t head, std::uint32_t fe
 }
 
 struct Fixture {
-    std::array<std::uint32_t, 3> pages{2U, 0U, 3U};
+    std::vector<std::uint32_t> pages{2U, 0U, 3U};
     std::vector<float> queries;
     oracle::Fp8Keys logical_keys;
     oracle::Int4Values logical_values;
@@ -168,6 +165,13 @@ Fixture make_fixture() {
         .physical_keys = std::vector<std::uint8_t>(kPhysicalTokens * kKvHeads * kHeadDim),
         .physical_values = std::vector<std::uint8_t>(kPhysicalTokens * kKvHeads * kHeadDim / 2U),
         .physical_scales = std::vector<std::uint16_t>(kPhysicalTokens * kKvHeads * kGroups)};
+    if (kW6Context > 135U) {
+        fixture.pages.resize((kW6Context + kPageSize - 1U) / kPageSize);
+        // 67 physical pages, relatively-prime stride17: a nonmonotonic injective
+        // logical-page mapping, with spare pages to catch accidental contiguous reads.
+        for (std::size_t page = 0; page < fixture.pages.size(); ++page)
+            fixture.pages[page] = static_cast<std::uint32_t>((page*17U + 2U) % kPhysicalPages);
+    }
     for (std::size_t logical = 0; logical < kW6Context; ++logical) {
         const std::size_t physical = physical_token(logical, fixture.pages);
         for (std::uint32_t head = 0; head < kKvHeads; ++head) {
@@ -386,8 +390,17 @@ double median(std::array<double, kTrials> values) {
 
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
     try {
+        const bool long_context = argc == 2 && std::string_view(argv[1]) == "--long-context";
+        if (argc != 1 && !long_context) fail("usage: dflash_attention_route_discriminator [--long-context]");
+        if (long_context) {
+            kW1Context = 4097U;
+            kW5Context = 4101U;
+            kW6Context = 4102U;
+            kPhysicalPages = 67U;
+            kPhysicalTokens = kPhysicalPages*kPageSize;
+        }
         if (!kv::use_fp8_qk_wmma(kW1, kW1Context) ||
             kv::use_fp8_qk_wmma(kW5, kW5Context)) {
             fail("production attention classifier does not retain W1-WMMA/W5-fused selection");
@@ -443,10 +456,13 @@ int main() {
             return result;
         }();
         const std::vector<std::uint32_t> pages(fixture.pages.begin(), fixture.pages.end());
-        const std::vector<std::int32_t> w1_positions{129};
+        const auto first_position = static_cast<std::int32_t>(kW1Context - 1U);
+        const std::vector<std::int32_t> w1_positions{first_position};
         const std::vector<std::int32_t> text_w1_positions{128};
-        const std::vector<std::int32_t> w5_positions{129, 130, 131, 132, 133};
-        const std::vector<std::int32_t> w6_positions{129, 130, 131, 132, 133, 134};
+        const std::vector<std::int32_t> w5_positions{first_position, first_position+1,
+            first_position+2, first_position+3, first_position+4};
+        const std::vector<std::int32_t> w6_positions{first_position, first_position+1,
+            first_position+2, first_position+3, first_position+4, first_position+5};
         std::vector<std::int32_t> text_positions(kTextRows);
         for (std::uint32_t row = 0; row < kTextRows; ++row) {
             text_positions[row] = static_cast<std::int32_t>(row);
@@ -1010,11 +1026,13 @@ int main() {
                            {"architecture", "gfx1201"}, {"wave_size", 32},
                            {"pci_bus_id", pci.data()}}},
             {"geometry", {{"query_heads", 24}, {"kv_heads", 4}, {"head_dim", 256},
-                           {"value_group", 16}, {"w1_context", 130}, {"w5_context", 134},
-                           {"w6_context", 135},
-                           {"w1_score_workspace_bytes", 12480},
-                           {"w5_serial_score_workspace_bytes", 12864},
-                           {"w6_serial_score_workspace_bytes", 12960},
+                           {"value_group", 16}, {"w1_context", kW1Context}, {"w5_context", kW5Context},
+                           {"w6_context", kW6Context}, {"physical_pages", kPhysicalPages},
+                           {"logical_page_table", pages},
+                           {"first_dflash_position", first_position},
+                           {"w1_score_workspace_bytes", kQueryHeads*kW1Context*sizeof(float)},
+                           {"w5_serial_score_workspace_bytes", kQueryHeads*kW5Context*sizeof(float)},
+                           {"w6_serial_score_workspace_bytes", kQueryHeads*kW6Context*sizeof(float)},
                            {"w5_batched_score_workspace_bytes",
                             batched_workspace_elements * sizeof(float)},
                            {"w6_batched_score_workspace_bytes",
@@ -1022,8 +1040,8 @@ int main() {
                            {"text_rows", 129}, {"text_context", 129},
                            {"text_w1_score_workspace_bytes", 12384},
                            {"text_dense_workspace_bytes", text_dense_workspace_bytes}}},
-            {"target_pair", {{"ordinary", "W1/C130/position129 FP8-Q WMMA"},
-                               {"dflash_candidate", "W5/C134/positions129..133 batched FP8-Q WMMA"},
+            {"target_pair", {{"ordinary", long_context ? "W1/C4097/position4096 FP8-Q WMMA" : "W1/C130/position129 FP8-Q WMMA"},
+                               {"dflash_candidate", long_context ? "W5/C4101/positions4096..4100 batched FP8-Q WMMA" : "W5/C134/positions129..133 batched FP8-Q WMMA"},
                                {"serial_wmma_same_route_row0_bit_exact", true},
                                {"fused_same_route_row0_bit_exact", true},
                                {"batched_serial_all_rows_bit_exact", true},
@@ -1032,9 +1050,9 @@ int main() {
                                {"current_production_cross_route_row0_mismatches", fused_mismatches},
                                {"current_production_cross_route_row0_max_abs",
                                 fused_pair_maximum_absolute}}},
-            {"target_pair_w6", {{"ordinary", "W1/C130/position129 FP8-Q WMMA"},
+            {"target_pair_w6", {{"ordinary", long_context ? "W1/C4097/position4096 FP8-Q WMMA" : "W1/C130/position129 FP8-Q WMMA"},
                                  {"dflash_candidate",
-                                  "W6/C135/positions129..134 batched FP8-Q WMMA"},
+                                  long_context ? "W6/C4102/positions4096..4101 batched FP8-Q WMMA" : "W6/C135/positions129..134 batched FP8-Q WMMA"},
                                  {"serial_wmma_same_route_row0_bit_exact", true},
                                  {"fused_same_route_row0_bit_exact", true},
                                  {"batched_serial_all_rows_bit_exact", true},

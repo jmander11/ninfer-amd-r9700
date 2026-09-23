@@ -121,8 +121,13 @@ per-topology definition updates; allocation guard unchanged, host C1–4/K4/K5 c
 Matched companion P4096/G128/chunk2048/context4240 ordinary/K4/K5 now measures
 28.6544/68.8281/83.2839tok/s with all three repetitions exactly matching ordinary tokens.
 Shortchat K4 and code K5 differ in acceptance: do not claim a universal best draft length.
-Long-context DFlash attribution is next; ordinary4K still needs improvement toward30tok/s.
-Integration checkpointsbe19fb30/1e83910f; evidence package retains all failed attempts.
+Long-context K5 graph attribution identifiesbatchedPV27.77%; sharedorderedloadstaging passes
+completeFP64/serialall-row/graph checks at134/135and4101/4102. CompleteW5/W6attention
+0.9007/0.9436→0.2818/0.3450ms; wholeordinary/K4/K5=29.8313/89.6352/104.8799tok/s,
+all3reps exactordinarytokensandacceptance. Shortchatstagingordinary/K4/K5=30.8765/75.6452/
+69.5402tok/s, allrepetitions exact. NextboundedPV
+question is sharingV/scaleloads across5/6rows without changingFMAorder. Ordinary4K stillnear30.
+Integration checkpointsbe19fb30/1e83910f/807fc291; evidence retains all failed attempts.
 
 COMPLETED USER REQUEST (2026-09-23): identify a smaller Q4/FP8 recipe close to the retained
 5090 NVFP4 PPL, then establish where A4 can replace A8 without unacceptable quality loss.
