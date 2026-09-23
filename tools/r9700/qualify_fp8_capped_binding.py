@@ -6,12 +6,15 @@ import struct
 
 from tools.convert.qwen3.common.inventory import TensorSpec, tensor_spec
 from tools.convert.qwen3_8_27b_r9700 import convert_fp8_capped as conversion
+from tools.convert.qwen3_8_27b_r9700 import compose_fp8_capped_dflash as companion
 from tools.r9700.make_sparse_r9700_candidate import build_objects, align_up, PREFIX, MAGIC, PAYLOAD_ALIGNMENT
 from tools.ppl.compare_nvfp4 import run
 
 
 def invalid_fixture(path, recipe, changed, fmt):
-    specs=conversion.specs_for(conversion.recipes()[recipe])
+    specs=(companion.base_specs()+companion.dflash.TENSOR_SPECS if recipe==companion.WEIGHTS_ID
+           else conversion.specs_for(conversion.recipes()[recipe]))
+    if changed=='missing-dflash':specs=companion.base_specs()
     specs=tuple((TensorSpec(s.name,s.shape,fmt,conversion.ROW_SCALED_LAYOUT)
                  if fmt==conversion.F8E4M3_ROW_F32S else tensor_spec(s.name,s.shape,fmt))
                 if s.name==changed else s for s in specs)
@@ -30,8 +33,23 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--out',required=True,type=Path)
     p.add_argument('--binary',required=True,type=Path)
-    p.add_argument('--only',choices=['early-attention','all-attention','attention-gdn','selective-cap'])
+    p.add_argument('--only',choices=['early-attention','all-attention','attention-gdn','selective-cap','selective-cap-dflash'])
+    p.add_argument('--artifact',type=Path,help='Explicit companion artifact; otherwise use a sparse host-only valid fixture')
     args=p.parse_args();out=args.out.resolve();fixtures=out/'binder-fixtures';fixtures.mkdir(exist_ok=True)
+    if args.only=='selective-cap-dflash':
+        recipe=companion.WEIGHTS_ID
+        missing=fixtures/'companion-missing-dflash.ninfer'
+        wrong=fixtures/'companion-wrong-matrix.ninfer'
+        invalid_fixture(missing,recipe,'missing-dflash',conversion.q4_inventory.Q4)
+        invalid_fixture(wrong,recipe,'dflash/feature_projection','BF16')
+        valid=args.artifact
+        if valid is None:
+            valid=fixtures/'companion-valid-sparse.ninfer'
+            invalid_fixture(valid,recipe,None,None)
+        run([args.binary.resolve(),'--fp8-capped-dflash',valid.resolve(),missing,wrong],
+            out/'binding-selective-cap-dflash')
+        print('selective-cap-dflash: PASS fixed inventory, missing/wrong companion rejection',flush=True)
+        return
     for name in ['early-attention','all-attention','attention-gdn','selective-cap']:
         if args.only and args.only!=name:continue
         recipe=f'r9700-q4-fp8-{name}-n16k16-eval'

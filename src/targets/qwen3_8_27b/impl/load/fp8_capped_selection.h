@@ -16,6 +16,8 @@ inline constexpr Matrix matrices[] = {
 };
 
 constexpr artifact::NumericFormat matrix_format(WeightsProfile profile, std::string_view name) {
+    if (profile == WeightsProfile::R9700Q4Fp8SelectiveCapDFlash2Q4Evaluation)
+        profile = WeightsProfile::R9700Q4Fp8SelectiveCapEvaluation;
     for (const auto& matrix : matrices)
         if (matrix.profile == profile && matrix.name == name)
             return artifact::NumericFormat::F8E4M3_ROW_F32S;

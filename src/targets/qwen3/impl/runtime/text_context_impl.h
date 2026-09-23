@@ -1124,7 +1124,7 @@ void TextContext::attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_la
 
     Tensor a_flat = a.view({kCfg.q_size, T});
     Variant::attention_output_projection(a_flat, *w.o_proj, x, ph, work_, s, text_layer,
-                                         linear_execution_);
+                                         linear_execution_, active_ordinary_decode_);
     if constexpr (requires { tap.capture_attention_stage(text_layer, "residual_x", x, s); }) {
         tap.capture_attention_stage(text_layer, "residual_x", x, s);
     }
@@ -1261,7 +1261,7 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
         Variant::gdn_output_projection(on_flat, *w.out_proj, x, ph, work_, s,
                                        packed_route_tokens(active_sequence_batch_,
                                                            active_sequence_width_),
-                                       linear_execution_, text_layer);
+                                       linear_execution_, text_layer, active_ordinary_decode_);
         if constexpr (requires { tap.capture_gdn_residual(text_layer, x, s); }) {
             tap.capture_gdn_residual(text_layer, x, s);
         }
@@ -1331,7 +1331,7 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
     Variant::gdn_output_projection(on_flat, *w.out_proj, x, ph, work_, s,
                                    packed_route_tokens(active_sequence_batch_,
                                                        active_sequence_width_),
-                                   linear_execution_, text_layer);
+                                   linear_execution_, text_layer, active_ordinary_decode_);
     if constexpr (requires { tap.capture_gdn_residual(text_layer, x, s); }) {
         tap.capture_gdn_residual(text_layer, x, s);
     }

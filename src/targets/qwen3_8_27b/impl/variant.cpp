@@ -271,8 +271,6 @@ struct Variant::ExecutionState::Impl {
     std::array<Slot, static_cast<std::size_t>(TextConfig::layers) * kSelectedRoleCount> slots{};
     std::size_t selected = 0;
     DeviceSpan activation{};
-    bool projected_residual_inventory_q4 = false;
-    bool normalized_linear_inventory_q4 = false;
 
     [[nodiscard]] static std::size_t index(SelectedLinearRole role,
                                            std::int32_t text_layer) {
@@ -325,15 +323,6 @@ Variant::ExecutionState::ExecutionState(const ModelView& model, DeviceSpan seria
     }
     auto* base = static_cast<std::byte*>(serialized_storage.data);
     impl_->activation = serialized_storage;
-    impl_->normalized_linear_inventory_q4 = normalized_linear_t1_inventory_q4(model);
-    impl_->projected_residual_inventory_q4 = std::all_of(
-        model.full_layers.begin(), model.full_layers.end(), [](const auto& layer) {
-            return layer.output.qtype == QType::Q4G64_F16S &&
-                   layer.post_mixer.down.qtype == QType::Q4G64_F16S;
-        }) && std::all_of(model.gdn_layers.begin(), model.gdn_layers.end(), [](const auto& layer) {
-            return layer.output.qtype == QType::Q4G64_F16S &&
-                   layer.post_mixer.down.qtype == QType::Q4G64_F16S;
-        });
     void* const matmul = kSelectedMatmulWorkspaceBytes == 0U
                              ? nullptr
                              : static_cast<void*>(base + activation_region);
@@ -607,7 +596,7 @@ bool Variant::ExecutionState::attention_q4_pair_c2c4(
 
 bool Variant::ExecutionState::projected_residual_t1(
     const Tensor& input, const Weight& weight, Tensor& residual,
-    qwen3::TextPhase phase, bool base_text, hipStream_t stream) {
+    qwen3::TextPhase phase, bool ordinary_decode, hipStream_t stream) {
     constexpr std::int32_t kRows = TextConfig::hidden;
     const bool exact_shape = input.ne[0] == weight.k && input.ne[1] == 1 &&
         input.ne[2] == 1 && input.ne[3] == 1 && residual.ne[0] == kRows &&
@@ -616,12 +605,11 @@ bool Variant::ExecutionState::projected_residual_t1(
                               weight.k == TextConfig::intermediate);
     if (impl_ == nullptr || !exact_shape || !projected_residual_t1_selected(
             ops::r9700::linear::kQ4ActivationBits,
-            impl_->projected_residual_inventory_q4, phase, base_text, 1U,
+            phase, ordinary_decode, 1U,
             static_cast<std::uint32_t>(weight.n),
             static_cast<std::uint32_t>(weight.k), weight.qtype)) {
         return false;
     }
-    const auto columns = static_cast<std::uint32_t>(weight.k);
     const std::size_t required =
         ops::projected_residual_t1_workspace_capacity_bytes(weight.k);
     if (required == 0U || impl_->activation.data == nullptr ||
@@ -634,26 +622,6 @@ bool Variant::ExecutionState::projected_residual_t1(
     return true;
 }
 
-bool Variant::ExecutionState::normalized_linear_t1_inventory_q4(
-    const ModelView& model) noexcept {
-    // Only the all-Q4 base Text matrix inventory is admitted. In particular, a mixed profile
-    // can retain Q4 gate/up while replacing an attention or GDN projection. BF16 GDN control
-    // projections, norms, embedding, output head, and speculative heads are separate roles.
-    return std::all_of(model.full_layers.begin(), model.full_layers.end(), [](const auto& layer) {
-        return layer.projection.query_key.qtype == QType::Q4G64_F16S &&
-               layer.projection.gate_value.qtype == QType::Q4G64_F16S &&
-               layer.output.qtype == QType::Q4G64_F16S &&
-               layer.post_mixer.gate_up.qtype == QType::Q4G64_F16S &&
-               layer.post_mixer.down.qtype == QType::Q4G64_F16S;
-    }) && std::all_of(model.gdn_layers.begin(), model.gdn_layers.end(), [](const auto& layer) {
-        return layer.projection.input_projection.query_key.qtype == QType::Q4G64_F16S &&
-               layer.projection.input_projection.value_z.qtype == QType::Q4G64_F16S &&
-               layer.output.qtype == QType::Q4G64_F16S &&
-               layer.post_mixer.gate_up.qtype == QType::Q4G64_F16S &&
-               layer.post_mixer.down.qtype == QType::Q4G64_F16S;
-    });
-}
-
 bool Variant::ExecutionState::normalized_linear_t1(
     const Tensor& input, const Tensor& norm, float eps, const Weight& weight, Tensor& output,
     qwen3::TextPhase phase, bool ordinary_decode, std::int32_t text_layer, hipStream_t stream) {
@@ -661,7 +629,7 @@ bool Variant::ExecutionState::normalized_linear_t1(
         input.ne[2] == 1 && input.ne[3] == 1 && output.ne[0] == 2 * TextConfig::intermediate &&
         output.ne[1] == 1 && output.ne[2] == 1 && output.ne[3] == 1;
     if (impl_ == nullptr || !exact_shape || !normalized_linear_t1_selected(
-            ops::r9700::linear::kQ4ActivationBits, impl_->normalized_linear_inventory_q4,
+            ops::r9700::linear::kQ4ActivationBits,
             phase, ordinary_decode, text_layer, 1U, static_cast<std::uint32_t>(weight.n),
             static_cast<std::uint32_t>(weight.k), weight.qtype)) {
         return false;
@@ -1009,9 +977,10 @@ std::size_t Variant::text_prefill_attention_workspace_capacity_bytes(
 void Variant::attention_output_projection(const Tensor& attention, const Weight& weight,
                                           Tensor& residual, qwen3::TextPhase phase,
                                           WorkspaceArena& workspace, hipStream_t stream,
-                                          std::int32_t text_layer, ExecutionState* execution) {
+                                          std::int32_t text_layer, ExecutionState* execution,
+                                          bool ordinary_decode) {
     if (execution != nullptr &&
-        execution->projected_residual_t1(attention, weight, residual, phase, true, stream)) {
+        execution->projected_residual_t1(attention, weight, residual, phase, ordinary_decode, stream)) {
         return;
     }
     auto scope = workspace.scope();
@@ -1205,9 +1174,10 @@ void Variant::gdn_input_projection_record(
 void Variant::gdn_output_projection(const Tensor& hidden, const Weight& weight, Tensor& residual,
                                     qwen3::TextPhase phase, WorkspaceArena& workspace,
                                     hipStream_t stream, std::int32_t,
-                                    ExecutionState* execution, std::int32_t text_layer) {
+                                    ExecutionState* execution, std::int32_t text_layer,
+                                    bool ordinary_decode) {
     if (execution != nullptr &&
-        execution->projected_residual_t1(hidden, weight, residual, phase, true, stream)) {
+        execution->projected_residual_t1(hidden, weight, residual, phase, ordinary_decode, stream)) {
         return;
     }
     auto scope = workspace.scope();
@@ -1295,7 +1265,7 @@ void post_mixer_body(const Tensor& hidden, const Variant::PostMixerWeights& weig
         auto delta_scope = workspace.scope();
         if (execution != nullptr && text_layer >= 0 &&
             execution->projected_residual_t1(
-                activation, weights.down, residual, phase, true, stream)) {
+                activation, weights.down, residual, phase, ordinary_decode, stream)) {
             return;
         }
         Tensor delta = workspace.alloc(DType::BF16, {TextConfig::hidden, hidden.ne[1]});
@@ -1458,6 +1428,7 @@ QType Variant::dflash_matrix_qtype(WeightsProfile profile) {
     case WeightsProfile::R9700Q4Fp8AttentionGdnEvaluation:
     case WeightsProfile::R9700Q4Fp8SelectiveCapEvaluation:
         throw std::invalid_argument("FP8 capped base has no DFlash companion");
+    case WeightsProfile::R9700Q4Fp8SelectiveCapDFlash2Q4Evaluation:
     case WeightsProfile::R9700Q4SelectiveProtectedDFlash2Q4Evaluation:
     case WeightsProfile::R9700Q4G64DFlash2Q4Evaluation:
     case WeightsProfile::R9700Q4G64DFlash2Q4MseEvaluation:
@@ -1486,6 +1457,11 @@ std::size_t Variant::linear_workspace_capacity_bytes(WeightsProfile profile,
     validate_profile(profile);
     // Companion activation storage is independent of the unchanged base recipe.
     switch (profile) {
+    case WeightsProfile::R9700Q4Fp8SelectiveCapDFlash2Q4Evaluation:
+        return std::max(
+            linear_workspace_capacity_bytes(WeightsProfile::R9700Q4Fp8SelectiveCapEvaluation, tokens),
+            ops::linear_workspace_capacity_bytes(QType::Q4G64_F16S, tokens,
+                                                 DFlashConfig::feature_rows));
     case WeightsProfile::R9700Q4SelectiveProtectedDFlash2Q4Evaluation:
         return std::max(
             linear_workspace_capacity_bytes(WeightsProfile::R9700Q4SelectiveProtectedN16K16Evaluation, tokens),
@@ -1550,6 +1526,7 @@ std::size_t Variant::vision_linear_workspace_capacity_bytes(WeightsProfile profi
                                                              std::int32_t tokens) {
     validate_profile(profile);
     switch (profile) {
+    case WeightsProfile::R9700Q4Fp8SelectiveCapDFlash2Q4Evaluation:
     case WeightsProfile::R9700Q4SelectiveProtectedDFlash2Q4Evaluation:
     case WeightsProfile::R9700Q4SelectiveProtectedN16K16Evaluation:
         return vision_linear_workspace_capacity_bytes(WeightsProfile::R9700Q4G64Evaluation, tokens);
@@ -1601,12 +1578,14 @@ std::size_t Variant::execution_state_capacity_bytes(WeightsProfile profile,
     const std::uint32_t tokens = std::max(prefill_tokens, maximum_graph_tokens);
     std::size_t bytes = linear_workspace_capacity_bytes(profile, static_cast<std::int32_t>(tokens));
     if (is_selective_protected_profile(profile) ||
-        profile == WeightsProfile::R9700Q4Fp8SelectiveCapEvaluation) {
+        profile == WeightsProfile::R9700Q4Fp8SelectiveCapEvaluation ||
+        profile == WeightsProfile::R9700Q4Fp8SelectiveCapDFlash2Q4Evaluation) {
         bytes = std::max(bytes, execution_storage_bytes(prefill_tokens, maximum_graph_tokens,
                                                         TextConfig::intermediate));
     }
     if (is_fp8_capped_profile(profile) &&
-        profile != WeightsProfile::R9700Q4Fp8SelectiveCapEvaluation) {
+        profile != WeightsProfile::R9700Q4Fp8SelectiveCapEvaluation &&
+        profile != WeightsProfile::R9700Q4Fp8SelectiveCapDFlash2Q4Evaluation) {
         bytes = std::max(bytes, execution_storage_bytes(prefill_tokens, maximum_graph_tokens));
     }
     if (profile == WeightsProfile::R9700Q4G64Fp8FourRoleN16K16Evaluation ||
@@ -1615,7 +1594,8 @@ std::size_t Variant::execution_state_capacity_bytes(WeightsProfile profile,
         profile == WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4Evaluation) {
         bytes = std::max(bytes, execution_storage_bytes(prefill_tokens, maximum_graph_tokens));
     }
-    if (profile == WeightsProfile::R9700Q4SelectiveProtectedDFlash2Q4Evaluation ||
+    if (profile == WeightsProfile::R9700Q4Fp8SelectiveCapDFlash2Q4Evaluation ||
+        profile == WeightsProfile::R9700Q4SelectiveProtectedDFlash2Q4Evaluation ||
         profile == WeightsProfile::R9700Q4G64DFlash2Q4MseEvaluation ||
         profile == WeightsProfile::R9700Q4G64DFlash2W8MseEvaluation ||
         profile == WeightsProfile::R9700Q4G64DFlash2Q4Evaluation ||

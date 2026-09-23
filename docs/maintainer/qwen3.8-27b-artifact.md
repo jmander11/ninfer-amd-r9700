@@ -323,6 +323,16 @@ reopen confirmed the exact ordered 1,124-object selected inventory and 295 Q4 de
 logical Q4 code/scale hashes and every non-Q4 payload hash matched the source, which remained
 unchanged.
 
+The compact selective-cap companion identity is
+`r9700-q4-fp8-selective-cap-n16k16-dflash2-q4-eval`. It preserves all1,124 base
+objects byte-for-byte, including26 FP8 projections and Q4 embedding/output head, and appends
+the66 canonical-Q4/BF16 DFlash objects from the qualified selective-protected tiled-head donor.
+`tools.convert.qwen3_8_27b_r9700.compose_fp8_capped_dflash --base BASE --donor DONOR --out NEW`
+performs create-only composition and exact payload readback; it does not copy the donor's base
+or W8 head and needs no requantization. Both selector codebooks and private state stay BF16.
+The combined17,002,543,616-byte local artifact has its own conversion receipt and fixed binder;
+base PPL selection is unchanged, and runtime token/speed admission is recorded in performance docs.
+
 In addition to the selective-protected canonical-Q4 companion above, the three older
 canonical-Q4 DFlash2 evaluation identities are
 `qwen3.8-27b/r9700-q4g64-n16k16-dflash2-q4-eval` and

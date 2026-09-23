@@ -752,11 +752,15 @@ ArtifactLoadPlan bind_fp8_q4_hybrid(const std::filesystem::path& path) {
 
 int main(int argc, char** argv) {
     try {
-        if (argc == 5 && std::string_view(argv[1]) == "--fp8-capped") {
+        if (argc == 5 && (std::string_view(argv[1]) == "--fp8-capped" ||
+                          std::string_view(argv[1]) == "--fp8-capped-dflash")) {
             namespace detail = ninfer::targets::qwen3_8_27b::detail;
             using Variant = detail::Variant;
             ninfer::artifact::Reader reader(argv[2]);
             const auto profile = Package::resolve_weights(reader.identity());
+            const bool companion = std::string_view(argv[1]) == "--fp8-capped-dflash";
+            require(companion == (profile == WeightsProfile::R9700Q4Fp8SelectiveCapDFlash2Q4Evaluation),
+                    "capped companion identity does not match qualification mode");
             require(detail::is_fp8_capped_profile(profile),
                     "expected fixed capped FP8 identity");
             const std::size_t expected = profile == WeightsProfile::R9700Q4Fp8EarlyAttentionEvaluation
@@ -775,20 +779,24 @@ int main(int argc, char** argv) {
                 fp8 += selected;
                 q4 += tensor->format == NumericFormat::Q4G64_F16S;
             }
-            require(reader.objects().size() == 1124U && fp8 == expected && q4 == 439U - expected,
+            require(reader.objects().size() == (companion ? 1190U : 1124U) && fp8 == expected &&
+                    q4 == 439U - expected + (companion ? 32U : 0U),
                     "capped base object/format counts differ");
             const auto bind = [&](ninfer::artifact::Reader& source) {
                 ninfer::artifact::Binder binder(source);
                 return detail::bind_artifact(binder, profile,
-                    {.vision = true, .speculative = ninfer::SpeculativeBackend::Mtp,
+                    {.vision = true, .speculative = companion ? ninfer::SpeculativeBackend::DFlash
+                                                             : ninfer::SpeculativeBackend::Mtp,
                      .proposal_head = ninfer::ProposalHead::Optimized});
             };
             const auto plan = bind(reader);
-            require(plan.materialization.object_count == 1124U &&
-                    plan.materialization.device_objects.size() == 1118U &&
+            require(plan.materialization.object_count == (companion ? 1190U : 1124U) &&
+                    (companion || plan.materialization.device_objects.size() == 1118U) &&
                     plan.bindings.token_embedding.format == NumericFormat::Q4G64_F16S &&
                     plan.bindings.output_head.format == NumericFormat::Q4G64_F16S,
                     "capped base materialization/endpoints differ");
+            require(plan.bindings.dflash.has_value() == companion,
+                    "capped companion is not bound");
             for (int i = 3; i < 5; ++i) {
                 ninfer::artifact::Reader invalid(argv[i]);
                 bool rejected = false;
@@ -798,8 +806,9 @@ int main(int argc, char** argv) {
             }
             for (const int tokens : {1, 6, 24, 2048}) {
                 require(Variant::linear_workspace_capacity_bytes(profile, tokens) ==
-                        Variant::linear_workspace_capacity_bytes(
-                            WeightsProfile::R9700Q4G64Evaluation, tokens),
+                        Variant::linear_workspace_capacity_bytes(companion
+                            ? WeightsProfile::R9700Q4G64DFlash2Q4Evaluation
+                            : WeightsProfile::R9700Q4G64Evaluation, tokens),
                         "capped Q4 workspace differs from complete Q4 inventory");
                 require(Variant::execution_state_capacity_bytes(profile, 2048, tokens) >=
                         Variant::linear_workspace_capacity_bytes(profile, 2048),

@@ -38,6 +38,7 @@ NumericFormat matrix_format(WeightsProfile profile, bool source_q4) {
     case WeightsProfile::R9700Q4Fp8AllAttentionEvaluation:
     case WeightsProfile::R9700Q4Fp8AttentionGdnEvaluation:
     case WeightsProfile::R9700Q4Fp8SelectiveCapEvaluation:
+    case WeightsProfile::R9700Q4Fp8SelectiveCapDFlash2Q4Evaluation:
     case WeightsProfile::R9700Q4SelectiveProtectedN16K16Evaluation:
     case WeightsProfile::R9700Q4SelectiveProtectedDFlash2Q4Evaluation:
     case WeightsProfile::R9700Q4G64Fp8FourRoleN16K16Evaluation:
@@ -63,7 +64,8 @@ NumericFormat dflash_matrix_format(WeightsProfile profile) {
         profile == WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2W8MseEvaluation) {
         return NumericFormat::W8G32_F16S;
     }
-    if (profile == WeightsProfile::R9700Q4SelectiveProtectedDFlash2Q4Evaluation ||
+    if (profile == WeightsProfile::R9700Q4Fp8SelectiveCapDFlash2Q4Evaluation ||
+        profile == WeightsProfile::R9700Q4SelectiveProtectedDFlash2Q4Evaluation ||
         profile == WeightsProfile::R9700Q4G64DFlash2Q4MseEvaluation ||
         profile == WeightsProfile::R9700Q4G64DFlash2Q4Evaluation ||
         profile == WeightsProfile::R9700Q4W8MseDFlash2Q4MseEvaluation ||
@@ -391,6 +393,7 @@ ArtifactLoadPlan bind_artifact(artifact::Binder& binder, WeightsProfile weights_
 
     const bool has_dflash = binder.contains("dflash/feature_projection");
     const bool profile_requires_dflash =
+        weights_profile == WeightsProfile::R9700Q4Fp8SelectiveCapDFlash2Q4Evaluation ||
         weights_profile == WeightsProfile::R9700Q4SelectiveProtectedDFlash2Q4Evaluation ||
         weights_profile == WeightsProfile::R9700Q4G64DFlash2Q4MseEvaluation ||
         weights_profile == WeightsProfile::R9700Q4G64DFlash2W8MseEvaluation ||

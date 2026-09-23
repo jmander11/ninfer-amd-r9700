@@ -80,13 +80,11 @@ struct Variant {
             Tensor& query, Tensor& key, Tensor& gate, Tensor& value, hipStream_t stream);
         [[nodiscard]] bool projected_residual_t1(
             const Tensor& input, const Weight& weight, Tensor& residual,
-            qwen3::TextPhase phase, bool base_text, hipStream_t stream);
+            qwen3::TextPhase phase, bool ordinary_decode, hipStream_t stream);
         [[nodiscard]] bool normalized_linear_t1(
             const Tensor& input, const Tensor& norm, float eps, const Weight& weight,
             Tensor& output, qwen3::TextPhase phase, bool ordinary_decode,
             std::int32_t text_layer, hipStream_t stream);
-        [[nodiscard]] static bool normalized_linear_t1_inventory_q4(
-            const ModelView& model) noexcept;
         [[nodiscard]] static constexpr bool dflash_down_scale_gather_selected(
             std::uint32_t activation_bits, qwen3::TextPhase phase,
             bool dflash_target_verify, std::int32_t route_tokens, std::int32_t text_layer,
@@ -97,12 +95,14 @@ struct Variant {
                 (tokens == 5 || tokens == 6) && rows == 5120 && columns == 17408 &&
                 weight == QType::Q4G64_F16S && layout == QuantLayout::Q4N16K16;
         }
+        // These local Q4 boundaries do not depend on neighboring matrix formats. Keep explicit
+        // ordinary-decode intent: speculative target verification can also have width one.
         [[nodiscard]] static constexpr bool normalized_linear_t1_selected(
-            std::uint32_t activation_bits, bool all_q4_text_inventory,
+            std::uint32_t activation_bits,
             qwen3::TextPhase phase, bool ordinary_decode,
             std::int32_t text_layer, std::uint32_t tokens, std::uint32_t rows,
             std::uint32_t columns, QType weight) noexcept {
-            return activation_bits == 8U && all_q4_text_inventory && ordinary_decode &&
+            return activation_bits == 8U && ordinary_decode &&
                    phase == qwen3::TextPhase::Verify && text_layer >= 0 &&
                    text_layer < TextConfig::layers && tokens == 1U &&
                    rows == 2U * TextConfig::intermediate && columns == TextConfig::hidden &&
@@ -110,12 +110,12 @@ struct Variant {
         }
         [[nodiscard]] static constexpr bool projected_residual_t1_selected(
             std::uint32_t activation_bits,
-            bool all_q4_residual_inventory, qwen3::TextPhase phase, bool base_text,
+            qwen3::TextPhase phase, bool ordinary_decode,
             std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns,
             QType weight) noexcept {
             return activation_bits == 8U &&
-                   all_q4_residual_inventory && phase == qwen3::TextPhase::Verify &&
-                   base_text && tokens == 1U && rows == TextConfig::hidden &&
+                   phase == qwen3::TextPhase::Verify &&
+                   ordinary_decode && tokens == 1U && rows == TextConfig::hidden &&
                    (columns == TextConfig::query_size ||
                     columns == TextConfig::intermediate) &&
                    weight == QType::Q4G64_F16S;
@@ -205,7 +205,8 @@ struct Variant {
                                             Tensor& residual, qwen3::TextPhase phase,
                                             WorkspaceArena& workspace, hipStream_t stream,
                                             std::int32_t text_layer,
-                                            ExecutionState* execution = nullptr);
+                                            ExecutionState* execution = nullptr,
+                                            bool ordinary_decode = false);
     static void mtp_attention_projection(const Tensor& hidden,
                                          const MtpAttentionProjectionWeights& weights,
                                          Tensor& query, Tensor& gate, Tensor& key, Tensor& value,
@@ -260,7 +261,8 @@ struct Variant {
                                       qwen3::TextPhase phase, WorkspaceArena& workspace,
                                       hipStream_t stream, std::int32_t route_tokens = 0,
                                       ExecutionState* execution = nullptr,
-                                      std::int32_t text_layer = -1);
+                                      std::int32_t text_layer = -1,
+                                      bool ordinary_decode = false);
     static void gdn_norm_control_projection(const Tensor& residual, const Tensor& norm_weight,
                                             float eps, const GdnProjectionWeights& weights,
                                             Tensor& hidden, Tensor& g, Tensor& beta,

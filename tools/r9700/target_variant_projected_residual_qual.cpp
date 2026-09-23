@@ -10,25 +10,29 @@ using ninfer::targets::qwen3::TextPhase;
 using Variant = ninfer::targets::qwen3_8_27b::detail::Variant;
 
 constexpr bool selected(std::uint32_t activation_bits = 8U,
-                        bool inventory = true, TextPhase phase = TextPhase::Verify,
-                        bool base_text = true, std::uint32_t tokens = 1U,
+                        TextPhase phase = TextPhase::Verify,
+                        bool ordinary_decode = true, std::uint32_t tokens = 1U,
                         std::uint32_t rows = 5120U, std::uint32_t columns = 6144U,
                         QType weight = QType::Q4G64_F16S) {
     return Variant::ExecutionState::projected_residual_t1_selected(
-        activation_bits, inventory, phase, base_text, tokens, rows, columns, weight);
+        activation_bits, phase, ordinary_decode, tokens, rows, columns, weight);
 }
 
 static_assert(selected());
-static_assert(selected(8U, true, TextPhase::Verify, true, 1U, 5120U, 17408U));
+static_assert(selected(8U, TextPhase::Verify, true, 1U, 5120U, 17408U));
 static_assert(!selected(4U));
-static_assert(!selected(8U, false));
-static_assert(!selected(8U, true, TextPhase::Prefill));
-static_assert(!selected(8U, true, TextPhase::Verify, false));
-static_assert(!selected(8U, true, TextPhase::Verify, true, 2U));
-static_assert(!selected(8U, true, TextPhase::Verify, true, 1U, 4096U));
-static_assert(!selected(8U, true, TextPhase::Verify, true, 1U, 5120U, 5120U));
-static_assert(!selected(8U, true, TextPhase::Verify, true, 1U, 5120U, 6144U,
+static_assert(!selected(8U, TextPhase::Prefill));
+// Width-one speculative verification is not ordinary decode, even for a Q4 local matrix.
+static_assert(!selected(8U, TextPhase::Verify, false));
+static_assert(!selected(8U, TextPhase::Verify, true, 2U));
+static_assert(!selected(8U, TextPhase::Verify, true, 1U, 4096U));
+static_assert(!selected(8U, TextPhase::Verify, true, 1U, 5120U, 5120U));
+static_assert(!selected(8U, TextPhase::Verify, true, 1U, 5120U, 6144U,
                         QType::W8G32_F16S));
+static_assert(!selected(8U, TextPhase::Verify, true, 1U, 5120U, 6144U,
+                        QType::F8E4M3_ROW_F32S));
+static_assert(!selected(8U, TextPhase::Verify, true, 1U, 5120U, 17408U,
+                        QType::F8E4M3_ROW_F32S));
 
 namespace {
 

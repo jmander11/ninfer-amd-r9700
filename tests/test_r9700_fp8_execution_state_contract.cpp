@@ -22,56 +22,35 @@ void require(bool condition, const char* message) {
 }
 
 constexpr bool normalized_selected(
-    std::uint32_t bits = 8U, bool inventory = true,
+    std::uint32_t bits = 8U,
     ninfer::targets::qwen3::TextPhase phase = ninfer::targets::qwen3::TextPhase::Verify,
     bool ordinary = true, std::int32_t layer = 0, std::uint32_t tokens = 1U,
     std::uint32_t rows = 34816U, std::uint32_t columns = 5120U,
     ninfer::QType weight = ninfer::QType::Q4G64_F16S) {
     return detail::Variant::ExecutionState::normalized_linear_t1_selected(
-        bits, inventory, phase, ordinary, layer, tokens, rows, columns, weight);
+        bits, phase, ordinary, layer, tokens, rows, columns, weight);
 }
 
 void normalized_route_contract() {
     using Phase = ninfer::targets::qwen3::TextPhase;
     static_assert(normalized_selected());
-    static_assert(normalized_selected(8U, true, Phase::Verify, true, 63));
+    static_assert(normalized_selected(8U, Phase::Verify, true, 63));
     static_assert(!normalized_selected(4U));
-    static_assert(!normalized_selected(8U, false));
-    static_assert(!normalized_selected(8U, true, Phase::Prefill));
+    static_assert(!normalized_selected(8U, Phase::Prefill));
     // A speculative target verify can also be width one: phase/shape cannot select this route.
-    static_assert(!normalized_selected(8U, true, Phase::Verify, false));
-    static_assert(!normalized_selected(8U, true, Phase::Verify, true, -1));
-    static_assert(!normalized_selected(8U, true, Phase::Verify, true, 64));
-    static_assert(!normalized_selected(8U, true, Phase::Verify, true, 0, 2U));
-    static_assert(!normalized_selected(8U, true, Phase::Verify, true, 0, 4U));
-    static_assert(!normalized_selected(8U, true, Phase::Verify, true, 0, 1U, 17408U));
-    static_assert(!normalized_selected(8U, true, Phase::Verify, true, 0, 1U, 34816U,
+    static_assert(!normalized_selected(8U, Phase::Verify, false));
+    static_assert(!normalized_selected(8U, Phase::Verify, true, -1));
+    static_assert(!normalized_selected(8U, Phase::Verify, true, 64));
+    static_assert(!normalized_selected(8U, Phase::Verify, true, 0, 2U));
+    static_assert(!normalized_selected(8U, Phase::Verify, true, 0, 4U));
+    static_assert(!normalized_selected(8U, Phase::Verify, true, 0, 1U, 17408U));
+    static_assert(!normalized_selected(8U, Phase::Verify, true, 0, 1U, 34816U,
                                       6144U));
-    static_assert(!normalized_selected(8U, true, Phase::Verify, true, 0, 1U, 34816U,
+    static_assert(!normalized_selected(8U, Phase::Verify, true, 0, 1U, 34816U,
                                       5120U, ninfer::QType::F8E4M3_ROW_F32S));
-    static_assert(!normalized_selected(8U, true, Phase::Verify, true, 0, 1U, 34816U,
+    static_assert(!normalized_selected(8U, Phase::Verify, true, 0, 1U, 34816U,
                                       5120U, ninfer::QType::W8G32_F16S));
 
-    detail::Variant::ModelView model{};
-    std::vector<ninfer::Weight*> matrices;
-    for (auto& layer : model.full_layers) {
-        matrices.insert(matrices.end(), {&layer.projection.query_key, &layer.projection.gate_value,
-            &layer.output, &layer.post_mixer.gate_up, &layer.post_mixer.down});
-    }
-    for (auto& layer : model.gdn_layers) {
-        matrices.insert(matrices.end(), {&layer.projection.input_projection.query_key,
-            &layer.projection.input_projection.value_z, &layer.output,
-            &layer.post_mixer.gate_up, &layer.post_mixer.down});
-    }
-    for (auto* weight : matrices) weight->qtype = ninfer::QType::Q4G64_F16S;
-    require(detail::Variant::ExecutionState::normalized_linear_t1_inventory_q4(model),
-            "all-Q4 base Text inventory did not select normalized-linear");
-    for (auto* weight : matrices) {
-        weight->qtype = ninfer::QType::F8E4M3_ROW_F32S;
-        require(!detail::Variant::ExecutionState::normalized_linear_t1_inventory_q4(model),
-                "mixed Text inventory selected normalized-linear");
-        weight->qtype = ninfer::QType::Q4G64_F16S;
-    }
     if constexpr (ninfer::ops::r9700::linear::kQ4ActivationBits == 8U) {
         const std::size_t required =
             ninfer::ops::normalized_linear_workspace_capacity_bytes(1, 5120, 34816);
@@ -208,6 +187,29 @@ int main() {
                     (q4_activation + 255U) / 256U * 256U,
                 "Q4 execution region does not replace its former arena reserve");
         using Profile = detail::WeightsProfile;
+        const auto capped_companion = Profile::R9700Q4Fp8SelectiveCapDFlash2Q4Evaluation;
+        require(Variant::dflash_matrix_qtype(capped_companion) == ninfer::QType::Q4G64_F16S,
+                "capped DFlash companion changed its canonical Q4 recipe");
+        for (const int tokens : {1, 4, 5, 6, 24, 2048}) {
+            const auto base = Variant::linear_workspace_capacity_bytes(
+                Profile::R9700Q4Fp8SelectiveCapEvaluation, tokens);
+            const auto draft = ninfer::ops::linear_workspace_capacity_bytes(
+                ninfer::QType::Q4G64_F16S, tokens, detail::DFlashConfig::feature_rows);
+            const auto activation = ninfer::ops::LinearExecution::activation_workspace_capacity_bytes(
+                tokens, detail::TextConfig::intermediate);
+            const auto verify = ninfer::ops::dflash_verify_down_linear_workspace_capacity_bytes(
+                ninfer::QType::Q4G64_F16S, 6, detail::DFlashConfig::intermediate,
+                detail::TextConfig::hidden);
+            require(Variant::linear_workspace_capacity_bytes(capped_companion, tokens) ==
+                        std::max(base, draft), "capped companion loses K25600 activation");
+            require(Variant::execution_state_capacity_bytes(capped_companion, tokens, tokens) ==
+                        (std::max({base, draft, activation, verify}) + 255U) / 256U * 256U,
+                    "capped companion loses FP8 K17408 or verify-down storage");
+            require(Variant::vision_linear_workspace_capacity_bytes(capped_companion, tokens) ==
+                        Variant::vision_linear_workspace_capacity_bytes(
+                            Profile::R9700Q4Fp8SelectiveCapEvaluation, tokens),
+                    "capped companion changed base Vision workspace");
+        }
         for (const auto profile : {Profile::R9700Q4G64DFlash2Q4MseEvaluation,
                                   Profile::R9700Q4W8MseDFlash2Q4MseEvaluation,
                                   Profile::R9700Q4G64Fp8FourRoleDFlash2Q4MseEvaluation}) {
