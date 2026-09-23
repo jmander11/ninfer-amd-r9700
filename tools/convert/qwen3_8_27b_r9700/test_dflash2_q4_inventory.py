@@ -13,7 +13,13 @@ from tools.convert.qwen3_8_27b_r9700 import dflash2_matrix_recipes as recipes
 class DFlash2Q4InventoryTest(unittest.TestCase):
     def test_selective_protected_has_only_canonical_companion(self) -> None:
         from tools.convert.qwen3_8_27b_r9700 import selective_protected_inventory as base
-        self.assertEqual(inventory.SELECTIVE_OBJECT_SPECS[:1124], base.OBJECT_SPECS)
+        for actual, original in zip(inventory.SELECTIVE_OBJECT_SPECS[:1124], base.OBJECT_SPECS):
+            if original.name == "text/output_head":
+                self.assertEqual((actual.name, actual.shape, actual.format),
+                                 (original.name, original.shape, original.format))
+                self.assertEqual(actual.layout, "r9700-w8g32-n16-k16-v1")
+            else:
+                self.assertEqual(actual, original)
         self.assertEqual(inventory.SELECTIVE_OBJECT_SPECS[1124:], inventory.TENSOR_SPECS)
         self.assertEqual(inventory.SELECTIVE_DEVICE_ARENA_BYTES,
                          base.DEVICE_ARENA_BYTES + 1_209_469_440)

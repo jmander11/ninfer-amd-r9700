@@ -118,6 +118,9 @@ ROW_SPLIT_K128_V1 = Layout(
 R9700_Q4G64_N16_K16_V1 = Layout(
     "r9700-q4g64-n16-k16-v1", 256, frozenset(("Q4G64_F16S",))
 )
+R9700_W8G32_N16_K16_V1 = Layout(
+    "r9700-w8g32-n16-k16-v1", 256, frozenset(("W8G32_F16S",))
+)
 ROW_SCALED_K128_V1 = Layout(
     "row-scaled-k128-v1", 256, frozenset(("F8E4M3_ROW_F32S",))
 )
@@ -128,6 +131,7 @@ LAYOUTS = MappingProxyType(
             CONTIGUOUS_LE_V1,
             ROW_SPLIT_K128_V1,
             R9700_Q4G64_N16_K16_V1,
+            R9700_W8G32_N16_K16_V1,
             ROW_SCALED_K128_V1,
         )
     }
@@ -240,6 +244,47 @@ def q4_n16k16_geometry(shape: Sequence[int]) -> RowSplitGeometry:
                             scale_offset, scale_bytes, scale_offset + scale_bytes)
 
 
+def w8_n16k16_geometry(shape: Sequence[int]) -> RowSplitGeometry:
+    n, _ = _shape(shape, rank=2)
+    if n % 16:
+        raise ValueError("r9700-w8g32-n16-k16-v1 requires N divisible by 16")
+    return row_split_geometry("W8G32_F16S", shape)
+
+
+def transcode_w8_n16k16(source: bytes | bytearray | memoryview,
+                        shape: Sequence[int], *, inverse: bool = False):
+    """Stream an exact W8 code/FP16-word permutation in bounded N16 blocks.
+
+    Forward consumes row-split and yields N16/K16; inverse consumes N16/K16
+    and yields row-split. No numerical conversion or requantization occurs.
+    """
+    import numpy as np
+
+    geometry = w8_n16k16_geometry(shape)
+    view = memoryview(source)
+    if view.nbytes != geometry.payload_bytes:
+        raise ValueError("W8 transcode payload size differs from descriptor")
+    groups = geometry.groups_per_row
+    code_block = 16 * geometry.k_pad
+    scale_block = 16 * groups * 2
+    for offset in range(0, geometry.base_bytes, code_block):
+        raw = np.frombuffer(view[offset:offset + code_block], dtype=np.uint8)
+        if inverse:
+            block = raw.reshape(groups, 2, 16, 16).transpose(2, 0, 1, 3)
+        else:
+            block = raw.reshape(16, groups, 2, 16).transpose(1, 2, 0, 3)
+        yield block.tobytes()
+    yield bytes(view[geometry.base_bytes:geometry.scale_offset])
+    for offset in range(geometry.scale_offset, geometry.payload_bytes, scale_block):
+        # Keep FP16 words as two uninterpreted bytes, including signed zero.
+        raw = np.frombuffer(view[offset:offset + scale_block], dtype=np.uint8)
+        if inverse:
+            block = raw.reshape(groups, 16, 2).transpose(1, 0, 2)
+        else:
+            block = raw.reshape(16, groups, 2).transpose(1, 0, 2)
+        yield block.tobytes()
+
+
 def row_scaled_geometry(
     format: str | RowScaledFormat, shape: Sequence[int]
 ) -> RowScaledGeometry:
@@ -293,6 +338,8 @@ def encoded_size(
         return row_scaled_geometry(numeric_spec, shape).payload_bytes
     if layout_spec is R9700_Q4G64_N16_K16_V1:
         return q4_n16k16_geometry(shape).payload_bytes
+    if layout_spec is R9700_W8G32_N16_K16_V1:
+        return w8_n16k16_geometry(shape).payload_bytes
     raise ValueError(f"unsupported tensor layout: {layout_spec.name!r}")
 
 
@@ -959,6 +1006,7 @@ __all__ = [
     "PLANE_ALIGNMENT",
     "ROW_SPLIT_K128_V1",
     "R9700_Q4G64_N16_K16_V1",
+    "R9700_W8G32_N16_K16_V1",
     "ROW_SCALED_K128_V1",
     "RowPlanes",
     "RowSplitGeometry",
@@ -979,6 +1027,8 @@ __all__ = [
     "get_layout",
     "row_split_geometry",
     "q4_n16k16_geometry",
+    "w8_n16k16_geometry",
+    "transcode_w8_n16k16",
     "row_scaled_geometry",
     "split_row_planes",
 ]

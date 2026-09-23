@@ -8,7 +8,6 @@
 #include <stdexcept>
 
 namespace ninfer::artifact {
-namespace {
 
 StorageLayout storage_layout_for(NumericFormat format) {
     switch (format) {
@@ -28,6 +27,7 @@ StorageLayout storage_layout_for(NumericFormat format) {
     throw std::logic_error("unhandled numeric format");
 }
 
+namespace {
 QType qtype_for(NumericFormat format) {
     switch (format) {
     case NumericFormat::BF16:
@@ -194,13 +194,27 @@ Tensor materialized_tensor(const MaterializedArtifact& materialized, ObjectHandl
 
 Weight materialized_weight(const MaterializedArtifact& materialized, ObjectHandle handle,
                            NumericFormat format, std::int32_t rows, std::int32_t columns) {
-    if (storage_layout_for(format) == StorageLayout::ContiguousLeV1) {
+    return materialized_weight(materialized, handle, format, rows, columns, storage_layout_for(format));
+}
+
+Weight materialized_weight(const MaterializedArtifact& materialized, ObjectHandle handle,
+                           NumericFormat format, std::int32_t rows, std::int32_t columns,
+                           StorageLayout layout) {
+    const std::array<std::uint64_t,2> shape{static_cast<std::uint64_t>(rows),
+                                           static_cast<std::uint64_t>(columns)};
+    (void)tensor_encoded_size(layout, format, shape);
+    if (layout == StorageLayout::R9700W8G32N16K16V1) {
+        auto out = row_split_weight(materialized, handle, format, rows, columns);
+        out.layout = QuantLayout::W8N16K16;
+        return out;
+    }
+    if (layout == StorageLayout::ContiguousLeV1) {
         return contiguous_weight(materialized, handle, format, rows, columns);
     }
-    if (storage_layout_for(format) == StorageLayout::RowScaledK128V1) {
+    if (layout == StorageLayout::RowScaledK128V1) {
         return row_scaled_weight(materialized, handle, format, rows, columns);
     }
-    if (storage_layout_for(format) == StorageLayout::R9700Q4G64N16K16V1) {
+    if (layout == StorageLayout::R9700Q4G64N16K16V1) {
         return r9700_q4_n16k16_weight(materialized, handle, rows, columns);
     }
     return row_split_weight(materialized, handle, format, rows, columns);

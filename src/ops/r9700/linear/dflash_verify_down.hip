@@ -1,61 +1,99 @@
 #include "dflash_verify_down.h"
-#include <hip/hip_fp16.h>
-#include <array>
-#include <limits>
+#include "a8q4_scale_gather_impl.h"
 
 namespace ninfer::ops::r9700::linear {
 namespace {
-using I2 = int __attribute__((ext_vector_type(2)));
-using I8 = int __attribute__((ext_vector_type(8)));
-constexpr unsigned N=5120,K=17408,G=272;
+constexpr unsigned N=5120,K=17408,G=K/64;
+using I2=detail::ScaleGatherI2;
+using I8=detail::ScaleGatherI8;
+struct Group {
+    I2 low[2],high[2],weight[2];
+    std::uint16_t weight_scale,activation_scale;
+};
 
 template<unsigned T>
-__global__ __launch_bounds__(32) void dflash_down_scale_gather_kernel(
+__device__ __forceinline__ Group load_group(
+    const std::uint8_t* low,const std::uint8_t* high,const std::uint16_t* scales,
+    const std::uint8_t* codes,const std::uint16_t* weight_scales,
+    unsigned row,unsigned group) {
+    const unsigned lane=threadIdx.x,axis=lane&15U,half_lane=lane>>4U;
+    Group value{};
+#pragma unroll
+    for(unsigned half=0;half<2;++half) {
+        const unsigned k=group*64+half*32+half_lane*16;
+        if(axis<T) {
+            const std::size_t offset=(static_cast<std::size_t>(axis)*K+k)/2;
+            value.low[half][0]=*reinterpret_cast<const int*>(low+offset);
+            value.low[half][1]=*reinterpret_cast<const int*>(low+offset+4);
+            value.high[half][0]=*reinterpret_cast<const int*>(high+offset);
+            value.high[half][1]=*reinterpret_cast<const int*>(high+offset+4);
+        }
+        const std::size_t pair=(((static_cast<std::size_t>(row/16)*G+group)*4+
+                                (k%64)/16)*16+row%16);
+        const auto packed=reinterpret_cast<const std::uint64_t*>(codes)[pair];
+        value.weight[half][0]=static_cast<int>(packed);
+        value.weight[half][1]=static_cast<int>(packed>>32);
+    }
+    value.weight_scale=weight_scales[(row/16)*G*16+group*16+row%16];
+    value.activation_scale=lane<T?scales[lane*G+group]:0;
+    return value;
+}
+
+template<unsigned T>
+__device__ __forceinline__ void consume_group(
+    const Group& value,float ws,float gathered,float (&total)[T]) {
+    I8 low_dot{},high_dot{};
+#pragma unroll
+    for(unsigned half=0;half<2;++half) {
+        low_dot=__builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
+            false,value.low[half],true,value.weight[half],low_dot,false);
+        high_dot=__builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
+            true,value.high[half],true,value.weight[half],high_dot,false);
+    }
+#pragma unroll
+    for(unsigned t=0;t<T;++t) {
+        const float as=__shfl(gathered,t,32);
+        const int combined=low_dot[t]+16*high_dot[t];
+        total[t]=fmaf(static_cast<float>(combined),as*ws,total[t]);
+    }
+}
+
+template<unsigned T>
+__global__ __launch_bounds__(32) void dflash_down_pipeline_kernel(
     const std::uint8_t* low,const std::uint8_t* high,const std::uint16_t* scales,
     const std::uint32_t* status,const std::uint8_t* codes,
     const std::uint16_t* weight_scales,hip_bfloat16* output) {
-    const unsigned lane=threadIdx.x,axis=lane&15U,half_lane=lane>>4U;
-    const unsigned row=blockIdx.x*16+axis;
+    const unsigned lane=threadIdx.x,row=blockIdx.x*16+(lane&15U);
     if(*status!=0) {
-        if(lane<16) for(unsigned t=0;t<T;++t) {
+        if(lane<16)for(unsigned t=0;t<T;++t) {
             hip_bfloat16 poison;poison.data=0x7fc1;output[t*N+row]=poison;
         }
         return;
     }
     float total[T]{};
-    for(unsigned group=0;group<G;++group) {
-        I8 low_dot{},high_dot{};
-#pragma unroll
-        for(unsigned half=0;half<2;++half) {
-            const unsigned k=group*64+half*32+half_lane*16;
-            I2 al{},ah{},b{};
-            if(axis<T) {
-                const std::size_t offset=(static_cast<std::size_t>(axis)*K+k)/2;
-                al[0]=*reinterpret_cast<const int*>(low+offset);
-                al[1]=*reinterpret_cast<const int*>(low+offset+4);
-                ah[0]=*reinterpret_cast<const int*>(high+offset);
-                ah[1]=*reinterpret_cast<const int*>(high+offset+4);
-            }
-            const std::size_t pair=(((static_cast<std::size_t>(row/16)*G+group)*4+
-                                    (k%64)/16)*16+row%16);
-            const auto packed=reinterpret_cast<const std::uint64_t*>(codes)[pair];
-            b[0]=static_cast<int>(packed);b[1]=static_cast<int>(packed>>32);
-            low_dot=__builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(false,al,true,b,low_dot,false);
-            high_dot=__builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(true,ah,true,b,high_dot,false);
-        }
-        const float ws=__half2float(__ushort_as_half(weight_scales[(row/16)*G*16+group*16+row%16]));
-        // One lane per token gathers the strided token-major FP16 scale. The
-        // shuffle executes with the complete wave, after reconverging the load.
-        // This removes separate token-scale load/wait phases without reordering
-        // any per-output integer dot, FP32 scale product or group FMA.
-        const float gathered=lane<T?__half2float(__ushort_as_half(scales[lane*G+group])):0.0F;
-#pragma unroll
-        for(unsigned t=0;t<T;++t) {
-            const float as=__shfl(gathered,t,32);
-            const int combined=low_dot[t]+16*high_dot[t];
-            total[t]=fmaf(static_cast<float>(combined),as*ws,total[t]);
-        }
+    Group current=load_group<T>(low,high,scales,codes,weight_scales,row,0);
+#pragma unroll 1
+    for(unsigned group=0;group<G-1;++group) {
+        float ws=__half2float(__ushort_as_half(current.weight_scale));
+        float gathered=__half2float(__ushort_as_half(current.activation_scale));
+        // Materialize full FP32 values before issuing successor loads. Keeping
+        // raw current FP16 scales live allowed the compiler to pack current and
+        // successor into opposite halves of one VGPR, forcing an early wait.
+        // This empty register-only boundary prevents that fold; it changes no
+        // bits, arithmetic or memory ordering.
+        asm volatile("" : "+v"(ws), "+v"(gathered));
+        // Scheduling barriers constrain instruction motion, not memory
+        // completion. ISA admission must demonstrate successor VMEM before
+        // current compute without a wait that drains it prematurely.
+        __builtin_amdgcn_sched_barrier(0);
+        Group next=load_group<T>(low,high,scales,codes,weight_scales,row,group+1);
+        __builtin_amdgcn_sched_barrier(0);
+        consume_group<T>(current,ws,gathered,total);
+        __builtin_amdgcn_sched_barrier(0);
+        current=next;
     }
+    consume_group<T>(current,__half2float(__ushort_as_half(current.weight_scale)),
+                     __half2float(__ushort_as_half(current.activation_scale)),total);
     if(lane<16) {
 #pragma unroll
         for(unsigned t=0;t<T;++t)output[t*N+row]=hip_bfloat16(total[t]);
@@ -64,34 +102,16 @@ __global__ __launch_bounds__(32) void dflash_down_scale_gather_kernel(
 }
 
 hipError_t a8q4g64_dflash_verify_down(const A8Q4G64CandidateArgs& a,hipStream_t stream) noexcept {
-    const auto bytes=a8q4g64_activation_workspace_capacity_bytes(a.tokens,K);
-    if((a.tokens!=5 && a.tokens!=6) || a.rows!=N || a.columns!=K ||
-       a.padded_columns!=K || a.weight_code_bytes!=static_cast<std::size_t>(N)*K/2 ||
-       a.weight_scale_bytes!=static_cast<std::size_t>(N)*G*2 ||
-       a.activation_workspace_bytes!=bytes || stream==nullptr)return hipErrorInvalidValue;
-    struct Plane {const void* p;std::size_t n,align;};
-    const std::array<Plane,5> planes{{
-        {a.input,static_cast<std::size_t>(a.tokens)*K*2,2},
-        {a.weight_codes,a.weight_code_bytes,8},{a.weight_scales,a.weight_scale_bytes,2},
-        {a.activation_workspace,bytes,256},
-        {a.output,static_cast<std::size_t>(a.tokens)*N*2,2}}};
-    for(unsigned i=0;i<5;++i) {
-        const auto p=reinterpret_cast<std::uintptr_t>(planes[i].p);
-        if(!p || p%planes[i].align || p>std::numeric_limits<std::uintptr_t>::max()-planes[i].n)
-            return hipErrorInvalidValue;
-        for(unsigned j=0;j<i;++j) {
-            const auto q=reinterpret_cast<std::uintptr_t>(planes[j].p);
-            if(p<q+planes[j].n && q<p+planes[i].n)return hipErrorInvalidValue;
-        }
-    }
-    unsigned flags=0;if(hipStreamGetFlags(stream,&flags)!=hipSuccess)return hipErrorInvalidValue;
+    const auto validated=detail::validate_a8q4_scale_gather<N,K>(a,stream);
+    if(validated!=hipSuccess)return validated;
     A8G64ActivationWorkspace scratch{};
-    auto status=a8q4g64_bind_activation_workspace(a.activation_workspace,bytes,a.tokens,K,&scratch);
+    auto status=a8q4g64_bind_activation_workspace(a.activation_workspace,a.activation_workspace_bytes,a.tokens,K,&scratch);
     if(status!=hipSuccess)return status;
-    status=a8g64_quantize_activation({a.input,scratch},stream);if(status!=hipSuccess)return status;
-    if(a.tokens==5)hipLaunchKernelGGL(dflash_down_scale_gather_kernel<5>,dim3(N/16),dim3(32),0,stream,
+    status=a8g64_quantize_activation({a.input,scratch},stream);
+    if(status!=hipSuccess)return status;
+    if(a.tokens==5)hipLaunchKernelGGL(dflash_down_pipeline_kernel<5>,dim3(N/16),dim3(32),0,stream,
         scratch.low_codes,scratch.high_codes,scratch.scales,scratch.status,a.weight_codes,a.weight_scales,a.output);
-    else hipLaunchKernelGGL(dflash_down_scale_gather_kernel<6>,dim3(N/16),dim3(32),0,stream,
+    else hipLaunchKernelGGL(dflash_down_pipeline_kernel<6>,dim3(N/16),dim3(32),0,stream,
         scratch.low_codes,scratch.high_codes,scratch.scales,scratch.status,a.weight_codes,a.weight_scales,a.output);
     return hipGetLastError();
 }

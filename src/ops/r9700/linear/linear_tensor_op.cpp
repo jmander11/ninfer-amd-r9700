@@ -8,6 +8,7 @@
 #include "ops/r9700/linear/r9700_q4_activation_profile.h"
 #include "ops/r9700/linear/r9700_w8_activation_profile.h"
 #include "ops/r9700/linear/dflash_verify_down.h"
+#include "ops/r9700/linear/w8_tiled_head.h"
 
 #include <hip/hip_bfloat16.h>
 
@@ -56,7 +57,9 @@ W8PayloadExtents validate_w8_weight(const Weight& weight, std::uint32_t rows,
     const std::uint64_t scale_bytes = checked_mul(
         checked_mul(rows, padded / kW8Group, "W8 scale plane"), sizeof(std::uint16_t),
         "W8 scale plane");
-    if (weight.layout != QuantLayout::RowSplit || weight.group != 32 ||
+    const bool valid_layout = weight.layout == QuantLayout::RowSplit ||
+        (weight.layout == QuantLayout::W8N16K16 && rows == 248320U && columns == 5120U);
+    if (!valid_layout || weight.group != 32 ||
         weight.group_size != 32 || weight.scale_dtype != DType::FP16 ||
         weight.qdata == nullptr || weight.scales == nullptr || weight.qhigh != nullptr ||
         weight.high_plane_bytes != 0 || weight.qdata_bytes != code_bytes ||
@@ -64,7 +67,7 @@ W8PayloadExtents validate_w8_weight(const Weight& weight, std::uint32_t rows,
         weight.padded_shape[1] != static_cast<std::int32_t>(padded) ||
         weight.n != static_cast<std::int32_t>(rows) ||
         weight.k != static_cast<std::int32_t>(columns)) {
-        throw std::invalid_argument("linear: malformed W8G32_F16S RowSplit weight");
+        throw std::invalid_argument("linear: malformed W8G32_F16S weight or unsupported layout/shape");
     }
     return {code_bytes, scale_bytes};
 }
@@ -173,7 +176,9 @@ void linear_with_workspace(const Tensor& x, const Weight& weight, Tensor& output
         if (activation.data == nullptr || activation.bytes < workspace_bytes) {
             throw std::invalid_argument("linear: external activation workspace is too small");
         }
-        HIP_CHECK(r9700::linear::a8w8g32_linear_candidate(
+        const auto launch = weight.layout == QuantLayout::W8N16K16
+            ? r9700::linear::a8w8g32_tiled_head : r9700::linear::a8w8g32_linear_candidate;
+        HIP_CHECK(launch(
             {.input = static_cast<const hip_bfloat16*>(x.data),
              .weight_codes = static_cast<const std::int8_t*>(weight.qdata),
              .weight_code_bytes = static_cast<std::size_t>(extents.code_bytes),
@@ -548,7 +553,9 @@ void linear(const Tensor& x, const Weight& weight, Tensor& output, hipStream_t s
     if (overlaps(code_range, scale_range)) {
         throw std::invalid_argument("linear: W8 code and scale planes overlap");
     }
-    HIP_CHECK(r9700::linear::w8g32_linear(
+    const auto launch = weight.layout == QuantLayout::W8N16K16
+        ? r9700::linear::w8g32_tiled_head : r9700::linear::w8g32_linear;
+    HIP_CHECK(launch(
         {.input = static_cast<const hip_bfloat16*>(x.data),
          .codes = static_cast<const std::int8_t*>(weight.qdata),
          .code_bytes = static_cast<std::size_t>(extents.code_bytes),

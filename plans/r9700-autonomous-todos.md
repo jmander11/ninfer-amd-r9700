@@ -73,8 +73,105 @@ above apply to every command.
 
 ### Current checkpoint
 
+ACTIVE DFLASH CONTINUATION (2026-09-22, user resumed): do not stop after one win or one
+failed candidate. Continue until credible in-scope mechanisms with material end-to-end benefit
+are implemented or excluded by evidence. This is a practical optimization assessment, not proof
+of global optimality. Keep the selected selective-protected/Q4/BF16 companion fixed, unrelated
+prefill/XAttention and broad recipe campaigns paused, and all GPU work serialized under `auto`.
+
+- [x] Reattribute the packed-W8 build on the measured chat K5 workload; rank remaining owners.
+  `profiles/rocprof/r9700-dflash-packed-w8-chat-k5-20260922/attribution.json`: exact129tokens,
+  37graphs/91accepted/zero fallback. Profiled pergraph: targetlayers68.491ms, head7.600ms,
+  draft5.170ms. Leading owners: gate/up13.509ms, normalization12.340ms, down9.742ms,
+  protectedBF16projections9.327ms. These durations are attribution only.
+- [ ] Bound and evaluate remaining W8 scale/operand scheduling, Q4 verify, normalization/fusion,
+  protected BF16 projection, draft and round-service mechanisms; reuse prior rejections unless
+  a genuinely new mechanism changes the bound. Maintain useful independent implementation/review.
+- [ ] Implement and independently qualify credible challengers, retain exact public greedy parity,
+  and admit only matched unprofiled whole-inference wins. Repeat attribution when it changes
+  target selection; commit at natural checkpoints.
+- [ ] Close only when no credible material mechanism remains untested or an external prerequisite
+  genuinely blocks progress; document the practical remaining bound and actual achieved rates.
+
+Next bounded mechanism: small-T gate/up next-G64 pipeline, distinct from the rejected
+scale-gather-only and T1 dot8-prefetch candidates. Current owner13.509ms/round across62calls
+needs roughly20us/call saving to clear2%round. Its2176CTAs already hide more latency than down's
+320; do not extrapolate the down win. Require emitted overlap/resources, independent oracle,
+complete Op screen and whole confirmation before promotion. Production is unchanged for this
+candidate. Exact-order normalization block-ahead is now rejected at the whole-gain screen:
+numerical/ISA checks pass but129-call savings0.382/0.481ms are below2%current round at T5/T6.
+Evidence and retained executable are in `profiles/bench/r9700-rmsnorm-block-ahead-20260922/`;
+temporary code is removed, and no whole rerun is justified.
+
+Live mechanism evidence: exact-order K5120 RMSNorm token8 at T5/T6 is admitted by balanced
+three-pair chat whole-inference A/B, retaining exact token IDs and speculative accounting.
+K4 decode improves 38.02294 → 41.27905 tok/s; K5 improves 38.54031 → 42.17567 tok/s,
+with mean paired gains of 8.57% and 9.48%. Raw-text one-pair checks are regression evidence only.
+See `profiles/bench/r9700-dflash-rmsnorm-exact-20260922/summary.json`.
+All three W8 scale-gather variants are rejected; the generic half-wave screen and sustained
+fixed-T full-wave shuffle/readlane screens lose despite exact outputs. Production source is
+restored to the packed-load baseline; evidence and timing-protocol distinctions remain in
+`profiles/bench/r9700-dflash-scale-gather-20260922/README.md`.
+The exact RMSNorm one-CTA-per-row mapping is also rejected: approximately 0.070 ms versus
+token8's 0.050 ms, with exact outputs and independent FP64 checks retained in
+`profiles/bench/r9700-dflash-rmsnorm-exact-20260922/row-cta-screen.json`.
+Q4 gate/up scale gathering is rejected at whole-inference scope: mean chat K4/K5 paired gains
+1.29%/1.20%, each with a negative pair; the selector is removed. Retain
+`profiles/bench/r9700-dflash-gate-up-scale-gather-20260922/planner-retry/summary.json`.
+Packed normalization is admitted only at K5120 rows5: chat K4 41.14269 → 42.60744 tok/s,
+3.56% mean paired gain, all three pairs winning. Rows6's K5 gain of 1.56% with one losing pair
+is not admitted, so rows6 stay scalar token8. Preserve the original combined `NO_WIN` summary
+at `profiles/bench/r9700-dflash-rmsnorm-packed-20260922/summary.json`; raw checks are regression-only.
+Protected BF16 staging's original diagnostic passes exact outputs/public FP64 and shows about
+3x operator gains for both qualified shapes/T5/T6, including two-byte-offset buffers; retain
+`profiles/bench/r9700-bf16-staging-20260922/screen/report.json`. Actual selected generic-dispatch
+qualification now passes. The combined rows5-packed-plus-BF16 whole A/B is admitted:
+chat K4 40.78243 → 45.45008 tok/s and K5 42.15744 → 45.65818 tok/s, all three
+pairs winning for each width with exact tokens and speculative accounting. Raw one-pair checks
+also improve but remain regression evidence. See the same package's `summary.json`.
+The unchecked frontier above remains active; these results do not establish exhaustion.
+
+Selected lossless W8-head bundle: storage/binder and all ordinary/prefill consumers are complete.
+The explicit artifact is
+`qwen3.8-27b-r9700-q4-selective-protected-n16k16-dflash2-q4-head-n16k16-eval.ninfer`
+in `/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-q4-selective-protected-dflash2-q4/`.
+Its receipt verifies 1,189 unchanged payloads and inverse-byte-exact head codes/scales, with the
+same size/recipe identity and no duplicate head, runtime packing or requantization. The original
+artifact and BF16-staging control binary remain unchanged. Real binding/old-layout rejection,
+public-consumer exact/FP64, graph and guard checks pass.
+The initial tiled ordinary route failed C3 (-3.89%); the qualified coalesced T1–3 replacement
+preserves the exact 256-chain reduction and removes that regression. The selected bundle also
+includes T5/T6 Q4 projection gathering at N5120/K6144, N12288/K5120 and N4096/K5120.
+`profiles/bench/r9700-w8-tiled-head-20260922/whole-inference-combined/summary.json` is PASS:
+24 exact-token/accounting runs; three balanced chat pairs each give K4 45.89039 → 53.56033
+tok/s (+16.72%), K5 45.68180 → 52.43020 (+14.77%) and ordinary C1 24.87909 → 27.46441
+(+10.39%). The single C3 ordinary pair improves aggregate 38.56344 → 45.08326 (+16.91%).
+Raw K4/K5 single regression pairs improve to 26.08567/24.87419 tok/s; no ordinary/raw decode
+or whole rate breaches the 2% regression bound. These are combined, not isolated-projection gains.
+Preserve the failed `whole-inference` and `whole-inference-retry` packages. C2/K4 and C4/K5
+correctness/startup smoke passes exact lane tokens, accounting and graph allocation bounds;
+`concurrency-smoke/summary.json` is not a throughput admission. Its first control was reused
+after correcting the harness's per-lane versus aggregate decode-count assumption.
+Fresh attribution in `profiles/rocprof/r9700-dflash-tiled-projections-chat-k5-20260922/attribution.json`
+retains exact tokens/accounting: target layers51.679ms, head2.238ms, draft4.688ms per graph.
+Gate/up13.509ms, down9.740ms and scalar normalization6.141ms remain leading owners (profiled,
+not performance-admission durations). The down-only next-group pipeline is now admitted for
+N5120/K17408 T5/T6 after public-Op exact/FP64/graph/guard checks and all 16 matched whole runs.
+Three balanced chat pairs each improve K4 53.70092 → 57.31582 tok/s (+6.73%) and K5
+52.48043 → 55.87248 (+6.46%); whole-output rates are 51.08892/49.88149 tok/s. Raw single
+regression pairs reach 27.86485/26.48399 tok/s. Same artifact, exact streams/accounting/config;
+ordinary is not repeated because its route is unchanged. Retain
+`profiles/bench/r9700-dflash-down-pipeline-20260922/whole-inference/summary.json`.
+The earlier C2/C4 smoke predates this pipeline. No 60 tok/s or terminal quality claim follows.
+Draft-side audit finds no independent roughly 1.3 ms/round mechanism: append totals 0.908 ms
+(dead Q-row elimination ceiling 0.262 ms), proposal head+selector 1.044 ms, already split SWA
+attention 0.139 ms and device round service including folding 0.672 ms. These are pre-pipeline
+profiled bounds, not speed measurements or exclusion of host overhead. Normalization block-ahead
+remains unselected; the unchecked optimization frontier remains active.
+
 COMPLETED DFLASH SPEED CHECKPOINT (2026-09-22): established matched baselines, attributed
-verification, and qualified a material end-to-end improvement. Chat K5 now measures39.00 tok/s;
+verification, and qualified the earlier packed-load improvement. That checkpoint measured
+39.00 tok/s for chat K5, superseded by the normalization result above;
 60+ remains an unmet aspiration, not an established result. Other prefill, XAttention and broad
 recipe campaigns remain explicitly paused. Main owns serialized GPU runs; independent agents
 review sources.

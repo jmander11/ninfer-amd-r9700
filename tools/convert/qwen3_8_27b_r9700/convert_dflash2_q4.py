@@ -3,15 +3,15 @@
 Accepted bases are exactly the all-Q4G64 evaluator, the source-MSE mixed Q4/W8 evaluator, and
 the authority-bound four-role rowwise-FP8/all-other-Q4 evaluator, and the selective-protected
 evaluator (canonical-Q4 companion only).
-Every existing payload byte is copied unchanged; only the 66 source-derived DFlash2 objects are
-encoded and appended under a new identity.
+Existing payloads are copied unchanged except the selective companion's output head,
+whose W8 codes/scales are losslessly tiled. The 66 DFlash2 objects are appended.
 """
 
 from __future__ import annotations
 
 import argparse
 from collections import Counter
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 import hashlib
 import json
 import os
@@ -32,7 +32,7 @@ from tools.artifact.container import (
     encode_directory,
     plan_objects,
 )
-from tools.artifact.layouts import align_up
+from tools.artifact.layouts import align_up, transcode_w8_n16k16
 from tools.convert.qwen3.common.inventory import ResourceSpec, TensorSpec
 
 from . import dflash2_matrix_recipes, dflash2_q4_inventory as inventory
@@ -136,6 +136,9 @@ def preflight(base: str | Path, dflash_model: str | Path,
             ArtifactTensorSpec(spec.name, spec.shape, spec.format, spec.layout)
             for spec in dflash2_matrix_recipes.tensor_specs(inventory.TENSOR_SPECS, matrix_recipe)
         )
+        if artifact.identity.weights_id == inventory.SELECTIVE_BASE_WEIGHTS_ID:
+            specs = tuple(replace(spec, layout="r9700-w8g32-n16-k16-v1")
+                          if spec.name == "text/output_head" else spec for spec in specs)
         base_identity = artifact.identity
     objects = plan_objects(specs)
     directory = encode_directory(output_identity, objects)
@@ -256,7 +259,9 @@ def preflight_summary(checked: Preflight, output: Path | None = None) -> dict[st
                 checked.base_path, checked.base_identity, base_sha256
             ),
             "objects": len(checked.objects) - len(inventory.TENSOR_SPECS),
-            "payload_copy": "byte_exact",
+            "payload_copy": ("byte_exact_except_losslessly_tiled_output_head"
+                             if checked.base_identity.weights_id == inventory.SELECTIVE_BASE_WEIGHTS_ID
+                             else "byte_exact"),
         },
         "output_identity": _identity_record(checked.output_identity),
         "dflash_source": {
@@ -387,7 +392,9 @@ def _report_value(
             "authority": _base_authority(
                 checked.base_path, checked.base_identity, base_sha256
             ),
-            "payload_copy": "byte_exact",
+            "payload_copy": ("byte_exact_except_losslessly_tiled_output_head"
+                             if checked.base_identity.weights_id == inventory.SELECTIVE_BASE_WEIGHTS_ID
+                             else "byte_exact"),
         },
         "dflash_source": checked.source,
         "dflash_recipe": recipe,
@@ -485,7 +492,11 @@ def convert(
                 if writer.objects != checked.objects:
                     raise RuntimeError("DFlash2 writer plan differs from completed preflight")
                 for obj in source_artifact.objects:
-                    writer.write(obj.name, _chunks(source_artifact.payload(obj)))
+                    if (checked.base_identity.weights_id == inventory.SELECTIVE_BASE_WEIGHTS_ID
+                            and obj.name == "text/output_head"):
+                        writer.write(obj.name, transcode_w8_n16k16(source_artifact.payload(obj), obj.shape))
+                    else:
+                        writer.write(obj.name, _chunks(source_artifact.payload(obj)))
                 for binding in inventory.source_bindings_for_recipe(checked.matrix_recipe):
                     tensor = _load_source_tensor(binding, reader, torch)
                     if binding.artifact.format == "BF16":

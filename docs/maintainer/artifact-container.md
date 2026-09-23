@@ -27,7 +27,7 @@ unique; shapes contain positive unsigned dimensions; object byte counts are posi
 - Numeric formats: `BF16`, `FP32`, `I32`, `Q4G64_F16S`, `Q5G64_F16S`, `Q6G64_F16S`, and
   `W8G32_F16S`.
 - Tensor layouts: `contiguous-le-v1`, `row-split-k128-v1`,
-  `r9700-q4g64-n16-k16-v1`, and `row-scaled-k128-v1`.
+  `r9700-q4g64-n16-k16-v1`, `r9700-w8g32-n16-k16-v1`, and `row-scaled-k128-v1`.
 - Resource encoding: `raw-bytes-v1`.
 - Provisional evaluation identities: `qwen3.8-27b/r9700-int-candidate`,
   `qwen3.8-27b/r9700-w8g32-mse-eval`,

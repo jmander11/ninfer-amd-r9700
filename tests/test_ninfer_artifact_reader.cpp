@@ -106,6 +106,7 @@ void test_registered_sizes() {
     constexpr StorageLayout rows   = StorageLayout::RowSplitK128V1;
     constexpr StorageLayout scaled = StorageLayout::RowScaledK128V1;
     constexpr StorageLayout q4n16 = StorageLayout::R9700Q4G64N16K16V1;
+    constexpr StorageLayout w8n16 = StorageLayout::R9700W8G32N16K16V1;
 
     const std::array<std::uint64_t, 2> shape_2x3 = {2, 3};
     const std::array<std::uint64_t, 1> shape_2   = {2};
@@ -122,6 +123,7 @@ void test_registered_sizes() {
         tensor_encoded_size(rows, NumericFormat::Q5G64_F16S, q5_shape) != 528 ||
         tensor_encoded_size(rows, NumericFormat::Q6G64_F16S, q6_shape) != 516 ||
         tensor_encoded_size(rows, NumericFormat::W8G32_F16S, w8_shape) != 264 ||
+        tensor_encoded_size(w8n16, NumericFormat::W8G32_F16S, q4_shape) != 2176 ||
         tensor_encoded_size(scaled, NumericFormat::F8E4M3_ROW_F32S, fp8_shape) != 520) {
         throw std::runtime_error("registered encoded-size calculation is wrong");
     }
@@ -136,6 +138,12 @@ void test_registered_sizes() {
     expect_artifact_error(
         [&] { (void)tensor_encoded_size(rows, NumericFormat::Q4G64_F16S, q4_shape); },
         "Q4 format in obsolete row-split layout");
+    expect_artifact_error(
+        [&] { (void)tensor_encoded_size(w8n16, NumericFormat::Q4G64_F16S, q4_shape); },
+        "Q4 format in W8 tiled layout");
+    expect_artifact_error(
+        [&] { (void)tensor_encoded_size(w8n16, NumericFormat::W8G32_F16S, w8_shape); },
+        "unaligned N in W8 tiled layout");
     expect_artifact_error(
         [&] { (void)tensor_encoded_size(rows, NumericFormat::F8E4M3_ROW_F32S, fp8_shape); },
         "FP8 format in grouped row-split layout");
@@ -189,6 +197,19 @@ void test_normative_fixture() {
 }
 
 void test_common_validation() {
+    {
+        auto directory = normative_directory();
+        directory["objects"] = Json::array({{{"name", "w8_tiled"}, {"kind", "tensor"},
+            {"shape", {16, 1}}, {"format", "W8G32_F16S"},
+            {"layout", "r9700-w8g32-n16-k16-v1"}, {"offset", 0}, {"bytes", 2176}}});
+        auto fixture = write_fixture(directory, "w8_tiled");
+        Reader reader(fixture.path);
+        const auto* tensor = std::get_if<TensorDescriptor>(reader.find("w8_tiled"));
+        if (tensor == nullptr || tensor->layout != StorageLayout::R9700W8G32N16K16V1 ||
+            reader.payload(reader.objects().front()).data.size() != 2176) {
+            throw std::runtime_error("W8 tiled descriptor/payload parse mismatch");
+        }
+    }
     {
         auto directory                   = normative_directory();
         directory["objects"][5]["bytes"] = 527;

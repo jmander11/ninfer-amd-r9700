@@ -36,8 +36,9 @@ payloads against the base. Matched dense/G16 PPL evidence lives under
 `profiles/ppl/r9700-selective-protected-comparison-20260921`.
 
 The current DFlash integration target is its canonical-Q4 companion,
-`r9700-q4-selective-protected-n16k16-dflash2-q4-eval`. It preserves all 1,124 base
-object payloads byte-exact and appends the existing 66-object DFlash plan: 32 Q4G64
+`r9700-q4-selective-protected-n16k16-dflash2-q4-eval`. It preserves 1,123 base
+object payloads byte-exact, losslessly permutes the output head's W8 codes and FP16
+scales into `r9700-w8g32-n16-k16-v1`, and appends the existing 66-object DFlash plan: 32 Q4G64
 matrices and 34 direct BF16 objects, including both model-specified selector codebooks.
 The projected tensor arena is 18,874,746,880 bytes. Only `canonical-q4g64` is admitted
 for this base; source-MSE companion recipes await acceptance evidence. The converter binds
@@ -51,6 +52,28 @@ python3.11 -m tools.convert.qwen3_8_27b_r9700.convert_dflash2_q4 \
 
 Materialization uses the same arguments plus an explicit fresh `--out` and `--device cpu`.
 Registration is not a numerical, acceptance, graph, or performance qualification.
+
+The output-head layout revision keeps that recipe identity and every represented
+weight value unchanged. The current binder requires the tiled head under this
+companion identity; it does not accept the superseded row-split head as a fallback.
+The selective base and unrelated evaluator identities are unchanged. An existing
+companion is migrated offline into a fresh path, never replaced:
+
+```bash
+python3.11 -m tools.convert.qwen3_8_27b_r9700.transcode_w8_head \
+  --source /explicit/original-companion.ninfer --preflight-only
+python3.11 -m tools.convert.qwen3_8_27b_r9700.transcode_w8_head \
+  --source /explicit/original-companion.ninfer --output /explicit/fresh-tiled-companion.ninfer
+```
+
+This CPU-only transform needs NumPy but no source checkpoint or GPU. It copies all
+1,189 non-head payloads unchanged, permutes only code bytes and exact scale words,
+and verifies every unchanged payload plus inverse-permuted head bytes. The adjacent
+create-only `.head-layout.json` records both artifact hashes and verification.
+The original artifact remains the input for retained old-build controls. One tiled
+head serves ordinary decoding, speculative verification, prefill and scoring; no
+second resident head or runtime repacking is permitted. Layout registration alone
+does not admit its execution paths or establish a whole-inference speed win.
 
 The provisional tensor counts are 582 BF16, 96 FP32, one I32, and 439 W8G32. Conversion starts only
 from the complete official BF16 source. It uses the target-owned inventory and source recipe under
@@ -195,8 +218,9 @@ G32 to 262,144/326,656/313,984/301,248 tokens; these are retained facts, not reu
 manifests.
 
 The C++ binder consumes Q4G64/W8G32 planes directly according to each explicit identity. Q4G64
-uses the Q4-only `r9700-q4g64-n16-k16-v1` persistent order; W8G32 remains row-split. The converter
-and `transcode_q4_n16k16.py` are the only layout writers, while runtime binding never repacks. The
+uses the Q4-only `r9700-q4g64-n16-k16-v1` persistent order; W8G32 remains row-split except
+the explicitly tiled selective-companion output head described above. The converter and explicit
+offline `transcode_q4_n16k16.py`/`transcode_w8_head.py` tools write these layouts; runtime binding never repacks. The
 runtime quantizes represented BF16 activations into caller-owned, compile-selected A4G64 or A8G64
 evaluation scratch and launches the qualified native signed-INT4 WMMA route without hidden
 allocation or runtime weight repacking.

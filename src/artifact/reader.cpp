@@ -102,6 +102,7 @@ NumericFormat parse_format(std::string_view name) {
 StorageLayout parse_layout(std::string_view name) {
     if (name == "contiguous-le-v1") { return StorageLayout::ContiguousLeV1; }
     if (name == "row-split-k128-v1") { return StorageLayout::RowSplitK128V1; }
+    if (name == "r9700-w8g32-n16-k16-v1") { return StorageLayout::R9700W8G32N16K16V1; }
     if (name == "row-scaled-k128-v1") { return StorageLayout::RowScaledK128V1; }
     if (name == "r9700-q4g64-n16-k16-v1") {
         return StorageLayout::R9700Q4G64N16K16V1;

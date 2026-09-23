@@ -1390,14 +1390,18 @@ void qualify_packed_loads(const std::filesystem::path& directory) {
         if (!bytes) fail("could not save exact public outputs");
         std::vector<double> samples;
         if (read_text(power) != "auto") fail("packed-load power changed before timing");
+        constexpr int timing_iterations = 16;
+        for (int warmup = 0; warmup < 32; ++warmup) invoke();
+        HIP_CHECK(hipStreamSynchronize(stream));
         for (int i = 0; i < 7; ++i) {
             Event begin, end;
-            HIP_CHECK(hipEventRecord(begin.get(), stream)); invoke();
+            HIP_CHECK(hipEventRecord(begin.get(), stream));
+            for (int iteration = 0; iteration < timing_iterations; ++iteration) invoke();
             HIP_CHECK(hipEventRecord(end.get(), stream));
             HIP_CHECK(hipEventSynchronize(end.get()));
             float milliseconds = 0;
             HIP_CHECK(hipEventElapsedTime(&milliseconds, begin.get(), end.get()));
-            samples.push_back(milliseconds);
+            samples.push_back(milliseconds / timing_iterations);
         }
         if (read_text(power) != "auto") fail("packed-load power changed after timing");
         if (!first) report << ',';
@@ -1407,6 +1411,7 @@ void qualify_packed_loads(const std::filesystem::path& directory) {
                << ",\"code_base_mod8\":4,\"oracle_max_error\":" << max_error
                << ",\"public_source_max_relative_rmse\":" << source_relative_rmse
                << ",\"public_source_max_scaled_error\":" << source_gross_scaled_error
+               << ",\"warmup_calls\":32,\"calls_per_sample\":" << timing_iterations
                << ",\"median_ms\":" << median(samples) << ",\"samples_ms\":[";
         for (std::size_t i = 0; i < samples.size(); ++i) {
             if (i) report << ',';

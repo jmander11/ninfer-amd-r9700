@@ -230,6 +230,25 @@ void qualify_host_attention_parity_routing() {
                 text_enabled ? 1U : 0U);
 }
 
+void qualify_host_ordinary_graph_allowance() {
+    namespace runtime = ninfer::targets::qwen3::detail::qwen3_8_27b_r9700;
+    runtime::SequencePlanningInputs inputs{};
+    inputs.weights_profile =
+        Variant::WeightsProfile::R9700Q4SelectiveProtectedDFlash2Q4Evaluation;
+    inputs.capacity = 1024U;
+    inputs.max_concurrency = 1U;
+    inputs.prefill_chunk = 4096U;
+    inputs.speculative_backend = ninfer::SpeculativeBackend::None;
+    inputs.features = {.vision = false, .speculative = ninfer::SpeculativeBackend::None};
+    inputs.use_device_graph = true;
+    const auto plan = runtime::build_sequence_candidate_for_qualification(inputs, 16U);
+    require(plan->graph_executable_count == 1U &&
+                plan->graph_allowance_bytes == 47ULL * 1024ULL * 1024ULL &&
+                plan->graph_allowance_bytes >= 48234496ULL,
+            "ordinary selective-protected allowance misses measured preparation residency");
+    std::printf("r9700_runtime_planner: PASS host ordinary C1/context1024 allowance\n");
+}
+
 void qualify_host_hybrid_allocation_bound() {
     namespace runtime = ninfer::targets::qwen3::detail::qwen3_8_27b_r9700;
     for (const auto profile : {Variant::WeightsProfile::R9700Q4G64Evaluation,
@@ -265,7 +284,7 @@ void qualify_host_dflash_graph_allowance() {
     constexpr std::size_t expected_classes =
         ninfer::targets::qwen3::detail::kR9700TextKVValueGroup == 16 ? 2U : 1U;
     constexpr std::size_t expected_allowance =
-        (42ULL + 26ULL * expected_classes) * 1024ULL * 1024ULL;
+        (48ULL + 26ULL * expected_classes) * 1024ULL * 1024ULL;
     const runtime::SequencePlanningInputs inputs{
         .weights_profile =
             Variant::WeightsProfile::R9700Q4G64DFlash2Q4Evaluation,
@@ -302,6 +321,21 @@ void qualify_host_dflash_graph_allowance() {
             "DFlash C1 K4/W5 graph topology inventory changed");
     require(plan->graph_allowance_bytes == expected_allowance,
             "DFlash C1 K4/W5 allowance must reserve each distinct executable topology");
+    // Reproduce the selective-protected context 1024 startup geometry whose
+    // complete preparation measured 71 MiB with selected BF16 staging and tiled W8 head.
+    for(const std::uint32_t k : {4U,5U}) {
+        auto measured_inputs=inputs;
+        measured_inputs.weights_profile=
+            Variant::WeightsProfile::R9700Q4SelectiveProtectedDFlash2Q4Evaluation;
+        measured_inputs.capacity=1024U;
+        measured_inputs.draft_window=k;
+        measured_inputs.dflash_verify_width=k+1U;
+        const auto measured=runtime::build_sequence_candidate_for_qualification(measured_inputs,16U);
+        require(measured->graph_executable_count==1U &&
+                    measured->graph_allowance_bytes==74ULL*1024ULL*1024ULL &&
+                    measured->graph_allowance_bytes>=74448896ULL,
+                "DFlash selective-protected graph allowance misses measured startup residency");
+    }
     std::printf("r9700_runtime_planner: PASS host DFlash C1/K4/W5 graph topology allowance\n");
 }
 void qualify_host_mtp_graph_allowance() {
@@ -487,7 +521,7 @@ std::size_t qualify_plan(ninfer::DeviceContext& device, std::uint32_t concurrenc
     }
     if (use_device_graph && backend == ninfer::SpeculativeBackend::None) {
         constexpr std::size_t kMiB                          = 1024ULL * 1024ULL;
-        constexpr std::size_t kOrdinaryGraphFamilyBytes     = 20ULL * kMiB;
+        constexpr std::size_t kOrdinaryGraphFamilyBytes     = 23ULL * kMiB;
         constexpr std::size_t kOrdinaryGraphExecutableBytes = 24ULL * kMiB;
         const auto profiles = Variant::ordinary_graph_profiles(max_context);
         const std::size_t definitions =
@@ -514,7 +548,7 @@ std::size_t qualify_plan(ninfer::DeviceContext& device, std::uint32_t concurrenc
     }
     if (use_device_graph && backend == ninfer::SpeculativeBackend::DFlash) {
         constexpr std::size_t kMiB                   = 1024ULL * 1024ULL;
-        constexpr std::size_t kDFlashFamilyBytes     = 42ULL * kMiB;
+        constexpr std::size_t kDFlashFamilyBytes     = 48ULL * kMiB;
         constexpr std::size_t kDFlashExecutableBytes = 26ULL * kMiB;
         constexpr std::size_t kDFlashK1FusedBytes    = 10ULL * kMiB;
         constexpr std::size_t kDFlashK1WmmaBytes     = 18ULL * kMiB;
@@ -666,6 +700,7 @@ int main(int argc, char** argv) {
         if (argc == 2 && std::string_view(argv[1]) == "--host-split512-routing") {
             qualify_host_split512_routing();
             qualify_host_hybrid_allocation_bound();
+            qualify_host_ordinary_graph_allowance();
             return 0;
         }
         if (argc == 2 && std::string_view(argv[1]) == "--host-dflash-graph-allowance") {

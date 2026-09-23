@@ -130,6 +130,10 @@ static_assert(!rmsnorm_k256_token8_selected(5120U, 2048U));
 [[nodiscard]] hipError_t rmsnorm_k5120_token8_qualification(
     const hip_bfloat16* input, const hip_bfloat16* weight, hip_bfloat16* output,
     std::uint32_t rows, float eps, bool unit_offset, hipStream_t stream) noexcept;
+// Direct regression boundary for the packed epilogue; same exact-order reduction and row mapping.
+[[nodiscard]] hipError_t rmsnorm_k5120_token8_packed_epilogue_qualification(
+    const hip_bfloat16* input, const hip_bfloat16* weight, hip_bfloat16* output,
+    std::uint32_t rows, float eps, bool unit_offset, hipStream_t stream) noexcept;
 [[nodiscard]] hipError_t rmsnorm_incumbent_qualification(
     const hip_bfloat16* input, const hip_bfloat16* weight, hip_bfloat16* output,
     std::uint32_t features, std::uint32_t rows, float eps, bool unit_offset,

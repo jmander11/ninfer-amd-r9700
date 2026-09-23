@@ -67,7 +67,11 @@ add_library(ninfer_r9700_core STATIC
   ops/r9700/linear/fp8_activation.hip
   ops/r9700/linear/linear_execution.hip
   ops/r9700/linear/r9700_linear.hip)
-target_sources(ninfer_r9700_core PRIVATE ops/r9700/linear/dflash_verify_down.hip)
+target_sources(ninfer_r9700_core PRIVATE
+  ops/r9700/linear/dflash_verify_down.hip
+  ops/r9700/linear/bf16_staging_pair.hip
+  ops/r9700/linear/w8_tiled_head.hip
+  ops/r9700/linear/a8q4_projection_scale_gather.hip)
 if(NINFER_R9700_XATTENTION_QUALIFICATION)
   target_sources(ninfer_r9700_core PRIVATE
     ops/r9700/kv/fp8_int4_kv_xattention.hip)
@@ -473,6 +477,12 @@ target_compile_definitions(ninfer_r9700_w8a8_wmma_linear_qual PRIVATE
   NINFER_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 target_link_libraries(ninfer_r9700_w8a8_wmma_linear_qual PRIVATE ninfer_r9700_core hip::host)
 
+add_executable(ninfer_r9700_w8_tiled_head_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/w8_tiled_head_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_w8_tiled_head_qual)
+set_target_properties(ninfer_r9700_w8_tiled_head_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_w8_tiled_head_qual PRIVATE ninfer_r9700_core hip::host)
+
 add_executable(ninfer_r9700_bidirectional_gqa_qual
   ${PROJECT_SOURCE_DIR}/tools/r9700/bidirectional_gqa_attention_qual.hip)
 ninfer_r9700_internal_includes(ninfer_r9700_bidirectional_gqa_qual)
@@ -705,6 +715,26 @@ target_compile_definitions(ninfer_r9700_dflash_verify_down_qual PRIVATE
 target_compile_options(ninfer_r9700_dflash_verify_down_qual PRIVATE -Wno-unused-function)
 target_link_libraries(ninfer_r9700_dflash_verify_down_qual PRIVATE ninfer_r9700_core hip::host)
 
+add_executable(ninfer_r9700_a8q4_projection_scale_gather_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/a8q4_projection_scale_gather_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_a8q4_projection_scale_gather_qual)
+set_target_properties(ninfer_r9700_a8q4_projection_scale_gather_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
+target_compile_definitions(ninfer_r9700_a8q4_projection_scale_gather_qual PRIVATE
+  NINFER_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+target_link_libraries(ninfer_r9700_a8q4_projection_scale_gather_qual PRIVATE ninfer_r9700_core hip::host)
+
+add_executable(ninfer_r9700_rmsnorm_rows56_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/rmsnorm_dflash_rows56_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_rmsnorm_rows56_qual)
+set_target_properties(ninfer_r9700_rmsnorm_rows56_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_rmsnorm_rows56_qual PRIVATE ninfer_r9700_core hip::host)
+
+add_executable(ninfer_r9700_bf16_staging_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/bf16_staging_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_bf16_staging_qual)
+set_target_properties(ninfer_r9700_bf16_staging_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_bf16_staging_qual PRIVATE ninfer_r9700_core hip::host)
+
 add_executable(ninfer_r9700_a8q4_projected_residual_t1_qual
   ${PROJECT_SOURCE_DIR}/tools/r9700/a8q4_projected_residual_t1_qual.hip)
 ninfer_r9700_internal_includes(ninfer_r9700_a8q4_projected_residual_t1_qual)
@@ -745,6 +775,7 @@ ninfer_r9700_internal_includes(ninfer_r9700_scalar_schedule_qual)
 set_target_properties(ninfer_r9700_scalar_schedule_qual PROPERTIES
   HIP_ARCHITECTURES gfx1201)
 target_link_libraries(ninfer_r9700_scalar_schedule_qual PRIVATE ninfer_r9700_core hip::host)
+
 
 # Retired backend tests and microbenchmarks do not enter this graph. The sole Qwen3.8 runtime,
 # public Engine, and product applications above are native HIP link owners;

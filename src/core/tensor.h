@@ -43,6 +43,7 @@ enum class QuantLayout : std::uint16_t {
     Contiguous = 1,
     RowScaled  = 2,
     Q4N16K16 = 3,
+    W8N16K16 = 4,
 };
 
 struct Weight {

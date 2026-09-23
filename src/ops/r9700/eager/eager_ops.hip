@@ -223,14 +223,12 @@ __device__ __forceinline__ hip_bfloat16 bf16_from_raw(std::uint32_t word, bool h
     return value;
 }
 
-__global__ __launch_bounds__(kBlock) void rmsnorm_k5120_token8_kernel(
+template <bool PackedEpilogue>
+__device__ __forceinline__ void rmsnorm_k5120_token8_row(
     const hip_bfloat16* input, const hip_bfloat16* weight, hip_bfloat16* output,
-    std::uint32_t rows, float eps, bool unit_offset) {
+    std::uint32_t rows, float eps, bool unit_offset, std::uint32_t row) {
     constexpr std::uint32_t features = 5120;
-    constexpr std::uint32_t tokens_per_block = kBlock / 32U;
     const std::uint32_t lane = threadIdx.x & 31U;
-    const std::uint32_t wave = threadIdx.x >> 5U;
-    const std::uint32_t row = blockIdx.x * tokens_per_block + wave;
     if (row >= rows) { return; }
     const std::size_t base = static_cast<std::size_t>(row) * features;
     float inverse = 0.0F;
@@ -260,12 +258,55 @@ __global__ __launch_bounds__(kBlock) void rmsnorm_k5120_token8_kernel(
         inverse = rsqrtf(sumsq / static_cast<float>(features) + eps);
     }
     inverse = __shfl(inverse, 0, 32);
-    for (std::uint32_t feature = lane; feature < features; feature += 32U) {
-        const float gain = static_cast<float>(weight[feature]) +
-            (unit_offset ? 1.0F : 0.0F);
-        output[base + feature] = hip_bfloat16(
-            static_cast<float>(input[base + feature]) * inverse * gain);
+    if constexpr (PackedEpilogue) {
+        for (std::uint32_t vector = lane; vector < features / 8U; vector += 32U) {
+            const std::size_t feature = static_cast<std::size_t>(vector) * 8U;
+            uint4 packed_input{}, packed_weight{};
+            // BF16 pointers need only two-byte alignment, including the stores.
+            __builtin_memcpy(&packed_input, input + base + feature, sizeof(packed_input));
+            __builtin_memcpy(&packed_weight, weight + feature, sizeof(packed_weight));
+            const std::uint32_t x[4]{packed_input.x, packed_input.y, packed_input.z, packed_input.w};
+            const std::uint32_t w[4]{packed_weight.x, packed_weight.y, packed_weight.z, packed_weight.w};
+            std::uint32_t y[4]{};
+#pragma unroll
+            for (std::uint32_t word = 0; word < 4U; ++word) {
+                const float gain_lo = static_cast<float>(bf16_from_raw(w[word], false)) +
+                    (unit_offset ? 1.0F : 0.0F);
+                const float gain_hi = static_cast<float>(bf16_from_raw(w[word], true)) +
+                    (unit_offset ? 1.0F : 0.0F);
+                const hip_bfloat16 lo(static_cast<float>(bf16_from_raw(x[word], false)) * inverse * gain_lo);
+                const hip_bfloat16 hi(static_cast<float>(bf16_from_raw(x[word], true)) * inverse * gain_hi);
+                y[word] = static_cast<std::uint32_t>(lo.data) |
+                    (static_cast<std::uint32_t>(hi.data) << 16U);
+            }
+            const uint4 packed_output{y[0], y[1], y[2], y[3]};
+            __builtin_memcpy(output + base + feature, &packed_output, sizeof(packed_output));
+        }
+    } else {
+        for (std::uint32_t feature = lane; feature < features; feature += 32U) {
+            const float gain = static_cast<float>(weight[feature]) +
+                (unit_offset ? 1.0F : 0.0F);
+            output[base + feature] = hip_bfloat16(
+                static_cast<float>(input[base + feature]) * inverse * gain);
+        }
     }
+}
+
+__global__ __launch_bounds__(kBlock) void rmsnorm_k5120_token8_kernel(
+    const hip_bfloat16* input, const hip_bfloat16* weight, hip_bfloat16* output,
+    std::uint32_t rows, float eps, bool unit_offset) {
+    constexpr std::uint32_t tokens_per_block = kBlock / 32U;
+    rmsnorm_k5120_token8_row<false>(input, weight, output, rows, eps, unit_offset,
+                            blockIdx.x * tokens_per_block + (threadIdx.x >> 5U));
+}
+
+// Exact-order packed epilogue for the qualified K5120 T5/T6 route.
+__global__ __launch_bounds__(kBlock) void rmsnorm_k5120_token8_packed_epilogue_kernel(
+    const hip_bfloat16* input, const hip_bfloat16* weight, hip_bfloat16* output,
+    std::uint32_t rows, float eps, bool unit_offset) {
+    constexpr std::uint32_t tokens_per_block = kBlock / 32U;
+    rmsnorm_k5120_token8_row<true>(input, weight, output, rows, eps, unit_offset,
+                                 blockIdx.x * tokens_per_block + (threadIdx.x >> 5U));
 }
 
 __global__ __launch_bounds__(kBlock) void rmsnorm_k5120_rows4_cta_kernel(
@@ -963,8 +1004,15 @@ hipError_t rmsnorm_bf16(const hip_bfloat16* input, const hip_bfloat16* weight,
                                    stream, input, weight, output, eps, unit_offset);
                 return;
             }
-            if (features == 5120U && rows >= 128U) {
+            if (features == 5120U && (rows == 5U || rows == 6U || rows >= 128U)) {
                 constexpr std::uint32_t tokens_per_block = kBlock / 32U;
+                if (rows == 5U) {
+                    hipLaunchKernelGGL(rmsnorm_k5120_token8_packed_epilogue_kernel,
+                                       dim3((rows + tokens_per_block - 1U) / tokens_per_block),
+                                       dim3(kBlock), 0, stream, input, weight, output, rows, eps,
+                                       unit_offset);
+                    return;
+                }
                 hipLaunchKernelGGL(rmsnorm_k5120_token8_kernel,
                                    dim3((rows + tokens_per_block - 1U) / tokens_per_block),
                                    dim3(kBlock), 0, stream, input, weight, output, rows, eps,
@@ -994,6 +1042,20 @@ hipError_t rmsnorm_k5120_token8_qualification(
                                dim3((rows + tokens_per_block - 1U) / tokens_per_block),
                                dim3(kBlock), 0, stream, input, weight, output, rows, eps,
                                unit_offset);
+        });
+}
+
+hipError_t rmsnorm_k5120_token8_packed_epilogue_qualification(
+    const hip_bfloat16* input, const hip_bfloat16* weight, hip_bfloat16* output,
+    std::uint32_t rows, float eps, bool unit_offset, hipStream_t stream) noexcept {
+    return checked_launch(
+        input != nullptr && weight != nullptr && output != nullptr && rows != 0 &&
+            std::isfinite(eps) && eps > 0.0F && valid_stream(stream),
+        [&] {
+            constexpr std::uint32_t tokens_per_block = kBlock / 32U;
+            hipLaunchKernelGGL(rmsnorm_k5120_token8_packed_epilogue_kernel,
+                               dim3((rows + tokens_per_block - 1U) / tokens_per_block), dim3(kBlock),
+                               0, stream, input, weight, output, rows, eps, unit_offset);
         });
 }
 

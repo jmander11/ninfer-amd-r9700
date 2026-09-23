@@ -41,17 +41,18 @@ void hip_check(hipError_t status, const char* expression, const char* file, int 
 
 template <class T> class DeviceBuffer {
 public:
-    explicit DeviceBuffer(std::size_t count) : count_(count) {
-        HIP_CHECK(hipMalloc(&data_, count * sizeof(T)));
+    explicit DeviceBuffer(std::size_t count, std::size_t offset = 0) : count_(count), offset_(offset) {
+        HIP_CHECK(hipMalloc(&data_, (count + offset) * sizeof(T)));
     }
     ~DeviceBuffer() { (void)hipFree(data_); }
     DeviceBuffer(const DeviceBuffer&) = delete;
     DeviceBuffer& operator=(const DeviceBuffer&) = delete;
-    [[nodiscard]] T* get() const noexcept { return data_; }
+    [[nodiscard]] T* get() const noexcept { return data_ + offset_; }
     [[nodiscard]] std::size_t size() const noexcept { return count_; }
 private:
     T* data_ = nullptr;
     std::size_t count_;
+    std::size_t offset_;
 };
 
 std::uint16_t bf16_bits(float value) {
@@ -379,14 +380,169 @@ void benchmark(hipStream_t stream, const std::filesystem::path& path, Numeric nu
     }
     if (::fsync(descriptor) != 0 || ::close(descriptor) != 0) fail("report close failed");
 }
+hipError_t exact_token8(const hip_bfloat16* input, const hip_bfloat16* weight,
+                       hip_bfloat16* output, std::uint32_t rows, float eps, bool unit_offset,
+                       hipStream_t stream) {
+    return ninfer::ops::r9700::eager::rmsnorm_k5120_token8_qualification(
+        input, weight, output, rows, eps, unit_offset, stream);
+}
+
+hipError_t exact_token8_packed_epilogue(const hip_bfloat16* input, const hip_bfloat16* weight,
+                               hip_bfloat16* output, std::uint32_t rows, float eps,
+                               bool unit_offset, hipStream_t stream) {
+    return ninfer::ops::r9700::eager::rmsnorm_k5120_token8_packed_epilogue_qualification(
+        input, weight, output, rows, eps, unit_offset, stream);
+}
+
+void screen_exact_token8(const std::filesystem::path& path) {
+    const std::filesystem::path pci("/sys/bus/pci/devices/0000:13:00.0");
+    const auto read = [](const auto& file) {
+        std::ifstream input(file); std::string value;
+        if (!(input >> value)) fail("cannot read PCI qualification attribute");
+        return value;
+    };
+    const auto power = [&] {
+        if (read(pci / "power_dpm_force_performance_level") != "auto")
+            fail("exact token8 screen requires auto power");
+    };
+    if (std::filesystem::exists(path) || std::filesystem::is_symlink(path))
+        fail("refusing existing exact token8 evidence");
+    if (read(pci / "vendor") != "0x1002" || read(pci / "device") != "0x7551")
+        fail("exact token8 screen requires the selected R9700 PCI function");
+    power(); select_r9700();
+    char bus[32]{}; HIP_CHECK(hipDeviceGetPCIBusId(bus, sizeof(bus), 0));
+    if (std::string_view(bus) != "0000:13:00.0") fail("HIP/PCI function mismatch");
+    hipStream_t stream{}; HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    const auto weight = make_weight();
+    Numeric numeric{};
+    std::uint32_t packed_epilogue_error = 0;
+    struct EpilogueCell {
+        std::uint32_t rows;
+        std::size_t offset;
+        std::array<float, kPairs> incumbent_forward{}, challenger_forward{},
+            packed_epilogue_forward{}, packed_epilogue_reverse{}, challenger_reverse{}, incumbent_reverse{};
+    };
+    std::array<EpilogueCell, 4> cells{{{5U, 0U}, {6U, 0U}, {5U, 1U}, {6U, 1U}}};
+    const auto equal = [](const auto& actual, const auto& expected) {
+        if (actual.size() != expected.size()) fail("exact output extent mismatch");
+        for (std::size_t i = 0; i < actual.size(); ++i)
+            if (actual[i].data != expected[i].data)
+                fail("token8 differs from serial FP32-order incumbent at " + std::to_string(i));
+    };
+    for (auto& cell : cells) {
+        DeviceBuffer<hip_bfloat16> d_weight(weight.size(), cell.offset);
+        HIP_CHECK(hipMemcpyAsync(d_weight.get(), weight.data(), weight.size() * sizeof(hip_bfloat16),
+                                hipMemcpyHostToDevice, stream));
+        for (const auto fixture : {0U, 1U, 2U}) {
+            const auto input = make_input(cell.rows, fixture);
+            DeviceBuffer<hip_bfloat16> d_input(input.size(), cell.offset);
+            DeviceBuffer<hip_bfloat16> d_output(input.size() + 2U * kGuard, cell.offset);
+            for (const auto* pointer : {d_input.get(), d_weight.get(), d_output.get() + kGuard})
+                if (reinterpret_cast<std::uintptr_t>(pointer) % 16U != cell.offset * sizeof(hip_bfloat16))
+                    fail("fixture does not have the requested aligned or exactly two-byte alignment");
+            HIP_CHECK(hipMemcpyAsync(d_input.get(), input.data(), input.size() * sizeof(hip_bfloat16),
+                                    hipMemcpyHostToDevice, stream));
+            for (const bool gain : {false, true}) for (const float eps : {1e-8F, 1e-6F, 1e-4F}) {
+                std::vector<hip_bfloat16> serial;
+                for (const auto route : {Launch(incumbent), Launch(exact_token8), Launch(exact_token8_packed_epilogue)}) {
+                    poison(d_output, stream);
+                    HIP_CHECK(route(d_input.get(), d_weight.get(), d_output.get() + kGuard,
+                                    cell.rows, eps, gain, stream));
+                    HIP_CHECK(hipStreamSynchronize(stream));
+                    const auto actual = checked(d_output, input.size());
+                    const auto error = require_oracle(actual, input, weight, cell.rows, eps, gain);
+                    if (route == incumbent) {
+                        serial = actual; numeric.incumbent = std::max(numeric.incumbent, error);
+                    } else {
+                        equal(actual, serial);
+                        if (route == exact_token8)
+                            numeric.challenger = std::max(numeric.challenger, error);
+                        else
+                            packed_epilogue_error = std::max(packed_epilogue_error, error);
+                    }
+                    if (fixture == 0U && eps == 1e-6F) {
+                        hipGraph_t graph{}; hipGraphExec_t executable{};
+                        HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeThreadLocal));
+                        HIP_CHECK(route(d_input.get(), d_weight.get(), d_output.get() + kGuard,
+                                        cell.rows, eps, gain, stream));
+                        HIP_CHECK(hipStreamEndCapture(stream, &graph));
+                        HIP_CHECK(hipGraphInstantiate(&executable, graph, nullptr, nullptr, 0));
+                        for (int replay = 0; replay < 2; ++replay) {
+                            poison(d_output, stream); HIP_CHECK(hipGraphLaunch(executable, stream));
+                            HIP_CHECK(hipStreamSynchronize(stream));
+                            equal(checked(d_output, input.size()), serial);
+                        }
+                        HIP_CHECK(hipGraphExecDestroy(executable)); HIP_CHECK(hipGraphDestroy(graph));
+                    }
+                }
+            }
+            equal(download(d_input), input); equal(download(d_weight), weight);
+            if (fixture != 0U) continue;
+            power();
+            for (int warm = 0; warm < 8; ++warm)
+                for (auto route : {Launch(incumbent), Launch(exact_token8), Launch(exact_token8_packed_epilogue)})
+                    HIP_CHECK(route(d_input.get(), d_weight.get(), d_output.get(), cell.rows, 1e-6F, true, stream));
+            HIP_CHECK(hipStreamSynchronize(stream));
+            for (std::size_t i = 0; i < kPairs; ++i) {
+                cell.incumbent_forward[i] = measure(stream, incumbent, d_input, d_weight, d_output, cell.rows);
+                cell.challenger_forward[i] = measure(stream, exact_token8, d_input, d_weight, d_output, cell.rows);
+                cell.packed_epilogue_forward[i] = measure(stream, exact_token8_packed_epilogue, d_input, d_weight, d_output, cell.rows);
+                cell.packed_epilogue_reverse[i] = measure(stream, exact_token8_packed_epilogue, d_input, d_weight, d_output, cell.rows);
+                cell.challenger_reverse[i] = measure(stream, exact_token8, d_input, d_weight, d_output, cell.rows);
+                cell.incumbent_reverse[i] = measure(stream, incumbent, d_input, d_weight, d_output, cell.rows);
+            }
+            power();
+        }
+    }
+    HIP_CHECK(hipStreamDestroy(stream)); power();
+    std::ostringstream out; out << std::setprecision(9);
+    out << "{\"schema\":\"ninfer.r9700.rmsnorm-exact-token8-screen.v3\","
+           "\"production_dispatch_changed\":false,\"all_outputs_bit_exact\":true,"
+           "\"oracle\":\"independent full FP64 represented-BF16 RMSNorm, maximum2BF16steps\","
+           "\"fixtures\":3,\"gain_modes\":2,\"epsilons\":[1e-8,1e-6,1e-4],"
+           "\"graph_replays\":2,\"power\":\"auto\",\"pci\":\"0000:13:00.0\","
+           "\"timing\":\"warm complete RMSNorm kernel, same-stream events, 256calls/sample; serial/token8/packed_epilogue then packed_epilogue/token8/serial\","
+        << "\"serial_max_bf16_steps\":" << numeric.incumbent
+        << ",\"token8_max_bf16_steps\":" << numeric.challenger
+        << ",\"packed_epilogue_max_bf16_steps\":" << packed_epilogue_error << ",\"cells\":[";
+    for (std::size_t i = 0; i < cells.size(); ++i) {
+        const auto& cell = cells[i]; out << (i ? "," : "") << "{\"features\":5120,\"rows\":" << cell.rows;
+        out << ",\"input_weight_output_address_mod16\":" << cell.offset * sizeof(hip_bfloat16);
+        out << ",\"timing_unit_offset\":true,\"timing_epsilon\":9.99999997e-7";
+        out << ",\"serial_forward_ms\":"; write_array(out, cell.incumbent_forward);
+        out << ",\"token8_forward_ms\":"; write_array(out, cell.challenger_forward);
+        out << ",\"packed_epilogue_forward_ms\":"; write_array(out, cell.packed_epilogue_forward);
+        out << ",\"packed_epilogue_reverse_ms\":"; write_array(out, cell.packed_epilogue_reverse);
+        out << ",\"token8_reverse_ms\":"; write_array(out, cell.challenger_reverse);
+        out << ",\"serial_reverse_ms\":"; write_array(out, cell.incumbent_reverse); out << '}';
+    }
+    out << "],\"passed\":true}\n";
+    const auto payload = out.str();
+    const int fd = ::open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
+    if (fd < 0) fail("refusing existing or unavailable exact token8 report");
+    std::size_t written = 0;
+    while (written < payload.size()) {
+        const auto count = ::write(fd, payload.data() + written, payload.size() - written);
+        if (count <= 0) { (void)::close(fd); fail("exact token8 report write failed"); }
+        written += static_cast<std::size_t>(count);
+    }
+    const bool sync_failed = ::fsync(fd) != 0;
+    const bool close_failed = ::close(fd) != 0;
+    if (sync_failed || close_failed) fail("exact token8 report close failed");
+}
 } // namespace
 
 int main(int argc, char** argv) {
     try {
+        if (argc == 3 && std::string_view(argv[1]) == "--exact-token8-screen") {
+            screen_exact_token8(argv[2]);
+            std::cout << "R9700 RMSNorm exact token8 T5/T6 screen: PASS\n";
+            return 0;
+        }
         bool timing = false; std::filesystem::path output;
         if (argc == 4 && std::string_view(argv[1]) == "--benchmark" &&
             std::string_view(argv[2]) == "--out-json") { timing = true; output = argv[3]; }
-        else if (argc != 1) fail("usage: rmsnorm_dflash_rows56_qual [--benchmark --out-json PATH]");
+        else if (argc != 1) fail("usage: rmsnorm_dflash_rows56_qual [--benchmark --out-json PATH | --exact-token8-screen FRESH_JSON]");
         select_r9700(); hipStream_t stream = nullptr;
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
         const auto numeric = qualify(stream); if (timing) benchmark(stream, output, numeric);

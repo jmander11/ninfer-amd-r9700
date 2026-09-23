@@ -5,6 +5,7 @@
 #include "targets/qwen3_8_27b/impl/load/selective_protected.h"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
@@ -131,12 +132,12 @@ NumericFormat mlp_gate_up_format(WeightsProfile profile, std::string_view name) 
 WeightPlan bind_weight(artifact::Binder& binder, std::string_view name, NumericFormat format,
                        std::initializer_list<std::uint64_t> shape) {
     return WeightPlan{.object = artifact::bind_device_tensor(binder, name, format, shape),
-                      .format = format};
+                      .format = format, .layout = artifact::storage_layout_for(format)};
 }
 
 Weight materialized_weight(const artifact::MaterializedArtifact& materialized,
                            const WeightPlan& plan, std::int32_t rows, std::int32_t columns) {
-    return artifact::materialized_weight(materialized, plan.object, plan.format, rows, columns);
+    return artifact::materialized_weight(materialized, plan.object, plan.format, rows, columns, plan.layout);
 }
 
 WeightPlan bind_mtp_matrix(artifact::Binder& binder, std::string_view name,
@@ -144,7 +145,7 @@ WeightPlan bind_mtp_matrix(artifact::Binder& binder, std::string_view name,
                            artifact::TensorPlacement placement, WeightsProfile profile) {
     const NumericFormat format = matrix_format(profile, false);
     return WeightPlan{.object = artifact::bind_tensor(binder, name, format, shape, placement),
-                      .format = format};
+                      .format = format, .layout = artifact::storage_layout_for(format)};
 }
 
 Weight row_view(const Weight& block, std::int32_t row_begin, std::int32_t row_count) {
@@ -303,10 +304,19 @@ ArtifactLoadPlan bind_artifact(artifact::Binder& binder, WeightsProfile weights_
     bind_r9700_text_layers(binder, out, weights_profile);
     out.final_norm =
         artifact::bind_device_tensor(binder, "text/final_norm", NumericFormat::BF16, {5120});
-    out.output_head = bind_weight(binder, "text/output_head",
+    if (weights_profile == WeightsProfile::R9700Q4SelectiveProtectedDFlash2Q4Evaluation) {
+        const std::array<std::uint64_t,2> head_shape{248320,5120};
+        const auto handle = binder.require_tensor("text/output_head", NumericFormat::W8G32_F16S,
+            artifact::StorageLayout::R9700W8G32N16K16V1, head_shape);
+        binder.materialize_on_device(handle);
+        out.output_head = WeightPlan{.object=handle, .format=NumericFormat::W8G32_F16S,
+                                    .layout=artifact::StorageLayout::R9700W8G32N16K16V1};
+    } else {
+        out.output_head = bind_weight(binder, "text/output_head",
                                   is_selective_protected_profile(weights_profile)
                                       ? NumericFormat::W8G32_F16S : matrix_format(weights_profile, false),
                                   {248320, 5120});
+    }
     const artifact::TensorPlacement proposal_placement =
         features.optimized_proposal() ? artifact::TensorPlacement::Device
                                       : artifact::TensorPlacement::ValidateOnly;
@@ -314,7 +324,7 @@ ArtifactLoadPlan bind_artifact(artifact::Binder& binder, WeightsProfile weights_
     out.draft_head = WeightPlan{
         .object = artifact::bind_tensor(binder, "text/draft_head", draft_format,
                                         {131072, 5120}, proposal_placement),
-        .format = draft_format};
+        .format = draft_format, .layout = artifact::storage_layout_for(draft_format)};
     out.draft_head_token_ids = artifact::bind_tensor(
         binder, "text/draft_head_token_ids", NumericFormat::I32, {131072}, proposal_placement);
     validate_draft_ids(binder, out.draft_head_token_ids);
@@ -362,7 +372,7 @@ ArtifactLoadPlan bind_artifact(artifact::Binder& binder, WeightsProfile weights_
     out.vision_merger_fc2 = WeightPlan{
         .object = artifact::bind_tensor(binder, "vision/merger/fc2", vision_formats.other,
                                         {5120, 4608}, vision_placement),
-        .format = vision_formats.other};
+        .format = vision_formats.other, .layout = artifact::storage_layout_for(vision_formats.other)};
     out.vision_merger_fc2_bias = artifact::bind_tensor(
         binder, "vision/merger/fc2_bias", NumericFormat::BF16, {5120}, vision_placement);
     out.vision_merger_norm = qwen3::bind_vision_merger_norm(binder, vision_placement);
@@ -398,7 +408,7 @@ ArtifactLoadPlan bind_artifact(artifact::Binder& binder, WeightsProfile weights_
             return WeightPlan{
                 .object = artifact::bind_tensor(binder, name, dflash_format, shape,
                                                 dflash_placement),
-                .format = dflash_format};
+                .format = dflash_format, .layout = artifact::storage_layout_for(dflash_format)};
         };
         const auto bind_bf16 = [&](std::string_view name,
                                    std::initializer_list<std::uint64_t> shape) {

@@ -751,6 +751,30 @@ ArtifactLoadPlan bind_fp8_q4_hybrid(const std::filesystem::path& path) {
 
 int main(int argc, char** argv) {
     try {
+        if (argc == 4 && std::string_view(argv[1]) == "--selective-dflash-tiled-head") {
+            const auto bind = [](const char* path) {
+                ninfer::artifact::Reader reader(path);
+                constexpr auto profile = WeightsProfile::R9700Q4SelectiveProtectedDFlash2Q4Evaluation;
+                require(Package::resolve_weights(reader.identity()) == profile,
+                        "wrong selective DFlash recipe identity");
+                ninfer::artifact::Binder binder(reader);
+                return ninfer::targets::qwen3_8_27b::detail::bind_artifact(binder, profile,
+                    {.vision = true, .speculative = ninfer::SpeculativeBackend::DFlash,
+                     .proposal_head = ninfer::ProposalHead::Optimized});
+            };
+            const auto plan = bind(argv[2]);
+            require(plan.materialization.object_count == 1190 &&
+                    plan.bindings.output_head.format == NumericFormat::W8G32_F16S &&
+                    plan.bindings.output_head.layout == ninfer::artifact::StorageLayout::R9700W8G32N16K16V1 &&
+                    plan.bindings.token_embedding.layout == ninfer::artifact::StorageLayout::RowSplitK128V1,
+                    "selective DFlash single tiled-head storage contract differs");
+            bool rejected = false;
+            try { (void)bind(argv[3]); }
+            catch (const ninfer::artifact::ArtifactError&) { rejected = true; }
+            require(rejected, "superseded row-split selective companion head was accepted");
+            std::cout << "r9700_target_binding: PASS selective DFlash tiled head and old-layout rejection\n";
+            return 0;
+        }
         if (argc == 4 && std::string_view(argv[1]) == "--selective-protected") {
             const auto bind = [](const char* path) {
                 ninfer::artifact::Reader reader(path);

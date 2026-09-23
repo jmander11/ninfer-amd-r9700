@@ -1,4 +1,6 @@
 #include "ops/r9700/linear/r9700_linear.h"
+#include "ops/r9700/linear/a8q4_projection_scale_gather.h"
+#include "ops/r9700/linear/bf16_staging_pair.h"
 #include "ops/r9700/linear/r9700_q4_activation_profile.h"
 #include "ops/r9700/linear/r9700_w8_activation_profile.h"
 
@@ -793,7 +795,9 @@ __global__ void wave8_linear_kernel(const hip_bfloat16* input, const void* weigh
     const std::size_t groups_per_row = padded_columns / kW8Group;
     for (std::uint32_t base = 0; base < columns; base += kCooperativeTile) {
         const std::uint32_t k = base + threadIdx.x;
-        if (k < columns) {
+        // The A16 prefill CTA has sixteen waves but this staging tile holds
+        // only 256 values. Extra consumer waves must not write beyond it.
+        if (threadIdx.x < kCooperativeTile && k < columns) {
             if constexpr (W8) {
                 const std::int32_t code = static_cast<std::int8_t>(
                     codes[static_cast<std::size_t>(row) * padded_columns + k]);
@@ -3361,6 +3365,10 @@ hipError_t a8q4g64_linear_candidate(const A8Q4G64CandidateArgs& args,
     if (!valid_a8q4_linear_args(linear_args)) return hipErrorInvalidValue;
     const hipError_t quantized = a8g64_quantize_activation({args.input, workspace}, stream);
     if (quantized != hipSuccess) return quantized;
+    if (detail::use_a8q4_projection_scale_gather(
+            args.tokens, args.rows, args.columns, args.padded_columns)) {
+        return detail::launch_a8q4_projection_scale_gather(linear_args, stream);
+    }
     if (use_a8q4_decode_dot8_t1(
             args.tokens, args.rows, args.columns, args.padded_columns)) {
         return a8q4g64_linear_decode_dot8_t1(linear_args, stream);
@@ -3829,6 +3837,13 @@ hipError_t bf16_linear_wmma16(const Bf16LinearArgs& args, hipStream_t stream) no
 }
 
 hipError_t bf16_linear(const Bf16LinearArgs& args, hipStream_t stream) noexcept {
+    if ((args.tokens == 5U || args.tokens == 6U) &&
+        ((args.rows == 7168U && args.columns == 5120U) ||
+         (args.rows == 5120U && args.columns == 6144U))) {
+        if (!valid_decode(args.input, args.output, args.tokens, args.rows, args.columns) ||
+            args.weights == nullptr) return hipErrorInvalidValue;
+        return detail::launch_bf16_staging_pair(args, stream);
+    }
     if (args.tokens >= 9U) { return bf16_linear_prefill(args, stream); }
     // Fixed R9700 decode dispatch selected by the standalone real-shape sweep:
     // baseline wins T=1..3; coalesced wave8 reuse wins T=4..8.

@@ -34,6 +34,7 @@ enum class StorageLayout {
     RowSplitK128V1,
     RowScaledK128V1,
     R9700Q4G64N16K16V1,
+    R9700W8G32N16K16V1,
 };
 
 enum class ResourceEncoding {
@@ -67,6 +68,7 @@ struct RowSplitGeometry {
 
 RowSplitGeometry row_split_geometry(NumericFormat format, std::span<const std::uint64_t> shape);
 RowSplitGeometry r9700_q4g64_n16k16_geometry(std::span<const std::uint64_t> shape);
+RowSplitGeometry r9700_w8g32_n16k16_geometry(std::span<const std::uint64_t> shape);
 
 struct RowScaledGeometry {
     std::uint64_t rows               = 0;

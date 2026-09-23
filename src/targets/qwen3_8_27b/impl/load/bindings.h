@@ -28,6 +28,7 @@ inline constexpr std::size_t kDFlash2Layers       = 5;
 struct WeightPlan {
     artifact::ObjectHandle object;
     artifact::NumericFormat format = artifact::NumericFormat::BF16;
+    artifact::StorageLayout layout = artifact::StorageLayout::ContiguousLeV1;
 };
 
 struct MlpPlan {

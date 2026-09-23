@@ -8,7 +8,7 @@ predecessor/successor codebooks and every non-matrix value remain source BF16.
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import json
 from pathlib import Path
@@ -172,7 +172,11 @@ MATRIX_RECIPE_SUMMARIES = tuple(
 ALL_Q4_OBJECT_SPECS = q4_inventory.OBJECT_SPECS + TENSOR_SPECS
 MIXED_OBJECT_SPECS = q4_w8_mse_inventory.OBJECT_SPECS + TENSOR_SPECS
 HYBRID_OBJECT_SPECS = fp8_hybrid_inventory.OBJECT_SPECS + TENSOR_SPECS
-SELECTIVE_OBJECT_SPECS = selective_protected_inventory.OBJECT_SPECS + TENSOR_SPECS
+SELECTIVE_OBJECT_SPECS = tuple(
+    replace(spec, layout="r9700-w8g32-n16-k16-v1")
+    if spec.name == "text/output_head" else spec
+    for spec in selective_protected_inventory.OBJECT_SPECS
+) + TENSOR_SPECS
 SELECTIVE_DEVICE_ARENA_BYTES = selective_protected_inventory.DEVICE_ARENA_BYTES + TENSOR_ENCODED_BYTES
 ALL_Q4_TENSOR_BYTES = q4_inventory.TENSOR_ENCODED_BYTES + TENSOR_ENCODED_BYTES
 MIXED_TENSOR_BYTES = q4_w8_mse_inventory.TENSOR_ENCODED_BYTES + TENSOR_ENCODED_BYTES

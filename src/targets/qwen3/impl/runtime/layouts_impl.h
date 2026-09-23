@@ -38,15 +38,23 @@ constexpr std::size_t kArenaAlign = 256ULL;
 // every adaptive K. These are target/toolchain calibration bounds, not HIP guarantees.
 constexpr std::size_t kR9700MtpGraphFamilyBytes    = 46ULL * kMiB;
 constexpr std::size_t kR9700MtpGraphOperationBytes = 4ULL * kMiB;
-constexpr std::size_t kR9700OrdinaryGraphFamilyBytes     = 20ULL * kMiB;
+// ROCm 10 gfx1201, 2026-09-22: selective-protected BF16 staging plus tiled
+// W8 head, ordinary C1/context1024, consumed 46 MiB in complete preparation
+// versus the matched control's 44 MiB. Reserve 23+24=47 MiB for this singleton,
+// leaving 1 MiB measured headroom. This is aggregate preparation calibration,
+// not isolated graph storage; retain the 24 MiB per-executable term. The C3
+// candidate consumed 72 MiB, within its previous 92 MiB bound.
+constexpr std::size_t kR9700OrdinaryGraphFamilyBytes     = 23ULL * kMiB;
 constexpr std::size_t kR9700OrdinaryGraphExecutableBytes = 24ULL * kMiB;
-// A fresh ROCm 10 gfx1201 C1/K4/W5 intercept resolves the DFlash fixed family image to 42 MiB:
-// the prior 40 MiB term under-planned P8192/G256 preparation by exactly 2 MiB (68 MiB consumed
-// versus 66 MiB reserved). Retain the previously calibrated per-executable terms: every K>=2
-// topology owns 26 MiB, while K=1 normal-context fused and FP8-Q/K-WMMA topologies own 10 MiB
-// and 18 MiB respectively. Current C=2..4 physical confirmation of the revised fixed term is
-// pending; the planner applies the one fixed family term rather than multiplying it by C.
-constexpr std::size_t kR9700DFlashGraphFamilyBytes           = 42ULL * kMiB;
+// ROCm 10 gfx1201, 2026-09-22: selective-protected BF16 staging, tiled W8 head
+// and Q4 projection gathering consume 73 MiB for C1/K4 at context1024. The
+// fixed-family 48 plus per-executable 26 MiB reserves 74 MiB (1 MiB headroom).
+// Matched startup checks consume 85/100 MiB observed/allowed at C2/K4 and
+// 109/152 MiB at C4/K5. These calibrate complete preparation, not isolated HIP
+// graph storage. Apply the fixed term once, not once per request. Retain the
+// existing executable terms: K>=2 owns 26 MiB; K1 normal-context fused and
+// FP8-Q/K-WMMA topologies own 10 and 18 MiB. The strict residency guard remains.
+constexpr std::size_t kR9700DFlashGraphFamilyBytes           = 48ULL * kMiB;
 constexpr std::size_t kR9700DFlashGraphExecutableBytes       = 26ULL * kMiB;
 constexpr std::size_t kR9700DFlashK1FusedExecutableBytes     = 10ULL * kMiB;
 constexpr std::size_t kR9700DFlashK1WmmaExecutableBytes      = 18ULL * kMiB;

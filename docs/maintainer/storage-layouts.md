@@ -1,6 +1,6 @@
 # Persistent storage layouts
 
-NInfer v2 registers four tensor layouts and one resource encoding. Payload offsets are relative to
+NInfer v2 registers five tensor layouts and one resource encoding. Payload offsets are relative to
 the container payload and tensor starts are 256-byte aligned.
 
 ## `contiguous-le-v1`
@@ -45,6 +45,23 @@ ordering each code plane as `[N/16][Kpad/64][4 K16 pairs][16 rows][8 bytes]` and
 the next 256-byte boundary. This is the sole accepted persistent layout for `Q4G64_F16S`; legacy
 row-split Q4 descriptors are rejected. Conversion or the explicit offline transcoder writes this
 order once, and loading performs no repack.
+
+## `r9700-w8g32-n16-k16-v1`
+
+This W8-only rank-two layout requires N divisible by 16 and pads K upward to 128.
+It preserves each signed W8 code and each exact FP16 G32 scale word. Codes are
+ordered `[N/16][Kpad/32][2 K16 blocks][16 rows][16 bytes]`; scales are
+`[N/16][Kpad/32][16 rows]`. The code byte at logical `(row,k)` has offset
+`(((((row/16)*groups+k/32)*2+(k%32)/16)*16+row%16)*16+k%16)`.
+Its scale word is at `((row/16)*groups+k/32)*16+row%16` in the scale plane.
+The code plane starts at zero, the scale plane at the next 256-byte boundary;
+plane sizes and total encoded bytes equal row-split W8. This is a storage-only
+permutation, not a numerical-format or quantization-recipe change.
+
+The selective-protected canonical-Q4 DFlash companion requires this layout for
+`text/output_head` only. All its consumers use the same resident head; no loader
+repack, duplicate weight, or runtime layout selector is permitted. Other W8
+objects and evaluation profiles retain their separately specified row-split layout.
 
 ## `raw-bytes-v1`
 

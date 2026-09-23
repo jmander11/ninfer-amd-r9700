@@ -72,7 +72,10 @@ configuration, all source tensors named by the established Qwen3.8 recipe,
 and all six frontend resource files. It opens every required safetensors shard
 during preflight before it creates an output. A partial checkout is rejected.
 
-Candidate W8 matrices use the registered `row-split-k128-v1` storage layout:
+Candidate W8 matrices use the registered `row-split-k128-v1` storage layout,
+except the selective-protected canonical-Q4 DFlash companion's output head,
+which uses the lossless `r9700-w8g32-n16-k16-v1` revision specified in
+`qwen3.8-27b-artifact.md` and `storage-layouts.md`. For row-split matrices:
 
 ```text
 K physical extent = round_up(K, 128)

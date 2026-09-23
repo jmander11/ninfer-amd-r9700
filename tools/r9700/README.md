@@ -4,7 +4,37 @@ This native-HIP suite qualifies the gfx1201 hardware assumptions and the R9700 O
 linked by `ninfer_r9700_core`. The standalone Makefile keeps focused oracle, ISA/resource, timing,
 and profiling work independent of the complete product build.
 
-It selects exactly one discrete AMD `gfx1201` device with PCI device ID `1002:7551`. If a host has
+## Selected DFlash small-width routes
+
+The CMake qualifiers below exercise the selected public Linear routes on gfx1201 under `auto`.
+Use fresh output paths and serialize physical runs. Existing completed reports under
+`profiles/bench/r9700-{bf16-staging,w8-tiled-head,q4-projection-scale-gather}-20260922/`
+need not be repeated unless the affected implementation changes.
+
+```bash
+cmake --build build-r9700 -j3 --target ninfer_r9700_bf16_staging_qual ninfer_r9700_w8_tiled_head_qual ninfer_r9700_a8q4_projection_scale_gather_qual
+build-r9700/src/ninfer_r9700_bf16_staging_qual FRESH_DIRECTORY
+build-r9700/src/ninfer_r9700_w8_tiled_head_qual FRESH_DIRECTORY
+build-r9700/src/ninfer_r9700_a8q4_projection_scale_gather_qual --out-json FRESH.json --round-ms-t5 T5_MS --round-ms-t6 T6_MS
+```
+
+BF16 staging covers the two protected projection shapes at T5/T6, including two-byte-offset
+buffers. Tiled W8 covers ordinary T1–3, A8 small/tail/prefill extents and A16 controls for the
+single losslessly tiled resident head; `--ordinary-only` restricts it to the coalesced T1–3
+consumer. Q4 projection qualification covers N5120/K6144, N12288/K5120 and N4096/K5120.
+Round durations must come from the matched whole workload; weighted operator savings are a
+screen, never whole-inference admission. Selected artifact and whole results are in
+`docs/performance.md`.
+
+The selected pipelined down projection is covered by
+`ninfer_r9700_dflash_verify_down_qual --out-json FRESH.json` at N5120/K17408 T5/T6.
+Build it as a CMake target and run from `build-r9700/src/`. The removed pipeline-comparison
+qualifier is historical; its direct and whole evidence remains under
+`profiles/bench/r9700-dflash-down-pipeline-20260922/`.
+
+## Standalone suite
+
+The suite selects exactly one discrete AMD `gfx1201` device with PCI device ID `1002:7551`. If a host has
 more than one such card, set `NINFER_R9700_PCI_BUS_ID` to the full PCI address reported by HIP (for
 example `0000:03:00.0`). An ordinal alone is never accepted as the device identity.
 

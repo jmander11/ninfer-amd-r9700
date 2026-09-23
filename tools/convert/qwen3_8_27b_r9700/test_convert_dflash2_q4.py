@@ -44,6 +44,17 @@ class DFlash2ConversionPublicationTest(unittest.TestCase):
                 TensorSpec("text/draft_head_token_ids", (2,), "I32", "contiguous-le-v1"),
             )
             base_payloads = (b"\x80\x3f\x00\x40\x40\x40\x80\x40", struct.pack("<2i", 9, 4))
+            selective = base_weights_id == inv.SELECTIVE_BASE_WEIGHTS_ID
+            if selective:
+                # The real layout transform needs NumPy. Import before mocking
+                # sys.modules so patch.dict does not unload its native modules
+                # and make the independent inverse check reinitialize them.
+                import numpy  # noqa: F401
+
+                base_specs += (TensorSpec("text/output_head", (16, 128), "W8G32_F16S", "row-split-k128-v1"),)
+                base_payloads += (bytes(((i % 255 - 127) & 255) for i in range(16 * 128))
+                                  + struct.pack("<64H", *range(0x3c00, 0x3c40)),)
+            base_count = len(base_specs)
             with ArtifactWriter(base, identity, base_specs) as writer:
                 for spec, payload in zip(base_specs, base_payloads, strict=True):
                     writer.write(spec.name, payload)
@@ -67,6 +78,9 @@ class DFlash2ConversionPublicationTest(unittest.TestCase):
                             inv.SourceBinding(codebook, ("codebook",)))
                 specs = base_specs + tuple(TensorSpec(spec.name, spec.shape, spec.format,
                     spec.layout) for spec in (matrix, codebook))
+                if selective:
+                    specs = tuple(replace(spec, layout="r9700-w8g32-n16-k16-v1")
+                                  if spec.name == "text/output_head" else spec for spec in specs)
                 objects = plan_objects(specs)
                 out_identity = ArtifactIdentity(inv.MODEL_ID,
                     inv.companion_weights_id(identity.weights_id, recipe.key))
@@ -74,7 +88,7 @@ class DFlash2ConversionPublicationTest(unittest.TestCase):
                     out_identity, objects)), 4096) + objects[-1].offset + objects[-1].bytes
                 checked = conversion.Preflight(base, root, {}, identity, out_identity,
                     specs, objects, file_bytes, 0, recipe.key)
-                matrix_payload = bytes((index % 251 for index in range(objects[2].bytes)))
+                matrix_payload = bytes((index % 251 for index in range(objects[base_count].bytes)))
                 with patch.dict(sys.modules, {"torch": torch,
                     "tools.convert.common.quantize": quantize,
                     "tools.convert.common.safetensors": safetensors,
@@ -90,13 +104,17 @@ class DFlash2ConversionPublicationTest(unittest.TestCase):
                 self.assertEqual(encoder.call_args.args[2], recipe.key)
                 with conversion.Artifact.open(output) as artifact:
                     self.assertEqual(artifact.identity, out_identity)
-                    for obj, payload in zip(artifact.objects[:2], base_payloads, strict=True):
-                        self.assertEqual(bytes(artifact.payload(obj)), payload)
-                    self.assertEqual(bytes(artifact.payload(artifact.objects[2])), matrix_payload)
-                    self.assertEqual(bytes(artifact.payload(artifact.objects[3])), preserved)
+                    for obj, payload in zip(artifact.objects[:base_count], base_payloads, strict=True):
+                        actual = bytes(artifact.payload(obj))
+                        if obj.name == "text/output_head" and selective:
+                            actual = b"".join(conversion.transcode_w8_n16k16(actual, obj.shape, inverse=True))
+                        self.assertEqual(actual, payload)
+                    self.assertEqual(bytes(artifact.payload(artifact.objects[base_count])), matrix_payload)
+                    self.assertEqual(bytes(artifact.payload(artifact.objects[base_count + 1])), preserved)
                 report = json.loads(report_path.read_text())
                 self.assertEqual(report["recipe_id"], recipe.recipe_id)
-                self.assertEqual(report["base"]["payload_copy"], "byte_exact")
+                self.assertEqual(report["base"]["payload_copy"],
+                                 "byte_exact_except_losslessly_tiled_output_head" if selective else "byte_exact")
                 self.assertFalse(conversion._pending_path(output).exists())
 
     def test_all_recipe_plans_bind_distinct_identities_and_storage(self) -> None:

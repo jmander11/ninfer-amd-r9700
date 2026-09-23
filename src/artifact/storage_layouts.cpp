@@ -94,6 +94,8 @@ std::string_view layout_name(StorageLayout layout) noexcept {
         return "row-scaled-k128-v1";
     case StorageLayout::R9700Q4G64N16K16V1:
         return "r9700-q4g64-n16-k16-v1";
+    case StorageLayout::R9700W8G32N16K16V1:
+        return "r9700-w8g32-n16-k16-v1";
     }
     return {};
 }
@@ -142,7 +144,20 @@ std::uint64_t tensor_encoded_size(StorageLayout layout, NumericFormat format,
         }
         return r9700_q4g64_n16k16_geometry(shape).encoded_bytes;
     }
+    if (layout == StorageLayout::R9700W8G32N16K16V1) {
+        if (format != NumericFormat::W8G32_F16S) {
+            throw ArtifactError("r9700-w8g32-n16-k16-v1 requires W8G32_F16S");
+        }
+        return r9700_w8g32_n16k16_geometry(shape).encoded_bytes;
+    }
     throw ArtifactError("unknown tensor layout");
+}
+
+RowSplitGeometry r9700_w8g32_n16k16_geometry(std::span<const std::uint64_t> shape) {
+    if (shape.size() != 2 || shape[0] == 0 || shape[0] % 16 != 0 || shape[1] == 0) {
+        throw ArtifactError("r9700-w8g32-n16-k16-v1 requires positive rank-two shape and N divisible by 16");
+    }
+    return row_split_geometry(NumericFormat::W8G32_F16S, shape);
 }
 
 RowSplitGeometry row_split_geometry(NumericFormat format, std::span<const std::uint64_t> shape) {

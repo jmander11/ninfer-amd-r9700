@@ -62,10 +62,13 @@ model or individual-Op throughput claim.
 
 ## Selective-protected DFlash decode (2026-09-22)
 
-The combined evaluation artifact is
-`/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-q4-selective-protected-dflash2-q4/qwen3.8-27b-r9700-q4-selective-protected-n16k16-dflash2-q4-eval.ninfer`
-(18,887,772,672 bytes). All 1124 base objects are unchanged from the selective-protected base;
-the companion adds 32 Q4G64 matrices and 34 BF16 objects, retaining both selector codebooks.
+The currently selected evaluation artifact is
+`/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-q4-selective-protected-dflash2-q4/qwen3.8-27b-r9700-q4-selective-protected-n16k16-dflash2-q4-head-n16k16-eval.ninfer`
+(18,887,772,672 bytes). It losslessly reorders only the W8 output-head codes and scales;
+1,189 other payloads remain byte-identical to the original combined artifact. The original
+`qwen3.8-27b-r9700-q4-selective-protected-n16k16-dflash2-q4-eval.ninfer` is retained with its
+matched control binary. That companion preserved all 1,124 selective-protected base objects and
+added 32 Q4G64 matrices and 34 BF16 objects, retaining both selector codebooks.
 This is AMD Q4, not NVIDIA NVFP4, and does not establish cross-platform quality equivalence.
 
 Matched ordinary/K4/K5 baselines use C1, context 1024, chunk 4096, G16, Device Graph, greedy
@@ -104,6 +107,134 @@ norm/head, and 5.155 ms to draft layers per graph. Its largest remaining target-
 are Q4 gate/up, normalization, Q4 down and protected BF16 projections. These intercepted durations
 are attribution only; they must not be reported as post-change timing. Reattribute before choosing
 a subsequent kernel mechanism. Raw-text acceptance remains a separate limitation.
+
+### Exact-order normalization admission and rejected refinements
+
+The subsequent K5120 RMSNorm change selects the existing exact-order token8 kernel at exactly
+T5/T6, preserving the serial FP32 reduction order and all other shape predicates. Independent
+original-BF16 FP64 checks, exact incumbent outputs and poisoned graph replay pass. Balanced
+three-pair chat A/B under the same C1 workload admits this change:
+
+| Width | Control decode tok/s | Selected decode tok/s | Mean paired gain | Selected whole-output tok/s |
+|---|---:|---:|---:|---:|
+| K4/W5 | 38.02294 | 41.27905 | 8.57% | 38.01150 |
+| K5/W6 | 38.54031 | 42.17567 | 9.48% | 38.72952 |
+
+Every chat pair wins and preserves exact token IDs and speculative accounting. Raw-text K4/K5
+one-pair checks also pass, but are regression checks, not additional balanced performance
+admission. Evidence: `profiles/bench/r9700-dflash-rmsnorm-exact-20260922/summary.json`.
+
+Two follow-up mechanisms are rejected. All three W8 scale-gather variants preserve exact outputs,
+but generic half-wave gathering loses its direct screen, and sustained fixed-T full-wave shuffle
+and explicit-readlane variants both lose at T5/T6. The packed-load baseline remains selected;
+lower ISA load/wait counts do not establish speed. Timings, protocol distinctions and retained
+reports are summarized in `profiles/bench/r9700-dflash-scale-gather-20260922/README.md`.
+Mapping the same RMSNorm row arithmetic to one 32-thread CTA per row also preserves exact outputs
+and stays within one BF16 step of the independent oracle, but takes approximately 0.070 ms versus
+token8's 0.050 ms; it is not promoted. Evidence:
+`profiles/bench/r9700-dflash-rmsnorm-exact-20260922/row-cta-screen.json`.
+
+The Q4 gate/up scale-gather candidate subsequently retained exact parity but failed whole
+admission: chat K4/K5 mean paired gains were only 1.29%/1.20%, each with a losing pair.
+Its selector was removed. Evidence:
+`profiles/bench/r9700-dflash-gate-up-scale-gather-20260922/planner-retry/summary.json`.
+
+The packed normalization epilogue has narrower admission. Chat K4/W5 improves
+41.14269 → 42.60744 decode tok/s, a 3.56% mean paired gain with all three pairs winning.
+K5/W6's 1.56% mean gain includes a losing pair and is not admitted. Selection is therefore
+restricted to K5120 **rows5 only**; rows6 retain the exact scalar token8 epilogue.
+The combined candidate's top-level `NO_WIN` result is preserved rather than presented as an
+all-width win. Raw one-pair results remain regression-only evidence. See
+`profiles/bench/r9700-dflash-rmsnorm-packed-20260922/summary.json`.
+
+Protected BF16 pair-load/K512 staging passes its original diagnostic at both qualified shapes,
+T5/T6 and aligned/two-byte-offset operands, with exact incumbent outputs and full-K independent
+FP64 checks. Aligned N7168/K5120 calls improve approximately 0.655/0.670 → 0.210/0.221 ms;
+N5120/K6144 improves 0.498/0.507 → 0.157/0.175 ms. Evidence:
+`profiles/bench/r9700-bf16-staging-20260922/screen/report.json`. Qualification through the
+actual selected generic dispatch now passes. The combined rows5-packed-plus-BF16 whole A/B
+passes all three balanced chat pairs at both widths, preserving exact tokens and speculative
+accounting: K4 40.78243 → 45.45008 tok/s (+11.50% mean paired gain), K5
+42.15744 → 45.65818 tok/s (+8.30%). Whole-request rates are 41.36606 and 41.54923 tok/s.
+Raw-text one-pair regression checks improve to 22.30746/21.69262 tok/s; these are not repeated
+admission measurements. Evidence: `profiles/bench/r9700-bf16-staging-20260922/summary.json`.
+
+### Lossless tiled head, coalesced ordinary decode and Q4 projections
+
+An additional exact-order normalization next-block prefetch passes full numerical/graph/guard
+checks and emits real overlap at38VGPR with no spills. It improves T5/T6 direct medians
+0.035264/0.050209→0.032304/0.046477ms, but129-call savings0.382/0.481ms miss the predeclared
+2%round screen. It is not selected; its temporary code is removed. Retained evidence:
+`profiles/bench/r9700-rmsnorm-block-ahead-20260922/README.md`.
+
+The selected bundle adds `r9700-w8g32-n16-k16-v1` output-head storage, a coalesced exact-reduction
+BF16 consumer for ordinary T1–3, and Q4 projection scale gathering at T5/T6 for
+N5120/K6144, N12288/K5120 and N4096/K5120. It retains the admitted BF16 staging and rows5-only
+packed normalization. The head permutation is inverse-byte-exact, with no requantization,
+duplicate resident head or runtime packing. Same recipe identity, BF16 codebooks and fixed cache
+are preserved. Real binding/old-layout rejection and public-consumer exact/FP64, graph and guard
+checks pass. The initial tiled ordinary consumer regressed C3 by 3.89% and was superseded; its
+failed evidence remains intact. The coalesced replacement preserves all 256 logical partial
+chains and the reduction tree; direct T1/T2/T3 warm medians improve from
+5.826/11.626/17.448 ms to 2.143/4.258/6.369 ms, respectively.
+
+Receipt-bound whole-Engine A/B against the retained BF16-staging control passes all 24 runs,
+with exact token streams, speculative accounting and matched configuration. Chat uses P89/G128,
+context 1024, chunk 4096, greedy sampling, Device Graph and `auto` power. C1 ordinary and K4/K5
+each have three balanced fresh-process pairs; C3 ordinary and raw P128/G64 K4/K5 each have one
+regression pair. Gains below are for the complete bundle, not an isolated projection claim.
+
+| Workload | Control decode tok/s | Selected decode tok/s | Mean paired decode gain | Selected whole-output tok/s |
+|---|---:|---:|---:|---:|
+| Chat ordinary C1 | 24.87909 | 27.46441 | 10.39% | 26.18621 |
+| Chat ordinary C3 aggregate | 38.56344 | 45.08326 | 16.91% | 41.98362 |
+| Chat K4 C1 | 45.89039 | 53.56033 | 16.72% | 48.09161 |
+| Chat K5 C1 | 45.68180 | 52.43020 | 14.77% | 47.19157 |
+| Raw K4 C1 (one pair) | 22.31616 | 26.08567 | 16.89% | 23.77438 |
+| Raw K5 C1 (one pair) | 21.53918 | 24.87419 | 15.48% | 22.78313 |
+
+Every chat speculative pair wins and each width exceeds the predeclared 2% mean gain; no ordinary
+or raw cell regresses by 2% in decode or whole throughput. Evidence:
+`profiles/bench/r9700-w8-tiled-head-20260922/whole-inference-combined/summary.json`.
+Original startup/ordinary failures remain in `whole-inference` and `whole-inference-retry`.
+The resumed optimization goal remains active: this is neither a 60 tok/s result nor terminal
+recipe/quality or full C1–4 performance admission. Separate C2/K4 and C4/K5 startup/correctness
+smoke passes exact lane tokens/accounting and graph allocation bounds in the same package's
+`concurrency-smoke/summary.json`; those short checks make no throughput-admission claim.
+Fresh matched K5 attribution in
+`profiles/rocprof/r9700-dflash-tiled-projections-chat-k5-20260922/attribution.json` measures
+51.679ms target layers, 2.238ms target head and 4.688ms draft layers per graph. Remaining major
+owners are gate/up13.509ms, down9.740ms and scalar normalization6.141ms. These intercepted
+durations identify optimization targets, not unprofiled speedups.
+
+### Down next-group pipeline admission
+
+The subsequent down-only next-group pipeline is selected at N5120/K17408, T5/T6. Public-Op
+qualification passes exact outputs, the original represented-input FP64 oracle, graphs and
+guards. The matched whole A/B uses the admitted tiled-head/projection binary as control and
+the identical tiled artifact on both arms; only the down implementation changes. All 16 runs
+preserve exact streams, speculative accounting, artifact and configuration. Three balanced chat
+pairs per width exceed the 2% mean-gain gate with every pair winning:
+
+| Width | Control decode tok/s | Selected decode tok/s | Mean paired decode gain | Selected whole-output tok/s |
+|---|---:|---:|---:|---:|
+| K4/W5 | 53.70092 | 57.31582 | 6.73% | 51.08892 |
+| K5/W6 | 52.48043 | 55.87248 | 6.46% | 49.88149 |
+
+Raw K4/K5 one-pair regression checks reach 27.86485/26.48399 decode tok/s and pass both
+decode/whole regression gates. Ordinary throughput is not remeasured: the exact T5/T6 predicate
+does not change its route. Earlier C2/C4 smoke predates this pipeline and is not new pipeline
+admission. Evidence: `profiles/bench/r9700-dflash-down-pipeline-20260922/whole-inference/summary.json`.
+The artifact/recipe is unchanged; these results do not establish 60 tok/s or terminal quality.
+
+The pre-pipeline trace also bounds the draft-side frontier. Context append totals 0.908 ms;
+omitting unused Q rows in its five QKV projections could save at most about 0.262 ms.
+Proposal head plus selector totals 1.044 ms, and the already split SWA draft attention totals
+0.139 ms. Device round-service work including postgraph folding totals about 0.672 ms.
+None identifies an independent roughly 1.3 ms/round (2%) mechanism; these are attribution bounds,
+not measured savings or proof that host overhead is absent. Do not reopen the historical serial
+draft-attention split-KV proposal against the current split SWA route. Normalization block-ahead
+qualification remains separate and unselected; the optimization frontier is still active.
 
 ## Typed Text/MTP cache and attention
 

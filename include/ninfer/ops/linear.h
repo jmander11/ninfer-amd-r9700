@@ -12,7 +12,9 @@ namespace ninfer::ops {
  *
  * The mathematical result is out[n,t] = sum_k dequantize(w[n,k]) * x[k,t].
  * `x` is contiguous BF16 [K,T], `w` is contiguous BF16_CTRL or canonical
- * Q4G64_F16S Q4N16K16 or W8G32_F16S RowSplit [N,K], and `out` is contiguous BF16 [N,T]. Dimension
+ * Q4G64_F16S Q4N16K16 or W8G32_F16S RowSplit [N,K]. The fixed N248320/K5120
+ * output head additionally supports resident W8N16K16 codes/scales without repacking.
+ * `out` is contiguous BF16 [N,T]. Dimension
  * zero is stored fastest, so physical activation/output storage is token-major.
  * The implementation accumulates in FP32 and rounds once to BF16 output; the
  * independent qualification oracle decodes the represented weight and evaluates
