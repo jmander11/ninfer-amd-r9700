@@ -1,5 +1,26 @@
 # R9700 perplexity and Pareto-quality gate
 
+## Bounded NVFP4 comparison
+
+`compare_nvfp4.py` compares three identical 4096-token samples with the local
+`ninfer-dylan2` NVFP4 scorer, then measures AMD C1 P4096/G128 ordinary inference.
+It evaluates all-Q4 and mixed Q4/W8 with Q4 A4/A8, plus selective and four-role
+A8 implementations. This diagnostic comparison does not replace BF16-source
+production admission. See `docs/performance.md` for results and limitations.
+
+Use Python3.11 and an explicit `--out` directory. Actions, in order, are
+`prepare`, `snapshot-amd`, `quality-nvidia`, `decode-quality-nvidia`,
+`quality-amd`, `decode-quality-amd`, `speed`, `analyze`. Preparation binds the
+explicit local artifacts and snapshots the NVIDIA scorer; snapshot AMD only
+after both evaluator builds are complete. Serialize GPU jobs. Outputs are
+create-only; successful cells can be resumed. `--only CONFIG` restricts a row.
+For a necessary host-only repair, `--ppl-bin`/`--bench-bin` names a new frozen
+binary and `--tag TAG` preserves failed cells in separate directories. After
+all three samples succeed, an explicit selection receipt chooses the retry
+for analysis. The retained campaign package includes exact commands and inputs.
+
+## BF16-source production gate
+
 This campaign measures the fixed Qwen3.8-27B FP8-K/INT4-V product against an
 independent BF16 reference. It does not expose a cache-format or attention-mode
 runtime switch. Before the persistent ABI is frozen, G16 and G32 are evaluated

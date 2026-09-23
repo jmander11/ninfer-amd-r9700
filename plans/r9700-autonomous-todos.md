@@ -76,6 +76,31 @@ above apply to every command.
 
 ### Current checkpoint
 
+COMPLETED USER REQUEST (2026-09-23): compare multi-text PPL against the standard 5090 NVFP4
+artifact using `ninfer-dylan2`, and measure AMD recipe/activation prefill and ordinary-decode
+speed to expose the measured speed/quality frontier. This bounded campaign supersedes the pause
+only for these comparisons; it does not reopen XAttention, capacity, or kernel optimization.
+- [x] Prepare three matched text/token samples and verify scoring/tokenizer alignment across GPUs.
+- [x] Measure all-Q4 and source-MSE mixed Q4/W8, each with Q4 A4/A8 (W8 stays A8), plus
+  selective-protected A8 and four-role A8 against the specified NVFP4 reference.
+- [x] Include the currently deployed selective-protected tiled-head companion as a separate
+  ordinary-mode row; the retained base selective artifact has the older RowSplit W8 head.
+- [x] Measure AMD C1 fresh-prompt prefill and ordinary decode with chunk2048, fixed cache,
+  warm1/r3; report actual routes, per-text PPL/NLL deltas, speed and measured Pareto frontier.
+Keep all model bytes fixed and no implicit download. Record A4 evaluator route corrections if
+needed so reported activation width matches execution. Snapshot the NVIDIA scorer without
+changing its active checkout; preserve other agents' work. Similarity is reported as paired
+NLL/PPL ratios and severe-position differences, not an unsupported equivalence assertion.
+All42 AMD and6 NVIDIA quality cells are finite/aligned; all21 AMD speed cells pass three-repeat
+token checks. A4 selector correction/public dispatch qualification: `3540705b`; ordinary graph
+profile-update budget correction and host C1..4 checks: `44013616`. All-Q4/A8 is15.17 GB,
+1437–1440 prefill/21.90–21.92 ordinary decode tok/s at P4096/G128, within5% NVFP4 PPL on every
+text in both schedules. Four-role is1625–1628/15.12 tok/s and within2%; current tiled selective
+is928–939/19.41–19.42 tok/s. These finite PPL screens are not production or DFlash admission.
+Full tables/limitations: `docs/performance.md`; exact commands, retained failures and selected
+retry receipts: `profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/` (`comparison.md/json`).
+No recipe was promoted; broader work remains paused outside this completed bounded comparison.
+
 COMPLETED USER REQUEST (2026-09-22): qualify DFlash K4/K5 at C2–4 and explain C2 scaling.
 The selected artifact and head math are unchanged; target verification remains genuinely batched.
 - [x] Localize and correct width-dependent arithmetic and accepted-token replay state.

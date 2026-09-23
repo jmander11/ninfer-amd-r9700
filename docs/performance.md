@@ -60,6 +60,79 @@ expected value exactly.
 Copy bus rate counts both the read and write traffic. This is the hardware bandwidth bound, not a
 model or individual-Op throughput claim.
 
+## Matched NVFP4 quality and AMD recipe comparison (2026-09-23)
+
+The bounded comparison uses the user's standard 5090 artifact
+`/ssdpool2nvme/local_llm/models/qwen3.8-nvfp4-flash2-nvfp4-bf16codebook-from-bf16/qwen3_8_27b_nvfp4_dflash_nvfp4.ninfer`
+and a frozen scorer from `ninfer-dylan2` at `dfc818ae32c4e0e1ded7b9252b87930338fb8455`.
+Its source, build, and model bytes were not changed. Three identical4096-token inputs cover
+WikiText, technical prose, and C++ source. Both embedded tokenizers and native tokenization
+match. Prefill PPL scores2047 next-token positions after2048 warmup tokens; a separate
+teacher-forced decode check scores the last128 positions. Compare recipes within each span,
+not prefill PPL against decode PPL. No speculation participates in either quality schedule.
+
+AMD uses the fixed FP8-K/INT4-V/FP16-scale G16 dense cache; NVIDIA uses its standard NVFP4
+cache without Sage/sparse attention. This is an end-to-end product comparison, not isolated
+activation quantization. A4/A8 refers to Q4 activation width; W8 activation configuration stays8.
+The A4 evaluator was corrected to exclude fused routes hardcoded to A8 (`3540705b`), and both
+activation profiles pass the owning N16/K16 public Q4 dispatch oracle. A4 has fewer optimized
+routes; its timings do not establish the hardware limit of four-bit arithmetic.
+
+AMD speed uses C1, fresh P4096/G128, chunk2048, context4224, ordinary Device Graph execution,
+auto power, one warmup and three measured repeats per text. Model loading is excluded. Rates
+below span the three per-text medians, not pooled scorer runtime or short-context decode.
+The host-only graph profile-update allowance fix (`44013616`) enabled affected startup cells;
+original failures are retained and explicit retry receipts select corrected runs. Kernel math
+and successful earlier measurements are unchanged.
+
+| Recipe / Q4 activation | File GB | Worst prefill PPL change vs NVFP4 | Worst short-decode PPL change | Prefill tok/s | Ordinary decode tok/s |
+|---|---:|---:|---:|---:|---:|
+| All-Q4 / A4 | 15.17 | +12.13% | +22.15% | 674–676 | 15.85–15.87 |
+| All-Q4 / A8 | 15.17 | +0.74% | +2.81% | 1437–1440 | 21.90–21.92 |
+| Source-MSE mixed Q4/W8 / A4 | 22.88 | +1.29% | +0.70% | 656–657 | 10.62 |
+| Source-MSE mixed Q4/W8 / A8 | 22.88 | -0.99% | +0.83% | 951 | 11.15–11.18 |
+| Selective / A8, old head | 17.68 | -0.48% | +4.67% | 929–941 | 18.07–18.09 |
+| Four-role FP8/Q4 / A8 | 21.55 | -0.77% | +1.57% | 1625–1628 | 15.12 |
+| Selective / A8, current tiled head | 18.89 | -0.48% | +4.67% | 928–939 | 19.41–19.42 |
+
+Sizes are decimal file GB, not resident VRAM. Current selective includes its unused DFlash
+companion; the base portion is approximately17.68 GB. Selective changes28 all-Q4 matrices:
+two W8 embedding/head, fifteen BF16, eleven FP8. Mixed and four-role retain their available
+older RowSplit W8 heads; this comparison measures available complete implementations, not
+intrinsic format performance. The tiled selective head preserves measured PPL exactly and
+improves ordinary decode about7.4% over its older counterpart.
+
+Prefill PPL, lower is better:
+
+| Recipe / activation | WikiText | Technical | C++ |
+|---|---:|---:|---:|
+| 5090 NVFP4 reference | 6.48105 | 9.57639 | 2.25303 |
+| All-Q4 / A4 | 7.14944 | 10.73758 | 2.41774 |
+| All-Q4 / A8 | 6.45516 | 9.59965 | 2.26963 |
+| Mixed / A4 | 6.56223 | 9.53078 | 2.28199 |
+| Mixed / A8 | 6.34720 | 9.16747 | 2.23071 |
+| Selective / A8, either head | 6.41437 | 9.35286 | 2.24231 |
+| Four-role / A8 | 6.41363 | 9.33412 | 2.23561 |
+
+For a5% per-text PPL screen across both schedules, all-Q4/A8 is the practical light/fast
+ordinary-decode choice. With a2% screen across both, four-role has the best measured prefill
+and decode rates among eligible rows; mixed/A8 has the lowest prefill PPL but costs capacity
+and speed. These are diagnostic PPL screens, not the existing BF16-source severe-position
+admission gate. All-Q4/A4 is unattractive: worse PPL and slower than all-Q4/A8. No production
+artifact was replaced, and this does not establish a DFlash winner for a different base recipe.
+
+Strict per-text prefill-quality/severe-position/speed dominance retains all five A8 rows;
+including short-decode severe positions retains all seven rows. Small sample-specific severe
+counts and timing differences therefore make the mathematical frontier less selective than
+the practical screens above. Neither frontier asserts statistical significance. Raw per-text
+newly severe positions and timing ranges are retained rather than hidden by an aggregate.
+
+Exact commands, matched inputs, aligned NLLs, per-repeat speeds, binary identities, and reports:
+`profiles/ppl/r9700-nvfp4-multitext-pareto-20260922/`. The reproducible driver is
+`tools/ppl/compare_nvfp4.py`; `comparison.md` and `comparison.json` contain per-text matrices
+and strict measured frontiers. These three local samples do not replace BF16-source production
+admission, general capability testing, or DFlash acceptance/throughput qualification.
+
 ## Corrected concurrent decode qualification (2026-09-22)
 
 The unchanged selective-protected tiled-head artifact named below passes the finite P89/G128
