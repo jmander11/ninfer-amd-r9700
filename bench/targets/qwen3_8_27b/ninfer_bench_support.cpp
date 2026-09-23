@@ -773,6 +773,9 @@ std::string format_table(const BenchEnvironment& env, const std::vector<TestResu
         << " pending_timeout_ms=" << env.pending_timeout_ms
         << " pending_deadline=unbounded"
         << " q4_activation_bits=" << ninfer::ops::r9700::linear::kQ4ActivationBits
+        << " q4_activation_profile=" << ninfer::ops::r9700::linear::kQ4ActivationProfile
+        << " q4_prefill_gate_up_a4="
+        << (ninfer::ops::r9700::linear::kQ4PrefillGateUpA4 ? "true" : "false")
         << " q4_prefill_cta_profile="
         << ninfer::ops::r9700::linear::kQ4PrefillCtaProfile
         << " dflash_small_t_candidate="
@@ -913,6 +916,10 @@ std::string format_json(const BenchEnvironment& env, const std::string& command,
          << "\"},\n"
          << "    \"q4_activation_bits\": "
          << ninfer::ops::r9700::linear::kQ4ActivationBits << ",\n"
+         << "    \"q4_activation_profile\": \""
+         << ninfer::ops::r9700::linear::kQ4ActivationProfile << "\",\n"
+         << "    \"q4_prefill_gate_up_a4\": "
+         << (ninfer::ops::r9700::linear::kQ4PrefillGateUpA4 ? "true" : "false") << ",\n"
          << "    \"q4_prefill_cta_profile\": \""
          << ninfer::ops::r9700::linear::kQ4PrefillCtaProfile << "\",\n"
          << "    \"dflash_small_t_candidate\": "
@@ -1051,7 +1058,8 @@ std::string format_csv(const BenchEnvironment& env, const std::vector<TestResult
     out << "label,kind,n_prompt,n_gen,target,weights_id,max_context,prefill_chunk,concurrency,"
            "spec,draft_tokens,dflash_verify_width_requested,dflash_verify_width,proposal_head,decode_path,kv_cache_format,"
            "kv_value_group,kv_key_plane_layout,kv_value_plane_layout,"
-           "kv_value_scale_plane_layout,q4_activation_bits,q4_prefill_cta_profile,"
+           "kv_value_scale_plane_layout,q4_activation_bits,q4_activation_profile,"
+           "q4_prefill_gate_up_a4,q4_prefill_cta_profile,"
            "dflash_small_t_candidate,dflash_mlp_down_t5_candidate,"
            "text_p129_wmma_tail_candidate,w8_activation_bits,"
            "fp8_qk_wmma_enabled,"
@@ -1095,6 +1103,8 @@ std::string format_csv(const BenchEnvironment& env, const std::vector<TestResult
             << ninfer::targets::qwen3::detail::kR9700TextKVValuePlaneLayoutName << ','
             << ninfer::targets::qwen3::detail::kR9700TextKVValueScalePlaneLayoutName << ','
             << ninfer::ops::r9700::linear::kQ4ActivationBits << ','
+            << ninfer::ops::r9700::linear::kQ4ActivationProfile << ','
+            << (ninfer::ops::r9700::linear::kQ4PrefillGateUpA4 ? "true" : "false") << ','
             << ninfer::ops::r9700::linear::kQ4PrefillCtaProfile << ','
             << (ninfer::ops::r9700::linear::kDFlashSmallTCandidateEnabled ? "true" : "false")
             << ','

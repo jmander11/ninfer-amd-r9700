@@ -589,6 +589,11 @@ int test_report_contract() {
     failures += expect(report.at("config").at("q4_activation_bits") ==
                            ninfer::ops::r9700::linear::kQ4ActivationBits,
                        "compiled Q4 activation width");
+    failures += expect(report.at("config").at("q4_activation_profile") ==
+                           ninfer::ops::r9700::linear::kQ4ActivationProfile &&
+                       report.at("config").at("q4_prefill_gate_up_a4") ==
+                           ninfer::ops::r9700::linear::kQ4PrefillGateUpA4,
+                       "compiled mixed Q4 activation evaluator metadata");
     failures += expect(report.at("config").at("q4_prefill_cta_profile") ==
                            ninfer::ops::r9700::linear::kQ4PrefillCtaProfile,
                        "compiled Q4 prefill CTA profile");
@@ -705,6 +710,14 @@ int test_human_and_csv_reports() {
     failures += expect(table.find("qwen3_8_27b_r9700") != std::string::npos, "table target");
     failures += expect(table.find("fixture-weights") != std::string::npos, "table weights id");
     failures += expect(table.find("model.ninfer") != std::string::npos, "table artifact");
+    failures += expect(
+        table.find(std::string("q4_activation_profile=") +
+                   std::string(ninfer::ops::r9700::linear::kQ4ActivationProfile)) !=
+            std::string::npos &&
+        table.find(std::string("q4_prefill_gate_up_a4=") +
+                   (ninfer::ops::r9700::linear::kQ4PrefillGateUpA4 ? "true" : "false")) !=
+            std::string::npos,
+        "table mixed Q4 evaluator profile");
     failures +=
         expect(table.find("proposal_head=optimized") != std::string::npos, "table proposal head");
     failures += expect(
@@ -751,6 +764,7 @@ int test_human_and_csv_reports() {
     for (const std::string_view field :
          {"proposal_head", "kv_value_group", "kv_key_plane_layout",
           "kv_value_plane_layout", "kv_value_scale_plane_layout", "q4_activation_bits",
+          "q4_activation_profile", "q4_prefill_gate_up_a4",
           "q4_prefill_cta_profile", "dflash_small_t_candidate",
            "dflash_mlp_down_t5_candidate",
            "text_p129_wmma_tail_candidate",

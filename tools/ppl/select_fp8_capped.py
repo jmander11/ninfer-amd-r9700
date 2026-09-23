@@ -62,14 +62,64 @@ def screen(out):
     print(json.dumps(result,indent=2))
 
 
+def mixed(out, action):
+    name='selective-cap-mixed'
+    common.ARTIFACTS={name:out/'artifacts/selective-cap.ninfer'}
+    common.CONFIGS=[(name,8)]
+    if action=='snapshot-mixed':
+        build=common.ROOT/'build-r9700-fp8-capped-mixed-20260923'
+        records={}
+        for kind,rel in [('ppl','apps/ninfer-ppl'),('bench','bench/ninfer_bench')]:
+            target=out/'bin'/f'mixed-{kind}'
+            if target.exists():raise FileExistsError(target)
+            shutil.copy2(build/rel,target);records[target.name]=common.digest(target)
+        common.write_json(out/'mixed-binaries.json',records)
+        return
+    if action in ('mixed-prefill','mixed-decode'):
+        schedule=action.split('-')[1]
+        common.quality(out,'amd',schedule,binary_override=out/'bin/mixed-ppl')
+        prefix='quality' if schedule=='prefill' else 'decode-quality'
+        for sample in common.SAMPLES:
+            report,_=common.nlls(out/f'{prefix}-{name}_a8-{sample}',schedule)
+            assert report['q4_prefill_gate_up_a4'] is True
+            assert report['q4_activation_profile']=='a8-except-n34816-k5120-tgt128-a4'
+        return
+    if action=='mixed-speed':
+        summary=json.loads((out/'mixed-quality-summary.json').read_text())
+        if not summary['within_5pct']:
+            raise ValueError('mixed profile not eligible for timing')
+        common.speed(out,binary_override=out/'bin/mixed-bench')
+        return
+    result={}
+    for schedule,prefix in [('prefill','quality'),('decode','decode-quality')]:
+        cells=[out/f'{prefix}-{name}_a8-{sample}' for sample in common.SAMPLES]
+        if schedule=='decode' and not any(p.exists() for p in cells):continue
+        result[schedule]={}
+        for sample,cell in zip(common.SAMPLES,cells):
+            report,cv=common.nlls(cell,schedule)
+            _,rv=common.nlls(out/f'{prefix}-nvfp4-{sample}',schedule)
+            assert report['q4_prefill_gate_up_a4'] is True
+            assert report['q4_activation_profile']=='a8-except-n34816-k5120-tgt128-a4'
+            result[schedule][sample]=dict(ppl=report['ppl'],
+                ratio=math.exp(statistics.mean(c-r for c,r in zip(cv,rv))),
+                new_severe=sum(c>=10 and r<10 for c,r in zip(cv,rv)))
+    ratios=[v['ratio'] for samples in result.values() for v in samples.values()]
+    result['within_2pct']='decode' in result and max(ratios)<=1.02
+    result['within_5pct']='decode' in result and max(ratios)<=1.05
+    common.write_json(out/'mixed-quality-summary.json',result)
+    print(json.dumps(result,indent=2))
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('action',choices=['prepare','quality','decode-quality','screen','speed','analyze'])
+    p.add_argument('action',choices=['prepare','quality','decode-quality','screen','speed','analyze',
+        'snapshot-mixed','mixed-prefill','mixed-decode','mixed-screen','mixed-speed'])
     p.add_argument('--out',type=Path,required=True)
     p.add_argument('--only',choices=NAMES)
     args=p.parse_args();out=args.out.resolve();configure(out)
     only=args.only+'_a8' if args.only else None
-    if args.action=='prepare':prepare(out)
+    if 'mixed' in args.action:mixed(out,args.action)
+    elif args.action=='prepare':prepare(out)
     elif args.action in ('quality','decode-quality'):
         common.quality(out,'amd','prefill' if args.action=='quality' else 'decode',only=only)
     elif args.action=='screen':screen(out)

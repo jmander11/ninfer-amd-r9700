@@ -65,6 +65,15 @@ maximum error is 0.015625 versus A4's 0.212891, at an 8.7--24.3 percent complete
 across the tested shapes. This admits A8 to matched real-model evaluation while keeping A4
 reproducible; it does not select a persistent Q4 recipe for production.
 
+The separate `NINFER_R9700_Q4_PREFILL_GATE_UP_A4=ON` evaluator requires the global
+Q4 A8 build and overrides only Q4 Linear N34816/K5120 at T>128 to the existing A4
+codec/consumer. Other roles, T1 decode, speculative widths and FP8 matrices are
+unchanged. The public workspace keeps its A8 capacity while the A4 consumer binds
+its exact-sized prefix. `q4_activation_profile` and `q4_prefill_gate_up_a4` in PPL
+and benchmark reports identify this mixed execution; `q4_activation_bits: 8` alone
+does not describe it. The default remains uniform A8. This is a bounded precision
+evaluation, not automatic promotion or a claim that the generic A4 kernel is faster.
+
 ## Direct BF16 source and byte contract
 
 The converter consumes one complete Qwen3.8-27B BF16 checkout: the pinned

@@ -16,6 +16,36 @@ static_assert(NINFER_R9700_Q4_ACTIVATION_BITS == 4 ||
               "R9700 Q4 activation width must be A4 or A8");
 inline constexpr std::uint32_t kQ4ActivationBits = NINFER_R9700_Q4_ACTIVATION_BITS;
 
+#ifndef NINFER_R9700_Q4_PREFILL_GATE_UP_A4
+#define NINFER_R9700_Q4_PREFILL_GATE_UP_A4 0
+#endif
+static_assert(NINFER_R9700_Q4_PREFILL_GATE_UP_A4 == 0 ||
+              NINFER_R9700_Q4_PREFILL_GATE_UP_A4 == 1);
+inline constexpr bool kQ4PrefillGateUpA4 = NINFER_R9700_Q4_PREFILL_GATE_UP_A4 == 1;
+static_assert(!kQ4PrefillGateUpA4 || kQ4ActivationBits == 8U,
+              "mixed prefill gate/up evaluator requires global Q4 A8");
+
+[[nodiscard]] constexpr bool is_q4_prefill_gate_up_a4_eligible(
+    std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns,
+    std::uint32_t padded_columns) noexcept {
+    return tokens > 128U && rows == 34816U && columns == 5120U &&
+           padded_columns == columns;
+}
+
+// Only the public Q4 Linear boundary applies this evaluation override. Private
+// explicitly-A8 Ops, decode/verify widths and all other formats remain unchanged.
+[[nodiscard]] constexpr std::uint32_t q4_linear_activation_bits(
+    std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns,
+    std::uint32_t padded_columns) noexcept {
+    return kQ4PrefillGateUpA4 &&
+           is_q4_prefill_gate_up_a4_eligible(tokens, rows, columns, padded_columns)
+        ? 4U : kQ4ActivationBits;
+}
+
+inline constexpr std::string_view kQ4ActivationProfile = kQ4PrefillGateUpA4
+    ? "a8-except-n34816-k5120-tgt128-a4"
+    : kQ4ActivationBits == 8U ? "uniform-a8" : "uniform-a4";
+
 #ifndef NINFER_R9700_DFLASH_SMALL_T_CANDIDATE
 #define NINFER_R9700_DFLASH_SMALL_T_CANDIDATE 0
 #endif

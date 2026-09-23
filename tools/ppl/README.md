@@ -15,6 +15,15 @@ retained reference for subsequent recipe comparisons; do not replace it with
 results from a changed NVIDIA build or scoring span. The larger local campaign
 directory additionally retains the frozen scorer and original logs.
 
+`python3.11 -m tools.ppl.select_fp8_capped` runs the subsequent fixed Q4/FP8-only
+recipe comparison against that reference. Its `prepare`, `quality`, `decode-quality`,
+`screen`, `speed`, and `analyze` actions take an explicit `--out`; `--only` selects
+one of four fixed recipe names. Conversion/binding are documented in
+`docs/maintainer/qwen3.8-27b-artifact.md`. Mixed activation actions snapshot and
+evaluate the separately compiled prefill gate/up A4 binary on selective-cap;
+they require explicit mixed-profile report metadata. Original measurements remain
+unchanged. Detailed commands live in the dated experiment package.
+
 Use Python3.11 and an explicit `--out` directory. Actions, in order, are
 `prepare`, `snapshot-amd`, `quality-nvidia`, `decode-quality-nvidia`,
 `quality-amd`, `decode-quality-amd`, `speed`, `analyze`. Preparation binds the

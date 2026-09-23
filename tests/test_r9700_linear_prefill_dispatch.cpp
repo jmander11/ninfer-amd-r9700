@@ -9,6 +9,27 @@ namespace linear = ninfer::ops::r9700::linear;
 
 namespace {
 
+static_assert(linear::is_q4_prefill_gate_up_a4_eligible(129U, 34816U, 5120U, 5120U));
+static_assert(linear::is_q4_prefill_gate_up_a4_eligible(2048U, 34816U, 5120U, 5120U));
+static_assert(!linear::is_q4_prefill_gate_up_a4_eligible(128U, 34816U, 5120U, 5120U));
+static_assert(!linear::is_q4_prefill_gate_up_a4_eligible(2048U, 34816U, 5120U, 5248U));
+static_assert(!linear::is_q4_prefill_gate_up_a4_eligible(2048U, 5120U, 17408U, 17408U));
+static_assert([] {
+    for (const auto t : {1U, 2U, 4U, 5U, 6U, 24U, 128U, 129U, 2047U, 2048U, 4096U}) {
+        const auto expected = linear::kQ4PrefillGateUpA4 && t > 128U
+            ? 4U : linear::kQ4ActivationBits;
+        if (linear::q4_linear_activation_bits(t, 34816U, 5120U, 5120U) != expected)
+            return false;
+        // Down, full-attention and GDN projections retain their global precision.
+        for (const auto n : {4096U, 7168U, 12288U, 248320U})
+            if (linear::q4_linear_activation_bits(t, n, 5120U, 5120U) !=
+                linear::kQ4ActivationBits) return false;
+        if (linear::q4_linear_activation_bits(t, 5120U, 17408U, 17408U) !=
+            linear::kQ4ActivationBits) return false;
+    }
+    return true;
+}());
+
 struct Shape {
     std::uint32_t rows;
     std::uint32_t columns;

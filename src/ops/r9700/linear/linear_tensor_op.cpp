@@ -108,6 +108,9 @@ std::size_t linear_workspace_capacity_bytes(QType qtype, std::int32_t tokens,
     const std::uint32_t checked_columns = checked_extent(columns, "K");
     std::size_t bytes = 0U;
     if (qtype == QType::Q4G64_F16S) {
+        // The mixed evaluator deliberately retains the A8 reservation: it has
+        // the same scale/status planes plus two code planes versus A4's one.
+        // No row-specific arena resizing or runtime allocation is needed.
         bytes = r9700::linear::kQ4ActivationBits == 8
                     ? r9700::linear::a8q4g64_activation_workspace_capacity_bytes(
                           checked_tokens, checked_columns)
@@ -243,7 +246,7 @@ void linear_with_workspace(const Tensor& x, const Weight& weight, Tensor& output
     if (activation.data == nullptr || activation.bytes < workspace_bytes) {
         throw std::invalid_argument("linear: external activation workspace is too small");
     }
-    if constexpr (r9700::linear::kQ4ActivationBits == 8) {
+    if (r9700::linear::q4_linear_activation_bits(tokens, rows, columns, padded) == 8U) {
         if (dflash_target_verify_down && (tokens == 5U || tokens == 6U) &&
             rows == 5120U && columns == 17408U && padded == 17408U) {
             // This complete launcher owns fresh A8 preparation. Dispatch before the
@@ -276,6 +279,10 @@ void linear_with_workspace(const Tensor& x, const Weight& weight, Tensor& output
              .padded_columns = padded},
             stream));
     } else {
+        // The arena may reserve A8 capacity for a mixed evaluator, but the A4
+        // codec binds an exact-sized image, not the entire available region.
+        const auto a4_bytes = r9700::linear::q4g64_activation_workspace_capacity_bytes(
+            tokens, columns);
         HIP_CHECK(r9700::linear::q4g64_linear_candidate(
             {.input = static_cast<const hip_bfloat16*>(x.data),
              .weight_codes = static_cast<const std::uint8_t*>(weight.qdata),
@@ -283,7 +290,7 @@ void linear_with_workspace(const Tensor& x, const Weight& weight, Tensor& output
              .weight_scales = static_cast<const std::uint16_t*>(weight.scales),
              .weight_scale_bytes = static_cast<std::size_t>(scale_bytes),
              .activation_workspace = activation.data,
-             .activation_workspace_bytes = workspace_bytes,
+             .activation_workspace_bytes = a4_bytes,
              .output = static_cast<hip_bfloat16*>(output.data),
              .tokens = tokens,
              .rows = rows,

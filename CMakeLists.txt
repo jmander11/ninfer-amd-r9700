@@ -44,6 +44,14 @@ endif()
 add_compile_definitions(
   NINFER_R9700_Q4_ACTIVATION_BITS=${NINFER_R9700_Q4_ACTIVATION_BITS})
 
+option(NINFER_R9700_Q4_PREFILL_GATE_UP_A4
+  "Evaluate A4 only for Q4 N34816/K5120 Linear at T>128" OFF)
+if(NINFER_R9700_Q4_PREFILL_GATE_UP_A4 AND NOT NINFER_R9700_Q4_ACTIVATION_BITS STREQUAL "8")
+  message(FATAL_ERROR "NINFER_R9700_Q4_PREFILL_GATE_UP_A4 requires Q4 activation bits 8")
+endif()
+add_compile_definitions(
+  NINFER_R9700_Q4_PREFILL_GATE_UP_A4=$<BOOL:${NINFER_R9700_Q4_PREFILL_GATE_UP_A4}>)
+
 # Qualification-only matched whole-DFlash A/B selector. Zero is the ordinary WMMA control; one
 # admits only the exact small-token N34816/K5120 cells selected by the two retained direct screens.
 # This is a separately compiled candidate profile, not a runtime, CLI, or artifact selector.

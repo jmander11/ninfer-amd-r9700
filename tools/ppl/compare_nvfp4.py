@@ -265,7 +265,8 @@ def analyze(out):
     lines = ['# Matched multi-text quality and AMD speed', '',
              'C1, P4096/G128, chunk2048, ordinary decode; warm1/r3 median. PPL scores2047 positions after2048 warmup tokens.', '',
              '## Summary', '',
-             'Speeds span the three per-text medians. Worst PPL changes compare each scoring schedule only with its matched NVFP4 reference. Sizes are decimal GB; the tiled selective file includes its unused DFlash companion.', '',
+             'Speeds span the three per-text medians. Worst PPL changes compare each scoring schedule only with its matched NVFP4 reference. Sizes are decimal GB.' +
+             (' The tiled selective file includes its unused DFlash companion.' if 'selective_tiled_a8' in rows else ''), '',
              '| Configuration | File GB | Worst prefill PPL change | Worst decode PPL change | Prefill tok/s | Decode tok/s |',
              '|---|---:|---:|---:|---:|---:|']
     for name,row in rows.items():

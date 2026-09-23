@@ -19,15 +19,28 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace {
 
-constexpr std::uint32_t kTokens = 3;
-constexpr std::uint32_t kRows = 32;
-constexpr std::uint32_t kColumns = 192;
-constexpr std::uint32_t kPaddedColumns = 256;
+constexpr bool kMixed = ninfer::ops::r9700::linear::kQ4PrefillGateUpA4;
+constexpr std::uint32_t kTokens = kMixed ? 129 : 3;
+constexpr std::uint32_t kRows = kMixed ? 34816 : 32;
+constexpr std::uint32_t kColumns = kMixed ? 5120 : 192;
+constexpr std::uint32_t kPaddedColumns = kMixed ? 5120 : 256;
 constexpr std::uint32_t kGroup = 64;
+constexpr std::uint32_t kActiveBits = kMixed ? 4 : ninfer::ops::r9700::linear::kQ4ActivationBits;
+
+// The mixed evaluator exercises the real gate/up geometry and its first tail
+// width. Sample complete independent FP64 dot products at tile/shape boundaries;
+// still check every output for finiteness and every output for poison propagation.
+constexpr bool oracle_position(std::uint32_t token, std::uint32_t row) {
+    if (!kMixed) return true;
+    const bool selected_token = token == 0 || token == 1 || token == 15 || token == 16 ||
+        token == 63 || token == 64 || token == 127 || token == 128;
+    return selected_token && (row < 32 || (row >= kRows/2 && row < kRows/2+32) || row >= kRows-32);
+}
 
 [[noreturn]] void fail(const std::string& message) { throw std::runtime_error(message); }
 
@@ -109,9 +122,9 @@ struct HostActivation {
 
 HostActivation quantize_activation(const std::vector<hip_bfloat16>& input) {
     constexpr int maximum_code =
-        ninfer::ops::r9700::linear::kQ4ActivationBits == 8 ? 127 : 7;
+        kActiveBits == 8 ? 127 : 7;
     constexpr int minimum_code =
-        ninfer::ops::r9700::linear::kQ4ActivationBits == 8 ? -127 : -8;
+        kActiveBits == 8 ? -127 : -8;
     HostActivation result{
         std::vector<int>(static_cast<std::size_t>(kTokens) * kPaddedColumns),
         std::vector<std::uint16_t>(static_cast<std::size_t>(kTokens) *
@@ -195,11 +208,12 @@ std::vector<hip_bfloat16> make_input() {
     return input;
 }
 
-std::vector<hip_bfloat16> oracle(const HostActivation& activation,
+std::vector<hip_bfloat16> quantized_reference(const HostActivation& activation,
                                  const HostWeights& weights) {
     std::vector<hip_bfloat16> output(static_cast<std::size_t>(kTokens) * kRows);
     for (std::uint32_t token = 0; token < kTokens; ++token) {
         for (std::uint32_t row = 0; row < kRows; ++row) {
+            if (!oracle_position(token, row)) continue;
             double sum = 0.0;
             for (std::uint32_t group = 0; group < kPaddedColumns / kGroup; ++group) {
                 std::int32_t dot = 0;
@@ -227,10 +241,36 @@ std::vector<hip_bfloat16> oracle(const HostActivation& activation,
     return output;
 }
 
+// The mathematical Linear oracle consumes represented BF16 public inputs and
+// exact decoded stored weights. It does not quantize the input or reproduce the
+// device reduction. The separate quantized reference above checks codec/dispatch.
+std::pair<double, double> logical_oracle(const std::vector<hip_bfloat16>& input,
+                                       const HostWeights& weights,
+                                       std::uint32_t token, std::uint32_t row) {
+    double sum = 0.0, budget = 0.0;
+    constexpr double max_code = kActiveBits == 8 ? 127.0 : 7.0;
+    for (std::uint32_t group = 0; group < kPaddedColumns/kGroup; ++group) {
+        const double scale = half_value(weights.scales[row*(kPaddedColumns/kGroup)+group]);
+        double max_input = 0.0, weight_l1 = 0.0;
+        for (std::uint32_t lane = 0; lane < kGroup; ++lane) {
+            const auto column = group*kGroup+lane;
+            const double x = column < kColumns ? static_cast<float>(input[token*kColumns+column]) : 0.0;
+            const double w = get_q4(weights.codes, row*kPaddedColumns+column)*scale;
+            sum += x*w;
+            max_input = std::max(max_input, std::abs(x));
+            weight_l1 += std::abs(w);
+        }
+        // Bound nearest-code error plus FP16 scale representation at this
+        // finite, normal-scale fixture; no observed output determines the bound.
+        budget += weight_l1*max_input*(0.5/max_code+0.002);
+    }
+    return {sum, budget*1.01+std::abs(sum)*0.004+1e-4};
+}
+
 void write_json(const std::filesystem::path& path, bool passed, const std::string& failure,
                 const hipDeviceProp_t& device, std::size_t workspace_bytes,
                 bool workspace_rewound, std::uint64_t maximum_bf16_steps,
-                bool status_poisoned) {
+                bool status_poisoned, double maximum_logical_error) {
     const auto parent = path.parent_path();
     if (!parent.empty()) std::filesystem::create_directories(parent);
     std::ofstream out(path, std::ios::trunc);
@@ -244,6 +284,8 @@ void write_json(const std::filesystem::path& path, bool passed, const std::strin
            "\"qwen3.8-27b/r9700-q4-w8-mse-n16k16-eval\"],\n"
         << "  \"q4_activation_bits\": "
         << ninfer::ops::r9700::linear::kQ4ActivationBits << ",\n"
+        << "  \"active_q4_activation_bits\": " << kActiveBits << ",\n"
+        << "  \"oracle_positions\": " << (kMixed ? 768U : kTokens*kRows) << ",\n"
         << "  \"shape\": {\"tokens\": " << kTokens << ", \"rows\": " << kRows
         << ", \"columns\": " << kColumns << ", \"padded_columns\": "
         << kPaddedColumns << "},\n"
@@ -251,6 +293,7 @@ void write_json(const std::filesystem::path& path, bool passed, const std::strin
         << "  \"workspace_rewound_after_dispatch\": "
         << (workspace_rewound ? "true" : "false") << ",\n"
         << "  \"maximum_bf16_steps\": " << maximum_bf16_steps << ",\n"
+        << "  \"maximum_public_input_oracle_abs_error\": " << maximum_logical_error << ",\n"
         << "  \"asynchronous_status_nan\": " << (status_poisoned ? "true" : "false")
         << ",\n"
         << "  \"hardware\": {\"architecture\": \"" << json_escape(device.gcnArchName)
@@ -275,12 +318,13 @@ int main(int argc, char** argv) {
     bool workspace_rewound = false;
     std::uint64_t maximum_bf16_steps = 0;
     bool status_poisoned = false;
+    double maximum_logical_error = 0.0;
     try {
         device = select_r9700();
         const std::vector<hip_bfloat16> input = make_input();
         const HostWeights weights = make_weights();
         const HostActivation activation = quantize_activation(input);
-        const std::vector<hip_bfloat16> expected = oracle(activation, weights);
+        const std::vector<hip_bfloat16> expected = quantized_reference(activation, weights);
         ninfer::DeviceBuffer d_input(input.size() * sizeof(hip_bfloat16));
         ninfer::DeviceBuffer d_weight_codes(weights.codes.size());
         ninfer::DeviceBuffer d_weight_scales(weights.scales.size() * sizeof(std::uint16_t));
@@ -347,11 +391,17 @@ int main(int argc, char** argv) {
         std::vector<hip_bfloat16> actual(expected.size());
         d_output.copy_to_host(actual.data(), d_output.size());
         for (std::size_t index = 0; index < actual.size(); ++index) {
+            if (!std::isfinite(static_cast<float>(actual[index]))) fail("nonfinite Tensor output");
+            if (!oracle_position(index/kRows, index%kRows)) continue;
+            const auto [reference, tolerance] = logical_oracle(input, weights, index/kRows, index%kRows);
+            const double error = std::abs(static_cast<float>(actual[index])-reference);
+            maximum_logical_error = std::max(maximum_logical_error, error);
+            if (error > tolerance) fail("Tensor output exceeds public-input FP64 quantization bound");
             const std::uint64_t steps = actual[index].data > expected[index].data
                                             ? actual[index].data - expected[index].data
                                             : expected[index].data - actual[index].data;
             maximum_bf16_steps = std::max(maximum_bf16_steps, steps);
-            if (steps > 2U) fail("compile-selected Tensor output differs from FP64 oracle");
+            if (steps > 2U) fail("compile-selected Tensor output differs from quantized reference");
         }
 
         std::vector<hip_bfloat16> invalid = input;
@@ -368,16 +418,16 @@ int main(int argc, char** argv) {
         }
         write_json(path, true, {}, device, workspace_bytes, workspace_rewound,
                    maximum_bf16_steps,
-                   status_poisoned);
+                   status_poisoned, maximum_logical_error);
         std::cout << "Q4 Tensor/WorkspaceArena A"
-                  << ninfer::ops::r9700::linear::kQ4ActivationBits
+                  << kActiveBits
                   << ": PASS workspace_bytes=" << workspace_bytes
                   << " max_bf16_steps=" << maximum_bf16_steps << '\n';
         return 0;
     } catch (const std::exception& error) {
         try {
             write_json(path, false, error.what(), device, workspace_bytes, workspace_rewound,
-                       maximum_bf16_steps, status_poisoned);
+                       maximum_bf16_steps, status_poisoned, maximum_logical_error);
         } catch (...) {
         }
         std::cerr << "Q4 Tensor/WorkspaceArena qualifier: FAIL: " << error.what() << '\n';
