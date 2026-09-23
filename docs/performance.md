@@ -236,6 +236,40 @@ not measured savings or proof that host overhead is absent. Do not reopen the hi
 draft-attention split-KV proposal against the current split SWA route. Normalization block-ahead
 qualification remains separate and unselected; the optimization frontier is still active.
 
+### Verify projection pipeline-family admission
+
+The next bundle extends one-group-ahead loading to Q4 gate/up N34816/K5120 and projections
+N5120/K6144 and N4096/K5120 at exactly T5/T6. N12288/K5120 retains its scale-gather route:
+its pipeline screen did not establish a useful gain. All selected routes pass the public
+represented-input FP64 oracle, exact incumbent outputs, poisoned graphs and guards. Linked
+gfx1201 ISA confirms successor-load overlap, ordered reductions and bounded final drains,
+with 62/63 VGPR, 22 SGPR and no LDS/private storage/spills. Public operator screens estimate
+3.710/3.391 ms per round for gate/up and 1.569/1.666 ms for the narrowed projection family;
+these estimates are not separate whole-model claims.
+
+The same-artifact whole comparison against the admitted down-pipeline binary passes all 16
+runs with exact tokens and speculative accounting. Every balanced chat pair wins:
+
+| Width | Control decode tok/s | Selected decode tok/s | Mean paired gain | Selected whole-output tok/s |
+|---|---:|---:|---:|---:|
+| K4/W5 | 57.42168 | 63.02158 | 9.75% | 55.59136 |
+| K5/W6 | 55.93994 | 61.24468 | 9.48% | 54.10987 |
+
+Raw-prompt single-pair regression checks reach 30.58844/29.02133 decode tok/s, with no decode
+or whole-output regression. These are C1 measurements; ordinary T1–4 and concurrent admission
+are not repeated for this T5/T6-only change. This is a bundle gain, not an isolated gate/up
+or projection whole-model gain. No quantization or artifact change is involved.
+Evidence: `profiles/bench/r9700-verify-pipeline-family-20260922/whole-inference/summary.json`.
+The subsequent paired BF16 control optimization is not included in these numbers.
+
+That paired BF16 split-K16 candidate is rejected: its complete-Op FP64 oracle, native BF16 ISA,
+guards, own-graph checks and direct timing screen pass, but the first real-model chat K4 run
+changes output index 52 from token 413 to 3470. Overall 76/129 output positions differ, with
+40 rather than 38 rounds and 88 rather than 90 accepted draft tokens. The campaign stops at this
+exact-token failure; no candidate speed is admitted and the unchanged T1-only control route
+is retained. Evidence:
+`profiles/bench/r9700-bf16-projected-control-splitk-20260922/whole-inference/rejection.json`.
+
 ## Typed Text/MTP cache and attention
 
 ### Bounded-panel dense prefill (2026-09-21)

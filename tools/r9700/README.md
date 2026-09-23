@@ -8,22 +8,25 @@ and profiling work independent of the complete product build.
 
 The CMake qualifiers below exercise the selected public Linear routes on gfx1201 under `auto`.
 Use fresh output paths and serialize physical runs. Existing completed reports under
-`profiles/bench/r9700-{bf16-staging,w8-tiled-head,q4-projection-scale-gather}-20260922/`
+`profiles/bench/r9700-{bf16-staging,w8-tiled-head,verify-pipeline-family}-20260922/`
 need not be repeated unless the affected implementation changes.
 
 ```bash
-cmake --build build-r9700 -j3 --target ninfer_r9700_bf16_staging_qual ninfer_r9700_w8_tiled_head_qual ninfer_r9700_a8q4_projection_scale_gather_qual
+cmake --build build-r9700 -j3 --target ninfer_r9700_bf16_staging_qual ninfer_r9700_w8_tiled_head_qual ninfer_r9700_a8q4_verify_projection_qual
 build-r9700/src/ninfer_r9700_bf16_staging_qual FRESH_DIRECTORY
 build-r9700/src/ninfer_r9700_w8_tiled_head_qual FRESH_DIRECTORY
-build-r9700/src/ninfer_r9700_a8q4_projection_scale_gather_qual --out-json FRESH.json --round-ms-t5 T5_MS --round-ms-t6 T6_MS
+build-r9700/src/ninfer_r9700_a8q4_verify_projection_qual --out-json FRESH.json
 ```
 
 BF16 staging covers the two protected projection shapes at T5/T6, including two-byte-offset
 buffers. Tiled W8 covers ordinary T1–3, A8 small/tail/prefill extents and A16 controls for the
 single losslessly tiled resident head; `--ordinary-only` restricts it to the coalesced T1–3
-consumer. Q4 projection qualification covers N5120/K6144, N12288/K5120 and N4096/K5120.
-Round durations must come from the matched whole workload; weighted operator savings are a
-screen, never whole-inference admission. Selected artifact and whole results are in
+consumer. The selected public Q4 qualifier covers N34816/K5120 gate/up, N5120/K6144,
+N12288/K5120 and N4096/K5120 at T5/T6. N12288 retains scale-gather; the other three
+shapes use the admitted successor pipeline. It checks the original represented-BF16
+FP64 formula, full-output represented-A8 FP64 formula, exact activation codec,
+public eager/graph parity, poison recovery and guards. It contains no temporary
+comparison kernel or timing campaign. Selected artifact and whole results are in
 `docs/performance.md`.
 
 The selected pipelined down projection is covered by
@@ -31,6 +34,14 @@ The selected pipelined down projection is covered by
 Build it as a CMake target and run from `build-r9700/src/`. The removed pipeline-comparison
 qualifier is historical; its direct and whole evidence remains under
 `profiles/bench/r9700-dflash-down-pipeline-20260922/`.
+
+The gate/up and projection comparison executables and obsolete down scale-gather
+ISA checker have been removed. Their evidence remains under the gate-up-pipeline,
+projection-pipeline and verify-pipeline-family packages in `profiles/bench/`.
+For new linked ISA inspection use the safe extractor
+`tools/bench/extract_embedded_code_object.py`: the selected projection module owns
+`verify_projection_kernel<N,K,T>` and down owns `dflash_down_pipeline_kernel<T>`.
+Do not apply the retired four-IU4-site scale-gather checker to primed/drained pipelines.
 
 ## Standalone suite
 

@@ -35,7 +35,7 @@ namespace ninfer::ops {
                                                            std::int32_t columns);
 // Complete serialized workspace for the explicitly identified DFlash target-verify
 // MLP-down call. Generic Linear callers do not select this route by shape alone.
-// C1 T5/T6 Q4N16K16/G64 A8 uses scale-gather WMMA, with the ordinary activation
+// C1 T5/T6 Q4N16K16/G64 A8 uses pipelined WMMA, with the ordinary activation
 // workspace only. Target schedule ownership excludes compact multi-request batches.
 [[nodiscard]] std::size_t dflash_verify_down_linear_workspace_capacity_bytes(
     QType qtype, std::int32_t tokens, std::int32_t columns, std::int32_t rows);

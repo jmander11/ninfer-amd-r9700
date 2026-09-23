@@ -1,25 +1,21 @@
 #define NINFER_A8Q4_QUAL_NO_MAIN
 #include "a8q4_shape_sweep_qual.hip"
 #include "ops/r9700/linear/dflash_verify_down.h"
-#if defined(NINFER_QUAL_PROJECTION_SCREEN)
-#include "ops/r9700/linear/a8q4_projection_scale_gather.h"
-#endif
+#include "ops/r9700/linear/a8q4_verify_projection.h"
 #include "ninfer/ops/linear.h"
 #include <cstring>
 #include <functional>
 
 namespace {
-constexpr unsigned Copies=3,Trials=24;
-#if defined(NINFER_QUAL_PROJECTION_SCREEN)
-// This standalone screen executes exactly three shapes serially. These explicit
-// parameters let it reuse the established oracle/codec/graph harness unchanged.
+constexpr unsigned Copies=3;
+#if defined(NINFER_QUAL_VERIFY_PROJECTIONS)
 unsigned N=0,K=0,G=0;
 #else
 constexpr unsigned N=5120,K=17408,G=K/64;
 #endif
-hipError_t candidate_launch(const linear::A8Q4G64CandidateArgs& a,hipStream_t s) {
-#if defined(NINFER_QUAL_PROJECTION_SCREEN)
-    return linear::a8q4_projection_scale_gather_candidate(a,s);
+hipError_t owning_launch(const linear::A8Q4G64CandidateArgs& a,hipStream_t s) {
+#if defined(NINFER_QUAL_VERIFY_PROJECTIONS)
+    return linear::a8q4_verify_projection_candidate(a,s);
 #else
     return linear::a8q4g64_dflash_verify_down(a,s);
 #endif
@@ -69,11 +65,7 @@ linear::A8Q4G64CandidateArgs arguments(unsigned t,Guarded<hip_bfloat16>& x,Weigh
     return {x.data(),w.codes.data(),w.codes.bytes(),w.scales.data(),w.scales.bytes(),
         y.scratch.data(),y.scratch.bytes(),y.value.data(),t,N,K,K};
 }
-void launch(bool candidate,const linear::A8Q4G64CandidateArgs& a,hipStream_t s) {
-#if defined(NINFER_QUAL_PROJECTION_SCREEN)
-    if(candidate) { HIP_CHECK(linear::a8q4g64_linear_candidate(a,s)); return; }
-#endif
-    if(candidate) {
+void launch(const linear::A8Q4G64CandidateArgs& a,hipStream_t s) {
         ninfer::Tensor input(const_cast<hip_bfloat16*>(a.input), ninfer::DType::BF16,
                              {static_cast<int>(K), static_cast<int>(a.tokens)});
         ninfer::Tensor output(a.output, ninfer::DType::BF16,
@@ -86,17 +78,13 @@ void launch(bool candidate,const linear::A8Q4G64CandidateArgs& a,hipStream_t s) 
         weight.qdata=const_cast<std::uint8_t*>(a.weight_codes);
         weight.scales=const_cast<std::uint16_t*>(a.weight_scales);
         weight.qdata_bytes=a.weight_code_bytes;weight.scale_bytes=a.weight_scale_bytes;
-        ninfer::ops::dflash_verify_down_linear(input,weight,output,
-            ninfer::DeviceSpan{a.activation_workspace,a.activation_workspace_bytes},s);
-    }
-    else {
-        linear::A8G64ActivationWorkspace w{};
-        HIP_CHECK(linear::a8q4g64_bind_activation_workspace(a.activation_workspace,a.activation_workspace_bytes,a.tokens,K,&w));
-        HIP_CHECK(linear::a8g64_quantize_activation({a.input,w},s));
-        HIP_CHECK(linear::a8q4g64_linear_wmma32({w.low_codes,w.low_code_bytes,w.high_codes,w.high_code_bytes,
-            w.scales,w.scale_bytes,w.status,a.weight_codes,a.weight_code_bytes,a.weight_scales,
-            a.weight_scale_bytes,a.output,a.tokens,N,K,K},s));
-    }
+
+#if defined(NINFER_QUAL_VERIFY_PROJECTIONS)
+    ninfer::ops::linear(input,weight,output,
+#else
+    ninfer::ops::dflash_verify_down_linear(input,weight,output,
+#endif
+        ninfer::DeviceSpan{a.activation_workspace,a.activation_workspace_bytes},s);
 }
 struct Graph {
     hipGraph_t graph{};hipGraphExec_t exec{};
@@ -214,25 +202,16 @@ void codec(unsigned t,Output& o,const HostActivation& expected,hipStream_t s) {
     transfer(&status,w.status,4,hipMemcpyDeviceToHost,s);
     if(low!=expected.low || high!=expected.high || scales!=expected.scales || status)fail("exact A8 codec/status failed");
 }
-__global__ void scrub(std::uint32_t* p,std::size_t n) {
-    for(std::size_t i=blockIdx.x*blockDim.x+threadIdx.x;i<n;i+=gridDim.x*blockDim.x)p[i]=i;
-}
-double timing(Graph& graph,DeviceBuffer<std::uint32_t>& flush,hipStream_t s) {
-    hipLaunchKernelGGL(scrub,dim3(4096),dim3(256),0,s,flush.get(),flush.bytes()/4);
-    Event start,end;HIP_CHECK(hipEventRecord(start.get(),s));graph.run(s);HIP_CHECK(hipEventRecord(end.get(),s));
-    HIP_CHECK(hipEventSynchronize(end.get()));float ms=0;HIP_CHECK(hipEventElapsedTime(&ms,start.get(),end.get()));return ms;
-}
-struct CellTiming { double control_ms, candidate_ms; };
-CellTiming cell(unsigned t,hipStream_t s,std::ostream& out) {
+void cell(unsigned t,hipStream_t s,std::ostream& out) {
     const auto host=make_decode_dot8_weights(N,K);const auto base=make_decode_dot8_input(K);
     std::vector<hip_bfloat16> x(t*K);
     for(unsigned token=0;token<t;++token)for(unsigned k=0;k<K;++k)
         x[token*K+k]=hip_bfloat16(static_cast<float>(base[(k/64)*64+(k+token*13)%64])*(token+4)/8.0F);
-    Guarded<hip_bfloat16> input(x.size(),s);input.put(x,s);Output control(t,s),candidate(t,s);
+    Guarded<hip_bfloat16> input(x.size(),s);input.put(x,s);Output candidate(t,s);
     std::array<std::unique_ptr<Weights>,Copies> weights;
     for(auto& w:weights)w=std::make_unique<Weights>(host,s);
     const auto valid=arguments(t,input,*weights[0],candidate);unsigned malformed=0;
-    auto reject=[&](auto a,hipStream_t stream){if(candidate_launch(a,stream)!=hipErrorInvalidValue)fail("malformed accepted");++malformed;};
+    auto reject=[&](auto a,hipStream_t stream){if(owning_launch(a,stream)!=hipErrorInvalidValue)fail("malformed accepted");++malformed;};
     reject(valid,nullptr);
     auto bad=valid;bad.tokens=4;reject(bad,s);bad=valid;bad.tokens=7;reject(bad,s);
     bad=valid;bad.rows=N-16;reject(bad,s);bad=valid;bad.columns-=64;reject(bad,s);
@@ -247,40 +226,31 @@ CellTiming cell(unsigned t,hipStream_t s,std::ostream& out) {
     bad=valid;bad.output=const_cast<hip_bfloat16*>(bad.input);reject(bad,s);
     bad=valid;bad.output=reinterpret_cast<hip_bfloat16*>(bad.activation_workspace);reject(bad,s);
     bad=valid;bad.weight_scales=reinterpret_cast<const std::uint16_t*>(bad.weight_codes);reject(bad,s);
-    std::array<std::unique_ptr<Graph>,Copies> cg,rg;
-    for(unsigned i=0;i<Copies;++i) {
-        cg[i]=std::make_unique<Graph>(s,[&]{launch(false,arguments(t,input,*weights[i],control),s);});
-        rg[i]=std::make_unique<Graph>(s,[&]{launch(true,arguments(t,input,*weights[i],candidate),s);});
-    }
+    std::array<std::unique_ptr<Graph>,Copies> graphs;
+    for(unsigned i=0;i<Copies;++i)
+        graphs[i]=std::make_unique<Graph>(s,[&]{launch(arguments(t,input,*weights[i],candidate),s);});
     double max_l2=0,max_abs=0,max_gross_fraction=0;unsigned cases=0;
     PublicError public_error{};std::vector<unsigned> public_rows;
     auto verify_fixture=[&](bool eager){
         const auto represented=quantize_host(x,t,K);const auto expected=oracle(t,represented,host);
         const auto public_expected=public_oracle(t,x,host);public_rows=public_expected.rows;
+        launch(arguments(t,input,*weights[0],candidate),s);
+        const auto eager_reference=candidate.value.read(s);
         for(unsigned i=0;i<Copies;++i) {
-            if(eager){launch(false,arguments(t,input,*weights[i],control),s);launch(true,arguments(t,input,*weights[i],candidate),s);}
-            else {cg[i]->run(s);rg[i]->run(s);}
-            for(auto* o:{&control,&candidate}) {
-                codec(t,*o,represented,s);const auto actual=o->value.read(s);
-                auto e=compare(actual,expected);
-                const auto pe=compare_public(t,actual,public_expected);
-                public_error.relative_rms=std::max(public_error.relative_rms,pe.relative_rms);
-                public_error.gross_rms=std::max(public_error.gross_rms,pe.gross_rms);
-                max_l2=std::max(max_l2,e.relative_l2);max_abs=std::max(max_abs,e.maximum_absolute);
-                max_gross_fraction=std::max(max_gross_fraction,e.maximum_absolute/(0.01*e.reference_maximum+1e-5));
-                o->value.guards(s);o->scratch.guards(s);
-            }
-            exact(control.value.read(s),candidate.value.read(s),"candidate/incumbent BF16 mismatch");
-#if defined(NINFER_QUAL_PROJECTION_SCREEN)
-            // The selected generic dispatcher above is the timed/graph route.
-            // Retain direct owning-entry checks against both independent oracles.
-            HIP_CHECK(candidate_launch(arguments(t,input,*weights[i],candidate),s));
-            codec(t,candidate,represented,s);
-            const auto direct=candidate.value.read(s);
-            (void)compare(direct,expected);(void)compare_public(t,direct,public_expected);
-            exact(control.value.read(s),direct,"direct/generic production BF16 mismatch");
+            // Poison workspace before every launch, including restored/zero
+            // fixtures, so graph replay cannot reuse a stale activation image.
+            HIP_CHECK(hipMemsetAsync(candidate.scratch.data(),0xff,candidate.scratch.bytes(),s));
+            if(eager)launch(arguments(t,input,*weights[i],candidate),s);
+            else graphs[i]->run(s);
+            codec(t,candidate,represented,s);const auto actual=candidate.value.read(s);
+            const auto e=compare(actual,expected);
+            const auto pe=compare_public(t,actual,public_expected);
+            public_error.relative_rms=std::max(public_error.relative_rms,pe.relative_rms);
+            public_error.gross_rms=std::max(public_error.gross_rms,pe.gross_rms);
+            max_l2=std::max(max_l2,e.relative_l2);max_abs=std::max(max_abs,e.maximum_absolute);
+            max_gross_fraction=std::max(max_gross_fraction,e.maximum_absolute/(0.01*e.reference_maximum+1e-5));
             candidate.value.guards(s);candidate.scratch.guards(s);
-#endif
+            exact(actual,eager_reference,"public eager/graph/allocation BF16 mismatch");
             exact(input.read(s),x,"hidden mutation");input.guards(s);
             exact(weights[i]->codes.read(s),host.codes,"code mutation");
             exact(weights[i]->scales.read(s),host.scales,"scale mutation");
@@ -289,65 +259,34 @@ CellTiming cell(unsigned t,hipStream_t s,std::ostream& out) {
         ++cases;
     };
     verify_fixture(true);verify_fixture(false);
-    const auto original=x;x[K+17].data=0x7fc1;input.put(x,s);cg[0]->run(s);rg[0]->run(s);
-    for(auto* o:{&control,&candidate}) {
+    const auto original=x;x[K+17].data=0x7fc1;input.put(x,s);graphs[0]->run(s);
+    for(auto* o:{&candidate}) {
         const auto values=o->value.read(s);
         if(!std::all_of(values.begin(),values.end(),[](auto v){return v.data==0x7fc1;}))fail("poison output/status propagation");
         std::uint32_t status=0;transfer(&status,workspace(t,*o).status,4,hipMemcpyDeviceToHost,s);
         if(!status)fail("poison status absent");
     }
     x=original;for(auto& v:x)v=hip_bfloat16(-0.75F*static_cast<float>(v));input.put(x,s);
-    HIP_CHECK(hipMemsetAsync(control.scratch.data(),0xff,control.scratch.bytes(),s));
     HIP_CHECK(hipMemsetAsync(candidate.scratch.data(),0xff,candidate.scratch.bytes(),s));verify_fixture(false);
     std::fill(x.begin(),x.end(),hip_bfloat16(0.0F));input.put(x,s);verify_fixture(false);
     x=original;input.put(x,s);verify_fixture(false);power();
-    DeviceBuffer<std::uint32_t> flush(80ULL*1024*1024/4);
-    for(unsigned i=0;i<Copies;++i){(void)timing(*cg[i],flush,s);(void)timing(*rg[i],flush,s);}
     out<<"{\"tokens\":"<<t<<",\"rows\":"<<N<<",\"columns\":"<<K<<",\"correctness\":{"
        <<"\"maximum_relative_l2\":"<<max_l2<<",\"maximum_absolute\":"<<max_abs
        <<",\"maximum_gross_cap_fraction\":"<<max_gross_fraction
        <<",\"criterion\":\"fp64_rel_l2_1e-2_gross_1e-2_refmax_plus_1e-5\","
-       <<"\"exact_codec\":true,\"exact_incumbent\":true,\"graph_poison_stale_finite\":true,"
+       <<"\"exact_codec\":true,\"exact_eager_graph\":true,\"graph_poison_stale_finite\":true,"
        <<"\"guards_immutability\":true,\"finite_cases\":"<<cases<<",\"malformed_cases\":"<<malformed
        <<"},\"public_bf16_oracle\":{\"criterion\":\"per_token_relative_rms_le_0.02_and_max_error_le_0.10_reference_rms\","
        <<"\"full_k\":"<<K<<",\"all_tokens\":true,\"maximum_relative_rms\":"<<public_error.relative_rms
        <<",\"maximum_error_over_reference_rms\":"<<public_error.gross_rms<<",\"sampled_rows\":[";
     for(std::size_t i=0;i<public_rows.size();++i)out<<(i?",":"")<<public_rows[i];
-    out<<"]},\"samples\":[";
-    std::array<double,Trials> control_times{},candidate_times{};
-    for(unsigned trial=0;trial<Trials;++trial) {
-        const auto i=trial%Copies;const bool first=(trial/Copies)%2==0;double c,r;
-        if(first){c=timing(*cg[i],flush,s);r=timing(*rg[i],flush,s);}else{r=timing(*rg[i],flush,s);c=timing(*cg[i],flush,s);}
-        if(!(c>0 && r>0))fail("invalid event");if(trial)out<<',';
-        control_times[trial]=c;candidate_times[trial]=r;
-        out<<"{\"allocation\":"<<i<<",\"control_first\":"<<(first?"true":"false")
-           <<",\"control_ms\":"<<c<<",\"candidate_ms\":"<<r<<'}';
-    }
-    std::sort(control_times.begin(),control_times.end());
-    std::sort(candidate_times.begin(),candidate_times.end());
-    const CellTiming result{(control_times[Trials/2-1]+control_times[Trials/2])/2,
-                            (candidate_times[Trials/2-1]+candidate_times[Trials/2])/2};
-    power();out<<"],\"control_median_ms\":"<<result.control_ms
-               <<",\"candidate_median_ms\":"<<result.candidate_ms<<'}';
-    return result;
+    out<<"]}}";
 }
 }
-
 int main(int argc,char** argv) {
  try {
-#if defined(NINFER_QUAL_PROJECTION_SCREEN)
-    if(argc!=7 || std::string_view(argv[1])!="--out-json" ||
-       std::string_view(argv[3])!="--round-ms-t5" || std::string_view(argv[5])!="--round-ms-t6")
-        fail("usage: qualifier --out-json FRESH.json --round-ms-t5 MS --round-ms-t6 MS");
-    const auto duration=[](const char* value) {
-        std::size_t consumed=0;const double result=std::stod(value,&consumed);
-        if(consumed!=std::strlen(value) || !std::isfinite(result) || result<=0)fail("invalid reference round duration");
-        return result;
-    };
-    const std::array<double,2> round_ms{duration(argv[4]),duration(argv[6])};
-#else
-    if(argc!=3 || std::string_view(argv[1])!="--out-json")fail("usage: scale_gather_qual --out-json FRESH.json");
-#endif
+    if(argc!=3 || std::string_view(argv[1])!="--out-json")
+        fail("usage: selected_q4_qual --out-json FRESH.json");
     const std::filesystem::path output=argv[2];require_fresh_output(output);power();
     HIP_CHECK(hipSetDevice(0));hipDeviceProp_t props{};HIP_CHECK(hipGetDeviceProperties(&props,0));
     char pci[32]{};HIP_CHECK(hipDeviceGetPCIBusId(pci,sizeof(pci),0));
@@ -355,53 +294,29 @@ int main(int argc,char** argv) {
        props.warpSize!=32 || (std::string_view(pci)!="0000:13:00.0" && std::string_view(pci)!="13:00.0"))fail("wrong device");
     hipStream_t stream{};HIP_CHECK(hipStreamCreateWithFlags(&stream,hipStreamNonBlocking));
     std::ostringstream out;out<<std::setprecision(17)<<"{\"schema\":\""
-#if defined(NINFER_QUAL_PROJECTION_SCREEN)
-        <<"ninfer.r9700.a8q4-projection-scale-gather.v2"
+#if defined(NINFER_QUAL_VERIFY_PROJECTIONS)
+        <<"ninfer.r9700.a8q4-verify-projections.v1"
 #else
-        <<"ninfer.r9700.dflash-down-scale-gather.v1\","
+        <<"ninfer.r9700.dflash-verify-down.v1"
 #endif
-#if defined(NINFER_QUAL_PROJECTION_SCREEN)
-        <<"\",\"production_dispatch_tested\":true,\"owning_direct_oracle_tested\":true,"
-#endif
-        <<"\"status\":\"qualified\",\"pci\":\"0000:13:00.0\",\"power\":\"auto\","
-        <<"\"copies\":3,\"scrub_bytes\":83886080,\"complete_boundary_graph\":true,\"cells\":[";
-#if defined(NINFER_QUAL_PROJECTION_SCREEN)
-    struct Projection {unsigned rows,columns,calls;const char* role;};
-    constexpr std::array<Projection,3> projections{{{5120,6144,60,"output"},
-        {12288,5120,48,"value_z"},{4096,5120,48,"query_key"}}};
-    std::array<std::array<CellTiming,2>,3> measured{};
+        <<"\",\"status\":\"qualified\",\"public_dispatch_tested\":true,"
+          "\"pci\":\"0000:13:00.0\",\"power\":\"auto\",\"copies\":3,\"cells\":[";
+#if defined(NINFER_QUAL_VERIFY_PROJECTIONS)
+    constexpr std::array<std::array<unsigned,2>,4> shapes{{{34816,5120},{5120,6144},{12288,5120},{4096,5120}}};
     bool first=true;
-    for(std::size_t shape=0;shape<projections.size();++shape) {
-        N=projections[shape].rows;K=projections[shape].columns;G=K/64;
-        for(unsigned width=0;width<2;++width) {
-            if(!first)out<<',';first=false;
-            measured[shape][width]=cell(width+5,stream,out);
-        }
+    for(const auto& shape:shapes) {
+        N=shape[0];K=shape[1];G=K/64;
+        for(unsigned t:{5U,6U}) {if(!first)out<<',';first=false;cell(t,stream,out);}
     }
-    out<<"],\"weighted_round_screen\":[";
-    for(unsigned width=0;width<2;++width) {
-        double control=0,candidate=0;
-        for(std::size_t shape=0;shape<projections.size();++shape) {
-            control+=projections[shape].calls*measured[shape][width].control_ms;
-            candidate+=projections[shape].calls*measured[shape][width].candidate_ms;
-        }
-        const double saving=control-candidate;
-        out<<(width?",":"")<<"{\"tokens\":"<<width+5
-           <<",\"formula\":\"60*output + 48*value_z + 48*query_key\",\"control_weighted_ms\":"<<control
-           <<",\"candidate_weighted_ms\":"<<candidate<<",\"saving_ms\":"<<saving
-           <<",\"reference_round_ms\":"<<round_ms[width]<<",\"minimum_fraction\":0.02"
-           <<",\"clears_screen\":"<<(saving>0.02*round_ms[width]?"true":"false")<<'}';
-    }
-    out<<"],\"timing_scope\":\"complete fresh quantize+Linear graph; 24 alternating trials, three allocations,80MiB scrub before each call\","
-          "\"screen_is_whole_admission\":false}\n";
 #else
-    cell(5,stream,out);out<<',';cell(6,stream,out);out<<"]}\n";
+    cell(5,stream,out);out<<',';cell(6,stream,out);
 #endif
-    HIP_CHECK(hipStreamDestroy(stream));
+    out<<"]}\n";
+    HIP_CHECK(hipStreamDestroy(stream));power();
     const int fd=::open(output.c_str(),O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC,0644);
     if(fd<0)fail("cannot create immutable result");const auto result=out.str();
     const auto count=::write(fd,result.data(),result.size());::close(fd);
     if(count!=static_cast<ssize_t>(result.size()))fail("short result write");
-    std::cout<<"complete boundary qualified; independent timing admission remains\n";return 0;
+    std::cout<<"selected public Q4 routes qualified\n";return 0;
  }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
 }

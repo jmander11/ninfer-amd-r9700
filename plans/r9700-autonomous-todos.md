@@ -93,15 +93,41 @@ prefill/XAttention and broad recipe campaigns paused, and all GPU work serialize
 - [ ] Close only when no credible material mechanism remains untested or an external prerequisite
   genuinely blocks progress; document the practical remaining bound and actual achieved rates.
 
-Next bounded mechanism: small-T gate/up next-G64 pipeline, distinct from the rejected
-scale-gather-only and T1 dot8-prefetch candidates. Current owner13.509ms/round across62calls
-needs roughly20us/call saving to clear2%round. Its2176CTAs already hide more latency than down's
-320; do not extrapolate the down win. Require emitted overlap/resources, independent oracle,
-complete Op screen and whole confirmation before promotion. Production is unchanged for this
-candidate. Exact-order normalization block-ahead is now rejected at the whole-gain screen:
+Exact-order normalization block-ahead is rejected at the whole-gain screen:
 numerical/ISA checks pass but129-call savings0.382/0.481ms are below2%current round at T5/T6.
 Evidence and retained executable are in `profiles/bench/r9700-rmsnorm-block-ahead-20260922/`;
 temporary code is removed, and no whole rerun is justified.
+Integrated public qualification and linked ISA checks pass for gate/up and the narrowed bundle:
+N5120/K6144 and N4096/K5120 pipeline at T5/T6; N12288/K5120 retains scale-gather.
+Selected-public screens save3.710/3.391ms for gate/up and1.569/1.666ms for projections.
+The extracted down-body public regression also passes. The immutable Q4-only benchmark is
+`profiles/bench/r9700-verify-pipeline-family-20260922/whole-inference/candidate-ninfer_bench`;
+whole admission PASS: chat K4/K5=63.02158/61.24468 decode tok/s versus
+57.42168/55.93994 matched control, +9.75%/+9.48%; all16streams/accounting exact.
+Raw single-pair checks30.58844/29.02133tok/s also pass. Evidence is adjacent `summary.json`.
+These are bundle results, not isolated operator gains, and exclude subsequent BF16 changes.
+Selected public qualifiers are consolidated and temporary comparison controls removed;
+the numerical-only four-shape qualifier is `ninfer_r9700_a8q4_verify_projection_qual`.
+The BF16 follow-up tested the complete paired projected-control Op: one joint split-K16
+projection kernel plus merge/gating, preserving both explicit BF16 projection seams. Its
+independent full-formula qualifier compares against two incumbent projections plus gating,
+weighted48completecalls rather than96individual projections. Complete-Op numerical, own-graph,
+guard and native-BF16 ISA checks pass; all warm/cold/alignment cells clear the material screen,
+estimating1.848–2.073ms/round. Evidence:
+`profiles/bench/r9700-bf16-projected-control-splitk-20260922/screen/report.json`.
+Public selected qualification and planner/T1 regression passed, but real-model chat K4 failed
+exact greedy parity at output index52 (413 versus3470), changing76/129positions and round
+accounting. The campaign stopped immediately; no speed is admitted. Retained decision:
+`profiles/bench/r9700-bf16-projected-control-splitk-20260922/whole-inference/rejection.json`.
+Admitted T1-only controls are restored and rejected implementation/targets deleted; never
+rerun this unchanged reduction profile or waive the exact-token gate.
+
+Next bounded candidate: gate/up-only two-group lookahead at T5/T6, preserving ascending exact
+group arithmetic. Current one-ahead control is0.3030/0.3088ms;62calls need17.24/18.22us per-call
+gain to clear2%current whole rounds53.4487/56.4859ms. This may hide more load latency but adds
+about13–14live registers and can reduce occupancy. Require actual two-generation overlap,
+no spills, independent oracle/exact output/graph checks, and balanced complete-Op screen;
+do not extrapolate to other projections or run whole A/B without material direct savings.
 
 Live mechanism evidence: exact-order K5120 RMSNorm token8 at T5/T6 is admitted by balanced
 three-pair chat whole-inference A/B, retaining exact token IDs and speculative accounting.
