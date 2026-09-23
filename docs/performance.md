@@ -60,6 +60,69 @@ expected value exactly.
 Copy bus rate counts both the read and write traffic. This is the hardware bandwidth bound, not a
 model or individual-Op throughput claim.
 
+## FP8-capped compact base selection (2026-09-23)
+
+Selected for subsequent optimization: **Q4/FP8 selective-cap, uniform Q4 A8 execution**.
+The15,793,065,984-byte artifact is saved at
+`/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-q4-fp8-selective-cap/qwen3.8-27b-r9700-q4-fp8-selective-cap-n16k16-eval.ninfer`.
+It is10.7% smaller than the17.68 GB selective base and26.7% smaller than four-role.
+It does not contain a DFlash companion and does not replace final BF16-source production
+admission. Existing model files remain unchanged.
+
+The recipe retains selective's26 protected projection positions, replaces its15 BF16 matrices
+with row-scaled FP8, and returns embedding/output head to Q4. Its other11 FP8 projections stay
+FP8. Everything else retains all-Q4 bytes or existing direct norm/control precision. This caps
+large promoted weight matrices, not norms, cache, GDN state or DFlash selector codebooks.
+The exact fixed inventory and converter are in `qwen3.8-27b-artifact.md` under maintainer docs.
+
+The immutable5090 reference is Git-tracked in `tools/ppl/fixtures/nvfp4-5090-20260922/`
+(`0b00efa1`): three exact4096-token inputs and six NLL sidecars/reports. These are the same
+prefill2047-position and short-decode128-position spans as the comparison below, with identical
+cache and measurement settings. All24 new recipe quality cells are finite and aligned.
+
+| FP8 promotions over all-Q4/A8 | File GB | Worst prefill PPL change vs NVFP4 | Worst short-decode PPL change | Prefill tok/s | Ordinary decode tok/s |
+|---|---:|---:|---:|---:|---:|
+| Early6 attention QK/GV pairs | 15.38 | +0.63% | +5.79% | not timed | not timed |
+| All attention QK/GV pairs | 15.72 | -0.01% | +4.33% | 1442–1456 | 20.36–20.45 |
+| All attention + GDN QK | 16.20 | +0.11% | +4.59% | 1423–1455 | 19.45–19.50 |
+| Selective-cap26 projections | 15.79 | +0.13% | +1.81% | 1431–1446 | 20.18–20.20 |
+
+Rates span per-text medians, C1/P4096/G128/chunk2048, ordinary graph, auto, warm1/r3.
+All nine admitted speed cells have exact repeated tokens. The early-attention candidate exceeds
+the5% secondary PPL screen and was not timed. Selective-cap alone meets the preferred2% screen
+in both schedules among the four new recipes. Its PPLs (WikiText/technical/code) are
+6.455954/9.389574/2.255864 for prefill and6.680329/22.708779/3.239396 for short decode.
+Its newly severe positions versus NVFP4 are5/6/6 and1/3/0 respectively: aggregate PPL agreement
+is not the separate BF16-source severe-position production gate.
+
+Relative to the old tiled selective companion's ordinary mode, selective-cap improves prefill
+about54% and decode about4%. It is not fastest on every axis: all-Q4/A8 still leads decode
+(~21.9 tok/s) and four-role leads prefill (~1627 tok/s). The benefit is a compact candidate with
+tighter measured PPL agreement, not proof of a global Pareto optimum or hardware ceiling.
+
+The bounded mixed evaluator applies A4 only to Q4 MLP gate/up N34816/K5120 at T>128;
+decode/verify and other Q4 operations stay A8. Its same-artifact PPLs are
+6.602872/9.655792/2.282552 prefill and6.705888/22.160924/3.216515 short decode: all within2%
+of NVFP4. Technical-prefill newly severe positions rise from6 to10, so this is not numerical
+equivalence. Mixed A4 measures900–901 prefill tok/s and20.18–20.19 decode tok/s with exact
+repeat tokens in all three speed cells. Uniform A8 remains the selected default; the generic
+A4 route needs a separately qualified cooperative prefill implementation before it can earn
+promotion on speed. This identifies an accuracy-tolerable optimization target, not a speed win.
+
+Verification: complete artifact payload readback and strict binder rejection checks for all four
+recipes; FP8 execution-state and host planning contracts; unchanged all-Q4 NLL control; mixed
+real-shape public-input FP64 oracle within its A4 error bound plus exact quantized-reference
+checks at768 tile/shape-boundary outputs, full finite/poison and arena checks; both-build
+selector/report tests. The installed artifact/current default build reproduces every frozen
+code-sample NLL exactly. The mixed evaluator corrected an exact-span A4 workspace binding
+failure before any model evaluation. No kernel arithmetic was rewritten.
+
+Evidence and exact commands: `profiles/ppl/r9700-fp8-capped-selection-20260923/`, including
+`quality-summary.json`, `comparison.md/json`, `mixed-quality-summary.json`, and `selection.json`.
+Drivers: `tools/ppl/select_fp8_capped.py`, `tools/convert/qwen3_8_27b_r9700/convert_fp8_capped.py`.
+The four-recipe integration is committed as `03240dd5`; the mixed evaluator is `0a439704`.
+Further kernel tuning and DFlash integration are separate follow-ups, not completed claims.
+
 ## Matched NVFP4 quality and AMD recipe comparison (2026-09-23)
 
 The bounded comparison uses the user's standard 5090 artifact
