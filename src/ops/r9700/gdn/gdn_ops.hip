@@ -775,3 +775,6 @@ hipError_t recurrent_bf16_fp32(const hip_bfloat16* q, const hip_bfloat16* k,
 }
 
 } // namespace ninfer::ops::r9700::gdn
+
+// Keep the exact-order paired controls in the existing GDN device module.
+#include "bf16_projected_control_wave32_impl.h"

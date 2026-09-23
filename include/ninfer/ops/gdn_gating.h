@@ -25,14 +25,14 @@ void gdn_gating(const Tensor& a, const Tensor& b, const Tensor& A_log, const Ten
  * Op: BF16 projected Gated DeltaNet controls at the R9700 decode cell.
  *
  * Math / indexing:
- *   ar[h] = BF16(sum_k hidden[k] * a_weight[h,k])
- *   br[h] = BF16(sum_k hidden[k] * b_weight[h,k])
- *   g[h] = -exp(A_log[h]) * softplus(FP32(ar[h]) + dt_bias[h])
- *   beta[h] = sigmoid(FP32(br[h])).
+ *   ar[h,t] = BF16(sum_k hidden[k,t] * a_weight[h,k])
+ *   br[h,t] = BF16(sum_k hidden[k,t] * b_weight[h,k])
+ *   g[h,t] = -exp(A_log[h]) * softplus(FP32(ar[h,t]) + dt_bias[h])
+ *   beta[h,t] = sigmoid(FP32(br[h,t])).
  *
  * Logical shapes and supported domain:
- *   hidden is contiguous BF16 [5120,1], both weights are contiguous BF16_CTRL [48,5120],
- *   A_log/dt_bias are contiguous FP32 [48], and g/beta are contiguous FP32 [48,1].
+ *   hidden is contiguous BF16 [5120,T], both weights are contiguous BF16_CTRL [48,5120],
+ *   A_log/dt_bias are contiguous FP32 [48], and g/beta are contiguous FP32 [48,T], T=1,5,6.
  *
  * Numeric / effects:
  *   Each dot product accumulates in FP32 and has an observable explicit BF16 rounding boundary
@@ -40,10 +40,11 @@ void gdn_gating(const Tensor& a, const Tensor& b, const Tensor& A_log, const Ten
  *   mutually non-overlapping; there is no workspace or persistent state effect.
  *
  * Execution:
- *   The caller supplies a non-null stream. The fixed T=1 domain is the qualified decode cell;
- *   wider token extents remain compositions of Linear and gdn_gating.
+ *   The caller supplies a non-null stream. T1 retains its fixed decode kernel; T5/T6
+ *   pair exact-order wave32 projections and gating. Other token extents remain
+ *   compositions of Linear and gdn_gating.
  */
-void bf16_gdn_projected_gating_t1(const Tensor& hidden, const Weight& a_weight,
+void bf16_gdn_projected_gating(const Tensor& hidden, const Weight& a_weight,
                                   const Weight& b_weight, const Tensor& A_log,
                                   const Tensor& dt_bias, Tensor& g, Tensor& beta,
                                   hipStream_t stream);

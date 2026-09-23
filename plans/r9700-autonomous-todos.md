@@ -73,24 +73,30 @@ above apply to every command.
 
 ### Current checkpoint
 
-ACTIVE DFLASH CONTINUATION (2026-09-22, user resumed): do not stop after one win or one
-failed candidate. Continue until credible in-scope mechanisms with material end-to-end benefit
-are implemented or excluded by evidence. This is a practical optimization assessment, not proof
-of global optimality. Keep the selected selective-protected/Q4/BF16 companion fixed, unrelated
-prefill/XAttention and broad recipe campaigns paused, and all GPU work serialized under `auto`.
+DFLASH OPTIMIZATION PASS COMPLETE (2026-09-22): final admitted C1 chat decode is
+K4 **64.81318 tok/s**, K5 **62.92418 tok/s**; whole-output57.02881/55.64922tok/s.
+All16 matched runs preserve exact tokens/accounting; every balanced chat pair and raw regression
+gate passes. Ordinary T1 is unchanged; latest measured C1 ordinary rate remains27.46441tok/s.
+Final authority: `profiles/bench/r9700-bf16-controls-wave32-20260922/whole-inference/summary.json`.
+No currently evidenced material mechanism remains untested in this fixed-artifact C1 pass.
+This is not global optimality, memory-bandwidth saturation or broad context/concurrency admission.
+Earlier rates below are retained history, not current work directives. Unrelated prefill/XAttention
+and broad recipe campaigns remain explicitly paused; do not resume them automatically.
+Final selected numerical-only T1/T5/T6 qualifier, existing GDN regression, build and diff checks
+pass after removal of temporary comparisons and duplicate oracle ownership.
 
 - [x] Reattribute the packed-W8 build on the measured chat K5 workload; rank remaining owners.
   `profiles/rocprof/r9700-dflash-packed-w8-chat-k5-20260922/attribution.json`: exact129tokens,
   37graphs/91accepted/zero fallback. Profiled pergraph: targetlayers68.491ms, head7.600ms,
   draft5.170ms. Leading owners: gate/up13.509ms, normalization12.340ms, down9.742ms,
   protectedBF16projections9.327ms. These durations are attribution only.
-- [ ] Bound and evaluate remaining W8 scale/operand scheduling, Q4 verify, normalization/fusion,
+- [x] Bound and evaluate remaining W8 scale/operand scheduling, Q4 verify, normalization/fusion,
   protected BF16 projection, draft and round-service mechanisms; reuse prior rejections unless
   a genuinely new mechanism changes the bound. Maintain useful independent implementation/review.
-- [ ] Implement and independently qualify credible challengers, retain exact public greedy parity,
+- [x] Implement and independently qualify credible challengers, retain exact public greedy parity,
   and admit only matched unprofiled whole-inference wins. Repeat attribution when it changes
   target selection; commit at natural checkpoints.
-- [ ] Close only when no credible material mechanism remains untested or an external prerequisite
+- [x] Close only when no credible material mechanism remains untested or an external prerequisite
   genuinely blocks progress; document the practical remaining bound and actual achieved rates.
 
 Exact-order normalization block-ahead is rejected at the whole-gain screen:
@@ -122,12 +128,37 @@ accounting. The campaign stopped immediately; no speed is admitted. Retained dec
 Admitted T1-only controls are restored and rejected implementation/targets deleted; never
 rerun this unchanged reduction profile or waive the exact-token gate.
 
-Next bounded candidate: gate/up-only two-group lookahead at T5/T6, preserving ascending exact
-group arithmetic. Current one-ahead control is0.3030/0.3088ms;62calls need17.24/18.22us per-call
-gain to clear2%current whole rounds53.4487/56.4859ms. This may hide more load latency but adds
-about13–14live registers and can reduce occupancy. Require actual two-generation overlap,
-no spills, independent oracle/exact output/graph checks, and balanced complete-Op screen;
-do not extrapolate to other projections or run whole A/B without material direct savings.
+Gate/up two-group lookahead is rejected at the native-code gate. Rotating payload copies
+force early waits at76/77VGPR; the one bounded fixed-slot repair still hoists future scale
+conversion across current compute, forcing waits at101/107VGPR. Neither implements the
+intended two-generation overlap, so no GPU campaign is justified. Evidence:
+`profiles/bench/r9700-gate-up-depth2-20260922/README.md`; temporary implementation is removed.
+
+The final admitted mechanism is exact-order wave32-per-(head,token) paired BF16 controls,
+preserving the original160FMA lane chains, shuffle reduction and BF16 seams. It attacks
+wave8's repeated CTA barriers and inactive token waves, unlike rejected WMMA reassociation.
+Pure launch savings are insufficient: require48completecalls to save>2%of53.4487/56.4859ms
+rounds, independent oracle/exact control/graph guards, then exact real-model whole admission.
+The refreshed admitted Q4 trace (`profiles/rocprof/r9700-dflash-verify-pipeline-chat-k5-20260922/attribution.json`)
+confirms2.081ms of control projections and~0.079ms gating; target layers42.598ms, gate/up10.524ms,
+down5.741ms and normalization6.147ms are attribution only, not unprofiled performance claims.
+The scalar wave32 candidate passes exact outputs, independent oracle and graph/guard checks,
+but three cold-cache cells miss the material gate (0.970–1.030ms savings versus1.069/1.130ms
+thresholds). Warm cells pass; mixed evidence does not admit the route. Retained first screen:
+`profiles/bench/r9700-bf16-controls-wave32-20260922/screen.json`.
+The bounded four-step load refinement passes fresh static and numerical/timing gates:
+25VGPR/19SGPR, no LDS/private/spills, actual blocked-load overlap and all160ordered FMAs.
+All warm/cold/alignment cells preserve exact outputs and save1.260–1.502ms/round, clearing
+the unchanged material gate. Evidence: same directory `four-step-screen.json`.
+T5/T6 are admitted in the owning projected-controls Op, preserving T1 and reusing the existing
+GDN module without scratch. Actual-public qualification, existing GDN regression and all16
+same-artifact whole runs pass. K4/K5 reach64.81318/62.92418tok/s; mean paired gains3.83%/3.71%.
+The last control pair is slower, so report variability: K4 pairs+2.88..5.72%, K5+2.67..5.54%;
+even the first two pairs exceed2%. Raw one-pair checks31.45723/29.82590tok/s pass.
+Beyond this controls family, the independent
+frontier review finds no currently justified untested material mechanism; do not invent a new
+campaign from theoretical headroom alone. Any closure is limited to this fixed artifact and
+measured C1 chat K4/K5 workloads, not a global or multi-context/concurrency optimum.
 
 Live mechanism evidence: exact-order K5120 RMSNorm token8 at T5/T6 is admitted by balanced
 three-pair chat whole-inference A/B, retaining exact token IDs and speculative accounting.
@@ -193,12 +224,12 @@ Draft-side audit finds no independent roughly 1.3 ms/round mechanism: append tot
 (dead Q-row elimination ceiling 0.262 ms), proposal head+selector 1.044 ms, already split SWA
 attention 0.139 ms and device round service including folding 0.672 ms. These are pre-pipeline
 profiled bounds, not speed measurements or exclusion of host overhead. Normalization block-ahead
-remains unselected; the unchecked optimization frontier remains active.
+remains unselected; this historical frontier is superseded by the completion above.
 
 COMPLETED DFLASH SPEED CHECKPOINT (2026-09-22): established matched baselines, attributed
 verification, and qualified the earlier packed-load improvement. That checkpoint measured
 39.00 tok/s for chat K5, superseded by the normalization result above;
-60+ remains an unmet aspiration, not an established result. Other prefill, XAttention and broad
+The later completed checkpoint above establishes60+ for the stated C1 chat workload. Other prefill, XAttention and broad
 recipe campaigns remain explicitly paused. Main owns serialized GPU runs; independent agents
 review sources.
 

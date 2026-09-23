@@ -783,3 +783,10 @@ target_link_libraries(ninfer_r9700_scalar_schedule_qual PRIVATE ninfer_r9700_cor
 # Retired backend tests and microbenchmarks do not enter this graph. The sole Qwen3.8 runtime,
 # public Engine, and product applications above are native HIP link owners;
 # real-model execution is still gated on the complete BF16-derived R9700 artifact.
+
+# Qualify the selected semantic projected-controls Op from the existing GDN module.
+add_executable(ninfer_r9700_gdn_projected_controls_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/gdn_projected_controls_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_gdn_projected_controls_qual)
+set_target_properties(ninfer_r9700_gdn_projected_controls_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_gdn_projected_controls_qual PRIVATE ninfer_r9700_core hip::host)

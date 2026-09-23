@@ -1211,10 +1211,11 @@ void Variant::gdn_norm_control_projection(const Tensor& residual, const Tensor& 
                                           WorkspaceArena& workspace, hipStream_t stream,
                                           ExecutionState* execution) {
     ops::rmsnorm(residual, norm_weight, eps, true, hidden, stream);
-    if (residual.ne[1] == 1 && residual.ne[2] == 1 && residual.ne[3] == 1 &&
+    if ((residual.ne[1] == 1 || residual.ne[1] == 5 || residual.ne[1] == 6) &&
+        residual.ne[2] == 1 && residual.ne[3] == 1 &&
         weights.a_projection.qtype == QType::BF16_CTRL &&
         weights.b_projection.qtype == QType::BF16_CTRL) {
-        ops::bf16_gdn_projected_gating_t1(hidden, weights.a_projection,
+        ops::bf16_gdn_projected_gating(hidden, weights.a_projection,
                                           weights.b_projection, weights.a_log,
                                           weights.dt_bias, g, beta, stream);
         return;

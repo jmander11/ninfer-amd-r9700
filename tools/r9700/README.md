@@ -29,6 +29,23 @@ public eager/graph parity, poison recovery and guards. It contains no temporary
 comparison kernel or timing campaign. Selected artifact and whole results are in
 `docs/performance.md`.
 
+The selected no-workspace projected GDN controls use the unchanged T1 kernel and
+paired exact-order wave32 dots at T5/T6, with explicit BF16 projection seams and
+FP32 gating. One numerical-only qualifier owns the complete independent FP64
+oracle across all three extents, aligned/two-byte-offset BF16 inputs, public
+eager/poisoned-graph parity, guards and input immutability:
+
+```bash
+cmake --build build-r9700 -j3 --target ninfer_r9700_gdn_projected_controls_qual
+build-r9700/src/ninfer_r9700_gdn_projected_controls_qual --out-json FRESH.json
+```
+
+It contains no retired serial-control comparison or timing mode. The four-step
+screen and matched whole-inference admission are retained under
+`profiles/bench/r9700-bf16-controls-wave32-20260922/`. Native inspection uses the
+existing GDN module's `projected_control_paired_wave32_kernel`; there is no
+separate device module or caller workspace for this route.
+
 The selected pipelined down projection is covered by
 `ninfer_r9700_dflash_verify_down_qual --out-json FRESH.json` at N5120/K17408 T5/T6.
 Build it as a CMake target and run from `build-r9700/src/`. The removed pipeline-comparison

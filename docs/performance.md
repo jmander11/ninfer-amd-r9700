@@ -270,6 +270,41 @@ exact-token failure; no candidate speed is admitted and the unchanged T1-only co
 is retained. Evidence:
 `profiles/bench/r9700-bf16-projected-control-splitk-20260922/whole-inference/rejection.json`.
 
+### Exact-order paired GDN controls admission
+
+The selected follow-up uses one wave32 per (head,token), computing the two BF16 projections
+with the incumbent's exact 160-FMA lane chains, shuffle reduction and BF16 rounding seams,
+followed by unchanged FP32 gating. Four-step blocked loads remove staged CTA barriers without
+reassociating either dot. Only T5/T6 changes; T1 retains its kernel, other widths retain their
+composition. The owning public Op requires no scratch, and the existing GDN device module is
+reused. Native code uses 25 VGPR/19 SGPR, with no LDS/private storage/spills. Public FP64,
+exact-output, graph, alignment and guard checks pass. The first scalar-load version missed
+three cold-cache material gates; the four-step version clears all eight warm/cold cells.
+
+The strict same-artifact comparison against the admitted Q4 pipeline bundle passes all 16 runs
+with exact tokens and speculative accounting:
+
+| Width | Matched control decode tok/s | Selected decode tok/s | Mean paired gain | Selected whole-output tok/s |
+|---|---:|---:|---:|---:|
+| K4/W5 | 62.43569 | 64.81318 | 3.83% | 57.02881 |
+| K5/W6 | 60.68160 | 62.92418 | 3.71% | 55.64922 |
+
+Every chat pair wins: K4 gains range 2.88–5.72%, K5 2.67–5.54%; the final control pair is
+slower at each width, so the mean is not a claim of a constant gain. Raw-prompt one-pair
+regression checks reach 31.45723/29.82590 decode tok/s and pass both decode/whole gates.
+Ordinary throughput is not retimed because T1 is unchanged; its latest measured C1 result
+remains 27.46441 tok/s. These DFlash results are C1, P89/G128 chat, context1024, chunk4096,
+greedy Device Graph, fixed selective-protected/Q4/BF16 artifact and typed production cache.
+Evidence: `profiles/bench/r9700-bf16-controls-wave32-20260922/whole-inference/summary.json`.
+
+The bounded optimization pass has no remaining evidenced, untested material mechanism above
+its 2% round gate. This is not a claim of globally optimal kernels, saturated bandwidth, or
+optimality across other prompts, contexts, concurrency or recipes. Remaining costs include
+gate/up, exact-order normalization and down projections; their concrete challengers and
+rejections are retained. Two-group gate/up prefetch and its fixed-slot repair both fail the
+native overlap gate, so neither receives a GPU timing campaign. Further work needs a distinct
+mechanism that resolves an observed limit, not another unchanged sweep.
+
 ## Typed Text/MTP cache and attention
 
 ### Bounded-panel dense prefill (2026-09-21)

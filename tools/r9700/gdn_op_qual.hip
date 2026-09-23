@@ -1,11 +1,9 @@
 #include <hip/hip_runtime.h>
 
 #include "ninfer/ops/causal_conv1d_silu.h"
-#include "ninfer/ops/gdn_gating.h"
 #include "ninfer/ops/scatter.h"
 #include "ninfer/types.h"
 #include "ops/r9700/gdn/gdn_ops.h"
-#include "ops/r9700/linear/r9700_linear.h"
 
 #include <algorithm>
 #include <array>
@@ -242,132 +240,6 @@ void require_invalid_argument(Function&& function, const char* label) {
 }
 
 double softplus_oracle(double value) { return value > 20.0 ? value : std::log1p(std::exp(value)); }
-
-void qualify_bf16_projected_control_t1(hipStream_t stream) {
-    using ninfer::ops::r9700::gdn::bf16_projected_control_t1;
-    using ninfer::ops::r9700::gdn::control_gates_bf16;
-    using ninfer::ops::r9700::linear::Bf16LinearArgs;
-    using ninfer::ops::r9700::linear::bf16_linear_baseline;
-    constexpr std::uint32_t columns = 5120;
-    constexpr std::size_t weight_elements =
-        static_cast<std::size_t>(kValueHeads) * columns;
-    const auto hidden = bf16_fixture(columns, 701U, 257.0F);
-    const auto a_weight = bf16_fixture(weight_elements, 709U, 1024.0F);
-    const auto b_weight = bf16_fixture(weight_elements, 719U, 1024.0F);
-    const auto a_log = fp32_fixture(kValueHeads, 727U, 97.0F);
-    const auto dt_bias = fp32_fixture(kValueHeads, 733U, 53.0F);
-    std::vector<double> g_oracle(kValueHeads);
-    std::vector<double> beta_oracle(kValueHeads);
-    for (std::uint32_t head = 0; head < kValueHeads; ++head) {
-        double a_sum = 0.0;
-        double b_sum = 0.0;
-        const std::size_t base = static_cast<std::size_t>(head) * columns;
-        for (std::uint32_t k = 0; k < columns; ++k) {
-            const double x = static_cast<float>(hidden[k]);
-            a_sum += x * static_cast<float>(a_weight[base + k]);
-            b_sum += x * static_cast<float>(b_weight[base + k]);
-        }
-        const float ar = static_cast<float>(bf16_from_bits(bf16_rne_bits(static_cast<float>(a_sum))));
-        const float br = static_cast<float>(bf16_from_bits(bf16_rne_bits(static_cast<float>(b_sum))));
-        const double av = static_cast<double>(ar) + dt_bias[head];
-        g_oracle[head] = -std::exp(a_log[head]) * softplus_oracle(av);
-        beta_oracle[head] = 1.0 / (1.0 + std::exp(-static_cast<double>(br)));
-    }
-
-    DeviceBuffer<hip_bfloat16> d_hidden(hidden.size());
-    DeviceBuffer<hip_bfloat16> d_a_weight(a_weight.size());
-    DeviceBuffer<hip_bfloat16> d_b_weight(b_weight.size());
-    DeviceBuffer<hip_bfloat16> d_a(kValueHeads);
-    DeviceBuffer<hip_bfloat16> d_b(kValueHeads);
-    DeviceBuffer<float> d_a_log(a_log.size());
-    DeviceBuffer<float> d_dt_bias(dt_bias.size());
-    DeviceBuffer<float> d_serial_g(kValueHeads);
-    DeviceBuffer<float> d_serial_beta(kValueHeads);
-    DeviceBuffer<float> d_candidate_g(kValueHeads);
-    DeviceBuffer<float> d_candidate_beta(kValueHeads);
-    copy_to_device(d_hidden, hidden);
-    copy_to_device(d_a_weight, a_weight);
-    copy_to_device(d_b_weight, b_weight);
-    copy_to_device(d_a_log, a_log);
-    copy_to_device(d_dt_bias, dt_bias);
-    HIP_CHECK(bf16_linear_baseline(
-        Bf16LinearArgs{d_hidden.get(), d_a_weight.get(), d_a.get(), 1, kValueHeads, columns},
-        stream));
-    HIP_CHECK(bf16_linear_baseline(
-        Bf16LinearArgs{d_hidden.get(), d_b_weight.get(), d_b.get(), 1, kValueHeads, columns},
-        stream));
-    HIP_CHECK(control_gates_bf16(d_a.get(), d_b.get(), d_a_log.get(), d_dt_bias.get(),
-                                 d_serial_g.get(), d_serial_beta.get(), kValueHeads, 1, stream));
-    HIP_CHECK(bf16_projected_control_t1(
-        d_hidden.get(), d_a_weight.get(), d_b_weight.get(), d_a_log.get(), d_dt_bias.get(),
-        d_candidate_g.get(), d_candidate_beta.get(), stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
-    const auto candidate_g = copy_to_host(d_candidate_g);
-    const auto candidate_beta = copy_to_host(d_candidate_beta);
-    require_fp32_exact(candidate_g, copy_to_host(d_serial_g),
-                       "projected-control candidate/serial g");
-    require_fp32_exact(candidate_beta, copy_to_host(d_serial_beta),
-                       "projected-control candidate/serial beta");
-    require_close(candidate_g, g_oracle, 6.25e-2, 1.0e-3,
-                  "projected-control FP64 g oracle");
-    require_close(candidate_beta, beta_oracle, 3.0e-4, 3.0e-5,
-                  "projected-control FP64 beta oracle");
-
-    const auto make_weight = [&](const DeviceBuffer<hip_bfloat16>& storage) {
-        ninfer::Weight weight;
-        weight.payload = storage.get();
-        weight.payload_bytes = weight_elements * sizeof(hip_bfloat16);
-        weight.qtype = ninfer::QType::BF16_CTRL;
-        weight.ndim = 2;
-        weight.shape[0] = static_cast<std::int32_t>(kValueHeads);
-        weight.shape[1] = static_cast<std::int32_t>(columns);
-        weight.padded_shape[0] = weight.shape[0];
-        weight.padded_shape[1] = weight.shape[1];
-        weight.qdata = storage.get();
-        weight.qdata_bytes = weight.payload_bytes;
-        weight.n = weight.shape[0];
-        weight.k = weight.shape[1];
-        weight.layout = ninfer::QuantLayout::Contiguous;
-        return weight;
-    };
-    const ninfer::Weight public_a_weight = make_weight(d_a_weight);
-    const ninfer::Weight public_b_weight = make_weight(d_b_weight);
-    const ninfer::Tensor hidden_tensor(d_hidden.get(), ninfer::DType::BF16,
-                                       {static_cast<std::int32_t>(columns), 1});
-    const ninfer::Tensor a_log_tensor(d_a_log.get(), ninfer::DType::FP32,
-                                      {static_cast<std::int32_t>(kValueHeads)});
-    const ninfer::Tensor dt_bias_tensor(d_dt_bias.get(), ninfer::DType::FP32,
-                                        {static_cast<std::int32_t>(kValueHeads)});
-    ninfer::Tensor g_tensor(d_candidate_g.get(), ninfer::DType::FP32,
-                            {static_cast<std::int32_t>(kValueHeads), 1});
-    ninfer::Tensor beta_tensor(d_candidate_beta.get(), ninfer::DType::FP32,
-                               {static_cast<std::int32_t>(kValueHeads), 1});
-    ninfer::ops::bf16_gdn_projected_gating_t1(
-        hidden_tensor, public_a_weight, public_b_weight, a_log_tensor, dt_bias_tensor,
-        g_tensor, beta_tensor, stream);
-    HIP_CHECK(hipStreamSynchronize(stream));
-    require_fp32_exact(copy_to_host(d_candidate_g), copy_to_host(d_serial_g),
-                       "public projected-control/serial g");
-    require_fp32_exact(copy_to_host(d_candidate_beta), copy_to_host(d_serial_beta),
-                       "public projected-control/serial beta");
-    require_invalid_argument(
-        [&] {
-            ninfer::Tensor wrong_hidden(d_hidden.get(), ninfer::DType::BF16,
-                                        {static_cast<std::int32_t>(columns), 2});
-            ninfer::ops::bf16_gdn_projected_gating_t1(
-                wrong_hidden, public_a_weight, public_b_weight, a_log_tensor, dt_bias_tensor,
-                g_tensor, beta_tensor, stream);
-        },
-        "public projected-control T2");
-    if (bf16_projected_control_t1(
-            nullptr, d_a_weight.get(), d_b_weight.get(), d_a_log.get(), d_dt_bias.get(),
-            d_candidate_g.get(), d_candidate_beta.get(), stream) != hipErrorInvalidValue ||
-        bf16_projected_control_t1(
-            d_hidden.get(), d_a_weight.get(), d_b_weight.get(), d_a_log.get(), d_dt_bias.get(),
-            d_candidate_g.get(), d_candidate_g.get(), stream) != hipErrorInvalidValue) {
-        fail("projected-control raw boundary did not reject malformed input");
-    }
-}
 
 void qualify_conv_and_controls(hipStream_t stream) {
     using namespace ninfer::ops::r9700::gdn;
@@ -1117,7 +989,6 @@ int main(int argc, char** argv) {
         hipStream_t stream = nullptr;
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
         qualify_conv_and_controls(stream);
-        qualify_bf16_projected_control_t1(stream);
         if (prefill_benchmark) {
             benchmark_conv_prefill_candidates(stream);
             HIP_CHECK(hipStreamDestroy(stream));
