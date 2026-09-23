@@ -8,6 +8,13 @@ It evaluates all-Q4 and mixed Q4/W8 with Q4 A4/A8, plus selective and four-role
 A8 implementations. This diagnostic comparison does not replace BF16-source
 production admission. See `docs/performance.md` for results and limitations.
 
+The immutable 5090 reference is also Git-tracked in
+`fixtures/nvfp4-5090-20260922/`: exact token IDs, all six FP32 NLL sidecars,
+reports, commands, binary identity, source commit, and artifact path. Use this
+retained reference for subsequent recipe comparisons; do not replace it with
+results from a changed NVIDIA build or scoring span. The larger local campaign
+directory additionally retains the frozen scorer and original logs.
+
 Use Python3.11 and an explicit `--out` directory. Actions, in order, are
 `prepare`, `snapshot-amd`, `quality-nvidia`, `decode-quality-nvidia`,
 `quality-amd`, `decode-quality-amd`, `speed`, `analyze`. Preparation binds the
