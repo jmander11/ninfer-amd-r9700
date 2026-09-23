@@ -318,7 +318,10 @@ __global__ void pv_vector_kernel(const float* probabilities, const std::uint8_t*
                                  std::uint32_t page_table_row_count,
                                  std::size_t context, std::size_t physical_tokens,
                                  std::uint32_t q_to_kv, float* output) {
-    const std::uint32_t qh = blockIdx.x, feature = threadIdx.x, kvh = qh / q_to_kv;
+    // Each feature is an independent serial FP32 FMA chain. Distribute the eight
+    // feature waves across CTAs instead of pinning all eight to one CU per head.
+    const std::uint32_t qh = blockIdx.x, feature = blockIdx.y * blockDim.x + threadIdx.x,
+                        kvh = qh / q_to_kv;
     if (page_table_row != nullptr) {
         const std::int32_t represented_row = *page_table_row;
         if (represented_row < 0 ||
@@ -329,21 +332,48 @@ __global__ void pv_vector_kernel(const float* probabilities, const std::uint8_t*
         pages += static_cast<std::size_t>(represented_row) * page_table_row_stride;
     }
     float sum = 0.0F;
-    for (std::size_t logical = 0; logical < context; ++logical) {
-        const std::size_t physical = static_cast<std::size_t>(pages[logical / kPageSize]) * kPageSize + logical % kPageSize;
-        // The typed cache transaction validates page ownership before A3. Keep this raw Op
-        // memory-safe as well: a corrupt external table is an invalid invocation, not an OOB V
-        // or scale dereference. A NaN makes accidental unchecked use conspicuous to its caller.
-        if (physical >= physical_tokens) {
+    constexpr unsigned kLoadAhead = 32U;
+    for (std::size_t page_base = 0; page_base < context; page_base += kPageSize) {
+        const std::size_t physical_base =
+            static_cast<std::size_t>(pages[page_base / kPageSize]) * kPageSize;
+        if (physical_base >= physical_tokens) {
             output[static_cast<std::size_t>(qh) * kHeadDim + feature] = __builtin_nanf("");
             return;
         }
-        const std::uint8_t packed = values[int4_offset<Group,VToken,SToken>(physical,kvh,feature,gridDim.x / q_to_kv,physical_tokens,false)];
-        int code = static_cast<int>((packed >> ((feature & 1U) * 4U)) & 0x0fU);
-        code = code >= 8 ? code - 16 : code;
-        const std::uint16_t bits = scales[int4_offset<Group,VToken,SToken>(physical,kvh,feature,gridDim.x / q_to_kv,physical_tokens,true)];
-        sum = fmaf(probabilities[static_cast<std::size_t>(qh) * context + logical],
-                   static_cast<float>(code) * __half2float(__ushort_as_half(bits)), sum);
+        const std::size_t end = min(context, page_base + kPageSize);
+        std::size_t base = page_base;
+        for (; base + kLoadAhead <= end; base += kLoadAhead) {
+            float probability[kLoadAhead];
+            std::uint8_t packed[kLoadAhead];
+            std::uint16_t bits[kLoadAhead];
+            // Stage independent reads ahead of the ordered accumulation. Unlike split-K,
+            // this exposes memory-level parallelism without changing any FP32 FMA chain.
+            #pragma unroll
+            for (unsigned i = 0; i < kLoadAhead; ++i) {
+                const std::size_t logical = base + i;
+                const std::size_t physical = physical_base + logical - page_base;
+                packed[i] = values[int4_offset<Group,VToken,SToken>(physical,kvh,feature,gridDim.x / q_to_kv,physical_tokens,false)];
+                bits[i] = scales[int4_offset<Group,VToken,SToken>(physical,kvh,feature,gridDim.x / q_to_kv,physical_tokens,true)];
+                probability[i] = probabilities[static_cast<std::size_t>(qh) * context + logical];
+            }
+            __builtin_amdgcn_sched_barrier(0);
+            #pragma unroll
+            for (unsigned i = 0; i < kLoadAhead; ++i) {
+                int code = static_cast<int>((packed[i] >> ((feature & 1U) * 4U)) & 0x0fU);
+                code = code >= 8 ? code - 16 : code;
+                const float value = static_cast<float>(code) * __half2float(__ushort_as_half(bits[i]));
+                sum = fmaf(probability[i], value, sum);
+            }
+        }
+        for (; base < end; ++base) {
+            const std::size_t physical = physical_base + base - page_base;
+            const std::uint8_t packed = values[int4_offset<Group,VToken,SToken>(physical,kvh,feature,gridDim.x / q_to_kv,physical_tokens,false)];
+            int code = static_cast<int>((packed >> ((feature & 1U) * 4U)) & 0x0fU);
+            code = code >= 8 ? code - 16 : code;
+            const std::uint16_t bits = scales[int4_offset<Group,VToken,SToken>(physical,kvh,feature,gridDim.x / q_to_kv,physical_tokens,true)];
+            sum = fmaf(probabilities[static_cast<std::size_t>(qh) * context + base],
+                       static_cast<float>(code) * __half2float(__ushort_as_half(bits)), sum);
+        }
     }
     output[static_cast<std::size_t>(qh) * kHeadDim + feature] = sum;
 }
@@ -395,7 +425,7 @@ __global__ void pv_vector_batched_w5w6_kernel(
 }
 
 template <std::uint32_t G, bool V, bool S> hipError_t pv_launch(const Int4KvPvArgs& a, hipStream_t stream) {
-    hipLaunchKernelGGL((pv_vector_kernel<G,V,S>), dim3(a.query_heads), dim3(kHeadDim), 0, stream,
+    hipLaunchKernelGGL((pv_vector_kernel<G,V,S>), dim3(a.query_heads, kHeadDim / 32U), dim3(32), 0, stream,
                        a.probabilities,a.value_codes,a.value_scale_bits,a.page_table,
                        a.page_table_row,a.page_table_row_stride,a.page_table_row_count,a.context,
                        a.physical_tokens,a.q_to_kv,a.output);

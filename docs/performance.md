@@ -62,6 +62,35 @@ model or individual-Op throughput claim.
 
 ## FP8-capped compact base selection (2026-09-23)
 
+### Subsequent decode optimization checkpoint
+
+On the new17.0025GB selective-cap canonical-Q4 DFlash companion, matched C1 short-chat
+P89/G128/chunk2048, maxctx1024, auto, Device Graph, warm1/reps3 measured **30.7514 ordinary,
+73.7744 K4, and69.1459 K5 output tok/s**. All three repetitions in both speculative modes
+match the same-artifact ordinary generated tokens exactly. K4 has37 rounds/90 accepted/one
+fallback; K5 has39 rounds/88 accepted/one fallback. These rates exceed the requested30/60
+targets for this workload, not every context or concurrency. Evidence:
+`profiles/bench/r9700-compact-decode-20260923/dflash-loadstage4-chat/`.
+
+The matched code P4096/G128 baseline20.2346 ordinary tok/s improves to26.3124 with local-Q4
+normalization/residual fusion and ordered attention-PV load staging; all repeated output tokens
+remain exact. Further staging experiments are active, so this is a checkpoint, not a ceiling.
+Mixed recipes now select the existing fused Q4 operations per local format/shape; explicit
+ordinary-decode intent excludes speculativeT1 rather than testing unrelated matrix inventories.
+PV retains its exact serial FP32 FMA order and decoded INT4/FP16 values; page lookup is hoisted
+and independent reads staged before accumulation. Full represented-input FP64 plus supplementary
+exact serial checks pass at4096 and64–67; context3 fails an unrelated FP8-query attention
+comparison afterPVpasses and is retained without relaxing that criterion.
+
+The companion is produced with `compose_fp8_capped_dflash`, preserving every selected base
+payload and copying only the donor's66 DFlash objects (32Q4/34BF16). Both selector codebooks
+stay BF16. Payload readback, real1190-object strict binder, missing/wrong companion rejection,
+workspace and host routing checks pass. This changes neither the retained base quality selection
+nor the separate final BF16-source admission requirement. The original recipe-comparison rates
+below predate these kernel changes and remain historical comparison evidence.
+
+### Recipe and quality selection
+
 Selected for subsequent optimization: **Q4/FP8 selective-cap, uniform Q4 A8 execution**.
 The15,793,065,984-byte artifact is saved at
 `/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-q4-fp8-selective-cap/qwen3.8-27b-r9700-q4-fp8-selective-cap-n16k16-eval.ninfer`.

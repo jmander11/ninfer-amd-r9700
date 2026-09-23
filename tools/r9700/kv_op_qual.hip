@@ -851,6 +851,7 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows,
         const unsigned kv_head = query_head / kQueriesPerKv;
         for (unsigned feature = 0; feature < kDimension; ++feature) {
             double expected = 0.0;
+            float serial = 0.0F;
             for (std::size_t logical = 0; logical < context; ++logical) {
                 const std::size_t physical = host_physical_token(logical, pages, physical_tokens);
                 const std::uint8_t packed = actual_values[host_value_offset<Group, VTokenFastest>(
@@ -864,14 +865,21 @@ void run_variant(std::size_t context, int iterations, std::uint32_t query_rows,
                 expected += static_cast<double>(probability_corpus[
                                 static_cast<std::size_t>(query_head) * context + logical]) *
                             static_cast<double>(code) * static_cast<float>(scale);
+                serial = std::fma(probability_corpus[
+                                      static_cast<std::size_t>(query_head) * context + logical],
+                                  static_cast<float>(code) * static_cast<float>(scale), serial);
             }
             const float actual = actual_pv[query_head * kDimension + feature];
-            if (std::abs(static_cast<double>(actual) - expected) > 1.0e-4) {
+            if (!std::isfinite(actual) ||
+                std::abs(static_cast<double>(actual) - expected) > 1.0e-4) {
                 std::ostringstream os;
                 os << "A3 vector PV mismatch at head=" << query_head << " feature=" << feature
                    << ": got " << actual << " expected " << expected;
                 fail(os.str());
             }
+            // Supplementary order-preservation evidence, not the FP64 mathematical oracle.
+            if (std::memcmp(&actual, &serial, sizeof(float)) != 0)
+                fail("A3 vector PV changed the serial FP32 FMA result");
         }
         }
     }

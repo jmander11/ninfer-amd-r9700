@@ -81,7 +81,7 @@ ACTIVE USER GOAL (2026-09-23): optimize the saved Q4/FP8 selective-cap model to 
 when bounded profiling identifies clear material wins. This explicitly reopens kernel work,
 recipe-specific DFlash integration, and mixed-A4 cooperative prefill, with decode first.
 Historical rates on other artifacts/workloads are motivation, not matched baselines or ceilings.
-- [ ] Establish matched C1 baseline and whole-inference attribution for the installed selective-cap
+- [x] Establish matched C1 baseline and whole-inference attribution for the installed selective-cap
   artifact; determine whether mixed-recipe dispatch bypasses admitted Q4 fused routes.
 - [ ] Qualify and optimize base-decode bottlenecks toward >=30 tok/s; measure whole inference.
 - [ ] Bind a correctly quantized DFlash companion retaining BF16 codebooks/private state; qualify
@@ -95,6 +95,28 @@ per-text PPL comparison from the separate BF16-source admission gate and report 
 Use matched commands, prompt/context, graph mode, auto power, and C<=4. Do not silently substitute
 another model, speculative throughput for ordinary decode, or profiler timing for admission.
 Unrelated XAttention and broad capacity campaigns remain paused.
+Current evidence: `profiles/bench/r9700-compact-decode-20260923/`. Installed-model code
+baseline C1/P4096/G128/chunk2048 is20.2346tok/s; exact-token trace attributes34.4% of kernel
+time (15.884ms/token) to serial value-weighted attention,39.8% to generic Q4 dot8,7.6% to
+paired GDN Q4. Local-Q4 norm/residual fusion removes unnecessary whole-inventory exclusions;
+combined with a wave32 PV grid candidate measures20.7168tok/s with all retained tokens exact.
+PV grid alone has no demonstrated material win (full4096 oracle passes,0.8096ms/PV).
+Next bounded PV candidate stages four independent token loads before the unchanged ordered
+FP32 FMA chain. Pagehoist alone reaches21.9507tok/s; full load staging reaches26.3124tok/s,
+all retained code tokens exact. Full4096FP64+exactserialPV oracle and64–67tailcontexts pass;
+context3 fails separateFP8-query attention criterion afterPVpasses (retained, not waived).
+Load-ahead8 sweep pending; currentbest4 uses26VGPR,noLDS/scratch,occupancy16.
+New17.0025GBselective-cap DFlashcompanion composed byte-exact and actual1190-object strict
+binder passes. Matched shortchatP89/G128/chunk2048 ordinary/K4/K5=30.7514/73.7744/69.1459tok/s;
+all3reps exactordinarytokens. Targets exceeded forshortchat only;4K optimization andDFlash
+qualification stillactive. Stage8PV0.1323ms,stage16PV0.0871ms fulloracle+serialexactPASS;
+stage16whole29.2859 andstage32whole29.7623tok/s, exactbaseline tokens. Stage32 selected;
+stage64 spills52bytes and explicitpagepointers regress0.0626→0.1394ms, both removed.
+Finalstage32all16layouts at65 also pass. A4cooperativegate/up-only candidate publicoracle
+128/129/130/2048PASS; sixsameprecision PPL sidecar comparisons running.
+4KDFlash retry withmatched4240capacity exposed graph allowance deficit(75MiB actual vs74MiB
+planned); correcting per-topology extra definition/update accounting, not weakening the check.
+Shortchat targets remain valid;4KDFlash has no admitted rate yet. Integration checkpointbe19fb30.
 
 COMPLETED USER REQUEST (2026-09-23): identify a smaller Q4/FP8 recipe close to the retained
 5090 NVFP4 PPL, then establish where A4 can replace A8 without unacceptable quality loss.
