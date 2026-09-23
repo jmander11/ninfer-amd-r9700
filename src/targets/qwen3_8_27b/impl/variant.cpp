@@ -462,6 +462,7 @@ bool Variant::ExecutionState::gdn_q4_pair_t1(
     if (input.ne[1] <= 0 || input.ne[2] <= 0 || input.ne[3] != 1 ||
         input.ne[1] > std::numeric_limits<std::int32_t>::max() / input.ne[2] ||
         !gdn_q4_pair_t1_selected(
+            ops::r9700::linear::kQ4ActivationBits,
             static_cast<std::uint32_t>(input.ne[1] * input.ne[2]),
             weight0.qtype, weight1.qtype)) {
         return false;
@@ -522,6 +523,7 @@ bool Variant::ExecutionState::attention_q4_pair_t1(
     if (hidden.ne[1] <= 0 || hidden.ne[2] <= 0 || hidden.ne[3] != 1 ||
         hidden.ne[1] > std::numeric_limits<std::int32_t>::max() / hidden.ne[2] ||
         !attention_q4_pair_t1_selected(
+            ops::r9700::linear::kQ4ActivationBits,
             static_cast<std::uint32_t>(hidden.ne[1] * hidden.ne[2]),
             query_key.qtype, gate_value.qtype)) {
         return false;
@@ -547,6 +549,7 @@ bool Variant::ExecutionState::gdn_q4_pair_c2c4(
     if (input.ne[1] <= 0 || input.ne[2] <= 0 || input.ne[3] != 1 ||
         input.ne[1] > std::numeric_limits<std::int32_t>::max() / input.ne[2] ||
         !q4_pair_c2c4_selected(
+            ops::r9700::linear::kQ4ActivationBits,
             static_cast<std::uint32_t>(input.ne[1] * input.ne[2]),
             query_key.qtype, value_z.qtype)) {
         return false;
@@ -573,6 +576,7 @@ bool Variant::ExecutionState::attention_q4_pair_c2c4(
     if (hidden.ne[1] <= 0 || hidden.ne[2] <= 0 || hidden.ne[3] != 1 ||
         hidden.ne[1] > std::numeric_limits<std::int32_t>::max() / hidden.ne[2] ||
         !q4_pair_c2c4_selected(
+            ops::r9700::linear::kQ4ActivationBits,
             static_cast<std::uint32_t>(hidden.ne[1] * hidden.ne[2]),
             query_key.qtype, gate_value.qtype)) {
         return false;
@@ -1257,6 +1261,7 @@ void post_mixer_body(const Tensor& hidden, const Variant::PostMixerWeights& weig
     };
     const bool fused_down = execution != nullptr && hidden.ne[1] > 0 &&
         Variant::ExecutionState::fused_mlp_down_selected(
+            ops::r9700::linear::kQ4ActivationBits,
             weights.gate_up.qtype, weights.down.qtype,
             static_cast<std::uint32_t>(hidden.ne[1]), text_layer);
     if (fused_down) {

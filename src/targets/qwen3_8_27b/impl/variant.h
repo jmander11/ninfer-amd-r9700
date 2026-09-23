@@ -120,25 +120,29 @@ struct Variant {
                    weight == QType::Q4G64_F16S;
         }
         [[nodiscard]] static constexpr bool attention_q4_pair_t1_selected(
-            std::uint32_t tokens, QType query_key, QType gate_value) noexcept {
-            return tokens == 1U &&
+            std::uint32_t activation_bits, std::uint32_t tokens,
+            QType query_key, QType gate_value) noexcept {
+            return activation_bits == 8U && tokens == 1U &&
                    query_key == QType::Q4G64_F16S && gate_value == QType::Q4G64_F16S;
         }
         [[nodiscard]] static constexpr bool gdn_q4_pair_t1_selected(
-            std::uint32_t tokens, QType weight0, QType weight1) noexcept {
-            return tokens == 1U && weight0 == QType::Q4G64_F16S &&
+            std::uint32_t activation_bits, std::uint32_t tokens,
+            QType weight0, QType weight1) noexcept {
+            return activation_bits == 8U && tokens == 1U && weight0 == QType::Q4G64_F16S &&
                    weight1 == QType::Q4G64_F16S;
         }
         [[nodiscard]] static constexpr bool q4_pair_c2c4_selected(
-            std::uint32_t tokens, QType weight0, QType weight1) noexcept {
-            return tokens >= 2U &&
+            std::uint32_t activation_bits, std::uint32_t tokens,
+            QType weight0, QType weight1) noexcept {
+            return activation_bits == 8U && tokens >= 2U &&
                    tokens <= 4U && weight0 == QType::Q4G64_F16S &&
                    weight1 == QType::Q4G64_F16S;
         }
         [[nodiscard]] static constexpr bool fused_mlp_down_selected(
-            QType gate_up, QType down, std::uint32_t tokens,
+            std::uint32_t activation_bits, QType gate_up, QType down, std::uint32_t tokens,
             std::int32_t text_layer) noexcept {
-            return gate_up == QType::F8E4M3_ROW_F32S && down == QType::Q4G64_F16S &&
+            return activation_bits == 8U && gate_up == QType::F8E4M3_ROW_F32S &&
+                   down == QType::Q4G64_F16S &&
                    tokens == 2048U && text_layer >= 0 && text_layer < TextConfig::layers;
         }
         [[nodiscard]] std::size_t selected_count() const noexcept;

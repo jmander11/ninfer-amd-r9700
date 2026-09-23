@@ -24,7 +24,7 @@
 namespace {
 
 constexpr std::uint32_t kTokens = 3;
-constexpr std::uint32_t kRows = 17;
+constexpr std::uint32_t kRows = 32;
 constexpr std::uint32_t kColumns = 192;
 constexpr std::uint32_t kPaddedColumns = 256;
 constexpr std::uint32_t kGroup = 64;
@@ -286,8 +286,24 @@ int main(int argc, char** argv) {
         ninfer::DeviceBuffer d_weight_scales(weights.scales.size() * sizeof(std::uint16_t));
         ninfer::DeviceBuffer d_output(expected.size() * sizeof(hip_bfloat16));
         d_input.copy_from_host(input.data(), d_input.size());
-        d_weight_codes.copy_from_host(weights.codes.data(), d_weight_codes.size());
-        d_weight_scales.copy_from_host(weights.scales.data(), d_weight_scales.size());
+        // The oracle retains logical row-major values; only the public stored image
+        // is tiled as [N/16, K/64, 4, 16, 8 packed bytes] and [N/16, K/64, 16 scales].
+        std::vector<std::uint8_t> tiled_codes(weights.codes.size());
+        std::vector<std::uint16_t> tiled_scales(weights.scales.size());
+        constexpr std::size_t groups = kPaddedColumns / kGroup;
+        for (std::size_t row = 0; row < kRows; ++row) {
+            for (std::size_t group = 0; group < groups; ++group) {
+                tiled_scales[((row / 16) * groups + group) * 16 + row % 16] =
+                    weights.scales[row * groups + group];
+                for (std::size_t byte = 0; byte < 32; ++byte) {
+                    const std::size_t destination =
+                        ((((row / 16) * groups + group) * 4 + byte / 8) * 16 + row % 16) * 8 + byte % 8;
+                    tiled_codes[destination] = weights.codes[(row * groups + group) * 32 + byte];
+                }
+            }
+        }
+        d_weight_codes.copy_from_host(tiled_codes.data(), d_weight_codes.size());
+        d_weight_scales.copy_from_host(tiled_scales.data(), d_weight_scales.size());
 
         ninfer::Tensor x(d_input.data(), ninfer::DType::BF16,
                          {static_cast<std::int32_t>(kColumns),
@@ -305,7 +321,7 @@ int main(int argc, char** argv) {
         weight.scale_bytes = weights.scales.size() * sizeof(std::uint16_t);
         weight.qtype = ninfer::QType::Q4G64_F16S;
         weight.group_size = weight.group = kGroup;
-        weight.layout = ninfer::QuantLayout::RowSplit;
+        weight.layout = ninfer::QuantLayout::Q4N16K16;
         weight.scale_dtype = ninfer::DType::FP16;
         weight.ndim = 2;
         weight.n = weight.shape[0] = weight.padded_shape[0] = kRows;

@@ -29,8 +29,6 @@ GENERIC_VALU_EVIDENCE_DB ?= ../../profiles/r9700/rocm10-pmc-isolated-valu/r2d2/5
 Q4G64_LINEAR_JSON ?= ../../profiles/bench/r9700-a8q4g64-linear-qualification.json
 Q4_HARDWARE_PEAK_JSON ?= ../../profiles/bench/r9700-q4-hardware-peak-probe.json
 A8Q4_SHAPE_SWEEP_JSON ?= ../../profiles/bench/r9700-a8q4g64-artifact-shape-sweep.json
-Q4_TENSOR_A4_JSON ?= ../../profiles/bench/r9700-q4-tensor-dispatch-a4.json
-Q4_TENSOR_A8_JSON ?= ../../profiles/bench/r9700-q4-tensor-dispatch-a8.json
 W8A8_WMMA_JSON ?= ../../profiles/bench/r9700-w8a8g32-linear-qualification.json
 W8A8_TENSOR_JSON ?= ../../profiles/bench/r9700-w8a8g32-linear-tensor-dispatch.json
 XATTENTION_STRIDE ?= 16
@@ -72,8 +70,6 @@ A8Q4_GDN_PAIR_T1_TARGET := $(BUILD_DIR)/a8q4_gdn_pair_t1_qual
 DFLASH_SMALL_T_OUTPUT_DIR ?=
 DFLASH_SMALL_T_C1_SUMMARY ?= $(abspath ../..)/profiles/bench/r9700-dflash-small-t-c1-20260906/summary.json
 A4Q4_PREFILL_TARGET := $(BUILD_DIR)/a4q4_prefill_qual
-Q4_TENSOR_A4_TARGET := $(BUILD_DIR)/q4_tensor_dispatch_a4_qual
-Q4_TENSOR_A8_TARGET := $(BUILD_DIR)/q4_tensor_dispatch_a8_qual
 PROBE_SOURCE := r9700_qual.hip
 KV_SOURCE := kv_op_qual.hip
 SPLIT512_SOURCE := split512_attention_qual.hip
@@ -109,7 +105,6 @@ A8Q4_DFLASH_SMALL_T_SOURCE := a8q4_dflash_small_t_qual.hip
 A8Q4_DFLASH_MLP_DOWN_SMALL_T_SOURCE := a8q4_dflash_mlp_down_small_t_qual.hip
 A8Q4_GDN_PAIR_T1_SOURCE := a8q4_gdn_pair_t1_qual.hip
 A8Q4_DFLASH_MLP_DOWN_SMALL_T_STATIC_CHECK := check_a8q4_dflash_mlp_down_small_t_static.py
-Q4_TENSOR_SOURCE := q4_tensor_dispatch_qual.hip
 SERVE_LOG_IMPL := ../../src/serve/request_log.cpp
 SERVE_LOG_HEADER := ../../src/serve/request_log.h
 SERVE_OPTIONS_IMPL := ../../src/serve/serve_options.cpp
@@ -623,19 +618,11 @@ a8q4-prefill-cta-pingpong-report:
 		--executable "$(abspath $(A8Q4_SHAPE_SWEEP_TARGET))" \
 		"$(PREFILL_CTA_PINGPONG_OUT)"
 
-$(Q4_TENSOR_A4_TARGET): $(Q4_TENSOR_SOURCE) $(LINEAR_IMPL) $(LINEAR_HEADER) $(LINEAR_TENSOR_IMPL) $(LINEAR_PUBLIC_HEADER) $(HIP_DEVICE_IMPL) $(HIP_ARENA_IMPL) $(CORE_DTYPE_IMPL) $(CORE_TENSOR_IMPL) Makefile
-	mkdir -p $(BUILD_DIR)
-	$(HIPCC) $(CXXFLAGS) -I../../include -DNINFER_R9700_Q4_ACTIVATION_BITS=4 $(Q4_TENSOR_SOURCE) $(LINEAR_IMPL) $(LINEAR_TENSOR_IMPL) $(HIP_DEVICE_IMPL) $(HIP_ARENA_IMPL) $(CORE_DTYPE_IMPL) $(CORE_TENSOR_IMPL) $(LDFLAGS) -o $@
-
-$(Q4_TENSOR_A8_TARGET): $(Q4_TENSOR_SOURCE) $(LINEAR_IMPL) $(LINEAR_HEADER) $(LINEAR_TENSOR_IMPL) $(LINEAR_PUBLIC_HEADER) $(HIP_DEVICE_IMPL) $(HIP_ARENA_IMPL) $(CORE_DTYPE_IMPL) $(CORE_TENSOR_IMPL) Makefile
-	mkdir -p $(BUILD_DIR)
-	$(HIPCC) $(CXXFLAGS) -I../../include -DNINFER_R9700_Q4_ACTIVATION_BITS=8 $(Q4_TENSOR_SOURCE) $(LINEAR_IMPL) $(LINEAR_TENSOR_IMPL) $(HIP_DEVICE_IMPL) $(HIP_ARENA_IMPL) $(CORE_DTYPE_IMPL) $(CORE_TENSOR_IMPL) $(LDFLAGS) -o $@
-
-q4g64-linear: $(Q4G64_LINEAR_TARGET) $(Q4_TENSOR_A4_TARGET) $(Q4_TENSOR_A8_TARGET)
+# Public Tensor dispatch links the configured production core through the CMake
+# ninfer_r9700_q4_tensor_dispatch_qual target (A4/A8 selected by that build).
+q4g64-linear: $(Q4G64_LINEAR_TARGET)
 	mkdir -p $(dir $(Q4G64_LINEAR_JSON))
 	$(Q4G64_LINEAR_TARGET) --out-json $(Q4G64_LINEAR_JSON)
-	$(Q4_TENSOR_A4_TARGET) --out-json $(Q4_TENSOR_A4_JSON)
-	$(Q4_TENSOR_A8_TARGET) --out-json $(Q4_TENSOR_A8_JSON)
 
 $(BUILD_DIR)/q4g64_linear.s: $(LINEAR_IMPL) $(LINEAR_HEADER) Makefile
 	mkdir -p $(BUILD_DIR)
@@ -955,4 +942,4 @@ $(BUILD_DIR)/gdn_projection_control_grid_qualification.s: $(GDN_PROJECTION_CONTR
 	$(HIPCC) $(CXXFLAGS) -Wno-unused-command-line-argument --offload-device-only -S $< -o $@
 
 clean:
-	rm -f $(PROBE_TARGET) $(KV_TARGET) $(HIP_DEVICE_TARGET) $(HIP_DEVICE_SANITIZE_TARGET) $(LINEAR_TARGET) $(EAGER_TARGET) $(RMSNORM_K256_PREFILL_TARGET) $(RMSNORM_DECODE_PRODUCTION_TARGET) $(RMSNORM_DECODE_ROUTING_TARGET) $(GATED_RMSNORM_PREFILL_TARGET) $(SILU_MUL_SPLIT_PREFILL_TARGET) $(GDN_TARGET) $(GDN_RECURRENCE_TARGET) $(GDN_RECURRENCE_EXACT_TARGET) $(SAMPLING_TARGET) $(ROPE_TARGET) $(SERVE_ENV_TARGET) $(INT4_WMMA_TARGET) $(Q4_HARDWARE_PEAK_TARGET) $(W8A8_WMMA_TARGET) $(Q4G64_LINEAR_TARGET) $(Q4_TENSOR_A4_TARGET) $(Q4_TENSOR_A8_TARGET) $(BUILD_DIR)/r9700_qual.s $(BUILD_DIR)/kv_append.s $(BUILD_DIR)/linear_op_qual.s $(BUILD_DIR)/w8a8_wmma_linear_qual.s $(BUILD_DIR)/q4g64_linear.s $(BUILD_DIR)/q4_hardware_peak_probe.s $(BUILD_DIR)/eager_ops.s $(BUILD_DIR)/gdn_ops.s $(BUILD_DIR)/gdn_recurrence.s $(BUILD_DIR)/gdn_verify_wave_off.s $(BUILD_DIR)/gdn_verify_wave_on.s $(BUILD_DIR)/sampling_ops.s $(BUILD_DIR)/rope_ops.s $(BUILD_DIR)/int4_wmma_qual.s
+	rm -f $(PROBE_TARGET) $(KV_TARGET) $(HIP_DEVICE_TARGET) $(HIP_DEVICE_SANITIZE_TARGET) $(LINEAR_TARGET) $(EAGER_TARGET) $(RMSNORM_K256_PREFILL_TARGET) $(RMSNORM_DECODE_PRODUCTION_TARGET) $(RMSNORM_DECODE_ROUTING_TARGET) $(GATED_RMSNORM_PREFILL_TARGET) $(SILU_MUL_SPLIT_PREFILL_TARGET) $(GDN_TARGET) $(GDN_RECURRENCE_TARGET) $(GDN_RECURRENCE_EXACT_TARGET) $(SAMPLING_TARGET) $(ROPE_TARGET) $(SERVE_ENV_TARGET) $(INT4_WMMA_TARGET) $(Q4_HARDWARE_PEAK_TARGET) $(W8A8_WMMA_TARGET) $(Q4G64_LINEAR_TARGET) $(BUILD_DIR)/r9700_qual.s $(BUILD_DIR)/kv_append.s $(BUILD_DIR)/linear_op_qual.s $(BUILD_DIR)/w8a8_wmma_linear_qual.s $(BUILD_DIR)/q4g64_linear.s $(BUILD_DIR)/q4_hardware_peak_probe.s $(BUILD_DIR)/eager_ops.s $(BUILD_DIR)/gdn_ops.s $(BUILD_DIR)/gdn_recurrence.s $(BUILD_DIR)/gdn_verify_wave_off.s $(BUILD_DIR)/gdn_verify_wave_on.s $(BUILD_DIR)/sampling_ops.s $(BUILD_DIR)/rope_ops.s $(BUILD_DIR)/int4_wmma_qual.s

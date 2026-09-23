@@ -259,10 +259,13 @@ ISA/resource evidence is native `v_wmma_i32_16x16x32_iu4`, 64 VGPR, zero LDS/scr
 occupancy 16 for A8Q4 WMMA; the selected wave32 A8 quantizer uses 10 VGPR and zero LDS/scratch. The
 complete durable result, including all five per-route samples from alternating forward/reverse
 route rounds plus both A4 and A8 timings and hardware/toolchain identity, is
-`profiles/bench/r9700-a8q4g64-linear-qualification.json`. The same command directly qualifies the
-compile-selected public Tensor/WorkspaceArena branch and exact workspace rewind in both builds;
-those records are `profiles/bench/r9700-q4-tensor-dispatch-a4.json` and
-`profiles/bench/r9700-q4-tensor-dispatch-a8.json`. The artifact-wide shape qualifier covers all
+`profiles/bench/r9700-a8q4g64-linear-qualification.json`. Historical public dispatch records are
+`profiles/bench/r9700-q4-tensor-dispatch-a4.json` and
+`profiles/bench/r9700-q4-tensor-dispatch-a8.json`. The current N16/K16 Tensor/WorkspaceArena
+qualifier links the actual configured core: build target `ninfer_r9700_q4_tensor_dispatch_qual`
+in the selected A4 or A8 CMake build and run `src/ninfer_r9700_q4_tensor_dispatch_qual
+--out-json FRESH.json`. It checks decoded-code arithmetic, workspace rewind and nonfinite
+activation handling; it is not a whole-model quality gate. The artifact-wide shape qualifier covers all
 17 all-Q4 and six mixed-artifact Q4 shapes plus the five additional unique shapes used by the 32
 DFlash Q4 matrices at T=1..8/32/128. Every one of 220 extents passes the exact codec and sampled
 independent FP64 formula with zero BF16 steps. Seven-trial interleaved timing shows the wave32 and

@@ -657,6 +657,12 @@ target_compile_definitions(ninfer_r9700_xattention_qual PRIVATE
   NINFER_R9700_XATTENTION_TAU_PERMILLE=${NINFER_R9700_XATTENTION_TAU_PERMILLE})
 target_link_libraries(ninfer_r9700_xattention_qual PRIVATE ninfer_r9700_core hip::host)
 
+add_executable(ninfer_r9700_q4_tensor_dispatch_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/q4_tensor_dispatch_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_q4_tensor_dispatch_qual)
+set_target_properties(ninfer_r9700_q4_tensor_dispatch_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_q4_tensor_dispatch_qual PRIVATE ninfer_r9700_core hip::host)
+
 # Target Variant GDN composition: direct W8G32 row-split projections feed the native mixed-width
 # snapshot and tree-record convolution leaves with caller-owned workspace and real Qwen3.8 shapes.
 add_executable(ninfer_r9700_target_variant_gdn_qual
