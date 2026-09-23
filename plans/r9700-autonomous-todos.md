@@ -113,10 +113,16 @@ qualification stillactive. Stage8PV0.1323ms,stage16PV0.0871ms fulloracle+seriale
 stage16whole29.2859 andstage32whole29.7623tok/s, exactbaseline tokens. Stage32 selected;
 stage64 spills52bytes and explicitpagepointers regress0.0626→0.1394ms, both removed.
 Finalstage32all16layouts at65 also pass. A4cooperativegate/up-only candidate publicoracle
-128/129/130/2048PASS; sixsameprecision PPL sidecar comparisons running.
-4KDFlash retry withmatched4240capacity exposed graph allowance deficit(75MiB actual vs74MiB
-planned); correcting per-topology extra definition/update accounting, not weakening the check.
-Shortchat targets remain valid;4KDFlash has no admitted rate yet. Integration checkpointbe19fb30.
+128/129/130/2048PASS; all six same-precision PPL sidecars reproduce byte-exactly.
+Whole prefill1376–1389tok/s still loses to uniformA8; do not promote it as an A8 speedup.
+Next bounded question: cooperative A4 ping/pong staging versus its single-bank implementation.
+4K DFlash graph allowance deficit (75MiB actual vs74MiB planned) fixed by charging extra
+per-topology definition updates; allocation guard unchanged, host C1–4/K4/K5 checks pass.
+Matched companion P4096/G128/chunk2048/context4240 ordinary/K4/K5 now measures
+28.6544/68.8281/83.2839tok/s with all three repetitions exactly matching ordinary tokens.
+Shortchat K4 and code K5 differ in acceptance: do not claim a universal best draft length.
+Long-context DFlash attribution is next; ordinary4K still needs improvement toward30tok/s.
+Integration checkpointsbe19fb30/1e83910f; evidence package retains all failed attempts.
 
 COMPLETED USER REQUEST (2026-09-23): identify a smaller Q4/FP8 recipe close to the retained
 5090 NVFP4 PPL, then establish where A4 can replace A8 without unacceptable quality loss.

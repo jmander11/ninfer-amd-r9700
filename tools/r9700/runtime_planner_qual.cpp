@@ -305,7 +305,7 @@ void qualify_host_dflash_graph_allowance() {
         ninfer::targets::qwen3::detail::qwen3_8_27b_r9700;
     constexpr std::size_t expected_classes =
         ninfer::targets::qwen3::detail::kR9700TextKVValueGroup == 16 ? 2U : 1U;
-    constexpr std::size_t expected_allowance =
+    std::size_t expected_allowance =
         (48ULL + 26ULL * expected_classes) * 1024ULL * 1024ULL;
     const runtime::SequencePlanningInputs inputs{
         .weights_profile =
@@ -336,6 +336,11 @@ void qualify_host_dflash_graph_allowance() {
             topology_classes.push_back(profile.topology_class);
         }
     }
+    for (const auto topology : topology_classes) {
+        const auto count = static_cast<std::size_t>(std::count_if(profiles.begin(), profiles.end(),
+            [&](const auto& p) { return p.topology_class == topology; }));
+        if (count > 3U) expected_allowance += (count - 3U)*4ULL*1024ULL*1024ULL;
+    }
     require(plan->dflash_verify_width == 5U &&
                 plan->graph_definition_count == profiles.size() &&
                 plan->graph_executable_count == topology_classes.size() &&
@@ -358,7 +363,41 @@ void qualify_host_dflash_graph_allowance() {
                     measured->graph_allowance_bytes>=74448896ULL,
                 "DFlash selective-protected graph allowance misses measured startup residency");
     }
-    std::printf("r9700_runtime_planner: PASS host DFlash C1/K4/W5 graph topology allowance\n");
+    // Same executable, more frontier definitions: preserve the 1K calibration and
+    // account for additional installs at the reproduced compact-companion geometry.
+    for (const std::uint32_t concurrency : {1U, 2U, 3U, 4U}) {
+        for (const std::uint32_t capacity : {1024U, 4096U, 4240U}) {
+            for (const std::uint32_t k : {4U, 5U}) {
+                auto compact_inputs = inputs;
+                compact_inputs.weights_profile =
+                    Variant::WeightsProfile::R9700Q4Fp8SelectiveCapDFlash2Q4Evaluation;
+                compact_inputs.capacity = capacity;
+                compact_inputs.prefill_chunk = 2048U;
+                compact_inputs.max_concurrency = concurrency;
+                compact_inputs.draft_window = k;
+                compact_inputs.dflash_verify_width = k + 1U;
+                const auto compact = runtime::build_sequence_candidate_for_qualification(
+                    compact_inputs, ((capacity + 63U) / 64U) * concurrency);
+                const std::size_t definitions_per_batch = capacity == 1024U ? 3U : 5U;
+                const std::size_t expected = (48ULL + concurrency *
+                    (26ULL + 4ULL*(definitions_per_batch - 3ULL))) * 1024ULL*1024ULL;
+                require(compact->graph_executable_count == concurrency &&
+                            compact->graph_definition_count == definitions_per_batch*concurrency &&
+                            compact->graph_allowance_bytes == expected,
+                        "DFlash compact companion omitted exact-B frontier updates");
+                if (capacity == 4240U && concurrency == 1U)
+                    require(compact->graph_allowance_bytes >= 78643200ULL,
+                            "DFlash compact companion misses measured 75-MiB preparation");
+                compact_inputs.use_device_graph = false;
+                const auto eager = runtime::build_sequence_candidate_for_qualification(
+                    compact_inputs, ((capacity + 63U) / 64U) * concurrency);
+                require(eager->graph_allowance_bytes == 0U && eager->graph_definition_count == 0U &&
+                            eager->graph_executable_count == 0U,
+                        "eager compact companion must not reserve graph updates");
+            }
+        }
+    }
+    std::printf("r9700_runtime_planner: PASS host DFlash C1-C4 K4/K5 graph topology/update allowance\n");
 }
 void qualify_host_mtp_graph_allowance() {
     namespace runtime = ninfer::targets::qwen3::detail::qwen3_8_27b_r9700;
@@ -599,6 +638,11 @@ std::size_t qualify_plan(ninfer::DeviceContext& device, std::uint32_t concurrenc
                 topology_classes.push_back(folded);
                 if (drafts != 1U) {
                     expected_allowance += kDFlashExecutableBytes;
+                    const auto count = static_cast<std::size_t>(std::count_if(
+                        profiles.begin(), profiles.end(), [&](const auto& p) {
+                            return p.topology_class == profile.topology_class;
+                        }));
+                    if (count > 3U) expected_allowance += (count - 3U)*4ULL*kMiB;
                 } else if (profile.topology_class == 0U) {
                     expected_allowance += kDFlashK1FusedBytes;
                 } else if (profile.topology_class == 1U) {

@@ -66,6 +66,13 @@ constexpr std::size_t kR9700DFlashGraphFamilyBytes           = 48ULL * kMiB;
 constexpr std::size_t kR9700DFlashGraphExecutableBytes       = 26ULL * kMiB;
 constexpr std::size_t kR9700DFlashK1FusedExecutableBytes     = 10ULL * kMiB;
 constexpr std::size_t kR9700DFlashK1WmmaExecutableBytes      = 18ULL * kMiB;
+// The K4/K5 1K calibration contains three definitions per executable. Larger
+// frontiers install more definitions on that same executable; each retains up to
+// the measured ROCm 4-MiB update bound. At C1/K4/context4240, five definitions
+// consumed 75 MiB with selective-cap FP8/Q4, exceeding the old fixed 74 MiB.
+// Charge updates, not additional executables or physical FP8 arena rounding.
+constexpr std::size_t kR9700DFlashCalibratedDefinitions = 3U;
+constexpr std::size_t kR9700DFlashGraphUpdateBytes = 4ULL * kMiB;
 
 enum class GdnWorkspacePath : std::uint8_t {
     Prefill,
@@ -995,7 +1002,17 @@ std::unique_ptr<SequencePlanImpl> build_sequence_candidate(const SequencePlannin
                 [&](GraphExecutionProfile profile) {
                     if (impl->adaptive_draft || impl->draft_window != 1U ||
                         profile.topology_class / impl->max_concurrency == 2U) {
-                        return kR9700DFlashGraphExecutableBytes;
+                        const auto definitions = static_cast<std::size_t>(std::count_if(
+                            expanded.begin(), expanded.end(), [&](const auto& other) {
+                                return other.topology_class == profile.topology_class;
+                            }));
+                        const std::size_t extra_updates = definitions >
+                                kR9700DFlashCalibratedDefinitions
+                            ? definitions - kR9700DFlashCalibratedDefinitions : 0U;
+                        return checked_add(kR9700DFlashGraphExecutableBytes,
+                            checked_mul(extra_updates, kR9700DFlashGraphUpdateBytes,
+                                        "DFlash graph profile update allowance"),
+                            "DFlash graph executable allowance");
                     }
                     const std::uint32_t attention_topology =
                         profile.topology_class / impl->max_concurrency;

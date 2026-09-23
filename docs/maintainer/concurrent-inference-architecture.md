@@ -1366,6 +1366,18 @@ at context4224/P4096/G128/chunk2048. This is aggregate toolchain-specific reside
 not isolated graph-storage measurement or a universal HIP bound; the strict observed
 allocation guard is unchanged. Eager execution reserves no graph allowance.
 
+DFlash K4/K5's calibrated 48 MiB family plus 26 MiB per exact-B/K executable likewise
+covers three definitions per topology at context1024. Each additional definition in
+that same topology reserves 4 MiB for the retained executable update, using the measured
+ROCm operation bound above. The 2026-09-23 selective-cap Q4/FP8 companion at
+C1/K4/P4096/G128/chunk2048/context4240 consumed 75 MiB, exceeding the old 74 MiB;
+its five definitions require an 82 MiB allowance. Context1024 remains 74 MiB.
+This is aggregate graph-preparation residency, not a measurement of isolated FP8
+library allocations. Fixed-K1's separately calibrated executable terms are unchanged;
+adaptive families charge their actual folded exact-B/K/topology definition inventory.
+Do not add the deficit to KV capacity, logical workspaces, or FP8 arena-rounding bounds.
+The observed-consumption guard remains fail-closed, and eager execution reserves zero.
+
 Startup graph allowance 必须计入全部 reachable exact-`B` definitions，以及每个 exact `B`、每个实际
 topology class 的一份 executable，不能沿用只覆盖 `B=1` definitions 的 reservation。
 
