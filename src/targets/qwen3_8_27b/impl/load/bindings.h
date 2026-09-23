@@ -166,6 +166,7 @@ struct GdnInputProjectionPayload {
 };
 
 struct GdnProjectionPayload {
+    ops::LinearExecution* output_execution = nullptr;
     Tensor a_log;
     Tensor dt_bias;
     Weight a_projection;

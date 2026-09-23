@@ -2,6 +2,7 @@
 
 #include "artifact/typed_binding.h"
 #include "targets/qwen3_8_27b/impl/load/fp8_hybrid_selection.h"
+#include "targets/qwen3_8_27b/impl/load/fp8_capped_selection.h"
 #include "targets/qwen3_8_27b/impl/load/selective_protected.h"
 
 #include <algorithm>
@@ -33,6 +34,10 @@ NumericFormat matrix_format(WeightsProfile profile, bool source_q4) {
     case WeightsProfile::R9700W8Bf16GdnQueryKeyEvaluation:
         return NumericFormat::W8G32_F16S;
     case WeightsProfile::R9700Q4G64Evaluation:
+    case WeightsProfile::R9700Q4Fp8EarlyAttentionEvaluation:
+    case WeightsProfile::R9700Q4Fp8AllAttentionEvaluation:
+    case WeightsProfile::R9700Q4Fp8AttentionGdnEvaluation:
+    case WeightsProfile::R9700Q4Fp8SelectiveCapEvaluation:
     case WeightsProfile::R9700Q4SelectiveProtectedN16K16Evaluation:
     case WeightsProfile::R9700Q4SelectiveProtectedDFlash2Q4Evaluation:
     case WeightsProfile::R9700Q4G64Fp8FourRoleN16K16Evaluation:
@@ -90,6 +95,7 @@ NumericFormat full_attention_value_output_format(WeightsProfile profile) {
 
 NumericFormat selected_fp8_role_format(WeightsProfile profile, std::string_view name,
                                        NumericFormat fallback) {
+    if (is_fp8_capped_profile(profile)) return fp8_capped::matrix_format(profile, name);
     if (is_selective_protected_profile(profile))
         return selective_protected::matrix_format(name);
     if (profile != WeightsProfile::R9700Q4G64Fp8FourRoleN16K16Evaluation &&
@@ -224,7 +230,9 @@ void bind_r9700_text_layers(artifact::Binder& binder, BindingPlan& out,
             target.attention.key_norm = artifact::bind_device_tensor(
                 binder, prefix + "attention/key_norm", NumericFormat::BF16, {256});
             target.attention.output = bind_weight(binder, prefix + "attention/output",
-                                                  is_selective_protected_profile(profile)
+                                                  is_fp8_capped_profile(profile)
+                                                      ? fp8_capped::matrix_format(profile, prefix + "attention/output")
+                                                      : is_selective_protected_profile(profile)
                                                       ? selective_protected::matrix_format(prefix + "attention/output")
                                                       : full_attention_value_output_format(profile),
                                                   {5120, 6144});
@@ -250,7 +258,9 @@ void bind_r9700_text_layers(artifact::Binder& binder, BindingPlan& out,
                                                            NumericFormat::BF16, {128});
             target.gdn.output =
                 bind_weight(binder, prefix + "gdn/output",
-                            is_selective_protected_profile(profile)
+                            is_fp8_capped_profile(profile)
+                                ? fp8_capped::matrix_format(profile, prefix + "gdn/output")
+                                : is_selective_protected_profile(profile)
                                 ? selective_protected::matrix_format(prefix + "gdn/output")
                                 : matrix_format(profile, false),
                             {5120, 6144});
@@ -263,7 +273,9 @@ void bind_r9700_text_layers(artifact::Binder& binder, BindingPlan& out,
                         {34816, 5120});
         target.mlp.down =
             bind_weight(binder, prefix + "mlp/down",
-                        is_selective_protected_profile(profile)
+                        is_fp8_capped_profile(profile)
+                            ? fp8_capped::matrix_format(profile, prefix + "mlp/down")
+                            : is_selective_protected_profile(profile)
                             ? selective_protected::matrix_format(prefix + "mlp/down")
                             : matrix_format(profile, false), {5120, 17408});
     }
@@ -518,6 +530,7 @@ LoadedModelData::LoadedModelData(BindingPlan plan, artifact::MaterializedArtifac
             target.norm =
                 artifact::materialized_tensor(backing, source.gdn.norm, NumericFormat::BF16, {128});
             target.output = materialized_weight(backing, source.gdn.output, 5120, 6144);
+            target.projection.output_execution = prepare_linear(target.output);
             target.post_attention_norm = artifact::materialized_tensor(
                 backing, source.post_attention_norm, NumericFormat::BF16, {5120});
             target.post_mixer = load_mlp(source.mlp, backing);

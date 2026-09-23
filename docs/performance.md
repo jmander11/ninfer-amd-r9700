@@ -97,8 +97,8 @@ and successful earlier measurements are unchanged.
 
 Sizes are decimal file GB, not resident VRAM. Current selective includes its unused DFlash
 companion; the base portion is approximately17.68 GB. Selective changes28 all-Q4 matrices:
-two W8 embedding/head, fifteen BF16, eleven FP8. Mixed and four-role retain their available
-older RowSplit W8 heads; this comparison measures available complete implementations, not
+two W8 embedding/head, fifteen BF16, eleven FP8. Mixed retains its available older RowSplit
+W8 head; four-role has a Q4 head. This compares available complete implementations, not
 intrinsic format performance. The tiled selective head preserves measured PPL exactly and
 improves ordinary decode about7.4% over its older counterpart.
 

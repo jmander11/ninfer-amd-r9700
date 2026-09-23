@@ -37,7 +37,7 @@ namespace ninfer::targets::qwen3_8_27b::detail {
 namespace {
 
 constexpr std::size_t kExecutionAlignment = 256U;
-constexpr std::size_t kSelectedRoleCount  = 6U;
+constexpr std::size_t kSelectedRoleCount  = 7U;
 constexpr std::size_t kSelectedMatmulWorkspaceBytes = 0U;
 constexpr std::size_t kSelectedProjectionCount =
     3U * static_cast<std::size_t>(TextConfig::full_attention_layers()) +
@@ -84,6 +84,7 @@ void validate_token_interval(std::int32_t first, std::int32_t last) {
 }
 
 void validate_profile(WeightsProfile profile) {
+    if (is_fp8_capped_profile(profile)) return;
     if (profile != WeightsProfile::R9700W8G32Candidate &&
         profile != WeightsProfile::R9700W8Bf16EmbeddingEvaluation &&
         profile != WeightsProfile::R9700W8Bf16AttentionQueryKeyEvaluation &&
@@ -307,7 +308,10 @@ Variant::ExecutionState::ExecutionState(const ModelView& model, DeviceSpan seria
         include_fp8_columns(layer.output);
         include_fp8_columns(layer.post_mixer.down);
     }
-    for (const auto& layer : model.gdn_layers) include_fp8_columns(layer.post_mixer.down);
+    for (const auto& layer : model.gdn_layers) {
+        include_fp8_columns(layer.output);
+        include_fp8_columns(layer.post_mixer.down);
+    }
     const std::size_t activation_bytes =
         execution_activation_bytes(prefill_tokens, maximum_graph_tokens, maximum_fp8_columns);
     const std::size_t activation_region = align_up(
@@ -374,6 +378,8 @@ Variant::ExecutionState::ExecutionState(const ModelView& model, DeviceSpan seria
             install(SelectedLinearRole::GdnQueryKey, layer,
                     weights.projection.input_projection.query_key,
                     weights.projection.input_projection.query_key_execution);
+            install(SelectedLinearRole::GdnOutput, layer, weights.output,
+                    weights.projection.output_execution);
             install(SelectedLinearRole::MlpGateUp, layer, weights.post_mixer.gate_up,
                     weights.post_mixer.gate_up_execution);
             install(SelectedLinearRole::MlpDown, layer, weights.post_mixer.down,
@@ -381,7 +387,8 @@ Variant::ExecutionState::ExecutionState(const ModelView& model, DeviceSpan seria
         }
     }
     if (impl_->selected != 0U && impl_->selected != kSelectedProjectionCount &&
-        impl_->selected != 11U) {
+        impl_->selected != 11U && impl_->selected != 12U && impl_->selected != 32U &&
+        impl_->selected != 80U && impl_->selected != 26U) {
         throw std::invalid_argument(
             "R9700 FP8 execution state has an incomplete selected inventory");
     }
@@ -1198,14 +1205,15 @@ void Variant::gdn_input_projection_record(
 void Variant::gdn_output_projection(const Tensor& hidden, const Weight& weight, Tensor& residual,
                                     qwen3::TextPhase phase, WorkspaceArena& workspace,
                                     hipStream_t stream, std::int32_t,
-                                    ExecutionState* execution) {
+                                    ExecutionState* execution, std::int32_t text_layer) {
     if (execution != nullptr &&
         execution->projected_residual_t1(hidden, weight, residual, phase, true, stream)) {
         return;
     }
     auto scope = workspace.scope();
     Tensor delta = workspace.alloc(DType::BF16, {TextConfig::hidden, hidden.ne[1]});
-    serialized_linear(execution, hidden, weight, delta, workspace, stream);
+    selected_linear(execution, SelectedLinearRole::GdnOutput, text_layer,
+                    hidden, weight, delta, workspace, stream);
     ops::residual_add(delta, residual, stream);
 }
 
@@ -1445,6 +1453,11 @@ std::size_t Variant::mtp_post_mixer_workspace_capacity_bytes(std::int32_t first,
 QType Variant::dflash_matrix_qtype(WeightsProfile profile) {
     validate_profile(profile);
     switch (profile) {
+    case WeightsProfile::R9700Q4Fp8EarlyAttentionEvaluation:
+    case WeightsProfile::R9700Q4Fp8AllAttentionEvaluation:
+    case WeightsProfile::R9700Q4Fp8AttentionGdnEvaluation:
+    case WeightsProfile::R9700Q4Fp8SelectiveCapEvaluation:
+        throw std::invalid_argument("FP8 capped base has no DFlash companion");
     case WeightsProfile::R9700Q4SelectiveProtectedDFlash2Q4Evaluation:
     case WeightsProfile::R9700Q4G64DFlash2Q4Evaluation:
     case WeightsProfile::R9700Q4G64DFlash2Q4MseEvaluation:
@@ -1522,6 +1535,10 @@ std::size_t Variant::linear_workspace_capacity_bytes(WeightsProfile profile,
                                                      DFlashConfig::feature_rows);
     case WeightsProfile::R9700Q4G64Evaluation:
     case WeightsProfile::R9700Q4G64Fp8FourRoleN16K16Evaluation:
+    case WeightsProfile::R9700Q4Fp8EarlyAttentionEvaluation:
+    case WeightsProfile::R9700Q4Fp8AllAttentionEvaluation:
+    case WeightsProfile::R9700Q4Fp8AttentionGdnEvaluation:
+    case WeightsProfile::R9700Q4Fp8SelectiveCapEvaluation:
         // The all-Q4 recipe also quantizes MLP down, whose K is the largest Text matrix input.
         return ops::linear_workspace_capacity_bytes(QType::Q4G64_F16S, tokens,
                                                      TextConfig::intermediate);
@@ -1556,6 +1573,10 @@ std::size_t Variant::vision_linear_workspace_capacity_bytes(WeightsProfile profi
                                                    VisionConfig::merger_hidden));
     case WeightsProfile::R9700Q4G64Evaluation:
     case WeightsProfile::R9700Q4G64Fp8FourRoleN16K16Evaluation:
+    case WeightsProfile::R9700Q4Fp8EarlyAttentionEvaluation:
+    case WeightsProfile::R9700Q4Fp8AllAttentionEvaluation:
+    case WeightsProfile::R9700Q4Fp8AttentionGdnEvaluation:
+    case WeightsProfile::R9700Q4Fp8SelectiveCapEvaluation:
     case WeightsProfile::R9700Q4G64DFlash2Q4Evaluation:
     case WeightsProfile::R9700Q4G64DFlash2Q4MseEvaluation:
     case WeightsProfile::R9700Q4G64DFlash2W8MseEvaluation:
@@ -1579,9 +1600,14 @@ std::size_t Variant::execution_state_capacity_bytes(WeightsProfile profile,
     }
     const std::uint32_t tokens = std::max(prefill_tokens, maximum_graph_tokens);
     std::size_t bytes = linear_workspace_capacity_bytes(profile, static_cast<std::int32_t>(tokens));
-    if (is_selective_protected_profile(profile)) {
+    if (is_selective_protected_profile(profile) ||
+        profile == WeightsProfile::R9700Q4Fp8SelectiveCapEvaluation) {
         bytes = std::max(bytes, execution_storage_bytes(prefill_tokens, maximum_graph_tokens,
                                                         TextConfig::intermediate));
+    }
+    if (is_fp8_capped_profile(profile) &&
+        profile != WeightsProfile::R9700Q4Fp8SelectiveCapEvaluation) {
+        bytes = std::max(bytes, execution_storage_bytes(prefill_tokens, maximum_graph_tokens));
     }
     if (profile == WeightsProfile::R9700Q4G64Fp8FourRoleN16K16Evaluation ||
         profile == WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4MseEvaluation ||

@@ -39,6 +39,10 @@ enum class WeightsProfile : std::uint8_t {
     R9700Q4SelectiveProtectedN16K16Evaluation,
     R9700Q4SelectiveProtectedDFlash2Q4Evaluation,
     R9700Q4G64Fp8FourRoleN16K16Evaluation,
+    R9700Q4Fp8EarlyAttentionEvaluation,
+    R9700Q4Fp8AllAttentionEvaluation,
+    R9700Q4Fp8AttentionGdnEvaluation,
+    R9700Q4Fp8SelectiveCapEvaluation,
     R9700Q4W8Evaluation,
     R9700Q4G64DFlash2Q4Evaluation,
     R9700Q4W8MseDFlash2Q4Evaluation,
@@ -50,6 +54,13 @@ enum class WeightsProfile : std::uint8_t {
     R9700Q4W8MseDFlash2W8MseEvaluation,
     R9700Q4G64Fp8FourRoleDFlash2W8MseEvaluation,
 };
+
+[[nodiscard]] constexpr bool is_fp8_capped_profile(WeightsProfile profile) noexcept {
+    return profile == WeightsProfile::R9700Q4Fp8EarlyAttentionEvaluation ||
+           profile == WeightsProfile::R9700Q4Fp8AllAttentionEvaluation ||
+           profile == WeightsProfile::R9700Q4Fp8AttentionGdnEvaluation ||
+           profile == WeightsProfile::R9700Q4Fp8SelectiveCapEvaluation;
+}
 
 [[nodiscard]] constexpr bool is_selective_protected_profile(WeightsProfile profile) noexcept {
     return profile == WeightsProfile::R9700Q4SelectiveProtectedN16K16Evaluation ||

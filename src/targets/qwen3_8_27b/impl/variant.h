@@ -39,6 +39,7 @@ struct Variant {
         MlpGateUp,
         AttentionOutput,
         MlpDown,
+        GdnOutput,
     };
 
     // Program-owned bindings for loaded-target-prepared row-scaled-E4M3 Text projections.
@@ -258,7 +259,8 @@ struct Variant {
     static void gdn_output_projection(const Tensor& hidden, const Weight& weight, Tensor& residual,
                                       qwen3::TextPhase phase, WorkspaceArena& workspace,
                                       hipStream_t stream, std::int32_t route_tokens = 0,
-                                      ExecutionState* execution = nullptr);
+                                      ExecutionState* execution = nullptr,
+                                      std::int32_t text_layer = -1);
     static void gdn_norm_control_projection(const Tensor& residual, const Tensor& norm_weight,
                                             float eps, const GdnProjectionWeights& weights,
                                             Tensor& hidden, Tensor& g, Tensor& beta,
@@ -339,6 +341,7 @@ struct Variant {
     [[nodiscard]] static constexpr std::size_t runtime_allocation_overhead_bound(
         WeightsProfile profile) noexcept {
         return profile == WeightsProfile::R9700Q4G64Fp8FourRoleN16K16Evaluation ||
+               is_fp8_capped_profile(profile) ||
                is_selective_protected_profile(profile) ||
                profile == WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4Evaluation ||
                profile == WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4MseEvaluation ||

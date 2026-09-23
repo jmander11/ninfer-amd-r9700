@@ -5,6 +5,7 @@
 #include "ops/r9700/linear/r9700_w8_activation_profile.h"
 #include "targets/qwen3_8_27b/impl/load/bindings.h"
 #include "targets/qwen3_8_27b/impl/load/fp8_hybrid_selection.h"
+#include "targets/qwen3_8_27b/impl/load/fp8_capped_selection.h"
 #include "targets/qwen3_8_27b/impl/load/selective_protected.h"
 #include "targets/qwen3_8_27b/impl/variant.h"
 
@@ -751,6 +752,64 @@ ArtifactLoadPlan bind_fp8_q4_hybrid(const std::filesystem::path& path) {
 
 int main(int argc, char** argv) {
     try {
+        if (argc == 5 && std::string_view(argv[1]) == "--fp8-capped") {
+            namespace detail = ninfer::targets::qwen3_8_27b::detail;
+            using Variant = detail::Variant;
+            ninfer::artifact::Reader reader(argv[2]);
+            const auto profile = Package::resolve_weights(reader.identity());
+            require(detail::is_fp8_capped_profile(profile),
+                    "expected fixed capped FP8 identity");
+            const std::size_t expected = profile == WeightsProfile::R9700Q4Fp8EarlyAttentionEvaluation
+                ? 12U : profile == WeightsProfile::R9700Q4Fp8AllAttentionEvaluation
+                ? 32U : profile == WeightsProfile::R9700Q4Fp8AttentionGdnEvaluation ? 80U : 26U;
+            std::size_t fp8 = 0U, q4 = 0U;
+            for (const auto& object : reader.objects()) {
+                const auto* tensor = std::get_if<ninfer::artifact::TensorDescriptor>(&object);
+                if (!tensor) continue;
+                const bool selected = detail::fp8_capped::matrix_format(profile, tensor->name) ==
+                                      NumericFormat::F8E4M3_ROW_F32S;
+                require((tensor->format == NumericFormat::F8E4M3_ROW_F32S) == selected,
+                        "capped FP8 matrix inventory differs");
+                require(tensor->format != NumericFormat::W8G32_F16S,
+                        "capped base contains an unexpected W8 matrix");
+                fp8 += selected;
+                q4 += tensor->format == NumericFormat::Q4G64_F16S;
+            }
+            require(reader.objects().size() == 1124U && fp8 == expected && q4 == 439U - expected,
+                    "capped base object/format counts differ");
+            const auto bind = [&](ninfer::artifact::Reader& source) {
+                ninfer::artifact::Binder binder(source);
+                return detail::bind_artifact(binder, profile,
+                    {.vision = true, .speculative = ninfer::SpeculativeBackend::Mtp,
+                     .proposal_head = ninfer::ProposalHead::Optimized});
+            };
+            const auto plan = bind(reader);
+            require(plan.materialization.object_count == 1124U &&
+                    plan.materialization.device_objects.size() == 1118U &&
+                    plan.bindings.token_embedding.format == NumericFormat::Q4G64_F16S &&
+                    plan.bindings.output_head.format == NumericFormat::Q4G64_F16S,
+                    "capped base materialization/endpoints differ");
+            for (int i = 3; i < 5; ++i) {
+                ninfer::artifact::Reader invalid(argv[i]);
+                bool rejected = false;
+                try { (void)bind(invalid); }
+                catch (const ninfer::artifact::ArtifactError&) { rejected = true; }
+                require(rejected, "capped binder accepted wrong selected/unlisted format");
+            }
+            for (const int tokens : {1, 6, 24, 2048}) {
+                require(Variant::linear_workspace_capacity_bytes(profile, tokens) ==
+                        Variant::linear_workspace_capacity_bytes(
+                            WeightsProfile::R9700Q4G64Evaluation, tokens),
+                        "capped Q4 workspace differs from complete Q4 inventory");
+                require(Variant::execution_state_capacity_bytes(profile, 2048, tokens) >=
+                        Variant::linear_workspace_capacity_bytes(profile, 2048),
+                        "capped execution storage misses Q4 activation region");
+            }
+            require(Variant::runtime_allocation_overhead_bound(profile) == (4U << 20U),
+                    "capped FP8 physical arena rounding omitted");
+            std::cout << "r9700_target_binding: PASS capped FP8 inventory, rejected formats, planning\n";
+            return 0;
+        }
         if (argc == 4 && std::string_view(argv[1]) == "--selective-dflash-tiled-head") {
             const auto bind = [](const char* path) {
                 ninfer::artifact::Reader reader(path);

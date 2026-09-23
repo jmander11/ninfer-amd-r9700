@@ -1261,7 +1261,7 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
         Variant::gdn_output_projection(on_flat, *w.out_proj, x, ph, work_, s,
                                        packed_route_tokens(active_sequence_batch_,
                                                            active_sequence_width_),
-                                       linear_execution_);
+                                       linear_execution_, text_layer);
         if constexpr (requires { tap.capture_gdn_residual(text_layer, x, s); }) {
             tap.capture_gdn_residual(text_layer, x, s);
         }
@@ -1331,7 +1331,7 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
     Variant::gdn_output_projection(on_flat, *w.out_proj, x, ph, work_, s,
                                    packed_route_tokens(active_sequence_batch_,
                                                        active_sequence_width_),
-                                   linear_execution_);
+                                   linear_execution_, text_layer);
     if constexpr (requires { tap.capture_gdn_residual(text_layer, x, s); }) {
         tap.capture_gdn_residual(text_layer, x, s);
     }

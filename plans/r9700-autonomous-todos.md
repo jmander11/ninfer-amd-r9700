@@ -76,6 +76,27 @@ above apply to every command.
 
 ### Current checkpoint
 
+ACTIVE USER REQUEST (2026-09-23): identify a smaller Q4/FP8 recipe close to the retained
+5090 NVFP4 PPL, then establish where A4 can replace A8 without unacceptable quality loss.
+This reopens only bounded recipe/activation selection; unrelated XAttention/capacity work stays
+paused. Cap large promoted base projections at FP8; preserve specified direct norms, controls,
+and persistent state. Do not claim faster execution until whole-inference measurement supports it.
+- [x] Register/convert four fixed candidates: early-attention FP8, all-attention FP8,
+  attention+GDN-QK FP8, and selective's26 protected projections capped at FP8 with Q4 endpoints.
+- [ ] Compare each against immutable matched NVFP4 inputs/NLLs; prefer at most2% per-text PPL
+  regression in both schedules, report5% sensitivity and newly severe positions separately.
+  Use existing all-Q4/A8 and four-role controls; do not rerun unchanged references.
+- [ ] Measure eligible candidates at matched C1/P4096/G128/chunk2048, select a concrete base
+  recipe and save under local_llm/models. If needed, refine only a material observed tradeoff.
+- [ ] Evaluate a bounded mixed-A4/A8 precision choice for the selected base; retain A8 where
+  quality or actual speed rejects A4. Record resulting recipe, supported routes, and limitations.
+Immutable 5090 reference: `tools/ppl/fixtures/nvfp4-5090-20260922/`, committed `0b00efa1`.
+Root alone owns GPU jobs; one helper owns fixed-profile C++ binding, root owns conversion/tests.
+All four real artifacts pass complete payload/inventory validation and host wrong-format
+rejection. The FP8 execution-state contract and ordinary host planner checks pass. Frozen A8
+scorers have completed all12 prefill cells (worst PPL increase under0.7%); decode checks run next.
+The one mixed evaluator tests prefill Q4 MLP gate/up at A4 with all other routes/decode at A8.
+
 COMPLETED USER REQUEST (2026-09-23): compare multi-text PPL against the standard 5090 NVFP4
 artifact using `ninfer-dylan2`, and measure AMD recipe/activation prefill and ordinary-decode
 speed to expose the measured speed/quality frontier. This bounded campaign supersedes the pause

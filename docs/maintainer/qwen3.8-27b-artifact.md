@@ -13,6 +13,31 @@ The same-size `r9700-w8g32-mse-eval` retains the all-W8 layout and runtime while
 stored FP16 group scale by a deterministic source-only decoded-weight SSE objective.
 The four-role FP8 base and registered DFlash companions are described below.
 
+Four fixed Q4/FP8-capped base evaluation identities use the target-owned shared
+`src/targets/qwen3_8_27b/impl/load/fp8_capped_selection.inc` inventory:
+
+| `r9700-q4-fp8-…-n16k16-eval` suffix | FP8 projections | Count |
+|---|---|---:|
+| `early-attention` | attention QK/GV at layers3,7,11,15,19,23 | 12 |
+| `all-attention` | all attention QK/GV | 32 |
+| `attention-gdn` | all attention QK/GV and all GDN QK | 80 |
+| `selective-cap` | selective's15 BF16 plus11 FP8 protections, all capped at FP8 | 26 |
+
+All other matrices retain the all-Q4 inventory, including embedding/output head,
+Vision, MTP, and draft shortlist. Existing direct norm/control/state tensors are
+unchanged; the cap is not a change to persistent state semantics. There is no
+DFlash companion for these new identities. Binding requires the exact per-identity
+format inventory, not arbitrary format overrides. FP8 GDN output uses an explicit
+layer-indexed prepared Linear slot, like other selected projections.
+
+`python3.11 -m tools.convert.qwen3_8_27b_r9700.convert_fp8_capped` accepts explicit
+`--recipe`, `--base`, `--four-role`, `--selective`, `--model`, and create-only `--out`.
+It copies represented bytes from validated Q4/FP8 donor inventories; the three
+SelectiveCap output matrices absent from FP8 donors are encoded from original BF16
+source with the existing row-scaled codec. The adjacent conversion receipt records
+every payload hash and origin. `--validate PATH` checks the complete identity,
+inventory, and readback hashes. Registration is evaluation support, not promotion.
+
 `r9700-q4-selective-protected-n16k16-eval` is a separate source-derived evaluation base,
 not a production selection. It starts from the exact all-Q4 N16K16 artifact
 and replaces 28 physical objects: W8G32 token embedding/output head; BF16 attention query_key
