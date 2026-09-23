@@ -60,6 +60,77 @@ expected value exactly.
 Copy bus rate counts both the read and write traffic. This is the hardware bandwidth bound, not a
 model or individual-Op throughput claim.
 
+## Decode bandwidth and concurrency follow-up (2026-09-22)
+
+The current selected build was measured without kernel or recipe changes. The fresh native
+4 GiB read-stream probe sustained **636.0 GB/s median** under `auto`, with exact checksum;
+write/copy medians were 588.0/548.6 GB/s. This is a streaming reference, not measured inference
+traffic. The installed gfx1201 counters do not reliably establish absolute GDDR6 byte rates.
+
+Descriptor- and schedule-based C1 weight accounting gives the following conditional comparison.
+It excludes inactive tensors and full-table embedding/codebook scans, counts selected rows and
+known weight replays, and uses observed useful decode outputs per speculative round (including
+correction/bonus tokens), rather than nominal draft width.
+
+| C1 mode | Measured decode tok/s | Modeled weight GB/round | Useful tokens/round | Weight-only stream reference tok/s |
+|---|---:|---:|---:|---:|
+| Ordinary | 27.53 | 15.482 | 1.000 | 41.08 |
+| DFlash K4 | 63.76 | 17.066 | 3.368 | 125.53 |
+| DFlash K5 | 62.15 | 17.113 | 3.459 | 128.57 |
+
+These are **not achievable-speed predictions or proven ceilings**. The model assumes reuse
+within weight calls and omits some rereads, activation/intermediate traffic, state work, compute,
+synchronization and scheduling. Its logical weight rates of 426/323/307 GB/s must not be called
+physical bandwidth utilization. Neither saturation nor exhaustion of optimization headroom is
+established. The complete source-accounted assumptions and fresh C1 reports are retained in
+`profiles/bench/r9700-decode-bandwidth-concurrency-20260922/bandwidth/fresh-c1-accounting.json`;
+`run_stream.py` and `account.py` in that directory reproduce the respective measurements/model.
+
+### C1–4 measurements
+
+The admitted saved binary `r9700-bf16-controls-wave32-20260922/whole-inference/candidate-ninfer_bench`
+and the selected tiled-head artifact below were held fixed: greedy, Device Graph, G16 fixed cache,
+P89/G128, context1024, chunk4096, one warmup and three repetitions per cell under `auto`.
+Each cell ran in a separate process, serialized on the GPU. Values are mean aggregate decode
+tok/s, with normalized per-request throughput (`aggregate / C`) in parentheses, not measured
+individual request latency.
+
+| Concurrency | Ordinary | DFlash K4 | DFlash K5 |
+|---|---:|---:|---:|
+| 1 | 27.53 (27.53) | 63.76 (63.76) | 62.15 (62.15) |
+| 2 | 33.79 (16.90) | 62.25 (31.12) | 61.66 (30.83) |
+| 3 | 44.67 (14.89) | 89.11 (29.70) | 82.08 (27.36) |
+| 4 | 56.82 (14.21) | 108.92 (27.23) | 98.77 (24.69) |
+
+Relative to each mode's fresh C1, aggregate ratios at C2/C3/C4 are ordinary
+1.228/1.623/2.064, K4 0.976/1.398/1.708, and K5 0.992/1.321/1.589.
+C4 whole-output rates including prefill are 51.89/91.15/83.67 tok/s respectively.
+The stock benchmark rotates the corpus by lane index: added lanes have different P89 prompts,
+so these ratios describe this concurrent workload, not an isolated identical-request scaling test.
+Same-C modes use the same per-lane inputs. K4 acceptance rates for C1–4 are
+60.40/56.91/60.76/64.16%; K5 rates are 50.28/47.87/51.59/56.04%.
+K4 has one summed fallback step at each C2–4 cell; K5 has none.
+
+All three repetitions within every cell reproduce exact tokens and accounting. C1 K4/K5 also
+match ordinary greedy output. **C2–4 DFlash does not match same-C ordinary output on all lanes**:
+matching lanes are 0/2, 1/3, 1/4 for K4 and 0/2, 0/3, 0/4 for K5. These are throughput
+observations, not exact-greedy production admission. No numerical gate was relaxed and no kernel
+was changed in this measurement task.
+
+Source dispatch establishes a plausible follow-up, not a measured causal attribution: several
+Q4 pipeline, BF16 staging/control and RMSNorm optimizations select only T5/T6, whereas batched
+verification uses T10/12, T15/18 and T20/24. K4 proposal batches requests; K5 proposal executes
+per sequence. These route differences prevent extrapolating C1 optimization coverage or ideal
+weight reuse to C2–4. Any follow-up must resolve the relevant exact-greedy discrepancy and measure
+the actual larger-batch owner before optimization or promotion.
+
+Evidence and exact launch commands: `profiles/bench/r9700-decode-bandwidth-concurrency-20260922/`
+(`concurrency/run.py`, `concurrency/summary.json`, per-cell reports/receipts under `concurrency/results/`).
+The first ordinary process succeeded; a checker incorrectly expected `spec=mtp` instead of the
+reported draft-disabled `spec=none`. The corrected checker validated and reused that retained run;
+no failed GPU measurement was overwritten or repeated. C1 traffic accounting is not extended to
+the fallback-bearing C2–4 schedule as a measured physical traffic estimate.
+
 ## Selective-protected DFlash decode (2026-09-22)
 
 The currently selected evaluation artifact is

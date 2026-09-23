@@ -73,6 +73,24 @@ above apply to every command.
 
 ### Current checkpoint
 
+COMPLETED USER MEASUREMENT REQUEST (2026-09-22): test the selected build's memory-bandwidth
+headroom, then measure C2–4 speedups against a matched C1 reference. This reopens measurement,
+not kernel optimization, model conversion, or broad recipe/prefill/XAttention campaigns.
+- [x] Measure sustained device-memory bandwidth under `auto`; relate source-accounted active
+  weight traffic and useful tokens per round to current ordinary/K4/K5 decode. Distinguish
+  modeled traffic from physical counters; do not claim a proven tok/s ceiling from a stream probe.
+- [x] Measure matched C1–4 ordinary/K4/K5 on the selected artifact, reporting aggregate and
+  per-request rates, acceptance, same-workload speedups and numerical/token limitations.
+- [x] Record results and whether bandwidth saturation or a practical ceiling is actually supported.
+Fresh read-stream median636GB/s does not establish inference saturation. Conditional C1
+weight-stream references41.08/125.53/128.57tok/s are not achievable-speed predictions.
+C1 ordinary/K4/K5=27.53/63.76/62.15; C4 aggregate=56.82/108.92/98.77tok/s.
+C2–4 DFlash fails same-C ordinary exact-token parity on some lanes: timing observations only,
+not production admission. Benchmark rotates added-lane prompts; scaling ratios include that mix.
+Results, acceptance, commands and limitations are recorded in `docs/performance.md`, backed by
+`profiles/bench/r9700-decode-bandwidth-concurrency-20260922/`.
+This measurement request is complete; no kernel work or paused campaign was reopened.
+
 DFLASH OPTIMIZATION PASS COMPLETE (2026-09-22): final admitted C1 chat decode is
 K4 **64.81318 tok/s**, K5 **62.92418 tok/s**; whole-output57.02881/55.64922tok/s.
 All16 matched runs preserve exact tokens/accounting; every balanced chat pair and raw regression
