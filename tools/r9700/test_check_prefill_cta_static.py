@@ -15,7 +15,7 @@ class PrefillCtaStaticTest(unittest.TestCase):
         opcode_count = profile.incumbent_opcode_count if incumbent else profile.opcode_count
         lds = profile.incumbent_lds_ceiling if incumbent else profile.lds_ceiling
         vgpr = profile.incumbent_vgpr_ceiling if incumbent else profile.vgpr_ceiling
-        control = " neg_lo:[1,1,0]" if recipe == "q4-a4-m64n128" else ""
+        control = " neg_lo:[1,1,0]" if recipe in ("q4-a4-m64n128", "q4-a4-pingpong") else ""
         controls = ([" neg_lo:[0,1,0]"] * 8 + [" neg_lo:[1,1,0]"] * 8
                     if recipe == "q4-dot8" else
                     [" neg_lo:[0,1,0]"] * 4 + [" neg_lo:[1,1,0]"] * 4
@@ -139,8 +139,20 @@ class PrefillCtaStaticTest(unittest.TestCase):
                            *self.fixture(Path(directory), "q4-a4-m64n128"))
             self.assertEqual(result["opcode_count"], 4)
             self.assertEqual(result["lds_bytes"], 6528)
-            self.assertEqual(result["vgpr_count"], 84)
+            self.assertEqual(result["vgpr_count"], 85)
             self.assertEqual(result["occupancy"], 16)
+
+    def test_accepts_a4_pingpong_signed_four_instruction_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            paths = self.fixture(Path(directory), "q4-a4-pingpong")
+            result = check("q4-a4-pingpong", "a4-m64n128", *paths)
+            self.assertEqual(result["opcode_count"], 4)
+            self.assertEqual(result["lds_bytes"], 13056)
+            self.assertEqual(result["occupancy"], 16)
+            assembly = paths[0]
+            assembly.write_text(assembly.read_text().replace("neg_lo:[1,1,0]", "neg_lo:[0,1,0]", 1))
+            with self.assertRaisesRegex(ValueError, "signed A"):
+                check("q4-a4-pingpong", "a4-m64n128", *paths)
 
     def test_m128n128_recipe_and_mode_are_exclusive(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

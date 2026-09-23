@@ -49,8 +49,13 @@ PROFILES = {
     ),
     "q4-a4-m64n128": Profile(
         "",
-        "_ZN6ninfer3ops5r97006linear12_GLOBAL__N_153q4g64_linear_prefill_cta_m64n128_qualification_kernelEPKhPKtPKjS5_S7_P12hip_bfloat16jjjj",
-        "v_wmma_i32_16x16x32_iu4", 4, 6528, 84, 0, 0, 0, 0, 512, 16,
+        "_ZN6ninfer3ops5r97006linear12_GLOBAL__N_139q4g64_linear_prefill_cta_m64n128_kernelEPKhPKtPKjS5_S7_P12hip_bfloat16jjjj",
+        "v_wmma_i32_16x16x32_iu4", 4, 6528, 85, 0, 0, 0, 0, 512, 16,
+    ),
+    "q4-a4-pingpong": Profile(
+        "",
+        "_ZN6ninfer3ops5r97006linear12_GLOBAL__N_138a4q4g64_linear_prefill_pingpong_kernelEPKhPKtPKjS5_S7_P12hip_bfloat16jjjj",
+        "v_wmma_i32_16x16x32_iu4", 4, 13056, 96, 0, 0, 0, 0, 512, 16,
     ),
 }
 
@@ -104,7 +109,7 @@ def check(recipe: str, mode: str, assembly: Path, metadata: Path) -> dict[str, i
         raise ValueError(f"unsupported static-gate mode: {mode}")
     if (recipe == "q4-m128n128") != (mode == "m128n128"):
         raise ValueError("q4-m128n128 recipe and mode must be selected together")
-    if (recipe == "q4-a4-m64n128") != (mode == "a4-m64n128"):
+    if (recipe in ("q4-a4-m64n128", "q4-a4-pingpong")) != (mode == "a4-m64n128"):
         raise ValueError("q4-a4-m64n128 recipe and mode must be selected together")
     if (recipe == "q4-dot8") != (mode == "decode-dot8"):
         raise ValueError("q4-dot8 recipe and decode-dot8 mode must be selected together")

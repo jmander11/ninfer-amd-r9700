@@ -393,12 +393,12 @@ struct A8Q4G64KernelResources {
                                               hipStream_t stream) noexcept;
 [[nodiscard]] hipError_t q4g64_linear_vector(const Q4G64LinearArgs& args,
                                               hipStream_t stream) noexcept;
-// Qualification-only signed-A4G64 x signed-Q4G64 M64xN128 cooperative route.
-// Production keeps the selected A8 activation profile until operator and model gates pass.
-[[nodiscard]] hipError_t q4g64_linear_prefill_cta_m64n128_qualification(
+// Signed-A4G64 x signed-Q4G64 M64xN128 cooperative route. The complete A4
+// consumer selects it only for N34816/K5120 prefill; activation precision is unchanged.
+[[nodiscard]] hipError_t q4g64_linear_prefill_cta_m64n128(
     const Q4G64LinearArgs& args, hipStream_t stream) noexcept;
 [[nodiscard]] hipError_t q4g64_prefill_qualification_resources(
-    Q4G64PrefillQualificationResources* resources) noexcept;
+    Q4G64PrefillQualificationResources* resources, bool pingpong = false) noexcept;
 
 [[nodiscard]] std::size_t a8q4g64_activation_workspace_capacity_bytes(
     std::uint32_t tokens, std::uint32_t columns) noexcept;

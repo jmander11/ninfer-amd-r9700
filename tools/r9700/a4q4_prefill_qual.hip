@@ -3,6 +3,14 @@
 
 namespace {
 
+constexpr const char* kGateUpPci = "/sys/bus/pci/devices/0000:13:00.0";
+void gate_up_auto() {
+    const std::filesystem::path pci(kGateUpPci);
+    if (read_text(pci / "vendor") != "0x1002" || read_text(pci / "device") != "0x7551" ||
+        read_text(pci / "power_dpm_force_performance_level") != "auto")
+        fail("gate/up timing requires the physical R9700 in auto power mode");
+}
+
 struct HostA4Activation {
     std::vector<std::uint8_t> codes;
     std::vector<std::uint16_t> scales;
@@ -56,6 +64,7 @@ struct A4Timing {
 };
 
 A4Timing run_a4_case(Shape shape, std::uint32_t tokens, bool timing) {
+    if (shape.rows % 16U != 0U) fail("Q4N16K16 fixture requires whole 16-row storage tiles");
     const std::uint32_t padded = (shape.columns + 127U) / 128U * 128U;
     const std::uint32_t groups = padded / kGroup;
     const std::vector<hip_bfloat16> input = make_input(shape.columns, tokens);
@@ -72,6 +81,23 @@ A4Timing run_a4_case(Shape shape, std::uint32_t tokens, bool timing) {
             }
         }
     }
+    // The oracle owns logical row-major weights. Both physical consumers require
+    // Q4N16K16 [N/16,K/64,4,16,8 bytes] codes and [N/16,K/64,16] scales.
+    // Uploading the logical image makes pairwise GPU parity pass while violating
+    // the represented-weight formula; pack independently of production helpers.
+    std::vector<std::uint8_t> stored_weights(weights.size());
+    std::vector<std::uint16_t> stored_scales(weight_scales.size());
+    for (std::uint32_t row = 0; row < shape.rows; ++row) {
+        for (std::uint32_t group = 0; group < groups; ++group) {
+            stored_scales[((static_cast<std::size_t>(row)/16U)*groups+group)*16U+row%16U] =
+                weight_scales[static_cast<std::size_t>(row)*groups+group];
+            for (std::uint32_t byte = 0; byte < 32U; ++byte) {
+                const auto destination =
+                    ((((static_cast<std::size_t>(row)/16U)*groups+group)*4U+byte/8U)*16U+row%16U)*8U+byte%8U;
+                stored_weights[destination] = weights[(static_cast<std::size_t>(row)*groups+group)*32U+byte];
+            }
+        }
+    }
     DeviceBuffer<hip_bfloat16> d_input(input.size());
     DeviceBuffer<std::uint8_t> d_weights(weights.size());
     DeviceBuffer<std::uint16_t> d_weight_scales(weight_scales.size());
@@ -80,8 +106,8 @@ A4Timing run_a4_case(Shape shape, std::uint32_t tokens, bool timing) {
     const std::size_t a8_bytes = linear::a8q4g64_activation_workspace_capacity_bytes(tokens, shape.columns);
     DeviceBuffer<std::uint8_t> d_a4(a4_bytes), d_a8(a8_bytes);
     HIP_CHECK(hipMemcpy(d_input.get(), input.data(), d_input.bytes(), hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(d_weights.get(), weights.data(), weights.size(), hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(d_weight_scales.get(), weight_scales.data(),
+    HIP_CHECK(hipMemcpy(d_weights.get(), stored_weights.data(), stored_weights.size(), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_weight_scales.get(), stored_scales.data(),
                         weight_scales.size() * sizeof(std::uint16_t), hipMemcpyHostToDevice));
     linear::Q4G64ActivationWorkspace a4{};
     linear::A8G64ActivationWorkspace a8{};
@@ -100,20 +126,20 @@ A4Timing run_a4_case(Shape shape, std::uint32_t tokens, bool timing) {
     const auto launch_a4 = [&] {
         hipError_t status = linear::q4g64_quantize_activation({d_input.get(), a4}, nullptr);
         return status == hipSuccess
-            ? linear::q4g64_linear_prefill_cta_m64n128_qualification(a4_args, nullptr) : status;
+            ? linear::q4g64_linear_prefill_cta_m64n128(a4_args, nullptr) : status;
     };
     const auto launch_incumbent = [&] { return linear::a8q4g64_linear_candidate(incumbent, nullptr); };
 
-    if (shape.rows == 129U && shape.columns == 193U && tokens == 193U) {
+    if (shape.rows == 144U && shape.columns == 193U && tokens == 193U) {
         linear::Q4G64LinearArgs malformed = a4_args;
         ++malformed.activation_codes;
-        if (linear::q4g64_linear_prefill_cta_m64n128_qualification(malformed, nullptr) !=
+        if (linear::q4g64_linear_prefill_cta_m64n128(malformed, nullptr) !=
             hipErrorInvalidValue) {
             fail("A4 M64N128 accepted a non-dword-aligned activation plane");
         }
         const std::uint32_t bad_status = linear::Q4G64ActivationNonfinite;
         HIP_CHECK(hipMemcpy(a4.status, &bad_status, sizeof(bad_status), hipMemcpyHostToDevice));
-        HIP_CHECK(linear::q4g64_linear_prefill_cta_m64n128_qualification(a4_args, nullptr));
+        HIP_CHECK(linear::q4g64_linear_prefill_cta_m64n128(a4_args, nullptr));
         HIP_CHECK(hipDeviceSynchronize());
         std::vector<hip_bfloat16> poisoned(static_cast<std::size_t>(tokens) * shape.rows);
         HIP_CHECK(hipMemcpy(poisoned.data(), d_output.get(), d_output.bytes(), hipMemcpyDeviceToHost));
@@ -136,7 +162,7 @@ A4Timing run_a4_case(Shape shape, std::uint32_t tokens, bool timing) {
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<hip_bfloat16> reference(static_cast<std::size_t>(tokens) * shape.rows);
     HIP_CHECK(hipMemcpy(reference.data(), d_output.get(), d_output.bytes(), hipMemcpyDeviceToHost));
-    HIP_CHECK(linear::q4g64_linear_prefill_cta_m64n128_qualification(a4_args, nullptr));
+    HIP_CHECK(linear::q4g64_linear_prefill_cta_m64n128(a4_args, nullptr));
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<hip_bfloat16> actual(reference.size());
     HIP_CHECK(hipMemcpy(actual.data(), d_output.get(), d_output.bytes(), hipMemcpyDeviceToHost));
@@ -164,7 +190,7 @@ A4Timing run_a4_case(Shape shape, std::uint32_t tokens, bool timing) {
         const hip_bfloat16 oracle(static_cast<float>(sum));
         maximum_steps = std::max(maximum_steps, bf16_steps(actual[static_cast<std::size_t>(token) * shape.rows + row], oracle));
     };
-    if (shape.rows <= 129U) {
+    if (shape.rows <= 144U) {
         for (std::uint32_t token = 0; token < tokens; ++token)
             for (std::uint32_t row = 0; row < shape.rows; ++row) check_oracle(token, row);
     } else {
@@ -174,6 +200,7 @@ A4Timing run_a4_case(Shape shape, std::uint32_t tokens, bool timing) {
     if (maximum_steps > 2U) fail("A4 independent FP64 represented formula exceeds two BF16 steps");
     A4Timing result{shape, tokens, {}, {}, 0.0, 0.0, maximum_steps};
     if (timing) {
+        gate_up_auto();
         HIP_CHECK(launch_incumbent()); HIP_CHECK(launch_a4()); HIP_CHECK(hipDeviceSynchronize());
         for (std::size_t trial = 0; trial < kTrials; ++trial) {
             if ((trial & 1U) == 0U) {
@@ -186,6 +213,7 @@ A4Timing run_a4_case(Shape shape, std::uint32_t tokens, bool timing) {
         }
         result.incumbent_median = median(result.incumbent);
         result.challenger_median = median(result.challenger);
+        gate_up_auto();
     }
     return result;
 }
@@ -193,23 +221,79 @@ A4Timing run_a4_case(Shape shape, std::uint32_t tokens, bool timing) {
 } // namespace
 
 int main(int argc, char** argv) {
+    const bool gate_up = argc == 4 && std::string_view(argv[1]) == "--gate-up-benchmark" &&
+                         std::string_view(argv[2]) == "--out-json";
     const bool regression = argc == 2 && std::string_view(argv[1]) == "--regression";
     const bool benchmark = argc == 4 && std::string_view(argv[1]) == "--benchmark" &&
                            std::string_view(argv[2]) == "--out-json";
-    if (!regression && !benchmark) {
+    if (!regression && !benchmark && !gate_up) {
         std::cerr << "usage: a4q4_prefill_qual --regression | "
-                     "--benchmark --out-json FRESH.json\n";
+                     "--benchmark --out-json FRESH.json | --gate-up-benchmark --out-json FRESH.json\n";
         return 2;
     }
     try {
+        if (gate_up) {
+            const std::filesystem::path output(argv[3]);
+            require_fresh_output(output);
+            gate_up_auto();
+            HIP_CHECK(hipSetDevice(0));
+            hipDeviceProp_t device{};
+            HIP_CHECK(hipGetDeviceProperties(&device, 0));
+            char bus[32]{};
+            HIP_CHECK(hipDeviceGetPCIBusId(bus, sizeof(bus), 0));
+            std::string address(bus);
+            if (address.size() == 7U) address = "0000:" + address;
+            if (std::string(device.gcnArchName) != "gfx1201" || device.warpSize != 32 ||
+                std::filesystem::canonical(std::filesystem::path("/sys/bus/pci/devices") / address) !=
+                    std::filesystem::canonical(kGateUpPci))
+                fail("gate/up timing selected a different physical GPU");
+            const Shape shape{34816, 5120, 0, 0};
+            const auto a8 = run_prefill_case(shape, 2048U, false, false);
+            if (a8.maximum_bf16_steps > 2U) fail("A8 independent oracle failed");
+            const auto row = run_a4_case(shape, 2048U, true);
+            linear::Q4G64PrefillQualificationResources resources{};
+            HIP_CHECK(linear::q4g64_prefill_qualification_resources(&resources, true));
+            gate_up_auto();
+            std::ostringstream report;
+            report << std::setprecision(17)
+                << "{\"schema_version\":1,\"artifact_type\":\"ninfer_r9700_gate_up_a4_a8_complete_op\","
+                << "\"shape\":[34816,5120],\"tokens\":2048,\"power\":\"auto\","
+                << "\"pci_bus_id\":\"" << address << "\",\"architecture\":\"gfx1201\","
+                << "\"cache_condition\":\"warm resident operands; identical allocations for paired routes\","
+                << "\"timing\":\"seven alternating unprofiled HIP event samples, one complete quantize+matrix call each\","
+                << "\"a4_codec_exact\":true,\"a4_reference_bit_exact\":true,"
+                << "\"represented_code_fp64_oracles_pass\":true,"
+                << "\"maximum_a4_bf16_steps\":" << row.maximum_bf16_steps
+                << ",\"maximum_a8_bf16_steps\":" << a8.maximum_bf16_steps
+                << ",\"a8_complete_ms\":" << row.incumbent_median
+                << ",\"a4_complete_ms\":" << row.challenger_median
+                << ",\"a4_over_a8\":" << row.challenger_median / row.incumbent_median
+                << ",\"a4_vgpr\":" << resources.registers
+                << ",\"a4_lds_bytes\":" << resources.static_shared_bytes
+                << ",\"a4_scratch_bytes\":" << resources.local_bytes
+                << ",\"a8_samples_ms\":[";
+            for (std::size_t i=0;i<kTrials;++i) report << (i ? "," : "") << row.incumbent[i];
+            report << "],\"a4_samples_ms\":[";
+            for (std::size_t i=0;i<kTrials;++i) report << (i ? "," : "") << row.challenger[i];
+            report << "],\"whole_inference_admission\":false}\n";
+            const auto text = report.str();
+            const int fd = ::open(output.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0644);
+            if (fd < 0) fail("cannot create gate/up report");
+            const auto written = ::write(fd, text.data(), text.size());
+            if (::close(fd) != 0 || written != static_cast<ssize_t>(text.size()))
+                fail("incomplete gate/up report");
+            std::cout << "gate/up qualified A4/A8 timing: " << row.challenger_median
+                      << '/' << row.incumbent_median << " ms\n";
+            return 0;
+        }
         linear::Q4G64PrefillQualificationResources resources{};
         HIP_CHECK(linear::q4g64_prefill_qualification_resources(&resources));
-        if (resources.registers > 84 || resources.static_shared_bytes != 6528 ||
+        if (resources.registers > 85 || resources.static_shared_bytes != 6528 ||
             resources.local_bytes != 0 || resources.max_threads_per_block < 512) {
             fail("A4Q4 M64N128 resource gate failed");
         }
         (void)run_a4_case(Shape{128, 256, 0, 0}, 192, false);
-        (void)run_a4_case(Shape{129, 193, 0, 0}, 193, false);
+        (void)run_a4_case(Shape{144, 193, 0, 0}, 193, false);
         const std::array<Shape, 8> shapes{{{7168,5120,0,0},{4096,5120,0,0},
             {12288,5120,0,0},{5120,6144,0,0},{34816,5120,0,0},
             {5120,17408,0,0},{5120,10240,0,0},{1024,5120,0,0}}};

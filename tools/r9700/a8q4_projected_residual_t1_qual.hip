@@ -234,7 +234,8 @@ std::vector<hip_bfloat16> download_guarded(const DeviceBuffer<hip_bfloat16>& buf
     return {host.begin() + 1, host.end() - 1};
 }
 
-CaseResult run_case(const ResidualShape& shape, hipStream_t stream) {
+CaseResult run_case(const ResidualShape& shape, hipStream_t stream,
+                    bool require_fusion_speedup = true) {
     const std::uint32_t groups = shape.columns / kGroupCountFactor;
     const auto input = make_decode_dot8_input(shape.columns);
     const auto activation = quantize_host(input, 1U, shape.columns);
@@ -407,7 +408,7 @@ CaseResult run_case(const ResidualShape& shape, hipStream_t stream) {
             fail("projected residual timing is not jointly allocation/order balanced");
         result.incumbent_copy_medians[copy] = even_median(incumbent_by_copy[copy]);
         result.candidate_copy_medians[copy] = even_median(candidate_by_copy[copy]);
-        if (result.candidate_copy_medians[copy] >
+        if (require_fusion_speedup && result.candidate_copy_medians[copy] >
             result.incumbent_copy_medians[copy] * 1.01)
             fail("projected residual regressed on a cold allocation");
     }
@@ -430,10 +431,80 @@ std::string read_all_text(const std::filesystem::path& path) {
     return value;
 }
 
+int down_benchmark(const std::filesystem::path& output) {
+    require_fresh_output(output);
+    if (read_text(kPowerPath.parent_path() / "vendor") != "0x1002" ||
+        read_text(kPowerPath.parent_path() / "device") != "0x7551")
+        fail("down benchmark requires the physical R9700 PCI function");
+    require_auto_power("before HIP initialization");
+    HIP_CHECK(hipSetDevice(0));
+    hipDeviceProp_t properties{};
+    HIP_CHECK(hipGetDeviceProperties(&properties, 0));
+    if (std::string_view(properties.gcnArchName) != "gfx1201" || properties.warpSize != 32)
+        fail("down benchmark requires gfx1201 wave32");
+    char pci_bus_id[32]{};
+    HIP_CHECK(hipDeviceGetPCIBusId(pci_bus_id, sizeof(pci_bus_id), 0));
+    std::string pci = pci_bus_id;
+    if (pci.size() == 7U) pci = "0000:" + pci;
+    std::transform(pci.begin(), pci.end(), pci.begin(), [](unsigned char value) {
+        return static_cast<char>(std::tolower(value));
+    });
+    if (std::filesystem::canonical(std::filesystem::path("/sys/bus/pci/devices") /
+            pci / "power_dpm_force_performance_level") != std::filesystem::canonical(kPowerPath))
+        fail("HIP device differs from pre-initialization R9700 PCI function");
+    int runtime_version = 0;
+    HIP_CHECK(hipRuntimeGetVersion(&runtime_version));
+    ResidualStream execution_stream;
+    // Measure the selected complete public Op, not a kernel-only surrogate.
+    // The unfused arm is a numerical/reference baseline, not the old version of
+    // a future staging challenger. Compare selected_op across frozen binaries.
+    const auto result = run_case(kResidualShapes[1], execution_stream.get(), false);
+    require_auto_power("after timing");
+    std::ostringstream report;
+    report << std::setprecision(17)
+           << "{\"schema\":\"ninfer.r9700.projected-residual-down-benchmark.v1\","
+              "\"status\":\"passed\",\"device\":\"" << json_escape(properties.name)
+           << "\",\"architecture\":\"gfx1201\",\"pci\":\"" << json_escape(pci)
+           << "\",\"hip_runtime_version\":" << runtime_version
+           << ",\"power\":\"auto\",\"tokens\":1,\"rows\":5120,\"columns\":17408,"
+              "\"activation\":\"A8G64\",\"weight\":\"Q4G64_FP16_N16K16\","
+              "\"oracle\":\"independent FP64 from represented A8 codec and signed Q4 weights; explicit BF16 projection seam and residual add\","
+              "\"exact_unfused_parity\":true,\"graph_replays\":3,\"exact_graph_parity\":true,"
+              "\"guards_and_status_poison\":true,\"maximum_delta_bf16_steps\":"
+           << result.maximum_delta_bf16_steps << ",\"maximum_residual_bf16_steps\":"
+           << result.maximum_residual_bf16_steps
+           << ",\"trials_per_arm\":12,\"disjoint_weight_copies\":3,\"cache_scrub_bytes\":"
+           << kScrubBytes << ",\"joint_copy_order_balanced\":true,"
+              "\"timing_scope\":\"complete quantization plus projection and residual update; reset and scrub excluded\","
+              "\"selected_op_median_ms\":" << result.candidate_median_ms
+           << ",\"unfused_reference_median_ms\":" << result.incumbent_median_ms
+           << ",\"selected_op_samples_ms\":";
+    write_array(report, result.candidate_samples);
+    report << ",\"selected_op_copy_medians_ms\":";
+    write_array(report, result.candidate_copy_medians);
+    report << ",\"unfused_reference_samples_ms\":";
+    write_array(report, result.incumbent_samples);
+    report << ",\"unfused_reference_copy_medians_ms\":";
+    write_array(report, result.incumbent_copy_medians);
+    report << ",\"production_promotion_authorized\":false}\n";
+    const std::string payload = report.str();
+    FILE* file = std::fopen(output.c_str(), "wx");
+    if (!file) fail("cannot exclusively create down benchmark report");
+    const bool wrote = std::fwrite(payload.data(), 1U, payload.size(), file) == payload.size();
+    const bool closed = std::fclose(file) == 0;
+    if (!wrote || !closed) fail("cannot finish down benchmark report");
+    std::cout << "projected_residual_down_benchmark: PASS selected_op_ms="
+              << result.candidate_median_ms << '\n';
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
     try {
+        if (argc == 4 && std::string_view(argv[1]) == "--down-benchmark" &&
+            std::string_view(argv[2]) == "--out-json")
+            return down_benchmark(argv[3]);
         if (argc == 3 && std::string_view(argv[1]) == "--serialize-json-text") {
             // Exercise the report's actual string serializer without initializing HIP.
             std::cout << "{\"text\":\"" << json_escape(read_all_text(argv[2])) << "\"}\n";
@@ -448,7 +519,8 @@ int main(int argc, char** argv) {
             std::cerr << "usage: a8q4_projected_residual_t1_qual --out-json NEW.json "
                          "--assembly FILE.s --static-receipt RECEIPT.txt "
                          "--compile-receipt RECEIPT.json --package DIRECTORY\n"
-                         "       a8q4_projected_residual_t1_qual --serialize-json-text FILE\n";
+                         "       a8q4_projected_residual_t1_qual --serialize-json-text FILE\n"
+                         "       a8q4_projected_residual_t1_qual --down-benchmark --out-json NEW.json\n";
             return 2;
         }
         const std::filesystem::path output = argv[2];
@@ -469,7 +541,8 @@ int main(int argc, char** argv) {
         std::smatch static_match;
         const std::regex static_expression(
             "a8q4_projected_residual_t1_static: PASS .*vgpr=([0-9]+) sgpr=([0-9]+) "
-            "wave32=true lds=0 scratch=0 spills=0");
+            "wave32=true lds=0 scratch=0 spills=0 down_stage2_dot8=32 "
+            "down_stage2_vgpr=([0-9]+) down_stage2_sgpr=([0-9]+) down_stage2_occupancy=16");
         if (!std::regex_match(static_text, static_match, static_expression))
             fail("projected residual static receipt differs");
         // DRM card ordinals can change across driver/container lifecycles. Bind
@@ -577,6 +650,9 @@ int main(int argc, char** argv) {
         report << "  ],\n  \"static\":{\"status\":\"passed\",\"native_iu4_dot8\":true,"
                   "\"wave_size\":32,\"vgpr\":" << static_match[1].str()
                << ",\"sgpr\":" << static_match[2].str()
+               << ",\"down_stage2_dot8\":32,\"down_stage2_vgpr\":" << static_match[3].str()
+               << ",\"down_stage2_sgpr\":" << static_match[4].str()
+               << ",\"down_stage2_occupancy\":16"
                << ",\"lds_bytes\":0,\"scratch_bytes\":0,\"spill_count\":0,"
                   "\"assembly_sha256\":\"" << sha256_file(assembly)
                << "\",\"receipt_sha256\":\"" << sha256_file(static_receipt)

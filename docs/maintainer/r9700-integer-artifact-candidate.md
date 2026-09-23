@@ -72,7 +72,13 @@ unchanged. The public workspace keeps its A8 capacity while the A4 consumer bind
 its exact-sized prefix. `q4_activation_profile` and `q4_prefill_gate_up_a4` in PPL
 and benchmark reports identify this mixed execution; `q4_activation_bits: 8` alone
 does not describe it. The default remains uniform A8. This is a bounded precision
-evaluation, not automatic promotion or a claim that the generic A4 kernel is faster.
+evaluation, not automatic precision promotion. The admitted cooperative consumer uses
+signed IU4 ping/pong staging at full T64 tiles for this exact gate/up geometry, with
+the qualified single-bank tail consumer otherwise. On the selective-cap recipe,
+whole P4096/chunk2048 prefill measures1489–1498tok/s versus uniformA8's1431–1446;
+all six retained mixed-precision NLL sidecars are unchanged. This is a kernel speedup,
+not a removal of the mixed recipe's10-versus6 newly severe technical-prefill positions.
+See the2026-09-23 compact-model checkpoint in `docs/performance.md`.
 
 ## Direct BF16 source and byte contract
 

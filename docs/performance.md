@@ -100,8 +100,46 @@ These are workload-specific C1 results, not a proven ceiling or a C2–4 admissi
 
 Mixed-A4 cooperative single-bank gate/up preserves all six prior mixed-precision NLL sidecars
 byte-for-byte, but wholeprefill1376–1389tok/s remains belowuniformA8. ExactN34816/K5120/T2048
-completequantize+matrix timing gives A4 7.4804ms versus A8 5.6684ms; public-input qualification
-and represented-code FP64 both pass. Retain uniformA8 while evaluating A4 ping/pong staging.
+completequantize+matrix timing gives A4 7.4804ms versus A8 5.6684ms.
+The selected A4 ping/pong consumer reduces this to5.6628ms (paired A8 5.8518ms);
+wholeprefill wiki/technical/code=1498.1668/1492.7539/1488.6179tok/s. Public-input FP64 at129/2048,
+exactcodec/represented-code FP64, and all six retained mixed-precision NLL sidecars pass.
+ISA uses4signedIU4 instructions/group,73VGPR,13056LDS,no scratch,occupancy16. A8's original
+owning kernel and emitted instruction schedule are preserved. Wholeevidence:
+`speed-selective-cap-pingpong-original-a8_a8-{wiki,technical,code}/` in the package above.
+Retain uniformA8 as the default precision choice; the mixedrecipe still adds10versus6 newly
+severe technical-prefill positions despite passing the same2%NVFP4PPL screen. The fast A4
+kernel is selected within the explicitly enabled mixed evaluator, not by a runtime flag.
+
+Further DFlash row-sharing PV passes completeFP64/serial/graph checks and improves W5/W6
+Op latency to0.2440/0.2831ms, but wholeK4/K5=89.4565/105.4945tok/s shows no material consistent
+gain over staged loads. It is rejected and removed; microbenchmark reuse alone is insufficient.
+
+The final base-decode change stages two raw G64 groups in the N5120/K17408 projected-residual
+operation. Integer dot order, serial FP32 group FMAs, explicit BF16 delta and residual addition
+remain unchanged; K6144 keeps its incumbent. Full5120-output independent FP64, exact unfused
+and graph parity, guards and poison checks pass. Three cold weight copies with80MiB scrub
+measure0.1336815→0.1277205ms. ISA has32nativeIU4dot8 instructions,58VGPR,18SGPR, noLDS/scratch,
+occupancy16, and both groups' raw loads precede computation.
+Balanced C1/P4096/G128/chunk2048/maxctx4224 base-only ABBA whole measurements give controls
+29.8817/29.8317 versus selected30.1973/30.1730 outputtok/s; all12 measured runs retain every
+baseline token. Evidence: `residual-stage2-whole/` and `residual-down-{before,stage2}.json`.
+Depth4 remains numerically exact but only reaches0.1264000ms, below the0.2ms/token material
+saving bound over depth2; it is removed. Prior losing CTA and gate/up-prefetch sweeps are not
+repeated. These results establish the requested C1 targets on the stated workloads, not memory
+bandwidth saturation, a universal throughput guarantee, or an optimization ceiling.
+The first final-linked confirmation measured29.4460tok/s with exact tokens. A follow-up balanced
+old/final/final/old comparison measured30.1642/30.1673/29.5064/29.6305. Both binaries show
+run-to-run variation, not a consistent final-build regression: their entire KV/GDN objects and
+named dot8/residual/GDN-pair/A8-prefill machine code and resource metadata are identical.
+Report approximately30tok/s at4K, with observed29.45–30.20 range, not a guaranteed30tok/s
+minimum on every run. All output-token checks still pass. Evidence: `ordinary-final-code/`
+and `final-linked-comparison/`; no failed or slow result was discarded.
+Final-linked shortchat confirmation measures30.7130 ordinary,75.5710 K4 and70.7222 K5
+outputtok/s, all three repetitions exactordinarytokens (`final-linked-chat/`). Both C1 targets
+are satisfied on this delivered build and workload. CLI, serving, PPL and benchmark rebuilds
+pass; uniformA8 and mixedA4 public dispatch, standaloneA4 regression and selected down Op
+qualification pass. No further material winner remains in the bounded candidates above.
 
 The companion is produced with `compose_fp8_capped_dflash`, preserving every selected base
 payload and copying only the donor's66 DFlash objects (32Q4/34BF16). Both selector codebooks

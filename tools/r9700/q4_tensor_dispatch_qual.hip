@@ -25,21 +25,30 @@
 namespace {
 
 constexpr bool kMixed = ninfer::ops::r9700::linear::kQ4PrefillGateUpA4;
-constexpr std::uint32_t kTokens = kMixed ? 129 : 3;
+std::uint32_t gTokens = kMixed ? 129 : 3;
 constexpr std::uint32_t kRows = kMixed ? 34816 : 32;
 constexpr std::uint32_t kColumns = kMixed ? 5120 : 192;
 constexpr std::uint32_t kPaddedColumns = kMixed ? 5120 : 256;
 constexpr std::uint32_t kGroup = 64;
-constexpr std::uint32_t kActiveBits = kMixed ? 4 : ninfer::ops::r9700::linear::kQ4ActivationBits;
+std::uint32_t gActiveBits = kMixed ? 4 : ninfer::ops::r9700::linear::kQ4ActivationBits;
 
 // The mixed evaluator exercises the real gate/up geometry and its first tail
 // width. Sample complete independent FP64 dot products at tile/shape boundaries;
 // still check every output for finiteness and every output for poison propagation.
-constexpr bool oracle_position(std::uint32_t token, std::uint32_t row) {
+bool oracle_position(std::uint32_t token, std::uint32_t row) {
     if (!kMixed) return true;
     const bool selected_token = token == 0 || token == 1 || token == 15 || token == 16 ||
-        token == 63 || token == 64 || token == 127 || token == 128;
+        token == 63 || token == 64 || token == 127 || token == 128 ||
+        token == gTokens/2 || token + 2 == gTokens || token + 1 == gTokens;
     return selected_token && (row < 32 || (row >= kRows/2 && row < kRows/2+32) || row >= kRows-32);
+}
+
+std::uint32_t oracle_positions() {
+    if (!kMixed) return gTokens*kRows;
+    std::uint32_t count = 0;
+    for (std::uint32_t token = 0; token < gTokens; ++token)
+        if (oracle_position(token, 0)) count += 96;
+    return count;
 }
 
 [[noreturn]] void fail(const std::string& message) { throw std::runtime_error(message); }
@@ -121,15 +130,15 @@ struct HostActivation {
 };
 
 HostActivation quantize_activation(const std::vector<hip_bfloat16>& input) {
-    constexpr int maximum_code =
-        kActiveBits == 8 ? 127 : 7;
-    constexpr int minimum_code =
-        kActiveBits == 8 ? -127 : -8;
+    const int maximum_code =
+        gActiveBits == 8 ? 127 : 7;
+    const int minimum_code =
+        gActiveBits == 8 ? -127 : -8;
     HostActivation result{
-        std::vector<int>(static_cast<std::size_t>(kTokens) * kPaddedColumns),
-        std::vector<std::uint16_t>(static_cast<std::size_t>(kTokens) *
+        std::vector<int>(static_cast<std::size_t>(gTokens) * kPaddedColumns),
+        std::vector<std::uint16_t>(static_cast<std::size_t>(gTokens) *
                                    (kPaddedColumns / kGroup))};
-    for (std::uint32_t token = 0; token < kTokens; ++token) {
+    for (std::uint32_t token = 0; token < gTokens; ++token) {
         for (std::uint32_t group = 0; group < kPaddedColumns / kGroup; ++group) {
             float maximum = 0.0F;
             for (std::uint32_t lane = 0; lane < kGroup; ++lane) {
@@ -197,8 +206,8 @@ HostWeights make_weights() {
 }
 
 std::vector<hip_bfloat16> make_input() {
-    std::vector<hip_bfloat16> input(static_cast<std::size_t>(kTokens) * kColumns);
-    for (std::uint32_t token = 0; token < kTokens; ++token) {
+    std::vector<hip_bfloat16> input(static_cast<std::size_t>(gTokens) * kColumns);
+    for (std::uint32_t token = 0; token < gTokens; ++token) {
         for (std::uint32_t column = 0; column < kColumns; ++column) {
             const int code = static_cast<int>((token * 17U + column * 13U) % 65U) - 32;
             input[static_cast<std::size_t>(token) * kColumns + column] =
@@ -210,8 +219,8 @@ std::vector<hip_bfloat16> make_input() {
 
 std::vector<hip_bfloat16> quantized_reference(const HostActivation& activation,
                                  const HostWeights& weights) {
-    std::vector<hip_bfloat16> output(static_cast<std::size_t>(kTokens) * kRows);
-    for (std::uint32_t token = 0; token < kTokens; ++token) {
+    std::vector<hip_bfloat16> output(static_cast<std::size_t>(gTokens) * kRows);
+    for (std::uint32_t token = 0; token < gTokens; ++token) {
         for (std::uint32_t row = 0; row < kRows; ++row) {
             if (!oracle_position(token, row)) continue;
             double sum = 0.0;
@@ -248,7 +257,7 @@ std::pair<double, double> logical_oracle(const std::vector<hip_bfloat16>& input,
                                        const HostWeights& weights,
                                        std::uint32_t token, std::uint32_t row) {
     double sum = 0.0, budget = 0.0;
-    constexpr double max_code = kActiveBits == 8 ? 127.0 : 7.0;
+    const double max_code = gActiveBits == 8 ? 127.0 : 7.0;
     for (std::uint32_t group = 0; group < kPaddedColumns/kGroup; ++group) {
         const double scale = half_value(weights.scales[row*(kPaddedColumns/kGroup)+group]);
         double max_input = 0.0, weight_l1 = 0.0;
@@ -284,9 +293,9 @@ void write_json(const std::filesystem::path& path, bool passed, const std::strin
            "\"qwen3.8-27b/r9700-q4-w8-mse-n16k16-eval\"],\n"
         << "  \"q4_activation_bits\": "
         << ninfer::ops::r9700::linear::kQ4ActivationBits << ",\n"
-        << "  \"active_q4_activation_bits\": " << kActiveBits << ",\n"
-        << "  \"oracle_positions\": " << (kMixed ? 768U : kTokens*kRows) << ",\n"
-        << "  \"shape\": {\"tokens\": " << kTokens << ", \"rows\": " << kRows
+        << "  \"active_q4_activation_bits\": " << gActiveBits << ",\n"
+        << "  \"oracle_positions\": " << oracle_positions() << ",\n"
+        << "  \"shape\": {\"tokens\": " << gTokens << ", \"rows\": " << kRows
         << ", \"columns\": " << kColumns << ", \"padded_columns\": "
         << kPaddedColumns << "},\n"
         << "  \"workspace_bytes\": " << workspace_bytes << ",\n"
@@ -308,8 +317,8 @@ void write_json(const std::filesystem::path& path, bool passed, const std::strin
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc != 3 || std::string_view(argv[1]) != "--out-json") {
-        std::cerr << "usage: q4_tensor_dispatch_qual --out-json PATH\n";
+    if ((argc != 3 && argc != 5) || std::string_view(argv[1]) != "--out-json") {
+        std::cerr << "usage: q4_tensor_dispatch_qual --out-json PATH [--tokens T (mixed build)]\n";
         return 2;
     }
     const std::filesystem::path path(argv[2]);
@@ -320,6 +329,18 @@ int main(int argc, char** argv) {
     bool status_poisoned = false;
     double maximum_logical_error = 0.0;
     try {
+        if (argc == 5) {
+            if (!kMixed || std::string_view(argv[3]) != "--tokens")
+                fail("--tokens requires the mixed gate/up build");
+            std::size_t consumed = 0;
+            const auto value = std::stoul(argv[4], &consumed);
+            if (consumed != std::string_view(argv[4]).size() || value == 0 || value > 4096)
+                fail("qualification tokens must be in [1,4096]");
+            gTokens = static_cast<std::uint32_t>(value);
+            // Independent expectation for this fixed real gate/up geometry. Do not consult
+            // production dispatch: a selector regression must fail codec/output qualification.
+            gActiveBits = gTokens > 128U ? 4U : 8U;
+        }
         device = select_r9700();
         const std::vector<hip_bfloat16> input = make_input();
         const HostWeights weights = make_weights();
@@ -351,10 +372,10 @@ int main(int argc, char** argv) {
 
         ninfer::Tensor x(d_input.data(), ninfer::DType::BF16,
                          {static_cast<std::int32_t>(kColumns),
-                          static_cast<std::int32_t>(kTokens)});
+                          static_cast<std::int32_t>(gTokens)});
         ninfer::Tensor output(d_output.data(), ninfer::DType::BF16,
                               {static_cast<std::int32_t>(kRows),
-                               static_cast<std::int32_t>(kTokens)});
+                               static_cast<std::int32_t>(gTokens)});
         ninfer::Weight weight{};
         weight.payload = d_weight_codes.data();
         weight.payload_bytes = weights.codes.size() +
@@ -373,13 +394,13 @@ int main(int argc, char** argv) {
         weight.padded_shape[1] = kPaddedColumns;
 
         workspace_bytes = ninfer::ops::linear_workspace_capacity_bytes(
-            ninfer::QType::Q4G64_F16S, kTokens, kColumns);
+            ninfer::QType::Q4G64_F16S, gTokens, kColumns);
         const std::size_t expected_workspace =
             ninfer::ops::r9700::linear::kQ4ActivationBits == 8
                 ? ninfer::ops::r9700::linear::a8q4g64_activation_workspace_capacity_bytes(
-                      kTokens, kColumns)
+                      gTokens, kColumns)
                 : ninfer::ops::r9700::linear::q4g64_activation_workspace_capacity_bytes(
-                      kTokens, kColumns);
+                      gTokens, kColumns);
         if (workspace_bytes != expected_workspace) fail("compile-selected workspace mismatch");
         ninfer::WorkspaceArena workspace(workspace_bytes);
         ninfer::ops::linear(x, weight, output, workspace, nullptr);
@@ -420,7 +441,7 @@ int main(int argc, char** argv) {
                    maximum_bf16_steps,
                    status_poisoned, maximum_logical_error);
         std::cout << "Q4 Tensor/WorkspaceArena A"
-                  << kActiveBits
+                  << gActiveBits
                   << ": PASS workspace_bytes=" << workspace_bytes
                   << " max_bf16_steps=" << maximum_bf16_steps << '\n';
         return 0;

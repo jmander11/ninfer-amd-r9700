@@ -76,58 +76,50 @@ above apply to every command.
 
 ### Current checkpoint
 
-ACTIVE USER GOAL (2026-09-23): optimize the saved Q4/FP8 selective-cap model to at least
+COMPLETED USER GOAL (2026-09-23): optimize the saved Q4/FP8 selective-cap model to at least
 30 output tok/s ordinary decode and 60 output tok/s DFlash at C1; continue past these targets
 when bounded profiling identifies clear material wins. This explicitly reopens kernel work,
 recipe-specific DFlash integration, and mixed-A4 cooperative prefill, with decode first.
 Historical rates on other artifacts/workloads are motivation, not matched baselines or ceilings.
 - [x] Establish matched C1 baseline and whole-inference attribution for the installed selective-cap
   artifact; determine whether mixed-recipe dispatch bypasses admitted Q4 fused routes.
-- [ ] Qualify and optimize base-decode bottlenecks toward >=30 tok/s; measure whole inference.
-- [ ] Bind a correctly quantized DFlash companion retaining BF16 codebooks/private state; qualify
+- [x] Qualify and optimize base-decode bottlenecks toward >=30 tok/s; measure whole inference.
+- [x] Bind a correctly quantized DFlash companion retaining BF16 codebooks/private state; qualify
   greedy-token/state correctness and optimize K4/K5 toward >=60 output tok/s at C1.
-- [ ] Implement a well-motivated cooperative mixed-A4 prefill challenger, qualify against the
+- [x] Implement a well-motivated cooperative mixed-A4 prefill challenger, qualify against the
   public-input oracle and retained quality samples, and promote only whole-prefill wins over A8.
-- [ ] Evaluate remaining clearly evidenced material wins, record achieved rates and limitations,
+- [x] Evaluate remaining clearly evidenced material wins, record achieved rates and limitations,
   and commit coherent implementation/results at natural milestones.
 Preserve the immutable 5090 reference and selected near-NVFP4 quality; distinguish the <=2%
 per-text PPL comparison from the separate BF16-source admission gate and report severe positions.
 Use matched commands, prompt/context, graph mode, auto power, and C<=4. Do not silently substitute
 another model, speculative throughput for ordinary decode, or profiler timing for admission.
 Unrelated XAttention and broad capacity campaigns remain paused.
-Current evidence: `profiles/bench/r9700-compact-decode-20260923/`. Installed-model code
-baseline C1/P4096/G128/chunk2048 is20.2346tok/s; exact-token trace attributes34.4% of kernel
-time (15.884ms/token) to serial value-weighted attention,39.8% to generic Q4 dot8,7.6% to
-paired GDN Q4. Local-Q4 norm/residual fusion removes unnecessary whole-inventory exclusions;
-combined with a wave32 PV grid candidate measures20.7168tok/s with all retained tokens exact.
-PV grid alone has no demonstrated material win (full4096 oracle passes,0.8096ms/PV).
-Next bounded PV candidate stages four independent token loads before the unchanged ordered
-FP32 FMA chain. Pagehoist alone reaches21.9507tok/s; full load staging reaches26.3124tok/s,
-all retained code tokens exact. Full4096FP64+exactserialPV oracle and64–67tailcontexts pass;
-context3 fails separateFP8-query attention criterion afterPVpasses (retained, not waived).
-Load-ahead8 sweep pending; currentbest4 uses26VGPR,noLDS/scratch,occupancy16.
-New17.0025GBselective-cap DFlashcompanion composed byte-exact and actual1190-object strict
-binder passes. Matched shortchatP89/G128/chunk2048 ordinary/K4/K5=30.7514/73.7744/69.1459tok/s;
-all3reps exactordinarytokens. Targets exceeded forshortchat only;4K optimization andDFlash
-qualification stillactive. Stage8PV0.1323ms,stage16PV0.0871ms fulloracle+serialexactPASS;
-stage16whole29.2859 andstage32whole29.7623tok/s, exactbaseline tokens. Stage32 selected;
-stage64 spills52bytes and explicitpagepointers regress0.0626→0.1394ms, both removed.
-Finalstage32all16layouts at65 also pass. A4cooperativegate/up-only candidate publicoracle
-128/129/130/2048PASS; all six same-precision PPL sidecars reproduce byte-exactly.
-Whole prefill1376–1389tok/s still loses to uniformA8; do not promote it as an A8 speedup.
-Next bounded question: cooperative A4 ping/pong staging versus its single-bank implementation.
-4K DFlash graph allowance deficit (75MiB actual vs74MiB planned) fixed by charging extra
-per-topology definition updates; allocation guard unchanged, host C1–4/K4/K5 checks pass.
-Matched companion P4096/G128/chunk2048/context4240 ordinary/K4/K5 now measures
-28.6544/68.8281/83.2839tok/s with all three repetitions exactly matching ordinary tokens.
-Shortchat K4 and code K5 differ in acceptance: do not claim a universal best draft length.
-Long-context K5 graph attribution identifiesbatchedPV27.77%; sharedorderedloadstaging passes
-completeFP64/serialall-row/graph checks at134/135and4101/4102. CompleteW5/W6attention
-0.9007/0.9436→0.2818/0.3450ms; wholeordinary/K4/K5=29.8313/89.6352/104.8799tok/s,
-all3reps exactordinarytokensandacceptance. Shortchatstagingordinary/K4/K5=30.8765/75.6452/
-69.5402tok/s, allrepetitions exact. NextboundedPV
-question is sharingV/scaleloads across5/6rows without changingFMAorder. Ordinary4K stillnear30.
-Integration checkpointsbe19fb30/1e83910f/807fc291; evidence retains all failed attempts.
+Evidence and exact commands: `profiles/bench/r9700-compact-decode-20260923/`;
+completed results belong in `docs/performance.md`, not a growing experiment diary here.
+- Base-only C1/P4096/G128: 20.2346 baseline → 30.1973/30.1730 tok/s in balanced final A/B;
+  controls29.8817/29.8317. Local Q4 fusions, ordered PV staging and down-only two-group raw
+  loads preserve every retained token. Full FP64, explicit BF16 seams and graph checks pass.
+- New17.0025GB DFlash companion preserves all base payloads and BF16 codebooks; actual1190-object
+  binding passes. C1 code4K K4/K5=89.6352/104.8799 tok/s; shortchat=75.6452/69.5402, with
+  ordinary30.8765. Every speculative repetition matches ordinary tokens exactly. Draft-length
+  preference is workload-dependent. The graph-update allowance fix retains fail-closed checks.
+- Mixed A4 ping/pong prefill=1489–1498 tok/s versus uniformA8's1431–1446; all six mixed PPL
+  sidecars unchanged, public FP64 passes, original A8 ISA preserved. Fast kernel is selected
+  within the mixed evaluator; uniformA8 remains default because mixed has10 versus6 new severe
+  technical positions. This is not final BF16-source production admission.
+- Rejected and removed: PV stage64 spills, explicit page pointers regress, DFlash row-sharing
+  gives no material consistent whole win. Do not repeat prior losing T1 CTA or gate/up-prefetch
+  sweeps. Context3's separate FP8-query oracle failure is retained, not waived; changed PV passes.
+- Depth4 is rejected:0.1264000ms versus depth2's0.1277205, below material whole saving bound.
+- Final linked4K confirmation and balanced comparison show29.45–30.20tok/s across both
+  binaries with identical ordinary-kernel machine code and exact tokens. No consistent build
+  regression, but no guaranteed30tok/s floor on every4K run. Retain all slow cells.
+- Final linked shortchat ordinary/K4/K5=30.7130/75.5710/70.7222tok/s, all repetitions exact;
+  both C1 targets achieved on the delivered build. CLI/serve/PPL/bench builds and focused
+  oracle/static/graph checks pass. No remaining material winner in this bounded investigation;
+  code/results are committed with this ledger. Prior checkpoints:be19fb30,1e83910f,807fc291,
+  23bc2389. No universal ceiling or C2–4 speed claim; unrelated paused work stays paused.
 
 COMPLETED USER REQUEST (2026-09-23): identify a smaller Q4/FP8 recipe close to the retained
 5090 NVFP4 PPL, then establish where A4 can replace A8 without unacceptable quality loss.
