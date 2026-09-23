@@ -58,8 +58,8 @@ candidate::ProjectionControlArgs args(Guarded<hip_bfloat16>& x,Weights& w,Output
         w.log.data(),w.bias.data(),o.g.data(),o.beta.data()};
 }
 void incumbent(const candidate::ProjectionControlArgs& a,hipStream_t s) {
-    HIP_CHECK(ninfer::ops::r9700::gdn::bf16_projected_control_t1(a.projection.input,
-        a.a_weight,a.b_weight,a.a_log,a.dt_bias,a.g,a.beta,s));
+    HIP_CHECK(ninfer::ops::r9700::gdn::bf16_projected_control(a.projection.input,
+        a.a_weight,a.b_weight,a.a_log,a.dt_bias,a.g,a.beta,1U,s));
     HIP_CHECK(linear::a8q4g64_gdn_pair_t1(a.projection,s));
 }
 struct Graph {

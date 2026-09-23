@@ -220,6 +220,39 @@ class CompareTest(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, message):
                     compare(left, right, "target")
 
+    def test_selected_pre_recurrence_state_identity_and_difference(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            paths = []
+            for role, width in zip(ROLES["selected"], (1, 5)):
+                path = self.recurrent_state_fixture(directory,
+                    "text-append-frontier129-column0", role, layer=1)
+                value = json.loads(path.read_text())
+                value.update(role=role, capture_point="selected-column-zero-state-before-recurrence",
+                    text_layer=2, gdn_index=2, batch=2, selected_row=1, stable_lane=1,
+                    width=width, selected_column=0, flat_column=width, absolute_frontier=203,
+                    base_frontier=202, state_frontier=202, linear_state_slot=1,
+                    selected_token=42, selected_cache_position=202, selected_rope_position=202,
+                    expected_history_sha256="a" * 64)
+                path.write_text(json.dumps(value)); paths.append(path)
+            result = compare_recurrent_state(*paths, "selected")
+            self.assertIsNone(result["first_difference"])
+            self.assertEqual(result["state_frontier"], 202)
+            original = json.loads(paths[1].read_text())
+            for changes in ({"linear_state_slot": 0}, {"state_frontier": 201},
+                            {"expected_history_sha256": "b" * 64},
+                            {"selected_column": 1, "flat_column": 6,
+                             "base_frontier": 201}, {"selected_token": 43}):
+                paths[1].write_text(json.dumps(dict(original, **changes)))
+                with self.subTest(changes=changes), self.assertRaises(RuntimeError):
+                    compare_recurrent_state(*paths, "selected")
+            sidecar = paths[1].with_suffix(".bin")
+            data = bytearray(sidecar.read_bytes()); struct.pack_into("<f", data, 28, 0.5)
+            sidecar.write_bytes(data); original["sidecar_fnv1a64"] = fnv1a64(data)
+            paths[1].write_text(json.dumps(original))
+            result = compare_recurrent_state(*paths, "selected")
+            self.assertEqual(result["first_difference"]["first_element_index"], 7)
+
     def test_selected_gdn_layer33_identity_and_localization(self):
         with tempfile.TemporaryDirectory() as raw:
             directory = Path(raw)

@@ -406,6 +406,8 @@ __global__ __launch_bounds__(kBlock) void bf16_projected_control_t1_kernel(
     const hip_bfloat16* b_weight, const float* a_log, const float* dt_bias,
     float* g, float* beta) {
     const std::uint32_t head = blockIdx.x;
+    hidden += static_cast<std::size_t>(blockIdx.y) * kControlColumns;
+    const std::size_t output = static_cast<std::size_t>(blockIdx.y) * kControlHeads + head;
     const std::size_t base = static_cast<std::size_t>(head) * kControlColumns;
     float a_partial = 0.0F;
     float b_partial = 0.0F;
@@ -431,9 +433,9 @@ __global__ __launch_bounds__(kBlock) void bf16_projected_control_t1_kernel(
         const hip_bfloat16 br = static_cast<hip_bfloat16>(b_reduction[0]);
         const float av = static_cast<float>(ar) + dt_bias[head];
         const float softplus = av > 20.0F ? av : log1pf(expf(av));
-        g[head] = -expf(a_log[head]) * softplus;
+        g[output] = -expf(a_log[head]) * softplus;
         const float bv = static_cast<float>(br);
-        beta[head] = 1.0F / (1.0F + expf(-bv));
+        beta[output] = 1.0F / (1.0F + expf(-bv));
     }
 }
 
@@ -715,11 +717,12 @@ hipError_t control_gates_bf16(const hip_bfloat16* a, const hip_bfloat16* b, cons
                                                    stream, a, b, a_log, dt_bias, g, beta, count, value_heads); });
 }
 
-hipError_t bf16_projected_control_t1(
+hipError_t bf16_projected_control(
     const hip_bfloat16* hidden, const hip_bfloat16* a_weight,
     const hip_bfloat16* b_weight, const float* a_log, const float* dt_bias,
-    float* g, float* beta, hipStream_t stream) noexcept {
-    constexpr std::size_t hidden_bytes = kControlColumns * sizeof(hip_bfloat16);
+    float* g, float* beta, std::uint32_t tokens, hipStream_t stream) noexcept {
+    if (tokens < 1U || tokens > 24U) return hipErrorInvalidValue;
+    const std::size_t hidden_bytes = kControlColumns * tokens * sizeof(hip_bfloat16);
     constexpr std::size_t weight_bytes =
         static_cast<std::size_t>(kControlHeads) * kControlColumns * sizeof(hip_bfloat16);
     constexpr std::size_t vector_bytes = kControlHeads * sizeof(float);
@@ -733,8 +736,8 @@ hipError_t bf16_projected_control_t1(
         byte_range(b_weight, weight_bytes / sizeof(hip_bfloat16)),
         byte_range(a_log, vector_bytes / sizeof(float)),
         byte_range(dt_bias, vector_bytes / sizeof(float)),
-        byte_range(g, vector_bytes / sizeof(float)),
-        byte_range(beta, vector_bytes / sizeof(float)),
+        byte_range(g, tokens * vector_bytes / sizeof(float)),
+        byte_range(beta, tokens * vector_bytes / sizeof(float)),
     };
     for (std::size_t first = 0; first < ranges.size(); ++first) {
         for (std::size_t second = first + 1; second < ranges.size(); ++second) {
@@ -742,7 +745,7 @@ hipError_t bf16_projected_control_t1(
         }
     }
     return checked_launch(true, [&] {
-        hipLaunchKernelGGL(bf16_projected_control_t1_kernel, dim3(kControlHeads), dim3(kBlock),
+        hipLaunchKernelGGL(bf16_projected_control_t1_kernel, dim3(kControlHeads, tokens), dim3(kBlock),
                            0, stream, hidden, a_weight, b_weight, a_log, dt_bias, g, beta);
     });
 }
@@ -775,6 +778,3 @@ hipError_t recurrent_bf16_fp32(const hip_bfloat16* q, const hip_bfloat16* k,
 }
 
 } // namespace ninfer::ops::r9700::gdn
-
-// Keep the exact-order paired controls in the existing GDN device module.
-#include "bf16_projected_control_wave32_impl.h"

@@ -1,6 +1,5 @@
 #include "ops/r9700/linear/r9700_linear.h"
 #include "ops/r9700/linear/a8q4_verify_projection.h"
-#include "ops/r9700/linear/bf16_staging_pair.h"
 #include "ops/r9700/linear/r9700_q4_activation_profile.h"
 #include "ops/r9700/linear/r9700_w8_activation_profile.h"
 

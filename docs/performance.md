@@ -60,9 +60,43 @@ expected value exactly.
 Copy bus rate counts both the read and write traffic. This is the hardware bandwidth bound, not a
 model or individual-Op throughput claim.
 
-## Decode bandwidth and concurrency follow-up (2026-09-22)
+## Corrected concurrent decode qualification (2026-09-22)
 
-The current selected build was measured without kernel or recipe changes. The fresh native
+The unchanged selective-protected tiled-head artifact named below passes the finite P89/G128
+greedy workload at C1–4 with DFlash K4/K5 exactly matching fresh same-C ordinary tokens.
+All12 graph cells use warm1/r3; all9 C2–4 eager cells use warm0/r1. Repeated graph outputs
+and eager/graph tokens and speculative accounting agree exactly. R9700/gfx1201, ROCm10,
+fixed G16 cache, context1024, chunk4096 and power auto are unchanged.
+
+| Concurrency | Ordinary aggregate tok/s | DFlash K4 aggregate tok/s | DFlash K5 aggregate tok/s |
+|---|---:|---:|---:|
+| 1 | 27.51 | 58.75 | 57.29 |
+| 2 | 34.04 | 69.31 | 64.42 |
+| 3 | 45.34 | 87.94 | 77.15 |
+| 4 | 57.67 | 97.99 | 86.73 |
+
+These are medians of three unprofiled graph repetitions; divide aggregate throughput by C for
+normalized per-request throughput, not measured request latency. Added lanes rotate the corpus.
+K4 wins at every measured C; C2 K4 now exceeds C1 aggregate throughput by18%.
+The correctness changes cost about8% C1 speculative speed versus the earlier measurement below.
+C4 speculative rates also decrease; the old faster numbers failed exact-greedy qualification.
+
+The corrections canonicalize small-token K5120 RMSNorm, protected BF16 Linear, projected GDN
+controls, and accepted-token replay-fold normalization/dot association. Independent FP64 Op
+oracles pass; same-input checks establish cross-width equality and replay state matches ordinary
+snapshot state exactly. The artifact, output-head math and tolerances are unchanged, and target
+verification is still batched. C4 ordinary output changes from its old width-dependent arithmetic;
+shared ordinary lanes now match across C1–4. This finite workload is not universal context parity,
+terminal artifact/PPL selection, or proof of bandwidth saturation or exhausted speed headroom.
+
+Evidence, exact launch commands and retained failed localization runs:
+`profiles/bench/r9700-dflash-concurrent-correctness-20260922/` (`run_final.py`,
+`summarize_final.py`, `final-summary.json`, per-cell reports). Output directories are create-only.
+
+## Historical pre-correction bandwidth and concurrency follow-up (2026-09-22)
+
+The earlier selected build was measured without kernel or recipe changes. Its numerical failures
+are resolved only by the subsequent corrected qualification above. The fresh native
 4 GiB read-stream probe sustained **636.0 GB/s median** under `auto`, with exact checksum;
 write/copy medians were 588.0/548.6 GB/s. This is a streaming reference, not measured inference
 traffic. The installed gfx1201 counters do not reliably establish absolute GDDR6 byte rates.
@@ -133,7 +167,8 @@ the fallback-bearing C2–4 schedule as a measured physical traffic estimate.
 
 ### Measured C2 verification cost
 
-Follow-up C1/C2 K4 traces reproduce each mode's saved tokens and accounting. Profiling measures
+Pre-correction C1/C2 K4 traces reproduce each mode's saved tokens and accounting. These are not
+timings of the corrected build above. Profiling measures
 kernel attribution, not unprofiled speed or physical memory utilization:
 
 | Active batch | Physical graph launches | Kernel ms/graph | Target-layer ms/graph |

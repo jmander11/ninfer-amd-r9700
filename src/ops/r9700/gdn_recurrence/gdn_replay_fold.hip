@@ -15,13 +15,13 @@ namespace {
 
 constexpr int kStateDim = 128;
 constexpr int kWaveSize = 32;
-constexpr int kValuesPerWave = 4;
 constexpr int kWavesPerBlock = 4;
-constexpr int kValuesPerBlock = kValuesPerWave * kWavesPerBlock;
-constexpr int kKeysPerLane = kStateDim / kWaveSize;
+constexpr int kThreadsPerValue = 8;
+constexpr int kValuesPerBlock = kWaveSize * kWavesPerBlock / kThreadsPerValue;
+constexpr int kKeysPerLane = kStateDim / kThreadsPerValue;
 constexpr float kL2NormEpsilon = 1.0e-6F;
 
-static_assert(kKeysPerLane == 4);
+static_assert(kKeysPerLane == 16);
 static_assert(kStateDim % kValuesPerBlock == 0);
 static_assert(sizeof(GdnReplayFoldKernelRow) == 80);
 static_assert(alignof(GdnReplayFoldKernelRow) == 8);
@@ -41,71 +41,11 @@ struct FoldGeometry {
 
 using FoldGeometry48x48 = FoldGeometry<48, 16, 48, 10240>;
 
-__device__ __forceinline__ float wave_sum(float value) {
-#pragma unroll
-    for (int offset = kWaveSize / 2; offset != 0; offset >>= 1) {
-        value += __shfl_down(value, offset, kWaveSize);
-    }
-    return __shfl(value, 0, kWaveSize);
-}
-
-__device__ __forceinline__ void load_state_lane(float (&lane_state)[kValuesPerWave][kKeysPerLane],
-                                                 const float* base, int value_base, int key_base) {
-#pragma unroll
-    for (int value = 0; value < kValuesPerWave; ++value) {
-#pragma unroll
-        for (int key = 0; key < kKeysPerLane; ++key) {
-            lane_state[value][key] =
-                base[static_cast<std::int64_t>(value_base + value) * kStateDim + key_base + key];
-        }
-    }
-}
-
-__device__ __forceinline__ void store_state_lane(
-    const float (&lane_state)[kValuesPerWave][kKeysPerLane], float* base, int value_base,
-    int key_base) {
-#pragma unroll
-    for (int value = 0; value < kValuesPerWave; ++value) {
-#pragma unroll
-        for (int key = 0; key < kKeysPerLane; ++key) {
-            base[static_cast<std::int64_t>(value_base + value) * kStateDim + key_base + key] =
-                lane_state[value][key];
-        }
-    }
-}
-
-__device__ __forceinline__ void load_normalized_key(float (&key)[kKeysPerLane],
-                                                     const hip_bfloat16* base, int key_base) {
-    float norm2 = 0.0F;
-#pragma unroll
-    for (int item = 0; item < kKeysPerLane; ++item) {
-        key[item] = static_cast<float>(base[key_base + item]);
-        norm2 = fmaf(key[item], key[item], norm2);
-    }
-    const float inverse_norm = rsqrtf(wave_sum(norm2) + kL2NormEpsilon);
-#pragma unroll
-    for (int item = 0; item < kKeysPerLane; ++item) { key[item] *= inverse_norm; }
-}
-
-__device__ __forceinline__ void apply_transition(
-    float (&lane_state)[kValuesPerWave][kKeysPerLane], const float (&key)[kKeysPerLane],
-    float local_value, float alpha, float beta) {
-#pragma unroll
-    for (int value = 0; value < kValuesPerWave; ++value) {
-        float state_key = 0.0F;
-#pragma unroll
-        for (int item = 0; item < kKeysPerLane; ++item) {
-            state_key = fmaf(lane_state[value][item], key[item], state_key);
-        }
-        state_key = wave_sum(state_key);
-        const float represented_value = __shfl(local_value, value, kWaveSize);
-        const float delta = beta * (represented_value - alpha * state_key);
-#pragma unroll
-        for (int item = 0; item < kKeysPerLane; ++item) {
-            lane_state[value][item] =
-                fmaf(delta, key[item], alpha * lane_state[value][item]);
-        }
-    }
+__device__ __forceinline__ float group_sum(float value) {
+    value += __shfl_xor(value, 4, kWaveSize);
+    value += __shfl_xor(value, 2, kWaveSize);
+    value += __shfl_xor(value, 1, kWaveSize);
+    return value;
 }
 
 template <class Geometry>
@@ -233,30 +173,53 @@ void replay_fold_kernel(FoldAccess<Geometry> access) {
     const std::int32_t value_head = static_cast<std::int32_t>(blockIdx.x);
     const int lane = static_cast<int>(threadIdx.x);
     const int wave = static_cast<int>(threadIdx.y);
-    const int value_base = state_tile * kValuesPerBlock + wave * kValuesPerWave;
-    const int key_base = lane * kKeysPerLane;
+    const int tid = wave * kWaveSize + lane;
+    const int value_row = state_tile * kValuesPerBlock + tid / kThreadsPerValue;
+    const int sublane = lane % kThreadsPerValue;
     const std::int32_t columns = access.active_columns(batch);
     if (columns == 0) { return; }
 
     float* recurrent = access.state_base(layer, batch, value_head);
-    float lane_state[kValuesPerWave][kKeysPerLane];
-    load_state_lane(lane_state, recurrent, value_base, key_base);
+    float lane_state[kKeysPerLane];
+#pragma unroll
+    for (int item = 0; item < kKeysPerLane; ++item)
+        lane_state[item] = recurrent[value_row * kStateDim + sublane + item*kThreadsPerValue];
+    __shared__ float key[kStateDim];
+    __shared__ float reduction[kStateDim];
 
     for (std::int32_t step = 0; step < columns; ++step) {
-        float key[kKeysPerLane];
-        load_normalized_key(key, access.key_base(layer, batch, value_head, step), key_base);
-        float local_value = 0.0F;
-        if (lane < kValuesPerWave) {
-            local_value = static_cast<float>(
-                access.value_base(layer, batch, value_head, step)[value_base + lane]);
+        // Match snapshot/record's represented-key normalization exactly. The
+        // whole 128-thread block cooperates, independently of batch or path.
+        key[tid] = static_cast<float>(access.key_base(layer, batch, value_head, step)[tid]);
+        reduction[tid] = key[tid] * key[tid];
+        __syncthreads();
+        for (int stride = kStateDim/2; stride != 0; stride >>= 1) {
+            if (tid < stride) reduction[tid] += reduction[tid + stride];
+            __syncthreads();
         }
+        key[tid] *= rsqrtf(reduction[0] + kL2NormEpsilon);
+        __syncthreads();
+        const float value = static_cast<float>(
+            access.value_base(layer, batch, value_head, step)[value_row]);
         float g;
         float beta;
         access.gate(layer, batch, value_head, step, g, beta);
-        apply_transition(lane_state, key, local_value, expf(g), beta);
+        const float alpha = expf(g);
+        float state_key = 0.0F;
+#pragma unroll
+        for (int item = 0; item < kKeysPerLane; ++item)
+            state_key = fmaf(lane_state[item], key[sublane + item*kThreadsPerValue], state_key);
+        state_key = group_sum(state_key);
+        const float delta = beta * (value - alpha*state_key);
+#pragma unroll
+        for (int item = 0; item < kKeysPerLane; ++item)
+            lane_state[item] = fmaf(delta, key[sublane + item*kThreadsPerValue], alpha*lane_state[item]);
+        __syncthreads();
     }
 
-    store_state_lane(lane_state, recurrent, value_base, key_base);
+#pragma unroll
+    for (int item = 0; item < kKeysPerLane; ++item)
+        recurrent[value_row * kStateDim + sublane + item*kThreadsPerValue] = lane_state[item];
     access.publish_conv_history(layer, batch, value_head, state_tile, columns);
 }
 

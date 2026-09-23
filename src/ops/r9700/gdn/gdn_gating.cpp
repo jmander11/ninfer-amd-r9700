@@ -2,7 +2,6 @@
 
 #include "core/device.h"
 #include "ops/r9700/gdn/gdn_ops.h"
-#include "ops/r9700/gdn/bf16_projected_control_wave32.h"
 
 #include <array>
 #include <cstddef>
@@ -84,9 +83,9 @@ void bf16_gdn_projected_gating(const Tensor& hidden, const Weight& a_weight,
     constexpr std::int32_t kColumns = 5120;
     constexpr std::int32_t kHeads = 48;
     if (hidden.dtype != DType::BF16 || hidden.data == nullptr || !hidden.is_contiguous() ||
-        hidden.ne[0] != kColumns || (hidden.ne[1] != 1 && hidden.ne[1] != 5 && hidden.ne[1] != 6) || hidden.ne[2] != 1 || hidden.ne[3] != 1) {
+        hidden.ne[0] != kColumns || hidden.ne[1] < 1 || hidden.ne[1] > 24 || hidden.ne[2] != 1 || hidden.ne[3] != 1) {
         throw std::invalid_argument(
-            "bf16_gdn_projected_gating: hidden must be contiguous BF16 [5120,T=1/5/6]");
+            "bf16_gdn_projected_gating: hidden must be contiguous BF16 [5120,T=1..24]");
     }
     const auto require_weight = [](const Weight& weight, const char* label) {
         constexpr std::uint64_t kBytes =
@@ -140,22 +139,13 @@ void bf16_gdn_projected_gating(const Tensor& hidden, const Weight& a_weight,
             }
         }
     }
-    if (hidden.ne[1] != 1) {
-        HIP_CHECK(r9700::gdn::bf16_projected_control_wave32({
-            static_cast<const hip_bfloat16*>(hidden.data),
-            static_cast<const hip_bfloat16*>(a_weight.qdata),
-            static_cast<const hip_bfloat16*>(b_weight.qdata),
-            static_cast<const float*>(A_log.data), static_cast<const float*>(dt_bias.data),
-            static_cast<float*>(g.data), static_cast<float*>(beta.data),
-            static_cast<std::uint32_t>(hidden.ne[1])}, stream));
-        return;
-    }
-    HIP_CHECK(r9700::gdn::bf16_projected_control_t1(
+    HIP_CHECK(r9700::gdn::bf16_projected_control(
         static_cast<const hip_bfloat16*>(hidden.data),
         static_cast<const hip_bfloat16*>(a_weight.qdata),
         static_cast<const hip_bfloat16*>(b_weight.qdata),
         static_cast<const float*>(A_log.data), static_cast<const float*>(dt_bias.data),
-        static_cast<float*>(g.data), static_cast<float*>(beta.data), stream));
+        static_cast<float*>(g.data), static_cast<float*>(beta.data),
+        static_cast<std::uint32_t>(hidden.ne[1]), stream));
 }
 
 } // namespace ninfer::ops

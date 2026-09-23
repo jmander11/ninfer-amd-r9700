@@ -56,18 +56,21 @@ and profiling work independent of the complete product build.
 
 The CMake qualifiers below exercise the selected public Linear routes on gfx1201 under `auto`.
 Use fresh output paths and serialize physical runs. Existing completed reports under
-`profiles/bench/r9700-{bf16-staging,w8-tiled-head,verify-pipeline-family}-20260922/`
+`profiles/bench/r9700-{w8-tiled-head,verify-pipeline-family}-20260922/`
 need not be repeated unless the affected implementation changes.
 
 ```bash
-cmake --build build-r9700 -j3 --target ninfer_r9700_bf16_staging_qual ninfer_r9700_w8_tiled_head_qual ninfer_r9700_a8q4_verify_projection_qual
-build-r9700/src/ninfer_r9700_bf16_staging_qual FRESH_DIRECTORY
+cmake --build build-r9700 -j3 --target ninfer_r9700_linear_op_qual ninfer_r9700_w8_tiled_head_qual ninfer_r9700_a8q4_verify_projection_qual
+build-r9700/src/ninfer_r9700_linear_op_qual --selective-protected-bf16
 build-r9700/src/ninfer_r9700_w8_tiled_head_qual FRESH_DIRECTORY
 build-r9700/src/ninfer_r9700_a8q4_verify_projection_qual --out-json FRESH.json
 ```
 
-BF16 staging covers the two protected projection shapes at T5/T6, including two-byte-offset
-buffers. Tiled W8 covers ordinary T1–3, A8 small/tail/prefill extents and A16 controls for the
+Protected BF16 projections now retain ordinary arithmetic at T1–24; the owning Linear qualifier
+checks their original represented-input FP64 formula, all-output same-column equality against T1,
+and exact eager/graph outputs. The superseded T5/T6 staging route and its comparison-only
+qualifier are removed; historical evidence remains under `profiles/bench/r9700-bf16-staging-20260922/`.
+Tiled W8 covers ordinary T1–3, A8 small/tail/prefill extents and A16 controls for the
 single losslessly tiled resident head; `--ordinary-only` restricts it to the coalesced T1–3
 consumer. The selected public Q4 qualifier covers N34816/K5120 gate/up, N5120/K6144,
 N12288/K5120 and N4096/K5120 at T5/T6. N12288 retains scale-gather; the other three
@@ -77,22 +80,35 @@ public eager/graph parity, poison recovery and guards. It contains no temporary
 comparison kernel or timing campaign. Selected artifact and whole results are in
 `docs/performance.md`.
 
-The selected no-workspace projected GDN controls use the unchanged T1 kernel and
-paired exact-order wave32 dots at T5/T6, with explicit BF16 projection seams and
-FP32 gating. One numerical-only qualifier owns the complete independent FP64
-oracle across all three extents, aligned/two-byte-offset BF16 inputs, public
-eager/poisoned-graph parity, guards and input immutability:
+The current concurrent-correctness route uses one no-workspace batched grid for
+projected GDN controls at T1–24, retaining ordinary T1 arithmetic, explicit BF16
+projection seams and FP32 gating for every token. Its numerical-only qualifier owns
+the complete independent FP64 oracle, same-column equality against T1,
+aligned/two-byte-offset BF16 inputs, public eager/poisoned-graph parity, guards and
+input immutability. The corrected P89/G128 C1–4 graph and C2–4 eager matrix passes
+exact same-C ordinary token and eager/graph accounting checks; see `docs/performance.md`.
+Run the owning Op qualifier with:
 
 ```bash
 cmake --build build-r9700 -j3 --target ninfer_r9700_gdn_projected_controls_qual
 build-r9700/src/ninfer_r9700_gdn_projected_controls_qual --out-json FRESH.json
 ```
 
-It contains no retired serial-control comparison or timing mode. The four-step
-screen and matched whole-inference admission are retained under
+It contains no retired serial-control comparison or timing mode. The historical four-step
+screen and matched C1 wave32 whole-inference admission are retained under
 `profiles/bench/r9700-bf16-controls-wave32-20260922/`. Native inspection uses the
-existing GDN module's `projected_control_paired_wave32_kernel`; there is no
+existing GDN module's `bf16_projected_control_t1_kernel` (the name denotes its
+retained arithmetic profile, with a batched launch grid); there is no
 separate device module or caller workspace for this route.
+
+`ninfer_r9700_gdn_replay_fold_qual` qualifies accepted-token state publication against
+the independent FP64 recurrence and ordinary snapshot updates. The canonical fold
+uses the production snapshot's key-normalization tree and eight-lane dot reduction;
+its six-token prefix and five-token path must publish bit-exact ordinary FP32 state,
+with exact convolution history and unchanged input records. Build that CMake target
+and run `build-r9700/src/ninfer_r9700_gdn_replay_fold_qual`. This admission uses the
+production `NINFER_R9700_GDN_VERIFY_WAVE_QK_CANDIDATE=0` profile; it does not admit the
+separate wave-QK experiment. Whole speculative-token qualification remains required.
 
 The selected pipelined down projection is covered by
 `ninfer_r9700_dflash_verify_down_qual --out-json FRESH.json` at N5120/K17408 T5/T6.
@@ -1151,10 +1167,10 @@ the complete result directly with an independent CPU FP64 formula across ordinar
 mixed-magnitude inputs, both gain modes, three epsilon values, every selected row count, and two
 Device Graph replays. The current physical regression passed all 432 FP64 cases, with zero
 same-column cross-width mismatches against T1 and exact eager/graph outputs at T2/5/6/10/24.
-This establishes the RMSNorm correction only, not whole-model admission. Whole C2
-DFlash-versus-ordinary greedy parity remains open, and the norm-corrected C1 K4 run differs from the
-retained ordinary stream at token 52 (3470 versus 413). The candidate is not promoted;
-remaining arithmetic-profile differences require localization before any further math change.
+RMSNorm alone did not restore whole-model parity. With the protected BF16 projection,
+projected GDN control and replay-fold corrections, the P89/G128 C1–4 DFlash K4/K5 graph
+and C2–4 eager matrix now passes exact ordinary-token parity. Retained intermediate failures
+and final scope are documented in `docs/performance.md`; this is not universal-context admission.
 K5120 rows 25 through 127 retain the generic route, K5120 rows at or above
 128 retain the token8 prefill route, and every other feature width retains its existing specialized
 or generic fallback. Check the host selection boundary and gfx1201 resources without GPU execution

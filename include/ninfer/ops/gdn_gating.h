@@ -32,7 +32,7 @@ void gdn_gating(const Tensor& a, const Tensor& b, const Tensor& A_log, const Ten
  *
  * Logical shapes and supported domain:
  *   hidden is contiguous BF16 [5120,T], both weights are contiguous BF16_CTRL [48,5120],
- *   A_log/dt_bias are contiguous FP32 [48], and g/beta are contiguous FP32 [48,T], T=1,5,6.
+ *   A_log/dt_bias are contiguous FP32 [48], and g/beta are contiguous FP32 [48,T], T=1..24.
  *
  * Numeric / effects:
  *   Each dot product accumulates in FP32 and has an observable explicit BF16 rounding boundary
@@ -40,8 +40,8 @@ void gdn_gating(const Tensor& a, const Tensor& b, const Tensor& A_log, const Ten
  *   mutually non-overlapping; there is no workspace or persistent state effect.
  *
  * Execution:
- *   The caller supplies a non-null stream. T1 retains its fixed decode kernel; T5/T6
- *   pair exact-order wave32 projections and gating. Other token extents remain
+ *   The caller supplies a non-null stream. A single batched grid retains the ordinary
+ *   T1 projection arithmetic independently for every token. Other token extents remain
  *   compositions of Linear and gdn_gating.
  */
 void bf16_gdn_projected_gating(const Tensor& hidden, const Weight& a_weight,

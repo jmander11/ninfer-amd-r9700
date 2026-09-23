@@ -278,6 +278,7 @@ inline bool recurrent_state_enabled() {
 
 inline int recurrent_state_layer() {
     if (!recurrent_state_enabled()) return -1;
+    if (selected_role(requested_role())) return gdn_detail_layer();
     const char* value = std::getenv("NINFER_QWEN3_GDN_STATE_TRACE_TEXT_LAYER");
     if (value == nullptr || (std::string_view(value) != "0" && std::string_view(value) != "1")) {
         throw std::invalid_argument(
@@ -319,7 +320,8 @@ inline void require_eager(bool use_device_graph) {
         throw std::invalid_argument("layer3 attention trace supports only the exact target pair");
     }
     if (recurrent_state_enabled() &&
-        requested_role() != Role::TextFresh && requested_role() != Role::TextAppend) {
+        requested_role() != Role::TextFresh && requested_role() != Role::TextAppend &&
+        !selected_role(requested_role())) {
         throw std::invalid_argument("GDN recurrent-state trace supports only the exact Text pair");
     }
     if (gdn_enabled() && (gdn_manifest_path() == gdn_sidecar_path() ||
@@ -639,6 +641,29 @@ public:
         attention_cache_scheduled_ = true;
     }
 
+    void capture_gdn_recurrent_state_batch(int layer, const Tensor& states,
+                                           const Tensor& slots, hipStream_t) {
+        if (!recurrent_state_enabled() || !selected_role(call_.role) ||
+            layer != recurrent_state_layer()) return;
+        if (recurrent_state_scheduled_ || call_.column != 0 ||
+            call_.base_frontier != call_.frontier - 1 || states.dtype != DType::FP32 ||
+            !states.data || !states.is_contiguous() || states.ne[0] != 128 ||
+            states.ne[1] != 128 || states.ne[2] != 48 || slots.dtype != DType::I32 ||
+            !slots.data || !slots.is_contiguous() || slots.numel() != call_.batch)
+            throw std::logic_error("selected GDN state requires a matching column-zero base frontier");
+        HIP_CHECK(hipMemcpyAsync(&recurrent_state_slot_,
+            static_cast<const std::int32_t*>(slots.data) + call_.row, sizeof(std::int32_t),
+            hipMemcpyDeviceToHost, stream_));
+        HIP_CHECK(hipStreamSynchronize(stream_));
+        if (recurrent_state_slot_ < 0 || recurrent_state_slot_ >= states.ne[3])
+            throw std::logic_error("selected GDN state slot is out of bounds");
+        HIP_CHECK(hipMemcpyAsync(static_cast<std::uint8_t*>(device_.data()) + kCombinedPayloadBytes,
+            static_cast<const std::uint8_t*>(states.data) +
+                static_cast<std::size_t>(recurrent_state_slot_) * kRecurrentStateBytes,
+            kRecurrentStateBytes, hipMemcpyDeviceToDevice, stream_));
+        recurrent_state_scheduled_ = true;
+    }
+
     RecurrentStateTrace capture_gdn_recurrent_state(int layer, const Tensor& state,
                                                      std::int32_t slot, hipStream_t) {
         if (!recurrent_state_enabled() || layer != recurrent_state_layer()) return {};
@@ -939,7 +964,8 @@ private:
         write_exclusive(recurrent_state_sidecar_path(), payload, kRecurrentStateBytes,
                         "GDN recurrent-state sidecar");
         const std::uint64_t hash = fnv1a64(payload, kRecurrentStateBytes);
-        const char* point = call_.role == Role::TextFresh
+        const bool selected = selected_role(call_.role);
+        const char* point = selected ? "selected-column-zero-state-before-recurrence" : call_.role == Role::TextFresh
             ? "wide-prefill-state-after-prefix-128-before-selected-column-128"
             : "restored-append-state-before-selected-column-0";
         std::ostringstream manifest;
@@ -951,14 +977,19 @@ private:
                  << "  \"production_routing_authorized\": false,\n"
                  << "  \"execution\": \"eager\",\n"
                  << "  \"role\": \"" << role_name(call_.role) << "\",\n"
+                 << selected_manifest_fields();
+        if (selected) manifest << "\"width\":" << call_.width
+            << ",\"selected_column\":" << call_.column
+            << ",\"absolute_frontier\":" << call_.frontier << ",\n";
+        manifest
                  << "  \"capture_point\": \"" << point << "\",\n"
                  << "  \"selected_token\": " << token << ",\n"
                  << "  \"selected_cache_position\": " << position << ",\n"
                  << "  \"selected_rope_position\": " << rope_position << ",\n"
-                 << "  \"state_frontier\": 128,\n"
-                 << "  \"linear_state_slot\": 0,\n"
+                 << "  \"state_frontier\": " << (selected ? call_.base_frontier : 128) << ",\n"
+                 << "  \"linear_state_slot\": " << recurrent_state_slot_ << ",\n"
                  << "  \"text_layer\": " << recurrent_state_layer() << ",\n"
-                 << "  \"gdn_index\": " << recurrent_state_layer() << ",\n"
+                 << "  \"gdn_index\": " << recurrent_state_layer() - recurrent_state_layer() / 4 << ",\n"
                  << "  \"dtype\": \"fp32\",\n"
                  << "  \"shape\": [128,128,48],\n"
                  << "  \"elements\": " << kRecurrentStateElements << ",\n"
@@ -1096,6 +1127,7 @@ private:
     std::size_t next_snapshot_ = 0;
     std::size_t next_gdn_field_ = 0;
     bool recurrent_state_scheduled_ = false;
+    std::int32_t recurrent_state_slot_ = 0;
     std::size_t next_attention_field_ = 0;
     bool attention_cache_scheduled_ = false;
     std::uint32_t attention_visible_frontier_ = 0;
@@ -1145,6 +1177,10 @@ struct CompositeTap {
     void capture_gdn_residual(int layer, const Tensor& value, hipStream_t stream) {
         trace.capture_gdn_residual(layer, value, stream);
     }
+    void capture_gdn_recurrent_state_batch(int layer, const Tensor& states,
+                                           const Tensor& slots, hipStream_t stream) {
+        trace.capture_gdn_recurrent_state_batch(layer, states, slots, stream);
+    }
     RecurrentStateTrace capture_gdn_recurrent_state(int layer, const Tensor& state,
                                                      std::int32_t slot, hipStream_t stream) {
         return trace.capture_gdn_recurrent_state(layer, state, slot, stream);
@@ -1190,6 +1226,10 @@ struct Tap {
     }
     void capture_gdn_residual(int layer, const Tensor& value, hipStream_t stream) {
         trace.capture_gdn_residual(layer, value, stream);
+    }
+    void capture_gdn_recurrent_state_batch(int layer, const Tensor& states,
+                                           const Tensor& slots, hipStream_t stream) {
+        trace.capture_gdn_recurrent_state_batch(layer, states, slots, stream);
     }
     RecurrentStateTrace capture_gdn_recurrent_state(int layer, const Tensor& state,
                                                      std::int32_t slot, hipStream_t stream) {

@@ -254,25 +254,37 @@ def load_gdn(path: Path, expected: tuple[str, int, int, int, int]) -> tuple[dict
 
 
 def load_recurrent_state(path: Path, role: str) -> tuple[dict, bytes]:
-    if role not in {"text-fresh-frontier129-column128", "text-append-frontier129-column0"}:
+    selected = role in ROLES["selected"]
+    if not selected and role not in {"text-fresh-frontier129-column128", "text-append-frontier129-column0"}:
         fail("unknown recurrent-state role")
     value = json.loads(path.read_text(), object_pairs_hook=pairs,
                        parse_constant=lambda token: fail(f"nonfinite JSON: {token}"))
-    if not isinstance(value, dict) or set(value) != RECURRENT_STATE_MANIFEST_KEYS:
+    extra = SELECTED_KEYS | {"width", "selected_column", "absolute_frontier"} if selected else set()
+    if not isinstance(value, dict) or set(value) != RECURRENT_STATE_MANIFEST_KEYS | extra:
         fail(f"recurrent-state manifest keys differ: {path}")
     point = ("wide-prefill-state-after-prefix-128-before-selected-column-128"
              if role == "text-fresh-frontier129-column128" else
              "restored-append-state-before-selected-column-0")
     layer = integer(value.get("text_layer"), "recurrent-state text_layer")
-    if layer not in (0, 1) or value.get("gdn_index") != layer:
+    if ((selected and (not 0 <= layer < 64 or layer % 4 == 3)) or
+            (not selected and layer not in (0, 1)) or value.get("gdn_index") != layer - layer // 4):
         fail(f"recurrent-state layer/GDN index differs: {path}")
+    token, position, slot = 24178, 128, 0
+    if selected:
+        _, _, column, frontier, position = selected_expected(value, role)
+        token = integer(value.get("selected_token"), "selected_token")
+        slot = integer(value.get("linear_state_slot"), "linear_state_slot")
+        if (column != 0 or value["base_frontier"] != frontier - 1 or
+                not 0 <= token < 248077 or slot != value["stable_lane"]):
+            fail("selected state requires column-zero base frontier and mapped stable lane")
+        point = "selected-column-zero-state-before-recurrence"
     exact = {
         "artifact_type": "ninfer_qwen3_gdn_recurrent_state_trace",
         "schema_version": 2, "diagnostic_only": True, "timing_evidence_eligible": False,
         "production_routing_authorized": False, "execution": "eager", "role": role,
-        "capture_point": point, "selected_token": 24178, "selected_cache_position": 128,
-        "selected_rope_position": 128, "state_frontier": 128, "linear_state_slot": 0,
-        "text_layer": layer, "gdn_index": layer, "dtype": "fp32", "shape": [128,128,48],
+        "capture_point": point, "selected_token": token, "selected_cache_position": position,
+        "selected_rope_position": position, "state_frontier": position, "linear_state_slot": slot,
+        "text_layer": layer, "gdn_index": layer - layer // 4, "dtype": "fp32", "shape": [128,128,48],
         "elements": RECURRENT_STATE_ELEMENTS, "sidecar_bytes": RECURRENT_STATE_BYTES,
         "layout": "little-endian-fp32:key,value,value_head",
     }
@@ -433,9 +445,18 @@ def compare_gdn(left_path: Path, right_path: Path, diagnostic: str) -> dict:
     }
 
 
-def compare_recurrent_state(left_path: Path, right_path: Path) -> dict:
-    left, left_data = load_recurrent_state(left_path, "text-fresh-frontier129-column128")
-    right, right_data = load_recurrent_state(right_path, "text-append-frontier129-column0")
+def compare_recurrent_state(left_path: Path, right_path: Path, diagnostic: str = "text") -> dict:
+    if diagnostic not in ("text", "selected"):
+        fail("recurrent-state comparison requires Text or selected diagnostic")
+    roles = ROLES["selected"] if diagnostic == "selected" else (
+        "text-fresh-frontier129-column128", "text-append-frontier129-column0")
+    left, left_data = load_recurrent_state(left_path, roles[0])
+    right, right_data = load_recurrent_state(right_path, roles[1])
+    if diagnostic == "selected":
+        for key in ("stable_lane", "expected_history_sha256", "base_frontier", "state_frontier",
+                    "selected_token", "selected_cache_position", "selected_rope_position", "linear_state_slot"):
+            if left[key] != right[key]:
+                fail(f"paired selected state semantic identity differs: {key}")
     if left["text_layer"] != right["text_layer"] or left["gdn_index"] != right["gdn_index"]:
         fail("paired recurrent-state layer identity differs")
     layer = left["text_layer"]
@@ -460,8 +481,9 @@ def compare_recurrent_state(left_path: Path, right_path: Path) -> dict:
     return {
         "artifact_type": "ninfer_qwen3_gdn_recurrent_state_comparison",
         "schema_version": 2, "diagnostic_only": True, "timing_evidence_eligible": False,
-        "production_routing_authorized": False, "diagnostic": "text-prefix-state",
-        "text_layer": layer, "gdn_index": layer, "classification": classification,
+        "production_routing_authorized": False, "diagnostic": diagnostic + "-prefix-state",
+        "text_layer": layer, "gdn_index": left["gdn_index"], "state_frontier": left["state_frontier"],
+        "classification": classification,
         "first_difference": detail,
         "limitations": [
             "compares one exact GDN FP32 state frontier and does not localize an earlier update",
@@ -564,9 +586,7 @@ def main() -> int:
             fail("attention-detail requires selected diagnostic")
         result = compare_selected_attention(args.left, args.right)
     elif args.recurrent_state:
-        if args.diagnostic != "text":
-            fail("recurrent-state comparison requires the Text diagnostic")
-        result = compare_recurrent_state(args.left, args.right)
+        result = compare_recurrent_state(args.left, args.right, args.diagnostic)
     else:
         result = (compare_gdn(args.left, args.right, args.diagnostic) if args.gdn_detail else
                   compare(args.left, args.right, args.diagnostic))

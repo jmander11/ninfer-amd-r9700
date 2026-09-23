@@ -7,6 +7,7 @@
 #include "core/layout.h"
 #include "core/linear_attention_state.h"
 #include "ninfer/ops/gdn_replay.h"
+#include "ninfer/ops/gated_delta_net.h"
 
 #include <algorithm>
 #include <array>
@@ -24,7 +25,7 @@ namespace {
 
 constexpr int kLayers = 48;
 constexpr int kCapacity = 2;
-constexpr int kWidth = 4;
+constexpr int kWidth = 6;
 constexpr int kConvChannels = 10240;
 constexpr int kQkHeads = 16;
 constexpr int kValueHeads = 48;
@@ -282,6 +283,45 @@ std::vector<T> copy_tensor(const ninfer::Tensor& tensor) {
     return result;
 }
 
+// Supplement the independent FP64 oracle with the state-publication invariant:
+// folding recorded inputs must retain the ordinary snapshot arithmetic profile.
+std::vector<float> snapshot_state(const Fixture& fixture, int row,
+                                 const std::vector<int>& sequence,
+                                 const std::vector<float>& initial, hipStream_t stream) {
+    ninfer::DeviceBuffer q_storage(kStateDim*kQkHeads*2), k_storage(kStateDim*kQkHeads*2);
+    ninfer::DeviceBuffer v_storage(kStateDim*kValueHeads*2), out_storage(kStateDim*kValueHeads*2);
+    ninfer::DeviceBuffer g_storage(kValueHeads*4), beta_storage(kValueHeads*4);
+    ninfer::DeviceBuffer state_storage(initial.size()*sizeof(float)), slot_storage(sizeof(std::int32_t));
+    ninfer::Tensor q(q_storage.data(),ninfer::DType::BF16,{kStateDim,kQkHeads,1,1});
+    ninfer::Tensor k(k_storage.data(),ninfer::DType::BF16,{kStateDim,kQkHeads,1,1});
+    ninfer::Tensor v(v_storage.data(),ninfer::DType::BF16,{kStateDim,kValueHeads,1,1});
+    ninfer::Tensor out(out_storage.data(),ninfer::DType::BF16,{kStateDim,kValueHeads,1,1});
+    ninfer::Tensor g(g_storage.data(),ninfer::DType::FP32,{kValueHeads,1,1});
+    ninfer::Tensor beta(beta_storage.data(),ninfer::DType::FP32,{kValueHeads,1,1});
+    ninfer::Tensor state(state_storage.data(),ninfer::DType::FP32,{kStateDim,kStateDim,kValueHeads,1});
+    ninfer::Tensor slot(slot_storage.data(),ninfer::DType::I32,{1});
+    HIP_CHECK(hipMemsetAsync(slot.data,0,slot.bytes(),stream));
+    HIP_CHECK(hipMemcpyAsync(state.data,initial.data(),state.bytes(),hipMemcpyHostToDevice,stream));
+    for(int token:sequence) {
+        const auto* keys=fixture.key.data()+key_index(kOracleLayer,row,token,0,0);
+        HIP_CHECK(hipMemcpyAsync(k.data,keys,k.bytes(),hipMemcpyHostToDevice,stream));
+        HIP_CHECK(hipMemcpyAsync(q.data,keys,q.bytes(),hipMemcpyHostToDevice,stream));
+        HIP_CHECK(hipMemcpyAsync(v.data,fixture.value.data()+value_index(kOracleLayer,row,token,0,0),
+                                v.bytes(),hipMemcpyHostToDevice,stream));
+        std::array<float,kValueHeads> host_g{},host_beta{};
+        for(int head=0;head<kValueHeads;++head) {
+            host_g[head]=fixture.gate[gate_index(kOracleLayer,row,token,head,0)];
+            host_beta[head]=fixture.gate[gate_index(kOracleLayer,row,token,head,1)];
+        }
+        HIP_CHECK(hipMemcpyAsync(g.data,host_g.data(),g.bytes(),hipMemcpyHostToDevice,stream));
+        HIP_CHECK(hipMemcpyAsync(beta.data,host_beta.data(),beta.bytes(),hipMemcpyHostToDevice,stream));
+        ninfer::ops::gated_delta_net_snapshot(q,k,v,g,beta,1.F/std::sqrt(float(kStateDim)),
+                                             true,state,{},slot,slot,out,stream);
+        HIP_CHECK(hipStreamSynchronize(stream));
+    }
+    return copy_tensor<float>(state);
+}
+
 template <class Callable>
 void require_invalid(Callable&& callable, const std::string& label) {
     try {
@@ -356,20 +396,28 @@ void qualify(hipStream_t stream) {
     ninfer::ops::GdnReplayFoldRow path{};
     path.linear_state_slot = slots[1];
     path.commit_columns = 1; // Ignored in path mode.
-    path.path = {3, 1, 2};
-    path.path_length = 3;
+    path.path = {0, 1, 4, 2, 5};
+    path.path_length = 5;
     const std::array rows{prefix, path};
     ninfer::ops::gdn_replay_fold(records, states.all_layers_view(), rows, stream);
     HIP_CHECK(hipStreamSynchronize(stream));
 
-    const std::array<std::vector<int>, kCapacity> sequences{std::vector<int>{0, 1, 2, 3},
-                                                             std::vector<int>{3, 1, 2}};
+    const std::array<std::vector<int>, kCapacity> sequences{std::vector<int>{0, 1, 2, 3, 4, 5},
+                                                             std::vector<int>{0, 1, 4, 2, 5}};
     for (int row = 0; row < kCapacity; ++row) {
         const std::vector<float> actual_state =
             copy_tensor<float>(states.recurrent_slot(kOracleLayer, slots[row]));
         require_state_close(actual_state,
                             recurrent_oracle(fixture, row, sequences[row], initial_recurrent[row]),
                             "row " + std::to_string(row) + " independent FP64 recurrence");
+        const auto ordinary_state=snapshot_state(fixture,row,sequences[row],initial_recurrent[row],stream);
+        std::size_t state_differences=0;
+        for(std::size_t i=0;i<actual_state.size();++i)
+            state_differences+=std::bit_cast<std::uint32_t>(actual_state[i])!=
+                               std::bit_cast<std::uint32_t>(ordinary_state[i]);
+        if(state_differences)
+            fail("replay/ordinary state profile mismatch row="+std::to_string(row)+
+                 " elements="+std::to_string(state_differences));
         const std::vector<hip_bfloat16> actual_conv =
             copy_tensor<hip_bfloat16>(states.conv_slot(kOracleLayer, slots[row]));
         require_bf16_exact(actual_conv,
@@ -441,7 +489,7 @@ int main() {
             throw;
         }
         std::cout << "r9700_gdn_replay_fold: PASS gfx1201 wave32 Qwen3.8 L48/Hq16/Hv48 "
-                     "B=2 W=4 prefix/path/no-op/read-only max_state_abs="
+                     "B=2 W=6 prefix6/path5/no-op/read-only ordinary-state-exact max_state_abs="
                   << g_max_state_abs << " max_state_rel_l2=" << g_max_state_relative_l2 << '\n';
         return 0;
     } catch (const std::exception& error) {

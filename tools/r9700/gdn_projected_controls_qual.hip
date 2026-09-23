@@ -94,7 +94,7 @@ void cell(unsigned t,unsigned offset,hipStream_t s,std::ostream& out){
     for(unsigned h=0;h<N;++h){log[h]=float(int(h%13)-6)/8;bias[h]=float(int(h%17)-8)/4;}
     bias[0]=21;bias[1]=-21;bias[2]=100;bias[3]=-100;
     Buffer<hip_bfloat16>x(t*K,offset,s),a(N*K,offset,s),b(N*K,offset,s);
-    Buffer<float>al(N,4,s),dt(N,4,s),tg(t*N,4,s),tb(t*N,4,s);
+    Buffer<float>al(N,4,s),dt(N,4,s),tg(t*N,4,s),tb(t*N,4,s),sg(N,4,s),sb(N,4,s);
     a.put(aw,s);b.put(bw,s);al.put(log,s);dt.put(bias,s);
     const auto weight=[](hip_bfloat16* data) {
         ninfer::Weight w{}; w.payload=data; w.payload_bytes=N*K*sizeof(hip_bfloat16);
@@ -109,6 +109,9 @@ void cell(unsigned t,unsigned offset,hipStream_t s,std::ostream& out){
     const ninfer::Tensor bias_tensor(dt.data(),ninfer::DType::FP32,{int(N)});
     ninfer::Tensor g_tensor(tg.data(),ninfer::DType::FP32,{int(N),int(t)});
     ninfer::Tensor beta_tensor(tb.data(),ninfer::DType::FP32,{int(N),int(t)});
+    const ninfer::Tensor single_input(x.data()+(t-1U)*K,ninfer::DType::BF16,{int(K),1});
+    ninfer::Tensor single_g(sg.data(),ninfer::DType::FP32,{int(N),1});
+    ninfer::Tensor single_b(sb.data(),ninfer::DType::FP32,{int(N),1});
     auto target=[&]{ninfer::ops::bf16_gdn_projected_gating(
         input,wa,wb,log_tensor,bias_tensor,g_tensor,beta_tensor,s);};
     const auto reject=[&](const std::function<void()>& call) {
@@ -117,7 +120,7 @@ void cell(unsigned t,unsigned offset,hipStream_t s,std::ostream& out){
     };
     reject([&]{ninfer::ops::bf16_gdn_projected_gating(
         input,wa,wb,log_tensor,bias_tensor,g_tensor,beta_tensor,nullptr);});
-    for(int bad_t:{2,4,7}) {
+    for(int bad_t:{25,26}) {
         const ninfer::Tensor bad_input(x.data(),ninfer::DType::BF16,{int(K),bad_t});
         reject([&]{ninfer::ops::bf16_gdn_projected_gating(
             bad_input,wa,wb,log_tensor,bias_tensor,g_tensor,beta_tensor,s);});
@@ -133,8 +136,13 @@ void cell(unsigned t,unsigned offset,hipStream_t s,std::ostream& out){
                 fixture==1?(k%2?-1.0F:1.0F)*(1.0F+float(token+1)/16):
                 float(int((k*71+token*53)%521)-260)/float(33+(k%7));
             host[token*K+k]=hip_bfloat16(value);}
+        std::copy_n(host.begin(),K,host.begin()+(t-1U)*K);
         x.put(host,s);const auto ref=oracle(t,host,aw,bw,log,bias);
         target();const auto expected_g=tg.get(s),expected_b=tb.get(s);
+        ninfer::ops::bf16_gdn_projected_gating(single_input,wa,wb,log_tensor,bias_tensor,
+                                             single_g,single_b,s);
+        exact(std::vector<float>(expected_g.end()-N,expected_g.end()),sg.get(s));
+        exact(std::vector<float>(expected_b.end()-N,expected_b.end()),sb.get(s));
         for(unsigned replay=0;replay<3;++replay){
             if(replay){tg.poison(s);tb.poison(s);graph.run(s);}
             const auto actual_g=tg.get(s),actual_b=tb.get(s);
@@ -143,10 +151,10 @@ void cell(unsigned t,unsigned offset,hipStream_t s,std::ostream& out){
         }
         exact(x.get(s),host);exact(a.get(s),aw);exact(b.get(s),bw);exact(al.get(s),log);exact(dt.get(s),bias);
         x.guards(s);a.guards(s);b.guards(s);al.guards(s);dt.guards(s);
-        tg.guards(s);tb.guards(s);
+        tg.guards(s);tb.guards(s);sg.guards(s);sb.guards(s);
     }
     out<<"{\"tokens\":"<<t<<",\"bf16_address_mod16\":"<<offset<<",\"fp32_address_mod16\":4,"
-       <<"\"own_eager_graph_exact\":true,\"guards_and_immutability\":true,\"fixtures\":3,"
+       <<"\"own_eager_graph_exact\":true,\"same_column_vs_t1_exact\":true,\"guards_and_immutability\":true,\"fixtures\":3,"
        <<"\"maximum_normalized_oracle_g\":"<<new_g<<",\"maximum_normalized_oracle_beta\":"<<new_b<<'}';
 }
 }
@@ -161,7 +169,7 @@ int main(int argc,char**argv){try{
     out<<"{\"schema\":\"ninfer.r9700.gdn-projected-controls.v1\",\"public_op_tested\":true,\"target\":\"gfx1201\","
           "\"pci\":\"0000:13:00.0\",\"oracle\":\"original BF16 dots FP64, independent BF16 RNE seams, FP64 gates every output\","
           "\"criterion\":\"g abs<=0.0625 OR rel<=0.001; beta abs<=0.0003 OR rel<=0.00003\",\"cells\":[";
-    bool first=true;for(unsigned t:{1U,5U,6U})for(unsigned offset:{0U,2U}){
+    bool first=true;for(unsigned t=1U;t<=24U;++t)for(unsigned offset:{0U,2U}){
         if(!first)out<<',';first=false;cell(t,offset,s,out);}
     out<<"],\"numerical_passed\":true}\n";
     check(hipStreamDestroy(s));const auto data=out.str();

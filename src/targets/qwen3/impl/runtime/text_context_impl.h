@@ -1214,6 +1214,11 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
         Tensor o           = workspace_recipe::gdn_recurrent_output<TextConfig>(work_, T).view(
             {kCfg.gdn_v_dim, kCfg.gdn_v_heads, T});
         Tensor& recurrent_states = state_.recurrent.at(static_cast<std::size_t>(gidx));
+        if constexpr (requires { tap.capture_gdn_recurrent_state_batch(
+                          text_layer, recurrent_states, *active_linear_state_slots_, s); }) {
+            tap.capture_gdn_recurrent_state_batch(
+                text_layer, recurrent_states, *active_linear_state_slots_, s);
+        }
         Tensor q_batch =
             q_recurrent.view({kCfg.gdn_k_dim, kCfg.gdn_k_heads, width, active_sequence_batch_});
         Tensor k_batch =
