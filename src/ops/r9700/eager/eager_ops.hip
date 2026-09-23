@@ -998,21 +998,13 @@ hipError_t rmsnorm_bf16(const hip_bfloat16* input, const hip_bfloat16* weight,
         input != nullptr && weight != nullptr && output != nullptr && features != 0 && rows != 0 &&
             std::isfinite(eps) && eps > 0.0F && valid_stream(stream),
         [&] {
-            if (rmsnorm_k5120_rows4_selected(features, rows) ||
-                use_rmsnorm_k5120_rows56_candidate(features, rows)) {
+            if (rmsnorm_k5120_small_t_selected(features, rows)) {
                 hipLaunchKernelGGL(rmsnorm_k5120_rows4_cta_kernel, dim3(rows), dim3(kBlock), 0,
                                    stream, input, weight, output, eps, unit_offset);
                 return;
             }
-            if (features == 5120U && (rows == 5U || rows == 6U || rows >= 128U)) {
+            if (features == 5120U && rows >= 128U) {
                 constexpr std::uint32_t tokens_per_block = kBlock / 32U;
-                if (rows == 5U) {
-                    hipLaunchKernelGGL(rmsnorm_k5120_token8_packed_epilogue_kernel,
-                                       dim3((rows + tokens_per_block - 1U) / tokens_per_block),
-                                       dim3(kBlock), 0, stream, input, weight, output, rows, eps,
-                                       unit_offset);
-                    return;
-                }
                 hipLaunchKernelGGL(rmsnorm_k5120_token8_kernel,
                                    dim3((rows + tokens_per_block - 1U) / tokens_per_block),
                                    dim3(kBlock), 0, stream, input, weight, output, rows, eps,

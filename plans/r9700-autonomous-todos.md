@@ -6,9 +6,12 @@ in `docs/performance.md` and `docs/maintainer/r9700-overhaul-plan.md`, not here.
 
 ## Fixed execution and product constraints
 
-- Keep useful, non-overlapping subagent work active when it exists; do not invent work to fill a
-  slot. Give each bounded implementation or experiment one owner and an independent read-only,
-  CPU-only reviewer. Review the material semantics, scope, graph/workspace invariants, oracle,
+- Conserve agent usage: normally use at most one independent implementation agent alongside
+  the primary agent. Batch independent, read-only CPU review at material kernel/correctness
+  checkpoints; the primary agent handles routine checks and small harness/document edits.
+  Do not create jobs to fill slots or restart a reviewer for each mechanical change.
+  Give each bounded implementation one owner. Review the material semantics, scope,
+  graph/workspace invariants, oracle,
   ISA/resources, command safety, provenance, and decision logic; repair `NO-SHIP` findings and
   require the same reviewer to report `SHIP` before GPU qualification.
 - The primary agent alone serializes R9700 work, reproduces preflight and result decisions, and
@@ -72,6 +75,57 @@ retain it; never continue a failed package to timing. The fixed GPU, delegation,
 above apply to every command.
 
 ### Current checkpoint
+
+ACTIVE USER REQUEST (2026-09-22): correctness-qualify DFlash K4/K5 at C2–4 and
+explain why C2 aggregate speed does not exceed C1. Keep the selected artifact fixed;
+do not waive exact public greedy parity or serialize target verification by request.
+- [ ] Localize the first same-input ordinary/speculative divergence, distinguish numerical
+  routing from state/commit errors, and implement the necessary correction.
+- [ ] Qualify corrected C2–4 graph/eager behavior and exact greedy output, protect C1,
+  and measure the resulting decode rates on the reported workload.
+- [x] Attribute C1/C2 runtime costs sufficiently to explain scaling; record evidence and closure.
+Root alone builds/runs GPU work; independent CPU agents own localization, trace preparation,
+and review. Broader recipe, prefill and XAttention campaigns remain paused.
+Localization checkpoint: C2 ordinary/K4 eager reproduces both graph token streams exactly.
+Lane1 first mismatch is output36/frontier125 (target logits differ before acceptance).
+At first fresh decode frontier90, the original first difference was layer0 post-MLP
+(1630 BF16 elements); the captured-input pure MLP replay below localized its source.
+Evidence: `profiles/bench/r9700-dflash-concurrent-correctness-20260922/`.
+The stateless replay reproduced both original MLP outputs and localized one differing BF16
+normalization element, amplified by A8 quantization. Canonical parallel K5120 RMSNorm T1–24
+now passes432 FP64 cases (max1 BF16 step), zero cross-width differences, and exact real-input
+MLP stage parity. C2 ordinary remains exact; corrected C2 K4 fixes lane0 but lane1 still diverges
+at output36, so whole speculative qualification remains OPEN. Its one-run74.97tok/s is a
+correctness-screen observation, not an admitted speed. Norm-stage eager traces reproduce current
+graph outputs; layers0–2 now match exactly and the next first difference is layer3 post-mixer
+(two BF16 elements). Localize with the existing attention-stage taps before blaming a projection.
+C1 K4 also fails the ordinary-output regression at output52 (3470 versus413), so the canonical
+norm change is an oracle-qualified correction, NOT an admitted whole-inference build. Preserve
+this regression and complete the remaining numerical corrections before promotion.
+Selected layer3 stage traces establish identical inputs and normalized inputs but differing BF16
+Q/gate/K/V projections (3/1/1/1 elements). Attention FP32 and its BF16 cast match exactly at this
+position; one gate difference survives gating before the two residual differences. The next
+correction is canonical small-T arithmetic for the two protected BF16 Linear shapes, preserving
+one genuinely batched launch. C4 ordinary may change arithmetic too: use fresh same-build,
+same-C ordinary references for speculative gates, retaining historical comparisons separately.
+Protected BF16 correction passes both real shapes at T1–24 against the existing full-K FP64
+sampled oracle, exact same-column comparisons and eager/two graph replays; retained T2047/2048
+also pass. C2 ordinary remains exact, but corrected C2 K4 still fails lane1 at36 and lane0 at52.
+Next trace reuses the unchanged T2 ordinary capture and observes the corrected actual T10 route;
+the W8 head's separate BF16-versus-A8 activation profile also needs a same-input discriminator.
+Corrected actual F90 attention stages now all match exactly, and residual boundaries match
+through layer32. The next first difference is layer33 post-mixer (205 BF16 elements). Extend
+the existing selected GDN detail capture to that layer; do not infer a state fault from the
+residual alone. Head replay and GDN localization are independent bounded jobs.
+The captured ordinary frontier125 head replay has identical normalized inputs: T2 and T10
+both choose4031 with logits4031=23.625 and854=23.5, although159459 other/full logit entries
+differ. It reproduces the ordinary decision but does not reproduce the verify argmax flip;
+do not change the head merely because its activation profile differs. Continue GDN localization.
+C1/C2 K4 traces reproduce saved tokens/accounting: C2 runs37 two-lane graphs +5 one-lane
+tails. Full C2 graph kernels97.565ms versus47.122ms C1; target layers87.180 versus38.585ms.
+Small BF16 control projections alone cost15.660ms/full C2 graph versus0.761ms/C1 paired
+controls. These are attribution-only figures; analysis and actual topology evidence are in
+`profiles/rocprof/r9700-dflash-c1-c2-k4-20260922/analysis.md`.
 
 COMPLETED USER MEASUREMENT REQUEST (2026-09-22): test the selected build's memory-bandwidth
 headroom, then measure C2–4 speedups against a matched C1 reference. This reopens measurement,

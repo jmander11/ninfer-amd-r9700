@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail-closed gfx1201 static gate for production K5120 rows1..4 RMSNorm."""
+"""Fail-closed gfx1201 static gate for canonical K5120 rows1..24 RMSNorm."""
 
 from __future__ import annotations
 
@@ -94,7 +94,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (OSError, UnicodeError, ValueError) as error:
         raise SystemExit(str(error)) from error
     print(" ".join(f"{key}={value}" for key, value in result.items()))
-    print("production=true features=5120 rows=1..4")
+    print("production=true features=5120 rows=1..24")
     return 0
 
 

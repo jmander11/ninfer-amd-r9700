@@ -1064,8 +1064,19 @@ void run_selective_protected_bf16_shape(std::uint32_t rows, std::uint32_t column
     weight.ndim = 2;
     hipStream_t stream{};
     HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
-    for (const std::uint32_t tokens : {1U, 2047U, 2048U}) {
-        const auto input = make_input(tokens, columns);
+    std::vector<std::uint32_t> token_cases;
+    for (std::uint32_t tokens = 1U; tokens <= 24U; ++tokens) token_cases.push_back(tokens);
+    token_cases.insert(token_cases.end(), {2047U, 2048U});
+    const auto singleton_input = make_input(1U, columns);
+    std::vector<hip_bfloat16> singleton_output;
+    for (const std::uint32_t tokens : token_cases) {
+        auto input = make_input(tokens, columns);
+        if (tokens <= 24U) {
+            // Place the same represented column in each successive final
+            // lane; preserve the other columns as independent batch data.
+            std::copy(singleton_input.begin(), singleton_input.end(),
+                      input.begin() + static_cast<std::size_t>(tokens - 1U) * columns);
+        }
         DeviceBuffer<hip_bfloat16> d_input(input.size());
         DeviceBuffer<hip_bfloat16> d_output(static_cast<std::size_t>(tokens) * rows);
         HIP_CHECK(hipMemcpy(d_input.get(), input.data(), d_input.bytes(), hipMemcpyHostToDevice));
@@ -1074,8 +1085,14 @@ void run_selective_protected_bf16_shape(std::uint32_t rows, std::uint32_t column
         ninfer::Tensor output(d_output.get(), ninfer::DType::BF16,
                               {static_cast<int>(rows), static_cast<int>(tokens)});
         std::vector<std::uint32_t> sampled_tokens{0U};
-        if (tokens > 1U) sampled_tokens = {0U, 1U, 15U, 16U, 31U, 32U,
-                                           1023U, 1024U, tokens - 2U, tokens - 1U};
+        if (tokens <= 24U) {
+            sampled_tokens.clear();
+            for (std::uint32_t token = 0U; token < tokens; ++token)
+                sampled_tokens.push_back(token);
+        } else {
+            sampled_tokens = {0U, 1U, 15U, 16U, 31U, 32U,
+                              1023U, 1024U, tokens - 2U, tokens - 1U};
+        }
         const std::array<std::uint32_t, 9> sampled_rows{
             0U, 1U, 7U, 8U, 15U, 16U, rows / 2U, rows - 2U, rows - 1U};
         std::vector<double> expected;
@@ -1108,11 +1125,22 @@ void run_selective_protected_bf16_shape(std::uint32_t rows, std::uint32_t column
                     fail("selective BF16 FP64 mismatch N=" + std::to_string(rows) + " K=" + std::to_string(columns)
                          + " T=" + std::to_string(tokens) + " token=" + std::to_string(token) + " row=" + std::to_string(row));
             }
+            if (tokens == 1U && singleton_output.empty()) singleton_output = actual;
+            if (tokens <= 24U) {
+                const std::size_t base = static_cast<std::size_t>(tokens - 1U) * rows;
+                for (std::uint32_t row = 0U; row < rows; ++row) {
+                    if (actual[base + row].data != singleton_output[row].data)
+                        fail("selective BF16 same-column mismatch N=" + std::to_string(rows) +
+                             " K=" + std::to_string(columns) + " T=" + std::to_string(tokens) +
+                             " row=" + std::to_string(row));
+                }
+            }
+            return actual;
         };
         const auto invoke = [&] { ninfer::ops::linear(x, weight, output, stream); };
         HIP_CHECK(hipMemsetAsync(d_output.get(), 0xff, d_output.bytes(), stream));
         invoke();
-        check();
+        const auto eager = check();
         hipGraph_t graph{};
         hipGraphExec_t executable{};
         HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeThreadLocal));
@@ -1122,12 +1150,19 @@ void run_selective_protected_bf16_shape(std::uint32_t rows, std::uint32_t column
         for (int replay = 0; replay < 2; ++replay) {
             HIP_CHECK(hipMemsetAsync(d_output.get(), 0xff, d_output.bytes(), stream));
             HIP_CHECK(hipGraphLaunch(executable, stream));
-            check();
+            const auto replayed = check();
+            for (std::size_t i = 0; i < eager.size(); ++i) {
+                if (eager[i].data != replayed[i].data)
+                    fail("selective BF16 graph/eager mismatch T=" + std::to_string(tokens) +
+                         " element=" + std::to_string(i));
+            }
         }
         HIP_CHECK(hipGraphExecDestroy(executable));
         HIP_CHECK(hipGraphDestroy(graph));
         std::cout << "selective-protected-bf16: PASS N=" << rows << " K=" << columns << " T=" << tokens
                   << " fp64_samples=" << expected.size() << " full_K=" << columns
+                  << " same_column_vs_t1=" << (tokens <= 24U ? "EXACT" : "not_applicable")
+                  << " graph_eager_exact=true"
                   << " eager=PASS graph_replays=2 abs_tolerance=" << absolute_tolerance
                   << " rel_tolerance=" << relative_tolerance << " max_abs=" << maximum_absolute
                   << " max_normalized=" << maximum_normalized << '\n';

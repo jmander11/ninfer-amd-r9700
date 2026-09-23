@@ -3837,12 +3837,13 @@ hipError_t bf16_linear_wmma16(const Bf16LinearArgs& args, hipStream_t stream) no
 }
 
 hipError_t bf16_linear(const Bf16LinearArgs& args, hipStream_t stream) noexcept {
-    if ((args.tokens == 5U || args.tokens == 6U) &&
+    if (args.tokens >= 1U && args.tokens <= 24U &&
         ((args.rows == 7168U && args.columns == 5120U) ||
          (args.rows == 5120U && args.columns == 6144U))) {
-        if (!valid_decode(args.input, args.output, args.tokens, args.rows, args.columns) ||
-            args.weights == nullptr) return hipErrorInvalidValue;
-        return detail::launch_bf16_staging_pair(args, stream);
+        // Protected projections retain the ordinary T1 reduction at every
+        // supported small-token width. One batched grid owns all tokens;
+        // neither a host request loop nor width-dependent reassociation.
+        return bf16_linear_baseline(args, stream);
     }
     if (args.tokens >= 9U) { return bf16_linear_prefill(args, stream); }
     // Fixed R9700 decode dispatch selected by the standalone real-shape sweep:

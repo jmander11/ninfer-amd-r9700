@@ -16,6 +16,7 @@ SNAPSHOTS = 129
 SNAPSHOT_BYTES = HIDDEN * 2
 PAYLOAD_BYTES = SNAPSHOTS * SNAPSHOT_BYTES
 ROLES = {
+    "selected": ("target-ordinary-selected", "target-dflash-selected"),
     "target": (
         ("target-ordinary-frontier130", 1, 0, 130, 129),
         ("target-dflash-frontier130-column0", 5, 0, 130, 129),
@@ -126,11 +127,38 @@ def decode_gdn_values(data: bytes, dtype: str,
     return bits, values
 
 
+SELECTED_KEYS = {"batch", "selected_row", "stable_lane", "flat_column",
+                 "base_frontier", "expected_history_sha256"}
+
+
+def selected_expected(value: dict, role: str) -> tuple:
+    batch = integer(value.get("batch"), "batch")
+    row = integer(value.get("selected_row"), "selected_row")
+    lane = integer(value.get("stable_lane"), "stable_lane")
+    width = integer(value.get("width"), "width")
+    column = integer(value.get("selected_column"), "selected_column")
+    frontier = integer(value.get("absolute_frontier"), "absolute_frontier")
+    base = integer(value.get("base_frontier"), "base_frontier")
+    flat = integer(value.get("flat_column"), "flat_column")
+    if not (1 <= batch <= 4 and 0 <= row < batch and 0 <= lane < 4 and
+            1 <= width <= 6 and 0 <= column < width and frontier > 0 and
+            base >= 0 and base + column + 1 == frontier and flat == row * width + column):
+        fail("selected trace geometry/frontier is invalid")
+    if role == "target-ordinary-selected" and width != 1:
+        fail("ordinary selected trace width must be one")
+    history = value.get("expected_history_sha256")
+    if not isinstance(history, str) or len(history) != 64 or any(c not in "0123456789abcdef" for c in history):
+        fail("selected trace expected history identity is invalid")
+    return role, width, column, frontier, frontier - 1
+
+
 def load(path: Path, expected: tuple[str, int, int, int, int]) -> tuple[dict, bytes]:
     value = json.loads(path.read_text(), object_pairs_hook=pairs,
                        parse_constant=lambda token: fail(f"nonfinite JSON: {token}"))
-    if not isinstance(value, dict) or set(value) != MANIFEST_KEYS:
+    if not isinstance(value, dict) or set(value) != MANIFEST_KEYS | (SELECTED_KEYS if isinstance(expected, str) else set()):
         fail(f"manifest keys differ: {path}")
+    if isinstance(expected, str):
+        expected = selected_expected(value, expected)
     role, width, column, frontier, position = expected
     exact = {
         "artifact_type": "ninfer_qwen3_layer_boundary_trace",
@@ -172,11 +200,18 @@ def load(path: Path, expected: tuple[str, int, int, int, int]) -> tuple[dict, by
 def load_gdn(path: Path, expected: tuple[str, int, int, int, int]) -> tuple[dict, bytes]:
     value = json.loads(path.read_text(), object_pairs_hook=pairs,
                        parse_constant=lambda token: fail(f"nonfinite JSON: {token}"))
-    if not isinstance(value, dict) or set(value) != GDN_MANIFEST_KEYS:
+    if not isinstance(value, dict) or set(value) != GDN_MANIFEST_KEYS | (SELECTED_KEYS if isinstance(expected, str) else set()):
         fail(f"GDN manifest keys differ: {path}")
+    selected = isinstance(expected, str)
+    if selected:
+        expected = selected_expected(value, expected)
+    layer = integer(value.get("text_layer"), "GDN text_layer") if selected else 1
+    if not 0 <= layer < 64 or layer % 4 == 3:
+        fail("GDN text_layer is not a GDN layer in 0..63")
     role, width, column, frontier, position = expected
     exact = {
-        "artifact_type": "ninfer_qwen3_layer1_gdn_detail_trace",
+        "artifact_type": ("ninfer_qwen3_selected_gdn_detail_trace" if selected
+                          else "ninfer_qwen3_layer1_gdn_detail_trace"),
         "schema_version": 1,
         "diagnostic_only": True,
         "timing_evidence_eligible": False,
@@ -188,10 +223,11 @@ def load_gdn(path: Path, expected: tuple[str, int, int, int, int]) -> tuple[dict
         "absolute_frontier": frontier,
         "cache_position": position,
         "rope_position": position,
-        "text_layer": 1,
-        "gdn_index": 1,
+        "text_layer": layer,
+        "gdn_index": layer - layer // 4,
         "sidecar_bytes": GDN_PAYLOAD_BYTES,
-        "layout": "typed selected-column layer1 GDN boundaries in field order",
+        "layout": ("typed selected-column selected-layer GDN boundaries in field order" if selected
+                   else "typed selected-column layer1 GDN boundaries in field order"),
     }
     for key, expected_value in exact.items():
         if value.get(key) != expected_value:
@@ -273,6 +309,11 @@ def compare(left_path: Path, right_path: Path, diagnostic: str) -> dict:
         if left[key] != right[key]:
             fail(f"paired semantic identity differs: {key}")
 
+    if diagnostic == "selected":
+        for key in ("stable_lane", "expected_history_sha256"):
+            if left[key] != right[key]:
+                fail(f"paired selected semantic identity differs: {key}")
+
     first = None
     for snapshot in range(SNAPSHOTS):
         begin = snapshot * SNAPSHOT_BYTES
@@ -319,6 +360,7 @@ def compare(left_path: Path, right_path: Path, diagnostic: str) -> dict:
         "limitations": [
             "localizes the first visible represented-BF16 residual boundary, not the primitive root cause",
             "an exact transformer residual stack leaves final RMSNorm and LM head untested",
+            "expected_history_sha256 is caller-validated prefix provenance, not a device-state hash; compare state only at matching pre-verify base frontiers",
         ],
     }
 
@@ -328,13 +370,17 @@ def compare_gdn(left_path: Path, right_path: Path, diagnostic: str) -> dict:
         fail("unknown diagnostic")
     left, left_data = load_gdn(left_path, ROLES[diagnostic][0])
     right, right_data = load_gdn(right_path, ROLES[diagnostic][1])
+    if diagnostic == "selected":
+        for key in ("stable_lane", "expected_history_sha256"):
+            if left[key] != right[key]:
+                fail(f"paired selected semantic identity differs: {key}")
     for key in ("absolute_frontier", "token", "cache_position", "rope_position",
                 "text_layer", "gdn_index"):
         if left[key] != right[key]:
             fail(f"paired GDN semantic identity differs: {key}")
 
     detail = None
-    classification = "layer1_gdn_boundaries_exact"
+    classification = "selected_gdn_boundaries_exact" if diagnostic == "selected" else "layer1_gdn_boundaries_exact"
     for field_index, (name, dtype, elements, offset, byte_count) in enumerate(GDN_FIELDS):
         left_field = left_data[offset:offset + byte_count]
         right_field = right_data[offset:offset + byte_count]
@@ -369,12 +415,15 @@ def compare_gdn(left_path: Path, right_path: Path, diagnostic: str) -> dict:
             fail("first differing GDN field does not have exact predecessors")
         break
     return {
-        "artifact_type": "ninfer_qwen3_layer1_gdn_detail_comparison",
+        "artifact_type": ("ninfer_qwen3_selected_gdn_detail_comparison" if diagnostic == "selected"
+                          else "ninfer_qwen3_layer1_gdn_detail_comparison"),
         "schema_version": 1,
         "diagnostic_only": True,
         "timing_evidence_eligible": False,
         "production_routing_authorized": False,
         "diagnostic": diagnostic,
+        "text_layer": left["text_layer"],
+        "gdn_index": left["gdn_index"],
         "classification": classification,
         "first_difference": detail,
         "limitations": [
@@ -421,6 +470,81 @@ def compare_recurrent_state(left_path: Path, right_path: Path) -> dict:
     }
 
 
+ATTENTION_FIELDS = [
+    ("input_x", "bf16", 5120), ("norm_h", "bf16", 5120),
+    ("projection_q", "bf16", 6144), ("projection_gate", "bf16", 6144),
+    ("projection_k", "bf16", 1024), ("projection_v", "bf16", 1024),
+    ("normalized_qk", "bf16", 7168), ("rope_qk", "bf16", 7168),
+    ("attention_fp32", "fp32", 6144), ("attention_bf16", "bf16", 6144),
+    ("gated_attention", "bf16", 6144), ("residual_x", "bf16", 5120),
+]
+
+
+def load_selected_attention(path: Path, role: str) -> tuple[dict, bytes]:
+    value = json.loads(path.read_text(), object_pairs_hook=pairs,
+                       parse_constant=lambda token: fail(f"nonfinite JSON: {token}"))
+    keys = SELECTED_KEYS | {"artifact_type", "schema_version", "diagnostic_only",
+        "timing_evidence_eligible", "production_routing_authorized", "execution",
+        "cache_capture", "text_layer", "role", "width", "selected_column",
+        "absolute_frontier", "token", "cache_position", "rope_position", "fields",
+        "sidecar_path", "sidecar_bytes", "sidecar_fnv1a64"}
+    if not isinstance(value, dict) or set(value) != keys:
+        fail("selected attention manifest keys differ")
+    _, _, _, _, position = selected_expected(value, role)
+    exact = {"artifact_type": "ninfer_qwen3_layer3_attention_trace", "schema_version": 1,
+        "diagnostic_only": True, "timing_evidence_eligible": False,
+        "production_routing_authorized": False, "execution": "eager",
+        "cache_capture": False, "text_layer": 3, "role": role,
+        "cache_position": position, "rope_position": position, "sidecar_bytes": 137216}
+    for key, expected in exact.items():
+        if value[key] != expected:
+            fail(f"selected attention field differs: {key}")
+    if not 0 <= integer(value["token"], "token") < 248077:
+        fail("selected attention token outside domain")
+    fields, offset = [], 0
+    for name, dtype, count in ATTENTION_FIELDS:
+        size = count * (4 if dtype == "fp32" else 2)
+        fields.append(dict(name=name, dtype=dtype, elements=count, offset=offset, bytes=size))
+        offset += size
+    if value["fields"] != fields:
+        fail("selected attention field layout differs")
+    sidecar = Path(value["sidecar_path"])
+    if (sidecar != path.with_suffix(".bin") or not sidecar.is_absolute() or
+            sidecar.is_symlink() or not sidecar.is_file()):
+        fail("selected attention sidecar identity differs")
+    data = sidecar.read_bytes()
+    if len(data) != offset or fnv1a64(data) != value["sidecar_fnv1a64"]:
+        fail("selected attention sidecar bytes/hash differ")
+    for field in fields:
+        for (bits,) in struct.iter_unpack("<I" if field["dtype"] == "fp32" else "<H",
+                data[field["offset"]:field["offset"] + field["bytes"]]):
+            mask = 0x7f800000 if field["dtype"] == "fp32" else 0x7f80
+            if bits & mask == mask:
+                fail("nonfinite selected attention stage")
+    return value, data
+
+
+def compare_selected_attention(left_path: Path, right_path: Path) -> dict:
+    left, a = load_selected_attention(left_path, ROLES["selected"][0])
+    right, b = load_selected_attention(right_path, ROLES["selected"][1])
+    for key in ("absolute_frontier", "token", "cache_position", "rope_position",
+                "stable_lane", "expected_history_sha256"):
+        if left[key] != right[key]:
+            fail(f"selected attention semantic identity differs: {key}")
+    stages = []
+    for field in left["fields"]:
+        start, size = field["offset"], field["bytes"]
+        fmt = "<I" if field["dtype"] == "fp32" else "<H"
+        x, y = list(struct.iter_unpack(fmt, a[start:start+size])), list(struct.iter_unpack(fmt, b[start:start+size]))
+        mismatches = [i for i, (av, bv) in enumerate(zip(x, y)) if av != bv]
+        stages.append(dict(name=field["name"], mismatch_count=len(mismatches),
+                           first_index=mismatches[0] if mismatches else None))
+    return dict(diagnostic_only=True, cache_capture=False, stages=stages,
+        first_differing_stage=next((s["name"] for s in stages if s["mismatch_count"]), None),
+        limitations=["selected column of actual batched execution; cache/state equality is not established",
+                     "same consumed token/history required; no production or timing admission"])
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--left", type=Path, required=True)
@@ -428,13 +552,18 @@ def main() -> int:
     parser.add_argument("--diagnostic", choices=sorted(ROLES), required=True)
     parser.add_argument("--gdn-detail", action="store_true")
     parser.add_argument("--recurrent-state", action="store_true")
+    parser.add_argument("--attention-detail", action="store_true")
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     if args.out.exists() or args.out.is_symlink():
         fail("comparison refuses to overwrite output")
-    if args.gdn_detail and args.recurrent_state:
+    if sum((args.gdn_detail, args.recurrent_state, args.attention_detail)) > 1:
         fail("comparison mode is ambiguous")
-    if args.recurrent_state:
+    if args.attention_detail:
+        if args.diagnostic != "selected":
+            fail("attention-detail requires selected diagnostic")
+        result = compare_selected_attention(args.left, args.right)
+    elif args.recurrent_state:
         if args.diagnostic != "text":
             fail("recurrent-state comparison requires the Text diagnostic")
         result = compare_recurrent_state(args.left, args.right)

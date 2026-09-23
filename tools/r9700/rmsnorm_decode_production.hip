@@ -262,21 +262,51 @@ void run_regression(hipStream_t stream) {
     upload(d_weight, weight);
     Error maximum;
     std::uint32_t cases = 0;
-    constexpr std::uint32_t maximum_rows = 6U;
+    constexpr std::uint32_t maximum_rows = 24U;
+    std::array<std::vector<hip_bfloat16>, 18> singleton_outputs;
+    std::uint64_t crosswidth_mismatches = 0;
+    std::string first_crosswidth_mismatch;
     for (std::uint32_t rows = 1U; rows <= maximum_rows; ++rows) {
         for (const std::uint32_t fixture : {0U, 1U, 2U}) {
-            const auto input = make_input(rows, fixture);
+            auto input = make_input(rows, fixture);
+            // Move the same represented column through every supported lane
+            // position as width grows. Other columns retain unrelated values.
+            const auto singleton_input = make_input(1U, fixture);
+            std::copy(singleton_input.begin(), singleton_input.end(),
+                      input.begin() + static_cast<std::size_t>(rows - 1U) * kFeatures);
             DeviceBuffer<hip_bfloat16> d_input(input.size());
             DeviceBuffer<hip_bfloat16> d_output(input.size() + 2U * kGuardElements);
             upload(d_input, input);
+            std::size_t reference_index = fixture * 6U;
             for (const bool unit_offset : {false, true}) {
                 for (const float eps : {1.0e-8F, kModelEps, 1.0e-4F}) {
                     poison_output(d_output, stream);
                     launch_production(d_input, d_weight, d_output, rows, eps, unit_offset, stream);
                     HIP_CHECK(hipStreamSynchronize(stream));
-                    const Error error = require_oracle(
-                        checked_output(d_output, input.size()), input, weight, rows, eps,
-                        unit_offset);
+                    const auto actual = checked_output(d_output, input.size());
+                    const Error error = require_oracle(actual, input, weight, rows, eps,
+                                                       unit_offset);
+                    if (rows == 1U) {
+                        singleton_outputs[reference_index] = actual;
+                    } else {
+                        const auto& reference = singleton_outputs[reference_index];
+                        const std::size_t base = static_cast<std::size_t>(rows - 1U) * kFeatures;
+                        for (std::uint32_t feature = 0; feature < kFeatures; ++feature) {
+                            if (actual[base + feature].data == reference[feature].data) continue;
+                            ++crosswidth_mismatches;
+                            if (first_crosswidth_mismatch.empty()) {
+                                std::ostringstream detail;
+                                detail << "same-column vs T1 mismatch: rows=" << rows
+                                       << " lane=" << rows - 1U << " fixture=" << fixture
+                                       << " unit_offset=" << unit_offset << " eps=" << eps
+                                       << " feature=" << feature << " actual_bits="
+                                       << actual[base + feature].data << " singleton_bits="
+                                       << reference[feature].data;
+                                first_crosswidth_mismatch = detail.str();
+                            }
+                        }
+                    }
+                    ++reference_index;
                     maximum.max_abs = std::max(maximum.max_abs, error.max_abs);
                     maximum.relative_l2 = std::max(maximum.relative_l2, error.relative_l2);
                     maximum.max_bf16_steps =
@@ -287,11 +317,15 @@ void run_regression(hipStream_t stream) {
         }
     }
 
-    for (const std::uint32_t graph_rows : {5U, 6U}) {
+    for (const std::uint32_t graph_rows : {2U, 5U, 6U, 10U, 24U}) {
         const auto graph_input = make_input(graph_rows, 0U);
         DeviceBuffer<hip_bfloat16> d_input(graph_input.size());
         DeviceBuffer<hip_bfloat16> d_output(graph_input.size() + 2U * kGuardElements);
         upload(d_input, graph_input);
+        poison_output(d_output, stream);
+        launch_production(d_input, d_weight, d_output, graph_rows, kModelEps, true, stream);
+        HIP_CHECK(hipStreamSynchronize(stream));
+        const auto eager = checked_output(d_output, graph_input.size());
         poison_output(d_output, stream);
         hipGraph_t graph = nullptr;
         hipGraphExec_t executable = nullptr;
@@ -301,8 +335,13 @@ void run_regression(hipStream_t stream) {
         HIP_CHECK(hipGraphInstantiate(&executable, graph, nullptr, nullptr, 0));
         for (int replay = 0; replay < 2; ++replay) HIP_CHECK(hipGraphLaunch(executable, stream));
         HIP_CHECK(hipStreamSynchronize(stream));
-        (void)require_oracle(checked_output(d_output, graph_input.size()), graph_input, weight,
-                             graph_rows, kModelEps, true);
+        const auto replayed = checked_output(d_output, graph_input.size());
+        (void)require_oracle(replayed, graph_input, weight, graph_rows, kModelEps, true);
+        for (std::size_t i = 0; i < eager.size(); ++i) {
+            if (eager[i].data != replayed[i].data)
+                fail("RMSNorm graph/eager mismatch at rows=" + std::to_string(graph_rows) +
+                     " element=" + std::to_string(i));
+        }
         HIP_CHECK(hipGraphExecDestroy(executable));
         HIP_CHECK(hipGraphDestroy(graph));
     }
@@ -339,13 +378,14 @@ void run_regression(hipStream_t stream) {
     reject_without_write(d_input.get(), d_weight.get(), out, kFeatures, 1U, kModelEps, nullptr);
 
     std::cout << "r9700 production RMSNorm K5120 rows1.." << maximum_rows
-              << ": PASS cases=" << cases
+              << ": oracle/graph/boundary PASS cases=" << cases
               << " max_bf16_steps=" << maximum.max_bf16_steps
-              << " graph_rows=5,6 graph_replays_per_row=2 output_canaries=true malformed_cases=10"
-              << " dflash_rows56_candidate="
-              << (ninfer::ops::r9700::eager::kDFlashRmsnormRows56CandidateEnabled ? "true" :
-                                                                                     "false")
+              << " graph_rows=2,5,6,10,24 graph_replays_per_row=2 graph_eager_exact=true"
+              << " output_canaries=true malformed_cases=10 crosswidth_mismatches="
+              << crosswidth_mismatches
               << '\n';
+    if (crosswidth_mismatches != 0U) fail(first_crosswidth_mismatch);
+    std::cout << "RMSNorm same-column T1..24 exact invariance: PASS\n";
 }
 } // namespace
 

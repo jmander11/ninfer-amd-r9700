@@ -795,17 +795,10 @@ void TextContext::ordinary_decode_batch(const Tensor& ids, const Tensor& cache_p
 
         Tensor x = work_.alloc(DType::BF16, {kCfg.hidden, batch});
         ops::embedding(ids, *embed_, x, stream);
-        if (layer_boundary_trace::matches(layer_boundary_trace::Role::TargetOrdinary)) {
-            layer_boundary_trace::Session trace(
-                {.role       = layer_boundary_trace::Role::TargetOrdinary,
-                 .width      = 1,
-                 .batch      = batch,
-                 .column     = 0,
-                 .frontier   = 130,
-                 .ids        = &ids,
-                 .positions  = &cache_positions,
-                 .rope       = &rope_positions},
-                stream);
+        if (auto trace_call = layer_boundary_trace::select_target_call(
+                layer_boundary_trace::Role::TargetOrdinary, 1, batch, ids, cache_positions,
+                rope_positions, linear_state_slots, stream)) {
+            layer_boundary_trace::Session trace(*trace_call, stream);
             layer_boundary_trace::Tap tap{trace};
             tap.begin(x);
             run_layers(x, Phase::Verify, tap);
@@ -877,17 +870,10 @@ void TextContext::target_verify_batch_impl(const Tensor& ids, const Tensor& cach
         Tensor x        = work_.alloc(DType::BF16, {kCfg.hidden, columns});
         Tensor flat_ids = ids.view({columns});
         ops::embedding(flat_ids, *embed_, x, stream);
-        if (layer_boundary_trace::matches(layer_boundary_trace::Role::TargetDFlash)) {
-            layer_boundary_trace::Session trace(
-                {.role       = layer_boundary_trace::Role::TargetDFlash,
-                 .width      = width,
-                 .batch      = batch,
-                 .column     = 0,
-                 .frontier   = 130,
-                 .ids        = &ids,
-                 .positions  = &cache_positions,
-                 .rope       = &rope_positions},
-                stream);
+        if (auto trace_call = layer_boundary_trace::select_target_call(
+                layer_boundary_trace::Role::TargetDFlash, width, batch, ids, cache_positions,
+                rope_positions, linear_state_slots, stream, &valid_columns)) {
+            layer_boundary_trace::Session trace(*trace_call, stream);
             layer_boundary_trace::CompositeTap<Tap> combined{tap, trace};
             combined.begin(x);
             run_layers(x, Phase::Verify, combined);

@@ -1,6 +1,5 @@
 #include "ninfer_bench_support.h"
 #include "core/roctx.h"
-#include "ops/r9700/eager/r9700_rmsnorm_profile.h"
 #include "ops/r9700/kv/r9700_attention_profile.h"
 #include "ops/r9700/linear/r9700_q4_activation_profile.h"
 #include "ops/r9700/linear/r9700_w8_activation_profile.h"
@@ -599,9 +598,6 @@ int test_report_contract() {
     failures += expect(report.at("config").at("dflash_mlp_down_t5_candidate") ==
                            ninfer::ops::r9700::linear::kDFlashMlpDownT5CandidateEnabled,
                        "compiled DFlash MLP-down T5 candidate profile");
-    failures += expect(report.at("config").at("dflash_rmsnorm_rows56_candidate") ==
-                           ninfer::ops::r9700::eager::kDFlashRmsnormRows56CandidateEnabled,
-                       "compiled DFlash RMSNorm rows5/6 candidate profile");
     failures += expect(report.at("config").at("text_p129_wmma_tail_candidate") ==
                            ninfer::ops::r9700::kv::kTextP129WmmaTailCandidate,
                        "compiled Text P129 WMMA tail candidate profile");
@@ -729,11 +725,6 @@ int test_human_and_csv_reports() {
             std::string::npos,
         "table DFlash MLP-down T5 candidate profile");
     failures += expect(
-        table.find(std::string("dflash_rmsnorm_rows56_candidate=") +
-                       (ninfer::ops::r9700::eager::kDFlashRmsnormRows56CandidateEnabled ?
-                            "true" : "false")) != std::string::npos,
-        "table DFlash RMSNorm rows5/6 candidate profile");
-    failures += expect(
         table.find(std::string("text_p129_wmma_tail_candidate=") +
                        (ninfer::ops::r9700::kv::kTextP129WmmaTailCandidate ? "true" : "false")) !=
             std::string::npos,
@@ -762,7 +753,6 @@ int test_human_and_csv_reports() {
           "kv_value_plane_layout", "kv_value_scale_plane_layout", "q4_activation_bits",
           "q4_prefill_cta_profile", "dflash_small_t_candidate",
            "dflash_mlp_down_t5_candidate",
-           "dflash_rmsnorm_rows56_candidate",
            "text_p129_wmma_tail_candidate",
            "w8_activation_bits",
           "fp8_qk_wmma_enabled", "fp8_qk_wmma_profile",

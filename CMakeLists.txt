@@ -73,20 +73,6 @@ endif()
 add_compile_definitions(
   NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE=${NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE})
 
-# Qualification-selected exact DFlash RMSNorm route. Zero retains the ordinary rows1..4 CTA
-# domain; one additionally admits only the independently qualified K5120 rows5/6 cells.
-set(NINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE "0" CACHE STRING
-  "Enable the exact qualified R9700 DFlash RMSNorm rows5/6 candidate")
-set_property(CACHE NINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE PROPERTY STRINGS 0 1)
-if(NOT NINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE STREQUAL "0" AND
-   NOT NINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE STREQUAL "1")
-  message(FATAL_ERROR
-    "NINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE must be 0 or 1; got "
-    "'${NINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE}'")
-endif()
-add_compile_definitions(
-  NINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE=${NINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE})
-
 # Qualification-only Text P129 WMMA tail candidate. Default zero retains the dense P129 route; one
 # admits only the exact Text P129 tail overwrite. The DFlash W5/W6 batched-WMMA route is a
 # production route and is not gated by this flag.

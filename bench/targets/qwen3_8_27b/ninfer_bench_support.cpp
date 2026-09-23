@@ -1,5 +1,4 @@
 #include "ninfer_bench_support.h"
-#include "ops/r9700/eager/r9700_rmsnorm_profile.h"
 #include "ops/r9700/kv/r9700_attention_profile.h"
 #include "ops/r9700/kv/r9700_xattention_profile.h"
 #include "ops/r9700/linear/r9700_q4_activation_profile.h"
@@ -780,9 +779,6 @@ std::string format_table(const BenchEnvironment& env, const std::vector<TestResu
         << (ninfer::ops::r9700::linear::kDFlashSmallTCandidateEnabled ? "true" : "false")
         << " dflash_mlp_down_t5_candidate="
         << (ninfer::ops::r9700::linear::kDFlashMlpDownT5CandidateEnabled ? "true" : "false")
-        << " dflash_rmsnorm_rows56_candidate="
-        << (ninfer::ops::r9700::eager::kDFlashRmsnormRows56CandidateEnabled ? "true" :
-                                                                                 "false")
         << " text_p129_wmma_tail_candidate="
         << (ninfer::ops::r9700::kv::kTextP129WmmaTailCandidate ? "true" : "false")
         << " w8_activation_bits=" << ninfer::ops::r9700::linear::kW8ActivationBits
@@ -925,10 +921,6 @@ std::string format_json(const BenchEnvironment& env, const std::string& command,
          << "    \"dflash_mlp_down_t5_candidate\": "
          << (ninfer::ops::r9700::linear::kDFlashMlpDownT5CandidateEnabled ? "true" : "false")
          << ",\n"
-         << "    \"dflash_rmsnorm_rows56_candidate\": "
-         << (ninfer::ops::r9700::eager::kDFlashRmsnormRows56CandidateEnabled ? "true" :
-                                                                                  "false")
-         << ",\n"
           << "    \"text_p129_wmma_tail_candidate\": "
           << (ninfer::ops::r9700::kv::kTextP129WmmaTailCandidate ? "true" : "false")
          << ",\n"
@@ -1061,7 +1053,6 @@ std::string format_csv(const BenchEnvironment& env, const std::vector<TestResult
            "kv_value_group,kv_key_plane_layout,kv_value_plane_layout,"
            "kv_value_scale_plane_layout,q4_activation_bits,q4_prefill_cta_profile,"
            "dflash_small_t_candidate,dflash_mlp_down_t5_candidate,"
-           "dflash_rmsnorm_rows56_candidate,"
            "text_p129_wmma_tail_candidate,w8_activation_bits,"
            "fp8_qk_wmma_enabled,"
            "fp8_qk_wmma_profile,fp8_qk_wmma_t1_min_context,fp8_qk_wmma_t2_min_context,"
@@ -1108,9 +1099,6 @@ std::string format_csv(const BenchEnvironment& env, const std::vector<TestResult
             << (ninfer::ops::r9700::linear::kDFlashSmallTCandidateEnabled ? "true" : "false")
             << ','
             << (ninfer::ops::r9700::linear::kDFlashMlpDownT5CandidateEnabled ? "true" : "false")
-            << ','
-            << (ninfer::ops::r9700::eager::kDFlashRmsnormRows56CandidateEnabled ? "true" :
-                                                                                   "false")
             << ','
             << (ninfer::ops::r9700::kv::kTextP129WmmaTailCandidate ? "true" : "false") << ','
             << ninfer::ops::r9700::linear::kW8ActivationBits << ','

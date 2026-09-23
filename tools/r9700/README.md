@@ -1,5 +1,53 @@
 # R9700 codec and gfx12 qualification
 
+Selected concurrent Text localization uses the existing eager layer-boundary
+trace without serializing the model batch. Set
+`NINFER_QWEN3_LAYER_BOUNDARY_TRACE_ROLE` to `target-ordinary-selected` or
+`target-dflash-selected`, with the same-prefix settings
+`NINFER_QWEN3_LAYER_BOUNDARY_TRACE_BATCH`, `_LANE`, `_FRONTIER`, `_COLUMN`,
+`_TOKEN`, and `_HISTORY_SHA256` (each suffix uses the full preceding prefix).
+LANE is the stable request lane, not compact row; COLUMN is the within-request
+verify column, or -1 to locate the frontier automatically. FRONTIER is consumed
+cache position plus one; TOKEN must match the consumed device ID. HISTORY_SHA256
+is caller-validated provenance for the represented prompt/generated prefix,
+not a device-state digest. The caller must verify equal prefix tokens before
+comparing traces; matching frontier alone is insufficient.
+
+Use `--no-device-graph` and the existing manifest/sidecar output variables; the
+optional layer1 GDN detail outputs are supported. Selected layer3 attention stages
+use `NINFER_QWEN3_LAYER3_ATTENTION_TRACE_MANIFEST` and
+`NINFER_QWEN3_LAYER3_ATTENTION_TRACE_SIDECAR`; no legacy fixed-pair provenance
+variables are required. The 12 typed stages retain the real batched projections
+and attention execution. Compare these manifests using the command below with
+`--attention-detail`. Their explicit `cache_capture=false` means cache/state
+equality is not established. The old fixed layer3 cache and recurrence-state
+captures remain unavailable for selected roles.
+Compare matching consumed tokens with
+`python3 tools/bench/compare_qwen3_layer_boundary_trace.py --diagnostic selected
+--left LEFT.json --right RIGHT.json --out FRESH.json` (add `--gdn-detail` for
+GDN payloads). Widths may differ; manifests retain actual batch, stable lane,
+compact row, flat column and pre-verify base frontier. State comparisons require
+matching base frontiers, not just matching selected-token frontiers. Tracing
+synchronizes metadata reads and is never performance evidence.
+
+The bounded layer0 MLP replay uses matched first-decode C2 lane1 sidecars
+(ordinary T2 column1 and K4 verify T10 column5), the selected artifact, and the
+actual public RMSNorm/Linear/SiLU/residual Ops:
+
+```bash
+build-r9700/src/ninfer_r9700_mlp_width_discriminator --weights SELECTED.ninfer --ordinary-trace ORDINARY.bin --verify-trace VERIFY.bin --out-dir FRESH_DIRECTORY --expect-width-invariant
+```
+
+Both captured post-mixer inputs must be identical. This regression mode requires
+every replay stage to be bit-identical across widths and the ordinary final
+output to reproduce its captured post-MLP boundary; the historical verify endpoint
+is recorded but is not an expected output after the fix. Without
+`--expect-width-invariant`, diagnostic mode instead requires both historical
+endpoints to reproduce and reports intermediate differences. Neither mode is an
+independent numerical qualification; the RMSNorm and Linear qualifiers own their
+mathematical oracles. Validate the input sidecar manifests with the comparator
+above before replaying them.
+
 This native-HIP suite qualifies the gfx1201 hardware assumptions and the R9700 Op implementations
 linked by `ninfer_r9700_core`. The standalone Makefile keeps focused oracle, ISA/resource, timing,
 and profiling work independent of the complete product build.
@@ -1046,6 +1094,13 @@ route selection. MTP cases also reject malformed logical shapes and partial byte
 standalone form with
 `make -C tools/r9700 build/eager_op_qual`.
 
+K5120 small-token RMSNorm uses the ordinary parallel-CTA arithmetic consistently at T1..24,
+including speculative verification batches. `make -C tools/r9700
+rmsnorm-decode-production-regression` checks the represented-input FP64 oracle and exact
+same-column equality against T1 at every width, plus eager/graph equality at T2/5/6/10/24.
+There is no rows5/6 candidate build flag. T25..127 and other feature widths retain their
+existing routes; T>=128 prefill remains unchanged.
+
 `rmsnorm_prefill_qual` retains the direct regression boundary for the production K5120 prefill
 route selected at T>=128. One 256-thread workgroup assigns each of its eight wave32 waves
 to one token; lane zero retains the incumbent feature-ascending FP32 `fmaf` chain while 128-bit
@@ -1055,8 +1110,9 @@ modes, three eps values, and the independent FP64 criterion before timing. Run t
 static-check tests with `make -C tools/r9700 rmsnorm-prefill-static-test`; the real assembly gate
 is `rmsnorm-prefill-static`. A fresh no-clobber physical report is produced only by explicitly
 setting `RMSNORM_PREFILL_JSON` and invoking `rmsnorm-prefill-benchmark`. The retained admission
-report passed the no-regression envelope from T128 upward and the 1.5x P2048 gate; other feature
-widths and smaller row counts retain the incumbent kernel.
+report passed the no-regression envelope from T128 upward and the 1.5x P2048 gate. The current
+small-token K5120 route is the canonical parallel CTA described below; other feature widths
+retain their existing routes.
 
 The later qualification-only residual-add to K5120 token8 RMSNorm fusion has been removed after
 terminal physical rejection. Although its exact residual/output, complete independent-oracle,
@@ -1087,13 +1143,19 @@ make -C tools/r9700 rmsnorm-k256-prefill-benchmark \
   RMSNORM_K256_PREFILL_JSON=../../profiles/bench/EXPLICIT-FRESH-rmsnorm-k256-token8.json
 ```
 
-The canonical ordinary-decode RMSNorm route covers exactly K5120 and rows 1 through 4, the
-complete supported concurrency domain. One 256-thread CTA owns each row:
+The canonical small-token RMSNorm route covers exactly K5120 and rows 1 through 24, including
+ordinary decode and flattened speculative verification batches. One 256-thread CTA owns each row:
 every lane accumulates 20 represented BF16 values in FP32, wave32 shuffles reduce each wave, and
 eight LDS partials complete the CTA reduction before BF16 publication. The numerical gate compares
 the complete result directly with an independent CPU FP64 formula across ordinary, zero, and
 mixed-magnitude inputs, both gain modes, three epsilon values, every selected row count, and two
-Device Graph replays. K5120 rows 5 through 127 retain the generic route, K5120 rows at or above
+Device Graph replays. The current physical regression passed all 432 FP64 cases, with zero
+same-column cross-width mismatches against T1 and exact eager/graph outputs at T2/5/6/10/24.
+This establishes the RMSNorm correction only, not whole-model admission. Whole C2
+DFlash-versus-ordinary greedy parity remains open, and the norm-corrected C1 K4 run differs from the
+retained ordinary stream at token 52 (3470 versus 413). The candidate is not promoted;
+remaining arithmetic-profile differences require localization before any further math change.
+K5120 rows 25 through 127 retain the generic route, K5120 rows at or above
 128 retain the token8 prefill route, and every other feature width retains its existing specialized
 or generic fallback. Check the host selection boundary and gfx1201 resources without GPU execution
 with:
@@ -1103,7 +1165,7 @@ make -C tools/r9700 rmsnorm-decode-production-routing-test \
   rmsnorm-decode-production-static-test rmsnorm-decode-production-static
 ```
 
-The immutable operator report is
+The historical rows1..4 operator admission report is
 `profiles/bench/r9700-rmsnorm-k5120-rows4-qualification-8192i-20260906.json`, SHA-256
 `e58b2e56980fb083548f1c357c26fc98a8a5bae27b1723ccf712451eaf4b8103`. All four rows passed; the
 minimum robust ordinary-round saving lower bound was `11.7782198046 ms`.

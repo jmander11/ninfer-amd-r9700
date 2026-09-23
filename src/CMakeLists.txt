@@ -780,6 +780,20 @@ target_link_libraries(ninfer_r9700_scalar_schedule_qual PRIVATE ninfer_r9700_cor
 
 
 
+# Captured-input head profile replay; diagnostic, not qualification.
+add_executable(ninfer_r9700_head_width_discriminator
+  ${PROJECT_SOURCE_DIR}/tools/r9700/head_width_discriminator.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_head_width_discriminator)
+set_target_properties(ninfer_r9700_head_width_discriminator PROPERTIES HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_head_width_discriminator PRIVATE ninfer_r9700_core ninfer_artifact hip::host)
+
+# Stateless replay of captured equal layer0 MLP inputs; diagnostic, not qualification.
+add_executable(ninfer_r9700_mlp_width_discriminator
+  ${PROJECT_SOURCE_DIR}/tools/r9700/mlp_width_discriminator.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_mlp_width_discriminator)
+set_target_properties(ninfer_r9700_mlp_width_discriminator PROPERTIES HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_mlp_width_discriminator PRIVATE ninfer_artifact ninfer_r9700_core hip::host)
+
 # Retired backend tests and microbenchmarks do not enter this graph. The sole Qwen3.8 runtime,
 # public Engine, and product applications above are native HIP link owners;
 # real-model execution is still gated on the complete BF16-derived R9700 artifact.

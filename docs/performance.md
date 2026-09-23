@@ -131,6 +131,34 @@ reported draft-disabled `spec=none`. The corrected checker validated and reused 
 no failed GPU measurement was overwritten or repeated. C1 traffic accounting is not extended to
 the fallback-bearing C2–4 schedule as a measured physical traffic estimate.
 
+### Measured C2 verification cost
+
+Follow-up C1/C2 K4 traces reproduce each mode's saved tokens and accounting. Profiling measures
+kernel attribution, not unprofiled speed or physical memory utilization:
+
+| Active batch | Physical graph launches | Kernel ms/graph | Target-layer ms/graph |
+|---|---:|---:|---:|
+| C1 | 38 | 47.122 | 38.585 |
+| C2, two active lanes | 37 | 97.565 | 87.180 |
+| C2, one-lane tail | 5 | 47.256 | 38.731 |
+
+The C2 target layers take 2.26 times C1's cost, overwhelming the reuse elsewhere: target
+norm/head is only 2.328 versus 2.221 ms/graph, and drafting is 5.485 versus 4.218 ms.
+The tiny N48 BF16 control projections are a major regression: their T10 WMMA route totals
+15.660 ms/full C2 graph, versus 0.761 ms for the C1 paired-wave32 controls. C2 also leaves the
+T5 Q4/down and normalization specializations. Generic N5120 Q4 trace rows include both down
+and another projection; they cannot all be attributed to down alone.
+
+Across the complete run, graph cost per useful output increases from 13.989 to 15.024 ms.
+Lower acceptance (56.91% versus 60.40%) and five one-lane tails also limit sharing. The actual
+79 lane evaluations are 37*2+5, consistent with 78 speculative rounds plus one fallback;
+lane-summed rounds are not graph counts. Prompt rotation confounds an isolated acceptance
+comparison. These findings explain the measured scaling, but do not resolve the separately
+observed numerical mismatch or authorize a route change.
+
+Explicit databases, attribution, reconstruction scripts and independent topology checks are
+retained under `profiles/rocprof/r9700-dflash-c1-c2-k4-20260922/` (`analysis.md`, `comparison.json`).
+
 ## Selective-protected DFlash decode (2026-09-22)
 
 The currently selected evaluation artifact is
