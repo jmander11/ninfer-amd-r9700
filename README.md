@@ -1,119 +1,66 @@
 # NInfer AMD — Radeon AI PRO R9700
 
-NInfer is a from-scratch C++/HIP inference engine specialized for one AMD Radeon AI PRO R9700
-(`gfx1201`, wave32) and the Qwen3.8-27B model. It supports local CLI generation, OpenAI and
-Anthropic compatible HTTP serving, teacher-forced perplexity scoring, fixed concurrency from one to
-four requests, Vision input (including DFlash2), MTP, DFlash2, prefix reuse, host-RAM prefix spill,
-optional persistent SSD prefix storage, and Device Graphs. Generation includes p-less sampling,
-schema-constrained tool calls, thinking-cycle exclusion, and bounded repetition recovery.
+Native C++/HIP inference for **Qwen3.8-27B on one Radeon AI PRO R9700** (`gfx1201`,
+wave32). Supports CLI generation, OpenAI/Anthropic-compatible serving, Vision,
+DFlash2 speculative decoding, fixed concurrency of 1–4 requests, prefix caching,
+Device Graphs and perplexity scoring. This is a target-specific AMD engine, not
+a general multi-model or multi-GPU framework.
 
-This branch is the native AMD implementation: HIP kernels and RDNA 4 matrix instructions,
-not a CUDA compatibility layer. It is tuned for a single R9700 and Qwen3.8-27B, rather than
-offering a generic multi-model or multi-GPU backend.
+## Performance
 
-## Benchmarks
+One R9700, ROCm 10, Release build, power `auto`, Device Graphs, dense G16 attention.
+Code workload: **4,096 prompt + 128 output tokens**, chunk 2,048, maximum context
+4,240; median of three repetitions after one warmup. Rates measure inference
+phases, excluding model loading—not end-to-end request throughput.
 
-Measured on **one AMD Radeon AI PRO R9700**, native `gfx1201` Release build, ROCm 10
-toolchain, power profile `auto`, Device Graphs, dense attention and the fixed G16 cache.
-Workload: code corpus, **4,096 prompt tokens + 128 generated tokens**, prefill chunk 2,048,
-maximum context 4,240, one warmup and three measured repetitions; reported rates are medians.
-These are measured phase throughputs, not end-to-end rates including prefill or model loading.
+### DFlash2 decode · 2026-09-24
 
-### DFlash2 decode — 2026-09-24
-
-| Concurrent requests | 4 draft tokens, aggregate tok/s | 5 draft tokens, aggregate tok/s | Best per-request tok/s |
+| Concurrent requests | 4 drafts, aggregate tok/s | 5 drafts, aggregate tok/s | Best tok/s per request |
 |---|---:|---:|---:|
 | 1 | — | **105.15** | 105.15 |
 | 2 | 146.25 | **149.40** | 74.70 |
 | 3 | **191.05** | 178.29 | 63.68 |
 | 4 | **203.26** | 186.88 | 50.82 |
 
-Per-request throughput is aggregate divided by concurrency, not a request-latency measurement.
-C1/K4 was not remeasured in this pass. For this workload, use five drafts at C1–2 and four
-at C3–4; this is not a universal prompt/context optimum. C4 adaptive drafting with maximum
-five drafts reaches **201.04 aggregate tok/s**. All 24 final benchmark repetitions and 44
-cold-transition cases match ordinary greedy tokens exactly. Changed Ops also pass independent
-numerical oracles, graph/state checks and ISA/resource qualification.
+Per-request rates are aggregate divided by concurrency. C1/four drafts was not
+remeasured. Five drafts wins at C1–2 and four at C3–4 on this workload; other
+prompts may differ. C4 adaptive reaches **201.04 aggregate tok/s**. All 24 final
+repetitions and 44 cold-transition cases match ordinary greedy tokens exactly.
 
-### Prefill and ordinary decode — retained 2026-09-23 measurements
+### Prefill and ordinary decode · retained 2026-09-23 results
 
 | C1 mode | Prefill tok/s | Decode tok/s |
 |---|---:|---:|
-| Ordinary, no speculation | 1,519.18 | 30.15 |
-| DFlash2, five drafts | 1,472.19 | See latest table above |
+| No speculation | 1,519.18 | 30.15 |
+| DFlash2, five drafts | 1,472.19 | See newer table above |
 
-These use the same selected weight/activation recipe and P4096/G128 workload, but precede
-the latest decode optimizations; prefill and ordinary decode were not remeasured afterward.
-Keep chunk 2,048: matched 4,096-chunk checks were 3.6–4.2% slower on the tested samples.
-Neither these results nor isolated memory-bandwidth tests establish a hardware performance ceiling.
+Same recipe/workload; prefill and ordinary decode were not remeasured after the
+latest decode changes. Keep chunk **2,048**: tested 4,096 chunks were 3.6–4.2%
+slower. Results are workload-specific, not a claimed hardware ceiling.
+Methodology, quality checks and committed evidence: `docs/performance.md`.
 
-Full methodology, qualifications, historical comparisons and evidence locations are in
-`docs/performance.md`. The latest committed reports and reproduction helpers are under
-`profiles/bench/r9700-remaining-candidates-20260924/`; each cell's `command.json` records its
-exact invocation. Model artifacts are local prerequisites and are not included in Git.
+## Model and precision
 
-## Selected local model and precision
+- **15.79 GB base / 17.00 GB DFlash-enabled artifact** (decimal file sizes, not VRAM).
+- Selective Q4/FP8 weights, Q4 embedding/output head; Q4 DFlash with BF16 codebooks.
+- A4 for large-prefill Q4 MLP gate/up (T>128); A8 for other Q4 operations,
+  including ordinary decode and DFlash verification.
+- Fixed cache: FP8 E4M3FN keys, INT4 values, FP16 value scales. DFlash state is BF16.
 
-The benchmarked compact selective recipe uses Q4 weights with protected FP8 components,
-a Q4 embedding/output head, and a canonical-Q4 DFlash2 companion with BF16 selector codebooks.
-The base artifact is **15.79 GB**; the complete DFlash-enabled artifact is **17.00 GB**
-(decimal file sizes, not total runtime VRAM requirements).
+The selected local recipe's worst prefill PPL increase across three tested texts
+is **1.88% versus the 5090 NVFP4 reference**, with more newly severe positions on
+the technical sample (10 versus 6). This is not universal quality equivalence;
+the separate BF16-source production-admission campaign remains unfinished.
 
-Large-prefill Q4 MLP gate/up uses **A4** at T>128; other Q4 operations, including ordinary
-decode and DFlash verification, use **A8**. DFlash2 retains its private BF16 state.
-The selected recipe's retained three-text comparison against the 5090 NVFP4 reference has
-a worst per-text prefill PPL increase of **1.88%**; this is not universal quality equivalence,
-and the technical sample has more newly severe positions (10 versus 6). Exact recipe,
-quality comparisons and limitations are recorded in `docs/performance.md`.
-
-There is no compatibility backend and no runtime cache-format selector. The growing
-Text/MTP cache has one fixed represented format:
-
-- keys: FP8 E4M3FN;
-- values: signed canonical INT4;
-- value scales: FP16, one scale per fixed feature group;
-- attention softmax and accumulation: FP32;
-- explicit model-boundary outputs: BF16 where required by the Qwen formula.
-
-FP64 is used only by independent qualification oracles, never by production attention.
-
-## Implementation and artifact status
-
-The HIP core, artifact reader/materializer, typed cache, sole-target runtime, public Engine, CLI,
-server, PPL executable, and a broad set of native Ops build for `gfx1201`. Physical R9700
-qualifiers cover cache bytes/lifecycle, full Text attention, speculative transitions, DFlash2,
-Vision, Linear, GDN, sampling, persistent state, and fixed C=1..4 runtime planning.
-
-The original integer-candidate binding identity remains deliberately provisional:
-
-```text
-model_id   = qwen3.8-27b
-weights_id = r9700-int-candidate
-target_key = qwen3_8_27b_r9700
-recipe     = W8G32 candidate
-```
-
-This W8G32 candidate is not the compact Q4/FP8 recipe benchmarked above. Evaluation identities
-support the selected local deployment, but no final production artifact has been published.
-Final weight-recipe and G16/G32 cache-layout selection require paired BF16-reference quality,
-resolved-capacity, and matched whole-inference performance results. BF16 greedy-token differences
-are retained as diagnostics rather than a zero-difference gate.
-Those inputs are not committed to this repository.
-
-## Requirements
-
-- 64-bit Linux;
-- AMD Radeon AI PRO R9700;
-- a coherent ROCm 10 installation with `gfx1201` support;
-- CMake 3.28 or newer and Ninja;
-- a C++20 compiler;
-- FFmpeg development libraries;
-- libcurl development files for the CLI/server media-acquisition path;
-- Python 3.11, PyTorch, and safetensors only when converting or running Python reference tooling.
-
-The build rejects every HIP architecture other than `gfx1201`.
+Artifacts are not bundled. The installed recipe and creation receipts are under
+`/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-q4-fp8-selective-cap/`.
+Conversion and binding details: `docs/maintainer/r9700-integer-artifact-candidate.md`.
 
 ## Build
+
+Requires 64-bit Linux, R9700, ROCm 10 with `gfx1201`, CMake ≥3.28, Ninja, C++20,
+FFmpeg and libcurl development libraries. Python reference/conversion tools also
+require Python 3.11, PyTorch and safetensors.
 
 ```sh
 cmake -S . -B build-r9700 -G Ninja \
@@ -126,252 +73,31 @@ cmake -S . -B build-r9700 -G Ninja \
 cmake --build build-r9700 --parallel 4
 ```
 
-The product executables are:
+Only `gfx1201` is supported. Serialize builds, model conversion and GPU jobs on
+the shared host; never use uncapped build parallelism (maximum 14 jobs).
 
-```text
-build-r9700/apps/ninfer
-build-r9700/apps/ninfer-serve
-build-r9700/apps/ninfer-ppl
-build-r9700/bench/ninfer_bench
-```
+## Run
 
-Use each executable's `--help` output as the exact option/default authority.
-
-The selected local execution profile uses A4 only for full-K Q4 gate/up Linear
-N34816/K5120 at T>128; other Q4 operations, including ordinary decode and speculative
-verify widths, remain A8. Explicit settings above also update an existing CMake cache.
-Use family0 only for a uniform-activation control; broader A4 families remain evaluators.
-Serialize model conversion/readback, builds, and GPU jobs on the shared host. Never use
-uncapped build parallelism; 14 jobs is the maximum, and fewer may be needed for memory safety.
-
-The installed compact Q4-head base and canonical-Q4/BF16-codebook DFlash companion are in
-`/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-q4-fp8-selective-cap/`.
-Its `README.md` records exact artifact names, creation commands, selected activation policy,
-and quality limitations. Artifact bytes/identities do not change with activation policy.
-This local choice does not claim completion of the separate BF16-source production gate.
-
-## Artifact conversion and evaluators
-
-The commands below build explicit evaluation recipes; they do not recreate the compact
-selective-cap benchmark artifact by themselves. For that recipe's provenance and local
-creation receipts, see the selected-model directory's `README.md` and `docs/performance.md`.
-
-The provisional converter consumes a complete BF16 source directory directly. It preflights every
-required shard and frontend resource before creating output, writes final bound layouts, and never
-relies on runtime weight repacking.
+Use a DFlash-enabled `.ninfer` artifact for speculative generation:
 
 ```sh
-python3 -m tools.convert.qwen3_8_27b_r9700.build_draft_ranking \
-  --corpus tools/ppl/corpus.ids \
-  --out out/qwen3_8_27b_draft_ranking.i64
-
-python3 -m tools.convert.qwen3_8_27b_r9700.convert \
-  --model /path/to/complete-qwen3.8-27b-bf16 \
-  --draft-ranking out/qwen3_8_27b_draft_ranking.i64 \
-  --out models/qwen3_8_27b_r9700_candidate.ninfer \
-  --device cpu
-
-python3 -m tools.convert.qwen3_8_27b_r9700.convert_q4 \
-  --model /path/to/complete-qwen3.8-27b-bf16 \
-  --draft-ranking out/qwen3_8_27b_draft_ranking.i64 \
-  --out models/qwen3_8_27b_r9700_q4_eval.ninfer \
-  --device cpu
-
-python3 -m tools.convert.qwen3_8_27b_r9700.convert_q4_w8 \
-  --model /path/to/complete-qwen3.8-27b-bf16 \
-  --draft-ranking out/qwen3_8_27b_draft_ranking.i64 \
-  --out models/qwen3_8_27b_r9700_q4_w8_eval.ninfer \
-  --device cpu
-
-python3 -m tools.convert.qwen3_8_27b_r9700.convert_q4_w8_mse \
-  --model /path/to/complete-qwen3.8-27b-bf16 \
-  --draft-ranking out/qwen3_8_27b_draft_ranking.i64 \
-  --out models/qwen3_8_27b_r9700_q4_w8_mse_eval.ninfer \
-  --device cpu
-
-python3 -m tools.convert.qwen3_8_27b_r9700.convert_w8_bf16_embedding \
-  --model /path/to/complete-qwen3.8-27b-bf16 \
-  --draft-ranking out/qwen3_8_27b_draft_ranking.i64 \
-  --out models/qwen3_8_27b_r9700_w8_bf16_embedding_eval.ninfer \
-  --device cpu
-
-python3 -m tools.convert.qwen3_8_27b_r9700.convert_w8_bf16_attention_vo \
-  --model /path/to/complete-qwen3.8-27b-bf16 \
-  --draft-ranking out/qwen3_8_27b_draft_ranking.i64 \
-  --out models/qwen3_8_27b_r9700_w8_bf16_attention_vo_eval.ninfer \
-  --device cpu
-
-python3 -m tools.convert.qwen3_8_27b_r9700.convert_w8_bf16_gdn_qk \
-  --model /path/to/complete-qwen3.8-27b-bf16 \
-  --draft-ranking out/qwen3_8_27b_draft_ranking.i64 \
-  --out models/qwen3_8_27b_r9700_w8_bf16_gdn_qk_eval.ninfer \
-  --device cpu
-```
-
-The ranking builder validates the explicitly named Qwen3.8 token IDs, count, domain, and SHA-256
-against the sibling manifest and emits exactly one little-endian I64 frequency row plus its JSON
-provenance sidecar. Converter preflight requires that sibling sidecar, revalidates every named
-corpus and manifest, and re-derives the row before opening the artifact. The current PPL corpus is
-unique source text and is valid ranking evidence; the
-benchmark corpus is deliberately excluded because its manifest says it is tiled for throughput and
-would bias frequencies. Tokenizer special-ID force-inclusion remains converter-owned. Retired-model
-ranking fixtures are not valid provenance. The converter refuses partial checkpoints and existing
-output files. `convert_q4.py` writes the registered evaluation-only all-Q4G64 capacity artifact (15,159,801,760
-tensor bytes); `convert_q4_w8.py` preserves source-Q4 roles and promotes every source-Q5/Q6/W8 role
-to W8G32 (22,868,177,312 tensor bytes); `convert_q4_w8_mse.py` keeps that exact format and byte
-plan while refining both Q4G64 and W8G32 scales from the represented source weights alone;
-`convert.py` retains the all-W8G32 evaluator
-(30,260,413,792 tensor bytes); and `convert_w8_bf16_embedding.py` keeps those W8 matrices except for
-the direct source-BF16 token embedding (31,452,349,792 tensor bytes). The prior BF16-output-head
-evaluator was removed after its 8K result failed to improve all-W8. Q5/Q6 remain fallback
-measurements rather than primary artifacts; `convert_w8_bf16_attention_vo.py` is the coherent Q5
-fallback with all 16 full-attention gate/value and output pairs in BF16 (31,282,775,392 tensor bytes),
-while `convert_w8_bf16_gdn_qk.py` is the complete 48-layer GDN query/key fallback
-(31,204,132,192 tensor bytes),
-and none of these evaluator identities selects the production recipe. DFlash2 companion objects
-are optional in the base artifact but are required when
-starting the Engine with `--spec dflash`. See
-`docs/maintainer/r9700-integer-artifact-candidate.md` for the exact current inventory and codec.
-
-## CLI
-
-Text generation:
-
-```sh
-build-r9700/apps/ninfer models/qwen3_8_27b_r9700_candidate.ninfer \
+build-r9700/apps/ninfer /path/to/model-dflash.ninfer \
   --prompt "Explain wave32 matrix instructions." \
-  --max-new 256
+  --spec dflash --draft-tokens 5 --max-new 256
+
+build-r9700/apps/ninfer-serve /path/to/model.ninfer \
+  --host 127.0.0.1 --port 8080 \
+  --max-context 8192 --kv-capacity auto --max-concurrency 2
 ```
 
-Structured messages and media:
-
-```sh
-build-r9700/apps/ninfer models/qwen3_8_27b_r9700_candidate.ninfer \
-  --messages examples/cli/messages/scenario_translation_markdown.json \
-  --vision \
-  --max-new 256
-```
-
-MTP and DFlash2 are startup-fixed backends. DFlash2 is the preferred speculative path for the
-R9700 product and is the only backend with remaining feature/performance work. MTP remains a
-supported, already-implemented path whose cache, row-view, state, and exact-execution behavior are
-kept under regression coverage; no new MTP optimization is required for product completion.
-
-DFlash uses a single-block chain with at most five drafts. Optional startup-enabled adaptive
-drafting captures the supported K-specific graphs in advance and chooses one K for the whole
-compact batch at a round boundary; it does not split requests into acceptance cohorts. P-less
-is the request default (explicit temperature zero remains greedy); top-k, top-p, min-p, and
-presence/frequency penalties are ignored in that mode. Tool eligibility and suppressed tokens
-still apply. Recovery can rebuild a repeating text-only thinking request on its existing lane,
-within its original budget, at most twice; it never retracts already streamed prose or reasoning.
-
-Optional SSD prefix storage requires a nonzero RAM tier and an explicit location and capacity.
-It stores exact fixed-format cache/checkpoint bytes, can restore across restarts with a matching
-model fingerprint, and never offloads an active request. See `docs/cli.md` and executable `--help`
-for the exact sampling, adaptive-draft, recovery, and cache options.
-
-```sh
-build-r9700/apps/ninfer models/qwen3_8_27b_r9700_dflash_candidate.ninfer \
-  --prompt "Write a short proof." \
-  --spec dflash --draft-tokens 4
-```
-
-The CLI streams answer content to stdout and diagnostics/reasoning to stderr. It accepts exactly one
-prompt source: `--prompt` or `--messages`.
-
-## HTTP server
-
-```sh
-build-r9700/apps/ninfer-serve models/qwen3_8_27b_r9700_candidate.ninfer \
-  --host 127.0.0.1 \
-  --port 8080 \
-  --max-context 8192 \
-  --kv-capacity auto \
-  --max-concurrency 2
-```
-
-The server exposes OpenAI Responses, OpenAI Chat Completions, and Anthropic Messages protocol
-surfaces. Request concurrency is startup-fixed in `[1,4]`; excess requests enter a bounded FIFO and
-are never preempted. See `docs/serving.md` for endpoint and streaming semantics.
-
-## Perplexity and Pareto gates
-
-Encode a corpus once:
-
-```sh
-build-r9700/apps/ninfer-ppl \
-  --encode \
-  --weights models/qwen3_8_27b_r9700_candidate.ninfer \
-  --text corpus.txt \
-  --ids corpus.ids
-```
-
-Score it:
-
-```sh
-build-r9700/apps/ninfer-ppl \
-  --weights models/qwen3_8_27b_r9700_candidate.ninfer \
-  --ids corpus.ids \
-  --schedule prefill \
-  --out-json profiles/bench/r9700-ppl.json
-```
-
-The report includes per-token NLL and greedy argmax IDs. Final admission uses the paired campaign
-runner described in `tools/ppl/README.md`: its schema-v6 result binds the candidate, scorers,
-validated corpus, commands, and sidecar hashes; requires explicit PPL and new-severe-position
-guardrails; and retains BF16 greedy flips as a diagnostic. Prefill/decode schedules require an
-explicit measured per-token NLL bound and report their greedy flips diagnostically because private
-attention precision may differ. Same-route graph/eager, speculative/ordinary, and draft-window
-variants retain exact-token parity. The
-reference is a separate BF16-source scorer; changing an Engine cache flag is not a reference path.
-G16 and G32 are separate compile-time evaluator/Engine profiles over runtime state, not separate
-`.ninfer` identities, and the selection campaign requires their candidate artifacts to be
-byte-identical. Speculative proposal acceptance and whole-path latency are measured separately by
-the schema-v14 native benchmark matrix, whose schema-v20 reports identify the compiled KV group
-and exact plane layouts, Q4/W8
-activation profiles, the exact FP8-Q/K crossover classifier, and the compile-bound dense or
-XAttention qualification identity.
-
-## Correctness and performance
-
-Focused physical qualifiers are built under `build-r9700/src/`. The live completion ledger and
-latest verified commands are in `plans/r9700-autonomous-todos.md`.
-
-Real-model 8K PPL evidence is retained for every evaluated weight/activation profile. The BF16
-reference is 6.460181; the best Q4-containing profile is the 183-Q4/256-W8 source-MSE artifact with
-A8G64 Q4 and adaptive-A8G32 W8 execution at 6.538677. Its +0.012077 mean-NLL delta and three new
-severe positions meet the 8K accuracy tier; the identical artifact's represented-BF16 W8 control
-is retained at 6.544746. All-Q4+A8 meets the capacity-speed tier at +0.039509 mean NLL and nine new
-severe positions. BF16-greedy differences are diagnostic. No end-to-end R9700
-tokens-per-second result is claimed for a finally admitted artifact; the selected local evaluation
-recipe's measured results are published above. The separate, currently paused production Pareto
-campaign still requires current
-matched dense/sparse quality, post-promotion C=1..4 capacity, 32K graph/eager parity, phase and
-whole-inference measurement, and relevant profiler attribution on an otherwise idle R9700.
-Exact-v3 BF16 authority and the dense all-Q4 quality rebase are complete; mixed and sparse quality
-plus all post-promotion capacity gates remain open.
-
-ROCm tracing and ISA/resource inspection use `rocprofv3`, `rocprof-compute` when its installed release
-supports `gfx1201`, HIP events, and LLVM disassembly. Radeon GPU Profiler is optional. The currently
-installed profiler stack does not expose complete VALU/LDS/stall or absolute request-size counters
-for `gfx1201`; zero values from those events are not accepted as evidence. Dispatch-level GL2C/TCP
-hit counters are usable while the card is held in `profile_standard`, but those pinned-clock timings
-are attribution-only and production performance is measured under `auto`.
+Also built: `build-r9700/apps/ninfer-ppl` and `build-r9700/bench/ninfer_bench`.
+Use each executable's `--help` for exact options. Benchmark reproduction commands
+and reports: `profiles/bench/r9700-remaining-candidates-20260924/`.
 
 ## Documentation
 
-- `docs/performance.md`: AMD benchmarks, model recipes, quality comparisons and measured exclusions.
-- `docs/cli.md`: CLI behavior and options.
-- `docs/serving.md`: HTTP contracts and server operation.
-- `docs/maintainer/qwen3.8-27b-model.md`: exact model and family-runtime semantics.
-- `docs/maintainer/paged-kv-cache.md`: typed cache ownership and capacity.
-- `docs/maintainer/softmax-attention.md`: Text/MTP and DFlash attention ownership.
-- `docs/maintainer/op-development.md`: numerical-oracle and Op admission rules.
-- `docs/maintainer/kernel-iteration.md`: gfx1201 kernel optimization procedure.
-
-## Scope
-
-NInfer is intentionally not a general inference framework. It supports one registered model/device
-contract, one resident model instance, and small fixed concurrency. Additional GPUs, checkpoint
-families, compatibility backends, plugin discovery, preemptive scheduling, and runtime weight
-repacking are outside the product.
+- `docs/cli.md` — generation, sampling, media, speculative decoding and prefix storage.
+- `docs/serving.md` — OpenAI/Anthropic endpoints and request lifecycle.
+- `docs/performance.md` — benchmarks, recipes, quality comparisons and limitations.
+- `docs/README.md` — architecture, artifact formats, conversion and kernel development.
+- `plans/r9700-autonomous-todos.md` — current development status and paused campaigns.
