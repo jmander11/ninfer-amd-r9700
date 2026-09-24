@@ -60,6 +60,58 @@ expected value exactly.
 Copy bus rate counts both the read and write traffic. This is the hardware bandwidth bound, not a
 model or individual-Op throughput claim.
 
+## Gate/up reuse, paired-feature PV and exact-tree GDN (2026-09-24)
+
+Same installed cap26 Q4-head/gate-up-A4 weights and Q4 DFlash/BF16 codebooks,
+dense G16, auto, P4096/G128, chunk2048, warmup1/repetitions3. Three bounded
+candidates are retained after numerical and physical checks:
+
+- Gate/up N34816/K5120 T18/20/24 shares weight payloads across two M tiles;
+  cold complete-Linear latency falls31.4/30.1/28.3%. T15 control and all changed
+  widths pass canonical original-input/represented-A8 FP64, exact codec/generic/
+  graph, poison/stale/zero/scaled fixtures and guards;12 corruptions are rejected.
+  Native IU4,108/103/100VGPR, no LDS/private scratch.
+- Paired-feature PV is selected only for W6/G16 feature-fast values/scales at
+  4096<=context<8192. Complete-attention cold savings are9–12% at the tested
+  selected boundary/interior points. Broad W4/W5 pairing was slower and rejected.
+  Boundary controls2048/4095/8192 retain the old route. Public/profile FP64,
+  serial/graph and invalid-page guards pass; paired PV has118VGPR, no spills.
+- GDN sequential record retains the original normalization tree using first-wave
+  shuffles and explicitly materialized squares. Final ISA has separate square/add
+  operations,60VGPR/1024LDS/no spills and20→3 emitted barrier signal/wait pairs.
+  Warm Op savings are9–15%; cold C4 is mixed, not a universal latency win. Isolated
+  whole comparisons resolve this: GDN alone raises C1K5 104.79→105.15tok/s and
+  C4K4 202.73→203.51 aggregate, with separated three-repetition ranges.
+  Retain this route only at actual compact batch1/4: fresh C2/C3 K4 tests
+  showed a small regression/no benefit, so batch2/3 keeps the incumbent.
+  All12 batch1..4/W4..6 oracle/record/graph cells and W2/W16 boundaries pass;
+  both selected instruction/resource streams match their qualified controls.
+
+| DFlash mode | Aggregate tok/s | Per-request tok/s |
+|---|---:|---:|
+| C1 K5 | 105.15 | 105.15 |
+| C2 K4 | 146.25 | 73.12 |
+| C2 K5 | 149.40 | 74.70 |
+| C3 K4 | 191.05 | 63.68 |
+| C3 K5 | 178.29 | 59.43 |
+| C4 K4 | 203.26 | 50.82 |
+| C4 K5 | 186.88 | 46.72 |
+| C4 adaptive maxK5 | 201.04 | 50.26 |
+
+C3K5 improves157.52→178.29 against a fresh whole control. C4K4/K5 improve from
+the previous pass's181.89/166.90; these latter baselines are retained, not fresh
+same-pass controls. K5 is the measured C2 preference; K4 remains preferable at
+C3/C4 on this workload. Adaptive is not a guaranteed winner.
+C1 retains its unchanged qualified instruction-body measurement; all concurrent
+modes were remeasured after batch-specific GDN selection. C2/C3 K4 are effectively
+unchanged against fresh145.92/191.02 controls, not claimed as material gains.
+All24 final benchmark repetitions and44 cold K3/adaptive graph/eager cases match
+ordinary tokens. GDN public FP64/record/snapshot checks and actual replay-fold
+ordinary-state-exact qualification pass. Four focused host and two static tests
+pass; CLI/server/PPL/bench are rebuilt. Weights/precision are unchanged. Ordinary
+decode and prefill were not remeasured; no absolute performance ceiling is claimed.
+Evidence/reproduction: `profiles/bench/r9700-remaining-candidates-20260924/`.
+
 ## Concurrent projections and paired QK (2026-09-23)
 
 Follow-up investigation (2026-09-24, no production change): matched steady-graph

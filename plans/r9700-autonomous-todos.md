@@ -85,6 +85,25 @@ above apply to every command.
 
 ### Current checkpoint
 
+COMPLETED USER REQUEST (2026-09-24, test and retain beneficial candidates):
+- [x] Qualify and time gate/up cross-tile weight reuse at T20; keep only a measured win.
+- [x] Qualify and time adjacent-feature PV reuse; keep only a measured win.
+- [x] Qualify and time exact-tree GDN normalization, preserving replay state.
+- [x] Remove losing candidates, verify retained production routes and whole decode,
+  update evidence/delivery and commit natural checkpoints.
+Unchanged installed weights/precision/cache/chunk2048, C<=4, auto power;
+heavy jobs serial, builds capped at4 normally (never above14). Older campaigns paused.
+Closure: gate/up T18/20/24 cold complete-Op savings28–31%; paired PV only W6/G16/
+feature-fast at4096<=context<8192 (cold savings9–12%); exact-tree GDN only actual
+batch1/4 after batch2/3 showed no benefit. Independent oracles, exact graph/state,
+ISA/resources and replay-fold pass. Final C1K5/C2K5/C3K4/C4K4 rates are
+105.15/149.40/191.05/203.26 aggregate tok/s, P4096/G128; C4K5/adaptive maxK5
+186.88/201.04. All24 final repetitions and44 cold transitions match ordinary
+tokens. CLI/server/PPL/bench rebuilt; four host and two static tests pass.
+C1 reuses its unchanged qualified body measurement; concurrent modes are fresh.
+Evidence/reproduction: `profiles/bench/r9700-remaining-candidates-20260924/`;
+`docs/performance.md`. No renewed prefill/quality campaign or ceiling claim.
+
 COMPLETED USER REQUEST (2026-09-24, investigation only):
 - [x] Compare C3/K4 and C4/K4 projection tile costs and identify a distinct reuse mechanism.
 - [x] Investigate attention PV and GDN recurrence/record costs against prior exclusions.

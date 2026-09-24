@@ -11,8 +11,12 @@ including split512 at context 8192 and above. The workspace planner owns four,
 five or six independent FP32 score planes as appropriate.
 QK packs two independent query rows into the two eight-lane halves of WMMA's
 M dimension, with six valid heads in each half. The odd W5 tail is masked;
-each dot retains its FP8 operands and ascending K reduction. Softmax and PV are
-unchanged. Qualification also checks invalid device page-table rows and physical
+each dot retains its FP8 operands and ascending K reduction. Softmax is unchanged.
+W6 with G16 feature-fast values/scales at4096<=context<8192 uses two adjacent
+PV features per lane, sharing their packed byte, scale and probability while
+retaining each ordered FP32 FMA chain. Other widths/layouts/contexts retain the
+single-feature route; broad pairing was slower for W4/W5. The static checker
+covers both emitted PV routes. Qualification also checks invalid device page-table rows and physical
 pages poison every represented W4/W5/W6 row without touching workspace guards.
 
 Focused qualification (JSON on stdout):
@@ -184,6 +188,10 @@ N7168/K5120, N6144/K5120, N1280/K5120 and N5120/K4096 at their selected widths.
 including the three previously selected output cells. The complete owner has89
 cells. N12288 T5/6 retains scale-gather; its concurrent widths use the tiled
 successor body, not the small-T accumulator mapping.
+N34816/K5120 T18/20/24 use one wave for both M tiles, sharing each weight payload
+while retaining independent ordered G64 accumulations. Other projection cells
+retain their prior routes. Focused canonical qualification and complete-Op timing:
+`profiles/bench/r9700-remaining-candidates-20260924/`.
 These scopes use identical numerical criteria and
 report their restricted domain explicitly. Restricted results never qualify the
 unmeasured domain. Retained original diagnostic provenance:
@@ -194,7 +202,8 @@ ISA checker have been removed. Their evidence remains under the gate-up-pipeline
 projection-pipeline and verify-pipeline-family packages in `profiles/bench/`.
 For new linked ISA inspection use the safe extractor
 `tools/bench/extract_embedded_code_object.py`: the selected projection module owns
-`small_batch_projection_kernel<N,K,T>` for every admitted shape, including down.
+`small_batch_projection_kernel<N,K,T>` for the ordinary tiled cells, including down,
+and `gate_up_paired_tiles_kernel<T>` for N34816/K5120 T18/20/24.
 Do not apply the retired four-IU4-site scale-gather checker to primed/drained pipelines.
 
 ## Standalone suite

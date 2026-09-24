@@ -12,6 +12,7 @@ namespace ninfer::ops::r9700::linear {
 // T5/6 attention/auxiliary: N7168/K5120, N6144/K5120, N1280/K5120,
 // N5120/K4096. Other widths retain their existing route.
 // N12288 T5/6 retains scale-gather; other admitted cells use successor pipelining.
+// N34816/K5120 T18/20/24 share weight payloads across two M tiles in one wave.
 // No allocation or persistent-weight transformation.
 [[nodiscard]] hipError_t a8q4_small_batch_projection(
     const A8Q4G64CandidateArgs& args, hipStream_t stream) noexcept;

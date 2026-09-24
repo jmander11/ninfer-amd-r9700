@@ -63,11 +63,12 @@ def main() -> int:
         "qk_wmma_batched_dflash_verify_kernelILb1EE": (0, 0, 32, 24, 32, 1024),
         "softmax_wmma_scores_batched_dflash_verify_in_place_kernel": (76, 0, 20, 23, 32, 1024),
         "pv_vector_batched_dflash_verify_kernelILj16ELb0ELb0EE": (0, 0, 48, 111, 32, 1024),
+        "pv_paired_features_batched_dflash_verify_kernel": (0, 0, 48, 118, 32, 1024),
     }
     for symbol, wanted in expected.items():
         actual = resources(text, symbol)
         require(actual == wanted, f"{symbol} resources {actual} != {wanted}")
-        wanted_occupancy = 12 if symbol.startswith("pv_vector_batched") else 16
+        wanted_occupancy = 12 if symbol.startswith("pv_") else 16
         require(occupancy(text, symbol) == wanted_occupancy,
                 f"{symbol} occupancy is not {wanted_occupancy}")
     require("qk_wmma_batched_dflash_verify_kernelILb0EE" not in text,

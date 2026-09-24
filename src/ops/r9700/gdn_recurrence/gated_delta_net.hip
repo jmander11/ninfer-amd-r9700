@@ -132,6 +132,45 @@ __device__ __forceinline__ void stage_qk_ordinary(const hip_bfloat16* q,
     __syncthreads();
 }
 
+// Preserve stage_qk<true>'s stride-64,32,16,... FP32 tree, but perform it
+// inside the first wave. This is deliberately not the wave-QK profile's
+// sequential four-FMA reduction: replay publication retains the old tree.
+__device__ __forceinline__ void stage_qk_exact_tree(const hip_bfloat16* q,
+                                                  const hip_bfloat16* k,
+                                                  std::size_t base,
+                                                  float* staged_q,
+                                                  float* staged_k) {
+    const int lane = static_cast<int>(threadIdx.x);
+    if (lane < 32) {
+        float qv[4], kv[4], qs[4], ks[4];
+#pragma unroll
+        for (int item = 0; item < 4; ++item) {
+            qv[item] = static_cast<float>(q[base + lane + item * 32]);
+            kv[item] = static_cast<float>(k[base + lane + item * 32]);
+            qs[item] = __fmul_rn(qv[item], qv[item]);
+            ks[item] = __fmul_rn(kv[item], kv[item]);
+            // HIP rounded intrinsics alone still permit contraction here.
+            // Materialize both square results before any tree additions.
+            asm volatile("" : "+v"(qs[item]), "+v"(ks[item]));
+        }
+        float qsum = __fadd_rn(__fadd_rn(qs[0], qs[2]), __fadd_rn(qs[1], qs[3]));
+        float ksum = __fadd_rn(__fadd_rn(ks[0], ks[2]), __fadd_rn(ks[1], ks[3]));
+#pragma unroll
+        for (int stride = 16; stride != 0; stride >>= 1) {
+            qsum = __fadd_rn(qsum, __shfl_down(qsum, stride, 32));
+            ksum = __fadd_rn(ksum, __shfl_down(ksum, stride, 32));
+        }
+        const float q_scale = rsqrtf(__shfl(qsum, 0, 32) + kEpsilon);
+        const float k_scale = rsqrtf(__shfl(ksum, 0, 32) + kEpsilon);
+#pragma unroll
+        for (int item = 0; item < 4; ++item) {
+            staged_q[lane + item * 32] = qv[item] * q_scale;
+            staged_k[lane + item * 32] = kv[item] * k_scale;
+        }
+    }
+    __syncthreads();
+}
+
 __device__ __forceinline__ void load_state_row(const float* state, std::size_t base,
                                                 int value_row, int sublane,
                                                 float (&local)[kKeysPerThread]) {
@@ -285,7 +324,7 @@ void snapshot_kernel(const hip_bfloat16* q, const hip_bfloat16* k, const hip_bfl
     }
 }
 
-template <bool Tree>
+template <bool Tree, bool ExactTree = false>
 __global__ __launch_bounds__(kBlock, 1)
 void record_kernel(const hip_bfloat16* q, const hip_bfloat16* k, const hip_bfloat16* v,
                    const float* g, const float* beta, const float* states,
@@ -335,7 +374,9 @@ void record_kernel(const hip_bfloat16* q, const hip_bfloat16* k, const hip_bfloa
             }
         }
         const std::size_t qk_base = (column * kQHeads + q_head) * kDim;
-        if constexpr (r9700::gdn_recurrence::kVerifyWaveQkCandidate) {
+        if constexpr (!Tree && ExactTree && !r9700::gdn_recurrence::kVerifyWaveQkCandidate) {
+            stage_qk_exact_tree(q, k, qk_base, staged_q, staged_k);
+        } else if constexpr (r9700::gdn_recurrence::kVerifyWaveQkCandidate) {
             stage_qk_ordinary<true>(q, k, qk_base, staged_q, staged_k, reduction);
         } else {
             stage_qk<true>(q, k, qk_base, staged_q, staged_k, reduction);
@@ -641,7 +682,12 @@ void gated_delta_net_replay_record(const Tensor& q, const Tensor& k, const Tenso
                            static_cast<float*>(gate_record.data), static_cast<hip_bfloat16*>(out.data),
                            geometry.width, states.ne[3], scale);
     } else {
-        hipLaunchKernelGGL((record_kernel<false>), dim3(geometry.batch * kValueHeads), dim3(kBlock),
+        // Whole-inference admission favors the exact-tree route at actual
+        // batch 1/4, but retains the incumbent at 2/3. Separate bodies avoid
+        // charging the incumbent for the other route's register allocation.
+        const auto selected = (geometry.batch == 1 || geometry.batch == 4)
+            ? record_kernel<false, true> : record_kernel<false, false>;
+        hipLaunchKernelGGL(selected, dim3(geometry.batch * kValueHeads), dim3(kBlock),
                            0, stream, static_cast<const hip_bfloat16*>(q.data),
                            static_cast<const hip_bfloat16*>(k.data),
                            static_cast<const hip_bfloat16*>(v.data), static_cast<const float*>(g.data),

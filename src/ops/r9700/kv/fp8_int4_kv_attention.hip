@@ -316,7 +316,7 @@ __device__ std::size_t int4_offset(std::size_t token, std::uint32_t head, std::u
                : coordinate + leading * (in_page + kPageSize * (static_cast<std::size_t>(head) + heads * page));
 }
 
-template <std::uint32_t Group, bool VToken, bool SToken>
+template <std::uint32_t Group, bool VToken, bool SToken, bool PairedFeatures = false>
 __device__ __forceinline__ void pv_vector_body(const float* probabilities, const std::uint8_t* values,
                                  const std::uint16_t* scales, const std::uint32_t* pages,
                                  const std::int32_t* page_table_row,
@@ -324,26 +324,33 @@ __device__ __forceinline__ void pv_vector_body(const float* probabilities, const
                                  std::uint32_t page_table_row_count,
                                  std::size_t context, std::size_t physical_tokens,
                                  std::uint32_t q_to_kv, float* output) {
-    // Each feature is an independent serial FP32 FMA chain. Distribute the eight
-    // feature waves across CTAs instead of pinning all eight to one CU per head.
-    const std::uint32_t qh = blockIdx.x, feature = blockIdx.y * blockDim.x + threadIdx.x,
+    // Each feature retains its independent serial FP32 FMA chain. The paired
+    // route consumes both nibbles with shared probability/scale loads; it halves
+    // feature CTAs without sharing accumulators across features or query rows.
+    const std::uint32_t qh = blockIdx.x,
+                        feature = (blockIdx.y * blockDim.x + threadIdx.x) * (PairedFeatures ? 2U : 1U),
                         kvh = qh / q_to_kv;
     if (page_table_row != nullptr) {
         const std::int32_t represented_row = *page_table_row;
         if (represented_row < 0 ||
             static_cast<std::uint32_t>(represented_row) >= page_table_row_count) {
             output[static_cast<std::size_t>(qh) * kHeadDim + feature] = __builtin_nanf("");
+            if constexpr (PairedFeatures)
+                output[static_cast<std::size_t>(qh) * kHeadDim + feature + 1U] = __builtin_nanf("");
             return;
         }
         pages += static_cast<std::size_t>(represented_row) * page_table_row_stride;
     }
     float sum = 0.0F;
+    float paired_sum = 0.0F;
     constexpr unsigned kLoadAhead = 32U;
     for (std::size_t page_base = 0; page_base < context; page_base += kPageSize) {
         const std::size_t physical_base =
             static_cast<std::size_t>(pages[page_base / kPageSize]) * kPageSize;
         if (physical_base >= physical_tokens) {
             output[static_cast<std::size_t>(qh) * kHeadDim + feature] = __builtin_nanf("");
+            if constexpr (PairedFeatures)
+                output[static_cast<std::size_t>(qh) * kHeadDim + feature + 1U] = __builtin_nanf("");
             return;
         }
         const std::size_t end = min(context, page_base + kPageSize);
@@ -369,6 +376,12 @@ __device__ __forceinline__ void pv_vector_body(const float* probabilities, const
                 code = code >= 8 ? code - 16 : code;
                 const float value = static_cast<float>(code) * __half2float(__ushort_as_half(bits[i]));
                 sum = fmaf(probability[i], value, sum);
+                if constexpr (PairedFeatures) {
+                    int other = static_cast<int>(packed[i] >> 4U);
+                    other = other >= 8 ? other - 16 : other;
+                    const float other_value = static_cast<float>(other) * __half2float(__ushort_as_half(bits[i]));
+                    paired_sum = fmaf(probability[i], other_value, paired_sum);
+                }
             }
         }
         for (; base < end; ++base) {
@@ -379,9 +392,17 @@ __device__ __forceinline__ void pv_vector_body(const float* probabilities, const
             const std::uint16_t bits = scales[int4_offset<Group,VToken,SToken>(physical,kvh,feature,gridDim.x / q_to_kv,physical_tokens,true)];
             sum = fmaf(probabilities[static_cast<std::size_t>(qh) * context + base],
                        static_cast<float>(code) * __half2float(__ushort_as_half(bits)), sum);
+            if constexpr (PairedFeatures) {
+                int other = static_cast<int>(packed >> 4U);
+                other = other >= 8 ? other - 16 : other;
+                paired_sum = fmaf(probabilities[static_cast<std::size_t>(qh) * context + base],
+                    static_cast<float>(other) * __half2float(__ushort_as_half(bits)), paired_sum);
+            }
         }
     }
     output[static_cast<std::size_t>(qh) * kHeadDim + feature] = sum;
+    if constexpr (PairedFeatures)
+        output[static_cast<std::size_t>(qh) * kHeadDim + feature + 1U] = paired_sum;
 }
 
 template <std::uint32_t Group, bool VToken, bool SToken>
@@ -411,6 +432,19 @@ __global__ void pv_vector_batched_dflash_verify_kernel(
         values, scales, pages, page_table_row, page_table_row_stride,
         page_table_row_count, context, physical_tokens, q_to_kv,
         output + static_cast<std::size_t>(row) * heads * kHeadDim);
+}
+
+__global__ void pv_paired_features_batched_dflash_verify_kernel(
+    const float* probabilities, const std::uint8_t* values, const std::uint16_t* scales,
+    const std::uint32_t* pages, const std::int32_t* page_table_row,
+    std::uint32_t page_table_row_stride, std::uint32_t page_table_row_count,
+    std::size_t context, std::size_t physical_tokens, std::uint32_t q_to_kv,
+    float* output) {
+    const std::size_t row = blockIdx.z, heads = gridDim.x;
+    pv_vector_body<16, false, false, true>(
+        probabilities + row * heads * context, values, scales, pages,
+        page_table_row, page_table_row_stride, page_table_row_count, context,
+        physical_tokens, q_to_kv, output + row * heads * kHeadDim);
 }
 
 template <std::uint32_t G, bool V, bool S> hipError_t pv_launch(const Int4KvPvArgs& a, hipStream_t stream) {
@@ -1726,6 +1760,16 @@ std::size_t fp8_int4_kv_attention_dflash_verify_batched_wmma_workspace_bytes(
 
 template <std::uint32_t Group, bool VToken, bool SToken>
 hipError_t batched_dflash_verify_pv_launch(const Fp8Int4KvAttentionArgs& a, hipStream_t stream) {
+    if constexpr (Group == 16 && !VToken && !SToken) {
+        if (a.query_rows == 6 && a.context >= 4096 && a.context < 8192) {
+            hipLaunchKernelGGL(pv_paired_features_batched_dflash_verify_kernel,
+                dim3(a.query_heads, kHeadDim / 64U, a.query_rows), dim3(32), 0, stream,
+                a.score_workspace, a.value_codes, a.value_scale_bits, a.page_table,
+                a.page_table_row, a.page_table_row_stride, a.page_table_row_count,
+                a.context, a.physical_tokens, a.q_to_kv, a.output);
+            return hipGetLastError();
+        }
+    }
     hipLaunchKernelGGL((pv_vector_batched_dflash_verify_kernel<Group, VToken, SToken>),
                        dim3(a.query_heads, kHeadDim / 32U, a.query_rows), dim3(32), 0, stream,
                        a.score_workspace, a.value_codes, a.value_scale_bits, a.page_table,

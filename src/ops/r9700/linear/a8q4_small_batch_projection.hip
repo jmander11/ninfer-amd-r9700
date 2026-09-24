@@ -1,5 +1,6 @@
 #include "a8q4_small_batch_projection.h"
 #include "a8q4_pipeline_impl.h"
+#include "a8q4_paired_tiles.h"
 
 namespace ninfer::ops::r9700::linear {
 namespace {
@@ -15,10 +16,17 @@ __global__ __launch_bounds__(32) void small_batch_projection_kernel(
 }
 template <unsigned N, unsigned K, unsigned T>
 hipError_t launch_width(const A8Q4G64LinearArgs& a, hipStream_t stream) {
+    if constexpr (N == 34816 && K == 5120 && (T == 18 || T == 20 || T == 24)) {
+        hipLaunchKernelGGL((detail::gate_up_paired_tiles_kernel<T>),dim3(N/16),dim3(32),0,stream,
+            a.activation_low_codes,a.activation_high_codes,a.activation_scales,a.activation_status,
+            a.weight_codes,a.weight_scales,a.output);
+        return hipGetLastError();
+    } else {
     hipLaunchKernelGGL((small_batch_projection_kernel<N,K,T>),dim3(N/16,(T+15)/16),dim3(32),0,stream,
         a.activation_low_codes,a.activation_high_codes,a.activation_scales,a.activation_status,
         a.weight_codes,a.weight_scales,a.output);
     return hipGetLastError();
+    }
 }
 template <unsigned N, unsigned K>
 hipError_t launch_prepared(const A8Q4G64LinearArgs& a, hipStream_t stream) {
