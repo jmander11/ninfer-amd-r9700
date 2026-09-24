@@ -62,6 +62,14 @@ model or individual-Op throughput claim.
 
 ## Concurrent projections and paired QK (2026-09-23)
 
+Follow-up investigation (2026-09-24, no production change): matched steady-graph
+attribution at C3K4/C4K4 shows gate/up180.50→324.83us/call while down stays
+93.76→94.10us. This prioritizes T20 cross-tile weight reuse, not blanket projection
+replacement. Distinct secondary hypotheses are adjacent-feature INT4 PV reuse
+and exact-tree GDN normalization with fewer block barriers. No candidate has been
+timed or promoted in this investigation; C3/C4 acceptance also differs. Details:
+`profiles/bench/r9700-concurrent-overhead-20260923/remaining-investigation-20260924.md`.
+
 Same cap26 Q4-head/gate-up-A4 weights, Q4 DFlash/BF16 codebooks, fixed G16 cache,
 dense P4096/G128, chunk2048, auto, warmup1/repetitions3. Concurrent projection
 coverage now includes45 new T10/12/15/18/20/24 cells across eight shapes. The

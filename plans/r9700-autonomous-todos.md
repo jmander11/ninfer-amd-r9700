@@ -85,6 +85,23 @@ above apply to every command.
 
 ### Current checkpoint
 
+COMPLETED USER REQUEST (2026-09-24, investigation only):
+- [x] Compare C3/K4 and C4/K4 projection tile costs and identify a distinct reuse mechanism.
+- [x] Investigate attention PV and GDN recurrence/record costs against prior exclusions.
+- [x] Record ranked next experiments, bounds and limitations; no production kernel change
+  or renewed prefill/quality campaign is implied by this investigation.
+Start from a24d51f9, unchanged installed model/precision and auto power. Heavy work
+is serial; one CPU-only independent review. Reuse completed evidence where valid.
+Closure: fresh exact-token C3 trace versus retained C4,31 steady rounds each,
+shows gate/up180.50→324.83us/call but down93.76→94.10us. Prioritize T20
+cross-tile weight reuse, not every projection. Next are adjacent-feature INT4 PV
+reuse and exact-tree wave GDN normalization (not the different-order wave-QK
+candidate). GDN record computes recurrence; there are no per-token full snapshots
+to delete. C4 acceptance also differs, so tiling is not the sole scaling cause.
+No production change or new speedup claim. Ranked mechanisms, bounds, risks and
+reproduction: `profiles/bench/r9700-concurrent-overhead-20260923/remaining-investigation-20260924.md`.
+Implementation is a follow-up choice, not an unchecked assignment from this investigation.
+
 COMPLETED USER REQUEST (concurrent projections, round overhead, attention/FP8):
 - [x] Profile current C2..4 Q4 projection gaps, qualify and promote material
   same-contract shape extensions; compare affected whole decode workloads.
