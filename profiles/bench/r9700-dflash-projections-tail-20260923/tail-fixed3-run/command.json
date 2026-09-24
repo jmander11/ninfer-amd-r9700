@@ -1,0 +1,8 @@
+[
+  "profiles/bench/r9700-dflash-projections-tail-20260923/tail-check-fixed",
+  "/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-q4-fp8-selective-cap/qwen3.8-27b-r9700-q4-fp8-selective-cap-n16k16-dflash2-q4-eval.ninfer",
+  "profiles/bench/r9700-compact-mixed-delivery-20260923/code.ids",
+  "fixed3",
+  "profiles/bench/r9700-dflash-projections-tail-20260923/tail-fixed3.json",
+  "1"
+]

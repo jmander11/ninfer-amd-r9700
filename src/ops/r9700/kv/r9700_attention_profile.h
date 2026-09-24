@@ -60,16 +60,16 @@ inline constexpr bool kTextP129WmmaTailCandidate =
             (query_rows == 2U && visible_context >= kFp8QkWmmaT2MinimumContext));
 }
 
-// Production DFlash W5/W6 batched-WMMA route. It is selected for the exactly qualified cell:
-// DFlash target verification, rows 5 or 6, non-tree execution, and context 64..8191. The caller
+// Production DFlash W4..6 batched-WMMA route. It is selected for the exactly qualified cell:
+// DFlash target verification, rows 4..6, non-tree execution, and context 64..8191. The caller
 // must additionally require G16, token-fastest FP8 keys, and feature-fastest INT4/FP16 values and
 // scales; every other cell (G32, wrong layout, tree, out-of-range context) retains the fused
 // fallback. This route is not gated by a qualification flag.
-[[nodiscard]] constexpr bool use_dflash_w5w6_batched_wmma(
+[[nodiscard]] constexpr bool use_dflash_verify_batched_wmma(
     std::uint32_t query_rows, std::size_t visible_context,
     bool tree_or_device_count, bool dflash_target_verify) noexcept {
     return dflash_target_verify &&
-           (query_rows == 5U || query_rows == 6U) && !tree_or_device_count &&
+           (query_rows >= 4U && query_rows <= 6U) && !tree_or_device_count &&
            visible_context >= kFp8QkWmmaT1MinimumContext &&
            visible_context < kSplit512MinimumContext;
 }

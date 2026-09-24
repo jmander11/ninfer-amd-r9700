@@ -23,7 +23,7 @@ class AttentionParityStaticTest(unittest.TestCase):
             self.skipTest("build/kv_op_qual.s has not been generated")
         text = assembly.read_text(encoding="utf-8")
         marker = ".vgpr_count:     24"
-        symbol = "qk_wmma_batched_w5w6_kernelILb1EE"
+        symbol = "qk_wmma_batched_dflash_verify_kernelILb1EE"
         metadata = text.find(".amdgpu_metadata")
         symbol_at = text.find(symbol, metadata)
         start = text.rfind(".name:", metadata, symbol_at)

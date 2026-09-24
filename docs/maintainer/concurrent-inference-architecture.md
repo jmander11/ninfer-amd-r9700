@@ -1414,10 +1414,18 @@ backend；迁移与后续改动必须继续保护它现有的graph/eager语义�
 Without adaptive drafting, the proposal window is startup-fixed and only that K is planned and
 captured. Startup-enabled adaptive drafting preplans the bounded supported K set (DFlash {3,4,5}),
 with separate K-specific graph definitions and accounted memory. At each round boundary one K is
-selected for the whole compact batch, constrained by each row's remaining budget. The policy uses
+selected for the whole compact batch. Each row's remaining output/context budget constrains its
+logical proposals and publication, not necessarily DFlash's physical captured K. DFlash can
+choose a larger padded K only when its cost has been measured at the current concurrency and
+its full physical width fits every row's remaining context. K3 remains eligible; no new graph
+or storage is created. Existing masked fallback remains at the context boundary. The policy uses
 observed conditional acceptance and measured round time at concurrency/context length to estimate
 tokens per second; it does not split acceptance cohorts or capture graphs during serving. A smaller
 live K does not shrink the backing storage or discard previous full-width pending DFlash features.
+DFlash selects at the actual round boundary after publication establishes the compact batch.
+Expected yield is clipped to each row's logical extent (including one guaranteed target output
+for a zero-draft active row), while timing and K histograms describe the physical route. Hop
+acceptance is observed only for actual proposals. MTP retains its existing budget-clamped policy.
 These are functional scheduling semantics, not a claim that adaptive K beats a physically qualified
 fixed policy on a particular artifact.
 

@@ -1,0 +1,155 @@
+{
+  "status": "retained_preexisting_policy_independent_long_prompt_mismatch",
+  "control": "c63c893f runtime/adaptive/decision-trace overlay linked to current exact-generic-qualified core",
+  "workload": "P4096 C4 unequal limits129/125/119/113 code corpus offsets0/17/34/51; short cases P64",
+  "short_cases_exact": true,
+  "rows": [
+    {
+      "case": 0,
+      "context": 77,
+      "lane": 0,
+      "output_limit": 2,
+      "candidate_mismatches": 0,
+      "control_mismatches": 0,
+      "candidate_first": [],
+      "control_first": []
+    },
+    {
+      "case": 1,
+      "context": 77,
+      "lane": 0,
+      "output_limit": 3,
+      "candidate_mismatches": 0,
+      "control_mismatches": 0,
+      "candidate_first": [],
+      "control_first": []
+    },
+    {
+      "case": 2,
+      "context": 77,
+      "lane": 0,
+      "output_limit": 4,
+      "candidate_mismatches": 0,
+      "control_mismatches": 0,
+      "candidate_first": [],
+      "control_first": []
+    },
+    {
+      "case": 3,
+      "context": 77,
+      "lane": 0,
+      "output_limit": 13,
+      "candidate_mismatches": 0,
+      "control_mismatches": 0,
+      "candidate_first": [],
+      "control_first": []
+    },
+    {
+      "case": 4,
+      "context": 77,
+      "lane": 1,
+      "output_limit": 11,
+      "candidate_mismatches": 0,
+      "control_mismatches": 0,
+      "candidate_first": [],
+      "control_first": []
+    },
+    {
+      "case": 5,
+      "context": 77,
+      "lane": 2,
+      "output_limit": 7,
+      "candidate_mismatches": 0,
+      "control_mismatches": 0,
+      "candidate_first": [],
+      "control_first": []
+    },
+    {
+      "case": 6,
+      "context": 77,
+      "lane": 3,
+      "output_limit": 3,
+      "candidate_mismatches": 0,
+      "control_mismatches": 0,
+      "candidate_first": [],
+      "control_first": []
+    },
+    {
+      "case": 7,
+      "context": 4240,
+      "lane": 0,
+      "output_limit": 129,
+      "candidate_mismatches": 58,
+      "control_mismatches": 57,
+      "candidate_first": [
+        {
+          "position": 66,
+          "ordinary": 5037,
+          "candidate": 8416
+        }
+      ],
+      "control_first": [
+        {
+          "position": 66,
+          "ordinary": 5037,
+          "candidate": 8416
+        }
+      ]
+    },
+    {
+      "case": 8,
+      "context": 4240,
+      "lane": 1,
+      "output_limit": 125,
+      "candidate_mismatches": 0,
+      "control_mismatches": 0,
+      "candidate_first": [],
+      "control_first": []
+    },
+    {
+      "case": 9,
+      "context": 4240,
+      "lane": 2,
+      "output_limit": 119,
+      "candidate_mismatches": 1,
+      "control_mismatches": 1,
+      "candidate_first": [
+        {
+          "position": 64,
+          "ordinary": 37785,
+          "candidate": 10458
+        }
+      ],
+      "control_first": [
+        {
+          "position": 64,
+          "ordinary": 37785,
+          "candidate": 10458
+        }
+      ]
+    },
+    {
+      "case": 10,
+      "context": 4240,
+      "lane": 3,
+      "output_limit": 113,
+      "candidate_mismatches": 75,
+      "control_mismatches": 75,
+      "candidate_first": [
+        {
+          "position": 38,
+          "ordinary": 2200,
+          "candidate": 834
+        }
+      ],
+      "control_first": [
+        {
+          "position": 38,
+          "ordinary": 2200,
+          "candidate": 834
+        }
+      ]
+    }
+  ],
+  "whole_performance_admission": false
+}

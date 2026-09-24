@@ -4363,6 +4363,7 @@ ProgramImplCore::decode_dflash_batch(std::span<const std::uint32_t> lanes,
 
     const std::uint32_t width           = dflash_verify_width;
     std::array<std::uint32_t, kMaximumConcurrency> row_ks{};
+    std::uint32_t physical_context_extent = std::numeric_limits<std::uint32_t>::max();
     std::uint32_t maximum_frontier      = 0;
     for (std::size_t row = 0; row < lanes.size(); ++row) {
         const std::uint32_t lane = lanes[row];
@@ -4397,11 +4398,9 @@ ProgramImplCore::decode_dflash_batch(std::span<const std::uint32_t> lanes,
                 ? capacity - sequence.execution_frontier - 1U
                 : 0U;
         const std::uint32_t afford = std::min(budget_extent, cap_extent);
+        physical_context_extent = std::min(physical_context_extent, cap_extent);
         row_ks[row] =
             adaptive_draft ? afford : std::min({draft_window, budget_extent, cap_extent});
-        if (adaptive_draft && lanes.size() == 1 && request.adaptive.live_k != 0) {
-            row_ks[row] = std::min(request.adaptive.live_k, afford);
-        }
     }
     std::array<const qwen3::AdaptiveDraftState*, kMaximumConcurrency> dflash_row_states{};
     for (std::size_t row = 0; row < lanes.size(); ++row) {
@@ -4416,28 +4415,22 @@ ProgramImplCore::decode_dflash_batch(std::span<const std::uint32_t> lanes,
         const auto states = std::span<const qwen3::AdaptiveDraftState* const>(
             dflash_row_states.data(), lanes.size());
         const auto caps = std::span<const std::uint32_t>(row_ks.data(), lanes.size());
-        if (lanes.size() == 1) {
-            qwen3::AdaptiveDraftState& ad = requests[lanes[0]].adaptive;
-            if (ad.live_k == 0) {
-                qwen3::AdaptiveDraftConfig cfg;
-                cfg.captured_ks   = captured_ks;
-                cfg.round_time    = &t_state;
-                cfg.length_tokens = maximum_frontier;
-                const qwen3::AdaptiveDraftState* ptr = &ad;
-                const std::uint32_t row_cap[]          = {row_ks[0]};
-                ad.live_k                              = qwen3::adaptive_select_k(
-                    cfg, std::span<const qwen3::AdaptiveDraftState* const>(&ptr, 1),
-                    std::span<const std::uint32_t>(row_cap, 1), row_ks[0], 0);
-            }
-            row_ks[0] = std::min(ad.live_k, row_ks[0]);
-            batch_k   = qwen3::adaptive_batch_k(
-                std::span<const std::uint32_t>(row_ks.data(), lanes.size()), captured_ks);
-        } else if (batch_st.live_k == 0) {
-            batch_k = qwen3::adaptive_batch_next(batch_st, states, caps, captured_ks, &t_state,
-                                                   maximum_frontier);
-        } else {
-            batch_k = std::min(batch_st.live_k, batch_k);
-        }
+        qwen3::AdaptiveDraftConfig cfg;
+        cfg.captured_ks = captured_ks;
+        cfg.round_time = &t_state;
+        cfg.length_tokens = maximum_frontier;
+        const auto previous_k = lanes.size() == 1
+            ? requests[lanes[0]].adaptive.live_k : batch_st.live_k;
+        batch_k = qwen3::adaptive_dflash_physical_k(
+            cfg, states, caps, physical_context_extent, previous_k);
+        if (batch_st.live_k != batch_k) { batch_st.rounds_at_k = 0; }
+        else { ++batch_st.rounds_at_k; }
+        batch_st.live_k = batch_k;
+        std::array<qwen3::AdaptiveDraftState*, kMaximumConcurrency> mut_states{};
+        for (std::size_t row = 0; row < lanes.size(); ++row)
+            mut_states[row] = &requests[lanes[row]].adaptive;
+        qwen3::adaptive_assign_live_k(
+            std::span<qwen3::AdaptiveDraftState*>(mut_states.data(), lanes.size()), batch_k);
     }
     const std::uint32_t live_w = dflash_captured_verify_width(batch_k, dflash_verify_width);
     std::uint32_t maximum_target_tokens = 1;
@@ -4552,7 +4545,8 @@ ProgramImplCore::decode_dflash_batch(std::span<const std::uint32_t> lanes,
             *dflash_host_ingress, *dflash_host_egress,
             std::span<const std::uint32_t>(text_target_columns.data(), lanes.size()),
             static_cast<std::int32_t>(lanes.size()), static_cast<std::int32_t>(width),
-            TextConfig::token_domain, dflash_uses_tree_verify(batch_k, live_w));
+            static_cast<std::int32_t>(live_w), TextConfig::token_domain,
+            dflash_uses_tree_verify(batch_k, live_w));
         tool_masks->rethrow_error();
         // Fallback (extent 0) is not a k-draft round; do not fit T(batch_k) from it.
         if (adaptive_draft && realized_extent > 0) {
@@ -4582,8 +4576,6 @@ ProgramImplCore::decode_dflash_batch(std::span<const std::uint32_t> lanes,
                     count, w, static_cast<int>(draft_window));
             }
         }
-        std::array<std::uint32_t, kMaximumConcurrency> next_caps{};
-        std::uint32_t next_length = 0;
         for (std::size_t row = 0; row < lanes.size(); ++row) {
             SequenceState& sequence       = sequences[lanes[row]];
             RequestControl& request       = requests[lanes[row]];
@@ -4619,40 +4611,12 @@ ProgramImplCore::decode_dflash_batch(std::span<const std::uint32_t> lanes,
                     request.speculative_stats.rounds_per_draft[batch_k] += 1;
                 }
             }
-            if (adaptive_draft) {
-                const std::uint32_t remaining_after =
-                    budgets[row].generated_tokens_remaining >
-                            static_cast<std::uint32_t>(count_i)
-                        ? budgets[row].generated_tokens_remaining -
-                              static_cast<std::uint32_t>(count_i)
-                        : 0;
-                const std::uint32_t next_budget =
-                    remaining_after > 1 ? remaining_after - 1 : 0;
-                const std::uint32_t next_cap =
-                    capacity > base_E + static_cast<std::uint32_t>(count_i) + 1
-                        ? capacity - (base_E + static_cast<std::uint32_t>(count_i)) - 1
-                        : 0;
-                const std::uint32_t budget_extent = std::min(next_budget, next_cap);
-                next_caps[row]                    = budget_extent;
-                next_length =
-                    std::max(next_length, base_E + static_cast<std::uint32_t>(count_i));
-                if (extent > 0) {
-                    if (lanes.size() == 1) {
-                        if (budget_extent > 0) {
-                            qwen3::AdaptiveDraftConfig cfg;
-                            cfg.captured_ks   = captured_ks;
-                            cfg.round_time    = &adaptive_t_by_batch[batch_idx];
-                            cfg.length_tokens = base_E + static_cast<std::uint32_t>(count_i);
-                            (void)qwen3::adaptive_draft_next(
-                                cfg, request.adaptive, static_cast<std::uint32_t>(accepted_i),
-                                extent, budget_extent, batch_k);
-                        }
-                    } else {
-                        qwen3::adaptive_record_round(
-                            request.adaptive, static_cast<std::uint32_t>(accepted_i), extent,
-                            batch_k);
-                    }
-                }
+            // Observe only actual proposals. Select the next physical route at
+            // its round boundary, after publication determines the surviving
+            // compact batch and its real per-row budgets.
+            if (adaptive_draft && extent > 0) {
+                qwen3::adaptive_record_round(request.adaptive,
+                    static_cast<std::uint32_t>(accepted_i), extent, batch_k);
             }
             sequence.dflash_context_frontier = base_E;
             request.speculative_stats.live_draft_tokens = request.adaptive.live_k;
@@ -4671,24 +4635,6 @@ ProgramImplCore::decode_dflash_batch(std::span<const std::uint32_t> lanes,
             };
             request.lifecycle = Lifecycle::Pending;
             request.timings.decode_seconds += seconds;
-        }
-        if (adaptive_draft && lanes.size() > 1) {
-            std::array<qwen3::AdaptiveDraftState*, kMaximumConcurrency> mut_states{};
-            for (std::size_t row = 0; row < lanes.size(); ++row) {
-                mut_states[row]        = &requests[lanes[row]].adaptive;
-                dflash_row_states[row] = mut_states[row];
-            }
-            const std::uint32_t next = qwen3::adaptive_batch_next(
-                adaptive_batch_k_by_c[batch_idx],
-                std::span<const qwen3::AdaptiveDraftState* const>(dflash_row_states.data(),
-                                                                    lanes.size()),
-                std::span<const std::uint32_t>(next_caps.data(), lanes.size()), captured_ks,
-                &adaptive_t_by_batch[batch_idx], next_length);
-            qwen3::adaptive_assign_live_k(
-                std::span<qwen3::AdaptiveDraftState*>(mut_states.data(), lanes.size()), next);
-            for (std::size_t row = 0; row < lanes.size(); ++row) {
-                requests[lanes[row]].speculative_stats.live_draft_tokens = next;
-            }
         }
         return runtime::BatchedGeneratedRound{
             .tokens     = std::span<const TokenId>(dflash_host_egress->licensed_tokens.data(),

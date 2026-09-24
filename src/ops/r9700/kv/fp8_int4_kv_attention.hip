@@ -164,7 +164,7 @@ __global__ void qk_wmma_kernel(const hip_bfloat16* query, const std::uint8_t* ke
 }
 
 template <bool TokenFastest>
-__global__ void qk_wmma_batched_w5w6_kernel(
+__global__ void qk_wmma_batched_dflash_verify_kernel(
     const hip_bfloat16* query, const std::uint8_t* key_codes,
     const std::uint32_t* page_table, const std::int32_t* page_table_row,
     std::uint32_t page_table_row_stride, std::uint32_t page_table_row_count,
@@ -390,7 +390,7 @@ __global__ void pv_vector_kernel(const float* probabilities, const std::uint8_t*
 }
 
 template <std::uint32_t Group, bool VToken, bool SToken>
-__global__ void pv_vector_batched_w5w6_kernel(
+__global__ void pv_vector_batched_dflash_verify_kernel(
     const float* probabilities, const std::uint8_t* values, const std::uint16_t* scales,
     const std::uint32_t* pages, const std::int32_t* page_table_row,
     std::uint32_t page_table_row_stride, std::uint32_t page_table_row_count,
@@ -1404,7 +1404,7 @@ __global__ void softmax_wmma_scores_in_place_kernel(
     }
 }
 
-__global__ void softmax_wmma_scores_batched_w5w6_in_place_kernel(
+__global__ void softmax_wmma_scores_batched_dflash_verify_in_place_kernel(
     float* scores, std::size_t context, const std::int32_t* row_positions) {
     const std::uint32_t qh = blockIdx.x;
     const std::uint32_t row = blockIdx.y;
@@ -1708,7 +1708,7 @@ hipError_t fp8_int4_kv_attention_wmma(const Fp8Int4KvAttentionArgs& a,
     return hipSuccess;
 }
 
-std::size_t fp8_int4_kv_attention_wmma_batched_w5w6_workspace_bytes(
+std::size_t fp8_int4_kv_attention_dflash_verify_batched_wmma_workspace_bytes(
     std::size_t context, std::uint32_t rows) noexcept {
     if (context == 0U || rows == 0U) return 0U;
     const std::size_t elements_per_token = static_cast<std::size_t>(rows) * 24U;
@@ -1719,8 +1719,8 @@ std::size_t fp8_int4_kv_attention_wmma_batched_w5w6_workspace_bytes(
 }
 
 template <std::uint32_t Group, bool VToken, bool SToken>
-hipError_t batched_w5w6_pv_launch(const Fp8Int4KvAttentionArgs& a, hipStream_t stream) {
-    hipLaunchKernelGGL((pv_vector_batched_w5w6_kernel<Group, VToken, SToken>),
+hipError_t batched_dflash_verify_pv_launch(const Fp8Int4KvAttentionArgs& a, hipStream_t stream) {
+    hipLaunchKernelGGL((pv_vector_batched_dflash_verify_kernel<Group, VToken, SToken>),
                        dim3(a.query_heads, kHeadDim / 32U, a.query_rows), dim3(32), 0, stream,
                        a.score_workspace, a.value_codes, a.value_scale_bits, a.page_table,
                        a.page_table_row, a.page_table_row_stride, a.page_table_row_count,
@@ -1729,24 +1729,24 @@ hipError_t batched_w5w6_pv_launch(const Fp8Int4KvAttentionArgs& a, hipStream_t s
 }
 
 template <std::uint32_t Group>
-hipError_t batched_w5w6_pv_dispatch(const Fp8Int4KvAttentionArgs& a, hipStream_t stream) {
+hipError_t batched_dflash_verify_pv_dispatch(const Fp8Int4KvAttentionArgs& a, hipStream_t stream) {
     const unsigned layout =
         (a.value_layout == Fp8Int4KvPlaneLayout::TokenFastest ? 1U : 0U) |
         (a.value_scale_layout == Fp8Int4KvPlaneLayout::TokenFastest ? 2U : 0U);
     switch (layout) {
-    case 0: return batched_w5w6_pv_launch<Group, false, false>(a, stream);
-    case 1: return batched_w5w6_pv_launch<Group, true, false>(a, stream);
-    case 2: return batched_w5w6_pv_launch<Group, false, true>(a, stream);
-    default: return batched_w5w6_pv_launch<Group, true, true>(a, stream);
+    case 0: return batched_dflash_verify_pv_launch<Group, false, false>(a, stream);
+    case 1: return batched_dflash_verify_pv_launch<Group, true, false>(a, stream);
+    case 2: return batched_dflash_verify_pv_launch<Group, false, true>(a, stream);
+    default: return batched_dflash_verify_pv_launch<Group, true, true>(a, stream);
     }
 }
 
-hipError_t fp8_int4_kv_attention_wmma_batched_w5w6(
+hipError_t fp8_int4_kv_attention_dflash_verify_batched_wmma(
     const Fp8Int4KvAttentionArgs& a, hipStream_t stream) noexcept {
     if (!a.query || !a.key_codes || !a.value_codes || !a.value_scale_bits || !a.page_table ||
         !a.page_table_pages || !a.context || !a.physical_tokens ||
         a.physical_tokens % kPageSize || a.query_heads != 24U || a.kv_heads != 4U ||
-        a.q_to_kv != 6U || (a.query_rows != 5U && a.query_rows != 6U) ||
+        a.q_to_kv != 6U || (a.query_rows < 4U || a.query_rows > 6U) ||
         !a.row_positions || !a.score_workspace ||
         !a.output || !std::isfinite(a.attention_scale) || !(a.attention_scale > 0.0F) ||
         (a.page_table_row != nullptr &&
@@ -1763,19 +1763,19 @@ hipError_t fp8_int4_kv_attention_wmma_batched_w5w6(
     }
     const dim3 qk_grid(static_cast<unsigned>((a.context + 15U) / 16U),
                        a.query_rows * a.kv_heads);
-    hipLaunchKernelGGL((qk_wmma_batched_w5w6_kernel<true>), qk_grid, dim3(32), 0, stream,
+    hipLaunchKernelGGL((qk_wmma_batched_dflash_verify_kernel<true>), qk_grid, dim3(32), 0, stream,
                        a.query, a.key_codes, a.page_table, a.page_table_row,
                        a.page_table_row_stride, a.page_table_row_count, a.context,
                        a.physical_tokens, a.kv_heads, a.q_to_kv, a.attention_scale,
                        a.score_workspace);
     hipError_t error = hipGetLastError();
     if (error != hipSuccess) return error;
-    hipLaunchKernelGGL(softmax_wmma_scores_batched_w5w6_in_place_kernel,
+    hipLaunchKernelGGL(softmax_wmma_scores_batched_dflash_verify_in_place_kernel,
                        dim3(a.query_heads, a.query_rows), dim3(kHeadDim), 0, stream,
                        a.score_workspace, a.context, a.row_positions);
     error = hipGetLastError();
     if (error != hipSuccess) return error;
-    return batched_w5w6_pv_launch<16U, false, false>(a, stream);
+    return batched_dflash_verify_pv_launch<16U, false, false>(a, stream);
 }
 
 namespace {

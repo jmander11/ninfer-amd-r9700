@@ -1,0 +1,28 @@
+{
+  "status": "complete",
+  "target": "R9700 gfx1201 wave32 ROCm10 auto",
+  "workload": "P4096 G128 chunk2048 dense G16; warmup1 repetitions3",
+  "weights_and_mlp_activation_policy_unchanged": true,
+  "aggregate_decode_tok_s": {
+    "c1_k5": 101.5431148591,
+    "c1_k4": 87.6373763973,
+    "c4_k4": 162.2249348540782,
+    "c4_k5": 153.98070285982905,
+    "c4_adaptive_max_k5": 160.8980138499
+  },
+  "fresh_control_tok_s": {
+    "c1_k5": 98.0081964974,
+    "c4_k4": 161.8388280377,
+    "c4_adaptive_max_k5": 156.6668501933
+  },
+  "all_15_final_repetitions_exact_ordinary": true,
+  "projection_oracle_cells_pass": 8,
+  "attention_oracle_cells_pass": 16,
+  "cold_engine_cases_exact_ordinary": 44,
+  "six_pending_rows_at_k4_observed": false,
+  "maximum_append_workspace_regression": "pass; append/storage unchanged",
+  "delivery_build": ["ninfer", "ninfer-serve", "ninfer-ppl", "ninfer_bench"],
+  "focused_ctest_pass": ["r9700_fp8_execution_state_contract", "qwen3_adaptive_draft", "qwen3_decision_trace", "bench_support"],
+  "gate_up_decision": "no new bounded mechanism justified; not an absolute hardware ceiling",
+  "prefill": "paused; unchanged, not remeasured"
+}

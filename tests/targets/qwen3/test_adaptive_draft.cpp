@@ -370,6 +370,52 @@ void test_budget_clamp() {
            "budget_extent=3 clamps to captured k<=3");
 }
 
+void test_dflash_physical_tail_route() {
+    q36::AdaptiveDraftState a, b;
+    plant_r(a, 5, {0.9f, 0.8f, 0.7f, 0.6f, 0.5f});
+    plant_r(b, 5, {0.9f, 0.8f, 0.7f, 0.6f, 0.5f});
+    const q36::AdaptiveDraftState* states[] = {&a, &b};
+    const std::uint32_t ks[] = {3, 4, 5};
+    const std::uint32_t extents[] = {3, 0};
+    q36::AdaptiveRoundTimeState t;
+    plant_t(t, 3, 0.080f);
+    plant_t(t, 4, 0.040f);
+    plant_t(t, 5, 0.050f);
+    auto cfg = cfg_of(ks, t);
+    expect(q36::adaptive_dflash_physical_k(cfg, states, extents, 5, 3) == 4,
+           "measured faster physical K4 can serve logical extents 3 and 0");
+    expect_near(q36::detail::row_sum_e(states, extents, 4, false, true),
+                q36::detail::expected_tokens(a, 3) + 1.0f, 1e-6f,
+                "target-only active row contributes one output, not a fake draft");
+    expect(a.observed == 256 && b.observed == 256 && b.rounds_hist[4] == 0,
+           "physical route selection does not invent acceptance observations");
+    expect(q36::adaptive_dflash_physical_k(cfg, states, extents, 3, 4) == 3,
+           "extra padded K4 cannot exceed a row's physical context");
+    expect(q36::adaptive_dflash_physical_k(cfg, states, extents, 0, 4) == 3,
+           "context exhaustion retains the existing minimum captured masked route");
+    t = {};
+    plant_t(t, 3, 0.080f);
+    expect(q36::adaptive_dflash_physical_k(cfg, states, extents, 5, 3) == 3,
+           "unmeasured padded widths are not admitted by extrapolated cost");
+    plant_t(t, 4, 0.060f);
+    plant_t(t, 5, 0.040f);
+    expect(q36::adaptive_dflash_physical_k(cfg, states, extents, 5, 4) == 5,
+           "physical K5 wins when its measured cost is lower");
+    t = {};
+    plant_t(t, 3, 0.020f);
+    plant_t(t, 4, 0.060f);
+    plant_t(t, 5, 0.040f);
+    expect(q36::adaptive_dflash_physical_k(cfg, states, extents, 5, 4) == 3,
+           "K3 remains eligible and wins when faster");
+    const std::uint32_t zeros[] = {0, 0};
+    expect(q36::adaptive_dflash_physical_k(cfg, states, zeros, 5, 4) == 3,
+           "target-only batch selects measured cost with guaranteed clipped yield");
+    const std::uint32_t fixed[] = {4};
+    cfg.captured_ks = fixed;
+    expect(q36::adaptive_dflash_physical_k(cfg, states, extents, 5, 4) == 4,
+           "K4-only capture inventory cannot acquire other physical widths");
+}
+
 void test_t_survives_request_seed() {
     q36::AdaptiveRoundTimeState st;
     plant_t(st, 4, 0.015f);
@@ -411,6 +457,7 @@ int main() {
     test_batch_row_budget_clips_expected_tokens();
     test_batch_next_writes_executed_k();
     test_budget_clamp();
+    test_dflash_physical_tail_route();
     test_t_survives_request_seed();
     test_optimistic_cold_start_does_not_invent_all_success();
     if (failures != 0) {

@@ -85,6 +85,34 @@ above apply to every command.
 
 ### Current checkpoint
 
+COMPLETED USER REQUEST (remaining projections, verify gate/up and adaptive tails):
+- [x] Attribute remaining generic Q4 calls on the current delivered build; qualify
+  and promote a new specialized route only where its whole-inference bound is material.
+- [x] Profile verify gate/up's physical bottleneck and evaluate a genuinely new
+  latency/issue/traffic mechanism; preserve prior rejected alternatives.
+- [x] Improve adaptive tail selection by separating logical output allowance from
+  legal physical captured width; qualify budget/context transitions and exact tokens,
+  measure against fixed/adaptive controls, and retain only demonstrated improvements.
+  Fixed the inherited cold K3/W4 attention seam through the qualified matching
+  FP8-Q batched route, not K3 suppression or a token-parity waiver.
+- [x] Rebuild affected deliverables, record wins/exclusions and natural commits.
+User authorized all three targets after checkpoint c63c893f. Installed cap26
+Q4-head/gate-up-A4 weights, BF16-codebook Q4 DFlash, fixed KV and chunk2048 remain
+unchanged. Prefill remains paused. Serial heavy jobs, C<=4, auto power, build cap14
+(normally4), one independent agent at most. No arbitrary precision/policy changes,
+unconditional K3 removal or repetition of rejected mechanisms without new evidence.
+Closure: eight new T5/6 Linear cells qualify; old36 ISA streams remain exact.
+Final C1 K5/K4 is101.54/87.64tok/s; C4 K4/K5/adaptive is162.22/153.98/160.90
+aggregate. Fresh C1K5/adaptiveC4 controls98.01/156.67 yield3.61%/2.70% gains;
+fixedC4K4 is essentially unchanged. All15 repetitions match ordinary tokens.
+Sixteen W4 attention oracle cells and44 cold Engine transition cases pass;
+the six-pending-at-K4 event was not observed, but unchanged append/storage's
+maximum-capacity regression passes. CLI/server/PPL/bench rebuilt; four focused
+host/state tests pass. Gate/up has no justified new mechanism; this is not an
+absolute hardware-ceiling claim. No open task remains in this bounded request.
+Evidence and reproduction: `profiles/bench/r9700-dflash-projections-tail-20260923/`;
+current results: `docs/performance.md`. Older paused campaigns below stay paused.
+
 COMPLETED USER REQUEST (numerical qualification and decode follow-up):
 - [x] Derive and implement an A8 implementation-profile numerical criterion from
   represented-input quantization and floating-point error bounds; retain the

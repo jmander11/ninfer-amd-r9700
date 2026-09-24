@@ -116,3 +116,42 @@ adaptive deliverable, not a new speculative precision experiment. Fused W4
 and batched W5/W6 can each pass their own oracle yet disagree on greedy tokens
 because their private Q precision differs. Maintain the public BF16-Q oracle
 plus explicit FP8-Q profile allowance; PPL/prefill/weights remain unchanged.
+
+## Closure
+
+The historical parity limitation above is resolved, not waived. DFlash W4 now
+shares the existing W5/W6 batched FP8-Q profile for G16/context64..8191; tree and
+other domains retain their routes. Workspace and topology use the same predicate.
+`w4-short/stdout.log` and `w4-long/stdout.log` contain16 passing oracle cells:
+public BF16-Q FP64 plus existing FP8-Q profile allowance, separate arithmetic
+check, serial-bit-exact, graph, guards, C1..4 metadata and poisoned invalid rows.
+`attention-isa.json` proves all three renamed device instruction/resource streams
+unchanged. No kernel body or profile tolerance was relaxed.
+
+`verify_attention_fix.py` and `tail-w4-summary.json` retain44 exact-ordinary Engine
+cases: cold fixedK3, adaptive graph stride1/17, adaptive eager stride1; short limits,
+near-context and long unequal budgets. The140-row eager trace observes9 padded
+and4 target-only rows. Six pending rows at K4 were not observed; append/storage
+are unchanged and the existing maximum-append workspace regression passes.
+The old-header causal helper requires the then-current pre-W4 core to reproduce
+the historical failure; linking it to today's fixed core is not an old control.
+
+Final unprofiled P4096/G128, auto, chunk2048, warmup1/repetitions3:
+
+| Mode | Final aggregate tok/s | Comparison |
+|---|---:|---|
+| C1 K5 | 101.5431 | fresh control98.0082 (+3.61%) |
+| C1 K4 | 87.6374 | prior-pass84.7129 |
+| C4 K4 | 162.2249 | fresh control161.8388; essentially unchanged |
+| C4 K5 | 153.9807 | prior-pass149.0754 |
+| C4 adaptive maxK5 | 160.8980 | fresh control156.6669 (+2.70%) |
+
+All15 final repetitions match same-C ordinary tokens. Each `final-*` directory
+retains command, receipt, report and summary. Reproduce with Python3.11
+`run_decode.py --binary build-r9700/bench/ninfer_bench --label <new-label>
+--concurrency <1|4> --draft <4|5>`; add `--adaptive` for adaptive maxK5.
+Use a new label and the serial resource scope documented above. Scripts use the
+explicit installed model paths and ordinary-token references, not artifact globs.
+Ordinary decode and prefill were not remeasured; weights/recipe/chunk are unchanged.
+Gate/up and vocabulary/selector exclusions above close the bounded investigation,
+not an absolute hardware-ceiling claim.

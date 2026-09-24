@@ -405,23 +405,24 @@ int main(int argc, char** argv) {
             kv::use_fp8_qk_wmma(kW5, kW5Context)) {
             fail("production attention classifier does not retain W1-WMMA/W5-fused selection");
         }
-        const bool w5w6_selected = true;
+        const bool dflash_selected = true;
         const bool text_selected = kv::kTextP129WmmaTailCandidate;
-        if (kv::use_dflash_w5w6_batched_wmma(kW5, kW5Context, false, true) !=
-                w5w6_selected ||
-            kv::use_dflash_w5w6_batched_wmma(kW6, kW6Context, false, true) !=
-                w5w6_selected ||
+        if (kv::use_dflash_verify_batched_wmma(kW5, kW5Context, false, true) !=
+                dflash_selected ||
+            kv::use_dflash_verify_batched_wmma(kW6, kW6Context, false, true) !=
+                dflash_selected ||
             kv::use_text_p129_wmma_tail(kTextRows, kTextContext) != text_selected ||
-            kv::use_dflash_w5w6_batched_wmma(kW5, kW5Context, false, false) ||
-            kv::use_dflash_w5w6_batched_wmma(kW6, kW6Context, false, false) ||
-            kv::use_dflash_w5w6_batched_wmma(4U, kW5Context, false, true) ||
-            kv::use_dflash_w5w6_batched_wmma(7U, kW6Context, false, true) ||
-            kv::use_dflash_w5w6_batched_wmma(kW5, kW5Context, true, true) ||
-            kv::use_dflash_w5w6_batched_wmma(kW6, kW6Context, true, true) ||
-            kv::use_dflash_w5w6_batched_wmma(kW5, 63U, false, true) ||
-            kv::use_dflash_w5w6_batched_wmma(kW6, 63U, false, true) ||
-            kv::use_dflash_w5w6_batched_wmma(kW5, 8192U, false, true) ||
-            kv::use_dflash_w5w6_batched_wmma(kW6, 8192U, false, true) ||
+            kv::use_dflash_verify_batched_wmma(kW5, kW5Context, false, false) ||
+            kv::use_dflash_verify_batched_wmma(kW6, kW6Context, false, false) ||
+            !kv::use_dflash_verify_batched_wmma(4U, kW5Context, false, true) ||
+            kv::use_dflash_verify_batched_wmma(3U, kW5Context, false, true) ||
+            kv::use_dflash_verify_batched_wmma(7U, kW6Context, false, true) ||
+            kv::use_dflash_verify_batched_wmma(kW5, kW5Context, true, true) ||
+            kv::use_dflash_verify_batched_wmma(kW6, kW6Context, true, true) ||
+            kv::use_dflash_verify_batched_wmma(kW5, 63U, false, true) ||
+            kv::use_dflash_verify_batched_wmma(kW6, 63U, false, true) ||
+            kv::use_dflash_verify_batched_wmma(kW5, 8192U, false, true) ||
+            kv::use_dflash_verify_batched_wmma(kW6, 8192U, false, true) ||
             kv::use_text_p129_wmma_tail(128U, kTextContext) ||
             kv::use_text_p129_wmma_tail(kTextRows, 130U)) {
             fail("attention parity selector escaped its exact Text/DFlash cells");
@@ -529,6 +530,102 @@ int main(int argc, char** argv) {
                 .value_scale_layout = kv::Fp8Int4KvPlaneLayout::FeatureFastest,
                 .score_workspace = scores, .output = output};
         };
+        // W4 uses the same dynamic-row device instructions as W5/W6. Exercise
+        // its public inputs directly, including compact-C page-table selection
+        // and distinct causal prefixes; serial parity is supplementary only.
+        Json w4_cells = Json::array();
+        std::vector<float> w4_profile_queries = fixture.queries;
+        for (auto& value : w4_profile_queries)
+            value = static_cast<float>(oracle::decode_e4m3fn(oracle::encode_e4m3fn(value)));
+        for (const std::size_t context : {std::size_t{64}, kW1Context + 3U}) {
+            constexpr std::uint32_t rows = 4U;
+            const auto elements = rows * row_elements;
+            const auto score_elements = rows * kQueryHeads * context;
+            DeviceArray<float> output(elements + 2U), serial_output(elements + 2U);
+            DeviceArray<float> scores(score_elements + 2U);
+            DeviceArray<float> serial_scores(kQueryHeads * context + 2U);
+            DeviceArray<std::int32_t> positions(rows), selected_row(1U);
+            for (std::uint32_t concurrency = 1U; concurrency <= 4U; ++concurrency) {
+                // Other table rows deliberately contain invalid physical pages:
+                // ignoring the device selector cannot pass as an equivalent map.
+                std::vector<std::uint32_t> tables(concurrency * pages.size(),
+                    static_cast<std::uint32_t>(kPhysicalPages));
+                std::copy(pages.begin(), pages.end(),
+                    tables.begin() + static_cast<std::ptrdiff_t>((concurrency - 1U) * pages.size()));
+                DeviceArray<std::uint32_t> device_tables(tables.size());
+                upload(device_tables, tables);
+                upload(selected_row, std::vector<std::int32_t>{static_cast<std::int32_t>(concurrency - 1U)});
+                std::vector<std::int32_t> host_positions(rows);
+                for (std::uint32_t row = 0; row < rows; ++row)
+                    host_positions[row] = static_cast<std::int32_t>(context - rows + row - (concurrency - 1U));
+                upload(positions, host_positions);
+                auto batched = args(rows, context, positions.get(), scores.get() + 1U,
+                                    output.get() + 1U);
+                batched.page_table = device_tables.get();
+                batched.page_table_row = selected_row.get();
+                batched.page_table_row_stride = static_cast<std::uint32_t>(pages.size());
+                batched.page_table_row_count = concurrency;
+                auto serial = batched;
+                serial.score_workspace = serial_scores.get() + 1U;
+                serial.output = serial_output.get() + 1U;
+                fill_guarded(output, elements); fill_guarded(serial_output, elements);
+                fill_guarded(scores, score_elements);
+                fill_guarded(serial_scores, kQueryHeads * context);
+                hip_check(kv::fp8_int4_kv_attention_wmma(serial, device.stream), "W4 serial WMMA");
+                hip_check(kv::fp8_int4_kv_attention_dflash_verify_batched_wmma(batched, device.stream),
+                          "W4 batched WMMA");
+                device.synchronize();
+                const auto actual = read_guarded(output, elements, "W4 batched output");
+                const auto reference = read_guarded(serial_output, elements, "W4 serial output");
+                const auto public_oracle = attention_oracle(fixture, fixture.queries, rows, host_positions);
+                const auto profile_oracle = attention_oracle(fixture, w4_profile_queries, rows, host_positions);
+                constexpr double implementation_limit = 2.0e-4;
+                const auto error = require_profile_bound(actual, public_oracle, profile_oracle,
+                    implementation_limit, "W4 public BF16 attention");
+                (void)require_oracle(actual, profile_oracle, implementation_limit, "W4 FP8-Q profile");
+                const auto exact = [](const auto& left, const auto& right) {
+                    return std::equal(left.begin(), left.end(), right.begin(), [](float a, float b) {
+                        return std::bit_cast<std::uint32_t>(a) == std::bit_cast<std::uint32_t>(b);
+                    });
+                };
+                if (!exact(actual, reference)) fail("W4 batched/serial mismatch");
+                ninfer::DecodeGraphDefinition definition;
+                definition.capture(device.stream, [&] {
+                    hip_check(kv::fp8_int4_kv_attention_dflash_verify_batched_wmma(batched, device.stream),
+                              "capture W4 batched WMMA");
+                });
+                ninfer::DecodeGraphExecutable executable;
+                executable.instantiate(definition); executable.upload(device.stream);
+                fill_guarded(output, elements); fill_guarded(scores, score_elements);
+                executable.launch(device.stream); device.synchronize();
+                if (!exact(actual, read_guarded(output, elements, "W4 graph output")))
+                    fail("W4 eager/graph mismatch");
+                (void)read_guarded(scores, score_elements, "W4 score workspace");
+                (void)read_guarded(serial_scores, kQueryHeads * context, "W4 serial workspace");
+                auto missing = batched; missing.score_workspace = nullptr;
+                if (kv::fp8_int4_kv_attention_dflash_verify_batched_wmma(missing, device.stream) != hipErrorInvalidValue)
+                    fail("W4 accepted missing workspace");
+                auto tree = batched; tree.ancestor_masks = positions.get();
+                if (kv::fp8_int4_kv_attention_dflash_verify_batched_wmma(tree, device.stream) != hipErrorInvalidValue)
+                    fail("W4 accepted tree metadata");
+                // Device-resident invalid row positions must poison only that
+                // row; the remaining represented causal queries remain exact.
+                host_positions.back() = -1; upload(positions, host_positions);
+                executable.launch(device.stream); device.synchronize();
+                const auto masked = download(output);
+                for (std::size_t i = 0; i < elements; ++i) {
+                    if (i >= 3U * row_elements) {
+                        if (!std::isnan(masked[i + 1U])) fail("W4 invalid row was not poisoned");
+                    } else if (std::bit_cast<std::uint32_t>(masked[i + 1U]) !=
+                               std::bit_cast<std::uint32_t>(actual[i])) fail("W4 invalid row changed valid prefix");
+                }
+                require_guard_canaries(output, "W4 masked output");
+                require_guard_canaries(scores, "W4 masked workspace");
+                w4_cells.push_back({{"context", context}, {"concurrency", concurrency},
+                    {"public_oracle_max_abs", error.maximum_absolute}, {"serial_exact", true},
+                    {"graph_exact", true}, {"device_row_metadata", true}, {"guards", true}});
+            }
+        }
         auto w1 = args(kW1, kW1Context, d_w1_positions.get(), d_w1_scores.get() + 1,
                        d_w1_output.get() + 1);
         auto w1_fused = w1;
@@ -563,53 +660,53 @@ int main(int argc, char** argv) {
         missing_workspace.score_workspace = nullptr;
         if (kv::fp8_int4_kv_attention_wmma(missing_workspace, device.stream) !=
             hipErrorInvalidValue) fail("WMMA accepted a missing exact score workspace");
-        if (kv::fp8_int4_kv_attention_wmma_batched_w5w6(missing_workspace, device.stream) !=
+        if (kv::fp8_int4_kv_attention_dflash_verify_batched_wmma(missing_workspace, device.stream) !=
             hipErrorInvalidValue) fail("batched W5 WMMA accepted a missing score workspace");
         auto w6_missing_workspace = w6_wmma;
         w6_missing_workspace.score_workspace = nullptr;
-        if (kv::fp8_int4_kv_attention_wmma_batched_w5w6(w6_missing_workspace, device.stream) !=
+        if (kv::fp8_int4_kv_attention_dflash_verify_batched_wmma(w6_missing_workspace, device.stream) !=
             hipErrorInvalidValue) fail("batched W6 WMMA accepted a missing score workspace");
         auto wrong_width = w5_batched;
-        wrong_width.query_rows = 4U;
-        if (kv::fp8_int4_kv_attention_wmma_batched_w5w6(wrong_width, device.stream) !=
-            hipErrorInvalidValue) fail("batched W5/W6 WMMA accepted W4");
+        wrong_width.query_rows = 3U;
+        if (kv::fp8_int4_kv_attention_dflash_verify_batched_wmma(wrong_width, device.stream) !=
+            hipErrorInvalidValue) fail("batched DFlash WMMA accepted W3");
         auto wrong_width_w7 = w6_batched;
         wrong_width_w7.query_rows = 7U;
-        if (kv::fp8_int4_kv_attention_wmma_batched_w5w6(wrong_width_w7, device.stream) !=
+        if (kv::fp8_int4_kv_attention_dflash_verify_batched_wmma(wrong_width_w7, device.stream) !=
             hipErrorInvalidValue) fail("batched W5/W6 WMMA accepted W7");
         auto missing_positions = w5_batched;
         missing_positions.row_positions = nullptr;
-        if (kv::fp8_int4_kv_attention_wmma_batched_w5w6(missing_positions, device.stream) !=
+        if (kv::fp8_int4_kv_attention_dflash_verify_batched_wmma(missing_positions, device.stream) !=
             hipErrorInvalidValue) fail("batched W5 WMMA accepted missing causal positions");
         auto w6_missing_positions = w6_batched;
         w6_missing_positions.row_positions = nullptr;
-        if (kv::fp8_int4_kv_attention_wmma_batched_w5w6(w6_missing_positions, device.stream) !=
+        if (kv::fp8_int4_kv_attention_dflash_verify_batched_wmma(w6_missing_positions, device.stream) !=
             hipErrorInvalidValue) fail("batched W6 WMMA accepted missing causal positions");
         auto tree = w5_batched;
         tree.ancestor_masks = d_w5_positions.get();
         tree.prefix_lengths = d_w5_positions.get();
-        if (kv::fp8_int4_kv_attention_wmma_batched_w5w6(tree, device.stream) !=
+        if (kv::fp8_int4_kv_attention_dflash_verify_batched_wmma(tree, device.stream) !=
             hipErrorInvalidValue) fail("batched W5 WMMA accepted tree metadata");
         auto w6_tree = w6_batched;
         w6_tree.ancestor_masks = d_w6_positions.get();
         w6_tree.prefix_lengths = d_w6_positions.get();
-        if (kv::fp8_int4_kv_attention_wmma_batched_w5w6(w6_tree, device.stream) !=
+        if (kv::fp8_int4_kv_attention_dflash_verify_batched_wmma(w6_tree, device.stream) !=
             hipErrorInvalidValue) fail("batched W6 WMMA accepted tree metadata");
         auto wrong_group = w5_batched;
         wrong_group.value_group = 32U;
-        if (kv::fp8_int4_kv_attention_wmma_batched_w5w6(wrong_group, device.stream) !=
+        if (kv::fp8_int4_kv_attention_dflash_verify_batched_wmma(wrong_group, device.stream) !=
             hipErrorInvalidValue) fail("batched W5 WMMA accepted unqualified G32 values");
         auto w6_wrong_group = w6_batched;
         w6_wrong_group.value_group = 32U;
-        if (kv::fp8_int4_kv_attention_wmma_batched_w5w6(w6_wrong_group, device.stream) !=
+        if (kv::fp8_int4_kv_attention_dflash_verify_batched_wmma(w6_wrong_group, device.stream) !=
             hipErrorInvalidValue) fail("batched W6 WMMA accepted unqualified G32 values");
         auto wrong_layout = w5_batched;
         wrong_layout.value_layout = kv::Fp8Int4KvPlaneLayout::TokenFastest;
-        if (kv::fp8_int4_kv_attention_wmma_batched_w5w6(wrong_layout, device.stream) !=
+        if (kv::fp8_int4_kv_attention_dflash_verify_batched_wmma(wrong_layout, device.stream) !=
             hipErrorInvalidValue) fail("batched W5 WMMA accepted an unqualified cache layout");
         auto w6_wrong_layout = w6_batched;
         w6_wrong_layout.value_layout = kv::Fp8Int4KvPlaneLayout::TokenFastest;
-        if (kv::fp8_int4_kv_attention_wmma_batched_w5w6(w6_wrong_layout, device.stream) !=
+        if (kv::fp8_int4_kv_attention_dflash_verify_batched_wmma(w6_wrong_layout, device.stream) !=
             hipErrorInvalidValue) fail("batched W6 WMMA accepted an unqualified cache layout");
         auto malformed = w5_fused;
         malformed.query_rows = 0U;
@@ -663,11 +760,11 @@ int main(int argc, char** argv) {
         hip_check(kv::fp8_int4_kv_attention_wmma(w1, device.stream), "W1 WMMA");
         hip_check(kv::fp8_int4_kv_attention_fused(w1_fused, device.stream), "W1 fused");
         hip_check(kv::fp8_int4_kv_attention_wmma(w5_wmma, device.stream), "W5 serial WMMA");
-        hip_check(kv::fp8_int4_kv_attention_wmma_batched_w5w6(w5_batched, device.stream),
+        hip_check(kv::fp8_int4_kv_attention_dflash_verify_batched_wmma(w5_batched, device.stream),
                   "W5 batched WMMA");
         hip_check(kv::fp8_int4_kv_attention_fused(w5_fused, device.stream), "W5 fused");
         hip_check(kv::fp8_int4_kv_attention_wmma(w6_wmma, device.stream), "W6 serial WMMA");
-        hip_check(kv::fp8_int4_kv_attention_wmma_batched_w5w6(w6_batched, device.stream),
+        hip_check(kv::fp8_int4_kv_attention_dflash_verify_batched_wmma(w6_batched, device.stream),
                   "W6 batched WMMA");
         hip_check(kv::fp8_int4_kv_attention_fused(w6_fused, device.stream), "W6 fused");
         hip_check(launch_text_dense(text_dense, d_text_dense_workspace.get() + 1),
@@ -888,7 +985,7 @@ int main(int argc, char** argv) {
             return kv::fp8_int4_kv_attention_fused(w5_fused, device.stream);
         };
         const auto launch_batched = [&] {
-            return kv::fp8_int4_kv_attention_wmma_batched_w5w6(w5_batched, device.stream);
+            return kv::fp8_int4_kv_attention_dflash_verify_batched_wmma(w5_batched, device.stream);
         };
         const auto launch_w6_wmma = [&] {
             return kv::fp8_int4_kv_attention_wmma(w6_wmma, device.stream);
@@ -897,7 +994,7 @@ int main(int argc, char** argv) {
             return kv::fp8_int4_kv_attention_fused(w6_fused, device.stream);
         };
         const auto launch_w6_batched = [&] {
-            return kv::fp8_int4_kv_attention_wmma_batched_w5w6(w6_batched, device.stream);
+            return kv::fp8_int4_kv_attention_dflash_verify_batched_wmma(w6_batched, device.stream);
         };
 
         fill_guarded(d_w5_batched_output, kW5 * row_elements);
@@ -1017,8 +1114,9 @@ int main(int argc, char** argv) {
             }
         }
         const Json report{
-            {"schema_version", 2},
-            {"qualification", "text_p129_and_dflash_w5w6_attention_parity_discriminator"},
+            {"schema_version", 3},
+            {"qualification", "text_p129_and_dflash_verify_attention_parity_discriminator"},
+            {"w4_qualification", w4_cells},
             {"selector", {{"name", "NINFER_R9700_TEXT_P129_WMMA_TAIL_CANDIDATE"},
                            {"compiled", kv::kTextP129WmmaTailCandidate},
                            {"default", false}}},
@@ -1141,11 +1239,11 @@ int main(int argc, char** argv) {
                         {"launch_order", "ABBA by trial"}}},
             {"default_production_routing_changed", false},
             {"compiled_text_p129_candidate_enabled", kv::kTextP129WmmaTailCandidate},
-            {"dflash_w5w6_route_is_production", true}};
+            {"dflash_verify_route_is_production", true}};
         const std::string serialized = report.dump(2);
         const Json parsed = Json::parse(serialized);
         if (parsed != report || parsed.at("timing").at("evidence_eligible") != false ||
-            parsed.at("dflash_w5w6_route_is_production") != true ||
+            parsed.at("dflash_verify_route_is_production") != true ||
             parsed.at("target_pair").at("current_production_cross_route_row0_mismatches") !=
                 fused_mismatches ||
             parsed.at("text_pair").at("original_dense_tail_append_w1_mismatches") !=

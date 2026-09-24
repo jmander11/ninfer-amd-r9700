@@ -138,6 +138,10 @@ when explicitly supplied.
 MTP and DFlash cannot be enabled together. DFlash requires appended `dflash/` objects and
 uses chain verification `W=k+1`, `k` in `1..5`. `--adaptive-draft` selects live K from `{3,4,5}`
 using measured expected yield divided by round time; explicit `--draft-tokens 4` stays fixed.
+For DFlash, K describes the physical captured graph. Per-request output and context limits
+still clip the logical proposals and published tokens. Near an output limit, a larger padded
+graph may be selected only with measured cost at the current batch size and enough remaining
+physical context in every row; K3 remains eligible. Selection never adds graphs at runtime.
 R9700 speed recommendations require R9700 end-to-end measurements; NVIDIA timings do not transfer.
 
 ## Common options

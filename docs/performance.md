@@ -60,6 +60,61 @@ expected value exactly.
 Copy bus rate counts both the read and write traffic. This is the hardware bandwidth bound, not a
 model or individual-Op throughput claim.
 
+## Remaining projections and adaptive correctness (2026-09-23)
+
+The selected cap26 Q4-head/gate-up-A4 model and Q4 DFlash companion are unchanged.
+Eight T5/T6 Linear cells now use the existing successor pipeline: N7168/K5120,
+N6144/K5120, N1280/K5120 and N5120/K4096. Independent original-input and
+represented-A8 FP64 bounds, exact generic/codec/graph checks and guards pass;
+the prior36 instruction/resource streams are unchanged. Cold complete-Op savings
+are17–50%; final whole C1 K5 rises98.0082→101.5431tok/s, all repetitions exact
+ordinary tokens. These are separate operator and whole-inference claims.
+
+Final unprofiled P4096/G128, chunk2048, auto, one warmup/three repetitions:
+
+| Decode mode | Aggregate tok/s | Per-request tok/s |
+|---|---:|---:|
+| C1 fixed K5 | 101.54 | 101.54 |
+| C1 fixed K4 | 87.64 | 87.64 |
+| C4 fixed K4 | 162.22 | 40.56 |
+| C4 fixed K5 | 153.98 | 38.50 |
+| C4 adaptive, maximum K5 | 160.90 | 40.22 |
+
+All15 repetitions match same-C ordinary tokens. Fresh control C4 fixedK4 is
+161.84: that fixed route is essentially unchanged. Prior-pass C1 K4/C4 K5 were
+84.71/149.08; these are historical, not fresh paired controls. Ordinary decode
+was not changed or remeasured in this pass (previous C1 approximately30.16tok/s).
+
+Adaptive DFlash distinguishes physical captured K from logical output allowance.
+Additional padded candidates require measured same-C cost and enough physical
+context. Logical ingress/publication masks and the existing minimum-width masked
+fallback remain; K3 is not banned. Selection occurs at the actual compact round
+boundary. Fresh C4 adaptive rises156.6669→160.8980 aggregate tok/s
+(40.2245 per request), mostly selecting K4 on this workload.
+
+Expanded cold-start tests exposed and fixed a preexisting K3/W4 attention seam:
+W4 used BF16-Q fused arithmetic where ordinary W1 and W5/W6 used FP8-Q WMMA.
+Warmup could train adaptive selection away from K3 and conceal the mismatch.
+W4 now shares the same batched attention profile at context64..8191, with proper
+workspace/topology planning. The public BF16-Q FP64 oracle is unchanged;
+the existing explicit FP8-Q quantization/profile bound and separate arithmetic
+check pass at short/4K contexts, C1–4 metadata, graph replay and poisoned rows.
+All three renamed device instruction/resource streams are unchanged.
+
+Forty-four real Engine cases now match ordinary tokens exactly: cold fixedK3,
+adaptive graph with two prompt-offset sets, and adaptive eager; cases cover short
+C1 output limits, near-context C4, and long unequal request budgets. The trace
+observes9 padded and4 target-only rows. A six-pending-row K5→K4 transition was
+not observed; append/storage mathematics are unchanged and the maximum-append
+workspace regression passes. Existing routes outside the admitted W4 domain,
+weights, MLP activation policy, fixed cache and prefill/PPL routes are unchanged.
+
+Gate/up remains~25% of C1 traced kernel service, at~558GB/s useful-weight rate
+versus the636GB/s stream control. No new scheduler/issue mechanism justified
+another challenger; prior depth2 failures remain excluded. This is not proof
+of an absolute hardware ceiling. Prefill remains paused; chunk2048 is retained.
+Evidence: `profiles/bench/r9700-dflash-projections-tail-20260923/`.
+
 ## Compact prefill and concurrent decode optimization (2026-09-23)
 
 Same selected cap26 Q4-head/gate-up-A4 weights and precision as the delivery below.

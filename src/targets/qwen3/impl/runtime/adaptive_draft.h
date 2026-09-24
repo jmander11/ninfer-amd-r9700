@@ -63,6 +63,8 @@ struct AdaptiveDraftConfig {
     const AdaptiveRoundTimeState* round_time = nullptr;
     std::uint32_t length_tokens              = 0;
     float switch_seconds                     = kAdaptiveSwitchSeconds;
+    // DFlash target-only rows still publish one token. MTP retains its policy.
+    bool count_target_only_rows              = false;
 };
 
 [[nodiscard]] inline std::vector<std::uint32_t>
@@ -250,13 +252,13 @@ inline void t_lookup(const AdaptiveRoundTimeState* st, std::uint32_t k, std::uin
 
 [[nodiscard]] inline float row_sum_e(std::span<const AdaptiveDraftState* const> states,
                                      std::span<const std::uint32_t> row_cap, std::uint32_t k,
-                                     bool optimistic) {
+                                     bool optimistic, bool count_target_only_rows = false) {
     float sum_e = 0.0f;
     for (std::size_t r = 0; r < states.size(); ++r) {
         const AdaptiveDraftState* st = states[r];
         if (st == nullptr) { continue; }
         const std::uint32_t kr = r < row_cap.size() ? std::min(k, row_cap[r]) : k;
-        if (kr == 0) { continue; }
+        if (kr == 0 && !count_target_only_rows) { continue; }
         sum_e += optimistic ? expected_tokens_optimistic(*st, kr) : expected_tokens(*st, kr);
     }
     return sum_e;
@@ -324,7 +326,8 @@ adaptive_select_k(const AdaptiveDraftConfig& cfg,
         bool measured = false;
         detail::t_lookup(cfg.round_time, k, cfg.length_tokens, t, measured);
         if (!measured || !(t > 0.0f)) { continue; }
-        const float e = detail::row_sum_e(states, row_cap, k, false);
+        const float e = detail::row_sum_e(states, row_cap, k, false,
+                                          cfg.count_target_only_rows);
         if (!(e > 0.0f)) { continue; }
         const float t_eff =
             t + ((live_k != 0 && k != live_k) ? cfg.switch_seconds : 0.0f);
@@ -360,7 +363,8 @@ adaptive_select_k(const AdaptiveDraftConfig& cfg,
     }
     if (!(t_lb > 0.0f)) { return probe; }
 
-    const float e_opt = detail::row_sum_e(states, row_cap, probe, true);
+    const float e_opt = detail::row_sum_e(states, row_cap, probe, true,
+                                         cfg.count_target_only_rows);
     const float t_eff =
         t_lb + ((live_k != 0 && probe != live_k) ? cfg.switch_seconds : 0.0f);
     if (!(e_opt > 0.0f) || !(t_eff > 0.0f)) {
@@ -369,6 +373,31 @@ adaptive_select_k(const AdaptiveDraftConfig& cfg,
     const float sc_opt = e_opt / t_eff;
     if (best == 0 || sc_opt > best_s) { return probe; }
     return best;
+}
+
+// A captured DFlash graph's physical K need not equal a row's logical proposal
+// allowance. Preserve normal exploration within the logical envelope; an extra
+// padded route requires a measured cost at this exact batch size and enough
+// physical context in every row. The caller owns the per-C round-time state.
+[[nodiscard]] inline std::uint32_t adaptive_dflash_physical_k(
+    const AdaptiveDraftConfig& cfg,
+    std::span<const AdaptiveDraftState* const> states,
+    std::span<const std::uint32_t> logical_extents,
+    std::uint32_t physical_context_extent, std::uint32_t live_k) {
+    if (cfg.captured_ks.empty()) { return 0; }
+    const auto logical_k = adaptive_batch_k(logical_extents, cfg.captured_ks);
+    std::vector<std::uint32_t> eligible;
+    for (const auto k : cfg.captured_ks) {
+        if (k <= logical_k ||
+            (k <= physical_context_extent && cfg.round_time != nullptr &&
+             adaptive_t_measured(*cfg.round_time, k))) {
+            eligible.push_back(k);
+        }
+    }
+    AdaptiveDraftConfig physical = cfg;
+    physical.captured_ks = eligible;
+    physical.count_target_only_rows = true;
+    return adaptive_select_k(physical, states, logical_extents, eligible.back(), live_k);
 }
 
 [[nodiscard]] inline std::uint32_t

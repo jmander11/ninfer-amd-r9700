@@ -788,7 +788,7 @@ std::vector<GraphExecutionProfile> Variant::dflash_graph_profiles(std::uint32_t 
             planes.key == Fp8KInt4VPlaneLayout::TokenFastestHeadMajor &&
             planes.value == Fp8KInt4VPlaneLayout::FeatureFastestPageMajor &&
             planes.value_scale == Fp8KInt4VPlaneLayout::FeatureFastestPageMajor &&
-            ops::r9700::kv::use_dflash_w5w6_batched_wmma(
+            ops::r9700::kv::use_dflash_verify_batched_wmma(
                 block, maximum_visible, false, true);
         profile.topology_class =
             ops::r9700::kv::use_split512_attention(block, maximum_visible)

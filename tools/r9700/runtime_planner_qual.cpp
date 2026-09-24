@@ -196,15 +196,27 @@ void qualify_host_attention_parity_routing() {
     constexpr std::size_t kW6C135Bytes = 6U * 24U * 135U * sizeof(float);
     constexpr std::size_t kTextP129Bytes = (129U * 24U * 129U + 129U * 24U) * sizeof(float);
     const bool text_enabled = kv::kTextP129WmmaTailCandidate;
-    require(kv::use_dflash_w5w6_batched_wmma(5U, 134U, false, true) &&
-                kv::use_dflash_w5w6_batched_wmma(6U, 135U, false, true) &&
+    for (const std::size_t context : {64U, 133U, 4100U, 8191U}) {
+        require(kv::use_dflash_verify_batched_wmma(4U, context, false, true) &&
+                    q27::r9700_full_attention_workspace_capacity_bytes(4U, context, false, true) ==
+                        4U * 24U * context * sizeof(float),
+                "DFlash W4 route or score workspace omitted an admitted context");
+    }
+    require(!kv::use_dflash_verify_batched_wmma(4U, 63U, false, true) &&
+                !kv::use_dflash_verify_batched_wmma(4U, 8192U, false, true) &&
+                !kv::use_dflash_verify_batched_wmma(4U, 134U, true, true) &&
+                !kv::use_dflash_verify_batched_wmma(4U, 134U, false, false),
+            "DFlash W4 route escaped context/tree/caller admission");
+    require(kv::use_dflash_verify_batched_wmma(5U, 134U, false, true) &&
+                kv::use_dflash_verify_batched_wmma(6U, 135U, false, true) &&
                 kv::use_text_p129_wmma_tail(129U, 129U) == text_enabled &&
-                !kv::use_dflash_w5w6_batched_wmma(5U, 134U, false, false) &&
-                !kv::use_dflash_w5w6_batched_wmma(6U, 135U, false, false) &&
-                !kv::use_dflash_w5w6_batched_wmma(4U, 134U, false, true) &&
-                !kv::use_dflash_w5w6_batched_wmma(7U, 135U, false, true) &&
-                !kv::use_dflash_w5w6_batched_wmma(5U, 134U, true, true) &&
-                !kv::use_dflash_w5w6_batched_wmma(6U, 135U, true, true) &&
+                !kv::use_dflash_verify_batched_wmma(5U, 134U, false, false) &&
+                !kv::use_dflash_verify_batched_wmma(6U, 135U, false, false) &&
+                kv::use_dflash_verify_batched_wmma(4U, 134U, false, true) &&
+                !kv::use_dflash_verify_batched_wmma(3U, 134U, false, true) &&
+                !kv::use_dflash_verify_batched_wmma(7U, 135U, false, true) &&
+                !kv::use_dflash_verify_batched_wmma(5U, 134U, true, true) &&
+                !kv::use_dflash_verify_batched_wmma(6U, 135U, true, true) &&
                 !kv::use_text_p129_wmma_tail(128U, 128U) &&
                 !kv::use_text_p129_wmma_tail(129U, 130U),
             "attention parity selectors escaped their exact Text/DFlash cells");
@@ -221,7 +233,7 @@ void qualify_host_attention_parity_routing() {
                 q27::r9700_full_attention_workspace_capacity_bytes(6U, 135U, false, true) ==
                     kW6C135Bytes &&
                 q27::r9700_full_attention_workspace_capacity_bytes(6U, 135U, true, true) == 0U,
-            "DFlash W5/W6 production workspace escaped width/tree selection");
+            "DFlash W4..6 production workspace escaped width/tree selection");
     require(q27::r9700_full_attention_workspace_capacity_bytes(129U, 129U, false) ==
                 kTextP129Bytes,
             "Text P129 tail candidate changed the dense caller-owned workspace peak");

@@ -136,7 +136,7 @@ public:
         output_.exceptions(std::ios::badbit | std::ios::failbit);
         output_.open(path, std::ios::out);
         output_ << "{\n  \"artifact_type\": \"ninfer_dflash_target_decision_trace\",\n"
-                   "  \"schema_version\": 1,\n"
+                   "  \"schema_version\": 2,\n"
                    "  \"diagnostic_only\": true,\n"
                    "  \"timing_eligible\": false,\n"
                    "  \"production_routing_authorized\": false,\n"
@@ -237,9 +237,11 @@ inline void record_dflash(const Tensor& logits, const Tensor& target_argmax,
                           const qwen3::DFlashDecodeIngress& ingress,
                           const qwen3::DFlashDecodeEgress& egress,
                           std::span<const std::uint32_t> live_columns, std::int32_t batch_size,
-                          std::int32_t verify_width, std::int32_t token_domain, bool tree_verify) {
+                          std::int32_t verify_width, std::int32_t physical_verify_width,
+                          std::int32_t token_domain, bool tree_verify) {
     if (!enabled()) { return; }
-    if (batch_size <= 0 || verify_width <= 0 ||
+    if (batch_size <= 0 || verify_width <= 0 || physical_verify_width < 2 ||
+        physical_verify_width > verify_width ||
         live_columns.size() != static_cast<std::size_t>(batch_size) ||
         target_argmax.dtype != DType::I32 || cache_positions.dtype != DType::I32 ||
         verify_ids.dtype != DType::I32 || target_argmax.data == nullptr ||
@@ -281,6 +283,7 @@ inline void record_dflash(const Tensor& logits, const Tensor& target_argmax,
               << ingress.lanes[static_cast<std::size_t>(row)]
               << ",\"token_domain\":" << token_domain
               << ",\"verify_width\":" << verify_width
+              << ",\"physical_verify_width\":" << physical_verify_width
               << ",\"tree_verify\":" << (tree_verify ? "true" : "false")
               << ",\"anchor\":" << ingress.anchors[static_cast<std::size_t>(row)]
               << ",\"base_frontier\":" << base

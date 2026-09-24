@@ -813,19 +813,20 @@ int test_attention_parity_selector_scope() {
     failures += expect(!kv::use_text_p129_wmma_tail(128U, 128U) &&
                            !kv::use_text_p129_wmma_tail(129U, 130U),
                        "Text tail candidate rejects adjacent cells");
-    failures += expect(kv::use_dflash_w5w6_batched_wmma(5U, 134U, false, true) &&
-                           kv::use_dflash_w5w6_batched_wmma(6U, 135U, false, true),
-                       "DFlash W5/W6 batched route exact selected cells (production)");
-    failures += expect(!kv::use_dflash_w5w6_batched_wmma(5U, 134U, false, false) &&
-                           !kv::use_dflash_w5w6_batched_wmma(6U, 135U, false, false) &&
-                           !kv::use_dflash_w5w6_batched_wmma(4U, 134U, false, true) &&
-                           !kv::use_dflash_w5w6_batched_wmma(7U, 135U, false, true) &&
-                           !kv::use_dflash_w5w6_batched_wmma(5U, 134U, true, true) &&
-                           !kv::use_dflash_w5w6_batched_wmma(6U, 135U, true, true) &&
-                           !kv::use_dflash_w5w6_batched_wmma(5U, 63U, false, true) &&
-                           !kv::use_dflash_w5w6_batched_wmma(6U, 63U, false, true) &&
-                           !kv::use_dflash_w5w6_batched_wmma(5U, 8192U, false, true) &&
-                           !kv::use_dflash_w5w6_batched_wmma(6U, 8192U, false, true),
+    failures += expect(kv::use_dflash_verify_batched_wmma(4U, 133U, false, true) &&
+                           kv::use_dflash_verify_batched_wmma(5U, 134U, false, true) &&
+                           kv::use_dflash_verify_batched_wmma(6U, 135U, false, true),
+                       "DFlash W4..6 batched route exact selected cells (production)");
+    failures += expect(!kv::use_dflash_verify_batched_wmma(5U, 134U, false, false) &&
+                           !kv::use_dflash_verify_batched_wmma(6U, 135U, false, false) &&
+                           !kv::use_dflash_verify_batched_wmma(3U, 134U, false, true) &&
+                           !kv::use_dflash_verify_batched_wmma(7U, 135U, false, true) &&
+                           !kv::use_dflash_verify_batched_wmma(5U, 134U, true, true) &&
+                           !kv::use_dflash_verify_batched_wmma(6U, 135U, true, true) &&
+                           !kv::use_dflash_verify_batched_wmma(5U, 63U, false, true) &&
+                           !kv::use_dflash_verify_batched_wmma(6U, 63U, false, true) &&
+                           !kv::use_dflash_verify_batched_wmma(5U, 8192U, false, true) &&
+                           !kv::use_dflash_verify_batched_wmma(6U, 8192U, false, true),
                        "DFlash batched route rejects unqualified width/tree/context cells");
     return failures;
 }

@@ -151,12 +151,12 @@ enum class DensePrefillFullScoreStage : std::uint32_t {
 [[nodiscard]] hipError_t fp8_int4_kv_attention_wmma(const Fp8Int4KvAttentionArgs& args,
                                                      hipStream_t stream) noexcept;
 
-// Qualification-only K4/W5 and K5/W6 chain candidate. The caller owns `rows` independent FP32
-// score planes (rows in {5, 6}); QK, stable Softmax, and exact INT4/FP16 PV each launch once
+// Production DFlash K3..5/W4..6 chain route. The caller owns `rows` independent FP32
+// score planes (rows in {4, 5, 6}); QK, stable Softmax, and exact INT4/FP16 PV each launch once
 // across all causal rows.
-[[nodiscard]] std::size_t fp8_int4_kv_attention_wmma_batched_w5w6_workspace_bytes(
+[[nodiscard]] std::size_t fp8_int4_kv_attention_dflash_verify_batched_wmma_workspace_bytes(
     std::size_t context, std::uint32_t rows) noexcept;
-[[nodiscard]] hipError_t fp8_int4_kv_attention_wmma_batched_w5w6(
+[[nodiscard]] hipError_t fp8_int4_kv_attention_dflash_verify_batched_wmma(
     const Fp8Int4KvAttentionArgs& args, hipStream_t stream) noexcept;
 
 // Production long-context decode leaf for the one selected R9700 cache layout. T=1 keeps the

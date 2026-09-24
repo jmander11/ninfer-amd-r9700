@@ -1,5 +1,29 @@
 # R9700 codec and gfx12 qualification
 
+DFlash target chain verification W4..6 uses the same batched FP8-Q WMMA / FP32
+softmax / INT4-times-FP16 PV arithmetic for contexts 64..8191. The represented
+public-input oracle remains BF16-Q attention with exact decoded cache planes;
+the private FP8-Q profile is bounded by the existing pointwise quantization
+deviation plus `2e-4 * max(1, abs(profile_oracle))`, with a separate FP64 profile
+check. Serial-WMMA bit parity supplements, rather than replaces, that oracle.
+Other widths, tree/device-count forms and contexts retain their existing routes,
+including split512 at context 8192 and above. The workspace planner owns four,
+five or six independent FP32 score planes as appropriate.
+
+Focused qualification (JSON on stdout):
+
+```bash
+build-r9700/src/ninfer_r9700_dflash_attention_route_discriminator
+build-r9700/src/ninfer_r9700_dflash_attention_route_discriminator --long-context
+build-r9700/src/ninfer_r9700_runtime_planner_qual --host-attention-parity-routing
+```
+
+The discriminator retains W5/W6 and adds W4 at context64 and133 (4100 with
+`--long-context`), compact C1..4 device page-table selection, causal prefixes,
+invalid-row poisoning, serial/eager/graph equality, and score/output guards.
+Cold-start fixed K3 and adaptive Engine exact-token tests remain required: a
+warmed adaptive benchmark can stop choosing K3 and conceal a W4 route mismatch.
+
 Selected concurrent Text localization uses the existing eager layer-boundary
 trace without serializing the model batch. Set
 `NINFER_QWEN3_LAYER_BOUNDARY_TRACE_ROLE` to `target-ordinary-selected` or
