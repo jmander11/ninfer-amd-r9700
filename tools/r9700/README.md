@@ -119,19 +119,38 @@ Build it as a CMake target and run from `build-r9700/src/`. The removed pipeline
 qualifier is historical; its direct and whole evidence remains under
 `profiles/bench/r9700-dflash-down-pipeline-20260922/`.
 
-The small-batch and down qualifiers now evaluate public BF16-input FP64 error
-over every output row (2% per-token relative RMS and 10%-of-reference-RMS gross
-cap), alongside represented-A8 FP64, exact codec/output and graph checks. This
-replaces the previous sampled-row estimate, without changing the error constants.
-The full small-batch owner currently **fails** in its unchanged generic A8 control
-at N4096/K5120/T6/token5 (2.0341% relative RMS, 3.7310% gross). Do not describe it
-as globally qualified. The default command retains that failure. For a change
+The small-batch and down qualifiers evaluate every output against the original
+BF16-input/stored-Q4 FP64 oracle, without private activation casts in that oracle.
+Their v3 criterion separately bounds the admitted A8 implementation profile:
+independently quantize the input, compute its represented FP64 result `q`, and
+let `S` be the sum of absolute exact integer-dot/scaled group terms, inflated
+by `1/(1-gamma(G,2^-53))` for its FP64 accumulation. With `G=K/64` and
+`gamma(n,u)=n*u/(1-n*u)`, define `R=gamma(G,2^-53)*S`,
+`A=gamma(G,2^-24)*S`, and `E=A+R+2^-8*(abs(q)+R+A)`.
+Require both `abs(actual-q)<=E` and `abs(actual-public)<=abs(q-public)+E`
+per output and in per-token L2. Positive budget arithmetic rounds outward;
+zero terms require exact zero and nonfinite values fail. The separate arithmetic
+check prevents quantization allowance from hiding an implementation defect.
+Exact INT32 G64 dots and exact FP16 scale products feed ascending FP32 FMAs,
+then one BF16 RNE cast; this finite, non-underflowing profile justifies the bound.
+Codec, exact generic/eager/graph, poison, guard and deliberate output-corruption
+checks remain mandatory. This is not a bound on model-quality loss: PPL admission
+remains separate and no production precision changes.
+
+The old 2% relative-RMS/10%-of-reference-RMS gross screen is retained as diagnostic
+data, including its unchanged N4096/K5120/T6/token5 failure (2.0341% RMS,
+3.7310% gross). Ideal represented A8 already differs by 2.01625% there; crossing
+2% was not evidence of a kernel bug. Full v3 requalification is recorded under
+`profiles/bench/r9700-a8-bound-dflash-20260923/`: all 32 small-batch and two down
+cells pass, with 102 deliberately corrupted outputs rejected. Maximum public
+and arithmetic norm-budget utilization is 0.88150 and 0.45584 respectively.
+For a change
 restricted to MLP, append `--mlp-only` to qualify all selected widths of just
 N34816/K5120 and N5120/K17408; also run the dedicated T5/6 down qualifier when
 the shared pipeline changes. `--output-only` instead qualifies N5120/K6144 at
 all selected T2..6 and T12/18/24 widths. These scopes use identical numerical criteria and
-report their restricted domain explicitly. This is scoped evidence, not a waiver of
-the inherited non-MLP failure. Retained diagnostic provenance:
+report their restricted domain explicitly. Restricted results never qualify the
+unmeasured domain. Retained original diagnostic provenance:
 `profiles/rocprof/r9700-compact-mixed-speed-20260923/`.
 
 The gate/up and projection comparison executables and obsolete down scale-gather

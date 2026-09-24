@@ -105,9 +105,10 @@ Numerical limitation found during the subsequent larger-batch experiment:
 the full-output public BF16-input oracle (rather than the prior sampled-row norm)
 rejects the unchanged generic N4096/K5120/T6 control at 2.0341% relative RMS
 against the 2% criterion. This is not a measured model-quality regression, but
-the complete small-batch qualification is failed; do not infer universal A8
-accuracy from the passing model sidecars or narrower MLP checks. The failing
-test and receipt are retained; its criterion has not been relaxed.
+the historical complete small-batch qualification failed; do not infer universal
+A8 accuracy from the passing model sidecars or narrower MLP checks. The failing
+test and receipt are retained. The subsequent principled implementation-profile
+qualification below resolves the unexplained operator cutoff, not model quality.
 
 ### Four-token concurrent DFlash follow-up
 
@@ -130,7 +131,20 @@ FP64 output itself differs2.01625% from the original BF16-input oracle, versus
 it at the output. Exact codec/generic checks pass. Arithmetic scheduling alone
 cannot repair the2% failure while retaining those codes/scales. One lower-input-MSE
 scale refinement worsened output error to2.18842% and was rejected. No numerical
-criterion or codec was changed; the accuracy decision remains open.
+codec was changed. The subsequent numerical review keeps this result explicitly.
+
+The v3 small-batch/down qualification retains the original full-output BF16-input
+FP64 oracle and adds an analytically derived A8-profile envelope: independently
+measured quantization error plus exact-integer/group-FP32-FMA/BF16-cast error.
+A separate per-output arithmetic bound prevents quantization allowance from
+concealing kernel defects; both bounds also apply per-token in L2. The derivation
+is in `tools/r9700/README.md`. All32 small-batch and two down cells pass, including
+exact codec/generic/eager/graph, poison recovery and guards; all102 deliberately
+corrupted outputs fail. Maximum public/arithmetic norm-budget fractions are
+0.88150/0.45584. The historical2.03407% RMS remains recorded and still fails its
+old diagnostic screen. This changes no production arithmetic, weights, precision,
+PPL threshold or previously measured model quality. Evidence:
+`profiles/bench/r9700-a8-bound-dflash-20260923/`.
 
 Matched chunk check on the frozen preceding build: C1 codeP4096 prefill
 1473.39/1523.68/1459.01tok/s at chunks1024/2048/4096; WikiTextP8192 gives

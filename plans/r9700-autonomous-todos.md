@@ -85,10 +85,30 @@ above apply to every command.
 
 ### Current checkpoint
 
+ACTIVE USER REQUEST (numerical qualification and decode follow-up):
+- [x] Derive and implement an A8 implementation-profile numerical criterion from
+  represented-input quantization and floating-point error bounds; retain the
+  original BF16-input FP64 oracle and failing fixture, requalify the entire
+  affected small-batch/down domain, and keep model PPL admission separate.
+- [ ] Inspect current-compatible C1 DFlash attribution and pursue only a genuinely
+  new, bounded material mechanism; qualify and measure any proposed improvement.
+- [ ] Diagnose adaptive C4 versus fixedK4, including actual captured-K residence
+  and timing-policy overhead; fix a demonstrated issue and verify exact tokens.
+- [ ] Rebuild affected deliverables, document conclusions and commit natural checkpoints.
+User authorized this follow-up after clarifying that2.034% is operator RMS error,
+not PPL degradation. No user choice remains pending. Preserve weights/precision
+unless evidence establishes a necessary change; prefill and unrelated campaigns
+remain paused. Serial heavyweight jobs, explicit build cap14 (normally4), C<=4.
+Numerical checkpoint: all32 small-batch plus two down cells pass the analytically
+derived quantization+FP32-FMA/BF16 envelope and separate arithmetic bound;102
+output corruptions rejected. Original public FP64 oracle, historical2.03407%
+RMS and model PPL gates are unchanged. Evidence:
+`profiles/bench/r9700-a8-bound-dflash-20260923/`.
+
 ACTIVE USER REQUEST (2026-09-23, follow-up): resolve the inherited A8 public-oracle
 failure first, then work through final-build attribution, useful DFlash coverage,
 remaining material prefill/decode mechanisms, and chunk selection including4096.
-- [ ] Diagnose N4096/K5120/T6 failure against represented public inputs; repair the
+- [x] Diagnose N4096/K5120/T6 failure against represented public inputs; repair the
   actual cause with justified numerical criteria and affected-domain qualification,
   not a threshold increase to make a fixture pass.
 - [x] Reprofile final C1/C4 ordinary/K5 paths; inspect intermediate C only where
@@ -103,8 +123,8 @@ Preserve installed selected weights, fixed KV format, C<=4, auto power, serial
 heavyweight work and build cap14 (normally4). No unrelated paused campaign resumes.
 Follow-up checkpoint: inherited failure is cancellation-amplified A8 quantization
 (ideal represented-A8 FP64 error2.01625%, GPU2.03407%); arithmetic/codec checks
-pass. Scale-refinement experiment worsens output error and is rejected. User
-decision pending on numerical contract versus more accurate activations; no waiver.
+pass. Scale-refinement experiment worsens output error and is rejected. The user
+authorized principled numerical qualification in the active request above; no waiver.
 K4 MLP T10/15/20 extension passes six full-oracle/graph cells and exact old ISA.
 C2/3/4 aggregate decode98.32/132.17/142.61→122.14/160.87/161.66tok/s; all nine
 repetitions exact same-C ordinary tokens. Chunk4096 initial code4K prefill1459
@@ -117,9 +137,9 @@ K5 output T12/18/24 passes eight output-oracle cells; direct savings26–36%,
 fresh C4 whole140.49→144.78 aggregate tok/s, all repetitions exact ordinary
 tokens. Retained instructions unchanged. Delivered binaries rebuilt and host
 contracts pass; installed model guidance updated. Bounded optimization pass done.
-ONLY BLOCKER: user choice for inherited N4096 numerical contract versus more
-accurate activations. Do not relax the2% threshold or change precision implicitly;
-all other independent follow-up priorities are complete. Preserve failed evidence.
+The numerical item continues in the active request above; user authorized a
+principled criterion review, not a fixture-specific threshold increase. All other
+independent priorities of this preceding pass are complete. Preserve failed evidence.
 Evidence:
 `profiles/bench/r9700-compact-followup-20260923/`.
 
