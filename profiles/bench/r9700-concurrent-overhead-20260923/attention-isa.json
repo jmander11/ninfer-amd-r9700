@@ -1,0 +1,49 @@
+{
+  "baseline": {
+    "executable_path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-concurrent-overhead-20260923/projection-bin/bench",
+    "executable_size_bytes": 9733584,
+    "executable_sha256": "557164934b5932ac854603af8e5c44ff093602c0f47dac34c5cec8c6e8633590",
+    "executable_device": 42,
+    "executable_inode": 1306673,
+    "code_object_path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-concurrent-overhead-20260923/attention-baseline.hsaco",
+    "code_object_size_bytes": 972264,
+    "code_object_sha256": "8a7316f0c4541e89964597bd71ce3dbd9fa1c8ab475a316b1d8f5bc8034ecc62",
+    "section": ".hip_fatbin",
+    "bundle_target": "hipv4-amdgcn-amd-amdhsa--gfx1201",
+    "bundle_offset_bytes": 1052672,
+    "code_symbol": "qk_wmma_batched_dflash_verify_kernel"
+  },
+  "candidate": {
+    "executable_path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700/bench/ninfer_bench",
+    "executable_size_bytes": 9733616,
+    "executable_sha256": "246254f759f8d19bb909c6303b11ec8961fd34e8951229073e17bb40c5e25fc6",
+    "executable_device": 42,
+    "executable_inode": 1305118,
+    "code_object_path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-concurrent-overhead-20260923/attention-candidate.hsaco",
+    "code_object_size_bytes": 973032,
+    "code_object_sha256": "5b3f7df2e1f149ecd4b4cb07829a5d29ddf60ea49461540771939cc9a50f2b37",
+    "section": ".hip_fatbin",
+    "bundle_target": "hipv4-amdgcn-amd-amdhsa--gfx1201",
+    "bundle_offset_bytes": 1052672,
+    "code_symbol": "qk_wmma_batched_dflash_verify_kernel"
+  },
+  "qk_before": {
+    "vgpr_count": 24,
+    "sgpr_count": 32,
+    "group_segment_fixed_size": 0,
+    "private_segment_fixed_size": 0,
+    "wavefront_size": 32
+  },
+  "qk_after": {
+    "vgpr_count": 24,
+    "sgpr_count": 32,
+    "group_segment_fixed_size": 0,
+    "private_segment_fixed_size": 0,
+    "wavefront_size": 32
+  },
+  "fp8_wmma_sites": 1,
+  "unchanged_instruction_exact": [
+    "softmax_wmma_scores_batched_dflash_verify_in_place_kernel",
+    "pv_vector_batched_dflash_verify_kernel"
+  ]
+}

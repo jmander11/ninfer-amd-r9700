@@ -647,6 +647,43 @@ int main(int argc, char** argv) {
         auto w6_batched = w6_wmma;
         w6_batched.score_workspace = d_w6_batched_scores.get() + 1;
         w6_batched.output = d_w6_batched_output.get() + 1;
+        // Paired QK must poison every represented row (including the odd W5
+        // tail) when device page metadata is invalid, without touching guards.
+        for (const std::uint32_t rows : {4U, 5U, 6U}) {
+            auto bad = rows == 6U ? w6_batched : w5_batched;
+            bad.query_rows = rows;
+            const auto output_count = rows * row_elements;
+            const auto score_count = rows * kQueryHeads * bad.context;
+            DeviceArray<float> invalid_output(output_count + 2U), invalid_scores(score_count + 2U);
+            DeviceArray<std::int32_t> selected_row(1U);
+            DeviceArray<std::uint32_t> invalid_pages(pages.size());
+            bad.output = invalid_output.get() + 1U;
+            bad.score_workspace = invalid_scores.get() + 1U;
+            const auto check_poison = [&] {
+                fill_guarded(invalid_output, output_count);
+                fill_guarded(invalid_scores, score_count);
+                hip_check(kv::fp8_int4_kv_attention_dflash_verify_batched_wmma(bad, device.stream),
+                          "invalid paired-QK metadata");
+                device.synchronize();
+                const auto values = read_guarded(invalid_output, output_count, "invalid metadata output");
+                if (!std::all_of(values.begin(), values.end(), [](float v) { return std::isnan(v); }))
+                    fail("paired-QK invalid metadata did not poison every row");
+                require_guard_canaries(invalid_scores, "invalid metadata scores");
+            };
+            bad.page_table_row = selected_row.get();
+            bad.page_table_row_stride = static_cast<std::uint32_t>(pages.size());
+            bad.page_table_row_count = 1U;
+            for (const auto invalid_row : {-1, 1}) {
+                upload(selected_row, std::vector<std::int32_t>{invalid_row});
+                check_poison();
+            }
+            bad.page_table_row = nullptr;
+            auto malformed_pages = pages;
+            malformed_pages.front() = static_cast<std::uint32_t>(kPhysicalPages);
+            upload(invalid_pages, malformed_pages);
+            bad.page_table = invalid_pages.get();
+            check_poison();
+        }
         auto text_dense = args(kTextRows, kTextContext, d_text_positions.get(), nullptr,
                                d_text_dense_output.get() + 1);
         text_dense.query = d_text_query.get();
@@ -1117,6 +1154,7 @@ int main(int argc, char** argv) {
             {"schema_version", 3},
             {"qualification", "text_p129_and_dflash_verify_attention_parity_discriminator"},
             {"w4_qualification", w4_cells},
+            {"w4_w5_w6_invalid_page_metadata_poison", true},
             {"selector", {{"name", "NINFER_R9700_TEXT_P129_WMMA_TAIL_CANDIDATE"},
                            {"compiled", kv::kTextP129WmmaTailCandidate},
                            {"default", false}}},

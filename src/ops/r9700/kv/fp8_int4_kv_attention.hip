@@ -169,26 +169,29 @@ __global__ void qk_wmma_batched_dflash_verify_kernel(
     const std::uint32_t* page_table, const std::int32_t* page_table_row,
     std::uint32_t page_table_row_stride, std::uint32_t page_table_row_count,
     std::size_t context, std::size_t physical_tokens, std::uint32_t kv_heads,
-    std::uint32_t q_to_kv,
+    std::uint32_t q_to_kv, std::uint32_t query_rows,
     float attention_scale, float* scores) {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
     const std::uint32_t lane = threadIdx.x & 31U;
     const std::uint32_t k_half = lane >> 4U;
     const std::uint32_t axis = lane & 15U;
-    const std::uint32_t row = blockIdx.y / kv_heads;
+    // Each eight-M-lane group represents one causal row's six heads.
+    // Keep the same FP8 operands and sixteen ascending K chunks per dot;
+    // only independent M rows are packed into the formerly unused lanes.
+    const std::uint32_t pair_base = 2U * (blockIdx.y / kv_heads);
+    const std::uint32_t output_row = pair_base + k_half;
     const std::uint32_t kv_head = blockIdx.y % kv_heads;
     const std::size_t tile = static_cast<std::size_t>(blockIdx.x) * 16U;
-    float* row_scores = scores + static_cast<std::size_t>(row) * kv_heads * q_to_kv * context;
     if (page_table_row != nullptr) {
         const std::int32_t represented_row = *page_table_row;
         if (represented_row < 0 ||
             static_cast<std::uint32_t>(represented_row) >= page_table_row_count) {
             for (std::uint32_t j = 0; j < 8; ++j) {
-                const std::uint32_t qrow = (lane >> 4U) * 8U + j;
                 const std::size_t logical = tile + axis;
-                if (qrow < q_to_kv && logical < context) {
-                    const std::uint32_t query_head = kv_head * q_to_kv + qrow;
-                    row_scores[static_cast<std::size_t>(query_head) * context + logical] =
+                if (j < q_to_kv && output_row < query_rows && logical < context) {
+                    const std::uint32_t query_head = kv_head * q_to_kv + j;
+                    scores[(static_cast<std::size_t>(output_row) * kv_heads * q_to_kv +
+                            query_head) * context + logical] =
                         __builtin_nanf("");
                 }
             }
@@ -200,13 +203,15 @@ __global__ void qk_wmma_batched_dflash_verify_kernel(
     for (std::uint32_t chunk = 0; chunk < kHeadDim / 16U; ++chunk) {
         std::uint8_t a_bytes[8];
         std::uint8_t b_bytes[8];
-        const std::uint32_t query_head = kv_head * q_to_kv + axis;
+        const std::uint32_t input_row = pair_base + (axis >> 3U);
+        const std::uint32_t local_head = axis & 7U;
+        const std::uint32_t query_head = kv_head * q_to_kv + local_head;
         for (std::uint32_t j = 0; j < 8; ++j) {
             const std::uint32_t feature = chunk * 16U + k_half * 8U + j;
-            a_bytes[j] = query_head < kv_heads * q_to_kv
+            a_bytes[j] = local_head < q_to_kv && input_row < query_rows
                              ? __hip_cvt_float_to_fp8(
                                    static_cast<float>(query[
-                                       (static_cast<std::size_t>(row) * kv_heads * q_to_kv +
+                                       (static_cast<std::size_t>(input_row) * kv_heads * q_to_kv +
                                         query_head) * kHeadDim + feature]),
                                    __HIP_SATFINITE, __HIP_E4M3)
                              : 0U;
@@ -228,21 +233,22 @@ __global__ void qk_wmma_batched_dflash_verify_kernel(
         accum = __builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8_w32_gfx12(a, b, accum);
     }
     for (std::uint32_t j = 0; j < 8; ++j) {
-        const std::uint32_t qrow = (lane >> 4U) * 8U + j;
-        const std::uint32_t query_head = kv_head * q_to_kv + qrow;
+        const std::uint32_t query_head = kv_head * q_to_kv + j;
         const std::size_t logical = tile + axis;
-        if (qrow < q_to_kv && logical < context) {
+        if (j < q_to_kv && output_row < query_rows && logical < context) {
             const std::size_t physical =
                 static_cast<std::size_t>(page_table[logical / kPageSize]) * kPageSize +
                 logical % kPageSize;
-            row_scores[static_cast<std::size_t>(query_head) * context + logical] =
+            scores[(static_cast<std::size_t>(output_row) * kv_heads * q_to_kv +
+                    query_head) * context + logical] =
                 physical < physical_tokens ? accum[j] * attention_scale : __builtin_nanf("");
         }
     }
 #else
     (void)query; (void)key_codes; (void)page_table; (void)page_table_row;
     (void)page_table_row_stride; (void)page_table_row_count; (void)context;
-    (void)physical_tokens; (void)kv_heads; (void)q_to_kv; (void)attention_scale; (void)scores;
+    (void)physical_tokens; (void)kv_heads; (void)q_to_kv; (void)query_rows;
+    (void)attention_scale; (void)scores;
 #endif
 }
 } // namespace
@@ -1762,11 +1768,11 @@ hipError_t fp8_int4_kv_attention_dflash_verify_batched_wmma(
         return hipErrorInvalidValue;
     }
     const dim3 qk_grid(static_cast<unsigned>((a.context + 15U) / 16U),
-                       a.query_rows * a.kv_heads);
+                       ((a.query_rows + 1U) / 2U) * a.kv_heads);
     hipLaunchKernelGGL((qk_wmma_batched_dflash_verify_kernel<true>), qk_grid, dim3(32), 0, stream,
                        a.query, a.key_codes, a.page_table, a.page_table_row,
                        a.page_table_row_stride, a.page_table_row_count, a.context,
-                       a.physical_tokens, a.kv_heads, a.q_to_kv, a.attention_scale,
+                       a.physical_tokens, a.kv_heads, a.q_to_kv, a.query_rows, a.attention_scale,
                        a.score_workspace);
     hipError_t error = hipGetLastError();
     if (error != hipSuccess) return error;

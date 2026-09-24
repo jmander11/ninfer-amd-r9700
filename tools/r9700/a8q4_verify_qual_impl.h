@@ -384,13 +384,14 @@ void cell(unsigned t,hipStream_t s,std::ostream& out) {
 #ifndef NINFER_A8Q4_VERIFY_QUAL_NO_MAIN
 int main(int argc,char** argv) {
  try {
-    bool mlp_only=false,output_only=false,draft_only=false,projection_only=false;
+    bool mlp_only=false,output_only=false,draft_only=false,projection_only=false,concurrent_only=false;
     mlp_only=argc==4 && std::string_view(argv[3])=="--mlp-only";
     output_only=argc==4 && std::string_view(argv[3])=="--output-only";
     draft_only=argc==4 && std::string_view(argv[3])=="--draft-only";
     projection_only=argc==4 && std::string_view(argv[3])=="--projection-only";
-    if((argc!=3 && !mlp_only && !output_only && !draft_only && !projection_only) || std::string_view(argv[1])!="--out-json")
-        fail("usage: selected_q4_qual --out-json FRESH.json [--mlp-only|--output-only|--draft-only|--projection-only]");
+    concurrent_only=argc==4 && std::string_view(argv[3])=="--concurrent-only";
+    if((argc!=3 && !mlp_only && !output_only && !draft_only && !projection_only && !concurrent_only) || std::string_view(argv[1])!="--out-json")
+        fail("usage: selected_q4_qual --out-json FRESH.json [--mlp-only|--output-only|--draft-only|--projection-only|--concurrent-only]");
     const std::filesystem::path output=argv[2];require_fresh_output(output);power();
     HIP_CHECK(hipSetDevice(0));hipDeviceProp_t props{};HIP_CHECK(hipGetDeviceProperties(&props,0));
     char pci[32]{};HIP_CHECK(hipDeviceGetPCIBusId(pci,sizeof(pci),0));
@@ -401,10 +402,12 @@ int main(int argc,char** argv) {
         <<"ninfer.r9700.a8q4-small-batch-projections.v3"
         <<"\",\"status\":\"qualified\",\"public_dispatch_tested\":true,"
           "\"pci\":\"0000:13:00.0\",\"power\":\"auto\",\"copies\":3,\"scope\":\""
-        <<(mlp_only?"mlp_only":output_only?"output_only":draft_only?"draft_only":projection_only?"projection_only":"complete_owner")<<"\",\"cells\":[";
+        <<(mlp_only?"mlp_only":output_only?"output_only":draft_only?"draft_only":projection_only?"projection_only":concurrent_only?"concurrent_only":"complete_owner")<<"\",\"cells\":[";
     constexpr std::array<std::array<unsigned,2>,10> shapes{{{34816,5120},{5120,6144},{12288,5120},{4096,5120},{5120,17408},{5120,25600},{7168,5120},{6144,5120},{1280,5120},{5120,4096}}};
     bool first=true;
     for(const auto& shape:shapes) {
+        if(concurrent_only && (shape==std::array<unsigned,2>{34816,5120} ||
+                               shape==std::array<unsigned,2>{5120,17408}))continue;
         if(mlp_only && shape!=std::array<unsigned,2>{34816,5120} &&
            shape!=std::array<unsigned,2>{5120,17408})continue;
         if(output_only && shape!=std::array<unsigned,2>{5120,6144})continue;
@@ -416,6 +419,7 @@ int main(int argc,char** argv) {
            shape!=std::array<unsigned,2>{5120,4096})continue;
         N=shape[0];K=shape[1];G=K/64;
         for(unsigned t:{2U,3U,4U,5U,6U,10U,12U,15U,18U,20U,24U}) {
+            if(concurrent_only && t<10)continue;
             if(draft_only && t!=5 && t!=6)continue;
             if(!linear::detail::use_a8q4_small_batch_projection(t,N,K,K))continue;
             if(!first)out<<',';first=false;cell(t,stream,out);

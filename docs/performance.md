@@ -60,6 +60,55 @@ expected value exactly.
 Copy bus rate counts both the read and write traffic. This is the hardware bandwidth bound, not a
 model or individual-Op throughput claim.
 
+## Concurrent projections and paired QK (2026-09-23)
+
+Same cap26 Q4-head/gate-up-A4 weights, Q4 DFlash/BF16 codebooks, fixed G16 cache,
+dense P4096/G128, chunk2048, auto, warmup1/repetitions3. Concurrent projection
+coverage now includes45 new T10/12/15/18/20/24 cells across eight shapes. The
+independent original-input/represented-A8 FP64 criteria and exact generic/graph
+checks pass all48 affected cells;144 corruptions are rejected. Prior44 kernel
+instruction/resource streams remain exact. New nativeIU4 kernels use70–75VGPR,
+22SGPR, no LDS/private scratch; complete-Op reductions range3.66–51.66%.
+
+DFlash W4..6 QK now packs two query rows into separate eight-M-lane groups,
+masking unused heads and the odd W5 tail. FP8 operands and each dot's reduction
+order are unchanged. QK retains24VGPR/32SGPR and no LDS/private scratch;
+softmax/PV instruction streams remain exact. Complete attention at4K improves
+8–17%; short-context latency is effectively unchanged. Public/profile FP64,
+serial/graph bit parity, guards and invalid-page metadata checks pass.
+
+| DFlash mode | Fresh control aggregate tok/s | Final aggregate tok/s |
+|---|---:|---:|
+| C1 K5 | 101.26 | 102.73 |
+| C2 K4 | 122.58 | 146.20 |
+| C3 K4 | 160.20 | 190.96 |
+| C4 K4 | 162.21 | 181.89 |
+| C4 K5 | 154.05 | 166.90 |
+
+C4 adaptive maxK5 reaches180.21 aggregate tok/s (45.05/request); no fresh
+adaptive pre-change control was collected in this pass. Fixed K4 remains the
+concurrent preference, and C3 has the highest aggregate rate on this workload.
+All18 final benchmark repetitions match same-concurrency ordinary tokens exactly.
+
+C1's fresh control is the projection-only build (its C1 device bodies are
+unchanged); concurrent controls precede both optimizations. The projection-only
+C2/C3/C4 K4 results are144.27/186.82/178.75, so the attention contribution is
+measured separately. All44 cold K3/adaptive graph/eager Engine transition cases
+match ordinary tokens. Fixed-draft acceptance/round counts are checked separately
+from final-token parity. Six pending rows at K4 remain unobserved; append/storage
+are unchanged and their maximum-capacity regression passes.
+
+The C4 runtime audit found less than0.9% uncovered inter-round time. Large
+intra-graph trace gaps are instrumentation-confounded, not proven hardware idle;
+the requested copy table was empty. Shared FP8 preparation is only0.261ms/round;
+FP8 matmul is4.45% of steady kernel service with no identified algorithm defect.
+Neither a host-copy rewrite nor a custom FP8 rewrite is justified by this capture.
+These are bounded decisions, not absolute-ceiling claims. Prefill was not tuned
+or remeasured; precision, weights and chunk2048 are unchanged. The semantic Linear
+dispatch can also serve a matching short prefill tail, with the same exact output.
+Evidence/reproduction:
+`profiles/bench/r9700-concurrent-overhead-20260923/`.
+
 ## Remaining projections and adaptive correctness (2026-09-23)
 
 The selected cap26 Q4-head/gate-up-A4 model and Q4 DFlash companion are unchanged.

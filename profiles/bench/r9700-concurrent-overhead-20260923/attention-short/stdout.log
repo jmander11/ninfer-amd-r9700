@@ -1,0 +1,293 @@
+{
+  "compiled_text_p129_candidate_enabled": false,
+  "default_production_routing_changed": false,
+  "dflash_verify_route_is_production": true,
+  "geometry": {
+    "first_dflash_position": 129,
+    "head_dim": 256,
+    "kv_heads": 4,
+    "logical_page_table": [
+      2,
+      0,
+      3
+    ],
+    "physical_pages": 4,
+    "query_heads": 24,
+    "text_context": 129,
+    "text_dense_workspace_bytes": 1609920,
+    "text_rows": 129,
+    "text_w1_score_workspace_bytes": 12384,
+    "value_group": 16,
+    "w1_context": 130,
+    "w1_score_workspace_bytes": 12480,
+    "w5_batched_score_workspace_bytes": 64320,
+    "w5_context": 134,
+    "w5_serial_score_workspace_bytes": 12864,
+    "w6_batched_score_workspace_bytes": 77760,
+    "w6_context": 135,
+    "w6_serial_score_workspace_bytes": 12960
+  },
+  "hardware": {
+    "architecture": "gfx1201",
+    "device": 0,
+    "name": "AMD Radeon AI PRO R9700",
+    "pci_bus_id": "0000:13:00.0",
+    "wave_size": 32
+  },
+  "oracle": {
+    "dense_bf16_q_implementation_limit": 0.002,
+    "text_dense_bf16_q_max_abs": 2.44645333324911e-07,
+    "text_dense_bf16_q_max_rel": 0.02073064306329364,
+    "text_tail_w1_fp8_q_profile_max_abs": 9.044436233285325e-08,
+    "text_tail_w1_fp8_q_profile_max_rel": 0.0007811854513329629,
+    "text_tail_w1_max_abs": 0.005974978995205715,
+    "text_tail_w1_max_rel": 57.10761239284523,
+    "w1_fused_max_abs": 1.312206052289655e-07,
+    "w1_fused_max_rel": 0.0004874102918493229,
+    "w1_wmma_fp8_q_profile_max_abs": 9.153369255610055e-08,
+    "w1_wmma_fp8_q_profile_max_rel": 0.0020592741914981882,
+    "w1_wmma_max_abs": 0.005992343048476956,
+    "w1_wmma_max_rel": 82.99858330799803,
+    "w5_batched_fp8_q_profile_max_abs": 1.0127989602537468e-07,
+    "w5_batched_fp8_q_profile_max_rel": 0.0020592741914981882,
+    "w5_batched_max_abs": 0.007128709399839436,
+    "w5_batched_max_rel": 735.2805439517479,
+    "w5_fused_max_abs": 1.314751499337241e-07,
+    "w5_fused_max_rel": 0.0014610364487651916,
+    "w5_wmma_fp8_q_profile_max_abs": 1.0127989602537468e-07,
+    "w5_wmma_fp8_q_profile_max_rel": 0.0020592741914981882,
+    "w5_wmma_max_abs": 0.007128709399839436,
+    "w5_wmma_max_rel": 735.2805439517479,
+    "w6_batched_fp8_q_profile_max_abs": 1.0127989602537468e-07,
+    "w6_batched_fp8_q_profile_max_rel": 0.0020592741914981882,
+    "w6_batched_max_abs": 0.007128709399839436,
+    "w6_batched_max_rel": 735.2805439517479,
+    "w6_fused_max_abs": 1.314751499337241e-07,
+    "w6_fused_max_rel": 0.0014610364487651916,
+    "w6_wmma_fp8_q_profile_max_abs": 1.0127989602537468e-07,
+    "w6_wmma_fp8_q_profile_max_rel": 0.0020592741914981882,
+    "w6_wmma_max_abs": 0.007128709399839436,
+    "w6_wmma_max_rel": 735.2805439517479,
+    "wmma_implementation_limit": 0.0002,
+    "wmma_public_criterion": "pointwise_abs<=abs(fp8_q_oracle-bf16_oracle)+2e-4*max(1,abs(fp8_q_oracle))"
+  },
+  "qualification": "text_p129_and_dflash_verify_attention_parity_discriminator",
+  "schema_version": 3,
+  "selector": {
+    "compiled": false,
+    "default": false,
+    "name": "NINFER_R9700_TEXT_P129_WMMA_TAIL_CANDIDATE"
+  },
+  "target_pair": {
+    "batched_graph_all_rows_bit_exact": true,
+    "batched_serial_all_rows_bit_exact": true,
+    "current_production_cross_route_row0_bit_exact": false,
+    "current_production_cross_route_row0_max_abs": 0.0059923455119132996,
+    "current_production_cross_route_row0_mismatches": 6144,
+    "dflash_candidate": "W5/C134/positions129..133 batched FP8-Q WMMA",
+    "fused_same_route_row0_bit_exact": true,
+    "ordinary": "W1/C130/position129 FP8-Q WMMA",
+    "serial_wmma_same_route_row0_bit_exact": true
+  },
+  "target_pair_w6": {
+    "batched_graph_all_rows_bit_exact": true,
+    "batched_serial_all_rows_bit_exact": true,
+    "dflash_candidate": "W6/C135/positions129..134 batched FP8-Q WMMA",
+    "fused_same_route_row0_bit_exact": true,
+    "ordinary": "W1/C130/position129 FP8-Q WMMA",
+    "serial_wmma_same_route_row0_bit_exact": true
+  },
+  "text_pair": {
+    "append": "W1/C129/position128 FP8-Q WMMA",
+    "candidate_graph_eager_bit_exact": true,
+    "dense_prefix_rows0_127_preserved_bit_exact": true,
+    "fresh": "dense T129/C129 plus W1 tail overwrite",
+    "original_dense_tail_append_w1_bit_exact": false,
+    "original_dense_tail_append_w1_max_abs": 0.005975022912025452,
+    "original_dense_tail_append_w1_mismatches": 6144,
+    "overwritten_tail_append_w1_bit_exact": true
+  },
+  "timing": {
+    "diagnostic_only": true,
+    "evidence_eligible": false,
+    "iterations": 50,
+    "launch_order": "ABBA by trial",
+    "text_dense_p129_median_ms": 0.18863086700439452,
+    "text_dense_p129_samples_ms": [
+      0.19282770156860352,
+      0.18236125946044923,
+      0.18876285552978517,
+      0.1953268814086914,
+      0.18340608596801758,
+      0.18863086700439452,
+      0.18225883483886718
+    ],
+    "text_dense_plus_tail_median_ms": 0.22058374404907227,
+    "text_dense_plus_tail_samples_ms": [
+      0.21964614868164062,
+      0.22094215393066408,
+      0.22121574401855468,
+      0.21829975128173829,
+      0.21967012405395508,
+      0.22058374404907227,
+      0.23257097244262695
+    ],
+    "text_tail_overwrite_median_overhead_ms": 0.03195287704467775,
+    "trials": 7,
+    "w1_fused_median_ms": 0.08990262031555175,
+    "w1_fused_samples_ms": [
+      0.10224266052246093,
+      0.08964821815490723,
+      0.08990262031555175,
+      0.09001542091369628,
+      0.09012184143066407,
+      0.08938422203063964,
+      0.08943942070007324
+    ],
+    "w1_wmma_median_ms": 0.03571448087692261,
+    "w1_wmma_samples_ms": [
+      0.044779300689697266,
+      0.03582887887954712,
+      0.03569207906723022,
+      0.03602328062057495,
+      0.03570008039474487,
+      0.03571448087692261,
+      0.035620079040527344
+    ],
+    "w5_batched_wmma_median_ms": 0.038578479290008544,
+    "w5_batched_wmma_samples_ms": [
+      0.03860408067703247,
+      0.038578479290008544,
+      0.03846250057220459,
+      0.03861370086669922,
+      0.0384840989112854,
+      0.03864969968795776,
+      0.03838969945907593
+    ],
+    "w5_fused_median_ms": 0.09555303573608398,
+    "w5_fused_samples_ms": [
+      0.09584024429321289,
+      0.09530661582946777,
+      0.09555303573608398,
+      0.09575464248657227,
+      0.09578023910522461,
+      0.09552503585815429,
+      0.09514182090759277
+    ],
+    "w5_serial_wmma_median_ms": 0.1810956382751465,
+    "w5_serial_wmma_samples_ms": [
+      0.1960325050354004,
+      0.1810956382751465,
+      0.18138843536376953,
+      0.18110923767089843,
+      0.1808956718444824,
+      0.18102123260498046,
+      0.18082124710083008
+    ],
+    "w6_batched_wmma_median_ms": 0.039284100532531736,
+    "w6_batched_wmma_samples_ms": [
+      0.03941447973251343,
+      0.039199299812316894,
+      0.039284100532531736,
+      0.03945689916610718,
+      0.039513700008392334,
+      0.0392096996307373,
+      0.03896568059921265
+    ],
+    "w6_fused_median_ms": 0.09703864097595215,
+    "w6_fused_samples_ms": [
+      0.09740345954895019,
+      0.09703864097595215,
+      0.09703783988952637,
+      0.09784584045410157,
+      0.09770666122436523,
+      0.09701944351196289,
+      0.09699064254760742
+    ],
+    "w6_serial_wmma_median_ms": 0.2182157516479492,
+    "w6_serial_wmma_samples_ms": [
+      0.21884536743164063,
+      0.2188365364074707,
+      0.21861732482910157,
+      0.21809572219848633,
+      0.2182157516479492,
+      0.21807811737060548,
+      0.217858943939209
+    ]
+  },
+  "w4_qualification": [
+    {
+      "concurrency": 1,
+      "context": 64,
+      "device_row_metadata": true,
+      "graph_exact": true,
+      "guards": true,
+      "public_oracle_max_abs": 0.011699273776169215,
+      "serial_exact": true
+    },
+    {
+      "concurrency": 2,
+      "context": 64,
+      "device_row_metadata": true,
+      "graph_exact": true,
+      "guards": true,
+      "public_oracle_max_abs": 0.012681683522402204,
+      "serial_exact": true
+    },
+    {
+      "concurrency": 3,
+      "context": 64,
+      "device_row_metadata": true,
+      "graph_exact": true,
+      "guards": true,
+      "public_oracle_max_abs": 0.012691424674376589,
+      "serial_exact": true
+    },
+    {
+      "concurrency": 4,
+      "context": 64,
+      "device_row_metadata": true,
+      "graph_exact": true,
+      "guards": true,
+      "public_oracle_max_abs": 0.01222128694314134,
+      "serial_exact": true
+    },
+    {
+      "concurrency": 1,
+      "context": 133,
+      "device_row_metadata": true,
+      "graph_exact": true,
+      "guards": true,
+      "public_oracle_max_abs": 0.005992343048476956,
+      "serial_exact": true
+    },
+    {
+      "concurrency": 2,
+      "context": 133,
+      "device_row_metadata": true,
+      "graph_exact": true,
+      "guards": true,
+      "public_oracle_max_abs": 0.006008422530018369,
+      "serial_exact": true
+    },
+    {
+      "concurrency": 3,
+      "context": 133,
+      "device_row_metadata": true,
+      "graph_exact": true,
+      "guards": true,
+      "public_oracle_max_abs": 0.006258506759126453,
+      "serial_exact": true
+    },
+    {
+      "concurrency": 4,
+      "context": 133,
+      "device_row_metadata": true,
+      "graph_exact": true,
+      "guards": true,
+      "public_oracle_max_abs": 0.006545486927782118,
+      "serial_exact": true
+    }
+  ],
+  "w4_w5_w6_invalid_page_metadata_poison": true
+}

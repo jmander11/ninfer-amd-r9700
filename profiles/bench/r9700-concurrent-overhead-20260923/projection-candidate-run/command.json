@@ -1,0 +1,6 @@
+[
+  "profiles/bench/r9700-concurrent-overhead-20260923/projection-selected-screen",
+  "profiles/bench/r9700-concurrent-overhead-20260923/projection-candidate.json",
+  "--concurrent-projections",
+  "--timing-only"
+]

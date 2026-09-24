@@ -1,0 +1,5 @@
+[
+  "profiles/bench/r9700-concurrent-overhead-20260923/baseline-screen-linked",
+  "profiles/bench/r9700-concurrent-overhead-20260923/projection-baseline.json",
+  "--concurrent-projections"
+]

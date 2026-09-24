@@ -85,6 +85,34 @@ above apply to every command.
 
 ### Current checkpoint
 
+COMPLETED USER REQUEST (concurrent projections, round overhead, attention/FP8):
+- [x] Profile current C2..4 Q4 projection gaps, qualify and promote material
+  same-contract shape extensions; compare affected whole decode workloads.
+- [x] Attribute DFlash GPU idle gaps, synchronization and host round overhead;
+  optimize only an identified material mechanism.
+- [x] Reassess decode attention and protected FP8 projections from current traces;
+  pursue a new bounded mechanism or record evidence-backed exclusions.
+- [x] Verify/rebuild affected delivery, record results and natural commits.
+Continuation from8562efdd; unchanged installed weights/precision/cache/chunk2048,
+C<=4, prefill and older campaigns paused. Heavy jobs strictly serial and resource
+bounded; one independent CPU review agent. No repeat of rejected mechanisms
+without new evidence. No absolute-ceiling claim from kernel bandwidth alone.
+
+Closure: 45 additional concurrent Linear cells promoted after all48 affected
+FP64/exact/graph cells passed and144 deliberate corruptions were rejected;
+prior44 ISA/resource streams remain exact. Paired-row QK passes nine complete-Op
+cells and canonical short/long/invalid-metadata checks; softmax/PV are unchanged.
+Final P4096/G128 C1K5 is102.73tok/s; C2/C3/C4 K4 aggregate is
+146.20/190.96/181.89, gains19.3/19.2/12.1% against fresh controls.
+C4K5 is166.90 (+8.3%); adaptive maxK5 is180.21. All18 final repetitions and
+44 cold transition cases match ordinary tokens; fixed acceptance/round counts
+are unchanged. CLI/server/PPL/bench rebuilt, four focused host and two static
+tests pass. Host overhead and FP8 rewrites are excluded by the measured bound,
+not by an absolute-ceiling claim. Six pending rows at K4 remain unobserved;
+append/storage are unchanged. Evidence and reproduction:
+`profiles/bench/r9700-concurrent-overhead-20260923/`; `docs/performance.md`.
+Older campaigns and prefill remain paused; no new campaign is required by closure.
+
 COMPLETED USER REQUEST (remaining projections, verify gate/up and adaptive tails):
 - [x] Attribute remaining generic Q4 calls on the current delivered build; qualify
   and promote a new specialized route only where its whole-inference bound is material.

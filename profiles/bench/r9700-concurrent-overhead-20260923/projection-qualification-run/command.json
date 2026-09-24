@@ -1,0 +1,6 @@
+[
+  "build-r9700/src/ninfer_r9700_a8q4_small_batch_projection_qual",
+  "--out-json",
+  "profiles/bench/r9700-concurrent-overhead-20260923/projection-qualification.json",
+  "--concurrent-only"
+]

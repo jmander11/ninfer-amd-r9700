@@ -1,0 +1,485 @@
+{
+  "cells": [
+    {
+      "rows": 4096,
+      "columns": 5120,
+      "tokens": 10,
+      "generic_ms": 0.12494000047445297,
+      "selected_ms": 0.07206049934029579,
+      "saving_fraction": 0.42323916226468783,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 4096,
+      "columns": 5120,
+      "tokens": 12,
+      "generic_ms": 0.11527999863028526,
+      "selected_ms": 0.0705999992787838,
+      "saving_fraction": 0.38757806976381726,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 4096,
+      "columns": 5120,
+      "tokens": 15,
+      "generic_ms": 0.1160999983549118,
+      "selected_ms": 0.07121999934315681,
+      "saving_fraction": 0.38656330445896403,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 4096,
+      "columns": 5120,
+      "tokens": 18,
+      "generic_ms": 0.10223999619483948,
+      "selected_ms": 0.07067950069904327,
+      "saving_fraction": 0.3086903038968345,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 4096,
+      "columns": 5120,
+      "tokens": 20,
+      "generic_ms": 0.10779999941587448,
+      "selected_ms": 0.07129999995231628,
+      "saving_fraction": 0.3385899783055403,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 4096,
+      "columns": 5120,
+      "tokens": 24,
+      "generic_ms": 0.11848200112581253,
+      "selected_ms": 0.07146099954843521,
+      "saving_fraction": 0.39686198013694174,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 12288,
+      "columns": 5120,
+      "tokens": 10,
+      "generic_ms": 0.1563035026192665,
+      "selected_ms": 0.14422299712896347,
+      "saving_fraction": 0.07728877016741886,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 12288,
+      "columns": 5120,
+      "tokens": 12,
+      "generic_ms": 0.15268299728631973,
+      "selected_ms": 0.14454299956560135,
+      "saving_fraction": 0.05331305951149101,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 12288,
+      "columns": 5120,
+      "tokens": 15,
+      "generic_ms": 0.1521800011396408,
+      "selected_ms": 0.14539999514818192,
+      "saving_fraction": 0.04455254265136677,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 12288,
+      "columns": 5120,
+      "tokens": 18,
+      "generic_ms": 0.16318000108003616,
+      "selected_ms": 0.13462000340223312,
+      "saving_fraction": 0.17502143331764652,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 12288,
+      "columns": 5120,
+      "tokens": 20,
+      "generic_ms": 0.15620000660419464,
+      "selected_ms": 0.14389999955892563,
+      "saving_fraction": 0.078745240238285,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 12288,
+      "columns": 5120,
+      "tokens": 24,
+      "generic_ms": 0.15572000294923782,
+      "selected_ms": 0.15001999586820602,
+      "saving_fraction": 0.03660420609476811,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 5120,
+      "columns": 6144,
+      "tokens": 10,
+      "generic_ms": 0.15094000101089478,
+      "selected_ms": 0.09984000027179718,
+      "saving_fraction": 0.33854511989442226,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 5120,
+      "columns": 6144,
+      "tokens": 12,
+      "generic_ms": 0.14232000708580017,
+      "selected_ms": 0.09713999927043915,
+      "saving_fraction": 0.31745366474106096,
+      "new_route": false,
+      "comparison": "generic, not previous production"
+    },
+    {
+      "rows": 5120,
+      "columns": 6144,
+      "tokens": 15,
+      "generic_ms": 0.14215999841690063,
+      "selected_ms": 0.09738000109791756,
+      "saving_fraction": 0.31499717091766244,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 5120,
+      "columns": 6144,
+      "tokens": 18,
+      "generic_ms": 0.12628000229597092,
+      "selected_ms": 0.09721999987959862,
+      "saving_fraction": 0.23012354995260786,
+      "new_route": false,
+      "comparison": "generic, not previous production"
+    },
+    {
+      "rows": 5120,
+      "columns": 6144,
+      "tokens": 20,
+      "generic_ms": 0.13190000504255295,
+      "selected_ms": 0.09747999906539917,
+      "saving_fraction": 0.26095530448273574,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 5120,
+      "columns": 6144,
+      "tokens": 24,
+      "generic_ms": 0.14417999982833862,
+      "selected_ms": 0.09799999743700027,
+      "saving_fraction": 0.32029409381551166,
+      "new_route": false,
+      "comparison": "generic, not previous production"
+    },
+    {
+      "rows": 7168,
+      "columns": 5120,
+      "tokens": 10,
+      "generic_ms": 0.12557999789714813,
+      "selected_ms": 0.10357999801635742,
+      "saving_fraction": 0.17518713369313033,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 7168,
+      "columns": 5120,
+      "tokens": 12,
+      "generic_ms": 0.12601999938488007,
+      "selected_ms": 0.10365999862551689,
+      "saving_fraction": 0.1774321605182132,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 7168,
+      "columns": 5120,
+      "tokens": 15,
+      "generic_ms": 0.12637999653816223,
+      "selected_ms": 0.10432000085711479,
+      "saving_fraction": 0.1745529061981428,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 7168,
+      "columns": 5120,
+      "tokens": 18,
+      "generic_ms": 0.11599999666213989,
+      "selected_ms": 0.10327999666333199,
+      "saving_fraction": 0.10965517555880644,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 7168,
+      "columns": 5120,
+      "tokens": 20,
+      "generic_ms": 0.12026000022888184,
+      "selected_ms": 0.10568000003695488,
+      "saving_fraction": 0.12123732050705083,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 7168,
+      "columns": 5120,
+      "tokens": 24,
+      "generic_ms": 0.13015999644994736,
+      "selected_ms": 0.10501999780535698,
+      "saving_fraction": 0.19314689098242166,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 6144,
+      "columns": 5120,
+      "tokens": 10,
+      "generic_ms": 0.12112049758434296,
+      "selected_ms": 0.09304049983620644,
+      "saving_fraction": 0.23183522449272342,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 6144,
+      "columns": 5120,
+      "tokens": 12,
+      "generic_ms": 0.12285999953746796,
+      "selected_ms": 0.09264100342988968,
+      "saving_fraction": 0.2459628538282922,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 6144,
+      "columns": 5120,
+      "tokens": 15,
+      "generic_ms": 0.12257999926805496,
+      "selected_ms": 0.09380000084638596,
+      "saving_fraction": 0.23478543476520675,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 6144,
+      "columns": 5120,
+      "tokens": 18,
+      "generic_ms": 0.11022000014781952,
+      "selected_ms": 0.091279998421669,
+      "saving_fraction": 0.17183815732852004,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 6144,
+      "columns": 5120,
+      "tokens": 20,
+      "generic_ms": 0.11535999923944473,
+      "selected_ms": 0.09304000064730644,
+      "saving_fraction": 0.19348126507707597,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 6144,
+      "columns": 5120,
+      "tokens": 24,
+      "generic_ms": 0.12533999979496002,
+      "selected_ms": 0.09290000051259995,
+      "saving_fraction": 0.258816015122289,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 1280,
+      "columns": 5120,
+      "tokens": 10,
+      "generic_ms": 0.10898000001907349,
+      "selected_ms": 0.0526799988001585,
+      "saving_fraction": 0.5166085631222377,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 1280,
+      "columns": 5120,
+      "tokens": 12,
+      "generic_ms": 0.1089399978518486,
+      "selected_ms": 0.05268000066280365,
+      "saving_fraction": 0.5164310473509917,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 1280,
+      "columns": 5120,
+      "tokens": 15,
+      "generic_ms": 0.10934000089764595,
+      "selected_ms": 0.052960000932216644,
+      "saving_fraction": 0.5156392857377702,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 1280,
+      "columns": 5120,
+      "tokens": 18,
+      "generic_ms": 0.09310000017285347,
+      "selected_ms": 0.052799999713897705,
+      "saving_fraction": 0.4328678881217298,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 1280,
+      "columns": 5120,
+      "tokens": 20,
+      "generic_ms": 0.09883999824523926,
+      "selected_ms": 0.053199999034404755,
+      "saving_fraction": 0.46175637415121873,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 1280,
+      "columns": 5120,
+      "tokens": 24,
+      "generic_ms": 0.11004000157117844,
+      "selected_ms": 0.05339999869465828,
+      "saving_fraction": 0.5147219380934219,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 5120,
+      "columns": 4096,
+      "tokens": 10,
+      "generic_ms": 0.10438000038266182,
+      "selected_ms": 0.07600000128149986,
+      "saving_fraction": 0.2718911572822341,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 5120,
+      "columns": 4096,
+      "tokens": 12,
+      "generic_ms": 0.10468000173568726,
+      "selected_ms": 0.07781999930739403,
+      "saving_fraction": 0.2565915359469867,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 5120,
+      "columns": 4096,
+      "tokens": 15,
+      "generic_ms": 0.10593999922275543,
+      "selected_ms": 0.07832000032067299,
+      "saving_fraction": 0.26071360302738034,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 5120,
+      "columns": 4096,
+      "tokens": 18,
+      "generic_ms": 0.0943400003015995,
+      "selected_ms": 0.07585999742150307,
+      "saving_fraction": 0.19588724635379418,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 5120,
+      "columns": 4096,
+      "tokens": 20,
+      "generic_ms": 0.09822000190615654,
+      "selected_ms": 0.07620000094175339,
+      "saving_fraction": 0.22419059801527974,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 5120,
+      "columns": 4096,
+      "tokens": 24,
+      "generic_ms": 0.10617999732494354,
+      "selected_ms": 0.0759200006723404,
+      "saving_fraction": 0.2849877322938541,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 5120,
+      "columns": 25600,
+      "tokens": 10,
+      "generic_ms": 0.4534199982881546,
+      "selected_ms": 0.24667999893426895,
+      "saving_fraction": 0.4559569497031747,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 5120,
+      "columns": 25600,
+      "tokens": 12,
+      "generic_ms": 0.45462000370025635,
+      "selected_ms": 0.24543999880552292,
+      "saving_fraction": 0.4601205472530233,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 5120,
+      "columns": 25600,
+      "tokens": 15,
+      "generic_ms": 0.457179993391037,
+      "selected_ms": 0.2469400018453598,
+      "saving_fraction": 0.45986262431622615,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 5120,
+      "columns": 25600,
+      "tokens": 18,
+      "generic_ms": 0.3940799981355667,
+      "selected_ms": 0.24678000062704086,
+      "saving_fraction": 0.37378196864955693,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 5120,
+      "columns": 25600,
+      "tokens": 20,
+      "generic_ms": 0.4194605052471161,
+      "selected_ms": 0.247079998254776,
+      "saving_fraction": 0.4109576583158546,
+      "new_route": true,
+      "comparison": "previous production generic"
+    },
+    {
+      "rows": 5120,
+      "columns": 25600,
+      "tokens": 24,
+      "generic_ms": 0.4731200039386749,
+      "selected_ms": 0.251120001077652,
+      "saving_fraction": 0.4692255685933716,
+      "new_route": true,
+      "comparison": "previous production generic"
+    }
+  ],
+  "new_route_count": 45
+}

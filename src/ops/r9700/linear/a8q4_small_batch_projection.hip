@@ -8,7 +8,7 @@ __global__ __launch_bounds__(32) void small_batch_projection_kernel(
     const std::uint8_t* low, const std::uint8_t* high, const std::uint16_t* scales,
     const std::uint32_t* status, const std::uint8_t* codes,
     const std::uint16_t* weight_scales, hip_bfloat16* output) {
-    if constexpr(N==12288)
+    if constexpr(N==12288 && T<=8)
         detail::a8q4_scale_gather_body<N,K,T>(low,high,scales,status,codes,weight_scales,output);
     else
         detail::a8q4_pipeline_body<N,K,T>(low,high,scales,status,codes,weight_scales,output);
@@ -29,14 +29,7 @@ hipError_t launch_prepared(const A8Q4G64LinearArgs& a, hipStream_t stream) {
         case 4: return launch_width<N,K,4>(a,stream);
         }
     }
-    if constexpr (N==5120 && K==6144) {
-        switch(a.tokens) {
-        case 12: return launch_width<N,K,12>(a,stream);
-        case 18: return launch_width<N,K,18>(a,stream);
-        case 24: return launch_width<N,K,24>(a,stream);
-        }
-    }
-    if constexpr ((N==34816 && K==5120) || (N==5120 && K==17408)) {
+    {
         switch(a.tokens) {
         case 10: return launch_width<N,K,10>(a,stream);
         case 12: return launch_width<N,K,12>(a,stream);
