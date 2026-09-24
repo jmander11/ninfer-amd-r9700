@@ -1,0 +1,48 @@
+{
+  "concurrency": 2,
+  "command": [
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-gdn-q4-pair-production-20260919/bench/ninfer_bench",
+    "--weights",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer",
+    "--corpus",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids",
+    "--device",
+    "0",
+    "--concurrency",
+    "2",
+    "--whole-pg",
+    "8192,256",
+    "--prefill-chunk",
+    "4096",
+    "--kv-capacity",
+    "workload",
+    "--spec",
+    "mtp",
+    "--draft-tokens",
+    "0",
+    "--retain-token-ids",
+    "--output",
+    "json",
+    "--output-file",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gdn-q4-pair-t1-production-confirmation-20260919/results/run-2-c2.json",
+    "-r",
+    "1",
+    "--warmup",
+    "1"
+  ],
+  "exit_code": 0,
+  "started_unix_ns": 1789843970172123408,
+  "finished_unix_ns": 1789844160887425147,
+  "power_before": "auto",
+  "power_after": "auto",
+  "stdout": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gdn-q4-pair-t1-production-confirmation-20260919/results/run-2-c2.stdout",
+    "bytes": 138,
+    "sha256": "0ce43324efde41862dedd8b0c053f1670bc8018839510ba1673babaaa33333c2"
+  },
+  "stderr": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gdn-q4-pair-t1-production-confirmation-20260919/results/run-2-c2.stderr",
+    "bytes": 229,
+    "sha256": "5a8ddcd91df3af250d5dee2fa4bb4f0aa5416811a1e7b387de8d4574c8a8664a"
+  }
+}

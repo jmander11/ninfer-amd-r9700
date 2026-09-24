@@ -1,0 +1,21 @@
+{
+  "artifact_type": "ninfer_retained_fda2d17a_diagnostic_build_receipt",
+  "schema_version": 1,
+  "source": {"commit": "fda2d17ad115bd9857ea848f5f068b0d67ddc100", "tree": "b1e8b47ba90f8a3b1d476e163df97a3d5dc225ef"},
+  "benchmark": {"path": "retained-bin/ninfer_bench", "bytes": 5264472, "sha256": "f36b75bf00daad9dcf3228f3ae4df553b4809ba123f1e33e5656c2472a0f315f"},
+  "source_files": {
+    "include/ninfer/ops/gated_delta_net.h": {"bytes": 7783, "sha256": "0e2a00c53f9f1e68aa0c1de6cc13f107a5a2ac2106ad0ce85aa5d164ad5c86b4"},
+    "src/ops/r9700/gdn_recurrence/gated_delta_net.hip": {"bytes": 33417, "sha256": "f7d67c695b0b7f120889e403e8cfd7fb09d51714fdfbecc89f9a11ecff643cdb"},
+    "src/targets/qwen3/impl/runtime/layer_boundary_trace.h": {"bytes": 54361, "sha256": "3cc2a4ac946358972fa4b90b623d0ec16425ecb367913fe26892155f37edd25a"},
+    "src/targets/qwen3/impl/runtime/text_context_impl.h": {"bytes": 96933, "sha256": "b7b0c7fcd9b9ccc7d65ba89f940f5b78817ea5c77be936f0a5aff8b07c36fdff"},
+    "tools/bench/compare_qwen3_layer_boundary_trace.py": {"bytes": 20283, "sha256": "5a2afafb8e1e8cf4aba38df57eecdaa4be4d0fe3fe9e0e9489fa9569c057c829"},
+    "tools/bench/test_compare_qwen3_layer_boundary_trace.py": {"bytes": 14456, "sha256": "5a92701cb8995c5a353aff5128b2be7501b71af1884921b513405606bf9a63c8"}
+  },
+  "toolchain_runtime": {
+    "hip_compiler": {"path": "/opt/rocm/core-10.0/lib/llvm/bin/clang-23", "sha256": "241bf4da7ec39bc00b68ed74f6be751516d9892ed990e8c7fa372bad18500247"},
+    "python": {"path": "/usr/bin/python3.12", "sha256": "1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118"},
+    "amdhip": {"path": "/opt/rocm/core-10.0/lib/libamdhip64.so.7.15.26333-0000000", "sha256": "817aeadfd9f62b68831ad89993163c7f1f470f30595e7e0da5fdc942193142a8"},
+    "hipblaslt": {"path": "/opt/rocm/core-10.0/lib/libhipblaslt.so.1.4", "sha256": "1e8545626323f9b22c65d36492e1686b831cb85c8f7c8be3fc21c0d6cbb0d055"}
+  },
+  "relationship": "the retained executable identity and maintainer-provided capture are bound to the named committed diagnostic source; no claim is made that a mutable build directory remains reproducible"
+}

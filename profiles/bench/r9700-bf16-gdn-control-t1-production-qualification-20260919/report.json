@@ -1,0 +1,128 @@
+{
+  "schema": "ninfer.r9700.bf16-gdn-control-t1-production-qualification.v1",
+  "status": "qualified_for_whole_ab_only",
+  "production_routing_authorized": false,
+  "device": {
+    "ordinal": 0,
+    "name": "AMD Radeon AI PRO R9700",
+    "architecture": "gfx1201",
+    "wavefront": 32,
+    "pci_bus_id": "0000:13:00.0",
+    "runtime_version": 71526333,
+    "driver_version": 71526333,
+    "power_profile_path": "/sys/devices/pci0000:00/0000:00:02.1/0000:03:00.0/0000:04:08.0/0000:0a:00.0/0000:0b:08.0/0000:11:00.0/0000:12:00.0/0000:13:00.0/power_dpm_force_performance_level"
+  },
+  "shape": {
+    "tokens": 1,
+    "columns": 5120,
+    "heads": 48
+  },
+  "numeric": {
+    "serial_fp32_outputs_bit_exact": true,
+    "independent_fp64_oracle_passed": true,
+    "explicit_bf16_boundary": true,
+    "malformed_input_checks_passed": true
+  },
+  "static": {
+    "passed": true,
+    "receipt": "PASS kernel=bf16_projected_control_t1_kernel vgpr=11 sgpr=22 lds=2048 scratch=0 stores_fp32=2 stores_bf16=0"
+  },
+  "build_cache": {
+    "CMAKE_BUILD_TYPE": "Release",
+    "CMAKE_HIP_ARCHITECTURES": "gfx1201",
+    "NINFER_R9700_BF16_GDN_CONTROL_T1_CANDIDATE": "1"
+  },
+  "identities": {
+    "executable": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-bf16-gdn-control-t1-direct/src/ninfer_r9700_gdn_qual",
+      "bytes": 915424,
+      "sha256": "d85ec6742d72233e7fe6258b0436d397b9d7cc51831b351befc691aa784a4602"
+    },
+    "assembly": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-production-qualification-20260919/artifacts/gdn_ops.s",
+      "bytes": 635789,
+      "sha256": "9a6c1581aa468c479a31d3f4db0149df4020373e8bf77d375293cb93f40ec1a3"
+    },
+    "static_receipt": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-production-qualification-20260919/artifacts/static-receipt.txt",
+      "bytes": 108,
+      "sha256": "1cf38491b3028ce5a3ec5d7fd8c7d9d350b597d378d2aba021f4288fd138dad5"
+    },
+    "stdout": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-production-qualification-20260919/artifacts/qualification.stdout",
+      "bytes": 242,
+      "sha256": "f50d85382059a0693eff6c040aa4484b5667a38d1a854bd9224e481476493ab0"
+    },
+    "stderr": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-production-qualification-20260919/artifacts/qualification.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "device_stdout": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-production-qualification-20260919/artifacts/device.stdout",
+      "bytes": 168,
+      "sha256": "32fa92630677bb0d6237fd8ba4281a0ee8bb6bfba8493bccef95303fddb4f7ea"
+    },
+    "device_stderr": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-production-qualification-20260919/artifacts/device.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "device_process": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-production-qualification-20260919/artifacts/device-process.json",
+      "bytes": 1102,
+      "sha256": "b0b532d2816a91753dc6213d9b9a6930bb18f8680574655cb475b7440f4d47a7"
+    },
+    "device_identity": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-production-qualification-20260919/artifacts/device.json",
+      "bytes": 386,
+      "sha256": "f7be131f59019bbefa6b95dad0e760f2e969f84ed77d8de9a392566d3fd52ac4"
+    },
+    "qualification_process": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-production-qualification-20260919/artifacts/qualification-process.json",
+      "bytes": 1615,
+      "sha256": "bf889bcacd55e63b2f80e3c80830b510bb51e44ce13591c2af8a9447d6363274"
+    },
+    "kernel_source": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/gdn/gdn_ops.hip",
+      "bytes": 40328,
+      "sha256": "ad256339e4f812404b349bef860ffa15ceebcadea1b4791182bb7553226a8845"
+    },
+    "semantic_wrapper": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/gdn/gdn_gating.cpp",
+      "bytes": 7458,
+      "sha256": "c7f4942728dc61d272940c59dd0cd22d2caa0d14e2235e27e88f3a76ba15670e"
+    },
+    "qualifier": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/gdn_op_qual.hip",
+      "bytes": 63406,
+      "sha256": "02dc0151c07756f7ff8f2179174bdbd481cc59126231fb053acc7419016a3c3e"
+    },
+    "checker": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/check_bf16_gdn_projected_control_t1_static.py",
+      "bytes": 2538,
+      "sha256": "db9b7b6286ad9749346023504130c62986898851e130f4e82bfbc2f4f23b5e3d"
+    },
+    "runner": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-production-qualification-20260919/run_qualification.py",
+      "bytes": 4211,
+      "sha256": "e37e085bb0a0d1285fcaa5802f4ffccbb37818cdd2db3f09aa238b3107a27ec1"
+    },
+    "commands": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-production-qualification-20260919/commands.sh",
+      "bytes": 1980,
+      "sha256": "cbb5a3cc3f5fbb23d0b5b614479982a3ca7a03bf61d32955202493a3167b8da1"
+    },
+    "writer": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-production-qualification-20260919/write_report.py",
+      "bytes": 8150,
+      "sha256": "e5c1f361ea04dc79a0c252fad77b4e49a132efc0ad3c9f7db2b156b8bc069d1b"
+    },
+    "plan": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-production-qualification-20260919/plan.json",
+      "bytes": 1344,
+      "sha256": "2338bd40ee0cd7af04250fcdf5c6c7211b0c1a6d315b07bdf8bda027582f5896"
+    }
+  },
+  "next_gate": "matched whole ordinary-decode A/B; no production promotion is authorized by this report"
+}

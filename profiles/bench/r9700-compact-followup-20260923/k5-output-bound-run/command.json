@@ -1,0 +1,5 @@
+[
+  "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-compact-followup-20260923/k4-screen",
+  "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-compact-followup-20260923/k5-output-bound.json",
+  "--k5-output"
+]

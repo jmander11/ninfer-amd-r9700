@@ -1,0 +1,164 @@
+{
+  "artifact_type": "ninfer_r9700_fp8_e2_t129_text_parity_evidence",
+  "build": {
+    "bytes": 8969,
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-e2-t129-text-parity-gate-20260906/build-provenance.json",
+    "sha256": "80c1af2c818668e451dc4c4eba89cf55123c78c5a9f42c86aee869603f9fdbf9"
+  },
+  "candidate": {
+    "algorithm_fingerprint": "e2e00100000000000000000000000000",
+    "matrix_shape": [
+      34816,
+      5120
+    ],
+    "scope_contract": "T128 exact-validates and retains default e2; only N34816/K5120/T129 selects the same exact viable e2; every other shape and width retains default selection",
+    "selected_tokens": [
+      129
+    ],
+    "selector_cmake_key": "NINFER_R9700_FP8_PREFIX_COMMON_ALGO_CANDIDATE",
+    "selector_value": "1",
+    "semantic_identity": "e2-at-t129",
+    "unchanged_default_tokens": [
+      128
+    ]
+  },
+  "capture_result_closure": {
+    "bytes": 7864,
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-e2-t129-text-parity-gate-20260906/results/result.sha256",
+    "sha256": "987a4e4646daf4c68ad74c6b5b536460078266dadad249a40aee7e34a2d6a385"
+  },
+  "conclusion": "public tokens, layer0/layer1 recurrent states, and layer1 GDN selected-column boundaries are exact; first residual difference is layer3 post-mixer",
+  "gdn_comparison": {
+    "artifact_type": "ninfer_qwen3_layer1_gdn_detail_comparison",
+    "classification": "layer1_gdn_boundaries_exact",
+    "diagnostic": "text",
+    "diagnostic_only": true,
+    "first_difference": null,
+    "limitations": [
+      "captures one selected column and does not capture persistent convolution or recurrence state",
+      "the first differing field localizes a stage boundary, not necessarily the primitive operation"
+    ],
+    "production_routing_authorized": false,
+    "schema_version": 1,
+    "timing_evidence_eligible": false
+  },
+  "generated_token_ids_by_lane": [
+    [
+      96558,
+      96917
+    ]
+  ],
+  "layer_comparison": {
+    "artifact_type": "ninfer_qwen3_layer_boundary_comparison",
+    "classification": "first_visible_post_mixer_layer_3",
+    "diagnostic": "text",
+    "diagnostic_only": true,
+    "first_difference": {
+      "first_hidden_index": 0,
+      "half": "post_mixer",
+      "layer": 3,
+      "left_bf16_bits": 48413,
+      "mismatch_count": 3467,
+      "preceding_boundary_exact": true,
+      "right_bf16_bits": 48414,
+      "snapshot_index": 7
+    },
+    "limitations": [
+      "localizes the first visible represented-BF16 residual boundary, not the primitive root cause",
+      "an exact transformer residual stack leaves final RMSNorm and LM head untested"
+    ],
+    "production_routing_authorized": false,
+    "schema_version": 1,
+    "timing_evidence_eligible": false
+  },
+  "limitations": [
+    "four candidate captures are required because the committed trace emits one selected recurrent-state layer per process",
+    "prior operator and owner evidence motivates e2, but this gate proves only exact parity of the combined selector-one build and does not isolate e2 causality",
+    "functional eager C1 diagnostic only; trace D2H invalidates all timing",
+    "the result is consistent with e2 removing the prior layer0/layer1 divergence, but the combined-build experiment does not isolate e2 causality",
+    "whole Text parity remains blocked at the first full-attention layer3 post-mixer",
+    "no production routing or performance claim"
+  ],
+  "processes": {
+    "layer0-append": {
+      "bytes": 2690,
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-e2-t129-text-parity-gate-20260906/results/layer0-append.process.json",
+      "sha256": "7ebb4f3b8e026f0f1e32dac09a8108f6c4f478a7f8441b7521627764fd8659e0"
+    },
+    "layer0-fresh": {
+      "bytes": 2710,
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-e2-t129-text-parity-gate-20260906/results/layer0-fresh.process.json",
+      "sha256": "bdf917a7c6762a4a522af62ff0cc3935fa8d64cd90ab4dea6a25af84f7e8a5e7"
+    },
+    "layer1-append": {
+      "bytes": 2690,
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-e2-t129-text-parity-gate-20260906/results/layer1-append.process.json",
+      "sha256": "0ac2a5b9dadb2eac94fd465a588a83e7440d93ba0cc9c04fb47efd15f1b9a801"
+    },
+    "layer1-fresh": {
+      "bytes": 2710,
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-e2-t129-text-parity-gate-20260906/results/layer1-fresh.process.json",
+      "sha256": "b69ef407b11eaf1b6b9dd7c7cd3af8719e9d573287316a4fdddc291e963daf67"
+    }
+  },
+  "production_routing_authorized": false,
+  "reports": {
+    "layer0-append": {
+      "bytes": 5629,
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-e2-t129-text-parity-gate-20260906/results/layer0-append.json",
+      "sha256": "4cc8e781ffa6beb0e92159489dd4fe264cfb58cb3704eae1791b535dc46da6e9"
+    },
+    "layer0-fresh": {
+      "bytes": 5742,
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-e2-t129-text-parity-gate-20260906/results/layer0-fresh.json",
+      "sha256": "a4432653aad81135ea7bb36e1b7828c349bf3d8f4de2ca83e8cc43eed4f768e0"
+    },
+    "layer1-append": {
+      "bytes": 5627,
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-e2-t129-text-parity-gate-20260906/results/layer1-append.json",
+      "sha256": "db9eeb13d1da6af4f3ca945a0559e918509b780197d321f4d63dfe12103ca943"
+    },
+    "layer1-fresh": {
+      "bytes": 5745,
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-e2-t129-text-parity-gate-20260906/results/layer1-fresh.json",
+      "sha256": "f70b0a3a937cabd0e3a502c19a39211d90b9b4f8cf143128a397f5f635de9a46"
+    }
+  },
+  "schema_version": 1,
+  "state_comparisons": {
+    "0": {
+      "artifact_type": "ninfer_qwen3_gdn_recurrent_state_comparison",
+      "classification": "layer0_recurrent_prefix_state_exact",
+      "diagnostic": "text-prefix-state",
+      "diagnostic_only": true,
+      "first_difference": null,
+      "gdn_index": 0,
+      "limitations": [
+        "compares one exact GDN FP32 state frontier and does not localize an earlier update",
+        "does not authorize production routing or a performance claim"
+      ],
+      "production_routing_authorized": false,
+      "schema_version": 2,
+      "text_layer": 0,
+      "timing_evidence_eligible": false
+    },
+    "1": {
+      "artifact_type": "ninfer_qwen3_gdn_recurrent_state_comparison",
+      "classification": "layer1_recurrent_prefix_state_exact",
+      "diagnostic": "text-prefix-state",
+      "diagnostic_only": true,
+      "first_difference": null,
+      "gdn_index": 1,
+      "limitations": [
+        "compares one exact GDN FP32 state frontier and does not localize an earlier update",
+        "does not authorize production routing or a performance claim"
+      ],
+      "production_routing_authorized": false,
+      "schema_version": 2,
+      "text_layer": 1,
+      "timing_evidence_eligible": false
+    }
+  },
+  "status": "partial_success_layer01_exact_whole_text_blocked_at_layer3_full_attention",
+  "timing_evidence_eligible": false
+}

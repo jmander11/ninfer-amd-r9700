@@ -23,20 +23,38 @@ namespace ninfer::serve {
 GenerationRequest parse_chat_completion_request(const nlohmann::json& body,
                                                 const RequestLimits& limits);
 
+void apply_ninfer_object(const nlohmann::json& ninfer, GenerationRequest& out);
+
 std::optional<bool> parse_openai_preserve_thinking(const nlohmann::json& body);
+std::optional<bool> parse_openai_enable_thinking(const nlohmann::json& body);
+
+[[nodiscard]] CompletionTimings make_completion_timings(int prompt_tokens, int completion_tokens,
+                                                         double prefill_seconds,
+                                                         double decode_seconds, int draft_n = 0,
+                                                         int draft_n_accepted = 0,
+                                                         double prefill_tail_tok_s = 0.0,
+                                                         double prefill_tail_window_s = 0.0,
+                                                         int prompt_reused = 0,
+                                                         const ninfer::GenerationRecoveryStats& recovery = {});
 
 // Non-streaming chat completion response body (JSON string). When `reasoning` is
 // non-empty it is attached as `message.reasoning_content` (the DeepSeek/vLLM-style
 // convention consumed by Chatbox, Open WebUI, etc.), leaving `content` = answer.
+// The usage object carries OpenAI-standard details sub-objects: `cached_tokens` and
+// engine stats under the `ninfer` namespace in `prompt_tokens_details` (prefill /
+// decode rates, KV-RAM tier stats, context checkpoint), and reasoning / speculative-decoding token
+// counts in `completion_tokens_details`. Each stat is stored exactly once.
 std::string make_chat_completion_response(const std::string& id, const std::string& model,
                                           std::int64_t created, const std::string& content,
                                           const std::string& reasoning, const char* finish_reason,
-                                          const CompletionUsage& usage);
+                                          const CompletionUsage& usage,
+                                          const CompletionTimings* timings = nullptr);
 std::string make_chat_completion_tool_response(const std::string& id, const std::string& model,
                                                std::int64_t created, const std::string& content,
                                                const std::string& reasoning,
                                                const std::vector<ToolCall>& tool_calls,
-                                               const CompletionUsage& usage);
+                                               const CompletionUsage& usage,
+                                               const CompletionTimings* timings = nullptr);
 
 // Streaming SSE event strings ("data: {...}\n\n"). The first chunk carries the
 // assistant role; reasoning chunks carry `reasoning_content` deltas (the <think>
@@ -58,11 +76,20 @@ std::string make_chat_chunk_tool_calls(const std::string& id, const std::string&
                                        const std::vector<ToolCall>& tool_calls, bool include_usage);
 std::string make_chat_chunk_final(const std::string& id, const std::string& model,
                                   std::int64_t created, const char* finish_reason,
-                                  bool include_usage);
+                                  bool include_usage,
+                                  const CompletionTimings* timings = nullptr,
+                                  const CompletionUsage* usage = nullptr);
 // Dedicated usage chunk: `choices: []` with the request's token usage. Emitted
-// only when stream_options.include_usage is true.
+// before [DONE] (and whenever include_usage is requested). Carries the usage object
+// described above: OpenAI-standard `prompt_tokens_details` (`cached_tokens`, `ninfer`
+// engine stats — prefill/decode rates, reuse source, prefix_reuse_path, context_checkpoint, and when host KV RAM is enabled
+// the same live occupancy, copy times, and lifetime counters as the serve `[req] done`
+// line) and OpenAI-standard `completion_tokens_details` (reasoning and speculative
+// prediction token counts). Rates and millisecond fields are rounded to three
+// decimal places.
 std::string make_chat_chunk_usage(const std::string& id, const std::string& model,
-                                  std::int64_t created, const CompletionUsage& usage);
+                                  std::int64_t created, const CompletionUsage& usage,
+                                  const CompletionTimings* timings = nullptr);
 std::string sse_done();
 
 // /v1/models payloads.

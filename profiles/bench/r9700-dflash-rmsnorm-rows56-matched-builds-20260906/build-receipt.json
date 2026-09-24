@@ -1,0 +1,110 @@
+{
+  "artifact_type": "ninfer_r9700_dflash_rmsnorm_rows56_matched_build_receipt",
+  "benchmark_execution": "not-run",
+  "builds": {
+    "candidate": {
+      "NINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE": 1,
+      "benchmark_executable": {
+        "bytes": 5166672,
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-rmsnorm-rows56-candidate-20260906/bench/ninfer_bench",
+        "sha256": "a1c2a1a90550373aab2663594b1854ee21e7f2ca32612b0fbd4b1eeb4780b7eb"
+      },
+      "benchmark_report_field_verified": {
+        "field": "dflash_rmsnorm_rows56_candidate",
+        "test": "ninfer_bench_support_test",
+        "value": true
+      },
+      "cmake_cache": {
+        "bytes": 34026,
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-rmsnorm-rows56-candidate-20260906/CMakeCache.txt",
+        "sha256": "b4df3cd36934887a7ef488e8320a5b9c8ad22188ac7fea4b5e1d7cbf388cba43"
+      },
+      "compile_commands": {
+        "bytes": 263911,
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-rmsnorm-rows56-candidate-20260906/compile_commands.json",
+        "sha256": "1916cd9c2bb6bfae2e00910fed61ad43eb04ef1e094eeafd9e86763aeec9e3e2"
+      },
+      "cpu_checks": {
+        "host_routing": "passed",
+        "ninfer_bench_support_test": "passed",
+        "production_numerical_harness": "compiled-not-run-no-gpu"
+      },
+      "directory": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-rmsnorm-rows56-candidate-20260906",
+      "eager_object": {
+        "bytes": 189648,
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-rmsnorm-rows56-candidate-20260906/src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/eager/eager_ops.hip.o",
+        "sha256": "cdac4c61350a4f23d2d918e05a7eaaae6d51f6b3efaf3679a6a2e3cf6f05854b"
+      },
+      "normalized_compile_commands": {
+        "bytes": 250513,
+        "sha256": "fc1e2cd71ff3c8ca7c564f3fe39ad786b869bdaebfa26a304fb1b40107ef0fe3"
+      },
+      "production_numerical_executable": {
+        "bytes": 202488,
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700-dflash-rmsnorm-rows56-build-source/tools/r9700/build/rmsnorm_dflash_rows56_production_on",
+        "sha256": "b850815c345f71593cff8bc521b027494120f6a133506d1872e940d7f13da3d5"
+      }
+    },
+    "control": {
+      "NINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE": 0,
+      "benchmark_executable": {
+        "bytes": 5166640,
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-rmsnorm-rows56-control-20260906/bench/ninfer_bench",
+        "sha256": "5fbdbc70bd70dcf5af5f69b5cf91f5cbe9134dc05fdf57dfaa622d22fc1e0b43"
+      },
+      "benchmark_report_field_verified": {
+        "field": "dflash_rmsnorm_rows56_candidate",
+        "test": "ninfer_bench_support_test",
+        "value": false
+      },
+      "cmake_cache": {
+        "bytes": 34018,
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-rmsnorm-rows56-control-20260906/CMakeCache.txt",
+        "sha256": "5e6e5a70803757c370c7e9ef0ab21797808a96e22d15faef376bb67994679d33"
+      },
+      "compile_commands": {
+        "bytes": 263563,
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-rmsnorm-rows56-control-20260906/compile_commands.json",
+        "sha256": "100eba043a6ffbe02574430047fe1a7a2e0ddae4b75fbb524b7f9ad32ecda696"
+      },
+      "cpu_checks": {
+        "host_routing": "passed",
+        "ninfer_bench_support_test": "passed",
+        "production_numerical_harness": "compiled-not-run-no-gpu"
+      },
+      "directory": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-rmsnorm-rows56-control-20260906",
+      "eager_object": {
+        "bytes": 189648,
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-rmsnorm-rows56-control-20260906/src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/eager/eager_ops.hip.o",
+        "sha256": "d52a17b6734bc8c0a94416e4e9ab938936accbf365db1eb2acd317e2c4878ccc"
+      },
+      "normalized_compile_commands": {
+        "bytes": 250513,
+        "sha256": "fc1e2cd71ff3c8ca7c564f3fe39ad786b869bdaebfa26a304fb1b40107ef0fe3"
+      },
+      "production_numerical_executable": {
+        "bytes": 202456,
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700-dflash-rmsnorm-rows56-build-source/tools/r9700/build/rmsnorm_dflash_rows56_production_off",
+        "sha256": "b9506baa69b5f848cd2bfda129e601052d60960bf72f8e5456b1afe8943c5a73"
+      }
+    }
+  },
+  "configs_differ_only_in_dflash_rmsnorm_rows56_candidate": true,
+  "maximum_supported_benchmark_concurrency": 4,
+  "ordinary_rows_1_to_4_identical_between_arms": true,
+  "production_routing_authorized": false,
+  "schema_version": 1,
+  "selector_domain": {
+    "features": 5120,
+    "rows": [
+      5,
+      6
+    ]
+  },
+  "source": {
+    "commit": "c8e1bc418b80c23364460801b7c0c017bdab87b8",
+    "detached_checkout": "/ssdpool2nvme/local_llm/ninfer-amd-r9700-dflash-rmsnorm-rows56-build-source",
+    "tree": "5cda68536859bda53f091c1fc74593b246061598"
+  },
+  "status": "cpu-build-and-host-checks-passed-no-gpu-execution"
+}

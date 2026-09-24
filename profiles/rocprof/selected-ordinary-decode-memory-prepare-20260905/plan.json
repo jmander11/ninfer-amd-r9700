@@ -1,0 +1,15 @@
+{
+  "artifact_type": "ninfer_r9700_selected_decode_memory_profile_preparation",
+  "schema_version": 1,
+  "status": "blocked_on_terminal_schema_v7_selection_and_distinct_instrumentation_build_receipt",
+  "selection": "profiles/bench/pareto-result-post-promotion-20260905.json",
+  "prepared_output": "profiles/rocprof/selected-ordinary-decode-memory-20260905",
+  "workload": "ordinary non-speculative 8192-token context plus 256-token decode, C1..4, one profiled repetition after one warmup",
+  "counter_scope": ["exactly one outer ordinary Device Graph replay/transaction range at each frontier 8192..8447 under spec=none", "exact CSV-to-database kernel symbol/grid/workgroup/static-and-allocated-LDS/scratch/VGPR reconciliation", "GL2/TCP relative hit activity", "relative GL2 read requests per output token", "broad overlapping SQ dependency/issue waits", "occupancy", "GL2 write-stall instance-sum activity"],
+  "unsupported_claims": ["physical GDDR6/HBM bytes per second", "physical peak-bandwidth fraction", "complete stall freedom"],
+  "prepare_command": "bash profiles/rocprof/selected-ordinary-decode-memory-prepare-20260905/prepare.sh",
+  "future_gpu_command": "bash profiles/rocprof/selected-ordinary-decode-memory-20260905/commands.sh",
+  "profile_build_receipt": "profiles/rocprof/selected-ordinary-decode-profile-build-20260905/receipt.json",
+  "profile_timing_admissible": false,
+  "note": "Do not execute this preparation package until the live finalist campaign exits and schema-v7 selects the terminal route. The terminal timing executable remains immutable. Build the marker-bearing profiler executable only in build-r9700-selected-ordinary-decode-profile and publish its derivation receipt at the declared profile_build_receipt path. The preparer now requires and independently validates that receipt against the selected artifact, terminal executable, marker source, complete runtime route, exact build directory, CMake source/cache and compile definitions, hybrid planner/workspace authority when selected, and a distinct resulting binary. All profiler timing is inadmissible; only the counter attribution may inform the memory diagnosis."
+}

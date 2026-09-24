@@ -1,0 +1,13 @@
+{
+  "command": [
+    "/usr/bin/python3",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700-combined-selector-src-6fe53d53/tools/bench/compare_prefill_p129_tail_trace.py",
+    "--fresh",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/results/ordinary-fresh.tail.json",
+    "--append",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/results/ordinary-append.tail.json",
+    "--out",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/results/tail-comparison.json"
+  ],
+  "exit_code": 0
+}

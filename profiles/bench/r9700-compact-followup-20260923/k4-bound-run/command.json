@@ -1,0 +1,5 @@
+[
+  "profiles/bench/r9700-compact-followup-20260923/baseline-screen",
+  "profiles/bench/r9700-compact-followup-20260923/k4-bound.json",
+  "--k4-batches"
+]

@@ -1,0 +1,86 @@
+{
+  "schema": "ninfer.r9700.bf16-gdn-control-t1-whole-ab-retry2-package.v1",
+  "status": "reviewed_ready",
+  "production_routing_authorized": false,
+  "measurement_limitations": "Low pre/post-run VRAM and auto power do not prove absence of external GPU activity during inference; the operator must keep competing GPU containers and applications stopped throughout this campaign.",
+  "imported_helpers": {
+    "original_whole_runner": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-20260919/run.py",
+      "bytes": 16327,
+      "sha256": "d6d426345dc6590ff7214ad3c3e262027ae0e0a42dff7de038c6287f5522d250"
+    }
+  },
+  "claim": "Create-only complete six-role BF16 GDN T1 whole A/B retry with bounded post-exit amdgpu VRAM drain.",
+  "reviewed_plan": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-20260919/plan.json",
+    "bytes": 11328,
+    "sha256": "7d0c32b87791baf7edd52d8a62cf02344d191692231c8fb9edeb21f565697e74"
+  },
+  "retained_failure": {
+    "result_manifest": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-20260919/results/result.sha256",
+      "bytes": 985,
+      "sha256": "adfb01770404d9ed50992729c96f9ecaa40e82e3399e085a24f901fc2d7727dd"
+    },
+    "failure_process": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-20260919/results/run-3-candidate.process.json",
+      "bytes": 2056,
+      "sha256": "cd1abce19314bbfe889b76e7ebac80f9721633e2479833219dc4b702e5cf33d9"
+    },
+    "failure_stderr": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-20260919/results/run-3-candidate.stderr",
+      "bytes": 235,
+      "sha256": "0f61de06af2e31b4e2cc461f9633916ff9442515d2cdb610ea8c28825c44705b"
+    }
+  },
+  "vram_gate": {
+    "source": "PCI-derived amdgpu sysfs mem_info_vram_used/mem_info_vram_total",
+    "maximum_used_bytes": 1073741824,
+    "maximum_used_fraction_permille": 50,
+    "minimum_total_bytes": 32000000000
+  },
+  "exact_invocation": {
+    "preflight": "bash profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-retry2-20260920/commands.sh --preflight",
+    "measure": "bash profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-retry2-20260920/commands.sh --measure"
+  },
+  "order": [
+    "control",
+    "candidate",
+    "candidate",
+    "control",
+    "control",
+    "candidate"
+  ],
+  "note": "Reuse the reviewed builds and numerical authorities. Never resume prior pairs. Require low VRAM and auto power before every role; after exit poll up to 30 seconds for asynchronous allocation release, recording initial/final readings and elapsed time.",
+  "post_exit_drain": {
+    "maximum_seconds": 30,
+    "poll_seconds": 0.1
+  },
+  "retained_retry_failure": {
+    "plan": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-retry-20260919/plan.json",
+      "bytes": 12201,
+      "sha256": "9dfe3ea9d2285f141baf019b2c4b4bed912c04ab80b4c34f36bac62ba127d981"
+    },
+    "result_manifest": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-retry-20260919/results/result.sha256",
+      "bytes": 352,
+      "sha256": "bcf12a2e7256ceb054759307cbac41da46d008737cad38e878030123aa1f9c04"
+    },
+    "failure_process": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-retry-20260919/results/run-1-control.process.json",
+      "bytes": 3498,
+      "sha256": "00e057f60677348a49f92032a7db43cbd6209eaa7c1db1b9e0eddbb50a1aca9e"
+    },
+    "failure_report": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-retry-20260919/results/run-1-control.json",
+      "bytes": 7417,
+      "sha256": "2ba6726bfde918ad0c2d164ec7060fcf8c4f3f365ae916f24791ea618e172023"
+    },
+    "failure_stderr": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-retry-20260919/results/run-1-control.stderr",
+      "bytes": 229,
+      "sha256": "50942399b1606b484818fa248fcb24c3013495c90f99a40e74971c85ad38eadb"
+    }
+  }
+}

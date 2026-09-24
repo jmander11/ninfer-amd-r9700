@@ -1,0 +1,41 @@
+{
+  "schema": "ninfer.r9700.rmsnorm-k5120-rows56-summary.v1",
+  "status": "screen-complete",
+  "production_dispatch_changed": false,
+  "eligible_rows": [
+    5,
+    6
+  ],
+  "forbidden_rows": [],
+  "decision_criterion": "both launch-order medians faster; paired-ratio 2SE upper below one; order-ratio delta at most 0.02",
+  "cells": [
+    {
+      "rows": 5,
+      "incumbent_median_ms": 0.10465337,
+      "challenger_median_ms": 0.008648351765,
+      "forward_ratio_median": 0.08268470938772172,
+      "reverse_ratio_median": 0.08283221017780079,
+      "paired_ratio_mean": 0.08245172574940772,
+      "paired_ratio_standard_deviation": 0.0010485118264938755,
+      "paired_ratio_upper": 0.08301217889522496,
+      "order_ratio_delta": 0.00014750079007906647,
+      "accepted": true
+    },
+    {
+      "rows": 6,
+      "incumbent_median_ms": 0.103696495,
+      "challenger_median_ms": 0.00863077352,
+      "forward_ratio_median": 0.08333510317370134,
+      "reverse_ratio_median": 0.08343034282654847,
+      "paired_ratio_mean": 0.08327564987906594,
+      "paired_ratio_standard_deviation": 0.0003795530632200115,
+      "paired_ratio_upper": 0.08347852952516163,
+      "order_ratio_delta": 9.523965284713443e-05,
+      "accepted": true
+    }
+  ],
+  "limitations": [
+    "standalone exact-shape screen only",
+    "no production routing or whole-DFlash claim"
+  ]
+}

@@ -1,0 +1,17 @@
+a5f6106894f70acb9da0573d6d8b7fd69810c717830fb286f36e7e65598df859  profiles/bench/r9700-dflash-rmsnorm-rows56-token-parity-20260906/plan.json
+103a6ebcfdd263820e16f1a18756563735c3acd5e34623d095dda81029ba64df  profiles/bench/r9700-dflash-rmsnorm-rows56-token-parity-20260906/analyze.py
+5d2bdcb64e746e3b483e71f02a4b1a8d6ac4cc7e03ca603f084095efdfefbd83  profiles/bench/r9700-dflash-rmsnorm-rows56-token-parity-20260906/run.py
+3b80eb85b7013c82e0e53bdf8f570fb6c7eff0aa1319cc607073c2cf3e7562d3  profiles/bench/r9700-dflash-rmsnorm-rows56-token-parity-20260906/test_analyze.py
+ca21aad43d59870b4a9ede349b89260454efa63f5e96e670c6213eef276256bc  profiles/bench/r9700-dflash-rmsnorm-rows56-token-parity-20260906/commands.sh
+d3fc4c9b238390849c08ef5f61fa4695c024e0a676e67aa8245d4face418d9ee  profiles/bench/r9700-dflash-rmsnorm-rows56-matched-builds-20260906/build-receipt.json
+41a31b36e459877a5ccdb0ef5e9b6443dcc444aba23f57b43987416b3e4ef60b  profiles/bench/r9700-dflash-rmsnorm-rows56-matched-builds-20260906/gpu-numerical-result.json
+4a84530ded75e34e214814a27666d6dd20520cc69ef2c98b45a0370617966890  profiles/bench/r9700-dflash-rmsnorm-rows56-matched-builds-20260906/result.sha256
+5fbdbc70bd70dcf5af5f69b5cf91f5cbe9134dc05fdf57dfaa622d22fc1e0b43  build-r9700-dflash-rmsnorm-rows56-control-20260906/bench/ninfer_bench
+a1c2a1a90550373aab2663594b1854ee21e7f2ca32612b0fbd4b1eeb4780b7eb  build-r9700-dflash-rmsnorm-rows56-candidate-20260906/bench/ninfer_bench
+34e9bc09b99ae4efc06049e744e8b43ac5794a9dab76fcf43de43e31f5db4515  profiles/bench/r9700-dflash-p129-isolation-discriminator-20260906/history-p129.ids
+d517d347a5bec7721c8fb043bd4937b266879779526404e59ec2330ce2218bfe  profiles/bench/r9700-dflash-semantic-traces-aebd5f82-20260906/results/result.sha256
+e57f6c722c43f2fee6da7092eb2ed915a181abfc5bc28413a74119e6e0f2a66b  profiles/bench/r9700-dflash-semantic-traces-aebd5f82-20260906/results/decision-ordinary.json
+d59a1b19e6f3b78bbd76c46945b28352eb56dafa39952f398b6a03ab76b454b0  profiles/bench/r9700-dflash-semantic-traces-aebd5f82-20260906/results/decision-dflash.json
+e3aa333e5c2bceade0d72fda7ef725107f431b1957af522726a0211b9b3f9f25  profiles/bench/r9700-dflash-semantic-traces-aebd5f82-20260906/analysis-result.sha256
+b8096ffe54b6b51ead578c51a9357d96346073c64a37f27ef6fea91799569ec2  profiles/bench/r9700-qwen3-layer-boundary-traces-43e5e4cc-20260906/analysis-result.sha256
+d8fc77c36cf17c92e96d67b9a6b5a1826a1ade4f59d59c003b2368fe981fc512  out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval.ninfer

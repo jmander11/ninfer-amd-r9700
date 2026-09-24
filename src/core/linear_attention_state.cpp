@@ -193,34 +193,112 @@ Tensor LinearAttentionStatePool::recurrent_slot(std::uint32_t layer, std::int32_
         .view({spec.key_head_dim, spec.value_head_dim, spec.value_heads});
 }
 
-void LinearAttentionStatePool::copy_slot(std::int32_t src, std::int32_t dst, cudaStream_t stream) {
+void LinearAttentionStatePool::copy_slot(std::int32_t src, std::int32_t dst, hipStream_t stream) {
     validate_layer_slot(*this, 0, src, "LinearAttentionStatePool copy_slot source");
     validate_layer_slot(*this, 0, dst, "LinearAttentionStatePool copy_slot destination");
     if (src == dst) { return; }
     for (std::uint32_t layer = 0; layer < layer_count(); ++layer) {
         const Tensor source      = conv_slot(layer, src);
         const Tensor destination = conv_slot(layer, dst);
-        CUDA_CHECK(cudaMemcpyAsync(destination.data, source.data, source.bytes(),
-                                   cudaMemcpyDeviceToDevice, stream));
+        HIP_CHECK(hipMemcpyAsync(destination.data, source.data, source.bytes(),
+                                 hipMemcpyDeviceToDevice, stream));
     }
     for (std::uint32_t layer = 0; layer < layer_count(); ++layer) {
         const Tensor source      = recurrent_slot(layer, src);
         const Tensor destination = recurrent_slot(layer, dst);
-        CUDA_CHECK(cudaMemcpyAsync(destination.data, source.data, source.bytes(),
-                                   cudaMemcpyDeviceToDevice, stream));
+        HIP_CHECK(hipMemcpyAsync(destination.data, source.data, source.bytes(),
+                                 hipMemcpyDeviceToDevice, stream));
     }
 }
 
-void LinearAttentionStatePool::zero_slot(std::int32_t slot, cudaStream_t stream) {
+void LinearAttentionStatePool::copy_slot_2d(std::int32_t src, std::int32_t dst,
+                                            hipStream_t stream) {
+    // A 2D D2D copy treats height*pitch as the bounding box, which includes
+    // the sibling slot in the same layer tensor, so in-pool src/dst overlap.
+    copy_slot(src, dst, stream);
+}
+
+void LinearAttentionStatePool::zero_slot(std::int32_t slot, hipStream_t stream) {
     validate_layer_slot(*this, 0, slot, "LinearAttentionStatePool zero_slot");
     for (std::uint32_t layer = 0; layer < layer_count(); ++layer) {
         const Tensor state = conv_slot(layer, slot);
-        CUDA_CHECK(cudaMemsetAsync(state.data, 0, state.bytes(), stream));
+        HIP_CHECK(hipMemsetAsync(state.data, 0, state.bytes(), stream));
     }
     for (std::uint32_t layer = 0; layer < layer_count(); ++layer) {
         const Tensor state = recurrent_slot(layer, slot);
-        CUDA_CHECK(cudaMemsetAsync(state.data, 0, state.bytes(), stream));
+        HIP_CHECK(hipMemsetAsync(state.data, 0, state.bytes(), stream));
     }
+}
+
+std::size_t LinearAttentionStatePool::conv_slot_bytes() const noexcept {
+    return Tensor(nullptr, spec.conv_dtype, {spec.conv_channels, spec.conv_width}).bytes();
+}
+
+std::size_t LinearAttentionStatePool::recurrent_slot_bytes() const noexcept {
+    return Tensor(nullptr, DType::FP32,
+                  {spec.key_head_dim, spec.value_head_dim, spec.value_heads})
+        .bytes();
+}
+
+std::size_t LinearAttentionStatePool::conv_host_image_bytes() const noexcept {
+    return static_cast<std::size_t>(layer_count()) * conv_slot_bytes();
+}
+
+std::size_t LinearAttentionStatePool::recurrent_host_image_bytes() const noexcept {
+    return static_cast<std::size_t>(layer_count()) * recurrent_slot_bytes();
+}
+
+void LinearAttentionStatePool::pack_slot_to_host(std::int32_t slot, void* conv_dst,
+                                                 void* recurrent_dst, hipStream_t stream) const {
+    validate_layer_slot(*this, 0, slot, "LinearAttentionStatePool pack_slot_to_host");
+    if ((conv_dst == nullptr && conv_host_image_bytes() != 0) ||
+        (recurrent_dst == nullptr && recurrent_host_image_bytes() != 0)) {
+        throw std::invalid_argument("LinearAttentionStatePool host pack destination is null");
+    }
+    const std::uint32_t layers     = layer_count();
+    const std::size_t conv_bytes   = conv_slot_bytes();
+    const std::size_t rec_bytes    = recurrent_slot_bytes();
+    if (layers == 1) {
+        HIP_CHECK(hipMemcpyAsync(conv_dst, conv_slot(0, slot).data, conv_bytes,
+                                 hipMemcpyDeviceToHost, stream));
+        HIP_CHECK(hipMemcpyAsync(recurrent_dst, recurrent_slot(0, slot).data, rec_bytes,
+                                 hipMemcpyDeviceToHost, stream));
+        return;
+    }
+    const std::size_t conv_pitch = static_cast<std::size_t>(layer_stride_bytes(conv, "conv"));
+    const std::size_t rec_pitch =
+        static_cast<std::size_t>(layer_stride_bytes(recurrent, "recurrent"));
+    HIP_CHECK(hipMemcpy2DAsync(conv_dst, conv_bytes, conv_slot(0, slot).data, conv_pitch,
+                               conv_bytes, layers, hipMemcpyDeviceToHost, stream));
+    HIP_CHECK(hipMemcpy2DAsync(recurrent_dst, rec_bytes, recurrent_slot(0, slot).data, rec_pitch,
+                               rec_bytes, layers, hipMemcpyDeviceToHost, stream));
+}
+
+void LinearAttentionStatePool::unpack_slot_from_host(std::int32_t slot, const void* conv_src,
+                                                     const void* recurrent_src,
+                                                     hipStream_t stream) {
+    validate_layer_slot(*this, 0, slot, "LinearAttentionStatePool unpack_slot_from_host");
+    if ((conv_src == nullptr && conv_host_image_bytes() != 0) ||
+        (recurrent_src == nullptr && recurrent_host_image_bytes() != 0)) {
+        throw std::invalid_argument("LinearAttentionStatePool host unpack source is null");
+    }
+    const std::uint32_t layers   = layer_count();
+    const std::size_t conv_bytes = conv_slot_bytes();
+    const std::size_t rec_bytes  = recurrent_slot_bytes();
+    if (layers == 1) {
+        HIP_CHECK(hipMemcpyAsync(conv_slot(0, slot).data, conv_src, conv_bytes,
+                                 hipMemcpyHostToDevice, stream));
+        HIP_CHECK(hipMemcpyAsync(recurrent_slot(0, slot).data, recurrent_src, rec_bytes,
+                                 hipMemcpyHostToDevice, stream));
+        return;
+    }
+    const std::size_t conv_pitch = static_cast<std::size_t>(layer_stride_bytes(conv, "conv"));
+    const std::size_t rec_pitch =
+        static_cast<std::size_t>(layer_stride_bytes(recurrent, "recurrent"));
+    HIP_CHECK(hipMemcpy2DAsync(conv_slot(0, slot).data, conv_pitch, conv_src, conv_bytes,
+                               conv_bytes, layers, hipMemcpyHostToDevice, stream));
+    HIP_CHECK(hipMemcpy2DAsync(recurrent_slot(0, slot).data, rec_pitch, recurrent_src, rec_bytes,
+                               rec_bytes, layers, hipMemcpyHostToDevice, stream));
 }
 
 } // namespace ninfer

@@ -1,0 +1,78 @@
+{
+  "scope": "attribution_only",
+  "production_changed": false,
+  "concurrency": {
+    "3": {
+      "graph": 3,
+      "steady_rounds": 31,
+      "families": {
+        "gate_up": {
+          "calls_per_round": 67.0,
+          "us_per_call": 180.49451083293212,
+          "ms_per_round": 12.093132225806452,
+          "kernel_service_fraction": 0.21918339155128935
+        },
+        "down": {
+          "calls_per_round": 67.0,
+          "us_per_call": 93.75668608570054,
+          "ms_per_round": 6.281697967741936,
+          "kernel_service_fraction": 0.11385337062075347
+        },
+        "attention_pv": {
+          "calls_per_round": 48.0,
+          "us_per_call": 176.03824126344088,
+          "ms_per_round": 8.449835580645162,
+          "kernel_service_fraction": 0.15315003474983147
+        },
+        "gdn_record": {
+          "calls_per_round": 48.0,
+          "us_per_call": 52.44919220430108,
+          "ms_per_round": 2.5175612258064515,
+          "kernel_service_fraction": 0.04562983333075077
+        }
+      },
+      "ms_kernel_service_per_round": 55.17357925806452,
+      "unprofiled_acceptance_length": 4.021052632,
+      "unprofiled_acceptance_rate": 0.7592592593
+    },
+    "4": {
+      "graph": 4,
+      "steady_rounds": 31,
+      "families": {
+        "gate_up": {
+          "calls_per_round": 67.0,
+          "us_per_call": 324.8332792489167,
+          "ms_per_round": 21.76382970967742,
+          "kernel_service_fraction": 0.3001058783979778
+        },
+        "down": {
+          "calls_per_round": 67.0,
+          "us_per_call": 94.09866297544536,
+          "ms_per_round": 6.304610419354839,
+          "kernel_service_fraction": 0.08693555652184759
+        },
+        "attention_pv": {
+          "calls_per_round": 64.0,
+          "us_per_call": 170.32846219758065,
+          "ms_per_round": 10.90102158064516,
+          "kernel_service_fraction": 0.1503164057307503
+        },
+        "gdn_record": {
+          "calls_per_round": 48.0,
+          "us_per_call": 78.18200806451614,
+          "ms_per_round": 3.7527363870967743,
+          "kernel_service_fraction": 0.05174724599802172
+        }
+      },
+      "ms_kernel_service_per_round": 72.52050451612904,
+      "unprofiled_acceptance_length": 3.863636364,
+      "unprofiled_acceptance_rate": 0.724137931
+    }
+  },
+  "limitations": [
+    "Distinct captures; profiler interception perturbs durations.",
+    "C3 and C4 differ in request count and acceptance; not a pure tile A/B.",
+    "Repeated weight instructions do not establish physical DRAM byte counts.",
+    "No new candidate timing or stall/cache-counter capture in this investigation."
+  ]
+}

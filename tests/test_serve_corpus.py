@@ -1,47 +1,215 @@
 from __future__ import annotations
 
-import pytest
+import json
+import hashlib
+import io
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from tools.bench.run_serve_corpus import (
     CampaignError,
+    Fixture,
+    RUN_ARTIFACT_TYPE,
+    RUN_SCHEMA_VERSION,
+    RunSpec,
+    load_existing_records,
+    parse_args as parse_corpus_args,
+    require_compiled_profile,
     require_server_log_identity,
+    server_command,
     summary_row,
+    validate_server_start,
+)
+from tools.bench.run_serve_concurrency import (
+    Job, receive_stream, parse_args as parse_concurrency_args,
 )
 
 
-def test_request_log_v9_identity_is_accepted() -> None:
-    current = {
-        "artifact_type": "ninfer_serve_request_log",
-        "schema_version": 9,
-        "event": "server_start",
-    }
-    require_server_log_identity(current, "server_start")
+class ServeCorpusTest(unittest.TestCase):
+    def test_streamed_output_and_terminal_usage(self) -> None:
+        events = [
+            {"choices": [{"delta": {"role": "assistant"}}]},
+            {"choices": [{"delta": {"reasoning_content": "think"}}]},
+            {"choices": [{"delta": {"content": "hello"}}]},
+            {"choices": [{"delta": {}, "finish_reason": "stop"}]},
+            {"choices": [], "usage": {"prompt_tokens": 7, "completion_tokens": 2}},
+        ]
+        wire = b"".join(("data: " + json.dumps(event) + "\n\n").encode()
+                        for event in events)
+        job = Job(0, 0, Fixture("stream", [], False, 2, "suite"), 7, 2)
 
-    stale = dict(current, schema_version=8)
-    with pytest.raises(CampaignError):
-        require_server_log_identity(stale, "server_start")
+        class Connection:
+            def __init__(self, body):
+                self.response = io.BytesIO(body)
+                self.response.status = 200
+            def getresponse(self):
+                return self.response
 
+        with patch("tools.bench.run_serve_concurrency.time.monotonic",
+                   side_effect=[10.25, 10.75, 11.0]):
+            result = receive_stream(Connection(wire + b"data: [DONE]\n\n"), job, 10.0)
+        self.assertEqual((result.prompt_tokens, result.completion_tokens), (7, 2))
+        self.assertEqual((result.first_output_at, result.output_event_count), (10.25, 2))
+        self.assertEqual(result.max_output_gap_seconds, 0.5)
+        self.assertEqual(result.finish_reason, "stop")
+        self.assertEqual(result.content_sha256, hashlib.sha256(b"hello").hexdigest())
+        self.assertEqual(result.reasoning_sha256, hashlib.sha256(b"think").hexdigest())
+        with self.assertRaisesRegex(CampaignError, "before.*DONE"):
+            receive_stream(Connection(wire), job, 10.0)
+        without_usage = b"data: " + json.dumps(events[3]).encode() + b"\n\ndata: [DONE]\n\n"
+        with self.assertRaisesRegex(CampaignError, "no terminal usage"):
+            receive_stream(Connection(without_usage), job, 10.0)
 
-def test_summary_retains_one_canonical_weights_id() -> None:
-    records = [{"weights_id": "nvfp4", "metrics": {}}]
-    row = summary_row(
-        "context_profile",
-        "qwen3_6_27b",
-        "fixture",
-        "fixture",
-        "mtp0",
-        "greedy",
-        records,
-    )
-    assert row["weights_id"] == "nvfp4"
+    def test_corpus_campaign_requires_selected_prefill_chunk(self) -> None:
+        common = [
+            "--artifact", "/tmp/model.ninfer", "--output", "/tmp/out",
+            "--expected-kv-value-group", "16", "--expected-xattention-profile", "dense",
+        ]
+        with self.assertRaises(SystemExit):
+            parse_corpus_args(common)
+        parsed = parse_corpus_args([*common, "--prefill-chunk", "1024"])
+        self.assertEqual(parsed.prefill_chunk, 1024)
 
-    with pytest.raises(CampaignError):
-        summary_row(
+    def test_concurrency_campaign_requires_selected_prefill_chunk(self) -> None:
+        common = [
+            "--artifact", "/tmp/model.ninfer", "--suite", "corpus-makespan",
+            "--concurrency", "1", "--output", "/tmp/out",
+            "--expected-kv-value-group", "16", "--expected-xattention-profile", "dense",
+        ]
+        with self.assertRaises(SystemExit):
+            parse_concurrency_args(common)
+        parsed = parse_concurrency_args([*common, "--prefill-chunk", "2048"])
+        self.assertEqual(parsed.prefill_chunk, 2048)
+
+    def test_selected_prefill_chunk_is_launched_and_binds_resume(self) -> None:
+        fixture = Fixture("fixture", [], False, 1, "suite")
+        artifact = Path("/tmp/selected.ninfer").resolve()
+        spec = RunSpec(
+            "qwen3_8_27b_r9700", "qwen3.8-27b", artifact, "mtp0", "none", 0, 0,
+            "greedy", fixture, 7,
+        )
+        command = server_command(
+            Path("/tmp/ninfer-serve"), spec, Path("/tmp/server.jsonl"), 8080, 0, 8192
+        )
+        self.assertEqual(command[command.index("--prefill-chunk") + 1], "8192")
+        self.assertEqual(command[command.index("--max-concurrency") + 1], "1")
+
+        start = {
+            "artifact_type": "ninfer_serve_request_log", "schema_version": 21,
+            "event": "server_start", "server_instance_id": "server",
+            "engine": {
+                "device": 0, "max_concurrency": 1,
+                "max_context": 262144, "kv_capacity": 262144,
+                "prefill_chunk": 8192, "kv_cache_format": "fp8-k-int4-v",
+                "device_graph": True, "prefix_reuse": False,
+                "speculative_backend": "none", "speculative_draft_window": 0,
+                "proposal_head": "full", "kv_value_group": 16,
+                "xattention_qualification": False,
+            },
+            "sampling_defaults": {"greedy": True, "server_overrides": {"p_less": False}},
+            "artifact": {"target": spec.target, "weights_id": "weights"},
+            "server": {"public_model_id": spec.model_id},
+        }
+        self.assertEqual(
+            validate_server_start(start, spec, 0, 8192, 16, "dense"),
+            ("server", "weights"),
+        )
+        with self.assertRaisesRegex(CampaignError, "Engine configuration mismatch"):
+            validate_server_start(start, spec, 0, 4096, 16, "dense")
+        start["engine"]["max_concurrency"] = 5
+        with self.assertRaisesRegex(CampaignError, "Engine configuration mismatch"):
+            validate_server_start(start, spec, 0, 8192, 16, "dense")
+
+        record = {
+            "artifact_type": RUN_ARTIFACT_TYPE, "schema_version": RUN_SCHEMA_VERSION,
+            "target": spec.target, "speculative_mode": spec.speculative_mode,
+            "sampling_mode": spec.sampling_mode, "fixture": fixture.name, "seed": spec.seed,
+            "artifact_path": str(artifact), "prefill_chunk": 8192,
+            "kv_value_group": 16, "xattention_profile": "dense",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "run.jsonl"
+            path.write_text(json.dumps(record) + "\n", encoding="utf-8")
+            self.assertEqual(
+                load_existing_records(path, {spec.key: spec}, 8192, 16, "dense"),
+                {spec.key: record},
+            )
+            with self.assertRaisesRegex(CampaignError, "prefill chunk differs"):
+                load_existing_records(path, {spec.key: spec}, 4096, 16, "dense")
+            record["prefill_chunk"] = True
+            path.write_text(json.dumps(record) + "\n", encoding="utf-8")
+            with self.assertRaisesRegex(CampaignError, "prefill chunk differs"):
+                load_existing_records(path, {spec.key: spec}, 1, 16, "dense")
+
+    def test_request_log_v21_identity_is_accepted(self) -> None:
+        current = {
+            "artifact_type": "ninfer_serve_request_log",
+            "schema_version": 21,
+            "event": "server_start",
+        }
+        require_server_log_identity(current, "server_start")
+
+        stale = dict(current, schema_version=20)
+        with self.assertRaises(CampaignError):
+            require_server_log_identity(stale, "server_start")
+
+    def test_schema_v20_requires_selected_compiled_profile(self) -> None:
+        require_compiled_profile({"kv_value_group": 16, "xattention_qualification": False}, 16,
+                                 "dense")
+        require_compiled_profile({
+            "kv_value_group": 32, "xattention_qualification": True,
+            "xattention_profile": "b128-s16-tau900", "xattention_find_block": 128,
+            "xattention_stride": 16, "xattention_tau_permille": 900,
+        }, 32, "b128-s16-tau900")
+        with self.assertRaises(CampaignError):
+            require_compiled_profile({"kv_value_group": 32, "xattention_qualification": False},
+                                     16, "dense")
+
+    def test_summary_retains_one_canonical_weights_id(self) -> None:
+        records = [{"weights_id": "fixture-weights", "metrics": {}}]
+        row = summary_row(
             "context_profile",
-            "qwen3_6_27b",
+            "qwen3_8_27b_r9700",
             "fixture",
             "fixture",
             "mtp0",
             "greedy",
-            [*records, {"weights_id": "groupwise-int", "metrics": {}}],
+            records,
         )
+        self.assertEqual(row["weights_id"], "fixture-weights")
+
+        with self.assertRaises(CampaignError):
+            summary_row(
+                "context_profile",
+                "qwen3_8_27b_r9700",
+                "fixture",
+                "fixture",
+                "mtp0",
+                "greedy",
+                [*records, {"weights_id": "different-fixture-weights", "metrics": {}}],
+            )
+
+    def test_serve_corpus_rejects_stale_dense_profile_identity(self) -> None:
+        require_compiled_profile({"kv_value_group": 16, "xattention_qualification": False}, 16,
+                                 "dense")
+        with self.assertRaisesRegex(CampaignError, "selected dense"):
+            require_compiled_profile({"kv_value_group": 16, "xattention_qualification": True},
+                                     16, "dense")
+        with self.assertRaisesRegex(CampaignError, "selected dense"):
+            require_compiled_profile({"kv_value_group": 16, "xattention_qualification": 0},
+                                     16, "dense")
+        with self.assertRaisesRegex(CampaignError, "retains XAttention"):
+            require_compiled_profile({
+                "kv_value_group": 16,
+                "xattention_qualification": False,
+                "xattention_profile": "b128-s16-tau900",
+            }, 16, "dense")
+
+
+if __name__ == "__main__":
+    unittest.main()

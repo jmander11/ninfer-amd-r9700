@@ -1,0 +1,35 @@
+{
+  "artifact_type": "ninfer_r9700_benchmark_reporting_source_review",
+  "schema_version": 1,
+  "status": "reporting_only",
+  "scope": "serial_lane_phase_reporting_only",
+  "model_runtime_changed": false,
+  "arithmetic_changed": false,
+  "kernel_or_recipe_changed": false,
+  "base_source_review": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921/source-review-accounted.json",
+    "sha256": "156231e18c516accb538984fcfa740bd5ca7f02bde0b39255c8e1ee823da6015"
+  },
+  "sources": [
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/targets/qwen3_8_27b/ninfer_bench.cpp",
+      "sha256": "e73cf691a52eb002bf891662e024a9b0402e42ae9dfc195ebbc39b57834168ee"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/targets/qwen3_8_27b/ninfer_bench_support.h",
+      "sha256": "7250eb826618713a15c0b592399f8b299c1145dac366afd12ccaa9ac29d84532"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/targets/qwen3_8_27b/ninfer_bench_support.cpp",
+      "sha256": "f98414fd71a030ec1efa8b2e9d396d089134aa229bad8be87983dcd35df288fe"
+    }
+  ],
+  "reviewer": "root independent review of reporter change and fresh compile profiles",
+  "implementation_commit": "5eff7490",
+  "findings": [
+    "Serial lane prepare, vision and prefill service times sum; batched decode remains max; whole elapsed wall measurement is unchanged.",
+    "Source/runtime comparison against accounted implementation 0c7c1759 shows only subsequently added XAttention tracing behind NINFER_R9700_XATTENTION_KEEP_DIAGNOSTIC; this macro is absent in all four matching production build configurations. No active model arithmetic, kernel, cache, artifact recipe or device allocation changed.",
+    "All four fresh benchmark/planner/support-test builds complete; CTest ninfer_bench_support_test passes in each, including unequal-lane aggregate throughput and unchanged whole-wall checks.",
+    "Schema20 concurrent prefill metrics are not reused as aggregate throughput. Existing capacity, chunk and numerical evidence remains applicable."
+  ]
+}

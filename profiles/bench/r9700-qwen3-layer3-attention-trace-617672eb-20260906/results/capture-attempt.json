@@ -1,0 +1,10 @@
+{
+  "artifact_type": "ninfer_qwen3_layer3_attention_trace_capture_attempt",
+  "schema_version": 1,
+  "status": "complete_raw_capture_offline_analysis_stopped",
+  "gpu_rerun_required": false,
+  "raw_capture_closure": {"path":"capture-result.sha256","bytes":1840,"sha256":"815307ab0a04a6e834eb19cc670c75e6d1f2c4c60c693f8861d0e7fb0b8eb79f"},
+  "offline_failure": "layer-boundary comparator received a tuple with width/frontier/token fields in the wrong order",
+  "raw_capture_mutated": false,
+  "recovery": "repair the package analyzer, validate existing raw captures, then publish summary and a new result closure"
+}

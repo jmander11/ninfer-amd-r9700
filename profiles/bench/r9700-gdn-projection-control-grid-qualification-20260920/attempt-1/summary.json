@@ -1,0 +1,16 @@
+{
+  "status": "completed",
+  "disposition": "admitted",
+  "production_routing_authorized": false,
+  "whole_ab_preparation_authorized": true,
+  "control_median_ms": 0.17841950058937073,
+  "candidate_median_ms": 0.17215950042009354,
+  "saved_ms_per_token_48_layers": 0.3004800081253052,
+  "ratio_mean_plus_2se": 0.9880624398555556,
+  "allocation_median_ratios": [
+    0.9670971325598395,
+    0.9619785224731897,
+    0.9626596875968999
+  ],
+  "minimum_saved_ms_per_token": 0.2
+}

@@ -2,6 +2,7 @@
 #include "serve/console_log.h"
 #include "serve/generation_service.h"
 #include "serve/http_server.h"
+#include "serve/request_log.h"
 #include "serve/serve_options.h"
 
 #include <atomic>
@@ -55,7 +56,16 @@ int main(int argc, char** argv) {
             return 1;
         }
 
+        if (options.sampling_overrides.p_less) {
+            ninfer::serve::write_console_log(ninfer::serve::ConsoleLogLevel::Warning,
+                                             ninfer::kPLessSamplingIgnoredParamsWarning);
+        }
+
         ninfer::serve::write_console_log(ninfer::serve::ConsoleLogLevel::Info, "loading model...");
+        if (!options.generation_recovery) {
+            ninfer::serve::write_console_log(ninfer::serve::ConsoleLogLevel::Warning,
+                "generation recovery disabled: no cycle exclusions or internal retries; tool grammar remains enabled");
+        }
         auto load_progress_options        = ninfer::product::stderr_load_progress_options();
         load_progress_options.line_prefix = [] {
             return ninfer::serve::current_console_log_prefix(ninfer::serve::ConsoleLogLevel::Info);
@@ -83,12 +93,25 @@ int main(int argc, char** argv) {
                  << " free-after-startup=" << format_bytes(memory.available_after_startup_bytes)
                  << " headroom=" << format_bytes(memory.kv_capacity_headroom_bytes)
                  << " slack=" << format_bytes(memory.planned_slack_bytes)
-                 << " graphs=" << format_bytes(memory.cuda_graph_observed_bytes) << '/'
-                 << format_bytes(memory.cuda_graph_allowance_bytes);
+                 << " graphs=" << format_bytes(memory.device_graph_observed_bytes) << '/'
+                 << format_bytes(memory.device_graph_allowance_bytes)
+                 << " kv-ram=" << ninfer::serve::format_kv_ram_occupancy(memory)
+                 << " kv-disk=" << ninfer::serve::format_kv_disk_occupancy(memory);
         ninfer::serve::write_console_log(ninfer::serve::ConsoleLogLevel::Info, capacity.str());
 
         ninfer::serve::write_console_log(ninfer::serve::ConsoleLogLevel::Info, "warming up...");
         service.warmup();
+        const ninfer::MemorySummary warmed = service.memory_summary();
+        if (warmed.kv_ram_capacity_bytes != 0) {
+            std::ostringstream ram;
+            ram << "kv-ram=" << ninfer::serve::format_kv_ram_occupancy(warmed);
+            ninfer::serve::write_console_log(ninfer::serve::ConsoleLogLevel::Info, ram.str());
+        }
+        if (warmed.kv_disk_capacity_bytes != 0) {
+            std::ostringstream disk;
+            disk << "kv-disk=" << ninfer::serve::format_kv_disk_occupancy(warmed);
+            ninfer::serve::write_console_log(ninfer::serve::ConsoleLogLevel::Info, disk.str());
+        }
 
         g_server.store(&server);
         std::signal(SIGINT, handle_signal);

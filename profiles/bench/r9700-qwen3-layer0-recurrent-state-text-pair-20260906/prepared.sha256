@@ -1,0 +1,8 @@
+ba4a663bae8ade4308068a9df549b103be195f30f9c5f7e320acb4f4e4dc439d  profiles/bench/r9700-qwen3-layer0-recurrent-state-text-pair-20260906/analyze.py
+b21117aad7714dc1b8b828e72f3a4632124c75f1fa7669dd72863e0b5f1a3bae  profiles/bench/r9700-qwen3-layer0-recurrent-state-text-pair-20260906/build-provenance.json
+fa589fc6021e84fb6580a651c1ec459aec72a87f848a45afbbec769dfecd25ac  profiles/bench/r9700-qwen3-layer0-recurrent-state-text-pair-20260906/capture-provenance.json
+c4818a29102a0f436a2db4773178910a25e682b19ca7166c797214ada4f73696  profiles/bench/r9700-qwen3-layer0-recurrent-state-text-pair-20260906/commands.sh
+f457cfac3cab3d694c4de4c36dbe3ce2b613f5fd293cb0b32d80373c37833d86  profiles/bench/r9700-qwen3-layer0-recurrent-state-text-pair-20260906/plan.json
+f36b75bf00daad9dcf3228f3ae4df553b4809ba123f1e33e5656c2472a0f315f  profiles/bench/r9700-qwen3-layer0-recurrent-state-text-pair-20260906/retained-bin/ninfer_bench
+1c50035bb1d46860c3034493831a0a38850dbc6b0111e6b1db823a10ed2d9c69  profiles/bench/r9700-qwen3-layer0-recurrent-state-text-pair-20260906/run.py
+6e786bab93e18b0e051f7bce2563fc78d29387c3c7b4aed009b840f61a4eaf5b  profiles/bench/r9700-qwen3-layer0-recurrent-state-text-pair-20260906/test_analyze.py

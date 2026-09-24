@@ -1,0 +1,92 @@
+{
+  "artifact_type": "ninfer_r9700_chunk_campaign_inputs",
+  "schema_version": 1,
+  "python": "/home/battlefront/.local/bin/python3.11",
+  "artifacts": [
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer",
+      "bytes": 15172833280,
+      "sha256": "60719c5d5bfe978376c7de94db460bcd82d965ec447870cc47f0a02bf8d59953",
+      "model_id": "qwen3.8-27b",
+      "weights_id": "r9700-q4g64-n16k16-eval",
+      "conversion_receipt": {
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer.conversion.json",
+        "sha256": "a8567a6b25176aac1f2106bcac3131b74d887e1a5be2c98da23c38a3a7870e54",
+        "recipe_id": "r9700-all-q4g64-n16k16-eval-v1",
+        "object_plan_sha256": "bff624cbfda357d7c8b355530824682b1625c68c1f909ddb8b4241c2b3d21ec6",
+        "source_artifact_sha256": "19d029a89c1ef1cf87420067555021a7c7b435c31a92bea7c64ccf42c03d80e9",
+        "source_receipt_sha256": "aa6861cc31c7db6aa06335b111507f4802d702c6e83ef8fc96c0714b9dc477f9",
+        "transcoder_sha256": "e988d0ecc7d20a12728aa8313a71221eeea9c30dfff5d998020a826baab52801",
+        "receipt_producer_sha256": "3fb4f58e376e5c8dbd333f06ef146796410eb7829de4130c408d8adc5a615d64"
+      }
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4-w8-mse-n16k16-eval.ninfer",
+      "bytes": 22881204736,
+      "sha256": "b021b71f70790215ccd9a287195c69b94f7c5ebf9ac0b9bb90bd62c3f09b3bcc",
+      "model_id": "qwen3.8-27b",
+      "weights_id": "r9700-q4-w8-mse-n16k16-eval",
+      "conversion_receipt": {
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4-w8-mse-n16k16-eval.ninfer.conversion.json",
+        "sha256": "1298ba51b2e80c225663814771a706afcbbe014e03f0bdefd4aa7dbf1cc8551c",
+        "recipe_id": "r9700-source-q4-n16k16-promoted-w8-source-mse8-eval-v1",
+        "object_plan_sha256": "14b80eb8a8200112169ef34bda4520d8b50233935bc9aa1c79f02b674ef36fb3",
+        "source_artifact_sha256": "8fbadf14e355b1943ef9386a91ebafff0d852295a9adc0054bdd430291505ebd",
+        "source_receipt_sha256": "5d9a30ec76ce9f557195d554a7f8d71ad803fb4af5b115f2f887b7622de66d89",
+        "transcoder_sha256": "e988d0ecc7d20a12728aa8313a71221eeea9c30dfff5d998020a826baab52801",
+        "receipt_producer_sha256": "3fb4f58e376e5c8dbd333f06ef146796410eb7829de4130c408d8adc5a615d64"
+      }
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer",
+      "bytes": 21553549312,
+      "sha256": "040c6e7ed29c856718a638c00181975710d987b7d5f49f4cafbdf68911f7e7d2",
+      "model_id": "qwen3.8-27b",
+      "weights_id": "r9700-q4g64-f8e4m3-four-role-n16k16-eval",
+      "conversion_receipt": {
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer.conversion.json",
+        "sha256": "2c5cb9f405ba581f685a96b1a2965ad3ff49b31280ebdd15d19158b6f4779c59",
+        "recipe_id": "r9700-q4g64-f8e4m3-four-role-n16k16-eval-v1",
+        "object_plan_sha256": "82692559ecd3293e68b3ea3e19df8b93b690d046bb764a476bf59178bd637227",
+        "source_artifact_sha256": "1dfe9626fd6412592f87480a2f6934e8494a4b267693a25831dff490959542ce",
+        "source_receipt_sha256": "a3bea3a6866b83bdb6ad9a382ca44b98ad009674c19a585d67ddb0f6a1ea9df7",
+        "transcoder_sha256": "e988d0ecc7d20a12728aa8313a71221eeea9c30dfff5d998020a826baab52801",
+        "selection_sha256": "b2ceeb63c581c0f26aab5a4d8c0958da34d836fcc5c47d377bce709eaf37e3e8",
+        "source_index_sha256": "77042094076611b69791a610065f28b7013b8c621795fa86ddccc8bac7d1b9df",
+        "source_ranking_sha256": "205b2d6c5b58d946c87b425578da13b5cfc32a0abe1ff201e95b47d032bf004e"
+      }
+    }
+  ],
+  "files": {
+    "profiles/bench/r9700-chunk-selection-receipt-bound-n16k16-20260921/campaign.py": "422fdbdda5148fb4a7cfb3ee1b26adc342712b730c5cfe9e9a6b5fbd11ba702b",
+    "profiles/bench/r9700-chunk-selection-receipt-bound-n16k16-20260921/commands.sh": "3f984fe716516d332c904122ea094b20937decdc064cca4d8a18ad21f92f3138",
+    "tools/bench/run_ninfer_bench_matrix.py": "d8416f3016df8c080a4869a5ce47a427e61bb3b8af1338ff5be59705f9240ae7",
+    "tools/bench/select_prefill_chunk.py": "f8bf1e032c617a8eba408bbb8aaf95526c58c5bc0068658be18773c9f42dbba5",
+    "tools/bench/matrix_contract.py": "126d167b36c72ac2ef212fdf1c9cf68992d57dbbc01026691d43aecfaecb8d22",
+    "tools/bench/prefill_chunk_authority.py": "7d01cf8b7308b4441f51c8a839d3a851bbd0aa3a85aac3b2baef90b1cf04704a",
+    "tools/ppl/run.py": "4468880998be4dd32718ccf0aa74a9c13d60c4c885a136c3db59071cf8c71fed",
+    "tools/bench/prepare_matrix_cell.py": "21352d65c7a712292293578ec95d267b22fee564a269429b14d8ba99490e0398",
+    "bench/fixtures/bench_corpus.ids": "27e4f63c17efe3f89b5cf278b3b1a42a737316ed4044d7d0d1d52437059d1002",
+    "bench/fixtures/bench_corpus.manifest.json": "2d212e77fe90057ecc4819159dcfa43766655a702fe3848f4dd4b76f433339f6",
+    "build-r9700-selection-dense-g16-20260921/bench/ninfer_bench": "a9ccdd970f04d4a6858c4b82612d75915ce867c081efb6171a7dd00a9d54a4c8",
+    "build-r9700-selection-dense-g16-20260921/apps/ninfer-ppl": "c223db8892079321803ed0ecbb612beb7cef0e68000f2f6bdf25e29828487b02",
+    "build-r9700-selection-dense-g16-20260921/src/ninfer_r9700_runtime_planner_qual": "cfccc5b562f7780aae4aa1aa5522ad000bcad65599f896fab71569a89f4c12c1",
+    "build-r9700-selection-dense-g16-20260921/CMakeCache.txt": "29a5e85e12ec76e2a6c769f0ab618ebd5ce61b48f8a42edb0643272cdca1515a",
+    "build-r9700-selection-dense-g16-20260921/compile_commands.json": "db280c36eb8e09d62679b7983a2ebd2f5b3cb687ed18823189575f6a4a84eb46",
+    "build-r9700-selection-xattention-g16-20260921/bench/ninfer_bench": "85a0ea5838400766c2173f09b85bc4cc6bbbcde6a34d838b00969dd8d7452cee",
+    "build-r9700-selection-xattention-g16-20260921/apps/ninfer-ppl": "c6a2bddb96bb98433a907b442f9d4549af796271e61a5815cb2302cf0f066721",
+    "build-r9700-selection-xattention-g16-20260921/src/ninfer_r9700_runtime_planner_qual": "5e33efade32ecc267b37fe7a6b51eac3369caac3d4a566bd8e219d4f12b9ab8f",
+    "build-r9700-selection-xattention-g16-20260921/CMakeCache.txt": "ed78c11e40fcafedbb5ad11d17462a525167125b3f5454ffb6912a81ae7dd563",
+    "build-r9700-selection-xattention-g16-20260921/compile_commands.json": "4664c6f5b37d3b0e32f9783a79bab6c46f91d7c0f5351d0c2620eaaea9eab8af",
+    "build-r9700-selection-dense-g32-20260921/bench/ninfer_bench": "68b0a4a0f966cd9af7ae6382391e24a1a7f72ff67019bc0b3bd48582a53db951",
+    "build-r9700-selection-dense-g32-20260921/apps/ninfer-ppl": "3e37798b1108428a0ef6c93a77eaadc128d55c85d2d5ce002519ca83148130a0",
+    "build-r9700-selection-dense-g32-20260921/src/ninfer_r9700_runtime_planner_qual": "27c852938a00d5751850a60a29973b555c180077d5e110c8faed29bb0a84f257",
+    "build-r9700-selection-dense-g32-20260921/CMakeCache.txt": "5f3e8ed1bd4f4db47f73d302067e1040c2b639cc9a89421cdd72085e83d7dd32",
+    "build-r9700-selection-dense-g32-20260921/compile_commands.json": "46beaac24a04e8bd3de0004857fc998bf1df83e41a25775e3bd43f8b95da84b1",
+    "build-r9700-selection-xattention-g32-20260921/bench/ninfer_bench": "ab1c7eb3a3c9a7412d3b153aaee0e6708b4d92f8ba163935b1774dadd86f2bf0",
+    "build-r9700-selection-xattention-g32-20260921/apps/ninfer-ppl": "faad19638e60d9a46033f9d810ef394b155cb14e33e7625728bd9cf131a8ff5c",
+    "build-r9700-selection-xattention-g32-20260921/src/ninfer_r9700_runtime_planner_qual": "5c72f93baabab640ae4d448abeed55349e3d8365ad1d62b4de1bb3b6cd8e60a1",
+    "build-r9700-selection-xattention-g32-20260921/CMakeCache.txt": "d31038ddecc48811a34ee9473cfb8ca8fe3ade4af0bef8ce97cb45239a62ce1d",
+    "build-r9700-selection-xattention-g32-20260921/compile_commands.json": "23aed150c502cbf3f6880bd5bfca69d459d65a096d495a4fe47f8ea06ad69dc0"
+  }
+}

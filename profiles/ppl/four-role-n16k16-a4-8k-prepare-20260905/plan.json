@@ -1,0 +1,73 @@
+{
+  "artifact_type": "ninfer_r9700_four_role_n16k16_a4_8k_numerical_first_plan",
+  "schema_version": 1,
+  "status": "prepared_not_executed",
+  "decision": "A4 changes the represented activation and must pass model quality before any new exact-shape performance qualifier",
+  "weights": {
+    "path": "out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer",
+    "weights_id": "r9700-q4g64-f8e4m3-four-role-n16k16-eval",
+    "sha256": "040c6e7ed29c856718a638c00181975710d987b7d5f49f4cafbdf68911f7e7d2",
+    "persistent_bytes_changed": false,
+    "new_artifact_required": false
+  },
+  "activation_profile": {
+    "q4_activation_bits": 4,
+    "w8_activation_bits": 8,
+    "boundary": "runtime BF16 input to signed A4G64 codes with FP16 max/7 scale for every Q4 Linear reached by the 4096-token prefill chunks",
+    "artifact_note": "activation codes/scales are transient caller-owned workspace; the existing N16/K16 artifact stores only logical Q4 weights and is shared unchanged"
+  },
+  "workload": {
+    "corpus": "tools/ppl/corpus.ids",
+    "corpus_sha256": "aa1ba6d9932a4bcefdfd1c395bde73911daeba083c6b45d353a421dcd1eae077",
+    "tokens": 8192,
+    "skip": "half",
+    "scored_positions": 4095,
+    "prefill_chunk": 4096,
+    "schedule": "prefill",
+    "spec": "none",
+    "attention": "dense",
+    "kv_value_group": 16,
+    "device": 0
+  },
+  "bf16_reference": {
+    "campaign": "profiles/ppl/bf16-reference-deterministic-pv-gdn-v3-a-20260904/results.json",
+    "campaign_sha256": "9b402ad02be0f27d80530bd1eba4ead7c0179c658aa9654d43ca5b0fb9ca41f0",
+    "repeat_proof": "profiles/ppl/bf16-reference-deterministic-pv-gdn-v3-repeat-comparison-20260904.json",
+    "repeat_proof_sha256": "9b13916a2a3ca8b8e5d01352f98a8306414f4e13a79989c19b1d1248d5eb00de",
+    "source": "/ssdpool2nvme/local_llm/models/qwen3.8-27b-bf16",
+    "source_availability": "all 18 named nonempty shards are locally present; the retained authority binds their individual SHA-256 values and deterministic execution provenance"
+  },
+  "candidate_scorer": {
+    "path": "build-r9700-a4q4-n16k16/apps/ninfer-ppl",
+    "sha256": "55e5dfb93f385f76f1a8d41b00f53e4790a72795f333ca6d70b170d4acf7fc38",
+    "cmake_cache_sha256": "ef9a6696a3d7202c6c1c07358e870436b899e754e063095a036f246a7048af68",
+    "configuration": {
+      "CMAKE_BUILD_TYPE": "Release",
+      "CMAKE_HIP_ARCHITECTURES": "gfx1201",
+      "NINFER_R9700_KV_VALUE_GROUP": 16,
+      "NINFER_R9700_Q4_ACTIVATION_BITS": 4,
+      "NINFER_R9700_FP8_QK_WMMA": 1,
+      "NINFER_R9700_XATTENTION_QUALIFICATION": false
+    }
+  },
+  "runner": {
+    "python": "/ssdpool2nvme/local_llm/.venv-ninfer-r9700/bin/python",
+    "observed_python_version": "3.12.3",
+    "note": "the selected project venv is used explicitly; no interpreter or dependency was installed"
+  },
+  "acceptance": {
+    "complete_finite_aligned_schema_v6_sidecars": true,
+    "mean_nll_delta_vs_bf16_maximum": 0.04879016416943205,
+    "new_nll_ge_10_positions_maximum": 11,
+    "bf16_argmax_identity": "diagnostic_only",
+    "pass_is_numerical_eligibility_only": true
+  },
+  "output": "profiles/ppl/four-role-n16k16-a4-8k-20260905",
+  "command": [
+    "bash",
+    "profiles/ppl/four-role-n16k16-a4-8k-prepare-20260905/run.sh",
+    "--execute-gpu-quality"
+  ],
+  "next_on_pass": "Only a pass permits construction of a distinct N16/K16 exact-P2048 A4 physical qualifier including the fused SiLU-to-A4 MLP-down boundary; no production admission follows from this PPL gate alone",
+  "next_on_failure": "A failure terminally rejects the A4 activation architecture without a physical qualifier"
+}

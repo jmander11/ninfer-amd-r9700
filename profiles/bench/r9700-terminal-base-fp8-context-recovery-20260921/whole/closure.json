@@ -1,0 +1,17 @@
+{
+  "artifact_type": "ninfer_r9700_whole_campaign_closure",
+  "schema_version": 1,
+  "status": "stopped_concurrent_prefill_reporting_defect",
+  "reason": "Schema20 divides C prompt token counts by max per-lane active prefill time, not total serial lane prefill service time. The C>1 prefill objective is not aggregate throughput.",
+  "completed_profile": "all_q4_dense-g16",
+  "completed_concurrency": [1, 2],
+  "interrupted_concurrency": 3,
+  "termination": "SIGINT to exclusively owned campaign process group; exit130",
+  "retained_valid_evidence": [
+    "C1 phase and whole measurements",
+    "C2 independently measured whole wall time and batched decode rate",
+    "C1/C2 public token sequences, exact across all three graph repetitions at both prompt lengths"
+  ],
+  "invalid_claim": "C2 reported prefill_tok_s is aggregate serial prefill throughput",
+  "recovery": "Correct benchmark phase aggregation and distinguish schema21 semantics. Preserve all raw outputs. Do not resume this whole stage or publish selection from its phase metrics. Completed chunk, quality, capacity and FP8 accounting proofs remain valid."
+}

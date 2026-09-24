@@ -1,0 +1,52 @@
+{
+  "rows": [
+    {
+      "concurrency": 2,
+      "draft_tokens": 0,
+      "exact_ordinary_tokens": true,
+      "aggregate_decode_tok_s": 47.408909664063245,
+      "per_request_decode_tok_s": 23.704454832031622,
+      "prefill_tok_s": 1516.3179210165981
+    },
+    {
+      "concurrency": 2,
+      "draft_tokens": 5,
+      "exact_ordinary_tokens": true,
+      "aggregate_decode_tok_s": 101.5587680871921,
+      "per_request_decode_tok_s": 50.77938404359605,
+      "prefill_tok_s": 1469.8768378714135
+    },
+    {
+      "concurrency": 3,
+      "draft_tokens": 0,
+      "exact_ordinary_tokens": true,
+      "aggregate_decode_tok_s": 67.18792193801734,
+      "per_request_decode_tok_s": 22.395973979339114,
+      "prefill_tok_s": 1508.861738015576
+    },
+    {
+      "concurrency": 3,
+      "draft_tokens": 5,
+      "exact_ordinary_tokens": true,
+      "aggregate_decode_tok_s": 120.1116973474596,
+      "per_request_decode_tok_s": 40.037232449153194,
+      "prefill_tok_s": 1465.0736075448947
+    },
+    {
+      "concurrency": 4,
+      "draft_tokens": 0,
+      "exact_ordinary_tokens": true,
+      "aggregate_decode_tok_s": 81.49944132777642,
+      "per_request_decode_tok_s": 20.374860331944106,
+      "prefill_tok_s": 1506.4252724862101
+    },
+    {
+      "concurrency": 4,
+      "draft_tokens": 5,
+      "exact_ordinary_tokens": true,
+      "aggregate_decode_tok_s": 125.35288109142434,
+      "per_request_decode_tok_s": 31.338220272856084,
+      "prefill_tok_s": 1466.537723055966
+    }
+  ]
+}

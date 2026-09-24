@@ -1,0 +1,14 @@
+{
+  "artifact_type": "ninfer_qwen3_layer1_gdn_detail_comparison",
+  "schema_version": 1,
+  "diagnostic_only": true,
+  "timing_evidence_eligible": false,
+  "production_routing_authorized": false,
+  "diagnostic": "target",
+  "classification": "layer1_gdn_boundaries_exact",
+  "first_difference": null,
+  "limitations": [
+    "captures one selected column and does not capture persistent convolution or recurrence state",
+    "the first differing field localizes a stage boundary, not necessarily the primitive operation"
+  ]
+}

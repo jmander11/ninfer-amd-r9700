@@ -1,13 +1,16 @@
 #include "serve/openai_schema.h"
 
 #include <array>
+#include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <limits>
 #include <random>
 #include <string>
+#include <string_view>
 
 namespace ninfer::serve {
 namespace {
@@ -477,7 +480,220 @@ Json tool_calls_json(const std::vector<ToolCall>& tool_calls, bool include_index
 
 std::string sse_event(const Json& payload) { return "data: " + payload.dump() + "\n\n"; }
 
+void append_json_string(std::string& out, std::string_view text) {
+    for (const unsigned char c : text) {
+        switch (c) {
+        case '"':
+            out += "\\\"";
+            break;
+        case '\\':
+            out += "\\\\";
+            break;
+        case '\b':
+            out += "\\b";
+            break;
+        case '\f':
+            out += "\\f";
+            break;
+        case '\n':
+            out += "\\n";
+            break;
+        case '\r':
+            out += "\\r";
+            break;
+        case '\t':
+            out += "\\t";
+            break;
+        default:
+            if (c < 0x20U) {
+                char buf[8];
+                std::snprintf(buf, sizeof(buf), "\\u%04x", c);
+                out += buf;
+            } else {
+                out.push_back(static_cast<char>(c));
+            }
+            break;
+        }
+    }
+}
+
+std::string make_delta_chunk(const std::string& id, const std::string& model, std::int64_t created,
+                             std::string_view delta_key, const std::string& delta_text,
+                             bool include_usage) {
+    std::string out;
+    out.reserve(128 + id.size() + model.size() + delta_text.size() * 2);
+    out += "data: {\"id\":\"";
+    append_json_string(out, id);
+    out += "\",\"object\":\"chat.completion.chunk\",\"created\":";
+    out += std::to_string(created);
+    out += ",\"model\":\"";
+    append_json_string(out, model);
+    out += "\",\"choices\":[{\"index\":0,\"delta\":{\"";
+    out += delta_key;
+    out += "\":\"";
+    append_json_string(out, delta_text);
+    out += "\"},\"finish_reason\":null}]";
+    if (include_usage) { out += ",\"usage\":null"; }
+    out += "}\n\n";
+    return out;
+}
+
+double json_decimal3(double value) { return std::round(value * 1000.0) / 1000.0; }
+
+const char* prefix_reuse_source_name(ninfer::PrefixReuseSource source) {
+    switch (source) {
+    case ninfer::PrefixReuseSource::None:
+        return "none";
+    case ninfer::PrefixReuseSource::VramResident:
+        return "vram_resident";
+    case ninfer::PrefixReuseSource::HostRam:
+        return "host_ram";
+    case ninfer::PrefixReuseSource::HostDisk:
+        return "host_disk";
+    }
+    return "unknown";
+}
+
+const char* prefix_reuse_path_name(ninfer::PrefixReusePath path) {
+    switch (path) {
+    case ninfer::PrefixReusePath::FullReset:
+        return "full_reset";
+    case ninfer::PrefixReusePath::AppendAtFrontier:
+        return "append_frontier";
+    case ninfer::PrefixReusePath::RestoreTurnCheckpoint:
+        return "restore_turn_checkpoint";
+    case ninfer::PrefixReusePath::RestoreResponseCheckpoint:
+        return "restore_response_checkpoint";
+    case ninfer::PrefixReusePath::RestoreContextCheckpoint:
+        return "restore_context_checkpoint";
+    case ninfer::PrefixReusePath::RestoreTurnRollback:
+        return "restore_turn_rollback";
+    }
+    return "unknown";
+}
+
+Json usage_to_json(const CompletionUsage& usage, const CompletionTimings* timings) {
+    Json out = {{"prompt_tokens", usage.prompt_tokens},
+                {"completion_tokens", usage.completion_tokens},
+                {"total_tokens", usage.prompt_tokens + usage.completion_tokens}};
+    if (timings == nullptr) { return out; }
+
+    // Downstream proxies normalize OpenAI usage (e.g. LiteLLM drops unknown top-level
+    // usage keys) but forward the standard details sub-objects, so every stat lives
+    // exactly once, here:
+//  - prompt_tokens_details: the OpenAI-standard `cached_tokens` plus engine stats
+    //    under the `ninfer` vendor namespace (ttft_ms, prefill/decode rates, reuse source,
+    //    prefix_reuse_path, context_checkpoint restored/captured head frontiers, KV RAM tier).
+    //  - completion_tokens_details: OpenAI-standard keys only, so they survive proxy
+    //    normalization (reasoning + speculative-decoding token breakdowns).
+    Json ptd = {{"cached_tokens", timings->prompt_reused_n}};
+    Json ninfer = {{"reuse_source", prefix_reuse_source_name(timings->prefix_reuse_source)},
+                   {"prefix_reuse_path", prefix_reuse_path_name(timings->prefix_reuse_path)},
+                   {"context_checkpoint",
+                    {{"restored_tokens",
+                      static_cast<int>(timings->restored_context_checkpoint_tokens)},
+                     {"captured_tokens",
+                      static_cast<int>(timings->captured_context_checkpoint_tokens)}}},
+                   {"ttft_ms", json_decimal3(timings->ttft_ms)},
+                   {"prefill",
+                    {{"tokens", prefill_eval_tokens(timings->prompt_n, timings->prompt_reused_n)},
+                     {"ms", json_decimal3(timings->prompt_ms)},
+                     {"tok_s", json_decimal3(timings->prompt_per_second)},
+                     {"ms_per_token", json_decimal3(timings->prompt_per_token_ms)},
+                     {"tail_tok_s", json_decimal3(timings->prefill_tail_tok_s)},
+                     {"tail_window_s", json_decimal3(timings->prefill_tail_window_s)}}},
+                   {"decode",
+                    {{"tokens", timings->predicted_n},
+                     {"ms", json_decimal3(timings->predicted_ms)},
+                     {"tok_s", json_decimal3(timings->predicted_per_second)},
+                     {"ms_per_token", json_decimal3(timings->predicted_per_token_ms)}}}};
+    if (timings->recovery.discarded_tool_calls != 0 ||
+        timings->recovery.discarded_reasoning_tokens != 0) {
+        const auto& recovery = timings->recovery;
+        ninfer["recovery"] = {{"attempts", recovery.attempts},
+                              {"discarded_tool_calls", recovery.discarded_tool_calls},
+                              {"discarded_reasoning_tokens", recovery.discarded_reasoning_tokens},
+                              {"prefill_tokens", recovery.prefill_tokens},
+                              {"prefill_samples", recovery.prefill_samples},
+                              {"prepare_ms", json_decimal3(recovery.prepare_seconds * 1000.0)},
+                              {"prefill_ms", json_decimal3(recovery.prefill_seconds * 1000.0)}};
+    }
+    if (timings->kv_ram_capacity_bytes != 0) {
+        // Host KV RAM tier: live engine-wide gauges at request end, this request's
+        // D2H/H2D copy time, and engine-lifetime cumulative counters.
+        ninfer["kv_ram"] = {{"used_bytes", timings->kv_ram_used_bytes},
+                            {"entry_count", timings->kv_ram_entry_count},
+                            {"save_ms", json_decimal3(timings->kv_ram_save_ms)},
+                            {"load_ms", json_decimal3(timings->kv_ram_load_ms)},
+                            {"lifetime",
+                             {{"captures", timings->kv_ram_captures},
+                              {"restores", timings->kv_ram_restores},
+                              {"evictions", timings->kv_ram_evictions},
+                              {"drops", timings->kv_ram_drops}}}};
+    }
+    if (timings->kv_disk_capacity_bytes != 0) {
+        // Host KV disk tier: live gauges, this request's SSD-to-host restore wall,
+        // post-disk H2D wall, and engine-lifetime cumulative counters.
+        ninfer["kv_disk"] = {{"used_bytes", timings->kv_disk_used_bytes},
+                             {"entry_count", timings->kv_disk_entry_count},
+                             {"save_ms", json_decimal3(timings->kv_disk_save_ms)},
+                             {"load_ms", json_decimal3(timings->kv_disk_load_ms)},
+                             {"h2d_ms", json_decimal3(timings->kv_disk_h2d_ms)},
+                             {"lifetime",
+                              {{"captures", timings->kv_disk_captures},
+                               {"restores", timings->kv_disk_restores},
+                               {"evictions", timings->kv_disk_evictions},
+                               {"drops", timings->kv_disk_drops}}}};
+    }
+    ptd["ninfer"] = std::move(ninfer);
+    out["prompt_tokens_details"] = std::move(ptd);
+
+    Json ctd = {{"reasoning_tokens", timings->reasoning_tokens}};
+    if (timings->draft_n > 0) {
+        ctd["accepted_prediction_tokens"] = timings->draft_n_accepted;
+        ctd["rejected_prediction_tokens"] = std::max(0, timings->draft_n - timings->draft_n_accepted);
+    }
+    out["completion_tokens_details"] = std::move(ctd);
+    return out;
+}
+
 } // namespace
+
+CompletionTimings make_completion_timings(int prompt_tokens, int completion_tokens,
+                                           double prefill_seconds, double decode_seconds,
+                                           int draft_n, int draft_n_accepted,
+                                           double prefill_tail_tok_s,
+                                           double prefill_tail_window_s, int prompt_reused,
+                                           const ninfer::GenerationRecoveryStats& recovery) {
+    CompletionTimings out;
+    out.recovery = recovery;
+    out.prompt_n            = prompt_tokens;
+    out.prompt_reused_n     = std::max(0, std::min(prompt_reused, prompt_tokens));
+    out.prompt_ms           = prefill_seconds * 1000.0;
+    // Prefill rates cover the computed (non-reused) suffix only: a cached prefix is
+    // not re-prefilled, so counting it would inflate the rate by the reuse ratio.
+    const int computed_prompt_tokens = prefill_eval_tokens(prompt_tokens, out.prompt_reused_n);
+    out.prompt_per_token_ms =
+        computed_prompt_tokens > 0 ? out.prompt_ms / computed_prompt_tokens : 0.0;
+    out.prompt_per_second =
+        prefill_seconds > 0.0 && computed_prompt_tokens > 0
+            ? static_cast<double>(computed_prompt_tokens) / prefill_seconds
+            : 0.0;
+    out.prefill_tail_tok_s    = prefill_tail_tok_s;
+    out.prefill_tail_window_s = prefill_tail_window_s;
+    // First completion token is sampled during prefill; decode.ms is later rounds only.
+    const int decode_tokens = decode_eval_tokens(completion_tokens, recovery.prefill_samples);
+    out.predicted_n  = decode_tokens;
+    out.predicted_ms = decode_seconds * 1000.0;
+    out.predicted_per_token_ms =
+        decode_tokens > 0 ? out.predicted_ms / static_cast<double>(decode_tokens) : 0.0;
+    out.predicted_per_second = decode_seconds > 0.0 && decode_tokens > 0
+                                   ? static_cast<double>(decode_tokens) / decode_seconds
+                                   : 0.0;
+    out.draft_n          = draft_n;
+    out.draft_n_accepted = draft_n_accepted;
+    return out;
+}
 
 std::optional<bool> parse_openai_preserve_thinking(const Json& body) {
     std::optional<bool> top_level;
@@ -495,7 +711,10 @@ std::optional<bool> parse_openai_preserve_thinking(const Json& body) {
             bad_request("chat_template_kwargs must be an object", "chat_template_kwargs");
         }
         for (auto it = kwargs.begin(); it != kwargs.end(); ++it) {
-            if (it.key() != "preserve_thinking" && !it.value().is_null()) {
+            // LiteLLM / Open WebUI commonly nest enable_thinking here (llama.cpp style).
+            // NInfer's native field is top-level enable_thinking; both are accepted.
+            if (it.key() != "preserve_thinking" && it.key() != "enable_thinking" &&
+                !it.value().is_null()) {
                 bad_request("chat_template_kwargs." + it.key() + " is not supported",
                             "chat_template_kwargs", "chat_template_option_not_supported");
             }
@@ -516,6 +735,34 @@ std::optional<bool> parse_openai_preserve_thinking(const Json& body) {
     return template_value ? template_value : top_level;
 }
 
+std::optional<bool> parse_openai_enable_thinking(const Json& body) {
+    std::optional<bool> top_level;
+    if (body.contains("enable_thinking") && !body.at("enable_thinking").is_null()) {
+        if (!body.at("enable_thinking").is_boolean()) {
+            bad_request("enable_thinking must be a boolean or null", "enable_thinking");
+        }
+        top_level = body.at("enable_thinking").get<bool>();
+    }
+
+    std::optional<bool> template_value;
+    if (body.contains("chat_template_kwargs") && body.at("chat_template_kwargs").is_object()) {
+        const Json& kwargs = body.at("chat_template_kwargs");
+        if (kwargs.contains("enable_thinking") && !kwargs.at("enable_thinking").is_null()) {
+            if (!kwargs.at("enable_thinking").is_boolean()) {
+                bad_request("chat_template_kwargs.enable_thinking must be a boolean or null",
+                            "chat_template_kwargs");
+            }
+            template_value = kwargs.at("enable_thinking").get<bool>();
+        }
+    }
+
+    if (top_level && template_value && *top_level != *template_value) {
+        bad_request("conflicting enable_thinking values", "enable_thinking",
+                    "conflicting_template_option");
+    }
+    return template_value ? template_value : top_level;
+}
+
 void parse_openai_reasoning_effort(const Json& body, GenerationRequest& out) {
     if (!body.contains("reasoning_effort") || body.at("reasoning_effort").is_null()) { return; }
     if (!body.at("reasoning_effort").is_string()) {
@@ -530,6 +777,21 @@ void parse_openai_reasoning_effort(const Json& body, GenerationRequest& out) {
     }
     out.reasoning_effort       = *effort;
     out.reasoning_effort_param = "reasoning_effort";
+}
+
+void apply_ninfer_object(const Json& ninfer, GenerationRequest& out) {
+    if (!ninfer.is_object()) { bad_request("ninfer must be an object", "ninfer"); }
+    for (auto it = ninfer.begin(); it != ninfer.end(); ++it) {
+        if (it.key() != "capture_context_checkpoint") {
+            bad_request("ninfer." + it.key() + " is not supported", "ninfer",
+                        "ninfer_option_not_supported");
+        }
+    }
+    if (!ninfer.contains("capture_context_checkpoint")) { return; }
+    if (!ninfer.at("capture_context_checkpoint").is_boolean()) {
+        bad_request("ninfer.capture_context_checkpoint must be a boolean", "ninfer");
+    }
+    out.capture_context_checkpoint = ninfer.at("capture_context_checkpoint").get<bool>();
 }
 
 GenerationRequest parse_chat_completion_request(const Json& body, const RequestLimits& limits) {
@@ -553,11 +815,12 @@ GenerationRequest parse_chat_completion_request(const Json& body, const RequestL
     if (body.contains("stream_options") && body.at("stream_options").is_object()) {
         out.include_usage = get_bool(body.at("stream_options"), "include_usage", false);
     }
-    if (body.contains("enable_thinking") && !body.at("enable_thinking").is_null()) {
-        out.enable_thinking = get_bool(body, "enable_thinking", false);
+    if (const std::optional<bool> enable_thinking = parse_openai_enable_thinking(body)) {
+        out.enable_thinking = *enable_thinking;
     }
     parse_openai_reasoning_effort(body, out);
     out.preserve_thinking = parse_openai_preserve_thinking(body);
+    if (body.contains("ninfer")) { apply_ninfer_object(body.at("ninfer"), out); }
 
     std::optional<int> max_tokens = get_int(body, "max_completion_tokens");
     if (!max_tokens) { max_tokens = get_int(body, "max_tokens"); }
@@ -575,10 +838,11 @@ GenerationRequest parse_chat_completion_request(const Json& body, const RequestL
 std::string make_chat_completion_response(const std::string& id, const std::string& model,
                                           std::int64_t created, const std::string& content,
                                           const std::string& reasoning, const char* finish_reason,
-                                          const CompletionUsage& usage) {
+                                          const CompletionUsage& usage,
+                                          const CompletionTimings* timings) {
     Json message = {{"role", "assistant"}, {"content", content}};
     if (!reasoning.empty()) { message["reasoning_content"] = reasoning; }
-    const Json payload = {
+    Json payload = {
         {"id", id},
         {"object", "chat.completion"},
         {"created", created},
@@ -586,9 +850,7 @@ std::string make_chat_completion_response(const std::string& id, const std::stri
         {"choices",
          Json::array({Json{
              {"index", 0}, {"message", std::move(message)}, {"finish_reason", finish_reason}}})},
-        {"usage", Json{{"prompt_tokens", usage.prompt_tokens},
-                       {"completion_tokens", usage.completion_tokens},
-                       {"total_tokens", usage.prompt_tokens + usage.completion_tokens}}}};
+         {"usage", usage_to_json(usage, timings)}};
     return payload.dump();
 }
 
@@ -596,12 +858,13 @@ std::string make_chat_completion_tool_response(const std::string& id, const std:
                                                std::int64_t created, const std::string& content,
                                                const std::string& reasoning,
                                                const std::vector<ToolCall>& tool_calls,
-                                               const CompletionUsage& usage) {
+                                               const CompletionUsage& usage,
+                                               const CompletionTimings* timings) {
     Json message = {{"role", "assistant"},
                     {"content", content.empty() ? Json(nullptr) : Json(content)},
                     {"tool_calls", tool_calls_json(tool_calls, false)}};
     if (!reasoning.empty()) { message["reasoning_content"] = reasoning; }
-    const Json payload = {
+    Json payload = {
         {"id", id},
         {"object", "chat.completion"},
         {"created", created},
@@ -609,9 +872,7 @@ std::string make_chat_completion_tool_response(const std::string& id, const std:
         {"choices",
          Json::array({Json{
              {"index", 0}, {"message", std::move(message)}, {"finish_reason", "tool_calls"}}})},
-        {"usage", Json{{"prompt_tokens", usage.prompt_tokens},
-                       {"completion_tokens", usage.completion_tokens},
-                       {"total_tokens", usage.prompt_tokens + usage.completion_tokens}}}};
+         {"usage", usage_to_json(usage, timings)}};
     return payload.dump();
 }
 
@@ -628,22 +889,13 @@ std::string make_chat_chunk_role(const std::string& id, const std::string& model
 std::string make_chat_chunk_reasoning(const std::string& id, const std::string& model,
                                       std::int64_t created, const std::string& delta_text,
                                       bool include_usage) {
-    Json payload       = base_chunk(id, model, created);
-    payload["choices"] = Json::array({Json{{"index", 0},
-                                           {"delta", Json{{"reasoning_content", delta_text}}},
-                                           {"finish_reason", nullptr}}});
-    if (include_usage) { payload["usage"] = nullptr; }
-    return sse_event(payload);
+    return make_delta_chunk(id, model, created, "reasoning_content", delta_text, include_usage);
 }
 
 std::string make_chat_chunk_content(const std::string& id, const std::string& model,
                                     std::int64_t created, const std::string& delta_text,
                                     bool include_usage) {
-    Json payload       = base_chunk(id, model, created);
-    payload["choices"] = Json::array(
-        {Json{{"index", 0}, {"delta", Json{{"content", delta_text}}}, {"finish_reason", nullptr}}});
-    if (include_usage) { payload["usage"] = nullptr; }
-    return sse_event(payload);
+    return make_delta_chunk(id, model, created, "content", delta_text, include_usage);
 }
 
 std::string make_chat_chunk_tool_calls(const std::string& id, const std::string& model,
@@ -661,21 +913,28 @@ std::string make_chat_chunk_tool_calls(const std::string& id, const std::string&
 
 std::string make_chat_chunk_final(const std::string& id, const std::string& model,
                                   std::int64_t created, const char* finish_reason,
-                                  bool include_usage) {
+                                  bool include_usage, const CompletionTimings* timings,
+                                  const CompletionUsage* usage) {
     Json payload       = base_chunk(id, model, created);
     payload["choices"] = Json::array(
         {Json{{"index", 0}, {"delta", Json::object()}, {"finish_reason", finish_reason}}});
-    if (include_usage) { payload["usage"] = nullptr; }
+    // Prefer attaching real usage on the finish chunk. LiteLLM strips mid-stream
+    // usage from the wire but keeps it on the in-memory chunk list, then rebuilds
+    // the final usage object from those stored chunks.
+    if (usage != nullptr) {
+        payload["usage"] = usage_to_json(*usage, timings);
+    } else if (include_usage) {
+        payload["usage"] = nullptr;
+    }
     return sse_event(payload);
 }
 
 std::string make_chat_chunk_usage(const std::string& id, const std::string& model,
-                                  std::int64_t created, const CompletionUsage& usage) {
+                                  std::int64_t created, const CompletionUsage& usage,
+                                  const CompletionTimings* timings) {
     Json payload       = base_chunk(id, model, created);
     payload["choices"] = Json::array();
-    payload["usage"]   = Json{{"prompt_tokens", usage.prompt_tokens},
-                              {"completion_tokens", usage.completion_tokens},
-                              {"total_tokens", usage.prompt_tokens + usage.completion_tokens}};
+    payload["usage"]   = usage_to_json(usage, timings);
     return sse_event(payload);
 }
 

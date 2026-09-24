@@ -1,0 +1,21 @@
+{
+  "status": "stopped_unaccounted_fp8_library_allocation",
+  "stage_exit_code": 130,
+  "reusable_completed_profiles": [
+    "all_q4_dense-g16", "all_q4_dense-g32",
+    "all_q4_xattention-g16", "all_q4_xattention-g32",
+    "mixed_dense-g16", "mixed_dense-g32",
+    "mixed_xattention-g16", "mixed_xattention-g32"
+  ],
+  "completed_concurrency_per_reusable_profile": [1, 2, 3, 4],
+  "failure": "Four-role C2+ failed with an unstructured hipBLASLt out-of-memory error during startup. This is not a validated capacity exclusion.",
+  "diagnostic_profile": "four_role_dense-g16",
+  "diagnostic_concurrency": 1,
+  "planned_slack_bytes": 5244103936,
+  "available_after_startup_bytes": 1314914304,
+  "unaccounted_startup_difference_bytes": 3929189632,
+  "source_finding": "The 144 selected FP8 LinearExecution objects each create a library handle after the authoritative free-memory snapshot and Program arena allocation.",
+  "interrupted_profile": "four_role_xattention-g32",
+  "interrupted_concurrency": 2,
+  "decision": "Preserve all successful, failed and partial outputs. Repair shared library-resource ownership and startup accounting, then use a fresh reviewed recovery package. Do not resume this namespace, reinterpret these errors as capacity exclusions, or launch its whole/select stages."
+}

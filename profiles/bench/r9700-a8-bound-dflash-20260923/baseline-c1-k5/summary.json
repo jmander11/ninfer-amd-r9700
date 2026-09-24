@@ -1,0 +1,40 @@
+{
+  "concurrency": 1,
+  "max_draft": 5,
+  "adaptive": false,
+  "aggregate_decode_tok_s": 95.97271582064664,
+  "repetition_rates": [
+    94.65814744720073,
+    96.05069483635442,
+    95.97271582064664
+  ],
+  "per_request_tok_s": 95.97271582064664,
+  "request_lane_rounds_per_draft": [
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      25
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      25
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      25
+    ]
+  ],
+  "all_repetitions_exact_ordinary": true,
+  "resources": "scope counters not retained; completed measurement recovered without retiming"
+}

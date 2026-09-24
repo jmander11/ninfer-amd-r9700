@@ -61,7 +61,7 @@ Select evidence according to the claim being made:
 - floating-point operators require an independent FP32 or FP64 mathematical oracle and a justified
   numerical criterion;
 - stateful behavior requires verification of the complete affected state transition;
-- CUDA changes require relevant supported shapes and execution routes;
+- HIP kernel changes require the supported gfx1201 shapes and execution routes;
 - operator-level performance claims require direct operator measurements;
 - end-to-end performance claims require end-to-end measurements; and
 - CLI or serving changes require the affected observable behavior, schema tests, and documentation

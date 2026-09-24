@@ -1,0 +1,157 @@
+{
+  "artifact": {
+    "file_size_bytes": 21553549312,
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer",
+    "sha256": "040c6e7ed29c856718a638c00181975710d987b7d5f49f4cafbdf68911f7e7d2",
+    "weights_id": "r9700-q4g64-f8e4m3-four-role-n16k16-eval"
+  },
+  "artifact_type": "ninfer_r9700_retained_prefill_trace_plan",
+  "analyzer": {
+    "file_size_bytes": 34541,
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/bench/analyze_retained_prefill_trace.py",
+    "sha256": "8b02f8bb10173afb98d8e719ad25bac3a8c54ed81b54d1e28ceb08111e0c6a3c"
+  },
+  "benchmark_command": [
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-rmsnorm-production-final-20260906/bench/ninfer_bench",
+    "--weights",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer",
+    "--corpus",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids",
+    "--device",
+    "0",
+    "--concurrency",
+    "1",
+    "-p",
+    "2048",
+    "--prefill-chunk",
+    "4096",
+    "--draft-tokens",
+    "0",
+    "--output",
+    "json",
+    "--output-file",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/rocprof/r9700-retained-production-p2048-trace-plan-20260906/benchmark-report.json",
+    "-r",
+    "1",
+    "--warmup",
+    "1",
+    "--profile-measured"
+  ],
+  "benchmark_executable": {
+    "file_size_bytes": 4982648,
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-rmsnorm-production-final-20260906/bench/ninfer_bench",
+    "sha256": "a7c9303bd213fa3dbdb29ca0cee73addef1de8ab6a6e6b231509e25239776425"
+  },
+  "claims": {
+    "admissible": "selected-region dispatch inventory and stage/operator service attribution for the exact retained-production P2048 route",
+    "not_admissible": "profiled throughput, physical memory bandwidth, peak utilization, causal stall attribution, or proof of practical-ceiling closure"
+  },
+  "corpus": {
+    "file_size_bytes": 333620,
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids",
+    "sha256": "27e4f63c17efe3f89b5cf278b3b1a42a737316ed4044d7d0d1d52437059d1002"
+  },
+  "commands": {
+    "file_size_bytes": 2684,
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/rocprof/r9700-retained-production-p2048-trace-plan-20260906/commands.sh",
+    "sha256": "4e77b0386252cbdff97180fa34921fd0e45c793d0dc2d0dcb439371977203188"
+  },
+  "legacy_analyzer": {
+    "file_size_bytes": 20055,
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/bench/analyze_whole_profile.py",
+    "sha256": "3df20e4ffe8bb1a8a7cdb228088cd180330a7829d02720a8c2e5f8a366a855a1"
+  },
+  "limitations": [
+    "The retained 1904.339303 tok/s unprofiled authority owns throughput; rocprof durations are attribution-only.",
+    "ROCTX association owns stage attribution; kernel symbols classify operators but do not infer a missing stage marker.",
+    "At most 112 known short runtime fill/copy dispatches may have an empty ROCTX region; they are surfaced and make stage attribution incomplete.",
+    "The trace has no hardware counters and cannot establish physical HBM bandwidth, cache-hit rate, peak utilization, stall cause, or stall freedom.",
+    "Power files prove only auto state at the capture endpoints."
+  ],
+  "output_root": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/rocprof/r9700-retained-production-p2048-trace-plan-20260906",
+  "outputs": {
+    "benchmark_report": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/rocprof/r9700-retained-production-p2048-trace-plan-20260906/benchmark-report.json",
+    "database": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/rocprof/r9700-retained-production-p2048-trace-plan-20260906/raw/retained-production-p2048_results.db",
+    "evidence": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/rocprof/r9700-retained-production-p2048-trace-plan-20260906/evidence.json",
+    "power_after": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/rocprof/r9700-retained-production-p2048-trace-plan-20260906/power-profile-after.txt",
+    "power_before": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/rocprof/r9700-retained-production-p2048-trace-plan-20260906/power-profile-before.txt"
+  },
+  "power_profile": {
+    "path": "/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level",
+    "required_before_after": "auto"
+  },
+  "profile_timing_admissible": false,
+  "profiler": {
+    "file_size_bytes": 95727,
+    "path": "/opt/rocm/core-10.0/bin/rocprofv3",
+    "sha256": "2d220ded2167097e480e6866a916b575548d56bed8a823a4e505f7133868f0a6"
+  },
+  "profiler_command": [
+    "/opt/rocm/core-10.0/bin/rocprofv3",
+    "--selected-regions",
+    "-f",
+    "rocpd",
+    "-d",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/rocprof/r9700-retained-production-p2048-trace-plan-20260906/raw",
+    "-o",
+    "retained-production-p2048",
+    "--marker-trace",
+    "--kernel-trace",
+    "--memory-copy-trace",
+    "--",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-rmsnorm-production-final-20260906/bench/ninfer_bench",
+    "--weights",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer",
+    "--corpus",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids",
+    "--device",
+    "0",
+    "--concurrency",
+    "1",
+    "-p",
+    "2048",
+    "--prefill-chunk",
+    "4096",
+    "--draft-tokens",
+    "0",
+    "--output",
+    "json",
+    "--output-file",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/rocprof/r9700-retained-production-p2048-trace-plan-20260906/benchmark-report.json",
+    "-r",
+    "1",
+    "--warmup",
+    "1",
+    "--profile-measured"
+  ],
+  "repository_root": "/ssdpool2nvme/local_llm/ninfer-amd-r9700",
+  "schema_version": 1,
+  "status": "command_only_not_executed",
+  "unprofiled_authority": {
+    "file": {
+      "file_size_bytes": 40009,
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-scalar-base-production-p2048-c1-ab-20260905.json",
+      "sha256": "08463f48aae28aa0dd5ad4f5f05155a11deacda2d458db38e2f512a974be8e9f"
+    },
+    "prefill_median_ms": 1075.438603,
+    "prefill_tok_s": 1904.3393033195778,
+    "prior_executable": {
+      "file_size_bytes": 4979952,
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-scalar-base-qualification/bench/ninfer_bench",
+      "sha256": "590b224f144e06932c2b4e054ef9d90e2e846acda8a068ff4eae43f3a7aff769"
+    },
+    "relationship_to_trace_executable": "This authority measured the qualification binary whose scalar-base route was promoted unchanged. The trace separately binds the later retained-production executable; the timing authority does not assert byte identity between those executables.",
+    "role": "retained unprofiled whole-model P2048 throughput authority"
+  },
+  "workload": {
+    "concurrency": 1,
+    "draft_tokens": 0,
+    "generated_tokens": 0,
+    "kv_cache_format": "fp8-k-int4-v",
+    "kv_value_group": 16,
+    "prefill_chunk": 4096,
+    "prompt_tokens": 2048,
+    "spec": "none",
+    "xattention_profile": "dense"
+  }
+}

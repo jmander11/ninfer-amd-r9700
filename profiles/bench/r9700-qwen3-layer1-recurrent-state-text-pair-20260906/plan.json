@@ -1,0 +1,50 @@
+{
+  "artifact_type": "ninfer_qwen3_layer1_recurrent_state_text_pair_plan",
+  "schema_version": 1,
+  "status": "prepared_cpu_only_no_gpu_execution",
+  "claim": "functional-only comparison of the exact layer1 FP32 recurrent state at frontier 128 and the existing selected-column GDN boundaries",
+  "production_routing_authorized": false,
+  "timing_evidence_eligible": false,
+  "source": {
+    "commit": "c3d44daaa41448c8a899ea8b6eee478eb1f5bdc8",
+    "tree": "7dba466a7d48ae8fe54b00497f01f1582ee4223d",
+    "authority": "exact clean detached committed source and fresh exact gfx1201 diagnostic build; live branch-tip equality is not required"
+  },
+  "artifact": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval.ninfer",
+    "bytes": 22763026944,
+    "sha256": "d8fc77c36cf17c92e96d67b9a6b5a1826a1ade4f59d59c003b2368fe981fc512",
+    "weights_id": "r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval"
+  },
+  "history": {
+    "source_corpus": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids", "bytes": 333620, "sha256": "27e4f63c17efe3f89b5cf278b3b1a42a737316ed4044d7d0d1d52437059d1002"},
+    "p129_fixture": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-p129-isolation-discriminator-20260906/history-p129.ids", "bytes": 811, "sha256": "34e9bc09b99ae4efc06049e744e8b43ac5794a9dab76fcf43de43e31f5db4515"},
+    "seed_report": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-small-t-n16-whole-ab-c1-20260906/results-functional-failure-isolated-token-parity-attempt3/ordinary-control.json", "bytes": 13290, "sha256": "02fe8d9eb0ba21224def806bdd06ac5d67c6a6a11e912a56a9018d35c544eea2"},
+    "seed_token": 24178,
+    "rule": "source corpus tokens [0,128) followed by retained fresh-P128 ordinary greedy seed"
+  },
+  "hardware": {"device": 0, "name": "AMD Radeon AI PRO R9700", "architecture": "gfx1201", "wavefront_width": 32, "pci_bus": "0000:13:00.0", "pci_vendor_device": "1002:7551", "power_profile": "auto"},
+  "workload": {"concurrency": 1, "maximum_product_concurrency": 4, "prefill_chunk": 4096, "warmup": 0, "repetitions": 1, "device_graph": false, "draft_tokens": 0, "retain_token_ids": true},
+  "roles": {
+    "text-fresh": {"trace_role": "text-fresh-frontier129-column128", "command_shape": "whole-pg129,1", "selected_column": 128, "selected_token": 24178, "state_capture": "after prefix 128 before selected column 128"},
+    "text-append": {"trace_role": "text-append-frontier129-column0", "command_shape": "isolated pg128,1", "selected_column": 0, "selected_token": 24178, "state_capture": "restored state before selected column 0"}
+  },
+  "trace": {
+    "legacy_layer_sidecar_bytes": 1320960,
+    "gdn_detail_sidecar_bytes": 78208,
+    "recurrent_state_sidecar_bytes": 3145728,
+    "recurrent_state_shape": [128, 128, 48],
+    "recurrent_state_dtype": "fp32",
+    "state_frontier": 128,
+    "linear_state_slot": 0,
+    "text_layer": 1,
+    "gdn_index": 1,
+    "combined_device_staging_bytes": 4544908,
+    "one_combined_final_d2h": true
+  },
+  "comparisons": ["exact FP32 recurrent state: fresh prefix-128 versus append restored frontier-128", "existing selected-column layer1 GDN boundaries: fresh column128 versus append column0"],
+  "expected_recurrent_state_classification": {"classification": "first_difference_layer1_recurrent_prefix_state", "first_element_index": 599, "mismatch_count": 402925, "fresh_bits": 950422399, "append_bits": 950422400, "maximum_absolute_difference": 0.000046528875827789307},
+  "expected_gdn_output_classification": {"classification": "first_difference_gdn_recurrence", "field": "o", "first_element_index": 154, "mismatch_count": 106, "fresh_bits": 14405, "append_bits": 14406, "maximum_absolute_difference": 0.000003814697265625},
+  "limitations": ["diagnostic eager execution and final synchronous D2H make all timings ineligible", "state equality or divergence localizes the recurrence frontier but does not by itself identify an earlier transition", "no production routing or performance claim"],
+  "results_directory": "results"
+}

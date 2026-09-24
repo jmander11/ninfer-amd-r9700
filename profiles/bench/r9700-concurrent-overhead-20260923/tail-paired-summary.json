@@ -1,0 +1,33 @@
+{
+  "results": [
+    {
+      "mode": "fixed3",
+      "stride": 1,
+      "cases": 11,
+      "exact_ordinary": true
+    },
+    {
+      "mode": "graph",
+      "stride": 1,
+      "cases": 11,
+      "exact_ordinary": true
+    },
+    {
+      "mode": "graph",
+      "stride": 17,
+      "cases": 11,
+      "exact_ordinary": true
+    },
+    {
+      "mode": "eager",
+      "stride": 1,
+      "cases": 11,
+      "exact_ordinary": true
+    }
+  ],
+  "eager_round_rows": 140,
+  "padded_rows": 9,
+  "zero_extent_rows": 4,
+  "pending_six_at_k4_rows": 0,
+  "timing_eligible": false
+}

@@ -1,0 +1,75 @@
+{
+  "status": "passed",
+  "kernels": {
+    "a8g64_normalized_prepare_t1_kernel": {
+      "symbol": "_ZN6ninfer3ops5r97006linear12_GLOBAL__N_134a8g64_normalized_prepare_t1_kernelEPK12hip_bfloat16S6_fbPhS7_PtPj",
+      "source_resources": {
+        "group_segment_fixed_size": 32,
+        "private_segment_fixed_size": 0,
+        "sgpr_spill_count": 0,
+        "vgpr_spill_count": 0,
+        "wavefront_size": 32,
+        "vgpr_count": 28,
+        "sgpr_count": 19
+      },
+      "extraction": {
+        "executable_path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700/src/ninfer_r9700_a8q4_normalized_linear_t1_qual",
+        "executable_size_bytes": 851800,
+        "executable_sha256": "3e628ab9874b686b97cd215b2e75e272ba2b5f1e1c89ec23328df40102cc9ef2",
+        "executable_device": 42,
+        "executable_inode": 1160281,
+        "code_object_path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-normalized-linear-t1-qualification-20260920/attempt-1/embedded/a8g64_normalized_prepare_t1_kernel.hsaco",
+        "code_object_size_bytes": 306152,
+        "code_object_sha256": "23989ea9e65686b3163d9ba82deb37257babf4b163ecebaa674a39f06931ceb3",
+        "section": ".hip_fatbin",
+        "bundle_target": "hipv4-amdgcn-amd-amdhsa--gfx1201",
+        "bundle_offset_bytes": 143360,
+        "code_symbol": "_ZN6ninfer3ops5r97006linear12_GLOBAL__N_134a8g64_normalized_prepare_t1_kernelEPK12hip_bfloat16S6_fbPhS7_PtPj"
+      },
+      "embedded_resources": {
+        "group_segment_fixed_size": 32,
+        "private_segment_fixed_size": 0,
+        "sgpr_spill_count": 0,
+        "vgpr_spill_count": 0,
+        "wavefront_size": 32,
+        "vgpr_count": 28,
+        "sgpr_count": 19
+      }
+    },
+    "a8q4g64_linear_decode_dot8_t1_kernel": {
+      "symbol": "_ZN6ninfer3ops5r97006linear12_GLOBAL__N_136a8q4g64_linear_decode_dot8_t1_kernelEPKhS5_PKtPKjS5_S7_P12hip_bfloat16jj",
+      "source_resources": {
+        "group_segment_fixed_size": 0,
+        "private_segment_fixed_size": 0,
+        "sgpr_spill_count": 0,
+        "vgpr_spill_count": 0,
+        "wavefront_size": 32,
+        "vgpr_count": 18,
+        "sgpr_count": 34
+      },
+      "extraction": {
+        "executable_path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700/src/ninfer_r9700_a8q4_normalized_linear_t1_qual",
+        "executable_size_bytes": 851800,
+        "executable_sha256": "3e628ab9874b686b97cd215b2e75e272ba2b5f1e1c89ec23328df40102cc9ef2",
+        "executable_device": 42,
+        "executable_inode": 1160281,
+        "code_object_path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-normalized-linear-t1-qualification-20260920/attempt-1/embedded/a8q4g64_linear_decode_dot8_t1_kernel.hsaco",
+        "code_object_size_bytes": 306152,
+        "code_object_sha256": "23989ea9e65686b3163d9ba82deb37257babf4b163ecebaa674a39f06931ceb3",
+        "section": ".hip_fatbin",
+        "bundle_target": "hipv4-amdgcn-amd-amdhsa--gfx1201",
+        "bundle_offset_bytes": 143360,
+        "code_symbol": "_ZN6ninfer3ops5r97006linear12_GLOBAL__N_136a8q4g64_linear_decode_dot8_t1_kernelEPKhS5_PKtPKjS5_S7_P12hip_bfloat16jj"
+      },
+      "embedded_resources": {
+        "group_segment_fixed_size": 0,
+        "private_segment_fixed_size": 0,
+        "sgpr_spill_count": 0,
+        "vgpr_spill_count": 0,
+        "wavefront_size": 32,
+        "vgpr_count": 18,
+        "sgpr_count": 34
+      }
+    }
+  }
+}

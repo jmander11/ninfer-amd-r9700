@@ -1,0 +1,1 @@
+PASS incumbent_projection_kernel=vgpr8/sgpr11/lds1024/scratch0 combined_projection_kernel=vgpr8/sgpr17/lds1024/scratch0 incumbent_control_kernel=vgpr16/sgpr12/lds0/scratch0 fused_projection_control_kernel=vgpr11/sgpr25/lds2048/scratch0

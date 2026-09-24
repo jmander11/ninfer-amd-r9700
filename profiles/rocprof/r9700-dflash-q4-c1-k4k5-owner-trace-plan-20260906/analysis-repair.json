@@ -1,0 +1,16 @@
+{
+  "artifact_type": "ninfer_r9700_dflash_owner_trace_analysis_repair",
+  "schema_version": 1,
+  "capture_rerun": false,
+  "reason": "The original analyzer incorrectly required GPU execution timestamps to end inside the host measured marker; selected-region asynchronous GPU drain/reordering may complete after that marker.",
+  "old_analyzer": {"file_size_bytes": 29120, "sha256": "6743f75863d97b21402c45019a3aeb5b4ec8b4a14bef75a4aaa1273eec74483f"},
+  "new_analyzer": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/bench/analyze_dflash_trace.py", "file_size_bytes": 32661, "sha256": "a331404acb758591e666493d697cfa9608a5a327b68f6264623a322a5643a772"},
+  "k4w5": {
+    "historical_output": {"path": "k4w5/evidence-pre-async-drain-repair.json", "file_size_bytes": 4412, "sha256": "530c62fcf233bc07d87d655d22a0d97764ad4666401b33b3e0bf536add1015da"},
+    "canonical_output": {"path": "k4w5/evidence.json", "file_size_bytes": 5252, "sha256": "dd8ffd1eb031b8c7c5004c0d45690d2d08aaa4c05eab5d82845c72a9cc397ad8"}
+  },
+  "k5w6": {
+    "prior_output": null,
+    "canonical_output": {"path": "k5w6/evidence.json", "file_size_bytes": 14028, "sha256": "094139b10b607db827b6782dbe6b1a02dd2b5bee16771a35aa4211df19e11fe1"}
+  }
+}

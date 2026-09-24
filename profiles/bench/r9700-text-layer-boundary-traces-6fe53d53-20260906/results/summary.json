@@ -1,0 +1,102 @@
+{
+  "artifact_type": "ninfer_qwen3_text_layer_boundary_trace_evidence",
+  "schema_version": 1,
+  "status": "valid_functional_localization",
+  "timing_evidence_eligible": false,
+  "production_routing_authorized": false,
+  "source_commit": "6fe53d531072dfd6069b951b64006603ef976ad9",
+  "retained_p129_ordinary_control": [
+    96558,
+    96917
+  ],
+  "fresh_tokens": [
+    96558,
+    96917
+  ],
+  "append_tokens": [
+    96558,
+    96917
+  ],
+  "parity_closed": true,
+  "reports": {
+    "text-fresh": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-text-layer-boundary-traces-6fe53d53-20260906/results/text-fresh.json",
+      "bytes": 5932,
+      "sha256": "ce55687f1e2c03fa79ec5fbb5b96c9a9badab18aca99aea0556c28459a59945b"
+    },
+    "text-append": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-text-layer-boundary-traces-6fe53d53-20260906/results/text-append.json",
+      "bytes": 5817,
+      "sha256": "6b37d668f956f5163c7f2a85de859ac68ccc693a2999ace0987dd969ef713599"
+    }
+  },
+  "processes": {
+    "text-fresh": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-text-layer-boundary-traces-6fe53d53-20260906/results/text-fresh.process.json",
+      "bytes": 2126,
+      "sha256": "5ccc339d2738d0e5e2a2e0c0d0a1318c762416663e086cfc7a11cf87a83b7033"
+    },
+    "text-append": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-text-layer-boundary-traces-6fe53d53-20260906/results/text-append.process.json",
+      "bytes": 2103,
+      "sha256": "bb395cd7f79b352e18361c2a6dddd59512db0931cb222ad631a9d7b00282ebcc"
+    }
+  },
+  "manifests": {
+    "text-fresh": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-text-layer-boundary-traces-6fe53d53-20260906/results/text-fresh.trace.json",
+      "bytes": 784,
+      "sha256": "eb0fb7093165ec081b805480379eaa58ce8face2f146f2c55616bec0fa75344e"
+    },
+    "text-append": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-text-layer-boundary-traces-6fe53d53-20260906/results/text-append.trace.json",
+      "bytes": 780,
+      "sha256": "65de106a3b135a356b3f728eed23c0455cf8bbd3c416803e5e7958c6e580491b"
+    }
+  },
+  "sidecars": {
+    "text-fresh": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-text-layer-boundary-traces-6fe53d53-20260906/results/text-fresh.trace.bin",
+      "bytes": 1320960,
+      "sha256": "bc0ded13132d5603320c416eb467abe325ac2e690967b61e83469977b856293d"
+    },
+    "text-append": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-text-layer-boundary-traces-6fe53d53-20260906/results/text-append.trace.bin",
+      "bytes": 1320960,
+      "sha256": "2b6822c352c102210fa9f5afbdcf58c474576258b6e9b811731a7066ecd881b2"
+    }
+  },
+  "comparator_process": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-text-layer-boundary-traces-6fe53d53-20260906/results/text-comparator.process.json",
+    "bytes": 1206,
+    "sha256": "186dc753d80eae154879b116b8f0cb073f56a7d2d2822120b2645f112bc85f41"
+  },
+  "text_comparison": {
+    "artifact_type": "ninfer_qwen3_layer_boundary_comparison",
+    "schema_version": 1,
+    "diagnostic_only": true,
+    "timing_evidence_eligible": false,
+    "production_routing_authorized": false,
+    "diagnostic": "text",
+    "classification": "first_visible_post_mixer_layer_13",
+    "first_difference": {
+      "snapshot_index": 27,
+      "layer": 13,
+      "half": "post_mixer",
+      "first_hidden_index": 53,
+      "mismatch_count": 202,
+      "left_bf16_bits": 48683,
+      "right_bf16_bits": 48682,
+      "preceding_boundary_exact": true
+    },
+    "limitations": [
+      "localizes the first visible represented-BF16 residual boundary, not the primitive root cause",
+      "an exact transformer residual stack leaves final RMSNorm and LM head untested"
+    ]
+  },
+  "limitations": [
+    "synchronous trace transfer invalidates all timings",
+    "first differing represented-BF16 boundary localizes a layer half, not a primitive root cause",
+    "does not authorize production routing or performance claims"
+  ]
+}

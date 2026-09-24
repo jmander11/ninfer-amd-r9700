@@ -1,0 +1,41 @@
+{
+  "status": "PASS",
+  "rows": [
+    {
+      "schedule": "quality",
+      "sample": "wiki",
+      "ppl": 6.602871654537882,
+      "exact": true
+    },
+    {
+      "schedule": "quality",
+      "sample": "technical",
+      "ppl": 9.655791565052294,
+      "exact": true
+    },
+    {
+      "schedule": "quality",
+      "sample": "code",
+      "ppl": 2.2825519811569133,
+      "exact": true
+    },
+    {
+      "schedule": "decode-quality",
+      "sample": "wiki",
+      "ppl": 6.705888442293621,
+      "exact": true
+    },
+    {
+      "schedule": "decode-quality",
+      "sample": "technical",
+      "ppl": 22.160923990817484,
+      "exact": true
+    },
+    {
+      "schedule": "decode-quality",
+      "sample": "code",
+      "ppl": 3.216514784741117,
+      "exact": true
+    }
+  ]
+}

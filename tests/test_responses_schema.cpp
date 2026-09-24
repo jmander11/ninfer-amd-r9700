@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <functional>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -41,6 +42,18 @@ ninfer::PromptCapabilities effort_capabilities() {
     capabilities.reasoning_effort.xhigh          = true;
     capabilities.reasoning_effort.default_effort = ninfer::ReasoningEffort::XHigh;
     return capabilities;
+}
+
+ninfer::OwnedMedia unused_media(const ContentPart&) {
+    throw std::logic_error("media acquisition was not expected");
+}
+
+std::string joined_text(const ninfer::ChatMessage& message) {
+    std::string text;
+    for (const ninfer::MessagePart& part : message.parts) {
+        if (part.kind == ninfer::MessagePartKind::Text) { text += part.text; }
+    }
+    return text;
 }
 
 bool throws_api(const std::function<void()>& fn) {
@@ -78,7 +91,7 @@ Json parse_event(const std::string& event) {
 }
 
 int test_basic_request() {
-    const Json body                = {{"model", "qwen3.6-27b"},
+    const Json body                = {{"model", "qwen3.8-27b"},
                                       {"input", "hello"},
                                       {"instructions", "be concise"},
                                       {"previous_response_id", "resp_previous"},
@@ -89,7 +102,7 @@ int test_basic_request() {
                                       {"metadata", Json{{"trace", "abc"}}}};
     const ResponsesRequest request = parse_responses_request(body, limits());
     int failures                   = 0;
-    failures += check(request.generation.model == "qwen3.6-27b", "model parsed");
+    failures += check(request.generation.model == "qwen3.8-27b", "model parsed");
     failures += check(request.input_turns.size() == 1 &&
                           request.input_turns[0].role == ninfer::ChatRole::User &&
                           request.input_turns[0].content[0].text == "hello",
@@ -253,7 +266,7 @@ int test_typed_items_and_tools() {
                            {"parameters", Json{{"type", "object"}, {"properties", Json::object()}}},
                            {"strict", false}};
     const Json body     = {
-        {"model", "qwen3.6-27b"},
+        {"model", "qwen3.8-27b"},
         {"input",
              Json::array({Json{{"id", "rs_old"},
                                {"type", "reasoning"},
@@ -309,7 +322,7 @@ int test_typed_items_and_tools() {
 }
 
 int test_explicit_rejections() {
-    const Json base = {{"model", "qwen3.6-27b"}, {"input", "hello"}, {"max_output_tokens", 32}};
+    const Json base = {{"model", "qwen3.8-27b"}, {"input", "hello"}, {"max_output_tokens", 32}};
     int failures    = 0;
 
     Json strict     = base;
@@ -349,6 +362,20 @@ int test_explicit_rejections() {
     failures += check(api_code([&] { (void)parse_responses_request(too_small, limits()); }) ==
                           "invalid_value",
                       "OpenAI minimum max_output_tokens enforced");
+
+    Json pin          = base;
+    pin["ninfer"]     = Json{{"capture_context_checkpoint", true}};
+    failures += check(parse_responses_request(pin, limits()).generation.capture_context_checkpoint,
+                      "Responses ninfer capture flag parsed");
+    Json ninfer_null          = base;
+    ninfer_null["ninfer"]     = nullptr;
+    failures += check(!parse_responses_request(ninfer_null, limits()).generation.capture_context_checkpoint,
+                      "Responses ninfer null is omit");
+    Json unknown_ninfer          = base;
+    unknown_ninfer["ninfer"]     = Json{{"capture_context_checkpoint", true}, {"foo", 1}};
+    failures += check(api_code([&] { (void)parse_responses_request(unknown_ninfer, limits()); }) ==
+                          "ninfer_option_not_supported",
+                      "Responses unknown ninfer key rejected");
     return failures;
 }
 
@@ -365,7 +392,7 @@ GenerationOutcome sample_outcome() {
 }
 
 int test_response_object() {
-    ResponsesRequest request = parse_responses_request(Json{{"model", "qwen3.6-27b"},
+    ResponsesRequest request = parse_responses_request(Json{{"model", "qwen3.8-27b"},
                                                             {"input", "hello"},
                                                             {"max_output_tokens", 32},
                                                             {"reasoning", Json{{"effort", "low"}}},
@@ -417,7 +444,7 @@ int test_response_object() {
 }
 
 int test_sse_sequence() {
-    ResponsesRequest request = parse_responses_request(Json{{"model", "qwen3.6-27b"},
+    ResponsesRequest request = parse_responses_request(Json{{"model", "qwen3.8-27b"},
                                                             {"input", "hello"},
                                                             {"max_output_tokens", 32},
                                                             {"stream", true}},
@@ -459,7 +486,7 @@ int test_sse_sequence() {
 }
 
 int test_sse_function_call() {
-    ResponsesRequest request = parse_responses_request(Json{{"model", "qwen3.6-27b"},
+    ResponsesRequest request = parse_responses_request(Json{{"model", "qwen3.8-27b"},
                                                             {"input", "weather"},
                                                             {"max_output_tokens", 32},
                                                             {"stream", true}},
@@ -497,7 +524,7 @@ int test_sse_function_call() {
 
 int test_input_tokens_schema() {
     const ResponsesRequest request = parse_response_input_tokens_request(
-        Json{{"model", "qwen3.6-27b"}, {"input", "hello"}}, limits());
+        Json{{"model", "qwen3.8-27b"}, {"input", "hello"}}, limits());
     int failures = 0;
     failures += check(!request.store && !request.stream, "input_tokens request is stateless");
     failures += check(Json::parse(make_response_input_tokens_body(9)) ==
@@ -506,10 +533,76 @@ int test_input_tokens_schema() {
     failures +=
         check(api_code([&] {
                   (void)parse_response_input_tokens_request(
-                      Json{{"model", "qwen3.6-27b"}, {"input", "hello"}, {"instructions", "x"}},
+                      Json{{"model", "qwen3.8-27b"}, {"input", "hello"}, {"instructions", "x"}},
                       limits());
               }) == "unknown_parameter",
               "input_tokens accepts only model and input");
+    failures += check(!parse_response_input_tokens_request(
+                              Json{{"model", "qwen3.8-27b"}, {"input", "hello"}, {"ninfer", nullptr}},
+                              limits())
+                              .generation.capture_context_checkpoint,
+                      "input_tokens allows ninfer null");
+    failures += check(throws_api([&] {
+                          (void)parse_response_input_tokens_request(
+                              Json{{"model", "qwen3.8-27b"},
+                                   {"input", "hello"},
+                                   {"ninfer", Json{{"capture_context_checkpoint", true}}}},
+                              limits());
+                      }),
+                      "input_tokens rejects ninfer object");
+    return failures;
+}
+
+int test_system_prepend() {
+    int failures = 0;
+    ServeOptions server;
+
+    ResponsesRequest instructed =
+        parse_responses_request(Json{{"model", "m"},
+                                     {"input", "hello"},
+                                     {"instructions", "be concise"},
+                                     {"max_output_tokens", 32}},
+                                limits());
+    compose_responses_generation_messages(instructed, {});
+    failures += check(instructed.generation.messages[0].role == ninfer::ChatRole::Developer,
+                      "instructions did not compose as Developer");
+    const ninfer::PromptInput merged = to_prompt_input(
+        instructed.generation,
+        resolve_prompt_semantics(instructed.generation, server, effort_capabilities()),
+        unused_media, "P");
+    failures += check(merged.messages[0].role == ninfer::ChatRole::Developer &&
+                          joined_text(merged.messages[0]) == "P\n\nbe concise",
+                      "Responses instructions were not prepended as Developer");
+    failures += check(instructed.input_turns.size() == 1 &&
+                          instructed.input_turns[0].content[0].text == "hello",
+                      "Responses input_turns changed when prepending instructions");
+
+    ResponsesRequest follow =
+        parse_responses_request(Json{{"model", "m"}, {"input", "q2"}, {"max_output_tokens", 32}},
+                                limits());
+    ChatTurn previous_user;
+    previous_user.role = ninfer::ChatRole::User;
+    ContentPart q1;
+    q1.kind = ContentKind::Text;
+    q1.text = "q1";
+    previous_user.content.push_back(std::move(q1));
+    ChatTurn previous_assistant;
+    previous_assistant.role = ninfer::ChatRole::Assistant;
+    ContentPart old;
+    old.kind = ContentKind::Text;
+    old.text = "old";
+    previous_assistant.content.push_back(std::move(old));
+    compose_responses_generation_messages(follow, {previous_user, previous_assistant});
+    const ninfer::PromptInput inserted = to_prompt_input(
+        follow.generation, resolve_prompt_semantics(follow.generation, server, effort_capabilities()),
+        unused_media, "P");
+    failures += check(inserted.messages[0].role == ninfer::ChatRole::System &&
+                          joined_text(inserted.messages[0]) == "P",
+                      "Responses follow-up did not insert a leading System");
+    failures += check(follow.input_turns.size() == 1 &&
+                          follow.input_turns[0].role == ninfer::ChatRole::User &&
+                          follow.input_turns[0].content[0].text == "q2",
+                      "Responses follow-up input_turns were mutated");
     return failures;
 }
 
@@ -527,6 +620,7 @@ int main() {
     failures += test_sse_sequence();
     failures += test_sse_function_call();
     failures += test_input_tokens_schema();
+    failures += test_system_prepend();
     if (failures == 0) { std::cout << "ok\n"; }
     return failures == 0 ? 0 : 1;
 }

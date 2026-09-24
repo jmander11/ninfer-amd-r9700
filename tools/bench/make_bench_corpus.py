@@ -10,7 +10,7 @@ Two content sources:
   * one or more `--source-text` files you provide (e.g. a downloaded public-domain book or a
     concatenated document set) for genuinely diverse, very long content.
 
-The chosen text is encoded with a local Hugging Face Qwen3.6 tokenizer WITHOUT the chat template
+The chosen text is encoded with the local Qwen3.8-27B tokenizer WITHOUT the chat template
 and WITHOUT special tokens. If it is shorter than `--tokens`, it is tiled (built-in paragraphs are
 rotated each cycle to avoid a trivial period-1 loop) and then truncated to exactly `--tokens`
 tokens.
@@ -35,7 +35,7 @@ import sys
 from pathlib import Path
 from typing import Any, Sequence
 
-TOKENIZER_MODEL_ID = "Qwen/Qwen3.6-27B"
+TOKENIZER_MODEL_ID = "Qwen/Qwen3.8-27B"
 DEFAULT_TOKENS = 65536
 
 # Curated, in-distribution prose spanning several domains and languages. Order and content are part

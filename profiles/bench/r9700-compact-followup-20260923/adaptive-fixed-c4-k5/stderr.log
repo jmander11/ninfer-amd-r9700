@@ -1,0 +1,2 @@
+[ninfer_bench] loading /ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-q4-fp8-selective-cap/qwen3.8-27b-r9700-q4-fp8-selective-cap-n16k16-dflash2-q4-eval.ninfer (max_context=4240, concurrency=4, kv_format=fp8-k-int4-v)
+[ninfer_bench] test 1/1 whole-pp4096+tg128: warmup=1 reps=3

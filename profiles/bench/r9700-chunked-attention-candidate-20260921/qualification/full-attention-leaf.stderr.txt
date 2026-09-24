@@ -1,0 +1,1 @@
+/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/full_attention_leaf_qual.hip:459: HIP_CHECK(q27::r9700_qwen3_8_27b_full_attention(args, device.stream)) failed: hipErrorInvalidValue: invalid argument

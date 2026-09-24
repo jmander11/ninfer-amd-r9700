@@ -1,0 +1,159 @@
+{
+  "artifact_type": "ninfer_r9700_dflash_owner_trace_evidence",
+  "schema_version": 1,
+  "status": "valid-evaluation-attribution-only",
+  "cell": "k4w5",
+  "workload": {
+    "concurrency": 1,
+    "prompt_tokens": 128,
+    "generated_tokens": 64,
+    "draft_tokens": 4,
+    "verify_width": 5,
+    "device_graph": false,
+    "proposal_head": "optimized"
+  },
+  "benchmark": {
+    "decode_output_tok_s_profiled": 12.22942942,
+    "decode_engine_tok_s_profiled": 12.22942942,
+    "profiled_timing_admissible_for_selection": false
+  },
+  "target_verification_rounds": 40,
+  "bounded_terminal_selected_region_async_drain": {
+    "calls": 0,
+    "summed_duration_ns": 0,
+    "max_completion_after_measured_ns": 0,
+    "dispatch_id_span_to_capture_end": 0,
+    "crossing_calls": 0,
+    "wholly_post_marker_calls": 0,
+    "dispatch_ids": [],
+    "bounds": {
+      "maximum_calls": 32,
+      "maximum_dispatch_id_window": 128,
+      "maximum_completion_tail_ns": 5000000,
+      "maximum_summed_duration_ns": 1000000
+    },
+    "interpretation": "bounded selected-region asynchronous GPU drain/reordering after the measured host marker; global dispatch IDs may interleave independent streams",
+    "rows": []
+  },
+  "stages": [
+    {
+      "stage": "prompt_prefill",
+      "calls": 2286,
+      "summed_duration_ms": 469.752761
+    },
+    {
+      "stage": "proposal_head_and_round_service_or_unattributed",
+      "calls": 10105,
+      "summed_duration_ms": 639.081067
+    },
+    {
+      "stage": "target_64_layer_verification",
+      "calls": 70640,
+      "summed_duration_ms": 3607.450763
+    }
+  ],
+  "operator_families": [
+    {
+      "stage": "target_64_layer_verification",
+      "family": "q4_linear",
+      "calls": 12800,
+      "summed_duration_ms": 2707.577625
+    },
+    {
+      "stage": "target_64_layer_verification",
+      "family": "normalization",
+      "calls": 8320,
+      "summed_duration_ms": 525.122594
+    },
+    {
+      "stage": "proposal_head_and_round_service_or_unattributed",
+      "family": "q4_linear",
+      "calls": 1566,
+      "summed_duration_ms": 497.823169
+    },
+    {
+      "stage": "prompt_prefill",
+      "family": "q4_linear",
+      "calls": 327,
+      "summed_duration_ms": 418.860513
+    },
+    {
+      "stage": "target_64_layer_verification",
+      "family": "other",
+      "calls": 49520,
+      "summed_duration_ms": 374.750544
+    },
+    {
+      "stage": "proposal_head_and_round_service_or_unattributed",
+      "family": "other",
+      "calls": 6093,
+      "summed_duration_ms": 73.737422
+    },
+    {
+      "stage": "proposal_head_and_round_service_or_unattributed",
+      "family": "normalization",
+      "calls": 1126,
+      "summed_duration_ms": 56.241954
+    },
+    {
+      "stage": "prompt_prefill",
+      "family": "other",
+      "calls": 1741,
+      "summed_duration_ms": 40.312928
+    },
+    {
+      "stage": "prompt_prefill",
+      "family": "normalization",
+      "calls": 215,
+      "summed_duration_ms": 10.56068
+    },
+    {
+      "stage": "proposal_head_and_round_service_or_unattributed",
+      "family": "dflash_swa",
+      "calls": 400,
+      "summed_duration_ms": 7.941347
+    },
+    {
+      "stage": "proposal_head_and_round_service_or_unattributed",
+      "family": "dflash_convolution",
+      "calls": 800,
+      "summed_duration_ms": 2.298504
+    },
+    {
+      "stage": "proposal_head_and_round_service_or_unattributed",
+      "family": "dflash_selector",
+      "calls": 40,
+      "summed_duration_ms": 0.765032
+    },
+    {
+      "stage": "proposal_head_and_round_service_or_unattributed",
+      "family": "embedding",
+      "calls": 80,
+      "summed_duration_ms": 0.273639
+    },
+    {
+      "stage": "prompt_prefill",
+      "family": "embedding",
+      "calls": 1,
+      "summed_duration_ms": 0.00992
+    },
+    {
+      "stage": "prompt_prefill",
+      "family": "sampling",
+      "calls": 2,
+      "summed_duration_ms": 0.00872
+    }
+  ],
+  "limitations": [
+    "The only exact local artifact/build pair is the retained legacy row-split canonical-Q4 evaluator; current N16/K16 DFlash companions are absent.",
+    "The all-Q4 base is an evaluation control and has not won terminal production selection.",
+    "Eager execution is required so per-layer ROCTX ranges remain attributable; its profiled timing is not a Device-Graph performance result.",
+    "Empty or outer-round-associated dispatches are conservatively combined as proposal/head/round service or unattributed; symbols refine operators but cannot invent a missing semantic marker.",
+    "The trace contains no performance counters and makes no memory-bandwidth, cache-hit, or stall claim.",
+    "A bounded terminal selected-region asynchronous GPU drain/reordering after the measured host marker is retained rather than discarded; empty-region rows remain conservatively unattributed service."
+  ],
+  "claims": {
+    "admissible": "evaluation-only eager whole-DFlash dispatch attribution separating exact 64-layer target verification from combined proposal/head/round service for K4/W5 and K5/W6",
+    "not_admissible": "production recipe selection, production routing, Device-Graph throughput, profiled throughput authority, acceptance/quality admission, physical bandwidth, cache hit rate, or practical-ceiling closure"
+  }
+}

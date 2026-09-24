@@ -1,0 +1,40 @@
+{
+  "artifact_type": "ninfer_r9700_dflash_rmsnorm_rows56_matched_gpu_numerical_result",
+  "schema_version": 1,
+  "status": "passed",
+  "source_commit": "c8e1bc418b80c23364460801b7c0c017bdab87b8",
+  "build_receipt": "profiles/bench/r9700-dflash-rmsnorm-rows56-matched-builds-20260906/build-receipt.json",
+  "hardware": {
+    "device": 0,
+    "product": "AMD Radeon AI PRO R9700",
+    "gfx": "gfx1201",
+    "unique_id": "0xc2146e1b61370523",
+    "power_profile": "auto",
+    "power_profile_authority": "/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level"
+  },
+  "control": {
+    "selector": 0,
+    "executable_sha256": "b9506baa69b5f848cd2bfda129e601052d60960bf72f8e5456b1afe8943c5a73",
+    "eager_cases": 108,
+    "maximum_bf16_steps": 1,
+    "graph_rows": [5, 6],
+    "graph_replays_per_row": 2,
+    "output_canaries": true,
+    "malformed_cases": 10,
+    "result": "pass"
+  },
+  "candidate": {
+    "selector": 1,
+    "executable_sha256": "b850815c345f71593cff8bc521b027494120f6a133506d1872e940d7f13da3d5",
+    "eager_cases": 108,
+    "maximum_bf16_steps": 1,
+    "graph_rows": [5, 6],
+    "graph_replays_per_row": 2,
+    "output_canaries": true,
+    "malformed_cases": 10,
+    "result": "pass"
+  },
+  "timing_evidence_eligible": false,
+  "production_routing_authorized": false,
+  "next_gate": "exact ordinary-W1 versus DFlash-W5 and ordinary-W1 versus DFlash-W6 semantic parity"
+}

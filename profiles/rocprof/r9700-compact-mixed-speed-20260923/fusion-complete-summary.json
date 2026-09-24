@@ -1,0 +1,20 @@
+{
+  "rows": [
+    {
+      "concurrency": 1,
+      "draft_tokens": 0,
+      "exact_ordinary_tokens": true,
+      "aggregate_decode_tok_s": 30.151527045664416,
+      "per_request_decode_tok_s": 30.151527045664416,
+      "prefill_tok_s": 1519.1769057391284
+    },
+    {
+      "concurrency": 1,
+      "draft_tokens": 5,
+      "exact_ordinary_tokens": true,
+      "aggregate_decode_tok_s": 96.28317582470149,
+      "per_request_decode_tok_s": 96.28317582470149,
+      "prefill_tok_s": 1472.1913041980629
+    }
+  ]
+}

@@ -2,7 +2,7 @@
 
 // Product-side adapter between HTTP protocol requests and the public NInfer
 // engine. It owns one Engine and keeps protocol concerns (aliases, usage,
-// streaming callbacks, and tool-call parsing) outside the target package.
+// streaming callbacks, and typed tool-call protocol translation) outside the target package.
 
 #include "ninfer/engine.h"
 #include "serve/request.h"
@@ -23,10 +23,13 @@ struct RequestCapacity;
 struct MediaInputCapacity;
 
 struct GenerationMetrics {
+    ninfer::GenerationRecoveryStats recovery;
     double prepare_seconds = 0.0;
     double ttft_seconds    = 0.0;
     double vision_seconds  = 0.0;
     double prefill_seconds = 0.0;
+    double prefill_tail_tok_s    = 0.0;
+    double prefill_tail_window_s = 0.0;
     double decode_seconds  = 0.0;
     double total_seconds   = 0.0;
 
@@ -39,12 +42,37 @@ struct GenerationMetrics {
     std::vector<std::uint64_t> speculative_accepted_per_position;
     std::uint32_t prefix_cache_hit_tokens     = 0;
     ninfer::PrefixReusePath prefix_reuse_path = ninfer::PrefixReusePath::FullReset;
+    ninfer::PrefixReuseSource prefix_reuse_source = ninfer::PrefixReuseSource::None;
+    std::uint32_t captured_context_checkpoint_tokens = 0;
+    std::uint32_t restored_context_checkpoint_tokens = 0;
+    std::size_t kv_ram_capacity_bytes = 0;
+    std::size_t kv_ram_used_bytes     = 0;
+    std::size_t kv_ram_entry_count    = 0;
+    std::uint64_t kv_ram_captures     = 0;
+    std::uint64_t kv_ram_restores     = 0;
+    std::uint64_t kv_ram_evictions    = 0;
+    std::uint64_t kv_ram_drops        = 0;
+    double kv_ram_save_seconds        = 0;
+    double kv_ram_load_seconds        = 0;
+    std::size_t kv_disk_capacity_bytes = 0;
+    std::size_t kv_disk_used_bytes     = 0;
+    std::size_t kv_disk_entry_count    = 0;
+    std::uint64_t kv_disk_captures     = 0;
+    std::uint64_t kv_disk_restores     = 0;
+    std::uint64_t kv_disk_evictions    = 0;
+    std::uint64_t kv_disk_drops        = 0;
+    double kv_disk_save_seconds        = 0;
+    double kv_disk_load_seconds        = 0;
+    double kv_disk_h2d_seconds         = 0;
 };
 
 struct GenerationOutcome {
     std::string text;
     std::string reasoning;
     std::vector<ToolCall> tool_calls;
+    // Set when the model emitted parseable Qwen <tool_call> markup but the request
+    // was not tool-capable. The markup stays in `text`; serve logs a warning.
+    std::vector<std::string> ignored_qwen_tool_call_names;
     int prompt_tokens                  = 0;
     int completion_tokens              = 0;
     int reasoning_tokens               = 0;
@@ -61,6 +89,13 @@ struct StreamSink {
 
 // Translate Engine request failures into the shared protocol-neutral HTTP error contract.
 ApiError request_error_to_api_error(const ninfer::RequestError& exception);
+
+// HTTP 400 owner for capture_context_checkpoint on a server that cannot pin.
+// Throws before Engine submit. No-op when capture is not requested, or when
+// prefix reuse and a speculative backend are both available.
+void reject_unavailable_context_checkpoint_capture(bool capture_requested,
+                                                   bool allow_prefix_reuse,
+                                                   ninfer::SpeculativeBackend spec);
 
 // Preparation ends by synchronously submitting the owning prompt to the Engine FIFO. The returned
 // request keeps its ingress/response lifetime reservation until the HTTP response is released and
@@ -101,7 +136,7 @@ public:
                                           std::function<bool()> is_cancelled = {}) const;
 
     // Consumes prepared.generation. A PreparedRequest is single-use.
-    GenerationOutcome run(PreparedRequest& prepared, const StreamSink* sink,
+    GenerationOutcome run(PreparedRequest& prepared, std::uint64_t request_id, const StreamSink* sink,
                           std::function<bool()> is_cancelled = {});
 
     void warmup();

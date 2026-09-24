@@ -1,0 +1,22 @@
+{
+  "name": "serializer-regression",
+  "argv": [
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920/attempt-1/qual",
+    "--serialize-json-text",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920/attempt-1/serializer-input.txt"
+  ],
+  "started_unix_ns": 1789958034986446425,
+  "exit_code": 0,
+  "pid": 1589562,
+  "finished_unix_ns": 1789958035009065861,
+  "stdout": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920/attempt-1/serializer-regression.stdout",
+    "bytes": 409,
+    "sha256": "4797b5d6fe9ff071c73d499ddf5a03fc31b11434788fb951a77ff0ce30ddf698"
+  },
+  "stderr": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920/attempt-1/serializer-regression.stderr",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

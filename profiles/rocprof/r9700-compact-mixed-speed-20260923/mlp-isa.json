@@ -1,0 +1,70 @@
+{
+  "rows": [
+    {
+      "n": 34816,
+      "k": 5120,
+      "t": 2,
+      "vgpr_count": 59,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "n": 34816,
+      "k": 5120,
+      "t": 3,
+      "vgpr_count": 60,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "n": 34816,
+      "k": 5120,
+      "t": 4,
+      "vgpr_count": 61,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "n": 5120,
+      "k": 17408,
+      "t": 2,
+      "vgpr_count": 59,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "n": 5120,
+      "k": 17408,
+      "t": 3,
+      "vgpr_count": 60,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "n": 5120,
+      "k": 17408,
+      "t": 4,
+      "vgpr_count": 61,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    }
+  ]
+}

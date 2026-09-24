@@ -1,0 +1,34 @@
+[
+  {
+    "identity": [
+      "r9700-q4g64-f8e4m3-four-role-n16k16-eval",
+      16,
+      "dense"
+    ],
+    "returncode": 0
+  },
+  {
+    "identity": [
+      "r9700-q4g64-f8e4m3-four-role-n16k16-eval",
+      32,
+      "dense"
+    ],
+    "returncode": 0
+  },
+  {
+    "identity": [
+      "r9700-q4g64-f8e4m3-four-role-n16k16-eval",
+      16,
+      "b128-s16-tau900"
+    ],
+    "returncode": 0
+  },
+  {
+    "identity": [
+      "r9700-q4g64-f8e4m3-four-role-n16k16-eval",
+      32,
+      "b128-s16-tau900"
+    ],
+    "returncode": 0
+  }
+]

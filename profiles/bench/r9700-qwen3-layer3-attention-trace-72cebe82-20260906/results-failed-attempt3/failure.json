@@ -1,0 +1,11 @@
+{
+  "artifact_type": "ninfer_qwen3_layer3_attention_trace_failed_attempt",
+  "schema_version": 1,
+  "status": "invalid_source_trace_contract_after_successful_ordinary_arm",
+  "cause": "trace incorrectly required tree ancestor/prefix metadata for the K4/W5 chain verifier, although W=K+1 uses ordinary causal attention with null tree metadata",
+  "completed_arm": "target-ordinary",
+  "failed_arm": "target-dflash",
+  "failed_error": "layer3 attention visibility metadata differs",
+  "usable_as_functional_comparison_evidence": false,
+  "action": "preserved all outputs; source trace/analyzer corrected for exact K4/W5 chain semantics; fresh committed build and results namespace required"
+}

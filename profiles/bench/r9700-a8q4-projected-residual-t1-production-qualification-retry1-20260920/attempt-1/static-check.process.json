@@ -1,0 +1,22 @@
+{
+  "name": "static-check",
+  "argv": [
+    "/home/battlefront/.local/bin/python3.11",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/check_a8q4_projected_residual_t1_static.py",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry1-20260920/attempt-1/qual.s"
+  ],
+  "started_unix_ns": 1789959715574937627,
+  "exit_code": 0,
+  "pid": 1646118,
+  "finished_unix_ns": 1789959715615554011,
+  "stdout": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry1-20260920/attempt-1/static-receipt.txt",
+    "bytes": 215,
+    "sha256": "2e925106872f692d5c8080088dd683df4ed266d24312bad280f3fd590dd98c78"
+  },
+  "stderr": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry1-20260920/attempt-1/static-check.stderr",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

@@ -17,7 +17,7 @@
 
 namespace ninfer::serve {
 
-inline constexpr int kRequestLogSchemaVersion        = 9;
+inline constexpr int kRequestLogSchemaVersion        = 21;
 inline constexpr const char* kRequestLogArtifactType = "ninfer_serve_request_log";
 
 struct RequestLogContext {
@@ -59,12 +59,11 @@ struct ServerLogEnvironment {
     int device = 0;
     std::string gpu_name;
     std::string gpu_uuid;
+    std::string architecture_name;
     std::uint64_t total_device_memory_bytes = 0;
-    int compute_capability_major            = 0;
-    int compute_capability_minor            = 0;
-    std::string cuda_compile_version;
-    std::string cuda_runtime_version;
-    std::string cuda_driver_version;
+    std::string hip_compile_version;
+    std::string hip_runtime_version;
+    std::string hip_driver_version;
 };
 
 struct ThroughputReport {
@@ -74,6 +73,16 @@ struct ThroughputReport {
     std::uint64_t decode_rounds           = 0;
     std::uint64_t decode_row_rounds       = 0;
     ninfer::RuntimeStats scheduler;
+    std::size_t kv_ram_capacity_bytes = 0;
+    std::size_t kv_ram_used_bytes     = 0;
+    std::size_t kv_ram_entry_count    = 0;
+    double kv_ram_save_seconds        = 0;
+    double kv_ram_load_seconds        = 0;
+    std::size_t kv_disk_capacity_bytes = 0;
+    std::size_t kv_disk_used_bytes     = 0;
+    std::size_t kv_disk_entry_count    = 0;
+    double kv_disk_save_seconds        = 0;
+    double kv_disk_load_seconds        = 0;
 };
 
 RequestLogContext make_request_log_context(std::uint64_t id, std::string protocol,
@@ -86,10 +95,19 @@ RequestRejectionLogContext make_request_rejection_log_context(std::uint64_t id,
 
 // Compact console records retained for operator visibility.
 std::string format_request_start(const RequestLogContext& context);
+std::string format_recovery_event(std::uint64_t request_id, const ninfer::RecoveryEvent& event);
 std::string format_request_rejected(const RequestRejectionLogContext& context);
 std::string format_request_done(const RequestLogContext& context, const GenerationOutcome& outcome);
+std::string format_ignored_qwen_tool_call_markup(const RequestLogContext& context,
+                                                 const GenerationOutcome& outcome);
 std::string format_request_error(const RequestLogContext& context, const std::string& message);
 std::string format_throughput(const ThroughputReport& report);
+
+// Human RAM occupancy is MiB by default. Exact bytes stay on JSONL and the Engine API; pass
+// exact_bytes=true, or set NINFER_KV_RAM_LOG_BYTES=1 at the occupancy helper, for debug lines.
+std::string format_kv_ram_size(std::uint64_t bytes, bool exact_bytes);
+std::string format_kv_ram_occupancy(const ninfer::MemorySummary& memory);
+std::string format_kv_disk_occupancy(const ninfer::MemorySummary& memory);
 
 // Pure JSON formatters are public to repository tests. Each return value is one complete JSON
 // object without a trailing newline.
@@ -154,5 +172,11 @@ private:
     std::mutex mutex_;
     bool failed_ = false;
 };
+
+// Emits the complete successful-request diagnostic: the human done line, the
+// tools-off Qwen warning when applicable, and the structured request_done event.
+// Kept here so every HTTP protocol uses one observable logging path.
+void write_request_done_logs(JsonlRequestLog& jsonl, const RequestLogContext& context,
+                             const GenerationOutcome& outcome);
 
 } // namespace ninfer::serve

@@ -1,0 +1,2 @@
+r9700_runtime_planner: PASS host split-512 production routing
+r9700_runtime_planner: PASS host hybrid arena bound/nonhybrid affine capacity

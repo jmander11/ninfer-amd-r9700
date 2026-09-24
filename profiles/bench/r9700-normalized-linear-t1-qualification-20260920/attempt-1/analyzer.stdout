@@ -1,0 +1,13 @@
+{
+  "status": "passed",
+  "control_median_ms": 0.24069900065660477,
+  "candidate_median_ms": 0.23475949466228485,
+  "saved_ms_per_token": 0.3801283836364746,
+  "ratio_mean_plus_2se": 0.9790383568005527,
+  "allocation_median_ratios": [
+    0.9757796720371227,
+    0.9773541730435258,
+    0.9707446885314572
+  ],
+  "passing_authorizes": "whole C1 A/B preparation only"
+}

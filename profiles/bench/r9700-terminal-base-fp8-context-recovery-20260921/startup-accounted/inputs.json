@@ -1,0 +1,68 @@
+{
+  "command": [
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-fp8-accounted-g16-20260921/bench/ninfer_bench",
+    "--weights",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer",
+    "--corpus",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids",
+    "--device",
+    "0",
+    "--concurrency",
+    "1",
+    "-p",
+    "128",
+    "--prefill-chunk",
+    "2048",
+    "--max-ctx",
+    "262144",
+    "--kv-capacity",
+    "auto",
+    "--draft-tokens",
+    "0",
+    "--output",
+    "json",
+    "--output-file",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921/startup-accounted/model-c1.json",
+    "-r",
+    "1",
+    "--warmup",
+    "0"
+  ],
+  "artifact": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer",
+    "file_size_bytes": 21553549312,
+    "sha256": "040c6e7ed29c856718a638c00181975710d987b7d5f49f4cafbdf68911f7e7d2",
+    "model_id": "qwen3.8-27b",
+    "weights_id": "r9700-q4g64-f8e4m3-four-role-n16k16-eval"
+  },
+  "files": [
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-fp8-accounted-g16-20260921/bench/ninfer_bench",
+      "sha256": "26b48e4ebf83e6dbd11c33c77ea0ffdd2f3d7bdb1d841f83cf3d4d6e6ab90299"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-fp8-accounted-g16-20260921/src/ninfer_r9700_runtime_planner_qual",
+      "sha256": "5eddfc1e2f53cd532cfaa0127ea4060e29ceb65f7ad7c449fae76df30c5c4fb9"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids",
+      "sha256": "27e4f63c17efe3f89b5cf278b3b1a42a737316ed4044d7d0d1d52437059d1002"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/prefill-chunk-selection-panel-attention-20260921.json",
+      "sha256": "3e762ec81d5e740946b61132ea040404e13100a6d2b6449bd2e38ce1b61fabe7"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921/qualification-accounted/receipt.json",
+      "sha256": "0a40d9ad6b4788c62617655069620b1a82a36792d49a33fd5eb68fa24354807d"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921/source-review-accounted.json",
+      "sha256": "156231e18c516accb538984fcfa740bd5ca7f02bde0b39255c8e1ee823da6015"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-terminal-base-fp8-context-recovery-20260921/campaign.py",
+      "sha256": "730cfff1eced2a25b4ea5779accb69c0e012efebebec962156df0d6489030379"
+    }
+  ]
+}

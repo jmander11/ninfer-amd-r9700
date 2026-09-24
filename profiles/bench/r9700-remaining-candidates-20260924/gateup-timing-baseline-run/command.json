@@ -1,0 +1,6 @@
+[
+  "profiles/bench/r9700-remaining-candidates-20260924/gateup-timing-control",
+  "profiles/bench/r9700-remaining-candidates-20260924/gateup-timing-baseline.json",
+  "--concurrent-projections",
+  "--timing-only"
+]

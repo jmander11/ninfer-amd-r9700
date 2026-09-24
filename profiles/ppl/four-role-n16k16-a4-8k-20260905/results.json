@@ -1,0 +1,664 @@
+{
+  "artifact_type": "ninfer_r9700_ppl_campaign",
+  "schema_version": 6,
+  "created_at": "2026-09-05T23:24:27.673996+00:00",
+  "weights_inputs": {
+    "bf16-reference": "/ssdpool2nvme/local_llm/models/qwen3.8-27b-bf16",
+    "r9700-g16": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer"
+  },
+  "scorers": {
+    "bf16-reference": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/reference/qwen3_8_27b_bf16/ppl.py",
+      "bytes": 342,
+      "sha256": "1aa72c4def8d089ae6c71743503138200bd32b732d8d15c522200d00b620da23"
+    },
+    "r9700-g16": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-a4q4-n16k16/apps/ninfer-ppl",
+      "bytes": 4848112,
+      "sha256": "55e5dfb93f385f76f1a8d41b00f53e4790a72795f333ca6d70b170d4acf7fc38"
+    }
+  },
+  "model_id": "qwen3.8-27b",
+  "reference_weights_id": "bf16-source",
+  "reference_source": {
+    "config_sha256": "191e0af232104ed8b65258cf3fb2b842e288008baca7633c11b82a1ac7203aab",
+    "index_sha256": "77042094076611b69791a610065f28b7013b8c621795fa86ddccc8bac7d1b9df",
+    "shards_sha256": {
+      "model-00001-of-00018.safetensors": "ba0ce20aae489ad196733da5064bcdf159a1fe84f53336648196e1ebb7751b1c",
+      "model-00002-of-00018.safetensors": "06a148c01bfbe3faa14a5f184a7ff29a706f7ae1c8b2705d2058e26d17a001fb",
+      "model-00003-of-00018.safetensors": "2e1bf62cbcd406eaa64b60d10353e1f0ef4039d0976e56f05cabe953454f9968",
+      "model-00004-of-00018.safetensors": "511e34063187882659753c4d93f3859f93c019fd438d8813071921c81d9a3f1a",
+      "model-00005-of-00018.safetensors": "635cb53446dc74f219740fc59e18b774f877b803b9722e289ca62575a6efa701",
+      "model-00006-of-00018.safetensors": "0bc5214fac607f0e6cc92eec3789d4b8559410ef9fce66621ba8158e8410dae0",
+      "model-00007-of-00018.safetensors": "80b0c49033e9a0d5762562aa12f4acdb7f54da586f3d0110f28c48d91cf07892",
+      "model-00008-of-00018.safetensors": "7192c5b66185d3592927daabee1cc19e6f6e0ce75988ee20e824b624765fda79",
+      "model-00009-of-00018.safetensors": "af3c48cc37af44f3db6ae0579baf019180d48d9c527caa0a1f03ff85813a56d8",
+      "model-00010-of-00018.safetensors": "163490a76f3bea3a40855b7efc04ce6d27afaf1a34f0bbde495b9491f76457c9",
+      "model-00011-of-00018.safetensors": "5f3ae1b948aeee39da77aec558e8236cd65fe4d7cb7686a76bb007acc563c6d8",
+      "model-00012-of-00018.safetensors": "a3de1c7114677a8f5ac5c4892c90e8238ea5c1e2038c80e757dfc87c3902ca55",
+      "model-00013-of-00018.safetensors": "06ab79a41f74c9c5cb734816feb0c7fc364104b227165ee7391231e1155aa02a",
+      "model-00014-of-00018.safetensors": "4138ed94603065ba884bbcadedb04d7718bb40117e85e6f5c6fc5b9c05b7a85b",
+      "model-00015-of-00018.safetensors": "69224e27b9de4e7dbf6fc936c6eaae08447bda3b80a6c31a871ab451173afd22",
+      "model-00016-of-00018.safetensors": "73cb9a1089fb6155cb648609478d6633be8a5c7d9ca5a05bc8925ce8a553cefe",
+      "model-00017-of-00018.safetensors": "beb51f01056142ac4984bd800507b0dd0fd18de57f8e9ef6ea41d1a3598983a8",
+      "model-00018-of-00018.safetensors": "1d3479509e21494658f9b64d317f5ea8e55c4025d28c702d6c4d0b356ce8ea06"
+    },
+    "tensor_count": 1199,
+    "text_tensor_count": 851,
+    "shard_count": 18
+  },
+  "reference_execution": {
+    "attention_pv": {
+      "accumulation_dtype": "float32",
+      "accumulation_order": "ordered-in-place-add",
+      "final_partial_chunk": true,
+      "implementation": "torch-mm-source-row-chunked-v1",
+      "operand_dtype": "float32",
+      "source_row_chunk": 8192,
+      "source_row_order": "ascending-absolute"
+    },
+    "deterministic_algorithms": {
+      "enabled": true,
+      "warn_only": false
+    },
+    "device_arch": "gfx1201",
+    "device_index": 0,
+    "device_name": "AMD Radeon AI PRO R9700",
+    "distributions": {
+      "flash-linear-attention": {
+        "direct_url_sha256": null,
+        "record_sha256": "794321c0ae78c65e6e5c30d549bfe3682ebd06677942c06afad00fa2970855a6",
+        "version": "0.5.2"
+      },
+      "safetensors": {
+        "direct_url_sha256": null,
+        "record_sha256": "40ec990a7670d615c710ef136fdb7098c24f0bdb0960be15fcbba565dee49c78",
+        "version": "0.8.0"
+      },
+      "torch": {
+        "direct_url_sha256": "8e3847fed034f40209ebaa7841ba295c7ce1e56d484552baad1828ba2c89361e",
+        "record_sha256": "24676e26390ff4a3205cfde772cf7fe5cca528814be0865a65c068c9ff66de6a",
+        "version": "2.9.1+rocm7.2.4.lw.git39497456"
+      },
+      "triton": {
+        "direct_url_sha256": "a9eb932cb518dd66b9d66c43f11f0f8f8edadb9c23ec8f19e2ac5411a0b260df",
+        "record_sha256": "51bb7178d53626640ebd403aaf4caba0262f182ff88c3b5fcae26e29910e69ad",
+        "version": "3.5.1+rocm7.2.4.gita272dfa8"
+      }
+    },
+    "environment": {
+      "AMD_SERIALIZE_COPY": "0",
+      "AMD_SERIALIZE_KERNEL": "0",
+      "CUDA_LAUNCH_BLOCKING": "0",
+      "FLA_CACHE_MODE": null,
+      "FLA_CACHE_RESULTS": null,
+      "FLA_CONFIG_DIR": null,
+      "FLA_DISABLE_BACKEND_DISPATCH": null,
+      "FLA_DISABLE_TENSOR_CACHE": null,
+      "FLA_USE_FAST_OPS": "0",
+      "HIP_LAUNCH_BLOCKING": "0",
+      "HIP_VISIBLE_DEVICES": null,
+      "LD_LIBRARY_PATH": "/opt/rocm/lib:/opt/rocm/core-10.0/lib",
+      "PYTORCH_ALLOC_CONF": null,
+      "PYTORCH_CUDA_ALLOC_CONF": null,
+      "PYTORCH_HIP_ALLOC_CONF": null,
+      "PYTORCH_NO_CUDA_MEMORY_CACHING": "0",
+      "PYTORCH_TUNABLEOP_ENABLED": "0",
+      "ROCBLAS_DEFAULT_ATOMICS_MODE": "0",
+      "ROCBLAS_TENSILE_GEMM_OVERRIDE_PATH": null,
+      "ROCBLAS_TENSILE_LIBPATH": null,
+      "ROCBLAS_USE_HIPBLASLT": "0",
+      "ROCBLAS_USE_HIPBLASLT_BATCHED": "0",
+      "ROCR_VISIBLE_DEVICES": null,
+      "TORCH_ALLOW_TF32_CUBLAS_OVERRIDE": "0",
+      "TORCH_BLAS_PREFER_HIPBLASLT": "0",
+      "TRITON_CACHE_DIR": null,
+      "TRITON_DEFAULT_FP_FUSION": "1",
+      "TRITON_INTERPRET": "0",
+      "TRITON_KERNEL_OVERRIDE": "0",
+      "TRITON_OVERRIDE_ARCH": null
+    },
+    "fla_python_tree_sha256": "757ae2d0030e062700c586af236899ab26f6349805556a161b6749ad22784077",
+    "gdn_recurrence": {
+      "dispatch": "T=1-project-explicit;T>1-fla-fused-recurrent",
+      "final_state_dtype": "float32",
+      "gate_state_input_dtype": "float32",
+      "multi_token_implementation": "fla.ops.gated_delta_rule.fused_recurrent_gated_delta_rule",
+      "output_dtype": "bfloat16",
+      "output_final_state": true,
+      "qkv_input_dtype": "bfloat16",
+      "scale": 0.08838834764831845,
+      "single_token_implementation": "project-explicit-fp32-recurrence-v1"
+    },
+    "hip": "7.2.53211-97f5574fe2",
+    "matmul_precision": "highest",
+    "matmul_reduction": {
+      "allow_bf16_reduced_precision_reduction": true,
+      "allow_fp16_accumulation": false,
+      "allow_fp16_reduced_precision_reduction": true,
+      "allow_tf32": false
+    },
+    "platform": "Linux-7.0.0-30-generic-x86_64-with-glibc2.39",
+    "preferred_blas_library": "hipblas",
+    "profile": "rocm-hipblas-no-atomics-strict-deterministic-pv-gdn-v3",
+    "python": "3.12.3 (main, Jun 19 2026, 12:46:00) [GCC 13.3.0]",
+    "python_executable": "/usr/bin/python3.12",
+    "python_executable_sha256": "1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118",
+    "scorer_python_tree_sha256": "b09714374eed958d9e508ba415c6a4b2b913e944bada39a8d177be4b8cb113b7",
+    "stage_trace_enabled": false,
+    "torch": "2.9.1+rocm7.2.4.git39497456",
+    "torch_git": "394974567f84664f30602e971570223925ffbcc1",
+    "triton_codegen": {
+      "amd_global_prefetch": 0,
+      "amd_local_prefetch": 0,
+      "amd_scalarize_packed_fops": false,
+      "amd_use_async_copy": false,
+      "amd_use_block_pingpong": false,
+      "amd_use_buffer_atomics": true,
+      "amd_use_buffer_ops": false,
+      "amd_use_in_thread_transpose": false,
+      "default_fp_fusion": true,
+      "interpret": false,
+      "kernel_override": false,
+      "override_arch": null,
+      "target_arch": "gfx1201",
+      "target_backend": "hip"
+    },
+    "tunable_op": {
+      "enabled": false
+    }
+  },
+  "candidate_artifact": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer",
+    "bytes": 21553549312,
+    "sha256": "040c6e7ed29c856718a638c00181975710d987b7d5f49f4cafbdf68911f7e7d2",
+    "model_id": "qwen3.8-27b",
+    "weights_id": "r9700-q4g64-f8e4m3-four-role-n16k16-eval",
+    "conversion_receipt": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer.conversion.json",
+      "sha256": "2c5cb9f405ba581f685a96b1a2965ad3ff49b31280ebdd15d19158b6f4779c59",
+      "recipe_id": "r9700-q4g64-f8e4m3-four-role-n16k16-eval-v1",
+      "object_plan_sha256": "82692559ecd3293e68b3ea3e19df8b93b690d046bb764a476bf59178bd637227",
+      "source_artifact_sha256": "1dfe9626fd6412592f87480a2f6934e8494a4b267693a25831dff490959542ce",
+      "source_receipt_sha256": "a3bea3a6866b83bdb6ad9a382ca44b98ad009674c19a585d67ddb0f6a1ea9df7",
+      "transcoder_sha256": "e988d0ecc7d20a12728aa8313a71221eeea9c30dfff5d998020a826baab52801",
+      "selection_sha256": "b2ceeb63c581c0f26aab5a4d8c0958da34d836fcc5c47d377bce709eaf37e3e8",
+      "source_index_sha256": "77042094076611b69791a610065f28b7013b8c621795fa86ddccc8bac7d1b9df",
+      "source_ranking_sha256": "205b2d6c5b58d946c87b425578da13b5cfc32a0abe1ff201e95b47d032bf004e"
+    }
+  },
+  "required_candidate_identity": "fp8-hybrid-selection-authority",
+  "corpus": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/ppl/corpus.ids",
+    "manifest_path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/ppl/corpus.manifest.json",
+    "tokens": 32768,
+    "ids_sha256": "aa1ba6d9932a4bcefdfd1c395bde73911daeba083c6b45d353a421dcd1eae077",
+    "manifest_sha256": "ae7d907d21310f7f946d74f5b10f5989e900851c52d9cf04e6a9d21c25b5912a",
+    "source": "wikitext-2"
+  },
+  "lengths": [
+    8192
+  ],
+  "skip": "half",
+  "prefill_chunk": 4096,
+  "schedules": [
+    "prefill"
+  ],
+  "spec": "none",
+  "draft_tokens": 0,
+  "q4_activation_bits": 4,
+  "w8_activation_bits": 8,
+  "candidate_kv_plane_layouts": {
+    "key": "token-fastest-head-major",
+    "value": "feature-fastest-page-major",
+    "value_scale": "feature-fastest-page-major"
+  },
+  "fp8_qk_wmma_enabled": true,
+  "fp8_qk_wmma_profile": "t1-ge64-t2-ge320-t3plus-stream-v1",
+  "fp8_qk_wmma_t1_min_context": 64,
+  "fp8_qk_wmma_t2_min_context": 320,
+  "xattention_profile": "dense",
+  "reused_bf16_campaign": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/ppl/bf16-reference-deterministic-pv-gdn-v3-a-20260904/results.json",
+    "sha256": "9b402ad02be0f27d80530bd1eba4ead7c0179c658aa9654d43ca5b0fb9ca41f0"
+  },
+  "bf16_repeat_comparison": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/ppl/bf16-reference-deterministic-pv-gdn-v3-repeat-comparison-20260904.json",
+    "sha256": "9b13916a2a3ca8b8e5d01352f98a8306414f4e13a79989c19b1d1248d5eb00de",
+    "authority_input": "first",
+    "authority_campaign_sha256": "9b402ad02be0f27d80530bd1eba4ead7c0179c658aa9654d43ca5b0fb9ca41f0"
+  },
+  "reused_candidate_campaign": null,
+  "reused_candidate_campaigns": [],
+  "baseline": "bf16-reference",
+  "gates": {
+    "r9700-g16": 0.04879016416943205
+  },
+  "quality_tier": "capacity-speed",
+  "quality_gate_contract": {
+    "complete_finite_aligned_sidecars": true,
+    "maximum_mean_nll_delta_by_profile": {
+      "r9700-g16": 0.04879016416943205
+    },
+    "severe_nll_threshold": 10.0,
+    "tier": "capacity-speed",
+    "tier_maximum_mean_nll_delta": 0.04879016416943205,
+    "maximum_new_severe_rate": 0.0025,
+    "minimum_new_severe_budget": 0,
+    "new_severe_budget_formula": "max(minimum_budget, ceil(rate * scored_positions))",
+    "bf16_argmax_identity": "diagnostic_only",
+    "prefill_decode_schedule": {
+      "complete_finite_aligned_sidecars": true,
+      "maximum_absolute_nll_delta": null,
+      "argmax_identity": "diagnostic_only"
+    },
+    "same_route_execution_variants": {
+      "maximum_absolute_nll_delta": 0.0,
+      "argmax_identity": "required"
+    },
+    "pareto_selection": "requires separate whole-inference speed and capacity evidence"
+  },
+  "schedule_parity_max_abs_nll": null,
+  "execution_parity_max_abs_nll": 0.0,
+  "position_extras_enabled": false,
+  "terrible_nll": 10.0,
+  "parity": [],
+  "cells": [
+    {
+      "scheme": "bf16-reference",
+      "weights": "/ssdpool2nvme/local_llm/models/qwen3.8-27b-bf16",
+      "model_id": "qwen3.8-27b",
+      "weights_id": "bf16-source",
+      "weight_format": "source-bf16",
+      "formula_profile": "checkpoint-direct-qwen3.8-source-bf16",
+      "source_config_sha256": "191e0af232104ed8b65258cf3fb2b842e288008baca7633c11b82a1ac7203aab",
+      "source_index_sha256": "77042094076611b69791a610065f28b7013b8c621795fa86ddccc8bac7d1b9df",
+      "source_shards_sha256": {
+        "model-00001-of-00018.safetensors": "ba0ce20aae489ad196733da5064bcdf159a1fe84f53336648196e1ebb7751b1c",
+        "model-00002-of-00018.safetensors": "06a148c01bfbe3faa14a5f184a7ff29a706f7ae1c8b2705d2058e26d17a001fb",
+        "model-00003-of-00018.safetensors": "2e1bf62cbcd406eaa64b60d10353e1f0ef4039d0976e56f05cabe953454f9968",
+        "model-00004-of-00018.safetensors": "511e34063187882659753c4d93f3859f93c019fd438d8813071921c81d9a3f1a",
+        "model-00005-of-00018.safetensors": "635cb53446dc74f219740fc59e18b774f877b803b9722e289ca62575a6efa701",
+        "model-00006-of-00018.safetensors": "0bc5214fac607f0e6cc92eec3789d4b8559410ef9fce66621ba8158e8410dae0",
+        "model-00007-of-00018.safetensors": "80b0c49033e9a0d5762562aa12f4acdb7f54da586f3d0110f28c48d91cf07892",
+        "model-00008-of-00018.safetensors": "7192c5b66185d3592927daabee1cc19e6f6e0ce75988ee20e824b624765fda79",
+        "model-00009-of-00018.safetensors": "af3c48cc37af44f3db6ae0579baf019180d48d9c527caa0a1f03ff85813a56d8",
+        "model-00010-of-00018.safetensors": "163490a76f3bea3a40855b7efc04ce6d27afaf1a34f0bbde495b9491f76457c9",
+        "model-00011-of-00018.safetensors": "5f3ae1b948aeee39da77aec558e8236cd65fe4d7cb7686a76bb007acc563c6d8",
+        "model-00012-of-00018.safetensors": "a3de1c7114677a8f5ac5c4892c90e8238ea5c1e2038c80e757dfc87c3902ca55",
+        "model-00013-of-00018.safetensors": "06ab79a41f74c9c5cb734816feb0c7fc364104b227165ee7391231e1155aa02a",
+        "model-00014-of-00018.safetensors": "4138ed94603065ba884bbcadedb04d7718bb40117e85e6f5c6fc5b9c05b7a85b",
+        "model-00015-of-00018.safetensors": "69224e27b9de4e7dbf6fc936c6eaae08447bda3b80a6c31a871ab451173afd22",
+        "model-00016-of-00018.safetensors": "73cb9a1089fb6155cb648609478d6633be8a5c7d9ca5a05bc8925ce8a553cefe",
+        "model-00017-of-00018.safetensors": "beb51f01056142ac4984bd800507b0dd0fd18de57f8e9ef6ea41d1a3598983a8",
+        "model-00018-of-00018.safetensors": "1d3479509e21494658f9b64d317f5ea8e55c4025d28c702d6c4d0b356ce8ea06"
+      },
+      "corpus_ids_sha256": "b2e1a07e0ae2e9d7571ad2b063ea324251524931b8c7d2c7cfd10b2c7b5829db",
+      "source_tensor_count": 1199,
+      "source_text_tensor_count": 851,
+      "source_shard_count": 18,
+      "execution_provenance": {
+        "profile": "rocm-hipblas-no-atomics-strict-deterministic-pv-gdn-v3",
+        "python": "3.12.3 (main, Jun 19 2026, 12:46:00) [GCC 13.3.0]",
+        "python_executable": "/usr/bin/python3.12",
+        "python_executable_sha256": "1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118",
+        "platform": "Linux-7.0.0-30-generic-x86_64-with-glibc2.39",
+        "torch": "2.9.1+rocm7.2.4.git39497456",
+        "torch_git": "394974567f84664f30602e971570223925ffbcc1",
+        "hip": "7.2.53211-97f5574fe2",
+        "device_index": 0,
+        "device_name": "AMD Radeon AI PRO R9700",
+        "device_arch": "gfx1201",
+        "stage_trace_enabled": false,
+        "attention_pv": {
+          "implementation": "torch-mm-source-row-chunked-v1",
+          "source_row_chunk": 8192,
+          "source_row_order": "ascending-absolute",
+          "final_partial_chunk": true,
+          "operand_dtype": "float32",
+          "accumulation_dtype": "float32",
+          "accumulation_order": "ordered-in-place-add"
+        },
+        "gdn_recurrence": {
+          "dispatch": "T=1-project-explicit;T>1-fla-fused-recurrent",
+          "single_token_implementation": "project-explicit-fp32-recurrence-v1",
+          "multi_token_implementation": "fla.ops.gated_delta_rule.fused_recurrent_gated_delta_rule",
+          "qkv_input_dtype": "bfloat16",
+          "gate_state_input_dtype": "float32",
+          "output_dtype": "bfloat16",
+          "final_state_dtype": "float32",
+          "output_final_state": true,
+          "scale": 0.08838834764831845
+        },
+        "tunable_op": {
+          "enabled": false
+        },
+        "triton_codegen": {
+          "target_backend": "hip",
+          "target_arch": "gfx1201",
+          "default_fp_fusion": true,
+          "interpret": false,
+          "kernel_override": false,
+          "override_arch": null,
+          "amd_use_buffer_ops": false,
+          "amd_use_buffer_atomics": true,
+          "amd_global_prefetch": 0,
+          "amd_local_prefetch": 0,
+          "amd_use_async_copy": false,
+          "amd_use_block_pingpong": false,
+          "amd_use_in_thread_transpose": false,
+          "amd_scalarize_packed_fops": false
+        },
+        "matmul_precision": "highest",
+        "preferred_blas_library": "hipblas",
+        "deterministic_algorithms": {
+          "enabled": true,
+          "warn_only": false
+        },
+        "matmul_reduction": {
+          "allow_tf32": false,
+          "allow_fp16_reduced_precision_reduction": true,
+          "allow_bf16_reduced_precision_reduction": true,
+          "allow_fp16_accumulation": false
+        },
+        "environment": {
+          "HIP_VISIBLE_DEVICES": null,
+          "ROCR_VISIBLE_DEVICES": null,
+          "LD_LIBRARY_PATH": "/opt/rocm/lib:/opt/rocm/core-10.0/lib",
+          "TORCH_BLAS_PREFER_HIPBLASLT": "0",
+          "ROCBLAS_DEFAULT_ATOMICS_MODE": "0",
+          "FLA_USE_FAST_OPS": "0",
+          "PYTORCH_TUNABLEOP_ENABLED": "0",
+          "TORCH_ALLOW_TF32_CUBLAS_OVERRIDE": "0",
+          "TRITON_DEFAULT_FP_FUSION": "1",
+          "TRITON_INTERPRET": "0",
+          "TRITON_KERNEL_OVERRIDE": "0",
+          "ROCBLAS_USE_HIPBLASLT": "0",
+          "ROCBLAS_USE_HIPBLASLT_BATCHED": "0",
+          "CUDA_LAUNCH_BLOCKING": "0",
+          "HIP_LAUNCH_BLOCKING": "0",
+          "AMD_SERIALIZE_KERNEL": "0",
+          "AMD_SERIALIZE_COPY": "0",
+          "PYTORCH_NO_CUDA_MEMORY_CACHING": "0",
+          "TRITON_OVERRIDE_ARCH": null,
+          "ROCBLAS_TENSILE_GEMM_OVERRIDE_PATH": null,
+          "ROCBLAS_TENSILE_LIBPATH": null,
+          "PYTORCH_ALLOC_CONF": null,
+          "PYTORCH_HIP_ALLOC_CONF": null,
+          "PYTORCH_CUDA_ALLOC_CONF": null,
+          "FLA_CACHE_MODE": null,
+          "FLA_CACHE_RESULTS": null,
+          "FLA_CONFIG_DIR": null,
+          "FLA_DISABLE_BACKEND_DISPATCH": null,
+          "FLA_DISABLE_TENSOR_CACHE": null,
+          "TRITON_CACHE_DIR": null
+        },
+        "scorer_python_tree_sha256": "b09714374eed958d9e508ba415c6a4b2b913e944bada39a8d177be4b8cb113b7",
+        "fla_python_tree_sha256": "757ae2d0030e062700c586af236899ab26f6349805556a161b6749ad22784077",
+        "distributions": {
+          "torch": {
+            "version": "2.9.1+rocm7.2.4.lw.git39497456",
+            "record_sha256": "24676e26390ff4a3205cfde772cf7fe5cca528814be0865a65c068c9ff66de6a",
+            "direct_url_sha256": "8e3847fed034f40209ebaa7841ba295c7ce1e56d484552baad1828ba2c89361e"
+          },
+          "triton": {
+            "version": "3.5.1+rocm7.2.4.gita272dfa8",
+            "record_sha256": "51bb7178d53626640ebd403aaf4caba0262f182ff88c3b5fcae26e29910e69ad",
+            "direct_url_sha256": "a9eb932cb518dd66b9d66c43f11f0f8f8edadb9c23ec8f19e2ac5411a0b260df"
+          },
+          "flash-linear-attention": {
+            "version": "0.5.2",
+            "record_sha256": "794321c0ae78c65e6e5c30d549bfe3682ebd06677942c06afad00fa2970855a6",
+            "direct_url_sha256": null
+          },
+          "safetensors": {
+            "version": "0.8.0",
+            "record_sha256": "40ec990a7670d615c710ef136fdb7098c24f0bdb0960be15fcbba565dee49c78",
+            "direct_url_sha256": null
+          }
+        }
+      },
+      "kv_format": "bf16-reference",
+      "kv_value_group": null,
+      "cache_only_diagnostic": false,
+      "cache_diagnostic_scope": null,
+      "cache_key_codec": null,
+      "cache_value_codec": null,
+      "cache_append_boundary": null,
+      "cache_use_boundary": null,
+      "schedule": "prefill",
+      "spec": "none",
+      "draft_tokens": 0,
+      "speculative_execution": false,
+      "device_graph": false,
+      "prefill_chunk": 4096,
+      "skip_tokens": 4096,
+      "prompt_tokens": 8192,
+      "tokens_scored": 4095,
+      "argmax_tokens": 4095,
+      "non_finite": 0,
+      "terrible_tokens": 46,
+      "terrible_nll": 10.0,
+      "sum_nll": 7638.702098846436,
+      "mean_nll": 1.8653729179112175,
+      "max_nll": 15.135608673095703,
+      "ppl": 6.458343869078888,
+      "score_seconds": 208.8502580850036,
+      "command": [
+        "tools/reference/qwen3_8_27b_bf16/ppl.py",
+        "--weights",
+        "/ssdpool2nvme/local_llm/models/qwen3.8-27b-bf16",
+        "--ids",
+        "tools/ppl/corpus.ids",
+        "--scheme",
+        "bf16-reference",
+        "--schedule",
+        "prefill",
+        "--skip",
+        "half",
+        "--tokens",
+        "8192",
+        "--prefill-chunk",
+        "4096",
+        "--device",
+        "0",
+        "--out-json",
+        "profiles/ppl/bf16-reference-deterministic-pv-gdn-v3-a-20260904/8192.prefill.bf16-reference.json"
+      ],
+      "nll_sha256": "6ba4009ac23da9c831b475ce38fa98c377fd504ade81733de711be95e4092c0e",
+      "argmax_sha256": "c9904bd5b09d00666aee8500023cb52cc6f22d5c369cc00ceba57ea04a6d80c1",
+      "profile_value_group": null,
+      "quality_tier": "capacity-speed",
+      "nll_std": 2.3439261652636754,
+      "nll_se": 0.03662831783538499,
+      "nll_tokens": 4095,
+      "delta_mean_nll": 0.0,
+      "gate": null,
+      "argmax_exact": true,
+      "argmax_compared": 4095,
+      "argmax_mismatches": 0,
+      "argmax_first_mismatch": null,
+      "argmax_flip_rate": 0.0,
+      "argmax_identity_is_gate": false,
+      "terrible_baseline": 46,
+      "terrible_delta": 0,
+      "complete_finite_aligned": true,
+      "quality_eligible": false,
+      "pass": true,
+      "reused_bf16_campaign": {
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/ppl/bf16-reference-deterministic-pv-gdn-v3-a-20260904/results.json",
+        "sha256": "9b402ad02be0f27d80530bd1eba4ead7c0179c658aa9654d43ca5b0fb9ca41f0"
+      }
+    },
+    {
+      "scheme": "r9700-g16",
+      "weights": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer",
+      "model_id": "qwen3.8-27b",
+      "weights_id": "r9700-q4g64-f8e4m3-four-role-n16k16-eval",
+      "kv_format": "fp8-k-int4-v",
+      "kv_value_group": 16,
+      "kv_plane_layouts": {
+        "key": "token-fastest-head-major",
+        "value": "feature-fastest-page-major",
+        "value_scale": "feature-fastest-page-major"
+      },
+      "q4_activation_bits": 4,
+      "q4_prefill_cta_profile": "m64n128-pingpong-n16-k16-production",
+      "w8_activation_bits": 8,
+      "fp8_qk_wmma_enabled": true,
+      "fp8_qk_wmma_profile": "t1-ge64-t2-ge320-t3plus-stream-v1",
+      "fp8_qk_wmma_t1_min_context": 64,
+      "fp8_qk_wmma_t2_min_context": 320,
+      "xattention_qualification": false,
+      "schedule": "prefill",
+      "spec": "none",
+      "draft_tokens": 0,
+      "device_graph": true,
+      "prefill_chunk": 4096,
+      "skip_tokens": 4096,
+      "prompt_tokens": 8192,
+      "tokens_scored": 4095,
+      "argmax_tokens": 4095,
+      "non_finite": 0,
+      "terrible_tokens": 42,
+      "terrible_nll": 10,
+      "sum_nll": 7927.39995098114,
+      "mean_nll": 1.9358730039025984,
+      "max_nll": 15.675565719604492,
+      "ppl": 6.930091412159345,
+      "score_seconds": 36.710642967,
+      "command": [
+        "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-a4q4-n16k16/apps/ninfer-ppl",
+        "--weights",
+        "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer",
+        "--ids",
+        "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/ppl/corpus.ids",
+        "--scheme",
+        "r9700-g16",
+        "--schedule",
+        "prefill",
+        "--skip",
+        "half",
+        "--tokens",
+        "8192",
+        "--prefill-chunk",
+        "4096",
+        "--device",
+        "0",
+        "--out-json",
+        "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/ppl/four-role-n16k16-a4-8k-20260905/8192.prefill.r9700-g16.json"
+      ],
+      "nll_sha256": "a51ca85ff1008bb75e15ece9c4ff24a80897e15c8747f2103c3153d70add1e1d",
+      "argmax_sha256": "31b7bf28af7771c78918549c37a34fd55b640dd904f979971ef955947abaa565",
+      "profile_value_group": 16,
+      "quality_tier": "capacity-speed",
+      "nll_std": 2.3824059554298422,
+      "nll_se": 0.03722963796454816,
+      "nll_tokens": 4095,
+      "argmax_exact": false,
+      "argmax_compared": 4095,
+      "argmax_mismatches": 652,
+      "argmax_first_mismatch": 4,
+      "argmax_flip_rate": 0.1592185592185592,
+      "argmax_identity_is_gate": false,
+      "delta_mean_nll": 0.07050008599138091,
+      "terrible_baseline": 46,
+      "terrible_delta": -4,
+      "delta_nll_se": 0.007383204032997746,
+      "delta_abs_p50": 0.14313316345214844,
+      "delta_abs_p95": 1.0205652236938476,
+      "delta_abs_p99": 1.6354442596435546,
+      "delta_abs_max": 7.625267028808594,
+      "worst_delta_tokens": [
+        {
+          "position": 3599,
+          "delta_nll": 7.625267028808594,
+          "abs_delta_nll": 7.625267028808594
+        },
+        {
+          "position": 3005,
+          "delta_nll": -5.3692779541015625,
+          "abs_delta_nll": 5.3692779541015625
+        },
+        {
+          "position": 3624,
+          "delta_nll": -3.4010467529296875,
+          "abs_delta_nll": 3.4010467529296875
+        },
+        {
+          "position": 1977,
+          "delta_nll": 2.4596786499023438,
+          "abs_delta_nll": 2.4596786499023438
+        },
+        {
+          "position": 3999,
+          "delta_nll": -2.4548606872558594,
+          "abs_delta_nll": 2.4548606872558594
+        },
+        {
+          "position": 3285,
+          "delta_nll": 2.402555465698242,
+          "abs_delta_nll": 2.402555465698242
+        },
+        {
+          "position": 1319,
+          "delta_nll": 2.359128952026367,
+          "abs_delta_nll": 2.359128952026367
+        },
+        {
+          "position": 3248,
+          "delta_nll": 2.344097137451172,
+          "abs_delta_nll": 2.344097137451172
+        },
+        {
+          "position": 3428,
+          "delta_nll": -2.281587600708008,
+          "abs_delta_nll": 2.281587600708008
+        },
+        {
+          "position": 3489,
+          "delta_nll": -2.278310775756836,
+          "abs_delta_nll": 2.278310775756836
+        }
+      ],
+      "in_noise": false,
+      "severe_threshold_nll": 10.0,
+      "severe_positions_compared": 4095,
+      "persistent_severe_positions": 35,
+      "new_severe_positions": 7,
+      "repaired_severe_positions": 11,
+      "new_severe_position_rate": 0.0017094017094017094,
+      "maximum_new_severe_rate": 0.0025,
+      "minimum_new_severe_budget": 0,
+      "new_severe_position_budget": 11,
+      "new_severe_positions_pass": true,
+      "new_severe_position_indices": [
+        334,
+        797,
+        815,
+        950,
+        1014,
+        2424,
+        3369
+      ],
+      "repaired_severe_position_indices": [
+        339,
+        526,
+        694,
+        1002,
+        1963,
+        2004,
+        2747,
+        3428,
+        3489,
+        3677,
+        3683
+      ],
+      "complete_finite_aligned": true,
+      "gate": 0.04879016416943205,
+      "pass": false,
+      "quality_eligible": false
+    }
+  ],
+  "pass": false
+}

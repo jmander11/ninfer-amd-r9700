@@ -1,0 +1,113 @@
+{
+  "schema": "ninfer.r9700.paired-projection-c2c4-whole-ab-summary.v1",
+  "status": "passed",
+  "production_routing_authorized": true,
+  "exact_public_token_parity": true,
+  "by_concurrency": {
+    "2": {
+      "pairs": [
+        {
+          "order": [
+            "control",
+            "candidate"
+          ],
+          "control_seconds": 15.90038074,
+          "candidate_seconds": 14.70903804,
+          "candidate_over_control": 0.9250745803210244
+        },
+        {
+          "order": [
+            "candidate",
+            "control"
+          ],
+          "control_seconds": 15.91292925,
+          "candidate_seconds": 14.71215657,
+          "candidate_over_control": 0.9245410658757249
+        },
+        {
+          "order": [
+            "control",
+            "candidate"
+          ],
+          "control_seconds": 15.91816587,
+          "candidate_seconds": 14.71891818,
+          "candidate_over_control": 0.9246616915671076
+        }
+      ],
+      "mean": 0.9247591125879523,
+      "upper_2se": 0.9250821761674793,
+      "median": 0.9246616915671076
+    },
+    "3": {
+      "pairs": [
+        {
+          "order": [
+            "control",
+            "candidate"
+          ],
+          "control_seconds": 17.66803747,
+          "candidate_seconds": 16.40236653,
+          "candidate_over_control": 0.9283638071206783
+        },
+        {
+          "order": [
+            "candidate",
+            "control"
+          ],
+          "control_seconds": 17.67922405,
+          "candidate_seconds": 16.39233352,
+          "candidate_over_control": 0.9272088793964915
+        },
+        {
+          "order": [
+            "control",
+            "candidate"
+          ],
+          "control_seconds": 17.687975,
+          "candidate_seconds": 16.39587668,
+          "candidate_over_control": 0.9269504666305781
+        }
+      ],
+      "mean": 0.927507717715916,
+      "upper_2se": 0.9283767103059163,
+      "median": 0.9272088793964915
+    },
+    "4": {
+      "pairs": [
+        {
+          "order": [
+            "control",
+            "candidate"
+          ],
+          "control_seconds": 20.2331394,
+          "candidate_seconds": 18.89472106,
+          "candidate_over_control": 0.9338501893581576
+        },
+        {
+          "order": [
+            "candidate",
+            "control"
+          ],
+          "control_seconds": 20.22682047,
+          "candidate_seconds": 18.89517518,
+          "candidate_over_control": 0.9341643788268617
+        },
+        {
+          "order": [
+            "control",
+            "candidate"
+          ],
+          "control_seconds": 20.23383721,
+          "candidate_seconds": 18.90220237,
+          "candidate_over_control": 0.9341877259276418
+        }
+      ],
+      "mean": 0.934067431370887,
+      "upper_2se": 0.9342850911691954,
+      "median": 0.9341643788268617
+    }
+  },
+  "limitations": [
+    "Unprofiled whole-model timing does not prove physical HBM bandwidth."
+  ]
+}

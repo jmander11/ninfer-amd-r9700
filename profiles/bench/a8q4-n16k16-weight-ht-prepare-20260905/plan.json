@@ -1,0 +1,45 @@
+{
+  "schema": "ninfer.r9700.a8q4-n16k16-weight-device-ht-preparation.v1",
+  "status": "cpu_static_ready_gpu_not_run",
+  "scope": {
+    "tokens": 2048,
+    "rows": 5120,
+    "columns": 17408,
+    "production_calls": 64,
+    "candidate_change": "the two packed-W global_load_b64 instructions only: th:TH_LOAD_HT scope:SCOPE_DEV; patched directly in the exact production object HSACO",
+    "unchanged": ["activation loads", "scale loads", "load widths", "addresses", "request order", "LDS", "barriers", "signed-IU4 arithmetic", "output"]
+  },
+  "commands": {
+    "cpu_build_static": "bash profiles/bench/a8q4-n16k16-weight-ht-prepare-20260905/build.sh",
+    "root_only_gpu_gate": "bash profiles/bench/a8q4-n16k16-weight-ht-prepare-20260905/run.sh"
+  },
+  "admission": {
+    "first_stable_timing_miss_is_terminal": true,
+    "unstable_timing": "inconclusive; no physical rejection claim",
+    "threshold_logic": "candidate_over_incumbent_max OR saving_ms_per_call_min",
+    "candidate_over_incumbent_max": 0.86874,
+    "saving_ms_per_call_min": 0.390625,
+    "stability": "both routes MAD/median <= 0.02 and range/median <= 0.06",
+    "timing": "seven alternating samples; 128 complete calls per same-stream event interval; median normalized per call"
+  },
+  "correctness": {
+    "full_output": "candidate bit-equal to exact production incumbent for the entire output",
+    "independent_oracle": "20 row/token-distinct output coordinates, each evaluated across complete K in FP64 from represented A8/Q4 codes and FP16 scales",
+    "additional": ["candidate output poisoned before captured graph replay", "nonzero-status full-output poison and reset", "output suffix canaries", "all five byte spans", "all seven pointer null/alignment classes", "representative input/input and input/output overlap", "rejected-call output no-clobber"]
+  },
+  "static_contract": {
+    "logical_vgpr": 92,
+    "architectural_vgpr": 96,
+    "production_kernarg_bytes": 72,
+    "lds_bytes": 17152,
+    "occupancy_waves_per_eu": 16,
+    "scratch_bytes": 0,
+    "spills": 0,
+    "native_signed_iu4_sites": 8,
+    "weight_ht_b64_static_sites": 2,
+    "complete_hsaco_otherwise_identical": true,
+    "activation_policy": "default",
+    "scale_policy": "default"
+  },
+  "output": "profiles/bench/r9700-a8q4-n16k16-weight-device-ht-p2048-ab-20260905.json"
+}

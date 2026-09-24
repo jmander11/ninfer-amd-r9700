@@ -1,0 +1,24 @@
+{
+  "argv": [
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/build/dflash_down_scale_gather_qual",
+    "--out-json",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-qualification-20260921/attempt-1/qualification.json"
+  ],
+  "cwd": "/ssdpool2nvme/local_llm/ninfer-amd-r9700",
+  "started_unix_ns": 1789971484827288514,
+  "exit_code": 0,
+  "error": null,
+  "finished_unix_ns": 1789971494694747924,
+  "outputs": [
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-qualification-20260921/attempt-1/qualifier.stdout",
+      "bytes": 66,
+      "sha256": "7077410aec0afde8b057951670d191c0b92510cac4eea3d418e503267ebbd615"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-down-scale-gather-qualification-20260921/attempt-1/qualifier.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ]
+}

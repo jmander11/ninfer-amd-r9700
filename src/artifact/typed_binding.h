@@ -11,6 +11,8 @@ namespace ninfer::artifact {
 
 class MaterializedArtifact;
 
+[[nodiscard]] StorageLayout storage_layout_for(NumericFormat format);
+
 [[nodiscard]] ObjectHandle bind_tensor(Binder& binder, std::string_view name, NumericFormat format,
                                        std::initializer_list<std::uint64_t> shape,
                                        TensorPlacement placement);
@@ -28,5 +30,9 @@ class MaterializedArtifact;
 [[nodiscard]] Weight materialized_weight(const MaterializedArtifact& materialized,
                                          ObjectHandle handle, NumericFormat format,
                                          std::int32_t rows, std::int32_t columns);
+[[nodiscard]] Weight materialized_weight(const MaterializedArtifact& materialized,
+                                         ObjectHandle handle, NumericFormat format,
+                                         std::int32_t rows, std::int32_t columns,
+                                         StorageLayout layout);
 
 } // namespace ninfer::artifact

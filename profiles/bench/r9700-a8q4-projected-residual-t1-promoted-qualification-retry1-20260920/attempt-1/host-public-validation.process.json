@@ -1,0 +1,23 @@
+{
+  "name": "host-public-validation",
+  "argv": [
+    "/usr/bin/env",
+    "ROCR_VISIBLE_DEVICES=-1",
+    "HIP_VISIBLE_DEVICES=-1",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700/src/ninfer_r9700_target_variant_projected_residual_qual"
+  ],
+  "started_unix_ns": 1789961973395301326,
+  "exit_code": 0,
+  "pid": 1717864,
+  "finished_unix_ns": 1789961973473272331,
+  "stdout": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-promoted-qualification-retry1-20260920/attempt-1/host-public-validation.stdout",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "stderr": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-promoted-qualification-retry1-20260920/attempt-1/host-public-validation.stderr",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

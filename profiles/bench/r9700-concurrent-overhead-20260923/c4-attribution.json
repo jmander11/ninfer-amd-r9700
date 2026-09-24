@@ -1,0 +1,5160 @@
+{
+  "database": "profiles/bench/r9700-concurrent-overhead-20260923/baseline-c4-k4-trace/raw/r2d2/1423243_results.db",
+  "timing_use": "attribution_only",
+  "rounds": [
+    {
+      "graph": 4,
+      "round": 0,
+      "start": 954716534622045,
+      "end": 954716634870930,
+      "kernels": 2187,
+      "span_ms": 100.248885,
+      "kernel_busy_ms": 83.842598,
+      "uncovered_in_graph_ms": 16.406287
+    },
+    {
+      "graph": 4,
+      "round": 1,
+      "start": 954716638151752,
+      "end": 954716737846535,
+      "kernels": 2187,
+      "span_ms": 99.694783,
+      "kernel_busy_ms": 83.342723,
+      "uncovered_in_graph_ms": 16.35206
+    },
+    {
+      "graph": 4,
+      "round": 2,
+      "start": 954716741189508,
+      "end": 954716840956229,
+      "kernels": 2187,
+      "span_ms": 99.766721,
+      "kernel_busy_ms": 83.36778,
+      "uncovered_in_graph_ms": 16.398941
+    },
+    {
+      "graph": 4,
+      "round": 3,
+      "start": 954716844386022,
+      "end": 954716944115715,
+      "kernels": 2187,
+      "span_ms": 99.729693,
+      "kernel_busy_ms": 83.298017,
+      "uncovered_in_graph_ms": 16.431676
+    },
+    {
+      "graph": 4,
+      "round": 4,
+      "start": 954716947494499,
+      "end": 954717047191758,
+      "kernels": 2187,
+      "span_ms": 99.697259,
+      "kernel_busy_ms": 83.288089,
+      "uncovered_in_graph_ms": 16.40917
+    },
+    {
+      "graph": 4,
+      "round": 5,
+      "start": 954717050575341,
+      "end": 954717150198975,
+      "kernels": 2187,
+      "span_ms": 99.623634,
+      "kernel_busy_ms": 83.239969,
+      "uncovered_in_graph_ms": 16.383665
+    },
+    {
+      "graph": 4,
+      "round": 6,
+      "start": 954717153578989,
+      "end": 954717253395508,
+      "kernels": 2187,
+      "span_ms": 99.816519,
+      "kernel_busy_ms": 83.453734,
+      "uncovered_in_graph_ms": 16.362785
+    },
+    {
+      "graph": 4,
+      "round": 7,
+      "start": 954717256731701,
+      "end": 954717356409316,
+      "kernels": 2187,
+      "span_ms": 99.677615,
+      "kernel_busy_ms": 83.299121,
+      "uncovered_in_graph_ms": 16.378494
+    },
+    {
+      "graph": 4,
+      "round": 8,
+      "start": 954717359786099,
+      "end": 954717459412936,
+      "kernels": 2187,
+      "span_ms": 99.626837,
+      "kernel_busy_ms": 83.211814,
+      "uncovered_in_graph_ms": 16.415023
+    },
+    {
+      "graph": 4,
+      "round": 9,
+      "start": 954717462749809,
+      "end": 954717562485474,
+      "kernels": 2187,
+      "span_ms": 99.735665,
+      "kernel_busy_ms": 83.387739,
+      "uncovered_in_graph_ms": 16.347926
+    },
+    {
+      "graph": 4,
+      "round": 10,
+      "start": 954717565771447,
+      "end": 954717665409792,
+      "kernels": 2187,
+      "span_ms": 99.638345,
+      "kernel_busy_ms": 83.248293,
+      "uncovered_in_graph_ms": 16.390052
+    },
+    {
+      "graph": 4,
+      "round": 11,
+      "start": 954717668722125,
+      "end": 954717768312870,
+      "kernels": 2187,
+      "span_ms": 99.590745,
+      "kernel_busy_ms": 83.237726,
+      "uncovered_in_graph_ms": 16.353019
+    },
+    {
+      "graph": 4,
+      "round": 12,
+      "start": 954717771544623,
+      "end": 954717871283449,
+      "kernels": 2187,
+      "span_ms": 99.738826,
+      "kernel_busy_ms": 83.37057,
+      "uncovered_in_graph_ms": 16.368256
+    },
+    {
+      "graph": 4,
+      "round": 13,
+      "start": 954717874656152,
+      "end": 954717974722760,
+      "kernels": 2187,
+      "span_ms": 100.066608,
+      "kernel_busy_ms": 83.505825,
+      "uncovered_in_graph_ms": 16.560783
+    },
+    {
+      "graph": 4,
+      "round": 14,
+      "start": 954717978125314,
+      "end": 954718077937590,
+      "kernels": 2187,
+      "span_ms": 99.812276,
+      "kernel_busy_ms": 83.497314,
+      "uncovered_in_graph_ms": 16.314962
+    },
+    {
+      "graph": 4,
+      "round": 15,
+      "start": 954718081331483,
+      "end": 954718181122421,
+      "kernels": 2187,
+      "span_ms": 99.790938,
+      "kernel_busy_ms": 83.432179,
+      "uncovered_in_graph_ms": 16.358759
+    },
+    {
+      "graph": 4,
+      "round": 16,
+      "start": 954718184445814,
+      "end": 954718284060987,
+      "kernels": 2187,
+      "span_ms": 99.615173,
+      "kernel_busy_ms": 83.362466,
+      "uncovered_in_graph_ms": 16.252707
+    },
+    {
+      "graph": 4,
+      "round": 17,
+      "start": 954718287403620,
+      "end": 954718386802357,
+      "kernels": 2187,
+      "span_ms": 99.398737,
+      "kernel_busy_ms": 83.278746,
+      "uncovered_in_graph_ms": 16.119991
+    },
+    {
+      "graph": 4,
+      "round": 18,
+      "start": 954718390183761,
+      "end": 954718489632091,
+      "kernels": 2187,
+      "span_ms": 99.44833,
+      "kernel_busy_ms": 83.293492,
+      "uncovered_in_graph_ms": 16.154838
+    },
+    {
+      "graph": 4,
+      "round": 19,
+      "start": 954718493070374,
+      "end": 954718592700622,
+      "kernels": 2187,
+      "span_ms": 99.630248,
+      "kernel_busy_ms": 83.385938,
+      "uncovered_in_graph_ms": 16.24431
+    },
+    {
+      "graph": 4,
+      "round": 20,
+      "start": 954718596094996,
+      "end": 954718695745388,
+      "kernels": 2187,
+      "span_ms": 99.650392,
+      "kernel_busy_ms": 83.469693,
+      "uncovered_in_graph_ms": 16.180699
+    },
+    {
+      "graph": 4,
+      "round": 21,
+      "start": 954718699088441,
+      "end": 954718798762979,
+      "kernels": 2187,
+      "span_ms": 99.674538,
+      "kernel_busy_ms": 83.507272,
+      "uncovered_in_graph_ms": 16.167266
+    },
+    {
+      "graph": 4,
+      "round": 22,
+      "start": 954718802145613,
+      "end": 954718901677453,
+      "kernels": 2187,
+      "span_ms": 99.53184,
+      "kernel_busy_ms": 83.385373,
+      "uncovered_in_graph_ms": 16.146467
+    },
+    {
+      "graph": 4,
+      "round": 23,
+      "start": 954718904995806,
+      "end": 954719004524754,
+      "kernels": 2187,
+      "span_ms": 99.528948,
+      "kernel_busy_ms": 83.407775,
+      "uncovered_in_graph_ms": 16.121173
+    },
+    {
+      "graph": 4,
+      "round": 24,
+      "start": 954719007770618,
+      "end": 954719107085085,
+      "kernels": 2187,
+      "span_ms": 99.314467,
+      "kernel_busy_ms": 83.217297,
+      "uncovered_in_graph_ms": 16.09717
+    },
+    {
+      "graph": 4,
+      "round": 25,
+      "start": 954719110392378,
+      "end": 954719209885787,
+      "kernels": 2187,
+      "span_ms": 99.493409,
+      "kernel_busy_ms": 83.388707,
+      "uncovered_in_graph_ms": 16.104702
+    },
+    {
+      "graph": 4,
+      "round": 26,
+      "start": 954719213185081,
+      "end": 954719312621108,
+      "kernels": 2187,
+      "span_ms": 99.436027,
+      "kernel_busy_ms": 83.435916,
+      "uncovered_in_graph_ms": 16.000111
+    },
+    {
+      "graph": 4,
+      "round": 27,
+      "start": 954719315915181,
+      "end": 954719415475981,
+      "kernels": 2187,
+      "span_ms": 99.5608,
+      "kernel_busy_ms": 83.467988,
+      "uncovered_in_graph_ms": 16.092812
+    },
+    {
+      "graph": 4,
+      "round": 28,
+      "start": 954719418723264,
+      "end": 954719518306772,
+      "kernels": 2187,
+      "span_ms": 99.583508,
+      "kernel_busy_ms": 83.415739,
+      "uncovered_in_graph_ms": 16.167769
+    },
+    {
+      "graph": 4,
+      "round": 29,
+      "start": 954719521585785,
+      "end": 954719621105955,
+      "kernels": 2187,
+      "span_ms": 99.52017,
+      "kernel_busy_ms": 83.387024,
+      "uncovered_in_graph_ms": 16.133146
+    },
+    {
+      "graph": 4,
+      "round": 30,
+      "start": 954719624465209,
+      "end": 954719723128379,
+      "kernels": 2187,
+      "span_ms": 98.66317,
+      "kernel_busy_ms": 82.519988,
+      "uncovered_in_graph_ms": 16.143182
+    },
+    {
+      "graph": 3,
+      "round": 0,
+      "start": 954719727249016,
+      "end": 954719809348803,
+      "kernels": 2118,
+      "span_ms": 82.099787,
+      "kernel_busy_ms": 66.749034,
+      "uncovered_in_graph_ms": 15.350753
+    },
+    {
+      "graph": 3,
+      "round": 1,
+      "start": 954719812060245,
+      "end": 954719893527998,
+      "kernels": 2118,
+      "span_ms": 81.467753,
+      "kernel_busy_ms": 66.062481,
+      "uncovered_in_graph_ms": 15.405272
+    },
+    {
+      "graph": 1,
+      "round": 0,
+      "start": 954719897332764,
+      "end": 954719953618261,
+      "kernels": 1980,
+      "span_ms": 56.285497,
+      "kernel_busy_ms": 42.309816,
+      "uncovered_in_graph_ms": 13.975681
+    },
+    {
+      "graph": 1,
+      "round": 1,
+      "start": 954719954698726,
+      "end": 954720010990170,
+      "kernels": 1980,
+      "span_ms": 56.291444,
+      "kernel_busy_ms": 42.438574,
+      "uncovered_in_graph_ms": 13.85287
+    },
+    {
+      "graph": 1,
+      "round": 2,
+      "start": 954720012065665,
+      "end": 954720068204088,
+      "kernels": 1980,
+      "span_ms": 56.138423,
+      "kernel_busy_ms": 42.258859,
+      "uncovered_in_graph_ms": 13.879564
+    },
+    {
+      "graph": 1,
+      "round": 3,
+      "start": 954720069194773,
+      "end": 954720124670712,
+      "kernels": 1980,
+      "span_ms": 55.475939,
+      "kernel_busy_ms": 41.795495,
+      "uncovered_in_graph_ms": 13.680444
+    }
+  ],
+  "gaps": [
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.280822,
+      "device_busy_ms": 2.43193,
+      "uncovered_ms": 0.848892,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.640024,
+        "hipEventRecord": 0.00706,
+        "hipEventSynchronize": 2.486675,
+        "hipLaunchKernel": 0.02058,
+        "hipGetLastError": 0.00057,
+        "hipGraphLaunch": 0.066883
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.342973,
+      "device_busy_ms": 2.47825,
+      "uncovered_ms": 0.864723,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.639323,
+        "hipEventRecord": 0.00555,
+        "hipEventSynchronize": 2.535935,
+        "hipLaunchKernel": 0.01508,
+        "hipGetLastError": 0.0006,
+        "hipGraphLaunch": 0.065665
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.429793,
+      "device_busy_ms": 2.485049,
+      "uncovered_ms": 0.944744,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.730334,
+        "hipEventRecord": 0.006251,
+        "hipEventSynchronize": 2.542555,
+        "hipLaunchKernel": 0.01405,
+        "hipGetLastError": 0.00079,
+        "hipGraphLaunch": 0.081393
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.378784,
+      "device_busy_ms": 2.451209,
+      "uncovered_ms": 0.927575,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.687123,
+        "hipEventRecord": 0.00559,
+        "hipEventSynchronize": 2.540645,
+        "hipLaunchKernel": 0.01746,
+        "hipGetLastError": 0.00046,
+        "hipGraphLaunch": 0.066736
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.383583,
+      "device_busy_ms": 2.450729,
+      "uncovered_ms": 0.932854,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.706094,
+        "hipEventRecord": 0.0066,
+        "hipEventSynchronize": 2.516276,
+        "hipLaunchKernel": 0.01693,
+        "hipGetLastError": 0.0004,
+        "hipGraphLaunch": 0.068403
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.380014,
+      "device_busy_ms": 2.427009,
+      "uncovered_ms": 0.953005,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.689941,
+        "hipEventRecord": 0.00519,
+        "hipEventSynchronize": 2.524666,
+        "hipLaunchKernel": 0.01022,
+        "hipGetLastError": 0.00048,
+        "hipGraphLaunch": 0.088997
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.336193,
+      "device_busy_ms": 2.442929,
+      "uncovered_ms": 0.893264,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.682404,
+        "hipEventRecord": 0.00742,
+        "hipEventSynchronize": 2.501305,
+        "hipLaunchKernel": 0.01476,
+        "hipGetLastError": 0.0004,
+        "hipGraphLaunch": 0.070144
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.376783,
+      "device_busy_ms": 2.47869,
+      "uncovered_ms": 0.898093,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.70629,
+        "hipEventRecord": 0.00571,
+        "hipEventSynchronize": 2.521905,
+        "hipLaunchKernel": 0.01452,
+        "hipGetLastError": 0.00086,
+        "hipGraphLaunch": 0.066408
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.336873,
+      "device_busy_ms": 2.427929,
+      "uncovered_ms": 0.908944,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.664673,
+        "hipEventRecord": 0.00799,
+        "hipEventSynchronize": 2.487886,
+        "hipLaunchKernel": 0.01915,
+        "hipGetLastError": 0.00047,
+        "hipGraphLaunch": 0.072554
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.285973,
+      "device_busy_ms": 2.424129,
+      "uncovered_ms": 0.861844,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.647558,
+        "hipEventRecord": 0.00632,
+        "hipEventSynchronize": 2.494175,
+        "hipLaunchKernel": 0.0109,
+        "hipGetLastError": 0.00054,
+        "hipGraphLaunch": 0.067948
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.312333,
+      "device_busy_ms": 2.436089,
+      "uncovered_ms": 0.876244,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.655244,
+        "hipEventRecord": 0.00499,
+        "hipEventSynchronize": 2.502616,
+        "hipLaunchKernel": 0.01495,
+        "hipGetLastError": 0.00046,
+        "hipGraphLaunch": 0.080593
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.231753,
+      "device_busy_ms": 2.42729,
+      "uncovered_ms": 0.804463,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.618649,
+        "hipEventRecord": 0.00488,
+        "hipEventSynchronize": 2.479515,
+        "hipLaunchKernel": 0.01138,
+        "hipGetLastError": 0.00078,
+        "hipGraphLaunch": 0.055819
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.372703,
+      "device_busy_ms": 2.434809,
+      "uncovered_ms": 0.937894,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.737734,
+        "hipEventRecord": 0.00601,
+        "hipEventSynchronize": 2.491635,
+        "hipLaunchKernel": 0.01522,
+        "hipGetLastError": 0.0005,
+        "hipGraphLaunch": 0.059294
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.402554,
+      "device_busy_ms": 2.467811,
+      "uncovered_ms": 0.934743,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.679969,
+        "hipEventRecord": 0.00832,
+        "hipEventSynchronize": 2.529736,
+        "hipLaunchKernel": 0.01704,
+        "hipGetLastError": 0.00062,
+        "hipGraphLaunch": 0.089699
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.393893,
+      "device_busy_ms": 2.44413,
+      "uncovered_ms": 0.949763,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.729243,
+        "hipEventRecord": 0.00652,
+        "hipEventSynchronize": 2.511245,
+        "hipLaunchKernel": 0.01604,
+        "hipGetLastError": 0.00038,
+        "hipGraphLaunch": 0.067334
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.323393,
+      "device_busy_ms": 2.44701,
+      "uncovered_ms": 0.876383,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.698787,
+        "hipEventRecord": 0.00575,
+        "hipEventSynchronize": 2.493186,
+        "hipLaunchKernel": 0.01469,
+        "hipGetLastError": 0.00068,
+        "hipGraphLaunch": 0.04111
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.342633,
+      "device_busy_ms": 2.454489,
+      "uncovered_ms": 0.888144,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.695914,
+        "hipEventRecord": 0.0052,
+        "hipEventSynchronize": 2.504086,
+        "hipLaunchKernel": 0.01356,
+        "hipGetLastError": 0.00044,
+        "hipGraphLaunch": 0.061123
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.381404,
+      "device_busy_ms": 2.444209,
+      "uncovered_ms": 0.937195,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.752257,
+        "hipEventRecord": 0.00602,
+        "hipEventSynchronize": 2.498545,
+        "hipLaunchKernel": 0.01363,
+        "hipGetLastError": 0.00043,
+        "hipGraphLaunch": 0.051232
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.438283,
+      "device_busy_ms": 2.45917,
+      "uncovered_ms": 0.979113,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.740165,
+        "hipEventRecord": 0.00578,
+        "hipEventSynchronize": 2.524095,
+        "hipLaunchKernel": 0.01418,
+        "hipGetLastError": 0.00043,
+        "hipGraphLaunch": 0.092683
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.394374,
+      "device_busy_ms": 2.446409,
+      "uncovered_ms": 0.947965,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.713907,
+        "hipEventRecord": 0.00566,
+        "hipEventSynchronize": 2.515875,
+        "hipLaunchKernel": 0.01436,
+        "hipGetLastError": 0.00088,
+        "hipGraphLaunch": 0.080002
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.343053,
+      "device_busy_ms": 2.42469,
+      "uncovered_ms": 0.918363,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.719054,
+        "hipEventRecord": 0.00529,
+        "hipEventSynchronize": 2.487705,
+        "hipLaunchKernel": 0.01397,
+        "hipGetLastError": 0.00062,
+        "hipGraphLaunch": 0.058184
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.382634,
+      "device_busy_ms": 2.42853,
+      "uncovered_ms": 0.954104,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.714726,
+        "hipEventRecord": 0.00626,
+        "hipEventSynchronize": 2.492384,
+        "hipLaunchKernel": 0.027741,
+        "hipGetLastError": 0.00047,
+        "hipGraphLaunch": 0.072953
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.318353,
+      "device_busy_ms": 2.42013,
+      "uncovered_ms": 0.898223,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.673254,
+        "hipEventRecord": 0.00811,
+        "hipEventSynchronize": 2.478254,
+        "hipLaunchKernel": 0.01266,
+        "hipGetLastError": 0.00036,
+        "hipGraphLaunch": 0.071924
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.245864,
+      "device_busy_ms": 2.43089,
+      "uncovered_ms": 0.814974,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.622475,
+        "hipEventRecord": 0.0056,
+        "hipEventSynchronize": 2.489665,
+        "hipLaunchKernel": 0.01339,
+        "hipGetLastError": 0.00035,
+        "hipGraphLaunch": 0.057614
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.307293,
+      "device_busy_ms": 2.43845,
+      "uncovered_ms": 0.868843,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.651924,
+        "hipEventRecord": 0.00593,
+        "hipEventSynchronize": 2.497144,
+        "hipLaunchKernel": 0.011201,
+        "hipGetLastError": 0.00032,
+        "hipGraphLaunch": 0.078063
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.299294,
+      "device_busy_ms": 2.43461,
+      "uncovered_ms": 0.864684,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.665764,
+        "hipEventRecord": 0.00599,
+        "hipEventSynchronize": 2.490695,
+        "hipLaunchKernel": 0.01448,
+        "hipGetLastError": 0.00042,
+        "hipGraphLaunch": 0.065795
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.294073,
+      "device_busy_ms": 2.43517,
+      "uncovered_ms": 0.858903,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.664714,
+        "hipEventRecord": 0.00498,
+        "hipEventSynchronize": 2.493875,
+        "hipLaunchKernel": 0.01421,
+        "hipGetLastError": 0.00058,
+        "hipGraphLaunch": 0.058333
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.247283,
+      "device_busy_ms": 2.41697,
+      "uncovered_ms": 0.830313,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.590643,
+        "hipEventRecord": 0.00572,
+        "hipEventSynchronize": 2.485485,
+        "hipLaunchKernel": 0.01365,
+        "hipGetLastError": 0.00039,
+        "hipGraphLaunch": 0.093975
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.279013,
+      "device_busy_ms": 2.41861,
+      "uncovered_ms": 0.860403,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.647693,
+        "hipEventRecord": 0.00561,
+        "hipEventSynchronize": 2.497556,
+        "hipLaunchKernel": 0.01054,
+        "hipGetLastError": 0.00043,
+        "hipGraphLaunch": 0.064814
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.359254,
+      "device_busy_ms": 2.44785,
+      "uncovered_ms": 0.911404,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.722232,
+        "hipEventRecord": 0.00571,
+        "hipEventSynchronize": 2.494085,
+        "hipLaunchKernel": 0.02564,
+        "hipGetLastError": 0.00044,
+        "hipGraphLaunch": 0.050527
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 3,
+      "gap_ms": 4.120637,
+      "device_busy_ms": 2.955692,
+      "uncovered_ms": 1.164945,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.631115,
+        "hipEventRecord": 0.00691,
+        "hipEventSynchronize": 2.992528,
+        "hipLaunchKernel": 0.15991,
+        "hipGetLastError": 0.00127,
+        "hipMemsetAsync": 0.02975,
+        "hipMemcpy2DAsync": 0.071851,
+        "hipGraphLaunch": 0.061193
+      }
+    },
+    {
+      "from_graph": 3,
+      "to_graph": 3,
+      "gap_ms": 2.711442,
+      "device_busy_ms": 1.835409,
+      "uncovered_ms": 0.876033,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.670901,
+        "hipEventRecord": 0.00922,
+        "hipEventSynchronize": 1.877932,
+        "hipLaunchKernel": 0.02007,
+        "hipGetLastError": 0.00069,
+        "hipGraphLaunch": 0.055879
+      }
+    },
+    {
+      "from_graph": 3,
+      "to_graph": 1,
+      "gap_ms": 3.804766,
+      "device_busy_ms": 2.786172,
+      "uncovered_ms": 1.018594,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.505063,
+        "hipEventRecord": 0.00593,
+        "hipEventSynchronize": 2.897149,
+        "hipLaunchKernel": 0.14359,
+        "hipGetLastError": 0.00127,
+        "hipMemsetAsync": 0.02565,
+        "hipMemcpy2DAsync": 0.04049,
+        "hipGraphLaunch": 0.065373
+      }
+    },
+    {
+      "from_graph": 1,
+      "to_graph": 1,
+      "gap_ms": 1.080465,
+      "device_busy_ms": 0.583162,
+      "uncovered_ms": 0.497303,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.288102,
+        "hipEventRecord": 0.00553,
+        "hipEventSynchronize": 0.661914,
+        "hipLaunchKernel": 0.01468,
+        "hipGetLastError": 0.00051,
+        "hipGraphLaunch": 0.067318
+      }
+    },
+    {
+      "from_graph": 1,
+      "to_graph": 1,
+      "gap_ms": 1.075495,
+      "device_busy_ms": 0.546202,
+      "uncovered_ms": 0.529293,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.33737,
+        "hipEventRecord": 0.00688,
+        "hipEventSynchronize": 0.623603,
+        "hipLaunchKernel": 0.01377,
+        "hipGetLastError": 0.00041,
+        "hipGraphLaunch": 0.042561
+      }
+    },
+    {
+      "from_graph": 1,
+      "to_graph": 1,
+      "gap_ms": 0.990685,
+      "device_busy_ms": 0.546523,
+      "uncovered_ms": 0.444162,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.255167,
+        "hipEventRecord": 0.0065,
+        "hipEventSynchronize": 0.610944,
+        "hipLaunchKernel": 0.01593,
+        "hipGetLastError": 0.00051,
+        "hipGraphLaunch": 0.049844
+      }
+    }
+  ],
+  "families": [
+    {
+      "graph": 4,
+      "rounds": 31,
+      "kernel_ms": 2583.946905,
+      "families": [
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<34816u, 5120u, 20u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 2077,
+          "kernel_ms": 673.316554,
+          "fraction": 0.26057677605415036
+        },
+        {
+          "name": "ninfer::ops::r9700::linear::(anonymous namespace)::a8q4g64_linear_wmma32_kernel(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int)",
+          "calls": 6262,
+          "kernel_ms": 635.216331,
+          "fraction": 0.24583180473671537
+        },
+        {
+          "name": "void ninfer::ops::r9700::kv::pv_vector_batched_dflash_verify_kernel<16u, false, false>(float const*, unsigned char const*, unsigned short const*, unsigned int const*, int const*, unsigned int, unsigned int, unsigned long, unsigned long, unsigned int, float*)",
+          "calls": 1984,
+          "kernel_ms": 362.142076,
+          "fraction": 0.14015074199057506
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<5120u, 17408u, 20u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 2077,
+          "kernel_ms": 194.094518,
+          "fraction": 0.07511552099790533
+        },
+        {
+          "name": "void ninfer::ops::r9700::kv::(anonymous namespace)::qk_wmma_batched_dflash_verify_kernel<true>(hip_bfloat16 const*, unsigned char const*, unsigned int const*, int const*, unsigned int, unsigned int, unsigned long, unsigned long, unsigned int, unsigned int, float, float*)",
+          "calls": 1984,
+          "kernel_ms": 152.398664,
+          "fraction": 0.05897902302292082
+        },
+        {
+          "name": "void ninfer::ops::(anonymous namespace)::record_kernel<false>(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, float const*, float const*, float const*, int const*, int const*, int const*, float*, hip_bfloat16*, hip_bfloat16*, float*, hip_bfloat16*, int, int, float)",
+          "calls": 1488,
+          "kernel_ms": 116.431683,
+          "fraction": 0.045059626718607054
+        },
+        {
+          "name": "Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SABV_SAV_UserArgs_MT16x128x32_MI16x16x1_SN_LDSB0_AFC1_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA0_DTLB0_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUAMB_GLS0_HPLR0_ISA1201_ICIW0_IU1_K1_LDSTI0_LBSPPA128_LBSPPB128_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA8_LPB8_LPMXSA0_LPMXSB0_LPM0_LRVW8_LWPMn1_MIAV1_MIWT1_8_MXLIBL_MXSFNS_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL0_PAP0_PGL0_PGR1_PLR1_PKA0_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK0_SKFTR0_SKFDPO0_SKWS0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSM1_ULSGRO0_USL1_USLMX0_UDFMAC0_UIOFGRO0_UPLRP0_USFGROn1_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS32_WG16_2_1_WGMXCC1",
+          "calls": 744,
+          "kernel_ms": 89.410837,
+          "fraction": 0.034602428102136255
+        },
+        {
+          "name": "ninfer::ops::detail::(anonymous namespace)::swa_partial_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, int const*, int const*, int const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, float*, float*, int, int, int, int, int, int, int, float)",
+          "calls": 155,
+          "kernel_ms": 77.642757,
+          "fraction": 0.03004812399579859
+        },
+        {
+          "name": "ninfer::ops::r9700::gdn::(anonymous namespace)::bf16_projected_control_t1_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, float const*, float const*, float*, float*)",
+          "calls": 1488,
+          "kernel_ms": 38.554188,
+          "fraction": 0.01492065797690994
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::rmsnorm_k5120_rows4_cta_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, float, bool)",
+          "calls": 4371,
+          "kernel_ms": 32.427985,
+          "fraction": 0.012549787666786444
+        },
+        {
+          "name": "Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SABV_SAV_UserArgs_MT64x64x32_MI16x16x1_SN_LDSB0_AFC1_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA0_DTLB0_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUAMB_GLS0_HPLR0_ISA1201_ICIW0_IU1_K1_LDSTI0_LBSPPA128_LBSPPB128_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA8_LPB8_LPMXSA0_LPMXSB0_LPM0_LRVW8_LWPMn1_MIAV1_MIWT4_4_MXLIBL_MXSFNS_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL0_PAP0_PGL0_PGR1_PLR1_PKA0_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK0_SKFTR0_SKFDPO0_SKWS0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSM1_ULSGRO0_USL1_USLMX0_UDFMAC0_UIOFGRO0_UPLRP0_USFGROn1_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB1_WS32_WG16_2_1_WGMXCC1",
+          "calls": 62,
+          "kernel_ms": 25.531903,
+          "fraction": 0.009880970445095116
+        },
+        {
+          "name": "ninfer::ops::dflash2_column_topk_split_kernel(hip_bfloat16 const*, float*, int*, int, int, int)",
+          "calls": 31,
+          "kernel_ms": 23.567578,
+          "fraction": 0.009120767131242583
+        },
+        {
+          "name": "ninfer::ops::r9700::linear::(anonymous namespace)::a8g64_quantize_activation_kernel(hip_bfloat16 const*, unsigned char*, unsigned char*, unsigned short*, unsigned int*, unsigned int, unsigned int)",
+          "calls": 10416,
+          "kernel_ms": 23.333676,
+          "fraction": 0.009030245921403715
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::silu_mul_strided_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned long, ninfer::ops::r9700::eager::SiluMulStridedShape)",
+          "calls": 2139,
+          "kernel_ms": 22.613668,
+          "fraction": 0.008751599329011754
+        },
+        {
+          "name": "__amd_rocclr_fillBufferUnAligned",
+          "calls": 11718,
+          "kernel_ms": 19.276202,
+          "fraction": 0.007459983780123376
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::gated_rmsnorm_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float)",
+          "calls": 1488,
+          "kernel_ms": 18.297326,
+          "fraction": 0.007081154014656504
+        },
+        {
+          "name": "ninfer::ops::r9700::kv::softmax_wmma_scores_batched_dflash_verify_in_place_kernel(float*, unsigned long, int const*)",
+          "calls": 1984,
+          "kernel_ms": 16.840362,
+          "fraction": 0.006517301871572318
+        },
+        {
+          "name": "ninfer::ops::r9700::gdn::(anonymous namespace)::projection_conv_record_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, int const*, int const*, int const*, hip_bfloat16*, hip_bfloat16*, hip_bfloat16*, hip_bfloat16*, hip_bfloat16*, unsigned int, unsigned int)",
+          "calls": 1488,
+          "kernel_ms": 8.614916,
+          "fraction": 0.0033340143264282748
+        },
+        {
+          "name": "ninfer::ops::r9700::linear::(anonymous namespace)::fp8_quantize_activation_kernel(hip_bfloat16 const*, unsigned char*, float*, unsigned int*, unsigned int, unsigned int)",
+          "calls": 806,
+          "kernel_ms": 8.094746,
+          "fraction": 0.0031327060104588333
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::residual_add_kernel(hip_bfloat16 const*, hip_bfloat16*, unsigned long)",
+          "calls": 4278,
+          "kernel_ms": 7.198474,
+          "fraction": 0.002785844394120784
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::rmsnorm_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float, bool)",
+          "calls": 961,
+          "kernel_ms": 5.339936,
+          "fraction": 0.0020665811629747865
+        },
+        {
+          "name": "void ninfer::ops::r9700::kv::(anonymous namespace)::append_kernel<16u, true, false, false>(hip_bfloat16 const*, hip_bfloat16 const*, unsigned int const*, unsigned long, int const*, unsigned int, unsigned int const*, unsigned int, unsigned int const*, unsigned int, int const*, unsigned int, unsigned int, unsigned long, unsigned char*, unsigned char*, unsigned short*, unsigned int*)",
+          "calls": 1984,
+          "kernel_ms": 5.040538,
+          "fraction": 0.0019507126830843298
+        },
+        {
+          "name": "ninfer::ops::argmax_kernel(hip_bfloat16 const*, int*, int, int, ninfer::ops::SamplingConfig const*, int)",
+          "calls": 31,
+          "kernel_ms": 4.618066,
+          "fraction": 0.0017872139675408694
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::bf16_extract_features_kernel(hip_bfloat16 const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int, unsigned long)",
+          "calls": 1984,
+          "kernel_ms": 3.57457,
+          "fraction": 0.0013833759482763056
+        },
+        {
+          "name": "__amd_rocclr_copyBuffer",
+          "calls": 155,
+          "kernel_ms": 3.506494,
+          "fraction": 0.001357030205696119
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::rmsnorm_k256_token8_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float, bool)",
+          "calls": 496,
+          "kernel_ms": 1.548446,
+          "fraction": 0.0005992561213249852
+        },
+        {
+          "name": "ninfer::ops::speculative_sampling_partial_topk_kernel(hip_bfloat16 const*, int const*, int const*, ninfer::ops::SamplingConfig const*, int, int, int, int, ninfer::ops::SamplingWorkspace, unsigned long, int const*, int const*, int const*)",
+          "calls": 31,
+          "kernel_ms": 1.491042,
+          "fraction": 0.0005770404945685214
+        },
+        {
+          "name": "ninfer::ops::detail::(anonymous namespace)::swa_reduce_kernel(hip_bfloat16 const*, float const*, float const*, int const*, hip_bfloat16*, int, int)",
+          "calls": 155,
+          "kernel_ms": 1.467685,
+          "fraction": 0.0005680012221458551
+        },
+        {
+          "name": "__amd_rocclr_copyBufferRectAligned",
+          "calls": 837,
+          "kernel_ms": 1.403204,
+          "fraction": 0.0005430467620231538
+        },
+        {
+          "name": "ninfer::ops::(anonymous namespace)::poison_nonfinite_output(unsigned int const*, hip_bfloat16*, unsigned long)",
+          "calls": 806,
+          "kernel_ms": 1.324722,
+          "fraction": 0.0005126738469109527
+        },
+        {
+          "name": "void ninfer::ops::(anonymous namespace)::rope_kernel<(ninfer::ops::(anonymous namespace)::Profile)0, 256, 32, 24, 4, false>(int const*, hip_bfloat16*, hip_bfloat16*, int, long, long)",
+          "calls": 496,
+          "kernel_ms": 1.270486,
+          "fraction": 0.0004916842515384425
+        },
+        {
+          "name": "ninfer::ops::dflash2_column_topk_merge_kernel(float const*, int const*, float*, int*, int const*, int, int, int)",
+          "calls": 31,
+          "kernel_ms": 1.089604,
+          "fraction": 0.0004216820391671322
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::sigmoid_mul_kernel(hip_bfloat16 const*, hip_bfloat16*, unsigned long)",
+          "calls": 496,
+          "kernel_ms": 1.005443,
+          "fraction": 0.0003891113234774458
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::cast_fp32_to_bf16_kernel(float const*, hip_bfloat16*, unsigned long)",
+          "calls": 496,
+          "kernel_ms": 0.868604,
+          "fraction": 0.00033615396598096894
+        },
+        {
+          "name": "ninfer::ops::speculative_sampling_p_less_mass_finalize_kernel(hip_bfloat16 const*, int const*, int const*, int*, int*, int*, int*, int*, ninfer::ops::SamplingConfig const*, int, int, int, int, ninfer::ops::SamplingWorkspace, unsigned long, int const*, float const*, int, int const*, int const*, int const*, int*, int*)",
+          "calls": 31,
+          "kernel_ms": 0.711482,
+          "fraction": 0.0002753469889893113
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::bf16_scatter_batch_kernel(hip_bfloat16 const*, int const*, int const*, hip_bfloat16*, unsigned int, unsigned int, unsigned long, unsigned long)",
+          "calls": 155,
+          "kernel_ms": 0.667484,
+          "fraction": 0.00025831954933299995
+        },
+        {
+          "name": "void ninfer::ops::detail::(anonymous namespace)::grouped_dynamic_conv_kernel<true>(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, hip_bfloat16*, int, int)",
+          "calls": 310,
+          "kernel_ms": 0.661003,
+          "fraction": 0.0002558113708609659
+        },
+        {
+          "name": "void ninfer::ops::detail::(anonymous namespace)::grouped_dynamic_conv_kernel<false>(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, hip_bfloat16*, int, int)",
+          "calls": 310,
+          "kernel_ms": 0.652405,
+          "fraction": 0.00025248390310868247
+        },
+        {
+          "name": "void ninfer::ops::(anonymous namespace)::rope_kernel<(ninfer::ops::(anonymous namespace)::Profile)2, 128, 64, 32, 8, false>(int const*, hip_bfloat16*, hip_bfloat16*, int, long, long)",
+          "calls": 155,
+          "kernel_ms": 0.613761,
+          "fraction": 0.00023752848745164134
+        },
+        {
+          "name": "ninfer::ops::dflash2_path_select_kernel(float const*, int const*, hip_bfloat16 const*, ninfer::ops::Dflash2CodebookDevice, ninfer::ops::Dflash2CodebookDevice, int const*, int const*, int*, int*, float*, int, int, ninfer::ops::SamplingConfig const*, unsigned long long, int, bool)",
+          "calls": 31,
+          "kernel_ms": 0.534521,
+          "fraction": 0.0002068622226585573
+        },
+        {
+          "name": "void ninfer::ops::(anonymous namespace)::rope_kernel<(ninfer::ops::(anonymous namespace)::Profile)2, 128, 64, 8, 0, false>(int const*, hip_bfloat16*, hip_bfloat16*, int, long, long)",
+          "calls": 155,
+          "kernel_ms": 0.29356,
+          "fraction": 0.0001136091455408601
+        },
+        {
+          "name": "ninfer::ops::r9700::dflash::(anonymous namespace)::append_cyclic_kernel(unsigned short const*, unsigned short const*, int const*, int const*, int const*, unsigned short*, unsigned short*, int, int, int, int)",
+          "calls": 155,
+          "kernel_ms": 0.267561,
+          "fraction": 0.00010354740628852046
+        },
+        {
+          "name": "ninfer::targets::qwen3::(anonymous namespace)::initialize_segmented_cursor(int const*, unsigned int, unsigned int, unsigned int, unsigned int*, unsigned int*)",
+          "calls": 124,
+          "kernel_ms": 0.203321,
+          "fraction": 7.868621433612622e-05
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::embedding_gather_q4_kernel(unsigned char const*, unsigned short const*, int const*, hip_bfloat16*, unsigned int, unsigned int, unsigned long)",
+          "calls": 62,
+          "kernel_ms": 0.18044,
+          "fraction": 6.983115622493799e-05
+        },
+        {
+          "name": "ninfer::targets::qwen3::(anonymous namespace)::advance_segmented_cursor(int const*, unsigned int, unsigned int, unsigned int*, unsigned int*)",
+          "calls": 124,
+          "kernel_ms": 0.16708,
+          "fraction": 6.46607713481636e-05
+        },
+        {
+          "name": "ninfer::ops::r9700::schedule::(anonymous namespace)::prepare_ragged_prefix_kernel(HIP_vector_type<unsigned int, 4u> const*, int const*, int const*, int const*, HIP_vector_type<unsigned int, 4u>*, int*, int*, unsigned int, unsigned int, unsigned long, unsigned long)",
+          "calls": 31,
+          "kernel_ms": 0.162882,
+          "fraction": 6.303612496248254e-05
+        },
+        {
+          "name": "ninfer::ops::speculative_prepare_verify_inputs_kernel(int const*, int const*, int const*, int const*, int*, int*, int)",
+          "calls": 31,
+          "kernel_ms": 0.06912,
+          "fraction": 2.6749775649898657e-05
+        },
+        {
+          "name": "ninfer::ops::speculative_sampling_group_finalize_kernel(int const*, int const*, int const*, int*, int*, int*, int*, int*, ninfer::ops::SamplingConfig const*, int, int, int, int, ninfer::ops::SamplingWorkspace, unsigned long, int const*, float const*, int, int const*, int const*, int const*, int*, int*)",
+          "calls": 31,
+          "kernel_ms": 0.0662,
+          "fraction": 2.5619721470244373e-05
+        },
+        {
+          "name": "ninfer::ops::speculative_select_accepted_hidden_kernel(hip_bfloat16 const*, int const*, hip_bfloat16*, int, int)",
+          "calls": 31,
+          "kernel_ms": 0.05132,
+          "fraction": 1.986108921228008e-05
+        },
+        {
+          "name": "ninfer::ops::r9700::schedule::(anonymous namespace)::prepare_masked_block_kernel(int const*, int const*, int const*, int, int*, int*, unsigned int, unsigned int)",
+          "calls": 31,
+          "kernel_ms": 0.050241,
+          "fraction": 1.9443510972606458e-05
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::bf16_scatter_kernel(hip_bfloat16 const*, int const*, hip_bfloat16*, unsigned int, unsigned int)",
+          "calls": 31,
+          "kernel_ms": 0.04124,
+          "fraction": 1.5960080263336524e-05
+        }
+      ]
+    },
+    {
+      "graph": 3,
+      "rounds": 2,
+      "kernel_ms": 132.811515,
+      "families": [
+        {
+          "name": "ninfer::ops::r9700::linear::(anonymous namespace)::a8q4g64_linear_wmma32_kernel(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int)",
+          "calls": 402,
+          "kernel_ms": 40.900684,
+          "fraction": 0.3079603752731832
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<34816u, 5120u, 15u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 134,
+          "kernel_ms": 24.083381,
+          "fraction": 0.1813350371012634
+        },
+        {
+          "name": "void ninfer::ops::r9700::kv::pv_vector_batched_dflash_verify_kernel<16u, false, false>(float const*, unsigned char const*, unsigned short const*, unsigned int const*, int const*, unsigned int, unsigned int, unsigned long, unsigned long, unsigned int, float*)",
+          "calls": 96,
+          "kernel_ms": 18.204319,
+          "fraction": 0.13706883021400668
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<5120u, 17408u, 15u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 134,
+          "kernel_ms": 12.409655,
+          "fraction": 0.09343809533382703
+        },
+        {
+          "name": "void ninfer::ops::r9700::kv::(anonymous namespace)::qk_wmma_batched_dflash_verify_kernel<true>(hip_bfloat16 const*, unsigned char const*, unsigned int const*, int const*, unsigned int, unsigned int, unsigned long, unsigned long, unsigned int, unsigned int, float, float*)",
+          "calls": 96,
+          "kernel_ms": 7.250949,
+          "fraction": 0.0545957856139206
+        },
+        {
+          "name": "Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SABV_SAV_UserArgs_MT16x128x32_MI16x16x1_SN_LDSB0_AFC1_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA0_DTLB0_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUAMB_GLS0_HPLR0_ISA1201_ICIW0_IU1_K1_LDSTI0_LBSPPA128_LBSPPB128_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA8_LPB8_LPMXSA0_LPMXSB0_LPM0_LRVW8_LWPMn1_MIAV1_MIWT1_8_MXLIBL_MXSFNS_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL0_PAP0_PGL0_PGR1_PLR1_PKA0_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK0_SKFTR0_SKFDPO0_SKWS0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSM1_ULSGRO0_USL1_USLMX0_UDFMAC0_UIOFGRO0_UPLRP0_USFGROn1_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS32_WG16_2_1_WGMXCC1",
+          "calls": 48,
+          "kernel_ms": 5.642745,
+          "fraction": 0.042486865690825076
+        },
+        {
+          "name": "void ninfer::ops::(anonymous namespace)::record_kernel<false>(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, float const*, float const*, float const*, int const*, int const*, int const*, float*, hip_bfloat16*, hip_bfloat16*, float*, hip_bfloat16*, int, int, float)",
+          "calls": 96,
+          "kernel_ms": 4.237419,
+          "fraction": 0.031905509096858055
+        },
+        {
+          "name": "ninfer::ops::detail::(anonymous namespace)::swa_partial_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, int const*, int const*, int const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, float*, float*, int, int, int, int, int, int, int, float)",
+          "calls": 10,
+          "kernel_ms": 3.387655,
+          "fraction": 0.02550723858544946
+        },
+        {
+          "name": "ninfer::ops::r9700::linear::(anonymous namespace)::a8g64_quantize_activation_kernel(hip_bfloat16 const*, unsigned char*, unsigned char*, unsigned short*, unsigned int*, unsigned int, unsigned int)",
+          "calls": 670,
+          "kernel_ms": 2.191773,
+          "fraction": 0.016502883804917066
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::rmsnorm_k5120_rows4_cta_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, float, bool)",
+          "calls": 282,
+          "kernel_ms": 2.071088,
+          "fraction": 0.01559419000679271
+        },
+        {
+          "name": "ninfer::ops::r9700::gdn::(anonymous namespace)::bf16_projected_control_t1_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, float const*, float const*, float*, float*)",
+          "calls": 96,
+          "kernel_ms": 1.868689,
+          "fraction": 0.014070233292647855
+        },
+        {
+          "name": "Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SABV_SAV_UserArgs_MT64x64x32_MI16x16x1_SN_LDSB0_AFC1_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA0_DTLB0_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUAMB_GLS0_HPLR0_ISA1201_ICIW0_IU1_K1_LDSTI0_LBSPPA128_LBSPPB128_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA8_LPB8_LPMXSA0_LPMXSB0_LPM0_LRVW8_LWPMn1_MIAV1_MIWT4_4_MXLIBL_MXSFNS_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL0_PAP0_PGL0_PGR1_PLR1_PKA0_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK0_SKFTR0_SKFDPO0_SKWS0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSM1_ULSGRO0_USL1_USLMX0_UDFMAC0_UIOFGRO0_UPLRP0_USFGROn1_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB1_WS32_WG16_2_1_WGMXCC1",
+          "calls": 4,
+          "kernel_ms": 1.609006,
+          "fraction": 0.012114958556116162
+        },
+        {
+          "name": "__amd_rocclr_fillBufferUnAligned",
+          "calls": 754,
+          "kernel_ms": 1.236002,
+          "fraction": 0.009306437020916446
+        },
+        {
+          "name": "ninfer::ops::dflash2_column_topk_split_kernel(hip_bfloat16 const*, float*, int*, int, int, int)",
+          "calls": 2,
+          "kernel_ms": 1.185885,
+          "fraction": 0.008929082692867407
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::silu_mul_strided_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned long, ninfer::ops::r9700::eager::SiluMulStridedShape)",
+          "calls": 138,
+          "kernel_ms": 1.085683,
+          "fraction": 0.008174614979732743
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::gated_rmsnorm_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float)",
+          "calls": 96,
+          "kernel_ms": 0.911323,
+          "fraction": 0.0068617770078144204
+        },
+        {
+          "name": "ninfer::ops::r9700::kv::softmax_wmma_scores_batched_dflash_verify_in_place_kernel(float*, unsigned long, int const*)",
+          "calls": 96,
+          "kernel_ms": 0.818603,
+          "fraction": 0.006163644771313692
+        },
+        {
+          "name": "ninfer::ops::r9700::linear::(anonymous namespace)::fp8_quantize_activation_kernel(hip_bfloat16 const*, unsigned char*, float*, unsigned int*, unsigned int, unsigned int)",
+          "calls": 52,
+          "kernel_ms": 0.513481,
+          "fraction": 0.00386623855619748
+        },
+        {
+          "name": "ninfer::ops::r9700::gdn::(anonymous namespace)::projection_conv_record_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, int const*, int const*, int const*, hip_bfloat16*, hip_bfloat16*, hip_bfloat16*, hip_bfloat16*, hip_bfloat16*, unsigned int, unsigned int)",
+          "calls": 96,
+          "kernel_ms": 0.495481,
+          "fraction": 0.0037307081392754233
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::residual_add_kernel(hip_bfloat16 const*, hip_bfloat16*, unsigned long)",
+          "calls": 276,
+          "kernel_ms": 0.461842,
+          "fraction": 0.0034774243784509197
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::rmsnorm_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float, bool)",
+          "calls": 62,
+          "kernel_ms": 0.314561,
+          "fraction": 0.002368476859856617
+        },
+        {
+          "name": "ninfer::ops::argmax_kernel(hip_bfloat16 const*, int*, int, int, ninfer::ops::SamplingConfig const*, int)",
+          "calls": 2,
+          "kernel_ms": 0.280402,
+          "fraction": 0.0021112777758765873
+        },
+        {
+          "name": "void ninfer::ops::r9700::kv::(anonymous namespace)::append_kernel<16u, true, false, false>(hip_bfloat16 const*, hip_bfloat16 const*, unsigned int const*, unsigned long, int const*, unsigned int, unsigned int const*, unsigned int, unsigned int const*, unsigned int, int const*, unsigned int, unsigned int, unsigned long, unsigned char*, unsigned char*, unsigned short*, unsigned int*)",
+          "calls": 96,
+          "kernel_ms": 0.244163,
+          "fraction": 0.0018384173992744529
+        },
+        {
+          "name": "__amd_rocclr_copyBuffer",
+          "calls": 10,
+          "kernel_ms": 0.220641,
+          "fraction": 0.0016613092622277518
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::bf16_extract_features_kernel(hip_bfloat16 const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int, unsigned long)",
+          "calls": 128,
+          "kernel_ms": 0.218122,
+          "fraction": 0.0016423425333262707
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::rmsnorm_k256_token8_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float, bool)",
+          "calls": 32,
+          "kernel_ms": 0.0978,
+          "fraction": 0.0007363819319431752
+        },
+        {
+          "name": "__amd_rocclr_copyBufferRectAligned",
+          "calls": 54,
+          "kernel_ms": 0.09084,
+          "fraction": 0.00068397683739998
+        },
+        {
+          "name": "ninfer::ops::(anonymous namespace)::poison_nonfinite_output(unsigned int const*, hip_bfloat16*, unsigned long)",
+          "calls": 52,
+          "kernel_ms": 0.085441,
+          "fraction": 0.0006433252417909697
+        },
+        {
+          "name": "void ninfer::ops::(anonymous namespace)::rope_kernel<(ninfer::ops::(anonymous namespace)::Profile)0, 256, 32, 24, 4, false>(int const*, hip_bfloat16*, hip_bfloat16*, int, long, long)",
+          "calls": 32,
+          "kernel_ms": 0.07824,
+          "fraction": 0.0005891055455545402
+        },
+        {
+          "name": "ninfer::ops::dflash2_column_topk_merge_kernel(float const*, int const*, float*, int*, int const*, int, int, int)",
+          "calls": 2,
+          "kernel_ms": 0.073401,
+          "fraction": 0.0005526704518053273
+        },
+        {
+          "name": "ninfer::ops::speculative_sampling_partial_topk_kernel(hip_bfloat16 const*, int const*, int const*, ninfer::ops::SamplingConfig const*, int, int, int, int, ninfer::ops::SamplingWorkspace, unsigned long, int const*, int const*, int const*)",
+          "calls": 2,
+          "kernel_ms": 0.05992,
+          "fraction": 0.0004511656989983135
+        },
+        {
+          "name": "ninfer::ops::detail::(anonymous namespace)::swa_reduce_kernel(hip_bfloat16 const*, float const*, float const*, int const*, hip_bfloat16*, int, int)",
+          "calls": 10,
+          "kernel_ms": 0.05796,
+          "fraction": 0.0004364079424890229
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::sigmoid_mul_kernel(hip_bfloat16 const*, hip_bfloat16*, unsigned long)",
+          "calls": 32,
+          "kernel_ms": 0.05788,
+          "fraction": 0.0004358055850804804
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::cast_fp32_to_bf16_kernel(float const*, hip_bfloat16*, unsigned long)",
+          "calls": 32,
+          "kernel_ms": 0.0534,
+          "fraction": 0.0004020735702021018
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::bf16_scatter_batch_kernel(hip_bfloat16 const*, int const*, int const*, hip_bfloat16*, unsigned int, unsigned int, unsigned long, unsigned long)",
+          "calls": 10,
+          "kernel_ms": 0.04272,
+          "fraction": 0.0003216588561616815
+        },
+        {
+          "name": "void ninfer::ops::detail::(anonymous namespace)::grouped_dynamic_conv_kernel<true>(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, hip_bfloat16*, int, int)",
+          "calls": 20,
+          "kernel_ms": 0.03976,
+          "fraction": 0.0002993716320456099
+        },
+        {
+          "name": "void ninfer::ops::detail::(anonymous namespace)::grouped_dynamic_conv_kernel<false>(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, hip_bfloat16*, int, int)",
+          "calls": 20,
+          "kernel_ms": 0.03936,
+          "fraction": 0.0002963598450028975
+        },
+        {
+          "name": "void ninfer::ops::(anonymous namespace)::rope_kernel<(ninfer::ops::(anonymous namespace)::Profile)2, 128, 64, 32, 8, false>(int const*, hip_bfloat16*, hip_bfloat16*, int, long, long)",
+          "calls": 10,
+          "kernel_ms": 0.03844,
+          "fraction": 0.00028943273480465907
+        },
+        {
+          "name": "ninfer::ops::dflash2_path_select_kernel(float const*, int const*, hip_bfloat16 const*, ninfer::ops::Dflash2CodebookDevice, ninfer::ops::Dflash2CodebookDevice, int const*, int const*, int*, int*, float*, int, int, ninfer::ops::SamplingConfig const*, unsigned long long, int, bool)",
+          "calls": 2,
+          "kernel_ms": 0.0342,
+          "fraction": 0.0002575077921519079
+        },
+        {
+          "name": "ninfer::ops::speculative_sampling_p_less_mass_finalize_kernel(hip_bfloat16 const*, int const*, int const*, int*, int*, int*, int*, int*, ninfer::ops::SamplingConfig const*, int, int, int, int, ninfer::ops::SamplingWorkspace, unsigned long, int const*, float const*, int, int const*, int const*, int const*, int*, int*)",
+          "calls": 2,
+          "kernel_ms": 0.02952,
+          "fraction": 0.00022226988375217315
+        },
+        {
+          "name": "void ninfer::ops::(anonymous namespace)::rope_kernel<(ninfer::ops::(anonymous namespace)::Profile)2, 128, 64, 8, 0, false>(int const*, hip_bfloat16*, hip_bfloat16*, int, long, long)",
+          "calls": 10,
+          "kernel_ms": 0.017441,
+          "fraction": 0.00013132144452986626
+        },
+        {
+          "name": "ninfer::ops::r9700::dflash::(anonymous namespace)::append_cyclic_kernel(unsigned short const*, unsigned short const*, int const*, int const*, int const*, unsigned short*, unsigned short*, int, int, int, int)",
+          "calls": 10,
+          "kernel_ms": 0.017,
+          "fraction": 0.00012800094931527585
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::embedding_gather_q4_kernel(unsigned char const*, unsigned short const*, int const*, hip_bfloat16*, unsigned int, unsigned int, unsigned long)",
+          "calls": 4,
+          "kernel_ms": 0.0102,
+          "fraction": 7.680056958916552e-05
+        },
+        {
+          "name": "ninfer::ops::r9700::schedule::(anonymous namespace)::prepare_ragged_prefix_kernel(HIP_vector_type<unsigned int, 4u> const*, int const*, int const*, int const*, HIP_vector_type<unsigned int, 4u>*, int*, int*, unsigned int, unsigned int, unsigned long, unsigned long)",
+          "calls": 2,
+          "kernel_ms": 0.00968,
+          "fraction": 7.288524643363944e-05
+        },
+        {
+          "name": "ninfer::targets::qwen3::(anonymous namespace)::initialize_segmented_cursor(int const*, unsigned int, unsigned int, unsigned int, unsigned int*, unsigned int*)",
+          "calls": 6,
+          "kernel_ms": 0.0096,
+          "fraction": 7.228288902509696e-05
+        },
+        {
+          "name": "ninfer::targets::qwen3::(anonymous namespace)::advance_segmented_cursor(int const*, unsigned int, unsigned int, unsigned int*, unsigned int*)",
+          "calls": 6,
+          "kernel_ms": 0.008,
+          "fraction": 6.0235740854247465e-05
+        },
+        {
+          "name": "ninfer::ops::speculative_prepare_verify_inputs_kernel(int const*, int const*, int const*, int const*, int*, int*, int)",
+          "calls": 2,
+          "kernel_ms": 0.00468,
+          "fraction": 3.523790839973477e-05
+        },
+        {
+          "name": "ninfer::ops::speculative_sampling_group_finalize_kernel(int const*, int const*, int const*, int*, int*, int*, int*, int*, ninfer::ops::SamplingConfig const*, int, int, int, int, ninfer::ops::SamplingWorkspace, unsigned long, int const*, float const*, int, int const*, int const*, int const*, int*, int*)",
+          "calls": 2,
+          "kernel_ms": 0.00388,
+          "fraction": 2.921433431431002e-05
+        },
+        {
+          "name": "ninfer::ops::r9700::schedule::(anonymous namespace)::prepare_masked_block_kernel(int const*, int const*, int const*, int, int*, int*, unsigned int, unsigned int)",
+          "calls": 2,
+          "kernel_ms": 0.0032,
+          "fraction": 2.4094296341698986e-05
+        },
+        {
+          "name": "ninfer::ops::speculative_select_accepted_hidden_kernel(hip_bfloat16 const*, int const*, hip_bfloat16*, int, int)",
+          "calls": 2,
+          "kernel_ms": 0.00288,
+          "fraction": 2.1684866707529087e-05
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::bf16_scatter_kernel(hip_bfloat16 const*, int const*, hip_bfloat16*, unsigned int, unsigned int)",
+          "calls": 2,
+          "kernel_ms": 0.00252,
+          "fraction": 1.897425836908795e-05
+        }
+      ]
+    },
+    {
+      "graph": 1,
+      "rounds": 4,
+      "kernel_ms": 168.802744,
+      "families": [
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<34816u, 5120u, 5u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 268,
+          "kernel_ms": 45.306465,
+          "fraction": 0.2683988656013791
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<5120u, 17408u, 5u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 268,
+          "kernel_ms": 24.700739,
+          "fraction": 0.1463290134667479
+        },
+        {
+          "name": "void ninfer::ops::r9700::kv::pv_vector_batched_dflash_verify_kernel<16u, false, false>(float const*, unsigned char const*, unsigned short const*, unsigned int const*, int const*, unsigned int, unsigned int, unsigned long, unsigned long, unsigned int, float*)",
+          "calls": 64,
+          "kernel_ms": 12.302654,
+          "fraction": 0.07288183656540559
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<12288u, 5120u, 5u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 192,
+          "kernel_ms": 11.777729,
+          "fraction": 0.06977214185570349
+        },
+        {
+          "name": "Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SABV_SAV_UserArgs_MT16x128x32_MI16x16x1_SN_LDSB0_AFC1_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA0_DTLB0_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUAMB_GLS0_HPLR0_ISA1201_ICIW0_IU1_K1_LDSTI0_LBSPPA128_LBSPPB128_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA8_LPB8_LPMXSA0_LPMXSB0_LPM0_LRVW8_LWPMn1_MIAV1_MIWT1_8_MXLIBL_MXSFNS_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL0_PAP0_PGL0_PGR1_PLR1_PKA0_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK0_SKFTR0_SKFDPO0_SKWS0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSM1_ULSGRO0_USL1_USLMX0_UDFMAC0_UIOFGRO0_UPLRP0_USFGROn1_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS32_WG16_2_1_WGMXCC1",
+          "calls": 96,
+          "kernel_ms": 10.901119,
+          "fraction": 0.0645790390705971
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<5120u, 6144u, 5u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 240,
+          "kernel_ms": 9.638844,
+          "fraction": 0.05710122816486917
+        },
+        {
+          "name": "ninfer::ops::r9700::linear::(anonymous namespace)::a8q4g64_linear_wmma32_kernel(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int)",
+          "calls": 12,
+          "kernel_ms": 8.994117,
+          "fraction": 0.05328181750410408
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<4096u, 5120u, 5u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 192,
+          "kernel_ms": 5.4259,
+          "fraction": 0.03214343482473247
+        },
+        {
+          "name": "void ninfer::ops::r9700::kv::(anonymous namespace)::qk_wmma_batched_dflash_verify_kernel<true>(hip_bfloat16 const*, unsigned char const*, unsigned int const*, int const*, unsigned int, unsigned int, unsigned long, unsigned long, unsigned int, unsigned int, float, float*)",
+          "calls": 64,
+          "kernel_ms": 4.845026,
+          "fraction": 0.028702294081191
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::rmsnorm_k5120_rows4_cta_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, float, bool)",
+          "calls": 564,
+          "kernel_ms": 4.164417,
+          "fraction": 0.02467031578586187
+        },
+        {
+          "name": "Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SABV_SAV_UserArgs_MT64x64x32_MI16x16x1_SN_LDSB0_AFC1_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA0_DTLB0_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUAMB_GLS0_HPLR0_ISA1201_ICIW0_IU1_K1_LDSTI0_LBSPPA128_LBSPPB128_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA8_LPB8_LPMXSA0_LPMXSB0_LPM0_LRVW8_LWPMn1_MIAV1_MIWT4_4_MXLIBL_MXSFNS_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL0_PAP0_PGL0_PGR1_PLR1_PKA0_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK0_SKFTR0_SKFDPO0_SKWS0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSM1_ULSGRO0_USL1_USLMX0_UDFMAC0_UIOFGRO0_UPLRP0_USFGROn1_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB1_WS32_WG16_2_1_WGMXCC1",
+          "calls": 8,
+          "kernel_ms": 3.095293,
+          "fraction": 0.01833674575811398
+        },
+        {
+          "name": "void ninfer::ops::(anonymous namespace)::record_kernel<false>(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, float const*, float const*, float const*, int const*, int const*, int const*, float*, hip_bfloat16*, hip_bfloat16*, float*, hip_bfloat16*, int, int, float)",
+          "calls": 192,
+          "kernel_ms": 2.756332,
+          "fraction": 0.01632871560429136
+        },
+        {
+          "name": "__amd_rocclr_fillBufferUnAligned",
+          "calls": 1500,
+          "kernel_ms": 2.490772,
+          "fraction": 0.01475551842925018
+        },
+        {
+          "name": "ninfer::ops::detail::(anonymous namespace)::swa_partial_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, int const*, int const*, int const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, float*, float*, int, int, int, int, int, int, int, float)",
+          "calls": 20,
+          "kernel_ms": 2.301889,
+          "fraction": 0.013636561500445751
+        },
+        {
+          "name": "ninfer::ops::r9700::linear::(anonymous namespace)::a8g64_quantize_activation_kernel(hip_bfloat16 const*, unsigned char*, unsigned char*, unsigned short*, unsigned int*, unsigned int, unsigned int)",
+          "calls": 1332,
+          "kernel_ms": 2.20737,
+          "fraction": 0.01307662392028414
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<7168u, 5120u, 5u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 56,
+          "kernel_ms": 2.042131,
+          "fraction": 0.012097735804579101
+        },
+        {
+          "name": "ninfer::ops::r9700::gdn::(anonymous namespace)::bf16_projected_control_t1_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, float const*, float const*, float*, float*)",
+          "calls": 192,
+          "kernel_ms": 1.412287,
+          "fraction": 0.008366493141841343
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<6144u, 5120u, 5u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 40,
+          "kernel_ms": 1.40029,
+          "fraction": 0.008295422022286556
+        },
+        {
+          "name": "ninfer::ops::dflash2_column_topk_split_kernel(hip_bfloat16 const*, float*, int*, int, int, int)",
+          "calls": 4,
+          "kernel_ms": 1.197725,
+          "fraction": 0.007095411908706887
+        },
+        {
+          "name": "ninfer::ops::r9700::linear::(anonymous namespace)::fp8_quantize_activation_kernel(hip_bfloat16 const*, unsigned char*, float*, unsigned int*, unsigned int, unsigned int)",
+          "calls": 104,
+          "kernel_ms": 1.030566,
+          "fraction": 0.006105149570317411
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::silu_mul_strided_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned long, ninfer::ops::r9700::eager::SiluMulStridedShape)",
+          "calls": 276,
+          "kernel_ms": 0.998525,
+          "fraction": 0.005915336305196556
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<1280u, 5120u, 5u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 40,
+          "kernel_ms": 0.989686,
+          "fraction": 0.005862973412327941
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::rmsnorm_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float, bool)",
+          "calls": 188,
+          "kernel_ms": 0.919085,
+          "fraction": 0.005444727841627977
+        },
+        {
+          "name": "ninfer::ops::r9700::gdn::(anonymous namespace)::projection_conv_record_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, int const*, int const*, int const*, hip_bfloat16*, hip_bfloat16*, hip_bfloat16*, hip_bfloat16*, hip_bfloat16*, unsigned int, unsigned int)",
+          "calls": 192,
+          "kernel_ms": 0.917842,
+          "fraction": 0.0054373642172546675
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::residual_add_kernel(hip_bfloat16 const*, hip_bfloat16*, unsigned long)",
+          "calls": 552,
+          "kernel_ms": 0.904681,
+          "fraction": 0.005359397475197441
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::gated_rmsnorm_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float)",
+          "calls": 192,
+          "kernel_ms": 0.787001,
+          "fraction": 0.004662252409830495
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<5120u, 25600u, 5u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 4,
+          "kernel_ms": 0.721163,
+          "fraction": 0.004272223205091974
+        },
+        {
+          "name": "ninfer::ops::r9700::kv::softmax_wmma_scores_batched_dflash_verify_in_place_kernel(float*, unsigned long, int const*)",
+          "calls": 64,
+          "kernel_ms": 0.632322,
+          "fraction": 0.0037459225188898587
+        },
+        {
+          "name": "ninfer::ops::argmax_kernel(hip_bfloat16 const*, int*, int, int, ninfer::ops::SamplingConfig const*, int)",
+          "calls": 4,
+          "kernel_ms": 0.572763,
+          "fraction": 0.003393090576774036
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<5120u, 4096u, 5u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 20,
+          "kernel_ms": 0.566123,
+          "fraction": 0.0033537547233236918
+        },
+        {
+          "name": "__amd_rocclr_copyBuffer",
+          "calls": 20,
+          "kernel_ms": 0.441041,
+          "fraction": 0.0026127596598785148
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::bf16_extract_features_kernel(hip_bfloat16 const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int, unsigned long)",
+          "calls": 256,
+          "kernel_ms": 0.41988,
+          "fraction": 0.0024874003233028015
+        },
+        {
+          "name": "ninfer::ops::detail::(anonymous namespace)::swa_reduce_kernel(hip_bfloat16 const*, float const*, float const*, int const*, hip_bfloat16*, int, int)",
+          "calls": 20,
+          "kernel_ms": 0.382204,
+          "fraction": 0.002264204899417986
+        },
+        {
+          "name": "void ninfer::ops::r9700::kv::(anonymous namespace)::append_kernel<16u, true, false, false>(hip_bfloat16 const*, hip_bfloat16 const*, unsigned int const*, unsigned long, int const*, unsigned int, unsigned int const*, unsigned int, unsigned int const*, unsigned int, int const*, unsigned int, unsigned int, unsigned long, unsigned char*, unsigned char*, unsigned short*, unsigned int*)",
+          "calls": 64,
+          "kernel_ms": 0.19172,
+          "fraction": 0.001135763527635546
+        },
+        {
+          "name": "__amd_rocclr_copyBufferRectAligned",
+          "calls": 108,
+          "kernel_ms": 0.181441,
+          "fraction": 0.0010748699677536047
+        },
+        {
+          "name": "ninfer::ops::(anonymous namespace)::poison_nonfinite_output(unsigned int const*, hip_bfloat16*, unsigned long)",
+          "calls": 104,
+          "kernel_ms": 0.17028,
+          "fraction": 0.0010087513743260003
+        },
+        {
+          "name": "ninfer::ops::dflash2_column_topk_merge_kernel(float const*, int const*, float*, int*, int const*, int, int, int)",
+          "calls": 4,
+          "kernel_ms": 0.136,
+          "fraction": 0.0008056741068142826
+        },
+        {
+          "name": "void ninfer::ops::(anonymous namespace)::rope_kernel<(ninfer::ops::(anonymous namespace)::Profile)0, 256, 32, 24, 4, true>(int const*, hip_bfloat16*, hip_bfloat16*, int, long, long)",
+          "calls": 64,
+          "kernel_ms": 0.11616,
+          "fraction": 0.0006881404724084343
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::cast_fp32_to_bf16_kernel(float const*, hip_bfloat16*, unsigned long)",
+          "calls": 64,
+          "kernel_ms": 0.10564,
+          "fraction": 0.0006258192106166236
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::sigmoid_mul_kernel(hip_bfloat16 const*, hip_bfloat16*, unsigned long)",
+          "calls": 64,
+          "kernel_ms": 0.10416,
+          "fraction": 0.0006170515806307035
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::bf16_scatter_batch_kernel(hip_bfloat16 const*, int const*, int const*, hip_bfloat16*, unsigned int, unsigned int, unsigned long, unsigned long)",
+          "calls": 20,
+          "kernel_ms": 0.08592,
+          "fraction": 0.0005089964651285527
+        },
+        {
+          "name": "ninfer::ops::dflash2_path_select_kernel(float const*, int const*, hip_bfloat16 const*, ninfer::ops::Dflash2CodebookDevice, ninfer::ops::Dflash2CodebookDevice, int const*, int const*, int*, int*, float*, int, int, ninfer::ops::SamplingConfig const*, unsigned long long, int, bool)",
+          "calls": 4,
+          "kernel_ms": 0.068281,
+          "fraction": 0.0004045017182896032
+        },
+        {
+          "name": "void ninfer::ops::detail::(anonymous namespace)::grouped_dynamic_conv_kernel<true>(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, hip_bfloat16*, int, int)",
+          "calls": 40,
+          "kernel_ms": 0.0658,
+          "fraction": 0.0003898040899145573
+        },
+        {
+          "name": "void ninfer::ops::detail::(anonymous namespace)::grouped_dynamic_conv_kernel<false>(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, hip_bfloat16*, int, int)",
+          "calls": 40,
+          "kernel_ms": 0.06512,
+          "fraction": 0.0003857757193804859
+        },
+        {
+          "name": "ninfer::ops::speculative_sampling_partial_topk_kernel(hip_bfloat16 const*, int const*, int const*, ninfer::ops::SamplingConfig const*, int, int, int, int, ninfer::ops::SamplingWorkspace, unsigned long, int const*, int const*, int const*)",
+          "calls": 4,
+          "kernel_ms": 0.04624,
+          "fraction": 0.00027392919631685607
+        },
+        {
+          "name": "void ninfer::ops::(anonymous namespace)::rope_kernel<(ninfer::ops::(anonymous namespace)::Profile)2, 128, 64, 32, 8, true>(int const*, hip_bfloat16*, hip_bfloat16*, int, long, long)",
+          "calls": 20,
+          "kernel_ms": 0.04352,
+          "fraction": 0.0002578157141805704
+        },
+        {
+          "name": "void ninfer::ops::(anonymous namespace)::rope_kernel<(ninfer::ops::(anonymous namespace)::Profile)2, 128, 64, 8, 0, true>(int const*, hip_bfloat16*, hip_bfloat16*, int, long, long)",
+          "calls": 20,
+          "kernel_ms": 0.03592,
+          "fraction": 0.00021279274938800757
+        },
+        {
+          "name": "ninfer::ops::r9700::dflash::(anonymous namespace)::append_cyclic_kernel(unsigned short const*, unsigned short const*, int const*, int const*, int const*, unsigned short*, unsigned short*, int, int, int, int)",
+          "calls": 20,
+          "kernel_ms": 0.03288,
+          "fraction": 0.00019478356347098243
+        },
+        {
+          "name": "ninfer::ops::speculative_sampling_p_less_mass_finalize_kernel(hip_bfloat16 const*, int const*, int const*, int*, int*, int*, int*, int*, ninfer::ops::SamplingConfig const*, int, int, int, int, ninfer::ops::SamplingWorkspace, unsigned long, int const*, float const*, int, int const*, int const*, int const*, int*, int*)",
+          "calls": 4,
+          "kernel_ms": 0.02788,
+          "fraction": 0.00016516319189692794
+        },
+        {
+          "name": "ninfer::ops::r9700::schedule::(anonymous namespace)::prepare_ragged_prefix_kernel(HIP_vector_type<unsigned int, 4u> const*, int const*, int const*, int const*, HIP_vector_type<unsigned int, 4u>*, int*, int*, unsigned int, unsigned int, unsigned long, unsigned long)",
+          "calls": 4,
+          "kernel_ms": 0.019521,
+          "fraction": 0.00011564385469942361
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::embedding_gather_q4_kernel(unsigned char const*, unsigned short const*, int const*, hip_bfloat16*, unsigned int, unsigned int, unsigned long)",
+          "calls": 8,
+          "kernel_ms": 0.01668,
+          "fraction": 9.881355957104583e-05
+        },
+        {
+          "name": "ninfer::ops::speculative_prepare_verify_inputs_kernel(int const*, int const*, int const*, int const*, int*, int*, int)",
+          "calls": 4,
+          "kernel_ms": 0.00836,
+          "fraction": 4.952526127181914e-05
+        },
+        {
+          "name": "ninfer::ops::speculative_sampling_group_finalize_kernel(int const*, int const*, int const*, int*, int*, int*, int*, int*, ninfer::ops::SamplingConfig const*, int, int, int, int, ninfer::ops::SamplingWorkspace, unsigned long, int const*, float const*, int, int const*, int const*, int const*, int*, int*)",
+          "calls": 4,
+          "kernel_ms": 0.007,
+          "fraction": 4.146852020367631e-05
+        },
+        {
+          "name": "ninfer::ops::r9700::schedule::(anonymous namespace)::prepare_masked_block_kernel(int const*, int const*, int const*, int, int*, int*, unsigned int, unsigned int)",
+          "calls": 4,
+          "kernel_ms": 0.00648,
+          "fraction": 3.838800155997464e-05
+        },
+        {
+          "name": "ninfer::targets::qwen3::(anonymous namespace)::initialize_segmented_cursor(int const*, unsigned int, unsigned int, unsigned int, unsigned int*, unsigned int*)",
+          "calls": 4,
+          "kernel_ms": 0.00648,
+          "fraction": 3.838800155997464e-05
+        },
+        {
+          "name": "ninfer::targets::qwen3::(anonymous namespace)::advance_segmented_cursor(int const*, unsigned int, unsigned int, unsigned int*, unsigned int*)",
+          "calls": 4,
+          "kernel_ms": 0.00624,
+          "fraction": 3.6966223724420024e-05
+        },
+        {
+          "name": "ninfer::ops::speculative_select_accepted_hidden_kernel(hip_bfloat16 const*, int const*, hip_bfloat16*, int, int)",
+          "calls": 4,
+          "kernel_ms": 0.00592,
+          "fraction": 3.507051994368054e-05
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::bf16_scatter_kernel(hip_bfloat16 const*, int const*, hip_bfloat16*, unsigned int, unsigned int)",
+          "calls": 4,
+          "kernel_ms": 0.00512,
+          "fraction": 3.0331260491831815e-05
+        }
+      ]
+    }
+  ],
+  "generic_nodes": [
+    {
+      "graph": 4,
+      "node": 4,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 376.2080322580645
+    },
+    {
+      "graph": 4,
+      "node": 8,
+      "grid_x": 12288,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 78.88280645161291
+    },
+    {
+      "graph": 4,
+      "node": 16,
+      "grid_x": 12288,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 78.00287096774194
+    },
+    {
+      "graph": 4,
+      "node": 24,
+      "grid_x": 12288,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 77.24419354838709
+    },
+    {
+      "graph": 4,
+      "node": 32,
+      "grid_x": 12288,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 76.8906129032258
+    },
+    {
+      "graph": 4,
+      "node": 40,
+      "grid_x": 12288,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 76.89587096774194
+    },
+    {
+      "graph": 4,
+      "node": 51,
+      "grid_x": 2560,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 71.77325806451614
+    },
+    {
+      "graph": 4,
+      "node": 55,
+      "grid_x": 12288,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 77.09448387096774
+    },
+    {
+      "graph": 4,
+      "node": 66,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 62.571838709677415
+    },
+    {
+      "graph": 4,
+      "node": 72,
+      "grid_x": 2560,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 71.31129032258065
+    },
+    {
+      "graph": 4,
+      "node": 86,
+      "grid_x": 2560,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 71.56283870967742
+    },
+    {
+      "graph": 4,
+      "node": 90,
+      "grid_x": 12288,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 77.07509677419354
+    },
+    {
+      "graph": 4,
+      "node": 101,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 63.21432258064516
+    },
+    {
+      "graph": 4,
+      "node": 107,
+      "grid_x": 2560,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 71.34490322580645
+    },
+    {
+      "graph": 4,
+      "node": 121,
+      "grid_x": 2560,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 71.40670967741934
+    },
+    {
+      "graph": 4,
+      "node": 125,
+      "grid_x": 12288,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 77.0442258064516
+    },
+    {
+      "graph": 4,
+      "node": 136,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 62.31774193548387
+    },
+    {
+      "graph": 4,
+      "node": 142,
+      "grid_x": 2560,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 71.33580645161291
+    },
+    {
+      "graph": 4,
+      "node": 156,
+      "grid_x": 2560,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 71.30087096774194
+    },
+    {
+      "graph": 4,
+      "node": 160,
+      "grid_x": 12288,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 77.07383870967742
+    },
+    {
+      "graph": 4,
+      "node": 171,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 63.22858064516129
+    },
+    {
+      "graph": 4,
+      "node": 177,
+      "grid_x": 2560,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 71.34751612903226
+    },
+    {
+      "graph": 4,
+      "node": 191,
+      "grid_x": 2560,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 71.40667741935484
+    },
+    {
+      "graph": 4,
+      "node": 195,
+      "grid_x": 12288,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 76.96054838709678
+    },
+    {
+      "graph": 4,
+      "node": 206,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 62.36151612903226
+    },
+    {
+      "graph": 4,
+      "node": 212,
+      "grid_x": 2560,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 71.35767741935483
+    },
+    {
+      "graph": 4,
+      "node": 227,
+      "grid_x": 496640,
+      "grid_y": 1,
+      "calls": 31,
+      "mean_us": 1153.7983870967744
+    },
+    {
+      "graph": 4,
+      "node": 230,
+      "grid_x": 512,
+      "grid_y": 1,
+      "calls": 31,
+      "mean_us": 70.95241935483871
+    },
+    {
+      "graph": 4,
+      "node": 233,
+      "grid_x": 512,
+      "grid_y": 1,
+      "calls": 31,
+      "mean_us": 56.015741935483874
+    },
+    {
+      "graph": 4,
+      "node": 236,
+      "grid_x": 512,
+      "grid_y": 1,
+      "calls": 31,
+      "mean_us": 56.09058064516129
+    },
+    {
+      "graph": 4,
+      "node": 239,
+      "grid_x": 512,
+      "grid_y": 1,
+      "calls": 31,
+      "mean_us": 56.10725806451613
+    },
+    {
+      "graph": 4,
+      "node": 253,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.59509677419355
+    },
+    {
+      "graph": 4,
+      "node": 256,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 91.5023870967742
+    },
+    {
+      "graph": 4,
+      "node": 262,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.16045161290323
+    },
+    {
+      "graph": 4,
+      "node": 277,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.16806451612904
+    },
+    {
+      "graph": 4,
+      "node": 280,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.17716129032257
+    },
+    {
+      "graph": 4,
+      "node": 286,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 91.35783870967742
+    },
+    {
+      "graph": 4,
+      "node": 301,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.25322580645161
+    },
+    {
+      "graph": 4,
+      "node": 304,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 91.75912903225806
+    },
+    {
+      "graph": 4,
+      "node": 310,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.26364516129031
+    },
+    {
+      "graph": 4,
+      "node": 378,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.74848387096775
+    },
+    {
+      "graph": 4,
+      "node": 381,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.54648387096775
+    },
+    {
+      "graph": 4,
+      "node": 403,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.73706451612902
+    },
+    {
+      "graph": 4,
+      "node": 406,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.25070967741935
+    },
+    {
+      "graph": 4,
+      "node": 412,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.45851612903226
+    },
+    {
+      "graph": 4,
+      "node": 428,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.59519354838709
+    },
+    {
+      "graph": 4,
+      "node": 431,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.92287096774194
+    },
+    {
+      "graph": 4,
+      "node": 437,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.00416129032257
+    },
+    {
+      "graph": 4,
+      "node": 501,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.69703225806451
+    },
+    {
+      "graph": 4,
+      "node": 504,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.07003225806451
+    },
+    {
+      "graph": 4,
+      "node": 510,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.25448387096775
+    },
+    {
+      "graph": 4,
+      "node": 525,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.65835483870968
+    },
+    {
+      "graph": 4,
+      "node": 528,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 93.26625806451614
+    },
+    {
+      "graph": 4,
+      "node": 534,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.33458064516128
+    },
+    {
+      "graph": 4,
+      "node": 549,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.57441935483871
+    },
+    {
+      "graph": 4,
+      "node": 552,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.00945161290323
+    },
+    {
+      "graph": 4,
+      "node": 558,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.29080645161291
+    },
+    {
+      "graph": 4,
+      "node": 622,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.86212903225807
+    },
+    {
+      "graph": 4,
+      "node": 625,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.8287741935484
+    },
+    {
+      "graph": 4,
+      "node": 631,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.44816129032257
+    },
+    {
+      "graph": 4,
+      "node": 646,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.71912903225807
+    },
+    {
+      "graph": 4,
+      "node": 649,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.17970967741935
+    },
+    {
+      "graph": 4,
+      "node": 655,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.72941935483871
+    },
+    {
+      "graph": 4,
+      "node": 670,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.59006451612903
+    },
+    {
+      "graph": 4,
+      "node": 673,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 93.73316129032257
+    },
+    {
+      "graph": 4,
+      "node": 679,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.47003225806452
+    },
+    {
+      "graph": 4,
+      "node": 727,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 94.9567741935484
+    },
+    {
+      "graph": 4,
+      "node": 742,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.60677419354839
+    },
+    {
+      "graph": 4,
+      "node": 745,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 93.01058064516128
+    },
+    {
+      "graph": 4,
+      "node": 751,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 91.96548387096774
+    },
+    {
+      "graph": 4,
+      "node": 766,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.62467741935484
+    },
+    {
+      "graph": 4,
+      "node": 769,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.44922580645161
+    },
+    {
+      "graph": 4,
+      "node": 775,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.17435483870968
+    },
+    {
+      "graph": 4,
+      "node": 790,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.71525806451614
+    },
+    {
+      "graph": 4,
+      "node": 793,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 91.63125806451613
+    },
+    {
+      "graph": 4,
+      "node": 799,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 93.1073870967742
+    },
+    {
+      "graph": 4,
+      "node": 847,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 94.35906451612902
+    },
+    {
+      "graph": 4,
+      "node": 863,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.6183870967742
+    },
+    {
+      "graph": 4,
+      "node": 866,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 93.39125806451614
+    },
+    {
+      "graph": 4,
+      "node": 872,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.81203225806452
+    },
+    {
+      "graph": 4,
+      "node": 887,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.64025806451613
+    },
+    {
+      "graph": 4,
+      "node": 890,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.25964516129032
+    },
+    {
+      "graph": 4,
+      "node": 896,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.22735483870969
+    },
+    {
+      "graph": 4,
+      "node": 911,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.69712903225806
+    },
+    {
+      "graph": 4,
+      "node": 914,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 93.40945161290323
+    },
+    {
+      "graph": 4,
+      "node": 920,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.43270967741935
+    },
+    {
+      "graph": 4,
+      "node": 968,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 94.23903225806451
+    },
+    {
+      "graph": 4,
+      "node": 983,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.75774193548386
+    },
+    {
+      "graph": 4,
+      "node": 986,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.03780645161291
+    },
+    {
+      "graph": 4,
+      "node": 992,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 93.03396774193548
+    },
+    {
+      "graph": 4,
+      "node": 1007,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.70212903225806
+    },
+    {
+      "graph": 4,
+      "node": 1010,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.81845161290323
+    },
+    {
+      "graph": 4,
+      "node": 1016,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.76174193548387
+    },
+    {
+      "graph": 4,
+      "node": 1031,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.56406451612904
+    },
+    {
+      "graph": 4,
+      "node": 1034,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.26748387096774
+    },
+    {
+      "graph": 4,
+      "node": 1040,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.52174193548386
+    },
+    {
+      "graph": 4,
+      "node": 1088,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 94.51648387096775
+    },
+    {
+      "graph": 4,
+      "node": 1103,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.76683870967743
+    },
+    {
+      "graph": 4,
+      "node": 1106,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.80032258064517
+    },
+    {
+      "graph": 4,
+      "node": 1112,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.23645161290322
+    },
+    {
+      "graph": 4,
+      "node": 1127,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.66093548387097
+    },
+    {
+      "graph": 4,
+      "node": 1130,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.30241935483872
+    },
+    {
+      "graph": 4,
+      "node": 1136,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.86490322580646
+    },
+    {
+      "graph": 4,
+      "node": 1151,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.72164516129031
+    },
+    {
+      "graph": 4,
+      "node": 1154,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 93.00035483870968
+    },
+    {
+      "graph": 4,
+      "node": 1160,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.9783870967742
+    },
+    {
+      "graph": 4,
+      "node": 1208,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 94.46348387096774
+    },
+    {
+      "graph": 4,
+      "node": 1223,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.7126129032258
+    },
+    {
+      "graph": 4,
+      "node": 1226,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.50106451612903
+    },
+    {
+      "graph": 4,
+      "node": 1232,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.37454838709677
+    },
+    {
+      "graph": 4,
+      "node": 1247,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.71503225806451
+    },
+    {
+      "graph": 4,
+      "node": 1250,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.82625806451614
+    },
+    {
+      "graph": 4,
+      "node": 1256,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.22751612903225
+    },
+    {
+      "graph": 4,
+      "node": 1272,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.65054838709678
+    },
+    {
+      "graph": 4,
+      "node": 1275,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.15274193548386
+    },
+    {
+      "graph": 4,
+      "node": 1281,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.74370967741935
+    },
+    {
+      "graph": 4,
+      "node": 1295,
+      "grid_x": 14336,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 78.99367741935484
+    },
+    {
+      "graph": 4,
+      "node": 1300,
+      "grid_x": 14336,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 78.88296774193549
+    },
+    {
+      "graph": 4,
+      "node": 1327,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 94.7087741935484
+    },
+    {
+      "graph": 4,
+      "node": 1342,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.5732258064516
+    },
+    {
+      "graph": 4,
+      "node": 1345,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.55651612903226
+    },
+    {
+      "graph": 4,
+      "node": 1351,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.6558064516129
+    },
+    {
+      "graph": 4,
+      "node": 1366,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.6558064516129
+    },
+    {
+      "graph": 4,
+      "node": 1369,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.75512903225805
+    },
+    {
+      "graph": 4,
+      "node": 1375,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.49570967741934
+    },
+    {
+      "graph": 4,
+      "node": 1390,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.68035483870968
+    },
+    {
+      "graph": 4,
+      "node": 1393,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.94619354838709
+    },
+    {
+      "graph": 4,
+      "node": 1399,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.04290322580646
+    },
+    {
+      "graph": 4,
+      "node": 1413,
+      "grid_x": 14336,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 78.80554838709678
+    },
+    {
+      "graph": 4,
+      "node": 1418,
+      "grid_x": 14336,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 78.87648387096775
+    },
+    {
+      "graph": 4,
+      "node": 1445,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 94.02883870967743
+    },
+    {
+      "graph": 4,
+      "node": 1460,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.80287096774194
+    },
+    {
+      "graph": 4,
+      "node": 1463,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.34748387096774
+    },
+    {
+      "graph": 4,
+      "node": 1469,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.64941935483871
+    },
+    {
+      "graph": 4,
+      "node": 1484,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.81958064516128
+    },
+    {
+      "graph": 4,
+      "node": 1487,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.56567741935483
+    },
+    {
+      "graph": 4,
+      "node": 1493,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.56051612903225
+    },
+    {
+      "graph": 4,
+      "node": 1508,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.6646129032258
+    },
+    {
+      "graph": 4,
+      "node": 1511,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.24974193548387
+    },
+    {
+      "graph": 4,
+      "node": 1517,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.20851612903226
+    },
+    {
+      "graph": 4,
+      "node": 1531,
+      "grid_x": 14336,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 79.05683870967742
+    },
+    {
+      "graph": 4,
+      "node": 1536,
+      "grid_x": 14336,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 78.92416129032257
+    },
+    {
+      "graph": 4,
+      "node": 1563,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 94.1708064516129
+    },
+    {
+      "graph": 4,
+      "node": 1578,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.6996129032258
+    },
+    {
+      "graph": 4,
+      "node": 1581,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.75793548387097
+    },
+    {
+      "graph": 4,
+      "node": 1587,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.52296774193549
+    },
+    {
+      "graph": 4,
+      "node": 1602,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.70216129032258
+    },
+    {
+      "graph": 4,
+      "node": 1605,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 91.79780645161291
+    },
+    {
+      "graph": 4,
+      "node": 1611,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.82758064516129
+    },
+    {
+      "graph": 4,
+      "node": 1626,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.78987096774193
+    },
+    {
+      "graph": 4,
+      "node": 1629,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 93.30877419354839
+    },
+    {
+      "graph": 4,
+      "node": 1635,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.37983870967743
+    },
+    {
+      "graph": 4,
+      "node": 1649,
+      "grid_x": 14336,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 78.96151612903226
+    },
+    {
+      "graph": 4,
+      "node": 1654,
+      "grid_x": 14336,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 78.84035483870969
+    },
+    {
+      "graph": 4,
+      "node": 1681,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 94.24570967741934
+    },
+    {
+      "graph": 4,
+      "node": 1697,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.75009677419355
+    },
+    {
+      "graph": 4,
+      "node": 1700,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.0944193548387
+    },
+    {
+      "graph": 4,
+      "node": 1706,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.4802258064516
+    },
+    {
+      "graph": 4,
+      "node": 1721,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.7371935483871
+    },
+    {
+      "graph": 4,
+      "node": 1724,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.93309677419354
+    },
+    {
+      "graph": 4,
+      "node": 1730,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.32154838709677
+    },
+    {
+      "graph": 4,
+      "node": 1745,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.66216129032257
+    },
+    {
+      "graph": 4,
+      "node": 1748,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.00935483870968
+    },
+    {
+      "graph": 4,
+      "node": 1754,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.52806451612904
+    },
+    {
+      "graph": 4,
+      "node": 1802,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 94.58758064516128
+    },
+    {
+      "graph": 4,
+      "node": 1817,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.6467741935484
+    },
+    {
+      "graph": 4,
+      "node": 1820,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.95896774193548
+    },
+    {
+      "graph": 4,
+      "node": 1826,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.37454838709677
+    },
+    {
+      "graph": 4,
+      "node": 1841,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.57316129032257
+    },
+    {
+      "graph": 4,
+      "node": 1844,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.08941935483871
+    },
+    {
+      "graph": 4,
+      "node": 1850,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.55132258064516
+    },
+    {
+      "graph": 4,
+      "node": 1865,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.78493548387097
+    },
+    {
+      "graph": 4,
+      "node": 1868,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.90354838709678
+    },
+    {
+      "graph": 4,
+      "node": 1874,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.26870967741935
+    },
+    {
+      "graph": 4,
+      "node": 1888,
+      "grid_x": 14336,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 78.8403870967742
+    },
+    {
+      "graph": 4,
+      "node": 1893,
+      "grid_x": 14336,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 78.87509677419355
+    },
+    {
+      "graph": 4,
+      "node": 1920,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 93.73587096774195
+    },
+    {
+      "graph": 4,
+      "node": 1935,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.61577419354839
+    },
+    {
+      "graph": 4,
+      "node": 1938,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.62358064516128
+    },
+    {
+      "graph": 4,
+      "node": 1944,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.44809677419354
+    },
+    {
+      "graph": 4,
+      "node": 1959,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.71906451612902
+    },
+    {
+      "graph": 4,
+      "node": 1962,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.94106451612903
+    },
+    {
+      "graph": 4,
+      "node": 1968,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.30870967741934
+    },
+    {
+      "graph": 4,
+      "node": 1983,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.59519354838709
+    },
+    {
+      "graph": 4,
+      "node": 1986,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.90487096774194
+    },
+    {
+      "graph": 4,
+      "node": 1992,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.19651612903226
+    },
+    {
+      "graph": 4,
+      "node": 2006,
+      "grid_x": 14336,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 79.17451612903226
+    },
+    {
+      "graph": 4,
+      "node": 2011,
+      "grid_x": 14336,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 78.78870967741935
+    },
+    {
+      "graph": 4,
+      "node": 2038,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 94.26212903225806
+    },
+    {
+      "graph": 4,
+      "node": 2053,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.75635483870968
+    },
+    {
+      "graph": 4,
+      "node": 2056,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.75006451612903
+    },
+    {
+      "graph": 4,
+      "node": 2062,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.29583870967743
+    },
+    {
+      "graph": 4,
+      "node": 2077,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.72158064516128
+    },
+    {
+      "graph": 4,
+      "node": 2080,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 93.114
+    },
+    {
+      "graph": 4,
+      "node": 2086,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 93.012
+    },
+    {
+      "graph": 4,
+      "node": 2102,
+      "grid_x": 8192,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 74.82096774193549
+    },
+    {
+      "graph": 4,
+      "node": 2105,
+      "grid_x": 24576,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.443
+    },
+    {
+      "graph": 4,
+      "node": 2111,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 92.19003225806452
+    },
+    {
+      "graph": 4,
+      "node": 2127,
+      "grid_x": 14336,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 78.84919354838709
+    },
+    {
+      "graph": 4,
+      "node": 2132,
+      "grid_x": 14336,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 78.78874193548387
+    },
+    {
+      "graph": 4,
+      "node": 2159,
+      "grid_x": 10240,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 94.21325806451614
+    },
+    {
+      "graph": 4,
+      "node": 2175,
+      "grid_x": 496640,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 2217.6928709677422
+    },
+    {
+      "graph": 3,
+      "node": 4,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 407.602
+    },
+    {
+      "graph": 3,
+      "node": 8,
+      "grid_x": 12288,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 84.5
+    },
+    {
+      "graph": 3,
+      "node": 16,
+      "grid_x": 12288,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 84.321
+    },
+    {
+      "graph": 3,
+      "node": 24,
+      "grid_x": 12288,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 83.66
+    },
+    {
+      "graph": 3,
+      "node": 32,
+      "grid_x": 12288,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 83.54
+    },
+    {
+      "graph": 3,
+      "node": 40,
+      "grid_x": 12288,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 83.761
+    },
+    {
+      "graph": 3,
+      "node": 51,
+      "grid_x": 2560,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 80.88
+    },
+    {
+      "graph": 3,
+      "node": 55,
+      "grid_x": 12288,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 83.84
+    },
+    {
+      "graph": 3,
+      "node": 66,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 68.24
+    },
+    {
+      "graph": 3,
+      "node": 72,
+      "grid_x": 2560,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 80.641
+    },
+    {
+      "graph": 3,
+      "node": 86,
+      "grid_x": 2560,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 80.721
+    },
+    {
+      "graph": 3,
+      "node": 90,
+      "grid_x": 12288,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 83.6
+    },
+    {
+      "graph": 3,
+      "node": 101,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 68.74
+    },
+    {
+      "graph": 3,
+      "node": 107,
+      "grid_x": 2560,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 80.56
+    },
+    {
+      "graph": 3,
+      "node": 121,
+      "grid_x": 2560,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 80.54
+    },
+    {
+      "graph": 3,
+      "node": 125,
+      "grid_x": 12288,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 84.0005
+    },
+    {
+      "graph": 3,
+      "node": 136,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 68.201
+    },
+    {
+      "graph": 3,
+      "node": 142,
+      "grid_x": 2560,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 80.56
+    },
+    {
+      "graph": 3,
+      "node": 156,
+      "grid_x": 2560,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 80.5805
+    },
+    {
+      "graph": 3,
+      "node": 160,
+      "grid_x": 12288,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 84.0205
+    },
+    {
+      "graph": 3,
+      "node": 171,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 68.7205
+    },
+    {
+      "graph": 3,
+      "node": 177,
+      "grid_x": 2560,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 80.6405
+    },
+    {
+      "graph": 3,
+      "node": 191,
+      "grid_x": 2560,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 80.62
+    },
+    {
+      "graph": 3,
+      "node": 195,
+      "grid_x": 12288,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 84.12
+    },
+    {
+      "graph": 3,
+      "node": 206,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 68.1805
+    },
+    {
+      "graph": 3,
+      "node": 212,
+      "grid_x": 2560,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 80.5805
+    },
+    {
+      "graph": 3,
+      "node": 227,
+      "grid_x": 496640,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 1124.0445
+    },
+    {
+      "graph": 3,
+      "node": 230,
+      "grid_x": 512,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 69.8405
+    },
+    {
+      "graph": 3,
+      "node": 233,
+      "grid_x": 512,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 54.94
+    },
+    {
+      "graph": 3,
+      "node": 236,
+      "grid_x": 512,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 55.02
+    },
+    {
+      "graph": 3,
+      "node": 250,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.8205
+    },
+    {
+      "graph": 3,
+      "node": 253,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 90.6805
+    },
+    {
+      "graph": 3,
+      "node": 259,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 101.4405
+    },
+    {
+      "graph": 3,
+      "node": 274,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.0205
+    },
+    {
+      "graph": 3,
+      "node": 277,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 90.82
+    },
+    {
+      "graph": 3,
+      "node": 283,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 100.9605
+    },
+    {
+      "graph": 3,
+      "node": 298,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.2
+    },
+    {
+      "graph": 3,
+      "node": 301,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 91.481
+    },
+    {
+      "graph": 3,
+      "node": 307,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 101.3405
+    },
+    {
+      "graph": 3,
+      "node": 370,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.7205
+    },
+    {
+      "graph": 3,
+      "node": 373,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 91.48
+    },
+    {
+      "graph": 3,
+      "node": 395,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.3005
+    },
+    {
+      "graph": 3,
+      "node": 398,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 90.18
+    },
+    {
+      "graph": 3,
+      "node": 404,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 101.201
+    },
+    {
+      "graph": 3,
+      "node": 420,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.48
+    },
+    {
+      "graph": 3,
+      "node": 423,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 91.561
+    },
+    {
+      "graph": 3,
+      "node": 429,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 100.9005
+    },
+    {
+      "graph": 3,
+      "node": 489,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.281
+    },
+    {
+      "graph": 3,
+      "node": 492,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 90.86
+    },
+    {
+      "graph": 3,
+      "node": 498,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 101.5405
+    },
+    {
+      "graph": 3,
+      "node": 513,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.14
+    },
+    {
+      "graph": 3,
+      "node": 516,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 91.381
+    },
+    {
+      "graph": 3,
+      "node": 522,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 101.461
+    },
+    {
+      "graph": 3,
+      "node": 537,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 81.841
+    },
+    {
+      "graph": 3,
+      "node": 540,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 90.4
+    },
+    {
+      "graph": 3,
+      "node": 546,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 100.64
+    },
+    {
+      "graph": 3,
+      "node": 606,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 85.101
+    },
+    {
+      "graph": 3,
+      "node": 609,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 91.78
+    },
+    {
+      "graph": 3,
+      "node": 615,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 100.96
+    },
+    {
+      "graph": 3,
+      "node": 630,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.42
+    },
+    {
+      "graph": 3,
+      "node": 633,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 91.3
+    },
+    {
+      "graph": 3,
+      "node": 639,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 100.901
+    },
+    {
+      "graph": 3,
+      "node": 654,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.24
+    },
+    {
+      "graph": 3,
+      "node": 657,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 92.5005
+    },
+    {
+      "graph": 3,
+      "node": 663,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 101.66
+    },
+    {
+      "graph": 3,
+      "node": 707,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 103.0405
+    },
+    {
+      "graph": 3,
+      "node": 722,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 81.94
+    },
+    {
+      "graph": 3,
+      "node": 725,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 90.58
+    },
+    {
+      "graph": 3,
+      "node": 731,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 101.2205
+    },
+    {
+      "graph": 3,
+      "node": 746,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.28
+    },
+    {
+      "graph": 3,
+      "node": 749,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 91.9205
+    },
+    {
+      "graph": 3,
+      "node": 755,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 100.801
+    },
+    {
+      "graph": 3,
+      "node": 770,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.0
+    },
+    {
+      "graph": 3,
+      "node": 773,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 91.2
+    },
+    {
+      "graph": 3,
+      "node": 779,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 101.16
+    },
+    {
+      "graph": 3,
+      "node": 823,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 103.08
+    },
+    {
+      "graph": 3,
+      "node": 839,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.0205
+    },
+    {
+      "graph": 3,
+      "node": 842,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 91.16
+    },
+    {
+      "graph": 3,
+      "node": 848,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 100.881
+    },
+    {
+      "graph": 3,
+      "node": 863,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.14
+    },
+    {
+      "graph": 3,
+      "node": 866,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 90.3005
+    },
+    {
+      "graph": 3,
+      "node": 872,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 100.98
+    },
+    {
+      "graph": 3,
+      "node": 887,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.3005
+    },
+    {
+      "graph": 3,
+      "node": 890,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 91.62
+    },
+    {
+      "graph": 3,
+      "node": 896,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 100.8205
+    },
+    {
+      "graph": 3,
+      "node": 940,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 103.2005
+    },
+    {
+      "graph": 3,
+      "node": 955,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.26
+    },
+    {
+      "graph": 3,
+      "node": 958,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 92.0605
+    },
+    {
+      "graph": 3,
+      "node": 964,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 101.12
+    },
+    {
+      "graph": 3,
+      "node": 979,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.0005
+    },
+    {
+      "graph": 3,
+      "node": 982,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 91.24
+    },
+    {
+      "graph": 3,
+      "node": 988,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 101.2605
+    },
+    {
+      "graph": 3,
+      "node": 1003,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.34
+    },
+    {
+      "graph": 3,
+      "node": 1006,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 90.561
+    },
+    {
+      "graph": 3,
+      "node": 1012,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 101.0805
+    },
+    {
+      "graph": 3,
+      "node": 1056,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 102.98
+    },
+    {
+      "graph": 3,
+      "node": 1071,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.1005
+    },
+    {
+      "graph": 3,
+      "node": 1074,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 92.6805
+    },
+    {
+      "graph": 3,
+      "node": 1080,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 100.8605
+    },
+    {
+      "graph": 3,
+      "node": 1095,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.0
+    },
+    {
+      "graph": 3,
+      "node": 1098,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 90.8205
+    },
+    {
+      "graph": 3,
+      "node": 1104,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 101.2005
+    },
+    {
+      "graph": 3,
+      "node": 1119,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.2
+    },
+    {
+      "graph": 3,
+      "node": 1122,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 91.2
+    },
+    {
+      "graph": 3,
+      "node": 1128,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 100.7205
+    },
+    {
+      "graph": 3,
+      "node": 1172,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 103.2605
+    },
+    {
+      "graph": 3,
+      "node": 1187,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.4
+    },
+    {
+      "graph": 3,
+      "node": 1190,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 90.8605
+    },
+    {
+      "graph": 3,
+      "node": 1196,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 101.34
+    },
+    {
+      "graph": 3,
+      "node": 1211,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.52
+    },
+    {
+      "graph": 3,
+      "node": 1214,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 92.1005
+    },
+    {
+      "graph": 3,
+      "node": 1220,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 100.66
+    },
+    {
+      "graph": 3,
+      "node": 1236,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.421
+    },
+    {
+      "graph": 3,
+      "node": 1239,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 91.48
+    },
+    {
+      "graph": 3,
+      "node": 1245,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 100.84
+    },
+    {
+      "graph": 3,
+      "node": 1259,
+      "grid_x": 14336,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 84.78
+    },
+    {
+      "graph": 3,
+      "node": 1264,
+      "grid_x": 14336,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 85.281
+    },
+    {
+      "graph": 3,
+      "node": 1287,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 103.261
+    },
+    {
+      "graph": 3,
+      "node": 1302,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.1805
+    },
+    {
+      "graph": 3,
+      "node": 1305,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 91.3
+    },
+    {
+      "graph": 3,
+      "node": 1311,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 101.58
+    },
+    {
+      "graph": 3,
+      "node": 1326,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.2605
+    },
+    {
+      "graph": 3,
+      "node": 1329,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 90.6805
+    },
+    {
+      "graph": 3,
+      "node": 1335,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 101.0805
+    },
+    {
+      "graph": 3,
+      "node": 1350,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.3405
+    },
+    {
+      "graph": 3,
+      "node": 1353,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 91.6
+    },
+    {
+      "graph": 3,
+      "node": 1359,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 100.78
+    },
+    {
+      "graph": 3,
+      "node": 1373,
+      "grid_x": 14336,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 84.74
+    },
+    {
+      "graph": 3,
+      "node": 1378,
+      "grid_x": 14336,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 84.561
+    },
+    {
+      "graph": 3,
+      "node": 1401,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 102.1
+    },
+    {
+      "graph": 3,
+      "node": 1416,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.2805
+    },
+    {
+      "graph": 3,
+      "node": 1419,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 91.3005
+    },
+    {
+      "graph": 3,
+      "node": 1425,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 100.761
+    },
+    {
+      "graph": 3,
+      "node": 1440,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.16
+    },
+    {
+      "graph": 3,
+      "node": 1443,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 91.4605
+    },
+    {
+      "graph": 3,
+      "node": 1449,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 101.4805
+    },
+    {
+      "graph": 3,
+      "node": 1464,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.401
+    },
+    {
+      "graph": 3,
+      "node": 1467,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 91.46
+    },
+    {
+      "graph": 3,
+      "node": 1473,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 100.6405
+    },
+    {
+      "graph": 3,
+      "node": 1487,
+      "grid_x": 14336,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 85.32
+    },
+    {
+      "graph": 3,
+      "node": 1492,
+      "grid_x": 14336,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 85.021
+    },
+    {
+      "graph": 3,
+      "node": 1515,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 102.84
+    },
+    {
+      "graph": 3,
+      "node": 1530,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.1805
+    },
+    {
+      "graph": 3,
+      "node": 1533,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 92.18
+    },
+    {
+      "graph": 3,
+      "node": 1539,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 101.02
+    },
+    {
+      "graph": 3,
+      "node": 1554,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 81.98
+    },
+    {
+      "graph": 3,
+      "node": 1557,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 90.961
+    },
+    {
+      "graph": 3,
+      "node": 1563,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 101.6005
+    },
+    {
+      "graph": 3,
+      "node": 1578,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.2205
+    },
+    {
+      "graph": 3,
+      "node": 1581,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 92.08
+    },
+    {
+      "graph": 3,
+      "node": 1587,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 101.24
+    },
+    {
+      "graph": 3,
+      "node": 1601,
+      "grid_x": 14336,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 85.3
+    },
+    {
+      "graph": 3,
+      "node": 1606,
+      "grid_x": 14336,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 85.3405
+    },
+    {
+      "graph": 3,
+      "node": 1629,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 102.141
+    },
+    {
+      "graph": 3,
+      "node": 1645,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.1205
+    },
+    {
+      "graph": 3,
+      "node": 1648,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 91.0605
+    },
+    {
+      "graph": 3,
+      "node": 1654,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 101.3
+    },
+    {
+      "graph": 3,
+      "node": 1669,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.1205
+    },
+    {
+      "graph": 3,
+      "node": 1672,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 91.5605
+    },
+    {
+      "graph": 3,
+      "node": 1678,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 100.9805
+    },
+    {
+      "graph": 3,
+      "node": 1693,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.2005
+    },
+    {
+      "graph": 3,
+      "node": 1696,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 91.2405
+    },
+    {
+      "graph": 3,
+      "node": 1702,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 101.5005
+    },
+    {
+      "graph": 3,
+      "node": 1746,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 102.9005
+    },
+    {
+      "graph": 3,
+      "node": 1761,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.2405
+    },
+    {
+      "graph": 3,
+      "node": 1764,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 91.9005
+    },
+    {
+      "graph": 3,
+      "node": 1770,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 101.2605
+    },
+    {
+      "graph": 3,
+      "node": 1785,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.1005
+    },
+    {
+      "graph": 3,
+      "node": 1788,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 91.22
+    },
+    {
+      "graph": 3,
+      "node": 1794,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 101.4805
+    },
+    {
+      "graph": 3,
+      "node": 1809,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.4
+    },
+    {
+      "graph": 3,
+      "node": 1812,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 91.06
+    },
+    {
+      "graph": 3,
+      "node": 1818,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 100.7605
+    },
+    {
+      "graph": 3,
+      "node": 1832,
+      "grid_x": 14336,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 84.68
+    },
+    {
+      "graph": 3,
+      "node": 1837,
+      "grid_x": 14336,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 84.76
+    },
+    {
+      "graph": 3,
+      "node": 1860,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 102.3205
+    },
+    {
+      "graph": 3,
+      "node": 1875,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.1
+    },
+    {
+      "graph": 3,
+      "node": 1878,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 90.5605
+    },
+    {
+      "graph": 3,
+      "node": 1884,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 101.6205
+    },
+    {
+      "graph": 3,
+      "node": 1899,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.3805
+    },
+    {
+      "graph": 3,
+      "node": 1902,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 91.3605
+    },
+    {
+      "graph": 3,
+      "node": 1908,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 100.6805
+    },
+    {
+      "graph": 3,
+      "node": 1923,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.0805
+    },
+    {
+      "graph": 3,
+      "node": 1926,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 90.8405
+    },
+    {
+      "graph": 3,
+      "node": 1932,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 101.0005
+    },
+    {
+      "graph": 3,
+      "node": 1946,
+      "grid_x": 14336,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 85.54
+    },
+    {
+      "graph": 3,
+      "node": 1951,
+      "grid_x": 14336,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 85.1805
+    },
+    {
+      "graph": 3,
+      "node": 1974,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 102.5405
+    },
+    {
+      "graph": 3,
+      "node": 1989,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.0605
+    },
+    {
+      "graph": 3,
+      "node": 1992,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 91.2
+    },
+    {
+      "graph": 3,
+      "node": 1998,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 100.68
+    },
+    {
+      "graph": 3,
+      "node": 2013,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.46
+    },
+    {
+      "graph": 3,
+      "node": 2016,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 90.6805
+    },
+    {
+      "graph": 3,
+      "node": 2022,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 100.981
+    },
+    {
+      "graph": 3,
+      "node": 2038,
+      "grid_x": 8192,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 82.14
+    },
+    {
+      "graph": 3,
+      "node": 2041,
+      "grid_x": 24576,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 91.1205
+    },
+    {
+      "graph": 3,
+      "node": 2047,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 100.8805
+    },
+    {
+      "graph": 3,
+      "node": 2063,
+      "grid_x": 14336,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 84.9
+    },
+    {
+      "graph": 3,
+      "node": 2068,
+      "grid_x": 14336,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 84.6605
+    },
+    {
+      "graph": 3,
+      "node": 2091,
+      "grid_x": 10240,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 102.041
+    },
+    {
+      "graph": 3,
+      "node": 2107,
+      "grid_x": 496640,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 1143.165
+    },
+    {
+      "graph": 1,
+      "node": 227,
+      "grid_x": 496640,
+      "grid_y": 1,
+      "calls": 4,
+      "mean_us": 1087.36425
+    },
+    {
+      "graph": 1,
+      "node": 230,
+      "grid_x": 512,
+      "grid_y": 1,
+      "calls": 4,
+      "mean_us": 69.6805
+    },
+    {
+      "graph": 1,
+      "node": 1971,
+      "grid_x": 496640,
+      "grid_y": 1,
+      "calls": 4,
+      "mean_us": 1091.4845
+    }
+  ],
+  "graph_span_ms": 3476.0639490000003,
+  "graph_kernel_busy_ms": 2885.5611639999993,
+  "graph_uncovered_ms": 590.5027849999999,
+  "inter_round_gap_ms": 113.98471800000003,
+  "inter_round_uncovered_ms": 31.476389000000005
+}

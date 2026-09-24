@@ -1,0 +1,54 @@
+{
+  "artifact_type": "ninfer_r9700_retained_prefill_trace_analysis_repair",
+  "capture_analyzer": {
+    "file_size_bytes": 34541,
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/bench/analyze_retained_prefill_trace.py",
+    "sha256": "8b02f8bb10173afb98d8e719ad25bac3a8c54ed81b54d1e28ceb08111e0c6a3c"
+  },
+  "capture_closure": {
+    "file_size_bytes": 507,
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/rocprof/r9700-retained-production-p2048-trace-plan-20260906/prepared.sha256",
+    "sha256": "3be7c32f5edc21d14364b089afaf75a6a778d379806a681e2b13d0d3be6735e5"
+  },
+  "capture_commands": {
+    "file_size_bytes": 2684,
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/rocprof/r9700-retained-production-p2048-trace-plan-20260906/commands.sh",
+    "sha256": "4e77b0386252cbdff97180fa34921fd0e45c793d0dc2d0dcb439371977203188"
+  },
+  "capture_outputs": {
+    "benchmark_report": {
+      "file_size_bytes": 5481,
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/rocprof/r9700-retained-production-p2048-trace-plan-20260906/benchmark-report.json",
+      "sha256": "af5b7e8b13cdb02d15bb4096da302465f4270385a41a217a4b708fca57dfa876"
+    },
+    "database": {
+      "file_size_bytes": 2813952,
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/rocprof/r9700-retained-production-p2048-trace-plan-20260906/raw/retained-production-p2048_results.db",
+      "sha256": "020dd544e7f771419f4eb473b2b078bae7d795d8897fe44a66f5d0712132b393"
+    },
+    "power_after": {
+      "file_size_bytes": 5,
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/rocprof/r9700-retained-production-p2048-trace-plan-20260906/power-profile-after.txt",
+      "sha256": "6d1dbb9c582de44ad1dbc0d24eca4d831d8172bef0593680ecd24f6d0ce9def5"
+    },
+    "power_before": {
+      "file_size_bytes": 5,
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/rocprof/r9700-retained-production-p2048-trace-plan-20260906/power-profile-before.txt",
+      "sha256": "6d1dbb9c582de44ad1dbc0d24eca4d831d8172bef0593680ecd24f6d0ce9def5"
+    }
+  },
+  "capture_plan": {
+    "file_size_bytes": 7126,
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/rocprof/r9700-retained-production-p2048-trace-plan-20260906/plan.json",
+    "sha256": "c8152e35d2854f2b4c2a3f04fcbb60ae51f67cd0f2b48e7d4ac8fae344a3a8f8"
+  },
+  "cause": "absolute analyzer invocation lacked repository root on sys.path",
+  "recapture_permitted": false,
+  "repaired_analyzer": {
+    "file_size_bytes": 37564,
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/bench/analyze_retained_prefill_trace.py",
+    "sha256": "9cc1ef16abc1ddbb80866aca8fc5e052d661348cc06bb6f5451394b3027c7a53"
+  },
+  "schema_version": 1,
+  "status": "analysis_only_no_recapture"
+}

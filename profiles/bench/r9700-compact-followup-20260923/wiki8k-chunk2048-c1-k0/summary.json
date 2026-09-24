@@ -1,0 +1,10 @@
+{
+  "concurrency": 1,
+  "draft_tokens": 0,
+  "adaptive": false,
+  "chunk": 2048,
+  "prompt": 8192,
+  "prefill_tok_s": 1241.8631621418804,
+  "aggregate_decode_tok_s": 27.19587229582999,
+  "exact_repeated_tokens": true
+}

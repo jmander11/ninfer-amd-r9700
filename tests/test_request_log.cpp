@@ -1,5 +1,6 @@
 #include "serve/console_log.h"
 #include "serve/request_log.h"
+#include "product/context_checkpoint_format.h"
 
 #include <nlohmann/json.hpp>
 
@@ -8,6 +9,7 @@
 #include <fstream>
 #include <iostream>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -30,6 +32,30 @@ int check(bool condition, const char* message) {
 int main() {
     int failures = 0;
 
+    ninfer::RecoveryEvent recovery_event{
+        .kind = ninfer::RecoveryEventKind::RetryTriggered,
+        .cause = "repeated_reasoning", .attempts = 1, .cycle_exclusions = 17,
+        .discarded_tool_calls = 0, .discarded_reasoning_tokens = 6568,
+        .generated_tokens = 7000, .remaining_tokens = 25000};
+    failures += check(format_recovery_event(103, recovery_event) ==
+        "[req 103] recovery event=retry_triggered cause=repeated_reasoning attempts=1"
+        " cycle_exclusions=17 discarded_tool_calls=0 discarded_reasoning_tokens=6568"
+        " gen=7000 remaining=25000", "reasoning recovery log lost request identity or accounting");
+    for (const auto& [kind, name] : std::vector<std::pair<ninfer::RecoveryEventKind, std::string>>{
+             {ninfer::RecoveryEventKind::CycleExclusion, "cycle_exclusion"},
+             {ninfer::RecoveryEventKind::RetryStarted, "retry_started"},
+             {ninfer::RecoveryEventKind::RetryPrefillComplete, "retry_prefill_complete"},
+             {ninfer::RecoveryEventKind::Finished, "finished"},
+             {ninfer::RecoveryEventKind::Exhausted, "exhausted"}}) {
+        recovery_event.kind = kind;
+        recovery_event.cause = "duplicate_tool_call";
+        recovery_event.discarded_tool_calls = 1;
+        const auto record = format_recovery_event(104, recovery_event);
+        failures += check(record.find("event=" + name + " cause=duplicate_tool_call") != std::string::npos &&
+                          record.find("discarded_tool_calls=1") != std::string::npos,
+                          "recovery log stage or duplicate-call accounting missing");
+    }
+
     bool protected_artifact_rejected = false;
     try {
         JsonlRequestLog unsafe("same-path.ninfer", "same-path.ninfer");
@@ -38,7 +64,7 @@ int main() {
                       "request log accepted the model artifact as its output path");
 
     ServeOptions options;
-    options.artifact_path                  = "/models/qwen3_6_27b.ninfer";
+    options.artifact_path                  = "/models/qwen3_8_27b_r9700.ninfer";
     options.host                           = "127.0.0.1";
     options.port                           = 8123;
     options.api_key                        = "must-not-appear";
@@ -48,7 +74,6 @@ int main() {
     options.kv_capacity                    = ninfer::KvCapacityPolicy::explicit_capacity(524288);
     options.prefill_chunk                  = 1024;
     options.log_stats_interval_ms          = 2500;
-    options.kv_cache                       = ninfer::KvCacheStorage::Int8Group64;
     options.speculative.backend            = ninfer::SpeculativeBackend::Mtp;
     options.speculative.draft_tokens       = 3;
     options.speculative.proposal_head      = ninfer::ProposalHead::Optimized;
@@ -64,9 +89,9 @@ int main() {
     };
 
     ninfer::LoadSummary load;
-    load.target               = "qwen3_6_27b";
-    load.model_id             = "qwen3.6-27b";
-    load.weights_id           = "groupwise-int";
+    load.target               = "qwen3_8_27b_r9700";
+    load.model_id             = "qwen3.8-27b";
+    load.weights_id           = "fixture-weights";
     load.load_seconds         = 1.234567890123;
     load.upload_seconds       = 0.345678901234;
     load.artifact_bytes_read  = 1000;
@@ -81,7 +106,6 @@ int main() {
     memory.kv_capacity                       = 524288;
     memory.kv_capacity_page_groups           = 8192;
     memory.kv_capacity_max_page_groups       = 16384;
-    memory.kv_cache                          = ninfer::KvCacheStorage::Int8Group64;
     memory.weights.capacity_bytes            = 100;
     memory.sequence.capacity_bytes           = 200;
     memory.workspace.capacity_bytes          = 300;
@@ -92,20 +116,19 @@ int main() {
     memory.available_after_weights_bytes     = 1700;
     memory.available_after_startup_bytes     = 180;
     memory.planned_slack_bytes               = 100;
-    memory.cuda_graph_allowance_bytes        = 600;
-    memory.cuda_graph_observed_bytes         = 550;
+    memory.device_graph_allowance_bytes      = 600;
+    memory.device_graph_observed_bytes       = 550;
     memory.kv_payload_bytes                  = 400;
 
     ServerLogEnvironment environment;
     environment.device                    = 0;
-    environment.gpu_name                  = "NVIDIA GeForce RTX 5090";
+    environment.gpu_name                  = "Radeon AI PRO R9700";
     environment.gpu_uuid                  = "GPU-00000000-0000-0000-0000-000000000000";
+    environment.architecture_name         = "gfx1201";
     environment.total_device_memory_bytes = 32000000000ULL;
-    environment.compute_capability_major  = 12;
-    environment.compute_capability_minor  = 0;
-    environment.cuda_compile_version      = "13.1";
-    environment.cuda_runtime_version      = "13.1";
-    environment.cuda_driver_version       = "13.1";
+    environment.hip_compile_version       = "7.15.26333";
+    environment.hip_runtime_version       = "7.15.26333";
+    environment.hip_driver_version        = "7.1.3";
 
     const Json server = Json::parse(
         format_server_start_json("serve-test", 1000, options, sampling_defaults, "deployment-alias",
@@ -114,14 +137,18 @@ int main() {
                       "server record artifact type mismatch");
     failures += check(server.at("schema_version") == kRequestLogSchemaVersion,
                       "server record schema mismatch");
+    failures += check(kRequestLogSchemaVersion == 21, "request-log schema is not version 21");
     failures += check(server.at("event") == "server_start", "server event mismatch");
     failures += check(server.at("server").at("public_model_id") == "deployment-alias",
                       "resolved public model id missing");
-    failures += check(server.at("artifact").at("target") == "qwen3_6_27b", "server target missing");
-    failures += check(server.at("artifact").at("weights_id") == "groupwise-int",
+    failures += check(server.at("artifact").at("target") == "qwen3_8_27b_r9700", "server target missing");
+    failures += check(server.at("artifact").at("weights_id") == "fixture-weights",
                       "server weights id missing");
     failures += check(server.at("artifact").at("size_bytes") == 123456, "artifact size missing");
     failures += check(server.at("engine").at("max_context") == 262144, "max context missing");
+    failures += check(server.at("engine").at("kv_value_group") ==
+                          NINFER_R9700_KV_VALUE_GROUP,
+                      "KV value group missing");
     failures += check(server.at("engine").at("kv_capacity") == 524288, "KV capacity missing");
     failures += check(server.at("engine").at("kv_capacity_mode") == "explicit" &&
                           server.at("engine").at("kv_capacity_page_groups") == 8192 &&
@@ -131,7 +158,22 @@ int main() {
         check(server.at("engine").at("log_stats_interval_ms") == 2500, "stats interval missing");
     failures += check(server.at("server").at("request_log_jsonl") == "requests.jsonl",
                       "request log path missing");
-    failures += check(server.at("engine").at("kv_cache") == "int8-group64", "KV type missing");
+    failures += check(server.at("engine").at("kv_cache_format") == "fp8-k-int4-v",
+                      "fixed KV format missing");
+#if defined(NINFER_R9700_XATTENTION_QUALIFICATION)
+    failures += check(
+        server.at("engine").at("xattention_qualification") == true &&
+            server.at("engine").at("xattention_profile") == "b128-s16-tau900" &&
+            server.at("engine").at("xattention_find_block") == 128 &&
+            server.at("engine").at("xattention_stride") == 16 &&
+            server.at("engine").at("xattention_tau_permille") == 900,
+        "compile-bound XAttention qualification profile missing");
+#else
+    failures += check(server.at("engine").at("xattention_qualification") == false,
+                      "ordinary server mislabeled as XAttention qualification");
+    failures += check(!server.at("engine").contains("xattention_profile"),
+                      "ordinary server carries an XAttention profile");
+#endif
     failures += check(server.at("engine").at("vision") == false, "Vision state missing");
     failures += check(server.at("engine").at("speculative_backend") == "mtp",
                       "speculative backend missing");
@@ -139,6 +181,27 @@ int main() {
         check(server.at("engine").at("proposal_head") == "optimized", "proposal head missing");
     failures +=
         check(server.at("engine").at("prefix_reuse") == false, "prefix-reuse state missing");
+    failures += check(server.at("engine").at("kv_ram_capacity_bytes") == 0,
+                      "KV RAM capacity missing from server_start engine object");
+    failures += check(server.at("engine").at("kv_disk_capacity_bytes") == 0 &&
+                          server.at("engine").at("kv_disk_used_bytes") == 0 &&
+                          server.at("engine").at("kv_disk_entry_count") == 0,
+                      "KV disk occupancy missing from server_start engine object");
+    failures += check(server.at("engine").at("kv_ram_used_bytes") == 0 &&
+                          server.at("engine").at("kv_ram_entry_count") == 0,
+                      "KV RAM occupancy missing from server_start engine object");
+    failures += check(server.at("memory").at("kv_ram_capacity_bytes") == 0,
+                      "KV RAM capacity missing from server_start memory object");
+    memory.kv_ram_capacity_bytes = 2ULL * 1024ULL * 1024ULL;
+    memory.kv_ram_used_bytes     = 1024ULL * 1024ULL;
+    memory.kv_ram_entry_count    = 3;
+    const Json ram_server = Json::parse(
+        format_server_start_json("serve-test", 1001, options, sampling_defaults, "deployment-alias",
+                                 load, memory, environment, std::uint64_t{123456}));
+    failures += check(ram_server.at("engine").at("kv_ram_capacity_bytes") == 2097152 &&
+                          ram_server.at("memory").at("kv_ram_used_bytes") == 1048576 &&
+                          ram_server.at("memory").at("kv_ram_entry_count") == 3,
+                      "enabled KV RAM occupancy missing from server_start");
     failures += check(server.at("server").at("default_preserve_thinking") == true,
                       "server preserve-thinking default missing");
     failures +=
@@ -150,19 +213,21 @@ int main() {
                 0.6F &&
             server.at("sampling_defaults").at("server_overrides").at("top_p").is_null(),
         "server sampling overrides lost omission state");
-    failures += check(server.at("environment").at("gpu_name") == "NVIDIA GeForce RTX 5090",
+    failures += check(server.at("environment").at("gpu_name") == "Radeon AI PRO R9700" &&
+                          server.at("environment").at("architecture_name") == "gfx1201" &&
+                          server.at("environment").at("hip_runtime_version") == "7.15.26333",
                       "GPU name missing");
     failures += check(server.at("memory").at("request_transient").at("capacity_bytes") == 500 &&
                           server.at("memory").at("request_transient").at("peak_used_bytes") == 450,
                       "request transient memory missing");
-    failures += check(server.at("memory").at("cuda_graph_allowance_bytes") == 600,
-                      "CUDA Graph allowance missing");
+    failures += check(server.at("memory").at("device_graph_allowance_bytes") == 600,
+                      "Device Graph allowance missing");
     failures += check(server.at("memory").at("runtime_reservation_bytes") == 1600 &&
                           server.at("memory").at("available_after_weights_bytes") == 1700 &&
                           server.at("memory").at("available_after_startup_bytes") == 180 &&
                           server.at("memory").at("kv_capacity_headroom_bytes") == 0 &&
                           server.at("memory").at("planned_slack_bytes") == 100 &&
-                          server.at("memory").at("cuda_graph_observed_bytes") == 550,
+                          server.at("memory").at("device_graph_observed_bytes") == 550,
                       "adaptive KV memory ledger missing");
     failures += check(server.dump().find("must-not-appear") == std::string::npos,
                       "server JSON leaked the API key");
@@ -170,7 +235,7 @@ int main() {
                       "server argv did not retain the redaction marker");
 
     GenerationRequest request;
-    request.model          = "qwen3.6-27b";
+    request.model          = "qwen3.8-27b";
     request.stream         = false;
     request.max_tokens     = 4096;
     request.max_tokens_set = true;
@@ -203,6 +268,8 @@ int main() {
                       "resolved preserve-thinking metadata missing");
     failures += check(started.at("request").at("sampling").at("seed") == 7632647173703958409ULL,
                       "resolved seed missing");
+    failures += check(started.at("request").at("sampling").at("p_less") == false,
+                      "resolved p_less missing");
 
     ApiError preparation_error;
     preparation_error.status = 400;
@@ -262,12 +329,248 @@ int main() {
                       "computed prefill tokens missing");
     failures += check(done.at("result").at("prefix_reuse_path") == "restore_turn_checkpoint",
                       "prefix reuse path missing");
+    failures += check(done.at("result").at("context_checkpoint").at("restored_tokens") == 0,
+                      "turn-checkpoint reuse must not report restored_tokens");
+    failures += check(done.at("result").at("context_checkpoint").at("captured_tokens") == 0,
+                      "request_done captured_tokens should be 0 without a freeze");
+    failures += check(done.at("result").at("reuse_source") == "none",
+                      "reuse_source missing from request_done");
+    failures += check(done.at("result").at("ignored_qwen_tool_call_names").empty(),
+                      "request_done JSON should list no ignored names by default");
+    failures += check(format_request_done(context, outcome).find("ignored_tool_calls=") ==
+                          std::string::npos,
+                      "done line should omit ignored_tool_calls when none were ignored");
+    outcome.ignored_qwen_tool_call_names = {"fetch_url"};
+    const std::string ignored_done       = format_request_done(context, outcome);
+    const std::string ignored_warning =
+        format_ignored_qwen_tool_call_markup(context, outcome);
+    const Json ignored_json =
+        Json::parse(format_request_done_json("serve-test", 3001, context, outcome));
+    failures += check(ignored_done.find("ignored_tool_calls=fetch_url") != std::string::npos,
+                      "done line should include ignored_tool_calls=fetch_url");
+    failures += check(ignored_json.at("result").at("ignored_qwen_tool_call_names") ==
+                          Json::array({"fetch_url"}),
+                      "request_done JSON should list ignored_qwen_tool_call_names");
+    failures += check(ignored_warning.find("[req 7] ignored Qwen tool-call markup") !=
+                              std::string::npos &&
+                          ignored_warning.find("names=fetch_url") != std::string::npos &&
+                          ignored_warning.find("tools=0") != std::string::npos &&
+                          ignored_warning.find("tool_choice=auto") != std::string::npos &&
+                          ignored_warning.find("tool_history=no") != std::string::npos,
+                      "warning should include req id, names=fetch_url, and tools-off shape");
+
+    char live_log_path[] = "/tmp/ninfer-request-log-test-XXXXXX";
+    const int log_fd = mkstemp(live_log_path);
+    failures += check(log_fd >= 0, "failed to create temporary request log");
+    if (log_fd >= 0) {
+        close(log_fd);
+        std::ostringstream captured_console;
+        std::streambuf* original_cerr = std::cerr.rdbuf(captured_console.rdbuf());
+        {
+            JsonlRequestLog live_log(live_log_path);
+            write_request_done_logs(live_log, context, outcome);
+        }
+        std::cerr.rdbuf(original_cerr);
+
+        const std::string console = captured_console.str();
+        failures += check(console.find("[info] ninfer-serve: [req 7] done") != std::string::npos &&
+                              console.find("ignored_tool_calls=fetch_url") != std::string::npos,
+                          "live done logger should emit the ignored tool name");
+        failures += check(console.find("[warning] ninfer-serve: [req 7] ignored Qwen tool-call markup") !=
+                                  std::string::npos &&
+                              console.find("names=fetch_url tools=0 tool_choice=auto tool_history=no") !=
+                                  std::string::npos,
+                          "live done logger should emit the tools-off warning");
+
+        std::ifstream logged(live_log_path);
+        std::string record;
+        std::getline(logged, record);
+        const Json live_json = Json::parse(record);
+        failures += check(live_json.at("event") == "request_done" &&
+                              live_json.at("request").at("request_id") == 7 &&
+                              live_json.at("result").at("ignored_qwen_tool_call_names") ==
+                                  Json::array({"fetch_url"}),
+                          "live done logger should persist ignored names in request_done JSONL");
+        std::filesystem::remove(live_log_path);
+    }
+    outcome.ignored_qwen_tool_call_names.clear();
+    outcome.metrics.prefix_reuse_source = ninfer::PrefixReuseSource::HostRam;
+    const Json ram_hit =
+        Json::parse(format_request_done_json("serve-test", 3002, context, outcome));
+    failures += check(ram_hit.at("result").at("reuse_source") == "host_ram",
+                      "host_ram reuse_source missing");
+    outcome.metrics.prefix_reuse_source = ninfer::PrefixReuseSource::HostDisk;
+    const Json disk_hit =
+        Json::parse(format_request_done_json("serve-test", 3006, context, outcome));
+    failures += check(disk_hit.at("result").at("reuse_source") == "host_disk",
+                      "host_disk reuse_source missing");
+    outcome.metrics.prefix_reuse_source = ninfer::PrefixReuseSource::VramResident;
+    const Json vram_hit =
+        Json::parse(format_request_done_json("serve-test", 3003, context, outcome));
+    failures += check(vram_hit.at("result").at("reuse_source") == "vram_resident",
+                      "vram_resident reuse_source missing");
+    outcome.metrics.kv_ram_capacity_bytes = 1024ULL * 1024ULL;
+    outcome.metrics.kv_ram_used_bytes     = 512ULL * 1024ULL;
+    outcome.metrics.kv_ram_entry_count    = 1;
+    outcome.metrics.kv_ram_captures       = 4;
+    outcome.metrics.kv_ram_restores       = 2;
+    outcome.metrics.kv_ram_drops          = 1;
+    outcome.metrics.kv_ram_save_seconds   = 0.008;
+    outcome.metrics.kv_ram_load_seconds   = 0.014;
+    const Json ram_done =
+        Json::parse(format_request_done_json("serve-test", 3004, context, outcome));
+    failures += check(ram_done.at("result").at("kv_ram_capacity_bytes") == 1048576 &&
+                          ram_done.at("result").at("kv_ram_used_bytes") == 524288 &&
+                          ram_done.at("result").at("kv_ram_entry_count") == 1 &&
+                          ram_done.at("result").at("kv_ram_captures") == 4 &&
+                          ram_done.at("result").at("kv_ram_drops") == 1 &&
+                          ram_done.at("timings_seconds").at("kv_ram_save") == 0.008 &&
+                          ram_done.at("timings_seconds").at("kv_ram_load") == 0.014,
+                      "request_done JSON omitted live KV RAM occupancy");
+    outcome.metrics.kv_disk_capacity_bytes = 2ULL * 1024ULL * 1024ULL;
+    outcome.metrics.kv_disk_used_bytes     = 1024ULL * 1024ULL;
+    outcome.metrics.kv_disk_entry_count    = 2;
+    outcome.metrics.kv_disk_captures       = 3;
+    outcome.metrics.kv_disk_restores       = 1;
+    outcome.metrics.kv_disk_drops          = 0;
+    outcome.metrics.kv_disk_save_seconds   = 0.005;
+    outcome.metrics.kv_disk_load_seconds   = 0.009;
+    outcome.metrics.kv_disk_h2d_seconds    = 0.012;
+    const Json disk_done =
+        Json::parse(format_request_done_json("serve-test", 3007, context, outcome));
+    failures += check(disk_done.at("result").at("kv_disk_capacity_bytes") == 2097152 &&
+                          disk_done.at("result").at("kv_disk_used_bytes") == 1048576 &&
+                          disk_done.at("timings_seconds").at("kv_disk_save") == 0.005 &&
+                          disk_done.at("timings_seconds").at("kv_disk_load") == 0.009 &&
+                          disk_done.at("timings_seconds").at("kv_disk_h2d") == 0.012,
+                      "request_done JSON omitted live KV disk occupancy");
+    failures += check(format_request_done(context, outcome).find("kv-disk=1 MiB n=2 restores=1") !=
+                              std::string::npos &&
+                          format_request_done(context, outcome).find("h2d=12ms") !=
+                              std::string::npos,
+                      "human request log omits KV disk occupancy when the tier is enabled");
+    failures += check(format_request_done(context, outcome).find("kv-ram=0.5 MiB n=1 restores=2") !=
+                              std::string::npos &&
+                          format_request_done(context, outcome).find("evicts=0 drops=1") !=
+                              std::string::npos &&
+                          format_request_done(context, outcome).find("save=8ms load=14ms") !=
+                              std::string::npos &&
+                          format_request_done(context, outcome).find("ram_captures=") ==
+                              std::string::npos &&
+                          format_request_done(context, outcome).find(" used=") == std::string::npos,
+                      "human request log omits KV RAM occupancy when the tier is enabled");
     outcome.metrics.prefix_reuse_path = ninfer::PrefixReusePath::RestoreResponseCheckpoint;
     const Json response_restore =
         Json::parse(format_request_done_json("serve-test", 3001, context, outcome));
     failures += check(response_restore.at("result").at("prefix_reuse_path") ==
                           "restore_response_checkpoint",
                       "response checkpoint reuse path missing");
+    failures +=
+        check(format_request_done(context, outcome).find("reuse=restore_response_checkpoint") !=
+                  std::string::npos,
+              "human request log omits response checkpoint reuse path");
+    outcome.metrics.prefix_reuse_path = ninfer::PrefixReusePath::RestoreContextCheckpoint;
+    outcome.metrics.prefix_cache_hit_tokens            = 36864;
+    outcome.metrics.restored_context_checkpoint_tokens = 36864;
+    outcome.metrics.captured_context_checkpoint_tokens = 0;
+    const Json context_restore =
+        Json::parse(format_request_done_json("serve-test", 3005, context, outcome));
+    failures += check(context_restore.at("result").at("prefix_reuse_path") ==
+                          "restore_context_checkpoint",
+                      "context checkpoint reuse path missing");
+    failures +=
+        check(format_request_done(context, outcome).find("reuse=restore_context_checkpoint") !=
+                  std::string::npos,
+              "human request log omits context checkpoint reuse path");
+    failures += check(context_restore.at("result").at("prefix_cache_hit_tokens") == 36864,
+                      "request_done cache tokens should stay the full reused prefix");
+    failures += check(context_restore.at("result").at("context_checkpoint").at("restored_tokens") ==
+                          36864,
+                      "request_done restored_tokens should be the restored head frontier");
+    failures += check(context_restore.at("result").at("context_checkpoint").at("captured_tokens") ==
+                          0,
+                      "request_done captured_tokens should be 0 without a freeze");
+    outcome.metrics.prefix_reuse_path = ninfer::PrefixReusePath::RestoreTurnRollback;
+    outcome.metrics.prefix_cache_hit_tokens            = 1000;
+    outcome.metrics.restored_context_checkpoint_tokens = 1000;
+    outcome.metrics.captured_context_checkpoint_tokens = 0;
+    const Json rollback_restore =
+        Json::parse(format_request_done_json("serve-test", 3006, context, outcome));
+    failures += check(rollback_restore.at("result").at("prefix_reuse_path") ==
+                          "restore_turn_rollback",
+                      "turn-rollback reuse path missing");
+    failures +=
+        check(format_request_done(context, outcome).find("reuse=restore_turn_rollback") !=
+                  std::string::npos,
+              "human request log omits turn-rollback reuse path");
+    outcome.metrics.prefix_reuse_path = ninfer::PrefixReusePath::RestoreContextCheckpoint;
+    outcome.metrics.prefix_cache_hit_tokens            = 36864;
+    outcome.metrics.restored_context_checkpoint_tokens = 36864;
+    outcome.metrics.captured_context_checkpoint_tokens = 0;
+    failures += check(context_restore.at("result").at("prefix_cache_hit_tokens").get<int>() ==
+                          context_restore.at("result")
+                              .at("context_checkpoint")
+                              .at("restored_tokens")
+                              .get<int>(),
+                      "request_done restored_tokens is the restored head frontier");
+    failures +=
+        check(format_request_done(context, outcome).find("cache=36864") != std::string::npos &&
+                  format_request_done(context, outcome).find("context_ckpt=restored:36864") !=
+                      std::string::npos &&
+                  format_request_done(context, outcome).find("captured:") == std::string::npos,
+              "human request log omits restore-only restored: frontier");
+    outcome.metrics.prefix_cache_hit_tokens            = 0;
+    outcome.metrics.restored_context_checkpoint_tokens = 0;
+    outcome.metrics.captured_context_checkpoint_tokens = 24576;
+    const Json context_made =
+        Json::parse(format_request_done_json("serve-test", 3006, context, outcome));
+    failures += check(context_made.at("result").at("context_checkpoint").at("captured_tokens") ==
+                          24576,
+                      "request_done omitted captured context-checkpoint tokens");
+    failures += check(context_made.at("result").at("context_checkpoint").at("restored_tokens") == 0,
+                      "freeze-only request_done restored_tokens should be 0");
+    failures +=
+        check(format_request_done(context, outcome).find("context_ckpt=captured:24576") !=
+                  std::string::npos &&
+                  format_request_done(context, outcome).find("context_ckpt=restored:") ==
+                      std::string::npos,
+              "human request log omits freeze-only captured:");
+    outcome.metrics.prefix_cache_hit_tokens            = 36864;
+    outcome.metrics.restored_context_checkpoint_tokens = 36864;
+    outcome.metrics.captured_context_checkpoint_tokens = 102400;
+    const Json context_both =
+        Json::parse(format_request_done_json("serve-test", 3007, context, outcome));
+    failures += check(context_both.at("result").at("context_checkpoint").at("restored_tokens") ==
+                          36864,
+                      "combined request_done restored_tokens");
+    failures += check(context_both.at("result").at("context_checkpoint").at("captured_tokens") ==
+                          102400,
+                      "combined request_done captured_tokens");
+    failures += check(context_both.at("result").at("prefix_cache_hit_tokens") == 36864,
+                      "combined request_done cache tokens stay the full reused prefix");
+    failures +=
+        check(format_request_done(context, outcome).find("context_ckpt=restored:36864,captured:102400") !=
+                  std::string::npos,
+              "human request log omits combined restored/captured frontiers");
+    failures += check(ninfer::product::format_context_checkpoint_frontiers(0, 0, ' ') == "",
+                      "CLI/serve frontier formatter empty when both are 0");
+    failures +=
+        check(ninfer::product::format_context_checkpoint_frontiers(0, 0, ' ', "none") == "none",
+              "CLI frontier formatter prints none when both are 0");
+    failures +=
+        check(ninfer::product::format_context_checkpoint_frontiers(36864, 0, ' ') ==
+                  "restored:36864",
+              "CLI restore-only is space-separated restored:");
+    failures +=
+        check(ninfer::product::format_context_checkpoint_frontiers(0, 24576, ' ') ==
+                  "captured:24576",
+              "CLI freeze-only is space-separated captured:");
+    failures += check(ninfer::product::format_context_checkpoint_frontiers(36864, 102400, ' ') ==
+                          "restored:36864 captured:102400",
+                      "CLI combined restored/captured is space-separated");
+    failures += check(ninfer::product::format_context_checkpoint_frontiers(36864, 102400, ',') ==
+                          "restored:36864,captured:102400",
+                      "serve combined restored/captured is comma-separated");
     failures += check(done.at("timings_seconds").at("decode").get<double>() ==
                           outcome.metrics.decode_seconds,
                       "decode time lost precision");
@@ -294,10 +597,9 @@ int main() {
     failures +=
         check(format_request_start(context).find("preserve_thinking=on") != std::string::npos,
               "human request log omits preserve-thinking mode");
-    failures +=
-        check(format_request_done(context, outcome).find("reuse=restore_response_checkpoint") !=
-                  std::string::npos,
-              "human request log omits response checkpoint reuse path");
+    failures += check(format_request_done(context, outcome).find("reuse_source=vram_resident") !=
+                          std::string::npos,
+                      "human request log omits reuse_source");
     failures += check(format_request_start(context).find("submitted") != std::string::npos,
                       "human request log mislabels a submitted request");
 
@@ -314,8 +616,52 @@ int main() {
     const std::string human_throughput         = format_throughput(throughput);
     failures += check(human_throughput.find("prefill=50.0tok/s") != std::string::npos &&
                           human_throughput.find("decode=20.0tok/s") != std::string::npos &&
-                          human_throughput.find("avg_decode_batch=1.80") != std::string::npos,
+                          human_throughput.find("avg_decode_batch=1.80") != std::string::npos &&
+                          human_throughput.find("ram_captures=") == std::string::npos &&
+                          human_throughput.find("kv-ram=") == std::string::npos,
                       "human throughput report mismatch");
+    failures += check(format_kv_ram_size(1024ULL * 1024ULL, false) == "1 MiB" &&
+                          format_kv_ram_size(1024ULL * 1024ULL, true) == "1048576 B" &&
+                          format_kv_ram_size(1536ULL * 1024ULL, false) == "1.5 MiB",
+                      "KV RAM human size is not MiB by default with exact bytes available");
+    ninfer::MemorySummary ram_off;
+    failures += check(format_kv_ram_occupancy(ram_off) == "off",
+                      "disabled KV RAM occupancy is not off");
+    ThroughputReport ram_throughput = throughput;
+    ram_throughput.kv_ram_capacity_bytes = 1024ULL * 1024ULL;
+    ram_throughput.kv_ram_used_bytes     = 512ULL * 1024ULL;
+    ram_throughput.kv_ram_entry_count    = 2;
+    ram_throughput.scheduler.kv_ram_captures = 3;
+    ram_throughput.scheduler.kv_ram_restores = 1;
+    ram_throughput.kv_ram_save_seconds       = 0.008;
+    ram_throughput.kv_ram_load_seconds       = 0.014;
+    const std::string human_ram_throughput   = format_throughput(ram_throughput);
+    failures += check(human_ram_throughput.find("kv-ram=0.5 MiB n=2 restores=1") !=
+                              std::string::npos &&
+                          human_ram_throughput.find("evicts=0 drops=0") != std::string::npos &&
+                          human_ram_throughput.find("save=8ms load=14ms") != std::string::npos &&
+                          human_ram_throughput.find("ram_captures=") == std::string::npos,
+                      "human RAM throughput occupancy mismatch");
+    ram_throughput.kv_disk_capacity_bytes = 2ULL * 1024ULL * 1024ULL;
+    ram_throughput.kv_disk_used_bytes     = 1024ULL * 1024ULL;
+    ram_throughput.kv_disk_entry_count    = 1;
+    ram_throughput.scheduler.kv_disk_restores = 4;
+    ram_throughput.kv_disk_save_seconds       = 0.005;
+    ram_throughput.kv_disk_load_seconds       = 0.009;
+    const std::string human_disk_throughput   = format_throughput(ram_throughput);
+    failures += check(human_disk_throughput.find("kv-disk=1 MiB n=1 restores=4") !=
+                              std::string::npos,
+                      "human throughput omits KV disk occupancy");
+    const Json ram_throughput_json =
+        Json::parse(format_throughput_json("serve-test", 5001, ram_throughput));
+    failures += check(ram_throughput_json.at("scheduler").at("kv_ram_capacity_bytes") == 1048576 &&
+                          ram_throughput_json.at("scheduler").at("kv_ram_used_bytes") == 524288 &&
+                          ram_throughput_json.at("scheduler").at("kv_ram_entry_count") == 2 &&
+                          ram_throughput_json.at("scheduler").at("kv_ram_captures") == 3 &&
+                          ram_throughput_json.at("scheduler").at("kv_ram_restores") == 1 &&
+                          ram_throughput_json.at("timings_seconds").at("kv_ram_save") == 0.008 &&
+                          ram_throughput_json.at("timings_seconds").at("kv_ram_load") == 0.014,
+                      "enabled KV RAM occupancy missing from throughput JSON");
     const Json throughput_json =
         Json::parse(format_throughput_json("serve-test", 5000, throughput));
     failures += check(throughput_json.at("event") == "throughput", "throughput event mismatch");
@@ -324,6 +670,14 @@ int main() {
                       "throughput token deltas mismatch");
     failures += check(throughput_json.at("decode_batch").at("average_size") == 1.8,
                       "throughput batch average mismatch");
+    failures += check(throughput_json.at("scheduler").at("kv_ram_captures") == 0 &&
+                          throughput_json.at("scheduler").at("kv_ram_restores") == 0 &&
+                          throughput_json.at("scheduler").at("kv_ram_evictions") == 0 &&
+                          throughput_json.at("scheduler").at("kv_ram_drops") == 0 &&
+                          throughput_json.at("scheduler").at("kv_ram_capacity_bytes") == 0 &&
+                          throughput_json.at("scheduler").at("kv_ram_used_bytes") == 0 &&
+                          throughput_json.at("scheduler").at("kv_ram_entry_count") == 0,
+                      "throughput scheduler RAM counters missing");
 
     const std::string console_prefix =
         format_console_log_prefix(std::chrono::system_clock::time_point{}, ConsoleLogLevel::Info);

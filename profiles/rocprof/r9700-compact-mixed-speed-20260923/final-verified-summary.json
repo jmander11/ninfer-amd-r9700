@@ -1,0 +1,85 @@
+{
+  "rows": [
+    {
+      "concurrency": 1,
+      "draft_tokens": 0,
+      "aggregate_decode_tok_s": 30.151527045664416,
+      "per_request_decode_tok_s": 30.151527045664416,
+      "prefill_tok_s": 1519.1769057391284,
+      "exact_same_c_ordinary": true,
+      "exact_prior_ordinary": null,
+      "source": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/rocprof/r9700-compact-mixed-speed-20260923/fusion-c1-k0"
+    },
+    {
+      "concurrency": 1,
+      "draft_tokens": 5,
+      "aggregate_decode_tok_s": 96.28317582470149,
+      "per_request_decode_tok_s": 96.28317582470149,
+      "prefill_tok_s": 1472.1913041980629,
+      "exact_same_c_ordinary": true,
+      "exact_prior_ordinary": null,
+      "source": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/rocprof/r9700-compact-mixed-speed-20260923/fusion-c1-k5"
+    },
+    {
+      "concurrency": 2,
+      "draft_tokens": 0,
+      "aggregate_decode_tok_s": 49.97559664285525,
+      "per_request_decode_tok_s": 24.987798321427626,
+      "prefill_tok_s": 1520.2508478925379,
+      "exact_same_c_ordinary": true,
+      "exact_prior_ordinary": true,
+      "source": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/rocprof/r9700-compact-mixed-speed-20260923/final-c2-k0"
+    },
+    {
+      "concurrency": 2,
+      "draft_tokens": 5,
+      "aggregate_decode_tok_s": 119.66391519982993,
+      "per_request_decode_tok_s": 59.831957599914965,
+      "prefill_tok_s": 1470.1597049167513,
+      "exact_same_c_ordinary": true,
+      "exact_prior_ordinary": true,
+      "source": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/rocprof/r9700-compact-mixed-speed-20260923/final-c2-k5"
+    },
+    {
+      "concurrency": 3,
+      "draft_tokens": 0,
+      "aggregate_decode_tok_s": 71.04306133076442,
+      "per_request_decode_tok_s": 23.68102044358814,
+      "prefill_tok_s": 1507.70944550422,
+      "exact_same_c_ordinary": true,
+      "exact_prior_ordinary": true,
+      "source": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/rocprof/r9700-compact-mixed-speed-20260923/final-c3-k0"
+    },
+    {
+      "concurrency": 3,
+      "draft_tokens": 5,
+      "aggregate_decode_tok_s": 133.65957314659715,
+      "per_request_decode_tok_s": 44.55319104886572,
+      "prefill_tok_s": 1467.0447264963714,
+      "exact_same_c_ordinary": true,
+      "exact_prior_ordinary": true,
+      "source": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/rocprof/r9700-compact-mixed-speed-20260923/final-c3-k5"
+    },
+    {
+      "concurrency": 4,
+      "draft_tokens": 0,
+      "aggregate_decode_tok_s": 86.03014565329441,
+      "per_request_decode_tok_s": 21.507536413323603,
+      "prefill_tok_s": 1505.8799557131588,
+      "exact_same_c_ordinary": true,
+      "exact_prior_ordinary": true,
+      "source": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/rocprof/r9700-compact-mixed-speed-20260923/final-c4-k0"
+    },
+    {
+      "concurrency": 4,
+      "draft_tokens": 5,
+      "aggregate_decode_tok_s": 140.38632339273087,
+      "per_request_decode_tok_s": 35.09658084818272,
+      "prefill_tok_s": 1466.9622835625255,
+      "exact_same_c_ordinary": true,
+      "exact_prior_ordinary": true,
+      "source": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/rocprof/r9700-compact-mixed-speed-20260923/final-c4-k5"
+    }
+  ],
+  "units": "output tokens per second"
+}

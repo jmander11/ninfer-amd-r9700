@@ -1,0 +1,4 @@
+# Checkpoint-direct Qwen3.8-27B BF16 reference dependencies. Install explicitly.
+torch>=2.7
+safetensors>=0.5
+flash-linear-attention>=0.5.1

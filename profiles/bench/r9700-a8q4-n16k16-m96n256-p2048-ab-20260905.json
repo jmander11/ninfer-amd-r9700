@@ -1,0 +1,347 @@
+{
+  "benchmark_command": [
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/build/a8q4_n16k16_m96n256_qual",
+    "--benchmark"
+  ],
+  "build": {
+    "command": [
+      "make",
+      "-C",
+      "tools/r9700",
+      "a8q4-n16k16-m96n256-qual",
+      "a8q4-n16k16-m96n256-assembly"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": "make: Entering directory '/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700'\nmake: Nothing to be done for 'a8q4-n16k16-m96n256-qual'.\nmake: Nothing to be done for 'a8q4-n16k16-m96n256-assembly'.\nmake: Leaving directory '/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700'\n"
+  },
+  "candidate_identity": "r9700-a8q4g64-n16k16-m96n256-w24-four-fragment-pingpong-v1",
+  "contract": {
+    "activation": "A8G64 unsigned-low/signed-high INT4 planes plus FP16 G64 scales",
+    "candidate_kernarg_bytes": 72,
+    "output": "BF16",
+    "shapes": [
+      [
+        "value_z",
+        12288,
+        5120,
+        48
+      ],
+      [
+        "gdn_output_attention_output",
+        5120,
+        6144,
+        64
+      ],
+      [
+        "mlp_down",
+        5120,
+        17408,
+        64
+      ]
+    ],
+    "static_lds_bytes": 30208,
+    "threads": 768,
+    "tile_rows": 256,
+    "tile_tokens": 96,
+    "tokens": 2048,
+    "weights": "Q4N16K16 signed INT4 plus FP16 G64 scales"
+  },
+  "decision": {
+    "admission_pass": false,
+    "aggregate_81_tmac_gate_pass": false,
+    "candidate_service_point_ms": 390.7034416198125,
+    "candidate_service_robust_upper_ms": 392.300469966833,
+    "candidate_tmac_per_second_point": 56.283692982971864,
+    "candidate_tmac_per_second_robust_lower": 56.054565923357565,
+    "cells": [
+      {
+        "candidate_mad_ms": 0.0022841691992185886,
+        "candidate_median_ms": 2.278930902480469,
+        "control_mad_ms": 0.0019444227226559363,
+        "control_median_ms": 2.172574758527344,
+        "name": "value_z",
+        "paired_ratio_mad": 0.00035758157410181735,
+        "paired_ratio_median": 1.0490114857854693,
+        "robust_ratio_upper": 1.0506019371107593,
+        "stability_pass": true
+      },
+      {
+        "candidate_mad_ms": 0.0011757612226562797,
+        "candidate_median_ms": 1.1603908538828125,
+        "control_mad_ms": 0.0009722709648437577,
+        "control_median_ms": 1.0951309204101562,
+        "name": "gdn_output_attention_output",
+        "paired_ratio_mad": 0.0005474025621572398,
+        "paired_ratio_median": 1.0602305753372911,
+        "robust_ratio_upper": 1.0626653124532541,
+        "stability_pass": true
+      },
+      {
+        "candidate_mad_ms": 0.002721428871093945,
+        "candidate_median_ms": 3.2351522445664065,
+        "control_mad_ms": 0.0028934478750000103,
+        "control_median_ms": 3.0805945396445313,
+        "name": "mlp_down",
+        "paired_ratio_mad": 0.0005986242606375036,
+        "paired_ratio_median": 1.0503744907503463,
+        "robust_ratio_upper": 1.0530370517368097,
+        "stability_pass": true
+      }
+    ],
+    "classification": "terminal_reject",
+    "control_service_point_ms": 371.53001785281253,
+    "every_cell_guard_pass": false,
+    "every_cell_robust_ratio_upper_max": 1.01,
+    "maximum_candidate_service_robust_upper_ms": 271.441719,
+    "minimum_tmac_per_second": 81.01272212883386,
+    "one_fresh_unpooled_repeat_only_if_inconclusive": true,
+    "stability_pass": true,
+    "stable_miss_is_terminal": true,
+    "useful_tmac": 21.99023255552
+  },
+  "input_sha256": {
+    "src/ops/r9700/linear/r9700_linear.h": "e9ca13712b487f83f6fbd88593ca9171d9b8d8274ba236ca2b5ebe5b6744e31c",
+    "src/ops/r9700/linear/r9700_linear.hip": "c65a49dd2228a9fdf34f167754c8fd095e3382154762d8e000606c7d4d2c2ff2",
+    "tools/r9700/a8q4_n16k16_m96n256_harness.hip": "126a3fd286ba520a7302d3a4a9cf1af0ea3de96c71dc9aabbeba7eb16e308b2c",
+    "tools/r9700/a8q4_n16k16_m96n256_qual.h": "2622e302b2ed176247c47b98ccb070c938ca357600806f665b5852b872662a2f",
+    "tools/r9700/a8q4_n16k16_m96n256_qual.hip": "6eabdce6b8e0fb3631b830f30541ee54e77b70ad8a498784eb703930a5064028",
+    "tools/r9700/build/a8q4_n16k16_m96n256_qual": "3721a585b64d8014d1d0a9031dd120f97592bc283044f3016926d8900e342689",
+    "tools/r9700/build/a8q4_n16k16_m96n256_qual.s": "152b58d0d3ce38bf345ea1b0aefd223a45fad3c108ce354feea4f7e55e7ff1df",
+    "tools/r9700/check_prefill_cta_static.py": "d8b470421b55d659d2f0d0fed8a972948f150ad824c2598ecfbf244f779449b7",
+    "tools/r9700/run_a8q4_n16k16_m96n256_gate.py": "2106052a2f80986fe90b7c4b3bc116220acf219bfb1f488eaa9dc98719b1ccb0",
+    "tools/r9700/test_check_prefill_cta_static.py": "c5acc8b52fc5ae73f38a2268bd098a422005110dc0958bfe6418f3b873c982ec",
+    "tools/r9700/test_run_a8q4_n16k16_m96n256_gate.py": "1c6a12fcf5f05eafa410fa90c1224b531c99f83017cf411071941a17b87c8417",
+    "tools/r9700/validate_a8q4_n16k16_m96n256_report.py": "38b4fda18b6e0a27fb7f8a191fb25f6d0d8df636a93a271015c9c33cc4014a09"
+  },
+  "measurement": {
+    "candidate_identity": "r9700-a8q4g64-n16k16-m96n256-w24-four-fragment-pingpong-v1",
+    "cells": [
+      {
+        "calls": 48,
+        "candidate_interval_samples_ms": [
+          291.688873291,
+          291.195373535,
+          291.682647705,
+          291.423522949,
+          292.008270264,
+          291.717437744,
+          292.370422363,
+          292.129272461
+        ],
+        "columns": 5120,
+        "control_interval_samples_ms": [
+          271.504425049,
+          277.654663086,
+          277.965515137,
+          277.990875244,
+          278.300628662,
+          278.188262939,
+          278.376281738,
+          278.561279297
+        ],
+        "iterations_per_sample": 128,
+        "name": "value_z",
+        "rows": 12288,
+        "tokens": 2048
+      },
+      {
+        "calls": 64,
+        "candidate_interval_samples_ms": [
+          146.275054932,
+          148.573730469,
+          148.737060547,
+          148.482040405,
+          148.766220093,
+          148.486328125,
+          149.071380615,
+          148.436065674
+        ],
+        "columns": 6144,
+        "control_interval_samples_ms": [
+          139.988708496,
+          140.062301636,
+          140.311203003,
+          140.228988647,
+          140.29083252,
+          140.124526978,
+          140.442474365,
+          139.979888916
+        ],
+        "iterations_per_sample": 128,
+        "name": "gdn_output_attention_output",
+        "rows": 5120,
+        "tokens": 2048
+      },
+      {
+        "calls": 64,
+        "candidate_interval_samples_ms": [
+          413.675689697,
+          413.35043335,
+          414.118408203,
+          413.826599121,
+          414.569610596,
+          414.080566406,
+          414.752258301,
+          414.249481201
+        ],
+        "columns": 17408,
+        "control_interval_samples_ms": [
+          390.853363037,
+          393.788726807,
+          394.131958008,
+          394.105957031,
+          394.500244141,
+          394.672698975,
+          394.70022583,
+          395.056884766
+        ],
+        "iterations_per_sample": 128,
+        "name": "mlp_down",
+        "rows": 5120,
+        "tokens": 2048
+      }
+    ],
+    "device": {
+      "architecture": "gfx1201",
+      "name": "AMD Radeon AI PRO R9700",
+      "ordinal": 0
+    },
+    "pair_order": [
+      "AB",
+      "BA",
+      "AB",
+      "BA",
+      "AB",
+      "BA",
+      "AB",
+      "BA"
+    ],
+    "schema": "ninfer.r9700.a8q4-n16k16-m96n256-measurement.v1",
+    "warmup_order": [
+      "A",
+      "B",
+      "B",
+      "A"
+    ]
+  },
+  "numerical_qualification": {
+    "graph": "capture and replay on an owned nondefault stream for all three shapes",
+    "incumbent_bit_parity": "exhaustive over every BF16 output element",
+    "independent_oracle": "126 sampled outputs; each decodes the stored signed codes and exact FP16 G64 scales and evaluates the complete-K logical formula in FP64",
+    "m96_tail": "full parity, output allocation canaries, and an unmapped VMM guard immediately after the final valid activation scale at T2048",
+    "oracle_is_not_exhaustive": true,
+    "status": "all valid rows poisoned for nonzero status and restored after reset"
+  },
+  "power_after_regression": {
+    "command": [
+      "/opt/rocm/bin/rocm-smi",
+      "-d",
+      "0",
+      "--showproductname",
+      "--showprofile",
+      "--showperflevel",
+      "--json"
+    ],
+    "stdout": {
+      "card0": {
+        "Card Model": "0x7551",
+        "Card SKU": "APM107573",
+        "Card Series": "AMD Radeon AI PRO R9700",
+        "Card Vendor": "Advanced Micro Devices, Inc. [AMD/ATI]",
+        "Device Rev": "0xc0",
+        "GFX Version": "gfx1201",
+        "GUID": "38699",
+        "Node ID": "1",
+        "Performance Level": "auto",
+        "Subsystem ID": "0x5413"
+      }
+    },
+    "sysfs_path": "/sys/class/drm/card2/device/power_dpm_force_performance_level",
+    "sysfs_value": "auto"
+  },
+  "power_after_timing": {
+    "command": [
+      "/opt/rocm/bin/rocm-smi",
+      "-d",
+      "0",
+      "--showproductname",
+      "--showprofile",
+      "--showperflevel",
+      "--json"
+    ],
+    "stdout": {
+      "card0": {
+        "Card Model": "0x7551",
+        "Card SKU": "APM107573",
+        "Card Series": "AMD Radeon AI PRO R9700",
+        "Card Vendor": "Advanced Micro Devices, Inc. [AMD/ATI]",
+        "Device Rev": "0xc0",
+        "GFX Version": "gfx1201",
+        "GUID": "38699",
+        "Node ID": "1",
+        "Performance Level": "auto",
+        "Subsystem ID": "0x5413"
+      }
+    },
+    "sysfs_path": "/sys/class/drm/card2/device/power_dpm_force_performance_level",
+    "sysfs_value": "auto"
+  },
+  "power_before_regression": {
+    "command": [
+      "/opt/rocm/bin/rocm-smi",
+      "-d",
+      "0",
+      "--showproductname",
+      "--showprofile",
+      "--showperflevel",
+      "--json"
+    ],
+    "stdout": {
+      "card0": {
+        "Card Model": "0x7551",
+        "Card SKU": "APM107573",
+        "Card Series": "AMD Radeon AI PRO R9700",
+        "Card Vendor": "Advanced Micro Devices, Inc. [AMD/ATI]",
+        "Device Rev": "0xc0",
+        "GFX Version": "gfx1201",
+        "GUID": "38699",
+        "Node ID": "1",
+        "Performance Level": "auto",
+        "Subsystem ID": "0x5413"
+      }
+    },
+    "sysfs_path": "/sys/class/drm/card2/device/power_dpm_force_performance_level",
+    "sysfs_value": "auto"
+  },
+  "regression": {
+    "command": [
+      "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/build/a8q4_n16k16_m96n256_qual",
+      "--regression"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": "PASS exact_shapes=3 full_bit_parity=true complete_k_fp64_samples=126 m96_tail=true graph_replay=true status_poison_reset=true alignment_and_span_rejection=true resource_query=true vmm_scale_read_guard=true guards=true\n"
+  },
+  "schema": "ninfer.r9700.a8q4-n16k16-m96n256-gate.v1",
+  "schema_version": 1,
+  "static": {
+    "command": [
+      "/ssdpool2nvme/local_llm/.venv-ninfer-r9700/bin/python",
+      "-m",
+      "tools.r9700.check_prefill_cta_static",
+      "--recipe",
+      "q4-m96n256",
+      "--mode",
+      "m96n256",
+      "--assembly",
+      "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/build/a8q4_n16k16_m96n256_qual.s",
+      "--metadata",
+      "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/build/a8q4_n16k16_m96n256_qual.s"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": "recipe=q4-m96n256 mode=m96n256 opcode_count=16 barrier_pair_count=2 global_inv_count=0 lds_bytes=30208 vgpr_count=105 private_bytes=0 scratch_bytes=0 flat_scratch=0 sgpr_spill_count=0 vgpr_spill_count=0 maximum_workgroup_size=768 occupancy=12 architectural_vgpr_count=112 static_active_blocks_per_cu=2 static_resident_waves=48 n16_weight_b64_sites=4\nm96n256_challenger_static_gate=passed\n"
+  },
+  "status": "measured"
+}

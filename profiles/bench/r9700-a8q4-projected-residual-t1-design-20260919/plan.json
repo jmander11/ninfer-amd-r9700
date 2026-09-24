@@ -1,0 +1,69 @@
+{
+  "schema": "ninfer.r9700.a8q4-projected-residual-t1-plan.v1",
+  "status": "reviewed_ready",
+  "production_routing_authorized": false,
+  "claim": "Direct all-Q4 T1 projection-plus-residual qualification before product integration.",
+  "bound_inputs": [
+    {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/a8q4_projected_residual_t1_qual.hip","bytes":36680,"sha256":"9b0e924af148429e5a8c1b95c50436923da79edf50184ee432588b3445bed1fb"},
+    {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/a8q4_shape_sweep_qual.hip","bytes":97355,"sha256":"b8f85a76b2f431ba4ea50fb0e3f28ece55a5501c69197e978df9516c98506be2"},
+    {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/check_a8q4_projected_residual_t1_static.py","bytes":3447,"sha256":"5dc8c78e3e4306b2b24c0e7bf5c238e8184cc7655b24bd175b64c44009cf6b56"},
+    {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/linear/r9700_linear.h","bytes":23638,"sha256":"07a76b945ed82efc5e470fd517dfbf4bc2ca09b565cbd636dd8269f85b972514"},
+    {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/linear/r9700_linear.hip","bytes":192174,"sha256":"5d28cce1938b7bae7ba5dc236813be3394bdadbb60585f5db0c4f687ce2e1b49"},
+    {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/eager/eager_ops.h","bytes":20285,"sha256":"1da8744d51bf9f02100b6003784e4f066bb75c9cbc646029d7f8e3df0a80149b"},
+    {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/eager/eager_ops.hip","bytes":71794,"sha256":"47579f025fc96eee9c2e483137320b518efad85a874682533b143cb40203d96f"},
+    {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/rocprof/ordinary-decode-c1-one-round-trace-20260905/analysis-v2.json","bytes":25873,"sha256":"ca8937876bc16259aeaf793a1c6070c5b99dac74d71f2eca4b348ff0b2f7a9d1"},
+    {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919/commands.sh","bytes":468,"sha256":"e7dd521f69d4e1b81484e4436949d99fc1edc9096d40d8535f8eae922df1dfb2"},
+    {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919/preflight.py","bytes":5313,"sha256":"56162db6a1e986b656a1fe5c2cdb42e7af0c925e2fbfcc8b8c1dbee06fa39322"},
+    {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919/measure.py","bytes":4009,"sha256":"ac680b260f0100b682445937acf78d3a9d08094c2fcc106b2dd37a12984b2a5d"}
+  ],
+  "compile_contract": {
+    "architecture": "gfx1201",
+    "optimization": "O3",
+    "language": "c++20",
+    "hipcc": "/opt/rocm/bin/hipcc",
+    "source_root": "/ssdpool2nvme/local_llm/ninfer-amd-r9700"
+  },
+  "workload": {
+    "device": 0,
+    "tokens": 1,
+    "rows": 5120,
+    "columns": [6144, 17408],
+    "calls_per_shape_per_token": 64,
+    "disjoint_weight_copies": 3,
+    "cache_scrub_bytes_before_each_arm": 83886080,
+    "trials_per_arm": 12,
+    "required_power": "auto"
+  },
+  "timing_design": {
+    "joint_allocation_order_balanced": true,
+    "samples_per_arm_per_copy": 4,
+    "first_position_samples_per_arm_per_copy": 2
+  },
+  "semantic_boundary": "delta=BF16(dot); residual=BF16(FP32(residual)+FP32(delta))",
+  "admission": {
+    "complete_residual_bit_exact": true,
+    "independent_fp64_represented_weight_oracle_max_bf16_steps": 2,
+    "maximum_candidate_over_incumbent_ratio_each_allocation": 1.01,
+    "minimum_aggregate_saved_ms_per_token": 0.2,
+    "aggregate_formula": "64*sum(incumbent_shape_median_ms-candidate_shape_median_ms)",
+    "passing_authorizes": "selector-off/on whole C1 A/B only"
+  },
+  "static_contract": {
+    "architecture": "gfx1201",
+    "native_iu4_dot8": true,
+    "wave_size": 32,
+    "maximum_vgpr": 32,
+    "maximum_sgpr": 64,
+    "lds_bytes": 0,
+    "scratch_bytes": 0,
+    "spill_count": 0
+  },
+  "exact_invocation": {
+    "preflight": "bash profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919/commands.sh --preflight",
+    "measure": "bash profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919/commands.sh --measure"
+  },
+  "output": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-design-20260919/attempt-1/qualification.json",
+    "create_only": true
+  }
+}

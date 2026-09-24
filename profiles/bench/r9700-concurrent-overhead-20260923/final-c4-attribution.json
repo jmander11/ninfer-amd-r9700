@@ -1,0 +1,2120 @@
+{
+  "database": "profiles/bench/r9700-concurrent-overhead-20260923/final-c4-k4-trace/raw/r2d2/1482544_results.db",
+  "timing_use": "attribution_only",
+  "rounds": [
+    {
+      "graph": 4,
+      "round": 0,
+      "start": 956783434094666,
+      "end": 956783523797140,
+      "kernels": 2187,
+      "span_ms": 89.702474,
+      "kernel_busy_ms": 73.091776,
+      "uncovered_in_graph_ms": 16.610698
+    },
+    {
+      "graph": 4,
+      "round": 1,
+      "start": 956783526967651,
+      "end": 956783615877112,
+      "kernels": 2187,
+      "span_ms": 88.909461,
+      "kernel_busy_ms": 72.520976,
+      "uncovered_in_graph_ms": 16.388485
+    },
+    {
+      "graph": 4,
+      "round": 2,
+      "start": 956783619036484,
+      "end": 956783708118492,
+      "kernels": 2187,
+      "span_ms": 89.082008,
+      "kernel_busy_ms": 72.690122,
+      "uncovered_in_graph_ms": 16.391886
+    },
+    {
+      "graph": 4,
+      "round": 3,
+      "start": 956783711525615,
+      "end": 956783800512613,
+      "kernels": 2187,
+      "span_ms": 88.986998,
+      "kernel_busy_ms": 72.589107,
+      "uncovered_in_graph_ms": 16.397891
+    },
+    {
+      "graph": 4,
+      "round": 4,
+      "start": 956783803866766,
+      "end": 956783892891682,
+      "kernels": 2187,
+      "span_ms": 89.024916,
+      "kernel_busy_ms": 72.534681,
+      "uncovered_in_graph_ms": 16.490235
+    },
+    {
+      "graph": 4,
+      "round": 5,
+      "start": 956783896196984,
+      "end": 956783985213992,
+      "kernels": 2187,
+      "span_ms": 89.017008,
+      "kernel_busy_ms": 72.515492,
+      "uncovered_in_graph_ms": 16.501516
+    },
+    {
+      "graph": 4,
+      "round": 6,
+      "start": 956783988594804,
+      "end": 956784077468798,
+      "kernels": 2187,
+      "span_ms": 88.873994,
+      "kernel_busy_ms": 72.501723,
+      "uncovered_in_graph_ms": 16.372271
+    },
+    {
+      "graph": 4,
+      "round": 7,
+      "start": 956784080780870,
+      "end": 956784169680267,
+      "kernels": 2187,
+      "span_ms": 88.899397,
+      "kernel_busy_ms": 72.573247,
+      "uncovered_in_graph_ms": 16.32615
+    },
+    {
+      "graph": 4,
+      "round": 8,
+      "start": 956784172993659,
+      "end": 956784261930506,
+      "kernels": 2187,
+      "span_ms": 88.936847,
+      "kernel_busy_ms": 72.594565,
+      "uncovered_in_graph_ms": 16.342282
+    },
+    {
+      "graph": 4,
+      "round": 9,
+      "start": 956784265204647,
+      "end": 956784353963763,
+      "kernels": 2187,
+      "span_ms": 88.759116,
+      "kernel_busy_ms": 72.41464,
+      "uncovered_in_graph_ms": 16.344476
+    },
+    {
+      "graph": 4,
+      "round": 10,
+      "start": 956784357172734,
+      "end": 956784446074422,
+      "kernels": 2187,
+      "span_ms": 88.901688,
+      "kernel_busy_ms": 72.530079,
+      "uncovered_in_graph_ms": 16.371609
+    },
+    {
+      "graph": 4,
+      "round": 11,
+      "start": 956784449280014,
+      "end": 956784538098292,
+      "kernels": 2187,
+      "span_ms": 88.818278,
+      "kernel_busy_ms": 72.504484,
+      "uncovered_in_graph_ms": 16.313794
+    },
+    {
+      "graph": 4,
+      "round": 12,
+      "start": 956784541260912,
+      "end": 956784630094289,
+      "kernels": 2187,
+      "span_ms": 88.833377,
+      "kernel_busy_ms": 72.414555,
+      "uncovered_in_graph_ms": 16.418822
+    },
+    {
+      "graph": 4,
+      "round": 13,
+      "start": 956784633219830,
+      "end": 956784722458359,
+      "kernels": 2187,
+      "span_ms": 89.238529,
+      "kernel_busy_ms": 72.601195,
+      "uncovered_in_graph_ms": 16.637334
+    },
+    {
+      "graph": 4,
+      "round": 14,
+      "start": 956784725590340,
+      "end": 956784814433689,
+      "kernels": 2187,
+      "span_ms": 88.843349,
+      "kernel_busy_ms": 72.48288,
+      "uncovered_in_graph_ms": 16.360469
+    },
+    {
+      "graph": 4,
+      "round": 15,
+      "start": 956784817706800,
+      "end": 956784906625326,
+      "kernels": 2187,
+      "span_ms": 88.918526,
+      "kernel_busy_ms": 72.602424,
+      "uncovered_in_graph_ms": 16.316102
+    },
+    {
+      "graph": 4,
+      "round": 16,
+      "start": 956784909796197,
+      "end": 956784998649406,
+      "kernels": 2187,
+      "span_ms": 88.853209,
+      "kernel_busy_ms": 72.478167,
+      "uncovered_in_graph_ms": 16.375042
+    },
+    {
+      "graph": 4,
+      "round": 17,
+      "start": 956785001783537,
+      "end": 956785090695876,
+      "kernels": 2187,
+      "span_ms": 88.912339,
+      "kernel_busy_ms": 72.526034,
+      "uncovered_in_graph_ms": 16.386305
+    },
+    {
+      "graph": 4,
+      "round": 18,
+      "start": 956785094098548,
+      "end": 956785183151053,
+      "kernels": 2187,
+      "span_ms": 89.052505,
+      "kernel_busy_ms": 72.551835,
+      "uncovered_in_graph_ms": 16.50067
+    },
+    {
+      "graph": 4,
+      "round": 19,
+      "start": 956785186446725,
+      "end": 956785275514593,
+      "kernels": 2187,
+      "span_ms": 89.067868,
+      "kernel_busy_ms": 72.648315,
+      "uncovered_in_graph_ms": 16.419553
+    },
+    {
+      "graph": 4,
+      "round": 20,
+      "start": 956785278871385,
+      "end": 956785367861402,
+      "kernels": 2187,
+      "span_ms": 88.990017,
+      "kernel_busy_ms": 72.666371,
+      "uncovered_in_graph_ms": 16.323646
+    },
+    {
+      "graph": 4,
+      "round": 21,
+      "start": 956785371136473,
+      "end": 956785460138929,
+      "kernels": 2187,
+      "span_ms": 89.002456,
+      "kernel_busy_ms": 72.547949,
+      "uncovered_in_graph_ms": 16.454507
+    },
+    {
+      "graph": 4,
+      "round": 22,
+      "start": 956785463416001,
+      "end": 956785552227570,
+      "kernels": 2187,
+      "span_ms": 88.811569,
+      "kernel_busy_ms": 72.48796,
+      "uncovered_in_graph_ms": 16.323609
+    },
+    {
+      "graph": 4,
+      "round": 23,
+      "start": 956785555401711,
+      "end": 956785644410671,
+      "kernels": 2187,
+      "span_ms": 89.00896,
+      "kernel_busy_ms": 72.593777,
+      "uncovered_in_graph_ms": 16.415183
+    },
+    {
+      "graph": 4,
+      "round": 24,
+      "start": 956785647579262,
+      "end": 956785736502268,
+      "kernels": 2187,
+      "span_ms": 88.923006,
+      "kernel_busy_ms": 72.544792,
+      "uncovered_in_graph_ms": 16.378214
+    },
+    {
+      "graph": 4,
+      "round": 25,
+      "start": 956785739695140,
+      "end": 956785828402698,
+      "kernels": 2187,
+      "span_ms": 88.707558,
+      "kernel_busy_ms": 72.400339,
+      "uncovered_in_graph_ms": 16.307219
+    },
+    {
+      "graph": 4,
+      "round": 26,
+      "start": 956785831694800,
+      "end": 956785920610530,
+      "kernels": 2187,
+      "span_ms": 88.91573,
+      "kernel_busy_ms": 72.444085,
+      "uncovered_in_graph_ms": 16.471645
+    },
+    {
+      "graph": 4,
+      "round": 27,
+      "start": 956785923875781,
+      "end": 956786012846370,
+      "kernels": 2187,
+      "span_ms": 88.970589,
+      "kernel_busy_ms": 72.641645,
+      "uncovered_in_graph_ms": 16.328944
+    },
+    {
+      "graph": 4,
+      "round": 28,
+      "start": 956786015998151,
+      "end": 956786104804118,
+      "kernels": 2187,
+      "span_ms": 88.805967,
+      "kernel_busy_ms": 72.454722,
+      "uncovered_in_graph_ms": 16.351245
+    },
+    {
+      "graph": 4,
+      "round": 29,
+      "start": 956786107990209,
+      "end": 956786196766569,
+      "kernels": 2187,
+      "span_ms": 88.77636,
+      "kernel_busy_ms": 72.463745,
+      "uncovered_in_graph_ms": 16.312615
+    },
+    {
+      "graph": 4,
+      "round": 30,
+      "start": 956786200106931,
+      "end": 956786288142577,
+      "kernels": 2187,
+      "span_ms": 88.035646,
+      "kernel_busy_ms": 71.523958,
+      "uncovered_in_graph_ms": 16.511688
+    },
+    {
+      "graph": 3,
+      "round": 0,
+      "start": 956786292152353,
+      "end": 956786362989686,
+      "kernels": 2118,
+      "span_ms": 70.837333,
+      "kernel_busy_ms": 55.23901,
+      "uncovered_in_graph_ms": 15.598323
+    },
+    {
+      "graph": 3,
+      "round": 1,
+      "start": 956786365368532,
+      "end": 956786435591817,
+      "kernels": 2118,
+      "span_ms": 70.223285,
+      "kernel_busy_ms": 54.729841,
+      "uncovered_in_graph_ms": 15.493444
+    },
+    {
+      "graph": 1,
+      "round": 0,
+      "start": 956786438936239,
+      "end": 956786495213602,
+      "kernels": 1980,
+      "span_ms": 56.277363,
+      "kernel_busy_ms": 42.161535,
+      "uncovered_in_graph_ms": 14.115828
+    },
+    {
+      "graph": 1,
+      "round": 1,
+      "start": 956786496275599,
+      "end": 956786552555814,
+      "kernels": 1980,
+      "span_ms": 56.280215,
+      "kernel_busy_ms": 42.264368,
+      "uncovered_in_graph_ms": 14.015847
+    },
+    {
+      "graph": 1,
+      "round": 2,
+      "start": 956786553526171,
+      "end": 956786609700557,
+      "kernels": 1980,
+      "span_ms": 56.174386,
+      "kernel_busy_ms": 42.068527,
+      "uncovered_in_graph_ms": 14.105859
+    },
+    {
+      "graph": 1,
+      "round": 3,
+      "start": 956786610617703,
+      "end": 956786666350263,
+      "kernels": 1980,
+      "span_ms": 55.73256,
+      "kernel_busy_ms": 41.651959,
+      "uncovered_in_graph_ms": 14.080601
+    }
+  ],
+  "gaps": [
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.170511,
+      "device_busy_ms": 2.434856,
+      "uncovered_ms": 0.735655,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.516307,
+        "hipEventRecord": 0.00414,
+        "hipEventSynchronize": 2.526216,
+        "hipLaunchKernel": 0.01816,
+        "hipGetLastError": 0.00038,
+        "hipGraphLaunch": 0.064438
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.159372,
+      "device_busy_ms": 2.474496,
+      "uncovered_ms": 0.684876,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.51563,
+        "hipEventRecord": 0.00443,
+        "hipEventSynchronize": 2.529036,
+        "hipLaunchKernel": 0.00724,
+        "hipGetLastError": 0.0002,
+        "hipGraphLaunch": 0.064806
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.407123,
+      "device_busy_ms": 2.477816,
+      "uncovered_ms": 0.929307,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.629705,
+        "hipEventRecord": 0.0067,
+        "hipEventSynchronize": 2.589456,
+        "hipLaunchKernel": 0.01427,
+        "hipGetLastError": 0.00036,
+        "hipGraphLaunch": 0.082343
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.354153,
+      "device_busy_ms": 2.449936,
+      "uncovered_ms": 0.904217,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.691658,
+        "hipEventRecord": 0.0078,
+        "hipEventSynchronize": 2.515206,
+        "hipLaunchKernel": 0.0146,
+        "hipGetLastError": 0.00039,
+        "hipGraphLaunch": 0.067799
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.305302,
+      "device_busy_ms": 2.448217,
+      "uncovered_ms": 0.857085,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.643634,
+        "hipEventRecord": 0.00599,
+        "hipEventSynchronize": 2.510636,
+        "hipLaunchKernel": 0.01436,
+        "hipGetLastError": 0.00045,
+        "hipGraphLaunch": 0.071222
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.380812,
+      "device_busy_ms": 2.429656,
+      "uncovered_ms": 0.951156,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.718379,
+        "hipEventRecord": 0.00608,
+        "hipEventSynchronize": 2.494696,
+        "hipLaunchKernel": 0.00897,
+        "hipGetLastError": 0.00081,
+        "hipGraphLaunch": 0.084897
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.312072,
+      "device_busy_ms": 2.488177,
+      "uncovered_ms": 0.823895,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.631817,
+        "hipEventRecord": 0.00587,
+        "hipEventSynchronize": 2.543436,
+        "hipLaunchKernel": 0.01311,
+        "hipGetLastError": 0.00035,
+        "hipGraphLaunch": 0.065809
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.313392,
+      "device_busy_ms": 2.439176,
+      "uncovered_ms": 0.874216,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.655583,
+        "hipEventRecord": 0.00588,
+        "hipEventSynchronize": 2.512546,
+        "hipLaunchKernel": 0.01314,
+        "hipGetLastError": 0.00029,
+        "hipGraphLaunch": 0.080983
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.274141,
+      "device_busy_ms": 2.421856,
+      "uncovered_ms": 0.852285,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.607299,
+        "hipEventRecord": 0.00555,
+        "hipEventSynchronize": 2.489356,
+        "hipLaunchKernel": 0.01567,
+        "hipGetLastError": 0.00059,
+        "hipGraphLaunch": 0.065056
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.208971,
+      "device_busy_ms": 2.436176,
+      "uncovered_ms": 0.772795,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.580287,
+        "hipEventRecord": 0.00497,
+        "hipEventSynchronize": 2.507786,
+        "hipLaunchKernel": 0.01342,
+        "hipGetLastError": 0.00043,
+        "hipGraphLaunch": 0.056648
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.205592,
+      "device_busy_ms": 2.439176,
+      "uncovered_ms": 0.766416,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.529534,
+        "hipEventRecord": 0.0044,
+        "hipEventSynchronize": 2.506936,
+        "hipLaunchKernel": 0.01563,
+        "hipGetLastError": 0.00036,
+        "hipGraphLaunch": 0.075632
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.16262,
+      "device_busy_ms": 2.421376,
+      "uncovered_ms": 0.741244,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.55479,
+        "hipEventRecord": 0.00551,
+        "hipEventSynchronize": 2.477817,
+        "hipLaunchKernel": 0.00946,
+        "hipGetLastError": 0.00036,
+        "hipGraphLaunch": 0.065344
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.125541,
+      "device_busy_ms": 2.426015,
+      "uncovered_ms": 0.699526,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.546408,
+        "hipEventRecord": 0.00391,
+        "hipEventSynchronize": 2.480387,
+        "hipLaunchKernel": 0.00806,
+        "hipGetLastError": 0.00021,
+        "hipGraphLaunch": 0.050936
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.131981,
+      "device_busy_ms": 2.419936,
+      "uncovered_ms": 0.712045,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.509264,
+        "hipEventRecord": 0.00542,
+        "hipEventSynchronize": 2.487076,
+        "hipLaunchKernel": 0.00933,
+        "hipGetLastError": 0.00046,
+        "hipGraphLaunch": 0.072601
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.273111,
+      "device_busy_ms": 2.470497,
+      "uncovered_ms": 0.802614,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.610049,
+        "hipEventRecord": 0.00542,
+        "hipEventSynchronize": 2.530476,
+        "hipLaunchKernel": 0.00854,
+        "hipGetLastError": 0.00043,
+        "hipGraphLaunch": 0.067506
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.170871,
+      "device_busy_ms": 2.438696,
+      "uncovered_ms": 0.732175,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.533698,
+        "hipEventRecord": 0.0045,
+        "hipEventSynchronize": 2.493686,
+        "hipLaunchKernel": 0.01404,
+        "hipGetLastError": 0.00083,
+        "hipGraphLaunch": 0.051397
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.134131,
+      "device_busy_ms": 2.439855,
+      "uncovered_ms": 0.694276,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.539874,
+        "hipEventRecord": 0.00451,
+        "hipEventSynchronize": 2.477296,
+        "hipLaunchKernel": 0.00723,
+        "hipGetLastError": 0.00048,
+        "hipGraphLaunch": 0.062961
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.402672,
+      "device_busy_ms": 2.446896,
+      "uncovered_ms": 0.955776,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.734459,
+        "hipEventRecord": 0.00544,
+        "hipEventSynchronize": 2.525916,
+        "hipLaunchKernel": 0.01527,
+        "hipGetLastError": 0.00073,
+        "hipGraphLaunch": 0.048937
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.295672,
+      "device_busy_ms": 2.456817,
+      "uncovered_ms": 0.838855,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.643898,
+        "hipEventRecord": 0.00569,
+        "hipEventSynchronize": 2.505977,
+        "hipLaunchKernel": 0.014099,
+        "hipGetLastError": 0.00033,
+        "hipGraphLaunch": 0.067168
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.356792,
+      "device_busy_ms": 2.448217,
+      "uncovered_ms": 0.908575,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.682243,
+        "hipEventRecord": 0.00609,
+        "hipEventSynchronize": 2.505386,
+        "hipLaunchKernel": 0.01513,
+        "hipGetLastError": 0.00076,
+        "hipGraphLaunch": 0.085743
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.275071,
+      "device_busy_ms": 2.423617,
+      "uncovered_ms": 0.851454,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.640979,
+        "hipEventRecord": 0.00628,
+        "hipEventSynchronize": 2.490766,
+        "hipLaunchKernel": 0.01379,
+        "hipGetLastError": 0.00051,
+        "hipGraphLaunch": 0.066006
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.277072,
+      "device_busy_ms": 2.434217,
+      "uncovered_ms": 0.842855,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.622928,
+        "hipEventRecord": 0.00519,
+        "hipEventSynchronize": 2.500996,
+        "hipLaunchKernel": 0.02773,
+        "hipGetLastError": 0.00048,
+        "hipGraphLaunch": 0.066288
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.174141,
+      "device_busy_ms": 2.428856,
+      "uncovered_ms": 0.745285,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.530224,
+        "hipEventRecord": 0.00422,
+        "hipEventSynchronize": 2.498106,
+        "hipLaunchKernel": 0.01585,
+        "hipGetLastError": 0.00035,
+        "hipGraphLaunch": 0.065281
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.168591,
+      "device_busy_ms": 2.417176,
+      "uncovered_ms": 0.751415,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.581099,
+        "hipEventRecord": 0.00423,
+        "hipEventSynchronize": 2.481246,
+        "hipLaunchKernel": 0.00748,
+        "hipGetLastError": 0.00033,
+        "hipGraphLaunch": 0.052096
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.192872,
+      "device_busy_ms": 2.433776,
+      "uncovered_ms": 0.759096,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.577818,
+        "hipEventRecord": 0.00391,
+        "hipEventSynchronize": 2.483936,
+        "hipLaunchKernel": 0.01424,
+        "hipGetLastError": 0.00046,
+        "hipGraphLaunch": 0.070428
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.292102,
+      "device_busy_ms": 2.438816,
+      "uncovered_ms": 0.853286,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.657595,
+        "hipEventRecord": 0.00657,
+        "hipEventSynchronize": 2.488396,
+        "hipLaunchKernel": 0.01334,
+        "hipGetLastError": 0.00039,
+        "hipGraphLaunch": 0.069761
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.265251,
+      "device_busy_ms": 2.431696,
+      "uncovered_ms": 0.833555,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.635829,
+        "hipEventRecord": 0.00562,
+        "hipEventSynchronize": 2.491566,
+        "hipLaunchKernel": 0.01332,
+        "hipGetLastError": 0.0004,
+        "hipGraphLaunch": 0.065016
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.151781,
+      "device_busy_ms": 2.424616,
+      "uncovered_ms": 0.727165,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.508755,
+        "hipEventRecord": 0.00436,
+        "hipEventSynchronize": 2.492806,
+        "hipLaunchKernel": 0.01217,
+        "hipGetLastError": 0.00037,
+        "hipGraphLaunch": 0.08879
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.186091,
+      "device_busy_ms": 2.428776,
+      "uncovered_ms": 0.757315,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.555703,
+        "hipEventRecord": 0.00523,
+        "hipEventSynchronize": 2.488267,
+        "hipLaunchKernel": 0.01353,
+        "hipGetLastError": 0.00045,
+        "hipGraphLaunch": 0.069042
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 4,
+      "gap_ms": 3.340362,
+      "device_busy_ms": 2.447056,
+      "uncovered_ms": 0.893306,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.695329,
+        "hipEventRecord": 0.00711,
+        "hipEventSynchronize": 2.491116,
+        "hipLaunchKernel": 0.02532,
+        "hipGetLastError": 0.00033,
+        "hipGraphLaunch": 0.055167
+      }
+    },
+    {
+      "from_graph": 4,
+      "to_graph": 3,
+      "gap_ms": 4.009776,
+      "device_busy_ms": 2.949379,
+      "uncovered_ms": 1.060397,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.518418,
+        "hipEventRecord": 0.00542,
+        "hipEventSynchronize": 2.989595,
+        "hipLaunchKernel": 0.15864,
+        "hipGetLastError": 0.00121,
+        "hipMemsetAsync": 0.02966,
+        "hipMemcpy2DAsync": 0.08316,
+        "hipGraphLaunch": 0.096213
+      }
+    },
+    {
+      "from_graph": 3,
+      "to_graph": 3,
+      "gap_ms": 2.378846,
+      "device_busy_ms": 1.823853,
+      "uncovered_ms": 0.554993,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.393563,
+        "hipEventRecord": 0.00377,
+        "hipEventSynchronize": 1.874237,
+        "hipLaunchKernel": 0.007,
+        "hipGetLastError": 0.00038,
+        "hipGraphLaunch": 0.054916
+      }
+    },
+    {
+      "from_graph": 3,
+      "to_graph": 1,
+      "gap_ms": 3.344422,
+      "device_busy_ms": 2.341496,
+      "uncovered_ms": 1.002926,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.498309,
+        "hipEventRecord": 0.00603,
+        "hipEventSynchronize": 2.437576,
+        "hipLaunchKernel": 0.134,
+        "hipGetLastError": 0.00112,
+        "hipMemsetAsync": 0.02752,
+        "hipMemcpy2DAsync": 0.040569,
+        "hipGraphLaunch": 0.073058
+      }
+    },
+    {
+      "from_graph": 1,
+      "to_graph": 1,
+      "gap_ms": 1.061997,
+      "device_busy_ms": 0.582004,
+      "uncovered_ms": 0.479993,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.237062,
+        "hipEventRecord": 0.00657,
+        "hipEventSynchronize": 0.686528,
+        "hipLaunchKernel": 0.01631,
+        "hipGetLastError": 0.00055,
+        "hipGraphLaunch": 0.067667
+      }
+    },
+    {
+      "from_graph": 1,
+      "to_graph": 1,
+      "gap_ms": 0.970357,
+      "device_busy_ms": 0.545443,
+      "uncovered_ms": 0.424914,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.179921,
+        "hipEventRecord": 0.00631,
+        "hipEventSynchronize": 0.673838,
+        "hipLaunchKernel": 0.0142,
+        "hipGetLastError": 0.00044,
+        "hipGraphLaunch": 0.051368
+      }
+    },
+    {
+      "from_graph": 1,
+      "to_graph": 1,
+      "gap_ms": 0.917146,
+      "device_busy_ms": 0.546804,
+      "uncovered_ms": 0.370342,
+      "clipped_api_ms": {
+        "hipMemcpyAsync": 0.190629,
+        "hipEventRecord": 0.00619,
+        "hipEventSynchronize": 0.60437,
+        "hipLaunchKernel": 0.01218,
+        "hipGetLastError": 0.00049,
+        "hipGraphLaunch": 0.051778
+      }
+    }
+  ],
+  "families": [
+    {
+      "graph": 4,
+      "rounds": 31,
+      "kernel_ms": 2248.13564,
+      "families": [
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<34816u, 5120u, 20u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 2077,
+          "kernel_ms": 674.678721,
+          "fraction": 0.3001058783979778
+        },
+        {
+          "name": "void ninfer::ops::r9700::kv::pv_vector_batched_dflash_verify_kernel<16u, false, false>(float const*, unsigned char const*, unsigned short const*, unsigned int const*, int const*, unsigned int, unsigned int, unsigned long, unsigned long, unsigned int, float*)",
+          "calls": 1984,
+          "kernel_ms": 337.931669,
+          "fraction": 0.1503164057307503
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<5120u, 17408u, 20u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 2077,
+          "kernel_ms": 195.442923,
+          "fraction": 0.08693555652184759
+        },
+        {
+          "name": "void ninfer::ops::(anonymous namespace)::record_kernel<false>(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, float const*, float const*, float const*, int const*, int const*, int const*, float*, hip_bfloat16*, hip_bfloat16*, float*, hip_bfloat16*, int, int, float)",
+          "calls": 1488,
+          "kernel_ms": 116.334828,
+          "fraction": 0.05174724599802172
+        },
+        {
+          "name": "ninfer::ops::r9700::linear::(anonymous namespace)::a8q4g64_linear_wmma32_kernel(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int)",
+          "calls": 186,
+          "kernel_ms": 112.030629,
+          "fraction": 0.049832682248656494
+        },
+        {
+          "name": "void ninfer::ops::r9700::kv::(anonymous namespace)::qk_wmma_batched_dflash_verify_kernel<true>(hip_bfloat16 const*, unsigned char const*, unsigned int const*, int const*, unsigned int, unsigned int, unsigned long, unsigned long, unsigned int, unsigned int, unsigned int, float, float*)",
+          "calls": 1984,
+          "kernel_ms": 106.092527,
+          "fraction": 0.04719133717394383
+        },
+        {
+          "name": "Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SABV_SAV_UserArgs_MT16x128x32_MI16x16x1_SN_LDSB0_AFC1_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA0_DTLB0_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUAMB_GLS0_HPLR0_ISA1201_ICIW0_IU1_K1_LDSTI0_LBSPPA128_LBSPPB128_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA8_LPB8_LPMXSA0_LPMXSB0_LPM0_LRVW8_LWPMn1_MIAV1_MIWT1_8_MXLIBL_MXSFNS_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL0_PAP0_PGL0_PGR1_PLR1_PKA0_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK0_SKFTR0_SKFDPO0_SKWS0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSM1_ULSGRO0_USL1_USLMX0_UDFMAC0_UIOFGRO0_UPLRP0_USFGROn1_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS32_WG16_2_1_WGMXCC1",
+          "calls": 744,
+          "kernel_ms": 90.001633,
+          "fraction": 0.040033898043625164
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<12288u, 5120u, 20u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 1488,
+          "kernel_ms": 86.993004,
+          "fraction": 0.03869562069662309
+        },
+        {
+          "name": "ninfer::ops::detail::(anonymous namespace)::swa_partial_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, int const*, int const*, int const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, float*, float*, int, int, int, int, int, int, int, float)",
+          "calls": 155,
+          "kernel_ms": 78.06665,
+          "fraction": 0.0347250622297861
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<5120u, 6144u, 20u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 1860,
+          "kernel_ms": 77.347997,
+          "fraction": 0.034405396019610276
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<4096u, 5120u, 20u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 1488,
+          "kernel_ms": 43.364037,
+          "fraction": 0.019288888191817465
+        },
+        {
+          "name": "ninfer::ops::r9700::gdn::(anonymous namespace)::bf16_projected_control_t1_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, float const*, float const*, float*, float*)",
+          "calls": 1488,
+          "kernel_ms": 39.086311,
+          "fraction": 0.01738609997749068
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::rmsnorm_k5120_rows4_cta_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, float, bool)",
+          "calls": 4371,
+          "kernel_ms": 33.048875,
+          "fraction": 0.014700569846399482
+        },
+        {
+          "name": "Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SABV_SAV_UserArgs_MT64x64x32_MI16x16x1_SN_LDSB0_AFC1_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA0_DTLB0_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUAMB_GLS0_HPLR0_ISA1201_ICIW0_IU1_K1_LDSTI0_LBSPPA128_LBSPPB128_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA8_LPB8_LPMXSA0_LPMXSB0_LPM0_LRVW8_LWPMn1_MIAV1_MIWT4_4_MXLIBL_MXSFNS_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL0_PAP0_PGL0_PGR1_PLR1_PKA0_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK0_SKFTR0_SKFDPO0_SKWS0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSM1_ULSGRO0_USL1_USLMX0_UDFMAC0_UIOFGRO0_UPLRP0_USFGROn1_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB1_WS32_WG16_2_1_WGMXCC1",
+          "calls": 62,
+          "kernel_ms": 25.540613,
+          "fraction": 0.011360797162576899
+        },
+        {
+          "name": "ninfer::ops::dflash2_column_topk_split_kernel(hip_bfloat16 const*, float*, int*, int, int, int)",
+          "calls": 31,
+          "kernel_ms": 23.867239,
+          "fraction": 0.010616458622576706
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::silu_mul_strided_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned long, ninfer::ops::r9700::eager::SiluMulStridedShape)",
+          "calls": 2139,
+          "kernel_ms": 22.768282,
+          "fraction": 0.010127628242217628
+        },
+        {
+          "name": "ninfer::ops::r9700::linear::(anonymous namespace)::a8g64_quantize_activation_kernel(hip_bfloat16 const*, unsigned char*, unsigned char*, unsigned short*, unsigned int*, unsigned int, unsigned int)",
+          "calls": 10416,
+          "kernel_ms": 22.10629,
+          "fraction": 0.009833165582482381
+        },
+        {
+          "name": "__amd_rocclr_fillBufferUnAligned",
+          "calls": 11718,
+          "kernel_ms": 19.306413,
+          "fraction": 0.008587743842715824
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::gated_rmsnorm_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float)",
+          "calls": 1488,
+          "kernel_ms": 18.63553,
+          "fraction": 0.008289326350433198
+        },
+        {
+          "name": "ninfer::ops::r9700::kv::softmax_wmma_scores_batched_dflash_verify_in_place_kernel(float*, unsigned long, int const*)",
+          "calls": 1984,
+          "kernel_ms": 16.96515,
+          "fraction": 0.0075463195806103585
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<7168u, 5120u, 20u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 434,
+          "kernel_ms": 16.558064,
+          "fraction": 0.007365242428165945
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<6144u, 5120u, 20u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 310,
+          "kernel_ms": 11.145188,
+          "fraction": 0.0049575247159019285
+        },
+        {
+          "name": "ninfer::ops::r9700::gdn::(anonymous namespace)::projection_conv_record_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, int const*, int const*, int const*, hip_bfloat16*, hip_bfloat16*, hip_bfloat16*, hip_bfloat16*, hip_bfloat16*, unsigned int, unsigned int)",
+          "calls": 1488,
+          "kernel_ms": 8.663813,
+          "fraction": 0.00385377681215
+        },
+        {
+          "name": "ninfer::ops::r9700::linear::(anonymous namespace)::fp8_quantize_activation_kernel(hip_bfloat16 const*, unsigned char*, float*, unsigned int*, unsigned int, unsigned int)",
+          "calls": 806,
+          "kernel_ms": 8.179936,
+          "fraction": 0.003638542023202835
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<1280u, 5120u, 20u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 310,
+          "kernel_ms": 7.640778,
+          "fraction": 0.0033987175257806064
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::residual_add_kernel(hip_bfloat16 const*, hip_bfloat16*, unsigned long)",
+          "calls": 4278,
+          "kernel_ms": 7.234848,
+          "fraction": 0.0032181545771855654
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<5120u, 25600u, 20u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 31,
+          "kernel_ms": 5.54696,
+          "fraction": 0.0024673600210350297
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::rmsnorm_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float, bool)",
+          "calls": 961,
+          "kernel_ms": 5.425952,
+          "fraction": 0.002413534087293772
+        },
+        {
+          "name": "void ninfer::ops::r9700::kv::(anonymous namespace)::append_kernel<16u, true, false, false>(hip_bfloat16 const*, hip_bfloat16 const*, unsigned int const*, unsigned long, int const*, unsigned int, unsigned int const*, unsigned int, unsigned int const*, unsigned int, int const*, unsigned int, unsigned int, unsigned long, unsigned char*, unsigned char*, unsigned short*, unsigned int*)",
+          "calls": 1984,
+          "kernel_ms": 5.083593,
+          "fraction": 0.0022612483470970638
+        },
+        {
+          "name": "ninfer::ops::argmax_kernel(hip_bfloat16 const*, int*, int, int, ninfer::ops::SamplingConfig const*, int)",
+          "calls": 31,
+          "kernel_ms": 4.670231,
+          "fraction": 0.002077379548148616
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<5120u, 4096u, 20u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 155,
+          "kernel_ms": 4.356464,
+          "fraction": 0.0019378119017765315
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::bf16_extract_features_kernel(hip_bfloat16 const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int, unsigned long)",
+          "calls": 1984,
+          "kernel_ms": 3.601737,
+          "fraction": 0.0016020995067717533
+        },
+        {
+          "name": "__amd_rocclr_copyBuffer",
+          "calls": 155,
+          "kernel_ms": 3.499548,
+          "fraction": 0.001556644509225431
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::rmsnorm_k256_token8_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float, bool)",
+          "calls": 496,
+          "kernel_ms": 1.567453,
+          "fraction": 0.0006972235002688716
+        },
+        {
+          "name": "ninfer::ops::speculative_sampling_partial_topk_kernel(hip_bfloat16 const*, int const*, int const*, ninfer::ops::SamplingConfig const*, int, int, int, int, ninfer::ops::SamplingWorkspace, unsigned long, int const*, int const*, int const*)",
+          "calls": 31,
+          "kernel_ms": 1.495178,
+          "fraction": 0.0006650746393576146
+        },
+        {
+          "name": "ninfer::ops::detail::(anonymous namespace)::swa_reduce_kernel(hip_bfloat16 const*, float const*, float const*, int const*, hip_bfloat16*, int, int)",
+          "calls": 155,
+          "kernel_ms": 1.450892,
+          "fraction": 0.0006453756500208324
+        },
+        {
+          "name": "__amd_rocclr_copyBufferRectAligned",
+          "calls": 837,
+          "kernel_ms": 1.420648,
+          "fraction": 0.0006319227250896659
+        },
+        {
+          "name": "ninfer::ops::(anonymous namespace)::poison_nonfinite_output(unsigned int const*, hip_bfloat16*, unsigned long)",
+          "calls": 806,
+          "kernel_ms": 1.320971,
+          "fraction": 0.0005875850978457865
+        },
+        {
+          "name": "void ninfer::ops::(anonymous namespace)::rope_kernel<(ninfer::ops::(anonymous namespace)::Profile)0, 256, 32, 24, 4, false>(int const*, hip_bfloat16*, hip_bfloat16*, int, long, long)",
+          "calls": 496,
+          "kernel_ms": 1.273726,
+          "fraction": 0.0005665699067872969
+        },
+        {
+          "name": "ninfer::ops::dflash2_column_topk_merge_kernel(float const*, int const*, float*, int*, int const*, int, int, int)",
+          "calls": 31,
+          "kernel_ms": 1.108969,
+          "fraction": 0.0004932838483001853
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::sigmoid_mul_kernel(hip_bfloat16 const*, hip_bfloat16*, unsigned long)",
+          "calls": 496,
+          "kernel_ms": 0.968482,
+          "fraction": 0.0004307934017717899
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::cast_fp32_to_bf16_kernel(float const*, hip_bfloat16*, unsigned long)",
+          "calls": 496,
+          "kernel_ms": 0.874808,
+          "fraction": 0.0003891259870778971
+        },
+        {
+          "name": "ninfer::ops::speculative_sampling_p_less_mass_finalize_kernel(hip_bfloat16 const*, int const*, int const*, int*, int*, int*, int*, int*, ninfer::ops::SamplingConfig const*, int, int, int, int, ninfer::ops::SamplingWorkspace, unsigned long, int const*, float const*, int, int const*, int const*, int const*, int*, int*)",
+          "calls": 31,
+          "kernel_ms": 0.7162,
+          "fraction": 0.0003185750838414714
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::bf16_scatter_batch_kernel(hip_bfloat16 const*, int const*, int const*, hip_bfloat16*, unsigned int, unsigned int, unsigned long, unsigned long)",
+          "calls": 155,
+          "kernel_ms": 0.674329,
+          "fraction": 0.000299950317944339
+        },
+        {
+          "name": "void ninfer::ops::detail::(anonymous namespace)::grouped_dynamic_conv_kernel<false>(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, hip_bfloat16*, int, int)",
+          "calls": 310,
+          "kernel_ms": 0.663244,
+          "fraction": 0.00029501956563439386
+        },
+        {
+          "name": "void ninfer::ops::detail::(anonymous namespace)::grouped_dynamic_conv_kernel<true>(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, hip_bfloat16*, int, int)",
+          "calls": 310,
+          "kernel_ms": 0.660286,
+          "fraction": 0.0002937038087257048
+        },
+        {
+          "name": "void ninfer::ops::(anonymous namespace)::rope_kernel<(ninfer::ops::(anonymous namespace)::Profile)2, 128, 64, 32, 8, false>(int const*, hip_bfloat16*, hip_bfloat16*, int, long, long)",
+          "calls": 155,
+          "kernel_ms": 0.623204,
+          "fraction": 0.00027720925237411384
+        },
+        {
+          "name": "ninfer::ops::dflash2_path_select_kernel(float const*, int const*, hip_bfloat16 const*, ninfer::ops::Dflash2CodebookDevice, ninfer::ops::Dflash2CodebookDevice, int const*, int const*, int*, int*, float*, int, int, ninfer::ops::SamplingConfig const*, unsigned long long, int, bool)",
+          "calls": 31,
+          "kernel_ms": 0.546725,
+          "fraction": 0.00024319039753313104
+        },
+        {
+          "name": "void ninfer::ops::(anonymous namespace)::rope_kernel<(ninfer::ops::(anonymous namespace)::Profile)2, 128, 64, 8, 0, false>(int const*, hip_bfloat16*, hip_bfloat16*, int, long, long)",
+          "calls": 155,
+          "kernel_ms": 0.291202,
+          "fraction": 0.0001295304406098913
+        },
+        {
+          "name": "ninfer::ops::r9700::dflash::(anonymous namespace)::append_cyclic_kernel(unsigned short const*, unsigned short const*, int const*, int const*, int const*, unsigned short*, unsigned short*, int, int, int, int)",
+          "calls": 155,
+          "kernel_ms": 0.269125,
+          "fraction": 0.00011971030360072047
+        },
+        {
+          "name": "ninfer::targets::qwen3::(anonymous namespace)::initialize_segmented_cursor(int const*, unsigned int, unsigned int, unsigned int, unsigned int*, unsigned int*)",
+          "calls": 124,
+          "kernel_ms": 0.20392,
+          "fraction": 9.070627073017712e-05
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::embedding_gather_q4_kernel(unsigned char const*, unsigned short const*, int const*, hip_bfloat16*, unsigned int, unsigned int, unsigned long)",
+          "calls": 62,
+          "kernel_ms": 0.17808,
+          "fraction": 7.9212302332434e-05
+        },
+        {
+          "name": "ninfer::targets::qwen3::(anonymous namespace)::advance_segmented_cursor(int const*, unsigned int, unsigned int, unsigned int*, unsigned int*)",
+          "calls": 124,
+          "kernel_ms": 0.167842,
+          "fraction": 7.465830664914862e-05
+        },
+        {
+          "name": "ninfer::ops::r9700::schedule::(anonymous namespace)::prepare_ragged_prefix_kernel(HIP_vector_type<unsigned int, 4u> const*, int const*, int const*, int const*, HIP_vector_type<unsigned int, 4u>*, int*, int*, unsigned int, unsigned int, unsigned long, unsigned long)",
+          "calls": 31,
+          "kernel_ms": 0.163521,
+          "fraction": 7.273626959625978e-05
+        },
+        {
+          "name": "ninfer::ops::speculative_prepare_verify_inputs_kernel(int const*, int const*, int const*, int const*, int*, int*, int)",
+          "calls": 31,
+          "kernel_ms": 0.0694,
+          "fraction": 3.087002348310265e-05
+        },
+        {
+          "name": "ninfer::ops::speculative_sampling_group_finalize_kernel(int const*, int const*, int const*, int*, int*, int*, int*, int*, ninfer::ops::SamplingConfig const*, int, int, int, int, ninfer::ops::SamplingWorkspace, unsigned long, int const*, float const*, int, int const*, int const*, int const*, int*, int*)",
+          "calls": 31,
+          "kernel_ms": 0.06756,
+          "fraction": 3.0051567529083787e-05
+        },
+        {
+          "name": "ninfer::ops::speculative_select_accepted_hidden_kernel(hip_bfloat16 const*, int const*, hip_bfloat16*, int, int)",
+          "calls": 31,
+          "kernel_ms": 0.051801,
+          "fraction": 2.3041759170723348e-05
+        },
+        {
+          "name": "ninfer::ops::r9700::schedule::(anonymous namespace)::prepare_masked_block_kernel(int const*, int const*, int const*, int, int*, int*, unsigned int, unsigned int)",
+          "calls": 31,
+          "kernel_ms": 0.050401,
+          "fraction": 2.2419020944839433e-05
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::bf16_scatter_kernel(hip_bfloat16 const*, int const*, hip_bfloat16*, unsigned int, unsigned int)",
+          "calls": 31,
+          "kernel_ms": 0.04124,
+          "fraction": 1.8344088882466185e-05
+        }
+      ]
+    },
+    {
+      "graph": 3,
+      "rounds": 2,
+      "kernel_ms": 109.968851,
+      "families": [
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<34816u, 5120u, 15u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 134,
+          "kernel_ms": 24.458363,
+          "fraction": 0.22241173548316878
+        },
+        {
+          "name": "void ninfer::ops::r9700::kv::pv_vector_batched_dflash_verify_kernel<16u, false, false>(float const*, unsigned char const*, unsigned short const*, unsigned int const*, int const*, unsigned int, unsigned int, unsigned long, unsigned long, unsigned int, float*)",
+          "calls": 96,
+          "kernel_ms": 16.743232,
+          "fraction": 0.15225431426941072
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<5120u, 17408u, 15u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 134,
+          "kernel_ms": 12.583803,
+          "fraction": 0.11443061271959638
+        },
+        {
+          "name": "Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SABV_SAV_UserArgs_MT16x128x32_MI16x16x1_SN_LDSB0_AFC1_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA0_DTLB0_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUAMB_GLS0_HPLR0_ISA1201_ICIW0_IU1_K1_LDSTI0_LBSPPA128_LBSPPB128_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA8_LPB8_LPMXSA0_LPMXSB0_LPM0_LRVW8_LWPMn1_MIAV1_MIWT1_8_MXLIBL_MXSFNS_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL0_PAP0_PGL0_PGR1_PLR1_PKA0_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK0_SKFTR0_SKFDPO0_SKWS0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSM1_ULSGRO0_USL1_USLMX0_UDFMAC0_UIOFGRO0_UPLRP0_USFGROn1_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS32_WG16_2_1_WGMXCC1",
+          "calls": 48,
+          "kernel_ms": 5.728154,
+          "fraction": 0.0520888774222075
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<12288u, 5120u, 15u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 96,
+          "kernel_ms": 5.544478,
+          "fraction": 0.050418622633421895
+        },
+        {
+          "name": "void ninfer::ops::r9700::kv::(anonymous namespace)::qk_wmma_batched_dflash_verify_kernel<true>(hip_bfloat16 const*, unsigned char const*, unsigned int const*, int const*, unsigned int, unsigned int, unsigned long, unsigned long, unsigned int, unsigned int, unsigned int, float, float*)",
+          "calls": 96,
+          "kernel_ms": 5.161509,
+          "fraction": 0.04693610011438603
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<5120u, 6144u, 15u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 120,
+          "kernel_ms": 5.025635,
+          "fraction": 0.04570053205339028
+        },
+        {
+          "name": "ninfer::ops::r9700::linear::(anonymous namespace)::a8q4g64_linear_wmma32_kernel(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int)",
+          "calls": 10,
+          "kernel_ms": 4.913472,
+          "fraction": 0.044680579594307115
+        },
+        {
+          "name": "void ninfer::ops::(anonymous namespace)::record_kernel<false>(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, float const*, float const*, float const*, int const*, int const*, int const*, float*, hip_bfloat16*, hip_bfloat16*, float*, hip_bfloat16*, int, int, float)",
+          "calls": 96,
+          "kernel_ms": 4.402993,
+          "fraction": 0.04003854691543517
+        },
+        {
+          "name": "ninfer::ops::detail::(anonymous namespace)::swa_partial_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, int const*, int const*, int const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, float*, float*, int, int, int, int, int, int, int, float)",
+          "calls": 10,
+          "kernel_ms": 3.438826,
+          "fraction": 0.031270909614214304
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<4096u, 5120u, 15u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 96,
+          "kernel_ms": 2.785623,
+          "fraction": 0.025331018508141002
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::rmsnorm_k5120_rows4_cta_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, float, bool)",
+          "calls": 282,
+          "kernel_ms": 2.131407,
+          "fraction": 0.019381915702656564
+        },
+        {
+          "name": "ninfer::ops::r9700::gdn::(anonymous namespace)::bf16_projected_control_t1_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, float const*, float const*, float*, float*)",
+          "calls": 96,
+          "kernel_ms": 1.910575,
+          "fraction": 0.017373783417997158
+        },
+        {
+          "name": "Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SABV_SAV_UserArgs_MT64x64x32_MI16x16x1_SN_LDSB0_AFC1_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA0_DTLB0_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUAMB_GLS0_HPLR0_ISA1201_ICIW0_IU1_K1_LDSTI0_LBSPPA128_LBSPPB128_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA8_LPB8_LPMXSA0_LPMXSB0_LPM0_LRVW8_LWPMn1_MIAV1_MIWT4_4_MXLIBL_MXSFNS_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL0_PAP0_PGL0_PGR1_PLR1_PKA0_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK0_SKFTR0_SKFDPO0_SKWS0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSM1_ULSGRO0_USL1_USLMX0_UDFMAC0_UIOFGRO0_UPLRP0_USFGROn1_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB1_WS32_WG16_2_1_WGMXCC1",
+          "calls": 4,
+          "kernel_ms": 1.628372,
+          "fraction": 0.014807574919556084
+        },
+        {
+          "name": "ninfer::ops::r9700::linear::(anonymous namespace)::a8g64_quantize_activation_kernel(hip_bfloat16 const*, unsigned char*, unsigned char*, unsigned short*, unsigned int*, unsigned int, unsigned int)",
+          "calls": 670,
+          "kernel_ms": 1.51777,
+          "fraction": 0.013801817389180505
+        },
+        {
+          "name": "__amd_rocclr_fillBufferUnAligned",
+          "calls": 754,
+          "kernel_ms": 1.231884,
+          "fraction": 0.011202117588734286
+        },
+        {
+          "name": "ninfer::ops::dflash2_column_topk_split_kernel(hip_bfloat16 const*, float*, int*, int, int, int)",
+          "calls": 2,
+          "kernel_ms": 1.195368,
+          "fraction": 0.010870059922695746
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::silu_mul_strided_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned long, ninfer::ops::r9700::eager::SiluMulStridedShape)",
+          "calls": 138,
+          "kernel_ms": 1.145409,
+          "fraction": 0.010415758549664214
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<7168u, 5120u, 15u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 28,
+          "kernel_ms": 1.056528,
+          "fraction": 0.009607520587807178
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::gated_rmsnorm_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float)",
+          "calls": 96,
+          "kernel_ms": 0.946325,
+          "fraction": 0.008605391357594524
+        },
+        {
+          "name": "ninfer::ops::r9700::kv::softmax_wmma_scores_batched_dflash_verify_in_place_kernel(float*, unsigned long, int const*)",
+          "calls": 96,
+          "kernel_ms": 0.840645,
+          "fraction": 0.007644391956045808
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<6144u, 5120u, 15u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 20,
+          "kernel_ms": 0.703565,
+          "fraction": 0.006397857153204229
+        },
+        {
+          "name": "ninfer::ops::r9700::linear::(anonymous namespace)::fp8_quantize_activation_kernel(hip_bfloat16 const*, unsigned char*, float*, unsigned int*, unsigned int, unsigned int)",
+          "calls": 52,
+          "kernel_ms": 0.527363,
+          "fraction": 0.004795567064713625
+        },
+        {
+          "name": "ninfer::ops::r9700::gdn::(anonymous namespace)::projection_conv_record_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, int const*, int const*, int const*, hip_bfloat16*, hip_bfloat16*, hip_bfloat16*, hip_bfloat16*, hip_bfloat16*, unsigned int, unsigned int)",
+          "calls": 96,
+          "kernel_ms": 0.505643,
+          "fraction": 0.004598056589679199
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<1280u, 5120u, 15u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 20,
+          "kernel_ms": 0.492925,
+          "fraction": 0.0044824056586714725
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::residual_add_kernel(hip_bfloat16 const*, hip_bfloat16*, unsigned long)",
+          "calls": 276,
+          "kernel_ms": 0.457162,
+          "fraction": 0.004157195386173491
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::rmsnorm_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float, bool)",
+          "calls": 62,
+          "kernel_ms": 0.322922,
+          "fraction": 0.002936486078225915
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<5120u, 25600u, 15u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 2,
+          "kernel_ms": 0.312723,
+          "fraction": 0.0028437416337104404
+        },
+        {
+          "name": "ninfer::ops::argmax_kernel(hip_bfloat16 const*, int*, int, int, ninfer::ops::SamplingConfig const*, int)",
+          "calls": 2,
+          "kernel_ms": 0.288322,
+          "fraction": 0.00262185152775671
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<5120u, 4096u, 15u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 10,
+          "kernel_ms": 0.283361,
+          "fraction": 0.0025767387530492613
+        },
+        {
+          "name": "void ninfer::ops::r9700::kv::(anonymous namespace)::append_kernel<16u, true, false, false>(hip_bfloat16 const*, hip_bfloat16 const*, unsigned int const*, unsigned long, int const*, unsigned int, unsigned int const*, unsigned int, unsigned int const*, unsigned int, int const*, unsigned int, unsigned int, unsigned long, unsigned char*, unsigned char*, unsigned short*, unsigned int*)",
+          "calls": 96,
+          "kernel_ms": 0.249601,
+          "fraction": 0.002269742729238846
+        },
+        {
+          "name": "__amd_rocclr_copyBuffer",
+          "calls": 10,
+          "kernel_ms": 0.221443,
+          "fraction": 0.0020136884034552657
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::bf16_extract_features_kernel(hip_bfloat16 const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int, unsigned long)",
+          "calls": 128,
+          "kernel_ms": 0.219403,
+          "fraction": 0.0019951376958553474
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::rmsnorm_k256_token8_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float, bool)",
+          "calls": 32,
+          "kernel_ms": 0.10048,
+          "fraction": 0.0009137132841371599
+        },
+        {
+          "name": "__amd_rocclr_copyBufferRectAligned",
+          "calls": 54,
+          "kernel_ms": 0.09076,
+          "fraction": 0.0008253246185140191
+        },
+        {
+          "name": "ninfer::ops::(anonymous namespace)::poison_nonfinite_output(unsigned int const*, hip_bfloat16*, unsigned long)",
+          "calls": 52,
+          "kernel_ms": 0.08632,
+          "fraction": 0.0007849495490318436
+        },
+        {
+          "name": "void ninfer::ops::(anonymous namespace)::rope_kernel<(ninfer::ops::(anonymous namespace)::Profile)0, 256, 32, 24, 4, false>(int const*, hip_bfloat16*, hip_bfloat16*, int, long, long)",
+          "calls": 32,
+          "kernel_ms": 0.082281,
+          "fraction": 0.0007482209666808286
+        },
+        {
+          "name": "ninfer::ops::dflash2_column_topk_merge_kernel(float const*, int const*, float*, int*, int const*, int, int, int)",
+          "calls": 2,
+          "kernel_ms": 0.075682,
+          "fraction": 0.0006882130649887395
+        },
+        {
+          "name": "ninfer::ops::speculative_sampling_partial_topk_kernel(hip_bfloat16 const*, int const*, int const*, ninfer::ops::SamplingConfig const*, int, int, int, int, ninfer::ops::SamplingWorkspace, unsigned long, int const*, int const*, int const*)",
+          "calls": 2,
+          "kernel_ms": 0.061561,
+          "fraction": 0.0005598039757640097
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::sigmoid_mul_kernel(hip_bfloat16 const*, hip_bfloat16*, unsigned long)",
+          "calls": 32,
+          "kernel_ms": 0.059361,
+          "fraction": 0.0005397983107052742
+        },
+        {
+          "name": "ninfer::ops::detail::(anonymous namespace)::swa_reduce_kernel(hip_bfloat16 const*, float const*, float const*, int const*, hip_bfloat16*, int, int)",
+          "calls": 10,
+          "kernel_ms": 0.0592,
+          "fraction": 0.0005383342597623395
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::cast_fp32_to_bf16_kernel(float const*, hip_bfloat16*, unsigned long)",
+          "calls": 32,
+          "kernel_ms": 0.0544,
+          "fraction": 0.0004946855359978255
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::bf16_scatter_batch_kernel(hip_bfloat16 const*, int const*, int const*, hip_bfloat16*, unsigned int, unsigned int, unsigned long, unsigned long)",
+          "calls": 10,
+          "kernel_ms": 0.04348,
+          "fraction": 0.00039538468943355607
+        },
+        {
+          "name": "void ninfer::ops::detail::(anonymous namespace)::grouped_dynamic_conv_kernel<false>(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, hip_bfloat16*, int, int)",
+          "calls": 20,
+          "kernel_ms": 0.043321,
+          "fraction": 0.0003939388254588565
+        },
+        {
+          "name": "void ninfer::ops::detail::(anonymous namespace)::grouped_dynamic_conv_kernel<true>(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, hip_bfloat16*, int, int)",
+          "calls": 20,
+          "kernel_ms": 0.0422,
+          "fraction": 0.000383745029763019
+        },
+        {
+          "name": "void ninfer::ops::(anonymous namespace)::rope_kernel<(ninfer::ops::(anonymous namespace)::Profile)2, 128, 64, 32, 8, false>(int const*, hip_bfloat16*, hip_bfloat16*, int, long, long)",
+          "calls": 10,
+          "kernel_ms": 0.03952,
+          "fraction": 0.000359374492327832
+        },
+        {
+          "name": "ninfer::ops::dflash2_path_select_kernel(float const*, int const*, hip_bfloat16 const*, ninfer::ops::Dflash2CodebookDevice, ninfer::ops::Dflash2CodebookDevice, int const*, int const*, int*, int*, float*, int, int, ninfer::ops::SamplingConfig const*, unsigned long long, int, bool)",
+          "calls": 2,
+          "kernel_ms": 0.03512,
+          "fraction": 0.00031936316221036084
+        },
+        {
+          "name": "ninfer::ops::speculative_sampling_p_less_mass_finalize_kernel(hip_bfloat16 const*, int const*, int const*, int*, int*, int*, int*, int*, ninfer::ops::SamplingConfig const*, int, int, int, int, ninfer::ops::SamplingWorkspace, unsigned long, int const*, float const*, int, int const*, int const*, int const*, int*, int*)",
+          "calls": 2,
+          "kernel_ms": 0.03072,
+          "fraction": 0.00027935183209288966
+        },
+        {
+          "name": "void ninfer::ops::(anonymous namespace)::rope_kernel<(ninfer::ops::(anonymous namespace)::Profile)2, 128, 64, 8, 0, false>(int const*, hip_bfloat16*, hip_bfloat16*, int, long, long)",
+          "calls": 10,
+          "kernel_ms": 0.01736,
+          "fraction": 0.000157862884281659
+        },
+        {
+          "name": "ninfer::ops::r9700::dflash::(anonymous namespace)::append_cyclic_kernel(unsigned short const*, unsigned short const*, int const*, int const*, int const*, unsigned short*, unsigned short*, int, int, int, int)",
+          "calls": 10,
+          "kernel_ms": 0.016921,
+          "fraction": 0.0001538708447540295
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::embedding_gather_q4_kernel(unsigned char const*, unsigned short const*, int const*, hip_bfloat16*, unsigned int, unsigned int, unsigned long)",
+          "calls": 4,
+          "kernel_ms": 0.01008,
+          "fraction": 9.166231990547942e-05
+        },
+        {
+          "name": "ninfer::ops::r9700::schedule::(anonymous namespace)::prepare_ragged_prefix_kernel(HIP_vector_type<unsigned int, 4u> const*, int const*, int const*, int const*, HIP_vector_type<unsigned int, 4u>*, int*, int*, unsigned int, unsigned int, unsigned long, unsigned long)",
+          "calls": 2,
+          "kernel_ms": 0.00976,
+          "fraction": 8.875240498784515e-05
+        },
+        {
+          "name": "ninfer::targets::qwen3::(anonymous namespace)::initialize_segmented_cursor(int const*, unsigned int, unsigned int, unsigned int, unsigned int*, unsigned int*)",
+          "calls": 6,
+          "kernel_ms": 0.0096,
+          "fraction": 8.729744752902801e-05
+        },
+        {
+          "name": "ninfer::targets::qwen3::(anonymous namespace)::advance_segmented_cursor(int const*, unsigned int, unsigned int, unsigned int*, unsigned int*)",
+          "calls": 6,
+          "kernel_ms": 0.00828,
+          "fraction": 7.529404849378666e-05
+        },
+        {
+          "name": "ninfer::ops::speculative_prepare_verify_inputs_kernel(int const*, int const*, int const*, int const*, int*, int*, int)",
+          "calls": 2,
+          "kernel_ms": 0.0046,
+          "fraction": 4.183002694099259e-05
+        },
+        {
+          "name": "ninfer::ops::speculative_sampling_group_finalize_kernel(int const*, int const*, int const*, int*, int*, int*, int*, int*, ninfer::ops::SamplingConfig const*, int, int, int, int, ninfer::ops::SamplingWorkspace, unsigned long, int const*, float const*, int, int const*, int const*, int const*, int*, int*)",
+          "calls": 2,
+          "kernel_ms": 0.00396,
+          "fraction": 3.601019710572406e-05
+        },
+        {
+          "name": "ninfer::ops::speculative_select_accepted_hidden_kernel(hip_bfloat16 const*, int const*, hip_bfloat16*, int, int)",
+          "calls": 2,
+          "kernel_ms": 0.00328,
+          "fraction": 2.982662790575124e-05
+        },
+        {
+          "name": "ninfer::ops::r9700::schedule::(anonymous namespace)::prepare_masked_block_kernel(int const*, int const*, int const*, int, int*, int*, unsigned int, unsigned int)",
+          "calls": 2,
+          "kernel_ms": 0.00324,
+          "fraction": 2.9462888541046956e-05
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::bf16_scatter_kernel(hip_bfloat16 const*, int const*, hip_bfloat16*, unsigned int, unsigned int)",
+          "calls": 2,
+          "kernel_ms": 0.00256,
+          "fraction": 2.3279319341074138e-05
+        }
+      ]
+    },
+    {
+      "graph": 1,
+      "rounds": 4,
+      "kernel_ms": 168.146389,
+      "families": [
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<34816u, 5120u, 5u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 268,
+          "kernel_ms": 45.27914,
+          "fraction": 0.26928404629611163
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<5120u, 17408u, 5u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 268,
+          "kernel_ms": 24.958886,
+          "fraction": 0.14843545644028075
+        },
+        {
+          "name": "void ninfer::ops::r9700::kv::pv_vector_batched_dflash_verify_kernel<16u, false, false>(float const*, unsigned char const*, unsigned short const*, unsigned int const*, int const*, unsigned int, unsigned int, unsigned long, unsigned long, unsigned int, float*)",
+          "calls": 64,
+          "kernel_ms": 12.197797,
+          "fraction": 0.07254272347174819
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<12288u, 5120u, 5u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 192,
+          "kernel_ms": 11.804194,
+          "fraction": 0.0702018881892254
+        },
+        {
+          "name": "Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SABV_SAV_UserArgs_MT16x128x32_MI16x16x1_SN_LDSB0_AFC1_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA0_DTLB0_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUAMB_GLS0_HPLR0_ISA1201_ICIW0_IU1_K1_LDSTI0_LBSPPA128_LBSPPB128_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA8_LPB8_LPMXSA0_LPMXSB0_LPM0_LRVW8_LWPMn1_MIAV1_MIWT1_8_MXLIBL_MXSFNS_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL0_PAP0_PGL0_PGR1_PLR1_PKA0_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK0_SKFTR0_SKFDPO0_SKWS0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSM1_ULSGRO0_USL1_USLMX0_UDFMAC0_UIOFGRO0_UPLRP0_USFGROn1_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS32_WG16_2_1_WGMXCC1",
+          "calls": 96,
+          "kernel_ms": 11.028324,
+          "fraction": 0.06558763506958214
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<5120u, 6144u, 5u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 240,
+          "kernel_ms": 9.691865,
+          "fraction": 0.05763944773146452
+        },
+        {
+          "name": "ninfer::ops::r9700::linear::(anonymous namespace)::a8q4g64_linear_wmma32_kernel(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int)",
+          "calls": 12,
+          "kernel_ms": 9.004464,
+          "fraction": 0.05355133734094046
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<4096u, 5120u, 5u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 192,
+          "kernel_ms": 5.480843,
+          "fraction": 0.03259566281854557
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::rmsnorm_k5120_rows4_cta_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, float, bool)",
+          "calls": 564,
+          "kernel_ms": 4.239305,
+          "fraction": 0.02521198953609405
+        },
+        {
+          "name": "void ninfer::ops::r9700::kv::(anonymous namespace)::qk_wmma_batched_dflash_verify_kernel<true>(hip_bfloat16 const*, unsigned char const*, unsigned int const*, int const*, unsigned int, unsigned int, unsigned long, unsigned long, unsigned int, unsigned int, unsigned int, float, float*)",
+          "calls": 64,
+          "kernel_ms": 3.393307,
+          "fraction": 0.020180671260207676
+        },
+        {
+          "name": "Cijk_Alik_Bljk_F8BS_BH_Bias_HA_S_SABV_SAV_UserArgs_MT64x64x32_MI16x16x1_SN_LDSB0_AFC1_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA0_DTLB0_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUAMB_GLS0_HPLR0_ISA1201_ICIW0_IU1_K1_LDSTI0_LBSPPA128_LBSPPB128_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA8_LPB8_LPMXSA0_LPMXSB0_LPM0_LRVW8_LWPMn1_MIAV1_MIWT4_4_MXLIBL_MXSFNS_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL0_PAP0_PGL0_PGR1_PLR1_PKA0_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK0_SKFTR0_SKFDPO0_SKWS0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSM1_ULSGRO0_USL1_USLMX0_UDFMAC0_UIOFGRO0_UPLRP0_USFGROn1_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB1_WS32_WG16_2_1_WGMXCC1",
+          "calls": 8,
+          "kernel_ms": 3.123184,
+          "fraction": 0.01857419608339017
+        },
+        {
+          "name": "void ninfer::ops::(anonymous namespace)::record_kernel<false>(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, float const*, float const*, float const*, int const*, int const*, int const*, float*, hip_bfloat16*, hip_bfloat16*, float*, hip_bfloat16*, int, int, float)",
+          "calls": 192,
+          "kernel_ms": 2.799931,
+          "fraction": 0.016651746235240295
+        },
+        {
+          "name": "__amd_rocclr_fillBufferUnAligned",
+          "calls": 1500,
+          "kernel_ms": 2.511623,
+          "fraction": 0.014937121248556815
+        },
+        {
+          "name": "ninfer::ops::detail::(anonymous namespace)::swa_partial_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, int const*, int const*, int const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, float*, float*, int, int, int, int, int, int, int, float)",
+          "calls": 20,
+          "kernel_ms": 2.344338,
+          "fraction": 0.01394224410016917
+        },
+        {
+          "name": "ninfer::ops::r9700::linear::(anonymous namespace)::a8g64_quantize_activation_kernel(hip_bfloat16 const*, unsigned char*, unsigned char*, unsigned short*, unsigned int*, unsigned int, unsigned int)",
+          "calls": 1332,
+          "kernel_ms": 2.2269,
+          "fraction": 0.013243816969509823
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<7168u, 5120u, 5u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 56,
+          "kernel_ms": 2.041016,
+          "fraction": 0.012138327870960107
+        },
+        {
+          "name": "ninfer::ops::r9700::gdn::(anonymous namespace)::bf16_projected_control_t1_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, float const*, float const*, float*, float*)",
+          "calls": 192,
+          "kernel_ms": 1.426011,
+          "fraction": 0.008480770883518646
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<6144u, 5120u, 5u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 40,
+          "kernel_ms": 1.39897,
+          "fraction": 0.008319952681231828
+        },
+        {
+          "name": "ninfer::ops::dflash2_column_topk_split_kernel(hip_bfloat16 const*, float*, int*, int, int, int)",
+          "calls": 4,
+          "kernel_ms": 1.193968,
+          "fraction": 0.007100765036351747
+        },
+        {
+          "name": "ninfer::ops::r9700::linear::(anonymous namespace)::fp8_quantize_activation_kernel(hip_bfloat16 const*, unsigned char*, float*, unsigned int*, unsigned int, unsigned int)",
+          "calls": 104,
+          "kernel_ms": 1.054245,
+          "fraction": 0.006269804580816779
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<1280u, 5120u, 5u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 40,
+          "kernel_ms": 1.014568,
+          "fraction": 0.006033837574709975
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::silu_mul_strided_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned long, ninfer::ops::r9700::eager::SiluMulStridedShape)",
+          "calls": 276,
+          "kernel_ms": 0.971566,
+          "fraction": 0.005778096132650223
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::rmsnorm_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float, bool)",
+          "calls": 188,
+          "kernel_ms": 0.943042,
+          "fraction": 0.005608458234568451
+        },
+        {
+          "name": "ninfer::ops::r9700::gdn::(anonymous namespace)::projection_conv_record_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, int const*, int const*, int const*, hip_bfloat16*, hip_bfloat16*, hip_bfloat16*, hip_bfloat16*, hip_bfloat16*, unsigned int, unsigned int)",
+          "calls": 192,
+          "kernel_ms": 0.936209,
+          "fraction": 0.005567821025285294
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::residual_add_kernel(hip_bfloat16 const*, hip_bfloat16*, unsigned long)",
+          "calls": 552,
+          "kernel_ms": 0.916125,
+          "fraction": 0.005448377484930705
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::gated_rmsnorm_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float)",
+          "calls": 192,
+          "kernel_ms": 0.833254,
+          "fraction": 0.004955527174597844
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<5120u, 25600u, 5u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 4,
+          "kernel_ms": 0.722084,
+          "fraction": 0.00429437708590935
+        },
+        {
+          "name": "ninfer::ops::r9700::kv::softmax_wmma_scores_batched_dflash_verify_in_place_kernel(float*, unsigned long, int const*)",
+          "calls": 64,
+          "kernel_ms": 0.636002,
+          "fraction": 0.0037824303202847846
+        },
+        {
+          "name": "ninfer::ops::argmax_kernel(hip_bfloat16 const*, int*, int, int, ninfer::ops::SamplingConfig const*, int)",
+          "calls": 4,
+          "kernel_ms": 0.583884,
+          "fraction": 0.0034724742141206493
+        },
+        {
+          "name": "void ninfer::ops::r9700::linear::(anonymous namespace)::small_batch_projection_kernel<5120u, 4096u, 5u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)",
+          "calls": 20,
+          "kernel_ms": 0.566767,
+          "fraction": 0.0033706760125547506
+        },
+        {
+          "name": "__amd_rocclr_copyBuffer",
+          "calls": 20,
+          "kernel_ms": 0.441363,
+          "fraction": 0.0026248734963912903
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::bf16_extract_features_kernel(hip_bfloat16 const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int, unsigned long)",
+          "calls": 256,
+          "kernel_ms": 0.422962,
+          "fraction": 0.002515439091588223
+        },
+        {
+          "name": "ninfer::ops::detail::(anonymous namespace)::swa_reduce_kernel(hip_bfloat16 const*, float const*, float const*, int const*, hip_bfloat16*, int, int)",
+          "calls": 20,
+          "kernel_ms": 0.388605,
+          "fraction": 0.0023111111830061365
+        },
+        {
+          "name": "void ninfer::ops::r9700::kv::(anonymous namespace)::append_kernel<16u, true, false, false>(hip_bfloat16 const*, hip_bfloat16 const*, unsigned int const*, unsigned long, int const*, unsigned int, unsigned int const*, unsigned int, unsigned int const*, unsigned int, int const*, unsigned int, unsigned int, unsigned long, unsigned char*, unsigned char*, unsigned short*, unsigned int*)",
+          "calls": 64,
+          "kernel_ms": 0.194281,
+          "fraction": 0.001155427726729237
+        },
+        {
+          "name": "__amd_rocclr_copyBufferRectAligned",
+          "calls": 108,
+          "kernel_ms": 0.1824,
+          "fraction": 0.0010847690579902968
+        },
+        {
+          "name": "ninfer::ops::(anonymous namespace)::poison_nonfinite_output(unsigned int const*, hip_bfloat16*, unsigned long)",
+          "calls": 104,
+          "kernel_ms": 0.1722,
+          "fraction": 0.001024107630405313
+        },
+        {
+          "name": "ninfer::ops::dflash2_column_topk_merge_kernel(float const*, int const*, float*, int*, int const*, int, int, int)",
+          "calls": 4,
+          "kernel_ms": 0.1396,
+          "fraction": 0.0008302289500846789
+        },
+        {
+          "name": "void ninfer::ops::(anonymous namespace)::rope_kernel<(ninfer::ops::(anonymous namespace)::Profile)0, 256, 32, 24, 4, true>(int const*, hip_bfloat16*, hip_bfloat16*, int, long, long)",
+          "calls": 64,
+          "kernel_ms": 0.117961,
+          "fraction": 0.0007015375156227708
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::sigmoid_mul_kernel(hip_bfloat16 const*, hip_bfloat16*, unsigned long)",
+          "calls": 64,
+          "kernel_ms": 0.105961,
+          "fraction": 0.0006301711302286724
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::cast_fp32_to_bf16_kernel(float const*, hip_bfloat16*, unsigned long)",
+          "calls": 64,
+          "kernel_ms": 0.105002,
+          "fraction": 0.0006244677665959273
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::bf16_scatter_batch_kernel(hip_bfloat16 const*, int const*, int const*, hip_bfloat16*, unsigned int, unsigned int, unsigned long, unsigned long)",
+          "calls": 20,
+          "kernel_ms": 0.08772,
+          "fraction": 0.0005216882772308599
+        },
+        {
+          "name": "ninfer::ops::dflash2_path_select_kernel(float const*, int const*, hip_bfloat16 const*, ninfer::ops::Dflash2CodebookDevice, ninfer::ops::Dflash2CodebookDevice, int const*, int const*, int*, int*, float*, int, int, ninfer::ops::SamplingConfig const*, unsigned long long, int, bool)",
+          "calls": 4,
+          "kernel_ms": 0.070281,
+          "fraction": 0.00041797507765688625
+        },
+        {
+          "name": "void ninfer::ops::detail::(anonymous namespace)::grouped_dynamic_conv_kernel<true>(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, hip_bfloat16*, int, int)",
+          "calls": 40,
+          "kernel_ms": 0.066841,
+          "fraction": 0.00039751671384391133
+        },
+        {
+          "name": "void ninfer::ops::detail::(anonymous namespace)::grouped_dynamic_conv_kernel<false>(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, hip_bfloat16*, int, int)",
+          "calls": 40,
+          "kernel_ms": 0.06584,
+          "fraction": 0.00039156356786228697
+        },
+        {
+          "name": "ninfer::ops::speculative_sampling_partial_topk_kernel(hip_bfloat16 const*, int const*, int const*, ninfer::ops::SamplingConfig const*, int, int, int, int, ninfer::ops::SamplingWorkspace, unsigned long, int const*, int const*, int const*)",
+          "calls": 4,
+          "kernel_ms": 0.04392,
+          "fraction": 0.0002612009705424004
+        },
+        {
+          "name": "void ninfer::ops::(anonymous namespace)::rope_kernel<(ninfer::ops::(anonymous namespace)::Profile)2, 128, 64, 32, 8, true>(int const*, hip_bfloat16*, hip_bfloat16*, int, long, long)",
+          "calls": 20,
+          "kernel_ms": 0.04016,
+          "fraction": 0.00023883950311891623
+        },
+        {
+          "name": "void ninfer::ops::(anonymous namespace)::rope_kernel<(ninfer::ops::(anonymous namespace)::Profile)2, 128, 64, 8, 0, true>(int const*, hip_bfloat16*, hip_bfloat16*, int, long, long)",
+          "calls": 20,
+          "kernel_ms": 0.03564,
+          "fraction": 0.00021195816462047247
+        },
+        {
+          "name": "ninfer::ops::r9700::dflash::(anonymous namespace)::append_cyclic_kernel(unsigned short const*, unsigned short const*, int const*, int const*, int const*, unsigned short*, unsigned short*, int, int, int, int)",
+          "calls": 20,
+          "kernel_ms": 0.0338,
+          "fraction": 0.00020101531886004403
+        },
+        {
+          "name": "ninfer::ops::speculative_sampling_p_less_mass_finalize_kernel(hip_bfloat16 const*, int const*, int const*, int*, int*, int*, int*, int*, ninfer::ops::SamplingConfig const*, int, int, int, int, ninfer::ops::SamplingWorkspace, unsigned long, int const*, float const*, int, int const*, int const*, int const*, int*, int*)",
+          "calls": 4,
+          "kernel_ms": 0.0288,
+          "fraction": 0.00017127932494583634
+        },
+        {
+          "name": "ninfer::ops::r9700::schedule::(anonymous namespace)::prepare_ragged_prefix_kernel(HIP_vector_type<unsigned int, 4u> const*, int const*, int const*, int const*, HIP_vector_type<unsigned int, 4u>*, int*, int*, unsigned int, unsigned int, unsigned long, unsigned long)",
+          "calls": 4,
+          "kernel_ms": 0.01956,
+          "fraction": 0.0001163272081923805
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::embedding_gather_q4_kernel(unsigned char const*, unsigned short const*, int const*, hip_bfloat16*, unsigned int, unsigned int, unsigned long)",
+          "calls": 8,
+          "kernel_ms": 0.016,
+          "fraction": 9.515518052546463e-05
+        },
+        {
+          "name": "ninfer::ops::speculative_prepare_verify_inputs_kernel(int const*, int const*, int const*, int const*, int*, int*, int)",
+          "calls": 4,
+          "kernel_ms": 0.00836,
+          "fraction": 4.971858182455527e-05
+        },
+        {
+          "name": "ninfer::ops::speculative_sampling_group_finalize_kernel(int const*, int const*, int const*, int*, int*, int*, int*, int*, ninfer::ops::SamplingConfig const*, int, int, int, int, ninfer::ops::SamplingWorkspace, unsigned long, int const*, float const*, int, int const*, int const*, int const*, int*, int*)",
+          "calls": 4,
+          "kernel_ms": 0.007,
+          "fraction": 4.1630391479890774e-05
+        },
+        {
+          "name": "ninfer::ops::r9700::schedule::(anonymous namespace)::prepare_masked_block_kernel(int const*, int const*, int const*, int, int*, int*, unsigned int, unsigned int)",
+          "calls": 4,
+          "kernel_ms": 0.00676,
+          "fraction": 4.0203063772008807e-05
+        },
+        {
+          "name": "ninfer::targets::qwen3::(anonymous namespace)::initialize_segmented_cursor(int const*, unsigned int, unsigned int, unsigned int, unsigned int*, unsigned int*)",
+          "calls": 4,
+          "kernel_ms": 0.00656,
+          "fraction": 3.90136240154405e-05
+        },
+        {
+          "name": "ninfer::targets::qwen3::(anonymous namespace)::advance_segmented_cursor(int const*, unsigned int, unsigned int, unsigned int*, unsigned int*)",
+          "calls": 4,
+          "kernel_ms": 0.00604,
+          "fraction": 3.59210806483629e-05
+        },
+        {
+          "name": "ninfer::ops::speculative_select_accepted_hidden_kernel(hip_bfloat16 const*, int const*, hip_bfloat16*, int, int)",
+          "calls": 4,
+          "kernel_ms": 0.00576,
+          "fraction": 3.4255864989167265e-05
+        },
+        {
+          "name": "ninfer::ops::r9700::eager::(anonymous namespace)::bf16_scatter_kernel(hip_bfloat16 const*, int const*, hip_bfloat16*, unsigned int, unsigned int)",
+          "calls": 4,
+          "kernel_ms": 0.0052,
+          "fraction": 3.092543367077601e-05
+        }
+      ]
+    }
+  ],
+  "generic_nodes": [
+    {
+      "graph": 4,
+      "node": 227,
+      "grid_x": 496640,
+      "grid_y": 1,
+      "calls": 31,
+      "mean_us": 1154.3921612903227
+    },
+    {
+      "graph": 4,
+      "node": 230,
+      "grid_x": 512,
+      "grid_y": 1,
+      "calls": 31,
+      "mean_us": 71.73067741935483
+    },
+    {
+      "graph": 4,
+      "node": 233,
+      "grid_x": 512,
+      "grid_y": 1,
+      "calls": 31,
+      "mean_us": 56.839225806451616
+    },
+    {
+      "graph": 4,
+      "node": 236,
+      "grid_x": 512,
+      "grid_y": 1,
+      "calls": 31,
+      "mean_us": 56.97829032258064
+    },
+    {
+      "graph": 4,
+      "node": 239,
+      "grid_x": 512,
+      "grid_y": 1,
+      "calls": 31,
+      "mean_us": 56.91406451612903
+    },
+    {
+      "graph": 4,
+      "node": 2175,
+      "grid_x": 496640,
+      "grid_y": 2,
+      "calls": 31,
+      "mean_us": 2217.036838709678
+    },
+    {
+      "graph": 3,
+      "node": 227,
+      "grid_x": 496640,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 1123.047
+    },
+    {
+      "graph": 3,
+      "node": 230,
+      "grid_x": 512,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 71.3405
+    },
+    {
+      "graph": 3,
+      "node": 233,
+      "grid_x": 512,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 56.4005
+    },
+    {
+      "graph": 3,
+      "node": 236,
+      "grid_x": 512,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 56.64
+    },
+    {
+      "graph": 3,
+      "node": 2107,
+      "grid_x": 496640,
+      "grid_y": 1,
+      "calls": 2,
+      "mean_us": 1149.308
+    },
+    {
+      "graph": 1,
+      "node": 227,
+      "grid_x": 496640,
+      "grid_y": 1,
+      "calls": 4,
+      "mean_us": 1087.847
+    },
+    {
+      "graph": 1,
+      "node": 230,
+      "grid_x": 512,
+      "grid_y": 1,
+      "calls": 4,
+      "mean_us": 71.161
+    },
+    {
+      "graph": 1,
+      "node": 1971,
+      "grid_x": 496640,
+      "grid_y": 1,
+      "calls": 4,
+      "mean_us": 1092.108
+    }
+  ],
+  "graph_span_ms": 3122.1048869999995,
+  "graph_kernel_busy_ms": 2526.250879999999,
+  "graph_uncovered_ms": 595.8540069999999,
+  "inter_round_gap_ms": 110.15071000000003,
+  "inter_round_uncovered_ms": 28.145286
+}

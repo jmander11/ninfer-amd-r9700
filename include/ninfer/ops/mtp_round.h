@@ -2,7 +2,7 @@
 
 #include "core/tensor.h"
 
-#include <cuda_runtime.h>
+#include <hip/hip_runtime_api.h>
 
 namespace ninfer::ops {
 
@@ -25,7 +25,7 @@ namespace ninfer::ops {
  *   verify_ids/alignment_ids are distinct contiguous I32 [K+1,B]. ar_positions,
  *   ar_rope_positions, and ar_valid_columns are I32 [B,max(K-1,1)] with contiguous rows and one
  *   shared step stride at least B; this permits an exact-B prefix of a fixed-capacity frame. All
- *   other tensors are contiguous I32 [B]. B>=1, 1<=K<=5, 0<=accepted[b]<=K,
+ *   other tensors are contiguous I32 [B]. 1<=B<=4, 1<=K<=5, 0<=accepted[b]<=K,
  *   licensed_counts[b]=accepted[b]+1, updated_frontiers and remaining_budgets are non-negative,
  *   and max_context is positive. The Op writes every output slot, including safe invalid-tail
  *   values. Inputs remain unchanged. No workspace or other state is used.
@@ -36,6 +36,6 @@ void mtp_prepare_next_round(const Tensor& verify_ids, const Tensor& next_anchors
                             const Tensor& rope_deltas, Tensor& alignment_ids, Tensor& next_extents,
                             Tensor& ar_positions, Tensor& ar_rope_positions,
                             Tensor& ar_valid_columns, std::int32_t max_context,
-                            cudaStream_t stream);
+                            hipStream_t stream);
 
 } // namespace ninfer::ops

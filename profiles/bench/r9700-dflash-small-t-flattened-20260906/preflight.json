@@ -1,0 +1,153 @@
+{
+  "assembly": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/build/q4g64_linear.s",
+    "sha256": "0a9b7deadbd4ef0cf2a540073d1a2371fb9ae8e027e604d41e29ab43afec112d"
+  },
+  "executable": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/build/a8q4_dflash_small_t_qual",
+    "sha256": "8a2e086e75bc8cdd63849c4a089ba7a83b9f2dd77cc874047a170a9f9b1d7e77"
+  },
+  "git_commit": "15cb54612f52928fa3283bae7e80a61628ab99aa",
+  "package_sha256": {
+    "src/ops/r9700/linear/r9700_linear.h": "d5c0a0ff858170247f21e3457d9c2c90fd40c6d0548f6f910b5b175c6c8ca195",
+    "src/ops/r9700/linear/r9700_linear.hip": "c43110542b22fa6af202903020f3d32f84f114e257e8be6db276512ce4ec46ef",
+    "tools/r9700/Makefile": "01dd7dc9177c35e5b45b650f67fdf55350b58312d407da3ca912c6af6951dc67",
+    "tools/r9700/a8q4_dflash_small_t_qual.hip": "3446cdd8f137a4da6f82202978d6e5cefe2823960ca4e086e6baf617845b3592",
+    "tools/r9700/check_a8q4_dflash_small_t_static.py": "19f55f2561d2b6e403b1f3023e5eaf3478cbc00f195debc08f61c19fbc85a95e",
+    "tools/r9700/run_a8q4_dflash_small_t_gate.py": "539703e5a23c96ad44ccea435c8794b5a07be79d9f89a0fdcdea5291f7c0adba"
+  },
+  "retained_c1_screen": {
+    "eligible_cells": [
+      {
+        "columns": 5120,
+        "rows": 34816,
+        "tokens": 4
+      },
+      {
+        "columns": 5120,
+        "rows": 34816,
+        "tokens": 5
+      },
+      {
+        "columns": 5120,
+        "rows": 34816,
+        "tokens": 6
+      }
+    ],
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-small-t-c1-20260906/summary.json",
+    "sha256": "27cba6590e4272908b30e5a1ad6073610288c6e26b27100f5ad662d25648b122"
+  },
+  "schema": "ninfer.r9700.a8q4-dflash-small-t-preflight.v1",
+  "static": {
+    "10": {
+      "dot8": 160,
+      "lds": 0,
+      "max_workgroup": 256,
+      "occupancy": 16,
+      "private": 0,
+      "scale_loads": 11,
+      "vgpr": 60,
+      "weight_loads": 4
+    },
+    "12": {
+      "dot8": 192,
+      "lds": 0,
+      "max_workgroup": 256,
+      "occupancy": 16,
+      "private": 0,
+      "scale_loads": 13,
+      "vgpr": 54,
+      "weight_loads": 4
+    },
+    "15": {
+      "dot8": 240,
+      "lds": 0,
+      "max_workgroup": 256,
+      "occupancy": 16,
+      "private": 0,
+      "scale_loads": 16,
+      "vgpr": 64,
+      "weight_loads": 4
+    },
+    "16": {
+      "dot8": 256,
+      "lds": 0,
+      "max_workgroup": 256,
+      "occupancy": 16,
+      "private": 0,
+      "scale_loads": 17,
+      "vgpr": 67,
+      "weight_loads": 4
+    },
+    "18": {
+      "dot8": 288,
+      "lds": 0,
+      "max_workgroup": 256,
+      "occupancy": 16,
+      "private": 0,
+      "scale_loads": 19,
+      "vgpr": 74,
+      "weight_loads": 4
+    },
+    "20": {
+      "dot8": 320,
+      "lds": 0,
+      "max_workgroup": 256,
+      "occupancy": 16,
+      "private": 0,
+      "scale_loads": 21,
+      "vgpr": 84,
+      "weight_loads": 4
+    },
+    "24": {
+      "dot8": 384,
+      "lds": 0,
+      "max_workgroup": 256,
+      "occupancy": 12,
+      "private": 0,
+      "scale_loads": 25,
+      "vgpr": 99,
+      "weight_loads": 4
+    },
+    "4": {
+      "dot8": 64,
+      "lds": 0,
+      "max_workgroup": 256,
+      "occupancy": 16,
+      "private": 0,
+      "scale_loads": 5,
+      "vgpr": 26,
+      "weight_loads": 4
+    },
+    "5": {
+      "dot8": 80,
+      "lds": 0,
+      "max_workgroup": 256,
+      "occupancy": 16,
+      "private": 0,
+      "scale_loads": 6,
+      "vgpr": 29,
+      "weight_loads": 4
+    },
+    "6": {
+      "dot8": 96,
+      "lds": 0,
+      "max_workgroup": 256,
+      "occupancy": 16,
+      "private": 0,
+      "scale_loads": 7,
+      "vgpr": 41,
+      "weight_loads": 4
+    },
+    "8": {
+      "dot8": 128,
+      "lds": 0,
+      "max_workgroup": 256,
+      "occupancy": 16,
+      "private": 0,
+      "scale_loads": 9,
+      "vgpr": 51,
+      "weight_loads": 4
+    }
+  }
+}

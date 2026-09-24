@@ -1,0 +1,82 @@
+{
+  "artifact_type": "ninfer_r9700_fp8_prefix_common_e2_diagnostic_summary",
+  "catalog_ranking": [
+    {
+      "fingerprint": "e2e00100000000000000000000000000",
+      "selection_score": 1.0295534766713481
+    },
+    {
+      "fingerprint": "dee00100000000000000000000000000",
+      "selection_score": 1.0497025590089901
+    },
+    {
+      "fingerprint": "e0e00100000000000000000000000000",
+      "selection_score": 1.0611829372103592
+    },
+    {
+      "fingerprint": "dde00100000000000000000000000000",
+      "selection_score": 1.0708389039135762
+    },
+    {
+      "fingerprint": "dbe00100000000000000000000000000",
+      "selection_score": 1.1726212539063356
+    },
+    {
+      "fingerprint": "dce00100000000000000000000000000",
+      "selection_score": 1.2162372127791417
+    },
+    {
+      "fingerprint": "e1e00100000000000000000000000000",
+      "selection_score": 1.8275595799010664
+    },
+    {
+      "fingerprint": "dfe00100000000000000000000000000",
+      "selection_score": 1.8809243996482663
+    }
+  ],
+  "confirmatory_trial_diagnostic": {
+    "fingerprint": "e2e00100000000000000000000000000",
+    "t128": {
+      "default_median_ms": 0.5425789952278137,
+      "selected_median_ms": 0.5387189984321594,
+      "selected_over_default": 0.9928858344506433
+    },
+    "t129": {
+      "default_median_ms": 0.5492794811725616,
+      "selected_median_ms": 0.5858795046806335,
+      "selected_over_default": 1.0666327885213205
+    }
+  },
+  "decision": "e2_operator_qualified_whole_text_pending",
+  "fingerprint": "e2e00100000000000000000000000000",
+  "oracle_maximum_bf16_steps": 0,
+  "prefix_mismatch_count": 0,
+  "production_routing_authorized": false,
+  "provenance_limitations": [
+    "no retained shell-history command, process exit receipt, stdout, stderr, or independent timestamp receipt exists",
+    "no retained build transcript independently proves the asserted source-commit to executable association; both identities are retained exactly",
+    "the result self-reports exact hardware and auto power but lacks an external power/process receipt",
+    "all timing values are diagnostic and cannot support a production performance claim",
+    "the preliminary catalog is retained only to explain selection among the exact eight returned identities",
+    "operator prefix exactness does not establish whole-Text append-versus-fresh parity"
+  ],
+  "ranking_rule": "ascending_selection_score_then_ascending_fingerprint",
+  "schema_version": 1,
+  "selected_rank": 1,
+  "selection_rule": "arithmetic_mean_of_t128_and_t129_selected_over_default",
+  "selection_screen_diagnostic": {
+    "fingerprint": "e2e00100000000000000000000000000",
+    "t128": {
+      "default_median_ms": 0.5380589962005615,
+      "selected_median_ms": 0.5380190014839172,
+      "selected_over_default": 0.9999256685290522
+    },
+    "t129": {
+      "default_median_ms": 0.546118974685669,
+      "selected_median_ms": 0.5784389972686768,
+      "selected_over_default": 1.059181284813644
+    }
+  },
+  "timing_evidence_eligible": false,
+  "whole_text_parity": "pending"
+}

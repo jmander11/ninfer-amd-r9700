@@ -1,109 +1,207 @@
 from __future__ import annotations
 
 import json
+import tempfile
+import unittest
+from pathlib import Path
 
-from tools.bench.run_ninfer_bench_matrix import BenchCase, report_rows
+from tools.bench.run_ninfer_bench_matrix import (
+    REPORT_SCHEMA_VERSION,
+    PHASE_TIMING_SEMANTICS,
+    R9700_KV_PLANE_LAYOUTS,
+    BenchCase,
+    report_rows,
+    prefill_timing_eligible,
+    resolved_dflash_verify_width,
+    resolved_dflash_topology,
+)
 
 
-def test_schema_v11_report_is_flattened_for_matrix_summary(tmp_path) -> None:
-    report_path = tmp_path / "report.json"
-    report_path.write_text(
-        json.dumps(
-            {
-                "schema_version": 11,
-                "artifact_type": "ninfer_bench_report",
-                "tool": "ninfer_bench",
-                "artifact": {"path": "model.ninfer"},
-                "environment": {"gpu_name": "RTX 5090"},
-                "load": {
-                    "target": "qwen3_6_27b",
-                    "weights_id": "nvfp4",
-                    "load_seconds": 2.5,
-                    "upload_seconds": 2.0,
-                    "artifact_bytes_read": 17_500_000_000,
-                    "host_to_device_bytes": 17_400_000_000,
-                    "peak_staging_bytes": 134_217_728,
-                },
-                "memory": {
-                    "kv_capacity": 8192,
-                    "kv_payload_bytes": 123_456,
-                    "weights": {"capacity_bytes": 17_400_000_000},
-                    "sequence": {"capacity_bytes": 2_000_000_000},
-                    "workspace": {"capacity_bytes": 100_000_000},
-                    "request_transient": {"capacity_bytes": 50_000_000},
-                    "cuda_graph_allowance_bytes": 150_000_000,
-                },
-                "config": {
-                    "max_context": 4096,
-                    "prefill_chunk": 1024,
-                    "kv_cache": "int8-group64",
-                    "mtp_draft_tokens": 5,
-                    "proposal_head": "optimized",
-                    "decode_path": "cuda-graph",
-                    "decode_graph_prime": {"primed": True, "output_tokens": 13},
-                    "repetitions": 2,
-                    "warmup": 1,
-                },
-                "tests": [
-                    {
-                        "label": "tg3",
-                        "kind": "tg",
-                        "n_prompt": 0,
-                        "n_gen": 3,
-                        "requested_output_tokens": 4,
-                        "workspace_peak_bytes": 1_048_576,
-                        "workspace_allocator_peak_bytes": 524_288,
-                        "decode_output_tok_s_mean": 4.5,
-                        "decode_engine_tok_s_mean": 7.5,
-                        "total_seconds_mean": 0.875,
-                        "speculative": {
-                            "acceptance_rate": 1.0,
-                            "acceptance_length": 5.0,
-                            "rounds": 1,
-                            "drafted_tokens": 5,
-                            "accepted_tokens": 5,
-                            "fallback_steps": 3,
-                            "accepted_per_position": [1, 1, 1, 1, 1],
-                        },
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
+class BenchMatrixTest(unittest.TestCase):
+    def test_historical_phase_timing_and_current_chain_contract(self) -> None:
+        legacy = {"schema_version": 20, "config": {"concurrency": 2}}
+        self.assertFalse(prefill_timing_eligible(legacy))
+        self.assertTrue(prefill_timing_eligible(legacy, 1))
+        for version in (21, 22, 23):
+            current = {**legacy, "schema_version": version,
+                       "phase_timing_semantics": PHASE_TIMING_SEMANTICS}
+            self.assertTrue(prefill_timing_eligible(current))
+        for k in range(1, 6):
+            self.assertEqual(resolved_dflash_verify_width(k, 0), k + 1)
+            self.assertEqual(resolved_dflash_topology(k, k + 1), "single-block-chain")
+        for k, width in ((4, 6), (6, 7), (7, 12), (11, 12)):
+            with self.assertRaises(ValueError):
+                resolved_dflash_verify_width(k, width)
 
-    rows = report_rows(
-        report_path,
-        BenchCase("pure_decode", "tg3_k5_graph", (), repetitions=2, warmup=1),
-    )
+    def test_current_report_is_flattened_for_matrix_summary(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        tmp_path = Path(directory.name)
+        report_path = tmp_path / "report.json"
+        report_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": REPORT_SCHEMA_VERSION,
+                    "phase_timing_semantics": PHASE_TIMING_SEMANTICS,
+                    "artifact_type": "ninfer_bench_report",
+                    "tool": "ninfer_bench",
+                    "artifact": {"path": "model.ninfer"},
+                    "environment": {
+                        "gpu_name": "AMD Radeon AI PRO R9700",
+                        "architecture_name": "gfx1201",
+                        "hip_runtime_version": "7.15.26333",
+                        "hip_driver_version": "7.15.26333",
+                        "device_id": 0,
+                    },
+                    "load": {
+                        "target": "qwen3_8_27b_r9700",
+                        "weights_id": "r9700-integer",
+                        "load_seconds": 2.5,
+                        "upload_seconds": 2.0,
+                        "artifact_bytes_read": 17_500_000_000,
+                        "host_to_device_bytes": 17_400_000_000,
+                        "peak_staging_bytes": 134_217_728,
+                    },
+                    "memory": {
+                        "kv_capacity_mode": "explicit",
+                        "kv_capacity": 8192,
+                        "kv_payload_bytes": 123_456,
+                        "weights": {"capacity_bytes": 17_400_000_000},
+                        "sequence": {"capacity_bytes": 2_000_000_000},
+                        "workspace": {"capacity_bytes": 100_000_000},
+                        "request_transient": {"capacity_bytes": 50_000_000},
+                        "device_graph_allowance_bytes": 150_000_000,
+                    },
+                    "config": {
+                        "max_context": 4096,
+                        "prefill_chunk": 1024,
+                        "concurrency": 4,
+                        "pending_timeout_ms": 0xFFFFFFFF,
+                        "pending_deadline": "unbounded",
+                        "kv_cache_format": "fp8-k-int4-v",
+                        "kv_value_group": 16,
+                        "kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
+                        "q4_activation_bits": 8,
+                        "q4_prefill_cta_profile":
+                            "m64n128-pingpong-n16-k16-scalar-base-production",
+                        "w8_activation_bits": 16,
+                        "fp8_qk_wmma_enabled": True,
+                        "fp8_qk_wmma_profile": "t1-ge64-t2-ge320-t3plus-stream-v1",
+                        "fp8_qk_wmma_t1_min_context": 64,
+                        "fp8_qk_wmma_t2_min_context": 320,
+                        "xattention_qualification": False,
+                        "draft_tokens": 5,
+                        "spec": "mtp",
+                        "speculative_execution": True,
+                        "dflash_verify_width_requested": 0,
+                        "dflash_verify_width": 0,
+                        "proposal_head": "optimized",
+                        "decode_path": "device-graph",
+                        "use_device_graph": True,
+                        "retain_token_ids": False,
+                        "decode_graph_prime": {"primed": True, "output_tokens": 13},
+                        "repetitions": 2,
+                        "warmup": 1,
+                    },
+                    "tests": [
+                        {
+                            "label": "tg3",
+                            "kind": "tg",
+                            "n_prompt": 0,
+                            "n_gen": 3,
+                            "requested_output_tokens": 4,
+                            "workspace_peak_bytes": 1_048_576,
+                            "workspace_allocator_peak_bytes": 524_288,
+                            "decode_output_tok_s_mean": 4.5,
+                            "decode_engine_tok_s_mean": 7.5,
+                            "decode_seconds_mean": 0.75,
+                            "total_seconds_mean": 0.875,
+                            "wave_seconds_mean": 0.25,
+                            "prefill_active_tok_s_mean": None,
+                            "speculative": {
+                                "enabled": True,
+                                "draft_window": 5,
+                                "acceptance_rate": 1.0,
+                                "acceptance_length": 6.0,
+                                "rounds": 1,
+                                "drafted_tokens": 5,
+                                "accepted_tokens": 5,
+                                "fallback_steps": 3,
+                                "accepted_per_position": [1, 1, 1, 1, 1],
+                                "rounds_per_draft": [0, 0, 0, 0, 0, 1],
+                            },
+                            "reps": [{}, {}],
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
 
-    assert len(rows) == 1
-    row = rows[0]
-    assert (row["suite"], row["case"], row["label"], row["kind"]) == (
-        "pure_decode",
-        "tg3_k5_graph",
-        "tg3",
-        "tg",
-    )
-    assert (row["target"], row["weights_id"], row["artifact_path"], row["gpu_name"]) == (
-        "qwen3_6_27b",
-        "nvfp4",
-        "model.ninfer",
-        "RTX 5090",
-    )
-    assert (row["decode_path"], row["decode_graph_primed"]) == (
-        "cuda-graph",
-        True,
-    )
-    assert row["decode_graph_prime_output_tokens"] == 13
-    assert row["kv_capacity"] == 8192
-    assert row["host_to_device_bytes"] == 17_400_000_000
-    assert row["workspace_capacity_bytes"] == 100_000_000
-    assert row["request_transient_capacity_bytes"] == 50_000_000
-    assert row["cuda_graph_allowance_bytes"] == 150_000_000
-    assert row["workspace_peak_bytes"] == 1_048_576
-    assert row["workspace_allocator_peak_bytes"] == 524_288
-    assert row["decode_output_tok_s_mean"] == 4.5
-    assert row["decode_engine_tok_s_mean"] == 7.5
-    assert row["spec_fallback_steps"] == 3
-    assert row["spec_accepted_per_position"] == "[1,1,1,1,1]"
+        rows = report_rows(
+            report_path,
+            BenchCase(
+                "pure_decode",
+                "tg3_k5_graph",
+                ("-n", "3", "--spec", "mtp", "--draft-tokens", "5", "--lm-head-draft"),
+                repetitions=2,
+                warmup=1,
+            ),
+        )
+
+        assert len(rows) == 1
+        row = rows[0]
+        assert (row["suite"], row["case"], row["label"], row["kind"]) == (
+            "pure_decode",
+            "tg3_k5_graph",
+            "tg3",
+            "tg",
+        )
+        assert (row["target"], row["weights_id"], row["artifact_path"], row["gpu_name"]) == (
+            "qwen3_8_27b_r9700",
+            "r9700-integer",
+            "model.ninfer",
+            "AMD Radeon AI PRO R9700",
+        )
+        assert (row["decode_path"], row["decode_graph_primed"]) == (
+            "device-graph",
+            True,
+        )
+        assert row["decode_graph_prime_output_tokens"] == 13
+        assert row["kv_capacity"] == 8192
+        assert row["concurrency"] == 4
+        assert row["kv_value_group"] == 16
+        assert row["kv_plane_layouts"] == R9700_KV_PLANE_LAYOUTS
+        assert row["q4_activation_bits"] == 8
+        assert row["q4_prefill_cta_profile"] == (
+            "m64n128-pingpong-n16-k16-scalar-base-production"
+        )
+        assert row["w8_activation_bits"] == 16
+        assert row["fp8_qk_wmma_enabled"] is True
+        assert row["fp8_qk_wmma_t1_min_context"] == 64
+        assert row["fp8_qk_wmma_t2_min_context"] == 320
+        assert row["xattention_qualification"] is False
+        assert row["xattention_profile"] is None
+        assert row["host_to_device_bytes"] == 17_400_000_000
+        assert row["workspace_capacity_bytes"] == 100_000_000
+        assert row["request_transient_capacity_bytes"] == 50_000_000
+        assert row["device_graph_allowance_bytes"] == 150_000_000
+        assert row["workspace_peak_bytes"] == 1_048_576
+        assert row["workspace_allocator_peak_bytes"] == 524_288
+        assert row["decode_output_tok_s_mean"] == 4.5
+        assert row["decode_engine_tok_s_mean"] == 7.5
+        assert row["wave_seconds_mean"] == 0.25
+        assert row["prefill_active_tok_s_mean"] is None
+        assert row["spec_fallback_steps"] == 3
+        assert row["spec_accepted_per_position"] == "[1,1,1,1,1]"
+        assert row["spec_rounds_per_draft"] == "[0,0,0,0,0,1]"
+        assert (
+            row["architecture_name"],
+            row["hip_runtime_version"],
+            row["hip_driver_version"],
+            row["device_id"],
+        ) == ("gfx1201", "7.15.26333", "7.15.26333", 0)
+
+
+if __name__ == "__main__":
+    unittest.main()

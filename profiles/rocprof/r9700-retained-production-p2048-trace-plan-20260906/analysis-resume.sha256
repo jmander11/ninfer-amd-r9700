@@ -1,0 +1,10 @@
+9cc1ef16abc1ddbb80866aca8fc5e052d661348cc06bb6f5451394b3027c7a53  tools/bench/analyze_retained_prefill_trace.py
+f23d5e94bc03248ce38ee6fd4afdab348d060355172bddb0fe284134f3376d99  profiles/rocprof/r9700-retained-production-p2048-trace-plan-20260906/analysis-repair.json
+c8741ef8d03deadc67dddb52056ca8147a563e1053f2962deaf65e1cbd6293df  profiles/rocprof/r9700-retained-production-p2048-trace-plan-20260906/resume-analysis.sh
+c8152e35d2854f2b4c2a3f04fcbb60ae51f67cd0f2b48e7d4ac8fae344a3a8f8  profiles/rocprof/r9700-retained-production-p2048-trace-plan-20260906/plan.json
+4e77b0386252cbdff97180fa34921fd0e45c793d0dc2d0dcb439371977203188  profiles/rocprof/r9700-retained-production-p2048-trace-plan-20260906/commands.sh
+3be7c32f5edc21d14364b089afaf75a6a778d379806a681e2b13d0d3be6735e5  profiles/rocprof/r9700-retained-production-p2048-trace-plan-20260906/prepared.sha256
+af5b7e8b13cdb02d15bb4096da302465f4270385a41a217a4b708fca57dfa876  profiles/rocprof/r9700-retained-production-p2048-trace-plan-20260906/benchmark-report.json
+020dd544e7f771419f4eb473b2b078bae7d795d8897fe44a66f5d0712132b393  profiles/rocprof/r9700-retained-production-p2048-trace-plan-20260906/raw/retained-production-p2048_results.db
+6d1dbb9c582de44ad1dbc0d24eca4d831d8172bef0593680ecd24f6d0ce9def5  profiles/rocprof/r9700-retained-production-p2048-trace-plan-20260906/power-profile-before.txt
+6d1dbb9c582de44ad1dbc0d24eca4d831d8172bef0593680ecd24f6d0ce9def5  profiles/rocprof/r9700-retained-production-p2048-trace-plan-20260906/power-profile-after.txt

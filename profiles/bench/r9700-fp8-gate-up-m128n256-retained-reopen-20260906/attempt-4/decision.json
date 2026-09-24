@@ -1,0 +1,40 @@
+{
+  "limitations": [
+    "Direct exact-shape qualification only; no production routing changed.",
+    "Complete time is matrix timing plus frozen fresh-trace quantize/poison overhead.",
+    "A direct pass permits one matched whole-P2048 confirmation; it is not production admission."
+  ],
+  "retained_assembly_sha256": "f84b82472e7d1b944927020abf2550ba1cd2051c2f0e71f3e3d32cf7ddfbcd85",
+  "retained_object_sha256": "a853adcd8282ff5410e69069bdafe1f808b1869e76b224b984520569001d318c",
+  "runtime": {
+    "LD_LIBRARY_PATH": "/opt/rocm/core-10.0/lib",
+    "hip_runtime": "/opt/rocm/core-10.0/lib/libamdhip64.so.7",
+    "hipblaslt": "/opt/rocm/core-10.0/lib/libhipblaslt.so.1"
+  },
+  "runtime_resources": {
+    "active_blocks_per_wgp": 1,
+    "maximum_threads": 1024,
+    "private_bytes": 0,
+    "runtime_reported_vgpr": 101,
+    "static_lds_bytes": 24576
+  },
+  "schema": "ninfer.r9700.fp8_gate_up_m128n256_retained_decision.v1",
+  "static": {
+    "descriptor_allocation_rounded_vgpr": 104,
+    "fp8_wmma_static_sites": 8,
+    "logical_vgpr": 97,
+    "resident_workgroups_per_wgp": 1,
+    "scratch_bytes": 0,
+    "static_lds_bytes": 24576,
+    "waves_per_simd": 12,
+    "waves_per_workgroup": 32
+  },
+  "timing": {
+    "challenger_matrix_median_ms": 49.380744934,
+    "challenger_useful_tflops": 14.786015101551769,
+    "incumbent_matrix_median_ms": 3.499504089,
+    "projected_64_call_saving_ms": -2936.39941408,
+    "projected_challenger_complete_ms": 49.48067909025,
+    "verdict": "reject"
+  }
+}

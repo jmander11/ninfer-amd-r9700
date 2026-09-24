@@ -16,6 +16,7 @@
 #include <functional>
 #include <iostream>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace {
@@ -75,10 +76,10 @@ ninfer::OwnedMedia fake_media(const ContentPart& part) {
     return media;
 }
 
-ninfer::PromptInput translate(const GenerationRequest& req) {
+ninfer::PromptInput translate(const GenerationRequest& req, std::string_view system_prepend = {}) {
     const ServeOptions server = default_server();
     return to_prompt_input(req, resolve_prompt_semantics(req, server, effort_capabilities()),
-                           fake_media);
+                           fake_media, system_prepend);
 }
 
 std::string joined_text(const ninfer::ChatMessage& message) {
@@ -311,6 +312,14 @@ int test_missing_and_bad_fields() {
                                    {"messages", Json::array({Json{{"role", "user"}, {"content", "hi"}}})}};
     const GenerationRequest req = parse_messages_request(no_max, default_limits());
     failures += check(req.max_tokens == 512 && !req.max_tokens_set, "max_tokens default applied");
+
+    Json ninfer = {{"model", "m"},
+                   {"max_tokens", 8},
+                   {"messages", Json::array({Json{{"role", "user"}, {"content", "hi"}}})},
+                   {"ninfer", Json{{"capture_context_checkpoint", true}}}};
+    const GenerationRequest ignored = parse_messages_request(ninfer, default_limits());
+    failures += check(!ignored.capture_context_checkpoint,
+                      "Anthropic ninfer object does not pin");
     return failures;
 }
 
@@ -622,6 +631,10 @@ int test_response_serialization() {
     failures += check(resp.at("stop_sequence").is_null(), "stop_sequence null");
     failures += check(resp.at("usage").at("input_tokens") == 7, "input_tokens");
     failures += check(resp.at("usage").at("output_tokens") == 3, "output_tokens");
+    failures += check(resp.at("usage").size() == 2 && !resp.at("usage").contains("ninfer") &&
+                          !resp.at("usage").contains("prompt_tokens_details") &&
+                          !resp.at("usage").contains("context_checkpoint"),
+                      "Anthropic usage stays input/output tokens only");
     const Json& content = resp.at("content");
     failures += check(content.size() == 3, "thinking + text + tool_use blocks");
     failures += check(content.at(0).at("type") == "thinking" &&
@@ -739,6 +752,66 @@ int test_count_tokens_and_error() {
     return failures;
 }
 
+int test_system_prepend() {
+    int failures = 0;
+
+    const GenerationRequest with_system = parse_messages_request(
+        Json{{"model", "m"},
+             {"max_tokens", 16},
+             {"system", "Be brief."},
+             {"messages", Json::array({Json{{"role", "user"}, {"content", "hello"}}})}},
+        default_limits());
+    const ninfer::PromptInput merged = translate(with_system, "P");
+    failures += check(merged.messages[0].role == ninfer::ChatRole::System &&
+                          joined_text(merged.messages[0]) == "P\n\nBe brief.",
+                      "Anthropic top-level system was not prepended");
+
+    const GenerationRequest user_only = parse_messages_request(
+        Json{{"model", "m"},
+             {"max_tokens", 16},
+             {"messages", Json::array({Json{{"role", "user"}, {"content", "hello"}}})}},
+        default_limits());
+    const ninfer::PromptInput inserted = translate(user_only, "P");
+    failures += check(inserted.messages.size() == 2 &&
+                          inserted.messages[0].role == ninfer::ChatRole::System &&
+                          joined_text(inserted.messages[0]) == "P" &&
+                          inserted.messages[1].role == ninfer::ChatRole::User,
+                      "Anthropic user-only prepend did not insert a leading System");
+
+    const Json tool = Json{{"name", "get_weather"}, {"input_schema", Json{{"type", "object"}}}};
+    const GenerationRequest tool_loop = parse_messages_request(
+        Json{{"model", "m"},
+             {"max_tokens", 16},
+             {"tools", Json::array({tool})},
+             {"messages",
+              Json::array(
+                  {Json{{"role", "user"}, {"content", "weather?"}},
+                   Json{{"role", "assistant"},
+                        {"content",
+                         Json::array({Json{{"type", "tool_use"},
+                                           {"id", "toolu_1"},
+                                           {"name", "get_weather"},
+                                           {"input", Json{{"city", "Paris"}}}}})}},
+                   Json{{"role", "user"},
+                        {"content",
+                         Json::array({Json{{"type", "tool_result"},
+                                           {"tool_use_id", "toolu_1"},
+                                           {"content", "20"}}})}}})}},
+        default_limits());
+    const ninfer::PromptInput looped = translate(tool_loop, "P");
+    failures += check(!looped.options.tool_jsons.empty(), "Anthropic tool-loop tools were dropped");
+    failures += check(looped.messages[0].role == ninfer::ChatRole::System &&
+                          joined_text(looped.messages[0]) == "P",
+                      "Anthropic tool-loop prepend did not insert a leading System");
+    failures += check(looped.messages[2].tool_calls.size() == 1 &&
+                          looped.messages[2].tool_calls[0].name == "get_weather",
+                      "Anthropic tool-loop assistant tool_use was lost");
+    failures += check(looped.messages[3].role == ninfer::ChatRole::Tool &&
+                          joined_text(looped.messages[3]) == "20",
+                      "Anthropic tool-loop tool_result was lost");
+    return failures;
+}
+
 } // namespace
 
 int main() {
@@ -757,6 +830,7 @@ int main() {
     failures += test_response_serialization();
     failures += test_streaming_events();
     failures += test_count_tokens_and_error();
+    failures += test_system_prepend();
     if (failures == 0) { std::cout << "ok\n"; }
     return failures == 0 ? 0 : 1;
 }

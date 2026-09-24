@@ -1,0 +1,27 @@
+{
+  "artifact_type": "ninfer_qwen3_layer_boundary_trace_analysis_repair",
+  "schema_version": 1,
+  "status": "analysis_only_no_gpu_rerun",
+  "cause": "the capture analyzer required finite DFlash acceptance metrics when zero drafted tokens correctly serialize undefined rates as null",
+  "gpu_rerun": false,
+  "capture_prepared_closure": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer-boundary-traces-43e5e4cc-20260906/prepared.sha256",
+    "bytes": 3944,
+    "sha256": "21b1c5c0f72d4f1ff9d673761f8c6bc83013adc6a1f3073740b09250417e3eef"
+  },
+  "capture_result_closure": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer-boundary-traces-43e5e4cc-20260906/results/result.sha256",
+    "bytes": 6554,
+    "sha256": "bab590a7a40307a6f440a2bb41bd4c4135987eb7e67d8bac4ca5b58a38aa0d00"
+  },
+  "capture_analyzer": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer-boundary-traces-43e5e4cc-20260906/analyze.py",
+    "bytes": 19381,
+    "sha256": "e04839b3ad51f417a8b5a341f4cac7c481e1353bc479388c18df93244a402c1d"
+  },
+  "repaired_analyzer": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer-boundary-traces-43e5e4cc-20260906/analyze.py",
+    "bytes": 21433,
+    "sha256": "655c054f027694f1ee1d4f2f7aaaeb121fc442a3c9daa78fb2f33dccdbdc8e2f"
+  }
+}

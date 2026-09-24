@@ -1,0 +1,27 @@
+{
+  "rows": [
+    {
+      "concurrency": 1,
+      "draft_tokens": 0,
+      "adaptive": false,
+      "chunk": 2048,
+      "prefill_tok_s": 1523.6842937392448,
+      "aggregate_decode_tok_s": 30.158581102261802,
+      "exact_repeated_tokens": true
+    },
+    {
+      "concurrency": 1,
+      "draft_tokens": 5,
+      "adaptive": false,
+      "chunk": 2048,
+      "prefill_tok_s": 1472.6566678938004,
+      "aggregate_decode_tok_s": 96.04952945264235,
+      "exact_repeated_tokens": true
+    }
+  ],
+  "resources": {
+    "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+    "memory.peak": "751341568\n",
+    "cpu.stat": "usage_usec 33811048\nuser_usec 2966995\nsystem_usec 30844053\nnice_usec 0\ncore_sched.force_idle_usec 0\n"
+  }
+}

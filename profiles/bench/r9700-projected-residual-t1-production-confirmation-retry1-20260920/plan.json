@@ -1,0 +1,601 @@
+{
+  "schema": "ninfer.r9700.projected-residual-production-confirmation.v1",
+  "status": "prepared_awaiting_independent_review",
+  "sources": [
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/CMakeLists.txt",
+      "bytes": 14528,
+      "sha256": "5516421ee751a0e6b3e019ec9b37bc34b86084326ba1af410e473e56ad1b817a"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/CMakeLists.txt",
+      "bytes": 35884,
+      "sha256": "3f7cd818ecd649cfd9e3fe736eb55fbadb0b2bac2ba44f4c4e17e86499768264"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/include/ninfer/ops/projected_residual.h",
+      "bytes": 1831,
+      "sha256": "3980d224b7a328a4c06fc7a7ce6aca41a9710b4f6205a2aa2f79e1bf453ebddb"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/linear/linear_tensor_op.cpp",
+      "bytes": 25971,
+      "sha256": "42f8b8c91c5536605ce02a54a6cf4617d1847238f47624b78cb001857d523d46"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/linear/r9700_linear.h",
+      "bytes": 24842,
+      "sha256": "e0355cacb2e33c96bd52944dc73c31d116c63971e7e1bf5872b2926ea6534d61"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/linear/r9700_linear.hip",
+      "bytes": 197202,
+      "sha256": "7f4396f774eb6bf78bc79894af60cab166b9ae27d891424f526dfccb5877b5be"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/linear/r9700_q4_activation_profile.h",
+      "bytes": 7373,
+      "sha256": "e8d08263030347f8ffdca69742b6c8f0464d9d5a511892dae13b21af206b27fa"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/targets/qwen3_8_27b/impl/variant.h",
+      "bytes": 20185,
+      "sha256": "cd71e1a5f92dc19414256b1eb4452eb6ca1a70250db4e9aed89982d8e58914bc"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/targets/qwen3_8_27b/impl/variant.cpp",
+      "bytes": 75634,
+      "sha256": "da079315f603c56918b6f6371e4ce7618357f27f1ecf0a013cc8603952ad207f"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/targets/qwen3_8_27b/ninfer_bench_support.cpp",
+      "bytes": 56472,
+      "sha256": "638917954c961a5d61cecbbbd13e8c32457aaf14445dae2b3b3f0ed72bede342"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/target_variant_projected_residual_qual.cpp",
+      "bytes": 7146,
+      "sha256": "4ec6c3fb53fa51086cdd0182be906b54ce47a3cc32b2f03a89d4f1cd65f99760"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/gdn_op_qual.hip",
+      "bytes": 63406,
+      "sha256": "02dc0151c07756f7ff8f2179174bdbd481cc59126231fb053acc7419016a3c3e"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/a8q4_projected_residual_t1_qual.hip",
+      "bytes": 36063,
+      "sha256": "be347438fee60c0934303c006da1dd5089567f09d58cf2fb73c234533aba7cfd"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-projected-residual-t1-production-confirmation-retry1-20260920/campaign.py",
+      "bytes": 18003,
+      "sha256": "f1d44f64483ab7f50d3c43a98de722e19febd0cd47a3e7bbe46dc8f925c3b15a"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-projected-residual-t1-production-confirmation-retry1-20260920/commands.sh",
+      "bytes": 262,
+      "sha256": "d5859b6d8bf5697401c019fdc57304c820033cceb837bdb068f8001f6b9d7a84"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-projected-residual-t1-production-confirmation-retry1-20260920/README.md",
+      "bytes": 3481,
+      "sha256": "a5cb933b94065fdccd822845ed6d51f2058c03fd4c54126c7c79d0586d7013df"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-projected-residual-t1-whole-ab-20260920/campaign.py",
+      "bytes": 20397,
+      "sha256": "ceadbb74f108bdc277698d5c9931d036bd7470e2a2b7a3ad0509e0d44b6be36d"
+    }
+  ],
+  "production_qualification": {
+    "attempt": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-promoted-qualification-retry1-20260920/attempt-1",
+    "closure": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-promoted-qualification-retry1-20260920/attempt-1/closure.json",
+      "bytes": 8794,
+      "sha256": "ae8e2b5addbb84c8178778bc0fee9d1bad2862016545e665e54c8ef992c42a0d"
+    },
+    "manifest": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-promoted-qualification-retry1-20260920/attempt-1/result.sha256",
+      "bytes": 5430,
+      "sha256": "efd4d20b9ae256b770e159b3a64d6d975d7b08eed5725d5de6e73d594c79fb8b"
+    },
+    "qualification": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-promoted-qualification-retry1-20260920/attempt-1/qualification.json",
+      "bytes": 18366,
+      "sha256": "1c345413009b636aaa187fcf0d4e73836fd1ccf0851aad960cfb5ca1e3cdb6e1"
+    },
+    "plan": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-promoted-qualification-retry1-20260920/plan.json",
+      "bytes": 13512,
+      "sha256": "667b7e645060e303a184b503d1b1dd75a2d913a64b817fada30369c7f29b982b"
+    }
+  },
+  "retained_admission": {
+    "plan": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-projected-residual-t1-whole-ab-20260920/plan.json",
+      "bytes": 16251,
+      "sha256": "4065a51c43c94c042973c8653bd9d0ea39c3ebe34db3e4ca634946f851f92fb0"
+    },
+    "summary": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-projected-residual-t1-whole-ab-20260920/attempt-1/summary.json",
+      "bytes": 1868,
+      "sha256": "8f4c03d19e6062be538418e7c5be9f3db5babcd00ab8c3daa162ab42f7bda663"
+    },
+    "manifest": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-projected-residual-t1-whole-ab-20260920/attempt-1/result.sha256",
+      "bytes": 4604,
+      "sha256": "e7337ec8e9bc19d8519f52f06ffcb50359270fa47a4416ff859a4aee8afa9b79"
+    },
+    "direct_qualification": {
+      "attempt": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry2-20260920/attempt-1",
+      "closure": {
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry2-20260920/attempt-1/closure.json",
+        "bytes": 8852,
+        "sha256": "9fbab6cfe0332847fcbd52f15c24dc95d80cc543349daaec67ed3be496533e03"
+      },
+      "manifest": {
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry2-20260920/attempt-1/result.sha256",
+        "bytes": 5488,
+        "sha256": "206b15a42c9e1cb7df2150d834659b8ed3d167dd643fc74a771213a83b787e6d"
+      },
+      "qualification": {
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry2-20260920/attempt-1/qualification.json",
+        "bytes": 18400,
+        "sha256": "d1399bab218b1f8016cae167970857ddf0230d7f594924de42d1732faed9ba79"
+      },
+      "plan": {
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry2-20260920/plan.json",
+        "bytes": 15738,
+        "sha256": "5797fda75cecd32342063b374685c248142f44e32880101eb825f17fe9446281"
+      }
+    },
+    "candidate_median_seconds": 8.827286038,
+    "control_median_seconds": 9.019826925
+  },
+  "failed_confirmation": {
+    "plan": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-projected-residual-t1-production-confirmation-20260920/plan.json",
+      "bytes": 16029,
+      "sha256": "83046e6f25b74c1a0c0b9ca8b6a23315c6f0975294a3a9684898b489020155a7"
+    },
+    "manifest": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-projected-residual-t1-production-confirmation-20260920/attempt-1/result.sha256",
+      "bytes": 557,
+      "sha256": "6416e6194a00b07c3f5569d58d0c13424933e256f1f5ac87c71b7bd6fa0d582a"
+    },
+    "failure": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-projected-residual-t1-production-confirmation-20260920/attempt-1/failure.json",
+      "bytes": 86,
+      "sha256": "168b197d5d40d84e297049ede0d7c7202fa06467f7d074eeeae8976a3d271842"
+    },
+    "reason": "stale helper lacked source-supported --device-info; explicitly rebuilt helper"
+  },
+  "preparation_device_identity": {
+    "command": [
+      "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700/src/ninfer_r9700_gdn_qual",
+      "--device-info"
+    ],
+    "executable": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700/src/ninfer_r9700_gdn_qual",
+      "bytes": 921376,
+      "sha256": "6b0aaaf2f0a13855c733078d5ee01705c3a8db0eb9cafecd4e26f5d3d8fbdba5"
+    },
+    "exit_code": 0,
+    "device": {
+      "ordinal": 0,
+      "name": "AMD Radeon AI PRO R9700",
+      "architecture": "gfx1201",
+      "wavefront": 32,
+      "pci_bus_id": "0000:13:00.0",
+      "runtime_version": 71526333,
+      "driver_version": 71526333
+    },
+    "before": {
+      "pci_bus_id": "0000:13:00.0",
+      "power": "auto",
+      "used_bytes": 59912192,
+      "total_bytes": 34208743424,
+      "vendor": "0x1002",
+      "device": "0x7551",
+      "low_vram": true
+    },
+    "drain_samples": [
+      {
+        "elapsed_seconds": 0.00020705896895378828,
+        "pci_bus_id": "0000:13:00.0",
+        "power": "auto",
+        "used_bytes": 59949056,
+        "total_bytes": 34208743424,
+        "vendor": "0x1002",
+        "device": "0x7551",
+        "low_vram": true
+      }
+    ]
+  },
+  "build": {
+    "directory": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700",
+    "values": {
+      "CMAKE_BUILD_TYPE": "Release",
+      "CMAKE_CXX_COMPILER": "/usr/bin/c++",
+      "CMAKE_CXX_COMPILER_AR": "/usr/bin/gcc-ar-13",
+      "CMAKE_CXX_COMPILER_RANLIB": "/usr/bin/gcc-ranlib-13",
+      "CMAKE_CXX_FLAGS": "",
+      "CMAKE_CXX_FLAGS_DEBUG": "-g",
+      "CMAKE_CXX_FLAGS_MINSIZEREL": "-Os -DNDEBUG",
+      "CMAKE_CXX_FLAGS_RELEASE": "-O3 -DNDEBUG",
+      "CMAKE_CXX_FLAGS_RELWITHDEBINFO": "-O2 -g -DNDEBUG",
+      "CMAKE_EXE_LINKER_FLAGS": "",
+      "CMAKE_EXE_LINKER_FLAGS_DEBUG": "",
+      "CMAKE_EXE_LINKER_FLAGS_MINSIZEREL": "",
+      "CMAKE_EXE_LINKER_FLAGS_RELEASE": "",
+      "CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO": "",
+      "CMAKE_HIP_ARCHITECTURES": "gfx1201",
+      "CMAKE_HIP_COMPILER": "/opt/rocm/llvm/bin/clang++",
+      "CMAKE_HIP_COMPILER_AR": "/opt/rocm/core-10.0/lib/llvm/bin/llvm-ar",
+      "CMAKE_HIP_COMPILER_CLANG_SCAN_DEPS": "CMAKE_HIP_COMPILER_CLANG_SCAN_DEPS-NOTFOUND",
+      "CMAKE_HIP_COMPILER_RANLIB": "/opt/rocm/core-10.0/lib/llvm/bin/llvm-ranlib",
+      "CMAKE_HIP_FLAGS": "",
+      "CMAKE_HIP_FLAGS_DEBUG": "-g -O",
+      "CMAKE_HIP_FLAGS_MINSIZEREL": "-Os -DNDEBUG",
+      "CMAKE_HIP_FLAGS_RELEASE": "-O3 -DNDEBUG",
+      "CMAKE_HIP_FLAGS_RELWITHDEBINFO": "-O2 -g -DNDEBUG",
+      "CMAKE_HIP_PLATFORM": "amd",
+      "NINFER_BUILD_APPS": "ON",
+      "NINFER_BUILD_BENCHMARKS": "ON",
+      "NINFER_BUILD_R9700_CORE_QUALIFIER": "ON",
+      "NINFER_R9700_A8Q4_T1_DOT8_QUALIFICATION": "OFF",
+      "NINFER_R9700_ATTENTION_PARITY_CANDIDATE": "0",
+      "NINFER_R9700_DFLASH_ATTENTION_W5_WMMA_CANDIDATE": "0",
+      "NINFER_R9700_DFLASH_DOWN_SPLITK_CANDIDATE": "0",
+      "NINFER_R9700_DFLASH_DOWN_SPLITK_FACTOR": "8",
+      "NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE": "0",
+      "NINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE": "0",
+      "NINFER_R9700_DFLASH_SMALL_T_CANDIDATE": "0",
+      "NINFER_R9700_DOT8_WEIGHT_NT_QUALIFICATION": "OFF",
+      "NINFER_R9700_FP8_PREFIX_COMMON_ALGO_CANDIDATE": "0",
+      "NINFER_R9700_FP8_QK_WMMA": "1",
+      "NINFER_R9700_GDN_Q4_PAIR_T1_CANDIDATE": "0",
+      "NINFER_R9700_GDN_VERIFY_WAVE_QK_CANDIDATE": "0",
+      "NINFER_R9700_KV_VALUE_GROUP": "16",
+      "NINFER_R9700_Q4_ACTIVATION_BITS": "8",
+      "NINFER_R9700_Q4_SCALAR_BASE_QUALIFICATION": "OFF",
+      "NINFER_R9700_SPLIT512_GROUPED_T1_QUALIFICATION": "OFF",
+      "NINFER_R9700_TEXT_P129_WMMA_TAIL_CANDIDATE": "0",
+      "NINFER_R9700_W8_ACTIVATION_BITS": "8",
+      "NINFER_R9700_XATTENTION_QUALIFICATION": "OFF",
+      "NINFER_R9700_XATTENTION_STRIDE": "16",
+      "NINFER_R9700_XATTENTION_TAU_PERMILLE": "1000",
+      "NINFER_ROCM_CLANGXX": "/opt/rocm/llvm/bin/clang++"
+    },
+    "cache": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700/CMakeCache.txt",
+      "bytes": 36703,
+      "sha256": "6de09f13c35debbf64cbccd878813e8fe700d9c4462b9ad317d7e8e689d4c550"
+    },
+    "archive": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700/src/libninfer_r9700_core.a",
+      "bytes": 4261838,
+      "sha256": "da513fad9d166bd5c7371c16e0c8086998a5a8cdd666c77ac4e5f1ef291e1cec"
+    },
+    "executable": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700/bench/ninfer_bench",
+      "bytes": 5423424,
+      "sha256": "e7575aadf419186da669841d273d9e7e61758b4c49444e8a3e0183ae006ff9ca"
+    },
+    "route_qualifier": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700/src/ninfer_r9700_target_variant_projected_residual_qual",
+      "bytes": 696784,
+      "sha256": "b679d05be15da341617ae94adeb285144c4cf5327d941b37b81cae3fa8853429"
+    }
+  },
+  "device_identity_helper": {
+    "executable": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700/src/ninfer_r9700_gdn_qual",
+      "bytes": 921376,
+      "sha256": "6b0aaaf2f0a13855c733078d5ee01705c3a8db0eb9cafecd4e26f5d3d8fbdba5"
+    },
+    "command": [
+      "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700/src/ninfer_r9700_gdn_qual",
+      "--device-info"
+    ],
+    "expected": {
+      "ordinal": 0,
+      "name": "AMD Radeon AI PRO R9700",
+      "architecture": "gfx1201",
+      "wavefront": 32,
+      "pci_bus_id": "0000:13:00.0"
+    }
+  },
+  "artifact": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer",
+    "bytes": 15172833280,
+    "sha256": "60719c5d5bfe978376c7de94db460bcd82d965ec447870cc47f0a02bf8d59953"
+  },
+  "corpus": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids",
+    "bytes": 333620,
+    "sha256": "27e4f63c17efe3f89b5cf278b3b1a42a737316ed4044d7d0d1d52437059d1002"
+  },
+  "token_authority": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-three-route-production-confirmation-20260920/results/c1.json",
+    "bytes": 7316,
+    "sha256": "da2b66887e0deb70535a701dddb486199cede272807da6a8fb8f6a50078808ce"
+  },
+  "expected_tokens": [
+    [
+      116335,
+      96905,
+      3709,
+      98698,
+      113073,
+      113929,
+      97823,
+      98289,
+      102050,
+      1710,
+      271,
+      32,
+      3074,
+      37441,
+      3992,
+      1558,
+      15135,
+      35872,
+      4409,
+      660,
+      314,
+      1141,
+      16401,
+      854,
+      6992,
+      13914,
+      494,
+      4779,
+      11,
+      748,
+      61610,
+      506,
+      6937,
+      1331,
+      799,
+      369,
+      59056,
+      539,
+      4779,
+      32288,
+      4598,
+      1056,
+      6891,
+      33633,
+      13,
+      41173,
+      473,
+      11,
+      539,
+      12503,
+      11,
+      11036,
+      279,
+      4220,
+      9640,
+      506,
+      2957,
+      321,
+      369,
+      5802,
+      12204,
+      6608,
+      11,
+      864,
+      369,
+      3069,
+      279,
+      1330,
+      33286,
+      1902,
+      381,
+      16384,
+      24358,
+      13,
+      271,
+      35,
+      24348,
+      5757,
+      8032,
+      279,
+      42197,
+      314,
+      264,
+      3074,
+      5484,
+      440,
+      46608,
+      13,
+      25876,
+      513,
+      22000,
+      11,
+      47389,
+      11,
+      466,
+      5384,
+      26,
+      48647,
+      32524,
+      26,
+      321,
+      866,
+      2357,
+      628,
+      3564,
+      506,
+      279,
+      3140,
+      16219,
+      4299,
+      13,
+      7441,
+      14018,
+      8646,
+      9370,
+      6907,
+      7652,
+      494,
+      279,
+      1151,
+      11,
+      11984,
+      286,
+      850,
+      3157,
+      61386,
+      7289,
+      11,
+      11135,
+      88295,
+      11,
+      321,
+      1528,
+      421,
+      628,
+      381,
+      79174,
+      4598,
+      1056,
+      21118,
+      85305,
+      13,
+      271,
+      32,
+      34308,
+      13159,
+      20511,
+      28342,
+      777,
+      1056,
+      4879,
+      13,
+      70508,
+      1144,
+      39026,
+      321,
+      12594,
+      30137,
+      310,
+      16731,
+      32889,
+      11,
+      10014,
+      18243,
+      1144,
+      3000,
+      321,
+      2956,
+      310,
+      35097,
+      11,
+      321,
+      14421,
+      10462,
+      1144,
+      23271,
+      24199,
+      321,
+      264,
+      3609,
+      1218,
+      7662,
+      364,
+      72404,
+      13,
+      561,
+      21208,
+      772,
+      852,
+      11988,
+      264,
+      2545,
+      1396,
+      1834,
+      5802,
+      22700,
+      82,
+      2944,
+      777,
+      1056,
+      279,
+      799,
+      852,
+      4138,
+      17699,
+      12922,
+      2957,
+      264,
+      1936,
+      13,
+      271,
+      623,
+      26984,
+      11,
+      6429,
+      2695,
+      369,
+      279,
+      869,
+      314,
+      279,
+      1786,
+      10242,
+      488,
+      2873,
+      685,
+      948,
+      488,
+      1236,
+      264,
+      5576,
+      13,
+      1049,
+      33465,
+      586,
+      421,
+      4802,
+      7157,
+      383,
+      799,
+      2313,
+      513,
+      33829,
+      364,
+      2361,
+      11,
+      748,
+      264,
+      5307,
+      421,
+      5686,
+      1845,
+      303,
+      8091,
+      3665,
+      628,
+      1990
+    ]
+  ],
+  "runs": 3,
+  "admission": {
+    "every_seconds_over_candidate_median_at_most": 1.01,
+    "median_seconds_over_control_median_at_most": 0.99
+  },
+  "workload": {
+    "concurrency": 1,
+    "whole_pg": "8192,256",
+    "prefill_chunk": 4096,
+    "spec": "none",
+    "draft_tokens": 0,
+    "device_graph": true,
+    "warmup": 1,
+    "reps": 1
+  }
+}

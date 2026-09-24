@@ -1,0 +1,30 @@
+[
+  {
+    "mode": "fixed4",
+    "mismatches": []
+  },
+  {
+    "mode": "fixed5",
+    "mismatches": []
+  },
+  {
+    "mode": "fixed3",
+    "mismatches": [
+      {
+        "case": 5,
+        "count": 1,
+        "first": 6
+      },
+      {
+        "case": 7,
+        "count": 91,
+        "first": 36
+      },
+      {
+        "case": 9,
+        "count": 98,
+        "first": 12
+      }
+    ]
+  }
+]

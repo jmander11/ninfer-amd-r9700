@@ -1,0 +1,24 @@
+{
+  "argv": [
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/build/gdn_projection_control_grid_qual",
+    "--out-json",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gdn-projection-control-grid-qualification-20260920/attempt-1/qualification.json"
+  ],
+  "cwd": "/ssdpool2nvme/local_llm/ninfer-amd-r9700",
+  "started_unix_ns": 1789970374308991552,
+  "exit_code": 0,
+  "error": null,
+  "finished_unix_ns": 1789970377070543897,
+  "outputs": [
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gdn-projection-control-grid-qualification-20260920/attempt-1/qualifier.stdout",
+      "bytes": 88,
+      "sha256": "cf61923f7527edbacf41e41063e6bb94ebff6c73ba7178fe481d978446bcf00e"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-gdn-projection-control-grid-qualification-20260920/attempt-1/qualifier.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ]
+}

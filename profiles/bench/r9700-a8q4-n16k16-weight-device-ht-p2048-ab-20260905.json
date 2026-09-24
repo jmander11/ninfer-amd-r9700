@@ -1,0 +1,171 @@
+{
+  "bound_regression": {
+    "command": [
+      "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/build/a8q4_n16k16_weight_ht_harness",
+      "--regression"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": "PASS exact_shape=2048x5120x17408 full_bit_parity=true complete_k_fp64_samples=20 graph_replay=true status_poison_reset=true guards=true\n"
+  },
+  "command": [
+    "/ssdpool2nvme/local_llm/.venv-ninfer-r9700/bin/python",
+    "-m",
+    "tools.r9700.run_a8q4_n16k16_weight_ht_gate",
+    "--benchmark",
+    "--output",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-n16k16-weight-device-ht-p2048-ab-20260905.json"
+  ],
+  "decision": {
+    "admission_pass": false,
+    "candidate_mad_ms": 0.0031239986406252918,
+    "candidate_median_ms": 3.086025714875,
+    "candidate_over_control": 1.0000173832356412,
+    "candidate_over_control_max": 0.86874,
+    "classification": "terminal_reject",
+    "control_mad_ms": 0.004838943476562552,
+    "control_median_ms": 3.0859720706953127,
+    "first_stable_timing_miss_is_terminal": true,
+    "saving_ms_per_call": -5.36441796872289e-05,
+    "saving_ms_per_call_min": 0.390625,
+    "stability_pass": true
+  },
+  "hashes_sha256": {
+    "build-r9700/bench/ninfer_bench": "5d6505d3543ea0e5899506461a53852ad801020ad929f13dd4e934671c48f7b3",
+    "build-r9700/src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/linear/r9700_linear.hip.o": "01578de383205d0d7ea009c2cf7d61e68fca43c8ee9a490f972faebf750b6544",
+    "src/ops/r9700/linear/r9700_linear.h": "e9ca13712b487f83f6fbd88593ca9171d9b8d8274ba236ca2b5ebe5b6744e31c",
+    "src/ops/r9700/linear/r9700_linear.hip": "c65a49dd2228a9fdf34f167754c8fd095e3382154762d8e000606c7d4d2c2ff2",
+    "tools/r9700/a8q4_n16k16_layout_qual.hip": "f4e71a4ff39544623c5aa3ea869ed902b5908e9ca95a46f6333417cebd109e46",
+    "tools/r9700/a8q4_n16k16_weight_ht_harness.hip": "3bb4d1a94f4d5f7bda626dfebc8ae0aac1e995ef1c9f622f76c3fa1a6b0ab21d",
+    "tools/r9700/build/a8q4_n16k16_weight_ht_baseline.hsaco": "2a421c64546ad0b8a3d08c76ae39b9bf1c9cf1a2267e8806ed67fc06f9888c8d",
+    "tools/r9700/build/a8q4_n16k16_weight_ht_baseline.objdump": "6e4c894ccdc3c126f7283ab3a47ad0d6674f1eec8f8f20b2974721df09874639",
+    "tools/r9700/build/a8q4_n16k16_weight_ht_candidate.hsaco": "69bc2e769894ea6ff04610ba909547161478983243ab1878dd5174b6b8f1662f",
+    "tools/r9700/build/a8q4_n16k16_weight_ht_candidate.notes": "2534770591f34021d7f3546dd9931929df0650e68416313e56dc85e55ba9a70d",
+    "tools/r9700/build/a8q4_n16k16_weight_ht_candidate.objdump": "8984d1388533e34a88a667aed94f222566f7da99f1fbe400672866372650bd90",
+    "tools/r9700/build/a8q4_n16k16_weight_ht_fatbin.bin": "0cb2b145306912b1d188eff80b3f0321ddb376b66957871ffeb6dd5ea0cf9e90",
+    "tools/r9700/build/a8q4_n16k16_weight_ht_harness": "60c0a0a90f26e7d57f9ff3616ac9ea24c19c09c7fd321761853caed198e3555e",
+    "tools/r9700/check_a8q4_n16k16_weight_ht_static.py": "0e8b1ded440be192761a5443051f80a8feb5ec598dab4d7505f192f8720f51c7",
+    "tools/r9700/patch_a8q4_n16k16_weight_ht_assembly.py": "e441673c4bfcd987a6ee524afa9f3a97a18b3a133420d9b088386d2ff48716da",
+    "tools/r9700/run_a8q4_n16k16_weight_ht_gate.py": "4730d8dc50a358721786f87a203a089a9b3653bf57e6d07ef9a20988ecbcd2c4",
+    "tools/r9700/validate_a8q4_n16k16_weight_ht_report.py": "40914957b079a3dda30497cc1eb2bdea509f141cd69110ffb950c2325331cc7e"
+  },
+  "measurement": {
+    "calls": 64,
+    "candidate_interval_samples_ms": [
+      394.194000244,
+      394.235473633,
+      394.745697021,
+      395.011291504,
+      395.378540039,
+      395.41116333,
+      395.841125488
+    ],
+    "columns": 17408,
+    "control_interval_samples_ms": [
+      389.024627686,
+      394.372772217,
+      394.307098389,
+      395.004425049,
+      395.250732422,
+      395.623809814,
+      395.550933838
+    ],
+    "device": {
+      "architecture": "gfx1201",
+      "name": "AMD Radeon AI PRO R9700",
+      "ordinal": 0
+    },
+    "iterations_per_sample": 128,
+    "rows": 5120,
+    "schema": "ninfer.r9700.a8q4-n16k16-weight-ht-measurement.v1",
+    "tokens": 2048
+  },
+  "power_after": {
+    "command": [
+      "/opt/rocm/bin/rocm-smi",
+      "-d",
+      "0",
+      "--showproductname",
+      "--showprofile",
+      "--showperflevel",
+      "--json"
+    ],
+    "stdout": {
+      "card0": {
+        "Card Model": "0x7551",
+        "Card SKU": "APM107573",
+        "Card Series": "AMD Radeon AI PRO R9700",
+        "Card Vendor": "Advanced Micro Devices, Inc. [AMD/ATI]",
+        "Device Rev": "0xc0",
+        "GFX Version": "gfx1201",
+        "GUID": "38699",
+        "Node ID": "1",
+        "Performance Level": "auto",
+        "Subsystem ID": "0x5413"
+      }
+    },
+    "sysfs_path": "/sys/class/drm/card2/device/power_dpm_force_performance_level",
+    "sysfs_value": "auto"
+  },
+  "power_before": {
+    "command": [
+      "/opt/rocm/bin/rocm-smi",
+      "-d",
+      "0",
+      "--showproductname",
+      "--showprofile",
+      "--showperflevel",
+      "--json"
+    ],
+    "stdout": {
+      "card0": {
+        "Card Model": "0x7551",
+        "Card SKU": "APM107573",
+        "Card Series": "AMD Radeon AI PRO R9700",
+        "Card Vendor": "Advanced Micro Devices, Inc. [AMD/ATI]",
+        "Device Rev": "0xc0",
+        "GFX Version": "gfx1201",
+        "GUID": "38699",
+        "Node ID": "1",
+        "Performance Level": "auto",
+        "Subsystem ID": "0x5413"
+      }
+    },
+    "sysfs_path": "/sys/class/drm/card2/device/power_dpm_force_performance_level",
+    "sysfs_value": "auto"
+  },
+  "resources": {
+    "activation_policy": "default",
+    "architectural_vgpr": 96,
+    "complete_hsaco_otherwise_identical": true,
+    "lds_bytes": 17152,
+    "logical_vgpr": 92,
+    "native_signed_iu4_sites": 8,
+    "occupancy_waves_per_eu": 16,
+    "production_kernarg_bytes": 72,
+    "scale_policy": "default",
+    "scratch_bytes": 0,
+    "sgpr_spills": 0,
+    "vgpr_spills": 0,
+    "weight_ht_b64_static_sites": 2
+  },
+  "schema": "ninfer.r9700.a8q4-n16k16-weight-device-ht-gate.v1",
+  "static": {
+    "command": [
+      "/ssdpool2nvme/local_llm/.venv-ninfer-r9700/bin/python",
+      "-m",
+      "tools.r9700.check_a8q4_n16k16_weight_ht_static",
+      "--baseline",
+      "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/build/a8q4_n16k16_weight_ht_baseline.hsaco",
+      "--candidate",
+      "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/build/a8q4_n16k16_weight_ht_candidate.hsaco",
+      "--baseline-disassembly",
+      "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/build/a8q4_n16k16_weight_ht_baseline.objdump",
+      "--candidate-disassembly",
+      "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/build/a8q4_n16k16_weight_ht_candidate.objdump",
+      "--notes",
+      "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/build/a8q4_n16k16_weight_ht_candidate.notes"
+    ],
+    "stdout": "PASS vgpr=92 architectural_vgpr=96 lds=17152 iu4=8 weight_ht_b64=2 occupancy=16 scratch=0 spills=0 exact_hsaco_equality=true A_policy=default scale_policy=default\n"
+  }
+}

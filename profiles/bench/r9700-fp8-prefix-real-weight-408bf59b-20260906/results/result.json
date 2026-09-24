@@ -1,0 +1,15 @@
+{
+  "artifact_type": "ninfer_r9700_fp8_linear_prefix_discriminator_result",
+  "schema_version": 1,
+  "diagnostic_only": true,
+  "timing_evidence_eligible": false,
+  "production_routing_authorized": false,
+  "artifact": {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval.ninfer","bytes":22763026944,"sha256":"d8fc77c36cf17c92e96d67b9a6b5a1826a1ade4f59d59c003b2368fe981fc512","model_id":"qwen3.8-27b","weights_id":"r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval"},
+  "device": {"ordinal":0,"name":"AMD Radeon AI PRO R9700","architecture":"gfx1201","wave_size":32},
+  "input_contract": "one identical represented-BF16 128-column prefix plus one appended column; independent per-token E4M3 outer scale",
+  "cells": [
+    {"weight_name":"text/layers/0/mlp/gate_up","rows":34816,"columns":5120,"activation_code_prefix_exact":true,"activation_scale_prefix_exact":true,"bf16_output_prefix_exact":false,"bf16_output_prefix_mismatch_count":291,"first_output_mismatch":{"flat_index":2231847,"token":64,"row":3623,"p128_bits":14790,"p129_bits":14789},"represented_fp64_oracle":{"probe_count":28,"maximum_bf16_steps":0,"maximum_error_bound_ratio":0.21287897269736736,"criterion":"abs_error <= BF16_rounding_error + gamma_5120*sum_abs; ratio <= 1.05"},"profiles":[{"tokens":128,"activation_workspace_bytes":655876,"selected_matmul_workspace_bytes":0,"algorithm_max_workspace_bytes":536870912,"selected_heuristic_rank":0,"heuristic_result_count":8,"waves_count":0,"algorithm_fingerprint":"e2e00100000000000000000000000000"},{"tokens":129,"activation_workspace_bytes":661252,"selected_matmul_workspace_bytes":0,"algorithm_max_workspace_bytes":536870912,"selected_heuristic_rank":0,"heuristic_result_count":8,"waves_count":0,"algorithm_fingerprint":"dde00100000000000000000000000000"}]},
+    {"weight_name":"text/layers/0/gdn/query_key","rows":4096,"columns":5120,"activation_code_prefix_exact":true,"activation_scale_prefix_exact":true,"bf16_output_prefix_exact":true,"bf16_output_prefix_mismatch_count":0,"first_output_mismatch":null,"represented_fp64_oracle":{"probe_count":28,"maximum_bf16_steps":0,"maximum_error_bound_ratio":0.22709865698681717,"criterion":"abs_error <= BF16_rounding_error + gamma_5120*sum_abs; ratio <= 1.05"},"profiles":[{"tokens":128,"activation_workspace_bytes":655876,"selected_matmul_workspace_bytes":0,"algorithm_max_workspace_bytes":536870912,"selected_heuristic_rank":0,"heuristic_result_count":8,"waves_count":0,"algorithm_fingerprint":"dde00100000000000000000000000000"},{"tokens":129,"activation_workspace_bytes":661252,"selected_matmul_workspace_bytes":0,"algorithm_max_workspace_bytes":536870912,"selected_heuristic_rank":0,"heuristic_result_count":8,"waves_count":0,"algorithm_fingerprint":"dde00100000000000000000000000000"}]}
+  ],
+  "conclusion": "activation prefixes are exact but at least one hipBLASLt BF16 output prefix differs"
+}

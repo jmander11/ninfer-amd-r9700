@@ -1,0 +1,41 @@
+{
+  "concurrency": 4,
+  "max_draft": 4,
+  "adaptive": false,
+  "aggregate_decode_tok_s": 161.71190961459988,
+  "repetition_rates": [
+    161.6525277709484,
+    161.71190961459988,
+    161.71880405103585
+  ],
+  "per_request_tok_s": 40.42797740364997,
+  "request_lane_rounds_per_draft": [
+    [
+      0,
+      0,
+      0,
+      0,
+      132
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      132
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      132
+    ]
+  ],
+  "all_repetitions_exact_ordinary": true,
+  "resources": {
+    "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+    "memory.peak": "750825472\n",
+    "cpu.stat": "usage_usec 15630705\nuser_usec 2949805\nsystem_usec 12680899\nnice_usec 0\ncore_sched.force_idle_usec 0\n"
+  }
+}

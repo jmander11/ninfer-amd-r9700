@@ -1,0 +1,22 @@
+{
+  "name": "production-binary-check",
+  "argv": [
+    "/home/battlefront/.local/bin/python3.11",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry2-20260920/production_binary.py",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry2-20260920/attempt-1"
+  ],
+  "started_unix_ns": 1789960184305841599,
+  "exit_code": 0,
+  "pid": 1660842,
+  "finished_unix_ns": 1789960184484942697,
+  "stdout": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry2-20260920/attempt-1/production-binary-check.stdout",
+    "bytes": 86,
+    "sha256": "8a03f42e8558ea2eb108085b8c1ee7497dac3c45af82242197d7a876acad7243"
+  },
+  "stderr": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry2-20260920/attempt-1/production-binary-check.stderr",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

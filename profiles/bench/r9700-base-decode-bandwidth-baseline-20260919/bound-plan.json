@@ -1,0 +1,182 @@
+{
+  "schema": "ninfer.r9700.base-decode-bandwidth-baseline-plan.v1",
+  "status": "prepared_awaiting_independent_review_and_gpu_execution",
+  "claim": "Measure selector-free ordinary C1/P8192+G256 decode and its same-session streaming ceiling after the block-size family was directly rejected. This package does not itself prove physical HBM saturation or stall freedom.",
+  "production_routing_authorized": false,
+  "layer0": {
+    "public_op": "ordinary Qwen3.8-27B decode; the dominant owner is A8G64 x packed-Q4G64 Linear at T=1",
+    "represented_inputs": "signed A8 represented as low/high Q4 planes plus FP16 G64 activation scales; signed packed Q4 N16/K16 weights plus FP16 G64 row scales; BF16 output",
+    "oracle": "the sealed cold block+pipeline sweep checks all seven production tuples against an independent represented-formula FP64 oracle and full-output bit parity; this baseline package does not rerun the closed direct candidate family",
+    "baseline": "selector-free current source bound by bound-plan.json; unprofiled auto C1/P8192+G256, three independent measured processes",
+    "suspected_limit": "weight-stream bandwidth and latency hiding in the 321 T=1 dot8 calls per ordinary round",
+    "mechanism_decision": "deferred until this baseline and a separately qualified challenger exist; profiler counters are attribution-only"
+  },
+  "workload": {
+    "device": 0,
+    "concurrency": 1,
+    "whole_pg": "8192,256",
+    "prefill_chunk": 4096,
+    "kv_capacity": "workload",
+    "spec": "none",
+    "draft_tokens": 0,
+    "device_graph": true,
+    "retain_token_ids": true,
+    "independent_measured_processes": 3,
+    "repetitions_per_process": 1,
+    "warmup_per_process": 1,
+    "required_power": "auto"
+  },
+  "dot8_round_inventory": [
+    {
+      "rows": 4096,
+      "columns": 5120,
+      "calls": 48
+    },
+    {
+      "rows": 5120,
+      "columns": 6144,
+      "calls": 64
+    },
+    {
+      "rows": 5120,
+      "columns": 17408,
+      "calls": 64
+    },
+    {
+      "rows": 7168,
+      "columns": 5120,
+      "calls": 32
+    },
+    {
+      "rows": 12288,
+      "columns": 5120,
+      "calls": 48
+    },
+    {
+      "rows": 34816,
+      "columns": 5120,
+      "calls": 64
+    },
+    {
+      "rows": 248320,
+      "columns": 5120,
+      "calls": 1
+    }
+  ],
+  "useful_byte_contract": {
+    "formula_per_call": "N*Kpad/2 weight-code bytes + N*(Kpad/64)*2 weight-scale bytes + Kpad activation-code bytes + (Kpad/64)*2 activation-scale bytes + 4 status bytes + N*2 BF16 output bytes",
+    "kpad": "ceil(K/128)*128",
+    "bytes_per_round": 13609999780,
+    "weight_code_and_scale_bytes_per_round": 13599129600,
+    "interpretation": "exact unique represented bytes at the Linear boundary; not physical HBM traffic and not source-level repeated load requests"
+  },
+  "same_session_stream_probe": {
+    "size_gib": 4,
+    "trials": 5,
+    "interpretation": "isolated auto-state streaming ceiling, not inference traffic"
+  },
+  "focused_optional_profile": {
+    "workload": "C1/P8192+G1 ordinary, one measured region after one warmup",
+    "kernel_regex": "a8q4g64_linear_decode_dot8_t1_kernel",
+    "counters": [
+      "SQ_WAIT_ANY",
+      "SQ_WAIT_INST_ANY",
+      "SQ_WAVE_CYCLES",
+      "SQ_WAVES"
+    ],
+    "power_during_capture": "profile_standard",
+    "power_before_after": "auto",
+    "timing_admissible": false
+  },
+  "cold_shape_measurement": {
+    "status": "completed_retained_do_not_rerun",
+    "report": "profiles/bench/r9700-base-decode-dot8-cold-block-sweep-20260919.json",
+    "routes": [
+      32,
+      64,
+      128,
+      256
+    ],
+    "contract": "all seven exact production shapes; identical immutable weight contents rotated across disjoint allocations totaling more than 64 MiB; independent represented-formula oracle and bit-exact route parity retained",
+    "interpretation": "direct unprofiled auto-state evidence rejected both tested mechanisms. The block-size family had only one small local win and a sub-0.1% call-weighted whole bound. The one-group-ahead pipeline was 0.9971x to 1.0245x block256 across the seven shapes, within noise or slower. No compile selector was retained."
+  },
+  "stages": {
+    "static_validation": "python3 profiles/bench/r9700-base-decode-bandwidth-baseline-20260919/validate.py",
+    "bind_build": "python3 profiles/bench/r9700-base-decode-bandwidth-baseline-20260919/prepare.py",
+    "non_mutating_preflight": "bash profiles/bench/r9700-base-decode-bandwidth-baseline-20260919/commands.sh --preflight",
+    "unprofiled_measurement": "bash profiles/bench/r9700-base-decode-bandwidth-baseline-20260919/commands.sh --measure",
+    "optional_privileged_profile": "bash profiles/bench/r9700-base-decode-bandwidth-baseline-20260919/commands.sh --profile"
+  },
+  "review_gate": "After prepare.py creates bound-plan.json, independently review source identity, selector-free cache, commands, retained cold sweep, useful-byte formula, output freshness, power restoration, and decision language before either GPU action.",
+  "source_commit": "3db868e386d58f8edd8226f81023478984f8e9ce",
+  "source_tree": "c144b9e1dcea5e23153ec3cf004f7ed2e6f86aa4",
+  "source_worktree": "/ssdpool2nvme/local_llm/ninfer-amd-r9700-base-decode-source-3db868e3",
+  "build_directory": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-base-decode-bandwidth-3db868e3-20260919",
+  "build_cache": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-base-decode-bandwidth-3db868e3-20260919/CMakeCache.txt",
+    "bytes": 33183,
+    "sha256": "1085afcd4c17e5425adce51f3c46e8b4a3545f9e7a2b5b69747fce9446e0156a"
+  },
+  "benchmark": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-base-decode-bandwidth-3db868e3-20260919/bench/ninfer_bench",
+    "bytes": 5339920,
+    "sha256": "690b6c9e2bc26509ce44aab53c338e4b53781b67fbd5388e377ce5fa3cffb9ad"
+  },
+  "stream_probe": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-base-decode-tools-3db868e3-20260919/hbm_bandwidth_probe",
+    "bytes": 68784,
+    "sha256": "11e8eee9678d131b28dd0b023cb618d294094362737adb6a01134cbbaed0fdb2"
+  },
+  "artifact": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer",
+    "bytes": 15172833280,
+    "sha256": "60719c5d5bfe978376c7de94db460bcd82d965ec447870cc47f0a02bf8d59953"
+  },
+  "corpus": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids",
+    "bytes": 333620,
+    "sha256": "27e4f63c17efe3f89b5cf278b3b1a42a737316ed4044d7d0d1d52437059d1002"
+  },
+  "profiler": {
+    "path": "/opt/rocm/core-10.0/bin/rocprofv3",
+    "bytes": 95727,
+    "sha256": "2d220ded2167097e480e6866a916b575548d56bed8a823a4e505f7133868f0a6"
+  },
+  "counter_preflight": {
+    "path": "/opt/rocm/core-10.0/bin/rocprofv3-avail",
+    "bytes": 20207,
+    "sha256": "b079e32c759b3564a7750b7c274697537f2e2894f76ddaa7f17f139325571d75"
+  },
+  "retained_cold_block_sweep": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-base-decode-dot8-cold-block-sweep-20260919.json",
+    "bytes": 8562,
+    "sha256": "a2802bc7e9f69ed75b06249f4e533fa5cf5fbd7524e7539acba3eaa1e86def06"
+  },
+  "retained_token_authority": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-rmsnorm-production-final-p8192-g256-c1-20260906.json",
+    "bytes": 6750,
+    "sha256": "b05db0068a4f1c73ce9c2092443b42f9f48b0fdb80ff8b3335db60cd5bdca74b"
+  },
+  "expected_tokens": {
+    "count": 257,
+    "sha256": "eb9241c6cc2a7547fa3c744dfe7b647e20a6e290dbf7241341b76ab524b89403"
+  },
+  "selector_free_cache": {
+    "CMAKE_BUILD_TYPE": "Release",
+    "CMAKE_HIP_ARCHITECTURES": "gfx1201",
+    "GPU_BUILD_TARGETS": "gfx1201",
+    "NINFER_BUILD_BENCHMARKS": "ON",
+    "NINFER_R9700_Q4_ACTIVATION_BITS": "8",
+    "NINFER_R9700_W8_ACTIVATION_BITS": "8",
+    "NINFER_R9700_KV_VALUE_GROUP": "16",
+    "NINFER_R9700_FP8_QK_WMMA": "1",
+    "NINFER_R9700_XATTENTION_QUALIFICATION": "OFF",
+    "NINFER_R9700_DFLASH_SMALL_T_CANDIDATE": "0",
+    "NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE": "0",
+    "NINFER_R9700_DFLASH_DOWN_SPLITK_CANDIDATE": "0",
+    "NINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE": "0",
+    "NINFER_R9700_TEXT_P129_WMMA_TAIL_CANDIDATE": "0",
+    "NINFER_R9700_GDN_VERIFY_WAVE_QK_CANDIDATE": "0",
+    "NINFER_R9700_FP8_PREFIX_COMMON_ALGO_CANDIDATE": "0"
+  }
+}

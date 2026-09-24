@@ -1,0 +1,24 @@
+{
+  "artifact_type": "ninfer_r9700_dflash_semantic_trace_analysis_repair",
+  "schema_version": 1,
+  "status": "analysis_only_no_gpu_rerun",
+  "cause": "capture analyzer rejected exact normal two-line ninfer_bench informational stderr and treated finite decimal speculative-rate serialization as exact rational equality",
+  "capture_analyzer_sha256": "f8c17bf643aad048455ef08b86d90a64029d819ffe67c61de742270064c53e3c",
+  "capture_prepared": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-semantic-traces-aebd5f82-20260906/prepared.sha256",
+    "bytes": 3655,
+    "sha256": "c45e9a346001c0824182508561aa4b7b2ed4dd9cd9a0e6b0cae5996799455a6c"
+  },
+  "capture_result": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-semantic-traces-aebd5f82-20260906/results/result.sha256",
+    "bytes": 4801,
+    "sha256": "d517d347a5bec7721c8fb043bd4937b266879779526404e59ec2330ce2218bfe"
+  },
+  "repaired_analyzer": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-semantic-traces-aebd5f82-20260906/analyze.py",
+    "bytes": 23095,
+    "sha256": "a78060b06ed1a5922d28c2acfb14c2baed6e22a8521c4238d35327a937d76d04"
+  },
+  "raw_capture_modified": false,
+  "gpu_rerun_permitted": false
+}

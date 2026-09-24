@@ -1,0 +1,17 @@
+{
+  "exact_qualified_code_object": true,
+  "extraction": {
+    "executable_path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700/bench/ninfer_bench",
+    "executable_size_bytes": 9363368,
+    "executable_sha256": "7fbe41e0dafcbdb880ccf1fa8e8eed56cee30c69563a16b7a1d7fb021f8b8deb",
+    "executable_device": 42,
+    "executable_inode": 1304864,
+    "code_object_path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8-bound-dflash-20260923/draft-final.hsaco",
+    "code_object_size_bytes": 181536,
+    "code_object_sha256": "c6dcc1783a1f7455fd20870cf3741312a6ff6d3e1270577d87c9356022c03fa4",
+    "section": ".hip_fatbin",
+    "bundle_target": "hipv4-amdgcn-amd-amdhsa--gfx1201",
+    "bundle_offset_bytes": 2367488,
+    "code_symbol": "small_batch_projection_kernel"
+  }
+}

@@ -1,0 +1,117 @@
+{
+  "artifact_type": "ninfer_exact_committed_source_build_receipt",
+  "schema_version": 1,
+  "source": {
+    "commit": "25a27bb293e6a32134fbc6b66cecff5444739ccc",
+    "tree": "40703b4636e339604728e37f080225a78960495c",
+    "worktree": "/ssdpool2nvme/local_llm/ninfer-amd-r9700-fp8-e2-text-parity-src-25a27bb2"
+  },
+  "build_directory": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-fp8-e2-text-parity-25a27bb2-fresh-20260906",
+  "configure_command": ["cmake","-S","/ssdpool2nvme/local_llm/ninfer-amd-r9700-fp8-e2-text-parity-src-25a27bb2","-B","/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-fp8-e2-text-parity-25a27bb2-fresh-20260906","-G","Ninja","-DCMAKE_BUILD_TYPE=Release","-DCMAKE_HIP_COMPILER=/opt/rocm/llvm/bin/clang++","-DNINFER_BUILD_BENCHMARKS=ON","-DCMAKE_EXPORT_COMPILE_COMMANDS=ON","-DGPU_BUILD_TARGETS=gfx1201","-DNINFER_R9700_KV_VALUE_GROUP=16","-DNINFER_R9700_Q4_ACTIVATION_BITS=8","-DNINFER_R9700_W8_ACTIVATION_BITS=8","-DNINFER_R9700_FP8_QK_WMMA=1","-DNINFER_R9700_DFLASH_SMALL_T_CANDIDATE=0","-DNINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE=1","-DNINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE=1","-DNINFER_R9700_GDN_VERIFY_WAVE_QK_CANDIDATE=1","-DNINFER_R9700_FP8_PREFIX_COMMON_ALGO_CANDIDATE=1","-DNINFER_R9700_XATTENTION_QUALIFICATION=OFF","-DNINFER_R9700_XATTENTION_STRIDE=16","-DNINFER_R9700_XATTENTION_TAU_PERMILLE=1000"],
+  "build_command": ["cmake","--build","/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-fp8-e2-text-parity-25a27bb2-fresh-20260906","--target","ninfer_bench","ninfer_qwen3_runtime_mechanisms_test","ninfer_qwen3_prefill_tail_trace_path_test","-j","16"],
+  "profile": {
+    "GPU_BUILD_TARGETS": "gfx1201",
+    "NINFER_R9700_KV_VALUE_GROUP": "16",
+    "NINFER_R9700_Q4_ACTIVATION_BITS": "8",
+    "NINFER_R9700_W8_ACTIVATION_BITS": "8",
+    "NINFER_R9700_FP8_QK_WMMA": "1",
+    "NINFER_R9700_DFLASH_SMALL_T_CANDIDATE": "0",
+    "NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE": "1",
+    "NINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE": "1",
+    "NINFER_R9700_GDN_VERIFY_WAVE_QK_CANDIDATE": "1",
+    "NINFER_R9700_FP8_PREFIX_COMMON_ALGO_CANDIDATE": "1",
+    "NINFER_R9700_XATTENTION_QUALIFICATION": "OFF",
+    "NINFER_R9700_XATTENTION_STRIDE": "16",
+    "NINFER_R9700_XATTENTION_TAU_PERMILLE": "1000"
+  },
+  "normalized_selector_delta": {
+    "control_value": "0",
+    "candidate_value": "1",
+    "only_difference": "NINFER_R9700_FP8_PREFIX_COMMON_ALGO_CANDIDATE",
+    "control_not_reexecuted": "prior selector-zero authorities motivate attribution but are not a matched causal control for this combined build"
+  },
+  "normalized_profile_sha256": "995b25a06a910e972cadf711c8d376a123c089f2626c8c797c187e7164fef34f",
+  "build_process": {
+    "configure_started_unix_ns": 1788744309074268561,
+    "configure_finished_unix_ns": 1788744310766796564,
+    "build_finished_unix_ns": 1788744323700471394,
+    "configure_exit_code": 0,
+    "build_exit_code": 0,
+    "configure_stdout": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-e2-t129-text-parity-gate-20260906/configure.stdout.gz", "bytes": 677, "sha256": "d7477dfb3b38c864266652d06cba10b1f818ec01919b67dda31bd1398a121ba7", "encoding": "gzip-n", "uncompressed_bytes": 1722, "uncompressed_sha256": "c513ce32f7ff2883bb194f17b51eb344c1deb670a7377c67441c3c9650b460fb"},
+    "configure_stderr": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-e2-t129-text-parity-gate-20260906/configure.stderr", "bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
+    "build_stdout": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-e2-t129-text-parity-gate-20260906/build.stdout", "bytes": 9777, "sha256": "2700a72cffa311a7cf28a019fc76f8d12f5a80d2f27896667122a48a5906342a"},
+    "build_stderr": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-e2-t129-text-parity-gate-20260906/build.stderr", "bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+  },
+  "source_files": {
+    "CMakeLists.txt": {"bytes": 12197, "sha256": "df8b2e12ad870e0383fdefd5ca91e0cbc9f79a6c5846a43088d43e638b0f6970"},
+    "src/ops/r9700/linear/linear_execution.h": {"bytes": 4664, "sha256": "25c4e520f64441029686349ac327a08105d5a95c76bf9cee65fc268318b5f0a1"},
+    "src/ops/r9700/linear/linear_execution.hip": {"bytes": 26378, "sha256": "dc7a33c8492e444fa657afbfb0a2f0afb68e5b300bb6c1c4b90f93b793e37a90"},
+    "src/targets/qwen3/impl/runtime/layer_boundary_trace.h": {"bytes": 52916, "sha256": "d5fadf08f0db4d6d909ac7dde47260b5d8d93e13aa5630c3ce00945812b49a5c"},
+    "src/targets/qwen3/impl/runtime/text_context_impl.h": {"bytes": 96933, "sha256": "b7b0c7fcd9b9ccc7d65ba89f940f5b78817ea5c77be936f0a5aff8b07c36fdff"},
+    "bench/targets/qwen3_8_27b/ninfer_bench.cpp": {"bytes": 20195, "sha256": "5a5469aa805349b167c60211b7db5ea5f1b983909eb855fc271140f9a1f46fa6"},
+    "bench/targets/qwen3_8_27b/ninfer_bench_support.cpp": {"bytes": 55257, "sha256": "9c4ff9223b8465590af91449b378c9365d29ec8877d9a08a01fd55b3b5a2dccd"},
+    "tools/bench/compare_qwen3_layer_boundary_trace.py": {"bytes": 20283, "sha256": "5a2afafb8e1e8cf4aba38df57eecdaa4be4d0fe3fe9e0e9489fa9569c057c829"}
+  },
+  "outputs": {
+    "benchmark": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-fp8-e2-text-parity-25a27bb2-fresh-20260906/bench/ninfer_bench",
+      "bytes": 5265912,
+      "sha256": "aad900d35f7ab422edc18d5bae14caddb88d6f74a51461cfb75276af3d4fcf5d"
+    },
+    "cmake_cache": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-fp8-e2-text-parity-25a27bb2-fresh-20260906/CMakeCache.txt",
+      "bytes": 34525,
+      "sha256": "47684b73c3f6f2c3ce2e6afeff83ecc4522f4638c330af8761eb25abed70f9b2"
+    },
+    "compile_commands": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-fp8-e2-text-parity-25a27bb2-fresh-20260906/compile_commands.json",
+      "bytes": 280200,
+      "sha256": "c9ec4e1b0350c7a7dd23e3580f464491299cac4e719e6f89e8461b28d7e1ca0f"
+    },
+    "build_ninja": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-fp8-e2-text-parity-25a27bb2-fresh-20260906/build.ninja", "bytes": 541704, "sha256": "524a8d5186492e67e99f7f05e7a45e624b18dd4c0e5669209028942ae1aa918d"},
+    "runtime_test": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-fp8-e2-text-parity-25a27bb2-fresh-20260906/tests/ninfer_qwen3_runtime_mechanisms_test",
+      "bytes": 285704,
+      "sha256": "9f5c726fb557921a447f353dadd88e9644e1dd5c2c6c687c021e070b3927619e"
+    },
+    "trace_path_test": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-fp8-e2-text-parity-25a27bb2-fresh-20260906/tests/ninfer_qwen3_prefill_tail_trace_path_test",
+      "bytes": 27936,
+      "sha256": "d6ec4c54654c9ebfd1c414304e9c9a2caca28bcc67e3dc88f5532097cf8268eb"
+    }
+  },
+  "benchmark_elf": {"gnu_build_id": null, "build_id_note": "no GNU build-id note is present", "historical_discriminator_sha256": "28d9937f7a3c966b3b49eb3f62449df52dad9d6c22a3e604b42d2ef087c76eff", "fresh_benchmark_is_distinct_artifact": true},
+  "source_blob_ids": {"CMakeLists.txt":"51bb9f42f530659772706d7e633d696e0a89e4cc","src/ops/r9700/linear/linear_execution.h":"56e4c276db7a13a7d64ad21762df4f2d27ec0350","src/ops/r9700/linear/linear_execution.hip":"1b9d34ad94e612e094a141b30964a0dfea625dc1","src/targets/qwen3/impl/runtime/layer_boundary_trace.h":"d09a2b40498c1622c1643d8d04d6d216cd3dc438","src/targets/qwen3/impl/runtime/text_context_impl.h":"3907584b97730689daacd0d148a1fcea1b3132fc","bench/targets/qwen3_8_27b/ninfer_bench.cpp":"5ccd79ddf0976c42b17f1d5fd2cc00eee3610d7a","bench/targets/qwen3_8_27b/ninfer_bench_support.cpp":"775909953aec1b2f7ffa5f615e93de63fa39e16d","tools/bench/compare_qwen3_layer_boundary_trace.py":"b1ada2e2a56e01a797b16709488df8d8700d618b"},
+  "toolchain_runtime": {
+    "cxx": {
+      "path": "/usr/bin/x86_64-linux-gnu-g++-13",
+      "bytes": 1027128,
+      "sha256": "1353e9bdd29a7295c7226bf6c63abccce056d8cac31f112e5cdbecc3f28c2769"
+    },
+    "clang": {
+      "path": "/opt/rocm/core-10.0/lib/llvm/bin/clang-23",
+      "bytes": 201136,
+      "sha256": "241bf4da7ec39bc00b68ed74f6be751516d9892ed990e8c7fa372bad18500247"
+    },
+    "hipcc": {
+      "path": "/opt/rocm/core-10.0/bin/hipcc",
+      "bytes": 644120,
+      "sha256": "7b95d430bb8c4d4237f9b4935dbd6440e2067fde0979cc69bffb26ebd021464c"
+    },
+    "python": {
+      "path": "/usr/bin/python3.12",
+      "bytes": 8020928,
+      "sha256": "1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118"
+    },
+    "libamdhip64": {
+      "path": "/opt/rocm/core-10.0/lib/libamdhip64.so.7.15.26333-0000000",
+      "bytes": 28216272,
+      "sha256": "817aeadfd9f62b68831ad89993163c7f1f470f30595e7e0da5fdc942193142a8"
+    },
+    "libhipblaslt": {
+      "path": "/opt/rocm/core-10.0/lib/libhipblaslt.so.1.4",
+      "bytes": 9081728,
+      "sha256": "1e8545626323f9b22c65d36492e1686b831cb85c8f7c8be3fc21c0d6cbb0d055"
+    }
+  }
+}

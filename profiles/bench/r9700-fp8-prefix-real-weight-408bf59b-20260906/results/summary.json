@@ -1,0 +1,44 @@
+{
+  "artifact": {
+    "bytes": 22763026944,
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval.ninfer",
+    "sha256": "d8fc77c36cf17c92e96d67b9a6b5a1826a1ade4f59d59c003b2368fe981fc512"
+  },
+  "artifact_type": "ninfer_r9700_fp8_prefix_real_weight_summary",
+  "classification": "gate_up_width_dependent_bf16_prefix_only",
+  "conclusion": "layer0 gate_up changes hipBLASLt algorithm and 291 BF16 prefix outputs; layer1 query_key retains one algorithm and exact prefix outputs",
+  "executable": {
+    "bytes": 275568,
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-prefix-real-weight-408bf59b-20260906/retained-bin/fp8_linear_prefix_discriminator",
+    "sha256": "54e649d3186832002ff9079b382e11608d96f4e024aa434bbb5956e061e55374"
+  },
+  "gate_up": {
+    "first_output_mismatch": {
+      "flat_index": 2231847,
+      "p128_bits": 14790,
+      "p129_bits": 14789,
+      "row": 3623,
+      "token": 64
+    },
+    "prefix_mismatch_count": 291,
+    "t128_fingerprint": "e2e00100000000000000000000000000",
+    "t129_fingerprint": "dde00100000000000000000000000000"
+  },
+  "limitations": [
+    "the retained preliminary result lacked process and power endpoint receipts and is not the final immutable authority",
+    "the create-only rerun is functional evidence only; timings are inadmissible",
+    "pairwise BF16 prefix mismatch localizes a width-dependent library result but does not imply either output violates the represented-operation oracle",
+    "no production routing claim"
+  ],
+  "query_key": {
+    "prefix_mismatch_count": 0,
+    "t128_fingerprint": "dde00100000000000000000000000000",
+    "t129_fingerprint": "dde00100000000000000000000000000"
+  },
+  "schema_version": 1,
+  "source": {
+    "commit": "408bf59bcedda20d1294e613714fe81c43545f02",
+    "tree": "b286ec6984f4b10e42a551a26b1e8eba1fc0ff15"
+  },
+  "status": "pass"
+}

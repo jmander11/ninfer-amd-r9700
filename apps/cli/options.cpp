@@ -52,15 +52,49 @@ float parse_float(const char* text, std::string_view label, float minimum, float
     return static_cast<float>(value);
 }
 
-KvCacheStorage parse_kv_cache(std::string_view text) {
-    if (text == "bf16") { return KvCacheStorage::BFloat16; }
-    if (text == "int8") { return KvCacheStorage::Int8Group64; }
-    throw std::invalid_argument("invalid kv-dtype: " + std::string(text));
-}
-
 KvCapacityPolicy parse_kv_capacity(const char* text) {
     if (std::string_view(text) == "auto") { return KvCapacityPolicy::automatic(); }
     return KvCapacityPolicy::explicit_capacity(parse_u32(text, "kv-capacity"));
+}
+
+std::size_t parse_kv_ram_capacity_bytes(const char* text) {
+    if (text == nullptr || std::string_view(text) == "off") { return 0; }
+    const std::uint64_t mib = parse_u64(text, "kv-ram-capacity");
+    if (mib == 0) {
+        throw std::invalid_argument("--kv-ram-capacity must be off or a positive MiB integer");
+    }
+    constexpr std::uint64_t kMiB = 1024ULL * 1024ULL;
+    if (mib > std::numeric_limits<std::uint64_t>::max() / kMiB) {
+        throw std::invalid_argument("--kv-ram-capacity overflows 64-bit bytes");
+    }
+    const std::uint64_t bytes = mib * kMiB;
+    if (bytes > std::numeric_limits<std::size_t>::max()) {
+        throw std::invalid_argument("--kv-ram-capacity overflows size_t");
+    }
+    return static_cast<std::size_t>(bytes);
+}
+
+std::size_t parse_kv_disk_capacity_bytes(const char* text) {
+    if (text == nullptr || std::string_view(text) == "off") { return 0; }
+    const std::uint64_t mib = parse_u64(text, "kv-disk-capacity");
+    if (mib == 0) {
+        throw std::invalid_argument("--kv-disk-capacity must be off or a positive MiB integer");
+    }
+    constexpr std::uint64_t kMiB = 1024ULL * 1024ULL;
+    if (mib > std::numeric_limits<std::uint64_t>::max() / kMiB) {
+        throw std::invalid_argument("--kv-disk-capacity overflows 64-bit bytes");
+    }
+    const std::uint64_t bytes = mib * kMiB;
+    if (bytes > std::numeric_limits<std::size_t>::max()) {
+        throw std::invalid_argument("--kv-disk-capacity overflows size_t");
+    }
+    return static_cast<std::size_t>(bytes);
+}
+
+KvDiskCompress parse_kv_disk_compress(const char* text) {
+    if (text == nullptr || std::string_view(text) == "off") { return KvDiskCompress::Off; }
+    if (std::string_view(text) == "zstd") { return KvDiskCompress::Zstd; }
+    throw std::invalid_argument("--kv-disk-compress must be off or zstd");
 }
 
 ReasoningEffort parse_reasoning_effort(std::string_view text) {
@@ -75,16 +109,19 @@ ReasoningEffort parse_reasoning_effort(std::string_view text) {
 std::string usage_text(const char* argv0) {
     return std::string("usage: ") + argv0 +
            " <model.ninfer> (--prompt <text>|--messages <messages.json>)\n"
-           "       [--max-context N] [--kv-capacity N|auto] [--prefill-chunk N] [--max-new N]\n"
+           "       [--max-context N] [--kv-capacity N|auto] [--kv-ram-capacity off|N] [--kv-disk-capacity off|N]\n"
+           "       [--kv-disk-location PATH] [--kv-disk-compress off|zstd] [--prefill-chunk N] [--max-new N]\n"
            "       [--device N]\n"
-           "       [--kv-dtype bf16|int8] [--spec mtp|dflash --draft-tokens N]\n"
-           "       [--lm-head-draft]\n"
+           "       [--spec mtp|dflash --draft-tokens N]\n"
+           "       [--adaptive-draft] [--dflash-verify-width N] [--lm-head-draft]\n"
            "       [--temperature F] [--top-p F] [--top-k N] [--min-p F]\n"
            "       [--presence-penalty F] [--frequency-penalty F] [--seed N] [--greedy]\n"
+           "       [--no-p-less-sampling]\n"
            "       [--stop-token-id N]... [--stop <text>]... [--reasoning-stop <text>]...\n"
            "       [--raw-output] [--print-token-ids] [--no-thinking]\n"
            "       [--reasoning-effort low|medium|xhigh] [--vision]\n"
-           "       [--no-cuda-graph]\n"
+           "       [--no-device-graph] [--capture-context-checkpoint]\n"
+           "       [--context-checkpoints off|a,b,c]\n"
            "\n"
            "Streams answer content to stdout and reasoning plus diagnostics to stderr.\n"
            "Structured message content accepts text, image/image_url, and video/video_url parts;\n"
@@ -93,8 +130,17 @@ std::string usage_text(const char* argv0) {
            "--kv-capacity auto leaves " +
            std::to_string(kDefaultKvCapacityHeadroomBytes / (1024ULL * 1024ULL)) +
            " MiB of sizing headroom.\n"
-           "Sampling defaults come from the loaded model and thinking mode; flags override "
-           "individual fields.\n";
+           "--kv-ram-capacity sets pinned host KV prefix-cache capacity in MiB (default off).\n"
+           "--kv-disk-capacity sets SSD KV prefix-cache unique-object capacity in MiB (default off).\n"
+           "--kv-disk-location is required iff --kv-disk-capacity is enabled.\n"
+           "--kv-disk-compress applies zstd-1 to new GDN/hidden/cyclic writes (default off).\n"
+           "--context-checkpoints off disables the automatic prefill ladder; a comma list "
+           "replaces the default marks and requires --spec mtp or dflash.\n"
+           "--capture-context-checkpoint pins the current resume frontier on an exact-hit "
+           "(no-op on a fresh one-shot run).\n"
+           "P-less sampling is enabled by default and uses temperature (default 2.0) and seed "
+           "only; top-p, top-k, min-p, and penalties are ignored.\n"
+           "--no-p-less-sampling opts into the registered production sampler.\n";
 }
 
 Options parse_options(int argc, char** argv) {
@@ -125,16 +171,27 @@ Options parse_options(int argc, char** argv) {
         } else if (arg == "--kv-capacity") {
             options.kv_capacity  = parse_kv_capacity(value(arg));
             kv_capacity_explicit = true;
+        } else if (arg == "--kv-ram-capacity") {
+            options.kv_ram_capacity_bytes = parse_kv_ram_capacity_bytes(value(arg));
+        } else if (arg == "--kv-disk-capacity") {
+            options.kv_disk_capacity_bytes = parse_kv_disk_capacity_bytes(value(arg));
+        } else if (arg == "--kv-disk-location") {
+            options.kv_disk_location = value(arg);
+        } else if (arg == "--kv-disk-compress") {
+            options.kv_disk_compress = parse_kv_disk_compress(value(arg));
         } else if (arg == "--prefill-chunk") {
             options.prefill_chunk = parse_u32(value(arg), "prefill-chunk");
         } else if (arg == "--device") {
             options.device = parse_device(value(arg));
-        } else if (arg == "--kv-dtype") {
-            options.kv_cache = parse_kv_cache(value(arg));
         } else if (arg == "--spec") {
             options.speculative.backend = product::parse_speculative_backend(value(arg));
         } else if (arg == "--draft-tokens") {
             options.speculative.draft_tokens = parse_u32(value(arg), "draft-tokens");
+        } else if (arg == "--adaptive-draft") {
+            options.speculative.adaptive_draft = true;
+        } else if (arg == "--dflash-verify-width") {
+            options.speculative.dflash_verify_width =
+                parse_u32(value(arg), "dflash-verify-width");
         } else if (arg == "--lm-head-draft") {
             options.speculative.proposal_head = ProposalHead::Optimized;
         } else if (arg == "--raw-output") {
@@ -147,8 +204,12 @@ Options parse_options(int argc, char** argv) {
             options.reasoning_effort = parse_reasoning_effort(value(arg));
         } else if (arg == "--vision") {
             options.enable_vision = true;
-        } else if (arg == "--no-cuda-graph") {
-            options.use_cuda_graph = false;
+        } else if (arg == "--no-device-graph") {
+            options.use_device_graph = false;
+        } else if (arg == "--capture-context-checkpoint") {
+            options.capture_context_checkpoint = true;
+        } else if (arg == "--context-checkpoints") {
+            options.context_checkpoint_marks = parse_context_checkpoint_marks_flag(value(arg));
         } else if (arg == "--stop-token-id") {
             const std::uint32_t token = parse_u32(value(arg), "stop-token-id", true);
             if (token > static_cast<std::uint32_t>(std::numeric_limits<TokenId>::max())) {
@@ -186,6 +247,8 @@ Options parse_options(int argc, char** argv) {
             options.sampling.seed = parse_u64(value(arg), "seed");
         } else if (arg == "--greedy") {
             options.greedy = true;
+        } else if (arg == "--no-p-less-sampling") {
+            options.sampling.p_less = false;
         } else {
             throw std::invalid_argument("unknown argument: " + std::string(arg));
         }
@@ -207,10 +270,9 @@ Options parse_options(int argc, char** argv) {
         options.kv_capacity.explicit_tokens < options.max_context) {
         throw std::invalid_argument("--kv-capacity must be at least --max-context");
     }
+    validate_kv_disk_options(options.kv_ram_capacity_bytes, options.kv_disk_capacity_bytes,
+                             options.kv_disk_location);
     product::validate_speculative_cli_options(options.speculative);
-    if (options.speculative.backend == SpeculativeBackend::DFlash && options.enable_vision) {
-        throw std::invalid_argument("--spec dflash cannot be combined with --vision");
-    }
     if (!options.enable_thinking && options.reasoning_effort) {
         throw std::invalid_argument("--reasoning-effort cannot be combined with --no-thinking");
     }

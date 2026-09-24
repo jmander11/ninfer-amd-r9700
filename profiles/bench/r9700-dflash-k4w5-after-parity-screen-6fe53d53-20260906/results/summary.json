@@ -1,0 +1,61 @@
+{
+  "artifact_type": "ninfer_r9700_dflash_k4w5_after_parity_screen_evidence",
+  "schema_version": 1,
+  "status": "valid_directional_screen",
+  "timing_evidence_eligible": true,
+  "production_routing_authorized": false,
+  "production_recipe_selected": false,
+  "source_commit": "6fe53d531072dfd6069b951b64006603ef976ad9",
+  "base_decode": {
+    "total_seconds_mean": 1.683029069,
+    "total_seconds_stddev": 0.001328158819,
+    "whole_output_tok_s_mean": 16.63667737,
+    "whole_output_tok_s_stddev": 0.01312593174,
+    "decode_output_tok_s_mean": 18.07380127,
+    "prefill_tok_s_mean": 683.9610124
+  },
+  "dflash_k4w5": {
+    "total_seconds_mean": 1.317772846,
+    "total_seconds_stddev": 0.001247397189,
+    "whole_output_tok_s_mean": 21.24798429,
+    "whole_output_tok_s_stddev": 0.02011590789,
+    "decode_output_tok_s_mean": 23.97843736,
+    "prefill_tok_s_mean": 673.9108173
+  },
+  "base_decode_total_seconds_mean": 1.683029069,
+  "dflash_k4w5_total_seconds_mean": 1.317772846,
+  "dflash_over_base_ratio": 0.7829768779828484,
+  "dflash_wins": true,
+  "material_win": true,
+  "base_decode_tok_s_reference": 27.05729956,
+  "break_even_ms_per_round": 57.6915,
+  "reports": {
+    "base-decode": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-k4w5-after-parity-screen-6fe53d53-20260906/results/base-decode.json",
+      "bytes": 7929,
+      "sha256": "59c3e706dca666333f9e61f7bd53c203cb9c732221231c63934b496ae4c899db"
+    },
+    "dflash-k4w5": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-k4w5-after-parity-screen-6fe53d53-20260906/results/dflash-k4w5.json",
+      "bytes": 8068,
+      "sha256": "0a84f473830450852ef2dc0801e3be592883f75dd753888d7813a4e6bf4ab581"
+    }
+  },
+  "processes": {
+    "base-decode": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-k4w5-after-parity-screen-6fe53d53-20260906/results/base-decode.process.json",
+      "bytes": 1630,
+      "sha256": "4fcf53ff1a62579bd08beaba0fa35b684b7dbc2bc03b2fbde4b2d249becc451a"
+    },
+    "dflash-k4w5": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-k4w5-after-parity-screen-6fe53d53-20260906/results/dflash-k4w5.process.json",
+      "bytes": 1671,
+      "sha256": "5b4519784f06b8ecfd97639d0281f85d1cb9786ae60088cd74b7690f5b087b6b"
+    }
+  },
+  "limitations": [
+    "directional screen only; not production admission",
+    "C1/P129+G27 only; no C2..4, longer generation, capacity, chunk, or profiling",
+    "eager decode (no device graph); order-stability required for the win claim"
+  ]
+}

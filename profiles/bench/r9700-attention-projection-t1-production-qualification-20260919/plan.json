@@ -1,0 +1,27 @@
+{
+  "schema": "ninfer.r9700.attention-projection-t1-production-plan.v1",
+  "status": "reviewed_ready",
+  "production_routing_authorized": false,
+  "claim": "Direct production-symbol qualification of the exact all-Q4 T1 full-attention paired projection before whole-inference A/B.",
+  "bound_inputs": [
+    {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/attention_projection_t1_op_qual.hip","bytes":97,"sha256":"8c59944abbadc44ff3e2d2d55535d913d4ea7410cc6a2c693fac6b4798e61b35"},
+    {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/a8q4_attention_pair_t1_qual.hip","bytes":37148,"sha256":"20c75e1d8e4e08e4283a8651d92f1737c16b342aa35a329b7cf322fb5c619ce1"},
+    {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/a8q4_shape_sweep_qual.hip","bytes":97355,"sha256":"b8f85a76b2f431ba4ea50fb0e3f28ece55a5501c69197e978df9516c98506be2"},
+    {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/check_attention_projection_t1_op_static.py","bytes":3623,"sha256":"42b4b4b331c06b725a5c745682020b83c90b5fc826fdc67ebe31831af966f490"},
+    {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/include/ninfer/ops/attention_projection.h","bytes":2007,"sha256":"2e2bf5a984025c21614488fbdbdd912a653506606261e0b477020a76ba745fd3"},
+    {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/attention_projection/attention_projection.h","bytes":1238,"sha256":"25cecc328d3408abe0a4dc08d7d11e12d743224f9383e28226246b1d2dd6d8fc"},
+    {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/attention_projection/attention_projection.hip","bytes":13136,"sha256":"f37a9f1c8750a91187f82b08b71c4bf9a748c7e519f529b249428d7665639ad0"},
+    {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/linear/r9700_linear.hip","bytes":192174,"sha256":"5d28cce1938b7bae7ba5dc236813be3394bdadbb60585f5db0c4f687ce2e1b49"},
+    {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-attention-projection-t1-production-qualification-20260919/commands.sh","bytes":1797,"sha256":"25457d220ab9bb695ba16d03f23ee69737d57ce1c18e9239ee94c97707f75797"},
+    {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-attention-projection-t1-production-qualification-20260919/preflight.py","bytes":4981,"sha256":"c7de24782ebd9a2efbe781f864b55be45fc683f1c485aad52f9d3caccd9a8323"}
+  ],
+  "domain": {"tokens":1,"columns":5120,"matrix_rows":[7168,7168],"outputs":[6144,1024,6144,1024],"qtype":"Q4G64_F16S","layout":"Q4N16K16","group":64,"scale_dtype":"FP16"},
+  "correctness": {"oracle":"independent represented-weight FP64","criterion":"maximum 2 BF16 steps and bit-exact to two serial production linears plus four extracts","guards":["canary","nonfinite status poison","malformed extent","alignment","alias"]},
+  "timing": {"arms":["two complete serial production linears plus four extracts","quantize-once production direct scatter"],"trials_per_arm":12,"disjoint_weight_copies":3,"allocation_and_order_balanced":true},
+  "static": {"architecture":"gfx1201","native_mixed_iu4_dot8":true,"wave_size":32,"vgpr":20,"sgpr":24,"lds_bytes":0,"scratch_bytes":0,"spill_count":0},
+  "exact_invocation": {
+    "preflight": "bash profiles/bench/r9700-attention-projection-t1-production-qualification-20260919/commands.sh --preflight",
+    "measure": "bash profiles/bench/r9700-attention-projection-t1-production-qualification-20260919/commands.sh --measure"
+  },
+  "output": {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-attention-projection-t1-production-qualification-20260919/qualification.json","create_only":true}
+}

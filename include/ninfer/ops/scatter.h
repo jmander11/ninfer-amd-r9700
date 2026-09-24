@@ -2,7 +2,7 @@
 
 #include "core/tensor.h"
 
-#include <cuda_runtime.h>
+#include <hip/hip_runtime_api.h>
 
 namespace ninfer::ops {
 
@@ -30,7 +30,7 @@ namespace ninfer::ops {
  *   D divisible by eight with 16-byte-aligned source/destination uses BF16x8 copies; other aligned
  *   even D uses BF16x2; remaining contiguous dimensions use scalar copies.
  */
-void scatter(const Tensor& src, const Tensor& indices, Tensor& dst, cudaStream_t stream);
+void scatter(const Tensor& src, const Tensor& indices, Tensor& dst, hipStream_t stream);
 
 /**
  * Scatter compact request-major BF16 blocks into lane-owned fixed storage.
@@ -45,7 +45,21 @@ void scatter(const Tensor& src, const Tensor& indices, Tensor& dst, cudaStream_t
  * 16-byte aligned. Inputs and destination do not alias.
  */
 void scatter_bf16_batch(const Tensor& source, const Tensor& lanes, const Tensor& valid_columns,
-                        Tensor& destination, cudaStream_t stream);
+                        Tensor& destination, hipStream_t stream);
+
+/**
+ * Gather packed-tree feature columns onto a sequential prefix in lane-owned storage.
+ *
+ * features is contiguous [D,W,C], path is [W,B], lanes and counts are I32 [B]. D is divisible by
+ * eight. For each b and i < counts[b]:
+ *
+ *   features[:, i, lanes[b]] = features[:, path[i,b], lanes[b]]
+ *
+ * path[i,b] is in [0,W) and path is strictly increasing, so the copy is safe in increasing i.
+ * Columns i >= counts[b] are unchanged.
+ */
+void gather_bf16_path(Tensor& features, const Tensor& lanes, const Tensor& path,
+                      const Tensor& counts, hipStream_t stream);
 
 /**
  * Op: extract_bf16_columns
@@ -69,6 +83,6 @@ void scatter_bf16_batch(const Tensor& source, const Tensor& lanes, const Tensor&
  *   None. The Op has no persistent state side effect.
  */
 void extract_bf16_columns(const Tensor& source, std::int32_t source_column, Tensor& destination,
-                          cudaStream_t stream);
+                          hipStream_t stream);
 
 } // namespace ninfer::ops

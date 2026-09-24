@@ -1,0 +1,17 @@
+ba3950543779f637107b06d45387fc3a124179e435e08deca7e41781c260259f  profiles/bench/r9700-a8q4-projected-residual-t1-design-retry-20260920/attempt-1/closure.json
+550880b3190548903e16f1eb95518aac135de1e95b6dba32b70d7ad12a1027f8  profiles/bench/r9700-a8q4-projected-residual-t1-design-retry-20260920/attempt-1/compile-receipt.json
+158c08691b2cf9604cea5652b80790577b5e56830bb2d07b44bc663a17768d8b  profiles/bench/r9700-a8q4-projected-residual-t1-design-retry-20260920/attempt-1/device-compile.process.json
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  profiles/bench/r9700-a8q4-projected-residual-t1-design-retry-20260920/attempt-1/device-compile.stderr
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  profiles/bench/r9700-a8q4-projected-residual-t1-design-retry-20260920/attempt-1/device-compile.stdout
+d578facd3fc823a9094bd50d0110ce7845bcf567f8eddbee0c0fa053537a43e0  profiles/bench/r9700-a8q4-projected-residual-t1-design-retry-20260920/attempt-1/host-compile.process.json
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  profiles/bench/r9700-a8q4-projected-residual-t1-design-retry-20260920/attempt-1/host-compile.stderr
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  profiles/bench/r9700-a8q4-projected-residual-t1-design-retry-20260920/attempt-1/host-compile.stdout
+93c749a745180265f5b5884ee07c5a5a74ad1ed71061bc1faa96647b0949e2e2  profiles/bench/r9700-a8q4-projected-residual-t1-design-retry-20260920/attempt-1/qual
+2f2bffcde8a3e1b3a8177e81d8f42de2e7c3f60226705c23770b9735ffd826e9  profiles/bench/r9700-a8q4-projected-residual-t1-design-retry-20260920/attempt-1/qual.s
+a5f508d34d95b55817da458c4757d4a1c4a92b8ce56be72f82244556660ca5db  profiles/bench/r9700-a8q4-projected-residual-t1-design-retry-20260920/attempt-1/qualification.json
+1feb4bd1505d7af11fbe2ed80bc6c57d6e769204496abf9b48f7e4ef13fe2d19  profiles/bench/r9700-a8q4-projected-residual-t1-design-retry-20260920/attempt-1/qualifier.process.json
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  profiles/bench/r9700-a8q4-projected-residual-t1-design-retry-20260920/attempt-1/qualifier.stderr
+8c207c27a55f0f2a3b84de3243d9bb78082ddd36387653465789f17cc152e5e4  profiles/bench/r9700-a8q4-projected-residual-t1-design-retry-20260920/attempt-1/qualifier.stdout
+ed9ab2fcef823c005544671df6645c4e6e41a0757a3b5e6267753cc37b807e96  profiles/bench/r9700-a8q4-projected-residual-t1-design-retry-20260920/attempt-1/static-check.process.json
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  profiles/bench/r9700-a8q4-projected-residual-t1-design-retry-20260920/attempt-1/static-check.stderr
+204085883c2e3a5a44b25c69a17be2f7480a50616934010936e854ed526cc747  profiles/bench/r9700-a8q4-projected-residual-t1-design-retry-20260920/attempt-1/static-receipt.txt

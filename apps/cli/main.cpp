@@ -1,11 +1,14 @@
 #include "options.h"
+#include "product/context_checkpoint_format.h"
 #include "product/load_progress/load_progress.h"
 #include "product/prompt_input/prompt_input.h"
 
 #include "ninfer/engine.h"
+#include <nlohmann/json.hpp>
 
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <exception>
 #include <iomanip>
 #include <iostream>
@@ -16,6 +19,12 @@
 namespace {
 
 using Clock = std::chrono::steady_clock;
+
+std::string format_ms(double seconds) {
+    std::ostringstream output;
+    output << std::fixed << std::setprecision(0) << seconds * 1000.0 << "ms";
+    return output.str();
+}
 
 std::string format_seconds(double seconds) {
     std::ostringstream output;
@@ -56,6 +65,24 @@ std::string format_bytes(std::uint64_t bytes) {
     return output.str();
 }
 
+bool kv_ram_log_exact_bytes() {
+    const char* text = std::getenv("NINFER_KV_RAM_LOG_BYTES");
+    return text != nullptr && text[0] != '\0' && text[0] != '0';
+}
+
+std::string format_kv_ram_size(std::uint64_t bytes) {
+    if (kv_ram_log_exact_bytes()) { return std::to_string(bytes) + " B"; }
+    constexpr std::uint64_t kMiB = 1024ULL * 1024ULL;
+    std::ostringstream output;
+    if (bytes % kMiB == 0) {
+        output << (bytes / kMiB) << " MiB";
+    } else {
+        output << std::fixed << std::setprecision(1)
+               << static_cast<double>(bytes) / static_cast<double>(kMiB) << " MiB";
+    }
+    return output.str();
+}
+
 std::string format_arena_used(const ninfer::ArenaMemorySummary& arena) {
     return format_bytes(arena.used_bytes) + " / " + format_bytes(arena.capacity_bytes);
 }
@@ -67,7 +94,12 @@ std::string format_arena_peak(const ninfer::ArenaMemorySummary& arena) {
 std::string format_sampling(const ninfer::ResolvedSamplingParameters& sampling) {
     if (sampling.temperature <= 0.0F) { return "greedy (temperature 0)"; }
     std::ostringstream output;
-    output << std::fixed << std::setprecision(2) << "temp=" << sampling.temperature
+    output << std::fixed << std::setprecision(2);
+    if (sampling.p_less) {
+        output << "p-less temp=" << sampling.temperature << " seed=" << sampling.seed;
+        return output.str();
+    }
+    output << "temp=" << sampling.temperature
            << " top_p=" << sampling.top_p << " top_k=" << sampling.top_k
            << " min_p=" << sampling.min_p << " presence=" << sampling.presence_penalty
            << " freq=" << sampling.frequency_penalty << " seed=" << sampling.seed;
@@ -92,12 +124,46 @@ std::string format_finish(ninfer::FinishReason reason) {
     return "unknown";
 }
 
-std::string format_kv_cache(ninfer::KvCacheStorage storage) {
-    return storage == ninfer::KvCacheStorage::BFloat16 ? "bf16" : "int8-group64";
-}
-
 std::string format_kv_capacity_mode(ninfer::KvCapacityMode mode) {
     return mode == ninfer::KvCapacityMode::Automatic ? "auto" : "explicit";
+}
+
+std::string format_prefix_reuse_path(ninfer::PrefixReusePath path) {
+    switch (path) {
+    case ninfer::PrefixReusePath::FullReset:
+        return "full_reset";
+    case ninfer::PrefixReusePath::AppendAtFrontier:
+        return "append_frontier";
+    case ninfer::PrefixReusePath::RestoreTurnCheckpoint:
+        return "restore_turn_checkpoint";
+    case ninfer::PrefixReusePath::RestoreResponseCheckpoint:
+        return "restore_response_checkpoint";
+    case ninfer::PrefixReusePath::RestoreContextCheckpoint:
+        return "restore_context_checkpoint";
+    case ninfer::PrefixReusePath::RestoreTurnRollback:
+        return "restore_turn_rollback";
+    }
+    return "unknown";
+}
+
+std::string format_prefix_reuse_source(ninfer::PrefixReuseSource source) {
+    switch (source) {
+    case ninfer::PrefixReuseSource::None:
+        return "none";
+    case ninfer::PrefixReuseSource::VramResident:
+        return "vram_resident";
+    case ninfer::PrefixReuseSource::HostRam:
+        return "host_ram";
+    case ninfer::PrefixReuseSource::HostDisk:
+        return "host_disk";
+    }
+    return "unknown";
+}
+
+std::string format_context_checkpoint(const ninfer::GenerationResult& result) {
+    return ninfer::product::format_context_checkpoint_frontiers(
+        result.restored_context_checkpoint_tokens, result.captured_context_checkpoint_tokens, ' ',
+        "none");
 }
 
 void print_stage(std::string_view group, std::string_view detail, double seconds) {
@@ -153,21 +219,31 @@ void print_load_summary(const ninfer::LoadSummary& load, double wall_seconds) {
 
 void print_generation_summary(const ninfer::GenerationResult& result,
                               const ninfer::ResolvedSamplingParameters& sampling,
-                              const ninfer::MemorySummary& memory) {
+                              const ninfer::MemorySummary& memory,
+                              const ninfer::RuntimeStats& stats) {
     print_stage("prepare", "render/preprocess", result.timings.prepare_seconds);
     print_stage("generate", "vision", result.timings.vision_seconds);
     print_stage("generate", "text prefill", result.timings.prefill_seconds);
     print_stage("generate", "decode", result.timings.decode_seconds);
+    if (result.recovery.attempts != 0) {
+        print_stage("recovery", "prepare", result.recovery.prepare_seconds);
+        print_stage("recovery", "text prefill", result.recovery.prefill_seconds);
+        print_metric("recovery attempts", std::to_string(result.recovery.attempts));
+    }
     print_stage("generate", "total", result.timings.total_seconds);
 
     const std::size_t generated = result.generated_token_ids.size();
-    const std::size_t decoded   = generated == 0 ? 0 : generated - 1;
+    const std::size_t prefill_samples = 1 + result.recovery.prefill_samples;
+    const std::size_t decoded = generated > prefill_samples ? generated - prefill_samples : 0;
     const double model_seconds  = result.timings.vision_seconds + result.timings.prefill_seconds +
-                                 result.timings.decode_seconds;
+                                 result.timings.decode_seconds + result.recovery.prefill_seconds;
     print_metric("sampling", format_sampling(sampling));
     print_metric("finish reason", format_finish(result.finish_reason));
     print_metric("prompt tokens", std::to_string(result.prompt.prompt_tokens));
     print_metric("reused prompt tokens", std::to_string(result.reused_prompt_tokens));
+    print_metric("prefix reuse path", format_prefix_reuse_path(result.prefix_reuse_path));
+    print_metric("prefix reuse source", format_prefix_reuse_source(result.prefix_reuse_source));
+    print_metric("context checkpoint", format_context_checkpoint(result));
     print_metric("generated tokens", std::to_string(generated));
     print_metric("model elapsed", format_seconds(model_seconds));
     print_metric("prefill speed", format_rate(static_cast<double>(result.prompt.prompt_tokens),
@@ -187,16 +263,45 @@ void print_generation_summary(const ninfer::GenerationResult& result,
                                        std::to_string(memory.kv_capacity_max_page_groups));
     print_metric("gpu weights used", format_arena_used(memory.weights));
     print_metric("gpu sequence used", format_arena_used(memory.sequence));
-    print_metric("kv cache dtype", format_kv_cache(memory.kv_cache));
+    print_metric("kv cache format", "fp8-k/int4-v");
     print_metric("kv cache payload", format_bytes(memory.kv_payload_bytes));
+    print_metric("KV RAM capacity", memory.kv_ram_capacity_bytes == 0
+                                        ? "off"
+                                        : format_kv_ram_size(memory.kv_ram_capacity_bytes));
+    print_metric("KV RAM used", memory.kv_ram_capacity_bytes == 0
+                                    ? "off"
+                                    : format_kv_ram_size(memory.kv_ram_used_bytes) + " / " +
+                                          std::to_string(memory.kv_ram_entry_count) + " entries");
+    print_metric("KV RAM events",
+                 "captures=" + std::to_string(stats.kv_ram_captures) +
+                     " restores=" + std::to_string(stats.kv_ram_restores) +
+                     " evicts=" + std::to_string(stats.kv_ram_evictions) +
+                     " drops=" + std::to_string(stats.kv_ram_drops) +
+                     " save=" + format_ms(result.kv_ram_save_seconds) +
+                     " load=" + format_ms(result.kv_ram_load_seconds));
+    print_metric("KV disk capacity", memory.kv_disk_capacity_bytes == 0
+                                         ? "off"
+                                         : format_kv_ram_size(memory.kv_disk_capacity_bytes));
+    print_metric("KV disk used", memory.kv_disk_capacity_bytes == 0
+                                     ? "off"
+                                     : format_kv_ram_size(memory.kv_disk_used_bytes) + " / " +
+                                           std::to_string(memory.kv_disk_entry_count) + " entries");
+    print_metric("KV disk events",
+                 "captures=" + std::to_string(stats.kv_disk_captures) +
+                     " restores=" + std::to_string(stats.kv_disk_restores) +
+                     " evicts=" + std::to_string(stats.kv_disk_evictions) +
+                     " drops=" + std::to_string(stats.kv_disk_drops) +
+                     " save=" + format_ms(result.kv_disk_save_seconds) +
+                     " load=" + format_ms(result.kv_disk_load_seconds) +
+                     " h2d=" + format_ms(result.kv_disk_h2d_seconds));
     print_metric("gpu workspace peak", format_arena_peak(memory.workspace));
     print_metric("runtime reservation", format_bytes(memory.runtime_reservation_bytes));
     print_metric("free after weights", format_bytes(memory.available_after_weights_bytes));
     print_metric("free after startup", format_bytes(memory.available_after_startup_bytes));
     print_metric("KV capacity headroom", format_bytes(memory.kv_capacity_headroom_bytes));
     print_metric("planned slack", format_bytes(memory.planned_slack_bytes));
-    print_metric("CUDA Graph memory", format_bytes(memory.cuda_graph_observed_bytes) + " / " +
-                                          format_bytes(memory.cuda_graph_allowance_bytes));
+    print_metric("Device Graph memory", format_bytes(memory.device_graph_observed_bytes) + " / " +
+                                            format_bytes(memory.device_graph_allowance_bytes));
     print_metric("planned device total", format_bytes(reserved));
 
     const ninfer::SpeculativeStats& speculative = result.speculative;
@@ -239,6 +344,10 @@ int main(int argc, char** argv) {
             return 0;
         }
 
+        if (cli.sampling.p_less) {
+            std::cerr << ninfer::kPLessSamplingIgnoredParamsWarning << '\n';
+        }
+
         ninfer::PromptInput input =
             cli.messages_path.empty()
                 ? ninfer::product::prompt_from_text(cli.prompt, cli.enable_thinking)
@@ -249,6 +358,7 @@ int main(int argc, char** argv) {
         ninfer::RequestOptions request;
         request.execution.sampling                = cli.sampling;
         request.execution.requested_output_tokens = cli.max_new;
+        request.execution.capture_context_checkpoint = cli.capture_context_checkpoint;
         request.stop.token_ids                    = cli.stop_token_ids;
         request.stop.strings                      = cli.stop_strings;
         request.output.raw                        = cli.raw_output;
@@ -261,11 +371,15 @@ int main(int argc, char** argv) {
         engine_options.device         = cli.device;
         engine_options.max_context    = cli.max_context;
         engine_options.kv_capacity    = cli.kv_capacity;
+        engine_options.kv_ram_capacity_bytes = cli.kv_ram_capacity_bytes;
+        engine_options.kv_disk_capacity_bytes = cli.kv_disk_capacity_bytes;
+        engine_options.kv_disk_location = cli.kv_disk_location;
+        engine_options.kv_disk_compress = cli.kv_disk_compress;
+        engine_options.context_checkpoint_marks = cli.context_checkpoint_marks;
         engine_options.prefill_chunk  = cli.prefill_chunk;
-        engine_options.kv_cache       = cli.kv_cache;
         engine_options.speculative    = cli.speculative;
         engine_options.enable_vision  = cli.enable_vision;
-        engine_options.use_cuda_graph = cli.use_cuda_graph;
+        engine_options.use_device_graph = cli.use_device_graph;
         engine_options.load_progress  = load_progress.callback();
 
         const auto load_started = Clock::now();
@@ -277,10 +391,20 @@ int main(int argc, char** argv) {
         ninfer::PreparedPrompt prompt = engine.prepare(std::move(input));
 
         StreamingSink sink;
-        ninfer::GenerationHandle generation = engine.submit(std::move(prompt), std::move(request));
+        ninfer::GenerationHandle generation = engine.submit(
+            std::move(prompt), std::move(request), ninfer::OutputDelivery::Streaming);
         const ninfer::ResolvedSamplingParameters sampling = generation.resolved_sampling();
         const ninfer::GenerationResult result             = generation.wait(&sink);
         sink.finish_streams();
+        if (!result.tool_calls.empty()) {
+            auto calls = nlohmann::ordered_json::array();
+            for (const auto& call : result.tool_calls) {
+                calls.push_back({{"id", call.id}, {"type", "function"},
+                                 {"function", {{"name", call.name},
+                                               {"arguments", call.arguments_json}}}});
+            }
+            std::cout << nlohmann::ordered_json{{"tool_calls", std::move(calls)}}.dump() << '\n';
+        }
 
         if (cli.print_token_ids) {
             std::cerr << std::left << std::setw(12) << "tokens" << std::setw(26) << "generated ids";
@@ -290,7 +414,8 @@ int main(int argc, char** argv) {
             }
             std::cerr << '\n';
         }
-        print_generation_summary(result, sampling, engine.memory_summary());
+        print_generation_summary(result, sampling, engine.memory_summary(),
+                                 engine.runtime_stats());
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "error: " << error.what() << '\n';

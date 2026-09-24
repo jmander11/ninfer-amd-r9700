@@ -4,7 +4,7 @@
 #include "core/cyclic_kv_cache.h"
 #include "core/tensor.h"
 
-#include <cuda_runtime.h>
+#include <hip/hip_runtime_api.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -25,34 +25,37 @@ struct SwaContextExecutionEnvelope {
 /**
  * Op: symmetric non-causal sliding-window grouped-query attention
  *
- * The fixed optimized geometry is D=128, Hq=32, Hkv=8, group=4, and window W=4096.
- * q/out are contiguous BF16 [128,32,W,B], query_k/query_v are contiguous BF16 [128,8,W,B],
- * positions is contiguous device I32 [W,B], valid_columns and lanes are contiguous device I32
- * [B]. Row b has V=valid_columns[b] live query columns with positions[i,b]=L[b]+i for i<V;
- * lanes[b] selects its cyclic-cache lane. Columns i>=V are an inert physical tail and produce
+ * The fixed optimized geometry is D=128, Hq=32, Hkv=8, group=4, and two closed windows W=2048
+ * and W=4096. swa() selects W from context.capacity; both are power-of-two cyclic capacities of
+ * the same Op. q/out are contiguous BF16 [128,32,T,B], query_k/query_v are contiguous BF16
+ * [128,8,T,B], positions is contiguous device I32 [T,B], valid_columns and lanes are contiguous
+ * device I32 [B]. Row b has V=valid_columns[b] live query columns with positions[i,b]=L[b]+i for
+ * i<V; lanes[b] selects its cyclic-cache lane. Columns i>=V are an inert physical tail and produce
  * zero output.
  *
- * The read-only cyclic context contains committed absolute positions [max(0,L-4096),L), with
- * absolute position p stored at physical slot p mod 4096. Query K/V is a separate temporary
+ * The read-only cyclic context contains committed absolute positions [max(0,L-W),L), with
+ * absolute position p stored at physical slot p mod W. Query K/V is a separate temporary
  * segment at positions [L,L+V). For every live query position p_i, admitted populated keys satisfy
- * abs(p_j-p_i)<4096. Thus distance 4095 is included, distance 4096 is excluded, and every query
+ * abs(p_j-p_i)<W. Thus distance W-1 is included, distance W is excluded, and every query
  * row sees every live temporary query row from the same batch row. scale is 1/sqrt(128).
  *
  * Context and query K/V are unchanged. out is the only observable mutation and is completely
- * overwritten. The current optimized implementation domain is T=1..16 on sm_120a.
+ * overwritten. The R9700 implementation domain is T=1..16 on gfx1201 wave32.
  *
- * The caller guarantees min_context <= L <= max_context, sequential nonnegative positions, and
- * that the cyclic context contains the declared live interval. The execution envelope may affect
- * finite launch selection and workspace capacity, never the admitted key set.
+ * The registered request-batch domain is B=1..4. The caller guarantees min_context <= L <=
+ * max_context, sequential nonnegative positions, and that the cyclic context contains the
+ * declared live interval. The envelope is checked in the device route without a host read and
+ * never changes the admitted key set.
  */
 void swa(const Tensor& q, const Tensor& query_k, const Tensor& query_v, const Tensor& positions,
          const Tensor& valid_columns, const Tensor& lanes, float scale,
          const CyclicKVCacheLayerView& context, SwaContextExecutionEnvelope envelope,
-         WorkspaceArena& workspace, Tensor& out, cudaStream_t stream);
+         WorkspaceArena& workspace, Tensor& out, hipStream_t stream);
 
 /**
- * Returns the transient arena capacity required for every T in the inclusive optimized interval.
- * The execution envelope is the fixed profile; invalid profiles or intervals throw.
+ * Short fixed envelopes use a workspace-free wave32 score-streaming route. Longer envelopes use
+ * caller-owned split-KV partial accumulators and statistics sized by this function. Invalid
+ * profiles or intervals throw.
  */
 [[nodiscard]] std::size_t swa_workspace_capacity_bytes(SwaContextExecutionEnvelope envelope,
                                                        std::int32_t min_tokens,

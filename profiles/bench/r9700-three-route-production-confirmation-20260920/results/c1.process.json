@@ -1,0 +1,88 @@
+{
+  "concurrency": 1,
+  "command": [
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-three-route-production-20260920/bench/ninfer_bench",
+    "--weights",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer",
+    "--corpus",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids",
+    "--device",
+    "0",
+    "--concurrency",
+    "1",
+    "--whole-pg",
+    "8192,256",
+    "--prefill-chunk",
+    "4096",
+    "--kv-capacity",
+    "workload",
+    "--spec",
+    "mtp",
+    "--draft-tokens",
+    "0",
+    "--retain-token-ids",
+    "--output",
+    "json",
+    "--output-file",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-three-route-production-confirmation-20260920/results/c1.json",
+    "-r",
+    "1",
+    "--warmup",
+    "1"
+  ],
+  "cwd": "/ssdpool2nvme/local_llm/ninfer-amd-r9700",
+  "executable": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-three-route-production-20260920/bench/ninfer_bench",
+    "bytes": 5409024,
+    "sha256": "ca5a2cc7c8ac8de573552dc06abb44df25208b26a86bb17b9a92eac89df320ff"
+  },
+  "started_unix_ns": 1789955668114427997,
+  "before": {
+    "pci": "0000:13:00.0",
+    "power": "auto",
+    "used_bytes": 59912192,
+    "total_bytes": 34208743424,
+    "device_vendor": "0x1002",
+    "device_id": "0x7551",
+    "low_vram": true
+  },
+  "exit_code": 0,
+  "finished_unix_ns": 1789955767230613832,
+  "drain_samples": [
+    {
+      "elapsed_seconds": 0.0005321609787642956,
+      "pci": "0000:13:00.0",
+      "power": "auto",
+      "used_bytes": 14536429568,
+      "total_bytes": 34208743424,
+      "device_vendor": "0x1002",
+      "device_id": "0x7551",
+      "low_vram": false
+    },
+    {
+      "elapsed_seconds": 0.10081609094049782,
+      "pci": "0000:13:00.0",
+      "power": "auto",
+      "used_bytes": 59912192,
+      "total_bytes": 34208743424,
+      "device_vendor": "0x1002",
+      "device_id": "0x7551",
+      "low_vram": true
+    }
+  ],
+  "stdout": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-three-route-production-confirmation-20260920/results/c1.stdout",
+    "bytes": 129,
+    "sha256": "aa4e6c305c59a526a6d64b1d47140f30956c75dc3eb54749fc15464e84b7e916"
+  },
+  "stderr": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-three-route-production-confirmation-20260920/results/c1.stderr",
+    "bytes": 229,
+    "sha256": "50942399b1606b484818fa248fcb24c3013495c90f99a40e74971c85ad38eadb"
+  },
+  "report": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-three-route-production-confirmation-20260920/results/c1.json",
+    "bytes": 7316,
+    "sha256": "da2b66887e0deb70535a701dddb486199cede272807da6a8fb8f6a50078808ce"
+  }
+}

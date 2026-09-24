@@ -1,0 +1,243 @@
+{
+  "artifact_type": "ninfer_qwen3_layer1_gdn_detail_trace_evidence",
+  "schema_version": 1,
+  "status": "valid_functional_localization",
+  "timing_evidence_eligible": false,
+  "production_routing_authorized": false,
+  "source_commit": "e915a5e45a51c07784b36aede8650352bfe5e374",
+  "authorities": {
+    "plan": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/plan.json",
+      "bytes": 4929,
+      "sha256": "a680bcd7dc3e78dc3ee94dc4e08cbf4642dd85d35348e54943f8497933aff989"
+    },
+    "build_provenance": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/build-provenance.json",
+      "bytes": 4284,
+      "sha256": "38f7f3e7532833fa3c011eae93d9551aefbab7e8d59739e88ade7640bdf34f9a"
+    },
+    "prepared_closure": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/prepared.sha256",
+      "bytes": 894,
+      "sha256": "16ebfd956a87aaabfd02a99a180b505ac354894da3e54edb4872c4cc2b627b12"
+    },
+    "comparator": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700-layer1-gdn-src-e915a5e4/tools/bench/compare_qwen3_layer_boundary_trace.py",
+      "bytes": 14417,
+      "sha256": "4c2a01402b10cece650acd42e49e2be7c4019a55ffb7a8380aa1558ed08c5aaf"
+    }
+  },
+  "selectors": {
+    "dflash_small_t_candidate": false,
+    "dflash_mlp_down_t5_candidate": true,
+    "dflash_rmsnorm_rows56_candidate": true,
+    "ordinary_w1_uses_rows56_or_t5_candidates": false
+  },
+  "claim": "eager-only functional layer1 GDN localization; all captured timings are ineligible",
+  "reports": {
+    "target-ordinary": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/results/target-ordinary.json",
+      "bytes": 5731,
+      "sha256": "bc7bb33677efd51f7dff08f97de96e7374cfa3f6cb2e82d438e53f98c0a00267"
+    },
+    "target-dflash": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/results/target-dflash.json",
+      "bytes": 5818,
+      "sha256": "35bd5f6ea4cc72661b21388f23511ccb99c073b3e4bf1f590e5d350b0de887af"
+    },
+    "text-fresh": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/results/text-fresh.json",
+      "bytes": 5731,
+      "sha256": "9cf73f49f81b86408ad3483b48b311fb79d5e3caf45e98e6ed4e134698c9d3c7"
+    },
+    "text-append": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/results/text-append.json",
+      "bytes": 5614,
+      "sha256": "e432f98ccb4528a662366b063276eef4fa0c7472a558b895e3b97a6cfb95b670"
+    }
+  },
+  "processes": {
+    "target-ordinary": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/results/target-ordinary.process.json",
+      "bytes": 2365,
+      "sha256": "7d0a28a5cee6bc1d57de08aec62986efdef767434d46c6e3b5e5057319e028fb"
+    },
+    "target-dflash": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/results/target-dflash.process.json",
+      "bytes": 2448,
+      "sha256": "570104e73c1847a732bbf55c2d4c04aabcc175363b04ed58afdd3a04d1ba13d0"
+    },
+    "text-fresh": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/results/text-fresh.process.json",
+      "bytes": 2340,
+      "sha256": "1619609bfeab1377a40b3c238b8c812073c4abd4fe389c1d4aa051ee126fcb32"
+    },
+    "text-append": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/results/text-append.process.json",
+      "bytes": 2318,
+      "sha256": "e1195803366a5040a984dfd6ba60ca6bbbea007f968f2c14b568630ab5b2e814"
+    }
+  },
+  "tokens": {
+    "target-ordinary": [
+      96558,
+      96917
+    ],
+    "target-dflash": [
+      96558,
+      96917
+    ],
+    "text-fresh": [
+      96558,
+      96917
+    ],
+    "text-append": [
+      96558,
+      96917
+    ]
+  },
+  "layer_manifests": {
+    "target-ordinary": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/results/target-ordinary.trace.json",
+      "bytes": 784,
+      "sha256": "546914d27568430364daaffbc7dd06c02864d9ba0231086bfecca5a97f7a9ffb"
+    },
+    "target-dflash": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/results/target-dflash.trace.json",
+      "bytes": 788,
+      "sha256": "63cc84b2fe8468c1953d7367980640b3b6490077713eb4dc62ce2ef82552ab6e"
+    },
+    "text-fresh": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/results/text-fresh.trace.json",
+      "bytes": 788,
+      "sha256": "63e87870ef0e8e3ad5616fab08bfd8a92658f0d1ff33ba01d34774d87df4e8fb"
+    },
+    "text-append": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/results/text-append.trace.json",
+      "bytes": 784,
+      "sha256": "63419ba3f8547b0888d1fe73d1b7079a4d2e763a15c9535471937c8c75d19439"
+    }
+  },
+  "layer_sidecars": {
+    "target-ordinary": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/results/target-ordinary.trace.bin",
+      "bytes": 1320960,
+      "sha256": "54ea35495385ecb06edeff5b5f93b959935eaaa7fe3c133f8decc2042504e1e3"
+    },
+    "target-dflash": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/results/target-dflash.trace.bin",
+      "bytes": 1320960,
+      "sha256": "d48daf590732929a00474714334c10913afb7be53eda8219d18aa7eee0eec16e"
+    },
+    "text-fresh": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/results/text-fresh.trace.bin",
+      "bytes": 1320960,
+      "sha256": "79c020efee91a2124d391c6b6c18fc6d4403267ef1dec68da59f7950980ec23b"
+    },
+    "text-append": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/results/text-append.trace.bin",
+      "bytes": 1320960,
+      "sha256": "2b6822c352c102210fa9f5afbdcf58c474576258b6e9b811731a7066ecd881b2"
+    }
+  },
+  "gdn_manifests": {
+    "target-ordinary": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/results/target-ordinary.gdn.json",
+      "bytes": 1519,
+      "sha256": "607b2721a3a1e4ece09e8cff7b4f9958c1f5f6108df19ba3b4e1e7ef73a105c7"
+    },
+    "target-dflash": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/results/target-dflash.gdn.json",
+      "bytes": 1523,
+      "sha256": "ccc52f3a3d24bf76e9a0facda3613afdaa683fb2ae31eb7d7f7292f6e09bbeb7"
+    },
+    "text-fresh": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/results/text-fresh.gdn.json",
+      "bytes": 1523,
+      "sha256": "c463e925eba97a5f1bf3c5149bc6d72c2b9207c0f4d7a5c9da91798f46fdb802"
+    },
+    "text-append": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/results/text-append.gdn.json",
+      "bytes": 1519,
+      "sha256": "de6862508f430b6cc1dbc92aba74233ac79902054da4a59bc304469b08fd2b60"
+    }
+  },
+  "gdn_sidecars": {
+    "target-ordinary": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/results/target-ordinary.gdn.bin",
+      "bytes": 78208,
+      "sha256": "34a23fdd558fd7e87184df1aa9436cba4b21e62ff4398b86238e37b715636071"
+    },
+    "target-dflash": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/results/target-dflash.gdn.bin",
+      "bytes": 78208,
+      "sha256": "34a23fdd558fd7e87184df1aa9436cba4b21e62ff4398b86238e37b715636071"
+    },
+    "text-fresh": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/results/text-fresh.gdn.bin",
+      "bytes": 78208,
+      "sha256": "21ae26563b9cb528abc68cd75793d71d42a11bcd64c10a41baa58370b874b39f"
+    },
+    "text-append": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/results/text-append.gdn.bin",
+      "bytes": 78208,
+      "sha256": "4a9a4f6a4e57ca558cf4188071c965c96c219a95d59e9cd8217a324d19b617ff"
+    }
+  },
+  "comparator_processes": {
+    "target": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/results/target-gdn-comparator.process.json",
+      "bytes": 1293,
+      "sha256": "b4d1f1769372c46cbbd58e65e01d4dfd41d0317827444dcc92fbc1d0fba1bcf7"
+    },
+    "text": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/results/text-gdn-comparator.process.json",
+      "bytes": 1278,
+      "sha256": "4079a6a90fc716c16ea98e5acf09dc71a758fee0987cb32874b9d384a01300ad"
+    }
+  },
+  "target_gdn_comparison": {
+    "artifact_type": "ninfer_qwen3_layer1_gdn_detail_comparison",
+    "schema_version": 1,
+    "diagnostic_only": true,
+    "timing_evidence_eligible": false,
+    "production_routing_authorized": false,
+    "diagnostic": "target",
+    "classification": "layer1_gdn_boundaries_exact",
+    "first_difference": null,
+    "limitations": [
+      "captures one selected column and does not capture persistent convolution or recurrence state",
+      "the first differing field localizes a stage boundary, not necessarily the primitive operation"
+    ]
+  },
+  "text_gdn_comparison": {
+    "artifact_type": "ninfer_qwen3_layer1_gdn_detail_comparison",
+    "schema_version": 1,
+    "diagnostic_only": true,
+    "timing_evidence_eligible": false,
+    "production_routing_authorized": false,
+    "diagnostic": "text",
+    "classification": "first_difference_gdn_recurrence",
+    "first_difference": {
+      "field": "o",
+      "dtype": "bf16",
+      "first_element_index": 154,
+      "mismatch_count": 106,
+      "left_bits": 14405,
+      "right_bits": 14406,
+      "left_value": 4.696846008300781e-05,
+      "right_value": 4.7206878662109375e-05,
+      "maximum_absolute_difference": 3.814697265625e-06,
+      "preceding_fields_exact": true
+    },
+    "limitations": [
+      "captures one selected column and does not capture persistent convolution or recurrence state",
+      "the first differing field localizes a stage boundary, not necessarily the primitive operation"
+    ]
+  },
+  "limitations": [
+    "functional localization only; synchronous final D2H invalidates timing",
+    "captures selected columns and no persistent convolution or recurrence state",
+    "no production routing or performance claim"
+  ]
+}

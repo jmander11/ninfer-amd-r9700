@@ -1,0 +1,13 @@
+{
+  "status": "passed",
+  "control_median_ms": 0.24015949666500092,
+  "candidate_median_ms": 0.2344595044851303,
+  "saved_ms_per_token": 0.36479949951171875,
+  "ratio_mean_plus_2se": 0.979649069002379,
+  "allocation_median_ratios": [
+    0.976897096747874,
+    0.9759387368849526,
+    0.9752148147420454
+  ],
+  "passing_authorizes": "selector-free whole C1 production confirmation preparation only"
+}

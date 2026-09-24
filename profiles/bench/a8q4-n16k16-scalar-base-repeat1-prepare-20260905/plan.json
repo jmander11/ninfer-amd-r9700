@@ -1,0 +1,25 @@
+{
+  "schema": "ninfer.r9700.a8q4-n16k16-scalar-base-repeat1-preparation.v1",
+  "status": "cpu_prepared_gpu_not_run",
+  "repeat": {
+    "ordinal": 1,
+    "only_repeat": true,
+    "pooled_with_first": false,
+    "reason": "the immutable first run classified inconclusive because stability_pass was false",
+    "first_report": "profiles/bench/r9700-a8q4-n16k16-scalar-base-p2048-ab-20260905.json",
+    "first_report_sha256": "1941b3c6a262a61928d3971fc2b0afe06f7dac16db68a4221e79ae42940afb9b",
+    "base_closure_sha256": "fee60286307a97bcd4b51b4dda3541a22b54b20671c6c3dbd3031c6a46665c8c"
+  },
+  "frozen_protocol": {
+    "candidate_and_baseline": "identical HSACOs and sources bound by the approved base closure",
+    "warmup": "ABBA",
+    "samples": "eight independent pairs, exact four AB and four BA; 128 calls per interval",
+    "admission": "every-cell robust ratio upper <=1.01 and robust weighted saving lower >=25ms",
+    "robust_mad_factor": 4.4478,
+    "stability": "MAD/median <=2% and range/median <=6%; unstable remains inconclusive",
+    "no_pooling": true,
+    "no_tolerance_or_implementation_change": true
+  },
+  "root_only_gpu_command": "bash profiles/bench/a8q4-n16k16-scalar-base-repeat1-prepare-20260905/run.sh",
+  "output": "profiles/bench/r9700-a8q4-n16k16-scalar-base-p2048-ab-repeat1-20260905.json"
+}

@@ -1,0 +1,76 @@
+{
+  "status": "passed",
+  "production_routing_authorized": false,
+  "promotion_review_authorized": true,
+  "exact_public_token_parity": true,
+  "records": [
+    {
+      "role": "control",
+      "stem": "run-1-control",
+      "decode_seconds": 8.828454699,
+      "decode_output_tok_s": 28.997147148412864
+    },
+    {
+      "role": "candidate",
+      "stem": "run-2-candidate",
+      "decode_seconds": 8.736298928,
+      "decode_output_tok_s": 29.303026614567326
+    },
+    {
+      "role": "candidate",
+      "stem": "run-3-candidate",
+      "decode_seconds": 8.731872514,
+      "decode_output_tok_s": 29.317881083301394
+    },
+    {
+      "role": "control",
+      "stem": "run-4-control",
+      "decode_seconds": 8.823600892,
+      "decode_output_tok_s": 29.01309829551615
+    },
+    {
+      "role": "control",
+      "stem": "run-5-control",
+      "decode_seconds": 8.826095962,
+      "decode_output_tok_s": 29.004896513949777
+    },
+    {
+      "role": "candidate",
+      "stem": "run-6-candidate",
+      "decode_seconds": 8.735625429,
+      "decode_output_tok_s": 29.30528581847691
+    }
+  ],
+  "pairs": [
+    {
+      "order": [
+        "control",
+        "candidate"
+      ],
+      "control_seconds": 8.828454699,
+      "candidate_seconds": 8.736298928,
+      "candidate_over_control": 0.9895615060458499
+    },
+    {
+      "order": [
+        "candidate",
+        "control"
+      ],
+      "control_seconds": 8.823600892,
+      "candidate_seconds": 8.731872514,
+      "candidate_over_control": 0.9896042013773351
+    },
+    {
+      "order": [
+        "control",
+        "candidate"
+      ],
+      "control_seconds": 8.826095962,
+      "candidate_seconds": 8.735625429,
+      "candidate_over_control": 0.9897496545030201
+    }
+  ],
+  "paired_ratio_mean": 0.9896384539754017,
+  "paired_ratio_upper_2se": 0.989752353877887,
+  "paired_ratio_median": 0.9896042013773351
+}

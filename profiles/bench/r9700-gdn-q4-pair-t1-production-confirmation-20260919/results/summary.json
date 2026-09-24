@@ -1,0 +1,42 @@
+{
+  "schema": "ninfer.r9700.gdn-q4-pair-t1-production-confirmation-summary.v1",
+  "status": "passed",
+  "production_route_confirmed": true,
+  "c1_exact_retained_authority_tokens": true,
+  "c2_c3_c4_exact_repeat_tokens": true,
+  "route_selection": {
+    "c1": "paired_q4_t1",
+    "c2_c3_c4": "unchanged_fallback"
+  },
+  "c1_decode_seconds": [
+    9.255951561,
+    9.266168907,
+    9.269185397
+  ],
+  "c1_median_decode_seconds": 9.266168907,
+  "retained_candidate_median_decode_seconds": 9.268753725,
+  "production_over_retained": 0.9997211256144365,
+  "decode_seconds_by_concurrency": {
+    "1": [
+      9.255951561,
+      9.266168907,
+      9.269185397
+    ],
+    "2": [
+      15.91140377,
+      15.92767997
+    ],
+    "3": [
+      17.68192614,
+      17.6831105
+    ],
+    "4": [
+      20.24795819,
+      20.23683081
+    ]
+  },
+  "limitations": [
+    "C2..4 exercise and exactly repeat the unchanged fallback; the paired route is deliberately T1-only.",
+    "This confirms retained whole speed, not physical HBM bandwidth or stall freedom."
+  ]
+}

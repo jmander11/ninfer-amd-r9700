@@ -1,0 +1,23 @@
+{
+  "schema": "ninfer.r9700.dflash-mlp-down-t5-qualification-plan.v1",
+  "status": "prepared-no-gpu-execution",
+  "source": {"commit": "8bd921d757e08a576c59e5d7401c4ea36f1fbc9c", "tree": "a90cf4b424f57aa0a431557f53c54f2ad7a65c07"},
+  "cell": {"rows": 5120, "columns": 17408, "tokens": 5, "count": 1},
+  "candidate": "standalone qualifier-only A8Q4G64 MLP-down kernel",
+  "incumbent": "a8q4g64_linear_wmma32",
+  "identities": {
+    "binary": {"path": "tools/r9700/build/a8q4_dflash_mlp_down_small_t_qual", "bytes": 420016, "sha256": "560ad12b7dace9817a6a056a9241fe59dfd599a14a7dc1fdc37eb9ecbfe33f47"},
+    "assembly": {"path": "tools/r9700/build/a8q4_dflash_mlp_down_small_t.s", "bytes": 58187, "sha256": "92c71dad66dcc0e3e52f6de33779509ff0632de6ede4a928ffc306e2eea04079"},
+    "qualifier_source": {"path": "tools/r9700/a8q4_dflash_mlp_down_small_t_qual.hip", "bytes": 8422, "sha256": "fd2f93b3f0214c50d926e94f5e5e10928d00fc40e24f1b873214cc0ae0d6ec1a"},
+    "shared_harness": {"path": "tools/r9700/a8q4_dflash_small_t_qual.hip", "bytes": 21405, "sha256": "69af9a07e18bf331a175dfae6c02fb12db71baebad5e63552bf5744116612486"},
+    "static_checker": {"path": "tools/r9700/check_a8q4_dflash_mlp_down_small_t_static.py", "bytes": 4114, "sha256": "f071c008447fb4d57609b93a593049d6210ec8b7257c4a9c460a29bdda3545f8"}
+  },
+  "toolchain": {"hip_compiler": {"path": "/opt/rocm/llvm/bin/clang++", "sha256": "241bf4da7ec39bc00b68ed74f6be751516d9892ed990e8c7fa372bad18500247"}, "hip_runtime": {"path": "/opt/rocm/core-10.0/lib/libamdhip64.so.7", "sha256": "817aeadfd9f62b68831ad89993163c7f1f470f30595e7e0da5fdc942193142a8"}, "python": {"path": "/usr/bin/python3", "sha256": "1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118"}},
+  "production_dispatch_changed": false,
+  "production_eligible": false,
+  "t6": {"status": "excluded-not-executed", "reason": "prior static screening rejected T6; this closure retains only the exact T5-only assembly proving T6 is absent"},
+  "power": {"device": 0, "required_before_after": "auto", "sysfs": "/sys/class/drm/card2/device/power_dpm_force_performance_level"},
+  "outputs": {"report": "cell-t5.json", "stdout": "cell-t5.stdout", "stderr": "cell-t5.stderr", "exit": "cell-t5.exit", "summary": "summary.json"},
+  "decision": "accept only if the independent FP64 represented oracle, malformed/status/canary checks, both launch-order medians, paired-ratio confidence bound, and order-stability gate all pass",
+  "limitations": ["standalone synthetic represented-input qualification only", "no whole-DFlash or production performance claim", "no production routing authorization"]
+}

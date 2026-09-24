@@ -1,0 +1,39 @@
+{
+  "status": "completed",
+  "disposition": "admitted",
+  "cells": [
+    {
+      "tokens": 5,
+      "disposition": "admitted",
+      "control_median_ms": 0.3220999985933304,
+      "candidate_median_ms": 0.23037949949502945,
+      "ratio_mean_plus_2se": 0.7815716741924856,
+      "allocation_median_ratios": [
+        0.7160849750351527,
+        0.7160862222911122,
+        0.7149429352316163
+      ],
+      "round_saving_lower_ms": 4.488106618829838,
+      "minimum_round_saving_ms": 0.9212005556976745,
+      "retained_control_round_ms": 92.12005556976744
+    },
+    {
+      "tokens": 6,
+      "disposition": "admitted",
+      "control_median_ms": 0.33163899183273315,
+      "candidate_median_ms": 0.23075999319553375,
+      "ratio_mean_plus_2se": 0.6973701307363416,
+      "allocation_median_ratios": [
+        0.6941676152394731,
+        0.6966018258890204,
+        0.696026917391698
+      ],
+      "round_saving_lower_ms": 6.4164419281369485,
+      "minimum_round_saving_ms": 0.932125899404762,
+      "retained_control_round_ms": 93.21258994047619
+    }
+  ],
+  "production_routing_authorized": false,
+  "whole_ab_preparation_authorized": true,
+  "limitation": "64-call saved-time projection uses historical matched whole controls; no current whole throughput claim"
+}

@@ -21,18 +21,23 @@ from typing import Any, Iterable, Sequence
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MANIFEST_PATH = REPO_ROOT / "examples/cli/manifest.json"
 
-TARGET_MODEL_IDS = {
-    "qwen3_6_35b_a3b": "qwen3.6-35b-a3b",
-    "qwen3_6_27b": "qwen3.6-27b",
-}
-TARGET_ORDER = tuple(TARGET_MODEL_IDS)
+TARGET_KEY = "qwen3_8_27b_r9700"
+PUBLIC_MODEL_ID = "qwen3.8-27b"
 SPECULATIVE_MODES = {
-    "mtp0": ("none", 0),
-    "mtp3": ("mtp", 3),
-    "dflash7": ("dflash", 7),
+    "mtp0": ("none", 0, 0),
+    "mtp1": ("mtp", 1, 0),
+    "mtp2": ("mtp", 2, 0),
+    "mtp3": ("mtp", 3, 0),
+    "mtp4": ("mtp", 4, 0),
+    "mtp5": ("mtp", 5, 0),
+    "dflash1": ("dflash", 1, 0),
+    "dflash2": ("dflash", 2, 0),
+    "dflash3": ("dflash", 3, 0),
+    "dflash4": ("dflash", 4, 0),
+    "dflash5": ("dflash", 5, 0),
 }
 DEFAULT_MODES = ("mtp0", "mtp3")
-SAMPLING_MODES = ("stochastic", "greedy")
+SAMPLING_MODES = ("stochastic", "p-less", "greedy")
 
 SEEDS = (
     7632647173703958409,
@@ -55,9 +60,11 @@ LONG_DECODE_FIXTURES = (
     "long_decode_aime26_30",
 )
 
+# Decode-saturation only; not part of corpus-makespan membership.
+SATURATION_ONLY_FIXTURES = ("thinking_logic_grid",)
+
 SCENARIO_FIXTURES = {
     "code": (
-        "scenario_code_cuda",
         "scenario_code_python",
         "scenario_code_typescript",
     ),
@@ -79,10 +86,11 @@ SCENARIO_FIXTURES = {
 }
 
 WARMUP_FIXTURE = "text_smoke_zh"
+KV_CACHE_FORMAT = "fp8-k-int4-v"
 RUN_ARTIFACT_TYPE = "ninfer_serve_corpus_result"
-RUN_SCHEMA_VERSION = 5
+RUN_SCHEMA_VERSION = 6
 SERVER_LOG_ARTIFACT_TYPE = "ninfer_serve_request_log"
-SERVER_LOG_SCHEMA_VERSION = 9
+SERVER_LOG_SCHEMA_VERSION = 21
 STARTUP_TIMEOUT_SECONDS = 1800.0
 REQUEST_TIMEOUT_SECONDS = 24.0 * 60.0 * 60.0
 LOG_EVENT_TIMEOUT_SECONDS = 10.0
@@ -106,6 +114,7 @@ class RunSpec:
     speculative_mode: str
     speculative_backend: str
     draft_tokens: int
+    dflash_verify_width: int
     sampling_mode: str
     fixture: Fixture
     seed: int
@@ -270,15 +279,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--serve",
         type=Path,
-        default=REPO_ROOT / "build/apps/ninfer-serve",
+        default=REPO_ROOT / "build-r9700/apps/ninfer-serve",
         help="ninfer-serve executable",
     )
     parser.add_argument(
         "--artifact",
-        action="append",
+        type=Path,
         required=True,
-        metavar="TARGET=PATH",
-        help="artifact for a registered target; repeat to benchmark multiple targets",
+        metavar="PATH",
+        help="Qwen3.8-27B R9700 artifact",
     )
     parser.add_argument(
         "--mode",
@@ -287,39 +296,55 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="benchmark only this mode; repeat to select multiple (default: mtp0 and mtp3)",
     )
     parser.add_argument(
+        "--fixture",
+        action="append",
+        dest="fixtures",
+        help="benchmark only this fixture; repeat to select multiple",
+    )
+    parser.add_argument(
+        "--seed",
+        action="append",
+        dest="seeds",
+        type=int,
+        help="benchmark only this seed; repeat to select multiple (default: all five campaign seeds)",
+    )
+    parser.add_argument(
         "--sampling",
         choices=SAMPLING_MODES,
         default="stochastic",
         help="sampling profile for all requests (default: stochastic)",
     )
     parser.add_argument("--output", type=Path, required=True, help="campaign output directory")
+    parser.add_argument(
+        "--prefill-chunk", type=int, required=True,
+        help="schema-v2-selected production prefill chunk",
+    )
+    parser.add_argument("--expected-kv-value-group", type=int, choices=(16, 32), required=True)
+    parser.add_argument(
+        "--expected-xattention-profile", choices=("dense", "b128-s16-tau900"), required=True,
+    )
     parser.add_argument("--port", type=int, default=8080, help="loopback serving port")
-    parser.add_argument("--device", type=int, default=0, help="CUDA device index")
+    parser.add_argument("--device", type=int, default=0, help="HIP device index")
+    parser.add_argument(
+        "--lm-head-draft",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="pass --lm-head-draft to ninfer-serve for speculative modes (default: on)",
+    )
     return parser.parse_args(argv)
 
 
-def parse_artifacts(values: Sequence[str]) -> list[tuple[str, Path]]:
-    parsed: dict[str, Path] = {}
-    for value in values:
-        target, separator, raw_path = value.partition("=")
-        if not separator or not target or not raw_path:
-            raise CampaignError(f"invalid --artifact value {value!r}; expected TARGET=PATH")
-        if target not in TARGET_MODEL_IDS:
-            expected = ", ".join(TARGET_MODEL_IDS)
-            raise CampaignError(f"unsupported artifact target {target!r}; expected {expected}")
-        if target in parsed:
-            raise CampaignError(f"duplicate artifact target: {target}")
-        path = Path(raw_path).expanduser().resolve()
-        if not path.is_file():
-            raise CampaignError(f"artifact not found: {path}")
-        parsed[target] = path
-    return [(target, parsed[target]) for target in TARGET_ORDER if target in parsed]
+def parse_artifact(value: Path) -> tuple[str, Path]:
+    path = value.expanduser().resolve()
+    if not path.is_file():
+        raise CampaignError(f"artifact not found: {path}")
+    return TARGET_KEY, path
 
 
 def fixture_metadata(name: str) -> tuple[str, str | None]:
     if name in NIAH_FIXTURES:
         return "long_niah", None
-    if name in LONG_DECODE_FIXTURES:
+    if name in LONG_DECODE_FIXTURES or name in SATURATION_ONLY_FIXTURES:
         return "long_decode", "reasoning"
     for category, names in SCENARIO_FIXTURES.items():
         if name in names:
@@ -338,6 +363,7 @@ def load_fixtures() -> dict[str, Fixture]:
     selected_names = (
         *NIAH_FIXTURES,
         *LONG_DECODE_FIXTURES,
+        *SATURATION_ONLY_FIXTURES,
         *(name for names in SCENARIO_FIXTURES.values() for name in names),
         WARMUP_FIXTURE,
     )
@@ -375,23 +401,38 @@ def build_specs(
     fixtures: dict[str, Fixture],
     mode_names: Sequence[str],
     sampling_mode: str,
+    fixture_filter: Sequence[str] | None = None,
+    seed_filter: Sequence[int] | None = None,
 ) -> list[RunSpec]:
     specs: list[RunSpec] = []
+    seeds = tuple(SEEDS)
+    if seed_filter:
+        unknown = [seed for seed in seed_filter if seed not in SEEDS]
+        if unknown:
+            raise CampaignError(f"seed filter {unknown} is outside the campaign seed list")
+        seeds = tuple(seed for seed in SEEDS if seed in set(seed_filter))
     for target, artifact in artifacts:
         for mode_name in mode_names:
-            backend, draft_tokens = SPECULATIVE_MODES[mode_name]
-            if backend == "dflash" and target != "qwen3_6_35b_a3b":
-                raise CampaignError("DFlash corpus measurements require the 35B-A3B target")
-            for fixture_name in block_fixture_names(backend):
-                for seed in SEEDS:
+            backend, draft_tokens, verify_width = SPECULATIVE_MODES[mode_name]
+            selected = block_fixture_names(backend)
+            if fixture_filter:
+                unknown = [name for name in fixture_filter if name not in selected]
+                if unknown:
+                    raise CampaignError(
+                        f"fixture filter {unknown} is outside {backend} campaign membership"
+                    )
+                selected = tuple(name for name in selected if name in set(fixture_filter))
+            for fixture_name in selected:
+                for seed in seeds:
                     specs.append(
                         RunSpec(
                             target=target,
-                            model_id=TARGET_MODEL_IDS[target],
+                            model_id=PUBLIC_MODEL_ID,
                             artifact=artifact,
                             speculative_mode=mode_name,
                             speculative_backend=backend,
                             draft_tokens=draft_tokens,
+                            dflash_verify_width=verify_width,
                             sampling_mode=sampling_mode,
                             fixture=fixtures[fixture_name],
                             seed=seed,
@@ -463,16 +504,59 @@ def require_server_log_identity(event: dict[str, Any], event_name: str) -> None:
         raise CampaignError(f"unexpected serving log identity {identity!r}; expected {expected!r}")
 
 
-def validate_server_start(event: dict[str, Any], spec: RunSpec, device: int) -> tuple[str, str]:
+def require_compiled_profile(engine: dict[str, Any], group: int, profile: str) -> None:
+    if engine.get("kv_value_group") != group:
+        raise CampaignError(f"server_start does not bind selected G{group}")
+    expected = (
+        {"xattention_qualification": False}
+        if profile == "dense"
+        else {
+            "xattention_qualification": True,
+            "xattention_profile": "b128-s16-tau900",
+            "xattention_find_block": 128,
+            "xattention_stride": 16,
+            "xattention_tau_permille": 900,
+        }
+    )
+    if any(
+        type(engine.get(key)) is not type(value) or engine.get(key) != value
+        for key, value in expected.items()
+    ):
+        raise CampaignError(f"server_start does not bind selected {profile} attention profile")
+    if profile == "dense":
+        stale = sorted({
+            "xattention_profile", "xattention_find_block", "xattention_stride",
+            "xattention_tau_permille",
+        }.intersection(engine))
+        if stale:
+            raise CampaignError(
+                "dense serve-corpus server_start retains XAttention profile fields: "
+                + ", ".join(stale)
+            )
+
+
+def validate_server_start(
+    event: dict[str, Any],
+    spec: RunSpec,
+    device: int,
+    prefill_chunk: int,
+    expected_group: int,
+    expected_profile: str,
+    lm_head_draft: bool = True,
+) -> tuple[str, str]:
     require_server_log_identity(event, "server_start")
     engine = event.get("engine", {})
+    if not isinstance(engine, dict):
+        raise CampaignError("server_start engine provenance must be an object")
+    require_compiled_profile(engine, expected_group, expected_profile)
     actual = {
         "device": engine.get("device"),
+        "max_concurrency": engine.get("max_concurrency"),
         "max_context": engine.get("max_context"),
         "kv_capacity": engine.get("kv_capacity"),
         "prefill_chunk": engine.get("prefill_chunk"),
-        "kv_cache": engine.get("kv_cache"),
-        "cuda_graph": engine.get("cuda_graph"),
+        "kv_cache_format": engine.get("kv_cache_format"),
+        "device_graph": engine.get("device_graph"),
         "prefix_reuse": engine.get("prefix_reuse"),
         "speculative_backend": engine.get("speculative_backend"),
         "speculative_draft_window": engine.get("speculative_draft_window"),
@@ -480,15 +564,16 @@ def validate_server_start(event: dict[str, Any], spec: RunSpec, device: int) -> 
     }
     expected = {
         "device": device,
+        "max_concurrency": 1,
         "max_context": 262144,
         "kv_capacity": 262144,
-        "prefill_chunk": 1024,
-        "kv_cache": "int8-group64",
-        "cuda_graph": True,
+        "prefill_chunk": prefill_chunk,
+        "kv_cache_format": KV_CACHE_FORMAT,
+        "device_graph": True,
         "prefix_reuse": False,
         "speculative_backend": spec.speculative_backend,
         "speculative_draft_window": spec.draft_tokens,
-        "proposal_head": "optimized" if spec.draft_tokens else "full",
+        "proposal_head": "optimized" if spec.draft_tokens and lm_head_draft else "full",
     }
     if actual != expected:
         raise CampaignError(f"server_start Engine configuration mismatch: {actual!r}")
@@ -496,6 +581,9 @@ def validate_server_start(event: dict[str, Any], spec: RunSpec, device: int) -> 
         spec.sampling_mode == "greedy"
     ):
         raise CampaignError("server_start sampling mode does not match the campaign")
+    p_less = event.get("sampling_defaults", {}).get("server_overrides", {}).get("p_less")
+    if p_less != (spec.sampling_mode == "p-less"):
+        raise CampaignError("server_start p-less mode does not match the campaign")
     if event.get("artifact", {}).get("target") != spec.target:
         raise CampaignError(
             "loaded artifact target mismatch: "
@@ -524,6 +612,9 @@ def build_result_record(
     payload: dict[str, Any],
     response: dict[str, Any],
     server_event: dict[str, Any],
+    prefill_chunk: int,
+    expected_group: int,
+    expected_profile: str,
 ) -> dict[str, Any]:
     require_server_log_identity(server_event, "request_done")
     request = server_event.get("request", {})
@@ -607,6 +698,9 @@ def build_result_record(
         "weights_id": weights_id,
         "model": spec.model_id,
         "artifact_path": str(spec.artifact),
+        "prefill_chunk": prefill_chunk,
+        "kv_value_group": expected_group,
+        "xattention_profile": expected_profile,
         "fixture": spec.fixture.name,
         "suite": spec.fixture.suite,
         "category": spec.fixture.category,
@@ -638,6 +732,9 @@ def record_key(record: dict[str, Any]) -> tuple[str, str, str, str, int]:
 def load_existing_records(
     path: Path,
     expected_specs: dict[tuple[str, str, str, str, int], RunSpec],
+    prefill_chunk: int,
+    expected_group: int,
+    expected_profile: str,
 ) -> dict[tuple[str, str, str, str, int], dict[str, Any]]:
     records: dict[tuple[str, str, str, str, int], dict[str, Any]] = {}
     if not path.exists():
@@ -664,6 +761,18 @@ def load_existing_records(
                     raise CampaignError(
                         f"{path}:{line_number}: artifact path differs from the current command"
                     )
+                if type(record.get("prefill_chunk")) is not int or record["prefill_chunk"] != prefill_chunk:
+                    raise CampaignError(
+                        f"{path}:{line_number}: prefill chunk differs from the current command"
+                    )
+                if (
+                    type(record.get("kv_value_group")) is not int
+                    or record["kv_value_group"] != expected_group
+                    or record.get("xattention_profile") != expected_profile
+                ):
+                    raise CampaignError(
+                        f"{path}:{line_number}: static profile differs from the current command"
+                    )
                 records[key] = record
     except (OSError, json.JSONDecodeError) as exc:
         raise CampaignError(f"failed to read existing results from {path}: {exc}") from exc
@@ -682,6 +791,8 @@ def server_command(
     server_log: Path,
     port: int,
     device: int,
+    prefill_chunk: int,
+    lm_head_draft: bool = True,
 ) -> list[str]:
     command = [
         str(serve),
@@ -694,16 +805,16 @@ def server_command(
         spec.model_id,
         "--max-context",
         "262144",
+        "--max-concurrency",
+        "1",
         "--prefill-chunk",
-        "1024",
+        str(prefill_chunk),
         "--log-stats-interval-ms",
         "0",
         "--device",
         str(device),
         "--request-log-jsonl",
         str(server_log),
-        "--kv-dtype",
-        "int8",
         "--no-prefix-reuse",
     ]
     if spec.speculative_backend != "none":
@@ -713,16 +824,20 @@ def server_command(
                 spec.speculative_backend,
                 "--draft-tokens",
                 str(spec.draft_tokens),
-                "--lm-head-draft",
             ]
         )
+        if lm_head_draft:
+            command.append("--lm-head-draft")
+        if spec.dflash_verify_width:
+            command.extend(["--dflash-verify-width", str(spec.dflash_verify_width)])
     if spec.sampling_mode == "greedy":
-        command.append("--greedy")
-    else:
+        command.extend(["--greedy", "--no-p-less-sampling"])
+    elif spec.sampling_mode == "stochastic":
         # Published stochastic measurements use this explicit profile; they must not drift when
         # product defaults follow a newly registered model recommendation.
         command.extend(
             [
+                "--no-p-less-sampling",
                 "--temperature",
                 "0.6",
                 "--top-p",
@@ -747,10 +862,14 @@ def run_block(
     output_dir: Path,
     port: int,
     device: int,
+    prefill_chunk: int,
+    expected_group: int,
+    expected_profile: str,
     run_handle: Any,
     records: dict[tuple[str, str, str, str, int], dict[str, Any]],
     completed_before_block: int,
     total: int,
+    lm_head_draft: bool = True,
 ) -> None:
     first = block_specs[0]
     server_log = (
@@ -758,7 +877,9 @@ def run_block(
         / "server"
         / f"{first.target}_{first.speculative_mode}_{first.sampling_mode}.jsonl"
     )
-    command = server_command(serve, first, server_log, port, device)
+    command = server_command(
+        serve, first, server_log, port, device, prefill_chunk, lm_head_draft
+    )
     print(
         f"start {first.target}/{first.speculative_mode}: "
         f"{len(block_specs)} missing request(s)",
@@ -766,7 +887,10 @@ def run_block(
     )
     with RunningServer(command, "127.0.0.1", port, server_log) as server:
         server_start = server.wait_until_ready()
-        server_instance_id, weights_id = validate_server_start(server_start, first, device)
+        server_instance_id, weights_id = validate_server_start(
+            server_start, first, device, prefill_chunk, expected_group, expected_profile,
+            lm_head_draft
+        )
 
         connection = http.client.HTTPConnection(
             "127.0.0.1", port, timeout=REQUEST_TIMEOUT_SECONDS
@@ -789,7 +913,10 @@ def run_block(
                         f"non-sequential serving request id {request_id}; expected {last_request_id + 1}"
                     )
                 last_request_id = request_id
-                record = build_result_record(spec, weights_id, payload, response, request_done)
+                record = build_result_record(
+                    spec, weights_id, payload, response, request_done, prefill_chunk,
+                    expected_group, expected_profile
+                )
                 append_record(run_handle, record)
                 records[spec.key] = record
                 completed = completed_before_block + block_index
@@ -828,9 +955,11 @@ def select_records(
     fixtures: Sequence[str],
 ) -> list[dict[str, Any]]:
     return [
-        records[(target, speculative_mode, sampling_mode, fixture, seed)]
+        record
         for fixture in fixtures
         for seed in SEEDS
+        if (record := records.get((target, speculative_mode, sampling_mode, fixture, seed)))
+        is not None
     ]
 
 
@@ -914,12 +1043,15 @@ def build_summary_rows(
     mode_names: Sequence[str],
     sampling_mode: str,
 ) -> list[dict[str, Any]]:
+    present = {key[3] for key in records}
     rows: list[dict[str, Any]] = []
     for target in target_order:
         for mode_name in mode_names:
-            backend, _ = SPECULATIVE_MODES[mode_name]
+            backend, _, _ = SPECULATIVE_MODES[mode_name]
             if backend == "none":
                 for fixture in NIAH_FIXTURES:
+                    if fixture not in present:
+                        continue
                     rows.append(
                         summary_row(
                             "context_profile",
@@ -936,6 +1068,8 @@ def build_summary_rows(
                 continue
 
             for fixture in LONG_DECODE_FIXTURES:
+                if fixture not in present:
+                    continue
                 rows.append(
                     summary_row(
                         "long_decode",
@@ -951,7 +1085,10 @@ def build_summary_rows(
                 )
 
             for category, fixture_names in SCENARIO_FIXTURES.items():
-                for fixture in fixture_names:
+                category_present = tuple(name for name in fixture_names if name in present)
+                if not category_present:
+                    continue
+                for fixture in category_present:
                     rows.append(
                         summary_row(
                             "scenario_fixture",
@@ -975,7 +1112,7 @@ def build_summary_rows(
                         mode_name,
                         sampling_mode,
                         select_records(
-                            records, target, mode_name, sampling_mode, fixture_names
+                            records, target, mode_name, sampling_mode, category_present
                         ),
                     )
                 )
@@ -1014,12 +1151,15 @@ def markdown_table(headers: Sequence[str], rows: Sequence[Sequence[str]]) -> str
 
 
 def mode_display_name(mode_name: str) -> str:
-    if mode_name == "mtp0":
+    if mode_name not in SPECULATIVE_MODES:
+        raise CampaignError(f"unsupported summary mode: {mode_name}")
+    backend, draft_tokens, verify_width = SPECULATIVE_MODES[mode_name]
+    if backend == "none":
         return "MTP0"
-    if mode_name == "mtp3":
-        return "MTP3"
-    if mode_name == "dflash7":
-        return "DFlash block=8 (k=7)"
+    if backend == "mtp":
+        return f"MTP{draft_tokens}"
+    if backend == "dflash":
+        return f"DFlash k={draft_tokens} W={draft_tokens + 1} chain"
     raise CampaignError(f"unsupported summary mode: {mode_name}")
 
 
@@ -1147,6 +1287,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise CampaignError("--port must be in [1, 65535]")
     if args.device < 0:
         raise CampaignError("--device must be nonnegative")
+    if args.prefill_chunk <= 0 or args.prefill_chunk % 128 != 0:
+        raise CampaignError("--prefill-chunk must be a positive multiple of 128")
 
     serve = args.serve.expanduser().resolve()
     if not serve.is_file():
@@ -1154,19 +1296,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not os.access(serve, os.X_OK):
         raise CampaignError(f"ninfer-serve is not executable: {serve}")
 
-    artifacts = parse_artifacts(args.artifact)
+    artifacts = (parse_artifact(args.artifact),)
     mode_names = args.mode or list(DEFAULT_MODES)
     if len(mode_names) != len(set(mode_names)):
         raise CampaignError("duplicate --mode value")
     fixtures = load_fixtures()
-    specs = build_specs(artifacts, fixtures, mode_names, args.sampling)
+    specs = build_specs(
+        artifacts, fixtures, mode_names, args.sampling, args.fixtures, args.seeds
+    )
     expected_specs = {spec.key: spec for spec in specs}
     total = len(expected_specs)
 
     output_dir = args.output.expanduser().resolve()
     (output_dir / "server").mkdir(parents=True, exist_ok=True)
     run_path = output_dir / "run.jsonl"
-    records = load_existing_records(run_path, expected_specs)
+    records = load_existing_records(
+        run_path, expected_specs, args.prefill_chunk,
+        args.expected_kv_value_group, args.expected_xattention_profile,
+    )
     print(f"resume state: {len(records)}/{total} formal request(s) complete", flush=True)
 
     with run_path.open("a", encoding="utf-8") as run_handle:
@@ -1189,10 +1336,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                     output_dir,
                     args.port,
                     args.device,
+                    args.prefill_chunk,
+                    args.expected_kv_value_group,
+                    args.expected_xattention_profile,
                     run_handle,
                     records,
                     len(records),
                     total,
+                    args.lm_head_draft,
                 )
 
     missing = set(expected_specs) - set(records)

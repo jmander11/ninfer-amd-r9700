@@ -95,14 +95,18 @@ NumericFormat parse_format(std::string_view name) {
     if (name == "Q5G64_F16S") { return NumericFormat::Q5G64_F16S; }
     if (name == "Q6G64_F16S") { return NumericFormat::Q6G64_F16S; }
     if (name == "W8G32_F16S") { return NumericFormat::W8G32_F16S; }
-    if (name == "NVFP4") { return NumericFormat::NVFP4; }
+    if (name == "F8E4M3_ROW_F32S") { return NumericFormat::F8E4M3_ROW_F32S; }
     throw ArtifactError("unknown tensor format: " + std::string(name));
 }
 
 StorageLayout parse_layout(std::string_view name) {
     if (name == "contiguous-le-v1") { return StorageLayout::ContiguousLeV1; }
     if (name == "row-split-k128-v1") { return StorageLayout::RowSplitK128V1; }
-    if (name == "blockscale-k16-m128x4-v1") { return StorageLayout::BlockScaleK16M128x4V1; }
+    if (name == "r9700-w8g32-n16-k16-v1") { return StorageLayout::R9700W8G32N16K16V1; }
+    if (name == "row-scaled-k128-v1") { return StorageLayout::RowScaledK128V1; }
+    if (name == "r9700-q4g64-n16-k16-v1") {
+        return StorageLayout::R9700Q4G64N16K16V1;
+    }
     throw ArtifactError("unknown tensor layout: " + std::string(name));
 }
 
@@ -210,6 +214,7 @@ public:
         fd_   = fd;
         data_ = static_cast<const std::byte*>(mapping);
         size_ = size;
+        status_ = status;
     }
 
     ~MappedFile() {
@@ -223,6 +228,15 @@ public:
     const std::byte* data() const noexcept { return data_; }
 
     std::size_t size() const noexcept { return size_; }
+
+    std::string file_identity() const {
+        return "linux-file-v1:" + std::to_string(status_.st_dev) + ":" +
+               std::to_string(status_.st_ino) + ":" + std::to_string(status_.st_size) + ":" +
+               std::to_string(status_.st_mtim.tv_sec) + ":" +
+               std::to_string(status_.st_mtim.tv_nsec) + ":" +
+               std::to_string(status_.st_ctim.tv_sec) + ":" +
+               std::to_string(status_.st_ctim.tv_nsec);
+    }
 
     std::size_t read_direct(std::uint64_t absolute_offset, std::span<std::byte> destination) const {
         constexpr std::size_t alignment = Reader::direct_io_alignment;
@@ -250,6 +264,7 @@ private:
     int fd_                = -1;
     const std::byte* data_ = nullptr;
     std::size_t size_      = 0;
+    struct stat status_ {};
 };
 
 } // namespace
@@ -273,8 +288,7 @@ struct Reader::Impl {
             throw ArtifactError("artifact is shorter than the v2 prefix");
         }
         if (std::equal(kV1Magic.begin(), kV1Magic.end(), file.data())) {
-            throw ArtifactError("NInfer artifact v1 is no longer supported; migrate it with: "
-                                "python3 -m tools.artifact.migrate_v1_to_v2 <artifact>");
+            throw ArtifactError("NInfer artifact v1 is no longer supported");
         }
         if (!std::equal(kMagic.begin(), kMagic.end(), file.data())) {
             throw ArtifactError("artifact magic is not NInfer v2");
@@ -371,6 +385,8 @@ const ObjectDescriptor* Reader::find(std::string_view name) const noexcept {
 }
 
 std::uint64_t Reader::file_bytes() const noexcept { return impl_->file.size(); }
+
+std::string Reader::file_identity() const { return impl_->file.file_identity(); }
 
 std::uint64_t Reader::payload_offset() const noexcept { return impl_->payload_start; }
 

@@ -1,0 +1,48 @@
+{
+  "artifact_type": "ninfer_r9700_dflash_mlp_down_t5_matched_build_plan",
+  "schema_version": 1,
+  "status": "cpu_build_complete_no_gpu_execution",
+  "claim": "matched executables differ only in the exact N5120/K17408/T5 MLP-down compile selector; no performance or production-selection claim",
+  "source": {
+    "detached_checkout": "/ssdpool2nvme/local_llm/ninfer-amd-r9700-d1a9b6fb-dflash-mlp-build-source",
+    "commit": "d1a9b6fb33a843363fba3ad46d6569071df1ab66",
+    "tree": "557bbda04f2926319bf7c25f26eb9ec193d74824"
+  },
+  "builds": {
+    "control": {
+      "directory": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-mlp-down-t5-d1a9b6fb-control-20260906",
+      "NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE": 0
+    },
+    "candidate": {
+      "directory": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-mlp-down-t5-d1a9b6fb-candidate-20260906",
+      "NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE": 1
+    }
+  },
+  "shared_configuration": {
+    "CMAKE_BUILD_TYPE": "Release",
+    "CMAKE_GENERATOR": "Unix Makefiles",
+    "CMAKE_HIP_ARCHITECTURES": "gfx1201",
+    "CMAKE_HIP_COMPILER": "/opt/rocm/llvm/bin/clang++",
+    "NINFER_BUILD_APPS": true,
+    "NINFER_BUILD_BENCHMARKS": true,
+    "NINFER_BUILD_R9700_CORE_QUALIFIER": true,
+    "NINFER_R9700_KV_VALUE_GROUP": 16,
+    "NINFER_R9700_Q4_ACTIVATION_BITS": 8,
+    "NINFER_R9700_W8_ACTIVATION_BITS": 8,
+    "NINFER_R9700_FP8_QK_WMMA": 1,
+    "NINFER_R9700_XATTENTION_QUALIFICATION": false,
+    "NINFER_R9700_XATTENTION_STRIDE": 16,
+    "NINFER_R9700_XATTENTION_TAU_PERMILLE": 1000,
+    "NINFER_R9700_DFLASH_SMALL_T_CANDIDATE": 0
+  },
+  "selector_boundary": {
+    "candidate_domain": {"tokens": 5, "rows": 5120, "columns": 17408, "padded_columns": 17408},
+    "T6_and_all_other_valid_cells": "existing WMMA fallback",
+    "gate_up_small_t_selector_identical_between_arms": 0,
+    "benchmark_report_field": "dflash_mlp_down_t5_candidate"
+  },
+  "cpu_checks": ["ninfer_bench_support_test", "ninfer_r9700_linear_prefill_dispatch_test"],
+  "benchmark_execution": "not-run",
+  "maximum_supported_benchmark_concurrency": 4,
+  "production_routing_authorized": false
+}

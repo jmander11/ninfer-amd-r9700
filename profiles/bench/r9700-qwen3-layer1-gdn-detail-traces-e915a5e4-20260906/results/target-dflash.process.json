@@ -1,0 +1,57 @@
+{
+  "command": [
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-layer1-gdn-e915a5e4-20260906/bench/ninfer_bench",
+    "--weights",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval.ninfer",
+    "--corpus",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-p129-isolation-discriminator-20260906/history-p129.ids",
+    "--device",
+    "0",
+    "--concurrency",
+    "1",
+    "--whole-pg",
+    "129,1",
+    "--prefill-chunk",
+    "4096",
+    "--kv-capacity",
+    "workload",
+    "--spec",
+    "dflash",
+    "--draft-tokens",
+    "4",
+    "--dflash-verify-width",
+    "5",
+    "--lm-head-draft",
+    "--retain-token-ids",
+    "--no-device-graph",
+    "--output",
+    "json",
+    "-r",
+    "1",
+    "--warmup",
+    "0"
+  ],
+  "trace_environment": {
+    "NINFER_QWEN3_LAYER_BOUNDARY_TRACE_ROLE": "target-dflash-frontier130-column0",
+    "NINFER_QWEN3_LAYER_BOUNDARY_TRACE_MANIFEST": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/results/target-dflash.trace.json",
+    "NINFER_QWEN3_LAYER_BOUNDARY_TRACE_SIDECAR": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/results/target-dflash.trace.bin",
+    "NINFER_QWEN3_GDN_DETAIL_TRACE_MANIFEST": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/results/target-dflash.gdn.json",
+    "NINFER_QWEN3_GDN_DETAIL_TRACE_SIDECAR": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/results/target-dflash.gdn.bin"
+  },
+  "exit_code": 0,
+  "started_unix_ns": 1788738328160675119,
+  "finished_unix_ns": 1788738349595993416,
+  "power_before": "auto",
+  "power_after": "auto",
+  "instrumentation_environment_present": [],
+  "stdout": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/results/target-dflash.stdout",
+    "bytes": 5818,
+    "sha256": "35bd5f6ea4cc72661b21388f23511ccb99c073b3e4bf1f590e5d350b0de887af"
+  },
+  "stderr": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer1-gdn-detail-traces-e915a5e4-20260906/results/target-dflash.stderr",
+    "bytes": 253,
+    "sha256": "642c5884587159e804c0a0c0b379a9c8c632d2be97eecb4bf22b158a09268547"
+  }
+}

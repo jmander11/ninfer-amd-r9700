@@ -101,24 +101,80 @@ CyclicKVCacheLayerView CyclicKVCache::layer_view(std::uint32_t layer) const {
 }
 
 void CyclicKVCache::copy_lane_from(const CyclicKVCache& source, std::int32_t lane,
-                                   cudaStream_t stream) {
-    if (source.layer_count() != layer_count() || source.capacity_ != capacity_ ||
-        source.padded_capacity_ != padded_capacity_ || source.num_kv_heads_ != num_kv_heads_ ||
-        source.head_dim_ != head_dim_ || source.lane_capacity_ != lane_capacity_) {
+                                   hipStream_t stream) {
+    if (source.lane_capacity_ != lane_capacity_) {
         throw std::invalid_argument("Cyclic KV copy requires identical layouts");
     }
-    if (lane < 0 || lane >= lane_capacity_) {
+    copy_lane_from(source, lane, lane, stream);
+}
+
+void CyclicKVCache::copy_lane_from(const CyclicKVCache& source, std::int32_t source_lane,
+                                   std::int32_t dest_lane, hipStream_t stream) {
+    if (source.layer_count() != layer_count() || source.capacity_ != capacity_ ||
+        source.padded_capacity_ != padded_capacity_ || source.num_kv_heads_ != num_kv_heads_ ||
+        source.head_dim_ != head_dim_) {
+        throw std::invalid_argument("Cyclic KV copy requires matching layer geometry");
+    }
+    if (source_lane < 0 || source_lane >= source.lane_capacity_ || dest_lane < 0 ||
+        dest_lane >= lane_capacity_) {
         throw std::out_of_range("Cyclic KV lane is out of range");
     }
     for (std::size_t layer = 0; layer < k_.size(); ++layer) {
+        Tensor destination_k = k_[layer].slice(3, dest_lane, 1);
+        Tensor destination_v = v_[layer].slice(3, dest_lane, 1);
+        Tensor source_k      = source.k_[layer].slice(3, source_lane, 1);
+        Tensor source_v      = source.v_[layer].slice(3, source_lane, 1);
+        HIP_CHECK(hipMemcpyAsync(destination_k.data, source_k.data, destination_k.bytes(),
+                                 hipMemcpyDeviceToDevice, stream));
+        HIP_CHECK(hipMemcpyAsync(destination_v.data, source_v.data, destination_v.bytes(),
+                                 hipMemcpyDeviceToDevice, stream));
+    }
+}
+
+std::size_t CyclicKVCache::lane_host_bytes() const noexcept {
+    if (k_.empty()) { return 0; }
+    const Tensor k_lane = k_[0].slice(3, 0, 1);
+    const Tensor v_lane = v_[0].slice(3, 0, 1);
+    return static_cast<std::size_t>(layer_count()) * (k_lane.bytes() + v_lane.bytes());
+}
+
+void CyclicKVCache::copy_lane_to_host(std::int32_t lane, void* dst, hipStream_t stream) const {
+    if (lane < 0 || lane >= lane_capacity_) {
+        throw std::out_of_range("Cyclic KV lane is out of range");
+    }
+    if (dst == nullptr && lane_host_bytes() != 0) {
+        throw std::invalid_argument("Cyclic KV host pack destination is null");
+    }
+    auto* out = static_cast<unsigned char*>(dst);
+    for (std::size_t layer = 0; layer < k_.size(); ++layer) {
+        Tensor source_k = k_[layer].slice(3, lane, 1);
+        Tensor source_v = v_[layer].slice(3, lane, 1);
+        HIP_CHECK(hipMemcpyAsync(out, source_k.data, source_k.bytes(), hipMemcpyDeviceToHost,
+                                 stream));
+        out += source_k.bytes();
+        HIP_CHECK(hipMemcpyAsync(out, source_v.data, source_v.bytes(), hipMemcpyDeviceToHost,
+                                 stream));
+        out += source_v.bytes();
+    }
+}
+
+void CyclicKVCache::copy_lane_from_host(const void* src, std::int32_t lane, hipStream_t stream) {
+    if (lane < 0 || lane >= lane_capacity_) {
+        throw std::out_of_range("Cyclic KV lane is out of range");
+    }
+    if (src == nullptr && lane_host_bytes() != 0) {
+        throw std::invalid_argument("Cyclic KV host unpack source is null");
+    }
+    auto* in = static_cast<const unsigned char*>(src);
+    for (std::size_t layer = 0; layer < k_.size(); ++layer) {
         Tensor destination_k = k_[layer].slice(3, lane, 1);
         Tensor destination_v = v_[layer].slice(3, lane, 1);
-        Tensor source_k      = source.k_[layer].slice(3, lane, 1);
-        Tensor source_v      = source.v_[layer].slice(3, lane, 1);
-        CUDA_CHECK(cudaMemcpyAsync(destination_k.data, source_k.data, destination_k.bytes(),
-                                   cudaMemcpyDeviceToDevice, stream));
-        CUDA_CHECK(cudaMemcpyAsync(destination_v.data, source_v.data, destination_v.bytes(),
-                                   cudaMemcpyDeviceToDevice, stream));
+        HIP_CHECK(hipMemcpyAsync(destination_k.data, in, destination_k.bytes(),
+                                 hipMemcpyHostToDevice, stream));
+        in += destination_k.bytes();
+        HIP_CHECK(hipMemcpyAsync(destination_v.data, in, destination_v.bytes(),
+                                 hipMemcpyHostToDevice, stream));
+        in += destination_v.bytes();
     }
 }
 

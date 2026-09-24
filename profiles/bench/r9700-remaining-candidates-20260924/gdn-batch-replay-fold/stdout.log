@@ -1,0 +1,1 @@
+r9700_gdn_replay_fold: PASS gfx1201 wave32 Qwen3.8 L48/Hq16/Hv48 B=2 W=6 prefix6/path5/no-op/read-only ordinary-state-exact max_state_abs=3.89485e-09 max_state_rel_l2=8.03287e-08

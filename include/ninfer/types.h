@@ -1,7 +1,9 @@
 #pragma once
 
+#include <charconv>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -9,6 +11,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -16,16 +19,53 @@ namespace ninfer {
 
 using TokenId = std::int32_t;
 
-inline constexpr std::uint32_t kMaximumConcurrency = 8;
+inline constexpr std::uint32_t kMaximumConcurrency = 4;
+inline constexpr std::size_t kMaxContextCheckpointMarks = 16;
+// Physical campaign commands remain explicit and do not inherit this product-wide startup default.
+inline constexpr std::uint32_t kDefaultPrefillChunk = 4096;
 
-enum class KvCacheStorage : std::uint8_t {
-    BFloat16,
-    Int8Group64,
-};
+[[nodiscard]] inline std::vector<std::uint32_t>
+parse_context_checkpoint_marks_flag(std::string_view raw,
+                                    const char* flag = "--context-checkpoints") {
+    if (raw == "off") { return {}; }
+    if (raw.empty()) {
+        throw std::invalid_argument(std::string(flag) + " must be off or a comma-separated list");
+    }
+    std::vector<std::uint32_t> marks;
+    std::size_t begin = 0;
+    while (true) {
+        const std::size_t comma = raw.find(',', begin);
+        const std::string_view token =
+            comma == std::string_view::npos ? raw.substr(begin) : raw.substr(begin, comma - begin);
+        if (token.empty()) {
+            throw std::invalid_argument(std::string(flag) + " contains an empty mark");
+        }
+        std::uint32_t value = 0;
+        const auto parsed   = std::from_chars(token.data(), token.data() + token.size(), value);
+        if (parsed.ec != std::errc{} || parsed.ptr != token.data() + token.size() || value == 0) {
+            throw std::invalid_argument(std::string(flag) + " marks must be positive integers");
+        }
+        if (!marks.empty() && value <= marks.back()) {
+            throw std::invalid_argument(std::string(flag) + " marks must be strictly increasing");
+        }
+        if (marks.size() >= kMaxContextCheckpointMarks) {
+            throw std::invalid_argument(std::string(flag) + " accepts at most 16 marks");
+        }
+        marks.push_back(value);
+        if (comma == std::string_view::npos) { break; }
+        begin = comma + 1;
+    }
+    return marks;
+}
 
 enum class KvCapacityMode : std::uint8_t {
     Explicit,
     Automatic,
+};
+
+enum class KvDiskCompress : std::uint8_t {
+    Off,
+    Zstd,
 };
 
 inline constexpr std::size_t kDefaultKvCapacityHeadroomBytes = 1024ULL * 1024ULL * 1024ULL;
@@ -57,10 +97,19 @@ enum class SpeculativeBackend : std::uint8_t {
     DFlash,
 };
 
+[[nodiscard]] constexpr bool context_checkpoint_capture_available(
+    bool allow_prefix_reuse, SpeculativeBackend spec) noexcept {
+    return allow_prefix_reuse && spec != SpeculativeBackend::None;
+}
+
 struct SpeculativeOptions {
     SpeculativeBackend backend = SpeculativeBackend::None;
     std::uint32_t draft_tokens = 0;
     ProposalHead proposal_head = ProposalHead::Full;
+    // DFlash2 chain verify width. 0 selects K+1.
+    std::uint32_t dflash_verify_width = 0;
+    // Startup-only: capture extra draft-K graphs and lock live K at argmax E[Y]/T(k,C,L).
+    bool adaptive_draft = false;
 };
 
 struct LoadProgress {
@@ -75,13 +124,41 @@ struct EngineOptions {
     std::uint32_t max_concurrency      = 1;
     std::uint32_t max_pending_requests = 16;
     std::uint32_t pending_timeout_ms   = 30000;
-    std::uint32_t prefill_chunk        = 1024;
-    KvCacheStorage kv_cache            = KvCacheStorage::BFloat16;
+    std::uint32_t prefill_chunk        = kDefaultPrefillChunk;
+    std::size_t kv_ram_capacity_bytes  = 0;
+    std::size_t kv_disk_capacity_bytes = 0;
+    std::filesystem::path kv_disk_location;
+    KvDiskCompress kv_disk_compress    = KvDiskCompress::Off;
+    // Filled from the loaded artifact at Engine construction for the KV-disk fingerprint.
+    std::string model_id;
+    std::string weights_id;
+    std::string artifact_file_identity;
+    // nullopt = default prefill ladder; empty = disable automatic ladder (`off`).
+    std::optional<std::vector<std::uint32_t>> context_checkpoint_marks;
     SpeculativeOptions speculative;
     bool enable_vision  = false;
-    bool use_cuda_graph = true;
+    bool use_device_graph = true;
+    // Disable repetition recovery without changing grammar or sampling law.
+    bool generation_recovery = true;
     LoadProgress load_progress;
 };
+
+inline void validate_kv_disk_options(std::size_t ram_capacity_bytes,
+                                     std::size_t disk_capacity_bytes,
+                                     const std::filesystem::path& disk_location) {
+    if (disk_capacity_bytes == 0) {
+        if (!disk_location.empty()) {
+            throw std::invalid_argument("--kv-disk-location requires --kv-disk-capacity");
+        }
+        return;
+    }
+    if (disk_location.empty()) {
+        throw std::invalid_argument("--kv-disk-capacity requires --kv-disk-location");
+    }
+    if (ram_capacity_bytes == 0) {
+        throw std::invalid_argument("--kv-disk-capacity requires --kv-ram-capacity > 0");
+    }
+}
 
 enum class SamplingMode : std::uint8_t {
     Thinking,
@@ -118,6 +195,9 @@ struct SamplingOverrides {
     std::optional<float> presence_penalty;
     std::optional<float> frequency_penalty;
     std::optional<std::uint64_t> seed;
+    // Product-default process/request mode. False explicitly opts out. When true, Engine keeps
+    // temperature and seed and ignores top-k, top-p, min-p, and presence/frequency penalties.
+    bool p_less = true;
 };
 
 // Complete parameters after Engine resolution. Target runtimes consume only this type.
@@ -129,7 +209,11 @@ struct ResolvedSamplingParameters {
     float presence_penalty  = 0.0F;
     float frequency_penalty = 0.0F;
     std::uint64_t seed      = 0;
+    bool p_less             = false;
 };
+
+inline constexpr const char* kPLessSamplingIgnoredParamsWarning =
+    "p-less sampling: top-p, top-k, min-p, presence penalty, and frequency penalty are ignored";
 
 enum class OutputChannel : std::uint8_t {
     Content,
@@ -153,6 +237,7 @@ struct ExecutionOptions {
     SamplingOverrides sampling;
     std::uint32_t requested_output_tokens = 0;
     bool allow_prefix_reuse               = true;
+    bool capture_context_checkpoint       = false;
 };
 
 struct OutputOptions {
@@ -281,11 +366,13 @@ struct PromptInput {
 };
 
 enum class RequestErrorKind : std::uint8_t {
+    InvalidToolSchema,
     ContextLengthExceeded,
     MediaBudgetExceeded,
     Overloaded,
     QueueTimeout,
     Unavailable,
+    RecoveryExhausted,
 };
 
 class RequestError final : public std::invalid_argument {
@@ -302,6 +389,8 @@ private:
 struct PromptSummary {
     std::uint32_t prompt_tokens = 0;
     bool has_media              = false;
+    // First token intersecting the final completed assistant payload, when present.
+    std::optional<std::uint32_t> final_assistant_token_begin;
 };
 
 enum class FinishReason : std::uint8_t {
@@ -318,10 +407,33 @@ struct OutputDelta {
     std::string text;
 };
 
+enum class OutputDelivery : std::uint8_t {
+    TerminalOnly,
+    Streaming,
+};
+
+enum class RecoveryEventKind : std::uint8_t {
+    CycleExclusion, RetryTriggered, RetryStarted, RetryPrefillComplete, Finished, Exhausted,
+};
+
+// Host-only diagnostics, never model output. Delivered by wait() on its caller thread,
+// including for TerminalOnly requests. Counts are cumulative across internal retries.
+struct RecoveryEvent {
+    RecoveryEventKind kind = RecoveryEventKind::CycleExclusion;
+    std::string cause;
+    std::uint32_t attempts = 0;
+    std::uint32_t cycle_exclusions = 0;
+    std::uint32_t discarded_tool_calls = 0;
+    std::uint32_t discarded_reasoning_tokens = 0;
+    std::size_t generated_tokens = 0;
+    std::uint32_t remaining_tokens = 0;
+};
+
 class OutputSink {
 public:
     virtual ~OutputSink()                   = default;
     virtual void publish(OutputDelta delta) = 0;
+    virtual void recovery_event(const RecoveryEvent&) {}
 };
 
 class CancellationView {
@@ -330,6 +442,7 @@ public:
     explicit CancellationView(std::function<bool()> requested);
 
     [[nodiscard]] bool requested() const;
+    [[nodiscard]] bool armed() const noexcept;
 
 private:
     std::function<bool()> requested_;
@@ -342,6 +455,12 @@ struct GenerationTimings {
     double prefill_seconds     = 0.0;
     double decode_seconds      = 0.0;
     double total_seconds       = 0.0;
+    // Prefill throughput over the trailing window (<= 1s) of prefill execution, i.e. the
+    // steady-state rate once warm. Degenerates to the overall prefill average when the
+    // prefill is shorter than the window. 0 when prefill did not process prompt tokens
+    // (fully reused prefix).
+    double prefill_tail_tok_s     = 0.0;
+    double prefill_tail_window_s  = 0.0;
 };
 
 struct SpeculativeStats {
@@ -353,6 +472,8 @@ struct SpeculativeStats {
     std::uint64_t accepted_tokens = 0;
     std::uint64_t fallback_steps  = 0;
     std::vector<std::uint64_t> accepted_per_position;
+    std::uint32_t live_draft_tokens = 0;         // last live K used this request
+    std::vector<std::uint64_t> rounds_per_draft; // index = K, size N+1
 };
 
 enum class PrefixReusePath : std::uint8_t {
@@ -360,6 +481,27 @@ enum class PrefixReusePath : std::uint8_t {
     AppendAtFrontier,
     RestoreTurnCheckpoint,
     RestoreResponseCheckpoint,
+    RestoreContextCheckpoint,
+    RestoreTurnRollback,
+};
+
+enum class PrefixReuseSource : std::uint8_t {
+    None,
+    VramResident,
+    HostRam,
+    HostDisk,
+};
+
+struct GenerationRecoveryStats {
+    std::uint32_t attempts = 0;
+    std::uint32_t discarded_tool_calls = 0;
+    // Generated reasoning omitted from internal retry context, not retracted
+    // from the published response or removed from completion-token usage.
+    std::uint32_t discarded_reasoning_tokens = 0;
+    std::uint32_t prefill_samples = 0;
+    std::uint64_t prefill_tokens = 0;
+    double prepare_seconds = 0.0;
+    double prefill_seconds = 0.0;
 };
 
 struct GenerationResult {
@@ -367,10 +509,34 @@ struct GenerationResult {
     std::vector<TokenId> generated_token_ids;
     std::string content;
     std::string reasoning;
+    // Complete, schema-validated calls. Tool markup is not streamed as content.
+    std::vector<ToolCall> tool_calls;
+    // Diagnostic names only when tools were not declared; never executable.
+    std::vector<std::string> undeclared_tool_call_names;
+    GenerationRecoveryStats recovery;
     std::uint32_t reasoning_tokens     = 0;
     FinishReason finish_reason         = FinishReason::None;
     std::uint32_t reused_prompt_tokens = 0;
     PrefixReusePath prefix_reuse_path  = PrefixReusePath::FullReset;
+    PrefixReuseSource prefix_reuse_source = PrefixReuseSource::None;
+    // Absolute staged-checkpoint head frontiers this request restored or wrote;
+    // 0 if none. restored is the matching ladder or turn-rollback F (the same
+    // length as reused_prompt_tokens on those paths). captured is the advertised
+    // ladder freeze, occupy-append rollback pin, or exact-hit request pin written
+    // this request.
+    std::uint32_t captured_context_checkpoint_tokens = 0;
+    std::uint32_t restored_context_checkpoint_tokens = 0;
+    // HIP D2H/H2D elapsed for this request's admission spills and RAM restore.
+    double kv_ram_save_seconds = 0;
+    double kv_ram_load_seconds = 0;
+    // Disk spill I/O harvested onto this request (emergency/idle overlap). Restore
+    // load is the host wall from the first live SSD read of this request's restore
+    // until the last page or state object has arrived in the pinned host window.
+    // h2d is the host wall from that last host arrival until copy_stream copies_done
+    // (page and state H2D that remain after SSD is idle, not overlapped copy time).
+    double kv_disk_save_seconds = 0;
+    double kv_disk_load_seconds = 0;
+    double kv_disk_h2d_seconds  = 0;
     GenerationTimings timings;
     SpeculativeStats speculative;
 };
@@ -388,7 +554,6 @@ struct MemorySummary {
     std::uint32_t kv_capacity                 = 0; // Resolved page-aligned Main KV capacity.
     std::uint32_t kv_capacity_page_groups     = 0;
     std::uint32_t kv_capacity_max_page_groups = 0;
-    KvCacheStorage kv_cache                   = KvCacheStorage::BFloat16;
     ArenaMemorySummary weights;
     ArenaMemorySummary sequence;
     ArenaMemorySummary workspace;
@@ -401,13 +566,22 @@ struct MemorySummary {
     std::size_t kv_capacity_headroom_bytes        = 0;
     std::size_t planned_slack_bytes               = 0;
     std::size_t workspace_logical_peak_bytes      = 0;
-    std::size_t cuda_graph_allowance_bytes        = 0;
-    std::size_t cuda_graph_observed_bytes         = 0;
+    std::size_t device_graph_allowance_bytes      = 0;
+    std::size_t device_graph_observed_bytes       = 0;
     std::size_t kv_payload_bytes                  = 0;
+    std::size_t kv_ram_capacity_bytes             = 0;
+    // Live host-RAM residents only (claimed included). Not pinned-arena occupancy;
+    // a retired copy may still occupy the pin until its D2H/H2D event is reaped.
+    std::size_t kv_ram_used_bytes                 = 0;
+    std::size_t kv_ram_entry_count                = 0;
+    std::size_t kv_disk_capacity_bytes            = 0;
+    std::size_t kv_disk_used_bytes                = 0;
+    std::size_t kv_disk_entry_count               = 0;
 };
 
-// Monotonic execution counters plus one boundary-consistent scheduler snapshot. Consumers derive
-// interval throughput by subtracting two snapshots and dividing by their own monotonic wall time.
+// Monotonic execution counters plus fieldwise-concurrent live scheduler gauges. A returned value is
+// race-free but is not a multi-field transaction with one boundary identity. Consumers derive
+// interval throughput from the monotonic counters and their own monotonic wall time.
 struct RuntimeStats {
     // Actual prompt tokens evaluated by prefill; resident prefix hits are excluded.
     std::uint64_t computed_prefill_tokens = 0;
@@ -420,6 +594,68 @@ struct RuntimeStats {
     std::uint32_t prefilling_requests   = 0;
     std::uint32_t decode_ready_requests = 0;
     std::uint32_t waiting_requests      = 0;
+    std::uint64_t kv_ram_captures       = 0;
+    std::uint64_t kv_ram_restores       = 0;
+    std::uint64_t kv_ram_evictions      = 0;
+    std::uint64_t kv_ram_drops          = 0;
+    double kv_ram_save_seconds          = 0;
+    double kv_ram_load_seconds          = 0;
+    std::size_t kv_ram_capacity_bytes   = 0;
+    std::size_t kv_ram_used_bytes       = 0;
+    std::size_t kv_ram_entry_count      = 0;
+    std::uint64_t kv_disk_captures      = 0;
+    std::uint64_t kv_disk_restores      = 0;
+    std::uint64_t kv_disk_evictions     = 0;
+    std::uint64_t kv_disk_drops         = 0;
+    double kv_disk_save_seconds         = 0;
+    double kv_disk_load_seconds         = 0;
+    std::size_t kv_disk_capacity_bytes  = 0;
+    std::size_t kv_disk_used_bytes      = 0;
+    std::size_t kv_disk_entry_count     = 0;
+};
+
+enum class ScoreSchedule : std::uint8_t {
+    Prefill,
+    Decode,
+};
+
+[[nodiscard]] inline const char* score_schedule_name(ScoreSchedule schedule) noexcept {
+    switch (schedule) {
+    case ScoreSchedule::Prefill:
+        return "prefill";
+    case ScoreSchedule::Decode:
+        return "decode";
+    }
+    return "unknown";
+}
+
+struct ScoreOptions {
+    ScoreSchedule schedule = ScoreSchedule::Prefill;
+    // nullopt: skip the first prompt_tokens/2 positions so scored tokens have KV context.
+    // 0: score every teacher-forced position except the last prompt token.
+    std::optional<std::uint32_t> skip_tokens;
+};
+
+// Teacher-forced NLL at or above this is reported as a terrible token (p <= exp(-10) ≈ 4.5e-5).
+inline constexpr double kScoreTerribleNll = 10.0;
+
+struct ScoreResult {
+    ScoreSchedule schedule      = ScoreSchedule::Prefill;
+    std::uint32_t prompt_tokens = 0;
+    std::uint32_t skip_tokens   = 0;
+    std::uint32_t tokens_scored = 0;
+    std::uint32_t non_finite    = 0;
+    std::uint32_t terrible_tokens = 0;
+    double sum_nll              = 0.0;
+    double mean_nll             = 0.0;
+    double max_nll              = 0.0;
+    double perplexity           = 0.0;
+    double score_seconds        = 0.0;
+    std::vector<float> token_nlls;
+    // Greedy prediction for every scored position, in the same order as token_nlls. PPL tooling
+    // compares this sequence exactly against the BF16-KV reference so a small mean-NLL delta
+    // cannot hide an argmax flip.
+    std::vector<TokenId> argmax_token_ids;
 };
 
 struct LoadSummary {

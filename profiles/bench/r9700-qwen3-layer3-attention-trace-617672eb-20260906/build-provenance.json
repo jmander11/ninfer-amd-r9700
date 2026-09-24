@@ -1,0 +1,23 @@
+{
+  "artifact_type": "ninfer_qwen3_layer3_attention_trace_build",
+  "schema_version": 1,
+  "source": {"commit": "617672eb7186f038f26412661d9f586454774450", "tree": "9a793c64218c710f7fc1df765edc0d4d81950015", "worktree": "/ssdpool2nvme/local_llm/ninfer-amd-r9700-layer3-attention-src-617672eb"},
+  "build_directory": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-layer3-attention-617672eb-20260906",
+  "profile": {"GPU_BUILD_TARGETS":"gfx1201", "NINFER_R9700_KV_VALUE_GROUP":"16", "NINFER_R9700_Q4_ACTIVATION_BITS":"8", "NINFER_R9700_W8_ACTIVATION_BITS":"8", "NINFER_R9700_FP8_QK_WMMA":"1", "NINFER_R9700_DFLASH_SMALL_T_CANDIDATE":"0", "NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE":"1", "NINFER_R9700_DFLASH_RMSNORM_ROWS56_CANDIDATE":"1", "NINFER_R9700_GDN_VERIFY_WAVE_QK_CANDIDATE":"1", "NINFER_R9700_XATTENTION_QUALIFICATION":"OFF", "NINFER_R9700_XATTENTION_STRIDE":"16", "NINFER_R9700_XATTENTION_TAU_PERMILLE":"1000"},
+  "outputs": {
+    "benchmark": {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-layer3-attention-617672eb-20260906/bench/ninfer_bench","bytes":5263704,"sha256":"01df541bfb8aff8d1a47257ffd45945b1bdb581306197b70f88450dd66f6dff3"},
+    "cache": {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-layer3-attention-617672eb-20260906/CMakeCache.txt","bytes":34225,"sha256":"e6bcc65625e9ad43480548a96dce8a620433af3a2aa989e46e09dc6451129e0c"},
+    "compile_commands": {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-layer3-attention-617672eb-20260906/compile_commands.json","bytes":267342,"sha256":"1a4be06cb4b1976326a9dc62e4126ae9ca641cc28b9658e9b04840a6f2cd54b7"},
+    "runtime_test": {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-layer3-attention-617672eb-20260906/tests/ninfer_qwen3_runtime_mechanisms_test","bytes":285704,"sha256":"35f0e1d4a8fc4945d4211e1bff0dbe94b181017ef55c70e634c95a2c8a1a7527"},
+    "decision_test": {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-layer3-attention-617672eb-20260906/tests/ninfer_qwen3_decision_trace_test","bytes":109928,"sha256":"190bdac5b3493c5f18f23dab8778cf3e94e908d4068beaefa89cd8a19d9a209e"},
+    "path_test": {"path":"/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-layer3-attention-617672eb-20260906/tests/ninfer_qwen3_prefill_tail_trace_path_test","bytes":27936,"sha256":"d6ec4c54654c9ebfd1c414304e9c9a2caca28bcc67e3dc88f5532097cf8268eb"}
+  },
+  "tools": {
+    "cxx":{"path":"/usr/bin/x86_64-linux-gnu-g++-13","bytes":1027128,"sha256":"1353e9bdd29a7295c7226bf6c63abccce056d8cac31f112e5cdbecc3f28c2769"},
+    "clang":{"path":"/opt/rocm/core-10.0/lib/llvm/bin/clang-23","bytes":201136,"sha256":"241bf4da7ec39bc00b68ed74f6be751516d9892ed990e8c7fa372bad18500247"},
+    "hipcc":{"path":"/opt/rocm/core-10.0/bin/hipcc","bytes":644120,"sha256":"7b95d430bb8c4d4237f9b4935dbd6440e2067fde0979cc69bffb26ebd021464c"},
+    "python":{"path":"/usr/bin/python3.12","bytes":8020928,"sha256":"1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118"},
+    "libamdhip64":{"path":"/opt/rocm/core-10.0/lib/libamdhip64.so.7.15.26333-0000000","bytes":28216272,"sha256":"817aeadfd9f62b68831ad89993163c7f1f470f30595e7e0da5fdc942193142a8"},
+    "libhipblaslt":{"path":"/opt/rocm/core-10.0/lib/libhipblaslt.so.1.4","bytes":9081728,"sha256":"1e8545626323f9b22c65d36492e1686b831cb85c8f7c8be3fc21c0d6cbb0d055"}
+  }
+}

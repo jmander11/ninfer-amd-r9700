@@ -1,0 +1,45 @@
+{
+  "schema": "ninfer.r9700.three-route-production-confirmation-result.v1",
+  "status": "passed",
+  "production_composition_confirmed": true,
+  "exact_public_token_parity": true,
+  "by_concurrency": [
+    {
+      "concurrency": 1,
+      "decode_seconds": 9.018674791,
+      "decode_output_tok_s": 28.38554509754248,
+      "per_lane_decode_tok_s": 28.38554509754248,
+      "exact_retained_tokens": true,
+      "over_retained_candidate": 0.9865955009907746
+    },
+    {
+      "concurrency": 2,
+      "decode_seconds": 14.70800287,
+      "decode_output_tok_s": 34.81098042510784,
+      "per_lane_decode_tok_s": 17.40549021255392,
+      "exact_retained_tokens": true,
+      "over_retained_candidate": 0.999717668855668
+    },
+    {
+      "concurrency": 3,
+      "decode_seconds": 16.40075402,
+      "decode_output_tok_s": 46.82711533039625,
+      "per_lane_decode_tok_s": 15.609038443465417,
+      "exact_retained_tokens": true,
+      "over_retained_candidate": 1.0002974735718737
+    },
+    {
+      "concurrency": 4,
+      "decode_seconds": 18.8960216,
+      "decode_output_tok_s": 54.191301305455745,
+      "per_lane_decode_tok_s": 13.547825326363936,
+      "exact_retained_tokens": true,
+      "over_retained_candidate": 1.0000447955624618
+    }
+  ],
+  "limitations": [
+    "Unprofiled whole decode does not establish physical bandwidth or stall freedom.",
+    "Low pre/post VRAM does not exclude competing GPU activity during inference.",
+    "One process per concurrency confirms composition; it is not a new speedup A/B."
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "exact_old_down_widths": [
+    5,
+    6
+  ],
+  "baseline_sha256": "9fccc922e04b0cf2146a0a78a9c18399a59f9351834b0e84c05abdd19bdf1e05",
+  "old_code_object_sha256": "f92dfaa5f4dc1d28e1949b673272dd6718ff8cb1ef90014c1133852928dae1e9",
+  "new_code_object_sha256": "c6dcc1783a1f7455fd20870cf3741312a6ff6d3e1270577d87c9356022c03fa4",
+  "normalization": "instructions without address comments or objdump zero-padding ellipsis",
+  "instruction_counts": {
+    "5": 438,
+    "6": 480
+  }
+}

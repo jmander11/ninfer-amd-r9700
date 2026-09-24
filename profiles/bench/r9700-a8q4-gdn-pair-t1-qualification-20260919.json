@@ -1,0 +1,25 @@
+{
+  "schema": "ninfer.r9700.a8q4-gdn-pair-t1-qualification.v1",
+  "status": "qualified_for_whole_ab_only",
+  "production_routing_authorized": false,
+  "command": "tools/r9700/build/a8q4_gdn_pair_t1_qual --out-json profiles/bench/r9700-a8q4-gdn-pair-t1-qualification-20260919.json --assembly tools/r9700/build/a8q4_gdn_pair_t1.s",
+  "executable": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/build/a8q4_gdn_pair_t1_qual", "bytes": 458824, "sha256": "631c5f6b5d2ffa5d18d3c411a3cd3e2cc9b4118a100ed6f5a1e56c9285835ce2"},
+  "sources": [
+    {"role": "qualifier", "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/a8q4_gdn_pair_t1_qual.hip", "bytes": 24885, "sha256": "1101e597721a7318b6d346fcbd35556c13a7d560a96364c2be4c97238be769d4"},
+    {"role": "shared_qualifier", "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/a8q4_shape_sweep_qual.hip", "bytes": 97355, "sha256": "b8f85a76b2f431ba4ea50fb0e3f28ece55a5501c69197e978df9516c98506be2"},
+    {"role": "contract", "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/linear/r9700_linear.h", "bytes": 23663, "sha256": "e667f49c33601df59de2da4d9abce6f10ea35822d36378c20690875fb0690716"},
+    {"role": "implementation", "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/linear/r9700_linear.hip", "bytes": 192188, "sha256": "b456c041d9980bf5cfad29b41ad69e50562efebb34a296af800446519e6e854d"}
+  ],
+  "device": {"name": "AMD Radeon AI PRO R9700", "architecture": "gfx1201", "pci_bus_id": "0000:13:00.0", "wave_size": 32, "hip_runtime_version": 71526333, "hip_driver_version": 71526333},
+  "power_profile_before": "auto",
+  "power_profile_after": "auto",
+  "static_receipt": {"status": "passed", "command": "python3 '/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/check_a8q4_gdn_pair_t1_static.py' '/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/build/a8q4_gdn_pair_t1.s'", "checker_sha256": "8adf5dc6422a2c30e0c602636aac17809ddd9f80dd0d4e37d13f4c04fbd1d855", "assembly_sha256": "afffa2f73d26813eaa5b1af7187ca7a51f48daeae65cfc110c9a9bd11afeb786", "exact_route_symbol": true, "native_iu4_dot8": true, "wave_size": 32, "vgpr": 18, "sgpr": 44, "lds_bytes": 0, "scratch_bytes": 0, "spill_count": 0},
+  "correctness": {"both_complete_outputs_bit_exact_to_serial": true, "independent_fp64_represented_oracle": true, "maximum_bf16_steps": 0, "status_poisoning": true, "canaries": true, "malformed_extent_alignment_alias_rejection": true},
+  "timing": {"scope": "complete serial quant+dot twice versus quant once+combined dot", "trials_per_arm": 12, "disjoint_weight_copies": 3, "weight_pair_bytes": 44564480, "intervening_weight_bytes": 89128960, "arm_order_balanced": true, "allocation_balanced": true,
+    "serial_samples_ms": [0.15659999847412109,0.1454399973154068,0.14628000557422638,0.14363999664783478,0.12807999551296234,0.13264100253582001,0.12763999402523041,0.12532000243663788,0.12508000433444977,0.29128000140190125,0.11739999800920486,0.11947999894618988],
+    "paired_samples_ms": [0.35267999768257141,0.12439999729394913,0.12483999878168106,0.12408000230789185,0.12488000094890594,0.10292000323534012,0.10155999660491943,0.10143999755382538,0.10187999904155731,0.10159999877214432,0.093879997730255127,0.093439996242523193],
+    "serial_copy_medians_ms": [0.13585999608039856,0.13014049828052521,0.13245999813079834],
+    "paired_copy_medians_ms": [0.10157999768853188,0.12446000054478645,0.10240000113844872],
+    "serial_median_ms": 0.13036049902439117, "paired_median_ms": 0.10240000113844872, "speedup": 1.2730517341317096, "all_copy_medians_clear_one_percent": true},
+  "decision": "direct_gate_passed_whole_ab_required"
+}

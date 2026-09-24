@@ -43,8 +43,16 @@ ResolvedSamplingParameters resolve_sampling(const ModelSamplingDefaults& default
         .presence_penalty  = overrides.presence_penalty.value_or(preset.presence_penalty),
         .frequency_penalty = overrides.frequency_penalty.value_or(preset.frequency_penalty),
         .seed              = overrides.seed.value_or(0),
+        .p_less            = overrides.p_less,
     };
     validate(resolved);
+    if (resolved.p_less) {
+        resolved.top_k             = 0;
+        resolved.top_p             = 1.0F;
+        resolved.min_p             = 0.0F;
+        resolved.presence_penalty  = 0.0F;
+        resolved.frequency_penalty = 0.0F;
+    }
     return resolved;
 }
 

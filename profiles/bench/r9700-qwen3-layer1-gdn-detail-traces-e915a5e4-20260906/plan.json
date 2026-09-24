@@ -1,0 +1,46 @@
+{
+  "artifact_type": "ninfer_qwen3_layer1_gdn_detail_trace_plan",
+  "schema_version": 1,
+  "status": "prepared_cpu_only_no_gpu_execution",
+  "source": {"commit": "e915a5e45a51c07784b36aede8650352bfe5e374", "tree": "8f447301e37f1263ab6431164276731ded6a12f1"},
+  "claim": "eager-only functional layer1 GDN localization; all captured timings are ineligible",
+  "production_routing_authorized": false,
+  "artifact": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval.ninfer", "bytes": 22763026944, "sha256": "d8fc77c36cf17c92e96d67b9a6b5a1826a1ade4f59d59c003b2368fe981fc512", "weights_id": "r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval"},
+  "history": {
+    "source_corpus": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids", "bytes": 333620, "sha256": "27e4f63c17efe3f89b5cf278b3b1a42a737316ed4044d7d0d1d52437059d1002"},
+    "p129_fixture": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-p129-isolation-discriminator-20260906/history-p129.ids", "bytes": 811, "sha256": "34e9bc09b99ae4efc06049e744e8b43ac5794a9dab76fcf43de43e31f5db4515"},
+    "seed_report": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-small-t-n16-whole-ab-c1-20260906/results-functional-failure-isolated-token-parity-attempt3/ordinary-control.json", "bytes": 13290, "sha256": "02fe8d9eb0ba21224def806bdd06ac5d67c6a6a11e912a56a9018d35c544eea2"},
+    "seed_token": 24178,
+    "rule": "source corpus tokens [0,128) followed by retained fresh-P128 ordinary greedy seed"
+  },
+  "hardware": {"device": 0, "name": "AMD Radeon AI PRO R9700", "architecture": "gfx1201", "wavefront_width": 32, "pci_bus": "0000:13:00.0", "pci_vendor_device": "1002:7551", "power_profile": "auto"},
+  "common": {"concurrency": 1, "maximum_product_concurrency": 4, "prefill_chunk": 4096, "kv_capacity": "workload", "repetitions": 1, "warmup": 0, "device_graph": false, "retain_token_ids": true},
+  "selectors": {"dflash_small_t_candidate": false, "dflash_mlp_down_t5_candidate": true, "dflash_rmsnorm_rows56_candidate": true, "ordinary_w1_uses_rows56_or_t5_candidates": false},
+  "prior_selector_on_parity": {"summary": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-rmsnorm-rows56-token-parity-20260906/results/summary.json", "bytes": 4263, "sha256": "7fcd118d8a010c6162671a47700e27b743a2baf4f67b0af1d1b1ad2f6a2b6144"}, "matches_ordinary_through_index": 20, "first_difference_index": 21, "ordinary_index21": 96723, "selector_on_index21": 128415, "ordinary_index27": 95946, "selector_on_index27": 96843, "purpose": "bypass the known W5 generic RMSNorm divergence and localize the next primitive"},
+  "target_pair": {"absolute_frontier": 130, "selected_input_token": 96558, "ordinary": {"role": "target-ordinary-frontier130", "width": 1, "selected_column": 0, "shape": "whole-pg129,1 ordinary"}, "dflash": {"role": "target-dflash-frontier130-column0", "width": 5, "selected_column": 0, "shape": "whole-pg129,1 DFlash K4/W5"}},
+  "text_pair": {"absolute_frontier": 129, "selected_input_token": 24178, "fresh": {"role": "text-fresh-frontier129-column128", "width": 129, "selected_column": 128, "shape": "base0/T129"}, "append": {"role": "text-append-frontier129-column0", "width": 1, "selected_column": 0, "shape": "base128/T1 isolated"}},
+  "trace": {
+    "legacy_layer_sidecar_bytes": 1320960,
+    "gdn_detail_sidecar_bytes": 78208,
+    "metadata_bytes": 12,
+    "combined_device_staging_bytes": 1399180,
+    "gdn_fields": [
+      {"name":"h","dtype":"bf16","elements":5120,"offset":0,"bytes":10240},
+      {"name":"g","dtype":"fp32","elements":48,"offset":10240,"bytes":192},
+      {"name":"beta","dtype":"fp32","elements":48,"offset":10432,"bytes":192},
+      {"name":"z","dtype":"bf16","elements":6144,"offset":10624,"bytes":12288},
+      {"name":"q","dtype":"bf16","elements":2048,"offset":22912,"bytes":4096},
+      {"name":"k","dtype":"bf16","elements":2048,"offset":27008,"bytes":4096},
+      {"name":"v","dtype":"bf16","elements":6144,"offset":31104,"bytes":12288},
+      {"name":"o","dtype":"bf16","elements":6144,"offset":43392,"bytes":12288},
+      {"name":"on","dtype":"bf16","elements":6144,"offset":55680,"bytes":12288},
+      {"name":"x","dtype":"bf16","elements":5120,"offset":67968,"bytes":10240}
+    ],
+    "one_combined_final_d2h": true,
+    "persistent_state_captured": false,
+    "runtime_requirement": "reported planned slack and available-after-startup each cover 1399180 bytes"
+  },
+  "comparisons": ["target ordinary W1 column0 versus DFlash W5 column0", "text fresh W129 column128 versus append W1 column0"],
+  "limitations": ["functional localization only; synchronous final D2H invalidates timing", "captures selected columns and no persistent convolution or recurrence state", "no production routing or performance claim"],
+  "results_directory": "results"
+}

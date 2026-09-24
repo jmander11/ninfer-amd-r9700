@@ -1,0 +1,2 @@
+device: name=AMD Radeon AI PRO R9700 arch=gfx1201 wave=32 pci=0000:13:00.0 runtime=71526333 driver=71526333 vram_mib=32624
+r9700_gdn_op_qualification: PASS conv=T1..8/17/63/64/65/128/1024/2048 B=1..4 tree/snapshot C=10240 Hq=16 Hv=48 K=V=128

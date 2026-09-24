@@ -1,0 +1,12 @@
+2b6822c352c102210fa9f5afbdcf58c474576258b6e9b811731a7066ecd881b2  profiles/bench/r9700-qwen3-layer0-recurrent-state-text-pair-20260906/results/append.layer.bin
+59d739735016cadaf1d82085e03596d0be31ac8a956ee83066e5d5b327b0009f  profiles/bench/r9700-qwen3-layer0-recurrent-state-text-pair-20260906/results/append.layer.json
+0037724719910f869f20d835536b9187bf0205d6b04c2400591f5b7bf278832b  profiles/bench/r9700-qwen3-layer0-recurrent-state-text-pair-20260906/results/append.report.json
+0590bf20498136400478b69595c0703fa47c25a1fac77d61647fe60b1756b0bc  profiles/bench/r9700-qwen3-layer0-recurrent-state-text-pair-20260906/results/append.state.bin
+3d6204b9bfc114c278766c799a3840f2ea320cd8062b0bdf375ab8519564ad85  profiles/bench/r9700-qwen3-layer0-recurrent-state-text-pair-20260906/results/append.state.json
+79c020efee91a2124d391c6b6c18fc6d4403267ef1dec68da59f7950980ec23b  profiles/bench/r9700-qwen3-layer0-recurrent-state-text-pair-20260906/results/fresh.layer.bin
+cbf0599e2738554161e3d9309f7af8e424f423487d33a35471facefca8b73e48  profiles/bench/r9700-qwen3-layer0-recurrent-state-text-pair-20260906/results/fresh.layer.json
+248ee3f34eef875e523dc4afe87192f55b9c3116d0b1f3e0b3b712a35a89f596  profiles/bench/r9700-qwen3-layer0-recurrent-state-text-pair-20260906/results/fresh.report.json
+0590bf20498136400478b69595c0703fa47c25a1fac77d61647fe60b1756b0bc  profiles/bench/r9700-qwen3-layer0-recurrent-state-text-pair-20260906/results/fresh.state.bin
+f1dfa564e1a8c1182c47ebe41f77454561215ef5b23f58e98660a67e037cebfe  profiles/bench/r9700-qwen3-layer0-recurrent-state-text-pair-20260906/results/fresh.state.json
+f4ea653763c4209c26ffa5f66de06d26546c943ea7886629e9b8ace7575b0934  profiles/bench/r9700-qwen3-layer0-recurrent-state-text-pair-20260906/results/state-comparison.json
+fb8ad5021699e3eefa3a7d74f612e64ef8a5c64767ca47291b9da6e2057631c7  profiles/bench/r9700-qwen3-layer0-recurrent-state-text-pair-20260906/results/summary.json

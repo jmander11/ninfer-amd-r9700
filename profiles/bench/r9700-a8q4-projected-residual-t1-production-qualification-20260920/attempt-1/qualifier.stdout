@@ -1,0 +1,1 @@
+a8q4_projected_residual_t1_static: PASS symbol=_ZN6ninfer3ops5r97006linear12_GLOBAL__N_136a8q4g64_projected_residual_t1_kernelEPKhS5_PKtPKjS5_S7_P12hip_bfloat16j vgpr=18 sgpr=32 wave32=true lds=0 scratch=0 spills=0

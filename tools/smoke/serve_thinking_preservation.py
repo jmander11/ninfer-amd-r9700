@@ -1,4 +1,4 @@
-"""Run the Qwen3.6 thinking-preservation fixture through a real ninfer-serve process."""
+"""Run the Qwen3.8 thinking-preservation fixture through a real ninfer-serve process."""
 
 from __future__ import annotations
 
@@ -16,6 +16,10 @@ from typing import Any
 
 class TestFailure(RuntimeError):
     pass
+
+
+REQUEST_LOG_ARTIFACT_TYPE = "ninfer_serve_request_log"
+REQUEST_LOG_SCHEMA_VERSION = 20
 
 
 def free_port() -> int:
@@ -98,8 +102,14 @@ def read_events(path: Path) -> list[dict[str, Any]]:
     for line in path.read_text(encoding="utf-8").splitlines():
         if line:
             value = json.loads(line)
-            if isinstance(value, dict):
-                events.append(value)
+            if not isinstance(value, dict):
+                raise TestFailure("request log contains a non-object event")
+            identity = (value.get("artifact_type"), value.get("schema_version"))
+            expected = (REQUEST_LOG_ARTIFACT_TYPE, REQUEST_LOG_SCHEMA_VERSION)
+            if identity != expected:
+                raise TestFailure(
+                    f"request log identity {identity!r} does not match {expected!r}")
+            events.append(value)
     return events
 
 
@@ -266,11 +276,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--artifact", type=Path, required=True)
     parser.add_argument("--backend", choices=("mtp", "dflash"), required=True)
-    parser.add_argument("--server-bin", type=Path, default=Path("build/apps/ninfer-serve"))
+    parser.add_argument("--server-bin", type=Path, default=Path("build-r9700/apps/ninfer-serve"))
     parser.add_argument(
         "--fixture",
         type=Path,
-        default=Path("tests/fixtures/serve/qwen3_6_thinking_preservation.json"),
+        default=Path("tests/fixtures/serve/qwen3_8_thinking_preservation.json"),
     )
     parser.add_argument("--startup-timeout", type=float, default=600.0)
     parser.add_argument("--port", type=int, default=0)

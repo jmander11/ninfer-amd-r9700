@@ -1,0 +1,16 @@
+499bf1346625e05b14d5cf95bdff5d7b33f29bc360f71a7736a0d8acfc80c89e  profiles/ppl/four-role-n16k16-a4-8k-prepare-20260905/plan.json
+ed8c7907db40f8c5e98d08c9f174c9342ba673ac333b2323004e38e76ba23a5d  profiles/ppl/four-role-n16k16-a4-8k-prepare-20260905/run.sh
+a2fcf2b292637c2cf12c7cfc00a81631d0852321bbda648d32bf7d5fa923ee6e  profiles/ppl/four-role-n16k16-a4-8k-prepare-20260905/validate_result.py
+8079cd290143de5be16cd3e022010d68022a5f3780870480a3ec9311a3d39315  tools/ppl/run.py
+1aa72c4def8d089ae6c71743503138200bd32b732d8d15c522200d00b620da23  tools/reference/qwen3_8_27b_bf16/ppl.py
+aa1ba6d9932a4bcefdfd1c395bde73911daeba083c6b45d353a421dcd1eae077  tools/ppl/corpus.ids
+ae7d907d21310f7f946d74f5b10f5989e900851c52d9cf04e6a9d21c25b5912a  tools/ppl/corpus.manifest.json
+9b402ad02be0f27d80530bd1eba4ead7c0179c658aa9654d43ca5b0fb9ca41f0  profiles/ppl/bf16-reference-deterministic-pv-gdn-v3-a-20260904/results.json
+3b599dcba827831dfde0c5259890735d1a296aa39bd016a3c467f5946a0262e7  profiles/ppl/bf16-reference-deterministic-pv-gdn-v3-a-20260904/8192.prefill.bf16-reference.json
+6ba4009ac23da9c831b475ce38fa98c377fd504ade81733de711be95e4092c0e  profiles/ppl/bf16-reference-deterministic-pv-gdn-v3-a-20260904/8192.prefill.bf16-reference.nllf32
+c9904bd5b09d00666aee8500023cb52cc6f22d5c369cc00ceba57ea04a6d80c1  profiles/ppl/bf16-reference-deterministic-pv-gdn-v3-a-20260904/8192.prefill.bf16-reference.argmaxi32
+9b13916a2a3ca8b8e5d01352f98a8306414f4e13a79989c19b1d1248d5eb00de  profiles/ppl/bf16-reference-deterministic-pv-gdn-v3-repeat-comparison-20260904.json
+55e5dfb93f385f76f1a8d41b00f53e4790a72795f333ca6d70b170d4acf7fc38  build-r9700-a4q4-n16k16/apps/ninfer-ppl
+ef9a6696a3d7202c6c1c07358e870436b899e754e063095a036f246a7048af68  build-r9700-a4q4-n16k16/CMakeCache.txt
+040c6e7ed29c856718a638c00181975710d987b7d5f49f4cafbdf68911f7e7d2  out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer
+2c5cb9f405ba581f685a96b1a2965ad3ff49b31280ebdd15d19158b6f4779c59  out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer.conversion.json

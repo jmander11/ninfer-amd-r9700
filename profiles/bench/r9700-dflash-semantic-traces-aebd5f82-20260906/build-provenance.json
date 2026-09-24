@@ -1,0 +1,22 @@
+{
+  "artifact_type": "ninfer_r9700_dflash_semantic_trace_build",
+  "schema_version": 1,
+  "source": {"commit": "aebd5f82b91a756429651b2795e3ad24c1058cb3", "tree": "cd5a2e3e872759d88c094f56e0f7e6416cf1340e"},
+  "build_directory": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-semantic-traces-aebd5f82-final-20260906",
+  "configure": ["cmake", "-S", ".", "-B", "build-r9700-semantic-traces-aebd5f82-final-20260906", "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_HIP_COMPILER=/opt/rocm/llvm/bin/clang++", "-DNINFER_BUILD_BENCHMARKS=ON", "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON", "-DGPU_BUILD_TARGETS=gfx1201", "-DNINFER_R9700_KV_VALUE_GROUP=16", "-DNINFER_R9700_Q4_ACTIVATION_BITS=8", "-DNINFER_R9700_W8_ACTIVATION_BITS=8", "-DNINFER_R9700_FP8_QK_WMMA=1", "-DNINFER_R9700_DFLASH_SMALL_T_CANDIDATE=0", "-DNINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE=0", "-DNINFER_R9700_XATTENTION_QUALIFICATION=OFF", "-DNINFER_R9700_XATTENTION_STRIDE=16", "-DNINFER_R9700_XATTENTION_TAU_PERMILLE=1000"],
+  "build": ["cmake", "--build", "build-r9700-semantic-traces-aebd5f82-final-20260906", "--target", "ninfer_bench", "-j", "16"],
+  "profile": {"GPU_BUILD_TARGETS": "gfx1201", "NINFER_R9700_KV_VALUE_GROUP": "16", "NINFER_R9700_Q4_ACTIVATION_BITS": "8", "NINFER_R9700_W8_ACTIVATION_BITS": "8", "NINFER_R9700_FP8_QK_WMMA": "1", "NINFER_R9700_DFLASH_SMALL_T_CANDIDATE": "0", "NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE": "0", "NINFER_R9700_XATTENTION_QUALIFICATION": "OFF", "NINFER_R9700_XATTENTION_STRIDE": "16", "NINFER_R9700_XATTENTION_TAU_PERMILLE": "1000"},
+  "toolchain_runtime": {
+    "cxx": {"path": "/usr/bin/x86_64-linux-gnu-g++-13", "bytes": 1027128, "sha256": "1353e9bdd29a7295c7226bf6c63abccce056d8cac31f112e5cdbecc3f28c2769"},
+    "hip_compiler": {"path": "/opt/rocm/core-10.0/lib/llvm/bin/clang-23", "bytes": 201136, "sha256": "241bf4da7ec39bc00b68ed74f6be751516d9892ed990e8c7fa372bad18500247"},
+    "hipcc": {"path": "/opt/rocm/core-10.0/bin/hipcc", "bytes": 644120, "sha256": "7b95d430bb8c4d4237f9b4935dbd6440e2067fde0979cc69bffb26ebd021464c"},
+    "python": {"path": "/usr/bin/python3.12", "bytes": 8020928, "sha256": "1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118"},
+    "hipblaslt": {"path": "/opt/rocm/core-10.0/lib/libhipblaslt.so.1.4", "bytes": 9081728, "sha256": "1e8545626323f9b22c65d36492e1686b831cb85c8f7c8be3fc21c0d6cbb0d055"},
+    "amdhip": {"path": "/opt/rocm/core-10.0/lib/libamdhip64.so.7.15.26333-0000000", "bytes": 28216272, "sha256": "817aeadfd9f62b68831ad89993163c7f1f470f30595e7e0da5fdc942193142a8"}
+  },
+  "outputs": {
+    "benchmark": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-semantic-traces-aebd5f82-final-20260906/bench/ninfer_bench", "bytes": 5141320, "sha256": "49eae026ba04a7d7bc7a0bed6a137e94c4bed34439d74304a9eb344679f8473b"},
+    "cmake_cache": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-semantic-traces-aebd5f82-final-20260906/CMakeCache.txt", "bytes": 33648, "sha256": "7d8121e9dab69e1ce7f4d85ec9be03522cb0a37b61c63390827f737ca678303b"},
+    "compile_commands": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-semantic-traces-aebd5f82-final-20260906/compile_commands.json", "bytes": 209326, "sha256": "701a1a06ebd3e0dbd70384252bdc03e598a26e5bc095d9021ecb261a08ff6bd3"}
+  }
+}

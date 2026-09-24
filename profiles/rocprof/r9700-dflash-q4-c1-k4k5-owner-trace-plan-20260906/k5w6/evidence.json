@@ -1,0 +1,351 @@
+{
+  "artifact_type": "ninfer_r9700_dflash_owner_trace_evidence",
+  "schema_version": 1,
+  "status": "valid-evaluation-attribution-only",
+  "cell": "k5w6",
+  "workload": {
+    "concurrency": 1,
+    "prompt_tokens": 128,
+    "generated_tokens": 64,
+    "draft_tokens": 5,
+    "verify_width": 6,
+    "device_graph": false,
+    "proposal_head": "optimized"
+  },
+  "benchmark": {
+    "decode_output_tok_s_profiled": 12.94503929,
+    "decode_engine_tok_s_profiled": 12.94503929,
+    "profiled_timing_admissible_for_selection": false
+  },
+  "target_verification_rounds": 39,
+  "bounded_terminal_selected_region_async_drain": {
+    "calls": 19,
+    "summed_duration_ns": 315119,
+    "max_completion_after_measured_ns": 2092304,
+    "dispatch_id_span_to_capture_end": 90,
+    "crossing_calls": 0,
+    "wholly_post_marker_calls": 19,
+    "dispatch_ids": [
+      80924,
+      80929,
+      80934,
+      80939,
+      80944,
+      80949,
+      80954,
+      80974,
+      81009,
+      80959,
+      80969,
+      80964,
+      80989,
+      80984,
+      80979,
+      80999,
+      81004,
+      80994,
+      81014
+    ],
+    "bounds": {
+      "maximum_calls": 32,
+      "maximum_dispatch_id_window": 128,
+      "maximum_completion_tail_ns": 5000000,
+      "maximum_summed_duration_ns": 1000000
+    },
+    "interpretation": "bounded selected-region asynchronous GPU drain/reordering after the measured host marker; global dispatch IDs may interleave independent streams",
+    "rows": [
+      {
+        "dispatch_id": 80924,
+        "duration_ns": 2920,
+        "completion_after_measured_ns": 332912,
+        "start_relation": "wholly-post-marker",
+        "region": "ninfer.attention.verify.attention payload=63",
+        "symbol": "ninfer::ops::r9700::linear::(anonymous namespace)::a8g64_quantize_activation_kernel(hip_bfloat16 const*, unsigned char*, unsigned char*, unsigned short*, unsigned int*, unsigned int, unsigned int)",
+        "attributed_stage": "target_64_layer_verification"
+      },
+      {
+        "dispatch_id": 80929,
+        "duration_ns": 2840,
+        "completion_after_measured_ns": 445712,
+        "start_relation": "wholly-post-marker",
+        "region": "ninfer.attention.verify.attention payload=63",
+        "symbol": "ninfer::ops::r9700::linear::(anonymous namespace)::a8g64_quantize_activation_kernel(hip_bfloat16 const*, unsigned char*, unsigned char*, unsigned short*, unsigned int*, unsigned int, unsigned int)",
+        "attributed_stage": "target_64_layer_verification"
+      },
+      {
+        "dispatch_id": 80934,
+        "duration_ns": 6800,
+        "completion_after_measured_ns": 564071,
+        "start_relation": "wholly-post-marker",
+        "region": "ninfer.attention.verify.attention payload=63",
+        "symbol": "ninfer::ops::r9700::eager::(anonymous namespace)::rmsnorm_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float, bool)",
+        "attributed_stage": "target_64_layer_verification"
+      },
+      {
+        "dispatch_id": 80939,
+        "duration_ns": 2600,
+        "completion_after_measured_ns": 741791,
+        "start_relation": "wholly-post-marker",
+        "region": "ninfer.attention.verify.attention payload=63",
+        "symbol": "ninfer::ops::r9700::eager::(anonymous namespace)::cast_fp32_to_bf16_kernel(float const*, hip_bfloat16*, unsigned long)",
+        "attributed_stage": "target_64_layer_verification"
+      },
+      {
+        "dispatch_id": 80944,
+        "duration_ns": 2840,
+        "completion_after_measured_ns": 866230,
+        "start_relation": "wholly-post-marker",
+        "region": "ninfer.attention.verify.attention payload=63",
+        "symbol": "ninfer::ops::r9700::eager::(anonymous namespace)::residual_add_kernel(hip_bfloat16 const*, hip_bfloat16*, unsigned long)",
+        "attributed_stage": "target_64_layer_verification"
+      },
+      {
+        "dispatch_id": 80949,
+        "duration_ns": 5240,
+        "completion_after_measured_ns": 1619307,
+        "start_relation": "wholly-post-marker",
+        "region": "ninfer.post-mixer.verify.post_mixer payload=63",
+        "symbol": "ninfer::ops::r9700::eager::(anonymous namespace)::silu_mul_strided_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned long, ninfer::ops::r9700::eager::SiluMulStridedShape)",
+        "attributed_stage": "target_64_layer_verification"
+      },
+      {
+        "dispatch_id": 80954,
+        "duration_ns": 96999,
+        "completion_after_measured_ns": 1957625,
+        "start_relation": "wholly-post-marker",
+        "region": "",
+        "symbol": "ninfer::ops::r9700::eager::(anonymous namespace)::rmsnorm_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float, bool)",
+        "attributed_stage": "proposal_head_and_round_service_or_unattributed"
+      },
+      {
+        "dispatch_id": 80974,
+        "duration_ns": 100840,
+        "completion_after_measured_ns": 2086524,
+        "start_relation": "wholly-post-marker",
+        "region": "",
+        "symbol": "ninfer::ops::r9700::eager::(anonymous namespace)::rmsnorm_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float, bool)",
+        "attributed_stage": "proposal_head_and_round_service_or_unattributed"
+      },
+      {
+        "dispatch_id": 81009,
+        "duration_ns": 59960,
+        "completion_after_measured_ns": 2090904,
+        "start_relation": "wholly-post-marker",
+        "region": "",
+        "symbol": "ninfer::ops::r9700::linear::(anonymous namespace)::a8q4g64_linear_wmma32_kernel(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int)",
+        "attributed_stage": "proposal_head_and_round_service_or_unattributed"
+      },
+      {
+        "dispatch_id": 80959,
+        "duration_ns": 4240,
+        "completion_after_measured_ns": 2084374,
+        "start_relation": "wholly-post-marker",
+        "region": "",
+        "symbol": "ninfer::ops::(anonymous namespace)::distribution_partial_kernel(hip_bfloat16 const*, int, int, int, int, ninfer::ops::SamplingConfig const*, int const*, int const*, int const*, int const*, int const*, unsigned long long*)",
+        "attributed_stage": "proposal_head_and_round_service_or_unattributed"
+      },
+      {
+        "dispatch_id": 80969,
+        "duration_ns": 4080,
+        "completion_after_measured_ns": 2086064,
+        "start_relation": "wholly-post-marker",
+        "region": "",
+        "symbol": "__amd_rocclr_copyBuffer",
+        "attributed_stage": "proposal_head_and_round_service_or_unattributed"
+      },
+      {
+        "dispatch_id": 80964,
+        "duration_ns": 2800,
+        "completion_after_measured_ns": 2085224,
+        "start_relation": "wholly-post-marker",
+        "region": "",
+        "symbol": "ninfer::targets::qwen3::(anonymous namespace)::advance_segmented_cursor(int const*, unsigned int, unsigned int, unsigned int*, unsigned int*)",
+        "attributed_stage": "proposal_head_and_round_service_or_unattributed"
+      },
+      {
+        "dispatch_id": 80989,
+        "duration_ns": 3680,
+        "completion_after_measured_ns": 2088664,
+        "start_relation": "wholly-post-marker",
+        "region": "",
+        "symbol": "void ninfer::ops::(anonymous namespace)::rope_kernel<(ninfer::ops::(anonymous namespace)::Profile)2, 128, 64, 8, 0, true>(int const*, hip_bfloat16*, hip_bfloat16*, int, long, long)",
+        "attributed_stage": "proposal_head_and_round_service_or_unattributed"
+      },
+      {
+        "dispatch_id": 80984,
+        "duration_ns": 2600,
+        "completion_after_measured_ns": 2087684,
+        "start_relation": "wholly-post-marker",
+        "region": "",
+        "symbol": "ninfer::ops::r9700::linear::(anonymous namespace)::a8g64_quantize_activation_kernel(hip_bfloat16 const*, unsigned char*, unsigned char*, unsigned short*, unsigned int*, unsigned int, unsigned int)",
+        "attributed_stage": "proposal_head_and_round_service_or_unattributed"
+      },
+      {
+        "dispatch_id": 80979,
+        "duration_ns": 2560,
+        "completion_after_measured_ns": 2087694,
+        "start_relation": "wholly-post-marker",
+        "region": "",
+        "symbol": "__amd_rocclr_copyBufferRectAligned",
+        "attributed_stage": "proposal_head_and_round_service_or_unattributed"
+      },
+      {
+        "dispatch_id": 80999,
+        "duration_ns": 4240,
+        "completion_after_measured_ns": 2089744,
+        "start_relation": "wholly-post-marker",
+        "region": "",
+        "symbol": "__amd_rocclr_fillBufferUnAligned",
+        "attributed_stage": "proposal_head_and_round_service_or_unattributed"
+      },
+      {
+        "dispatch_id": 81004,
+        "duration_ns": 4640,
+        "completion_after_measured_ns": 2091214,
+        "start_relation": "wholly-post-marker",
+        "region": "",
+        "symbol": "ninfer::ops::r9700::eager::(anonymous namespace)::rmsnorm_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float, bool)",
+        "attributed_stage": "proposal_head_and_round_service_or_unattributed"
+      },
+      {
+        "dispatch_id": 80994,
+        "duration_ns": 2440,
+        "completion_after_measured_ns": 2089324,
+        "start_relation": "wholly-post-marker",
+        "region": "",
+        "symbol": "__amd_rocclr_copyBufferRectAligned",
+        "attributed_stage": "proposal_head_and_round_service_or_unattributed"
+      },
+      {
+        "dispatch_id": 81014,
+        "duration_ns": 2800,
+        "completion_after_measured_ns": 2092304,
+        "start_relation": "wholly-post-marker",
+        "region": "",
+        "symbol": "ninfer::ops::r9700::dflash::(anonymous namespace)::append_cyclic_kernel(unsigned short const*, unsigned short const*, int const*, int const*, int const*, unsigned short*, unsigned short*, int, int, int, int)",
+        "attributed_stage": "proposal_head_and_round_service_or_unattributed"
+      }
+    ]
+  },
+  "stages": [
+    {
+      "stage": "prompt_prefill",
+      "calls": 2286,
+      "summed_duration_ms": 470.049948
+    },
+    {
+      "stage": "proposal_head_and_round_service_or_unattributed",
+      "calls": 9854,
+      "summed_duration_ms": 608.131186
+    },
+    {
+      "stage": "target_64_layer_verification",
+      "calls": 68874,
+      "summed_duration_ms": 3520.345088
+    }
+  ],
+  "operator_families": [
+    {
+      "stage": "target_64_layer_verification",
+      "family": "q4_linear",
+      "calls": 12480,
+      "summed_duration_ms": 2647.627652
+    },
+    {
+      "stage": "target_64_layer_verification",
+      "family": "normalization",
+      "calls": 8112,
+      "summed_duration_ms": 509.784889
+    },
+    {
+      "stage": "proposal_head_and_round_service_or_unattributed",
+      "family": "q4_linear",
+      "calls": 1527,
+      "summed_duration_ms": 472.893112
+    },
+    {
+      "stage": "prompt_prefill",
+      "family": "q4_linear",
+      "calls": 327,
+      "summed_duration_ms": 419.241719
+    },
+    {
+      "stage": "target_64_layer_verification",
+      "family": "other",
+      "calls": 48282,
+      "summed_duration_ms": 362.932547
+    },
+    {
+      "stage": "proposal_head_and_round_service_or_unattributed",
+      "family": "other",
+      "calls": 5942,
+      "summed_duration_ms": 71.656365
+    },
+    {
+      "stage": "proposal_head_and_round_service_or_unattributed",
+      "family": "normalization",
+      "calls": 1098,
+      "summed_duration_ms": 53.845395
+    },
+    {
+      "stage": "prompt_prefill",
+      "family": "other",
+      "calls": 1741,
+      "summed_duration_ms": 40.137231
+    },
+    {
+      "stage": "prompt_prefill",
+      "family": "normalization",
+      "calls": 215,
+      "summed_duration_ms": 10.651838
+    },
+    {
+      "stage": "proposal_head_and_round_service_or_unattributed",
+      "family": "dflash_swa",
+      "calls": 390,
+      "summed_duration_ms": 6.30725
+    },
+    {
+      "stage": "proposal_head_and_round_service_or_unattributed",
+      "family": "dflash_convolution",
+      "calls": 780,
+      "summed_duration_ms": 2.189429
+    },
+    {
+      "stage": "proposal_head_and_round_service_or_unattributed",
+      "family": "dflash_selector",
+      "calls": 39,
+      "summed_duration_ms": 0.886716
+    },
+    {
+      "stage": "proposal_head_and_round_service_or_unattributed",
+      "family": "embedding",
+      "calls": 78,
+      "summed_duration_ms": 0.352919
+    },
+    {
+      "stage": "prompt_prefill",
+      "family": "embedding",
+      "calls": 1,
+      "summed_duration_ms": 0.01052
+    },
+    {
+      "stage": "prompt_prefill",
+      "family": "sampling",
+      "calls": 2,
+      "summed_duration_ms": 0.00864
+    }
+  ],
+  "limitations": [
+    "The only exact local artifact/build pair is the retained legacy row-split canonical-Q4 evaluator; current N16/K16 DFlash companions are absent.",
+    "The all-Q4 base is an evaluation control and has not won terminal production selection.",
+    "Eager execution is required so per-layer ROCTX ranges remain attributable; its profiled timing is not a Device-Graph performance result.",
+    "Empty or outer-round-associated dispatches are conservatively combined as proposal/head/round service or unattributed; symbols refine operators but cannot invent a missing semantic marker.",
+    "The trace contains no performance counters and makes no memory-bandwidth, cache-hit, or stall claim.",
+    "A bounded terminal selected-region asynchronous GPU drain/reordering after the measured host marker is retained rather than discarded; empty-region rows remain conservatively unattributed service."
+  ],
+  "claims": {
+    "admissible": "evaluation-only eager whole-DFlash dispatch attribution separating exact 64-layer target verification from combined proposal/head/round service for K4/W5 and K5/W6",
+    "not_admissible": "production recipe selection, production routing, Device-Graph throughput, profiled throughput authority, acceptance/quality admission, physical bandwidth, cache hit rate, or practical-ceiling closure"
+  }
+}

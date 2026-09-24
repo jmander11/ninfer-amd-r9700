@@ -20,13 +20,19 @@ struct Options {
     std::uint32_t max_new        = 128;
     std::uint32_t max_context    = 2048;
     KvCapacityPolicy kv_capacity = KvCapacityPolicy::explicit_capacity(2048);
-    std::uint32_t prefill_chunk  = 1024;
+    std::size_t kv_ram_capacity_bytes = 0;
+    std::size_t kv_disk_capacity_bytes = 0;
+    std::filesystem::path kv_disk_location;
+    KvDiskCompress kv_disk_compress = KvDiskCompress::Off;
+    std::uint32_t prefill_chunk  = kDefaultPrefillChunk;
     int device                   = 0;
 
-    KvCacheStorage kv_cache = KvCacheStorage::BFloat16;
     SpeculativeOptions speculative;
     bool enable_vision  = false;
-    bool use_cuda_graph = true;
+    bool use_device_graph = true;
+
+    bool capture_context_checkpoint = false;
+    std::optional<std::vector<std::uint32_t>> context_checkpoint_marks;
 
     bool raw_output      = false;
     bool print_token_ids = false;

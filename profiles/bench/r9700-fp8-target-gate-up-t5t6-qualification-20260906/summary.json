@@ -1,0 +1,118 @@
+{
+  "artifact_type": "ninfer_r9700_fp8_target_gate_up_t5t6_qualification",
+  "schema_version": 1,
+  "status": "rejected",
+  "production_eligible": false,
+  "production_routing_authorized": false,
+  "whole_dflash_authority": false,
+  "source_commit": "337940345d20cd0211fccd10bc4f7e9d0181bc2d",
+  "binary": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/build/fp8_gate_up_small_t_qual",
+    "bytes": 113272,
+    "sha256": "4611e36dc2f1a5324a94a0da7f00c402b052f986dbf8ac4c504831d4327f4ece"
+  },
+  "assembly": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/build/fp8_gate_up_small_t.s",
+    "bytes": 63959,
+    "sha256": "a463e37e04512213013302769fa946c2fd1a57565533782f60797f107f46071d"
+  },
+  "build_provenance": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-target-gate-up-t5t6-qualification-20260906/build-provenance.json",
+    "bytes": 2984,
+    "sha256": "8b89b2685dadcdece760c3b5897800f74dd0a444802683b7f04a26006eae9a8a"
+  },
+  "analysis_repair": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-target-gate-up-t5t6-qualification-20260906/analysis-repair.json",
+    "bytes": 2178,
+    "sha256": "943d09751460aab72d508559f01fa9146c057514edd0e2a6d7b3a6452b0ab3f9"
+  },
+  "capture_result_closure": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-target-gate-up-t5t6-qualification-20260906/result.sha256",
+    "bytes": 1911,
+    "sha256": "d78fceed234a4f15990c5324bb9150433a9d2c48e18398dbc4a432a72748069c"
+  },
+  "hardware": {
+    "device": 0,
+    "name": "AMD Radeon AI PRO R9700",
+    "architecture": "gfx1201",
+    "wavefront_width": 32,
+    "pci_bus": "0000:13:00.0",
+    "pci_vendor_device": "1002:7551",
+    "power_profile_before_after": "auto"
+  },
+  "numeric_regression": "passed_before_timing",
+  "decision": {
+    "accepted": false,
+    "criterion": "both cells require overall candidate/incumbent median ratio at most 0.90, each launch-order median ratio at most 0.92, paired-ratio mean plus two standard errors below 0.95, launch-order median-ratio delta at most 0.03, and positive projected 64-call saving",
+    "requires_both_cells": true
+  },
+  "cells": [
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-target-gate-up-t5t6-qualification-20260906/cell-t5.json",
+      "tokens": 5,
+      "status": "rejected"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-target-gate-up-t5t6-qualification-20260906/cell-t6.json",
+      "tokens": 6,
+      "status": "rejected"
+    }
+  ],
+  "raw_evidence": {
+    "regression.stdout": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-target-gate-up-t5t6-qualification-20260906/regression.stdout",
+      "bytes": 41,
+      "sha256": "a01c8b5898b98aea4da3e629f7fe5c11e3aee461b77def3afce44004804658a9"
+    },
+    "regression.stderr": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-target-gate-up-t5t6-qualification-20260906/regression.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "regression.exit": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-target-gate-up-t5t6-qualification-20260906/regression.exit",
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    "benchmark.stdout": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-target-gate-up-t5t6-qualification-20260906/benchmark.stdout",
+      "bytes": 1134,
+      "sha256": "d5d53e68da3fb2ecbf962518dfa345b62ff9c009ed170dffec7fe4204bb1f528"
+    },
+    "benchmark.stderr": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-target-gate-up-t5t6-qualification-20260906/benchmark.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "benchmark.exit": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-target-gate-up-t5t6-qualification-20260906/benchmark.exit",
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    "static.stdout": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-target-gate-up-t5t6-qualification-20260906/static.stdout",
+      "bytes": 158,
+      "sha256": "9622ae7c504072180458a5ca4f7d1da9357bda13f6019aed8e983f8ae63bddd4"
+    },
+    "hardware.txt": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-target-gate-up-t5t6-qualification-20260906/hardware.txt",
+      "bytes": 120,
+      "sha256": "b3ccbf6716f7e169ec87933e8cdbe7c01c0ebe56c6ff748cae5e6fe0382a293a"
+    },
+    "power-before.txt": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-target-gate-up-t5t6-qualification-20260906/power-before.txt",
+      "bytes": 5,
+      "sha256": "6d1dbb9c582de44ad1dbc0d24eca4d831d8172bef0593680ecd24f6d0ce9def5"
+    },
+    "power-after.txt": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-target-gate-up-t5t6-qualification-20260906/power-after.txt",
+      "bytes": 5,
+      "sha256": "6d1dbb9c582de44ad1dbc0d24eca4d831d8172bef0593680ecd24f6d0ce9def5"
+    }
+  },
+  "limitations": [
+    "standalone represented-input operator qualification only",
+    "does not establish whole-DFlash performance, exact-token parity, or production eligibility",
+    "a passing result only justifies a separately reviewed production integration"
+  ]
+}

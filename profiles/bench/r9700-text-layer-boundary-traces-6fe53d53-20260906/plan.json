@@ -1,0 +1,105 @@
+{
+  "artifact_type": "ninfer_qwen3_text_layer_boundary_trace_plan",
+  "schema_version": 1,
+  "status": "prepared_cpu_only_no_gpu_execution",
+  "source": {
+    "commit": "6fe53d531072dfd6069b951b64006603ef976ad9",
+    "tree": "b711ff3e93f6cf3249456427401152084c66b939",
+    "worktree": "/ssdpool2nvme/local_llm/ninfer-amd-r9700-combined-selector-src-6fe53d53"
+  },
+  "claim": "eager-only functional localization of the first current Text append-versus-fresh divergence on the retained combined-selector build; all captured timings are ineligible",
+  "production_routing_authorized": false,
+  "build_receipt": "build-provenance.json",
+  "artifact": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval.ninfer",
+    "bytes": 22763026944,
+    "sha256": "d8fc77c36cf17c92e96d67b9a6b5a1826a1ade4f59d59c003b2368fe981fc512",
+    "weights_id": "r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval"
+  },
+  "history": {
+    "source_corpus": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids",
+      "bytes": 333620,
+      "sha256": "27e4f63c17efe3f89b5cf278b3b1a42a737316ed4044d7d0d1d52437059d1002"
+    },
+    "p129_fixture": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-p129-isolation-discriminator-20260906/history-p129.ids",
+      "bytes": 811,
+      "sha256": "34e9bc09b99ae4efc06049e744e8b43ac5794a9dab76fcf43de43e31f5db4515"
+    },
+    "seed_token": 24178,
+    "rule": "source corpus tokens [0,128) followed by retained fresh-P128 ordinary greedy seed"
+  },
+  "prior_authorities": {
+    "combined_gate_receipt": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/build-provenance.json",
+      "bytes": 4481,
+      "sha256": "ffdc23ea98b3dcf67a0ebee15bb0d2271fd95e469593e0d87459e63da1de83a6"
+    },
+    "combined_gate_capture": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/results/result.sha256",
+      "bytes": 3454,
+      "sha256": "3e262f85e9807ef2e72f3e76524624835293f2f358c4defe1d47b581d64fba06"
+    },
+    "combined_gate_analysis": {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-attention-candidate-combined-whole-parity-gate-template-20260906/results/summary.json",
+      "bytes": 7418,
+      "sha256": "86fccb50cdee3ce49a03cd84f1e827a234e32edd375a1830e0501d8d06dd130a"
+    }
+  },
+  "hardware": {
+    "device": 0,
+    "name": "AMD Radeon AI PRO R9700",
+    "architecture": "gfx1201",
+    "wavefront_width": 32,
+    "pci_bus": "0000:13:00.0",
+    "pci_vendor_device": "1002:7551",
+    "power_profile": "auto"
+  },
+  "common": {
+    "concurrency": 1,
+    "maximum_product_concurrency": 4,
+    "prefill_chunk": 4096,
+    "kv_capacity": "workload",
+    "repetitions": 1,
+    "warmup": 0,
+    "device_graph": false,
+    "retain_token_ids": true
+  },
+  "text_pair": {
+    "absolute_frontier": 129,
+    "selected_input_token": 24178,
+    "fresh": {
+      "role": "text-fresh-frontier129-column128",
+      "width": 129,
+      "selected_column": 128,
+      "shape": "base0/T129"
+    },
+    "append": {
+      "role": "text-append-frontier129-column0",
+      "width": 1,
+      "selected_column": 0,
+      "shape": "base128/T1 isolated"
+    }
+  },
+  "trace": {
+    "hidden": 5120,
+    "layers": 64,
+    "snapshots": 129,
+    "bytes_per_snapshot": 10240,
+    "bytes_per_sidecar": 1320960,
+    "device_staging_bytes": 1320972,
+    "prior_gate_available_after_startup_bytes": 8992587776,
+    "prior_gate_headroom_multiple": 6807,
+    "runtime_requirement": "reported planned slack and available-after-startup each cover device staging bytes",
+    "one_staging_slab_per_process": true,
+    "layout": "input then each layer post_mixer/post_mlp",
+    "one_final_d2h": true
+  },
+  "limitations": [
+    "functional localization only; synchronous final D2H invalidates timing",
+    "first differing represented-BF16 boundary localizes a layer half, not a primitive root cause",
+    "no production routing or performance claim"
+  ],
+  "results_directory": "results"
+}

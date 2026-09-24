@@ -1,7 +1,6 @@
 #include "runtime/contract/sampling.h"
 
-#include <ninfer/targets/qwen3_6_27b/package.h>
-#include <ninfer/targets/qwen3_6_35b_a3b/package.h>
+#include <ninfer/targets/qwen3_8_27b/package.h>
 
 #include <cmath>
 #include <iostream>
@@ -40,43 +39,19 @@ bool throws_runtime(const auto& operation) {
 } // namespace
 
 int main() {
-    using Dense27 = ninfer::targets::qwen3_6_27b::Package;
-    using Moe35   = ninfer::targets::qwen3_6_35b_a3b::Package;
+    using Dense27 = ninfer::targets::qwen3_8_27b::Package;
 
     int failures = 0;
 
-    const ninfer::ModelSamplingDefaults qwen3_6 = Dense27::sampling_defaults(Dense27::model_id);
-    const ninfer::ModelSamplingDefaults qwen3_8 =
-        Dense27::sampling_defaults(Dense27::qwen3_8_model_id);
-    const ninfer::ModelSamplingDefaults qwen3_6_35 = Moe35::sampling_defaults(Moe35::model_id);
+    const ninfer::ModelSamplingDefaults qwen3_8 = Dense27::sampling_defaults(Dense27::model_id);
+    const ninfer::SamplingPreset qwen3_8_thinking{
+        .temperature = 2.0F, .top_k = 20, .top_p = 0.95F, .min_p = 0.0F};
+    const ninfer::SamplingPreset qwen3_8_non_thinking{
+        .temperature = 2.0F, .top_k = 20, .top_p = 0.8F, .min_p = 0.0F};
 
-    const ninfer::SamplingPreset dense_thinking{
-        .temperature = 1.0F, .top_k = 20, .top_p = 0.95F, .min_p = 0.0F};
-    const ninfer::SamplingPreset dense_non_thinking{
-        .temperature      = 0.7F,
-        .top_k            = 20,
-        .top_p            = 0.8F,
-        .min_p            = 0.0F,
-        .presence_penalty = 1.5F,
-    };
-    const ninfer::SamplingPreset moe_thinking{
-        .temperature      = 1.0F,
-        .top_k            = 20,
-        .top_p            = 0.95F,
-        .min_p            = 0.0F,
-        .presence_penalty = 1.5F,
-    };
-
-    failures += check(same_preset(qwen3_6.thinking, dense_thinking),
-                      "Qwen3.6-27B thinking defaults mismatch");
-    failures += check(same_preset(qwen3_6.non_thinking, dense_non_thinking),
-                      "Qwen3.6-27B non-thinking defaults mismatch");
-    failures += check(same_preset(qwen3_8.thinking, dense_thinking) &&
-                          same_preset(qwen3_8.non_thinking, dense_non_thinking),
+    failures += check(same_preset(qwen3_8.thinking, qwen3_8_thinking) &&
+                          same_preset(qwen3_8.non_thinking, qwen3_8_non_thinking),
                       "Qwen3.8-27B defaults mismatch");
-    failures += check(same_preset(qwen3_6_35.thinking, moe_thinking) &&
-                          same_preset(qwen3_6_35.non_thinking, dense_non_thinking),
-                      "Qwen3.6-35B-A3B defaults mismatch");
     failures += check(throws_runtime([] { (void)Dense27::sampling_defaults("unknown"); }),
                       "unknown model received dense-27B sampling defaults");
 
@@ -84,14 +59,20 @@ int main() {
         qwen3_8, ninfer::SamplingMode::Thinking, ninfer::SamplingOverrides{});
     const ninfer::ResolvedSamplingParameters non_thinking = ninfer::runtime::resolve_sampling(
         qwen3_8, ninfer::SamplingMode::NonThinking, ninfer::SamplingOverrides{});
-    failures += check(thinking.temperature == 1.0F && thinking.top_p == 0.95F &&
-                          thinking.presence_penalty == 0.0F && thinking.seed == 0,
-                      "omitted overrides did not select Qwen3.8 thinking defaults");
-    failures += check(non_thinking.temperature == 0.7F && non_thinking.top_p == 0.8F &&
-                          non_thinking.presence_penalty == 1.5F,
-                      "omitted overrides did not select Qwen3.8 non-thinking defaults");
+    failures += check(thinking.p_less && thinking.temperature == 2.0F &&
+                          thinking.top_k == 0 && thinking.top_p == 1.0F &&
+                          thinking.min_p == 0.0F && thinking.presence_penalty == 0.0F &&
+                          thinking.frequency_penalty == 0.0F && thinking.seed == 0,
+                      "omitted overrides did not select default p-less thinking");
+    failures += check(non_thinking.p_less && non_thinking.temperature == 2.0F &&
+                          non_thinking.top_k == 0 && non_thinking.top_p == 1.0F &&
+                          non_thinking.min_p == 0.0F &&
+                          non_thinking.presence_penalty == 0.0F &&
+                          non_thinking.frequency_penalty == 0.0F,
+                      "omitted overrides did not select default p-less non-thinking");
 
     ninfer::SamplingOverrides overrides;
+    overrides.p_less           = false;
     overrides.temperature       = 0.0F;
     overrides.top_k             = 0;
     overrides.top_p             = 0.0F;
@@ -103,8 +84,31 @@ int main() {
         ninfer::runtime::resolve_sampling(qwen3_8, ninfer::SamplingMode::NonThinking, overrides);
     failures += check(overridden.temperature == 0.0F && overridden.top_k == 0 &&
                           overridden.top_p == 0.0F && overridden.presence_penalty == 0.0F &&
-                          overridden.frequency_penalty == -1.0F && overridden.seed == 123,
+                          overridden.frequency_penalty == -1.0F && overridden.seed == 123 &&
+                          !overridden.p_less,
                       "explicit zero sampling overrides were lost");
+
+    ninfer::SamplingOverrides p_less_overrides;
+    p_less_overrides.p_less            = true;
+    p_less_overrides.temperature       = 1.5F;
+    p_less_overrides.top_k             = 5;
+    p_less_overrides.top_p             = 0.5F;
+    p_less_overrides.min_p             = 0.2F;
+    p_less_overrides.presence_penalty  = 1.5F;
+    p_less_overrides.frequency_penalty = 0.5F;
+    p_less_overrides.seed              = 99;
+    const ninfer::ResolvedSamplingParameters p_less = ninfer::runtime::resolve_sampling(
+        qwen3_8, ninfer::SamplingMode::Thinking, p_less_overrides);
+    failures += check(p_less.p_less && p_less.temperature == 1.5F && p_less.seed == 99 &&
+                          p_less.top_k == 0 && p_less.top_p == 1.0F && p_less.min_p == 0.0F &&
+                          p_less.presence_penalty == 0.0F && p_less.frequency_penalty == 0.0F,
+                      "p-less resolution did not keep temperature/seed and drop filters");
+    p_less_overrides.top_p = 1.5F;
+    failures += check(throws_invalid([&] {
+                          (void)ninfer::runtime::resolve_sampling(
+                              qwen3_8, ninfer::SamplingMode::Thinking, p_less_overrides);
+                      }),
+                      "p-less accepted an out-of-range ignored field");
 
     overrides.temperature = std::numeric_limits<float>::quiet_NaN();
     failures += check(throws_invalid([&] {

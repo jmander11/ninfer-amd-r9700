@@ -1,0 +1,23 @@
+{
+  "artifact_type": "ninfer_qwen3_layer_boundary_trace",
+  "schema_version": 1,
+  "diagnostic_only": true,
+  "timing_evidence_eligible": false,
+  "production_routing_authorized": false,
+  "execution": "eager",
+  "role": "text-append-frontier129-column0",
+  "width": 1,
+  "selected_column": 0,
+  "absolute_frontier": 129,
+  "token": 24178,
+  "cache_position": 128,
+  "rope_position": 128,
+  "hidden": 5120,
+  "layers": 64,
+  "snapshot_count": 129,
+  "snapshot_bytes": 10240,
+  "sidecar_path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-fp8-e2-t129-text-parity-gate-20260906/results/layer1-append.trace.bin",
+  "sidecar_bytes": 1320960,
+  "sidecar_fnv1a64": "ea660469c3ecd36d",
+  "layout": "little-endian-u16: input, then layer0..63 post_mixer,post_mlp"
+}

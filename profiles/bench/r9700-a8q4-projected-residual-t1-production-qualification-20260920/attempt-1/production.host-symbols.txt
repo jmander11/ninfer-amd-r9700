@@ -1,0 +1,1036 @@
+000000000000c840 r CSWTCH.1
+00000000000c56f0 d DW.ref._ZTISt14overflow_error
+00000000000c56e8 d DW.ref.__gxx_personality_v0
+000000000000c8f4 r GCC_except_table0
+000000000000e47c r GCC_except_table0
+000000000000ef50 r GCC_except_table0
+000000000000e490 r GCC_except_table1
+000000000000eab0 r GCC_except_table1
+000000000000ed18 r GCC_except_table1
+000000000000d334 r GCC_except_table10
+000000000000e544 r GCC_except_table10
+000000000000f204 r GCC_except_table100
+000000000000d664 r GCC_except_table102
+000000000000d674 r GCC_except_table103
+000000000000d6b4 r GCC_except_table106
+000000000000d6d8 r GCC_except_table107
+000000000000d344 r GCC_except_table11
+000000000000e558 r GCC_except_table11
+000000000000eda0 r GCC_except_table11
+000000000000d700 r GCC_except_table110
+000000000000d71c r GCC_except_table111
+000000000000d740 r GCC_except_table112
+000000000000d764 r GCC_except_table113
+000000000000d78c r GCC_except_table114
+000000000000d7b4 r GCC_except_table115
+000000000000d7d8 r GCC_except_table116
+000000000000d7fc r GCC_except_table117
+000000000000d820 r GCC_except_table118
+000000000000d844 r GCC_except_table119
+000000000000e56c r GCC_except_table12
+000000000000edb0 r GCC_except_table12
+000000000000d868 r GCC_except_table120
+000000000000d88c r GCC_except_table121
+000000000000d8b0 r GCC_except_table122
+000000000000d8d4 r GCC_except_table124
+000000000000d8f8 r GCC_except_table125
+000000000000d91c r GCC_except_table126
+000000000000d948 r GCC_except_table127
+000000000000d974 r GCC_except_table128
+000000000000e580 r GCC_except_table13
+000000000000edc4 r GCC_except_table13
+000000000000d9a4 r GCC_except_table130
+000000000000d9d8 r GCC_except_table131
+000000000000da0c r GCC_except_table132
+000000000000da40 r GCC_except_table133
+000000000000da74 r GCC_except_table135
+000000000000e594 r GCC_except_table14
+000000000000ec9c r GCC_except_table14
+000000000000da9c r GCC_except_table142
+000000000000dab0 r GCC_except_table146
+000000000000ce10 r GCC_except_table15
+000000000000e5a8 r GCC_except_table15
+000000000000ecd8 r GCC_except_table15
+000000000000e5bc r GCC_except_table16
+000000000000ef8c r GCC_except_table16
+000000000000dac4 r GCC_except_table166
+000000000000ce2c r GCC_except_table17
+000000000000e5d0 r GCC_except_table17
+000000000000ecf8 r GCC_except_table17
+000000000000edd8 r GCC_except_table17
+000000000000dadc r GCC_except_table172
+000000000000daf0 r GCC_except_table176
+000000000000db08 r GCC_except_table177
+000000000000db1c r GCC_except_table179
+000000000000d35c r GCC_except_table18
+000000000000ede8 r GCC_except_table18
+000000000000efa0 r GCC_except_table18
+000000000000db30 r GCC_except_table181
+000000000000db40 r GCC_except_table183
+000000000000db80 r GCC_except_table184
+000000000000ce54 r GCC_except_table19
+000000000000e5e4 r GCC_except_table19
+000000000000edf8 r GCC_except_table19
+000000000000dbb0 r GCC_except_table191
+000000000000dbe4 r GCC_except_table192
+000000000000dbf8 r GCC_except_table194
+000000000000dc08 r GCC_except_table195
+000000000000dc40 r GCC_except_table196
+000000000000dc6c r GCC_except_table197
+000000000000c90c r GCC_except_table2
+000000000000e4a4 r GCC_except_table2
+000000000000eb74 r GCC_except_table2
+000000000000ed64 r GCC_except_table2
+000000000000ce70 r GCC_except_table20
+000000000000e5f8 r GCC_except_table20
+000000000000dc98 r GCC_except_table201
+000000000000dcb0 r GCC_except_table202
+000000000000dcc4 r GCC_except_table204
+000000000000dcd4 r GCC_except_table206
+000000000000e60c r GCC_except_table21
+000000000000ee08 r GCC_except_table21
+000000000000efb4 r GCC_except_table21
+000000000000dd14 r GCC_except_table210
+000000000000dd58 r GCC_except_table211
+000000000000dd6c r GCC_except_table213
+000000000000dd7c r GCC_except_table214
+000000000000ddb4 r GCC_except_table215
+000000000000de00 r GCC_except_table216
+000000000000de4c r GCC_except_table217
+000000000000de8c r GCC_except_table218
+000000000000decc r GCC_except_table219
+000000000000e620 r GCC_except_table22
+000000000000ee18 r GCC_except_table22
+000000000000deec r GCC_except_table220
+000000000000df14 r GCC_except_table223
+000000000000df3c r GCC_except_table225
+000000000000df54 r GCC_except_table226
+000000000000df68 r GCC_except_table227
+000000000000dfac r GCC_except_table228
+000000000000dfcc r GCC_except_table229
+000000000000d36c r GCC_except_table23
+000000000000e634 r GCC_except_table23
+000000000000efc8 r GCC_except_table23
+000000000000dff4 r GCC_except_table232
+000000000000e01c r GCC_except_table233
+000000000000e040 r GCC_except_table235
+000000000000e058 r GCC_except_table237
+000000000000e07c r GCC_except_table238
+000000000000d384 r GCC_except_table24
+000000000000e648 r GCC_except_table24
+000000000000e0a4 r GCC_except_table240
+000000000000e0bc r GCC_except_table242
+000000000000e0e0 r GCC_except_table243
+000000000000e108 r GCC_except_table244
+000000000000e12c r GCC_except_table245
+000000000000e154 r GCC_except_table246
+000000000000e1ac r GCC_except_table248
+000000000000e1c0 r GCC_except_table249
+000000000000d39c r GCC_except_table25
+000000000000e65c r GCC_except_table25
+000000000000efdc r GCC_except_table25
+000000000000e1d0 r GCC_except_table252
+000000000000e20c r GCC_except_table259
+000000000000e670 r GCC_except_table26
+000000000000ee50 r GCC_except_table26
+000000000000e230 r GCC_except_table260
+000000000000e250 r GCC_except_table267
+000000000000e268 r GCC_except_table269
+000000000000e684 r GCC_except_table27
+000000000000ee60 r GCC_except_table27
+000000000000e298 r GCC_except_table273
+000000000000e2ac r GCC_except_table275
+000000000000e2c8 r GCC_except_table276
+000000000000ce90 r GCC_except_table28
+000000000000e698 r GCC_except_table28
+000000000000e2dc r GCC_except_table280
+000000000000e2f0 r GCC_except_table282
+000000000000d3b4 r GCC_except_table29
+000000000000e6ac r GCC_except_table29
+000000000000ee70 r GCC_except_table29
+000000000000efec r GCC_except_table29
+000000000000cd78 r GCC_except_table3
+000000000000e4b8 r GCC_except_table3
+000000000000d3cc r GCC_except_table30
+000000000000e6c0 r GCC_except_table30
+000000000000ee80 r GCC_except_table30
+000000000000d3e4 r GCC_except_table31
+000000000000e6d4 r GCC_except_table31
+000000000000d3f8 r GCC_except_table32
+000000000000e6e8 r GCC_except_table32
+000000000000eeb4 r GCC_except_table32
+000000000000f000 r GCC_except_table32
+000000000000d410 r GCC_except_table33
+000000000000e6fc r GCC_except_table33
+000000000000d424 r GCC_except_table34
+000000000000eecc r GCC_except_table34
+000000000000d43c r GCC_except_table35
+000000000000e710 r GCC_except_table35
+000000000000eedc r GCC_except_table35
+000000000000f014 r GCC_except_table35
+000000000000d450 r GCC_except_table36
+000000000000e724 r GCC_except_table36
+000000000000d468 r GCC_except_table37
+000000000000e738 r GCC_except_table37
+000000000000eefc r GCC_except_table37
+000000000000e74c r GCC_except_table38
+000000000000f028 r GCC_except_table38
+000000000000d15c r GCC_except_table39
+000000000000e760 r GCC_except_table39
+000000000000cd94 r GCC_except_table4
+000000000000e4cc r GCC_except_table4
+000000000000ebcc r GCC_except_table4
+000000000000ed74 r GCC_except_table4
+000000000000e774 r GCC_except_table40
+000000000000f03c r GCC_except_table40
+000000000000d47c r GCC_except_table41
+000000000000ef10 r GCC_except_table41
+000000000000f04c r GCC_except_table41
+000000000000ef24 r GCC_except_table42
+000000000000f060 r GCC_except_table42
+000000000000d494 r GCC_except_table47
+000000000000d4ec r GCC_except_table48
+000000000000d304 r GCC_except_table5
+000000000000e4e0 r GCC_except_table5
+000000000000ebe0 r GCC_except_table5
+000000000000ed84 r GCC_except_table5
+000000000000d500 r GCC_except_table51
+000000000000d1dc r GCC_except_table53
+000000000000d200 r GCC_except_table54
+000000000000f074 r GCC_except_table54
+000000000000d214 r GCC_except_table55
+000000000000d244 r GCC_except_table56
+000000000000f088 r GCC_except_table56
+000000000000d26c r GCC_except_table57
+000000000000f09c r GCC_except_table58
+000000000000d294 r GCC_except_table59
+000000000000cdcc r GCC_except_table6
+000000000000e4f4 r GCC_except_table6
+000000000000ebf4 r GCC_except_table6
+000000000000ef64 r GCC_except_table6
+000000000000f0b0 r GCC_except_table60
+000000000000f0c4 r GCC_except_table62
+000000000000d2c0 r GCC_except_table63
+000000000000f0d8 r GCC_except_table64
+000000000000f0ec r GCC_except_table66
+000000000000d524 r GCC_except_table69
+000000000000e508 r GCC_except_table7
+000000000000d53c r GCC_except_table70
+000000000000d554 r GCC_except_table71
+000000000000f100 r GCC_except_table71
+000000000000d56c r GCC_except_table72
+000000000000d584 r GCC_except_table75
+000000000000f114 r GCC_except_table75
+000000000000d5b4 r GCC_except_table77
+000000000000f128 r GCC_except_table77
+000000000000d5c8 r GCC_except_table78
+000000000000cddc r GCC_except_table8
+000000000000e51c r GCC_except_table8
+000000000000f13c r GCC_except_table80
+000000000000d5f8 r GCC_except_table81
+000000000000d620 r GCC_except_table82
+000000000000f150 r GCC_except_table82
+000000000000d644 r GCC_except_table85
+000000000000f164 r GCC_except_table86
+000000000000f178 r GCC_except_table87
+000000000000f18c r GCC_except_table88
+000000000000d31c r GCC_except_table9
+000000000000e530 r GCC_except_table9
+000000000000ec44 r GCC_except_table9
+000000000000ef78 r GCC_except_table9
+000000000000f1a0 r GCC_except_table90
+000000000000f1b4 r GCC_except_table92
+000000000000f1c8 r GCC_except_table94
+000000000000f1dc r GCC_except_table96
+000000000000f1f0 r GCC_except_table98
+000000000000d654 r GCC_except_table99
+00000000000c3f80 d _DYNAMIC
+00000000000c5740 d _GLOBAL_OFFSET_TABLE_
+00000000000a9db0 t _GLOBAL__sub_I_a8q4_projected_residual_t1_qual.hip
+000000000000625c R _IO_stdin_used
+00000000000c5c60 V guard variable for std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, false, false, false>::operator()(char) const::__nul
+00000000000c5c70 V guard variable for std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, false, false, true>::operator()(char) const::__nul
+00000000000c5c80 V guard variable for std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, false, true, false>::operator()(char) const::__nul
+00000000000c5c90 V guard variable for std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, false, true, true>::operator()(char) const::__nul
+00000000000c5c28 b (anonymous namespace)::kPowerPath[abi:cxx11]
+0000000000091280 t double (anonymous namespace)::even_median<12ul>(std::array<double, 12ul>)
+000000000008acf0 t (anonymous namespace)::json_escape[abi:cxx11](std::basic_string_view<char, std::char_traits<char>>)
+000000000008fa60 t (anonymous namespace)::sha256_file(std::filesystem::__cxx11::path const&)
+000000000008b3f0 t (anonymous namespace)::shell_quote[abi:cxx11](std::basic_string_view<char, std::char_traits<char>>)
+00000000000908a0 t void (anonymous namespace)::write_array<std::array<double, 12ul>>(std::ostream&, std::array<double, 12ul> const&)
+0000000000090aa0 t void (anonymous namespace)::write_array<std::array<double, 3ul>>(std::ostream&, std::array<double, 3ul> const&)
+0000000000090d40 t (anonymous namespace)::fill_guarded((anonymous namespace)::DeviceBuffer<hip_bfloat16>&, std::vector<hip_bfloat16, std::allocator<hip_bfloat16>> const&, unsigned short, ihipStream_t*)
+000000000008afc0 t (anonymous namespace)::read_all_text(std::filesystem::__cxx11::path const&)
+0000000000091790 t (anonymous namespace)::HostActivation::~HostActivation()
+000000000008b990 t (anonymous namespace)::ResidualStream::ResidualStream()
+0000000000006718 r (anonymous namespace)::kIncumbentFirst
+00000000000c3a40 d (anonymous namespace)::kResidualShapes
+0000000000090e90 t (anonymous namespace)::download_guarded((anonymous namespace)::DeviceBuffer<hip_bfloat16> const&, unsigned short, char const*, ihipStream_t*)
+0000000000090b90 t (anonymous namespace)::launch_candidate(ninfer::ops::r9700::linear::A8Q4G64ProjectedResidualT1Args const&, ihipStream_t*)
+0000000000091760 t (anonymous namespace)::DecodeDot8Weights::~DecodeDot8Weights()
+000000000008b760 t (anonymous namespace)::require_auto_power(char const*)
+000000000008b210 t (anonymous namespace)::require_fresh_output(std::filesystem::__cxx11::path const&)
+00000000000c3a60 d (anonymous namespace)::projected_residual_cache_scrub_kernel(unsigned int*, unsigned long)
+000000000008b1c0 t (anonymous namespace)::fail(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&)
+0000000000091aa0 t (anonymous namespace)::__device_stub__projected_residual_cache_scrub_kernel(unsigned int*, unsigned long)
+00000000000917e0 t (anonymous namespace)::scrub((anonymous namespace)::DeviceBuffer<unsigned int>&, ihipStream_t*)
+00000000000918f0 t (anonymous namespace)::timed(std::function<hipError_t ()> const&, ihipStream_t*)
+000000000008b9c0 t (anonymous namespace)::run_case((anonymous namespace)::ResidualShape const&, ihipStream_t*)
+000000000008b870 t (anonymous namespace)::hip_check(hipError_t, char const*, char const*, int)
+000000000008b5d0 t (anonymous namespace)::read_text(std::filesystem::__cxx11::path const&)
+00000000000aae00 T ninfer::dtype_size(ninfer::DType)
+00000000000aae1e t ninfer::dtype_size(ninfer::DType) (.cold)
+00000000000b6fb0 T ninfer::DeviceArena::alloc_bytes(unsigned long, unsigned long)
+00000000000b6dd0 T ninfer::DeviceArena::Scope::Scope(ninfer::DeviceArena::Scope&&)
+00000000000b6da0 T ninfer::DeviceArena::Scope::Scope(ninfer::DeviceArena&)
+00000000000b6dd0 T ninfer::DeviceArena::Scope::Scope(ninfer::DeviceArena::Scope&&)
+00000000000b6da0 T ninfer::DeviceArena::Scope::Scope(ninfer::DeviceArena&)
+00000000000b6db0 T ninfer::DeviceArena::Scope::~Scope()
+00000000000b6db0 T ninfer::DeviceArena::Scope::~Scope()
+00000000000b7120 T ninfer::DeviceArena::alloc(ninfer::DType, std::initializer_list<int>, unsigned long)
+00000000000b71a0 T ninfer::DeviceArena::reset()
+00000000000b7190 T ninfer::DeviceArena::scope()
+00000000000b6e80 T ninfer::DeviceArena::DeviceArena(ninfer::DeviceSpan)
+00000000000b6f10 T ninfer::DeviceArena::DeviceArena(ninfer::DeviceArena&&)
+00000000000b6df0 T ninfer::DeviceArena::DeviceArena(unsigned long)
+00000000000b6e80 T ninfer::DeviceArena::DeviceArena(ninfer::DeviceSpan)
+00000000000b6f10 T ninfer::DeviceArena::DeviceArena(ninfer::DeviceArena&&)
+00000000000b6df0 T ninfer::DeviceArena::DeviceArena(unsigned long)
+00000000000b6ef0 T ninfer::DeviceArena::~DeviceArena()
+00000000000b6ef0 T ninfer::DeviceArena::~DeviceArena()
+00000000000b6f40 T ninfer::DeviceArena::operator=(ninfer::DeviceArena&&)
+00000000000b6bc0 T ninfer::DeviceBuffer::fill_async(int, ihipStream_t*)
+00000000000b6b00 T ninfer::DeviceBuffer::copy_from_host(void const*, unsigned long, unsigned long)
+00000000000b6c40 T ninfer::DeviceBuffer::copy_from_host_async(void const*, unsigned long, ihipStream_t*, unsigned long)
+00000000000b6ad0 T ninfer::DeviceBuffer::fill(int)
+00000000000b6940 T ninfer::DeviceBuffer::DeviceBuffer(ninfer::DeviceBuffer&&)
+00000000000b63e0 T ninfer::DeviceBuffer::DeviceBuffer(unsigned long)
+00000000000b6940 T ninfer::DeviceBuffer::DeviceBuffer(ninfer::DeviceBuffer&&)
+00000000000b63e0 T ninfer::DeviceBuffer::DeviceBuffer(unsigned long)
+00000000000b6920 T ninfer::DeviceBuffer::~DeviceBuffer()
+00000000000b6920 T ninfer::DeviceBuffer::~DeviceBuffer()
+00000000000b6960 T ninfer::DeviceBuffer::operator=(ninfer::DeviceBuffer&&)
+00000000000b5420 t ninfer::(anonymous namespace)::destroy_event(ihipEvent_t*&)
+00000000000b53a0 t ninfer::(anonymous namespace)::destroy_stream(ihipStream_t*&)
+00000000000a9df0 t ninfer::(anonymous namespace)::normalize_shape(std::initializer_list<int>)
+00000000000aa688 t ninfer::(anonymous namespace)::normalize_shape(std::initializer_list<int>) (.cold)
+00000000000b6410 t ninfer::(anonymous namespace)::allocation_error(char const*, hipError_t)
+00000000000b4e00 t ninfer::(anonymous namespace)::hip_error_message[abi:cxx11](char const*, hipError_t)
+00000000000b5770 T ninfer::DeviceContext::DeviceContext(ninfer::DeviceContext&&)
+00000000000b4850 T ninfer::DeviceContext::DeviceContext(int)
+00000000000b5770 T ninfer::DeviceContext::DeviceContext(ninfer::DeviceContext&&)
+00000000000b4850 T ninfer::DeviceContext::DeviceContext(int)
+00000000000b54a0 T ninfer::DeviceContext::~DeviceContext()
+00000000000b54a0 T ninfer::DeviceContext::~DeviceContext()
+00000000000b57c0 T ninfer::DeviceContext::operator=(ninfer::DeviceContext&&)
+00000000000b7930 T ninfer::HostPinnedArena::insert_free(unsigned long, unsigned long)
+00000000000b7a20 T ninfer::HostPinnedArena::free(void*)
+00000000000b7770 T ninfer::HostPinnedArena::try_alloc(unsigned long, unsigned long)
+00000000000b7550 T ninfer::HostPinnedArena::HostPinnedArena(ninfer::HostPinnedArena&&)
+00000000000b72c0 T ninfer::HostPinnedArena::HostPinnedArena(unsigned long)
+00000000000b7550 T ninfer::HostPinnedArena::HostPinnedArena(ninfer::HostPinnedArena&&)
+00000000000b72c0 T ninfer::HostPinnedArena::HostPinnedArena(unsigned long)
+00000000000b74a0 T ninfer::HostPinnedArena::~HostPinnedArena()
+00000000000b74a0 T ninfer::HostPinnedArena::~HostPinnedArena()
+00000000000b7620 T ninfer::HostPinnedArena::operator=(ninfer::HostPinnedArena&&)
+00000000000b61a0 T ninfer::DeviceEventTimer::record_stop()
+00000000000b6130 T ninfer::DeviceEventTimer::start()
+00000000000b62a0 T ninfer::DeviceEventTimer::stop_ms()
+00000000000b5ff0 T ninfer::DeviceEventTimer::DeviceEventTimer(ninfer::DeviceEventTimer&&)
+00000000000b5d80 T ninfer::DeviceEventTimer::DeviceEventTimer(ninfer::DeviceContext const&)
+00000000000b5ff0 T ninfer::DeviceEventTimer::DeviceEventTimer(ninfer::DeviceEventTimer&&)
+00000000000b5d80 T ninfer::DeviceEventTimer::DeviceEventTimer(ninfer::DeviceContext const&)
+00000000000b5f00 T ninfer::DeviceEventTimer::~DeviceEventTimer()
+00000000000b5f00 T ninfer::DeviceEventTimer::~DeviceEventTimer()
+00000000000b6010 T ninfer::DeviceEventTimer::operator=(ninfer::DeviceEventTimer&&)
+00000000000b7250 T ninfer::PinnedHostBuffer::PinnedHostBuffer(ninfer::PinnedHostBuffer&&)
+00000000000b71b0 T ninfer::PinnedHostBuffer::PinnedHostBuffer(unsigned long)
+00000000000b7250 T ninfer::PinnedHostBuffer::PinnedHostBuffer(ninfer::PinnedHostBuffer&&)
+00000000000b71b0 T ninfer::PinnedHostBuffer::PinnedHostBuffer(unsigned long)
+00000000000b7230 T ninfer::PinnedHostBuffer::~PinnedHostBuffer()
+00000000000b7230 T ninfer::PinnedHostBuffer::~PinnedHostBuffer()
+00000000000b7270 T ninfer::PinnedHostBuffer::operator=(ninfer::PinnedHostBuffer&&)
+00000000000b14b0 t ninfer::ops::(anonymous namespace)::byte_range(void const*, unsigned long, char const*)
+00000000000b2ea5 t ninfer::ops::(anonymous namespace)::byte_range(void const*, unsigned long, char const*) (.cold)
+00000000000b1420 t ninfer::ops::(anonymous namespace)::checked_mul(unsigned long, unsigned long, char const*)
+00000000000b2dc7 t ninfer::ops::(anonymous namespace)::checked_mul(unsigned long, unsigned long, char const*) (.cold)
+00000000000b1140 t ninfer::ops::(anonymous namespace)::checked_extent(int, char const*)
+00000000000b2ae7 t ninfer::ops::(anonymous namespace)::checked_extent(int, char const*) (.cold)
+00000000000b1550 t ninfer::ops::(anonymous namespace)::require_disjoint(ninfer::ops::(anonymous namespace)::ByteRange, ninfer::ops::(anonymous namespace)::ByteRange, char const*)
+00000000000b3094 t ninfer::ops::(anonymous namespace)::require_disjoint(ninfer::ops::(anonymous namespace)::ByteRange, ninfer::ops::(anonymous namespace)::ByteRange, char const*) (.cold)
+00000000000b1730 t ninfer::ops::(anonymous namespace)::validate_w8_weight(ninfer::Weight const&, unsigned int, unsigned int, unsigned int)
+00000000000b36a6 t ninfer::ops::(anonymous namespace)::validate_w8_weight(ninfer::Weight const&, unsigned int, unsigned int, unsigned int) (.cold)
+00000000000b1c80 t ninfer::ops::(anonymous namespace)::linear_with_workspace(ninfer::Tensor const&, ninfer::Weight const&, ninfer::Tensor&, ninfer::DeviceSpan, ninfer::DeviceSpan, ihipStream_t*, bool) (.constprop.0)
+00000000000b39cd t ninfer::ops::(anonymous namespace)::linear_with_workspace(ninfer::Tensor const&, ninfer::Weight const&, ninfer::Tensor&, ninfer::DeviceSpan, ninfer::DeviceSpan, ihipStream_t*, bool) (.constprop.0.cold)
+00000000000b1190 T ninfer::ops::projected_residual_t1(ninfer::Tensor const&, ninfer::Weight const&, ninfer::Tensor&, ninfer::DeviceSpan const&, ihipStream_t*)
+00000000000b2bf7 t ninfer::ops::projected_residual_t1(ninfer::Tensor const&, ninfer::Weight const&, ninfer::Tensor&, ninfer::DeviceSpan const&, ihipStream_t*) (.cold)
+00000000000b2630 T ninfer::ops::dflash_verify_down_linear(ninfer::Tensor const&, ninfer::Weight const&, ninfer::Tensor&, ninfer::DeviceSpan const&, ihipStream_t*)
+00000000000b3bfd t ninfer::ops::dflash_verify_down_linear(ninfer::Tensor const&, ninfer::Weight const&, ninfer::Tensor&, ninfer::DeviceSpan const&, ihipStream_t*) (.cold)
+00000000000b28e0 T ninfer::ops::dflash_verify_down_linear(ninfer::Tensor const&, ninfer::Weight const&, ninfer::Tensor&, ninfer::DeviceArena&, ihipStream_t*)
+00000000000b416f t ninfer::ops::dflash_verify_down_linear(ninfer::Tensor const&, ninfer::Weight const&, ninfer::Tensor&, ninfer::DeviceArena&, ihipStream_t*) (.cold)
+00000000000b15a0 T ninfer::ops::linear_workspace_capacity_bytes(ninfer::QType, int, int)
+00000000000b316c t ninfer::ops::linear_workspace_capacity_bytes(ninfer::QType, int, int) (.cold)
+00000000000b1110 T ninfer::ops::projected_residual_t1_workspace_capacity_bytes(int)
+00000000000b2a9b t ninfer::ops::projected_residual_t1_workspace_capacity_bytes(int) (.cold)
+00000000000b1640 T ninfer::ops::dflash_verify_down_linear_workspace_capacity_bytes(ninfer::QType, int, int, int)
+00000000000b3409 t ninfer::ops::dflash_verify_down_linear_workspace_capacity_bytes(ninfer::QType, int, int, int) (.cold)
+00000000000ab6d0 T ninfer::ops::r9700::eager::i32_gather(int const*, unsigned long, int const*, int*, unsigned long, ihipStream_t*)
+00000000000ab1d0 T ninfer::ops::r9700::eager::i32_offset(int const*, int*, unsigned long, int, ihipStream_t*)
+00000000000af0c0 T ninfer::ops::r9700::eager::argmax_bf16(hip_bfloat16 const*, int*, unsigned int, unsigned int, unsigned int, ihipStream_t*)
+00000000000ad330 T ninfer::ops::r9700::eager::l2norm_bf16(hip_bfloat16 const*, hip_bfloat16*, unsigned int, unsigned int, float, ihipStream_t*)
+00000000000c3d00 d void ninfer::ops::r9700::eager::(anonymous namespace)::copy_kernel<int>(int const*, int*, unsigned long)
+00000000000c3cf8 d void ninfer::ops::r9700::eager::(anonymous namespace)::fill_kernel<int>(int*, unsigned long, int)
+00000000000c3dd0 d ninfer::ops::r9700::eager::(anonymous namespace)::gelu_kernel(hip_bfloat16*, unsigned long, ninfer::ops::r9700::eager::GeluMode)
+00000000000c3cf0 d ninfer::ops::r9700::eager::(anonymous namespace)::iota_kernel(int*, unsigned long, int)
+00000000000c3da8 d ninfer::ops::r9700::eager::(anonymous namespace)::l2norm_kernel(hip_bfloat16 const*, hip_bfloat16*, unsigned int, float)
+00000000000c3d08 d ninfer::ops::r9700::eager::(anonymous namespace)::offset_kernel(int const*, int*, unsigned long, int)
+00000000000c3d98 d ninfer::ops::r9700::eager::(anonymous namespace)::rmsnorm_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float, bool)
+00000000000c3dd8 d ninfer::ops::r9700::eager::(anonymous namespace)::silu_mul_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned long)
+00000000000c3d20 d void ninfer::ops::r9700::eager::(anonymous namespace)::increment_kernel<int>(int*)
+00000000000c3d28 d void ninfer::ops::r9700::eager::(anonymous namespace)::increment_kernel<long>(long*)
+00000000000c3da0 d ninfer::ops::r9700::eager::(anonymous namespace)::layernorm_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float)
+00000000000c3d30 d ninfer::ops::r9700::eager::(anonymous namespace)::i32_gather_kernel(int const*, int const*, int*, unsigned long)
+00000000000c3e18 d ninfer::ops::r9700::eager::(anonymous namespace)::argmax_bf16_kernel(hip_bfloat16 const*, int*, unsigned int, unsigned int)
+00000000000c3d40 d ninfer::ops::r9700::eager::(anonymous namespace)::bf16_gather_kernel(hip_bfloat16 const*, int const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000c3db0 d ninfer::ops::r9700::eager::(anonymous namespace)::l2norm_dump_kernel(hip_bfloat16 const*, hip_bfloat16*, unsigned int, float, float*, float*)
+00000000000c3df0 d ninfer::ops::r9700::eager::(anonymous namespace)::sigmoid_mul_kernel(hip_bfloat16 const*, hip_bfloat16*, unsigned long)
+00000000000c3d38 d ninfer::ops::r9700::eager::(anonymous namespace)::bf16_scatter_kernel(hip_bfloat16 const*, int const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000c3d70 d ninfer::ops::r9700::eager::(anonymous namespace)::residual_add_kernel(hip_bfloat16 const*, hip_bfloat16*, unsigned long)
+00000000000c3dc8 d ninfer::ops::r9700::eager::(anonymous namespace)::gated_rmsnorm_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float)
+00000000000c3d10 d ninfer::ops::r9700::eager::(anonymous namespace)::offset_scalar_kernel(int const*, int const*, int*, unsigned long)
+00000000000c3d18 d ninfer::ops::r9700::eager::(anonymous namespace)::add_i32_scalars_kernel(int const*, int const*, int*)
+00000000000c3d50 d ninfer::ops::r9700::eager::(anonymous namespace)::bf16_gather_path_kernel(hip_bfloat16*, int const*, int const*, int const*, unsigned int, unsigned int)
+00000000000c3df8 d ninfer::ops::r9700::eager::(anonymous namespace)::embedding_gather_kernel(hip_bfloat16 const*, int const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000c3d78 d ninfer::ops::r9700::eager::(anonymous namespace)::residual_rmsnorm_kernel(hip_bfloat16 const*, hip_bfloat16*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float)
+00000000000c3de8 d ninfer::ops::r9700::eager::(anonymous namespace)::silu_mul_strided_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned long, ninfer::ops::r9700::eager::SiluMulStridedShape)
+00000000000c3d68 d ninfer::ops::r9700::eager::(anonymous namespace)::cast_bf16_to_fp32_kernel(hip_bfloat16 const*, float*, unsigned long)
+00000000000c3d60 d ninfer::ops::r9700::eager::(anonymous namespace)::cast_fp32_to_bf16_kernel(float const*, hip_bfloat16*, unsigned long)
+00000000000c3d48 d ninfer::ops::r9700::eager::(anonymous namespace)::bf16_scatter_batch_kernel(hip_bfloat16 const*, int const*, int const*, hip_bfloat16*, unsigned int, unsigned int, unsigned long, unsigned long)
+00000000000af300 t void ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__copy_kernel<int>(int const*, int*, unsigned long)
+00000000000af280 t void ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__fill_kernel<int>(int*, unsigned long, int)
+00000000000b0370 t ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__gelu_kernel(hip_bfloat16*, unsigned long, ninfer::ops::r9700::eager::GeluMode)
+00000000000af200 t ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__iota_kernel(int*, unsigned long, int)
+00000000000c3e08 d ninfer::ops::r9700::eager::(anonymous namespace)::embedding_gather_q4_kernel(unsigned char const*, unsigned short const*, int const*, hip_bfloat16*, unsigned int, unsigned int, unsigned long)
+00000000000c3e00 d ninfer::ops::r9700::eager::(anonymous namespace)::embedding_gather_q6_kernel(unsigned char const*, unsigned char const*, unsigned short const*, int const*, hip_bfloat16*, unsigned int, unsigned int, unsigned long)
+00000000000c3e10 d ninfer::ops::r9700::eager::(anonymous namespace)::embedding_gather_w8_kernel(unsigned char const*, unsigned short const*, int const*, hip_bfloat16*, unsigned int, unsigned int, unsigned long)
+00000000000c3d90 d ninfer::ops::r9700::eager::(anonymous namespace)::rmsnorm_k256_token8_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float, bool)
+00000000000c3d88 d ninfer::ops::r9700::eager::(anonymous namespace)::rmsnorm_k5120_token8_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float, bool)
+00000000000afff0 t ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__l2norm_kernel(hip_bfloat16 const*, hip_bfloat16*, unsigned int, float)
+00000000000af380 t ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__offset_kernel(int const*, int*, unsigned long, int)
+00000000000c3d58 d ninfer::ops::r9700::eager::(anonymous namespace)::bf16_extract_features_kernel(hip_bfloat16 const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int, unsigned long)
+00000000000afe70 t ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__rmsnorm_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float, bool)
+00000000000c3de0 d ninfer::ops::r9700::eager::(anonymous namespace)::silu_mul_split17408_2d_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*)
+00000000000b03f0 t ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__silu_mul_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned long)
+00000000000c3d80 d ninfer::ops::r9700::eager::(anonymous namespace)::rmsnorm_k5120_rows4_cta_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, float, bool)
+00000000000af520 t void ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__increment_kernel<int>(int*)
+00000000000af580 t void ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__increment_kernel<long>(long*)
+00000000000aff30 t ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__layernorm_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float)
+00000000000c3db8 d ninfer::ops::r9700::eager::(anonymous namespace)::gated_rmsnorm_k128_rows8_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, float)
+00000000000af5e0 t ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__i32_gather_kernel(int const*, int const*, int*, unsigned long)
+00000000000b0940 t ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__argmax_bf16_kernel(hip_bfloat16 const*, int*, unsigned int, unsigned int)
+00000000000af710 t ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__bf16_gather_kernel(hip_bfloat16 const*, int const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000b0080 t ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__l2norm_dump_kernel(hip_bfloat16 const*, hip_bfloat16*, unsigned int, float, float*, float*)
+00000000000b05a0 t ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__sigmoid_mul_kernel(hip_bfloat16 const*, hip_bfloat16*, unsigned long)
+00000000000c3dc0 d ninfer::ops::r9700::eager::(anonymous namespace)::gated_rmsnorm_k6144_token8_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float)
+00000000000af670 t ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__bf16_scatter_kernel(hip_bfloat16 const*, int const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000afb10 t ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__residual_add_kernel(hip_bfloat16 const*, hip_bfloat16*, unsigned long)
+00000000000b02b0 t ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__gated_rmsnorm_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float)
+00000000000af410 t ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__offset_scalar_kernel(int const*, int const*, int*, unsigned long)
+00000000000af4a0 t ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__add_i32_scalars_kernel(int const*, int const*, int*)
+00000000000af890 t ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__bf16_gather_path_kernel(hip_bfloat16*, int const*, int const*, int const*, unsigned int, unsigned int)
+00000000000b0620 t ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__embedding_gather_kernel(hip_bfloat16 const*, int const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000afb90 t ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__residual_rmsnorm_kernel(hip_bfloat16 const*, hip_bfloat16*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float)
+00000000000b0500 t ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__silu_mul_strided_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned long, ninfer::ops::r9700::eager::SiluMulStridedShape)
+00000000000afa90 t ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__cast_bf16_to_fp32_kernel(hip_bfloat16 const*, float*, unsigned long)
+00000000000afa10 t ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__cast_fp32_to_bf16_kernel(float const*, hip_bfloat16*, unsigned long)
+00000000000af7b0 t ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__bf16_scatter_batch_kernel(hip_bfloat16 const*, int const*, int const*, hip_bfloat16*, unsigned int, unsigned int, unsigned long, unsigned long)
+00000000000b07a0 t ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__embedding_gather_q4_kernel(unsigned char const*, unsigned short const*, int const*, hip_bfloat16*, unsigned int, unsigned int, unsigned long)
+00000000000b06c0 t ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__embedding_gather_q6_kernel(unsigned char const*, unsigned char const*, unsigned short const*, int const*, hip_bfloat16*, unsigned int, unsigned int, unsigned long)
+00000000000b0870 t ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__embedding_gather_w8_kernel(unsigned char const*, unsigned short const*, int const*, hip_bfloat16*, unsigned int, unsigned int, unsigned long)
+00000000000afdb0 t ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__rmsnorm_k256_token8_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float, bool)
+00000000000afcf0 t ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__rmsnorm_k5120_token8_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float, bool)
+00000000000af950 t ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__bf16_extract_features_kernel(hip_bfloat16 const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int, unsigned long)
+00000000000b0480 t ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__silu_mul_split17408_2d_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*)
+00000000000afc50 t ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__rmsnorm_k5120_rows4_cta_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, float, bool)
+00000000000b0140 t ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__gated_rmsnorm_k128_rows8_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, float)
+00000000000b01f0 t ninfer::ops::r9700::eager::(anonymous namespace)::__device_stub__gated_rmsnorm_k6144_token8_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float)
+00000000000ac600 T ninfer::ops::r9700::eager::rmsnorm_bf16(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, unsigned int, float, bool, ihipStream_t*)
+00000000000ab570 T ninfer::ops::r9700::eager::i32_increment(int*, ihipStream_t*)
+00000000000ab620 T ninfer::ops::r9700::eager::i64_increment(long*, ihipStream_t*)
+00000000000adf20 T ninfer::ops::r9700::eager::silu_mul_bf16(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned long, ihipStream_t*)
+00000000000ad150 T ninfer::ops::r9700::eager::layernorm_bf16(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, unsigned int, float, ihipStream_t*)
+00000000000ab460 T ninfer::ops::r9700::eager::i32_add_scalars(int const*, int const*, int*, ihipStream_t*)
+00000000000abd60 T ninfer::ops::r9700::eager::bf16_gather_path(hip_bfloat16*, int const*, int const*, int const*, unsigned int, unsigned int, unsigned int, unsigned int, ihipStream_t*)
+00000000000ad4a0 T ninfer::ops::r9700::eager::l2norm_bf16_dump(hip_bfloat16 const*, hip_bfloat16*, unsigned int, unsigned int, float, float*, float*, ihipStream_t*)
+00000000000ae7c0 T ninfer::ops::r9700::eager::sigmoid_mul_bf16(hip_bfloat16 const*, hip_bfloat16*, unsigned long, ihipStream_t*)
+00000000000ac1e0 T ninfer::ops::r9700::eager::cast_bf16_to_fp32(hip_bfloat16 const*, float*, unsigned long, ihipStream_t*)
+00000000000ac0c0 T ninfer::ops::r9700::eager::cast_fp32_to_bf16(float const*, hip_bfloat16*, unsigned long, ihipStream_t*)
+00000000000ab300 T ninfer::ops::r9700::eager::i32_offset_scalar(int const*, int const*, int*, unsigned long, ihipStream_t*)
+00000000000ac300 T ninfer::ops::r9700::eager::residual_add_bf16(hip_bfloat16 const*, hip_bfloat16*, unsigned long, ihipStream_t*)
+00000000000abb70 T ninfer::ops::r9700::eager::bf16_scatter_batch(hip_bfloat16 const*, int const*, int const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int, unsigned long, unsigned long, ihipStream_t*)
+00000000000ad680 T ninfer::ops::r9700::eager::gated_rmsnorm_bf16(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, unsigned int, float, ihipStream_t*)
+00000000000af1f0 T ninfer::ops::r9700::eager::greedy_select_bf16(hip_bfloat16 const*, int*, unsigned int, unsigned int, unsigned int, ihipStream_t*)
+00000000000ab9d0 T ninfer::ops::r9700::eager::bf16_gather_columns(hip_bfloat16 const*, int const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int, ihipStream_t*)
+00000000000ab830 T ninfer::ops::r9700::eager::bf16_scatter_columns(hip_bfloat16 const*, int const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int, ihipStream_t*)
+00000000000abf10 T ninfer::ops::r9700::eager::bf16_extract_features(hip_bfloat16 const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int, unsigned int, ihipStream_t*)
+00000000000ae8e0 T ninfer::ops::r9700::eager::embedding_gather_bf16(hip_bfloat16 const*, int const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int, ihipStream_t*)
+00000000000ac420 T ninfer::ops::r9700::eager::residual_rmsnorm_bf16(hip_bfloat16 const*, hip_bfloat16*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, unsigned int, float, ihipStream_t*)
+00000000000ae080 T ninfer::ops::r9700::eager::silu_mul_bf16_strided(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned long, ninfer::ops::r9700::eager::SiluMulStridedShape, ihipStream_t*)
+00000000000aecb0 T ninfer::ops::r9700::eager::embedding_gather_q4g64_f16s(unsigned char const*, unsigned short const*, int const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int, unsigned int, ihipStream_t*)
+00000000000aea80 T ninfer::ops::r9700::eager::embedding_gather_q6g64_f16s(unsigned char const*, unsigned char const*, unsigned short const*, int const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int, unsigned int, ihipStream_t*)
+00000000000aeec0 T ninfer::ops::r9700::eager::embedding_gather_w8g32_f16s(unsigned char const*, unsigned short const*, int const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int, unsigned int, ihipStream_t*)
+00000000000acc40 T ninfer::ops::r9700::eager::rmsnorm_incumbent_qualification(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, unsigned int, float, bool, ihipStream_t*)
+00000000000acfb0 T ninfer::ops::r9700::eager::rmsnorm_k256_token8_qualification(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float, bool, ihipStream_t*)
+00000000000acaa0 T ninfer::ops::r9700::eager::rmsnorm_k5120_token8_qualification(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float, bool, ihipStream_t*)
+00000000000ae5f0 T ninfer::ops::r9700::eager::silu_mul_split17408_2d_qualification(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, ihipStream_t*)
+00000000000adc30 T ninfer::ops::r9700::eager::gated_rmsnorm_incumbent_qualification(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, unsigned int, float, ihipStream_t*)
+00000000000acdf0 T ninfer::ops::r9700::eager::rmsnorm_k5120_rows56_cta_qualification(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float, bool, ihipStream_t*)
+00000000000ada60 T ninfer::ops::r9700::eager::gated_rmsnorm_k6144_token8_qualification(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float, ihipStream_t*)
+00000000000ae710 T ninfer::ops::r9700::eager::silu_mul_split17408_incumbent_qualification(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, ihipStream_t*)
+00000000000ab0b0 T ninfer::ops::r9700::eager::i32_copy(int const*, int*, unsigned long, ihipStream_t*)
+00000000000aafa0 T ninfer::ops::r9700::eager::i32_fill(int*, unsigned long, int, ihipStream_t*)
+00000000000aae70 T ninfer::ops::r9700::eager::i32_iota(int*, unsigned long, int, ihipStream_t*)
+00000000000ade10 T ninfer::ops::r9700::eager::gelu_bf16(hip_bfloat16*, unsigned long, ninfer::ops::r9700::eager::GeluMode, ihipStream_t*)
+00000000000c0680 T ninfer::ops::r9700::linear::bf16_linear(ninfer::ops::r9700::linear::Bf16LinearArgs const&, ihipStream_t*)
+00000000000b85a0 t ninfer::ops::r9700::linear::(anonymous namespace)::ranges_overlap(void const*, unsigned long, void const*, unsigned long)
+00000000000c3f48 d ninfer::ops::r9700::linear::(anonymous namespace)::bf16_linear_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000ba1c0 t ninfer::ops::r9700::linear::(anonymous namespace)::valid_a8_workspace(ninfer::ops::r9700::linear::A8G64ActivationWorkspace const&)
+00000000000c3f50 d ninfer::ops::r9700::linear::(anonymous namespace)::w8g32_linear_kernel(hip_bfloat16 const*, signed char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned long)
+00000000000c3f68 d void ninfer::ops::r9700::linear::(anonymous namespace)::wave8_linear_kernel<false, 16u>(hip_bfloat16 const*, void const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned long, unsigned int)
+00000000000c3f58 d void ninfer::ops::r9700::linear::(anonymous namespace)::wave8_linear_kernel<false, 8u>(hip_bfloat16 const*, void const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned long, unsigned int)
+00000000000c3f70 d void ninfer::ops::r9700::linear::(anonymous namespace)::wave8_linear_kernel<true, 16u>(hip_bfloat16 const*, void const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned long, unsigned int)
+00000000000c3f60 d void ninfer::ops::r9700::linear::(anonymous namespace)::wave8_linear_kernel<true, 8u>(hip_bfloat16 const*, void const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned long, unsigned int)
+00000000000b9250 t ninfer::ops::r9700::linear::(anonymous namespace)::valid_q4_linear_args(ninfer::ops::r9700::linear::Q4G64LinearArgs const&)
+00000000000b81f0 t ninfer::ops::r9700::linear::(anonymous namespace)::valid_a8q4_linear_args(ninfer::ops::r9700::linear::A8Q4G64LinearArgs const&)
+00000000000be620 t ninfer::ops::r9700::linear::(anonymous namespace)::valid_a8w8_linear_args(ninfer::ops::r9700::linear::A8W8G32LinearArgs const&)
+00000000000b8bb0 t ninfer::ops::r9700::linear::(anonymous namespace)::scalar_base_offsets_fit(unsigned int, unsigned int, unsigned int)
+00000000000c3f78 d ninfer::ops::r9700::linear::(anonymous namespace)::bf16_linear_wmma16_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int)
+00000000000c3e88 d ninfer::ops::r9700::linear::(anonymous namespace)::a8q4g64_gdn_pair_t1_kernel(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned char const*, unsigned short const*, hip_bfloat16*)
+00000000000c3e60 d ninfer::ops::r9700::linear::(anonymous namespace)::q4g64_linear_vector_kernel(unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int)
+00000000000c3e58 d ninfer::ops::r9700::linear::(anonymous namespace)::q4g64_linear_wmma32_kernel(unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int)
+00000000000c3e78 d ninfer::ops::r9700::linear::(anonymous namespace)::a8q4g64_linear_wmma32_kernel(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int)
+00000000000c3f30 d ninfer::ops::r9700::linear::(anonymous namespace)::a8w8g32_linear_wmma32_kernel(signed char const*, unsigned short const*, unsigned int const*, signed char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int)
+00000000000c3f28 d ninfer::ops::r9700::linear::(anonymous namespace)::a8g32_quantize_activation_kernel(hip_bfloat16 const*, signed char*, unsigned short*, unsigned int*, unsigned int, unsigned int)
+00000000000c3e70 d ninfer::ops::r9700::linear::(anonymous namespace)::a8g64_quantize_activation_kernel(hip_bfloat16 const*, unsigned char*, unsigned char*, unsigned short*, unsigned int*, unsigned int, unsigned int)
+00000000000c3f20 d ninfer::ops::r9700::linear::(anonymous namespace)::fused_silu_a8g64_quantize_kernel(hip_bfloat16 const*, unsigned char*, unsigned char*, unsigned short*, unsigned int*)
+00000000000c3e50 d ninfer::ops::r9700::linear::(anonymous namespace)::q4g64_quantize_activation_kernel(hip_bfloat16 const*, unsigned char*, unsigned short*, unsigned int*, unsigned int, unsigned int)
+00000000000bf8e0 t ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__bf16_linear_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000c3e20 d void ninfer::ops::r9700::linear::(anonymous namespace)::a8q4g64_linear_down_splitk_kernel<2u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, float*, unsigned int, unsigned int, unsigned int)
+00000000000c3e30 d void ninfer::ops::r9700::linear::(anonymous namespace)::a8q4g64_linear_down_splitk_kernel<4u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, float*, unsigned int, unsigned int, unsigned int)
+00000000000c3e40 d void ninfer::ops::r9700::linear::(anonymous namespace)::a8q4g64_linear_down_splitk_kernel<8u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, float*, unsigned int, unsigned int, unsigned int)
+00000000000c3f10 d ninfer::ops::r9700::linear::(anonymous namespace)::a8q4g64_linear_prefill_cta_kernel(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int, unsigned int)
+00000000000c3f38 d ninfer::ops::r9700::linear::(anonymous namespace)::a8w8g32_linear_prefill_cta_kernel(signed char const*, unsigned short const*, unsigned int const*, signed char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int, unsigned int)
+00000000000bfaa0 t ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__w8g32_linear_kernel(hip_bfloat16 const*, signed char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned long)
+00000000000c0170 t void ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__wave8_linear_kernel<false, 16u>(hip_bfloat16 const*, void const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned long, unsigned int)
+00000000000bfd10 t void ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__wave8_linear_kernel<false, 8u>(hip_bfloat16 const*, void const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned long, unsigned int)
+00000000000c0360 t void ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__wave8_linear_kernel<true, 16u>(hip_bfloat16 const*, void const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned long, unsigned int)
+00000000000bff00 t void ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__wave8_linear_kernel<true, 8u>(hip_bfloat16 const*, void const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned long, unsigned int)
+00000000000c3e80 d ninfer::ops::r9700::linear::(anonymous namespace)::a8q4g64_linear_decode_dot8_t1_kernel(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000c3eb0 d void ninfer::ops::r9700::linear::(anonymous namespace)::a8q4g64_linear_dflash_small_t_kernel<10u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000c3eb8 d void ninfer::ops::r9700::linear::(anonymous namespace)::a8q4g64_linear_dflash_small_t_kernel<12u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000c3ec0 d void ninfer::ops::r9700::linear::(anonymous namespace)::a8q4g64_linear_dflash_small_t_kernel<15u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000c3ec8 d void ninfer::ops::r9700::linear::(anonymous namespace)::a8q4g64_linear_dflash_small_t_kernel<16u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000c3ed0 d void ninfer::ops::r9700::linear::(anonymous namespace)::a8q4g64_linear_dflash_small_t_kernel<18u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000c3ed8 d void ninfer::ops::r9700::linear::(anonymous namespace)::a8q4g64_linear_dflash_small_t_kernel<20u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000c3ee0 d void ninfer::ops::r9700::linear::(anonymous namespace)::a8q4g64_linear_dflash_small_t_kernel<24u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000c3e90 d void ninfer::ops::r9700::linear::(anonymous namespace)::a8q4g64_linear_dflash_small_t_kernel<4u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000c3e98 d void ninfer::ops::r9700::linear::(anonymous namespace)::a8q4g64_linear_dflash_small_t_kernel<5u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000c3ea0 d void ninfer::ops::r9700::linear::(anonymous namespace)::a8q4g64_linear_dflash_small_t_kernel<6u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000c3ea8 d void ninfer::ops::r9700::linear::(anonymous namespace)::a8q4g64_linear_dflash_small_t_kernel<8u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000c3f18 d ninfer::ops::r9700::linear::(anonymous namespace)::a8q4g64_projected_residual_t1_kernel(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int)
+00000000000c05c0 t ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__bf16_linear_wmma16_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int)
+00000000000c3ee8 d ninfer::ops::r9700::linear::(anonymous namespace)::a8q4g64_linear_dflash_mlp_down_t5_kernel(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)
+00000000000c3e28 d void ninfer::ops::r9700::linear::(anonymous namespace)::a8q4g64_linear_down_splitk_reduce_kernel<2u>(float const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000c3e38 d void ninfer::ops::r9700::linear::(anonymous namespace)::a8q4g64_linear_down_splitk_reduce_kernel<4u>(float const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000c3e48 d void ninfer::ops::r9700::linear::(anonymous namespace)::a8q4g64_linear_down_splitk_reduce_kernel<8u>(float const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000bb060 t ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__a8q4g64_gdn_pair_t1_kernel(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned char const*, unsigned short const*, hip_bfloat16*)
+00000000000b9790 t ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__q4g64_linear_vector_kernel(unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int)
+00000000000b9520 t ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__q4g64_linear_wmma32_kernel(unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int)
+00000000000ba5b0 t ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__a8q4g64_linear_wmma32_kernel(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int)
+00000000000be8f0 t ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__a8w8g32_linear_wmma32_kernel(signed char const*, unsigned short const*, unsigned int const*, signed char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int)
+00000000000be3d0 t ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__a8g32_quantize_activation_kernel(hip_bfloat16 const*, signed char*, unsigned short*, unsigned int*, unsigned int, unsigned int)
+00000000000ba330 t ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__a8g64_quantize_activation_kernel(hip_bfloat16 const*, unsigned char*, unsigned char*, unsigned short*, unsigned int*, unsigned int, unsigned int)
+00000000000bdfc0 t ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__fused_silu_a8g64_quantize_kernel(hip_bfloat16 const*, unsigned char*, unsigned char*, unsigned short*, unsigned int*)
+00000000000b9000 t ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__q4g64_quantize_activation_kernel(hip_bfloat16 const*, unsigned char*, unsigned short*, unsigned int*, unsigned int, unsigned int)
+00000000000b85d0 t void ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__a8q4g64_linear_down_splitk_kernel<2u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, float*, unsigned int, unsigned int, unsigned int)
+00000000000b8760 t void ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__a8q4g64_linear_down_splitk_kernel<4u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, float*, unsigned int, unsigned int, unsigned int)
+00000000000b88f0 t void ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__a8q4g64_linear_down_splitk_kernel<8u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, float*, unsigned int, unsigned int, unsigned int)
+00000000000bd2c0 t ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__a8q4g64_linear_prefill_cta_kernel(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int, unsigned int)
+00000000000beb90 t ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__a8w8g32_linear_prefill_cta_kernel(signed char const*, unsigned short const*, unsigned int const*, signed char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int, unsigned int)
+00000000000ba8d0 t ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__a8q4g64_linear_decode_dot8_t1_kernel(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000bbce0 t void ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__a8q4g64_linear_dflash_small_t_kernel<10u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000bbdd0 t void ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__a8q4g64_linear_dflash_small_t_kernel<12u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000bbec0 t void ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__a8q4g64_linear_dflash_small_t_kernel<15u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000bbfb0 t void ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__a8q4g64_linear_dflash_small_t_kernel<16u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000bc0a0 t void ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__a8q4g64_linear_dflash_small_t_kernel<18u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000bc190 t void ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__a8q4g64_linear_dflash_small_t_kernel<20u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000bc280 t void ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__a8q4g64_linear_dflash_small_t_kernel<24u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000bb920 t void ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__a8q4g64_linear_dflash_small_t_kernel<4u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000bba10 t void ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__a8q4g64_linear_dflash_small_t_kernel<5u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000bbb00 t void ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__a8q4g64_linear_dflash_small_t_kernel<6u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000bbbf0 t void ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__a8q4g64_linear_dflash_small_t_kernel<8u>(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000bd770 t ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__a8q4g64_projected_residual_t1_kernel(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int)
+00000000000c3f00 d ninfer::ops::r9700::linear::(anonymous namespace)::a8q4g64_linear_prefill_cta_m64n64_regression_kernel(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int, unsigned int)
+00000000000c3ef0 d ninfer::ops::r9700::linear::(anonymous namespace)::a8q4g64_linear_prefill_cta_m64n128_regression_kernel(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int, unsigned int)
+00000000000c3e68 d ninfer::ops::r9700::linear::(anonymous namespace)::q4g64_linear_prefill_cta_m64n128_qualification_kernel(unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int, unsigned int)
+00000000000bc4e0 t ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__a8q4g64_linear_dflash_mlp_down_t5_kernel(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*)
+00000000000b86d0 t void ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__a8q4g64_linear_down_splitk_reduce_kernel<2u>(float const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000b8860 t void ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__a8q4g64_linear_down_splitk_reduce_kernel<4u>(float const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000b89f0 t void ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__a8q4g64_linear_down_splitk_reduce_kernel<8u>(float const*, hip_bfloat16*, unsigned int, unsigned int)
+00000000000c3f08 d ninfer::ops::r9700::linear::(anonymous namespace)::a8q4g64_linear_prefill_cta_m128n128_qualification_kernel(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int, unsigned int)
+00000000000c3ef8 d ninfer::ops::r9700::linear::(anonymous namespace)::a8q4g64_linear_prefill_cta_global_inv_qualification_kernel(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int, unsigned int)
+00000000000c3f40 d ninfer::ops::r9700::linear::(anonymous namespace)::a8w8g32_linear_prefill_cta_global_inv_qualification_kernel(signed char const*, unsigned short const*, unsigned int const*, signed char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int, unsigned int)
+00000000000bcd40 t ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__a8q4g64_linear_prefill_cta_m64n64_regression_kernel(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int, unsigned int)
+00000000000bc780 t ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__a8q4g64_linear_prefill_cta_m64n128_regression_kernel(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int, unsigned int)
+00000000000b9a30 t ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__q4g64_linear_prefill_cta_m64n128_qualification_kernel(unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int, unsigned int)
+00000000000bd020 t ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__a8q4g64_linear_prefill_cta_m128n128_qualification_kernel(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int, unsigned int)
+00000000000bca60 t ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__a8q4g64_linear_prefill_cta_global_inv_qualification_kernel(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int, unsigned int)
+00000000000bee40 t ninfer::ops::r9700::linear::(anonymous namespace)::__device_stub__a8w8g32_linear_prefill_cta_global_inv_qualification_kernel(signed char const*, unsigned short const*, unsigned int const*, signed char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int, unsigned int)
+00000000000c06b0 T ninfer::ops::r9700::linear::w8g32_linear(ninfer::ops::r9700::linear::W8G32LinearArgs const&, ihipStream_t*)
+00000000000bfb70 T ninfer::ops::r9700::linear::bf16_linear_wave8(ninfer::ops::r9700::linear::Bf16LinearArgs const&, ihipStream_t*)
+00000000000bffe0 T ninfer::ops::r9700::linear::bf16_linear_wave16(ninfer::ops::r9700::linear::Bf16LinearArgs const&, ihipStream_t*)
+00000000000c0440 T ninfer::ops::r9700::linear::bf16_linear_wmma16(ninfer::ops::r9700::linear::Bf16LinearArgs const&, ihipStream_t*)
+00000000000bfdf0 T ninfer::ops::r9700::linear::w8g32_linear_wave8(ninfer::ops::r9700::linear::W8G32LinearArgs const&, ihipStream_t*)
+00000000000ba9c0 T ninfer::ops::r9700::linear::a8q4g64_gdn_pair_t1(ninfer::ops::r9700::linear::A8Q4G64GdnPairArgs const&, ihipStream_t*)
+00000000000c06a0 T ninfer::ops::r9700::linear::bf16_linear_prefill(ninfer::ops::r9700::linear::Bf16LinearArgs const&, ihipStream_t*)
+00000000000b9610 T ninfer::ops::r9700::linear::q4g64_linear_vector(ninfer::ops::r9700::linear::Q4G64LinearArgs const&, ihipStream_t*)
+00000000000b90c0 T ninfer::ops::r9700::linear::q4g64_linear_wmma32(ninfer::ops::r9700::linear::Q4G64LinearArgs const&, ihipStream_t*)
+00000000000c0250 T ninfer::ops::r9700::linear::w8g32_linear_wave16(ninfer::ops::r9700::linear::W8G32LinearArgs const&, ihipStream_t*)
+00000000000bf770 T ninfer::ops::r9700::linear::bf16_linear_baseline(ninfer::ops::r9700::linear::Bf16LinearArgs const&, ihipStream_t*)
+00000000000c1820 W ninfer::ops::r9700::linear::use_a8w8_prefill_cta(unsigned int, unsigned int, unsigned int)
+00000000000c06d0 T ninfer::ops::r9700::linear::w8g32_linear_prefill(ninfer::ops::r9700::linear::W8G32LinearArgs const&, ihipStream_t*)
+00000000000ba400 T ninfer::ops::r9700::linear::a8q4g64_linear_wmma32(ninfer::ops::r9700::linear::A8Q4G64LinearArgs const&, ihipStream_t*)
+00000000000be490 T ninfer::ops::r9700::linear::a8w8g32_linear_wmma32(ninfer::ops::r9700::linear::A8W8G32LinearArgs const&, ihipStream_t*)
+00000000000bf980 T ninfer::ops::r9700::linear::w8g32_linear_baseline(ninfer::ops::r9700::linear::W8G32LinearArgs const&, ihipStream_t*)
+00000000000b9bb0 T ninfer::ops::r9700::linear::q4g64_linear_candidate(ninfer::ops::r9700::linear::Q4G64CandidateArgs const&, ihipStream_t*)
+00000000000bdbc0 T ninfer::ops::r9700::linear::fused_silu_a8q4g64_down(ninfer::ops::r9700::linear::FusedSiluA8Q4G64DownArgs const&, ihipStream_t*)
+00000000000c1710 W ninfer::ops::r9700::linear::use_a8q4_decode_dot8_t1(unsigned int, unsigned int, unsigned int, unsigned int)
+00000000000bf3b0 T ninfer::ops::r9700::linear::a8q4g64_kernel_resources(ninfer::ops::r9700::linear::A8Q4G64KernelResources*)
+00000000000bd850 T ninfer::ops::r9700::linear::a8q4g64_linear_candidate(ninfer::ops::r9700::linear::A8Q4G64CandidateArgs const&, ihipStream_t*)
+00000000000bf220 T ninfer::ops::r9700::linear::a8w8g32_kernel_resources(ninfer::ops::r9700::linear::A8W8G32KernelResources*)
+00000000000bef40 T ninfer::ops::r9700::linear::a8w8g32_linear_candidate(ninfer::ops::r9700::linear::A8W8G32CandidateArgs const&, ihipStream_t*)
+00000000000bde40 T ninfer::ops::r9700::linear::fused_silu_a8g64_prepare(hip_bfloat16 const*, ninfer::ops::r9700::linear::A8G64ActivationWorkspace const&, ihipStream_t*)
+00000000000be240 T ninfer::ops::r9700::linear::a8g32_quantize_activation(ninfer::ops::r9700::linear::A8G32ActivationQuantizeArgs const&, ihipStream_t*)
+00000000000ba050 T ninfer::ops::r9700::linear::a8g64_quantize_activation(ninfer::ops::r9700::linear::A8G64ActivationQuantizeArgs const&, ihipStream_t*)
+00000000000b8e60 T ninfer::ops::r9700::linear::q4g64_quantize_activation(ninfer::ops::r9700::linear::Q4G64ActivationQuantizeArgs const&, ihipStream_t*)
+00000000000c17a0 W ninfer::ops::r9700::linear::select_a8q4_prefill_route(unsigned int, unsigned int, unsigned int)
+00000000000bd130 T ninfer::ops::r9700::linear::a8q4g64_linear_prefill_cta(ninfer::ops::r9700::linear::A8Q4G64LinearArgs const&, ihipStream_t*)
+00000000000be9e0 T ninfer::ops::r9700::linear::a8w8g32_linear_prefill_cta(ninfer::ops::r9700::linear::A8W8G32LinearArgs const&, ihipStream_t*)
+00000000000bb160 T ninfer::ops::r9700::linear::a8q4g64_gdn_pair_t1_resources(ninfer::ops::r9700::linear::A8Q4G64GdnPairResources*)
+00000000000ba6b0 T ninfer::ops::r9700::linear::a8q4g64_linear_decode_dot8_t1(ninfer::ops::r9700::linear::A8Q4G64LinearArgs const&, ihipStream_t*)
+00000000000bd3d0 T ninfer::ops::r9700::linear::a8q4g64_projected_residual_t1(ninfer::ops::r9700::linear::A8Q4G64ProjectedResidualT1Args const&, ihipStream_t*)
+00000000000b8d40 T ninfer::ops::r9700::linear::q4g64_bind_activation_workspace(void*, unsigned long, unsigned int, unsigned int, ninfer::ops::r9700::linear::Q4G64ActivationWorkspace*)
+00000000000b9ef0 T ninfer::ops::r9700::linear::a8q4g64_bind_activation_workspace(void*, unsigned long, unsigned int, unsigned int, ninfer::ops::r9700::linear::A8G64ActivationWorkspace*)
+00000000000ba6a8 T ninfer::ops::r9700::linear::a8q4g64_linear_dflash_down_splitk(ninfer::ops::r9700::linear::A8Q4G64LinearArgs const&, ihipStream_t*)
+00000000000be0f0 T ninfer::ops::r9700::linear::a8w8g32_bind_activation_workspace(void*, unsigned long, unsigned int, unsigned int, ninfer::ops::r9700::linear::A8G32ActivationWorkspace*)
+00000000000c0f30 W hipError_t ninfer::ops::r9700::linear::a8q4g64_linear_dflash_down_splitk_t<2u>(ninfer::ops::r9700::linear::A8Q4G64LinearArgs const&, ihipStream_t*)
+00000000000c11d0 W hipError_t ninfer::ops::r9700::linear::a8q4g64_linear_dflash_down_splitk_t<4u>(ninfer::ops::r9700::linear::A8Q4G64LinearArgs const&, ihipStream_t*)
+00000000000c1470 W hipError_t ninfer::ops::r9700::linear::a8q4g64_linear_dflash_down_splitk_t<8u>(ninfer::ops::r9700::linear::A8Q4G64LinearArgs const&, ihipStream_t*)
+00000000000b8a80 T ninfer::ops::r9700::linear::a8q4g64_scalar_base_u32_offsets_fit(unsigned int, unsigned int, unsigned int)
+00000000000b9b30 T ninfer::ops::r9700::linear::q4g64_prefill_qualification_resources(ninfer::ops::r9700::linear::Q4G64PrefillQualificationResources*)
+00000000000b8ce0 T ninfer::ops::r9700::linear::q4g64_activation_workspace_capacity_bytes(unsigned int, unsigned int)
+00000000000b9e70 T ninfer::ops::r9700::linear::a8q4g64_activation_workspace_capacity_bytes(unsigned int, unsigned int)
+00000000000bb430 T ninfer::ops::r9700::linear::a8q4g64_linear_dflash_small_t_qualification(ninfer::ops::r9700::linear::A8Q4G64LinearArgs const&, ihipStream_t*)
+00000000000be070 T ninfer::ops::r9700::linear::a8w8g32_activation_workspace_capacity_bytes(unsigned int, unsigned int)
+00000000000bcb70 T ninfer::ops::r9700::linear::a8q4g64_linear_prefill_cta_m64n64_regression(ninfer::ops::r9700::linear::A8Q4G64LinearArgs const&, ihipStream_t*)
+00000000000bc5b0 T ninfer::ops::r9700::linear::a8q4g64_linear_prefill_cta_m64n128_regression(ninfer::ops::r9700::linear::A8Q4G64LinearArgs const&, ihipStream_t*)
+00000000000b9880 T ninfer::ops::r9700::linear::q4g64_linear_prefill_cta_m64n128_qualification(ninfer::ops::r9700::linear::Q4G64LinearArgs const&, ihipStream_t*)
+00000000000bc370 T ninfer::ops::r9700::linear::a8q4g64_linear_dflash_mlp_down_t5_qualification(ninfer::ops::r9700::linear::A8Q4G64LinearArgs const&, ihipStream_t*)
+00000000000bb1e0 T ninfer::ops::r9700::linear::a8q4g64_linear_decode_dot8_block_t1_qualification(ninfer::ops::r9700::linear::A8Q4G64LinearArgs const&, unsigned int, ihipStream_t*)
+00000000000bce50 T ninfer::ops::r9700::linear::a8q4g64_linear_prefill_cta_m128n128_qualification(ninfer::ops::r9700::linear::A8Q4G64LinearArgs const&, ihipStream_t*)
+00000000000bc890 T ninfer::ops::r9700::linear::a8q4g64_linear_prefill_cta_global_inv_qualification(ninfer::ops::r9700::linear::A8Q4G64LinearArgs const&, ihipStream_t*)
+00000000000bec90 T ninfer::ops::r9700::linear::a8w8g32_linear_prefill_cta_global_inv_qualification(ninfer::ops::r9700::linear::A8W8G32LinearArgs const&, ihipStream_t*)
+00000000000b1800 T ninfer::ops::linear(ninfer::Tensor const&, ninfer::Weight const&, ninfer::Tensor&, ihipStream_t*)
+00000000000b36ef t ninfer::ops::linear(ninfer::Tensor const&, ninfer::Weight const&, ninfer::Tensor&, ihipStream_t*) (.cold)
+00000000000b2770 T ninfer::ops::linear(ninfer::Tensor const&, ninfer::Weight const&, ninfer::Tensor&, ninfer::DeviceSpan const&, ihipStream_t*)
+00000000000b27a0 T ninfer::ops::linear(ninfer::Tensor const&, ninfer::Weight const&, ninfer::Tensor&, ninfer::DeviceArena&, ihipStream_t*)
+00000000000b3eac t ninfer::ops::linear(ninfer::Tensor const&, ninfer::Weight const&, ninfer::Tensor&, ninfer::DeviceArena&, ihipStream_t*) (.cold)
+00000000000a9ea0 T ninfer::Tensor::Tensor(void*, ninfer::DType, std::initializer_list<int>)
+00000000000a9ea0 T ninfer::Tensor::Tensor(void*, ninfer::DType, std::initializer_list<int>)
+00000000000aa71a t ninfer::Tensor::Tensor(void*, ninfer::DType, std::initializer_list<int>) (.cold)
+00000000000b47f0 T ninfer::hip_check(hipError_t, char const*, char const*, int)
+00000000000b6b60 T ninfer::DeviceBuffer::copy_to_host(void*, unsigned long, unsigned long) const
+00000000000b69b0 T ninfer::DeviceBuffer::require_range(unsigned long, unsigned long, char const*) const
+00000000000b6cf0 T ninfer::DeviceBuffer::copy_to_host_async(void*, unsigned long, ihipStream_t*, unsigned long) const
+00000000000b5360 T ninfer::DeviceContext::is_gfx1201() const
+00000000000b5ae0 T ninfer::DeviceContext::total_vram() const
+00000000000b5af0 T ninfer::DeviceContext::synchronize() const
+00000000000b5bc0 T ninfer::DeviceContext::synchronize_all() const
+00000000000b5ca0 T ninfer::DeviceContext::order_copy_after_compute() const
+00000000000b6210 T ninfer::DeviceEventTimer::elapsed_ms() const
+00000000000aa0f0 T ninfer::Tensor::is_contiguous() const
+00000000000aa8f6 t ninfer::Tensor::is_contiguous() const (.cold)
+00000000000aa200 T ninfer::Tensor::view(std::initializer_list<int>) const
+00000000000aa9a0 t ninfer::Tensor::view(std::initializer_list<int>) const (.cold)
+00000000000aa020 T ninfer::Tensor::bytes() const
+00000000000aa83e t ninfer::Tensor::bytes() const (.cold)
+00000000000a9fa0 T ninfer::Tensor::numel() const
+00000000000aa7ac t ninfer::Tensor::numel() const (.cold)
+00000000000aa4c0 T ninfer::Tensor::slice(int, int, int) const
+00000000000aabe8 t ninfer::Tensor::slice(int, int, int) const (.cold)
+00000000000aa570 T ninfer::Tensor::permute(std::initializer_list<int>) const
+00000000000aad0c t ninfer::Tensor::permute(std::initializer_list<int>) const (.cold)
+00000000000aa480 T ninfer::Tensor::reshape(std::initializer_list<int>) const
+0000000000092620 W std::filesystem::__cxx11::path::string() const
+000000000009c680 W std::__cxx11::regex_traits<char>::_RegexMask std::__cxx11::regex_traits<char>::lookup_classname<char const*>(char const*, char const*, bool) const
+000000000009d220 W std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> std::__cxx11::regex_traits<char>::transform_primary<char const*>(char const*, char const*) const
+00000000000a29a0 W std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> std::__cxx11::regex_traits<char>::transform_primary<char*>(char*, char*) const
+00000000000a26f0 W std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> std::__cxx11::regex_traits<char>::lookup_collatename<char const*>(char const*, char const*) const
+000000000009bf70 W std::__cxx11::regex_traits<char>::value(char, int) const
+000000000009e670 W std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> std::__cxx11::regex_traits<char>::transform<__gnu_cxx::__normal_iterator<char*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>(__gnu_cxx::__normal_iterator<char*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, __gnu_cxx::__normal_iterator<char*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>) const
+000000000009d540 W std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> std::__cxx11::regex_traits<char>::transform<char*>(char*, char*) const
+0000000000093320 W std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>::str() const
+000000000009b9b0 W std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, false, true, false>::operator()(char) const
+000000000009bad0 W std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, false, true, true>::operator()(char) const
+000000000009bc60 W std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, true, true, false>::_M_apply(char, std::integral_constant<bool, true>) const
+000000000009bd40 W std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, true, true, true>::_M_apply(char, std::integral_constant<bool, true>) const
+000000000009ba50 W std::__detail::_RegexTranslatorBase<std::__cxx11::regex_traits<char>, true, false>::_M_translate(char) const
+000000000009f470 W std::__detail::_RegexTranslatorBase<std::__cxx11::regex_traits<char>, true, false>::_M_in_range_icase(char, char, char) const
+000000000009bb70 W std::__detail::_RegexTranslatorBase<std::__cxx11::regex_traits<char>, true, true>::_M_translate(char) const
+00000000000a0280 W std::__detail::_RegexTranslatorBase<std::__cxx11::regex_traits<char>, true, true>::_M_in_range_icase(char, char, char) const
+00000000000a8ac0 W std::__detail::_Executor<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>, std::__cxx11::regex_traits<char>, false>::_M_word_boundary() const
+00000000000a89f0 W std::__detail::_Executor<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>, std::__cxx11::regex_traits<char>, false>::_M_is_line_terminator(char) const
+00000000000a97f0 W std::__detail::_Executor<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>, std::__cxx11::regex_traits<char>, true>::_M_word_boundary() const
+00000000000a9720 W std::__detail::_Executor<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>, std::__cxx11::regex_traits<char>, true>::_M_is_line_terminator(char) const
+00000000000b7e50 W std::pair<std::__detail::_Node_iterator<std::pair<void* const, ninfer::HostPinnedArena::Span>, false, false>, bool> std::_Hashtable<void*, std::pair<void* const, ninfer::HostPinnedArena::Span>, std::allocator<std::pair<void* const, ninfer::HostPinnedArena::Span>>, std::__detail::_Select1st, std::equal_to<void*>, std::hash<void*>, std::__detail::_Mod_range_hashing, std::__detail::_Default_ranged_hash, std::__detail::_Prime_rehash_policy, std::__detail::_Hashtable_traits<false, false, true>>::_M_emplace<void*&, ninfer::HostPinnedArena::Span>(std::integral_constant<bool, true>, void*&, ninfer::HostPinnedArena::Span&&)
+00000000000b80b0 W std::_Hashtable<void*, std::pair<void* const, ninfer::HostPinnedArena::Span>, std::allocator<std::pair<void* const, ninfer::HostPinnedArena::Span>>, std::__detail::_Select1st, std::equal_to<void*>, std::hash<void*>, std::__detail::_Mod_range_hashing, std::__detail::_Default_ranged_hash, std::__detail::_Prime_rehash_policy, std::__detail::_Hashtable_traits<false, false, true>>::_M_rehash_aux(unsigned long, std::integral_constant<bool, true>)
+00000000000b7fb0 W std::_Hashtable<void*, std::pair<void* const, ninfer::HostPinnedArena::Span>, std::allocator<std::pair<void* const, ninfer::HostPinnedArena::Span>>, std::__detail::_Select1st, std::equal_to<void*>, std::hash<void*>, std::__detail::_Mod_range_hashing, std::__detail::_Default_ranged_hash, std::__detail::_Prime_rehash_policy, std::__detail::_Hashtable_traits<false, false, true>>::_M_insert_unique_node(unsigned long, unsigned long, std::__detail::_Hash_node<std::pair<void* const, ninfer::HostPinnedArena::Span>, false>*, unsigned long)
+0000000000093e70 W std::filesystem::__cxx11::path::path(std::filesystem::__cxx11::path const&)
+0000000000092d20 W std::filesystem::__cxx11::path::path<char [10], std::filesystem::__cxx11::path>(char const (&) [10], std::filesystem::__cxx11::path::format)
+0000000000093000 W std::filesystem::__cxx11::path::path<char [11], std::filesystem::__cxx11::path>(char const (&) [11], std::filesystem::__cxx11::path::format)
+0000000000092e90 W std::filesystem::__cxx11::path::path<char [12], std::filesystem::__cxx11::path>(char const (&) [12], std::filesystem::__cxx11::path::format)
+0000000000093170 W std::filesystem::__cxx11::path::path<char [13], std::filesystem::__cxx11::path>(char const (&) [13], std::filesystem::__cxx11::path::format)
+0000000000092c30 W std::filesystem::__cxx11::path::path<char [15], std::filesystem::__cxx11::path>(char const (&) [15], std::filesystem::__cxx11::path::format)
+00000000000928f0 W std::filesystem::__cxx11::path::path<char [21], std::filesystem::__cxx11::path>(char const (&) [21], std::filesystem::__cxx11::path::format)
+0000000000094720 W std::filesystem::__cxx11::path::path<char [32], std::filesystem::__cxx11::path>(char const (&) [32], std::filesystem::__cxx11::path::format)
+0000000000092af0 W std::filesystem::__cxx11::path::path<char [34], std::filesystem::__cxx11::path>(char const (&) [34], std::filesystem::__cxx11::path::format)
+0000000000094630 W std::filesystem::__cxx11::path::path<char [36], std::filesystem::__cxx11::path>(char const (&) [36], std::filesystem::__cxx11::path::format)
+0000000000094540 W std::filesystem::__cxx11::path::path<char [38], std::filesystem::__cxx11::path>(char const (&) [38], std::filesystem::__cxx11::path::format)
+0000000000092110 W std::filesystem::__cxx11::path::path<char [41], std::filesystem::__cxx11::path>(char const (&) [41], std::filesystem::__cxx11::path::format)
+0000000000094450 W std::filesystem::__cxx11::path::path<char [48], std::filesystem::__cxx11::path>(char const (&) [48], std::filesystem::__cxx11::path::format)
+0000000000092240 W std::filesystem::__cxx11::path::path<char [55], std::filesystem::__cxx11::path>(char const (&) [55], std::filesystem::__cxx11::path::format)
+0000000000091e60 W std::filesystem::__cxx11::path::path<char [62], std::filesystem::__cxx11::path>(char const (&) [62], std::filesystem::__cxx11::path::format)
+00000000000933d0 W std::filesystem::__cxx11::path::path<char [78], std::filesystem::__cxx11::path>(char const (&) [78], std::filesystem::__cxx11::path::format)
+00000000000929e0 W std::filesystem::__cxx11::path::path<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, std::filesystem::__cxx11::path>(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&, std::filesystem::__cxx11::path::format)
+0000000000091f80 W std::filesystem::__cxx11::path::path<char*, std::filesystem::__cxx11::path>(char* const&, std::filesystem::__cxx11::path::format)
+0000000000091f50 W std::filesystem::__cxx11::path::~path()
+0000000000092200 W std::filesystem::__cxx11::operator/(std::filesystem::__cxx11::path const&, std::filesystem::__cxx11::path const&)
+00000000000970f0 W std::_Deque_base<std::__detail::_StateSeq<std::__cxx11::regex_traits<char>>, std::allocator<std::__detail::_StateSeq<std::__cxx11::regex_traits<char>>>>::_M_initialize_map(unsigned long)
+00000000000a6920 W std::_Deque_base<long, std::allocator<long>>::_M_initialize_map(unsigned long)
+00000000000959d0 W std::regex_error::regex_error(std::regex_constants::error_type, char const*)
+0000000000094910 W std::__shared_ptr<std::__detail::_NFA<std::__cxx11::regex_traits<char>> const, (__gnu_cxx::_Lock_policy)2>::~__shared_ptr()
+0000000000095910 W std::__shared_ptr<std::__detail::_NFA<std::__cxx11::regex_traits<char>>, (__gnu_cxx::_Lock_policy)2>::~__shared_ptr()
+00000000000b7c20 W std::unordered_map<void*, ninfer::HostPinnedArena::Span, std::hash<void*>, std::equal_to<void*>, std::allocator<std::pair<void* const, ninfer::HostPinnedArena::Span>>>::~unordered_map()
+000000000009d710 W std::_Function_base::_Base_manager<std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, false, false>>::_M_destroy(std::_Any_data&, std::integral_constant<bool, false>)
+000000000009f5c0 W std::_Function_base::_Base_manager<std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, true, false>>::_M_destroy(std::_Any_data&, std::integral_constant<bool, false>)
+0000000000096eb0 W std::__shared_count<(__gnu_cxx::_Lock_policy)2>::__shared_count<std::__detail::_NFA<std::__cxx11::regex_traits<char>>, std::allocator<void>, std::locale const&, std::regex_constants::syntax_option_type&>(std::__detail::_NFA<std::__cxx11::regex_traits<char>>*&, std::_Sp_alloc_shared_tag<std::allocator<void>>, std::locale const&, std::regex_constants::syntax_option_type&)
+00000000000a70d0 W std::_Sp_counted_base<(__gnu_cxx::_Lock_policy)2>::_M_release_last_use_cold()
+0000000000096fa6 W std::_Sp_counted_base<(__gnu_cxx::_Lock_policy)2>::~_Sp_counted_base()
+0000000000091d50 t std::_Function_handler<hipError_t (), (anonymous namespace)::run_case((anonymous namespace)::ResidualShape const&, ihipStream_t*)::'lambda0'()::operator()() const::'lambda'()>::_M_manager(std::_Any_data&, std::_Any_data const&, std::_Manager_operation)
+0000000000091ca0 t std::_Function_handler<hipError_t (), (anonymous namespace)::run_case((anonymous namespace)::ResidualShape const&, ihipStream_t*)::'lambda0'()::operator()() const::'lambda'()>::_M_invoke(std::_Any_data const&)
+0000000000091c20 t std::_Function_handler<hipError_t (), (anonymous namespace)::run_case((anonymous namespace)::ResidualShape const&, ihipStream_t*)::'lambda'()::operator()() const::'lambda'()>::_M_manager(std::_Any_data&, std::_Any_data const&, std::_Manager_operation)
+0000000000091b10 t std::_Function_handler<hipError_t (), (anonymous namespace)::run_case((anonymous namespace)::ResidualShape const&, ihipStream_t*)::'lambda'()::operator()() const::'lambda'()>::_M_invoke(std::_Any_data const&)
+000000000009b8d0 W std::_Function_handler<bool (char), std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, false, false, false>>::_M_manager(std::_Any_data&, std::_Any_data const&, std::_Manager_operation)
+000000000009b880 W std::_Function_handler<bool (char), std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, false, false, false>>::_M_invoke(std::_Any_data const&, char&&)
+000000000009b950 W std::_Function_handler<bool (char), std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, false, false, true>>::_M_manager(std::_Any_data&, std::_Any_data const&, std::_Manager_operation)
+000000000009b900 W std::_Function_handler<bool (char), std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, false, false, true>>::_M_invoke(std::_Any_data const&, char&&)
+000000000009b980 W std::_Function_handler<bool (char), std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, false, true, false>>::_M_manager(std::_Any_data&, std::_Any_data const&, std::_Manager_operation)
+000000000009b978 W std::_Function_handler<bool (char), std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, false, true, false>>::_M_invoke(std::_Any_data const&, char&&)
+000000000009baa0 W std::_Function_handler<bool (char), std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, false, true, true>>::_M_manager(std::_Any_data&, std::_Any_data const&, std::_Manager_operation)
+000000000009ba90 W std::_Function_handler<bool (char), std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, false, true, true>>::_M_invoke(std::_Any_data const&, char&&)
+000000000009bbc0 W std::_Function_handler<bool (char), std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, true, false, false>>::_M_manager(std::_Any_data&, std::_Any_data const&, std::_Manager_operation)
+000000000009bbb0 W std::_Function_handler<bool (char), std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, true, false, false>>::_M_invoke(std::_Any_data const&, char&&)
+000000000009bc00 W std::_Function_handler<bool (char), std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, true, false, true>>::_M_manager(std::_Any_data&, std::_Any_data const&, std::_Manager_operation)
+000000000009bbf0 W std::_Function_handler<bool (char), std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, true, false, true>>::_M_invoke(std::_Any_data const&, char&&)
+000000000009bc30 W std::_Function_handler<bool (char), std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, true, true, false>>::_M_manager(std::_Any_data&, std::_Any_data const&, std::_Manager_operation)
+000000000009bc28 W std::_Function_handler<bool (char), std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, true, true, false>>::_M_invoke(std::_Any_data const&, char&&)
+000000000009bd10 W std::_Function_handler<bool (char), std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, true, true, true>>::_M_manager(std::_Any_data&, std::_Any_data const&, std::_Manager_operation)
+000000000009bd08 W std::_Function_handler<bool (char), std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, true, true, true>>::_M_invoke(std::_Any_data const&, char&&)
+000000000009be00 W std::_Function_handler<bool (char), std::__detail::_CharMatcher<std::__cxx11::regex_traits<char>, false, false>>::_M_manager(std::_Any_data&, std::_Any_data const&, std::_Manager_operation)
+000000000009bdf0 W std::_Function_handler<bool (char), std::__detail::_CharMatcher<std::__cxx11::regex_traits<char>, false, false>>::_M_invoke(std::_Any_data const&, char&&)
+000000000009be40 W std::_Function_handler<bool (char), std::__detail::_CharMatcher<std::__cxx11::regex_traits<char>, false, true>>::_M_manager(std::_Any_data&, std::_Any_data const&, std::_Manager_operation)
+000000000009be30 W std::_Function_handler<bool (char), std::__detail::_CharMatcher<std::__cxx11::regex_traits<char>, false, true>>::_M_invoke(std::_Any_data const&, char&&)
+000000000009bec0 W std::_Function_handler<bool (char), std::__detail::_CharMatcher<std::__cxx11::regex_traits<char>, true, false>>::_M_manager(std::_Any_data&, std::_Any_data const&, std::_Manager_operation)
+000000000009be70 W std::_Function_handler<bool (char), std::__detail::_CharMatcher<std::__cxx11::regex_traits<char>, true, false>>::_M_invoke(std::_Any_data const&, char&&)
+000000000009bf40 W std::_Function_handler<bool (char), std::__detail::_CharMatcher<std::__cxx11::regex_traits<char>, true, true>>::_M_manager(std::_Any_data&, std::_Any_data const&, std::_Manager_operation)
+000000000009bef0 W std::_Function_handler<bool (char), std::__detail::_CharMatcher<std::__cxx11::regex_traits<char>, true, true>>::_M_invoke(std::_Any_data const&, char&&)
+000000000009d690 W std::_Function_handler<bool (char), std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, false, false>>::_M_manager(std::_Any_data&, std::_Any_data const&, std::_Manager_operation)
+000000000009d670 W std::_Function_handler<bool (char), std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, false, false>>::_M_invoke(std::_Any_data const&, char&&)
+000000000009e7c0 W std::_Function_handler<bool (char), std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, false, true>>::_M_manager(std::_Any_data&, std::_Any_data const&, std::_Manager_operation)
+000000000009e7a0 W std::_Function_handler<bool (char), std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, false, true>>::_M_invoke(std::_Any_data const&, char&&)
+000000000009f540 W std::_Function_handler<bool (char), std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, true, false>>::_M_manager(std::_Any_data&, std::_Any_data const&, std::_Manager_operation)
+000000000009f520 W std::_Function_handler<bool (char), std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, true, false>>::_M_invoke(std::_Any_data const&, char&&)
+00000000000a0350 W std::_Function_handler<bool (char), std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, true, true>>::_M_manager(std::_Any_data&, std::_Any_data const&, std::_Manager_operation)
+00000000000a0330 W std::_Function_handler<bool (char), std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, true, true>>::_M_invoke(std::_Any_data const&, char&&)
+0000000000097060 W std::_Sp_counted_ptr_inplace<std::__detail::_NFA<std::__cxx11::regex_traits<char>>, std::allocator<void>, (__gnu_cxx::_Lock_policy)2>::_M_destroy()
+0000000000096fc0 W std::_Sp_counted_ptr_inplace<std::__detail::_NFA<std::__cxx11::regex_traits<char>>, std::allocator<void>, (__gnu_cxx::_Lock_policy)2>::_M_dispose()
+0000000000097070 W std::_Sp_counted_ptr_inplace<std::__detail::_NFA<std::__cxx11::regex_traits<char>>, std::allocator<void>, (__gnu_cxx::_Lock_policy)2>::_M_get_deleter(std::type_info const&)
+0000000000096fb0 W std::_Sp_counted_ptr_inplace<std::__detail::_NFA<std::__cxx11::regex_traits<char>>, std::allocator<void>, (__gnu_cxx::_Lock_policy)2>::~_Sp_counted_ptr_inplace()
+00000000000a66d0 W std::map<long, long, std::less<long>, std::allocator<std::pair<long const, long>>>::~map()
+00000000000a65d0 W std::map<long, long, std::less<long>, std::allocator<std::pair<long const, long>>>::operator[](long const&)
+000000000009ebe0 W std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>::pair(std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>> const&)
+000000000009e280 W std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>::~pair()
+0000000000093260 W std::pair<char const*, std::filesystem::__cxx11::path>::pair<char const (&) [10], std::filesystem::__cxx11::path>(char const (&) [10], std::filesystem::__cxx11::path&&)
+0000000000092e10 W std::pair<char const*, std::filesystem::__cxx11::path>::pair<char const (&) [5], std::filesystem::__cxx11::path>(char const (&) [5], std::filesystem::__cxx11::path&&)
+00000000000930f0 W std::pair<char const*, std::filesystem::__cxx11::path>::pair<char const (&) [8], std::filesystem::__cxx11::path>(char const (&) [8], std::filesystem::__cxx11::path&&)
+0000000000092f80 W std::pair<char const*, std::filesystem::__cxx11::path>::pair<char const (&) [9], std::filesystem::__cxx11::path>(char const (&) [9], std::filesystem::__cxx11::path&&)
+00000000000932e0 W std::pair<char const*, std::filesystem::__cxx11::path>::~pair()
+0000000000091680 t std::array<(anonymous namespace)::DeviceWeights, 3ul>::~array()
+00000000000934c0 W std::array<std::pair<char const*, std::filesystem::__cxx11::path>, 13ul>::~array()
+00000000000a6d10 W void std::deque<std::__detail::_StateSeq<std::__cxx11::regex_traits<char>>, std::allocator<std::__detail::_StateSeq<std::__cxx11::regex_traits<char>>>>::_M_push_back_aux<std::__detail::_StateSeq<std::__cxx11::regex_traits<char>> const&>(std::__detail::_StateSeq<std::__cxx11::regex_traits<char>> const&)
+00000000000a6fe0 W void std::deque<std::__detail::_StateSeq<std::__cxx11::regex_traits<char>>, std::allocator<std::__detail::_StateSeq<std::__cxx11::regex_traits<char>>>>::_M_push_back_aux<std::__detail::_StateSeq<std::__cxx11::regex_traits<char>>>(std::__detail::_StateSeq<std::__cxx11::regex_traits<char>>&&)
+00000000000a6e00 W std::deque<std::__detail::_StateSeq<std::__cxx11::regex_traits<char>>, std::allocator<std::__detail::_StateSeq<std::__cxx11::regex_traits<char>>>>::_M_reallocate_map(unsigned long, bool)
+00000000000a6a60 W void std::deque<long, std::allocator<long>>::_M_push_back_aux<long const&>(long const&)
+00000000000a6b30 W std::deque<long, std::allocator<long>>::_M_reallocate_map(unsigned long, bool)
+00000000000958b0 W std::stack<std::__detail::_StateSeq<std::__cxx11::regex_traits<char>>, std::deque<std::__detail::_StateSeq<std::__cxx11::regex_traits<char>>, std::allocator<std::__detail::_StateSeq<std::__cxx11::regex_traits<char>>>>>::~stack()
+00000000000a6570 W std::stack<long, std::deque<long, std::allocator<long>>>::~stack()
+00000000000b7ca0 W std::vector<ninfer::HostPinnedArena::Span, std::allocator<ninfer::HostPinnedArena::Span>>::_M_insert_rval(__gnu_cxx::__normal_iterator<ninfer::HostPinnedArena::Span const*, std::vector<ninfer::HostPinnedArena::Span, std::allocator<ninfer::HostPinnedArena::Span>>>, ninfer::HostPinnedArena::Span&&)
+00000000000a2aa0 W void std::vector<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, std::allocator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>::_M_realloc_insert<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&>(__gnu_cxx::__normal_iterator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>*, std::vector<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, std::allocator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&)
+000000000009c5c0 W std::vector<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, std::allocator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>::~vector()
+00000000000a7b20 W std::vector<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>>::_M_fill_assign(unsigned long, std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>> const&)
+00000000000a9060 W std::vector<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>>::operator=(std::vector<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>> const&)
+0000000000097260 W void std::vector<std::__detail::_State<char>, std::allocator<std::__detail::_State<char>>>::_M_realloc_insert<std::__detail::_State<char>>(__gnu_cxx::__normal_iterator<std::__detail::_State<char>*, std::vector<std::__detail::_State<char>, std::allocator<std::__detail::_State<char>>>>, std::__detail::_State<char>&&)
+00000000000a3f70 W void std::vector<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>::_M_realloc_insert<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>(__gnu_cxx::__normal_iterator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>*, std::vector<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>>, std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>&&)
+000000000009eaf0 W std::vector<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>::vector(std::vector<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>> const&)
+000000000009e190 W std::vector<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>::~vector()
+00000000000a8500 W void std::vector<std::pair<long, std::vector<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>>>, std::allocator<std::pair<long, std::vector<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>>>>>::_M_realloc_insert<long&, std::vector<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>> const&>(__gnu_cxx::__normal_iterator<std::pair<long, std::vector<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>>>*, std::vector<std::pair<long, std::vector<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>>>, std::allocator<std::pair<long, std::vector<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>>>>>>, long&, std::vector<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>> const&)
+00000000000a7e20 W std::vector<std::pair<long, std::vector<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>>>, std::allocator<std::pair<long, std::vector<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>>>>>::~vector()
+00000000000926d0 W std::__cxx11::basic_regex<char, std::__cxx11::regex_traits<char>>::basic_regex(char const*, std::regex_constants::syntax_option_type)
+0000000000093770 W std::__cxx11::basic_regex<char, std::__cxx11::regex_traits<char>>::~basic_regex()
+00000000000b45c0 W std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::_M_dispose()
+0000000000093f40 W std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::_M_replace(unsigned long, unsigned long, char const*, unsigned long)
+0000000000093810 W void std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::_M_construct<std::istreambuf_iterator<char, std::char_traits<char>>>(std::istreambuf_iterator<char, std::char_traits<char>>, std::istreambuf_iterator<char, std::char_traits<char>>, std::input_iterator_tag)
+00000000000b45f0 W std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::append(char const*)
+00000000000961d0 W std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::assign(unsigned long, char)
+0000000000094380 W std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::reserve(unsigned long)
+0000000000094810 W std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::_M_assign(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&)
+0000000000094060 W std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::_M_mutate(unsigned long, unsigned long, char const*, unsigned long)
+00000000000b4440 W std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::basic_string(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>&&)
+00000000000b4520 W std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::basic_string<std::allocator<char>>(char const*, std::allocator<char> const&)
+00000000000b4440 W std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::basic_string(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>&&)
+0000000000092070 W std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::basic_string<std::allocator<char>>(char const*, std::allocator<char> const&)
+0000000000092830 W std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::operator=(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>&&)
+00000000000a79f0 W std::__cxx11::match_results<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>>::_M_establish_failed_match(__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>)
+00000000000a66f0 W std::_Rb_tree<long, std::pair<long const, long>, std::_Select1st<std::pair<long const, long>>, std::less<long>, std::allocator<std::pair<long const, long>>>::_M_get_insert_hint_unique_pos(std::_Rb_tree_const_iterator<std::pair<long const, long>>, long const&)
+00000000000a68e0 W std::_Rb_tree<long, std::pair<long const, long>, std::_Select1st<std::pair<long const, long>>, std::less<long>, std::allocator<std::pair<long const, long>>>::_M_erase(std::_Rb_tree_node<std::pair<long const, long>>*)
+0000000000095a00 W std::__detail::_ScannerBase::_ScannerBase(std::regex_constants::syntax_option_type)
+00000000000a2520 W std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, false, false>::_M_make_range(char, char)
+000000000009c110 W std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, false, false>::_M_add_character_class(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&, bool)
+00000000000a1fb0 W std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, false, false>::_M_add_collate_element(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&)
+00000000000a2310 W std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, false, false>::_M_add_equivalence_class(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&)
+000000000009c2e0 W std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, false, false>::_M_ready()
+000000000009d7d0 W std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, false, false>::_BracketMatcher(std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, false, false> const&)
+000000000009c510 W std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, false, false>::~_BracketMatcher()
+00000000000a3c30 W std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, false, true>::_M_make_range(char, char)
+000000000009dc80 W std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, false, true>::_M_add_character_class(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&, bool)
+00000000000a36c0 W std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, false, true>::_M_add_collate_element(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&)
+00000000000a3a20 W std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, false, true>::_M_add_equivalence_class(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&)
+000000000009de50 W std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, false, true>::_M_ready()
+000000000009e850 W std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, false, true>::_BracketMatcher(std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, false, true> const&)
+000000000009e090 W std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, false, true>::~_BracketMatcher()
+00000000000a4880 W std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, true, false>::_M_add_char(char)
+00000000000a4d20 W std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, true, false>::_M_make_range(char, char)
+000000000009ed10 W std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, true, false>::_M_add_character_class(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&, bool)
+00000000000a4990 W std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, true, false>::_M_add_collate_element(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&)
+00000000000a4b10 W std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, true, false>::_M_add_equivalence_class(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&)
+000000000009eee0 W std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, true, false>::_M_ready()
+000000000009f680 W std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, true, false>::_BracketMatcher(std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, true, false> const&)
+000000000009f120 W std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, true, false>::~_BracketMatcher()
+00000000000a5440 W std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, true, true>::_M_add_char(char)
+00000000000a58e0 W std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, true, true>::_M_make_range(char, char)
+000000000009fa40 W std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, true, true>::_M_add_character_class(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&, bool)
+00000000000a5550 W std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, true, true>::_M_add_collate_element(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&)
+00000000000a56d0 W std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, true, true>::_M_add_equivalence_class(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&)
+000000000009fc10 W std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, true, true>::_M_ready()
+00000000000a03e0 W std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, true, true>::_BracketMatcher(std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, true, true> const&)
+000000000009fe50 W std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, true, true>::~_BracketMatcher()
+00000000000a8f60 W std::__detail::_Backref_matcher<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::__cxx11::regex_traits<char>>::_M_apply(__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, __gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, __gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, __gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>)
+00000000000a7110 W bool std::__detail::__regex_algo_impl<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>, char, std::__cxx11::regex_traits<char>>(__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, __gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::__cxx11::match_results<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>>&, std::__cxx11::basic_regex<char, std::__cxx11::regex_traits<char>> const&, std::regex_constants::match_flag_type, std::__detail::_RegexExecutorPolicy, bool)
+0000000000097790 W std::__detail::_NFA<std::__cxx11::regex_traits<char>>::_M_insert_alt(long, long, bool)
+00000000000976b0 W std::__detail::_NFA<std::__cxx11::regex_traits<char>>::_M_insert_dummy()
+00000000000957d0 W std::__detail::_NFA<std::__cxx11::regex_traits<char>>::_M_insert_accept()
+00000000000a5c20 W std::__detail::_NFA<std::__cxx11::regex_traits<char>>::_M_insert_repeat(long, long, bool)
+000000000009a780 W std::__detail::_NFA<std::__cxx11::regex_traits<char>>::_M_insert_backref(unsigned long)
+000000000009b6a0 W std::__detail::_NFA<std::__cxx11::regex_traits<char>>::_M_insert_matcher(std::function<bool (char)>)
+0000000000099470 W std::__detail::_NFA<std::__cxx11::regex_traits<char>>::_M_insert_line_end()
+00000000000996f0 W std::__detail::_NFA<std::__cxx11::regex_traits<char>>::_M_insert_lookahead(long, bool)
+0000000000099390 W std::__detail::_NFA<std::__cxx11::regex_traits<char>>::_M_insert_line_begin()
+0000000000099550 W std::__detail::_NFA<std::__cxx11::regex_traits<char>>::_M_insert_word_bound(bool)
+0000000000095630 W std::__detail::_NFA<std::__cxx11::regex_traits<char>>::_M_insert_subexpr_end()
+0000000000095040 W std::__detail::_NFA<std::__cxx11::regex_traits<char>>::_M_insert_subexpr_begin()
+00000000000970c0 W std::__detail::_State<char>::~_State()
+0000000000096d90 W std::__detail::_Scanner<char>::_M_eat_class(char)
+00000000000965b0 W std::__detail::_Scanner<char>::_M_scan_normal()
+0000000000096ba0 W std::__detail::_Scanner<char>::_M_scan_in_brace()
+00000000000962c0 W std::__detail::_Scanner<char>::_M_eat_escape_awk()
+0000000000095b40 W std::__detail::_Scanner<char>::_M_eat_escape_ecma()
+0000000000096980 W std::__detail::_Scanner<char>::_M_scan_in_bracket()
+0000000000096050 W std::__detail::_Scanner<char>::_M_eat_escape_posix()
+0000000000094ef0 W std::__detail::_Scanner<char>::_Scanner(char const*, char const*, std::regex_constants::syntax_option_type, std::locale)
+000000000009a020 W std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_try_char()
+0000000000097920 W std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_assertion()
+00000000000984e0 W std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_quantifier()
+00000000000974a0 W std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_alternative()
+00000000000952b0 W std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_disjunction()
+00000000000955a0 W std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_match_token(std::__detail::_ScannerBase::_TokenT)
+000000000009a980 W std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_cur_int_value(int)
+00000000000a1640 W bool std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_expression_term<false, false>(std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_BracketState&, std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, false, false>&)
+00000000000a2d50 W bool std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_expression_term<false, true>(std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_BracketState&, std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, false, true>&)
+00000000000a4330 W bool std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_expression_term<true, false>(std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_BracketState&, std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, true, false>&)
+00000000000a4ef0 W bool std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_expression_term<true, true>(std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_BracketState&, std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, true, true>&)
+000000000009b5b0 W std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_bracket_expression()
+000000000009a300 W void std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_insert_char_matcher<false, false>()
+000000000009a400 W void std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_insert_char_matcher<false, true>()
+000000000009a500 W void std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_insert_char_matcher<true, false>()
+000000000009a640 W void std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_insert_char_matcher<true, true>()
+00000000000a0680 W void std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_insert_bracket_matcher<false, false>(bool)
+00000000000a0b20 W void std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_insert_bracket_matcher<false, true>(bool)
+00000000000a0f20 W void std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_insert_bracket_matcher<true, false>(bool)
+00000000000a1300 W void std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_insert_bracket_matcher<true, true>(bool)
+0000000000099c60 W void std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_insert_any_matcher_ecma<false, false>()
+0000000000099d50 W void std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_insert_any_matcher_ecma<false, true>()
+0000000000099e40 W void std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_insert_any_matcher_ecma<true, false>()
+0000000000099f30 W void std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_insert_any_matcher_ecma<true, true>()
+00000000000998a0 W void std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_insert_any_matcher_posix<false, false>()
+0000000000099990 W void std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_insert_any_matcher_posix<false, true>()
+0000000000099a80 W void std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_insert_any_matcher_posix<true, false>()
+0000000000099b70 W void std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_insert_any_matcher_posix<true, true>()
+000000000009aa00 W void std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_insert_character_class_matcher<false, false>()
+000000000009ad30 W void std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_insert_character_class_matcher<false, true>()
+000000000009afd0 W void std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_insert_character_class_matcher<true, false>()
+000000000009b310 W void std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_insert_character_class_matcher<true, true>()
+0000000000097d70 W std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_atom()
+0000000000094980 W std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_Compiler(char const*, char const*, std::locale const&, std::regex_constants::syntax_option_type)
+0000000000094db0 W std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::~_Compiler()
+00000000000a8c90 W std::__detail::_Executor<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>, std::__cxx11::regex_traits<char>, false>::_M_lookahead(long)
+00000000000a8750 W std::__detail::_Executor<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>, std::__cxx11::regex_traits<char>, false>::_M_handle_match(std::__detail::_Executor<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>, std::__cxx11::regex_traits<char>, false>::_Match_mode, long)
+00000000000a7e80 W std::__detail::_Executor<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>, std::__cxx11::regex_traits<char>, false>::_M_main_dispatch(std::__detail::_Executor<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>, std::__cxx11::regex_traits<char>, false>::_Match_mode, std::integral_constant<bool, false>)
+00000000000a8970 W std::__detail::_Executor<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>, std::__cxx11::regex_traits<char>, false>::_M_rep_once_more(std::__detail::_Executor<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>, std::__cxx11::regex_traits<char>, false>::_Match_mode, long)
+00000000000a8880 W std::__detail::_Executor<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>, std::__cxx11::regex_traits<char>, false>::_M_handle_backref(std::__detail::_Executor<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>, std::__cxx11::regex_traits<char>, false>::_Match_mode, long)
+00000000000a8160 W std::__detail::_Executor<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>, std::__cxx11::regex_traits<char>, false>::_M_dfs(std::__detail::_Executor<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>, std::__cxx11::regex_traits<char>, false>::_Match_mode, long)
+00000000000a7620 W std::__detail::_Executor<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>, std::__cxx11::regex_traits<char>, false>::_Executor(__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, __gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::vector<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>>&, std::__cxx11::basic_regex<char, std::__cxx11::regex_traits<char>> const&, std::regex_constants::match_flag_type)
+00000000000a7860 W std::__detail::_Executor<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>, std::__cxx11::regex_traits<char>, false>::~_Executor()
+00000000000a99c0 W std::__detail::_Executor<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>, std::__cxx11::regex_traits<char>, true>::_M_lookahead(long)
+00000000000a9630 W std::__detail::_Executor<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>, std::__cxx11::regex_traits<char>, true>::_M_handle_backref(std::__detail::_Executor<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>, std::__cxx11::regex_traits<char>, true>::_Match_mode, long)
+00000000000a9220 W std::__detail::_Executor<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>, std::__cxx11::regex_traits<char>, true>::_M_dfs(std::__detail::_Executor<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>, std::__cxx11::regex_traits<char>, true>::_Match_mode, long)
+00000000000a7910 W std::__detail::_Executor<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>, std::__cxx11::regex_traits<char>, true>::_M_search()
+00000000000a79c0 W std::__detail::_Executor<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>, std::__cxx11::regex_traits<char>, true>::~_Executor()
+00000000000a5dc0 W std::__detail::_StateSeq<std::__cxx11::regex_traits<char>>::_M_clone()
+000000000009ce60 W void std::__make_heap<__gnu_cxx::__normal_iterator<char*, std::vector<char, std::allocator<char>>>, __gnu_cxx::__ops::_Iter_less_iter>(__gnu_cxx::__normal_iterator<char*, std::vector<char, std::allocator<char>>>, __gnu_cxx::__normal_iterator<char*, std::vector<char, std::allocator<char>>>, __gnu_cxx::__ops::_Iter_less_iter&)
+0000000000094210 W std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> std::__str_concat<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::value_type const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::size_type, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::value_type const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::size_type, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::allocator_type const&)
+000000000009db90 W std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>* std::__do_uninit_copy<__gnu_cxx::__normal_iterator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const*, std::vector<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, std::allocator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>*>(__gnu_cxx::__normal_iterator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const*, std::vector<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, std::allocator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>, __gnu_cxx::__normal_iterator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const*, std::vector<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, std::allocator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>*)
+000000000009ca30 W void std::__introsort_loop<__gnu_cxx::__normal_iterator<char*, std::vector<char, std::allocator<char>>>, long, __gnu_cxx::__ops::_Iter_less_iter>(__gnu_cxx::__normal_iterator<char*, std::vector<char, std::allocator<char>>>, __gnu_cxx::__normal_iterator<char*, std::vector<char, std::allocator<char>>>, long, __gnu_cxx::__ops::_Iter_less_iter)
+0000000000095980 W std::__throw_regex_error(std::regex_constants::error_type, char const*)
+000000000009cc60 W void std::__final_insertion_sort<__gnu_cxx::__normal_iterator<char*, std::vector<char, std::allocator<char>>>, __gnu_cxx::__ops::_Iter_less_iter>(__gnu_cxx::__normal_iterator<char*, std::vector<char, std::allocator<char>>>, __gnu_cxx::__normal_iterator<char*, std::vector<char, std::allocator<char>>>, __gnu_cxx::__ops::_Iter_less_iter)
+000000000009c630 W void std::_Destroy<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>*>(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>*)
+000000000009e210 W void std::_Destroy<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>*>(std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>*, std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>*)
+000000000009d320 W __gnu_cxx::__normal_iterator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const*, std::vector<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, std::allocator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>> std::__find_if<__gnu_cxx::__normal_iterator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const*, std::vector<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, std::allocator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>, __gnu_cxx::__ops::_Iter_equals_val<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const>>(__gnu_cxx::__normal_iterator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const*, std::vector<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, std::allocator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>, __gnu_cxx::__normal_iterator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const*, std::vector<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>, std::allocator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>, __gnu_cxx::__ops::_Iter_equals_val<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const>, std::random_access_iterator_tag)
+0000000000092be0 W bool std::operator==<char, std::char_traits<char>, std::allocator<char>>(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&, char const*)
+00000000000924a0 W std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> std::operator+<char, std::char_traits<char>, std::allocator<char>>(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>&&, char const*)
+0000000000092330 W std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> std::operator+<char, std::char_traits<char>, std::allocator<char>>(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>&&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>&&)
+0000000000092590 W std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> std::operator+<char, std::char_traits<char>, std::allocator<char>>(char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>&&)
+00000000000927e0 W std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> std::operator+<char, std::char_traits<char>, std::allocator<char>>(char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&)
+00000000000c3b00 V typeinfo for std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, false, false, false>
+00000000000c3b10 V typeinfo for std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, false, false, true>
+00000000000c3b20 V typeinfo for std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, false, true, false>
+00000000000c3b30 V typeinfo for std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, false, true, true>
+00000000000c3b40 V typeinfo for std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, true, false, false>
+00000000000c3b50 V typeinfo for std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, true, false, true>
+00000000000c3b60 V typeinfo for std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, true, true, false>
+00000000000c3b70 V typeinfo for std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, true, true, true>
+00000000000c3b80 V typeinfo for std::__detail::_CharMatcher<std::__cxx11::regex_traits<char>, false, false>
+00000000000c3b90 V typeinfo for std::__detail::_CharMatcher<std::__cxx11::regex_traits<char>, false, true>
+00000000000c3ba0 V typeinfo for std::__detail::_CharMatcher<std::__cxx11::regex_traits<char>, true, false>
+00000000000c3bb0 V typeinfo for std::__detail::_CharMatcher<std::__cxx11::regex_traits<char>, true, true>
+00000000000c3cb0 V typeinfo for std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, false, false>
+00000000000c3cc0 V typeinfo for std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, false, true>
+00000000000c3cd0 V typeinfo for std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, true, false>
+00000000000c3ce0 V typeinfo for std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, true, true>
+00000000000c3af0 V typeinfo for std::_Mutex_base<(__gnu_cxx::_Lock_policy)2>
+00000000000c42b8 B typeinfo for std::overflow_error
+00000000000c3ad8 V typeinfo for std::_Sp_counted_base<(__gnu_cxx::_Lock_policy)2>
+00000000000c42a0 B typeinfo for std::invalid_argument
+00000000000c3ac0 V typeinfo for std::_Sp_counted_ptr_inplace<std::__detail::_NFA<std::__cxx11::regex_traits<char>>, std::allocator<void>, (__gnu_cxx::_Lock_policy)2>
+00000000000c3a78 d typeinfo for (anonymous namespace)::run_case((anonymous namespace)::ResidualShape const&, ihipStream_t*)::'lambda0'()::operator()() const::'lambda'()
+00000000000c3a68 d typeinfo for (anonymous namespace)::run_case((anonymous namespace)::ResidualShape const&, ihipStream_t*)::'lambda'()::operator()() const::'lambda'()
+000000000000b590 V typeinfo name for std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, false, false, false>
+000000000000b5d6 V typeinfo name for std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, false, false, true>
+000000000000b61c V typeinfo name for std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, false, true, false>
+000000000000b662 V typeinfo name for std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, false, true, true>
+000000000000b6a8 V typeinfo name for std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, true, false, false>
+000000000000b6ee V typeinfo name for std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, true, false, true>
+000000000000b734 V typeinfo name for std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, true, true, false>
+000000000000b77a V typeinfo name for std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, true, true, true>
+000000000000b7c0 V typeinfo name for std::__detail::_CharMatcher<std::__cxx11::regex_traits<char>, false, false>
+000000000000b803 V typeinfo name for std::__detail::_CharMatcher<std::__cxx11::regex_traits<char>, false, true>
+000000000000b846 V typeinfo name for std::__detail::_CharMatcher<std::__cxx11::regex_traits<char>, true, false>
+000000000000b889 V typeinfo name for std::__detail::_CharMatcher<std::__cxx11::regex_traits<char>, true, true>
+000000000000b8cc V typeinfo name for std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, false, false>
+000000000000b912 V typeinfo name for std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, false, true>
+000000000000b958 V typeinfo name for std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, true, false>
+000000000000b99e V typeinfo name for std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, true, true>
+000000000000b536 V typeinfo name for std::_Mutex_base<(__gnu_cxx::_Lock_policy)2>
+000000000000b502 V typeinfo name for std::_Sp_counted_base<(__gnu_cxx::_Lock_policy)2>
+000000000000b565 V typeinfo name for std::_Sp_make_shared_tag
+000000000000b491 V typeinfo name for std::_Sp_counted_ptr_inplace<std::__detail::_NFA<std::__cxx11::regex_traits<char>>, std::allocator<void>, (__gnu_cxx::_Lock_policy)2>
+0000000000006776 r typeinfo name for (anonymous namespace)::run_case((anonymous namespace)::ResidualShape const&, ihipStream_t*)::'lambda0'()::operator()() const::'lambda'()
+0000000000006724 r typeinfo name for (anonymous namespace)::run_case((anonymous namespace)::ResidualShape const&, ihipStream_t*)::'lambda'()::operator()() const::'lambda'()
+00000000000c3a88 V vtable for std::_Sp_counted_ptr_inplace<std::__detail::_NFA<std::__cxx11::regex_traits<char>>, std::allocator<void>, (__gnu_cxx::_Lock_policy)2>
+0000000000091150 t (anonymous namespace)::run_case((anonymous namespace)::ResidualShape const&, ihipStream_t*)::'lambda0'()::operator()() const
+0000000000091020 t (anonymous namespace)::run_case((anonymous namespace)::ResidualShape const&, ihipStream_t*)::'lambda'()::operator()() const
+00000000000c3bc0 V std::__cxx11::regex_traits<char>::_RegexMask std::__cxx11::regex_traits<char>::lookup_classname<char const*>(char const*, char const*, bool) const::__classnames[abi:cxx11]
+00000000000c52e0 V std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> std::__cxx11::regex_traits<char>::lookup_collatename<char const*>(char const*, char const*) const::__collatenames
+00000000000c5c59 V std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, false, false, false>::operator()(char) const::__nul
+00000000000c5c68 V std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, false, false, true>::operator()(char) const::__nul
+00000000000c5c78 V std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, false, true, false>::operator()(char) const::__nul
+00000000000c5c88 V std::__detail::_AnyMatcher<std::__cxx11::regex_traits<char>, false, true, true>::operator()(char) const::__nul
+000000000009cfd0 W std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, false, false>::_M_apply(char, std::integral_constant<bool, false>) const::'lambda'()::operator()() const
+000000000009e2c0 W std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, false, true>::_M_apply(char, std::integral_constant<bool, false>) const::'lambda'()::operator()() const
+000000000009f1d0 W std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, true, false>::_M_apply(char, std::integral_constant<bool, false>) const::'lambda'()::operator()() const
+000000000009ff50 W std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, true, true>::_M_apply(char, std::integral_constant<bool, false>) const::'lambda'()::operator()() const
+000000000000b9e4 V std::__detail::_Executor<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>, std::__cxx11::regex_traits<char>, false>::_M_is_word(char) const::__s
+000000000000b9e6 V std::__detail::_Executor<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::allocator<std::__cxx11::sub_match<__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>>>, std::__cxx11::regex_traits<char>, true>::_M_is_word(char) const::__s
+000000000000b580 V std::_Sp_make_shared_tag::_S_ti()::__tag
+00000000000a20f0 W bool std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_expression_term<false, false>(std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_BracketState&, std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, false, false>&)::'lambda'(char)::operator()(char) const
+00000000000a2210 W bool std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_expression_term<false, false>(std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_BracketState&, std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, false, false>&)::'lambda'()::operator()() const
+00000000000a3800 W bool std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_expression_term<false, true>(std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_BracketState&, std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, false, true>&)::'lambda'(char)::operator()(char) const
+00000000000a3920 W bool std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_M_expression_term<false, true>(std::__detail::_Compiler<std::__cxx11::regex_traits<char>>::_BracketState&, std::__detail::_BracketMatcher<std::__cxx11::regex_traits<char>, false, true>&)::'lambda'()::operator()() const
+000000000007db78 r __EH_FRAME_LIST_END__
+000000000007db78 r __EH_FRAME_LIST__
+00000000000002c4 r __abi_tag
+0000000000093800 t __clang_call_terminate
+00000000000c52d0 D __data_start
+0000000000086eb0 t __do_fini
+00000000000c5c20 b __do_fini.__finalized
+0000000000086e70 t __do_init
+00000000000c5bd8 b __do_init.__initialized
+00000000000c5be0 b __do_init.__object
+00000000000c52d8 d __dso_handle
+00000000000c1890 t __extendhfsf2
+00000000000c3a38 d __fini
+00000000000c5ca0 B __hip_cuid_29882513df5037fe
+00000000000c5c58 B __hip_cuid_5f55ee615d739d9c
+00000000000c5ca1 B __hip_cuid_c5c9cb118b21cec5
+00000000000c5ca2 B __hip_cuid_d18a3510515e3ed0
+00000000000c5cb0 B __hip_cuid_ec94fed09d9da32b
+00000000000c56f8 d __hip_fatbin_wrapper
+00000000000c5710 d __hip_fatbin_wrapper
+00000000000c5728 d __hip_fatbin_wrapper
+00000000000c5c98 b __hip_gpubin_handle_29882513df5037fe
+00000000000c5c50 b __hip_gpubin_handle_5f55ee615d739d9c
+00000000000c5ca8 b __hip_gpubin_handle_ec94fed09d9da32b
+0000000000091dc0 t __hip_module_ctor
+00000000000b09d0 t __hip_module_ctor
+00000000000c06e0 t __hip_module_ctor
+0000000000091e30 t __hip_module_dtor
+00000000000b10e0 t __hip_module_dtor
+00000000000c0f00 t __hip_module_dtor
+00000000000c3a10 d __init
+00000000000c1990 t __sfp_handle_exceptions
+00000000000c1a10 t __truncsfhf2
+00000000000c20f0 t _fini
+00000000000c20d4 t _init
+0000000000086e40 T _start
+00000000000c20c0 t atexit
+00000000000c52d0 W data_start
+0000000000086f00 T main

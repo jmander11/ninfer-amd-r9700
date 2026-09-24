@@ -8,17 +8,18 @@ import torch
 from tools.artifact.layouts import (
     RowPlanes,
     assemble_row_planes,
-    block_scale_geometry,
     decode_direct,
-    decode_nvfp4_words,
     decode_row_split_codes,
+    decode_q4_n16k16_codes,
     dequantize_row_split,
     encode_direct,
-    encode_nvfp4,
     encode_row_split,
+    encode_q4_n16k16,
     encoded_size,
     gather_row_planes,
+    row_scaled_geometry,
     row_split_geometry,
+    q4_n16k16_geometry,
     split_row_planes,
 )
 
@@ -90,26 +91,41 @@ def test_row_split_geometry_and_encoded_size_are_derived_from_format_and_shape()
     ) == (256, 4, 256, 256, 64, 512, 16, 528)
     assert encoded_size("row-split-k128-v1", "Q5G64_F16S", (2, 130)) == 528
 
-    q4 = row_split_geometry("Q4G64_F16S", (1, 4304))
     w8 = row_split_geometry("W8G32_F16S", (1, 4304))
-    assert (q4.k_pad, q4.groups_per_row, q4.base_row_bytes, q4.high_row_bytes) == (
-        4352,
-        68,
-        2176,
-        0,
-    )
     assert (w8.k_pad, w8.groups_per_row, w8.base_row_bytes, w8.high_row_bytes) == (
         4352,
         136,
         4352,
         0,
     )
+    with pytest.raises(ValueError, match="does not accept"):
+        row_split_geometry("Q4G64_F16S", (16, 4304))
+
+
+def test_row_scaled_geometry_is_distinct_and_k128_padded():
+    geometry = row_scaled_geometry("F8E4M3_ROW_F32S", (3, 129))
+    assert (
+        geometry.k_pad,
+        geometry.code_row_bytes,
+        geometry.code_bytes,
+        geometry.scale_row_bytes,
+        geometry.scale_offset,
+        geometry.scale_bytes,
+        geometry.payload_bytes,
+    ) == (256, 256, 768, 4, 768, 12, 780)
+    assert encoded_size(
+        "row-scaled-k128-v1", "F8E4M3_ROW_F32S", (3, 129)
+    ) == 780
+
+    with pytest.raises(ValueError, match="does not accept"):
+        encoded_size("row-split-k128-v1", "F8E4M3_ROW_F32S", (3, 129))
+    with pytest.raises(ValueError, match="does not accept"):
+        encoded_size("row-scaled-k128-v1", "W8G32_F16S", (3, 129))
 
 
 @pytest.mark.parametrize(
     ("format_name", "k", "prefix", "base_prefix", "high_prefix"),
     [
-        ("Q4G64_F16S", 65, (-8, -7, -1, 0, 1, 7), b"\x98\x0f\x71", b""),
         ("Q5G64_F16S", 65, (-16, -15, -1, 0, 1, 15), b"\x10\x0f\xf1", b"\x07"),
         (
             "Q6G64_F16S",
@@ -149,6 +165,27 @@ def test_row_split_plane_bit_order_and_round_trip(
     )
     assert torch.equal(decoded_scales, scales)
     assert torch.equal(decoded_codes, codes)
+
+
+def test_q4_n16k16_exact_tile_order_and_round_trip():
+    shape = (16, 65)
+    geometry = q4_n16k16_geometry(shape)
+    codes = torch.zeros((16, geometry.groups_per_row, 64), dtype=torch.int8)
+    scales = torch.zeros((16, geometry.groups_per_row), dtype=torch.float16)
+    for row in range(16):
+        codes[row, 0, :4] = torch.tensor((row & 7, -8, -1, 7), dtype=torch.int8)
+        scales[row, 0] = row + 1
+    payload = encode_q4_n16k16(codes, scales, shape)
+    assert len(payload) == geometry.payload_bytes
+    # Pair 0, lane `row`, eight-byte fragment: the first packed byte is row-specific.
+    for row in range(16):
+        assert payload[row * 8] == ((row & 7) | 0x80)
+    decoded_scales, decoded_codes = decode_q4_n16k16_codes(payload, shape)
+    assert torch.equal(decoded_scales, scales)
+    assert torch.equal(decoded_codes, codes)
+    assert encoded_size("r9700-q4g64-n16-k16-v1", "Q4G64_F16S", shape) == geometry.payload_bytes
+    with pytest.raises(ValueError, match="does not accept"):
+        encoded_size("row-split-k128-v1", "Q4G64_F16S", shape)
 
 
 def test_consecutive_views_arbitrary_gathers_and_standalone_assembly():
@@ -214,87 +251,3 @@ def test_consecutive_views_arbitrary_gathers_and_standalone_assembly():
     )
     assert torch.equal(tensor_scales, scales[[2, 0]])
     assert torch.equal(tensor_codes, codes[[2, 0]])
-
-
-def test_nvfp4_known_vector_geometry_swizzle_tail_and_round_trip():
-    shape = (128, 64)
-    geometry = block_scale_geometry("NVFP4", shape)
-    assert (
-        geometry.code_plane_bytes,
-        geometry.scale_plane_offset,
-        geometry.scale_plane_bytes,
-        geometry.weight_divisor_offset,
-        geometry.payload_bytes,
-    ) == (4096, 4096, 512, 4608, 4612)
-
-    packed = (
-        torch.arange(geometry.code_plane_bytes, dtype=torch.int64)
-        .remainder(256)
-        .to(torch.uint8)
-        .reshape(128, 32)
-    )
-    packed[0, 0] = 0x10
-    scales = (
-        torch.arange(128 * 4, dtype=torch.int64)
-        .remainder(0x7F)
-        .to(torch.uint8)
-        .reshape(128, 4)
-    )
-    divisor = struct.pack("<f", 2.5)
-    payload = encode_nvfp4(packed, scales, divisor, shape)
-
-    assert len(payload) == 4612
-    assert payload[0] == 0x10  # low nibble is K=0; high nibble is K=1.
-    for row, lane in ((0, 0), (31, 3), (32, 0), (127, 3)):
-        offset = (
-            geometry.scale_plane_offset
-            + (row % 32) * 16
-            + (row // 32) * 4
-            + lane
-        )
-        assert payload[offset] == int(scales[row, lane])
-    assert payload[geometry.weight_divisor_offset :] == divisor
-
-    decoded_packed, decoded_scales, decoded_divisor = decode_nvfp4_words(
-        payload, shape
-    )
-    assert torch.equal(decoded_packed, packed)
-    assert torch.equal(decoded_scales, scales)
-    assert bytes(decoded_divisor.reshape(1).view(torch.uint8).numpy()) == divisor
-
-
-@pytest.mark.parametrize(
-    ("layout", "format_name", "shape", "message"),
-    [
-        ("blockscale-k16-m128x4-v1", "NVFP4", (128,), "rank 2"),
-        (
-            "blockscale-k16-m128x4-v1",
-            "NVFP4",
-            (127, 64),
-            "N divisible by 128",
-        ),
-        (
-            "blockscale-k16-m128x4-v1",
-            "NVFP4",
-            (128, 65),
-            "K divisible by 64",
-        ),
-        (
-            "blockscale-k16-m128x4-v1",
-            "Q4G64_F16S",
-            (128, 64),
-            "does not accept",
-        ),
-        (
-            "row-split-k128-v1",
-            "NVFP4",
-            (128, 64),
-            "does not accept",
-        ),
-    ],
-)
-def test_nvfp4_layout_rejects_out_of_contract_signatures(
-    layout, format_name, shape, message
-):
-    with pytest.raises(ValueError, match=message):
-        encoded_size(layout, format_name, shape)

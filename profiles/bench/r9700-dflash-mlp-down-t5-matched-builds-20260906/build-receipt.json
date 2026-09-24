@@ -1,0 +1,54 @@
+{
+  "artifact_type": "ninfer_r9700_dflash_mlp_down_t5_matched_build_receipt",
+  "schema_version": 1,
+  "status": "cpu-build-and-host-checks-passed-no-gpu-execution",
+  "source": {
+    "commit": "d1a9b6fb33a843363fba3ad46d6569071df1ab66",
+    "tree": "557bbda04f2926319bf7c25f26eb9ec193d74824",
+    "detached_checkout": "/ssdpool2nvme/local_llm/ninfer-amd-r9700-d1a9b6fb-dflash-mlp-build-source"
+  },
+  "builds": {
+    "control": {
+      "directory": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-mlp-down-t5-d1a9b6fb-control-20260906",
+      "NINFER_R9700_DFLASH_SMALL_T_CANDIDATE": 0,
+      "NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE": 0,
+      "benchmark_executable": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-mlp-down-t5-d1a9b6fb-control-20260906/bench/ninfer_bench", "bytes": 5120976, "sha256": "db248587690acc76a2d4dd2e74a3a5fccd4d8558d3cb66a80082a36ff8c75949"},
+      "cmake_cache": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-mlp-down-t5-d1a9b6fb-control-20260906/CMakeCache.txt", "bytes": 34001, "sha256": "4ad5e13170c985a3209eb9d0ff8f5d372d52f4dac1d1a76477db93aa7de288a5"},
+      "compile_commands": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-mlp-down-t5-d1a9b6fb-control-20260906/compile_commands.json", "bytes": 249878, "sha256": "96c89dfd4729a7cb8880b0e5205f58f22ff24aea42a2839028784c51814fa56a"},
+      "linear_object": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-mlp-down-t5-d1a9b6fb-control-20260906/src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/linear/r9700_linear.hip.o", "bytes": 341936, "sha256": "84cfdb1dbf1a7341332b94197445a0fa2189290d9d99575ffc488daa05526064"},
+      "normalized_compile_commands": {"bytes": 235946, "sha256": "f9229b539c423730e0038cb94931d11912b8fe8e3ef15ebf6a128b4cbf8793ee"},
+      "cpu_checks": {"ninfer_bench_support_test": "passed", "ninfer_r9700_linear_prefill_dispatch_test": "passed"},
+      "benchmark_report_field_verified": {"field": "dflash_mlp_down_t5_candidate", "value": false, "test": "ninfer_bench_support_test"}
+    },
+    "candidate": {
+      "directory": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-mlp-down-t5-d1a9b6fb-candidate-20260906",
+      "NINFER_R9700_DFLASH_SMALL_T_CANDIDATE": 0,
+      "NINFER_R9700_DFLASH_MLP_DOWN_T5_CANDIDATE": 1,
+      "benchmark_executable": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-mlp-down-t5-d1a9b6fb-candidate-20260906/bench/ninfer_bench", "bytes": 5121072, "sha256": "1a6977420a4ddb460d0acea901ea10824ec90c798912d823f0b4c01fb24dc0f2"},
+      "cmake_cache": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-mlp-down-t5-d1a9b6fb-candidate-20260906/CMakeCache.txt", "bytes": 34009, "sha256": "dc1359cc3efb3c45ae7dbc6849c8fc2476b807a57fbc413be4331ca1ddc7690d"},
+      "compile_commands": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-mlp-down-t5-d1a9b6fb-candidate-20260906/compile_commands.json", "bytes": 250222, "sha256": "8e55d395980028342a3bb3bd2b5999008438410ecb70dd0d9fd0a524fbb66c81"},
+      "linear_object": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-mlp-down-t5-d1a9b6fb-candidate-20260906/src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/linear/r9700_linear.hip.o", "bytes": 342016, "sha256": "9d6bf49d18dcf79f5c77f5df03673ae064c771ee2834f914b10293bbb4931ea8"},
+      "normalized_compile_commands": {"bytes": 235946, "sha256": "f9229b539c423730e0038cb94931d11912b8fe8e3ef15ebf6a128b4cbf8793ee"},
+      "cpu_checks": {"ninfer_bench_support_test": "passed", "ninfer_r9700_linear_prefill_dispatch_test": "passed"},
+      "benchmark_report_field_verified": {"field": "dflash_mlp_down_t5_candidate", "value": true, "test": "ninfer_bench_support_test"}
+    }
+  },
+  "configs_differ_only_in_dflash_mlp_down_t5_candidate": true,
+  "shared_gate_up_small_t_selector": 0,
+  "dispatch_relocation_proof": {
+    "tool": {"path": "/opt/rocm/llvm/bin/llvm-objdump", "bytes": 1157640, "sha256": "707d2832386fbedda85afaa952cecd16be23063cdd261d95af3a37678f9ed6a6"},
+    "MLP_down_T5_qualification_calls": {"control": 0, "candidate": 1},
+    "gate_up_small_T_qualification_calls": {"control": 0, "candidate": 0}
+  },
+  "toolchain": {
+    "cmake": {"path": "/usr/bin/cmake", "bytes": 11796472, "sha256": "1c5227af4edd22d8d689def545e18ee458260c0fd579eba2187967f38817e638"},
+    "make": {"path": "/usr/bin/make", "bytes": 259808, "sha256": "d78b8f1d099fbcfb6f2f49ab87223b9b68fb3956642f92d6ec6de812e8afa965"},
+    "hip_compiler": {"path": "/opt/rocm/llvm/bin/clang++", "bytes": 201136, "sha256": "241bf4da7ec39bc00b68ed74f6be751516d9892ed990e8c7fa372bad18500247"},
+    "host_compiler": {"path": "/usr/bin/c++", "bytes": 1027128, "sha256": "1353e9bdd29a7295c7226bf6c63abccce056d8cac31f112e5cdbecc3f28c2769"}
+  },
+  "selector_domain": {"tokens": 5, "rows": 5120, "columns": 17408, "padded_columns": 17408},
+  "T6_candidate": "rejected-static-incumbent-WMMA",
+  "benchmark_execution": "not-run",
+  "maximum_supported_benchmark_concurrency": 4,
+  "production_routing_authorized": false
+}

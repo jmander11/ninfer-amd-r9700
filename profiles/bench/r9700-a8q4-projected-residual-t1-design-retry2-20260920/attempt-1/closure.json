@@ -1,0 +1,115 @@
+{
+  "schema": "ninfer.r9700.projected-residual-attempt-closure.v1",
+  "status": "passed",
+  "error": null,
+  "started_unix_ns": 1789958025322122157,
+  "finished_unix_ns": 1789958035498047316,
+  "plan": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920/plan.json",
+    "bytes": 16667,
+    "sha256": "8f9746a008c178847988dc4b36c279a264ee0454652a16119e6600c903f7eea2"
+  },
+  "create_only": true,
+  "artifacts": [
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920/attempt-1/compile-receipt.json",
+      "bytes": 6541,
+      "sha256": "b5cf186d964236c865ee91969ebdd9f2995ef072fe115c071ddcd0873490f76e"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920/attempt-1/device-compile.process.json",
+      "bytes": 1293,
+      "sha256": "b27d95434d0ebfa9202eb3319f386236ee513e0a252115d3c969b73c16cb0b5a"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920/attempt-1/device-compile.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920/attempt-1/device-compile.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920/attempt-1/host-compile.process.json",
+      "bytes": 1499,
+      "sha256": "5b2dccb3ac4ce773a3d1dd9bd50640a09e2e5cd9028bc9e8568da9113d3bc731"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920/attempt-1/host-compile.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920/attempt-1/host-compile.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920/attempt-1/qual",
+      "bytes": 828248,
+      "sha256": "a4805746076f686374daa6798a362de52f8a51dc6c167e60cd292b33855a22e8"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920/attempt-1/qual.s",
+      "bytes": 59466,
+      "sha256": "0ea6742498db93d0d2e3f7da9c884fa34f437ab30a5f7fa3ad526c4bc76efe90"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920/attempt-1/qualification.json",
+      "bytes": 15754,
+      "sha256": "e0ba90ebdc236b0cb99f121b19e9160fffdb87a091f322b2c9c047ae44c6d34e"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920/attempt-1/qualifier.process.json",
+      "bytes": 1642,
+      "sha256": "caad1553f7d105b0ad60fb707e69b87c3ac319fb108a9c0d6cbee1e8d955b09a"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920/attempt-1/qualifier.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920/attempt-1/qualifier.stdout",
+      "bytes": 251,
+      "sha256": "2d0d285961e58ed3542f28730cb83ac4d75162184de5cad24a560811b6c061f1"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920/attempt-1/serializer-input.txt",
+      "bytes": 184,
+      "sha256": "110356b81716a78c26c4887902f0fdd4465cafeef3d3f2538b7b420105acdf16"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920/attempt-1/serializer-regression.process.json",
+      "bytes": 1054,
+      "sha256": "d207ece7fc73dedd83ce74e5e1162e5cfcfeb9f2c08d919aebcfc08af3d2bf4a"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920/attempt-1/serializer-regression.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920/attempt-1/serializer-regression.stdout",
+      "bytes": 409,
+      "sha256": "4797b5d6fe9ff071c73d499ddf5a03fc31b11434788fb951a77ff0ce30ddf698"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920/attempt-1/static-check.process.json",
+      "bytes": 999,
+      "sha256": "a4d85dd25a69ed392a9a58382838014167c571fd45188cca9159603365d81f5c"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920/attempt-1/static-check.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-design-retry2-20260920/attempt-1/static-receipt.txt",
+      "bytes": 191,
+      "sha256": "204085883c2e3a5a44b25c69a17be2f7480a50616934010936e854ed526cc747"
+    }
+  ]
+}

@@ -1,0 +1,84 @@
+{
+  "status": "completed",
+  "disposition": "confirmed",
+  "linked_numerical_qualified": true,
+  "cells": {
+    "ordinary-production": {
+      "exact_public_tokens": true,
+      "workspace_capacity_bytes": 24847872
+    },
+    "k4w5-production": {
+      "exact_public_tokens": true,
+      "exact_accounting": true,
+      "workspace_capacity_bytes": 26142720,
+      "comparisons": {
+        "decode_seconds": {
+          "production_seconds": [
+            3.676994688,
+            3.861524575,
+            3.676256883
+          ],
+          "production_median_seconds": 3.676994688,
+          "retained_candidate_median_seconds": 3.6832645595,
+          "retained_control_median_seconds": 3.928657859,
+          "candidate_ratio": 0.9982977406594842,
+          "control_ratio": 0.9359416930584894,
+          "production_tokens_per_second": 17.405518753906886,
+          "confirmed": true
+        },
+        "total_seconds": {
+          "production_seconds": [
+            3.863506314,
+            4.04800152,
+            3.862910419
+          ],
+          "production_median_seconds": 3.863506314,
+          "retained_candidate_median_seconds": 3.8719093575,
+          "retained_control_median_seconds": 4.1172174045,
+          "candidate_ratio": 0.9978297416793286,
+          "control_ratio": 0.938378019527776,
+          "production_tokens_per_second": 16.824095709242837,
+          "confirmed": true
+        }
+      },
+      "confirmed": true
+    },
+    "k5w6-production": {
+      "exact_public_tokens": true,
+      "exact_accounting": true,
+      "workspace_capacity_bytes": 26401280,
+      "comparisons": {
+        "decode_seconds": {
+          "production_seconds": [
+            3.633629917,
+            3.825779588,
+            3.63527383
+          ],
+          "production_median_seconds": 3.63527383,
+          "retained_candidate_median_seconds": 3.6390566275,
+          "retained_control_median_seconds": 3.905773408,
+          "candidate_ratio": 0.9989605005122993,
+          "control_ratio": 0.9307436582352808,
+          "production_tokens_per_second": 17.605276244073202,
+          "confirmed": true
+        },
+        "total_seconds": {
+          "production_seconds": [
+            3.820656263,
+            4.013217093,
+            3.822677786
+          ],
+          "production_median_seconds": 3.822677786,
+          "retained_candidate_median_seconds": 3.827529578,
+          "retained_control_median_seconds": 4.0945091394999995,
+          "candidate_ratio": 0.9987323959485807,
+          "control_ratio": 0.933610759131632,
+          "production_tokens_per_second": 17.00378730272612,
+          "confirmed": true
+        }
+      },
+      "confirmed": true
+    }
+  },
+  "limitation": "current production confirmation versus retained matched candidate/control; not a fresh randomized A/B"
+}

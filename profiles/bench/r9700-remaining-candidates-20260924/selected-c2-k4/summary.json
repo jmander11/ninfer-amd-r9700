@@ -1,0 +1,18 @@
+{
+  "concurrency": 2,
+  "draft": 4,
+  "adaptive": false,
+  "timing_eligible": true,
+  "all_repetitions_exact_ordinary": true,
+  "aggregate_tok_s": 146.24988281371085,
+  "repetition_rates": [
+    146.34719432391492,
+    146.24988281371085,
+    146.0373634791813
+  ],
+  "resources": {
+    "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+    "memory.peak": "758341632\n",
+    "cpu.stat": "usage_usec 6807030\nuser_usec 2247515\nsystem_usec 4559514\nnice_usec 0\ncore_sched.force_idle_usec 0\n"
+  }
+}

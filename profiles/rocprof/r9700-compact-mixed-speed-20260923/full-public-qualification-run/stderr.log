@@ -1,0 +1,1 @@
+public BF16/Q4 FP64 oracle criterion failed: N=4096 K=5120 T=6 token=5 relative_rms=0.020341 gross_rms=0.037310

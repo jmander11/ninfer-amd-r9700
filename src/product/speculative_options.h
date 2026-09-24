@@ -8,6 +8,9 @@
 
 namespace ninfer::product {
 
+inline constexpr std::uint32_t kMaximumMtpDraftTokens    = 5;
+inline constexpr std::uint32_t kMaximumDFlashDraftTokens = 5;
+
 [[nodiscard]] inline SpeculativeBackend parse_speculative_backend(std::string_view value) {
     if (value == "mtp") { return SpeculativeBackend::Mtp; }
     if (value == "dflash") { return SpeculativeBackend::DFlash; }
@@ -29,19 +32,28 @@ namespace ninfer::product {
 inline void validate_speculative_cli_options(const SpeculativeOptions& options) {
     switch (options.backend) {
     case SpeculativeBackend::None:
-        if (options.draft_tokens != 0 || options.proposal_head != ProposalHead::Full) {
+        if (options.draft_tokens != 0 || options.proposal_head != ProposalHead::Full ||
+            options.dflash_verify_width != 0 || options.adaptive_draft) {
             throw std::invalid_argument(
-                "--draft-tokens and --lm-head-draft require --spec mtp|dflash");
+                "--draft-tokens, --lm-head-draft, --dflash-verify-width, and --adaptive-draft require "
+                "--spec mtp|dflash");
         }
         return;
     case SpeculativeBackend::Mtp:
-        if (options.draft_tokens == 0 || options.draft_tokens > 5) {
+        if (options.draft_tokens == 0 || options.draft_tokens > kMaximumMtpDraftTokens) {
             throw std::invalid_argument("--spec mtp requires --draft-tokens in [1,5]");
+        }
+        if (options.dflash_verify_width != 0) {
+            throw std::invalid_argument("--dflash-verify-width requires --spec dflash");
         }
         return;
     case SpeculativeBackend::DFlash:
-        if (options.draft_tokens == 0 || options.draft_tokens > 15) {
-            throw std::invalid_argument("--spec dflash requires --draft-tokens in [1,15]");
+        if (options.draft_tokens == 0 || options.draft_tokens > kMaximumDFlashDraftTokens) {
+            throw std::invalid_argument("--spec dflash requires --draft-tokens in [1,5]");
+        }
+        if (options.dflash_verify_width != 0 &&
+            options.dflash_verify_width != options.draft_tokens + 1) {
+            throw std::invalid_argument("DFlash2 requires chain --dflash-verify-width K+1");
         }
         return;
     }

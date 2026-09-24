@@ -1,0 +1,14 @@
+{
+  "executable_path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700/src/ninfer_r9700_a8q4_projected_residual_t1_qual",
+  "executable_size_bytes": 911384,
+  "executable_sha256": "d8962d1a893acf888ef1168116f5bc34cb4b6d5abff231110030326807fe199e",
+  "executable_device": 42,
+  "executable_inode": 1159700,
+  "code_object_path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry1-20260920/attempt-1/production.hsaco",
+  "code_object_size_bytes": 301272,
+  "code_object_sha256": "6f0d62d10127fc8c8e5e4e4d6d94713483146305b1debf882a92361d2d5f56de",
+  "section": ".hip_fatbin",
+  "bundle_target": "hipv4-amdgcn-amd-amdhsa--gfx1201",
+  "bundle_offset_bytes": 143360,
+  "code_symbol": "_ZN6ninfer3ops5r97006linear12_GLOBAL__N_136a8q4g64_projected_residual_t1_kernelEPKhS5_PKtPKjS5_S7_P12hip_bfloat16j"
+}

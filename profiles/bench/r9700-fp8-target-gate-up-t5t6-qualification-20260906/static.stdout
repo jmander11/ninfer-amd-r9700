@@ -1,0 +1,1 @@
+FP8 target gate-up T5/T6 static PASS: logical_vgpr=54 logical_sgpr=19 lds=0 private=0 wmma_sites=4 wavefront=32 max_workgroup=128 vgpr_spills=0 sgpr_spills=0

@@ -1,0 +1,34 @@
+{
+  "name": "device-compile",
+  "argv": [
+    "/opt/rocm/bin/hipcc",
+    "-O3",
+    "-std=c++20",
+    "--offload-arch=gfx1201",
+    "-I/ssdpool2nvme/local_llm/ninfer-amd-r9700/src",
+    "-I/ssdpool2nvme/local_llm/ninfer-amd-r9700/include",
+    "-isystem",
+    "/opt/rocm/include",
+    "-DNINFER_SOURCE_DIR=\"/ssdpool2nvme/local_llm/ninfer-amd-r9700\"",
+    "-Wno-unused-command-line-argument",
+    "--offload-device-only",
+    "-S",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/src/ops/r9700/linear/r9700_linear.hip",
+    "-o",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry2-20260920/attempt-1/qual.s"
+  ],
+  "started_unix_ns": 1789960181805450513,
+  "exit_code": 0,
+  "pid": 1660748,
+  "finished_unix_ns": 1789960184265049502,
+  "stdout": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry2-20260920/attempt-1/device-compile.stdout",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "stderr": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-projected-residual-t1-production-qualification-retry2-20260920/attempt-1/device-compile.stderr",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

@@ -2,7 +2,7 @@
 
 #include "core/tensor.h"
 
-#include <cuda_runtime.h>
+#include <hip/hip_runtime_api.h>
 
 namespace ninfer::ops {
 
@@ -15,7 +15,7 @@ namespace ninfer::ops {
  *
  * Logical shapes:
  *   BF16 embedding_norm and hidden_norm [D,T], out [2D,T], contiguous. The registered domains are
- *   D=5120 for Qwen3.6-27B and D=2048 for Qwen3.6-35B-A3B.
+ *   D=5120 for the supported Qwen3.8-27B target.
  *
  * Numeric:
  *   Exact BF16 element copies; no arithmetic or conversion.
@@ -27,7 +27,7 @@ namespace ninfer::ops {
  *   None. The Op has no persistent state side effect.
  */
 void mtp_pack_fc_input(const Tensor& embedding_norm, const Tensor& hidden_norm, Tensor& out,
-                       cudaStream_t stream);
+                       hipStream_t stream);
 
 /**
  * Op: mtp_split_attn_in
@@ -49,6 +49,6 @@ void mtp_pack_fc_input(const Tensor& embedding_norm, const Tensor& hidden_norm, 
  *   None. The Op has no persistent state side effect.
  */
 void mtp_split_attn_in(const Tensor& attn_in, Tensor& q, Tensor& k, Tensor& gate, Tensor& v,
-                       cudaStream_t stream);
+                       hipStream_t stream);
 
 } // namespace ninfer::ops

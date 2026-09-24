@@ -1,0 +1,17 @@
+{
+  "artifact_type": "ninfer_r9700_whole_campaign_closure",
+  "schema_version": 1,
+  "status": "paused_by_user",
+  "reason": "User requested immediate wrap-up and authorized pausing XAttention.",
+  "completed_cells": {
+    "all_q4_dense-g16": [1, 2, 3, 4],
+    "all_q4_dense-g32": [1, 2, 3, 4],
+    "all_q4_xattention-g16": [1, 2, 3]
+  },
+  "interrupted_cell": {"profile": "all_q4_xattention-g16", "concurrency": 4},
+  "termination": "SIGINT to exclusively owned process group3644066; campaign exit130",
+  "completed_report_semantics": "schema21 serial-lane-service-sum_shared-decode-max_v1",
+  "graph_eager_controls_complete": false,
+  "terminal_selection_complete": false,
+  "continuation": "Wait for explicit user resumption. Preserve all outputs. Reuse valid completed cells through a reviewed missing-cell continuation; never rerun this create-only whole stage. Do not run controls/select on the incomplete matrix. Completed chunk, quality, capacity and resource/reporting bridges remain valid."
+}

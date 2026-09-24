@@ -1,0 +1,5 @@
+[
+  "build-r9700/src/ninfer_r9700_a8q4_small_batch_projection_qual",
+  "--out-json",
+  "profiles/rocprof/r9700-compact-mixed-speed-20260923/full-public-qualification.json"
+]

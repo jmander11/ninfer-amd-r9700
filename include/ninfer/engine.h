@@ -4,6 +4,7 @@
 
 #include <chrono>
 #include <memory>
+#include <span>
 
 namespace ninfer {
 
@@ -19,6 +20,7 @@ public:
     PreparedPrompt& operator=(const PreparedPrompt&) = delete;
 
     [[nodiscard]] const PromptSummary& summary() const noexcept;
+    [[nodiscard]] std::span<const TokenId> token_ids() const;
     [[nodiscard]] explicit operator bool() const noexcept;
 
 private:
@@ -74,16 +76,24 @@ public:
     [[nodiscard]] PromptCapabilities prompt_capabilities() const;
     [[nodiscard]] ModelSamplingDefaults sampling_defaults() const;
 
-    // Establishes queue membership synchronously. Destroying an unconsumed handle cancels its
-    // request; wait() owns result consumption and may run independently from GPU execution.
+    // Establishes queue membership synchronously. Delivery intent is fixed before queue
+    // membership; terminal-only requests do not publish per-round OutputDelta events,
+    // but may use an OutputSink for host-only recovery diagnostics. Destroying
+    // an unconsumed handle cancels its request; wait() owns result consumption and may run
+    // independently from GPU execution.
     [[nodiscard]] GenerationHandle
     submit(PreparedPrompt prompt, RequestOptions options,
+           OutputDelivery delivery = OutputDelivery::TerminalOnly,
            std::chrono::steady_clock::time_point pending_deadline = {},
            HostInputLease host_input                              = {});
 
     GenerationResult generate(PreparedPrompt prompt, RequestOptions options,
                               OutputSink* sink                     = nullptr,
                               const CancellationView& cancellation = {});
+
+    // Teacher-forced next-token NLL over a prepared token sequence. Does not sample, decode,
+    // or change generate/serve graphs. Used only by the perplexity tool.
+    [[nodiscard]] ScoreResult score(PreparedPrompt prompt, ScoreOptions options = {});
 
     [[nodiscard]] const EngineOptions& options() const;
     [[nodiscard]] LoadSummary load_summary() const;

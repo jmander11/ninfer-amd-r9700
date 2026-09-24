@@ -1,0 +1,27 @@
+{
+  "artifact_type": "ninfer_r9700_dflash_rmsnorm_rows56_token_parity_plan",
+  "schema_version": 1,
+  "status": "prepared_cpu_only_no_gpu_execution",
+  "claim": "functional exact-token selector attribution through the retained P129 index-27 failure; timings are ineligible",
+  "production_routing_authorized": false,
+  "source": {"commit": "c8e1bc418b80c23364460801b7c0c017bdab87b8", "tree": "5cda68536859bda53f091c1fc74593b246061598"},
+  "matched_build_receipt": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-rmsnorm-rows56-matched-builds-20260906/build-receipt.json", "bytes": 5100, "sha256": "d3fc4c9b238390849c08ef5f61fa4695c024e0a676e67aa8245d4face418d9ee"},
+  "matched_gpu_numerical_authority": {
+    "result": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-rmsnorm-rows56-matched-builds-20260906/gpu-numerical-result.json", "bytes": 1399, "sha256": "41a31b36e459877a5ccdb0ef5e9b6443dcc444aba23f57b43987416b3e4ef60b"},
+    "closure": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-rmsnorm-rows56-matched-builds-20260906/result.sha256", "bytes": 311, "sha256": "4a84530ded75e34e214814a27666d6dd20520cc69ef2c98b45a0370617966890"}
+  },
+  "artifact": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval.ninfer", "bytes": 22763026944, "sha256": "d8fc77c36cf17c92e96d67b9a6b5a1826a1ade4f59d59c003b2368fe981fc512"},
+  "history": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-p129-isolation-discriminator-20260906/history-p129.ids", "bytes": 811, "sha256": "34e9bc09b99ae4efc06049e744e8b43ac5794a9dab76fcf43de43e31f5db4515"},
+  "prior_authority": {
+    "capture_closure": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-semantic-traces-aebd5f82-20260906/results/result.sha256", "bytes": 4801, "sha256": "d517d347a5bec7721c8fb043bd4937b266879779526404e59ec2330ce2218bfe"},
+    "analysis_closure": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-semantic-traces-aebd5f82-20260906/analysis-result.sha256", "bytes": 875, "sha256": "e3aa333e5c2bceade0d72fda7ef725107f431b1957af522726a0211b9b3f9f25"},
+    "ordinary_report": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-semantic-traces-aebd5f82-20260906/results/decision-ordinary.json", "bytes": 6035, "sha256": "e57f6c722c43f2fee6da7092eb2ed915a181abfc5bc28413a74119e6e0f2a66b"},
+    "dflash_report": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-semantic-traces-aebd5f82-20260906/results/decision-dflash.json", "bytes": 6156, "sha256": "d59a1b19e6f3b78bbd76c46945b28352eb56dafa39952f398b6a03ab76b454b0"},
+    "layer_analysis_closure": {"path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-qwen3-layer-boundary-traces-43e5e4cc-20260906/analysis-result.sha256", "bytes": 905, "sha256": "b8096ffe54b6b51ead578c51a9357d96346073c64a37f27ef6fea91799569ec2"}
+  },
+  "workload": {"device": 0, "concurrency": 1, "maximum_product_concurrency": 4, "prompt_tokens": 129, "decode_tokens": 27, "retained_tokens": 28, "prefill_chunk": 4096, "device_graph": false, "warmup": 0, "repetitions": 1, "dflash": "K4/W5", "power_profile": "auto"},
+  "arms": ["control-ordinary", "control-dflash", "candidate-dflash"],
+  "decision": "credit restoration only when fresh ordinary and selector-off exactly reproduce the two retained 28-token authorities and selector-on DFlash exactly equals ordinary",
+  "text_pair": "not rerun: fresh T129 uses rows129 and append/ordinary W1 use rows1, outside the exact K5120 rows5/6 selector",
+  "limitations": ["functional token parity only; timings are ineligible", "does not prove hidden-state exactness or performance", "does not authorize production routing"]
+}

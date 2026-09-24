@@ -1,0 +1,39 @@
+{
+  "rows": [
+    {
+      "concurrency": 2,
+      "draft_tokens": 4,
+      "adaptive": false,
+      "chunk": 2048,
+      "prompt": 4096,
+      "prefill_tok_s": 1483.4355198579303,
+      "aggregate_decode_tok_s": 122.13773591372444,
+      "exact_repeated_tokens": true
+    },
+    {
+      "concurrency": 3,
+      "draft_tokens": 4,
+      "adaptive": false,
+      "chunk": 2048,
+      "prompt": 4096,
+      "prefill_tok_s": 1468.8769798306428,
+      "aggregate_decode_tok_s": 160.87326499283424,
+      "exact_repeated_tokens": true
+    },
+    {
+      "concurrency": 4,
+      "draft_tokens": 4,
+      "adaptive": false,
+      "chunk": 2048,
+      "prompt": 4096,
+      "prefill_tok_s": 1467.461806093289,
+      "aggregate_decode_tok_s": 161.65626594352682,
+      "exact_repeated_tokens": true
+    }
+  ],
+  "resources": {
+    "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+    "memory.peak": "756432896\n",
+    "cpu.stat": "usage_usec 39921715\nuser_usec 7381066\nsystem_usec 32540649\nnice_usec 0\ncore_sched.force_idle_usec 0\n"
+  }
+}

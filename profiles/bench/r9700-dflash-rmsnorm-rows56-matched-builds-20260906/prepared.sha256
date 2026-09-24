@@ -1,0 +1,4 @@
+1606347f8bfae45632dae096704447b4618b8fdc3245751f3def972a24fe5816  profiles/bench/r9700-dflash-rmsnorm-rows56-matched-builds-20260906/plan.json
+bb7f309cd5df45eeb3d75cca7037a84250f55d4ef435fe74624efaf75243cd8c  profiles/bench/r9700-dflash-rmsnorm-rows56-matched-builds-20260906/commands.sh
+fc53b340ee56f01fdd080dab20f3cdf95179b7086062ba5290321c2be7426b94  profiles/bench/r9700-dflash-rmsnorm-rows56-matched-builds-20260906/publish.py
+703065f6aec0bb825bb2c182e7767bb79338480da1cab32aedb60486e27b3e3c  profiles/bench/r9700-dflash-rmsnorm-rows56-matched-builds-20260906/validate.py

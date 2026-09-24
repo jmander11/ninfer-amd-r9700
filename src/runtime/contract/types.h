@@ -2,11 +2,20 @@
 
 #include "ninfer/types.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <stdexcept>
 
 namespace ninfer::runtime {
+
+// A failed optional cache read can be retried by recomputing the prompt.
+// HIP failures and execution errors must retain their original exception.
+class CacheRestoreFailure : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
+};
 
 using ::ninfer::FinishReason;
 using ::ninfer::KvCapacityMode;
@@ -20,9 +29,16 @@ using ::ninfer::TokenId;
 // Engine has already selected the registered model/mode preset, applied every explicit override,
 // and validated these values before constructing the runtime request.
 struct ResolvedExecutionOptions {
+    static constexpr std::size_t kMaximumSuppressedTokens = 4;
+
     ResolvedSamplingParameters sampling;
     std::uint32_t requested_output_tokens = 0;
     bool allow_prefix_reuse               = true;
+    // Internal cache recovery bypasses existing images without disabling capture.
+    bool force_cold_prefill               = false;
+    bool capture_context_checkpoint       = false;
+    std::array<TokenId, kMaximumSuppressedTokens> suppressed_token_ids{};
+    std::uint32_t suppressed_token_count = 0;
 };
 
 struct ResolvedRequestOptions {
@@ -32,8 +48,11 @@ struct ResolvedRequestOptions {
 };
 
 struct OutputDecision {
+    // Tokens to commit from the licensed round. A non-terminal decision may be a
+    // proper prefix (structured-output cut). Zero only with reject_generated_round.
     std::uint32_t accepted_tokens = 0;
     FinishReason finish_reason    = FinishReason::None;
+    bool reject_generated_round   = false;
 
     [[nodiscard]] bool finished() const noexcept { return finish_reason != FinishReason::None; }
 };
@@ -56,12 +75,21 @@ struct RequestPlanSummary {
     std::size_t transient_alignment       = 1;
     AdmissionResources admission;
     std::uint64_t service_work_quanta = 0;
+    std::uint64_t ram_entry_id             = 0;
+    std::uint64_t disk_entry_id            = 0;
+    std::uint64_t disk_hash_f_lo           = 0;
+    std::uint64_t disk_hash_f_hi           = 0;
+    std::uint32_t disk_execution_frontier  = 0;
+    std::uint64_t disk_committed_generation = 0;
+    PrefixReusePath disk_reuse_path       = PrefixReusePath::FullReset;
+    PrefixReuseSource reuse_source         = PrefixReuseSource::None;
 };
 
 struct BeginSummary {
-    std::uint32_t prompt_tokens        = 0;
-    std::uint32_t reused_prompt_tokens = 0;
-    PrefixReusePath prefix_reuse_path  = PrefixReusePath::FullReset;
+    std::uint32_t prompt_tokens           = 0;
+    std::uint32_t reused_prompt_tokens    = 0;
+    PrefixReusePath prefix_reuse_path     = PrefixReusePath::FullReset;
+    PrefixReuseSource prefix_reuse_source = PrefixReuseSource::None;
 };
 
 struct GeneratedRound {
@@ -72,6 +100,9 @@ struct BatchedGeneratedRound {
     std::span<const TokenId> tokens;
     std::span<const std::int32_t> row_counts;
     std::uint32_t row_stride = 1;
+    // True when the sampler was armed with a protected, valid cycle exclusion for
+    // that row's root selection. This does not claim the unmodified draw differed.
+    std::array<bool, kMaximumConcurrency> cycle_exclusions{};
 };
 
 struct PrefillStepResult {

@@ -1,0 +1,13 @@
+{
+  "artifact_type": "ninfer_qwen3_layer3_attention_trace_comparison",
+  "classification": "layer3_attention_internal_exact",
+  "diagnostic_only": true,
+  "first_difference": null,
+  "limitations": [
+    "localizes the first selected-column layer-3 attention owner but is not a numerical oracle",
+    "the trace is synchronous eager-only diagnostic evidence and cannot support timing"
+  ],
+  "production_routing_authorized": false,
+  "schema_version": 1,
+  "timing_evidence_eligible": false
+}

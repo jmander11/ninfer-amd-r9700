@@ -1,0 +1,839 @@
+{
+  "rows": [
+    {
+      "shape": [
+        1280,
+        5120,
+        10
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        1280,
+        5120,
+        12
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        1280,
+        5120,
+        15
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        1280,
+        5120,
+        18
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        1280,
+        5120,
+        20
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        1280,
+        5120,
+        24
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        4096,
+        5120,
+        10
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        4096,
+        5120,
+        12
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        4096,
+        5120,
+        15
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        4096,
+        5120,
+        18
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        4096,
+        5120,
+        20
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        4096,
+        5120,
+        24
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        5120,
+        4096,
+        10
+      ],
+      "vgpr_count": 75,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        5120,
+        4096,
+        12
+      ],
+      "vgpr_count": 75,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        5120,
+        4096,
+        15
+      ],
+      "vgpr_count": 75,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        5120,
+        4096,
+        18
+      ],
+      "vgpr_count": 71,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        5120,
+        4096,
+        20
+      ],
+      "vgpr_count": 71,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        5120,
+        4096,
+        24
+      ],
+      "vgpr_count": 71,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        5120,
+        6144,
+        10
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        5120,
+        6144,
+        15
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        5120,
+        6144,
+        20
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        5120,
+        25600,
+        10
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        5120,
+        25600,
+        12
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        5120,
+        25600,
+        15
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        5120,
+        25600,
+        18
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        5120,
+        25600,
+        20
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        5120,
+        25600,
+        24
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        6144,
+        5120,
+        10
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        6144,
+        5120,
+        12
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        6144,
+        5120,
+        15
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        6144,
+        5120,
+        18
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        6144,
+        5120,
+        20
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        6144,
+        5120,
+        24
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        7168,
+        5120,
+        10
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        7168,
+        5120,
+        12
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        7168,
+        5120,
+        15
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        7168,
+        5120,
+        18
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        7168,
+        5120,
+        20
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        7168,
+        5120,
+        24
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        12288,
+        5120,
+        10
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        12288,
+        5120,
+        12
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        12288,
+        5120,
+        15
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        12288,
+        5120,
+        18
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        12288,
+        5120,
+        20
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    },
+    {
+      "shape": [
+        12288,
+        5120,
+        24
+      ],
+      "vgpr_count": 70,
+      "sgpr_count": 22,
+      "group_segment_fixed_size": 0,
+      "private_segment_fixed_size": 0,
+      "wavefront_size": 32,
+      "iu4_sites": 8
+    }
+  ],
+  "retained_instruction_exact": [
+    [
+      34816,
+      5120,
+      2
+    ],
+    [
+      34816,
+      5120,
+      3
+    ],
+    [
+      34816,
+      5120,
+      4
+    ],
+    [
+      34816,
+      5120,
+      10
+    ],
+    [
+      34816,
+      5120,
+      12
+    ],
+    [
+      34816,
+      5120,
+      15
+    ],
+    [
+      34816,
+      5120,
+      18
+    ],
+    [
+      34816,
+      5120,
+      20
+    ],
+    [
+      34816,
+      5120,
+      24
+    ],
+    [
+      34816,
+      5120,
+      5
+    ],
+    [
+      34816,
+      5120,
+      6
+    ],
+    [
+      5120,
+      17408,
+      2
+    ],
+    [
+      5120,
+      17408,
+      3
+    ],
+    [
+      5120,
+      17408,
+      4
+    ],
+    [
+      5120,
+      17408,
+      10
+    ],
+    [
+      5120,
+      17408,
+      12
+    ],
+    [
+      5120,
+      17408,
+      15
+    ],
+    [
+      5120,
+      17408,
+      18
+    ],
+    [
+      5120,
+      17408,
+      20
+    ],
+    [
+      5120,
+      17408,
+      24
+    ],
+    [
+      5120,
+      17408,
+      5
+    ],
+    [
+      5120,
+      17408,
+      6
+    ],
+    [
+      5120,
+      25600,
+      5
+    ],
+    [
+      5120,
+      25600,
+      6
+    ],
+    [
+      5120,
+      4096,
+      5
+    ],
+    [
+      5120,
+      4096,
+      6
+    ],
+    [
+      5120,
+      6144,
+      2
+    ],
+    [
+      5120,
+      6144,
+      3
+    ],
+    [
+      5120,
+      6144,
+      4
+    ],
+    [
+      5120,
+      6144,
+      12
+    ],
+    [
+      5120,
+      6144,
+      18
+    ],
+    [
+      5120,
+      6144,
+      24
+    ],
+    [
+      5120,
+      6144,
+      5
+    ],
+    [
+      5120,
+      6144,
+      6
+    ],
+    [
+      7168,
+      5120,
+      5
+    ],
+    [
+      7168,
+      5120,
+      6
+    ],
+    [
+      6144,
+      5120,
+      5
+    ],
+    [
+      6144,
+      5120,
+      6
+    ],
+    [
+      1280,
+      5120,
+      5
+    ],
+    [
+      1280,
+      5120,
+      6
+    ],
+    [
+      12288,
+      5120,
+      5
+    ],
+    [
+      12288,
+      5120,
+      6
+    ],
+    [
+      4096,
+      5120,
+      5
+    ],
+    [
+      4096,
+      5120,
+      6
+    ]
+  ],
+  "baseline": {
+    "executable_path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-projections-tail-20260923/final-bin/bench",
+    "executable_size_bytes": 9415680,
+    "executable_sha256": "0c2c8b4f5b98f90faf6a437140a0cb7c286a2b682edb7d051f2978fe9b8e4cfd",
+    "executable_device": 42,
+    "executable_inode": 1301238,
+    "code_object_path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-concurrent-overhead-20260923/projection-baseline.hsaco",
+    "code_object_size_bytes": 219064,
+    "code_object_sha256": "0295ea0658f8e3e0acd7326f7b23e5cbd032269e3d0a694b5d07a39a7e5062d2",
+    "section": ".hip_fatbin",
+    "bundle_target": "hipv4-amdgcn-amd-amdhsa--gfx1201",
+    "bundle_offset_bytes": 2367488,
+    "code_symbol": "small_batch_projection_kernel"
+  },
+  "candidate": {
+    "executable_path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700/bench/ninfer_bench",
+    "executable_size_bytes": 9733584,
+    "executable_sha256": "557164934b5932ac854603af8e5c44ff093602c0f47dac34c5cec8c6e8633590",
+    "executable_device": 42,
+    "executable_inode": 1304230,
+    "code_object_path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-concurrent-overhead-20260923/projection-candidate.hsaco",
+    "code_object_size_bytes": 489000,
+    "code_object_sha256": "4a222b414b8474a1a85869c05cc2d2b1201465afe3c1a3c37847d132aa09b53f",
+    "section": ".hip_fatbin",
+    "bundle_target": "hipv4-amdgcn-amd-amdhsa--gfx1201",
+    "bundle_offset_bytes": 2367488,
+    "code_symbol": "small_batch_projection_kernel"
+  }
+}

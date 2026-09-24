@@ -3,7 +3,7 @@
 #include "core/layout.h"
 #include "core/tensor.h"
 
-#include <cuda_runtime_api.h>
+#include <hip/hip_runtime_api.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -66,8 +66,15 @@ public:
 
     [[nodiscard]] CyclicKVCacheLayerView layer_view(std::uint32_t layer) const;
 
-    // Copies one lane's complete fixed state. Source and destination must have identical layouts.
-    void copy_lane_from(const CyclicKVCache& source, std::int32_t lane, cudaStream_t stream);
+    [[nodiscard]] std::size_t lane_host_bytes() const noexcept;
+
+    // Copies one lane's complete fixed state. The same-lane overload requires identical layouts.
+    // The source/dest-lane overload allows a different lane_capacity (Engine-wide 1-lane staging).
+    void copy_lane_from(const CyclicKVCache& source, std::int32_t lane, hipStream_t stream);
+    void copy_lane_from(const CyclicKVCache& source, std::int32_t source_lane,
+                        std::int32_t dest_lane, hipStream_t stream);
+    void copy_lane_to_host(std::int32_t lane, void* dst, hipStream_t stream) const;
+    void copy_lane_from_host(const void* src, std::int32_t lane, hipStream_t stream);
 
 private:
     std::vector<Tensor> k_;

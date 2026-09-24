@@ -1,0 +1,667 @@
+{
+  "artifact_type": "ninfer_chunked_prefill_attribution",
+  "schema_version": 1,
+  "purpose": "attribute appended-chunk attention cost; profiler timings are not speed admission",
+  "execution": {
+    "inputs": {
+      "frozen_chunk_inputs": {
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-chunk-selection-receipt-bound-n16k16-20260921/inputs.json",
+        "sha256": "d744f5a7105656dbf3e5b841782bd52dd30d7779aeb6d26a0892da2f0443d3ab"
+      },
+      "artifact": {
+        "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer",
+        "bytes": 15172833280,
+        "sha256": "60719c5d5bfe978376c7de94db460bcd82d965ec447870cc47f0a02bf8d59953",
+        "model_id": "qwen3.8-27b",
+        "weights_id": "r9700-q4g64-n16k16-eval",
+        "conversion_receipt": {
+          "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer.conversion.json",
+          "sha256": "a8567a6b25176aac1f2106bcac3131b74d887e1a5be2c98da23c38a3a7870e54",
+          "recipe_id": "r9700-all-q4g64-n16k16-eval-v1",
+          "object_plan_sha256": "bff624cbfda357d7c8b355530824682b1625c68c1f909ddb8b4241c2b3d21ec6",
+          "source_artifact_sha256": "19d029a89c1ef1cf87420067555021a7c7b435c31a92bea7c64ccf42c03d80e9",
+          "source_receipt_sha256": "aa6861cc31c7db6aa06335b111507f4802d702c6e83ef8fc96c0714b9dc477f9",
+          "transcoder_sha256": "e988d0ecc7d20a12728aa8313a71221eeea9c30dfff5d998020a826baab52801",
+          "receipt_producer_sha256": "3fb4f58e376e5c8dbd333f06ef146796410eb7829de4130c408d8adc5a615d64"
+        }
+      },
+      "benchmark_sha256": "a9ccdd970f04d4a6858c4b82612d75915ce867c081efb6171a7dd00a9d54a4c8",
+      "corpus_sha256": "27e4f63c17efe3f89b5cf278b3b1a42a737316ed4044d7d0d1d52437059d1002",
+      "profiler": {
+        "path": "/opt/rocm/core-10.0/bin/rocprofv3",
+        "sha256": "2d220ded2167097e480e6866a916b575548d56bed8a823a4e505f7133868f0a6"
+      }
+    },
+    "benchmark_command": [
+      "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-selection-dense-g16-20260921/bench/ninfer_bench",
+      "--weights",
+      "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer",
+      "--corpus",
+      "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids",
+      "--device",
+      "0",
+      "--concurrency",
+      "1",
+      "-p",
+      "8192",
+      "--prefill-chunk",
+      "1024",
+      "--draft-tokens",
+      "0",
+      "--output",
+      "json",
+      "--output-file",
+      "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/rocprof/r9700-chunked-prefill-attribution-20260921/run/benchmark-report.json",
+      "-r",
+      "1",
+      "--warmup",
+      "0",
+      "--profile-measured"
+    ],
+    "profiler_command": [
+      "/opt/rocm/core-10.0/bin/rocprofv3",
+      "--selected-regions",
+      "-f",
+      "rocpd",
+      "-d",
+      "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/rocprof/r9700-chunked-prefill-attribution-20260921/run/raw",
+      "-o",
+      "chunked-prefill",
+      "--marker-trace",
+      "--kernel-trace",
+      "--memory-copy-trace",
+      "--",
+      "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-selection-dense-g16-20260921/bench/ninfer_bench",
+      "--weights",
+      "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer",
+      "--corpus",
+      "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids",
+      "--device",
+      "0",
+      "--concurrency",
+      "1",
+      "-p",
+      "8192",
+      "--prefill-chunk",
+      "1024",
+      "--draft-tokens",
+      "0",
+      "--output",
+      "json",
+      "--output-file",
+      "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/rocprof/r9700-chunked-prefill-attribution-20260921/run/benchmark-report.json",
+      "-r",
+      "1",
+      "--warmup",
+      "0",
+      "--profile-measured"
+    ],
+    "pci": "0000:13:00.0",
+    "power_before": "auto",
+    "returncode": 0,
+    "power_after": "auto"
+  },
+  "benchmark_report_sha256": "1ca138d66977fec86766834cc31d0419587512d90917e319e39e125dd955b426",
+  "database_sha256": "f579912e0d96e04e71677a28da377bee71804ae548f4b8c841eb169989e804fb",
+  "attribution": {
+    "schema": "ninfer_selected_region_attribution",
+    "schema_version": 1,
+    "database": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/rocprof/r9700-chunked-prefill-attribution-20260921/run/raw/chunked-prefill_results.db",
+    "benchmark_report": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/rocprof/r9700-chunked-prefill-attribution-20260921/run/benchmark-report.json",
+    "workload": {
+      "kind": "pp",
+      "prompt_tokens": 8192,
+      "generated_tokens": 0,
+      "concurrency": 1,
+      "prefill_chunk": 1024
+    },
+    "ranges": {
+      "measured_wall_ms": 43842.748469,
+      "text_prefill_chunks": 8,
+      "text_prefill_wall_ms": 43838.81203,
+      "mtp_prefill_ranges": 0,
+      "mtp_prefill_wall_ms": 0.0
+    },
+    "kernel_execution_categories": [
+      {
+        "category": "base_text_prefill",
+        "calls": 16808,
+        "independent_summed_duration_ms": 43658.354827,
+        "active_union_ms": 43640.81826
+      },
+      {
+        "category": "measured_other",
+        "calls": 65,
+        "independent_summed_duration_ms": 0.2102,
+        "active_union_ms": 0.2102
+      },
+      {
+        "category": "prefill_orchestration",
+        "calls": 47,
+        "independent_summed_duration_ms": 2.386843,
+        "active_union_ms": 2.379087
+      },
+      {
+        "category": "prefill_unattributed",
+        "calls": 50,
+        "independent_summed_duration_ms": 0.29372,
+        "active_union_ms": 0.29372
+      }
+    ],
+    "prefill_stage_attribution": {
+      "kernel_complete": false,
+      "unattributed_kernel_calls": 50,
+      "unattributed_kernel_summed_duration_ms": 0.29372,
+      "memory_copy_complete": true,
+      "unattributed_memory_copy_calls": 0,
+      "basis": "rocprof kernel/copy region association, not temporal containment"
+    },
+    "prefill_no_kernel_wall_ms": 196.941021,
+    "prefill_kernel_active_union_ms": 43641.871009,
+    "prefill_kernel_active_wall_fraction": 0.9955076104510946,
+    "prefill_no_kernel_wall_interpretation": "kernel-inactive wall gap only; marker/kernel/copy trace cannot separate host work from true GPU idle",
+    "memory_copy_categories": [],
+    "memory_copy_kinds": [],
+    "symbol_families": [
+      {
+        "execution_category": "base_text_prefill",
+        "family": "dense_attention",
+        "calls": 112,
+        "summed_duration_ms": 39087.58007
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "family": "a8q4_prefill_cta",
+        "calls": 2560,
+        "summed_duration_ms": 3237.931091
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "family": "other",
+        "calls": 9784,
+        "summed_duration_ms": 1103.675131
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "family": "a8_activation_quantize",
+        "calls": 2560,
+        "summed_duration_ms": 146.59325
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "family": "residual_add",
+        "calls": 1024,
+        "summed_duration_ms": 52.942022
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "family": "gdn",
+        "calls": 768,
+        "summed_duration_ms": 29.633263
+      },
+      {
+        "execution_category": "prefill_orchestration",
+        "family": "other",
+        "calls": 46,
+        "summed_duration_ms": 2.384003
+      },
+      {
+        "execution_category": "prefill_unattributed",
+        "family": "other",
+        "calls": 50,
+        "summed_duration_ms": 0.29372
+      },
+      {
+        "execution_category": "measured_other",
+        "family": "other",
+        "calls": 65,
+        "summed_duration_ms": 0.2102
+      },
+      {
+        "execution_category": "prefill_orchestration",
+        "family": "a8_activation_quantize",
+        "calls": 1,
+        "summed_duration_ms": 0.00284
+      }
+    ],
+    "marker_families": [
+      {
+        "execution_category": "base_text_prefill",
+        "family": "attention",
+        "calls": 2984,
+        "summed_duration_ms": 39497.688612
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "family": "post_mixer",
+        "calls": 4608,
+        "summed_duration_ms": 2548.959402
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "family": "gdn",
+        "calls": 9216,
+        "summed_duration_ms": 1611.706813
+      },
+      {
+        "execution_category": "prefill_orchestration",
+        "family": "prefill_orchestration",
+        "calls": 47,
+        "summed_duration_ms": 2.386843
+      },
+      {
+        "execution_category": "prefill_unattributed",
+        "family": "unmarked",
+        "calls": 50,
+        "summed_duration_ms": 0.29372
+      },
+      {
+        "execution_category": "measured_other",
+        "family": "unmarked",
+        "calls": 65,
+        "summed_duration_ms": 0.2102
+      }
+    ],
+    "operator_attribution": [
+      {
+        "execution_category": "base_text_prefill",
+        "stage": "attention",
+        "marker_family": "attention",
+        "operator_family": "dense_attention",
+        "calls": 160,
+        "summed_duration_ms": 39128.152931,
+        "ambiguous": false
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "stage": "post_mixer",
+        "marker_family": "post_mixer",
+        "operator_family": "a8q4_prefill_cta",
+        "calls": 1024,
+        "summed_duration_ms": 2303.910039,
+        "ambiguous": false
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "stage": "gdn",
+        "marker_family": "gdn",
+        "operator_family": "a8q4_prefill_cta",
+        "calls": 1152,
+        "summed_duration_ms": 690.682826,
+        "ambiguous": false
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "stage": "gdn",
+        "marker_family": "gdn",
+        "operator_family": "gdn_recurrence",
+        "calls": 384,
+        "summed_duration_ms": 546.716735,
+        "ambiguous": false
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "stage": "gdn",
+        "marker_family": "gdn",
+        "operator_family": "other",
+        "calls": 5376,
+        "summed_duration_ms": 283.777098,
+        "ambiguous": false
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "stage": "attention",
+        "marker_family": "attention",
+        "operator_family": "a8q4_prefill_cta",
+        "calls": 384,
+        "summed_duration_ms": 243.338226,
+        "ambiguous": false
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "stage": "post_mixer",
+        "marker_family": "post_mixer",
+        "operator_family": "other",
+        "calls": 2048,
+        "summed_duration_ms": 137.887101,
+        "ambiguous": false
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "stage": "attention",
+        "marker_family": "attention",
+        "operator_family": "other",
+        "calls": 1928,
+        "summed_duration_ms": 94.721336,
+        "ambiguous": false
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "stage": "post_mixer",
+        "marker_family": "post_mixer",
+        "operator_family": "a8q4_activation_quantize",
+        "calls": 1024,
+        "summed_duration_ms": 82.402347,
+        "ambiguous": false
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "stage": "gdn",
+        "marker_family": "gdn",
+        "operator_family": "a8q4_activation_quantize",
+        "calls": 1152,
+        "summed_duration_ms": 43.791916,
+        "ambiguous": false
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "stage": "gdn",
+        "marker_family": "gdn",
+        "operator_family": "gdn",
+        "calls": 384,
+        "summed_duration_ms": 28.1755,
+        "ambiguous": false
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "stage": "post_mixer",
+        "marker_family": "post_mixer",
+        "operator_family": "residual_add",
+        "calls": 512,
+        "summed_duration_ms": 24.759915,
+        "ambiguous": false
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "stage": "attention",
+        "marker_family": "attention",
+        "operator_family": "a8q4_activation_quantize",
+        "calls": 384,
+        "summed_duration_ms": 20.398987,
+        "ambiguous": false
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "stage": "gdn",
+        "marker_family": "gdn",
+        "operator_family": "residual_add",
+        "calls": 384,
+        "summed_duration_ms": 17.104975,
+        "ambiguous": false
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "stage": "attention",
+        "marker_family": "attention",
+        "operator_family": "residual_add",
+        "calls": 128,
+        "summed_duration_ms": 11.077132,
+        "ambiguous": false
+      },
+      {
+        "execution_category": "prefill_orchestration",
+        "stage": "prefill_orchestration",
+        "marker_family": "prefill_orchestration",
+        "operator_family": "other",
+        "calls": 46,
+        "summed_duration_ms": 2.384003,
+        "ambiguous": false
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "stage": "gdn",
+        "marker_family": "gdn",
+        "operator_family": "gdn_control",
+        "calls": 384,
+        "summed_duration_ms": 1.457763,
+        "ambiguous": false
+      },
+      {
+        "execution_category": "prefill_unattributed",
+        "stage": "ambiguous",
+        "marker_family": "unmarked",
+        "operator_family": "other",
+        "calls": 50,
+        "summed_duration_ms": 0.29372,
+        "ambiguous": true
+      },
+      {
+        "execution_category": "measured_other",
+        "stage": "ambiguous",
+        "marker_family": "unmarked",
+        "operator_family": "other",
+        "calls": 65,
+        "summed_duration_ms": 0.2102,
+        "ambiguous": true
+      },
+      {
+        "execution_category": "prefill_orchestration",
+        "stage": "prefill_orchestration",
+        "marker_family": "prefill_orchestration",
+        "operator_family": "a8q4_activation_quantize",
+        "calls": 1,
+        "summed_duration_ms": 0.00284,
+        "ambiguous": false
+      }
+    ],
+    "operator_stage_attribution": {
+      "complete": false,
+      "ambiguous_kernel_calls": 50,
+      "ambiguous_kernel_summed_duration_ms": 0.29372,
+      "basis": "rocprof nearest-range marker association; symbol names classify operators but never infer an absent stage marker"
+    },
+    "top_kernels": [
+      {
+        "execution_category": "base_text_prefill",
+        "name": "void ninfer::ops::r9700::kv::fused_attention_causal_kernel<16u, true, false, false, false>(hip_bfloat16 const*, unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, int const*, unsigned int, unsigned int, unsigned long, unsigned long, unsigned int, int const*, int const*, unsigned int, unsigned int, float, float*)",
+        "calls": 112,
+        "summed_duration_ms": 39087.58007
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "name": "ninfer::ops::r9700::linear::(anonymous namespace)::a8q4g64_linear_prefill_cta_kernel(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int, unsigned int)",
+        "calls": 2560,
+        "summed_duration_ms": 3237.931091
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "name": "void ninfer::ops::(anonymous namespace)::ordinary_kernel<true>(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, float const*, float const*, float const*, float*, hip_bfloat16*, float*, int, int, float)",
+        "calls": 384,
+        "summed_duration_ms": 546.716735
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "name": "ninfer::ops::r9700::linear::(anonymous namespace)::bf16_linear_wmma16_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int)",
+        "calls": 768,
+        "summed_duration_ms": 155.898303
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "name": "ninfer::ops::r9700::linear::(anonymous namespace)::a8g64_quantize_activation_kernel(hip_bfloat16 const*, unsigned char*, unsigned char*, unsigned short*, unsigned int*, unsigned int, unsigned int)",
+        "calls": 2560,
+        "summed_duration_ms": 146.59325
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "name": "ninfer::ops::r9700::eager::(anonymous namespace)::silu_mul_split17408_2d_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*)",
+        "calls": 512,
+        "summed_duration_ms": 99.493862
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "name": "ninfer::ops::r9700::eager::(anonymous namespace)::rmsnorm_k5120_token8_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float, bool)",
+        "calls": 1024,
+        "summed_duration_ms": 67.645223
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "name": "ninfer::ops::r9700::eager::(anonymous namespace)::residual_add_kernel(hip_bfloat16 const*, hip_bfloat16*, unsigned long)",
+        "calls": 1024,
+        "summed_duration_ms": 52.942022
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "name": "ninfer::ops::r9700::eager::(anonymous namespace)::bf16_extract_features_kernel(hip_bfloat16 const*, hip_bfloat16*, unsigned int, unsigned int, unsigned int, unsigned long)",
+        "calls": 1664,
+        "summed_duration_ms": 50.124012
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "name": "__amd_rocclr_copyBufferRectAligned",
+        "calls": 1152,
+        "summed_duration_ms": 37.239313
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "name": "ninfer::ops::r9700::eager::(anonymous namespace)::sigmoid_mul_kernel(hip_bfloat16 const*, hip_bfloat16*, unsigned long)",
+        "calls": 128,
+        "summed_duration_ms": 33.838865
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "name": "void ninfer::ops::r9700::kv::dense_full_score_pv_kernel<16u, false>(float const*, float const*, unsigned char const*, unsigned short const*, unsigned int const*, int const*, unsigned int, unsigned int, unsigned long, unsigned long, int const*, int const*, unsigned int, float*)",
+        "calls": 16,
+        "summed_duration_ms": 29.020184
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "name": "void ninfer::ops::r9700::gdn::(anonymous namespace)::causal_conv1d_silu_prefill_kernel<4u>(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, unsigned int)",
+        "calls": 384,
+        "summed_duration_ms": 28.1755
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "name": "ninfer::ops::r9700::eager::(anonymous namespace)::gated_rmsnorm_k128_rows8_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, float)",
+        "calls": 384,
+        "summed_duration_ms": 26.131295
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "name": "__amd_rocclr_fillBufferUnAligned",
+        "calls": 2696,
+        "summed_duration_ms": 12.893896
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "name": "ninfer::ops::r9700::eager::(anonymous namespace)::cast_fp32_to_bf16_kernel(float const*, hip_bfloat16*, unsigned long)",
+        "calls": 128,
+        "summed_duration_ms": 12.189385
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "name": "ninfer::ops::r9700::eager::(anonymous namespace)::rmsnorm_k256_token8_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float, bool)",
+        "calls": 256,
+        "summed_duration_ms": 11.203048
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "name": "void ninfer::ops::r9700::kv::dense_full_score_qk_bk32_kernel<false>(hip_bfloat16 const*, unsigned char const*, unsigned int const*, int const*, unsigned int, unsigned int, unsigned long, unsigned long, int const*, int const*, unsigned int, float, float*)",
+        "calls": 16,
+        "summed_duration_ms": 9.696237
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "name": "void ninfer::ops::(anonymous namespace)::rope_kernel<(ninfer::ops::(anonymous namespace)::Profile)0, 256, 32, 24, 4, false>(int const*, hip_bfloat16*, hip_bfloat16*, int, long, long)",
+        "calls": 128,
+        "summed_duration_ms": 5.172007
+      },
+      {
+        "execution_category": "base_text_prefill",
+        "name": "void ninfer::ops::r9700::kv::(anonymous namespace)::append_kernel<16u, true, false, false>(hip_bfloat16 const*, hip_bfloat16 const*, unsigned int const*, unsigned long, int const*, unsigned int, unsigned int const*, unsigned int, unsigned int const*, unsigned int, int const*, unsigned int, unsigned int, unsigned long, unsigned char*, unsigned char*, unsigned short*, unsigned int*)",
+        "calls": 128,
+        "summed_duration_ms": 3.490926
+      },
+      {
+        "execution_category": "prefill_orchestration",
+        "name": "ninfer::ops::r9700::linear::(anonymous namespace)::a8q4g64_linear_decode_dot8_t1_kernel(unsigned char const*, unsigned char const*, unsigned short const*, unsigned int const*, unsigned char const*, unsigned short const*, hip_bfloat16*, unsigned int, unsigned int)",
+        "calls": 1,
+        "summed_duration_ms": 1.087723
+      },
+      {
+        "execution_category": "prefill_orchestration",
+        "name": "ninfer::ops::r9700::eager::(anonymous namespace)::rmsnorm_k5120_token8_kernel(hip_bfloat16 const*, hip_bfloat16 const*, hip_bfloat16*, unsigned int, float, bool)",
+        "calls": 8,
+        "summed_duration_ms": 0.59072
+      },
+      {
+        "execution_category": "prefill_orchestration",
+        "name": "ninfer::ops::r9700::eager::(anonymous namespace)::embedding_gather_q4_kernel(unsigned char const*, unsigned short const*, int const*, hip_bfloat16*, unsigned int, unsigned int, unsigned long)",
+        "calls": 8,
+        "summed_duration_ms": 0.57896
+      },
+      {
+        "execution_category": "prefill_unattributed",
+        "name": "__amd_rocclr_fillBufferUnAligned",
+        "calls": 34,
+        "summed_duration_ms": 0.21288
+      },
+      {
+        "execution_category": "measured_other",
+        "name": "__amd_rocclr_fillBufferUnAligned",
+        "calls": 63,
+        "summed_duration_ms": 0.20404
+      },
+      {
+        "execution_category": "prefill_orchestration",
+        "name": "__amd_rocclr_copyBuffer",
+        "calls": 16,
+        "summed_duration_ms": 0.08864
+      },
+      {
+        "execution_category": "prefill_unattributed",
+        "name": "void ninfer::ops::r9700::eager::(anonymous namespace)::fill_kernel<int>(int*, unsigned long, int)",
+        "calls": 8,
+        "summed_duration_ms": 0.04564
+      },
+      {
+        "execution_category": "prefill_unattributed",
+        "name": "__amd_rocclr_copyBuffer",
+        "calls": 8,
+        "summed_duration_ms": 0.0352
+      },
+      {
+        "execution_category": "prefill_orchestration",
+        "name": "ninfer::ops::r9700::eager::(anonymous namespace)::iota_kernel(int*, unsigned long, int)",
+        "calls": 8,
+        "summed_duration_ms": 0.0194
+      },
+      {
+        "execution_category": "measured_other",
+        "name": "__amd_rocclr_copyBuffer",
+        "calls": 2,
+        "summed_duration_ms": 0.00616
+      },
+      {
+        "execution_category": "prefill_orchestration",
+        "name": "ninfer::ops::(anonymous namespace)::sampling_partial_kernel(hip_bfloat16 const*, ninfer::ops::SamplingConfig const*, int, int, unsigned long long*, int)",
+        "calls": 1,
+        "summed_duration_ms": 0.006
+      },
+      {
+        "execution_category": "prefill_orchestration",
+        "name": "void ninfer::ops::r9700::eager::(anonymous namespace)::fill_kernel<int>(int*, unsigned long, int)",
+        "calls": 2,
+        "summed_duration_ms": 0.00468
+      },
+      {
+        "execution_category": "prefill_orchestration",
+        "name": "__amd_rocclr_fillBufferUnAligned",
+        "calls": 1,
+        "summed_duration_ms": 0.00456
+      },
+      {
+        "execution_category": "prefill_orchestration",
+        "name": "ninfer::ops::(anonymous namespace)::sampling_finalize_kernel(unsigned long long const*, int, ninfer::ops::SamplingConfig const*, int const*, int, int, int*)",
+        "calls": 1,
+        "summed_duration_ms": 0.00332
+      },
+      {
+        "execution_category": "prefill_orchestration",
+        "name": "ninfer::ops::r9700::linear::(anonymous namespace)::a8g64_quantize_activation_kernel(hip_bfloat16 const*, unsigned char*, unsigned char*, unsigned short*, unsigned int*, unsigned int, unsigned int)",
+        "calls": 1,
+        "summed_duration_ms": 0.00284
+      }
+    ],
+    "duration_note": "independent sums may overlap across streams; active_union is wall-time union"
+  }
+}

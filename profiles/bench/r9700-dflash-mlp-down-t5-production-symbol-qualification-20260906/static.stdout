@@ -1,0 +1,1 @@
+a8q4_dflash_mlp_down_small_t_static=passed T5:dot8=80,wloads=4,scale_loads=6,vgpr=33,sgpr=102,occupancy=16 lds=0 private=0 scratch=0 sgpr_spills=0 vgpr_spills=0 wave32=1

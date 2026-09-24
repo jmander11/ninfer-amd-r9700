@@ -1,0 +1,15 @@
+{
+  "command": [
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-phase-sum-g32-20260921/src/ninfer_r9700_runtime_planner_qual",
+    "--host-split512-routing"
+  ],
+  "exit_code": 0,
+  "stdout": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-terminal-base-phase-sum-20260921/host-checks/dense-g32.stdout.txt",
+    "sha256": "3edf12a44281a4b9b5809f2fecce4442231b3e3fcfd0b1b9c5f9323fea8847bf"
+  },
+  "stderr": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-terminal-base-phase-sum-20260921/host-checks/dense-g32.stderr.txt",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

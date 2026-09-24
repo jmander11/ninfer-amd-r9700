@@ -1,0 +1,51 @@
+{
+  "schema": "ninfer.r9700.gdn-q4-pair-t1-whole-ab-summary.v1",
+  "status": "passed",
+  "production_routing_authorized": true,
+  "exact_public_token_parity": true,
+  "pairs": [
+    {
+      "order": [
+        "control",
+        "candidate"
+      ],
+      "control_seconds": 9.347721853,
+      "candidate_seconds": 9.146213549,
+      "candidate_over_control": 0.9784430573385826
+    },
+    {
+      "order": [
+        "candidate",
+        "control"
+      ],
+      "control_seconds": 9.463699242,
+      "candidate_seconds": 9.268753725,
+      "candidate_over_control": 0.9794007066354317
+    },
+    {
+      "order": [
+        "control",
+        "candidate"
+      ],
+      "control_seconds": 9.477735923,
+      "candidate_seconds": 9.273871586,
+      "candidate_over_control": 0.97849018598363
+    }
+  ],
+  "paired_ratio_mean": 0.9787779833192147,
+  "paired_ratio_upper_2se": 0.979401300813184,
+  "paired_ratio_median": 0.97849018598363,
+  "control_decode_output_tok_s": [
+    27.38635188613801,
+    27.050732853371883,
+    27.010670278199523
+  ],
+  "candidate_decode_output_tok_s": [
+    27.989724778292512,
+    27.619678717917388,
+    27.604436574953453
+  ],
+  "limitations": [
+    "This is an unprofiled whole-model timing gate; it does not prove physical HBM bandwidth."
+  ]
+}

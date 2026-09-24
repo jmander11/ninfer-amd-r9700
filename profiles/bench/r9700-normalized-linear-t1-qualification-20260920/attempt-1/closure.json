@@ -1,0 +1,101 @@
+{
+  "schema": "ninfer.r9700.normalized-linear-t1-closure.v1",
+  "status": "passed",
+  "error": null,
+  "started_unix_ns": 1789963868514427864,
+  "finished_unix_ns": 1789963873352551665,
+  "plan": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-normalized-linear-t1-qualification-20260920/plan.json",
+    "bytes": 11718,
+    "sha256": "a8a0482f55e27a0c4a82c59cda044f89e8327c777eee098796aa8fa8df86900f"
+  },
+  "create_only": true,
+  "production_routing_authorized": false,
+  "artifacts": [
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-normalized-linear-t1-qualification-20260920/attempt-1/analyzer.process.json",
+      "bytes": 1033,
+      "sha256": "463953f8973f8defbc7784765dcbdf4db2fe07c4ae7a42e1dd843d3941e1a313"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-normalized-linear-t1-qualification-20260920/attempt-1/analyzer.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-normalized-linear-t1-qualification-20260920/attempt-1/analyzer.stdout",
+      "bytes": 369,
+      "sha256": "b1ce8fdd6cf0c4e7b0c6218234475730698bbf4ff1c036b20d87a95124cb6b78"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-normalized-linear-t1-qualification-20260920/attempt-1/device-compile.process.json",
+      "bytes": 2226,
+      "sha256": "84d1e6830bf07e6701b2ec0b1dc754b9074c2e1e61188bf80870af9e9d3aa19d"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-normalized-linear-t1-qualification-20260920/attempt-1/device-compile.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-normalized-linear-t1-qualification-20260920/attempt-1/device-compile.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-normalized-linear-t1-qualification-20260920/attempt-1/embedded/a8g64_normalized_prepare_t1_kernel.hsaco",
+      "bytes": 306152,
+      "sha256": "23989ea9e65686b3163d9ba82deb37257babf4b163ecebaa674a39f06931ceb3"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-normalized-linear-t1-qualification-20260920/attempt-1/embedded/a8q4g64_linear_decode_dot8_t1_kernel.hsaco",
+      "bytes": 306152,
+      "sha256": "23989ea9e65686b3163d9ba82deb37257babf4b163ecebaa674a39f06931ceb3"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-normalized-linear-t1-qualification-20260920/attempt-1/qual.s",
+      "bytes": 1686201,
+      "sha256": "5dae31def739235f2b618af6ffba63c74be7c087e9a18d63c6993b93ad2716a6"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-normalized-linear-t1-qualification-20260920/attempt-1/qualification.json",
+      "bytes": 3308,
+      "sha256": "f9d8a06cb2f9f11f0d3db91dbab6513939cb86751e16ec31a46a1e453588d8a3"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-normalized-linear-t1-qualification-20260920/attempt-1/qualifier.process.json",
+      "bytes": 989,
+      "sha256": "b7a8fde8567c7cdc8e52a145257ad8af03b33e6470ebadd2745d1b4352a4f9cd"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-normalized-linear-t1-qualification-20260920/attempt-1/qualifier.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-normalized-linear-t1-qualification-20260920/attempt-1/qualifier.stdout",
+      "bytes": 76,
+      "sha256": "00e80d264f7490fac0144abbe18184243788bf22e745706cddb12fb277b2ce91"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-normalized-linear-t1-qualification-20260920/attempt-1/static-embedded-check.process.json",
+      "bytes": 1304,
+      "sha256": "f23dd53ea62e10fe4a1adc8a0ec0f489fd4d398b51b5439de3f7d666218ce4ab"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-normalized-linear-t1-qualification-20260920/attempt-1/static-embedded-check.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-normalized-linear-t1-qualification-20260920/attempt-1/static-embedded-check.stdout",
+      "bytes": 3414,
+      "sha256": "0ca6c4352b7b648416f58101a6dfa74af5ba0d60888f02c37cb79d726ec6c2dd"
+    },
+    {
+      "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-normalized-linear-t1-qualification-20260920/attempt-1/summary.json",
+      "bytes": 369,
+      "sha256": "b1ce8fdd6cf0c4e7b0c6218234475730698bbf4ff1c036b20d87a95124cb6b78"
+    }
+  ]
+}

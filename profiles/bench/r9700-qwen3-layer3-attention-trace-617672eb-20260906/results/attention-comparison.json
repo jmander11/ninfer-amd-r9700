@@ -1,0 +1,21 @@
+{
+  "artifact_type": "ninfer_qwen3_layer3_attention_trace_comparison",
+  "classification": "full_attention_route_arithmetic_difference",
+  "diagnostic_only": true,
+  "first_difference": {
+    "field": "attention_fp32",
+    "first_byte_index": 0,
+    "first_element_index": 0,
+    "left_bits": 1052023983,
+    "maximum_absolute_difference": 0.02367246150970459,
+    "mismatch_byte_count": 17181,
+    "right_bits": 1052080823
+  },
+  "limitations": [
+    "localizes the first selected-column layer-3 attention owner but is not a numerical oracle",
+    "the trace is synchronous eager-only diagnostic evidence and cannot support timing"
+  ],
+  "production_routing_authorized": false,
+  "schema_version": 1,
+  "timing_evidence_eligible": false
+}

@@ -1,0 +1,67 @@
+{
+  "command": [
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-dflash-small-t-n16-cd966d72-control-20260906/bench/ninfer_bench",
+    "--weights",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-dflash2-q4-eval.ninfer",
+    "--corpus",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids",
+    "--device",
+    "0",
+    "--concurrency",
+    "1",
+    "--whole-pg",
+    "128,1",
+    "--prefill-chunk",
+    "4096",
+    "--kv-capacity",
+    "workload",
+    "--draft-tokens",
+    "0",
+    "--retain-token-ids",
+    "--no-device-graph",
+    "--output",
+    "json",
+    "--output-file",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-p129-isolation-discriminator-20260906/results/eager-ordinary_seed_p128.json",
+    "-r",
+    "1",
+    "--warmup",
+    "0"
+  ],
+  "exit_code": 0,
+  "started_unix_ns": 1788730040838448583,
+  "finished_unix_ns": 1788730056495921849,
+  "power_profile_before": "auto",
+  "power_profile_after": "auto",
+  "profiling_environment_policy": {
+    "exact": [
+      "AMD_SERIALIZE_COPY",
+      "AMD_SERIALIZE_KERNEL",
+      "GPU_DUMP_CODE_OBJECT",
+      "HIP_FORCE_QUEUE_PROFILING",
+      "LD_AUDIT",
+      "LD_PRELOAD"
+    ],
+    "prefixes": [
+      "ROCPROF",
+      "ROCP_",
+      "ROCTRACER_",
+      "ROCTX_",
+      "HSA_TOOLS_",
+      "HIP_TRACE_",
+      "AQLPROFILE_",
+      "ATT_PROFILE"
+    ]
+  },
+  "profiling_environment_removed": [],
+  "stdout": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-p129-isolation-discriminator-20260906/results/eager-ordinary_seed_p128.stdout.txt",
+    "bytes": 151,
+    "sha256": "91d25f0fb90e6633895e50fba6d38093b097be6c9728095efcbd689b1249744b"
+  },
+  "stderr": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-dflash-p129-isolation-discriminator-20260906/results/eager-ordinary_seed_p128.stderr.txt",
+    "bytes": 253,
+    "sha256": "5fe3eb395d90b1e4e3d76cb7eb187f188b9f8df19f3dcd0b6a497418d0eb5d7f"
+  }
+}

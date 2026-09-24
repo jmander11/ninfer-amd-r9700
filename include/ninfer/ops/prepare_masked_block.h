@@ -2,7 +2,7 @@
 
 #include "core/tensor.h"
 
-#include <cuda_runtime.h>
+#include <hip/hip_runtime_api.h>
 
 #include <cstdint>
 
@@ -22,12 +22,12 @@ namespace ninfer::ops {
  * invalid physical tail safe for downstream fixed-width execution; valid_columns remains the
  * authority that excludes those rows from mathematical work and persistent-state updates.
  *
- * The registered domain is W=1..16, B=1..8, and nonnegative mask_id. The caller guarantees
+ * The registered domain is W=1..16, B=1..4, and nonnegative mask_id. The caller guarantees
  * nonnegative lengths whose final valid positions fit I32. Inputs are unchanged, every output
  * element is overwritten, and the Op owns no workspace or persistent state.
  */
 void prepare_masked_block(const Tensor& anchors, const Tensor& lengths, const Tensor& valid_columns,
                           std::int32_t mask_id, Tensor& ids, Tensor& positions,
-                          cudaStream_t stream);
+                          hipStream_t stream);
 
 } // namespace ninfer::ops

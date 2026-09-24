@@ -1,0 +1,339 @@
+{
+  "bound_regression": {
+    "command": [
+      "/ssdpool2nvme/local_llm/ninfer-amd-r9700/tools/r9700/build/a8q4_n16k16_m64n192_scalar_base_harness",
+      "--regression"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": "PASS exact_shapes=3 full_bit_parity=true complete_k_fp64_samples=126 actual_wrapper=true graph_replay=true status_poison_reset=true input_immutable=true vmm_end_guards=5x2 active_blocks=2 resident_waves=48\n"
+  },
+  "candidate_identity": "exact-q4-m64n192-w24-two-fragment-scalar-base-integrated-tail-v1",
+  "command": [
+    "/ssdpool2nvme/local_llm/.venv-ninfer-r9700/bin/python",
+    "-m",
+    "tools.r9700.run_a8q4_n16k16_m64n192_scalar_base_gate",
+    "--benchmark",
+    "--output",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8q4-n16k16-m64n192-scalar-base-p2048-ab-20260905.json"
+  ],
+  "decision": {
+    "admission_pass": false,
+    "candidate_service_point_ms": 363.0915012359375,
+    "candidate_service_robust_upper_ms": 364.5550331436297,
+    "cells": [
+      {
+        "candidate_mad_ms": 0.0029743909804689217,
+        "candidate_median_ms": 2.1247175931914066,
+        "control_mad_ms": 0.0023276805898437836,
+        "control_median_ms": 2.175446987152344,
+        "name": "value_z",
+        "paired_ratio_mad": 0.000222079863495539,
+        "paired_ratio_median": 0.9764617493604328,
+        "paired_saving_mad_ms": 0.0005633831015625645,
+        "paired_saving_median_ms": 0.05129277706250002,
+        "robust_ratio_upper": 0.9774495161772883,
+        "stability_pass": true
+      },
+      {
+        "candidate_mad_ms": 0.00069385767187502,
+        "candidate_median_ms": 1.0762411355976562,
+        "control_mad_ms": 0.00036925076953120417,
+        "control_median_ms": 1.0966716408710937,
+        "name": "gdn_output",
+        "paired_ratio_mad": 0.0005429586752992988,
+        "paired_ratio_median": 0.9813163946953756,
+        "paired_saving_mad_ms": 0.0006060004218749748,
+        "paired_saving_median_ms": 0.02048319578515634,
+        "robust_ratio_upper": 0.9837313662913718,
+        "stability_pass": true
+      },
+      {
+        "candidate_mad_ms": 0.0022166967382812874,
+        "candidate_median_ms": 3.0035253763203125,
+        "control_mad_ms": 0.002270817757812571,
+        "control_median_ms": 3.0864435434335937,
+        "name": "mlp_down",
+        "paired_ratio_mad": 0.0002373614524963652,
+        "paired_ratio_median": 0.972899081663513,
+        "paired_saving_mad_ms": 0.0007321834531250904,
+        "paired_saving_median_ms": 0.08365035056640635,
+        "robust_ratio_upper": 0.9739548179319264,
+        "stability_pass": true
+      }
+    ],
+    "classification": "terminal_reject",
+    "every_cell_robust_ratio_upper_max": 1.01,
+    "first_stable_timing_miss_is_terminal": true,
+    "floor_closing_candidate_service_max_ms": 271.441719,
+    "floor_closing_diagnostic_pass": false,
+    "robust_mad_factor": 4.4478,
+    "robust_weighted_saving_lower_ms": 8.625394776951355,
+    "stability_pass": true,
+    "unstable_allows_exactly_one_frozen_unpooled_repeat": true,
+    "weighted_paired_saving_point_ms": 9.126600265500013,
+    "weighted_saving_lower_ms_min": 25.0,
+    "weighted_saving_uncertainty_ms": 0.5012054885486573
+  },
+  "hashes_sha256": {
+    "build-r9700/src/CMakeFiles/ninfer_r9700_core.dir/ops/r9700/linear/r9700_linear.hip.o": "01578de383205d0d7ea009c2cf7d61e68fca43c8ee9a490f972faebf750b6544",
+    "profiles/bench/a8q4-n16k16-m64n192-scalar-base-prepare-20260905/build.sh": "92c3d889936ad4327eed1bbcccd2046b9418dd65c2f557be008f511efb5fe31b",
+    "profiles/bench/a8q4-n16k16-m64n192-scalar-base-prepare-20260905/plan.json": "e956120acfd933e4b02f6aef465502a5f7ca05dfaef87b5c071a8f5c8c08ea9c",
+    "profiles/bench/a8q4-n16k16-m64n192-scalar-base-prepare-20260905/run.sh": "7ca3903961200f93b4667601a0014457e4e5721b669d056a7c1ce77f126e778a",
+    "src/ops/r9700/linear/r9700_linear.hip": "c65a49dd2228a9fdf34f167754c8fd095e3382154762d8e000606c7d4d2c2ff2",
+    "tools/r9700/a8q4_n16k16_m64n192_scalar_base_harness.hip": "f3fd2353b2bfacd238db9792e53c22319139acba83e23bf86e77f83a35856366",
+    "tools/r9700/a8q4_n16k16_m64n192_scalar_base_qual.h": "aee6c8e123517541c0fafab72c463b72f09e280de24ea68a545fce4128e6ba58",
+    "tools/r9700/a8q4_n16k16_m64n192_scalar_base_qual.hip": "8d1e793efb97b3c4fadda5aff7bf1e5f17c15045f9b1a2c9bbc2bf91f28d384b",
+    "tools/r9700/a8q4_n16k16_qualification_harness_impl.hip": "c1790d51640755c3d4ff110570c008713d6d67bc459179bd51018233d48a700d",
+    "tools/r9700/build/a8q4_n16k16_m64n192_scalar_base_baseline.hsaco": "2a421c64546ad0b8a3d08c76ae39b9bf1c9cf1a2267e8806ed67fc06f9888c8d",
+    "tools/r9700/build/a8q4_n16k16_m64n192_scalar_base_baseline.objdump": "c0933c676bcd8d8b3ec6834d1535cebe1af07956c2cea7ece7ec856003ad730d",
+    "tools/r9700/build/a8q4_n16k16_m64n192_scalar_base_candidate.hsaco": "d238e27d4d79b4bd45dbce834425d65f3731ad9d3aa01e763cae372193fdf72c",
+    "tools/r9700/build/a8q4_n16k16_m64n192_scalar_base_candidate.notes": "111502ea8569a3076f467bd75451b527cda10f617e2ea3eee4efcce927f8bd9f",
+    "tools/r9700/build/a8q4_n16k16_m64n192_scalar_base_candidate.objdump": "2a319a1d9ad797f3c181e7a7a3587be1a8e9f3123c880097b038c08bd0190570",
+    "tools/r9700/build/a8q4_n16k16_m64n192_scalar_base_harness": "565120e6dc01543bd2337e713c75d542f9f6a2ca85b94ed12db389ac45648e00",
+    "tools/r9700/build/a8q4_n16k16_m64n192_scalar_base_qual.s": "40ae34d60f6afbd7220ac798440ab2d5332d13600285521bb6406f442a31df76",
+    "tools/r9700/check_a8q4_n16k16_m64n192_scalar_base_static.py": "d88d13e2d49550c8547f58e060634a4654f44835f965e627b21e092b5ae8f09c",
+    "tools/r9700/patch_a8q4_n16k16_weight_ht_assembly.py": "e441673c4bfcd987a6ee524afa9f3a97a18b3a133420d9b088386d2ff48716da",
+    "tools/r9700/run_a8q4_n16k16_m64n192_scalar_base_gate.py": "eb275e07ff479d5379b7606c07ff4e4db964e93b81a5fef969c30fe2578c585f",
+    "tools/r9700/test_check_a8q4_n16k16_m64n192_scalar_base_static.py": "3aab43f68831a21c5ea59941056236c3ef42db8cf7dc2d72a77dc5e2f77a2d45",
+    "tools/r9700/test_run_a8q4_n16k16_m64n192_scalar_base_gate.py": "3638f7529a9b69d6c56e739b69ecf0643f590ebfb5da9bc034ac0a7a987a61c4",
+    "tools/r9700/validate_a8q4_n16k16_m64n192_scalar_base_report.py": "5c3109fb54a07f5912c5b28acd674466e786131b7f7fe825a8a41bdce3f14900"
+  },
+  "measurement": {
+    "cells": [
+      {
+        "calls": 48,
+        "candidate_interval_samples_ms": [
+          271.135192871,
+          271.383239746,
+          271.53692627,
+          271.901885986,
+          272.064849854,
+          272.025817871,
+          272.298370361,
+          272.426239014
+        ],
+        "columns": 5120,
+        "control_interval_samples_ms": [
+          277.935852051,
+          277.963745117,
+          278.253753662,
+          278.419219971,
+          278.506347656,
+          278.49520874,
+          278.849639893,
+          279.00592041
+        ],
+        "iterations_per_sample": 128,
+        "name": "value_z",
+        "rows": 12288,
+        "tokens": 2048
+      },
+      {
+        "calls": 64,
+        "candidate_interval_samples_ms": [
+          137.67010498,
+          137.315429688,
+          137.773544312,
+          137.744186401,
+          137.863754272,
+          137.727355957,
+          137.847732544,
+          137.867782593
+        ],
+        "columns": 6144,
+        "control_interval_samples_ms": [
+          140.309829712,
+          140.319030762,
+          140.334381104,
+          140.34815979,
+          140.40447998,
+          140.457672119,
+          140.54359436,
+          140.399780273
+        ],
+        "iterations_per_sample": 128,
+        "name": "gdn_output",
+        "rows": 5120,
+        "tokens": 2048
+      },
+      {
+        "calls": 64,
+        "candidate_interval_samples_ms": [
+          383.498840332,
+          383.401428223,
+          384.145996094,
+          384.351898193,
+          384.550598145,
+          384.613739014,
+          384.821655273,
+          384.713470459
+        ],
+        "columns": 17408,
+        "control_interval_samples_ms": [
+          394.276184082,
+          394.654754639,
+          394.814941406,
+          394.960449219,
+          395.1690979,
+          395.359283447,
+          395.351593018,
+          395.696136475
+        ],
+        "iterations_per_sample": 128,
+        "name": "mlp_down",
+        "rows": 5120,
+        "tokens": 2048
+      }
+    ],
+    "device": {
+      "architecture": "gfx1201",
+      "name": "AMD Radeon AI PRO R9700",
+      "ordinal": 0
+    },
+    "pair_order": [
+      "AB",
+      "BA",
+      "AB",
+      "BA",
+      "AB",
+      "BA",
+      "AB",
+      "BA"
+    ],
+    "schema": "ninfer.r9700.a8q4-n16k16-m64n192-scalar-base-measurement.v1",
+    "warmup_interval_launches": 128,
+    "warmup_order": [
+      "A",
+      "B",
+      "B",
+      "A"
+    ]
+  },
+  "power_after_regression": {
+    "command": [
+      "/opt/rocm/bin/rocm-smi",
+      "-d",
+      "0",
+      "--showproductname",
+      "--showprofile",
+      "--showperflevel",
+      "--json"
+    ],
+    "stdout": {
+      "card0": {
+        "Card Model": "0x7551",
+        "Card SKU": "APM107573",
+        "Card Series": "AMD Radeon AI PRO R9700",
+        "Card Vendor": "Advanced Micro Devices, Inc. [AMD/ATI]",
+        "Device Rev": "0xc0",
+        "GFX Version": "gfx1201",
+        "GUID": "38699",
+        "Node ID": "1",
+        "Performance Level": "auto",
+        "Subsystem ID": "0x5413"
+      }
+    },
+    "sysfs_path": "/sys/class/drm/card2/device/power_dpm_force_performance_level",
+    "sysfs_value": "auto"
+  },
+  "power_after_timing": {
+    "command": [
+      "/opt/rocm/bin/rocm-smi",
+      "-d",
+      "0",
+      "--showproductname",
+      "--showprofile",
+      "--showperflevel",
+      "--json"
+    ],
+    "stdout": {
+      "card0": {
+        "Card Model": "0x7551",
+        "Card SKU": "APM107573",
+        "Card Series": "AMD Radeon AI PRO R9700",
+        "Card Vendor": "Advanced Micro Devices, Inc. [AMD/ATI]",
+        "Device Rev": "0xc0",
+        "GFX Version": "gfx1201",
+        "GUID": "38699",
+        "Node ID": "1",
+        "Performance Level": "auto",
+        "Subsystem ID": "0x5413"
+      }
+    },
+    "sysfs_path": "/sys/class/drm/card2/device/power_dpm_force_performance_level",
+    "sysfs_value": "auto"
+  },
+  "power_before_regression": {
+    "command": [
+      "/opt/rocm/bin/rocm-smi",
+      "-d",
+      "0",
+      "--showproductname",
+      "--showprofile",
+      "--showperflevel",
+      "--json"
+    ],
+    "stdout": {
+      "card0": {
+        "Card Model": "0x7551",
+        "Card SKU": "APM107573",
+        "Card Series": "AMD Radeon AI PRO R9700",
+        "Card Vendor": "Advanced Micro Devices, Inc. [AMD/ATI]",
+        "Device Rev": "0xc0",
+        "GFX Version": "gfx1201",
+        "GUID": "38699",
+        "Node ID": "1",
+        "Performance Level": "auto",
+        "Subsystem ID": "0x5413"
+      }
+    },
+    "sysfs_path": "/sys/class/drm/card2/device/power_dpm_force_performance_level",
+    "sysfs_value": "auto"
+  },
+  "prepared_manifest": {
+    "path": "profiles/bench/a8q4-n16k16-m64n192-scalar-base-prepare-20260905/prepared.sha256",
+    "sha256": "5231bd6ed356074b986e28fef6a87c8107ab36c3691ce4d2afb89f1bef55fda2"
+  },
+  "request_model": {
+    "candidate_bytes": 306829197312,
+    "policy": "integrated-m64n192-tail-with-uniform-status-request-accounting",
+    "production_bytes": 364823707648,
+    "reduction_bytes": 57994510336,
+    "reduction_fraction": 0.158965848765
+  },
+  "resources": {
+    "allocated_vgpr": 96,
+    "compiler_occupancy_waves_per_simd": 12,
+    "lds_bytes": 21504,
+    "logical_vgpr": 89,
+    "max_zero_extended_voffset": 44564472,
+    "native_signed_iu4_sites": 8,
+    "runtime_active_blocks_required": 2,
+    "runtime_resident_waves_required": 48,
+    "scratch_bytes": 0,
+    "spills": 0,
+    "workgroup_threads": 768
+  },
+  "schema": "ninfer.r9700.a8q4-n16k16-m64n192-scalar-base-gate.v1",
+  "static": {
+    "command": [
+      "/ssdpool2nvme/local_llm/.venv-ninfer-r9700/bin/python",
+      "-m",
+      "tools.r9700.check_a8q4_n16k16_m64n192_scalar_base_static",
+      "--source",
+      "tools/r9700/a8q4_n16k16_m64n192_scalar_base_qual.hip",
+      "--assembly",
+      "tools/r9700/build/a8q4_n16k16_m64n192_scalar_base_qual.s",
+      "--candidate",
+      "tools/r9700/build/a8q4_n16k16_m64n192_scalar_base_candidate.hsaco",
+      "--notes",
+      "tools/r9700/build/a8q4_n16k16_m64n192_scalar_base_candidate.notes",
+      "--disassembly",
+      "tools/r9700/build/a8q4_n16k16_m64n192_scalar_base_candidate.objdump"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": "PASS logical_vgpr=89 allocated_vgpr=96 lds_bytes=21504 compiler_occupancy_waves_per_simd=12 workgroup_threads=768 waves_per_workgroup=24 iu4_sites=8 max_voffset=44564472 derived_active_blocks=2 derived_resident_waves=48 request_bytes=306829197312 active_blocks_runtime_required=2 resident_waves_runtime_required=48 scratch=0 spills=0\n"
+  }
+}

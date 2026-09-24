@@ -1,0 +1,2 @@
+dflash-companion-selector: PASS K=4 C=1 mapped=0 graph_replays=2 full_FP64_selector_oracle logits_rows=131072 bf16_codebook_rows=248320 workspace_bytes=24064
+dflash-companion-selector: PASS K=4 C=1 mapped=1 graph_replays=2 full_FP64_selector_oracle logits_rows=131072 bf16_codebook_rows=248320 workspace_bytes=24064

@@ -1,0 +1,153 @@
+{
+  "stem": "run-3-candidate",
+  "role": "candidate",
+  "command": [
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-bf16-gdn-control-t1-candidate/bench/ninfer_bench",
+    "--weights",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer",
+    "--corpus",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/bench/fixtures/bench_corpus.ids",
+    "--device",
+    "0",
+    "--concurrency",
+    "1",
+    "--whole-pg",
+    "8192,256",
+    "--prefill-chunk",
+    "4096",
+    "--kv-capacity",
+    "workload",
+    "--spec",
+    "mtp",
+    "--draft-tokens",
+    "0",
+    "--retain-token-ids",
+    "--output",
+    "json",
+    "--output-file",
+    "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-retry2-20260920/results/run-3-candidate.json",
+    "-r",
+    "1",
+    "--warmup",
+    "1"
+  ],
+  "cwd": "/ssdpool2nvme/local_llm/ninfer-amd-r9700",
+  "exit_code": 0,
+  "started_unix_ns": 1789947417514382254,
+  "finished_unix_ns": 1789947512931263922,
+  "power_profile_path": "/sys/devices/pci0000:00/0000:00:02.1/0000:03:00.0/0000:04:08.0/0000:0a:00.0/0000:0b:08.0/0000:11:00.0/0000:12:00.0/0000:13:00.0/power_dpm_force_performance_level",
+  "power_before": "auto",
+  "power_after": "auto",
+  "vram_before": {
+    "pci_bus_id": "0000:13:00.0",
+    "used_path": "/sys/devices/pci0000:00/0000:00:02.1/0000:03:00.0/0000:04:08.0/0000:0a:00.0/0000:0b:08.0/0000:11:00.0/0000:12:00.0/0000:13:00.0/mem_info_vram_used",
+    "total_path": "/sys/devices/pci0000:00/0000:00:02.1/0000:03:00.0/0000:04:08.0/0000:0a:00.0/0000:0b:08.0/0000:11:00.0/0000:12:00.0/0000:13:00.0/mem_info_vram_total",
+    "used_bytes": 59912192,
+    "total_bytes": 34208743424,
+    "used_fraction_permille_ceil": 2,
+    "maximum_used_bytes": 1073741824,
+    "maximum_used_fraction_permille": 50,
+    "passed": true
+  },
+  "vram_after": {
+    "pci_bus_id": "0000:13:00.0",
+    "used_path": "/sys/devices/pci0000:00/0000:00:02.1/0000:03:00.0/0000:04:08.0/0000:0a:00.0/0000:0b:08.0/0000:11:00.0/0000:12:00.0/0000:13:00.0/mem_info_vram_used",
+    "total_path": "/sys/devices/pci0000:00/0000:00:02.1/0000:03:00.0/0000:04:08.0/0000:0a:00.0/0000:0b:08.0/0000:11:00.0/0000:12:00.0/0000:13:00.0/mem_info_vram_total",
+    "used_bytes": 59912192,
+    "total_bytes": 34208743424,
+    "used_fraction_permille_ceil": 2,
+    "maximum_used_bytes": 1073741824,
+    "maximum_used_fraction_permille": 50,
+    "passed": true
+  },
+  "post_exit_drain": {
+    "status": "drained",
+    "samples": [
+      {
+        "started_seconds": 3.200024366378784e-06,
+        "vram": {
+          "pci_bus_id": "0000:13:00.0",
+          "used_path": "/sys/devices/pci0000:00/0000:00:02.1/0000:03:00.0/0000:04:08.0/0000:0a:00.0/0000:0b:08.0/0000:11:00.0/0000:12:00.0/0000:13:00.0/mem_info_vram_used",
+          "total_path": "/sys/devices/pci0000:00/0000:00:02.1/0000:03:00.0/0000:04:08.0/0000:0a:00.0/0000:0b:08.0/0000:11:00.0/0000:12:00.0/0000:13:00.0/mem_info_vram_total",
+          "used_bytes": 14536441856,
+          "total_bytes": 34208743424,
+          "used_fraction_permille_ceil": 425,
+          "maximum_used_bytes": 1073741824,
+          "maximum_used_fraction_permille": 50,
+          "passed": false
+        },
+        "vram_error": null,
+        "power": "auto",
+        "power_error": null,
+        "finished_seconds": 0.0004971410380676389
+      },
+      {
+        "started_seconds": 0.10056994401384145,
+        "vram": {
+          "pci_bus_id": "0000:13:00.0",
+          "used_path": "/sys/devices/pci0000:00/0000:00:02.1/0000:03:00.0/0000:04:08.0/0000:0a:00.0/0000:0b:08.0/0000:11:00.0/0000:12:00.0/0000:13:00.0/mem_info_vram_used",
+          "total_path": "/sys/devices/pci0000:00/0000:00:02.1/0000:03:00.0/0000:04:08.0/0000:0a:00.0/0000:0b:08.0/0000:11:00.0/0000:12:00.0/0000:13:00.0/mem_info_vram_total",
+          "used_bytes": 59912192,
+          "total_bytes": 34208743424,
+          "used_fraction_permille_ceil": 2,
+          "maximum_used_bytes": 1073741824,
+          "maximum_used_fraction_permille": 50,
+          "passed": true
+        },
+        "vram_error": null,
+        "power": "auto",
+        "power_error": null,
+        "finished_seconds": 0.10109094507060945
+      }
+    ],
+    "initial": {
+      "pci_bus_id": "0000:13:00.0",
+      "used_path": "/sys/devices/pci0000:00/0000:00:02.1/0000:03:00.0/0000:04:08.0/0000:0a:00.0/0000:0b:08.0/0000:11:00.0/0000:12:00.0/0000:13:00.0/mem_info_vram_used",
+      "total_path": "/sys/devices/pci0000:00/0000:00:02.1/0000:03:00.0/0000:04:08.0/0000:0a:00.0/0000:0b:08.0/0000:11:00.0/0000:12:00.0/0000:13:00.0/mem_info_vram_total",
+      "used_bytes": 14536441856,
+      "total_bytes": 34208743424,
+      "used_fraction_permille_ceil": 425,
+      "maximum_used_bytes": 1073741824,
+      "maximum_used_fraction_permille": 50,
+      "passed": false
+    },
+    "final": {
+      "pci_bus_id": "0000:13:00.0",
+      "used_path": "/sys/devices/pci0000:00/0000:00:02.1/0000:03:00.0/0000:04:08.0/0000:0a:00.0/0000:0b:08.0/0000:11:00.0/0000:12:00.0/0000:13:00.0/mem_info_vram_used",
+      "total_path": "/sys/devices/pci0000:00/0000:00:02.1/0000:03:00.0/0000:04:08.0/0000:0a:00.0/0000:0b:08.0/0000:11:00.0/0000:12:00.0/0000:13:00.0/mem_info_vram_total",
+      "used_bytes": 59912192,
+      "total_bytes": 34208743424,
+      "used_fraction_permille_ceil": 2,
+      "maximum_used_bytes": 1073741824,
+      "maximum_used_fraction_permille": 50,
+      "passed": true
+    },
+    "elapsed_seconds": 0.10109094507060945,
+    "sample_count": 2,
+    "poll_count": 1,
+    "power_samples_auto": true,
+    "maximum_seconds": 30,
+    "poll_seconds": 0.1
+  },
+  "post_exit_drain_started_monotonic_seconds": 674836.343007135,
+  "executable": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700-bf16-gdn-control-t1-candidate/bench/ninfer_bench",
+    "bytes": 5360504,
+    "sha256": "72169cfd4bf1704b49595ebeaa64d2adc7238f2a382763f3030efef7df3b4b3f"
+  },
+  "stdout": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-retry2-20260920/results/run-3-candidate.stdout",
+    "bytes": 142,
+    "sha256": "436867bab62c0c4f6dd301be2244949a74bc16f45bf63332ccb628c37a552ea7"
+  },
+  "stderr": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-retry2-20260920/results/run-3-candidate.stderr",
+    "bytes": 229,
+    "sha256": "50942399b1606b484818fa248fcb24c3013495c90f99a40e74971c85ad38eadb"
+  },
+  "benchmark_report": {
+    "path": "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-bf16-gdn-control-t1-whole-ab-retry2-20260920/results/run-3-candidate.json",
+    "bytes": 7422,
+    "sha256": "3ef313ccc583ef1bca320f989643e9538e7ccc8371ef9ce8e75b01895ce67a39"
+  }
+}
