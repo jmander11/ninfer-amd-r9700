@@ -549,7 +549,7 @@ __launch_bounds__(kSamplerGroupBlock) __global__ void speculative_sampling_group
     __shared__ float p_less_red_aux[kSamplerGroupBlock];
     unsigned long long keys[kSamplerGroupItemsPerThread];
 
-    // The preceding partial launch initializes all caller-owned counters. CUDA
+    // The preceding partial launch initializes all caller-owned counters. HIP
     // stream ordering makes those writes visible before this launch begins.
 
     const int group_begin = group * kSamplerPartialsPerGroup;

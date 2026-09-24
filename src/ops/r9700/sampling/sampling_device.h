@@ -59,7 +59,7 @@ __device__ __forceinline__ unsigned long long sampling_splitmix64(unsigned long 
 }
 
 // Uniform float in [0,1) from (seed, position, purpose, sub). Pure function of
-// its inputs so it is safe under CUDA-graph replay (no mutable RNG state).
+// its inputs so it is safe under HIP graph replay (no mutable RNG state).
 __device__ __forceinline__ float sampling_uniform(unsigned long long seed, int position,
                                                   int purpose, unsigned int sub) {
     unsigned long long key = seed;

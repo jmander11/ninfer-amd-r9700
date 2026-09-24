@@ -1,4 +1,4 @@
-# NInfer for Radeon AI PRO R9700
+# NInfer AMD — Radeon AI PRO R9700
 
 NInfer is a from-scratch C++/HIP inference engine specialized for one AMD Radeon AI PRO R9700
 (`gfx1201`, wave32) and the Qwen3.8-27B model. It supports local CLI generation, OpenAI and
@@ -6,6 +6,65 @@ Anthropic compatible HTTP serving, teacher-forced perplexity scoring, fixed conc
 four requests, Vision input (including DFlash2), MTP, DFlash2, prefix reuse, host-RAM prefix spill,
 optional persistent SSD prefix storage, and Device Graphs. Generation includes p-less sampling,
 schema-constrained tool calls, thinking-cycle exclusion, and bounded repetition recovery.
+
+This branch is the native AMD implementation: HIP kernels and RDNA 4 matrix instructions,
+not a CUDA compatibility layer. It is tuned for a single R9700 and Qwen3.8-27B, rather than
+offering a generic multi-model or multi-GPU backend.
+
+## Benchmarks
+
+Measured on **one AMD Radeon AI PRO R9700**, native `gfx1201` Release build, ROCm 10
+toolchain, power profile `auto`, Device Graphs, dense attention and the fixed G16 cache.
+Workload: code corpus, **4,096 prompt tokens + 128 generated tokens**, prefill chunk 2,048,
+maximum context 4,240, one warmup and three measured repetitions; reported rates are medians.
+These are measured phase throughputs, not end-to-end rates including prefill or model loading.
+
+### DFlash2 decode — 2026-09-24
+
+| Concurrent requests | 4 draft tokens, aggregate tok/s | 5 draft tokens, aggregate tok/s | Best per-request tok/s |
+|---|---:|---:|---:|
+| 1 | — | **105.15** | 105.15 |
+| 2 | 146.25 | **149.40** | 74.70 |
+| 3 | **191.05** | 178.29 | 63.68 |
+| 4 | **203.26** | 186.88 | 50.82 |
+
+Per-request throughput is aggregate divided by concurrency, not a request-latency measurement.
+C1/K4 was not remeasured in this pass. For this workload, use five drafts at C1–2 and four
+at C3–4; this is not a universal prompt/context optimum. C4 adaptive drafting with maximum
+five drafts reaches **201.04 aggregate tok/s**. All 24 final benchmark repetitions and 44
+cold-transition cases match ordinary greedy tokens exactly. Changed Ops also pass independent
+numerical oracles, graph/state checks and ISA/resource qualification.
+
+### Prefill and ordinary decode — retained 2026-09-23 measurements
+
+| C1 mode | Prefill tok/s | Decode tok/s |
+|---|---:|---:|
+| Ordinary, no speculation | 1,519.18 | 30.15 |
+| DFlash2, five drafts | 1,472.19 | See latest table above |
+
+These use the same selected weight/activation recipe and P4096/G128 workload, but precede
+the latest decode optimizations; prefill and ordinary decode were not remeasured afterward.
+Keep chunk 2,048: matched 4,096-chunk checks were 3.6–4.2% slower on the tested samples.
+Neither these results nor isolated memory-bandwidth tests establish a hardware performance ceiling.
+
+Full methodology, qualifications, historical comparisons and evidence locations are in
+`docs/performance.md`. The latest committed reports and reproduction helpers are under
+`profiles/bench/r9700-remaining-candidates-20260924/`; each cell's `command.json` records its
+exact invocation. Model artifacts are local prerequisites and are not included in Git.
+
+## Selected local model and precision
+
+The benchmarked compact selective recipe uses Q4 weights with protected FP8 components,
+a Q4 embedding/output head, and a canonical-Q4 DFlash2 companion with BF16 selector codebooks.
+The base artifact is **15.79 GB**; the complete DFlash-enabled artifact is **17.00 GB**
+(decimal file sizes, not total runtime VRAM requirements).
+
+Large-prefill Q4 MLP gate/up uses **A4** at T>128; other Q4 operations, including ordinary
+decode and DFlash verification, use **A8**. DFlash2 retains its private BF16 state.
+The selected recipe's retained three-text comparison against the 5090 NVFP4 reference has
+a worst per-text prefill PPL increase of **1.88%**; this is not universal quality equivalence,
+and the technical sample has more newly severe positions (10 versus 6). Exact recipe,
+quality comparisons and limitations are recorded in `docs/performance.md`.
 
 There is no compatibility backend and no runtime cache-format selector. The growing
 Text/MTP cache has one fixed represented format:
@@ -18,14 +77,14 @@ Text/MTP cache has one fixed represented format:
 
 FP64 is used only by independent qualification oracles, never by production attention.
 
-## Migration status
+## Implementation and artifact status
 
 The HIP core, artifact reader/materializer, typed cache, sole-target runtime, public Engine, CLI,
 server, PPL executable, and a broad set of native Ops build for `gfx1201`. Physical R9700
 qualifiers cover cache bytes/lifecycle, full Text attention, speculative transitions, DFlash2,
 Vision, Linear, GDN, sampling, persistent state, and fixed C=1..4 runtime planning.
 
-The currently accepted artifact identity is deliberately provisional:
+The original integer-candidate binding identity remains deliberately provisional:
 
 ```text
 model_id   = qwen3.8-27b
@@ -34,7 +93,8 @@ target_key = qwen3_8_27b_r9700
 recipe     = W8G32 candidate
 ```
 
-It exists so the real model gates can run. It is not yet a selected or published product artifact.
+This W8G32 candidate is not the compact Q4/FP8 recipe benchmarked above. Evaluation identities
+support the selected local deployment, but no final production artifact has been published.
 Final weight-recipe and G16/G32 cache-layout selection require paired BF16-reference quality,
 resolved-capacity, and matched whole-inference performance results. BF16 greedy-token differences
 are retained as diagnostics rather than a zero-difference gate.
@@ -59,6 +119,7 @@ The build rejects every HIP architecture other than `gfx1201`.
 cmake -S . -B build-r9700 -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DNINFER_BUILD_APPS=ON \
+  -DNINFER_BUILD_BENCHMARKS=ON \
   -DNINFER_R9700_Q4_ACTIVATION_BITS=8 \
   -DNINFER_R9700_Q4_PREFILL_A4_FAMILIES=1 \
   -DNINFER_R9700_W8_ACTIVATION_BITS=8
@@ -71,6 +132,7 @@ The product executables are:
 build-r9700/apps/ninfer
 build-r9700/apps/ninfer-serve
 build-r9700/apps/ninfer-ppl
+build-r9700/bench/ninfer_bench
 ```
 
 Use each executable's `--help` output as the exact option/default authority.
@@ -88,7 +150,11 @@ Its `README.md` records exact artifact names, creation commands, selected activa
 and quality limitations. Artifact bytes/identities do not change with activation policy.
 This local choice does not claim completion of the separate BF16-source production gate.
 
-## Artifact conversion
+## Artifact conversion and evaluators
+
+The commands below build explicit evaluation recipes; they do not recreate the compact
+selective-cap benchmark artifact by themselves. For that recipe's provenance and local
+creation receipts, see the selected-model directory's `README.md` and `docs/performance.md`.
 
 The provisional converter consumes a complete BF16 source directory directly. It preflights every
 required shard and frontend resource before creating output, writes final bound layouts, and never
@@ -277,7 +343,9 @@ A8G64 Q4 and adaptive-A8G32 W8 execution at 6.538677. Its +0.012077 mean-NLL del
 severe positions meet the 8K accuracy tier; the identical artifact's represented-BF16 W8 control
 is retained at 6.544746. All-Q4+A8 meets the capacity-speed tier at +0.039509 mean NLL and nine new
 severe positions. BF16-greedy differences are diagnostic. No end-to-end R9700
-tokens-per-second result is published for a final artifact. Pareto selection still requires current
+tokens-per-second result is claimed for a finally admitted artifact; the selected local evaluation
+recipe's measured results are published above. The separate, currently paused production Pareto
+campaign still requires current
 matched dense/sparse quality, post-promotion C=1..4 capacity, 32K graph/eager parity, phase and
 whole-inference measurement, and relevant profiler attribution on an otherwise idle R9700.
 Exact-v3 BF16 authority and the dense all-Q4 quality rebase are complete; mixed and sparse quality
@@ -292,6 +360,7 @@ are attribution-only and production performance is measured under `auto`.
 
 ## Documentation
 
+- `docs/performance.md`: AMD benchmarks, model recipes, quality comparisons and measured exclusions.
 - `docs/cli.md`: CLI behavior and options.
 - `docs/serving.md`: HTTP contracts and server operation.
 - `docs/maintainer/qwen3.8-27b-model.md`: exact model and family-runtime semantics.
