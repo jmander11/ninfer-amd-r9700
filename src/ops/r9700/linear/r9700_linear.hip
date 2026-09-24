@@ -1,5 +1,5 @@
 #include "ops/r9700/linear/r9700_linear.h"
-#include "ops/r9700/linear/a8q4_verify_projection.h"
+#include "ops/r9700/linear/a8q4_small_batch_projection.h"
 #include "ops/r9700/linear/r9700_q4_activation_profile.h"
 #include "ops/r9700/linear/r9700_w8_activation_profile.h"
 
@@ -3651,9 +3651,9 @@ hipError_t a8q4g64_linear_candidate(const A8Q4G64CandidateArgs& args,
     if (!valid_a8q4_linear_args(linear_args)) return hipErrorInvalidValue;
     const hipError_t quantized = a8g64_quantize_activation({args.input, workspace}, stream);
     if (quantized != hipSuccess) return quantized;
-    if (detail::use_a8q4_verify_projection(
+    if (detail::use_a8q4_small_batch_projection(
             args.tokens, args.rows, args.columns, args.padded_columns)) {
-        return detail::launch_a8q4_verify_projection(linear_args, stream);
+        return detail::launch_a8q4_small_batch_projection(linear_args, stream);
     }
     if (use_a8q4_decode_dot8_t1(
             args.tokens, args.rows, args.columns, args.padded_columns)) {

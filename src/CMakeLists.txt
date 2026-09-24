@@ -70,7 +70,7 @@ add_library(ninfer_r9700_core STATIC
 target_sources(ninfer_r9700_core PRIVATE
   ops/r9700/linear/dflash_verify_down.hip
   ops/r9700/linear/w8_tiled_head.hip
-  ops/r9700/linear/a8q4_verify_projection.hip)
+  ops/r9700/linear/a8q4_small_batch_projection.hip)
 if(NINFER_R9700_XATTENTION_QUALIFICATION)
   target_sources(ninfer_r9700_core PRIVATE
     ops/r9700/kv/fp8_int4_kv_xattention.hip)
@@ -720,14 +720,14 @@ target_compile_definitions(ninfer_r9700_dflash_verify_down_qual PRIVATE
 target_compile_options(ninfer_r9700_dflash_verify_down_qual PRIVATE -Wno-unused-function)
 target_link_libraries(ninfer_r9700_dflash_verify_down_qual PRIVATE ninfer_r9700_core hip::host)
 
-add_executable(ninfer_r9700_a8q4_verify_projection_qual
-  ${PROJECT_SOURCE_DIR}/tools/r9700/a8q4_verify_projection_qual.hip)
-ninfer_r9700_internal_includes(ninfer_r9700_a8q4_verify_projection_qual)
-set_target_properties(ninfer_r9700_a8q4_verify_projection_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
-target_compile_definitions(ninfer_r9700_a8q4_verify_projection_qual PRIVATE
+add_executable(ninfer_r9700_a8q4_small_batch_projection_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/a8q4_small_batch_projection_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_a8q4_small_batch_projection_qual)
+set_target_properties(ninfer_r9700_a8q4_small_batch_projection_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
+target_compile_definitions(ninfer_r9700_a8q4_small_batch_projection_qual PRIVATE
   NINFER_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
-target_link_libraries(ninfer_r9700_a8q4_verify_projection_qual PRIVATE ninfer_r9700_core hip::host)
-target_compile_options(ninfer_r9700_a8q4_verify_projection_qual PRIVATE -Wno-unused-function)
+target_link_libraries(ninfer_r9700_a8q4_small_batch_projection_qual PRIVATE ninfer_r9700_core hip::host)
+target_compile_options(ninfer_r9700_a8q4_small_batch_projection_qual PRIVATE -Wno-unused-function)
 
 add_executable(ninfer_r9700_rmsnorm_rows56_qual
   ${PROJECT_SOURCE_DIR}/tools/r9700/rmsnorm_dflash_rows56_qual.hip)

@@ -1245,7 +1245,7 @@ void post_mixer_body(const Tensor& hidden, const Variant::PostMixerWeights& weig
             TextConfig::intermediate, TextConfig::intermediate) == 8U &&
         Variant::ExecutionState::fused_mlp_down_selected(
             ops::r9700::linear::kQ4ActivationBits,
-            weights.gate_up.qtype, weights.down.qtype,
+            weights.down.qtype,
             static_cast<std::uint32_t>(hidden.ne[1]), text_layer);
     if (fused_down) {
         Tensor gate_up = workspace.alloc(DType::BF16, {2 * TextConfig::intermediate,

@@ -60,6 +60,35 @@ expected value exactly.
 Copy bus rate counts both the read and write traffic. This is the hardware bandwidth bound, not a
 model or individual-Op throughput claim.
 
+## Compact prefill and concurrent ordinary decode optimization (2026-09-23)
+
+Same selected cap26 Q4-head/gate-up-A4 weights and precision as the delivery below.
+The existing SiLU→BF16-round→A8-prepare→Q4-down fusion now admits BF16 gate/up output
+independently of its producer format, retaining exact T2048/down-A8 guards.
+All six mixed-profile NLL sidecars remain byte-exact. C1 codeP4096/G128 ordinary
+prefill1494.30→1519.18tok/s; K5 prefill1450.71→1472.19tok/s. Ordinary decode
+stays30.15tok/s; this is a materialization/launch saving, not lower precision.
+
+Ordinary T2–4 Q4 MLP gate/up and down use successor loading through the semantic
+Linear owner. Independent FP64/public-input, exact codec, graph/poison/guard and
+exact generic-output checks pass; native IU4 WMMA,59–61VGPR, no LDS/private scratch.
+Cold complete-Op A/B improves gate/up10–14% and down39–43%. Whole medians,
+auto/G16/dense/chunk2048, warm1/reps3:
+
+| C | Ordinary before, aggregate tok/s | Ordinary after, aggregate tok/s | After per request | K5 after, aggregate tok/s |
+|---|---:|---:|---:|---:|
+| 1 | 30.15 | 30.15 | 30.15 | 96.28 |
+| 2 | 38.15 | 47.41 | 23.70 | 101.56 |
+| 3 | 53.90 | 67.19 | 22.40 | 120.11 |
+| 4 | 65.79 | 81.50 | 20.37 | 125.35 |
+
+All18 C2–4 candidate repetitions exactly match prior same-C greedy tokens; K5
+matches ordinary at each C. Lanes use corpus offsets, not identical prompts.
+K5 larger widths remain unchanged at this checkpoint; their pipeline extension is
+still an experiment. Candidate safety limits are nonbinding with no CPU throttling.
+Evidence: `profiles/rocprof/r9700-compact-mixed-speed-20260923/`. Its
+`baseline-corrected.json` supersedes the explicitly marked first helper summaries.
+
 ## Selected compact mixed-profile delivery (2026-09-23)
 
 The user selected the compact cap26 Q4 embedding/head model with gate/up-only A4 large

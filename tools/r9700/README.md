@@ -60,10 +60,10 @@ Use fresh output paths and serialize physical runs. Existing completed reports u
 need not be repeated unless the affected implementation changes.
 
 ```bash
-cmake --build build-r9700 -j3 --target ninfer_r9700_linear_op_qual ninfer_r9700_w8_tiled_head_qual ninfer_r9700_a8q4_verify_projection_qual
+cmake --build build-r9700 -j3 --target ninfer_r9700_linear_op_qual ninfer_r9700_w8_tiled_head_qual ninfer_r9700_a8q4_small_batch_projection_qual
 build-r9700/src/ninfer_r9700_linear_op_qual --selective-protected-bf16
 build-r9700/src/ninfer_r9700_w8_tiled_head_qual FRESH_DIRECTORY
-build-r9700/src/ninfer_r9700_a8q4_verify_projection_qual --out-json FRESH.json
+build-r9700/src/ninfer_r9700_a8q4_small_batch_projection_qual --out-json FRESH.json
 ```
 
 Protected BF16 projections now retain ordinary arithmetic at T1–24; the owning Linear qualifier
@@ -72,8 +72,9 @@ and exact eager/graph outputs. The superseded T5/T6 staging route and its compar
 qualifier are removed; historical evidence remains under `profiles/bench/r9700-bf16-staging-20260922/`.
 Tiled W8 covers ordinary T1–3, A8 small/tail/prefill extents and A16 controls for the
 single losslessly tiled resident head; `--ordinary-only` restricts it to the coalesced T1–3
-consumer. The selected public Q4 qualifier covers N34816/K5120 gate/up, N5120/K6144,
-N12288/K5120 and N4096/K5120 at T5/T6. N12288 retains scale-gather; the other three
+consumer. The selected public Q4 qualifier covers ordinary T2–4 N34816/K5120 gate/up
+and N5120/K17408 down, plus N34816/K5120, N5120/K6144, N12288/K5120 and N4096/K5120
+at T5/T6. N12288 retains scale-gather; the other
 shapes use the admitted successor pipeline. It checks the original represented-BF16
 FP64 formula, full-output represented-A8 FP64 formula, exact activation codec,
 public eager/graph parity, poison recovery and guards. It contains no temporary
@@ -121,7 +122,7 @@ ISA checker have been removed. Their evidence remains under the gate-up-pipeline
 projection-pipeline and verify-pipeline-family packages in `profiles/bench/`.
 For new linked ISA inspection use the safe extractor
 `tools/bench/extract_embedded_code_object.py`: the selected projection module owns
-`verify_projection_kernel<N,K,T>` and down owns `dflash_down_pipeline_kernel<T>`.
+`small_batch_projection_kernel<N,K,T>` and down owns `dflash_down_pipeline_kernel<T>`.
 Do not apply the retired four-IU4-site scale-gather checker to primed/drained pipelines.
 
 ## Standalone suite
@@ -1349,10 +1350,14 @@ required `5 ms`. The immutable report is
 qualification command or checker; production retains the separate normalization, A8 preparation,
 and Q4 output matrix.
 
-The production Text-MLP fusion is selected only for row-scaled-E4M3 gate/up plus Q4G64 down at
-T=2,048 in a main Text layer. It preserves the explicit BF16 rounding boundary between FP32
+The production Text-MLP fusion consumes BF16 gate/up output with Q4G64 down and A8 down
+activations at T=2,048 in a main Text layer, independently of the gate/up producer format.
+It preserves the explicit BF16 rounding boundary between FP32
 SiLU-multiply and the existing signed-A8G64 codec, then invokes the unchanged production M64N128
-Q4 matrix. All other profiles and widths use the ordinary split boundary. The one-shot timing
+Q4 matrix. Other down formats, activation widths and token widths use the ordinary split boundary.
+Compact gate/up-A4 admission retains all six NLL sidecars exactly and improves matched C1
+code4K ordinary prefill1494.30→1519.18tok/s; evidence is in
+`profiles/rocprof/r9700-compact-mixed-speed-20260923/`. The one-shot timing
 executable was removed after direct and matched-whole admission; its immutable report remains at
 `profiles/bench/r9700-fused-silu-a8q4-down-p2048-ab-20260904.json`. To inspect the actual
 production kernel, compile `src/ops/r9700/linear/r9700_linear.hip` for gfx1201 to assembly and run:

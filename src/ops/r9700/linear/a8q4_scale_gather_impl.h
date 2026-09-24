@@ -69,7 +69,7 @@ inline hipError_t validate_a8q4_scale_gather(
     const A8Q4G64CandidateArgs& a,hipStream_t stream) noexcept {
     constexpr unsigned G=K/64;
     const auto bytes=a8q4g64_activation_workspace_capacity_bytes(a.tokens,K);
-    if((a.tokens!=5 && a.tokens!=6) || a.rows!=N || a.columns!=K ||
+    if(a.tokens<2 || a.tokens>6 || a.rows!=N || a.columns!=K ||
        a.padded_columns!=K || a.weight_code_bytes!=static_cast<std::size_t>(N)*K/2 ||
        a.weight_scale_bytes!=static_cast<std::size_t>(N)*G*2 ||
        a.activation_workspace_bytes!=bytes || stream==nullptr)return hipErrorInvalidValue;

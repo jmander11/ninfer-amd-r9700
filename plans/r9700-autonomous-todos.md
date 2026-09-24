@@ -85,6 +85,25 @@ above apply to every command.
 
 ### Current checkpoint
 
+ACTIVE USER REQUEST (2026-09-23): profiler-guided prefill and decode optimization on the
+delivered cap26 Q4-head mixed gate/up-A4 model and Q4 DFlash companion. Preserve selected
+precision, quality and exact ordinary/speculative token semantics; do not reopen recipe search.
+- [ ] Profile measured C1–C4 ordinary/K5 runs; identify current phase owners and retain prior rejections. Qualify concurrent output correctness and report aggregate and per-request throughput separately.
+- [ ] Pursue bounded new mechanisms with a material whole-phase bound; qualify with independent oracles,
+  review, ISA/resources as needed, and unprofiled A/B before promoting any winner. Record exclusions.
+- [ ] Rebuild/verify affected delivered routes, document speed/quality evidence and final weight/activation policy.
+All heavyweight jobs serial; C<=4; build cap14 (normally4); memory safety limits; power auto.
+Other paused work remains paused. Stop this pass when credible bounded mechanisms are exhausted,
+not on an unproved assertion of a hardware ceiling.
+Checkpoint: compact T2048 SiLU/A8 fusion preserves six exact NLL sidecars and raises
+C1 prefill1494→1519tok/s. Ordinary T2–4 MLP successor pipeline passes independent
+oracles/ISA/direct A-B and18 whole repetitions; C2/3/4 aggregate decode38.15/53.90/65.79
+→47.41/67.19/81.50tok/s, exact baseline tokens. C1 and K5 decode unchanged.
+Next: bounded K5 T12/18/24 MLP pipeline with explicit16-row mapping; measure baseline,
+qualify, then whole A-B. Finish C3/C4 traces and final delivered-route checks. Evidence:
+`profiles/rocprof/r9700-compact-mixed-speed-20260923/`; baseline authority is
+`baseline-corrected.json`, not the superseded first helper summaries.
+
 COMPLETED USER REQUEST (2026-09-23): deliver the selected compact Q4-head model with
 gate/up-only A4 prefill and A8 decode. Reuse the installed base/companion bytes, not a new quantization.
 - [x] Select family1 in default and delivered builds; keep the qualified fast gate/up kernels.

@@ -1,21 +1,21 @@
 #define NINFER_A8Q4_QUAL_NO_MAIN
 #include "a8q4_shape_sweep_qual.hip"
 #include "ops/r9700/linear/dflash_verify_down.h"
-#include "ops/r9700/linear/a8q4_verify_projection.h"
+#include "ops/r9700/linear/a8q4_small_batch_projection.h"
 #include "ninfer/ops/linear.h"
 #include <cstring>
 #include <functional>
 
 namespace {
 constexpr unsigned Copies=3;
-#if defined(NINFER_QUAL_VERIFY_PROJECTIONS)
+#if defined(NINFER_QUAL_SMALL_BATCH_PROJECTIONS)
 unsigned N=0,K=0,G=0;
 #else
 constexpr unsigned N=5120,K=17408,G=K/64;
 #endif
 hipError_t owning_launch(const linear::A8Q4G64CandidateArgs& a,hipStream_t s) {
-#if defined(NINFER_QUAL_VERIFY_PROJECTIONS)
-    return linear::a8q4_verify_projection_candidate(a,s);
+#if defined(NINFER_QUAL_SMALL_BATCH_PROJECTIONS)
+    return linear::a8q4_small_batch_projection(a,s);
 #else
     return linear::a8q4g64_dflash_verify_down(a,s);
 #endif
@@ -79,7 +79,7 @@ void launch(const linear::A8Q4G64CandidateArgs& a,hipStream_t s) {
         weight.scales=const_cast<std::uint16_t*>(a.weight_scales);
         weight.qdata_bytes=a.weight_code_bytes;weight.scale_bytes=a.weight_scale_bytes;
 
-#if defined(NINFER_QUAL_VERIFY_PROJECTIONS)
+#if defined(NINFER_QUAL_SMALL_BATCH_PROJECTIONS)
     ninfer::ops::linear(input,weight,output,
 #else
     ninfer::ops::dflash_verify_down_linear(input,weight,output,
@@ -213,7 +213,7 @@ void cell(unsigned t,hipStream_t s,std::ostream& out) {
     const auto valid=arguments(t,input,*weights[0],candidate);unsigned malformed=0;
     auto reject=[&](auto a,hipStream_t stream){if(owning_launch(a,stream)!=hipErrorInvalidValue)fail("malformed accepted");++malformed;};
     reject(valid,nullptr);
-    auto bad=valid;bad.tokens=4;reject(bad,s);bad=valid;bad.tokens=7;reject(bad,s);
+    auto bad=valid;bad.tokens=1;reject(bad,s);bad=valid;bad.tokens=7;reject(bad,s);
     bad=valid;bad.rows=N-16;reject(bad,s);bad=valid;bad.columns-=64;reject(bad,s);
     bad=valid;bad.padded_columns-=64;reject(bad,s);
     bad=valid;--bad.weight_code_bytes;reject(bad,s);bad=valid;--bad.weight_scale_bytes;reject(bad,s);
@@ -283,6 +283,7 @@ void cell(unsigned t,hipStream_t s,std::ostream& out) {
     out<<"]}}";
 }
 }
+#ifndef NINFER_A8Q4_VERIFY_QUAL_NO_MAIN
 int main(int argc,char** argv) {
  try {
     if(argc!=3 || std::string_view(argv[1])!="--out-json")
@@ -294,19 +295,22 @@ int main(int argc,char** argv) {
        props.warpSize!=32 || (std::string_view(pci)!="0000:13:00.0" && std::string_view(pci)!="13:00.0"))fail("wrong device");
     hipStream_t stream{};HIP_CHECK(hipStreamCreateWithFlags(&stream,hipStreamNonBlocking));
     std::ostringstream out;out<<std::setprecision(17)<<"{\"schema\":\""
-#if defined(NINFER_QUAL_VERIFY_PROJECTIONS)
-        <<"ninfer.r9700.a8q4-verify-projections.v1"
+#if defined(NINFER_QUAL_SMALL_BATCH_PROJECTIONS)
+        <<"ninfer.r9700.a8q4-small-batch-projections.v1"
 #else
         <<"ninfer.r9700.dflash-verify-down.v1"
 #endif
         <<"\",\"status\":\"qualified\",\"public_dispatch_tested\":true,"
           "\"pci\":\"0000:13:00.0\",\"power\":\"auto\",\"copies\":3,\"cells\":[";
-#if defined(NINFER_QUAL_VERIFY_PROJECTIONS)
-    constexpr std::array<std::array<unsigned,2>,4> shapes{{{34816,5120},{5120,6144},{12288,5120},{4096,5120}}};
+#if defined(NINFER_QUAL_SMALL_BATCH_PROJECTIONS)
+    constexpr std::array<std::array<unsigned,2>,5> shapes{{{34816,5120},{5120,6144},{12288,5120},{4096,5120},{5120,17408}}};
     bool first=true;
     for(const auto& shape:shapes) {
         N=shape[0];K=shape[1];G=K/64;
-        for(unsigned t:{5U,6U}) {if(!first)out<<',';first=false;cell(t,stream,out);}
+        for(unsigned t:{2U,3U,4U,5U,6U}) {
+            if(!linear::detail::use_a8q4_small_batch_projection(t,N,K,K))continue;
+            if(!first)out<<',';first=false;cell(t,stream,out);
+        }
     }
 #else
     cell(5,stream,out);out<<',';cell(6,stream,out);
@@ -320,3 +324,4 @@ int main(int argc,char** argv) {
     std::cout<<"selected public Q4 routes qualified\n";return 0;
  }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
 }
+#endif

@@ -554,10 +554,10 @@ a8q4-dflash-small-t-screen: a8q4-dflash-small-t-build a8q4-dflash-small-t-static
 		--c1-summary "$(DFLASH_SMALL_T_C1_SUMMARY)" \
 		--output-dir "$(DFLASH_SMALL_T_OUTPUT_DIR)"
 
-$(A4Q4_PREFILL_TARGET): a4q4_prefill_qual.hip $(A8Q4_SHAPE_SWEEP_SOURCE) $(LINEAR_IMPL) $(LINEAR_HEADER) ../../src/ops/r9700/linear/a8q4_verify_projection.hip Makefile
+$(A4Q4_PREFILL_TARGET): a4q4_prefill_qual.hip $(A8Q4_SHAPE_SWEEP_SOURCE) $(LINEAR_IMPL) $(LINEAR_HEADER) ../../src/ops/r9700/linear/a8q4_small_batch_projection.hip Makefile
 	mkdir -p $(BUILD_DIR)
 	$(HIPCC) $(CXXFLAGS) -Wno-unused-function -DNINFER_SOURCE_DIR='"$(CURDIR)/../.."' \
-		a4q4_prefill_qual.hip $(LINEAR_IMPL) ../../src/ops/r9700/linear/a8q4_verify_projection.hip $(LDFLAGS) -o $@
+		a4q4_prefill_qual.hip $(LINEAR_IMPL) ../../src/ops/r9700/linear/a8q4_small_batch_projection.hip $(LDFLAGS) -o $@
 
 .PHONY: a4q4-prefill-regression a4q4-prefill-benchmark
 a4q4-prefill-regression: $(A4Q4_PREFILL_TARGET)

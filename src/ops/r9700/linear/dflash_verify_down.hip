@@ -14,6 +14,7 @@ __global__ __launch_bounds__(32) void dflash_down_pipeline_kernel(
 }
 
 hipError_t a8q4g64_dflash_verify_down(const A8Q4G64CandidateArgs& a,hipStream_t stream) noexcept {
+    if(a.tokens!=5 && a.tokens!=6)return hipErrorInvalidValue;
     const auto validated=detail::validate_a8q4_scale_gather<N,K>(a,stream);
     if(validated!=hipSuccess)return validated;
     A8G64ActivationWorkspace scratch{};

@@ -82,17 +82,17 @@ int main() {
         static_assert(Variant::runtime_allocation_overhead_bound(
             detail::WeightsProfile::R9700Q4W8Evaluation) == 0U);
         static_assert(Variant::ExecutionState::fused_mlp_down_selected(
-            8U, ninfer::QType::F8E4M3_ROW_F32S, ninfer::QType::Q4G64_F16S, 2048U, 63));
+            8U, ninfer::QType::Q4G64_F16S, 2048U, 63));
         static_assert(!Variant::ExecutionState::fused_mlp_down_selected(
-            4U, ninfer::QType::F8E4M3_ROW_F32S, ninfer::QType::Q4G64_F16S, 2048U, 63));
+            4U, ninfer::QType::Q4G64_F16S, 2048U, 63));
         static_assert(!Variant::ExecutionState::fused_mlp_down_selected(
-            8U, ninfer::QType::F8E4M3_ROW_F32S, ninfer::QType::Q4G64_F16S, 2047U, 63));
+            8U, ninfer::QType::Q4G64_F16S, 2047U, 63));
         static_assert(!Variant::ExecutionState::fused_mlp_down_selected(
-            8U, ninfer::QType::Q4G64_F16S, ninfer::QType::Q4G64_F16S, 2048U, 63));
+            8U, ninfer::QType::F8E4M3_ROW_F32S, 2048U, 63));
         static_assert(!Variant::ExecutionState::fused_mlp_down_selected(
-            8U, ninfer::QType::F8E4M3_ROW_F32S, ninfer::QType::Q4G64_F16S, 2048U, -1));
+            8U, ninfer::QType::Q4G64_F16S, 2048U, -1));
         static_assert(!Variant::ExecutionState::fused_mlp_down_selected(
-            8U, ninfer::QType::F8E4M3_ROW_F32S, ninfer::QType::Q4G64_F16S, 2048U,
+            8U, ninfer::QType::Q4G64_F16S, 2048U,
             detail::TextConfig::layers));
         require(Variant::ExecutionState::eager_widths(2048, 4, 4, 0) ==
                     std::vector<std::uint32_t>({1, 2, 3, 4, 8, 12, 16, 2048}),

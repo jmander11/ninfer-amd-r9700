@@ -140,10 +140,11 @@ struct Variant {
                    weight1 == QType::Q4G64_F16S;
         }
         [[nodiscard]] static constexpr bool fused_mlp_down_selected(
-            std::uint32_t activation_bits, QType gate_up, QType down, std::uint32_t tokens,
+            std::uint32_t activation_bits, QType down, std::uint32_t tokens,
             std::int32_t text_layer) noexcept {
-            return activation_bits == 8U && gate_up == QType::F8E4M3_ROW_F32S &&
-                   down == QType::Q4G64_F16S &&
+            // The fused Op consumes represented BF16 gate/up values, independently
+            // of the producer's weight or activation precision.
+            return activation_bits == 8U && down == QType::Q4G64_F16S &&
                    tokens == 2048U && text_layer >= 0 && text_layer < TextConfig::layers;
         }
         [[nodiscard]] std::size_t selected_count() const noexcept;

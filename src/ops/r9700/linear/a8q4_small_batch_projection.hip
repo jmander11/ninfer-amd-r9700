@@ -1,10 +1,10 @@
-#include "a8q4_verify_projection.h"
+#include "a8q4_small_batch_projection.h"
 #include "a8q4_pipeline_impl.h"
 
 namespace ninfer::ops::r9700::linear {
 namespace {
 template <unsigned N, unsigned K, unsigned T>
-__global__ __launch_bounds__(32) void verify_projection_kernel(
+__global__ __launch_bounds__(32) void small_batch_projection_kernel(
     const std::uint8_t* low, const std::uint8_t* high, const std::uint16_t* scales,
     const std::uint32_t* status, const std::uint8_t* codes,
     const std::uint16_t* weight_scales, hip_bfloat16* output) {
@@ -15,12 +15,24 @@ __global__ __launch_bounds__(32) void verify_projection_kernel(
 }
 template <unsigned N, unsigned K>
 hipError_t launch_prepared(const A8Q4G64LinearArgs& a, hipStream_t stream) {
-    if (a.tokens == 5) {
-        hipLaunchKernelGGL((verify_projection_kernel<N,K,5>),dim3(N/16),dim3(32),0,stream,
+    if (a.tokens == 2) {
+        hipLaunchKernelGGL((small_batch_projection_kernel<N,K,2>),dim3(N/16),dim3(32),0,stream,
+            a.activation_low_codes,a.activation_high_codes,a.activation_scales,a.activation_status,
+            a.weight_codes,a.weight_scales,a.output);
+    } else if (a.tokens == 3) {
+        hipLaunchKernelGGL((small_batch_projection_kernel<N,K,3>),dim3(N/16),dim3(32),0,stream,
+            a.activation_low_codes,a.activation_high_codes,a.activation_scales,a.activation_status,
+            a.weight_codes,a.weight_scales,a.output);
+    } else if (a.tokens == 4) {
+        hipLaunchKernelGGL((small_batch_projection_kernel<N,K,4>),dim3(N/16),dim3(32),0,stream,
+            a.activation_low_codes,a.activation_high_codes,a.activation_scales,a.activation_status,
+            a.weight_codes,a.weight_scales,a.output);
+    } else if (a.tokens == 5) {
+        hipLaunchKernelGGL((small_batch_projection_kernel<N,K,5>),dim3(N/16),dim3(32),0,stream,
             a.activation_low_codes,a.activation_high_codes,a.activation_scales,a.activation_status,
             a.weight_codes,a.weight_scales,a.output);
     } else {
-        hipLaunchKernelGGL((verify_projection_kernel<N,K,6>),dim3(N/16),dim3(32),0,stream,
+        hipLaunchKernelGGL((small_batch_projection_kernel<N,K,6>),dim3(N/16),dim3(32),0,stream,
             a.activation_low_codes,a.activation_high_codes,a.activation_scales,a.activation_status,
             a.weight_codes,a.weight_scales,a.output);
     }
@@ -42,16 +54,20 @@ hipError_t launch(const A8Q4G64CandidateArgs& a, hipStream_t stream) {
          a.weight_scales,a.weight_scale_bytes,a.output,a.tokens,a.rows,a.columns,a.padded_columns},stream);
 }
 }
-hipError_t detail::launch_a8q4_verify_projection(
+hipError_t detail::launch_a8q4_small_batch_projection(
     const A8Q4G64LinearArgs& a, hipStream_t stream) noexcept {
     if (a.rows == 34816) return launch_prepared<34816,5120>(a,stream);
+    if (a.rows == 5120 && a.columns == 17408) return launch_prepared<5120,17408>(a,stream);
     if (a.rows == 5120) return launch_prepared<5120,6144>(a,stream);
     if (a.rows == 12288) return launch_prepared<12288,5120>(a,stream);
     return launch_prepared<4096,5120>(a,stream);
 }
-hipError_t a8q4_verify_projection_candidate(
+hipError_t a8q4_small_batch_projection(
     const A8Q4G64CandidateArgs& a, hipStream_t stream) noexcept {
+    if (!detail::use_a8q4_small_batch_projection(a.tokens,a.rows,a.columns,a.padded_columns))
+        return hipErrorInvalidValue;
     if (a.rows == 34816 && a.columns == 5120) return launch<34816,5120>(a,stream);
+    if (a.rows == 5120 && a.columns == 17408) return launch<5120,17408>(a,stream);
     if (a.rows == 5120 && a.columns == 6144) return launch<5120,6144>(a,stream);
     if (a.rows == 12288 && a.columns == 5120) return launch<12288,5120>(a,stream);
     if (a.rows == 4096 && a.columns == 5120) return launch<4096,5120>(a,stream);
