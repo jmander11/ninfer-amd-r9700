@@ -697,7 +697,7 @@ python3 tools/bench/run_ninfer_bench_matrix.py --preset concurrency \
   --concurrency 1 --concurrency 2 --concurrency 3 --concurrency 4
 ```
 
-The `prefill-chunk` preset writes schema-v21 raw reports and a schema-v14 manifest, binding prompt,
+The `prefill-chunk` preset writes schema-v23 raw reports and a schema-v14 manifest, binding prompt,
 chunk, artifact, executable, corpus, cache group, and attention profile. The selection owner first
 normalizes each chunk's 8K throughput to that candidate's best result and advances the two chunks
 with the greatest minimum ratio across all twelve candidates. Every candidate measures those same
@@ -1232,13 +1232,18 @@ gdn-recurrence-resources` for GDN, or `make -C tools/r9700 sampling-isa rope-res
 named sampling/RoPE boundary. Do not run this list speculatively or use unavailable VALU/LDS/cache
 counters.
 
-Current raw reports are `ninfer_bench_report` schema v21 with exact
+Current raw reports are `ninfer_bench_report` schema v23 with exact
 `phase_timing_semantics=serial-lane-service-sum_shared-decode-max_v1`: serial lane service is
 summed for prefill; shared decode uses its maximum. The reader also interprets retained schema-v20
 reports explicitly as legacy lane-max timing, never as corrected v21. Legacy C1 prefill and
 capacity evidence remain replayable; C>1 legacy prefill throughput is marked ineligible/null in
 derived rows and cannot enter terminal selection's 24 phase/whole objectives. Retained legacy
-decode/whole-wall results remain readable for diagnostics. Missing/wrong v21 markers fail closed.
+decode/whole-wall results remain readable for diagnostics. Missing/wrong phase markers fail closed.
+Schema v23 includes `speculative.rounds_per_draft` in each repetition and test aggregate:
+index K counts request-lane speculative rounds executed at that K, summed across lanes and
+repetitions, not GPU graph launches. Fallback steps are separate. The matrix summary preserves
+the histogram as `spec_rounds_per_draft`; retained reports without it have no histogram evidence.
+This exposes adaptive K selection without changing policy or phase-timing semantics.
 The config records concurrency, the
 compiled G16/G32 KV value group, exact K/V/V-scale plane layouts, compile-selected Q4 and W8
 activation profiles, and the exact

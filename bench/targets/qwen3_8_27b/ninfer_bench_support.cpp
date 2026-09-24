@@ -176,6 +176,12 @@ SpeculativeStats aggregate_speculative(const TestResult& result) {
         for (std::size_t i = 0; i < in.accepted_per_position.size(); ++i) {
             out.accepted_per_position[i] += in.accepted_per_position[i];
         }
+        if (out.rounds_per_draft.size() < in.rounds_per_draft.size()) {
+            out.rounds_per_draft.resize(in.rounds_per_draft.size());
+        }
+        for (std::size_t i = 0; i < in.rounds_per_draft.size(); ++i) {
+            out.rounds_per_draft[i] += in.rounds_per_draft[i];
+        }
     }
     return out;
 }
@@ -224,6 +230,11 @@ void append_speculative_json(std::ostringstream& out, const SpeculativeStats& st
     for (std::size_t i = 0; i < stats.accepted_per_position.size(); ++i) {
         if (i != 0) { out << ", "; }
         out << stats.accepted_per_position[i];
+    }
+    out << "],\n" << indent << "  \"rounds_per_draft\": [";
+    for (std::size_t i = 0; i < stats.rounds_per_draft.size(); ++i) {
+        if (i != 0) { out << ", "; }
+        out << stats.rounds_per_draft[i];
     }
     out << "]\n" << indent << '}';
 }
@@ -672,6 +683,12 @@ RepTiming fold_lane_results(const std::vector<GenerationResult>& generated,
         }
         for (std::size_t j = 0; j < in.accepted_per_position.size(); ++j) {
             timing.speculative.accepted_per_position[j] += in.accepted_per_position[j];
+        }
+        if (timing.speculative.rounds_per_draft.size() < in.rounds_per_draft.size()) {
+            timing.speculative.rounds_per_draft.resize(in.rounds_per_draft.size());
+        }
+        for (std::size_t j = 0; j < in.rounds_per_draft.size(); ++j) {
+            timing.speculative.rounds_per_draft[j] += in.rounds_per_draft[j];
         }
     }
     return timing;

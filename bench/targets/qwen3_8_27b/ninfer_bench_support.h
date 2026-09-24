@@ -15,7 +15,7 @@
 
 namespace ninfer::bench {
 
-inline constexpr int kSchemaVersion                   = 22;
+inline constexpr int kSchemaVersion                   = 23;
 inline constexpr std::string_view kPhaseTimingSemantics =
     "serial-lane-service-sum_shared-decode-max_v1";
 inline constexpr std::string_view kArtifactType       = "ninfer_bench_report";

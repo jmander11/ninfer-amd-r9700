@@ -22,7 +22,7 @@ class BenchMatrixTest(unittest.TestCase):
         legacy = {"schema_version": 20, "config": {"concurrency": 2}}
         self.assertFalse(prefill_timing_eligible(legacy))
         self.assertTrue(prefill_timing_eligible(legacy, 1))
-        for version in (21, 22):
+        for version in (21, 22, 23):
             current = {**legacy, "schema_version": version,
                        "phase_timing_semantics": PHASE_TIMING_SEMANTICS}
             self.assertTrue(prefill_timing_eligible(current))
@@ -128,6 +128,7 @@ class BenchMatrixTest(unittest.TestCase):
                                 "accepted_tokens": 5,
                                 "fallback_steps": 3,
                                 "accepted_per_position": [1, 1, 1, 1, 1],
+                                "rounds_per_draft": [0, 0, 0, 0, 0, 1],
                             },
                             "reps": [{}, {}],
                         }
@@ -193,6 +194,7 @@ class BenchMatrixTest(unittest.TestCase):
         assert row["prefill_active_tok_s_mean"] is None
         assert row["spec_fallback_steps"] == 3
         assert row["spec_accepted_per_position"] == "[1,1,1,1,1]"
+        assert row["spec_rounds_per_draft"] == "[0,0,0,0,0,1]"
         assert (
             row["architecture_name"],
             row["hip_runtime_version"],

@@ -416,7 +416,8 @@ ninfer::SpeculativeStats speculative(std::uint64_t rounds, std::uint64_t drafted
             .drafted_tokens        = drafted,
             .accepted_tokens       = accepted,
             .fallback_steps        = fallback,
-            .accepted_per_position = std::move(per_position)};
+            .accepted_per_position = std::move(per_position),
+            .rounds_per_draft      = {0, 0, 0, 0, 0, rounds}};
 }
 
 std::vector<qb::TestResult> sample_results() {
@@ -496,6 +497,8 @@ int test_lane_service_fold() {
     second.generated_token_ids = {21, 22, 23};
     first.speculative = speculative(2, 4, 3, 1, {2, 1});
     second.speculative = speculative(3, 6, 4, 2, {3, 1, 0});
+    first.speculative.rounds_per_draft = {0, 0, 0, 1, 1};
+    second.speculative.rounds_per_draft = {0, 0, 0, 0, 1, 2};
     auto folded = qb::fold_lane_results({first, second}, 3);
     failures += expect_near(folded.timings.prepare_seconds, 0.5, "lane preparation service sum");
     failures += expect_near(folded.timings.vision_seconds, 1.0, "lane vision service sum");
@@ -510,6 +513,9 @@ int test_lane_service_fold() {
                            folded.speculative.accepted_tokens == 7 && folded.speculative.fallback_steps == 3 &&
                            folded.speculative.accepted_per_position == std::vector<std::uint64_t>{5, 2, 0},
                        "speculative fold unchanged");
+    failures += expect(folded.speculative.rounds_per_draft ==
+                           std::vector<std::uint64_t>{0, 0, 0, 1, 2, 2},
+                       "lane fold retains adaptive draft histogram with unequal extents");
     auto single = qb::fold_lane_results({first}, 3);
     failures += expect_near(single.timings.prefill_seconds, 2.0, "C1 prefill unchanged");
 
@@ -548,7 +554,7 @@ int test_report_contract() {
         return fail(std::string("invalid benchmark JSON: ") + error.what());
     }
 
-    failures += expect(report.at("schema_version") == 22, "report schema v22");
+    failures += expect(report.at("schema_version") == 23, "report schema v23");
     failures += expect(report.at("phase_timing_semantics") ==
                            "serial-lane-service-sum_shared-decode-max_v1",
                        "report explicitly versions phase aggregation semantics");
@@ -689,6 +695,21 @@ int test_report_contract() {
                             "speculative acceptance");
     failures += expect(tg.at("speculative").at("accepted_per_position").size() == 5,
                        "per-position acceptance");
+    failures += expect(tg.at("speculative").at("rounds_per_draft") ==
+                           Json::array({0, 0, 0, 0, 0, 1}),
+                       "report retains draft histogram and excludes fallback steps");
+    failures += expect(tg.at("reps").at(0).at("speculative").at("rounds_per_draft") ==
+                           Json::array({0, 0, 0, 0, 0, 1}),
+                       "per-repetition draft histogram retained");
+    auto adaptive_results = results;
+    auto& adaptive_reps = adaptive_results[1].reps;
+    adaptive_reps[1] = adaptive_reps[0];
+    adaptive_reps[1].speculative = speculative(1, 4, 4, 0, {1, 1, 1, 1});
+    adaptive_reps[1].speculative.rounds_per_draft = {0, 0, 0, 0, 1};
+    const auto adaptive_report = Json::parse(qb::format_json(env, "adaptive test", adaptive_results));
+    failures += expect(adaptive_report.at("tests").at(1).at("speculative").at("rounds_per_draft") ==
+                           Json::array({0, 0, 0, 0, 1, 1}),
+                       "report sums different K histograms across repetitions");
     failures +=
         expect(tg.at("reps").at(0).at("generated_output_tokens") == 4, "rep generated tokens");
     failures += expect(tg.at("reps").at(0).at("generated_token_ids_by_lane") ==

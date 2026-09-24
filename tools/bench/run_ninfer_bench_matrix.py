@@ -77,7 +77,7 @@ CONTEXT_CORE = ((512, 512), (2048, 512), (8192, 512))
 CONTEXT_FULL_EXTRA = ((32768, 256), (65536, 128))
 PRIMARY_KS = (0, 3, 5)
 SWEEP_KS = (0, 1, 2, 3, 4, 5)
-REPORT_SCHEMA_VERSION = 22
+REPORT_SCHEMA_VERSION = 23
 PHASE_TIMING_SEMANTICS = "serial-lane-service-sum_shared-decode-max_v1"
 LEGACY_PHASE_TIMING_SEMANTICS = "legacy-lane-max_v20"
 REPORT_ARTIFACT_TYPE = "ninfer_bench_report"
@@ -1795,7 +1795,7 @@ def validate_report_phase_timing(report: dict[str, Any]) -> str:
     version = report.get("schema_version")
     if type(version) is not int:
         raise ValueError("benchmark report lacks an integer timing schema")
-    if version in (21, 22) and report.get("phase_timing_semantics") == PHASE_TIMING_SEMANTICS:
+    if version in (21, 22, 23) and report.get("phase_timing_semantics") == PHASE_TIMING_SEMANTICS:
         return PHASE_TIMING_SEMANTICS
     if version == 20 and "phase_timing_semantics" not in report:
         return LEGACY_PHASE_TIMING_SEMANTICS
@@ -2186,6 +2186,9 @@ def report_rows(
             "spec_fallback_steps": speculative.get("fallback_steps"),
             "spec_accepted_per_position": json.dumps(
                 speculative.get("accepted_per_position", []), separators=(",", ":")
+            ),
+            "spec_rounds_per_draft": json.dumps(
+                speculative.get("rounds_per_draft", []), separators=(",", ":")
             ),
             "gpu_name": environment.get("gpu_name"),
             "architecture_name": environment.get("architecture_name"),
