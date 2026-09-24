@@ -60,7 +60,7 @@ expected value exactly.
 Copy bus rate counts both the read and write traffic. This is the hardware bandwidth bound, not a
 model or individual-Op throughput claim.
 
-## Compact prefill and concurrent ordinary decode optimization (2026-09-23)
+## Compact prefill and concurrent decode optimization (2026-09-23)
 
 Same selected cap26 Q4-head/gate-up-A4 weights and precision as the delivery below.
 The existing SiLU→BF16-round→A8-prepare→Q4-down fusion now admits BF16 gate/up output
@@ -69,25 +69,45 @@ All six mixed-profile NLL sidecars remain byte-exact. C1 codeP4096/G128 ordinary
 prefill1494.30→1519.18tok/s; K5 prefill1450.71→1472.19tok/s. Ordinary decode
 stays30.15tok/s; this is a materialization/launch saving, not lower precision.
 
-Ordinary T2–4 Q4 MLP gate/up and down use successor loading through the semantic
+Ordinary T2–4 Q4 MLP gate/up, down and N5120/K6144 output use successor loading through the semantic
 Linear owner. Independent FP64/public-input, exact codec, graph/poison/guard and
 exact generic-output checks pass; native IU4 WMMA,59–61VGPR, no LDS/private scratch.
-Cold complete-Op A/B improves gate/up10–14% and down39–43%. Whole medians,
+Cold complete-Op A/B improves gate/up10–14%, down39–43%, output22–29%.
+Concurrent K5 T12/18/24 MLP uses a16-row tiled pipeline: gate/up7–18% and
+down41–50% lower complete-Op latency. Full public BF16-input FP64 checks pass
+for all14 selected MLP cells, two dedicated down cells and five output cells;
+exact generic/eager/graph outputs and codec/poison/guards pass. Tiled kernels
+use70VGPR,22SGPR, native IU4, no LDS/private scratch; retained small-width
+instruction streams are identical. Whole medians,
 auto/G16/dense/chunk2048, warm1/reps3:
 
-| C | Ordinary before, aggregate tok/s | Ordinary after, aggregate tok/s | After per request | K5 after, aggregate tok/s |
-|---|---:|---:|---:|---:|
-| 1 | 30.15 | 30.15 | 30.15 | 96.28 |
-| 2 | 38.15 | 47.41 | 23.70 | 101.56 |
-| 3 | 53.90 | 67.19 | 22.40 | 120.11 |
-| 4 | 65.79 | 81.50 | 20.37 | 125.35 |
+| C | Ordinary before, aggregate tok/s | Ordinary after, aggregate tok/s | Ordinary per request | K5 after, aggregate tok/s | K5 per request |
+|---|---:|---:|---:|---:|---:|
+| 1 | 30.15 | 30.15 | 30.15 | 96.28 | 96.28 |
+| 2 | 38.15 | 49.98 | 24.99 | 119.66 | 59.83 |
+| 3 | 53.90 | 71.04 | 23.68 | 133.66 | 44.55 |
+| 4 | 65.79 | 86.03 | 21.51 | 140.39 | 35.10 |
 
-All18 C2–4 candidate repetitions exactly match prior same-C greedy tokens; K5
+All18 final C2–4 repetitions exactly match prior same-C greedy tokens; K5
 matches ordinary at each C. Lanes use corpus offsets, not identical prompts.
-K5 larger widths remain unchanged at this checkpoint; their pipeline extension is
-still an experiment. Candidate safety limits are nonbinding with no CPU throttling.
+Per-request rates are aggregate throughput divided by C, not individual request latency.
+The tiled K5 step improves prior101.56/120.11/125.35 aggregate tok/s by17.8/11.3/12.0%.
+C1 rates reuse the unchanged fusion checkpoint; later changes select only C>1
+extents and preserve C1 instructions. Final C2–4 ordinary prefill1506–1520tok/s,
+K5 prefill1467–1470tok/s; no new prefill arithmetic or precision change.
+Candidate safety limits are nonbinding with no CPU throttling. CLI/server/PPL/bench
+are rebuilt. This bounded pass does not establish a physical throughput ceiling.
 Evidence: `profiles/rocprof/r9700-compact-mixed-speed-20260923/`. Its
+`final-verified-summary.json` retains rates and exact prior-token checks;
 `baseline-corrected.json` supersedes the explicitly marked first helper summaries.
+
+Numerical limitation found during the subsequent larger-batch experiment:
+the full-output public BF16-input oracle (rather than the prior sampled-row norm)
+rejects the unchanged generic N4096/K5120/T6 control at 2.0341% relative RMS
+against the 2% criterion. This is not a measured model-quality regression, but
+the complete small-batch qualification is failed; do not infer universal A8
+accuracy from the passing model sidecars or narrower MLP checks. The failing
+test and receipt are retained; its criterion has not been relaxed.
 
 ## Selected compact mixed-profile delivery (2026-09-23)
 

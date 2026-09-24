@@ -5,8 +5,10 @@
 
 int main(int argc,char** argv) {
  try {
-    if(argc!=2 && !(argc==3 && std::string_view(argv[2])=="--verify-batches"))
-        fail("usage: mlp_screen FRESH.json [--verify-batches]");
+    const bool verify_batches=argc==3 && std::string_view(argv[2])=="--verify-batches";
+    const bool output_projection=argc==3 && std::string_view(argv[2])=="--output-projections";
+    if(argc!=2 && !verify_batches && !output_projection)
+        fail("usage: mlp_screen FRESH.json [--verify-batches|--output-projections]");
     const std::filesystem::path path=argv[1];require_fresh_output(path);power();
     HIP_CHECK(hipSetDevice(0));
     hipDeviceProp_t props{};HIP_CHECK(hipGetDeviceProperties(&props,0));
@@ -17,10 +19,13 @@ int main(int argc,char** argv) {
     DeviceBuffer<std::uint8_t> scrub(80U<<20U);
     std::ostringstream out;out<<std::setprecision(17)<<"{\"cells\":[";
     bool first=true;
-    for(const auto shape:std::array<std::array<unsigned,2>,2>{{{34816,5120},{5120,17408}}}) {
+    const std::vector<std::array<unsigned,2>> shapes=output_projection?
+        std::vector<std::array<unsigned,2>>{{5120,6144}}:
+        std::vector<std::array<unsigned,2>>{{34816,5120},{5120,17408}};
+    for(const auto shape:shapes) {
       N=shape[0];K=shape[1];G=K/64;
       const auto w=make_decode_dot8_weights(N,K);const auto base=make_decode_dot8_input(K);
-      const std::array<unsigned,3> widths=argc==3?std::array<unsigned,3>{12,18,24}:
+      const std::array<unsigned,3> widths=verify_batches?std::array<unsigned,3>{12,18,24}:
                                                   std::array<unsigned,3>{2,3,4};
       for(unsigned t:widths) {
         std::vector<hip_bfloat16> x(t*K);

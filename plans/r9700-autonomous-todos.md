@@ -85,13 +85,13 @@ above apply to every command.
 
 ### Current checkpoint
 
-ACTIVE USER REQUEST (2026-09-23): profiler-guided prefill and decode optimization on the
+COMPLETED BOUNDED USER REQUEST (2026-09-23): profiler-guided prefill and decode optimization on the
 delivered cap26 Q4-head mixed gate/up-A4 model and Q4 DFlash companion. Preserve selected
 precision, quality and exact ordinary/speculative token semantics; do not reopen recipe search.
-- [ ] Profile measured C1–C4 ordinary/K5 runs; identify current phase owners and retain prior rejections. Qualify concurrent output correctness and report aggregate and per-request throughput separately.
-- [ ] Pursue bounded new mechanisms with a material whole-phase bound; qualify with independent oracles,
+- [x] Profile measured C1–C4 ordinary/K5 runs; identify current phase owners and retain prior rejections. Qualify concurrent output correctness and report aggregate and per-request throughput separately.
+- [x] Pursue bounded new mechanisms with a material whole-phase bound; qualify with independent oracles,
   review, ISA/resources as needed, and unprofiled A/B before promoting any winner. Record exclusions.
-- [ ] Rebuild/verify affected delivered routes, document speed/quality evidence and final weight/activation policy.
+- [x] Rebuild/verify affected delivered routes, document speed/quality evidence and final weight/activation policy.
 All heavyweight jobs serial; C<=4; build cap14 (normally4); memory safety limits; power auto.
 Other paused work remains paused. Stop this pass when credible bounded mechanisms are exhausted,
 not on an unproved assertion of a hardware ceiling.
@@ -99,10 +99,18 @@ Checkpoint: compact T2048 SiLU/A8 fusion preserves six exact NLL sidecars and ra
 C1 prefill1494→1519tok/s. Ordinary T2–4 MLP successor pipeline passes independent
 oracles/ISA/direct A-B and18 whole repetitions; C2/3/4 aggregate decode38.15/53.90/65.79
 →47.41/67.19/81.50tok/s, exact baseline tokens. C1 and K5 decode unchanged.
-Next: bounded K5 T12/18/24 MLP pipeline with explicit16-row mapping; measure baseline,
-qualify, then whole A-B. Finish C3/C4 traces and final delivered-route checks. Evidence:
+Closure: promote K5 T12/18/24 tiled MLP and ordinary N5120/K6144 T2–4 pipeline.
+Final C2/3/4 aggregate ordinary49.98/71.04/86.03 and K5 119.66/133.66/140.39tok/s;
+all18 repetitions exact prior same-C ordinary tokens. C1 remains30.15/96.28.
+MLP14cells, dedicated down2cells and output5cells pass full-output FP64 criteria;
+retained instructions exact. All delivered binaries rebuilt; focused host checks pass,
+limits nonbinding, independent final review SHIP. Installed model README and active
+performance/qualification docs updated; unchanged weight/activation recipe.
+Full-output oracle exposed inherited generic N4096/T6 2.0341%>2% failure, retained
+explicitly: no global A8 qualification or hardware-ceiling claim. Other paused work
+is not reopened by this bounded closure. Evidence:
 `profiles/rocprof/r9700-compact-mixed-speed-20260923/`; baseline authority is
-`baseline-corrected.json`, not the superseded first helper summaries.
+`baseline-corrected.json`, final authority `final-verified-summary.json`.
 
 COMPLETED USER REQUEST (2026-09-23): deliver the selected compact Q4-head model with
 gate/up-only A4 prefill and A8 decode. Reuse the installed base/companion bytes, not a new quantization.

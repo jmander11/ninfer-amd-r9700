@@ -18,12 +18,13 @@ __device__ __forceinline__ PipelineGroup load_pipeline_group(
     unsigned row,unsigned group) {
     constexpr unsigned G=K/64;
     const unsigned lane=threadIdx.x,axis=lane&15U,half_lane=lane>>4U;
+    const unsigned token_base=T>8?blockIdx.y*16U:0U;
     PipelineGroup value{};
 #pragma unroll
     for(unsigned half=0;half<2;++half) {
         const unsigned k=group*64+half*32+half_lane*16;
-        if(axis<T) {
-            const std::size_t offset=(static_cast<std::size_t>(axis)*K+k)/2;
+        if(token_base+axis<T) {
+            const std::size_t offset=(static_cast<std::size_t>(token_base+axis)*K+k)/2;
             value.low[half][0]=*reinterpret_cast<const int*>(low+offset);
             value.low[half][1]=*reinterpret_cast<const int*>(low+offset+4);
             value.high[half][0]=*reinterpret_cast<const int*>(high+offset);
@@ -36,13 +37,17 @@ __device__ __forceinline__ PipelineGroup load_pipeline_group(
         value.weight[half][1]=static_cast<int>(packed>>32);
     }
     value.weight_scale=weight_scales[(row/16)*G*16+group*16+row%16];
-    value.activation_scale=lane<T?scales[lane*G+group]:0;
+    if constexpr(T<=8)
+        value.activation_scale=lane<T?scales[lane*G+group]:0;
+    else
+        value.activation_scale=lane<16 && token_base+lane<T?
+            scales[(token_base+lane)*G+group]:0;
     return value;
 }
 
 template<unsigned T>
 __device__ __forceinline__ void consume_pipeline_group(
-    const PipelineGroup& value,float ws,float gathered,float (&total)[T]) {
+    const PipelineGroup& value,float ws,float gathered,float (&total)[T<=8?T:8]) {
     PipelineI8 low_dot{},high_dot{};
 #pragma unroll
     for(unsigned half=0;half<2;++half) {
@@ -52,8 +57,9 @@ __device__ __forceinline__ void consume_pipeline_group(
             true,value.high[half],true,value.weight[half],high_dot,false);
     }
 #pragma unroll
-    for(unsigned t=0;t<T;++t) {
-        const float as=__shfl(gathered,t,32);
+    for(unsigned t=0;t<(T<=8?T:8);++t) {
+        const unsigned source=T<=8?t:(threadIdx.x>>4U)*8U+t;
+        const float as=__shfl(gathered,source,32);
         const int combined=low_dot[t]+16*high_dot[t];
         total[t]=fmaf(static_cast<float>(combined),as*ws,total[t]);
     }
@@ -66,13 +72,20 @@ __device__ __forceinline__ void a8q4_pipeline_body(
     const std::uint16_t* weight_scales,hip_bfloat16* output) {
     constexpr unsigned G=K/64;
     const unsigned lane=threadIdx.x,row=blockIdx.x*16+(lane&15U);
+    const unsigned token_base=T>8?blockIdx.y*16U+(lane>>4U)*8U:0U;
     if(*status!=0) {
-        if(lane<16)for(unsigned t=0;t<T;++t) {
-            hip_bfloat16 poison;poison.data=0x7fc1;output[t*N+row]=poison;
+        if constexpr(T<=8) {
+            if(lane<16)for(unsigned t=0;t<T;++t) {
+                hip_bfloat16 poison;poison.data=0x7fc1;output[t*N+row]=poison;
+            }
+        } else {
+            for(unsigned t=0;t<8;++t)if(token_base+t<T) {
+                hip_bfloat16 poison;poison.data=0x7fc1;output[(token_base+t)*N+row]=poison;
+            }
         }
         return;
     }
-    float total[T]{};
+    float total[T<=8?T:8]{};
     PipelineGroup current=load_pipeline_group<K,T>(low,high,scales,codes,weight_scales,row,0);
 #pragma unroll 1
     for(unsigned group=0;group<G-1;++group) {
@@ -96,9 +109,15 @@ __device__ __forceinline__ void a8q4_pipeline_body(
     }
     consume_pipeline_group<T>(current,__half2float(__ushort_as_half(current.weight_scale)),
                      __half2float(__ushort_as_half(current.activation_scale)),total);
-    if(lane<16) {
+    if constexpr(T<=8) {
+        if(lane<16) {
 #pragma unroll
-        for(unsigned t=0;t<T;++t)output[t*N+row]=hip_bfloat16(total[t]);
+            for(unsigned t=0;t<T;++t)output[t*N+row]=hip_bfloat16(total[t]);
+        }
+    } else {
+#pragma unroll
+        for(unsigned t=0;t<8;++t)if(token_base+t<T)
+            output[(token_base+t)*N+row]=hip_bfloat16(total[t]);
     }
 }
 

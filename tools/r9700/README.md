@@ -117,6 +117,21 @@ Build it as a CMake target and run from `build-r9700/src/`. The removed pipeline
 qualifier is historical; its direct and whole evidence remains under
 `profiles/bench/r9700-dflash-down-pipeline-20260922/`.
 
+The small-batch and down qualifiers now evaluate public BF16-input FP64 error
+over every output row (2% per-token relative RMS and 10%-of-reference-RMS gross
+cap), alongside represented-A8 FP64, exact codec/output and graph checks. This
+replaces the previous sampled-row estimate, without changing the error constants.
+The full small-batch owner currently **fails** in its unchanged generic A8 control
+at N4096/K5120/T6/token5 (2.0341% relative RMS, 3.7310% gross). Do not describe it
+as globally qualified. The default command retains that failure. For a change
+restricted to MLP, append `--mlp-only` to qualify all selected widths of just
+N34816/K5120 and N5120/K17408; also run the dedicated T5/6 down qualifier when
+the shared pipeline changes. `--output-only` instead qualifies N5120/K6144 at
+all selected T2..6 widths. These scopes use identical numerical criteria and
+report their restricted domain explicitly. This is scoped evidence, not a waiver of
+the inherited non-MLP failure. Retained diagnostic provenance:
+`profiles/rocprof/r9700-compact-mixed-speed-20260923/`.
+
 The gate/up and projection comparison executables and obsolete down scale-gather
 ISA checker have been removed. Their evidence remains under the gate-up-pipeline,
 projection-pipeline and verify-pipeline-family packages in `profiles/bench/`.

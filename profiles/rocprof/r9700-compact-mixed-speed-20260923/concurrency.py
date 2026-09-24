@@ -14,6 +14,8 @@ def main():
     parser.add_argument('--binary', type=Path, required=True)
     parser.add_argument('--label', required=True)
     parser.add_argument('--concurrency', type=int, nargs='+', default=[1,2,3,4])
+    parser.add_argument('--draft-tokens', type=int, choices=[0,5], nargs='+', default=[0,5])
+    parser.add_argument('--reference-label', help='explicit same-workload ordinary reference when omitting K0')
     args = parser.parse_args()
     assert all(1 <= c <= 4 for c in args.concurrency)
     power = Path('/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level')
@@ -21,7 +23,10 @@ def main():
     rows = []
     for c in args.concurrency:
         ordinary = None
-        for k in [0,5]:
+        if 0 not in args.draft_tokens:
+            assert args.reference_label
+            ordinary = json.loads((HERE/f'{args.reference_label}-c{c}-k0/report.json').read_text())['tests'][0]['reps'][0]['generated_token_ids_by_lane']
+        for k in args.draft_tokens:
             assert power.read_text().strip() == 'auto'
             cell = HERE/f'{args.label}-c{c}-k{k}'
             command = json.loads((SOURCE/f'whole-k{k}/command.json').read_text())

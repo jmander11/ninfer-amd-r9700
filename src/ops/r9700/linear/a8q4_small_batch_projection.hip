@@ -13,30 +13,34 @@ __global__ __launch_bounds__(32) void small_batch_projection_kernel(
     else
         detail::a8q4_pipeline_body<N,K,T>(low,high,scales,status,codes,weight_scales,output);
 }
+template <unsigned N, unsigned K, unsigned T>
+hipError_t launch_width(const A8Q4G64LinearArgs& a, hipStream_t stream) {
+    hipLaunchKernelGGL((small_batch_projection_kernel<N,K,T>),dim3(N/16,(T+15)/16),dim3(32),0,stream,
+        a.activation_low_codes,a.activation_high_codes,a.activation_scales,a.activation_status,
+        a.weight_codes,a.weight_scales,a.output);
+    return hipGetLastError();
+}
 template <unsigned N, unsigned K>
 hipError_t launch_prepared(const A8Q4G64LinearArgs& a, hipStream_t stream) {
-    if (a.tokens == 2) {
-        hipLaunchKernelGGL((small_batch_projection_kernel<N,K,2>),dim3(N/16),dim3(32),0,stream,
-            a.activation_low_codes,a.activation_high_codes,a.activation_scales,a.activation_status,
-            a.weight_codes,a.weight_scales,a.output);
-    } else if (a.tokens == 3) {
-        hipLaunchKernelGGL((small_batch_projection_kernel<N,K,3>),dim3(N/16),dim3(32),0,stream,
-            a.activation_low_codes,a.activation_high_codes,a.activation_scales,a.activation_status,
-            a.weight_codes,a.weight_scales,a.output);
-    } else if (a.tokens == 4) {
-        hipLaunchKernelGGL((small_batch_projection_kernel<N,K,4>),dim3(N/16),dim3(32),0,stream,
-            a.activation_low_codes,a.activation_high_codes,a.activation_scales,a.activation_status,
-            a.weight_codes,a.weight_scales,a.output);
-    } else if (a.tokens == 5) {
-        hipLaunchKernelGGL((small_batch_projection_kernel<N,K,5>),dim3(N/16),dim3(32),0,stream,
-            a.activation_low_codes,a.activation_high_codes,a.activation_scales,a.activation_status,
-            a.weight_codes,a.weight_scales,a.output);
-    } else {
-        hipLaunchKernelGGL((small_batch_projection_kernel<N,K,6>),dim3(N/16),dim3(32),0,stream,
-            a.activation_low_codes,a.activation_high_codes,a.activation_scales,a.activation_status,
-            a.weight_codes,a.weight_scales,a.output);
+    if constexpr ((N==34816 && K==5120) || (N==5120 && (K==17408 || K==6144))) {
+        switch(a.tokens) {
+        case 2: return launch_width<N,K,2>(a,stream);
+        case 3: return launch_width<N,K,3>(a,stream);
+        case 4: return launch_width<N,K,4>(a,stream);
+        }
     }
-    return hipGetLastError();
+    if constexpr ((N==34816 && K==5120) || (N==5120 && K==17408)) {
+        switch(a.tokens) {
+        case 12: return launch_width<N,K,12>(a,stream);
+        case 18: return launch_width<N,K,18>(a,stream);
+        case 24: return launch_width<N,K,24>(a,stream);
+        }
+    }
+    if constexpr (K!=17408) {
+        if(a.tokens==5)return launch_width<N,K,5>(a,stream);
+        if(a.tokens==6)return launch_width<N,K,6>(a,stream);
+    }
+    return hipErrorInvalidValue;
 }
 template <unsigned N, unsigned K>
 hipError_t launch(const A8Q4G64CandidateArgs& a, hipStream_t stream) {

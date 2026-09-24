@@ -121,15 +121,24 @@ struct PublicReference {
     std::vector<double> values;
 };
 PublicReference public_oracle(unsigned tokens,const std::vector<hip_bfloat16>& input,
-                              const DecodeDot8Weights& weights) {
+                              const DecodeDot8Weights& weights,bool full_output=true) {
     PublicReference reference;
-    reference.rows={0,1,15,16,N-17,N-16,N-2,N-1};
-    for(unsigned i=0;i<24;++i)reference.rows.push_back(i*(N-1)/23);
-    std::sort(reference.rows.begin(),reference.rows.end());
-    reference.rows.erase(std::unique(reference.rows.begin(),reference.rows.end()),reference.rows.end());
+    if(full_output) {
+        reference.rows.resize(N);
+        for(unsigned row=0;row<N;++row)reference.rows[row]=row;
+    } else {
+        reference.rows={0,1,15,16,N-17,N-16,N-2,N-1};
+        for(unsigned i=0;i<24;++i)reference.rows.push_back(i*(N-1)/23);
+        std::sort(reference.rows.begin(),reference.rows.end());
+        reference.rows.erase(std::unique(reference.rows.begin(),reference.rows.end()),reference.rows.end());
+    }
     // Original represented BF16 public input, not the private A8 image.
     // Decode each signed stored Q4 value with its exact FP16 scale and
     // evaluate the complete K reduction in FP64, without staging casts.
+    // Decode invariant stored scales once, not once for every scalar product.
+    std::vector<double> decoded_scales(weights.scales.size());
+    for(std::size_t i=0;i<decoded_scales.size();++i)
+        decoded_scales[i]=half_value(weights.scales[i]);
     for(unsigned token=0;token<tokens;++token)for(const unsigned row:reference.rows) {
         double sum=0;
         for(unsigned k=0;k<K;++k) {
@@ -137,7 +146,7 @@ PublicReference public_oracle(unsigned tokens,const std::vector<hip_bfloat16>& i
             const std::size_t word=(row/16)*G*64+group*64+(lane/16)*16+row%16;
             const int nibble=(weights.codes[word*8+(lane%16)/2]>>((lane%2)*4))&15;
             const int code=nibble>=8?nibble-16:nibble;
-            const double scale=half_value(weights.scales[(row/16)*G*16+group*16+row%16]);
+            const double scale=decoded_scales[(row/16)*G*16+group*16+row%16];
             sum+=static_cast<double>(static_cast<float>(input[token*K+k]))*code*scale;
         }
         reference.values.push_back(sum);
@@ -157,7 +166,7 @@ PublicError compare_public(unsigned tokens,const std::vector<hip_bfloat16>& actu
             const double error=observed-expected;
             e2+=error*error;r2+=expected*expected;maximum=std::max(maximum,std::abs(error));
         }
-        // Declared before physical execution: each token must meet 2% RMS
+        // Suite criterion: each complete output token must meet 2% RMS
         // and 10%-of-reference-RMS gross error. A zero reference requires
         // exact zero, rather than an arbitrary tolerance floor.
         if(r2==0) {
@@ -167,7 +176,8 @@ PublicError compare_public(unsigned tokens,const std::vector<hip_bfloat16>& actu
         const double relative=std::sqrt(e2/r2);
         const double gross=maximum/std::sqrt(r2/reference.rows.size());
         if(relative>0.02 || gross>0.10)
-            fail("public BF16/Q4 FP64 oracle criterion failed: token="+std::to_string(token)+
+            fail("public BF16/Q4 FP64 oracle criterion failed: N="+std::to_string(N)+
+                 " K="+std::to_string(K)+" T="+std::to_string(tokens)+" token="+std::to_string(token)+
                  " relative_rms="+std::to_string(relative)+" gross_rms="+std::to_string(gross));
         result.relative_rms=std::max(result.relative_rms,relative);
         result.gross_rms=std::max(result.gross_rms,gross);
@@ -207,7 +217,7 @@ void cell(unsigned t,hipStream_t s,std::ostream& out) {
     std::vector<hip_bfloat16> x(t*K);
     for(unsigned token=0;token<t;++token)for(unsigned k=0;k<K;++k)
         x[token*K+k]=hip_bfloat16(static_cast<float>(base[(k/64)*64+(k+token*13)%64])*(token+4)/8.0F);
-    Guarded<hip_bfloat16> input(x.size(),s);input.put(x,s);Output candidate(t,s);
+    Guarded<hip_bfloat16> input(x.size(),s);input.put(x,s);Output candidate(t,s),control(t,s);
     std::array<std::unique_ptr<Weights>,Copies> weights;
     for(auto& w:weights)w=std::make_unique<Weights>(host,s);
     const auto valid=arguments(t,input,*weights[0],candidate);unsigned malformed=0;
@@ -234,6 +244,18 @@ void cell(unsigned t,hipStream_t s,std::ostream& out) {
     auto verify_fixture=[&](bool eager){
         const auto represented=quantize_host(x,t,K);const auto expected=oracle(t,represented,host);
         const auto public_expected=public_oracle(t,x,host);public_rows=public_expected.rows;
+        // An unchanged generic route is supplementary regression evidence, not
+        // the oracle. Check it against the same complete public-input formula.
+        const auto control_args=arguments(t,input,*weights[0],control);
+        const auto cw=workspace(t,control);
+        HIP_CHECK(linear::a8g64_quantize_activation({control_args.input,cw},s));
+        HIP_CHECK(linear::a8q4g64_linear_wmma32({cw.low_codes,cw.low_code_bytes,
+            cw.high_codes,cw.high_code_bytes,cw.scales,cw.scale_bytes,cw.status,
+            control_args.weight_codes,control_args.weight_code_bytes,
+            control_args.weight_scales,control_args.weight_scale_bytes,
+            control_args.output,t,N,K,K},s));
+        const auto control_values=control.value.read(s);
+        compare_public(t,control_values,public_expected);
         launch(arguments(t,input,*weights[0],candidate),s);
         const auto eager_reference=candidate.value.read(s);
         for(unsigned i=0;i<Copies;++i) {
@@ -244,6 +266,7 @@ void cell(unsigned t,hipStream_t s,std::ostream& out) {
             else graphs[i]->run(s);
             codec(t,candidate,represented,s);const auto actual=candidate.value.read(s);
             const auto e=compare(actual,expected);
+            exact(actual,control_values,"public candidate/generic BF16 mismatch");
             const auto pe=compare_public(t,actual,public_expected);
             public_error.relative_rms=std::max(public_error.relative_rms,pe.relative_rms);
             public_error.gross_rms=std::max(public_error.gross_rms,pe.gross_rms);
@@ -276,18 +299,22 @@ void cell(unsigned t,hipStream_t s,std::ostream& out) {
        <<",\"criterion\":\"fp64_rel_l2_1e-2_gross_1e-2_refmax_plus_1e-5\","
        <<"\"exact_codec\":true,\"exact_eager_graph\":true,\"graph_poison_stale_finite\":true,"
        <<"\"guards_immutability\":true,\"finite_cases\":"<<cases<<",\"malformed_cases\":"<<malformed
-       <<"},\"public_bf16_oracle\":{\"criterion\":\"per_token_relative_rms_le_0.02_and_max_error_le_0.10_reference_rms\","
+       <<"},\"public_bf16_oracle\":{\"criterion\":\"per_token_all_rows_relative_rms_le_0.02_and_max_error_le_0.10_reference_rms\","
        <<"\"full_k\":"<<K<<",\"all_tokens\":true,\"maximum_relative_rms\":"<<public_error.relative_rms
-       <<",\"maximum_error_over_reference_rms\":"<<public_error.gross_rms<<",\"sampled_rows\":[";
-    for(std::size_t i=0;i<public_rows.size();++i)out<<(i?",":"")<<public_rows[i];
-    out<<"]}}";
+       <<",\"maximum_error_over_reference_rms\":"<<public_error.gross_rms
+       <<",\"rows_checked\":"<<public_rows.size()<<",\"generic_control_checked\":true}}";
 }
 }
 #ifndef NINFER_A8Q4_VERIFY_QUAL_NO_MAIN
 int main(int argc,char** argv) {
  try {
-    if(argc!=3 || std::string_view(argv[1])!="--out-json")
-        fail("usage: selected_q4_qual --out-json FRESH.json");
+    bool mlp_only=false,output_only=false;
+#if defined(NINFER_QUAL_SMALL_BATCH_PROJECTIONS)
+    mlp_only=argc==4 && std::string_view(argv[3])=="--mlp-only";
+    output_only=argc==4 && std::string_view(argv[3])=="--output-only";
+#endif
+    if((argc!=3 && !mlp_only && !output_only) || std::string_view(argv[1])!="--out-json")
+        fail("usage: selected_q4_qual --out-json FRESH.json [--mlp-only|--output-only]");
     const std::filesystem::path output=argv[2];require_fresh_output(output);power();
     HIP_CHECK(hipSetDevice(0));hipDeviceProp_t props{};HIP_CHECK(hipGetDeviceProperties(&props,0));
     char pci[32]{};HIP_CHECK(hipDeviceGetPCIBusId(pci,sizeof(pci),0));
@@ -296,18 +323,22 @@ int main(int argc,char** argv) {
     hipStream_t stream{};HIP_CHECK(hipStreamCreateWithFlags(&stream,hipStreamNonBlocking));
     std::ostringstream out;out<<std::setprecision(17)<<"{\"schema\":\""
 #if defined(NINFER_QUAL_SMALL_BATCH_PROJECTIONS)
-        <<"ninfer.r9700.a8q4-small-batch-projections.v1"
+        <<"ninfer.r9700.a8q4-small-batch-projections.v2"
 #else
-        <<"ninfer.r9700.dflash-verify-down.v1"
+        <<"ninfer.r9700.dflash-verify-down.v2"
 #endif
         <<"\",\"status\":\"qualified\",\"public_dispatch_tested\":true,"
-          "\"pci\":\"0000:13:00.0\",\"power\":\"auto\",\"copies\":3,\"cells\":[";
+          "\"pci\":\"0000:13:00.0\",\"power\":\"auto\",\"copies\":3,\"scope\":\""
+        <<(mlp_only?"mlp_only":output_only?"output_only":"complete_owner")<<"\",\"cells\":[";
 #if defined(NINFER_QUAL_SMALL_BATCH_PROJECTIONS)
     constexpr std::array<std::array<unsigned,2>,5> shapes{{{34816,5120},{5120,6144},{12288,5120},{4096,5120},{5120,17408}}};
     bool first=true;
     for(const auto& shape:shapes) {
+        if(mlp_only && shape!=std::array<unsigned,2>{34816,5120} &&
+           shape!=std::array<unsigned,2>{5120,17408})continue;
+        if(output_only && shape!=std::array<unsigned,2>{5120,6144})continue;
         N=shape[0];K=shape[1];G=K/64;
-        for(unsigned t:{2U,3U,4U,5U,6U}) {
+        for(unsigned t:{2U,3U,4U,5U,6U,12U,18U,24U}) {
             if(!linear::detail::use_a8q4_small_batch_projection(t,N,K,K))continue;
             if(!first)out<<',';first=false;cell(t,stream,out);
         }
