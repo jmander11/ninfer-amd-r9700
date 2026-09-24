@@ -381,12 +381,12 @@ ProgramImplCore::ProgramImplCore(const LoadedModelData& model_in, const Sequence
         throw std::logic_error("DFlash state does not match the frozen sequence plan");
     }
     if (plan.persistent.linear_execution) {
+        const auto verify_widths = qwen3::captured_verify_widths<DFlashConfig>(
+            plan.speculative_backend, plan.captured_ks, plan.dflash_verify_width);
         linear_execution = std::make_unique<typename Variant::ExecutionState>(
             model, plan.persistent.linear_execution->bind(backing),
             std::min(plan.prefill_chunk, plan.capacity),
-            plan.max_concurrency,
-            plan.features.mtp() ? plan.draft_window + 1U : 0U,
-            plan.features.dflash() ? plan.dflash_verify_width : 0U);
+            plan.max_concurrency, verify_widths);
     }
 
     io = qwen3::RoundState(backing, plan.persistent.round);

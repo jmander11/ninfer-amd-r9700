@@ -285,14 +285,16 @@ struct Variant::ExecutionState::Impl {
 Variant::ExecutionState::ExecutionState(const ModelView& model, DeviceSpan serialized_storage,
                                         std::uint32_t prefill_tokens,
                                         std::uint32_t maximum_concurrency,
-                                        std::uint32_t mtp_width,
-                                        std::uint32_t dflash_width)
+                                        std::span<const std::uint32_t> verify_widths)
     : impl_(std::make_unique<Impl>()) {
     const std::vector<std::uint32_t> prepared_widths = eager_widths(
-        prefill_tokens, maximum_concurrency, mtp_width, dflash_width);
+        prefill_tokens, maximum_concurrency, verify_widths);
+    std::uint32_t maximum_verify_width = 1U;
+    for (const auto width : verify_widths)
+        maximum_verify_width = std::max(maximum_verify_width, width);
     const std::uint64_t maximum_graph_tokens64 =
         static_cast<std::uint64_t>(maximum_concurrency) *
-        std::max({1U, mtp_width, dflash_width});
+        maximum_verify_width;
     if (maximum_graph_tokens64 > std::numeric_limits<std::uint32_t>::max()) {
         throw std::overflow_error("R9700 FP8 execution graph width overflows");
     }
@@ -651,12 +653,13 @@ Variant::ExecutionState::~ExecutionState() = default;
 
 std::vector<std::uint32_t> Variant::ExecutionState::eager_widths(
     std::uint32_t prefill_tokens, std::uint32_t maximum_concurrency,
-    std::uint32_t mtp_width, std::uint32_t dflash_width) {
+    std::span<const std::uint32_t> verify_widths) {
     if (prefill_tokens == 0U || maximum_concurrency == 0U) {
         throw std::invalid_argument("R9700 linear execution widths must be positive");
     }
     std::vector<std::uint32_t> widths;
-    widths.reserve(static_cast<std::size_t>(maximum_concurrency) * 3U + 1U);
+    widths.reserve(static_cast<std::size_t>(maximum_concurrency) *
+                   (verify_widths.size() + 1U) + 1U);
     const auto append_product = [&](std::uint32_t batch, std::uint32_t width,
                                     const char* label) {
         if (width == 0U) return;
@@ -668,8 +671,8 @@ std::vector<std::uint32_t> Variant::ExecutionState::eager_widths(
     };
     for (std::uint32_t batch = 1; batch <= maximum_concurrency; ++batch) {
         widths.push_back(batch); // Ordinary decode and one-column speculative substeps.
-        append_product(batch, mtp_width, "R9700 MTP linear width overflows");
-        append_product(batch, dflash_width, "R9700 DFlash linear width overflows");
+        for (const auto width : verify_widths)
+            append_product(batch, width, "R9700 speculative linear width overflows");
     }
     widths.push_back(prefill_tokens);
     std::sort(widths.begin(), widths.end());

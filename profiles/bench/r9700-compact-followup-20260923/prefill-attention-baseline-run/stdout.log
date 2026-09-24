@@ -1,0 +1,2 @@
+rows=2048 context=2048 group=16 panel=2048 oracle=FP64 complete-sampled-vectors PASS
+rows=2048 context=4096 group=16 panel=1024 oracle=FP64 complete-sampled-vectors PASS

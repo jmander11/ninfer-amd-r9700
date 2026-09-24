@@ -750,8 +750,9 @@ void print_host_hybrid_width_authority(int argc, char** argv) {
     if (concurrency > ninfer::kMaximumConcurrency) {
         throw std::invalid_argument("hybrid width inventory exceeds product concurrency");
     }
+    const std::uint32_t verify_widths[]{mtp_width, dflash_width};
     const auto widths = Variant::ExecutionState::eager_widths(
-        prefill, concurrency, mtp_width, dflash_width);
+        prefill, concurrency, verify_widths);
     std::printf("prefill,max_concurrency,mtp_width,dflash_width,prepared_width\n");
     for (const std::uint32_t width : widths) {
         std::printf("%u,%u,%u,%u,%u\n", prefill, concurrency, mtp_width, dflash_width,

@@ -109,6 +109,63 @@ the complete small-batch qualification is failed; do not infer universal A8
 accuracy from the passing model sidecars or narrower MLP checks. The failing
 test and receipt are retained; its criterion has not been relaxed.
 
+### Four-token concurrent DFlash follow-up
+
+The same successor pipeline now covers K4 MLP widths T10/15/20, corresponding to
+C2/3/4. Six new cells pass the unchanged full-output public BF16-input FP64 gate
+(maximum relative RMS1.96781%), represented-A8 oracle, exact codec/generic/graph
+output, poison and guards. All23 prior kernel instruction streams are unchanged;
+new cells use native IU4,70VGPR/22SGPR and no LDS/private scratch. Cold complete-Op
+gate/up latency falls7–18%, down44–50%. Same codeP4096/G128/chunk2048, auto,
+warm1/reps3: K4 aggregate decode98.32/132.17/142.61→122.14/160.87/161.66tok/s
+at C2/3/4 (per-request61.07/53.62/40.41). All nine selected repetitions exactly
+match prior same-C ordinary greedy tokens. K4 now beats the retained K5 rates on
+this concurrent sample; C1 routing is unchanged and its sample still favors K5.
+This is workload-specific selection, not a universal best draft length.
+Evidence: `profiles/bench/r9700-compact-followup-20260923/`.
+
+The inherited N4096/T6 failure was localized separately: exact represented-A8
+FP64 output itself differs2.01625% from the original BF16-input oracle, versus
+2.03407% GPU error. Input quantization error is0.26831%; cancellation amplifies
+it at the output. Exact codec/generic checks pass. Arithmetic scheduling alone
+cannot repair the2% failure while retaining those codes/scales. One lower-input-MSE
+scale refinement worsened output error to2.18842% and was rejected. No numerical
+criterion or codec was changed; the accuracy decision remains open.
+
+Matched chunk check on the frozen preceding build: C1 codeP4096 prefill
+1473.39/1523.68/1459.01tok/s at chunks1024/2048/4096; WikiTextP8192 gives
+1241.86/1197.63 at2048/4096. Each uses warm1/reps3, same weights, auto and G16.
+The2048/4096 runs generate identical tokens on both samples. Keep2048;4096 is
+3.6–4.2% slower here, not a theoretically preferred size. No model precision changed.
+
+A bounded high/low-BF16 WMMA PV prototype passed two independent complete-attention
+oracle cases and exhaustively reconstructed finite INT4×FP16 values, but complete
+attention regressed10.09→11.01ms for P2048/context2048 and42.89→43.98ms for
+P2048/context4096. Despite fewer arithmetic instructions and zero scratch spills,
+the added decomposition/data/synchronization cost defeated the mechanism.
+Rejected; no candidate remains in production and no model-quality claim follows.
+
+Concurrent adaptive K5 initially failed before inference because smaller captured
+FP8 verification widths were absent from load-time preparation. Load and Program
+binding now share the full captured-width inventory, without changing workspace
+maxima or adding preparation during capture. Host contracts pass; repaired C4
+adaptive measures154.82 aggregate tok/s and all three repetitions exactly match
+ordinary tokens. FixedK4 remains faster on this sample. The first adaptive
+repetition records130 rounds,517 drafted tokens and381 accepted (73.69%).
+
+The remaining N5120/K6144 K5 output projections now use the same tiled successor
+pipeline at T12/18/24. All eight output cells pass unchanged full-output numerical,
+codec, graph/poison and guard criteria; all29 previous instruction streams are
+unchanged. New cells use70VGPR/22SGPR, nativeIU4, no LDS/private scratch. Matched
+cold complete-Op latency falls26–36%. Fresh C4 whole comparison improves fixedK5
+140.488→144.777 aggregate tok/s (+3.05%,36.19 per request), with all six control/
+candidate repetitions exact ordinary tokens and identical121 verification rounds.
+Candidate repetitions144.660–144.786 versus control140.172–140.533tok/s.
+The repaired-adaptive154.82 measurement precedes this last output extension;
+its result is not a fresh final-build adaptive timing. FixedK4's measured161.66
+still leads; K4/C1 routes retain identical instructions. Final delivered binaries
+are rebuilt, host contracts pass, and the accuracy-policy decision remains open.
+
 ## Selected compact mixed-profile delivery (2026-09-23)
 
 The user selected the compact cap26 Q4 embedding/head model with gate/up-only A4 large

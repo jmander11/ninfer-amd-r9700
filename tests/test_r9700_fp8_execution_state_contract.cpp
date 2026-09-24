@@ -3,6 +3,7 @@
 #include "ninfer/ops/normalized_linear.h"
 #include "ninfer/ops/linear.h"
 #include "targets/qwen3_8_27b/impl/variant.h"
+#include <ninfer/targets/qwen3/startup_features.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -61,12 +62,68 @@ void normalized_route_contract() {
     }
 }
 
+void adaptive_width_contract() {
+    namespace qwen3 = ninfer::targets::qwen3;
+    using Backend = ninfer::SpeculativeBackend;
+    for (const auto backend : {Backend::Mtp, Backend::DFlash}) {
+        ninfer::EngineOptions options;
+        options.speculative.backend = backend;
+        options.speculative.draft_tokens = 5U;
+        options.speculative.adaptive_draft = true;
+        const auto startup = qwen3::startup_verify_widths<detail::DFlashConfig>(options);
+        require(startup == std::vector<std::uint32_t>({4, 5, 6}),
+                "adaptive startup omits a captured verification width");
+        const auto ks = qwen3::adaptive_draft_ks(backend, 5U, true);
+        const auto storage = backend == Backend::DFlash
+            ? qwen3::dflash_storage_verify_width<detail::DFlashConfig>(ks, 5U, 0U) : 0U;
+        const auto program = qwen3::captured_verify_widths<detail::DFlashConfig>(
+            backend, ks, storage);
+        require(startup == program, "loaded and Program FP8 preparation disagree");
+        for (std::uint32_t concurrency = 1U; concurrency <= 4U; ++concurrency) {
+            const auto prepared = detail::Variant::ExecutionState::eager_widths(
+                2048U, concurrency, startup);
+            std::vector<std::uint32_t> observed{2048U};
+            for (std::uint32_t batch = 1U; batch <= concurrency; ++batch) {
+                observed.push_back(batch);
+                // These are the physical target Linear widths of the three
+                // captured K3/K4/K5 graphs, not just the K5 storage maximum.
+                for (const std::uint32_t width : {4U, 5U, 6U})
+                    observed.push_back(batch * width);
+            }
+            std::sort(observed.begin(), observed.end());
+            observed.erase(std::unique(observed.begin(), observed.end()), observed.end());
+            require(prepared == observed,
+                    "adaptive C1-C4 graph execution width was not prepared exactly");
+        }
+        options.speculative.adaptive_draft = false;
+        require(qwen3::startup_verify_widths<detail::DFlashConfig>(options) ==
+                    std::vector<std::uint32_t>({6}),
+                "fixed K5 unexpectedly prepares adaptive graphs");
+    }
+    ninfer::EngineOptions ordinary;
+    require(qwen3::startup_verify_widths<detail::DFlashConfig>(ordinary).empty(),
+            "ordinary startup prepares speculative graph widths");
+    ninfer::EngineOptions fixed;
+    fixed.speculative.backend = Backend::DFlash;
+    fixed.speculative.draft_tokens = 4U;
+    fixed.speculative.adaptive_draft = true;
+    require(qwen3::startup_verify_widths<detail::DFlashConfig>(fixed) ==
+                std::vector<std::uint32_t>({5}),
+            "K4-only adaptive policy was broadened during preparation");
+    fixed.speculative.draft_tokens = 5U;
+    fixed.speculative.dflash_verify_width = 6U;
+    require(qwen3::startup_verify_widths<detail::DFlashConfig>(fixed) ==
+                std::vector<std::uint32_t>({4, 5, 6}),
+            "explicit storage width erased smaller captured graph widths");
+}
+
 } // namespace
 
 int main() {
     try {
         using Variant = detail::Variant;
         normalized_route_contract();
+        adaptive_width_contract();
         static_assert(!std::is_copy_constructible_v<Variant::ExecutionState>);
         static_assert(!std::is_move_constructible_v<Variant::ExecutionState>);
         // Prepared executions borrow a stable, explicitly owned device context.
@@ -94,23 +151,26 @@ int main() {
         static_assert(!Variant::ExecutionState::fused_mlp_down_selected(
             8U, ninfer::QType::Q4G64_F16S, 2048U,
             detail::TextConfig::layers));
-        require(Variant::ExecutionState::eager_widths(2048, 4, 4, 0) ==
+        const std::uint32_t mtp_widths[]{4U};
+        const std::uint32_t dflash_widths[]{12U};
+        require(Variant::ExecutionState::eager_widths(2048, 4, mtp_widths) ==
                     std::vector<std::uint32_t>({1, 2, 3, 4, 8, 12, 16, 2048}),
                 "MTP eager descriptor widths are incomplete");
-        require(Variant::ExecutionState::eager_widths(2048, 4, 0, 12) ==
+        require(Variant::ExecutionState::eager_widths(2048, 4, dflash_widths) ==
                     std::vector<std::uint32_t>({1, 2, 3, 4, 12, 24, 36, 48, 2048}),
                 "DFlash eager descriptor widths are incomplete");
-        require(Variant::ExecutionState::eager_widths(4, 4, 0, 0) ==
+        require(Variant::ExecutionState::eager_widths(4, 4, {}) ==
                     std::vector<std::uint32_t>({1, 2, 3, 4}),
                 "ordinary eager descriptor widths are not unique and complete");
-        const auto prefill_widths = Variant::ExecutionState::eager_widths(2048, 4, 0, 0);
+        const auto prefill_widths = Variant::ExecutionState::eager_widths(2048, 4, {});
         require(std::find(prefill_widths.begin(), prefill_widths.end(), 2047U) ==
                     prefill_widths.end(),
                 "irregular final prefill tail was incorrectly made graph-eager");
         bool width_overflow_rejected = false;
         try {
+            const std::uint32_t overflow_widths[]{std::numeric_limits<std::uint32_t>::max()};
             (void)Variant::ExecutionState::eager_widths(
-                2048, 4, 0, std::numeric_limits<std::uint32_t>::max());
+                2048, 4, overflow_widths);
         } catch (const std::overflow_error&) {
             width_overflow_rejected = true;
         }

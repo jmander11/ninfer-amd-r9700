@@ -73,7 +73,9 @@ qualifier are removed; historical evidence remains under `profiles/bench/r9700-b
 Tiled W8 covers ordinary T1–3, A8 small/tail/prefill extents and A16 controls for the
 single losslessly tiled resident head; `--ordinary-only` restricts it to the coalesced T1–3
 consumer. The selected public Q4 qualifier covers ordinary T2–4 N34816/K5120 gate/up
-and N5120/K17408 down, plus N34816/K5120, N5120/K6144, N12288/K5120 and N4096/K5120
+and N5120/K17408 down, tiled MLP at T10/12/15/18/20/24,
+tiled N5120/K6144 output at T12/18/24, plus N34816/K5120,
+N5120/K6144, N12288/K5120 and N4096/K5120
 at T5/T6. N12288 retains scale-gather; the other
 shapes use the admitted successor pipeline. It checks the original represented-BF16
 FP64 formula, full-output represented-A8 FP64 formula, exact activation codec,
@@ -127,7 +129,7 @@ as globally qualified. The default command retains that failure. For a change
 restricted to MLP, append `--mlp-only` to qualify all selected widths of just
 N34816/K5120 and N5120/K17408; also run the dedicated T5/6 down qualifier when
 the shared pipeline changes. `--output-only` instead qualifies N5120/K6144 at
-all selected T2..6 widths. These scopes use identical numerical criteria and
+all selected T2..6 and T12/18/24 widths. These scopes use identical numerical criteria and
 report their restricted domain explicitly. This is scoped evidence, not a waiver of
 the inherited non-MLP failure. Retained diagnostic provenance:
 `profiles/rocprof/r9700-compact-mixed-speed-20260923/`.

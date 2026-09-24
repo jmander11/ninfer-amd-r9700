@@ -1265,6 +1265,13 @@ executable。Backend-specific proposal shape 只有在真实改变 Device Graph 
 
 Startup 对 graph family 的准备顺序固定为：
 
+Loaded FP8 Linear descriptors must already cover the full prefill chunk, ordinary
+widths `B=1..C`, and every flattened verification width `B*W(K)` of the frozen
+captured-K set. Load planning and Program binding consume the same family width
+authority; preparing only the maximum storage width is insufficient for adaptive
+K3/K4/K5. Descriptor preparation does not occur inside stream capture. The maximum
+workspace extent remains separate from this finite descriptor inventory.
+
 1. 对启用的 semantic family，以 `B=1` 的首个 reachable profile 执行一次 eager round，使 HIP code 和
    library runtime 在 stream capture 前完成 lazy materialization；
 2. 捕获全部 exact-`B`/profile definitions。Capture 只记录 HIP work，不执行 model round，也不承担

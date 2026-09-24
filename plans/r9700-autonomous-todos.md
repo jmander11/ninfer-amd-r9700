@@ -85,6 +85,44 @@ above apply to every command.
 
 ### Current checkpoint
 
+ACTIVE USER REQUEST (2026-09-23, follow-up): resolve the inherited A8 public-oracle
+failure first, then work through final-build attribution, useful DFlash coverage,
+remaining material prefill/decode mechanisms, and chunk selection including4096.
+- [ ] Diagnose N4096/K5120/T6 failure against represented public inputs; repair the
+  actual cause with justified numerical criteria and affected-domain qualification,
+  not a threshold increase to make a fixture pass.
+- [x] Reprofile final C1/C4 ordinary/K5 paths; inspect intermediate C only where
+  evidence can change the decision. Retain prior exclusions.
+- [x] Evaluate K4/adaptive-width coverage and remaining material decode mechanisms;
+  promote only independently qualified, whole-inference wins.
+- [x] Evaluate material prefill mechanisms from current attribution, then compare
+  chunks2048/4096 (1024 control where useful) on matched prompts and quality.
+- [x] Rebuild/verify selected routes, record outcomes/exclusions and selected chunk,
+  update installed model guidance and commit coherent checkpoints.
+Preserve installed selected weights, fixed KV format, C<=4, auto power, serial
+heavyweight work and build cap14 (normally4). No unrelated paused campaign resumes.
+Follow-up checkpoint: inherited failure is cancellation-amplified A8 quantization
+(ideal represented-A8 FP64 error2.01625%, GPU2.03407%); arithmetic/codec checks
+pass. Scale-refinement experiment worsens output error and is rejected. User
+decision pending on numerical contract versus more accurate activations; no waiver.
+K4 MLP T10/15/20 extension passes six full-oracle/graph cells and exact old ISA.
+C2/3/4 aggregate decode98.32/132.17/142.61→122.14/160.87/161.66tok/s; all nine
+repetitions exact same-C ordinary tokens. Chunk4096 initial code4K prefill1459
+versus1524 at2048; WikiText8K1198 versus1242 also favors2048. Matched2048/4096
+tokens exact;1024 control1473 on code4K. High/low-BF16 WMMA PV passes two
+oracle cases but loses complete-Op timing, so removed. Adaptive C4 exposed missing
+smaller FP8 graph widths; shared captured-width preparation fix passes host tests
+and three C4 repetitions exact ordinary tokens at154.82 aggregate tok/s.
+K5 output T12/18/24 passes eight output-oracle cells; direct savings26–36%,
+fresh C4 whole140.49→144.78 aggregate tok/s, all repetitions exact ordinary
+tokens. Retained instructions unchanged. Delivered binaries rebuilt and host
+contracts pass; installed model guidance updated. Bounded optimization pass done.
+ONLY BLOCKER: user choice for inherited N4096 numerical contract versus more
+accurate activations. Do not relax the2% threshold or change precision implicitly;
+all other independent follow-up priorities are complete. Preserve failed evidence.
+Evidence:
+`profiles/bench/r9700-compact-followup-20260923/`.
+
 COMPLETED BOUNDED USER REQUEST (2026-09-23): profiler-guided prefill and decode optimization on the
 delivered cap26 Q4-head mixed gate/up-A4 model and Q4 DFlash companion. Preserve selected
 precision, quality and exact ordinary/speculative token semantics; do not reopen recipe search.

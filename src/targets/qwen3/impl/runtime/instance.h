@@ -8,6 +8,7 @@
 #endif
 
 #include <ninfer/targets/qwen3/runtime.h>
+#include <ninfer/targets/qwen3/startup_features.h>
 
 namespace ninfer::targets::qwen3::detail::NINFER_QWEN3_RUNTIME_NS {
 
@@ -42,22 +43,12 @@ inline constexpr std::uint32_t kMaximumDFlashDraftTokens = Variant::maximum_dfla
 // Auto verify width from k when --dflash-verify-width is omitted. Product DFlash is chain W=k+1.
 // A tree-capable package may still select a wider default for a native draft window.
 [[nodiscard]] inline constexpr std::uint32_t dflash_default_verify_width(std::uint32_t draft_window) {
-    if constexpr (!DFlashConfig::tree_verify) {
-        return draft_window + 1U;
-    } else {
-        if constexpr (DFlashConfig::two_block_first > 0) {
-            if (draft_window > static_cast<std::uint32_t>(DFlashConfig::two_block_first)) {
-                return draft_window + 1U;
-            }
-        }
-        if (draft_window <= 5U) { return draft_window + 1U; }
-        return static_cast<std::uint32_t>(DFlashConfig::verify_width);
-    }
+    return qwen3::dflash_verify_width<DFlashConfig>(draft_window);
 }
 
 [[nodiscard]] inline constexpr std::uint32_t dflash_verify_width(std::uint32_t draft_window,
                                                                 std::uint32_t override_width = 0) {
-    return override_width != 0 ? override_width : dflash_default_verify_width(draft_window);
+    return qwen3::dflash_verify_width<DFlashConfig>(draft_window, override_width);
 }
 
 // Packed-tree verify and GDN/KV path fold for a tree-capable package. W == k+1 is chain.
@@ -79,8 +70,7 @@ inline constexpr std::uint32_t kMaximumDFlashDraftTokens = Variant::maximum_dfla
 
 [[nodiscard]] inline constexpr std::uint32_t
 dflash_captured_verify_width(std::uint32_t k, std::uint32_t storage_ceil) {
-    const std::uint32_t live = dflash_verify_width(k, 0);
-    return live <= storage_ceil ? live : storage_ceil;
+    return qwen3::dflash_captured_verify_width<DFlashConfig>(k, storage_ceil);
 }
 
 // Storage / ReplaySSM / pending-features width. Adaptive `{3,4,5}` is chain W<=6.
@@ -88,15 +78,8 @@ dflash_captured_verify_width(std::uint32_t k, std::uint32_t storage_ceil) {
 [[nodiscard]] inline std::uint32_t
 dflash_storage_verify_width(std::span<const std::uint32_t> captured_ks,
                             std::uint32_t draft_window, std::uint32_t override_width) {
-    if (override_width != 0) {
-        return dflash_verify_width(draft_window, override_width);
-    }
-    std::uint32_t ceil = 0;
-    for (const std::uint32_t k : captured_ks) {
-        const std::uint32_t w = dflash_default_verify_width(k);
-        if (w > ceil) { ceil = w; }
-    }
-    return ceil != 0 ? ceil : dflash_default_verify_width(draft_window);
+    return qwen3::dflash_storage_verify_width<DFlashConfig>(
+        captured_ks, draft_window, override_width);
 }
 
 inline std::vector<GraphExecutionProfile> ordinary_graph_profiles(std::uint32_t capacity) {

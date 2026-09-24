@@ -1,6 +1,11 @@
 #pragma once
 
 #include "ninfer/types.h"
+#include "targets/qwen3/impl/runtime/adaptive_draft.h"
+
+#include <algorithm>
+#include <span>
+#include <vector>
 
 namespace ninfer::targets::qwen3 {
 
@@ -48,6 +53,53 @@ template <class DFlashConfig>
         if (draft_window <= 5U) return draft_window + 1U;
         return static_cast<std::uint32_t>(DFlashConfig::verify_width);
     }
+}
+
+template <class DFlashConfig>
+[[nodiscard]] inline constexpr std::uint32_t dflash_captured_verify_width(
+    std::uint32_t k, std::uint32_t storage_ceil) {
+    return std::min(dflash_verify_width<DFlashConfig>(k), storage_ceil);
+}
+
+template <class DFlashConfig>
+[[nodiscard]] inline std::uint32_t dflash_storage_verify_width(
+    std::span<const std::uint32_t> captured_ks, std::uint32_t draft_window,
+    std::uint32_t override_width) {
+    if (override_width != 0U) return override_width;
+    std::uint32_t width = 0U;
+    for (const auto k : captured_ks)
+        width = std::max(width, dflash_verify_width<DFlashConfig>(k));
+    return width != 0U ? width : dflash_verify_width<DFlashConfig>(draft_window);
+}
+
+// Actual graph widths, not just the largest storage extent. Adaptive graph
+// capture observes each K independently, including widths below the maximum.
+template <class DFlashConfig>
+[[nodiscard]] inline std::vector<std::uint32_t> captured_verify_widths(
+    SpeculativeBackend backend, std::span<const std::uint32_t> captured_ks,
+    std::uint32_t dflash_storage_width) {
+    std::vector<std::uint32_t> widths;
+    if (backend == SpeculativeBackend::None) return widths;
+    for (const auto k : captured_ks) {
+        const auto width = backend == SpeculativeBackend::Mtp ? k + 1U
+            : dflash_captured_verify_width<DFlashConfig>(k, dflash_storage_width);
+        if (std::find(widths.begin(), widths.end(), width) == widths.end())
+            widths.push_back(width);
+    }
+    return widths;
+}
+
+template <class DFlashConfig>
+[[nodiscard]] inline std::vector<std::uint32_t> startup_verify_widths(
+    const EngineOptions& options) {
+    const auto& speculative = options.speculative;
+    const auto ks = adaptive_draft_ks(speculative.backend, speculative.draft_tokens,
+                                     speculative.adaptive_draft);
+    const auto storage = speculative.backend == SpeculativeBackend::DFlash
+        ? dflash_storage_verify_width<DFlashConfig>(ks, speculative.draft_tokens,
+                                                    speculative.dflash_verify_width)
+        : 0U;
+    return captured_verify_widths<DFlashConfig>(speculative.backend, ks, storage);
 }
 
 } // namespace ninfer::targets::qwen3

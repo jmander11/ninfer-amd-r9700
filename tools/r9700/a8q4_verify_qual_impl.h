@@ -338,7 +338,7 @@ int main(int argc,char** argv) {
            shape!=std::array<unsigned,2>{5120,17408})continue;
         if(output_only && shape!=std::array<unsigned,2>{5120,6144})continue;
         N=shape[0];K=shape[1];G=K/64;
-        for(unsigned t:{2U,3U,4U,5U,6U,12U,18U,24U}) {
+        for(unsigned t:{2U,3U,4U,5U,6U,10U,12U,15U,18U,20U,24U}) {
             if(!linear::detail::use_a8q4_small_batch_projection(t,N,K,K))continue;
             if(!first)out<<',';first=false;cell(t,stream,out);
         }

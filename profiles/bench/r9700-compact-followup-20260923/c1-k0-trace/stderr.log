@@ -1,0 +1,33 @@
+W0923 20:36:36.265366 1028708 tool.cpp:3301] rocprofv3 is only recording profiling data within regions of code surrounded by roctxProfilerResume(0)/roctxProfilerPause
+W0923 20:36:36.265449 1028708 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.000608 sec
+W0923 20:36:36.265953 1028708 simple_timer.cpp:55] [rocprofv3] '/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/rocprof/r9700-compact-mixed-speed-20260923/final-bin/bench --weights /ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-q4-fp8-selective-cap/qwen3.8-27b-r9700-q4-fp8-selective-cap-n16k16-dflash2-q4-eval.ninfer --corpus /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-compact-mixed-delivery-20260923/code.ids --device 0 --concurrency 1 --whole-pg 4096,128 --prefill-chunk 2048 --max-ctx 4240 --kv-capacity workload --draft-tokens 0 --warmup 1 -r 1 --retain-token-ids --output json --output-file profiles/bench/r9700-compact-followup-20260923/c1-k0-trace/report.json --profile-measured' ::     0.000000 sec
+[ninfer_bench] loading /ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-q4-fp8-selective-cap/qwen3.8-27b-r9700-q4-fp8-selective-cap-n16k16-dflash2-q4-eval.ninfer (max_context=4240, concurrency=1, kv_format=fp8-k-int4-v)
+W0923 20:36:36.283519 1028708 tool.cpp:3348] HSA version 1.21.0 initialized (instance=0)
+W0923 20:36:36.297248 1028708 queue_controller.cpp:170] [queue-intercept] device-memory ring-buffer requested but profiling requires system-memory InterceptQueue; falling back to system-memory ring for agent 97458889582016 (priority and CU-mask from the descriptor are not preserved)
+W0923 20:36:36.323863 1028708 queue_controller.cpp:170] [queue-intercept] device-memory ring-buffer requested but profiling requires system-memory InterceptQueue; falling back to system-memory ring for agent 97458889582016 (priority and CU-mask from the descriptor are not preserved)
+W0923 20:36:36.336933 1028708 queue_controller.cpp:170] [queue-intercept] device-memory ring-buffer requested but profiling requires system-memory InterceptQueue; falling back to system-memory ring for agent 97458889582016 (priority and CU-mask from the descriptor are not preserved)
+W0923 20:36:40.104408 1028708 queue_controller.cpp:170] [queue-intercept] device-memory ring-buffer requested but profiling requires system-memory InterceptQueue; falling back to system-memory ring for agent 97458889582016 (priority and CU-mask from the descriptor are not preserved)
+[ninfer_bench] test 1/1 whole-pp4096+tg128: warmup=1 reps=1
+W0923 20:36:47.965201 1028708 tool.cpp:3348] MARKER (ROCTx) version 1.3.5 initialized (instance=0)
+W0923 20:36:55.906470 1028708 simple_timer.cpp:55] [rocprofv3] '/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/rocprof/r9700-compact-mixed-speed-20260923/final-bin/bench --weights /ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-q4-fp8-selective-cap/qwen3.8-27b-r9700-q4-fp8-selective-cap-n16k16-dflash2-q4-eval.ninfer --corpus /ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-compact-mixed-delivery-20260923/code.ids --device 0 --concurrency 1 --whole-pg 4096,128 --prefill-chunk 2048 --max-ctx 4240 --kv-capacity workload --draft-tokens 0 --warmup 1 -r 1 --retain-token-ids --output json --output-file profiles/bench/r9700-compact-followup-20260923/c1-k0-trace/report.json --profile-measured' ::    19.640516 sec
+W0923 20:36:55.920534 1028708 generateRocpd.cpp:1062] writing SQL database for process 1028708 on node 2579950404
+E0923 20:36:55.921423 1028708 generateRocpd.cpp:1086] Opened result file: profiles/bench/r9700-compact-followup-20260923/c1-k0-trace/raw/r2d2/1028708_results.db (UUID=0000384f-46a4-76a4-8c99-b8e459427874)
+W0923 20:36:55.943162 1028708 simple_timer.cpp:55] SQLite3 generation :: rocpd_string             ::     0.005541 sec
+W0923 20:36:55.943190 1028708 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_node          ::     0.000002 sec
+W0923 20:36:55.943480 1028708 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_process       ::     0.000284 sec
+W0923 20:36:55.943677 1028708 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_agent         ::     0.000188 sec
+W0923 20:36:55.943692 1028708 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_pmc           ::     0.000002 sec
+W0923 20:36:55.960593 1028708 simple_timer.cpp:55] SQLite3 generation :: rocpd kernel info        ::     0.016894 sec
+W0923 20:36:55.963662 1028708 simple_timer.cpp:55] SQLite3 generation :: rocpd_region             ::     0.003037 sec
+W0923 20:36:56.291039 1028708 simple_timer.cpp:55] SQLite3 generation :: rocpd_kernel_dispatch    ::     0.327361 sec
+W0923 20:36:56.291068 1028708 simple_timer.cpp:55] SQLite3 generation :: rocpd_pmc_event          ::     0.000006 sec
+W0923 20:36:56.291081 1028708 simple_timer.cpp:55] SQLite3 generation :: rocpd_memory_copy        ::     0.000002 sec
+W0923 20:36:56.294108 1028708 simple_timer.cpp:55] SQLite3 generation :: rocpd_graph_launch       ::     0.003021 sec
+W0923 20:36:56.294130 1028708 simple_timer.cpp:55] SQLite3 generation :: rocpd_memory_allocate    ::     0.000004 sec
+W0923 20:36:56.294148 1028708 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_pmc: kfd      ::     0.000012 sec
+W0923 20:36:56.294161 1028708 simple_timer.cpp:55] SQLite3 generation :: rocpd_pmc_event: kfd     ::     0.000000 sec
+W0923 20:36:56.295917 1028708 simple_timer.cpp:55] SQLite3 generation :: rocpd_flush_pending      ::     0.001749 sec
+W0923 20:36:56.296213 1028708 simple_timer.cpp:55] SQLite3 generation :: SQL indexing             ::     0.000286 sec
+W0923 20:36:56.298042 1028708 simple_timer.cpp:55] SQLite3 generation :: total                    ::     0.377516 sec
+W0923 20:36:56.300360 1028708 simple_timer.cpp:55] [rocprofv3] output generation ::     0.390576 sec
+W0923 20:36:56.300815 1028708 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.391104 sec

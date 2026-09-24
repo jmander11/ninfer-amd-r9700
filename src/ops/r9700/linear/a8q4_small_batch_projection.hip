@@ -29,10 +29,20 @@ hipError_t launch_prepared(const A8Q4G64LinearArgs& a, hipStream_t stream) {
         case 4: return launch_width<N,K,4>(a,stream);
         }
     }
-    if constexpr ((N==34816 && K==5120) || (N==5120 && K==17408)) {
+    if constexpr (N==5120 && K==6144) {
         switch(a.tokens) {
         case 12: return launch_width<N,K,12>(a,stream);
         case 18: return launch_width<N,K,18>(a,stream);
+        case 24: return launch_width<N,K,24>(a,stream);
+        }
+    }
+    if constexpr ((N==34816 && K==5120) || (N==5120 && K==17408)) {
+        switch(a.tokens) {
+        case 10: return launch_width<N,K,10>(a,stream);
+        case 12: return launch_width<N,K,12>(a,stream);
+        case 15: return launch_width<N,K,15>(a,stream);
+        case 18: return launch_width<N,K,18>(a,stream);
+        case 20: return launch_width<N,K,20>(a,stream);
         case 24: return launch_width<N,K,24>(a,stream);
         }
     }

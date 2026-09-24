@@ -43,11 +43,10 @@ Package::LoadPlan Package::plan_load(artifact::Binder& binder, const EngineOptio
                                      WeightsProfile weights_profile) {
     const auto features = qwen3::startup_features(options);
     auto plan = detail::bind_artifact(binder, weights_profile, features);
+    const auto verify_widths = qwen3::startup_verify_widths<detail::DFlashConfig>(options);
     plan.bindings.linear_prepared_widths = detail::Variant::ExecutionState::eager_widths(
         std::min(options.prefill_chunk, options.max_context), options.max_concurrency,
-        features.mtp() ? options.speculative.draft_tokens + 1U : 0U,
-        features.dflash() ? qwen3::dflash_verify_width<detail::DFlashConfig>(
-            options.speculative.draft_tokens, options.speculative.dflash_verify_width) : 0U);
+        verify_widths);
     return LoadPlan(std::make_unique<LoadPlan::Impl>(
         weights_profile, std::move(plan)));
 }

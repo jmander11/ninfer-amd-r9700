@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <vector>
 
 namespace ninfer::targets::qwen3_8_27b::detail {
@@ -50,7 +51,7 @@ struct Variant {
     public:
         ExecutionState(const ModelView& model, DeviceSpan serialized_storage,
                        std::uint32_t prefill_tokens, std::uint32_t maximum_concurrency,
-                       std::uint32_t mtp_width, std::uint32_t dflash_width);
+                       std::span<const std::uint32_t> verify_widths);
         ~ExecutionState();
 
         ExecutionState(const ExecutionState&)            = delete;
@@ -152,7 +153,7 @@ struct Variant {
         // plus the fixed full prefill chunk prepared before graph definition begins.
         [[nodiscard]] static std::vector<std::uint32_t>
         eager_widths(std::uint32_t prefill_tokens, std::uint32_t maximum_concurrency,
-                     std::uint32_t mtp_width, std::uint32_t dflash_width);
+                     std::span<const std::uint32_t> verify_widths);
 
     private:
         struct Impl;
