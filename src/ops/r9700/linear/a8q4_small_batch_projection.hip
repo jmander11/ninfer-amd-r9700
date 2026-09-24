@@ -71,7 +71,11 @@ hipError_t detail::launch_a8q4_small_batch_projection(
     if (a.rows == 34816) return launch_prepared<34816,5120>(a,stream);
     if (a.rows == 5120 && a.columns == 17408) return launch_prepared<5120,17408>(a,stream);
     if (a.rows == 5120 && a.columns == 25600) return launch_prepared<5120,25600>(a,stream);
+    if (a.rows == 5120 && a.columns == 4096) return launch_prepared<5120,4096>(a,stream);
     if (a.rows == 5120) return launch_prepared<5120,6144>(a,stream);
+    if (a.rows == 7168) return launch_prepared<7168,5120>(a,stream);
+    if (a.rows == 6144) return launch_prepared<6144,5120>(a,stream);
+    if (a.rows == 1280) return launch_prepared<1280,5120>(a,stream);
     if (a.rows == 12288) return launch_prepared<12288,5120>(a,stream);
     return launch_prepared<4096,5120>(a,stream);
 }
@@ -82,7 +86,11 @@ hipError_t a8q4_small_batch_projection(
     if (a.rows == 34816 && a.columns == 5120) return launch<34816,5120>(a,stream);
     if (a.rows == 5120 && a.columns == 17408) return launch<5120,17408>(a,stream);
     if (a.rows == 5120 && a.columns == 25600) return launch<5120,25600>(a,stream);
+    if (a.rows == 5120 && a.columns == 4096) return launch<5120,4096>(a,stream);
     if (a.rows == 5120 && a.columns == 6144) return launch<5120,6144>(a,stream);
+    if (a.rows == 7168 && a.columns == 5120) return launch<7168,5120>(a,stream);
+    if (a.rows == 6144 && a.columns == 5120) return launch<6144,5120>(a,stream);
+    if (a.rows == 1280 && a.columns == 5120) return launch<1280,5120>(a,stream);
     if (a.rows == 12288 && a.columns == 5120) return launch<12288,5120>(a,stream);
     if (a.rows == 4096 && a.columns == 5120) return launch<4096,5120>(a,stream);
     return hipErrorInvalidValue;

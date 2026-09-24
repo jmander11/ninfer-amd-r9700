@@ -149,7 +149,9 @@ For a change
 restricted to MLP, append `--mlp-only` to qualify all selected widths of just
 N34816/K5120 and N5120/K17408, including T5/T6 down. `--draft-only` covers the four
 N5120/K17408 and N5120/K25600 T5/T6 cells. `--output-only` qualifies N5120/K6144 at
-all selected T2..6 and T12/18/24 widths. The complete owner now has 36 cells.
+all selected T2..6 and T12/18/24 widths. `--projection-only` covers the eight
+T5/T6 cells N7168/K5120, N6144/K5120, N1280/K5120 and N5120/K4096.
+The complete owner now has 44 cells.
 These scopes use identical numerical criteria and
 report their restricted domain explicitly. Restricted results never qualify the
 unmeasured domain. Retained original diagnostic provenance:
