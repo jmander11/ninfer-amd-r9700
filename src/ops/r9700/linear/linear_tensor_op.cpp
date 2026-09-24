@@ -7,7 +7,6 @@
 #include "ops/r9700/linear/r9700_linear.h"
 #include "ops/r9700/linear/r9700_q4_activation_profile.h"
 #include "ops/r9700/linear/r9700_w8_activation_profile.h"
-#include "ops/r9700/linear/dflash_verify_down.h"
 #include "ops/r9700/linear/w8_tiled_head.h"
 
 #include <hip/hip_bfloat16.h>
@@ -127,17 +126,11 @@ std::size_t linear_workspace_capacity_bytes(QType qtype, std::int32_t tokens,
     return bytes;
 }
 
-std::size_t dflash_verify_down_linear_workspace_capacity_bytes(
-    QType qtype, std::int32_t tokens, std::int32_t columns, std::int32_t rows) {
-    (void)checked_extent(rows, "N");
-    return linear_workspace_capacity_bytes(qtype, tokens, columns);
-}
-
 namespace {
 
 void linear_with_workspace(const Tensor& x, const Weight& weight, Tensor& output,
                             DeviceSpan activation,
-                            hipStream_t stream, bool dflash_target_verify_down = false) {
+                            hipStream_t stream) {
     if (weight.qtype == QType::W8G32_F16S) {
         const std::uint32_t tokens = checked_extent(x.ne[1], "T");
         const std::uint32_t rows = checked_extent(output.ne[0], "N");
@@ -247,23 +240,6 @@ void linear_with_workspace(const Tensor& x, const Weight& weight, Tensor& output
         throw std::invalid_argument("linear: external activation workspace is too small");
     }
     if (r9700::linear::q4_linear_activation_bits(tokens, rows, columns, padded) == 8U) {
-        if (dflash_target_verify_down && (tokens == 5U || tokens == 6U) &&
-            rows == 5120U && columns == 17408U && padded == 17408U) {
-            // This complete launcher owns fresh A8 preparation. Dispatch before the
-            // generic launcher, never after it; only the activation workspace is used.
-            HIP_CHECK(r9700::linear::a8q4g64_dflash_verify_down(
-                {.input = static_cast<const hip_bfloat16*>(x.data),
-                 .weight_codes = static_cast<const std::uint8_t*>(weight.qdata),
-                 .weight_code_bytes = static_cast<std::size_t>(code_bytes),
-                 .weight_scales = static_cast<const std::uint16_t*>(weight.scales),
-                 .weight_scale_bytes = static_cast<std::size_t>(scale_bytes),
-                 .activation_workspace = activation.data,
-                 .activation_workspace_bytes = workspace_bytes,
-                 .output = static_cast<hip_bfloat16*>(output.data),
-                 .tokens = tokens, .rows = rows, .columns = columns,
-                 .padded_columns = padded}, stream));
-            return;
-        }
         HIP_CHECK(r9700::linear::a8q4g64_linear_candidate(
             {.input = static_cast<const hip_bfloat16*>(x.data),
              .weight_codes = static_cast<const std::uint8_t*>(weight.qdata),
@@ -310,17 +286,6 @@ void linear(const Tensor& x, const Weight& weight, Tensor& output,
     const DeviceSpan activation = workspace_bytes == 0U ? DeviceSpan{}
                                                         : workspace.alloc_bytes(workspace_bytes);
     linear_with_workspace(x, weight, output, activation, stream);
-}
-
-void dflash_verify_down_linear(const Tensor& x, const Weight& weight, Tensor& output,
-                               WorkspaceArena& workspace, hipStream_t stream) {
-    const std::size_t activation_bytes = linear_workspace_capacity_bytes(
-        weight.qtype, x.ne[1], x.ne[0]);
-    auto scope = workspace.scope();
-    const DeviceSpan activation = activation_bytes == 0U
-                                      ? DeviceSpan{}
-                                      : workspace.alloc_bytes(activation_bytes);
-    linear_with_workspace(x, weight, output, activation, stream, true);
 }
 
 std::size_t normalized_linear_workspace_capacity_bytes(
@@ -487,18 +452,6 @@ void projected_residual_t1(const Tensor& input, const Weight& weight, Tensor& re
 void linear(const Tensor& x, const Weight& weight, Tensor& output,
             const DeviceSpan& activation_workspace, hipStream_t stream) {
     linear_with_workspace(x, weight, output, activation_workspace, stream);
-}
-
-void dflash_verify_down_linear(const Tensor& x, const Weight& weight, Tensor& output,
-                               const DeviceSpan& serialized_workspace,
-                               hipStream_t stream) {
-    const std::size_t activation_bytes = linear_workspace_capacity_bytes(
-        weight.qtype, x.ne[1], x.ne[0]);
-    linear_with_workspace(
-        x, weight, output,
-        DeviceSpan{serialized_workspace.data,
-                   std::min(serialized_workspace.bytes, activation_bytes)},
-        stream, true);
 }
 
 void linear(const Tensor& x, const Weight& weight, Tensor& output, hipStream_t stream) {

@@ -46,10 +46,8 @@ hipError_t launch_prepared(const A8Q4G64LinearArgs& a, hipStream_t stream) {
         case 24: return launch_width<N,K,24>(a,stream);
         }
     }
-    if constexpr (K!=17408) {
-        if(a.tokens==5)return launch_width<N,K,5>(a,stream);
-        if(a.tokens==6)return launch_width<N,K,6>(a,stream);
-    }
+    if(a.tokens==5)return launch_width<N,K,5>(a,stream);
+    if(a.tokens==6)return launch_width<N,K,6>(a,stream);
     return hipErrorInvalidValue;
 }
 template <unsigned N, unsigned K>
@@ -72,6 +70,7 @@ hipError_t detail::launch_a8q4_small_batch_projection(
     const A8Q4G64LinearArgs& a, hipStream_t stream) noexcept {
     if (a.rows == 34816) return launch_prepared<34816,5120>(a,stream);
     if (a.rows == 5120 && a.columns == 17408) return launch_prepared<5120,17408>(a,stream);
+    if (a.rows == 5120 && a.columns == 25600) return launch_prepared<5120,25600>(a,stream);
     if (a.rows == 5120) return launch_prepared<5120,6144>(a,stream);
     if (a.rows == 12288) return launch_prepared<12288,5120>(a,stream);
     return launch_prepared<4096,5120>(a,stream);
@@ -82,6 +81,7 @@ hipError_t a8q4_small_batch_projection(
         return hipErrorInvalidValue;
     if (a.rows == 34816 && a.columns == 5120) return launch<34816,5120>(a,stream);
     if (a.rows == 5120 && a.columns == 17408) return launch<5120,17408>(a,stream);
+    if (a.rows == 5120 && a.columns == 25600) return launch<5120,25600>(a,stream);
     if (a.rows == 5120 && a.columns == 6144) return launch<5120,6144>(a,stream);
     if (a.rows == 12288 && a.columns == 5120) return launch<12288,5120>(a,stream);
     if (a.rows == 4096 && a.columns == 5120) return launch<4096,5120>(a,stream);

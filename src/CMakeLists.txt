@@ -68,7 +68,6 @@ add_library(ninfer_r9700_core STATIC
   ops/r9700/linear/linear_execution.hip
   ops/r9700/linear/r9700_linear.hip)
 target_sources(ninfer_r9700_core PRIVATE
-  ops/r9700/linear/dflash_verify_down.hip
   ops/r9700/linear/w8_tiled_head.hip
   ops/r9700/linear/a8q4_small_batch_projection.hip)
 if(NINFER_R9700_XATTENTION_QUALIFICATION)
@@ -702,24 +701,7 @@ set_target_properties(ninfer_r9700_target_variant_projected_residual_qual PROPER
 target_link_libraries(ninfer_r9700_target_variant_projected_residual_qual PRIVATE
   ninfer_r9700_target_bindings hip::host)
 
-# Complete public-Op qualification for the fixed A8/Q4 T1 projection-plus-residual boundary.
-add_executable(ninfer_r9700_target_variant_down_scale_gather_qual
-  ${PROJECT_SOURCE_DIR}/tools/r9700/target_variant_down_scale_gather_qual.cpp)
-ninfer_r9700_internal_includes(ninfer_r9700_target_variant_down_scale_gather_qual)
-set_target_properties(ninfer_r9700_target_variant_down_scale_gather_qual PROPERTIES
-  HIP_ARCHITECTURES gfx1201 LINKER_LANGUAGE HIP)
-target_link_libraries(ninfer_r9700_target_variant_down_scale_gather_qual PRIVATE
-  ninfer_r9700_target_bindings hip::host)
-
-add_executable(ninfer_r9700_dflash_verify_down_qual
-  ${PROJECT_SOURCE_DIR}/tools/r9700/dflash_verify_down_qual.hip)
-ninfer_r9700_internal_includes(ninfer_r9700_dflash_verify_down_qual)
-set_target_properties(ninfer_r9700_dflash_verify_down_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
-target_compile_definitions(ninfer_r9700_dflash_verify_down_qual PRIVATE
-  NINFER_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
-target_compile_options(ninfer_r9700_dflash_verify_down_qual PRIVATE -Wno-unused-function)
-target_link_libraries(ninfer_r9700_dflash_verify_down_qual PRIVATE ninfer_r9700_core hip::host)
-
+# Complete public Linear qualification for the selected A8/Q4 small-batch projections.
 add_executable(ninfer_r9700_a8q4_small_batch_projection_qual
   ${PROJECT_SOURCE_DIR}/tools/r9700/a8q4_small_batch_projection_qual.hip)
 ninfer_r9700_internal_includes(ninfer_r9700_a8q4_small_batch_projection_qual)

@@ -1,0 +1,6 @@
+[
+  "/ssdpool2nvme/local_llm/ninfer-amd-r9700/build-r9700/src/ninfer_r9700_a8q4_small_batch_projection_qual",
+  "--out-json",
+  "/ssdpool2nvme/local_llm/ninfer-amd-r9700/profiles/bench/r9700-a8-bound-dflash-20260923/final-draft-qualification.json",
+  "--draft-only"
+]

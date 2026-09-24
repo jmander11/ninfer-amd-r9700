@@ -179,16 +179,11 @@ void selected_linear(Variant::ExecutionState* execution, Variant::SelectedLinear
 
 void serialized_linear(Variant::ExecutionState* execution, const Tensor& input,
                        const Weight& weight, Tensor& output, WorkspaceArena& workspace,
-                       hipStream_t stream, bool dflash_target_verify_down = false) {
+                       hipStream_t stream) {
     if (execution != nullptr) {
-        execution->linear(input, weight, output, workspace, stream,
-                          dflash_target_verify_down);
+        execution->linear(input, weight, output, workspace, stream);
     } else {
-        if (dflash_target_verify_down) {
-            ops::dflash_verify_down_linear(input, weight, output, workspace, stream);
-        } else {
-            ops::linear(input, weight, output, workspace, stream);
-        }
+        ops::linear(input, weight, output, workspace, stream);
     }
 }
 
@@ -388,13 +383,10 @@ Variant::ExecutionState::ExecutionState(const ModelView& model, DeviceSpan seria
 }
 
 void Variant::ExecutionState::linear(const Tensor& input, const Weight& weight, Tensor& output,
-                                     WorkspaceArena& fallback_workspace, hipStream_t stream,
-                                     bool dflash_target_verify_down) {
+                                     WorkspaceArena& fallback_workspace, hipStream_t stream) {
     if (impl_ == nullptr) throw std::logic_error("R9700 linear execution state is empty");
-    const std::size_t required = dflash_target_verify_down
-        ? ops::dflash_verify_down_linear_workspace_capacity_bytes(
-              weight.qtype, input.ne[1], input.ne[0], output.ne[0])
-        : ops::linear_workspace_capacity_bytes(weight.qtype, input.ne[1], input.ne[0]);
+    const std::size_t required = ops::linear_workspace_capacity_bytes(
+        weight.qtype, input.ne[1], input.ne[0]);
     if (required == 0U) {
         ops::linear(input, weight, output, stream);
         return;
@@ -403,12 +395,7 @@ void Variant::ExecutionState::linear(const Tensor& input, const Weight& weight, 
         throw std::invalid_argument("R9700 serialized linear activation region is too small");
     }
     (void)fallback_workspace;
-    if (dflash_target_verify_down) {
-        ops::dflash_verify_down_linear(
-            input, weight, output, DeviceSpan{impl_->activation.data, required}, stream);
-    } else {
-        ops::linear(input, weight, output, DeviceSpan{impl_->activation.data, required}, stream);
-    }
+    ops::linear(input, weight, output, DeviceSpan{impl_->activation.data, required}, stream);
 }
 
 void Variant::ExecutionState::fused_mlp_down(const Tensor& gate_up, const Weight& down,
@@ -1225,9 +1212,8 @@ namespace {
 void post_mixer_body(const Tensor& hidden, const Variant::PostMixerWeights& weights,
                     Tensor& residual, qwen3::TextPhase phase, WorkspaceArena& workspace,
                     hipStream_t stream, Variant::ExecutionState* execution,
-                    std::int32_t text_layer, bool dflash_target_verify,
-                    const Tensor* norm, float eps, bool ordinary_decode,
-                    std::int32_t route_tokens) {
+                    std::int32_t text_layer,
+                    const Tensor* norm, float eps, bool ordinary_decode) {
     auto outer = workspace.scope();
     const auto project_gate_up = [&](Tensor& gate_up) {
         if (norm != nullptr) {
@@ -1277,16 +1263,11 @@ void post_mixer_body(const Tensor& hidden, const Variant::PostMixerWeights& weig
             return;
         }
         Tensor delta = workspace.alloc(DType::BF16, {TextConfig::hidden, hidden.ne[1]});
-        const bool verify_down = Variant::ExecutionState::dflash_down_scale_gather_selected(
-                ops::r9700::linear::kQ4ActivationBits, phase, dflash_target_verify,
-                route_tokens, text_layer, static_cast<std::uint32_t>(activation.ne[1]),
-                static_cast<std::uint32_t>(weights.down.n),
-                static_cast<std::uint32_t>(weights.down.k), weights.down.qtype, weights.down.layout);
         if (weights.down.qtype == QType::F8E4M3_ROW_F32S) {
             selected_linear(execution, Variant::SelectedLinearRole::MlpDown, text_layer,
                             activation, weights.down, delta, workspace, stream);
         } else {
-            serialized_linear(execution, activation, weights.down, delta, workspace, stream, verify_down);
+            serialized_linear(execution, activation, weights.down, delta, workspace, stream);
         }
         ops::residual_add(delta, residual, stream);
     }
@@ -1297,17 +1278,17 @@ void post_mixer_body(const Tensor& hidden, const Variant::PostMixerWeights& weig
 void Variant::post_mixer(const Tensor& norm, float eps, const Tensor& hidden,
                          const PostMixerWeights& weights, Tensor& residual,
                          qwen3::TextPhase phase, WorkspaceArena& workspace, hipStream_t stream,
-                         std::int32_t route_tokens, ExecutionState* execution, std::int32_t text_layer,
-                         bool dflash_target_verify, bool ordinary_decode) {
+                         ExecutionState* execution, std::int32_t text_layer,
+                         bool ordinary_decode) {
     post_mixer_body(hidden, weights, residual, phase, workspace, stream, execution, text_layer,
-                    dflash_target_verify, &norm, eps, ordinary_decode, route_tokens);
+                    &norm, eps, ordinary_decode);
 }
 
 void Variant::mtp_post_mixer(const Tensor& hidden, const MtpPostMixerWeights& weights,
                              Tensor& residual, WorkspaceArena& workspace, hipStream_t stream,
                              std::int32_t, ExecutionState* execution) {
     post_mixer_body(hidden, weights, residual, qwen3::TextPhase::Verify, workspace, stream,
-                    execution, -1, false, nullptr, 0.0F, false, 0);
+                    execution, -1, nullptr, 0.0F, false);
 }
 
 std::size_t Variant::mtp_attention_projection_workspace_capacity_bytes(std::int32_t first,
@@ -1624,22 +1605,6 @@ std::size_t Variant::execution_state_capacity_bytes(WeightsProfile profile,
         profile == WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2W8MseEvaluation ||
         profile == WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4Evaluation) {
         bytes = std::max(bytes, execution_storage_bytes(prefill_tokens, maximum_graph_tokens));
-    }
-    if (profile == WeightsProfile::R9700Q4Fp8SelectiveCapDFlash2Q4Evaluation ||
-        profile == WeightsProfile::R9700Q4SelectiveProtectedDFlash2Q4Evaluation ||
-        profile == WeightsProfile::R9700Q4G64DFlash2Q4MseEvaluation ||
-        profile == WeightsProfile::R9700Q4G64DFlash2W8MseEvaluation ||
-        profile == WeightsProfile::R9700Q4G64DFlash2Q4Evaluation ||
-        profile == WeightsProfile::R9700Q4W8MseDFlash2Q4MseEvaluation ||
-        profile == WeightsProfile::R9700Q4W8MseDFlash2W8MseEvaluation ||
-        profile == WeightsProfile::R9700Q4W8MseDFlash2Q4Evaluation ||
-        profile == WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4MseEvaluation ||
-        profile == WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2W8MseEvaluation ||
-        profile == WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4Evaluation) {
-        bytes = std::max(
-            bytes,
-            ops::dflash_verify_down_linear_workspace_capacity_bytes(
-                QType::Q4G64_F16S, 6, DFlashConfig::intermediate, TextConfig::hidden));
     }
     return bytes == 0U ? 0U
                        : align_up(bytes, kExecutionAlignment,

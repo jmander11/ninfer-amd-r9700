@@ -1,6 +1,5 @@
 #define NINFER_A8Q4_QUAL_NO_MAIN
 #include "a8q4_shape_sweep_qual.hip"
-#include "ops/r9700/linear/dflash_verify_down.h"
 #include "ops/r9700/linear/a8q4_small_batch_projection.h"
 #include "ninfer/ops/linear.h"
 #include <cstring>
@@ -8,17 +7,9 @@
 
 namespace {
 constexpr unsigned Copies=3;
-#if defined(NINFER_QUAL_SMALL_BATCH_PROJECTIONS)
 unsigned N=0,K=0,G=0;
-#else
-constexpr unsigned N=5120,K=17408,G=K/64;
-#endif
 hipError_t owning_launch(const linear::A8Q4G64CandidateArgs& a,hipStream_t s) {
-#if defined(NINFER_QUAL_SMALL_BATCH_PROJECTIONS)
     return linear::a8q4_small_batch_projection(a,s);
-#else
-    return linear::a8q4g64_dflash_verify_down(a,s);
-#endif
 }
 constexpr std::size_t Guard=256;
 const std::filesystem::path Pci="/sys/bus/pci/devices/0000:13:00.0";
@@ -79,11 +70,7 @@ void launch(const linear::A8Q4G64CandidateArgs& a,hipStream_t s) {
         weight.scales=const_cast<std::uint16_t*>(a.weight_scales);
         weight.qdata_bytes=a.weight_code_bytes;weight.scale_bytes=a.weight_scale_bytes;
 
-#if defined(NINFER_QUAL_SMALL_BATCH_PROJECTIONS)
     ninfer::ops::linear(input,weight,output,
-#else
-    ninfer::ops::dflash_verify_down_linear(input,weight,output,
-#endif
         ninfer::DeviceSpan{a.activation_workspace,a.activation_workspace_bytes},s);
 }
 struct Graph {
@@ -397,13 +384,12 @@ void cell(unsigned t,hipStream_t s,std::ostream& out) {
 #ifndef NINFER_A8Q4_VERIFY_QUAL_NO_MAIN
 int main(int argc,char** argv) {
  try {
-    bool mlp_only=false,output_only=false;
-#if defined(NINFER_QUAL_SMALL_BATCH_PROJECTIONS)
+    bool mlp_only=false,output_only=false,draft_only=false;
     mlp_only=argc==4 && std::string_view(argv[3])=="--mlp-only";
     output_only=argc==4 && std::string_view(argv[3])=="--output-only";
-#endif
-    if((argc!=3 && !mlp_only && !output_only) || std::string_view(argv[1])!="--out-json")
-        fail("usage: selected_q4_qual --out-json FRESH.json [--mlp-only|--output-only]");
+    draft_only=argc==4 && std::string_view(argv[3])=="--draft-only";
+    if((argc!=3 && !mlp_only && !output_only && !draft_only) || std::string_view(argv[1])!="--out-json")
+        fail("usage: selected_q4_qual --out-json FRESH.json [--mlp-only|--output-only|--draft-only]");
     const std::filesystem::path output=argv[2];require_fresh_output(output);power();
     HIP_CHECK(hipSetDevice(0));hipDeviceProp_t props{};HIP_CHECK(hipGetDeviceProperties(&props,0));
     char pci[32]{};HIP_CHECK(hipDeviceGetPCIBusId(pci,sizeof(pci),0));
@@ -411,30 +397,25 @@ int main(int argc,char** argv) {
        props.warpSize!=32 || (std::string_view(pci)!="0000:13:00.0" && std::string_view(pci)!="13:00.0"))fail("wrong device");
     hipStream_t stream{};HIP_CHECK(hipStreamCreateWithFlags(&stream,hipStreamNonBlocking));
     std::ostringstream out;out<<std::setprecision(17)<<"{\"schema\":\""
-#if defined(NINFER_QUAL_SMALL_BATCH_PROJECTIONS)
         <<"ninfer.r9700.a8q4-small-batch-projections.v3"
-#else
-        <<"ninfer.r9700.dflash-verify-down.v3"
-#endif
         <<"\",\"status\":\"qualified\",\"public_dispatch_tested\":true,"
           "\"pci\":\"0000:13:00.0\",\"power\":\"auto\",\"copies\":3,\"scope\":\""
-        <<(mlp_only?"mlp_only":output_only?"output_only":"complete_owner")<<"\",\"cells\":[";
-#if defined(NINFER_QUAL_SMALL_BATCH_PROJECTIONS)
-    constexpr std::array<std::array<unsigned,2>,5> shapes{{{34816,5120},{5120,6144},{12288,5120},{4096,5120},{5120,17408}}};
+        <<(mlp_only?"mlp_only":output_only?"output_only":draft_only?"draft_only":"complete_owner")<<"\",\"cells\":[";
+    constexpr std::array<std::array<unsigned,2>,6> shapes{{{34816,5120},{5120,6144},{12288,5120},{4096,5120},{5120,17408},{5120,25600}}};
     bool first=true;
     for(const auto& shape:shapes) {
         if(mlp_only && shape!=std::array<unsigned,2>{34816,5120} &&
            shape!=std::array<unsigned,2>{5120,17408})continue;
         if(output_only && shape!=std::array<unsigned,2>{5120,6144})continue;
+        if(draft_only && shape!=std::array<unsigned,2>{5120,17408} &&
+           shape!=std::array<unsigned,2>{5120,25600})continue;
         N=shape[0];K=shape[1];G=K/64;
         for(unsigned t:{2U,3U,4U,5U,6U,10U,12U,15U,18U,20U,24U}) {
+            if(draft_only && t!=5 && t!=6)continue;
             if(!linear::detail::use_a8q4_small_batch_projection(t,N,K,K))continue;
             if(!first)out<<',';first=false;cell(t,stream,out);
         }
     }
-#else
-    cell(5,stream,out);out<<',';cell(6,stream,out);
-#endif
     out<<"]}\n";
     HIP_CHECK(hipStreamDestroy(stream));power();
     const int fd=::open(output.c_str(),O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC,0644);

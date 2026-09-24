@@ -33,16 +33,8 @@ namespace ninfer::ops {
 [[nodiscard]] std::size_t linear_workspace_capacity_bytes(QType qtype,
                                                            std::int32_t tokens,
                                                            std::int32_t columns);
-// Complete serialized workspace for the explicitly identified DFlash target-verify
-// MLP-down call. Generic Linear callers do not select this route by shape alone.
-// C1 T5/T6 Q4N16K16/G64 A8 uses pipelined WMMA, with the ordinary activation
-// workspace only. Target schedule ownership excludes compact multi-request batches.
-[[nodiscard]] std::size_t dflash_verify_down_linear_workspace_capacity_bytes(
-    QType qtype, std::int32_t tokens, std::int32_t columns, std::int32_t rows);
 void linear(const Tensor& x, const Weight& w, Tensor& out, WorkspaceArena& workspace,
             hipStream_t stream);
-void dflash_verify_down_linear(const Tensor& x, const Weight& w, Tensor& out,
-                               WorkspaceArena& workspace, hipStream_t stream);
 
 // Executes an integer linear against caller-owned serialized workspace. The span may
 // be larger than the exact requirement for this shape; the activation image consumes the
@@ -51,9 +43,6 @@ void dflash_verify_down_linear(const Tensor& x, const Weight& w, Tensor& out,
 // stable without reserving private activation storage inside each schedule's WorkspaceArena.
 void linear(const Tensor& x, const Weight& w, Tensor& out,
             const DeviceSpan& activation_workspace, hipStream_t stream);
-void dflash_verify_down_linear(const Tensor& x, const Weight& w, Tensor& out,
-                               const DeviceSpan& serialized_workspace,
-                               hipStream_t stream);
 
 // Workspace-free boundary retained for BF16/exact-W8 control and qualification routes. It rejects
 // Q4 rather than allocating hidden activation storage; product execution uses the DeviceSpan

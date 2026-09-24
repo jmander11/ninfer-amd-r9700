@@ -63,8 +63,7 @@ struct Variant {
                                const Tensor& input, const Weight& weight, Tensor& output,
                                hipStream_t stream);
         void linear(const Tensor& input, const Weight& weight, Tensor& output,
-                    WorkspaceArena& fallback_workspace, hipStream_t stream,
-                    bool dflash_target_verify_down = false);
+                    WorkspaceArena& fallback_workspace, hipStream_t stream);
         void fused_mlp_down(const Tensor& gate_up, const Weight& down,
                             Tensor& output, hipStream_t stream);
         [[nodiscard]] bool gdn_q4_pair_t1(
@@ -86,16 +85,6 @@ struct Variant {
             const Tensor& input, const Tensor& norm, float eps, const Weight& weight,
             Tensor& output, qwen3::TextPhase phase, bool ordinary_decode,
             std::int32_t text_layer, hipStream_t stream);
-        [[nodiscard]] static constexpr bool dflash_down_scale_gather_selected(
-            std::uint32_t activation_bits, qwen3::TextPhase phase,
-            bool dflash_target_verify, std::int32_t route_tokens, std::int32_t text_layer,
-            std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns,
-            QType weight, QuantLayout layout) noexcept {
-            return activation_bits == 8 && phase == qwen3::TextPhase::Verify &&
-                dflash_target_verify && route_tokens == 0 && text_layer >= 0 && text_layer < 64 &&
-                (tokens == 5 || tokens == 6) && rows == 5120 && columns == 17408 &&
-                weight == QType::Q4G64_F16S && layout == QuantLayout::Q4N16K16;
-        }
         // These local Q4 boundaries do not depend on neighboring matrix formats. Keep explicit
         // ordinary-decode intent: speculative target verification can also have width one.
         [[nodiscard]] static constexpr bool normalized_linear_t1_selected(
@@ -276,10 +265,9 @@ struct Variant {
     static void post_mixer(const Tensor& norm, float eps, const Tensor& hidden,
                            const PostMixerWeights& weights, Tensor& residual,
                            qwen3::TextPhase phase, WorkspaceArena& workspace,
-                           hipStream_t stream, std::int32_t route_tokens = 0,
+                           hipStream_t stream,
                            ExecutionState* execution = nullptr,
                            std::int32_t text_layer = -1,
-                           bool dflash_target_verify = false,
                            bool ordinary_decode = false);
     static void mtp_post_mixer(const Tensor& hidden, const MtpPostMixerWeights& weights,
                                Tensor& residual, WorkspaceArena& workspace, hipStream_t stream,

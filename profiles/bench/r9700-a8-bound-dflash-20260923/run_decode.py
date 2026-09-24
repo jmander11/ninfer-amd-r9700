@@ -13,6 +13,8 @@ parser.add_argument('--label', required=True)
 parser.add_argument('--concurrency', type=int, choices=[1, 2, 3, 4], required=True)
 parser.add_argument('--draft', type=int, choices=[4, 5], required=True)
 parser.add_argument('--adaptive', action='store_true')
+parser.add_argument('--summarize-existing', action='store_true',
+                    help='finish analysis of a successful retained run without retiming')
 args = parser.parse_args()
 if args.adaptive and args.draft != 5:
     parser.error('adaptive measurement uses maxK5')
@@ -29,10 +31,16 @@ for flag, value in [('--concurrency', args.concurrency), ('--draft-tokens', args
     command[command.index(flag)+1] = str(value)
 if args.adaptive:
     command.append('--adaptive-draft')
-run(command, cell)
+if args.summarize_existing:
+    assert json.loads((cell/'receipt.json').read_text())['exit_code'] == 0
+    assert json.loads((cell/'command.json').read_text()) == command
+else:
+    run(command, cell)
 report = json.loads((cell/'report.json').read_text())
 reps = report['tests'][0]['reps']
-ordinary = json.loads((prior/f'final-c{args.concurrency}-k0/report.json').read_text())
+ordinary_path = (ROOT/'profiles/bench/r9700-compact-followup-20260923/baseline-c1-k0/report.json'
+                 if args.concurrency == 1 else prior/f'final-c{args.concurrency}-k0/report.json')
+ordinary = json.loads(ordinary_path.read_text())
 tokens = ordinary['tests'][0]['reps'][0]['generated_token_ids_by_lane']
 assert all(r['generated_token_ids_by_lane'] == tokens for r in reps)
 histograms = [r['speculative']['rounds_per_draft'] for r in reps]
@@ -43,10 +51,13 @@ summary = dict(concurrency=args.concurrency, max_draft=args.draft, adaptive=args
     per_request_tok_s=statistics.median(rates)/args.concurrency,
     request_lane_rounds_per_draft=histograms, all_repetitions_exact_ordinary=True)
 assert (pci/'power_dpm_force_performance_level').read_text().strip() == 'auto'
-group = Path('/sys/fs/cgroup')/Path('/proc/self/cgroup').read_text().strip().split('::')[1].lstrip('/')
-summary['resources'] = {key:(group/key).read_text() for key in ['memory.events','memory.peak','cpu.stat']}
-events = dict(line.split() for line in summary['resources']['memory.events'].splitlines())
-assert all(int(events[key]) == 0 for key in ['high','max','oom','oom_kill'])
-assert int(dict(line.split() for line in summary['resources']['cpu.stat'].splitlines()).get('nr_throttled',0)) == 0
+if not args.summarize_existing:
+    group = Path('/sys/fs/cgroup')/Path('/proc/self/cgroup').read_text().strip().split('::')[1].lstrip('/')
+    summary['resources'] = {key:(group/key).read_text() for key in ['memory.events','memory.peak','cpu.stat']}
+    events = dict(line.split() for line in summary['resources']['memory.events'].splitlines())
+    assert all(int(events[key]) == 0 for key in ['high','max','oom','oom_kill'])
+    assert int(dict(line.split() for line in summary['resources']['cpu.stat'].splitlines()).get('nr_throttled',0)) == 0
+else:
+    summary['resources'] = 'scope counters not retained; completed measurement recovered without retiming'
 write_json(cell/'summary.json', summary)
 print(json.dumps(summary), flush=True)

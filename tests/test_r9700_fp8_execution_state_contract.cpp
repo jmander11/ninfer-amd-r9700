@@ -94,6 +94,23 @@ void adaptive_width_contract() {
             observed.erase(std::unique(observed.begin(), observed.end()), observed.end());
             require(prepared == observed,
                     "adaptive C1-C4 graph execution width was not prepared exactly");
+            if (backend == Backend::DFlash) {
+                // A tiny prefill cannot conceal insufficient serialized activation
+                // storage for a K5 append after the live adaptive graph drops to K3/K4.
+                const auto capacity = detail::Variant::execution_state_capacity_bytes(
+                    detail::WeightsProfile::R9700Q4Fp8SelectiveCapDFlash2Q4Evaluation,
+                    1U, concurrency * storage);
+                for (std::uint32_t batch = 1U; batch <= concurrency; ++batch) {
+                    for (const auto width : startup) {
+                        for (const auto columns : {detail::TextConfig::intermediate,
+                                                   detail::DFlashConfig::feature_rows}) {
+                            require(capacity >= ninfer::ops::linear_workspace_capacity_bytes(
+                                        ninfer::QType::Q4G64_F16S, batch * width, columns),
+                                    "adaptive graph or pending append exceeds Q4 activation storage");
+                        }
+                    }
+                }
+            }
         }
         options.speculative.adaptive_draft = false;
         require(qwen3::startup_verify_widths<detail::DFlashConfig>(options) ==
@@ -215,13 +232,9 @@ int main() {
             auto state = std::max(std::max(base, companion),
                 ninfer::ops::LinearExecution::activation_workspace_capacity_bytes(
                     tokens, detail::TextConfig::intermediate));
-            state = std::max(state,
-                ninfer::ops::dflash_verify_down_linear_workspace_capacity_bytes(
-                    ninfer::QType::Q4G64_F16S, 6, detail::DFlashConfig::intermediate,
-                    detail::TextConfig::hidden));
             require(Variant::execution_state_capacity_bytes(protected_dflash, tokens, tokens) ==
                         (state + 255U) / 256U * 256U,
-                    "protected companion loses FP8 K17408 or verify-down workspace");
+                    "protected companion loses FP8 K17408 or Q4 activation workspace");
             require(Variant::vision_linear_workspace_capacity_bytes(protected_dflash, tokens) ==
                         Variant::vision_linear_workspace_capacity_bytes(protected_profile, tokens),
                     "protected companion changes base Vision workspace");
@@ -289,14 +302,11 @@ int main() {
                 ninfer::QType::Q4G64_F16S, tokens, detail::DFlashConfig::feature_rows);
             const auto activation = ninfer::ops::LinearExecution::activation_workspace_capacity_bytes(
                 tokens, detail::TextConfig::intermediate);
-            const auto verify = ninfer::ops::dflash_verify_down_linear_workspace_capacity_bytes(
-                ninfer::QType::Q4G64_F16S, 6, detail::DFlashConfig::intermediate,
-                detail::TextConfig::hidden);
             require(Variant::linear_workspace_capacity_bytes(capped_companion, tokens) ==
                         std::max(base, draft), "capped companion loses K25600 activation");
             require(Variant::execution_state_capacity_bytes(capped_companion, tokens, tokens) ==
-                        (std::max({base, draft, activation, verify}) + 255U) / 256U * 256U,
-                    "capped companion loses FP8 K17408 or verify-down storage");
+                        (std::max({base, draft, activation}) + 255U) / 256U * 256U,
+                    "capped companion loses FP8 K17408 or Q4 activation storage");
             require(Variant::vision_linear_workspace_capacity_bytes(capped_companion, tokens) ==
                         Variant::vision_linear_workspace_capacity_bytes(
                             Profile::R9700Q4Fp8SelectiveCapEvaluation, tokens),
@@ -325,10 +335,7 @@ int main() {
                 require(Variant::vision_linear_workspace_capacity_bytes(profile, tokens) ==
                         Variant::vision_linear_workspace_capacity_bytes(base, tokens),
                         "W8 companion changed the base Vision workspace");
-                auto expected_state = std::max(expected_linear,
-                    ninfer::ops::dflash_verify_down_linear_workspace_capacity_bytes(
-                        ninfer::QType::Q4G64_F16S, 6, detail::DFlashConfig::intermediate,
-                        detail::TextConfig::hidden));
+                auto expected_state = expected_linear;
                 if (profile == Profile::R9700Q4G64Fp8FourRoleDFlash2W8MseEvaluation) {
                     expected_state = std::max(expected_state,
                         ninfer::ops::LinearExecution::activation_workspace_capacity_bytes(

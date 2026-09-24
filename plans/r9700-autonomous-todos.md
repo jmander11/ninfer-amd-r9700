@@ -85,16 +85,16 @@ above apply to every command.
 
 ### Current checkpoint
 
-ACTIVE USER REQUEST (numerical qualification and decode follow-up):
+COMPLETED USER REQUEST (numerical qualification and decode follow-up):
 - [x] Derive and implement an A8 implementation-profile numerical criterion from
   represented-input quantization and floating-point error bounds; retain the
   original BF16-input FP64 oracle and failing fixture, requalify the entire
   affected small-batch/down domain, and keep model PPL admission separate.
-- [ ] Inspect current-compatible C1 DFlash attribution and pursue only a genuinely
+- [x] Inspect current-compatible C1 DFlash attribution and pursue only a genuinely
   new, bounded material mechanism; qualify and measure any proposed improvement.
-- [ ] Diagnose adaptive C4 versus fixedK4, including actual captured-K residence
+- [x] Diagnose adaptive C4 versus fixedK4, including actual captured-K residence
   and timing-policy overhead; fix a demonstrated issue and verify exact tokens.
-- [ ] Rebuild affected deliverables, document conclusions and commit natural checkpoints.
+- [x] Rebuild affected deliverables, document conclusions and commit natural checkpoints.
 User authorized this follow-up after clarifying that2.034% is operator RMS error,
 not PPL degradation. No user choice remains pending. Preserve weights/precision
 unless evidence establishes a necessary change; prefill and unrelated campaigns
@@ -104,8 +104,23 @@ derived quantization+FP32-FMA/BF16 envelope and separate arithmetic bound;102
 output corruptions rejected. Original public FP64 oracle, historical2.03407%
 RMS and model PPL gates are unchanged. Evidence:
 `profiles/bench/r9700-a8-bound-dflash-20260923/`.
+Adaptive checkpoint: fixedK4 161.71 versus adaptive156.51 aggregate tok/s, all
+exact ordinary tokens. Matched traces isolate most of the gap to K3/W4 tail
+execution as lanes drain; steady C4/K4 differs only0.41%. Current budget clamp
+is intentional and tested, not an implementation bug. No unconditional K3 removal
+or policy rewrite; fixedK4 remains the measured concurrent recommendation.
+Closure: ordinary Linear now owns draft down/feature T5/6 successor kernels;
+the duplicate target-verify API/kernel is removed. Final four-cell public oracle,
+exact codec/graph/poison checks pass; old32 projection and old target-down ISA
+are unchanged. Final C1 K5/K4 98.03/84.71 versus95.97/83.17tok/s; C4 K5
+149.08 versus144.82 aggregate. Final C4 K4/adaptive161.74/156.28 are essentially
+unchanged. All15 final repetitions exact ordinary tokens. Delivered binaries
+rebuilt, focused host/Python checks pass, model guidance updated. No weights,
+precision or PPL changed; prefill remains paused. Bounded request complete, no
+hardware-ceiling claim or pending user decision. Future adaptive policy work is
+only a recorded experiment direction, not an unfinished item in this pass.
 
-ACTIVE USER REQUEST (2026-09-23, follow-up): resolve the inherited A8 public-oracle
+COMPLETED USER REQUEST (2026-09-23, follow-up): resolve the inherited A8 public-oracle
 failure first, then work through final-build attribution, useful DFlash coverage,
 remaining material prefill/decode mechanisms, and chunk selection including4096.
 - [x] Diagnose N4096/K5120/T6 failure against represented public inputs; repair the
@@ -137,9 +152,9 @@ K5 output T12/18/24 passes eight output-oracle cells; direct savings26–36%,
 fresh C4 whole140.49→144.78 aggregate tok/s, all repetitions exact ordinary
 tokens. Retained instructions unchanged. Delivered binaries rebuilt and host
 contracts pass; installed model guidance updated. Bounded optimization pass done.
-The numerical item continues in the active request above; user authorized a
-principled criterion review, not a fixture-specific threshold increase. All other
-independent priorities of this preceding pass are complete. Preserve failed evidence.
+The numerical item is resolved by the principled criterion review above, not a
+fixture-specific threshold increase. All independent priorities of this preceding
+pass are complete. Preserve failed evidence.
 Evidence:
 `profiles/bench/r9700-compact-followup-20260923/`.
 

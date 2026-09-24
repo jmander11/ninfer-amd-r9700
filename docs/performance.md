@@ -178,7 +178,58 @@ Candidate repetitions144.660–144.786 versus control140.172–140.533tok/s.
 The repaired-adaptive154.82 measurement precedes this last output extension;
 its result is not a fresh final-build adaptive timing. FixedK4's measured161.66
 still leads; K4/C1 routes retain identical instructions. Final delivered binaries
-are rebuilt, host contracts pass, and the accuracy-policy decision remains open.
+were rebuilt and host contracts passed. The subsequent A8 bound qualification
+above resolves the operator-criterion question without changing model quality.
+
+### Draft projection and adaptive-tail follow-up
+
+The compact C1 draft still used generic Linear for N5120/K17408 down and
+N5120/K25600 feature projection at T5/6. Transferring the existing successor
+pipeline to these four shape-owned public routes passes complete independent
+FP64/A8-profile qualification, exact generic/codec/eager/graph, poison and guards.
+The prior32 kernel instruction/resource streams remain exact. New kernels use
+nativeIU4,62/63VGPR,22SGPR and no LDS/private scratch. Cold complete-Op latency
+falls44.6–47.4%. Matched C1 codeP4096/G128 K5 improves95.9727→97.9506tok/s
+(2.06%); all three repetitions on each build match ordinary tokens and use25
+request-lane speculative rounds. K4 improves83.1713→84.5524tok/s (1.66%),
+again exact ordinary tokens in all six repetitions and30 rounds each.
+Same weights, precision, auto, G16, chunk2048,
+warm1/reps3; no PPL arithmetic changes.
+
+Fresh fixedK4/adaptive C4 baseline measures161.7119/156.5149 aggregate tok/s
+(40.4280/39.1287 per request), with exact ordinary tokens. Adaptive actual
+K3/K4/K5 request-lane histograms are3/123/4,2/129/1,2/129/1; these are not graph
+launch counts. Matched traces show31 steady C4/K4 rounds differ only0.41% in
+kernel service. Most of the difference is at the tail: adaptive uses slow K3/W4
+routes as requests drain, while fixedK4 keeps masked/padded W5 execution.
+The current budget-clamp policy is intentional and tested; no numerical or
+steady-state chooser bug is demonstrated. Five redundant compact copies cost
+about8us/round, too small to explain the gap. Keep fixedK4 for this measured
+concurrent workload. Do not banK3 or change adaptive semantics from this one
+sample; physical-width/logical-budget separation is a future policy experiment.
+Evidence: `profiles/bench/r9700-a8-bound-dflash-20260923/`.
+
+After removing the duplicate verify-only Linear API/kernel and rebuilding all
+deliverables, the final public four-cell qualification passes again. Its linked
+projection code object matches the qualified candidate exactly, and the previous
+target-down instruction/resource streams match the consolidated route. Final
+matched confirmation (same workload, median of three repetitions):
+
+| Mode | Before, aggregate tok/s | Final, aggregate tok/s | Final per request |
+|---|---:|---:|---:|
+| C1 K5 |95.97|98.03|98.03|
+| C1 K4 |83.17|84.71|84.71|
+| C4 K5 |144.82|149.08|37.27|
+| C4 K4 |161.71|161.74|40.43|
+| C4 adaptive maxK5 |156.51|156.28|39.07|
+
+C1 K5/K4 gains are2.15%/1.85%, C4 K5 gains2.94%; fixedC4 K4 is unchanged.
+Adaptive has no demonstrated gain (repetition ranges overlap); its tail limitation
+remains. All15 final repetitions exactly match same-C ordinary tokens. Final
+scope limits are nonbinding with zero recorded throttling. Focused execution-state
+capacity and benchmark host tests, plus two Python matrix tests, pass. Ordinary
+T1–4 decode and large-prefill routes are unchanged; no new speed or ceiling claim
+is made for them. `final-summary.json` binds the final confirmation.
 
 ## Selected compact mixed-profile delivery (2026-09-23)
 

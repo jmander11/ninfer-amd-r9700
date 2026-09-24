@@ -1,0 +1,207 @@
+{
+  "status": "complete",
+  "rows": [
+    {
+      "cell": "final-c1-k5",
+      "baseline": "baseline-c1-k5",
+      "aggregate_before": 95.97271582064664,
+      "aggregate_after": 98.03427410109309,
+      "per_request_after": 98.03427410109309,
+      "speedup_percent": 2.148067044699542,
+      "all_six_repetitions_exact_ordinary": true,
+      "final_repetition_rates": [
+        98.1600753542383,
+        98.03427410109309,
+        98.01121064938236
+      ],
+      "final_request_lane_rounds_per_draft": [
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          25
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          25
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          25
+        ]
+      ]
+    },
+    {
+      "cell": "final-c1-k4",
+      "baseline": "baseline-c1-k4",
+      "aggregate_before": 83.1712857789551,
+      "aggregate_after": 84.71292063874797,
+      "per_request_after": 84.71292063874797,
+      "speedup_percent": 1.853566222229741,
+      "all_six_repetitions_exact_ordinary": true,
+      "final_repetition_rates": [
+        84.74828591477046,
+        84.71292063874797,
+        84.65196890199081
+      ],
+      "final_request_lane_rounds_per_draft": [
+        [
+          0,
+          0,
+          0,
+          0,
+          30
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          30
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          30
+        ]
+      ]
+    },
+    {
+      "cell": "final-c4-k5",
+      "baseline": "baseline-c4-k5",
+      "aggregate_before": 144.81989374633412,
+      "aggregate_after": 149.07541100789607,
+      "per_request_after": 37.268852751974016,
+      "speedup_percent": 2.938489423984736,
+      "all_six_repetitions_exact_ordinary": true,
+      "final_repetition_rates": [
+        149.20584841849313,
+        149.07541100789607,
+        148.97820300988363
+      ],
+      "final_request_lane_rounds_per_draft": [
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          121
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          121
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          121
+        ]
+      ]
+    },
+    {
+      "cell": "final-c4-k4",
+      "baseline": "baseline-fixed-c4",
+      "aggregate_before": 161.71190961459988,
+      "aggregate_after": 161.73557694538817,
+      "per_request_after": 40.433894236347044,
+      "speedup_percent": 0.014635490264569562,
+      "all_six_repetitions_exact_ordinary": true,
+      "final_repetition_rates": [
+        161.76646937197316,
+        161.73557694538817,
+        161.70257786255945
+      ],
+      "final_request_lane_rounds_per_draft": [
+        [
+          0,
+          0,
+          0,
+          0,
+          132
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          132
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          132
+        ]
+      ]
+    },
+    {
+      "cell": "final-c4-adaptive",
+      "baseline": "baseline-adaptive-c4",
+      "aggregate_before": 156.51490611175635,
+      "aggregate_after": 156.28047578971837,
+      "per_request_after": 39.07011894742959,
+      "speedup_percent": -0.1497814667381192,
+      "all_six_repetitions_exact_ordinary": true,
+      "final_repetition_rates": [
+        157.11905036263968,
+        156.28047578971837,
+        156.17351525054372
+      ],
+      "final_request_lane_rounds_per_draft": [
+        [
+          0,
+          0,
+          0,
+          3,
+          123,
+          4
+        ],
+        [
+          0,
+          0,
+          0,
+          2,
+          129,
+          1
+        ],
+        [
+          0,
+          0,
+          0,
+          2,
+          129,
+          1
+        ]
+      ]
+    }
+  ],
+  "final_benchmark_sha256": "7fbe41e0dafcbdb880ccf1fa8e8eed56cee30c69563a16b7a1d7fb021f8b8deb",
+  "final_public_draft_cells": 4,
+  "production_precision_changed": false,
+  "model_weights_changed": false,
+  "prefill_chunk": 2048,
+  "prefill_work": "paused",
+  "adaptive_policy": "unchanged; measured tail limitation, not a correctness bug",
+  "hardware_ceiling_claim": false
+}

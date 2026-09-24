@@ -75,7 +75,7 @@ single losslessly tiled resident head; `--ordinary-only` restricts it to the coa
 consumer. The selected public Q4 qualifier covers ordinary T2–4 N34816/K5120 gate/up
 and N5120/K17408 down, tiled MLP at T10/12/15/18/20/24,
 tiled N5120/K6144 output at T12/18/24, plus N34816/K5120,
-N5120/K6144, N12288/K5120 and N4096/K5120
+N5120/K6144, N12288/K5120, N4096/K5120, N5120/K17408 and N5120/K25600
 at T5/T6. N12288 retains scale-gather; the other
 shapes use the admitted successor pipeline. It checks the original represented-BF16
 FP64 formula, full-output represented-A8 FP64 formula, exact activation codec,
@@ -113,15 +113,16 @@ and run `build-r9700/src/ninfer_r9700_gdn_replay_fold_qual`. This admission uses
 production `NINFER_R9700_GDN_VERIFY_WAVE_QK_CANDIDATE=0` profile; it does not admit the
 separate wave-QK experiment. Whole speculative-token qualification remains required.
 
-The selected pipelined down projection is covered by
-`ninfer_r9700_dflash_verify_down_qual --out-json FRESH.json` at N5120/K17408 T5/T6.
-Build it as a CMake target and run from `build-r9700/src/`. The removed pipeline-comparison
-qualifier is historical; its direct and whole evidence remains under
+The selected small-batch projections, including down N5120/K17408 and DFlash feature
+N5120/K25600 at T5/T6, use the ordinary shape-owned Linear boundary. Qualify them with
+`ninfer_r9700_a8q4_small_batch_projection_qual --out-json FRESH.json` from
+`build-r9700/src/`. The caller-specific down API, kernel and qualifiers are removed;
+their historical direct and whole evidence remains under
 `profiles/bench/r9700-dflash-down-pipeline-20260922/`.
 
-The small-batch and down qualifiers evaluate every output against the original
+The small-batch qualifier evaluates every output against the original
 BF16-input/stored-Q4 FP64 oracle, without private activation casts in that oracle.
-Their v3 criterion separately bounds the admitted A8 implementation profile:
+Its v3 criterion separately bounds the admitted A8 implementation profile:
 independently quantize the input, compute its represented FP64 result `q`, and
 let `S` be the sum of absolute exact integer-dot/scaled group terms, inflated
 by `1/(1-gamma(G,2^-53))` for its FP64 accumulation. With `G=K/64` and
@@ -140,15 +141,16 @@ remains separate and no production precision changes.
 The old 2% relative-RMS/10%-of-reference-RMS gross screen is retained as diagnostic
 data, including its unchanged N4096/K5120/T6/token5 failure (2.0341% RMS,
 3.7310% gross). Ideal represented A8 already differs by 2.01625% there; crossing
-2% was not evidence of a kernel bug. Full v3 requalification is recorded under
+2% was not evidence of a kernel bug. Pre-consolidation v3 requalification is recorded under
 `profiles/bench/r9700-a8-bound-dflash-20260923/`: all 32 small-batch and two down
 cells pass, with 102 deliberately corrupted outputs rejected. Maximum public
 and arithmetic norm-budget utilization is 0.88150 and 0.45584 respectively.
 For a change
 restricted to MLP, append `--mlp-only` to qualify all selected widths of just
-N34816/K5120 and N5120/K17408; also run the dedicated T5/6 down qualifier when
-the shared pipeline changes. `--output-only` instead qualifies N5120/K6144 at
-all selected T2..6 and T12/18/24 widths. These scopes use identical numerical criteria and
+N34816/K5120 and N5120/K17408, including T5/T6 down. `--draft-only` covers the four
+N5120/K17408 and N5120/K25600 T5/T6 cells. `--output-only` qualifies N5120/K6144 at
+all selected T2..6 and T12/18/24 widths. The complete owner now has 36 cells.
+These scopes use identical numerical criteria and
 report their restricted domain explicitly. Restricted results never qualify the
 unmeasured domain. Retained original diagnostic provenance:
 `profiles/rocprof/r9700-compact-mixed-speed-20260923/`.
@@ -158,7 +160,7 @@ ISA checker have been removed. Their evidence remains under the gate-up-pipeline
 projection-pipeline and verify-pipeline-family packages in `profiles/bench/`.
 For new linked ISA inspection use the safe extractor
 `tools/bench/extract_embedded_code_object.py`: the selected projection module owns
-`small_batch_projection_kernel<N,K,T>` and down owns `dflash_down_pipeline_kernel<T>`.
+`small_batch_projection_kernel<N,K,T>` for every admitted shape, including down.
 Do not apply the retired four-IU4-site scale-gather checker to primed/drained pipelines.
 
 ## Standalone suite

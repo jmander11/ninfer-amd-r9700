@@ -1344,8 +1344,7 @@ void TextContext::mlp_tail(const Tensor* post_norm, const MlpW& m, Tensor& x,
     Tensor h       = workspace_recipe::post_mixer_hidden<TextConfig>(work_, T);
 
     Variant::post_mixer(*post_norm, kCfg.rms_eps, h, *m.payload, x, ph, work_, s,
-                        packed_route_tokens(active_sequence_batch_, active_sequence_width_),
-                        linear_execution_, text_layer, active_dflash_target_verify_,
+                        linear_execution_, text_layer,
                         active_ordinary_decode_);
 }
 

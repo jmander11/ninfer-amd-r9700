@@ -918,17 +918,6 @@ profile-pmc: $(KV_TARGET)
 		-d $(PROFILE_DIR) -- ./$(KV_TARGET) --context 4096 --iterations 1 \
 		--timing-only --group 16 --key-order token --value-order feature --scale-order feature
 
-DFLASH_DOWN_SCALE_GATHER_SOURCE := ../../src/ops/r9700/linear/dflash_verify_down.hip
-DFLASH_DOWN_SCALE_GATHER_HEADER := ../../src/ops/r9700/linear/dflash_verify_down.h
-DFLASH_VERIFY_DOWN_BUILD ?= ../../build-r9700
-.PHONY: dflash-verify-down-build
-dflash-verify-down-build:
-	cmake --build $(DFLASH_VERIFY_DOWN_BUILD) --target ninfer_r9700_dflash_verify_down_qual
-
-$(BUILD_DIR)/dflash_down_scale_gather.s: $(DFLASH_DOWN_SCALE_GATHER_SOURCE) $(DFLASH_DOWN_SCALE_GATHER_HEADER) $(LINEAR_HEADER) Makefile
-	mkdir -p $(BUILD_DIR)
-	$(HIPCC) $(CXXFLAGS) -Wno-unused-command-line-argument --offload-device-only -S $< -o $@
-
 .PHONY: gdn-projection-control-grid-static
 $(BUILD_DIR)/gdn_projection_control_grid_qual: gdn_projection_control_grid_qual.hip a8q4_shape_sweep_qual.hip $(GDN_PROJECTION_CONTROL_GRID_SOURCE) ../../src/ops/r9700/gdn/gdn_projection_control_grid_qualification.h $(LINEAR_IMPL) $(LINEAR_HEADER) $(GDN_IMPL) $(GDN_HEADER) Makefile
 	mkdir -p $(BUILD_DIR)
