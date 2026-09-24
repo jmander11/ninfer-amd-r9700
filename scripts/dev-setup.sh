@@ -12,8 +12,14 @@ image="${NINFER_BUILDER_IMAGE:-local/ninfer-r9700-builder:local}"
 volume="${NINFER_BUILD_VOLUME:-ninfer-r9700-build-cache}"
 rocm_context="${NINFER_ROCM_CONTEXT:-/opt/rocm/core-10.0}"
 render_node="${NINFER_DRM_RENDER_NODE:-/dev/dri/renderD128}"
+jobs="${NINFER_DEV_JOBS:-4}"
+[[ "$jobs" =~ ^([1-9]|1[0-4])$ ]] || { echo 'NINFER_DEV_JOBS must be 1..14.' >&2; exit 2; }
 command -v docker >/dev/null
 if [[ ${NINFER_REBUILD_BUILDER:-0} == 1 ]] || ! docker image inspect "$image" >/dev/null 2>&1; then
+  docker buildx version >/dev/null 2>&1 || {
+    echo 'Docker Buildx is required for local ROCm/Python build contexts; see docs/containers.md.' >&2
+    exit 1
+  }
   python_context="${NINFER_PYTHON_CONTEXT:-}"
   if [[ -z "$python_context" ]]; then
     python_executable="$(realpath "$(command -v python3.11)")"
@@ -21,7 +27,8 @@ if [[ ${NINFER_REBUILD_BUILDER:-0} == 1 ]] || ! docker image inspect "$image" >/
   fi
   test -x "$rocm_context/lib/llvm/bin/clang++"
   test -x "$python_context/bin/python3.11"
-  docker build --target build --tag "$image" \
+  docker buildx build --load --target build --tag "$image" \
+    --build-arg "NINFER_BUILD_JOBS=$jobs" \
     --build-context "rocm=$rocm_context" --build-context "python311=$python_context" "$repo_root"
 fi
 platform="$(docker image inspect -f '{{index .Config.Labels "org.ninfer.platform"}}' "$image")"

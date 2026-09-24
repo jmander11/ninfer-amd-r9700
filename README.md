@@ -76,6 +76,9 @@ cmake --build build-r9700 --parallel 4
 Only `gfx1201` is supported. Serialize builds, model conversion and GPU jobs on
 the shared host; never use uncapped build parallelism (maximum 14 jobs).
 
+For the native ROCm Docker image, dedicated development container and GPU device
+passthrough commands, see `docs/containers.md`. No NVIDIA container runtime is needed.
+
 ## Run
 
 Use a DFlash-enabled `.ninfer` artifact for speculative generation:

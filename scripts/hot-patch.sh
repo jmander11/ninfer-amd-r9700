@@ -21,9 +21,11 @@ while (($#)); do
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
+jobs="${NINFER_DEV_JOBS:-4}"
+[[ "$jobs" =~ ^([1-9]|1[0-4])$ ]] || { echo 'NINFER_DEV_JOBS must be 1..14.' >&2; exit 2; }
 ((image_only && export_only)) && { echo 'Choose image-only or export-only.' >&2; exit 2; }
 bash "$repo_root/scripts/dev-setup.sh"
-docker exec "$builder" cmake --build /build --parallel "${NINFER_DEV_JOBS:-$(nproc)}" \
+docker exec "$builder" cmake --build /build --parallel "$jobs" \
   --target ninfer ninfer-serve ninfer-ppl
 mkdir -p "$out"
 for app in ninfer ninfer-serve ninfer-ppl; do

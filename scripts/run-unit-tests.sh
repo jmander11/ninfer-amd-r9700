@@ -25,6 +25,8 @@ while (($#)); do
     *) echo "Unknown option: $1; pass CTest arguments after --." >&2; exit 2 ;;
   esac
 done
+jobs="${NINFER_DEV_JOBS:-4}"
+[[ "$jobs" =~ ^([1-9]|1[0-4])$ ]] || { echo 'NINFER_DEV_JOBS must be 1..14.' >&2; exit 2; }
 if ((use_builder)); then
   bash "$repo_root/scripts/dev-setup.sh"
   args=()
@@ -32,7 +34,7 @@ if ((use_builder)); then
   ((run_python)) && args+=(--python)
   [[ -n "$artifact" ]] && args+=(--real "$artifact")
   docker exec -e NINFER_BUILD_DIR=/build -e NINFER_PYTHON=/opt/python311/bin/python3.11 \
-    -e "NINFER_DEV_JOBS=${NINFER_DEV_JOBS:-$(nproc)}" \
+    -e "NINFER_DEV_JOBS=$jobs" \
     -e "NINFER_DRM_RENDER_NODE=${NINFER_DRM_RENDER_NODE:-/dev/dri/renderD128}" \
     -e "NINFER_MIN_FREE_VRAM_GIB=${NINFER_MIN_FREE_VRAM_GIB:-20}" \
     -w /src "$builder" bash /src/scripts/run-unit-tests.sh "${args[@]}" -- "${ctest_args[@]}"
@@ -55,7 +57,7 @@ if ((gpu)) || [[ -n "$artifact" ]]; then
   exec 9>"$build_dir/.r9700-tests.lock"
   flock -n 9 || { echo 'Another test runner owns this build GPU lane.' >&2; exit 1; }
 fi
-cmake --build "$build_dir" --parallel "${NINFER_DEV_JOBS:-$(nproc)}"
+cmake --build "$build_dir" --parallel "$jobs"
 selection=()
 ((gpu)) || selection+=(-LE r9700)
 ctest --test-dir "$build_dir" --output-on-failure "${selection[@]}" "${ctest_args[@]}"

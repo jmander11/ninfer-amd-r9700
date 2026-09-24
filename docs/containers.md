@@ -6,11 +6,24 @@ and a self-contained Python 3.11 distribution through `python311`. No model or
 converted artifact is downloaded or copied into an image. Docker build installs
 Ubuntu build/runtime packages and CMake fetches the pinned CPU grammar dependency.
 
+Docker Buildx is required for these named contexts. On this Ubuntu host with the
+Docker apt repository configured, install the missing plugin once:
+
 ```sh
-docker build --target runtime --tag local/ninfer-r9700:local \
+sudo apt-get install docker-buildx-plugin
+docker buildx version
+```
+
+```sh
+docker buildx build --load --target runtime --tag local/ninfer-r9700:local \
   --build-context rocm=/opt/rocm/core-10.0 \
   --build-context python311=/absolute/path/to/self-contained-python-3.11 .
 ```
+
+Image builds default to four compile jobs; `--build-arg NINFER_BUILD_JOBS=8`
+overrides this within the enforced range 1–14. Build and GPU/model jobs must run
+serially on the shared host. These are native AMD images: no NVIDIA Container
+Toolkit or `--gpus all` is needed.
 
 Both contexts must contain their `bin` and `lib` directories; do not provide a
 single executable, an external-symlink virtual environment, or the parent of a
@@ -37,6 +50,18 @@ directory read-only at `/models`. It checks existing container ownership of the
 checkout and never repurposes another builder. Set `NINFER_REBUILD_BUILDER=1` to
 rebuild the image; an existing container continues to use its original image
 until the user recreates it. No packages are installed into an existing container.
+
+Setup configures the mounted build volume. Compile the applications explicitly:
+
+```sh
+docker exec ninfer-r9700-builder cmake --build /build --parallel 4 \
+  --target ninfer ninfer-serve ninfer-ppl
+docker exec ninfer-r9700-builder /build/apps/ninfer --help
+```
+
+For benchmarks, set `NINFER_BUILD_BENCHMARKS=ON` when running setup, then build
+the `ninfer_bench` target; its executable is `/build/bench/ninfer_bench`.
+The runtime image contains the three applications, not the benchmark or test tools.
 
 ## Tests
 
@@ -81,7 +106,8 @@ unrelated benchmark processes: the maintainer still schedules the sole GPU.
 `--python` additionally runs the artifact, benchmark-matrix and serving-corpus
 Python tests with Python 3.11. The selected interpreter must already provide
 `pytest` and `torch`; the runner does not install or upgrade dependencies.
-`NINFER_DEV_JOBS` controls build parallelism. CTest arguments follow `--`.
+`NINFER_DEV_JOBS` controls setup, test-runner and hot-patch build parallelism
+(default 4, enforced range 1–14). CTest arguments follow `--`.
 
 ## Runtime and incremental app deployment
 

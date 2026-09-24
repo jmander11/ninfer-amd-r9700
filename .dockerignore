@@ -2,6 +2,7 @@
 .cache
 .claude
 .codex
+.cortexkit
 .idea
 .pytest_cache
 .vscode
