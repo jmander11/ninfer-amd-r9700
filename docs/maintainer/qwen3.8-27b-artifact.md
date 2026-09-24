@@ -13,7 +13,7 @@ The same-size `r9700-w8g32-mse-eval` retains the all-W8 layout and runtime while
 stored FP16 group scale by a deterministic source-only decoded-weight SSE objective.
 The four-role FP8 base and registered DFlash companions are described below.
 
-Four fixed Q4/FP8-capped base evaluation identities use the target-owned shared
+Fixed Q4/FP8-capped base evaluation identities use the target-owned shared
 `src/targets/qwen3_8_27b/impl/load/fp8_capped_selection.inc` inventory:
 
 | `r9700-q4-fp8-…-n16k16-eval` suffix | FP8 projections | Count |
@@ -22,11 +22,15 @@ Four fixed Q4/FP8-capped base evaluation identities use the target-owned shared
 | `all-attention` | all attention QK/GV | 32 |
 | `attention-gdn` | all attention QK/GV and all GDN QK | 80 |
 | `selective-cap` | selective's15 BF16 plus11 FP8 protections, all capped at FP8 | 26 |
+| `default-protected` | early-attention plus attention output3/7 and GDN output4; default NVIDIA large-projection protection locations | 15 |
+| `output-only` | attention output3/7 and GDN output4 | 3 |
+| `selective-no-late-mlp` | selective-cap minus gate/up and down62/63 | 22 |
 
 All other matrices retain the all-Q4 inventory, including embedding/output head,
 Vision, MTP, and draft shortlist. Existing direct norm/control/state tensors are
 unchanged; the cap is not a change to persistent state semantics. There is no
-DFlash companion for these new identities. Binding requires the exact per-identity
+DFlash payload in these base identities; selective-cap's separately registered companion is
+described below. Binding requires the exact per-identity
 format inventory, not arbitrary format overrides. FP8 GDN output uses an explicit
 layer-indexed prepared Linear slot, like other selected projections.
 
@@ -37,6 +41,46 @@ SelectiveCap output matrices absent from FP8 donors are encoded from original BF
 source with the existing row-scaled codec. The adjacent conversion receipt records
 every payload hash and origin. `--validate PATH` checks the complete identity,
 inventory, and readback hashes. Registration is evaluation support, not promotion.
+For a protection subset already represented in an existing capped artifact, use
+`--capped-donor PATH` instead of `--four-role`, `--selective`, and `--model`. Every
+selected FP8 payload copies exactly from that validated donor; every other object
+copies exactly from `--base`. No source encoding or dependency installation is needed.
+
+Endpoint ablations are six explicit evaluation identities in `fp8_endpoint_selection.inc`:
+`r9700-q4-fp8-{selective-cap|selective-no-late-mlp}-{embed|head|endpoints}-w8-n16k16-eval`.
+They retain the matching 26/22-projection FP8 base and replace only embedding, output head,
+or both with W8G32/FP16-scale payloads. Embedding uses `row-split-k128-v1`; head uses
+`r9700-w8g32-n16-k16-v1`. Each replacement adds 675,430,400 bytes. No DFlash is attached.
+`python3.11 -m tools.convert.qwen3_8_27b_r9700.compose_fp8_endpoints --recipe ID
+--base BASE --donor DONOR --out NEW` requires the matching capped base and the registered
+selective-protected tiled-head DFlash donor. It copies represented payloads exactly,
+validates inventories, and reads back the complete output against its conversion receipt.
+`--validate PATH` repeats that check when needed. These identities do not promote a recipe.
+
+### Selected local compact deployment
+
+The user-selected local profile retains `r9700-q4-fp8-selective-cap-n16k16-eval`
+(15,793,065,984 bytes) and its `r9700-q4-fp8-selective-cap-n16k16-dflash2-q4-eval`
+companion (17,002,543,616 bytes). Both are installed under
+`/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-q4-fp8-selective-cap/`, with exact identity
+as filename stem after `qwen3.8-27b-`. The adjacent README records executable creation/build/run
+commands; conversion receipts retain source paths and every payload origin/hash. Selection
+changes no stored bytes, and does not rename the provisional identities or waive BF16-source gates.
+
+Creation uses `convert_fp8_capped --recipe r9700-q4-fp8-selective-cap-n16k16-eval`
+with `out/qwen3.8-27b-r9700-q4g64-n16k16-eval.ninfer` as base,
+`out/qwen3.8-27b-r9700-q4g64-f8e4m3-four-role-n16k16-eval.ninfer` as four-role donor,
+`out/qwen3.8-27b-r9700-q4-selective-protected-n16k16-eval.ninfer` as selective donor,
+and `/ssdpool2nvme/local_llm/models/qwen3.8-27b-bf16` as source. The companion uses
+`compose_fp8_capped_dflash` with that base and the installed selective-protected tiled-head
+Q4 DFlash donor described below. Outputs are create-only; do not reconvert on installation.
+
+Execution is global Q4 A8 with `NINFER_R9700_Q4_PREFILL_A4_FAMILIES=1`: only full-K
+N34816/K5120 Q4 calls at T>128 use the qualified A4 ping/pong/tail routes. Other Q4 calls,
+including ordinary decode and small speculative verify, stay A8. Protected FP8 projections
+remain FP8. This is a compile-time execution policy, not an artifact recipe or a runtime flag.
+The current build/run configuration is G16, dense, chunk2048, W8 activation bits8;
+see `docs/performance.md` for quality tradeoffs and delivery evidence.
 
 `r9700-q4-selective-protected-n16k16-eval` is a separate source-derived evaluation base,
 not a production selection. It starts from the exact all-Q4 N16K16 artifact

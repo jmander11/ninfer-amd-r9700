@@ -58,8 +58,11 @@ The build rejects every HIP architecture other than `gfx1201`.
 ```sh
 cmake -S . -B build-r9700 -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
-  -DNINFER_BUILD_APPS=ON
-cmake --build build-r9700 --parallel
+  -DNINFER_BUILD_APPS=ON \
+  -DNINFER_R9700_Q4_ACTIVATION_BITS=8 \
+  -DNINFER_R9700_Q4_PREFILL_A4_FAMILIES=1 \
+  -DNINFER_R9700_W8_ACTIVATION_BITS=8
+cmake --build build-r9700 --parallel 4
 ```
 
 The product executables are:
@@ -71,6 +74,19 @@ build-r9700/apps/ninfer-ppl
 ```
 
 Use each executable's `--help` output as the exact option/default authority.
+
+The selected local execution profile uses A4 only for full-K Q4 gate/up Linear
+N34816/K5120 at T>128; other Q4 operations, including ordinary decode and speculative
+verify widths, remain A8. Explicit settings above also update an existing CMake cache.
+Use family0 only for a uniform-activation control; broader A4 families remain evaluators.
+Serialize model conversion/readback, builds, and GPU jobs on the shared host. Never use
+uncapped build parallelism; 14 jobs is the maximum, and fewer may be needed for memory safety.
+
+The installed compact Q4-head base and canonical-Q4/BF16-codebook DFlash companion are in
+`/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-q4-fp8-selective-cap/`.
+Its `README.md` records exact artifact names, creation commands, selected activation policy,
+and quality limitations. Artifact bytes/identities do not change with activation policy.
+This local choice does not claim completion of the separate BF16-source production gate.
 
 ## Artifact conversion
 

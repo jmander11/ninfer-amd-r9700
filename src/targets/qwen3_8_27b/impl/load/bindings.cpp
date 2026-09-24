@@ -24,6 +24,7 @@ using artifact::NumericFormat;
 bool is_full_layer(std::size_t layer) { return layer >= 3 && (layer - 3) % 4 == 0; }
 
 NumericFormat matrix_format(WeightsProfile profile, bool source_q4) {
+    profile = fp8_capped_base_profile(profile);
     switch (profile) {
     case WeightsProfile::R9700W8G32Candidate: return NumericFormat::W8G32_F16S;
     case WeightsProfile::R9700W8Bf16EmbeddingEvaluation: return NumericFormat::W8G32_F16S;
@@ -35,6 +36,9 @@ NumericFormat matrix_format(WeightsProfile profile, bool source_q4) {
         return NumericFormat::W8G32_F16S;
     case WeightsProfile::R9700Q4G64Evaluation:
     case WeightsProfile::R9700Q4Fp8EarlyAttentionEvaluation:
+    case WeightsProfile::R9700Q4Fp8DefaultProtectedEvaluation:
+    case WeightsProfile::R9700Q4Fp8OutputOnlyEvaluation:
+    case WeightsProfile::R9700Q4Fp8SelectiveNoLateMlpEvaluation:
     case WeightsProfile::R9700Q4Fp8AllAttentionEvaluation:
     case WeightsProfile::R9700Q4Fp8AttentionGdnEvaluation:
     case WeightsProfile::R9700Q4Fp8SelectiveCapEvaluation:
@@ -80,7 +84,7 @@ NumericFormat dflash_matrix_format(WeightsProfile profile) {
 }
 
 NumericFormat token_embedding_format(WeightsProfile profile) {
-    if (is_selective_protected_profile(profile))
+    if (is_selective_protected_profile(profile) || fp8_capped_w8_embedding(profile))
         return NumericFormat::W8G32_F16S;
     if (profile == WeightsProfile::R9700W8Bf16EmbeddingEvaluation) {
         return NumericFormat::BF16;
@@ -318,7 +322,8 @@ ArtifactLoadPlan bind_artifact(artifact::Binder& binder, WeightsProfile weights_
     bind_r9700_text_layers(binder, out, weights_profile);
     out.final_norm =
         artifact::bind_device_tensor(binder, "text/final_norm", NumericFormat::BF16, {5120});
-    if (weights_profile == WeightsProfile::R9700Q4SelectiveProtectedDFlash2Q4Evaluation) {
+    if (weights_profile == WeightsProfile::R9700Q4SelectiveProtectedDFlash2Q4Evaluation ||
+        fp8_capped_w8_head(weights_profile)) {
         const std::array<std::uint64_t,2> head_shape{248320,5120};
         const auto handle = binder.require_tensor("text/output_head", NumericFormat::W8G32_F16S,
             artifact::StorageLayout::R9700W8G32N16K16V1, head_shape);

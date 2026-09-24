@@ -187,6 +187,38 @@ int main() {
                     (q4_activation + 255U) / 256U * 256U,
                 "Q4 execution region does not replace its former arena reserve");
         using Profile = detail::WeightsProfile;
+#define NINFER_QWEN38_FP8_ENDPOINT(symbol, id, base, embed, head) \
+        { \
+            const auto endpoint = Profile::symbol; \
+            require(detail::fp8_capped_base_profile(endpoint) == Profile::base && \
+                    detail::fp8_capped_w8_embedding(endpoint) == (embed != 0) && \
+                    detail::fp8_capped_w8_head(endpoint) == (head != 0), \
+                    "capped endpoint protection identity differs"); \
+            const auto base_linear = Variant::linear_workspace_capacity_bytes(Profile::base, kPrefillTokens); \
+            const auto w8_linear = ninfer::ops::linear_workspace_capacity_bytes( \
+                ninfer::QType::W8G32_F16S, kPrefillTokens, detail::TextConfig::hidden); \
+            require(Variant::linear_workspace_capacity_bytes(endpoint, kPrefillTokens) == \
+                    (head != 0 ? std::max(base_linear, w8_linear) : base_linear), \
+                    "capped W8 head activation workspace differs"); \
+            require(Variant::execution_state_capacity_bytes(endpoint, kPrefillTokens, kGraphTokens) >= \
+                    Variant::execution_state_capacity_bytes(Profile::base, kPrefillTokens, kGraphTokens), \
+                    "endpoint variant loses base execution state"); \
+            require(Variant::vision_linear_workspace_capacity_bytes(endpoint, kPrefillTokens) == \
+                    Variant::vision_linear_workspace_capacity_bytes(Profile::base, kPrefillTokens), \
+                    "endpoint variant changes Vision workspace"); \
+        }
+#include "targets/qwen3_8_27b/impl/load/fp8_endpoint_selection.inc"
+#undef NINFER_QWEN38_FP8_ENDPOINT
+        for (const auto protected_outputs : {Profile::R9700Q4Fp8DefaultProtectedEvaluation,
+                 Profile::R9700Q4Fp8OutputOnlyEvaluation,
+                 Profile::R9700Q4Fp8SelectiveNoLateMlpEvaluation}) {
+            const auto q4 = Variant::linear_workspace_capacity_bytes(protected_outputs, kPrefillTokens);
+            const auto fp8 = ninfer::ops::LinearExecution::activation_workspace_capacity_bytes(
+                kPrefillTokens, detail::TextConfig::query_size);
+            require(Variant::execution_state_capacity_bytes(protected_outputs, kPrefillTokens, kGraphTokens) ==
+                        (std::max(q4, fp8) + 255U) / 256U * 256U,
+                    "protected-output recipe loses K6144 FP8 activation storage");
+        }
         const auto capped_companion = Profile::R9700Q4Fp8SelectiveCapDFlash2Q4Evaluation;
         require(Variant::dflash_matrix_qtype(capped_companion) == ninfer::QType::Q4G64_F16S,
                 "capped DFlash companion changed its canonical Q4 recipe");

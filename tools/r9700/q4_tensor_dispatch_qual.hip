@@ -24,11 +24,11 @@
 
 namespace {
 
-constexpr bool kMixed = ninfer::ops::r9700::linear::kQ4PrefillGateUpA4;
+constexpr bool kMixed = ninfer::ops::r9700::linear::kQ4PrefillA4Families != 0U;
 std::uint32_t gTokens = kMixed ? 129 : 3;
-constexpr std::uint32_t kRows = kMixed ? 34816 : 32;
-constexpr std::uint32_t kColumns = kMixed ? 5120 : 192;
-constexpr std::uint32_t kPaddedColumns = kMixed ? 5120 : 256;
+std::uint32_t kRows = kMixed ? 34816 : 32;
+std::uint32_t kColumns = kMixed ? 5120 : 192;
+std::uint32_t kPaddedColumns = kMixed ? 5120 : 256;
 constexpr std::uint32_t kGroup = 64;
 std::uint32_t gActiveBits = kMixed ? 4 : ninfer::ops::r9700::linear::kQ4ActivationBits;
 
@@ -317,8 +317,8 @@ void write_json(const std::filesystem::path& path, bool passed, const std::strin
 } // namespace
 
 int main(int argc, char** argv) {
-    if ((argc != 3 && argc != 5) || std::string_view(argv[1]) != "--out-json") {
-        std::cerr << "usage: q4_tensor_dispatch_qual --out-json PATH [--tokens T (mixed build)]\n";
+    if (argc < 3 || argc % 2 != 1 || std::string_view(argv[1]) != "--out-json") {
+        std::cerr << "usage: q4_tensor_dispatch_qual --out-json PATH [--tokens T] [--shape gate-up|down|attn-q|attn-kv|gdn-in|out]\n";
         return 2;
     }
     const std::filesystem::path path(argv[2]);
@@ -329,17 +329,36 @@ int main(int argc, char** argv) {
     bool status_poisoned = false;
     double maximum_logical_error = 0.0;
     try {
-        if (argc == 5) {
-            if (!kMixed || std::string_view(argv[3]) != "--tokens")
-                fail("--tokens requires the mixed gate/up build");
+        unsigned required_family = 1;
+        for (int arg = 3; arg < argc; arg += 2) {
+            if (!kMixed) fail("shape/token overrides require a mixed build");
+            if (std::string_view(argv[arg]) == "--shape") {
+                const std::string_view shape(argv[arg+1]);
+                kColumns = kPaddedColumns = 5120;
+                if (shape == "gate-up") { kRows = 34816; required_family = 1; }
+                else if (shape == "down") {
+                    kRows = 5120; kColumns = kPaddedColumns = 17408; required_family = 2;
+                } else if (shape == "attn-q") { kRows = 4096; required_family = 3; }
+                else if (shape == "attn-kv") { kRows = 7168; required_family = 3; }
+                else if (shape == "gdn-in") { kRows = 12288; required_family = 3; }
+                else if (shape == "out") {
+                    kRows = 5120; kColumns = kPaddedColumns = 6144; required_family = 3;
+                } else fail("unknown qualification shape");
+                continue;
+            }
+            if (std::string_view(argv[arg]) != "--tokens") fail("unknown option");
             std::size_t consumed = 0;
-            const auto value = std::stoul(argv[4], &consumed);
-            if (consumed != std::string_view(argv[4]).size() || value == 0 || value > 4096)
+            const auto value = std::stoul(argv[arg+1], &consumed);
+            if (consumed != std::string_view(argv[arg+1]).size() || value == 0 || value > 4096)
                 fail("qualification tokens must be in [1,4096]");
             gTokens = static_cast<std::uint32_t>(value);
-            // Independent expectation for this fixed real gate/up geometry. Do not consult
-            // production dispatch: a selector regression must fail codec/output qualification.
-            gActiveBits = gTokens > 128U ? 4U : 8U;
+        }
+        // Independent shape-family expectation, not the production dispatch predicate.
+        if (kMixed) {
+            const auto family = ninfer::ops::r9700::linear::kQ4PrefillA4Families;
+            const bool selected = family <= 3 ? family >= required_family :
+                (kRows == 7168 || (family == 5 && required_family == 1));
+            gActiveBits = gTokens > 128U && selected ? 4U : 8U;
         }
         device = select_r9700();
         const std::vector<hip_bfloat16> input = make_input();
@@ -355,7 +374,7 @@ int main(int argc, char** argv) {
         // is tiled as [N/16, K/64, 4, 16, 8 packed bytes] and [N/16, K/64, 16 scales].
         std::vector<std::uint8_t> tiled_codes(weights.codes.size());
         std::vector<std::uint16_t> tiled_scales(weights.scales.size());
-        constexpr std::size_t groups = kPaddedColumns / kGroup;
+        const std::size_t groups = kPaddedColumns / kGroup;
         for (std::size_t row = 0; row < kRows; ++row) {
             for (std::size_t group = 0; group < groups; ++group) {
                 tiled_scales[((row / 16) * groups + group) * 16 + row % 16] =

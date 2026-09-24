@@ -20,12 +20,21 @@ static_assert([] {
             ? 4U : linear::kQ4ActivationBits;
         if (linear::q4_linear_activation_bits(t, 34816U, 5120U, 5120U) != expected)
             return false;
-        // Down, full-attention and GDN projections retain their global precision.
+        // Endpoints remain A8; the wider evaluators add only exact Text shapes.
         for (const auto n : {4096U, 7168U, 12288U, 248320U})
             if (linear::q4_linear_activation_bits(t, n, 5120U, 5120U) !=
-                linear::kQ4ActivationBits) return false;
+                (t > 128U && ((linear::kQ4PrefillA4Families == 3U && n != 248320U) ||
+                    (linear::kQ4PrefillA4Families >= 3U && n == 7168U))
+                    ? 4U : linear::kQ4ActivationBits)) return false;
         if (linear::q4_linear_activation_bits(t, 5120U, 17408U, 17408U) !=
-            linear::kQ4ActivationBits) return false;
+            ((linear::kQ4PrefillA4Families == 2U || linear::kQ4PrefillA4Families == 3U) && t > 128U
+                ? 4U : linear::kQ4ActivationBits)) return false;
+        if (linear::q4_linear_activation_bits(t, 5120U, 6144U, 6144U) !=
+            (linear::kQ4PrefillA4Families == 3U && t > 128U
+                ? 4U : linear::kQ4ActivationBits)) return false;
+        for (const auto k : {5120U, 6144U, 17408U})
+            if (linear::q4_linear_activation_bits(t, 5120U, k, k+128U) !=
+                linear::kQ4ActivationBits) return false;
     }
     return true;
 }());
@@ -122,6 +131,7 @@ static_assert(!linear::use_a8w8_prefill_cta(4096U, 5120U, 10240U));
 
 int main() {
     std::cout << "R9700 cooperative prefill CTA dispatch predicates passed: q4_prefill_cta_profile="
-              << linear::kQ4PrefillCtaProfile << '\n';
+              << linear::kQ4PrefillCtaProfile << ", q4_activation_profile="
+              << linear::kQ4ActivationProfile << '\n';
     return 0;
 }

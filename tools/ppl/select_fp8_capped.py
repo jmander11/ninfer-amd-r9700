@@ -20,6 +20,7 @@ def configure(out):
 
 
 def prepare(out):
+    common.require_uniform_build(common.ROOT/'build-r9700', 8)
     reference=json.loads((REFERENCE/'reference.json').read_text())
     (out/'bin').mkdir()
     for kind,rel in [('ppl','apps/ninfer-ppl'),('bench','bench/ninfer_bench')]:

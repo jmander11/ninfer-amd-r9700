@@ -83,20 +83,31 @@ def convert(args):
     report = dict(recipe=args.recipe, weight_recipe_selected=False,
                   fp8_matrices=sorted(selected), objects=[],
                   authority_sha256=hashlib.sha256(AUTHORITY.read_bytes()).hexdigest(),
-                  donors={}, source_model=str(args.model.resolve()))
+                  donors={}, source_model=str(args.model.resolve()) if args.model else None)
     with ExitStack() as stack:
         base = stack.enter_context(Artifact(args.base))
-        four = stack.enter_context(Artifact(args.four_role))
-        selective = stack.enter_context(Artifact(args.selective))
-        for tag,artifact,inv,path in [('base',base,q4_inventory,args.base),
-                                     ('four_role',four,fp8_hybrid_inventory,args.four_role),
-                                     ('selective',selective,selective_protected_inventory,args.selective)]:
+        capped = four = selective = None
+        inputs = [('base',base,q4_inventory,args.base)]
+        if args.capped_donor:
+            capped = stack.enter_context(Artifact(args.capped_donor))
+            capped_names = recipes().get(capped.identity.weights_id)
+            if capped_names is None or not selected <= capped_names:
+                raise ValueError('capped donor must contain every selected FP8 matrix')
+            validate_inventory(capped,specs_for(capped_names),capped.identity.weights_id)
+            report['donors']['capped'] = dict(path=str(args.capped_donor.resolve()),
+                bytes=args.capped_donor.stat().st_size,weights_id=capped.identity.weights_id)
+        else:
+            four = stack.enter_context(Artifact(args.four_role))
+            selective = stack.enter_context(Artifact(args.selective))
+            inputs += [('four_role',four,fp8_hybrid_inventory,args.four_role),
+                       ('selective',selective,selective_protected_inventory,args.selective)]
+        for tag,artifact,inv,path in inputs:
             validate_inventory(artifact,inv.OBJECT_SPECS,inv.WEIGHTS_ID)
             report['donors'][tag] = dict(path=str(path.resolve()),bytes=path.stat().st_size,
                                         weights_id=inv.WEIGHTS_ID)
         four_names = fp8_hybrid_inventory.SELECTED_MATRIX_NAMES
         selective_names = selective_protected_inventory.FP8_NAMES
-        source_names = selected-four_names-selective_names
+        source_names = set() if capped else selected-four_names-selective_names
         reader = None
         if source_names:
             import torch
@@ -124,7 +135,8 @@ def convert(args):
                     writer.write(name,recorded_chunks(encode_e4m3_rowwise_chunks(tensor),record))
                     del tensor
                 else:
-                    tag,donor = (('four_role',four) if name in selected and name in four_names else
+                    tag,donor = (('capped',capped) if name in selected and capped else
+                                 ('four_role',four) if name in selected and name in four_names else
                                  ('selective',selective) if name in selected else ('base',base))
                     record['origin']=tag+'-copy-exact'
                     writer.write(name,recorded_chunks(copied_chunks(donor,name),record))
@@ -160,6 +172,8 @@ def main():
     p.add_argument('--base',type=Path)
     p.add_argument('--four-role',type=Path)
     p.add_argument('--selective',type=Path)
+    p.add_argument('--capped-donor',type=Path,
+                   help='Copy selected FP8 tensors from this registered capped base; no source encoding')
     p.add_argument('--model',type=Path)
     p.add_argument('--out',type=Path)
     p.add_argument('--validate',type=Path)
@@ -167,8 +181,11 @@ def main():
     if args.validate:
         validate(args.validate);print('PASS: fixed inventory and every payload digest')
     else:
-        for key in ('recipe','base','four_role','selective','model','out'):
+        required = ('recipe','base','out') + (() if args.capped_donor else ('four_role','selective','model'))
+        for key in required:
             if getattr(args,key) is None:p.error('--'+key.replace('_','-')+' is required')
+        if args.capped_donor and any((args.four_role,args.selective,args.model)):
+            p.error('--capped-donor replaces --four-role, --selective and --model')
         convert(args)
 
 

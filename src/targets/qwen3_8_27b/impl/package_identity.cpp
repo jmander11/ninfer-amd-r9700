@@ -35,6 +35,10 @@ ModelSamplingDefaults Package::sampling_defaults(std::string_view model) {
 }
 
 Package::WeightsProfile Package::resolve_weights(const artifact::ArtifactIdentity& identity) {
+#define NINFER_QWEN38_FP8_ENDPOINT(symbol, id, base, embed, head) \
+    if (identity.model_id == model_id && identity.weights_id == id) return WeightsProfile::symbol;
+#include "targets/qwen3_8_27b/impl/load/fp8_endpoint_selection.inc"
+#undef NINFER_QWEN38_FP8_ENDPOINT
     if (identity.model_id == model_id &&
         identity.weights_id == "r9700-q4-fp8-selective-cap-n16k16-dflash2-q4-eval") {
         return WeightsProfile::R9700Q4Fp8SelectiveCapDFlash2Q4Evaluation;

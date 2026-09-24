@@ -40,6 +40,9 @@ enum class WeightsProfile : std::uint8_t {
     R9700Q4SelectiveProtectedDFlash2Q4Evaluation,
     R9700Q4G64Fp8FourRoleN16K16Evaluation,
     R9700Q4Fp8EarlyAttentionEvaluation,
+    R9700Q4Fp8DefaultProtectedEvaluation,
+    R9700Q4Fp8OutputOnlyEvaluation,
+    R9700Q4Fp8SelectiveNoLateMlpEvaluation,
     R9700Q4Fp8AllAttentionEvaluation,
     R9700Q4Fp8AttentionGdnEvaluation,
     R9700Q4Fp8SelectiveCapEvaluation,
@@ -54,10 +57,47 @@ enum class WeightsProfile : std::uint8_t {
     R9700Q4G64DFlash2W8MseEvaluation,
     R9700Q4W8MseDFlash2W8MseEvaluation,
     R9700Q4G64Fp8FourRoleDFlash2W8MseEvaluation,
+#define NINFER_QWEN38_FP8_ENDPOINT(symbol, id, base, embed, head) symbol,
+#include "targets/qwen3_8_27b/impl/load/fp8_endpoint_selection.inc"
+#undef NINFER_QWEN38_FP8_ENDPOINT
 };
 
+[[nodiscard]] constexpr WeightsProfile fp8_capped_base_profile(WeightsProfile profile) noexcept {
+    switch (profile) {
+#define NINFER_QWEN38_FP8_ENDPOINT(symbol, id, base, embed, head) \
+    case WeightsProfile::symbol: return WeightsProfile::base;
+#include "targets/qwen3_8_27b/impl/load/fp8_endpoint_selection.inc"
+#undef NINFER_QWEN38_FP8_ENDPOINT
+    default: return profile;
+    }
+}
+
+[[nodiscard]] constexpr bool fp8_capped_w8_embedding(WeightsProfile profile) noexcept {
+    switch (profile) {
+#define NINFER_QWEN38_FP8_ENDPOINT(symbol, id, base, embed, head) \
+    case WeightsProfile::symbol: return embed != 0;
+#include "targets/qwen3_8_27b/impl/load/fp8_endpoint_selection.inc"
+#undef NINFER_QWEN38_FP8_ENDPOINT
+    default: return false;
+    }
+}
+
+[[nodiscard]] constexpr bool fp8_capped_w8_head(WeightsProfile profile) noexcept {
+    switch (profile) {
+#define NINFER_QWEN38_FP8_ENDPOINT(symbol, id, base, embed, head) \
+    case WeightsProfile::symbol: return head != 0;
+#include "targets/qwen3_8_27b/impl/load/fp8_endpoint_selection.inc"
+#undef NINFER_QWEN38_FP8_ENDPOINT
+    default: return false;
+    }
+}
+
 [[nodiscard]] constexpr bool is_fp8_capped_profile(WeightsProfile profile) noexcept {
+    profile = fp8_capped_base_profile(profile);
     return profile == WeightsProfile::R9700Q4Fp8EarlyAttentionEvaluation ||
+           profile == WeightsProfile::R9700Q4Fp8DefaultProtectedEvaluation ||
+           profile == WeightsProfile::R9700Q4Fp8OutputOnlyEvaluation ||
+           profile == WeightsProfile::R9700Q4Fp8SelectiveNoLateMlpEvaluation ||
            profile == WeightsProfile::R9700Q4Fp8AllAttentionEvaluation ||
            profile == WeightsProfile::R9700Q4Fp8AttentionGdnEvaluation ||
            profile == WeightsProfile::R9700Q4Fp8SelectiveCapEvaluation ||

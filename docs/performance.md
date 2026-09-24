@@ -60,6 +60,167 @@ expected value exactly.
 Copy bus rate counts both the read and write traffic. This is the hardware bandwidth bound, not a
 model or individual-Op throughput claim.
 
+## Selected compact mixed-profile delivery (2026-09-23)
+
+The user selected the compact cap26 Q4 embedding/head model with gate/up-only A4 large
+prefill. Fresh builds now default to `NINFER_R9700_Q4_PREFILL_A4_FAMILIES=1`, global Q4
+bits8, W8 bits8; delivered `build-r9700` was explicitly reconfigured and CLI/server/PPL/bench
+rebuilt. T>128 full-K N34816/K5120 Q4 uses the already-qualified fast A4 route; other Q4
+calls, including ordinary decode and small DFlash verify, stay A8. No new kernel arithmetic
+or weight conversion was needed. Broader A4 profiles remain evaluators, not defaults.
+
+Both artifacts and their creation receipts remain installed in
+`/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-q4-fp8-selective-cap/`:
+base15,793,065,984 bytes; canonical-Q4/BF16-codebook DFlash companion17,002,543,616 bytes.
+The adjacent README logs exact creation/build/run commands. These evaluation identities are
+not renamed, and the independent BF16-source production-admission status is unchanged.
+
+All six final-build PPL NLL sidecars are byte-identical to the retained mixed profile:
+worst per-text prefill regression+1.880% versus NVFP4, decode-0.642%. The10-versus6 newly
+severe technical-prefill tradeoff remains; this is not a universal quality-equivalence claim.
+
+Delivered companion, codeP4096/G128, C1, chunk2048, context4240, dense/G16, power`auto`,
+Device Graphs, one warmup/three measured repetitions (median rates):
+
+| Mode | Prefill tok/s | Output decode tok/s |
+|---|---:|---:|
+| Ordinary |1494.30|30.15|
+| DFlash K4 |1448.40|83.20|
+| DFlash K5 |1450.71|96.05|
+| DFlash adaptive, maxK5 |1459.47|92.53|
+
+Every repetition in all modes produces exactly the same128 greedy tokens as ordinary decode.
+K5 was fastest on this sample; the prior short-chat uniform-A8 result favoredK4. Do not treat
+either fixed K or this small adaptive comparison as a universal optimum. The selected mixed
+profile changes prefilled state, so old uniform-A8 acceptance/speed numbers are not guarantees.
+The memory safety scopes recorded no high/max/OOM events and no CPU throttling; benchmark
+limits were nonbinding. All heavyweight work ran serially, with four build jobs (maximum14).
+
+Checks: selected dispatch thresholds/padding/exclusions, FP8 execution-state contract, six exact
+quality sidecars, real companion ordinary/K4/K5/adaptive execution and repeated-token parity.
+Independent review passed. Uniform-control preparation now rejects the mixed-default build
+before snapshotting; configure family0 and complete the build to reproduce uniform controls.
+Evidence and replay script: `profiles/bench/r9700-compact-mixed-delivery-20260923/`.
+This delivers the selected recipe; it does not reopen paused XAttention or broad kernel sweeps.
+
+## Endpoint precision and mixed-activation search (2026-09-23)
+
+Completed 27 configurations / 162 finite, aligned scoring cells on the R9700, using the
+unchanged three-text 5090 reference and the same six scoring spans below. This is measured
+quality plus theoretical byte/work accounting: **no new speed measurements or promotion**.
+Six exact-copy artifacts replace embedding, output head, or both with W8 on the 26-protection
+and smaller 22-protection FP8 bases. The 26-protection variants were crossed with all six
+activation profiles; smaller-base A8 controls led to focused gate/up and gate/up+attention
+tests with Q4 or W8 head. Two gate/up W8-head controls used BF16 rather than A8 head activations.
+
+Key comparisons (decimal GB, base-only artifacts without DFlash; worst per-text PPL change
+versus NVFP4, not a comparison between the different prefill/decode scoring spans):
+
+| Base / endpoints / activation | File GB | Worst prefill | Worst decode | Logical weight stream GB/step |
+|---|---:|---:|---:|---:|
+| Retained cap26 / Q4 / A8 default |15.793|+0.126%|+1.814%|14.272|
+| Retained cap26 / Q4 / gate-up A4 |15.793|+1.880%|-0.642%|14.272|
+| cap26 / W8 head / gate-up A4 |16.468|+1.116%|-0.879%|14.947|
+| cap26 / W8 head / gate-up+attention A4 |16.468|+1.670%|+2.090%|14.947|
+| cap22 / Q4 / gate-up A4 |15.542|+2.679%|-0.098%|14.021|
+| cap22 / W8 head / gate-up A4 |16.218|+2.156%|+0.197%|14.696|
+
+Only cap26 W8-head/gate-up passes the preferred 2% screen among the new weight/profile
+combinations. Its BF16-head control also passes (+1.184% worst prefill); cap22's remains a
+near miss (+2.138%). All six decode NLL files are byte-identical between head A8/BF16 builds:
+ordinary T1 already uses BF16 activations. Batched PPL scores many head rows, unlike ordinary
+prefill's final logits. This sensitivity test is not evidence for faster A16 execution.
+
+No embedding-only or both-endpoint cap26 profile passes. MLP-wide A4's best endpoint variant
+still has a 3.490% worst regression; all-projection A4's best is 5.294%. These results do not
+support extending broad A4 to the less-protected cap22 variants. Near misses remain evidence,
+not statistical proof of a quality cliff. The 2% screen is not the BF16-source production gate:
+cap26 W8-head/gate-up has new severe counts 5/10/5 prefill and 1/1/0 decode (Wiki/technical/code),
+versus retained Q4-endpoint/gate-up's 5/10/3 and 1/2/0. Average PPL does not erase that tradeoff.
+
+Theoretical ranking and next optimization priorities, not additional authorized experiments:
+
+1. Keep cap26 Q4 endpoints + gate/up A4 as the compact speed-oriented shortlist leader.
+   Its modeled Q4 integer-product work is 75.98% of same-weight A8; gate/up+attention is
+   74.86%, MLP-wide 63.97%, and all eligible projections 50%, but the broader routes fail
+   this screen. Optimize the qualified gate/up route before broadening A4 coverage.
+2. Retain cap26 W8-head/gate-up as a PPL-oriented alternative: it improves all six aggregate
+   PPLs over Q4-endpoint/gate-up, but costs 675,430,400 extra file/head bytes (644.14 MiB)
+   and 4.73% more logical ordinary weight-stream bytes. It has the same body-work proxy,
+   not a demonstrated speed advantage. Any future performance work must include the tiled
+   W8 head's bulk A8 and small-T BF16 routes, and qualify DFlash verify/acceptance separately.
+3. Retain cap22 W8-head/gate-up as a near-miss capacity/quality option, not a promoted winner.
+   Revisit with broader held-out quality evidence if accepting its roughly 2.15% worst span
+   would change the decision; do not rerun unchanged cells or relax the screen implicitly.
+
+Embedding alone adds the same 644.14 MiB but just 2,720 extra logical bytes per token; it did
+not buy the hoped-for quality headroom. Stream accounting includes all Text layer weights,
+the complete head, final norm, and one embedding row, excluding KV, activations, cache effects,
+rereads and launch/reduction costs. Q4 product work excludes FP8 and head arithmetic. It cannot
+predict tok/s or establish a global optimum. At this search's closure the default was unchanged;
+the subsequent user-selected delivery above promotes only gate/up A4, not the W8-head alternative.
+
+Evidence/commands: `profiles/ppl/r9700-endpoint-precision-20260923/`, `comparison.md/json`,
+and `tools/ppl/endpoint_precision.py`. Original compact controls remain in
+`profiles/ppl/r9700-fp8-capped-selection-20260923/`; immutable NVIDIA fixtures are unchanged.
+Verification includes exact payload readback, all six real-artifact bindings, five focused
+converter tests, the FP8 execution-state contract, and per-cell profile/identity/NLL checks.
+After a shared-host memory/I/O stall, resumed conversion/build/GPU phases were strictly serial;
+builds used four jobs, with 24 GiB job memory and zero job-swap limits. These constrained runs
+must not be used as speed evidence. The larger NVIDIA +328 MiB artifact remains unmeasured.
+
+## NVIDIA-aligned precision follow-up (2026-09-23)
+
+The bounded follow-up completed42 finite/aligned quality cells: four broader A4 activation
+profiles on selective-cap, and three smaller weight recipes with uniformA8. Same immutable
+5090 reference,4096-token texts, chunk2048, prefill2047 and decode128 scored positions as below.
+The local admission criterion remains at most2% worse PPL on every text/schedule, with newly
+severe positions reported separately. No new candidate passed; none was timed or promoted.
+Default weights/execution and the frozen NVIDIA reference remain unchanged. This does not
+establish a global precision optimum or make2% a statistical quality cliff.
+
+| Candidate | File GB | Worst prefill PPL regression | Worst decode PPL regression | New severe prefill / decode (Wiki, technical, code) |
+|---|---:|---:|---:|---|
+| Selective-cap, A4 all eligible projection shapes |15.793|6.418%|5.197%|4,9,2 /1,2,0|
+| Selective-cap, A4 MLP gate/up+down |15.793|4.180%|5.256%|4,9,2 /1,2,0|
+| Selective-cap, A4 attention input only |15.793|0.739%|3.719%|5,3,7 /1,2,0|
+| Selective-cap, A4 gate/up+attention input |15.793|2.300%|2.419%|5,6,5 /1,4,0|
+| Default-NVIDIA15 protection locations, uniformA8 |15.424|0.526%|5.911%|3,5,3 /1,3,0|
+| Three output protections only, uniformA8 |15.217|0.833%|4.869%|4,6,5 /1,2,0|
+| Selective-cap without late MLP protections, uniformA8 |15.542|0.336%|2.232%|5,4,5 /1,4,0|
+
+All A4 changes apply only to full-K public Q4 Linear at T>128; decode/verify remainsA8.
+Decode quality nevertheless changes through prefilled KV/recurrent state. This is why prefill
+PPL alone cannot select the profile. Attention input is N7168/K5120, excluding GDN inputs.
+The existing gate/up-only mixed profile remains within2% with its previously measured prefill
+win, but retains its severe-position tradeoff; uniformA8 remains default.
+
+Selective-cap already protects the same large Text projection locations as NVIDIA's+328MiB
+artifact:15 split counterparts of the default's9 BF16 projections, plus11 split counterparts
+of the larger variant's8 added FP8 projections. AMD stores all26 at FP8 and keeps endpointsQ4;
+NVIDIA retains the original BF16 protections and W8 endpoints. Identical protection locations
+do not imply equivalent integer-A4 and NVFP4 activation errors.
+
+Scale payloads, excluding alignment/runtime KV/activation images:
+
+| Artifact | Group scale MiB | Row scale MiB | BF16 DFlash codebooks MiB |
+|---|---:|---:|---:|
+| AMD selective-cap base |807.747 FP16|0.875 FP32|none|
+| AMD selective-cap+Q4 DFlash |861.301 FP16|0.875 FP32|242.5|
+| NVIDIA default+NVFP4 DFlash |1525.234 FP8 +211.895 FP16|none|242.5|
+| NVIDIA+328MiB |1478.359 FP8 +211.895 FP16|0.244 BF16|242.5|
+
+NVIDIA additionally has about2KiB of FP32 divisors. Codebooks are not scales; the larger
+artifact's344,311,808 extra bytes are overwhelmingly increased weight precision, not BF16
+row scales. Its exact matched PPL remains unmeasured here because no NVIDIA GPU is visible.
+
+Verification: exact converted payload readback; real-artifact binding/PPL for all three new
+recipes; host selector0..5 and FP8 workspace contracts; public-input FP64/independent codec,
+finite/poison and arena checks for all six A4 projection shapes atT2048 and threshold cases.
+The explicitlyA8 fused-down route now respects the selected down activation width. No kernel
+arithmetic was rewritten. Evidence/commands: `profiles/ppl/r9700-nv-aligned-precision-20260923/`;
+runner `tools/ppl/select_nv_aligned.py`. Rejected candidates and sidecars are retained.
+
 ## FP8-capped compact base selection (2026-09-23)
 
 ### Subsequent decode optimization checkpoint
@@ -150,7 +311,8 @@ below predate these kernel changes and remain historical comparison evidence.
 
 ### Recipe and quality selection
 
-Selected for subsequent optimization: **Q4/FP8 selective-cap, uniform Q4 A8 execution**.
+Original selection for subsequent optimization: **Q4/FP8 selective-cap, uniform Q4 A8 execution**.
+The selected local delivery above now uses gate/up-only A4 prefill with these same weights.
 The15,793,065,984-byte artifact is saved at
 `/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-q4-fp8-selective-cap/qwen3.8-27b-r9700-q4-fp8-selective-cap-n16k16-eval.ninfer`.
 It is10.7% smaller than the17.68 GB selective base and26.7% smaller than four-role.

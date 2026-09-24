@@ -6,6 +6,15 @@ in `docs/performance.md` and `docs/maintainer/r9700-overhaul-plan.md`, not here.
 
 ## Fixed execution and product constraints
 
+- Shared-machine resource safety: run heavyweight jobs strictly serially across the primary
+  agent and all subagents. Never overlap model conversion/copy/readback, compilation, or
+  PPL/inference/benchmark/profiler jobs; wait for the complete job and its children to exit.
+  Lightweight editing/read-only review may continue. Build with an explicit maximum of 14 jobs:
+  `cmake --build <build-dir> --parallel 14` (or fewer); never use bare `--parallel`, bare `-j`,
+  or uncapped native builds. This is a job cap, not CPU affinity or a memory limit.
+  Reduce concurrency further or stop on sustained memory/swap/I/O pressure; 14 is not a target.
+  The 2026-09-23 stall coincided with conversion/readback + PPL + an eight-job build;
+  swap reached 99.83% and load exceeded 400 with blocked tasks. A build cap alone is insufficient.
 - Conserve agent usage: normally use at most one independent implementation agent alongside
   the primary agent. Batch independent, read-only CPU review at material kernel/correctness
   checkpoints; the primary agent handles routine checks and small harness/document edits.
@@ -75,6 +84,70 @@ retain it; never continue a failed package to timing. The fixed GPU, delegation,
 above apply to every command.
 
 ### Current checkpoint
+
+COMPLETED USER REQUEST (2026-09-23): deliver the selected compact Q4-head model with
+gate/up-only A4 prefill and A8 decode. Reuse the installed base/companion bytes, not a new quantization.
+- [x] Select family1 in default and delivered builds; keep the qualified fast gate/up kernels.
+- [x] Record exact installed model paths, weight recipe creation, and activation/build commands.
+- [x] Verify routing, matched quality, and real ordinary/DFlash execution; record measured delivery status.
+Heavyweight work is serial, builds explicitly capped at14 or fewer jobs; unrelated paused work stays paused.
+Closure: default/delivered family1; six mixed-profile NLL sidecars byte-exact; all installed
+base/companion bytes reused unchanged with adjacent creation receipts and updated README.
+C1 codeP4096/G128/chunk2048:1494.30tok/s ordinary prefill,30.15 ordinary decode,
+83.20 K4,96.05 K5,92.53 adaptive(maxK5) outputtok/s; all3 repetitions/modes exactordinarytokens.
+No binding memory limits/CPU throttling. CLI/server/PPL/bench and focused contracts pass;
+independent review SHIP. Evidence: `profiles/bench/r9700-compact-mixed-delivery-20260923/`;
+selected-delivery section in `docs/performance.md`. Uniform-control tools reject mixed snapshots.
+
+COMPLETED USER REQUEST (2026-09-23): endpoint/mixed-activation quality search with theoretical
+performance ranking. No speed benchmarks or kernel tuning in this pass. Preserve all prior
+reference/candidate evidence and the delivered default.
+- [x] Create exact-copy W8 embedding-only, head-only, and both-endpoint variants of selective-cap26
+  and the near-miss no-late-MLP22 recipe; qualify inventory, binding and endpoint layouts.
+- [x] Measure matched three-text prefill/decode PPL for useful endpoint/activation combinations.
+  Start with selective-cap endpoints crossed with the six existing A8/mixed profiles; use controls
+  and promising profiles to refine the smaller22-protection recipe. Retain quality failures.
+- [x] Rank measured quality against modeled active weight bytes and integer matrix work, explicitly
+  excluding unsupported tok/s predictions. Distinguish embedding residency from per-token traffic,
+  output-head cost, A4 compute opportunity, FP8 work and unmodeled KV/state/launch costs.
+- [x] Record a concrete quality-qualified optimization shortlist and next kernel work; do not
+  promote unmeasured performance or claim global optimality. Preserve BF16 DFlash codebooks/state.
+Use the immutable default5090 reference, C1, chunk2048, and unchanged scoring spans. PPL2% is a
+preferred screen, not a statistical cliff; report per-text NLL, severe positions, and near misses.
+No new NVIDIA measurement is possible while that GPU is absent. Other paused work remains paused.
+Closure: 27 configurations / 162 successful scoring cells; six exact-copy endpoint artifacts.
+Cap26 W8-head/gate-up A4 passes (worst prefill +1.116%, decode -0.879%); no tested endpoint
+enables MLP-wide/all-projection A4 within2%. Q4-endpoint cap26/gate-up remains the compact
+speed-oriented shortlist leader; W8 head adds644.14MiB and4.73% logical decode weight bytes.
+Cap22 W8-head/gate-up is a near miss (+2.156%). BF16-head controls do not change selection;
+all six decode NLL sidecars match their A8-head controls exactly. No speed or production promotion.
+Results, limitations, and conditional future priorities: `docs/performance.md`, endpoint precision
+section; full cells/commands: `profiles/ppl/r9700-endpoint-precision-20260923/`. Preserve them.
+
+COMPLETED USER REQUEST (2026-09-23): bounded NVIDIA-aligned AMD precision search.
+Keep the saved default NVFP4 reference immutable. Compare actual weight protections and scale
+storage with both NVIDIA artifacts; do not equate integer A4 with floating NVFP4 A4.
+- [x] Inventory protected roles and scale/codebook bytes in the installed artifacts.
+- [x] Screen broader A4 prefill coverage (MLP, then eligible Text projections) on the saved
+  selective-cap weights using the same three texts and prefill/decode scoring schedules.
+  Decode/verify stay A8. Qualify newly selected public Linear shapes before timing.
+- [x] Use the protection inventory and quality evidence to test a bounded NVIDIA-aligned weight
+  recipe where it could improve the speed/quality frontier; retain W4A8 for sensitive operations
+  and promote to W8/FP8 only where needed. Measure eligible whole-inference candidates, not
+  theoretical bit-width speedups. Preserve BF16 DFlash codebooks/state.
+- [x] Record the measured choice, scale costs, failures and reproducible commands; retain the
+  current delivered default unless a qualified candidate is a demonstrated better tradeoff.
+All42 new quality cells completed. No new candidate passes2% on every text/schedule, so no
+timing or promotion. Closest alternatives: gate/up+attention-input A4 worst+2.42%; removing
+late MLP protections saves250,994,688bytes but reaches+2.232% technical decode. Keep existing
+selective-cap/uniformA8 default and its separately evaluated gate/up-only mixed profile.
+Inventory, scale costs, failures and commands: `docs/performance.md` and
+`profiles/ppl/r9700-nv-aligned-precision-20260923/`; runner `tools/ppl/select_nv_aligned.py`.
+Frozen NVIDIA reference is intact; no visible NVIDIA GPU for additional328MiB PPL. No
+unbounded layer search or unrelated paused work was opened.
+The near-NVFP4 screen remains <=2% worse PPL per text/schedule with severe-position deltas
+reported separately. This is a bounded local comparison, not global optimality or BF16-source
+production admission. Unrelated paused tasks remain paused.
 
 COMPLETED USER GOAL (2026-09-23): optimize the saved Q4/FP8 selective-cap model to at least
 30 output tok/s ordinary decode and 60 output tok/s DFlash at C1; continue past these targets

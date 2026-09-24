@@ -93,10 +93,27 @@ def prepare(out):
     write_json(out / 'manifest.json', manifest)
 
 
+def require_uniform_build(build, bits):
+    """Do not silently label the mixed delivery default as a uniform control."""
+    settings = {}
+    for line in (build/'CMakeCache.txt').read_text().splitlines():
+        if line.startswith(('#', '//')) or '=' not in line:
+            continue
+        name, value = line.split('=', 1)
+        settings[name.split(':', 1)[0]] = value
+    expected = dict(NINFER_R9700_Q4_ACTIVATION_BITS=str(bits),
+                    NINFER_R9700_Q4_PREFILL_A4_FAMILIES='0',
+                    NINFER_R9700_W8_ACTIVATION_BITS='8')
+    if any(settings.get(key) != value for key, value in expected.items()):
+        raise ValueError(f'{build}: uniform comparison needs Q4 bits{bits}, prefill family0, W8 bits8; '
+                         'the delivered family1 build is a mixed profile, not this control')
+
+
 def snapshot_amd(out):
     records = {}
     for a in (4, 8):
         build = ROOT / ('build-r9700-pareto-a4-20260922' if a == 4 else 'build-r9700')
+        require_uniform_build(build, a)
         for kind, rel in (('ppl', 'apps/ninfer-ppl'), ('bench', 'bench/ninfer_bench')):
             target = out / f'bin/amd-a{a}-{kind}'
             if target.exists():

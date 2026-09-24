@@ -24,6 +24,31 @@ evaluate the separately compiled prefill gate/up A4 binary on selective-cap;
 they require explicit mixed-profile report metadata. Original measurements remain
 unchanged. Detailed commands live in the dated experiment package.
 
+`python3.11 -m tools.ppl.select_nv_aligned` performs the bounded follow-up:
+`prepare`, `snapshot`, `quality` (both schedules), and `speed` with explicit
+`--out`, `--recipe`, and `--profile`. The build-time
+`NINFER_R9700_Q4_PREFILL_A4_FAMILIES` selector is documented in the integer-artifact
+reference. `--binary-tag` names a new frozen snapshot after adding recipe identities;
+never overwrite the earlier snapshot. Speed requires the completed same-profile
+six-cell2% screen and checks benchmark profile and repeated tokens. New severe
+positions remain separately reported, not hidden by aggregate PPL.
+Commands/results: `profiles/ppl/r9700-nv-aligned-precision-20260923/`.
+
+`python3.11 -m tools.ppl.endpoint_precision` evaluates fixed W8 endpoint ablations with
+`prepare`, `snapshot`, `quality`, and `report`, using explicit `--out`. `quality` takes
+`--recipe cap26-embed|cap26-head|cap26-both|cap22-embed|cap22-head|cap22-both` and
+`--profile a8|gate-up|mlp|projections|attn-input|gate-up-attn-input` (compile selector0..5).
+`--recipe cap22-base` scores the retained Q4-endpoint smaller-base control without copying it.
+Snapshot each matching build first; optional `--w8-bits 16` requires an actual W8A16 build
+and uses a distinct snapshot/result name. Each configuration measures all six preserved
+NVFP4 scoring spans. `report` compares measured quality and theoretical weight bytes/Q4
+integer-product work only: there is no speed action or implied tok/s estimate.
+Commands/results: `profiles/ppl/r9700-endpoint-precision-20260923/`.
+
+On this shared machine, serialize conversion/readback, builds, and GPU jobs; never overlap
+them across agents. Explicitly cap CMake builds with `--parallel 14` or fewer jobs and
+reduce/stop on memory or I/O pressure. A build-job cap is not a memory limit.
+
 Use Python3.11 and an explicit `--out` directory. Actions, in order, are
 `prepare`, `snapshot-amd`, `quality-nvidia`, `decode-quality-nvidia`,
 `quality-amd`, `decode-quality-amd`, `speed`, `analyze`. Preparation binds the
@@ -318,12 +343,15 @@ timing; adjacent NLL and argmax sidecars retain the complete position-aligned re
 Reject a row before comparison if either the reported activation width or artifact identity is not
 the requested profile. The campaign runner enforces A8 by default; pass
 `--expected-q4-activation-bits 4` only with a scorer explicitly configured with
-`-DNINFER_R9700_Q4_ACTIVATION_BITS=4` to reproduce the retained A4 evaluator. Q4 A8 changes no
+`-DNINFER_R9700_Q4_ACTIVATION_BITS=4 -DNINFER_R9700_Q4_PREFILL_A4_FAMILIES=0`
+to reproduce the retained uniform-A4 evaluator. Q4 A8 changes no
 persistent Q4 bytes. A mixed artifact's W8 matrices use the selected adaptive A8 profile by
 default; request `--expected-w8-activation-bits 16` only for the represented-BF16 control.
 
-Configure `build-r9700-a4q4` with `-DNINFER_R9700_Q4_ACTIVATION_BITS=4` only when reproducing
-the retained A4 evidence. Leaving the option unset in any fresh build selects A8.
+Configure `build-r9700-a4q4` with activation bits4 and family0 only when reproducing
+the retained uniform-A4 evidence. A fresh default build selects A8 with gate/up-only
+A4 prefill (family1). Uniform-A8 control campaigns must explicitly configure family0;
+`q4_activation_bits: 8` alone does not identify uniform A8. Check `q4_activation_profile`.
 
 PPL verifies the target distribution under the MTP transaction, but it does not
 measure proposal acceptance or product throughput. Record acceptance and whole-path latency with the
@@ -345,7 +373,7 @@ python3 tools/bench/run_ninfer_bench_matrix.py \
   --output-dir profiles/bench/r9700-g32-qualification
 ```
 
-For all-Q4+A8 or mixed Q4/W8+A8, use the default `build-r9700/bench/ninfer_bench` and substitute
+For uniform all-Q4+A8 or mixed Q4/W8+A8 controls, use a separately configured family0 benchmark and substitute
 the exact `r9700-q4g64-n16k16-eval`, `r9700-q4-w8-n16k16-eval`, or `r9700-q4-w8-mse-n16k16-eval` artifact above. Keep
 `--expected-q4-activation-bits 8`; the default expected W8 profile is the selected adaptive A8
 route. Pass `--expected-w8-activation-bits 16` only for the represented-BF16 control. The runner

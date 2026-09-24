@@ -28,9 +28,9 @@ endif()
 add_compile_definitions(
   NINFER_R9700_KV_VALUE_GROUP=${NINFER_R9700_KV_VALUE_GROUP})
 
-# A8 is the production-style execution profile for every Q4-bearing artifact: it materially
-# reduces activation error while retaining native IU4 WMMA and large speed margins over W8.
-# A4 remains available only as a separately built evaluator over identical persistent bytes.
+# A8 is the baseline Q4 activation codec. The selected gate/up-only large-prefill
+# override below uses qualified A4 kernels; decode and other Q4 shapes remain A8.
+# Uniform A4 remains a separately built evaluator over identical persistent bytes.
 # This value is reported in scorer/benchmark output and is not a runtime or artifact selector.
 set(NINFER_R9700_Q4_ACTIVATION_BITS "8" CACHE STRING
   "R9700 Q4 evaluation activation width for separately built scorer binaries")
@@ -44,13 +44,17 @@ endif()
 add_compile_definitions(
   NINFER_R9700_Q4_ACTIVATION_BITS=${NINFER_R9700_Q4_ACTIVATION_BITS})
 
-option(NINFER_R9700_Q4_PREFILL_GATE_UP_A4
-  "Evaluate A4 only for Q4 N34816/K5120 Linear at T>128" OFF)
-if(NINFER_R9700_Q4_PREFILL_GATE_UP_A4 AND NOT NINFER_R9700_Q4_ACTIVATION_BITS STREQUAL "8")
-  message(FATAL_ERROR "NINFER_R9700_Q4_PREFILL_GATE_UP_A4 requires Q4 activation bits 8")
+set(NINFER_R9700_Q4_PREFILL_A4_FAMILIES "1" CACHE STRING
+  "Q4 prefill A4 policy: 1=selected gate/up; evaluators: 0=none, 2=MLP, 3=projections, 4=attention input, 5=gate/up+attention input")
+set_property(CACHE NINFER_R9700_Q4_PREFILL_A4_FAMILIES PROPERTY STRINGS 0 1 2 3 4 5)
+if(NOT NINFER_R9700_Q4_PREFILL_A4_FAMILIES MATCHES "^[0-5]$")
+  message(FATAL_ERROR "NINFER_R9700_Q4_PREFILL_A4_FAMILIES must be in [0,5]")
+endif()
+if(NOT NINFER_R9700_Q4_PREFILL_A4_FAMILIES STREQUAL "0" AND NOT NINFER_R9700_Q4_ACTIVATION_BITS STREQUAL "8")
+  message(FATAL_ERROR "Mixed prefill A4 families require Q4 activation bits 8")
 endif()
 add_compile_definitions(
-  NINFER_R9700_Q4_PREFILL_GATE_UP_A4=$<BOOL:${NINFER_R9700_Q4_PREFILL_GATE_UP_A4}>)
+  NINFER_R9700_Q4_PREFILL_A4_FAMILIES=${NINFER_R9700_Q4_PREFILL_A4_FAMILIES})
 
 # Qualification-only matched whole-DFlash A/B selector. Zero is the ordinary WMMA control; one
 # admits only the exact small-token N34816/K5120 cells selected by the two retained direct screens.

@@ -376,7 +376,9 @@ Variant::ExecutionState::ExecutionState(const ModelView& model, DeviceSpan seria
         }
     }
     if (impl_->selected != 0U && impl_->selected != kSelectedProjectionCount &&
-        impl_->selected != 11U && impl_->selected != 12U && impl_->selected != 32U &&
+        impl_->selected != 3U && impl_->selected != 22U &&
+        impl_->selected != 11U && impl_->selected != 12U && impl_->selected != 15U &&
+        impl_->selected != 32U &&
         impl_->selected != 80U && impl_->selected != 26U) {
         throw std::invalid_argument(
             "R9700 FP8 execution state has an incomplete selected inventory");
@@ -1238,6 +1240,9 @@ void post_mixer_body(const Tensor& hidden, const Variant::PostMixerWeights& weig
                         hidden, weights.gate_up, gate_up, workspace, stream);
     };
     const bool fused_down = execution != nullptr && hidden.ne[1] > 0 &&
+        ops::r9700::linear::q4_linear_activation_bits(
+            static_cast<std::uint32_t>(hidden.ne[1]), TextConfig::hidden,
+            TextConfig::intermediate, TextConfig::intermediate) == 8U &&
         Variant::ExecutionState::fused_mlp_down_selected(
             ops::r9700::linear::kQ4ActivationBits,
             weights.gate_up.qtype, weights.down.qtype,
@@ -1422,8 +1427,12 @@ std::size_t Variant::mtp_post_mixer_workspace_capacity_bytes(std::int32_t first,
 
 QType Variant::dflash_matrix_qtype(WeightsProfile profile) {
     validate_profile(profile);
+    profile = fp8_capped_base_profile(profile);
     switch (profile) {
     case WeightsProfile::R9700Q4Fp8EarlyAttentionEvaluation:
+    case WeightsProfile::R9700Q4Fp8DefaultProtectedEvaluation:
+    case WeightsProfile::R9700Q4Fp8OutputOnlyEvaluation:
+    case WeightsProfile::R9700Q4Fp8SelectiveNoLateMlpEvaluation:
     case WeightsProfile::R9700Q4Fp8AllAttentionEvaluation:
     case WeightsProfile::R9700Q4Fp8AttentionGdnEvaluation:
     case WeightsProfile::R9700Q4Fp8SelectiveCapEvaluation:
@@ -1455,6 +1464,12 @@ QType Variant::dflash_matrix_qtype(WeightsProfile profile) {
 std::size_t Variant::linear_workspace_capacity_bytes(WeightsProfile profile,
                                                      std::int32_t tokens) {
     validate_profile(profile);
+    const auto capped_base = fp8_capped_base_profile(profile);
+    if (capped_base != profile) {
+        const auto base = linear_workspace_capacity_bytes(capped_base, tokens);
+        return fp8_capped_w8_head(profile) ? std::max(base,
+            ops::linear_workspace_capacity_bytes(QType::W8G32_F16S, tokens, TextConfig::hidden)) : base;
+    }
     // Companion activation storage is independent of the unchanged base recipe.
     switch (profile) {
     case WeightsProfile::R9700Q4Fp8SelectiveCapDFlash2Q4Evaluation:
@@ -1512,6 +1527,9 @@ std::size_t Variant::linear_workspace_capacity_bytes(WeightsProfile profile,
     case WeightsProfile::R9700Q4G64Evaluation:
     case WeightsProfile::R9700Q4G64Fp8FourRoleN16K16Evaluation:
     case WeightsProfile::R9700Q4Fp8EarlyAttentionEvaluation:
+    case WeightsProfile::R9700Q4Fp8DefaultProtectedEvaluation:
+    case WeightsProfile::R9700Q4Fp8OutputOnlyEvaluation:
+    case WeightsProfile::R9700Q4Fp8SelectiveNoLateMlpEvaluation:
     case WeightsProfile::R9700Q4Fp8AllAttentionEvaluation:
     case WeightsProfile::R9700Q4Fp8AttentionGdnEvaluation:
     case WeightsProfile::R9700Q4Fp8SelectiveCapEvaluation:
@@ -1525,6 +1543,7 @@ std::size_t Variant::linear_workspace_capacity_bytes(WeightsProfile profile,
 std::size_t Variant::vision_linear_workspace_capacity_bytes(WeightsProfile profile,
                                                              std::int32_t tokens) {
     validate_profile(profile);
+    profile = fp8_capped_base_profile(profile);
     switch (profile) {
     case WeightsProfile::R9700Q4Fp8SelectiveCapDFlash2Q4Evaluation:
     case WeightsProfile::R9700Q4SelectiveProtectedDFlash2Q4Evaluation:
@@ -1551,6 +1570,9 @@ std::size_t Variant::vision_linear_workspace_capacity_bytes(WeightsProfile profi
     case WeightsProfile::R9700Q4G64Evaluation:
     case WeightsProfile::R9700Q4G64Fp8FourRoleN16K16Evaluation:
     case WeightsProfile::R9700Q4Fp8EarlyAttentionEvaluation:
+    case WeightsProfile::R9700Q4Fp8DefaultProtectedEvaluation:
+    case WeightsProfile::R9700Q4Fp8OutputOnlyEvaluation:
+    case WeightsProfile::R9700Q4Fp8SelectiveNoLateMlpEvaluation:
     case WeightsProfile::R9700Q4Fp8AllAttentionEvaluation:
     case WeightsProfile::R9700Q4Fp8AttentionGdnEvaluation:
     case WeightsProfile::R9700Q4Fp8SelectiveCapEvaluation:
@@ -1577,6 +1599,7 @@ std::size_t Variant::execution_state_capacity_bytes(WeightsProfile profile,
     }
     const std::uint32_t tokens = std::max(prefill_tokens, maximum_graph_tokens);
     std::size_t bytes = linear_workspace_capacity_bytes(profile, static_cast<std::int32_t>(tokens));
+    profile = fp8_capped_base_profile(profile);
     if (is_selective_protected_profile(profile) ||
         profile == WeightsProfile::R9700Q4Fp8SelectiveCapEvaluation ||
         profile == WeightsProfile::R9700Q4Fp8SelectiveCapDFlash2Q4Evaluation) {
@@ -1586,7 +1609,12 @@ std::size_t Variant::execution_state_capacity_bytes(WeightsProfile profile,
     if (is_fp8_capped_profile(profile) &&
         profile != WeightsProfile::R9700Q4Fp8SelectiveCapEvaluation &&
         profile != WeightsProfile::R9700Q4Fp8SelectiveCapDFlash2Q4Evaluation) {
-        bytes = std::max(bytes, execution_storage_bytes(prefill_tokens, maximum_graph_tokens));
+        const bool protected_outputs = profile == WeightsProfile::R9700Q4Fp8DefaultProtectedEvaluation ||
+            profile == WeightsProfile::R9700Q4Fp8OutputOnlyEvaluation ||
+            profile == WeightsProfile::R9700Q4Fp8SelectiveNoLateMlpEvaluation;
+        const auto columns = protected_outputs
+            ? std::max(TextConfig::query_size, TextConfig::value_dim) : TextConfig::hidden;
+        bytes = std::max(bytes, execution_storage_bytes(prefill_tokens, maximum_graph_tokens, columns));
     }
     if (profile == WeightsProfile::R9700Q4G64Fp8FourRoleN16K16Evaluation ||
         profile == WeightsProfile::R9700Q4G64Fp8FourRoleDFlash2Q4MseEvaluation ||

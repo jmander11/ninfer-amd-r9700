@@ -6,8 +6,8 @@
 namespace ninfer::ops::r9700::linear {
 
 // Compile-time execution boundary for the two qualified activation codecs over identical
-// persistent Q4G64 artifact bytes. A8 is the production-style default; A4 is retained only as an
-// explicit evaluator. This is deliberately not a runtime or artifact selector.
+// persistent Q4G64 artifact bytes. The selected default is A8 with gate/up-only A4
+// for T>128. Other profiles are evaluators, not runtime or artifact selectors.
 #ifndef NINFER_R9700_Q4_ACTIVATION_BITS
 #define NINFER_R9700_Q4_ACTIVATION_BITS 8
 #endif
@@ -16,14 +16,14 @@ static_assert(NINFER_R9700_Q4_ACTIVATION_BITS == 4 ||
               "R9700 Q4 activation width must be A4 or A8");
 inline constexpr std::uint32_t kQ4ActivationBits = NINFER_R9700_Q4_ACTIVATION_BITS;
 
-#ifndef NINFER_R9700_Q4_PREFILL_GATE_UP_A4
-#define NINFER_R9700_Q4_PREFILL_GATE_UP_A4 0
+#ifndef NINFER_R9700_Q4_PREFILL_A4_FAMILIES
+#define NINFER_R9700_Q4_PREFILL_A4_FAMILIES 1
 #endif
-static_assert(NINFER_R9700_Q4_PREFILL_GATE_UP_A4 == 0 ||
-              NINFER_R9700_Q4_PREFILL_GATE_UP_A4 == 1);
-inline constexpr bool kQ4PrefillGateUpA4 = NINFER_R9700_Q4_PREFILL_GATE_UP_A4 == 1;
-static_assert(!kQ4PrefillGateUpA4 || kQ4ActivationBits == 8U,
-              "mixed prefill gate/up evaluator requires global Q4 A8");
+inline constexpr unsigned kQ4PrefillA4Families = NINFER_R9700_Q4_PREFILL_A4_FAMILIES;
+static_assert(kQ4PrefillA4Families <= 5U);
+inline constexpr bool kQ4PrefillGateUpA4 = kQ4PrefillA4Families != 0U && kQ4PrefillA4Families != 4U;
+static_assert(kQ4PrefillA4Families == 0U || kQ4ActivationBits == 8U,
+              "mixed prefill policy requires global Q4 A8");
 
 [[nodiscard]] constexpr bool is_q4_prefill_gate_up_a4_eligible(
     std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns,
@@ -32,17 +32,35 @@ static_assert(!kQ4PrefillGateUpA4 || kQ4ActivationBits == 8U,
            padded_columns == columns;
 }
 
-// Only the public Q4 Linear boundary applies this evaluation override. Private
+[[nodiscard]] constexpr bool is_q4_prefill_a4_eligible(
+    std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns,
+    std::uint32_t padded_columns) noexcept {
+    if (tokens <= 128U || columns != padded_columns) return false;
+    if (kQ4PrefillGateUpA4 && rows == 34816U && columns == 5120U) return true;
+    if ((kQ4PrefillA4Families == 2U || kQ4PrefillA4Families == 3U) &&
+        rows == 5120U && columns == 17408U) return true;
+    if (kQ4PrefillA4Families >= 3U && rows == 7168U && columns == 5120U) return true;
+    return kQ4PrefillA4Families == 3U &&
+        (((rows == 4096U || rows == 12288U) && columns == 5120U) ||
+         (rows == 5120U && columns == 6144U));
+}
+
+// Only the public Q4 Linear boundary applies this activation override. Private
 // explicitly-A8 Ops, decode/verify widths and all other formats remain unchanged.
 [[nodiscard]] constexpr std::uint32_t q4_linear_activation_bits(
     std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns,
     std::uint32_t padded_columns) noexcept {
-    return kQ4PrefillGateUpA4 &&
-           is_q4_prefill_gate_up_a4_eligible(tokens, rows, columns, padded_columns)
+    return is_q4_prefill_a4_eligible(tokens, rows, columns, padded_columns)
         ? 4U : kQ4ActivationBits;
 }
 
-inline constexpr std::string_view kQ4ActivationProfile = kQ4PrefillGateUpA4
+inline constexpr std::string_view kQ4ActivationProfile = kQ4PrefillA4Families == 5U
+    ? "a8-except-gate-up-attn-input-tgt128-a4"
+    : kQ4PrefillA4Families == 4U ? "a8-except-n7168-k5120-tgt128-a4"
+    : kQ4PrefillA4Families == 3U
+    ? "a8-except-text-projections-tgt128-a4"
+    : kQ4PrefillA4Families == 2U ? "a8-except-mlp-tgt128-a4"
+    : kQ4PrefillGateUpA4
     ? "a8-except-n34816-k5120-tgt128-a4"
     : kQ4ActivationBits == 8U ? "uniform-a8" : "uniform-a4";
 
