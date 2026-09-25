@@ -155,7 +155,7 @@ class AnalyzeWholeProfileTest(unittest.TestCase):
                 (140_000_000, 141_000_000, 1_000_000,
                  "fused_attention_causal_kernel", "ninfer.attention.prefill.attention"),
                 (141_000_000, 142_000_000, 1_000_000,
-                 "dense_full_score_qk_bk32_kernel", "ninfer.attention.prefill.attention"),
+                 "dense_full_score_qk_tiled_kernel", "ninfer.attention.prefill.attention"),
                 (142_000_000, 143_000_000, 1_000_000,
                  "dense_full_score_maximum_kernel", "ninfer.attention.prefill.attention"),
                 (143_000_000, 144_000_000, 1_000_000,

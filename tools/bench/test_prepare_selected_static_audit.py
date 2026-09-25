@@ -10,23 +10,23 @@ from tools.bench import verify_selected_hardware_use as verifier
 
 
 def test_exact_device_symbol_and_emitted_metadata():
-    symbol = '_Z_dense_full_score_qk_bk32_kernelILb0EE'
-    raw = (symbol + '\0_Z___device_stub__dense_full_score_qk_bk32_kernelILb0EE\0').encode()
-    assert audit.unique_symbol(raw, 'dense_full_score_qk_bk32_kernelILb0EE') == symbol
+    symbol = '_Z_dense_full_score_qk_tiled_kernelILj32ELj64EE'
+    raw = (symbol + '\0_Z___device_stub__dense_full_score_qk_tiled_kernelILj32ELj64EE\0').encode()
+    assert audit.unique_symbol(raw, 'dense_full_score_qk_tiled_kernelILj32ELj64EE') == symbol
     with pytest.raises(ValueError, match='one selected code symbol'):
-        audit.unique_symbol(raw + b'_Z_other_dense_full_score_qk_bk32_kernelILb0EE\0',
-                            'dense_full_score_qk_bk32_kernelILb0EE')
+        audit.unique_symbol(raw + b'_Z_other_dense_full_score_qk_tiled_kernelILj32ELj64EE\0',
+                            'dense_full_score_qk_tiled_kernelILj32ELj64EE')
     metadata = f'''amdhsa.kernels:
   - .args: []
     .name: {symbol}
-    .vgpr_count: 41
-    .group_segment_fixed_size: 16488
+    .vgpr_count: 65
+    .group_segment_fixed_size: 32928
     .private_segment_fixed_size: 0
     .wavefront_size: 32
 '''
     proof = audit.symbol_proof(symbol, audit.SPECS['dense_panel_qk'][2],
-                              'v_wmma_f32_16x16x16_bf16 v0,v1,v2,v3\n' * 32, metadata)
-    assert (proof['opcode_sites'], proof['vgpr'], proof['lds_bytes']) == (32, 41, 16488)
+                              'v_wmma_f32_16x16x16_bf16 v0,v1,v2,v3\n' * 64, metadata)
+    assert (proof['opcode_sites'], proof['vgpr'], proof['lds_bytes']) == (64, 65, 32928)
     with pytest.raises(ValueError, match='not wave32'):
         audit.symbol_proof(symbol, 'opcode', '', metadata.replace('size: 32', 'size: 64'))
 

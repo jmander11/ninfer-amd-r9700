@@ -407,8 +407,8 @@ def verify(selection_path: Path, reconciliation_path: Path, audit_path: Path,
     if route["xattention_profile"] == "dense":
         dense = proofs["dense_panel_qk"]
         if (dense.get("opcode") != "v_wmma_f32_16x16x16_bf16"
-                or dense.get("opcode_sites") != 32
-                or "dense_full_score_qk_bk32_kernel" not in dense.get("code_symbol", "")):
+                or dense.get("opcode_sites") != 64
+                or "dense_full_score_qk_tiled_kernelILj32ELj64EE" not in dense.get("code_symbol", "")):
             raise ValueError("selected dense attention proof lacks BF16 WMMA")
     else:
         rank, consumer = proofs["xattention_rank"], proofs["xattention_flash_consumer"]

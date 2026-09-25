@@ -124,13 +124,15 @@ struct DensePrefillWmmaResources {
 
 // Staged causal prefill over bounded query panels. The caller owns one reusable FP32 score panel
 // and one FP32 maximum per (panel row, query head), plus FP32 numerator/denominator
-// partials for long-context split PV. QK uses Bk16 for calls below 512 rows and Bk32
-// otherwise, independently of the private panel width. Row positions remain absolute.
+// partials for long-context split PV. QK uses 16x16 for calls below 512 rows;
+// larger calls use 32x64, or 16x32 when a panel has fewer than 32 rows.
+// Row positions remain absolute.
 enum class DensePrefillFullScoreStage : std::uint32_t {
     QkBk16 = 0U,
     Maximum = 1U,
     Pv = 2U,
-    QkBk32 = 3U,
+    QkBq16Bk32 = 3U,
+    QkBq32Bk64 = 4U,
 };
 [[nodiscard]] std::size_t fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(
     std::uint32_t query_rows, std::size_t visible_context) noexcept;

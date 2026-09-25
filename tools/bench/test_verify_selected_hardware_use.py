@@ -15,7 +15,7 @@ from tools.bench.verify_selected_hardware_use import sha, snapshot, verify
 Q4_CTA = "_Z_a8q4g64_linear_prefill_cta_kernel"
 Q4_WAVE = "_ZN6ninfer3ops5r97006linear12_GLOBAL__N_128a8q4g64_linear_wmma32_kernelEPKhS5_PKtPKjS5_S7_P12hip_bfloat16jjj"
 W8_CTA = "_Z_a8w8g32_linear_prefill_cta_kernel"
-DENSE_QK = "_Z_dense_full_score_qk_bk32_kernel"
+DENSE_QK = "_Z_dense_full_score_qk_tiled_kernelILj32ELj64EE"
 XRANK = "_Z_xattention_rank_kernel"
 XCONSUMER = "_Z_xattention_flash_consumer_kernel"
 FP8_GATE = "Cijk_fp8_gate"
@@ -131,7 +131,7 @@ class SelectedHardwareUseTest(unittest.TestCase):
                                   "packed_fp8_conversion_sites": 8},
             "dense_panel_qk": {"code_symbol": DENSE_QK,
                                          "opcode": "v_wmma_f32_16x16x16_bf16",
-                                         "opcode_sites": 32},
+                                         "opcode_sites": 64},
             "xattention_rank": {"code_symbol": XRANK,
                                   "opcode": "v_wmma_f32_16x16x16_bf16",
                                   "opcode_sites": 2},

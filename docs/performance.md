@@ -60,6 +60,44 @@ expected value exactly.
 Copy bus rate counts both the read and write traffic. This is the hardware bandwidth bound, not a
 model or individual-Op throughput claim.
 
+## Dense QK key/query reuse (2026-09-25)
+
+For calls with at least512 query rows, production QK now uses32-query/64-key
+tiles, falling back to the revised16-query/32-key tile when score panels shrink
+below32 rows. Smaller whole calls retain16x16. Two sets of six GQA waves share
+decoded keys; each query fragment serves four K16 WMMA fragments. No operand
+format, score accumulation order, cache, workspace or model recipe changes.
+
+Qualified complete-attention warm median A/B, G16/2048 appended queries, auto,
+seven rotating-order samples; candidate output is bit-exact to the incumbent:
+
+| Context | Previous, ms | Selected, ms |
+|---:|---:|---:|
+|2048|9.62679|8.70563|
+|8192|96.2533|73.3662|
+|32768|272.262|184.782|
+|65536|391.505|287.647|
+|262144 (16-row panels)|1214.28|1165.31|
+
+The wide route regresses the final narrow-panel shape, so it is not used there.
+Production and prototype complete-Op timings agree at32K (184.762/184.753ms).
+G16/G32 independent FP64, graph/metadata and131071/131072/131073 panel-boundary
+qualification passes. Native BF16 WMMA sites32/64, metadata VGPR41/65, assembler
+next-free VGPR97/145, LDS16480/32928, wave32 WGP and zero spills/scratch.
+The static checker distinguishes the two register fields, and the selected-P2048
+hardware audit now resolves the exact32x64 symbol. Its17 affected tests pass.
+
+Matched32K WikiText NLL and argmax sidecars are byte-identical to the previous
+PV-WMMA build (PPL6.506943806327). Whole C1/chunk2048 prefill825.07→930.54 tok/s,
+tail495→617,39.72→35.21s. The8K screen is1305.40 tok/s versus1240.21 before QK
+tuning. Same loaded model, cyclic speed corpus and warmup0/repetition1 method;
+these screens do not establish a performance ceiling.
+The64K confirmation improves576.82→661.61 tok/s (+14.70%), tail335→405,
+113.62→99.06s. This is4.38× the original pre-fix64K average rate.
+Evidence: `profiles/bench/r9700-dense-pv-tiles-20260925/qk-*`,
+`profiles/bench/r9700-qk-tiles-contexts-20260925/`, and
+`profiles/ppl/r9700-qk-tiles-20260925/`.
+
 ## Long-context matrix-instruction PV (2026-09-25)
 
 The next PV route replaces scalar split accumulation with native FP16 WMMA and
@@ -89,7 +127,7 @@ method and2048 appended query rows:
 The complete G16/G32 FP64/graph/metadata suite passes through262144 context,
 including non-power-of-two scales, minimum-subnormal and maximum-finite scales.
 ISA confirms eight native `v_wmma_f32_16x16x16_f16` instructions per loop body,
-94 VGPR,13816-byte LDS, compiler occupancy14, wave32 WGP and zero spills/scratch.
+94 next-free VGPR,13816-byte LDS, compiler occupancy14, wave32 WGP and zero spills/scratch.
 Matched32K WikiText final512-position PPL6.510527→6.506944, mean-NLL delta
 −0.00055047, zero new severe positions; maximum absolute per-position change1.20241.
 The existing gate passes without a tolerance change; this is not a broad quality claim.

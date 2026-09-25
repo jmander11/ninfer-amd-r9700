@@ -94,6 +94,10 @@ ACTIVE USER REQUEST (2026-09-25, further long-context optimization):
   restoration, FP32 accumulation/denominator/merge. G16/G32 FP64 and graph tests,
   extreme/non-power-of-two scales, ISA and matched32K PPL pass. Whole32K659→825
   tok/s. Remove superseded scalar split code and commit before investigating QK.
+- [x] QK key/query reuse:32x64 for large calls/panels,16x32 for panels below32,
+  retaining16x16 below512 whole rows. Bit-exact complete Op and32K model sidecars;
+  G16/G32 FP64/graph/boundary and ISA/audit checks pass. Whole32K825→931 tok/s.
+  Commit before investigating score/softmax traffic.
 - [ ] Profile the final long-context build, then investigate PV parallelism/reuse,
   QK, and score/softmax traffic one at a time. Each investigation needs a concrete
   measured mechanism; retain exclusions rather than repeating exhausted candidates.

@@ -16,6 +16,7 @@ class DensePrefillAttentionStaticTest(unittest.TestCase):
     symbol = "_ZN6ninfer3ops5r97002kv26dense_full_score_qk_kernelILb0EEEv"
 
     def fixture(self, root: Path, *, lds: int = 8296, vgpr: int = 29,
+                reported_vgpr: int | None = None,
                 scratch: int = 0, occupancy: int = 15, maximum_workgroup: int = 192,
                 wavefront: int = 32, wgp_mode: int = 1, vgpr_spills: int = 0,
                 opcode: str = "v_wmma_f32_16x16x16_bf16",
@@ -46,6 +47,7 @@ amdhsa.kernels:
     .sgpr_spill_count: 0
     .symbol:         {symbol}.kd
     .vgpr_spill_count: {vgpr_spills}
+    .vgpr_count: {vgpr if reported_vgpr is None else reported_vgpr}
     .wavefront_size: {wavefront}
     .workgroup_processor_mode: {wgp_mode}
 """
@@ -80,16 +82,28 @@ amdhsa.kernels:
             self.assertEqual(result["full_score_stage"], "qk_bk16")
 
             bk32_symbol = ("_ZN6ninfer3ops5r97002kv"
-                           "31dense_full_score_qk_bk32_kernelILb0EEEv")
-            profile = FULL_SCORE_PROFILES["qk_bk32"]
+                           "32dense_full_score_qk_tiled_kernelILj16ELj32EEEv")
+            profile = FULL_SCORE_PROFILES["qk_narrow"]
             paths = self.fixture(
                 Path(directory), lds=profile["lds"], vgpr=37, occupancy=15,
                 maximum_workgroup=profile["workgroup"], symbol=bk32_symbol,
                 wmma_count=profile["wmma"])
             result = check(assembly=paths[0], metadata=paths[1], symbol=bk32_symbol,
-                           value_group=16, full_score_stage="qk_bk32")
+                           value_group=16, full_score_stage="qk_narrow")
             self.assertEqual(result["wmma_count"], 32)
-            self.assertEqual(result["lds_bytes"], 16488)
+            self.assertEqual(result["lds_bytes"], 16480)
+
+            wide_symbol = "_ZN6ninfer3ops5r97002kv32dense_full_score_qk_tiled_kernelILj32ELj64EEEv"
+            profile = FULL_SCORE_PROFILES["qk_wide"]
+            paths = self.fixture(Path(directory), lds=profile["lds"], vgpr=145, reported_vgpr=65,
+                                 occupancy=9, maximum_workgroup=384, symbol=wide_symbol,
+                                 wmma_count=64)
+            result = check(assembly=paths[0], metadata=paths[1], symbol=wide_symbol,
+                           value_group=16, full_score_stage="qk_wide")
+            self.assertEqual(result["wmma_count"], 64)
+            self.assertEqual(result["query_tile"], 32)
+            self.assertEqual(result["next_free_vgpr"], 145)
+            self.assertEqual(result["vgpr_count"], 65)
 
             pv_symbol = ("_ZN6ninfer3ops5r97002kv26dense_full_score_pv_kernel"
                          "ILj16ELb0EEEv")

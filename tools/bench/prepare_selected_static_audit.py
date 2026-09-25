@@ -21,7 +21,7 @@ SPECS = {
     'q4_wave32': ('linear_by_profile', 'a8q4g64_linear_wmma32_kernel', 'v_wmma_i32_16x16x32_iu4'),
     'w8_p2048_cta': ('linear_by_profile', 'a8w8g32_linear_prefill_cta_kernel', 'v_wmma_i32_16x16x16_iu8'),
     'ordinary_fp8_qk': ('attention_by_profile', 'qk_wmma_kernelILb0EE', 'v_wmma_f32_16x16x16_fp8_fp8'),
-    'dense_panel_qk': ('attention_by_profile', 'dense_full_score_qk_bk32_kernelILb0EE', 'v_wmma_f32_16x16x16_bf16'),
+    'dense_panel_qk': ('attention_by_profile', 'dense_full_score_qk_tiled_kernelILj32ELj64EE', 'v_wmma_f32_16x16x16_bf16'),
     'xattention_rank': ('xattention_by_profile', 'xattention_rank_kernelILj16EE', 'v_wmma_f32_16x16x16_bf16'),
     'xattention_flash_consumer': ('xattention_by_profile', '', 'v_wmma_f32_16x16x16_bf16'),
 }

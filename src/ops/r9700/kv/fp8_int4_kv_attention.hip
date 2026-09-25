@@ -873,151 +873,121 @@ void dense_full_score_qk_kernel(
 #endif
 }
 
-struct DenseFullScoreQkBk32Shared {
-    hip_bfloat16 keys[kHeadDim][32];
-    std::uint32_t row_context[kDensePrefillQueryTile];
-    std::uint32_t invalid_rows;
-    std::uint32_t inactive_rows;
-    std::uint32_t maximum_context;
-    std::size_t physical_page_base;
-    std::size_t table_offset;
-    std::uint32_t page_valid;
+template <std::uint32_t QueryTile, std::uint32_t KeyTile>
+struct DenseFullScoreQkTiledShared {
+    hip_bfloat16 keys[kHeadDim][KeyTile];
+    std::uint32_t row_context[QueryTile];
+    std::uint32_t inactive_rows, invalid_rows, maximum_context, page_valid;
+    std::size_t table_offset, physical_base;
 };
 
-// Selected production Bq16/Bk32 QK route. Since both the page and key tile are aligned and
-// 32 divides the fixed 64-token page, a key tile is always contained by one physical page.
-// Each wave retains two independent FP32 accumulators so each individual score sees exactly
-// the production feature-tile accumulation order while its query fragment feeds both K tiles.
-template <bool DeviceActiveRows>
-__global__ __launch_bounds__(kDenseFullScoreQkThreads)
-void dense_full_score_qk_bk32_kernel(
-    const hip_bfloat16* query, const std::uint8_t* keys, const std::uint32_t* pages,
-    const std::int32_t* page_table_row, std::uint32_t page_table_row_stride,
-    std::uint32_t page_table_row_count, std::size_t context, std::size_t physical_tokens,
-    const std::int32_t* row_positions, const std::int32_t* active_query_rows,
-    std::uint32_t total_query_rows, std::uint32_t panel_origin, std::uint32_t whole_rows, float attention_scale, float* scores) {
-#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
-    __shared__ DenseFullScoreQkBk32Shared shared;
-    const std::uint32_t tid = threadIdx.x;
-    const std::uint32_t wave = tid >> 5U;
-    const std::uint32_t lane = tid & 31U;
-    const std::uint32_t half = lane >> 4U;
-    const std::uint32_t axis = lane & 15U;
+// Two admitted geometries: 32x64 reuses each decoded key across two query tiles;
+// 16x32 avoids idle query waves in narrow score panels. Each individual score
+// retains exactly the Bk16/Bk32 BF16-WMMA feature accumulation order.
+template <std::uint32_t QueryTile, std::uint32_t KeyTile>
+__global__ __launch_bounds__(192U * (QueryTile / 16U))
+void dense_full_score_qk_tiled_kernel(Fp8Int4KvAttentionArgs a, float* scores,
+                                     std::uint32_t panel_origin, std::uint32_t whole_rows) {
+    static_assert((QueryTile == 16U && KeyTile == 32U) ||
+                  (QueryTile == 32U && KeyTile == 64U));
+    __shared__ DenseFullScoreQkTiledShared<QueryTile, KeyTile> shared;
+    constexpr std::uint32_t threads = 192U * (QueryTile / 16U);
+    const std::uint32_t tid = threadIdx.x, wave = tid / 32U, lane = tid % 32U;
+    const std::uint32_t head = wave % 6U, query_tile = wave / 6U;
+    const std::uint32_t axis = lane % 16U, half = lane / 16U;
+    const std::uint32_t query_base = blockIdx.y * QueryTile;
+    const std::uint32_t tile_rows = min(QueryTile, a.query_rows - query_base);
     const std::uint32_t kv_head = blockIdx.x;
-    const std::uint32_t query_base = blockIdx.y * kDensePrefillQueryTile;
-    const std::uint32_t tile_rows = min(kDensePrefillQueryTile,
-                                        total_query_rows - query_base);
     if (tid == 0U) {
-        const std::int32_t active = DeviceActiveRows ? dense_panel_active_rows(active_query_rows, total_query_rows, panel_origin, whole_rows)
-                                                     : static_cast<std::int32_t>(total_query_rows);
+        const std::int32_t active = a.active_query_rows != nullptr
+            ? dense_panel_active_rows(a.active_query_rows, a.query_rows, panel_origin, whole_rows)
+            : static_cast<std::int32_t>(a.query_rows);
+        const bool invalid = active < 0 || static_cast<std::uint32_t>(active) > a.query_rows;
         shared.inactive_rows = 0U;
+        shared.invalid_rows = 0U;
         shared.maximum_context = 0U;
         shared.table_offset = 0U;
-        shared.invalid_rows = 0U;
-        const bool invalid_active = active < 0 ||
-            static_cast<std::uint32_t>(active) > total_query_rows;
         for (std::uint32_t row = 0U; row < tile_rows; ++row) {
-            const std::uint32_t bit = 1U << row;
-            const std::uint32_t global_row = query_base + row;
-            if (invalid_active) {
-                shared.invalid_rows |= bit;
-                shared.row_context[row] = 0U;
-            } else if (global_row >= static_cast<std::uint32_t>(active)) {
-                shared.inactive_rows |= bit;
-                shared.row_context[row] = 0U;
-            } else {
-                const std::int32_t position = row_positions[global_row];
-                if (position < 0 || static_cast<std::size_t>(position) >= context) {
-                    shared.invalid_rows |= bit;
-                    shared.row_context[row] = 0U;
-                } else {
+            shared.row_context[row] = 0U;
+            if (invalid) shared.invalid_rows |= 1U << row;
+            else if (query_base + row >= static_cast<std::uint32_t>(active))
+                shared.inactive_rows |= 1U << row;
+            else {
+                const std::int32_t position = a.row_positions[query_base + row];
+                if (position < 0 || static_cast<std::size_t>(position) >= a.context)
+                    shared.invalid_rows |= 1U << row;
+                else {
                     shared.row_context[row] = static_cast<std::uint32_t>(position) + 1U;
-                    shared.maximum_context = max(shared.maximum_context,
-                                                 shared.row_context[row]);
+                    shared.maximum_context = max(shared.maximum_context, shared.row_context[row]);
                 }
             }
         }
-        if (!invalid_active && shared.maximum_context != 0U && page_table_row != nullptr) {
-            const std::int32_t table_row = page_table_row[0];
-            if (table_row < 0 || static_cast<std::uint32_t>(table_row) >= page_table_row_count) {
-                const std::uint32_t mask = (1U << tile_rows) - 1U;
+        if (!invalid && shared.maximum_context != 0U && a.page_table_row != nullptr) {
+            const std::int32_t table_row = a.page_table_row[0];
+            if (table_row < 0 || static_cast<std::uint32_t>(table_row) >= a.page_table_row_count) {
+                const std::uint32_t mask = tile_rows == 32U ? ~0U : (1U << tile_rows) - 1U;
                 shared.invalid_rows |= mask & ~shared.inactive_rows;
                 shared.maximum_context = 0U;
-            } else {
-                shared.table_offset = static_cast<std::size_t>(table_row) * page_table_row_stride;
-            }
+            } else shared.table_offset = static_cast<std::size_t>(table_row) * a.page_table_row_stride;
         }
     }
     __syncthreads();
-    const std::uint32_t key_base = blockIdx.z * 32U;
+    const std::uint32_t key_base = blockIdx.z * KeyTile;
     if (key_base >= shared.maximum_context) return;
     if (tid == 0U) {
-        const std::size_t physical_page = pages[shared.table_offset + key_base / kPageSize];
-        shared.page_valid = physical_page < physical_tokens / kPageSize ? 1U : 0U;
-        shared.physical_page_base = physical_page * kPageSize + key_base % kPageSize;
+        const std::size_t page = a.page_table[shared.table_offset + key_base / kPageSize];
+        shared.page_valid = page < a.physical_tokens / kPageSize ? 1U : 0U;
+        shared.physical_base = page * kPageSize + key_base % kPageSize;
     }
     __syncthreads();
-    for (std::uint32_t flat = tid; flat < kHeadDim * 32U; flat += blockDim.x) {
-        const std::uint32_t feature = flat / 32U;
-        const std::uint32_t token = flat % 32U;
-        hip_bfloat16 decoded(__builtin_nanf(""));
+    for (std::uint32_t flat = tid; flat < kHeadDim * KeyTile; flat += threads) {
+        const std::uint32_t feature = flat / KeyTile, token = flat % KeyTile;
+        hip_bfloat16 value(__builtin_nanf(""));
         if (key_base + token < shared.maximum_context && shared.page_valid != 0U) {
-            const std::uint8_t code = keys[key_offset<true>(
-                shared.physical_page_base + token, kv_head, feature, 4U, physical_tokens)];
-            if ((code & 0x7fU) != 0x7fU) {
-                decoded = hip_bfloat16(__half2float(
-                    __half(__hip_cvt_fp8_to_halfraw(code, __HIP_E4M3))));
-            }
+            const std::uint8_t code = a.key_codes[key_offset<true>(
+                shared.physical_base + token, kv_head, feature, 4U, a.physical_tokens)];
+            if ((code & 0x7fU) != 0x7fU)
+                value = hip_bfloat16(__half2float(__half(__hip_cvt_fp8_to_halfraw(code, __HIP_E4M3))));
         }
-        shared.keys[feature][token] = decoded;
+        shared.keys[feature][token] = value;
     }
     __syncthreads();
-    F32x8 score0{};
-    F32x8 score1{};
+    F32x8 accumulators[KeyTile / 16U]{};
 #pragma unroll
-    for (std::uint32_t feature_tile = 0U; feature_tile < kHeadDim / 16U;
-         ++feature_tile) {
-        I16x8 q_fragment{};
-        I16x8 k_fragment0{};
-        I16x8 k_fragment1{};
+    for (std::uint32_t feature_tile = 0U; feature_tile < kHeadDim / 16U; ++feature_tile) {
+        I16x8 query_fragment{};
 #pragma unroll
         for (std::uint32_t item = 0U; item < 8U; ++item) {
-            const std::uint32_t feature = feature_tile * 16U + half * 8U + item;
-            if (axis < tile_rows && (shared.inactive_rows & (1U << axis)) == 0U &&
-                (shared.invalid_rows & (1U << axis)) == 0U) {
-                q_fragment[item] = static_cast<short>(query[
-                    (static_cast<std::size_t>(query_base + axis) * 24U +
-                     kv_head * 6U + wave) * kHeadDim + feature].data);
-            }
-            k_fragment0[item] = static_cast<short>(shared.keys[feature][axis].data);
-            k_fragment1[item] = static_cast<short>(shared.keys[feature][16U + axis].data);
+            const std::uint32_t row = query_tile * 16U + axis;
+            if (row < tile_rows && (shared.inactive_rows & (1U << row)) == 0U &&
+                (shared.invalid_rows & (1U << row)) == 0U)
+                query_fragment[item] = static_cast<short>(a.query[
+                    (static_cast<std::size_t>(query_base + row) * 24U + kv_head * 6U + head) *
+                        kHeadDim + feature_tile * 16U + half * 8U + item].data);
         }
-        score0 = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(
-            q_fragment, k_fragment0, score0);
-        score1 = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(
-            q_fragment, k_fragment1, score1);
+#pragma unroll
+        for (std::uint32_t key_tile = 0U; key_tile < KeyTile / 16U; ++key_tile) {
+            I16x8 key_fragment{};
+#pragma unroll
+            for (std::uint32_t item = 0U; item < 8U; ++item)
+                key_fragment[item] = static_cast<short>(
+                    shared.keys[feature_tile * 16U + half * 8U + item][key_tile * 16U + axis].data);
+            accumulators[key_tile] = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(
+                query_fragment, key_fragment, accumulators[key_tile]);
+        }
     }
 #pragma unroll
     for (std::uint32_t item = 0U; item < 8U; ++item) {
-        const std::uint32_t row = half * 8U + item;
+        const std::uint32_t row = query_tile * 16U + half * 8U + item;
         if (row >= tile_rows) continue;
-        const std::size_t vector =
-            static_cast<std::size_t>(query_base + row) * 24U + kv_head * 6U + wave;
-        const std::uint32_t logical0 = key_base + axis;
-        if (logical0 < shared.row_context[row]) {
-            scores[vector * context + logical0] = score0[item] * attention_scale;
-        }
-        const std::uint32_t logical1 = key_base + 16U + axis;
-        if (logical1 < shared.row_context[row]) {
-            scores[vector * context + logical1] = score1[item] * attention_scale;
+        const std::size_t vector = static_cast<std::size_t>(query_base + row) * 24U + kv_head * 6U + head;
+#pragma unroll
+        for (std::uint32_t key_tile = 0U; key_tile < KeyTile / 16U; ++key_tile) {
+            const std::uint32_t logical = key_base + key_tile * 16U + axis;
+            if (logical < shared.row_context[row])
+                scores[vector * a.context + logical] = accumulators[key_tile][item] * a.attention_scale;
         }
     }
-#else
-    (void)query; (void)keys; (void)pages; (void)page_table_row;
-    (void)page_table_row_stride; (void)page_table_row_count; (void)context;
-    (void)physical_tokens; (void)row_positions; (void)active_query_rows;
-    (void)total_query_rows; (void)panel_origin; (void)whole_rows; (void)attention_scale; (void)scores;
-#endif
 }
 
 template <bool DeviceActiveRows>
@@ -1514,34 +1484,26 @@ hipError_t dense_full_score_launch(const Fp8Int4KvAttentionArgs& a, float* score
     return dense_full_score_pv_dispatch<Group>(a, scores, maxima, panel_origin, whole_rows, stream);
 }
 
-hipError_t dense_full_score_qk_bk32_launch(const Fp8Int4KvAttentionArgs& a, float* scores,
+hipError_t dense_full_score_qk_tiled_launch(const Fp8Int4KvAttentionArgs& a, float* scores,
                                            std::uint32_t panel_origin, std::uint32_t whole_rows,
                                            hipStream_t stream) noexcept {
-    const dim3 qk_grid(4U, (a.query_rows + kDensePrefillQueryTile - 1U) /
-                              kDensePrefillQueryTile,
-                       (a.context + 31U) / 32U);
-    if (a.active_query_rows != nullptr) {
-        hipLaunchKernelGGL((dense_full_score_qk_bk32_kernel<true>), qk_grid,
-                           dim3(kDenseFullScoreQkThreads), 0, stream, a.query, a.key_codes,
-                           a.page_table, a.page_table_row, a.page_table_row_stride,
-                           a.page_table_row_count, a.context, a.physical_tokens,
-                           a.row_positions, a.active_query_rows, a.query_rows, panel_origin, whole_rows,
-                           a.attention_scale, scores);
+    if (a.query_rows >= 32U) {
+        hipLaunchKernelGGL((dense_full_score_qk_tiled_kernel<32U, 64U>),
+                           dim3(4U, (a.query_rows + 31U) / 32U, (a.context + 63U) / 64U),
+                           dim3(384U), 0, stream, a, scores, panel_origin, whole_rows);
     } else {
-        hipLaunchKernelGGL((dense_full_score_qk_bk32_kernel<false>), qk_grid,
-                           dim3(kDenseFullScoreQkThreads), 0, stream, a.query, a.key_codes,
-                           a.page_table, a.page_table_row, a.page_table_row_stride,
-                           a.page_table_row_count, a.context, a.physical_tokens,
-                           a.row_positions, nullptr, a.query_rows, panel_origin, whole_rows, a.attention_scale, scores);
+        hipLaunchKernelGGL((dense_full_score_qk_tiled_kernel<16U, 32U>),
+                           dim3(4U, (a.query_rows + 15U) / 16U, (a.context + 31U) / 32U),
+                           dim3(192U), 0, stream, a, scores, panel_origin, whole_rows);
     }
     return hipGetLastError();
 }
 
 template <std::uint32_t Group>
-hipError_t dense_full_score_bk32_launch(
+hipError_t dense_full_score_tiled_launch(
     const Fp8Int4KvAttentionArgs& a, float* scores, float* maxima,
     std::uint32_t panel_origin, std::uint32_t whole_rows, hipStream_t stream) noexcept {
-    hipError_t error = dense_full_score_qk_bk32_launch(a, scores, panel_origin, whole_rows, stream);
+    hipError_t error = dense_full_score_qk_tiled_launch(a, scores, panel_origin, whole_rows, stream);
     if (error != hipSuccess) return error;
     const dim3 maximum_grid(a.query_rows * 24U);
     if (a.active_query_rows != nullptr) {
@@ -1860,8 +1822,8 @@ hipError_t fp8_int4_kv_attention_dense_prefill_full_score(
         hipError_t error;
         if (a.query_rows >= 512U) {
             error = a.value_group == 16U
-                ? dense_full_score_bk32_launch<16U>(panel, scores, maxima, origin, a.query_rows, stream)
-                : dense_full_score_bk32_launch<32U>(panel, scores, maxima, origin, a.query_rows, stream);
+                ? dense_full_score_tiled_launch<16U>(panel, scores, maxima, origin, a.query_rows, stream)
+                : dense_full_score_tiled_launch<32U>(panel, scores, maxima, origin, a.query_rows, stream);
         } else {
             error = a.value_group == 16U
                 ? dense_full_score_launch<16U>(panel, scores, maxima, origin, a.query_rows, stream)
@@ -1899,8 +1861,11 @@ hipError_t fp8_int4_kv_attention_dense_prefill_full_score_resources(
             ? reinterpret_cast<const void*>(dense_full_score_pv_kernel<16U, false>)
             : reinterpret_cast<const void*>(dense_full_score_pv_kernel<32U, false>);
         break;
-    case DensePrefillFullScoreStage::QkBk32:
-        kernel = reinterpret_cast<const void*>(dense_full_score_qk_bk32_kernel<false>);
+    case DensePrefillFullScoreStage::QkBq16Bk32:
+        kernel = reinterpret_cast<const void*>(dense_full_score_qk_tiled_kernel<16U, 32U>);
+        break;
+    case DensePrefillFullScoreStage::QkBq32Bk64:
+        kernel = reinterpret_cast<const void*>(dense_full_score_qk_tiled_kernel<32U, 64U>);
         break;
     default: return hipErrorInvalidValue;
     }

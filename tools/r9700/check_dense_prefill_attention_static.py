@@ -19,8 +19,10 @@ from tools.r9700.check_prefill_cta_static import _function, _one_integer
 FULL_SCORE_PROFILES = {
     "qk_bk16": {"lds": 8296, "wmma": 16, "vgpr": 64, "occupancy": 8,
                 "workgroup": 192, "rounded_lds": 12288},
-    "qk_bk32": {"lds": 16488, "wmma": 32, "vgpr": 128, "occupancy": 8,
+    "qk_narrow": {"lds": 16480, "wmma": 32, "vgpr": 128, "occupancy": 8,
                 "workgroup": 192, "rounded_lds": 16896},
+    "qk_wide": {"lds": 32928, "wmma": 64, "vgpr": 160, "occupancy": 8,
+                "workgroup": 384, "rounded_lds": 33280},
     "maximum": {"lds": 64, "wmma": 0, "vgpr": 64, "occupancy": 8,
                 "workgroup": 256, "rounded_lds": 512},
     "pv_g16": {"lds": 9208, "wmma": 0, "vgpr": 128, "occupancy": 8,
@@ -52,8 +54,10 @@ def check(*, assembly: Path, metadata: Path, symbol: str,
         raise ValueError("dense attention requires G16 or G32")
     if full_score_stage == "qk_bk16":
         specialization = "26dense_full_score_qk_kernelILb0EE"
-    elif full_score_stage == "qk_bk32":
-        specialization = "31dense_full_score_qk_bk32_kernelILb0EE"
+    elif full_score_stage == "qk_narrow":
+        specialization = "32dense_full_score_qk_tiled_kernelILj16ELj32EE"
+    elif full_score_stage == "qk_wide":
+        specialization = "32dense_full_score_qk_tiled_kernelILj32ELj64EE"
     elif full_score_stage == "maximum":
         specialization = "31dense_full_score_maximum_kernelILb0EE"
     elif full_score_stage == "pv":
@@ -69,7 +73,7 @@ def check(*, assembly: Path, metadata: Path, symbol: str,
     if specialization not in symbol:
         raise ValueError(
             "selected symbol is not the exact production "
-            f"full-score {full_score_stage} non-active specialization")
+            f"full-score {full_score_stage} specialization")
     assembly_body = _function(assembly.read_text(encoding="utf-8"), symbol, "assembly")
     metadata_text = metadata.read_text(encoding="utf-8")
     metadata_body = _function(metadata_text, symbol, "metadata")
@@ -106,7 +110,9 @@ def check(*, assembly: Path, metadata: Path, symbol: str,
                            r"^\s*\.amdhsa_private_segment_fixed_size\s+(\d+)",
                            "private segment size")
     vgpr = _one_integer(metadata_body, r"^\s*\.amdhsa_next_free_vgpr\s+(\d+)",
-                        "VGPR count")
+                        "next-free VGPR")
+    reported_vgpr = _one_integer(kernel_record, r"^\s*\.vgpr_count:\s*(\d+)",
+                                "reported VGPR count")
     flat_scratch = _one_integer(
         metadata_body, r"^\s*\.set\s+\S+\.uses_flat_scratch,\s*(\d+)",
         "flat-scratch use")
@@ -139,7 +145,7 @@ def check(*, assembly: Path, metadata: Path, symbol: str,
     if (vgpr > maximum_vgpr or rounded_lds > maximum_rounded_lds or
             occupancy < minimum_occupancy):
         raise ValueError(
-            f"resources fail: vgpr={vgpr}/{maximum_vgpr} "
+            f"resources fail: next_free_vgpr={vgpr}/{maximum_vgpr} "
             f"rounded_lds={rounded_lds}/{maximum_rounded_lds} "
             f"occupancy={occupancy}/{minimum_occupancy}")
     expected_workgroup = profile["workgroup"]
@@ -155,11 +161,11 @@ def check(*, assembly: Path, metadata: Path, symbol: str,
             f"private={private} scratch={scratch} flat_scratch={flat_scratch} "
             f"vgpr_spills={vgpr_spills} sgpr_spills={sgpr_spills}; all must be zero")
     return {"symbol": symbol, "value_group": value_group,
-            "query_tile": 1 if full_score_stage == "pv_merge" else 16,
+            "query_tile": 1 if full_score_stage == "pv_merge" else 32 if full_score_stage == "qk_wide" else 16,
             "key_splits": key_splits if full_score_stage == "pv_wmma" else "runtime" if full_score_stage == "pv_merge" else 1,
             "full_score_stage": full_score_stage,
             "wmma_opcode": opcode, "wmma_count": count, "lds_bytes": lds, "rounded_lds_bytes": rounded_lds,
-            "vgpr_count": vgpr,
+            "next_free_vgpr": vgpr, "vgpr_count": reported_vgpr,
             "occupancy": occupancy, "private_bytes": private, "scratch_bytes": scratch,
             "flat_scratch": flat_scratch, "maximum_workgroup_size": maximum_workgroup,
             "wavefront_size": wavefront_size, "workgroup_processor_mode": wgp_mode,
@@ -174,7 +180,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--value-group", required=True, type=int, choices=(16, 32))
     parser.add_argument("--key-splits", type=int, choices=(16, 32), default=16)
     parser.add_argument("--full-score-stage", required=True,
-                        choices=("qk_bk16", "qk_bk32", "maximum", "pv", "pv_wmma", "pv_merge"))
+                        choices=("qk_bk16", "qk_narrow", "qk_wide", "maximum", "pv", "pv_wmma", "pv_merge"))
     return parser.parse_args(argv)
 
 

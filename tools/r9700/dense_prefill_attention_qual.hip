@@ -566,11 +566,15 @@ int main(int argc, char** argv) {
             run_case(129U, group, kv::kDensePrefillLongPvMinimumContext + 1U);
             run_case(2048U, group, 65536U);
             run_case(128U, group, 131072U);
+            // The score panel crosses from32 to16 rows, selecting narrow tiled QK.
+            run_case(512U, group, 131071U);
+            run_case(512U, group, 131072U);
+            run_case(512U, group, 131073U);
             // The private FP16 PV operands use V/8: cover both finite scale extremes.
             run_case(128U, group, 32768U, 0x7bffU);
             run_case(128U, group, 32768U, 0x0001U);
         }
-        std::cout << "production Bk16/Bk32 dense G16/G32 FP64 qualification: PASS\n";
+        std::cout << "production dense G16/G32 FP64 qualification: PASS\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
