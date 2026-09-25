@@ -94,10 +94,12 @@ namespace ninfer::ops::r9700::gdn {
                                             float* beta, std::uint32_t value_heads,
                                             std::uint32_t tokens, hipStream_t stream) noexcept;
 
-// Exact Qwen3.8 decode cell for two BF16 [48,5120] projections followed by the control formula.
+// Two BF16 [48,5120] Qwen3.8 GDN control projections followed by the control formula, T>=1.
 // The projection values are rounded to BF16 in registers and are not materialized. This raw
-// boundary is also the direct production-symbol qualification seam.
-// T1 arithmetic is retained for every token in a single T1..24 batched launch.
+// boundary is also the direct production-symbol qualification seam. T1..24 retain the ordinary
+// T1 arithmetic for every token; wider launches use a split-K BF16 WMMA route with FP32
+// accumulation that reads each hidden column once and requires 16-byte aligned hidden and weight
+// bases.
 [[nodiscard]] hipError_t bf16_projected_control(
     const hip_bfloat16* hidden, const hip_bfloat16* a_weight,
     const hip_bfloat16* b_weight, const float* a_log, const float* dt_bias,

@@ -507,7 +507,10 @@ remain consistent.
 - activations are BF16 at public model/operator boundaries;
 - ordinary and Q/K norm oracles evaluate their reductions in FP32/FP64 and compare the declared
   BF16 outputs; production reduction and staging are route-private choices;
-- GDN `g`, `beta`, and recurrent state are FP32;
+- GDN `g`, `beta`, and recurrent state are FP32; the chunked prefill route (widths >= 64) forms
+  its intra-chunk and state products as FP16 WMMA with FP32 accumulation and keeps the state in
+  FP32 accumulators (about 5e-4 relative state error versus FP64 on long synthetic runs, inside
+  the GDN Op criterion); decode, verification, and replay routes stay FP32;
 - the ideal GQA oracle evaluates dot products, stable softmax, and value reduction in FP64 from
   BF16 Q and logical cache values; the BF16 Op output is promoted to FP64 for comparison;
 - low-bit weight storage changes representation, not the intended dequantized matrix;

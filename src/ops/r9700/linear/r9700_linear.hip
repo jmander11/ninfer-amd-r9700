@@ -602,6 +602,220 @@ __global__ __launch_bounds__(kThreads) void a8g64_normalized_prepare_t1_kernel(
     }
 }
 
+// Prefill form of the normalized A8G64 preparation: one wave per K5120 token row. Each lane
+// owns twenty 8-feature vectors (vector v covers features 8(32v+lane)..+7), so eight adjacent
+// lanes hold one G64 group. The FP32 sum of squares is lane-serial then a butterfly; the BF16
+// conversion is the public normalization seam before the exact codec.
+constexpr std::uint32_t kNormalizedPrefillColumns = 5120U;
+constexpr std::uint32_t kNormalizedPrefillVectors = kNormalizedPrefillColumns / (8U * kWaveSize);
+constexpr std::uint32_t kNormalizedPrefillTokensPerBlock = 8U;
+
+__global__ __launch_bounds__(kNormalizedPrefillTokensPerBlock * kWaveSize)
+void a8g64_normalized_prepare_prefill_kernel(
+    const hip_bfloat16* input, const hip_bfloat16* norm, float eps, bool unit_offset,
+    std::uint32_t tokens, std::uint8_t* low_codes, std::uint8_t* high_codes,
+    std::uint16_t* scale_words, std::uint32_t* status) {
+    constexpr std::uint32_t columns = kNormalizedPrefillColumns;
+    const std::uint32_t lane = threadIdx.x % kWaveSize;
+    const std::uint32_t token =
+        blockIdx.x * kNormalizedPrefillTokensPerBlock + threadIdx.x / kWaveSize;
+    if (token >= tokens) return;
+    const uint4* row =
+        reinterpret_cast<const uint4*>(input + static_cast<std::size_t>(token) * columns);
+    uint4 packed[kNormalizedPrefillVectors];
+    float sumsq = 0.0F;
+#pragma unroll
+    for (std::uint32_t vector = 0; vector < kNormalizedPrefillVectors; ++vector) {
+        packed[vector] = row[vector * kWaveSize + lane];
+        const std::uint32_t words[4]{packed[vector].x, packed[vector].y, packed[vector].z,
+                                     packed[vector].w};
+#pragma unroll
+        for (std::uint32_t word = 0; word < 4U; ++word) {
+            const float low = __uint_as_float(words[word] << 16U);
+            const float high = __uint_as_float(words[word] & 0xffff0000U);
+            sumsq = fmaf(low, low, sumsq);
+            sumsq = fmaf(high, high, sumsq);
+        }
+    }
+#pragma unroll
+    for (std::uint32_t width = kWaveSize / 2U; width != 0U; width >>= 1U)
+        sumsq += __shfl_xor(sumsq, width, kWaveSize);
+    const float inverse = rsqrtf(sumsq / static_cast<float>(columns) + eps);
+    const float offset = unit_offset ? 1.0F : 0.0F;
+    bool nonfinite = false, overflow = false;
+    const uint4* gains = reinterpret_cast<const uint4*>(norm);
+#pragma unroll
+    for (std::uint32_t vector = 0; vector < kNormalizedPrefillVectors; ++vector) {
+        const std::uint32_t slot = vector * kWaveSize + lane;
+        const uint4 gain_words = gains[slot];
+        const std::uint32_t words[4]{packed[vector].x, packed[vector].y, packed[vector].z,
+                                     packed[vector].w};
+        const std::uint32_t gain_packed[4]{gain_words.x, gain_words.y, gain_words.z,
+                                           gain_words.w};
+        float value[8];
+        float maximum = 0.0F;
+#pragma unroll
+        for (std::uint32_t element = 0; element < 8U; ++element) {
+            const std::uint32_t word = words[element >> 1U];
+            const std::uint32_t gain_word = gain_packed[element >> 1U];
+            const float x = __uint_as_float((element & 1U) ? word & 0xffff0000U : word << 16U);
+            const float gain = __uint_as_float((element & 1U) ? gain_word & 0xffff0000U
+                                                              : gain_word << 16U) + offset;
+            float normalized = static_cast<float>(hip_bfloat16(x * inverse * gain));
+            nonfinite |= !isfinite(normalized);
+            normalized = isfinite(normalized) ? normalized : 0.0F;
+            value[element] = normalized;
+            maximum = fmaxf(maximum, fabsf(normalized));
+        }
+        // Group maximum over the eight lanes of this vector slot (DPP row_xmask 4,2,1).
+        maximum = fmaxf(maximum, __int_as_float(__builtin_amdgcn_update_dpp(
+            0, __float_as_int(maximum), 0x164, 0xf, 0xf, false)));
+        maximum = fmaxf(maximum, __int_as_float(__builtin_amdgcn_update_dpp(
+            0, __float_as_int(maximum), 0x162, 0xf, 0xf, false)));
+        maximum = fmaxf(maximum, __int_as_float(__builtin_amdgcn_update_dpp(
+            0, __float_as_int(maximum), 0x161, 0xf, 0xf, false)));
+        std::uint16_t scale_bits = 0U;
+        if (maximum != 0.0F) {
+            scale_bits = __half_as_ushort(__float2half_rn(maximum / 127.0F));
+            if (scale_bits == 0U) scale_bits = 1U;
+            if (!isfinite(__half2float(__ushort_as_half(scale_bits)))) {
+                overflow = true;
+                scale_bits = 0U;
+            }
+        }
+        if ((lane & 7U) == 0U) {
+            scale_words[static_cast<std::size_t>(token) * (columns / kQ4Group) + slot / 8U] =
+                scale_bits;
+        }
+        const float scale = __half2float(__ushort_as_half(scale_bits));
+        std::uint32_t low_word = 0U, high_word = 0U;
+#pragma unroll
+        for (std::uint32_t element = 0; element < 8U; ++element) {
+            const int code = scale != 0.0F
+                ? max(-127, min(127, __float2int_rn(value[element] / scale)))
+                : 0;
+            const int low = code & 0x0f;
+            const int high = (code - low) / 16;
+            low_word |= static_cast<std::uint32_t>(low) << (element * 4U);
+            high_word |= static_cast<std::uint32_t>(high & 0x0f) << (element * 4U);
+        }
+        const std::size_t packed_offset =
+            static_cast<std::size_t>(token) * (columns / 8U) + slot;
+        reinterpret_cast<std::uint32_t*>(low_codes)[packed_offset] = low_word;
+        reinterpret_cast<std::uint32_t*>(high_codes)[packed_offset] = high_word;
+    }
+    if (nonfinite) atomicOr(status, static_cast<std::uint32_t>(Q4G64ActivationNonfinite));
+    if (overflow) atomicOr(status, static_cast<std::uint32_t>(Q4G64ActivationScaleOverflow));
+}
+
+// Gated per-head normalization of the Qwen3.8 GDN output into the A8G64 codec, one wave per
+// token row of 48 heads x 128 features. Vector v of lane l covers features 8(32v+l)..+7, so the
+// 16 lanes of each DPP row hold one head and eight adjacent lanes one G64 group. The value is
+// BF16(x * rsqrt(mean_head(x^2) + eps) * w * silu(z)), the public gated-RMSNorm seam, before the
+// exact codec.
+constexpr std::uint32_t kGatedPrefillColumns = 6144U;
+constexpr std::uint32_t kGatedPrefillHeadDim = 128U;
+constexpr std::uint32_t kGatedPrefillVectors = kGatedPrefillColumns / (8U * kWaveSize);
+
+__global__ __launch_bounds__(kNormalizedPrefillTokensPerBlock * kWaveSize)
+void a8g64_gated_normalized_prepare_prefill_kernel(
+    const hip_bfloat16* input, const hip_bfloat16* norm, const hip_bfloat16* gate, float eps,
+    std::uint32_t tokens, std::uint8_t* low_codes, std::uint8_t* high_codes,
+    std::uint16_t* scale_words, std::uint32_t* status) {
+    constexpr std::uint32_t columns = kGatedPrefillColumns;
+    const std::uint32_t lane = threadIdx.x % kWaveSize;
+    const std::uint32_t token =
+        blockIdx.x * kNormalizedPrefillTokensPerBlock + threadIdx.x / kWaveSize;
+    if (token >= tokens) return;
+    const std::size_t row_offset = static_cast<std::size_t>(token) * columns;
+    const uint4* values = reinterpret_cast<const uint4*>(input + row_offset);
+    const uint4* gates = reinterpret_cast<const uint4*>(gate + row_offset);
+    // Every head uses the same [128] weight: this lane always reads the same eight gains.
+    const uint4 gain_words =
+        reinterpret_cast<const uint4*>(norm)[lane % (kGatedPrefillHeadDim / 8U)];
+    const std::uint32_t gain_packed[4]{gain_words.x, gain_words.y, gain_words.z, gain_words.w};
+    const auto bf16_at = [](const std::uint32_t (&words)[4], std::uint32_t element) {
+        const std::uint32_t word = words[element >> 1U];
+        return __uint_as_float((element & 1U) ? word & 0xffff0000U : word << 16U);
+    };
+    bool nonfinite = false, overflow = false;
+#pragma unroll 4
+    for (std::uint32_t vector = 0; vector < kGatedPrefillVectors; ++vector) {
+        const std::uint32_t slot = vector * kWaveSize + lane;
+        const uint4 value_words = values[slot];
+        const uint4 gate_words = gates[slot];
+        const std::uint32_t x_packed[4]{value_words.x, value_words.y, value_words.z,
+                                        value_words.w};
+        const std::uint32_t z_packed[4]{gate_words.x, gate_words.y, gate_words.z, gate_words.w};
+        float sumsq = 0.0F;
+#pragma unroll
+        for (std::uint32_t element = 0; element < 8U; ++element) {
+            const float x = bf16_at(x_packed, element);
+            sumsq = fmaf(x, x, sumsq);
+        }
+        // Sum over the 16 lanes (one head) of this DPP row.
+        sumsq += __int_as_float(__builtin_amdgcn_update_dpp(
+            0, __float_as_int(sumsq), 0x168, 0xf, 0xf, false));
+        sumsq += __int_as_float(__builtin_amdgcn_update_dpp(
+            0, __float_as_int(sumsq), 0x164, 0xf, 0xf, false));
+        sumsq += __int_as_float(__builtin_amdgcn_update_dpp(
+            0, __float_as_int(sumsq), 0x162, 0xf, 0xf, false));
+        sumsq += __int_as_float(__builtin_amdgcn_update_dpp(
+            0, __float_as_int(sumsq), 0x161, 0xf, 0xf, false));
+        const float inverse = rsqrtf(sumsq / static_cast<float>(kGatedPrefillHeadDim) + eps);
+        float value[8];
+        float maximum = 0.0F;
+#pragma unroll
+        for (std::uint32_t element = 0; element < 8U; ++element) {
+            const float z = bf16_at(z_packed, element);
+            const float silu = z / (1.0F + expf(-z));
+            float normalized = static_cast<float>(hip_bfloat16(
+                bf16_at(x_packed, element) * inverse * bf16_at(gain_packed, element) * silu));
+            nonfinite |= !isfinite(normalized);
+            normalized = isfinite(normalized) ? normalized : 0.0F;
+            value[element] = normalized;
+            maximum = fmaxf(maximum, fabsf(normalized));
+        }
+        maximum = fmaxf(maximum, __int_as_float(__builtin_amdgcn_update_dpp(
+            0, __float_as_int(maximum), 0x164, 0xf, 0xf, false)));
+        maximum = fmaxf(maximum, __int_as_float(__builtin_amdgcn_update_dpp(
+            0, __float_as_int(maximum), 0x162, 0xf, 0xf, false)));
+        maximum = fmaxf(maximum, __int_as_float(__builtin_amdgcn_update_dpp(
+            0, __float_as_int(maximum), 0x161, 0xf, 0xf, false)));
+        std::uint16_t scale_bits = 0U;
+        if (maximum != 0.0F) {
+            scale_bits = __half_as_ushort(__float2half_rn(maximum / 127.0F));
+            if (scale_bits == 0U) scale_bits = 1U;
+            if (!isfinite(__half2float(__ushort_as_half(scale_bits)))) {
+                overflow = true;
+                scale_bits = 0U;
+            }
+        }
+        if ((lane & 7U) == 0U) {
+            scale_words[static_cast<std::size_t>(token) * (columns / kQ4Group) + slot / 8U] =
+                scale_bits;
+        }
+        const float scale = __half2float(__ushort_as_half(scale_bits));
+        std::uint32_t low_word = 0U, high_word = 0U;
+#pragma unroll
+        for (std::uint32_t element = 0; element < 8U; ++element) {
+            const int code = scale != 0.0F
+                ? max(-127, min(127, __float2int_rn(value[element] / scale)))
+                : 0;
+            const int low = code & 0x0f;
+            const int high = (code - low) / 16;
+            low_word |= static_cast<std::uint32_t>(low) << (element * 4U);
+            high_word |= static_cast<std::uint32_t>(high & 0x0f) << (element * 4U);
+        }
+        const std::size_t packed_offset =
+            static_cast<std::size_t>(token) * (columns / 8U) + slot;
+        reinterpret_cast<std::uint32_t*>(low_codes)[packed_offset] = low_word;
+        reinterpret_cast<std::uint32_t*>(high_codes)[packed_offset] = high_word;
+    }
+    if (nonfinite) atomicOr(status, static_cast<std::uint32_t>(Q4G64ActivationNonfinite));
+    if (overflow) atomicOr(status, static_cast<std::uint32_t>(Q4G64ActivationScaleOverflow));
+}
+
 __global__ __launch_bounds__(kWaveSize) void fused_silu_a8g64_quantize_kernel(
     const hip_bfloat16* gate_up, std::uint8_t* low_codes, std::uint8_t* high_codes,
     std::uint16_t* scale_words, std::uint32_t* status) {
@@ -3551,6 +3765,194 @@ hipError_t a8q4g64_linear_prefill_cta(
     return hipGetLastError();
 #else
     (void)stream;
+    return hipErrorNotSupported;
+#endif
+}
+
+bool a8q4g64_normalized_linear_prefill_supported(std::uint32_t tokens) noexcept {
+    return tokens != 0U && tokens % kA8Q4M128PrefillTokenTile == 0U &&
+           use_a8q4_prefill_cta(tokens, 34816U, 5120U) &&
+           scalar_base_offsets_fit(tokens, 34816U, 5120U);
+}
+
+hipError_t a8q4g64_normalized_linear_prefill(
+    const A8Q4G64CandidateArgs& args, const hip_bfloat16* norm, float eps,
+    bool unit_offset, hipStream_t stream) noexcept {
+    const std::uint32_t tokens = args.tokens;
+    if (!a8q4g64_normalized_linear_prefill_supported(tokens) || args.rows != 34816U ||
+        args.columns != 5120U || args.padded_columns != 5120U || !(eps > 0.0F) ||
+        eps > std::numeric_limits<float>::max()) return hipErrorInvalidValue;
+    const std::size_t input_bytes = static_cast<std::size_t>(tokens) * 5120U * sizeof(hip_bfloat16);
+    constexpr std::size_t norm_bytes = 5120U * sizeof(hip_bfloat16);
+    constexpr std::size_t code_bytes = 34816U * 5120U / 2U;
+    constexpr std::size_t scale_bytes = 34816U * 80U * sizeof(std::uint16_t);
+    const std::size_t output_bytes =
+        static_cast<std::size_t>(tokens) * 34816U * sizeof(hip_bfloat16);
+    const std::size_t workspace_bytes = a8q4g64_activation_workspace_capacity_bytes(tokens, 5120U);
+    if (args.weight_code_bytes != code_bytes || args.weight_scale_bytes != scale_bytes ||
+        args.activation_workspace_bytes != workspace_bytes)
+        return hipErrorInvalidValue;
+    const void* pointers[]{args.input, norm, args.weight_codes, args.weight_scales,
+                           args.output, args.activation_workspace};
+    const std::size_t sizes[]{input_bytes, norm_bytes, code_bytes, scale_bytes,
+                              output_bytes, workspace_bytes};
+    // The normalized rows and gains are read as 16-byte vectors.
+    const std::size_t alignments[]{16U, 16U, 8U, 2U, 2U, 4U};
+    for (std::size_t index = 0U; index < 6U; ++index) {
+        const auto first = reinterpret_cast<std::uintptr_t>(pointers[index]);
+        if (pointers[index] == nullptr || first % alignments[index] != 0U ||
+            first > std::numeric_limits<std::uintptr_t>::max() - sizes[index])
+            return hipErrorInvalidValue;
+        for (std::size_t other = 0U; other < index; ++other)
+            if (ranges_overlap(pointers[index], sizes[index], pointers[other], sizes[other]))
+                return hipErrorInvalidValue;
+    }
+    A8G64ActivationWorkspace workspace{};
+    if (a8q4g64_bind_activation_workspace(args.activation_workspace, workspace_bytes, tokens,
+                                          5120U, &workspace) != hipSuccess)
+        return hipErrorInvalidValue;
+    const A8Q4G64LinearArgs linear_args{
+        workspace.low_codes, workspace.low_code_bytes, workspace.high_codes,
+        workspace.high_code_bytes, workspace.scales, workspace.scale_bytes, workspace.status,
+        args.weight_codes, code_bytes, args.weight_scales, scale_bytes, args.output,
+        tokens, 34816U, 5120U, 5120U};
+    if (!valid_a8q4_linear_args(linear_args)) return hipErrorInvalidValue;
+    hipError_t result = hipMemsetAsync(workspace.status, 0, sizeof(std::uint32_t), stream);
+    if (result != hipSuccess) return result;
+#if defined(__HIPCC__)
+    hipLaunchKernelGGL(a8g64_normalized_prepare_prefill_kernel,
+                       dim3((tokens + kNormalizedPrefillTokensPerBlock - 1U) /
+                            kNormalizedPrefillTokensPerBlock),
+                       dim3(kNormalizedPrefillTokensPerBlock * kWaveSize), 0, stream,
+                       args.input, norm, eps, unit_offset, tokens, workspace.low_codes,
+                       workspace.high_codes, workspace.scales, workspace.status);
+    result = hipGetLastError();
+    if (result != hipSuccess) return result;
+    return a8q4g64_linear_prefill_cta(linear_args, stream);
+#else
+    (void)unit_offset;
+    return hipErrorNotSupported;
+#endif
+}
+
+bool a8q4g64_shared_activation_prefill_supported(std::uint32_t tokens, std::uint32_t columns,
+                                                 std::uint32_t rows0,
+                                                 std::uint32_t rows1) noexcept {
+    const auto fits = [&](std::uint32_t rows) {
+        return rows % kA8Q4M128PrefillTokenTile == 0U &&
+               use_a8q4_prefill_cta(tokens, rows, columns) &&
+               scalar_base_offsets_fit(tokens, rows, columns);
+    };
+    return tokens != 0U && tokens % kA8Q4M128PrefillTokenTile == 0U &&
+           columns % kQ4KAlignment == 0U && fits(rows0) && fits(rows1);
+}
+
+hipError_t a8q4g64_shared_activation_linear_prefill(
+    const A8Q4G64SharedActivationPrefillArgs& args, hipStream_t stream) noexcept {
+    const std::uint32_t tokens = args.tokens, columns = args.columns;
+    if (args.input == nullptr ||
+        !a8q4g64_shared_activation_prefill_supported(tokens, columns, args.projections[0].rows,
+                                                     args.projections[1].rows))
+        return hipErrorInvalidValue;
+    A8G64ActivationWorkspace workspace{};
+    if (a8q4g64_bind_activation_workspace(args.activation_workspace,
+                                          args.activation_workspace_bytes, tokens, columns,
+                                          &workspace) != hipSuccess)
+        return hipErrorInvalidValue;
+    A8Q4G64LinearArgs linear[2];
+    std::size_t input_bytes = 0;
+    if (!checked_mul(static_cast<std::size_t>(tokens) * columns, sizeof(hip_bfloat16),
+                     &input_bytes))
+        return hipErrorInvalidValue;
+    for (std::size_t index = 0; index < 2U; ++index) {
+        const auto& projection = args.projections[index];
+        linear[index] = A8Q4G64LinearArgs{
+            workspace.low_codes, workspace.low_code_bytes, workspace.high_codes,
+            workspace.high_code_bytes, workspace.scales, workspace.scale_bytes,
+            workspace.status, projection.weight_codes, projection.weight_code_bytes,
+            projection.weight_scales, projection.weight_scale_bytes, projection.output, tokens,
+            projection.rows, columns, columns};
+        if (!valid_a8q4_linear_args(linear[index]) ||
+            ranges_overlap(args.input, input_bytes, projection.output,
+                           static_cast<std::size_t>(tokens) * projection.rows *
+                               sizeof(hip_bfloat16)))
+            return hipErrorInvalidValue;
+    }
+    if (ranges_overlap(args.projections[0].output,
+                       static_cast<std::size_t>(tokens) * args.projections[0].rows *
+                           sizeof(hip_bfloat16),
+                       args.projections[1].output,
+                       static_cast<std::size_t>(tokens) * args.projections[1].rows *
+                           sizeof(hip_bfloat16)))
+        return hipErrorInvalidValue;
+    hipError_t result = a8g64_quantize_activation({args.input, workspace}, stream);
+    if (result != hipSuccess) return result;
+    result = a8q4g64_linear_prefill_cta(linear[0], stream);
+    if (result != hipSuccess) return result;
+    return a8q4g64_linear_prefill_cta(linear[1], stream);
+}
+
+bool a8q4g64_gated_normalized_linear_prefill_supported(std::uint32_t tokens) noexcept {
+    return tokens != 0U && tokens % kA8Q4M128PrefillTokenTile == 0U &&
+           use_a8q4_prefill_cta(tokens, 5120U, 6144U) &&
+           scalar_base_offsets_fit(tokens, 5120U, 6144U);
+}
+
+hipError_t a8q4g64_gated_normalized_linear_prefill(
+    const A8Q4G64CandidateArgs& args, const hip_bfloat16* norm, const hip_bfloat16* gate,
+    float eps, hipStream_t stream) noexcept {
+    const std::uint32_t tokens = args.tokens;
+    if (!a8q4g64_gated_normalized_linear_prefill_supported(tokens) || args.rows != 5120U ||
+        args.columns != 6144U || args.padded_columns != 6144U || !(eps > 0.0F) ||
+        eps > std::numeric_limits<float>::max()) return hipErrorInvalidValue;
+    const std::size_t input_bytes = static_cast<std::size_t>(tokens) * 6144U * sizeof(hip_bfloat16);
+    constexpr std::size_t norm_bytes = 128U * sizeof(hip_bfloat16);
+    constexpr std::size_t code_bytes = 5120U * 6144U / 2U;
+    constexpr std::size_t scale_bytes = 5120U * 96U * sizeof(std::uint16_t);
+    const std::size_t output_bytes =
+        static_cast<std::size_t>(tokens) * 5120U * sizeof(hip_bfloat16);
+    const std::size_t workspace_bytes = a8q4g64_activation_workspace_capacity_bytes(tokens, 6144U);
+    if (args.weight_code_bytes != code_bytes || args.weight_scale_bytes != scale_bytes ||
+        args.activation_workspace_bytes != workspace_bytes)
+        return hipErrorInvalidValue;
+    const void* pointers[]{args.input, norm, gate, args.weight_codes, args.weight_scales,
+                           args.output, args.activation_workspace};
+    const std::size_t sizes[]{input_bytes, norm_bytes, input_bytes, code_bytes, scale_bytes,
+                              output_bytes, workspace_bytes};
+    // Rows, gates and gains are read as 16-byte vectors.
+    const std::size_t alignments[]{16U, 16U, 16U, 8U, 2U, 2U, 4U};
+    for (std::size_t index = 0U; index < 7U; ++index) {
+        const auto first = reinterpret_cast<std::uintptr_t>(pointers[index]);
+        if (pointers[index] == nullptr || first % alignments[index] != 0U ||
+            first > std::numeric_limits<std::uintptr_t>::max() - sizes[index])
+            return hipErrorInvalidValue;
+        for (std::size_t other = 0U; other < index; ++other)
+            if (ranges_overlap(pointers[index], sizes[index], pointers[other], sizes[other]))
+                return hipErrorInvalidValue;
+    }
+    A8G64ActivationWorkspace workspace{};
+    if (a8q4g64_bind_activation_workspace(args.activation_workspace, workspace_bytes, tokens,
+                                          6144U, &workspace) != hipSuccess)
+        return hipErrorInvalidValue;
+    const A8Q4G64LinearArgs linear_args{
+        workspace.low_codes, workspace.low_code_bytes, workspace.high_codes,
+        workspace.high_code_bytes, workspace.scales, workspace.scale_bytes, workspace.status,
+        args.weight_codes, code_bytes, args.weight_scales, scale_bytes, args.output,
+        tokens, 5120U, 6144U, 6144U};
+    if (!valid_a8q4_linear_args(linear_args)) return hipErrorInvalidValue;
+    hipError_t result = hipMemsetAsync(workspace.status, 0, sizeof(std::uint32_t), stream);
+    if (result != hipSuccess) return result;
+#if defined(__HIPCC__)
+    hipLaunchKernelGGL(a8g64_gated_normalized_prepare_prefill_kernel,
+                       dim3((tokens + kNormalizedPrefillTokensPerBlock - 1U) /
+                            kNormalizedPrefillTokensPerBlock),
+                       dim3(kNormalizedPrefillTokensPerBlock * kWaveSize), 0, stream,
+                       args.input, norm, gate, eps, tokens, workspace.low_codes,
+                       workspace.high_codes, workspace.scales, workspace.status);
+    result = hipGetLastError();
+    if (result != hipSuccess) return result;
+    return a8q4g64_linear_prefill_cta(linear_args, stream);
+#else
     return hipErrorNotSupported;
 #endif
 }

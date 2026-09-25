@@ -98,13 +98,12 @@ TimingRow timing_row(int width, std::uint32_t chunk, hipStream_t stream) {
     ninfer::Tensor tin(state_in.data(), ninfer::DType::FP32, {kDim, kDim, kValueHeads});
     ninfer::Tensor tout(state_out.data(), ninfer::DType::FP32, {kDim, kDim, kValueHeads});
     ninfer::Tensor out(output.data(), ninfer::DType::BF16, {kDim, kValueHeads, width});
-    ninfer::WorkspaceArena arena(1);
     const std::size_t workspace_bytes =
         ninfer::ops::r9700::gdn_recurrence::affine_chunk_workspace_capacity_bytes(width, chunk);
     ninfer::DeviceBuffer workspace(workspace_bytes);
     const TimingSamples incumbent = timing_samples(stream, [&] {
         ninfer::ops::gated_delta_net(device.tq, device.tk, device.tv, device.tg, device.tbeta,
-                                     kScale, true, arena, tin, tout, out, stream);
+                                     kScale, true, tin, tout, out, stream);
     });
     const TimingSamples candidate = timing_samples(stream, [&] {
         HIP_CHECK(ninfer::ops::r9700::gdn_recurrence::affine_chunk_qualification(

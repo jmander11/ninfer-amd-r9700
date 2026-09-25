@@ -89,33 +89,128 @@ ACTIVE USER REQUEST (2026-09-25, prefill follow-up; ordered, one heavy host job 
 State: base-prefill campaign committed as `455ff332` (host-load rule) and `276d0926` (uniform A8
 M128xN128 GEMM, fused dense prefill attention, staged GDN). Production C1 prefill 4K 2174, 8K 1976,
 32K 1765, 64K 1514 tok/s. XAttention/Sage-style work stays deferred to a later campaign.
-- [ ] N0 NIAH harness qualification and production baseline. The fused attention and staged GDN
-  have no long-context retrieval evidence yet. First validate the existing tooling
-  (`tools/bench/run_niah_check.py`, `make_niah_positions.py`, `prepare_selected_niah.py`, their
-  tests; prompts `examples/cli/messages/long_niah_{8k,64k,100k,128k,...}_{start,q25,q75,end}.json`)
-  on a short case, confirming exact-answer scoring and that a deliberately wrong answer fails.
-  Then record the current production baseline at 8K/32K/64K/128K x five positions (greedy,
-  C1, dense), with retained commands/outputs under a fresh `profiles/bench/` directory. If the
-  score-panel build (`c2b3d80b`) is needed as a control for any failure, build it separately.
-- [ ] N1 Re-test prefill chunk 4096 vs 2048 on the current build (4K/8K/32K), since the old
-  3.6-4.2% loss predates the new GEMM/attention. Change the default only on a matched win.
-- [ ] N2 Producer fusions before Q4 GEMMs: residual add + RMSNorm + A8 quantize in one pass, and
-  GDN gated RMSNorm + A8 quantize; keep rounding points so outputs stay bit-exact. Target the ~7%
-  of 4K time in quantize/norm/residual kernels.
+- [x] N0 NIAH harness qualification and production baseline (2026-09-25). Tooling: runner unit
+  tests pass (28); the fixture generator reproduces committed fixtures byte-for-byte; added a 32K
+  preset and generated 32K/128K position fixtures. Scoring qualified on the live server: exact
+  answer passes, a one-digit-wrong needle fails, a needle-free 8K document fails (model says the
+  record is absent). Baseline on HEAD 0da145cd (n16k16-eval artifact, greedy, C1, dense, 262144
+  context, no prefix reuse): exact-answer 20/20 PASS at 8K/32K/64K/128K (7669/32261/64511/130036
+  prompt tokens) x start/q25/mid/q75/end. Evidence `profiles/bench/r9700-niah-baseline-20260925/`
+  (`matrix-exact.json`, qual-*.json, request log). Rerun command: serve with
+  `--max-context 262144 --kv-capacity 262144 --max-concurrency 1 --no-prefix-reuse --greedy`, then
+  `run_niah_check --exact-answer --lengths 8k,32k,64k,128k --positions start,q25,mid,q75,end`.
+  Note: the durable provenance mode still expects server-log schema 20 (server emits 21); it is
+  bound to the unexecuted SELECTED-NIAH flow and was not used.
+- [x] N1 Chunk 4096 vs 2048 re-tested on the N2 build (n16k16-eval, C1, no spec, warmup 1, r2):
+  4K 1953.5 vs 2199.1, 8K 1847.0 vs 2130.3, 32K 1671.1 vs 1838.1 tok/s; 4096 loses 9-13% (the
+  P2048-specialized fused MLP-down/GDN routes do not apply and the GEMM is already compute-bound).
+  Default stays 2048. Evidence `profiles/bench/r9700-n2-producers-20260925/chunk/`.
+- [ ] N2 Producer fusions before Q4 GEMMs. 4K prefill-window shares (profile
+  `profiles/rocprof/r9700-gdn-gemm-4k-20260925`): bf16_linear_wmma16 2.6% (GDN a/b control
+  N48/K5120, scalar 2-byte loads, ~4 TFLOP/s, 257 us each), fused_silu_a8g64_quantize 2.2%,
+  a8g64_quantize 1.9%, rmsnorm_k5120_token8 1.5% (serial single-lane sumsq), residual_add 1.3%,
+  gated_rmsnorm_k128 0.8%. Evidence dir `profiles/bench/r9700-n2-producers-20260925/`.
+  - [x] (a) `bf16_gdn_projected_gating` now covers every T: T1..24 keep the T1 kernel, wider T use
+    a split-K BF16 WMMA kernel reading hidden once, all threads sharing the epilogue (57 us at
+    T2048, no scratch, vs 2x~250 us); the serialized a/b Linear + control_gates fallback and its
+    workspace query are removed. Qualified against the FP64 oracle at T1..24 and
+    25/31/33/64/127/2048 (one-BF16-step seam allowance when the rigorous FP32 summation bound
+    admits it).
+  - [x] (b) Public `normalized_linear` gained an A8 prefill route (T%128, M128 inventory; 16-byte
+    aligned x/norm): one wave per token normalizes straight into the A8G64 codec (no BF16 rows),
+    then the M128 GEMM; used for the Q4 gate/up at prefill. Interleaved A/B about even (5.51 ms).
+  - [x] (c) GDN output leaf now owns the gated RMSNorm (family passes o/norm/z/scratch; trace taps
+    force materialization): Q4 prefill chunks use a wave-per-token gated-norm->A8G64 prepare (DPP
+    row = one head) then the M128 GEMM; 1.060 vs 1.174 ms per layer-chunk. Qualifier
+    `ninfer_r9700_a8q4_normalized_linear_prefill_qual` covers (b) and (c): FP64 plane check every
+    token, FP64 output oracle at sampled tokens, exact vs the GEMM on the same planes.
+  - [x] GDN qk/vz prefill pair shares one A8 quantize (`a8q4g64_shared_activation_linear_prefill`);
+    bit-exact (retained token ids identical).
+  - [x] (d) REJECTED: gate/up GEMM with a SiLU+A8G64 epilogue (gate/up row pairing, bit-exact vs
+    the composition). The paired main loop matched the plain GEMM (5.10 ms) but the epilogue VALU
+    serializes with WMMA in this issue-bound kernel: best 8.67 vs 8.26 ms for the MLP chain even
+    after LDS staging, branch-free BF16 rounding and DPP reductions (standalone SiLU is 0.33 ms of
+    memory-bound work). Do not retry without removing epilogue VALU from the GEMM.
+  - Whole 4K (a)+(b): +1.3%; +(c): 2170.5 -> 2213.3; +pair: 2220.5 vs 2135.3 in one pair (baseline
+    drifts 2135-2172 run to run; final interleaved number pending). PPL-4K with (a)+(b)+(c):
+    prefill 6.4534/9.4455/2.2497 vs committed 6.4571/9.4454/2.2543; decode within noise.
+  - [x] DFlash2 context projections (feature projection 5120x25600, per-layer fused QKV
+    6144x5120) were outside the explicit M128 inventory and ran the wmma32 fallback (17.2 ms and
+    3.3 ms per chunk-call at 32K, ~2.7% of DFlash prefill). Both shapes qualified in the M128
+    prefill regression (FP64, four token extents) and admitted; DFlash 32K prefill 1840 -> 1860
+    tok/s interleaved (+1.1%). The QKV context call still computes unused query rows (small).
+  - [ ] Remaining optional: attention output written as gated BF16 by the fused kernel
+    (cast_fp32_to_bf16 + sigmoid_mul ~0.4%); FP8 attention projections quantize the same hidden
+    twice (~0.2%). Then final interleaved whole A/B, NIAH regression, docs.
 - [ ] N3 FP8-Q QK decision (evaluation binaries and speed/PPL in
-  `profiles/bench/r9700-fp8qk-eval-20260925/`: 32K +5.6%, 64K +10.4%, PPL within noise). Research
-  (vLLM FP8 attention on Qwen3.5-27B at scale 1.0 kept MRCR to 1M; failures were FP8 PV/P, not QK)
-  says low risk but PPL is insufficient. Gates, in order: per-layer/head Q range stats on the real
-  checkpoint (max|q|, saturation at 448 must be 0, share below 2^-6); operator error vs FP64 on
-  captured real Q/K from all 16 attention layers (worst head/position); NIAH at 32K/64K/128K
-  x five positions vs the N0 baseline; greedy first-divergence and KL after long prompts; small
-  reasoning spot-check. Fallback on regression: fixed per-head power-of-two Q scales. Promote
-  only with the user's approval, removing the BF16-QK path if adopted.
-- [ ] N4 Larger formulation changes, each measured and qualified before promotion: (a) A8
-  quantizer emitting an int8 plane consumed by an IU8-WMMA GEMM with W4->W8 widened once per CTA
-  (removes the nibble recombine), and/or 256-token tiles to cut weight rereads/energy under the
-  300 W cap; (b) chunked (WY) GDN prefill with split-FP16 precision, qualified against FP64 and
-  PPL since it is not bit-exact; (c) 16-key double-buffered fused attention for long context.
+  `profiles/bench/r9700-fp8qk-eval-20260925/`: 32K +5.6%, 64K +10.4%, PPL within noise). Gates,
+  in order: per-layer/head Q range stats; operator error vs FP64 on real Q/K from all 16 layers;
+  NIAH at 32K/64K/128K x five positions vs N0; greedy first-divergence and KL; small reasoning
+  spot-check. Promote only with the user's approval, removing the BF16-QK path if adopted.
+  Evidence `profiles/bench/r9700-fp8qk-gates-20260925/` (scripts + JSON); real post-RoPE Q/K/V
+  of all 16 layers for wiki/code 4K were dumped with a temporary, reverted family patch.
+  - [x] Gate 1 PASS: max|q| 16.4 over 16 layers x 24 heads x 2 texts (no saturation at 448);
+    <=2.0% of nonzero q below 2^-6; E4M3 adds ~2.7-3.0% relative RMS error to q.
+  - [x] Gate 2 FAIL for plain FP8 Q (scale 1.0): FP64 attention on real Q/K/V with cache FP8 K and
+    INT4-G16 V shows added output error (vs BF16 Q) with p99 up to 38% and max 41% (layers 23-39),
+    227/768 layer-head-text cells above 10% p99, while the whole current INT4-V error is <=15%.
+    Early/late layers (3-11, 55-63) stay <10%. PPL was insensitive. Power-of-two Q scales cannot
+    help (range is fine; the 3-bit mantissa is the error).
+  - [x] Candidate split Q = E4M3(q) + E4M3(q - E4M3(q)), two FP8 WMMAs per K tile against the
+    same FP8 K: added error max 0.09% (p99 0.06%) over all layers/heads, same VGPRs as BF16 Q;
+    prototype (patch scripts `fp8qk_patch.py`/`fp8qk_split_patch.py` in the evidence dir) passes
+    the production dense-prefill FP64 qualifier, 245 VGPRs, no scratch. Interleaved speed (N2
+    build, C1): 32K 1902 vs 1903 tok/s (+0%), 64K 1624 vs 1595 (+1.9%). Most of the plain-FP8
+    gain (+10.4% at 64K) was the halved WMMA count, i.e. the imprecise part.
+  - DECISION PENDING (user): plain FP8 Q is rejected on precision; split FP8 Q is precision-safe
+    but only +0-2%. Not promoted; gates 3-5 (NIAH/KL/reasoning) are moot unless the user wants
+    the split variant. Source reverted to the production BF16-QK kernel.
+- Status 2026-09-25 (uncommitted working tree): N0/N1 done; N2 done except optional attention-output
+  and FP8-projection double-quantize fusions (~0.2-0.4% each); N3 awaits the user's decision; N4(a)
+  rejected, N4(b) done, N4(c) deferred at ~73% WMMA-busy. Final 4K profile
+  (`profiles/rocprof/r9700-followup-final-4k-20260925/`): GEMM 77.5%, chunked GDN 5.5%, FP8 GEMM
+  3.5%, attention 3.1%, all else <2.5% each. Next lever if pursued: chunked GDN load phase
+  (transposed-K bank conflicts, next-chunk prefetch) ~2-3%. Full ctest 86/86 pass.
+- [ ] N4 Larger formulation changes, each measured and qualified before promotion:
+  - [x] (a) REJECTED: IU8 GEMM (signed A8 x offset-binary W8, -8*sum(a) folded into the WMMA
+    seed). Register/LDS-only inner-loop microbench (`iu8_inner_microbench.hip` in the N2 evidence
+    dir), production-like occupancy: current 185.2 TOPS vs IU8 188.6 (+1.5-1.9%) before any
+    W4->W8 staging cost or the larger LDS stage. The bound is the per-element two-sided G64 scale
+    epilogue (magic subtract, scale product, FMA) serialized with WMMA; the <<4 is cheap.
+    Production (~157 TOPS under the 300 W cap) is ~85% of that inner-loop bound; the rest is
+    global loads, LDS staging and barriers. 256-row tiles already lost in the base campaign.
+  - [x] (b) Chunked (WY) GDN prefill (`gdn_prefill_chunked.{h,hip}`, replaces the staged route
+    and its workspace; the public GDN workspace query and ws parameter are removed). One
+    workgroup per value head, 64-token chunks, FP16 WMMA products with FP32 accumulation; S^T
+    tiles stay in WMMA accumulators and feed the next chunk directly; diagonal (I + A_II)^-1 in
+    FP32 and V' by block forward substitution (no full inverse, no W); masked partial chunk.
+    Scratch prototypes (FP64 oracle harness) in the session scratch `gdnchunk/`; v5 = production.
+    FP64 synthetic: output rel-RMS 1.73e-3 vs staged 1.66e-3 (BF16 floor), state 4.7e-4 (5.6e-4
+    with slow decays at T8192, no growth with length); split-FP16 state operand bought almost
+    nothing (5.59->5.48e-4) for +23% time, so single FP16 was kept. Public GDN qualifier passes
+    (T65/100/2047 tails, T128, P2048; max output abs 1.1e-5, rel-L2 1.8e-3, state abs 1.5e-5).
+    P2048 layer call 1.30 -> ~0.69-0.87 ms. Interleaved prefill (eval artifact, C1): 4K 2242 ->
+    2306 (+2.9%), 32K 1874 -> 1930 (+3.0%); decode unchanged; PPL-4K prefill 6.4610/9.3909/2.2548
+    vs 6.4534/9.4455/2.2497 (mixed sign, noise). Evidence `profiles/bench/r9700-gdn-chunked-20260925/`.
+    NIAH regression (N2 + DFlash inventory + chunked GDN): exact-answer 20/20 PASS
+    (`profiles/bench/r9700-niah-n2-chunked-20260925/`). Final vs committed base campaign, same
+    commands (`profiles/bench/r9700-prefill-followup-final-20260925/run.sh`): whole 4K 2160.7 ->
+    2295.9, ladder 8K 2023 -> 2197, 32K 1735 -> 1889, 64K 1516 -> 1613 tok/s. Docs updated
+    (performance.md follow-up section, model doc precision note, tools README).
+  - [ ] (c) 16-key double-buffered fused attention for long context (~48% of BF16 WMMA peak).
+    Kernel facts (2026-09-25 read): 12 waves (6 query heads x 2 row tiles) per CTA, 32-key
+    blocks, 246/244 VGPRs -> one CTA per CU; each block re-loads/converts K (FP8->BF16) and V
+    (INT4->FP16) from global into LDS, then two barriers; global latency is exposed because no
+    other CTA overlaps. Main loop per block: 32 BF16 QK WMMA + 32 FP16 PV WMMA + ~530 VALU.
+    Next: phase-cycle stamps (scratch harness `attnprof/` = stamped copy of the production source
+    + qualifier driver printing per-block load/QK/softmax/PV/barrier cycles), then decide:
+    register prefetch of the next block's raw K/V (~6-10 VGPRs; 16-key blocks halve it) with one
+    barrier per block, or other restructuring. Only then build.
+    Stamped result (2048 rows, 8K and 32K identical, cycles per 32-key block): load+barrier ~1500,
+    QK 3062, softmax ~415, PV 2981, end barrier 315. QK/PV equal the SIMD's WMMA saturation
+    (6 waves x 32 WMMA x 16 cycles), so steady state is ~73% WMMA-busy; only the load/softmax/
+    barrier ~27% is recoverable, and hiding the load needs ~8-12 more VGPRs on a 246/256 kernel.
+    Deferred as near its formulation limit (<=~10% attention, ~3% of 64K prefill).
 
 COMPLETED USER REQUEST (2026-09-25, base-prefill compute campaign; XAttention/Sage deferred):
 - [x] Gate/up back to A8 for no prefill speed loss: new M128xN128 A8Q4G64 prefill GEMM

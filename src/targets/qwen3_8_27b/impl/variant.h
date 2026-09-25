@@ -72,6 +72,10 @@ struct Variant {
         [[nodiscard]] bool attention_q4_pair_t1(
             const Tensor& hidden, const Weight& query_key, const Weight& gate_value,
             Tensor& query, Tensor& key, Tensor& gate, Tensor& value, hipStream_t stream);
+        // Full A8 prefill chunks: one activation quantization shared by both GDN projections.
+        [[nodiscard]] bool gdn_q4_pair_prefill(
+            const Tensor& input, const Weight& query_key, const Weight& value_z,
+            Tensor& query_key_output, Tensor& value_z_output, hipStream_t stream);
         [[nodiscard]] bool gdn_q4_pair_c2c4(
             const Tensor& input, const Weight& query_key, const Weight& value_z,
             Tensor& query_key_output, Tensor& value_z_output, hipStream_t stream);
@@ -98,6 +102,17 @@ struct Variant {
                    rows == 2U * TextConfig::intermediate && columns == TextConfig::hidden &&
                    weight == QType::Q4G64_F16S;
         }
+        // Full A8 prefill chunks of the GDN output projection: the gated RMSNorm feeds the codec
+        // directly and the projected delta is added to the residual.
+        [[nodiscard]] bool gated_normalized_output_prefill(
+            const Tensor& recurrent_output, const Tensor& norm, const Tensor& gate, float eps,
+            const Weight& weight, Tensor& residual, qwen3::TextPhase phase,
+            std::int32_t text_layer, WorkspaceArena& workspace, hipStream_t stream);
+        // Full A8 prefill chunks of the same gate/up boundary normalize straight into the codec.
+        [[nodiscard]] bool normalized_linear_prefill(
+            const Tensor& input, const Tensor& norm, float eps, const Weight& weight,
+            Tensor& output, qwen3::TextPhase phase, std::int32_t text_layer,
+            hipStream_t stream);
         [[nodiscard]] static constexpr bool projected_residual_t1_selected(
             std::uint32_t activation_bits,
             qwen3::TextPhase phase, bool ordinary_decode,
@@ -248,17 +263,22 @@ struct Variant {
         qwen3::TextPhase phase, WorkspaceArena& workspace, hipStream_t stream,
         const Tensor* parent_index = nullptr, ExecutionState* execution = nullptr,
         std::int32_t text_layer = -1);
-    static void gdn_output_projection(const Tensor& hidden, const Weight& weight, Tensor& residual,
-                                      qwen3::TextPhase phase, WorkspaceArena& workspace,
-                                      hipStream_t stream, std::int32_t route_tokens = 0,
+    // The family provides the gated-RMSNorm parameters and the BF16 [128,48,T] normalized
+    // scratch; the leaf owns whether the normalized output is materialized (always when
+    // `materialize_normalized`) or fused into the output projection's activation codec.
+    static void gdn_output_projection(const Tensor& recurrent_output, const Tensor& norm,
+                                      const Tensor& gate, float eps, Tensor& normalized,
+                                      bool materialize_normalized, const Weight& weight,
+                                      Tensor& residual, qwen3::TextPhase phase,
+                                      WorkspaceArena& workspace, hipStream_t stream,
+                                      std::int32_t route_tokens = 0,
                                       ExecutionState* execution = nullptr,
                                       std::int32_t text_layer = -1,
                                       bool ordinary_decode = false);
     static void gdn_norm_control_projection(const Tensor& residual, const Tensor& norm_weight,
                                             float eps, const GdnProjectionWeights& weights,
                                             Tensor& hidden, Tensor& g, Tensor& beta,
-                                            WorkspaceArena& workspace, hipStream_t stream,
-                                            ExecutionState* execution = nullptr);
+                                            hipStream_t stream);
     // The family provides the normalization parameters and BF16 scratch; the leaf owns whether
     // normalization is materialized or fused into the gate/up projection. ordinary_decode is
     // supplied only by the family ordinary-decode entry point, never inferred from Verify/T1.
@@ -305,8 +325,6 @@ struct Variant {
     gdn_output_projection_workspace_capacity_bytes(WeightsProfile weights_profile,
                                                    qwen3::TextPhase phase, std::int32_t first,
                                                    std::int32_t last);
-    [[nodiscard]] static std::size_t
-    gdn_norm_control_projection_workspace_capacity_bytes(std::int32_t first, std::int32_t last);
     [[nodiscard]] static std::size_t
     post_mixer_workspace_capacity_bytes(WeightsProfile weights_profile, qwen3::TextPhase phase,
                                         std::int32_t first, std::int32_t last);

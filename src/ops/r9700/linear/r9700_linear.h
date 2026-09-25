@@ -267,6 +267,51 @@ struct A8Q4G64CandidateArgs {
 [[nodiscard]] hipError_t a8q4g64_normalized_linear_t1(
     const A8Q4G64CandidateArgs& args, const hip_bfloat16* norm, float eps,
     bool unit_offset, hipStream_t stream) noexcept;
+// Prefill form of the T1 normalized projection above for the same K5120 -> N34816 Q4N16K16
+// matrix: RMSNorm, the explicit BF16 seam, and the A8G64 codec in one pass (no materialized
+// BF16 rows), then the M128xN128 A8Q4 GEMM. T is a positive multiple of 128 inside the
+// qualified M128 inventory; input and norm are 16-byte aligned.
+[[nodiscard]] bool a8q4g64_normalized_linear_prefill_supported(std::uint32_t tokens) noexcept;
+[[nodiscard]] hipError_t a8q4g64_normalized_linear_prefill(
+    const A8Q4G64CandidateArgs& args, const hip_bfloat16* norm, float eps,
+    bool unit_offset, hipStream_t stream) noexcept;
+
+// Two A8Q4 prefill projections of one represented BF16 [T,K] input (the Qwen3.8 GDN query-key and
+// value-z matrices): the activation is quantized once into the caller workspace and both
+// M128xN128 GEMMs read the same planes, each publishing its BF16 [T,rows] output exactly as
+// the single-projection route does. T is a positive multiple of 128 and both shapes are inside
+// the qualified M128 inventory.
+struct A8Q4G64PrefillProjection {
+    const std::uint8_t* weight_codes = nullptr;
+    std::size_t weight_code_bytes = 0;
+    const std::uint16_t* weight_scales = nullptr;
+    std::size_t weight_scale_bytes = 0;
+    hip_bfloat16* output = nullptr;
+    std::uint32_t rows = 0;
+};
+struct A8Q4G64SharedActivationPrefillArgs {
+    const hip_bfloat16* input = nullptr;
+    void* activation_workspace = nullptr;
+    std::size_t activation_workspace_bytes = 0;
+    A8Q4G64PrefillProjection projections[2];
+    std::uint32_t tokens = 0;
+    std::uint32_t columns = 0;
+};
+[[nodiscard]] bool a8q4g64_shared_activation_prefill_supported(
+    std::uint32_t tokens, std::uint32_t columns, std::uint32_t rows0,
+    std::uint32_t rows1) noexcept;
+[[nodiscard]] hipError_t a8q4g64_shared_activation_linear_prefill(
+    const A8Q4G64SharedActivationPrefillArgs& args, hipStream_t stream) noexcept;
+
+// Qwen3.8 GDN output projection at A8 prefill extents: the per-head gated RMSNorm
+// (x * rsqrt(mean_head(x^2) + eps) * norm * silu(z), BF16 seam, 48 heads x 128) of input/z
+// [T,6144] feeds the A8G64 codec directly, then the M128 A8Q4 GEMM against the Q4N16K16
+// [5120,6144] weight writes BF16 [T,5120]. input/gate/norm are 16-byte aligned; T is a positive
+// multiple of 128 inside the qualified M128 inventory.
+[[nodiscard]] bool a8q4g64_gated_normalized_linear_prefill_supported(std::uint32_t tokens) noexcept;
+[[nodiscard]] hipError_t a8q4g64_gated_normalized_linear_prefill(
+    const A8Q4G64CandidateArgs& args, const hip_bfloat16* norm, const hip_bfloat16* gate,
+    float eps, hipStream_t stream) noexcept;
 
 // Fixed T1 projected-residual boundary: quantize represented BF16 input with the
 // signed-A8G64 codec, evaluate the packed Q4N16K16/G64 projection, round that

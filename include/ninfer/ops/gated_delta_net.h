@@ -11,18 +11,6 @@
 namespace ninfer::ops {
 
 /**
- * Returns the transient arena capacity required by gated_delta_net for the given geometry. It is
- * zero when the private implementation requires no transient storage. The sole profile is
- * Hq=16, Hv=48, K=V=128 and T=1..262144. The query covers every T in the inclusive interval and
- * throws for any other profile or interval.
- */
-[[nodiscard]] std::size_t gated_delta_net_workspace_capacity_bytes(std::int32_t qk_heads,
-                                                                   std::int32_t value_heads,
-                                                                   bool normalize_qk,
-                                                                   std::int32_t min_tokens,
-                                                                   std::int32_t max_tokens);
-
-/**
  * Applies the Gated DeltaNet recurrence independently for each value head h. Let
  * G=value_heads/qk_heads; its Q/K head is qh=floor(h/G). Starting from S_h, for t in increasing
  * order:
@@ -41,16 +29,14 @@ namespace ninfer::ops {
  * compared directly with that result; output storage rounding belongs to the Op's numerical
  * criterion, not the oracle. Recurrent implementations may apply the normalization directly;
  * private arithmetic is implementation-defined. Inputs and out do not overlap state or one
- * another. The exact normalized ordinary T=2048 implementation uses a caller-owned transient
- * FP32 Q/K inverse-norm sidecar; every other ordinary width uses no transient storage. The
- * ordinary sequential form accepts T=1..262144; snapshot and replay forms retain their fixed
- * W=1..16 domain.
+ * another. No transient storage is used. The ordinary form accepts T=1..262144; snapshot and
+ * replay forms retain their fixed W=1..16 domain.
  *
  * This overload reads and writes the same `ssm_state`, publishing the state after all T tokens.
  */
 void gated_delta_net(const Tensor& q, const Tensor& k, const Tensor& v, const Tensor& g,
-                     const Tensor& beta, float scale, bool normalize_qk, WorkspaceArena& ws,
-                     Tensor& ssm_state, Tensor& out, hipStream_t stream);
+                     const Tensor& beta, float scale, bool normalize_qk, Tensor& ssm_state,
+                     Tensor& out, hipStream_t stream);
 
 /**
  * Distinct-state form of the same recurrence. `ssm_state_out` receives the final state;
@@ -58,7 +44,7 @@ void gated_delta_net(const Tensor& q, const Tensor& k, const Tensor& v, const Te
  * arguments may overlap either state.
  */
 void gated_delta_net(const Tensor& q, const Tensor& k, const Tensor& v, const Tensor& g,
-                     const Tensor& beta, float scale, bool normalize_qk, WorkspaceArena& ws,
+                     const Tensor& beta, float scale, bool normalize_qk,
                      const Tensor& ssm_state_in, Tensor& ssm_state_out, Tensor& out,
                      hipStream_t stream);
 
@@ -71,7 +57,7 @@ void gated_delta_net(const Tensor& q, const Tensor& k, const Tensor& v, const Te
  */
 void gated_delta_net_trace_prefix_state(
     const Tensor& q, const Tensor& k, const Tensor& v, const Tensor& g, const Tensor& beta,
-    float scale, bool normalize_qk, WorkspaceArena& ws, Tensor& ssm_state, Tensor& out,
+    float scale, bool normalize_qk, Tensor& ssm_state, Tensor& out,
     Tensor& prefix_state, std::int32_t prefix_tokens, hipStream_t stream);
 
 /**

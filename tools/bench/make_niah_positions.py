@@ -81,6 +81,7 @@ QUESTION = (
 # (overflows the 262k context, so it is the content source, not a rung).
 LENGTH_CHARS = {
     "8k": 31_967,
+    "32k": 137_026,
     "64k": 274_052,
     "100k": 429_959,
     "128k": 554_226,

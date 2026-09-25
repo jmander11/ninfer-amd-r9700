@@ -4,6 +4,7 @@
 #include "core/layout.h"
 #include "ninfer/ops/attention_projection.h"
 #include "ninfer/ops/linear.h"
+#include "ninfer/ops/gated_rmsnorm.h"
 #include "ninfer/ops/gdn_gating.h"
 #include "ninfer/ops/gdn_projection.h"
 #include "ninfer/ops/mtp_pack.h"
@@ -203,6 +204,11 @@ void project_gdn_inputs(const Tensor& hidden, const Variant::GdnProjectionWeight
         return;
     }
     if (execution != nullptr && execution->gdn_q4_pair_c2c4(
+            hidden_flat, weights.input_projection.query_key,
+            weights.input_projection.value_z, query_key, value_z, stream)) {
+        return;
+    }
+    if (execution != nullptr && execution->gdn_q4_pair_prefill(
             hidden_flat, weights.input_projection.query_key,
             weights.input_projection.value_z, query_key, value_z, stream)) {
         return;
@@ -530,6 +536,60 @@ bool Variant::ExecutionState::attention_q4_pair_t1(
     return true;
 }
 
+bool Variant::ExecutionState::gdn_q4_pair_prefill(
+    const Tensor& input, const Weight& query_key, const Weight& value_z,
+    Tensor& query_key_output, Tensor& value_z_output, hipStream_t stream) {
+    constexpr std::int32_t kRows0 = 2 * TextConfig::key_dim;
+    constexpr std::int32_t kRows1 = 2 * TextConfig::value_dim;
+    const std::int32_t tokens = input.ne[1];
+    const auto q4 = [](const Weight& weight, std::int32_t rows) {
+        return weight.qtype == QType::Q4G64_F16S && weight.ndim == 2U && weight.n == rows &&
+               weight.k == TextConfig::hidden && weight.padded_shape[0] == rows &&
+               weight.padded_shape[1] == TextConfig::hidden &&
+               weight.layout == QuantLayout::Q4N16K16 && weight.group == 64 &&
+               weight.scale_dtype == DType::FP16 && weight.qhigh == nullptr;
+    };
+    const auto output = [&](const Tensor& tensor, std::int32_t rows) {
+        return tensor.dtype == DType::BF16 && tensor.data != nullptr && tensor.is_contiguous() &&
+               tensor.ne[0] == rows && tensor.ne[1] == tokens && tensor.ne[2] == 1 &&
+               tensor.ne[3] == 1;
+    };
+    if (impl_ == nullptr || ops::r9700::linear::kQ4ActivationBits != 8 || tokens <= 0 ||
+        input.dtype != DType::BF16 || !input.is_contiguous() ||
+        input.ne[0] != TextConfig::hidden || input.ne[2] != 1 || input.ne[3] != 1 ||
+        !q4(query_key, kRows0) || !q4(value_z, kRows1) || !output(query_key_output, kRows0) ||
+        !output(value_z_output, kRows1) ||
+        !ops::r9700::linear::a8q4g64_shared_activation_prefill_supported(
+            static_cast<std::uint32_t>(tokens), TextConfig::hidden, kRows0, kRows1)) {
+        return false;
+    }
+    const std::size_t required = ops::r9700::linear::a8q4g64_activation_workspace_capacity_bytes(
+        static_cast<std::uint32_t>(tokens), TextConfig::hidden);
+    if (required == 0U || impl_->activation.data == nullptr ||
+        impl_->activation.bytes < required) {
+        throw std::invalid_argument("R9700 GDN prefill pair activation region is too small");
+    }
+    const auto projection = [](const Weight& weight, Tensor& destination) {
+        return ops::r9700::linear::A8Q4G64PrefillProjection{
+            static_cast<const std::uint8_t*>(weight.qdata),
+            static_cast<std::size_t>(weight.qdata_bytes),
+            static_cast<const std::uint16_t*>(weight.scales),
+            static_cast<std::size_t>(weight.scale_bytes),
+            static_cast<hip_bfloat16*>(destination.data),
+            static_cast<std::uint32_t>(weight.n)};
+    };
+    HIP_CHECK(ops::r9700::linear::a8q4g64_shared_activation_linear_prefill(
+        {.input = static_cast<const hip_bfloat16*>(input.data),
+         .activation_workspace = impl_->activation.data,
+         .activation_workspace_bytes = required,
+         .projections = {projection(query_key, query_key_output),
+                         projection(value_z, value_z_output)},
+         .tokens = static_cast<std::uint32_t>(tokens),
+         .columns = TextConfig::hidden},
+        stream));
+    return true;
+}
+
 bool Variant::ExecutionState::gdn_q4_pair_c2c4(
     const Tensor& input, const Weight& query_key, const Weight& value_z,
     Tensor& query_key_output, Tensor& value_z_output, hipStream_t stream) {
@@ -630,6 +690,83 @@ bool Variant::ExecutionState::normalized_linear_t1(
     if (required == 0U || impl_->activation.data == nullptr ||
         impl_->activation.bytes < required) {
         throw std::invalid_argument("R9700 normalized-linear T1 activation region is too small");
+    }
+    ops::normalized_linear(input, norm, eps, true, weight, output,
+                           {impl_->activation.data, required}, stream);
+    return true;
+}
+
+bool Variant::ExecutionState::gated_normalized_output_prefill(
+    const Tensor& recurrent_output, const Tensor& norm, const Tensor& gate, float eps,
+    const Weight& weight, Tensor& residual, qwen3::TextPhase phase, std::int32_t text_layer,
+    WorkspaceArena& workspace, hipStream_t stream) {
+    const std::int32_t tokens = recurrent_output.ne[2];
+    // The fused prepare reads rows, gates, and gains as 16-byte vectors.
+    const auto contiguous_bf16 = [](const Tensor& tensor) {
+        return tensor.dtype == DType::BF16 && tensor.data != nullptr && tensor.is_contiguous() &&
+               reinterpret_cast<std::uintptr_t>(tensor.data) % 16U == 0U;
+    };
+    if (impl_ == nullptr || phase != qwen3::TextPhase::Prefill ||
+        ops::r9700::linear::kQ4ActivationBits != 8 || text_layer < 0 ||
+        text_layer >= TextConfig::layers || tokens <= 0 ||
+        !ops::r9700::linear::a8q4g64_gated_normalized_linear_prefill_supported(
+            static_cast<std::uint32_t>(tokens)) ||
+        weight.qtype != QType::Q4G64_F16S || weight.layout != QuantLayout::Q4N16K16 ||
+        weight.n != TextConfig::hidden || weight.k != TextConfig::value_dim ||
+        weight.padded_shape[1] != TextConfig::value_dim || weight.group != 64 ||
+        weight.scale_dtype != DType::FP16 || weight.qhigh != nullptr ||
+        !contiguous_bf16(recurrent_output) || !contiguous_bf16(gate) || !contiguous_bf16(norm) ||
+        recurrent_output.ne[0] != TextConfig::gdn_value_head_dim ||
+        recurrent_output.ne[1] != TextConfig::gdn_value_heads || recurrent_output.ne[3] != 1 ||
+        gate.ne[0] * gate.ne[1] != TextConfig::value_dim || gate.ne[2] != tokens ||
+        norm.ne[0] != TextConfig::gdn_value_head_dim || residual.ne[0] != TextConfig::hidden ||
+        residual.ne[1] != tokens) {
+        return false;
+    }
+    const std::size_t required = ops::r9700::linear::a8q4g64_activation_workspace_capacity_bytes(
+        static_cast<std::uint32_t>(tokens), TextConfig::value_dim);
+    if (required == 0U || impl_->activation.data == nullptr ||
+        impl_->activation.bytes < required) {
+        throw std::invalid_argument("R9700 gated output prefill activation region is too small");
+    }
+    auto scope = workspace.scope();
+    Tensor delta = workspace.alloc(DType::BF16, {TextConfig::hidden, tokens});
+    HIP_CHECK(ops::r9700::linear::a8q4g64_gated_normalized_linear_prefill(
+        {.input = static_cast<const hip_bfloat16*>(recurrent_output.data),
+         .weight_codes = static_cast<const std::uint8_t*>(weight.qdata),
+         .weight_code_bytes = static_cast<std::size_t>(weight.qdata_bytes),
+         .weight_scales = static_cast<const std::uint16_t*>(weight.scales),
+         .weight_scale_bytes = static_cast<std::size_t>(weight.scale_bytes),
+         .activation_workspace = impl_->activation.data, .activation_workspace_bytes = required,
+         .output = static_cast<hip_bfloat16*>(delta.data),
+         .tokens = static_cast<std::uint32_t>(tokens), .rows = TextConfig::hidden,
+         .columns = TextConfig::value_dim, .padded_columns = TextConfig::value_dim},
+        static_cast<const hip_bfloat16*>(norm.data), static_cast<const hip_bfloat16*>(gate.data),
+        eps, stream));
+    ops::residual_add(delta, residual, stream);
+    return true;
+}
+
+bool Variant::ExecutionState::normalized_linear_prefill(
+    const Tensor& input, const Tensor& norm, float eps, const Weight& weight, Tensor& output,
+    qwen3::TextPhase phase, std::int32_t text_layer, hipStream_t stream) {
+    const std::int32_t tokens = input.ne[1];
+    if (impl_ == nullptr || phase != qwen3::TextPhase::Prefill ||
+        ops::r9700::linear::kQ4ActivationBits != 8 || text_layer < 0 ||
+        text_layer >= TextConfig::layers || weight.qtype != QType::Q4G64_F16S ||
+        tokens <= 0 || !ops::r9700::linear::a8q4g64_normalized_linear_prefill_supported(
+                           static_cast<std::uint32_t>(tokens)) ||
+        input.ne[0] != TextConfig::hidden || input.ne[2] != 1 || input.ne[3] != 1 ||
+        output.ne[0] != 2 * TextConfig::intermediate || output.ne[1] != tokens ||
+        reinterpret_cast<std::uintptr_t>(input.data) % 16U != 0U ||
+        reinterpret_cast<std::uintptr_t>(norm.data) % 16U != 0U) {
+        return false;
+    }
+    const std::size_t required = ops::normalized_linear_workspace_capacity_bytes(
+        tokens, TextConfig::hidden, 2 * TextConfig::intermediate);
+    if (required == 0U || impl_->activation.data == nullptr ||
+        impl_->activation.bytes < required) {
+        throw std::invalid_argument("R9700 normalized-linear prefill activation region is too small");
     }
     ops::normalized_linear(input, norm, eps, true, weight, output,
                            {impl_->activation.data, required}, stream);
@@ -1163,11 +1300,21 @@ void Variant::gdn_input_projection_record(
         static_cast<std::uint32_t>(batch), static_cast<std::uint32_t>(conv_states.ne[2]), stream));
 }
 
-void Variant::gdn_output_projection(const Tensor& hidden, const Weight& weight, Tensor& residual,
-                                    qwen3::TextPhase phase, WorkspaceArena& workspace,
-                                    hipStream_t stream, std::int32_t,
+void Variant::gdn_output_projection(const Tensor& recurrent_output, const Tensor& norm,
+                                    const Tensor& gate, float eps, Tensor& normalized,
+                                    bool materialize_normalized, const Weight& weight,
+                                    Tensor& residual, qwen3::TextPhase phase,
+                                    WorkspaceArena& workspace, hipStream_t stream, std::int32_t,
                                     ExecutionState* execution, std::int32_t text_layer,
                                     bool ordinary_decode) {
+    if (!materialize_normalized && execution != nullptr &&
+        execution->gated_normalized_output_prefill(recurrent_output, norm, gate, eps, weight,
+                                                   residual, phase, text_layer, workspace,
+                                                   stream)) {
+        return;
+    }
+    ops::gated_rmsnorm(recurrent_output, norm, gate, eps, normalized, stream);
+    const Tensor hidden = normalized.view({TextConfig::value_dim, normalized.ne[2]});
     if (execution != nullptr &&
         execution->projected_residual_t1(hidden, weight, residual, phase, ordinary_decode, stream)) {
         return;
@@ -1182,29 +1329,10 @@ void Variant::gdn_output_projection(const Tensor& hidden, const Weight& weight, 
 void Variant::gdn_norm_control_projection(const Tensor& residual, const Tensor& norm_weight,
                                           float eps, const GdnProjectionWeights& weights,
                                           Tensor& hidden, Tensor& g, Tensor& beta,
-                                          WorkspaceArena& workspace, hipStream_t stream,
-                                          ExecutionState* execution) {
+                                          hipStream_t stream) {
     ops::rmsnorm(residual, norm_weight, eps, true, hidden, stream);
-    if (residual.ne[1] >= 1 && residual.ne[1] <= 24 &&
-        residual.ne[2] == 1 && residual.ne[3] == 1 &&
-        weights.a_projection.qtype == QType::BF16_CTRL &&
-        weights.b_projection.qtype == QType::BF16_CTRL) {
-        ops::bf16_gdn_projected_gating(hidden, weights.a_projection,
-                                          weights.b_projection, weights.a_log,
-                                          weights.dt_bias, g, beta, stream);
-        return;
-    }
-    auto scope = workspace.scope();
-    Tensor a = workspace.alloc(DType::BF16, {TextConfig::gdn_value_heads, residual.ne[1]});
-    Tensor b = workspace.alloc(DType::BF16, {TextConfig::gdn_value_heads, residual.ne[1]});
-    serialized_linear(execution, hidden, weights.a_projection, a, workspace, stream);
-    serialized_linear(execution, hidden, weights.b_projection, b, workspace, stream);
-    HIP_CHECK(ops::r9700::gdn::control_gates_bf16(
-        static_cast<const hip_bfloat16*>(a.data), static_cast<const hip_bfloat16*>(b.data),
-        static_cast<const float*>(weights.a_log.data),
-        static_cast<const float*>(weights.dt_bias.data), static_cast<float*>(g.data),
-        static_cast<float*>(beta.data), TextConfig::gdn_value_heads,
-        static_cast<std::uint32_t>(residual.ne[1]), stream));
+    ops::bf16_gdn_projected_gating(hidden, weights.a_projection, weights.b_projection,
+                                   weights.a_log, weights.dt_bias, g, beta, stream);
 }
 
 namespace {
@@ -1220,6 +1348,11 @@ void post_mixer_body(const Tensor& hidden, const Variant::PostMixerWeights& weig
             if (execution != nullptr && execution->normalized_linear_t1(
                     residual, *norm, eps, weights.gate_up, gate_up, phase,
                     ordinary_decode, text_layer, stream)) {
+                return;
+            }
+            if (execution != nullptr && execution->normalized_linear_prefill(
+                    residual, *norm, eps, weights.gate_up, gate_up, phase, text_layer,
+                    stream)) {
                 return;
             }
             Tensor normalized_hidden = hidden;
@@ -1376,12 +1509,6 @@ std::size_t Variant::gdn_output_projection_workspace_capacity_bytes(WeightsProfi
     validate_profile(profile);
     validate_token_interval(first, last);
     return one_matrix_bytes(TextConfig::hidden, last);
-}
-
-std::size_t Variant::gdn_norm_control_projection_workspace_capacity_bytes(std::int32_t first,
-                                                                          std::int32_t last) {
-    validate_token_interval(first, last);
-    return two_matrix_bytes(TextConfig::gdn_value_heads, TextConfig::gdn_value_heads, last);
 }
 
 std::size_t Variant::post_mixer_workspace_capacity_bytes(WeightsProfile profile,

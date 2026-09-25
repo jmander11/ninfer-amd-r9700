@@ -1740,7 +1740,9 @@ int main(int argc, char** argv) {
                 Shape{7168, 5120, 0, 0}, Shape{4096, 5120, 0, 0},
                 Shape{12288, 5120, 0, 0}, Shape{5120, 6144, 0, 0},
                 Shape{34816, 5120, 0, 0}, Shape{5120, 17408, 0, 0},
-                Shape{5120, 10240, 0, 0}, Shape{1024, 5120, 0, 0}};
+                Shape{5120, 10240, 0, 0}, Shape{1024, 5120, 0, 0},
+                // DFlash2 context: feature projection and per-layer fused QKV.
+                Shape{5120, 25600, 0, 0}, Shape{6144, 5120, 0, 0}};
             std::vector<PrefillResult> tail_qualifications;
             if (pingpong_regression || pingpong_benchmark) {
                 // Exercise direct-call fallback and nonzero status poisoning
@@ -1836,7 +1838,7 @@ int main(int argc, char** argv) {
                               : lds_scope_regression
                               ? "A8Q4 LDS-scope/production CTA bit-exact regression: PASS ("
                               : "A8Q4 cooperative prefill CTA regression: PASS (")
-                      << "exact tail case and six Text plus two MTP shapes at four token extents)\n";
+                      << "exact tail case and six Text, two MTP and two DFlash2 context shapes at four token extents)\n";
             return 0;
         }
         std::vector<Result> results;

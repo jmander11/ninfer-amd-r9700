@@ -57,7 +57,7 @@ DEFAULT_FIXTURES = [
 # Position-matrix coordinates (lengths x positions). Each cell is a committed
 # fixture from the generator: the mid cell uses the bare name, the other
 # positions use the suffixed name (long_niah_{len}_{pos}.json).
-NIAH_LENGTHS = ("8k", "64k", "100k", "128k", "150k", "200k")
+NIAH_LENGTHS = ("8k", "32k", "64k", "100k", "128k", "150k", "200k")
 NIAH_POSITIONS = ("start", "q25", "mid", "q75", "end")
 SERVER_LOG_ARTIFACT_TYPE = "ninfer_serve_request_log"
 SERVER_LOG_SCHEMA_VERSION = 20

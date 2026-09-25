@@ -36,7 +36,7 @@ add_library(ninfer_r9700_core STATIC
   ops/r9700/gdn/gdn_gating.cpp
   ops/r9700/gdn/gdn_ops.hip
   ops/r9700/gdn_recurrence/gated_delta_net.hip
-  ops/r9700/gdn_recurrence/gdn_prefill_staged.hip
+  ops/r9700/gdn_recurrence/gdn_prefill_chunked.hip
   ops/r9700/gdn_recurrence/gdn_replay_fold.cpp
   ops/r9700/gdn_recurrence/gdn_replay_fold.hip
   ops/r9700/sampling/sampling.hip
@@ -736,6 +736,15 @@ set_target_properties(ninfer_r9700_a8q4_normalized_linear_t1_qual PROPERTIES
 target_compile_definitions(ninfer_r9700_a8q4_normalized_linear_t1_qual PRIVATE
   NINFER_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 target_link_libraries(ninfer_r9700_a8q4_normalized_linear_t1_qual PRIVATE
+  ninfer_r9700_core hip::host)
+
+# Public RMSNorm-to-Q4 projection at A8 prefill extents (normalization fused into the codec).
+add_executable(ninfer_r9700_a8q4_normalized_linear_prefill_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/a8q4_normalized_linear_prefill_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_a8q4_normalized_linear_prefill_qual)
+set_target_properties(ninfer_r9700_a8q4_normalized_linear_prefill_qual PROPERTIES
+  HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_a8q4_normalized_linear_prefill_qual PRIVATE
   ninfer_r9700_core hip::host)
 
 # Exact MTP next-round state transition for the complete fixed product domain K=1..5/B=1..4.

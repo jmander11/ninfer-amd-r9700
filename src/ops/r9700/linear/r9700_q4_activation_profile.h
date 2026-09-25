@@ -149,10 +149,10 @@ enum class A8Q4PrefillRoute : std::uint8_t {
         tokens == 1024U || tokens == 2048U || tokens == 4096U || tokens == 8192U;
     const bool qualified_shape =
         ((rows == 7168U || rows == 4096U || rows == 12288U || rows == 34816U ||
-          rows == 1024U) &&
+          rows == 1024U || rows == 6144U) &&
          columns == 5120U) ||
         (rows == 5120U &&
-         (columns == 6144U || columns == 10240U || columns == 17408U));
+         (columns == 6144U || columns == 10240U || columns == 17408U || columns == 25600U));
     return kQ4ActivationBits == 8U && qualified_tokens && qualified_shape;
 }
 

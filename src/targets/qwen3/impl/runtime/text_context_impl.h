@@ -1141,7 +1141,7 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
     Tensor g           = control.g;
     Tensor beta        = control.beta;
     Variant::gdn_norm_control_projection(x, *w.input_norm, kCfg.rms_eps, *w.projection, h, g, beta,
-                                         work_, s, linear_execution_);
+                                         s);
     if constexpr (requires { tap.capture_gdn_controls(text_layer, h, g, beta, s); }) {
         tap.capture_gdn_controls(text_layer, h, g, beta, s);
     }
@@ -1253,15 +1253,14 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
 
         Tensor on = workspace_recipe::gdn_normalized_output<TextConfig>(work_, T).view(
             {kCfg.gdn_v_dim, kCfg.gdn_v_heads, T});
-        ops::gated_rmsnorm(o, *w.gdn_norm, z, kCfg.rms_eps, on, s);
-        if constexpr (requires { tap.capture_gdn_normalized(text_layer, on, s); }) {
-            tap.capture_gdn_normalized(text_layer, on, s);
-        }
-        Tensor on_flat = on.view({kCfg.value_dim, T});
-        Variant::gdn_output_projection(on_flat, *w.out_proj, x, ph, work_, s,
+        constexpr bool materialize_normalized =
+            requires { tap.capture_gdn_normalized(text_layer, on, s); };
+        Variant::gdn_output_projection(o, *w.gdn_norm, z, kCfg.rms_eps, on,
+                                       materialize_normalized, *w.out_proj, x, ph, work_, s,
                                        packed_route_tokens(active_sequence_batch_,
                                                            active_sequence_width_),
                                        linear_execution_, text_layer, active_ordinary_decode_);
+        if constexpr (materialize_normalized) { tap.capture_gdn_normalized(text_layer, on, s); }
         if constexpr (requires { tap.capture_gdn_residual(text_layer, x, s); }) {
             tap.capture_gdn_residual(text_layer, x, s);
         }
@@ -1309,12 +1308,12 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
     }
     if (recurrent_state_trace.destination.data != nullptr) {
         ops::gated_delta_net_trace_prefix_state(
-            q_recurrent, k_recurrent, vv, g, beta, kGdnScale, /*normalize_qk=*/true, work_,
+            q_recurrent, k_recurrent, vv, g, beta, kGdnScale, /*normalize_qk=*/true,
             recurrent_state, o, recurrent_state_trace.destination,
             recurrent_state_trace.prefix_tokens, s);
     } else {
         ops::gated_delta_net(q_recurrent, k_recurrent, vv, g, beta, kGdnScale,
-                             /*normalize_qk=*/true, work_, recurrent_state, o, s);
+                             /*normalize_qk=*/true, recurrent_state, o, s);
     }
     if constexpr (requires { tap.capture_gdn_recurrence(text_layer, o, s); }) {
         tap.capture_gdn_recurrence(text_layer, o, s);
@@ -1322,16 +1321,14 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
 
     Tensor on = workspace_recipe::gdn_normalized_output<TextConfig>(work_, T).view(
         {kCfg.gdn_v_dim, kCfg.gdn_v_heads, T});
-    ops::gated_rmsnorm(o, *w.gdn_norm, z, kCfg.rms_eps, on, s);
-    if constexpr (requires { tap.capture_gdn_normalized(text_layer, on, s); }) {
-        tap.capture_gdn_normalized(text_layer, on, s);
-    }
-
-    Tensor on_flat = on.view({kCfg.value_dim, T});
-    Variant::gdn_output_projection(on_flat, *w.out_proj, x, ph, work_, s,
+    constexpr bool materialize_normalized =
+        requires { tap.capture_gdn_normalized(text_layer, on, s); };
+    Variant::gdn_output_projection(o, *w.gdn_norm, z, kCfg.rms_eps, on, materialize_normalized,
+                                   *w.out_proj, x, ph, work_, s,
                                    packed_route_tokens(active_sequence_batch_,
                                                        active_sequence_width_),
                                    linear_execution_, text_layer, active_ordinary_decode_);
+    if constexpr (materialize_normalized) { tap.capture_gdn_normalized(text_layer, on, s); }
     if constexpr (requires { tap.capture_gdn_residual(text_layer, x, s); }) {
         tap.capture_gdn_residual(text_layer, x, s);
     }

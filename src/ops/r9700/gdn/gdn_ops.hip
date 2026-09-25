@@ -24,6 +24,13 @@ constexpr std::uint32_t kMaximumVerifyWidth = 16;
 constexpr std::uint32_t kMaximumBatch = kMaximumConcurrency;
 constexpr std::uint32_t kControlHeads = 48;
 constexpr std::uint32_t kControlColumns = 5120;
+constexpr std::uint32_t kControlT1MaximumTokens = 24;
+// Wider launches: one CTA per 16 tokens, eight waves splitting K, six WMMA row tiles (a|b).
+constexpr std::uint32_t kControlWideTokens = 16;
+constexpr std::uint32_t kControlWideSplits = 8;
+constexpr std::uint32_t kControlWideSplitColumns = kControlColumns / kControlWideSplits;
+constexpr std::uint32_t kControlWideTiles = 2U * kControlHeads / 16U;
+static_assert(kControlColumns % (kControlWideSplits * 16U) == 0U);
 
 [[nodiscard]] bool valid_stream(hipStream_t stream) noexcept { return stream != nullptr; }
 
@@ -439,6 +446,80 @@ __global__ __launch_bounds__(kBlock) void bf16_projected_control_t1_kernel(
     }
 }
 
+using ControlBf16x8 = short __attribute__((ext_vector_type(8)));
+using ControlF32x8 = float __attribute__((ext_vector_type(8)));
+
+// The launcher admits only 16-byte aligned hidden and weight bases; rows are 10240 bytes.
+__device__ __forceinline__ ControlBf16x8 load_control_bf16x8(const hip_bfloat16* source) {
+    return *reinterpret_cast<const ControlBf16x8*>(source);
+}
+
+// Tokens are WMMA rows and the stacked [a;b] weight rows are WMMA columns, so one lane holds
+// a[h,t] and b[h,t] for the same head in tiles i and i+3 and applies the control formula in place.
+__global__ __launch_bounds__(kControlWideSplits * 32U) void bf16_projected_control_wide_kernel(
+    const hip_bfloat16* hidden, const hip_bfloat16* a_weight, const hip_bfloat16* b_weight,
+    const float* a_log, const float* dt_bias, float* g, float* beta, std::uint32_t tokens) {
+    const std::uint32_t lane = threadIdx.x & 31U;
+    const std::uint32_t split = threadIdx.x >> 5U;
+    const std::uint32_t lane_row = lane & 15U;
+    const std::uint32_t lane_half = lane >> 4U;
+    const std::uint32_t token_base = blockIdx.x * kControlWideTokens;
+    const std::uint32_t column = split * kControlWideSplitColumns + lane_half * 8U;
+    // Rows past the token extent load the last valid token; their results are never stored.
+    const hip_bfloat16* input = hidden +
+        static_cast<std::size_t>(min(token_base + lane_row, tokens - 1U)) * kControlColumns +
+        column;
+    const hip_bfloat16* weight[kControlWideTiles];
+#pragma unroll
+    for (std::uint32_t tile = 0; tile < kControlWideTiles; ++tile) {
+        const std::uint32_t head = (tile % 3U) * 16U + lane_row;
+        weight[tile] = (tile < 3U ? a_weight : b_weight) +
+            static_cast<std::size_t>(head) * kControlColumns + column;
+    }
+    ControlF32x8 accumulator[kControlWideTiles]{};
+#pragma unroll 4
+    for (std::uint32_t offset = 0; offset < kControlWideSplitColumns; offset += 16U) {
+        const ControlBf16x8 x = load_control_bf16x8(input + offset);
+#pragma unroll
+        for (std::uint32_t tile = 0; tile < kControlWideTiles; ++tile) {
+            accumulator[tile] = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(
+                x, load_control_bf16x8(weight[tile] + offset), accumulator[tile]);
+        }
+    }
+    // Every wave publishes its K-split partials; all threads then reduce them in split order and
+    // apply the control formula to three of the 48x16 (head, token) outputs each.
+    __shared__ float partial[kControlWideSplits][kControlWideTiles][8][32];
+#pragma unroll
+    for (std::uint32_t tile = 0; tile < kControlWideTiles; ++tile) {
+#pragma unroll
+        for (std::uint32_t element = 0; element < 8U; ++element) {
+            partial[split][tile][element][lane] = accumulator[tile][element];
+        }
+    }
+    __syncthreads();
+    for (std::uint32_t item = threadIdx.x; item < 3U * 8U * 32U;
+         item += kControlWideSplits * 32U) {
+        const std::uint32_t item_lane = item % 32U;
+        const std::uint32_t element = (item / 32U) % 8U;
+        const std::uint32_t tile = item / 256U;
+        const std::uint32_t token = token_base + (item_lane >> 4U) * 8U + element;
+        if (token >= tokens) continue;
+        float a = 0.0F, b = 0.0F;
+#pragma unroll
+        for (std::uint32_t source = 0; source < kControlWideSplits; ++source) {
+            a += partial[source][tile][element][item_lane];
+            b += partial[source][tile + 3U][element][item_lane];
+        }
+        const std::uint32_t head = tile * 16U + (item_lane & 15U);
+        const std::size_t output = static_cast<std::size_t>(token) * kControlHeads + head;
+        const float av = static_cast<float>(hip_bfloat16(a)) + dt_bias[head];
+        const float softplus = av > 20.0F ? av : log1pf(expf(av));
+        g[output] = -expf(a_log[head]) * softplus;
+        const float bv = static_cast<float>(hip_bfloat16(b));
+        beta[output] = 1.0F / (1.0F + expf(-bv));
+    }
+}
+
 __global__ void copy_fp32_kernel(const float* source, float* destination, std::size_t count) {
     const std::size_t index = static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
     if (index < count) { destination[index] = source[index]; }
@@ -721,8 +802,9 @@ hipError_t bf16_projected_control(
     const hip_bfloat16* hidden, const hip_bfloat16* a_weight,
     const hip_bfloat16* b_weight, const float* a_log, const float* dt_bias,
     float* g, float* beta, std::uint32_t tokens, hipStream_t stream) noexcept {
-    if (tokens < 1U || tokens > 24U) return hipErrorInvalidValue;
-    const std::size_t hidden_bytes = kControlColumns * tokens * sizeof(hip_bfloat16);
+    if (tokens < 1U) return hipErrorInvalidValue;
+    const std::size_t hidden_bytes =
+        static_cast<std::size_t>(kControlColumns) * tokens * sizeof(hip_bfloat16);
     constexpr std::size_t weight_bytes =
         static_cast<std::size_t>(kControlHeads) * kControlColumns * sizeof(hip_bfloat16);
     constexpr std::size_t vector_bytes = kControlHeads * sizeof(float);
@@ -730,6 +812,13 @@ hipError_t bf16_projected_control(
         a_log != nullptr && dt_bias != nullptr && g != nullptr && beta != nullptr &&
         valid_stream(stream);
     if (!pointers_valid) { return hipErrorInvalidValue; }
+    const auto aligned16 = [](const void* pointer) {
+        return reinterpret_cast<std::uintptr_t>(pointer) % 16U == 0U;
+    };
+    if (tokens > kControlT1MaximumTokens &&
+        (!aligned16(hidden) || !aligned16(a_weight) || !aligned16(b_weight))) {
+        return hipErrorInvalidValue;
+    }
     const std::array<ByteRange, 7> ranges{
         byte_range(hidden, hidden_bytes / sizeof(hip_bfloat16)),
         byte_range(a_weight, weight_bytes / sizeof(hip_bfloat16)),
@@ -745,8 +834,16 @@ hipError_t bf16_projected_control(
         }
     }
     return checked_launch(true, [&] {
-        hipLaunchKernelGGL(bf16_projected_control_t1_kernel, dim3(kControlHeads, tokens), dim3(kBlock),
-                           0, stream, hidden, a_weight, b_weight, a_log, dt_bias, g, beta);
+        if (tokens <= kControlT1MaximumTokens) {
+            hipLaunchKernelGGL(bf16_projected_control_t1_kernel, dim3(kControlHeads, tokens),
+                               dim3(kBlock), 0, stream, hidden, a_weight, b_weight, a_log,
+                               dt_bias, g, beta);
+        } else {
+            hipLaunchKernelGGL(bf16_projected_control_wide_kernel,
+                               dim3((tokens + kControlWideTokens - 1U) / kControlWideTokens),
+                               dim3(kControlWideSplits * 32U), 0, stream, hidden, a_weight,
+                               b_weight, a_log, dt_bias, g, beta, tokens);
+        }
     });
 }
 

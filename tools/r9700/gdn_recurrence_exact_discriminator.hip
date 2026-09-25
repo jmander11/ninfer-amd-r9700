@@ -450,9 +450,8 @@ RunResult run_ordinary(const Inputs& in, const std::vector<float>& initial,
     ninfer::Tensor tout(state_out.data(), ninfer::DType::FP32, {kDim, kDim, kValueHeads});
     ninfer::Tensor out(output.data(), ninfer::DType::BF16,
                        {kDim, kValueHeads, in.width});
-    ninfer::WorkspaceArena workspace(1);
     ninfer::ops::gated_delta_net(device.tq, device.tk, device.tv, device.tg, device.tbeta,
-                                 kScale, true, workspace, tin, tout, out, stream);
+                                 kScale, true, tin, tout, out, stream);
     HIP_CHECK(hipStreamSynchronize(stream));
     RunResult result{output.copy<hip_bfloat16>(in.v.size()),
                      state_out.copy<float>(initial.size()), {}};
@@ -752,11 +751,10 @@ void require_alias_rejection(hipStream_t stream) {
     ninfer::Tensor tstate(state.data(), ninfer::DType::FP32, {kDim, kDim, kValueHeads});
     ninfer::Tensor aliased_out(device.v.data(), ninfer::DType::BF16,
                                {kDim, kValueHeads, 1});
-    ninfer::WorkspaceArena workspace(1);
     bool rejected = false;
     try {
         ninfer::ops::gated_delta_net(device.tq, device.tk, device.tv, device.tg,
-                                     device.tbeta, kScale, true, workspace, tstate,
+                                     device.tbeta, kScale, true, tstate,
                                      aliased_out, stream);
     } catch (const std::invalid_argument&) {
         rejected = true;

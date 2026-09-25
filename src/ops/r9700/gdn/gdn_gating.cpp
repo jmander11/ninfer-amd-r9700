@@ -83,9 +83,9 @@ void bf16_gdn_projected_gating(const Tensor& hidden, const Weight& a_weight,
     constexpr std::int32_t kColumns = 5120;
     constexpr std::int32_t kHeads = 48;
     if (hidden.dtype != DType::BF16 || hidden.data == nullptr || !hidden.is_contiguous() ||
-        hidden.ne[0] != kColumns || hidden.ne[1] < 1 || hidden.ne[1] > 24 || hidden.ne[2] != 1 || hidden.ne[3] != 1) {
+        hidden.ne[0] != kColumns || hidden.ne[1] < 1 || hidden.ne[2] != 1 || hidden.ne[3] != 1) {
         throw std::invalid_argument(
-            "bf16_gdn_projected_gating: hidden must be contiguous BF16 [5120,T=1..24]");
+            "bf16_gdn_projected_gating: hidden must be contiguous BF16 [5120,T>=1]");
     }
     const auto require_weight = [](const Weight& weight, const char* label) {
         constexpr std::uint64_t kBytes =
@@ -138,6 +138,14 @@ void bf16_gdn_projected_gating(const Tensor& hidden, const Weight& a_weight,
                     "bf16_gdn_projected_gating: inputs and outputs must not overlap");
             }
         }
+    }
+    const auto aligned16 = [](const void* pointer) {
+        return reinterpret_cast<std::uintptr_t>(pointer) % 16U == 0U;
+    };
+    if (hidden.ne[1] > 24 &&
+        (!aligned16(hidden.data) || !aligned16(a_weight.qdata) || !aligned16(b_weight.qdata))) {
+        throw std::invalid_argument(
+            "bf16_gdn_projected_gating: T>24 requires 16-byte aligned hidden and weights");
     }
     HIP_CHECK(r9700::gdn::bf16_projected_control(
         static_cast<const hip_bfloat16*>(hidden.data),

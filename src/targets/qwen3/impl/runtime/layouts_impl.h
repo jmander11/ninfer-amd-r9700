@@ -382,7 +382,6 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
                                std::int32_t max_width) {
         auto stage = layout.scope();
         (void)workspace_recipe::gdn_control<TextConfig>(layout, last);
-        scratch(layout, Variant::gdn_norm_control_projection_workspace_capacity_bytes(first, last));
         (void)workspace_recipe::gdn_projection<TextConfig>(layout, last);
         if (path == GdnWorkspacePath::Snapshot) {
             scratch(layout, Variant::gdn_input_projection_snapshot_workspace_capacity_bytes(
@@ -396,11 +395,6 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
                                 plan.weights_profile, phase, first, last));
         }
         (void)workspace_recipe::gdn_recurrent_output<TextConfig>(layout, last);
-        if (path == GdnWorkspacePath::Prefill) {
-            scratch(layout, ops::gated_delta_net_workspace_capacity_bytes(
-                                TextConfig::gdn_key_heads, TextConfig::gdn_value_heads,
-                                /*normalize_qk=*/true, first, last));
-        }
         if (path == GdnWorkspacePath::ReplayRecord) {
             if (dflash_tree) {
                 // Nested: gdn_mix scopes the fold alloc before gdn_normalized_output.

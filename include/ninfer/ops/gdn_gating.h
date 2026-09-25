@@ -22,7 +22,7 @@ void gdn_gating(const Tensor& a, const Tensor& b, const Tensor& A_log, const Ten
                 Tensor& g, Tensor& beta, hipStream_t stream);
 
 /**
- * Op: BF16 projected Gated DeltaNet controls at the R9700 decode cell.
+ * Op: BF16 projected Gated DeltaNet controls.
  *
  * Math / indexing:
  *   ar[h,t] = BF16(sum_k hidden[k,t] * a_weight[h,k])
@@ -32,7 +32,7 @@ void gdn_gating(const Tensor& a, const Tensor& b, const Tensor& A_log, const Ten
  *
  * Logical shapes and supported domain:
  *   hidden is contiguous BF16 [5120,T], both weights are contiguous BF16_CTRL [48,5120],
- *   A_log/dt_bias are contiguous FP32 [48], and g/beta are contiguous FP32 [48,T], T=1..24.
+ *   A_log/dt_bias are contiguous FP32 [48], and g/beta are contiguous FP32 [48,T], T>=1.
  *
  * Numeric / effects:
  *   Each dot product accumulates in FP32 and has an observable explicit BF16 rounding boundary
@@ -40,9 +40,11 @@ void gdn_gating(const Tensor& a, const Tensor& b, const Tensor& A_log, const Ten
  *   mutually non-overlapping; there is no workspace or persistent state effect.
  *
  * Execution:
- *   The caller supplies a non-null stream. A single batched grid retains the ordinary
- *   T1 projection arithmetic independently for every token. Other token extents remain
- *   compositions of Linear and gdn_gating.
+ *   The caller supplies a non-null stream. T=1..24 use one batched grid that retains the
+ *   ordinary T1 projection arithmetic independently for every token; wider extents use a
+ *   batched WMMA route whose FP32 reduction association differs, so only the BF16-rounded
+ *   projection boundary, not bitwise equality with T1, is shared across the two routes.
+ *   T>24 requires 16-byte aligned hidden and weight storage.
  */
 void bf16_gdn_projected_gating(const Tensor& hidden, const Weight& a_weight,
                                   const Weight& b_weight, const Tensor& A_log,

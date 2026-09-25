@@ -3,12 +3,11 @@
 #include "ninfer/types.h"
 
 #include "core/device.h"
-#include "ops/r9700/gdn_recurrence/gdn_prefill_staged.h"
+#include "ops/r9700/gdn_recurrence/gdn_prefill_chunked.h"
 #include "ops/r9700/gdn_recurrence/gdn_verify_profile.h"
 
 #include <hip/hip_bfloat16.h>
 
-#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -484,33 +483,15 @@ void require_selector(const Tensor& tensor, int batch, const char* label, bool a
 
 } // namespace
 
-std::size_t gated_delta_net_workspace_capacity_bytes(std::int32_t qk_heads,
-                                                      std::int32_t value_heads,
-                                                      bool normalize_qk, std::int32_t min_tokens,
-                                                      std::int32_t max_tokens) {
-    if (qk_heads != kQHeads || value_heads != kValueHeads || min_tokens < 1 ||
-        max_tokens < min_tokens || max_tokens > kMaximumPrefillWidth) {
-        throw std::invalid_argument("gated_delta_net workspace: unsupported Qwen3.8 profile");
-    }
-    // The staged route's workspace grows with width, so the largest staged width bounds it.
-    const std::int32_t staged_width =
-        std::min(max_tokens, r9700::gdn_recurrence::kStagedMaximumWidth);
-    if (normalize_qk && staged_width >= std::max(min_tokens,
-                                                 r9700::gdn_recurrence::kStagedMinimumWidth)) {
-        return r9700::gdn_recurrence::prefill_staged_workspace_bytes(staged_width);
-    }
-    return 0;
-}
-
 void gated_delta_net(const Tensor& q, const Tensor& k, const Tensor& v, const Tensor& g,
-                     const Tensor& beta, float scale, bool normalize_qk, WorkspaceArena& ws,
-                     Tensor& state, Tensor& out, hipStream_t stream) {
-    gated_delta_net(q, k, v, g, beta, scale, normalize_qk, ws, state, state, out, stream);
+                     const Tensor& beta, float scale, bool normalize_qk, Tensor& state,
+                     Tensor& out, hipStream_t stream) {
+    gated_delta_net(q, k, v, g, beta, scale, normalize_qk, state, state, out, stream);
 }
 
 static void gated_delta_net_impl(const Tensor& q, const Tensor& k, const Tensor& v,
                                  const Tensor& g, const Tensor& beta, float scale,
-                                 bool normalize_qk, WorkspaceArena& ws,
+                                 bool normalize_qk,
                                  const Tensor& state_in, Tensor& state_out, Tensor& out,
                                  Tensor* prefix_state, std::int32_t prefix_tokens,
                                  hipStream_t stream) {
@@ -537,17 +518,17 @@ static void gated_delta_net_impl(const Tensor& q, const Tensor& k, const Tensor&
         }
     }
     if (stream == nullptr) { throw std::invalid_argument("gated_delta_net: null stream"); }
-    const std::size_t staged_bytes =
-        r9700::gdn_recurrence::prefill_staged_workspace_bytes(geometry.width);
-    if (normalize_qk && prefix_state == nullptr && staged_bytes != 0U) {
-        auto scope = ws.scope();
-        Tensor staged = ws.alloc(DType::FP32, {static_cast<std::int32_t>(staged_bytes / sizeof(float))});
-        HIP_CHECK(r9700::gdn_recurrence::prefill_staged(
+    // The chunked route reads q/k rows as 16-byte vectors; arena storage always qualifies.
+    const bool vector_aligned = reinterpret_cast<std::uintptr_t>(q.data) % 16U == 0U &&
+                                reinterpret_cast<std::uintptr_t>(k.data) % 16U == 0U;
+    if (normalize_qk && prefix_state == nullptr && vector_aligned &&
+        geometry.width >= r9700::gdn_recurrence::kChunkedMinimumWidth) {
+        HIP_CHECK(r9700::gdn_recurrence::prefill_chunked(
             static_cast<const hip_bfloat16*>(q.data), static_cast<const hip_bfloat16*>(k.data),
             static_cast<const hip_bfloat16*>(v.data), static_cast<const float*>(g.data),
             static_cast<const float*>(beta.data), static_cast<const float*>(state_in.data),
             static_cast<float*>(state_out.data), static_cast<hip_bfloat16*>(out.data),
-            staged.data, staged_bytes, geometry.width, scale, stream));
+            geometry.width, scale, stream));
         return;
     }
 #define NINFER_LAUNCH_ORDINARY(NORM) \
@@ -569,17 +550,17 @@ static void gated_delta_net_impl(const Tensor& q, const Tensor& k, const Tensor&
 }
 
 void gated_delta_net(const Tensor& q, const Tensor& k, const Tensor& v, const Tensor& g,
-                     const Tensor& beta, float scale, bool normalize_qk, WorkspaceArena& ws,
+                     const Tensor& beta, float scale, bool normalize_qk,
                      const Tensor& state_in, Tensor& state_out, Tensor& out, hipStream_t stream) {
-    gated_delta_net_impl(q, k, v, g, beta, scale, normalize_qk, ws, state_in, state_out, out,
+    gated_delta_net_impl(q, k, v, g, beta, scale, normalize_qk, state_in, state_out, out,
                          nullptr, 0, stream);
 }
 
 void gated_delta_net_trace_prefix_state(
     const Tensor& q, const Tensor& k, const Tensor& v, const Tensor& g, const Tensor& beta,
-    float scale, bool normalize_qk, WorkspaceArena& ws, Tensor& state, Tensor& out,
+    float scale, bool normalize_qk, Tensor& state, Tensor& out,
     Tensor& prefix_state, std::int32_t prefix_tokens, hipStream_t stream) {
-    gated_delta_net_impl(q, k, v, g, beta, scale, normalize_qk, ws, state, state, out,
+    gated_delta_net_impl(q, k, v, g, beta, scale, normalize_qk, state, state, out,
                          &prefix_state, prefix_tokens, stream);
 }
 

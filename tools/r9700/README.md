@@ -1620,15 +1620,18 @@ won at T=2048 and T=4096, so production has one route rather than an unsupported
 seven-run selected medians at T=16/32/64/128 are 0.033244/0.054612/0.099263/0.188758 ms, reductions
 of 21.37/27.02/28.47/28.97 percent. The same public timing fixture records T=1 through T=4096.
 
-Normalized ordinary widths 64..8192 (except the T129 prefix-trace diagnostic) now use the staged
-route in `gdn_prefill_staged.hip`: one wave per (token, Q/K head) writes normalized FP32 q/k in
-recurrence lane order and one pass writes exp(g), both into caller-owned workspace sized by the
-public capacity query; the recurrence then gives each wave four state rows and walks every token
-without workgroup barriers or LDS, prefetching the next token's staged inputs and reducing each
-eight-lane row group with DPP row_xmask additions. Its per-lane FMA and reduction order equals the
-former P2048 scale-sidecar route, which it replaces bit-exactly (all 786,432 state words and every
-P2048 output). The qualifier times P2048 at about 1.39 ms versus 2.84 ms before and covers odd
-width 65 in place.
+Normalized ordinary widths of 64 or more (except the T129 prefix-trace diagnostic) use the chunked
+(WY) route in `gdn_prefill_chunked.hip`, which needs no workspace: one workgroup per value head
+walks 64-token chunks, forming the strictly lower `A = beta_i exp(b_i - b_j) k_i.k_j`, FP32
+diagonal blocks of `(I + A)^-1`, `Z = beta (V - Gamma K S^T)`, the corrected values
+`V'_I = (I + A_II)^-1 (Z_I - sum_{J<I} A_IJ V'_J)`, `O = scale (Gamma q) S^T + (causal decayed
+q.k) V'` and `S <- Gamma_last S + (K exp(b_last - b))^T V'` with FP16 WMMA products and FP32
+accumulation. Each wave keeps its 16 state rows as S^T WMMA accumulators, which are directly the B
+operand of the next chunk's products; a partial final chunk is masked. It replaces the former
+per-token staged recurrence (not bit-exact: FP16 operand rounding, about 5e-4 relative state error
+on long synthetic runs versus FP64, inside the Op's output/state criteria). The qualifier covers
+T=128/2048 and partial chunks at T=65 (in place), 100 and 2047, and times P2048 at about 0.87 ms
+versus 1.39 ms before.
 
 Build and run with `make -C tools/r9700 build/gdn_recurrence_qual`. Compiler metadata reports the
 selected normalized ordinary kernel at 56 VGPR, 1040 bytes LDS, zero private scratch, and occupancy

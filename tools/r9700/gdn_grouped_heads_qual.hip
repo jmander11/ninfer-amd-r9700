@@ -46,9 +46,8 @@ void qualify(int width, bool in_place, hipStream_t stream) {
                                    {kDim, kDim, kValueHeads});
     ninfer::Tensor incumbent_out(incumbent_output.data(), ninfer::DType::BF16,
                                  {kDim, kValueHeads, width});
-    ninfer::WorkspaceArena arena(1);
     ninfer::ops::gated_delta_net(device.tq, device.tk, device.tv, device.tg,
-                                 device.tbeta, kScale, true, arena, incumbent_in,
+                                 device.tbeta, kScale, true, incumbent_in,
                                  incumbent_state, incumbent_out, stream);
     ninfer::DeviceBuffer& destination = in_place ? state_in : state_out;
     launch_grouped(device, state_in, destination, output, width, stream);
@@ -116,10 +115,9 @@ Row time_row(int width, hipStream_t stream) {
     ninfer::Tensor tin(state_in.data(), ninfer::DType::FP32, {kDim, kDim, kValueHeads});
     ninfer::Tensor tout(state_out.data(), ninfer::DType::FP32, {kDim, kDim, kValueHeads});
     ninfer::Tensor out(output.data(), ninfer::DType::BF16, {kDim, kValueHeads, width});
-    ninfer::WorkspaceArena arena(1);
     const Samples incumbent = sample(stream, [&] {
         ninfer::ops::gated_delta_net(device.tq, device.tk, device.tv, device.tg,
-                                     device.tbeta, kScale, true, arena, tin, tout,
+                                     device.tbeta, kScale, true, tin, tout,
                                      out, stream);
     });
     const Samples candidate = sample(stream, [&] {

@@ -57,31 +57,54 @@ double bf16_rne(double x){
     const double quantum=std::ldexp(1.0,std::max(exponent-8,-133));
     return std::nearbyint(x/quantum)*quantum;
 }
-struct Reference{std::vector<double>g,beta;};
+// Each output keeps the gate values for the BF16 projection candidates reachable by an FP32
+// accumulation of the exact dot: the FP64 dot rounded to BF16, plus the adjacent BF16 value on the
+// dot's side when the rounding midpoint lies within the recursive-summation bound K*2^-24*sum|x*w|
+// of the dot (the explicit BF16 seam can then flip by exactly one step).
+struct Reference{std::vector<double>g,g_alt,beta,beta_alt;std::size_t ambiguous=0;};
 Reference oracle(unsigned t,const std::vector<hip_bfloat16>& x,
                  const std::vector<hip_bfloat16>& aw,const std::vector<hip_bfloat16>& bw,
                  const std::vector<float>& log,const std::vector<float>& bias){
     Reference result;
+    const double gamma=double(K)*std::ldexp(1.0,-24);
     for(unsigned token=0;token<t;++token)for(unsigned head=0;head<N;++head){
-        double a=0,b=0;
+        double a=0,b=0,a_abs=0,b_abs=0;
         for(unsigned k=0;k<K;++k){const double v=float(x[token*K+k]);
-            a+=v*double(float(aw[head*K+k]));b+=v*double(float(bw[head*K+k]));}
-        const double av=bf16_rne(a)+double(bias[head]),bv=bf16_rne(b);
-        // Stable independent softplus/sigmoid; matches the public formula,
-        // not the production branch, intrinsic approximations or reduction.
-        const double softplus=std::max(av,0.0)+std::log1p(std::exp(-std::abs(av)));
-        result.g.push_back(-std::exp(double(log[head]))*softplus);
-        result.beta.push_back(bv>=0?1/(1+std::exp(-bv)):std::exp(bv)/(1+std::exp(bv)));
+            const double pa=v*double(float(aw[head*K+k])),pb=v*double(float(bw[head*K+k]));
+            a+=pa;b+=pb;a_abs+=std::abs(pa);b_abs+=std::abs(pb);}
+        const auto gate=[&](double ar){const double av=ar+double(bias[head]);
+            // Stable independent softplus; matches the public formula,
+            // not the production branch, intrinsic approximations or reduction.
+            return -std::exp(double(log[head]))*(std::max(av,0.0)+std::log1p(std::exp(-std::abs(av))));};
+        const auto sigmoid=[](double bv){return bv>=0?1/(1+std::exp(-bv)):std::exp(bv)/(1+std::exp(bv));};
+        const auto alternate=[&](double dot,double bound){const double r=bf16_rne(dot);
+            if(dot==r)return r;
+            int exponent=0;std::frexp(std::abs(r!=0?r:dot),&exponent);
+            const double step=std::ldexp(1.0,std::max(exponent-8,-133));
+            // The neighbour toward the dot; one step below a power of two is half as large.
+            double neighbour=dot>r?r+step:r-step;
+            if(std::abs(neighbour)<std::abs(r)&&std::abs(r)==std::ldexp(1.0,exponent-1))
+                neighbour=dot>r?r+step/2:r-step/2;
+            return std::abs(dot-(r+neighbour)/2)<=gamma*bound?neighbour:r;};
+        const double ar=bf16_rne(a),br=bf16_rne(b),aa=alternate(a,a_abs),ba=alternate(b,b_abs);
+        result.ambiguous+=(aa!=ar)+(ba!=br);
+        result.g.push_back(gate(ar));result.g_alt.push_back(gate(aa));
+        result.beta.push_back(sigmoid(br));result.beta_alt.push_back(sigmoid(ba));
     }
     return result;
 }
-double compare(const std::vector<float>& actual,const std::vector<double>& reference,bool beta){
+double compare(const std::vector<float>& actual,const std::vector<double>& reference,
+               const std::vector<double>& alternate,bool beta){
     double worst=0;require(actual.size()==reference.size(),"oracle size mismatch");
     for(std::size_t i=0;i<actual.size();++i){
         // Predeclared existing GDN public criteria, not tuned after execution.
-        const double limit=std::max(beta?0.0003:0.0625,(beta?0.00003:0.001)*std::abs(reference[i]));
-        const double e=std::abs(double(actual[i])-reference[i])/limit;
-        require(std::isfinite(e)&&e<=1,"independent public FP64 gating oracle failed");worst=std::max(worst,e);
+        const auto error=[&](double r){const double limit=std::max(beta?0.0003:0.0625,
+            (beta?0.00003:0.001)*std::abs(r));return std::abs(double(actual[i])-r)/limit;};
+        const double e=std::min(error(reference[i]),error(alternate[i]));
+        if(!(std::isfinite(e)&&e<=1)){std::ostringstream m;m<<std::setprecision(9)<<"independent public FP64 gating oracle failed: "
+            <<(beta?"beta":"g")<<" index "<<i<<" actual "<<actual[i]<<" reference "<<reference[i]<<" alternate "<<alternate[i];
+            throw std::runtime_error(m.str());}
+        worst=std::max(worst,e);
     }
     return worst;
 }
@@ -120,15 +143,17 @@ void cell(unsigned t,unsigned offset,hipStream_t s,std::ostream& out){
     };
     reject([&]{ninfer::ops::bf16_gdn_projected_gating(
         input,wa,wb,log_tensor,bias_tensor,g_tensor,beta_tensor,nullptr);});
-    for(int bad_t:{25,26}) {
-        const ninfer::Tensor bad_input(x.data(),ninfer::DType::BF16,{int(K),bad_t});
+    const bool wide=t>24U;
+    if(wide){
+        require(offset==0U,"wide cells use the admitted 16-byte alignment");
+        const ninfer::Tensor misaligned(x.data()+1,ninfer::DType::BF16,{int(K),int(t-1U)});
         reject([&]{ninfer::ops::bf16_gdn_projected_gating(
-            bad_input,wa,wb,log_tensor,bias_tensor,g_tensor,beta_tensor,s);});
+            misaligned,wa,wb,log_tensor,bias_tensor,g_tensor,beta_tensor,s);});
     }
     reject([&]{ninfer::ops::bf16_gdn_projected_gating(
         input,wa,wb,log_tensor,bias_tensor,g_tensor,g_tensor,s);});
     Graph graph(s,target);
-    double new_g=0,new_b=0;
+    double new_g=0,new_b=0;std::size_t ambiguous=0;
     for(unsigned fixture=0;fixture<3;++fixture){
         std::vector<hip_bfloat16>host(t*K);
         for(unsigned token=0;token<t;++token)for(unsigned k=0;k<K;++k){
@@ -139,22 +164,27 @@ void cell(unsigned t,unsigned offset,hipStream_t s,std::ostream& out){
         std::copy_n(host.begin(),K,host.begin()+(t-1U)*K);
         x.put(host,s);const auto ref=oracle(t,host,aw,bw,log,bias);
         target();const auto expected_g=tg.get(s),expected_b=tb.get(s);
-        ninfer::ops::bf16_gdn_projected_gating(single_input,wa,wb,log_tensor,bias_tensor,
-                                             single_g,single_b,s);
-        exact(std::vector<float>(expected_g.end()-N,expected_g.end()),sg.get(s));
-        exact(std::vector<float>(expected_b.end()-N,expected_b.end()),sb.get(s));
+        if(!wide){
+            ninfer::ops::bf16_gdn_projected_gating(single_input,wa,wb,log_tensor,bias_tensor,
+                                                 single_g,single_b,s);
+            exact(std::vector<float>(expected_g.end()-N,expected_g.end()),sg.get(s));
+            exact(std::vector<float>(expected_b.end()-N,expected_b.end()),sb.get(s));
+        }
+        ambiguous+=ref.ambiguous;
         for(unsigned replay=0;replay<3;++replay){
             if(replay){tg.poison(s);tb.poison(s);graph.run(s);}
             const auto actual_g=tg.get(s),actual_b=tb.get(s);
             exact(expected_g,actual_g);exact(expected_b,actual_b);
-            new_g=std::max(new_g,compare(actual_g,ref.g,false));new_b=std::max(new_b,compare(actual_b,ref.beta,true));
+            new_g=std::max(new_g,compare(actual_g,ref.g,ref.g_alt,false));
+            new_b=std::max(new_b,compare(actual_b,ref.beta,ref.beta_alt,true));
         }
         exact(x.get(s),host);exact(a.get(s),aw);exact(b.get(s),bw);exact(al.get(s),log);exact(dt.get(s),bias);
         x.guards(s);a.guards(s);b.guards(s);al.guards(s);dt.guards(s);
         tg.guards(s);tb.guards(s);sg.guards(s);sb.guards(s);
     }
     out<<"{\"tokens\":"<<t<<",\"bf16_address_mod16\":"<<offset<<",\"fp32_address_mod16\":4,"
-       <<"\"own_eager_graph_exact\":true,\"same_column_vs_t1_exact\":true,\"guards_and_immutability\":true,\"fixtures\":3,"
+       <<"\"route\":\""<<(wide?"wide-wmma":"t1")<<"\",\"own_eager_graph_exact\":true,\"same_column_vs_t1_exact\":"<<(wide?"null":"true")
+       <<",\"guards_and_immutability\":true,\"fixtures\":3,\"ambiguous_bf16_seams\":"<<ambiguous<<','
        <<"\"maximum_normalized_oracle_g\":"<<new_g<<",\"maximum_normalized_oracle_beta\":"<<new_b<<'}';
 }
 }
@@ -167,10 +197,11 @@ int main(int argc,char**argv){try{
             (std::string(pci)=="0000:13:00.0" || std::string(pci)=="13:00.0"),"wrong device");
     hipStream_t s{};check(hipStreamCreateWithFlags(&s,hipStreamNonBlocking));std::ostringstream out;out<<std::setprecision(17);
     out<<"{\"schema\":\"ninfer.r9700.gdn-projected-controls.v1\",\"public_op_tested\":true,\"target\":\"gfx1201\","
-          "\"pci\":\"0000:13:00.0\",\"oracle\":\"original BF16 dots FP64, independent BF16 RNE seams, FP64 gates every output\","
+          "\"pci\":\"0000:13:00.0\",\"oracle\":\"original BF16 dots FP64, independent BF16 RNE seams (plus the neighbour when an FP32 accumulation bound straddles a boundary), FP64 gates every output\","
           "\"criterion\":\"g abs<=0.0625 OR rel<=0.001; beta abs<=0.0003 OR rel<=0.00003\",\"cells\":[";
     bool first=true;for(unsigned t=1U;t<=24U;++t)for(unsigned offset:{0U,2U}){
         if(!first)out<<',';first=false;cell(t,offset,s,out);}
+    for(unsigned t:{25U,31U,33U,64U,127U,2048U}){out<<',';cell(t,0U,s,out);}
     out<<"],\"numerical_passed\":true}\n";
     check(hipStreamDestroy(s));const auto data=out.str();
     const int fd=::open(path.c_str(),O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC,0644);require(fd>=0,"cannot create output");

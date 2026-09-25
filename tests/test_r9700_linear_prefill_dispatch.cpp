@@ -47,9 +47,10 @@ struct Shape {
 constexpr std::array<std::uint32_t, 4> kQualifiedTokens{1024U, 2048U, 4096U, 8192U};
 constexpr std::array<std::uint32_t, 8> kDFlashSmallTEligible{4U, 5U, 6U, 8U,
                                                             10U, 12U, 18U, 20U};
-constexpr std::array<Shape, 8> kQ4Shapes{{
+constexpr std::array<Shape, 10> kQ4Shapes{{
     {7168U, 5120U}, {4096U, 5120U}, {12288U, 5120U}, {5120U, 6144U},
     {34816U, 5120U}, {5120U, 17408U}, {5120U, 10240U}, {1024U, 5120U},
+    {5120U, 25600U}, {6144U, 5120U},
 }};
 constexpr std::array<Shape, 4> kW8Shapes{{
     {7168U, 5120U}, {12288U, 5120U}, {5120U, 6144U}, {5120U, 17408U},
@@ -75,7 +76,7 @@ static_assert(!linear::use_a8q4_prefill_cta(129U, 7168U, 5120U));
 static_assert(!linear::use_a8q4_prefill_cta(1023U, 7168U, 5120U));
 static_assert(!linear::use_a8q4_prefill_cta(8193U, 7168U, 5120U));
 static_assert(!linear::use_a8q4_prefill_cta(4096U, 5120U, 5120U));
-static_assert(!linear::use_a8q4_prefill_cta(4096U, 5120U, 25600U));
+static_assert(!linear::use_a8q4_prefill_cta(4096U, 5120U, 20480U));
 
 static_assert([] {
     for (const std::uint32_t tokens : kDFlashSmallTEligible) {
@@ -118,6 +119,8 @@ static_assert(linear::select_a8q4_prefill_route(2048U, 7168U, 5120U) ==
 static_assert(linear::select_a8q4_prefill_route(512U, 7168U, 5120U) ==
               linear::A8Q4PrefillRoute::Wmma32);
 static_assert(linear::select_a8q4_prefill_route(2048U, 5120U, 25600U) ==
+              linear::A8Q4PrefillRoute::M64N128PingPongProduction);
+static_assert(linear::select_a8q4_prefill_route(2048U, 5120U, 20480U) ==
               linear::A8Q4PrefillRoute::Wmma32);
 
 static_assert(!linear::use_a8w8_prefill_cta(128U, 7168U, 5120U));

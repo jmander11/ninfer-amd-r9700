@@ -19,10 +19,12 @@ namespace ninfer::ops {
  * Q4N16K16 [34816,5120], out contiguous BF16 [34816,T]; T is any positive value.
  * eps is positive finite. All input/output/weight/workspace planes are disjoint.
  * BF16 and FP16 planes are two-byte aligned; packed weight codes are eight-byte
- * aligned and workspace is four-byte aligned. Weight and workspace byte extents
- * are exact, including the internal workspace padding reported by the query.
+ * aligned and workspace is four-byte aligned; on the A8 prefill route (T a multiple of 128
+ * in the qualified prefill inventory) x and norm are 16-byte aligned. Weight and workspace
+ * byte extents are exact, including the internal workspace padding reported by the query.
  * Caller owns the exact workspace returned below; no persistent state or allocation.
- * Stream-ordered and capture-safe. The private fused route is T1/A8; other extents
+ * Stream-ordered and capture-safe. The private fused routes are T1/A8 and the A8 prefill
+ * extents, which quantize the normalized rows without materializing them; other extents
  * compose public RMSNorm and Linear using a BF16 intermediate in caller workspace.
  */
 [[nodiscard]] std::size_t normalized_linear_workspace_capacity_bytes(

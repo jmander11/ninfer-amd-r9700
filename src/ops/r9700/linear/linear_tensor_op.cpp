@@ -294,7 +294,10 @@ std::size_t normalized_linear_workspace_capacity_bytes(
     if (columns != 5120 || rows != 34816)
         throw std::invalid_argument("normalized linear: unsupported projection shape");
     const std::size_t activation = linear_workspace_capacity_bytes(QType::Q4G64_F16S, tokens, columns);
-    if (tokens == 1 && r9700::linear::kQ4ActivationBits == 8) return activation;
+    if (r9700::linear::kQ4ActivationBits == 8 &&
+        (tokens == 1 || r9700::linear::a8q4g64_normalized_linear_prefill_supported(
+                            static_cast<std::uint32_t>(tokens))))
+        return activation;
     // K5120 BF16 rows are already multiples of the 256-byte workspace alignment.
     const std::uint64_t hidden = checked_mul(
         checked_mul(static_cast<std::uint64_t>(tokens), 5120U, "normalized hidden"),
@@ -361,6 +364,23 @@ void normalized_linear(const Tensor& input, const Tensor& norm, float eps,
              .activation_workspace = workspace.data, .activation_workspace_bytes = required,
              .output = static_cast<hip_bfloat16*>(output.data),
              .tokens = 1U, .rows = 34816U, .columns = 5120U, .padded_columns = 5120U},
+            static_cast<const hip_bfloat16*>(norm.data), eps, unit_offset, stream));
+        return;
+    }
+    if (r9700::linear::kQ4ActivationBits == 8 &&
+        r9700::linear::a8q4g64_normalized_linear_prefill_supported(tokens)) {
+        if (reinterpret_cast<std::uintptr_t>(input.data) % 16U != 0U ||
+            reinterpret_cast<std::uintptr_t>(norm.data) % 16U != 0U)
+            throw std::invalid_argument("normalized linear: prefill input/norm must be 16-byte aligned");
+        HIP_CHECK(r9700::linear::a8q4g64_normalized_linear_prefill(
+            {.input = static_cast<const hip_bfloat16*>(input.data),
+             .weight_codes = static_cast<const std::uint8_t*>(weight.qdata),
+             .weight_code_bytes = code_bytes,
+             .weight_scales = static_cast<const std::uint16_t*>(weight.scales),
+             .weight_scale_bytes = scale_bytes,
+             .activation_workspace = workspace.data, .activation_workspace_bytes = required,
+             .output = static_cast<hip_bfloat16*>(output.data),
+             .tokens = tokens, .rows = 34816U, .columns = 5120U, .padded_columns = 5120U},
             static_cast<const hip_bfloat16*>(norm.data), eps, unit_offset, stream));
         return;
     }

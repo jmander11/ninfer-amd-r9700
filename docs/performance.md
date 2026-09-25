@@ -60,6 +60,65 @@ expected value exactly.
 Copy bus rate counts both the read and write traffic. This is the hardware bandwidth bound, not a
 model or individual-Op throughput claim.
 
+## Prefill follow-up: producers, DFlash inventory, chunked GDN (2026-09-25)
+
+Same setup as the base-prefill campaign below (selective-cap model, C1, chunk2048, dense G16,
+`auto`, ROCm 10). Whole 4K is P4096/G128 on the DFlash-loaded artifact (median of three after one
+warmup); 8K–64K are `context_ladder.py` screens with DFlash loaded and no speculative rounds.
+
+| Build | 4K prefill | 8K | 32K | 64K |
+|---|---:|---:|---:|---:|
+| Base campaign (committed `276d0926`, rerun) | 2160.7 | 2023 | 1735 | 1516 |
+| + producers, DFlash M128 inventory, chunked GDN | **2295.9** | **2197** | **1889** | **1613** |
+
+**Producers (bit-exact or oracle-qualified, PPL-neutral).** The GDN a/b control projections use
+one split-K BF16 WMMA kernel for every T > 24 (57 µs at T2048 versus two 250 µs BF16 GEMMs); the
+public `normalized_linear` gained an A8 prefill route that normalizes straight into the A8G64
+codec; the GDN output leaf owns its gated RMSNorm and feeds the codec directly (1.06 versus
+1.17 ms per layer-chunk); the GDN query-key and value-z projections share one activation
+quantization (bit-exact). A gate/up GEMM with a SiLU+A8G64 epilogue was built bit-exact but
+rejected: its epilogue VALU serializes with WMMA in this issue-bound kernel (8.67 versus
+8.26 ms for the MLP chain) while the standalone SiLU kernel is memory-bound at 0.33 ms.
+
+**DFlash context projections.** The DFlash2 feature projection (5120x25600) and per-layer fused
+QKV (6144x5120) were outside the explicit M128 inventory and fell back to the wmma32 kernel
+(17.2 and 3.3 ms per chunk-call at 32K). Both now run the M128 kernel after the FP64 regression;
+DFlash-loaded 32K prefill rose from 1840 to 1860 tok/s.
+
+**Chunked GDN prefill.** The per-token staged recurrence (1.3 ms per layer-chunk at about half the
+non-dual-issue FP32 VALU rate) is replaced by a chunked (WY) route: one workgroup per value head
+walks 64-token chunks with FP16 WMMA products and FP32 accumulation, keeps each wave's 16 state
+rows as S^T WMMA accumulators that feed the next chunk directly, solves only the four FP32
+diagonal blocks of (I + A)^-1 and forms the corrected values by block forward substitution. It
+uses no workspace. P2048 is about 0.7–0.87 ms per call. Output error versus FP64 stays at the BF16
+floor (rel-RMS 1.73e-3 versus 1.66e-3 for the staged route); the FP32 state carries about 5e-4
+relative error on long synthetic runs (no growth with length), inside the GDN Op criterion.
+Interleaved: 4K 2242→2306, 32K 1874→1930 tok/s (eval artifact); 4K prefill PPL
+6.4610/9.3909/2.2548 versus 6.4534/9.4455/2.2497 (mixed sign, noise).
+
+**Chunk size.** Chunk 4096 remains 9–13% slower than 2048 (4K 1954 vs 2199, 8K 1847 vs 2130,
+32K 1671 vs 1838): the P2048-specialized fused routes do not apply and the GEMM is already
+compute-bound.
+
+**Rejected formulations.** An IU8 GEMM (signed A8 x offset-binary W8, correction folded into the
+WMMA seed) is only 1.5–1.9% faster in a register/LDS-only inner-loop microbenchmark before its W4→W8
+staging and larger LDS stage: the per-element two-sided G64 scale epilogue, not the high-nibble
+shift, bounds the A8xW4 loop. Production reaches about 85% of that inner-loop bound.
+
+**FP8 QK, operator gate.** Plain E4M3 Q (scale 1.0) had kept PPL within noise, but FP64 attention
+on real post-RoPE Q/K/V of all 16 attention layers (wiki and code, 4K) shows added output error
+versus BF16 Q with p99 up to 38% and maximum 41% in layers 23–39 (227 of 768 layer-head-text cells
+above 10% p99; the entire INT4-V error is at most 15%). The Q range is benign (max |q| 16.4, no
+saturation); the 3-bit mantissa is the error, so power-of-two Q scales cannot fix it. A split Q
+(E4M3 high part plus E4M3 residual, two FP8 WMMAs per tile) adds at most 0.09% but is only 0–1.9%
+faster (32K/64K), because the plain route's gain came from halving WMMA work. Neither is selected.
+Evidence: `profiles/bench/r9700-fp8qk-gates-20260925/`.
+
+NIAH (exact answer, 8K/32K/64K/128K x start/q25/mid/q75/end, greedy C1, no prefix reuse): the
+committed base-campaign build passes 20/20 and the follow-up build passes 20/20. Whole-4K decode is 30.2 vs 29.8 tok/s in this pair; a decode-focused interleaved A/B shows no difference (31.2/30.9 vs 31.1/30.9). Final comparison: `profiles/bench/r9700-prefill-followup-final-20260925/` (`run.sh`). Evidence:
+`profiles/bench/r9700-niah-baseline-20260925/`, `r9700-niah-n2-chunked-20260925/`,
+`r9700-n2-producers-20260925/`, `r9700-gdn-chunked-20260925/`.
+
 ## Base-prefill compute campaign (2026-09-25)
 
 Same installed selective-cap model/companion, C1, chunk2048, dense G16, R9700 in `auto`, ROCm 10.
@@ -112,7 +171,7 @@ about 15% (`profiles/rocprof/r9700-fused-32k-20260925/` shows the v1 split).
 
 **FP8 QK evaluation (not selected).** Casting represented BF16 Q once with the decode route's
 saturating E4M3 conversion and using FP8xFP8 WMMA against the stored FP8 keys (no K decode)
-makes the attention Op 1.47–1.56x faster and whole prefill 8K 1955 (no gain), 32K 1864 (+5.6%),
+(superseded by the operator gate in the follow-up section above) makes the attention Op 1.47–1.56x faster and whole prefill 8K 1955 (no gain), 32K 1864 (+5.6%),
 64K 1671 (+10.4%). Model quality is unchanged within noise: 4K prefill PPL +0.002%/+0.12%/−0.08%
 (WikiText/technical/code), 32K mean NLL +0.0021±0.0042 (512 positions) and −0.0005±0.0007
 (16383; 5 new/6 resolved severe). Operator error versus FP64 rises 10–50x, beyond the BF16 route's
