@@ -60,6 +60,116 @@ expected value exactly.
 Copy bus rate counts both the read and write traffic. This is the hardware bandwidth bound, not a
 model or individual-Op throughput claim.
 
+## Long-context DFlash attention production fix (2026-09-25)
+
+The pre-fix DFlash selector stopped batched FP8-Q WMMA at 8,192 visible tokens.
+At and above that boundary, K3 (four verification rows) used split512 while K4/K5 used
+fused attention. Direct comparisons found no long-context speed crossover in
+favor of those incumbents at the tested points through the native 262,144-token
+limit. The following table is operator evidence, not a server throughput claim.
+
+R9700/gfx1201, ROCm 10, device 0 / PCI `0000:13:00.0`, power `auto`, G16,
+token-fastest FP8 K and feature-fastest INT4 V / FP16 scales, BF16 Q, 24 query
+heads / 4 KV heads / dimension 256. The table reports median direct-launcher
+attention latency in milliseconds after a 256 MiB eviction pass outside each
+timed interval (seven individual trials). It does not establish physical cache
+hit rates or reproduce a complete inference schedule.
+
+| Visible context | K3: split512 → batched WMMA | K5: fused → batched WMMA |
+|---:|---:|---:|
+| 8,192 | 0.837 → 0.445 | 5.623 → 0.584 |
+| 15,200 | 1.477 → 0.780 | 10.388 → 1.023 |
+| 32,768 | 3.085 → 1.440 | 22.628 → 2.084 |
+| 65,536 | 6.434 → 2.917 | 44.882 → 4.241 |
+| 131,072 | 13.060 → 5.809 | 89.280 → 8.723 |
+| 262,144 | 27.632 → 13.061 | 182.063 → 19.786 |
+
+K4 also improves at all these points (15,200: 10.290 → 0.903 ms). Tiny contexts
+6/16/32 favor fused attention; at 63/64 the advantage becomes small or begins to
+favor WMMA. Retain the existing lower cutoff rather than claim one universal route.
+Separate warm, repeated-operand trials support the same long-context direction;
+their durations differ materially from eviction-pass timings at large extents.
+
+The existing independent represented-BF16 public FP64 oracle and private FP8-Q
+profile checks pass for all three widths at the listed points. Poisoned-output
+graph replay and output/workspace canaries pass. The inherited public criterion
+allows the independently computed FP8-Q quantization delta plus implementation
+error; it is not a model-quality bound. The unchanged kernel's retained assembly
+also passes the existing native FP8-WMMA/wave32/no-spill static checker
+(`tools/r9700/check_attention_parity_static.py tools/r9700/build/kv_op_qual.s`).
+An additional nonperiodic V fixture with nonzero head/feature-dependent means
+passes the same oracle and poisoned-replay checks at 15,200 and 262,144 tokens
+for all three widths. Public-oracle maximum absolute differences are at most
+0.000863 and 0.000251 respectively, including the private FP8-Q quantization delta.
+
+For the observed 15.2K adaptive request, inferred average K was approximately 3,
+not 5. K3's measured attention savings across 16 full-attention layers amount to
+about 11–12 ms; relative to its inferred 72 ms round, that suggests roughly
+18–21% higher throughput **only if other costs and acceptance stay unchanged**.
+The much larger K4/K5 operator improvement cannot be applied to that K3 request.
+The saved approximately 105 tok/s benchmark used 4K, fixed K5, greedy sampling,
+the full proposal head and a code continuation; it is not a matched control for
+15K chat with temperature 1.5, adaptive length and the optimized proposal head.
+
+Production integration extends the G16 DFlash W4..6 selector and score-workspace
+envelope through262144 and gives it precedence over ordinary/MTP split512.
+W6's paired PV at4096..8191 has a separate graph executable topology from vector
+PV, with boundary profiles and corresponding startup allowances. Other formats,
+tree/device-count forms and ordinary/MTP calls retain their existing routes.
+The public leaf qualifier passes at15200/32768 for all three widths, including
+fragmented pages, compact table rows0..3, pending publication, independent FP64
+public/profile checks, undersized scratch rejection, guards and poisoned graph
+replay. Public maximum absolute error is below0.000085 on these fixtures.
+Commands, fixtures and raw results are local under
+`profiles/bench/r9700-long-context-wmma-20260925/`.
+
+Matched whole-Engine checks use the installed selective-cap N16/K16 DFlash2-Q4
+artifact in `local_llm/models/qwen3.8-27b-r9700-q4-fp8-selective-cap/`, G16,
+C1, P15200/G128, chunk2048, capacity32768/workload, optimized proposal head,
+Device Graph, greedy decoding, cold requests (warmup0, one repetition), auto.
+The4096-token `r9700-compact-mixed-delivery-20260923/code.ids` corpus is cycled
+by the benchmark. These are not matched temperature1.5 chat measurements.
+
+| Mode | Before decode tok/s | After decode tok/s |
+|---|---:|---:|
+| Ordinary |25.74|unchanged route|
+| Fixed K3 |56.15|69.10|
+| Fixed K4 |not measured|79.86|
+| Fixed K5 |24.29|83.75|
+| Adaptive K3..5 |56.06|65.63|
+
+All four speculative modes exactly match ordinary generated token IDs. Fixed K5
+acceptance changes from85.12%/5.12 tokens per round to80.95%/4.92 tokens per round;
+its improvement comes despite lower acceptance, from cheaper verification.
+Decode-phase time divided by rounds falls from210.8 to58.8 ms for K5 and
+from65.1 to52.9 ms for K3 (phase-level averages, not isolated kernel timings).
+Adaptive selected K3 throughout this short
+sample, so the fixed-K5 result must not be advertised as adaptive throughput.
+This change does not alter the adaptive policy. Production integration commands
+and reports are under `profiles/bench/r9700-long-context-production-20260925/`.
+Additional exact-token checks pass across both W6 graph boundaries
+(P4080/G64 and P8180/G64), in eager K5 atP15200/G128, and for fixed K5 and
+adaptive atC2/3/4 with P9000/G32 per lane. The full runtime planner and focused
+route discriminators also pass. These short concurrent checks establish
+correctness, not a steady-state concurrency throughput ranking.
+A second15,200-token `technical.ids` continuation (G64) also exactly matches
+ordinary token IDs with fixed K5:46.17 tok/s versus ordinary25.63. Its lower
+throughput than the code fixture reinforces that the83.75 result is workload
+dependent, not a universal server speed promise.
+
+Deployment: `bash scripts/hot-patch.sh --image-only` rebuilt the three apps
+incrementally with12 jobs; `docker compose up -d --no-build --wait server`
+started the healthy updated image on host port8001. The installed server binary
+matches the exported build. Chat/Responses/Anthropic/SSE smoke requests pass,
+including observed disk and RAM restoration. Preserve-thinking is enabled.
+A fresh15424-token synthetic storage-protocol chat with128 generated tokens,
+temperature1.5 and the unchanged adaptive/optimized-head defaults measured
+866.8 prefill and51.5 decode tok/s,2.76 tokens/round,59.1% acceptance. This is
+an actual deployed-server check, not a before/after comparison to the user's
+different prompt. Logs and responses are in the production evidence directory.
+Whole-Engine and server validation cover the deployed32768-token capacity;
+the upper-context arithmetic/timing evidence through262144 is operator-level.
+
 ## Gate/up reuse, paired-feature PV and exact-tree GDN (2026-09-24)
 
 Same installed cap26 Q4-head/gate-up-A4 weights and Q4 DFlash/BF16 codebooks,

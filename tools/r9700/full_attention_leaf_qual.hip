@@ -65,9 +65,10 @@ std::size_t physical_token(std::size_t logical,
 // These offsets are the independent physical-format oracle for the leaf's selected candidate:
 // token-fastest K and feature-fastest V/V-scale. They intentionally do not call a production
 // planner or device indexing helper.
-std::size_t key_offset(std::size_t token, std::size_t head, std::size_t feature) {
+std::size_t key_offset(std::size_t token, std::size_t head, std::size_t feature,
+                       std::size_t physical_pages = kPhysicalPages) {
     return token % kPageSize +
-           kPageSize * (feature + kHeadDim * (token / kPageSize + kPhysicalPages * head));
+           kPageSize * (feature + kHeadDim * (token / kPageSize + physical_pages * head));
 }
 
 std::size_t value_offset(std::size_t token, std::size_t head, std::size_t byte) {
@@ -142,7 +143,8 @@ struct EncodedCache {
 
 EncodedCache encode_cache(const std::vector<float>& keys,
                           const std::vector<float>& values,
-                          const std::vector<std::uint32_t>& page_table) {
+                          const std::vector<std::uint32_t>& page_table,
+                          std::size_t physical_pages = kPhysicalPages) {
     const std::size_t tokens = keys.size() / (kKvHeads * kHeadDim);
     if (tokens == 0 || keys.size() != tokens * kKvHeads * kHeadDim ||
         values.size() != keys.size()) {
@@ -151,15 +153,15 @@ EncodedCache encode_cache(const std::vector<float>& keys,
     EncodedCache cache{
         oracle::encode_keys(keys, tokens * kKvHeads, kHeadDim),
         oracle::encode_values(values, tokens * kKvHeads, kHeadDim, kValueGroup),
-        std::vector<std::uint8_t>(kPhysicalTokens * kKvHeads * kHeadDim, 0U),
-        std::vector<std::uint8_t>(kPhysicalTokens * kKvHeads * kHeadDim / 2U, 0U),
-        std::vector<std::uint16_t>(kPhysicalTokens * kKvHeads * kGroups, 0U)};
+        std::vector<std::uint8_t>(physical_pages * kPageSize * kKvHeads * kHeadDim, 0U),
+        std::vector<std::uint8_t>(physical_pages * kPageSize * kKvHeads * kHeadDim / 2U, 0U),
+        std::vector<std::uint16_t>(physical_pages * kPageSize * kKvHeads * kGroups, 0U)};
     for (std::size_t logical = 0; logical < tokens; ++logical) {
         const std::size_t physical = physical_token(logical, page_table);
         for (std::size_t head = 0; head < kKvHeads; ++head) {
             const std::size_t represented_token = logical * kKvHeads + head;
             for (std::size_t feature = 0; feature < kHeadDim; ++feature) {
-                cache.physical_keys[key_offset(physical, head, feature)] =
+                cache.physical_keys[key_offset(physical, head, feature, physical_pages)] =
                     cache.logical_keys.codes[represented_token * kHeadDim + feature];
             }
             for (std::size_t group = 0; group < kGroups; ++group) {
@@ -287,6 +289,192 @@ void require_invalid(hipError_t status, const char* label) {
     }
 }
 
+// Exercise the actual target bridge with a pending publication and device-selected compact
+// table row. Other rows remain unmapped: ignoring the selector cannot produce the oracle.
+void qualify_long_dflash(ninfer::DeviceContext& device) {
+    if constexpr (kValueGroup != 16U) return;
+    constexpr std::size_t guard_bytes = 256U;
+    for (const std::uint32_t context : {15200U, 32768U}) {
+        const std::uint32_t mapped_pages = (context + kPageSize - 1U) / kPageSize;
+        const std::uint32_t physical_pages = mapped_pages + 1U;
+        ninfer::LayoutBuilder builder;
+        const ninfer::Fp8KInt4VPagedKVSpec spec{
+            .page_group_count = physical_pages, .logical_page_capacity = mapped_pages,
+            .table_rows = 4U, .layer_count = 1U, .head_dim = 256, .num_kv_heads = 4,
+            .value_group = 16,
+            .plane_layouts = {
+                .key = ninfer::Fp8KInt4VPlaneLayout::TokenFastestHeadMajor,
+                .value = ninfer::Fp8KInt4VPlaneLayout::FeatureFastestPageMajor,
+                .value_scale = ninfer::Fp8KInt4VPlaneLayout::FeatureFastestPageMajor}};
+        const q3::PagedKVCacheLayout layout{
+            .storage = ninfer::plan_fp8_k_int4_v_paged_kv_pool(builder, spec),
+            .layers = 1U, .max_context = mapped_pages * 64U};
+        ninfer::DeviceBuffer backing(builder.finish(256, "long DFlash qualification cache"));
+        q3::PagedKVCache typed_cache({backing.data(), backing.size()}, layout);
+        auto first = typed_cache.pool().reserve(1U);
+        auto occupied = typed_cache.pool().reserve(1U);
+        auto rest = typed_cache.pool().reserve(mapped_pages - 1U);
+        first.materialize_pages(1U, device.stream);
+        occupied.materialize_pages(1U, device.stream);
+        rest.materialize_pages(mapped_pages - 1U, device.stream);
+        first.release(); rest.release();
+        auto allocation = typed_cache.pool().reserve(mapped_pages);
+        allocation.materialize_pages(mapped_pages, device.stream);
+        std::vector<std::uint32_t> pages(allocation.page_ids().begin(), allocation.page_ids().end());
+        if (pages.size() != mapped_pages || pages[0] + 1U == pages[1])
+            fail("long DFlash fixture requires fragmented physical pages");
+        const auto source_keys = make_keys(context);
+        auto source_values = make_values(context);
+        for (std::size_t t = 0; t < context; ++t)
+            for (std::size_t h = 0; h < kKvHeads; ++h)
+                for (std::size_t f = 0; f < kHeadDim; ++f) {
+                    std::uint32_t hash = static_cast<std::uint32_t>(t) * 747796405U +
+                                         static_cast<std::uint32_t>(h) * 2891336453U +
+                                         static_cast<std::uint32_t>(f) * 277803737U;
+                    hash = ((hash >> ((hash >> 28U) + 4U)) ^ hash) * 277803737U;
+                    hash = (hash >> 22U) ^ hash;
+                    const float mean = (static_cast<int>((h * 7U + f) % 31U) - 15) / 8.0F;
+                    source_values[(t * kKvHeads + h) * kHeadDim + f] =
+                        represented_bf16(mean + (static_cast<int>(hash % 101U) - 50) / 64.0F);
+                }
+        const auto cache = encode_cache(source_keys, source_values, pages, physical_pages);
+        for (const std::uint32_t rows : {4U, 5U, 6U}) {
+            // Both extents cover the three widths; together they select every compact C1..4 row.
+            const std::int32_t selected_row = rows == 4U ? 0 :
+                (rows == 6U ? 3 : (context == 15200U ? 1 : 2));
+            allocation.unbind_row();
+            const auto& tables = typed_cache.pool().block_tables();
+            HIP_CHECK(hipMemsetAsync(tables.data, 0xff, tables.bytes(), device.stream));
+            allocation.bind_row(selected_row, device.stream);
+            const auto view = typed_cache.layer_view(0, allocation);
+            HIP_CHECK(hipMemcpyAsync(view.key_fp8_pages.data, cache.physical_keys.data(),
+                cache.physical_keys.size(), hipMemcpyHostToDevice, device.stream));
+            HIP_CHECK(hipMemcpyAsync(view.value_int4_pages.data, cache.physical_values.data(),
+                cache.physical_values.size(), hipMemcpyHostToDevice, device.stream));
+            HIP_CHECK(hipMemcpyAsync(view.value_scale_fp16_pages.data, cache.physical_scales.data(),
+                cache.physical_scales.size() * sizeof(std::uint16_t), hipMemcpyHostToDevice,
+                device.stream));
+            const auto queries = make_queries(rows);
+            const auto bf16_queries = as_bf16(queries);
+            std::vector<std::int32_t> positions(rows);
+            std::vector<std::size_t> frontiers(rows);
+            for (std::uint32_t r = 0; r < rows; ++r) {
+                positions[r] = context - rows + r;
+                frontiers[r] = static_cast<std::size_t>(positions[r]) + 1U;
+            }
+            ninfer::DeviceBuffer q(bf16_queries.size() * sizeof(hip_bfloat16));
+            ninfer::DeviceBuffer pos(rows * sizeof(std::int32_t));
+            ninfer::DeviceBuffer table_row(sizeof(std::int32_t)), base(sizeof(std::int32_t));
+            ninfer::DeviceBuffer status(sizeof(std::uint32_t)), cursor(sizeof(std::uint32_t));
+            q.copy_from_host(bf16_queries.data(), q.size());
+            pos.copy_from_host(positions.data(), pos.size());
+            table_row.copy_from_host(&selected_row, sizeof(selected_row));
+            base.copy_from_host(positions.data(), sizeof(std::int32_t));
+            constexpr std::size_t token_elements = kKvHeads * kHeadDim;
+            const auto suffix_start = static_cast<std::ptrdiff_t>((context - rows) * token_elements);
+            const auto append_keys = as_bf16(std::vector<float>(source_keys.begin() + suffix_start,
+                                                               source_keys.end()));
+            const auto append_values = as_bf16(std::vector<float>(source_values.begin() + suffix_start,
+                                                                 source_values.end()));
+            ninfer::DeviceBuffer dk(append_keys.size() * sizeof(hip_bfloat16));
+            ninfer::DeviceBuffer dv(append_values.size() * sizeof(hip_bfloat16));
+            dk.copy_from_host(append_keys.data(), dk.size());
+            dv.copy_from_host(append_values.data(), dv.size());
+            q3::PagedKVPublication publication{.valid_frontier = context - rows,
+                                               .healthy = true, .transaction_open = false};
+            auto transaction = typed_cache.begin_device_segmented_append(allocation, publication,
+                static_cast<const std::int32_t*>(base.data()), context - rows, context - rows,
+                context, {.status = static_cast<std::uint32_t*>(status.data()),
+                          .cursor = static_cast<std::uint32_t*>(cursor.data())},
+                static_cast<const std::int32_t*>(table_row.data()));
+            transaction.begin_device_segment(static_cast<const std::int32_t*>(pos.data()), rows,
+                                             nullptr);
+            transaction.launch_append_layer(0, static_cast<const hip_bfloat16*>(dk.data()),
+                static_cast<const hip_bfloat16*>(dv.data()), device.stream);
+            const auto read = transaction.pending_layer_read(0);
+            transaction.end_device_segment(device.stream);
+            const std::size_t scratch_bytes = q27::r9700_full_attention_workspace_capacity_bytes(
+                rows, context, false, true);
+            const std::size_t score_bytes = rows * kQueryHeads * context * sizeof(float);
+            if (scratch_bytes < score_bytes) fail("long DFlash planner underallocates scores");
+            const std::size_t output_bytes = queries.size() * sizeof(float);
+            ninfer::DeviceBuffer scratch(scratch_bytes + 2U * guard_bytes);
+            ninfer::DeviceBuffer output(output_bytes + 2U * guard_bytes);
+            auto* scratch_payload = static_cast<std::uint8_t*>(scratch.data()) + guard_bytes;
+            auto* output_payload = static_cast<std::uint8_t*>(output.data()) + guard_bytes;
+            const q27::R9700FullAttentionArgs args{
+                .query = ninfer::Tensor(q.data(), ninfer::DType::BF16,
+                                        {256, 24, static_cast<std::int32_t>(rows)}),
+                .cache_read = read, .row_positions = static_cast<const std::int32_t*>(pos.data()),
+                .dflash_target_verify = true, .workspace = scratch_payload,
+                .workspace_bytes = scratch_bytes,
+                .output = ninfer::Tensor(output_payload, ninfer::DType::FP32,
+                                         {256, 24, static_cast<std::int32_t>(rows)})};
+            auto short_workspace = args;
+            short_workspace.workspace_bytes = score_bytes - 1U;
+            require_invalid(q27::r9700_qwen3_8_27b_full_attention(short_workspace, device.stream),
+                            "long DFlash undersized score workspace");
+            const auto poison = [&] {
+                HIP_CHECK(hipMemsetAsync(scratch.data(), 0xa5, scratch.size(), device.stream));
+                HIP_CHECK(hipMemsetAsync(output.data(), 0xa5, output.size(), device.stream));
+                HIP_CHECK(hipMemsetAsync(output_payload, 0xff, output_bytes, device.stream));
+            };
+            const auto read_result = [&] {
+                device.synchronize();
+                const auto guards = [&](ninfer::DeviceBuffer& buffer) {
+                    std::array<std::uint8_t, guard_bytes> front{}, back{};
+                    HIP_CHECK(hipMemcpy(front.data(), buffer.data(), guard_bytes, hipMemcpyDeviceToHost));
+                    HIP_CHECK(hipMemcpy(back.data(), static_cast<std::uint8_t*>(buffer.data()) +
+                        buffer.size() - guard_bytes, guard_bytes, hipMemcpyDeviceToHost));
+                    const auto intact = [](std::uint8_t x) { return x == 0xa5; };
+                    if (!std::all_of(front.begin(), front.end(), intact) ||
+                        !std::all_of(back.begin(), back.end(), intact))
+                        fail("long DFlash output/workspace guard overwritten");
+                };
+                guards(scratch); guards(output);
+                std::vector<float> result(queries.size());
+                HIP_CHECK(hipMemcpy(result.data(), output_payload, output_bytes, hipMemcpyDeviceToHost));
+                return result;
+            };
+            poison();
+            HIP_CHECK(q27::r9700_qwen3_8_27b_full_attention(args, device.stream));
+            const auto actual = read_result();
+            const auto expected = attention_oracle(queries, rows, frontiers, cache);
+            auto profile_queries = queries;
+            for (auto& x : profile_queries) x = oracle::decode_e4m3fn(oracle::encode_e4m3fn(x));
+            const auto profile = attention_oracle(profile_queries, rows, frontiers, cache);
+            double maximum_error = 0.0;
+            for (std::size_t i = 0; i < actual.size(); ++i) {
+                const double error = std::abs(actual[i] - expected[i]);
+                const double allowance = 2e-4 * std::max(1.0, std::abs(profile[i]));
+                if (!std::isfinite(actual[i]) ||
+                    error > std::abs(profile[i] - expected[i]) + allowance ||
+                    std::abs(actual[i] - profile[i]) > allowance)
+                    fail("long DFlash public/profile FP64 oracle mismatch");
+                maximum_error = std::max(maximum_error, error);
+            }
+            ninfer::DecodeGraphDefinition definition;
+            definition.capture(device.stream, [&] {
+                HIP_CHECK(q27::r9700_qwen3_8_27b_full_attention(args, device.stream));
+            });
+            ninfer::DecodeGraphExecutable graph;
+            graph.instantiate(definition);
+            poison(); graph.launch(device.stream);
+            if (read_result() != actual) fail("long DFlash poisoned graph replay differs from eager");
+            std::uint32_t resolved_status = 0, resolved_cursor = 0;
+            transaction.enqueue_segmented_resolution(&resolved_status, &resolved_cursor);
+            device.synchronize();
+            transaction.finish_segmented_resolution(resolved_status, resolved_cursor, context);
+            if (resolved_status != 0U || resolved_cursor != context ||
+                publication.valid_frontier != context || read.valid_for(device.stream))
+                fail("long DFlash pending publication did not resolve correctly");
+            std::cout << "long_dflash_leaf context=" << context << " rows=" << rows
+                      << " compact_table_row=" << selected_row << " public_max_abs="
+                      << maximum_error << " oracle/guards/poisoned_graph=PASS\n";
+        }
+    }
+}
+
 } // namespace
 
 int main() {
@@ -329,6 +517,7 @@ int main() {
         if (!device.is_gfx1201() || device.props.warpSize != 32) {
             fail("selected physical device is not wave32 gfx1201");
         }
+        qualify_long_dflash(device);
 
         ninfer::LayoutBuilder cache_builder;
         const ninfer::Fp8KInt4VPagedKVSpec cache_spec{

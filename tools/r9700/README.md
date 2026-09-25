@@ -1,13 +1,13 @@
 # R9700 codec and gfx12 qualification
 
 DFlash target chain verification W4..6 uses the same batched FP8-Q WMMA / FP32
-softmax / INT4-times-FP16 PV arithmetic for contexts 64..8191. The represented
+softmax / INT4-times-FP16 PV arithmetic for contexts 64..262144. The represented
 public-input oracle remains BF16-Q attention with exact decoded cache planes;
 the private FP8-Q profile is bounded by the existing pointwise quantization
 deviation plus `2e-4 * max(1, abs(profile_oracle))`, with a separate FP64 profile
 check. Serial-WMMA bit parity supplements, rather than replaces, that oracle.
-Other widths, tree/device-count forms and contexts retain their existing routes,
-including split512 at context 8192 and above. The workspace planner owns four,
+Other widths, tree/device-count forms and layouts retain their existing routes,
+including ordinary/MTP split512 at context 8192 and above. The workspace planner owns four,
 five or six independent FP32 score planes as appropriate.
 QK packs two independent query rows into the two eight-lane halves of WMMA's
 M dimension, with six valid heads in each half. The odd W5 tail is masked;
@@ -25,6 +25,8 @@ Focused qualification (JSON on stdout):
 build-r9700/src/ninfer_r9700_dflash_attention_route_discriminator
 build-r9700/src/ninfer_r9700_dflash_attention_route_discriminator --long-context
 build-r9700/src/ninfer_r9700_runtime_planner_qual --host-attention-parity-routing
+build-r9700/src/ninfer_r9700_runtime_planner_qual --host-dflash-graph-allowance
+build-r9700/src/ninfer_r9700_full_attention_qual
 ```
 
 The discriminator retains W5/W6 and adds W4 at context64 and133 (4100 with
@@ -32,6 +34,11 @@ The discriminator retains W5/W6 and adds W4 at context64 and133 (4100 with
 invalid-row poisoning, serial/eager/graph equality, and score/output guards.
 Cold-start fixed K3 and adaptive Engine exact-token tests remain required: a
 warmed adaptive benchmark can stop choosing K3 and conceal a W4 route mismatch.
+The public leaf qualifier additionally covers contexts15200/32768, W4..6,
+fragmented physical pages, compact C1..4 table rows, pending publication,
+undersized-workspace rejection, independent FP64 public/profile oracles, and
+poisoned eager/captured output and scratch guards. W6's paired PV at4096..8191
+owns a distinct graph topology from its vector PV below4096 and at8192+.
 
 Selected concurrent Text localization uses the existing eager layer-boundary
 trace without serializing the model batch. Set

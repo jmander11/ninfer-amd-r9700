@@ -421,8 +421,8 @@ int main(int argc, char** argv) {
             kv::use_dflash_verify_batched_wmma(kW6, kW6Context, true, true) ||
             kv::use_dflash_verify_batched_wmma(kW5, 63U, false, true) ||
             kv::use_dflash_verify_batched_wmma(kW6, 63U, false, true) ||
-            kv::use_dflash_verify_batched_wmma(kW5, 8192U, false, true) ||
-            kv::use_dflash_verify_batched_wmma(kW6, 8192U, false, true) ||
+            kv::use_dflash_verify_batched_wmma(kW5, 262145U, false, true) ||
+            kv::use_dflash_verify_batched_wmma(kW6, 262145U, false, true) ||
             kv::use_text_p129_wmma_tail(128U, kTextContext) ||
             kv::use_text_p129_wmma_tail(kTextRows, 130U)) {
             fail("attention parity selector escaped its exact Text/DFlash cells");

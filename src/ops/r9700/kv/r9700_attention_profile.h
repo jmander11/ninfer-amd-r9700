@@ -19,6 +19,7 @@ inline constexpr bool kFp8QkWmmaDecode = NINFER_R9700_FP8_QK_WMMA != 0;
 inline constexpr std::uint32_t kFp8QkWmmaT1MinimumContext = 64U;
 inline constexpr std::uint32_t kFp8QkWmmaT2MinimumContext = 320U;
 inline constexpr std::uint32_t kSplit512MinimumContext = 8192U;
+inline constexpr std::size_t kDflashVerifyWmmaMaximumContext = 262144U;
 inline constexpr std::uint32_t kDensePrefillMinimumRows = 128U;
 inline constexpr std::uint32_t kDensePrefillMaximumRows = 8192U;
 inline constexpr std::size_t kDensePrefillMaximumContext = 262144U;
@@ -61,17 +62,17 @@ inline constexpr bool kTextP129WmmaTailCandidate =
 }
 
 // Production DFlash W4..6 batched-WMMA route. It is selected for the exactly qualified cell:
-// DFlash target verification, rows 4..6, non-tree execution, and context 64..8191. The caller
+// DFlash target verification, rows 4..6, non-tree execution, and context 64..262144. The caller
 // must additionally require G16, token-fastest FP8 keys, and feature-fastest INT4/FP16 values and
-// scales; every other cell (G32, wrong layout, tree, out-of-range context) retains the fused
-// fallback. This route is not gated by a qualification flag.
+// scales; other cells retain their existing split/fused fallback.
+// This route is not gated by a qualification flag.
 [[nodiscard]] constexpr bool use_dflash_verify_batched_wmma(
     std::uint32_t query_rows, std::size_t visible_context,
     bool tree_or_device_count, bool dflash_target_verify) noexcept {
     return dflash_target_verify &&
            (query_rows >= 4U && query_rows <= 6U) && !tree_or_device_count &&
            visible_context >= kFp8QkWmmaT1MinimumContext &&
-           visible_context < kSplit512MinimumContext;
+           visible_context <= kDflashVerifyWmmaMaximumContext;
 }
 
 [[nodiscard]] constexpr bool use_text_p129_wmma_tail(std::uint32_t query_rows,

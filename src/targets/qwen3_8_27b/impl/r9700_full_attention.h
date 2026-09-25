@@ -50,9 +50,9 @@ struct R9700FullAttentionArgs {
     std::uint32_t query_rows, std::size_t visible_context,
     bool tree_or_device_count, bool dflash_target_verify = false) noexcept;
 
-// Dispatches initial-prefix P128..4096 through staged full-score GQA6 and qualified long-context
-// T=1/T=4 through split-512. The default-off parity profile additionally overwrites only P129's
-// tail with W1 WMMA and admits chain W5 batched WMMA; every other width retains its existing route.
+// Dispatches dense prefill through staged full-score GQA6. G16 DFlash chain W4..6
+// uses batched WMMA for contexts64..262144 before the ordinary/MTP split-512 fallback.
+// The default-off Text parity profile additionally overwrites only P129's tail with W1 WMMA.
 [[nodiscard]] hipError_t r9700_qwen3_8_27b_full_attention(const R9700FullAttentionArgs& args,
                                                       hipStream_t stream) noexcept;
 

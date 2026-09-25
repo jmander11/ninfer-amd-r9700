@@ -113,7 +113,7 @@ std::size_t r9700_full_attention_workspace_capacity_bytes(
         (query_rows >= 4U && query_rows <= 6U) &&
         visible_context >= ops::r9700::kv::kFp8QkWmmaT1MinimumContext) {
         const std::size_t candidate_context = std::min<std::size_t>(
-            visible_context, ops::r9700::kv::kSplit512MinimumContext - 1U);
+            visible_context, ops::r9700::kv::kDflashVerifyWmmaMaximumContext);
         required = std::max(
             required,
             ops::r9700::kv::fp8_int4_kv_attention_dflash_verify_batched_wmma_workspace_bytes(
@@ -278,17 +278,6 @@ static hipError_t launch_r9700_attention(
         tail.output += 128U * row_elements;
         return ops::r9700::kv::fp8_int4_kv_attention_wmma(tail, stream);
     }
-    const bool split512 = ops::r9700::kv::use_split512_attention(
-        static_cast<std::uint32_t>(rows), raw.context, tree_or_device_count);
-    if (split512) {
-        const std::size_t required = r9700_full_attention_workspace_capacity_bytes(
-            static_cast<std::uint32_t>(rows), raw.context, tree_or_device_count);
-        if (required == 0U || a.workspace == nullptr || a.workspace_bytes < required) {
-            return hipErrorInvalidValue;
-        }
-        return ops::r9700::kv::fp8_int4_kv_attention_split512(
-            raw, a.workspace, required, stream);
-    }
     if (ops::r9700::kv::use_dflash_verify_batched_wmma(
             static_cast<std::uint32_t>(rows), raw.context, tree_or_device_count,
             a.dflash_target_verify) &&
@@ -305,6 +294,17 @@ static hipError_t launch_r9700_attention(
         auto wmma = raw;
         wmma.score_workspace = static_cast<float*>(a.workspace);
         return ops::r9700::kv::fp8_int4_kv_attention_dflash_verify_batched_wmma(wmma, stream);
+    }
+    const bool split512 = ops::r9700::kv::use_split512_attention(
+        static_cast<std::uint32_t>(rows), raw.context, tree_or_device_count);
+    if (split512) {
+        const std::size_t required = r9700_full_attention_workspace_capacity_bytes(
+            static_cast<std::uint32_t>(rows), raw.context, tree_or_device_count);
+        if (required == 0U || a.workspace == nullptr || a.workspace_bytes < required) {
+            return hipErrorInvalidValue;
+        }
+        return ops::r9700::kv::fp8_int4_kv_attention_split512(
+            raw, a.workspace, required, stream);
     }
     const bool ordinary_wmma =
         ops::r9700::kv::use_fp8_qk_wmma(static_cast<std::uint32_t>(rows), raw.context) &&

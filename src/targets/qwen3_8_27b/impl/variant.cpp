@@ -770,8 +770,9 @@ std::vector<GraphExecutionProfile> Variant::dflash_graph_profiles(std::uint32_t 
     if (draft_window == 0 || capacity == 0) { return {}; }
     const std::uint32_t block = verify_width != 0 ? verify_width : draft_window + 1;
     std::vector<std::uint32_t> ends;
-    for (const std::uint32_t visible_end : {128U, 512U, 2048U, 4096U, 8192U, 16384U, 32768U}) {
-        if (visible_end == ops::r9700::kv::kSplit512MinimumContext && visible_end > block) {
+    for (const std::uint32_t visible_end : {128U, 512U, 2048U, 4096U, 8192U, 16384U, 32768U,
+                                          65536U, 131072U, 262144U}) {
+        if ((visible_end == 4096U || visible_end == 8192U) && visible_end > block) {
             ends.push_back(visible_end - 1U - block);
         }
         if (visible_end >= block) { ends.push_back(visible_end - block); }
@@ -780,9 +781,9 @@ std::vector<GraphExecutionProfile> Variant::dflash_graph_profiles(std::uint32_t 
     for (GraphExecutionProfile& profile : profiles) {
         const std::size_t maximum_visible =
             std::min<std::size_t>(capacity, static_cast<std::size_t>(profile.max) + block);
-        // DFlash W5/W6 has a distinct admitted WMMA route, not the ordinary T1/T2
-        // predicate. At 8192 visible keys it returns to fused attention. Definitions
-        // across that boundary cannot share a HIP executable update topology.
+        // Match the launcher's DFlash-first precedence. W6's paired PV kernel
+        // has its own executable topology within [4096,8192); other WMMA
+        // contexts retain vector PV. Split remains available for other profiles.
         constexpr auto planes = qwen3::detail::kR9700TextKVPlaneLayouts;
         const bool dflash_wmma = qwen3::detail::kR9700TextKVValueGroup == 16 &&
             planes.key == Fp8KInt4VPlaneLayout::TokenFastestHeadMajor &&
@@ -790,11 +791,10 @@ std::vector<GraphExecutionProfile> Variant::dflash_graph_profiles(std::uint32_t 
             planes.value_scale == Fp8KInt4VPlaneLayout::FeatureFastestPageMajor &&
             ops::r9700::kv::use_dflash_verify_batched_wmma(
                 block, maximum_visible, false, true);
-        profile.topology_class =
-            ops::r9700::kv::use_split512_attention(block, maximum_visible)
-                ? 2U
-                : ((dflash_wmma || ops::r9700::kv::use_fp8_qk_wmma(block, maximum_visible))
-                       ? 1U : 0U);
+        profile.topology_class = dflash_wmma
+            ? ((block == 6U && maximum_visible >= 4096U && maximum_visible < 8192U) ? 3U : 1U)
+            : (ops::r9700::kv::use_split512_attention(block, maximum_visible)
+                ? 2U : (ops::r9700::kv::use_fp8_qk_wmma(block, maximum_visible) ? 1U : 0U));
     }
     return profiles;
 }

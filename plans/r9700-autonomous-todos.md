@@ -85,6 +85,34 @@ above apply to every command.
 
 ### Current checkpoint
 
+COMPLETED USER REQUEST (2026-09-25, production long-context DFlash): integrate the
+measured batched-WMMA route, qualify it, and build/validate the Compose deployment.
+- [x] Align dispatch, full score-workspace capacity, and graph topology through262144.
+- [x] Public target numerical/workspace/graph qualification; matched long-context
+  ordinary/fixed/adaptive whole-Engine accuracy and speed, including C1–4 coverage.
+  Public FP64/profile, guards, pending publication and graph replay pass; whole
+  exact-token checks pass for K3/K4/K5/adaptive, both4096/8192 transitions,
+  C2–4 fixed/adaptive, eager, and a second long technical-text corpus.
+- [x] Incrementally deploy and validate the real Compose server; record results and limits.
+  Healthy on8001; Chat/Responses/Anthropic/SSE and cache restoration pass.
+  A fresh15424-token chat attemperature1.5/adaptive measured51.5 decode tok/s
+  (59.1% acceptance). Matched greedy code P15200 K5 improves24.29→83.75 tok/s;
+  adaptive56.06→65.63. Details/limits in `docs/performance.md`, commands and
+  logs in `profiles/bench/r9700-long-context-production-20260925/`.
+
+COMPLETED USER REQUEST (2026-09-25, long-context DFlash attention investigation):
+- [x] Compare W4/W5/W6 through the native 262,144-token limit: all 18 long-context
+  cells pass existing independent-oracle checks and favor batched WMMA; tiny
+  6/16/32-token controls favor fused. Retain the current lower cutoff.
+- [x] Poisoned graph replay and extra nonperiodic V checks pass at 15,200/262,144
+  for all three widths. Reviewer SHIP for investigation, not production admission.
+- [x] Record timings and required workspace/graph/model-quality qualification in
+  `docs/performance.md`; commands and raw evidence are under
+  `profiles/bench/r9700-long-context-wmma-20260925/`.
+Production integration and whole-model results supersede the investigation-only
+status above; see the completed request and `docs/performance.md`. Unrelated campaigns
+remain paused.
+
 COMPLETED USER REQUEST (2026-09-24, Docker Compose deployment):
 - [x] Add AMD Compose runtime, explicit artifact/build contexts, temperature1.5,
   4GiB RAM/32GiB persistent disk prefix cache, bounded host memory and build jobs.

@@ -12,7 +12,8 @@ survives container replacement and `docker compose down --volumes`.
 Disk cache is prefix reuse, not active-context offload. RAM contents do not survive
 restart; durable disk entries can be restored for the same model fingerprint.
 Requests may override temperature; p-less sampling remains enabled by default.
-Adaptive draft length and the optimized proposal head are enabled. Pending requests
+Adaptive draft length and the optimized proposal head are enabled. Closed-turn
+assistant reasoning is retained by default (`--preserve-thinking`). Pending requests
 have a 900000 ms (15-minute) preparation/admission timeout; the default output limit
 is 32768 tokens. The 32768-token context limit still includes prompt and output.
 The server option for adaptive length is `--adaptive-draft`, not `--adaptive-token`.

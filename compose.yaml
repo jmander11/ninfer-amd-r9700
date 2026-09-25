@@ -65,6 +65,7 @@ services:
       - "${NINFER_DRAFT_TOKENS:-5}"
       - --adaptive-draft
       - --lm-head-draft
+      - --preserve-thinking
       - --pending-timeout-ms
       - "900000"
       - --default-max-tokens
