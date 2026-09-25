@@ -27,10 +27,8 @@ FULL_SCORE_PROFILES = {
                "workgroup": 256, "rounded_lds": 12288},
     "pv_g32": {"lds": 8952, "wmma": 0, "vgpr": 128, "occupancy": 8,
                "workgroup": 256, "rounded_lds": 12288},
-    "pv_split_g16": {"lds": 5912, "wmma": 0, "vgpr": 128, "occupancy": 8,
-                     "workgroup": 256, "rounded_lds": 6144},
-    "pv_split_g32": {"lds": 5656, "wmma": 0, "vgpr": 128, "occupancy": 8,
-                     "workgroup": 256, "rounded_lds": 6144},
+    "pv_wmma": {"lds": 13816, "wmma": 8, "vgpr": 128, "occupancy": 8,
+                "workgroup": 192, "rounded_lds": 13824},
     "pv_merge": {"lds": 4, "wmma": 0, "vgpr": 64, "occupancy": 8,
                  "workgroup": 256, "rounded_lds": 512},
 }
@@ -59,11 +57,11 @@ def check(*, assembly: Path, metadata: Path, symbol: str,
     elif full_score_stage == "maximum":
         specialization = "31dense_full_score_maximum_kernelILb0EE"
     elif full_score_stage == "pv":
-        specialization = f"26dense_full_score_pv_kernelILj{value_group}ELb0ELj16ELj1EE"
-    elif full_score_stage == "pv_split":
+        specialization = f"26dense_full_score_pv_kernelILj{value_group}ELb0EE"
+    elif full_score_stage == "pv_wmma":
         if key_splits not in (16, 32):
             raise ValueError("split PV requires 16 or 32 key splits")
-        specialization = f"26dense_full_score_pv_kernelILj{value_group}ELb0ELj8ELj{key_splits}EE"
+        specialization = f"31dense_full_score_pv_wmma_kernelILj{value_group}ELj{key_splits}EE"
     elif full_score_stage == "pv_merge":
         specialization = "32dense_full_score_pv_merge_kernel"
     else:
@@ -76,27 +74,30 @@ def check(*, assembly: Path, metadata: Path, symbol: str,
     metadata_text = metadata.read_text(encoding="utf-8")
     metadata_body = _function(metadata_text, symbol, "metadata")
     kernel_record = _kernel_metadata_record(metadata_text, symbol)
-    opcode = "v_wmma_f32_16x16x16_bf16"
+    opcode = "v_wmma_f32_16x16x16_f16" if full_score_stage == "pv_wmma" else "v_wmma_f32_16x16x16_bf16"
     count = len(re.findall(rf"^\s*{opcode}(?:\s|$)", assembly_body, re.MULTILINE))
     profile_name = (f"{full_score_stage}_g{value_group}"
-                    if full_score_stage in ("pv", "pv_split") else full_score_stage)
+                    if full_score_stage == "pv" else full_score_stage)
     profile = FULL_SCORE_PROFILES[profile_name]
     expected_wmma = profile["wmma"]
     if count != expected_wmma:
         raise ValueError(
-            f"BF16 WMMA count {count}, expected {expected_wmma} for selected stage")
+            f"WMMA count {count}, expected {expected_wmma} for selected stage")
+    if expected_wmma and any(instruction != opcode for instruction in re.findall(
+            r"^\s*(v_wmma_\S+)", assembly_body, re.MULTILINE)):
+        raise ValueError("selected stage contains an unexpected WMMA operand format")
     forbidden = re.findall(r"^\s*(v_wmma_\S*(?:fp8|iu[48])\S*)", assembly_body,
                            re.MULTILINE | re.IGNORECASE)
     if forbidden:
         raise ValueError(f"selected BF16-Q profile contains forbidden matrix opcodes: {forbidden}")
-    if full_score_stage in ("maximum", "pv", "pv_split", "pv_merge") and re.search(
+    if full_score_stage in ("maximum", "pv", "pv_merge") and re.search(
             r"^\s*v_wmma_", assembly_body, re.MULTILINE):
         raise ValueError("maximum/PV stage must not contain any WMMA instruction")
-    if full_score_stage in ("pv", "pv_split"):
+    if full_score_stage in ("pv", "pv_wmma"):
         if not re.search(r"^\s*v_exp_f32(?:_e(?:32|64))?(?:\s|$)", assembly_body,
                          re.MULTILINE):
             raise ValueError("PV stage is missing native FP32 exponential")
-        if not re.search(r"^\s*v_fma(?:c)?_f32(?:_e(?:32|64))?(?:\s|$)", assembly_body,
+        if full_score_stage == "pv" and not re.search(r"^\s*v_fma(?:c)?_f32(?:_e(?:32|64))?(?:\s|$)", assembly_body,
                          re.MULTILINE):
             raise ValueError("PV stage is missing FP32 probability-value accumulation")
     lds = _one_integer(metadata_body,
@@ -154,10 +155,10 @@ def check(*, assembly: Path, metadata: Path, symbol: str,
             f"private={private} scratch={scratch} flat_scratch={flat_scratch} "
             f"vgpr_spills={vgpr_spills} sgpr_spills={sgpr_spills}; all must be zero")
     return {"symbol": symbol, "value_group": value_group,
-            "query_tile": 8 if full_score_stage == "pv_split" else 1 if full_score_stage == "pv_merge" else 16,
-            "key_splits": key_splits if full_score_stage == "pv_split" else "runtime" if full_score_stage == "pv_merge" else 1,
+            "query_tile": 1 if full_score_stage == "pv_merge" else 16,
+            "key_splits": key_splits if full_score_stage == "pv_wmma" else "runtime" if full_score_stage == "pv_merge" else 1,
             "full_score_stage": full_score_stage,
-            "bf16_wmma_count": count, "lds_bytes": lds, "rounded_lds_bytes": rounded_lds,
+            "wmma_opcode": opcode, "wmma_count": count, "lds_bytes": lds, "rounded_lds_bytes": rounded_lds,
             "vgpr_count": vgpr,
             "occupancy": occupancy, "private_bytes": private, "scratch_bytes": scratch,
             "flat_scratch": flat_scratch, "maximum_workgroup_size": maximum_workgroup,
@@ -173,7 +174,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--value-group", required=True, type=int, choices=(16, 32))
     parser.add_argument("--key-splits", type=int, choices=(16, 32), default=16)
     parser.add_argument("--full-score-stage", required=True,
-                        choices=("qk_bk16", "qk_bk32", "maximum", "pv", "pv_split", "pv_merge"))
+                        choices=("qk_bk16", "qk_bk32", "maximum", "pv", "pv_wmma", "pv_merge"))
     return parser.parse_args(argv)
 
 

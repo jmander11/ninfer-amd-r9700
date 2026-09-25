@@ -90,6 +90,10 @@ ACTIVE USER REQUEST (2026-09-25, further long-context optimization):
   wins the qualified G16/G32 sweep. FP64, graph, workspace, ISA and matched32K PPL
   gates pass; whole32K629→659 tok/s. Commit before investigating the next mechanism.
   Evidence and precise numerical/performance limits are in `docs/performance.md`.
+- [x] PV matrix-instruction route: FP16 operands, represented V/8 with FP32 scale
+  restoration, FP32 accumulation/denominator/merge. G16/G32 FP64 and graph tests,
+  extreme/non-power-of-two scales, ISA and matched32K PPL pass. Whole32K659→825
+  tok/s. Remove superseded scalar split code and commit before investigating QK.
 - [ ] Profile the final long-context build, then investigate PV parallelism/reuse,
   QK, and score/softmax traffic one at a time. Each investigation needs a concrete
   measured mechanism; retain exclusions rather than repeating exhausted candidates.

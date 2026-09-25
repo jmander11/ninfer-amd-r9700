@@ -60,6 +60,47 @@ expected value exactly.
 Copy bus rate counts both the read and write traffic. This is the hardware bandwidth bound, not a
 model or individual-Op throughput claim.
 
+## Long-context matrix-instruction PV (2026-09-25)
+
+The next PV route replaces scalar split accumulation with native FP16 WMMA and
+FP32 accumulation:16 query rows,128 value features and six waves per block.
+Probabilities are formed in FP32, rounded to FP16 for the numerator, and summed
+in FP32 for the denominator. Represented signed-INT4 times stored-FP16-scale
+values are divided by8 before FP16 conversion and restored by8 in FP32 before
+the split merge, preventing finite operand overflow without changing the cache.
+The12K/32K dispatch boundaries, split counts and workspace envelope are unchanged.
+Short-context PV remains scalar FP32. This is an explicitly qualified private
+arithmetic change, not bit-exact equivalence or a Linear activation recipe change.
+
+Layer0 mechanism: reduce PV's scalar multiply/accumulate issue cost. Direct BF16,
+high/low corrected BF16 and FP16 operands were compared at64/128/256 feature
+tiles; FP16/128 was faster and more accurate than direct BF16. Corrected BF16 was
+closer to the FP64 oracle but materially slower. Nonperiodic complete-Op A/B,
+including non-power-of-two FP16 scales, same warm rotating-order seven-sample
+method and2048 appended query rows:
+
+| Context / group | Scalar split incumbent, ms | FP16 WMMA, ms |
+|---|---:|---:|
+|12288 / G16|129.323|104.423|
+|65536 / G16|542.325|395.813|
+|65536 / G32|542.736|393.043|
+|131072 / G16|911.337|612.284|
+
+The complete G16/G32 FP64/graph/metadata suite passes through262144 context,
+including non-power-of-two scales, minimum-subnormal and maximum-finite scales.
+ISA confirms eight native `v_wmma_f32_16x16x16_f16` instructions per loop body,
+94 VGPR,13816-byte LDS, compiler occupancy14, wave32 WGP and zero spills/scratch.
+Matched32K WikiText final512-position PPL6.510527→6.506944, mean-NLL delta
+−0.00055047, zero new severe positions; maximum absolute per-position change1.20241.
+The existing gate passes without a tolerance change; this is not a broad quality claim.
+The superseded scalar split implementation and comparison controls are absent
+from production. Evidence: `profiles/bench/r9700-dense-pv-tiles-20260925/wmma-*`
+and `profiles/ppl/r9700-wmma-pv-20260925/`.
+Matched whole32K (same C1/chunk2048/K5-loaded prefill-only workload) improves
+659.21→825.07 tok/s (+25.16%), tail382→495,49.71→39.72s. This is an unprofiled
+warmup0/repetition1 screen supported by the qualified rotating-order Op results,
+not a ceiling claim. Reports: `profiles/bench/r9700-wmma-pv-contexts-20260925/`.
+
 ## Long-context PV reuse and split tuning (2026-09-25)
 
 The follow-up profile of `0c084300` attributes42.14% of32K prefill/setup GPU
@@ -70,7 +111,7 @@ Eight query rows recover V reuse while keeping enough independent blocks; emitte
 register use drops109→68, compiler occupancy12→16, with zero spills. G16/G32 LDS
 is5912/5656 bytes. Tiles1/2 and64-way splitting did not win.
 
-Production selects eight query rows,16 splits at12288–32767 context and32 splits
+The first follow-up (`e3e033d2`) selects eight query rows,16 splits at12288–32767 context and32 splits
 from32768. Complete attention includes unchanged QK/max, every panel and merge;
 seven rotating-order warm event samples, R9700/gfx1201/ROCm10, auto,2048 appended
 queries, fragmented pages and nonperiodic represented inputs:
@@ -258,8 +299,11 @@ The count excludes96 small BF16 GDN A/B controls and the output head. MAC
 shares additionally exclude attention, recurrence and other non-matrix work;
 they are not runtime shares or fractions of every stored activation. Inter-Op
 hidden values remain BF16, GDN persistent state FP32, and the growing cache is
-FP8-K/INT4-V/FP16-scale. Dense prefill attention uses BF16-WMMA QK and FP32 PV
-accumulation, not integer-A4 attention. Ordinary/small-verify Q4 calls remainA8.
+FP8-K/INT4-V/FP16-scale. Dense prefill attention uses BF16-WMMA QK; short-context
+PV is FP32, while contexts>=12288 use FP16-WMMA PV with FP32 accumulation,
+denominator and merge (represented values are scaled by1/8 before FP16 conversion,
+then restored by8). These private attention operands do not alter the Linear mix.
+Attention is not integer-A4. Ordinary/small-verify Q4 calls remainA8.
 The smaller long-context attention panels are internal to the attention Op;
 they do not shrink the2048-token Linear calls or trigger the T<=128 A8 fallback.
 Body MACs follow the retained cap26 cost inventory (head format excluded), under

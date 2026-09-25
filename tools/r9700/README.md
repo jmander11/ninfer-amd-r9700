@@ -744,8 +744,8 @@ Bk32 schedule for complete calls with at least 512 query rows, regardless of pan
 each tile is shared across the six query heads of one KV
 head and writes FP32 scores. A separate maximum pass validates each causal
 vector; PV forms FP32 probabilities and reuses each direct INT4/FP16-scale V tile across the same
-six heads. At visible context>=12288, PV uses eight query rows per block and16 key splits
-(32 splits from context32768),
+six heads. At visible context>=12288, PV uses FP16 WMMA with16 query rows,
+128 value features and six waves per block, with16 key splits (32 from context32768),
 then merges FP32 numerator/denominator partials against the common maximum. Below that boundary
 it retains the16-query-row unsplit route. The caller-owned score/max/partial workspace is reused across layers at its planner-stable arena
 address. P<128, tree attention, and other layouts retain their prior routes. Device-active counts
@@ -767,19 +767,23 @@ features across all four KV heads. It also checks workspace/output canaries, act
 panels, invalid whole-call counts, and eager/Device Graph replay after poisoned scratch.
 `dense-prefill-attention-full-score-isa` prints both selected QK kernels plus maximum and PV. Invoke
 `dense-prefill-attention-full-score-static` with the exact selected mangled symbol and
-`DENSE_ATTN_STAGE=qk_bk16`, `qk_bk32`, `maximum`, `pv`, `pv_split`, or `pv_merge`.
+`DENSE_ATTN_STAGE=qk_bk16`, `qk_bk32`, `maximum`, `pv`, `pv_wmma`, or `pv_merge`.
 For split PV select `DENSE_ATTN_KEY_SPLITS=16` or `32` (direct checker: `--key-splits`).
 The checker requires exactly sixteen
-BF16 WMMAs for Bk16 and 32 for Bk32, and forbids every WMMA opcode in maximum/PV. The emitted
+BF16 WMMAs for Bk16,32 for Bk32, and eight FP16 WMMAs for split PV; maximum,
+short scalar PV and merge must not contain WMMA. The emitted
 pre-panel gfx1201 resources were Bk16 QK 29 VGPR/8,296-byte LDS/occupancy 15, Bk32 QK 97 next-free
 VGPR/16,488-byte LDS/occupancy 11, maximum 17 VGPR/64-byte LDS/occupancy 16, and PV 116
 VGPR/occupancy 12 with 9,208-byte G16 or 8,952-byte G32 LDS. Every stage is wave32 WGP mode with
 zero private/scratch/flat-scratch and zero register spills; PV must contain native FP32 exp and
 FP32 FMA/FMAC.
-The current split PV has68 VGPR,5912/5656-byte G16/G32 LDS and compiler occupancy16;
+The current split PV has94 VGPR,13816-byte LDS and compiler occupancy14 in both groups;
 the merge has8 VGPR,4-byte LDS and occupancy16. Both have zero scratch/spills and
-wave32 WGP execution. Split reduction changes private FP32 association, not cache or
-activation formats, and is qualified against the same independent FP64 formula.
+wave32 WGP execution. Split PV rounds probabilities and represented V/8 to FP16,
+uses FP32 WMMA accumulation, restores the exact factor8, and keeps the denominator
+and partial merge in FP32. This is a private arithmetic profile, not a cache or
+Linear activation format change. It is qualified against the same represented-input
+FP64 formula, including non-power-of-two scales and both finite FP16 scale extremes.
 
 The full-score route uses a caller-owned reusable FP32 workspace of
 `24*panel_rows*(visible_context+1)*4` bytes. Panel capacity is

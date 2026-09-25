@@ -119,8 +119,9 @@ Fixture make_fixture(std::uint32_t group, std::uint32_t context) {
                    std::vector<std::uint16_t>(physical_tokens * kHkv * (kD / group))};
     constexpr std::array<std::uint8_t, 10> key_words{
         0x08U, 0x18U, 0x20U, 0x28U, 0x30U, 0x88U, 0x98U, 0xa0U, 0xa8U, 0xb0U};
-    constexpr std::array<std::uint16_t, 6> scale_words{
-        0x2c00U, 0x3000U, 0x3400U, 0x3800U, 0x3a00U, 0x3c00U};
+    constexpr std::array<std::uint16_t, 12> scale_words{
+        0x2c00U, 0x3000U, 0x3400U, 0x3800U, 0x3a00U, 0x3c00U,
+        0x2c01U, 0x3001U, 0x3555U, 0x37ffU, 0x3a01U, 0x3c01U};
     for (std::size_t physical = 0U; physical < physical_tokens; ++physical) {
         for (std::uint32_t head = 0U; head < kHkv; ++head) {
             for (std::uint32_t feature = 0U; feature < kD; ++feature) {
@@ -292,8 +293,10 @@ void host_predicate_regression() {
     }
 }
 
-void run_case(std::uint32_t rows, std::uint32_t group, std::uint32_t context) {
-    const Fixture fixture = make_fixture(group, context);
+void run_case(std::uint32_t rows, std::uint32_t group, std::uint32_t context,
+              std::uint16_t uniform_scale = 0U) {
+    Fixture fixture = make_fixture(group, context);
+    if (uniform_scale != 0U) std::fill(fixture.scales.begin(), fixture.scales.end(), uniform_scale);
     const auto queries = make_queries(rows);
     auto positions = make_positions(rows);
     if (context > rows)
@@ -563,6 +566,9 @@ int main(int argc, char** argv) {
             run_case(129U, group, kv::kDensePrefillLongPvMinimumContext + 1U);
             run_case(2048U, group, 65536U);
             run_case(128U, group, 131072U);
+            // The private FP16 PV operands use V/8: cover both finite scale extremes.
+            run_case(128U, group, 32768U, 0x7bffU);
+            run_case(128U, group, 32768U, 0x0001U);
         }
         std::cout << "production Bk16/Bk32 dense G16/G32 FP64 qualification: PASS\n";
         return 0;

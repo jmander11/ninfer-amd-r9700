@@ -1067,8 +1067,9 @@ void dense_full_score_maximum_kernel(
     }
 }
 
-template <std::uint32_t Group, std::uint32_t QueryTile>
+template <std::uint32_t Group>
 struct DenseFullScorePvShared {
+    static constexpr std::uint32_t QueryTile = kDensePrefillQueryTile;
     float probability[6][QueryTile][16];
     float denominator[6][QueryTile];
     std::uint8_t packed_values[16][kHeadDim / 2U];
@@ -1082,8 +1083,7 @@ struct DenseFullScorePvShared {
     std::uint32_t page_valid;
 };
 
-template <std::uint32_t Group, bool DeviceActiveRows,
-          std::uint32_t QueryTile = kDensePrefillQueryTile, std::uint32_t Splits = 1U>
+template <std::uint32_t Group, bool DeviceActiveRows>
 __global__ __launch_bounds__(kDensePrefillThreads)
 void dense_full_score_pv_kernel(
     const float* scores, const float* maxima, const std::uint8_t* values,
@@ -1093,8 +1093,8 @@ void dense_full_score_pv_kernel(
     const std::int32_t* row_positions, const std::int32_t* active_query_rows,
     std::uint32_t total_query_rows, std::uint32_t panel_origin, std::uint32_t whole_rows, float* output) {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
-    static_assert(QueryTile >= 1U && QueryTile <= 16U);
-    __shared__ DenseFullScorePvShared<Group, QueryTile> shared;
+    constexpr std::uint32_t QueryTile = kDensePrefillQueryTile;
+    __shared__ DenseFullScorePvShared<Group> shared;
     const std::uint32_t tid = threadIdx.x;
     const std::uint32_t kv_head = blockIdx.x;
     const std::uint32_t query_base = blockIdx.y * QueryTile;
@@ -1147,12 +1147,7 @@ void dense_full_score_pv_kernel(
     }
     float numerator[6][QueryTile]{};
     __syncthreads();
-    const std::uint32_t split_extent = static_cast<std::uint32_t>(
-        (context + Splits * 16U - 1U) / (Splits * 16U)) * 16U;
-    const std::uint32_t key_begin = Splits == 1U ? 0U : blockIdx.z * split_extent;
-    const std::uint32_t key_end = Splits == 1U ? shared.maximum_context :
-        min(shared.maximum_context, key_begin + split_extent);
-    for (std::uint32_t key_base = key_begin; key_base < key_end; key_base += 16U) {
+    for (std::uint32_t key_base = 0U; key_base < shared.maximum_context; key_base += 16U) {
         if (tid == 0U) {
             const std::size_t physical_page = pages[shared.table_offset + key_base / kPageSize];
             shared.page_valid = physical_page < physical_tokens / kPageSize ? 1U : 0U;
@@ -1237,18 +1232,6 @@ void dense_full_score_pv_kernel(
         for (std::uint32_t row = 0U; row < QueryTile; ++row) {
             if (row >= tile_rows) continue;
             const std::uint32_t bit = 1U << row;
-            if constexpr (Splits > 1U) {
-                const std::size_t vector =
-                    (static_cast<std::size_t>(blockIdx.z) * total_query_rows + query_base + row) *
-                        24U + kv_head * 6U + head;
-                const bool inactive = (shared.inactive_rows & bit) != 0U;
-                const bool invalid = (shared.invalid_rows[head] & bit) != 0U;
-                output[vector * (kHeadDim + 1U) + tid] = inactive ? 0.0F :
-                    invalid ? __builtin_nanf("") : numerator[head][row];
-                if (tid == 0U) output[vector * (kHeadDim + 1U) + kHeadDim] = inactive ? 0.0F :
-                    invalid ? __builtin_nanf("") : shared.denominator[head][row];
-                continue;
-            }
             const std::size_t output_index =
                 (static_cast<std::size_t>(query_base + row) * 24U + kv_head * 6U + head) *
                     kHeadDim + tid;
@@ -1265,6 +1248,159 @@ void dense_full_score_pv_kernel(
     (void)context; (void)physical_tokens; (void)row_positions; (void)active_query_rows;
     (void)total_query_rows; (void)panel_origin; (void)whole_rows; (void)output;
 #endif
+}
+
+using DensePvF16x8 = _Float16 __attribute__((ext_vector_type(8)));
+
+struct DenseFullScorePvWmmaShared {
+    float probability[6][16][16];
+    float denominator[6][16];
+    __half probabilities[6][16][16];
+    __half values[16][128];
+    std::uint32_t row_context[16];
+    std::uint32_t invalid_rows[6];
+    std::uint32_t inactive_rows;
+    std::uint32_t maximum_context;
+    std::uint32_t page_valid;
+    std::size_t table_offset;
+    std::size_t physical_base;
+};
+
+// Each wave owns one GQA query head, 16 queries and 128 value features. QK and
+// softmax centering remain unchanged. FP16 matrix operands feed FP32 accumulators;
+// dividing represented V by eight keeps every finite FP16-scale/INT4 product in
+// FP16 range. Restore that exact power of two before the FP32 split merge.
+template <std::uint32_t Group, std::uint32_t Splits>
+__global__ __launch_bounds__(192)
+void dense_full_score_pv_wmma_kernel(Fp8Int4KvAttentionArgs a, const float* scores,
+                                   const float* maxima, float* partials,
+                                   std::uint32_t panel_origin, std::uint32_t whole_rows) {
+    __shared__ DenseFullScorePvWmmaShared shared;
+    const std::uint32_t tid = threadIdx.x, wave = tid / 32U, lane = tid % 32U;
+    const std::uint32_t axis = lane % 16U, half = lane / 16U;
+    const std::uint32_t query_base = blockIdx.y * 16U;
+    const std::uint32_t tile_rows = min(16U, a.query_rows - query_base);
+    const std::uint32_t kv_head = blockIdx.x / 2U;
+    const std::uint32_t feature_origin = (blockIdx.x % 2U) * 128U;
+    if (tid == 0U) {
+        const std::int32_t active = a.active_query_rows != nullptr
+            ? dense_panel_active_rows(a.active_query_rows, a.query_rows, panel_origin, whole_rows)
+            : static_cast<std::int32_t>(a.query_rows);
+        const bool invalid = active < 0 || static_cast<std::uint32_t>(active) > a.query_rows;
+        shared.inactive_rows = 0U;
+        shared.maximum_context = 0U;
+        shared.table_offset = 0U;
+        for (std::uint32_t head = 0U; head < 6U; ++head) shared.invalid_rows[head] = 0U;
+        for (std::uint32_t row = 0U; row < tile_rows; ++row) {
+            const std::uint32_t bit = 1U << row;
+            shared.row_context[row] = 0U;
+            if (invalid) {
+                for (std::uint32_t head = 0U; head < 6U; ++head) shared.invalid_rows[head] |= bit;
+            } else if (query_base + row >= static_cast<std::uint32_t>(active)) {
+                shared.inactive_rows |= bit;
+            } else {
+                const std::int32_t position = a.row_positions[query_base + row];
+                if (position < 0 || static_cast<std::size_t>(position) >= a.context) {
+                    for (std::uint32_t head = 0U; head < 6U; ++head) shared.invalid_rows[head] |= bit;
+                } else {
+                    shared.row_context[row] = static_cast<std::uint32_t>(position) + 1U;
+                    shared.maximum_context = max(shared.maximum_context, shared.row_context[row]);
+                }
+            }
+        }
+        if (!invalid && shared.maximum_context != 0U && a.page_table_row != nullptr) {
+            const std::int32_t table_row = a.page_table_row[0];
+            if (table_row < 0 || static_cast<std::uint32_t>(table_row) >= a.page_table_row_count) {
+                for (std::uint32_t head = 0U; head < 6U; ++head)
+                    shared.invalid_rows[head] |= ((1U << tile_rows) - 1U) & ~shared.inactive_rows;
+                shared.maximum_context = 0U;
+            } else shared.table_offset = static_cast<std::size_t>(table_row) * a.page_table_row_stride;
+        }
+        for (std::uint32_t head = 0U; head < 6U; ++head)
+            for (std::uint32_t row = 0U; row < 16U; ++row) shared.denominator[head][row] = 0.0F;
+    }
+    F32x8 numerator[8]{};
+    __syncthreads();
+    const std::uint32_t split_extent = static_cast<std::uint32_t>(
+        (a.context + Splits * 16U - 1U) / (Splits * 16U)) * 16U;
+    const std::uint32_t key_end = min(shared.maximum_context, (blockIdx.z + 1U) * split_extent);
+    for (std::uint32_t key_base = blockIdx.z * split_extent; key_base < key_end; key_base += 16U) {
+        if (tid == 0U) {
+            const std::size_t page = a.page_table[shared.table_offset + key_base / kPageSize];
+            shared.page_valid = page < a.physical_tokens / kPageSize ? 1U : 0U;
+            shared.physical_base = page * kPageSize + key_base % kPageSize;
+            if (shared.page_valid == 0U)
+                for (std::uint32_t row = 0U; row < tile_rows; ++row)
+                    if (shared.row_context[row] > key_base)
+                        for (std::uint32_t head = 0U; head < 6U; ++head)
+                            shared.invalid_rows[head] |= 1U << row;
+        }
+        __syncthreads();
+        for (std::uint32_t flat = tid; flat < 16U * 128U; flat += 192U) {
+            const std::uint32_t token = flat / 128U, local_feature = flat % 128U;
+            const std::uint32_t feature = feature_origin + local_feature;
+            float value = 0.0F;
+            if (shared.page_valid != 0U && key_base + token < shared.maximum_context) {
+                const std::uint8_t packed = a.value_codes[int4_offset<Group, false, false>(
+                    shared.physical_base + token, kv_head, feature, 4U, a.physical_tokens, false)];
+                int code = (packed >> ((feature & 1U) * 4U)) & 15U;
+                if (code >= 8) code -= 16;
+                const std::uint16_t scale = a.value_scale_bits[int4_offset<Group, false, false>(
+                    shared.physical_base + token, kv_head, feature, 4U, a.physical_tokens, true)];
+                value = static_cast<float>(code) * __half2float(__ushort_as_half(scale));
+            }
+            shared.values[token][local_feature] = __float2half_rn(value * 0.125F);
+        }
+        for (std::uint32_t flat = tid; flat < 6U * 16U * 16U; flat += 192U) {
+            const std::uint32_t token = flat % 16U, row = (flat / 16U) % 16U, head = flat / 256U;
+            float probability = 0.0F;
+            if (row < tile_rows && key_base + token < shared.row_context[row] &&
+                shared.page_valid != 0U && (shared.invalid_rows[head] & (1U << row)) == 0U) {
+                const std::size_t vector = static_cast<std::size_t>(query_base + row) * 24U + kv_head * 6U + head;
+                const float maximum = maxima[vector], score = scores[vector * a.context + key_base + token];
+                if (!isfinite(maximum) || !isfinite(score)) atomicOr(&shared.invalid_rows[head], 1U << row);
+                else probability = __expf(score - maximum);
+            }
+            shared.probability[head][row][token] = probability;
+            shared.probabilities[head][row][token] = __float2half_rn(probability);
+        }
+        __syncthreads();
+        if (tid < 96U) {
+            const std::uint32_t head = tid / 16U, row = tid % 16U;
+            float sum = 0.0F;
+            for (std::uint32_t token = 0U; token < 16U; ++token) sum += shared.probability[head][row][token];
+            shared.denominator[head][row] += sum;
+        }
+        DensePvF16x8 probabilities{};
+#pragma unroll
+        for (std::uint32_t item = 0U; item < 8U; ++item)
+            probabilities[item] = static_cast<_Float16>(__half2float(shared.probabilities[wave][axis][half * 8U + item]));
+#pragma unroll
+        for (std::uint32_t feature_tile = 0U; feature_tile < 8U; ++feature_tile) {
+            DensePvF16x8 values{};
+#pragma unroll
+            for (std::uint32_t item = 0U; item < 8U; ++item)
+                values[item] = static_cast<_Float16>(__half2float(shared.values[half * 8U + item][feature_tile * 16U + axis]));
+            numerator[feature_tile] = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12(
+                probabilities, values, numerator[feature_tile]);
+        }
+        __syncthreads();
+    }
+#pragma unroll
+    for (std::uint32_t item = 0U; item < 8U; ++item) {
+        const std::uint32_t row = half * 8U + item;
+        if (row >= tile_rows) continue;
+        const std::size_t vector = (static_cast<std::size_t>(blockIdx.z) * a.query_rows + query_base + row) *
+            24U + kv_head * 6U + wave;
+        const bool inactive = (shared.inactive_rows & (1U << row)) != 0U;
+        const bool invalid = (shared.invalid_rows[wave] & (1U << row)) != 0U;
+#pragma unroll
+        for (std::uint32_t feature_tile = 0U; feature_tile < 8U; ++feature_tile)
+            partials[vector * 257U + feature_origin + feature_tile * 16U + axis] =
+                inactive ? 0.0F : invalid ? __builtin_nanf("") : numerator[feature_tile][item] * 8.0F;
+        if (axis == 0U && feature_origin == 0U)
+            partials[vector * 257U + 256U] = inactive ? 0.0F : invalid ? __builtin_nanf("") : shared.denominator[wave][row];
+    }
 }
 
 __global__ __launch_bounds__(kDensePrefillThreads)
@@ -1287,30 +1423,33 @@ void dense_full_score_pv_merge_kernel(const float* partials, float* output,
     output[vector * kHeadDim + threadIdx.x] = denominator == 0.0F ? 0.0F : numerator / denominator;
 }
 
-template <std::uint32_t Group, std::uint32_t QueryTile, std::uint32_t Splits>
+template <std::uint32_t Group, std::uint32_t Splits>
 hipError_t dense_full_score_pv_launch(const Fp8Int4KvAttentionArgs& a, const float* scores,
                                     float* maxima, std::uint32_t panel_origin,
                                     std::uint32_t whole_rows, hipStream_t stream) noexcept {
-    const dim3 grid(4U, (a.query_rows + QueryTile - 1U) / QueryTile, Splits);
+    const dim3 grid(4U, (a.query_rows + kDensePrefillQueryTile - 1U) / kDensePrefillQueryTile);
     // The partials follow this panel's maxima and share the caller-owned score arena.
     // Global maxima give every split a common softmax scale, so the merge only sums
     // FP32 numerators/denominators; no normalized or BF16 intermediate is introduced.
     float* partials = maxima + static_cast<std::size_t>(a.query_rows) * 24U;
-    float* destination = Splits == 1U ? a.output : partials;
-    if (a.active_query_rows != nullptr) {
-        hipLaunchKernelGGL((dense_full_score_pv_kernel<Group, true, QueryTile, Splits>), grid,
+    if constexpr (Splits > 1U) {
+        hipLaunchKernelGGL((dense_full_score_pv_wmma_kernel<Group, Splits>),
+                           dim3(8U, (a.query_rows + 15U) / 16U, Splits), dim3(192U),
+                           0, stream, a, scores, maxima, partials, panel_origin, whole_rows);
+    } else if (a.active_query_rows != nullptr) {
+        hipLaunchKernelGGL((dense_full_score_pv_kernel<Group, true>), grid,
                            dim3(kDensePrefillThreads), 0, stream, scores, maxima,
                            a.value_codes, a.value_scale_bits, a.page_table, a.page_table_row,
                            a.page_table_row_stride, a.page_table_row_count, a.context,
                            a.physical_tokens, a.row_positions, a.active_query_rows,
-                           a.query_rows, panel_origin, whole_rows, destination);
+                           a.query_rows, panel_origin, whole_rows, a.output);
     } else {
-        hipLaunchKernelGGL((dense_full_score_pv_kernel<Group, false, QueryTile, Splits>), grid,
+        hipLaunchKernelGGL((dense_full_score_pv_kernel<Group, false>), grid,
                            dim3(kDensePrefillThreads), 0, stream, scores, maxima,
                            a.value_codes, a.value_scale_bits, a.page_table, a.page_table_row,
                            a.page_table_row_stride, a.page_table_row_count, a.context,
                            a.physical_tokens, a.row_positions, nullptr,
-                           a.query_rows, panel_origin, whole_rows, destination);
+                           a.query_rows, panel_origin, whole_rows, a.output);
     }
     hipError_t error = hipGetLastError();
     if (error != hipSuccess) return error;
@@ -1328,12 +1467,12 @@ hipError_t dense_full_score_pv_dispatch(const Fp8Int4KvAttentionArgs& a, const f
                                       float* maxima, std::uint32_t panel_origin,
                                       std::uint32_t whole_rows, hipStream_t stream) noexcept {
     if (dense_prefill_pv_splits(a.context) == kDensePrefillLongPvSplits)
-        return dense_full_score_pv_launch<Group, 8U, kDensePrefillLongPvSplits>(
+        return dense_full_score_pv_launch<Group, kDensePrefillLongPvSplits>(
             a, scores, maxima, panel_origin, whole_rows, stream);
     if (dense_prefill_pv_splits(a.context) > 1U)
-        return dense_full_score_pv_launch<Group, 8U, kDensePrefillPvSplits>(
+        return dense_full_score_pv_launch<Group, kDensePrefillPvSplits>(
             a, scores, maxima, panel_origin, whole_rows, stream);
-    return dense_full_score_pv_launch<Group, kDensePrefillQueryTile, 1U>(
+    return dense_full_score_pv_launch<Group, 1U>(
         a, scores, maxima, panel_origin, whole_rows, stream);
 }
 
