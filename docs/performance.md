@@ -98,6 +98,8 @@ code IDs, loaded K5 DFlash without speculative rounds, warmup0/repetition1:
 32K prefill629.06→659.21 tok/s, tail369→382,52.09→49.71s. This is a screening
 measurement supported by the rotating-order Op sweep, not a ceiling claim.
 Whole reports: `profiles/bench/r9700-joint-pv-contexts-20260925/`.
+The completed64K confirmation improves393.37→418.77 tok/s (+6.46%), tail216→237,
+166.60→156.50s, with the same unchanged default workspace envelope.
 
 ## Long-context dense PV fix (2026-09-25)
 
