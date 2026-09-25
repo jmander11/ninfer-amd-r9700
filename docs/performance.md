@@ -94,13 +94,29 @@ quality gate, but one window does not establish a broad quality improvement.
 Matched whole C1/chunk2048 screens improve8K1305.40→1490.14 tok/s (tail1048→1256)
 and32K930.54→967.01 tok/s (tail617→620,35.21→33.89s). Same installed model,
 cyclic code corpus, warmup0/repetition1 and auto power as the preceding comparisons.
+The64K confirmation improves661.61→672.05 tok/s,99.06→97.52s; tail remains405.
 Whole reports: `profiles/bench/r9700-early-wmma-contexts-20260925/`.
+The refreshed `local/ninfer-r9700:compose` image passes its server executable smoke
+check and the same32K GPU PPL case: NLL and argmax sidecars are byte-identical to
+the native build, with matching artifact identity and precision metadata. Command
+and outputs: `profiles/ppl/r9700-final-image-20260925/`. The server remains stopped;
+the previous runtime image is retained with the `-rollback` tag.
 Evidence: `profiles/bench/r9700-dense-pv-tiles-20260925/wmma-short-splits*`,
 `early-wmma-*`, and `profiles/ppl/r9700-early-wmma-20260925/`.
 
 ## Long-context follow-up exclusions and attribution (2026-09-25)
 
-After the QK/PV improvements, the selected-region32K trace attributes34.774s
+The final selected-region32K trace attributes33.607s of prefill/setup kernel
+service: all matrix PV25.98%, QK17.87%, Q4A8/Q4A4 projections17.84%/15.86%,
+GDN recurrence6.65%, score maximum5.14%, and PV merge1.00%. Command, trace and
+attribution: `profiles/rocprof/r9700-dense-final32k-20260925/`.
+The investigated staged-route changes no longer reveal another demonstrated
+material win. This is not a hardware ceiling: fused streaming QK/softmax/PV
+could avoid the score plane, but would be a distinct algorithm requiring new
+oracle and model qualification, not an admitted continuation of these kernels.
+The canceled128K whole-model run was not repeated;128K/262K evidence here is Op-only.
+
+Before the earlier crossover, the selected-region32K trace attributed34.774s
 of prefill/setup kernel service: PV WMMA16-split19.14%, QK32x64 16.91%,
 short-context scalar PV6.69%, with Q4A8/Q4A4 projections17.23%/15.32%.
 This is attribution, not unprofiled throughput or proof of a hardware ceiling.
@@ -117,6 +133,23 @@ Task-local source and logs: `profiles/bench/r9700-dense-pv-tiles-20260925/`
 (`probability_candidate.hip`, `probability-p32768.log`, `probability-p65536.log`);
 candidate0 is the incumbent and candidate1 materializes probabilities. The legacy
 log field `splits=1` is only a comparison label; actual partitions are32 in both cases.
+
+Also rejected: wave-owned register probability operands with a shuffle-reduced
+FP32 denominator. This removes probability LDS staging (13816→4600 bytes) but
+changes coalesced score loads into strided per-query access and raises registers
+94→105. FP64 passes (relative-L2 difference from incumbent about5e-8), but complete
+Op medians regress184.929→259.731ms at32K and289.164→420.357ms at64K.
+These observations reject this mapping; they do not establish individual stall causes.
+Source and logs are `register_candidate.hip` and `register-p*.log` in the same task directory.
+
+Not promoted: remove only the duplicate FP32 probability LDS tile, and accumulate
+the already-rounded FP16 probability operands in FP32 for the denominator. This
+preserves coalesced score loads and reduces LDS13816→7672 bytes (93VGPR). FP64
+passes, but complete-Op medians only improve185.301→184.049ms at32K and
+288.522→285.029ms at64K. There is no demonstrated material whole-model benefit
+to justify changing another numerical boundary; no model-quality promotion was
+attempted. Production retains FP32 probabilities for the denominator.
+Source/logs: `half_den_candidate.hip`, `half-den-p*.log` in the task directory.
 
 ## Dense QK key/query reuse (2026-09-25)
 

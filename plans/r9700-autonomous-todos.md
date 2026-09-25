@@ -85,30 +85,21 @@ above apply to every command.
 
 ### Current checkpoint
 
-ACTIVE USER REQUEST (2026-09-25, further long-context optimization):
-- [x] PV joint tile/split sweep: eight query rows with16 splits below32K and32 above
-  wins the qualified G16/G32 sweep. FP64, graph, workspace, ISA and matched32K PPL
-  gates pass; whole32K629→659 tok/s. Commit before investigating the next mechanism.
-  Evidence and precise numerical/performance limits are in `docs/performance.md`.
-- [x] PV matrix-instruction route: FP16 operands, represented V/8 with FP32 scale
-  restoration, FP32 accumulation/denominator/merge. G16/G32 FP64 and graph tests,
-  extreme/non-power-of-two scales, ISA and matched32K PPL pass. Whole32K659→825
-  tok/s. Remove superseded scalar split code and commit before investigating QK.
-- [x] QK key/query reuse:32x64 for large calls/panels,16x32 for panels below32,
-  retaining16x16 below512 whole rows. Bit-exact complete Op and32K model sidecars;
-  G16/G32 FP64/graph/boundary and ISA/audit checks pass. Whole32K825→931 tok/s.
-  Commit before investigating score/softmax traffic.
-- [x] Score/probability materialization: reject the bit-exact candidate; complete
-  Op slows8% at32K and13% at64K. Retain raw scores; no production change.
-- [x] Earlier matrix-PV crossover:2 splits from2048,4 from4096, unchanged16/32
-  from12288/32768. G16/G32 FP64/graph/boundary, ISA, C1–4 planner and matched32K
-  PPL pass. Whole8K1305→1490 and32K931→967 tok/s; commit before next mechanism.
-- [ ] Profile the final long-context build, then investigate PV parallelism/reuse,
-  QK, and score/softmax traffic one at a time. Each investigation needs a concrete
-  measured mechanism; retain exclusions rather than repeating exhausted candidates.
-  Qualify and measure each winner, commit it before the next investigation, and
-  refresh the runtime image for admitted changes. Heavy jobs remain serial; server
-  stays stopped; no128K whole-model rerun. Do not widen numerical tolerances.
+COMPLETED USER REQUEST (2026-09-25, further long-context optimization):
+- [x] Investigate serially and commit each admitted speedup before the next:
+  PV tile/split scheduling (`e3e033d2`), matrix PV (`2ac730d2`), wider QK reuse
+  (`4c7a763a`), and earlier matrix-PV crossover (`ee233cb9`).
+- [x] Retain exclusions: probability materialization and register-owned probability
+  mapping regress; FP16-operand denominator staging has no demonstrated material
+  whole-model gain. Further split counts do not justify another production schedule.
+- [x] G16/G32 FP64/graph/metadata/workspace/ISA, C1–4 planner and matched32K
+  model-quality gates pass. Final C1/chunk2048 prefill:8K1490,32K967,64K672 tok/s.
+  Final whole-phase profile and precise evidence/limits are in `docs/performance.md`.
+- [x] Refresh the incremental runtime image and verify its32K GPU NLL/argmax sidecars
+  are byte-identical to the native build. Server remains stopped; heavy jobs stayed
+  serial, no128K whole-model rerun, no numerical-tolerance changes.
+  Older campaigns remain paused. A fused streaming attention algorithm remains an
+  unproved research possibility, not a measured speedup or a claim of hardware saturation.
 
 COMPLETED USER REQUEST (2026-09-25, fix extreme long-context dense prefill slowdown):
 - [x] Qualify and time PV query-tile and split-KV challengers against the existing dense route.
