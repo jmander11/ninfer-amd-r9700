@@ -257,6 +257,10 @@ struct SiluMulStridedShape {
     std::uint32_t rows, hipStream_t stream) noexcept;
 [[nodiscard]] hipError_t sigmoid_mul_bf16(const hip_bfloat16* gate, hip_bfloat16* x,
                                           std::size_t count, hipStream_t stream) noexcept;
+// out = BF16(BF16(x) * sigmoid(gate)) for FP32 x: cast_fp32_to_bf16 then sigmoid_mul in one pass.
+[[nodiscard]] hipError_t sigmoid_mul_fp32_bf16(const hip_bfloat16* gate, const float* x,
+                                               hip_bfloat16* out, std::size_t count,
+                                               hipStream_t stream) noexcept;
 
 // Exact dense BF16 embedding gather. table is feature-fastest [features, vocabulary], ids is I32
 // [rows], and output is [features, rows]. Every id must be in [0,vocabulary); output does not

@@ -32,6 +32,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <cstring>
 #include <vector>
 
 namespace {
@@ -664,6 +665,33 @@ void qualify_normalization_and_activations(hipStream_t stream) {
         ninfer::ops::sigmoid_mul(gate_tensor, mutable_tensor, stream);
         HIP_CHECK(hipStreamSynchronize(stream));
         require_bf16_close(copy_to_host(d_mutable), sigmoid_expected, "sigmoid multiply FP64 oracle");
+        {
+            // FP32-source form: equals cast_fp32_to_bf16 then sigmoid_mul, bit for bit.
+            std::vector<float> wide(up.size());
+            for (std::size_t index = 0; index < wide.size(); ++index)
+                wide[index] = static_cast<float>(up[index]) *
+                              (1.0F + static_cast<float>(index % 7U) * 0.0009F);
+            DeviceBuffer<float> d_wide(wide.size());
+            HIP_CHECK(hipMemcpy(d_wide.get(), wide.data(), wide.size() * sizeof(float),
+                                hipMemcpyHostToDevice));
+            ninfer::Tensor wide_tensor(d_wide.get(), ninfer::DType::FP32,
+                                       {mutable_tensor.ne[0], mutable_tensor.ne[1],
+                                        mutable_tensor.ne[2], mutable_tensor.ne[3]});
+            DeviceBuffer<hip_bfloat16> d_fused(up.size());
+            ninfer::Tensor fused_tensor(d_fused.get(), ninfer::DType::BF16,
+                                        {mutable_tensor.ne[0], mutable_tensor.ne[1],
+                                         mutable_tensor.ne[2], mutable_tensor.ne[3]});
+            ninfer::ops::sigmoid_mul(gate_tensor, wide_tensor, fused_tensor, stream);
+            ninfer::ops::cast_fp32_to_bf16(wide_tensor, mutable_tensor, stream);
+            ninfer::ops::sigmoid_mul(gate_tensor, mutable_tensor, stream);
+            HIP_CHECK(hipStreamSynchronize(stream));
+            const auto fused = copy_to_host(d_fused), composed = copy_to_host(d_mutable);
+            if (std::memcmp(fused.data(), composed.data(), fused.size() * sizeof(hip_bfloat16)) != 0)
+                fail("FP32-source sigmoid multiply differs from cast + sigmoid_mul");
+            require_invalid_argument(
+                [&] { ninfer::ops::sigmoid_mul(gate_tensor, wide_tensor, gate_tensor, stream); },
+                "FP32-source sigmoid output/gate overlap");
+        }
         copy_to_device(d_mutable, up);
         ninfer::ops::gelu(mutable_tensor, ninfer::ops::GeluMode::Exact, stream);
         HIP_CHECK(hipStreamSynchronize(stream));

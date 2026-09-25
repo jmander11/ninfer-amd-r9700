@@ -110,6 +110,12 @@ public:
     [[nodiscard]] LaunchStatus run(std::uint32_t tokens, const hip_bfloat16* input,
                                    hip_bfloat16* output, hipStream_t stream) noexcept;
 
+    // Same GEMM and status consumer as run(), consuming the E4M3 activation that the immediately
+    // preceding run() of another execution bound to the same activation storage wrote for the
+    // same width and column count (one quantization shared by projections of one input).
+    [[nodiscard]] LaunchStatus run_quantized(std::uint32_t tokens, hip_bfloat16* output,
+                                             hipStream_t stream) noexcept;
+
     // Qualification-only control using the first viable heuristic while preserving the same
     // activation quantizer, descriptors, weight bytes, and output/status boundary.
     [[nodiscard]] LaunchStatus run_default_heuristic(

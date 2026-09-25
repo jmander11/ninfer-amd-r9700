@@ -1113,11 +1113,13 @@ void TextContext::attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_la
         tap.capture_attention_stage(text_layer, "attention_fp32", attention_fp32, s);
     }
     Tensor a = results.attention.view({kCfg.head_dim, kCfg.n_q, T});
-    ops::cast_fp32_to_bf16(attention_fp32, a, s);
     if constexpr (requires { tap.capture_attention_stage(text_layer, "attention_bf16", a, s); }) {
+        ops::cast_fp32_to_bf16(attention_fp32, a, s);
         tap.capture_attention_stage(text_layer, "attention_bf16", a, s);
+        ops::sigmoid_mul(gate, a, s);
+    } else {
+        ops::sigmoid_mul(gate, attention_fp32, a, s);
     }
-    ops::sigmoid_mul(gate, a, s);
     if constexpr (requires { tap.capture_attention_stage(text_layer, "gated_attention", a, s); }) {
         tap.capture_attention_stage(text_layer, "gated_attention", a, s);
     }

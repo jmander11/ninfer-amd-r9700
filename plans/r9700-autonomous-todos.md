@@ -171,6 +171,20 @@ M128xN128 GEMM, fused dense prefill attention, staged GDN). Production C1 prefil
   (`profiles/rocprof/r9700-followup-final-4k-20260925/`): GEMM 77.5%, chunked GDN 5.5%, FP8 GEMM
   3.5%, attention 3.1%, all else <2.5% each. Next lever if pursued: chunked GDN load phase
   (transposed-K bank conflicts, next-chunk prefetch) ~2-3%. Full ctest 86/86 pass.
+- [x] Follow-up batch 2 (2026-09-25, after `1c401c2b`): (1) chunked GDN kernel 0.918 -> 0.64 ms per
+  P2048 call: branch-free clamped V loads (the masked per-element load had made Z/V' 4x slower
+  than the prototype), load phase with all loads issued first, DPP wave sums and 16-byte K^T rows.
+  Rejected here: Q staged in LDS (+spills or slower with an LDS transpose), branch-free clamped q
+  loads (slower). (2) Chunked route from T16 (one masked chunk beats the sequential kernel from
+  T16: T16/32/48 0.026/0.026/0.031 vs 0.034/0.056/0.078 ms); verify widths use snapshot/record
+  forms and are unaffected. (3) FP8 attention projections share one E4M3 activation
+  (`LinearExecution::run_quantized`, exact); attention output cast+sigmoid gate fused into one
+  exact kernel (`sigmoid_mul` FP32-source overload). Interleaved: 4K 2309 -> 2336, 32K 1924 ->
+  1946 tok/s (+1.2%); PPL-4K prefill 6.4553/9.4133/2.2537 vs 6.4610/9.3909/2.2548. Evidence
+  `profiles/bench/r9700-followup2-20260925/`. (4) GEMM power: production gate/up GEMM on random
+  codes holds 300 W at ~2455 MHz (5.33 ms, 136.9 TOPS); all-zero codes 300 W at ~2875 MHz
+  (4.61 ms). The GEMM is power-capped: board cap = max = 300 W (min 210), overdrive disabled by
+  `amdgpu.ppfeaturemask=0xfff7bfff`; raising power or undervolting needs a host change (user).
 - [ ] N4 Larger formulation changes, each measured and qualified before promotion:
   - [x] (a) REJECTED: IU8 GEMM (signed A8 x offset-binary W8, -8*sum(a) folded into the WMMA
     seed). Register/LDS-only inner-loop microbench (`iu8_inner_microbench.hip` in the N2 evidence

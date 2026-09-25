@@ -509,6 +509,40 @@ LinearExecution::LaunchStatus LinearExecution::run(std::uint32_t tokens,
     return {hipGetLastError(), HIPBLAS_STATUS_SUCCESS};
 }
 
+LinearExecution::LaunchStatus LinearExecution::run_quantized(std::uint32_t tokens,
+                                                              hip_bfloat16* output,
+                                                              hipStream_t stream) noexcept {
+    Impl::Profile* profile = impl_ == nullptr ? nullptr : impl_->find(tokens);
+    std::size_t output_elements = 0;
+    std::size_t output_bytes = 0;
+    if (profile == nullptr || impl_->activation_storage == nullptr || output == nullptr ||
+        !checked_mul(tokens, impl_->rows, &output_elements) ||
+        !checked_mul(output_elements, sizeof(hip_bfloat16), &output_bytes) ||
+        ranges_overlap(output, output_bytes, impl_->weight_payload,
+                       impl_->weight_payload_bytes) ||
+        ranges_overlap(output, output_bytes, impl_->activation_storage,
+                       impl_->activation_storage_capacity_bytes) ||
+        (impl_->matmul_workspace_bytes != 0U &&
+         ranges_overlap(output, output_bytes, impl_->matmul_workspace,
+                        impl_->matmul_workspace_bytes))) {
+        return {hipErrorInvalidValue, HIPBLAS_STATUS_SUCCESS};
+    }
+    constexpr float alpha = 1.0F;
+    constexpr float beta  = 0.0F;
+    const hipblasStatus_t matmul_status = hipblasLtMatmul(
+        impl_->handle, profile->operation, &alpha, impl_->weight_codes,
+        impl_->weight_layout, profile->activation.codes,
+        profile->activation_layout, &beta, output, profile->output_layout, output,
+        profile->output_layout, &profile->algorithm, impl_->matmul_workspace,
+        profile->public_profile.selected_matmul_workspace_bytes, stream);
+    if (matmul_status != HIPBLAS_STATUS_SUCCESS) {
+        return {hipSuccess, matmul_status};
+    }
+    hipLaunchKernelGGL(poison_nonfinite_output, dim3(1), dim3(kPoisonBlockSize), 0,
+                       stream, profile->activation.status, output, output_elements);
+    return {hipGetLastError(), HIPBLAS_STATUS_SUCCESS};
+}
+
 LinearExecution::LaunchStatus LinearExecution::run_default_heuristic(
     std::uint32_t tokens, const hip_bfloat16* input, hip_bfloat16* output,
     hipStream_t stream) noexcept {

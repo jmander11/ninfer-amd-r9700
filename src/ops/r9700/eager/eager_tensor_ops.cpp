@@ -627,6 +627,26 @@ void sigmoid_mul(const Tensor& gate, Tensor& x, hipStream_t stream) {
                                               stream));
 }
 
+void sigmoid_mul(const Tensor& gate, const Tensor& x, Tensor& out, hipStream_t stream) {
+    constexpr const char* operation = "sigmoid_mul";
+    require_dtype(gate, DType::BF16, operation, "gate");
+    require_dtype(x, DType::FP32, operation, "x");
+    require_dtype(out, DType::BF16, operation, "out");
+    require_same_shape(gate, x, operation);
+    require_same_shape(gate, out, operation);
+    const std::size_t elements = checked_numel(out, operation, "out");
+    require_contiguous_nonnull(gate, operation, "gate");
+    require_contiguous_nonnull(x, operation, "x");
+    require_contiguous_nonnull(out, operation, "out");
+    if (tensors_overlap(gate, x) || tensors_overlap(gate, out) || tensors_overlap(x, out)) {
+        throw std::invalid_argument("sigmoid_mul: gate, x and out must not overlap");
+    }
+    HIP_CHECK(r9700::eager::sigmoid_mul_fp32_bf16(static_cast<const hip_bfloat16*>(gate.data),
+                                                   static_cast<const float*>(x.data),
+                                                   static_cast<hip_bfloat16*>(out.data), elements,
+                                                   stream));
+}
+
 void embedding(const Tensor& ids, const Weight& table, Tensor& output, hipStream_t stream) {
     require_embedding_common(ids, table, output);
     const auto vocabulary = static_cast<std::uint32_t>(table.shape[0]);

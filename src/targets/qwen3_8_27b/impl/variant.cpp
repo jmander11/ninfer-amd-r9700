@@ -804,6 +804,57 @@ std::vector<std::uint32_t> Variant::ExecutionState::eager_widths(
     return widths;
 }
 
+bool Variant::ExecutionState::run_shared(SelectedLinearRole first_role,
+                                         SelectedLinearRole second_role,
+                                         std::int32_t text_layer, const Tensor& input,
+                                         const Weight& first, Tensor& first_output,
+                                         const Weight& second, Tensor& second_output,
+                                         hipStream_t stream) {
+    if (first.qtype != QType::F8E4M3_ROW_F32S || second.qtype != QType::F8E4M3_ROW_F32S ||
+        impl_ == nullptr || first.k != second.k || input.ne[1] <= 0) {
+        return false;
+    }
+    Impl::Slot& second_slot = impl_->slots[Impl::index(second_role, text_layer)];
+    Impl::Slot& first_slot = impl_->slots[Impl::index(first_role, text_layer)];
+    if (second_slot.execution == nullptr || second_slot.weight != &second ||
+        first_slot.execution == nullptr) {
+        throw std::invalid_argument(
+            "R9700 FP8 selected projection binding differs from Program state");
+    }
+    const auto tokens = static_cast<std::uint32_t>(input.ne[1]);
+    if (!run(first_role, text_layer, input, first, first_output, stream)) return false;
+    if (second_slot.execution->prepared_profile(tokens) == nullptr) {
+        hipStreamCaptureStatus capture = hipStreamCaptureStatusNone;
+        HIP_CHECK(hipStreamIsCapturing(stream, &capture));
+        if (capture != hipStreamCaptureStatusNone) {
+            throw std::logic_error(
+                "R9700 FP8 projection width was not prepared before graph capture");
+        }
+        (void)second_slot.execution->prepare(tokens);
+    }
+    const auto* first_activation = first_slot.execution->activation_workspace(tokens);
+    const auto* second_activation = second_slot.execution->activation_workspace(tokens);
+    if (second_output.dtype != DType::BF16 || second_output.data == nullptr ||
+        !second_output.is_contiguous() || second_output.ne[0] != second.n ||
+        second_output.ne[1] != input.ne[1] || first_activation == nullptr ||
+        second_activation == nullptr || first_activation->codes != second_activation->codes ||
+        first_activation->scales != second_activation->scales ||
+        first_activation->status != second_activation->status) {
+        // Not provably the same activation image: quantize again.
+        return run(second_role, text_layer, input, second, second_output, stream);
+    }
+    const ops::LinearExecution::LaunchStatus status = second_slot.execution->run_quantized(
+        tokens, static_cast<hip_bfloat16*>(second_output.data), stream);
+    if (status.hip != hipSuccess) HIP_CHECK(status.hip);
+    if (status.hipblaslt != HIPBLAS_STATUS_SUCCESS) {
+        std::ostringstream message;
+        message << "R9700 FP8 selected projection failed with hipBLASLt status "
+                << static_cast<int>(status.hipblaslt);
+        throw std::runtime_error(message.str());
+    }
+    return true;
+}
+
 bool Variant::ExecutionState::run(SelectedLinearRole role, std::int32_t text_layer,
                                   const Tensor& input, const Weight& weight, Tensor& output,
                                   hipStream_t stream) {
@@ -950,6 +1001,22 @@ void Variant::attention_projection(const Tensor& hidden,
             hidden, weights.query_key, weights.gate_value,
             query, key, gate, value, stream)) {
         return;
+    }
+    if (execution != nullptr && weights.query_key.qtype == QType::F8E4M3_ROW_F32S &&
+        weights.gate_value.qtype == QType::F8E4M3_ROW_F32S) {
+        auto scope = workspace.scope();
+        Tensor query_key = workspace.alloc(DType::BF16, {7168, hidden.ne[1]});
+        Tensor gate_value = workspace.alloc(DType::BF16, {7168, hidden.ne[1]});
+        if (execution->run_shared(SelectedLinearRole::AttentionQueryKey,
+                                  SelectedLinearRole::AttentionGateValue, text_layer, hidden,
+                                  weights.query_key, query_key, weights.gate_value, gate_value,
+                                  stream)) {
+            ops::extract_bf16_columns(query_key, 0, query, stream);
+            ops::extract_bf16_columns(query_key, TextConfig::query_size, key, stream);
+            ops::extract_bf16_columns(gate_value, 0, gate, stream);
+            ops::extract_bf16_columns(gate_value, TextConfig::query_size, value, stream);
+            return;
+        }
     }
     {
         auto query_scope = workspace.scope();
@@ -1459,7 +1526,8 @@ std::size_t Variant::attention_projection_workspace_capacity_bytes(WeightsProfil
                                                                    std::int32_t last) {
     validate_profile(profile);
     validate_token_interval(first, last);
-    return one_matrix_bytes(7168, last);
+    // The shared-quantization FP8 route holds both projections at once.
+    return two_matrix_bytes(7168, 7168, last);
 }
 
 std::size_t Variant::attention_output_projection_workspace_capacity_bytes(

@@ -62,6 +62,13 @@ struct Variant {
         [[nodiscard]] bool run(SelectedLinearRole role, std::int32_t text_layer,
                                const Tensor& input, const Weight& weight, Tensor& output,
                                hipStream_t stream);
+        // Two row-scaled E4M3 projections of one input sharing a single activation quantization;
+        // false unless both roles are FP8 and bound to the same activation storage.
+        [[nodiscard]] bool run_shared(SelectedLinearRole first_role, SelectedLinearRole second_role,
+                                      std::int32_t text_layer, const Tensor& input,
+                                      const Weight& first, Tensor& first_output,
+                                      const Weight& second, Tensor& second_output,
+                                      hipStream_t stream);
         void linear(const Tensor& input, const Weight& weight, Tensor& output,
                     WorkspaceArena& fallback_workspace, hipStream_t stream);
         void fused_mlp_down(const Tensor& gate_up, const Weight& down,

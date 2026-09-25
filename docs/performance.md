@@ -96,6 +96,14 @@ relative error on long synthetic runs (no growth with length), inside the GDN Op
 Interleaved: 4K 2242→2306, 32K 1874→1930 tok/s (eval artifact); 4K prefill PPL
 6.4610/9.3909/2.2548 versus 6.4534/9.4455/2.2497 (mixed sign, noise).
 
+**Second batch.** The chunked GDN kernel was made branch-free on padded tokens and its load phase
+restructured (P2048 0.92→0.64 ms); the route now starts at T16. The two FP8 attention
+projections share one E4M3 activation quantization, and the attention output's FP32→BF16 cast and
+sigmoid gate run as one exact kernel. Interleaved: 4K 2309→2336, 32K 1924→1946 tok/s; PPL-4K
+unchanged. Under the 300 W cap the random-code gate/up GEMM runs at ~2.46 GHz, versus ~2.88 GHz
+for all-zero codes at the same power: the GEMM is power-bound, and only a higher power limit or a
+voltage offset (driver overdrive, disabled on this host) would raise its clock.
+
 **Chunk size.** Chunk 4096 remains 9–13% slower than 2048 (4K 1954 vs 2199, 8K 1847 vs 2130,
 32K 1671 vs 1838): the P2048-specialized fused routes do not apply and the GEMM is already
 compute-bound.

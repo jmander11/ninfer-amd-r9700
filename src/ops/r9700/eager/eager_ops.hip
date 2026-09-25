@@ -648,6 +648,15 @@ __global__ void sigmoid_mul_kernel(const hip_bfloat16* gate, hip_bfloat16* x,
     x[index] = hip_bfloat16(static_cast<float>(x[index]) / (1.0F + expf(-value)));
 }
 
+__global__ void sigmoid_mul_fp32_kernel(const hip_bfloat16* gate, const float* x,
+                                        hip_bfloat16* out, std::size_t count) {
+    const std::size_t index = static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    if (index >= count) { return; }
+    const float value = static_cast<float>(gate[index]);
+    const float represented = static_cast<float>(hip_bfloat16(x[index]));
+    out[index] = hip_bfloat16(represented / (1.0F + expf(-value)));
+}
+
 __global__ void embedding_gather_kernel(const hip_bfloat16* table, const std::int32_t* ids,
                                         hip_bfloat16* output, std::uint32_t features,
                                         std::uint32_t rows) {
@@ -1287,6 +1296,14 @@ hipError_t sigmoid_mul_bf16(const hip_bfloat16* gate, hip_bfloat16* x, std::size
                               valid_stream(stream),
                           [&] { hipLaunchKernelGGL(sigmoid_mul_kernel, linear_grid(count), dim3(kBlock), 0,
                                                    stream, gate, x, count); });
+}
+
+hipError_t sigmoid_mul_fp32_bf16(const hip_bfloat16* gate, const float* x, hip_bfloat16* out,
+                                 std::size_t count, hipStream_t stream) noexcept {
+    return checked_launch(gate != nullptr && x != nullptr && out != nullptr &&
+                              valid_linear_count(count) && valid_stream(stream),
+                          [&] { hipLaunchKernelGGL(sigmoid_mul_fp32_kernel, linear_grid(count),
+                                                   dim3(kBlock), 0, stream, gate, x, out, count); });
 }
 
 hipError_t embedding_gather_bf16(const hip_bfloat16* table, const std::int32_t* ids,

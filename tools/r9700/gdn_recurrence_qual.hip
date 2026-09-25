@@ -708,6 +708,8 @@ int main() {
         // Chunked widths with a partial final chunk, including in-place state aliasing.
         qualify_ordinary(65, true, true, 29, device.stream);
         qualify_ordinary(100, false, true, 31, device.stream);
+        qualify_ordinary(16, false, true, 41, device.stream);
+        qualify_ordinary(33, true, true, 43, device.stream);
         qualify_ordinary(2047, true, true, 37, device.stream);
         qualify_snapshot(3, 2, 53, device.stream);
         qualify_snapshot(1, static_cast<int>(ninfer::kMaximumConcurrency), 59, device.stream);

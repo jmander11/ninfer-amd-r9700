@@ -59,6 +59,15 @@ __device__ __forceinline__ F16x8 bf16x8_to_f16(const hip_bfloat16* source, bool 
     return result;
 }
 
+// Sum over all 32 lanes: DPP row_xmask within each 16-lane row, then across the two rows.
+__device__ __forceinline__ float wave_sum(float value) {
+    value += __int_as_float(__builtin_amdgcn_update_dpp(0, __float_as_int(value), 0x161, 0xf, 0xf, false));
+    value += __int_as_float(__builtin_amdgcn_update_dpp(0, __float_as_int(value), 0x162, 0xf, 0xf, false));
+    value += __int_as_float(__builtin_amdgcn_update_dpp(0, __float_as_int(value), 0x164, 0xf, 0xf, false));
+    value += __int_as_float(__builtin_amdgcn_update_dpp(0, __float_as_int(value), 0x168, 0xf, 0xf, false));
+    return value + __shfl_xor(value, 16, 32);
+}
+
 __device__ __forceinline__ F32x8 wmma(const F16x8& a, const F16x8& b, const F32x8& c) {
     return __builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12(a, b, c);
 }
@@ -85,39 +94,54 @@ __global__ __launch_bounds__(kWaves * 32) void chunked_kernel(
     const int chunks = (width + kChunk - 1) / kChunk;
     for (int chunk = 0; chunk < chunks; ++chunk) {
         const int t0 = chunk * kChunk;
-        // Normalized k in both layouts and the query scales; wave w owns tokens 8w..8w+7.
-        for (int r = 0; r < 8; ++r) {
-            const int i = wave * 8 + r;
-            const bool valid = t0 + i < width;
-            const std::size_t base = (std::size_t(t0 + i) * kQHeads + query_head) * kDim + 4 * lane;
-            uint2 kr{}, qr{};
-            if (valid) {
-                kr = *reinterpret_cast<const uint2*>(k + base);
-                qr = *reinterpret_cast<const uint2*>(q + base);
+        // Normalized k in both layouts and the query scales; wave w owns tokens 8w..8w+7 and
+        // lane l features 4l..4l+3. All loads are issued first; padded tokens read a clamped
+        // valid row and are zeroed.
+        {
+            uint2 key_raw[8], query_raw[8];
+#pragma unroll
+            for (int r = 0; r < 8; ++r) {
+                const int source = min(t0 + wave * 8 + r, width - 1);
+                const std::size_t base =
+                    (std::size_t(source) * kQHeads + query_head) * kDim + 4 * lane;
+                key_raw[r] = *reinterpret_cast<const uint2*>(k + base);
+                query_raw[r] = *reinterpret_cast<const uint2*>(q + base);
             }
-            const float kv[4] = {__uint_as_float(kr.x << 16U), __uint_as_float(kr.x & 0xffff0000U),
-                                 __uint_as_float(kr.y << 16U), __uint_as_float(kr.y & 0xffff0000U)};
-            const float qv[4] = {__uint_as_float(qr.x << 16U), __uint_as_float(qr.x & 0xffff0000U),
-                                 __uint_as_float(qr.y << 16U), __uint_as_float(qr.y & 0xffff0000U)};
-            float key_sum = 0.0F, query_sum = 0.0F;
+            _Float16 transposed[4][8];
+#pragma unroll
+            for (int r = 0; r < 8; ++r) {
+                const int i = wave * 8 + r;
+                const float live = t0 + i < width ? 1.0F : 0.0F;
+                const uint2 kr = key_raw[r], qr = query_raw[r];
+                const float kv[4] = {__uint_as_float(kr.x << 16U), __uint_as_float(kr.x & 0xffff0000U),
+                                     __uint_as_float(kr.y << 16U), __uint_as_float(kr.y & 0xffff0000U)};
+                const float qv[4] = {__uint_as_float(qr.x << 16U), __uint_as_float(qr.x & 0xffff0000U),
+                                     __uint_as_float(qr.y << 16U), __uint_as_float(qr.y & 0xffff0000U)};
+                float key_sum = 0.0F, query_sum = 0.0F;
+#pragma unroll
+                for (int it = 0; it < 4; ++it) {
+                    key_sum = fmaf(kv[it], kv[it], key_sum);
+                    query_sum = fmaf(qv[it], qv[it], query_sum);
+                }
+                key_sum = wave_sum(key_sum);
+                query_sum = wave_sum(query_sum);
+                const float key_inverse = rsqrtf(key_sum + kEpsilon) * live;
+#pragma unroll
+                for (int it = 0; it < 4; ++it) {
+                    const _Float16 normalized = _Float16(kv[it] * key_inverse);
+                    sh.k[i * kKPitch + 4 * lane + it] = normalized;
+                    transposed[it][r] = normalized;
+                }
+                if (lane == 0) sh.query_scale[i] = rsqrtf(query_sum + kEpsilon) * scale * live;
+            }
+            // Feature-major rows: eight consecutive tokens of each of this lane's features.
 #pragma unroll
             for (int it = 0; it < 4; ++it) {
-                key_sum = fmaf(kv[it], kv[it], key_sum);
-                query_sum = fmaf(qv[it], qv[it], query_sum);
-            }
+                F16x8 row;
 #pragma unroll
-            for (int w = 16; w; w >>= 1) {
-                key_sum += __shfl_xor(key_sum, w, 32);
-                query_sum += __shfl_xor(query_sum, w, 32);
+                for (int r = 0; r < 8; ++r) row[r] = transposed[it][r];
+                *reinterpret_cast<F16x8*>(&sh.k_transposed[(4 * lane + it) * kTPitch + wave * 8]) = row;
             }
-            const float key_inverse = rsqrtf(key_sum + kEpsilon);
-#pragma unroll
-            for (int it = 0; it < 4; ++it) {
-                const _Float16 normalized = _Float16(kv[it] * key_inverse);
-                sh.k[i * kKPitch + 4 * lane + it] = normalized;
-                sh.k_transposed[(4 * lane + it) * kTPitch + i] = normalized;
-            }
-            if (lane == 0) sh.query_scale[i] = rsqrtf(query_sum + kEpsilon) * scale;
         }
         if (wave == kWaves - 1) {
             // Inclusive scan of g over the chunk, two tokens per lane; padding decays nothing.
@@ -201,11 +225,11 @@ __global__ __launch_bounds__(kWaves * 32) void chunked_kernel(
             F32x8 acc;
 #pragma unroll
             for (int e = 0; e < 8; ++e) {
+                // Padded tokens have beta 0; read a valid clamped token instead of branching.
                 const int token = 16 * I + 8 * half + e;
-                acc[e] = t0 + token < width
-                    ? sh.beta[token] *
-                          float(v[(std::size_t(t0 + token) * kValueHeads + head) * kDim + row])
-                    : 0.0F;
+                const int source = min(t0 + token, width - 1);
+                acc[e] = sh.beta[token] *
+                         float(v[(std::size_t(source) * kValueHeads + head) * kDim + row]);
             }
             const int token = 16 * I + n;
             const _Float16 factor = _Float16(-sh.beta_gamma[token]);
