@@ -15,7 +15,7 @@ ENV LD_LIBRARY_PATH=/opt/rocm/core-10.0/lib:/opt/rocm/core-10.0/lib/llvm/lib:/op
 LABEL org.ninfer.platform=gfx1201
 
 FROM toolchain AS build
-ARG NINFER_BUILD_JOBS=4
+ARG NINFER_BUILD_JOBS=12
 RUN apt-get update && apt-get install --yes --no-install-recommends \
     build-essential cmake ninja-build git patch pkg-config util-linux \
     libavcodec-dev libavformat-dev libavutil-dev libswscale-dev \

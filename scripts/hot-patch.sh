@@ -2,9 +2,15 @@
 # Incremental app export/deploy for dedicated gfx1201 images and containers.
 set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+# This trusted checkout's .env also supplies paths to the child builder script.
+if [[ -f "$repo_root/.env" ]]; then
+  set -a
+  source "$repo_root/.env"
+  set +a
+fi
 builder="${NINFER_DEV_CONTAINER:-ninfer-r9700-builder}"
-container="${NINFER_CONTAINER:-ninfer-r9700}"
-image="${NINFER_IMAGE:-local/ninfer-r9700:local}"
+container="${NINFER_CONTAINER:-ninfer-r9700-server-1}"
+image="${NINFER_IMAGE:-local/ninfer-r9700:compose}"
 out="${NINFER_HOT_OUT:-$repo_root/out/hot-patch-r9700}"
 restart=1
 image_only=0
@@ -17,12 +23,15 @@ while (($#)); do
     --help|-h)
       echo 'Usage: scripts/hot-patch.sh [--no-restart | --image-only | --export-only]'
       echo 'Build/export CLI, server and PPL; update existing gfx1201 image/container. Existing image is tagged -rollback.'
+      echo 'Defaults target this repo Compose service: local/ninfer-r9700:compose / ninfer-r9700-server-1.'
+      echo 'Automatically loads and exports the repo .env when present.'
       exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
-jobs="${NINFER_DEV_JOBS:-4}"
+jobs="${NINFER_DEV_JOBS:-${NINFER_BUILD_JOBS:-12}}"
 [[ "$jobs" =~ ^([1-9]|1[0-4])$ ]] || { echo 'NINFER_DEV_JOBS must be 1..14.' >&2; exit 2; }
+export NINFER_DEV_JOBS="$jobs"
 ((image_only && export_only)) && { echo 'Choose image-only or export-only.' >&2; exit 2; }
 bash "$repo_root/scripts/dev-setup.sh"
 docker exec "$builder" cmake --build /build --parallel "$jobs" \

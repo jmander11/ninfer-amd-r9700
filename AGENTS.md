@@ -250,6 +250,21 @@ the task requires it. Never select an artifact by glob, modification time, or an
 "latest" name; large artifacts, source checkpoints, and profiler outputs are local prerequisites,
 not things to download or regenerate unless in scope.
 
+## Local build and deployment workflow
+
+For source-only development, prefer incremental CMake/Ninja builds, defaulting to 12 jobs
+(maximum 14). For Compose deployment, stop the server and run
+`bash scripts/hot-patch.sh --image-only`,
+then `docker compose up -d --no-build --wait server`. The helper retains build objects and
+updates the runtime image; run relevant tests separately. First-time builder setup may be slow.
+The helper automatically loads the trusted repo `.env` and exports its settings to the builder.
+Use full image builds for Dockerfile, toolchain or runtime dependency changes;
+`docker compose up -d --build` builds the image, not the incremental hot-patch path.
+Keep compilation, inference and conversion serial. The builder has no memory limit;
+Compose's 24 GiB/no-swap limit applies only to the server. Host port defaults to 8001;
+disk prefixes persist under `/ssdpool2nvme/local_llm/cache_r9700/prefix`.
+See `docs/containers.md` for setup and validation details.
+
 ## Commits
 
 Create a commit only when the user requests one. Use Conventional Commit-style subjects with

@@ -12,6 +12,10 @@ survives container replacement and `docker compose down --volumes`.
 Disk cache is prefix reuse, not active-context offload. RAM contents do not survive
 restart; durable disk entries can be restored for the same model fingerprint.
 Requests may override temperature; p-less sampling remains enabled by default.
+Adaptive draft length and the optimized proposal head are enabled. Pending requests
+have a 900000 ms (15-minute) preparation/admission timeout; the default output limit
+is 32768 tokens. The 32768-token context limit still includes prompt and output.
+The server option for adaptive length is `--adaptive-draft`, not `--adaptive-token`.
 
 ```sh
 cp .env.example .env
@@ -41,21 +45,21 @@ image but does not detect source edits as a rebuild requirement. Use
 `docker compose up -d --build server` to explicitly build before starting.
 Stop an already-running server first on this shared host.
 
-For a memory-bounded build, create a dedicated Buildx builder once (this does not
+For a dedicated Buildx builder, create it once (this does not
 change Docker's globally selected builder):
 
 ```sh
 docker buildx create --name ninfer-r9700-build --driver docker-container \
-  --driver-opt memory=24g,memory-swap=24g,cpu-period=100000,cpu-quota=1400000,default-load=true
+  --driver-opt cpu-period=100000,cpu-quota=1400000,default-load=true
 docker compose build --builder ninfer-r9700-build server
 docker compose up -d --no-build server
 ```
 
-The compile-job default remains4. Compose's service memory limit applies to the
-running server, not image compilation; the dedicated builder supplies the latter
-limit. Reuse it for subsequent builds rather than creating it again.
+The compile-job default is 12, with no builder memory limit. The builder CPU quota
+allows 14 logical CPUs; it is not a Linux load-average cap. Compose's memory limit
+applies only to the running server. Reuse the builder for subsequent builds.
 
-The default listener is host loopback port8080, with no API key. Change the bind
+The default listener is host loopback port 8001 (container port 8080), with no API key. Change the bind
 address only behind suitable access controls. `.env` can override model path,
 port, context, C1..4, draft count and cache capacities. For the measured workload,
 use K5 at C1–2 and K4 at C3–4. The runtime is bounded to24GiB host RAM with no
@@ -89,7 +93,7 @@ docker buildx build --load --target runtime --tag local/ninfer-r9700:local \
   --build-context python311=/absolute/path/to/self-contained-python-3.11 .
 ```
 
-Image builds default to four compile jobs; `--build-arg NINFER_BUILD_JOBS=8`
+Image builds default to 12 compile jobs; `--build-arg NINFER_BUILD_JOBS=8`
 overrides this within the enforced range 1–14. Build and GPU/model jobs must run
 serially on the shared host. These are native AMD images: no NVIDIA Container
 Toolkit or `--gpus all` is needed.
@@ -123,14 +127,14 @@ until the user recreates it. No packages are installed into an existing containe
 Setup configures the mounted build volume. Compile the applications explicitly:
 
 ```sh
-docker exec ninfer-r9700-builder cmake --build /build --parallel 4 \
+docker exec ninfer-r9700-builder cmake --build /build --parallel 12 \
   --target ninfer ninfer-serve ninfer-ppl
 docker exec ninfer-r9700-builder /build/apps/ninfer --help
 ```
 
 This is the incremental development path: CMake/Ninja retain objects in `/build`
 and rebuild affected dependencies after edits to the live `/src` checkout. Native
-`cmake --build build-r9700 --parallel 4 --target ninfer-serve` is incremental too.
+`cmake --build build-r9700 --parallel 12 --target ninfer-serve` is incremental too.
 The Compose runtime image is separate: its Dockerfile caches complete build layers,
 but a changed source snapshot invalidates the compile layer and recompiles the apps.
 Building in the development container does not update the Compose runtime image.
@@ -140,14 +144,14 @@ incrementally built CLI/server/PPL apps. For this Compose service:
 
 ```sh
 docker compose stop server
-set -a
-. ./.env
-set +a
-NINFER_IMAGE=local/ninfer-r9700:compose NINFER_DEV_JOBS=4 \
-  bash scripts/hot-patch.sh --image-only
+bash scripts/hot-patch.sh --image-only
 docker compose up -d --no-build --wait server
 ```
 
+The helper automatically sources the trusted checkout's `.env` when present and
+exports its settings to the builder, even when invoked from another directory.
+Values assigned in `.env` replace same-named shell values. `NINFER_DEV_JOBS` selects
+parallelism, falling back to `NINFER_BUILD_JOBS` and then 12.
 The first invocation creates the development builder if absent; later invocations
 reuse its persistent objects. The previous runtime image receives a `-rollback`
 tag. This helper was inspected, not executed in the Compose validation below.
@@ -175,7 +179,7 @@ build-r9700/src/ninfer_r9700_engine_cache_cancel_qual /absolute/path/to/exact-mo
   --disk-dir /absolute/path/to/new-cache-qualification
 # Start Compose only after the other tests finish, then exercise real HTTP routes:
 docker compose up -d --no-build server
-python3.11 tools/smoke/serve_cache.py --base-url http://127.0.0.1:8080
+python3.11 tools/smoke/serve_cache.py --base-url http://127.0.0.1:8001
 ```
 
 The HTTP smoke sends Chat, Responses, Anthropic and streaming requests without a
@@ -252,15 +256,11 @@ unrelated benchmark processes: the maintainer still schedules the sole GPU.
 Python tests with Python 3.11. The selected interpreter must already provide
 `pytest` and `torch`; the runner does not install or upgrade dependencies.
 `NINFER_DEV_JOBS` controls setup, test-runner and hot-patch build parallelism
-(default 4, enforced range 1–14). CTest arguments follow `--`.
+(default 12, enforced range 1–14). CTest arguments follow `--`.
 
 ## Runtime and incremental app deployment
 
 ```sh
-docker run --name ninfer-r9700 --device /dev/kfd --device /dev/dri/renderD128 \
-  -v /absolute/path/to/local-models:/models:ro -p 8080:8080 \
-  local/ninfer-r9700:local ninfer-serve /models/exact-selected-artifact.ninfer \
-  --host 0.0.0.0 --port 8080 --max-concurrency 1
 bash scripts/hot-patch.sh --export-only
 bash scripts/hot-patch.sh --image-only
 bash scripts/hot-patch.sh --no-restart
@@ -268,8 +268,9 @@ bash scripts/hot-patch.sh --no-restart
 
 `hot-patch.sh` builds CLI, server and PPL in the dedicated builder. Exports go to
 `out/hot-patch-r9700` (`NINFER_HOT_OUT` overrides it). Without an export-only flag,
-it updates the existing `local/ninfer-r9700:local` image and `ninfer-r9700`
-container; `NINFER_IMAGE` and `NINFER_CONTAINER` select explicit alternatives.
+it updates this repo's existing Compose image `local/ninfer-r9700:compose` and
+container `ninfer-r9700-server-1`; no image argument is needed for the normal flow.
+`NINFER_IMAGE` and `NINFER_CONTAINER` select explicit alternative deployments.
 Every target must carry `org.ninfer.platform=gfx1201`, which this Dockerfile sets.
 It refuses an unmarked or different-platform target, preserving existing NVIDIA
 deployments. The prior image is tagged with the `-rollback` suffix. By default a

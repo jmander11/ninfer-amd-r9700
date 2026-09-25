@@ -9,8 +9,8 @@ in `docs/performance.md` and `docs/maintainer/r9700-overhaul-plan.md`, not here.
 - Shared-machine resource safety: run heavyweight jobs strictly serially across the primary
   agent and all subagents. Never overlap model conversion/copy/readback, compilation, or
   PPL/inference/benchmark/profiler jobs; wait for the complete job and its children to exit.
-  Lightweight editing/read-only review may continue. Build with an explicit maximum of 14 jobs:
-  `cmake --build <build-dir> --parallel 14` (or fewer); never use bare `--parallel`, bare `-j`,
+  Lightweight editing/read-only review may continue. Default to 12 compile jobs, maximum 14:
+  `cmake --build <build-dir> --parallel 12`; never use bare `--parallel`, bare `-j`,
   or uncapped native builds. This is a job cap, not CPU affinity or a memory limit.
   Reduce concurrency further or stop on sustained memory/swap/I/O pressure; 14 is not a target.
   The 2026-09-23 stall coincided with conversion/readback + PPL + an eight-job build;
@@ -100,6 +100,9 @@ COMPLETED USER REQUEST (2026-09-24, Docker Compose deployment):
   `/ssdpool2nvme/local_llm/cache_r9700` (entries in `prefix/`), separate from5090.
   Verify actual mount, four HTTP routes/RAM reuse and restart disk hit12tokens.
   Document existing AMD incremental `scripts/hot-patch.sh` workflow for Compose.
+- [x] User adjustment: default 12 compile jobs across image/dev/test builds; remove
+  dedicated Buildx memory/swap limits, retaining its 14-CPU quota and cached state.
+  Server 24 GiB memory limit is unchanged. This supersedes earlier four-job defaults.
 Image/service/cache retained; test server and builder stopped to release resources.
 Local `.env` is configured and ignored. Old Docker named cache volume is retained
 unused; see `docs/containers.md` for validation and incremental-build commands.

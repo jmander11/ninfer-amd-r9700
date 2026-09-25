@@ -12,7 +12,7 @@ image="${NINFER_BUILDER_IMAGE:-local/ninfer-r9700-builder:local}"
 volume="${NINFER_BUILD_VOLUME:-ninfer-r9700-build-cache}"
 rocm_context="${NINFER_ROCM_CONTEXT:-/opt/rocm/core-10.0}"
 render_node="${NINFER_DRM_RENDER_NODE:-/dev/dri/renderD128}"
-jobs="${NINFER_DEV_JOBS:-4}"
+jobs="${NINFER_DEV_JOBS:-12}"
 [[ "$jobs" =~ ^([1-9]|1[0-4])$ ]] || { echo 'NINFER_DEV_JOBS must be 1..14.' >&2; exit 2; }
 command -v docker >/dev/null
 if [[ ${NINFER_REBUILD_BUILDER:-0} == 1 ]] || ! docker image inspect "$image" >/dev/null 2>&1; then

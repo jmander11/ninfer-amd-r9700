@@ -7,7 +7,7 @@ services:
       context: .
       target: runtime
       args:
-        NINFER_BUILD_JOBS: ${NINFER_BUILD_JOBS:-4}
+        NINFER_BUILD_JOBS: ${NINFER_BUILD_JOBS:-12}
       additional_contexts:
         rocm: ${NINFER_ROCM_CONTEXT:-/opt/rocm/core-10.0}
         python311: ${NINFER_PYTHON_CONTEXT:?Set the self-contained Python 3.11 root in .env}
@@ -15,7 +15,7 @@ services:
       - /dev/kfd:/dev/kfd
       - ${NINFER_DRM_RENDER_NODE:-/dev/dri/renderD128}:${NINFER_DRM_RENDER_NODE:-/dev/dri/renderD128}
     ports:
-      - "${NINFER_BIND_ADDRESS:-127.0.0.1}:${NINFER_PORT:-8080}:8080"
+      - "${NINFER_BIND_ADDRESS:-127.0.0.1}:${NINFER_PORT:-8001}:8080"
     volumes:
       - type: bind
         source: ${NINFER_MODELS_DIR:-../models}
@@ -63,6 +63,12 @@ services:
       - dflash
       - --draft-tokens
       - "${NINFER_DRAFT_TOKENS:-5}"
+      - --adaptive-draft
+      - --lm-head-draft
+      - --pending-timeout-ms
+      - "900000"
+      - --default-max-tokens
+      - "32768"
     healthcheck:
       test: [CMD, curl, --fail, --silent, --show-error, http://127.0.0.1:8080/health]
       interval: 15s

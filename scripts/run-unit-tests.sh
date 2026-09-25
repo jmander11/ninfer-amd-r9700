@@ -25,7 +25,7 @@ while (($#)); do
     *) echo "Unknown option: $1; pass CTest arguments after --." >&2; exit 2 ;;
   esac
 done
-jobs="${NINFER_DEV_JOBS:-4}"
+jobs="${NINFER_DEV_JOBS:-12}"
 [[ "$jobs" =~ ^([1-9]|1[0-4])$ ]] || { echo 'NINFER_DEV_JOBS must be 1..14.' >&2; exit 2; }
 if ((use_builder)); then
   bash "$repo_root/scripts/dev-setup.sh"
