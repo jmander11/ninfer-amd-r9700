@@ -27,6 +27,12 @@ FULL_SCORE_PROFILES = {
                "workgroup": 256, "rounded_lds": 12288},
     "pv_g32": {"lds": 8952, "wmma": 0, "vgpr": 128, "occupancy": 8,
                "workgroup": 256, "rounded_lds": 12288},
+    "pv_split_g16": {"lds": 4264, "wmma": 0, "vgpr": 128, "occupancy": 8,
+                     "workgroup": 256, "rounded_lds": 4608},
+    "pv_split_g32": {"lds": 4008, "wmma": 0, "vgpr": 128, "occupancy": 8,
+                     "workgroup": 256, "rounded_lds": 4096},
+    "pv_merge": {"lds": 4, "wmma": 0, "vgpr": 64, "occupancy": 8,
+                 "workgroup": 256, "rounded_lds": 512},
 }
 LDS_ALLOCATION_GRANULE = 512
 
@@ -53,9 +59,13 @@ def check(*, assembly: Path, metadata: Path, symbol: str,
     elif full_score_stage == "maximum":
         specialization = "31dense_full_score_maximum_kernelILb0EE"
     elif full_score_stage == "pv":
-        specialization = f"26dense_full_score_pv_kernelILj{value_group}ELb0EE"
+        specialization = f"26dense_full_score_pv_kernelILj{value_group}ELb0ELj16ELj1EE"
+    elif full_score_stage == "pv_split":
+        specialization = f"26dense_full_score_pv_kernelILj{value_group}ELb0ELj4ELj16EE"
+    elif full_score_stage == "pv_merge":
+        specialization = "32dense_full_score_pv_merge_kernel"
     else:
-        raise ValueError("full-score stage must be qk_bk16, qk_bk32, maximum, or pv")
+        raise ValueError("unknown full-score stage")
     if specialization not in symbol:
         raise ValueError(
             "selected symbol is not the exact production "
@@ -66,7 +76,8 @@ def check(*, assembly: Path, metadata: Path, symbol: str,
     kernel_record = _kernel_metadata_record(metadata_text, symbol)
     opcode = "v_wmma_f32_16x16x16_bf16"
     count = len(re.findall(rf"^\s*{opcode}(?:\s|$)", assembly_body, re.MULTILINE))
-    profile_name = f"pv_g{value_group}" if full_score_stage == "pv" else full_score_stage
+    profile_name = (f"{full_score_stage}_g{value_group}"
+                    if full_score_stage in ("pv", "pv_split") else full_score_stage)
     profile = FULL_SCORE_PROFILES[profile_name]
     expected_wmma = profile["wmma"]
     if count != expected_wmma:
@@ -76,10 +87,10 @@ def check(*, assembly: Path, metadata: Path, symbol: str,
                            re.MULTILINE | re.IGNORECASE)
     if forbidden:
         raise ValueError(f"selected BF16-Q profile contains forbidden matrix opcodes: {forbidden}")
-    if full_score_stage in ("maximum", "pv") and re.search(
+    if full_score_stage in ("maximum", "pv", "pv_split", "pv_merge") and re.search(
             r"^\s*v_wmma_", assembly_body, re.MULTILINE):
         raise ValueError("maximum/PV stage must not contain any WMMA instruction")
-    if full_score_stage == "pv":
+    if full_score_stage in ("pv", "pv_split"):
         if not re.search(r"^\s*v_exp_f32(?:_e(?:32|64))?(?:\s|$)", assembly_body,
                          re.MULTILINE):
             raise ValueError("PV stage is missing native FP32 exponential")
@@ -118,7 +129,7 @@ def check(*, assembly: Path, metadata: Path, symbol: str,
                    LDS_ALLOCATION_GRANULE)
     expected_lds = profile["lds"]
     if lds != expected_lds:
-        raise ValueError(f"Bq16 LDS size {lds}, expected exactly {expected_lds}")
+        raise ValueError(f"LDS size {lds}, expected exactly {expected_lds}")
     maximum_vgpr = profile["vgpr"]
     maximum_rounded_lds = profile["rounded_lds"]
     minimum_occupancy = profile["occupancy"]
@@ -140,7 +151,9 @@ def check(*, assembly: Path, metadata: Path, symbol: str,
         raise ValueError(
             f"private={private} scratch={scratch} flat_scratch={flat_scratch} "
             f"vgpr_spills={vgpr_spills} sgpr_spills={sgpr_spills}; all must be zero")
-    return {"symbol": symbol, "value_group": value_group, "query_tile": 16,
+    return {"symbol": symbol, "value_group": value_group,
+            "query_tile": 4 if full_score_stage == "pv_split" else 1 if full_score_stage == "pv_merge" else 16,
+            "key_splits": 16 if full_score_stage in ("pv_split", "pv_merge") else 1,
             "full_score_stage": full_score_stage,
             "bf16_wmma_count": count, "lds_bytes": lds, "rounded_lds_bytes": rounded_lds,
             "vgpr_count": vgpr,
@@ -157,7 +170,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--symbol", required=True)
     parser.add_argument("--value-group", required=True, type=int, choices=(16, 32))
     parser.add_argument("--full-score-stage", required=True,
-                        choices=("qk_bk16", "qk_bk32", "maximum", "pv"))
+                        choices=("qk_bk16", "qk_bk32", "maximum", "pv", "pv_split", "pv_merge"))
     return parser.parse_args(argv)
 
 

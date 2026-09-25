@@ -3,11 +3,19 @@
 Offline helper for the `ninfer_bench` throughput tool. Correctness/parity tooling lives separately
 under [`tools/parity`](../parity).
 
+## Reusable context speed and quality comparison
+
+`context_ladder.py` runs or collects serial C1 context ladders, retaining average and trailing
+prefill rates; it also runs matched-token PPL and compares dense with a separately compiled
+XAttention candidate. Commands, resume rules, corpus requirements and focused trace analysis
+are in `context_ladder.md`. Timing and quality are separate evidence; cyclic timing inputs do
+not establish natural long-context quality.
+
 ## Corpus baker
 
-`ninfer_bench` benchmarks prefill at an exact length by slicing the first `P` token ids of a
-committed corpus, so the corpus must be real, in-distribution text (not random tokens) and at
-least as long as the largest prefill you want to run. `make_bench_corpus.py` bakes that corpus
+`ninfer_bench` benchmarks prefill at an exact length, cycling corpus IDs when `P` exceeds its
+length. For representative long-context or sparse-attention measurements, use real,
+in-distribution text at least as long as the largest prefill. `make_bench_corpus.py` bakes a corpus
 offline with the local Qwen3.8-27B tokenizer.
 
 Outputs (committed):
@@ -21,14 +29,14 @@ Content sources:
 
 - Built-in curated multi-domain prose (Chinese / English / code / math) — the default. It is
   encoded WITHOUT the chat template or special tokens, then tiled (paragraphs rotated each cycle)
-  and truncated to exactly `--tokens`. Repetition only fills length; because prefill/decode
-  throughput is token-count / bandwidth bound, it does not bias the numbers.
+  and truncated to exactly `--tokens`. Report this repetition explicitly: it can affect attention
+  sparsity and is not a substitute for natural long-context input, particularly for XAttention.
 - `--source-text <file>` (repeatable) — tokenize your own long meaningful text instead, e.g. a
   downloaded public-domain book or a concatenated document set, for genuinely diverse very long
   content. The committed default is `~64k` tokens; raise `--tokens` and/or pass `--source-text`
   for more.
 
-The binary slices `[0:P]`; the manifest is provenance only.
+The binary reads the IDs, cycling if needed; the manifest is provenance only.
 
 ## Requirements
 
@@ -58,8 +66,8 @@ python3 tools/bench/make_bench_corpus.py \
 python3 tools/bench/make_bench_corpus.py --check
 ```
 
-`--tokens` is the exact committed corpus size and the ceiling on prefill length; increase it (and
-optionally use `--source-text`) to benchmark longer prefills, memory permitting.
+`--tokens` is the baked corpus size; increase it (and optionally use `--source-text`) to
+benchmark longer prefills without corpus cycling, memory permitting.
 
 ## NInfer performance matrix
 

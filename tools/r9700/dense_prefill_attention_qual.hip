@@ -102,6 +102,15 @@ struct Fixture {
     std::vector<std::uint16_t> scales;
 };
 
+std::uint32_t fixture_word(std::size_t physical, std::uint32_t head,
+                           std::uint32_t feature, std::uint32_t salt) {
+    std::uint32_t word = static_cast<std::uint32_t>(physical) * 0x9e3779b9U ^
+        head * 0x85ebca6bU ^ feature * 0xc2b2ae35U ^ salt;
+    word ^= word >> 16U; word *= 0x7feb352dU;
+    word ^= word >> 15U; word *= 0x846ca68bU;
+    return word ^ (word >> 16U);
+}
+
 Fixture make_fixture(std::uint32_t group, std::uint32_t context) {
     const std::size_t physical_tokens = ((context + kPage - 1U) / kPage + 5U) * kPage;
     Fixture result{group, physical_tokens, make_pages(context),
@@ -116,17 +125,17 @@ Fixture make_fixture(std::uint32_t group, std::uint32_t context) {
         for (std::uint32_t head = 0U; head < kHkv; ++head) {
             for (std::uint32_t feature = 0U; feature < kD; ++feature) {
                 result.keys[key_offset(physical, head, feature, physical_tokens / kPage)] =
-                    key_words[(physical * 5U + head * 7U + feature * 3U) % key_words.size()];
+                    key_words[fixture_word(physical, head, feature, 1U) % key_words.size()];
             }
             for (std::uint32_t feature = 0U; feature < kD; feature += 2U) {
-                const int lo = static_cast<int>((physical + head * 3U + feature) % 15U) - 7;
-                const int hi = static_cast<int>((physical * 3U + head + feature) % 15U) - 7;
+                const int lo = static_cast<int>(fixture_word(physical, head, feature, 2U) % 16U) - 8;
+                const int hi = static_cast<int>(fixture_word(physical, head, feature + 1U, 2U) % 16U) - 8;
                 result.values[value_offset(physical, head, feature)] =
                     static_cast<std::uint8_t>((lo & 15) | ((hi & 15) << 4));
             }
             for (std::uint32_t feature = 0U; feature < kD; feature += group) {
                 result.scales[scale_offset(physical, head, feature, group)] =
-                    scale_words[(physical + head + feature / group) % scale_words.size()];
+                    scale_words[fixture_word(physical, head, feature / group, 3U) % scale_words.size()];
             }
         }
     }
@@ -322,7 +331,9 @@ void run_case(std::uint32_t rows, std::uint32_t group, std::uint32_t context) {
     HIP_CHECK(hipMemcpy(output.data(), d_output.get(), d_output.bytes(), hipMemcpyDeviceToHost));
     const float* scores = reinterpret_cast<const float*>(d_workspace.get());
     const auto panel_rows = kv::dense_prefill_panel_rows(rows, context);
-    const auto last_origin = ((rows - 1U) / panel_rows) * panel_rows;
+    const auto panel_count = (rows + panel_rows - 1U) / panel_rows;
+    const auto query_tiles = (rows + 15U) / 16U;
+    const auto last_origin = (query_tiles - query_tiles / panel_count) * 16U;
     for (const auto row : {last_origin, rows - 1U}) {
         const std::uint32_t visible = static_cast<std::uint32_t>(positions[row]) + 1U;
         for (const auto head : {0U, 7U, 23U}) {
@@ -521,9 +532,19 @@ void run_case(std::uint32_t rows, std::uint32_t group, std::uint32_t context) {
 
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
     try {
         host_predicate_regression();
+        if (argc == 4) {
+            const auto rows = static_cast<std::uint32_t>(std::stoul(argv[1]));
+            const auto context = static_cast<std::uint32_t>(std::stoul(argv[2]));
+            const auto group = static_cast<std::uint32_t>(std::stoul(argv[3]));
+            if (!kv::use_dense_prefill_attention(rows, context) || (group != 16U && group != 32U))
+                fail("invalid dense attention qualification shape");
+            run_case(rows, group, context);
+            return 0;
+        }
+        if (argc != 1) fail("usage: dense_prefill_attention_qual [rows context value-group]");
         for (const std::uint32_t group : {16U, 32U}) {
             for (const std::uint32_t rows : {128U, 129U, 512U, 1024U, 2048U, 4096U}) {
                 run_case(rows, group, rows);
@@ -534,6 +555,11 @@ int main() {
             run_case(1025U, group, 32768U);
             run_case(8192U, group, 32768U);
             run_case(128U, group, 262144U);
+            run_case(129U, group, kv::kDensePrefillSplitPvMinimumContext - 1U);
+            run_case(1537U, group, kv::kDensePrefillSplitPvMinimumContext);
+            run_case(129U, group, kv::kDensePrefillSplitPvMinimumContext + 1U);
+            run_case(2048U, group, 65536U);
+            run_case(128U, group, 131072U);
         }
         std::cout << "production Bk16/Bk32 dense G16/G32 FP64 qualification: PASS\n";
         return 0;

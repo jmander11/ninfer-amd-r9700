@@ -661,6 +661,8 @@ RepTiming fold_lane_results(const std::vector<GenerationResult>& generated,
     timing.generated_token_ids_by_lane.reserve(generated.size());
     for (const GenerationResult& lane : generated) {
         timing.generated_token_ids_by_lane.push_back(lane.generated_token_ids);
+        timing.prefill_tail_by_lane.push_back(
+            {lane.timings.prefill_tail_tok_s, lane.timings.prefill_tail_window_s});
     }
     for (std::size_t i = 1; i < generated.size(); ++i) {
         const GenerationResult& result = generated[i];
@@ -1058,7 +1060,14 @@ std::string format_json(const BenchEnvironment& env, const std::string& command,
                 }
                 out << "],\n";
             }
-            out << "          \"wave_seconds\": " << number(rep.wave_seconds) << ",\n";
+            out << "          \"prefill_tail_by_lane\": [";
+            for (std::size_t lane = 0; lane < rep.prefill_tail_by_lane.size(); ++lane) {
+                if (lane != 0) { out << ", "; }
+                const auto& tail = rep.prefill_tail_by_lane[lane];
+                out << "{\"tok_s\": " << number(tail.tok_s)
+                    << ", \"window_s\": " << number(tail.window_s) << '}';
+            }
+            out << "],\n          \"wave_seconds\": " << number(rep.wave_seconds) << ",\n";
             append_timings_json(out, rep.timings, "          ");
             out << ",\n";
             append_speculative_json(out, rep.speculative, "          ");

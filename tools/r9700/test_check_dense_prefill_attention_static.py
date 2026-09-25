@@ -92,7 +92,7 @@ amdhsa.kernels:
             self.assertEqual(result["lds_bytes"], 16488)
 
             pv_symbol = ("_ZN6ninfer3ops5r97002kv26dense_full_score_pv_kernel"
-                         "ILj16ELb0EEEv")
+                         "ILj16ELb0ELj16ELj1EEEv")
             profile = FULL_SCORE_PROFILES["pv_g16"]
             paths = self.fixture(
                 Path(directory), lds=profile["lds"], vgpr=116,
@@ -104,7 +104,7 @@ amdhsa.kernels:
 
     def test_full_score_pv_gate_rejects_wmma(self) -> None:
         symbol = ("_ZN6ninfer3ops5r97002kv26dense_full_score_pv_kernel"
-                  "ILj16ELb0EEEv")
+                  "ILj16ELb0ELj16ELj1EEEv")
         with tempfile.TemporaryDirectory() as directory:
             profile = FULL_SCORE_PROFILES["pv_g16"]
             paths = self.fixture(Path(directory), lds=profile["lds"], vgpr=116,
@@ -113,6 +113,21 @@ amdhsa.kernels:
             with self.assertRaisesRegex(ValueError, "count 16, expected 0"):
                 check(assembly=paths[0], metadata=paths[1], symbol=symbol,
                       value_group=16, full_score_stage="pv")
+
+    def test_split_pv_and_merge_resources(self) -> None:
+        for stage, symbol, key in (
+            ("pv_split", "_ZN6ninfer3ops5r97002kv26dense_full_score_pv_kernelILj16ELb0ELj4ELj16EEEv", "pv_split_g16"),
+            ("pv_merge", "_ZN6ninfer3ops5r97002kv32dense_full_score_pv_merge_kernelEv", "pv_merge"),
+        ):
+            with self.subTest(stage=stage), tempfile.TemporaryDirectory() as directory:
+                profile = FULL_SCORE_PROFILES[key]
+                paths = self.fixture(Path(directory), lds=profile["lds"], vgpr=56,
+                                     occupancy=8, maximum_workgroup=256, symbol=symbol,
+                                     wmma_count=0,
+                                     additional="\n\tv_exp_f32 v0, v1\n\tv_fmac_f32 v0, v1, v2")
+                result = check(assembly=paths[0], metadata=paths[1], symbol=symbol,
+                               value_group=16, full_score_stage=stage)
+                self.assertEqual(result["key_splits"], 16)
 
     def test_rejects_wrong_symbol_or_opcode(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

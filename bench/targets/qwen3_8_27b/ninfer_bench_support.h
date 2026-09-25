@@ -89,10 +89,16 @@ struct BenchOptions {
 };
 
 struct RepTiming {
+    struct PrefillTail {
+        double tok_s = 0.0;
+        double window_s = 0.0;
+    };
     GenerationTimings timings;
     SpeculativeStats speculative;
     std::uint32_t generated_output_tokens = 0;
     std::vector<std::vector<TokenId>> generated_token_ids_by_lane;
+    // Per-request trailing service rate; do not sum rates from different lane windows.
+    std::vector<PrefillTail> prefill_tail_by_lane;
     // Host wall time from the first Engine submission until every request in the
     // repetition resolves. Unlike per-request GenerationTimings, this includes
     // scheduler queueing and is the denominator for pure-prefill wave throughput.

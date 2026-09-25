@@ -736,7 +736,7 @@ and N1024 regressed at all four extents by `1.21819x` through `1.35600x`. Its re
 `2ac938b230197384a476bd57ccfd39d72a1b73c03bee82c58bf3be9df7de5b1f`. Production remains A8;
 the already-rejected A4 quality profile was not reevaluated.
 
-The dense attention route is the three-stage full-score GQA6 path with bounded query panels
+The dense attention route is the staged full-score GQA6 path with bounded query panels
 in `fp8_int4_kv_attention.hip`. It accepts initial and appended P=128..8192 calls through a
 262144-token visible context with token-fastest
 FP8 K plus feature-fastest signed INT4 V and FP16 scales. QK uses Bk16 below P512 and the selected
@@ -744,35 +744,50 @@ Bk32 schedule for complete calls with at least 512 query rows, regardless of pan
 each tile is shared across the six query heads of one KV
 head and writes FP32 scores. A separate maximum pass validates each causal
 vector; PV forms FP32 probabilities and reuses each direct INT4/FP16-scale V tile across the same
-six heads. The caller-owned score/max workspace is reused across layers at its planner-stable arena
+six heads. At visible context>=12288, PV uses four query rows per block and16 key splits,
+then merges FP32 numerator/denominator partials against the common maximum. Below that boundary
+it retains the16-query-row unsplit route. The caller-owned score/max/partial workspace is reused across layers at its planner-stable arena
 address. P<128, tree attention, and other layouts retain their prior routes. Device-active counts
 remain relative to the whole call; each panel clamps that count using its original row offset.
 
 After the serialized campaign permits a new build/GPU run, execute the independent FP64 harness:
 
 ```sh
-make -C tools/r9700 dense-prefill-attention
+make -C tools/r9700 -j12 dense-prefill-attention
+# One explicit shape (rows, visible context, value group):
+tools/r9700/build/dense_prefill_attention_qual 1537 12288 16
 ```
 
 It covers G16/G32 initial prefixes, appended 8K/32K contexts, 8192 query rows, partial panels,
-and a 262144-context panel boundary with fragmented physical pages and exact stored cache planes.
+and12K dispatch boundaries,64K/128K/262144 contexts with fragmented physical pages,
+nonperiodic represented inputs and exact stored cache planes.
 Independent FP64 scores are computed once per sampled row/head and validate all 256 output
 features across all four KV heads. It also checks workspace/output canaries, active counts crossing
 panels, invalid whole-call counts, and eager/Device Graph replay after poisoned scratch.
 `dense-prefill-attention-full-score-isa` prints both selected QK kernels plus maximum and PV. Invoke
 `dense-prefill-attention-full-score-static` with the exact selected mangled symbol and
-`DENSE_ATTN_STAGE=qk_bk16`, `qk_bk32`, `maximum`, or `pv`. The checker requires exactly sixteen
+`DENSE_ATTN_STAGE=qk_bk16`, `qk_bk32`, `maximum`, `pv`, `pv_split`, or `pv_merge`. The checker requires exactly sixteen
 BF16 WMMAs for Bk16 and 32 for Bk32, and forbids every WMMA opcode in maximum/PV. The emitted
 pre-panel gfx1201 resources were Bk16 QK 29 VGPR/8,296-byte LDS/occupancy 15, Bk32 QK 97 next-free
 VGPR/16,488-byte LDS/occupancy 11, maximum 17 VGPR/64-byte LDS/occupancy 16, and PV 116
 VGPR/occupancy 12 with 9,208-byte G16 or 8,952-byte G32 LDS. Every stage is wave32 WGP mode with
 zero private/scratch/flat-scratch and zero register spills; PV must contain native FP32 exp and
 FP32 FMA/FMAC.
+The current split PV has109 VGPR,4264/4008-byte G16/G32 LDS and compiler occupancy12;
+the merge has8 VGPR,4-byte LDS and occupancy16. Both have zero scratch/spills and
+wave32 WGP execution. Split reduction changes private FP32 association, not cache or
+activation formats, and is qualified against the same independent FP64 formula.
 
 The full-score route uses a caller-owned reusable FP32 workspace of
-`24*panel_rows*(visible_context+1)*4` bytes. Panel rows are the lesser of the query count and
-`floor(2048*2048/visible_context/16)*16`, bounding scores at 384 MiB and maxima at 192 KiB.
-P2048 remains one panel with its original 384.1875 MiB workspace. The planner uses a conservative
+`24*panel_rows*(visible_context+1)*4` bytes. Panel capacity is
+`floor(2048*2048/visible_context/16)*16`, bounding scores at384MiB and maxima at192KiB.
+The minimum number of panels divides the query's16-row tiles evenly; the final tile may
+be partial. `panel_rows` is the largest resulting panel, so a nearly empty final grid is avoided
+without increasing launch count. At context>=12288 add `24*panel_rows*16*257*4` bytes
+for16 partial numerators (256 features) plus denominators. Its maximum is126.4921875MiB;
+the conservative combined score/max/partial envelope is at most510.6796875MiB. The exact query and planner envelope
+both include it; no device allocation occurs inside attention.
+The initial2048-token prefix remains one panel with its original 384.1875 MiB workspace. The planner uses a conservative
 envelope bound rather than the exact endpoint size because panel-size rounding introduces a
 sawtooth as context grows. All panels reuse one stable address on the owning stream.
 Its 192-thread QK stage launches one Bq16 CTA
@@ -783,9 +798,10 @@ FP32 probabilities plus each signed-INT4/FP16-scale V tile once for all six GQA 
 FP32 exponential, denominator, and numerator arithmetic and contains no WMMA. Inspect all staged
 ISA with `dense-prefill-attention-full-score-isa`; invoke
 `dense-prefill-attention-full-score-static` with `DENSE_ATTN_STAGE=qk_bk16`, `qk_bk32`, `maximum`,
-or `pv` and the
-exact corresponding non-active mangled symbol. The retained selector timed the three-launch Op as
-one HIP-event sample after every stage and the independent FP64 oracle passed.
+`pv`, `pv_split`, or `pv_merge` and the
+exact corresponding non-active mangled symbol. The retained short-context selector timed the three-launch Op as
+one HIP-event sample after every stage and the independent FP64 oracle passed. Current
+long-context results and quality checks are in `docs/performance.md`.
 
 For G16 and G32 at P128/512/1024/2048/4096, the retained pre-promotion report compared the complete
 incumbent fused call with Bq4/Bq8/Bq16 after independent FP64 qualification. It timed one complete Op

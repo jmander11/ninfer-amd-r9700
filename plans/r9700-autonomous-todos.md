@@ -85,6 +85,61 @@ above apply to every command.
 
 ### Current checkpoint
 
+COMPLETED USER REQUEST (2026-09-25, fix extreme long-context dense prefill slowdown):
+- [x] Qualify and time PV query-tile and split-KV challengers against the existing dense route.
+  Layer0: at32K PV owns63.47% of prefill GPU service; the bounded384MiB score
+  buffer reduces full panels to128 query rows/32 PV blocks (32 rows/8 blocks
+  at128K). Smaller PV query tiles increase independent blocks and reduce per-thread
+  accumulators, at the cost of more repeated V reads. The tile-only candidate is
+  bit-exact; adding16 key splits changes FP32 association, but not represented inputs,
+  causal/page semantics, FP32 intermediates or the independent FP64 oracle criterion.
+  G16 complete attention at32K:776.43→358.72ms; at128K:7478.94→993.55ms.
+  G32 at32K:770.85→358.61ms. New nonperiodic FP64 conformance passes both groups,
+  including graph replay, active rows, invalid metadata and context boundaries.
+  Native FP32 ISA, wave32 and zero-spill checks pass. Timings include
+  unchanged QK/max and all panels, under auto. No unchanged128K Engine rerun.
+- [x] Promote only a materially faster qualified route, verify the public boundary
+  and matched8K/32K whole-prefill results, then test larger contexts with bounded
+  runtime if the improvement supports it. Keep container stopped and heavy jobs serial.
+  Selected: four query rows/16 key splits from context12288, FP32 partial merge,
+  and evenly balanced16-row query tiles across the minimum panel count. No candidate flag.
+  Final G16/G32 FP64, graph/metadata/boundary checks and C1–4 workspace checks pass.
+  Whole prefill8K/16K/32K/64K:1240/889/629/393 tok/s;32K and64K improve1.54×/2.61×.
+  Matched32K WikiText final512-position PPL6.543→6.438, zero new severe positions.
+  Production build and reusable-harness tests pass. Detailed evidence, numerical limits,
+  workspace cost and remaining dense quadratic work are in `docs/performance.md`.
+  The128K whole-model point remains canceled; the retained128K result is Op-only.
+  Incremental Compose image refreshed with `scripts/hot-patch.sh --image-only`;
+  server remains stopped. Start the updated image with `docker compose up -d --no-build`.
+
+COMPLETED USER REQUEST (2026-09-25, prefill context ladder and precision comparison):
+- [x] Stop Compose; expose existing per-request trailing prefill timing in benchmark
+  JSON, without changing inference arithmetic. Focused benchmark contract test passes.
+- [x] Measure C1 dense prefill at8192/16384/32768/65536 with the installed
+  selected model and chunk2048; report average and trailing rate separately.
+  User canceled131072 after >46 minutes on2026-09-25. Retain its incomplete
+  command/log; do not repeat this point unchanged or report an inferred speed.
+- [x] Profile a representative longer-context prefill, attribute its bottleneck,
+  and compare actual activation routing with retained matched5090 PPL evidence.
+  Leave the container stopped. No conversion or new long-context PPL campaign.
+  At32K, PV63.47%, QK13.28%, maximum2.32% of prefill/setup GPU service;
+  final-chunk PV launches32 blocks. Details and retained5090 comparison in
+  `docs/performance.md`; no production kernel change or ceiling claim.
+- [x] Retain a reusable context-speed and matched-token PPL setup for future XAttention
+  testing; validate matching inputs/profiles, resumable evidence and offline comparison.
+  Do not resume XAttention implementation or the older admission campaigns here.
+  `tools/bench/context_ladder.md` owns commands; seven focused tests, retained-speed
+  collection, real256-token PPL smoke/resume and retained/fresh trace analysis pass.
+
+COMPLETED USER REQUEST (2026-09-25, post-fix optimization investigation):
+- [x] Verify Compose healthy on8001; isolate one fresh long-context prefill/decode
+  trace and chunk4096 screen, then restore the server. No product changes.
+- [x] Attribute long-context prefill slowdown and record bounded next targets in
+  `docs/performance.md`: dense PV37.23% of prefill GPU service, verify PV23.05%
+  of decode graph service; retain chunk2048. Adaptive-versus-fixed policy gap
+  remains a candidate investigation, not a proven bug or authorized policy change.
+  Evidence: `profiles/rocprof/r9700-long-context-followup-20260925/`.
+
 COMPLETED USER REQUEST (2026-09-25, production long-context DFlash): integrate the
 measured batched-WMMA route, qualify it, and build/validate the Compose deployment.
 - [x] Align dispatch, full score-workspace capacity, and graph topology through262144.

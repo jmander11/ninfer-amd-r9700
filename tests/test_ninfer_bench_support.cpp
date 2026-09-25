@@ -493,6 +493,10 @@ int test_lane_service_fold() {
     second.timings = timings(0.375, 3.0, 7.0, 12.0);
     first.timings.vision_seconds = 0.25;
     second.timings.vision_seconds = 0.75;
+    first.timings.prefill_tail_tok_s = 123.0;
+    first.timings.prefill_tail_window_s = 1.0;
+    second.timings.prefill_tail_tok_s = 456.0;
+    second.timings.prefill_tail_window_s = 0.5;
     first.generated_token_ids = {11, 12, 13};
     second.generated_token_ids = {21, 22, 23};
     first.speculative = speculative(2, 4, 3, 1, {2, 1});
@@ -531,6 +535,12 @@ int test_lane_service_fold() {
     env.repetitions = 1;
     const auto report = Json::parse(qb::format_json(env, "fixture", {whole}));
     const auto& row = report.at("tests").at(0);
+    const auto& tails = row.at("reps").at(0).at("prefill_tail_by_lane");
+    failures += expect(tails.size() == 2 && tails.at(0).at("tok_s") == 123.0 &&
+                           tails.at(0).at("window_s") == 1.0 &&
+                           tails.at(1).at("tok_s") == 456.0 &&
+                           tails.at(1).at("window_s") == 0.5,
+                       "report preserves per-lane trailing rates and windows without aggregation");
     failures += expect_near(row.at("prefill_tok_s_mean").get<double>(), 40.0,
                            "aggregate prefill divides200 tokens by5 seconds, not3");
     failures += expect_near(row.at("decode_output_tok_s_mean").get<double>(), 4.0 / 7.0,
@@ -825,8 +835,9 @@ int test_attention_parity_selector_scope() {
                            !kv::use_dflash_verify_batched_wmma(6U, 135U, true, true) &&
                            !kv::use_dflash_verify_batched_wmma(5U, 63U, false, true) &&
                            !kv::use_dflash_verify_batched_wmma(6U, 63U, false, true) &&
-                           !kv::use_dflash_verify_batched_wmma(5U, 8192U, false, true) &&
-                           !kv::use_dflash_verify_batched_wmma(6U, 8192U, false, true),
+                           kv::use_dflash_verify_batched_wmma(5U, 8192U, false, true) &&
+                           kv::use_dflash_verify_batched_wmma(6U, 262144U, false, true) &&
+                           !kv::use_dflash_verify_batched_wmma(6U, 262145U, false, true),
                        "DFlash batched route rejects unqualified width/tree/context cells");
     return failures;
 }

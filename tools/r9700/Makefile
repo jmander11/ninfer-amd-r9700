@@ -217,7 +217,7 @@ $(BUILD_DIR)/dense_prefill_attention.s: $(KV_ATTENTION_SOURCE) $(KV_ATTENTION_HE
 		$(KV_ATTENTION_SOURCE) -o $@
 
 dense-prefill-attention-full-score-isa: $(BUILD_DIR)/dense_prefill_attention.s
-	awk '/-- Begin function/ { selected = ($$0 ~ /dense_full_score_(qk(_bk32)?|maximum|pv)_kernel/) } selected && $$0 ~ /-- Begin function|v_wmma_|v_exp_|v_fma|amdhsa_group_segment_fixed_size|amdhsa_private_segment_fixed_size|amdhsa_next_free_vgpr|ScratchSize|Occupancy/' $<
+	awk '/-- Begin function/ { selected = ($$0 ~ /dense_full_score_(qk(_bk32)?|maximum|pv(_merge)?)_kernel/) } selected && $$0 ~ /-- Begin function|v_wmma_|v_exp_|v_fma|amdhsa_group_segment_fixed_size|amdhsa_private_segment_fixed_size|amdhsa_next_free_vgpr|ScratchSize|Occupancy/' $<
 
 # Codegen selects the exact unrolled WMMA count and final resource envelope. Bind those explicit
 # observations rather than guessing them before the first gfx1201 compilation.

@@ -1,5 +1,15 @@
 # R9700 perplexity and Pareto-quality gate
 
+## Exploratory dense/XAttention context comparison
+
+`tools/bench/context_ladder.py run --kind ppl` runs serial, matched-token prefill PPL
+at explicit context lengths, retaining aligned NLL/argmax sidecars. Its `compare` command
+rejects mismatched inputs, score windows, artifacts and activation/cache profiles and
+reports PPL/NLL changes and new severe positions. Reusable speed, PPL and trace commands
+are in `tools/bench/context_ladder.md`. This exploratory measurement setup does not replace
+the fixed BF16-source admission campaign below; never use cycled timing IDs as natural
+long-context quality evidence or extrapolate the retained4K5090 scores to longer inputs.
+
 ## Bounded NVFP4 comparison
 
 `compare_nvfp4.py` compares three identical 4096-token samples with the local

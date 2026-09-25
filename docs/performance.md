@@ -60,6 +60,240 @@ expected value exactly.
 Copy bus rate counts both the read and write traffic. This is the hardware bandwidth bound, not a
 model or individual-Op throughput claim.
 
+## Long-context dense PV fix (2026-09-25)
+
+Production dense prefill now uses four query rows per PV block and16 key splits
+at visible context>=12288, followed by an FP32 partial-sum merge. Shorter contexts
+retain the16-row unsplit route. This fixes the collapse in available parallel
+work as the bounded score buffer forces smaller query panels: at128K a full
+panel now launches512 PV blocks instead of8. It does not change weights,
+activation quantization, the three cache planes, QK arithmetic, or the softmax
+maximum. FP32 reduction association changes, so model outputs are not promised
+bit-exact to the preceding build.
+
+Panels now divide the query's16-row tiles evenly, retaining the minimum panel
+count instead of leaving a near-empty final grid. At6144 context/2048 query rows,
+this changes672/672/672/32 rows to512/512/512/512, preserving unsplit output
+bit-for-bit and improving the measured complete Op54.98→53.50ms. At12288,
+the split route plus balancing improves163.49→135.36ms with nonperiodic input.
+
+Matched C1/chunk2048/max-context131200/workload, installed selective-cap DFlash
+companion, K5 loaded but no speculative rounds, same cycled code IDs, R9700/auto,
+warmup0/repetition1; model loading excluded:
+
+| Context | Average prefill before → after, tok/s | Trailing rate before → after, tok/s | Prefill seconds before → after |
+|---:|---:|---:|---:|
+|8192|1161.88 → 1240.21|952 → 962|7.05 → 6.61|
+|16384|794.00 → 888.71|388 → 555|20.63 → 18.44|
+|32768|409.00 → 629.06|177 → 369|80.12 → 52.09|
+|65536|150.97 → 393.37|61 → 216|434.09 → 166.60|
+
+These are single-run whole-request screens, not a statistical ceiling claim;
+8K remains below the split dispatch threshold; only panel balancing changes there,
+so its small whole-run timing difference is not attributed entirely to the fix.
+Trailing rates retain the prorated
+one-second semantics below. The128K **whole-model** attempt remains canceled;
+it was not repeated. At the128K **operator shape**,2048 query rows with appended
+causal positions improve7478.94→993.55ms (7.53×), including QK, maximum, PV,
+merge and every panel. At32K the same G16 operator improves776.43→358.72ms;
+G32 with nonperiodic input improves770.85→358.61ms. These warm-operand medians
+use seven rotating candidate-order event samples, not profiler timing.
+
+The independent represented-input FP64 qualification passes both groups through
+262144, including12K boundary cases, partial panels, nonperiodic cache data,
+fragmented pages, active/inactive rows, malformed metadata, output/workspace
+guards and poisoned graph replay. Native leaf and C1–4 host workspace/graph
+planner checks also pass. Split PV uses109 VGPR and4264/4008-byte G16/G32 LDS;
+merge uses8 VGPR and4-byte LDS. Both retain wave32, native FP32 arithmetic and
+zero scratch/spills. No private candidate flag or alternate product route is exposed.
+
+Matched32K WikiText PPL over the final512 scored positions changes
+6.54289475→6.43794659 (−1.60400%; mean-NLL delta−0.01617005), with zero new
+severe positions. Worst absolute per-position NLL change is1.87492; the mean
+does not mean every score is improved or unchanged. This meets the existing accuracy
+tier on this window, not a general quality improvement, fresh5090 comparison or128K quality result.
+Caller-owned partial storage adds at most126.4921875MiB; matched benchmark workspace
+capacity rises608,387,072→741,023,744 bytes. There is no allocation inside the Op.
+
+A focused32K trace of the first split implementation (16K crossover, before panel
+balancing) reduced PV service50.972→23.161s and final-chunk service11.657→5.612s.
+The final chunk's PV dispatches increased32→2048 blocks; merge was only0.230s,
+0.44% of total prefill/setup GPU service. QK remained10.77s. This supports the
+parallelism mechanism, not a bandwidth-saturation claim. Retained attribution:
+`profiles/rocprof/r9700-dense-pv-selected32k-20260925/`; final unprofiled timing above
+uses the12K crossover and balanced panels.
+
+Direct qualification, ISA/resources and sweep evidence:
+`profiles/bench/r9700-dense-pv-tiles-20260925/`. Whole results:
+`profiles/bench/r9700-balanced-split-pv-contexts-20260925/`. Matched quality:
+`profiles/ppl/r9700-dense-pv-baseline-20260925/` and
+`profiles/ppl/r9700-balanced-split-pv-20260925/`.
+Dense attention still has increasing causal work and materializes FP32 score
+panels. This fix does not establish bandwidth saturation or eliminate quadratic
+long-context cost; a fused streaming attention redesign is a separate possible
+follow-up, not an already measured win. XAttention remains unpromoted.
+
+## Pre-fix dense prefill context scaling (2026-09-25)
+
+The installed `r9700-q4-fp8-selective-cap-n16k16-dflash2-q4-eval` artifact,
+mixed gate/up A4 profile, C1, chunk2048, max-context131200, workload KV capacity,
+loaded DFlash K5/optimized head, device0/R9700 in`auto`: unprofiled pure-prefill
+screen, warmup0/repetition1, no speculative rounds. The4096-token code corpus
+is cycled to each requested length; this is timing evidence, not natural
+long-context quality or representative XAttention sparsity evidence.
+
+| Prompt tokens | Average active prefill tok/s | Trailing prefill tok/s | Prefill seconds |
+|---:|---:|---:|---:|
+|8192|1161.88|952|7.05|
+|16384|794.00|388|20.63|
+|32768|409.00|177|80.12|
+|65536|150.97|61|434.09|
+|131072|not completed|not measured|aborted after >46 minutes elapsed|
+
+Average excludes loading; trailing rate is the Engine's last-second window,
+with chunk tokens prorated over the window and rounded, not instantaneous
+kernel timing. The benchmark now retains each lane's tail rate and window in
+`reps[].prefill_tail_by_lane`; it does not sum unrelated lane windows.
+The server remains stopped for this investigation.
+The user stopped the128K run because its duration was unacceptable. Its elapsed
+time includes startup and is not a completed prefill duration or throughput result.
+Retain the incomplete log/command; do not rerun128K unchanged. This establishes
+an unacceptable performance case, not by itself numerical corruption or a hang.
+
+Source inspection identifies a scaling constraint beyond the increasing number
+of attended keys. The dense FP32 score buffer is capped at384MiB. It forces
+smaller query panels, each followed by a separate PV launch:
+
+| Visible context | Full panel rows | Panels per2048-token chunk | PV blocks per full panel |
+|---:|---:|---:|---:|
+|8192|512|4|128|
+|16384|256|8|64|
+|32768|128|16|32|
+|65536|64|32|16|
+|131072|32|64|8|
+
+These are source-derived final-context launch shapes, not occupancy counters.
+On a64-CU R9700, the low block counts support a parallelism/latency-hiding
+hypothesis; the kernel also retains a serial16-key loop, barriers and120VGPR.
+This baseline motivated smaller query tiles and split-KV PV with an explicit
+partial-state merge; the subsequently qualified production fix is recorded above.
+Shrinking internal attention panels does not change the Linear activation profile.
+
+A fresh32K/G16 selected-region trace confirms the dominant owner: dense PV
+is63.47% (50.972s), QK13.28% (10.663s), and score maximum2.32% (1.860s)
+of80.312s prefill/setup kernel service. Reported profiled prefill is80.798s;
+use the unprofiled table above for speed. The first2048-token chunk has1.196s
+kernel service/PV0.091s; the final chunk has11.657s/PV8.757s. Its256 PV
+dispatches (16 panels across16 full-attention layers) each launch32 blocks.
+This physically confirms the low-parallelism launch shape and PV dominance,
+not hardware occupancy, memory saturation, cache hit rate or a proven stall cause.
+Trace and attribution: `profiles/rocprof/r9700-prefill32k-20260925/`.
+
+The complete commands/reports are retained at
+`profiles/bench/r9700-prefill-context-sweep-20260925/`.
+Reusable dense/XAttention speed, matched-token PPL, resume and trace commands
+are in `tools/bench/context_ladder.md`. Keep unprofiled speed and profiled
+attribution separate; reuse matching completed cells rather than repeating
+expensive128K controls. This setup does not resume the paused admission campaign.
+The runner's seven focused tests pass, the four retained speed cells collect
+without rerunning, and a real256-token prefill PPL smoke has127 finite aligned
+scores. Resuming that cell launches no inference. Smoke evidence lives in
+`profiles/ppl/r9700-context-ladder-smoke-20260925/`; it validates tooling, not
+long-context quality or a new comparison against5090.
+
+## Current prefill precision and retained 5090 quality (2026-09-25)
+
+The selected selective-cap model uses global Q4 A8 with the gate/up-only A4
+override atT>128, as confirmed by the current build and owning dispatch. For
+large Text-prefill matrix calls:
+
+| Route | Main Text matrices | Modeled Text-body matrix MAC share |
+|---|---:|---:|
+| Q4 weights / integer A4, gate/up layers0–61 |62|45.43%|
+| Q4 weights / integer A8 |232|49.14%|
+| Protected FP8 weights / FP8 GEMM operands |26|5.43%|
+
+The count excludes96 small BF16 GDN A/B controls and the output head. MAC
+shares additionally exclude attention, recurrence and other non-matrix work;
+they are not runtime shares or fractions of every stored activation. Inter-Op
+hidden values remain BF16, GDN persistent state FP32, and the growing cache is
+FP8-K/INT4-V/FP16-scale. Dense prefill attention uses BF16-WMMA QK and FP32 PV
+accumulation, not integer-A4 attention. Ordinary/small-verify Q4 calls remainA8.
+The smaller long-context attention panels are internal to the attention Op;
+they do not shrink the2048-token Linear calls or trigger the T<=128 A8 fallback.
+Body MACs follow the retained cap26 cost inventory (head format excluded), under
+`profiles/ppl/r9700-endpoint-precision-20260923/cap26-head-gate-up-cost.json`.
+
+Retained delivered AMD recipe versus the frozen standard5090 NVFP4 reference:
+
+| Text | AMD prefill PPL |5090 prefill PPL| Change |AMD decode PPL|5090 decode PPL|
+|---|---:|---:|---:|---:|---:|
+| WikiText |6.602872|6.481045|+1.88%|6.705888|6.864514|
+| Technical |9.655792|9.576387|+0.83%|22.160924|22.304207|
+| Code |2.282552|2.253032|+1.31%|3.216515|3.415608|
+
+These are identical4096-token inputs: prefill scores2047 positions after2048
+warmup tokens; teacher-forced decode scores128 after3967. No speculation.
+Prefill and decode columns score different spans and must not be compared as
+an activation-quality A/B. Integer A4 and NVIDIA NVFP4 also have different
+codebooks/scales, protections and cache formats. These retained results are
+neither fresh latest-binary PPL nor proof of8K–128K quality equivalence.
+The AMD delivery reports and six NLL sidecars remain under
+`profiles/bench/r9700-compact-mixed-delivery-20260923/`; the unchanged5090
+reference is tracked in `tools/ppl/fixtures/nvfp4-5090-20260922/`.
+
+## Post-fix long-context attribution (2026-09-25)
+
+On `fc3d61a7`, the same installed selective-cap companion, C1, code corpus,
+optimized proposal head, fixed K5, max-context32768/workload, and power`auto`:
+a fresh unprofiled chunk4096 screen measured1598.94 prefill tok/s atP2048
+and818.52 atP15200 (G32, warmup0/repetition1). The preceding chunk2048
+P15200/G128 result was868.70. This single screen does not select a new chunk;
+it agrees with the earlier repeated2048/4096 comparison below. Keep2048.
+The historical1904.34 P2048 result used all-Q4, not this selected weight recipe.
+Standalone long-context prefill also agrees with the user's875.7tok/s server
+request: the observed gap is not evidence of Docker overhead.
+
+A fresh selected-region marker/kernel trace atP15200/G128/chunk2048 separates
+graph0 prefill/setup from graph1 DFlash decode using recorded graph IDs:
+
+| GPU kernel service owner | Prefill/setup share | Decode-graph share |
+|---|---:|---:|
+| Dense FP32 PV accumulation |37.23%|—|
+| Dense BF16-WMMA QK |13.63%|—|
+| Dense score maximum |2.25%|—|
+| Batched DFlash vector PV |—|23.05%|
+| Small-batch Q4 gate/up |—|21.53%|
+| Small-batch Q4 down |—|11.52%|
+
+These are attribution-only fractions, not unprofiled speed or bandwidth claims.
+Prefill/setup kernel service sums17.432s against17.613s reported prefill time.
+The first2048-token chunk has1.197s kernel service, versus3.204s for the last
+full2048-token chunk; dense PV alone grows90.5→1673.5ms across those chunks.
+The increasing attention extent, not just prompt length divided by a fixed
+throughput, is material. Interval logger rates are not individual chunk timings.
+
+The strongest next kernel investigation is long-context dense PV: its serial
+16-key tiles, shared-memory/barrier work and six-head FP32 accumulation are a
+concrete issue/synchronization hypothesis. The emitted route has120VGPR,
+9208-byte LDS and no scratch; these do not prove occupancy or bandwidth saturation.
+Test a genuinely new long-context tiling/split-reduction mechanism at the public
+Op, including merge traffic and oracle error, before implementing a production
+change. Halving this owner would save about18.6% of profiled prefill GPU service,
+not establish a measured23% throughput gain. The separately owned verify PV
+is the next attention target; halving it would save about11.5% of decode graph
+kernel service. Preserve the prior rejected short-context head-partition,
+FP32-BLAS and high/low-BF16-WMMA PV findings; do not repeat them unchanged.
+The measured adaptive65.63 versus fixed-K5 83.75tok/s gap is also worth policy
+diagnosis, but this trace does not establish why adaptive stayed atK3 or justify
+forcingK5 for all prompts/concurrencies.
+
+Commands, exact workload and offline graph-ID attribution are retained under
+`profiles/rocprof/r9700-long-context-followup-20260925/`. No PMC/sudo or power
+changes were needed. The idle Compose server was stopped for isolated capture,
+then automatically restarted and verified healthy on8001. No production kernel,
+sampling policy or chunk setting was changed by this investigation.
+
 ## Long-context DFlash attention production fix (2026-09-25)
 
 The pre-fix DFlash selector stopped batched FP8-Q WMMA at 8,192 visible tokens.
