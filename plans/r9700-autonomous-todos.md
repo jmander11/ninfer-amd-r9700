@@ -85,18 +85,25 @@ above apply to every command.
 
 ### Current checkpoint
 
-ACTIVE USER REQUEST (2026-09-24, Docker Compose deployment):
+COMPLETED USER REQUEST (2026-09-24, Docker Compose deployment):
 - [x] Add AMD Compose runtime, explicit artifact/build contexts, temperature1.5,
   4GiB RAM/32GiB persistent disk prefix cache, bounded host memory and build jobs.
 - [x] Verify resolved Compose config and native-equivalent server settings:
   Chat/Responses/Anthropic/SSE, resolved temperature, RAM hit and disk restart hit.
 - [x] Rebuild and run all86 registered host/GPU tests; correct stale qualifier
   expectations. Real Engine cancellation/RAM and exact-output disk restart pass.
-- [ ] Build and run the actual Compose image after the user installs
-  `docker-buildx-plugin`; `docker buildx version` currently fails. Do not claim
-  container validation from the native results. Resume using `.env.example`,
-  `compose.yaml`, `docs/containers.md` and `tools/smoke/serve_cache.py`.
-No native test server remains running. Older performance/quality campaigns stay paused.
+- [x] Build and run the actual Compose image with Buildx. All three apps compile;
+  healthy container passes four HTTP routes, temperature1.5, RAM restoration and
+  restart disk restoration (12 prompt tokens reused,22 output tokens). Dedicated
+  builder capped24GiB/no swap; exclude profiler dumps from Docker context.
+- [x] Move Compose disk storage to an explicit NVMe bind at
+  `/ssdpool2nvme/local_llm/cache_r9700` (entries in `prefix/`), separate from5090.
+  Verify actual mount, four HTTP routes/RAM reuse and restart disk hit12tokens.
+  Document existing AMD incremental `scripts/hot-patch.sh` workflow for Compose.
+Image/service/cache retained; test server and builder stopped to release resources.
+Local `.env` is configured and ignored. Old Docker named cache volume is retained
+unused; see `docs/containers.md` for validation and incremental-build commands.
+Older performance/quality campaigns stay paused.
 
 COMPLETED USER REQUEST (2026-09-24, test and retain beneficial candidates):
 - [x] Qualify and time gate/up cross-tile weight reuse at T20; keep only a measured win.

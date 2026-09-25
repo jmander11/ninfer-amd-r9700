@@ -5,8 +5,10 @@
 `compose.yaml` builds this checkout and runs the selected DFlash artifact with
 temperature **1.5**, **4 GiB pinned RAM prefix cache**, **32 GiB disk cache**, chunk
 2048, C1/K5 and a32768-token context limit. Cache sizes are capacities, not upfront
-disk allocations. The named `prefix-cache` volume survives container replacement
-and `docker compose down`; do not use `down --volumes` if you want to preserve it.
+disk allocations. A bind mount stores disk prefixes under
+`/ssdpool2nvme/local_llm/cache_r9700/prefix`, beside (not shared with) the 5090
+cache. Override its parent with `NINFER_DISK_CACHE_DIR`. This host directory
+survives container replacement and `docker compose down --volumes`.
 Disk cache is prefix reuse, not active-context offload. RAM contents do not survive
 restart; durable disk entries can be restored for the same model fingerprint.
 Requests may override temperature; p-less sampling remains enabled by default.
@@ -14,6 +16,7 @@ Requests may override temperature; p-less sampling remains enabled by default.
 ```sh
 cp .env.example .env
 # Edit the explicit model, ROCm and self-contained Python paths for your machine.
+mkdir -p /ssdpool2nvme/local_llm/cache_r9700
 docker compose config --quiet
 docker compose build server
 docker compose up -d --no-build server
@@ -33,6 +36,25 @@ pulling source, stop the server, run `docker compose build server`, then
 `docker compose up -d --no-build server`; Docker reuses unchanged build layers.
 Do not overlap image compilation with inference or other heavy jobs.
 
+`docker compose up -d` normally reuses an existing image; it can build a missing
+image but does not detect source edits as a rebuild requirement. Use
+`docker compose up -d --build server` to explicitly build before starting.
+Stop an already-running server first on this shared host.
+
+For a memory-bounded build, create a dedicated Buildx builder once (this does not
+change Docker's globally selected builder):
+
+```sh
+docker buildx create --name ninfer-r9700-build --driver docker-container \
+  --driver-opt memory=24g,memory-swap=24g,cpu-period=100000,cpu-quota=1400000,default-load=true
+docker compose build --builder ninfer-r9700-build server
+docker compose up -d --no-build server
+```
+
+The compile-job default remains4. Compose's service memory limit applies to the
+running server, not image compilation; the dedicated builder supplies the latter
+limit. Reuse it for subsequent builds rather than creating it again.
+
 The default listener is host loopback port8080, with no API key. Change the bind
 address only behind suitable access controls. `.env` can override model path,
 port, context, C1..4, draft count and cache capacities. For the measured workload,
@@ -42,6 +64,8 @@ must fit that bound. Existing NVIDIA containers are not modified.
 
 Docker references: https://docs.docker.com/reference/compose-file/build/ and
 https://docs.docker.com/reference/cli/docker/buildx/build/.
+Build/restart semantics: https://docs.docker.com/reference/cli/docker/compose/up/;
+builder limits: https://docs.docker.com/build/builders/drivers/docker-container/.
 
 ## Image prerequisites
 
@@ -104,6 +128,31 @@ docker exec ninfer-r9700-builder cmake --build /build --parallel 4 \
 docker exec ninfer-r9700-builder /build/apps/ninfer --help
 ```
 
+This is the incremental development path: CMake/Ninja retain objects in `/build`
+and rebuild affected dependencies after edits to the live `/src` checkout. Native
+`cmake --build build-r9700 --parallel 4 --target ninfer-serve` is incremental too.
+The Compose runtime image is separate: its Dockerfile caches complete build layers,
+but a changed source snapshot invalidates the compile layer and recompiles the apps.
+Building in the development container does not update the Compose runtime image.
+
+For source-only edits, the AMD-adapted `scripts/hot-patch.sh` also deploys the
+incrementally built CLI/server/PPL apps. For this Compose service:
+
+```sh
+docker compose stop server
+set -a
+. ./.env
+set +a
+NINFER_IMAGE=local/ninfer-r9700:compose NINFER_DEV_JOBS=4 \
+  bash scripts/hot-patch.sh --image-only
+docker compose up -d --no-build --wait server
+```
+
+The first invocation creates the development builder if absent; later invocations
+reuse its persistent objects. The previous runtime image receives a `-rollback`
+tag. This helper was inspected, not executed in the Compose validation below.
+Dockerfile, toolchain or runtime-library changes still require a full image build.
+
 For benchmarks, set `NINFER_BUILD_BENCHMARKS=ON` when running setup, then build
 the `ninfer_bench` target; its executable is `/build/bench/ninfer_bench`.
 The runtime image contains the three applications, not the benchmark or test tools.
@@ -144,9 +193,22 @@ The separate ordinary-greedy Engine qualifier passed cancellation/RAM continuati
 and disk restart with38 reused tokens/16 output tokens exact to cold execution.
 Local native request logs are under
 `profiles/bench/r9700-compose-validation-20260924/`.
-Compose configuration validates, but the actual image build/runtime test remains
-pending installation of the missing Docker Buildx plugin. Native results do not
-prove container packaging. Test servers were stopped after validation.
+Compose configuration and actual image/runtime validation also pass after installing
+Buildx. `local/ninfer-r9700:compose` was built from this checkout with the local
+ROCm/Python contexts and a24GiB/no-swap builder. All three apps compiled; the
+Compose server became healthy, passed Chat/Responses/Anthropic/SSE, logged
+temperature1.5, restored RAM prefixes and restored12 prompt tokens from disk after
+restart (22 generated tokens). The image and stopped service
+are retained; `docker compose up -d` can now start this tested image without building.
+Generated profiler dumps and local qualifier binaries are excluded from build context.
+
+The final Compose mount was separately verified as a writable bind from
+`/ssdpool2nvme/local_llm/cache_r9700` to `/cache`. All four HTTP smoke routes and
+RAM reuse pass; after restart, the request restores12 prompt tokens from
+`host_disk` and generates21 tokens. An observed disk save was84ms. These are
+functional observations, not a controlled storage benchmark. The earlier named
+volume on Docker's ZFS data root had2.8–3.8s writes; that unused volume is retained,
+not migrated or deleted. No 5090 cache or Docker data-root settings were changed.
 
 The native runner uses an already configured `build-r9700` with `BUILD_TESTING=ON`;
 `NINFER_BUILD_DIR` changes that explicit path. `--builder` selects the dedicated

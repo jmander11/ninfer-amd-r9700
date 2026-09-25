@@ -23,7 +23,11 @@ services:
         read_only: true
         bind:
           create_host_path: false
-      - prefix-cache:/cache
+      - type: bind
+        source: ${NINFER_DISK_CACHE_DIR:-/ssdpool2nvme/local_llm/cache_r9700}
+        target: /cache
+        bind:
+          create_host_path: false
     shm_size: 1gb
     mem_limit: 24g
     memswap_limit: 24g
@@ -65,6 +69,3 @@ services:
       timeout: 5s
       start_period: 3m
       retries: 4
-
-volumes:
-  prefix-cache:
