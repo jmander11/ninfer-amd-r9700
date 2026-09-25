@@ -85,6 +85,18 @@ above apply to every command.
 
 ### Current checkpoint
 
+ACTIVE USER REQUEST (2026-09-25, further long-context optimization):
+- [x] PV joint tile/split sweep: eight query rows with16 splits below32K and32 above
+  wins the qualified G16/G32 sweep. FP64, graph, workspace, ISA and matched32K PPL
+  gates pass; whole32K629→659 tok/s. Commit before investigating the next mechanism.
+  Evidence and precise numerical/performance limits are in `docs/performance.md`.
+- [ ] Profile the final long-context build, then investigate PV parallelism/reuse,
+  QK, and score/softmax traffic one at a time. Each investigation needs a concrete
+  measured mechanism; retain exclusions rather than repeating exhausted candidates.
+  Qualify and measure each winner, commit it before the next investigation, and
+  refresh the runtime image for admitted changes. Heavy jobs remain serial; server
+  stays stopped; no128K whole-model rerun. Do not widen numerical tolerances.
+
 COMPLETED USER REQUEST (2026-09-25, fix extreme long-context dense prefill slowdown):
 - [x] Qualify and time PV query-tile and split-KV challengers against the existing dense route.
   Layer0: at32K PV owns63.47% of prefill GPU service; the bounded384MiB score

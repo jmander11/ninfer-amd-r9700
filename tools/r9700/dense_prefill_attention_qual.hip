@@ -558,6 +558,9 @@ int main(int argc, char** argv) {
             run_case(129U, group, kv::kDensePrefillSplitPvMinimumContext - 1U);
             run_case(1537U, group, kv::kDensePrefillSplitPvMinimumContext);
             run_case(129U, group, kv::kDensePrefillSplitPvMinimumContext + 1U);
+            run_case(129U, group, kv::kDensePrefillLongPvMinimumContext - 1U);
+            run_case(1537U, group, kv::kDensePrefillLongPvMinimumContext);
+            run_case(129U, group, kv::kDensePrefillLongPvMinimumContext + 1U);
             run_case(2048U, group, 65536U);
             run_case(128U, group, 131072U);
         }

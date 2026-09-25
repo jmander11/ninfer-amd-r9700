@@ -60,9 +60,48 @@ expected value exactly.
 Copy bus rate counts both the read and write traffic. This is the hardware bandwidth bound, not a
 model or individual-Op throughput claim.
 
+## Long-context PV reuse and split tuning (2026-09-25)
+
+The follow-up profile of `0c084300` attributes42.14% of32K prefill/setup GPU
+service to PV,20.87% to QK,3.54% to score maximum, and0.54% to partial merging:
+`profiles/rocprof/r9700-balanced-pv-final32k-20260925/`.
+The next bounded sweep crossed query tiles1/2/4/8/16 with16/32/64 key splits.
+Eight query rows recover V reuse while keeping enough independent blocks; emitted
+register use drops109→68, compiler occupancy12→16, with zero spills. G16/G32 LDS
+is5912/5656 bytes. Tiles1/2 and64-way splitting did not win.
+
+Production selects eight query rows,16 splits at12288–32767 context and32 splits
+from32768. Complete attention includes unchanged QK/max, every panel and merge;
+seven rotating-order warm event samples, R9700/gfx1201/ROCm10, auto,2048 appended
+queries, fragmented pages and nonperiodic represented inputs:
+
+| Context / group | Previous tile4/split16, ms | Selected, ms |
+|---|---:|---:|
+|12288 / G16|135.968|130.136|
+|32768 / G16|360.188|345.588|
+|65536 / G16|611.195|563.770|
+|65536 / G32|606.189|562.194|
+|131072 / G16|990.466|909.065|
+
+The full G16/G32 FP64/graph/invalid-metadata qualification passes, including both
+dispatch boundaries and262144 context. The workspace envelope covers both split
+regimes, including small query counts; the default2048-row envelope is unchanged.
+Changing only query tiling is bit-exact;32 splits change FP32 association. Matched32K
+WikiText final512-position PPL is6.510527 versus6.437947 for `0c084300`, delta mean
+NLL+0.01121072 with zero new severe positions, within the existing accuracy gate.
+This is one matched window, not a broad quality claim. Raw evidence:
+`profiles/bench/r9700-dense-pv-tiles-20260925/joint-*` and
+`profiles/ppl/r9700-joint-pv-20260925/`.
+
+Matched whole C1/chunk2048/max-context131200, same selective-cap model and cycled
+code IDs, loaded K5 DFlash without speculative rounds, warmup0/repetition1:
+32K prefill629.06→659.21 tok/s, tail369→382,52.09→49.71s. This is a screening
+measurement supported by the rotating-order Op sweep, not a ceiling claim.
+Whole reports: `profiles/bench/r9700-joint-pv-contexts-20260925/`.
+
 ## Long-context dense PV fix (2026-09-25)
 
-Production dense prefill now uses four query rows per PV block and16 key splits
+The first fix (`0c084300`) uses four query rows per PV block and16 key splits
 at visible context>=12288, followed by an FP32 partial-sum merge. Shorter contexts
 retain the16-row unsplit route. This fixes the collapse in available parallel
 work as the bounded score buffer forces smaller query panels: at128K a full

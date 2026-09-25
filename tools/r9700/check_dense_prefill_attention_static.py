@@ -27,10 +27,10 @@ FULL_SCORE_PROFILES = {
                "workgroup": 256, "rounded_lds": 12288},
     "pv_g32": {"lds": 8952, "wmma": 0, "vgpr": 128, "occupancy": 8,
                "workgroup": 256, "rounded_lds": 12288},
-    "pv_split_g16": {"lds": 4264, "wmma": 0, "vgpr": 128, "occupancy": 8,
-                     "workgroup": 256, "rounded_lds": 4608},
-    "pv_split_g32": {"lds": 4008, "wmma": 0, "vgpr": 128, "occupancy": 8,
-                     "workgroup": 256, "rounded_lds": 4096},
+    "pv_split_g16": {"lds": 5912, "wmma": 0, "vgpr": 128, "occupancy": 8,
+                     "workgroup": 256, "rounded_lds": 6144},
+    "pv_split_g32": {"lds": 5656, "wmma": 0, "vgpr": 128, "occupancy": 8,
+                     "workgroup": 256, "rounded_lds": 6144},
     "pv_merge": {"lds": 4, "wmma": 0, "vgpr": 64, "occupancy": 8,
                  "workgroup": 256, "rounded_lds": 512},
 }
@@ -49,7 +49,7 @@ def _kernel_metadata_record(text: str, symbol: str) -> str:
 
 
 def check(*, assembly: Path, metadata: Path, symbol: str,
-          value_group: int, full_score_stage: str) -> dict[str, int | str]:
+          value_group: int, full_score_stage: str, key_splits: int = 16) -> dict[str, int | str]:
     if value_group not in (16, 32):
         raise ValueError("dense attention requires G16 or G32")
     if full_score_stage == "qk_bk16":
@@ -61,7 +61,9 @@ def check(*, assembly: Path, metadata: Path, symbol: str,
     elif full_score_stage == "pv":
         specialization = f"26dense_full_score_pv_kernelILj{value_group}ELb0ELj16ELj1EE"
     elif full_score_stage == "pv_split":
-        specialization = f"26dense_full_score_pv_kernelILj{value_group}ELb0ELj4ELj16EE"
+        if key_splits not in (16, 32):
+            raise ValueError("split PV requires 16 or 32 key splits")
+        specialization = f"26dense_full_score_pv_kernelILj{value_group}ELb0ELj8ELj{key_splits}EE"
     elif full_score_stage == "pv_merge":
         specialization = "32dense_full_score_pv_merge_kernel"
     else:
@@ -152,8 +154,8 @@ def check(*, assembly: Path, metadata: Path, symbol: str,
             f"private={private} scratch={scratch} flat_scratch={flat_scratch} "
             f"vgpr_spills={vgpr_spills} sgpr_spills={sgpr_spills}; all must be zero")
     return {"symbol": symbol, "value_group": value_group,
-            "query_tile": 4 if full_score_stage == "pv_split" else 1 if full_score_stage == "pv_merge" else 16,
-            "key_splits": 16 if full_score_stage in ("pv_split", "pv_merge") else 1,
+            "query_tile": 8 if full_score_stage == "pv_split" else 1 if full_score_stage == "pv_merge" else 16,
+            "key_splits": key_splits if full_score_stage == "pv_split" else "runtime" if full_score_stage == "pv_merge" else 1,
             "full_score_stage": full_score_stage,
             "bf16_wmma_count": count, "lds_bytes": lds, "rounded_lds_bytes": rounded_lds,
             "vgpr_count": vgpr,
@@ -169,6 +171,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--metadata", required=True, type=Path)
     parser.add_argument("--symbol", required=True)
     parser.add_argument("--value-group", required=True, type=int, choices=(16, 32))
+    parser.add_argument("--key-splits", type=int, choices=(16, 32), default=16)
     parser.add_argument("--full-score-stage", required=True,
                         choices=("qk_bk16", "qk_bk32", "maximum", "pv", "pv_split", "pv_merge"))
     return parser.parse_args(argv)
@@ -178,7 +181,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         result = check(assembly=args.assembly, metadata=args.metadata, symbol=args.symbol,
-                       value_group=args.value_group, full_score_stage=args.full_score_stage)
+                       value_group=args.value_group, full_score_stage=args.full_score_stage,
+                       key_splits=args.key_splits)
     except (OSError, UnicodeError, ValueError) as error:
         raise SystemExit(str(error)) from error
     print(" ".join(f"{key}={value}" for key, value in result.items()))

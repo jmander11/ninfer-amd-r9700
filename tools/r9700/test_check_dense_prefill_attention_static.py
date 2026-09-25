@@ -115,9 +115,10 @@ amdhsa.kernels:
                       value_group=16, full_score_stage="pv")
 
     def test_split_pv_and_merge_resources(self) -> None:
-        for stage, symbol, key in (
-            ("pv_split", "_ZN6ninfer3ops5r97002kv26dense_full_score_pv_kernelILj16ELb0ELj4ELj16EEEv", "pv_split_g16"),
-            ("pv_merge", "_ZN6ninfer3ops5r97002kv32dense_full_score_pv_merge_kernelEv", "pv_merge"),
+        for stage, symbol, key, splits in (
+            ("pv_split", "_ZN6ninfer3ops5r97002kv26dense_full_score_pv_kernelILj16ELb0ELj8ELj16EEEv", "pv_split_g16", 16),
+            ("pv_split", "_ZN6ninfer3ops5r97002kv26dense_full_score_pv_kernelILj16ELb0ELj8ELj32EEEv", "pv_split_g16", 32),
+            ("pv_merge", "_ZN6ninfer3ops5r97002kv32dense_full_score_pv_merge_kernelEv", "pv_merge", 16),
         ):
             with self.subTest(stage=stage), tempfile.TemporaryDirectory() as directory:
                 profile = FULL_SCORE_PROFILES[key]
@@ -126,8 +127,8 @@ amdhsa.kernels:
                                      wmma_count=0,
                                      additional="\n\tv_exp_f32 v0, v1\n\tv_fmac_f32 v0, v1, v2")
                 result = check(assembly=paths[0], metadata=paths[1], symbol=symbol,
-                               value_group=16, full_score_stage=stage)
-                self.assertEqual(result["key_splits"], 16)
+                               value_group=16, full_score_stage=stage, key_splits=splits)
+                self.assertEqual(result["key_splits"], "runtime" if stage == "pv_merge" else splits)
 
     def test_rejects_wrong_symbol_or_opcode(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -226,6 +226,7 @@ dense-prefill-attention-full-score-static:
 		test -n "$(DENSE_ATTN_SYMBOL)" && test -n "$(DENSE_ATTN_VALUE_GROUP)" && \
 		test -n "$(DENSE_ATTN_STAGE)"
 	python3 $(DENSE_PREFILL_ATTENTION_STATIC_CHECK) --full-score-stage "$(DENSE_ATTN_STAGE)" \
+		--key-splits "$(if $(DENSE_ATTN_KEY_SPLITS),$(DENSE_ATTN_KEY_SPLITS),16)" \
 		--assembly "$(DENSE_ATTN_ASSEMBLY)" --metadata "$(DENSE_ATTN_METADATA)" \
 		--symbol "$(DENSE_ATTN_SYMBOL)" --value-group "$(DENSE_ATTN_VALUE_GROUP)"
 
