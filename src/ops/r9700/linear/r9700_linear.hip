@@ -28,6 +28,7 @@ constexpr std::uint32_t kA8Q4PrefillThreads = kA8Q4PrefillWaves * kWaveSize;
 constexpr std::uint32_t kA8Q4M128PrefillTokenTile = 128;
 constexpr std::uint32_t kA8Q4M128PrefillWaves = 32;
 constexpr std::uint32_t kA8Q4M128PrefillThreads = kA8Q4M128PrefillWaves * kWaveSize;
+constexpr std::uint32_t kA8Q4M128ProductionThreads = 8U * kWaveSize;
 constexpr std::uint32_t kA8W8PrefillTokenTile = 64;
 constexpr std::uint32_t kA8W8PrefillRowTile = 64;
 constexpr std::uint32_t kA8W8PrefillWaves = 16;
@@ -1629,10 +1630,6 @@ struct A8Q4PrefillN128Tile {
     std::uint16_t weight_scales[2U * kA8Q4PrefillRowTile];
 };
 
-struct A8Q4PrefillN128PingPongTile {
-    A8Q4PrefillN128Tile bank[2];
-};
-
 struct A4Q4PrefillPingPongBank {
     std::uint32_t activation_low[8U * kA8Q4PrefillTokenTile];
     std::uint32_t weights[8U * 2U * kA8Q4PrefillRowTile];
@@ -1643,7 +1640,6 @@ struct A4Q4PrefillPingPongTile { A4Q4PrefillPingPongBank bank[2]; };
 static_assert(sizeof(A4Q4PrefillPingPongTile) == 13056U);
 
 static_assert(sizeof(A8Q4PrefillN128Tile) == 8576U);
-static_assert(sizeof(A8Q4PrefillN128PingPongTile) == 17152U);
 
 struct A8Q4PrefillM128N128Tile {
     std::uint32_t activation_low[8U * kA8Q4M128PrefillTokenTile];
@@ -2020,210 +2016,261 @@ void a8q4g64_linear_prefill_cta_m64n128_regression_kernel(
 }
 
 
-__global__ __launch_bounds__(kA8Q4PrefillThreads)
+// Production A8Q4G64 prefill: an M128xN128 CTA of eight waves, each owning 2x4
+// WMMA fragments (32 tokens x 64 rows). Token tiles vary fastest in the grid so
+// consecutive CTAs share one weight tile in L2. The signed high-nibble chain
+// starts from 0x04B40000; after <<4 and the unsigned low-nibble chain the I32
+// word is exactly 0x4B400000 + dot (|dot| <= 64*127*8 < 2^22), whose FP32 value
+// minus 12582912 recovers dot without a conversion instruction. The FP32 scale
+// product and FMA order equal the per-group incumbent formula.
+struct A8Q4PrefillM128Stage {
+    std::uint64_t activation_low[4U * kA8Q4M128PrefillTokenTile];
+    std::uint64_t activation_high[4U * kA8Q4M128PrefillTokenTile];
+    std::uint64_t weights[4U * kA8Q4M128PrefillTokenTile];
+    float activation_scales[kA8Q4M128PrefillTokenTile];
+    float weight_scales[kA8Q4M128PrefillTokenTile];
+};
+struct A8Q4PrefillM128PingPong { A8Q4PrefillM128Stage stage[2]; };
+static_assert(sizeof(A8Q4PrefillM128PingPong) == 26624U);
+
+// [pair][128 rows] u64 image; odd pairs (the upper half-wave) move by 16 rows so
+// the two half-waves read disjoint bank halves.
+[[maybe_unused]] __device__ __forceinline__ std::uint32_t a8q4_m128_lds_index(
+    std::uint32_t pair, std::uint32_t row) {
+    return pair * 128U + (row ^ ((pair & 1U) << 4U));
+}
+
+struct A8Q4PrefillM128Load {
+    std::uint16_t scale;
+    uint4 activation_low, activation_high, weights;
+};
+
+// Per-thread byte offsets from the uniform plane bases; every qualified plane is below 4 GiB,
+// so loads use scalar-base plus 32-bit-offset addressing.
+struct A8Q4PrefillM128Offsets {
+    std::uint32_t activation, weight, scale;
+    bool activation_scale;
+};
+
+template <class T>
+__device__ __forceinline__ const T& a8q4_m128_at(const void* base, std::uint32_t offset) {
+    return *reinterpret_cast<const T*>(static_cast<const std::uint8_t*>(base) + offset);
+}
+
+[[maybe_unused]] __device__ __forceinline__ A8Q4PrefillM128Load a8q4_m128_load(
+    const std::uint8_t* activation_low_codes, const std::uint8_t* activation_high_codes,
+    const std::uint16_t* activation_scales, const std::uint8_t* weight_codes,
+    const std::uint16_t* weight_scales, const A8Q4PrefillM128Offsets& offsets,
+    std::uint32_t group) {
+    A8Q4PrefillM128Load loaded;
+    // Issue the scale first: loads complete in order, so its conversion never waits for the
+    // prefetched code planes, which are consumed only after this group's WMMA work.
+    loaded.scale = offsets.activation_scale
+        ? a8q4_m128_at<std::uint16_t>(activation_scales, offsets.scale + group * 2U)
+        : a8q4_m128_at<std::uint16_t>(weight_scales, offsets.scale + group * 32U);
+    loaded.activation_low =
+        a8q4_m128_at<uint4>(activation_low_codes, offsets.activation + group * 32U);
+    loaded.activation_high =
+        a8q4_m128_at<uint4>(activation_high_codes, offsets.activation + group * 32U);
+    // One 16-row weight tile-group is 512 contiguous bytes: [pair][16 rows][u64].
+    loaded.weights = a8q4_m128_at<uint4>(weight_codes, offsets.weight + group * 512U);
+    return loaded;
+}
+
+[[maybe_unused]] __device__ __forceinline__ std::uint64_t a8q4_m128_u64(std::uint32_t low,
+                                                                      std::uint32_t high) {
+    return (static_cast<std::uint64_t>(high) << 32U) | low;
+}
+
+[[maybe_unused]] __device__ __forceinline__ void a8q4_m128_store(
+    A8Q4PrefillM128Stage& stage, const A8Q4PrefillM128Load& loaded, std::uint32_t thread) {
+    const std::uint32_t token = thread >> 1U;
+    const std::uint32_t activation_pair = (thread & 1U) * 2U;
+    stage.activation_low[a8q4_m128_lds_index(activation_pair, token)] =
+        a8q4_m128_u64(loaded.activation_low.x, loaded.activation_low.y);
+    stage.activation_low[a8q4_m128_lds_index(activation_pair + 1U, token)] =
+        a8q4_m128_u64(loaded.activation_low.z, loaded.activation_low.w);
+    stage.activation_high[a8q4_m128_lds_index(activation_pair, token)] =
+        a8q4_m128_u64(loaded.activation_high.x, loaded.activation_high.y);
+    stage.activation_high[a8q4_m128_lds_index(activation_pair + 1U, token)] =
+        a8q4_m128_u64(loaded.activation_high.z, loaded.activation_high.w);
+    const std::uint32_t within = thread & 31U;
+    const std::uint32_t weight_pair = within >> 3U;
+    const std::uint32_t row = (thread >> 5U) * 16U + (within & 7U) * 2U;
+    stage.weights[a8q4_m128_lds_index(weight_pair, row)] =
+        a8q4_m128_u64(loaded.weights.x, loaded.weights.y);
+    stage.weights[a8q4_m128_lds_index(weight_pair, row + 1U)] =
+        a8q4_m128_u64(loaded.weights.z, loaded.weights.w);
+    const float scale = __half2float(__ushort_as_half(loaded.scale));
+    if (thread < kA8Q4M128PrefillTokenTile) {
+        stage.activation_scales[thread] = scale;
+    } else {
+        stage.weight_scales[thread - kA8Q4M128PrefillTokenTile] = scale;
+    }
+}
+
+[[maybe_unused]] __device__ __forceinline__ WmmaI32x2 a8q4_m128_fragment(std::uint64_t value) {
+    return WmmaI32x2{static_cast<int>(static_cast<std::uint32_t>(value)),
+                     static_cast<int>(static_cast<std::uint32_t>(value >> 32U))};
+}
+
+// One K64 group of the wave's 2x4 fragments.
+[[maybe_unused]] __device__ __forceinline__ void a8q4_m128_group(
+    const A8Q4PrefillM128Stage& stage, std::uint32_t wave_token, std::uint32_t wave_row,
+    std::uint32_t axis, std::uint32_t lane_group, const WmmaI32x8& high_origin,
+    WmmaF32Fragment (&totals)[2][4]) {
+    WmmaI32x2 low[2][2], high[2][2], weights[2][4];
+#pragma unroll
+    for (std::uint32_t half = 0; half < 2U; ++half) {
+        const std::uint32_t pair = half * 2U + lane_group;
+#pragma unroll
+        for (std::uint32_t fragment = 0; fragment < 2U; ++fragment) {
+            const std::uint32_t index =
+                a8q4_m128_lds_index(pair, wave_token + fragment * 16U + axis);
+            low[half][fragment] = a8q4_m128_fragment(stage.activation_low[index]);
+            high[half][fragment] = a8q4_m128_fragment(stage.activation_high[index]);
+        }
+#pragma unroll
+        for (std::uint32_t row_fragment = 0; row_fragment < 4U; ++row_fragment) {
+            weights[half][row_fragment] = a8q4_m128_fragment(stage.weights[
+                a8q4_m128_lds_index(pair, wave_row + row_fragment * 16U + axis)]);
+        }
+    }
+    float activation_scale[2][8];
+#pragma unroll
+    for (std::uint32_t fragment = 0; fragment < 2U; ++fragment) {
+#pragma unroll
+        for (std::uint32_t element = 0; element < 8U; ++element) {
+            activation_scale[fragment][element] = stage.activation_scales[
+                wave_token + fragment * 16U + lane_group * 8U + element];
+        }
+    }
+    float weight_scale[4];
+#pragma unroll
+    for (std::uint32_t row_fragment = 0; row_fragment < 4U; ++row_fragment) {
+        weight_scale[row_fragment] = stage.weight_scales[wave_row + row_fragment * 16U + axis];
+    }
+#pragma unroll
+    for (std::uint32_t fragment = 0; fragment < 2U; ++fragment) {
+#pragma unroll
+        for (std::uint32_t row_fragment = 0; row_fragment < 4U; ++row_fragment) {
+            WmmaI32x8 dot = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
+                true, high[0][fragment], true, weights[0][row_fragment], high_origin, false);
+            dot = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
+                true, high[1][fragment], true, weights[1][row_fragment], dot, false);
+            dot = dot << 4;
+            dot = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
+                false, low[0][fragment], true, weights[0][row_fragment], dot, false);
+            dot = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
+                false, low[1][fragment], true, weights[1][row_fragment], dot, false);
+#pragma unroll
+            for (std::uint32_t element = 0; element < 8U; ++element) {
+                totals[fragment][row_fragment][element] = fmaf(
+                    __int_as_float(dot[element]) - 12582912.0F,
+                    activation_scale[fragment][element] * weight_scale[row_fragment],
+                    totals[fragment][row_fragment][element]);
+            }
+        }
+    }
+    // Interleave each WMMA with four independent VALU instructions of the scale epilogue.
+#pragma unroll
+    for (std::uint32_t instruction = 0; instruction < 32U; ++instruction) {
+        __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);
+        __builtin_amdgcn_sched_group_barrier(0x002, 4, 0);
+    }
+}
+
+__global__ __launch_bounds__(kA8Q4M128ProductionThreads)
 void a8q4g64_linear_prefill_cta_kernel(
     const std::uint8_t* activation_low_codes,
     const std::uint8_t* activation_high_codes,
     const std::uint16_t* activation_scales,
     const std::uint32_t* activation_status,
     const std::uint8_t* weight_codes, const std::uint16_t* weight_scales,
-    hip_bfloat16* output, std::uint32_t tokens, std::uint32_t rows,
-    std::uint32_t columns, std::uint32_t padded_columns) {
+    hip_bfloat16* output, std::uint32_t rows, std::uint32_t padded_columns) {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
-    (void)tokens;
-    (void)columns;
-    __shared__ A8Q4PrefillN128PingPongTile tiles;
+    __shared__ A8Q4PrefillM128PingPong tiles;
     const std::uint32_t thread = threadIdx.x;
     const std::uint32_t lane = thread & (kWaveSize - 1U);
-    const std::uint32_t wave = thread / kWaveSize;
+    const std::uint32_t wave = __builtin_amdgcn_readfirstlane(thread / kWaveSize);
     const std::uint32_t axis = lane & 15U;
     const std::uint32_t lane_group = lane >> 4U;
-    const std::uint32_t wave_token_tile = wave / 4U;
-    const std::uint32_t wave_row_tile = wave & 3U;
-    const std::uint32_t cta_token_base = blockIdx.y * kA8Q4PrefillTokenTile;
-    const std::uint32_t cta_row_base = blockIdx.x * (2U * kA8Q4PrefillRowTile);
-    const std::uint32_t token_base =
-        cta_token_base + wave_token_tile * kWmmaTile;
+    const std::uint32_t token_base = blockIdx.x * kA8Q4M128PrefillTokenTile;
+    const std::uint32_t row_base = blockIdx.y * kA8Q4M128PrefillTokenTile;
+    const std::uint32_t wave_token = (wave & 3U) * 32U;
+    const std::uint32_t wave_row = (wave >> 2U) * 64U;
 
     if (*activation_status != Q4G64ActivationOk) {
 #pragma unroll
-        for (std::uint32_t row_half = 0; row_half < 2U; ++row_half) {
+        for (std::uint32_t fragment = 0; fragment < 2U; ++fragment) {
 #pragma unroll
-            for (std::uint32_t element = 0; element < 8U; ++element) {
-                const std::uint32_t token = token_base + lane_group * 8U + element;
-                const std::uint32_t row = cta_row_base +
-                    row_half * kA8Q4PrefillRowTile + wave_row_tile * kWmmaTile + axis;
-                output[static_cast<std::size_t>(token) * rows + row] =
-                    conspicuous_bf16_nan();
+            for (std::uint32_t row_fragment = 0; row_fragment < 4U; ++row_fragment) {
+#pragma unroll
+                for (std::uint32_t element = 0; element < 8U; ++element) {
+                    const std::uint32_t token = token_base + wave_token + fragment * 16U +
+                                                lane_group * 8U + element;
+                    const std::uint32_t row =
+                        row_base + wave_row + row_fragment * 16U + axis;
+                    output[static_cast<std::size_t>(token) * rows + row] =
+                        conspicuous_bf16_nan();
+                }
             }
         }
         return;
     }
 
     const std::uint32_t groups = padded_columns / kQ4Group;
-    const std::uint32_t activation_row = thread / 8U;
-    const std::uint32_t word = thread & 7U;
-    const std::uint32_t token = cta_token_base + activation_row;
-    const std::uint32_t activation_lds =
-        a8q4_lds_word_index(activation_row, word, kA8Q4PrefillTokenTile);
-    const std::uint32_t load_tile = thread >> 6U;
-    const std::uint32_t load_pair = (thread >> 4U) & 3U;
-    const std::uint32_t load_lane = thread & 15U;
-    const std::uint32_t load_row_local = load_tile * 16U + load_lane;
-    const std::uint32_t load_row = cta_row_base + load_row_local;
-    const std::uint32_t load_word = load_pair * 2U;
+    A8Q4PrefillM128Offsets offsets;
+    offsets.activation =
+        (token_base + (thread >> 1U)) * (padded_columns / 2U) + (thread & 1U) * 16U;
+    offsets.weight = (row_base / 16U + (thread >> 5U)) * groups * 512U + (thread & 31U) * 16U;
+    offsets.activation_scale = thread < kA8Q4M128PrefillTokenTile;
+    offsets.scale = offsets.activation_scale
+        ? (token_base + thread) * groups * 2U
+        : static_cast<std::uint32_t>(
+              q4_n16k16_scale_index(row_base + thread - kA8Q4M128PrefillTokenTile, 0U, groups) *
+              sizeof(std::uint16_t));
 
-    std::uint32_t activation_offset =
-        token * (padded_columns / 2U) + word * sizeof(std::uint32_t);
-    std::uint32_t weight_offset = static_cast<std::uint32_t>(
-        q4_n16k16_pair_index(load_row, 0U, load_pair, groups) *
-        sizeof(std::uint64_t));
-    std::uint32_t activation_scale_offset =
-        (cta_token_base + thread) * groups * sizeof(std::uint16_t);
-    std::uint32_t weight_scale_offset = static_cast<std::uint32_t>(
-        q4_n16k16_scale_index(cta_row_base + thread, 0U, groups) *
-        sizeof(std::uint16_t));
+    WmmaF32Fragment totals[2][4]{};
+    WmmaI32x8 high_origin;
+#pragma unroll
+    for (std::uint32_t element = 0; element < 8U; ++element) high_origin[element] = 0x04B40000;
 
-    tiles.bank[0].activation_low[activation_lds] =
-        scalar_base_load_u32(activation_low_codes, activation_offset);
-    tiles.bank[0].activation_high[activation_lds] =
-        scalar_base_load_u32(activation_high_codes, activation_offset);
-    const std::uint64_t first_weight =
-        scalar_base_load_u64(weight_codes, weight_offset);
-    tiles.bank[0].weights[a8q4_lds_word_index(
-        load_row_local, load_word, 2U * kA8Q4PrefillRowTile)] =
-        static_cast<std::uint32_t>(first_weight);
-    tiles.bank[0].weights[a8q4_lds_word_index(
-        load_row_local, load_word + 1U, 2U * kA8Q4PrefillRowTile)] =
-        static_cast<std::uint32_t>(first_weight >> 32U);
-    if (thread < kA8Q4PrefillTokenTile) {
-        tiles.bank[0].activation_scales[thread] =
-            scalar_base_load_u16(activation_scales, activation_scale_offset);
-    }
-    if (thread < 2U * kA8Q4PrefillRowTile) {
-        tiles.bank[0].weight_scales[thread] =
-            scalar_base_load_u16(weight_scales, weight_scale_offset);
-    }
+    a8q4_m128_store(tiles.stage[0],
+                    a8q4_m128_load(activation_low_codes, activation_high_codes,
+                                   activation_scales, weight_codes, weight_scales, offsets, 0U),
+                    thread);
     prefill_cta_barrier<true>();
+    for (std::uint32_t group = 0; group + 1U < groups; ++group) {
+        const A8Q4PrefillM128Load next =
+            a8q4_m128_load(activation_low_codes, activation_high_codes, activation_scales,
+                           weight_codes, weight_scales, offsets, group + 1U);
+        a8q4_m128_group(tiles.stage[group & 1U], wave_token, wave_row, axis, lane_group,
+                        high_origin, totals);
+        a8q4_m128_store(tiles.stage[(group + 1U) & 1U], next, thread);
+        prefill_cta_barrier<true>();
+    }
+    a8q4_m128_group(tiles.stage[(groups - 1U) & 1U], wave_token, wave_row, axis, lane_group,
+                    high_origin, totals);
 
-    WmmaF32Fragment totals[2]{};
-    for (std::uint32_t group = 0; group < groups; ++group) {
-        const bool has_next = group + 1U < groups;
-        std::uint32_t next_activation_low = 0U;
-        std::uint32_t next_activation_high = 0U;
-        std::uint64_t next_weight = 0U;
-        if (has_next) {
-            activation_offset += kQ4Group / 2U;
-            weight_offset += 4U * 16U * sizeof(std::uint64_t);
-            next_activation_low =
-                scalar_base_load_u32(activation_low_codes, activation_offset);
-            next_activation_high =
-                scalar_base_load_u32(activation_high_codes, activation_offset);
-            next_weight = scalar_base_load_u64(weight_codes, weight_offset);
-        }
-
-        A8Q4PrefillN128Tile& current = tiles.bank[group & 1U];
-        WmmaI32x8 low_dot[2]{};
-        WmmaI32x8 high_dot[2]{};
 #pragma unroll
-        for (std::uint32_t half = 0; half < 2U; ++half) {
-            WmmaI32x2 a_low{};
-            WmmaI32x2 a_high{};
-            WmmaI32x2 b[2]{};
-            const std::uint32_t fragment_word = half * 4U + lane_group * 2U;
-            const std::uint32_t activation_fragment_row =
-                wave_token_tile * kWmmaTile + axis;
-            const std::uint32_t a_index = a8q4_lds_word_index(
-                activation_fragment_row, fragment_word, kA8Q4PrefillTokenTile);
-            a_low[0] = static_cast<int>(current.activation_low[a_index]);
-            a_low[1] = static_cast<int>(current.activation_low[a8q4_lds_word_index(
-                activation_fragment_row, fragment_word + 1U,
-                kA8Q4PrefillTokenTile)]);
-            a_high[0] = static_cast<int>(current.activation_high[a_index]);
-            a_high[1] = static_cast<int>(current.activation_high[a8q4_lds_word_index(
-                activation_fragment_row, fragment_word + 1U,
-                kA8Q4PrefillTokenTile)]);
+    for (std::uint32_t fragment = 0; fragment < 2U; ++fragment) {
 #pragma unroll
-            for (std::uint32_t row_half = 0; row_half < 2U; ++row_half) {
-                const std::uint32_t weight_fragment_row =
-                    row_half * kA8Q4PrefillRowTile + wave_row_tile * kWmmaTile + axis;
-                const std::uint32_t b_index = a8q4_lds_word_index(
-                    weight_fragment_row, fragment_word,
-                    2U * kA8Q4PrefillRowTile);
-                b[row_half][0] = static_cast<int>(current.weights[b_index]);
-                b[row_half][1] = static_cast<int>(current.weights[
-                    a8q4_lds_word_index(weight_fragment_row, fragment_word + 1U,
-                                           2U * kA8Q4PrefillRowTile)]);
-            }
-            low_dot[0] = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
-                false, a_low, true, b[0], low_dot[0], false);
-            high_dot[0] = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
-                true, a_high, true, b[0], high_dot[0], false);
-            low_dot[1] = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
-                false, a_low, true, b[1], low_dot[1], false);
-            high_dot[1] = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
-                true, a_high, true, b[1], high_dot[1], false);
-        }
-#pragma unroll
-        for (std::uint32_t row_half = 0; row_half < 2U; ++row_half) {
-            const std::uint32_t fragment_row = row_half * kA8Q4PrefillRowTile +
-                wave_row_tile * kWmmaTile + axis;
-            const float weight_scale = __half2float(__ushort_as_half(
-                current.weight_scales[fragment_row]));
+        for (std::uint32_t row_fragment = 0; row_fragment < 4U; ++row_fragment) {
 #pragma unroll
             for (std::uint32_t element = 0; element < 8U; ++element) {
-                const std::uint32_t fragment_token =
-                    wave_token_tile * kWmmaTile + lane_group * 8U + element;
-                const float activation_scale = __half2float(__ushort_as_half(
-                    current.activation_scales[fragment_token]));
-                const std::int32_t combined =
-                    low_dot[row_half][element] + 16 * high_dot[row_half][element];
-                totals[row_half][element] = fmaf(
-                    static_cast<float>(combined), activation_scale * weight_scale,
-                    totals[row_half][element]);
+                const std::uint32_t token = token_base + wave_token + fragment * 16U +
+                                            lane_group * 8U + element;
+                const std::uint32_t row = row_base + wave_row + row_fragment * 16U + axis;
+                output[static_cast<std::size_t>(token) * rows + row] =
+                    static_cast<hip_bfloat16>(totals[fragment][row_fragment][element]);
             }
-        }
-
-        if (has_next) {
-            A8Q4PrefillN128Tile& next = tiles.bank[(group + 1U) & 1U];
-            next.activation_low[activation_lds] = next_activation_low;
-            next.activation_high[activation_lds] = next_activation_high;
-            next.weights[a8q4_lds_word_index(
-                load_row_local, load_word, 2U * kA8Q4PrefillRowTile)] =
-                static_cast<std::uint32_t>(next_weight);
-            next.weights[a8q4_lds_word_index(
-                load_row_local, load_word + 1U, 2U * kA8Q4PrefillRowTile)] =
-                static_cast<std::uint32_t>(next_weight >> 32U);
-            if (thread < kA8Q4PrefillTokenTile) {
-                activation_scale_offset += sizeof(std::uint16_t);
-                next.activation_scales[thread] = scalar_base_load_u16(
-                    activation_scales, activation_scale_offset);
-            }
-            if (thread < 2U * kA8Q4PrefillRowTile) {
-                weight_scale_offset += 16U * sizeof(std::uint16_t);
-                next.weight_scales[thread] =
-                    scalar_base_load_u16(weight_scales, weight_scale_offset);
-            }
-            prefill_cta_barrier<true>();
-        }
-    }
-
-#pragma unroll
-    for (std::uint32_t row_half = 0; row_half < 2U; ++row_half) {
-#pragma unroll
-        for (std::uint32_t element = 0; element < 8U; ++element) {
-            const std::uint32_t token = token_base + lane_group * 8U + element;
-            const std::uint32_t row = cta_row_base +
-                row_half * kA8Q4PrefillRowTile + wave_row_tile * kWmmaTile + axis;
-            output[static_cast<std::size_t>(token) * rows + row] =
-                static_cast<hip_bfloat16>(totals[row_half][element]);
         }
     }
 #else
     (void)activation_low_codes; (void)activation_high_codes;
     (void)activation_scales; (void)activation_status; (void)weight_codes;
-    (void)weight_scales; (void)output; (void)tokens; (void)rows;
-    (void)columns; (void)padded_columns;
+    (void)weight_scales; (void)output; (void)rows; (void)padded_columns;
 #endif
 }
 
@@ -3482,25 +3529,25 @@ hipError_t a8q4g64_linear_prefill_cta(
     if (!valid_a8q4_linear_args(args) || args.tokens <= 128U) {
         return hipErrorInvalidValue;
     }
-    // Scalar-base loads deliberately use U32 byte cursors and remove all tile
-    // predicates. The size_t-addressed single-bank kernel remains the complete
-    // direct-call fallback for every tuple outside the qualified inventory.
+    // The M128xN128 kernel has no tile predicates and uses U32 byte offsets. The size_t-addressed
+    // single-bank kernel remains the complete direct-call fallback for every
+    // tuple outside the qualified inventory.
     if (!use_a8q4_prefill_cta(args.tokens, args.rows, args.columns) ||
         args.columns != args.padded_columns ||
-        args.tokens % kA8Q4PrefillTokenTile != 0U ||
-        args.rows % (2U * kA8Q4PrefillRowTile) != 0U ||
+        args.tokens % kA8Q4M128PrefillTokenTile != 0U ||
+        args.rows % kA8Q4M128PrefillTokenTile != 0U ||
         !scalar_base_offsets_fit(args.tokens, args.rows, args.padded_columns)) {
         return a8q4g64_linear_prefill_cta_m64n128_regression(args, stream);
     }
 #if defined(__HIPCC__)
-    const dim3 grid(args.rows / (2U * kA8Q4PrefillRowTile),
-                    args.tokens / kA8Q4PrefillTokenTile);
+    const dim3 grid(args.tokens / kA8Q4M128PrefillTokenTile,
+                    args.rows / kA8Q4M128PrefillTokenTile);
     hipLaunchKernelGGL(a8q4g64_linear_prefill_cta_kernel,
-                       grid, dim3(kA8Q4PrefillThreads), 0, stream,
+                       grid, dim3(kA8Q4M128ProductionThreads), 0, stream,
                        args.activation_low_codes, args.activation_high_codes,
                        args.activation_scales, args.activation_status,
-                       args.weight_codes, args.weight_scales, args.output, args.tokens,
-                       args.rows, args.columns, args.padded_columns);
+                       args.weight_codes, args.weight_scales, args.output, args.rows,
+                       args.padded_columns);
     return hipGetLastError();
 #else
     (void)stream;

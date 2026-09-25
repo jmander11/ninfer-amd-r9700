@@ -32,10 +32,12 @@ PROFILES = {
         "_ZN6ninfer3ops5r97006linear12_GLOBAL__N_136a8q4g64_linear_decode_dot8_t1_kernelEPKhS5_PKtPKjS5_S7_P12hip_bfloat16jj",
         "v_dot8_i32_iu4", 16, 0, 64, 0, 0, 0, 0, 256,
     ),
+    # M128xN128 production: two K64 bodies (pipelined loop plus peeled final group) of 2x4
+    # fragments, each four IU4 WMMA sites.
     "q4": Profile(
         "_ZN6ninfer3ops5r97006linear12_GLOBAL__N_152a8q4g64_linear_prefill_cta_m64n128_regression_kernelEPKhS5_PKtPKjS5_S7_P12hip_bfloat16jjjj",
-        "_ZN6ninfer3ops5r97006linear12_GLOBAL__N_133a8q4g64_linear_prefill_cta_kernelEPKhS5_PKtPKjS5_S7_P12hip_bfloat16jjjj",
-        "v_wmma_i32_16x16x32_iu4", 8, 17152, 96, 0, 8, 8576, 96, 512, 16,
+        "_ZN6ninfer3ops5r97006linear12_GLOBAL__N_133a8q4g64_linear_prefill_cta_kernelEPKhS5_PKtPKjS5_S7_P12hip_bfloat16jj",
+        "v_wmma_i32_16x16x32_iu4", 64, 26624, 232, 0, 8, 8576, 96, 256, 7,
     ),
     "w8": Profile(
         "_ZN6ninfer3ops5r97006linear12_GLOBAL__N_158a8w8g32_linear_prefill_cta_global_inv_qualification_kernelEPKaPKtPKjS5_S7_P12hip_bfloat16jjjj",
@@ -265,48 +267,37 @@ def check(recipe: str, mode: str, assembly: Path, metadata: Path) -> dict[str, i
             rf"^\s*{re.escape(profile.opcode)}[^\n]*$", assembly_body,
             flags=re.MULTILINE,
         )
-        if (sum("neg_lo:[0,1,0]" in line for line in opcode_lines) != 4 or
-                sum("neg_lo:[1,1,0]" in line for line in opcode_lines) != 4):
+        if (sum("neg_lo:[0,1,0]" in line for line in opcode_lines) != 32 or
+                sum("neg_lo:[1,1,0]" in line for line in opcode_lines) != 32):
             raise ValueError(
-                "q4: expected four unsigned-low/signed-W and four signed-high/signed-W IU4 sites")
-        first_wmma = assembly_body.find(profile.opcode)
-        loads = list(re.finditer(r"^\s*global_load_b(?:32|64)(?:\s|$)",
-                                 assembly_body[:first_wmma], flags=re.MULTILINE))
-        if (sum("global_load_b32" in match.group(0) for match in loads) != 4 or
-                sum("global_load_b64" in match.group(0) for match in loads) != 2):
+                "q4: expected 32 unsigned-low/signed-W and 32 signed-high/signed-W IU4 sites")
+        global_loads = list(re.finditer(
+            r"^\s*(global_load_b128)\s+v\[\d+:\d+\],\s+v\d+,\s+(s\[\d+:\d+\])\s*$",
+            assembly_body, flags=re.MULTILINE))
+        roles = [(match.group(1), match.group(2)) for match in global_loads]
+        if roles != [("global_load_b128", "s[4:5]"), ("global_load_b128", "s[6:7]"),
+                     ("global_load_b128", "s[16:17]")] * 2:
             raise ValueError(
-                "q4: expected prologue+successor pairs of two activation b32 and one N16/K16 weight b64 load")
+                "q4: production loads must be prologue and successor triples of low-code, "
+                "high-code and N16/K16 weight b128 loads from scalar bases with U32 offsets")
+        scale_loads = re.findall(r"^\s*global_load_d16_b16(?:\s|$)", assembly_body,
+                                 flags=re.MULTILINE)
+        if len(scale_loads) != 2:
+            raise ValueError("q4: expected one prologue and one successor FP16 scale load")
         n16_weight_b64_sites = 2
-        global_loads = re.findall(
-            r"^\s*(global_load_(?:b32|b64|d16_b16))\s+"
-            r"v(?:\[\d+:\d+\]|\d+),\s+v\d+,\s+(s\[\d+:\d+\])\s*$",
-            assembly_body, flags=re.MULTILINE,
-        )
-        expected_loads = [
-            ("global_load_b32", "s[4:5]"),
-            ("global_load_b32", "s[6:7]"),
-            ("global_load_b64", "s[16:17]"),
-            ("global_load_d16_b16", "s[8:9]"),
-            ("global_load_d16_b16", "s[18:19]"),
-        ] * 2
-        if global_loads != expected_loads:
-            raise ValueError(
-                "q4: production loads must retain exact scalar-base role/order "
-                "with one VGPR U32 offset and default cache policy")
         scalar_base_load_sites = len(global_loads)
-        overlap_window = assembly_body[loads[-3].start():first_wmma]
-        overlap_widths = re.findall(r"^\s*global_load_b(32|64)(?:\s|$)",
-                                    overlap_window, flags=re.MULTILINE)
-        if overlap_widths != ["32", "32", "64"] or re.search(
-                r"^\s*s_wait_loadcnt\s+0x0", overlap_window, flags=re.MULTILINE):
+        successor = global_loads[3].start()
+        first_loop_wmma = assembly_body.find(profile.opcode, successor)
+        overlap_window = assembly_body[successor:first_loop_wmma]
+        if first_loop_wmma < 0 or re.search(r"^\s*s_wait_loadcnt\s+0x0", overlap_window,
+                                            flags=re.MULTILINE):
             raise ValueError(
-                "q4: next-group activation b32+b32 and N16/K16 weight b64 must remain outstanding across current WMMA")
-        last_wmma = assembly_body.rfind(profile.opcode)
-        publish_window = assembly_body[last_wmma:]
-        if len(re.findall(r"^\s*ds_store(?:_\S+)?", publish_window,
-                          flags=re.MULTILINE)) < 3 or "s_wait_loadcnt 0x0" not in publish_window:
+                "q4: next-group code planes must remain outstanding across current WMMA")
+        publish = re.search(r"^\s*ds_store", assembly_body[first_loop_wmma:], flags=re.MULTILINE)
+        if publish is None or "s_wait_loadcnt" not in assembly_body[
+                first_loop_wmma:first_loop_wmma + publish.start()]:
             raise ValueError(
-                f"{recipe}: prefetched payload must be waited before LDS publication")
+                f"{recipe}: prefetched payload must be waited and published after current WMMA")
     return {
         "recipe": recipe, "mode": mode, "opcode_count": opcode_count,
         "barrier_pair_count": signal_count, "global_inv_count": global_inv_count,

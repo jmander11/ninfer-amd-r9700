@@ -122,30 +122,16 @@ struct DensePrefillWmmaResources {
     int local_bytes = 0;
 };
 
-// Staged causal prefill over bounded query panels. The caller owns one reusable FP32 score panel
-// and one FP32 maximum per (panel row, query head), plus FP32 numerator/denominator
-// partials for long-context split PV. QK uses 16x16 for calls below 512 rows;
-// larger calls use 32x64, or 16x32 when a panel has fewer than 32 rows.
-// Row positions remain absolute.
-enum class DensePrefillFullScoreStage : std::uint32_t {
-    QkBk16 = 0U,
-    Maximum = 1U,
-    Pv = 2U,
-    QkBq16Bk32 = 3U,
-    QkBq32Bk64 = 4U,
-};
-[[nodiscard]] std::size_t fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(
-    std::uint32_t query_rows, std::size_t visible_context) noexcept;
-// Conservative envelope maximum; unlike the exact query above, this remains valid across the
-// sawtooth in panel widths as visible context grows.
-[[nodiscard]] std::size_t fp8_int4_kv_attention_dense_prefill_workspace_envelope_bytes(
-    std::uint32_t maximum_query_rows, std::size_t maximum_visible_context) noexcept;
-[[nodiscard]] hipError_t fp8_int4_kv_attention_dense_prefill_full_score(
-    const Fp8Int4KvAttentionArgs& args, void* workspace, std::size_t workspace_bytes,
-    hipStream_t stream) noexcept;
-[[nodiscard]] hipError_t fp8_int4_kv_attention_dense_prefill_full_score_resources(
-    std::uint32_t value_group, DensePrefillFullScoreStage stage,
-    DensePrefillWmmaResources* resources) noexcept;
+// Fused causal dense prefill without a score plane. Represented BF16 Q and exact-BF16 FP8 K feed
+// BF16 WMMA with FP32 accumulation; online FP32 Softmax produces FP16 probabilities for FP16
+// WMMA against INT4-times-FP16-scale V staged as FP16 V/8, with FP32 numerator and denominator.
+// Row positions are absolute; invalid rows, positions, page-table rows, and physical pages
+// poison exactly the dependent rows with NaN, and device-inactive rows are exact positive zero.
+// The launch needs no caller-owned workspace.
+[[nodiscard]] hipError_t fp8_int4_kv_attention_dense_prefill(
+    const Fp8Int4KvAttentionArgs& args, hipStream_t stream) noexcept;
+[[nodiscard]] hipError_t fp8_int4_kv_attention_dense_prefill_resources(
+    std::uint32_t value_group, DensePrefillWmmaResources* resources) noexcept;
 
 // Native gfx12 decode challenger: raw wave32 FP8-Q/FP8-K WMMA writes one reusable FP32 score workspace,
 // followed by a stable FP32 softmax plus exact signed-INT4-times-FP16-scale PV consumer. Q's

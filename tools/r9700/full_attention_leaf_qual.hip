@@ -578,9 +578,11 @@ int main() {
         ninfer::DeviceBuffer d_prefix_lengths(
             kMaximumQualifiedRows * sizeof(std::int32_t));
         ninfer::DeviceBuffer d_active_query_rows(sizeof(std::int32_t));
-        ninfer::DeviceBuffer d_score_workspace(
+        // Dense prefill needs none; the single-row WMMA score plane is the largest consumer.
+        ninfer::DeviceBuffer d_score_workspace(std::max(
             q27::r9700_full_attention_workspace_capacity_bytes(
-                kMaximumQualifiedRows, kContext + 1U, false));
+                kMaximumQualifiedRows, kContext + 1U, false),
+            q27::r9700_full_attention_score_workspace_capacity_bytes(kContext + 1U)));
         const ninfer::Fp8KInt4VPagedKVLayerView view =
             typed_cache.layer_view(0, allocation);
         if (view.key_fp8_pages.bytes() != cache.physical_keys.size() ||

@@ -44,8 +44,8 @@ endif()
 add_compile_definitions(
   NINFER_R9700_Q4_ACTIVATION_BITS=${NINFER_R9700_Q4_ACTIVATION_BITS})
 
-set(NINFER_R9700_Q4_PREFILL_A4_FAMILIES "1" CACHE STRING
-  "Q4 prefill A4 policy: 1=selected gate/up; evaluators: 0=none, 2=MLP, 3=projections, 4=attention input, 5=gate/up+attention input")
+set(NINFER_R9700_Q4_PREFILL_A4_FAMILIES "0" CACHE STRING
+  "Q4 prefill A4 policy: 0=selected uniform A8; evaluators: 1=gate/up, 2=MLP, 3=projections, 4=attention input, 5=gate/up+attention input")
 set_property(CACHE NINFER_R9700_Q4_PREFILL_A4_FAMILIES PROPERTY STRINGS 0 1 2 3 4 5)
 if(NOT NINFER_R9700_Q4_PREFILL_A4_FAMILIES MATCHES "^[0-5]$")
   message(FATAL_ERROR "NINFER_R9700_Q4_PREFILL_A4_FAMILIES must be in [0,5]")

@@ -6,8 +6,8 @@
 namespace ninfer::ops::r9700::linear {
 
 // Compile-time execution boundary for the two qualified activation codecs over identical
-// persistent Q4G64 artifact bytes. The selected default is A8 with gate/up-only A4
-// for T>128. Other profiles are evaluators, not runtime or artifact selectors.
+// persistent Q4G64 artifact bytes. The selected default is uniform A8; the mixed
+// prefill A4 families are evaluators, not runtime or artifact selectors.
 #ifndef NINFER_R9700_Q4_ACTIVATION_BITS
 #define NINFER_R9700_Q4_ACTIVATION_BITS 8
 #endif
@@ -17,7 +17,7 @@ static_assert(NINFER_R9700_Q4_ACTIVATION_BITS == 4 ||
 inline constexpr std::uint32_t kQ4ActivationBits = NINFER_R9700_Q4_ACTIVATION_BITS;
 
 #ifndef NINFER_R9700_Q4_PREFILL_A4_FAMILIES
-#define NINFER_R9700_Q4_PREFILL_A4_FAMILIES 1
+#define NINFER_R9700_Q4_PREFILL_A4_FAMILIES 0
 #endif
 inline constexpr unsigned kQ4PrefillA4Families = NINFER_R9700_Q4_PREFILL_A4_FAMILIES;
 static_assert(kQ4PrefillA4Families <= 5U);

@@ -262,7 +262,9 @@ void qualify_ordinary(int width, bool in_place, bool normalize, int salt, hipStr
     ninfer::Tensor tout(in_place ? state_in.data() : state_out.data(), ninfer::DType::FP32,
                         {kDim, kDim, kValueHeads});
     ninfer::Tensor o(output.data(), ninfer::DType::BF16, {kDim, kValueHeads, in.width});
-    ninfer::WorkspaceArena arena(1);
+    ninfer::WorkspaceArena arena(std::max<std::size_t>(
+        1U, ninfer::ops::gated_delta_net_workspace_capacity_bytes(kQHeads, kValueHeads, normalize,
+                                                                  in.width, in.width)));
     if (in_place) {
         ninfer::ops::gated_delta_net(device.tq, device.tk, device.tv, device.tg, device.tbeta,
                                      kScale, normalize, arena, tin, o, stream);
@@ -285,6 +287,11 @@ void qualify_ordinary(int width, bool in_place, bool normalize, int salt, hipStr
     if (!in_place && copied<float>(state_in, state_count) != initial) {
         fail("ordinary distinct input state mutated");
     }
+}
+
+// Normalized FP32 q/k per (token, Q/K head) plus exp(g) per (token, value head).
+std::size_t staged_workspace_bytes(std::size_t width) {
+    return width * (static_cast<std::size_t>(kQHeads) * 2U * kDim + kValueHeads) * sizeof(float);
 }
 
 void qualify_selected_p2048(hipStream_t stream) {
@@ -315,8 +322,8 @@ void qualify_selected_p2048(hipStream_t stream) {
     const std::size_t workspace_bytes =
         ninfer::ops::gated_delta_net_workspace_capacity_bytes(kQHeads, kValueHeads, true,
                                                                kWidth, kWidth);
-    if (workspace_bytes != static_cast<std::size_t>(kWidth) * 2U * kQHeads * sizeof(float)) {
-        fail("selected P2048 sidecar workspace mismatch");
+    if (workspace_bytes != staged_workspace_bytes(kWidth)) {
+        fail("selected P2048 staged workspace mismatch");
     }
     ninfer::WorkspaceArena arena(workspace_bytes);
     ninfer::ops::gated_delta_net(device.tq, device.tk, device.tv, device.tg, device.tbeta,
@@ -683,15 +690,19 @@ void qualify_record(bool tree, int width, int batch, int salt, hipStream_t strea
 }
 
 void qualify_contract_rejection() {
-    constexpr std::size_t kP2048SidecarBytes = 2048U * 2U * 16U * sizeof(float);
+    // The staged normalized route covers widths 64..8192 and its workspace grows with width.
     if (ninfer::ops::gated_delta_net_workspace_capacity_bytes(16, 48, true, 2048, 2048) !=
-            kP2048SidecarBytes ||
+            staged_workspace_bytes(2048) ||
         ninfer::ops::gated_delta_net_workspace_capacity_bytes(16, 48, true, 1, 4096) !=
-            kP2048SidecarBytes ||
-        ninfer::ops::gated_delta_net_workspace_capacity_bytes(16, 48, true, 1, 2047) != 0U ||
-        ninfer::ops::gated_delta_net_workspace_capacity_bytes(16, 48, true, 2049, 4096) != 0U ||
+            staged_workspace_bytes(4096) ||
+        ninfer::ops::gated_delta_net_workspace_capacity_bytes(16, 48, true, 1, 262144) !=
+            staged_workspace_bytes(8192) ||
+        ninfer::ops::gated_delta_net_workspace_capacity_bytes(16, 48, true, 1, 63) != 0U ||
+        ninfer::ops::gated_delta_net_workspace_capacity_bytes(16, 48, true, 64, 64) !=
+            staged_workspace_bytes(64) ||
+        ninfer::ops::gated_delta_net_workspace_capacity_bytes(16, 48, true, 8193, 9000) != 0U ||
         ninfer::ops::gated_delta_net_workspace_capacity_bytes(16, 48, false, 1, 4096) != 0U) {
-        fail("ordinary P2048 scale-sidecar workspace selection mismatch");
+        fail("ordinary staged workspace selection mismatch");
     }
     constexpr int maximum_batch = static_cast<int>(ninfer::kMaximumConcurrency);
     const std::size_t maximum =
@@ -726,6 +737,8 @@ int main() {
         qualify_ordinary(3, true, false, 17, device.stream);
         qualify_ordinary(64, true, false, 19, device.stream);
         qualify_ordinary(128, false, true, 23, device.stream);
+        // Odd staged width: final single transition and in-place state aliasing.
+        qualify_ordinary(65, true, true, 29, device.stream);
         qualify_snapshot(3, 2, 53, device.stream);
         qualify_snapshot(1, static_cast<int>(ninfer::kMaximumConcurrency), 59, device.stream);
         qualify_snapshot(16, 1, 61, device.stream);

@@ -60,6 +60,66 @@ expected value exactly.
 Copy bus rate counts both the read and write traffic. This is the hardware bandwidth bound, not a
 model or individual-Op throughput claim.
 
+## Base-prefill compute campaign (2026-09-25)
+
+Same installed selective-cap model/companion, C1, chunk2048, dense G16, R9700 in `auto`, ROCm 10.
+4K is P4096/G128 whole inference (median of three after one warmup, code text); 8K–64K are
+cycled-code prefill screens (warmup0/repetition1, loaded DFlash K5, no speculative rounds).
+
+| Step | 4K prefill | 8K | 32K | 64K | Worst 4K prefill PPL vs 5090 NVFP4 |
+|---|---:|---:|---:|---:|---:|
+| Start: gate/up A4, score-panel attention | 1687.6 | 1407 | 951 | — | +1.56% |
+| Uniform A8 + M128xN128 A8 GEMM | 1725.8 | 1512 | 970 | 678 | +0.008% |
+| + fused dense prefill attention (v1) | 1971.9 | 1853 | 1591 | 1349 | — |
+| + fused attention v2 | — | 1841 | 1643 | 1428 | — |
+| + GEMM pipeline and staged GDN | **2173.8** | **1976** | **1765** | **1514** | **+0.056%** |
+
+Ordinary decode is unchanged (30.1–30.2 tok/s). Current 4K prefill PPL (WikiText/technical/code)
+is 6.457054/9.445386/2.254297 versus NVFP4 6.481045/9.576387/2.253032; teacher-forced decode is
+6.716401/23.151247/3.248450 (128 positions; paired differences from the first A8 build are within
+about one standard error). Evidence: `profiles/bench/r9700-a8-gateup-20260925/`,
+`r9700-fused-attention-20260925/`, `r9700-gdn-gemm-20260925/`.
+
+**Uniform A8.** Gate/up A4 and A8 ran at nearly the same speed because neither Q4 GEMM is
+matrix-issue bound: on gfx1201 WMMA and VALU issue serialize (measured), and the per-G64-group
+two-sided scale epilogue costs about one VALU slot per WMMA cycle. The new A8 prefill kernel uses
+an eight-wave M128xN128 CTA with 2x4 fragments per wave, token tiles fastest in the grid, an exact
+magic-number I32-to-FP32 epilogue (high-nibble chain seeded with 0x04B40000), scale-first
+scalar-base U32 loads, a peeled final group and WMMA/VALU interleaving. It is bit-exact to the
+former A8 kernel (FP64 regression over six Text and two MTP shapes at T=1024–8192). Gate/up
+N34816/K5120/T2048 on worst-case random codes: former A8 6.2, shipped A4 5.4, new A8 5.39 ms.
+The default is now `NINFER_R9700_Q4_PREFILL_A4_FAMILIES=0`. Under this load the card sits at its
+300 W limit near 2.44 GHz (a register-only WMMA loop holds 2.91 GHz), and all-zero data is 14%
+faster than random data, so the GEMM is power- and epilogue-bound at about 157 useful TOPS.
+
+**Fused dense prefill attention.** The QK / maximum / FP32-score-plane / split-PV / merge stages
+and their 0.5–0.74 GB caller workspace are replaced by one kernel (see
+`docs/maintainer/softmax-attention.md`). Complete-Op at 2048 appended rows: 32K 142→20.8 ms,
+64K 248→44.2 ms (~77 TFLOP/s at 32K). The dense FP64 qualifier passes through 262144 context,
+both FP16 scale extremes, graph replay and every poisoning case; the kernel uses 246/244 VGPRs and
+no scratch. 32K WikiText PPL versus the same build with score-panel attention: mean NLL −0.0021
+(final 512 positions) and +0.0010 (last 16383; 9 new/4 resolved severe).
+
+**GDN recurrence.** The P2048 sequential recurrence was barrier- and LDS-bound (~14% of VALU
+throughput). The staged route precomputes normalized FP32 q/k in lane order and exp(g), then runs
+four state rows per wave with no workgroup barriers, DPP row reductions and next-token prefetch.
+P2048 state and outputs are bit-exact to the former sidecar route; 2.85→1.39 ms per layer call.
+
+Current 4K kernel service: Q4 A8 GEMM 72%, GDN recurrence 7%, FP8 hipBLASLt 3.7%, attention
+2.9%, BF16 GDN controls 2.6%, activation quantization 4%, norms/residual/convolution about 4%
+(`profiles/rocprof/r9700-gdn-gemm-4k-20260925/`). At 32K the GEMM is about 58% and attention
+about 15% (`profiles/rocprof/r9700-fused-32k-20260925/` shows the v1 split).
+
+**FP8 QK evaluation (not selected).** Casting represented BF16 Q once with the decode route's
+saturating E4M3 conversion and using FP8xFP8 WMMA against the stored FP8 keys (no K decode)
+makes the attention Op 1.47–1.56x faster and whole prefill 8K 1955 (no gain), 32K 1864 (+5.6%),
+64K 1671 (+10.4%). Model quality is unchanged within noise: 4K prefill PPL +0.002%/+0.12%/−0.08%
+(WikiText/technical/code), 32K mean NLL +0.0021±0.0042 (512 positions) and −0.0005±0.0007
+(16383; 5 new/6 resolved severe). Operator error versus FP64 rises 10–50x, beyond the BF16 route's
+2e-3 criterion, so adoption would need its own criterion as decode's FP8-Q route has. Evidence
+and binaries: `profiles/bench/r9700-fp8qk-eval-20260925/`. FP8 probabilities for PV (Sage-style)
+were not evaluated.
+
 ## Earlier matrix-PV crossover (2026-09-25)
 
 Matrix PV now begins at2048 visible tokens with2 key splits, uses4 from4096,

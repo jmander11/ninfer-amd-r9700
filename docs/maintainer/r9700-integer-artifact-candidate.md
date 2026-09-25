@@ -52,8 +52,8 @@ to real-source quality and whole-inference comparison; it does not alter this pr
 W8 artifact's identity, inventory, converter, or unselected status.
 
 A8 is the baseline codec for every Q4-bearing identity and consumes those same
-Q4G64 artifact planes without changing their identity. The selected compile default overrides
-only large gate/up calls to A4 as described below. Uniform A4 requires an explicit
+Q4G64 artifact planes without changing their identity. The selected compile default is uniform
+A8; the mixed prefill A4 families below are evaluators. Uniform A4 requires an explicit
 evaluator build with activation bits4 and family0. A8 stores each signed A8G64 code as unsigned low and signed high nibbles,
 executes both with native IU4 WMMA, and recombines `low + 16 * high` exactly in I32 before FP32
 scale composition and one BF16 output rounding. Exact activation images and every independent
@@ -67,7 +67,7 @@ across the tested shapes. This admits A8 to matched real-model evaluation while 
 reproducible; it does not select a persistent Q4 recipe for production.
 
 The `NINFER_R9700_Q4_PREFILL_A4_FAMILIES` policy requires the global
-Q4 A8 build when nonzero: `0` is disabled, the selected default `1` selects only Q4 Linear N34816/K5120, `2` adds
+Q4 A8 build when nonzero: the selected default `0` disables it, `1` selects only Q4 Linear N34816/K5120, `2` adds
 MLP down N5120/K17408, and `3` adds Text projection shapes N4096/7168/12288 K5120
 and N5120/K6144. `4` selects only attention-input N7168/K5120; `5` combines that
 shape with gate/up, leaving down and GDN A8. All overrides require T>128 and unpadded K. The broader profiles
@@ -75,8 +75,10 @@ are quality-screen candidates, not admitted speedups. T1 decode, speculative wid
 endpoints, and FP8 matrices are unchanged. The public workspace keeps its A8 capacity while the A4 consumer binds
 its exact-sized prefix. `q4_activation_profile` and `q4_prefill_gate_up_a4` in PPL
 and benchmark reports identify this mixed execution; `q4_activation_bits: 8` alone
-does not describe it. The user selected gate/up-only A4 after the bounded NVFP4 comparison;
-this is not final BF16-source weight-recipe admission. The admitted cooperative consumer uses
+does not describe it. The user first selected gate/up-only A4 after the bounded NVFP4
+comparison, then restored uniform A8 on 2026-09-25 once the M128xN128 A8 prefill GEMM made A8
+at least as fast as the A4 route (see `docs/performance.md`); neither is final BF16-source
+weight-recipe admission. The admitted cooperative consumer uses
 signed IU4 ping/pong staging at full T64 tiles for this exact gate/up geometry, with
 the qualified single-bank tail consumer otherwise. On the selective-cap recipe,
 whole P4096/chunk2048 prefill measures1489–1498tok/s versus uniformA8's1431–1446;

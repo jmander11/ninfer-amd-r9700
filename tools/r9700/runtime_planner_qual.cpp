@@ -137,11 +137,9 @@ void qualify_host_split512_routing() {
                     kv::fp8_int4_kv_attention_split512_workspace_capacity_bytes(4U, 8192U) &&
                 q27::r9700_full_attention_workspace_capacity_bytes(4U, 8191U, true) == 0U,
             "split-512 caller-owned workspace selection differs");
-    require(q27::r9700_full_attention_workspace_capacity_bytes(2048U, 2048U, false) ==
-                kv::fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(2048U, 2048U) &&
-                q27::r9700_full_attention_workspace_capacity_bytes(4096U, 262144U, false) ==
-                kv::fp8_int4_kv_attention_dense_prefill_workspace_envelope_bytes(4096U, 262144U),
-            "dense full-score caller-owned planner peak differs");
+    require(q27::r9700_full_attention_workspace_capacity_bytes(2048U, 2048U, false) == 0U &&
+                q27::r9700_full_attention_workspace_capacity_bytes(4096U, 262144U, false) == 0U,
+            "fused dense prefill must not reserve caller-owned attention workspace");
     const auto has_classes = [](const std::vector<Variant::GraphExecutionProfile>& profiles,
                                 std::initializer_list<std::uint32_t> wanted) {
         return std::all_of(wanted.begin(), wanted.end(), [&](std::uint32_t value) {
@@ -196,7 +194,6 @@ void qualify_host_attention_parity_routing() {
     constexpr std::size_t kW5C140Bytes = 5U * 24U * 140U * sizeof(float);
     constexpr std::size_t kW6C134Bytes = 6U * 24U * 134U * sizeof(float);
     constexpr std::size_t kW6C135Bytes = 6U * 24U * 135U * sizeof(float);
-    constexpr std::size_t kTextP129Bytes = (129U * 24U * 129U + 129U * 24U) * sizeof(float);
     const bool text_enabled = kv::kTextP129WmmaTailCandidate;
     for (const std::size_t context : {64U, 133U, 4100U, 8191U, 8192U, 15200U, 32768U, 262144U}) {
         for (const std::uint32_t rows : {4U, 5U, 6U}) {
@@ -239,8 +236,9 @@ void qualify_host_attention_parity_routing() {
                 q27::r9700_full_attention_workspace_capacity_bytes(6U, 135U, true, true) == 0U,
             "DFlash W4..6 production workspace escaped width/tree selection");
     require(q27::r9700_full_attention_workspace_capacity_bytes(129U, 129U, false) ==
-                kTextP129Bytes,
-            "Text P129 tail candidate changed the dense caller-owned workspace peak");
+                (text_enabled ? q27::r9700_full_attention_score_workspace_capacity_bytes(129U)
+                              : 0U),
+            "Text P129 tail candidate changed the fused dense caller-owned workspace");
     std::printf("r9700_runtime_planner: PASS host attention parity routing/capacity "
                 "text_p129_selector=%u\n",
                 text_enabled ? 1U : 0U);

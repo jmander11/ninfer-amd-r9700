@@ -23,20 +23,6 @@ inline constexpr std::size_t kDflashVerifyWmmaMaximumContext = 262144U;
 inline constexpr std::uint32_t kDensePrefillMinimumRows = 128U;
 inline constexpr std::uint32_t kDensePrefillMaximumRows = 8192U;
 inline constexpr std::size_t kDensePrefillMaximumContext = 262144U;
-inline constexpr std::size_t kDensePrefillScoreElements = 24U * 2048U * 2048U;
-inline constexpr std::size_t kDensePrefillTwoSplitMinimumContext = 2048U;
-inline constexpr std::size_t kDensePrefillFourSplitMinimumContext = 4096U;
-inline constexpr std::size_t kDensePrefillSplitPvMinimumContext = 12288U;
-inline constexpr std::uint32_t kDensePrefillPvSplits = 16U;
-inline constexpr std::size_t kDensePrefillLongPvMinimumContext = 32768U;
-inline constexpr std::uint32_t kDensePrefillLongPvSplits = 32U;
-
-[[nodiscard]] constexpr std::uint32_t dense_prefill_pv_splits(std::size_t context) noexcept {
-    return context >= kDensePrefillLongPvMinimumContext ? kDensePrefillLongPvSplits :
-        context >= kDensePrefillSplitPvMinimumContext ? kDensePrefillPvSplits :
-        context >= kDensePrefillFourSplitMinimumContext ? 4U :
-        context >= kDensePrefillTwoSplitMinimumContext ? 2U : 1U;
-}
 
 // Qualification-only Text P129 WMMA tail candidate. Zero retains the dense P129 route; one admits
 // the exact P129 tail overwrite. The DFlash W5/W6 batched-WMMA route is a production route and is
@@ -50,25 +36,13 @@ static_assert(NINFER_R9700_TEXT_P129_WMMA_TAIL_CANDIDATE == 0 ||
 inline constexpr bool kTextP129WmmaTailCandidate =
     NINFER_R9700_TEXT_P129_WMMA_TAIL_CANDIDATE == 1;
 
-// Causal prefill covers initial and appended chunks. Query panels bound the score plane while
-// preserving absolute positions and the complete visible cache frontier.
+// Causal prefill covers initial and appended chunks with absolute positions and the complete
+// visible cache frontier.
 [[nodiscard]] constexpr bool use_dense_prefill_attention(
     std::uint32_t query_rows, std::size_t visible_context) noexcept {
     return query_rows >= kDensePrefillMinimumRows &&
            query_rows <= kDensePrefillMaximumRows && visible_context >= query_rows &&
            visible_context <= kDensePrefillMaximumContext;
-}
-
-[[nodiscard]] constexpr std::uint32_t dense_prefill_panel_rows(
-    std::uint32_t query_rows, std::size_t context) noexcept {
-    if (!use_dense_prefill_attention(query_rows, context)) return 0U;
-    const auto capacity = static_cast<std::uint32_t>(
-        (kDensePrefillScoreElements / (24U * context)) / 16U * 16U);
-    if (query_rows <= capacity) return query_rows;
-    // Keep the minimum number of panels, but distribute query tiles evenly. Filling
-    // every panel to capacity can strand a few rows in a final near-empty PV grid.
-    const auto panels = (query_rows + capacity - 1U) / capacity;
-    return ((query_rows + panels * 16U - 1U) / (panels * 16U)) * 16U;
 }
 
 [[nodiscard]] constexpr bool use_fp8_qk_wmma(std::uint32_t query_rows,

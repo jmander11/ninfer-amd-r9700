@@ -499,21 +499,15 @@ int main(int argc, char** argv) {
         DeviceArray<float> d_w5_batched_scores(batched_workspace_elements + 2U);
         const std::size_t w6_batched_workspace_elements = kW6 * kQueryHeads * kW6Context;
         DeviceArray<float> d_w6_batched_scores(w6_batched_workspace_elements + 2U);
-        const std::size_t text_dense_workspace_bytes =
-            kv::fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(kTextRows, kTextRows);
-        if (text_dense_workspace_bytes != 1609920U ||
-            text_dense_workspace_bytes % sizeof(float) != 0U) {
-            fail("unexpected exact Text P129 dense workspace size");
-        }
-        const std::size_t text_dense_workspace_elements =
-            text_dense_workspace_bytes / sizeof(float);
+        // Fused dense prefill needs no workspace; only the W1 tail candidate owns scores.
+        const std::size_t text_candidate_workspace_elements =
+            static_cast<std::size_t>(kQueryHeads) * kTextRows;
         DeviceArray<float> d_text_dense_output(static_cast<std::size_t>(kTextRows) *
                                                 row_elements + 2U);
         DeviceArray<float> d_text_candidate_output(static_cast<std::size_t>(kTextRows) *
                                                     row_elements + 2U);
         DeviceArray<float> d_text_w1_output(row_elements + 2U);
-        DeviceArray<float> d_text_dense_workspace(text_dense_workspace_elements + 2U);
-        DeviceArray<float> d_text_candidate_workspace(text_dense_workspace_elements + 2U);
+        DeviceArray<float> d_text_candidate_workspace(text_candidate_workspace_elements + 2U);
         DeviceArray<float> d_text_w1_scores(kQueryHeads * kTextContext + 2U);
 
         const auto args = [&](std::uint32_t rows, std::size_t context,
@@ -750,20 +744,12 @@ int main(int argc, char** argv) {
         if (kv::fp8_int4_kv_attention_fused(malformed, device.stream) != hipErrorInvalidValue) {
             fail("fused route accepted zero rows");
         }
-        if (kv::fp8_int4_kv_attention_dense_prefill_full_score(
-                text_dense, d_text_dense_workspace.get() + 1,
-                text_dense_workspace_bytes - sizeof(float), device.stream) !=
-            hipErrorInvalidValue) {
-            fail("dense Text P129 accepted an undersized workspace");
-        }
 
-        const auto launch_text_dense = [&](kv::Fp8Int4KvAttentionArgs call, float* workspace) {
-            return kv::fp8_int4_kv_attention_dense_prefill_full_score(
-                call, workspace, text_dense_workspace_bytes, device.stream);
+        const auto launch_text_dense = [&](kv::Fp8Int4KvAttentionArgs call) {
+            return kv::fp8_int4_kv_attention_dense_prefill(call, device.stream);
         };
         const auto launch_text_candidate = [&] {
-            hipError_t status = launch_text_dense(text_candidate,
-                                                   d_text_candidate_workspace.get() + 1);
+            hipError_t status = launch_text_dense(text_candidate);
             if (status != hipSuccess) return status;
             auto tail = text_candidate;
             tail.query += 128U * row_elements;
@@ -791,8 +777,7 @@ int main(int argc, char** argv) {
         fill_guarded(d_text_candidate_output,
                      static_cast<std::size_t>(kTextRows) * row_elements);
         fill_guarded(d_text_w1_output, row_elements);
-        fill_guarded(d_text_dense_workspace, text_dense_workspace_elements);
-        fill_guarded(d_text_candidate_workspace, text_dense_workspace_elements);
+        fill_guarded(d_text_candidate_workspace, text_candidate_workspace_elements);
         fill_guarded(d_text_w1_scores, kQueryHeads * kTextContext);
         hip_check(kv::fp8_int4_kv_attention_wmma(w1, device.stream), "W1 WMMA");
         hip_check(kv::fp8_int4_kv_attention_fused(w1_fused, device.stream), "W1 fused");
@@ -804,7 +789,7 @@ int main(int argc, char** argv) {
         hip_check(kv::fp8_int4_kv_attention_dflash_verify_batched_wmma(w6_batched, device.stream),
                   "W6 batched WMMA");
         hip_check(kv::fp8_int4_kv_attention_fused(w6_fused, device.stream), "W6 fused");
-        hip_check(launch_text_dense(text_dense, d_text_dense_workspace.get() + 1),
+        hip_check(launch_text_dense(text_dense),
                   "Text P129 dense");
         hip_check(launch_text_candidate(), "Text P129 dense plus W1-tail overwrite");
         hip_check(kv::fp8_int4_kv_attention_wmma(text_tail, device.stream),
@@ -842,7 +827,6 @@ int main(int argc, char** argv) {
                            "W6 batched score workspace");
         // The dense QK plane intentionally does not materialize masked future-score cells.
         // Its contract is bounded scratch, not a fully written observable output.
-        require_guard_canaries(d_text_dense_workspace, "Text P129 dense workspace");
         require_guard_canaries(d_text_candidate_workspace, "Text P129 candidate workspace");
         (void)read_guarded(d_text_w1_scores, kQueryHeads * kTextContext,
                            "Text W1 score workspace");
@@ -1080,7 +1064,7 @@ int main(int argc, char** argv) {
         }
         fill_guarded(d_text_candidate_output,
                      static_cast<std::size_t>(kTextRows) * row_elements);
-        fill_guarded(d_text_candidate_workspace, text_dense_workspace_elements);
+        fill_guarded(d_text_candidate_workspace, text_candidate_workspace_elements);
         ninfer::DecodeGraphDefinition text_graph_definition;
         text_graph_definition.capture(device.stream, [&] {
             hip_check(launch_text_candidate(), "capture Text P129 tail candidate");
@@ -1128,13 +1112,13 @@ int main(int argc, char** argv) {
                 w6_batched_samples[trial] = time_ms(device.stream, launch_w6_batched);
                 w6_fused_samples[trial] = time_ms(device.stream, launch_w6_fused);
                 text_dense_samples[trial] = time_ms(device.stream, [&] {
-                    return launch_text_dense(text_dense, d_text_dense_workspace.get() + 1);
+                    return launch_text_dense(text_dense);
                 });
                 text_candidate_samples[trial] = time_ms(device.stream, launch_text_candidate);
             } else {
                 text_candidate_samples[trial] = time_ms(device.stream, launch_text_candidate);
                 text_dense_samples[trial] = time_ms(device.stream, [&] {
-                    return launch_text_dense(text_dense, d_text_dense_workspace.get() + 1);
+                    return launch_text_dense(text_dense);
                 });
                 w6_fused_samples[trial] = time_ms(device.stream, launch_w6_fused);
                 w6_batched_samples[trial] = time_ms(device.stream, launch_w6_batched);
@@ -1175,7 +1159,7 @@ int main(int argc, char** argv) {
                             w6_batched_workspace_elements * sizeof(float)},
                            {"text_rows", 129}, {"text_context", 129},
                            {"text_w1_score_workspace_bytes", 12384},
-                           {"text_dense_workspace_bytes", text_dense_workspace_bytes}}},
+                           {"text_candidate_workspace_bytes", text_candidate_workspace_elements * sizeof(float)}}},
             {"target_pair", {{"ordinary", long_context ? "W1/C4097/position4096 FP8-Q WMMA" : "W1/C130/position129 FP8-Q WMMA"},
                                {"dflash_candidate", long_context ? "W5/C4101/positions4096..4100 batched FP8-Q WMMA" : "W5/C134/positions129..133 batched FP8-Q WMMA"},
                                {"serial_wmma_same_route_row0_bit_exact", true},

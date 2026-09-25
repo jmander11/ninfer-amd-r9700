@@ -1705,10 +1705,10 @@ int main(int argc, char** argv) {
             m128n128_benchmark || pingpong_regression || pingpong_benchmark) {
             linear::A8Q4G64KernelResources resources{};
             HIP_CHECK(linear::a8q4g64_kernel_resources(&resources));
-            if (resources.prefill_cta_registers > 96 ||
-                resources.prefill_cta_static_shared_bytes != 17152 ||
+            if (resources.prefill_cta_registers > 232 ||
+                resources.prefill_cta_static_shared_bytes != 26624 ||
                 resources.prefill_cta_local_bytes != 0) {
-                fail("prefill CTA resource gate requires <=96 VGPR, exactly 17152B LDS, "
+                fail("M128xN128 production CTA requires <=232 VGPR, exactly 26624B LDS, "
                      "and no scratch");
             }
             if (resources.prefill_cta_m64n128_regression_registers > 96 ||
@@ -1735,13 +1735,6 @@ int main(int argc, char** argv) {
                  resources.prefill_cta_m128n128_qualification_local_bytes != 0 ||
                  resources.prefill_cta_m128n128_qualification_max_threads_per_block < 1024)) {
                 fail("M128xN128 CTA requires <=96 VGPR, exactly 12800B LDS, no scratch");
-            }
-            if ((pingpong_regression || pingpong_benchmark) &&
-                (resources.prefill_cta_registers > 96 ||
-                 resources.prefill_cta_static_shared_bytes != 17152 ||
-                 resources.prefill_cta_local_bytes != 0)) {
-                fail("ping/pong CTA requires <=96 VGPR, exactly 17152B LDS, no scratch, "
-                     "and a 512-thread launch bound");
             }
             const std::vector<Shape> prefill_shapes{
                 Shape{7168, 5120, 0, 0}, Shape{4096, 5120, 0, 0},

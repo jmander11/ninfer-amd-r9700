@@ -450,13 +450,18 @@ identity. Ordinary benchmark-only schema-v5 reports remain diagnostic and are no
 admission evidence.
 
 The cooperative prefill CTAs are now production linear-Op routes at only their physically admitted
-tuple predicates. A8Q4G64 uses a sixteen-wave 64-token-by-64-row CTA, stages one K64 group in a
-6,400-byte fragment-major LDS tile, and issues the native low/high signedness pair of
-`v_wmma_i32_16x16x32_iu4`. A8W8G32 is a separate sixteen-wave 64-token-by-64-row implementation,
+tuple predicates. A8Q4G64 uses an eight-wave 128-token-by-128-row CTA with token tiles fastest in
+the grid; each wave owns 2x4 fragments. It double-buffers one K64 group (26,624 bytes of LDS),
+loads each next group from scalar bases with U32 offsets (scale first) while the current group
+computes, and chains the signed high-nibble `v_wmma_i32_16x16x32_iu4` pair from the exact
+0x04B40000 origin, shifts by four, and completes the unsigned low-nibble pair, so the I32 result
+reads as FP32 12582912+dot without a conversion. It is bit-exact to the former M64xN128 kernel,
+and `prefill-cta-static-q4` pins its symbol, 64 IU4 sites, loads and resources.
+A8W8G32 is a separate sixteen-wave 64-token-by-64-row implementation,
 stages one signed-I8 G32 group in 4,352 bytes of fragment-major LDS, and issues two native signed
 `v_wmma_i32_16x16x16_iu8` operations per group. Both retain no scratch and bounded VGPR use.
 
-The qualified Stage-1 memory pipeline is the production body for both cooperative CTAs. Each
+The qualified Stage-1 memory pipeline is the production body for the W8 cooperative CTA. Each
 barrier uses workgroup-local release, signal/wait, and acquire; the former broad `global_inv`
 body is retained only under an explicitly named qualification entry for direct regression. Run
 the exact bit-parity/status/tail matrices with:
@@ -736,22 +741,17 @@ and N1024 regressed at all four extents by `1.21819x` through `1.35600x`. Its re
 `2ac938b230197384a476bd57ccfd39d72a1b73c03bee82c58bf3be9df7de5b1f`. Production remains A8;
 the already-rejected A4 quality profile was not reevaluated.
 
-The dense attention route is the staged full-score GQA6 path with bounded query panels
-in `fp8_int4_kv_attention.hip`. It accepts initial and appended P=128..8192 calls through a
-262144-token visible context with token-fastest
-FP8 K plus feature-fastest signed INT4 V and FP16 scales. QK uses16x16 below P512;
-complete calls with at least512 query rows use32x64, or16x32 when the current panel
-has fewer than32 rows;
-each tile is shared across the six query heads of one KV
-head and writes FP32 scores. A separate maximum pass validates each causal
-vector; PV forms FP32 probabilities and reuses each direct INT4/FP16-scale V tile across the same
-six heads. At visible context>=2048, PV uses FP16 WMMA with16 query rows,
-128 value features and six waves per block, with2 key splits,4 from4096,
-16 from12288 and32 from32768,
-then merges FP32 numerator/denominator partials against the common maximum. Below that boundary
-it retains the16-query-row unsplit route. The caller-owned score/max/partial workspace is reused across layers at its planner-stable arena
-address. P<128, tree attention, and other layouts retain their prior routes. Device-active counts
-remain relative to the whole call; each panel clamps that count using its original row offset.
+The dense attention route is one fused causal GQA6 kernel in `fp8_int4_kv_attention.hip`
+(`dense_prefill_kernel`). It accepts initial and appended P=128..8192 calls through a
+262144-token visible context with token-fastest FP8 K plus feature-fastest signed INT4 V and FP16
+scales, and needs no caller-owned workspace. One 384-thread CTA owns a KV head and 32 query rows;
+each of its twelve waves owns one query head and sixteen rows over all 256 features. Every 32-key
+block is decoded once into LDS (exact BF16 K; FP16 V/8 from exact n/8 times the FP16 scale), then
+each wave computes S^T=K Q^T with 32 BF16 WMMAs, updates online FP32 Softmax (reference raised
+only when a block exceeds it by 2^8), and accumulates O+=P V with 32 FP16 WMMAs. The denominator
+sums exactly the FP16 probabilities in FP32. Blocks fully visible to every row skip masking; a
+nonfinite visible score poisons its row through a NaN denominator. P<128, tree attention, and
+other layouts retain their prior routes.
 
 After the serialized campaign permits a new build/GPU run, execute the independent FP64 harness:
 
@@ -761,55 +761,22 @@ make -C tools/r9700 -j12 dense-prefill-attention
 tools/r9700/build/dense_prefill_attention_qual 1537 12288 16
 ```
 
-It covers G16/G32 initial prefixes, appended 8K/32K contexts, 8192 query rows, partial panels,
-and2K/4K/12K/32K dispatch boundaries,64K/128K/262144 contexts with fragmented physical pages,
-nonperiodic represented inputs and exact stored cache planes.
-Independent FP64 scores are computed once per sampled row/head and validate all 256 output
-features across all four KV heads. It also checks workspace/output canaries, active counts crossing
-panels, invalid whole-call counts, and eager/Device Graph replay after poisoned scratch.
-`dense-prefill-attention-full-score-isa` prints all selected QK kernels plus maximum and PV. Invoke
-`dense-prefill-attention-full-score-static` with the exact selected mangled symbol and
-`DENSE_ATTN_STAGE=qk_bk16`, `qk_narrow`, `qk_wide`, `maximum`, `pv`, `pv_wmma`, or `pv_merge`.
-For split PV select `DENSE_ATTN_KEY_SPLITS=2`, `4`, `16` or `32`
-(direct checker: `--key-splits`).
-The checker requires exactly sixteen
-BF16 WMMAs for16x16,32 for16x32,64 for32x64, and eight FP16 WMMAs for split PV; maximum,
-short scalar PV and merge must not contain WMMA. The emitted
-pre-panel gfx1201 resources were Bk16 QK 29 VGPR/8,296-byte LDS/occupancy 15, Bk32 QK 97 next-free
-VGPR/16,488-byte LDS/occupancy 11, maximum 17 VGPR/64-byte LDS/occupancy 16, and PV 116
-VGPR/occupancy 12 with 9,208-byte G16 or 8,952-byte G32 LDS. Every stage is wave32 WGP mode with
-zero private/scratch/flat-scratch and zero register spills; scalar PV must contain native FP32 exp and
-FP32 FMA/FMAC. Current tiled QK has metadata VGPR41/65, assembler next-free VGPR97/145,
-LDS16480/32928 bytes and compiler occupancy11/9 for16x32/32x64. The checker reports
-metadata VGPR and assembler next-free separately; they are not interchangeable.
-The current split PV has94 next-free VGPR,13816-byte LDS and compiler occupancy14 in both groups;
-the merge has8 VGPR,4-byte LDS and occupancy16. Both have zero scratch/spills and
-wave32 WGP execution. Split PV rounds probabilities and represented V/8 to FP16,
-uses FP32 WMMA accumulation, restores the exact factor8, and keeps the denominator
-and partial merge in FP32. This is a private arithmetic profile, not a cache or
-Linear activation format change. It is qualified against the same represented-input
-FP64 formula, including non-power-of-two scales and both finite FP16 scale extremes.
+It covers G16/G32 initial prefixes, appended 8K/32K contexts, 8192 query rows, key-block and page
+boundaries around 2K/4K/12K/32K, 64K/128K/262144 contexts with fragmented physical pages,
+nonperiodic represented inputs, both finite FP16 scale extremes, and exact stored cache planes.
+Independent FP64 attention validates all 256 output features of sampled rows across all four KV
+heads. It also checks output canaries, device-active counts, invalid whole-call counts, malformed
+positions, page-table rows and physical pages, and eager/Device Graph replay. The kernel must
+report zero scratch/spills. `dense-prefill-attention-isa` prints the selected kernel's WMMA and
+resource lines; `dense-prefill-attention-static` with `DENSE_ATTN_ASSEMBLY`, `DENSE_ATTN_METADATA`,
+the exact mangled `DENSE_ATTN_SYMBOL` and `DENSE_ATTN_VALUE_GROUP` requires 32 BF16 and 32 FP16
+WMMAs, native FP32 exp, three barrier pairs, 37,536-byte LDS, at most 256 next-free VGPRs,
+occupancy at least 5, 384-thread wave32 WGP execution and zero private/scratch/spills. Current
+G16/G32 kernels use 246/244 next-free VGPRs. Timing, whole-model results and quality checks are in
+`docs/performance.md`.
 
-The full-score route uses a caller-owned reusable FP32 workspace of
-`24*panel_rows*(visible_context+1)*4` bytes. Panel capacity is
-`floor(2048*2048/visible_context/16)*16`, bounding scores at384MiB and maxima at192KiB.
-The minimum number of panels divides the query's16-row tiles evenly; the final tile may
-be partial. `panel_rows` is the largest resulting panel, so a nearly empty final grid is avoided
-without increasing launch count. Add `24*panel_rows*splits*257*4` bytes for split
-numerators (256 features) plus denominators:2 splits from2048,4 from4096,
-16 from12288 and32 from32768. Its maximum is126.4921875MiB;
-the conservative combined score/max/partial envelope is at most510.6796875MiB. The exact query and planner envelope
-both include it; no device allocation occurs inside attention.
-The initial2048-token prefix uses one panel and480.5625MiB including two partials.
-The planner uses a conservative
-envelope bound rather than the exact endpoint size because panel-size rounding introduces a
-sawtooth as context grows. All panels reuse one stable address on the owning stream.
-The wide QK block has384 threads: two sets of six query-head waves share each decoded
-64-key tile. Narrow QK uses192 threads. Every individual score retains the original
-BF16-WMMA feature accumulation order. Current long-context complete-Op timing,
-whole-model results and quality checks are in `docs/performance.md`.
-
-For G16 and G32 at P128/512/1024/2048/4096, the retained pre-promotion report compared the complete
+Historical score-panel evidence (superseded by the fused route): for G16 and G32 at
+P128/512/1024/2048/4096, the retained pre-promotion report compared the complete
 incumbent fused call with Bq4/Bq8/Bq16 after independent FP64 qualification. It timed one complete Op
 call per event sample using seven rotating forward/reverse route pairs, preserving all fourteen
 raw samples and each route's real CTA count. Bq16 won every measured cell. Its exact
@@ -827,12 +794,12 @@ Bk32 at P512/1024/2048/4096 for both G16 and G32. September25 tiled QK supersede
 large-call choice as described above; P129..511 still uses16x16.
 The focused qualifier covers production correctness only.
 
-The subsequently isolated dense P2048 FP8-Q/Bk32 route passed its exact FP8-Q panel, independent
+The earlier isolated dense P2048 FP8-Q/Bk32 score-panel route passed its exact FP8-Q panel, independent
 FP64 score and complete-attention oracles, workspace overwrite/liveness, and static resource gates,
 but failed its fixed physical threshold. Candidate/incumbent medians were 2.983591080/3.442310095 ms
 (`0.8667409378x`); 16 calls total 47.73745728 ms, only 7.33950424 ms matched saving rather than the
-required 15 ms (candidate ceiling 32.439611 ms). Production remains the BF16-WMMA Bq16/Bk32 route,
-and all FP8-Q/Bk32 candidate modes and checker surfaces are removed. The immutable design report is
+required 15 ms (candidate ceiling 32.439611 ms); its candidate modes and checker surfaces were
+removed. The later fused-route FP8-QK evaluation is recorded in `docs/performance.md`. The immutable design report is
 `profiles/bench/r9700-dense-full-score-fp8-q-bk32-static-design-20260904.json` (SHA-256
 `aed480c787313c280aefc83d8cdf943a6b81711872786677f905f3d4036cd521`); the terminal physical report
 is `profiles/bench/r9700-dense-full-score-fp8-q-bk32-ab-20260904.json` (SHA-256
@@ -1464,9 +1431,9 @@ and Q4 output matrix.
 The production Text-MLP fusion consumes BF16 gate/up output with Q4G64 down and A8 down
 activations at T=2,048 in a main Text layer, independently of the gate/up producer format.
 It preserves the explicit BF16 rounding boundary between FP32
-SiLU-multiply and the existing signed-A8G64 codec, then invokes the unchanged production M64N128
-Q4 matrix. Other down formats, activation widths and token widths use the ordinary split boundary.
-Compact gate/up-A4 admission retains all six NLL sidecars exactly and improves matched C1
+SiLU-multiply and the existing signed-A8G64 codec, then invokes the production A8Q4 prefill
+matrix. Other down formats, activation widths and token widths use the ordinary split boundary.
+Its historical compact gate/up-A4 admission retained all six NLL sidecars exactly and improved matched C1
 code4K ordinary prefill1494.30→1519.18tok/s; evidence is in
 `profiles/rocprof/r9700-compact-mixed-speed-20260923/`. The one-shot timing
 executable was removed after direct and matched-whole admission; its immutable report remains at
@@ -1652,6 +1619,16 @@ point their medians were 0.196199 and 0.193988 ms, versus 0.188758 ms for four t
 won at T=2048 and T=4096, so production has one route rather than an unsupported crossover. The
 seven-run selected medians at T=16/32/64/128 are 0.033244/0.054612/0.099263/0.188758 ms, reductions
 of 21.37/27.02/28.47/28.97 percent. The same public timing fixture records T=1 through T=4096.
+
+Normalized ordinary widths 64..8192 (except the T129 prefix-trace diagnostic) now use the staged
+route in `gdn_prefill_staged.hip`: one wave per (token, Q/K head) writes normalized FP32 q/k in
+recurrence lane order and one pass writes exp(g), both into caller-owned workspace sized by the
+public capacity query; the recurrence then gives each wave four state rows and walks every token
+without workgroup barriers or LDS, prefetching the next token's staged inputs and reducing each
+eight-lane row group with DPP row_xmask additions. Its per-lane FMA and reduction order equals the
+former P2048 scale-sidecar route, which it replaces bit-exactly (all 786,432 state words and every
+P2048 output). The qualifier times P2048 at about 1.39 ms versus 2.84 ms before and covers odd
+width 65 in place.
 
 Build and run with `make -C tools/r9700 build/gdn_recurrence_qual`. Compiler metadata reports the
 selected normalized ordinary kernel at 56 VGPR, 1040 bytes LDS, zero private scratch, and occupancy

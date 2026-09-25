@@ -165,11 +165,8 @@ std::vector<std::int32_t> make_positions(std::uint32_t rows) {
     return result;
 }
 
-hipError_t launch_selected_dense(const kv::Fp8Int4KvAttentionArgs& args,
-                                 void* workspace, std::size_t workspace_bytes,
-                                 hipStream_t stream) {
-    return kv::fp8_int4_kv_attention_dense_prefill_full_score(
-        args, workspace, workspace_bytes, stream);
+hipError_t launch_selected_dense(const kv::Fp8Int4KvAttentionArgs& args, hipStream_t stream) {
+    return kv::fp8_int4_kv_attention_dense_prefill(args, stream);
 }
 
 std::array<double, kD> expected_vector(const Fixture& fixture, const std::vector<hip_bfloat16>& queries,
@@ -219,27 +216,12 @@ double expected(const Fixture& fixture, const std::vector<hip_bfloat16>& queries
     return expected_vector(fixture, queries, positions, row, head)[feature];
 }
 
-double expected_score(const Fixture& fixture, const std::vector<hip_bfloat16>& queries,
-                      std::uint32_t row, std::uint32_t query_head,
-                      std::uint32_t logical) {
-    const std::uint32_t kv_head = query_head / 6U;
-    const std::size_t physical =
-        static_cast<std::size_t>(fixture.pages[logical / kPage]) * kPage + logical % kPage;
-    double dot = 0.0;
-    for (std::uint32_t dimension = 0U; dimension < kD; ++dimension) {
-        dot += static_cast<double>(static_cast<float>(queries[
-                   (static_cast<std::size_t>(row) * kHq + query_head) * kD + dimension])) *
-               oracle::decode_e4m3fn(fixture.keys[key_offset(physical, kv_head, dimension, fixture.physical_tokens / kPage)]);
-    }
-    return dot * static_cast<double>(kScale);
-}
-
 void host_predicate_regression() {
-    if (kv::fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(127U, 128U) != 0U ||
-        kv::fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(8193U, 32768U) != 0U ||
-        kv::fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(2048U, 2048U) !=
-            503906304U) {
-        fail("full-score workspace capacity contract is incorrect");
+    for (const std::uint32_t group : {16U, 32U}) {
+        kv::DensePrefillWmmaResources resources{};
+        HIP_CHECK(kv::fp8_int4_kv_attention_dense_prefill_resources(group, &resources));
+        if (resources.local_bytes != 0 || resources.static_shared_bytes > 65536)
+            fail("fused dense prefill spills or exceeds the LDS limit");
     }
     kv::Fp8Int4KvAttentionArgs args{};
     args.query = reinterpret_cast<const hip_bfloat16*>(1U);
@@ -259,10 +241,7 @@ void host_predicate_regression() {
     args.value_scale_layout = kv::Fp8Int4KvPlaneLayout::FeatureFastest;
     args.output = reinterpret_cast<float*>(1U);
     auto rejected = [&](const kv::Fp8Int4KvAttentionArgs& candidate, const char* label) {
-        if (launch_selected_dense(
-                candidate, reinterpret_cast<void*>(4096U),
-                kv::fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(
-                    candidate.query_rows, candidate.context), nullptr) != hipErrorInvalidValue) fail(label);
+        if (launch_selected_dense(candidate, nullptr) != hipErrorInvalidValue) fail(label);
     };
     auto bad = args; bad.score_workspace = reinterpret_cast<float*>(1U);
     rejected(bad, "score workspace was accepted");
@@ -276,24 +255,7 @@ void host_predicate_regression() {
     rejected(bad, "tree metadata was accepted");
     bad = args; bad.context = 2047U;
     rejected(bad, "context shorter than query rows was accepted");
-    const std::size_t required =
-        kv::fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(args.query_rows, args.context);
-    if (kv::fp8_int4_kv_attention_dense_prefill_full_score(
-            args, reinterpret_cast<void*>(4096U), required - 1U, nullptr) !=
-        hipErrorInvalidValue) {
-        fail("undersized full-score workspace was accepted");
-    }
-    for (const auto rows : {128U, 1024U, 2048U, 4096U, 8192U}) {
-        for (const auto maximum : {2047U, 2048U, 2049U, 4095U, 4096U, 4097U,
-                                   8192U, 32768U, 262144U}) {
-            const auto envelope = kv::fp8_int4_kv_attention_dense_prefill_workspace_envelope_bytes(rows, maximum);
-            for (std::uint32_t context = rows; context <= maximum; ++context)
-                if (kv::fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(rows, context) > envelope)
-                    fail("dense workspace envelope underallocates an intermediate context");
-        }
-    }
 }
-
 void run_case(std::uint32_t rows, std::uint32_t group, std::uint32_t context,
               std::uint16_t uniform_scale = 0U) {
     Fixture fixture = make_fixture(group, context);
@@ -309,8 +271,6 @@ void run_case(std::uint32_t rows, std::uint32_t group, std::uint32_t context,
     DeviceBuffer<std::uint32_t> d_pages(fixture.pages.size());
     DeviceBuffer<std::int32_t> d_positions(positions.size());
     DeviceBuffer<float> d_output(static_cast<std::size_t>(rows) * kHq * kD);
-    DeviceBuffer<std::uint8_t> d_workspace(
-        kv::fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(rows, context));
     HIP_CHECK(hipMemcpy(d_queries.get(), queries.data(), d_queries.bytes(), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d_keys.get(), fixture.keys.data(), d_keys.bytes(), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d_values.get(), fixture.values.data(), d_values.bytes(), hipMemcpyHostToDevice));
@@ -328,37 +288,13 @@ void run_case(std::uint32_t rows, std::uint32_t group, std::uint32_t context,
         .value_layout=kv::Fp8Int4KvPlaneLayout::FeatureFastest,
         .value_scale_layout=kv::Fp8Int4KvPlaneLayout::FeatureFastest,
         .output=d_output.get()};
-    HIP_CHECK(launch_selected_dense(args, d_workspace.get(),
-                                    d_workspace.bytes(), nullptr));
+    HIP_CHECK(launch_selected_dense(args, nullptr));
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<float> output(static_cast<std::size_t>(rows) * kHq * kD);
     HIP_CHECK(hipMemcpy(output.data(), d_output.get(), d_output.bytes(), hipMemcpyDeviceToHost));
-    const float* scores = reinterpret_cast<const float*>(d_workspace.get());
-    const auto panel_rows = kv::dense_prefill_panel_rows(rows, context);
-    const auto panel_count = (rows + panel_rows - 1U) / panel_rows;
-    const auto query_tiles = (rows + 15U) / 16U;
-    const auto last_origin = (query_tiles - query_tiles / panel_count) * 16U;
-    for (const auto row : {last_origin, rows - 1U}) {
-        const std::uint32_t visible = static_cast<std::uint32_t>(positions[row]) + 1U;
-        for (const auto head : {0U, 7U, 23U}) {
-            for (const auto logical : {0U, visible / 2U, visible - 1U}) {
-                float actual = 0.0F;
-                const std::size_t index =
-                    (static_cast<std::size_t>(row - last_origin) * kHq + head) * context + logical;
-                HIP_CHECK(hipMemcpy(&actual, scores + index, sizeof(actual), hipMemcpyDeviceToHost));
-                const double reference = expected_score(fixture, queries, row, head, logical);
-                const double error = std::abs(static_cast<double>(actual) - reference);
-                if (!std::isfinite(reference) || !std::isfinite(actual) || !std::isfinite(error) ||
-                    (error > 2.0e-3 &&
-                     error / std::max(std::abs(reference), 1.0e-6) > 2.0e-3)) {
-                    fail("production full-score QK differs from independent FP64 oracle");
-                }
-            }
-        }
-    }
     const std::array<std::uint32_t, 5> sampled_rows{
-        0U, rows / 3U, std::min(panel_rows - 1U, rows - 1U),
-        std::min(panel_rows, rows - 1U), rows - 1U};
+        0U, rows / 3U, std::min(rows / 2U + 15U, rows - 1U), std::min(rows - 16U, rows - 1U),
+        rows - 1U};
     constexpr std::array<std::uint32_t, 4> sampled_heads{0U, 7U, 13U, 23U};
     for (const auto row : sampled_rows) for (const auto head : sampled_heads) {
         const auto references = expected_vector(fixture, queries, positions, row, head);
@@ -380,12 +316,11 @@ void run_case(std::uint32_t rows, std::uint32_t group, std::uint32_t context,
         hipGraphExec_t executable{};
         HIP_CHECK(hipStreamCreate(&stream));
         HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
-        HIP_CHECK(launch_selected_dense(args, d_workspace.get(), d_workspace.bytes(), stream));
+        HIP_CHECK(launch_selected_dense(args, stream));
         HIP_CHECK(hipStreamEndCapture(stream, &graph));
         HIP_CHECK(hipGraphInstantiate(&executable, graph, nullptr, nullptr, 0));
         for (unsigned replay = 0; replay < 2; ++replay) {
             HIP_CHECK(hipMemsetAsync(d_output.get(), 0xff, d_output.bytes(), stream));
-            HIP_CHECK(hipMemsetAsync(d_workspace.get(), 0xff, d_workspace.bytes(), stream));
             HIP_CHECK(hipGraphLaunch(executable, stream));
             HIP_CHECK(hipStreamSynchronize(stream));
             std::vector<float> replay_output(output.size());
@@ -399,12 +334,11 @@ void run_case(std::uint32_t rows, std::uint32_t group, std::uint32_t context,
     if (rows == 129U || rows == 1537U) {
         const std::vector<float> baseline_output = output;
         DeviceBuffer<std::int32_t> d_active(1U);
-        std::int32_t active = rows == 129U ? 127 : static_cast<std::int32_t>(panel_rows + 3U);
+        std::int32_t active = rows == 129U ? 127 : static_cast<std::int32_t>(rows / 2U + 3U);
         HIP_CHECK(hipMemcpy(d_active.get(), &active, sizeof(active), hipMemcpyHostToDevice));
         args.active_query_rows = d_active.get();
         HIP_CHECK(hipMemset(d_output.get(), 0xff, d_output.bytes()));
-        HIP_CHECK(launch_selected_dense(args, d_workspace.get(),
-                                        d_workspace.bytes(), nullptr));
+        HIP_CHECK(launch_selected_dense(args, nullptr));
         HIP_CHECK(hipDeviceSynchronize());
         HIP_CHECK(hipMemcpy(output.data(), d_output.get(), d_output.bytes(), hipMemcpyDeviceToHost));
         const std::size_t inactive_begin = static_cast<std::size_t>(active) * kHq * kD;
@@ -429,8 +363,7 @@ void run_case(std::uint32_t rows, std::uint32_t group, std::uint32_t context,
         inactive_args.page_table_row_stride = args.page_table_pages;
         inactive_args.page_table_row_count = 1U;
         inactive_args.row_positions = reinterpret_cast<const std::int32_t*>(1U);
-        HIP_CHECK(launch_selected_dense(inactive_args, d_workspace.get(),
-                                        d_workspace.bytes(), nullptr));
+        HIP_CHECK(launch_selected_dense(inactive_args, nullptr));
         HIP_CHECK(hipDeviceSynchronize());
         HIP_CHECK(hipMemcpy(output.data(), d_output.get(), d_output.bytes(), hipMemcpyDeviceToHost));
         if (!std::all_of(output.begin(), output.end(),
@@ -439,8 +372,7 @@ void run_case(std::uint32_t rows, std::uint32_t group, std::uint32_t context,
         }
         active = -1;
         HIP_CHECK(hipMemcpy(d_active.get(), &active, sizeof(active), hipMemcpyHostToDevice));
-        HIP_CHECK(launch_selected_dense(args, d_workspace.get(),
-                                        d_workspace.bytes(), nullptr));
+        HIP_CHECK(launch_selected_dense(args, nullptr));
         HIP_CHECK(hipDeviceSynchronize());
         HIP_CHECK(hipMemcpy(output.data(), d_output.get(), d_output.bytes(), hipMemcpyDeviceToHost));
         if (!std::all_of(output.begin(), output.end(), [](float value) { return std::isnan(value); })) {
@@ -448,7 +380,7 @@ void run_case(std::uint32_t rows, std::uint32_t group, std::uint32_t context,
         }
         active = static_cast<std::int32_t>(rows + 1U);
         HIP_CHECK(hipMemcpy(d_active.get(), &active, sizeof(active), hipMemcpyHostToDevice));
-        HIP_CHECK(launch_selected_dense(args, d_workspace.get(), d_workspace.bytes(), nullptr));
+        HIP_CHECK(launch_selected_dense(args, nullptr));
         HIP_CHECK(hipDeviceSynchronize());
         HIP_CHECK(hipMemcpy(output.data(), d_output.get(), d_output.bytes(), hipMemcpyDeviceToHost));
         if (!std::all_of(output.begin(), output.end(), [](float value) { return std::isnan(value); }))
@@ -459,8 +391,7 @@ void run_case(std::uint32_t rows, std::uint32_t group, std::uint32_t context,
         malformed_positions[5] = -1;
         HIP_CHECK(hipMemcpy(d_positions.get(), malformed_positions.data(), d_positions.bytes(),
                             hipMemcpyHostToDevice));
-        HIP_CHECK(launch_selected_dense(args, d_workspace.get(),
-                                        d_workspace.bytes(), nullptr));
+        HIP_CHECK(launch_selected_dense(args, nullptr));
         HIP_CHECK(hipDeviceSynchronize());
         HIP_CHECK(hipMemcpy(output.data(), d_output.get(), d_output.bytes(), hipMemcpyDeviceToHost));
         const std::size_t bad_row = 5U * kHq * kD;
@@ -487,8 +418,7 @@ void run_case(std::uint32_t rows, std::uint32_t group, std::uint32_t context,
         args.page_table_row = d_page_row.get();
         args.page_table_row_stride = static_cast<std::uint32_t>(fixture.pages.size());
         args.page_table_row_count = 2U;
-        HIP_CHECK(launch_selected_dense(args, d_workspace.get(),
-                                        d_workspace.bytes(), nullptr));
+        HIP_CHECK(launch_selected_dense(args, nullptr));
         HIP_CHECK(hipDeviceSynchronize());
         HIP_CHECK(hipMemcpy(output.data(), d_output.get(), d_output.bytes(), hipMemcpyDeviceToHost));
         for (const auto row : {0U, 64U, 128U}) {
@@ -503,8 +433,7 @@ void run_case(std::uint32_t rows, std::uint32_t group, std::uint32_t context,
         }
 
         args.page_table_row_count = 1U;
-        HIP_CHECK(launch_selected_dense(args, d_workspace.get(),
-                                        d_workspace.bytes(), nullptr));
+        HIP_CHECK(launch_selected_dense(args, nullptr));
         HIP_CHECK(hipDeviceSynchronize());
         HIP_CHECK(hipMemcpy(output.data(), d_output.get(), d_output.bytes(), hipMemcpyDeviceToHost));
         if (!std::all_of(output.begin(), output.end(), [](float value) { return std::isnan(value); })) {
@@ -515,8 +444,7 @@ void run_case(std::uint32_t rows, std::uint32_t group, std::uint32_t context,
         page_rows[fixture.pages.size()] = static_cast<std::uint32_t>(fixture.physical_tokens / kPage);
         HIP_CHECK(hipMemcpy(d_page_rows.get(), page_rows.data(), d_page_rows.bytes(),
                             hipMemcpyHostToDevice));
-        HIP_CHECK(launch_selected_dense(args, d_workspace.get(),
-                                        d_workspace.bytes(), nullptr));
+        HIP_CHECK(launch_selected_dense(args, nullptr));
         HIP_CHECK(hipDeviceSynchronize());
         HIP_CHECK(hipMemcpy(output.data(), d_output.get(), d_output.bytes(), hipMemcpyDeviceToHost));
         if (!std::all_of(output.begin(), output.end(), [](float value) { return std::isnan(value); })) {
@@ -524,14 +452,13 @@ void run_case(std::uint32_t rows, std::uint32_t group, std::uint32_t context,
         }
     }
     d_output.check_canaries();
-    d_workspace.check_canaries();
     d_queries.check_canaries();
     d_positions.check_canaries();
     d_keys.check_canaries();
     d_values.check_canaries();
     d_scales.check_canaries();
     std::cout << "rows=" << rows << " context=" << context << " group=" << group
-              << " panel=" << panel_rows << " oracle=FP64 complete-sampled-vectors PASS\n";
+              << " oracle=FP64 complete-sampled-vectors PASS\n";
 }
 
 } // namespace
@@ -559,21 +486,14 @@ int main(int argc, char** argv) {
             run_case(1025U, group, 32768U);
             run_case(8192U, group, 32768U);
             run_case(128U, group, 262144U);
-            run_case(129U, group, kv::kDensePrefillTwoSplitMinimumContext - 1U);
-            run_case(129U, group, kv::kDensePrefillTwoSplitMinimumContext);
-            run_case(129U, group, kv::kDensePrefillTwoSplitMinimumContext + 1U);
-            run_case(129U, group, kv::kDensePrefillFourSplitMinimumContext - 1U);
-            run_case(129U, group, kv::kDensePrefillFourSplitMinimumContext);
-            run_case(129U, group, kv::kDensePrefillFourSplitMinimumContext + 1U);
-            run_case(129U, group, kv::kDensePrefillSplitPvMinimumContext - 1U);
-            run_case(1537U, group, kv::kDensePrefillSplitPvMinimumContext);
-            run_case(129U, group, kv::kDensePrefillSplitPvMinimumContext + 1U);
-            run_case(129U, group, kv::kDensePrefillLongPvMinimumContext - 1U);
-            run_case(1537U, group, kv::kDensePrefillLongPvMinimumContext);
-            run_case(129U, group, kv::kDensePrefillLongPvMinimumContext + 1U);
+            // Key-block and page boundaries of the fused 32-key schedule.
+            for (const std::uint32_t context : {2047U, 2048U, 2049U, 4095U, 4096U, 4097U,
+                                                12287U, 12288U, 12289U, 32767U, 32769U})
+                run_case(129U, group, context);
+            run_case(1537U, group, 12288U);
+            run_case(1537U, group, 32768U);
             run_case(2048U, group, 65536U);
             run_case(128U, group, 131072U);
-            // The score panel crosses from32 to16 rows, selecting narrow tiled QK.
             run_case(512U, group, 131071U);
             run_case(512U, group, 131072U);
             run_case(512U, group, 131073U);

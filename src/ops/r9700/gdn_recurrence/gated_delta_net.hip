@@ -3,11 +3,12 @@
 #include "ninfer/types.h"
 
 #include "core/device.h"
-#include "ops/r9700/gdn_recurrence/gdn_prefill_scale_sidecar.h"
+#include "ops/r9700/gdn_recurrence/gdn_prefill_staged.h"
 #include "ops/r9700/gdn_recurrence/gdn_verify_profile.h"
 
 #include <hip/hip_bfloat16.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -491,9 +492,12 @@ std::size_t gated_delta_net_workspace_capacity_bytes(std::int32_t qk_heads,
         max_tokens < min_tokens || max_tokens > kMaximumPrefillWidth) {
         throw std::invalid_argument("gated_delta_net workspace: unsupported Qwen3.8 profile");
     }
-    constexpr int kSidecarWidth = 2048;
-    if (normalize_qk && min_tokens <= kSidecarWidth && max_tokens >= kSidecarWidth) {
-        return r9700::gdn_recurrence::prefill_scale_sidecar_workspace_bytes(kSidecarWidth);
+    // The staged route's workspace grows with width, so the largest staged width bounds it.
+    const std::int32_t staged_width =
+        std::min(max_tokens, r9700::gdn_recurrence::kStagedMaximumWidth);
+    if (normalize_qk && staged_width >= std::max(min_tokens,
+                                                 r9700::gdn_recurrence::kStagedMinimumWidth)) {
+        return r9700::gdn_recurrence::prefill_staged_workspace_bytes(staged_width);
     }
     return 0;
 }
@@ -533,20 +537,17 @@ static void gated_delta_net_impl(const Tensor& q, const Tensor& k, const Tensor&
         }
     }
     if (stream == nullptr) { throw std::invalid_argument("gated_delta_net: null stream"); }
-    if (normalize_qk && geometry.width == 2048) {
+    const std::size_t staged_bytes =
+        r9700::gdn_recurrence::prefill_staged_workspace_bytes(geometry.width);
+    if (normalize_qk && prefix_state == nullptr && staged_bytes != 0U) {
         auto scope = ws.scope();
-        Tensor sidecar = ws.alloc(DType::FP32, {2 * kQHeads, geometry.width});
-        HIP_CHECK(r9700::gdn_recurrence::prefill_scale_sidecar_prepare(
-            static_cast<const hip_bfloat16*>(q.data),
-            static_cast<const hip_bfloat16*>(k.data), static_cast<float*>(sidecar.data),
-            geometry.width, stream));
-        HIP_CHECK(r9700::gdn_recurrence::prefill_scale_sidecar_recurrence(
-            static_cast<const hip_bfloat16*>(q.data),
-            static_cast<const hip_bfloat16*>(k.data),
+        Tensor staged = ws.alloc(DType::FP32, {static_cast<std::int32_t>(staged_bytes / sizeof(float))});
+        HIP_CHECK(r9700::gdn_recurrence::prefill_staged(
+            static_cast<const hip_bfloat16*>(q.data), static_cast<const hip_bfloat16*>(k.data),
             static_cast<const hip_bfloat16*>(v.data), static_cast<const float*>(g.data),
             static_cast<const float*>(beta.data), static_cast<const float*>(state_in.data),
             static_cast<float*>(state_out.data), static_cast<hip_bfloat16*>(out.data),
-            static_cast<const float*>(sidecar.data), geometry.width, scale, stream));
+            staged.data, staged_bytes, geometry.width, scale, stream));
         return;
     }
 #define NINFER_LAUNCH_ORDINARY(NORM) \

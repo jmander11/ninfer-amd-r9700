@@ -266,10 +266,11 @@ S  = S + u outer k
 o  = (S @ q) * (1/sqrt(128))
 ```
 
-The HIP recurrence uses an algebraically equivalent ordering appropriate to the kernel. Prefill
-uses chunked parallel state passing for large T and recurrent/small-T paths where appropriate;
-ordinary decode uses the width-one in-place path, while MTP verification and Fold share the same
-finite-precision recurrent transition through their Record and Fold modes.
+The HIP recurrence uses an algebraically equivalent ordering appropriate to the kernel. Normalized
+prefill widths 64..8192 stage normalized FP32 q/k and exp(g) once and run a barrier-free
+token-sequential FP32 recurrence (four state rows per wave); other widths use the general
+sequential kernel. Ordinary decode uses the width-one in-place path, while MTP verification and
+Fold share the same finite-precision recurrent transition through their Record and Fold modes.
 
 The per-head output is normalized and gated before projection:
 

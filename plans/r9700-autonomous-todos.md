@@ -85,6 +85,30 @@ above apply to every command.
 
 ### Current checkpoint
 
+COMPLETED USER REQUEST (2026-09-25, base-prefill compute campaign; XAttention/Sage deferred):
+- [x] Gate/up back to A8 for no prefill speed loss: new M128xN128 A8Q4G64 prefill GEMM
+  (token-fastest raster, exact magic-number I32->FP32, bit-exact to the prior A8 kernel,
+  FP64 qualifier PASS) and default `NINFER_R9700_Q4_PREFILL_A4_FAMILIES=0`. 4K prefill
+  1687.6->1725.8 tok/s, 8K 1407->1512, 32K 951->970; worst 4K prefill PPL vs NVFP4
+  +1.56%->+0.008%. Evidence: `profiles/bench/r9700-a8-gateup-20260925/`.
+- [x] Fused streaming dense prefill attention (no FP32 score plane or caller workspace; same
+  BF16-QK / FP16-PV operand precisions, online FP32 Softmax). Dense qualifier FP64 PASS through
+  262144; 32K WikiText mean-NLL +0.0031 (final 512) / +0.0006 (16383 positions, 8 new/8
+  resolved severe). Prefill 4K 1726->1972, 8K 1512->1853, 32K 970->1591, 64K 678->1349 tok/s.
+  Evidence: `profiles/bench/r9700-fused-attention-20260925/`.
+- [x] Re-profile whole prefill; iterate on the dominant kernel until each is near its
+  measured limit. Done: fused attention v2 (32 rows/CTA, full-D waves, spill-free,
+  32K 1591->1643, 64K 1349->1428); A8 GEMM scale-first loads, U32 scalar-base offsets, peeled
+  loop and WMMA/VALU interleave (bit-exact, 2-5% per shape); barrier-free staged GDN prefill
+  recurrence for normalized widths 64..8192 (P2048 bit-exact, 2.85->1.39 ms/call). Whole
+  prefill now 4K 2174, 8K 1976, 32K 1765 tok/s (`profiles/bench/r9700-gdn-gemm-20260925/`).
+  GEMM remains bounded by its G64 two-sided scale epilogue under the 300 W cap.
+- [x] Evaluate FP8 for remaining BF16/FP16 components: FP8-Q/FP8-K QK in the fused kernel gives
+  32K +5.6%, 64K +10.4%, no 8K/4K gain, PPL unchanged within noise; not selected pending the
+  user's decision (evidence `profiles/bench/r9700-fp8qk-eval-20260925/`). FP8 PV (Sage-style) not
+  evaluated per the user's deferral. README, performance, softmax/model/artifact docs, qualifier
+  README and static gates updated; all 86 registered tests pass.
+
 COMPLETED USER REQUEST (2026-09-25, further long-context optimization):
 - [x] Investigate serially and commit each admitted speedup before the next:
   PV tile/split scheduling (`e3e033d2`), matrix PV (`2ac730d2`), wider QK reuse

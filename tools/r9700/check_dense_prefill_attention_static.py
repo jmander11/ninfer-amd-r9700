@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail-closed ISA/resource gate for the selected production full-score stages."""
+"""Fail-closed ISA/resource gate for the fused production dense-prefill attention kernel."""
 
 from __future__ import annotations
 
@@ -15,26 +15,10 @@ if str(REPO_ROOT) not in sys.path:
 
 from tools.r9700.check_prefill_cta_static import _function, _one_integer
 
-
-FULL_SCORE_PROFILES = {
-    "qk_bk16": {"lds": 8296, "wmma": 16, "vgpr": 64, "occupancy": 8,
-                "workgroup": 192, "rounded_lds": 12288},
-    "qk_narrow": {"lds": 16480, "wmma": 32, "vgpr": 128, "occupancy": 8,
-                "workgroup": 192, "rounded_lds": 16896},
-    "qk_wide": {"lds": 32928, "wmma": 64, "vgpr": 160, "occupancy": 8,
-                "workgroup": 384, "rounded_lds": 33280},
-    "maximum": {"lds": 64, "wmma": 0, "vgpr": 64, "occupancy": 8,
-                "workgroup": 256, "rounded_lds": 512},
-    "pv_g16": {"lds": 9208, "wmma": 0, "vgpr": 128, "occupancy": 8,
-               "workgroup": 256, "rounded_lds": 12288},
-    "pv_g32": {"lds": 8952, "wmma": 0, "vgpr": 128, "occupancy": 8,
-               "workgroup": 256, "rounded_lds": 12288},
-    "pv_wmma": {"lds": 13816, "wmma": 8, "vgpr": 128, "occupancy": 8,
-                "workgroup": 192, "rounded_lds": 13824},
-    "pv_merge": {"lds": 4, "wmma": 0, "vgpr": 64, "occupancy": 8,
-                 "workgroup": 256, "rounded_lds": 512},
-}
-LDS_ALLOCATION_GRANULE = 512
+# One loop body per 32-key block: S^T = K Q^T as 2 key tiles x 16 feature tiles of BF16 WMMA,
+# then O += P V as 16 feature tiles x 2 key tiles of FP16 WMMA.
+PROFILE = {"bf16_wmma": 32, "f16_wmma": 32, "lds": 37536, "vgpr": 256, "occupancy": 5,
+           "workgroup": 384, "barrier_pairs": 3}
 
 
 def _kernel_metadata_record(text: str, symbol: str) -> str:
@@ -48,62 +32,38 @@ def _kernel_metadata_record(text: str, symbol: str) -> str:
     return selected[0]
 
 
-def check(*, assembly: Path, metadata: Path, symbol: str,
-          value_group: int, full_score_stage: str, key_splits: int = 16) -> dict[str, int | str]:
+def _count(body: str, opcode: str) -> int:
+    return len(re.findall(rf"^\s*{opcode}(?:_e32|_e64)?(?:\s|$)", body, re.MULTILINE))
+
+
+def check(*, assembly: Path, metadata: Path, symbol: str, value_group: int) -> dict[str, int | str]:
     if value_group not in (16, 32):
         raise ValueError("dense attention requires G16 or G32")
-    if full_score_stage == "qk_bk16":
-        specialization = "26dense_full_score_qk_kernelILb0EE"
-    elif full_score_stage == "qk_narrow":
-        specialization = "32dense_full_score_qk_tiled_kernelILj16ELj32EE"
-    elif full_score_stage == "qk_wide":
-        specialization = "32dense_full_score_qk_tiled_kernelILj32ELj64EE"
-    elif full_score_stage == "maximum":
-        specialization = "31dense_full_score_maximum_kernelILb0EE"
-    elif full_score_stage == "pv":
-        specialization = f"26dense_full_score_pv_kernelILj{value_group}ELb0EE"
-    elif full_score_stage == "pv_wmma":
-        if key_splits not in (2, 4, 16, 32):
-            raise ValueError("split PV requires 2, 4, 16 or 32 key splits")
-        specialization = f"31dense_full_score_pv_wmma_kernelILj{value_group}ELj{key_splits}EE"
-    elif full_score_stage == "pv_merge":
-        specialization = "32dense_full_score_pv_merge_kernel"
-    else:
-        raise ValueError("unknown full-score stage")
-    if specialization not in symbol:
-        raise ValueError(
-            "selected symbol is not the exact production "
-            f"full-score {full_score_stage} specialization")
+    if f"20dense_prefill_kernelILj{value_group}EE" not in symbol:
+        raise ValueError("selected symbol is not the exact production fused dense-prefill "
+                         f"G{value_group} specialization")
     assembly_body = _function(assembly.read_text(encoding="utf-8"), symbol, "assembly")
     metadata_text = metadata.read_text(encoding="utf-8")
     metadata_body = _function(metadata_text, symbol, "metadata")
     kernel_record = _kernel_metadata_record(metadata_text, symbol)
-    opcode = "v_wmma_f32_16x16x16_f16" if full_score_stage == "pv_wmma" else "v_wmma_f32_16x16x16_bf16"
-    count = len(re.findall(rf"^\s*{opcode}(?:\s|$)", assembly_body, re.MULTILINE))
-    profile_name = (f"{full_score_stage}_g{value_group}"
-                    if full_score_stage == "pv" else full_score_stage)
-    profile = FULL_SCORE_PROFILES[profile_name]
-    expected_wmma = profile["wmma"]
-    if count != expected_wmma:
-        raise ValueError(
-            f"WMMA count {count}, expected {expected_wmma} for selected stage")
-    if expected_wmma and any(instruction != opcode for instruction in re.findall(
-            r"^\s*(v_wmma_\S+)", assembly_body, re.MULTILINE)):
-        raise ValueError("selected stage contains an unexpected WMMA operand format")
-    forbidden = re.findall(r"^\s*(v_wmma_\S*(?:fp8|iu[48])\S*)", assembly_body,
-                           re.MULTILINE | re.IGNORECASE)
-    if forbidden:
-        raise ValueError(f"selected BF16-Q profile contains forbidden matrix opcodes: {forbidden}")
-    if full_score_stage in ("maximum", "pv", "pv_merge") and re.search(
-            r"^\s*v_wmma_", assembly_body, re.MULTILINE):
-        raise ValueError("maximum/PV stage must not contain any WMMA instruction")
-    if full_score_stage in ("pv", "pv_wmma"):
-        if not re.search(r"^\s*v_exp_f32(?:_e(?:32|64))?(?:\s|$)", assembly_body,
-                         re.MULTILINE):
-            raise ValueError("PV stage is missing native FP32 exponential")
-        if full_score_stage == "pv" and not re.search(r"^\s*v_fma(?:c)?_f32(?:_e(?:32|64))?(?:\s|$)", assembly_body,
-                         re.MULTILINE):
-            raise ValueError("PV stage is missing FP32 probability-value accumulation")
+    bf16 = _count(assembly_body, "v_wmma_f32_16x16x16_bf16")
+    f16 = _count(assembly_body, "v_wmma_f32_16x16x16_f16")
+    if bf16 != PROFILE["bf16_wmma"] or f16 != PROFILE["f16_wmma"]:
+        raise ValueError(f"WMMA counts bf16={bf16} f16={f16}, expected "
+                         f"{PROFILE['bf16_wmma']}/{PROFILE['f16_wmma']}")
+    unexpected = [op for op in re.findall(r"^\s*(v_wmma_\S+)", assembly_body, re.MULTILINE)
+                  if op not in ("v_wmma_f32_16x16x16_bf16", "v_wmma_f32_16x16x16_f16")]
+    if unexpected:
+        raise ValueError(f"fused dense prefill contains unexpected matrix opcodes: {unexpected}")
+    if _count(assembly_body, "v_exp_f32") == 0:
+        raise ValueError("fused dense prefill is missing native FP32 exponential")
+    barrier_pairs = len(re.findall(r"^\s*s_barrier_signal\s+-1(?:\s|$)", assembly_body,
+                                   re.MULTILINE))
+    if (barrier_pairs != PROFILE["barrier_pairs"] or
+            len(re.findall(r"^\s*s_barrier_wait\s+-1(?:\s|$)", assembly_body,
+                           re.MULTILINE)) != barrier_pairs or
+            re.search(r"^\s*s_barrier(?:\s|$)", assembly_body, re.MULTILINE)):
+        raise ValueError(f"expected {PROFILE['barrier_pairs']} signal/wait barrier pairs")
     lds = _one_integer(metadata_body,
                        r"^\s*\.amdhsa_group_segment_fixed_size\s+(\d+)", "LDS size")
     private = _one_integer(metadata_body,
@@ -111,11 +71,8 @@ def check(*, assembly: Path, metadata: Path, symbol: str,
                            "private segment size")
     vgpr = _one_integer(metadata_body, r"^\s*\.amdhsa_next_free_vgpr\s+(\d+)",
                         "next-free VGPR")
-    reported_vgpr = _one_integer(kernel_record, r"^\s*\.vgpr_count:\s*(\d+)",
-                                "reported VGPR count")
     flat_scratch = _one_integer(
-        metadata_body, r"^\s*\.set\s+\S+\.uses_flat_scratch,\s*(\d+)",
-        "flat-scratch use")
+        metadata_body, r"^\s*\.set\s+\S+\.uses_flat_scratch,\s*(\d+)", "flat-scratch use")
     scratch = _one_integer(metadata_body, r"^;\s*ScratchSize:\s*(\d+)", "scratch size")
     occupancy = _one_integer(metadata_body, r"^;\s*Occupancy:\s*(\d+)", "occupancy")
     wave32 = _one_integer(metadata_body, r"^\s*\.amdhsa_wavefront_size32\s+(\d+)",
@@ -127,45 +84,27 @@ def check(*, assembly: Path, metadata: Path, symbol: str,
         "maximum flat workgroup size")
     wavefront_size = _one_integer(
         kernel_record, r"^\s*\.wavefront_size:\s*(\d+)", "wavefront size")
-    metadata_wgp_mode = _one_integer(
-        kernel_record, r"^\s*\.workgroup_processor_mode:\s*(\d+)",
-        "metadata WGP mode")
     vgpr_spills = _one_integer(
         kernel_record, r"^\s*\.vgpr_spill_count:\s*(\d+)", "VGPR spill count")
     sgpr_spills = _one_integer(
         kernel_record, r"^\s*\.sgpr_spill_count:\s*(\d+)", "SGPR spill count")
-    rounded_lds = ((lds + LDS_ALLOCATION_GRANULE - 1) // LDS_ALLOCATION_GRANULE *
-                   LDS_ALLOCATION_GRANULE)
-    expected_lds = profile["lds"]
-    if lds != expected_lds:
-        raise ValueError(f"LDS size {lds}, expected exactly {expected_lds}")
-    maximum_vgpr = profile["vgpr"]
-    maximum_rounded_lds = profile["rounded_lds"]
-    minimum_occupancy = profile["occupancy"]
-    if (vgpr > maximum_vgpr or rounded_lds > maximum_rounded_lds or
-            occupancy < minimum_occupancy):
-        raise ValueError(
-            f"resources fail: next_free_vgpr={vgpr}/{maximum_vgpr} "
-            f"rounded_lds={rounded_lds}/{maximum_rounded_lds} "
-            f"occupancy={occupancy}/{minimum_occupancy}")
-    expected_workgroup = profile["workgroup"]
-    if (wave32 != 1 or wavefront_size != 32 or wgp_mode != 1 or metadata_wgp_mode != 1 or
-            maximum_workgroup != expected_workgroup):
+    if lds != PROFILE["lds"]:
+        raise ValueError(f"LDS size {lds}, expected exactly {PROFILE['lds']}")
+    if vgpr > PROFILE["vgpr"] or occupancy < PROFILE["occupancy"]:
+        raise ValueError(f"resources fail: next_free_vgpr={vgpr}/{PROFILE['vgpr']} "
+                         f"occupancy={occupancy}/{PROFILE['occupancy']}")
+    if (wave32 != 1 or wavefront_size != 32 or wgp_mode != 1 or
+            maximum_workgroup != PROFILE["workgroup"]):
         raise ValueError(
             f"execution mode fails: wave32={wave32} wavefront={wavefront_size} "
-            f"wgp={wgp_mode}/{metadata_wgp_mode} "
-            f"max_workgroup={maximum_workgroup}/{expected_workgroup}")
+            f"wgp={wgp_mode} max_workgroup={maximum_workgroup}/{PROFILE['workgroup']}")
     if (private != 0 or scratch != 0 or flat_scratch != 0 or
             vgpr_spills != 0 or sgpr_spills != 0):
         raise ValueError(
             f"private={private} scratch={scratch} flat_scratch={flat_scratch} "
             f"vgpr_spills={vgpr_spills} sgpr_spills={sgpr_spills}; all must be zero")
-    return {"symbol": symbol, "value_group": value_group,
-            "query_tile": 1 if full_score_stage == "pv_merge" else 32 if full_score_stage == "qk_wide" else 16,
-            "key_splits": key_splits if full_score_stage == "pv_wmma" else "runtime" if full_score_stage == "pv_merge" else 1,
-            "full_score_stage": full_score_stage,
-            "wmma_opcode": opcode, "wmma_count": count, "lds_bytes": lds, "rounded_lds_bytes": rounded_lds,
-            "next_free_vgpr": vgpr, "vgpr_count": reported_vgpr,
+    return {"symbol": symbol, "value_group": value_group, "bf16_wmma": bf16, "f16_wmma": f16,
+            "barrier_pairs": barrier_pairs, "lds_bytes": lds, "next_free_vgpr": vgpr,
             "occupancy": occupancy, "private_bytes": private, "scratch_bytes": scratch,
             "flat_scratch": flat_scratch, "maximum_workgroup_size": maximum_workgroup,
             "wavefront_size": wavefront_size, "workgroup_processor_mode": wgp_mode,
@@ -178,9 +117,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--metadata", required=True, type=Path)
     parser.add_argument("--symbol", required=True)
     parser.add_argument("--value-group", required=True, type=int, choices=(16, 32))
-    parser.add_argument("--key-splits", type=int, choices=(2, 4, 16, 32), default=16)
-    parser.add_argument("--full-score-stage", required=True,
-                        choices=("qk_bk16", "qk_narrow", "qk_wide", "maximum", "pv", "pv_wmma", "pv_merge"))
     return parser.parse_args(argv)
 
 
@@ -188,12 +124,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         result = check(assembly=args.assembly, metadata=args.metadata, symbol=args.symbol,
-                       value_group=args.value_group, full_score_stage=args.full_score_stage,
-                       key_splits=args.key_splits)
+                       value_group=args.value_group)
     except (OSError, UnicodeError, ValueError) as error:
         raise SystemExit(str(error)) from error
     print(" ".join(f"{key}={value}" for key, value in result.items()))
-    print("production=true selected_route=full_score_" + args.full_score_stage)
+    print("production=true selected_route=fused_dense_prefill")
     return 0
 
 

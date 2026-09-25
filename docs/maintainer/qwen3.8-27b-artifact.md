@@ -75,10 +75,10 @@ and `/ssdpool2nvme/local_llm/models/qwen3.8-27b-bf16` as source. The companion u
 `compose_fp8_capped_dflash` with that base and the installed selective-protected tiled-head
 Q4 DFlash donor described below. Outputs are create-only; do not reconvert on installation.
 
-Execution is global Q4 A8 with `NINFER_R9700_Q4_PREFILL_A4_FAMILIES=1`: only full-K
-N34816/K5120 Q4 calls at T>128 use the qualified A4 ping/pong/tail routes. Other Q4 calls,
-including ordinary decode and small speculative verify, stay A8. Protected FP8 projections
-remain FP8. This is a compile-time execution policy, not an artifact recipe or a runtime flag.
+Execution is uniform Q4 A8 (`NINFER_R9700_Q4_PREFILL_A4_FAMILIES=0`) for every Q4 call,
+including large prefill, ordinary decode and small speculative verify. Protected FP8 projections
+remain FP8. This is a compile-time execution policy, not an artifact recipe or a runtime flag;
+the nonzero mixed prefill A4 families remain evaluators.
 The current build/run configuration is G16, dense, chunk2048, W8 activation bits8;
 see `docs/performance.md` for quality tradeoffs and delivery evidence.
 

@@ -36,7 +36,7 @@ add_library(ninfer_r9700_core STATIC
   ops/r9700/gdn/gdn_gating.cpp
   ops/r9700/gdn/gdn_ops.hip
   ops/r9700/gdn_recurrence/gated_delta_net.hip
-  ops/r9700/gdn_recurrence/gdn_prefill_scale_sidecar.hip
+  ops/r9700/gdn_recurrence/gdn_prefill_staged.hip
   ops/r9700/gdn_recurrence/gdn_replay_fold.cpp
   ops/r9700/gdn_recurrence/gdn_replay_fold.hip
   ops/r9700/sampling/sampling.hip

@@ -27,29 +27,28 @@ remeasured. Five drafts wins at C1–2 and four at C3–4 on this workload; othe
 prompts may differ. C4 adaptive reaches **201.04 aggregate tok/s**. All 24 final
 repetitions and 44 cold-transition cases match ordinary greedy tokens exactly.
 
-### Prefill and ordinary decode · retained 2026-09-23 results
+### Prefill and ordinary decode · 2026-09-25
 
-| C1 mode | Prefill tok/s | Decode tok/s |
+| C1, no speculation | Prefill tok/s | Decode tok/s |
 |---|---:|---:|
-| No speculation | 1,519.18 | 30.15 |
-| DFlash2, five drafts | 1,472.19 | See newer table above |
+| 4K prompt (workload above) | **2,173.84** | 30.18 |
 
-Same recipe/workload; prefill and ordinary decode were not remeasured after the
-latest decode changes. Keep chunk **2,048**: tested 4,096 chunks were 3.6–4.2%
-slower. Results are workload-specific, not a claimed hardware ceiling.
-Methodology, quality checks and committed evidence: `docs/performance.md`.
+Longer single-request prefill (cycled code corpus, chunk 2,048, one screen each):
+**8K 1,976, 32K 1,765, 64K 1,514 tok/s**. DFlash2 prefill was not remeasured.
+Keep chunk **2,048**: tested 4,096 chunks were 3.6–4.2% slower. Results are
+workload-specific, not a claimed hardware ceiling. Methodology, quality checks
+and committed evidence: `docs/performance.md`.
 
 ## Model and precision
 
 - **15.79 GB base / 17.00 GB DFlash-enabled artifact** (decimal file sizes, not VRAM).
 - Selective Q4/FP8 weights, Q4 embedding/output head; Q4 DFlash with BF16 codebooks.
-- A4 for large-prefill Q4 MLP gate/up (T>128); A8 for other Q4 operations,
-  including ordinary decode and DFlash verification.
+- A8 activations for every Q4 operation (prefill, ordinary decode and DFlash
+  verification); FP8 activations for the protected FP8 projections.
 - Fixed cache: FP8 E4M3FN keys, INT4 values, FP16 value scales. DFlash state is BF16.
 
-The selected local recipe's worst prefill PPL increase across three tested texts
-is **1.88% versus the 5090 NVFP4 reference**, with more newly severe positions on
-the technical sample (10 versus 6). This is not universal quality equivalence;
+On three matched 4K texts, prefill PPL is within **−1.37% to +0.06% of the 5090
+NVFP4 reference** (worst: code, +0.06%). This is not universal quality equivalence;
 the separate BF16-source production-admission campaign remains unfinished.
 
 Artifacts are not bundled. The installed recipe and creation receipts are under
@@ -68,7 +67,7 @@ cmake -S . -B build-r9700 -G Ninja \
   -DNINFER_BUILD_APPS=ON \
   -DNINFER_BUILD_BENCHMARKS=ON \
   -DNINFER_R9700_Q4_ACTIVATION_BITS=8 \
-  -DNINFER_R9700_Q4_PREFILL_A4_FAMILIES=1 \
+  -DNINFER_R9700_Q4_PREFILL_A4_FAMILIES=0 \
   -DNINFER_R9700_W8_ACTIVATION_BITS=8
 cmake --build build-r9700 --parallel 4
 ```

@@ -138,23 +138,19 @@ signed-INT4 V, and FP16 V-scale planes as dense attention; it introduces no cach
 runtime selector. `tau=1` bypasses all estimator arithmetic and emits every causal page in dense
 order.
 
-Dense prefill uses the staged GQA6 QK/maximum/PV operator. BF16 WMMA computes QK from represented
-BF16 queries and exactly decoded token-fastest FP8 keys; FP32 softmax and direct signed-INT4 times
-stored FP16-scale PV preserve the represented value precision. QK uses Bq16 and Bk16 below 512
-query rows, Bk32 otherwise. That choice uses the complete call's row count even when its last
-private panel is smaller. Initial and appended calls with 128..8192 query rows and visible
-context through 262144 use absolute per-row causal positions and the same fragmented page table.
-Shorter query calls, tree masks, and other layouts retain their separate routes.
-
-The caller-owned FP32 score workspace is reused across query panels and layers. Panel width is
-`min(query_rows, floor(2048*2048/visible_context/16)*16)`; exact storage is
-`24*panel_rows*(visible_context+1)*4` bytes, capped at 384 MiB scores plus 192 KiB maxima.
-The planner reserves a conservative envelope bound that covers intermediate contexts despite the
-panel-width rounding sawtooth. This preserves arena and Device Graph addresses. Global device-active
-counts are validated against the original call and then clamped by panel origin; inactive rows
-publish positive zero and invalid counts poison every row. P2048 retains one panel and its original
-arithmetic decomposition. Appended-panel qualification and whole-request timing are required before
-crediting any performance improvement.
+Dense prefill is one fused causal GQA6 operator with no score plane and no caller-owned workspace.
+Each CTA owns one KV head and 32 query rows; each wave owns one query head and 16 rows over all
+256 features. Per 32-key block, token-fastest FP8 keys are decoded exactly to BF16 and signed INT4
+values times their FP16 scales are staged as FP16 V/8 in LDS. BF16 WMMA computes S^T = K Q^T from
+represented BF16 queries with FP32 accumulation; online FP32 Softmax raises its reference only
+when a block exceeds it by 2^8; FP16 probabilities and FP16 V/8 feed FP16 WMMA with FP32
+accumulation, and the FP32 denominator sums exactly those FP16 probabilities. The final FP32
+normalization restores the factor 8. Initial and appended calls with 128..8192 query rows and
+visible context through 262144 use absolute per-row causal positions and the same fragmented page
+table. Device-active counts belong to the whole call: inactive rows publish positive zero and
+invalid counts, positions, page-table rows, physical pages or nonfinite visible scores poison
+exactly the dependent rows. Shorter query calls, tree masks, and other layouts retain their separate
+routes. An FP8-Q/FP8-K QK variant was evaluated but not selected; see `docs/performance.md`.
 
 The historical fused-online candidate's static resource gate used the combined gfx1201 residency envelope rather than an isolated
 register target: next-free VGPR must be at most 240, allocation-rounded LDS at most 43,520 bytes,

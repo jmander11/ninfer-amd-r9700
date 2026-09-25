@@ -129,8 +129,8 @@ ROPE_IMPL := ../../src/ops/r9700/rope/rope.hip
 ROPE_HEADER := ../../include/ninfer/ops/rope.h
 GDN_RECURRENCE_IMPL := ../../src/ops/r9700/gdn_recurrence/gated_delta_net.hip
 GDN_RECURRENCE_HEADER := ../../include/ninfer/ops/gated_delta_net.h
-GDN_RECURRENCE_SIDECAR_IMPL := ../../src/ops/r9700/gdn_recurrence/gdn_prefill_scale_sidecar.hip
-GDN_RECURRENCE_SIDECAR_HEADER := ../../src/ops/r9700/gdn_recurrence/gdn_prefill_scale_sidecar.h
+GDN_RECURRENCE_STAGED_IMPL := ../../src/ops/r9700/gdn_recurrence/gdn_prefill_staged.hip
+GDN_RECURRENCE_STAGED_HEADER := ../../src/ops/r9700/gdn_recurrence/gdn_prefill_staged.h
 GDN_VERIFY_PROFILE := ../../src/ops/r9700/gdn_recurrence/gdn_verify_profile.h
 GDN_VERIFY_WAVE_STATIC_CHECK := check_gdn_verify_wave_static.py
 GDN_AFFINE_CHUNK_IMPL := ../../src/ops/r9700/gdn_recurrence/gdn_affine_chunk_qualification.hip
@@ -172,7 +172,7 @@ CXXFLAGS := -O3 -std=c++20 --offload-arch=$(ARCH) -I../../src $(SYSTEM_INCLUDES)
 LDFLAGS := -L$(ROCM_ROOT)/lib -Wl,-rpath,$(ROCM_ROOT)/lib
 
 
-.PHONY: all clean hbm fp8-hipblaslt-probe int4-wmma int4-wmma-isa int4-wmma-resources w8a8-wmma w8a8-prefill-cta-regression w8a8-prefill-cta-lds-scope-regression w8a8-prefill-cta-lds-scope-benchmark w8a8-prefill-cta-lds-scope-report w8a8-wmma-isa w8a8-wmma-resources prefill-cta-static-q4 prefill-cta-static-w8 prefill-cta-static-incumbent-diagnostic q4g64-linear a8q4-shape-sweep a8q4-gdn-pair-t1 a8q4-gdn-pair-t1-static a8q4-dflash-small-t-build a8q4-dflash-small-t-static a8q4-dflash-small-t-test a8q4-dflash-small-t-screen a8q4-dflash-mlp-down-small-t-build a8q4-dflash-mlp-down-small-t-static a8q4-dflash-mlp-down-small-t-static-test a8q4-prefill-cta-regression a8q4-prefill-cta-lds-scope-regression a8q4-prefill-cta-lds-scope-benchmark a8q4-prefill-cta-lds-scope-report a8q4-prefill-cta-m64n64-regression q4g64-linear-isa q4g64-linear-resources xattention-isa xattention-resources xattention-reports split512-attention split512-attention-isa split512-attention-resources dense-prefill-attention dense-prefill-attention-full-score-isa dense-prefill-attention-full-score-static dense-prefill-attention-static-test isa kv-resources linear-isa linear-resources eager-isa rmsnorm-prefill-static rmsnorm-prefill-static-test rmsnorm-prefill-benchmark rmsnorm-k256-prefill-static rmsnorm-k256-prefill-static-test rmsnorm-k256-prefill-benchmark rmsnorm-decode-production-static rmsnorm-decode-production-static-test rmsnorm-decode-production-routing-test rmsnorm-decode-production-regression rmsnorm-dflash-rows56-build rmsnorm-dflash-rows56-static rmsnorm-dflash-rows56-static-test rmsnorm-dflash-rows56-screen gated-rmsnorm-prefill-static gated-rmsnorm-prefill-static-test gated-rmsnorm-prefill-path-test gated-rmsnorm-prefill-benchmark gated-rmsnorm-k128-production-static gated-rmsnorm-k128-production-static-test silu-mul-split-prefill-static silu-mul-split-prefill-static-test silu-mul-split-prefill-benchmark gdn-isa gdn-prefill-benchmark gdn-prefill-static gdn-prefill-static-test gdn-recurrence-resources gdn-recurrence-exact-discriminator gdn-verify-wave-static sampling-isa rope-resources run sanitize rocm-tool-audit rocm-tool-audit-test profile-trace profile-attention-trace profile-pmc
+.PHONY: all clean hbm fp8-hipblaslt-probe int4-wmma int4-wmma-isa int4-wmma-resources w8a8-wmma w8a8-prefill-cta-regression w8a8-prefill-cta-lds-scope-regression w8a8-prefill-cta-lds-scope-benchmark w8a8-prefill-cta-lds-scope-report w8a8-wmma-isa w8a8-wmma-resources prefill-cta-static-q4 prefill-cta-static-w8 prefill-cta-static-incumbent-diagnostic q4g64-linear a8q4-shape-sweep a8q4-gdn-pair-t1 a8q4-gdn-pair-t1-static a8q4-dflash-small-t-build a8q4-dflash-small-t-static a8q4-dflash-small-t-test a8q4-dflash-small-t-screen a8q4-dflash-mlp-down-small-t-build a8q4-dflash-mlp-down-small-t-static a8q4-dflash-mlp-down-small-t-static-test a8q4-prefill-cta-regression a8q4-prefill-cta-lds-scope-regression a8q4-prefill-cta-lds-scope-benchmark a8q4-prefill-cta-lds-scope-report a8q4-prefill-cta-m64n64-regression q4g64-linear-isa q4g64-linear-resources xattention-isa xattention-resources xattention-reports split512-attention split512-attention-isa split512-attention-resources dense-prefill-attention dense-prefill-attention-isa dense-prefill-attention-static dense-prefill-attention-static-test isa kv-resources linear-isa linear-resources eager-isa rmsnorm-prefill-static rmsnorm-prefill-static-test rmsnorm-prefill-benchmark rmsnorm-k256-prefill-static rmsnorm-k256-prefill-static-test rmsnorm-k256-prefill-benchmark rmsnorm-decode-production-static rmsnorm-decode-production-static-test rmsnorm-decode-production-routing-test rmsnorm-decode-production-regression rmsnorm-dflash-rows56-build rmsnorm-dflash-rows56-static rmsnorm-dflash-rows56-static-test rmsnorm-dflash-rows56-screen gated-rmsnorm-prefill-static gated-rmsnorm-prefill-static-test gated-rmsnorm-prefill-path-test gated-rmsnorm-prefill-benchmark gated-rmsnorm-k128-production-static gated-rmsnorm-k128-production-static-test silu-mul-split-prefill-static silu-mul-split-prefill-static-test silu-mul-split-prefill-benchmark gdn-isa gdn-prefill-benchmark gdn-prefill-static gdn-prefill-static-test gdn-recurrence-resources gdn-recurrence-exact-discriminator gdn-verify-wave-static sampling-isa rope-resources run sanitize rocm-tool-audit rocm-tool-audit-test profile-trace profile-attention-trace profile-pmc
 
 all: $(PROBE_TARGET) $(KV_TARGET) $(HIP_DEVICE_TARGET) $(LINEAR_TARGET) $(EAGER_TARGET) $(GDN_TARGET) $(GDN_RECURRENCE_TARGET) $(SAMPLING_TARGET) $(ROPE_TARGET) $(SERVE_ENV_TARGET)
 
@@ -216,17 +216,13 @@ $(BUILD_DIR)/dense_prefill_attention.s: $(KV_ATTENTION_SOURCE) $(KV_ATTENTION_HE
 	$(HIPCC) $(CXXFLAGS) -Wno-unused-command-line-argument --offload-device-only -S \
 		$(KV_ATTENTION_SOURCE) -o $@
 
-dense-prefill-attention-full-score-isa: $(BUILD_DIR)/dense_prefill_attention.s
-	awk '/-- Begin function/ { selected = ($$0 ~ /dense_full_score_(qk(_tiled)?|maximum|pv(_merge|_wmma)?)_kernel/) } selected && $$0 ~ /-- Begin function|v_wmma_|v_exp_|v_fma|amdhsa_group_segment_fixed_size|amdhsa_private_segment_fixed_size|amdhsa_next_free_vgpr|ScratchSize|Occupancy/' $<
+dense-prefill-attention-isa: $(BUILD_DIR)/dense_prefill_attention.s
+	awk '/-- Begin function/ { selected = ($$0 ~ /dense_prefill_kernel/) } selected && $$0 ~ /-- Begin function|v_wmma_|v_exp_|amdhsa_group_segment_fixed_size|amdhsa_private_segment_fixed_size|amdhsa_next_free_vgpr|ScratchSize|Occupancy/' $<
 
-# Codegen selects the exact unrolled WMMA count and final resource envelope. Bind those explicit
-# observations rather than guessing them before the first gfx1201 compilation.
-dense-prefill-attention-full-score-static:
+dense-prefill-attention-static:
 	test -n "$(DENSE_ATTN_ASSEMBLY)" && test -n "$(DENSE_ATTN_METADATA)" && \
-		test -n "$(DENSE_ATTN_SYMBOL)" && test -n "$(DENSE_ATTN_VALUE_GROUP)" && \
-		test -n "$(DENSE_ATTN_STAGE)"
-	python3 $(DENSE_PREFILL_ATTENTION_STATIC_CHECK) --full-score-stage "$(DENSE_ATTN_STAGE)" \
-		--key-splits "$(if $(DENSE_ATTN_KEY_SPLITS),$(DENSE_ATTN_KEY_SPLITS),16)" \
+		test -n "$(DENSE_ATTN_SYMBOL)" && test -n "$(DENSE_ATTN_VALUE_GROUP)"
+	python3 $(DENSE_PREFILL_ATTENTION_STATIC_CHECK) \
 		--assembly "$(DENSE_ATTN_ASSEMBLY)" --metadata "$(DENSE_ATTN_METADATA)" \
 		--symbol "$(DENSE_ATTN_SYMBOL)" --value-group "$(DENSE_ATTN_VALUE_GROUP)"
 
@@ -316,9 +312,9 @@ $(GDN_RECURRENCE_TARGET): $(GDN_RECURRENCE_SOURCE) $(GDN_RECURRENCE_IMPL) $(GDN_
 	$(HIPCC) $(CXXFLAGS) -I../../include $(GDN_RECURRENCE_SOURCE) $(GDN_RECURRENCE_IMPL) \
 		$(HIP_DEVICE_IMPL) $(HIP_ARENA_IMPL) $(CORE_DTYPE_IMPL) $(CORE_TENSOR_IMPL) $(LDFLAGS) -o $@
 
-$(GDN_RECURRENCE_EXACT_TARGET): $(GDN_RECURRENCE_EXACT_SOURCE) $(GDN_RECURRENCE_IMPL) $(GDN_RECURRENCE_HEADER) $(GDN_RECURRENCE_SIDECAR_IMPL) $(GDN_RECURRENCE_SIDECAR_HEADER) $(GDN_VERIFY_PROFILE) $(HIP_DEVICE_IMPL) $(HIP_ARENA_IMPL) $(CORE_DTYPE_IMPL) $(CORE_TENSOR_IMPL) Makefile
+$(GDN_RECURRENCE_EXACT_TARGET): $(GDN_RECURRENCE_EXACT_SOURCE) $(GDN_RECURRENCE_IMPL) $(GDN_RECURRENCE_HEADER) $(GDN_RECURRENCE_STAGED_IMPL) $(GDN_RECURRENCE_STAGED_HEADER) $(GDN_VERIFY_PROFILE) $(HIP_DEVICE_IMPL) $(HIP_ARENA_IMPL) $(CORE_DTYPE_IMPL) $(CORE_TENSOR_IMPL) Makefile
 	mkdir -p $(BUILD_DIR)
-	$(HIPCC) $(CXXFLAGS) -DNINFER_R9700_GDN_VERIFY_WAVE_QK_CANDIDATE=$(GDN_VERIFY_WAVE_QK_CANDIDATE) -I../../include $(GDN_RECURRENCE_EXACT_SOURCE) $(GDN_RECURRENCE_IMPL) $(GDN_RECURRENCE_SIDECAR_IMPL) \
+	$(HIPCC) $(CXXFLAGS) -DNINFER_R9700_GDN_VERIFY_WAVE_QK_CANDIDATE=$(GDN_VERIFY_WAVE_QK_CANDIDATE) -I../../include $(GDN_RECURRENCE_EXACT_SOURCE) $(GDN_RECURRENCE_IMPL) $(GDN_RECURRENCE_STAGED_IMPL) \
 		$(HIP_DEVICE_IMPL) $(HIP_ARENA_IMPL) $(CORE_DTYPE_IMPL) $(CORE_TENSOR_IMPL) $(LDFLAGS) -o $@
 
 gdn-recurrence-exact-discriminator: $(GDN_RECURRENCE_EXACT_TARGET)
@@ -482,10 +478,10 @@ $(Q4G64_LINEAR_TARGET): $(Q4G64_LINEAR_SOURCE) $(LINEAR_IMPL) $(LINEAR_HEADER) M
 	mkdir -p $(BUILD_DIR)
 	$(HIPCC) $(CXXFLAGS) $(Q4G64_LINEAR_SOURCE) $(LINEAR_IMPL) $(LDFLAGS) -o $@
 
-$(A8Q4_SHAPE_SWEEP_TARGET): $(A8Q4_SHAPE_SWEEP_SOURCE) $(LINEAR_IMPL) $(LINEAR_HEADER) $(Q4_ACTIVATION_PROFILE) Makefile
+$(A8Q4_SHAPE_SWEEP_TARGET): $(A8Q4_SHAPE_SWEEP_SOURCE) $(LINEAR_IMPL) $(LINEAR_HEADER) $(Q4_ACTIVATION_PROFILE) ../../src/ops/r9700/linear/a8q4_small_batch_projection.hip Makefile
 	mkdir -p $(BUILD_DIR)
 	$(HIPCC) $(CXXFLAGS) -DNINFER_SOURCE_DIR='"$(abspath ../..)"' \
-		$(A8Q4_SHAPE_SWEEP_SOURCE) $(LINEAR_IMPL) $(LDFLAGS) -o $@
+		$(A8Q4_SHAPE_SWEEP_SOURCE) $(LINEAR_IMPL) ../../src/ops/r9700/linear/a8q4_small_batch_projection.hip $(LDFLAGS) -o $@
 
 $(A8Q4_GDN_PAIR_T1_TARGET): $(A8Q4_GDN_PAIR_T1_SOURCE) $(A8Q4_SHAPE_SWEEP_SOURCE) \
 		$(LINEAR_IMPL) $(LINEAR_HEADER) $(Q4_ACTIVATION_PROFILE) Makefile

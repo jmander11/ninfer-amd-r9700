@@ -119,11 +119,12 @@ std::size_t r9700_full_attention_workspace_capacity_bytes(
             ops::r9700::kv::fp8_int4_kv_attention_dflash_verify_batched_wmma_workspace_bytes(
                 candidate_context, query_rows));
     }
-    // Exact panel sizing sawtooths at width transitions. The Op's conservative envelope owner
-    // bounds every intermediate context, preserving this single arena/Device Graph address.
-    required = std::max(required,
-        ops::r9700::kv::fp8_int4_kv_attention_dense_prefill_workspace_envelope_bytes(
-            query_rows, visible_context));
+    // Dense prefill is fused and needs no workspace; the qualification-only P129 tail reuses
+    // the single-row score workspace after the dense launch.
+    if (ops::r9700::kv::use_text_p129_wmma_tail(query_rows, visible_context)) {
+        required = std::max(required,
+                            r9700_full_attention_score_workspace_capacity_bytes(visible_context));
+    }
     return required;
 }
 
@@ -249,26 +250,19 @@ static hipError_t launch_r9700_attention(
         raw.value_layout == ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest &&
         raw.value_scale_layout == ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest;
     if (dense_prefill) {
-        const std::size_t required =
-            ops::r9700::kv::fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(
-                static_cast<std::uint32_t>(rows), raw.context);
-        if (required == 0U || a.workspace == nullptr || a.workspace_bytes < required) {
-            return hipErrorInvalidValue;
-        }
-        hipError_t error = ops::r9700::kv::fp8_int4_kv_attention_dense_prefill_full_score(
-            raw, a.workspace, required, stream);
+        hipError_t error = ops::r9700::kv::fp8_int4_kv_attention_dense_prefill(raw, stream);
         if (error != hipSuccess || !ops::r9700::kv::use_text_p129_wmma_tail(
                                        static_cast<std::uint32_t>(rows), raw.context)) {
             return error;
         }
         const std::size_t tail_score_bytes =
             r9700_full_attention_score_workspace_capacity_bytes(raw.context);
-        if (tail_score_bytes == 0U || tail_score_bytes > required) {
+        if (tail_score_bytes == 0U || a.workspace == nullptr ||
+            a.workspace_bytes < tail_score_bytes) {
             return hipErrorInvalidValue;
         }
-        // The dense consumers are enqueued first on this same stream, so its workspace front can
-        // be reused by the following W1 launches. Overwrite only the final output row, leaving the
-        // 128-row prefix byte-for-byte on the original dense route.
+        // Overwrite only the final output row, leaving the 128-row prefix byte-for-byte on the
+        // dense route.
         auto tail = raw;
         constexpr std::size_t row_elements = kQueryHeads * kHeadDim;
         tail.query += 128U * row_elements;

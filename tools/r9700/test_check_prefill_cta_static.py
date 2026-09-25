@@ -18,30 +18,41 @@ class PrefillCtaStaticTest(unittest.TestCase):
         control = " neg_lo:[1,1,0]" if recipe in ("q4-a4-m64n128", "q4-a4-pingpong") else ""
         controls = ([" neg_lo:[0,1,0]"] * 8 + [" neg_lo:[1,1,0]"] * 8
                     if recipe == "q4-dot8" else
-                    [" neg_lo:[0,1,0]"] * 4 + [" neg_lo:[1,1,0]"] * 4
+                    [" neg_lo:[0,1,0]"] * 32 + [" neg_lo:[1,1,0]"] * 32
                     if recipe == "q4" and not incumbent else [control] * opcode_count)
         opcodes = "\n".join(
             f"\t{profile.opcode} v[0:7], v[8:9], v[10:11], 0{control}"
             for control in controls)
         global_inv = ("\n\tglobal_inv scope:SCOPE_SE"
                       if incumbent and profile.incumbent_global_inv_count else "")
-        prefetch_count = 6 if recipe == "q4" and not incumbent else 0
-        pipeline_prefetch = (("\tglobal_load_b32 v0, v0, s[4:5]\n"
-                              "\tglobal_load_b32 v1, v0, s[6:7]\n"
-                              "\tglobal_load_b64 v[2:3], v1, s[16:17]\n"
-                              "\tglobal_load_d16_b16 v4, v2, s[8:9]\n"
-                              "\tglobal_load_d16_b16 v5, v3, s[18:19]\n") * 2
-                             if prefetch_count else "")
-        pipeline_publish = ("\ts_wait_loadcnt 0x0\n" +
-                            "\tds_store_b32 v0, v1\n" * 3
-                            if prefetch_count else "")
+        pipelined = recipe == "q4" and not incumbent
+        prologue = ("\tglobal_load_d16_b16 v4, v[2:3], off\n"
+                    "\tglobal_load_b128 v[0:3], v0, s[4:5]\n"
+                    "\tglobal_load_b128 v[4:7], v0, s[6:7]\n"
+                    "\tglobal_load_b128 v[8:11], v1, s[16:17]\n"
+                    "\ts_wait_loadcnt 0x0\n\tds_store_b64 v0, v[0:1]\n") if pipelined else ""
+        successor = ("\tglobal_load_b128 v[12:15], v0, s[4:5]\n"
+                     "\tglobal_load_d16_b16 v5, v[2:3], off\n"
+                     "\tglobal_load_b128 v[16:19], v0, s[6:7]\n"
+                     "\tglobal_load_b128 v[20:23], v1, s[16:17]\n") if pipelined else ""
+        half = len(controls) // 2
+        loop_opcodes = "\n".join(
+            f"\t{profile.opcode} v[0:7], v[8:9], v[10:11], 0{control}"
+            for control in controls[:half]) if pipelined else ""
+        publish = ("\n\ts_wait_loadcnt 0x0\n\tds_store_b64 v0, v[12:13]\n"
+                   if pipelined else "")
+        if pipelined:
+            opcodes = "\n".join(
+                f"\t{profile.opcode} v[0:7], v[8:9], v[10:11], 0{control}"
+                for control in controls[half:])
+        pipeline_prefetch = prologue
         barriers_before = "" if recipe == "q4-dot8" else "\ts_barrier_signal -1\n\ts_barrier_wait -1"
         barriers_after = "" if recipe == "q4-dot8" else "\ts_barrier_signal -1\n\ts_barrier_wait -1"
         body = f"""\t.globl {symbol} ; -- Begin function {symbol}
 {symbol}:
-{barriers_before}{global_inv}
-{pipeline_prefetch}{opcodes}
-{pipeline_publish}{barriers_after}{global_inv}
+{pipeline_prefetch}{barriers_before}{global_inv}
+{successor}{loop_opcodes}{publish}{barriers_after}{global_inv}
+{opcodes}
 \t.amdhsa_kernel {symbol}
 \t\t.amdhsa_group_segment_fixed_size {lds}
 \t\t.amdhsa_private_segment_fixed_size 0
@@ -91,22 +102,23 @@ class PrefillCtaStaticTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "zero LDS"):
                 check("q4-dot8", "decode-dot8", assembly, metadata)
 
-    def test_q4_production_is_pingpong_and_single_bank_n128_is_diagnostic(self) -> None:
+    def test_q4_production_is_m128n128_pipeline(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             result = check("q4", "lds-scope", *self.fixture(Path(directory), "q4"))
-            self.assertEqual(result["opcode_count"], 8)
-            self.assertEqual(result["lds_bytes"], 17152)
+            self.assertEqual(result["opcode_count"], 64)
+            self.assertEqual(result["lds_bytes"], 26624)
             self.assertEqual(result["global_inv_count"], 0)
-            self.assertEqual(result["n16_weight_b64_sites"], 2)
-            self.assertEqual(result["scalar_base_load_sites"], 10)
+            self.assertEqual(result["maximum_workgroup_size"], 256)
+            self.assertEqual(result["scalar_base_load_sites"], 6)
 
     def test_q4_production_requires_n16_weight_load_and_signed_plane_topology(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             assembly, metadata = self.fixture(Path(directory), "q4")
             text = assembly.read_text(encoding="utf-8")
-            assembly.write_text(text.replace("global_load_b64", "global_load_b32", 1),
+            assembly.write_text(text.replace("global_load_b128 v[8:11], v1, s[16:17]",
+                                             "global_load_b64 v[8:9], v1, s[16:17]", 1),
                                 encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "N16/K16 weight b64"):
+            with self.assertRaisesRegex(ValueError, "N16/K16 weight b128"):
                 check("q4", "lds-scope", assembly, metadata)
             assembly.write_text(text.replace("neg_lo:[0,1,0]", "neg_lo:[1,1,0]", 1),
                                 encoding="utf-8")
@@ -118,11 +130,11 @@ class PrefillCtaStaticTest(unittest.TestCase):
             assembly, metadata = self.fixture(Path(directory), "q4")
             text = assembly.read_text(encoding="utf-8")
             assembly.write_text(
-                text.replace("global_load_b32 v0, v0, s[4:5]",
-                             "global_load_b32 v0, v[0:1], off", 1),
+                text.replace("global_load_b128 v[0:3], v0, s[4:5]",
+                             "global_load_b128 v[0:3], v[0:1], off", 1),
                 encoding="utf-8",
             )
-            with self.assertRaisesRegex(ValueError, "scalar-base role/order"):
+            with self.assertRaisesRegex(ValueError, "scalar bases with U32 offsets"):
                 check("q4", "lds-scope", assembly, metadata)
 
     def test_accepts_exact_m128n128_challenger(self) -> None:
@@ -191,7 +203,7 @@ class PrefillCtaStaticTest(unittest.TestCase):
     def test_rejects_barrier_and_resource_regressions(self) -> None:
         mutations = (
             ("s_barrier_wait -1", "s_barrier", "signal=2 wait=1", True),
-            (".amdhsa_next_free_vgpr 96", ".amdhsa_next_free_vgpr 97", "exceed", False),
+            (".amdhsa_next_free_vgpr 232", ".amdhsa_next_free_vgpr 233", "exceed", False),
             (".amdhsa_private_segment_fixed_size 0", ".amdhsa_private_segment_fixed_size 4",
              "all must be zero", False),
             (".uses_flat_scratch, 0", ".uses_flat_scratch, 1", "all must be zero", False),

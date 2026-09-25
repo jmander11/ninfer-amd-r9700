@@ -58,7 +58,7 @@ NINFER_R9700_XATTENTION_TAU_PERMILLE=900
 ```
 
 Configure the separate build with the dense build's remaining options explicitly; do not assume
-CMake defaults match its mixed A4/A8 profile. Build `ninfer_bench` and `ninfer-ppl` there, serially,
+CMake defaults match its activation profile. Build `ninfer_bench` and `ninfer-ppl` there, serially,
 with `cmake --build <qualification-build> --parallel 12 --target ninfer_bench ninfer-ppl`.
 This is not a product runtime attention flag and does not promote XAttention.
 
