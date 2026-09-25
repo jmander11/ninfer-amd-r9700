@@ -85,6 +85,38 @@ above apply to every command.
 
 ### Current checkpoint
 
+ACTIVE USER REQUEST (2026-09-25, prefill follow-up; ordered, one heavy host job at a time):
+State: base-prefill campaign committed as `455ff332` (host-load rule) and `276d0926` (uniform A8
+M128xN128 GEMM, fused dense prefill attention, staged GDN). Production C1 prefill 4K 2174, 8K 1976,
+32K 1765, 64K 1514 tok/s. XAttention/Sage-style work stays deferred to a later campaign.
+- [ ] N0 NIAH harness qualification and production baseline. The fused attention and staged GDN
+  have no long-context retrieval evidence yet. First validate the existing tooling
+  (`tools/bench/run_niah_check.py`, `make_niah_positions.py`, `prepare_selected_niah.py`, their
+  tests; prompts `examples/cli/messages/long_niah_{8k,64k,100k,128k,...}_{start,q25,q75,end}.json`)
+  on a short case, confirming exact-answer scoring and that a deliberately wrong answer fails.
+  Then record the current production baseline at 8K/32K/64K/128K x five positions (greedy,
+  C1, dense), with retained commands/outputs under a fresh `profiles/bench/` directory. If the
+  score-panel build (`c2b3d80b`) is needed as a control for any failure, build it separately.
+- [ ] N1 Re-test prefill chunk 4096 vs 2048 on the current build (4K/8K/32K), since the old
+  3.6-4.2% loss predates the new GEMM/attention. Change the default only on a matched win.
+- [ ] N2 Producer fusions before Q4 GEMMs: residual add + RMSNorm + A8 quantize in one pass, and
+  GDN gated RMSNorm + A8 quantize; keep rounding points so outputs stay bit-exact. Target the ~7%
+  of 4K time in quantize/norm/residual kernels.
+- [ ] N3 FP8-Q QK decision (evaluation binaries and speed/PPL in
+  `profiles/bench/r9700-fp8qk-eval-20260925/`: 32K +5.6%, 64K +10.4%, PPL within noise). Research
+  (vLLM FP8 attention on Qwen3.5-27B at scale 1.0 kept MRCR to 1M; failures were FP8 PV/P, not QK)
+  says low risk but PPL is insufficient. Gates, in order: per-layer/head Q range stats on the real
+  checkpoint (max|q|, saturation at 448 must be 0, share below 2^-6); operator error vs FP64 on
+  captured real Q/K from all 16 attention layers (worst head/position); NIAH at 32K/64K/128K
+  x five positions vs the N0 baseline; greedy first-divergence and KL after long prompts; small
+  reasoning spot-check. Fallback on regression: fixed per-head power-of-two Q scales. Promote
+  only with the user's approval, removing the BF16-QK path if adopted.
+- [ ] N4 Larger formulation changes, each measured and qualified before promotion: (a) A8
+  quantizer emitting an int8 plane consumed by an IU8-WMMA GEMM with W4->W8 widened once per CTA
+  (removes the nibble recombine), and/or 256-token tiles to cut weight rereads/energy under the
+  300 W cap; (b) chunked (WY) GDN prefill with split-FP16 precision, qualified against FP64 and
+  PPL since it is not bit-exact; (c) 16-key double-buffered fused attention for long context.
+
 COMPLETED USER REQUEST (2026-09-25, base-prefill compute campaign; XAttention/Sage deferred):
 - [x] Gate/up back to A8 for no prefill speed loss: new M128xN128 A8Q4G64 prefill GEMM
   (token-fastest raster, exact magic-number I32->FP32, bit-exact to the prior A8 kernel,
