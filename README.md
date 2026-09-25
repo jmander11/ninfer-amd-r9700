@@ -78,6 +78,8 @@ the shared host; never use uncapped build parallelism (maximum 14 jobs).
 
 For the native ROCm Docker image, dedicated development container and GPU device
 passthrough commands, see `docs/containers.md`. No NVIDIA container runtime is needed.
+`compose.yaml` defaults to temperature1.5, DFlash,4GiB RAM prefix cache and32GiB
+persistent disk cache; copy `.env.example` to `.env` and set your local paths.
 
 ## Run
 

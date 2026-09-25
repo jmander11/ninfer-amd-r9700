@@ -3,6 +3,7 @@
 .claude
 .codex
 .cortexkit
+.env
 .idea
 .pytest_cache
 .vscode

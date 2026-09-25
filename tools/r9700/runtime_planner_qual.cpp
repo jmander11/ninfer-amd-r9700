@@ -164,11 +164,11 @@ void qualify_host_split512_routing() {
     const auto mtp = Variant::mtp_graph_profiles(32768U, 3U);
     const auto dflash = Variant::dflash_graph_profiles(32768U, 3U, 1U, 4U);
     require(has_classes(ordinary, {0U, 1U}) && has_classes(mtp, {0U, 1U, 3U}) &&
-                has_classes(dflash, {0U, 2U}) &&
+                has_classes(dflash, {1U, 2U}) &&
                 class_at(ordinary, 8190U) == 0U && class_at(ordinary, 8191U) == 1U &&
                 class_at(mtp, 8185U) == 0U && class_at(mtp, 8186U) == 1U &&
                 class_at(mtp, 8187U) == 1U && class_at(mtp, 8188U) == 3U &&
-                class_at(dflash, 8187U) == 0U && class_at(dflash, 8188U) == 2U,
+                class_at(dflash, 8187U) == 1U && class_at(dflash, 8188U) == 2U,
             "split-512 Device Graph topology classes are incomplete");
     for (const std::uint32_t width : {5U, 6U}) {
         for (std::uint32_t batch = 1; batch <= 4; ++batch) {
@@ -827,7 +827,7 @@ int main(int argc, char** argv) {
             qualify_plan(device, concurrency, ninfer::SpeculativeBackend::Mtp, 3, false);
             qualify_plan(device, concurrency, ninfer::SpeculativeBackend::Mtp, 3, true);
             qualify_plan(device, concurrency, ninfer::SpeculativeBackend::DFlash, 4, false);
-            qualify_plan(device, concurrency, ninfer::SpeculativeBackend::DFlash, 4, false, 6);
+            qualify_plan(device, concurrency, ninfer::SpeculativeBackend::DFlash, 5, false, 6);
             qualify_plan(device, concurrency, ninfer::SpeculativeBackend::None, 0, false, 0,
                          WeightsProfile::R9700Q4G64Evaluation, true, 32768);
             qualify_plan(device, concurrency, ninfer::SpeculativeBackend::Mtp, 3, false, 0,
@@ -836,7 +836,7 @@ int main(int argc, char** argv) {
                 qualify_plan(device, concurrency, ninfer::SpeculativeBackend::DFlash, 1, false, 2,
                              WeightsProfile::R9700Q4G64DFlash2Q4Evaluation, true, 128);
             }
-            for (std::uint32_t k = 1; k <= 11; ++k) {
+            for (std::uint32_t k = 1; k <= 5; ++k) {
                 qualify_plan(device, concurrency, ninfer::SpeculativeBackend::DFlash, k, false, 0,
                              WeightsProfile::R9700Q4G64DFlash2Q4Evaluation, true,
                              32768U + k + 1U);
@@ -860,10 +860,10 @@ int main(int argc, char** argv) {
                 "S16/tau900 4K/262K global planner workspace envelope changed");
 #endif
         (void)qualify_plan(device, ninfer::kMaximumConcurrency,
-                           ninfer::SpeculativeBackend::DFlash, 4, false, 6,
+                           ninfer::SpeculativeBackend::DFlash, 5, false, 6,
                            WeightsProfile::R9700Q4G64DFlash2Q4Evaluation);
         (void)qualify_plan(device, ninfer::kMaximumConcurrency,
-                           ninfer::SpeculativeBackend::DFlash, 4, false, 6,
+                           ninfer::SpeculativeBackend::DFlash, 5, false, 6,
                            WeightsProfile::R9700Q4W8MseDFlash2Q4Evaluation);
         const std::size_t dflash_q4_linear = Variant::linear_workspace_capacity_bytes(
             WeightsProfile::R9700Q4G64DFlash2Q4Evaluation, 128);

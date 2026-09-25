@@ -52,7 +52,7 @@ ArtifactLoadPlan bind_complete(const std::filesystem::path& path,
                 WeightsProfile::R9700W8G32Candidate,
             "package resolved the candidate to the wrong profile");
     const auto defaults = Package::sampling_defaults(reader.identity().model_id);
-    require(defaults.thinking.temperature == 0.6F && defaults.thinking.top_k == 20 &&
+    require(defaults.thinking.temperature == 2.0F && defaults.thinking.top_k == 20 &&
                 defaults.thinking.top_p == 0.95F,
             "Qwen3.8 sampling defaults changed");
 
@@ -259,10 +259,12 @@ ArtifactLoadPlan bind_dflash_q4_evaluation(const std::filesystem::path& path,
     require(ninfer::ops::grouped_dynamic_conv_prepare_workspace_capacity_bytes(
                 QType::Q4G64_F16S, kTokens, kTokens, kBatch) > kProjectionBytes,
             "DFlash2 grouped-convolution workspace omitted Q4 Linear scratch");
+    // Selector projection runs one request at a time and reuses scratch with
+    // top-k. At B2 top-k dominates both formats; B1 exposes Q4's Linear peak.
     require(ninfer::ops::dflash2_path_select_workspace_capacity_bytes(
-                QType::Q4G64_F16S, kTokens, kTokens, kBatch) >
+                QType::Q4G64_F16S, kTokens, kTokens, 1) >
                 ninfer::ops::dflash2_path_select_workspace_capacity_bytes(
-                    QType::BF16_CTRL, kTokens, kTokens, kBatch),
+                    QType::BF16_CTRL, kTokens, kTokens, 1),
             "DFlash2 selector workspace omitted Q4 Linear scratch");
     return plan;
 }

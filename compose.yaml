@@ -1,0 +1,70 @@
+name: ninfer-r9700
+
+services:
+  server:
+    image: local/ninfer-r9700:compose
+    build:
+      context: .
+      target: runtime
+      args:
+        NINFER_BUILD_JOBS: ${NINFER_BUILD_JOBS:-4}
+      additional_contexts:
+        rocm: ${NINFER_ROCM_CONTEXT:-/opt/rocm/core-10.0}
+        python311: ${NINFER_PYTHON_CONTEXT:?Set the self-contained Python 3.11 root in .env}
+    devices:
+      - /dev/kfd:/dev/kfd
+      - ${NINFER_DRM_RENDER_NODE:-/dev/dri/renderD128}:${NINFER_DRM_RENDER_NODE:-/dev/dri/renderD128}
+    ports:
+      - "${NINFER_BIND_ADDRESS:-127.0.0.1}:${NINFER_PORT:-8080}:8080"
+    volumes:
+      - type: bind
+        source: ${NINFER_MODELS_DIR:-../models}
+        target: /models
+        read_only: true
+        bind:
+          create_host_path: false
+      - prefix-cache:/cache
+    shm_size: 1gb
+    mem_limit: 24g
+    memswap_limit: 24g
+    ulimits:
+      memlock: {soft: -1, hard: -1}
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 2m
+    command:
+      - ninfer-serve
+      - /models/${NINFER_MODEL:-qwen3.8-27b-r9700-q4-fp8-selective-cap/qwen3.8-27b-r9700-q4-fp8-selective-cap-n16k16-dflash2-q4-eval.ninfer}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --temperature
+      - "1.5"
+      - --max-context
+      - "${NINFER_MAX_CONTEXT:-32768}"
+      - --max-concurrency
+      - "${NINFER_CONCURRENCY:-1}"
+      - --prefill-chunk
+      - "2048"
+      - --kv-capacity
+      - auto
+      - --kv-ram-capacity
+      - "${NINFER_RAM_CACHE_MIB:-4096}"
+      - --kv-disk-capacity
+      - "${NINFER_DISK_CACHE_MIB:-32768}"
+      - --kv-disk-location
+      - /cache/prefix
+      - --spec
+      - dflash
+      - --draft-tokens
+      - "${NINFER_DRAFT_TOKENS:-5}"
+    healthcheck:
+      test: [CMD, curl, --fail, --silent, --show-error, http://127.0.0.1:8080/health]
+      interval: 15s
+      timeout: 5s
+      start_period: 3m
+      retries: 4
+
+volumes:
+  prefix-cache:

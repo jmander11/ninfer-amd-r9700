@@ -1,5 +1,50 @@
 # R9700 containers and test runner
 
+## Compose: server with persistent prefix caching
+
+`compose.yaml` builds this checkout and runs the selected DFlash artifact with
+temperature **1.5**, **4 GiB pinned RAM prefix cache**, **32 GiB disk cache**, chunk
+2048, C1/K5 and a32768-token context limit. Cache sizes are capacities, not upfront
+disk allocations. The named `prefix-cache` volume survives container replacement
+and `docker compose down`; do not use `down --volumes` if you want to preserve it.
+Disk cache is prefix reuse, not active-context offload. RAM contents do not survive
+restart; durable disk entries can be restored for the same model fingerprint.
+Requests may override temperature; p-less sampling remains enabled by default.
+
+```sh
+cp .env.example .env
+# Edit the explicit model, ROCm and self-contained Python paths for your machine.
+docker compose config --quiet
+docker compose build server
+docker compose up -d --no-build server
+docker compose logs -f server
+```
+
+Buildx is required to build, not to run an already-built image. It is Docker's
+BuildKit frontend: it supplies build caching, multi-stage builds and the named
+local ROCm/Python contexts used here. Compose is the separate plugin that manages
+the service's devices, ports, mounts and lifecycle. Both must be installed for
+the complete workflow below.
+
+The image compiles a snapshot of **local working-tree files** using CMake and
+Ninja, not `make`, and copies the resulting apps into the runtime image. It does
+not pull Git, live-mount source, or compile at server startup. After changing or
+pulling source, stop the server, run `docker compose build server`, then
+`docker compose up -d --no-build server`; Docker reuses unchanged build layers.
+Do not overlap image compilation with inference or other heavy jobs.
+
+The default listener is host loopback port8080, with no API key. Change the bind
+address only behind suitable access controls. `.env` can override model path,
+port, context, C1..4, draft count and cache capacities. For the measured workload,
+use K5 at C1–2 and K4 at C3–4. The runtime is bounded to24GiB host RAM with no
+container swap; this limit does not count GPU VRAM. Cache/runtime allocations
+must fit that bound. Existing NVIDIA containers are not modified.
+
+Docker references: https://docs.docker.com/reference/compose-file/build/ and
+https://docs.docker.com/reference/cli/docker/buildx/build/.
+
+## Image prerequisites
+
 The Dockerfile builds only `gfx1201` and the Qwen3.8-27B product. It copies the
 maintainer's self-contained ROCm 10 tree through BuildKit's `rocm` named context,
 and a self-contained Python 3.11 distribution through `python311`. No model or
@@ -64,6 +109,44 @@ the `ninfer_bench` target; its executable is `/build/bench/ninfer_bench`.
 The runtime image contains the three applications, not the benchmark or test tools.
 
 ## Tests
+
+There is a registered CTest suite for host contracts and physical GPU Ops/runtime
+qualifiers, plus separate real-model and live-HTTP checks. No single command proves
+every model/context/precision combination. Run GPU tests only after stopping the
+server and any other GPU owner; never overlap them with builds or model conversion.
+
+```sh
+docker compose stop server
+# Existing native build, rebuilt first; all registered host and GPU CTests, serially:
+bash scripts/run-unit-tests.sh --gpu -- --parallel 1
+# Real-artifact RAM continuation/cancellation (ordinary greedy execution):
+bash scripts/run-unit-tests.sh --real /absolute/path/to/exact-model.ninfer -- --parallel 1
+# Restart/persistence proof requires a fresh directory whose parent already exists:
+build-r9700/src/ninfer_r9700_engine_cache_cancel_qual /absolute/path/to/exact-model.ninfer \
+  --disk-dir /absolute/path/to/new-cache-qualification
+# Start Compose only after the other tests finish, then exercise real HTTP routes:
+docker compose up -d --no-build server
+python3.11 tools/smoke/serve_cache.py --base-url http://127.0.0.1:8080
+```
+
+The HTTP smoke sends Chat, Responses, Anthropic and streaming requests without a
+temperature override, checks generated output and both cache-stat objects, and
+reports cache observations. It does not prove disk restoration; the separate
+restart qualifier explicitly requires a disk hit and cold-output parity.
+
+Validation on2026-09-24: rebuilt native gfx1201 suite86/86 passed, including physical
+GPU tests. Corrected stale qualifier expectations for temperature2.0, K<=5/widthK+1,
+W4 WMMA graph routing and reused selector scratch; engine arithmetic was unchanged.
+The selected17.00GB DFlash artifact served all four HTTP smoke routes using the
+Compose defaults (only host port/cache path differed). Request logs confirm
+temperature1.5, RAM restoration and a12-token disk restore after clean restart.
+The separate ordinary-greedy Engine qualifier passed cancellation/RAM continuation
+and disk restart with38 reused tokens/16 output tokens exact to cold execution.
+Local native request logs are under
+`profiles/bench/r9700-compose-validation-20260924/`.
+Compose configuration validates, but the actual image build/runtime test remains
+pending installation of the missing Docker Buildx plugin. Native results do not
+prove container packaging. Test servers were stopped after validation.
 
 The native runner uses an already configured `build-r9700` with `BUILD_TESTING=ON`;
 `NINFER_BUILD_DIR` changes that explicit path. `--builder` selects the dedicated

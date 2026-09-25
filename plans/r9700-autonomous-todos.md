@@ -85,6 +85,19 @@ above apply to every command.
 
 ### Current checkpoint
 
+ACTIVE USER REQUEST (2026-09-24, Docker Compose deployment):
+- [x] Add AMD Compose runtime, explicit artifact/build contexts, temperature1.5,
+  4GiB RAM/32GiB persistent disk prefix cache, bounded host memory and build jobs.
+- [x] Verify resolved Compose config and native-equivalent server settings:
+  Chat/Responses/Anthropic/SSE, resolved temperature, RAM hit and disk restart hit.
+- [x] Rebuild and run all86 registered host/GPU tests; correct stale qualifier
+  expectations. Real Engine cancellation/RAM and exact-output disk restart pass.
+- [ ] Build and run the actual Compose image after the user installs
+  `docker-buildx-plugin`; `docker buildx version` currently fails. Do not claim
+  container validation from the native results. Resume using `.env.example`,
+  `compose.yaml`, `docs/containers.md` and `tools/smoke/serve_cache.py`.
+No native test server remains running. Older performance/quality campaigns stay paused.
+
 COMPLETED USER REQUEST (2026-09-24, test and retain beneficial candidates):
 - [x] Qualify and time gate/up cross-tile weight reuse at T20; keep only a measured win.
 - [x] Qualify and time adjacent-feature PV reuse; keep only a measured win.

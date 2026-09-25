@@ -8,6 +8,7 @@ cmake-build-*/
 *.a
 compile_commands.json
 CMakeUserPresets.json
+.env
 .cache/
 
 # ROCm profiling artifacts
