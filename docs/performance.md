@@ -100,6 +100,9 @@ Matched whole32K (same C1/chunk2048/K5-loaded prefill-only workload) improves
 659.21→825.07 tok/s (+25.16%), tail382→495,49.71→39.72s. This is an unprofiled
 warmup0/repetition1 screen supported by the qualified rotating-order Op results,
 not a ceiling claim. Reports: `profiles/bench/r9700-wmma-pv-contexts-20260925/`.
+Completed64K confirmation:418.77→576.82 tok/s (+37.74%), tail237→335,
+156.50→113.62s. Relative to the original pre-fix baseline,32K is2.02× faster
+and64K is3.82× faster. The canceled128K whole-model run remains unmeasured.
 
 ## Long-context PV reuse and split tuning (2026-09-25)
 
