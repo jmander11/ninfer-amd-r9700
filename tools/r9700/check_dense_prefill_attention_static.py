@@ -63,8 +63,8 @@ def check(*, assembly: Path, metadata: Path, symbol: str,
     elif full_score_stage == "pv":
         specialization = f"26dense_full_score_pv_kernelILj{value_group}ELb0EE"
     elif full_score_stage == "pv_wmma":
-        if key_splits not in (16, 32):
-            raise ValueError("split PV requires 16 or 32 key splits")
+        if key_splits not in (2, 4, 16, 32):
+            raise ValueError("split PV requires 2, 4, 16 or 32 key splits")
         specialization = f"31dense_full_score_pv_wmma_kernelILj{value_group}ELj{key_splits}EE"
     elif full_score_stage == "pv_merge":
         specialization = "32dense_full_score_pv_merge_kernel"
@@ -178,7 +178,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--metadata", required=True, type=Path)
     parser.add_argument("--symbol", required=True)
     parser.add_argument("--value-group", required=True, type=int, choices=(16, 32))
-    parser.add_argument("--key-splits", type=int, choices=(16, 32), default=16)
+    parser.add_argument("--key-splits", type=int, choices=(2, 4, 16, 32), default=16)
     parser.add_argument("--full-score-stage", required=True,
                         choices=("qk_bk16", "qk_narrow", "qk_wide", "maximum", "pv", "pv_wmma", "pv_merge"))
     return parser.parse_args(argv)

@@ -98,6 +98,11 @@ ACTIVE USER REQUEST (2026-09-25, further long-context optimization):
   retaining16x16 below512 whole rows. Bit-exact complete Op and32K model sidecars;
   G16/G32 FP64/graph/boundary and ISA/audit checks pass. Whole32K825→931 tok/s.
   Commit before investigating score/softmax traffic.
+- [x] Score/probability materialization: reject the bit-exact candidate; complete
+  Op slows8% at32K and13% at64K. Retain raw scores; no production change.
+- [x] Earlier matrix-PV crossover:2 splits from2048,4 from4096, unchanged16/32
+  from12288/32768. G16/G32 FP64/graph/boundary, ISA, C1–4 planner and matched32K
+  PPL pass. Whole8K1305→1490 and32K931→967 tok/s; commit before next mechanism.
 - [ ] Profile the final long-context build, then investigate PV parallelism/reuse,
   QK, and score/softmax traffic one at a time. Each investigation needs a concrete
   measured mechanism; retain exclusions rather than repeating exhausted candidates.

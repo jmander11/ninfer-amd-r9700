@@ -1439,8 +1439,14 @@ hipError_t dense_full_score_pv_dispatch(const Fp8Int4KvAttentionArgs& a, const f
     if (dense_prefill_pv_splits(a.context) == kDensePrefillLongPvSplits)
         return dense_full_score_pv_launch<Group, kDensePrefillLongPvSplits>(
             a, scores, maxima, panel_origin, whole_rows, stream);
-    if (dense_prefill_pv_splits(a.context) > 1U)
+    if (dense_prefill_pv_splits(a.context) == kDensePrefillPvSplits)
         return dense_full_score_pv_launch<Group, kDensePrefillPvSplits>(
+            a, scores, maxima, panel_origin, whole_rows, stream);
+    if (dense_prefill_pv_splits(a.context) == 4U)
+        return dense_full_score_pv_launch<Group, 4U>(
+            a, scores, maxima, panel_origin, whole_rows, stream);
+    if (dense_prefill_pv_splits(a.context) == 2U)
+        return dense_full_score_pv_launch<Group, 2U>(
             a, scores, maxima, panel_origin, whole_rows, stream);
     return dense_full_score_pv_launch<Group, 1U>(
         a, scores, maxima, panel_origin, whole_rows, stream);
@@ -1766,15 +1772,16 @@ std::size_t fp8_int4_kv_attention_dense_prefill_workspace_envelope_bytes(
     // Every exact plane is bounded by both its rectangular envelope and the fixed score budget.
     // At most 2048 query rows fit because context >= query_rows; this also bounds maxima.
     const auto scores = std::min(rows * 24U * context, kDensePrefillScoreElements);
-    const auto maximum_split_rows = (kDensePrefillScoreElements /
-        (24U * kDensePrefillSplitPvMinimumContext)) / 16U * 16U;
-    const auto maximum_long_split_rows = (kDensePrefillScoreElements /
-        (24U * kDensePrefillLongPvMinimumContext)) / 16U * 16U;
-    const auto partial_vectors = context >= kDensePrefillSplitPvMinimumContext
-        ? std::min(rows, maximum_split_rows) * kDensePrefillPvSplits : 0U;
-    const auto long_partial_vectors = context >= kDensePrefillLongPvMinimumContext
-        ? std::min(rows, maximum_long_split_rows) * kDensePrefillLongPvSplits : 0U;
-    const auto partials = std::max(partial_vectors, long_partial_vectors) * 24U * (kHeadDim + 1U);
+    const auto partial_vectors = [rows, context](std::size_t threshold, std::size_t splits) {
+        const auto panel_bound = (kDensePrefillScoreElements / (24U * threshold)) / 16U * 16U;
+        return context >= threshold ? std::min(rows, panel_bound) * splits : 0U;
+    };
+    const auto partials = std::max({
+        partial_vectors(kDensePrefillTwoSplitMinimumContext, 2U),
+        partial_vectors(kDensePrefillFourSplitMinimumContext, 4U),
+        partial_vectors(kDensePrefillSplitPvMinimumContext, kDensePrefillPvSplits),
+        partial_vectors(kDensePrefillLongPvMinimumContext, kDensePrefillLongPvSplits)
+    }) * 24U * (kHeadDim + 1U);
     return (scores + std::min<std::size_t>(rows, 2048U) * 24U + partials) * sizeof(float);
 }
 

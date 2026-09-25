@@ -745,8 +745,9 @@ has fewer than32 rows;
 each tile is shared across the six query heads of one KV
 head and writes FP32 scores. A separate maximum pass validates each causal
 vector; PV forms FP32 probabilities and reuses each direct INT4/FP16-scale V tile across the same
-six heads. At visible context>=12288, PV uses FP16 WMMA with16 query rows,
-128 value features and six waves per block, with16 key splits (32 from context32768),
+six heads. At visible context>=2048, PV uses FP16 WMMA with16 query rows,
+128 value features and six waves per block, with2 key splits,4 from4096,
+16 from12288 and32 from32768,
 then merges FP32 numerator/denominator partials against the common maximum. Below that boundary
 it retains the16-query-row unsplit route. The caller-owned score/max/partial workspace is reused across layers at its planner-stable arena
 address. P<128, tree attention, and other layouts retain their prior routes. Device-active counts
@@ -761,7 +762,7 @@ tools/r9700/build/dense_prefill_attention_qual 1537 12288 16
 ```
 
 It covers G16/G32 initial prefixes, appended 8K/32K contexts, 8192 query rows, partial panels,
-and12K/32K dispatch boundaries,64K/128K/262144 contexts with fragmented physical pages,
+and2K/4K/12K/32K dispatch boundaries,64K/128K/262144 contexts with fragmented physical pages,
 nonperiodic represented inputs and exact stored cache planes.
 Independent FP64 scores are computed once per sampled row/head and validate all 256 output
 features across all four KV heads. It also checks workspace/output canaries, active counts crossing
@@ -769,7 +770,8 @@ panels, invalid whole-call counts, and eager/Device Graph replay after poisoned 
 `dense-prefill-attention-full-score-isa` prints all selected QK kernels plus maximum and PV. Invoke
 `dense-prefill-attention-full-score-static` with the exact selected mangled symbol and
 `DENSE_ATTN_STAGE=qk_bk16`, `qk_narrow`, `qk_wide`, `maximum`, `pv`, `pv_wmma`, or `pv_merge`.
-For split PV select `DENSE_ATTN_KEY_SPLITS=16` or `32` (direct checker: `--key-splits`).
+For split PV select `DENSE_ATTN_KEY_SPLITS=2`, `4`, `16` or `32`
+(direct checker: `--key-splits`).
 The checker requires exactly sixteen
 BF16 WMMAs for16x16,32 for16x32,64 for32x64, and eight FP16 WMMAs for split PV; maximum,
 short scalar PV and merge must not contain WMMA. The emitted
@@ -793,12 +795,13 @@ The full-score route uses a caller-owned reusable FP32 workspace of
 `floor(2048*2048/visible_context/16)*16`, bounding scores at384MiB and maxima at192KiB.
 The minimum number of panels divides the query's16-row tiles evenly; the final tile may
 be partial. `panel_rows` is the largest resulting panel, so a nearly empty final grid is avoided
-without increasing launch count. At context>=12288 add `24*panel_rows*16*257*4` bytes
-for16 partial numerators (256 features) plus denominators; use32 rather than16 from
-context32768. Its maximum is126.4921875MiB;
+without increasing launch count. Add `24*panel_rows*splits*257*4` bytes for split
+numerators (256 features) plus denominators:2 splits from2048,4 from4096,
+16 from12288 and32 from32768. Its maximum is126.4921875MiB;
 the conservative combined score/max/partial envelope is at most510.6796875MiB. The exact query and planner envelope
 both include it; no device allocation occurs inside attention.
-The initial2048-token prefix remains one panel with its original 384.1875 MiB workspace. The planner uses a conservative
+The initial2048-token prefix uses one panel and480.5625MiB including two partials.
+The planner uses a conservative
 envelope bound rather than the exact endpoint size because panel-size rounding introduces a
 sawtooth as context grows. All panels reuse one stable address on the owning stream.
 The wide QK block has384 threads: two sets of six query-head waves share each decoded

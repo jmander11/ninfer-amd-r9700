@@ -60,6 +60,64 @@ expected value exactly.
 Copy bus rate counts both the read and write traffic. This is the hardware bandwidth bound, not a
 model or individual-Op throughput claim.
 
+## Earlier matrix-PV crossover (2026-09-25)
+
+Matrix PV now begins at2048 visible tokens with2 key splits, uses4 from4096,
+16 from12288 and32 from32768. Shorter contexts retain scalar PV. Retuning the
+matrix kernel is necessary because the old scalar cutoff/split count was not its
+best schedule. No weight, Linear activation or cache format changes.
+
+Seven rotating-order warm complete-Op medians,2048 queries, auto:
+
+| Group/context | Previous scalar PV, ms | Selected matrix PV, ms |
+|---|---:|---:|
+|G16/2048|8.62439|6.00138|
+|G16/4096|36.6397|26.5062|
+|G16/8192|76.0053|49.9984|
+|G32/2048|8.60507|5.97431|
+|G32/8192|70.8930|49.2036|
+
+Both128-query appended calls and8192-query initial calls also improve. A separate
+8/16/32/64-split long-context sweep found only a2.4% complete-Op advantage for16
+versus32 at32K, with16 losing at64K; retain the current long-context schedule.
+This is not evidence of a universal optimal split count.
+
+G16/G32 FP64, graph replay, metadata/canary and new2K/4K boundary cases pass.
+The planner's C1–4 checks and envelope maxima immediately around both new cutoffs
+pass. Two/four-split specializations use eight native FP16 WMMA sites,94VGPR,
+13816-byte LDS, wave32 WGP and no scratch/spills. The global maximum workspace
+envelope remains510.6796875MiB; a standalone initial2K call now needs480.5625MiB.
+
+Matched32K WikiText, final512 scored positions: PPL6.506943806327→6.439215091077302,
+mean-NLL delta−0.0104632322, zero new severe positions. This passes the unchanged
+quality gate, but one window does not establish a broad quality improvement.
+Matched whole C1/chunk2048 screens improve8K1305.40→1490.14 tok/s (tail1048→1256)
+and32K930.54→967.01 tok/s (tail617→620,35.21→33.89s). Same installed model,
+cyclic code corpus, warmup0/repetition1 and auto power as the preceding comparisons.
+Whole reports: `profiles/bench/r9700-early-wmma-contexts-20260925/`.
+Evidence: `profiles/bench/r9700-dense-pv-tiles-20260925/wmma-short-splits*`,
+`early-wmma-*`, and `profiles/ppl/r9700-early-wmma-20260925/`.
+
+## Long-context follow-up exclusions and attribution (2026-09-25)
+
+After the QK/PV improvements, the selected-region32K trace attributes34.774s
+of prefill/setup kernel service: PV WMMA16-split19.14%, QK32x64 16.91%,
+short-context scalar PV6.69%, with Q4A8/Q4A4 projections17.23%/15.32%.
+This is attribution, not unprofiled throughput or proof of a hardware ceiling.
+The reproducible command and trace are in
+`profiles/rocprof/r9700-qk-pv-final32k-20260925/`.
+
+Rejected: materialize FP32 probabilities in the maximum pass, then consume them
+in both PV feature blocks instead of computing each exponential twice. Complete
+outputs are bit-exact and pass the independent FP64 oracle, but seven rotating-order
+warm complete-Op medians regress185.221→200.569ms at32K and287.667→326.321ms
+at64K (G16,2048 appended query rows, auto). The extra score writes outweigh saved
+PV arithmetic. Production retains raw FP32 scores and computes probabilities in PV.
+Task-local source and logs: `profiles/bench/r9700-dense-pv-tiles-20260925/`
+(`probability_candidate.hip`, `probability-p32768.log`, `probability-p65536.log`);
+candidate0 is the incumbent and candidate1 materializes probabilities. The legacy
+log field `splits=1` is only a comparison label; actual partitions are32 in both cases.
+
 ## Dense QK key/query reuse (2026-09-25)
 
 For calls with at least512 query rows, production QK now uses32-query/64-key
@@ -106,8 +164,9 @@ Probabilities are formed in FP32, rounded to FP16 for the numerator, and summed
 in FP32 for the denominator. Represented signed-INT4 times stored-FP16-scale
 values are divided by8 before FP16 conversion and restored by8 in FP32 before
 the split merge, preventing finite operand overflow without changing the cache.
-The12K/32K dispatch boundaries, split counts and workspace envelope are unchanged.
-Short-context PV remains scalar FP32. This is an explicitly qualified private
+At this checkpoint the12K/32K dispatch boundaries, split counts and workspace envelope
+were unchanged; the later earlier-crossover section above supersedes the short-context
+selection. This is an explicitly qualified private
 arithmetic change, not bit-exact equivalence or a Linear activation recipe change.
 
 Layer0 mechanism: reduce PV's scalar multiply/accumulate issue cost. Direct BF16,

@@ -238,7 +238,7 @@ void host_predicate_regression() {
     if (kv::fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(127U, 128U) != 0U ||
         kv::fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(8193U, 32768U) != 0U ||
         kv::fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(2048U, 2048U) !=
-            402849792U) {
+            503906304U) {
         fail("full-score workspace capacity contract is incorrect");
     }
     kv::Fp8Int4KvAttentionArgs args{};
@@ -284,7 +284,8 @@ void host_predicate_regression() {
         fail("undersized full-score workspace was accepted");
     }
     for (const auto rows : {128U, 1024U, 2048U, 4096U, 8192U}) {
-        for (const auto maximum : {8192U, 32768U, 262144U}) {
+        for (const auto maximum : {2047U, 2048U, 2049U, 4095U, 4096U, 4097U,
+                                   8192U, 32768U, 262144U}) {
             const auto envelope = kv::fp8_int4_kv_attention_dense_prefill_workspace_envelope_bytes(rows, maximum);
             for (std::uint32_t context = rows; context <= maximum; ++context)
                 if (kv::fp8_int4_kv_attention_dense_prefill_full_score_workspace_bytes(rows, context) > envelope)
@@ -558,6 +559,12 @@ int main(int argc, char** argv) {
             run_case(1025U, group, 32768U);
             run_case(8192U, group, 32768U);
             run_case(128U, group, 262144U);
+            run_case(129U, group, kv::kDensePrefillTwoSplitMinimumContext - 1U);
+            run_case(129U, group, kv::kDensePrefillTwoSplitMinimumContext);
+            run_case(129U, group, kv::kDensePrefillTwoSplitMinimumContext + 1U);
+            run_case(129U, group, kv::kDensePrefillFourSplitMinimumContext - 1U);
+            run_case(129U, group, kv::kDensePrefillFourSplitMinimumContext);
+            run_case(129U, group, kv::kDensePrefillFourSplitMinimumContext + 1U);
             run_case(129U, group, kv::kDensePrefillSplitPvMinimumContext - 1U);
             run_case(1537U, group, kv::kDensePrefillSplitPvMinimumContext);
             run_case(129U, group, kv::kDensePrefillSplitPvMinimumContext + 1U);

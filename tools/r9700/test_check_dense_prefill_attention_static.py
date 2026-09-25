@@ -130,6 +130,8 @@ amdhsa.kernels:
 
     def test_split_pv_and_merge_resources(self) -> None:
         for stage, symbol, key, splits in (
+            ("pv_wmma", "_ZN6ninfer3ops5r97002kv31dense_full_score_pv_wmma_kernelILj16ELj2EEEv", "pv_wmma", 2),
+            ("pv_wmma", "_ZN6ninfer3ops5r97002kv31dense_full_score_pv_wmma_kernelILj16ELj4EEEv", "pv_wmma", 4),
             ("pv_wmma", "_ZN6ninfer3ops5r97002kv31dense_full_score_pv_wmma_kernelILj16ELj16EEEv", "pv_wmma", 16),
             ("pv_wmma", "_ZN6ninfer3ops5r97002kv31dense_full_score_pv_wmma_kernelILj16ELj32EEEv", "pv_wmma", 32),
             ("pv_merge", "_ZN6ninfer3ops5r97002kv32dense_full_score_pv_merge_kernelEv", "pv_merge", 16),

@@ -24,6 +24,8 @@ inline constexpr std::uint32_t kDensePrefillMinimumRows = 128U;
 inline constexpr std::uint32_t kDensePrefillMaximumRows = 8192U;
 inline constexpr std::size_t kDensePrefillMaximumContext = 262144U;
 inline constexpr std::size_t kDensePrefillScoreElements = 24U * 2048U * 2048U;
+inline constexpr std::size_t kDensePrefillTwoSplitMinimumContext = 2048U;
+inline constexpr std::size_t kDensePrefillFourSplitMinimumContext = 4096U;
 inline constexpr std::size_t kDensePrefillSplitPvMinimumContext = 12288U;
 inline constexpr std::uint32_t kDensePrefillPvSplits = 16U;
 inline constexpr std::size_t kDensePrefillLongPvMinimumContext = 32768U;
@@ -31,7 +33,9 @@ inline constexpr std::uint32_t kDensePrefillLongPvSplits = 32U;
 
 [[nodiscard]] constexpr std::uint32_t dense_prefill_pv_splits(std::size_t context) noexcept {
     return context >= kDensePrefillLongPvMinimumContext ? kDensePrefillLongPvSplits :
-        context >= kDensePrefillSplitPvMinimumContext ? kDensePrefillPvSplits : 1U;
+        context >= kDensePrefillSplitPvMinimumContext ? kDensePrefillPvSplits :
+        context >= kDensePrefillFourSplitMinimumContext ? 4U :
+        context >= kDensePrefillTwoSplitMinimumContext ? 2U : 1U;
 }
 
 // Qualification-only Text P129 WMMA tail candidate. Zero retains the dense P129 route; one admits
