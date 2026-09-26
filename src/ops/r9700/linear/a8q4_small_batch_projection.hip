@@ -93,6 +93,9 @@ hipError_t launch_pair(const A8Q4G64LinearArgs& a, const A8Q4G64LinearArgs& b,
 }
 template <unsigned N, unsigned K>
 hipError_t launch_prepared(const A8Q4G64LinearArgs& a, hipStream_t stream) {
+    if constexpr (N==5120 && K==6144) {
+        if(a.tokens==1) return launch_width<N,K,1>(a,stream);
+    }
     if constexpr ((N==34816 && K==5120) || (N==5120 && (K==17408 || K==6144))) {
         switch(a.tokens) {
         case 2: return launch_width<N,K,2>(a,stream);

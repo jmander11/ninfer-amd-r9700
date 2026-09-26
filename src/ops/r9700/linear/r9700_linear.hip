@@ -600,82 +600,6 @@ __global__ __launch_bounds__(kSmallQuantizeThreads) void a8g64_quantize_activati
                         low_codes, high_codes, scale_words);
 }
 
-// One cooperative RMSNorm row followed by eight independent G64 codec waves.
-// The BF16 conversion is the public normalization seam, before the exact codec.
-__global__ __launch_bounds__(kThreads) void a8g64_normalized_prepare_t1_kernel(
-    const hip_bfloat16* input, const hip_bfloat16* norm, float eps, bool unit_offset,
-    std::uint8_t* low_codes, std::uint8_t* high_codes, std::uint16_t* scale_words,
-    std::uint32_t* status) {
-    constexpr std::uint32_t columns = 5120U;
-    constexpr std::uint32_t waves = kThreads / kWaveSize;
-    const std::uint32_t lane = threadIdx.x % kWaveSize;
-    const std::uint32_t wave = threadIdx.x / kWaveSize;
-    float sumsq = 0.0F;
-#pragma unroll
-    for (std::uint32_t column = threadIdx.x; column < columns; column += kThreads) {
-        const float value = static_cast<float>(input[column]);
-        sumsq = fmaf(value, value, sumsq);
-    }
-#pragma unroll
-    for (std::uint32_t width = kWaveSize / 2U; width != 0U; width >>= 1U)
-        sumsq += __shfl_down(sumsq, width, kWaveSize);
-    __shared__ float wave_sums[waves];
-    if (lane == 0U) wave_sums[wave] = sumsq;
-    if (threadIdx.x == 0U) *status = 0U;
-    __syncthreads();
-    if (wave == 0U) {
-        float block_sum = lane < waves ? wave_sums[lane] : 0.0F;
-#pragma unroll
-        for (std::uint32_t width = kWaveSize / 2U; width != 0U; width >>= 1U)
-            block_sum += __shfl_down(block_sum, width, kWaveSize);
-        if (lane == 0U) wave_sums[0] = rsqrtf(block_sum / static_cast<float>(columns) + eps);
-    }
-    __syncthreads();
-    const float inverse = wave_sums[0];
-    for (std::uint32_t group = wave; group < columns / kQ4Group; group += waves) {
-        const std::uint32_t column = group * kQ4Group + lane * 2U;
-        auto normalized = [&](std::uint32_t index) {
-            const float gain = static_cast<float>(norm[index]) + (unit_offset ? 1.0F : 0.0F);
-            float value = static_cast<float>(hip_bfloat16(
-                static_cast<float>(input[index]) * inverse * gain));
-            if (!isfinite(value)) {
-                atomicOr(status, static_cast<std::uint32_t>(Q4G64ActivationNonfinite));
-                value = 0.0F;
-            }
-            return value;
-        };
-        const float value0 = normalized(column);
-        const float value1 = normalized(column + 1U);
-        float maximum = fmaxf(fabsf(value0), fabsf(value1));
-#pragma unroll
-        for (std::uint32_t width = kWaveSize / 2U; width != 0U; width >>= 1U)
-            maximum = fmaxf(maximum, __shfl_down(maximum, width, kWaveSize));
-        std::uint16_t scale_bits = 0U;
-        if (lane == 0U) {
-            if (maximum != 0.0F) {
-                scale_bits = __half_as_ushort(__float2half_rn(maximum / 127.0F));
-                if (scale_bits == 0U) scale_bits = 1U;
-                if (!isfinite(__half2float(__ushort_as_half(scale_bits)))) {
-                    atomicOr(status, static_cast<std::uint32_t>(Q4G64ActivationScaleOverflow));
-                    scale_bits = 0U;
-                }
-            }
-            scale_words[group] = scale_bits;
-        }
-        scale_bits = static_cast<std::uint16_t>(
-            __shfl(static_cast<unsigned>(scale_bits), 0, kWaveSize));
-        const float scale = __half2float(__ushort_as_half(scale_bits));
-        const int code0 = scale != 0.0F ? max(-127, min(127, __float2int_rn(value0 / scale))) : 0;
-        const int code1 = scale != 0.0F ? max(-127, min(127, __float2int_rn(value1 / scale))) : 0;
-        const int low0 = code0 & 0x0f;
-        const int low1 = code1 & 0x0f;
-        const int high0 = (code0 - low0) / 16;
-        const int high1 = (code1 - low1) / 16;
-        low_codes[column / 2U] = static_cast<std::uint8_t>(low0 | (low1 << 4));
-        high_codes[column / 2U] = static_cast<std::uint8_t>((high0 & 0x0f) | ((high1 & 0x0f) << 4));
-    }
-}
-
 // Prefill form of the normalized A8G64 preparation: one wave per K5120 token row. Each lane
 // owns twenty 8-feature vectors (vector v covers features 8(32v+lane)..+7), so eight adjacent
 // lanes hold one G64 group. The FP32 sum of squares is lane-serial then a butterfly; the BF16
@@ -791,28 +715,19 @@ void a8g64_normalized_prepare_prefill_kernel(
 }
 
 // Small-T normalized preparation: one 640-thread CTA per K5120 row (one 16-byte vector per
-// thread) plus one final status CTA. Per-vector FP32 sums of squares go to LDS and wave 0 reduces
-// the row in a fixed order; the same BF16 seam and exact codec as the prefill preparation follow
-// with eight adjacent lanes per G64 group. The status CTA repeats the normalization of every row
-// at once without encoding, publishes the status word with a plain store and clears
-// clear_status, so no reset launch is needed. normalized_rows, when non-null, receives the BF16
-// seam rows; clear_status, when non-null, is another status word the status CTA clears.
+// thread) plus one final status CTA. The row reduction is the eager row-CTA RMSNorm's (per-thread
+// eight-term FMA chain, wave32 xor tree, wave partials summed in wave order), so the BF16 seam
+// equals ops::rmsnorm bit for bit; the exact codec follows with eight adjacent lanes per G64 group.
+// The status CTA repeats the normalization of every row at once without encoding, publishes the
+// status word with a plain store and clears clear_status, so no reset launch is needed.
+// normalized_rows, when non-null, receives the BF16 seam rows; clear_status, when non-null, is
+// another status word the status CTA clears.
 constexpr std::uint32_t kNormalizedSmallRowVectors = kNormalizedPrefillColumns / 8U;
+constexpr std::uint32_t kNormalizedSmallWaves = kNormalizedSmallRowVectors / kWaveSize;
 constexpr std::uint32_t kNormalizedSmallMaximumTokens = 12U;
 
-// Sum of squares of one row from its per-vector partials, in the fixed order of every small route.
-__device__ __forceinline__ float normalized_small_row_sum(const float* partial,
-                                                          std::uint32_t lane) {
-    float sum = 0.0F;
-    for (std::uint32_t index = lane; index < kNormalizedSmallRowVectors; index += kWaveSize)
-        sum += partial[index];
-#pragma unroll
-    for (std::uint32_t width = kWaveSize / 2U; width != 0U; width >>= 1U)
-        sum += __shfl_xor(sum, width, kWaveSize);
-    return sum;
-}
-
-__device__ __forceinline__ float normalized_small_vector_sumsq(uint4 packed) {
+// This thread's wave-reduced sum of squares of its row vector (lane 0 holds the wave partial).
+__device__ __forceinline__ float normalized_small_wave_sumsq(uint4 packed) {
     const std::uint32_t words[4]{packed.x, packed.y, packed.z, packed.w};
     float sumsq = 0.0F;
 #pragma unroll
@@ -822,7 +737,17 @@ __device__ __forceinline__ float normalized_small_vector_sumsq(uint4 packed) {
         sumsq = fmaf(low, low, sumsq);
         sumsq = fmaf(high, high, sumsq);
     }
+#pragma unroll
+    for (std::uint32_t width = kWaveSize / 2U; width != 0U; width >>= 1U)
+        sumsq += __shfl_xor(sumsq, width, kWaveSize);
     return sumsq;
+}
+
+__device__ __forceinline__ float normalized_small_inverse(const float* wave_sums, float eps) {
+    float sum = 0.0F;
+#pragma unroll
+    for (std::uint32_t wave = 0; wave < kNormalizedSmallWaves; ++wave) sum += wave_sums[wave];
+    return rsqrtf(sum / static_cast<float>(kNormalizedPrefillColumns) + eps);
 }
 
 // BF16 seam values of one vector: seam words and their FP32 values (nonfinite kept).
@@ -846,7 +771,7 @@ __global__ __launch_bounds__(kNormalizedSmallRowVectors) void a8g64_normalized_p
     std::uint32_t tokens, std::uint8_t* low_codes, std::uint8_t* high_codes,
     std::uint16_t* scale_words, std::uint32_t* status, hip_bfloat16* normalized_rows,
     std::uint32_t* clear_status) {
-    __shared__ float partial[kNormalizedSmallMaximumTokens][kNormalizedSmallRowVectors];
+    __shared__ float wave_sums[kNormalizedSmallMaximumTokens][kNormalizedSmallWaves];
     __shared__ float inverse[kNormalizedSmallMaximumTokens];
     constexpr std::uint32_t columns = kNormalizedPrefillColumns;
     const std::uint32_t slot = threadIdx.x;
@@ -863,13 +788,13 @@ __global__ __launch_bounds__(kNormalizedSmallRowVectors) void a8g64_normalized_p
                 ? rows[static_cast<std::size_t>(row) * kNormalizedSmallRowVectors + slot]
                 : uint4{};
 #pragma unroll
-        for (std::uint32_t row = 0; row < kNormalizedSmallMaximumTokens; ++row)
-            if (row < tokens) partial[row][slot] = normalized_small_vector_sumsq(loaded[row]);
-        __syncthreads();
-        if (wave < tokens) {
-            const float sum = normalized_small_row_sum(partial[wave], lane);
-            if (lane == 0U) inverse[wave] = rsqrtf(sum / static_cast<float>(columns) + eps);
+        for (std::uint32_t row = 0; row < kNormalizedSmallMaximumTokens; ++row) {
+            const float sumsq = normalized_small_wave_sumsq(loaded[row]);
+            if (row < tokens && lane == 0U) wave_sums[row][wave] = sumsq;
         }
+        __syncthreads();
+        // Thread j reduces row j once; every thread then reads the row's inverse.
+        if (slot < tokens) inverse[slot] = normalized_small_inverse(wave_sums[slot], eps);
         __syncthreads();
         bool nonfinite = false, overflow = false;
 #pragma unroll
@@ -901,16 +826,13 @@ __global__ __launch_bounds__(kNormalizedSmallRowVectors) void a8g64_normalized_p
     const std::uint32_t token = blockIdx.x;
     const std::size_t vector = static_cast<std::size_t>(token) * kNormalizedSmallRowVectors + slot;
     const uint4 loaded = rows[vector];
-    partial[0][slot] = normalized_small_vector_sumsq(loaded);
-    __syncthreads();
-    if (wave == 0U) {
-        const float sum = normalized_small_row_sum(partial[0], lane);
-        if (lane == 0U) inverse[0] = rsqrtf(sum / static_cast<float>(columns) + eps);
-    }
+    const float sumsq = normalized_small_wave_sumsq(loaded);
+    if (lane == 0U) wave_sums[0][wave] = sumsq;
     __syncthreads();
     std::uint32_t seam[4]{};
     float value[8];
-    normalized_small_vector_seam(loaded, gain_words, inverse[0], offset, seam, value);
+    normalized_small_vector_seam(loaded, gain_words, normalized_small_inverse(wave_sums[0], eps),
+                                 offset, seam, value);
     float maximum = 0.0F;
 #pragma unroll
     for (std::uint32_t element = 0; element < 8U; ++element) {
@@ -1580,53 +1502,6 @@ void a8q4g64_linear_decode_dot8_t1_kernel(
 #endif
 }
 
-__global__ __launch_bounds__(kThreads) void a8q4g64_projected_residual_t1_kernel(
-    const std::uint8_t* activation_low, const std::uint8_t* activation_high,
-    const std::uint16_t* activation_scales, const std::uint32_t* activation_status,
-    const std::uint8_t* weight_codes, const std::uint16_t* weight_scales,
-    hip_bfloat16* residual, std::uint32_t columns) {
-#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
-    const std::uint32_t row = blockIdx.x * blockDim.x + threadIdx.x;
-    if (row >= 5120U) return;
-    if (*activation_status != Q4G64ActivationOk) {
-        residual[row] = conspicuous_bf16_nan();
-        return;
-    }
-    const std::uint32_t groups = columns / kQ4Group;
-    float total = 0.0F;
-    for (std::uint32_t group = 0U; group < groups; ++group) {
-        int low_dot = 0;
-        int high_dot = 0;
-#pragma unroll
-        for (std::uint32_t word = 0U; word < 8U; ++word) {
-            const std::size_t element =
-                static_cast<std::size_t>(group) * kQ4Group + word * 8U;
-            const int low = load_q4x8(activation_low, element);
-            const int high = load_q4x8(activation_high, element);
-            const int weight =
-                load_q4_n16k16_x8(weight_codes, row, group, word, groups);
-            low_dot = __builtin_amdgcn_sudot8(false, low, true, weight, low_dot, false);
-            high_dot = __builtin_amdgcn_sudot8(true, high, true, weight, high_dot, false);
-        }
-        const int combined = low_dot + 16 * high_dot;
-        const float activation_scale =
-            __half2float(__ushort_as_half(activation_scales[group]));
-        const float weight_scale = __half2float(__ushort_as_half(
-            weight_scales[q4_n16k16_scale_index(row, group, groups)]));
-        total = fmaf(static_cast<float>(combined),
-                     activation_scale * weight_scale, total);
-    }
-    // This BF16 seam is part of the projected-residual boundary, even though
-    // the intermediate projection never needs a global-memory allocation.
-    const hip_bfloat16 delta = static_cast<hip_bfloat16>(total);
-    residual[row] = hip_bfloat16(static_cast<float>(residual[row]) +
-                                 static_cast<float>(delta));
-#else
-    (void)activation_low; (void)activation_high; (void)activation_scales;
-    (void)activation_status; (void)weight_codes; (void)weight_scales;
-    (void)residual; (void)columns;
-#endif
-}
 
 __global__ __launch_bounds__(kThreads)
 void a8q4g64_projected_residual_down_stage2_kernel(
@@ -4383,10 +4258,8 @@ hipError_t a8q4g64_normalized_linear_t1(
         1U, 34816U, 5120U, 5120U};
     if (!valid_a8q4_linear_args(linear_args)) return hipErrorInvalidValue;
 #if defined(__HIPCC__)
-    hipLaunchKernelGGL(a8g64_normalized_prepare_t1_kernel, dim3(1U), dim3(kThreads), 0,
-                       stream, args.input, norm, eps, unit_offset, workspace.low_codes,
-                       workspace.high_codes, workspace.scales, workspace.status);
-    const hipError_t prepared = hipGetLastError();
+    const hipError_t prepared = launch_normalized_prepare(args.input, norm, eps, unit_offset, 1U,
+                                                          workspace, nullptr, stream);
     if (prepared != hipSuccess) return prepared;
     return a8q4g64_linear_decode_dot8_t1(linear_args, stream);
 #else
@@ -4439,12 +4312,12 @@ hipError_t a8q4g64_projected_residual_t1(
                            args.residual);
         return hipGetLastError();
     }
-    hipLaunchKernelGGL(a8q4g64_projected_residual_t1_kernel,
-                       dim3(5120U / kThreads), dim3(kThreads), 0, stream,
-                       workspace.low_codes, workspace.high_codes, workspace.scales,
-                       workspace.status, args.weight_codes, args.weight_scales,
-                       args.residual, args.columns);
-    return hipGetLastError();
+    return detail::launch_a8q4_small_batch_projection(
+        {workspace.low_codes, workspace.low_code_bytes, workspace.high_codes,
+         workspace.high_code_bytes, workspace.scales, workspace.scale_bytes, workspace.status,
+         args.weight_codes, code_bytes, args.weight_scales, scale_bytes, args.residual, 1U,
+         5120U, 6144U, 6144U, true},
+        stream);
 #else
     (void)stream;
     return hipErrorNotSupported;

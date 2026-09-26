@@ -350,7 +350,7 @@ void cell(unsigned t,hipStream_t s,std::ostream& out) {
         ++cases;
     };
     verify_fixture(true);verify_fixture(false);
-    const auto original=x;x[K+17].data=0x7fc1;input.put(x,s);graphs[0]->run(s);
+    const auto original=x;x[(t>1U?K:0U)+17].data=0x7fc1;input.put(x,s);graphs[0]->run(s);
     for(auto* o:{&candidate}) {
         const auto values=o->value.read(s);
         if(!std::all_of(values.begin(),values.end(),[](auto v){return v.data==0x7fc1;}))fail("poison output/status propagation");
@@ -459,7 +459,7 @@ int main(int argc,char** argv) {
            shape!=std::array<unsigned,2>{1280,5120} &&
            shape!=std::array<unsigned,2>{5120,4096})continue;
         N=shape[0];K=shape[1];G=K/64;
-        for(unsigned t:{2U,3U,4U,5U,6U,10U,12U,15U,18U,20U,24U}) {
+        for(unsigned t:{1U,2U,3U,4U,5U,6U,10U,12U,15U,18U,20U,24U}) {
             if(concurrent_only && t<10)continue;
             if(draft_only && t!=5 && t!=6)continue;
             if(!linear::detail::use_a8q4_small_batch_projection(t,N,K,K))continue;
