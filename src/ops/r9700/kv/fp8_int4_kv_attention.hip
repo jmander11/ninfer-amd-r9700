@@ -615,6 +615,20 @@ struct DensePrefillShared {
     std::size_t table_offset;
 };
 
+// Split verification stages 16-key blocks into two LDS buffers: loaders convert block n + 1 into
+// one while the compute waves consume block n from the other.
+inline constexpr std::uint32_t kDenseVerifyKeys = 16U;
+inline constexpr std::uint32_t kDenseVerifyValuePitch = kDenseVerifyKeys + 8U;
+struct DenseVerifyShared {
+    std::uint16_t keys[2][kDenseVerifyKeys * kDensePrefillKeyPitch];
+    std::uint16_t values[2][kHeadDim * kDenseVerifyValuePitch];
+    std::uint32_t row_context[kDensePrefillRows];
+    std::uint32_t invalid_rows, inactive_rows, maximum_context, page_fault_from;
+    std::uint32_t full_context[6];
+    std::uint32_t block_valid[2];  // the buffer's page is resident
+    std::size_t table_offset;
+};
+
 // Split-context verification: one CTA per KV head and context chunk writes, for every row and
 // query head, its unnormalized FP32 numerator [256], log2-domain Softmax origin and FP32
 // denominator; dense_verify_merge_kernel combines the chunks.
@@ -632,7 +646,8 @@ __device__ __forceinline__ void dense_prefill_barrier() {
 // One CTA's tile setup (thread 0): per-row causal context, invalid/inactive rows, the page-table
 // row, and for every sixteen-lane wave tile the smallest context among its rows (blocks below it
 // need no masking). Packed tiles hold (row, query head) pairs p -> row p / 6.
-__device__ __forceinline__ void dense_attention_setup(DensePrefillShared& shared,
+template <class Shared>
+__device__ __forceinline__ void dense_attention_setup(Shared& shared,
                                                       const Fp8Int4KvAttentionArgs& a,
                                                       std::uint32_t row_base,
                                                       std::uint32_t tile_rows, bool packed) {
@@ -683,9 +698,9 @@ __device__ __forceinline__ void dense_attention_setup(DensePrefillShared& shared
     }
 }
 
-// Loader items of one 32-key block: items 0..255 are one key feature pair over sixteen keys, items
-// 256..383 two value tokens by 32 features. Loads and LDS staging are separate so a loader can
-// hold the next block's raw words in registers while the current block is consumed.
+// Loader items of a Keys-key block: 128 * Keys / 16 key items (one feature pair over sixteen keys)
+// followed by 4 * Keys value items (two tokens by 32 features), numbered separately below. Loads
+// and LDS staging are separate so a loader can hold raw words while a block is consumed.
 struct DenseKeyItem {
     uint2 first[2], second[2];
 };
@@ -711,7 +726,7 @@ __device__ __forceinline__ DenseKeyItem dense_load_key(const Fp8Int4KvAttentionA
 }
 
 // One feature pair over sixteen keys; E4M3FN values are exact in BF16.
-__device__ __forceinline__ void dense_store_key(DensePrefillShared& shared, std::uint32_t loader,
+__device__ __forceinline__ void dense_store_key(std::uint16_t* keys, std::uint32_t loader,
                                                 const DenseKeyItem& item) {
     const std::uint32_t feature = (loader % 128U) * 2U, key_half = loader / 128U;
 #pragma unroll
@@ -733,7 +748,7 @@ __device__ __forceinline__ void dense_store_key(DensePrefillShared& shared, std:
                     const std::uint32_t key =
                         key_half * 16U + part * 8U + word * 4U + pair * 2U + element;
                     *reinterpret_cast<std::uint32_t*>(
-                        &shared.keys[key * kDensePrefillKeyPitch + feature]) =
+                        &keys[key * kDensePrefillKeyPitch + feature]) =
                         (__float_as_uint(even[element]) >> 16U) |
                         (__float_as_uint(odd[element]) & 0xffff0000U);
                 }
@@ -742,13 +757,12 @@ __device__ __forceinline__ void dense_store_key(DensePrefillShared& shared, std:
     }
 }
 
-template <std::uint32_t Group>
+template <std::uint32_t Group, std::uint32_t Keys>
 __device__ __forceinline__ DenseValueItem dense_load_value(const Fp8Int4KvAttentionArgs& a,
-                                                          std::uint32_t loader, std::size_t page,
-                                                          std::size_t in_page,
+                                                          std::uint32_t item_index,
+                                                          std::size_t page, std::size_t in_page,
                                                           std::uint32_t kv_head) {
-    const std::uint32_t item_index = loader - 256U;
-    const std::uint32_t token_pair = item_index % 16U, chunk = item_index / 16U;
+    const std::uint32_t token_pair = item_index % (Keys / 2U), chunk = item_index / (Keys / 2U);
     const std::size_t row = in_page + 2U * token_pair + kPageSize * (kv_head + 4U * page);
     DenseValueItem item;
 #pragma unroll
@@ -768,10 +782,11 @@ __device__ __forceinline__ DenseValueItem dense_load_value(const Fp8Int4KvAttent
 
 // Two tokens by 32 features. A signed nibble n is staged as FP16 1024+(n^8), mapped exactly to
 // n/8 by one FMA, then rounded once by the FP16 scale product.
-__device__ __forceinline__ void dense_store_value(DensePrefillShared& shared, std::uint32_t loader,
+template <std::uint32_t Keys>
+__device__ __forceinline__ void dense_store_value(std::uint16_t* values, std::uint32_t item_index,
                                                   const DenseValueItem& item) {
-    const std::uint32_t item_index = loader - 256U;
-    const std::uint32_t token_pair = item_index % 16U, chunk = item_index / 16U;
+    constexpr std::uint32_t pitch = Keys + 8U;
+    const std::uint32_t token_pair = item_index % (Keys / 2U), chunk = item_index / (Keys / 2U);
 #pragma unroll
     for (std::uint32_t word = 0U; word < 4U; ++word) {
         const std::uint32_t feature = chunk * 32U + word * 8U;
@@ -796,10 +811,9 @@ __device__ __forceinline__ void dense_store_value(DensePrefillShared& shared, st
                 __builtin_bit_cast(DenseF16x2, upper), DenseF16x2{0.125f16, 0.125f16},
                 DenseF16x2{-129.0f16, -129.0f16}) * scale;
             const std::uint32_t target = feature + 2U * byte;
-            *reinterpret_cast<DenseF16x2*>(
-                &shared.values[target * kDensePrefillValuePitch + 2U * token_pair]) = lower_value;
-            *reinterpret_cast<DenseF16x2*>(
-                &shared.values[(target + 1U) * kDensePrefillValuePitch + 2U * token_pair]) =
+            *reinterpret_cast<DenseF16x2*>(&values[target * pitch + 2U * token_pair]) =
+                lower_value;
+            *reinterpret_cast<DenseF16x2*>(&values[(target + 1U) * pitch + 2U * token_pair]) =
                 upper_value;
         }
     }
@@ -825,21 +839,24 @@ __device__ __forceinline__ bool dense_load_query(const Fp8Int4KvAttentionArgs& a
     return nonfinite;
 }
 
-// One staged 32-key block of the online Softmax for this wave's sixteen lane rows: S^T = K Q^T
-// (2 key tiles x 16 feature tiles of BF16 WMMA), masking, the log2-domain origin update, FP16
-// probabilities, and O += P V (16 feature tiles x 2 key tiles of FP16 WMMA).
+// One staged block of 16 * KeyTiles keys of the online Softmax for this wave's sixteen lane rows:
+// S^T = K Q^T (KeyTiles key tiles x 16 feature tiles of BF16 WMMA), masking, the log2-domain origin
+// update, FP16 probabilities, and O += P V (16 feature tiles x KeyTiles key tiles of FP16 WMMA).
+template <std::uint32_t KeyTiles>
 __device__ __forceinline__ void dense_attention_block(
-    const DensePrefillShared& shared, std::uint32_t key_base, bool page_valid,
+    const std::uint16_t* staged_keys, const std::uint16_t* staged_values,
+    std::uint32_t key_base, bool page_valid,
     std::uint32_t full_context, std::uint32_t row_context, std::uint32_t axis,
     std::uint32_t half, float scale_log2, const I16x8 (&query)[16], F32x8 (&numerator)[16],
     float& reference, float& denominator) {
-    F32x8 scores[2] = {F32x8{}, F32x8{}};
+    constexpr std::uint32_t value_pitch = 16U * KeyTiles + 8U;
+    F32x8 scores[KeyTiles] = {};
     if (page_valid) {
 #pragma unroll
         for (std::uint32_t tile_k = 0U; tile_k < 16U; ++tile_k) {
 #pragma unroll
-            for (std::uint32_t key_tile = 0U; key_tile < 2U; ++key_tile) {
-                const I16x8 keys = *reinterpret_cast<const I16x8*>(&shared.keys[
+            for (std::uint32_t key_tile = 0U; key_tile < KeyTiles; ++key_tile) {
+                const I16x8 keys = *reinterpret_cast<const I16x8*>(&staged_keys[
                     (key_tile * 16U + axis) * kDensePrefillKeyPitch + tile_k * 16U + half * 8U]);
                 scores[key_tile] = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(
                     keys, query[tile_k], scores[key_tile]);
@@ -850,16 +867,16 @@ __device__ __forceinline__ void dense_attention_block(
     // Blocks wholly visible to every row with context skip masking. A nonfinite score of
     // such a block reaches the FP32 denominator and poisons its row there.
     float block_maximum = -INFINITY;
-    if (page_valid && key_base + kDensePrefillKeys <= full_context) {
+    if (page_valid && key_base + 16U * KeyTiles <= full_context) {
 #pragma unroll
-        for (std::uint32_t key_tile = 0U; key_tile < 2U; ++key_tile)
+        for (std::uint32_t key_tile = 0U; key_tile < KeyTiles; ++key_tile)
 #pragma unroll
             for (std::uint32_t item = 0U; item < 8U; ++item)
                 block_maximum = fmaxf(block_maximum, scores[key_tile][item]);
     } else {
         bool poisoned = false;
 #pragma unroll
-        for (std::uint32_t key_tile = 0U; key_tile < 2U; ++key_tile) {
+        for (std::uint32_t key_tile = 0U; key_tile < KeyTiles; ++key_tile) {
 #pragma unroll
             for (std::uint32_t item = 0U; item < 8U; ++item) {
                 float score = scores[key_tile][item];
@@ -881,9 +898,9 @@ __device__ __forceinline__ void dense_attention_block(
     const float rescale = raise ? __builtin_amdgcn_exp2f(reference - next) : 1.0F;
     const float origin = next == -INFINITY ? 0.0F : next;
     if (raise) denominator *= rescale;
-    DenseF16x8 probabilities[2];
+    DenseF16x8 probabilities[KeyTiles];
 #pragma unroll
-    for (std::uint32_t key_tile = 0U; key_tile < 2U; ++key_tile) {
+    for (std::uint32_t key_tile = 0U; key_tile < KeyTiles; ++key_tile) {
 #pragma unroll
         for (std::uint32_t item = 0U; item < 8U; item += 2U) {
             const auto packed = __builtin_amdgcn_cvt_pkrtz(
@@ -912,9 +929,9 @@ __device__ __forceinline__ void dense_attention_block(
 #pragma unroll
         for (std::uint32_t tile_f = 0U; tile_f < 16U; ++tile_f) {
 #pragma unroll
-            for (std::uint32_t key_tile = 0U; key_tile < 2U; ++key_tile) {
-                const DenseF16x8 values = *reinterpret_cast<const DenseF16x8*>(&shared.values[
-                    (tile_f * 16U + axis) * kDensePrefillValuePitch + key_tile * 16U + half * 8U]);
+            for (std::uint32_t key_tile = 0U; key_tile < KeyTiles; ++key_tile) {
+                const DenseF16x8 values = *reinterpret_cast<const DenseF16x8*>(&staged_values[
+                    (tile_f * 16U + axis) * value_pitch + key_tile * 16U + half * 8U]);
                 numerator[tile_f] = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12(
                     probabilities[key_tile], values, numerator[tile_f]);
             }
@@ -975,17 +992,20 @@ void dense_prefill_kernel(Fp8Int4KvAttentionArgs a) {
             std::uint32_t loader = tid;
             asm volatile("" : "+v"(loader));
             if (loader < 256U)
-                dense_store_key(shared, loader,
+                dense_store_key(shared.keys, loader,
                                 dense_load_key(a, loader, page, physical_pages, in_page, kv_head));
             else
-                dense_store_value(shared, loader,
-                                  dense_load_value<Group>(a, loader, page, in_page, kv_head));
+                dense_store_value<kDensePrefillKeys>(
+                    shared.values, loader - 256U,
+                    dense_load_value<Group, kDensePrefillKeys>(a, loader - 256U, page, in_page,
+                                                               kv_head));
         }
         dense_prefill_barrier();
         // Phase boundaries bound register live ranges at the 256-VGPR budget.
         __builtin_amdgcn_sched_barrier(0);
-        dense_attention_block(shared, key_base, page_valid, full_context, row_context, axis,
-                              half, scale_log2, query, numerator, reference, denominator);
+        dense_attention_block<2U>(shared.keys, shared.values, key_base, page_valid,
+                                  full_context, row_context, axis, half, scale_log2, query,
+                                  numerator, reference, denominator);
         dense_prefill_barrier();
     }
 
@@ -1016,20 +1036,23 @@ void dense_prefill_kernel(Fp8Int4KvAttentionArgs a) {
 // Split-context DFlash verification (4..6 rows): one CTA per KV head and context chunk of
 // kDenseVerifyThreads. The six query heads' (row, head) pairs are packed densely into sixteen-lane
 // tiles (pair p = 16 * wave + lane row is row p / 6 of query head p % 6), so waves 0..2 compute
-// every pair with the dense-prefill block arithmetic unchanged. Waves 3..5 are loaders: while the
-// compute waves consume block n from LDS they hold block n + 1's raw key/value words in registers
-// and stage them after the next barrier, so global latency overlaps compute.
+// every pair with the dense-prefill block arithmetic over 16-key blocks. Waves 3..5 are loaders
+// that convert block n + 1 into the other LDS buffer while the compute waves consume block n, so
+// staging overlaps compute and each block costs one barrier.
 inline constexpr std::uint32_t kDenseVerifyComputeWaves = 3U;
 inline constexpr std::uint32_t kDenseVerifyThreads = 2U * kDenseVerifyComputeWaves * 32U;
 inline constexpr std::uint32_t kDenseVerifyLoaders = kDenseVerifyComputeWaves * 32U;
+inline constexpr std::uint32_t kDenseVerifyKeyItems = 128U * kDenseVerifyKeys / 16U;
 static_assert(kDenseVerifyComputeWaves * 16U >= 6U * 6U);
-static_assert(4U * kDenseVerifyLoaders == 384U);
+// Two loader items per thread: a key item, then a key (wave 3) or value (waves 4..5) item.
+static_assert(kDenseVerifyKeyItems + 4U * kDenseVerifyKeys == 2U * kDenseVerifyLoaders);
+static_assert(kDenseVerifyKeyItems - kDenseVerifyLoaders == 32U);
 
 template <std::uint32_t Group>
 __global__ __launch_bounds__(kDenseVerifyThreads)
 void dense_verify_kernel(Fp8Int4KvAttentionArgs a, std::uint32_t chunk_keys, float* partial) {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
-    __shared__ DensePrefillShared shared;
+    __shared__ DenseVerifyShared shared;
     const std::uint32_t tid = threadIdx.x, lane = tid % 32U;
     const std::uint32_t wave = __builtin_amdgcn_readfirstlane(tid / 32U);
     const std::uint32_t axis = lane % 16U, half = lane / 16U;
@@ -1048,51 +1071,47 @@ void dense_verify_kernel(Fp8Int4KvAttentionArgs a, std::uint32_t chunk_keys, flo
     const std::uint32_t key_begin = chunk * chunk_keys;
     const std::uint32_t key_end = min(maximum_context, key_begin + chunk_keys);
     const std::uint32_t blocks =
-        key_end > key_begin ? (key_end - key_begin + kDensePrefillKeys - 1U) / kDensePrefillKeys
+        key_end > key_begin ? (key_end - key_begin + kDenseVerifyKeys - 1U) / kDenseVerifyKeys
                             : 0U;
-    const auto block_page = [&](std::uint32_t block) {
-        return a.page_table[table_offset + (key_begin + block * kDensePrefillKeys) / kPageSize];
-    };
 
     if (wave >= kDenseVerifyComputeWaves) {
-        // Loader thread t stages items t, t + 96, t + 192 and t + 288: two key items, then a key
-        // (waves 3..4) or value (wave 5) item, then a value item.
         const std::uint32_t loader = tid - kDenseVerifyLoaders;
-        const bool third_is_key = loader + 2U * kDenseVerifyLoaders < 256U;
-        DenseKeyItem keys[3];
-        DenseValueItem values[2];
-        const auto fetch = [&](std::uint32_t block) {
-            const std::size_t page = block_page(block);
-            if (page >= physical_pages) return false;
-            const std::size_t in_page = (key_begin + block * kDensePrefillKeys) % kPageSize;
-            keys[0] = dense_load_key(a, loader, page, physical_pages, in_page, kv_head);
-            keys[1] = dense_load_key(a, loader + kDenseVerifyLoaders, page, physical_pages,
-                                     in_page, kv_head);
-            if (third_is_key)
-                keys[2] = dense_load_key(a, loader + 2U * kDenseVerifyLoaders, page,
-                                         physical_pages, in_page, kv_head);
-            else
-                values[0] = dense_load_value<Group>(a, loader + 2U * kDenseVerifyLoaders, page,
-                                                    in_page, kv_head);
-            values[1] = dense_load_value<Group>(a, loader + 3U * kDenseVerifyLoaders, page,
-                                                in_page, kv_head);
-            return true;
-        };
-        bool valid = blocks != 0U && fetch(0U);
-        for (std::uint32_t block = 0U; block < blocks; ++block) {
-            dense_prefill_barrier();  // the compute waves are done with the previous block
+        const bool second_is_key = loader + kDenseVerifyLoaders < kDenseVerifyKeyItems;
+        DenseKeyItem keys[2];
+        DenseValueItem value;
+        // Stage block `block` into buffer block % 2: its loads, then the conversion and stores.
+        const auto stage = [&](std::uint32_t block) {
+            const std::uint32_t buffer = block % 2U;
+            const std::uint32_t key_base = key_begin + block * kDenseVerifyKeys;
+            const std::size_t page = a.page_table[table_offset + key_base / kPageSize];
+            const bool valid = page < physical_pages;
             if (valid) {
-                dense_store_key(shared, loader, keys[0]);
-                dense_store_key(shared, loader + kDenseVerifyLoaders, keys[1]);
-                if (third_is_key) dense_store_key(shared, loader + 2U * kDenseVerifyLoaders, keys[2]);
-                else dense_store_value(shared, loader + 2U * kDenseVerifyLoaders, values[0]);
-                dense_store_value(shared, loader + 3U * kDenseVerifyLoaders, values[1]);
+                const std::size_t in_page = key_base % kPageSize;
+                keys[0] = dense_load_key(a, loader, page, physical_pages, in_page, kv_head);
+                if (second_is_key)
+                    keys[1] = dense_load_key(a, loader + kDenseVerifyLoaders, page,
+                                             physical_pages, in_page, kv_head);
+                else
+                    value = dense_load_value<Group, kDenseVerifyKeys>(
+                        a, loader + kDenseVerifyLoaders - kDenseVerifyKeyItems, page, in_page,
+                        kv_head);
+                dense_store_key(shared.keys[buffer], loader, keys[0]);
+                if (second_is_key)
+                    dense_store_key(shared.keys[buffer], loader + kDenseVerifyLoaders, keys[1]);
+                else
+                    dense_store_value<kDenseVerifyKeys>(
+                        shared.values[buffer],
+                        loader + kDenseVerifyLoaders - kDenseVerifyKeyItems, value);
             } else if (loader == 0U) {
-                shared.page_fault_from =
-                    min(shared.page_fault_from, key_begin + block * kDensePrefillKeys);
+                shared.page_fault_from = min(shared.page_fault_from, key_base);
             }
-            dense_prefill_barrier();  // this block is staged
-            if (block + 1U < blocks) valid = fetch(block + 1U);
+            if (loader == 0U) shared.block_valid[buffer] = valid ? 1U : 0U;
+        };
+        if (blocks != 0U) stage(0U);
+        for (std::uint32_t block = 0U; block < blocks; ++block) {
+            // Block `block` is staged; the compute waves are done with block - 1's buffer.
+            dense_prefill_barrier();
+            if (block + 1U < blocks) stage(block + 1U);
         }
         return;
     }
@@ -1115,14 +1134,16 @@ void dense_verify_kernel(Fp8Int4KvAttentionArgs a, std::uint32_t chunk_keys, flo
     const float scale_log2 = a.attention_scale * 1.4426950408889634F;
     for (std::uint32_t block = 0U; block < blocks; ++block) {
         dense_prefill_barrier();
-        dense_prefill_barrier();
         __builtin_amdgcn_sched_barrier(0);
+        const std::uint32_t buffer = block % 2U;
         if (computes)
-            dense_attention_block(shared, key_begin + block * kDensePrefillKeys,
-                                  block_page(block) < physical_pages, full_context, row_context,
-                                  axis, half, scale_log2, query, numerator, reference,
-                                  denominator);
+            dense_attention_block<1U>(shared.keys[buffer], shared.values[buffer],
+                                      key_begin + block * kDenseVerifyKeys,
+                                      shared.block_valid[buffer] != 0U, full_context, row_context,
+                                      axis, half, scale_log2, query, numerator, reference,
+                                      denominator);
     }
+    // The loaders' page faults are complete: their last stores preceded the final barrier.
     if (!computes) return;
 
     const float row_denominator = denominator + __shfl_xor(denominator, 16, 32);
@@ -1176,18 +1197,30 @@ void dense_verify_merge_kernel(Fp8Int4KvAttentionArgs a, std::uint32_t chunks,
         return partial + ((static_cast<std::size_t>(chunk) * a.query_rows + row) * 24U + head) *
                              kDenseVerifyPartialStride;
     };
+    // Chunk origins and denominators are read once, in parallel; each chunk's weight is formed
+    // once. Every thread then accumulates in ascending chunk order exactly as a serial merge.
+    __shared__ float origins[kDenseVerifyMaximumChunks], denominators[kDenseVerifyMaximumChunks];
+    __shared__ float weights[kDenseVerifyMaximumChunks];
+    if (feature < chunks) {
+        origins[feature] = slot(feature)[kHeadDim];
+        denominators[feature] = slot(feature)[kHeadDim + 1U];
+    }
+    __syncthreads();
     float origin = -INFINITY;
-    for (std::uint32_t chunk = 0U; chunk < chunks; ++chunk)
-        origin = fmaxf(origin, slot(chunk)[kHeadDim]);
+    for (std::uint32_t chunk = 0U; chunk < chunks; ++chunk) origin = fmaxf(origin, origins[chunk]);
+    if (feature < chunks) {
+        weights[feature] = origins[feature] == -INFINITY
+            ? 0.0F : __builtin_amdgcn_exp2f(origins[feature] - origin);
+    }
+    __syncthreads();
     float numerator = 0.0F, denominator = 0.0F;
+#pragma unroll 8
     for (std::uint32_t chunk = 0U; chunk < chunks; ++chunk) {
-        const float* values = slot(chunk);
-        const float weight = values[kHeadDim] == -INFINITY
-            ? 0.0F : __builtin_amdgcn_exp2f(values[kHeadDim] - origin);
+        const float weight = weights[chunk];
         // A NaN denominator (invalid row, poisoned score or page fault) poisons the row.
-        denominator = values[kHeadDim + 1U] != values[kHeadDim + 1U]
-            ? __builtin_nanf("") : fmaf(values[kHeadDim + 1U], weight, denominator);
-        numerator = fmaf(values[feature], weight, numerator);
+        denominator = denominators[chunk] != denominators[chunk]
+            ? __builtin_nanf("") : fmaf(denominators[chunk], weight, denominator);
+        numerator = fmaf(slot(chunk)[feature], weight, numerator);
     }
     *output = numerator * (8.0F / denominator);
 }

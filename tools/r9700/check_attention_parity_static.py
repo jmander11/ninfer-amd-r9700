@@ -60,11 +60,11 @@ def main() -> int:
     parser.add_argument("assembly", type=Path)
     args = parser.parse_args()
     text = args.assembly.read_text(encoding="utf-8")
-    # DFlash split-context verification: the packed, warp-specialized dense verify kernel (three
-    # compute and three loader waves) and its merge.
+    # DFlash split-context verification: the packed, warp-specialized, double-buffered dense verify
+    # kernel (three compute and three loader waves, 16-key blocks) and its merge.
     expected = {
-        "dense_verify_kernelILj16EE": ((37552, 0, 107, 246, 8, 32, 1024), 5),
-        "dense_verify_merge_kernel": ((0, 0, 18, 8, 0, 32, 1024), 16),
+        "dense_verify_kernelILj16EE": ((41656, 0, 107, 234, 10, 32, 1024), 5),
+        "dense_verify_merge_kernel": ((768, 0, 28, 29, 0, 32, 1024), 16),
     }
     for symbol, (wanted, wanted_occupancy) in expected.items():
         actual = resources(text, symbol)
@@ -72,9 +72,9 @@ def main() -> int:
         require(occupancy(text, symbol) == wanted_occupancy,
                 f"{symbol} occupancy is not {wanted_occupancy}")
     body = section(text, "dense_verify_kernelILj16EE")
-    require(body.count("v_wmma_f32_16x16x16_bf16") == 32 and
-            body.count("v_wmma_f32_16x16x16_f16") == 32,
-            "split verify kernel lost its 32 BF16 QK and 32 FP16 PV WMMAs")
+    require(body.count("v_wmma_f32_16x16x16_bf16") == 16 and
+            body.count("v_wmma_f32_16x16x16_f16") == 16,
+            "split verify kernel lost its 16 BF16 QK and 16 FP16 PV WMMAs")
     print("attention parity gfx1201 static checks: PASS")
     return 0
 

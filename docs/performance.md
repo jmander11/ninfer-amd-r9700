@@ -60,6 +60,30 @@ expected value exactly.
 Copy bus rate counts both the read and write traffic. This is the hardware bandwidth bound, not a
 model or individual-Op throughput claim.
 
+## DFlash verify attention: double-buffered 16-key blocks (2026-09-26, second batch)
+
+Thread trace (`rocprofv3 --att`, available on gfx1201 with the installed decoder) of the 64K verify
+kernel: the compute waves spent 50% of their time at barriers waiting for the loaders' K/V
+conversion and 32% on LDS latency, WMMA 13%. Deeper register prefetch, 16-byte staging loads and
+page-table pipelining changed nothing, because staging could not overlap compute in one LDS buffer.
+Verification now stages 16-key blocks into two buffers (41.7 KB, still three CTAs per WGP): loaders
+convert block n+1 while the compute waves consume block n, with one barrier per block. The merge
+reads chunk origins/denominators once in parallel (same summation order).
+
+| Context | Verify+merge before, µs (microbenchmark) | After |
+|---|---:|---:|
+| 4K | 51.6 | 39.5 |
+| 16K | 136 | 111 |
+| 64K | 384 | 302 |
+| 128K | 703 | 544 |
+
+In-model at 64K the verify kernel is 312 -> 248 µs and the merge 22 -> 10 µs per layer; P65536/G256
+measures 37.2 ms/round (38.7 before). The softmax origin-raise schedule now advances per 16 keys,
+so greedy tokens can differ on near-ties; the FP64 leaf and route discriminators pass. Templating the
+shared block routine also changed the dense prefill kernel's code generation (same arithmetic,
+identical leaf-qualifier errors): 64K prefill attention fell from 12.4 to 9.2 s, and whole prefill
+measured 4K 2384, 32K 2086 (2004), 64K 1810 (1681) tok/s.
+
 ## DFlash decode: fewer launches, packed verify attention (2026-09-26)
 
 Same setup. Round time is the comparable metric: the gated-RMSNorm seam change below alters the
