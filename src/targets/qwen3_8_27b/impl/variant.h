@@ -164,6 +164,17 @@ struct Variant {
         [[nodiscard]] bool attention_fp8_gated_output(
             const Tensor& gate, const Tensor& attention_fp32, const Weight& weight,
             Tensor& residual, std::int32_t text_layer, hipStream_t stream);
+        // Q4 forms at the split small-batch pair widths (T5/T6) and small-batch output widths:
+        // the input RMSNorm feeds the A8G64 codec and the pair publishes query/key and
+        // gate/value directly; the output gate feeds the codec and the projection is added to
+        // the residual in the epilogue.
+        [[nodiscard]] bool attention_q4_normalized_split(
+            const Tensor& residual, const Tensor& norm, float eps, const Weight& query_key,
+            const Weight& gate_value, Tensor& query, Tensor& key, Tensor& gate, Tensor& value,
+            hipStream_t stream);
+        [[nodiscard]] bool attention_q4_gated_output(
+            const Tensor& gate, const Tensor& attention_fp32, const Weight& weight,
+            Tensor& residual, hipStream_t stream);
         [[nodiscard]] bool projected_residual_t1(
             const Tensor& input, const Weight& weight, Tensor& residual,
             qwen3::TextPhase phase, bool ordinary_decode, hipStream_t stream);

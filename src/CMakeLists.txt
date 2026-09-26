@@ -805,12 +805,12 @@ ninfer_r9700_internal_includes(ninfer_r9700_gdn_normalized_front_qual)
 set_target_properties(ninfer_r9700_gdn_normalized_front_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
 target_link_libraries(ninfer_r9700_gdn_normalized_front_qual PRIVATE ninfer_r9700_core hip::host)
 
-# Qualify the fused small-width FP8 attention input/output boundaries.
-add_executable(ninfer_r9700_fp8_attention_fused_qual
-  ${PROJECT_SOURCE_DIR}/tools/r9700/fp8_attention_fused_qual.hip)
-ninfer_r9700_internal_includes(ninfer_r9700_fp8_attention_fused_qual)
-set_target_properties(ninfer_r9700_fp8_attention_fused_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
-target_link_libraries(ninfer_r9700_fp8_attention_fused_qual PRIVATE ninfer_r9700_core hip::host)
+# Qualify the fused small-width FP8 and Q4 attention input/output boundaries.
+add_executable(ninfer_r9700_attention_fused_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/attention_fused_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_attention_fused_qual)
+set_target_properties(ninfer_r9700_attention_fused_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_attention_fused_qual PRIVATE ninfer_r9700_core hip::host)
 
 # Qualify the fused one-sequence GDN pair projection + recorded convolution.
 add_executable(ninfer_r9700_gdn_pair_conv_record_qual

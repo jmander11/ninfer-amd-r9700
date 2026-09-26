@@ -292,6 +292,10 @@ struct A8Q4G64SharedProjection {
     std::size_t weight_scale_bytes = 0;
     hip_bfloat16* output = nullptr;
     std::uint32_t rows = 0;
+    // Nonzero: rows [0,split) publish to `output` [T,split] and rows [split,rows) to `trailing`
+    // [T,rows-split]. Only the split small-batch pair admits it (both projections split).
+    std::uint32_t split = 0;
+    hip_bfloat16* trailing = nullptr;
 };
 inline constexpr std::uint32_t kA8Q4G64MaximumSharedProjections = 3;
 struct A8Q4G64SharedActivationArgs {
@@ -314,7 +318,8 @@ struct A8Q4G64SharedActivationArgs {
 // Normalized form of the shared projections at K5120: one pass computes the RMSNorm
 // BF16(x * rsqrt(mean(x^2) + eps) * (norm + unit_offset)), publishes those BF16 rows to
 // `normalized` [T,5120] and quantizes the same values into the A8G64 planes every GEMM reads.
-// input, norm and normalized are 16-byte aligned and pairwise disjoint from every output.
+// input, norm and normalized are 16-byte aligned and pairwise disjoint from every output; a null
+// `normalized` publishes no rows.
 // With `side`, the last projection runs on side->stream after `fork` is recorded on `stream`,
 // and `join` is recorded on side->stream after it; the caller orders its later work after
 // `join` before reading that output or reusing the activation workspace.
@@ -336,6 +341,26 @@ struct A8Q4G64SideProjection {
 // 16-byte slot and the small-batch projection; prefill T is a positive multiple of 128 inside the
 // qualified M128 inventory. input/gate/norm are 16-byte aligned.
 [[nodiscard]] bool a8q4g64_gated_normalized_linear_supported(std::uint32_t tokens) noexcept;
+
+// Attention output boundary at small-batch widths: the output gate
+// BF16(BF16(attention) / (1 + exp(-gate))) of FP32 attention and BF16 gate [T,6144] feeds the
+// A8G64 codec (status from one extra CTA, no reset launch), and the N5120/K6144 projection is
+// published as BF16(residual + BF16(projection)) in place.
+struct A8Q4G64GatedOutputArgs {
+    const hip_bfloat16* gate = nullptr;
+    const float* attention = nullptr;
+    const std::uint8_t* weight_codes = nullptr;
+    std::size_t weight_code_bytes = 0;
+    const std::uint16_t* weight_scales = nullptr;
+    std::size_t weight_scale_bytes = 0;
+    void* activation_workspace = nullptr;
+    std::size_t activation_workspace_bytes = 0;
+    hip_bfloat16* residual = nullptr;
+    std::uint32_t tokens = 0;
+};
+[[nodiscard]] bool a8q4g64_gated_output_supported(std::uint32_t tokens) noexcept;
+[[nodiscard]] hipError_t a8q4g64_gated_output(const A8Q4G64GatedOutputArgs& args,
+                                              hipStream_t stream) noexcept;
 // status_cleared: the caller already zeroed, on this stream after its last use, the status word
 // the workspace binds for (tokens, 6144); the small route then skips its reset launch.
 [[nodiscard]] hipError_t a8q4g64_gated_normalized_linear(

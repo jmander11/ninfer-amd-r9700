@@ -48,5 +48,21 @@ namespace detail {
 [[nodiscard]] hipError_t launch_a8q4_small_batch_projection_pair(
     const A8Q4G64LinearArgs& first, const A8Q4G64LinearArgs& second,
     hipStream_t stream) noexcept;
+// The attention pair (two N7168/K5120 matrices) at T5/T6 with each matrix's rows split at
+// `split`: rows [0,split) publish to its leading [T,split] and the rest to its trailing
+// [T,7168-split] output, the values the unsplit pair would store.
+struct A8Q4PairSplitOutputs {
+    hip_bfloat16* first_leading = nullptr;
+    hip_bfloat16* first_trailing = nullptr;
+    hip_bfloat16* second_leading = nullptr;
+    hip_bfloat16* second_trailing = nullptr;
+    std::uint32_t split = 0;
+};
+[[nodiscard]] bool use_a8q4_small_batch_projection_pair_split(
+    const A8Q4G64LinearArgs& first, const A8Q4G64LinearArgs& second,
+    std::uint32_t split) noexcept;
+[[nodiscard]] hipError_t launch_a8q4_small_batch_projection_pair_split(
+    const A8Q4G64LinearArgs& first, const A8Q4G64LinearArgs& second,
+    const A8Q4PairSplitOutputs& outputs, hipStream_t stream) noexcept;
 }
 }

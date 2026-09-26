@@ -76,6 +76,29 @@ hipError_t launch_pair_width(const A8Q4G64LinearArgs& a, const A8Q4G64LinearArgs
                        b.weight_codes, b.weight_scales, b.output);
     return hipGetLastError();
 }
+// The same pair at T <= 8 over two equal N-row matrices whose rows are split at `split`: each
+// row's BF16 values go to its leading [T,split] or trailing [T,N-split] output.
+template <unsigned N, unsigned K, unsigned T>
+__global__ __launch_bounds__(32 * kPairSplit) void small_batch_projection_pair_split_kernel(
+    const std::uint8_t* low, const std::uint8_t* high, const std::uint16_t* scales,
+    const std::uint32_t* status, const std::uint8_t* codes0, const std::uint16_t* scales0,
+    const std::uint8_t* codes1, const std::uint16_t* scales1,
+    detail::A8Q4PairSplitOutputs outputs) {
+    const bool second = blockIdx.x >= N / 16;
+    hip_bfloat16* leading = second ? outputs.second_leading : outputs.first_leading;
+    hip_bfloat16* trailing = second ? outputs.second_trailing : outputs.first_trailing;
+    const unsigned split = outputs.split;
+    detail::a8q4_pipeline_rows<K,T,kPairSplit>(
+        low,high,scales,status,second ? codes1 : codes0,second ? scales1 : scales0,
+        second ? blockIdx.x - N / 16 : blockIdx.x,
+        [&](unsigned row,const hip_bfloat16 (&values)[T]) {
+#pragma unroll
+            for (unsigned t = 0; t < T; ++t) {
+                if (row < split) leading[t * split + row] = values[t];
+                else trailing[t * (N - split) + row - split] = values[t];
+            }
+        });
+}
 template <unsigned N0, unsigned N1, unsigned K>
 hipError_t launch_pair(const A8Q4G64LinearArgs& a, const A8Q4G64LinearArgs& b,
                        hipStream_t stream) {
@@ -152,6 +175,31 @@ hipError_t detail::launch_a8q4_small_batch_projection_pair(
     if (!use_a8q4_small_batch_projection_pair(a, b)) return hipErrorInvalidValue;
     if (a.rows == 4096U) return launch_pair<4096,12288,5120>(a,b,stream);
     return launch_pair<7168,7168,5120>(a,b,stream);
+}
+
+bool detail::use_a8q4_small_batch_projection_pair_split(const A8Q4G64LinearArgs& a,
+                                                        const A8Q4G64LinearArgs& b,
+                                                        std::uint32_t split) noexcept {
+    return use_a8q4_small_batch_projection_pair(a, b) && a.rows == 7168U &&
+           (a.tokens == 5U || a.tokens == 6U) && split != 0U && split < a.rows;
+}
+
+hipError_t detail::launch_a8q4_small_batch_projection_pair_split(
+    const A8Q4G64LinearArgs& a, const A8Q4G64LinearArgs& b, const A8Q4PairSplitOutputs& outputs,
+    hipStream_t stream) noexcept {
+    if (!use_a8q4_small_batch_projection_pair_split(a, b, outputs.split) ||
+        outputs.first_leading == nullptr || outputs.first_trailing == nullptr ||
+        outputs.second_leading == nullptr || outputs.second_trailing == nullptr)
+        return hipErrorInvalidValue;
+    const auto launch = [&](auto kernel) {
+        hipLaunchKernelGGL(kernel, dim3(2U * 7168U / 16U), dim3(32U * kPairSplit), 0, stream,
+                           a.activation_low_codes, a.activation_high_codes, a.activation_scales,
+                           a.activation_status, a.weight_codes, a.weight_scales, b.weight_codes,
+                           b.weight_scales, outputs);
+        return hipGetLastError();
+    };
+    return a.tokens == 5U ? launch(small_batch_projection_pair_split_kernel<7168,5120,5>)
+                          : launch(small_batch_projection_pair_split_kernel<7168,5120,6>);
 }
 
 hipError_t detail::launch_a8q4_small_batch_projection(
