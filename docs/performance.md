@@ -60,6 +60,14 @@ expected value exactly.
 Copy bus rate counts both the read and write traffic. This is the hardware bandwidth bound, not a
 model or individual-Op throughput claim.
 
+## Paired small-batch projections (2026-09-26)
+
+Deeper per-wave prefetch (two or three G64 groups) did not move the narrow projections (N5120/K6144
+72%, N12288 84% in isolation): each launch pays a fixed ramp and tail. The GDN query-key/value-z
+(N4096+N12288) and the Q4 attention (N7168+N7168) projections of one prepared activation now run as
+one launch (qualified against the public FP64 bound at T5/6/12). 4K DFlash 33.65 -> 33.36 ms/round;
+dispatches per round 1,232 -> 1,146.
+
 ## Fused Q/K normalization and RoPE (2026-09-26)
 
 `ops::qk_norm_rope` replaces the two Q/K RMSNorms and RoPE of every full-attention layer (three

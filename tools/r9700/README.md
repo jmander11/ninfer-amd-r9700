@@ -181,7 +181,11 @@ over contiguous K ranges, one per wave of a K-split CTA (4 waves; 8 at N5120/K40
 N1280, 1 at N12288), whose partials wave zero adds in wave order before one BF16 RNE cast;
 the chain-plus-combine depth never exceeds `G`, so this finite, non-underflowing profile
 justifies the same bound. The generic WMMA control is checked against the same oracle but is
-no longer a bitwise reference. Codec, exact eager/graph, poison, guard and deliberate
+no longer a bitwise reference. Two projections of one prepared K5120 activation (the GDN
+query-key/value-z pair N4096+N12288 and the attention query-key/gate-value pair N7168+N7168) run
+as one launch with four-way K-split CTAs per 16-row tile; the qualifier's `pairs` section checks
+both outputs of each pair at T5/6/12 against the same public FP64 bound through the
+shared-activation Op. Codec, exact eager/graph, poison, guard and deliberate
 output-corruption checks remain mandatory. This is not a bound on model-quality loss: PPL admission
 remains separate and no production precision changes.
 

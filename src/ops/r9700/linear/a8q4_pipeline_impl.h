@@ -66,17 +66,18 @@ __device__ __forceinline__ void consume_pipeline_group(
 }
 
 // Accumulate publishes BF16(output + BF16(projection)) in place (projected-residual boundary).
-// Split waves of one CTA own contiguous ascending G64 ranges of the same 16 rows; wave zero
-// adds the later partial sums in ascending wave order before the single BF16 publication.
+// Split waves of one CTA own contiguous ascending G64 ranges of the same 16 rows (row tile
+// `tile`); wave zero adds the later partial sums in ascending wave order before the single BF16
+// publication.
 template<unsigned N,unsigned K,unsigned T,bool Accumulate=false,unsigned Split=1>
 __device__ __forceinline__ void a8q4_pipeline_body(
     const std::uint8_t* low,const std::uint8_t* high,const std::uint16_t* scales,
     const std::uint32_t* status,const std::uint8_t* codes,
-    const std::uint16_t* weight_scales,hip_bfloat16* output) {
+    const std::uint16_t* weight_scales,hip_bfloat16* output,unsigned tile) {
     constexpr unsigned G=K/64;
     static_assert(Split>=1 && G%Split==0 && G/Split>=2);
     constexpr unsigned Width=T<=8?T:8,Groups=G/Split;
-    const unsigned lane=threadIdx.x&31U,wave=threadIdx.x>>5U,row=blockIdx.x*16+(lane&15U);
+    const unsigned lane=threadIdx.x&31U,wave=threadIdx.x>>5U,row=tile*16+(lane&15U);
     const unsigned token_base=T>8?blockIdx.y*16U+(lane>>4U)*8U:0U;
     if(*status!=0) {
         if(wave!=0)return;

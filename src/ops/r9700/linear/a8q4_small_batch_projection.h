@@ -39,5 +39,14 @@ namespace detail {
 // No second quantization, stream query, workspace binding or allocation.
 [[nodiscard]] hipError_t launch_a8q4_small_batch_projection(
     const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept;
+// Two non-accumulating small-batch projections of the same prepared K5120 activation in one
+// launch (the GDN query-key/value-z and the attention query-key/gate-value pairs), with the
+// per-output arithmetic of the split small-batch route. The predicate requires identical
+// activation planes and widths; the launcher requires it.
+[[nodiscard]] bool use_a8q4_small_batch_projection_pair(
+    const A8Q4G64LinearArgs& first, const A8Q4G64LinearArgs& second) noexcept;
+[[nodiscard]] hipError_t launch_a8q4_small_batch_projection_pair(
+    const A8Q4G64LinearArgs& first, const A8Q4G64LinearArgs& second,
+    hipStream_t stream) noexcept;
 }
 }

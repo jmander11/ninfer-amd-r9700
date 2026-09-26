@@ -4212,6 +4212,13 @@ hipError_t run_shared_projections(
     const A8Q4G64SharedActivationArgs& args,
     const A8Q4G64LinearArgs (&linear)[kA8Q4G64MaximumSharedProjections],
     hipStream_t stream) noexcept {
+    if (args.projection_count == 2U &&
+        detail::use_a8q4_small_batch_projection_pair(linear[0], linear[1]) &&
+        detail::use_a8q4_small_batch_projection(linear[0].tokens, linear[0].rows,
+                                                linear[0].columns, linear[0].padded_columns) &&
+        detail::use_a8q4_small_batch_projection(linear[1].tokens, linear[1].rows,
+                                                linear[1].columns, linear[1].padded_columns))
+        return detail::launch_a8q4_small_batch_projection_pair(linear[0], linear[1], stream);
     for (std::uint32_t index = 0; index < args.projection_count; ++index) {
         const hipError_t result = run_a8q4_projection(linear[index], stream);
         if (result != hipSuccess) return result;

@@ -380,6 +380,48 @@ void cell(unsigned t,hipStream_t s,std::ostream& out) {
        <<",\"rows_checked\":"<<public_rows.size()<<",\"generic_control_oracle_checked\":true}}";
 }
 }
+// The paired small-batch launch (two projections of one prepared activation) through the public
+// shared-activation Op, each output checked against the complete FP64 public oracle bound.
+void pair_cell(unsigned t,unsigned n0,unsigned n1,hipStream_t s,std::ostream& out) {
+    K=5120;G=K/64;
+    const auto base=make_decode_dot8_input(K);
+    std::vector<hip_bfloat16> x(t*K);
+    for(unsigned token=0;token<t;++token)for(unsigned k=0;k<K;++k)
+        x[token*K+k]=hip_bfloat16(static_cast<float>(base[(k/64)*64+(k+token*13)%64])*(token+4)/8.0F);
+    Guarded<hip_bfloat16> input(x.size(),s);input.put(x,s);
+    Guarded<std::uint8_t> scratch(linear::a8q4g64_activation_workspace_capacity_bytes(t,K),s);
+    const std::array<unsigned,2> rows{n0,n1};
+    std::array<DecodeDot8Weights,2> host{make_decode_dot8_weights(n0,K),make_decode_dot8_weights(n1,K)};
+    std::array<std::unique_ptr<Weights>,2> weights{std::make_unique<Weights>(host[0],s),
+                                                   std::make_unique<Weights>(host[1],s)};
+    std::array<std::unique_ptr<Guarded<hip_bfloat16>>,2> outputs{
+        std::make_unique<Guarded<hip_bfloat16>>(t*n0,s),std::make_unique<Guarded<hip_bfloat16>>(t*n1,s)};
+    linear::A8Q4G64SharedActivationArgs args{};
+    args.input=input.data();args.activation_workspace=scratch.data();
+    args.activation_workspace_bytes=scratch.bytes();args.projection_count=2;args.tokens=t;args.columns=K;
+    for(unsigned i=0;i<2;++i)
+        args.projections[i]={weights[i]->codes.data(),weights[i]->codes.bytes(),
+                              weights[i]->scales.data(),weights[i]->scales.bytes(),
+                              outputs[i]->data(),rows[i]};
+    HIP_CHECK(hipMemsetAsync(scratch.data(),0xff,scratch.bytes(),s));  // stale status/planes
+    HIP_CHECK(linear::a8q4g64_shared_activation_linear(args,s));
+    HIP_CHECK(hipStreamSynchronize(s));
+    const auto represented=quantize_host(x,t,K);
+    double worst_public=0,worst_arithmetic=0;
+    for(unsigned i=0;i<2;++i) {
+        N=rows[i];
+        const auto budget=a8_error_budget(t,represented,host[i]);
+        const auto reference=public_oracle(t,x,host[i]);
+        const auto error=compare_public(t,outputs[i]->read(s),reference,budget);
+        worst_public=std::max(worst_public,error.public_bound_fraction);
+        worst_arithmetic=std::max(worst_arithmetic,error.arithmetic_bound_fraction);
+        outputs[i]->guards(s);
+    }
+    scratch.guards(s);input.guards(s);
+    out<<"{\"tokens\":"<<t<<",\"rows\":["<<n0<<','<<n1<<"],\"columns\":"<<K
+       <<",\"maximum_public_norm_bound_fraction\":"<<worst_public
+       <<",\"maximum_arithmetic_norm_bound_fraction\":"<<worst_arithmetic<<'}';
+}
 #ifndef NINFER_A8Q4_VERIFY_QUAL_NO_MAIN
 int main(int argc,char** argv) {
  try {
@@ -422,6 +464,15 @@ int main(int argc,char** argv) {
             if(draft_only && t!=5 && t!=6)continue;
             if(!linear::detail::use_a8q4_small_batch_projection(t,N,K,K))continue;
             if(!first)out<<',';first=false;cell(t,stream,out);
+        }
+    }
+    out<<"],\"pairs\":[";
+    if(!mlp_only && !output_only && !draft_only) {
+        bool first_pair=true;
+        for(unsigned t:{5U,6U,12U}) {
+            for(const auto& pair:{std::array<unsigned,2>{4096,12288},std::array<unsigned,2>{7168,7168}}) {
+                if(!first_pair)out<<',';first_pair=false;pair_cell(t,pair[0],pair[1],stream,out);
+            }
         }
     }
     out<<"]}\n";
