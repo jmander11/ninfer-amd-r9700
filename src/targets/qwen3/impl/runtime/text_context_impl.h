@@ -992,11 +992,6 @@ void TextContext::attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_la
     if constexpr (requires { tap.capture_attention_stage(text_layer, "input_x", x, s); }) {
         tap.capture_attention_stage(text_layer, "input_x", x, s);
     }
-    ops::rmsnorm(x, *w.input_norm, kCfg.rms_eps, true, h, s);
-    if constexpr (requires { tap.capture_attention_stage(text_layer, "norm_h", h, s); }) {
-        tap.capture_attention_stage(text_layer, "norm_h", h, s);
-    }
-
     Tensor q         = projection.query.view({kCfg.head_dim, kCfg.n_q, T});
     Tensor gate      = projection.gate.view({kCfg.head_dim, kCfg.n_q, T});
     Tensor k         = projection.key.view({kCfg.head_dim, kCfg.n_kv, T});
@@ -1005,10 +1000,23 @@ void TextContext::attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_la
     Tensor gate_flat = gate.view({kCfg.q_size, T});
     Tensor k_flat    = k.view({kCfg.kv_size, T});
     Tensor v_flat    = v.view({kCfg.kv_size, T});
-    const std::int32_t route_tokens =
-        packed_route_tokens(active_sequence_batch_, active_sequence_width_);
-    Variant::attention_projection(h, *w.projection, q_flat, gate_flat, k_flat, v_flat, ph, work_,
-                                  s, route_tokens, linear_execution_, text_layer);
+    // Tracing publishes the normalized hidden rows, so it keeps the separate RMSNorm.
+    constexpr bool traced_norm =
+        requires { tap.capture_attention_stage(text_layer, "norm_h", h, s); };
+    bool fused_front = false;
+    if constexpr (!traced_norm) {
+        fused_front = Variant::attention_normalized_projection(
+            x, *w.input_norm, kCfg.rms_eps, *w.projection, q_flat, gate_flat, k_flat, v_flat, s,
+            linear_execution_, text_layer);
+    }
+    if (!fused_front) {
+        ops::rmsnorm(x, *w.input_norm, kCfg.rms_eps, true, h, s);
+        if constexpr (traced_norm) tap.capture_attention_stage(text_layer, "norm_h", h, s);
+        const std::int32_t route_tokens =
+            packed_route_tokens(active_sequence_batch_, active_sequence_width_);
+        Variant::attention_projection(h, *w.projection, q_flat, gate_flat, k_flat, v_flat, ph,
+                                      work_, s, route_tokens, linear_execution_, text_layer);
+    }
     if constexpr (requires { tap.capture_attention_stage(text_layer, "projection_q", q, s); }) {
         tap.capture_attention_stage(text_layer, "projection_q", q, s);
         tap.capture_attention_stage(text_layer, "projection_gate", gate, s);
@@ -1120,6 +1128,18 @@ void TextContext::attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_la
         tap.capture_attention_stage(text_layer, "attention_fp32", attention_fp32, s);
     }
     Tensor a = results.attention.view({kCfg.head_dim, kCfg.n_q, T});
+    // Tracing publishes the gated attention rows, so it keeps the separate output gate.
+    constexpr bool traced_gate =
+        requires { tap.capture_attention_stage(text_layer, "gated_attention", a, s); };
+    if constexpr (!traced_gate) {
+        if (Variant::attention_gated_output_projection(gate_flat, attention_fp32, *w.o_proj, x,
+                                                       s, linear_execution_, text_layer)) {
+            if constexpr (requires { tap.capture_attention_stage(text_layer, "residual_x", x, s); }) {
+                tap.capture_attention_stage(text_layer, "residual_x", x, s);
+            }
+            return;
+        }
+    }
     if constexpr (requires { tap.capture_attention_stage(text_layer, "attention_bf16", a, s); }) {
         ops::cast_fp32_to_bf16(attention_fp32, a, s);
         tap.capture_attention_stage(text_layer, "attention_bf16", a, s);

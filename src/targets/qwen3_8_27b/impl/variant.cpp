@@ -17,6 +17,7 @@
 #include "ninfer/types.h"
 #include "ops/r9700/gdn/gdn_ops.h"
 #include "ops/r9700/kv/r9700_attention_profile.h"
+#include "ops/r9700/linear/fp8_small_t_linear.h"
 #include "ops/r9700/linear/linear_execution.h"
 #include "ops/r9700/linear/r9700_linear.h"
 #include "ops/r9700/linear/r9700_q4_activation_profile.h"
@@ -1304,6 +1305,122 @@ bool Variant::ExecutionState::run(SelectedLinearRole role, std::int32_t text_lay
     return true;
 }
 
+const ops::r9700::linear::Fp8ActivationWorkspace*
+Variant::ExecutionState::fp8_small_activation(SelectedLinearRole role, std::int32_t text_layer,
+                                              const Weight& weight, std::uint32_t tokens,
+                                              hipStream_t stream) {
+    if (impl_ == nullptr || weight.qtype != QType::F8E4M3_ROW_F32S || tokens == 0U ||
+        tokens > ops::r9700::linear::kFp8StatusCtaTokenLimit ||
+        !ops::r9700::linear::fp8_small_t_supported(
+            tokens, static_cast<std::uint32_t>(weight.n), static_cast<std::uint32_t>(weight.k),
+            static_cast<std::uint32_t>(weight.padded_shape[1]))) {
+        return nullptr;
+    }
+    Impl::Slot& slot = impl_->slots[Impl::index(role, text_layer)];
+    if (slot.execution == nullptr || slot.weight != &weight) {
+        throw std::invalid_argument(
+            "R9700 FP8 selected projection binding differs from Program state");
+    }
+    if (slot.execution->prepared_profile(tokens) == nullptr) {
+        hipStreamCaptureStatus capture = hipStreamCaptureStatusNone;
+        HIP_CHECK(hipStreamIsCapturing(stream, &capture));
+        if (capture != hipStreamCaptureStatusNone) {
+            throw std::logic_error(
+                "R9700 FP8 projection width was not prepared before graph capture");
+        }
+        (void)slot.execution->prepare(tokens);
+    }
+    return slot.execution->activation_workspace(tokens);
+}
+
+namespace {
+
+ops::r9700::linear::Fp8RowScaledWeight fp8_rows(const Weight& weight) {
+    return {static_cast<const std::uint8_t*>(weight.qdata),
+            static_cast<const float*>(weight.scales), static_cast<std::uint32_t>(weight.n)};
+}
+
+bool bf16_tokens(const Tensor& tensor, std::int32_t features, std::int32_t tokens) {
+    return tensor.dtype == DType::BF16 && tensor.data != nullptr && tensor.is_contiguous() &&
+           tensor.numel() == static_cast<std::int64_t>(features) * tokens;
+}
+
+} // namespace
+
+bool Variant::ExecutionState::attention_fp8_normalized_projection(
+    const Tensor& residual, const Tensor& norm, float eps, const Weight& query_key,
+    const Weight& gate_value, Tensor& query, Tensor& key, Tensor& gate, Tensor& value,
+    std::int32_t text_layer, hipStream_t stream) {
+    const std::int32_t tokens = residual.ne[1];
+    if (tokens <= 0 || residual.ne[0] != TextConfig::hidden || residual.ne[2] != 1 ||
+        residual.ne[3] != 1 || !bf16_tokens(residual, TextConfig::hidden, tokens) ||
+        norm.dtype != DType::BF16 || norm.data == nullptr || norm.numel() != TextConfig::hidden ||
+        query_key.k != TextConfig::hidden || gate_value.k != TextConfig::hidden ||
+        query_key.n != TextConfig::query_size + TextConfig::kv_size ||
+        gate_value.n != query_key.n ||
+        !bf16_tokens(query, TextConfig::query_size, tokens) ||
+        !bf16_tokens(gate, TextConfig::query_size, tokens) ||
+        !bf16_tokens(key, TextConfig::kv_size, tokens) ||
+        !bf16_tokens(value, TextConfig::kv_size, tokens)) {
+        return false;
+    }
+    const auto width = static_cast<std::uint32_t>(tokens);
+    const auto* first = fp8_small_activation(SelectedLinearRole::AttentionQueryKey, text_layer,
+                                             query_key, width, stream);
+    const auto* second = first == nullptr
+        ? nullptr
+        : fp8_small_activation(SelectedLinearRole::AttentionGateValue, text_layer, gate_value,
+                               width, stream);
+    if (second == nullptr || first->codes != second->codes || first->scales != second->scales ||
+        first->status != second->status) {
+        return false;
+    }
+    HIP_CHECK(ops::r9700::linear::fp8_quantize_normalized_activation(
+        {.input = static_cast<const hip_bfloat16*>(residual.data),
+         .weight = static_cast<const hip_bfloat16*>(norm.data),
+         .eps = eps,
+         .unit_offset = true,
+         .workspace = *first},
+        stream));
+    HIP_CHECK(ops::r9700::linear::fp8_small_t_pair_split(
+        {.first = fp8_rows(query_key),
+         .second = fp8_rows(gate_value),
+         .split = static_cast<std::uint32_t>(TextConfig::query_size),
+         .first_leading = static_cast<hip_bfloat16*>(query.data),
+         .first_trailing = static_cast<hip_bfloat16*>(key.data),
+         .second_leading = static_cast<hip_bfloat16*>(gate.data),
+         .second_trailing = static_cast<hip_bfloat16*>(value.data)},
+        *first, stream));
+    return true;
+}
+
+bool Variant::ExecutionState::attention_fp8_gated_output(
+    const Tensor& gate, const Tensor& attention_fp32, const Weight& weight, Tensor& residual,
+    std::int32_t text_layer, hipStream_t stream) {
+    const std::int32_t tokens = residual.ne[1];
+    if (tokens <= 0 || residual.ne[0] != TextConfig::hidden || residual.ne[2] != 1 ||
+        residual.ne[3] != 1 || !bf16_tokens(residual, TextConfig::hidden, tokens) ||
+        !bf16_tokens(gate, TextConfig::query_size, tokens) ||
+        attention_fp32.dtype != DType::FP32 || attention_fp32.data == nullptr ||
+        !attention_fp32.is_contiguous() ||
+        attention_fp32.numel() != static_cast<std::int64_t>(TextConfig::query_size) * tokens ||
+        weight.k != TextConfig::query_size || weight.n != TextConfig::hidden) {
+        return false;
+    }
+    const auto* activation = fp8_small_activation(SelectedLinearRole::AttentionOutput,
+                                                  text_layer, weight,
+                                                  static_cast<std::uint32_t>(tokens), stream);
+    if (activation == nullptr) return false;
+    HIP_CHECK(ops::r9700::linear::fp8_quantize_gated_activation(
+        {.gate = static_cast<const hip_bfloat16*>(gate.data),
+         .attention = static_cast<const float*>(attention_fp32.data),
+         .workspace = *activation},
+        stream));
+    HIP_CHECK(ops::r9700::linear::fp8_small_t_residual(
+        fp8_rows(weight), *activation, static_cast<hip_bfloat16*>(residual.data), stream));
+    return true;
+}
+
 std::size_t Variant::ExecutionState::selected_count() const noexcept {
     return impl_ == nullptr ? 0U : impl_->selected;
 }
@@ -1444,6 +1561,23 @@ void Variant::attention_projection(const Tensor& hidden,
                         weights.gate_value, gate_value, workspace, stream);
         ops::split_bf16_columns(gate_value, gate, value, stream);
     }
+}
+
+bool Variant::attention_normalized_projection(
+    const Tensor& residual, const Tensor& norm, float eps,
+    const FullAttentionProjectionWeights& weights, Tensor& query, Tensor& gate, Tensor& key,
+    Tensor& value, hipStream_t stream, ExecutionState* execution, std::int32_t text_layer) {
+    return execution != nullptr && execution->attention_fp8_normalized_projection(
+        residual, norm, eps, weights.query_key, weights.gate_value, query, key, gate, value,
+        text_layer, stream);
+}
+
+bool Variant::attention_gated_output_projection(const Tensor& gate, const Tensor& attention_fp32,
+                                                const Weight& weight, Tensor& residual,
+                                                hipStream_t stream, ExecutionState* execution,
+                                                std::int32_t text_layer) {
+    return execution != nullptr && execution->attention_fp8_gated_output(
+        gate, attention_fp32, weight, residual, text_layer, stream);
 }
 
 void Variant::full_attention(const Tensor& normalized_query,

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ops/r9700/linear/a8q4_small_batch_projection.h"
+#include "ops/r9700/linear/fp8_activation.h"
 #include "targets/qwen3_8_27b/impl/config.h"
 #include "targets/qwen3_8_27b/impl/load/bindings.h"
 #include <ninfer/targets/qwen3/decoder_state.h>
@@ -151,6 +152,18 @@ struct Variant {
         [[nodiscard]] bool attention_q4_pair_c2c4(
             const Tensor& hidden, const Weight& query_key, const Weight& gate_value,
             Tensor& query, Tensor& key, Tensor& gate, Tensor& value, hipStream_t stream);
+        // Small widths (T <= 16) of the FP8 attention input: the input RMSNorm of `residual` feeds
+        // the E4M3 codec in one launch, then both projections run as one launch publishing
+        // query/key and gate/value directly.
+        [[nodiscard]] bool attention_fp8_normalized_projection(
+            const Tensor& residual, const Tensor& norm, float eps, const Weight& query_key,
+            const Weight& gate_value, Tensor& query, Tensor& key, Tensor& gate, Tensor& value,
+            std::int32_t text_layer, hipStream_t stream);
+        // Small widths of the FP8 attention output: the output gate feeds the codec and the
+        // projection epilogue adds the rounded result to the residual.
+        [[nodiscard]] bool attention_fp8_gated_output(
+            const Tensor& gate, const Tensor& attention_fp32, const Weight& weight,
+            Tensor& residual, std::int32_t text_layer, hipStream_t stream);
         [[nodiscard]] bool projected_residual_t1(
             const Tensor& input, const Weight& weight, Tensor& residual,
             qwen3::TextPhase phase, bool ordinary_decode, hipStream_t stream);
@@ -243,6 +256,9 @@ struct Variant {
         struct Impl;
         [[nodiscard]] ops::r9700::linear::FusedSiluA8Q4G64DownArgs fused_down_args(
             const Tensor& gate_up, const Weight& down, Tensor& residual) const;
+        [[nodiscard]] const ops::r9700::linear::Fp8ActivationWorkspace* fp8_small_activation(
+            SelectedLinearRole role, std::int32_t text_layer, const Weight& weight,
+            std::uint32_t tokens, hipStream_t stream);
         std::unique_ptr<Impl> impl_;
     };
 
@@ -265,6 +281,16 @@ struct Variant {
                                      hipStream_t stream, std::int32_t route_tokens = 0,
                                      ExecutionState* execution = nullptr,
                                      std::int32_t text_layer = -1);
+    // Fused small-width FP8 attention boundaries. False when not selected: the caller then runs
+    // the input RMSNorm and attention_projection, or the output gate and
+    // attention_output_projection.
+    [[nodiscard]] static bool attention_normalized_projection(
+        const Tensor& residual, const Tensor& norm, float eps,
+        const FullAttentionProjectionWeights& weights, Tensor& query, Tensor& gate, Tensor& key,
+        Tensor& value, hipStream_t stream, ExecutionState* execution, std::int32_t text_layer);
+    [[nodiscard]] static bool attention_gated_output_projection(
+        const Tensor& gate, const Tensor& attention_fp32, const Weight& weight, Tensor& residual,
+        hipStream_t stream, ExecutionState* execution, std::int32_t text_layer);
     // The family schedule owns append/publication ordering and supplies the resulting typed read
     // capability. This target leaf owns the fixed Qwen3.8 full-attention geometry and R9700
     // implementation; it cannot manufacture a cache view or publish a frontier.
