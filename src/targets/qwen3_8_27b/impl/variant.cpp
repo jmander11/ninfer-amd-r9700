@@ -428,8 +428,8 @@ void Variant::ExecutionState::linear(const Tensor& input, const Weight& weight, 
     ops::linear(input, weight, output, DeviceSpan{impl_->activation.data, required}, stream);
 }
 
-void Variant::ExecutionState::fused_mlp_down(const Tensor& gate_up, const Weight& down,
-                                             Tensor& residual, hipStream_t stream) {
+ops::r9700::linear::FusedSiluA8Q4G64DownArgs Variant::ExecutionState::fused_down_args(
+    const Tensor& gate_up, const Weight& down, Tensor& residual) const {
     const auto tokens = static_cast<std::uint32_t>(gate_up.ne[1]);
     constexpr std::uint32_t rows = TextConfig::hidden;
     constexpr std::uint32_t columns = TextConfig::intermediate;
@@ -457,20 +457,64 @@ void Variant::ExecutionState::fused_mlp_down(const Tensor& gate_up, const Weight
         impl_->activation.bytes < required) {
         throw std::invalid_argument("R9700 fused MLP-down activation region is too small");
     }
+    return {.gate_up = static_cast<const hip_bfloat16*>(gate_up.data),
+            .weight_codes = static_cast<const std::uint8_t*>(down.qdata),
+            .weight_code_bytes = static_cast<std::size_t>(down.qdata_bytes),
+            .weight_scales = static_cast<const std::uint16_t*>(down.scales),
+            .weight_scale_bytes = static_cast<std::size_t>(down.scale_bytes),
+            .activation_workspace = impl_->activation.data,
+            .activation_workspace_bytes = required,
+            .residual = static_cast<hip_bfloat16*>(residual.data),
+            .tokens = tokens,
+            .rows = rows,
+            .columns = columns,
+            .padded_columns = columns};
+}
+
+void Variant::ExecutionState::fused_mlp_down(const Tensor& gate_up, const Weight& down,
+                                             Tensor& residual, hipStream_t stream) {
     HIP_CHECK(ops::r9700::linear::fused_silu_a8q4g64_down(
-        {.gate_up = static_cast<const hip_bfloat16*>(gate_up.data),
-         .weight_codes = static_cast<const std::uint8_t*>(down.qdata),
-         .weight_code_bytes = static_cast<std::size_t>(down.qdata_bytes),
-         .weight_scales = static_cast<const std::uint16_t*>(down.scales),
-         .weight_scale_bytes = static_cast<std::size_t>(down.scale_bytes),
+        fused_down_args(gate_up, down, residual), stream));
+}
+
+bool Variant::ExecutionState::normalized_mlp(Tensor& residual, const Tensor& norm,
+                                             float eps, const Weight& gate_up_weight,
+                                             const Weight& down, Tensor& gate_up,
+                                             std::int32_t text_layer, hipStream_t stream) {
+    const std::int32_t tokens = residual.ne[1];
+    if (impl_ == nullptr || ops::r9700::linear::kQ4ActivationBits != 8 || text_layer < 0 ||
+        text_layer >= TextConfig::layers || gate_up_weight.qtype != QType::Q4G64_F16S ||
+        tokens <= 0 ||
+        !ops::r9700::linear::a8q4g64_normalized_mlp_supported(static_cast<std::uint32_t>(tokens)) ||
+        residual.dtype != DType::BF16 || !residual.is_contiguous() ||
+        residual.ne[0] != TextConfig::hidden || residual.ne[2] != 1 || residual.ne[3] != 1 ||
+        gate_up.ne[0] != 2 * TextConfig::intermediate || gate_up.ne[1] != tokens ||
+        reinterpret_cast<std::uintptr_t>(residual.data) % 16U != 0U ||
+        reinterpret_cast<std::uintptr_t>(norm.data) % 16U != 0U) {
+        return false;
+    }
+    const std::size_t required = ops::r9700::linear::a8q4g64_activation_workspace_capacity_bytes(
+        static_cast<std::uint32_t>(tokens), TextConfig::hidden);
+    if (required == 0U || impl_->activation.data == nullptr ||
+        impl_->activation.bytes < required) {
+        throw std::invalid_argument("R9700 normalized MLP activation region is too small");
+    }
+    HIP_CHECK(ops::r9700::linear::a8q4g64_normalized_mlp(
+        {.input = static_cast<const hip_bfloat16*>(residual.data),
+         .weight_codes = static_cast<const std::uint8_t*>(gate_up_weight.qdata),
+         .weight_code_bytes = static_cast<std::size_t>(gate_up_weight.qdata_bytes),
+         .weight_scales = static_cast<const std::uint16_t*>(gate_up_weight.scales),
+         .weight_scale_bytes = static_cast<std::size_t>(gate_up_weight.scale_bytes),
          .activation_workspace = impl_->activation.data,
          .activation_workspace_bytes = required,
-         .residual = static_cast<hip_bfloat16*>(residual.data),
-         .tokens = tokens,
-         .rows = rows,
-         .columns = columns,
-         .padded_columns = columns},
-        stream));
+         .output = static_cast<hip_bfloat16*>(gate_up.data),
+         .tokens = static_cast<std::uint32_t>(tokens),
+         .rows = 2 * TextConfig::intermediate,
+         .columns = TextConfig::hidden,
+         .padded_columns = TextConfig::hidden},
+        static_cast<const hip_bfloat16*>(norm.data), eps, true,
+        fused_down_args(gate_up, down, residual), stream));
+    return true;
 }
 
 bool Variant::ExecutionState::gdn_q4_pair_t1(
@@ -623,6 +667,40 @@ bool Variant::ExecutionState::gdn_q4_pair_shared(
          .activation_workspace_bytes = required,
          .projections = {gdn_q4_projection(query_key, 0, kRows0, query_key_output),
                          gdn_q4_projection(value_z, 0, kRows1, value_z_output)},
+         .projection_count = 2,
+         .tokens = static_cast<std::uint32_t>(tokens),
+         .columns = TextConfig::hidden},
+        stream));
+    return true;
+}
+
+bool Variant::ExecutionState::attention_q4_shared(
+    const Tensor& hidden, const Weight& query_key, const Weight& gate_value,
+    Tensor& query_key_output, Tensor& gate_value_output, hipStream_t stream) {
+    constexpr std::int32_t kRows = 7168;
+    const std::int32_t tokens = hidden.ne[1];
+    if (impl_ == nullptr || ops::r9700::linear::kQ4ActivationBits != 8 || tokens <= 0 ||
+        hidden.dtype != DType::BF16 || !hidden.is_contiguous() ||
+        hidden.ne[0] != TextConfig::hidden || hidden.ne[2] != 1 || hidden.ne[3] != 1 ||
+        !gdn_q4_input_weight(query_key, kRows) || !gdn_q4_input_weight(gate_value, kRows) ||
+        !gdn_prefill_rows(query_key_output, kRows, tokens) ||
+        !gdn_prefill_rows(gate_value_output, kRows, tokens) ||
+        !ops::r9700::linear::a8q4g64_shared_activation_supported(
+            static_cast<std::uint32_t>(tokens), TextConfig::hidden, kRows)) {
+        return false;
+    }
+    const std::size_t required = ops::r9700::linear::a8q4g64_activation_workspace_capacity_bytes(
+        static_cast<std::uint32_t>(tokens), TextConfig::hidden);
+    if (required == 0U || impl_->activation.data == nullptr ||
+        impl_->activation.bytes < required) {
+        throw std::invalid_argument("R9700 attention shared activation region is too small");
+    }
+    HIP_CHECK(ops::r9700::linear::a8q4g64_shared_activation_linear(
+        {.input = static_cast<const hip_bfloat16*>(hidden.data),
+         .activation_workspace = impl_->activation.data,
+         .activation_workspace_bytes = required,
+         .projections = {gdn_q4_projection(query_key, 0, kRows, query_key_output),
+                         gdn_q4_projection(gate_value, 0, kRows, gate_value_output)},
          .projection_count = 2,
          .tokens = static_cast<std::uint32_t>(tokens),
          .columns = TextConfig::hidden},
@@ -798,20 +876,18 @@ bool Variant::ExecutionState::normalized_linear_t1(
     return true;
 }
 
-bool Variant::ExecutionState::gated_normalized_output_prefill(
+bool Variant::ExecutionState::gated_normalized_output(
     const Tensor& recurrent_output, const Tensor& norm, const Tensor& gate, float eps,
-    const Weight& weight, Tensor& residual, qwen3::TextPhase phase, std::int32_t text_layer,
-    hipStream_t stream) {
+    const Weight& weight, Tensor& residual, std::int32_t text_layer, hipStream_t stream) {
     const std::int32_t tokens = recurrent_output.ne[2];
     // The fused prepare reads rows, gates, and gains as 16-byte vectors.
     const auto contiguous_bf16 = [](const Tensor& tensor) {
         return tensor.dtype == DType::BF16 && tensor.data != nullptr && tensor.is_contiguous() &&
                reinterpret_cast<std::uintptr_t>(tensor.data) % 16U == 0U;
     };
-    if (impl_ == nullptr || phase != qwen3::TextPhase::Prefill ||
-        ops::r9700::linear::kQ4ActivationBits != 8 || text_layer < 0 ||
+    if (impl_ == nullptr || ops::r9700::linear::kQ4ActivationBits != 8 || text_layer < 0 ||
         text_layer >= TextConfig::layers || tokens <= 0 ||
-        !ops::r9700::linear::a8q4g64_gated_normalized_linear_prefill_supported(
+        !ops::r9700::linear::a8q4g64_gated_normalized_linear_supported(
             static_cast<std::uint32_t>(tokens)) ||
         weight.qtype != QType::Q4G64_F16S || weight.layout != QuantLayout::Q4N16K16 ||
         weight.n != TextConfig::hidden || weight.k != TextConfig::value_dim ||
@@ -829,9 +905,9 @@ bool Variant::ExecutionState::gated_normalized_output_prefill(
         static_cast<std::uint32_t>(tokens), TextConfig::value_dim);
     if (required == 0U || impl_->activation.data == nullptr ||
         impl_->activation.bytes < required) {
-        throw std::invalid_argument("R9700 gated output prefill activation region is too small");
+        throw std::invalid_argument("R9700 gated output activation region is too small");
     }
-    HIP_CHECK(ops::r9700::linear::a8q4g64_gated_normalized_linear_prefill(
+    HIP_CHECK(ops::r9700::linear::a8q4g64_gated_normalized_linear(
         {.input = static_cast<const hip_bfloat16*>(recurrent_output.data),
          .weight_codes = static_cast<const std::uint8_t*>(weight.qdata),
          .weight_code_bytes = static_cast<std::size_t>(weight.qdata_bytes),
@@ -1148,10 +1224,19 @@ void Variant::attention_projection(const Tensor& hidden,
                                   SelectedLinearRole::AttentionGateValue, text_layer, hidden,
                                   weights.query_key, query_key, weights.gate_value, gate_value,
                                   stream)) {
-            ops::extract_bf16_columns(query_key, 0, query, stream);
-            ops::extract_bf16_columns(query_key, TextConfig::query_size, key, stream);
-            ops::extract_bf16_columns(gate_value, 0, gate, stream);
-            ops::extract_bf16_columns(gate_value, TextConfig::query_size, value, stream);
+            ops::split_bf16_columns(query_key, query, key, stream);
+            ops::split_bf16_columns(gate_value, gate, value, stream);
+            return;
+        }
+    }
+    if (execution != nullptr) {
+        auto scope = workspace.scope();
+        Tensor query_key = workspace.alloc(DType::BF16, {7168, hidden.ne[1]});
+        Tensor gate_value = workspace.alloc(DType::BF16, {7168, hidden.ne[1]});
+        if (execution->attention_q4_shared(hidden, weights.query_key, weights.gate_value,
+                                           query_key, gate_value, stream)) {
+            ops::split_bf16_columns(query_key, query, key, stream);
+            ops::split_bf16_columns(gate_value, gate, value, stream);
             return;
         }
     }
@@ -1160,16 +1245,14 @@ void Variant::attention_projection(const Tensor& hidden,
         Tensor query_key = workspace.alloc(DType::BF16, {7168, hidden.ne[1]});
         selected_linear(execution, SelectedLinearRole::AttentionQueryKey, text_layer, hidden,
                         weights.query_key, query_key, workspace, stream);
-        ops::extract_bf16_columns(query_key, 0, query, stream);
-        ops::extract_bf16_columns(query_key, TextConfig::query_size, key, stream);
+        ops::split_bf16_columns(query_key, query, key, stream);
     }
     {
         auto gate_scope = workspace.scope();
         Tensor gate_value = workspace.alloc(DType::BF16, {7168, hidden.ne[1]});
         selected_linear(execution, SelectedLinearRole::AttentionGateValue, text_layer, hidden,
                         weights.gate_value, gate_value, workspace, stream);
-        ops::extract_bf16_columns(gate_value, 0, gate, stream);
-        ops::extract_bf16_columns(gate_value, TextConfig::query_size, value, stream);
+        ops::split_bf16_columns(gate_value, gate, value, stream);
     }
 }
 
@@ -1533,8 +1616,8 @@ void Variant::gdn_output_projection(const Tensor& recurrent_output, const Tensor
     // The output gate and the activation workspace may still belong to the side projection.
     if (execution != nullptr) execution->join_gdn_gate(stream);
     if (!materialize_normalized && execution != nullptr &&
-        execution->gated_normalized_output_prefill(recurrent_output, norm, gate, eps, weight,
-                                                   residual, phase, text_layer, stream)) {
+        execution->gated_normalized_output(recurrent_output, norm, gate, eps, weight,
+                                           residual, text_layer, stream)) {
         return;
     }
     ops::gated_rmsnorm(recurrent_output, norm, gate, eps, normalized, stream);
@@ -1598,6 +1681,11 @@ void post_mixer_body(const Tensor& hidden, const Variant::PostMixerWeights& weig
     if (fused_down) {
         Tensor gate_up = workspace.alloc(DType::BF16, {2 * TextConfig::intermediate,
                                                        hidden.ne[1]});
+        if (norm != nullptr && execution->normalized_mlp(residual, *norm, eps, weights.gate_up,
+                                                         weights.down, gate_up, text_layer,
+                                                         stream)) {
+            return;
+        }
         project_gate_up(gate_up);
         execution->fused_mlp_down(gate_up, weights.down, residual, stream);
         return;

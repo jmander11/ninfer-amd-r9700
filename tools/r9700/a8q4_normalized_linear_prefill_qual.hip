@@ -628,13 +628,13 @@ int main(int argc, char** argv) {
         std::vector<hip_bfloat16> gated_residual(static_cast<std::size_t>(tokens) * kGatedRows);
         for (auto& value : gated_residual) value = hip_bfloat16((rng.uniform() - 0.5) * 8.0);
         d_gated_output.put(gated_residual);
-        require(lin::a8q4g64_gated_normalized_linear_prefill_supported(tokens),
+        require(lin::a8q4g64_gated_normalized_linear_supported(tokens),
                 "T2048 is outside the gated prefill route");
         const std::size_t gated_workspace_bytes =
             lin::a8q4g64_activation_workspace_capacity_bytes(tokens, kGatedColumns);
         Device<std::uint8_t> d_gated_workspace(gated_workspace_bytes);
         const auto gated_route = [&] {
-            check(lin::a8q4g64_gated_normalized_linear_prefill(
+            check(lin::a8q4g64_gated_normalized_linear(
                       {.input = d_recurrent.data,
                        .weight_codes = d_gated_codes.data,
                        .weight_code_bytes = d_gated_codes.bytes(),
@@ -742,6 +742,61 @@ int main(int argc, char** argv) {
                 require(std::isfinite(error) && error <= 1.0, "gated FP64 oracle mismatch");
                 gated_worst = std::max(gated_worst, error);
             }
+        }
+        // ---- Verification width T6 of the gated route (one thread per 16-byte slot): its planes
+        // equal the T2048 planes of the same rows byte for byte, and the output is exactly
+        // BF16(residual + the non-accumulating small-batch GEMM on those planes). ----
+        {
+            constexpr std::uint32_t kT = 6;
+            require(lin::a8q4g64_gated_normalized_linear_supported(kT),
+                    "T6 is outside the gated route");
+            const std::size_t ws6 = lin::a8q4g64_activation_workspace_capacity_bytes(kT, kGatedColumns);
+            Device<std::uint8_t> d_ws6(ws6);
+            check(hipMemset(d_ws6.data, 0xff, ws6), "stale T6 workspace");
+            Device<hip_bfloat16> d_out6(static_cast<std::size_t>(kT) * kGatedRows),
+                d_control6(static_cast<std::size_t>(kT) * kGatedRows);
+            const std::vector<hip_bfloat16> residual6(gated_residual.begin(),
+                                                      gated_residual.begin() + kT * kGatedRows);
+            d_out6.put(residual6);
+            check(lin::a8q4g64_gated_normalized_linear(
+                      {.input = d_recurrent.data, .weight_codes = d_gated_codes.data,
+                       .weight_code_bytes = d_gated_codes.bytes(),
+                       .weight_scales = d_gated_scales.data,
+                       .weight_scale_bytes = d_gated_scales.bytes(),
+                       .activation_workspace = d_ws6.data, .activation_workspace_bytes = ws6,
+                       .output = d_out6.data, .tokens = kT, .rows = kGatedRows,
+                       .columns = kGatedColumns, .padded_columns = kGatedColumns},
+                      d_head_norm.data, d_gate.data, kEps, stream),
+                  "T6 gated route");
+            check(hipStreamSynchronize(stream), "sync");
+            lin::A8G64ActivationWorkspace planes6{};
+            check(lin::a8q4g64_bind_activation_workspace(d_ws6.data, ws6, kT, kGatedColumns,
+                                                         &planes6), "bind T6 gated planes");
+            const std::vector<std::uint8_t> host6 = d_ws6.get();
+            const auto plane6 = [&](const void* region) {
+                return host6.data() + (static_cast<const std::uint8_t*>(region) - d_ws6.data);
+            };
+            std::uint32_t status6 = ~0U;
+            std::memcpy(&status6, plane6(planes6.status), sizeof(status6));
+            require(status6 == 0U, "T6 gated route did not clear the stale activation status");
+            const std::size_t code_bytes6 = static_cast<std::size_t>(kT) * kGatedColumns / 2U;
+            const std::size_t scale_count6 = static_cast<std::size_t>(kT) * kGatedColumns / kGroup;
+            require(std::memcmp(plane6(planes6.low_codes), gated_low, code_bytes6) == 0 &&
+                        std::memcmp(plane6(planes6.high_codes), gated_high, code_bytes6) == 0 &&
+                        std::memcmp(plane6(planes6.scales), gated_scale_plane,
+                                    scale_count6 * sizeof(std::uint16_t)) == 0,
+                    "T6 gated planes differ from the T2048 planes of the same rows");
+            check(lin::detail::launch_a8q4_small_batch_projection(
+                      {planes6.low_codes, planes6.low_code_bytes, planes6.high_codes,
+                       planes6.high_code_bytes, planes6.scales, planes6.scale_bytes,
+                       planes6.status, d_gated_codes.data, d_gated_codes.bytes(),
+                       d_gated_scales.data, d_gated_scales.bytes(), d_control6.data, kT,
+                       kGatedRows, kGatedColumns, kGatedColumns},
+                      stream),
+                  "T6 gated control GEMM");
+            check(hipStreamSynchronize(stream), "sync");
+            require(accumulated_exactly(d_out6.get(), residual6, d_control6.get()),
+                    "T6 gated output differs from BF16(residual + small-batch GEMM)");
         }
         Device<std::uint8_t> d_gated_linear_workspace(ninfer::ops::linear_workspace_capacity_bytes(
             ninfer::QType::Q4G64_F16S, tokens, kGatedColumns));
@@ -942,6 +997,50 @@ int main(int argc, char** argv) {
                                                       d_down_codes.bytes(), d_down_scales.data,
                                                       d_down_scales.bytes(), kDownColumns)),
                     "T6 fused down differs from BF16(residual + small-batch GEMM)");
+
+            // The combined normalized MLP (gate/up prepare also clears the down status) equals
+            // the two-Op composition bit for bit, starting from a stale all-ones workspace.
+            require(lin::a8q4g64_normalized_mlp_supported(kT), "T6 normalized MLP not admitted");
+            const std::size_t gate_up_ws6 = lin::a8q4g64_activation_workspace_capacity_bytes(kT, kColumns);
+            Device<std::uint8_t> d_mlp_ws(std::max(gate_up_ws6, down_ws6));
+            Device<hip_bfloat16> d_mlp_gate_up(static_cast<std::size_t>(kT) * kRows);
+            const lin::A8Q4G64CandidateArgs gate_up_args{
+                .input = d_input.data, .weight_codes = d_codes.data,
+                .weight_code_bytes = d_codes.bytes(), .weight_scales = d_scales.data,
+                .weight_scale_bytes = d_scales.bytes(), .activation_workspace = d_mlp_ws.data,
+                .activation_workspace_bytes = gate_up_ws6, .output = d_mlp_gate_up.data,
+                .tokens = kT, .rows = kRows, .columns = kColumns, .padded_columns = kColumns};
+            const lin::FusedSiluA8Q4G64DownArgs down_args{
+                .gate_up = d_mlp_gate_up.data, .weight_codes = d_down_codes.data,
+                .weight_code_bytes = d_down_codes.bytes(), .weight_scales = d_down_scales.data,
+                .weight_scale_bytes = d_down_scales.bytes(), .activation_workspace = d_mlp_ws.data,
+                .activation_workspace_bytes = down_ws6, .residual = d_gated_output.data,
+                .tokens = kT, .rows = kGatedRows, .columns = kDownColumns,
+                .padded_columns = kDownColumns};
+            const auto mlp_run = [&](bool combined) {
+                check(hipMemset(d_mlp_ws.data, 0xff, d_mlp_ws.bytes()), "stale MLP workspace");
+                check(hipMemcpy(d_gated_output.data, residual6.data(), residual6.size() * 2,
+                                hipMemcpyHostToDevice), "residual");
+                if (combined) {
+                    check(lin::a8q4g64_normalized_mlp(gate_up_args, d_norm.data, kEps, true,
+                                                      down_args, stream), "T6 normalized MLP");
+                } else {
+                    check(lin::a8q4g64_normalized_linear_batched(gate_up_args, d_norm.data, kEps,
+                                                                 true, stream), "T6 gate/up");
+                    check(lin::fused_silu_a8q4g64_down(down_args, stream), "T6 down");
+                }
+                check(hipStreamSynchronize(stream), "sync");
+                std::vector<hip_bfloat16> result = d_gated_output.get();
+                result.resize(residual6.size());
+                return std::pair{result, d_mlp_gate_up.get()};
+            };
+            const auto composed = mlp_run(false);
+            const auto combined = mlp_run(true);
+            require(std::memcmp(composed.first.data(), combined.first.data(),
+                                composed.first.size() * sizeof(hip_bfloat16)) == 0 &&
+                        std::memcmp(composed.second.data(), combined.second.data(),
+                                    composed.second.size() * sizeof(hip_bfloat16)) == 0,
+                    "T6 normalized MLP differs from the gate/up + fused down composition");
         }
 
         std::ostringstream json;
@@ -975,6 +1074,7 @@ int main(int argc, char** argv) {
              << ",\"maximum_normalized_plane_error\":" << gated_worst_plane
              << ",\"maximum_normalized_oracle_error\":" << gated_worst
              << ",\"output_exact_vs_production_gemm_same_planes\":true"
+             << ",\"t6_planes_equal_t2048_rows\":true,\"t6_output_exact_vs_small_batch_gemm\":true"
              << ",\"route_ms\":" << gated_route_ms << ",\"composition_ms\":" << gated_composition_ms
              << ",\"residual_criterion\":\"output == BF16(residual + BF16 production GEMM)\"}"
              << ",\"projected_residual\":{\"rows\":" << kGatedRows << ",\"columns\":" << kGatedColumns
@@ -983,6 +1083,7 @@ int main(int argc, char** argv) {
              << ",\"composition_ms\":" << projected_composition_ms << "}"
              << ",\"fused_silu_down\":{\"rows\":" << kGatedRows << ",\"columns\":" << kDownColumns
              << ",\"output_exact_vs_residual_plus_production_gemm\":true}"
+             << ",\"verify_t6_normalized_mlp_equals_composition\":true"
              << ",\"verify_t6_residual_epilogue\":{\"projected_residual_k6144_exact\":true"
              << ",\"fused_silu_down_k17408_exact\":true}}\n";
         std::ofstream(out) << json.str();

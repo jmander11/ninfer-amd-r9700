@@ -805,7 +805,8 @@ void a8g64_normalized_prepare_prefill_kernel(
 // loads its 16-byte vectors first, per-vector FP32 sums of squares go to LDS, one wave per row
 // reduces its row in a fixed order, then the same BF16 seam and exact codec as the prefill
 // preparation run with eight adjacent lanes per G64 group. Thread 0 clears the status word, so no
-// separate reset launch is needed. normalized_rows, when non-null, receives the BF16 seam rows.
+// separate reset launch is needed. normalized_rows, when non-null, receives the BF16 seam rows;
+// clear_status, when non-null, is another status word thread 0 also clears.
 constexpr std::uint32_t kNormalizedSmallRowVectors = kNormalizedPrefillColumns / 8U;
 constexpr std::uint32_t kNormalizedSmallMaximumTokens =
     kSmallQuantizeMaximumVectors / kNormalizedSmallRowVectors;
@@ -813,13 +814,18 @@ constexpr std::uint32_t kNormalizedSmallMaximumTokens =
 __global__ __launch_bounds__(kSmallQuantizeThreads) void a8g64_normalized_prepare_small_kernel(
     const hip_bfloat16* input, const hip_bfloat16* norm, float eps, bool unit_offset,
     std::uint32_t tokens, std::uint8_t* low_codes, std::uint8_t* high_codes,
-    std::uint16_t* scale_words, std::uint32_t* status, hip_bfloat16* normalized_rows) {
+    std::uint16_t* scale_words, std::uint32_t* status, hip_bfloat16* normalized_rows,
+    std::uint32_t* clear_status) {
     __shared__ float partial[kSmallQuantizeMaximumVectors];
     __shared__ float inverse[kNormalizedSmallMaximumTokens];
     constexpr std::uint32_t columns = kNormalizedPrefillColumns;
     constexpr std::uint32_t kPasses = kSmallQuantizeMaximumVectors / kSmallQuantizeThreads;
     const std::uint32_t total = tokens * kNormalizedSmallRowVectors;
-    if (threadIdx.x == 0U) *status = 0U;
+    if (threadIdx.x == 0U) {
+        *status = 0U;
+        // A later stage's status word owned by the same Op (see a8q4g64_normalized_mlp).
+        if (clear_status != nullptr) *clear_status = 0U;
+    }
     uint4 loaded[kPasses];
 #pragma unroll
     for (std::uint32_t pass = 0; pass < kPasses; ++pass) {
@@ -940,19 +946,20 @@ constexpr std::uint32_t kGatedPrefillColumns = 6144U;
 constexpr std::uint32_t kGatedPrefillHeadDim = 128U;
 constexpr std::uint32_t kGatedPrefillVectors = kGatedPrefillColumns / (8U * kWaveSize);
 
-__global__ __launch_bounds__(kNormalizedPrefillTokensPerBlock * kWaveSize)
-void a8g64_gated_normalized_prepare_prefill_kernel(
-    const hip_bfloat16* input, const hip_bfloat16* norm, const hip_bfloat16* gate, float eps,
-    std::uint32_t tokens, std::uint8_t* low_codes, std::uint8_t* high_codes,
-    std::uint16_t* scale_words, std::uint32_t* status) {
+// One 16-byte vector (slot = 32 * vector + lane of a token row) of the gated prepare. Callers
+// keep each wave on 32 consecutive slots of one token so the DPP rows are whole heads/groups.
+__device__ __forceinline__ uint4 a8g64_gated_load(const hip_bfloat16* rows, std::uint32_t token,
+                                                  std::uint32_t slot) {
+    return reinterpret_cast<const uint4*>(
+        rows + static_cast<std::size_t>(token) * kGatedPrefillColumns)[slot];
+}
+
+__device__ __forceinline__ void a8g64_gated_prepare_vector(
+    uint4 value_words, uint4 gate_words, const hip_bfloat16* norm, float eps,
+    std::uint32_t token, std::uint32_t slot, std::uint8_t* low_codes, std::uint8_t* high_codes,
+    std::uint16_t* scale_words, bool& nonfinite, bool& overflow) {
     constexpr std::uint32_t columns = kGatedPrefillColumns;
-    const std::uint32_t lane = threadIdx.x % kWaveSize;
-    const std::uint32_t token =
-        blockIdx.x * kNormalizedPrefillTokensPerBlock + threadIdx.x / kWaveSize;
-    if (token >= tokens) return;
-    const std::size_t row_offset = static_cast<std::size_t>(token) * columns;
-    const uint4* values = reinterpret_cast<const uint4*>(input + row_offset);
-    const uint4* gates = reinterpret_cast<const uint4*>(gate + row_offset);
+    const std::uint32_t lane = slot % kWaveSize;
     // Every head uses the same [128] weight: this lane always reads the same eight gains.
     const uint4 gain_words =
         reinterpret_cast<const uint4*>(norm)[lane % (kGatedPrefillHeadDim / 8U)];
@@ -961,80 +968,113 @@ void a8g64_gated_normalized_prepare_prefill_kernel(
         const std::uint32_t word = words[element >> 1U];
         return __uint_as_float((element & 1U) ? word & 0xffff0000U : word << 16U);
     };
+    const std::uint32_t x_packed[4]{value_words.x, value_words.y, value_words.z, value_words.w};
+    const std::uint32_t z_packed[4]{gate_words.x, gate_words.y, gate_words.z, gate_words.w};
+    float sumsq = 0.0F;
+#pragma unroll
+    for (std::uint32_t element = 0; element < 8U; ++element) {
+        const float x = bf16_at(x_packed, element);
+        sumsq = fmaf(x, x, sumsq);
+    }
+    // Sum over the 16 lanes (one head) of this DPP row.
+    sumsq += __int_as_float(__builtin_amdgcn_update_dpp(
+        0, __float_as_int(sumsq), 0x168, 0xf, 0xf, false));
+    sumsq += __int_as_float(__builtin_amdgcn_update_dpp(
+        0, __float_as_int(sumsq), 0x164, 0xf, 0xf, false));
+    sumsq += __int_as_float(__builtin_amdgcn_update_dpp(
+        0, __float_as_int(sumsq), 0x162, 0xf, 0xf, false));
+    sumsq += __int_as_float(__builtin_amdgcn_update_dpp(
+        0, __float_as_int(sumsq), 0x161, 0xf, 0xf, false));
+    const float inverse = rsqrtf(sumsq / static_cast<float>(kGatedPrefillHeadDim) + eps);
+    float value[8];
+    float maximum = 0.0F;
+#pragma unroll
+    for (std::uint32_t element = 0; element < 8U; ++element) {
+        const float z = bf16_at(z_packed, element);
+        const float silu = z / (1.0F + expf(-z));
+        float normalized = static_cast<float>(hip_bfloat16(
+            bf16_at(x_packed, element) * inverse * bf16_at(gain_packed, element) * silu));
+        nonfinite |= !isfinite(normalized);
+        normalized = isfinite(normalized) ? normalized : 0.0F;
+        value[element] = normalized;
+        maximum = fmaxf(maximum, fabsf(normalized));
+    }
+    maximum = fmaxf(maximum, __int_as_float(__builtin_amdgcn_update_dpp(
+        0, __float_as_int(maximum), 0x164, 0xf, 0xf, false)));
+    maximum = fmaxf(maximum, __int_as_float(__builtin_amdgcn_update_dpp(
+        0, __float_as_int(maximum), 0x162, 0xf, 0xf, false)));
+    maximum = fmaxf(maximum, __int_as_float(__builtin_amdgcn_update_dpp(
+        0, __float_as_int(maximum), 0x161, 0xf, 0xf, false)));
+    std::uint16_t scale_bits = 0U;
+    if (maximum != 0.0F) {
+        scale_bits = __half_as_ushort(__float2half_rn(maximum / 127.0F));
+        if (scale_bits == 0U) scale_bits = 1U;
+        if (!isfinite(__half2float(__ushort_as_half(scale_bits)))) {
+            overflow = true;
+            scale_bits = 0U;
+        }
+    }
+    if ((lane & 7U) == 0U) {
+        scale_words[static_cast<std::size_t>(token) * (columns / kQ4Group) + slot / 8U] =
+            scale_bits;
+    }
+    const float scale = __half2float(__ushort_as_half(scale_bits));
+    std::uint32_t low_word = 0U, high_word = 0U;
+#pragma unroll
+    for (std::uint32_t element = 0; element < 8U; ++element) {
+        const int code = scale != 0.0F
+            ? max(-127, min(127, __float2int_rn(value[element] / scale)))
+            : 0;
+        const int low = code & 0x0f;
+        const int high = (code - low) / 16;
+        low_word |= static_cast<std::uint32_t>(low) << (element * 4U);
+        high_word |= static_cast<std::uint32_t>(high & 0x0f) << (element * 4U);
+    }
+    const std::size_t packed_offset = static_cast<std::size_t>(token) * (columns / 8U) + slot;
+    reinterpret_cast<std::uint32_t*>(low_codes)[packed_offset] = low_word;
+    reinterpret_cast<std::uint32_t*>(high_codes)[packed_offset] = high_word;
+}
+
+__global__ __launch_bounds__(kNormalizedPrefillTokensPerBlock * kWaveSize)
+void a8g64_gated_normalized_prepare_prefill_kernel(
+    const hip_bfloat16* input, const hip_bfloat16* norm, const hip_bfloat16* gate, float eps,
+    std::uint32_t tokens, std::uint8_t* low_codes, std::uint8_t* high_codes,
+    std::uint16_t* scale_words, std::uint32_t* status) {
+    const std::uint32_t lane = threadIdx.x % kWaveSize;
+    const std::uint32_t token =
+        blockIdx.x * kNormalizedPrefillTokensPerBlock + threadIdx.x / kWaveSize;
+    if (token >= tokens) return;
     bool nonfinite = false, overflow = false;
 #pragma unroll 4
     for (std::uint32_t vector = 0; vector < kGatedPrefillVectors; ++vector) {
         const std::uint32_t slot = vector * kWaveSize + lane;
-        const uint4 value_words = values[slot];
-        const uint4 gate_words = gates[slot];
-        const std::uint32_t x_packed[4]{value_words.x, value_words.y, value_words.z,
-                                        value_words.w};
-        const std::uint32_t z_packed[4]{gate_words.x, gate_words.y, gate_words.z, gate_words.w};
-        float sumsq = 0.0F;
-#pragma unroll
-        for (std::uint32_t element = 0; element < 8U; ++element) {
-            const float x = bf16_at(x_packed, element);
-            sumsq = fmaf(x, x, sumsq);
-        }
-        // Sum over the 16 lanes (one head) of this DPP row.
-        sumsq += __int_as_float(__builtin_amdgcn_update_dpp(
-            0, __float_as_int(sumsq), 0x168, 0xf, 0xf, false));
-        sumsq += __int_as_float(__builtin_amdgcn_update_dpp(
-            0, __float_as_int(sumsq), 0x164, 0xf, 0xf, false));
-        sumsq += __int_as_float(__builtin_amdgcn_update_dpp(
-            0, __float_as_int(sumsq), 0x162, 0xf, 0xf, false));
-        sumsq += __int_as_float(__builtin_amdgcn_update_dpp(
-            0, __float_as_int(sumsq), 0x161, 0xf, 0xf, false));
-        const float inverse = rsqrtf(sumsq / static_cast<float>(kGatedPrefillHeadDim) + eps);
-        float value[8];
-        float maximum = 0.0F;
-#pragma unroll
-        for (std::uint32_t element = 0; element < 8U; ++element) {
-            const float z = bf16_at(z_packed, element);
-            const float silu = z / (1.0F + expf(-z));
-            float normalized = static_cast<float>(hip_bfloat16(
-                bf16_at(x_packed, element) * inverse * bf16_at(gain_packed, element) * silu));
-            nonfinite |= !isfinite(normalized);
-            normalized = isfinite(normalized) ? normalized : 0.0F;
-            value[element] = normalized;
-            maximum = fmaxf(maximum, fabsf(normalized));
-        }
-        maximum = fmaxf(maximum, __int_as_float(__builtin_amdgcn_update_dpp(
-            0, __float_as_int(maximum), 0x164, 0xf, 0xf, false)));
-        maximum = fmaxf(maximum, __int_as_float(__builtin_amdgcn_update_dpp(
-            0, __float_as_int(maximum), 0x162, 0xf, 0xf, false)));
-        maximum = fmaxf(maximum, __int_as_float(__builtin_amdgcn_update_dpp(
-            0, __float_as_int(maximum), 0x161, 0xf, 0xf, false)));
-        std::uint16_t scale_bits = 0U;
-        if (maximum != 0.0F) {
-            scale_bits = __half_as_ushort(__float2half_rn(maximum / 127.0F));
-            if (scale_bits == 0U) scale_bits = 1U;
-            if (!isfinite(__half2float(__ushort_as_half(scale_bits)))) {
-                overflow = true;
-                scale_bits = 0U;
-            }
-        }
-        if ((lane & 7U) == 0U) {
-            scale_words[static_cast<std::size_t>(token) * (columns / kQ4Group) + slot / 8U] =
-                scale_bits;
-        }
-        const float scale = __half2float(__ushort_as_half(scale_bits));
-        std::uint32_t low_word = 0U, high_word = 0U;
-#pragma unroll
-        for (std::uint32_t element = 0; element < 8U; ++element) {
-            const int code = scale != 0.0F
-                ? max(-127, min(127, __float2int_rn(value[element] / scale)))
-                : 0;
-            const int low = code & 0x0f;
-            const int high = (code - low) / 16;
-            low_word |= static_cast<std::uint32_t>(low) << (element * 4U);
-            high_word |= static_cast<std::uint32_t>(high & 0x0f) << (element * 4U);
-        }
-        const std::size_t packed_offset =
-            static_cast<std::size_t>(token) * (columns / 8U) + slot;
-        reinterpret_cast<std::uint32_t*>(low_codes)[packed_offset] = low_word;
-        reinterpret_cast<std::uint32_t*>(high_codes)[packed_offset] = high_word;
+        a8g64_gated_prepare_vector(a8g64_gated_load(input, token, slot),
+                                   a8g64_gated_load(gate, token, slot), norm, eps, token, slot,
+                                   low_codes, high_codes, scale_words, nonfinite, overflow);
     }
+    if (nonfinite) atomicOr(status, static_cast<std::uint32_t>(Q4G64ActivationNonfinite));
+    if (overflow) atomicOr(status, static_cast<std::uint32_t>(Q4G64ActivationScaleOverflow));
+}
+
+// Small-T form: one 16-byte slot per thread over T x 768 slots (256-thread CTAs keep every wave
+// inside one token row), the same per-vector arithmetic. A single CTA is compute-bound on one CU,
+// so the status word is reset by the launcher instead.
+constexpr std::uint32_t kGatedSmallMaximumTokens = 8U;
+constexpr std::uint32_t kGatedSmallThreads = 256U;
+static_assert((kGatedPrefillColumns / 8U) % kGatedSmallThreads == 0U);
+
+__global__ __launch_bounds__(kGatedSmallThreads)
+void a8g64_gated_normalized_prepare_small_kernel(
+    const hip_bfloat16* input, const hip_bfloat16* norm, const hip_bfloat16* gate, float eps,
+    std::uint8_t* low_codes, std::uint8_t* high_codes, std::uint16_t* scale_words,
+    std::uint32_t* status) {
+    constexpr std::uint32_t row_slots = kGatedPrefillColumns / 8U;
+    const std::uint32_t index = blockIdx.x * kGatedSmallThreads + threadIdx.x;
+    const std::uint32_t token = index / row_slots, slot = index % row_slots;
+    bool nonfinite = false, overflow = false;
+    a8g64_gated_prepare_vector(a8g64_gated_load(input, token, slot),
+                               a8g64_gated_load(gate, token, slot), norm, eps, token, slot,
+                               low_codes, high_codes, scale_words, nonfinite, overflow);
     if (nonfinite) atomicOr(status, static_cast<std::uint32_t>(Q4G64ActivationNonfinite));
     if (overflow) atomicOr(status, static_cast<std::uint32_t>(Q4G64ActivationScaleOverflow));
 }
@@ -4022,15 +4062,17 @@ hipError_t run_a8q4_projection(const A8Q4G64LinearArgs& linear_args,
 hipError_t launch_normalized_prepare(const hip_bfloat16* input, const hip_bfloat16* norm,
                                      float eps, bool unit_offset, std::uint32_t tokens,
                                      const A8G64ActivationWorkspace& workspace,
-                                     hip_bfloat16* normalized, hipStream_t stream) noexcept {
+                                     hip_bfloat16* normalized, hipStream_t stream,
+                                     std::uint32_t* clear_status = nullptr) noexcept {
 #if defined(__HIPCC__)
     if (tokens <= kNormalizedSmallMaximumTokens) {
         hipLaunchKernelGGL(a8g64_normalized_prepare_small_kernel, dim3(1),
                            dim3(kSmallQuantizeThreads), 0, stream, input, norm, eps,
                            unit_offset, tokens, workspace.low_codes, workspace.high_codes,
-                           workspace.scales, workspace.status, normalized);
+                           workspace.scales, workspace.status, normalized, clear_status);
         return hipGetLastError();
     }
+    if (clear_status != nullptr) return hipErrorInvalidValue;
     const hipError_t reset = hipMemsetAsync(workspace.status, 0, sizeof(std::uint32_t), stream);
     if (reset != hipSuccess) return reset;
     hipLaunchKernelGGL(a8g64_normalized_prepare_prefill_kernel,
@@ -4042,7 +4084,7 @@ hipError_t launch_normalized_prepare(const hip_bfloat16* input, const hip_bfloat
     return hipGetLastError();
 #else
     (void)input; (void)norm; (void)eps; (void)unit_offset; (void)tokens; (void)workspace;
-    (void)normalized; (void)stream;
+    (void)normalized; (void)stream; (void)clear_status;
     return hipErrorNotSupported;
 #endif
 }
@@ -4051,9 +4093,10 @@ bool a8q4g64_normalized_linear_batched_supported(std::uint32_t tokens) noexcept 
     return tokens >= 2U && scalar_base_offsets_fit(tokens, 34816U, 5120U);
 }
 
-hipError_t a8q4g64_normalized_linear_batched(
-    const A8Q4G64CandidateArgs& args, const hip_bfloat16* norm, float eps,
-    bool unit_offset, hipStream_t stream) noexcept {
+namespace {
+hipError_t normalized_linear_batched(const A8Q4G64CandidateArgs& args, const hip_bfloat16* norm,
+                                     float eps, bool unit_offset, std::uint32_t* clear_status,
+                                     hipStream_t stream) noexcept {
     const std::uint32_t tokens = args.tokens;
     if (!a8q4g64_normalized_linear_batched_supported(tokens) || args.rows != 34816U ||
         args.columns != 5120U || args.padded_columns != 5120U || !(eps > 0.0F) ||
@@ -4094,14 +4137,21 @@ hipError_t a8q4g64_normalized_linear_batched(
         tokens, 34816U, 5120U, 5120U};
     if (!valid_a8q4_linear_args(linear_args)) return hipErrorInvalidValue;
 #if defined(__HIPCC__)
-    const hipError_t prepared = launch_normalized_prepare(args.input, norm, eps, unit_offset,
-                                                          tokens, workspace, nullptr, stream);
+    const hipError_t prepared = launch_normalized_prepare(
+        args.input, norm, eps, unit_offset, tokens, workspace, nullptr, stream, clear_status);
     if (prepared != hipSuccess) return prepared;
     return run_a8q4_projection(linear_args, stream);
 #else
-    (void)unit_offset;
+    (void)unit_offset; (void)clear_status;
     return hipErrorNotSupported;
 #endif
+}
+}
+
+hipError_t a8q4g64_normalized_linear_batched(
+    const A8Q4G64CandidateArgs& args, const hip_bfloat16* norm, float eps,
+    bool unit_offset, hipStream_t stream) noexcept {
+    return normalized_linear_batched(args, norm, eps, unit_offset, nullptr, stream);
 }
 
 bool a8q4g64_shared_activation_supported(std::uint32_t tokens, std::uint32_t columns,
@@ -4222,17 +4272,25 @@ hipError_t a8q4g64_normalized_shared_activation_linear(
 #endif
 }
 
-bool a8q4g64_gated_normalized_linear_prefill_supported(std::uint32_t tokens) noexcept {
-    return tokens != 0U && tokens % kA8Q4M128PrefillTokenTile == 0U &&
-           use_a8q4_prefill_cta(tokens, 5120U, 6144U) &&
-           scalar_base_offsets_fit(tokens, 5120U, 6144U);
+namespace {
+bool gated_normalized_small(std::uint32_t tokens) noexcept {
+    return tokens >= 1U && tokens <= kGatedSmallMaximumTokens &&
+           detail::use_a8q4_small_batch_projection(tokens, 5120U, 6144U, 6144U);
+}
 }
 
-hipError_t a8q4g64_gated_normalized_linear_prefill(
+bool a8q4g64_gated_normalized_linear_supported(std::uint32_t tokens) noexcept {
+    return gated_normalized_small(tokens) ||
+           (tokens != 0U && tokens % kA8Q4M128PrefillTokenTile == 0U &&
+            use_a8q4_prefill_cta(tokens, 5120U, 6144U) &&
+            scalar_base_offsets_fit(tokens, 5120U, 6144U));
+}
+
+hipError_t a8q4g64_gated_normalized_linear(
     const A8Q4G64CandidateArgs& args, const hip_bfloat16* norm, const hip_bfloat16* gate,
     float eps, hipStream_t stream) noexcept {
     const std::uint32_t tokens = args.tokens;
-    if (!a8q4g64_gated_normalized_linear_prefill_supported(tokens) || args.rows != 5120U ||
+    if (!a8q4g64_gated_normalized_linear_supported(tokens) || args.rows != 5120U ||
         args.columns != 6144U || args.padded_columns != 6144U || !(eps > 0.0F) ||
         eps > std::numeric_limits<float>::max()) return hipErrorInvalidValue;
     const std::size_t input_bytes = static_cast<std::size_t>(tokens) * 6144U * sizeof(hip_bfloat16);
@@ -4270,6 +4328,20 @@ hipError_t a8q4g64_gated_normalized_linear_prefill(
         args.weight_codes, code_bytes, args.weight_scales, scale_bytes, args.output,
         tokens, 5120U, 6144U, 6144U, true};
     if (!valid_a8q4_linear_args(linear_args, true)) return hipErrorInvalidValue;
+#if defined(__HIPCC__)
+    if (gated_normalized_small(tokens)) {
+        const hipError_t reset = hipMemsetAsync(workspace.status, 0, sizeof(std::uint32_t), stream);
+        if (reset != hipSuccess) return reset;
+        hipLaunchKernelGGL(a8g64_gated_normalized_prepare_small_kernel,
+                           dim3(tokens * (kGatedPrefillColumns / 8U) / kGatedSmallThreads),
+                           dim3(kGatedSmallThreads), 0, stream, args.input, norm, gate, eps,
+                           workspace.low_codes, workspace.high_codes, workspace.scales,
+                           workspace.status);
+        const hipError_t launched = hipGetLastError();
+        if (launched != hipSuccess) return launched;
+        return detail::launch_a8q4_small_batch_projection(linear_args, stream);
+    }
+#endif
     hipError_t result = hipMemsetAsync(workspace.status, 0, sizeof(std::uint32_t), stream);
     if (result != hipSuccess) return result;
 #if defined(__HIPCC__)
@@ -4513,8 +4585,13 @@ hipError_t a8q4g64_projected_residual(const A8Q4G64CandidateArgs& args,
     return run_a8q4_projection(linear_args, stream);
 }
 
-hipError_t fused_silu_a8q4g64_down(
-    const FusedSiluA8Q4G64DownArgs& args, hipStream_t stream) noexcept {
+namespace {
+hipError_t launch_fused_silu_quantize(const hip_bfloat16* gate_up,
+                                      const A8G64ActivationWorkspace& workspace, bool reset,
+                                      hipStream_t stream) noexcept;
+
+hipError_t fused_silu_down(const FusedSiluA8Q4G64DownArgs& args, bool status_cleared,
+                           hipStream_t stream) noexcept {
     const std::uint32_t tokens = args.tokens;
     constexpr std::uint32_t rows = 5120U;
     constexpr std::uint32_t columns = 17408U;
@@ -4554,9 +4631,49 @@ hipError_t fused_silu_a8q4g64_down(
         workspace.status, args.weight_codes, args.weight_code_bytes, args.weight_scales,
         args.weight_scale_bytes, args.residual, tokens, rows, columns, columns, true};
     if (!valid_a8q4_linear_args(linear_args, true)) return hipErrorInvalidValue;
-    hipError_t result = fused_silu_a8g64_prepare(args.gate_up, workspace, stream);
+    hipError_t result = status_cleared
+        ? launch_fused_silu_quantize(args.gate_up, workspace, false, stream)
+        : fused_silu_a8g64_prepare(args.gate_up, workspace, stream);
     if (result != hipSuccess) return result;
     return run_a8q4_projection(linear_args, stream);
+}
+}
+
+hipError_t fused_silu_a8q4g64_down(
+    const FusedSiluA8Q4G64DownArgs& args, hipStream_t stream) noexcept {
+    return fused_silu_down(args, false, stream);
+}
+
+bool a8q4g64_normalized_mlp_supported(std::uint32_t tokens) noexcept {
+    return tokens <= kNormalizedSmallMaximumTokens &&
+           a8q4g64_normalized_linear_batched_supported(tokens) &&
+           a8q4g64_projected_residual_supported(tokens, 5120U, 17408U);
+}
+
+hipError_t a8q4g64_normalized_mlp(const A8Q4G64CandidateArgs& gate_up,
+                                  const hip_bfloat16* norm, float eps, bool unit_offset,
+                                  const FusedSiluA8Q4G64DownArgs& down,
+                                  hipStream_t stream) noexcept {
+    const std::uint32_t tokens = gate_up.tokens;
+    if (!a8q4g64_normalized_mlp_supported(tokens) || down.tokens != tokens ||
+        down.gate_up != gate_up.output ||
+        gate_up.activation_workspace != down.activation_workspace)
+        return hipErrorInvalidValue;
+    A8G64ActivationWorkspace down_workspace{};
+    if (a8q4g64_bind_activation_workspace(down.activation_workspace,
+                                          down.activation_workspace_bytes, tokens, 17408U,
+                                          &down_workspace) != hipSuccess)
+        return hipErrorInvalidValue;
+    // The prepare clears the down status only if the gate/up stage never touches that word.
+    const auto* gate_up_end =
+        static_cast<const std::uint8_t*>(gate_up.activation_workspace) +
+        gate_up.activation_workspace_bytes;
+    if (reinterpret_cast<const std::uint8_t*>(down_workspace.status) < gate_up_end)
+        return hipErrorInvalidValue;
+    const hipError_t projected =
+        normalized_linear_batched(gate_up, norm, eps, unit_offset, down_workspace.status, stream);
+    if (projected != hipSuccess) return projected;
+    return fused_silu_down(down, true, stream);
 }
 
 hipError_t fused_silu_a8g64_prepare(
@@ -4582,13 +4699,24 @@ hipError_t fused_silu_a8g64_prepare(
                        sizeof(std::uint32_t))) {
         return hipErrorInvalidValue;
     }
-    hipError_t result = hipMemsetAsync(workspace.status, 0, sizeof(std::uint32_t), stream);
-    if (result != hipSuccess) return result;
+    return launch_fused_silu_quantize(gate_up, workspace, true, stream);
+}
+
+namespace {
+hipError_t launch_fused_silu_quantize(const hip_bfloat16* gate_up,
+                                      const A8G64ActivationWorkspace& workspace, bool reset,
+                                      hipStream_t stream) noexcept {
+    if (reset) {
+        const hipError_t result =
+            hipMemsetAsync(workspace.status, 0, sizeof(std::uint32_t), stream);
+        if (result != hipSuccess) return result;
+    }
     hipLaunchKernelGGL(fused_silu_a8g64_quantize_kernel,
-                       dim3(columns / kQ4Group, tokens), dim3(kWaveSize), 0, stream,
+                       dim3(17408U / kQ4Group, workspace.tokens), dim3(kWaveSize), 0, stream,
                        gate_up, workspace.low_codes, workspace.high_codes,
                        workspace.scales, workspace.status);
     return hipGetLastError();
+}
 }
 
 std::size_t a8w8g32_activation_workspace_capacity_bytes(std::uint32_t tokens,

@@ -1,9 +1,10 @@
 # R9700 codec and gfx12 qualification
 
 DFlash target chain verification W4..6 (contexts 64..262144) uses the split-context dense route:
-one 192-thread CTA (the six row-tile-0 waves, two staging items per thread, three CTAs per WGP) per
-KV head and context chunk (at most 64 chunks of at least 256 keys) runs the
-dense-prefill arithmetic (represented BF16 Q against exact-BF16 FP8 K, online FP32 Softmax with FP16
+one 192-thread CTA (three CTAs per WGP) per KV head and context chunk (at most 64 chunks of at
+least 256 keys). The six query heads' (row, head) pairs are packed into sixteen-lane tiles, so
+three compute waves cover W6, while three loader waves hold the next 32-key block in registers and
+stage it after each barrier. Every pair runs the dense-prefill arithmetic (represented BF16 Q against exact-BF16 FP8 K, online FP32 Softmax with FP16
 probabilities, FP16 V/8 PV) and writes per-row numerator/origin/denominator partials; a stable FP32
 merge normalizes. The public oracle is BF16-Q attention with exact decoded cache planes and the
 dense criterion |error| <= 2e-3 absolute or relative. The route no longer matches ordinary T=1

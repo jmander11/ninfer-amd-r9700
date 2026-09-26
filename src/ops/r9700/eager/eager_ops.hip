@@ -153,6 +153,21 @@ __global__ void bf16_extract_features_kernel(const hip_bfloat16* source,
     destination[index] = source[column * source_features + source_feature + feature];
 }
 
+__global__ void bf16_split_features_kernel(const hip_bfloat16* source, hip_bfloat16* first,
+                                           hip_bfloat16* second, std::uint32_t source_features,
+                                           std::uint32_t split, std::size_t elements) {
+    const std::size_t index = static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    if (index >= elements) { return; }
+    const std::size_t column = index / source_features;
+    const std::size_t feature = index - column * source_features;
+    const hip_bfloat16 value = source[index];
+    if (feature < split) {
+        first[column * split + feature] = value;
+    } else {
+        second[column * (source_features - split) + feature - split] = value;
+    }
+}
+
 __global__ void cast_fp32_to_bf16_kernel(const float* source, hip_bfloat16* destination,
                                          std::size_t count) {
     const std::size_t index = static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
@@ -973,6 +988,20 @@ hipError_t bf16_extract_features(const hip_bfloat16* source, hip_bfloat16* desti
                                                    linear_grid(elements), dim3(kBlock), 0, stream,
                                                    source, destination, source_features,
                                                    source_feature, destination_features,
+                                                   elements); });
+}
+
+hipError_t bf16_split_features(const hip_bfloat16* source, hip_bfloat16* first,
+                               hip_bfloat16* second, std::uint32_t source_features,
+                               std::uint32_t split, std::uint32_t columns,
+                               hipStream_t stream) noexcept {
+    const std::size_t elements = static_cast<std::size_t>(source_features) * columns;
+    return checked_launch(source != nullptr && first != nullptr && second != nullptr &&
+                              columns != 0 && split != 0 && split < source_features &&
+                              valid_linear_count(elements) && valid_stream(stream),
+                          [&] { hipLaunchKernelGGL(bf16_split_features_kernel,
+                                                   linear_grid(elements), dim3(kBlock), 0, stream,
+                                                   source, first, second, source_features, split,
                                                    elements); });
 }
 

@@ -60,6 +60,40 @@ expected value exactly.
 Copy bus rate counts both the read and write traffic. This is the hardware bandwidth bound, not a
 model or individual-Op throughput claim.
 
+## DFlash decode: fewer launches, packed verify attention (2026-09-26)
+
+Same setup. Round time is the comparable metric: the gated-RMSNorm seam change below alters the
+greedy trajectory of this sample (acceptance 3.88 -> 4.27), and prompts longer than the ~4.7K-token
+code corpus repeat it, which inflates acceptance at 32K/64K.
+
+| Workload | Before, ms/round | After, ms/round |
+|---|---:|---:|
+| P4096/G128 | 34.93 | 33.94 |
+| P15200/G128 | 36.2 | 34.93 |
+| P32768/G128 | 37.14 | 36.20 |
+| P65536/G128 | 40.46 | 38.66 |
+
+Ordinary decode P4096/G256: 32.6 -> 32.7 tok/s. Dispatches per 4K round fell from 1,350 to 1,233
+and status/zero fills from 101 to 70. **Launches.** The GDN output's gated RMSNorm now feeds the
+A8G64 codec directly at T1..8 (the prefill route's per-vector arithmetic, so its BF16 seam differs
+from the retired eager route; one thread per slot, 11.2 -> 3.8 µs with its status reset); the two
+Q4 attention input projections share one quantization and each is split into its two outputs by
+one copy kernel; the gate/up prepare also clears the fused-SiLU down status (one normalized-MLP Op,
+bit-identical to the two-Op composition); and the attention output buffer is zeroed only for padded
+columns. **Verify attention.** The (row, query head) pairs of a KV head's six query heads are packed
+into sixteen-lane tiles, so T6 needs three computing waves instead of six (62% of WMMA rows were
+padding); the other three waves are loaders that hold block n+1 in registers while block n is
+consumed. Per-pair arithmetic is unchanged; 64K W6 is 0.458 -> 0.312 ms per layer (packing alone 0.361),
+about 55% of KV bandwidth; chunk caps of 48 and 96 were no better than 64.
+
+**Measured out.** Sampled drafter proposals under p-less T1.5 (the selector's softmax over its
+top-16 at draft temperature 1.0 or 1.5, with residual resampling on rejection): 7 prompt types x 3
+seeds, 256 tokens, fixed K5. Greedy proposals accepted 2.59 tokens/round (52.3%), sampled 2.04
+(T1.0) and 1.91 (T1.5), and greedy won in every category, so proposals stay greedy. Overlapping
+the GDN control projection with the input projection needs concurrent graph branches, which this
+ROCm serializes unless `DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING=1` is set (a debug switch; it does not
+change the current single-branch graph).
+
 ## DFlash decode: K-split projections and latency-bound kernels (2026-09-25)
 
 Same setup as the section below.

@@ -17,7 +17,7 @@ from tools.r9700.check_prefill_cta_static import _function, _one_integer
 
 # One loop body per 32-key block: S^T = K Q^T as 2 key tiles x 16 feature tiles of BF16 WMMA,
 # then O += P V as 16 feature tiles x 2 key tiles of FP16 WMMA.
-PROFILE = {"bf16_wmma": 32, "f16_wmma": 32, "lds": 37536, "vgpr": 256, "occupancy": 5,
+PROFILE = {"bf16_wmma": 32, "f16_wmma": 32, "lds": 37552, "vgpr": 256, "occupancy": 5,
            "workgroup": 384, "barrier_pairs": 3}
 
 

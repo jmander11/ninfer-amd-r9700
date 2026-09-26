@@ -22,7 +22,7 @@ def section(text: str, fragment: str) -> str:
     return match.group(0)
 
 
-def resources(text: str, fragment: str) -> tuple[int, int, int, int, int, int]:
+def resources(text: str, fragment: str) -> tuple[int, int, int, int, int, int, int]:
     name = re.search(rf"(?m)^\s*\.name:\s+.*{re.escape(fragment)}.*$", text)
     if name is None:
         raise RuntimeError(f"missing metadata: {fragment}")
@@ -40,9 +40,10 @@ def resources(text: str, fragment: str) -> tuple[int, int, int, int, int, int]:
         found = re.search(rf"(?m)^\s*\.{field}:\s+(\d+)\s*$", block)
         require(found is not None, f"missing {field}: {fragment}")
         values.append(int(found.group(1)))
-    require(values[4] == 0 and values[5] == 0 and values[6] == 32,
+    # No scratch and no VGPR spills; SGPR spills (to VGPR lanes, no memory traffic) are pinned.
+    require(values[1] == 0 and values[5] == 0 and values[6] == 32,
             f"spill/wave contract failed for {fragment}: {values}")
-    return values[0], values[1], values[2], values[3], values[6], values[7]
+    return values[0], values[1], values[2], values[3], values[4], values[6], values[7]
 
 
 def occupancy(text: str, fragment: str) -> int:
@@ -59,18 +60,18 @@ def main() -> int:
     parser.add_argument("assembly", type=Path)
     args = parser.parse_args()
     text = args.assembly.read_text(encoding="utf-8")
-    # DFlash split-context verification: the six-wave dense attention kernel in split mode and its
-    # merge.
+    # DFlash split-context verification: the packed, warp-specialized dense verify kernel (three
+    # compute and three loader waves) and its merge.
     expected = {
-        "dense_prefill_kernelILj16ELb1ELj192EE": ((37536, 0, 44, 249, 32, 1024), 5),
-        "dense_verify_merge_kernel": ((0, 0, 18, 8, 32, 1024), 16),
+        "dense_verify_kernelILj16EE": ((37552, 0, 107, 246, 8, 32, 1024), 5),
+        "dense_verify_merge_kernel": ((0, 0, 18, 8, 0, 32, 1024), 16),
     }
     for symbol, (wanted, wanted_occupancy) in expected.items():
         actual = resources(text, symbol)
         require(actual == wanted, f"{symbol} resources {actual} != {wanted}")
         require(occupancy(text, symbol) == wanted_occupancy,
                 f"{symbol} occupancy is not {wanted_occupancy}")
-    body = section(text, "dense_prefill_kernelILj16ELb1ELj192EE")
+    body = section(text, "dense_verify_kernelILj16EE")
     require(body.count("v_wmma_f32_16x16x16_bf16") == 32 and
             body.count("v_wmma_f32_16x16x16_f16") == 32,
             "split verify kernel lost its 32 BF16 QK and 32 FP16 PV WMMAs")

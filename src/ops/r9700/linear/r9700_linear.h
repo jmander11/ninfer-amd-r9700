@@ -324,14 +324,15 @@ struct A8Q4G64SideProjection {
     bool unit_offset, hip_bfloat16* normalized, hipStream_t stream,
     const A8Q4G64SideProjection* side = nullptr) noexcept;
 
-// Qwen3.8 GDN output projection at A8 prefill extents: the per-head gated RMSNorm
-// (x * rsqrt(mean_head(x^2) + eps) * norm * silu(z), BF16 seam, 48 heads x 128) of input/z
-// [T,6144] feeds the A8G64 codec directly, then the M128 A8Q4 GEMM against the Q4N16K16
-// [5120,6144] weight rounds to BF16 and publishes output = BF16(output + projection) in place
-// (the projected-residual boundary). input/gate/norm are 16-byte aligned; T is a positive
-// multiple of 128 inside the qualified M128 inventory.
-[[nodiscard]] bool a8q4g64_gated_normalized_linear_prefill_supported(std::uint32_t tokens) noexcept;
-[[nodiscard]] hipError_t a8q4g64_gated_normalized_linear_prefill(
+// Qwen3.8 GDN output projection: the per-head gated RMSNorm (x * rsqrt(mean_head(x^2) + eps) *
+// norm * silu(z), BF16 seam, 48 heads x 128) of input/z [T,6144] feeds the A8G64 codec directly,
+// then the A8Q4 GEMM against the Q4N16K16 [5120,6144] weight rounds to BF16 and publishes
+// output = BF16(output + projection) in place (the projected-residual boundary). The per-vector
+// prepare arithmetic is shared by both extents: T1..8 small-batch widths use one thread per
+// 16-byte slot and the small-batch projection; prefill T is a positive multiple of 128 inside the
+// qualified M128 inventory. input/gate/norm are 16-byte aligned.
+[[nodiscard]] bool a8q4g64_gated_normalized_linear_supported(std::uint32_t tokens) noexcept;
+[[nodiscard]] hipError_t a8q4g64_gated_normalized_linear(
     const A8Q4G64CandidateArgs& args, const hip_bfloat16* norm, const hip_bfloat16* gate,
     float eps, hipStream_t stream) noexcept;
 
@@ -407,6 +408,19 @@ struct FusedSiluA8Q4G64DownArgs {
     std::uint32_t columns = 0;
     std::uint32_t padded_columns = 0;
 };
+
+// The whole A8 MLP at small verification widths (T <= 12 inside both routes): the normalized
+// gate/up projection of a8q4g64_normalized_linear_batched followed by fused_silu_a8q4g64_down,
+// with identical arithmetic. Both stages share one activation workspace base; the single-CTA
+// gate/up prepare also clears the down stage's status word (which must lie beyond the gate/up
+// planes), so the fused SiLU quantization needs no separate reset launch. down.gate_up must be
+// gate_up.output.
+[[nodiscard]] bool a8q4g64_normalized_mlp_supported(std::uint32_t tokens) noexcept;
+[[nodiscard]] hipError_t a8q4g64_normalized_mlp(const A8Q4G64CandidateArgs& gate_up,
+                                                const hip_bfloat16* norm, float eps,
+                                                bool unit_offset,
+                                                const FusedSiluA8Q4G64DownArgs& down,
+                                                hipStream_t stream) noexcept;
 
 struct A8Q4G64KernelResources {
     int quantize_registers = 0;

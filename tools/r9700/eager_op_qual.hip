@@ -1024,6 +1024,28 @@ void qualify_public_extended_paths(hipStream_t stream) {
     }
     require_bf16_exact(copy_to_host(d_extract), extract_expected, "public feature extraction");
 
+    // Split: rows [0, extract_start) and [extract_start, source_features) of every column.
+    DeviceBuffer<hip_bfloat16> d_split_first(extract_start * extract_columns);
+    DeviceBuffer<hip_bfloat16> d_split_second((source_features - extract_start) * extract_columns);
+    Tensor split_first(d_split_first.get(), DType::BF16,
+                       {static_cast<std::int32_t>(extract_start),
+                        static_cast<std::int32_t>(extract_columns)});
+    Tensor split_second(d_split_second.get(), DType::BF16,
+                        {static_cast<std::int32_t>(source_features - extract_start),
+                         static_cast<std::int32_t>(extract_columns)});
+    ninfer::ops::split_bf16_columns(extract_source_tensor, split_first, split_second, stream);
+    HIP_CHECK(hipStreamSynchronize(stream));
+    std::vector<std::uint16_t> first_expected, second_expected;
+    for (std::uint32_t column = 0; column < extract_columns; ++column) {
+        for (std::uint32_t feature = 0; feature < source_features; ++feature) {
+            const auto bits = bf16_bits(
+                extract_source[static_cast<std::size_t>(column) * source_features + feature]);
+            (feature < extract_start ? first_expected : second_expected).push_back(bits);
+        }
+    }
+    require_bf16_exact(copy_to_host(d_split_first), first_expected, "public split first rows");
+    require_bf16_exact(copy_to_host(d_split_second), second_expected, "public split second rows");
+
     // Fused and gated norms are checked against the represented-input FP64 formula. L2 dump is
     // additionally checked against the production FP32 accumulation boundary it exposes.
     constexpr std::uint32_t norm_features = 64;

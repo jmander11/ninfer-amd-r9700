@@ -433,6 +433,37 @@ void extract_bf16_columns(const Tensor& source, std::int32_t source_column,
         static_cast<std::uint32_t>(source.ne[1]), stream));
 }
 
+void split_bf16_columns(const Tensor& source, Tensor& first, Tensor& second,
+                        hipStream_t stream) {
+    constexpr const char* operation = "split_bf16_columns";
+    require_dtype(source, DType::BF16, operation, "source");
+    require_dtype(first, DType::BF16, operation, "first");
+    require_dtype(second, DType::BF16, operation, "second");
+    const auto rank2 = [](const Tensor& tensor) {
+        return tensor.ne[0] > 0 && tensor.ne[1] > 0 && tensor.ne[2] == 1 && tensor.ne[3] == 1;
+    };
+    if (!rank2(source) || !rank2(first) || !rank2(second) || first.ne[1] != source.ne[1] ||
+        second.ne[1] != source.ne[1] || first.ne[0] + second.ne[0] != source.ne[0]) {
+        throw std::invalid_argument("split_bf16_columns: invalid rank-2 split geometry");
+    }
+    require_contiguous_nonnull(source, operation, "source");
+    require_contiguous_nonnull(first, operation, "first");
+    require_contiguous_nonnull(second, operation, "second");
+    const auto overlaps = [](const Tensor& a, const Tensor& b) {
+        const auto a0 = reinterpret_cast<std::uintptr_t>(a.data);
+        const auto b0 = reinterpret_cast<std::uintptr_t>(b.data);
+        return a0 < b0 + b.bytes() && b0 < a0 + a.bytes();
+    };
+    if (overlaps(source, first) || overlaps(source, second) || overlaps(first, second)) {
+        throw std::invalid_argument("split_bf16_columns: tensors must not alias");
+    }
+    HIP_CHECK(r9700::eager::bf16_split_features(
+        static_cast<const hip_bfloat16*>(source.data), static_cast<hip_bfloat16*>(first.data),
+        static_cast<hip_bfloat16*>(second.data), static_cast<std::uint32_t>(source.ne[0]),
+        static_cast<std::uint32_t>(first.ne[0]), static_cast<std::uint32_t>(source.ne[1]),
+        stream));
+}
+
 void cast_fp32_to_bf16(const Tensor& source, Tensor& destination, hipStream_t stream) {
     constexpr const char* operation = "cast_fp32_to_bf16";
     require_dtype(source, DType::FP32, operation, "source");

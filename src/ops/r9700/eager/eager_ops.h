@@ -79,6 +79,12 @@ namespace ninfer::ops::r9700::eager {
                                           std::uint32_t batch,
                                           std::uint32_t lane_count,
                                           hipStream_t stream) noexcept;
+// Splits each source column into destination rows [0, split) -> first and
+// [split, source_features) -> second in one launch; exact BF16 copies.
+[[nodiscard]] hipError_t bf16_split_features(const hip_bfloat16* source, hip_bfloat16* first,
+                                             hip_bfloat16* second, std::uint32_t source_features,
+                                             std::uint32_t split, std::uint32_t columns,
+                                             hipStream_t stream) noexcept;
 [[nodiscard]] hipError_t bf16_extract_features(const hip_bfloat16* source,
                                                hip_bfloat16* destination,
                                                std::uint32_t source_features,

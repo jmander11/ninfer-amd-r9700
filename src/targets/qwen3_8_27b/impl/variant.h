@@ -14,6 +14,10 @@
 #include <span>
 #include <vector>
 
+namespace ninfer::ops::r9700::linear {
+struct FusedSiluA8Q4G64DownArgs;
+}
+
 namespace ninfer::targets::qwen3_8_27b::detail {
 
 using GraphExecutionProfile = qwen3::GraphExecutionProfile;
@@ -73,6 +77,12 @@ struct Variant {
         void linear(const Tensor& input, const Weight& weight, Tensor& output,
                     WorkspaceArena& fallback_workspace, hipStream_t stream);
         // SiLU-gated down projection added to the residual in place.
+        // Small verification widths: normalized gate/up plus fused SiLU down as one Op whose
+        // prepare also clears the down status (no reset launch). gate_up is BF16 scratch.
+        [[nodiscard]] bool normalized_mlp(Tensor& residual, const Tensor& norm, float eps,
+                                          const Weight& gate_up_weight, const Weight& down,
+                                          Tensor& gate_up, std::int32_t text_layer,
+                                          hipStream_t stream);
         void fused_mlp_down(const Tensor& gate_up, const Weight& down,
                             Tensor& residual, hipStream_t stream);
         [[nodiscard]] bool gdn_q4_pair_t1(
@@ -91,6 +101,10 @@ struct Variant {
         // (the value-z matrix split at value_dim) are projected from the same planes.
         // The output-gate projection runs on a private side stream, overlapping the
         // convolution and recurrence; join_gdn_gate orders `stream` after it.
+        // Both Q4 attention input projections from one A8G64 quantization of the hidden rows.
+        [[nodiscard]] bool attention_q4_shared(const Tensor& hidden, const Weight& query_key,
+                                               const Weight& gate_value, Tensor& query_key_output,
+                                               Tensor& gate_value_output, hipStream_t stream);
         [[nodiscard]] bool gdn_q4_normalized_prefill(
             const Tensor& residual, const Tensor& norm, float eps, const Weight& query_key,
             const Weight& value_z, Tensor& normalized, Tensor& query_key_output,
@@ -127,12 +141,12 @@ struct Variant {
                    rows == 2U * TextConfig::intermediate && columns == TextConfig::hidden &&
                    weight == QType::Q4G64_F16S;
         }
-        // Full A8 prefill chunks of the GDN output projection: the gated RMSNorm feeds the codec
-        // directly and the GEMM epilogue adds the projection to the residual.
-        [[nodiscard]] bool gated_normalized_output_prefill(
+        // GDN output projection at A8 small-batch widths (T1..8) and full prefill chunks: the
+        // gated RMSNorm feeds the codec directly and the GEMM epilogue adds the projection to the
+        // residual.
+        [[nodiscard]] bool gated_normalized_output(
             const Tensor& recurrent_output, const Tensor& norm, const Tensor& gate, float eps,
-            const Weight& weight, Tensor& residual, qwen3::TextPhase phase,
-            std::int32_t text_layer, hipStream_t stream);
+            const Weight& weight, Tensor& residual, std::int32_t text_layer, hipStream_t stream);
         // A8 widths T >= 2 (verification and prefill) of the same gate/up boundary normalize
         // straight into the codec.
         [[nodiscard]] bool normalized_linear_batched(
@@ -192,6 +206,8 @@ struct Variant {
 
     private:
         struct Impl;
+        [[nodiscard]] ops::r9700::linear::FusedSiluA8Q4G64DownArgs fused_down_args(
+            const Tensor& gate_up, const Weight& down, Tensor& residual) const;
         std::unique_ptr<Impl> impl_;
     };
 

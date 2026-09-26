@@ -1056,12 +1056,20 @@ void TextContext::attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_la
             : nullptr;
     const std::size_t key_stride = static_cast<std::size_t>(kCfg.kv_size) * sequence_width;
     const std::size_t query_stride = static_cast<std::size_t>(kCfg.q_size) * sequence_width;
-    HIP_CHECK(hipMemsetAsync(attention_fp32.data, 0, attention_fp32.bytes(), s));
     for (std::int32_t sequence = 0; sequence < sequence_batch; ++sequence) {
         qwen3::PagedKVTransaction& transaction = *text_kv_transactions_[sequence];
         const auto live_width = static_cast<std::int32_t>(transaction.position_count());
         const std::size_t key_offset = static_cast<std::size_t>(sequence) * key_stride;
         const std::size_t query_offset = static_cast<std::size_t>(sequence) * query_stride;
+        // Attention writes every live column of its panel; only padded columns need zeros.
+        if (live_width < sequence_width) {
+            HIP_CHECK(hipMemsetAsync(
+                all_attention + query_offset + static_cast<std::size_t>(kCfg.q_size) * live_width,
+                0,
+                static_cast<std::size_t>(kCfg.q_size) * (sequence_width - live_width) *
+                    sizeof(float),
+                s));
+        }
         transaction.launch_append_layer(static_cast<std::uint32_t>(fidx),
                                         all_keys + key_offset, all_values + key_offset, s);
         const qwen3::PagedKVLayerRead cache_read =
