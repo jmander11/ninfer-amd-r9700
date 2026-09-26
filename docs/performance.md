@@ -77,7 +77,7 @@ FP32 association and therefore the greedy trajectory.
 | GDN front zeroes the gated output status word (no memset) | 32.03 (32.16 same run) |
 | drafter SWA split partials in BF16 WMMA (72 -> 25 us per layer) | 31.78 |
 
-Host contention from another project's container shifted later absolute values by about +0.2 ms
+Run-to-run host drift (cause not established) shifted later absolute values by about +0.2 ms
 (the session-start binary still measured 33.3); rows after it compare against the same run.
 P65536/G256: 37.10 -> 35.35 ms/round (session start vs end).
 
@@ -125,6 +125,34 @@ spilled. A synthetic read of the TokenFastest K plane in 16-key blocks tops out 
 versus 612 GB/s for whole 64-byte rows, so the block-granular K access pattern is the limit. The
 prefill GDN convolution scatter was vectorized (987 -> 224 us per P2048 chunk) without an
 end-to-end change: it overlaps the side-stream output-gate projection.
+
+## Attention and drafter boundary fusions (2026-09-26, day)
+
+Same setup; every row is an A/B against the previous binary in the same session, and each step
+keeps the greedy trajectory (identical DFlash acceptance).
+
+| Step | P4096/G128 DFlash tok/s |
+|---|---:|
+| start (e125d435) | ~143.8 |
+| FP8 attention: RMSNorm into the E4M3 codec, one split-output QK/GV launch, gate into the codec, residual epilogue; T <= 16 FP8 status from one extra CTA | ~145.0 |
+| Q4 attention: normalized split pair (T5/6), gate into the A8G64 codec with residual epilogue | ~145.1 |
+| DFlash drafter Q/K RMSNorm + RoPE + V split in one Op (`dflash_qkv_norm_rope`) | ~145.5 |
+| DFlash convolution finish accumulates into the residual | ~145.7 |
+| six-row status pass of the T <= 6 normalized prepare | ~146.1 |
+
+P65536/G256: 35.33 -> 34.93 ms/round. Ordinary decode and prefill are unchanged within noise. The
+attention fusions are bit-identical to the unfused chains (`ninfer_r9700_attention_fused_qual`);
+the drafter front is bit-identical at T <= 8 and within one rotation rounding above, where the
+eager combined RoPE kernel contracts differently (`ninfer_r9700_dflash_qkv_norm_rope_qual`).
+
+**Measured out.** *MALL prefetch:* touching a 16 MB weight block costs about as long as reading it
+(33 us), a prefetched block is evicted by any intervening large projection, a forked Device Graph
+branch costs ~400 us, and extra prefetch CTAs inside the recurrence kernel added 11-15 us per
+layer in a synthetic layer sequence, so no form pays. *FP8 Q in packed decode attention:* a
+two-term (hi+lo) E4M3 query keeping BF16-equivalent precision was no faster; plain E4M3 Q saves
+6-9% of the kernel (~1% of a 64K round) and was already rejected on real-tensor operator error.
+*GDN record kernel:* 2 or 8 row tiles instead of 4 were slower; it reads the 3.1 MB FP32 state
+at ~270 GB/s and is bound by the serial token transitions.
 
 ## Paired small-batch projections (2026-09-26)
 
