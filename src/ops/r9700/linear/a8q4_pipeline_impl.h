@@ -65,34 +65,18 @@ __device__ __forceinline__ void consume_pipeline_group(
     }
 }
 
-// Accumulate publishes BF16(output + BF16(projection)) in place (projected-residual boundary).
-// Split waves of one CTA own contiguous ascending G64 ranges of the same 16 rows (row tile
-// `tile`); wave zero adds the later partial sums in ascending wave order before the single BF16
-// publication.
-template<unsigned N,unsigned K,unsigned T,bool Accumulate=false,unsigned Split=1>
-__device__ __forceinline__ void a8q4_pipeline_body(
+// Complete FP32 sums of the 16 rows of `row`'s tile: split waves of one CTA own contiguous
+// ascending G64 ranges; wave zero adds the later partial sums in ascending wave order. Returns
+// false for the waves that must not publish.
+template<unsigned K,unsigned T,unsigned Split>
+__device__ __forceinline__ bool a8q4_pipeline_sums(
     const std::uint8_t* low,const std::uint8_t* high,const std::uint16_t* scales,
-    const std::uint32_t* status,const std::uint8_t* codes,
-    const std::uint16_t* weight_scales,hip_bfloat16* output,unsigned tile) {
+    const std::uint8_t* codes,const std::uint16_t* weight_scales,unsigned row,
+    float (&total)[T<=8?T:8]) {
     constexpr unsigned G=K/64;
     static_assert(Split>=1 && G%Split==0 && G/Split>=2);
     constexpr unsigned Width=T<=8?T:8,Groups=G/Split;
-    const unsigned lane=threadIdx.x&31U,wave=threadIdx.x>>5U,row=tile*16+(lane&15U);
-    const unsigned token_base=T>8?blockIdx.y*16U+(lane>>4U)*8U:0U;
-    if(*status!=0) {
-        if(wave!=0)return;
-        if constexpr(T<=8) {
-            if(lane<16)for(unsigned t=0;t<T;++t) {
-                hip_bfloat16 poison;poison.data=0x7fc1;output[t*N+row]=poison;
-            }
-        } else {
-            for(unsigned t=0;t<8;++t)if(token_base+t<T) {
-                hip_bfloat16 poison;poison.data=0x7fc1;output[(token_base+t)*N+row]=poison;
-            }
-        }
-        return;
-    }
-    float total[Width]{};
+    const unsigned lane=threadIdx.x&31U,wave=threadIdx.x>>5U;
     const unsigned first=wave*Groups;
     PipelineGroup current=load_pipeline_group<K,T>(low,high,scales,codes,weight_scales,row,first);
 #pragma unroll 1
@@ -124,12 +108,40 @@ __device__ __forceinline__ void a8q4_pipeline_body(
             for(unsigned t=0;t<Width;++t)partial[wave-1][t][lane]=total[t];
         }
         __syncthreads();
-        if(wave!=0)return;
+        if(wave!=0)return false;
 #pragma unroll
         for(unsigned w=0;w<Split-1;++w)
 #pragma unroll
             for(unsigned t=0;t<Width;++t)total[t]+=partial[w][t][lane];
     }
+    return true;
+}
+
+// Accumulate publishes BF16(output + BF16(projection)) in place (projected-residual boundary).
+// The rows of tile `tile` are summed by a8q4_pipeline_sums before the single BF16 publication.
+template<unsigned N,unsigned K,unsigned T,bool Accumulate=false,unsigned Split=1>
+__device__ __forceinline__ void a8q4_pipeline_body(
+    const std::uint8_t* low,const std::uint8_t* high,const std::uint16_t* scales,
+    const std::uint32_t* status,const std::uint8_t* codes,
+    const std::uint16_t* weight_scales,hip_bfloat16* output,unsigned tile) {
+    constexpr unsigned Width=T<=8?T:8;
+    const unsigned lane=threadIdx.x&31U,wave=threadIdx.x>>5U,row=tile*16+(lane&15U);
+    const unsigned token_base=T>8?blockIdx.y*16U+(lane>>4U)*8U:0U;
+    if(*status!=0) {
+        if(wave!=0)return;
+        if constexpr(T<=8) {
+            if(lane<16)for(unsigned t=0;t<T;++t) {
+                hip_bfloat16 poison;poison.data=0x7fc1;output[t*N+row]=poison;
+            }
+        } else {
+            for(unsigned t=0;t<8;++t)if(token_base+t<T) {
+                hip_bfloat16 poison;poison.data=0x7fc1;output[(token_base+t)*N+row]=poison;
+            }
+        }
+        return;
+    }
+    float total[Width]{};
+    if(!a8q4_pipeline_sums<K,T,Split>(low,high,scales,codes,weight_scales,row,total))return;
     const auto publish=[&](hip_bfloat16& target,float value) {
         const hip_bfloat16 projection(value);
         if constexpr(Accumulate)
@@ -147,6 +159,32 @@ __device__ __forceinline__ void a8q4_pipeline_body(
         for(unsigned t=0;t<8;++t)if(token_base+t<T)
             publish(output[(token_base+t)*N+row],total[t]);
     }
+}
+
+// T<=8 form handing each row's BF16 projections of all T tokens to `epilogue(row, values)`
+// (lanes 0..15 of wave zero) instead of storing them. A nonzero activation status hands the
+// canonical BF16 quiet NaN for every token, exactly what the stored form would publish.
+template<unsigned K,unsigned T,unsigned Split,class Epilogue>
+__device__ __forceinline__ void a8q4_pipeline_rows(
+    const std::uint8_t* low,const std::uint8_t* high,const std::uint16_t* scales,
+    const std::uint32_t* status,const std::uint8_t* codes,
+    const std::uint16_t* weight_scales,unsigned tile,Epilogue&& epilogue) {
+    static_assert(T<=8);
+    const unsigned lane=threadIdx.x&31U,wave=threadIdx.x>>5U,row=tile*16+(lane&15U);
+    hip_bfloat16 values[T];
+    if(*status!=0) {
+        if(wave!=0 || lane>=16)return;
+#pragma unroll
+        for(unsigned t=0;t<T;++t)values[t].data=0x7fc1;
+        epilogue(row,values);
+        return;
+    }
+    float total[T]{};
+    if(!a8q4_pipeline_sums<K,T,Split>(low,high,scales,codes,weight_scales,row,total))return;
+    if(lane>=16)return;
+#pragma unroll
+    for(unsigned t=0;t<T;++t)values[t]=hip_bfloat16(total[t]);
+    epilogue(row,values);
 }
 
 }

@@ -1,5 +1,6 @@
 #include "ops/r9700/gdn/gdn_ops.h"
 #include "ops/r9700/linear/a8g64_codec.h"
+#include "ops/r9700/linear/a8q4_pipeline_impl.h"
 #include "ops/r9700/linear/r9700_linear.h"
 
 #include "ninfer/types.h"
@@ -320,17 +321,17 @@ __global__ void projection_conv_snapshot_kernel(
     }
 }
 
-__global__ void projection_conv_record_kernel(
-    const hip_bfloat16* query_key, const hip_bfloat16* value_z,
-    const hip_bfloat16* conv_weight, const hip_bfloat16* conv_states,
-    const std::int32_t* valid_columns, const std::int32_t* initial_state_slots,
-    const std::int32_t* parent_index, hip_bfloat16* conv_record, hip_bfloat16* query,
-    hip_bfloat16* key, hip_bfloat16* value, hip_bfloat16* z, std::uint32_t width,
-    std::uint32_t state_slots) {
-    const std::uint32_t channel = blockIdx.x * blockDim.x + threadIdx.x;
-    const std::uint32_t batch_index = blockIdx.y;
-    if (channel >= kProjectionChannels) { return; }
-
+// The recorded causal convolution of one channel of one sequence (width columns starting at
+// batch_index * width): `represented(column)` is the channel's BF16 projection of that column.
+// Shared by the standalone record kernel and the fused GDN pair epilogue.
+template <class Represented>
+__device__ __forceinline__ void conv_record_channel(
+    Represented&& represented_at, const hip_bfloat16* conv_weight,
+    const hip_bfloat16* conv_states, const std::int32_t* valid_columns,
+    const std::int32_t* initial_state_slots, const std::int32_t* parent_index,
+    hip_bfloat16* conv_record, hip_bfloat16* query, hip_bfloat16* key, hip_bfloat16* value,
+    std::uint32_t width, std::uint32_t state_slots, std::uint32_t batch_index,
+    std::uint32_t channel) {
     const std::int32_t valid_raw = valid_columns == nullptr
         ? static_cast<std::int32_t>(width)
         : valid_columns[batch_index];
@@ -359,10 +360,6 @@ __global__ void projection_conv_record_kernel(
 
     for (std::uint32_t token = 0; token < width; ++token) {
         const std::size_t column = static_cast<std::size_t>(batch_index) * width + token;
-        if (channel < kProjectionValueRows) {
-            z[column * kProjectionValueRows + channel] =
-                value_z[column * kProjectionValueZRows + kProjectionValueRows + channel];
-        }
         if (token >= valid || !valid_initial) {
             conv_record[column * kProjectionChannels + channel] = hip_bfloat16(0.0F);
             publish_projection_output(hip_bfloat16(0.0F), query, key, value, column, channel);
@@ -379,7 +376,7 @@ __global__ void projection_conv_record_kernel(
         float h0 = parent < 0 ? checkpoint0 : saved0[parent];
         float h1 = parent < 0 ? checkpoint1 : saved1[parent];
         float h2 = parent < 0 ? checkpoint2 : saved2[parent];
-        const hip_bfloat16 represented = projection_value(query_key, value_z, column, channel);
+        const hip_bfloat16 represented = represented_at(column);
         conv_record[column * kProjectionChannels + channel] = represented;
         const float current = static_cast<float>(represented);
         float sum = fmaf(w0, h0, 0.0F);
@@ -391,6 +388,70 @@ __global__ void projection_conv_record_kernel(
         saved0[token] = h1;
         saved1[token] = h2;
         saved2[token] = current;
+    }
+}
+
+__global__ void projection_conv_record_kernel(
+    const hip_bfloat16* query_key, const hip_bfloat16* value_z,
+    const hip_bfloat16* conv_weight, const hip_bfloat16* conv_states,
+    const std::int32_t* valid_columns, const std::int32_t* initial_state_slots,
+    const std::int32_t* parent_index, hip_bfloat16* conv_record, hip_bfloat16* query,
+    hip_bfloat16* key, hip_bfloat16* value, hip_bfloat16* z, std::uint32_t width,
+    std::uint32_t state_slots) {
+    const std::uint32_t channel = blockIdx.x * blockDim.x + threadIdx.x;
+    const std::uint32_t batch_index = blockIdx.y;
+    if (channel >= kProjectionChannels) { return; }
+    if (channel < kProjectionValueRows) {
+        for (std::uint32_t token = 0; token < width; ++token) {
+            const std::size_t column = static_cast<std::size_t>(batch_index) * width + token;
+            z[column * kProjectionValueRows + channel] =
+                value_z[column * kProjectionValueZRows + kProjectionValueRows + channel];
+        }
+    }
+    conv_record_channel(
+        [&](std::size_t column) { return projection_value(query_key, value_z, column, channel); },
+        conv_weight, conv_states, valid_columns, initial_state_slots, parent_index, conv_record,
+        query, key, value, width, state_slots, batch_index, channel);
+}
+
+// One sequence at T <= 8 columns: the GDN query-key [4096] and value-z [12288] A8Q4 projections
+// of one prepared activation (the small-batch pair arithmetic, CTAs [0, 256) own the query-key
+// row tiles) hand each row's BF16 values straight to the recorded convolution of its channel;
+// value-z rows 6144.. are the output gate z. Bitwise the pair projection followed by
+// projection_conv_record_kernel.
+constexpr unsigned kPairConvSplit = 4U;
+template <unsigned T>
+__global__ __launch_bounds__(32U * kPairConvSplit) void gdn_pair_conv_record_kernel(
+    const std::uint8_t* low, const std::uint8_t* high, const std::uint16_t* scales,
+    const std::uint32_t* status, const std::uint8_t* query_key_codes,
+    const std::uint16_t* query_key_scales, const std::uint8_t* value_z_codes,
+    const std::uint16_t* value_z_scales, const hip_bfloat16* conv_weight,
+    const hip_bfloat16* conv_states, const std::int32_t* valid_columns,
+    const std::int32_t* initial_state_slots, const std::int32_t* parent_index,
+    hip_bfloat16* conv_record, hip_bfloat16* query, hip_bfloat16* key, hip_bfloat16* value,
+    hip_bfloat16* z, std::uint32_t state_slots) {
+    constexpr unsigned kQueryKeyTiles = (kProjectionQueryRows + kProjectionKeyRows) / 16U;
+    const auto convolve = [&](std::uint32_t channel, const hip_bfloat16 (&values)[T]) {
+        conv_record_channel([&](std::size_t column) { return values[column]; }, conv_weight,
+                            conv_states, valid_columns, initial_state_slots, parent_index,
+                            conv_record, query, key, value, T, state_slots, 0U, channel);
+    };
+    if (blockIdx.x < kQueryKeyTiles) {
+        linear::detail::a8q4_pipeline_rows<kControlColumns, T, kPairConvSplit>(
+            low, high, scales, status, query_key_codes, query_key_scales, blockIdx.x,
+            [&](unsigned row, const hip_bfloat16 (&values)[T]) { convolve(row, values); });
+    } else {
+        linear::detail::a8q4_pipeline_rows<kControlColumns, T, kPairConvSplit>(
+            low, high, scales, status, value_z_codes, value_z_scales, blockIdx.x - kQueryKeyTiles,
+            [&](unsigned row, const hip_bfloat16 (&values)[T]) {
+                if (row < kProjectionValueRows) {
+                    convolve(kProjectionQueryRows + kProjectionKeyRows + row, values);
+                } else {
+#pragma unroll
+                    for (unsigned t = 0; t < T; ++t)
+                        z[t * kProjectionValueRows + row - kProjectionValueRows] = values[t];
+                }
+            });
     }
 }
 
@@ -1003,6 +1064,40 @@ hipError_t projection_conv_record_bf16(
                                conv_states, valid_columns, initial_state_slots, parent_index,
                                conv_record, query, key, value, z, width, state_slots);
         });
+}
+
+bool gdn_pair_conv_record_supported(std::uint32_t width, std::uint32_t batch) noexcept {
+    return batch == 1U && (width == 5U || width == 6U);
+}
+
+hipError_t gdn_pair_conv_record_bf16(
+    const linear::A8G64ActivationWorkspace& planes, const std::uint8_t* query_key_codes,
+    const std::uint16_t* query_key_scales, const std::uint8_t* value_z_codes,
+    const std::uint16_t* value_z_scales, const hip_bfloat16* conv_weight,
+    const hip_bfloat16* conv_states, const std::int32_t* valid_columns,
+    const std::int32_t* initial_state_slots, const std::int32_t* parent_index,
+    hip_bfloat16* conv_record, hip_bfloat16* query, hip_bfloat16* key, hip_bfloat16* value,
+    hip_bfloat16* z, std::uint32_t width, std::uint32_t state_slots, hipStream_t stream) noexcept {
+    const bool valid = gdn_pair_conv_record_supported(width, 1U) && planes.tokens == width &&
+        planes.columns == kControlColumns && planes.padded_columns == kControlColumns &&
+        planes.low_codes != nullptr && planes.high_codes != nullptr && planes.scales != nullptr &&
+        planes.status != nullptr && query_key_codes != nullptr && query_key_scales != nullptr &&
+        value_z_codes != nullptr && value_z_scales != nullptr && conv_weight != nullptr &&
+        conv_states != nullptr && initial_state_slots != nullptr && conv_record != nullptr &&
+        query != nullptr && key != nullptr && value != nullptr && z != nullptr &&
+        state_slots != 0U && valid_stream(stream);
+    return checked_launch(valid, [&] {
+        const dim3 grid((kProjectionQueryRows + kProjectionKeyRows + kProjectionValueZRows) / 16U);
+        const auto launch = [&](auto kernel) {
+            hipLaunchKernelGGL(kernel, grid, dim3(32U * kPairConvSplit), 0, stream,
+                               planes.low_codes, planes.high_codes, planes.scales, planes.status,
+                               query_key_codes, query_key_scales, value_z_codes, value_z_scales,
+                               conv_weight, conv_states, valid_columns, initial_state_slots,
+                               parent_index, conv_record, query, key, value, z, state_slots);
+        };
+        if (width == 5U) launch(gdn_pair_conv_record_kernel<5>);
+        else launch(gdn_pair_conv_record_kernel<6>);
+    });
 }
 
 hipError_t control_gates_bf16(const hip_bfloat16* a, const hip_bfloat16* b, const float* a_log,

@@ -674,9 +674,9 @@ bool Variant::ExecutionState::gdn_q4_pair_shared(
     return true;
 }
 
-bool Variant::ExecutionState::gdn_q4_normalized_front(
+bool Variant::ExecutionState::gdn_q4_normalized_front_record(
     const Tensor& residual, const Tensor& norm, float eps, const GdnProjectionWeights& weights,
-    Tensor& g, Tensor& beta, Tensor& query_key_output, Tensor& value_z_output,
+    const GdnConvRecord& record, Tensor& g, Tensor& beta, WorkspaceArena& workspace,
     hipStream_t stream) {
     constexpr std::int32_t kRows0 = 2 * TextConfig::key_dim;
     constexpr std::int32_t kRows1 = 2 * TextConfig::value_dim;
@@ -709,9 +709,7 @@ bool Variant::ExecutionState::gdn_q4_normalized_front(
         !gdn_prefill_rows(norm, TextConfig::hidden, 1) || !aligned(norm) ||
         !gdn_q4_input_weight(weights.input_projection.query_key, kRows0) ||
         !gdn_q4_input_weight(weights.input_projection.value_z, kRows1) ||
-        !gdn_prefill_rows(query_key_output, kRows0, tokens) ||
-        !gdn_prefill_rows(value_z_output, kRows1, tokens) || !shared(kRows0) ||
-        !shared(kRows1) || !control_weight(weights.a_projection) ||
+        !shared(kRows0) || !shared(kRows1) || !control_weight(weights.a_projection) ||
         !control_weight(weights.b_projection) || !fp32_rows(weights.a_log, 1) ||
         !fp32_rows(weights.dt_bias, 1) || !fp32_rows(g, tokens) || !fp32_rows(beta, tokens)) {
         return false;
@@ -734,18 +732,51 @@ bool Variant::ExecutionState::gdn_q4_normalized_front(
         static_cast<const float*>(weights.a_log.data),
         static_cast<const float*>(weights.dt_bias.data), static_cast<float*>(g.data),
         static_cast<float*>(beta.data), planes, nullptr, stream));
+    const auto i32 = [](const Tensor* tensor) {
+        return tensor == nullptr || tensor->data == nullptr
+                   ? nullptr
+                   : static_cast<const std::int32_t*>(tensor->data);
+    };
+    const auto bf16 = [](const Tensor& tensor) { return static_cast<hip_bfloat16*>(tensor.data); };
+    const auto width = static_cast<std::uint32_t>(record.query.ne[1]);
+    const auto batch = static_cast<std::uint32_t>(record.query.ne[2]);
+    const auto state_slots = static_cast<std::uint32_t>(record.conv_states.ne[2]);
+    const Weight& query_key = weights.input_projection.query_key;
+    const Weight& value_z = weights.input_projection.value_z;
+    if (ops::r9700::gdn::gdn_pair_conv_record_supported(width, batch)) {
+        HIP_CHECK(ops::r9700::gdn::gdn_pair_conv_record_bf16(
+            planes, static_cast<const std::uint8_t*>(query_key.qdata),
+            static_cast<const std::uint16_t*>(query_key.scales),
+            static_cast<const std::uint8_t*>(value_z.qdata),
+            static_cast<const std::uint16_t*>(value_z.scales),
+            static_cast<const hip_bfloat16*>(record.conv_weight.data),
+            static_cast<const hip_bfloat16*>(record.conv_states.data), i32(&record.valid_columns),
+            i32(&record.initial_slots), i32(record.parent_index), bf16(record.conv_record),
+            bf16(record.query), bf16(record.key), bf16(record.value), bf16(record.output_gate),
+            width, state_slots, stream));
+        return true;
+    }
+    auto scope = workspace.scope();
+    Tensor query_key_output = workspace.alloc(DType::BF16, {kRows0, tokens});
+    Tensor value_z_output = workspace.alloc(DType::BF16, {kRows1, tokens});
     HIP_CHECK(ops::r9700::linear::a8q4g64_prepared_shared_activation_linear(
         {.input = nullptr,
          .activation_workspace = impl_->activation.data,
          .activation_workspace_bytes = required,
-         .projections = {gdn_q4_projection(weights.input_projection.query_key, 0, kRows0,
-                                           query_key_output),
-                         gdn_q4_projection(weights.input_projection.value_z, 0, kRows1,
-                                           value_z_output)},
+         .projections = {gdn_q4_projection(query_key, 0, kRows0, query_key_output),
+                         gdn_q4_projection(value_z, 0, kRows1, value_z_output)},
          .projection_count = 2,
          .tokens = static_cast<std::uint32_t>(tokens),
          .columns = TextConfig::hidden},
         stream));
+    HIP_CHECK(ops::r9700::gdn::projection_conv_record_bf16(
+        static_cast<const hip_bfloat16*>(query_key_output.data),
+        static_cast<const hip_bfloat16*>(value_z_output.data),
+        static_cast<const hip_bfloat16*>(record.conv_weight.data),
+        static_cast<const hip_bfloat16*>(record.conv_states.data), i32(&record.valid_columns),
+        i32(&record.initial_slots), i32(record.parent_index), bf16(record.conv_record),
+        bf16(record.query), bf16(record.key), bf16(record.value), bf16(record.output_gate),
+        width, batch, state_slots, stream));
     return true;
 }
 
@@ -1704,29 +1735,11 @@ void Variant::gdn_front_record(
         if (parent_index != nullptr && parent_index->data != nullptr) {
             require_i32_selector(*parent_index, width, batch, false, "parent index");
         }
-        auto scope = workspace.scope();
-        Tensor query_key = workspace.alloc(DType::BF16, {2 * TextConfig::key_dim, tokens});
-        Tensor value_z = workspace.alloc(DType::BF16, {2 * TextConfig::value_dim, tokens});
-        if (execution->gdn_q4_normalized_front(residual_flat, norm_weight, eps, weights, g, beta,
-                                               query_key, value_z, stream)) {
-            HIP_CHECK(ops::r9700::gdn::projection_conv_record_bf16(
-                static_cast<const hip_bfloat16*>(query_key.data),
-                static_cast<const hip_bfloat16*>(value_z.data),
-                static_cast<const hip_bfloat16*>(conv_weight.data),
-                static_cast<const hip_bfloat16*>(conv_states.data),
-                valid_columns.data == nullptr
-                    ? nullptr
-                    : static_cast<const std::int32_t*>(valid_columns.data),
-                static_cast<const std::int32_t*>(initial_slots.data),
-                parent_index == nullptr || parent_index->data == nullptr
-                    ? nullptr
-                    : static_cast<const std::int32_t*>(parent_index->data),
-                static_cast<hip_bfloat16*>(conv_record.data),
-                static_cast<hip_bfloat16*>(query.data), static_cast<hip_bfloat16*>(key.data),
-                static_cast<hip_bfloat16*>(value.data),
-                static_cast<hip_bfloat16*>(output_gate.data), static_cast<std::uint32_t>(width),
-                static_cast<std::uint32_t>(batch), static_cast<std::uint32_t>(conv_states.ne[2]),
-                stream));
+        const ExecutionState::GdnConvRecord record{conv_weight, conv_states, valid_columns,
+                                                   initial_slots, parent_index, conv_record,
+                                                   query, key, value, output_gate};
+        if (execution->gdn_q4_normalized_front_record(residual_flat, norm_weight, eps, weights,
+                                                      record, g, beta, workspace, stream)) {
             return;
         }
     }

@@ -87,6 +87,20 @@ namespace ninfer::ops::r9700::gdn {
     hip_bfloat16* key, hip_bfloat16* value, hip_bfloat16* z, std::uint32_t width,
     std::uint32_t batch, std::uint32_t state_slots, hipStream_t stream) noexcept;
 
+// One sequence (batch 1) at verification widths 5..6: the Q4N16K16 query-key [4096,5120] and
+// value-z [12288,5120] projections of prepared A8G64 `planes` (the small-batch pair arithmetic)
+// fused with projection_conv_record_bf16 on their BF16 values; value-z rows 6144.. publish z.
+// Bitwise the pair projection followed by projection_conv_record_bf16.
+[[nodiscard]] bool gdn_pair_conv_record_supported(std::uint32_t width, std::uint32_t batch) noexcept;
+[[nodiscard]] hipError_t gdn_pair_conv_record_bf16(
+    const linear::A8G64ActivationWorkspace& planes, const std::uint8_t* query_key_codes,
+    const std::uint16_t* query_key_scales, const std::uint8_t* value_z_codes,
+    const std::uint16_t* value_z_scales, const hip_bfloat16* conv_weight,
+    const hip_bfloat16* conv_states, const std::int32_t* valid_columns,
+    const std::int32_t* initial_state_slots, const std::int32_t* parent_index,
+    hip_bfloat16* conv_record, hip_bfloat16* query, hip_bfloat16* key, hip_bfloat16* value,
+    hip_bfloat16* z, std::uint32_t width, std::uint32_t state_slots, hipStream_t stream) noexcept;
+
 // Makes the raw FP32 GDN controls. `a`/`b` are represented BF16 [tokens, value_heads], and
 // `a_log`/`dt_bias` are FP32 [value_heads]. Outputs g/beta are FP32 [tokens, value_heads]:
 // g=-exp(a_log)*softplus(a+dt_bias), beta=sigmoid(b), where softplus(x)=x for x>20 and otherwise

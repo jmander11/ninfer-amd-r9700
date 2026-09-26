@@ -105,13 +105,27 @@ struct Variant {
         [[nodiscard]] bool attention_q4_shared(const Tensor& hidden, const Weight& query_key,
                                                const Weight& gate_value, Tensor& query_key_output,
                                                Tensor& gate_value_output, hipStream_t stream);
-        // Verification-width GDN front: the input RMSNorm of `residual`, the a/b controls into
-        // g/beta and the A8G64 planes from one kernel, then both GDN input projections from those
-        // planes. The normalized rows are not materialized.
-        [[nodiscard]] bool gdn_q4_normalized_front(
+        // Operands of the recorded GDN convolution (projection_conv_record_bf16).
+        struct GdnConvRecord {
+            const Tensor& conv_weight;
+            const Tensor& conv_states;
+            const Tensor& valid_columns;
+            const Tensor& initial_slots;
+            const Tensor* parent_index;
+            Tensor& conv_record;
+            Tensor& query;
+            Tensor& key;
+            Tensor& value;
+            Tensor& output_gate;
+        };
+        // Verification-width GDN record front: the input RMSNorm of `residual`, the a/b controls
+        // into g/beta and the A8G64 planes from one kernel, then both GDN input projections from
+        // those planes and the recorded convolution (fused into the projection epilogue for one
+        // sequence of width 5..6). The normalized rows are not materialized.
+        [[nodiscard]] bool gdn_q4_normalized_front_record(
             const Tensor& residual, const Tensor& norm, float eps,
-            const GdnProjectionWeights& weights, Tensor& g, Tensor& beta,
-            Tensor& query_key_output, Tensor& value_z_output, hipStream_t stream);
+            const GdnProjectionWeights& weights, const GdnConvRecord& record, Tensor& g,
+            Tensor& beta, WorkspaceArena& workspace, hipStream_t stream);
         [[nodiscard]] bool gdn_q4_normalized_prefill(
             const Tensor& residual, const Tensor& norm, float eps, const Weight& query_key,
             const Weight& value_z, Tensor& normalized, Tensor& query_key_output,
