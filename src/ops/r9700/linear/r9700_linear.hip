@@ -4148,7 +4148,7 @@ bool a8q4g64_gated_normalized_linear_supported(std::uint32_t tokens) noexcept {
 
 hipError_t a8q4g64_gated_normalized_linear(
     const A8Q4G64CandidateArgs& args, const hip_bfloat16* norm, const hip_bfloat16* gate,
-    float eps, hipStream_t stream) noexcept {
+    float eps, hipStream_t stream, bool status_cleared) noexcept {
     const std::uint32_t tokens = args.tokens;
     if (!a8q4g64_gated_normalized_linear_supported(tokens) || args.rows != 5120U ||
         args.columns != 6144U || args.padded_columns != 6144U || !(eps > 0.0F) ||
@@ -4190,8 +4190,11 @@ hipError_t a8q4g64_gated_normalized_linear(
     if (!valid_a8q4_linear_args(linear_args, true)) return hipErrorInvalidValue;
 #if defined(__HIPCC__)
     if (gated_normalized_small(tokens)) {
-        const hipError_t reset = hipMemsetAsync(workspace.status, 0, sizeof(std::uint32_t), stream);
-        if (reset != hipSuccess) return reset;
+        if (!status_cleared) {
+            const hipError_t reset =
+                hipMemsetAsync(workspace.status, 0, sizeof(std::uint32_t), stream);
+            if (reset != hipSuccess) return reset;
+        }
         hipLaunchKernelGGL(a8g64_gated_normalized_prepare_small_kernel,
                            dim3(tokens * (kGatedPrefillColumns / 8U) / kGatedSmallThreads),
                            dim3(kGatedSmallThreads), 0, stream, args.input, norm, gate, eps,

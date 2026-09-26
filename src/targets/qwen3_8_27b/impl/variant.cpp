@@ -277,6 +277,10 @@ struct Variant::ExecutionState::Impl {
     hipEvent_t gate_fork = nullptr;
     hipEvent_t gate_join = nullptr;
     bool gate_pending = false;
+    // Layer and token count whose (T, 6144) gated-output status word the GDN front of that layer
+    // already zeroed (tokens 0: none).
+    std::int32_t gated_status_cleared_layer = -1;
+    std::int32_t gated_status_cleared_tokens = 0;
 
     Impl() {
         if (hipStreamCreateWithFlags(&side_stream, hipStreamNonBlocking) != hipSuccess ||
@@ -677,7 +681,7 @@ bool Variant::ExecutionState::gdn_q4_pair_shared(
 bool Variant::ExecutionState::gdn_q4_normalized_front_record(
     const Tensor& residual, const Tensor& norm, float eps, const GdnProjectionWeights& weights,
     const GdnConvRecord& record, Tensor& g, Tensor& beta, WorkspaceArena& workspace,
-    hipStream_t stream) {
+    std::int32_t text_layer, hipStream_t stream) {
     constexpr std::int32_t kRows0 = 2 * TextConfig::key_dim;
     constexpr std::int32_t kRows1 = 2 * TextConfig::value_dim;
     constexpr std::int32_t kHeads = TextConfig::gdn_value_heads;
@@ -724,6 +728,22 @@ bool Variant::ExecutionState::gdn_q4_normalized_front_record(
     HIP_CHECK(ops::r9700::linear::a8q4g64_bind_activation_workspace(
         impl_->activation.data, required, static_cast<std::uint32_t>(tokens), TextConfig::hidden,
         &planes));
+    // The same layer's gated output projection binds this region for (T, 6144); its status word
+    // lies beyond every (T, 5120) plane the input projections read, so the front zeroes it and
+    // the gated route skips its reset launch.
+    std::uint32_t* gated_status = nullptr;
+    const std::size_t gated_required =
+        ops::r9700::linear::a8q4g64_activation_workspace_capacity_bytes(
+            static_cast<std::uint32_t>(tokens), TextConfig::value_dim);
+    ops::r9700::linear::A8G64ActivationWorkspace gated_planes{};
+    if (gated_required != 0U && impl_->activation.bytes >= gated_required &&
+        ops::r9700::linear::a8q4g64_bind_activation_workspace(
+            impl_->activation.data, gated_required, static_cast<std::uint32_t>(tokens),
+            TextConfig::value_dim, &gated_planes) == hipSuccess &&
+        reinterpret_cast<std::uintptr_t>(gated_planes.status) >=
+            reinterpret_cast<std::uintptr_t>(planes.status + 1)) {
+        gated_status = gated_planes.status;
+    }
     HIP_CHECK(ops::r9700::gdn::bf16_gdn_normalized_front(
         static_cast<const hip_bfloat16*>(residual.data),
         static_cast<const hip_bfloat16*>(norm.data), eps, true,
@@ -731,7 +751,9 @@ bool Variant::ExecutionState::gdn_q4_normalized_front_record(
         static_cast<const hip_bfloat16*>(weights.b_projection.qdata),
         static_cast<const float*>(weights.a_log.data),
         static_cast<const float*>(weights.dt_bias.data), static_cast<float*>(g.data),
-        static_cast<float*>(beta.data), planes, nullptr, stream));
+        static_cast<float*>(beta.data), planes, nullptr, gated_status, stream));
+    impl_->gated_status_cleared_layer = text_layer;
+    impl_->gated_status_cleared_tokens = gated_status != nullptr ? tokens : 0;
     const auto i32 = [](const Tensor* tensor) {
         return tensor == nullptr || tensor->data == nullptr
                    ? nullptr
@@ -1024,7 +1046,10 @@ bool Variant::ExecutionState::gated_normalized_output(
          .tokens = static_cast<std::uint32_t>(tokens), .rows = TextConfig::hidden,
          .columns = TextConfig::value_dim, .padded_columns = TextConfig::value_dim},
         static_cast<const hip_bfloat16*>(norm.data), static_cast<const hip_bfloat16*>(gate.data),
-        eps, stream));
+        eps, stream,
+        impl_->gated_status_cleared_layer == text_layer &&
+            impl_->gated_status_cleared_tokens == tokens));
+    impl_->gated_status_cleared_tokens = 0;
     return true;
 }
 
@@ -1737,7 +1762,8 @@ void Variant::gdn_front_record(
                                                    initial_slots, parent_index, conv_record,
                                                    query, key, value, output_gate};
         if (execution->gdn_q4_normalized_front_record(residual_flat, norm_weight, eps, weights,
-                                                      record, g, beta, workspace, stream)) {
+                                                      record, g, beta, workspace, text_layer,
+                                                      stream)) {
             return;
         }
     }

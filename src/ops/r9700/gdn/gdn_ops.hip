@@ -603,7 +603,7 @@ __global__ __launch_bounds__(kControlT1Threads) void bf16_gdn_normalized_front_k
     const hip_bfloat16* a_weight, const hip_bfloat16* b_weight, const float* a_log,
     const float* dt_bias, float* g, float* beta, std::uint8_t* low_codes,
     std::uint8_t* high_codes, std::uint16_t* scale_words, std::uint32_t* status,
-    hip_bfloat16* hidden, std::uint32_t tokens) {
+    hip_bfloat16* hidden, std::uint32_t* clear_status, std::uint32_t tokens) {
     __shared__ float wave_sums[kFrontPassTokens][kFrontWaves];
     __shared__ float inverses[kFrontPassTokens];
     __shared__ float a_waves[kFrontPassTokens][kFrontWaves];
@@ -721,12 +721,14 @@ __global__ __launch_bounds__(kControlT1Threads) void bf16_gdn_normalized_front_k
     if (head == 0U) {
         const bool any_nonfinite = __syncthreads_or(nonfinite);
         const bool any_overflow = __syncthreads_or(overflow);
-        if (threadIdx.x == 0U)
+        if (threadIdx.x == 0U) {
             *status =
                 (any_nonfinite ? static_cast<std::uint32_t>(linear::Q4G64ActivationNonfinite)
                                : 0U) |
                 (any_overflow ? static_cast<std::uint32_t>(linear::Q4G64ActivationScaleOverflow)
                               : 0U);
+            if (clear_status != nullptr) *clear_status = 0U;
+        }
     }
 }
 
@@ -1169,7 +1171,7 @@ hipError_t bf16_gdn_normalized_front(
     const hip_bfloat16* a_weight, const hip_bfloat16* b_weight, const float* a_log,
     const float* dt_bias, float* g, float* beta,
     const linear::A8G64ActivationWorkspace& planes, hip_bfloat16* hidden,
-    hipStream_t stream) noexcept {
+    std::uint32_t* clear_status, hipStream_t stream) noexcept {
     const std::uint32_t tokens = planes.tokens;
     const auto aligned16 = [](const void* pointer) {
         return reinterpret_cast<std::uintptr_t>(pointer) % 16U == 0U;
@@ -1201,12 +1203,15 @@ hipError_t bf16_gdn_normalized_front(
         }
         if (hidden != nullptr && overlaps(ranges[first], byte_range(hidden, row_elements)))
             return hipErrorInvalidValue;
+        if (clear_status != nullptr && overlaps(ranges[first], byte_range(clear_status, 1U)))
+            return hipErrorInvalidValue;
     }
     return checked_launch(true, [&] {
         hipLaunchKernelGGL(bf16_gdn_normalized_front_kernel, dim3(kControlHeads),
                            dim3(kControlT1Threads), 0, stream, residual, norm, eps, unit_offset,
                            a_weight, b_weight, a_log, dt_bias, g, beta, planes.low_codes,
-                           planes.high_codes, planes.scales, planes.status, hidden, tokens);
+                           planes.high_codes, planes.scales, planes.status, hidden,
+                           clear_status, tokens);
     });
 }
 

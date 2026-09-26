@@ -125,14 +125,15 @@ namespace ninfer::ops::r9700::gdn {
 // [tokens,5120] (the row-CTA arithmetic of the eager RMSNorm, BF16 seam), the exact T1..24
 // control arithmetic of bf16_projected_control on that seam, and the exact A8G64 codec of the
 // same seam into `planes` (bound for tokens x 5120), whose status word is published without a
-// reset launch. `hidden`, when non-null, receives the BF16 seam rows.
+// reset launch. `hidden`, when non-null, receives the BF16 seam rows; `clear_status`, when
+// non-null, is a later Op's status word (disjoint from every operand) that CTA 0 zeroes.
 [[nodiscard]] bool bf16_gdn_normalized_front_supported(std::uint32_t tokens) noexcept;
 [[nodiscard]] hipError_t bf16_gdn_normalized_front(
     const hip_bfloat16* residual, const hip_bfloat16* norm, float eps, bool unit_offset,
     const hip_bfloat16* a_weight, const hip_bfloat16* b_weight, const float* a_log,
     const float* dt_bias, float* g, float* beta,
     const linear::A8G64ActivationWorkspace& planes, hip_bfloat16* hidden,
-    hipStream_t stream) noexcept;
+    std::uint32_t* clear_status, hipStream_t stream) noexcept;
 
 // Exact FP32 state movement for transaction/checkpoint publication. Source/destination are
 // non-overlapping FP32 elements and count is positive.

@@ -206,7 +206,8 @@ Result cell(unsigned t, hipStream_t s) {
                            const lin::A8G64ActivationWorkspace& p, float* g, float* beta,
                            hip_bfloat16* seam) {
         check(gdn::bf16_gdn_normalized_front(input, norm, kEps, true, d_a.data, d_b.data,
-                                             d_log.data, d_bias.data, g, beta, p, seam, s),
+                                             d_log.data, d_bias.data, g, beta, p, seam, nullptr,
+                                             s),
               "front");
     };
     const auto plane_bytes = [&](const Device<std::uint8_t>& region, const lin::A8G64ActivationWorkspace& p) {
@@ -256,7 +257,17 @@ Result cell(unsigned t, hipStream_t s) {
     require(same(actual.low, expected.low) && same(actual.high, expected.high) &&
                 same(actual.scales, expected.scales),
             "A8G64 planes differ from the exact codec of the seam");
-    // (4) The production call (no seam) is bitwise identical.
+    // (4) The production call (no seam) is bitwise identical and zeroes the handed-off status
+    // word of a later Op.
+    d_ws2.poison(); d_g2.poison(); d_beta2.poison();
+    Device<std::uint32_t> d_later_status(1);
+    d_later_status.poison();
+    check(gdn::bf16_gdn_normalized_front(d_x.data, d_gains.data, kEps, true, d_a.data, d_b.data,
+                                         d_log.data, d_bias.data, d_g2.data, d_beta2.data,
+                                         planes2, nullptr, d_later_status.data, s),
+          "front with handed-off status");
+    check(hipStreamSynchronize(s), "sync");
+    require(d_later_status.get()[0] == 0U, "front did not zero the handed-off status word");
     d_ws2.poison(); d_g2.poison(); d_beta2.poison();
     front(d_x.data, d_gains.data, planes2, d_g2.data, d_beta2.data, nullptr);
     check(hipStreamSynchronize(s), "sync");

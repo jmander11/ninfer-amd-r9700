@@ -336,9 +336,11 @@ struct A8Q4G64SideProjection {
 // 16-byte slot and the small-batch projection; prefill T is a positive multiple of 128 inside the
 // qualified M128 inventory. input/gate/norm are 16-byte aligned.
 [[nodiscard]] bool a8q4g64_gated_normalized_linear_supported(std::uint32_t tokens) noexcept;
+// status_cleared: the caller already zeroed, on this stream after its last use, the status word
+// the workspace binds for (tokens, 6144); the small route then skips its reset launch.
 [[nodiscard]] hipError_t a8q4g64_gated_normalized_linear(
     const A8Q4G64CandidateArgs& args, const hip_bfloat16* norm, const hip_bfloat16* gate,
-    float eps, hipStream_t stream) noexcept;
+    float eps, hipStream_t stream, bool status_cleared = false) noexcept;
 
 // Fixed T1 projected-residual boundary: quantize represented BF16 input with the
 // signed-A8G64 codec, evaluate the packed Q4N16K16/G64 projection, round that

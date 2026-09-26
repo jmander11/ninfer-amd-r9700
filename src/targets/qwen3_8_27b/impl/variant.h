@@ -125,7 +125,7 @@ struct Variant {
         [[nodiscard]] bool gdn_q4_normalized_front_record(
             const Tensor& residual, const Tensor& norm, float eps,
             const GdnProjectionWeights& weights, const GdnConvRecord& record, Tensor& g,
-            Tensor& beta, WorkspaceArena& workspace, hipStream_t stream);
+            Tensor& beta, WorkspaceArena& workspace, std::int32_t text_layer, hipStream_t stream);
         [[nodiscard]] bool gdn_q4_normalized_prefill(
             const Tensor& residual, const Tensor& norm, float eps, const Weight& query_key,
             const Weight& value_z, Tensor& normalized, Tensor& query_key_output,
