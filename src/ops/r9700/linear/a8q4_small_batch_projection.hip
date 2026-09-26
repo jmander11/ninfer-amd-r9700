@@ -9,7 +9,7 @@ namespace {
 template <unsigned N, unsigned K>
 constexpr unsigned k_split() {
     if constexpr (N == 1280) return 16;
-    else if constexpr (N == 5120 && K == 4096) return 8;
+    else if constexpr (N == 5120 && (K == 4096 || K == 6144)) return 8;
     else if constexpr (N == 12288) return 1;
     else return 4;
 }
