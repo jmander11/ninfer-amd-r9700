@@ -145,6 +145,75 @@ void rope_kernel(const std::int32_t* positions, hip_bfloat16* q, hip_bfloat16* k
     }
 }
 
+// Qwen3.8 Text Q/K normalization and RoPE in one pass: one wave per (token, head), eight features
+// per lane. out = RoPE(BF16(x * rsqrt(mean(x^2) + eps) * (w + 1))) with the per-head [256] gain w;
+// only features [0,64) rotate (pair i with i + 32, lanes 0..3 with lanes 4..7).
+constexpr int kQkNormRopeWaves = 4;
+constexpr int kQkNormRopeGroups = (kTextQ + kTextK + kQkNormRopeWaves - 1) / kQkNormRopeWaves;
+static_assert((kTextQ + kTextK) % kQkNormRopeWaves == 0);
+
+template <Profile P>
+__global__ __launch_bounds__(kQkNormRopeWaves * 32)
+void qk_norm_rope_kernel(const std::int32_t* positions, const hip_bfloat16* q,
+                         const hip_bfloat16* k, std::int64_t q_stride, std::int64_t k_stride,
+                         const hip_bfloat16* q_norm, const hip_bfloat16* k_norm, float eps,
+                         hip_bfloat16* qn, hip_bfloat16* kn, int tokens) {
+    const int token = static_cast<int>(blockIdx.x) / kQkNormRopeGroups;
+    const int head = (static_cast<int>(blockIdx.x) % kQkNormRopeGroups) * kQkNormRopeWaves +
+                     static_cast<int>(threadIdx.x) / 32;
+    const int lane = static_cast<int>(threadIdx.x) & 31;
+    if (token >= tokens) { return; }
+    const bool is_query = head < kTextQ;
+    const hip_bfloat16* source = is_query
+        ? q + static_cast<std::int64_t>(token) * q_stride + static_cast<std::int64_t>(head) * kTextD
+        : k + static_cast<std::int64_t>(token) * k_stride +
+              static_cast<std::int64_t>(head - kTextQ) * kTextD;
+    hip_bfloat16* destination = is_query
+        ? qn + (static_cast<std::int64_t>(token) * kTextQ + head) * kTextD
+        : kn + (static_cast<std::int64_t>(token) * kTextK + head - kTextQ) * kTextD;
+    const uint4 packed = reinterpret_cast<const uint4*>(source)[lane];
+    const uint4 gains = reinterpret_cast<const uint4*>(is_query ? q_norm : k_norm)[lane];
+    const std::uint32_t words[4] = {packed.x, packed.y, packed.z, packed.w};
+    const std::uint32_t gain_words[4] = {gains.x, gains.y, gains.z, gains.w};
+    const auto bf16 = [](const std::uint32_t (&w)[4], int i) {
+        return __uint_as_float((i & 1) ? w[i >> 1] & 0xffff0000U : w[i >> 1] << 16);
+    };
+    float sumsq = 0.0F;
+#pragma unroll
+    for (int i = 0; i < 8; ++i) sumsq = fmaf(bf16(words, i), bf16(words, i), sumsq);
+#pragma unroll
+    for (int width = 16; width != 0; width >>= 1) sumsq += __shfl_xor(sumsq, width, 32);
+    const float inverse = rsqrtf(sumsq / static_cast<float>(kTextD) + eps);
+    float value[8];
+#pragma unroll
+    for (int i = 0; i < 8; ++i)
+        value[i] = static_cast<float>(
+            hip_bfloat16(bf16(words, i) * inverse * (bf16(gain_words, i) + 1.0F)));
+    float partner[8];
+#pragma unroll
+    for (int i = 0; i < 8; ++i) partner[i] = __shfl_xor(value[i], 4, 32);
+    std::uint32_t out[4];
+#pragma unroll
+    for (int i = 0; i < 8; i += 2) {
+        float pair_out[2];
+#pragma unroll
+        for (int j = 0; j < 2; ++j) {
+            const int feature = lane * 8 + i + j;
+            float result = value[i + j];
+            if (feature < kTextR) {
+                float sine = 0.0F, cosine = 0.0F;
+                coefficient<P>(positions, tokens, token, feature % (kTextR / 2), &sine, &cosine);
+                result = feature < kTextR / 2 ? value[i + j] * cosine - partner[i + j] * sine
+                                              : value[i + j] * cosine + partner[i + j] * sine;
+            }
+            pair_out[j] = result;
+        }
+        out[i / 2] = static_cast<std::uint32_t>(hip_bfloat16(pair_out[0]).data) |
+                     (static_cast<std::uint32_t>(hip_bfloat16(pair_out[1]).data) << 16);
+    }
+    reinterpret_cast<uint4*>(destination)[lane] = uint4{out[0], out[1], out[2], out[3]};
+}
+
 template <Profile P, int HeadDim, int Half, int QHeads, int KHeads>
 void launch_profile(const std::int32_t* positions, hip_bfloat16* q, hip_bfloat16* k,
                     int tokens, std::int64_t q_stride, std::int64_t k_stride,
@@ -336,6 +405,71 @@ void rope(const Tensor& positions, int rotary_dim, float theta, Tensor& q, Tenso
         throw std::invalid_argument("rope: positions, q, and k storage must not overlap");
     }
     launch(profile, positions, q, &k, stream);
+}
+
+void qk_norm_rope(const Tensor& positions, int rotary_dim, float theta, const Tensor& q,
+                  const Tensor& k, const Tensor& q_norm, const Tensor& k_norm, float eps,
+                  Tensor& qn, Tensor& kn, hipStream_t stream) {
+    require_common(positions, rotary_dim, theta);
+    const int tokens = q.ne[2];
+    const int axes = axes_for(positions, tokens);
+    const Profile profile = pair_profile(axes, rotary_dim, theta, q, k);
+    if (profile != Profile::Text1D && profile != Profile::TextMrope) {
+        throw std::invalid_argument("qk_norm_rope: only the Qwen3.8 Text geometry is supported");
+    }
+    const auto bf16_vector = [](const Tensor& t, int n) {
+        return t.dtype == DType::BF16 && t.data != nullptr && t.is_contiguous() && t.ne[0] == n &&
+               t.ne[1] == 1 && t.ne[2] == 1 && t.ne[3] == 1 &&
+               reinterpret_cast<std::uintptr_t>(t.data) % 16U == 0U;
+    };
+    const auto aligned_rows = [](const Tensor& t) {
+        return t.dtype == DType::BF16 && t.data != nullptr &&
+               reinterpret_cast<std::uintptr_t>(t.data) % 16U == 0U && t.nb[2] % 16 == 0;
+    };
+    if (!(eps > 0.0F) || !std::isfinite(eps) || !bf16_vector(q_norm, kTextD) ||
+        !bf16_vector(k_norm, kTextD) || !aligned_rows(q) || !aligned_rows(k) ||
+        k.ne[2] != tokens || qn.dtype != DType::BF16 || kn.dtype != DType::BF16 ||
+        !qn.is_contiguous() || !kn.is_contiguous() || qn.ne[0] != kTextD ||
+        qn.ne[1] != kTextQ || qn.ne[2] != tokens || kn.ne[0] != kTextD ||
+        kn.ne[1] != kTextK || kn.ne[2] != tokens ||
+        reinterpret_cast<std::uintptr_t>(qn.data) % 16U != 0U ||
+        reinterpret_cast<std::uintptr_t>(kn.data) % 16U != 0U) {
+        throw std::invalid_argument("qk_norm_rope: invalid tensors");
+    }
+    require_layout(q, "q", kTextD, kTextQ, tokens);
+    require_layout(k, "k", kTextD, kTextK, tokens);
+    if (tokens == 0) { return; }
+    const std::size_t p_bytes = positions.bytes();
+    const std::size_t outputs[2] = {qn.bytes(), kn.bytes()};
+    const void* output_data[2] = {qn.data, kn.data};
+    for (int i = 0; i < 2; ++i) {
+        if (overlaps(output_data[i], outputs[i], q.data, storage_bytes(q)) ||
+            overlaps(output_data[i], outputs[i], k.data, storage_bytes(k)) ||
+            overlaps(output_data[i], outputs[i], positions.data, p_bytes)) {
+            throw std::invalid_argument("qk_norm_rope: outputs must not overlap inputs");
+        }
+    }
+    if (overlaps(qn.data, outputs[0], kn.data, outputs[1])) {
+        throw std::invalid_argument("qk_norm_rope: outputs must not overlap");
+    }
+    const auto qs = q.nb[2] / static_cast<std::int64_t>(sizeof(hip_bfloat16));
+    const auto ks = k.nb[2] / static_cast<std::int64_t>(sizeof(hip_bfloat16));
+    const dim3 grid(static_cast<unsigned>(tokens * kQkNormRopeGroups));
+    const auto* pos = static_cast<const std::int32_t*>(positions.data);
+    const auto* q_data = static_cast<const hip_bfloat16*>(q.data);
+    const auto* k_data = static_cast<const hip_bfloat16*>(k.data);
+    const auto* qw = static_cast<const hip_bfloat16*>(q_norm.data);
+    const auto* kw = static_cast<const hip_bfloat16*>(k_norm.data);
+    auto* qo = static_cast<hip_bfloat16*>(qn.data);
+    auto* ko = static_cast<hip_bfloat16*>(kn.data);
+    if (profile == Profile::Text1D) {
+        qk_norm_rope_kernel<Profile::Text1D><<<grid, kQkNormRopeWaves * 32, 0, stream>>>(
+            pos, q_data, k_data, qs, ks, qw, kw, eps, qo, ko, tokens);
+    } else {
+        qk_norm_rope_kernel<Profile::TextMrope><<<grid, kQkNormRopeWaves * 32, 0, stream>>>(
+            pos, q_data, k_data, qs, ks, qw, kw, eps, qo, ko, tokens);
+    }
+    HIP_CHECK(hipGetLastError());
 }
 
 void rope(const Tensor& positions, int rotary_dim, float theta, Tensor& x, hipStream_t stream) {

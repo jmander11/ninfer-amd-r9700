@@ -1023,19 +1023,23 @@ void TextContext::attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_la
     const auto results = workspace_recipe::text_attention_results<TextConfig>(work_, T);
     Tensor qn          = results.normalized_query.view({kCfg.head_dim, kCfg.n_q, T});
     Tensor kn          = results.normalized_key.view({kCfg.head_dim, kCfg.n_kv, T});
-    ops::rmsnorm(q, *w.q_norm, kCfg.rms_eps, true, qn, s);
-    ops::rmsnorm(k, *w.k_norm, kCfg.rms_eps, true, kn, s);
-    if constexpr (requires {
-                      tap.capture_attention_qk_stage(text_layer, "normalized_qk", qn, kn, s);
-                  }) {
-        tap.capture_attention_qk_stage(text_layer, "normalized_qk", qn, kn, s);
-    }
     const Tensor& cache_positions =
         active_cache_positions_ != nullptr ? *active_cache_positions_ : io_.pos;
     const Tensor& rope_positions =
         active_rope_positions_ != nullptr ? *active_rope_positions_ : io_.rope_pos;
     Tensor rope_for_op = active_sequence_batch_ != 0 ? rope_positions.view({T}) : rope_positions;
-    ops::rope(rope_for_op, kCfg.rotary_dim, kCfg.rope_theta, qn, kn, s);
+    if constexpr (requires {
+                      tap.capture_attention_qk_stage(text_layer, "normalized_qk", qn, kn, s);
+                  }) {
+        // Tracing publishes the normalized stage, so it keeps the separate Ops.
+        ops::rmsnorm(q, *w.q_norm, kCfg.rms_eps, true, qn, s);
+        ops::rmsnorm(k, *w.k_norm, kCfg.rms_eps, true, kn, s);
+        tap.capture_attention_qk_stage(text_layer, "normalized_qk", qn, kn, s);
+        ops::rope(rope_for_op, kCfg.rotary_dim, kCfg.rope_theta, qn, kn, s);
+    } else {
+        ops::qk_norm_rope(rope_for_op, kCfg.rotary_dim, kCfg.rope_theta, q, k, *w.q_norm,
+                          *w.k_norm, kCfg.rms_eps, qn, kn, s);
+    }
     if constexpr (requires { tap.capture_attention_qk_stage(text_layer, "rope_qk", qn, kn, s); }) {
         tap.capture_attention_qk_stage(text_layer, "rope_qk", qn, kn, s);
     }

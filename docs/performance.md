@@ -60,6 +60,14 @@ expected value exactly.
 Copy bus rate counts both the read and write traffic. This is the hardware bandwidth bound, not a
 model or individual-Op throughput claim.
 
+## Fused Q/K normalization and RoPE (2026-09-26)
+
+`ops::qk_norm_rope` replaces the two Q/K RMSNorms and RoPE of every full-attention layer (three
+launches, ~11 µs at T6) with one wave per head reading the projection planes directly; the tracing
+path keeps the separate Ops. FP64 criterion: one BF16 step per contributing operand across T1/6/130
+and 1-D/MRoPE (relative L2 7.7e-4). P4096 DFlash 33.82 -> 33.65 ms/round; ordinary decode 32.7 ->
+33.0 tok/s.
+
 ## DFlash verify attention: double-buffered 16-key blocks (2026-09-26, second batch)
 
 Thread trace (`rocprofv3 --att`, available on gfx1201 with the installed decoder) of the 64K verify

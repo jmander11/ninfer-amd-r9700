@@ -41,4 +41,20 @@ void rope(const Tensor& positions, int rotary_dim, float theta, Tensor& q, Tenso
 // from x; Q versus K role does not change the transformation.
 void rope(const Tensor& positions, int rotary_dim, float theta, Tensor& x, hipStream_t stream);
 
+/**
+ * Qwen3.8 Text Q/K RMSNorm followed by RoPE in one pass. For each head row x[256] of q (24 heads)
+ * and k (4 heads) with its gain w (q_norm or k_norm, BF16 [256], unit offset):
+ *
+ *   n = BF16(x * rsqrt(mean(x^2) + eps) * (w + 1))       (the public normalization seam)
+ *   out = rope(n)                                        (the Text 1-D/MRoPE formula above)
+ *
+ * written to contiguous qn [256,24,T] and kn [256,4,T]. q/k follow rope()'s strided layout (for
+ * example planes of the projection output) with 16-byte aligned rows; outputs do not overlap
+ * any input. The oracle evaluates both steps in FP64 from the represented inputs with the BF16
+ * seam; the RMS reduction association is implementation-defined. No workspace.
+ */
+void qk_norm_rope(const Tensor& positions, int rotary_dim, float theta, const Tensor& q,
+                  const Tensor& k, const Tensor& q_norm, const Tensor& k_norm, float eps,
+                  Tensor& qn, Tensor& kn, hipStream_t stream);
+
 } // namespace ninfer::ops
