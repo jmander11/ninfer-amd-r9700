@@ -703,7 +703,7 @@ void test_a8_small_route() {
     input[4U * columns + 7U].data = 0x7f7fU;
     if ((run(0U) & linear::Q4G64ActivationScaleOverflow) == 0U)
         fail("A8G64 small route scale overflow status missing");
-    std::cout << "codec: A8G64 small-T single-CTA route exact/status/stale-reset checks PASS\n";
+    std::cout << "codec: A8G64 small-T status-CTA route exact/status/stale-reset checks PASS\n";
 }
 
 void test_a8_codec_edges() {

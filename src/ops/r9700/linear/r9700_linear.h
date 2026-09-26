@@ -411,7 +411,7 @@ struct FusedSiluA8Q4G64DownArgs {
 
 // The whole A8 MLP at small verification widths (T <= 12 inside both routes): the normalized
 // gate/up projection of a8q4g64_normalized_linear_batched followed by fused_silu_a8q4g64_down,
-// with identical arithmetic. Both stages share one activation workspace base; the single-CTA
+// with identical arithmetic. Both stages share one activation workspace base; the small-route
 // gate/up prepare also clears the down stage's status word (which must lie beyond the gate/up
 // planes), so the fused SiLU quantization needs no separate reset launch. down.gate_up must be
 // gate_up.output.

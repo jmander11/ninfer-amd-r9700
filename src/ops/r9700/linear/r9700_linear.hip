@@ -529,86 +529,122 @@ __global__ __launch_bounds__(kWaveSize) void a8g64_quantize_activation_kernel(
                                                    ((high1 & 0x0f) << 4));
 }
 
-// Small-T form of the same codec in one 1024-thread CTA: thread 0 clears the status word before a
-// barrier, so no separate reset launch is needed. Eight adjacent lanes own one G64 group (one
-// 16-byte BF16 vector each); the group maximum is a DPP row reduction. Rows are unpadded,
-// 16-byte aligned and a multiple of 64 columns.
-constexpr std::uint32_t kSmallQuantizeThreads = 1024U;
-constexpr std::uint32_t kSmallQuantizeMaximumVectors = 8U * kSmallQuantizeThreads;
+// Small-T codec helpers. Eight adjacent lanes own one G64 group (one 16-byte BF16 vector each);
+// the group maximum is a DPP row reduction.
+__device__ __forceinline__ float a8g64_group_maximum(float maximum) {
+    maximum = fmaxf(maximum, __int_as_float(__builtin_amdgcn_update_dpp(
+        0, __float_as_int(maximum), 0x164, 0xf, 0xf, false)));
+    maximum = fmaxf(maximum, __int_as_float(__builtin_amdgcn_update_dpp(
+        0, __float_as_int(maximum), 0x162, 0xf, 0xf, false)));
+    return fmaxf(maximum, __int_as_float(__builtin_amdgcn_update_dpp(
+        0, __float_as_int(maximum), 0x161, 0xf, 0xf, false)));
+}
+
+// The G64 scale overflows exactly when some finite |x| of the group does: max/127 and the FP16
+// conversion are monotone, so status passes need no group reduction. FP16(|x|/127) is infinite
+// exactly when |x| >= 8321040 (checked over every finite FP32 value).
+__device__ __forceinline__ bool a8g64_element_overflows(float x) {
+    return fabsf(x) >= 8321040.0F;
+}
+
+// Encodes the eight finite values of one vector with its group's represented scale. Only lanes
+// with (lane & 7) == 0 write the scale word.
+__device__ __forceinline__ void a8g64_encode_vector(
+    const float (&value)[8], float maximum, std::uint32_t lane, std::size_t vector,
+    std::size_t scale_index, std::uint8_t* low_codes, std::uint8_t* high_codes,
+    std::uint16_t* scale_words) {
+    std::uint16_t scale_bits = 0U;
+    if (maximum != 0.0F) {
+        scale_bits = __half_as_ushort(__float2half_rn(maximum / 127.0F));
+        if (scale_bits == 0U) scale_bits = 1U;
+        if (!isfinite(__half2float(__ushort_as_half(scale_bits)))) scale_bits = 0U;
+    }
+    if ((lane & 7U) == 0U) scale_words[scale_index] = scale_bits;
+    const float scale = __half2float(__ushort_as_half(scale_bits));
+    std::uint32_t low_word = 0U, high_word = 0U;
+#pragma unroll
+    for (std::uint32_t element = 0; element < 8U; ++element) {
+        const int code = scale != 0.0F
+            ? max(-127, min(127, __float2int_rn(value[element] / scale)))
+            : 0;
+        const int low = code & 0x0f;
+        const int high = (code - low) / 16;
+        low_word |= static_cast<std::uint32_t>(low) << (element * 4U);
+        high_word |= static_cast<std::uint32_t>(high & 0x0f) << (element * 4U);
+    }
+    reinterpret_cast<std::uint32_t*>(low_codes)[vector] = low_word;
+    reinterpret_cast<std::uint32_t*>(high_codes)[vector] = high_word;
+}
+
+__device__ __forceinline__ float bf16_word_element(const std::uint32_t (&words)[4],
+                                                   std::uint32_t element) {
+    const std::uint32_t word = words[element >> 1U];
+    return __uint_as_float((element & 1U) ? word & 0xffff0000U : word << 16U);
+}
+
+// Small-T form of the same codec: 512-thread CTAs with one 16-byte vector per thread, plus one
+// final status CTA that scans every element for the nonfinite/overflow conditions and publishes
+// the status word with a plain store. No CTA accumulates into the status word, so no reset launch
+// is needed. Rows are unpadded, 16-byte aligned and a multiple of 64 columns.
+constexpr std::uint32_t kSmallQuantizeThreads = 512U;
+constexpr std::uint32_t kSmallQuantizeMaximumVectors = 8192U;
 
 __global__ __launch_bounds__(kSmallQuantizeThreads) void a8g64_quantize_activation_small_kernel(
     const hip_bfloat16* input, std::uint8_t* low_codes, std::uint8_t* high_codes,
     std::uint16_t* scale_words, std::uint32_t* status, std::uint32_t tokens,
     std::uint32_t columns) {
-    if (threadIdx.x == 0U) *status = 0U;
-    __syncthreads();
     const std::uint32_t row_vectors = columns / 8U;
     const std::uint32_t total = tokens * row_vectors;
-    constexpr std::uint32_t kPasses = kSmallQuantizeMaximumVectors / kSmallQuantizeThreads;
-    // Every pass's 16-byte load is issued before any dependent codec work.
-    uint4 loaded[kPasses];
+    const uint4* vectors = reinterpret_cast<const uint4*>(input);
+    if (blockIdx.x == gridDim.x - 1U) {
+        constexpr std::uint32_t kInFlight = 8U;
+        bool nonfinite = false, overflow = false;
+        for (std::uint32_t base = 0; base < total; base += kInFlight * kSmallQuantizeThreads) {
+            uint4 loaded[kInFlight];
 #pragma unroll
-    for (std::uint32_t pass = 0; pass < kPasses; ++pass) {
-        const std::uint32_t vector = pass * kSmallQuantizeThreads + threadIdx.x;
-        loaded[pass] = vector < total ? reinterpret_cast<const uint4*>(input)[vector] : uint4{};
-    }
-    bool nonfinite = false, overflow = false;
+            for (std::uint32_t item = 0; item < kInFlight; ++item) {
+                const std::uint32_t vector = base + item * kSmallQuantizeThreads + threadIdx.x;
+                loaded[item] = vector < total ? vectors[vector] : uint4{};
+            }
 #pragma unroll
-    for (std::uint32_t pass = 0; pass < kPasses; ++pass) {
-        const std::uint32_t base = pass * kSmallQuantizeThreads;
-        if (base >= total) break;
-        const std::uint32_t vector = base + threadIdx.x;
-        const bool valid = vector < total;  // whole G64 groups share validity
-        const uint4 packed = loaded[pass];
-        const std::uint32_t words[4]{packed.x, packed.y, packed.z, packed.w};
-        float value[8];
-        float maximum = 0.0F;
+            for (std::uint32_t item = 0; item < kInFlight; ++item) {
+                const std::uint32_t words[4]{loaded[item].x, loaded[item].y, loaded[item].z,
+                                             loaded[item].w};
 #pragma unroll
-        for (std::uint32_t element = 0; element < 8U; ++element) {
-            const std::uint32_t word = words[element >> 1U];
-            float x = __uint_as_float((element & 1U) ? word & 0xffff0000U : word << 16U);
-            nonfinite |= !isfinite(x);
-            x = isfinite(x) ? x : 0.0F;
-            value[element] = x;
-            maximum = fmaxf(maximum, fabsf(x));
-        }
-        maximum = fmaxf(maximum, __int_as_float(__builtin_amdgcn_update_dpp(
-            0, __float_as_int(maximum), 0x164, 0xf, 0xf, false)));
-        maximum = fmaxf(maximum, __int_as_float(__builtin_amdgcn_update_dpp(
-            0, __float_as_int(maximum), 0x162, 0xf, 0xf, false)));
-        maximum = fmaxf(maximum, __int_as_float(__builtin_amdgcn_update_dpp(
-            0, __float_as_int(maximum), 0x161, 0xf, 0xf, false)));
-        if (!valid) continue;
-        std::uint16_t scale_bits = 0U;
-        if (maximum != 0.0F) {
-            scale_bits = __half_as_ushort(__float2half_rn(maximum / 127.0F));
-            if (scale_bits == 0U) scale_bits = 1U;
-            if (!isfinite(__half2float(__ushort_as_half(scale_bits)))) {
-                overflow = true;
-                scale_bits = 0U;
+                for (std::uint32_t element = 0; element < 8U; ++element) {
+                    const float x = bf16_word_element(words, element);
+                    nonfinite |= !isfinite(x);
+                    overflow |= isfinite(x) && a8g64_element_overflows(x);
+                }
             }
         }
-        const std::uint32_t token = vector / row_vectors, slot = vector % row_vectors;
-        if ((threadIdx.x & 7U) == 0U)
-            scale_words[static_cast<std::size_t>(token) * (columns / kQ4Group) + slot / 8U] =
-                scale_bits;
-        const float scale = __half2float(__ushort_as_half(scale_bits));
-        std::uint32_t low_word = 0U, high_word = 0U;
-#pragma unroll
-        for (std::uint32_t element = 0; element < 8U; ++element) {
-            const int code = scale != 0.0F
-                ? max(-127, min(127, __float2int_rn(value[element] / scale)))
-                : 0;
-            const int low = code & 0x0f;
-            const int high = (code - low) / 16;
-            low_word |= static_cast<std::uint32_t>(low) << (element * 4U);
-            high_word |= static_cast<std::uint32_t>(high & 0x0f) << (element * 4U);
-        }
-        reinterpret_cast<std::uint32_t*>(low_codes)[vector] = low_word;
-        reinterpret_cast<std::uint32_t*>(high_codes)[vector] = high_word;
+        const bool any_nonfinite = __syncthreads_or(nonfinite);
+        const bool any_overflow = __syncthreads_or(overflow);
+        if (threadIdx.x == 0U)
+            *status = (any_nonfinite ? static_cast<std::uint32_t>(Q4G64ActivationNonfinite) : 0U) |
+                      (any_overflow ? static_cast<std::uint32_t>(Q4G64ActivationScaleOverflow)
+                                    : 0U);
+        return;
     }
-    if (nonfinite) atomicOr(status, static_cast<std::uint32_t>(Q4G64ActivationNonfinite));
-    if (overflow) atomicOr(status, static_cast<std::uint32_t>(Q4G64ActivationScaleOverflow));
+    const std::uint32_t vector = blockIdx.x * kSmallQuantizeThreads + threadIdx.x;
+    const bool valid = vector < total;  // whole G64 groups share validity
+    const uint4 packed = valid ? vectors[vector] : uint4{};
+    const std::uint32_t words[4]{packed.x, packed.y, packed.z, packed.w};
+    float value[8];
+    float maximum = 0.0F;
+#pragma unroll
+    for (std::uint32_t element = 0; element < 8U; ++element) {
+        float x = bf16_word_element(words, element);
+        x = isfinite(x) ? x : 0.0F;
+        value[element] = x;
+        maximum = fmaxf(maximum, fabsf(x));
+    }
+    maximum = a8g64_group_maximum(maximum);
+    if (!valid) return;
+    const std::uint32_t token = vector / row_vectors, slot = vector % row_vectors;
+    a8g64_encode_vector(value, maximum, threadIdx.x, vector,
+                        static_cast<std::size_t>(token) * (columns / kQ4Group) + slot / 8U,
+                        low_codes, high_codes, scale_words);
 }
 
 // One cooperative RMSNorm row followed by eight independent G64 codec waves.
@@ -801,140 +837,140 @@ void a8g64_normalized_prepare_prefill_kernel(
     if (overflow) atomicOr(status, static_cast<std::uint32_t>(Q4G64ActivationScaleOverflow));
 }
 
-// Small-T normalized preparation in one 1024-thread CTA (at most 12 K5120 rows): every thread
-// loads its 16-byte vectors first, per-vector FP32 sums of squares go to LDS, one wave per row
-// reduces its row in a fixed order, then the same BF16 seam and exact codec as the prefill
-// preparation run with eight adjacent lanes per G64 group. Thread 0 clears the status word, so no
-// separate reset launch is needed. normalized_rows, when non-null, receives the BF16 seam rows;
-// clear_status, when non-null, is another status word thread 0 also clears.
+// Small-T normalized preparation: one 640-thread CTA per K5120 row (one 16-byte vector per
+// thread) plus one final status CTA. Per-vector FP32 sums of squares go to LDS and wave 0 reduces
+// the row in a fixed order; the same BF16 seam and exact codec as the prefill preparation follow
+// with eight adjacent lanes per G64 group. The status CTA repeats the normalization of every row
+// at once without encoding, publishes the status word with a plain store and clears
+// clear_status, so no reset launch is needed. normalized_rows, when non-null, receives the BF16
+// seam rows; clear_status, when non-null, is another status word the status CTA clears.
 constexpr std::uint32_t kNormalizedSmallRowVectors = kNormalizedPrefillColumns / 8U;
-constexpr std::uint32_t kNormalizedSmallMaximumTokens =
-    kSmallQuantizeMaximumVectors / kNormalizedSmallRowVectors;
+constexpr std::uint32_t kNormalizedSmallMaximumTokens = 12U;
 
-__global__ __launch_bounds__(kSmallQuantizeThreads) void a8g64_normalized_prepare_small_kernel(
+// Sum of squares of one row from its per-vector partials, in the fixed order of every small route.
+__device__ __forceinline__ float normalized_small_row_sum(const float* partial,
+                                                          std::uint32_t lane) {
+    float sum = 0.0F;
+    for (std::uint32_t index = lane; index < kNormalizedSmallRowVectors; index += kWaveSize)
+        sum += partial[index];
+#pragma unroll
+    for (std::uint32_t width = kWaveSize / 2U; width != 0U; width >>= 1U)
+        sum += __shfl_xor(sum, width, kWaveSize);
+    return sum;
+}
+
+__device__ __forceinline__ float normalized_small_vector_sumsq(uint4 packed) {
+    const std::uint32_t words[4]{packed.x, packed.y, packed.z, packed.w};
+    float sumsq = 0.0F;
+#pragma unroll
+    for (std::uint32_t word = 0; word < 4U; ++word) {
+        const float low = __uint_as_float(words[word] << 16U);
+        const float high = __uint_as_float(words[word] & 0xffff0000U);
+        sumsq = fmaf(low, low, sumsq);
+        sumsq = fmaf(high, high, sumsq);
+    }
+    return sumsq;
+}
+
+// BF16 seam values of one vector: seam words and their FP32 values (nonfinite kept).
+__device__ __forceinline__ void normalized_small_vector_seam(
+    uint4 packed, uint4 gain_words, float row_inverse, float offset, std::uint32_t (&seam)[4],
+    float (&value)[8]) {
+    const std::uint32_t words[4]{packed.x, packed.y, packed.z, packed.w};
+    const std::uint32_t gain_packed[4]{gain_words.x, gain_words.y, gain_words.z, gain_words.w};
+#pragma unroll
+    for (std::uint32_t element = 0; element < 8U; ++element) {
+        const float x = bf16_word_element(words, element);
+        const float gain = bf16_word_element(gain_packed, element) + offset;
+        const hip_bfloat16 rounded(x * row_inverse * gain);
+        seam[element >> 1U] |= static_cast<std::uint32_t>(rounded.data) << ((element & 1U) * 16U);
+        value[element] = static_cast<float>(rounded);
+    }
+}
+
+__global__ __launch_bounds__(kNormalizedSmallRowVectors) void a8g64_normalized_prepare_small_kernel(
     const hip_bfloat16* input, const hip_bfloat16* norm, float eps, bool unit_offset,
     std::uint32_t tokens, std::uint8_t* low_codes, std::uint8_t* high_codes,
     std::uint16_t* scale_words, std::uint32_t* status, hip_bfloat16* normalized_rows,
     std::uint32_t* clear_status) {
-    __shared__ float partial[kSmallQuantizeMaximumVectors];
+    __shared__ float partial[kNormalizedSmallMaximumTokens][kNormalizedSmallRowVectors];
     __shared__ float inverse[kNormalizedSmallMaximumTokens];
     constexpr std::uint32_t columns = kNormalizedPrefillColumns;
-    constexpr std::uint32_t kPasses = kSmallQuantizeMaximumVectors / kSmallQuantizeThreads;
-    const std::uint32_t total = tokens * kNormalizedSmallRowVectors;
-    if (threadIdx.x == 0U) {
-        *status = 0U;
-        // A later stage's status word owned by the same Op (see a8q4g64_normalized_mlp).
-        if (clear_status != nullptr) *clear_status = 0U;
-    }
-    uint4 loaded[kPasses];
-#pragma unroll
-    for (std::uint32_t pass = 0; pass < kPasses; ++pass) {
-        const std::uint32_t vector = pass * kSmallQuantizeThreads + threadIdx.x;
-        loaded[pass] = vector < total ? reinterpret_cast<const uint4*>(input)[vector] : uint4{};
-    }
-#pragma unroll
-    for (std::uint32_t pass = 0; pass < kPasses; ++pass) {
-        const std::uint32_t vector = pass * kSmallQuantizeThreads + threadIdx.x;
-        if (vector >= total) continue;
-        const std::uint32_t words[4]{loaded[pass].x, loaded[pass].y, loaded[pass].z,
-                                     loaded[pass].w};
-        float sumsq = 0.0F;
-#pragma unroll
-        for (std::uint32_t word = 0; word < 4U; ++word) {
-            const float low = __uint_as_float(words[word] << 16U);
-            const float high = __uint_as_float(words[word] & 0xffff0000U);
-            sumsq = fmaf(low, low, sumsq);
-            sumsq = fmaf(high, high, sumsq);
-        }
-        partial[vector] = sumsq;
-    }
-    __syncthreads();
+    const std::uint32_t slot = threadIdx.x;
     const std::uint32_t wave = threadIdx.x / kWaveSize, lane = threadIdx.x % kWaveSize;
-    if (wave < tokens) {
-        float sum = 0.0F;
-        for (std::uint32_t index = lane; index < kNormalizedSmallRowVectors; index += kWaveSize)
-            sum += partial[wave * kNormalizedSmallRowVectors + index];
-#pragma unroll
-        for (std::uint32_t width = kWaveSize / 2U; width != 0U; width >>= 1U)
-            sum += __shfl_xor(sum, width, kWaveSize);
-        if (lane == 0U) inverse[wave] = rsqrtf(sum / static_cast<float>(columns) + eps);
-    }
-    __syncthreads();
     const float offset = unit_offset ? 1.0F : 0.0F;
-    const uint4* gains = reinterpret_cast<const uint4*>(norm);
-    bool nonfinite = false, overflow = false;
+    const uint4 gain_words = reinterpret_cast<const uint4*>(norm)[slot];
+    const uint4* rows = reinterpret_cast<const uint4*>(input);
+    if (blockIdx.x == tokens) {
+        // Rows are predicated, never broken out of, so the unrolled arrays stay in registers.
+        uint4 loaded[kNormalizedSmallMaximumTokens];
 #pragma unroll
-    for (std::uint32_t pass = 0; pass < kPasses; ++pass) {
-        const std::uint32_t base = pass * kSmallQuantizeThreads;
-        if (base >= total) break;
-        const std::uint32_t vector = base + threadIdx.x;
-        const bool valid = vector < total;  // whole G64 groups share validity
-        const std::uint32_t token = valid ? vector / kNormalizedSmallRowVectors : 0U;
-        const std::uint32_t slot = vector % kNormalizedSmallRowVectors;
-        const float row_inverse = inverse[token];
-        const uint4 gain_words = valid ? gains[slot] : uint4{};
-        const std::uint32_t words[4]{loaded[pass].x, loaded[pass].y, loaded[pass].z,
-                                     loaded[pass].w};
-        const std::uint32_t gain_packed[4]{gain_words.x, gain_words.y, gain_words.z,
-                                           gain_words.w};
-        float value[8];
-        std::uint32_t seam[4]{};
-        float maximum = 0.0F;
+        for (std::uint32_t row = 0; row < kNormalizedSmallMaximumTokens; ++row)
+            loaded[row] = row < tokens
+                ? rows[static_cast<std::size_t>(row) * kNormalizedSmallRowVectors + slot]
+                : uint4{};
 #pragma unroll
-        for (std::uint32_t element = 0; element < 8U; ++element) {
-            const std::uint32_t word = words[element >> 1U];
-            const std::uint32_t gain_word = gain_packed[element >> 1U];
-            const float x = __uint_as_float((element & 1U) ? word & 0xffff0000U : word << 16U);
-            const float gain = __uint_as_float((element & 1U) ? gain_word & 0xffff0000U
-                                                              : gain_word << 16U) + offset;
-            const hip_bfloat16 rounded(x * row_inverse * gain);
-            seam[element >> 1U] |= static_cast<std::uint32_t>(rounded.data)
-                                   << ((element & 1U) * 16U);
-            float normalized = static_cast<float>(rounded);
-            nonfinite |= valid && !isfinite(normalized);
-            normalized = isfinite(normalized) ? normalized : 0.0F;
-            value[element] = normalized;
-            maximum = fmaxf(maximum, fabsf(normalized));
+        for (std::uint32_t row = 0; row < kNormalizedSmallMaximumTokens; ++row)
+            if (row < tokens) partial[row][slot] = normalized_small_vector_sumsq(loaded[row]);
+        __syncthreads();
+        if (wave < tokens) {
+            const float sum = normalized_small_row_sum(partial[wave], lane);
+            if (lane == 0U) inverse[wave] = rsqrtf(sum / static_cast<float>(columns) + eps);
         }
-        maximum = fmaxf(maximum, __int_as_float(__builtin_amdgcn_update_dpp(
-            0, __float_as_int(maximum), 0x164, 0xf, 0xf, false)));
-        maximum = fmaxf(maximum, __int_as_float(__builtin_amdgcn_update_dpp(
-            0, __float_as_int(maximum), 0x162, 0xf, 0xf, false)));
-        maximum = fmaxf(maximum, __int_as_float(__builtin_amdgcn_update_dpp(
-            0, __float_as_int(maximum), 0x161, 0xf, 0xf, false)));
-        if (!valid) continue;
-        std::uint16_t scale_bits = 0U;
-        if (maximum != 0.0F) {
-            scale_bits = __half_as_ushort(__float2half_rn(maximum / 127.0F));
-            if (scale_bits == 0U) scale_bits = 1U;
-            if (!isfinite(__half2float(__ushort_as_half(scale_bits)))) {
-                overflow = true;
-                scale_bits = 0U;
+        __syncthreads();
+        bool nonfinite = false, overflow = false;
+#pragma unroll
+        for (std::uint32_t row = 0; row < kNormalizedSmallMaximumTokens; ++row) {
+            if (row < tokens) {
+                std::uint32_t seam[4]{};
+                float value[8];
+                normalized_small_vector_seam(loaded[row], gain_words, inverse[row], offset, seam,
+                                             value);
+#pragma unroll
+                for (std::uint32_t element = 0; element < 8U; ++element) {
+                    nonfinite |= !isfinite(value[element]);
+                    overflow |= isfinite(value[element]) &&
+                                a8g64_element_overflows(value[element]);
+                }
             }
         }
-        if ((threadIdx.x & 7U) == 0U)
-            scale_words[static_cast<std::size_t>(token) * (columns / kQ4Group) + slot / 8U] =
-                scale_bits;
-        const float scale = __half2float(__ushort_as_half(scale_bits));
-        std::uint32_t low_word = 0U, high_word = 0U;
-#pragma unroll
-        for (std::uint32_t element = 0; element < 8U; ++element) {
-            const int code = scale != 0.0F
-                ? max(-127, min(127, __float2int_rn(value[element] / scale)))
-                : 0;
-            const int low = code & 0x0f;
-            const int high = (code - low) / 16;
-            low_word |= static_cast<std::uint32_t>(low) << (element * 4U);
-            high_word |= static_cast<std::uint32_t>(high & 0x0f) << (element * 4U);
+        const bool any_nonfinite = __syncthreads_or(nonfinite);
+        const bool any_overflow = __syncthreads_or(overflow);
+        if (threadIdx.x == 0U) {
+            *status = (any_nonfinite ? static_cast<std::uint32_t>(Q4G64ActivationNonfinite) : 0U) |
+                      (any_overflow ? static_cast<std::uint32_t>(Q4G64ActivationScaleOverflow)
+                                    : 0U);
+            // A later stage's status word owned by the same Op (see a8q4g64_normalized_mlp).
+            if (clear_status != nullptr) *clear_status = 0U;
         }
-        reinterpret_cast<std::uint32_t*>(low_codes)[vector] = low_word;
-        reinterpret_cast<std::uint32_t*>(high_codes)[vector] = high_word;
-        if (normalized_rows != nullptr)
-            reinterpret_cast<uint4*>(normalized_rows)[vector] =
-                make_uint4(seam[0], seam[1], seam[2], seam[3]);
+        return;
     }
-    if (nonfinite) atomicOr(status, static_cast<std::uint32_t>(Q4G64ActivationNonfinite));
-    if (overflow) atomicOr(status, static_cast<std::uint32_t>(Q4G64ActivationScaleOverflow));
+    const std::uint32_t token = blockIdx.x;
+    const std::size_t vector = static_cast<std::size_t>(token) * kNormalizedSmallRowVectors + slot;
+    const uint4 loaded = rows[vector];
+    partial[0][slot] = normalized_small_vector_sumsq(loaded);
+    __syncthreads();
+    if (wave == 0U) {
+        const float sum = normalized_small_row_sum(partial[0], lane);
+        if (lane == 0U) inverse[0] = rsqrtf(sum / static_cast<float>(columns) + eps);
+    }
+    __syncthreads();
+    std::uint32_t seam[4]{};
+    float value[8];
+    normalized_small_vector_seam(loaded, gain_words, inverse[0], offset, seam, value);
+    float maximum = 0.0F;
+#pragma unroll
+    for (std::uint32_t element = 0; element < 8U; ++element) {
+        value[element] = isfinite(value[element]) ? value[element] : 0.0F;
+        maximum = fmaxf(maximum, fabsf(value[element]));
+    }
+    maximum = a8g64_group_maximum(maximum);
+    a8g64_encode_vector(value, maximum, lane, vector,
+                        static_cast<std::size_t>(token) * (columns / kQ4Group) + slot / 8U,
+                        low_codes, high_codes, scale_words);
+    if (normalized_rows != nullptr)
+        reinterpret_cast<uint4*>(normalized_rows)[vector] =
+            make_uint4(seam[0], seam[1], seam[2], seam[3]);
 }
 
 // Gated per-head normalization of the Qwen3.8 GDN output into the A8G64 codec, one wave per
@@ -954,26 +990,21 @@ __device__ __forceinline__ uint4 a8g64_gated_load(const hip_bfloat16* rows, std:
         rows + static_cast<std::size_t>(token) * kGatedPrefillColumns)[slot];
 }
 
-__device__ __forceinline__ void a8g64_gated_prepare_vector(
-    uint4 value_words, uint4 gate_words, const hip_bfloat16* norm, float eps,
-    std::uint32_t token, std::uint32_t slot, std::uint8_t* low_codes, std::uint8_t* high_codes,
-    std::uint16_t* scale_words, bool& nonfinite, bool& overflow) {
-    constexpr std::uint32_t columns = kGatedPrefillColumns;
+// The eight BF16 gated-seam values of one vector (nonfinite values kept).
+__device__ __forceinline__ void a8g64_gated_seam_values(
+    uint4 value_words, uint4 gate_words, const hip_bfloat16* norm, float eps, std::uint32_t slot,
+    float (&value)[8]) {
     const std::uint32_t lane = slot % kWaveSize;
     // Every head uses the same [128] weight: this lane always reads the same eight gains.
     const uint4 gain_words =
         reinterpret_cast<const uint4*>(norm)[lane % (kGatedPrefillHeadDim / 8U)];
     const std::uint32_t gain_packed[4]{gain_words.x, gain_words.y, gain_words.z, gain_words.w};
-    const auto bf16_at = [](const std::uint32_t (&words)[4], std::uint32_t element) {
-        const std::uint32_t word = words[element >> 1U];
-        return __uint_as_float((element & 1U) ? word & 0xffff0000U : word << 16U);
-    };
     const std::uint32_t x_packed[4]{value_words.x, value_words.y, value_words.z, value_words.w};
     const std::uint32_t z_packed[4]{gate_words.x, gate_words.y, gate_words.z, gate_words.w};
     float sumsq = 0.0F;
 #pragma unroll
     for (std::uint32_t element = 0; element < 8U; ++element) {
-        const float x = bf16_at(x_packed, element);
+        const float x = bf16_word_element(x_packed, element);
         sumsq = fmaf(x, x, sumsq);
     }
     // Sum over the 16 lanes (one head) of this DPP row.
@@ -986,53 +1017,37 @@ __device__ __forceinline__ void a8g64_gated_prepare_vector(
     sumsq += __int_as_float(__builtin_amdgcn_update_dpp(
         0, __float_as_int(sumsq), 0x161, 0xf, 0xf, false));
     const float inverse = rsqrtf(sumsq / static_cast<float>(kGatedPrefillHeadDim) + eps);
+#pragma unroll
+    for (std::uint32_t element = 0; element < 8U; ++element) {
+        const float z = bf16_word_element(z_packed, element);
+        const float silu = z / (1.0F + expf(-z));
+        value[element] = static_cast<float>(hip_bfloat16(
+            bf16_word_element(x_packed, element) * inverse *
+            bf16_word_element(gain_packed, element) * silu));
+    }
+}
+
+__device__ __forceinline__ void a8g64_gated_prepare_vector(
+    uint4 value_words, uint4 gate_words, const hip_bfloat16* norm, float eps,
+    std::uint32_t token, std::uint32_t slot, std::uint8_t* low_codes, std::uint8_t* high_codes,
+    std::uint16_t* scale_words, bool& nonfinite, bool& overflow) {
+    constexpr std::uint32_t columns = kGatedPrefillColumns;
     float value[8];
+    a8g64_gated_seam_values(value_words, gate_words, norm, eps, slot, value);
     float maximum = 0.0F;
 #pragma unroll
     for (std::uint32_t element = 0; element < 8U; ++element) {
-        const float z = bf16_at(z_packed, element);
-        const float silu = z / (1.0F + expf(-z));
-        float normalized = static_cast<float>(hip_bfloat16(
-            bf16_at(x_packed, element) * inverse * bf16_at(gain_packed, element) * silu));
-        nonfinite |= !isfinite(normalized);
-        normalized = isfinite(normalized) ? normalized : 0.0F;
-        value[element] = normalized;
-        maximum = fmaxf(maximum, fabsf(normalized));
+        nonfinite |= !isfinite(value[element]);
+        value[element] = isfinite(value[element]) ? value[element] : 0.0F;
+        maximum = fmaxf(maximum, fabsf(value[element]));
     }
-    maximum = fmaxf(maximum, __int_as_float(__builtin_amdgcn_update_dpp(
-        0, __float_as_int(maximum), 0x164, 0xf, 0xf, false)));
-    maximum = fmaxf(maximum, __int_as_float(__builtin_amdgcn_update_dpp(
-        0, __float_as_int(maximum), 0x162, 0xf, 0xf, false)));
-    maximum = fmaxf(maximum, __int_as_float(__builtin_amdgcn_update_dpp(
-        0, __float_as_int(maximum), 0x161, 0xf, 0xf, false)));
-    std::uint16_t scale_bits = 0U;
-    if (maximum != 0.0F) {
-        scale_bits = __half_as_ushort(__float2half_rn(maximum / 127.0F));
-        if (scale_bits == 0U) scale_bits = 1U;
-        if (!isfinite(__half2float(__ushort_as_half(scale_bits)))) {
-            overflow = true;
-            scale_bits = 0U;
-        }
-    }
-    if ((lane & 7U) == 0U) {
-        scale_words[static_cast<std::size_t>(token) * (columns / kQ4Group) + slot / 8U] =
-            scale_bits;
-    }
-    const float scale = __half2float(__ushort_as_half(scale_bits));
-    std::uint32_t low_word = 0U, high_word = 0U;
-#pragma unroll
-    for (std::uint32_t element = 0; element < 8U; ++element) {
-        const int code = scale != 0.0F
-            ? max(-127, min(127, __float2int_rn(value[element] / scale)))
-            : 0;
-        const int low = code & 0x0f;
-        const int high = (code - low) / 16;
-        low_word |= static_cast<std::uint32_t>(low) << (element * 4U);
-        high_word |= static_cast<std::uint32_t>(high & 0x0f) << (element * 4U);
-    }
-    const std::size_t packed_offset = static_cast<std::size_t>(token) * (columns / 8U) + slot;
-    reinterpret_cast<std::uint32_t*>(low_codes)[packed_offset] = low_word;
-    reinterpret_cast<std::uint32_t*>(high_codes)[packed_offset] = high_word;
+    maximum = a8g64_group_maximum(maximum);
+    overflow |= maximum != 0.0F &&
+                !isfinite(__half2float(__float2half_rn(maximum / 127.0F)));
+    a8g64_encode_vector(value, maximum, slot % kWaveSize,
+                        static_cast<std::size_t>(token) * (columns / 8U) + slot,
+                        static_cast<std::size_t>(token) * (columns / kQ4Group) + slot / 8U,
+                        low_codes, high_codes, scale_words);
 }
 
 __global__ __launch_bounds__(kNormalizedPrefillTokensPerBlock * kWaveSize)
@@ -1057,8 +1072,8 @@ void a8g64_gated_normalized_prepare_prefill_kernel(
 }
 
 // Small-T form: one 16-byte slot per thread over T x 768 slots (256-thread CTAs keep every wave
-// inside one token row), the same per-vector arithmetic. A single CTA is compute-bound on one CU,
-// so the status word is reset by the launcher instead.
+// inside one token row), the same per-vector arithmetic. The status word is reset by the
+// launcher: a status CTA recomputing every seam value would be the critical path.
 constexpr std::uint32_t kGatedSmallMaximumTokens = 8U;
 constexpr std::uint32_t kGatedSmallThreads = 256U;
 static_assert((kGatedPrefillColumns / 8U) % kGatedSmallThreads == 0U);
@@ -3639,7 +3654,9 @@ hipError_t a8g64_quantize_activation(const A8G64ActivationQuantizeArgs& args,
         reinterpret_cast<std::uintptr_t>(args.input) % 16U == 0U &&
         static_cast<std::size_t>(args.workspace.tokens) * (columns / 8U) <=
             kSmallQuantizeMaximumVectors) {
-        hipLaunchKernelGGL(a8g64_quantize_activation_small_kernel, dim3(1),
+        const std::uint32_t vectors = args.workspace.tokens * (columns / 8U);
+        hipLaunchKernelGGL(a8g64_quantize_activation_small_kernel,
+                           dim3((vectors + kSmallQuantizeThreads - 1U) / kSmallQuantizeThreads + 1U),
                            dim3(kSmallQuantizeThreads), 0, stream, args.input,
                            args.workspace.low_codes, args.workspace.high_codes,
                            args.workspace.scales, args.workspace.status, args.workspace.tokens,
@@ -4057,7 +4074,7 @@ hipError_t a8q4g64_linear_prefill_cta(
 hipError_t run_a8q4_projection(const A8Q4G64LinearArgs& linear_args,
                                hipStream_t stream) noexcept;
 
-// K5120 normalized preparation: the one-CTA small route (with its own status reset) up to
+// K5120 normalized preparation: the per-row small route (its status CTA publishes the status) up to
 // kNormalizedSmallMaximumTokens rows, otherwise the reset launch and one wave per row.
 hipError_t launch_normalized_prepare(const hip_bfloat16* input, const hip_bfloat16* norm,
                                      float eps, bool unit_offset, std::uint32_t tokens,
@@ -4066,8 +4083,8 @@ hipError_t launch_normalized_prepare(const hip_bfloat16* input, const hip_bfloat
                                      std::uint32_t* clear_status = nullptr) noexcept {
 #if defined(__HIPCC__)
     if (tokens <= kNormalizedSmallMaximumTokens) {
-        hipLaunchKernelGGL(a8g64_normalized_prepare_small_kernel, dim3(1),
-                           dim3(kSmallQuantizeThreads), 0, stream, input, norm, eps,
+        hipLaunchKernelGGL(a8g64_normalized_prepare_small_kernel, dim3(tokens + 1U),
+                           dim3(kNormalizedSmallRowVectors), 0, stream, input, norm, eps,
                            unit_offset, tokens, workspace.low_codes, workspace.high_codes,
                            workspace.scales, workspace.status, normalized, clear_status);
         return hipGetLastError();

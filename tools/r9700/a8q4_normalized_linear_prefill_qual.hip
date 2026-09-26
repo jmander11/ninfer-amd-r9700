@@ -451,6 +451,42 @@ int main(int argc, char** argv) {
             }
         }
 
+        // The T6 status CTA publishes a nonfinite input and a scale overflow (1e7 gains) over a
+        // stale ~0 status word without any reset launch.
+        {
+            const auto t6_status = [&](const std::vector<hip_bfloat16>& rows,
+                                       const std::vector<hip_bfloat16>& row_gains) {
+                Device<hip_bfloat16> d_rows(rows.size()), d_row_gains(row_gains.size());
+                d_rows.put(rows);
+                d_row_gains.put(row_gains);
+                check(hipMemcpy(verify_planes.status, &stale_status, sizeof(stale_status),
+                                hipMemcpyHostToDevice), "stale status");
+                ninfer::ops::normalized_linear(
+                    ninfer::Tensor(d_rows.data, ninfer::DType::BF16,
+                                   {static_cast<int>(kColumns), static_cast<int>(kVerifyTokens)}),
+                    ninfer::Tensor(d_row_gains.data, ninfer::DType::BF16,
+                                   {static_cast<int>(kColumns)}),
+                    kEps, true, weight, verify_y,
+                    {d_verify_workspace.data, verify_workspace_bytes}, stream);
+                check(hipStreamSynchronize(stream), "sync");
+                std::uint32_t published = 0;
+                check(hipMemcpy(&published, verify_planes.status, sizeof(published),
+                                hipMemcpyDeviceToHost), "status");
+                return published;
+            };
+            std::vector<hip_bfloat16> rows(input.begin(),
+                                           input.begin() + kVerifyTokens * kColumns);
+            rows[4U * kColumns + 7U] = hip_bfloat16(std::numeric_limits<float>::infinity());
+            require(t6_status(rows, norm) == lin::Q4G64ActivationNonfinite,
+                    "T6 normalized status CTA missed a nonfinite input");
+            rows[4U * kColumns + 7U] = input[4U * kColumns + 7U];
+            require(t6_status(rows, norm) == lin::Q4G64ActivationOk,
+                    "T6 normalized status CTA reported a clean input");
+            require(t6_status(rows, std::vector<hip_bfloat16>(kColumns, hip_bfloat16(1.0e7F))) ==
+                        lin::Q4G64ActivationScaleOverflow,
+                    "T6 normalized status CTA missed a scale overflow");
+        }
+
         // ---- GDN input front: RMSNorm into the shared codec, BF16 rows published, K5120 ->
         // query-key N4096, value N6144 and output gate N6144 from the same planes. ----
         constexpr std::uint32_t kPairRows0 = 4096, kPairRows1 = 6144;
@@ -797,6 +833,43 @@ int main(int argc, char** argv) {
             check(hipStreamSynchronize(stream), "sync");
             require(accumulated_exactly(d_out6.get(), residual6, d_control6.get()),
                     "T6 gated output differs from BF16(residual + small-batch GEMM)");
+            // The status CTA publishes a nonfinite input and a scale overflow (1e7 head gains)
+            // over a stale ~0 status word without any reset launch.
+            const auto gated_status6 = [&](const std::vector<hip_bfloat16>& rows,
+                                           const std::vector<hip_bfloat16>& gains6) {
+                Device<hip_bfloat16> d_rows(rows.size()), d_gains6(gains6.size());
+                d_rows.put(rows);
+                d_gains6.put(gains6);
+                check(hipMemset(planes6.status, 0xff, sizeof(std::uint32_t)), "stale status");
+                d_out6.put(residual6);
+                check(lin::a8q4g64_gated_normalized_linear(
+                          {.input = d_rows.data, .weight_codes = d_gated_codes.data,
+                           .weight_code_bytes = d_gated_codes.bytes(),
+                           .weight_scales = d_gated_scales.data,
+                           .weight_scale_bytes = d_gated_scales.bytes(),
+                           .activation_workspace = d_ws6.data, .activation_workspace_bytes = ws6,
+                           .output = d_out6.data, .tokens = kT, .rows = kGatedRows,
+                           .columns = kGatedColumns, .padded_columns = kGatedColumns},
+                          d_gains6.data, d_gate.data, kEps, stream),
+                      "T6 gated status route");
+                check(hipStreamSynchronize(stream), "sync");
+                std::uint32_t published = 0;
+                check(hipMemcpy(&published, planes6.status, sizeof(published),
+                                hipMemcpyDeviceToHost), "status");
+                return published;
+            };
+            std::vector<hip_bfloat16> rows6(recurrent.begin(),
+                                            recurrent.begin() + kT * kGatedColumns);
+            rows6[3U * kGatedColumns + 9U] = hip_bfloat16(std::numeric_limits<float>::infinity());
+            require(gated_status6(rows6, head_norm) == lin::Q4G64ActivationNonfinite,
+                    "T6 gated status CTA missed a nonfinite input");
+            rows6[3U * kGatedColumns + 9U] = recurrent[3U * kGatedColumns + 9U];
+            require(gated_status6(rows6, head_norm) == lin::Q4G64ActivationOk,
+                    "T6 gated status CTA reported a clean input");
+            require(gated_status6(rows6, std::vector<hip_bfloat16>(head_norm.size(),
+                                                                   hip_bfloat16(1.0e7F))) ==
+                        lin::Q4G64ActivationScaleOverflow,
+                    "T6 gated status CTA missed a scale overflow");
         }
         Device<std::uint8_t> d_gated_linear_workspace(ninfer::ops::linear_workspace_capacity_bytes(
             ninfer::QType::Q4G64_F16S, tokens, kGatedColumns));
@@ -1057,7 +1130,7 @@ int main(int argc, char** argv) {
              << ",\"output_exact_vs_production_gemm_same_planes\":true"
              << ",\"misaligned_prefill_input_rejected\":true"
              << ",\"route_ms\":" << route_ms << ",\"composition_ms\":" << composition_ms
-             << ",\"verify_t6\":{\"stale_status_cleared\":true"
+             << ",\"verify_t6\":{\"stale_status_cleared\":true,\"status_cta_nonfinite_overflow\":true"
              << ",\"maximum_normalized_plane_error\":" << verify_worst_plane
              << ",\"maximum_normalized_oracle_error\":" << verify_worst << "}"
              << ",\"normalized_pair\":{\"rows\":[" << kPairRows0 << "," << kPairRows1 << "," << kPairRows1 << "]"
