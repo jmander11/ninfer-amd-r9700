@@ -388,6 +388,9 @@ Error run_finish(ninfer::DeviceContext& device) {
     std::vector<hip_bfloat16> hidden(static_cast<std::size_t>(kD) * columns);
     std::vector<hip_bfloat16> base(static_cast<std::size_t>(kD) * 4);
     std::vector<hip_bfloat16> dynamic(static_cast<std::size_t>(kGroups) * 2 * columns);
+    std::vector<hip_bfloat16> residual(hidden.size());
+    for (std::size_t i = 0; i < residual.size(); ++i)
+        residual[i] = hip_bfloat16(patterned(static_cast<int>(i / kD), static_cast<int>(i % kD), 23, 64.0F));
     for (std::size_t i = 0; i < hidden.size(); ++i)
         hidden[i] = hip_bfloat16(patterned(static_cast<int>(i / kD), static_cast<int>(i % kD), 31, 256.0F));
     for (std::size_t i = 0; i < base.size(); ++i)
@@ -402,7 +405,9 @@ Error run_finish(ninfer::DeviceContext& device) {
                 const double x0 = static_cast<float>(hidden[hidden_index(d, token, b, tokens)]);
                 const double x1 = token == 0 ? 0.0 :
                     static_cast<float>(hidden[hidden_index(d, token - 1, b, tokens)]);
+                // Finish adds the convolution to the residual stream.
                 expected[hidden_index(d, token, b, tokens)] =
+                    static_cast<float>(residual[hidden_index(d, token, b, tokens)]) +
                     (static_cast<float>(base[2 * kD + d]) +
                      static_cast<float>(dynamic[dynamic_index(group, 0, token, b, tokens)])) * x0 +
                     (static_cast<float>(base[3 * kD + d]) +
@@ -413,7 +418,7 @@ Error run_finish(ninfer::DeviceContext& device) {
     auto d_hidden = upload(hidden);
     auto d_base = upload(base);
     auto d_dynamic = upload(dynamic);
-    DeviceBuffer d_output(hidden.size() * sizeof(hip_bfloat16));
+    auto d_output = upload(residual);
     Tensor hidden_tensor(d_hidden.data(), DType::BF16, {kD, tokens, batch});
     Tensor base_tensor(d_base.data(), DType::BF16, {kD, 2, 2});
     Tensor dynamic_tensor(d_dynamic.data(), DType::BF16, {kGroups, 2, tokens, batch});

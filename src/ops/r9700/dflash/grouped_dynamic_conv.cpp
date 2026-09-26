@@ -139,15 +139,18 @@ void grouped_dynamic_conv_prepare(const Tensor& hidden, const Tensor& base_kerne
 }
 
 void grouped_dynamic_conv_finish(const Tensor& hidden, const Tensor& base_kernel,
-                                 const Tensor& finish_dynamic, Tensor& out, hipStream_t stream) {
+                                 const Tensor& finish_dynamic, Tensor& residual,
+                                 hipStream_t stream) {
     require_hidden_layout(hidden, "hidden");
-    require_matching_activation(hidden, out, "out");
+    require_matching_activation(hidden, residual, "residual");
     require_base_kernel(base_kernel);
     require_finish_dynamic(hidden, finish_dynamic);
-    require_disjoint(hidden, out, "grouped_dynamic_conv: out aliases hidden");
-    require_disjoint(out, finish_dynamic, "grouped_dynamic_conv: out aliases finish_dynamic");
-    require_disjoint(out, base_kernel, "grouped_dynamic_conv: out aliases base_kernel");
-    detail::grouped_dynamic_conv_finish_launch(hidden, base_kernel, finish_dynamic, out, stream);
+    require_disjoint(hidden, residual, "grouped_dynamic_conv: residual aliases hidden");
+    require_disjoint(residual, finish_dynamic,
+                     "grouped_dynamic_conv: residual aliases finish_dynamic");
+    require_disjoint(residual, base_kernel, "grouped_dynamic_conv: residual aliases base_kernel");
+    detail::grouped_dynamic_conv_finish_launch(hidden, base_kernel, finish_dynamic, residual,
+                                               stream);
 }
 
 } // namespace ninfer::ops

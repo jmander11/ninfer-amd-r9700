@@ -329,12 +329,10 @@ void propose_batch_impl(DFlashBatchContext& state, qwen3::DFlashDecodeState& fra
                                       roots.attention.view({Config::query_size, columns}),
                                       weight.attention_output, roots.delta);
                     Tensor delta_batch = roots.delta.view({Config::hidden, width, batch_size});
-                    Tensor finished_batch =
-                        roots.prepared.view({Config::hidden, width, batch_size});
+                    Tensor residual_batch = residual.view({Config::hidden, width, batch_size});
                     ops::grouped_dynamic_conv_finish(delta_batch, weight.attention_conv.base_kernel,
-                                                     finish_dynamic, finished_batch,
+                                                     finish_dynamic, residual_batch,
                                                      state.execution.device.stream);
-                    ops::residual_add(roots.prepared, residual, state.execution.device.stream);
                 }
                 {
                     auto mlp_scope = state.execution.work.scope();
@@ -360,11 +358,10 @@ void propose_batch_impl(DFlashBatchContext& state, qwen3::DFlashDecodeState& fra
                     serialized_linear(state.execution, roots.intermediate, weight.down,
                                       roots.delta);
                     Tensor mlp_in  = roots.delta.view({Config::hidden, width, batch_size});
-                    Tensor mlp_out = roots.hidden.view({Config::hidden, width, batch_size});
+                    Tensor residual_batch = residual.view({Config::hidden, width, batch_size});
                     ops::grouped_dynamic_conv_finish(mlp_in, weight.mlp_conv.base_kernel,
-                                                     finish_dynamic, mlp_out,
+                                                     finish_dynamic, residual_batch,
                                                      state.execution.device.stream);
-                    ops::residual_add(roots.hidden, residual, state.execution.device.stream);
                 }
             }
         }(*state.execution.model.dflash);

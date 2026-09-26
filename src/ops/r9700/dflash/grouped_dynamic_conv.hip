@@ -62,8 +62,15 @@ __global__ void grouped_dynamic_conv_kernel(const hip_bfloat16* hidden,
         dynamic_previous =
             static_cast<float>(dynamic_source[dynamic_base + kGroupedDynamicConvGroups + group]);
     }
-    output[hidden_index] = hip_bfloat16((base_current + dynamic_current) * current +
-                                        (base_previous + dynamic_previous) * previous);
+    const hip_bfloat16 result((base_current + dynamic_current) * current +
+                              (base_previous + dynamic_previous) * previous);
+    if constexpr (Prepare) {
+        output[hidden_index] = result;
+    } else {
+        // Finish adds the rounded result to the residual stream in place.
+        output[hidden_index] =
+            hip_bfloat16(static_cast<float>(output[hidden_index]) + static_cast<float>(result));
+    }
 }
 
 } // namespace
@@ -84,7 +91,7 @@ void grouped_dynamic_conv_prepare_launch(const Tensor& hidden, const Tensor& bas
 }
 
 void grouped_dynamic_conv_finish_launch(const Tensor& hidden, const Tensor& base_kernel,
-                                        const Tensor& finish_dynamic, Tensor& out,
+                                        const Tensor& finish_dynamic, Tensor& residual,
                                         hipStream_t stream) {
     const int columns = hidden.ne[1] * hidden.ne[2];
     const dim3 grid((kGroupedDynamicConvHidden + kBlock - 1) / kBlock,
@@ -93,7 +100,7 @@ void grouped_dynamic_conv_finish_launch(const Tensor& hidden, const Tensor& base
         static_cast<const hip_bfloat16*>(hidden.data),
         static_cast<const hip_bfloat16*>(base_kernel.data),
         static_cast<const hip_bfloat16*>(finish_dynamic.data),
-        static_cast<hip_bfloat16*>(out.data), nullptr, hidden.ne[1], columns);
+        static_cast<hip_bfloat16*>(residual.data), nullptr, hidden.ne[1], columns);
     HIP_CHECK(hipGetLastError());
 }
 

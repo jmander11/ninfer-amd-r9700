@@ -39,12 +39,13 @@ inline constexpr std::int32_t kGroupedDynamicConvMaxWidthWhenBatched = 16;
  *                         (base[d,j,p] + dynamic[group(d),j,t,b]) * values[d,t,b,j]
  *
  *   with group(d)=floor(d/16). Prepare writes out into `prepared` with p=0 and writes
- *   dynamic[g,j,t,b] = proj[640 + j*320 + g, t, b] into `finish_dynamic`. Finish reads that stash
- *   and applies p=1. There is no persistent conv state; padding is zeros at the start of the
+ *   dynamic[g,j,t,b] = proj[640 + j*320 + g, t, b] into `finish_dynamic`. Finish reads that stash,
+ *   applies p=1 and adds the rounded result to the residual stream in place:
+ *   residual[d,t,b] = BF16(residual[d,t,b] + BF16(out[d,t,b])). There is no persistent conv state; padding is zeros at the start of the
  *   supplied block.
  *
  * Logical shapes:
- *   hidden/prepared/out are contiguous BF16 [D,T] or [D,T,B]. finish_dynamic is contiguous BF16
+ *   hidden/prepared/residual are contiguous BF16 [D,T] or [D,T,B]. finish_dynamic is contiguous BF16
  *   [G,2,T] or [G,2,T,B]. base_kernel is contiguous BF16 [D,2,2] stored D-fastest, then kernel
  *   offset, then phase (physical layout of a PyTorch [2,2,D] parameter). kernel_projection is a
  *   logical [1280,D] matrix. T is any positive value at B=1; B=2..4 admits T=1..16.
@@ -62,9 +63,9 @@ inline constexpr std::int32_t kGroupedDynamicConvMaxWidthWhenBatched = 16;
  *   implementation-defined.
  *
  * Effects:
- *   Prepare writes all of prepared and finish_dynamic. Finish writes all of out. Inputs other than
- *   those outputs are unchanged. prepared/out must not alias hidden, base_kernel, finish_dynamic,
- *   or any projection-weight plane. finish_dynamic must not alias hidden or base_kernel.
+ *   Prepare writes all of prepared and finish_dynamic. Finish updates all of residual. Inputs
+ *   other than those outputs are unchanged. prepared/residual must not alias hidden, base_kernel,
+ *   finish_dynamic, or any projection-weight plane. finish_dynamic must not alias hidden or base_kernel.
  *
  * Workspace:
  *   Prepare uses caller-owned transient storage sized by
@@ -80,6 +81,7 @@ void grouped_dynamic_conv_prepare(const Tensor& hidden, const Tensor& base_kerne
                                   hipStream_t stream);
 
 void grouped_dynamic_conv_finish(const Tensor& hidden, const Tensor& base_kernel,
-                                 const Tensor& finish_dynamic, Tensor& out, hipStream_t stream);
+                                 const Tensor& finish_dynamic, Tensor& residual,
+                                 hipStream_t stream);
 
 } // namespace ninfer::ops
