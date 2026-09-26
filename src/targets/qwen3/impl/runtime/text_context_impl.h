@@ -1142,10 +1142,14 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
     Tensor h           = control.hidden;
     Tensor g           = control.g;
     Tensor beta        = control.beta;
-    Variant::gdn_norm_control_projection(x, *w.input_norm, kCfg.rms_eps, *w.projection, h, g, beta,
-                                         s);
-    if constexpr (requires { tap.capture_gdn_controls(text_layer, h, g, beta, s); }) {
-        tap.capture_gdn_controls(text_layer, h, g, beta, s);
+    // The ordinary P2048 prefill leaf owns the whole GDN front, including this normalization.
+    const bool prefill_front = Variant::gdn_input_projection_prefill_p2048_selected(ph, T);
+    if (!prefill_front) {
+        Variant::gdn_norm_control_projection(x, *w.input_norm, kCfg.rms_eps, *w.projection, h, g,
+                                             beta, s);
+        if constexpr (requires { tap.capture_gdn_controls(text_layer, h, g, beta, s); }) {
+            tap.capture_gdn_controls(text_layer, h, g, beta, s);
+        }
     }
 
     auto projection       = workspace_recipe::gdn_projection<TextConfig>(work_, T);
@@ -1273,10 +1277,13 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
     Tensor qkv_c = conv.convolved;
     Tensor conv_state =
         state_.conv_slot(static_cast<std::uint32_t>(gidx), linear_state_current_slot_);
-    if (Variant::gdn_input_projection_prefill_p2048_selected(ph, T)) {
+    if (prefill_front) {
         Variant::gdn_input_projection_prefill_p2048(
-            h, *w.projection, *w.conv1d, conv_state, qc, kc, vc,
-            projection.output_gate, ph, work_, s, linear_execution_, text_layer);
+            x, *w.input_norm, kCfg.rms_eps, *w.projection, *w.conv1d, conv_state, h, g, beta, qc,
+            kc, vc, projection.output_gate, ph, work_, s, linear_execution_, text_layer);
+        if constexpr (requires { tap.capture_gdn_controls(text_layer, h, g, beta, s); }) {
+            tap.capture_gdn_controls(text_layer, h, g, beta, s);
+        }
     } else {
         // The target projection leaf copies whole logical rows and therefore consumes the
         // allocation's flat [value_dim,T] view. `z` is the later semantic

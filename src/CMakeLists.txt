@@ -334,6 +334,15 @@ target_link_libraries(ninfer_r9700_artifact_qual PRIVATE ninfer_artifact hip::ho
 # Isolated first-slice row-scaled-E4M3 gate_up execution. It owns fixed descriptors and one
 # installed top heuristic but is deliberately absent from target/Program dispatch until its
 # physical numerical and speed gates pass.
+# Small-T row-scaled E4M3 Linear route against an independent FP64 oracle of the consumed codes.
+add_executable(ninfer_r9700_fp8_row_scaled_small_t_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/fp8_row_scaled_small_t_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_fp8_row_scaled_small_t_qual)
+set_target_properties(ninfer_r9700_fp8_row_scaled_small_t_qual PROPERTIES
+  HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_fp8_row_scaled_small_t_qual PRIVATE
+  ninfer_r9700_core hip::host roc::hipblaslt)
+
 add_executable(ninfer_r9700_fp8_gate_up_qual
   ${PROJECT_SOURCE_DIR}/tools/r9700/fp8_gate_up_qual.hip)
 file(SHA256 ${PROJECT_SOURCE_DIR}/tools/r9700/fp8_gate_up_qual.hip

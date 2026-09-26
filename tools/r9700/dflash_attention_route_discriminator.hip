@@ -495,9 +495,14 @@ int main(int argc, char** argv) {
         DeviceArray<float> d_w1_scores(kQueryHeads * kW1Context + 2U);
         DeviceArray<float> d_w5_scores(kQueryHeads * kW5Context + 2U);
         DeviceArray<float> d_w6_scores(kQueryHeads * kW6Context + 2U);
-        const std::size_t batched_workspace_elements = kW5 * kQueryHeads * kW5Context;
+        // Split-context verify partials (bounded scratch; trailing chunk slots may stay unused).
+        const std::size_t batched_workspace_elements =
+            kv::fp8_int4_kv_attention_dflash_verify_batched_wmma_workspace_bytes(kW5Context, kW5) /
+            sizeof(float);
         DeviceArray<float> d_w5_batched_scores(batched_workspace_elements + 2U);
-        const std::size_t w6_batched_workspace_elements = kW6 * kQueryHeads * kW6Context;
+        const std::size_t w6_batched_workspace_elements =
+            kv::fp8_int4_kv_attention_dflash_verify_batched_wmma_workspace_bytes(kW6Context, kW6) /
+            sizeof(float);
         DeviceArray<float> d_w6_batched_scores(w6_batched_workspace_elements + 2U);
         // Fused dense prefill needs no workspace; only the W1 tail candidate owns scores.
         const std::size_t text_candidate_workspace_elements =
@@ -526,18 +531,16 @@ int main(int argc, char** argv) {
         };
         // W4 uses the same dynamic-row device instructions as W5/W6. Exercise
         // its public inputs directly, including compact-C page-table selection
-        // and distinct causal prefixes; serial parity is supplementary only.
+        // and distinct causal prefixes.
         Json w4_cells = Json::array();
-        std::vector<float> w4_profile_queries = fixture.queries;
-        for (auto& value : w4_profile_queries)
-            value = static_cast<float>(oracle::decode_e4m3fn(oracle::encode_e4m3fn(value)));
         for (const std::size_t context : {std::size_t{64}, kW1Context + 3U}) {
             constexpr std::uint32_t rows = 4U;
             const auto elements = rows * row_elements;
-            const auto score_elements = rows * kQueryHeads * context;
-            DeviceArray<float> output(elements + 2U), serial_output(elements + 2U);
+            const auto score_elements =
+                kv::fp8_int4_kv_attention_dflash_verify_batched_wmma_workspace_bytes(context, rows) /
+                sizeof(float);
+            DeviceArray<float> output(elements + 2U);
             DeviceArray<float> scores(score_elements + 2U);
-            DeviceArray<float> serial_scores(kQueryHeads * context + 2U);
             DeviceArray<std::int32_t> positions(rows), selected_row(1U);
             for (std::uint32_t concurrency = 1U; concurrency <= 4U; ++concurrency) {
                 // Other table rows deliberately contain invalid physical pages:
@@ -559,30 +562,22 @@ int main(int argc, char** argv) {
                 batched.page_table_row = selected_row.get();
                 batched.page_table_row_stride = static_cast<std::uint32_t>(pages.size());
                 batched.page_table_row_count = concurrency;
-                auto serial = batched;
-                serial.score_workspace = serial_scores.get() + 1U;
-                serial.output = serial_output.get() + 1U;
-                fill_guarded(output, elements); fill_guarded(serial_output, elements);
+                fill_guarded(output, elements);
                 fill_guarded(scores, score_elements);
-                fill_guarded(serial_scores, kQueryHeads * context);
-                hip_check(kv::fp8_int4_kv_attention_wmma(serial, device.stream), "W4 serial WMMA");
                 hip_check(kv::fp8_int4_kv_attention_dflash_verify_batched_wmma(batched, device.stream),
-                          "W4 batched WMMA");
+                          "W4 split verify");
                 device.synchronize();
-                const auto actual = read_guarded(output, elements, "W4 batched output");
-                const auto reference = read_guarded(serial_output, elements, "W4 serial output");
+                const auto actual = read_guarded(output, elements, "W4 split verify output");
                 const auto public_oracle = attention_oracle(fixture, fixture.queries, rows, host_positions);
-                const auto profile_oracle = attention_oracle(fixture, w4_profile_queries, rows, host_positions);
-                constexpr double implementation_limit = 2.0e-4;
-                const auto error = require_profile_bound(actual, public_oracle, profile_oracle,
-                    implementation_limit, "W4 public BF16 attention");
-                (void)require_oracle(actual, profile_oracle, implementation_limit, "W4 FP8-Q profile");
+                // Dense-attention criterion (BF16 Q, exact-BF16 K, FP16 probabilities and V/8).
+                constexpr double implementation_limit = 2.0e-3;
+                const auto error = require_oracle(actual, public_oracle, implementation_limit,
+                                                  "W4 public BF16 attention");
                 const auto exact = [](const auto& left, const auto& right) {
                     return std::equal(left.begin(), left.end(), right.begin(), [](float a, float b) {
                         return std::bit_cast<std::uint32_t>(a) == std::bit_cast<std::uint32_t>(b);
                     });
                 };
-                if (!exact(actual, reference)) fail("W4 batched/serial mismatch");
                 ninfer::DecodeGraphDefinition definition;
                 definition.capture(device.stream, [&] {
                     hip_check(kv::fp8_int4_kv_attention_dflash_verify_batched_wmma(batched, device.stream),
@@ -594,8 +589,7 @@ int main(int argc, char** argv) {
                 executable.launch(device.stream); device.synchronize();
                 if (!exact(actual, read_guarded(output, elements, "W4 graph output")))
                     fail("W4 eager/graph mismatch");
-                (void)read_guarded(scores, score_elements, "W4 score workspace");
-                (void)read_guarded(serial_scores, kQueryHeads * context, "W4 serial workspace");
+                require_guard_canaries(scores, "W4 split workspace");
                 auto missing = batched; missing.score_workspace = nullptr;
                 if (kv::fp8_int4_kv_attention_dflash_verify_batched_wmma(missing, device.stream) != hipErrorInvalidValue)
                     fail("W4 accepted missing workspace");
@@ -616,7 +610,7 @@ int main(int argc, char** argv) {
                 require_guard_canaries(output, "W4 masked output");
                 require_guard_canaries(scores, "W4 masked workspace");
                 w4_cells.push_back({{"context", context}, {"concurrency", concurrency},
-                    {"public_oracle_max_abs", error.maximum_absolute}, {"serial_exact", true},
+                    {"public_oracle_max_abs", error.maximum_absolute},
                     {"graph_exact", true}, {"device_row_metadata", true}, {"guards", true}});
             }
         }
@@ -647,7 +641,9 @@ int main(int argc, char** argv) {
             auto bad = rows == 6U ? w6_batched : w5_batched;
             bad.query_rows = rows;
             const auto output_count = rows * row_elements;
-            const auto score_count = rows * kQueryHeads * bad.context;
+            const auto score_count =
+                kv::fp8_int4_kv_attention_dflash_verify_batched_wmma_workspace_bytes(bad.context, rows) /
+                sizeof(float);
             DeviceArray<float> invalid_output(output_count + 2U), invalid_scores(score_count + 2U);
             DeviceArray<std::int32_t> selected_row(1U);
             DeviceArray<std::uint32_t> invalid_pages(pages.size());
@@ -821,10 +817,8 @@ int main(int argc, char** argv) {
         (void)read_guarded(d_w1_scores, kQueryHeads * kW1Context, "W1 score workspace");
         (void)read_guarded(d_w5_scores, kQueryHeads * kW5Context, "W5 score workspace");
         (void)read_guarded(d_w6_scores, kQueryHeads * kW6Context, "W6 score workspace");
-        (void)read_guarded(d_w5_batched_scores, batched_workspace_elements,
-                           "W5 batched score workspace");
-        (void)read_guarded(d_w6_batched_scores, w6_batched_workspace_elements,
-                           "W6 batched score workspace");
+        require_guard_canaries(d_w5_batched_scores, "W5 split verify workspace");
+        require_guard_canaries(d_w6_batched_scores, "W6 split verify workspace");
         // The dense QK plane intentionally does not materialize masked future-score cells.
         // Its contract is bounded scratch, not a fully written observable output.
         require_guard_canaries(d_text_candidate_workspace, "Text P129 candidate workspace");
@@ -845,13 +839,6 @@ int main(int argc, char** argv) {
                         })) {
             fail("W1 and W5 fused selected rows are not bit-exact");
         }
-        if (!std::equal(actual_w5_wmma.begin(), actual_w5_wmma.end(),
-                        actual_w5_batched.begin(), [](float left, float right) {
-                            return std::bit_cast<std::uint32_t>(left) ==
-                                   std::bit_cast<std::uint32_t>(right);
-                        })) {
-            fail("W5 batched WMMA is not bit-exact to serial WMMA");
-        }
         if (!std::equal(actual_w1.begin(), actual_w1.end(), actual_w6_wmma.begin(),
                         [](float left, float right) {
                             return std::bit_cast<std::uint32_t>(left) ==
@@ -865,13 +852,6 @@ int main(int argc, char** argv) {
                                    std::bit_cast<std::uint32_t>(right);
                         })) {
             fail("W1 and W6 fused selected rows are not bit-exact");
-        }
-        if (!std::equal(actual_w6_wmma.begin(), actual_w6_wmma.end(),
-                        actual_w6_batched.begin(), [](float left, float right) {
-                            return std::bit_cast<std::uint32_t>(left) ==
-                                   std::bit_cast<std::uint32_t>(right);
-                        })) {
-            fail("W6 batched WMMA is not bit-exact to serial WMMA");
         }
         if (!std::equal(actual_text_dense.begin(),
                         actual_text_dense.begin() + 128U * row_elements,
@@ -950,12 +930,8 @@ int main(int argc, char** argv) {
         const Error w5_wmma_error = require_profile_bound(
             actual_w5_wmma, oracle_w5, fp8_profile_oracle_w5, kImplementationLimit,
             "W5 serial WMMA");
-        const Error w5_batched_profile_error = require_oracle(
-            actual_w5_batched, fp8_profile_oracle_w5, kImplementationLimit,
-            "W5 batched WMMA FP8-Q profile");
-        const Error w5_batched_error = require_profile_bound(
-            actual_w5_batched, oracle_w5, fp8_profile_oracle_w5, kImplementationLimit,
-            "W5 batched WMMA");
+        const Error w5_batched_error = require_oracle(
+            actual_w5_batched, oracle_w5, kDenseImplementationLimit, "W5 split verify BF16-Q");
         const Error w5_fused_error = require_oracle(actual_w5_fused, oracle_w5,
                                                      kImplementationLimit,
                                                      "W5 fused");
@@ -965,12 +941,8 @@ int main(int argc, char** argv) {
         const Error w6_wmma_error = require_profile_bound(
             actual_w6_wmma, oracle_w6, fp8_profile_oracle_w6, kImplementationLimit,
             "W6 serial WMMA");
-        const Error w6_batched_profile_error = require_oracle(
-            actual_w6_batched, fp8_profile_oracle_w6, kImplementationLimit,
-            "W6 batched WMMA FP8-Q profile");
-        const Error w6_batched_error = require_profile_bound(
-            actual_w6_batched, oracle_w6, fp8_profile_oracle_w6, kImplementationLimit,
-            "W6 batched WMMA");
+        const Error w6_batched_error = require_oracle(
+            actual_w6_batched, oracle_w6, kDenseImplementationLimit, "W6 split verify BF16-Q");
         const Error w6_fused_error = require_oracle(actual_w6_fused, oracle_w6,
                                                      kImplementationLimit,
                                                      "W6 fused");
@@ -1031,14 +1003,13 @@ int main(int argc, char** argv) {
         device.synchronize();
         const std::vector<float> graph_w5_batched =
             read_guarded(d_w5_batched_output, kW5 * row_elements, "graph W5 batched WMMA");
-        (void)read_guarded(d_w5_batched_scores, batched_workspace_elements,
-                           "graph W5 batched score workspace");
-        if (!std::equal(actual_w5_wmma.begin(), actual_w5_wmma.end(),
+        require_guard_canaries(d_w5_batched_scores, "graph W5 split verify workspace");
+        if (!std::equal(actual_w5_batched.begin(), actual_w5_batched.end(),
                         graph_w5_batched.begin(), [](float left, float right) {
                             return std::bit_cast<std::uint32_t>(left) ==
                                    std::bit_cast<std::uint32_t>(right);
                         })) {
-            fail("captured W5 batched WMMA is not bit-exact to serial WMMA");
+            fail("captured W5 split verify differs from eager execution");
         }
         fill_guarded(d_w6_batched_output, kW6 * row_elements);
         fill_guarded(d_w6_batched_scores, w6_batched_workspace_elements);
@@ -1053,14 +1024,13 @@ int main(int argc, char** argv) {
         device.synchronize();
         const std::vector<float> graph_w6_batched =
             read_guarded(d_w6_batched_output, kW6 * row_elements, "graph W6 batched WMMA");
-        (void)read_guarded(d_w6_batched_scores, w6_batched_workspace_elements,
-                           "graph W6 batched score workspace");
-        if (!std::equal(actual_w6_wmma.begin(), actual_w6_wmma.end(),
+        require_guard_canaries(d_w6_batched_scores, "graph W6 split verify workspace");
+        if (!std::equal(actual_w6_batched.begin(), actual_w6_batched.end(),
                         graph_w6_batched.begin(), [](float left, float right) {
                             return std::bit_cast<std::uint32_t>(left) ==
                                    std::bit_cast<std::uint32_t>(right);
                         })) {
-            fail("captured W6 batched WMMA is not bit-exact to serial WMMA");
+            fail("captured W6 split verify differs from eager execution");
         }
         fill_guarded(d_text_candidate_output,
                      static_cast<std::size_t>(kTextRows) * row_elements);
@@ -1161,22 +1131,20 @@ int main(int argc, char** argv) {
                            {"text_w1_score_workspace_bytes", 12384},
                            {"text_candidate_workspace_bytes", text_candidate_workspace_elements * sizeof(float)}}},
             {"target_pair", {{"ordinary", long_context ? "W1/C4097/position4096 FP8-Q WMMA" : "W1/C130/position129 FP8-Q WMMA"},
-                               {"dflash_candidate", long_context ? "W5/C4101/positions4096..4100 batched FP8-Q WMMA" : "W5/C134/positions129..133 batched FP8-Q WMMA"},
+                               {"dflash_candidate", long_context ? "W5/C4101/positions4096..4100 split BF16-Q verify" : "W5/C134/positions129..133 split BF16-Q verify"},
                                {"serial_wmma_same_route_row0_bit_exact", true},
                                {"fused_same_route_row0_bit_exact", true},
-                               {"batched_serial_all_rows_bit_exact", true},
-                               {"batched_graph_all_rows_bit_exact", true},
+                               {"batched_graph_eager_all_rows_bit_exact", true},
                                {"current_production_cross_route_row0_bit_exact", false},
                                {"current_production_cross_route_row0_mismatches", fused_mismatches},
                                {"current_production_cross_route_row0_max_abs",
                                 fused_pair_maximum_absolute}}},
             {"target_pair_w6", {{"ordinary", long_context ? "W1/C4097/position4096 FP8-Q WMMA" : "W1/C130/position129 FP8-Q WMMA"},
                                  {"dflash_candidate",
-                                  long_context ? "W6/C4102/positions4096..4101 batched FP8-Q WMMA" : "W6/C135/positions129..134 batched FP8-Q WMMA"},
+                                  long_context ? "W6/C4102/positions4096..4101 split BF16-Q verify" : "W6/C135/positions129..134 split BF16-Q verify"},
                                  {"serial_wmma_same_route_row0_bit_exact", true},
                                  {"fused_same_route_row0_bit_exact", true},
-                                 {"batched_serial_all_rows_bit_exact", true},
-                                 {"batched_graph_all_rows_bit_exact", true}}},
+                                 {"batched_graph_eager_all_rows_bit_exact", true}}},
             {"text_pair", {{"fresh", "dense T129/C129 plus W1 tail overwrite"},
                             {"append", "W1/C129/position128 FP8-Q WMMA"},
                             {"dense_prefix_rows0_127_preserved_bit_exact", true},
@@ -1201,10 +1169,6 @@ int main(int argc, char** argv) {
                          w5_wmma_profile_error.maximum_relative},
                         {"w5_batched_max_abs", w5_batched_error.maximum_absolute},
                         {"w5_batched_max_rel", w5_batched_error.maximum_relative},
-                        {"w5_batched_fp8_q_profile_max_abs",
-                         w5_batched_profile_error.maximum_absolute},
-                        {"w5_batched_fp8_q_profile_max_rel",
-                         w5_batched_profile_error.maximum_relative},
                         {"w5_fused_max_abs", w5_fused_error.maximum_absolute},
                         {"w5_fused_max_rel", w5_fused_error.maximum_relative},
                         {"w6_wmma_max_abs", w6_wmma_error.maximum_absolute},
@@ -1215,10 +1179,6 @@ int main(int argc, char** argv) {
                          w6_wmma_profile_error.maximum_relative},
                         {"w6_batched_max_abs", w6_batched_error.maximum_absolute},
                         {"w6_batched_max_rel", w6_batched_error.maximum_relative},
-                        {"w6_batched_fp8_q_profile_max_abs",
-                         w6_batched_profile_error.maximum_absolute},
-                        {"w6_batched_fp8_q_profile_max_rel",
-                         w6_batched_profile_error.maximum_relative},
                         {"w6_fused_max_abs", w6_fused_error.maximum_absolute},
                         {"w6_fused_max_rel", w6_fused_error.maximum_relative},
                         {"text_dense_bf16_q_max_abs", text_dense_error.maximum_absolute},

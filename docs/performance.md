@@ -60,6 +60,57 @@ expected value exactly.
 Copy bus rate counts both the read and write traffic. This is the hardware bandwidth bound, not a
 model or individual-Op throughput claim.
 
+## DFlash decode: split verify attention and small-width dispatch (2026-09-25)
+
+Selective-cap DFlash-loaded artifact, C1, fixed five drafts, optimized proposal head, chunk2048,
+G16, ROCm 10. Round time is decode seconds divided by speculative rounds (acceptance varies with
+the generated text, so tok/s on one sample mixes speed with acceptance).
+
+| Workload | Before, ms/round | After, ms/round | Decode tok/s before → after |
+|---|---:|---:|---:|
+| P4096/G128 (code) | 46.1 | 39.3 | 89.5 → 98.8 (33 rounds vs 31) |
+| P15200/G128 (code) | 58.1 | 40.6 | 84.8 → 126.0 |
+| Ordinary decode P4096/G256 | — | — | 29.9 → 31.6–32.0 tok/s |
+
+**Verify attention.** W4..6 verification used an FP8-Q WMMA score plane, an FP32 softmax and a PV
+that walked the whole context serially per wave (0.26 ms at 4K and 1.82 ms at 32K for W6, 20–25x
+off KV bandwidth). It now runs the dense-prefill arithmetic split over context chunks (one CTA per
+KV head and chunk, at most 64 chunks of at least 256 keys) with a stable FP32 merge. Verification
+runs only the six row-tile-0 waves (192 threads, two staging items per thread), so three CTAs share
+a WGP and overlap one another's load phases, bit-identical to the twelve-wave form: W6 0.057 /
+0.088 / 0.135 / 0.246 / 0.458 ms at 4K / 8K / 15.2K / 32K / 64K (4.5–8.8x the old route). Q stays BF16, which is
+more precise than the FP8-Q route; greedy DFlash output therefore no longer equals greedy ordinary
+decode bit for bit (the 4K sample diverges at a near-tie at token 8, the 15.2K sample is identical),
+while p-less sampling semantics are unchanged. A warp-specialized variant (three packed-head compute
+waves plus loader waves, raw FP8 K in a two-stage LDS ring) spilled 100–850 VGPRs in every form and
+was dropped; the six-wave CTA reaches about a third of KV bandwidth at 32K.
+
+**NIAH on these builds.** Standard single-needle and a new multi-key variant (the target record
+among 32 same-form records, four with near-miss names; `make_niah_positions.py --multikey`) at
+8K/32K/64K/128K x five depths, DFlash, no prefix reuse, thinking off: greedy 20/20 each; production
+sampling (p-less, temperature 1.5, adaptive DFlash, optimized head) 60/60 multi-key runs (three seeds)
+and 40/40 standard runs (two seeds). Evidence: `profiles/bench/r9700-niah-dflash-20260925/`,
+`profiles/bench/r9700-niah-pless-20260925/`.
+
+**Small-width dispatch.** A8G64 activation quantization up to 8,192 vectors runs as one
+self-resetting 1024-thread CTA (no status memset launch); the GDN query-key/value-z pair shares one
+quantization at every width; the gate/up RMSNorm feeds the codec directly for all T >= 2 (a
+one-CTA prepare with a deterministic per-row reduction up to 12 rows); the DFlash drafter's SWA
+consumes eight context keys per step (0.315 → 0.179 ms at T6/W4096). Dispatches per 4K round fell
+from 1,935 to 1,560.
+
+**Residual epilogue at verify widths.** The small-batch N5120 projections (attention and GDN
+output, MLP down) add their BF16 result to the residual in the GEMM epilogue, and the SiLU of the
+down input feeds the codec directly at every small-batch width (previously T2048 only): both are
+bit-exact to the composition, 40.6 → 39.6 ms per 4K round.
+
+**FP8 projections.** The row-scaled E4M3 attention projections (N7168/K5120) ran through hipBLASLt
+at about 50% of bandwidth for T <= 16 (116 µs per call). A dedicated route (one 128-thread CTA per
+16 rows, native FP8 WMMA, four ordered K quarters, in-kernel poisoning) takes about 70 µs; it serves
+verification and ordinary decode. PPL-4K prefill is unchanged; decode 6.647/23.019/3.235 versus
+6.676/23.038/3.220 (mixed sign). Evidence: `profiles/bench/r9700-dflash-decode-20260925/`,
+`profiles/rocprof/r9700-dflash-decode-*-20260925/`.
+
 ## Prefill follow-up: producers, DFlash inventory, chunked GDN (2026-09-25)
 
 Same setup as the base-prefill campaign below (selective-cap model, C1, chunk2048, dense G16,
@@ -103,6 +154,16 @@ sigmoid gate run as one exact kernel. Interleaved: 4K 2309→2336, 32K 1924→19
 unchanged. Under the 300 W cap the random-code gate/up GEMM runs at ~2.46 GHz, versus ~2.88 GHz
 for all-zero codes at the same power: the GEMM is power-bound, and only a higher power limit or a
 voltage offset (driver overdrive, disabled on this host) would raise its clock.
+
+**Third batch.** The residual add moved into the M128 GEMM epilogue (bit-exact BF16(residual +
+BF16(projection))) for the GDN output, SiLU down and attention output projections; the P2048 GDN
+leaf normalizes its input once, publishing the BF16 rows for the control projection and quantizing
+them for the shared projections; and the value-z matrix is projected as separate value and
+output-gate halves, with the output-gate GEMM on a side stream that overlaps the convolution and
+the 48-CTA recurrence. Interleaved: 4K 2350→2380, 32K 1954→1980 tok/s; PPL-4K neutral. Prefill
+graph capture (~2 µs saved per dispatch, ~0.2%) and a double-buffered or register-prefetched
+dense attention were measured out: one 37.9 KB attention CTA already fills a CU, gfx1201 has no
+VMEM-to-LDS load, and a register prefetch spills at the 256-VGPR limit.
 
 **Chunk size.** Chunk 4096 remains 9–13% slower than 2048 (4K 1954 vs 2199, 8K 1847 vs 2130,
 32K 1671 vs 1838): the P2048-specialized fused routes do not apply and the GEMM is already

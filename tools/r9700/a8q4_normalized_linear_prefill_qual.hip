@@ -3,7 +3,8 @@
 // K5120 -> N34816, and the GDN output route (per-head gated RMSNorm into the codec) K6144 -> N5120.
 // Evidence: an independent FP64 oracle of the complete represented formula at sampled tokens;
 // an FP64 RMSNorm + codec check of every token's activation planes; exact equality with the
-// production A8Q4 GEMM on the same planes; rejection of a misaligned prefill input; and timing
+// production A8Q4 GEMM on the same planes (BF16(residual + GEMM) for the in-place projected-residual
+// routes: GDN output, attention output, fused SiLU down); rejection of a misaligned prefill input; and timing
 // against the composition it replaces (public RMSNorm with a BF16 intermediate, then Linear).
 #include <hip/hip_bfloat16.h>
 #include <hip/hip_runtime.h>
@@ -11,7 +12,9 @@
 #include "ninfer/ops/gated_rmsnorm.h"
 #include "ninfer/ops/linear.h"
 #include "ninfer/ops/normalized_linear.h"
+#include "ninfer/ops/residual_add.h"
 #include "ninfer/ops/rmsnorm.h"
+#include "ops/r9700/linear/a8q4_small_batch_projection.h"
 #include "ops/r9700/linear/r9700_linear.h"
 
 #include <algorithm>
@@ -79,6 +82,19 @@ std::uint16_t half_bits(float value) { return std::bit_cast<std::uint16_t>(stati
 double half_value(std::uint16_t bits) { return static_cast<double>(std::bit_cast<_Float16>(bits)); }
 
 // Independent BF16 round-to-nearest-even of a double (normal range).
+// Projected-residual boundary: every element equals BF16(residual + projection).
+bool accumulated_exactly(const std::vector<hip_bfloat16>& actual,
+                         const std::vector<hip_bfloat16>& residual,
+                         const std::vector<hip_bfloat16>& projection) {
+    for (std::size_t index = 0; index < actual.size(); ++index) {
+        const hip_bfloat16 expected(static_cast<float>(residual[index]) +
+                                    static_cast<float>(projection[index]));
+        if (std::bit_cast<std::uint16_t>(actual[index]) != std::bit_cast<std::uint16_t>(expected))
+            return false;
+    }
+    return true;
+}
+
 double bf16_rne(double x) {
     if (x == 0 || !std::isfinite(x)) return x;
     int exponent = 0;
@@ -161,7 +177,7 @@ int main(int argc, char** argv) {
         const std::filesystem::path out = argv[2];
         require(!std::filesystem::exists(out), "output exists");
         constexpr std::uint32_t tokens = 2048;
-        require(lin::a8q4g64_normalized_linear_prefill_supported(tokens),
+        require(lin::a8q4g64_normalized_linear_batched_supported(tokens),
                 "T2048 is outside the prefill route");
         hipStream_t stream{};
         check(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking), "stream");
@@ -237,7 +253,7 @@ int main(int argc, char** argv) {
             const std::size_t small_bytes =
                 ninfer::ops::normalized_linear_workspace_capacity_bytes(128, kColumns, kRows);
             bool rejected = false;
-            if (lin::a8q4g64_normalized_linear_prefill_supported(128U)) {
+            if (lin::a8q4g64_normalized_linear_batched_supported(128U)) {
                 try {
                     ninfer::ops::normalized_linear(misaligned, gains, kEps, true, weight, small,
                                                    {d_workspace.data, small_bytes}, stream);
@@ -356,6 +372,227 @@ int main(int argc, char** argv) {
         };
         const auto [route_ms, composition_ms] = time_ab(stream, route, composition);
 
+        // ---- Verification width T6 through the public op (the first six fixture rows): one
+        // prepare block that clears a stale status word itself, then the small-batch GEMM. ----
+        constexpr std::uint32_t kVerifyTokens = 6;
+        require(lin::a8q4g64_normalized_linear_batched_supported(kVerifyTokens),
+                "T6 is outside the batched normalized route");
+        const std::size_t verify_workspace_bytes =
+            ninfer::ops::normalized_linear_workspace_capacity_bytes(kVerifyTokens, kColumns, kRows);
+        require(verify_workspace_bytes ==
+                    lin::a8q4g64_activation_workspace_capacity_bytes(kVerifyTokens, kColumns),
+                "T6 normalized route still reserves a BF16 intermediate");
+        Device<std::uint8_t> d_verify_workspace(verify_workspace_bytes);
+        lin::A8G64ActivationWorkspace verify_planes{};
+        check(lin::a8q4g64_bind_activation_workspace(d_verify_workspace.data, verify_workspace_bytes,
+                                                     kVerifyTokens, kColumns, &verify_planes),
+              "bind T6 planes");
+        const std::uint32_t stale_status = ~0U;
+        check(hipMemcpy(verify_planes.status, &stale_status, sizeof(stale_status),
+                        hipMemcpyHostToDevice),
+              "stale status");
+        ninfer::Tensor verify_y(d_control.data, ninfer::DType::BF16,
+                                {static_cast<int>(kRows), static_cast<int>(kVerifyTokens)});
+        ninfer::ops::normalized_linear(
+            ninfer::Tensor(d_input.data, ninfer::DType::BF16,
+                           {static_cast<int>(kColumns), static_cast<int>(kVerifyTokens)}),
+            gains, kEps, true, weight, verify_y,
+            {d_verify_workspace.data, verify_workspace_bytes}, stream);
+        check(hipStreamSynchronize(stream), "sync");
+        const std::vector<std::uint8_t> verify_workspace = d_verify_workspace.get();
+        const auto verify_plane = [&](const void* region) {
+            return verify_workspace.data() +
+                   (static_cast<const std::uint8_t*>(region) - d_verify_workspace.data);
+        };
+        std::uint32_t verify_status = ~0U;
+        std::memcpy(&verify_status, verify_plane(verify_planes.status), sizeof(verify_status));
+        require(verify_status == 0U, "T6 route did not clear the stale activation status");
+        const std::uint8_t* verify_low = verify_plane(verify_planes.low_codes);
+        const std::uint8_t* verify_high = verify_plane(verify_planes.high_codes);
+        const auto* verify_scales =
+            reinterpret_cast<const std::uint16_t*>(verify_plane(verify_planes.scales));
+        const std::vector<hip_bfloat16> verify_output = d_control.get();
+        double verify_worst_plane = 0.0, verify_worst = 0.0;
+        for (std::uint32_t token = 0; token < kVerifyTokens; ++token) {
+            const std::vector<double> n = normalized_row(token);
+            std::vector<double> decoded(kColumns);
+            for (std::uint32_t k = 0; k < kColumns; ++k) {
+                const std::size_t index = static_cast<std::size_t>(token) * kColumns + k;
+                const unsigned low = (verify_low[index / 2] >> ((index & 1U) * 4U)) & 15U;
+                const unsigned high_nibble = (verify_high[index / 2] >> ((index & 1U) * 4U)) & 15U;
+                const int high = high_nibble >= 8U ? static_cast<int>(high_nibble) - 16
+                                                   : static_cast<int>(high_nibble);
+                const double scale = half_value(verify_scales[static_cast<std::size_t>(token) *
+                                                                  (kColumns / kGroup) + k / kGroup]);
+                decoded[k] = (static_cast<int>(low) + 16 * high) * scale;
+                const double limit = 0.5 * scale + std::abs(n[k]) * std::ldexp(1.0, -7) + 1e-30;
+                const double error = std::abs(decoded[k] - n[k]) / limit;
+                require(std::isfinite(error) && error <= 1.0,
+                        "T6 A8G64 planes differ from FP64 RMSNorm");
+                verify_worst_plane = std::max(verify_worst_plane, error);
+            }
+            const std::vector<double> xq = a8g64(n);
+            std::vector<double> reference(kRows);
+            double sum_squares = 0;
+            for (std::uint32_t row = 0; row < kRows; ++row) {
+                double sum = 0;
+                for (std::uint32_t k = 0; k < kColumns; ++k) sum += xq[k] * weight_at(codes, scales, row, k);
+                reference[row] = sum;
+                sum_squares += sum * sum;
+            }
+            const double rms = std::sqrt(sum_squares / kRows);
+            for (std::uint32_t row = 0; row < kRows; ++row) {
+                const double actual = static_cast<float>(
+                    verify_output[static_cast<std::size_t>(token) * kRows + row]);
+                const double limit = std::abs(reference[row]) * std::ldexp(1.0, -8) + 0.005 * rms;
+                const double error = std::abs(actual - reference[row]) / limit;
+                require(std::isfinite(error) && error <= 1.0, "T6 FP64 oracle mismatch");
+                verify_worst = std::max(verify_worst, error);
+            }
+        }
+
+        // ---- GDN input front: RMSNorm into the shared codec, BF16 rows published, K5120 ->
+        // query-key N4096, value N6144 and output gate N6144 from the same planes. ----
+        constexpr std::uint32_t kPairRows0 = 4096, kPairRows1 = 6144;
+        // pair_codes1/pair_scales1 hold the value-z matrix [2 x 6144 rows]; the value and gate
+        // projections read its two row-block halves.
+        std::vector<std::uint8_t> pair_codes0(static_cast<std::size_t>(kPairRows0) * kColumns / 2U),
+            pair_codes1(static_cast<std::size_t>(2U * kPairRows1) * kColumns / 2U);
+        std::vector<std::uint16_t> pair_scales0(static_cast<std::size_t>(kPairRows0) * kColumns / kGroup),
+            pair_scales1(static_cast<std::size_t>(2U * kPairRows1) * kColumns / kGroup);
+        for (auto* plane_codes : {&pair_codes0, &pair_codes1})
+            for (auto& byte : *plane_codes) byte = static_cast<std::uint8_t>(rng.next());
+        for (auto* plane_scales : {&pair_scales0, &pair_scales1})
+            for (auto& scale : *plane_scales)
+                scale = half_bits(static_cast<float>(0.004 * (0.5 + rng.uniform())));
+        Device<std::uint8_t> d_pair_codes0(pair_codes0.size()), d_pair_codes1(pair_codes1.size());
+        Device<std::uint16_t> d_pair_scales0(pair_scales0.size()), d_pair_scales1(pair_scales1.size());
+        Device<hip_bfloat16> d_pair_out0(static_cast<std::size_t>(tokens) * kPairRows0),
+            d_pair_out1(static_cast<std::size_t>(tokens) * kPairRows1),
+            d_pair_out2(static_cast<std::size_t>(tokens) * kPairRows1),
+            d_pair_control(static_cast<std::size_t>(tokens) * kPairRows1),
+            d_normalized_rows(input.size());
+        d_pair_codes0.put(pair_codes0);
+        d_pair_codes1.put(pair_codes1);
+        d_pair_scales0.put(pair_scales0);
+        d_pair_scales1.put(pair_scales1);
+        Device<std::uint8_t> d_pair_workspace(workspace_bytes);
+        const lin::A8Q4G64SharedActivationArgs pair_args{
+            .input = d_input.data,
+            .activation_workspace = d_pair_workspace.data,
+            .activation_workspace_bytes = workspace_bytes,
+            .projections = {{d_pair_codes0.data, d_pair_codes0.bytes(), d_pair_scales0.data,
+                             d_pair_scales0.bytes(), d_pair_out0.data, kPairRows0},
+                            {d_pair_codes1.data, d_pair_codes1.bytes() / 2U, d_pair_scales1.data,
+                             d_pair_scales1.bytes() / 2U, d_pair_out1.data, kPairRows1},
+                            {d_pair_codes1.data + d_pair_codes1.bytes() / 2U,
+                             d_pair_codes1.bytes() / 2U,
+                             d_pair_scales1.data + d_pair_scales1.count / 2U,
+                             d_pair_scales1.bytes() / 2U, d_pair_out2.data, kPairRows1}},
+            .projection_count = 3,
+            .tokens = tokens,
+            .columns = kColumns};
+        const auto pair_route = [&] {
+            check(lin::a8q4g64_normalized_shared_activation_linear(
+                      pair_args, d_norm.data, kEps, true, d_normalized_rows.data, stream),
+                  "normalized pair route");
+        };
+        pair_route();
+        check(hipStreamSynchronize(stream), "sync");
+        // The pair shares the normalized route's preparation: identical planes and status.
+        const std::vector<std::uint8_t> pair_workspace = d_pair_workspace.get();
+        for (const auto& [region, bytes] :
+             {std::pair<const void*, std::size_t>{planes.low_codes, planes.low_code_bytes},
+              {planes.high_codes, planes.high_code_bytes},
+              {planes.scales, planes.scale_bytes},
+              {planes.status, sizeof(std::uint32_t)}}) {
+            const std::size_t offset =
+                static_cast<std::size_t>(static_cast<const std::uint8_t*>(region) - d_workspace.data);
+            require(std::memcmp(pair_workspace.data() + offset, workspace.data() + offset, bytes) == 0,
+                    "normalized pair planes differ from the normalized route");
+        }
+        // Published rows: one BF16 step of the FP64 seam, and the planes are exactly the codec of
+        // the published rows.
+        const std::vector<hip_bfloat16> normalized_rows = d_normalized_rows.get();
+        double worst_row = 0.0;
+        for (std::uint32_t token = 0; token < tokens; ++token) {
+            const std::vector<double> n = normalized_row(token);
+            std::vector<double> published(kColumns);
+            for (std::uint32_t k = 0; k < kColumns; ++k) {
+                published[k] = static_cast<float>(
+                    normalized_rows[static_cast<std::size_t>(token) * kColumns + k]);
+                const double limit = std::abs(n[k]) * std::ldexp(1.0, -7) + 1e-30;
+                const double error = std::abs(published[k] - n[k]) / limit;
+                require(std::isfinite(error) && error <= 1.0,
+                        "published normalized row differs from FP64 RMSNorm at token " +
+                            std::to_string(token));
+                worst_row = std::max(worst_row, error);
+            }
+            const std::vector<double> codec = a8g64(published);
+            for (std::uint32_t k = 0; k < kColumns; ++k) {
+                const std::size_t index = static_cast<std::size_t>(token) * kColumns + k;
+                const unsigned low = (low_plane[index / 2] >> ((index & 1U) * 4U)) & 15U;
+                const unsigned high_nibble = (high_plane[index / 2] >> ((index & 1U) * 4U)) & 15U;
+                const int high = high_nibble >= 8U ? static_cast<int>(high_nibble) - 16
+                                                   : static_cast<int>(high_nibble);
+                const double scale = half_value(scale_plane[static_cast<std::size_t>(token) *
+                                                                (kColumns / kGroup) + k / kGroup]);
+                require((static_cast<int>(low) + 16 * high) * scale == codec[k],
+                        "planes are not the codec of the published normalized rows");
+            }
+        }
+        for (std::uint32_t index = 0; index < 3U; ++index) {
+            const auto& projection = pair_args.projections[index];
+            const std::uint32_t rows = projection.rows;
+            const Device<hip_bfloat16>* out_device =
+                index == 0U ? &d_pair_out0 : index == 1U ? &d_pair_out1 : &d_pair_out2;
+            check(lin::a8q4g64_linear_prefill_cta(
+                      {planes.low_codes, planes.low_code_bytes, planes.high_codes,
+                       planes.high_code_bytes, planes.scales, planes.scale_bytes, planes.status,
+                       projection.weight_codes, projection.weight_code_bytes,
+                       projection.weight_scales, projection.weight_scale_bytes,
+                       d_pair_control.data, tokens, rows, kColumns, kColumns},
+                      stream),
+                  "pair control GEMM");
+            check(hipStreamSynchronize(stream), "sync");
+            const std::size_t bytes = static_cast<std::size_t>(tokens) * rows * sizeof(hip_bfloat16);
+            require(std::memcmp(out_device->get().data(), d_pair_control.get().data(), bytes) == 0,
+                    "normalized pair output differs from the production GEMM on the same planes");
+        }
+        // Side-stream form: the output-gate projection on a second stream is bit-identical.
+        {
+            const std::vector<hip_bfloat16> serial_gate = d_pair_out2.get();
+            check(hipMemset(d_pair_out2.data, 0, d_pair_out2.bytes()), "clear gate");
+            hipStream_t side_stream{};
+            hipEvent_t fork{}, join{};
+            check(hipStreamCreateWithFlags(&side_stream, hipStreamNonBlocking), "side stream");
+            check(hipEventCreateWithFlags(&fork, hipEventDisableTiming), "fork");
+            check(hipEventCreateWithFlags(&join, hipEventDisableTiming), "join");
+            const lin::A8Q4G64SideProjection side{side_stream, fork, join};
+            check(lin::a8q4g64_normalized_shared_activation_linear(
+                      pair_args, d_norm.data, kEps, true, d_normalized_rows.data, stream, &side),
+                  "side-stream pair route");
+            check(hipStreamWaitEvent(stream, join, 0), "join");
+            check(hipStreamSynchronize(stream), "sync");
+            require(std::memcmp(serial_gate.data(), d_pair_out2.get().data(),
+                                d_pair_out2.bytes()) == 0,
+                    "side-stream output gate differs from the serial route");
+            (void)hipEventDestroy(join);
+            (void)hipEventDestroy(fork);
+            (void)hipStreamDestroy(side_stream);
+        }
+        ninfer::Tensor normalized_tensor(d_normalized_rows.data, ninfer::DType::BF16,
+                                         {static_cast<int>(kColumns), static_cast<int>(tokens)});
+        lin::A8Q4G64SharedActivationArgs unnormalized_args = pair_args;
+        unnormalized_args.input = d_normalized_rows.data;
+        const auto pair_composition = [&] {
+            ninfer::ops::rmsnorm(x, gains, kEps, true, normalized_tensor, stream);
+            check(lin::a8q4g64_shared_activation_linear(unnormalized_args, stream),
+                  "pair composition");
+        };
+        const auto [pair_route_ms, pair_composition_ms] =
+            time_ab(stream, pair_route, pair_composition);
+
         // ---- GDN output: per-head gated RMSNorm into the A8G64 codec, K6144 -> N5120. ----
         constexpr std::uint32_t kGatedColumns = 6144, kGatedRows = 5120, kHeadDim = 128;
         std::vector<std::uint8_t> gated_codes(static_cast<std::size_t>(kGatedRows) * kGatedColumns / 2U);
@@ -387,6 +624,10 @@ int main(int argc, char** argv) {
         d_head_norm.put(head_norm);
         d_gated_codes.put(gated_codes);
         d_gated_scales.put(gated_scales);
+        // The route adds its BF16 projection to this residual in place.
+        std::vector<hip_bfloat16> gated_residual(static_cast<std::size_t>(tokens) * kGatedRows);
+        for (auto& value : gated_residual) value = hip_bfloat16((rng.uniform() - 0.5) * 8.0);
+        d_gated_output.put(gated_residual);
         require(lin::a8q4g64_gated_normalized_linear_prefill_supported(tokens),
                 "T2048 is outside the gated prefill route");
         const std::size_t gated_workspace_bytes =
@@ -422,9 +663,8 @@ int main(int argc, char** argv) {
             kGatedColumns};
         check(lin::a8q4g64_linear_prefill_cta(gated_linear, stream), "gated control GEMM");
         check(hipStreamSynchronize(stream), "sync");
-        require(std::memcmp(gated_output.data(), d_gated_control.get().data(),
-                            gated_output.size() * sizeof(hip_bfloat16)) == 0,
-                "gated output differs from the production GEMM on the same planes");
+        require(accumulated_exactly(gated_output, gated_residual, d_gated_control.get()),
+                "gated output differs from BF16(residual + production GEMM) on the same planes");
         // FP64 per-head gated RMSNorm with the BF16 seam: n = BF16(x/sqrt(mean_h(x^2)+eps)*w*silu(z)).
         const auto gated_row = [&](std::uint32_t token) {
             std::vector<double> n(kGatedColumns);
@@ -491,10 +731,14 @@ int main(int argc, char** argv) {
             }
             const double rms = std::sqrt(sum_squares / kGatedRows);
             for (std::uint32_t row = 0; row < kGatedRows; ++row) {
-                const double actual = static_cast<float>(
-                    gated_output[static_cast<std::size_t>(token) * kGatedRows + row]);
-                const double limit = std::abs(reference[row]) * std::ldexp(1.0, -8) + 0.005 * rms;
-                const double error = std::abs(actual - reference[row]) / limit;
+                const std::size_t index = static_cast<std::size_t>(token) * kGatedRows + row;
+                const double actual = static_cast<float>(gated_output[index]);
+                const double expected =
+                    static_cast<float>(gated_residual[index]) + reference[row];
+                // Projection criterion plus the BF16 rounding of the published sum.
+                const double limit = std::abs(reference[row]) * std::ldexp(1.0, -8) +
+                                     0.005 * rms + std::abs(expected) * std::ldexp(1.0, -8);
+                const double error = std::abs(actual - expected) / limit;
                 require(std::isfinite(error) && error <= 1.0, "gated FP64 oracle mismatch");
                 gated_worst = std::max(gated_worst, error);
             }
@@ -518,6 +762,8 @@ int main(int argc, char** argv) {
                                         {static_cast<int>(kHeadDim), 48, static_cast<int>(tokens)});
         ninfer::Tensor gated_control_tensor(d_gated_control.data, ninfer::DType::BF16,
                                             {static_cast<int>(kGatedRows), static_cast<int>(tokens)});
+        ninfer::Tensor gated_residual_tensor(d_gated_output.data, ninfer::DType::BF16,
+                                             {static_cast<int>(kGatedRows), static_cast<int>(tokens)});
         const auto gated_composition = [&] {
             ninfer::ops::gated_rmsnorm(recurrent_tensor, head_norm_tensor, gate_tensor, kEps,
                                        gated_normalized, stream);
@@ -526,9 +772,177 @@ int main(int argc, char** argv) {
                                 gated_weight, gated_control_tensor,
                                 {d_gated_linear_workspace.data, d_gated_linear_workspace.bytes()},
                                 stream);
+            ninfer::ops::residual_add(gated_control_tensor, gated_residual_tensor, stream);
         };
         const auto [gated_route_ms, gated_composition_ms] =
             time_ab(stream, gated_route, gated_composition);
+
+        // ---- Projected-residual prefill (attention output, K6144 -> N5120) and the fused
+        // SiLU down projection (K17408 -> N5120): exact BF16(residual + production GEMM). ----
+        require(lin::a8q4g64_projected_residual_supported(tokens, kGatedRows, kGatedColumns),
+                "T2048 attention output is outside the projected-residual prefill route");
+        d_gated_output.put(gated_residual);
+        const auto projected_route = [&] {
+            check(lin::a8q4g64_projected_residual(
+                      {.input = d_recurrent.data,
+                       .weight_codes = d_gated_codes.data,
+                       .weight_code_bytes = d_gated_codes.bytes(),
+                       .weight_scales = d_gated_scales.data,
+                       .weight_scale_bytes = d_gated_scales.bytes(),
+                       .activation_workspace = d_gated_workspace.data,
+                       .activation_workspace_bytes = gated_workspace_bytes,
+                       .output = d_gated_output.data,
+                       .tokens = tokens, .rows = kGatedRows, .columns = kGatedColumns,
+                       .padded_columns = kGatedColumns},
+                      stream),
+                  "projected-residual route");
+        };
+        projected_route();
+        check(hipStreamSynchronize(stream), "sync");
+        const std::vector<hip_bfloat16> projected_output = d_gated_output.get();
+        check(lin::a8q4g64_linear_prefill_cta(gated_linear, stream), "projected control GEMM");
+        check(hipStreamSynchronize(stream), "sync");
+        require(accumulated_exactly(projected_output, gated_residual, d_gated_control.get()),
+                "projected-residual output differs from BF16(residual + production GEMM)");
+        const auto projected_composition = [&] {
+            ninfer::ops::linear(ninfer::Tensor(d_recurrent.data, ninfer::DType::BF16,
+                                               {static_cast<int>(kGatedColumns),
+                                                static_cast<int>(tokens)}),
+                                gated_weight, gated_control_tensor,
+                                {d_gated_linear_workspace.data, d_gated_linear_workspace.bytes()},
+                                stream);
+            ninfer::ops::residual_add(gated_control_tensor, gated_residual_tensor, stream);
+        };
+        const auto [projected_route_ms, projected_composition_ms] =
+            time_ab(stream, projected_route, projected_composition);
+
+        constexpr std::uint32_t kDownColumns = 17408;
+        std::vector<std::uint8_t> down_codes(static_cast<std::size_t>(kGatedRows) * kDownColumns / 2U);
+        std::vector<std::uint16_t> down_scales(static_cast<std::size_t>(kGatedRows) * kDownColumns / kGroup);
+        for (auto& byte : down_codes) byte = static_cast<std::uint8_t>(rng.next());
+        for (auto& scale : down_scales)
+            scale = half_bits(static_cast<float>(0.002 * (0.5 + rng.uniform())));
+        std::vector<hip_bfloat16> gate_up(static_cast<std::size_t>(tokens) * 2U * kDownColumns);
+        for (auto& value : gate_up) value = hip_bfloat16((rng.uniform() - 0.5) * 6.0);
+        Device<std::uint8_t> d_down_codes(down_codes.size());
+        Device<std::uint16_t> d_down_scales(down_scales.size());
+        Device<hip_bfloat16> d_gate_up(gate_up.size());
+        d_down_codes.put(down_codes);
+        d_down_scales.put(down_scales);
+        d_gate_up.put(gate_up);
+        d_gated_output.put(gated_residual);
+        const std::size_t down_workspace_bytes =
+            lin::a8q4g64_activation_workspace_capacity_bytes(tokens, kDownColumns);
+        Device<std::uint8_t> d_down_workspace(down_workspace_bytes);
+        check(lin::fused_silu_a8q4g64_down(
+                  {.gate_up = d_gate_up.data,
+                   .weight_codes = d_down_codes.data,
+                   .weight_code_bytes = d_down_codes.bytes(),
+                   .weight_scales = d_down_scales.data,
+                   .weight_scale_bytes = d_down_scales.bytes(),
+                   .activation_workspace = d_down_workspace.data,
+                   .activation_workspace_bytes = down_workspace_bytes,
+                   .residual = d_gated_output.data,
+                   .tokens = tokens, .rows = kGatedRows, .columns = kDownColumns,
+                   .padded_columns = kDownColumns},
+                  stream),
+              "fused down route");
+        check(hipStreamSynchronize(stream), "sync");
+        const std::vector<hip_bfloat16> down_output = d_gated_output.get();
+        lin::A8G64ActivationWorkspace down_planes{};
+        check(lin::a8q4g64_bind_activation_workspace(d_down_workspace.data, down_workspace_bytes,
+                                                     tokens, kDownColumns, &down_planes),
+              "bind down planes");
+        const lin::A8Q4G64LinearArgs down_linear{
+            down_planes.low_codes, down_planes.low_code_bytes, down_planes.high_codes,
+            down_planes.high_code_bytes, down_planes.scales, down_planes.scale_bytes,
+            down_planes.status, d_down_codes.data, d_down_codes.bytes(), d_down_scales.data,
+            d_down_scales.bytes(), d_gated_control.data, tokens, kGatedRows, kDownColumns,
+            kDownColumns};
+        check(lin::a8q4g64_linear_prefill_cta(down_linear, stream), "down control GEMM");
+        check(hipStreamSynchronize(stream), "sync");
+        require(accumulated_exactly(down_output, gated_residual, d_gated_control.get()),
+                "fused down output differs from BF16(residual + production GEMM)");
+
+        // ---- Verification width T6 of the in-place residual epilogue (small-batch routes): the
+        // attention/GDN output projection K6144 and the fused SiLU down K17408, each exactly
+        // BF16(residual + the non-accumulating small-batch GEMM on the same planes). ----
+        {
+            constexpr std::uint32_t kT = 6;
+            const std::vector<hip_bfloat16> residual6(gated_residual.begin(),
+                                                      gated_residual.begin() + kT * kGatedRows);
+            const auto small_control = [&](const lin::A8G64ActivationWorkspace& planes,
+                                           const std::uint8_t* codes_ptr, std::size_t code_bytes,
+                                           const std::uint16_t* scales_ptr, std::size_t scale_bytes,
+                                           std::uint32_t columns) {
+                check(lin::detail::launch_a8q4_small_batch_projection(
+                          {planes.low_codes, planes.low_code_bytes, planes.high_codes,
+                           planes.high_code_bytes, planes.scales, planes.scale_bytes, planes.status,
+                           codes_ptr, code_bytes, scales_ptr, scale_bytes, d_gated_control.data, kT,
+                           kGatedRows, columns, columns},
+                          stream),
+                      "T6 small-batch control");
+                check(hipStreamSynchronize(stream), "sync");
+                std::vector<hip_bfloat16> control = d_gated_control.get();
+                control.resize(static_cast<std::size_t>(kT) * kGatedRows);
+                return control;
+            };
+            require(lin::a8q4g64_projected_residual_supported(kT, kGatedRows, kGatedColumns) &&
+                        lin::a8q4g64_projected_residual_supported(kT, kGatedRows, kDownColumns),
+                    "T6 residual epilogue widths are not admitted");
+            const std::size_t ws6 = lin::a8q4g64_activation_workspace_capacity_bytes(kT, kGatedColumns);
+            Device<std::uint8_t> d_ws6(ws6);
+            check(hipMemcpy(d_gated_output.data, residual6.data(), residual6.size() * 2,
+                            hipMemcpyHostToDevice), "residual");
+            check(lin::a8q4g64_projected_residual(
+                      {.input = d_recurrent.data, .weight_codes = d_gated_codes.data,
+                       .weight_code_bytes = d_gated_codes.bytes(),
+                       .weight_scales = d_gated_scales.data,
+                       .weight_scale_bytes = d_gated_scales.bytes(),
+                       .activation_workspace = d_ws6.data, .activation_workspace_bytes = ws6,
+                       .output = d_gated_output.data, .tokens = kT, .rows = kGatedRows,
+                       .columns = kGatedColumns, .padded_columns = kGatedColumns},
+                      stream),
+                  "T6 projected residual");
+            check(hipStreamSynchronize(stream), "sync");
+            std::vector<hip_bfloat16> actual = d_gated_output.get();
+            actual.resize(residual6.size());
+            lin::A8G64ActivationWorkspace planes6{};
+            check(lin::a8q4g64_bind_activation_workspace(d_ws6.data, ws6, kT, kGatedColumns, &planes6),
+                  "bind T6 planes");
+            require(accumulated_exactly(actual, residual6,
+                                        small_control(planes6, d_gated_codes.data,
+                                                      d_gated_codes.bytes(), d_gated_scales.data,
+                                                      d_gated_scales.bytes(), kGatedColumns)),
+                    "T6 projected residual differs from BF16(residual + small-batch GEMM)");
+            const std::size_t down_ws6 = lin::a8q4g64_activation_workspace_capacity_bytes(kT, kDownColumns);
+            Device<std::uint8_t> d_down_ws6(down_ws6);
+            check(hipMemcpy(d_gated_output.data, residual6.data(), residual6.size() * 2,
+                            hipMemcpyHostToDevice), "residual");
+            check(lin::fused_silu_a8q4g64_down(
+                      {.gate_up = d_gate_up.data, .weight_codes = d_down_codes.data,
+                       .weight_code_bytes = d_down_codes.bytes(),
+                       .weight_scales = d_down_scales.data,
+                       .weight_scale_bytes = d_down_scales.bytes(),
+                       .activation_workspace = d_down_ws6.data,
+                       .activation_workspace_bytes = down_ws6, .residual = d_gated_output.data,
+                       .tokens = kT, .rows = kGatedRows, .columns = kDownColumns,
+                       .padded_columns = kDownColumns},
+                      stream),
+                  "T6 fused down");
+            check(hipStreamSynchronize(stream), "sync");
+            std::vector<hip_bfloat16> down_actual = d_gated_output.get();
+            down_actual.resize(residual6.size());
+            lin::A8G64ActivationWorkspace down_planes6{};
+            check(lin::a8q4g64_bind_activation_workspace(d_down_ws6.data, down_ws6, kT,
+                                                         kDownColumns, &down_planes6),
+                  "bind T6 down planes");
+            require(accumulated_exactly(down_actual, residual6,
+                                        small_control(down_planes6, d_down_codes.data,
+                                                      d_down_codes.bytes(), d_down_scales.data,
+                                                      d_down_scales.bytes(), kDownColumns)),
+                    "T6 fused down differs from BF16(residual + small-batch GEMM)");
+        }
 
         std::ostringstream json;
         json << std::setprecision(9)
@@ -544,13 +958,33 @@ int main(int argc, char** argv) {
              << ",\"output_exact_vs_production_gemm_same_planes\":true"
              << ",\"misaligned_prefill_input_rejected\":true"
              << ",\"route_ms\":" << route_ms << ",\"composition_ms\":" << composition_ms
+             << ",\"verify_t6\":{\"stale_status_cleared\":true"
+             << ",\"maximum_normalized_plane_error\":" << verify_worst_plane
+             << ",\"maximum_normalized_oracle_error\":" << verify_worst << "}"
+             << ",\"normalized_pair\":{\"rows\":[" << kPairRows0 << "," << kPairRows1 << "," << kPairRows1 << "]"
+             << ",\"planes_identical_to_normalized_route\":true"
+             << ",\"published_rows_criterion\":\"|h-n| <= |n|*2^-7 (one BF16 step)\""
+             << ",\"maximum_normalized_row_error\":" << worst_row
+             << ",\"planes_are_codec_of_published_rows\":true"
+             << ",\"outputs_exact_vs_production_gemm_same_planes\":true"
+             << ",\"side_stream_gate_identical\":true"
+             << ",\"route_ms\":" << pair_route_ms << ",\"composition_ms\":" << pair_composition_ms
+             << "}"
              << ",\"gated_output\":{\"rows\":" << kGatedRows << ",\"columns\":" << kGatedColumns
              << ",\"oracle\":\"FP64 per-head gated RMSNorm (BF16 seam), A8G64 codec, decoded Q4\""
              << ",\"maximum_normalized_plane_error\":" << gated_worst_plane
              << ",\"maximum_normalized_oracle_error\":" << gated_worst
              << ",\"output_exact_vs_production_gemm_same_planes\":true"
              << ",\"route_ms\":" << gated_route_ms << ",\"composition_ms\":" << gated_composition_ms
-             << "}}\n";
+             << ",\"residual_criterion\":\"output == BF16(residual + BF16 production GEMM)\"}"
+             << ",\"projected_residual\":{\"rows\":" << kGatedRows << ",\"columns\":" << kGatedColumns
+             << ",\"output_exact_vs_residual_plus_production_gemm\":true"
+             << ",\"route_ms\":" << projected_route_ms
+             << ",\"composition_ms\":" << projected_composition_ms << "}"
+             << ",\"fused_silu_down\":{\"rows\":" << kGatedRows << ",\"columns\":" << kDownColumns
+             << ",\"output_exact_vs_residual_plus_production_gemm\":true}"
+             << ",\"verify_t6_residual_epilogue\":{\"projected_residual_k6144_exact\":true"
+             << ",\"fused_silu_down_k17408_exact\":true}}\n";
         std::ofstream(out) << json.str();
         std::cout << json.str();
         check(hipStreamDestroy(stream), "stream");

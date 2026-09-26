@@ -505,6 +505,10 @@ def main() -> int:
     ap.add_argument("--thinking", action="store_true", default=False,
                     help="enable thinking (off by default so the answer is the needle)")
     ap.add_argument("--seed", type=int, default=None)
+    ap.add_argument("--temperature", type=float, default=0.0,
+                    help="request temperature; above zero each run uses seed + run index so "
+                         "repeated runs are independent samples (the production p-less profile "
+                         "is the server default at --temperature 1.5)")
     ap.add_argument("--runs", type=int, default=1, help="repeat each case N times")
     ap.add_argument("--timeout", type=float, default=600.0)
     ap.add_argument("--label", default="niah")
@@ -595,6 +599,7 @@ def main() -> int:
         "max_tokens": args.max_tokens,
         "thinking": args.thinking,
         "seed": args.seed,
+        "temperature": args.temperature,
         "runs": args.runs,
         "ts": int(time.time()),
         "evidence_mode": "provenance-bound" if binding is not None else "recall-only",
@@ -616,11 +621,13 @@ def main() -> int:
                 "model": args.model,
                 "messages": [dict(m) for m in messages],
                 "max_tokens": args.max_tokens,
-                "temperature": 0.0,
+                "temperature": args.temperature,
                 "chat_template_kwargs": {"enable_thinking": args.thinking},
                 "enable_thinking": args.thinking,
             }
-            if args.seed is not None:
+            if args.temperature > 0.0:
+                body["seed"] = (args.seed if args.seed is not None else 1) + run
+            elif args.seed is not None:
                 body["seed"] = args.seed
             t0 = time.perf_counter()
             try:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail-closed gfx1201 resource/ISA check for the attention parity kernels."""
+"""Fail-closed gfx1201 resource/ISA check for the DFlash split-context verify kernels."""
 
 from __future__ import annotations
 
@@ -59,24 +59,21 @@ def main() -> int:
     parser.add_argument("assembly", type=Path)
     args = parser.parse_args()
     text = args.assembly.read_text(encoding="utf-8")
+    # DFlash split-context verification: the six-wave dense attention kernel in split mode and its
+    # merge.
     expected = {
-        "qk_wmma_batched_dflash_verify_kernelILb1EE": (0, 0, 32, 24, 32, 1024),
-        "softmax_wmma_scores_batched_dflash_verify_in_place_kernel": (76, 0, 20, 23, 32, 1024),
-        "pv_vector_batched_dflash_verify_kernelILj16ELb0ELb0EE": (0, 0, 48, 111, 32, 1024),
-        "pv_paired_features_batched_dflash_verify_kernel": (0, 0, 48, 118, 32, 1024),
+        "dense_prefill_kernelILj16ELb1ELj192EE": ((37536, 0, 44, 249, 32, 1024), 5),
+        "dense_verify_merge_kernel": ((0, 0, 18, 8, 32, 1024), 16),
     }
-    for symbol, wanted in expected.items():
+    for symbol, (wanted, wanted_occupancy) in expected.items():
         actual = resources(text, symbol)
         require(actual == wanted, f"{symbol} resources {actual} != {wanted}")
-        wanted_occupancy = 12 if symbol.startswith("pv_") else 16
         require(occupancy(text, symbol) == wanted_occupancy,
                 f"{symbol} occupancy is not {wanted_occupancy}")
-    require("qk_wmma_batched_dflash_verify_kernelILb0EE" not in text,
-            "unqualified feature-fastest K specialization was emitted")
-    for symbol in ("qk_wmma_batched_dflash_verify_kernelILb1EE",):
-        body = section(text, symbol)
-        require(body.count("v_wmma_f32_16x16x16_fp8_fp8") == 1,
-                f"{symbol} does not use native gfx1201 FP8 WMMA")
+    body = section(text, "dense_prefill_kernelILj16ELb1ELj192EE")
+    require(body.count("v_wmma_f32_16x16x16_bf16") == 32 and
+            body.count("v_wmma_f32_16x16x16_f16") == 32,
+            "split verify kernel lost its 32 BF16 QK and 32 FP16 PV WMMAs")
     print("attention parity gfx1201 static checks: PASS")
     return 0
 

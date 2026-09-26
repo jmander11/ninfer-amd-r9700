@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ops/r9700/linear/a8q4_small_batch_projection.h"
 #include "targets/qwen3_8_27b/impl/config.h"
 #include "targets/qwen3_8_27b/impl/load/bindings.h"
 #include <ninfer/targets/qwen3/decoder_state.h>
@@ -71,18 +72,30 @@ struct Variant {
                                       hipStream_t stream);
         void linear(const Tensor& input, const Weight& weight, Tensor& output,
                     WorkspaceArena& fallback_workspace, hipStream_t stream);
+        // SiLU-gated down projection added to the residual in place.
         void fused_mlp_down(const Tensor& gate_up, const Weight& down,
-                            Tensor& output, hipStream_t stream);
+                            Tensor& residual, hipStream_t stream);
         [[nodiscard]] bool gdn_q4_pair_t1(
             const Tensor& input, const Weight& weight0, const Weight& weight1,
             Tensor& output0, Tensor& output1, hipStream_t stream);
         [[nodiscard]] bool attention_q4_pair_t1(
             const Tensor& hidden, const Weight& query_key, const Weight& gate_value,
             Tensor& query, Tensor& key, Tensor& gate, Tensor& value, hipStream_t stream);
-        // Full A8 prefill chunks: one activation quantization shared by both GDN projections.
-        [[nodiscard]] bool gdn_q4_pair_prefill(
+        // One A8 activation quantization shared by both GDN projections (any width the Q4 routes
+        // serve).
+        [[nodiscard]] bool gdn_q4_pair_shared(
             const Tensor& input, const Weight& query_key, const Weight& value_z,
             Tensor& query_key_output, Tensor& value_z_output, hipStream_t stream);
+        // Ordinary P2048 GDN front: the input RMSNorm of `residual` feeds the shared codec
+        // directly and is published to `normalized`; the query-key, value and output-gate rows
+        // (the value-z matrix split at value_dim) are projected from the same planes.
+        // The output-gate projection runs on a private side stream, overlapping the
+        // convolution and recurrence; join_gdn_gate orders `stream` after it.
+        [[nodiscard]] bool gdn_q4_normalized_prefill(
+            const Tensor& residual, const Tensor& norm, float eps, const Weight& query_key,
+            const Weight& value_z, Tensor& normalized, Tensor& query_key_output,
+            Tensor& value_output, Tensor& gate_output, hipStream_t stream);
+        void join_gdn_gate(hipStream_t stream);
         [[nodiscard]] bool gdn_q4_pair_c2c4(
             const Tensor& input, const Weight& query_key, const Weight& value_z,
             Tensor& query_key_output, Tensor& value_z_output, hipStream_t stream);
@@ -92,6 +105,11 @@ struct Variant {
         [[nodiscard]] bool projected_residual_t1(
             const Tensor& input, const Weight& weight, Tensor& residual,
             qwen3::TextPhase phase, bool ordinary_decode, hipStream_t stream);
+        // A8 widths T >= 2 (verification and prefill) of a Q4 projection whose BF16 result is
+        // added to the residual in the GEMM epilogue.
+        [[nodiscard]] bool projected_residual_batched(
+            const Tensor& input, const Weight& weight, Tensor& residual,
+            qwen3::TextPhase phase, std::int32_t text_layer, hipStream_t stream);
         [[nodiscard]] bool normalized_linear_t1(
             const Tensor& input, const Tensor& norm, float eps, const Weight& weight,
             Tensor& output, qwen3::TextPhase phase, bool ordinary_decode,
@@ -110,16 +128,16 @@ struct Variant {
                    weight == QType::Q4G64_F16S;
         }
         // Full A8 prefill chunks of the GDN output projection: the gated RMSNorm feeds the codec
-        // directly and the projected delta is added to the residual.
+        // directly and the GEMM epilogue adds the projection to the residual.
         [[nodiscard]] bool gated_normalized_output_prefill(
             const Tensor& recurrent_output, const Tensor& norm, const Tensor& gate, float eps,
             const Weight& weight, Tensor& residual, qwen3::TextPhase phase,
-            std::int32_t text_layer, WorkspaceArena& workspace, hipStream_t stream);
-        // Full A8 prefill chunks of the same gate/up boundary normalize straight into the codec.
-        [[nodiscard]] bool normalized_linear_prefill(
+            std::int32_t text_layer, hipStream_t stream);
+        // A8 widths T >= 2 (verification and prefill) of the same gate/up boundary normalize
+        // straight into the codec.
+        [[nodiscard]] bool normalized_linear_batched(
             const Tensor& input, const Tensor& norm, float eps, const Weight& weight,
-            Tensor& output, qwen3::TextPhase phase, std::int32_t text_layer,
-            hipStream_t stream);
+            Tensor& output, std::int32_t text_layer, hipStream_t stream);
         [[nodiscard]] static constexpr bool projected_residual_t1_selected(
             std::uint32_t activation_bits,
             qwen3::TextPhase phase, bool ordinary_decode,
@@ -156,8 +174,14 @@ struct Variant {
             std::int32_t text_layer) noexcept {
             // The fused Op consumes represented BF16 gate/up values, independently
             // of the producer's weight or activation precision.
+            // The full prefill chunk (M128) and every small-batch N5120/K17408 width own the
+            // in-place residual epilogue.
             return activation_bits == 8U && down == QType::Q4G64_F16S &&
-                   tokens == 2048U && text_layer >= 0 && text_layer < TextConfig::layers;
+                   (tokens == 2048U ||
+                    ops::r9700::linear::detail::use_a8q4_small_batch_projection(
+                        tokens, TextConfig::hidden, TextConfig::intermediate,
+                        TextConfig::intermediate)) &&
+                   text_layer >= 0 && text_layer < TextConfig::layers;
         }
         [[nodiscard]] std::size_t selected_count() const noexcept;
         // Complete set of token widths that graph-captured selected projections can observe,
@@ -249,11 +273,15 @@ struct Variant {
         qwen3::TextPhase phase, std::int32_t tokens) noexcept {
         return phase == qwen3::TextPhase::Prefill && tokens == 2048;
     }
+    // Ordinary P2048 prefill owns the whole GDN front: the input RMSNorm of `residual` (published
+    // to `hidden`), the a/b control projection into g/beta, the query-key/value-z projections
+    // and the convolution scatter. The A8 route normalizes straight into the shared codec.
     static void gdn_input_projection_prefill_p2048(
-        const Tensor& hidden, const GdnProjectionWeights& weights, const Tensor& conv_weight,
-        Tensor& conv_state, Tensor& query, Tensor& key, Tensor& value, Tensor& output_gate,
-        qwen3::TextPhase phase, WorkspaceArena& workspace, hipStream_t stream,
-        ExecutionState* execution = nullptr, std::int32_t text_layer = -1);
+        const Tensor& residual, const Tensor& norm_weight, float eps,
+        const GdnProjectionWeights& weights, const Tensor& conv_weight, Tensor& conv_state,
+        Tensor& hidden, Tensor& g, Tensor& beta, Tensor& query, Tensor& key, Tensor& value,
+        Tensor& output_gate, qwen3::TextPhase phase, WorkspaceArena& workspace,
+        hipStream_t stream, ExecutionState* execution = nullptr, std::int32_t text_layer = -1);
     static void
     gdn_input_projection_snapshot(const Tensor& hidden, const GdnProjectionWeights& weights,
                                   const Tensor& conv_weight, Tensor& conv_states,

@@ -65,7 +65,8 @@ __device__ __forceinline__ void consume_pipeline_group(
     }
 }
 
-template<unsigned N,unsigned K,unsigned T>
+// Accumulate publishes BF16(output + BF16(projection)) in place (projected-residual boundary).
+template<unsigned N,unsigned K,unsigned T,bool Accumulate=false>
 __device__ __forceinline__ void a8q4_pipeline_body(
     const std::uint8_t* low,const std::uint8_t* high,const std::uint16_t* scales,
     const std::uint32_t* status,const std::uint8_t* codes,
@@ -109,15 +110,22 @@ __device__ __forceinline__ void a8q4_pipeline_body(
     }
     consume_pipeline_group<T>(current,__half2float(__ushort_as_half(current.weight_scale)),
                      __half2float(__ushort_as_half(current.activation_scale)),total);
+    const auto publish=[&](hip_bfloat16& target,float value) {
+        const hip_bfloat16 projection(value);
+        if constexpr(Accumulate)
+            target=hip_bfloat16(static_cast<float>(target)+static_cast<float>(projection));
+        else
+            target=projection;
+    };
     if constexpr(T<=8) {
         if(lane<16) {
 #pragma unroll
-            for(unsigned t=0;t<T;++t)output[t*N+row]=hip_bfloat16(total[t]);
+            for(unsigned t=0;t<T;++t)publish(output[t*N+row],total[t]);
         }
     } else {
 #pragma unroll
         for(unsigned t=0;t<8;++t)if(token_base+t<T)
-            output[(token_base+t)*N+row]=hip_bfloat16(total[t]);
+            publish(output[(token_base+t)*N+row],total[t]);
     }
 }
 

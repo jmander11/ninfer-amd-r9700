@@ -175,14 +175,16 @@ hipError_t launch_causal_conv1d_silu_prefill(
     }
 }
 
+// value_stride is kProjectionValueZRows for the combined [value,z] rows and kProjectionValueRows
+// for a separately projected value.
+template <std::uint32_t ValueStride = kProjectionValueZRows>
 __device__ __forceinline__ hip_bfloat16 projection_value(
     const hip_bfloat16* query_key, const hip_bfloat16* value_z, std::size_t column,
     std::uint32_t channel) {
     if (channel < kProjectionQueryRows + kProjectionKeyRows) {
         return query_key[column * (kProjectionQueryRows + kProjectionKeyRows) + channel];
     }
-    return value_z[column * kProjectionValueZRows +
-                   (channel - kProjectionQueryRows - kProjectionKeyRows)];
+    return value_z[column * ValueStride + (channel - kProjectionQueryRows - kProjectionKeyRows)];
 }
 
 __device__ __forceinline__ void publish_projection_output(
@@ -200,9 +202,9 @@ __device__ __forceinline__ void publish_projection_output(
 
 template <std::uint32_t TokenTile>
 __global__ __launch_bounds__(kBlock) void projection_conv_prefill_direct_scatter_kernel(
-    const hip_bfloat16* query_key, const hip_bfloat16* value_z,
+    const hip_bfloat16* query_key, const hip_bfloat16* projected_value,
     const hip_bfloat16* conv_weight, const hip_bfloat16* history_in,
-    hip_bfloat16* query, hip_bfloat16* key, hip_bfloat16* value, hip_bfloat16* z) {
+    hip_bfloat16* query, hip_bfloat16* key, hip_bfloat16* value) {
     const std::uint32_t channel = blockIdx.x * blockDim.x + threadIdx.x;
     if (channel >= kProjectionChannels) { return; }
     const std::uint32_t token_begin = blockIdx.y * TokenTile;
@@ -219,8 +221,8 @@ __global__ __launch_bounds__(kBlock) void projection_conv_prefill_direct_scatter
                                       kProjectionChannels +
                                   channel];
             }
-            return projection_value(query_key, value_z,
-                                    static_cast<std::size_t>(source_token), channel);
+            return projection_value<kProjectionValueRows>(
+                query_key, projected_value, static_cast<std::size_t>(source_token), channel);
         };
         const float h0 = static_cast<float>(represented(static_cast<std::int32_t>(token) - 3));
         const float h1 = static_cast<float>(represented(static_cast<std::int32_t>(token) - 2));
@@ -232,16 +234,11 @@ __global__ __launch_bounds__(kBlock) void projection_conv_prefill_direct_scatter
         sum = fmaf(w3, current, sum);
         publish_projection_output(hip_bfloat16(sum / (1.0F + expf(-sum))), query, key, value,
                                   token, channel);
-        if (channel < kProjectionValueRows) {
-            z[static_cast<std::size_t>(token) * kProjectionValueRows + channel] =
-                value_z[static_cast<std::size_t>(token) * kProjectionValueZRows +
-                        kProjectionValueRows + channel];
-        }
     }
 }
 
 __global__ __launch_bounds__(kBlock) void projection_prefill_publish_history_kernel(
-    const hip_bfloat16* query_key, const hip_bfloat16* value_z,
+    const hip_bfloat16* query_key, const hip_bfloat16* projected_value,
     hip_bfloat16* history_out) {
     const std::uint32_t channel = blockIdx.x * blockDim.x + threadIdx.x;
     if (channel >= kProjectionChannels) { return; }
@@ -249,7 +246,8 @@ __global__ __launch_bounds__(kBlock) void projection_prefill_publish_history_ker
     for (std::uint32_t history_column = 0; history_column < 3U; ++history_column) {
         constexpr std::uint32_t kTailBegin = kProjectionPrefillTokens - 3U;
         history_out[static_cast<std::size_t>(history_column) * kProjectionChannels + channel] =
-            projection_value(query_key, value_z, kTailBegin + history_column, channel);
+            projection_value<kProjectionValueRows>(query_key, projected_value,
+                                                   kTailBegin + history_column, channel);
     }
 }
 
@@ -680,22 +678,18 @@ hipError_t causal_conv1d_silu_prefill_qualification(
 }
 
 hipError_t projection_conv_prefill_p2048_direct_scatter_bf16(
-    const hip_bfloat16* query_key, const hip_bfloat16* value_z,
+    const hip_bfloat16* query_key, const hip_bfloat16* projected_value,
     const hip_bfloat16* conv_weight, const hip_bfloat16* history_in,
     hip_bfloat16* history_out, hip_bfloat16* query, hip_bfloat16* key,
-    hip_bfloat16* value, hip_bfloat16* z, std::uint32_t tokens,
-    hipStream_t stream) noexcept {
-    if (query_key == nullptr || value_z == nullptr || conv_weight == nullptr ||
+    hip_bfloat16* value, std::uint32_t tokens, hipStream_t stream) noexcept {
+    if (query_key == nullptr || projected_value == nullptr || conv_weight == nullptr ||
         history_in == nullptr || history_out == nullptr || query == nullptr || key == nullptr ||
-        value == nullptr || z == nullptr || tokens != kProjectionPrefillTokens ||
-        !valid_stream(stream)) {
+        value == nullptr || tokens != kProjectionPrefillTokens || !valid_stream(stream)) {
         return hipErrorInvalidValue;
     }
     constexpr std::size_t kQueryKeyElements =
         static_cast<std::size_t>(kProjectionPrefillTokens) *
         (kProjectionQueryRows + kProjectionKeyRows);
-    constexpr std::size_t kValueZElements =
-        static_cast<std::size_t>(kProjectionPrefillTokens) * kProjectionValueZRows;
     constexpr std::size_t kConvolutionWeightElements =
         static_cast<std::size_t>(kProjectionChannels) * 4U;
     constexpr std::size_t kHistoryElements =
@@ -706,16 +700,15 @@ hipError_t projection_conv_prefill_p2048_direct_scatter_bf16(
         static_cast<std::size_t>(kProjectionPrefillTokens) * kProjectionKeyRows;
     constexpr std::size_t kValueElements =
         static_cast<std::size_t>(kProjectionPrefillTokens) * kProjectionValueRows;
-    const std::array<ByteRange, 9> ranges{
+    const std::array<ByteRange, 8> ranges{
         byte_range(query_key, kQueryKeyElements),
-        byte_range(value_z, kValueZElements),
+        byte_range(projected_value, kValueElements),
         byte_range(conv_weight, kConvolutionWeightElements),
         byte_range(history_in, kHistoryElements),
         byte_range(history_out, kHistoryElements),
         byte_range(query, kQueryElements),
         byte_range(key, kKeyElements),
         byte_range(value, kValueElements),
-        byte_range(z, kValueElements),
     };
     for (std::size_t lhs = 0; lhs < ranges.size(); ++lhs) {
         for (std::size_t rhs = lhs + 1; rhs < ranges.size(); ++rhs) {
@@ -731,12 +724,13 @@ hipError_t projection_conv_prefill_p2048_direct_scatter_bf16(
         HIP_KERNEL_NAME(projection_conv_prefill_direct_scatter_kernel<kTokenTile>),
         dim3((kProjectionChannels + kBlock - 1U) / kBlock,
              kProjectionPrefillTokens / kTokenTile),
-        dim3(kBlock), 0, stream, query_key, value_z, conv_weight, history_in, query, key, value, z);
+        dim3(kBlock), 0, stream, query_key, projected_value, conv_weight, history_in, query, key,
+        value);
     hipError_t status = hipGetLastError();
     if (status != hipSuccess) { return status; }
     hipLaunchKernelGGL(projection_prefill_publish_history_kernel,
                        dim3((kProjectionChannels + kBlock - 1U) / kBlock), dim3(kBlock), 0,
-                       stream, query_key, value_z, history_out);
+                       stream, query_key, projected_value, history_out);
     return hipGetLastError();
 }
 

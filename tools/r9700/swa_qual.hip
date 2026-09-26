@@ -250,16 +250,19 @@ int main() {
         const Result direct = run_case(device, 2048, 2, {65}, {2}, {0}, {0, 96});
         const Result saturated = run_case(device, 2048, 16, {65, 64, 63, 62},
                                           {16, 12, 8, 4}, {3, 1, 2, 0}, {0, 2048});
+        // Production C1 K5 drafter block: six columns over a full 4096-token window.
+        const Result production = run_case(device, 4096, 6, {8190}, {6}, {0}, {0, 8194});
         std::cout << "swa: PASS gfx1201 wave32 D128/Hq32/Hkv8 W4096 T3/B2 mixed-tail "
                      "W2048 T1 max_abs="
                   << std::max({w4096.max_abs, w2048.max_abs, w2048_b2.max_abs, direct.max_abs,
-                               saturated.max_abs})
+                               saturated.max_abs, production.max_abs})
                   << " rel_l2=" << std::max({w4096.relative_l2, w2048.relative_l2,
                                               w2048_b2.relative_l2, direct.relative_l2,
-                                              saturated.relative_l2})
+                                              saturated.relative_l2, production.relative_l2})
                   << " ms4096=" << w4096.milliseconds << " ms2048=" << w2048.milliseconds
                   << " ms2048_t3b2=" << w2048_b2.milliseconds
                   << " ms2048_t16b4=" << saturated.milliseconds
+                  << " ms4096_t6b1=" << production.milliseconds
                   << '\n';
         return 0;
     } catch (const std::exception& error) {

@@ -4,7 +4,7 @@
 
 namespace ninfer::ops::r9700::linear {
 namespace {
-template <unsigned N, unsigned K, unsigned T>
+template <unsigned N, unsigned K, unsigned T, bool Accumulate = false>
 __global__ __launch_bounds__(32) void small_batch_projection_kernel(
     const std::uint8_t* low, const std::uint8_t* high, const std::uint16_t* scales,
     const std::uint32_t* status, const std::uint8_t* codes,
@@ -12,16 +12,28 @@ __global__ __launch_bounds__(32) void small_batch_projection_kernel(
     if constexpr(N==12288 && T<=8)
         detail::a8q4_scale_gather_body<N,K,T>(low,high,scales,status,codes,weight_scales,output);
     else
-        detail::a8q4_pipeline_body<N,K,T>(low,high,scales,status,codes,weight_scales,output);
+        detail::a8q4_pipeline_body<N,K,T,Accumulate>(low,high,scales,status,codes,weight_scales,
+                                                     output);
 }
 template <unsigned N, unsigned K, unsigned T>
 hipError_t launch_width(const A8Q4G64LinearArgs& a, hipStream_t stream) {
     if constexpr (N == 34816 && K == 5120 && (T == 18 || T == 20 || T == 24)) {
+        if (a.accumulate_output) return hipErrorInvalidValue;
         hipLaunchKernelGGL((detail::gate_up_paired_tiles_kernel<T>),dim3(N/16),dim3(32),0,stream,
             a.activation_low_codes,a.activation_high_codes,a.activation_scales,a.activation_status,
             a.weight_codes,a.weight_scales,a.output);
         return hipGetLastError();
     } else {
+    // Only the N5120 residual-stream projections admit the in-place residual epilogue.
+    if constexpr (N == 5120) {
+        if (a.accumulate_output) {
+            hipLaunchKernelGGL((small_batch_projection_kernel<N,K,T,true>),dim3(N/16,(T+15)/16),
+                dim3(32),0,stream,a.activation_low_codes,a.activation_high_codes,
+                a.activation_scales,a.activation_status,a.weight_codes,a.weight_scales,a.output);
+            return hipGetLastError();
+        }
+    }
+    if (a.accumulate_output) return hipErrorInvalidValue;
     hipLaunchKernelGGL((small_batch_projection_kernel<N,K,T>),dim3(N/16,(T+15)/16),dim3(32),0,stream,
         a.activation_low_codes,a.activation_high_codes,a.activation_scales,a.activation_status,
         a.weight_codes,a.weight_scales,a.output);

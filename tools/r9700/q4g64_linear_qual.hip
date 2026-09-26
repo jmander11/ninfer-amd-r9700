@@ -646,6 +646,66 @@ void test_codec_edges() {
     std::cout << "codec: exact finite/RNE/partial-G64/K192-to-K256/status/alias checks PASS\n";
 }
 
+// The small-T route (one self-resetting CTA, eight lanes per G64 group) must reproduce the same
+// exact codec and status bits, clearing a stale status word without a separate reset.
+void test_a8_small_route() {
+    constexpr std::uint32_t tokens = 6;
+    constexpr std::uint32_t columns = 5120;
+    std::vector<hip_bfloat16> input(static_cast<std::size_t>(tokens) * columns);
+    std::uint32_t state = 0x9e3779b9U;
+    for (std::size_t index = 0; index < input.size(); ++index) {
+        state = state * 1664525U + 1013904223U;
+        const float magnitude = (index % 997U == 0U) ? 40.0F : 1.5F;
+        input[index] = hip_bfloat16((static_cast<float>(state >> 8U) / 16777216.0F - 0.5F) *
+                                    magnitude);
+    }
+    const std::array<float, 12> values{-127.0F, -126.5F, -2.5F, -1.5F, -0.5F, 0.5F,
+                                       1.5F, 2.5F, 126.5F, 127.0F, -0.0F, 0.0F};
+    for (std::size_t index = 0; index < values.size(); ++index)
+        input[columns + index] = hip_bfloat16(values[index]);
+    for (std::size_t index = 0; index < 64U; ++index) input[2U * columns + index] = hip_bfloat16(0.0F);
+    input[3U * columns + 64U].data = 0x0001U;
+    const std::size_t workspace_bytes =
+        linear::a8q4g64_activation_workspace_capacity_bytes(tokens, columns);
+    DeviceBuffer<hip_bfloat16> d_input(input.size());
+    DeviceBuffer<std::uint8_t> storage(workspace_bytes);
+    linear::A8G64ActivationWorkspace workspace{};
+    HIP_CHECK(linear::a8q4g64_bind_activation_workspace(storage.get(), workspace_bytes, tokens,
+                                                         columns, &workspace));
+    const auto run = [&](std::uint32_t stale_status) {
+        HIP_CHECK(hipMemcpy(d_input.get(), input.data(), input.size() * sizeof(hip_bfloat16),
+                            hipMemcpyHostToDevice));
+        HIP_CHECK(hipMemcpy(workspace.status, &stale_status, sizeof(stale_status),
+                            hipMemcpyHostToDevice));
+        HIP_CHECK(linear::a8g64_quantize_activation({d_input.get(), workspace}, nullptr));
+        std::uint32_t status = 0;
+        HIP_CHECK(hipMemcpy(&status, workspace.status, sizeof(status), hipMemcpyDeviceToHost));
+        return status;
+    };
+    if (run(~0U) != linear::Q4G64ActivationOk) fail("A8G64 small route kept a stale status");
+    const HostA8Activation expected = quantize_a8_host(input, tokens, columns);
+    std::vector<std::uint8_t> actual_low(expected.low_codes.size());
+    std::vector<std::uint8_t> actual_high(expected.high_codes.size());
+    std::vector<std::uint16_t> actual_scales(expected.scales.size());
+    HIP_CHECK(hipMemcpy(actual_low.data(), workspace.low_codes, actual_low.size(),
+                        hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(actual_high.data(), workspace.high_codes, actual_high.size(),
+                        hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(actual_scales.data(), workspace.scales, workspace.scale_bytes,
+                        hipMemcpyDeviceToHost));
+    if (actual_low != expected.low_codes || actual_high != expected.high_codes ||
+        actual_scales != expected.scales) {
+        fail("A8G64 small route exact activation codec mismatch");
+    }
+    input[4U * columns + 7U] = hip_bfloat16(std::numeric_limits<float>::infinity());
+    if ((run(0U) & linear::Q4G64ActivationNonfinite) == 0U)
+        fail("A8G64 small route nonfinite status missing");
+    input[4U * columns + 7U].data = 0x7f7fU;
+    if ((run(0U) & linear::Q4G64ActivationScaleOverflow) == 0U)
+        fail("A8G64 small route scale overflow status missing");
+    std::cout << "codec: A8G64 small-T single-CTA route exact/status/stale-reset checks PASS\n";
+}
+
 void test_a8_codec_edges() {
     constexpr std::uint32_t tokens = 2;
     constexpr std::uint32_t columns = 67;
@@ -1289,6 +1349,7 @@ int main(int argc, char** argv) {
         test_codec_edges();
         checks.a4_codec_edges = true;
         test_a8_codec_edges();
+        test_a8_small_route();
         checks.a8_codec_edges = true;
         test_asynchronous_status_poisoning();
         checks.asynchronous_status_poisoning = true;

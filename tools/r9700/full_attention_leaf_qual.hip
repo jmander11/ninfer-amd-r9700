@@ -395,8 +395,11 @@ void qualify_long_dflash(ninfer::DeviceContext& device) {
             transaction.end_device_segment(device.stream);
             const std::size_t scratch_bytes = q27::r9700_full_attention_workspace_capacity_bytes(
                 rows, context, false, true);
-            const std::size_t score_bytes = rows * kQueryHeads * context * sizeof(float);
-            if (scratch_bytes < score_bytes) fail("long DFlash planner underallocates scores");
+            const std::size_t score_bytes =
+                ninfer::ops::r9700::kv::fp8_int4_kv_attention_dflash_verify_batched_wmma_workspace_bytes(
+                    context, rows);
+            if (score_bytes == 0U || scratch_bytes < score_bytes)
+                fail("long DFlash planner underallocates split partials");
             const std::size_t output_bytes = queries.size() * sizeof(float);
             ninfer::DeviceBuffer scratch(scratch_bytes + 2U * guard_bytes);
             ninfer::DeviceBuffer output(output_bytes + 2U * guard_bytes);
@@ -439,18 +442,15 @@ void qualify_long_dflash(ninfer::DeviceContext& device) {
             poison();
             HIP_CHECK(q27::r9700_qwen3_8_27b_full_attention(args, device.stream));
             const auto actual = read_result();
+            // Dense-attention criterion (represented BF16 Q, exact-BF16 K, FP16 probabilities and
+            // V/8 with FP32 accumulation): |error| <= 2e-3 absolute or relative.
             const auto expected = attention_oracle(queries, rows, frontiers, cache);
-            auto profile_queries = queries;
-            for (auto& x : profile_queries) x = oracle::decode_e4m3fn(oracle::encode_e4m3fn(x));
-            const auto profile = attention_oracle(profile_queries, rows, frontiers, cache);
             double maximum_error = 0.0;
             for (std::size_t i = 0; i < actual.size(); ++i) {
                 const double error = std::abs(actual[i] - expected[i]);
-                const double allowance = 2e-4 * std::max(1.0, std::abs(profile[i]));
                 if (!std::isfinite(actual[i]) ||
-                    error > std::abs(profile[i] - expected[i]) + allowance ||
-                    std::abs(actual[i] - profile[i]) > allowance)
-                    fail("long DFlash public/profile FP64 oracle mismatch");
+                    (error > 2e-3 && error / std::max(std::abs(expected[i]), 1e-6) > 2e-3))
+                    fail("long DFlash public FP64 oracle mismatch");
                 maximum_error = std::max(maximum_error, error);
             }
             ninfer::DecodeGraphDefinition definition;

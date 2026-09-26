@@ -44,18 +44,18 @@ namespace ninfer::ops::r9700::gdn {
     hipStream_t stream) noexcept;
 
 // Fixed ordinary-prefill Qwen3.8 projection/convolution handoff. The represented BF16
-// projection outputs remain separate: query_key is [2048,4096] and value_z is [2048,12288].
-// The operation applies the incumbent width-four causal convolution and SiLU formula directly
-// into query [2048,2048], key [2048,2048], and value [2048,6144], copies the upper value_z half
-// to z [2048,6144], then publishes the final three represented projection columns to history.
-// history_in/history_out are disjoint or exactly identical. This target-specific entry accepts
-// exactly 2048 tokens; snapshot/replay and every other ordinary width use their existing paths.
+// projection outputs remain separate: query_key is [2048,4096] and projected_value is
+// [2048,6144] (the output gate is projected directly by the caller). The operation applies the
+// incumbent width-four causal convolution and SiLU formula directly into query [2048,2048], key
+// [2048,2048], and value [2048,6144], then publishes the final three represented projection
+// columns to history. history_in/history_out are disjoint or exactly identical. This
+// target-specific entry accepts exactly 2048 tokens; snapshot/replay and every other ordinary
+// width use their existing paths.
 [[nodiscard]] hipError_t projection_conv_prefill_p2048_direct_scatter_bf16(
-    const hip_bfloat16* query_key, const hip_bfloat16* value_z,
+    const hip_bfloat16* query_key, const hip_bfloat16* projected_value,
     const hip_bfloat16* conv_weight, const hip_bfloat16* history_in,
     hip_bfloat16* history_out, hip_bfloat16* query, hip_bfloat16* key,
-    hip_bfloat16* value, hip_bfloat16* z, std::uint32_t tokens,
-    hipStream_t stream) noexcept;
+    hip_bfloat16* value, std::uint32_t tokens, hipStream_t stream) noexcept;
 
 // Qwen3.8-27B verification projection/convolution at the fixed real geometry. `query_key` is
 // BF16 [B*W,4096] in column-major Tensor storage, `value_z` is BF16 [B*W,12288] in [value,z]

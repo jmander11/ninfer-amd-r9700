@@ -295,7 +295,7 @@ std::size_t normalized_linear_workspace_capacity_bytes(
         throw std::invalid_argument("normalized linear: unsupported projection shape");
     const std::size_t activation = linear_workspace_capacity_bytes(QType::Q4G64_F16S, tokens, columns);
     if (r9700::linear::kQ4ActivationBits == 8 &&
-        (tokens == 1 || r9700::linear::a8q4g64_normalized_linear_prefill_supported(
+        (tokens == 1 || r9700::linear::a8q4g64_normalized_linear_batched_supported(
                             static_cast<std::uint32_t>(tokens))))
         return activation;
     // K5120 BF16 rows are already multiples of the 256-byte workspace alignment.
@@ -368,11 +368,11 @@ void normalized_linear(const Tensor& input, const Tensor& norm, float eps,
         return;
     }
     if (r9700::linear::kQ4ActivationBits == 8 &&
-        r9700::linear::a8q4g64_normalized_linear_prefill_supported(tokens)) {
+        r9700::linear::a8q4g64_normalized_linear_batched_supported(tokens)) {
         if (reinterpret_cast<std::uintptr_t>(input.data) % 16U != 0U ||
             reinterpret_cast<std::uintptr_t>(norm.data) % 16U != 0U)
-            throw std::invalid_argument("normalized linear: prefill input/norm must be 16-byte aligned");
-        HIP_CHECK(r9700::linear::a8q4g64_normalized_linear_prefill(
+            throw std::invalid_argument("normalized linear: batched input/norm must be 16-byte aligned");
+        HIP_CHECK(r9700::linear::a8q4g64_normalized_linear_batched(
             {.input = static_cast<const hip_bfloat16*>(input.data),
              .weight_codes = static_cast<const std::uint8_t*>(weight.qdata),
              .weight_code_bytes = code_bytes,

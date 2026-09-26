@@ -25,7 +25,9 @@ phases, excluding model loading—not end-to-end request throughput.
 Per-request rates are aggregate divided by concurrency. C1/four drafts was not
 remeasured. Five drafts wins at C1–2 and four at C3–4 on this workload; other
 prompts may differ. C4 adaptive reaches **201.04 aggregate tok/s**. All 24 final
-repetitions and 44 cold-transition cases match ordinary greedy tokens exactly.
+repetitions and 44 cold-transition cases matched ordinary greedy tokens exactly at that time;
+since 2026-09-25 verification attention keeps BF16 queries (ordinary decode uses FP8 queries), so
+greedy DFlash can differ from greedy ordinary decode on near-ties. See `docs/performance.md`.
 
 ### Prefill and ordinary decode · 2026-09-25
 

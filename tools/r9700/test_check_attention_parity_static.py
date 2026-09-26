@@ -22,8 +22,8 @@ class AttentionParityStaticTest(unittest.TestCase):
         if not assembly.exists():
             self.skipTest("build/kv_op_qual.s has not been generated")
         text = assembly.read_text(encoding="utf-8")
-        marker = ".vgpr_count:     24"
-        symbol = "qk_wmma_batched_dflash_verify_kernelILb1EE"
+        marker = ".vgpr_count:     249"
+        symbol = "dense_prefill_kernelILj16ELb1ELj192EE"
         metadata = text.find(".amdgpu_metadata")
         symbol_at = text.find(symbol, metadata)
         start = text.rfind(".name:", metadata, symbol_at)
@@ -31,7 +31,7 @@ class AttentionParityStaticTest(unittest.TestCase):
         self.assertGreaterEqual(location, 0)
         with tempfile.TemporaryDirectory() as temporary:
             mutated = Path(temporary) / "mutated.s"
-            mutated.write_text(text[:location] + ".vgpr_count:     25" +
+            mutated.write_text(text[:location] + ".vgpr_count:     250" +
                                text[location + len(marker):],
                                encoding="utf-8")
             result = subprocess.run(["python3", str(CHECK), str(mutated)],

@@ -47,6 +47,58 @@ __device__ __forceinline__ void consume_key(const float (&query)[4], const hip_b
     maximum = next_maximum;
 }
 
+// Eight context keys per step: all K/V loads are issued before the dependent reductions, the
+// eight dot products share one butterfly, and the online Softmax updates once per group.
+constexpr int kKeyGroup = 8;
+
+__device__ __forceinline__ void consume_key_group(
+    const float (&query)[4], const hip_bfloat16* const (&keys)[kKeyGroup],
+    const hip_bfloat16* const (&values)[kKeyGroup], float scale, float& maximum,
+    float& denominator, float (&accumulator)[4]) {
+    const int lane = static_cast<int>(threadIdx.x) & (kWave - 1);
+    float key[kKeyGroup][4], value[kKeyGroup][4];
+#pragma unroll
+    for (int j = 0; j < kKeyGroup; ++j) {
+#pragma unroll
+        for (int item = 0; item < 4; ++item) {
+            key[j][item] = static_cast<float>(keys[j][lane + item * kWave]);
+            value[j][item] = static_cast<float>(values[j][lane + item * kWave]);
+        }
+    }
+    float score[kKeyGroup];
+#pragma unroll
+    for (int j = 0; j < kKeyGroup; ++j) {
+        float dot = 0.0F;
+#pragma unroll
+        for (int item = 0; item < 4; ++item) dot = fmaf(query[item], key[j][item], dot);
+        score[j] = dot;
+    }
+#pragma unroll
+    for (int offset = kWave / 2; offset > 0; offset >>= 1) {
+#pragma unroll
+        for (int j = 0; j < kKeyGroup; ++j) score[j] += __shfl_xor(score[j], offset, kWave);
+    }
+    float next_maximum = maximum;
+#pragma unroll
+    for (int j = 0; j < kKeyGroup; ++j) {
+        score[j] *= scale;
+        next_maximum = fmaxf(next_maximum, score[j]);
+    }
+    const float alpha = isinf(maximum) ? 0.0F : expf(maximum - next_maximum);
+    denominator *= alpha;
+#pragma unroll
+    for (int item = 0; item < 4; ++item) accumulator[item] *= alpha;
+#pragma unroll
+    for (int j = 0; j < kKeyGroup; ++j) {
+        const float probability = expf(score[j] - next_maximum);
+        denominator += probability;
+#pragma unroll
+        for (int item = 0; item < 4; ++item)
+            accumulator[item] = fmaf(probability, value[j][item], accumulator[item]);
+    }
+    maximum = next_maximum;
+}
+
 __global__ __launch_bounds__(kBlock, 2) void swa_direct_kernel(
     const hip_bfloat16* __restrict__ q, const hip_bfloat16* __restrict__ query_k,
     const hip_bfloat16* __restrict__ query_v, const std::int32_t* __restrict__ positions,
@@ -166,10 +218,25 @@ __global__ __launch_bounds__(kBlock, 2) void swa_partial_kernel(
             static_cast<int>((static_cast<std::int64_t>(context_count) * (split + 1)) / splits);
         const std::int64_t context_lane_base = static_cast<std::int64_t>(kHeadDim) *
             padded_capacity * kKvHeads * cache_lane;
-        for (int position = split_begin; position < split_end; ++position) {
+        const auto key_base_at = [&](int position) {
             const int slot = position & (window - 1);
-            const std::int64_t key_base = context_lane_base +
-                static_cast<std::int64_t>(kHeadDim) * (slot + padded_capacity * kv_head);
+            return context_lane_base +
+                   static_cast<std::int64_t>(kHeadDim) * (slot + padded_capacity * kv_head);
+        };
+        int position = split_begin;
+        for (; position + kKeyGroup <= split_end; position += kKeyGroup) {
+            const hip_bfloat16* keys[kKeyGroup];
+            const hip_bfloat16* values[kKeyGroup];
+#pragma unroll
+            for (int j = 0; j < kKeyGroup; ++j) {
+                const std::int64_t key_base = key_base_at(position + j);
+                keys[j] = context_k + key_base;
+                values[j] = context_v + key_base;
+            }
+            consume_key_group(query, keys, values, scale, maximum, denominator, accumulator);
+        }
+        for (; position < split_end; ++position) {
+            const std::int64_t key_base = key_base_at(position);
             consume_key(query, context_k + key_base, context_v + key_base, scale, maximum,
                         denominator, accumulator);
         }

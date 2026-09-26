@@ -185,6 +185,49 @@ M128xN128 GEMM, fused dense prefill attention, staged GDN). Production C1 prefil
   codes holds 300 W at ~2455 MHz (5.33 ms, 136.9 TOPS); all-zero codes 300 W at ~2875 MHz
   (4.61 ms). The GEMM is power-capped: board cap = max = 300 W (min 210), overdrive disabled by
   `amdgpu.ppfeaturemask=0xfff7bfff`; raising power or undervolting needs a host change (user).
+- [x] Follow-up batch 3 (2026-09-25, after `c7d89b96`; remaining prefill ideas): (1) residual add in
+  the M128 GEMM epilogue (`A8Q4G64LinearArgs::accumulate_output`, output = BF16(residual +
+  BF16(projection)), bit-exact vs `residual_add`) for the GDN output, fused SiLU down and a new
+  attention-output `a8q4g64_projected_residual_prefill`; (2) the P2048 GDN leaf owns the input
+  RMSNorm: one prepare pass publishes the BF16 rows for the control projection and quantizes
+  them for the shared projections (<=1 BF16 step vs the eager rmsnorm; PPL-neutral); (3) the
+  value-z matrix is projected as value and output-gate row halves from the shared planes (the
+  conv no longer copies z) and the output-gate GEMM runs on a private side stream overlapping
+  the conv and the 48-CTA recurrence (joined in `gdn_output_projection`; capture stays serial).
+  Qualifier `a8q4_normalized_linear_prefill_qual` covers all (exact same-plane GEMM parity, FP64
+  oracles, bit-identical side-stream gate); GDN op qualifier and ctest 86/86 pass. Interleaved:
+  epilogue+front 4K 2350 -> 2363, 32K 1954 -> 1962; side stream 4K 2366 -> 2380, 32K 1957 ->
+  1980 tok/s (overlap microbench: conv+recurrence 0.912 + z GEMM 0.893 ms -> 1.681 ms
+  overlapped). PPL-4K 6.4471/9.4393/2.2568 (mixed-sign vs 6.4553/9.4133/2.2537); the side-stream
+  build's NLLs are bit-identical to the epilogue build. Measured and not built: whole-chunk graph
+  capture (HIP graph saves ~2 us/dispatch, ~0.2%), status-word memsets (~0.2%). Evidence
+  `profiles/bench/r9700-prefill-epilogue-20260925/`, `profiles/rocprof/r9700-prefill-side-4k-20260925/`.
+- [x] DFlash decode batch (2026-09-25, user: "move to decode with dflash"; user accepted that the
+  BF16-Q split verify route may make greedy DFlash differ from greedy ordinary decode on near-ties;
+  p-less sampling semantics unchanged; epsilon p-less is the product default). (1) W4..6 verify
+  attention: dense-prefill kernel in split-context mode + FP32 merge (`dense_prefill_kernel<16,
+  true>`, `dense_verify_merge_kernel`); old FP8-Q QK / softmax / vector+paired PV verify kernels
+  removed; one graph topology class; bounded workspace. (2) SWA drafter: eight keys per step.
+  (3) Self-resetting single-CTA A8G64 quantize for small T; shared GDN pair quantization at every
+  width (`a8q4g64_shared_activation_linear`); batched normalized gate/up for T >= 2 with a one-CTA
+  prepare for <= 12 rows. (4) Small-T row-scaled E4M3 Linear kernel replacing hipBLASLt + poison
+  for T <= 16. Round time P4096 46.1 -> 40.5 ms, P15200 58.1 -> 43.4 ms; ordinary decode 29.9 ->
+  ~31.8 tok/s. Qualifiers: full attention leaf, route discriminator (both modes), planner,
+  static checker, SWA, q4g64 codec (small route), normalized linear (T6 section), FP8 small-T; ctest
+  86/86; PPL-4K decode mixed-sign. Rejected: reusing the prefill prepare kernel for T6 (45 us
+  single-block latency), 16-key SWA groups, doubled SWA splits.
+  (5) Batch 2: in-place residual epilogue for the small-batch N5120 routes
+  (`a8q4g64_projected_residual`, any admitted width) and the fused SiLU down at every
+  small-batch width: 40.6 -> 39.6 ms per 4K round, bit-exact (T6 section of the normalized
+  qualifier). NIAH on this code: standard and new multi-key (32 same-form distractors incl. four
+  near-miss names, `make_niah_positions.py --multikey`) both 20/20 greedy with DFlash K5; p-less
+  T1.5 production-profile pass recorded in `profiles/bench/r9700-niah-pless-20260925/`.
+  (6) Verify attention: six-wave split CTA (three per WGP), bit-identical, 1.4-1.6x (32K 0.394 ->
+  0.246 ms); P15200 round 41.9 -> 40.6 ms. Rejected: warp-specialized packed-head kernel (spills
+  100-850 VGPRs in every arrangement), smaller/more chunks. NIAH p-less T1.5 production profile:
+  multi-key 60/60, standard 40/40.
+  Next candidate (measured, not built): GDN record kernel (0.74 ms/round, latency-bound sequential
+  six-token recurrence on 48 CTAs).
 - [ ] N4 Larger formulation changes, each measured and qualified before promotion:
   - [x] (a) REJECTED: IU8 GEMM (signed A8 x offset-binary W8, -8*sum(a) folded into the WMMA
     seed). Register/LDS-only inner-loop microbench (`iu8_inner_microbench.hip` in the N2 evidence
@@ -225,6 +268,13 @@ M128xN128 GEMM, fused dense prefill attention, staged GDN). Production C1 prefil
     (6 waves x 32 WMMA x 16 cycles), so steady state is ~73% WMMA-busy; only the load/softmax/
     barrier ~27% is recoverable, and hiding the load needs ~8-12 more VGPRs on a 246/256 kernel.
     Deferred as near its formulation limit (<=~10% attention, ~3% of 64K prefill).
+    REJECTED 2026-09-25 (batch 3): measured residency is one 37.9 KB CTA per CU (64 concurrent at
+    <=60 KB; the 64 KB per-workgroup LDS cap forbids a second 37.5 KB stage), gfx1201 has no
+    VMEM-to-LDS load (`vmem-to-lds-load-insts` missing), and WMMA/VALU issue serializes, so only
+    memory latency is hideable, through registers. A register prefetch of the next block's raw
+    K/V issued before PV (scores dead) spilled in every variant (32-80 B scratch at 256 VGPRs:
+    64-bit addresses, merged role paths, then plain pressure; U32 SGPR-base offsets and a
+    wave-uniform branch-free fetch did not fit either). Source restored (246 VGPRs, no scratch).
 
 COMPLETED USER REQUEST (2026-09-25, base-prefill compute campaign; XAttention/Sage deferred):
 - [x] Gate/up back to A8 for no prefill speed loss: new M128xN128 A8Q4G64 prefill GEMM

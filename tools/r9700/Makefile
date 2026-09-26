@@ -474,9 +474,9 @@ prefill-cta-static-incumbent-diagnostic:
 		--assembly "$(BUILD_DIR)/w8a8_wmma_linear_qual.s" \
 		--metadata "$(BUILD_DIR)/w8a8_wmma_linear_qual.s"
 
-$(Q4G64_LINEAR_TARGET): $(Q4G64_LINEAR_SOURCE) $(LINEAR_IMPL) $(LINEAR_HEADER) Makefile
+$(Q4G64_LINEAR_TARGET): $(Q4G64_LINEAR_SOURCE) $(LINEAR_IMPL) $(LINEAR_HEADER) ../../src/ops/r9700/linear/a8q4_small_batch_projection.hip Makefile
 	mkdir -p $(BUILD_DIR)
-	$(HIPCC) $(CXXFLAGS) $(Q4G64_LINEAR_SOURCE) $(LINEAR_IMPL) $(LDFLAGS) -o $@
+	$(HIPCC) $(CXXFLAGS) $(Q4G64_LINEAR_SOURCE) $(LINEAR_IMPL) ../../src/ops/r9700/linear/a8q4_small_batch_projection.hip $(LDFLAGS) -o $@
 
 $(A8Q4_SHAPE_SWEEP_TARGET): $(A8Q4_SHAPE_SWEEP_SOURCE) $(LINEAR_IMPL) $(LINEAR_HEADER) $(Q4_ACTIVATION_PROFILE) ../../src/ops/r9700/linear/a8q4_small_batch_projection.hip Makefile
 	mkdir -p $(BUILD_DIR)

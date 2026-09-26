@@ -246,6 +246,9 @@ struct A8Q4G64LinearArgs {
     std::uint32_t rows = 0;
     std::uint32_t columns = 0;
     std::uint32_t padded_columns = 0;
+    // Only the M128 prefill route accepts this: publish BF16(output + BF16(projection)) in place
+    // (the projected-residual boundary); codec failure still writes BF16 NaN.
+    bool accumulate_output = false;
 };
 
 struct A8Q4G64CandidateArgs {
@@ -267,21 +270,22 @@ struct A8Q4G64CandidateArgs {
 [[nodiscard]] hipError_t a8q4g64_normalized_linear_t1(
     const A8Q4G64CandidateArgs& args, const hip_bfloat16* norm, float eps,
     bool unit_offset, hipStream_t stream) noexcept;
-// Prefill form of the T1 normalized projection above for the same K5120 -> N34816 Q4N16K16
-// matrix: RMSNorm, the explicit BF16 seam, and the A8G64 codec in one pass (no materialized
-// BF16 rows), then the M128xN128 A8Q4 GEMM. T is a positive multiple of 128 inside the
-// qualified M128 inventory; input and norm are 16-byte aligned.
-[[nodiscard]] bool a8q4g64_normalized_linear_prefill_supported(std::uint32_t tokens) noexcept;
-[[nodiscard]] hipError_t a8q4g64_normalized_linear_prefill(
+// Batched (T >= 2) form of the T1 normalized projection above for the same K5120 -> N34816
+// Q4N16K16 matrix: RMSNorm, the explicit BF16 seam, and the A8G64 codec in one pass (no
+// materialized BF16 rows; one wave per row, eight rows per block, a single block clearing its own
+// status), then the A8Q4 route the candidate selects for T (small-batch for verify widths, the
+// M128xN128 GEMM for prefill chunks). input and norm are 16-byte aligned.
+[[nodiscard]] bool a8q4g64_normalized_linear_batched_supported(std::uint32_t tokens) noexcept;
+[[nodiscard]] hipError_t a8q4g64_normalized_linear_batched(
     const A8Q4G64CandidateArgs& args, const hip_bfloat16* norm, float eps,
     bool unit_offset, hipStream_t stream) noexcept;
 
-// Two A8Q4 prefill projections of one represented BF16 [T,K] input (the Qwen3.8 GDN query-key and
-// value-z matrices): the activation is quantized once into the caller workspace and both
-// M128xN128 GEMMs read the same planes, each publishing its BF16 [T,rows] output exactly as
-// the single-projection route does. T is a positive multiple of 128 and both shapes are inside
-// the qualified M128 inventory.
-struct A8Q4G64PrefillProjection {
+// Two or three A8Q4 projections of one represented BF16 [T,K] input (the Qwen3.8 GDN query-key,
+// value and output-gate matrices): the activation is quantized once into the caller workspace and
+// every projection reads the same planes through the route the single-projection candidate would
+// select, publishing its BF16 [T,rows] output exactly as that route does. Outputs are pairwise
+// disjoint.
+struct A8Q4G64SharedProjection {
     const std::uint8_t* weight_codes = nullptr;
     std::size_t weight_code_bytes = 0;
     const std::uint16_t* weight_scales = nullptr;
@@ -289,24 +293,42 @@ struct A8Q4G64PrefillProjection {
     hip_bfloat16* output = nullptr;
     std::uint32_t rows = 0;
 };
-struct A8Q4G64SharedActivationPrefillArgs {
+inline constexpr std::uint32_t kA8Q4G64MaximumSharedProjections = 3;
+struct A8Q4G64SharedActivationArgs {
     const hip_bfloat16* input = nullptr;
     void* activation_workspace = nullptr;
     std::size_t activation_workspace_bytes = 0;
-    A8Q4G64PrefillProjection projections[2];
+    A8Q4G64SharedProjection projections[kA8Q4G64MaximumSharedProjections];
+    std::uint32_t projection_count = 0;  // 2 or 3
     std::uint32_t tokens = 0;
     std::uint32_t columns = 0;
 };
-[[nodiscard]] bool a8q4g64_shared_activation_prefill_supported(
-    std::uint32_t tokens, std::uint32_t columns, std::uint32_t rows0,
-    std::uint32_t rows1) noexcept;
-[[nodiscard]] hipError_t a8q4g64_shared_activation_linear_prefill(
-    const A8Q4G64SharedActivationPrefillArgs& args, hipStream_t stream) noexcept;
+[[nodiscard]] bool a8q4g64_shared_activation_supported(
+    std::uint32_t tokens, std::uint32_t columns, std::uint32_t rows) noexcept;
+[[nodiscard]] hipError_t a8q4g64_shared_activation_linear(
+    const A8Q4G64SharedActivationArgs& args, hipStream_t stream) noexcept;
+// Normalized form of the shared projections at K5120: one pass computes the RMSNorm
+// BF16(x * rsqrt(mean(x^2) + eps) * (norm + unit_offset)), publishes those BF16 rows to
+// `normalized` [T,5120] and quantizes the same values into the A8G64 planes every GEMM reads.
+// input, norm and normalized are 16-byte aligned and pairwise disjoint from every output.
+// With `side`, the last projection runs on side->stream after `fork` is recorded on `stream`,
+// and `join` is recorded on side->stream after it; the caller orders its later work after
+// `join` before reading that output or reusing the activation workspace.
+struct A8Q4G64SideProjection {
+    hipStream_t stream = nullptr;
+    hipEvent_t fork = nullptr;
+    hipEvent_t join = nullptr;
+};
+[[nodiscard]] hipError_t a8q4g64_normalized_shared_activation_linear(
+    const A8Q4G64SharedActivationArgs& args, const hip_bfloat16* norm, float eps,
+    bool unit_offset, hip_bfloat16* normalized, hipStream_t stream,
+    const A8Q4G64SideProjection* side = nullptr) noexcept;
 
 // Qwen3.8 GDN output projection at A8 prefill extents: the per-head gated RMSNorm
 // (x * rsqrt(mean_head(x^2) + eps) * norm * silu(z), BF16 seam, 48 heads x 128) of input/z
 // [T,6144] feeds the A8G64 codec directly, then the M128 A8Q4 GEMM against the Q4N16K16
-// [5120,6144] weight writes BF16 [T,5120]. input/gate/norm are 16-byte aligned; T is a positive
+// [5120,6144] weight rounds to BF16 and publishes output = BF16(output + projection) in place
+// (the projected-residual boundary). input/gate/norm are 16-byte aligned; T is a positive
 // multiple of 128 inside the qualified M128 inventory.
 [[nodiscard]] bool a8q4g64_gated_normalized_linear_prefill_supported(std::uint32_t tokens) noexcept;
 [[nodiscard]] hipError_t a8q4g64_gated_normalized_linear_prefill(
@@ -379,7 +401,7 @@ struct FusedSiluA8Q4G64DownArgs {
     std::size_t weight_scale_bytes = 0;
     void* activation_workspace = nullptr;
     std::size_t activation_workspace_bytes = 0;
-    hip_bfloat16* output = nullptr;
+    hip_bfloat16* residual = nullptr; // BF16 [T,N], updated in place
     std::uint32_t tokens = 0;
     std::uint32_t rows = 0;
     std::uint32_t columns = 0;
@@ -504,6 +526,18 @@ struct A8Q4G64KernelResources {
     const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept;
 [[nodiscard]] hipError_t a8q4g64_linear_candidate(const A8Q4G64CandidateArgs& args,
                                                    hipStream_t stream) noexcept;
+// Projected-residual boundary for T >= 2: the signed-A8G64 codec of represented BF16 input
+// [T,K], the A8Q4 projection against the Q4N16K16 weight, BF16 rounding of the projection, then
+// BF16(residual + projection) published in place into output [T,N]. Served by the small-batch
+// N5120 widths and by the M128 prefill inventory (T and N multiples of 128). Codec failure
+// writes BF16 NaN.
+[[nodiscard]] bool a8q4g64_projected_residual_supported(
+    std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns) noexcept;
+[[nodiscard]] hipError_t a8q4g64_projected_residual(
+    const A8Q4G64CandidateArgs& args, hipStream_t stream) noexcept;
+// SiLU(gate)*up of gate_up [T,2K] (BF16 seam), the A8G64 codec, and the N5120/K17408 down
+// projection published as the projected-residual boundary BF16(residual + BF16(projection)) in
+// place, at every width a8q4g64_projected_residual_supported admits.
 [[nodiscard]] hipError_t fused_silu_a8q4g64_down(
     const FusedSiluA8Q4G64DownArgs& args, hipStream_t stream) noexcept;
 [[nodiscard]] hipError_t fused_silu_a8g64_prepare(

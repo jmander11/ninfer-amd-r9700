@@ -353,34 +353,27 @@ void qualify_conv_and_controls(hipStream_t stream) {
         if (tokens == 2048U) {
             constexpr std::size_t kQueryKeyRows = 4096U;
             constexpr std::size_t kValueRows = 6144U;
-            constexpr std::size_t kValueZRows = 2U * kValueRows;
             std::vector<hip_bfloat16> query_key(
                 static_cast<std::size_t>(tokens) * kQueryKeyRows);
-            std::vector<hip_bfloat16> value_z(
-                static_cast<std::size_t>(tokens) * kValueZRows);
-            const std::vector<hip_bfloat16> z_fixture =
-                bf16_fixture(static_cast<std::size_t>(tokens) * kValueRows, 2049U, 43.0F);
+            std::vector<hip_bfloat16> projected_value(
+                static_cast<std::size_t>(tokens) * kValueRows);
             for (std::size_t token = 0; token < tokens; ++token) {
                 std::copy_n(input.data() + token * kChannels, kQueryKeyRows,
                             query_key.data() + token * kQueryKeyRows);
                 std::copy_n(input.data() + token * kChannels + kQueryKeyRows, kValueRows,
-                            value_z.data() + token * kValueZRows);
-                std::copy_n(z_fixture.data() + token * kValueRows, kValueRows,
-                            value_z.data() + token * kValueZRows + kValueRows);
+                            projected_value.data() + token * kValueRows);
             }
             DeviceBuffer<hip_bfloat16> d_query_key(query_key.size());
-            DeviceBuffer<hip_bfloat16> d_value_z(value_z.size());
+            DeviceBuffer<hip_bfloat16> d_projected_value(projected_value.size());
             DeviceBuffer<hip_bfloat16> d_query(static_cast<std::size_t>(tokens) * 2048U);
             DeviceBuffer<hip_bfloat16> d_key(static_cast<std::size_t>(tokens) * 2048U);
             DeviceBuffer<hip_bfloat16> d_value(static_cast<std::size_t>(tokens) * kValueRows);
-            DeviceBuffer<hip_bfloat16> d_z(static_cast<std::size_t>(tokens) * kValueRows);
             copy_to_device(d_query_key, query_key);
-            copy_to_device(d_value_z, value_z);
+            copy_to_device(d_projected_value, projected_value);
             copy_to_device(d_history_in, initial_history);
             HIP_CHECK(projection_conv_prefill_p2048_direct_scatter_bf16(
-                d_query_key.get(), d_value_z.get(), d_weight.get(), d_history_in.get(),
-                d_history_in.get(), d_query.get(), d_key.get(), d_value.get(), d_z.get(),
-                tokens, stream));
+                d_query_key.get(), d_projected_value.get(), d_weight.get(), d_history_in.get(),
+                d_history_in.get(), d_query.get(), d_key.get(), d_value.get(), tokens, stream));
             HIP_CHECK(hipStreamSynchronize(stream));
 
             const auto query_output = copy_to_host(d_query);
@@ -392,18 +385,16 @@ void qualify_conv_and_controls(hipStream_t stream) {
                                        "P2048 direct-scatter key parity");
             require_bf16_scatter_exact(value_output, incumbent_output, kChannels, 4096U,
                                        kValueRows, "P2048 direct-scatter value parity");
-            require_bf16_exact(copy_to_host(d_z), z_fixture,
-                               "P2048 direct-scatter output-gate copy");
             require_bf16_exact(copy_to_host(d_history_in), expected_history,
                                "P2048 direct-scatter in-place history");
             if (projection_conv_prefill_p2048_direct_scatter_bf16(
-                    d_query_key.get(), d_value_z.get(), d_weight.get(), d_history_in.get(),
-                    d_history_in.get(), d_query.get(), d_key.get(), d_value.get(), d_z.get(),
-                    tokens - 1U, stream) != hipErrorInvalidValue ||
+                    d_query_key.get(), d_projected_value.get(), d_weight.get(),
+                    d_history_in.get(), d_history_in.get(), d_query.get(), d_key.get(),
+                    d_value.get(), tokens - 1U, stream) != hipErrorInvalidValue ||
                 projection_conv_prefill_p2048_direct_scatter_bf16(
-                    d_query_key.get(), d_value_z.get(), d_weight.get(), d_history_in.get(),
-                    d_history_in.get(), d_query_key.get(), d_key.get(), d_value.get(), d_z.get(),
-                    tokens, stream) != hipErrorInvalidValue) {
+                    d_query_key.get(), d_projected_value.get(), d_weight.get(),
+                    d_history_in.get(), d_history_in.get(), d_query_key.get(), d_key.get(),
+                    d_value.get(), tokens, stream) != hipErrorInvalidValue) {
                 fail("P2048 direct-scatter malformed or overlap contract was accepted");
             }
         }
@@ -553,13 +544,12 @@ void benchmark_projection_conv_direct_scatter(hipStream_t stream) {
     constexpr std::uint32_t tokens = 2048U;
     constexpr std::size_t query_key_rows = 4096U;
     constexpr std::size_t value_rows = 6144U;
-    constexpr std::size_t value_z_rows = 2U * value_rows;
     const auto query_key = bf16_fixture(tokens * query_key_rows, 431U, 127.0F);
-    const auto value_z = bf16_fixture(tokens * value_z_rows, 433U, 127.0F);
+    const auto projected_value = bf16_fixture(tokens * value_rows, 433U, 127.0F);
     const auto weight = bf16_fixture(static_cast<std::size_t>(kChannels) * 4U, 439U, 127.0F);
     const auto history = bf16_fixture(static_cast<std::size_t>(kChannels) * 3U, 443U, 127.0F);
     DeviceBuffer<hip_bfloat16> d_query_key(query_key.size());
-    DeviceBuffer<hip_bfloat16> d_value_z(value_z.size());
+    DeviceBuffer<hip_bfloat16> d_projected_value(projected_value.size());
     DeviceBuffer<hip_bfloat16> d_weight(weight.size());
     DeviceBuffer<hip_bfloat16> d_history_in(history.size());
     DeviceBuffer<hip_bfloat16> d_history_out(history.size());
@@ -568,9 +558,8 @@ void benchmark_projection_conv_direct_scatter(hipStream_t stream) {
     DeviceBuffer<hip_bfloat16> d_query(static_cast<std::size_t>(tokens) * 2048U);
     DeviceBuffer<hip_bfloat16> d_key(static_cast<std::size_t>(tokens) * 2048U);
     DeviceBuffer<hip_bfloat16> d_value(static_cast<std::size_t>(tokens) * value_rows);
-    DeviceBuffer<hip_bfloat16> d_z(static_cast<std::size_t>(tokens) * value_rows);
     copy_to_device(d_query_key, query_key);
-    copy_to_device(d_value_z, value_z);
+    copy_to_device(d_projected_value, projected_value);
     copy_to_device(d_weight, weight);
     copy_to_device(d_history_in, history);
 
@@ -591,13 +580,9 @@ void benchmark_projection_conv_direct_scatter(hipStream_t stream) {
             query_key_rows * sizeof(hip_bfloat16), query_key_rows * sizeof(hip_bfloat16), tokens,
             hipMemcpyDeviceToDevice, stream));
         HIP_CHECK(hipMemcpy2DAsync(
-            d_qkv.get() + query_key_rows, kChannels * sizeof(hip_bfloat16), d_value_z.get(),
-            value_z_rows * sizeof(hip_bfloat16), value_rows * sizeof(hip_bfloat16), tokens,
-            hipMemcpyDeviceToDevice, stream));
-        HIP_CHECK(hipMemcpy2DAsync(
-            d_z.get(), value_rows * sizeof(hip_bfloat16), d_value_z.get() + value_rows,
-            value_z_rows * sizeof(hip_bfloat16), value_rows * sizeof(hip_bfloat16), tokens,
-            hipMemcpyDeviceToDevice, stream));
+            d_qkv.get() + query_key_rows, kChannels * sizeof(hip_bfloat16),
+            d_projected_value.get(), value_rows * sizeof(hip_bfloat16),
+            value_rows * sizeof(hip_bfloat16), tokens, hipMemcpyDeviceToDevice, stream));
         HIP_CHECK(causal_conv1d_silu_prefill_qualification(
             d_qkv.get(), d_weight.get(), d_history_in.get(), d_history_out.get(), d_qkv_c.get(),
             kChannels, tokens, 4U, stream));
@@ -608,9 +593,8 @@ void benchmark_projection_conv_direct_scatter(hipStream_t stream) {
     };
     const auto challenger = [&]() {
         return projection_conv_prefill_p2048_direct_scatter_bf16(
-            d_query_key.get(), d_value_z.get(), d_weight.get(), d_history_in.get(),
-            d_history_out.get(), d_query.get(), d_key.get(), d_value.get(), d_z.get(), tokens,
-            stream);
+            d_query_key.get(), d_projected_value.get(), d_weight.get(), d_history_in.get(),
+            d_history_out.get(), d_query.get(), d_key.get(), d_value.get(), tokens, stream);
     };
     const float incumbent_ms = median_kernel_ms(stream, incumbent);
     const float challenger_ms = median_kernel_ms(stream, challenger);

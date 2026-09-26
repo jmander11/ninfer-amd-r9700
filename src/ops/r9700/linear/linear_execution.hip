@@ -140,6 +140,116 @@ __global__ void poison_nonfinite_output(const std::uint32_t* status,
     }
 }
 
+// Small-T (T <= 16) row-scaled E4M3 projection: one 128-thread CTA per sixteen weight rows, each
+// wave accumulating one contiguous K quarter with native FP8 WMMA (rows are the M operand, tokens
+// the N operand). Every lane streams 32 contiguous bytes of its row and token per 64-K step; the
+// four WMMAs of a step pair those bytes identically, which only permutes the exact K sum. Four
+// steps stay in flight behind the current four. The quarters are summed in order, then scaled by
+// the weight-row and token scales and rounded to BF16. A nonzero activation status writes the
+// canonical BF16 quiet NaN to every output element instead.
+constexpr std::uint32_t kSmallTokenLimit = 16U;
+constexpr std::uint32_t kSmallSplit = 4U;
+constexpr std::uint32_t kSmallSteps = 4U;
+constexpr std::uint32_t kSmallKAlignment = 64U * kSmallSplit * kSmallSteps;
+using SmallI32x2 = int __attribute__((ext_vector_type(2)));
+using SmallF32x8 = float __attribute__((ext_vector_type(8)));
+
+__global__ __launch_bounds__(32U * kSmallSplit) void row_scaled_e4m3_small_t_kernel(
+    const std::uint8_t* __restrict__ weight, const float* __restrict__ weight_scales,
+    const std::uint8_t* __restrict__ activation, const float* __restrict__ token_scales,
+    const std::uint32_t* __restrict__ status, hip_bfloat16* __restrict__ output,
+    std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns) {
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
+    __shared__ float partial[kSmallSplit][8][32];
+    const std::uint32_t lane = threadIdx.x & 31U, wave = threadIdx.x >> 5U;
+    const std::uint32_t axis = lane & 15U, half = lane >> 4U;
+    const std::uint32_t row_base = blockIdx.x * 16U;
+    if (*status != r9700::linear::Fp8ActivationOk) {
+        if (wave == 0U && axis < tokens) {
+            for (std::uint32_t item = 0; item < 8U; ++item)
+                reinterpret_cast<std::uint16_t*>(output)[static_cast<std::size_t>(axis) * rows +
+                                                         row_base + half * 8U + item] =
+                    kCanonicalBf16QuietNan;
+        }
+        return;
+    }
+    const std::uint32_t steps = columns / 64U / kSmallSplit;
+    const std::uint32_t k_base = wave * steps * 64U + half * 32U;
+    const bool token = axis < tokens;
+    const std::uint8_t* weight_row = weight + static_cast<std::size_t>(row_base + axis) * columns +
+                                     k_base;
+    const std::uint8_t* activation_row =
+        activation + static_cast<std::size_t>(token ? axis : 0U) * columns + k_base;
+    struct Step { uint4 w0, w1, a0, a1; };
+    const auto load = [&](std::uint32_t step) {
+        Step value;
+        const uint4* w = reinterpret_cast<const uint4*>(weight_row + static_cast<std::size_t>(step) * 64U);
+        value.w0 = w[0];
+        value.w1 = w[1];
+        if (token) {
+            const uint4* a = reinterpret_cast<const uint4*>(
+                activation_row + static_cast<std::size_t>(step) * 64U);
+            value.a0 = a[0];
+            value.a1 = a[1];
+        } else {
+            value.a0 = uint4{};
+            value.a1 = uint4{};
+        }
+        return value;
+    };
+    SmallF32x8 accumulator{};
+    const auto consume = [&](const Step& value) {
+        const std::uint32_t w[8]{value.w0.x, value.w0.y, value.w0.z, value.w0.w,
+                                 value.w1.x, value.w1.y, value.w1.z, value.w1.w};
+        const std::uint32_t a[8]{value.a0.x, value.a0.y, value.a0.z, value.a0.w,
+                                 value.a1.x, value.a1.y, value.a1.z, value.a1.w};
+#pragma unroll
+        for (std::uint32_t chunk = 0; chunk < 4U; ++chunk) {
+            const SmallI32x2 weight_operand{static_cast<int>(w[2U * chunk]),
+                                            static_cast<int>(w[2U * chunk + 1U])};
+            const SmallI32x2 activation_operand{static_cast<int>(a[2U * chunk]),
+                                                static_cast<int>(a[2U * chunk + 1U])};
+            accumulator = __builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8_w32_gfx12(
+                weight_operand, activation_operand, accumulator);
+        }
+    };
+    Step current[kSmallSteps];
+#pragma unroll
+    for (std::uint32_t index = 0; index < kSmallSteps; ++index) current[index] = load(index);
+    for (std::uint32_t step = 0; step + kSmallSteps < steps; step += kSmallSteps) {
+        Step next[kSmallSteps];
+#pragma unroll
+        for (std::uint32_t index = 0; index < kSmallSteps; ++index)
+            next[index] = load(step + kSmallSteps + index);
+#pragma unroll
+        for (std::uint32_t index = 0; index < kSmallSteps; ++index) consume(current[index]);
+#pragma unroll
+        for (std::uint32_t index = 0; index < kSmallSteps; ++index) current[index] = next[index];
+    }
+#pragma unroll
+    for (std::uint32_t index = 0; index < kSmallSteps; ++index) consume(current[index]);
+#pragma unroll
+    for (std::uint32_t item = 0; item < 8U; ++item) partial[wave][item][lane] = accumulator[item];
+    __syncthreads();
+    if (wave == 0U && token) {
+        const float token_scale = token_scales[axis];
+#pragma unroll
+        for (std::uint32_t item = 0; item < 8U; ++item) {
+            float sum = partial[0][item][lane];
+#pragma unroll
+            for (std::uint32_t quarter = 1; quarter < kSmallSplit; ++quarter)
+                sum += partial[quarter][item][lane];
+            const std::uint32_t row = row_base + half * 8U + item;
+            output[static_cast<std::size_t>(axis) * rows + row] =
+                hip_bfloat16(sum * weight_scales[row] * token_scale);
+        }
+    }
+#else
+    (void)weight; (void)weight_scales; (void)activation; (void)token_scales; (void)status;
+    (void)output; (void)tokens; (void)rows; (void)columns;
+#endif
+}
+
 } // namespace
 
 LinearExecutionContext::LinearExecutionContext() {
@@ -209,6 +319,36 @@ struct LinearExecution::Impl {
         profiles.clear();
         if (preference != nullptr) (void)hipblasLtMatmulPreferenceDestroy(preference);
         if (weight_layout != nullptr) (void)hipblasLtMatrixLayoutDestroy(weight_layout);
+    }
+
+    [[nodiscard]] bool small_tokens(std::uint32_t tokens) const noexcept {
+        return tokens <= kSmallTokenLimit && rows % 16U == 0U && columns == padded_columns &&
+               columns % kSmallKAlignment == 0U;
+    }
+
+    // The prepared matrix product and its nonfinite-activation poisoning.
+    LaunchStatus matmul(Profile& profile, std::uint32_t tokens, hip_bfloat16* output,
+                        std::size_t output_elements, hipStream_t stream) noexcept {
+        if (small_tokens(tokens)) {
+            hipLaunchKernelGGL(row_scaled_e4m3_small_t_kernel, dim3(rows / 16U),
+                               dim3(32U * kSmallSplit), 0, stream,
+                               static_cast<const std::uint8_t*>(weight_codes),
+                               static_cast<const float*>(weight_scales),
+                               profile.activation.codes, profile.activation.scales,
+                               profile.activation.status, output, tokens, rows, columns);
+            return {hipGetLastError(), HIPBLAS_STATUS_SUCCESS};
+        }
+        constexpr float alpha = 1.0F;
+        constexpr float beta  = 0.0F;
+        const hipblasStatus_t matmul_status = hipblasLtMatmul(
+            handle, profile.operation, &alpha, weight_codes, weight_layout,
+            profile.activation.codes, profile.activation_layout, &beta, output,
+            profile.output_layout, output, profile.output_layout, &profile.algorithm,
+            matmul_workspace, profile.public_profile.selected_matmul_workspace_bytes, stream);
+        if (matmul_status != HIPBLAS_STATUS_SUCCESS) return {hipSuccess, matmul_status};
+        hipLaunchKernelGGL(poison_nonfinite_output, dim3(1), dim3(kPoisonBlockSize), 0, stream,
+                           profile.activation.status, output, output_elements);
+        return {hipGetLastError(), HIPBLAS_STATUS_SUCCESS};
     }
 
     [[nodiscard]] Profile* find(std::uint32_t tokens) noexcept {
@@ -493,20 +633,7 @@ LinearExecution::LaunchStatus LinearExecution::run(std::uint32_t tokens,
     if (quantize_status != hipSuccess) {
         return {quantize_status, HIPBLAS_STATUS_SUCCESS};
     }
-    constexpr float alpha = 1.0F;
-    constexpr float beta  = 0.0F;
-    const hipblasStatus_t matmul_status = hipblasLtMatmul(
-        impl_->handle, profile->operation, &alpha, impl_->weight_codes,
-        impl_->weight_layout, profile->activation.codes,
-        profile->activation_layout, &beta, output, profile->output_layout, output,
-        profile->output_layout, &profile->algorithm, impl_->matmul_workspace,
-        profile->public_profile.selected_matmul_workspace_bytes, stream);
-    if (matmul_status != HIPBLAS_STATUS_SUCCESS) {
-        return {hipSuccess, matmul_status};
-    }
-    hipLaunchKernelGGL(poison_nonfinite_output, dim3(1), dim3(kPoisonBlockSize), 0,
-                       stream, profile->activation.status, output, output_elements);
-    return {hipGetLastError(), HIPBLAS_STATUS_SUCCESS};
+    return impl_->matmul(*profile, tokens, output, output_elements, stream);
 }
 
 LinearExecution::LaunchStatus LinearExecution::run_quantized(std::uint32_t tokens,
@@ -527,20 +654,7 @@ LinearExecution::LaunchStatus LinearExecution::run_quantized(std::uint32_t token
                         impl_->matmul_workspace_bytes))) {
         return {hipErrorInvalidValue, HIPBLAS_STATUS_SUCCESS};
     }
-    constexpr float alpha = 1.0F;
-    constexpr float beta  = 0.0F;
-    const hipblasStatus_t matmul_status = hipblasLtMatmul(
-        impl_->handle, profile->operation, &alpha, impl_->weight_codes,
-        impl_->weight_layout, profile->activation.codes,
-        profile->activation_layout, &beta, output, profile->output_layout, output,
-        profile->output_layout, &profile->algorithm, impl_->matmul_workspace,
-        profile->public_profile.selected_matmul_workspace_bytes, stream);
-    if (matmul_status != HIPBLAS_STATUS_SUCCESS) {
-        return {hipSuccess, matmul_status};
-    }
-    hipLaunchKernelGGL(poison_nonfinite_output, dim3(1), dim3(kPoisonBlockSize), 0,
-                       stream, profile->activation.status, output, output_elements);
-    return {hipGetLastError(), HIPBLAS_STATUS_SUCCESS};
+    return impl_->matmul(*profile, tokens, output, output_elements, stream);
 }
 
 LinearExecution::LaunchStatus LinearExecution::run_default_heuristic(

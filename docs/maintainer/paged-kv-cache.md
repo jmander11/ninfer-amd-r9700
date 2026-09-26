@@ -448,7 +448,9 @@ three-stage split-512 leaf with caller-owned score/partial/merge storage. Below 
 ordinary T=1/context>=64 and T=2/context>=320 use FP8-Q/K WMMA plus FP32 score/softmax and exact
 vector PV; remaining shapes use fused QK/online-FP32-softmax/PV. The T=4 split route accepts the
 same causal, packed-tree, and device-active-row metadata as the fused leaf. Metadata-bearing T=1
-retains the fused leaf at every context because no such split-512 form was admitted.
+retains the fused leaf at every context because no such split-512 form was admitted. DFlash target
+verification W4..6 (non-tree, contexts 64..262144) instead runs the dense attention arithmetic split
+over context chunks with a stable FP32 merge and a bounded caller-owned partial workspace.
 
 Final admission additionally requires:
 

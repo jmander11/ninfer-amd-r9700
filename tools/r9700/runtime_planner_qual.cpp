@@ -162,23 +162,23 @@ void qualify_host_split512_routing() {
     const auto mtp = Variant::mtp_graph_profiles(32768U, 3U);
     const auto dflash = Variant::dflash_graph_profiles(32768U, 3U, 1U, 4U);
     require(has_classes(ordinary, {0U, 1U}) && has_classes(mtp, {0U, 1U, 3U}) &&
-                has_classes(dflash, {1U}) &&
+                has_classes(dflash, {3U}) &&
                 class_at(ordinary, 8190U) == 0U && class_at(ordinary, 8191U) == 1U &&
                 class_at(mtp, 8185U) == 0U && class_at(mtp, 8186U) == 1U &&
                 class_at(mtp, 8187U) == 1U && class_at(mtp, 8188U) == 3U &&
-                class_at(dflash, 8187U) == 1U && class_at(dflash, 8188U) == 1U,
+                class_at(dflash, 8187U) == 3U && class_at(dflash, 8188U) == 3U,
             "split-512 Device Graph topology classes are incomplete");
     for (const std::uint32_t width : {5U, 6U}) {
         for (std::uint32_t batch = 1; batch <= 4; ++batch) {
             const auto profiles = Variant::dflash_graph_profiles(16384U, width - 1U, batch, width);
             const bool g16 = ninfer::targets::qwen3::detail::kR9700TextKVValueGroup == 16;
-            const std::uint32_t short_class = g16 ? (width == 6U ? 3U : 1U) : 0U;
-            require(class_at(profiles, 8191U - width) == short_class &&
-                        class_at(profiles, 8192U - width) == (g16 ? 1U : 0U) &&
-                        class_at(profiles, 16383U) == (g16 ? 1U : 0U) &&
-                        class_at(profiles, 4095U - width) == (g16 ? 1U : 0U) &&
-                        class_at(profiles, 4096U - width) == short_class,
-                    "DFlash W5/W6 graph key omitted paired/vector WMMA topology");
+            const std::uint32_t verify_class = g16 ? 3U : 0U;
+            require(class_at(profiles, 8191U - width) == verify_class &&
+                        class_at(profiles, 8192U - width) == verify_class &&
+                        class_at(profiles, 16383U) == verify_class &&
+                        class_at(profiles, 4095U - width) == verify_class &&
+                        class_at(profiles, 4096U - width) == verify_class,
+                    "DFlash W5/W6 graph key omitted the split verify topology");
             const auto tiny = Variant::dflash_graph_profiles(63U, width - 1U, batch, width);
             require(class_at(tiny, 62U) == 0U,
                     "DFlash graph key must use capacity-clipped visible context");
@@ -190,17 +190,23 @@ void qualify_host_split512_routing() {
 void qualify_host_attention_parity_routing() {
     namespace kv = ninfer::ops::r9700::kv;
     namespace q27 = ninfer::targets::qwen3_8_27b::detail;
-    constexpr std::size_t kW5C134Bytes = 5U * 24U * 134U * sizeof(float);
-    constexpr std::size_t kW5C140Bytes = 5U * 24U * 140U * sizeof(float);
-    constexpr std::size_t kW6C134Bytes = 6U * 24U * 134U * sizeof(float);
-    constexpr std::size_t kW6C135Bytes = 6U * 24U * 135U * sizeof(float);
+    // Split verify partials: min(64, ceil(context/256)) chunks x rows x 24 heads x (256 numerator
+    // + origin + denominator) FP32.
+    const auto verify_bytes = [](std::uint32_t rows, std::size_t context) {
+        return std::min<std::size_t>(64U, (context + 255U) / 256U) * rows * 24U * 258U *
+               sizeof(float);
+    };
+    const std::size_t kW5C134Bytes = verify_bytes(5U, 134U);
+    const std::size_t kW5C140Bytes = verify_bytes(5U, 140U);
+    const std::size_t kW6C134Bytes = verify_bytes(6U, 134U);
+    const std::size_t kW6C135Bytes = verify_bytes(6U, 135U);
     const bool text_enabled = kv::kTextP129WmmaTailCandidate;
     for (const std::size_t context : {64U, 133U, 4100U, 8191U, 8192U, 15200U, 32768U, 262144U}) {
         for (const std::uint32_t rows : {4U, 5U, 6U}) {
             require(kv::use_dflash_verify_batched_wmma(rows, context, false, true) &&
                         q27::r9700_full_attention_workspace_capacity_bytes(rows, context, false, true) >=
-                            rows * 24U * context * sizeof(float),
-                    "DFlash route or score workspace omitted an admitted context");
+                            verify_bytes(rows, context),
+                    "DFlash route or split workspace omitted an admitted context");
         }
     }
     require(!kv::use_dflash_verify_batched_wmma(4U, 63U, false, true) &&
@@ -227,7 +233,7 @@ void qualify_host_attention_parity_routing() {
                 q27::r9700_full_attention_workspace_capacity_bytes(5U, 140U, false, true) ==
                     kW5C140Bytes &&
                 q27::r9700_full_attention_workspace_capacity_bytes(5U, 8191U, false, true) ==
-                    5U * 24U * 8191U * sizeof(float) &&
+                    verify_bytes(5U, 8191U) &&
                 q27::r9700_full_attention_workspace_capacity_bytes(5U, 134U, true, true) == 0U &&
                 q27::r9700_full_attention_workspace_capacity_bytes(6U, 134U, false, true) ==
                     kW6C134Bytes &&
@@ -392,12 +398,10 @@ void qualify_host_dflash_graph_allowance() {
                 const auto compact = runtime::build_sequence_candidate_for_qualification(
                     compact_inputs, ((capacity + 63U) / 64U) * concurrency);
                 const std::size_t definitions_per_batch = capacity == 1024U ? 3U : 6U;
-                const bool paired_pv = k == 5U && capacity >= 4096U &&
-                    ninfer::targets::qwen3::detail::kR9700TextKVValueGroup == 16;
-                const std::size_t classes = paired_pv ? 2U : 1U;
-                // The paired-PV topology owns the final two definitions; the
-                // four earlier vector-PV definitions need one extra update slot.
-                const std::size_t extra_updates = paired_pv ? 1U : definitions_per_batch - 3U;
+                // One split-verify executable serves every frontier definition; definitions
+                // beyond three need extra update slots.
+                const std::size_t classes = 1U;
+                const std::size_t extra_updates = definitions_per_batch - 3U;
                 const std::size_t expected = (48ULL + concurrency *
                     (26ULL * classes + 4ULL * extra_updates)) * 1024ULL*1024ULL;
                 require(compact->graph_executable_count == classes * concurrency &&
