@@ -849,13 +849,15 @@ __device__ __forceinline__ void normalized_small_vector_seam(
     }
 }
 
+// Rows is the status CTA's unrolled row bound (a launch covers tokens <= Rows).
+template <std::uint32_t Rows>
 __global__ __launch_bounds__(kNormalizedSmallRowVectors) void a8g64_normalized_prepare_small_kernel(
     const hip_bfloat16* input, const hip_bfloat16* norm, float eps, bool unit_offset,
     std::uint32_t tokens, std::uint8_t* low_codes, std::uint8_t* high_codes,
     std::uint16_t* scale_words, std::uint32_t* status, hip_bfloat16* normalized_rows,
     std::uint32_t* clear_status) {
-    __shared__ float wave_sums[kNormalizedSmallMaximumTokens][kNormalizedSmallWaves];
-    __shared__ float inverse[kNormalizedSmallMaximumTokens];
+    __shared__ float wave_sums[Rows][kNormalizedSmallWaves];
+    __shared__ float inverse[Rows];
     constexpr std::uint32_t columns = kNormalizedPrefillColumns;
     const std::uint32_t slot = threadIdx.x;
     const std::uint32_t wave = threadIdx.x / kWaveSize, lane = threadIdx.x % kWaveSize;
@@ -864,14 +866,14 @@ __global__ __launch_bounds__(kNormalizedSmallRowVectors) void a8g64_normalized_p
     const uint4* rows = reinterpret_cast<const uint4*>(input);
     if (blockIdx.x == tokens) {
         // Rows are predicated, never broken out of, so the unrolled arrays stay in registers.
-        uint4 loaded[kNormalizedSmallMaximumTokens];
+        uint4 loaded[Rows];
 #pragma unroll
-        for (std::uint32_t row = 0; row < kNormalizedSmallMaximumTokens; ++row)
+        for (std::uint32_t row = 0; row < Rows; ++row)
             loaded[row] = row < tokens
                 ? rows[static_cast<std::size_t>(row) * kNormalizedSmallRowVectors + slot]
                 : uint4{};
 #pragma unroll
-        for (std::uint32_t row = 0; row < kNormalizedSmallMaximumTokens; ++row) {
+        for (std::uint32_t row = 0; row < Rows; ++row) {
             const float sumsq = normalized_small_wave_sumsq(loaded[row]);
             if (row < tokens && lane == 0U) wave_sums[row][wave] = sumsq;
         }
@@ -881,7 +883,7 @@ __global__ __launch_bounds__(kNormalizedSmallRowVectors) void a8g64_normalized_p
         __syncthreads();
         bool nonfinite = false, overflow = false;
 #pragma unroll
-        for (std::uint32_t row = 0; row < kNormalizedSmallMaximumTokens; ++row) {
+        for (std::uint32_t row = 0; row < Rows; ++row) {
             if (row < tokens) {
                 std::uint32_t seam[4]{};
                 float value[8];
@@ -3998,11 +4000,17 @@ hipError_t launch_normalized_prepare(const hip_bfloat16* input, const hip_bfloat
                                      std::uint32_t* clear_status = nullptr) noexcept {
 #if defined(__HIPCC__)
     if (tokens <= kNormalizedSmallMaximumTokens) {
-        hipLaunchKernelGGL(a8g64_normalized_prepare_small_kernel, dim3(tokens + 1U),
-                           dim3(kNormalizedSmallRowVectors), 0, stream, input, norm, eps,
-                           unit_offset, tokens, workspace.low_codes, workspace.high_codes,
-                           workspace.scales, workspace.status, normalized, clear_status);
-        return hipGetLastError();
+        const auto launch = [&](auto kernel) {
+            hipLaunchKernelGGL(kernel, dim3(tokens + 1U), dim3(kNormalizedSmallRowVectors), 0,
+                               stream, input, norm, eps, unit_offset, tokens,
+                               workspace.low_codes, workspace.high_codes, workspace.scales,
+                               workspace.status, normalized, clear_status);
+            return hipGetLastError();
+        };
+        // Verification widths (T <= 6) keep the status CTA's row arrays at six.
+        return tokens <= 6U ? launch(a8g64_normalized_prepare_small_kernel<6U>)
+                            : launch(a8g64_normalized_prepare_small_kernel<
+                                     kNormalizedSmallMaximumTokens>);
     }
     if (clear_status != nullptr) return hipErrorInvalidValue;
     const hipError_t reset = hipMemsetAsync(workspace.status, 0, sizeof(std::uint32_t), stream);
