@@ -144,8 +144,8 @@ void cell(unsigned t,unsigned offset,hipStream_t s,std::ostream& out){
     reject([&]{ninfer::ops::bf16_gdn_projected_gating(
         input,wa,wb,log_tensor,bias_tensor,g_tensor,beta_tensor,nullptr);});
     const bool wide=t>24U;
-    if(wide){
-        require(offset==0U,"wide cells use the admitted 16-byte alignment");
+    require(offset==0U,"cells use the admitted 16-byte alignment");
+    if(t>1U){
         const ninfer::Tensor misaligned(x.data()+1,ninfer::DType::BF16,{int(K),int(t-1U)});
         reject([&]{ninfer::ops::bf16_gdn_projected_gating(
             misaligned,wa,wb,log_tensor,bias_tensor,g_tensor,beta_tensor,s);});
@@ -199,8 +199,8 @@ int main(int argc,char**argv){try{
     out<<"{\"schema\":\"ninfer.r9700.gdn-projected-controls.v1\",\"public_op_tested\":true,\"target\":\"gfx1201\","
           "\"pci\":\"0000:13:00.0\",\"oracle\":\"original BF16 dots FP64, independent BF16 RNE seams (plus the neighbour when an FP32 accumulation bound straddles a boundary), FP64 gates every output\","
           "\"criterion\":\"g abs<=0.0625 OR rel<=0.001; beta abs<=0.0003 OR rel<=0.00003\",\"cells\":[";
-    bool first=true;for(unsigned t=1U;t<=24U;++t)for(unsigned offset:{0U,2U}){
-        if(!first)out<<',';first=false;cell(t,offset,s,out);}
+    bool first=true;for(unsigned t=1U;t<=24U;++t){
+        if(!first)out<<',';first=false;cell(t,0U,s,out);}
     for(unsigned t:{25U,31U,33U,64U,127U,2048U}){out<<',';cell(t,0U,s,out);}
     out<<"],\"numerical_passed\":true}\n";
     check(hipStreamDestroy(s));const auto data=out.str();

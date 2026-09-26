@@ -4,16 +4,25 @@
 
 namespace ninfer::ops::r9700::linear {
 namespace {
+// Waves per CTA sharing one 16-row tile over contiguous K ranges. One wave per tile leaves too
+// few G64 payloads in flight to saturate DRAM on the narrower projections.
+template <unsigned N, unsigned K>
+constexpr unsigned k_split() {
+    if constexpr (N == 1280) return 16;
+    else if constexpr (N == 5120 && K == 4096) return 8;
+    else if constexpr (N == 12288) return 1;
+    else return 4;
+}
 template <unsigned N, unsigned K, unsigned T, bool Accumulate = false>
-__global__ __launch_bounds__(32) void small_batch_projection_kernel(
+__global__ __launch_bounds__((32 * k_split<N, K>())) void small_batch_projection_kernel(
     const std::uint8_t* low, const std::uint8_t* high, const std::uint16_t* scales,
     const std::uint32_t* status, const std::uint8_t* codes,
     const std::uint16_t* weight_scales, hip_bfloat16* output) {
     if constexpr(N==12288 && T<=8)
         detail::a8q4_scale_gather_body<N,K,T>(low,high,scales,status,codes,weight_scales,output);
     else
-        detail::a8q4_pipeline_body<N,K,T,Accumulate>(low,high,scales,status,codes,weight_scales,
-                                                     output);
+        detail::a8q4_pipeline_body<N,K,T,Accumulate,k_split<N,K>()>(
+            low,high,scales,status,codes,weight_scales,output);
 }
 template <unsigned N, unsigned K, unsigned T>
 hipError_t launch_width(const A8Q4G64LinearArgs& a, hipStream_t stream) {
@@ -28,13 +37,14 @@ hipError_t launch_width(const A8Q4G64LinearArgs& a, hipStream_t stream) {
     if constexpr (N == 5120) {
         if (a.accumulate_output) {
             hipLaunchKernelGGL((small_batch_projection_kernel<N,K,T,true>),dim3(N/16,(T+15)/16),
-                dim3(32),0,stream,a.activation_low_codes,a.activation_high_codes,
+                dim3(32*k_split<N,K>()),0,stream,a.activation_low_codes,a.activation_high_codes,
                 a.activation_scales,a.activation_status,a.weight_codes,a.weight_scales,a.output);
             return hipGetLastError();
         }
     }
     if (a.accumulate_output) return hipErrorInvalidValue;
-    hipLaunchKernelGGL((small_batch_projection_kernel<N,K,T>),dim3(N/16,(T+15)/16),dim3(32),0,stream,
+    hipLaunchKernelGGL((small_batch_projection_kernel<N,K,T>),dim3(N/16,(T+15)/16),
+        dim3(32*k_split<N,K>()),0,stream,
         a.activation_low_codes,a.activation_high_codes,a.activation_scales,a.activation_status,
         a.weight_codes,a.weight_scales,a.output);
     return hipGetLastError();

@@ -28,7 +28,7 @@ def main() -> int:
         "exponential": "_exp_f32",
         "reciprocal": "_rcp_f32",
         "no_scratch": ".amdhsa_private_segment_fixed_size 0",
-        "two_bf16_reductions": ".amdhsa_group_segment_fixed_size 2048",
+        "two_wave_partial_planes": ".amdhsa_group_segment_fixed_size 160",
     }
     for label, needle in required.items():
         if needle not in body:

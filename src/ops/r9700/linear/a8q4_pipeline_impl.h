@@ -17,7 +17,7 @@ __device__ __forceinline__ PipelineGroup load_pipeline_group(
     const std::uint8_t* codes,const std::uint16_t* weight_scales,
     unsigned row,unsigned group) {
     constexpr unsigned G=K/64;
-    const unsigned lane=threadIdx.x,axis=lane&15U,half_lane=lane>>4U;
+    const unsigned lane=threadIdx.x&31U,axis=lane&15U,half_lane=lane>>4U;
     const unsigned token_base=T>8?blockIdx.y*16U:0U;
     PipelineGroup value{};
 #pragma unroll
@@ -58,7 +58,7 @@ __device__ __forceinline__ void consume_pipeline_group(
     }
 #pragma unroll
     for(unsigned t=0;t<(T<=8?T:8);++t) {
-        const unsigned source=T<=8?t:(threadIdx.x>>4U)*8U+t;
+        const unsigned source=T<=8?t:((threadIdx.x&31U)>>4U)*8U+t;
         const float as=__shfl(gathered,source,32);
         const int combined=low_dot[t]+16*high_dot[t];
         total[t]=fmaf(static_cast<float>(combined),as*ws,total[t]);
@@ -66,15 +66,20 @@ __device__ __forceinline__ void consume_pipeline_group(
 }
 
 // Accumulate publishes BF16(output + BF16(projection)) in place (projected-residual boundary).
-template<unsigned N,unsigned K,unsigned T,bool Accumulate=false>
+// Split waves of one CTA own contiguous ascending G64 ranges of the same 16 rows; wave zero
+// adds the later partial sums in ascending wave order before the single BF16 publication.
+template<unsigned N,unsigned K,unsigned T,bool Accumulate=false,unsigned Split=1>
 __device__ __forceinline__ void a8q4_pipeline_body(
     const std::uint8_t* low,const std::uint8_t* high,const std::uint16_t* scales,
     const std::uint32_t* status,const std::uint8_t* codes,
     const std::uint16_t* weight_scales,hip_bfloat16* output) {
     constexpr unsigned G=K/64;
-    const unsigned lane=threadIdx.x,row=blockIdx.x*16+(lane&15U);
+    static_assert(Split>=1 && G%Split==0 && G/Split>=2);
+    constexpr unsigned Width=T<=8?T:8,Groups=G/Split;
+    const unsigned lane=threadIdx.x&31U,wave=threadIdx.x>>5U,row=blockIdx.x*16+(lane&15U);
     const unsigned token_base=T>8?blockIdx.y*16U+(lane>>4U)*8U:0U;
     if(*status!=0) {
+        if(wave!=0)return;
         if constexpr(T<=8) {
             if(lane<16)for(unsigned t=0;t<T;++t) {
                 hip_bfloat16 poison;poison.data=0x7fc1;output[t*N+row]=poison;
@@ -86,10 +91,11 @@ __device__ __forceinline__ void a8q4_pipeline_body(
         }
         return;
     }
-    float total[T<=8?T:8]{};
-    PipelineGroup current=load_pipeline_group<K,T>(low,high,scales,codes,weight_scales,row,0);
+    float total[Width]{};
+    const unsigned first=wave*Groups;
+    PipelineGroup current=load_pipeline_group<K,T>(low,high,scales,codes,weight_scales,row,first);
 #pragma unroll 1
-    for(unsigned group=0;group<G-1;++group) {
+    for(unsigned group=first;group<first+Groups-1;++group) {
         float ws=__half2float(__ushort_as_half(current.weight_scale));
         float gathered=__half2float(__ushort_as_half(current.activation_scale));
         // Materialize full FP32 values before issuing successor loads. Keeping
@@ -110,6 +116,19 @@ __device__ __forceinline__ void a8q4_pipeline_body(
     }
     consume_pipeline_group<T>(current,__half2float(__ushort_as_half(current.weight_scale)),
                      __half2float(__ushort_as_half(current.activation_scale)),total);
+    if constexpr(Split>1) {
+        __shared__ float partial[Split-1][Width][32];
+        if(wave!=0) {
+#pragma unroll
+            for(unsigned t=0;t<Width;++t)partial[wave-1][t][lane]=total[t];
+        }
+        __syncthreads();
+        if(wave!=0)return;
+#pragma unroll
+        for(unsigned w=0;w<Split-1;++w)
+#pragma unroll
+            for(unsigned t=0;t<Width;++t)total[t]+=partial[w][t][lane];
+    }
     const auto publish=[&](hip_bfloat16& target,float value) {
         const hip_bfloat16 projection(value);
         if constexpr(Accumulate)

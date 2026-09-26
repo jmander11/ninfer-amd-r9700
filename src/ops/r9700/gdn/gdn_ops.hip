@@ -406,41 +406,69 @@ __global__ void control_gates_kernel(const hip_bfloat16* a, const hip_bfloat16* 
     beta[index] = 1.0F / (1.0F + expf(-bv));
 }
 
-__global__ __launch_bounds__(kBlock) void bf16_projected_control_t1_kernel(
+// One CTA per (head, token) and one 16-byte vector of eight columns per thread: each thread's
+// ascending eight-term FMA chain, a fixed wave32 xor tree, then the wave partials in wave order.
+// Every admitted width runs this same per-column arithmetic.
+constexpr std::uint32_t kControlT1Threads = kControlColumns / 8U;
+
+__global__ __launch_bounds__(kControlT1Threads) void bf16_projected_control_t1_kernel(
     const hip_bfloat16* hidden, const hip_bfloat16* a_weight,
     const hip_bfloat16* b_weight, const float* a_log, const float* dt_bias,
     float* g, float* beta) {
+    constexpr std::uint32_t waves = kControlT1Threads / 32U;
     const std::uint32_t head = blockIdx.x;
-    hidden += static_cast<std::size_t>(blockIdx.y) * kControlColumns;
+    const std::uint32_t lane = threadIdx.x & 31U;
+    const std::uint32_t wave = threadIdx.x >> 5U;
     const std::size_t output = static_cast<std::size_t>(blockIdx.y) * kControlHeads + head;
-    const std::size_t base = static_cast<std::size_t>(head) * kControlColumns;
+    const auto load = [](const hip_bfloat16* row) {
+        return reinterpret_cast<const uint4*>(row)[threadIdx.x];
+    };
+    const uint4 x = load(hidden + static_cast<std::size_t>(blockIdx.y) * kControlColumns);
+    const uint4 av = load(a_weight + static_cast<std::size_t>(head) * kControlColumns);
+    const uint4 bv = load(b_weight + static_cast<std::size_t>(head) * kControlColumns);
+    const std::uint32_t xw[4] = {x.x, x.y, x.z, x.w};
+    const std::uint32_t aw[4] = {av.x, av.y, av.z, av.w};
+    const std::uint32_t bw[4] = {bv.x, bv.y, bv.z, bv.w};
     float a_partial = 0.0F;
     float b_partial = 0.0F;
-    for (std::uint32_t k = threadIdx.x; k < kControlColumns; k += blockDim.x) {
-        const float x = static_cast<float>(hidden[k]);
-        a_partial = fmaf(x, static_cast<float>(a_weight[base + k]), a_partial);
-        b_partial = fmaf(x, static_cast<float>(b_weight[base + k]), b_partial);
-    }
-    __shared__ float a_reduction[kBlock];
-    __shared__ float b_reduction[kBlock];
-    a_reduction[threadIdx.x] = a_partial;
-    b_reduction[threadIdx.x] = b_partial;
-    __syncthreads();
-    for (std::uint32_t width = kBlock / 2U; width != 0U; width >>= 1U) {
-        if (threadIdx.x < width) {
-            a_reduction[threadIdx.x] += a_reduction[threadIdx.x + width];
-            b_reduction[threadIdx.x] += b_reduction[threadIdx.x + width];
+#pragma unroll
+    for (int w = 0; w < 4; ++w) {
+#pragma unroll
+        for (int half = 0; half < 2; ++half) {
+            const auto value = [&](std::uint32_t word) {
+                return __uint_as_float(half == 0 ? word << 16 : word & 0xffff0000U);
+            };
+            a_partial = fmaf(value(xw[w]), value(aw[w]), a_partial);
+            b_partial = fmaf(value(xw[w]), value(bw[w]), b_partial);
         }
-        __syncthreads();
     }
+#pragma unroll
+    for (std::uint32_t width = 16U; width != 0U; width >>= 1U) {
+        a_partial += __shfl_xor(a_partial, width, 32);
+        b_partial += __shfl_xor(b_partial, width, 32);
+    }
+    __shared__ float a_waves[waves];
+    __shared__ float b_waves[waves];
+    if (lane == 0U) {
+        a_waves[wave] = a_partial;
+        b_waves[wave] = b_partial;
+    }
+    __syncthreads();
     if (threadIdx.x == 0U) {
-        const hip_bfloat16 ar = static_cast<hip_bfloat16>(a_reduction[0]);
-        const hip_bfloat16 br = static_cast<hip_bfloat16>(b_reduction[0]);
-        const float av = static_cast<float>(ar) + dt_bias[head];
-        const float softplus = av > 20.0F ? av : log1pf(expf(av));
+        float a_sum = 0.0F;
+        float b_sum = 0.0F;
+#pragma unroll
+        for (std::uint32_t i = 0; i < waves; ++i) {
+            a_sum += a_waves[i];
+            b_sum += b_waves[i];
+        }
+        const hip_bfloat16 ar = static_cast<hip_bfloat16>(a_sum);
+        const hip_bfloat16 br = static_cast<hip_bfloat16>(b_sum);
+        const float a_value = static_cast<float>(ar) + dt_bias[head];
+        const float softplus = a_value > 20.0F ? a_value : log1pf(expf(a_value));
         g[output] = -expf(a_log[head]) * softplus;
-        const float bv = static_cast<float>(br);
-        beta[output] = 1.0F / (1.0F + expf(-bv));
+        const float b_value = static_cast<float>(br);
+        beta[output] = 1.0F / (1.0F + expf(-b_value));
     }
 }
 
@@ -809,8 +837,7 @@ hipError_t bf16_projected_control(
     const auto aligned16 = [](const void* pointer) {
         return reinterpret_cast<std::uintptr_t>(pointer) % 16U == 0U;
     };
-    if (tokens > kControlT1MaximumTokens &&
-        (!aligned16(hidden) || !aligned16(a_weight) || !aligned16(b_weight))) {
+    if (!aligned16(hidden) || !aligned16(a_weight) || !aligned16(b_weight)) {
         return hipErrorInvalidValue;
     }
     const std::array<ByteRange, 7> ranges{
@@ -830,7 +857,7 @@ hipError_t bf16_projected_control(
     return checked_launch(true, [&] {
         if (tokens <= kControlT1MaximumTokens) {
             hipLaunchKernelGGL(bf16_projected_control_t1_kernel, dim3(kControlHeads, tokens),
-                               dim3(kBlock), 0, stream, hidden, a_weight, b_weight, a_log,
+                               dim3(kControlT1Threads), 0, stream, hidden, a_weight, b_weight, a_log,
                                dt_bias, g, beta);
         } else {
             hipLaunchKernelGGL(bf16_projected_control_wide_kernel,

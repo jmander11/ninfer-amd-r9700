@@ -175,10 +175,13 @@ Require both `abs(actual-q)<=E` and `abs(actual-public)<=abs(q-public)+E`
 per output and in per-token L2. Positive budget arithmetic rounds outward;
 zero terms require exact zero and nonfinite values fail. The separate arithmetic
 check prevents quantization allowance from hiding an implementation defect.
-Exact INT32 G64 dots and exact FP16 scale products feed ascending FP32 FMAs,
-then one BF16 RNE cast; this finite, non-underflowing profile justifies the bound.
-Codec, exact generic/eager/graph, poison, guard and deliberate output-corruption
-checks remain mandatory. This is not a bound on model-quality loss: PPL admission
+Exact INT32 G64 dots and exact FP16 scale products feed ascending FP32 FMA chains
+over contiguous K ranges, one per wave of a K-split CTA (4 waves; 8 at N5120/K4096, 16 at
+N1280, 1 at N12288), whose partials wave zero adds in wave order before one BF16 RNE cast;
+the chain-plus-combine depth never exceeds `G`, so this finite, non-underflowing profile
+justifies the same bound. The generic WMMA control is checked against the same oracle but is
+no longer a bitwise reference. Codec, exact eager/graph, poison, guard and deliberate
+output-corruption checks remain mandatory. This is not a bound on model-quality loss: PPL admission
 remains separate and no production precision changes.
 
 The old 2% relative-RMS/10%-of-reference-RMS gross screen is retained as diagnostic
@@ -1245,9 +1248,10 @@ make -C tools/r9700 rmsnorm-k256-prefill-benchmark \
 ```
 
 The canonical small-token RMSNorm route covers exactly K5120 and rows 1 through 24, including
-ordinary decode and flattened speculative verification batches. One 256-thread CTA owns each row:
-every lane accumulates 20 represented BF16 values in FP32, wave32 shuffles reduce each wave, and
-eight LDS partials complete the CTA reduction before BF16 publication. The numerical gate compares
+ordinary decode and flattened speculative verification batches. One 640-thread CTA owns each row:
+every lane loads one 16-byte vector of eight represented BF16 values and accumulates their squares
+in FP32, wave32 xor shuffles reduce each wave, and every lane adds the twenty LDS wave partials in
+wave order; the row stays in registers for the 16-byte BF16 publication. The numerical gate compares
 the complete result directly with an independent CPU FP64 formula across ordinary, zero, and
 mixed-magnitude inputs, both gain modes, three epsilon values, every selected row count, and two
 Device Graph replays. The current physical regression passed all 432 FP64 cases, with zero
@@ -1384,7 +1388,10 @@ FP32 g/beta outputs; CTA-uniform branches isolate all nine control barriers. Emi
 retains native IU4 and exact control reduction/BF16 seams, at 34 VGPR, 52 SGPR, 2048 bytes LDS,
 compiler occupancy 16, and zero scratch/spills. Four vector B128 activation loads replace the
 incumbent's two scalar B256 loads; the issue-cost effect remains unmeasured. This static probe
-is not a complete public Op and makes no numerical-correctness or performance claim. Next prepare
+is not a complete public Op and makes no numerical-correctness or performance claim. Its control
+heads retain the former 256-thread strided reduction; the production control now reduces one
+16-byte vector per thread over 640 threads, so the grid qualifier's exact incumbent `g` parity
+no longer holds until the candidate adopts that association. Next prepare
 and independently review complete control+quantize+pair numerical, graph/workspace, and timing
 qualification as specified in `plans/r9700-autonomous-todos.md`. Finish this bounded decision,
 then switch to recipe-independent DFlash optimization before another base-decode mechanism;

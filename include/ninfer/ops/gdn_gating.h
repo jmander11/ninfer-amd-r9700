@@ -40,11 +40,11 @@ void gdn_gating(const Tensor& a, const Tensor& b, const Tensor& A_log, const Ten
  *   mutually non-overlapping; there is no workspace or persistent state effect.
  *
  * Execution:
- *   The caller supplies a non-null stream. T=1..24 use one batched grid that retains the
- *   ordinary T1 projection arithmetic independently for every token; wider extents use a
- *   batched WMMA route whose FP32 reduction association differs, so only the BF16-rounded
- *   projection boundary, not bitwise equality with T1, is shared across the two routes.
- *   T>24 requires 16-byte aligned hidden and weight storage.
+ *   The caller supplies a non-null stream. T=1..24 use one batched grid that applies the same
+ *   per-token projection arithmetic to every token (bitwise equal to T1 per column); wider
+ *   extents use a batched WMMA route whose FP32 reduction association differs, so only the
+ *   BF16-rounded projection boundary, not bitwise equality with T1, is shared across the two
+ *   routes. Hidden and weight storage are 16-byte aligned.
  */
 void bf16_gdn_projected_gating(const Tensor& hidden, const Weight& a_weight,
                                   const Weight& b_weight, const Tensor& A_log,

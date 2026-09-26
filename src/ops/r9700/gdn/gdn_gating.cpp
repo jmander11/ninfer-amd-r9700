@@ -142,10 +142,9 @@ void bf16_gdn_projected_gating(const Tensor& hidden, const Weight& a_weight,
     const auto aligned16 = [](const void* pointer) {
         return reinterpret_cast<std::uintptr_t>(pointer) % 16U == 0U;
     };
-    if (hidden.ne[1] > 24 &&
-        (!aligned16(hidden.data) || !aligned16(a_weight.qdata) || !aligned16(b_weight.qdata))) {
+    if (!aligned16(hidden.data) || !aligned16(a_weight.qdata) || !aligned16(b_weight.qdata)) {
         throw std::invalid_argument(
-            "bf16_gdn_projected_gating: T>24 requires 16-byte aligned hidden and weights");
+            "bf16_gdn_projected_gating: hidden and weights must be 16-byte aligned");
     }
     HIP_CHECK(r9700::gdn::bf16_projected_control(
         static_cast<const hip_bfloat16*>(hidden.data),

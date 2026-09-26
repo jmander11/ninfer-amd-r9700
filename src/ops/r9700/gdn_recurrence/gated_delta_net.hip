@@ -132,45 +132,6 @@ __device__ __forceinline__ void stage_qk_ordinary(const hip_bfloat16* q,
     __syncthreads();
 }
 
-// Preserve stage_qk<true>'s stride-64,32,16,... FP32 tree, but perform it
-// inside the first wave. This is deliberately not the wave-QK profile's
-// sequential four-FMA reduction: replay publication retains the old tree.
-__device__ __forceinline__ void stage_qk_exact_tree(const hip_bfloat16* q,
-                                                  const hip_bfloat16* k,
-                                                  std::size_t base,
-                                                  float* staged_q,
-                                                  float* staged_k) {
-    const int lane = static_cast<int>(threadIdx.x);
-    if (lane < 32) {
-        float qv[4], kv[4], qs[4], ks[4];
-#pragma unroll
-        for (int item = 0; item < 4; ++item) {
-            qv[item] = static_cast<float>(q[base + lane + item * 32]);
-            kv[item] = static_cast<float>(k[base + lane + item * 32]);
-            qs[item] = __fmul_rn(qv[item], qv[item]);
-            ks[item] = __fmul_rn(kv[item], kv[item]);
-            // HIP rounded intrinsics alone still permit contraction here.
-            // Materialize both square results before any tree additions.
-            asm volatile("" : "+v"(qs[item]), "+v"(ks[item]));
-        }
-        float qsum = __fadd_rn(__fadd_rn(qs[0], qs[2]), __fadd_rn(qs[1], qs[3]));
-        float ksum = __fadd_rn(__fadd_rn(ks[0], ks[2]), __fadd_rn(ks[1], ks[3]));
-#pragma unroll
-        for (int stride = 16; stride != 0; stride >>= 1) {
-            qsum = __fadd_rn(qsum, __shfl_down(qsum, stride, 32));
-            ksum = __fadd_rn(ksum, __shfl_down(ksum, stride, 32));
-        }
-        const float q_scale = rsqrtf(__shfl(qsum, 0, 32) + kEpsilon);
-        const float k_scale = rsqrtf(__shfl(ksum, 0, 32) + kEpsilon);
-#pragma unroll
-        for (int item = 0; item < 4; ++item) {
-            staged_q[lane + item * 32] = qv[item] * q_scale;
-            staged_k[lane + item * 32] = kv[item] * k_scale;
-        }
-    }
-    __syncthreads();
-}
-
 __device__ __forceinline__ void load_state_row(const float* state, std::size_t base,
                                                 int value_row, int sublane,
                                                 float (&local)[kKeysPerThread]) {
@@ -324,19 +285,77 @@ void snapshot_kernel(const hip_bfloat16* q, const hip_bfloat16* k, const hip_bfl
     }
 }
 
-template <bool Tree, bool ExactTree = false>
-__global__ __launch_bounds__(kBlock, 1)
+// Normalizes one token's q/k head with a single wave into caller LDS rows. The FP32 arithmetic
+// is exactly the block routine's: stage_qk<true>'s stride-64,32,16,... tree (lane items
+// {i, i+64} and {i+32, i+96} pair first, then the stride-32 add and the in-wave strides), or
+// stage_qk_ordinary's lane FMA chain for the wave-QK profile. The replay fold keeps that tree.
+__device__ __forceinline__ void stage_token_qk_wave(const hip_bfloat16* q, const hip_bfloat16* k,
+                                                    std::size_t base, float* staged_q,
+                                                    float* staged_k, int lane) {
+    float qv[4], kv[4];
+#pragma unroll
+    for (int item = 0; item < 4; ++item) {
+        qv[item] = static_cast<float>(q[base + lane + item * 32]);
+        kv[item] = static_cast<float>(k[base + lane + item * 32]);
+    }
+    float q_scale = 0.0F, k_scale = 0.0F;
+    if constexpr (r9700::gdn_recurrence::kVerifyWaveQkCandidate) {
+        float q_sum = 0.0F, k_sum = 0.0F;
+#pragma unroll
+        for (int item = 0; item < 4; ++item) {
+            q_sum = fmaf(qv[item], qv[item], q_sum);
+            k_sum = fmaf(kv[item], kv[item], k_sum);
+        }
+        q_scale = rsqrtf(wave_sum(q_sum) + kEpsilon);
+        k_scale = rsqrtf(wave_sum(k_sum) + kEpsilon);
+    } else {
+        float qs[4], ks[4];
+#pragma unroll
+        for (int item = 0; item < 4; ++item) {
+            qs[item] = __fmul_rn(qv[item], qv[item]);
+            ks[item] = __fmul_rn(kv[item], kv[item]);
+            // HIP rounded intrinsics alone still permit contraction here.
+            asm volatile("" : "+v"(qs[item]), "+v"(ks[item]));
+        }
+        float qsum = __fadd_rn(__fadd_rn(qs[0], qs[2]), __fadd_rn(qs[1], qs[3]));
+        float ksum = __fadd_rn(__fadd_rn(ks[0], ks[2]), __fadd_rn(ks[1], ks[3]));
+#pragma unroll
+        for (int stride = 16; stride != 0; stride >>= 1) {
+            qsum = __fadd_rn(qsum, __shfl_down(qsum, stride, 32));
+            ksum = __fadd_rn(ksum, __shfl_down(ksum, stride, 32));
+        }
+        q_scale = rsqrtf(__shfl(qsum, 0, 32) + kEpsilon);
+        k_scale = rsqrtf(__shfl(ksum, 0, 32) + kEpsilon);
+    }
+#pragma unroll
+    for (int item = 0; item < 4; ++item) {
+        staged_q[lane + item * 32] = qv[item] * q_scale;
+        staged_k[lane + item * 32] = kv[item] * k_scale;
+    }
+}
+
+// Value rows evolve independently, so each (batch, head) is split into kOrdinaryRowTiles CTAs.
+// Every token's normalized q/k, controls and this tile's values are staged in LDS up front (one
+// wave per token), leaving the sequential recurrence with LDS reads and lane shuffles only. Row
+// tile zero alone publishes the replay records.
+template <bool Tree>
+__global__ __launch_bounds__(kOrdinaryBlock, 1)
 void record_kernel(const hip_bfloat16* q, const hip_bfloat16* k, const hip_bfloat16* v,
                    const float* g, const float* beta, const float* states,
                    const std::int32_t* valid_columns, const std::int32_t* initial_slots,
                    const std::int32_t* parent_index, float* tree_states,
                    hip_bfloat16* key_record, hip_bfloat16* value_record, float* gate_record,
                    hip_bfloat16* output, int width, int slots, float scale) {
-    const int combined = static_cast<int>(blockIdx.x);
+    constexpr int kWaves = kOrdinaryBlock / 32;
+    const int combined = static_cast<int>(blockIdx.x) / kOrdinaryRowTiles;
+    const int row_tile = static_cast<int>(blockIdx.x) % kOrdinaryRowTiles;
     const int batch = combined / kValueHeads;
     const int value_head = combined % kValueHeads;
     const int tid = static_cast<int>(threadIdx.x);
-    const int value_row = tid / kThreadsPerRow;
+    const int lane = tid % 32;
+    const int wave = tid / 32;
+    const int tile_row = tid / kThreadsPerRow;
+    const int value_row = row_tile * kOrdinaryRowsPerBlock + tile_row;
     const int sublane = tid % kThreadsPerRow;
     const int q_head = value_head / kGroup;
     const int valid = valid_columns == nullptr ? width : valid_columns[batch];
@@ -345,23 +364,46 @@ void record_kernel(const hip_bfloat16* q, const hip_bfloat16* k, const hip_bfloa
     const std::size_t slot_stride = static_cast<std::size_t>(kValueHeads) * kDim * kDim;
     const std::size_t tree_token_stride = slot_stride;
     const std::size_t tree_batch_stride = static_cast<std::size_t>(width) * slot_stride;
-    __shared__ float staged_q[kDim];
-    __shared__ float staged_k[kDim];
-    __shared__ float reduction[kDim];
+    __shared__ float staged_q[kMaximumVerifyWidth][kDim];
+    __shared__ float staged_k[kMaximumVerifyWidth][kDim];
+    __shared__ float staged_v[kMaximumVerifyWidth][kOrdinaryRowsPerBlock];
+    __shared__ float controls[kMaximumVerifyWidth][2];
     float local[kKeysPerThread];
     if (initial < 0 || initial >= slots || valid < 1 || valid > width) { return; }
     load_state_row(states, static_cast<std::size_t>(initial) * slot_stride + state_head,
                    value_row, sublane, local);
+    for (int token = wave; token < valid; token += kWaves) {
+        const std::size_t column = static_cast<std::size_t>(batch) * width + token;
+        const std::size_t qk_base = (column * kQHeads + q_head) * kDim;
+        const std::size_t vh = column * kValueHeads + value_head;
+        stage_token_qk_wave(q, k, qk_base, staged_q[token], staged_k[token], lane);
+        staged_v[token][lane] = static_cast<float>(
+            v[vh * kDim + row_tile * kOrdinaryRowsPerBlock + lane]);
+        if (lane == 0) {
+            controls[token][0] = expf(g[vh]);
+            controls[token][1] = beta[vh];
+        }
+        if (row_tile == 0) {
+#pragma unroll
+            for (int item = 0; item < 4; ++item) {
+                const int index = lane + item * 32;
+                value_record[vh * kDim + index] = v[vh * kDim + index];
+                if (value_head % kGroup == 0) key_record[qk_base + index] = k[qk_base + index];
+            }
+            if (lane == 0) {
+                gate_record[vh * 2] = g[vh];
+                gate_record[vh * 2 + 1] = beta[vh];
+            }
+        }
+    }
     __syncthreads();
     for (int token = 0; token < valid; ++token) {
         const std::size_t column = static_cast<std::size_t>(batch) * width + token;
+        const std::size_t vh = column * kValueHeads + value_head;
         if constexpr (Tree) {
             const int parent = parent_index[column];
             if ((token == 0 && parent != -1) || (token > 0 && (parent < 0 || parent >= token))) {
-                if (sublane == 0) {
-                    const std::size_t vh = column * kValueHeads + value_head;
-                    output[vh * kDim + value_row] = hip_bfloat16(NAN);
-                }
+                if (sublane == 0) { output[vh * kDim + value_row] = hip_bfloat16(NAN); }
                 return;
             }
             if (parent < 0) {
@@ -373,34 +415,15 @@ void record_kernel(const hip_bfloat16* q, const hip_bfloat16* k, const hip_bfloa
                 load_state_row(tree_states, parent_base, value_row, sublane, local);
             }
         }
-        const std::size_t qk_base = (column * kQHeads + q_head) * kDim;
-        if constexpr (!Tree && ExactTree && !r9700::gdn_recurrence::kVerifyWaveQkCandidate) {
-            stage_qk_exact_tree(q, k, qk_base, staged_q, staged_k);
-        } else if constexpr (r9700::gdn_recurrence::kVerifyWaveQkCandidate) {
-            stage_qk_ordinary<true>(q, k, qk_base, staged_q, staged_k, reduction);
-        } else {
-            stage_qk<true>(q, k, qk_base, staged_q, staged_k, reduction);
-        }
-        const std::size_t vh = column * kValueHeads + value_head;
-        if (tid < kDim) {
-            value_record[vh * kDim + tid] = v[vh * kDim + tid];
-            if (value_head % kGroup == 0) {
-                key_record[qk_base + tid] = k[qk_base + tid];
-            }
-        }
-        if (tid == 0) {
-            gate_record[vh * 2] = g[vh];
-            gate_record[vh * 2 + 1] = beta[vh];
-        }
-        transition(local, staged_q, staged_k, static_cast<float>(v[vh * kDim + value_row]),
-                   expf(g[vh]), beta[vh], scale, sublane,
+        transition(local, staged_q[token], staged_k[token], staged_v[token][tile_row],
+                   controls[token][0], controls[token][1], scale, sublane,
                    output + vh * kDim + value_row);
         if constexpr (Tree) {
             const std::size_t child_base = static_cast<std::size_t>(batch) * tree_batch_stride +
                 static_cast<std::size_t>(token) * tree_token_stride + state_head;
+            // A child reloads exactly the elements this thread stored for its parent.
             store_state_row(tree_states, child_base, value_row, sublane, local);
         }
-        __syncthreads();
     }
     for (int token = valid; token < width; ++token) {
         if (sublane == 0) {
@@ -651,7 +674,9 @@ void gated_delta_net_replay_record(const Tensor& q, const Tensor& k, const Tenso
         const std::size_t bytes = gated_delta_net_replay_record_workspace_capacity_bytes(
             kValueHeads, geometry.batch, geometry.width);
         float* scratch = static_cast<float*>(workspace->alloc_bytes(bytes).data);
-        hipLaunchKernelGGL((record_kernel<true>), dim3(geometry.batch * kValueHeads), dim3(kBlock),
+        hipLaunchKernelGGL((record_kernel<true>),
+                           dim3(geometry.batch * kValueHeads * kOrdinaryRowTiles),
+                           dim3(kOrdinaryBlock),
                            0, stream, static_cast<const hip_bfloat16*>(q.data),
                            static_cast<const hip_bfloat16*>(k.data),
                            static_cast<const hip_bfloat16*>(v.data), static_cast<const float*>(g.data),
@@ -664,13 +689,9 @@ void gated_delta_net_replay_record(const Tensor& q, const Tensor& k, const Tenso
                            static_cast<float*>(gate_record.data), static_cast<hip_bfloat16*>(out.data),
                            geometry.width, states.ne[3], scale);
     } else {
-        // Whole-inference admission favors the exact-tree route at actual
-        // batch 1/4, but retains the incumbent at 2/3. Separate bodies avoid
-        // charging the incumbent for the other route's register allocation.
-        const auto selected = (geometry.batch == 1 || geometry.batch == 4)
-            ? record_kernel<false, true> : record_kernel<false, false>;
-        hipLaunchKernelGGL(selected, dim3(geometry.batch * kValueHeads), dim3(kBlock),
-                           0, stream, static_cast<const hip_bfloat16*>(q.data),
+        hipLaunchKernelGGL((record_kernel<false>),
+                           dim3(geometry.batch * kValueHeads * kOrdinaryRowTiles),
+                           dim3(kOrdinaryBlock), 0, stream, static_cast<const hip_bfloat16*>(q.data),
                            static_cast<const hip_bfloat16*>(k.data),
                            static_cast<const hip_bfloat16*>(v.data), static_cast<const float*>(g.data),
                            static_cast<const float*>(beta.data), static_cast<const float*>(states.data),

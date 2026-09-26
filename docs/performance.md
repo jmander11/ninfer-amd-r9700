@@ -60,6 +60,32 @@ expected value exactly.
 Copy bus rate counts both the read and write traffic. This is the hardware bandwidth bound, not a
 model or individual-Op throughput claim.
 
+## DFlash decode: K-split projections and latency-bound kernels (2026-09-25)
+
+Same setup as the section below.
+
+| Workload | Before, ms/round | After, ms/round | Decode tok/s before → after |
+|---|---:|---:|---:|
+| P4096/G128 (code) | 39.3 | 34.9 | 98.8 → 111.0 (identical acceptance) |
+| P15200/G128 (code) | 40.6 | 36.2 | 126.0 → 141.3 |
+| Ordinary decode P4096/G256 | — | — | 31.6–32.0 → 32.6 |
+
+GPU busy time per 4K round fell from 36.7 to 32.1 ms. The small-batch A8Q4 projections (T2..24)
+now split K across 4 waves of one CTA (8 at N5120/K4096, 16 at N1280; N12288 keeps its route);
+one wave per 16-row tile left too few G64 payloads in flight on the narrow shapes. At T6:
+N34816/K5120 169→154 µs, N5120/K17408 94→79 µs, N5120/K6144 42→33 µs, N4096/K5120 29→21 µs,
+N1280/K5120 25→7.5 µs (85–94% of DRAM bandwidth for the large shapes). Only the FP32 association
+changes; the small-batch qualifier's FP64 bound still holds (89 cells, maximum budget use 0.888).
+Latency-bound kernels: K5120 small-T RMSNorm keeps a row in registers, one 16-byte vector per
+thread (7.7→1.8 µs, also used by ordinary decode); the BF16 GDN control projection likewise
+(9.9→5.1 µs, still bitwise equal across T1..24); the GDN verify record splits value rows over four
+CTAs and stages every token's normalized q/k first (15→11 µs, bit-identical); the drafter's column
+top-16 keeps register lists with wave-shuffle merges (0.33→0.06 ms per round, exact); verification
+argmax and the row-scaled FP8 activation codec use 16-byte loads (146→30 µs; 29→2.5 µs at T6
+x17408, also 6.0→3.3 ms per 4K prefill), both exact. Remaining per-round cost is mostly
+bandwidth-bound weight streaming, the LM heads, the GDN replay fold, and about 2.6 ms of launch
+gaps over ~1,350 dispatches.
+
 ## DFlash decode: split verify attention and small-width dispatch (2026-09-25)
 
 Selective-cap DFlash-loaded artifact, C1, fixed five drafts, optimized proposal head, chunk2048,

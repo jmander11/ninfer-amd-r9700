@@ -96,10 +96,10 @@ namespace ninfer::ops::r9700::gdn {
 
 // Two BF16 [48,5120] Qwen3.8 GDN control projections followed by the control formula, T>=1.
 // The projection values are rounded to BF16 in registers and are not materialized. This raw
-// boundary is also the direct production-symbol qualification seam. T1..24 retain the ordinary
-// T1 arithmetic for every token; wider launches use a split-K BF16 WMMA route with FP32
-// accumulation that reads each hidden column once and requires 16-byte aligned hidden and weight
-// bases.
+// boundary is also the direct production-symbol qualification seam. T1..24 use one per-token
+// arithmetic (identical for every token at every such width); wider launches use a split-K BF16
+// WMMA route with FP32 accumulation that reads each hidden column once. Hidden and weight bases
+// are 16-byte aligned.
 [[nodiscard]] hipError_t bf16_projected_control(
     const hip_bfloat16* hidden, const hip_bfloat16* a_weight,
     const hip_bfloat16* b_weight, const float* a_log, const float* dt_bias,

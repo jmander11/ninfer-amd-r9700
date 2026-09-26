@@ -48,13 +48,35 @@ __launch_bounds__(kArgmaxBlock) __global__
 
     float best_value        = -INFINITY;
     std::int32_t best_index = INT32_MAX;
-    for (std::int32_t v = static_cast<std::int32_t>(threadIdx.x); v < valid_rows; v += blockDim.x) {
-        if (argmax_token_suppressed(v, config, config ? t % columns_per_config : 0)) { continue; }
-        const float value = static_cast<float>(logits[base + v]);
-        if (argmax_better(value, v, best_value, best_index)) {
+    const std::int32_t column = config ? t % columns_per_config : 0;
+    const auto consider = [&](std::int32_t v, float value) {
+        if (argmax_better(value, v, best_value, best_index) &&
+            !argmax_token_suppressed(v, config, column)) {
             best_value = value;
             best_index = v;
         }
+    };
+    // 16-byte rows when the column base is aligned: eight logits per load, several in flight.
+    std::int32_t scalar_begin = 0;
+    if (physical_rows % 8 == 0 && reinterpret_cast<std::uintptr_t>(logits) % 16U == 0U) {
+        const auto* vectors = reinterpret_cast<const uint4*>(logits + base);
+        const std::int32_t vector_count = valid_rows / 8;
+#pragma unroll 4
+        for (std::int32_t i = static_cast<std::int32_t>(threadIdx.x); i < vector_count;
+             i += kArgmaxBlock) {
+            const uint4 packed = vectors[i];
+            const std::uint32_t words[4] = {packed.x, packed.y, packed.z, packed.w};
+#pragma unroll
+            for (int w = 0; w < 4; ++w) {
+                consider(i * 8 + 2 * w, __uint_as_float(words[w] << 16));
+                consider(i * 8 + 2 * w + 1, __uint_as_float(words[w] & 0xffff0000U));
+            }
+        }
+        scalar_begin = vector_count * 8;
+    }
+    for (std::int32_t v = scalar_begin + static_cast<std::int32_t>(threadIdx.x); v < valid_rows;
+         v += kArgmaxBlock) {
+        consider(v, static_cast<float>(logits[base + v]));
     }
 
     __shared__ float values[kArgmaxBlock];

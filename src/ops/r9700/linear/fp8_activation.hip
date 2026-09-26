@@ -12,7 +12,7 @@ namespace ninfer::ops::r9700::linear {
 namespace {
 
 constexpr std::uint32_t kWaveSize        = 32U;
-constexpr std::uint32_t kBlockSize       = 256U;
+constexpr std::uint32_t kBlockSize       = 1024U;
 constexpr std::uint32_t kWavesPerBlock   = kBlockSize / kWaveSize;
 constexpr std::uint32_t kColumnAlignment = 128U;
 constexpr std::size_t kPlaneAlignment    = 256U;
@@ -121,11 +121,30 @@ __global__ __launch_bounds__(kBlockSize) void fp8_quantize_activation_kernel(
     const std::uint32_t wave = threadIdx.x / kWaveSize;
     float local_maximum = 0.0F;
     unsigned local_bad  = 0U;
-    for (std::uint32_t column = threadIdx.x; column < columns; column += blockDim.x) {
-        const float value = static_cast<float>(
-            input[static_cast<std::size_t>(token) * columns + column]);
+    const auto observe = [&](float value) {
         local_bad |= static_cast<unsigned>(!isfinite(value));
         if (isfinite(value)) local_maximum = fmaxf(local_maximum, fabsf(value));
+    };
+    // Eight-column 16-byte rows when every token row is aligned; the codec is unchanged.
+    const bool vectorized = columns % 8U == 0U &&
+        reinterpret_cast<std::uintptr_t>(input) % 16U == 0U;
+    const hip_bfloat16* row = input + static_cast<std::size_t>(token) * columns;
+    if (vectorized) {
+        const auto* vectors = reinterpret_cast<const uint4*>(row);
+#pragma unroll 4
+        for (std::uint32_t i = threadIdx.x; i < columns / 8U; i += blockDim.x) {
+            const uint4 packed = vectors[i];
+            const std::uint32_t words[4] = {packed.x, packed.y, packed.z, packed.w};
+#pragma unroll
+            for (int w = 0; w < 4; ++w) {
+                observe(__uint_as_float(words[w] << 16));
+                observe(__uint_as_float(words[w] & 0xffff0000U));
+            }
+        }
+    } else {
+        for (std::uint32_t column = threadIdx.x; column < columns; column += blockDim.x) {
+            observe(static_cast<float>(row[column]));
+        }
     }
 #pragma unroll
     for (std::uint32_t delta = kWaveSize / 2U; delta != 0U; delta >>= 1U) {
@@ -162,15 +181,37 @@ __global__ __launch_bounds__(kBlockSize) void fp8_quantize_activation_kernel(
     }
     __syncthreads();
 
-    for (std::uint32_t column = threadIdx.x; column < padded; column += blockDim.x) {
-        std::uint8_t code = 0U;
-        if (token_bad == 0U && token_scale != 0.0F && column < columns) {
-            const float value = static_cast<float>(
-                input[static_cast<std::size_t>(token) * columns + column]);
-            code = static_cast<std::uint8_t>(
-                __hip_cvt_float_to_fp8(value / token_scale, __HIP_SATFINITE, __HIP_E4M3));
+    const auto encode = [&](float value) {
+        return static_cast<std::uint8_t>(
+            __hip_cvt_float_to_fp8(value / token_scale, __HIP_SATFINITE, __HIP_E4M3));
+    };
+    const bool encoded = token_bad == 0U && token_scale != 0.0F;
+    std::uint8_t* code_row = codes + static_cast<std::size_t>(token) * padded;
+    std::uint32_t tail = 0U;
+    if (vectorized) {
+        const auto* vectors = reinterpret_cast<const uint4*>(row);
+        for (std::uint32_t i = threadIdx.x; i < columns / 8U; i += blockDim.x) {
+            std::uint32_t packed_codes[2] = {0U, 0U};
+            if (encoded) {
+                const uint4 packed = vectors[i];
+                const std::uint32_t words[4] = {packed.x, packed.y, packed.z, packed.w};
+#pragma unroll
+                for (int w = 0; w < 4; ++w) {
+                    const std::uint32_t pair =
+                        static_cast<std::uint32_t>(encode(__uint_as_float(words[w] << 16))) |
+                        (static_cast<std::uint32_t>(
+                             encode(__uint_as_float(words[w] & 0xffff0000U))) << 8U);
+                    packed_codes[w / 2] |= pair << (16U * (w % 2));
+                }
+            }
+            *reinterpret_cast<uint2*>(code_row + static_cast<std::size_t>(i) * 8U) =
+                uint2{packed_codes[0], packed_codes[1]};
         }
-        codes[static_cast<std::size_t>(token) * padded + column] = code;
+        tail = columns;
+    }
+    for (std::uint32_t column = tail + threadIdx.x; column < padded; column += blockDim.x) {
+        code_row[column] = encoded && column < columns ? encode(static_cast<float>(row[column]))
+                                                       : std::uint8_t{0U};
     }
 }
 

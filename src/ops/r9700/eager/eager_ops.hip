@@ -13,6 +13,10 @@ constexpr std::uint32_t kBlock = 256;
 
 [[nodiscard]] bool valid_stream(hipStream_t stream) noexcept { return stream != nullptr; }
 
+[[nodiscard]] bool aligned16(const void* pointer) noexcept {
+    return reinterpret_cast<std::uintptr_t>(pointer) % 16U == 0U;
+}
+
 [[nodiscard]] bool valid_linear_count(std::size_t count) noexcept {
     return count != 0 && count <= static_cast<std::size_t>(UINT32_MAX) * kBlock;
 }
@@ -309,49 +313,56 @@ __global__ __launch_bounds__(kBlock) void rmsnorm_k5120_token8_packed_epilogue_k
                                  blockIdx.x * tokens_per_block + (threadIdx.x >> 5U));
 }
 
-__global__ __launch_bounds__(kBlock) void rmsnorm_k5120_rows4_cta_kernel(
+// One CTA per K5120 row, one 16-byte vector of eight features per thread: the row stays in
+// registers between the reduction and the scaled BF16 publication.
+constexpr std::uint32_t kRmsnormK5120RowThreads = 5120U / 8U;
+
+__global__ __launch_bounds__(kRmsnormK5120RowThreads) void rmsnorm_k5120_rows4_cta_kernel(
     const hip_bfloat16* input, const hip_bfloat16* weight, hip_bfloat16* output,
     float eps, bool unit_offset) {
     constexpr std::uint32_t features = 5120U;
     constexpr std::uint32_t wave_size = 32U;
-    constexpr std::uint32_t waves = kBlock / wave_size;
+    constexpr std::uint32_t waves = kRmsnormK5120RowThreads / wave_size;
     const std::uint32_t lane = threadIdx.x & (wave_size - 1U);
     const std::uint32_t wave = threadIdx.x / wave_size;
-    const std::size_t base = static_cast<std::size_t>(blockIdx.x) * features;
-
+    const std::size_t vector = static_cast<std::size_t>(blockIdx.x) * (features / 8U) +
+                               threadIdx.x;
+    const uint4 packed = reinterpret_cast<const uint4*>(input)[vector];
+    const std::uint32_t words[4] = {packed.x, packed.y, packed.z, packed.w};
+    float values[8];
+#pragma unroll
+    for (int w = 0; w < 4; ++w) {
+        values[2 * w] = __uint_as_float(words[w] << 16);
+        values[2 * w + 1] = __uint_as_float(words[w] & 0xffff0000U);
+    }
     float sumsq = 0.0F;
 #pragma unroll
-    for (std::uint32_t feature = threadIdx.x; feature < features; feature += kBlock) {
-        const float value = static_cast<float>(input[base + feature]);
-        sumsq = fmaf(value, value, sumsq);
-    }
+    for (int i = 0; i < 8; ++i) sumsq = fmaf(values[i], values[i], sumsq);
 #pragma unroll
     for (std::uint32_t width = wave_size / 2U; width != 0U; width >>= 1U) {
-        sumsq += __shfl_down(sumsq, width, wave_size);
+        sumsq += __shfl_xor(sumsq, width, wave_size);
     }
-
     __shared__ float wave_sums[waves];
     if (lane == 0U) wave_sums[wave] = sumsq;
     __syncthreads();
-    if (wave == 0U) {
-        float block_sum = lane < waves ? wave_sums[lane] : 0.0F;
+    float block_sum = 0.0F;
 #pragma unroll
-        for (std::uint32_t width = wave_size / 2U; width != 0U; width >>= 1U) {
-            block_sum += __shfl_down(block_sum, width, wave_size);
-        }
-        if (lane == 0U) {
-            wave_sums[0] = rsqrtf(block_sum / static_cast<float>(features) + eps);
-        }
-    }
-    __syncthreads();
-    const float inverse = wave_sums[0];
+    for (std::uint32_t i = 0; i < waves; ++i) block_sum += wave_sums[i];
+    const float inverse = rsqrtf(block_sum / static_cast<float>(features) + eps);
+    const uint4 gains = reinterpret_cast<const uint4*>(weight)[threadIdx.x];
+    const std::uint32_t gain_words[4] = {gains.x, gains.y, gains.z, gains.w};
+    const float offset = unit_offset ? 1.0F : 0.0F;
+    std::uint32_t result[4];
 #pragma unroll
-    for (std::uint32_t feature = threadIdx.x; feature < features; feature += kBlock) {
-        const float gain = static_cast<float>(weight[feature]) +
-            (unit_offset ? 1.0F : 0.0F);
-        output[base + feature] = hip_bfloat16(
-            static_cast<float>(input[base + feature]) * inverse * gain);
+    for (int w = 0; w < 4; ++w) {
+        const float low_gain = __uint_as_float(gain_words[w] << 16) + offset;
+        const float high_gain = __uint_as_float(gain_words[w] & 0xffff0000U) + offset;
+        const hip_bfloat16 low(values[2 * w] * inverse * low_gain);
+        const hip_bfloat16 high(values[2 * w + 1] * inverse * high_gain);
+        result[w] = static_cast<std::uint32_t>(low.data) |
+                    (static_cast<std::uint32_t>(high.data) << 16);
     }
+    reinterpret_cast<uint4*>(output)[vector] = uint4{result[0], result[1], result[2], result[3]};
 }
 
 __global__ __launch_bounds__(kBlock) void rmsnorm_k256_token8_kernel(
@@ -1007,9 +1018,11 @@ hipError_t rmsnorm_bf16(const hip_bfloat16* input, const hip_bfloat16* weight,
         input != nullptr && weight != nullptr && output != nullptr && features != 0 && rows != 0 &&
             std::isfinite(eps) && eps > 0.0F && valid_stream(stream),
         [&] {
-            if (rmsnorm_k5120_small_t_selected(features, rows)) {
-                hipLaunchKernelGGL(rmsnorm_k5120_rows4_cta_kernel, dim3(rows), dim3(kBlock), 0,
-                                   stream, input, weight, output, eps, unit_offset);
+            if (rmsnorm_k5120_small_t_selected(features, rows) &&
+                aligned16(input) && aligned16(weight) && aligned16(output)) {
+                hipLaunchKernelGGL(rmsnorm_k5120_rows4_cta_kernel, dim3(rows),
+                                   dim3(kRmsnormK5120RowThreads), 0, stream, input, weight,
+                                   output, eps, unit_offset);
                 return;
             }
             if (features == 5120U && rows >= 128U) {
@@ -1089,10 +1102,12 @@ hipError_t rmsnorm_k5120_rows56_cta_qualification(
         input != nullptr && weight != nullptr && output != nullptr &&
             !overlaps(input, elements, output, elements) &&
             !overlaps(weight, 5120U, output, elements) && (rows == 5U || rows == 6U) &&
+            aligned16(input) && aligned16(weight) && aligned16(output) &&
             std::isfinite(eps) && eps > 0.0F && valid_stream(stream),
         [&] {
-            hipLaunchKernelGGL(rmsnorm_k5120_rows4_cta_kernel, dim3(rows), dim3(kBlock), 0,
-                               stream, input, weight, output, eps, unit_offset);
+            hipLaunchKernelGGL(rmsnorm_k5120_rows4_cta_kernel, dim3(rows),
+                               dim3(kRmsnormK5120RowThreads), 0, stream, input, weight, output,
+                               eps, unit_offset);
         });
 }
 

@@ -9,7 +9,7 @@ class ExactStaticTest(unittest.TestCase):
     def test_accepts_exact_resource_record(self):
         with patch("tools.r9700.check_rmsnorm_dflash_rows56_static.check",
                    return_value={"symbol": "kernel", **EXPECTED}):
-            self.assertEqual(exact(Path("unused"))["vgprs"], 17)
+            self.assertEqual(exact(Path("unused"))["vgprs"], 24)
 
     def test_rejects_any_resource_drift(self):
         for key in EXPECTED:

@@ -42,8 +42,8 @@ def check(path: Path) -> dict[str, int | str]:
     occupancy = one(body, r"^;\s*Occupancy:\s*(\d+)", "occupancy")
     wave32 = one(body, r"^\s*\.amdhsa_wavefront_size32\s+(\d+)", "wave32")
     wgp = one(body, r"^\s*\.amdhsa_workgroup_processor_mode\s+(\d+)", "WGP")
-    global_loads = len(re.findall(r"^\s*(?:global|buffer)_load_(?:u16|ushort|dword)",
-                                  body, re.MULTILINE))
+    global_loads = len(re.findall(r"^\s*global_load_b128", body, re.MULTILINE))
+    global_stores = len(re.findall(r"^\s*global_store_b128", body, re.MULTILINE))
     shuffle_ops = len(re.findall(r"^\s*(?:ds_bpermute_b32|v_permlane\S*|v_mov_b32_dpp)",
                                  body, re.MULTILINE))
     instructions = [line.strip() for line in body.splitlines()
@@ -51,12 +51,14 @@ def check(path: Path) -> dict[str, int | str]:
     positions = lambda prefix: [index for index, line in enumerate(instructions)
                                 if line.startswith(prefix)]
     stores = positions("ds_store_b32")
-    loads = positions("ds_load_b32")
+    loads = positions("ds_load_b")
     signals = positions("s_barrier_signal -1")
     waits = positions("s_barrier_wait -1")
     invalidations = positions("global_inv scope:SCOPE_SE")
-    if global_loads < 1:
-        raise ValueError("production kernel lacks a distributed vector-addressed global input load")
+    if global_loads != 2:
+        raise ValueError("production kernel requires one 16-byte input and one 16-byte gain load")
+    if global_stores != 1:
+        raise ValueError("production kernel requires one 16-byte BF16 row-vector store")
     if shuffle_ops < 1:
         raise ValueError("production kernel lacks a wave32 shuffle reduction")
     forbidden = re.findall(
@@ -65,23 +67,22 @@ def check(path: Path) -> dict[str, int | str]:
         body, re.MULTILINE)
     if forbidden:
         raise ValueError(f"production kernel contains forbidden instructions: {forbidden}")
-    if lds != 32 or private != 0 or scratch != 0:
-        raise ValueError(f"LDS/private/scratch fail {lds}/32 {private}/0 {scratch}/0")
+    if lds != 80 or private != 0 or scratch != 0:
+        raise ValueError(f"LDS/private/scratch fail {lds}/80 {private}/0 {scratch}/0")
     if vgprs > 48 or occupancy != 16:
         raise ValueError(f"resources fail vgprs={vgprs}/48 occupancy={occupancy}/16")
-    if wave32 != 1 or wgp != 1 or maximum_workgroup != 256:
+    if wave32 != 1 or wgp != 1 or maximum_workgroup != 640:
         raise ValueError(
             f"execution geometry fails wave32={wave32} WGP={wgp} maxWG={maximum_workgroup}")
-    if not (len(stores) == len(loads) == len(signals) == len(waits) ==
-            len(invalidations) == 2):
+    if not (len(stores) == len(signals) == len(waits) == len(invalidations) == 1 and loads):
         raise ValueError(
-            "barrier/LDS protocol requires exactly two store/signal/wait/global_inv/load groups")
-    if not (stores[0] < signals[0] < waits[0] < invalidations[0] < loads[0] <
-            stores[1] < signals[1] < waits[1] < invalidations[1] < loads[1]):
+            "barrier/LDS protocol requires one store/signal/wait/global_inv group before loads")
+    if not stores[0] < signals[0] < waits[0] < invalidations[0] < loads[0]:
         raise ValueError("barrier/LDS protocol ordering drift")
     return {"symbol": symbol, "vgprs": vgprs, "lds": lds, "occupancy": occupancy,
             "maximum_workgroup": maximum_workgroup, "global_loads": global_loads,
-            "shuffle_ops": shuffle_ops, "barrier_pairs": len(signals),
+            "global_stores": global_stores, "shuffle_ops": shuffle_ops,
+            "barrier_pairs": len(signals),
             "global_invalidations": len(invalidations)}
 
 
