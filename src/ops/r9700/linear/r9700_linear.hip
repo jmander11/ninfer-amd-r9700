@@ -3935,7 +3935,7 @@ hipError_t launch_normalized_prepare(const hip_bfloat16* input, const hip_bfloat
 }
 
 bool a8q4g64_normalized_linear_batched_supported(std::uint32_t tokens) noexcept {
-    return tokens >= 2U && scalar_base_offsets_fit(tokens, 34816U, 5120U);
+    return tokens >= 1U && scalar_base_offsets_fit(tokens, 34816U, 5120U);
 }
 
 namespace {

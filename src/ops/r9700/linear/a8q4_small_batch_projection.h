@@ -30,7 +30,7 @@ namespace detail {
           ((rows == 5120 && (columns == 4096 || columns == 6144 || columns == 25600)) ||
            ((rows == 12288 || rows == 4096 || rows == 7168 || rows == 6144 ||
              rows == 1280) && columns == 5120))) ||
-         (((tokens >= 2 && tokens <= 4) || tokens == 10 || tokens == 12 || tokens == 15 ||
+         (((tokens >= 1 && tokens <= 4) || tokens == 10 || tokens == 12 || tokens == 15 ||
            tokens == 18 || tokens == 20 || tokens == 24) &&
           ((rows == 34816 && columns == 5120) || (rows == 5120 && columns == 17408))));
 }
