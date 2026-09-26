@@ -57,4 +57,20 @@ void qk_norm_rope(const Tensor& positions, int rotary_dim, float theta, const Te
                   const Tensor& k, const Tensor& q_norm, const Tensor& k_norm, float eps,
                   Tensor& qn, Tensor& kn, hipStream_t stream);
 
+/**
+ * DFlash drafter attention front in one pass. `fused` holds each token's projection rows
+ * [Q (32 heads) | K (8 heads) | V (8 heads)] of 128 features, contiguous [6144, T]. Writes
+ *
+ *   qn = rope(BF16(q * rsqrt(mean(q^2) + eps) * q_norm))     (no unit offset)
+ *   kn = rope(BF16(k * rsqrt(mean(k^2) + eps) * k_norm))
+ *   v  = the V rows
+ *
+ * into contiguous qn [128,32,T] (skipped when qn is null), kn [128,8,T] and v [128,8,T], with the
+ * DFlash full-dimension 1-D RoPE of rope() at theta 1e7. Bit-identical to the row copies, the
+ * eager rmsnorm (serial FP32 sum of squares in feature order) and rope. No workspace.
+ */
+void dflash_qkv_norm_rope(const Tensor& positions, const Tensor& fused, const Tensor& q_norm,
+                          const Tensor& k_norm, float eps, Tensor* qn, Tensor& kn, Tensor& v,
+                          hipStream_t stream);
+
 } // namespace ninfer::ops

@@ -57,16 +57,6 @@ void serialized_linear(ExecutionCore& execution, const Tensor& input, const Weig
     }
 }
 
-void copy_fused_row_range(const Tensor& fused, std::int32_t row0, Tensor& out,
-                          hipStream_t stream) {
-    const std::size_t elem = dtype_size(DType::BF16);
-    HIP_CHECK(hipMemcpy2DAsync(
-        out.data, static_cast<std::size_t>(out.ne[0]) * elem,
-        static_cast<const std::byte*>(fused.data) + static_cast<std::size_t>(row0) * elem,
-        static_cast<std::size_t>(fused.ne[0]) * elem, static_cast<std::size_t>(out.ne[0]) * elem,
-        static_cast<std::size_t>(fused.ne[1]), hipMemcpyDeviceToDevice, stream));
-}
-
 // [C,K,B] with C fastest. Copies src hops into dst starting at hop0.
 void copy_selector_hops(Tensor& dst, const Tensor& src, std::int32_t hop0, hipStream_t stream) {
     if (src.ne[0] != dst.ne[0] || src.ne[2] != dst.ne[2] || hop0 < 0 ||
@@ -174,6 +164,9 @@ void append_context_impl(Context& state, const Tensor& features, const Tensor& p
 
         static_assert(Config::local_layers == Config::layers,
                       "the sole DFlash2 route stores every layer in the cyclic local cache");
+        static_assert(Config::head_dim == 128 && Config::query_heads == 32 &&
+                          Config::kv_heads == 8 && Config::rope_theta == 1.0e7F,
+                      "dflash_qkv_norm_rope serves the DFlash2 attention geometry");
         for (int layer = 0; layer < Config::layers; ++layer) {
             auto layer_scope = state.execution.work.scope();
             const auto& weight =
@@ -188,23 +181,14 @@ void append_context_impl(Context& state, const Tensor& features, const Tensor& p
                                           : positions;
             auto layer_roots =
                 workspace_recipe::dflash_context_layer<Config>(state.execution.work, layer_columns);
-            Tensor key_raw =
-                layer_roots.key_raw.view({Config::head_dim, Config::kv_heads, layer_columns});
             Tensor value =
                 layer_roots.value.view({Config::head_dim, Config::kv_heads, layer_columns});
-            Tensor key_flat   = key_raw.view({Config::kv_size, layer_columns});
-            Tensor value_flat = value.view({Config::kv_size, layer_columns});
             serialized_linear(state.execution, layer_context, weight.query_key_value,
                               layer_roots.fused_qkv);
-            copy_fused_row_range(layer_roots.fused_qkv, Config::query_size, key_flat,
-                                 state.execution.device.stream);
-            copy_fused_row_range(layer_roots.fused_qkv, Config::query_size + Config::kv_size,
-                                 value_flat, state.execution.device.stream);
             Tensor key = layer_roots.key.view({Config::head_dim, Config::kv_heads, layer_columns});
-            ops::rmsnorm(key_raw, weight.key_norm, Config::rms_epsilon, false, key,
-                         state.execution.device.stream);
-            ops::rope(layer_positions.view({layer_columns}), Config::head_dim, Config::rope_theta,
-                      key, state.execution.device.stream);
+            ops::dflash_qkv_norm_rope(layer_positions.view({layer_columns}), layer_roots.fused_qkv,
+                                      weight.query_norm, weight.key_norm, Config::rms_epsilon,
+                                      nullptr, key, value, state.execution.device.stream);
             Tensor key_batch = key.view({Config::head_dim, Config::kv_heads, layer_width, batch});
             Tensor value_batch =
                 value.view({Config::head_dim, Config::kv_heads, layer_width, batch});
@@ -319,30 +303,15 @@ void propose_batch_impl(DFlashBatchContext& state, qwen3::DFlashDecodeState& fra
                         state.execution.work, state.execution.device.stream);
                     serialized_linear(state.execution, roots.prepared, weight.query_key_value,
                                       roots.fused_qkv);
-                    Tensor query_flat = roots.query_raw.view({Config::query_size, columns});
-                    Tensor key_flat   = roots.key_raw.view({Config::kv_size, columns});
-                    Tensor value_flat = roots.value.view({Config::kv_size, columns});
-                    copy_fused_row_range(roots.fused_qkv, 0, query_flat,
-                                         state.execution.device.stream);
-                    copy_fused_row_range(roots.fused_qkv, Config::query_size, key_flat,
-                                         state.execution.device.stream);
-                    copy_fused_row_range(roots.fused_qkv, Config::query_size + Config::kv_size,
-                                         value_flat, state.execution.device.stream);
-                    Tensor query_raw =
-                        roots.query_raw.view({Config::head_dim, Config::query_heads, columns});
-                    Tensor key_raw =
-                        roots.key_raw.view({Config::head_dim, Config::kv_heads, columns});
                     Tensor value =
                         roots.value.view({Config::head_dim, Config::kv_heads, columns});
                     Tensor query =
                         roots.query.view({Config::head_dim, Config::query_heads, columns});
                     Tensor key = roots.key.view({Config::head_dim, Config::kv_heads, columns});
-                    ops::rmsnorm(query_raw, weight.query_norm, Config::rms_epsilon, false, query,
-                                 state.execution.device.stream);
-                    ops::rmsnorm(key_raw, weight.key_norm, Config::rms_epsilon, false, key,
-                                 state.execution.device.stream);
-                    ops::rope(positions.view({columns}), Config::head_dim, Config::rope_theta,
-                              query, key, state.execution.device.stream);
+                    ops::dflash_qkv_norm_rope(positions.view({columns}), roots.fused_qkv,
+                                              weight.query_norm, weight.key_norm,
+                                              Config::rms_epsilon, &query, key, value,
+                                              state.execution.device.stream);
                     Tensor query_batch =
                         query.view({Config::head_dim, Config::query_heads, width, batch_size});
                     Tensor key_batch =

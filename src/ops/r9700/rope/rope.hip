@@ -214,6 +214,82 @@ void qk_norm_rope_kernel(const std::int32_t* positions, const hip_bfloat16* q,
     reinterpret_cast<uint4*>(destination)[lane] = uint4{out[0], out[1], out[2], out[3]};
 }
 
+// DFlash drafter front: one wave per (token, head) of the fused [Q|K|V] rows, four features per
+// lane (feature 4 * lane + i). Normalized heads sum their squares serially in feature order in
+// every lane (broadcast loads), exactly as the eager RMSNorm's single summing thread; RoPE pairs
+// feature f < 64 in lane l with f + 64 in lane l + 16.
+constexpr int kDflashFusedRows = (kDflashQ + 2 * kDflashK) * kDflashD;
+constexpr int kDflashFrontWaves = 4;
+
+__global__ __launch_bounds__(kDflashFrontWaves * 32)
+void dflash_qkv_norm_rope_kernel(const std::int32_t* positions, const hip_bfloat16* fused,
+                                 const hip_bfloat16* q_norm, const hip_bfloat16* k_norm,
+                                 float eps, hip_bfloat16* qn, hip_bfloat16* kn, hip_bfloat16* v,
+                                 int tokens, int first_head) {
+    constexpr int heads = kDflashQ + 2 * kDflashK;
+    const int per_token = heads - first_head;
+    const int groups = (per_token + kDflashFrontWaves - 1) / kDflashFrontWaves;
+    const int token = static_cast<int>(blockIdx.x) / groups;
+    const int head = first_head + (static_cast<int>(blockIdx.x) % groups) * kDflashFrontWaves +
+                     static_cast<int>(threadIdx.x) / 32;
+    const int lane = static_cast<int>(threadIdx.x) & 31;
+    if (token >= tokens || head >= heads) { return; }
+    const hip_bfloat16* row = fused + static_cast<std::int64_t>(token) * kDflashFusedRows +
+                              static_cast<std::int64_t>(head) * kDflashD;
+    const uint2 packed = reinterpret_cast<const uint2*>(row)[lane];
+    if (head >= kDflashQ + kDflashK) {
+        reinterpret_cast<uint2*>(v + (static_cast<std::int64_t>(token) * kDflashK + head -
+                                      kDflashQ - kDflashK) * kDflashD)[lane] = packed;
+        return;
+    }
+    const bool is_query = head < kDflashQ;
+    const auto element = [](std::uint32_t word, bool high) {
+        return __uint_as_float(high ? word & 0xffff0000U : word << 16);
+    };
+    float sumsq = 0.0F;
+    const auto* vectors = reinterpret_cast<const uint4*>(row);
+    for (int vector = 0; vector < kDflashD / 8; ++vector) {
+        const uint4 all = vectors[vector];
+        const std::uint32_t words[4] = {all.x, all.y, all.z, all.w};
+#pragma unroll
+        for (int i = 0; i < 8; ++i) {
+            const float x = element(words[i >> 1], (i & 1) != 0);
+            sumsq = fmaf(x, x, sumsq);
+        }
+    }
+    const float inverse = rsqrtf(sumsq / static_cast<float>(kDflashD) + eps);
+    const uint2 gains = reinterpret_cast<const uint2*>(is_query ? q_norm : k_norm)[lane];
+    const std::uint32_t words[2] = {packed.x, packed.y};
+    const std::uint32_t gain_words[2] = {gains.x, gains.y};
+    float value[4];
+#pragma unroll
+    for (int i = 0; i < 4; ++i) {
+        const float gain = element(gain_words[i >> 1], (i & 1) != 0);
+        value[i] = static_cast<float>(
+            hip_bfloat16(element(words[i >> 1], (i & 1) != 0) * inverse * gain));
+    }
+    float partner[4];
+#pragma unroll
+    for (int i = 0; i < 4; ++i) partner[i] = __shfl_xor(value[i], 16, 32);
+    std::uint16_t out[4];
+#pragma unroll
+    for (int i = 0; i < 4; ++i) {
+        const int feature = lane * 4 + i;
+        const int pair = feature % (kDflashD / 2);
+        float sine = 0.0F, cosine = 0.0F;
+        coefficient<Profile::Dflash1D>(positions, tokens, token, pair, &sine, &cosine);
+        out[i] = feature < kDflashD / 2
+            ? hip_bfloat16(value[i] * cosine - partner[i] * sine).data
+            : hip_bfloat16(value[i] * cosine + partner[i] * sine).data;
+    }
+    hip_bfloat16* destination = is_query
+        ? qn + (static_cast<std::int64_t>(token) * kDflashQ + head) * kDflashD
+        : kn + (static_cast<std::int64_t>(token) * kDflashK + head - kDflashQ) * kDflashD;
+    reinterpret_cast<uint2*>(destination)[lane] =
+        uint2{static_cast<std::uint32_t>(out[0]) | (static_cast<std::uint32_t>(out[1]) << 16),
+              static_cast<std::uint32_t>(out[2]) | (static_cast<std::uint32_t>(out[3]) << 16)};
+}
+
 template <Profile P, int HeadDim, int Half, int QHeads, int KHeads>
 void launch_profile(const std::int32_t* positions, hip_bfloat16* q, hip_bfloat16* k,
                     int tokens, std::int64_t q_stride, std::int64_t k_stride,
@@ -469,6 +545,56 @@ void qk_norm_rope(const Tensor& positions, int rotary_dim, float theta, const Te
         qk_norm_rope_kernel<Profile::TextMrope><<<grid, kQkNormRopeWaves * 32, 0, stream>>>(
             pos, q_data, k_data, qs, ks, qw, kw, eps, qo, ko, tokens);
     }
+    HIP_CHECK(hipGetLastError());
+}
+
+void dflash_qkv_norm_rope(const Tensor& positions, const Tensor& fused, const Tensor& q_norm,
+                          const Tensor& k_norm, float eps, Tensor* qn, Tensor& kn, Tensor& v,
+                          hipStream_t stream) {
+    const int tokens = fused.ne[1];
+    const auto bf16_rows = [&](const Tensor& t, int rows, int columns) {
+        return t.dtype == DType::BF16 && t.data != nullptr && t.is_contiguous() &&
+               t.numel() == static_cast<std::int64_t>(rows) * columns &&
+               reinterpret_cast<std::uintptr_t>(t.data) % 16U == 0U;
+    };
+    const auto heads = [&](const Tensor& t, int count) {
+        return bf16_rows(t, kDflashD * count, tokens) && t.ne[0] == kDflashD &&
+               t.ne[1] == count && t.ne[2] == tokens && t.ne[3] == 1;
+    };
+    if (tokens <= 0 || fused.ne[0] != kDflashFusedRows || fused.ne[2] != 1 ||
+        fused.ne[3] != 1 || !bf16_rows(fused, kDflashFusedRows, tokens) ||
+        !bf16_rows(q_norm, kDflashD, 1) || !bf16_rows(k_norm, kDflashD, 1) ||
+        !(eps > 0.0F) || !std::isfinite(eps) || positions.dtype != DType::I32 ||
+        positions.data == nullptr || !positions.is_contiguous() ||
+        positions.numel() != tokens || !heads(kn, kDflashK) || !heads(v, kDflashK) ||
+        (qn != nullptr && !heads(*qn, kDflashQ))) {
+        throw std::invalid_argument("dflash_qkv_norm_rope: invalid tensors");
+    }
+    const std::size_t fused_bytes = fused.bytes();
+    for (const Tensor* output : {static_cast<const Tensor*>(qn), static_cast<const Tensor*>(&kn),
+                                 static_cast<const Tensor*>(&v)}) {
+        if (output == nullptr) continue;
+        if (overlaps(output->data, output->bytes(), fused.data, fused_bytes) ||
+            overlaps(output->data, output->bytes(), positions.data, positions.bytes())) {
+            throw std::invalid_argument("dflash_qkv_norm_rope: outputs must not overlap inputs");
+        }
+    }
+    if (overlaps(kn.data, kn.bytes(), v.data, v.bytes()) ||
+        (qn != nullptr && (overlaps(qn->data, qn->bytes(), kn.data, kn.bytes()) ||
+                           overlaps(qn->data, qn->bytes(), v.data, v.bytes())))) {
+        throw std::invalid_argument("dflash_qkv_norm_rope: outputs must not overlap");
+    }
+    const int first_head = qn != nullptr ? 0 : kDflashQ;
+    const int per_token = kDflashQ + 2 * kDflashK - first_head;
+    const int groups = (per_token + kDflashFrontWaves - 1) / kDflashFrontWaves;
+    dflash_qkv_norm_rope_kernel<<<tokens * groups, kDflashFrontWaves * 32, 0, stream>>>(
+        static_cast<const std::int32_t*>(positions.data),
+        static_cast<const hip_bfloat16*>(fused.data),
+        static_cast<const hip_bfloat16*>(q_norm.data),
+        static_cast<const hip_bfloat16*>(k_norm.data), eps,
+        qn != nullptr ? static_cast<hip_bfloat16*>(qn->data) : nullptr,
+        static_cast<hip_bfloat16*>(kn.data), static_cast<hip_bfloat16*>(v.data), tokens,
+        first_head);
     HIP_CHECK(hipGetLastError());
 }
 

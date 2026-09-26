@@ -812,6 +812,13 @@ ninfer_r9700_internal_includes(ninfer_r9700_attention_fused_qual)
 set_target_properties(ninfer_r9700_attention_fused_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
 target_link_libraries(ninfer_r9700_attention_fused_qual PRIVATE ninfer_r9700_core hip::host)
 
+# Qualify the fused DFlash drafter Q/K norm, RoPE and V split.
+add_executable(ninfer_r9700_dflash_qkv_norm_rope_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/dflash_qkv_norm_rope_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_dflash_qkv_norm_rope_qual)
+set_target_properties(ninfer_r9700_dflash_qkv_norm_rope_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_dflash_qkv_norm_rope_qual PRIVATE ninfer_r9700_core hip::host)
+
 # Qualify the fused one-sequence GDN pair projection + recorded convolution.
 add_executable(ninfer_r9700_gdn_pair_conv_record_qual
   ${PROJECT_SOURCE_DIR}/tools/r9700/gdn_pair_conv_record_qual.hip)
