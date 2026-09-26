@@ -203,40 +203,83 @@ __device__ __forceinline__ void publish_projection_output(
     }
 }
 
+// Eight channels (one 16-byte BF16 vector) per thread over TokenTile consecutive tokens: the three
+// history columns and the tile's inputs are each read once, carried in registers, and the outputs
+// are published as 16-byte vectors. Per element the arithmetic is the recorded convolution's
+// (w0 h0 + w1 h1 + w2 h2 + w3 x as one FMA chain, SiLU, BF16).
 template <std::uint32_t TokenTile>
 __global__ __launch_bounds__(kBlock) void projection_conv_prefill_direct_scatter_kernel(
     const hip_bfloat16* query_key, const hip_bfloat16* projected_value,
     const hip_bfloat16* conv_weight, const hip_bfloat16* history_in,
     hip_bfloat16* query, hip_bfloat16* key, hip_bfloat16* value) {
-    const std::uint32_t channel = blockIdx.x * blockDim.x + threadIdx.x;
-    if (channel >= kProjectionChannels) { return; }
+    constexpr std::uint32_t kVectors = kProjectionChannels / 8U;
+    const std::uint32_t vector = blockIdx.x * blockDim.x + threadIdx.x;
+    if (vector >= kVectors) { return; }
+    const std::uint32_t channel = vector * 8U;
     const std::uint32_t token_begin = blockIdx.y * TokenTile;
-    const float w0 = static_cast<float>(conv_weight[channel]);
-    const float w1 = static_cast<float>(conv_weight[kProjectionChannels + channel]);
-    const float w2 = static_cast<float>(conv_weight[2U * kProjectionChannels + channel]);
-    const float w3 = static_cast<float>(conv_weight[3U * kProjectionChannels + channel]);
+    const auto load = [](const hip_bfloat16* base, std::size_t offset, float (&out)[8]) {
+        const uint4 packed = *reinterpret_cast<const uint4*>(base + offset);
+        const std::uint32_t words[4] = {packed.x, packed.y, packed.z, packed.w};
+#pragma unroll
+        for (std::uint32_t item = 0; item < 8U; ++item)
+            out[item] = __uint_as_float((item & 1U) ? words[item / 2U] & 0xffff0000U
+                                                    : words[item / 2U] << 16U);
+    };
+    // Represented input of token `source` (negative: the history columns).
+    const auto represented = [&](std::int32_t source, float (&out)[8]) {
+        if (source < 0) {
+            load(history_in, static_cast<std::size_t>(source + 3) * kProjectionChannels + channel,
+                 out);
+        } else if (channel < kProjectionQueryRows + kProjectionKeyRows) {
+            load(query_key,
+                 static_cast<std::size_t>(source) * (kProjectionQueryRows + kProjectionKeyRows) +
+                     channel,
+                 out);
+        } else {
+            load(projected_value,
+                 static_cast<std::size_t>(source) * kProjectionValueRows +
+                     (channel - kProjectionQueryRows - kProjectionKeyRows),
+                 out);
+        }
+    };
+    float w[4][8];
+#pragma unroll
+    for (std::uint32_t tap = 0; tap < 4U; ++tap)
+        load(conv_weight, static_cast<std::size_t>(tap) * kProjectionChannels + channel, w[tap]);
+    float h0[8], h1[8], h2[8];
+    represented(static_cast<std::int32_t>(token_begin) - 3, h0);
+    represented(static_cast<std::int32_t>(token_begin) - 2, h1);
+    represented(static_cast<std::int32_t>(token_begin) - 1, h2);
+    hip_bfloat16* destination;
+    std::size_t stride, offset;
+    if (channel < kProjectionQueryRows) {
+        destination = query; stride = kProjectionQueryRows; offset = channel;
+    } else if (channel < kProjectionQueryRows + kProjectionKeyRows) {
+        destination = key; stride = kProjectionKeyRows; offset = channel - kProjectionQueryRows;
+    } else {
+        destination = value; stride = kProjectionValueRows;
+        offset = channel - kProjectionQueryRows - kProjectionKeyRows;
+    }
 #pragma unroll
     for (std::uint32_t local = 0; local < TokenTile; ++local) {
         const std::uint32_t token = token_begin + local;
-        const auto represented = [&](std::int32_t source_token) {
-            if (source_token < 0) {
-                return history_in[static_cast<std::size_t>(source_token + 3) *
-                                      kProjectionChannels +
-                                  channel];
-            }
-            return projection_value<kProjectionValueRows>(
-                query_key, projected_value, static_cast<std::size_t>(source_token), channel);
-        };
-        const float h0 = static_cast<float>(represented(static_cast<std::int32_t>(token) - 3));
-        const float h1 = static_cast<float>(represented(static_cast<std::int32_t>(token) - 2));
-        const float h2 = static_cast<float>(represented(static_cast<std::int32_t>(token) - 1));
-        const float current = static_cast<float>(represented(static_cast<std::int32_t>(token)));
-        float sum = fmaf(w0, h0, 0.0F);
-        sum = fmaf(w1, h1, sum);
-        sum = fmaf(w2, h2, sum);
-        sum = fmaf(w3, current, sum);
-        publish_projection_output(hip_bfloat16(sum / (1.0F + expf(-sum))), query, key, value,
-                                  token, channel);
+        float current[8];
+        represented(static_cast<std::int32_t>(token), current);
+        std::uint32_t words[4] = {};
+#pragma unroll
+        for (std::uint32_t item = 0; item < 8U; ++item) {
+            float sum = fmaf(w[0][item], h0[item], 0.0F);
+            sum = fmaf(w[1][item], h1[item], sum);
+            sum = fmaf(w[2][item], h2[item], sum);
+            sum = fmaf(w[3][item], current[item], sum);
+            const hip_bfloat16 output(sum / (1.0F + expf(-sum)));
+            words[item / 2U] |= static_cast<std::uint32_t>(output.data) << ((item & 1U) * 16U);
+            h0[item] = h1[item];
+            h1[item] = h2[item];
+            h2[item] = current[item];
+        }
+        *reinterpret_cast<uint4*>(destination + static_cast<std::size_t>(token) * stride + offset) =
+            uint4{words[0], words[1], words[2], words[3]};
     }
 }
 
@@ -975,6 +1018,15 @@ hipError_t projection_conv_prefill_p2048_direct_scatter_bf16(
         value == nullptr || tokens != kProjectionPrefillTokens || !valid_stream(stream)) {
         return hipErrorInvalidValue;
     }
+    // The convolution reads and publishes 16-byte channel vectors.
+    for (const void* pointer : {static_cast<const void*>(query_key),
+                                static_cast<const void*>(projected_value),
+                                static_cast<const void*>(conv_weight),
+                                static_cast<const void*>(history_in),
+                                static_cast<const void*>(query), static_cast<const void*>(key),
+                                static_cast<const void*>(value)}) {
+        if (reinterpret_cast<std::uintptr_t>(pointer) % 16U != 0U) return hipErrorInvalidValue;
+    }
     constexpr std::size_t kQueryKeyElements =
         static_cast<std::size_t>(kProjectionPrefillTokens) *
         (kProjectionQueryRows + kProjectionKeyRows);
@@ -1007,10 +1059,10 @@ hipError_t projection_conv_prefill_p2048_direct_scatter_bf16(
             }
         }
     }
-    constexpr std::uint32_t kTokenTile = 4U;
+    constexpr std::uint32_t kTokenTile = 16U;
     hipLaunchKernelGGL(
         HIP_KERNEL_NAME(projection_conv_prefill_direct_scatter_kernel<kTokenTile>),
-        dim3((kProjectionChannels + kBlock - 1U) / kBlock,
+        dim3((kProjectionChannels / 8U + kBlock - 1U) / kBlock,
              kProjectionPrefillTokens / kTokenTile),
         dim3(kBlock), 0, stream, query_key, projected_value, conv_weight, history_in, query, key,
         value);
