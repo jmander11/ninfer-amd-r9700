@@ -74,6 +74,12 @@ FP32 association and therefore the greedy trajectory.
 | K6144 small-batch projections split over eight waves | 32.68 |
 | GDN recorded convolution fused into the pair projection epilogue | 32.23 |
 | pinned KV-resolution readback; no host wait for the replay fold | 31.91 |
+| GDN front zeroes the gated output status word (no memset) | 32.03 (32.16 same run) |
+| drafter SWA split partials in BF16 WMMA (72 -> 25 us per layer) | 31.78 |
+
+Host contention from another project's container shifted later absolute values by about +0.2 ms
+(the session-start binary still measured 33.3); rows after it compare against the same run.
+P65536/G256: 37.10 -> 35.35 ms/round (session start vs end).
 
 **Status CTA.** Small-T producers used one 1024-thread CTA (compute-bound on one WGP) or a status
 memset launch. They now spread one 16-byte vector per thread over many CTAs; one extra CTA rescans
@@ -98,8 +104,27 @@ Softmax and a vector PV (110 us per layer at 4K), and split-512 from 8K. Host-fi
 now uses the packed split-context route that DFlash verification already used (BF16 Q, exact-BF16
 FP8 K, FP16 probabilities, FP16 V/8, FP32 merge), so ordinary, MTP and DFlash share one attention
 arithmetic; split-512 remains for tree/device-count T4. The discriminator adds widths 1..4
-(max |error| 2.4e-4 against the 2e-3 dense criterion). Ordinary decode: 4K 33.30 -> 34.56 tok/s,
-32K 23.47 -> 31.56 tok/s.
+(max |error| 2.4e-4 against the 2e-3 dense criterion); NIAH standard and multikey 8K..128K pass
+20/20 each on ordinary decode. Further T1 work: the output projection with residual epilogue and
+the MLP (gate/up, fused SiLU codec, down) use the small-batch K-split kernels at T=1, the T1
+normalized prepare shares the per-row small kernel (now the eager row-CTA RMSNorm reduction, so
+fused and unfused seams match bit for bit), and the fused GDN front covers T1.
+
+| Ordinary decode, tok/s | 4K | 32K |
+|---|---:|---:|
+| session start | 33.30 | 23.47 |
+| packed T1 attention | 34.56 | 31.56 |
+| K-split T1 output projection, shared prepare | 35.68 | 33.74 |
+| T1 MLP through the normalized small-batch route | 36.29 | — |
+| fused T1 GDN front | 36.68 | — |
+
+**Measured out.** Long-context packed attention stays near 400 GB/s at T1/64K (compute waves idle
+at the barrier, loaders waiting on global loads). A depth-2/3 register ring, 16-byte K/V loads,
+scalar page-table loads and 128 chunks changed nothing; page-granular (64-byte-row) K loads
+spilled. A synthetic read of the TokenFastest K plane in 16-key blocks tops out near 511 GB/s
+versus 612 GB/s for whole 64-byte rows, so the block-granular K access pattern is the limit. The
+prefill GDN convolution scatter was vectorized (987 -> 224 us per P2048 chunk) without an
+end-to-end change: it overlaps the side-stream output-gate projection.
 
 ## Paired small-batch projections (2026-09-26)
 
