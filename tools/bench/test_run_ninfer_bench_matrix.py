@@ -252,10 +252,10 @@ class CompiledKvGroupTest(unittest.TestCase):
                         "q4_prefill_cta_profile":
                             "m64n128-pingpong-n16-k16-scalar-base-production",
                         "w8_activation_bits": w8_activation_bits,
-                        "fp8_qk_wmma_enabled": fp8_qk_wmma,
-                        "fp8_qk_wmma_profile": "t1-ge64-t2-ge320-t3plus-stream-v1",
-                        "fp8_qk_wmma_t1_min_context": 64,
-                        "fp8_qk_wmma_t2_min_context": 320,
+                        "split512_enabled": fp8_qk_wmma,
+                        "decode_attention_profile": "packed-t1to6-split512-t4tree-v1",
+                        "packed_decode_min_context": 64,
+                        "split512_min_context": 8192,
                         **xattention,
                         "concurrency": concurrency,
                         "pending_timeout_ms": 0xFFFFFFFF,
@@ -621,9 +621,9 @@ class CompiledKvGroupTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "expected True"):
                 load_bench_report(report, 16, 8, 8, True)
             payload = json.loads(report.read_text(encoding="utf-8"))
-            payload["config"]["fp8_qk_wmma_t2_min_context"] = 1
+            payload["config"]["split512_min_context"] = 1
             report.write_text(json.dumps(payload), encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "t2_min_context=1"):
+            with self.assertRaisesRegex(ValueError, "split512_min_context=1"):
                 load_bench_report(report)
 
     def test_compile_bound_xattention_profile_is_enforced(self) -> None:
@@ -804,9 +804,9 @@ class CompiledKvGroupTest(unittest.TestCase):
             self.assertEqual(manifest["schema_version"], MATRIX_SCHEMA_VERSION)
             self.assertEqual(manifest["expected_q4_activation_bits"], 8)
             self.assertEqual(manifest["expected_w8_activation_bits"], 8)
-            self.assertTrue(manifest["expected_fp8_qk_wmma_enabled"])
-            self.assertEqual(manifest["expected_fp8_qk_wmma_t1_min_context"], 64)
-            self.assertEqual(manifest["expected_fp8_qk_wmma_t2_min_context"], 320)
+            self.assertTrue(manifest["expected_split512_enabled"])
+            self.assertEqual(manifest["expected_packed_decode_min_context"], 64)
+            self.assertEqual(manifest["expected_split512_min_context"], 8192)
             self.assertEqual(manifest["expected_xattention_profile"], "dense")
             self.assertEqual(manifest["case_count"], 3)
             self.assertEqual(manifest["point_count"], 12)
@@ -1945,10 +1945,10 @@ class CompiledKvGroupTest(unittest.TestCase):
                     "q4_prefill_cta_profile":
                         "m64n128-pingpong-n16-k16-scalar-base-production",
                     "w8_activation_bits": 8,
-                    "fp8_qk_wmma_enabled": True,
-                    "fp8_qk_wmma_profile": "t1-ge64-t2-ge320-t3plus-stream-v1",
-                    "fp8_qk_wmma_t1_min_context": 64,
-                    "fp8_qk_wmma_t2_min_context": 320,
+                    "split512_enabled": True,
+                    "decode_attention_profile": "packed-t1to6-split512-t4tree-v1",
+                    "packed_decode_min_context": 64,
+                    "split512_min_context": 8192,
                 }}),
                 encoding="utf-8",
             )

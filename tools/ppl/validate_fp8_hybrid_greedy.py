@@ -118,7 +118,7 @@ def validate(
         "draft_tokens": 0,
         "q4_activation_bits": 8,
         "w8_activation_bits": 8,
-        "fp8_qk_wmma_enabled": True,
+        "split512_enabled": True,
         "xattention_profile": "dense",
         "baseline": run.BASELINE,
         "gates": {CANDIDATE: gate},

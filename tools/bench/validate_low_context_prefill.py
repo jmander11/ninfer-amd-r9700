@@ -18,9 +18,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tools.bench.run_ninfer_bench_matrix import (
-    FP8_QK_WMMA_PROFILE,
-    FP8_QK_WMMA_T1_MIN_CONTEXT,
-    FP8_QK_WMMA_T2_MIN_CONTEXT,
+    DECODE_ATTENTION_PROFILE,
+    PACKED_DECODE_MIN_CONTEXT,
+    SPLIT512_MIN_CONTEXT,
     LOW_CONTEXT_PREFILL_PROMPTS,
     MATRIX_SCHEMA_VERSION,
     R9700_KV_PLANE_LAYOUTS,
@@ -269,12 +269,12 @@ def validate_ladder(
         or manifest["expected_q4_activation_bits"] != 8
         or type(manifest.get("expected_w8_activation_bits")) is not int
         or manifest["expected_w8_activation_bits"] != 8
-        or manifest.get("expected_fp8_qk_wmma_enabled") is not True
-        or manifest.get("expected_fp8_qk_wmma_profile") != FP8_QK_WMMA_PROFILE
-        or type(manifest.get("expected_fp8_qk_wmma_t1_min_context")) is not int
-        or manifest["expected_fp8_qk_wmma_t1_min_context"] != FP8_QK_WMMA_T1_MIN_CONTEXT
-        or type(manifest.get("expected_fp8_qk_wmma_t2_min_context")) is not int
-        or manifest["expected_fp8_qk_wmma_t2_min_context"] != FP8_QK_WMMA_T2_MIN_CONTEXT
+        or manifest.get("expected_split512_enabled") is not True
+        or manifest.get("expected_decode_attention_profile") != DECODE_ATTENTION_PROFILE
+        or type(manifest.get("expected_packed_decode_min_context")) is not int
+        or manifest["expected_packed_decode_min_context"] != PACKED_DECODE_MIN_CONTEXT
+        or type(manifest.get("expected_split512_min_context")) is not int
+        or manifest["expected_split512_min_context"] != SPLIT512_MIN_CONTEXT
         or type(chunk) is not int
         or chunk not in (1024, 2048, 4096, 8192)
         or not isinstance(artifact, dict)

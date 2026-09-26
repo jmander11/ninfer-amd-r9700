@@ -11,9 +11,9 @@ from unittest import mock
 from tools.bench.select_prefill_chunk import REQUIRED_GROUPS, REQUIRED_PROFILES, REQUIRED_RECIPES
 from tools.bench.matrix_contract import R9700_KV_PLANE_LAYOUTS
 from tools.bench.run_ninfer_bench_matrix import (
-    FP8_QK_WMMA_PROFILE,
-    FP8_QK_WMMA_T1_MIN_CONTEXT,
-    FP8_QK_WMMA_T2_MIN_CONTEXT,
+    DECODE_ATTENTION_PROFILE,
+    PACKED_DECODE_MIN_CONTEXT,
+    SPLIT512_MIN_CONTEXT,
 )
 from tools.bench.validate_post_chunk_capacity_campaign import (
     EXPECTED_IDENTITIES,
@@ -25,10 +25,10 @@ STATIC_CONTRACT = {
     "expected_kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
     "expected_q4_activation_bits": 8,
     "expected_w8_activation_bits": 8,
-    "expected_fp8_qk_wmma_enabled": True,
-    "expected_fp8_qk_wmma_profile": FP8_QK_WMMA_PROFILE,
-    "expected_fp8_qk_wmma_t1_min_context": FP8_QK_WMMA_T1_MIN_CONTEXT,
-    "expected_fp8_qk_wmma_t2_min_context": FP8_QK_WMMA_T2_MIN_CONTEXT,
+    "expected_split512_enabled": True,
+    "expected_decode_attention_profile": DECODE_ATTENTION_PROFILE,
+    "expected_packed_decode_min_context": PACKED_DECODE_MIN_CONTEXT,
+    "expected_split512_min_context": SPLIT512_MIN_CONTEXT,
 }
 
 

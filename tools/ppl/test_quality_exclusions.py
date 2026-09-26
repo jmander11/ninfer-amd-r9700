@@ -33,7 +33,7 @@ def campaign_fixture(root: Path, weights=WEIGHTS, mean_gate=None):
         "scorers": {run.BASELINE: {"path": "/bf16-scorer"}}}
     campaign = {**reference, "artifact_type": run.CAMPAIGN_ARTIFACT_TYPE,
         "schema_version": run.CAMPAIGN_SCHEMA_VERSION, "q4_activation_bits": 8,
-        "w8_activation_bits": 8, "fp8_qk_wmma_profile": run.FP8_QK_WMMA_PROFILE,
+        "w8_activation_bits": 8, "decode_attention_profile": run.DECODE_ATTENTION_PROFILE,
         "xattention_profile": "b128-s16-tau900",
         "candidate_kv_plane_layouts": run.R9700_KV_PLANE_LAYOUTS,
         "candidate_artifact": {"weights_id": weights, "sha256": "b" * 64,
@@ -67,7 +67,7 @@ def campaign_fixture(root: Path, weights=WEIGHTS, mean_gate=None):
                 "kv_format": "fp8-k-int4-v", "kv_value_group": group,
                 "kv_plane_layouts": run.R9700_KV_PLANE_LAYOUTS,
                 "q4_activation_bits": 8, "w8_activation_bits": 8,
-                "fp8_qk_wmma_enabled": True, "fp8_qk_wmma_profile": run.FP8_QK_WMMA_PROFILE,
+                "split512_enabled": True, "decode_attention_profile": run.DECODE_ATTENTION_PROFILE,
                 "xattention_qualification": True, "xattention_profile": "b128-s16-tau900",
                 "xattention_find_block": 128, "xattention_stride": 16, "xattention_tau_permille": 900,
                 "prefill_chunk": 2048, "prompt_tokens": tokens, "skip_tokens": tokens // 2,

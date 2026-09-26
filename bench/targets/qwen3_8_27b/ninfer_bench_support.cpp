@@ -804,13 +804,13 @@ std::string format_table(const BenchEnvironment& env, const std::vector<TestResu
         << " text_p129_wmma_tail_candidate="
         << (ninfer::ops::r9700::kv::kTextP129WmmaTailCandidate ? "true" : "false")
         << " w8_activation_bits=" << ninfer::ops::r9700::linear::kW8ActivationBits
-        << " fp8_qk_wmma_enabled="
+        << " split512_enabled="
         << (ninfer::ops::r9700::kv::kFp8QkWmmaDecode ? "true" : "false")
-        << " fp8_qk_wmma_profile=t1-ge64-t2-ge320-t3plus-stream-v1"
-        << " fp8_qk_wmma_t1_min_context="
-        << ninfer::ops::r9700::kv::kFp8QkWmmaT1MinimumContext
-        << " fp8_qk_wmma_t2_min_context="
-        << ninfer::ops::r9700::kv::kFp8QkWmmaT2MinimumContext
+        << " decode_attention_profile=packed-t1to6-split512-t4tree-v1"
+        << " packed_decode_min_context="
+        << ninfer::ops::r9700::kv::kPackedDecodeMinimumContext
+        << " split512_min_context="
+        << ninfer::ops::r9700::kv::kSplit512MinimumContext
         << " spec=" << speculative_backend_name(env.speculative_backend)
         << " k=" << env.draft_tokens
         << " proposal_head=" << proposal_head_name(env.proposal_head)
@@ -952,13 +952,13 @@ std::string format_json(const BenchEnvironment& env, const std::string& command,
          << ",\n"
          << "    \"w8_activation_bits\": "
          << ninfer::ops::r9700::linear::kW8ActivationBits << ",\n"
-         << "    \"fp8_qk_wmma_enabled\": "
+         << "    \"split512_enabled\": "
          << (ninfer::ops::r9700::kv::kFp8QkWmmaDecode ? "true" : "false") << ",\n"
-         << "    \"fp8_qk_wmma_profile\": \"t1-ge64-t2-ge320-t3plus-stream-v1\",\n"
-         << "    \"fp8_qk_wmma_t1_min_context\": "
-         << ninfer::ops::r9700::kv::kFp8QkWmmaT1MinimumContext << ",\n"
-         << "    \"fp8_qk_wmma_t2_min_context\": "
-         << ninfer::ops::r9700::kv::kFp8QkWmmaT2MinimumContext << ",\n"
+         << "    \"decode_attention_profile\": \"packed-t1to6-split512-t4tree-v1\",\n"
+         << "    \"packed_decode_min_context\": "
+         << ninfer::ops::r9700::kv::kPackedDecodeMinimumContext << ",\n"
+         << "    \"split512_min_context\": "
+         << ninfer::ops::r9700::kv::kSplit512MinimumContext << ",\n"
 #if defined(NINFER_R9700_XATTENTION_QUALIFICATION)
          << "    \"xattention_qualification\": true,\n"
          << "    \"xattention_profile\": \"b128-s"
@@ -1088,8 +1088,8 @@ std::string format_csv(const BenchEnvironment& env, const std::vector<TestResult
            "q4_prefill_gate_up_a4,q4_prefill_cta_profile,"
            "dflash_small_t_candidate,dflash_mlp_down_t5_candidate,"
            "text_p129_wmma_tail_candidate,w8_activation_bits,"
-           "fp8_qk_wmma_enabled,"
-           "fp8_qk_wmma_profile,fp8_qk_wmma_t1_min_context,fp8_qk_wmma_t2_min_context,"
+           "split512_enabled,"
+           "decode_attention_profile,packed_decode_min_context,split512_min_context,"
            "kv_payload_bytes,load_host_to_device_bytes,"
            "weights_capacity_bytes,sequence_capacity_bytes,workspace_capacity_bytes,"
            "request_transient_capacity_bytes,device_graph_allowance_bytes,"
@@ -1139,9 +1139,9 @@ std::string format_csv(const BenchEnvironment& env, const std::vector<TestResult
             << (ninfer::ops::r9700::kv::kTextP129WmmaTailCandidate ? "true" : "false") << ','
             << ninfer::ops::r9700::linear::kW8ActivationBits << ','
             << (ninfer::ops::r9700::kv::kFp8QkWmmaDecode ? "true" : "false") << ','
-            << "t1-ge64-t2-ge320-t3plus-stream-v1,"
-            << ninfer::ops::r9700::kv::kFp8QkWmmaT1MinimumContext << ','
-            << ninfer::ops::r9700::kv::kFp8QkWmmaT2MinimumContext << ','
+            << "packed-t1to6-split512-t4tree-v1,"
+            << ninfer::ops::r9700::kv::kPackedDecodeMinimumContext << ','
+            << ninfer::ops::r9700::kv::kSplit512MinimumContext << ','
             << env.memory.kv_payload_bytes << ','
             << env.load.host_to_device_bytes << ',' << env.memory.weights.capacity_bytes << ','
             << env.memory.sequence.capacity_bytes << ',' << env.memory.workspace.capacity_bytes

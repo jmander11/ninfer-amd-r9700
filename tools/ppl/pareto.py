@@ -355,7 +355,7 @@ def _static_profile_tuple(cache_profile: dict, execution_profile: dict) -> tuple
     return (
         cache_profile["value_group"], layouts["key"], layouts["value"],
         layouts["value_scale"], execution_profile["q4_activation_bits"],
-        execution_profile["w8_activation_bits"], execution_profile["fp8_qk_wmma_profile"],
+        execution_profile["w8_activation_bits"], execution_profile["decode_attention_profile"],
         execution_profile["xattention_profile"],
     )
 
@@ -701,13 +701,13 @@ def classify(payload: dict) -> dict:
         if (
             not isinstance(execution_profile, dict)
             or set(execution_profile) != {
-                "q4_activation_bits", "w8_activation_bits", "fp8_qk_wmma_profile",
+                "q4_activation_bits", "w8_activation_bits", "decode_attention_profile",
                 "xattention_profile",
             }
             or execution_profile.get("q4_activation_bits") != 8
             or execution_profile.get("w8_activation_bits") != 8
-            or execution_profile.get("fp8_qk_wmma_profile")
-            != "t1-ge64-t2-ge320-t3plus-stream-v1"
+            or execution_profile.get("decode_attention_profile")
+            != "packed-t1to6-split512-t4tree-v1"
             or execution_profile.get("xattention_profile")
             not in ("dense", "b128-s16-tau900")
         ):

@@ -165,12 +165,12 @@ def load_static_profile_selection(path: Path, artifact: dict[str, Any]) -> dict[
     if (not isinstance(cache, dict) or set(cache) != {"value_group", "plane_layouts"} or
             group not in (16, 32) or layouts != expected_layouts or
             not isinstance(execution, dict) or set(execution) != {
-                "q4_activation_bits", "w8_activation_bits", "fp8_qk_wmma_profile",
+                "q4_activation_bits", "w8_activation_bits", "decode_attention_profile",
                 "xattention_profile",
             } or execution.get("q4_activation_bits") != 8 or
             execution.get("w8_activation_bits") != 8 or
-            execution.get("fp8_qk_wmma_profile") !=
-            "t1-ge64-t2-ge320-t3plus-stream-v1" or profile not in XATTENTION_PROFILES):
+            execution.get("decode_attention_profile") !=
+            "packed-t1to6-split512-t4tree-v1" or profile not in XATTENTION_PROFILES):
         raise ValueError("static profile winner has an unsupported cache/attention identity")
     recipe = terminal.get("winner_artifact")
     if (not isinstance(recipe, dict) or recipe.get("kind") != "artifact" or

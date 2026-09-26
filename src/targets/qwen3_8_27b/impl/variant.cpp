@@ -1232,7 +1232,7 @@ std::vector<GraphExecutionProfile> Variant::ordinary_graph_profiles(std::uint32_
     for (GraphExecutionProfile& profile : profiles) {
         const std::size_t maximum_visible = static_cast<std::size_t>(profile.max) + 1U;
         profile.topology_class =
-            ops::r9700::kv::use_split512_attention(1U, maximum_visible) ? 1U : 0U;
+            ops::r9700::kv::use_packed_decode_attention(1U, maximum_visible, false) ? 3U : 0U;
     }
     return profiles;
 }
@@ -1246,8 +1246,9 @@ std::vector<GraphExecutionProfile> Variant::mtp_graph_profiles(std::uint32_t cap
         if (visible_end == ops::r9700::kv::kSplit512MinimumContext &&
             draft_window == 3U) {
             // One captured MTP round contains two fixed-width T=4 attention leaves. The MTP-cache
-            // leaf can see max+2K keys while target verification sees max+(K+1), so their split
-            // topology transitions require distinct profile boundaries and topology bits.
+            // leaf (device-selected rows) can see max+2K keys and splits at 8192; target
+            // verification sees max+(K+1) on the packed route. Their transitions require distinct
+            // profile boundaries and topology bits.
             const std::uint32_t text_offset = draft_window + 1U;
             ends.push_back(visible_end - 1U - mtp_offset);
             ends.push_back(visible_end - mtp_offset);
@@ -1265,8 +1266,10 @@ std::vector<GraphExecutionProfile> Variant::mtp_graph_profiles(std::uint32_t cap
         const std::size_t maximum_text_visible =
             static_cast<std::size_t>(profile.max) + draft_window + 1U;
         profile.topology_class =
-            (ops::r9700::kv::use_split512_attention(width, maximum_visible) ? 1U : 0U) |
-            (ops::r9700::kv::use_split512_attention(width, maximum_text_visible) ? 2U : 0U);
+            (ops::r9700::kv::use_split512_attention(width, maximum_visible, true) ? 1U : 0U) |
+            (ops::r9700::kv::use_packed_decode_attention(width, maximum_text_visible, false)
+                 ? 2U
+                 : 0U);
     }
     return profiles;
 }
@@ -1289,19 +1292,17 @@ std::vector<GraphExecutionProfile> Variant::dflash_graph_profiles(std::uint32_t 
     for (GraphExecutionProfile& profile : profiles) {
         const std::size_t maximum_visible =
             std::min<std::size_t>(capacity, static_cast<std::size_t>(profile.max) + block);
-        // Match the launcher's DFlash-first precedence: the split verify route (chunk kernel and
-        // merge) is its own executable topology. Split512 remains available for other profiles.
+        // Match the launcher's packed-first precedence: the packed decode route (chunk kernel and
+        // merge) is its own executable topology; split512 serves tree/device-count T=4.
         constexpr auto planes = qwen3::detail::kR9700TextKVPlaneLayouts;
-        const bool dflash_wmma = qwen3::detail::kR9700TextKVValueGroup == 16 &&
+        const bool packed = qwen3::detail::kR9700TextKVValueGroup == 16 &&
             planes.key == Fp8KInt4VPlaneLayout::TokenFastestHeadMajor &&
             planes.value == Fp8KInt4VPlaneLayout::FeatureFastestPageMajor &&
             planes.value_scale == Fp8KInt4VPlaneLayout::FeatureFastestPageMajor &&
-            ops::r9700::kv::use_dflash_verify_batched_wmma(
-                block, maximum_visible, false, true);
-        profile.topology_class = dflash_wmma
+            ops::r9700::kv::use_packed_decode_attention(block, maximum_visible, false);
+        profile.topology_class = packed
             ? 3U
-            : (ops::r9700::kv::use_split512_attention(block, maximum_visible)
-                ? 2U : (ops::r9700::kv::use_fp8_qk_wmma(block, maximum_visible) ? 1U : 0U));
+            : (ops::r9700::kv::use_split512_attention(block, maximum_visible, true) ? 2U : 0U);
     }
     return profiles;
 }
@@ -1368,8 +1369,7 @@ void Variant::full_attention(const Tensor& normalized_query,
                              WorkspaceArena& workspace, hipStream_t stream,
                              const Tensor* ancestor_masks,
                              const Tensor* prefix_lengths,
-                             const Tensor* active_query_rows,
-                             bool dflash_target_verify) {
+                             const Tensor* active_query_rows) {
     if (cache_positions.dtype != DType::I32 || cache_positions.data == nullptr ||
         !cache_positions.is_contiguous() || cache_positions.ne[0] != normalized_query.ne[2] ||
         cache_positions.ne[1] != 1 || cache_positions.ne[2] != 1 ||
@@ -1404,8 +1404,7 @@ void Variant::full_attention(const Tensor& normalized_query,
         r9700_full_attention_workspace_capacity_bytes(
             static_cast<std::uint32_t>(normalized_query.ne[2]),
             cache_read.visible_frontier(),
-            ancestor_masks != nullptr || active_query_rows != nullptr,
-            dflash_target_verify);
+            ancestor_masks != nullptr || active_query_rows != nullptr);
     DeviceSpan attention_workspace{};
     if (attention_workspace_bytes != 0U) {
         attention_workspace = workspace.alloc_bytes(attention_workspace_bytes);
@@ -1428,7 +1427,6 @@ void Variant::full_attention(const Tensor& normalized_query,
                 active_query_rows == nullptr
                     ? nullptr
                     : static_cast<const std::int32_t*>(active_query_rows->data),
-            .dflash_target_verify = dflash_target_verify,
             .workspace = attention_workspace.data,
             .workspace_bytes = attention_workspace.bytes,
             .output = attention_fp32,
@@ -1438,13 +1436,13 @@ void Variant::full_attention(const Tensor& normalized_query,
 
 std::size_t Variant::full_attention_workspace_capacity_bytes(
     std::int32_t maximum_query_rows, std::uint32_t maximum_visible_context,
-    bool tree_or_device_count, bool dflash_target_verify) {
+    bool tree_or_device_count) {
     if (maximum_query_rows <= 0) {
         return 0U;
     }
     return r9700_full_attention_workspace_capacity_bytes(
         static_cast<std::uint32_t>(maximum_query_rows), maximum_visible_context,
-        tree_or_device_count, dflash_target_verify);
+        tree_or_device_count);
 }
 
 #if defined(NINFER_R9700_XATTENTION_QUALIFICATION)

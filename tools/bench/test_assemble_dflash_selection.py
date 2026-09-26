@@ -42,7 +42,7 @@ class DFlashSelectionTest(unittest.TestCase):
                         "selected_prefill_chunk": 2048, "prefill_chunks": [2048],
                         "artifact": artifact, "bench": self.bench, "expected_kv_value_group": 16,
                         "expected_q4_activation_bits": 8, "expected_w8_activation_bits": 8,
-                        "expected_fp8_qk_wmma_enabled": True, "expected_xattention_profile": "dense",
+                        "expected_split512_enabled": True, "expected_xattention_profile": "dense",
                         "power_profile": self.auto_power,
                         "commands": [{"command": [self.bench["path"], "--prefill-chunk", "2048"]}]}
             shortlist = {"artifact_type": "ninfer_dflash_shortlist",
@@ -220,7 +220,7 @@ class DFlashSelectionTest(unittest.TestCase):
             "artifact": self.artifact, "bench": self.bench,
             "expected_kv_value_group": 16,
             "expected_q4_activation_bits": 8, "expected_w8_activation_bits": 8,
-            "expected_fp8_qk_wmma_enabled": True,
+            "expected_split512_enabled": True,
             "expected_xattention_profile": "dense",
             "power_profile": self.auto_power,
         }
@@ -253,7 +253,7 @@ class DFlashSelectionTest(unittest.TestCase):
             "artifact": self.artifact, "bench": self.bench,
             "expected_kv_value_group": 16,
             "expected_q4_activation_bits": 8, "expected_w8_activation_bits": 8,
-            "expected_fp8_qk_wmma_enabled": True,
+            "expected_split512_enabled": True,
             "expected_xattention_profile": "dense",
         }
         _same_campaign(
@@ -280,7 +280,7 @@ class DFlashSelectionTest(unittest.TestCase):
             "artifact": self.artifact, "bench": self.bench,
             "expected_kv_value_group": 16,
             "expected_q4_activation_bits": 8, "expected_w8_activation_bits": 8,
-            "expected_fp8_qk_wmma_enabled": True,
+            "expected_split512_enabled": True,
             "expected_xattention_profile": "dense",
             "required_candidate_identity": "fp8-hybrid-selection-authority",
             "hybrid_shared_workspace_authority": {
@@ -319,7 +319,7 @@ class DFlashSelectionTest(unittest.TestCase):
             "artifact": self.artifact, "bench": self.bench,
             "expected_kv_value_group": 16,
             "expected_q4_activation_bits": 8, "expected_w8_activation_bits": 8,
-            "expected_fp8_qk_wmma_enabled": True,
+            "expected_split512_enabled": True,
             "expected_xattention_profile": "dense",
             "required_candidate_identity": "fp8-hybrid-selection-authority",
             "hybrid_shared_workspace_authority": extended,
@@ -338,7 +338,7 @@ class DFlashSelectionTest(unittest.TestCase):
             "artifact": self.artifact, "bench": self.bench,
             "expected_kv_value_group": 16,
             "expected_q4_activation_bits": 8, "expected_w8_activation_bits": 8,
-            "expected_fp8_qk_wmma_enabled": True,
+            "expected_split512_enabled": True,
             "expected_xattention_profile": "dense",
             "required_candidate_identity": "fp8-hybrid-selection-authority",
         }

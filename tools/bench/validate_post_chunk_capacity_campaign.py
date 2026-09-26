@@ -11,9 +11,9 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from tools.bench.run_ninfer_bench_matrix import (
-    FP8_QK_WMMA_PROFILE,
-    FP8_QK_WMMA_T1_MIN_CONTEXT,
-    FP8_QK_WMMA_T2_MIN_CONTEXT,
+    DECODE_ATTENTION_PROFILE,
+    PACKED_DECODE_MIN_CONTEXT,
+    SPLIT512_MIN_CONTEXT,
     MATRIX_SCHEMA_VERSION,
     PRODUCT_CONCURRENCIES,
     R9700_KV_PLANE_LAYOUTS,
@@ -82,7 +82,7 @@ def _validate_capacity_outcomes(
                 manifest["expected_kv_value_group"],
                 manifest["expected_q4_activation_bits"],
                 manifest["expected_w8_activation_bits"],
-                manifest["expected_fp8_qk_wmma_enabled"],
+                manifest["expected_split512_enabled"],
                 record["concurrency"],
                 manifest["artifact"],
                 record["command"],
@@ -153,12 +153,12 @@ def validate_matrix(
         or manifest.get("expected_kv_plane_layouts") != R9700_KV_PLANE_LAYOUTS
         or manifest.get("expected_q4_activation_bits") != 8
         or manifest.get("expected_w8_activation_bits") != 8
-        or manifest.get("expected_fp8_qk_wmma_enabled") is not True
-        or manifest.get("expected_fp8_qk_wmma_profile") != FP8_QK_WMMA_PROFILE
-        or manifest.get("expected_fp8_qk_wmma_t1_min_context")
-        != FP8_QK_WMMA_T1_MIN_CONTEXT
-        or manifest.get("expected_fp8_qk_wmma_t2_min_context")
-        != FP8_QK_WMMA_T2_MIN_CONTEXT
+        or manifest.get("expected_split512_enabled") is not True
+        or manifest.get("expected_decode_attention_profile") != DECODE_ATTENTION_PROFILE
+        or manifest.get("expected_packed_decode_min_context")
+        != PACKED_DECODE_MIN_CONTEXT
+        or manifest.get("expected_split512_min_context")
+        != SPLIT512_MIN_CONTEXT
     ):
         raise ValueError(f"{path} is not an exact schema-v14 post-chunk capacity matrix")
     validate_manifest_output_ownership(root, manifest)

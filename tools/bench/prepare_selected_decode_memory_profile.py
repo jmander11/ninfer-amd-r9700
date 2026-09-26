@@ -11,9 +11,9 @@ import shlex
 from pathlib import Path
 
 from tools.bench.run_ninfer_bench_matrix import (
-    FP8_QK_WMMA_PROFILE,
-    FP8_QK_WMMA_T1_MIN_CONTEXT,
-    FP8_QK_WMMA_T2_MIN_CONTEXT,
+    DECODE_ATTENTION_PROFILE,
+    PACKED_DECODE_MIN_CONTEXT,
+    SPLIT512_MIN_CONTEXT,
     MATRIX_SCHEMA_VERSION,
     PRODUCT_CONCURRENCIES,
     validate_report_phase_timing,
@@ -112,7 +112,7 @@ def validate_profile_build_receipt(
         "NINFER_R9700_Q4_ACTIVATION_BITS": str(compiled_route["q4_activation_bits"]),
         "NINFER_R9700_Q4_PREFILL_PINGPONG_QUALIFICATION": "OFF",
         "NINFER_R9700_W8_ACTIVATION_BITS": str(compiled_route["w8_activation_bits"]),
-        "NINFER_R9700_FP8_QK_WMMA": "1" if compiled_route["fp8_qk_wmma_enabled"] else "0",
+        "NINFER_R9700_FP8_QK_WMMA": "1" if compiled_route["split512_enabled"] else "0",
         "NINFER_R9700_XATTENTION_QUALIFICATION": (
             "OFF" if selected_route["execution_profile"]["xattention_profile"] == "dense"
             else "ON"
@@ -210,10 +210,10 @@ def prepare(selection_path: Path, receipt_path: Path, out: Path) -> dict:
     }
     expected_execution = {
         "q4_activation_bits": 8, "w8_activation_bits": 8,
-        "fp8_qk_wmma_enabled": True,
-        "fp8_qk_wmma_profile": FP8_QK_WMMA_PROFILE,
-        "fp8_qk_wmma_t1_min_context": FP8_QK_WMMA_T1_MIN_CONTEXT,
-        "fp8_qk_wmma_t2_min_context": FP8_QK_WMMA_T2_MIN_CONTEXT,
+        "split512_enabled": True,
+        "decode_attention_profile": DECODE_ATTENTION_PROFILE,
+        "packed_decode_min_context": PACKED_DECODE_MIN_CONTEXT,
+        "split512_min_context": SPLIT512_MIN_CONTEXT,
         "q4_prefill_cta_profile":
             "m64n128-pingpong-n16-k16-scalar-base-production",
     }
@@ -232,7 +232,7 @@ def prepare(selection_path: Path, receipt_path: Path, out: Path) -> dict:
         or any(manifest.get(f"expected_{key}") != value
                for key, value in expected_execution.items())
         or any(execution.get(key) != expected_execution[key] for key in (
-            "q4_activation_bits", "w8_activation_bits", "fp8_qk_wmma_profile"))
+            "q4_activation_bits", "w8_activation_bits", "decode_attention_profile"))
     ):
         raise ValueError("selected whole matrix differs from the terminal route")
     artifact_path = Path(manifest["artifact"]["path"]).resolve(strict=True)

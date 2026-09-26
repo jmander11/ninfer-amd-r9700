@@ -301,10 +301,10 @@ class CompiledProfileIdentityTest(unittest.TestCase):
                     "kv_plane_layouts": run.R9700_KV_PLANE_LAYOUTS,
                     "q4_activation_bits": q4_activation_bits,
                     "w8_activation_bits": w8_activation_bits,
-                    "fp8_qk_wmma_enabled": fp8_qk_wmma,
-                    "fp8_qk_wmma_profile": run.FP8_QK_WMMA_PROFILE,
-                    "fp8_qk_wmma_t1_min_context": run.FP8_QK_WMMA_T1_MIN_CONTEXT,
-                    "fp8_qk_wmma_t2_min_context": run.FP8_QK_WMMA_T2_MIN_CONTEXT,
+                    "split512_enabled": fp8_qk_wmma,
+                    "decode_attention_profile": run.DECODE_ATTENTION_PROFILE,
+                    "packed_decode_min_context": run.PACKED_DECODE_MIN_CONTEXT,
+                    "split512_min_context": run.SPLIT512_MIN_CONTEXT,
                     "xattention_qualification": xattention,
                     **(
                         {
@@ -470,7 +470,7 @@ class CompiledProfileIdentityTest(unittest.TestCase):
                 )
 
             with mock.patch.object(run.subprocess, "run", side_effect=write_wrong_profile):
-                with self.assertRaisesRegex(SystemExit, "fp8_qk_wmma_enabled=False"):
+                with self.assertRaisesRegex(SystemExit, "split512_enabled=False"):
                     run.run_cell(
                         Path("ninfer-ppl-g16"), Path("model.ninfer"), Path("corpus.ids"),
                         "r9700-g16", "decode", "half", 257, 4096, 0, cell_path, [],
@@ -484,11 +484,11 @@ class CompiledProfileIdentityTest(unittest.TestCase):
             def write_stale_classifier(*_args, **_kwargs) -> None:
                 self.write_cell(cell_path, scheme="r9700-g16", group=16)
                 payload = json.loads(cell_path.read_text(encoding="utf-8"))
-                payload["fp8_qk_wmma_t2_min_context"] = 1
+                payload["split512_min_context"] = 1
                 cell_path.write_text(json.dumps(payload), encoding="utf-8")
 
             with mock.patch.object(run.subprocess, "run", side_effect=write_stale_classifier):
-                with self.assertRaisesRegex(SystemExit, "t2_min_context=1"):
+                with self.assertRaisesRegex(SystemExit, "split512_min_context=1"):
                     run.run_cell(
                         Path("ninfer-ppl-g16"), Path("model.ninfer"), Path("corpus.ids"),
                         "r9700-g16", "decode", "half", 257, 4096, 0, cell_path, [],
@@ -1315,10 +1315,10 @@ class CampaignOrchestrationTest(unittest.TestCase):
                 "q4_activation_bits": 8,
                 "w8_activation_bits": 8,
                 "candidate_kv_plane_layouts": run.R9700_KV_PLANE_LAYOUTS,
-                "fp8_qk_wmma_enabled": True,
-                "fp8_qk_wmma_profile": run.FP8_QK_WMMA_PROFILE,
-                "fp8_qk_wmma_t1_min_context": run.FP8_QK_WMMA_T1_MIN_CONTEXT,
-                "fp8_qk_wmma_t2_min_context": run.FP8_QK_WMMA_T2_MIN_CONTEXT,
+                "split512_enabled": True,
+                "decode_attention_profile": run.DECODE_ATTENTION_PROFILE,
+                "packed_decode_min_context": run.PACKED_DECODE_MIN_CONTEXT,
+                "split512_min_context": run.SPLIT512_MIN_CONTEXT,
                 "xattention_profile": "dense",
                 "weights_inputs": {"r9700-g16": str(weights)},
                 "scorers": {"r9700-g16": scorer_identity},

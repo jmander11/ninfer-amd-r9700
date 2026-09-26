@@ -60,12 +60,11 @@ constexpr std::size_t kR9700OrdinaryGraphUpdateBytes = 4ULL * kMiB;
 // Matched startup checks consume 85/100 MiB observed/allowed at C2/K4 and
 // 109/152 MiB at C4/K5. These calibrate complete preparation, not isolated HIP
 // graph storage. Apply the fixed term once, not once per request. Retain the
-// existing executable terms: K>=2 owns 26 MiB; K1 normal-context fused and
-// FP8-Q/K-WMMA topologies own 10 and 18 MiB. The strict residency guard remains.
+// existing executable terms: K>=2 and every packed-decode topology own 26 MiB; the K1
+// short-context fused topology owns 10 MiB. The strict residency guard remains.
 constexpr std::size_t kR9700DFlashGraphFamilyBytes           = 48ULL * kMiB;
 constexpr std::size_t kR9700DFlashGraphExecutableBytes       = 26ULL * kMiB;
 constexpr std::size_t kR9700DFlashK1FusedExecutableBytes     = 10ULL * kMiB;
-constexpr std::size_t kR9700DFlashK1WmmaExecutableBytes      = 18ULL * kMiB;
 // The K4/K5 1K calibration contains three definitions per executable. Larger
 // frontiers install more definitions on that same executable; each retains up to
 // the measured ROCm 4-MiB update bound. At C1/K4/context4240, five definitions
@@ -367,9 +366,7 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
 #endif
         {
         scratch(layout, Variant::full_attention_workspace_capacity_bytes(
-                            max_width, envelope.max_visible_keys, tree_verify,
-                            phase == qwen3::TextPhase::Verify &&
-                                plan.features.speculative == SpeculativeBackend::DFlash));
+                            max_width, envelope.max_visible_keys, tree_verify));
         }
         (void)batch_size;
         (void)min_width;
@@ -994,8 +991,12 @@ std::unique_ptr<SequencePlanImpl> build_sequence_candidate(const SequencePlannin
             const GraphAllowance allowance = graph_topology_allowance(
                 expanded,
                 [&](GraphExecutionProfile profile) {
+                    const std::uint32_t attention_topology =
+                        (profile.topology_class % k_stride) / impl->max_concurrency;
+                    // Every packed-decode topology (class 3) is the calibrated DFlash
+                    // verification executable, whatever its captured K.
                     if (impl->adaptive_draft || impl->draft_window != 1U ||
-                        profile.topology_class / impl->max_concurrency == 2U) {
+                        attention_topology == 3U) {
                         const auto definitions = static_cast<std::size_t>(std::count_if(
                             expanded.begin(), expanded.end(), [&](const auto& other) {
                                 return other.topology_class == profile.topology_class;
@@ -1008,15 +1009,8 @@ std::unique_ptr<SequencePlanImpl> build_sequence_candidate(const SequencePlannin
                                         "DFlash graph profile update allowance"),
                             "DFlash graph executable allowance");
                     }
-                    const std::uint32_t attention_topology =
-                        profile.topology_class / impl->max_concurrency;
-                    const std::uint32_t batch_size =
-                        profile.topology_class % impl->max_concurrency + 1U;
                     if (attention_topology == 0U) {
                         return kR9700DFlashK1FusedExecutableBytes;
-                    }
-                    if (attention_topology == 1U) {
-                        return kR9700DFlashK1WmmaExecutableBytes;
                     }
                     throw std::logic_error("unknown DFlash K=1 graph topology class");
                 },

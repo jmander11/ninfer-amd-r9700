@@ -1033,7 +1033,7 @@ void dense_prefill_kernel(Fp8Int4KvAttentionArgs a) {
 #endif
 }
 
-// Split-context DFlash verification (4..6 rows): one CTA per KV head and context chunk of
+// Split-context packed decode (1..6 rows): one CTA per KV head and context chunk of
 // kDenseVerifyThreads. The six query heads' (row, head) pairs are packed densely into sixteen-lane
 // tiles (pair p = 16 * wave + lane row is row p / 6 of query head p % 6), so waves 0..2 compute
 // every pair with the dense-prefill block arithmetic over 16-key blocks. Waves 3..5 are loaders
@@ -1500,7 +1500,7 @@ std::uint32_t dense_verify_chunk_keys(std::size_t context) noexcept {
 
 } // namespace
 
-std::size_t fp8_int4_kv_attention_dflash_verify_batched_wmma_workspace_bytes(
+std::size_t fp8_int4_kv_attention_packed_decode_workspace_bytes(
     std::size_t context, std::uint32_t rows) noexcept {
     if (context == 0U || rows == 0U ||
         context > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max()))
@@ -1509,13 +1509,13 @@ std::size_t fp8_int4_kv_attention_dflash_verify_batched_wmma_workspace_bytes(
            kDenseVerifyPartialStride * sizeof(float);
 }
 
-hipError_t fp8_int4_kv_attention_dflash_verify_batched_wmma(
+hipError_t fp8_int4_kv_attention_packed_decode(
     const Fp8Int4KvAttentionArgs& a, hipStream_t stream) noexcept {
     if (!a.query || !a.key_codes || !a.value_codes || !a.value_scale_bits || !a.page_table ||
         !a.page_table_pages || !a.context ||
         a.context > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max()) ||
         !a.physical_tokens || a.physical_tokens % kPageSize || a.query_heads != 24U ||
-        a.kv_heads != 4U || a.q_to_kv != 6U || (a.query_rows < 4U || a.query_rows > 6U) ||
+        a.kv_heads != 4U || a.q_to_kv != 6U || (a.query_rows < 1U || a.query_rows > 6U) ||
         !a.row_positions || !a.score_workspace ||
         !a.output || !std::isfinite(a.attention_scale) || !(a.attention_scale > 0.0F) ||
         (a.page_table_row != nullptr &&

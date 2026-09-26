@@ -74,9 +74,9 @@ NINFER_MAGIC = b"NINFER\x00\x02"
 NINFER_PREFIX = struct.Struct("<8sQ")
 MAX_DIRECTORY_BYTES = 64 * 1024 * 1024
 TOKEN_DOMAIN = 248077
-FP8_QK_WMMA_PROFILE = "t1-ge64-t2-ge320-t3plus-stream-v1"
-FP8_QK_WMMA_T1_MIN_CONTEXT = 64
-FP8_QK_WMMA_T2_MIN_CONTEXT = 320
+DECODE_ATTENTION_PROFILE = "packed-t1to6-split512-t4tree-v1"
+PACKED_DECODE_MIN_CONTEXT = 64
+SPLIT512_MIN_CONTEXT = 8192
 XATTENTION_PROFILES = ("dense", "b128-s16-tau900")
 R9700_KV_PLANE_LAYOUTS = {
     "key": "token-fastest-head-major",
@@ -966,17 +966,17 @@ def validate_cell_report(
             f"{profile_name} report w8_activation_bits={cell.get('w8_activation_bits')!r}; "
             f"expected compiled A{expected_w8_activation_bits}"
         )
-    if not profile.reference and cell.get("fp8_qk_wmma_enabled") is not expected_fp8_qk_wmma:
+    if not profile.reference and cell.get("split512_enabled") is not expected_fp8_qk_wmma:
         raise SystemExit(
-            f"{profile_name} report fp8_qk_wmma_enabled="
-            f"{cell.get('fp8_qk_wmma_enabled')!r}; expected "
+            f"{profile_name} report split512_enabled="
+            f"{cell.get('split512_enabled')!r}; expected "
             f"{expected_fp8_qk_wmma!r}"
         )
     if not profile.reference:
         expected_attention_profile = {
-            "fp8_qk_wmma_profile": FP8_QK_WMMA_PROFILE,
-            "fp8_qk_wmma_t1_min_context": FP8_QK_WMMA_T1_MIN_CONTEXT,
-            "fp8_qk_wmma_t2_min_context": FP8_QK_WMMA_T2_MIN_CONTEXT,
+            "decode_attention_profile": DECODE_ATTENTION_PROFILE,
+            "packed_decode_min_context": PACKED_DECODE_MIN_CONTEXT,
+            "split512_min_context": SPLIT512_MIN_CONTEXT,
         }
         for key, value in expected_attention_profile.items():
             if cell.get(key) != value:
@@ -1186,8 +1186,8 @@ CANDIDATE_SCORER_REPORT_FIELDS = (
     "prefill_chunk", "prompt_tokens", "skip_tokens", "terrible_nll", "tokens_scored",
     "argmax_tokens", "non_finite", "terrible_tokens", "sum_nll", "mean_nll",
     "max_nll", "ppl", "score_seconds", "q4_activation_bits", "w8_activation_bits",
-    "fp8_qk_wmma_enabled", "fp8_qk_wmma_profile", "fp8_qk_wmma_t1_min_context",
-    "fp8_qk_wmma_t2_min_context", "xattention_qualification",
+    "split512_enabled", "decode_attention_profile", "packed_decode_min_context",
+    "split512_min_context", "xattention_qualification",
 )
 
 
@@ -1613,10 +1613,10 @@ def load_reused_candidate_cells(
         "q4_activation_bits": expected_q4_activation_bits,
         "w8_activation_bits": expected_w8_activation_bits,
         "candidate_kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
-        "fp8_qk_wmma_enabled": expected_fp8_qk_wmma,
-        "fp8_qk_wmma_profile": FP8_QK_WMMA_PROFILE,
-        "fp8_qk_wmma_t1_min_context": FP8_QK_WMMA_T1_MIN_CONTEXT,
-        "fp8_qk_wmma_t2_min_context": FP8_QK_WMMA_T2_MIN_CONTEXT,
+        "split512_enabled": expected_fp8_qk_wmma,
+        "decode_attention_profile": DECODE_ATTENTION_PROFILE,
+        "packed_decode_min_context": PACKED_DECODE_MIN_CONTEXT,
+        "split512_min_context": SPLIT512_MIN_CONTEXT,
         "xattention_profile": expected_xattention_profile,
     }
     for key, expected in expected_top.items():
@@ -2481,10 +2481,10 @@ def main() -> int:
         "candidate_kv_plane_layouts": (
             R9700_KV_PLANE_LAYOUTS if selected_candidates else None
         ),
-        "fp8_qk_wmma_enabled": bool(args.expected_fp8_qk_wmma),
-        "fp8_qk_wmma_profile": FP8_QK_WMMA_PROFILE,
-        "fp8_qk_wmma_t1_min_context": FP8_QK_WMMA_T1_MIN_CONTEXT,
-        "fp8_qk_wmma_t2_min_context": FP8_QK_WMMA_T2_MIN_CONTEXT,
+        "split512_enabled": bool(args.expected_fp8_qk_wmma),
+        "decode_attention_profile": DECODE_ATTENTION_PROFILE,
+        "packed_decode_min_context": PACKED_DECODE_MIN_CONTEXT,
+        "split512_min_context": SPLIT512_MIN_CONTEXT,
         "xattention_profile": args.expected_xattention_profile,
         "reused_bf16_campaign": (
             {

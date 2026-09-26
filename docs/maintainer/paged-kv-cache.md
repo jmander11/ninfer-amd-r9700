@@ -443,14 +443,12 @@ physically impossible zero-cost append fusion is therefore below 0.8 percent at 
 percent at longer contexts. A single ordinary HIP launch cannot globally order all independent
 append writers before all attention readers, and per-query-head encoding violates single-writer
 transaction ownership. Separate ordered append followed by the selected attention family is the
-qualified architecture. At context 8,192 and above, ordinary T=1 and fixed-width T=4 use the
-three-stage split-512 leaf with caller-owned score/partial/merge storage. Below that boundary,
-ordinary T=1/context>=64 and T=2/context>=320 use FP8-Q/K WMMA plus FP32 score/softmax and exact
-vector PV; remaining shapes use fused QK/online-FP32-softmax/PV. The T=4 split route accepts the
-same causal, packed-tree, and device-active-row metadata as the fused leaf. Metadata-bearing T=1
-retains the fused leaf at every context because no such split-512 form was admitted. DFlash target
-verification W4..6 (non-tree, contexts 64..262144) instead runs the dense attention arithmetic split
-over context chunks with a stable FP32 merge and a bounded caller-owned partial workspace.
+qualified architecture. Host-fixed 1..6-row decode (ordinary T=1, MTP and DFlash chain
+verification; non-tree, contexts 64..262144) runs the packed decode route: the dense attention
+arithmetic split over context chunks with a stable FP32 merge and a bounded caller-owned partial
+workspace. At context 8,192 and above, fixed-width T=4 with packed-tree or device-active-row
+metadata uses the three-stage split-512 leaf with caller-owned score/partial/merge storage;
+remaining shapes use fused QK/online-FP32-softmax/PV.
 
 Final admission additionally requires:
 

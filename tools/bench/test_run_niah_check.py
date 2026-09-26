@@ -56,7 +56,7 @@ class NiahEvidenceTest(unittest.TestCase):
             "value_scale": "feature-fastest-page-major",
         }}
         execution = {"q4_activation_bits": 8, "w8_activation_bits": 8,
-                     "fp8_qk_wmma_profile": "t1-ge64-t2-ge320-t3plus-stream-v1",
+                     "decode_attention_profile": "packed-t1to6-split512-t4tree-v1",
                      "xattention_profile": "dense"}
         recipe = {
             "kind": "artifact", "weights_id": "r9700-q4g64-n16k16-eval",

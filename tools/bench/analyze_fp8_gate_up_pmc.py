@@ -92,10 +92,10 @@ def validate_benchmark_report(path: Path, plan: dict, label: str) -> dict:
             or config.get("kv_value_group") != 16 or config.get("concurrency") != 1
             or config.get("q4_activation_bits") != 8 or config.get("w8_activation_bits") != 8
             or config.get("q4_prefill_cta_profile") != "m64n128-pingpong-production"
-            or config.get("fp8_qk_wmma_enabled") is not True
-            or config.get("fp8_qk_wmma_profile") != "t1-ge64-t2-ge320-t3plus-stream-v1"
-            or config.get("fp8_qk_wmma_t1_min_context") != 64
-            or config.get("fp8_qk_wmma_t2_min_context") != 320
+            or config.get("split512_enabled") is not True
+            or config.get("decode_attention_profile") != "packed-t1to6-split512-t4tree-v1"
+            or config.get("packed_decode_min_context") != 64
+            or config.get("split512_min_context") != 8192
             or config.get("xattention_qualification") is not False
             or config.get("spec") != "none" or config.get("draft_tokens") != 0
             or config.get("speculative_execution") is not False

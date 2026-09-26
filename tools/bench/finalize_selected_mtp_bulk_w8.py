@@ -168,8 +168,8 @@ def _validate_engine_trace(route: dict, command: list[str], report_path: Path,
         or config.get("prefill_chunk") != route["selected_prefill_chunk"]
         or config.get("kv_value_group") != route["cache_profile"]["value_group"]
         or config.get("q4_activation_bits") != 8 or config.get("w8_activation_bits") != 8
-        or config.get("fp8_qk_wmma_enabled") is not True
-        or config.get("fp8_qk_wmma_profile") != "t1-ge64-t2-ge320-t3plus-stream-v1"
+        or config.get("split512_enabled") is not True
+        or config.get("decode_attention_profile") != "packed-t1to6-split512-t4tree-v1"
         or config.get("xattention_qualification") is not expected_sparse
         or config.get("spec") != "mtp" or config.get("draft_tokens") != 3
         or config.get("proposal_head") != "optimized"

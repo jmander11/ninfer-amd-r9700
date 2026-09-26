@@ -140,20 +140,21 @@ struct DensePrefillWmmaResources {
 [[nodiscard]] hipError_t fp8_int4_kv_attention_wmma(const Fp8Int4KvAttentionArgs& args,
                                                      hipStream_t stream) noexcept;
 
-// Production DFlash K3..5/W4..6 chain route (rows in {4, 5, 6}), split over the context: one
+// Production packed decode route (1..6 host-fixed rows: ordinary decode, MTP, DFlash chain
+// verification), split over the context: one
 // 192-thread CTA per KV head and context chunk (at most 64 chunks of at least 256 keys) runs the
 // dense-prefill arithmetic (represented BF16 Q against exact-BF16 FP8 K in BF16 WMMA, online FP32
 // Softmax with FP16 probabilities, FP16 V/8 PV with FP32 accumulation) and writes per-row
 // numerator/origin/denominator partials to the caller workspace; one stable FP32 merge normalizes.
 // Row positions are absolute; invalid positions, page-table rows and physical pages poison exactly
 // the dependent rows with NaN.
-[[nodiscard]] std::size_t fp8_int4_kv_attention_dflash_verify_batched_wmma_workspace_bytes(
+[[nodiscard]] std::size_t fp8_int4_kv_attention_packed_decode_workspace_bytes(
     std::size_t context, std::uint32_t rows) noexcept;
-[[nodiscard]] hipError_t fp8_int4_kv_attention_dflash_verify_batched_wmma(
+[[nodiscard]] hipError_t fp8_int4_kv_attention_packed_decode(
     const Fp8Int4KvAttentionArgs& args, hipStream_t stream) noexcept;
 
-// Production long-context decode leaf for the one selected R9700 cache layout. T=1 keeps the
-// qualified FP8-Q/FP8-K WMMA score profile; fixed-width T=4 uses represented-BF16 Q and shares one
+// Long-context decode leaf for tree or device-selected rows (see use_split512_attention). T=1 keeps
+// the qualified FP8-Q/FP8-K WMMA score profile; fixed-width T=4 uses represented-BF16 Q and shares one
 // decoded 16-token K tile across all four rows and six query heads of each KV head. Both feed
 // 512-token FP32 Softmax/INT4-V partials and one stable FP32 merge. The caller owns the exact,
 // fixed-address workspace returned below; the implementation performs no device allocation.

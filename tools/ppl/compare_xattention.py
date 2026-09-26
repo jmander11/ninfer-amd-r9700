@@ -43,10 +43,10 @@ SHARED_FIELDS = (
     "q4_activation_bits",
     "w8_activation_bits",
     "candidate_kv_plane_layouts",
-    "fp8_qk_wmma_enabled",
-    "fp8_qk_wmma_profile",
-    "fp8_qk_wmma_t1_min_context",
-    "fp8_qk_wmma_t2_min_context",
+    "split512_enabled",
+    "decode_attention_profile",
+    "packed_decode_min_context",
+    "split512_min_context",
     "baseline",
     "gates",
     "quality_tier",
@@ -182,10 +182,10 @@ def _validate_cell_contract(
             "kv_plane_layouts": campaign.get("candidate_kv_plane_layouts"),
             "q4_activation_bits": campaign.get("q4_activation_bits"),
             "w8_activation_bits": campaign.get("w8_activation_bits"),
-            "fp8_qk_wmma_enabled": campaign.get("fp8_qk_wmma_enabled"),
-            "fp8_qk_wmma_profile": campaign.get("fp8_qk_wmma_profile"),
-            "fp8_qk_wmma_t1_min_context": campaign.get("fp8_qk_wmma_t1_min_context"),
-            "fp8_qk_wmma_t2_min_context": campaign.get("fp8_qk_wmma_t2_min_context"),
+            "split512_enabled": campaign.get("split512_enabled"),
+            "decode_attention_profile": campaign.get("decode_attention_profile"),
+            "packed_decode_min_context": campaign.get("packed_decode_min_context"),
+            "split512_min_context": campaign.get("split512_min_context"),
         }
     for field, expected_value in expected.items():
         if cell.get(field) != expected_value:
@@ -289,8 +289,8 @@ def _aligned_workload(dense: dict[str, Any], sparse: dict[str, Any]) -> dict[str
     keys = (
         "scheme", "model_id", "weights_id", "kv_format", "kv_value_group",
         "kv_plane_layouts", "q4_activation_bits", "w8_activation_bits",
-        "fp8_qk_wmma_enabled", "fp8_qk_wmma_profile", "fp8_qk_wmma_t1_min_context",
-        "fp8_qk_wmma_t2_min_context", "schedule", "spec", "draft_tokens",
+        "split512_enabled", "decode_attention_profile", "packed_decode_min_context",
+        "split512_min_context", "schedule", "spec", "draft_tokens",
         "device_graph", "prefill_chunk", "skip_tokens", "prompt_tokens", "tokens_scored",
         "argmax_tokens", "terrible_nll",
     )

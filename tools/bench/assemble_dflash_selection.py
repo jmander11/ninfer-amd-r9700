@@ -151,7 +151,7 @@ def _same_campaign(
     if (
         manifest.get("expected_q4_activation_bits") != 8
         or manifest.get("expected_w8_activation_bits") != 8
-        or manifest.get("expected_fp8_qk_wmma_enabled") is not True
+        or manifest.get("expected_split512_enabled") is not True
         or manifest.get("expected_xattention_profile") != text_prefill_profile
     ):
         raise ValueError(

@@ -195,7 +195,7 @@ def _manifest(root: Path, prompt: int, chunks: Sequence[int]) -> tuple[dict[str,
         or value.get("expected_kv_plane_layouts") != R9700_KV_PLANE_LAYOUTS
         or value.get("expected_q4_activation_bits") != 8
         or value.get("expected_w8_activation_bits") != 8
-        or value.get("expected_fp8_qk_wmma_enabled") is not True
+        or value.get("expected_split512_enabled") is not True
         or not isinstance(value.get("bench"), dict)
         or not _valid_sha256(value["bench"].get("sha256"))
         or type(value["bench"].get("file_size_bytes")) is not int
@@ -283,8 +283,8 @@ def _same_candidate(screen: dict[str, Any], final: dict[str, Any]) -> None:
     fields = (
         "artifact", "bench", "corpus_sha256", "base_chunk_profile", "expected_kv_value_group",
         "expected_kv_plane_layouts", "expected_q4_activation_bits",
-        "expected_w8_activation_bits", "expected_fp8_qk_wmma_enabled",
-        "expected_fp8_qk_wmma_profile", "expected_xattention_profile",
+        "expected_w8_activation_bits", "expected_split512_enabled",
+        "expected_decode_attention_profile", "expected_xattention_profile",
     )
     if any(screen.get(field) != final.get(field) for field in fields):
         raise ValueError("8K and 32K chunk matrices do not bind one candidate identity")

@@ -98,26 +98,18 @@ std::size_t r9700_full_attention_score_workspace_capacity_bytes(
 
 std::size_t r9700_full_attention_workspace_capacity_bytes(
     std::uint32_t query_rows, std::size_t visible_context,
-    bool tree_or_device_count, bool dflash_target_verify) noexcept {
+    bool tree_or_device_count) noexcept {
     std::size_t required = 0U;
     if (ops::r9700::kv::use_split512_attention(
             query_rows, visible_context, tree_or_device_count)) {
         required = ops::r9700::kv::fp8_int4_kv_attention_split512_workspace_capacity_bytes(
             query_rows, visible_context);
-    } else if (!tree_or_device_count &&
-               ops::r9700::kv::use_fp8_qk_wmma(query_rows, visible_context)) {
-        required = r9700_full_attention_score_workspace_capacity_bytes(visible_context);
     }
-    if (dflash_target_verify &&
-        !tree_or_device_count &&
-        (query_rows >= 4U && query_rows <= 6U) &&
-        visible_context >= ops::r9700::kv::kFp8QkWmmaT1MinimumContext) {
-        const std::size_t candidate_context = std::min<std::size_t>(
-            visible_context, ops::r9700::kv::kDflashVerifyWmmaMaximumContext);
+    if (ops::r9700::kv::use_packed_decode_attention(query_rows, visible_context,
+                                                    tree_or_device_count)) {
         required = std::max(
-            required,
-            ops::r9700::kv::fp8_int4_kv_attention_dflash_verify_batched_wmma_workspace_bytes(
-                candidate_context, query_rows));
+            required, ops::r9700::kv::fp8_int4_kv_attention_packed_decode_workspace_bytes(
+                          visible_context, query_rows));
     }
     // Dense prefill is fused and needs no workspace; the qualification-only P129 tail reuses
     // the single-row score workspace after the dense launch.
@@ -272,22 +264,21 @@ static hipError_t launch_r9700_attention(
         tail.output += 128U * row_elements;
         return ops::r9700::kv::fp8_int4_kv_attention_wmma(tail, stream);
     }
-    if (ops::r9700::kv::use_dflash_verify_batched_wmma(
-            static_cast<std::uint32_t>(rows), raw.context, tree_or_device_count,
-            a.dflash_target_verify) &&
+    if (ops::r9700::kv::use_packed_decode_attention(
+            static_cast<std::uint32_t>(rows), raw.context, tree_or_device_count) &&
         raw.value_group == 16U &&
         raw.key_layout == ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest &&
         raw.value_layout == ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest &&
         raw.value_scale_layout == ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest) {
         const std::size_t required =
-            ops::r9700::kv::fp8_int4_kv_attention_dflash_verify_batched_wmma_workspace_bytes(
+            ops::r9700::kv::fp8_int4_kv_attention_packed_decode_workspace_bytes(
                 raw.context, static_cast<std::uint32_t>(rows));
         if (required == 0U || a.workspace == nullptr || a.workspace_bytes < required) {
             return hipErrorInvalidValue;
         }
-        auto wmma = raw;
-        wmma.score_workspace = static_cast<float*>(a.workspace);
-        return ops::r9700::kv::fp8_int4_kv_attention_dflash_verify_batched_wmma(wmma, stream);
+        auto packed = raw;
+        packed.score_workspace = static_cast<float*>(a.workspace);
+        return ops::r9700::kv::fp8_int4_kv_attention_packed_decode(packed, stream);
     }
     const bool split512 = ops::r9700::kv::use_split512_attention(
         static_cast<std::uint32_t>(rows), raw.context, tree_or_device_count);
@@ -299,20 +290,6 @@ static hipError_t launch_r9700_attention(
         }
         return ops::r9700::kv::fp8_int4_kv_attention_split512(
             raw, a.workspace, required, stream);
-    }
-    const bool ordinary_wmma =
-        ops::r9700::kv::use_fp8_qk_wmma(static_cast<std::uint32_t>(rows), raw.context) &&
-                               a.ancestor_masks == nullptr && a.prefix_lengths == nullptr &&
-                               a.active_query_rows == nullptr;
-    if (ordinary_wmma) {
-        const std::size_t required =
-            r9700_full_attention_score_workspace_capacity_bytes(raw.context);
-        if (required == 0U || a.workspace == nullptr || a.workspace_bytes < required) {
-            return hipErrorInvalidValue;
-        }
-        auto wmma = raw;
-        wmma.score_workspace = static_cast<float*>(a.workspace);
-        return ops::r9700::kv::fp8_int4_kv_attention_wmma(wmma, stream);
     }
     return ops::r9700::kv::fp8_int4_kv_attention_fused(raw, stream);
 }

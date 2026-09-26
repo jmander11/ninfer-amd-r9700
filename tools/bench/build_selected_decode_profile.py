@@ -115,9 +115,9 @@ def build(selection_path: Path, output: Path) -> dict:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     compiled = {
         "q4_activation_bits": 8, "w8_activation_bits": 8,
-        "fp8_qk_wmma_enabled": True,
-        "fp8_qk_wmma_profile": "t1-ge64-t2-ge320-t3plus-stream-v1",
-        "fp8_qk_wmma_t1_min_context": 64, "fp8_qk_wmma_t2_min_context": 320,
+        "split512_enabled": True,
+        "decode_attention_profile": "packed-t1to6-split512-t4tree-v1",
+        "packed_decode_min_context": 64, "split512_min_context": 8192,
         "q4_prefill_cta_profile":
             "m64n128-pingpong-n16-k16-scalar-base-production",
     }

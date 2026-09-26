@@ -1,18 +1,18 @@
 # R9700 codec and gfx12 qualification
 
-DFlash target chain verification W4..6 (contexts 64..262144) uses the split-context dense route:
+Host-fixed 1..6-row decode (ordinary T=1, MTP verification, DFlash chain verification W2..6;
+contexts 64..262144) uses the packed split-context dense route:
 one 192-thread CTA (three CTAs per WGP) per KV head and context chunk (at most 64 chunks of at
 least 256 keys). The six query heads' (row, head) pairs are packed into sixteen-lane tiles, so
 three compute waves cover W6, while three loader waves convert the next 16-key block into the
 second of two LDS buffers (one barrier per block). Every pair runs the dense-prefill arithmetic (represented BF16 Q against exact-BF16 FP8 K, online FP32 Softmax with FP16
 probabilities, FP16 V/8 PV) and writes per-row numerator/origin/denominator partials; a stable FP32
 merge normalizes. The public oracle is BF16-Q attention with exact decoded cache planes and the
-dense criterion |error| <= 2e-3 absolute or relative. The route no longer matches ordinary T=1
-decode's FP8-Q arithmetic bit for bit, so greedy DFlash can differ from greedy ordinary decode on
-near-ties; sampled (p-less) verification keeps its exact target-distribution semantics. Other widths,
-tree/device-count forms and layouts retain their existing routes, including ordinary/MTP split512
-at context 8192 and above. The workspace planner owns the bounded partials. Qualification also
-checks invalid device page-table rows and physical pages poison every represented W4/W5/W6 row
+dense criterion |error| <= 2e-3 absolute or relative. Ordinary T=1 decode and MTP verification
+use the same packed route (rows 1..6), so greedy DFlash and greedy ordinary decode share one
+attention arithmetic. Tree/device-count forms and other layouts retain their existing routes,
+including split512 for tree/device-count T=4 at context 8192 and above. The workspace planner owns the bounded partials. Qualification also
+checks invalid device page-table rows and physical pages poison every represented row (1..6)
 without touching workspace guards; `check_attention_parity_static.py` pins the split kernel's
 resources (249 VGPRs, no scratch, 32 BF16 and 32 FP16 WMMAs) and the merge kernel.
 
@@ -26,7 +26,7 @@ build-r9700/src/ninfer_r9700_runtime_planner_qual --host-dflash-graph-allowance
 build-r9700/src/ninfer_r9700_full_attention_qual
 ```
 
-The discriminator retains W5/W6 and adds W4 at context64 and133 (4100 with
+The discriminator retains W5/W6 and adds widths 1..4 at context64 and133 (4100 with
 `--long-context`), compact C1..4 device page-table selection, causal prefixes,
 invalid-row poisoning, eager/graph equality, and workspace/output guards.
 Cold-start fixed K3 and adaptive Engine exact-token tests remain required: a
@@ -34,8 +34,9 @@ warmed adaptive benchmark can stop choosing K3 and conceal a W4 route mismatch.
 The public leaf qualifier additionally covers contexts15200/32768, W4..6,
 fragmented physical pages, compact C1..4 table rows, pending publication,
 undersized-workspace rejection, the independent FP64 public oracle, and
-poisoned eager/captured output and scratch guards. All W4..6 verification contexts share one graph
-topology (split kernel plus merge).
+poisoned eager/captured output and scratch guards; its T1..6 fixed-context cells use the same
+packed-route criterion. All packed decode contexts share one graph topology (split kernel plus
+merge).
 
 `ninfer_r9700_fp8_row_scaled_small_t_qual` checks the small-T (T <= 16) row-scaled E4M3 Linear
 route used by verification and ordinary decode (one 128-thread CTA per 16 rows, native FP8 WMMA,

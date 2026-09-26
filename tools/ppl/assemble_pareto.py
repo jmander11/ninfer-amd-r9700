@@ -162,7 +162,7 @@ def _reports(
             manifest["expected_kv_value_group"],
             manifest["expected_q4_activation_bits"],
             manifest["expected_w8_activation_bits"],
-            manifest["expected_fp8_qk_wmma_enabled"],
+            manifest["expected_split512_enabled"],
             concurrency,
             manifest["artifact"],
             record["command"],
@@ -473,8 +473,8 @@ def _quality_candidate(
         quality.get("schema") != "ninfer-r9700-q4-a8-final-quality-v2"
         or representation.get("q4_activation_bits") != 8
         or representation.get("w8_activation_bits") != 8
-        or representation.get("fp8_qk_wmma_profile")
-        != "t1-ge64-t2-ge320-t3plus-stream-v1"
+        or representation.get("decode_attention_profile")
+        != "packed-t1to6-split512-t4tree-v1"
         or representation.get("xattention_profile") not in ("dense", "b128-s16-tau900")
         or representation.get("kv_plane_layouts") != R9700_KV_PLANE_LAYOUTS
     ):
@@ -647,7 +647,7 @@ def _campaign_quality_candidate(
     representation = {
         "q4_activation_bits": campaign.get("q4_activation_bits"),
         "w8_activation_bits": campaign.get("w8_activation_bits"),
-        "fp8_qk_wmma_profile": campaign.get("fp8_qk_wmma_profile"),
+        "decode_attention_profile": campaign.get("decode_attention_profile"),
         "xattention_profile": campaign.get("xattention_profile"),
         "kv_plane_layouts": campaign.get("candidate_kv_plane_layouts"),
     }
@@ -666,8 +666,8 @@ def _campaign_quality_candidate(
         or artifact["bytes"] <= 0
         or representation["q4_activation_bits"] != 8
         or representation["w8_activation_bits"] != 8
-        or representation["fp8_qk_wmma_profile"]
-        != "t1-ge64-t2-ge320-t3plus-stream-v1"
+        or representation["decode_attention_profile"]
+        != "packed-t1to6-split512-t4tree-v1"
         or representation["xattention_profile"] not in ("dense", "b128-s16-tau900")
         or representation["kv_plane_layouts"] != R9700_KV_PLANE_LAYOUTS
         or campaign.get("required_candidate_identity")
@@ -704,8 +704,8 @@ def _campaign_quality_candidate(
             "kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
             "q4_activation_bits": 8,
             "w8_activation_bits": 8,
-            "fp8_qk_wmma_enabled": True,
-            "fp8_qk_wmma_profile": "t1-ge64-t2-ge320-t3plus-stream-v1",
+            "split512_enabled": True,
+            "decode_attention_profile": "packed-t1to6-split512-t4tree-v1",
         }
         expected_cell_identity.update(
             {"xattention_qualification": False}
@@ -882,8 +882,8 @@ def assemble_candidate(
             != quality_source["representation"]["q4_activation_bits"]
             or manifest.get("expected_w8_activation_bits")
             != quality_source["representation"]["w8_activation_bits"]
-            or manifest.get("expected_fp8_qk_wmma_profile")
-            != quality_source["representation"]["fp8_qk_wmma_profile"]
+            or manifest.get("expected_decode_attention_profile")
+            != quality_source["representation"]["decode_attention_profile"]
             or manifest.get("expected_xattention_profile")
             != quality_source["representation"].get("xattention_profile")
         ):
@@ -969,7 +969,7 @@ def assemble_candidate(
         "execution_profile": {
             key: quality_source["representation"][key]
             for key in (
-                "q4_activation_bits", "w8_activation_bits", "fp8_qk_wmma_profile",
+                "q4_activation_bits", "w8_activation_bits", "decode_attention_profile",
                 "xattention_profile",
             )
         },

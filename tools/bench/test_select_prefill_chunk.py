@@ -103,7 +103,7 @@ class PrefillChunkSelectionTest(unittest.TestCase):
                 },
                 "expected_q4_activation_bits": 8,
                 "expected_w8_activation_bits": 8,
-                "expected_fp8_qk_wmma_enabled": True,
+                "expected_split512_enabled": True,
                 "bench": {"sha256": "b" * 64, "file_size_bytes": 1},
                 "artifact": {
                     "model_id": "qwen3.8-27b",
@@ -160,7 +160,7 @@ class PrefillChunkSelectionTest(unittest.TestCase):
                     "value_scale": "feature-fastest-page-major",
                 },
                 "expected_q4_activation_bits": 8, "expected_w8_activation_bits": 8,
-                "expected_fp8_qk_wmma_enabled": True,
+                "expected_split512_enabled": True,
                 "bench": {"sha256": "b" * 64, "file_size_bytes": 1},
                 "artifact": {
                     "model_id": "qwen3.8-27b", "weights_id": REQUIRED_RECIPES[0],
@@ -252,8 +252,8 @@ class PrefillChunkSelectionTest(unittest.TestCase):
                     },
                     "expected_q4_activation_bits": 8,
                     "expected_w8_activation_bits": 8,
-                    "expected_fp8_qk_wmma_enabled": True,
-                    "expected_fp8_qk_wmma_profile": "t1-ge64-t2-ge320-t3plus-stream-v1",
+                    "expected_split512_enabled": True,
+                    "expected_decode_attention_profile": "packed-t1to6-split512-t4tree-v1",
                     "expected_xattention_profile": identity[2],
                     "required_candidate_identity": (
                         "fp8-hybrid-selection-authority" if hybrid else None

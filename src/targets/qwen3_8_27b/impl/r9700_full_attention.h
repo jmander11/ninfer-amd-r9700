@@ -28,11 +28,8 @@ struct R9700FullAttentionArgs {
     // Optional device I32 scalar. Null activates all T rows; a valid scalar activates its prefix
     // and zeroes the fixed-width tail without reading tail metadata or cache state.
     const std::int32_t* active_query_rows = nullptr;
-    // Explicit family-schedule identity: true only inside DFlash target verification. Shape alone
-    // must not route an unrelated Text remainder through a qualified DFlash leaf.
-    bool dflash_target_verify = false;
     // Caller-owned storage at the planner's stable peak. Dense initial-prefix calls use the
-    // rectangular FP32 score plane plus maxima; decode uses the ordinary-WMMA or split arena.
+    // rectangular FP32 score plane plus maxima; decode uses the packed or split arena.
     void* workspace = nullptr;
     std::size_t workspace_bytes = 0;
     Tensor output;                             // contiguous FP32 [256,24,T]
@@ -48,10 +45,11 @@ struct R9700FullAttentionArgs {
 // planning; a concrete call consumes only its exact selected-route prefix of the stable span.
 [[nodiscard]] std::size_t r9700_full_attention_workspace_capacity_bytes(
     std::uint32_t query_rows, std::size_t visible_context,
-    bool tree_or_device_count, bool dflash_target_verify = false) noexcept;
+    bool tree_or_device_count) noexcept;
 
-// Dispatches dense prefill through staged full-score GQA6. G16 DFlash chain W4..6
-// uses batched WMMA for contexts64..262144 before the ordinary/MTP split-512 fallback.
+// Dispatches dense prefill through staged full-score GQA6. G16 host-fixed 1..6-row decode
+// (ordinary, MTP, DFlash chain verification) uses the packed route for contexts 64..262144;
+// tree or device-selected T=4 uses split-512, and every other cell the fused leaf.
 // The default-off Text parity profile additionally overwrites only P129's tail with W1 WMMA.
 [[nodiscard]] hipError_t r9700_qwen3_8_27b_full_attention(const R9700FullAttentionArgs& args,
                                                       hipStream_t stream) noexcept;

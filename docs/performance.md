@@ -60,6 +60,47 @@ expected value exactly.
 Copy bus rate counts both the read and write traffic. This is the hardware bandwidth bound, not a
 model or individual-Op throughput claim.
 
+## Decode launches, host stalls and packed T1 attention (2026-09-26, overnight)
+
+Same setup (selective-cap Q4/FP8 DFlash2 artifact, code corpus, C1, draft 5). Each step was
+qualified before the next; ms/round is the comparable DFlash metric because some steps change the
+FP32 association and therefore the greedy trajectory.
+
+| Step | P4096/G128 DFlash ms/round |
+|---|---:|
+| start of session | 33.39 |
+| multi-CTA small-T A8G64 codecs with a status CTA (no reset launch) | 33.12 |
+| fused GDN verification front (RMSNorm + a/b controls + codec, one kernel) | 32.73 |
+| K6144 small-batch projections split over eight waves | 32.68 |
+| GDN recorded convolution fused into the pair projection epilogue | 32.23 |
+| pinned KV-resolution readback; no host wait for the replay fold | 31.91 |
+
+**Status CTA.** Small-T producers used one 1024-thread CTA (compute-bound on one WGP) or a status
+memset launch. They now spread one 16-byte vector per thread over many CTAs; one extra CTA rescans
+the rows for the nonfinite/overflow conditions (overflow exactly when |x| >= 8321040, checked over
+every finite FP32 value) and plain-stores the status word. T6: quantize 4.2 -> 2.6 us, normalized
+prepare 6.4 -> 4.8 us. The gated prepare keeps its memset: its status pass would repeat every
+SiLU/norm and measured 9.2 us.
+**GDN front.** One CTA per control head normalizes all T rows with the eager row-CTA RMSNorm
+arithmetic, runs the unchanged control dot on the BF16 seam, and the token's owner CTA encodes it;
+CTA 0 sees every seam value and publishes the status. Bitwise the eager composition (new
+`ninfer_r9700_gdn_normalized_front_qual`). **Pair + convolution.** For one sequence (W5..6) wave
+zero of each pair CTA holds all tokens of its 16 channels after the split combine, so the recorded
+causal convolution and the output-gate copy run in the epilogue (`gdn_pair_conv_record_bf16`,
+bitwise the composition; `ninfer_r9700_gdn_pair_conv_record_qual`).
+**Host.** The segmented KV status/cursor readbacks landed in `std::array`s, so each copy into
+pageable memory was a staged synchronous copy (~140 us of idle GPU per round); they now use a pinned
+buffer. The commit tail no longer synchronizes before the next round unless a DFlash context
+append's ingress copy is pending. C4 (P2048/G96): 328.7 -> 332.2 tok/s.
+
+**Packed decode attention for T1.** Ordinary T1 decode used FP8-Q/FP8-K WMMA scores, a separate
+Softmax and a vector PV (110 us per layer at 4K), and split-512 from 8K. Host-fixed 1..6-row decode
+now uses the packed split-context route that DFlash verification already used (BF16 Q, exact-BF16
+FP8 K, FP16 probabilities, FP16 V/8, FP32 merge), so ordinary, MTP and DFlash share one attention
+arithmetic; split-512 remains for tree/device-count T4. The discriminator adds widths 1..4
+(max |error| 2.4e-4 against the 2e-3 dense criterion). Ordinary decode: 4K 33.30 -> 34.56 tok/s,
+32K 23.47 -> 31.56 tok/s.
+
 ## Paired small-batch projections (2026-09-26)
 
 Deeper per-wave prefetch (two or three G64 groups) did not move the narrow projections (N5120/K6144

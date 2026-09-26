@@ -87,9 +87,9 @@ DFLASH_PRODUCTION_PROFILES = ((4, 5), (5, 6))
 DFLASH_SHORTLIST_K_ORDER = (4, 5)
 MODEL_ID = "qwen3.8-27b"
 TARGET_ID = "qwen3_8_27b_r9700"
-FP8_QK_WMMA_PROFILE = "t1-ge64-t2-ge320-t3plus-stream-v1"
-FP8_QK_WMMA_T1_MIN_CONTEXT = 64
-FP8_QK_WMMA_T2_MIN_CONTEXT = 320
+DECODE_ATTENTION_PROFILE = "packed-t1to6-split512-t4tree-v1"
+PACKED_DECODE_MIN_CONTEXT = 64
+SPLIT512_MIN_CONTEXT = 8192
 XATTENTION_PROFILES = ("dense", "b128-s16-tau900")
 BENCHMARK_PENDING_TIMEOUT_MS = 0xFFFFFFFF
 NINFER_MAGIC = b"NINFER\x00\x02"
@@ -1892,21 +1892,21 @@ def load_bench_report(
             f"benchmark report w8_activation_bits={w8_activation_bits}; "
             f"expected compiled A{expected_w8_activation_bits}"
         )
-    fp8_qk_wmma = config.get("fp8_qk_wmma_enabled")
+    fp8_qk_wmma = config.get("split512_enabled")
     if type(fp8_qk_wmma) is not bool:
         raise ValueError(
-            "benchmark report has invalid fp8_qk_wmma_enabled="
+            "benchmark report has invalid split512_enabled="
             f"{fp8_qk_wmma!r}"
         )
     if expected_fp8_qk_wmma is not None and fp8_qk_wmma is not expected_fp8_qk_wmma:
         raise ValueError(
-            f"benchmark report fp8_qk_wmma_enabled={fp8_qk_wmma}; "
+            f"benchmark report split512_enabled={fp8_qk_wmma}; "
             f"expected {expected_fp8_qk_wmma}"
         )
     expected_attention_profile = {
-        "fp8_qk_wmma_profile": FP8_QK_WMMA_PROFILE,
-        "fp8_qk_wmma_t1_min_context": FP8_QK_WMMA_T1_MIN_CONTEXT,
-        "fp8_qk_wmma_t2_min_context": FP8_QK_WMMA_T2_MIN_CONTEXT,
+        "decode_attention_profile": DECODE_ATTENTION_PROFILE,
+        "packed_decode_min_context": PACKED_DECODE_MIN_CONTEXT,
+        "split512_min_context": SPLIT512_MIN_CONTEXT,
     }
     for key, value in expected_attention_profile.items():
         if config.get(key) != value:
@@ -2103,10 +2103,10 @@ def report_rows(
             "q4_activation_bits": config.get("q4_activation_bits"),
             "q4_prefill_cta_profile": config.get("q4_prefill_cta_profile"),
             "w8_activation_bits": config.get("w8_activation_bits"),
-            "fp8_qk_wmma_enabled": config.get("fp8_qk_wmma_enabled"),
-            "fp8_qk_wmma_profile": config.get("fp8_qk_wmma_profile"),
-            "fp8_qk_wmma_t1_min_context": config.get("fp8_qk_wmma_t1_min_context"),
-            "fp8_qk_wmma_t2_min_context": config.get("fp8_qk_wmma_t2_min_context"),
+            "split512_enabled": config.get("split512_enabled"),
+            "decode_attention_profile": config.get("decode_attention_profile"),
+            "packed_decode_min_context": config.get("packed_decode_min_context"),
+            "split512_min_context": config.get("split512_min_context"),
             "xattention_qualification": config.get("xattention_qualification"),
             "xattention_profile": config.get("xattention_profile"),
             "xattention_find_block": config.get("xattention_find_block"),
@@ -2355,8 +2355,8 @@ def bind_dflash_diagnostic(
         for key in (
             "kv_cache_format", "kv_value_group", "q4_activation_bits",
             "q4_prefill_cta_profile", "w8_activation_bits",
-            "fp8_qk_wmma_enabled", "fp8_qk_wmma_profile",
-            "fp8_qk_wmma_t1_min_context", "fp8_qk_wmma_t2_min_context",
+            "split512_enabled", "decode_attention_profile",
+            "packed_decode_min_context", "split512_min_context",
         )
     }
     if any(value is None for value in compiled_profile.values()):
@@ -2440,8 +2440,8 @@ def validate_bound_diagnostic(
             for key in (
                 "kv_cache_format", "kv_value_group", "q4_activation_bits",
                 "q4_prefill_cta_profile", "w8_activation_bits",
-                "fp8_qk_wmma_enabled", "fp8_qk_wmma_profile",
-                "fp8_qk_wmma_t1_min_context", "fp8_qk_wmma_t2_min_context",
+                "split512_enabled", "decode_attention_profile",
+                "packed_decode_min_context", "split512_min_context",
             )
         },
     }
@@ -3227,10 +3227,10 @@ def write_manifest(
         "expected_kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
         "expected_q4_activation_bits": args.expected_q4_activation_bits,
         "expected_w8_activation_bits": args.expected_w8_activation_bits,
-        "expected_fp8_qk_wmma_enabled": bool(args.expected_fp8_qk_wmma),
-        "expected_fp8_qk_wmma_profile": FP8_QK_WMMA_PROFILE,
-        "expected_fp8_qk_wmma_t1_min_context": FP8_QK_WMMA_T1_MIN_CONTEXT,
-        "expected_fp8_qk_wmma_t2_min_context": FP8_QK_WMMA_T2_MIN_CONTEXT,
+        "expected_split512_enabled": bool(args.expected_fp8_qk_wmma),
+        "expected_decode_attention_profile": DECODE_ATTENTION_PROFILE,
+        "expected_packed_decode_min_context": PACKED_DECODE_MIN_CONTEXT,
+        "expected_split512_min_context": SPLIT512_MIN_CONTEXT,
         "expected_xattention_profile": args.expected_xattention_profile,
         "concurrency": list(args.concurrency),
         "resume": args.resume,
@@ -3689,7 +3689,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "expected_kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
             "expected_q4_activation_bits": args.expected_q4_activation_bits,
             "expected_w8_activation_bits": args.expected_w8_activation_bits,
-            "expected_fp8_qk_wmma_enabled": bool(args.expected_fp8_qk_wmma),
+            "expected_split512_enabled": bool(args.expected_fp8_qk_wmma),
             "expected_xattention_profile": args.expected_xattention_profile,
             "required_candidate_identity": (
                 "fp8-hybrid-selection-authority" if args.require_fp8_hybrid else None

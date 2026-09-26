@@ -77,17 +77,17 @@ causal positions, optional paired packed-tree ancestry metadata, and an optional
 active-row count. It delegates to
 `src/ops/r9700/kv/fp8_int4_kv_attention.{h,hip}` at the fixed Qwen3.8 geometry.
 
-The selected production implementation has two finite crossovers. At context 8,192 and above,
-ordinary T=1 and fixed-width T=4 use the admitted split-512 score, partial Softmax/PV, and merge
-stages; T=4 supports causal, packed-tree, and device-active-row metadata. T=1 with tree or
-device-active-row metadata retains the fused leaf at every context; workspace sizing and launch
-share this metadata-aware decision. Below the split boundary, ordinary T=1
-at context 64 and above and T=2 at context 320 and above privately cast represented BF16 Q to
-E4M3FN and use wave32 FP8-Q/FP8-K WMMA, a caller-owned FP32 score panel, stable FP32 Softmax, and
-exact vector FP32-probability INT4-V accumulation. Remaining shapes stream FP8 K and signed-
-INT4-times-FP16-scale V through online FP32 Softmax without materializing scores. The query cast is
-an implementation profile, not a cache-format or public-semantic change, and the compile-isolated
-score-streaming build remains the PPL control. Output is FP32; the family schedule performs the
+The selected production implementation routes by row count, context and metadata. Host-fixed
+decode widths of 1..6 rows without tree or device-active-row metadata (ordinary T=1, MTP target
+verification, DFlash chain verification) at context 64..262,144 use the packed decode route: the
+(row, query head) pairs of each KV head are packed into sixteen-lane tiles and run the dense-prefill
+arithmetic (represented BF16 Q against exact-BF16 FP8 K, online FP32 Softmax with FP16
+probabilities, FP16 V/8 PV) over context chunks, followed by a stable FP32 merge of caller-owned
+partials. At context 8,192 and above, fixed-width T=4 with packed-tree or device-active-row
+metadata uses the admitted split-512 score, partial Softmax/PV, and merge stages. Remaining shapes
+stream FP8 K and signed-INT4-times-FP16-scale V through online FP32 Softmax without materializing
+scores; workspace sizing and launch share this metadata-aware decision. The FP8-Q/FP8-K WMMA
+score Op and split-512's T=1 form remain qualified Ops without a production selection. Output is FP32; the family schedule performs the
 explicit BF16 cast where the next semantic boundary requires it. Inactive fixed-width rows are
 exact positive zero. Invalid represented position/tree/count/table-row metadata remains
 conspicuous as NaN in the affected contract-defined rows.

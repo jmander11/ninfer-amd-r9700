@@ -295,7 +295,7 @@ sidecars. `results.json` is `ninfer_r9700_ppl_campaign` schema v6 and records th
 candidate and scorer hashes, validated BF16 source identity/counts, validated
 source config/index and all 18 shard SHA-256 values, corpus manifest/hash/token count, exact
 commands, compiled group, both activation profiles, the
-`t1-ge64-t2-ge320-t3plus-stream-v1` attention classifier, compile-bound dense or XAttention
+`packed-t1to6-split512-t4tree-v1` attention classifier, compile-bound dense or XAttention
 prefill profile, explicit quality tier, execution labels, sidecar hashes, thresholds, and the
 overall gate result. The runner
 rejects corpus, model, weights, group,
@@ -1037,7 +1037,7 @@ Its input is an explicit retained comparison manifest:
       "execution_profile": {
         "q4_activation_bits": 8,
         "w8_activation_bits": 8,
-        "fp8_qk_wmma_profile": "t1-ge64-t2-ge320-t3plus-stream-v1",
+        "decode_attention_profile": "packed-t1to6-split512-t4tree-v1",
         "xattention_profile": "dense"
       },
       "quality_cells": {

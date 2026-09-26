@@ -110,15 +110,13 @@ void qualify_host_request_lane_cap() {
 void qualify_host_split512_routing() {
     namespace kv = ninfer::ops::r9700::kv;
     namespace q27 = ninfer::targets::qwen3_8_27b::detail;
-    require(!kv::use_split512_attention(1U, 8191U) &&
-                kv::use_split512_attention(1U, 8192U) &&
+    require(!kv::use_split512_attention(1U, 8192U, false) &&
                 !kv::use_split512_attention(1U, 8192U, true) &&
-                !kv::use_split512_attention(4U, 8191U) &&
-                kv::use_split512_attention(4U, 8192U) &&
+                !kv::use_split512_attention(4U, 8191U, true) &&
+                !kv::use_split512_attention(4U, 8192U, false) &&
                 kv::use_split512_attention(4U, 8192U, true) &&
-                !kv::use_split512_attention(2U, 32768U) &&
-                !kv::use_split512_attention(3U, 32768U) &&
-                !kv::use_split512_attention(5U, 32768U),
+                !kv::use_split512_attention(2U, 32768U, true) &&
+                !kv::use_split512_attention(5U, 32768U, true),
             "split-512 production selector differs from its admitted boundary");
     require(!kv::use_dense_prefill_attention(127U, 127U) &&
                 kv::use_dense_prefill_attention(128U, 128U) &&
@@ -129,14 +127,14 @@ void qualify_host_split512_routing() {
                 kv::use_dense_prefill_attention(128U, 262144U),
             "dense-prefill production selector differs from its admitted boundary");
     require(q27::r9700_full_attention_workspace_capacity_bytes(1U, 8192U, false) ==
-                kv::fp8_int4_kv_attention_split512_workspace_capacity_bytes(1U, 8192U) &&
+                kv::fp8_int4_kv_attention_packed_decode_workspace_bytes(8192U, 1U) &&
                 q27::r9700_full_attention_workspace_capacity_bytes(1U, 8192U, true) == 0U &&
                 q27::r9700_full_attention_workspace_capacity_bytes(4U, 8192U, false) ==
-                    kv::fp8_int4_kv_attention_split512_workspace_capacity_bytes(4U, 8192U) &&
+                    kv::fp8_int4_kv_attention_packed_decode_workspace_bytes(8192U, 4U) &&
                 q27::r9700_full_attention_workspace_capacity_bytes(4U, 8192U, true) ==
                     kv::fp8_int4_kv_attention_split512_workspace_capacity_bytes(4U, 8192U) &&
                 q27::r9700_full_attention_workspace_capacity_bytes(4U, 8191U, true) == 0U,
-            "split-512 caller-owned workspace selection differs");
+            "packed/split-512 caller-owned workspace selection differs");
     require(q27::r9700_full_attention_workspace_capacity_bytes(2048U, 2048U, false) == 0U &&
                 q27::r9700_full_attention_workspace_capacity_bytes(4096U, 262144U, false) == 0U,
             "fused dense prefill must not reserve caller-owned attention workspace");
@@ -161,12 +159,20 @@ void qualify_host_split512_routing() {
     const auto ordinary = Variant::ordinary_graph_profiles(32768U);
     const auto mtp = Variant::mtp_graph_profiles(32768U, 3U);
     const auto dflash = Variant::dflash_graph_profiles(32768U, 3U, 1U, 4U);
-    require(has_classes(ordinary, {0U, 1U}) && has_classes(mtp, {0U, 1U, 3U}) &&
-                has_classes(dflash, {3U}) &&
-                class_at(ordinary, 8190U) == 0U && class_at(ordinary, 8191U) == 1U &&
-                class_at(mtp, 8185U) == 0U && class_at(mtp, 8186U) == 1U &&
-                class_at(mtp, 8187U) == 1U && class_at(mtp, 8188U) == 3U &&
-                class_at(dflash, 8187U) == 3U && class_at(dflash, 8188U) == 3U,
+    const auto only_classes = [](const std::vector<Variant::GraphExecutionProfile>& profiles,
+                                 std::initializer_list<std::uint32_t> allowed) {
+        return std::all_of(profiles.begin(), profiles.end(), [&](const auto& profile) {
+            return std::find(allowed.begin(), allowed.end(), profile.topology_class) !=
+                   allowed.end();
+        });
+    };
+    require(has_classes(ordinary, {3U}) && only_classes(ordinary, {0U, 3U}) &&
+                has_classes(mtp, {2U, 3U}) && only_classes(mtp, {0U, 2U, 3U}) &&
+                has_classes(dflash, {3U}) && only_classes(dflash, {0U, 3U}) &&
+                class_at(ordinary, 8190U) == 3U && class_at(ordinary, 8191U) == 3U &&
+                class_at(mtp, 8185U) == 2U && class_at(mtp, 8186U) == 3U &&
+                class_at(dflash, 8188U) == 3U &&
+                class_at(Variant::ordinary_graph_profiles(63U), 62U) == 0U,
             "split-512 Device Graph topology classes are incomplete");
     for (const std::uint32_t width : {5U, 6U}) {
         for (std::uint32_t batch = 1; batch <= 4; ++batch) {
@@ -202,45 +208,34 @@ void qualify_host_attention_parity_routing() {
     const std::size_t kW6C135Bytes = verify_bytes(6U, 135U);
     const bool text_enabled = kv::kTextP129WmmaTailCandidate;
     for (const std::size_t context : {64U, 133U, 4100U, 8191U, 8192U, 15200U, 32768U, 262144U}) {
-        for (const std::uint32_t rows : {4U, 5U, 6U}) {
-            require(kv::use_dflash_verify_batched_wmma(rows, context, false, true) &&
-                        q27::r9700_full_attention_workspace_capacity_bytes(rows, context, false, true) >=
+        for (std::uint32_t rows = 1U; rows <= 6U; ++rows) {
+            require(kv::use_packed_decode_attention(rows, context, false) &&
+                        q27::r9700_full_attention_workspace_capacity_bytes(rows, context, false) >=
                             verify_bytes(rows, context),
-                    "DFlash route or split workspace omitted an admitted context");
+                    "packed decode route or split workspace omitted an admitted context");
         }
     }
-    require(!kv::use_dflash_verify_batched_wmma(4U, 63U, false, true) &&
-                !kv::use_dflash_verify_batched_wmma(4U, 262145U, false, true) &&
-                !kv::use_dflash_verify_batched_wmma(4U, 134U, true, true) &&
-                !kv::use_dflash_verify_batched_wmma(4U, 134U, false, false),
-            "DFlash W4 route escaped context/tree/caller admission");
-    require(kv::use_dflash_verify_batched_wmma(5U, 134U, false, true) &&
-                kv::use_dflash_verify_batched_wmma(6U, 135U, false, true) &&
+    require(!kv::use_packed_decode_attention(4U, 63U, false) &&
+                !kv::use_packed_decode_attention(4U, 262145U, false) &&
+                !kv::use_packed_decode_attention(4U, 134U, true) &&
+                !kv::use_packed_decode_attention(0U, 134U, false) &&
+                !kv::use_packed_decode_attention(7U, 135U, false) &&
                 kv::use_text_p129_wmma_tail(129U, 129U) == text_enabled &&
-                !kv::use_dflash_verify_batched_wmma(5U, 134U, false, false) &&
-                !kv::use_dflash_verify_batched_wmma(6U, 135U, false, false) &&
-                kv::use_dflash_verify_batched_wmma(4U, 134U, false, true) &&
-                !kv::use_dflash_verify_batched_wmma(3U, 134U, false, true) &&
-                !kv::use_dflash_verify_batched_wmma(7U, 135U, false, true) &&
-                !kv::use_dflash_verify_batched_wmma(5U, 134U, true, true) &&
-                !kv::use_dflash_verify_batched_wmma(6U, 135U, true, true) &&
                 !kv::use_text_p129_wmma_tail(128U, 128U) &&
                 !kv::use_text_p129_wmma_tail(129U, 130U),
-            "attention parity selectors escaped their exact Text/DFlash cells");
-    require(q27::r9700_full_attention_workspace_capacity_bytes(5U, 134U, false, false) == 0U &&
-                q27::r9700_full_attention_workspace_capacity_bytes(5U, 134U, false, true) ==
-                    kW5C134Bytes &&
-                q27::r9700_full_attention_workspace_capacity_bytes(5U, 140U, false, true) ==
+            "attention parity selectors escaped their exact Text/packed cells");
+    require(q27::r9700_full_attention_workspace_capacity_bytes(5U, 134U, false) == kW5C134Bytes &&
+                q27::r9700_full_attention_workspace_capacity_bytes(5U, 140U, false) ==
                     kW5C140Bytes &&
-                q27::r9700_full_attention_workspace_capacity_bytes(5U, 8191U, false, true) ==
+                q27::r9700_full_attention_workspace_capacity_bytes(5U, 8191U, false) ==
                     verify_bytes(5U, 8191U) &&
-                q27::r9700_full_attention_workspace_capacity_bytes(5U, 134U, true, true) == 0U &&
-                q27::r9700_full_attention_workspace_capacity_bytes(6U, 134U, false, true) ==
+                q27::r9700_full_attention_workspace_capacity_bytes(5U, 134U, true) == 0U &&
+                q27::r9700_full_attention_workspace_capacity_bytes(6U, 134U, false) ==
                     kW6C134Bytes &&
-                q27::r9700_full_attention_workspace_capacity_bytes(6U, 135U, false, true) ==
+                q27::r9700_full_attention_workspace_capacity_bytes(6U, 135U, false) ==
                     kW6C135Bytes &&
-                q27::r9700_full_attention_workspace_capacity_bytes(6U, 135U, true, true) == 0U,
-            "DFlash W4..6 production workspace escaped width/tree selection");
+                q27::r9700_full_attention_workspace_capacity_bytes(6U, 135U, true) == 0U,
+            "packed decode production workspace escaped width/tree selection");
     require(q27::r9700_full_attention_workspace_capacity_bytes(129U, 129U, false) ==
                 (text_enabled ? q27::r9700_full_attention_score_workspace_capacity_bytes(129U)
                               : 0U),
@@ -435,9 +430,9 @@ void qualify_host_mtp_graph_allowance() {
              Case{64, 1, 3, false, 1, 1, 0},
              Case{1024, 1, 3, false, 3, 1, 3},
              Case{1024, 4, 5, false, 12, 4, 12},
-             Case{262144, 1, 3, false, 11, 3, 11},
-             Case{262144, 4, 5, false, 32, 4, 32},
-             Case{262144, 4, 5, true, 108, 20, 108}}) {
+             Case{262144, 1, 3, false, 11, 3, 10},
+             Case{262144, 4, 5, false, 32, 8, 28},
+             Case{262144, 4, 5, true, 108, 28, 96}}) {
         runtime::SequencePlanningInputs inputs{
             .weights_profile = Variant::WeightsProfile::R9700Q4G64Evaluation,
             .capacity = c.context,
@@ -643,7 +638,6 @@ std::size_t qualify_plan(ninfer::DeviceContext& device, std::uint32_t concurrenc
         constexpr std::size_t kDFlashFamilyBytes     = 48ULL * kMiB;
         constexpr std::size_t kDFlashExecutableBytes = 26ULL * kMiB;
         constexpr std::size_t kDFlashK1FusedBytes    = 10ULL * kMiB;
-        constexpr std::size_t kDFlashK1WmmaBytes     = 18ULL * kMiB;
         std::size_t definitions = 0;
         std::vector<std::uint32_t> topology_classes;
         std::size_t expected_allowance = kDFlashFamilyBytes;
@@ -659,7 +653,7 @@ std::size_t qualify_plan(ninfer::DeviceContext& device, std::uint32_t concurrenc
                     continue;
                 }
                 topology_classes.push_back(folded);
-                if (drafts != 1U) {
+                if (drafts != 1U || profile.topology_class == 3U) {
                     expected_allowance += kDFlashExecutableBytes;
                     const auto count = static_cast<std::size_t>(std::count_if(
                         profiles.begin(), profiles.end(), [&](const auto& p) {
@@ -668,8 +662,6 @@ std::size_t qualify_plan(ninfer::DeviceContext& device, std::uint32_t concurrenc
                     if (count > 3U) expected_allowance += (count - 3U)*4ULL*kMiB;
                 } else if (profile.topology_class == 0U) {
                     expected_allowance += kDFlashK1FusedBytes;
-                } else if (profile.topology_class == 1U) {
-                    expected_allowance += kDFlashK1WmmaBytes;
                 } else {
                     throw std::runtime_error("unexpected DFlash K=1 topology class");
                 }

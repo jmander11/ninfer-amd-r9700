@@ -10,9 +10,9 @@ from unittest.mock import patch
 
 from tools.bench.check_ordinary_decode_report import validate_matrix
 from tools.bench.run_ninfer_bench_matrix import (
-    FP8_QK_WMMA_PROFILE,
-    FP8_QK_WMMA_T1_MIN_CONTEXT,
-    FP8_QK_WMMA_T2_MIN_CONTEXT,
+    DECODE_ATTENTION_PROFILE,
+    PACKED_DECODE_MIN_CONTEXT,
+    SPLIT512_MIN_CONTEXT,
     MATRIX_SCHEMA_VERSION,
     R9700_KV_PLANE_LAYOUTS,
     R9700_POWER_PROFILE,
@@ -54,10 +54,10 @@ class OrdinaryDecodeReportTest(unittest.TestCase):
             "case_count": 1, "point_count": 1, "concurrency": [1],
             "expected_kv_value_group": 16, "expected_q4_activation_bits": 8,
             "expected_kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
-            "expected_w8_activation_bits": 8, "expected_fp8_qk_wmma_enabled": True,
-            "expected_fp8_qk_wmma_profile": FP8_QK_WMMA_PROFILE,
-            "expected_fp8_qk_wmma_t1_min_context": FP8_QK_WMMA_T1_MIN_CONTEXT,
-            "expected_fp8_qk_wmma_t2_min_context": FP8_QK_WMMA_T2_MIN_CONTEXT,
+            "expected_w8_activation_bits": 8, "expected_split512_enabled": True,
+            "expected_decode_attention_profile": DECODE_ATTENTION_PROFILE,
+            "expected_packed_decode_min_context": PACKED_DECODE_MIN_CONTEXT,
+            "expected_split512_min_context": SPLIT512_MIN_CONTEXT,
             "expected_xattention_profile": "b128-s16-tau900",
             "power_profile": {"required": "auto", "sysfs_path": str(R9700_POWER_PROFILE),
                               "observed": "auto", "rechecked_after": "auto"},
@@ -182,9 +182,9 @@ class OrdinaryDecodeReportTest(unittest.TestCase):
             matrix, executable, artifact, report = self.fixture(Path(directory))
             manifest_path = matrix / "manifest.json"
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            manifest["expected_fp8_qk_wmma_profile"] = "forged"
-            manifest["expected_fp8_qk_wmma_t1_min_context"] = 1
-            manifest["expected_fp8_qk_wmma_t2_min_context"] = 2
+            manifest["expected_decode_attention_profile"] = "forged"
+            manifest["expected_packed_decode_min_context"] = 1
+            manifest["expected_split512_min_context"] = 2
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "manifest contract"):
                 self.validate(matrix, executable, artifact, report)

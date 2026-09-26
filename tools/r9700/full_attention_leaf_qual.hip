@@ -394,9 +394,9 @@ void qualify_long_dflash(ninfer::DeviceContext& device) {
             const auto read = transaction.pending_layer_read(0);
             transaction.end_device_segment(device.stream);
             const std::size_t scratch_bytes = q27::r9700_full_attention_workspace_capacity_bytes(
-                rows, context, false, true);
+                rows, context, false);
             const std::size_t score_bytes =
-                ninfer::ops::r9700::kv::fp8_int4_kv_attention_dflash_verify_batched_wmma_workspace_bytes(
+                ninfer::ops::r9700::kv::fp8_int4_kv_attention_packed_decode_workspace_bytes(
                     context, rows);
             if (score_bytes == 0U || scratch_bytes < score_bytes)
                 fail("long DFlash planner underallocates split partials");
@@ -409,7 +409,7 @@ void qualify_long_dflash(ninfer::DeviceContext& device) {
                 .query = ninfer::Tensor(q.data(), ninfer::DType::BF16,
                                         {256, 24, static_cast<std::int32_t>(rows)}),
                 .cache_read = read, .row_positions = static_cast<const std::int32_t*>(pos.data()),
-                .dflash_target_verify = true, .workspace = scratch_payload,
+                .workspace = scratch_payload,
                 .workspace_bytes = scratch_bytes,
                 .output = ninfer::Tensor(output_payload, ninfer::DType::FP32,
                                          {256, 24, static_cast<std::int32_t>(rows)})};
@@ -479,11 +479,11 @@ void qualify_long_dflash(ninfer::DeviceContext& device) {
 
 int main() {
     try {
-        const auto selects_wmma = [](std::uint32_t rows, std::size_t context) {
-            return ninfer::ops::r9700::kv::use_fp8_qk_wmma(rows, context);
+        const auto selects_packed = [](std::uint32_t rows, std::size_t context, bool tree) {
+            return ninfer::ops::r9700::kv::use_packed_decode_attention(rows, context, tree);
         };
-        const auto selects_split512 = [](std::uint32_t rows, std::size_t context) {
-            return ninfer::ops::r9700::kv::use_split512_attention(rows, context);
+        const auto selects_split512 = [](std::uint32_t rows, std::size_t context, bool tree) {
+            return ninfer::ops::r9700::kv::use_split512_attention(rows, context, tree);
         };
         const auto selects_dense_prefill = [](std::uint32_t rows, std::size_t context) {
             return ninfer::ops::r9700::kv::use_dense_prefill_attention(rows, context);
@@ -496,21 +496,19 @@ int main() {
             !selects_dense_prefill(4096U, 8192U)) {
             fail("dense-prefill row/context classifier is not the admitted boundary");
         }
+        if (!selects_packed(1U, 64U, false) || !selects_packed(6U, 262144U, false) ||
+            selects_packed(1U, 63U, false) || selects_packed(7U, 4096U, false) ||
+            selects_packed(0U, 4096U, false) || selects_packed(4U, 4096U, true) ||
+            selects_packed(1U, 262145U, false)) {
+            fail("packed decode row/context/tree classifier is not the admitted boundary");
+        }
         if (ninfer::ops::r9700::kv::kFp8QkWmmaDecode) {
-            if (selects_wmma(1U, 63U) || !selects_wmma(1U, 64U) ||
-                selects_wmma(2U, 319U) || !selects_wmma(2U, 320U) ||
-                selects_wmma(3U, 4096U)) {
-                fail("FP8-Q/K WMMA context/row classifier is not the qualified boundary");
-            }
-            if (selects_split512(1U, 8191U) || !selects_split512(1U, 8192U) ||
-                selects_split512(4U, 8191U) || !selects_split512(4U, 8192U) ||
-                selects_split512(2U, 32768U) || selects_split512(3U, 32768U) ||
-                selects_split512(5U, 32768U)) {
+            if (selects_split512(4U, 8191U, true) || !selects_split512(4U, 8192U, true) ||
+                selects_split512(4U, 8192U, false) || selects_split512(1U, 8192U, true) ||
+                selects_split512(5U, 32768U, true)) {
                 fail("split-512 context/row classifier is not the admitted boundary");
             }
-        } else if (selects_wmma(1U, 4096U) || selects_wmma(2U, 4096U)) {
-            fail("score-streaming control unexpectedly selects FP8-Q/K WMMA");
-        } else if (selects_split512(1U, 8192U) || selects_split512(4U, 8192U)) {
+        } else if (selects_split512(4U, 8192U, true)) {
             fail("score-streaming control unexpectedly selects split-512 attention");
         }
         ninfer::DeviceContext device(0);
@@ -578,11 +576,15 @@ int main() {
         ninfer::DeviceBuffer d_prefix_lengths(
             kMaximumQualifiedRows * sizeof(std::int32_t));
         ninfer::DeviceBuffer d_active_query_rows(sizeof(std::int32_t));
-        // Dense prefill needs none; the single-row WMMA score plane is the largest consumer.
-        ninfer::DeviceBuffer d_score_workspace(std::max(
-            q27::r9700_full_attention_workspace_capacity_bytes(
-                kMaximumQualifiedRows, kContext + 1U, false),
-            q27::r9700_full_attention_score_workspace_capacity_bytes(kContext + 1U)));
+        // Dense prefill needs none; the packed decode partials (rows 1..6) and the single-row WMMA
+        // score plane are the consumers.
+        std::size_t score_workspace_capacity =
+            q27::r9700_full_attention_score_workspace_capacity_bytes(kContext + 1U);
+        for (std::uint32_t rows = 1U; rows <= kMaximumQualifiedRows; ++rows)
+            score_workspace_capacity = std::max(
+                score_workspace_capacity,
+                q27::r9700_full_attention_workspace_capacity_bytes(rows, kContext + 1U, false));
+        ninfer::DeviceBuffer d_score_workspace(score_workspace_capacity);
         const ninfer::Fp8KInt4VPagedKVLayerView view =
             typed_cache.layer_view(0, allocation);
         if (view.key_fp8_pages.bytes() != cache.physical_keys.size() ||
@@ -610,8 +612,8 @@ int main() {
             typed_cache.published_layer_read(allocation, publication, 0);
         double maximum_absolute = 0.0;
         double maximum_relative = 0.0;
-        double wmma_maximum_absolute = 0.0;
-        double wmma_maximum_relative = 0.0;
+        double packed_maximum_absolute = 0.0;
+        double packed_maximum_relative = 0.0;
         std::array<float, 2> decode_latency_ms{};
         std::array<float, 3> prefill_latency_ms{};
         constexpr std::array<std::size_t, 11> qualified_widths{
@@ -632,8 +634,8 @@ int main() {
             const std::size_t score_workspace_bytes =
                 q27::r9700_full_attention_workspace_capacity_bytes(
                     static_cast<std::uint32_t>(rows), kContext, false);
-            const bool uses_wmma = ninfer::ops::r9700::kv::use_fp8_qk_wmma(
-                static_cast<std::uint32_t>(rows), kContext);
+            const bool uses_packed = ninfer::ops::r9700::kv::use_packed_decode_attention(
+                static_cast<std::uint32_t>(rows), kContext, false);
             const q27::R9700FullAttentionArgs args{
                 .query = ninfer::Tensor(d_queries.data(), ninfer::DType::BF16,
                                         {static_cast<std::int32_t>(kHeadDim),
@@ -660,11 +662,13 @@ int main() {
                 const double relative = absolute / std::max(std::abs(expected[index]), 1.0e-6);
                 maximum_absolute = std::max(maximum_absolute, absolute);
                 maximum_relative = std::max(maximum_relative, relative);
-                if (uses_wmma) {
-                    wmma_maximum_absolute = std::max(wmma_maximum_absolute, absolute);
-                    wmma_maximum_relative = std::max(wmma_maximum_relative, relative);
+                if (uses_packed) {
+                    packed_maximum_absolute = std::max(packed_maximum_absolute, absolute);
+                    packed_maximum_relative = std::max(packed_maximum_relative, relative);
                 }
-                const double tolerance = uses_wmma ? 5.0e-3 : 2.0e-4;
+                // Packed decode: the dense-attention criterion (BF16 Q, exact-BF16 K, FP16
+                // probabilities and V/8 with FP32 accumulation).
+                const double tolerance = uses_packed ? 2.0e-3 : 2.0e-4;
                 if (!std::isfinite(actual[index]) || !std::isfinite(expected[index]) ||
                     !std::isfinite(absolute) || !std::isfinite(relative) ||
                     (absolute > tolerance && relative > tolerance)) {
@@ -802,6 +806,10 @@ int main() {
                                        full_active_positions.size() * sizeof(std::int32_t));
         q27::R9700FullAttentionArgs fixed_count_args = active_count_args;
         fixed_count_args.active_query_rows = nullptr;
+        fixed_count_args.workspace_bytes = q27::r9700_full_attention_workspace_capacity_bytes(
+            static_cast<std::uint32_t>(kActiveCountRows), kContext, false);
+        fixed_count_args.workspace =
+            fixed_count_args.workspace_bytes == 0U ? nullptr : d_score_workspace.data();
         constexpr int kActiveTimingWarmups = 20;
         for (int warmup = 0; warmup < kActiveTimingWarmups; ++warmup) {
             HIP_CHECK(q27::r9700_qwen3_8_27b_full_attention(fixed_count_args, device.stream));
@@ -1098,6 +1106,9 @@ int main() {
                                      static_cast<std::int32_t>(kQueryHeads), 3}),
             .cache_read = committed_read,
             .row_positions = static_cast<const std::int32_t*>(d_row_positions.data()),
+            .workspace = d_score_workspace.data(),
+            .workspace_bytes = q27::r9700_full_attention_workspace_capacity_bytes(3U, kContext,
+                                                                                false),
             .output = ninfer::Tensor(d_output.data(), ninfer::DType::FP32,
                                      {static_cast<std::int32_t>(kHeadDim),
                                       static_cast<std::int32_t>(kQueryHeads), 3})};
@@ -1113,7 +1124,8 @@ int main() {
                                              valid_row_expected[index]);
             const double relative = absolute /
                                     std::max(std::abs(valid_row_expected[index]), 1.0e-6);
-            if (absolute > 2.0e-4 && relative > 2.0e-4) {
+            // Packed decode criterion (BF16 Q, FP16 probabilities and V/8).
+            if (absolute > 2.0e-3 && relative > 2.0e-3) {
                 fail("valid row adjacent to rejected device frontiers differs from FP64 oracle");
             }
         }
@@ -1231,7 +1243,7 @@ int main() {
             .row_positions = static_cast<const std::int32_t*>(d_row_positions.data()),
             .workspace = d_score_workspace.data(),
             .workspace_bytes =
-                q27::r9700_full_attention_score_workspace_capacity_bytes(kContext + 1U),
+                q27::r9700_full_attention_workspace_capacity_bytes(1U, kContext + 1U, false),
             .output = ninfer::Tensor(d_output.data(), ninfer::DType::FP32,
                                      {static_cast<std::int32_t>(kHeadDim),
                                       static_cast<std::int32_t>(kQueryHeads), 1})};
@@ -1267,9 +1279,9 @@ int main() {
             const double absolute =
                 std::abs(static_cast<double>(pending_actual[index]) - pending_expected[index]);
             const double relative = absolute / std::max(std::abs(pending_expected[index]), 1.0e-6);
-            const double tolerance = ninfer::ops::r9700::kv::use_fp8_qk_wmma(
-                                         1U, kContext + 1U)
-                                         ? 5.0e-3
+            const double tolerance = ninfer::ops::r9700::kv::use_packed_decode_attention(
+                                         1U, kContext + 1U, false)
+                                         ? 2.0e-3
                                          : 2.0e-4;
             if (absolute > tolerance && relative > tolerance) {
                 fail("same-stream pending attention differs from the FP64 oracle");
@@ -1280,8 +1292,8 @@ int main() {
                   << kValueGroup << ' '
                   << "token-K/feature-V/feature-scale T=1..9,17,128 context=257 max_abs="
                   << maximum_absolute << " max_rel=" << maximum_relative
-                  << " wmma_max_abs=" << wmma_maximum_absolute
-                  << " wmma_max_rel=" << wmma_maximum_relative
+                  << " packed_max_abs=" << packed_maximum_absolute
+                  << " packed_max_rel=" << packed_maximum_relative
                   << " whole_op_ms[T1/T2]=" << decode_latency_ms[0] << '/'
                   << decode_latency_ms[1]
                   << " tree_max_abs=" << tree_maximum_absolute

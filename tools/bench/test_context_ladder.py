@@ -22,8 +22,8 @@ class ContextLadderTests(unittest.TestCase):
         self.precision = dict(q4_activation_bits=8, q4_activation_profile='mixed',
                               q4_prefill_gate_up_a4=True, q4_prefill_cta_profile='production',
                               w8_activation_bits=8, kv_value_group=16, kv_plane_layouts={'key': 'fp8'},
-                              fp8_qk_wmma_enabled=True, fp8_qk_wmma_profile='production',
-                              fp8_qk_wmma_t1_min_context=64, fp8_qk_wmma_t2_min_context=320)
+                              split512_enabled=True, decode_attention_profile='production',
+                              packed_decode_min_context=64, split512_min_context=8192)
         config = dict(self.precision, xattention_qualification=False, concurrency=1,
                       prefill_chunk=2048, max_context=131200, spec='dflash', draft_tokens=5,
                       warmup=0, repetitions=1, corpus_path='/corpus.ids', corpus_tokens=4096,

@@ -564,7 +564,7 @@ int test_report_contract() {
         return fail(std::string("invalid benchmark JSON: ") + error.what());
     }
 
-    failures += expect(report.at("schema_version") == 23, "report schema v23");
+    failures += expect(report.at("schema_version") == 24, "report schema v24");
     failures += expect(report.at("phase_timing_semantics") ==
                            "serial-lane-service-sum_shared-decode-max_v1",
                        "report explicitly versions phase aggregation semantics");
@@ -625,14 +625,14 @@ int test_report_contract() {
     failures += expect(report.at("config").at("w8_activation_bits") ==
                            ninfer::ops::r9700::linear::kW8ActivationBits,
                        "compiled W8 activation width");
-    failures += expect(report.at("config").at("fp8_qk_wmma_enabled") ==
+    failures += expect(report.at("config").at("split512_enabled") ==
                            ninfer::ops::r9700::kv::kFp8QkWmmaDecode,
-                       "compiled FP8-Q/K WMMA enablement");
-    failures += expect(report.at("config").at("fp8_qk_wmma_profile") ==
-                           "t1-ge64-t2-ge320-t3plus-stream-v1" &&
-                           report.at("config").at("fp8_qk_wmma_t1_min_context") == 64 &&
-                           report.at("config").at("fp8_qk_wmma_t2_min_context") == 320,
-                       "compiled FP8-Q/K crossover classifier");
+                       "compiled split-512 enablement");
+    failures += expect(report.at("config").at("decode_attention_profile") ==
+                           "packed-t1to6-split512-t4tree-v1" &&
+                           report.at("config").at("packed_decode_min_context") == 64 &&
+                           report.at("config").at("split512_min_context") == 8192,
+                       "compiled decode attention classifier");
 #if defined(NINFER_R9700_XATTENTION_QUALIFICATION)
     failures += expect(report.at("config").at("xattention_qualification") == true &&
                            report.at("config").at("xattention_profile") ==
@@ -800,8 +800,8 @@ int test_human_and_csv_reports() {
            "dflash_mlp_down_t5_candidate",
            "text_p129_wmma_tail_candidate",
            "w8_activation_bits",
-          "fp8_qk_wmma_enabled", "fp8_qk_wmma_profile",
-          "fp8_qk_wmma_t1_min_context", "fp8_qk_wmma_t2_min_context", "kv_payload_bytes",
+          "split512_enabled", "decode_attention_profile",
+          "packed_decode_min_context", "split512_min_context", "kv_payload_bytes",
           "load_host_to_device_bytes", "request_transient_capacity_bytes",
           "device_graph_allowance_bytes", "workspace_peak_bytes",
           "workspace_allocator_peak_bytes", "spec_acceptance_rate",
@@ -823,22 +823,18 @@ int test_attention_parity_selector_scope() {
     failures += expect(!kv::use_text_p129_wmma_tail(128U, 128U) &&
                            !kv::use_text_p129_wmma_tail(129U, 130U),
                        "Text tail candidate rejects adjacent cells");
-    failures += expect(kv::use_dflash_verify_batched_wmma(4U, 133U, false, true) &&
-                           kv::use_dflash_verify_batched_wmma(5U, 134U, false, true) &&
-                           kv::use_dflash_verify_batched_wmma(6U, 135U, false, true),
-                       "DFlash W4..6 batched route exact selected cells (production)");
-    failures += expect(!kv::use_dflash_verify_batched_wmma(5U, 134U, false, false) &&
-                           !kv::use_dflash_verify_batched_wmma(6U, 135U, false, false) &&
-                           !kv::use_dflash_verify_batched_wmma(3U, 134U, false, true) &&
-                           !kv::use_dflash_verify_batched_wmma(7U, 135U, false, true) &&
-                           !kv::use_dflash_verify_batched_wmma(5U, 134U, true, true) &&
-                           !kv::use_dflash_verify_batched_wmma(6U, 135U, true, true) &&
-                           !kv::use_dflash_verify_batched_wmma(5U, 63U, false, true) &&
-                           !kv::use_dflash_verify_batched_wmma(6U, 63U, false, true) &&
-                           kv::use_dflash_verify_batched_wmma(5U, 8192U, false, true) &&
-                           kv::use_dflash_verify_batched_wmma(6U, 262144U, false, true) &&
-                           !kv::use_dflash_verify_batched_wmma(6U, 262145U, false, true),
-                       "DFlash batched route rejects unqualified width/tree/context cells");
+    failures += expect(kv::use_packed_decode_attention(1U, 64U, false) &&
+                           kv::use_packed_decode_attention(2U, 320U, false) &&
+                           kv::use_packed_decode_attention(4U, 133U, false) &&
+                           kv::use_packed_decode_attention(5U, 8192U, false) &&
+                           kv::use_packed_decode_attention(6U, 262144U, false),
+                       "packed decode route selected cells (production)");
+    failures += expect(!kv::use_packed_decode_attention(0U, 134U, false) &&
+                           !kv::use_packed_decode_attention(7U, 135U, false) &&
+                           !kv::use_packed_decode_attention(5U, 134U, true) &&
+                           !kv::use_packed_decode_attention(1U, 63U, false) &&
+                           !kv::use_packed_decode_attention(6U, 262145U, false),
+                       "packed decode route rejects unqualified width/tree/context cells");
     return failures;
 }
 

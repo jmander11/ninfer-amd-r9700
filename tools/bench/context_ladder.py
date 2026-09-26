@@ -19,8 +19,8 @@ ROOT = Path(__file__).resolve().parents[2]
 POWER = Path('/sys/bus/pci/devices/0000:13:00.0/power_dpm_force_performance_level')
 PRECISION = ('q4_activation_bits', 'q4_activation_profile', 'q4_prefill_gate_up_a4',
              'q4_prefill_cta_profile', 'w8_activation_bits', 'kv_value_group',
-             'kv_plane_layouts', 'fp8_qk_wmma_enabled', 'fp8_qk_wmma_profile',
-             'fp8_qk_wmma_t1_min_context', 'fp8_qk_wmma_t2_min_context')
+             'kv_plane_layouts', 'split512_enabled', 'decode_attention_profile',
+             'packed_decode_min_context', 'split512_min_context')
 
 
 def read(path):

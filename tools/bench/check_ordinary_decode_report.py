@@ -15,9 +15,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tools.bench.run_ninfer_bench_matrix import (
-    FP8_QK_WMMA_PROFILE,
-    FP8_QK_WMMA_T1_MIN_CONTEXT,
-    FP8_QK_WMMA_T2_MIN_CONTEXT,
+    DECODE_ATTENTION_PROFILE,
+    PACKED_DECODE_MIN_CONTEXT,
+    SPLIT512_MIN_CONTEXT,
     MATRIX_SCHEMA_VERSION,
     R9700_KV_PLANE_LAYOUTS,
     R9700_POWER_PROFILE,
@@ -82,10 +82,10 @@ def validate_matrix(
             and manifest.get("expected_kv_plane_layouts") == R9700_KV_PLANE_LAYOUTS
             and manifest.get("expected_q4_activation_bits") == 8
             and manifest.get("expected_w8_activation_bits") == 8
-            and manifest.get("expected_fp8_qk_wmma_enabled") is True
-            and manifest.get("expected_fp8_qk_wmma_profile") == FP8_QK_WMMA_PROFILE
-            and manifest.get("expected_fp8_qk_wmma_t1_min_context") == FP8_QK_WMMA_T1_MIN_CONTEXT
-            and manifest.get("expected_fp8_qk_wmma_t2_min_context") == FP8_QK_WMMA_T2_MIN_CONTEXT
+            and manifest.get("expected_split512_enabled") is True
+            and manifest.get("expected_decode_attention_profile") == DECODE_ATTENTION_PROFILE
+            and manifest.get("expected_packed_decode_min_context") == PACKED_DECODE_MIN_CONTEXT
+            and manifest.get("expected_split512_min_context") == SPLIT512_MIN_CONTEXT
             and manifest.get("expected_xattention_profile") == "b128-s16-tau900",
             "ordinary diagnostic manifest contract differs")
     require(not (root / "failures.json").exists(),

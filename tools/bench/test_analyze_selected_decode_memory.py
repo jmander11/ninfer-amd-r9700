@@ -88,7 +88,7 @@ class SelectedDecodeMemoryAnalysisTest(unittest.TestCase):
                         "execution_profile": {"xattention_profile": "dense"},
                         "prefill_chunk": 2048}
             compiled = {"q4_activation_bits": 8, "w8_activation_bits": 8,
-                        "fp8_qk_wmma_enabled": True}
+                        "split512_enabled": True}
             receipt = {
                 "artifact_type": PROFILE_BUILD_RECEIPT_TYPE, "schema_version": 1,
                 "status": "passed", "purpose": "profiler_attribution_only",
@@ -324,10 +324,10 @@ class SelectedDecodeMemoryAnalysisTest(unittest.TestCase):
                            "prefill_chunk": 2048, "kv_value_group": 16,
                            "corpus_path": "/corpus", "corpus_tokens": 65536,
                            "q4_activation_bits": 8, "w8_activation_bits": 8,
-                           "fp8_qk_wmma_enabled": True,
-                           "fp8_qk_wmma_profile": "t1-ge64-t2-ge320-t3plus-stream-v1",
-                           "fp8_qk_wmma_t1_min_context": 64,
-                           "fp8_qk_wmma_t2_min_context": 320,
+                           "split512_enabled": True,
+                           "decode_attention_profile": "packed-t1to6-split512-t4tree-v1",
+                           "packed_decode_min_context": 64,
+                           "split512_min_context": 8192,
                            "q4_prefill_cta_profile":
                                "m64n128-pingpong-n16-k16-scalar-base-production",
                            "xattention_qualification": False,
@@ -348,10 +348,10 @@ class SelectedDecodeMemoryAnalysisTest(unittest.TestCase):
                     "corpus": {"path": "/corpus", "tokens": 65536},
                     "compiled_route": {
                         "q4_activation_bits": 8, "w8_activation_bits": 8,
-                        "fp8_qk_wmma_enabled": True,
-                        "fp8_qk_wmma_profile": "t1-ge64-t2-ge320-t3plus-stream-v1",
-                        "fp8_qk_wmma_t1_min_context": 64,
-                        "fp8_qk_wmma_t2_min_context": 320,
+                        "split512_enabled": True,
+                        "decode_attention_profile": "packed-t1to6-split512-t4tree-v1",
+                        "packed_decode_min_context": 64,
+                        "split512_min_context": 8192,
                         "q4_prefill_cta_profile":
                             "m64n128-pingpong-n16-k16-scalar-base-production"}}
             result = validate_benchmark_report(

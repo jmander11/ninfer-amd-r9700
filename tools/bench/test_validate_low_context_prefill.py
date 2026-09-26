@@ -10,9 +10,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from tools.bench.run_ninfer_bench_matrix import (
-    FP8_QK_WMMA_PROFILE,
-    FP8_QK_WMMA_T1_MIN_CONTEXT,
-    FP8_QK_WMMA_T2_MIN_CONTEXT,
+    DECODE_ATTENTION_PROFILE,
+    PACKED_DECODE_MIN_CONTEXT,
+    SPLIT512_MIN_CONTEXT,
     LOW_CONTEXT_PREFILL_PROMPTS,
     MATRIX_SCHEMA_VERSION,
     R9700_KV_PLANE_LAYOUTS,
@@ -100,7 +100,7 @@ class LowContextPrefillValidationTest(unittest.TestCase):
                     "execution_profile": {
                         "q4_activation_bits": 8,
                         "w8_activation_bits": 8,
-                        "fp8_qk_wmma_profile": FP8_QK_WMMA_PROFILE,
+                        "decode_attention_profile": DECODE_ATTENTION_PROFILE,
                         "xattention_profile": profile,
                     },
                     "quality": {
@@ -199,10 +199,10 @@ class LowContextPrefillValidationTest(unittest.TestCase):
             "expected_xattention_profile": "dense", "expected_kv_value_group": 16,
             "expected_kv_plane_layouts": R9700_KV_PLANE_LAYOUTS,
             "expected_q4_activation_bits": 8, "expected_w8_activation_bits": 8,
-            "expected_fp8_qk_wmma_enabled": True,
-            "expected_fp8_qk_wmma_profile": FP8_QK_WMMA_PROFILE,
-            "expected_fp8_qk_wmma_t1_min_context": FP8_QK_WMMA_T1_MIN_CONTEXT,
-            "expected_fp8_qk_wmma_t2_min_context": FP8_QK_WMMA_T2_MIN_CONTEXT,
+            "expected_split512_enabled": True,
+            "expected_decode_attention_profile": DECODE_ATTENTION_PROFILE,
+            "expected_packed_decode_min_context": PACKED_DECODE_MIN_CONTEXT,
+            "expected_split512_min_context": SPLIT512_MIN_CONTEXT,
             "corpus": str(root / "corpus.ids"), "corpus_tokens": 3,
             "corpus_sha256": "c" * 64,
             "power_profile": {
