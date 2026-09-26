@@ -1,4 +1,5 @@
 #include "ops/r9700/linear/fp8_activation.h"
+#include "ops/r9700/linear/fp8_encode_impl.h"
 
 #include <hip/amd_detail/amd_hip_fp8.h>
 #include <hip/hip_runtime.h>
@@ -10,6 +11,10 @@
 
 namespace ninfer::ops::r9700::linear {
 namespace {
+
+using fp8_encode::encode_row8;
+using fp8_encode::encode_rows;
+using fp8_encode::unpack8;
 
 constexpr std::uint32_t kWaveSize        = 32U;
 constexpr std::uint32_t kBlockSize       = 1024U;
@@ -69,7 +74,8 @@ bool workspace_geometry(std::uint32_t tokens, std::uint32_t columns,
     std::size_t scale_end = 0;
     if (!checked_add(result.scale_offset, result.scale_bytes, &scale_end) ||
         !align_up(scale_end, kPlaneAlignment, &result.status_offset) ||
-        !checked_add(result.status_offset, sizeof(std::uint32_t), &result.total_bytes)) {
+        !checked_add(result.status_offset, static_cast<std::size_t>(tokens) * sizeof(std::uint32_t),
+                     &result.total_bytes)) {
         return false;
     }
     *out = result;
@@ -95,6 +101,10 @@ bool ranges_overlap(const void* lhs, std::size_t lhs_bytes, const void* rhs,
     return lhs_begin < rhs_end && rhs_begin < lhs_end;
 }
 
+std::size_t status_bytes(const Fp8ActivationWorkspace& workspace) noexcept {
+    return static_cast<std::size_t>(workspace.tokens) * sizeof(std::uint32_t);
+}
+
 bool valid_workspace(const Fp8ActivationWorkspace& workspace) noexcept {
     WorkspaceGeometry geometry;
     return workspace_geometry(workspace.tokens, workspace.columns, &geometry) &&
@@ -108,55 +118,17 @@ bool valid_workspace(const Fp8ActivationWorkspace& workspace) noexcept {
            !ranges_overlap(workspace.codes, workspace.code_bytes, workspace.scales,
                            workspace.scale_bytes) &&
            !ranges_overlap(workspace.codes, workspace.code_bytes, workspace.status,
-                           sizeof(std::uint32_t)) &&
+                           status_bytes(workspace)) &&
            !ranges_overlap(workspace.scales, workspace.scale_bytes, workspace.status,
-                           sizeof(std::uint32_t));
-}
-
-// Status CTA epilogue: the OR over the CTA's threads of `bad` is stored once. Status CTAs lay their
-// threads out like a token CTA and loop over the tokens, so their loads stay independent.
-template <std::uint32_t Waves>
-__device__ __forceinline__ void publish_status(bool bad, std::uint32_t* status) {
-    __shared__ unsigned wave_bad[Waves];
-    const std::uint32_t lane = threadIdx.x % kWaveSize, wave = threadIdx.x / kWaveSize;
-    const bool any = __builtin_amdgcn_ballot_w32(bad) != 0U;
-    if (lane == 0U) wave_bad[wave] = any ? 1U : 0U;
-    __syncthreads();
-    if (threadIdx.x == 0U) {
-        unsigned result = 0U;
-        for (std::uint32_t index = 0; index < Waves; ++index) result |= wave_bad[index];
-        *status = result != 0U ? Fp8ActivationNonfinite : Fp8ActivationOk;
-    }
+                           status_bytes(workspace));
 }
 
 __global__ __launch_bounds__(kBlockSize) void fp8_quantize_activation_kernel(
     const hip_bfloat16* input, std::uint8_t* codes, float* scales, std::uint32_t* status,
-    std::uint32_t columns, std::uint32_t padded, std::uint32_t status_cta) {
+    std::uint32_t columns, std::uint32_t padded) {
     const std::uint32_t token = blockIdx.x;
     const std::uint32_t lane = threadIdx.x % kWaveSize;
     const std::uint32_t wave = threadIdx.x / kWaveSize;
-    if (status_cta != 0U && token == gridDim.x - 1U) {
-        const std::size_t elements = static_cast<std::size_t>(token) * columns;
-        const auto* bits = reinterpret_cast<const std::uint16_t*>(input);
-        bool bad = false;
-        if (elements % 8U == 0U && reinterpret_cast<std::uintptr_t>(input) % 16U == 0U) {
-            const auto* vectors = reinterpret_cast<const uint4*>(input);
-#pragma unroll 4
-            for (std::size_t i = threadIdx.x; i < elements / 8U; i += blockDim.x) {
-                const uint4 packed = vectors[i];
-                const std::uint32_t words[4] = {packed.x, packed.y, packed.z, packed.w};
-#pragma unroll
-                for (int w = 0; w < 4; ++w)
-                    bad |= (words[w] & 0x7f80U) == 0x7f80U ||
-                           (words[w] & 0x7f800000U) == 0x7f800000U;
-            }
-        } else {
-            for (std::size_t i = threadIdx.x; i < elements; i += blockDim.x)
-                bad |= (bits[i] & 0x7f80U) == 0x7f80U;
-        }
-        publish_status<kWavesPerBlock>(bad, status);
-        return;
-    }
     float local_maximum = 0.0F;
     unsigned local_bad  = 0U;
     const auto observe = [&](float value) {
@@ -212,9 +184,7 @@ __global__ __launch_bounds__(kBlockSize) void fp8_quantize_activation_kernel(
             token_bad = bad != 0U;
             token_scale = bad != 0U ? 0.0F : maximum / kE4M3FiniteMaximum;
             scales[token] = token_scale;
-            if (bad != 0U && status_cta == 0U) {
-                atomicOr(status, static_cast<std::uint32_t>(Fp8ActivationNonfinite));
-            }
+            status[token] = bad != 0U ? Fp8ActivationNonfinite : Fp8ActivationOk;
         }
     }
     __syncthreads();
@@ -253,66 +223,6 @@ __global__ __launch_bounds__(kBlockSize) void fp8_quantize_activation_kernel(
     }
 }
 
-// Encodes one token row held as eight values per thread: the finite maximum and nonfinite flag
-// are reduced over the CTA, then the row publishes scale max / 448 and E4M3 codes exactly as
-// fp8_quantize_activation_kernel does for the same BF16 values.
-template <std::uint32_t Threads>
-__device__ __forceinline__ void encode_row8(const float (&values)[8], std::uint32_t vector,
-                                            std::uint32_t token, std::uint8_t* codes,
-                                            float* scales, std::uint32_t padded) {
-    constexpr std::uint32_t waves = Threads / kWaveSize;
-    const std::uint32_t lane = threadIdx.x % kWaveSize, wave = threadIdx.x / kWaveSize;
-    float maximum = 0.0F;
-    unsigned bad = 0U;
-#pragma unroll
-    for (int i = 0; i < 8; ++i) {
-        bad |= static_cast<unsigned>(!isfinite(values[i]));
-        if (isfinite(values[i])) maximum = fmaxf(maximum, fabsf(values[i]));
-    }
-#pragma unroll
-    for (std::uint32_t delta = kWaveSize / 2U; delta != 0U; delta >>= 1U) {
-        maximum = fmaxf(maximum, __shfl_xor(maximum, delta, kWaveSize));
-        bad |= __shfl_xor(bad, delta, kWaveSize);
-    }
-    __shared__ float wave_maxima[waves];
-    __shared__ unsigned wave_bad[waves];
-    if (lane == 0U) {
-        wave_maxima[wave] = maximum;
-        wave_bad[wave] = bad;
-    }
-    __syncthreads();
-    float row_maximum = 0.0F;
-    unsigned row_bad = 0U;
-#pragma unroll
-    for (std::uint32_t index = 0; index < waves; ++index) {
-        row_maximum = fmaxf(row_maximum, wave_maxima[index]);
-        row_bad |= wave_bad[index];
-    }
-    const float token_scale = row_bad != 0U ? 0.0F : row_maximum / kE4M3FiniteMaximum;
-    if (threadIdx.x == 0U) scales[token] = token_scale;
-    const bool encoded = row_bad == 0U && token_scale != 0.0F;
-    std::uint32_t packed[2] = {0U, 0U};
-    if (encoded) {
-#pragma unroll
-        for (int i = 0; i < 8; ++i) {
-            const std::uint32_t code = static_cast<std::uint8_t>(
-                __hip_cvt_float_to_fp8(values[i] / token_scale, __HIP_SATFINITE, __HIP_E4M3));
-            packed[i / 4] |= code << (8U * (i % 4));
-        }
-    }
-    *reinterpret_cast<uint2*>(codes + static_cast<std::size_t>(token) * padded +
-                              static_cast<std::size_t>(vector) * 8U) = uint2{packed[0], packed[1]};
-}
-
-__device__ __forceinline__ void unpack8(uint4 packed, float (&values)[8]) {
-    const std::uint32_t words[4] = {packed.x, packed.y, packed.z, packed.w};
-#pragma unroll
-    for (int w = 0; w < 4; ++w) {
-        values[2 * w] = __uint_as_float(words[w] << 16);
-        values[2 * w + 1] = __uint_as_float(words[w] & 0xffff0000U);
-    }
-}
-
 // K5120 RMSNorm with the eager small-T reduction: one 16-byte vector per thread of a 640-thread
 // row, per-thread FMA sum of squares, wave butterfly, then the wave sums in ascending order.
 constexpr std::uint32_t kNormFeatures = 5120U;
@@ -346,48 +256,9 @@ __device__ __forceinline__ void norm_vector_apply(float (&values)[8], uint4 gain
 __global__ __launch_bounds__(kNormThreads) void fp8_quantize_normalized_kernel(
     const hip_bfloat16* input, const hip_bfloat16* weight, float eps, bool unit_offset,
     std::uint8_t* codes, float* scales, std::uint32_t* status) {
-    const std::uint32_t tokens = gridDim.x - 1U;
     const std::uint32_t lane = threadIdx.x % kWaveSize, wave = threadIdx.x / kWaveSize;
     const auto* rows = reinterpret_cast<const uint4*>(input);
     const auto* gains = reinterpret_cast<const uint4*>(weight);
-    if (blockIdx.x == tokens) {
-        // Replays the token CTAs' reductions (same thread-to-vector map and order), eight rows at
-        // a time.
-        constexpr std::uint32_t group = 8U;
-        __shared__ float group_sums[group][kNormWaves];
-        const uint4 gain = gains[threadIdx.x];
-        bool bad = false;
-        for (std::uint32_t first = 0; first < tokens; first += group) {
-            float values[group][8];
-#pragma unroll
-            for (std::uint32_t g = 0; g < group; ++g) {
-                const std::uint32_t token = min(first + g, tokens - 1U);
-                unpack8(rows[static_cast<std::size_t>(token) * kNormThreads + threadIdx.x],
-                        values[g]);
-            }
-#pragma unroll
-            for (std::uint32_t g = 0; g < group; ++g) {
-                const float sumsq = norm_vector_sumsq(values[g]);
-                if (lane == 0U) group_sums[g][wave] = sumsq;
-            }
-            __syncthreads();
-#pragma unroll
-            for (std::uint32_t g = 0; g < group; ++g) {
-                float block_sum = 0.0F;
-#pragma unroll
-                for (std::uint32_t index = 0; index < kNormWaves; ++index)
-                    block_sum += group_sums[g][index];
-                const float inverse =
-                    rsqrtf(block_sum / static_cast<float>(kNormFeatures) + eps);
-                norm_vector_apply(values[g], gain, inverse, unit_offset);
-#pragma unroll
-                for (int i = 0; i < 8; ++i) bad |= !isfinite(values[g][i]);
-            }
-            __syncthreads();
-        }
-        publish_status<kNormWaves>(bad, status);
-        return;
-    }
     const std::uint32_t token = blockIdx.x;
     float values[8];
     unpack8(rows[static_cast<std::size_t>(token) * kNormThreads + threadIdx.x], values);
@@ -400,7 +271,7 @@ __global__ __launch_bounds__(kNormThreads) void fp8_quantize_normalized_kernel(
     for (std::uint32_t index = 0; index < kNormWaves; ++index) block_sum += wave_sums[index];
     const float inverse = rsqrtf(block_sum / static_cast<float>(kNormFeatures) + eps);
     norm_vector_apply(values, gains[threadIdx.x], inverse, unit_offset);
-    encode_row8<kNormThreads>(values, threadIdx.x, token, codes, scales, kNormFeatures);
+    encode_row8<kNormThreads>(values, threadIdx.x, token, codes, scales, kNormFeatures, status);
 }
 
 // Output gate over K = 8 * threads features.
@@ -423,26 +294,53 @@ __global__ __launch_bounds__(Threads) void fp8_quantize_gated_kernel(
     const hip_bfloat16* gate, const float* attention, std::uint8_t* codes, float* scales,
     std::uint32_t* status) {
     constexpr std::uint32_t columns = 8U * Threads;
-    const std::uint32_t tokens = gridDim.x - 1U;
-    const std::uint32_t lane = threadIdx.x % kWaveSize;
-    if (blockIdx.x == tokens) {
-        bool bad = false;
-#pragma unroll 4
-        for (std::uint32_t token = 0; token < tokens; ++token) {
-            float values[8];
-            gate_vector(gate, attention,
-                        static_cast<std::size_t>(token) * columns + threadIdx.x * 8U, values);
-#pragma unroll
-            for (int i = 0; i < 8; ++i) bad |= !isfinite(values[i]);
-        }
-        publish_status<Threads / kWaveSize>(bad, status);
-        return;
-    }
     const std::uint32_t token = blockIdx.x;
     float values[8];
     gate_vector(gate, attention, static_cast<std::size_t>(token) * columns + threadIdx.x * 8U,
                 values);
-    encode_row8<Threads>(values, threadIdx.x, token, codes, scales, columns);
+    encode_row8<Threads>(values, threadIdx.x, token, codes, scales, columns, status);
+}
+
+
+// Gated per-head RMSNorm of the GDN recurrent output x [T, 48 x 128] with gate z:
+// BF16(x * rsqrt(mean_head(x^2) + eps) * w * silu(z)); the 16 lanes of a DPP row hold one head
+// (eight features each). One 768-thread CTA per token row.
+constexpr std::uint32_t kGatedNormColumns = 6144U;
+constexpr std::uint32_t kGatedNormThreads = kGatedNormColumns / 8U;
+constexpr std::uint32_t kGatedNormHead = 128U;
+
+__device__ __forceinline__ void gated_norm_vector(const hip_bfloat16* input,
+                                                  const hip_bfloat16* gate,
+                                                  const hip_bfloat16* weight, float eps,
+                                                  std::uint32_t token, float (&values)[8]) {
+    const std::size_t offset = static_cast<std::size_t>(token) * kGatedNormThreads + threadIdx.x;
+    float x[8], z[8], w[8];
+    unpack8(reinterpret_cast<const uint4*>(input)[offset], x);
+    unpack8(reinterpret_cast<const uint4*>(gate)[offset], z);
+    unpack8(reinterpret_cast<const uint4*>(weight)[threadIdx.x % (kGatedNormHead / 8U)], w);
+    float sumsq = 0.0F;
+#pragma unroll
+    for (int i = 0; i < 8; ++i) sumsq = fmaf(x[i], x[i], sumsq);
+    sumsq += __int_as_float(__builtin_amdgcn_update_dpp(0, __float_as_int(sumsq), 0x168, 0xf, 0xf, false));
+    sumsq += __int_as_float(__builtin_amdgcn_update_dpp(0, __float_as_int(sumsq), 0x164, 0xf, 0xf, false));
+    sumsq += __int_as_float(__builtin_amdgcn_update_dpp(0, __float_as_int(sumsq), 0x162, 0xf, 0xf, false));
+    sumsq += __int_as_float(__builtin_amdgcn_update_dpp(0, __float_as_int(sumsq), 0x161, 0xf, 0xf, false));
+    const float inverse = rsqrtf(sumsq / static_cast<float>(kGatedNormHead) + eps);
+#pragma unroll
+    for (int i = 0; i < 8; ++i) {
+        const float silu = z[i] / (1.0F + expf(-z[i]));
+        values[i] = static_cast<float>(hip_bfloat16(x[i] * inverse * w[i] * silu));
+    }
+}
+
+__global__ __launch_bounds__(kGatedNormThreads) void fp8_quantize_gated_rmsnorm_kernel(
+    const hip_bfloat16* input, const hip_bfloat16* gate, const hip_bfloat16* weight, float eps,
+    std::uint8_t* codes, float* scales, std::uint32_t* status) {
+    const std::uint32_t token = blockIdx.x;
+    float values[8];
+    gated_norm_vector(input, gate, weight, eps, token, values);
+    encode_row8<kGatedNormThreads>(values, threadIdx.x, token, codes, scales, kGatedNormColumns,
+                                   status);
 }
 
 constexpr std::uint32_t kGatedColumns = 6144U;
@@ -489,20 +387,14 @@ hipError_t fp8_quantize_activation(const Fp8ActivationQuantizeArgs& args,
                        args.workspace.code_bytes) ||
         ranges_overlap(args.input, input_bytes, args.workspace.scales,
                        args.workspace.scale_bytes) ||
-        ranges_overlap(args.input, input_bytes, args.workspace.status, sizeof(std::uint32_t))) {
+        ranges_overlap(args.input, input_bytes, args.workspace.status, status_bytes(args.workspace))) {
         return hipErrorInvalidValue;
     }
-    const bool status_cta = args.workspace.tokens <= kFp8StatusCtaTokenLimit;
-    if (!status_cta) {
-        const hipError_t result =
-            hipMemsetAsync(args.workspace.status, 0, sizeof(std::uint32_t), stream);
-        if (result != hipSuccess) return result;
-    }
     hipLaunchKernelGGL(fp8_quantize_activation_kernel,
-                       dim3(args.workspace.tokens + (status_cta ? 1U : 0U)), dim3(kBlockSize), 0,
+                       dim3(args.workspace.tokens), dim3(kBlockSize), 0,
                        stream, args.input, args.workspace.codes, args.workspace.scales,
                        args.workspace.status, args.workspace.columns,
-                       args.workspace.padded_columns, status_cta ? 1U : 0U);
+                       args.workspace.padded_columns);
     return hipGetLastError();
 }
 
@@ -511,7 +403,7 @@ hipError_t fp8_quantize_normalized_activation(const Fp8NormalizedQuantizeArgs& a
     const Fp8ActivationWorkspace& workspace = args.workspace;
     std::size_t input_bytes = 0;
     if (args.input == nullptr || args.weight == nullptr || !valid_workspace(workspace) ||
-        workspace.tokens > kFp8StatusCtaTokenLimit || workspace.columns != kNormFeatures ||
+        workspace.columns != kNormFeatures ||
         workspace.padded_columns != kNormFeatures || !std::isfinite(args.eps) ||
         !(args.eps > 0.0F) || reinterpret_cast<std::uintptr_t>(args.input) % 16U != 0U ||
         reinterpret_cast<std::uintptr_t>(args.weight) % 16U != 0U ||
@@ -519,12 +411,13 @@ hipError_t fp8_quantize_normalized_activation(const Fp8NormalizedQuantizeArgs& a
                      sizeof(hip_bfloat16), &input_bytes) ||
         ranges_overlap(args.input, input_bytes, workspace.codes, workspace.code_bytes) ||
         ranges_overlap(args.input, input_bytes, workspace.scales, workspace.scale_bytes) ||
-        ranges_overlap(args.input, input_bytes, workspace.status, sizeof(std::uint32_t))) {
+        ranges_overlap(args.input, input_bytes, workspace.status, status_bytes(workspace))) {
         return hipErrorInvalidValue;
     }
-    hipLaunchKernelGGL(fp8_quantize_normalized_kernel, dim3(workspace.tokens + 1U),
-                       dim3(kNormThreads), 0, stream, args.input, args.weight, args.eps,
-                       args.unit_offset, workspace.codes, workspace.scales, workspace.status);
+    hipLaunchKernelGGL(fp8_quantize_normalized_kernel,
+                       dim3(workspace.tokens), dim3(kNormThreads), 0,
+                       stream, args.input, args.weight, args.eps, args.unit_offset,
+                       workspace.codes, workspace.scales, workspace.status);
     return hipGetLastError();
 }
 
@@ -533,7 +426,7 @@ hipError_t fp8_quantize_gated_activation(const Fp8GatedQuantizeArgs& args,
     const Fp8ActivationWorkspace& workspace = args.workspace;
     std::size_t elements = 0, gate_bytes = 0, attention_bytes = 0;
     if (args.gate == nullptr || args.attention == nullptr || !valid_workspace(workspace) ||
-        workspace.tokens > kFp8StatusCtaTokenLimit || workspace.columns != kGatedColumns ||
+        workspace.columns != kGatedColumns ||
         workspace.padded_columns != kGatedColumns ||
         reinterpret_cast<std::uintptr_t>(args.gate) % 16U != 0U ||
         reinterpret_cast<std::uintptr_t>(args.attention) % 16U != 0U ||
@@ -545,14 +438,42 @@ hipError_t fp8_quantize_gated_activation(const Fp8GatedQuantizeArgs& args,
         ranges_overlap(args.gate, gate_bytes, workspace.scales, workspace.scale_bytes) ||
         ranges_overlap(args.attention, attention_bytes, workspace.scales,
                        workspace.scale_bytes) ||
-        ranges_overlap(args.gate, gate_bytes, workspace.status, sizeof(std::uint32_t)) ||
+        ranges_overlap(args.gate, gate_bytes, workspace.status, status_bytes(workspace)) ||
         ranges_overlap(args.attention, attention_bytes, workspace.status,
-                       sizeof(std::uint32_t))) {
+                       status_bytes(workspace))) {
         return hipErrorInvalidValue;
     }
-    hipLaunchKernelGGL(fp8_quantize_gated_kernel<kGatedColumns / 8U>, dim3(workspace.tokens + 1U),
-                       dim3(kGatedColumns / 8U), 0, stream, args.gate, args.attention,
-                       workspace.codes, workspace.scales, workspace.status);
+    hipLaunchKernelGGL(fp8_quantize_gated_kernel<kGatedColumns / 8U>,
+                       dim3(workspace.tokens), dim3(kGatedColumns / 8U),
+                       0, stream, args.gate, args.attention, workspace.codes, workspace.scales,
+                       workspace.status);
+    return hipGetLastError();
+}
+
+hipError_t fp8_quantize_gated_rmsnorm_activation(const Fp8GatedRmsNormQuantizeArgs& args,
+                                                 hipStream_t stream) noexcept {
+    const Fp8ActivationWorkspace& workspace = args.workspace;
+    std::size_t elements = 0, input_bytes = 0;
+    if (args.input == nullptr || args.gate == nullptr || args.weight == nullptr ||
+        !valid_workspace(workspace) || workspace.columns != kGatedNormColumns ||
+        workspace.padded_columns != kGatedNormColumns || !std::isfinite(args.eps) ||
+        !(args.eps > 0.0F) || reinterpret_cast<std::uintptr_t>(args.input) % 16U != 0U ||
+        reinterpret_cast<std::uintptr_t>(args.gate) % 16U != 0U ||
+        reinterpret_cast<std::uintptr_t>(args.weight) % 16U != 0U ||
+        !checked_mul(workspace.tokens, kGatedNormColumns, &elements) ||
+        !checked_mul(elements, sizeof(hip_bfloat16), &input_bytes) ||
+        ranges_overlap(args.input, input_bytes, workspace.codes, workspace.code_bytes) ||
+        ranges_overlap(args.gate, input_bytes, workspace.codes, workspace.code_bytes) ||
+        ranges_overlap(args.input, input_bytes, workspace.scales, workspace.scale_bytes) ||
+        ranges_overlap(args.gate, input_bytes, workspace.scales, workspace.scale_bytes) ||
+        ranges_overlap(args.input, input_bytes, workspace.status, status_bytes(workspace)) ||
+        ranges_overlap(args.gate, input_bytes, workspace.status, status_bytes(workspace))) {
+        return hipErrorInvalidValue;
+    }
+    hipLaunchKernelGGL(fp8_quantize_gated_rmsnorm_kernel,
+                       dim3(workspace.tokens), dim3(kGatedNormThreads),
+                       0, stream, args.input, args.gate, args.weight, args.eps, workspace.codes,
+                       workspace.scales, workspace.status);
     return hipGetLastError();
 }
 

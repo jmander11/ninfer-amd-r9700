@@ -1,6 +1,8 @@
 #include "ops/r9700/gdn/gdn_ops.h"
 #include "ops/r9700/linear/a8g64_codec.h"
 #include "ops/r9700/linear/a8q4_pipeline_impl.h"
+#include "ops/r9700/linear/cb4_pipeline_impl.h"
+#include "ops/r9700/linear/fp8_encode_impl.h"
 #include "ops/r9700/linear/r9700_linear.h"
 
 #include "ninfer/types.h"
@@ -498,6 +500,62 @@ __global__ __launch_bounds__(32U * kPairConvSplit) void gdn_pair_conv_record_ker
     }
 }
 
+// The CB4G32 form of gdn_pair_conv_record_kernel: CTAs [0, 256) own the query-key row blocks of
+// one per-token E4M3 image, the rest the value-z row blocks; each block's BF16 outputs (canonical
+// NaN for a flagged token) are staged, then every row runs the recorded convolution of its
+// channel (value-z rows 6144.. are the output gate z).
+constexpr std::uint32_t kCb4PairSplit = linear::cb4::kVerifySplit;
+constexpr std::uint32_t kCb4PairSteps = linear::cb4::kVerifySteps;
+template <unsigned T>
+__global__ __launch_bounds__(32U * kCb4PairSplit) void gdn_cb4_pair_conv_record_kernel(
+    const std::uint8_t* activation, const float* token_scales, const std::uint32_t* status,
+    linear::Cb4Weight query_key, linear::Cb4Weight value_z, const hip_bfloat16* conv_weight,
+    const hip_bfloat16* conv_states, const std::int32_t* valid_columns,
+    const std::int32_t* initial_state_slots, const std::int32_t* parent_index,
+    hip_bfloat16* conv_record, hip_bfloat16* query, hip_bfloat16* key, hip_bfloat16* value,
+    hip_bfloat16* z, std::uint32_t state_slots) {
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
+    __shared__ uint2 table[256];
+    __shared__ float partial[kCb4PairSplit][8][32];
+    __shared__ hip_bfloat16 staged[16][T];
+    constexpr unsigned kQueryKeyTiles = (kProjectionQueryRows + kProjectionKeyRows) / 16U;
+    const bool second = blockIdx.x >= kQueryKeyTiles;
+    const linear::Cb4Weight weight = second ? value_z : query_key;
+    const std::uint32_t row_base = (second ? blockIdx.x - kQueryKeyTiles : blockIdx.x) * 16U;
+    linear::cb4::load_table(table, 32U * kCb4PairSplit);
+    const auto stage = [&](std::uint32_t token, std::uint32_t row, float y) {
+        staged[row - row_base][token] = status[token] != linear::Fp8ActivationOk
+            ? hip_bfloat16(__builtin_nanf("")) : hip_bfloat16(y);
+    };
+    linear::cb4::small_t_rows<kCb4PairSplit, kCb4PairSteps>(
+        weight, row_base, activation, token_scales, T, table, partial, stage);
+    __syncthreads();
+    if (threadIdx.x >= 16U) return;
+    const std::uint32_t row = row_base + threadIdx.x;
+    hip_bfloat16 values[T];
+#pragma unroll
+    for (unsigned t = 0; t < T; ++t) values[t] = staged[threadIdx.x][t];
+    const auto convolve = [&](std::uint32_t channel) {
+        conv_record_channel([&](std::size_t column) { return values[column]; }, conv_weight,
+                            conv_states, valid_columns, initial_state_slots, parent_index,
+                            conv_record, query, key, value, T, state_slots, 0U, channel);
+    };
+    if (!second) {
+        convolve(row);
+    } else if (row < kProjectionValueRows) {
+        convolve(kProjectionQueryRows + kProjectionKeyRows + row);
+    } else {
+#pragma unroll
+        for (unsigned t = 0; t < T; ++t) z[t * kProjectionValueRows + row - kProjectionValueRows] = values[t];
+    }
+#else
+    (void)activation; (void)token_scales; (void)status; (void)query_key; (void)value_z;
+    (void)conv_weight; (void)conv_states; (void)valid_columns; (void)initial_state_slots;
+    (void)parent_index; (void)conv_record; (void)query; (void)key; (void)value; (void)z;
+    (void)state_slots;
+#endif
+}
+
 __global__ void control_gates_kernel(const hip_bfloat16* a, const hip_bfloat16* b,
                                      const float* a_log, const float* dt_bias, float* g,
                                      float* beta, std::size_t count,
@@ -641,12 +699,16 @@ __device__ __forceinline__ uint4 front_seam(uint4 packed, uint4 gains, float inv
     return uint4{seam[0], seam[1], seam[2], seam[3]};
 }
 
-__global__ __launch_bounds__(kControlT1Threads) void bf16_gdn_normalized_front_kernel(
+// kFp8: the owner CTA of each token encodes its seam row as a per-token E4M3 image (codes in
+// low_codes, FP32 scales in fp8_scales, one status word per token); otherwise the A8G64 codec.
+template <bool kFp8>
+__global__ __launch_bounds__(kControlT1Threads) void gdn_normalized_front_kernel(
     const hip_bfloat16* residual, const hip_bfloat16* norm, float eps, bool unit_offset,
     const hip_bfloat16* a_weight, const hip_bfloat16* b_weight, const float* a_log,
     const float* dt_bias, float* g, float* beta, std::uint8_t* low_codes,
     std::uint8_t* high_codes, std::uint16_t* scale_words, std::uint32_t* status,
-    hip_bfloat16* hidden, std::uint32_t* clear_status, std::uint32_t tokens) {
+    hip_bfloat16* hidden, std::uint32_t* clear_status, std::uint32_t tokens,
+    float* fp8_scales) {
     __shared__ float wave_sums[kFrontPassTokens][kFrontWaves];
     __shared__ float inverses[kFrontPassTokens];
     __shared__ float a_waves[kFrontPassTokens][kFrontWaves];
@@ -688,7 +750,7 @@ __global__ __launch_bounds__(kControlT1Threads) void bf16_gdn_normalized_front_k
             if (token < tokens) {
                 float value[8];
                 const uint4 seam = front_seam(loaded[row], gains, inverses[row], offset, value);
-                if (head == 0U) {
+                if (!kFp8 && head == 0U) {
 #pragma unroll
                     for (std::uint32_t element = 0; element < 8U; ++element) {
                         nonfinite |= !isfinite(value[element]);
@@ -696,7 +758,17 @@ __global__ __launch_bounds__(kControlT1Threads) void bf16_gdn_normalized_front_k
                                     linear::codec::a8g64_element_overflows(value[element]);
                     }
                 }
-                if (token % kControlHeads == head) {
+                if constexpr (kFp8) {
+                    // CTA-uniform owner: the whole CTA encodes the row (block reduction inside).
+                    if (token % kControlHeads == head) {
+                        const std::size_t vector =
+                            static_cast<std::size_t>(token) * row_vectors + threadIdx.x;
+                        if (hidden != nullptr) reinterpret_cast<uint4*>(hidden)[vector] = seam;
+                        linear::fp8_encode::encode_row8<kControlT1Threads>(
+                            value, threadIdx.x, token, low_codes, fp8_scales, kControlColumns,
+                            status);
+                    }
+                } else if (token % kControlHeads == head) {
                     const std::size_t vector =
                         static_cast<std::size_t>(token) * row_vectors + threadIdx.x;
                     if (hidden != nullptr) reinterpret_cast<uint4*>(hidden)[vector] = seam;
@@ -761,7 +833,7 @@ __global__ __launch_bounds__(kControlT1Threads) void bf16_gdn_normalized_front_k
         }
         __syncthreads();
     }
-    if (head == 0U) {
+    if (!kFp8 && head == 0U) {
         const bool any_nonfinite = __syncthreads_or(nonfinite);
         const bool any_overflow = __syncthreads_or(overflow);
         if (threadIdx.x == 0U) {
@@ -1154,6 +1226,37 @@ hipError_t gdn_pair_conv_record_bf16(
     });
 }
 
+hipError_t gdn_cb4_pair_conv_record_bf16(
+    const linear::Fp8ActivationWorkspace& image, const linear::Cb4Weight& query_key,
+    const linear::Cb4Weight& value_z, const hip_bfloat16* conv_weight,
+    const hip_bfloat16* conv_states, const std::int32_t* valid_columns,
+    const std::int32_t* initial_state_slots, const std::int32_t* parent_index,
+    hip_bfloat16* conv_record, hip_bfloat16* query, hip_bfloat16* key, hip_bfloat16* value,
+    hip_bfloat16* z, std::uint32_t width, std::uint32_t state_slots, hipStream_t stream) noexcept {
+    const bool valid = gdn_pair_conv_record_supported(width, 1U) && image.tokens == width &&
+        image.padded_columns == kControlColumns && image.codes != nullptr &&
+        image.scales != nullptr && image.status != nullptr &&
+        query_key.rows == kProjectionQueryRows + kProjectionKeyRows &&
+        value_z.rows == kProjectionValueZRows && query_key.columns == kControlColumns &&
+        value_z.columns == kControlColumns &&
+        linear::cb4_linear_supported(width, query_key.rows, query_key.columns) &&
+        query_key.codes != nullptr && value_z.codes != nullptr && conv_weight != nullptr &&
+        conv_states != nullptr && initial_state_slots != nullptr && conv_record != nullptr &&
+        query != nullptr && key != nullptr && value != nullptr && z != nullptr &&
+        state_slots != 0U && valid_stream(stream);
+    return checked_launch(valid, [&] {
+        const dim3 grid((query_key.rows + value_z.rows) / 16U);
+        const auto launch = [&](auto kernel) {
+            hipLaunchKernelGGL(kernel, grid, dim3(32U * kCb4PairSplit), 0, stream,
+                               image.codes, image.scales, image.status, query_key, value_z,
+                               conv_weight, conv_states, valid_columns, initial_state_slots,
+                               parent_index, conv_record, query, key, value, z, state_slots);
+        };
+        if (width == 5U) launch(gdn_cb4_pair_conv_record_kernel<5>);
+        else launch(gdn_cb4_pair_conv_record_kernel<6>);
+    });
+}
+
 hipError_t control_gates_bf16(const hip_bfloat16* a, const hip_bfloat16* b, const float* a_log,
                               const float* dt_bias, float* g, float* beta,
                               std::uint32_t value_heads, std::uint32_t tokens,
@@ -1259,11 +1362,54 @@ hipError_t bf16_gdn_normalized_front(
             return hipErrorInvalidValue;
     }
     return checked_launch(true, [&] {
-        hipLaunchKernelGGL(bf16_gdn_normalized_front_kernel, dim3(kControlHeads),
+        hipLaunchKernelGGL(gdn_normalized_front_kernel<false>, dim3(kControlHeads),
                            dim3(kControlT1Threads), 0, stream, residual, norm, eps, unit_offset,
                            a_weight, b_weight, a_log, dt_bias, g, beta, planes.low_codes,
                            planes.high_codes, planes.scales, planes.status, hidden,
-                           clear_status, tokens);
+                           clear_status, tokens, nullptr);
+    });
+}
+
+hipError_t fp8_gdn_normalized_front(
+    const hip_bfloat16* residual, const hip_bfloat16* norm, float eps, bool unit_offset,
+    const hip_bfloat16* a_weight, const hip_bfloat16* b_weight, const float* a_log,
+    const float* dt_bias, float* g, float* beta, const linear::Fp8ActivationWorkspace& image,
+    hipStream_t stream) noexcept {
+    const std::uint32_t tokens = image.tokens;
+    const auto aligned16 = [](const void* pointer) {
+        return reinterpret_cast<std::uintptr_t>(pointer) % 16U == 0U;
+    };
+    if (!bf16_gdn_normalized_front_supported(tokens) || image.columns != kControlColumns ||
+        image.padded_columns != kControlColumns || residual == nullptr || norm == nullptr ||
+        a_weight == nullptr || b_weight == nullptr || a_log == nullptr || dt_bias == nullptr ||
+        g == nullptr || beta == nullptr || image.codes == nullptr || image.scales == nullptr ||
+        image.status == nullptr || !(eps > 0.0F) || !valid_stream(stream) ||
+        !aligned16(residual) || !aligned16(norm) || !aligned16(a_weight) ||
+        !aligned16(b_weight) || !aligned16(image.codes))
+        return hipErrorInvalidValue;
+    const std::size_t row_elements = static_cast<std::size_t>(tokens) * kControlColumns;
+    constexpr std::size_t weight_elements =
+        static_cast<std::size_t>(kControlHeads) * kControlColumns;
+    const std::size_t control_elements = static_cast<std::size_t>(tokens) * kControlHeads;
+    const std::array<ByteRange, 11> ranges{
+        byte_range(residual, row_elements), byte_range(norm, kControlColumns),
+        byte_range(a_weight, weight_elements), byte_range(b_weight, weight_elements),
+        byte_range(a_log, kControlHeads), byte_range(dt_bias, kControlHeads),
+        byte_range(g, control_elements), byte_range(beta, control_elements),
+        ByteRange{reinterpret_cast<std::uintptr_t>(image.codes),
+                  reinterpret_cast<std::uintptr_t>(image.codes) + image.code_bytes},
+        ByteRange{reinterpret_cast<std::uintptr_t>(image.scales),
+                  reinterpret_cast<std::uintptr_t>(image.scales) + image.scale_bytes},
+        ByteRange{reinterpret_cast<std::uintptr_t>(image.status),
+                  reinterpret_cast<std::uintptr_t>(image.status) + tokens * 4U}};
+    for (std::size_t first = 0; first < ranges.size(); ++first)
+        for (std::size_t second = first + 1; second < ranges.size(); ++second)
+            if (overlaps(ranges[first], ranges[second])) return hipErrorInvalidValue;
+    return checked_launch(true, [&] {
+        hipLaunchKernelGGL(gdn_normalized_front_kernel<true>, dim3(kControlHeads),
+                           dim3(kControlT1Threads), 0, stream, residual, norm, eps, unit_offset,
+                           a_weight, b_weight, a_log, dt_bias, g, beta, image.codes, nullptr,
+                           nullptr, image.status, nullptr, nullptr, tokens, image.scales);
     });
 }
 

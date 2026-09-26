@@ -213,7 +213,13 @@ load_gdn_input_projection(const GdnPlan& plan, const artifact::MaterializedArtif
 }
 
 void bind_r9700_text_layers(artifact::Binder& binder, BindingPlan& out,
-                            WeightsProfile profile) {
+                            WeightsProfile profile, bool cb4_text) {
+    const auto bind_weight = [&](artifact::Binder& target, std::string_view name,
+                                 NumericFormat format,
+                                 std::initializer_list<std::uint64_t> shape) {
+        if (cb4_text && format == NumericFormat::Q4G64_F16S) format = NumericFormat::CB4G32_F32S;
+        return detail::bind_weight(target, name, format, shape);
+    };
     for (std::size_t layer = 0; layer < kTextLayers; ++layer) {
         TextLayerPlan& target    = out.text_layers[layer];
         const std::string prefix = "text/layers/" + std::to_string(layer) + "/";
@@ -310,6 +316,9 @@ void validate_draft_ids(const artifact::Binder& binder, artifact::ObjectHandle h
 
 ArtifactLoadPlan bind_artifact(artifact::Binder& binder, WeightsProfile weights_profile,
                                qwen3::StartupFeatures features) {
+    // A CB4 Text profile binds exactly its base recipe except for the Text-layer Q4 matrices.
+    const bool cb4_text = is_cb4_text_profile(weights_profile);
+    if (cb4_text) weights_profile = fp8_capped_base_profile(weights_profile);
     (void)matrix_format(weights_profile, false);
     ArtifactLoadPlan load_plan;
     BindingPlan& out = load_plan.bindings;
@@ -319,7 +328,7 @@ ArtifactLoadPlan bind_artifact(artifact::Binder& binder, WeightsProfile weights_
     out.token_embedding =
         bind_weight(binder, "text/token_embedding", token_embedding_format(weights_profile),
                     {248320, 5120});
-    bind_r9700_text_layers(binder, out, weights_profile);
+    bind_r9700_text_layers(binder, out, weights_profile, cb4_text);
     out.final_norm =
         artifact::bind_device_tensor(binder, "text/final_norm", NumericFormat::BF16, {5120});
     if (weights_profile == WeightsProfile::R9700Q4SelectiveProtectedDFlash2Q4Evaluation ||

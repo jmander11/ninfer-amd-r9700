@@ -4,8 +4,8 @@
 // RMSNorm or output gate, E4M3 quantization, small-T projection, feature split or BF16 residual
 // add), so every activation code, scale, status word and published BF16 element must be
 // bit-identical to it. An independent FP64 product of the decoded consumed activation and weight
-// codes with their scales checks the projection itself. Nonfinite inputs must poison every
-// published element; every status word starts poisoned, so a finite image must store OK without a
+// codes with their scales checks the projection itself. A nonfinite input must poison every
+// published element of its token (FP8) or of the image (A8G64); every status word starts poisoned, so a finite image must store OK without a
 // reset launch.
 #include "ops/r9700/eager/eager_ops.h"
 #include "ops/r9700/linear/fp8_activation.h"
@@ -120,10 +120,20 @@ struct Activation {
                         workspace.scale_bytes, hipMemcpyDeviceToHost), "scales");
         return result;
     }
+    // OR of the per-token status words.
     std::uint32_t status() const {
+        std::vector<std::uint32_t> words(workspace.tokens);
+        check(hipMemcpy(words.data(), workspace.status, words.size() * sizeof(std::uint32_t),
+                        hipMemcpyDeviceToHost), "status");
         std::uint32_t value = 0;
-        check(hipMemcpy(&value, workspace.status, sizeof(value), hipMemcpyDeviceToHost), "status");
+        for (const auto word : words) value |= word;
         return value;
+    }
+    // Every token's status word starts poisoned, proving the producers' plain stores.
+    void poison_status() const {
+        const std::vector<std::uint32_t> words(workspace.tokens, fp8::Fp8ActivationNonfinite);
+        check(hipMemcpy(workspace.status, words.data(), words.size() * sizeof(std::uint32_t),
+                        hipMemcpyHostToDevice), "stale");
     }
 };
 
@@ -188,9 +198,7 @@ void run_front(std::uint32_t tokens, Rng& rng, bool poison) {
     auto* x_bf16 = reinterpret_cast<const hip_bfloat16*>(device_x.data);
     auto* norm_bf16 = reinterpret_cast<const hip_bfloat16*>(device_norm.data);
     // Unfused chain; both status words start poisoned to prove the plain stores.
-    const std::uint32_t stale = fp8::Fp8ActivationNonfinite;
-    check(hipMemcpy(reference.workspace.status, &stale, sizeof(stale), hipMemcpyHostToDevice),
-          "stale");
+    reference.poison_status();
     check(eager::rmsnorm_bf16(x_bf16, norm_bf16, reinterpret_cast<hip_bfloat16*>(h.data), kHidden,
                               tokens, eps, true, g_stream), "rmsnorm");
     check(fp8::fp8_quantize_activation({reinterpret_cast<const hip_bfloat16*>(h.data),
@@ -199,7 +207,7 @@ void run_front(std::uint32_t tokens, Rng& rng, bool poison) {
                                   reinterpret_cast<hip_bfloat16*>(qk.data), g_stream), "qk");
     check(fp8::fp8_small_t_linear(gate_value.view(kPair), reference.workspace,
                                   reinterpret_cast<hip_bfloat16*>(gv.data), g_stream), "gv");
-    check(hipMemcpy(fused.workspace.status, &stale, sizeof(stale), hipMemcpyHostToDevice), "stale");
+    fused.poison_status();
     check(fp8::fp8_quantize_normalized_activation(
               {x_bf16, norm_bf16, eps, true, fused.workspace}, g_stream), "fused quantize");
     check(fp8::fp8_small_t_pair_split(
@@ -230,7 +238,10 @@ void run_front(std::uint32_t tokens, Rng& rng, bool poison) {
             require(first == qk_host[source] && second == gv_host[source],
                     label + " split output differs at token " + std::to_string(t) + " row " +
                         std::to_string(r));
-            if (poison) require(first == kNan && second == kNan, label + " not poisoned");
+            // FP8 images poison exactly the rows of the flagged (last) token.
+            if (poison)
+                require((first == kNan && second == kNan) == (t == tokens - 1U),
+                        label + " per-token poisoning");
         }
     }
     if (!poison) {
@@ -261,9 +272,7 @@ void run_output(std::uint32_t tokens, Rng& rng, bool poison) {
     Fp8Weight weight(kHidden, kQuery, rng);
     Activation reference(tokens, kQuery), fused(tokens, kQuery);
     auto* gate_bf16 = reinterpret_cast<const hip_bfloat16*>(device_gate.data);
-    const std::uint32_t stale = fp8::Fp8ActivationNonfinite;
-    check(hipMemcpy(reference.workspace.status, &stale, sizeof(stale), hipMemcpyHostToDevice),
-          "stale");
+    reference.poison_status();
     check(eager::sigmoid_mul_fp32_bf16(gate_bf16, device_attention.data,
                                        reinterpret_cast<hip_bfloat16*>(gated.data), elements,
                                        g_stream), "sigmoid mul");
@@ -274,7 +283,7 @@ void run_output(std::uint32_t tokens, Rng& rng, bool poison) {
     check(eager::residual_add_bf16(reinterpret_cast<const hip_bfloat16*>(delta.data),
                                    reinterpret_cast<hip_bfloat16*>(reference_residual.data),
                                    residual_elements, g_stream), "residual add");
-    check(hipMemcpy(fused.workspace.status, &stale, sizeof(stale), hipMemcpyHostToDevice), "stale");
+    fused.poison_status();
     check(fp8::fp8_quantize_gated_activation({gate_bf16, device_attention.data, fused.workspace},
                                              g_stream), "fused quantize");
     check(fp8::fp8_small_t_residual(weight.view(kHidden), fused.workspace,
@@ -288,7 +297,10 @@ void run_output(std::uint32_t tokens, Rng& rng, bool poison) {
     const auto expected = reference_residual.download(), got = fused_residual.download();
     for (std::size_t i = 0; i < residual_elements; ++i) {
         require(expected[i] == got[i], label + " residual differs at " + std::to_string(i));
-        if (poison) require((got[i] & 0x7fffU) > 0x7f80U, label + " residual not poisoned");
+        // FP8 images poison exactly the rows of the flagged (middle) token.
+        if (poison)
+            require(((got[i] & 0x7fffU) > 0x7f80U) == (i / kHidden == tokens / 2U),
+                    label + " per-token residual poisoning");
     }
     if (!poison)
         check_oracle(got, kHidden, 0U, weight, 0U, kHidden, fused, tokens, kQuery, &residual,

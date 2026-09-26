@@ -1,6 +1,6 @@
 # Persistent storage layouts
 
-NInfer v2 registers five tensor layouts and one resource encoding. Payload offsets are relative to
+NInfer v2 registers seven tensor layouts and one resource encoding. Payload offsets are relative to
 the container payload and tensor starts are 256-byte aligned.
 
 ## `contiguous-le-v1`
@@ -62,6 +62,27 @@ The selective-protected canonical-Q4 DFlash companion requires this layout for
 `text/output_head` only. All its consumers use the same resident head; no loader
 repack, duplicate weight, or runtime layout selector is permitted. Other W8
 objects and evaluation profiles retain their separately specified row-split layout.
+
+## `row-scaled-k128-v1`
+
+This layout accepts rank-two `F8E4M3_ROW_F32S` matrices `[N,K]`. It pads K upward to 128 and
+stores the row-major E4M3FN code plane `[N][Kpad]` at offset zero (padding codes zero), then the
+little-endian FP32 row multipliers `[N]` at the next 256-byte boundary.
+
+## `r9700-cb4g32-n16k64-v1`
+
+This layout accepts rank-two `CB4G32_F32S` matrices `[N,K]` with `N` divisible by 16 and pads K
+upward to 128. The code and group planes are ordered in N16 x K64 tiles: tile index
+`(r / 16) * (Kpad / 64) + k / 64`, and within a tile slot `16 * ((k % 64) / 32) + r % 16`.
+
+1. Code plane at offset zero: 512 bytes per tile, 16 bytes per slot holding the 32 four-bit codes
+   of that row's 32-column group, low nibble for the even column.
+2. Group plane at the next 256-byte boundary: 32 bytes per tile, one group code byte per slot.
+3. FP32 row multipliers `[N]` at the next 256-byte boundary.
+
+A wave of the small-T kernel reads one contiguous 512-byte code tile per 64-column step; the
+prefill kernel stages 4 KiB of contiguous tiles per 128-row slab. Plane sizes equal a row-major
+layout; the tiling is a storage permutation only.
 
 ## `raw-bytes-v1`
 

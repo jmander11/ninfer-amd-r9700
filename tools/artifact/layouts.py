@@ -22,10 +22,12 @@ else:
     torch = None  # type: ignore[assignment]
 
 from .numeric import (
+    CodebookFormat,
     DirectFormat,
     NumericFormat,
     QuantFormat,
     RowScaledFormat,
+    cb4_group_magnitudes,
     get_format,
 )
 
@@ -71,6 +73,21 @@ class RowScaledGeometry:
     code_offset: int
     code_bytes: int
     scale_row_bytes: int
+    scale_offset: int
+    scale_bytes: int
+    payload_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class CodebookGeometry:
+    n: int
+    k: int
+    k_pad: int
+    code_row_bytes: int
+    code_bytes: int
+    group_row_bytes: int
+    group_offset: int
+    group_bytes: int
     scale_offset: int
     scale_bytes: int
     payload_bytes: int
@@ -124,6 +141,9 @@ R9700_W8G32_N16_K16_V1 = Layout(
 ROW_SCALED_K128_V1 = Layout(
     "row-scaled-k128-v1", 256, frozenset(("F8E4M3_ROW_F32S",))
 )
+R9700_CB4G32_N16K64_V1 = Layout(
+    "r9700-cb4g32-n16k64-v1", 256, frozenset(("CB4G32_F32S",))
+)
 LAYOUTS = MappingProxyType(
     {
         layout.name: layout
@@ -133,6 +153,7 @@ LAYOUTS = MappingProxyType(
             R9700_Q4G64_N16_K16_V1,
             R9700_W8G32_N16_K16_V1,
             ROW_SCALED_K128_V1,
+            R9700_CB4G32_N16K64_V1,
         )
     }
 )
@@ -310,6 +331,107 @@ def row_scaled_geometry(
     )
 
 
+def cb4_geometry(shape: Sequence[int]) -> CodebookGeometry:
+    """K128-padded planes of N16 x K64 tiles (N % 16 == 0), each plane 256-byte aligned.
+
+    Tile (row block b = r / 16, step s = k / 64) is tile index b * (K / 64) + s. Within a tile,
+    slot p = 16 * ((k % 64) / 32) + r % 16 holds 16 code bytes (32 codes of that half step, low
+    nibble = even k) in the 512-byte code tile and one group code byte in the 32-byte group tile.
+    FP32 row multipliers [N] follow.
+    """
+
+    n, k = _shape(shape, rank=2)
+    if n % 16:
+        raise ValueError("r9700-cb4g32-n16k64-v1 requires N divisible by 16")
+    k_pad = align_up(k, K_ALIGNMENT)
+    code_bytes = n * (k_pad // 2)
+    group_offset = align_up(code_bytes, PLANE_ALIGNMENT)
+    group_bytes = n * (k_pad // 32)
+    scale_offset = align_up(group_offset + group_bytes, PLANE_ALIGNMENT)
+    scale_bytes = n * 4
+    return CodebookGeometry(
+        n=n, k=k, k_pad=k_pad, code_row_bytes=k_pad // 2, code_bytes=code_bytes,
+        group_row_bytes=k_pad // 32, group_offset=group_offset, group_bytes=group_bytes,
+        scale_offset=scale_offset, scale_bytes=scale_bytes,
+        payload_bytes=scale_offset + scale_bytes,
+    )
+
+
+@lru_cache(maxsize=1)
+def cb4_magnitude_table() -> tuple[tuple[int, ...], ...]:
+    """E4M3FN magnitude words [256 group codes][8 magnitudes]."""
+
+    return tuple(cb4_group_magnitudes(code) for code in range(256))
+
+
+def cb4_tile_codes(packed: "torch.Tensor") -> "torch.Tensor":
+    """Row-major packed codes uint8 [N, K/2] -> N16 x K64 tile order (flat uint8)."""
+
+    n, half_k = packed.shape
+    return (packed.reshape(n // 16, 16, half_k // 32, 2, 16)
+            .permute(0, 2, 3, 1, 4).contiguous().reshape(-1))
+
+
+def cb4_tile_groups(groups: "torch.Tensor") -> "torch.Tensor":
+    """Row-major group codes uint8 [N, K/32] -> N16 x K64 tile order (flat uint8)."""
+
+    n, k32 = groups.shape
+    return groups.reshape(n // 16, 16, k32 // 2, 2).permute(0, 2, 3, 1).contiguous().reshape(-1)
+
+
+def encode_cb4_planes(codes: "torch.Tensor", groups: "torch.Tensor",
+                      scales: "torch.Tensor") -> bytes:
+    """Pack exact CB4G32 words: codes uint8 [N, K_pad] in 0..15 (bit 3 = sign, bits 0..2 =
+    magnitude index), group codes uint8 [N, K_pad / 32], FP32 row multipliers [N]."""
+
+    _require_torch()
+    if codes.dtype != torch.uint8 or groups.dtype != torch.uint8 or scales.dtype != torch.float32:
+        raise TypeError("CB4 planes require uint8 codes/groups and FP32 scales")
+    n, k_pad = codes.shape
+    geometry = cb4_geometry((n, k_pad))
+    if geometry.k_pad != k_pad or tuple(groups.shape) != (n, k_pad // 32) or tuple(scales.shape) != (n,):
+        raise ValueError("CB4 planes have inconsistent shapes")
+    if bool((codes > 15).any()):
+        raise ValueError("CB4 codes must be four-bit words")
+    if not bool(torch.isfinite(scales).all()) or bool((scales < 0).any()):
+        raise ValueError("CB4 row multipliers must be finite and nonnegative")
+    c = codes.to("cpu")
+    packed = (c[:, 0::2] | (c[:, 1::2] << 4)).contiguous()
+    out = bytearray(geometry.payload_bytes)
+    out[:geometry.code_bytes] = cb4_tile_codes(packed).numpy().tobytes()
+    out[geometry.group_offset:geometry.group_offset + geometry.group_bytes] = \
+        cb4_tile_groups(groups.to("cpu")).numpy().tobytes()
+    out[geometry.scale_offset:] = scales.to("cpu").contiguous().numpy().astype("<f4").tobytes()
+    return bytes(out)
+
+
+def decode_cb4(source: Payload, shape: Sequence[int]) -> "torch.Tensor":
+    """Exact logical FP64 [N, K] values (E4M3 magnitude times FP32 row multiplier) of one
+    CB4G32 payload."""
+
+    _require_torch()
+    import numpy as np
+    geometry = cb4_geometry(shape)
+    view = memoryview(source).cast("B")
+    if len(view) != geometry.payload_bytes:
+        raise ValueError(f"CB4 payload has {len(view)} bytes, expected {geometry.payload_bytes}")
+    n, k_pad = geometry.n, geometry.k_pad
+    tiles = np.frombuffer(view[:geometry.code_bytes], dtype=np.uint8)
+    packed = tiles.reshape(n // 16, k_pad // 64, 2, 16, 16).transpose(0, 3, 1, 2, 4).reshape(n, k_pad // 2)
+    codes = np.empty((n, k_pad), dtype=np.uint8)
+    codes[:, 0::2] = packed & 15
+    codes[:, 1::2] = packed >> 4
+    groups = np.frombuffer(view[geometry.group_offset:geometry.group_offset + geometry.group_bytes],
+                           dtype=np.uint8).reshape(n // 16, k_pad // 64, 2, 16).transpose(0, 3, 1, 2)
+    groups = groups.reshape(n, k_pad // 32)
+    scales = np.frombuffer(view[geometry.scale_offset:], dtype="<f4").astype(np.float64)
+    words = np.array(cb4_magnitude_table(), dtype=np.uint8)            # [256, 8]
+    lut = torch.tensor(words).view(torch.float8_e4m3fn).to(torch.float64).numpy()
+    magnitude = lut[np.repeat(groups, 32, axis=1), codes & 7]
+    value = np.where(codes & 8, -magnitude, magnitude) * scales[:, None]
+    return torch.from_numpy(np.ascontiguousarray(value[:, :geometry.k]))
+
+
 def encoded_size(
     layout: str | Layout,
     format: str | NumericFormat,
@@ -336,6 +458,10 @@ def encoded_size(
         if not isinstance(numeric_spec, RowScaledFormat):
             raise ValueError("row-scaled-k128-v1 requires a row-scaled format")
         return row_scaled_geometry(numeric_spec, shape).payload_bytes
+    if layout_spec is R9700_CB4G32_N16K64_V1:
+        if not isinstance(numeric_spec, CodebookFormat):
+            raise ValueError("r9700-cb4g32-n16k64-v1 requires a codebook format")
+        return cb4_geometry(shape).payload_bytes
     if layout_spec is R9700_Q4G64_N16_K16_V1:
         return q4_n16k16_geometry(shape).payload_bytes
     if layout_spec is R9700_W8G32_N16_K16_V1:
@@ -999,6 +1125,14 @@ def dequantize_row_split(
 
 
 __all__ = [
+    "CodebookGeometry",
+    "R9700_CB4G32_N16K64_V1",
+    "cb4_geometry",
+    "cb4_tile_codes",
+    "cb4_tile_groups",
+    "cb4_magnitude_table",
+    "decode_cb4",
+    "encode_cb4_planes",
     "CONTIGUOUS_LE_V1",
     "K_ALIGNMENT",
     "LAYOUTS",

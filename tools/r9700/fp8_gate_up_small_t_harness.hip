@@ -412,11 +412,11 @@ void regression(Cell& cell, Stream& stream) {
                         cell.candidate_output.get() + Cell::kOutputGuardElements,
                         sizeof(first),
                         hipMemcpyDeviceToHost));
+    // The nonfinite input is token 0's first element: that token's whole row is poisoned.
     HIP_CHECK(hipMemcpy(&last, cell.candidate_output.get() + Cell::kOutputGuardElements +
-                        static_cast<std::size_t>(cell.tokens) * candidate::kRows - 1U,
-                        sizeof(last), hipMemcpyDeviceToHost));
+                        candidate::kRows - 1U, sizeof(last), hipMemcpyDeviceToHost));
     require(status == fp8::Fp8ActivationNonfinite && first == 0x7fc0U && last == 0x7fc0U,
-            "nonfinite status did not poison the complete candidate output");
+            "nonfinite status did not poison the flagged token's candidate output");
     HIP_CHECK(hipMemcpy(cell.input.get(), cell.input_host.data(), cell.input.bytes(),
                         hipMemcpyHostToDevice));
 }

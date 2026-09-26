@@ -80,6 +80,8 @@ std::string_view format_name(NumericFormat format) noexcept {
         return "W8G32_F16S";
     case NumericFormat::F8E4M3_ROW_F32S:
         return "F8E4M3_ROW_F32S";
+    case NumericFormat::CB4G32_F32S:
+        return "CB4G32_F32S";
     }
     return {};
 }
@@ -96,6 +98,8 @@ std::string_view layout_name(StorageLayout layout) noexcept {
         return "r9700-q4g64-n16-k16-v1";
     case StorageLayout::R9700W8G32N16K16V1:
         return "r9700-w8g32-n16-k16-v1";
+    case StorageLayout::R9700Cb4G32N16K64V1:
+        return "r9700-cb4g32-n16k64-v1";
     }
     return {};
 }
@@ -143,6 +147,12 @@ std::uint64_t tensor_encoded_size(StorageLayout layout, NumericFormat format,
             throw ArtifactError("r9700-q4g64-n16-k16-v1 requires Q4G64_F16S");
         }
         return r9700_q4g64_n16k16_geometry(shape).encoded_bytes;
+    }
+    if (layout == StorageLayout::R9700Cb4G32N16K64V1) {
+        if (format != NumericFormat::CB4G32_F32S) {
+            throw ArtifactError("r9700-cb4g32-n16k64-v1 requires CB4G32_F32S");
+        }
+        return r9700_cb4g32_geometry(shape).encoded_bytes;
     }
     if (layout == StorageLayout::R9700W8G32N16K16V1) {
         if (format != NumericFormat::W8G32_F16S) {
@@ -226,6 +236,26 @@ RowScaledGeometry row_scaled_geometry(NumericFormat format,
     out.scale_plane_bytes = checked_mul(out.rows, 4, "FP8 scale plane bytes");
     out.encoded_bytes =
         checked_add(out.scale_plane_offset, out.scale_plane_bytes, "tensor encoded size");
+    return out;
+}
+
+CodebookGeometry r9700_cb4g32_geometry(std::span<const std::uint64_t> shape) {
+    if (shape.size() != 2 || shape[0] == 0 || shape[0] % 16 != 0 || shape[1] == 0) {
+        throw ArtifactError("r9700-cb4g32-n16k64-v1 requires a positive rank-two shape with N % 16 == 0");
+    }
+    CodebookGeometry out;
+    out.rows               = shape[0];
+    out.columns            = shape[1];
+    out.padded_columns     = align_up(shape[1], kKAlignment, "padded K");
+    out.code_plane_bytes   = checked_mul(out.rows, out.padded_columns / 2, "CB4 code plane bytes");
+    out.group_plane_offset = align_up(out.code_plane_bytes, kTensorAlignment, "CB4 group offset");
+    out.group_plane_bytes  = checked_mul(out.rows, out.padded_columns / 32, "CB4 group bytes");
+    out.scale_plane_offset = align_up(checked_add(out.group_plane_offset, out.group_plane_bytes,
+                                                  "CB4 group plane end"),
+                                      kTensorAlignment, "CB4 scale offset");
+    out.scale_plane_bytes  = checked_mul(out.rows, 4, "CB4 scale plane bytes");
+    out.encoded_bytes      = checked_add(out.scale_plane_offset, out.scale_plane_bytes,
+                                         "tensor encoded size");
     return out;
 }
 

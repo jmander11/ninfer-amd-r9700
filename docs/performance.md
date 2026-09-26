@@ -60,6 +60,50 @@ expected value exactly.
 Copy bus rate counts both the read and write traffic. This is the hardware bandwidth bound, not a
 model or individual-Op throughput claim.
 
+## CB4G32 Text weights and per-token E4M3 activations (2026-09-26, evening)
+
+The Text-layer Q4G64 projections of the selective-cap DFlash2 base were re-encoded from BF16 as
+`CB4G32_F32S` (`r9700-cb4-fp8-selective-cap-dflash2-q4-eval`; codec in `tensor-formats.md`,
+recipe in `qwen3.8-27b-artifact.md`). Each 32-column group selects an eight-magnitude codebook
+whose values are exact E4M3, so every Linear runs FP8 x FP8 WMMA with only the FP32 row scale
+and the per-token activation scale applied after the K sum: prefill is a 256-token x 128-row
+GEMM that decodes weights into double-buffered LDS and loads activation fragments directly;
+T2..16 is a four-way K-split WMMA kernel; T1 is an FP8 dot4 GEMV. Epilogues split outputs,
+accumulate into the residual, or (MLP gate/up, stored interleaved) publish the SiLU-gated
+product directly. QK/PV attention and the typed cache are unchanged (no FP8 attention).
+
+Interleaved A/B against the production Q4 selective-cap artifact, same binary, R9700 at the
+300 W cap:
+
+| Workload | Q4 selective-cap | CB4 |
+|---|---:|---:|
+| prefill 4K tok/s | ~2380 | ~3050 (+28%) |
+| prefill 8K / 32K / 64K (earlier CB4 build) | | +36% / +18% / +16% |
+| P4096/G128 DFlash ms/round | 31.37 | 31.43 |
+| P4096 ordinary decode tok/s (512 tokens) | 36.70 | 36.92 |
+| P65536 DFlash ms/round (earlier CB4 build) | 34.87 | 35.49 |
+
+Quality (`profiles/ppl/r9700-cb4-final-20260926/`, same windows): 4K prefill PPL wiki -0.33%,
+technical -1.48%, code -0.95% relative to Q4; 128-position decode-path spans +2.68%, +4.37%,
++0.67% (short spans, mixed). Against BF16 at 8K, prefill dNLL +0.0224 vs +0.0354 for Q4 (paired
+-0.0131 +/- 0.0053), top-1 flips 378 vs 424, new severe 2 vs 8; decode path +0.0245 vs +0.0367
+(paired -0.0123 +/- 0.0054), flips 382 vs 437, severe 3 vs 10. NIAH exact-answer 8K..128K x five
+positions passes 20/20 (standard) and 20/20 (multikey)
+(`profiles/bench/r9700-niah-cb4-20260926/`). Kernels are checked against an FP64 oracle of the
+decoded codebook (`ninfer_r9700_cb4_linear_qual`, T1..2048, pair, SiLU-pair, residual,
+per-token poison), the producers against theirs (`ninfer_r9700_fp8_producers_qual`), and the
+fused GDN front bitwise against its composition (`ninfer_r9700_gdn_cb4_front_qual`).
+
+The per-token E4M3 image now carries one status word per token, plain-stored by the producing
+CTA; consumers poison only a flagged token's outputs. This removed the serial status CTA (40 us
+per SiLU-producer call) and every status memset; the SiLU producer itself is superseded by the
+SiLU-pair epilogue.
+
+**Measured out.** Eight-byte group-code loads shared across four steps (10-40% slower than byte
+loads); small-T 8x2 and 2x4 K-split depths (4x2 best for verification; T1 took the GEMV);
+compile-time K specialization (no gain); accurate `expf`/division in the SiLU epilogue (3x code,
+15-20% slower prefill; fast exp/reciprocal and branch-free BF16 rounding used instead).
+
 ## Decode launches, host stalls and packed T1 attention (2026-09-26, overnight)
 
 Same setup (selective-cap Q4/FP8 DFlash2 artifact, code corpus, C1, draft 5). Each step was

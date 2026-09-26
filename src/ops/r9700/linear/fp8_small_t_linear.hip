@@ -67,13 +67,6 @@ __global__ __launch_bounds__(32U * kSplit) void fp8_small_t_kernel(KernelArgs a)
             *out = hip_bfloat16(static_cast<float>(*out) + delta);
         }
     };
-    if (*a.status != Fp8ActivationOk) {
-        if (wave == 0U && axis < a.tokens) {
-            for (std::uint32_t item = 0; item < 8U; ++item)
-                publish(axis, row_base + half * 8U + item, true, 0.0F);
-        }
-        return;
-    }
     const std::uint32_t steps = columns / 64U / kSplit;
     const std::uint32_t k_base = wave * steps * 64U + half * 32U;
     const bool token = axis < a.tokens;
@@ -142,7 +135,8 @@ __global__ __launch_bounds__(32U * kSplit) void fp8_small_t_kernel(KernelArgs a)
             for (std::uint32_t quarter = 1; quarter < kSplit; ++quarter)
                 sum += partial[quarter][item][lane];
             const std::uint32_t row = row_base + half * 8U + item;
-            publish(axis, row, false, sum * weight.scales[row] * token_scale);
+            publish(axis, row, a.status[axis] != Fp8ActivationOk,
+                    sum * weight.scales[row] * token_scale);
         }
     }
 #else

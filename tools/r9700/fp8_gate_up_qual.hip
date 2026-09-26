@@ -815,11 +815,12 @@ int main(int argc, char** argv) try {
     std::array<std::uint16_t, 2> fp8_endpoints{};
     HIP_CHECK(hipMemcpy(&fp8_endpoints[0], fp8_output.get(), sizeof(fp8_endpoints[0]),
                         hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(&fp8_endpoints[1], fp8_output.get() + output_elements - 1U,
+    // The nonfinite input is token 0's first element: both ends of that token's row are poisoned.
+    HIP_CHECK(hipMemcpy(&fp8_endpoints[1], fp8_output.get() + output_elements / tokens - 1U,
                         sizeof(fp8_endpoints[1]), hipMemcpyDeviceToHost));
     require(device_status == linear::Fp8ActivationNonfinite && fp8_endpoints[0] == 0x7FC0U &&
                 fp8_endpoints[1] == 0x7FC0U,
-            "post-matmul device status consumer did not canonically poison nonfinite output");
+            "post-matmul device status consumer did not canonically poison the flagged token");
     HIP_CHECK(linear::a8q4g64_linear_candidate(q4_candidate, stream.get()));
     HIP_CHECK(hipStreamSynchronize(stream.get()));
     HIP_CHECK(hipMemcpy(&q4_device_status, q4_activation.status, sizeof(q4_device_status),

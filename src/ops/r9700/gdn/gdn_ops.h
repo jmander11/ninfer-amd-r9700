@@ -3,6 +3,8 @@
 #include <hip/hip_bfloat16.h>
 #include <hip/hip_runtime_api.h>
 
+#include "ops/r9700/linear/cb4_linear.h"
+#include "ops/r9700/linear/fp8_activation.h"
 #include "ops/r9700/linear/r9700_linear.h"
 
 #include <cstddef>
@@ -92,6 +94,15 @@ namespace ninfer::ops::r9700::gdn {
 // fused with projection_conv_record_bf16 on their BF16 values; value-z rows 6144.. publish z.
 // Bitwise the pair projection followed by projection_conv_record_bf16.
 [[nodiscard]] bool gdn_pair_conv_record_supported(std::uint32_t width, std::uint32_t batch) noexcept;
+// The same fused projection-convolution of one per-token E4M3 image over CB4G32 query-key
+// [4096, 5120] and value-z [12288, 5120] weights.
+[[nodiscard]] hipError_t gdn_cb4_pair_conv_record_bf16(
+    const linear::Fp8ActivationWorkspace& image, const linear::Cb4Weight& query_key,
+    const linear::Cb4Weight& value_z, const hip_bfloat16* conv_weight,
+    const hip_bfloat16* conv_states, const std::int32_t* valid_columns,
+    const std::int32_t* initial_state_slots, const std::int32_t* parent_index,
+    hip_bfloat16* conv_record, hip_bfloat16* query, hip_bfloat16* key, hip_bfloat16* value,
+    hip_bfloat16* z, std::uint32_t width, std::uint32_t state_slots, hipStream_t stream) noexcept;
 [[nodiscard]] hipError_t gdn_pair_conv_record_bf16(
     const linear::A8G64ActivationWorkspace& planes, const std::uint8_t* query_key_codes,
     const std::uint16_t* query_key_scales, const std::uint8_t* value_z_codes,
@@ -134,6 +145,14 @@ namespace ninfer::ops::r9700::gdn {
     const float* dt_bias, float* g, float* beta,
     const linear::A8G64ActivationWorkspace& planes, hip_bfloat16* hidden,
     std::uint32_t* clear_status, hipStream_t stream) noexcept;
+
+// The same front with the seam encoded as a per-token E4M3 image (bound for tokens x 5120) for
+// CB4G32 projections: each token's owner CTA publishes its codes, scale and status word.
+[[nodiscard]] hipError_t fp8_gdn_normalized_front(
+    const hip_bfloat16* residual, const hip_bfloat16* norm, float eps, bool unit_offset,
+    const hip_bfloat16* a_weight, const hip_bfloat16* b_weight, const float* a_log,
+    const float* dt_bias, float* g, float* beta, const linear::Fp8ActivationWorkspace& image,
+    hipStream_t stream) noexcept;
 
 // Exact FP32 state movement for transaction/checkpoint publication. Source/destination are
 // non-overlapping FP32 elements and count is positive.

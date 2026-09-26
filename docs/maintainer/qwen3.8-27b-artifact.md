@@ -82,6 +82,31 @@ the nonzero mixed prefill A4 families remain evaluators.
 The current build/run configuration is G16, dense, chunk2048, W8 activation bits8;
 see `docs/performance.md` for quality tradeoffs and delivery evidence.
 
+### CB4G32 Text recipe
+
+`r9700-cb4-fp8-selective-cap-dflash2-q4-eval` (profile
+`R9700Cb4Fp8SelectiveCapDFlash2Q4Evaluation`, 17,017,223,680 bytes) is the selective-cap DFlash2
+companion with every Text-layer projection the base stores as Q4G64 re-encoded from the original
+BF16 checkpoint as `CB4G32_F32S` in `r9700-cb4g32-n16k64-v1` (see `tensor-formats.md`), including
+GDN value_z. The 26 FP8 protections, embedding, output head, MTP, DFlash2 companion, Vision and
+resources are copied byte-exact from the base. MLP gate/up rows are stored gate/up interleaved in
+16-row tiles (stored row `16 b + i` is gate feature `8 b + i` for `i < 8`, else up feature
+`8 b + i - 8`) so the projection publishes the SiLU-gated activation directly; no other object is
+permuted. The binder uses the selective-cap base inventory and switches exactly its Text-layer Q4
+matrices to CB4. Installed at
+`/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-cb4-fp8-selective-cap/`. Conversion (GPU
+search optional, create-only, validated readback):
+
+```bash
+python3.11 -m tools.convert.qwen3_8_27b_r9700.convert_cb4 \
+  --base <qwen3.8-27b-r9700-q4-fp8-selective-cap-n16k16-dflash2-q4-eval.ninfer> \
+  --model /ssdpool2nvme/local_llm/models/qwen3.8-27b-bf16 --out <new.ninfer> --device cuda
+```
+
+Its Linears run per-token E4M3 activations: prefill a 256-token x 128-row FP8 WMMA GEMM with the
+group scale folded into the decoded weight bytes, verification widths a small-T WMMA kernel, one
+token an FP8 dot4 GEMV. Quality and speed evidence are in `docs/performance.md`.
+
 `r9700-q4-selective-protected-n16k16-eval` is a separate source-derived evaluation base,
 not a production selection. It starts from the exact all-Q4 N16K16 artifact
 and replaces 28 physical objects: W8G32 token embedding/output head; BF16 attention query_key

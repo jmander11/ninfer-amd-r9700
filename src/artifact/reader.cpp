@@ -96,6 +96,7 @@ NumericFormat parse_format(std::string_view name) {
     if (name == "Q6G64_F16S") { return NumericFormat::Q6G64_F16S; }
     if (name == "W8G32_F16S") { return NumericFormat::W8G32_F16S; }
     if (name == "F8E4M3_ROW_F32S") { return NumericFormat::F8E4M3_ROW_F32S; }
+    if (name == "CB4G32_F32S") { return NumericFormat::CB4G32_F32S; }
     throw ArtifactError("unknown tensor format: " + std::string(name));
 }
 
@@ -104,6 +105,7 @@ StorageLayout parse_layout(std::string_view name) {
     if (name == "row-split-k128-v1") { return StorageLayout::RowSplitK128V1; }
     if (name == "r9700-w8g32-n16-k16-v1") { return StorageLayout::R9700W8G32N16K16V1; }
     if (name == "row-scaled-k128-v1") { return StorageLayout::RowScaledK128V1; }
+    if (name == "r9700-cb4g32-n16k64-v1") { return StorageLayout::R9700Cb4G32N16K64V1; }
     if (name == "r9700-q4g64-n16-k16-v1") {
         return StorageLayout::R9700Q4G64N16K16V1;
     }

@@ -37,6 +37,10 @@ from .layouts import (
     encode_q4_n16k16,
     encoded_size,
     gather_row_planes,
+    R9700_CB4G32_N16K64_V1,
+    cb4_geometry,
+    decode_cb4,
+    encode_cb4_planes,
     get_layout,
     row_split_geometry,
     q4_n16k16_geometry,
@@ -45,6 +49,8 @@ from .layouts import (
 )
 from .numeric import (
     BF16,
+    CB4G32_F32S,
+    CodebookFormat,
     DIRECT_FORMATS,
     FP32,
     F8E4M3_ROW_F32S,
@@ -65,6 +71,12 @@ from .numeric import (
 
 __all__ = [
     "Artifact",
+    "CB4G32_F32S",
+    "CodebookFormat",
+    "R9700_CB4G32_N16K64_V1",
+    "cb4_geometry",
+    "decode_cb4",
+    "encode_cb4_planes",
     "ArtifactError",
     "ArtifactIdentity",
     "ArtifactObject",

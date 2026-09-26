@@ -57,6 +57,8 @@ enum class WeightsProfile : std::uint8_t {
     R9700Q4G64DFlash2W8MseEvaluation,
     R9700Q4W8MseDFlash2W8MseEvaluation,
     R9700Q4G64Fp8FourRoleDFlash2W8MseEvaluation,
+    // Selective-cap DFlash2 base with every remaining Q4 Text matrix in CB4G32_F32S.
+    R9700Cb4Fp8SelectiveCapDFlash2Q4Evaluation,
 #define NINFER_QWEN38_FP8_ENDPOINT(symbol, id, base, embed, head) symbol,
 #include "targets/qwen3_8_27b/impl/load/fp8_endpoint_selection.inc"
 #undef NINFER_QWEN38_FP8_ENDPOINT
@@ -64,6 +66,8 @@ enum class WeightsProfile : std::uint8_t {
 
 [[nodiscard]] constexpr WeightsProfile fp8_capped_base_profile(WeightsProfile profile) noexcept {
     switch (profile) {
+    case WeightsProfile::R9700Cb4Fp8SelectiveCapDFlash2Q4Evaluation:
+        return WeightsProfile::R9700Q4Fp8SelectiveCapDFlash2Q4Evaluation;
 #define NINFER_QWEN38_FP8_ENDPOINT(symbol, id, base, embed, head) \
     case WeightsProfile::symbol: return WeightsProfile::base;
 #include "targets/qwen3_8_27b/impl/load/fp8_endpoint_selection.inc"
@@ -90,6 +94,11 @@ enum class WeightsProfile : std::uint8_t {
 #undef NINFER_QWEN38_FP8_ENDPOINT
     default: return false;
     }
+}
+
+// Text projections that the base recipe stores as Q4G64 are CB4G32 codebook matrices.
+[[nodiscard]] constexpr bool is_cb4_text_profile(WeightsProfile profile) noexcept {
+    return profile == WeightsProfile::R9700Cb4Fp8SelectiveCapDFlash2Q4Evaluation;
 }
 
 [[nodiscard]] constexpr bool is_fp8_capped_profile(WeightsProfile profile) noexcept {

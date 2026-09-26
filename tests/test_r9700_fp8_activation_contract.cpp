@@ -25,7 +25,8 @@ int main() {
         static_assert(linear::Fp8ActivationNonfinite == 1U);
         require(linear::fp8_activation_workspace_capacity_bytes(1, 1) == 516,
                 "scalar FP8 activation workspace geometry is wrong");
-        constexpr std::size_t kBytes = 1028;
+        // Codes [3, 256], scales [3] at 768, one status word per token at 1024.
+        constexpr std::size_t kBytes = 1036;
         require(linear::fp8_activation_workspace_capacity_bytes(3, 129) == kBytes,
                 "K128-padded FP8 activation workspace geometry is wrong");
         require(ops::LinearExecution::activation_workspace_capacity_bytes(3, 129) == kBytes,

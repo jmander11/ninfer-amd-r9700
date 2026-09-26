@@ -79,12 +79,14 @@ void fp8_gate_up_n34816_k5120_t5t6_wmma_kernel(
 #endif
 }
 
-__global__ void poison_nonfinite(const std::uint32_t* status, hip_bfloat16* output,
-                                 std::size_t elements) {
-    if (*status == ops::r9700::linear::Fp8ActivationOk) return;
+// Every output element of a flagged token (rows of kRows) becomes the poison value.
+__global__ void poison_nonfinite(const std::uint32_t* status, std::uint32_t tokens,
+                                 hip_bfloat16* output, std::size_t elements) {
+    (void)tokens;
     for (std::size_t index = static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
          index < elements; index += static_cast<std::size_t>(gridDim.x) * blockDim.x) {
-        reinterpret_cast<std::uint16_t*>(output)[index] = kPoison;
+        if (status[index / kRows] != ops::r9700::linear::Fp8ActivationOk)
+            reinterpret_cast<std::uint16_t*>(output)[index] = kPoison;
     }
 }
 
@@ -160,7 +162,7 @@ hipError_t launch(const Arguments& a, hipStream_t stream) noexcept {
     if (status != hipSuccess) return status;
     const std::size_t elements = static_cast<std::size_t>(a.tokens) * kRows;
     hipLaunchKernelGGL(poison_nonfinite, dim3((elements + 255U) / 256U), dim3(256), 0,
-                       stream, a.activation.status, a.output_bf16, elements);
+                       stream, a.activation.status, a.tokens, a.output_bf16, elements);
     return hipGetLastError();
 }
 

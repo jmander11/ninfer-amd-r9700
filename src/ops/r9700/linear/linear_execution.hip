@@ -130,16 +130,14 @@ bool ranges_overlap(const void* lhs, std::size_t lhs_bytes, const void* rhs,
     return lhs_begin < rhs_end && rhs_begin < lhs_end;
 }
 
-__global__ void poison_nonfinite_output(const std::uint32_t* status,
-                                        hip_bfloat16* output,
-                                        std::size_t output_elements) {
-    __shared__ bool poison;
-    if (threadIdx.x == 0U) poison = *status != r9700::linear::Fp8ActivationOk;
-    __syncthreads();
-    if (!poison) return;
-    for (std::size_t index = threadIdx.x; index < output_elements; index += blockDim.x) {
-        reinterpret_cast<std::uint16_t*>(output)[index] = kCanonicalBf16QuietNan;
-    }
+// Every output element of a flagged token becomes the canonical BF16 quiet NaN (one CTA per token).
+__global__ void poison_nonfinite_output(const std::uint32_t* status, hip_bfloat16* output,
+                                        std::size_t rows) {
+    const std::uint32_t token = blockIdx.x;
+    if (status[token] == r9700::linear::Fp8ActivationOk) return;
+    auto* row = reinterpret_cast<std::uint16_t*>(output) + static_cast<std::size_t>(token) * rows;
+    for (std::size_t index = threadIdx.x; index < rows; index += blockDim.x)
+        row[index] = kCanonicalBf16QuietNan;
 }
 
 } // namespace
@@ -235,8 +233,9 @@ struct LinearExecution::Impl {
             profile.output_layout, output, profile.output_layout, &profile.algorithm,
             matmul_workspace, profile.public_profile.selected_matmul_workspace_bytes, stream);
         if (matmul_status != HIPBLAS_STATUS_SUCCESS) return {hipSuccess, matmul_status};
-        hipLaunchKernelGGL(poison_nonfinite_output, dim3(1), dim3(kPoisonBlockSize), 0, stream,
-                           profile.activation.status, output, output_elements);
+        hipLaunchKernelGGL(poison_nonfinite_output, dim3(profile.activation.tokens),
+                           dim3(kPoisonBlockSize), 0, stream, profile.activation.status, output,
+                           output_elements / profile.activation.tokens);
         return {hipGetLastError(), HIPBLAS_STATUS_SUCCESS};
     }
 

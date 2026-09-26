@@ -77,6 +77,37 @@ struct Variant {
                                       hipStream_t stream);
         void linear(const Tensor& input, const Weight& weight, Tensor& output,
                     WorkspaceArena& fallback_workspace, hipStream_t stream);
+        // One CB4G32 projection target: rows [0, leading rows) publish to `leading`, the rest to
+        // `trailing` (nullptr: every row to `leading`); `accumulate` publishes
+        // BF16(output + BF16(projection)); `silu_pair` publishes the SiLU-gated activation of a
+        // gate/up-interleaved weight to `leading` [rows / 2, T].
+        struct Cb4Target {
+            const Weight& weight;
+            Tensor& leading;
+            Tensor* trailing;
+            bool accumulate;
+            bool silu_pair = false;
+        };
+        // CB4 projections of one per-token E4M3 image; each returns false unless every target
+        // weight is CB4G32_F32S. The image is produced from
+        // - the BF16 rows `input` [K, T];
+        [[nodiscard]] bool cb4_projections(const Tensor& input, std::span<const Cb4Target> targets,
+                                           hipStream_t stream);
+        // - RMSNorm (unit offset) of `residual` [5120, T];
+        [[nodiscard]] bool cb4_normalized_projections(const Tensor& residual, const Tensor& norm,
+                                                      float eps,
+                                                      std::span<const Cb4Target> targets,
+                                                      hipStream_t stream);
+        // - the attention output gate BF16(BF16(attention) * sigmoid(gate)) [6144, T];
+        [[nodiscard]] bool cb4_gated_projections(const Tensor& gate, const Tensor& attention_fp32,
+                                                 std::span<const Cb4Target> targets,
+                                                 hipStream_t stream);
+        // - the GDN gated per-head RMSNorm of `recurrent_output` with gate `z` [6144, T].
+        [[nodiscard]] bool cb4_gated_rmsnorm_projections(const Tensor& recurrent_output,
+                                                         const Tensor& norm, const Tensor& z,
+                                                         float eps,
+                                                         std::span<const Cb4Target> targets,
+                                                         hipStream_t stream);
         // SiLU-gated down projection added to the residual in place.
         // Small verification widths: normalized gate/up plus fused SiLU down as one Op whose
         // prepare also clears the down status (no reset launch). gate_up is BF16 scratch.
@@ -267,6 +298,19 @@ struct Variant {
         struct Impl;
         [[nodiscard]] ops::r9700::linear::FusedSiluA8Q4G64DownArgs fused_down_args(
             const Tensor& gate_up, const Weight& down, Tensor& residual) const;
+        // CB4 GDN front: residual RMSNorm, a/b controls into g/beta and the per-token E4M3 image
+        // of the seam (bound in the serialized region) from one kernel; false unless both GDN
+        // input projections are CB4G32.
+        [[nodiscard]] bool gdn_cb4_front(const Tensor& residual, const Tensor& norm, float eps,
+                                         const GdnProjectionWeights& weights, Tensor& g,
+                                         Tensor& beta, hipStream_t stream,
+                                         ops::r9700::linear::Fp8ActivationWorkspace* image);
+        [[nodiscard]] bool cb4_targets_supported(std::uint32_t tokens, std::uint32_t columns,
+                                                 std::span<const Cb4Target> targets) const noexcept;
+        [[nodiscard]] ops::r9700::linear::Fp8ActivationWorkspace cb4_image(
+            std::uint32_t tokens, std::uint32_t columns) const;
+        void cb4_project(const ops::r9700::linear::Fp8ActivationWorkspace& image,
+                         std::span<const Cb4Target> targets, hipStream_t stream) const;
         [[nodiscard]] const ops::r9700::linear::Fp8ActivationWorkspace* fp8_small_activation(
             SelectedLinearRole role, std::int32_t text_layer, const Weight& weight,
             std::uint32_t tokens, hipStream_t stream);
