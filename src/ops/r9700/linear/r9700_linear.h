@@ -307,6 +307,10 @@ struct A8Q4G64SharedActivationArgs {
     std::uint32_t tokens, std::uint32_t columns, std::uint32_t rows) noexcept;
 [[nodiscard]] hipError_t a8q4g64_shared_activation_linear(
     const A8Q4G64SharedActivationArgs& args, hipStream_t stream) noexcept;
+// The same projections of activation planes another Op's exact A8G64 codec already prepared
+// (with their status word) in activation_workspace for (tokens, columns); input must be null.
+[[nodiscard]] hipError_t a8q4g64_prepared_shared_activation_linear(
+    const A8Q4G64SharedActivationArgs& args, hipStream_t stream) noexcept;
 // Normalized form of the shared projections at K5120: one pass computes the RMSNorm
 // BF16(x * rsqrt(mean(x^2) + eps) * (norm + unit_offset)), publishes those BF16 rows to
 // `normalized` [T,5120] and quantizes the same values into the A8G64 planes every GEMM reads.

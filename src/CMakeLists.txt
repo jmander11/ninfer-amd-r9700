@@ -797,6 +797,13 @@ target_link_libraries(ninfer_r9700_mlp_width_discriminator PRIVATE ninfer_artifa
 # public Engine, and product applications above are native HIP link owners;
 # real-model execution is still gated on the complete BF16-derived R9700 artifact.
 
+# Qualify the verification-width GDN front (RMSNorm seam, controls, A8G64 planes, status).
+add_executable(ninfer_r9700_gdn_normalized_front_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/gdn_normalized_front_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_gdn_normalized_front_qual)
+set_target_properties(ninfer_r9700_gdn_normalized_front_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_gdn_normalized_front_qual PRIVATE ninfer_r9700_core hip::host)
+
 # Qualify the selected semantic projected-controls Op from the existing GDN module.
 add_executable(ninfer_r9700_gdn_projected_controls_qual
   ${PROJECT_SOURCE_DIR}/tools/r9700/gdn_projected_controls_qual.hip)

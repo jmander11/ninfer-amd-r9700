@@ -3,6 +3,8 @@
 #include <hip/hip_bfloat16.h>
 #include <hip/hip_runtime_api.h>
 
+#include "ops/r9700/linear/r9700_linear.h"
+
 #include <cstddef>
 #include <cstdint>
 
@@ -104,6 +106,19 @@ namespace ninfer::ops::r9700::gdn {
     const hip_bfloat16* hidden, const hip_bfloat16* a_weight,
     const hip_bfloat16* b_weight, const float* a_log, const float* dt_bias,
     float* g, float* beta, std::uint32_t tokens, hipStream_t stream) noexcept;
+
+// Verification-width GDN front for T2..24: the unit-offset-capable K5120 RMSNorm of residual
+// [tokens,5120] (the row-CTA arithmetic of the eager RMSNorm, BF16 seam), the exact T1..24
+// control arithmetic of bf16_projected_control on that seam, and the exact A8G64 codec of the
+// same seam into `planes` (bound for tokens x 5120), whose status word is published without a
+// reset launch. `hidden`, when non-null, receives the BF16 seam rows.
+[[nodiscard]] bool bf16_gdn_normalized_front_supported(std::uint32_t tokens) noexcept;
+[[nodiscard]] hipError_t bf16_gdn_normalized_front(
+    const hip_bfloat16* residual, const hip_bfloat16* norm, float eps, bool unit_offset,
+    const hip_bfloat16* a_weight, const hip_bfloat16* b_weight, const float* a_log,
+    const float* dt_bias, float* g, float* beta,
+    const linear::A8G64ActivationWorkspace& planes, hip_bfloat16* hidden,
+    hipStream_t stream) noexcept;
 
 // Exact FP32 state movement for transaction/checkpoint publication. Source/destination are
 // non-overlapping FP32 elements and count is positive.

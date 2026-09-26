@@ -1,4 +1,6 @@
 #include "ops/r9700/gdn/gdn_ops.h"
+#include "ops/r9700/linear/a8g64_codec.h"
+#include "ops/r9700/linear/r9700_linear.h"
 
 #include "ninfer/types.h"
 
@@ -411,19 +413,18 @@ __global__ void control_gates_kernel(const hip_bfloat16* a, const hip_bfloat16* 
 // Every admitted width runs this same per-column arithmetic.
 constexpr std::uint32_t kControlT1Threads = kControlColumns / 8U;
 
-__global__ __launch_bounds__(kControlT1Threads) void bf16_projected_control_t1_kernel(
-    const hip_bfloat16* hidden, const hip_bfloat16* a_weight,
-    const hip_bfloat16* b_weight, const float* a_log, const float* dt_bias,
-    float* g, float* beta) {
+// The control output of one (head, token) from this thread's hidden vector x (slot threadIdx.x);
+// a_waves/b_waves are the CTA's wave partials. Called by every thread of a kControlT1Threads CTA.
+__device__ __forceinline__ void control_t1_output(
+    uint4 x, const hip_bfloat16* a_weight, const hip_bfloat16* b_weight, const float* a_log,
+    const float* dt_bias, float* g, float* beta, std::uint32_t head, std::size_t output,
+    float* a_waves, float* b_waves) {
     constexpr std::uint32_t waves = kControlT1Threads / 32U;
-    const std::uint32_t head = blockIdx.x;
     const std::uint32_t lane = threadIdx.x & 31U;
     const std::uint32_t wave = threadIdx.x >> 5U;
-    const std::size_t output = static_cast<std::size_t>(blockIdx.y) * kControlHeads + head;
     const auto load = [](const hip_bfloat16* row) {
         return reinterpret_cast<const uint4*>(row)[threadIdx.x];
     };
-    const uint4 x = load(hidden + static_cast<std::size_t>(blockIdx.y) * kControlColumns);
     const uint4 av = load(a_weight + static_cast<std::size_t>(head) * kControlColumns);
     const uint4 bv = load(b_weight + static_cast<std::size_t>(head) * kControlColumns);
     const std::uint32_t xw[4] = {x.x, x.y, x.z, x.w};
@@ -447,8 +448,6 @@ __global__ __launch_bounds__(kControlT1Threads) void bf16_projected_control_t1_k
         a_partial += __shfl_xor(a_partial, width, 32);
         b_partial += __shfl_xor(b_partial, width, 32);
     }
-    __shared__ float a_waves[waves];
-    __shared__ float b_waves[waves];
     if (lane == 0U) {
         a_waves[wave] = a_partial;
         b_waves[wave] = b_partial;
@@ -469,6 +468,204 @@ __global__ __launch_bounds__(kControlT1Threads) void bf16_projected_control_t1_k
         g[output] = -expf(a_log[head]) * softplus;
         const float b_value = static_cast<float>(br);
         beta[output] = 1.0F / (1.0F + expf(-b_value));
+    }
+}
+
+__global__ __launch_bounds__(kControlT1Threads) void bf16_projected_control_t1_kernel(
+    const hip_bfloat16* hidden, const hip_bfloat16* a_weight,
+    const hip_bfloat16* b_weight, const float* a_log, const float* dt_bias,
+    float* g, float* beta) {
+    __shared__ float a_waves[kControlT1Threads / 32U];
+    __shared__ float b_waves[kControlT1Threads / 32U];
+    const std::uint32_t head = blockIdx.x;
+    const uint4 x = reinterpret_cast<const uint4*>(
+        hidden + static_cast<std::size_t>(blockIdx.y) * kControlColumns)[threadIdx.x];
+    control_t1_output(x, a_weight, b_weight, a_log, dt_bias, g, beta, head,
+                      static_cast<std::size_t>(blockIdx.y) * kControlHeads + head, a_waves,
+                      b_waves);
+}
+
+// Verification-width GDN front: one kControlT1Threads CTA per control head, eight tokens per
+// pass. Every CTA normalizes each token row with the K5120 row-CTA RMSNorm arithmetic (per-thread
+// eight-term FMA chain, wave32 xor tree, wave partials summed in wave order, BF16 seam) and runs
+// the per-(head, token) control arithmetic of control_t1_output on the seam (thread j sums token
+// j's wave partials). CTA token % kControlHeads encodes the token's seam with the exact A8G64
+// codec (and publishes it to `hidden` when non-null); CTA 0, which sees every seam value,
+// plain-stores the nonfinite/overflow status word, so no reset launch is needed.
+constexpr std::uint32_t kFrontMaximumTokens = 24U;
+constexpr std::uint32_t kFrontPassTokens = 8U;
+constexpr std::uint32_t kFrontWaves = kControlT1Threads / 32U;
+
+__device__ __forceinline__ float front_vector_sumsq(uint4 packed) {
+    const std::uint32_t words[4] = {packed.x, packed.y, packed.z, packed.w};
+    float sumsq = 0.0F;
+#pragma unroll
+    for (std::uint32_t element = 0; element < 8U; ++element) {
+        const float value = linear::codec::bf16_word_element(words, element);
+        sumsq = fmaf(value, value, sumsq);
+    }
+#pragma unroll
+    for (std::uint32_t width = 16U; width != 0U; width >>= 1U)
+        sumsq += __shfl_xor(sumsq, width, 32);
+    return sumsq;
+}
+
+__device__ __forceinline__ float front_inverse(const float* wave_sums, float eps) {
+    float block_sum = 0.0F;
+#pragma unroll
+    for (std::uint32_t i = 0; i < kFrontWaves; ++i) block_sum += wave_sums[i];
+    return rsqrtf(block_sum / static_cast<float>(kControlColumns) + eps);
+}
+
+// BF16 seam words and their FP32 values (nonfinite kept).
+__device__ __forceinline__ uint4 front_seam(uint4 packed, uint4 gains, float inverse, float offset,
+                                            float (&value)[8]) {
+    const std::uint32_t words[4] = {packed.x, packed.y, packed.z, packed.w};
+    const std::uint32_t gain_words[4] = {gains.x, gains.y, gains.z, gains.w};
+    std::uint32_t seam[4];
+#pragma unroll
+    for (std::uint32_t w = 0; w < 4U; ++w) {
+        const float low_gain = __uint_as_float(gain_words[w] << 16) + offset;
+        const float high_gain = __uint_as_float(gain_words[w] & 0xffff0000U) + offset;
+        const hip_bfloat16 low(__uint_as_float(words[w] << 16) * inverse * low_gain);
+        const hip_bfloat16 high(__uint_as_float(words[w] & 0xffff0000U) * inverse * high_gain);
+        seam[w] = static_cast<std::uint32_t>(low.data) |
+                  (static_cast<std::uint32_t>(high.data) << 16);
+        value[2U * w] = static_cast<float>(low);
+        value[2U * w + 1U] = static_cast<float>(high);
+    }
+    return uint4{seam[0], seam[1], seam[2], seam[3]};
+}
+
+__global__ __launch_bounds__(kControlT1Threads) void bf16_gdn_normalized_front_kernel(
+    const hip_bfloat16* residual, const hip_bfloat16* norm, float eps, bool unit_offset,
+    const hip_bfloat16* a_weight, const hip_bfloat16* b_weight, const float* a_log,
+    const float* dt_bias, float* g, float* beta, std::uint8_t* low_codes,
+    std::uint8_t* high_codes, std::uint16_t* scale_words, std::uint32_t* status,
+    hip_bfloat16* hidden, std::uint32_t tokens) {
+    __shared__ float wave_sums[kFrontPassTokens][kFrontWaves];
+    __shared__ float inverses[kFrontPassTokens];
+    __shared__ float a_waves[kFrontPassTokens][kFrontWaves];
+    __shared__ float b_waves[kFrontPassTokens][kFrontWaves];
+    constexpr std::uint32_t row_vectors = kControlT1Threads;
+    const std::uint32_t head = blockIdx.x;
+    const std::uint32_t lane = threadIdx.x & 31U, wave = threadIdx.x >> 5U;
+    const float offset = unit_offset ? 1.0F : 0.0F;
+    const uint4 gains = reinterpret_cast<const uint4*>(norm)[threadIdx.x];
+    const uint4 av = reinterpret_cast<const uint4*>(
+        a_weight + static_cast<std::size_t>(head) * kControlColumns)[threadIdx.x];
+    const uint4 bv = reinterpret_cast<const uint4*>(
+        b_weight + static_cast<std::size_t>(head) * kControlColumns)[threadIdx.x];
+    const std::uint32_t aw[4] = {av.x, av.y, av.z, av.w};
+    const std::uint32_t bw[4] = {bv.x, bv.y, bv.z, bv.w};
+    const uint4* rows = reinterpret_cast<const uint4*>(residual);
+    bool nonfinite = false, overflow = false;
+    for (std::uint32_t first = 0; first < tokens; first += kFrontPassTokens) {
+        // Tokens are predicated, never broken out of, so the arrays stay in registers.
+        uint4 loaded[kFrontPassTokens];
+#pragma unroll
+        for (std::uint32_t row = 0; row < kFrontPassTokens; ++row)
+            loaded[row] = first + row < tokens
+                ? rows[static_cast<std::size_t>(first + row) * row_vectors + threadIdx.x]
+                : uint4{};
+#pragma unroll
+        for (std::uint32_t row = 0; row < kFrontPassTokens; ++row) {
+            const float sumsq = front_vector_sumsq(loaded[row]);
+            if (lane == 0U) wave_sums[row][wave] = sumsq;
+        }
+        __syncthreads();
+        // Thread j reduces row j once; every thread then reads the row's inverse.
+        if (threadIdx.x < kFrontPassTokens)
+            inverses[threadIdx.x] = front_inverse(wave_sums[threadIdx.x], eps);
+        __syncthreads();
+#pragma unroll
+        for (std::uint32_t row = 0; row < kFrontPassTokens; ++row) {
+            const std::uint32_t token = first + row;
+            if (token < tokens) {
+                float value[8];
+                const uint4 seam = front_seam(loaded[row], gains, inverses[row], offset, value);
+                if (head == 0U) {
+#pragma unroll
+                    for (std::uint32_t element = 0; element < 8U; ++element) {
+                        nonfinite |= !isfinite(value[element]);
+                        overflow |= isfinite(value[element]) &&
+                                    linear::codec::a8g64_element_overflows(value[element]);
+                    }
+                }
+                if (token % kControlHeads == head) {
+                    const std::size_t vector =
+                        static_cast<std::size_t>(token) * row_vectors + threadIdx.x;
+                    if (hidden != nullptr) reinterpret_cast<uint4*>(hidden)[vector] = seam;
+                    float finite[8];
+                    float maximum = 0.0F;
+#pragma unroll
+                    for (std::uint32_t element = 0; element < 8U; ++element) {
+                        finite[element] = isfinite(value[element]) ? value[element] : 0.0F;
+                        maximum = fmaxf(maximum, fabsf(finite[element]));
+                    }
+                    maximum = linear::codec::a8g64_group_maximum(maximum);
+                    linear::codec::a8g64_encode_vector(
+                        finite, maximum, lane, vector,
+                        static_cast<std::size_t>(token) * (kControlColumns / 64U) +
+                            threadIdx.x / 8U,
+                        low_codes, high_codes, scale_words);
+                }
+                const std::uint32_t xw[4] = {seam.x, seam.y, seam.z, seam.w};
+                float a_partial = 0.0F;
+                float b_partial = 0.0F;
+#pragma unroll
+                for (int w = 0; w < 4; ++w) {
+#pragma unroll
+                    for (int half = 0; half < 2; ++half) {
+                        const auto element = [&](std::uint32_t word) {
+                            return __uint_as_float(half == 0 ? word << 16 : word & 0xffff0000U);
+                        };
+                        a_partial = fmaf(element(xw[w]), element(aw[w]), a_partial);
+                        b_partial = fmaf(element(xw[w]), element(bw[w]), b_partial);
+                    }
+                }
+#pragma unroll
+                for (std::uint32_t width = 16U; width != 0U; width >>= 1U) {
+                    a_partial += __shfl_xor(a_partial, width, 32);
+                    b_partial += __shfl_xor(b_partial, width, 32);
+                }
+                if (lane == 0U) {
+                    a_waves[row][wave] = a_partial;
+                    b_waves[row][wave] = b_partial;
+                }
+            }
+        }
+        __syncthreads();
+        if (threadIdx.x < kFrontPassTokens && first + threadIdx.x < tokens) {
+            const std::uint32_t row = threadIdx.x;
+            float a_sum = 0.0F;
+            float b_sum = 0.0F;
+#pragma unroll
+            for (std::uint32_t i = 0; i < kFrontWaves; ++i) {
+                a_sum += a_waves[row][i];
+                b_sum += b_waves[row][i];
+            }
+            const hip_bfloat16 ar = static_cast<hip_bfloat16>(a_sum);
+            const hip_bfloat16 br = static_cast<hip_bfloat16>(b_sum);
+            const float a_value = static_cast<float>(ar) + dt_bias[head];
+            const float softplus = a_value > 20.0F ? a_value : log1pf(expf(a_value));
+            const std::size_t output =
+                static_cast<std::size_t>(first + row) * kControlHeads + head;
+            g[output] = -expf(a_log[head]) * softplus;
+            const float b_value = static_cast<float>(br);
+            beta[output] = 1.0F / (1.0F + expf(-b_value));
+        }
+        __syncthreads();
+    }
+    if (head == 0U) {
+        const bool any_nonfinite = __syncthreads_or(nonfinite);
+        const bool any_overflow = __syncthreads_or(overflow);
+        if (threadIdx.x == 0U)
+            *status =
+                (any_nonfinite ? static_cast<std::uint32_t>(linear::Q4G64ActivationNonfinite)
+                               : 0U) |
+                (any_overflow ? static_cast<std::uint32_t>(linear::Q4G64ActivationScaleOverflow)
+                              : 0U);
     }
 }
 
@@ -865,6 +1062,56 @@ hipError_t bf16_projected_control(
                                dim3(kControlWideSplits * 32U), 0, stream, hidden, a_weight,
                                b_weight, a_log, dt_bias, g, beta, tokens);
         }
+    });
+}
+
+bool bf16_gdn_normalized_front_supported(std::uint32_t tokens) noexcept {
+    return tokens >= 2U && tokens <= kFrontMaximumTokens;
+}
+
+hipError_t bf16_gdn_normalized_front(
+    const hip_bfloat16* residual, const hip_bfloat16* norm, float eps, bool unit_offset,
+    const hip_bfloat16* a_weight, const hip_bfloat16* b_weight, const float* a_log,
+    const float* dt_bias, float* g, float* beta,
+    const linear::A8G64ActivationWorkspace& planes, hip_bfloat16* hidden,
+    hipStream_t stream) noexcept {
+    const std::uint32_t tokens = planes.tokens;
+    const auto aligned16 = [](const void* pointer) {
+        return reinterpret_cast<std::uintptr_t>(pointer) % 16U == 0U;
+    };
+    if (!bf16_gdn_normalized_front_supported(tokens) || planes.columns != kControlColumns ||
+        planes.padded_columns != kControlColumns || residual == nullptr || norm == nullptr ||
+        a_weight == nullptr || b_weight == nullptr || a_log == nullptr || dt_bias == nullptr ||
+        g == nullptr || beta == nullptr || planes.low_codes == nullptr ||
+        planes.high_codes == nullptr || planes.scales == nullptr || planes.status == nullptr ||
+        !(eps > 0.0F) || !valid_stream(stream) || !aligned16(residual) || !aligned16(norm) ||
+        !aligned16(a_weight) || !aligned16(b_weight) || !aligned16(planes.low_codes) ||
+        !aligned16(planes.high_codes) || (hidden != nullptr && !aligned16(hidden)))
+        return hipErrorInvalidValue;
+    const std::size_t row_elements = static_cast<std::size_t>(tokens) * kControlColumns;
+    constexpr std::size_t weight_elements =
+        static_cast<std::size_t>(kControlHeads) * kControlColumns;
+    const std::size_t control_elements = static_cast<std::size_t>(tokens) * kControlHeads;
+    const std::array<ByteRange, 12> ranges{
+        byte_range(residual, row_elements), byte_range(norm, kControlColumns),
+        byte_range(a_weight, weight_elements), byte_range(b_weight, weight_elements),
+        byte_range(a_log, kControlHeads), byte_range(dt_bias, kControlHeads),
+        byte_range(g, control_elements), byte_range(beta, control_elements),
+        byte_range(planes.low_codes, row_elements / 2U),
+        byte_range(planes.high_codes, row_elements / 2U),
+        byte_range(planes.scales, row_elements / 64U), byte_range(planes.status, 1U)};
+    for (std::size_t first = 0; first < ranges.size(); ++first) {
+        for (std::size_t second = first + 1; second < ranges.size(); ++second) {
+            if (overlaps(ranges[first], ranges[second])) return hipErrorInvalidValue;
+        }
+        if (hidden != nullptr && overlaps(ranges[first], byte_range(hidden, row_elements)))
+            return hipErrorInvalidValue;
+    }
+    return checked_launch(true, [&] {
+        hipLaunchKernelGGL(bf16_gdn_normalized_front_kernel, dim3(kControlHeads),
+                           dim3(kControlT1Threads), 0, stream, residual, norm, eps, unit_offset,
+                           a_weight, b_weight, a_log, dt_bias, g, beta, planes.low_codes,
+                           planes.high_codes, planes.scales, planes.status, hidden, tokens);
     });
 }
 

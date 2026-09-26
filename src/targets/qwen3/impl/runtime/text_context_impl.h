@@ -1154,9 +1154,13 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
     Tensor h           = control.hidden;
     Tensor g           = control.g;
     Tensor beta        = control.beta;
-    // The ordinary P2048 prefill leaf owns the whole GDN front, including this normalization.
+    // The ordinary P2048 prefill leaf owns the whole GDN front, including this normalization; so
+    // does the verification record leaf unless the tap observes the normalized controls.
     const bool prefill_front = Variant::gdn_input_projection_prefill_p2048_selected(ph, T);
-    if (!prefill_front) {
+    constexpr bool tap_controls = requires { tap.capture_gdn_controls(text_layer, h, g, beta, s); };
+    const bool record_front = !tap_controls && ph == Phase::Verify &&
+                              gdn_state_action_ == GdnStateAction::RecordForReplay;
+    if (!prefill_front && !record_front) {
         Variant::gdn_norm_control_projection(x, *w.input_norm, kCfg.rms_eps, *w.projection, h, g,
                                              beta, s);
         if constexpr (requires { tap.capture_gdn_controls(text_layer, h, g, beta, s); }) {
@@ -1210,12 +1214,20 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
                 live_records.gate = work_.alloc(
                     DType::FP32, {2, spec.value_heads, width, active_sequence_batch_});
             }
-            Variant::gdn_input_projection_record(projection_input, *w.projection, *w.conv1d,
-                                                 conv_states, valid, *active_linear_state_slots_,
-                                                 live_records.conv, query_output, key_output,
-                                                 value_output, gate_output, ph, work_, s,
-                                                 active_parent_index_, linear_execution_,
-                                                 text_layer);
+            if (record_front) {
+                Variant::gdn_front_record(x, *w.input_norm, kCfg.rms_eps, *w.projection,
+                                          *w.conv1d, conv_states, valid,
+                                          *active_linear_state_slots_, projection_input, g, beta,
+                                          live_records.conv, query_output, key_output,
+                                          value_output, gate_output, ph, work_, s,
+                                          active_parent_index_, linear_execution_, text_layer);
+            } else {
+                Variant::gdn_input_projection_record(
+                    projection_input, *w.projection, *w.conv1d, conv_states, valid,
+                    *active_linear_state_slots_, live_records.conv, query_output, key_output,
+                    value_output, gate_output, ph, work_, s, active_parent_index_,
+                    linear_execution_, text_layer);
+            }
         } else {
             Variant::gdn_input_projection_snapshot(
                 projection_input, *w.projection, *w.conv1d, conv_states, valid,

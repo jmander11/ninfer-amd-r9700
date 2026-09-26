@@ -105,6 +105,13 @@ struct Variant {
         [[nodiscard]] bool attention_q4_shared(const Tensor& hidden, const Weight& query_key,
                                                const Weight& gate_value, Tensor& query_key_output,
                                                Tensor& gate_value_output, hipStream_t stream);
+        // Verification-width GDN front: the input RMSNorm of `residual`, the a/b controls into
+        // g/beta and the A8G64 planes from one kernel, then both GDN input projections from those
+        // planes. The normalized rows are not materialized.
+        [[nodiscard]] bool gdn_q4_normalized_front(
+            const Tensor& residual, const Tensor& norm, float eps,
+            const GdnProjectionWeights& weights, Tensor& g, Tensor& beta,
+            Tensor& query_key_output, Tensor& value_z_output, hipStream_t stream);
         [[nodiscard]] bool gdn_q4_normalized_prefill(
             const Tensor& residual, const Tensor& norm, float eps, const Weight& query_key,
             const Weight& value_z, Tensor& normalized, Tensor& query_key_output,
@@ -314,6 +321,18 @@ struct Variant {
         qwen3::TextPhase phase, WorkspaceArena& workspace, hipStream_t stream,
         const Tensor* parent_index = nullptr, ExecutionState* execution = nullptr,
         std::int32_t text_layer = -1);
+    // Verification record front: owns the GDN input RMSNorm of `residual` [hidden,width,batch],
+    // the a/b controls into g/beta, the query-key/value-z projections and the convolution record
+    // (gdn_input_projection_record's outputs). `hidden` [hidden,width,batch] is scratch for the
+    // unfused composition; the fused A8 route does not materialize it.
+    static void gdn_front_record(
+        const Tensor& residual, const Tensor& norm_weight, float eps,
+        const GdnProjectionWeights& weights, const Tensor& conv_weight, const Tensor& conv_states,
+        const Tensor& valid_columns, const Tensor& initial_slots, Tensor& hidden, Tensor& g,
+        Tensor& beta, Tensor& conv_record, Tensor& query, Tensor& key, Tensor& value,
+        Tensor& output_gate, qwen3::TextPhase phase, WorkspaceArena& workspace,
+        hipStream_t stream, const Tensor* parent_index = nullptr,
+        ExecutionState* execution = nullptr, std::int32_t text_layer = -1);
     // The family provides the gated-RMSNorm parameters and the BF16 [128,48,T] normalized
     // scratch; the leaf owns whether the normalized output is materialized (always when
     // `materialize_normalized`) or fused into the output projection's activation codec.
