@@ -1215,7 +1215,7 @@ hipError_t bf16_projected_control(
 }
 
 bool bf16_gdn_normalized_front_supported(std::uint32_t tokens) noexcept {
-    return tokens >= 2U && tokens <= kFrontMaximumTokens;
+    return tokens >= 1U && tokens <= kFrontMaximumTokens;
 }
 
 hipError_t bf16_gdn_normalized_front(

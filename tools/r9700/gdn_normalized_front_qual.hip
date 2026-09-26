@@ -348,16 +348,16 @@ int main(int argc, char** argv) {
         require(std::string(props.gcnArchName).rfind("gfx1201", 0) == 0, "wrong device");
         hipStream_t s{};
         check(hipStreamCreateWithFlags(&s, hipStreamNonBlocking), "stream");
-        require(!gdn::bf16_gdn_normalized_front_supported(1) &&
+        require(!gdn::bf16_gdn_normalized_front_supported(0) &&
                     !gdn::bf16_gdn_normalized_front_supported(25),
-                "front admits a width outside T2..24");
+                "front admits a width outside T1..24");
         std::ostringstream out;
         out << std::setprecision(6);
         out << "{\"schema\":\"ninfer.r9700.gdn-normalized-front.v1\",\"target\":\"gfx1201\","
                "\"oracle\":\"FP64 RMSNorm seam (|err|<=(2^-8+2^-16)|ref|); FP64 control oracle of the seam; exact A8G64 codec of the seam\","
                "\"production_equals_seam_call\":true,\"status_flags\":true,\"composition_parity\":true,\"cells\":[";
         bool first = true;
-        for (unsigned t : {2U, 5U, 6U, 12U, 18U, 24U}) {
+        for (unsigned t : {1U, 2U, 5U, 6U, 12U, 18U, 24U}) {
             const Result r = cell(t, s);
             out << (first ? "" : ",") << "{\"tokens\":" << t << ",\"max_seam_error\":" << r.seam
                 << ",\"max_g_error\":" << r.g << ",\"max_beta_error\":" << r.beta

@@ -678,10 +678,10 @@ bool Variant::ExecutionState::gdn_q4_pair_shared(
     return true;
 }
 
-bool Variant::ExecutionState::gdn_q4_normalized_front_record(
+bool Variant::ExecutionState::gdn_q4_front(
     const Tensor& residual, const Tensor& norm, float eps, const GdnProjectionWeights& weights,
-    const GdnConvRecord& record, Tensor& g, Tensor& beta, WorkspaceArena& workspace,
-    std::int32_t text_layer, hipStream_t stream) {
+    Tensor& g, Tensor& beta, std::int32_t text_layer, hipStream_t stream,
+    ops::r9700::linear::A8G64ActivationWorkspace* planes_out, std::size_t* required_out) {
     constexpr std::int32_t kRows0 = 2 * TextConfig::key_dim;
     constexpr std::int32_t kRows1 = 2 * TextConfig::value_dim;
     constexpr std::int32_t kHeads = TextConfig::gdn_value_heads;
@@ -701,11 +701,6 @@ bool Variant::ExecutionState::gdn_q4_normalized_front_record(
                tensor.ne[0] == kHeads && tensor.ne[1] == columns && tensor.ne[2] == 1 &&
                tensor.ne[3] == 1;
     };
-    const auto shared = [&](std::int32_t rows) {
-        return ops::r9700::linear::a8q4g64_shared_activation_supported(
-            static_cast<std::uint32_t>(tokens), TextConfig::hidden,
-            static_cast<std::uint32_t>(rows));
-    };
     if (impl_ == nullptr || ops::r9700::linear::kQ4ActivationBits != 8 || tokens <= 0 ||
         !ops::r9700::gdn::bf16_gdn_normalized_front_supported(
             static_cast<std::uint32_t>(tokens)) ||
@@ -713,9 +708,9 @@ bool Variant::ExecutionState::gdn_q4_normalized_front_record(
         !gdn_prefill_rows(norm, TextConfig::hidden, 1) || !aligned(norm) ||
         !gdn_q4_input_weight(weights.input_projection.query_key, kRows0) ||
         !gdn_q4_input_weight(weights.input_projection.value_z, kRows1) ||
-        !shared(kRows0) || !shared(kRows1) || !control_weight(weights.a_projection) ||
-        !control_weight(weights.b_projection) || !fp32_rows(weights.a_log, 1) ||
-        !fp32_rows(weights.dt_bias, 1) || !fp32_rows(g, tokens) || !fp32_rows(beta, tokens)) {
+        !control_weight(weights.a_projection) || !control_weight(weights.b_projection) ||
+        !fp32_rows(weights.a_log, 1) || !fp32_rows(weights.dt_bias, 1) ||
+        !fp32_rows(g, tokens) || !fp32_rows(beta, tokens)) {
         return false;
     }
     const std::size_t required = ops::r9700::linear::a8q4g64_activation_workspace_capacity_bytes(
@@ -754,6 +749,69 @@ bool Variant::ExecutionState::gdn_q4_normalized_front_record(
         static_cast<float*>(beta.data), planes, nullptr, gated_status, stream));
     impl_->gated_status_cleared_layer = text_layer;
     impl_->gated_status_cleared_tokens = gated_status != nullptr ? tokens : 0;
+    *planes_out = planes;
+    *required_out = required;
+    return true;
+}
+
+bool Variant::ExecutionState::gdn_q4_normalized_front_t1(
+    const Tensor& residual, const Tensor& norm, float eps, const GdnProjectionWeights& weights,
+    Tensor& g, Tensor& beta, Tensor& query_key_output, Tensor& value_z_output,
+    std::int32_t text_layer, hipStream_t stream) {
+    constexpr std::int32_t kRows0 = 2 * TextConfig::key_dim;
+    constexpr std::int32_t kRows1 = 2 * TextConfig::value_dim;
+    const Weight& query_key = weights.input_projection.query_key;
+    const Weight& value_z = weights.input_projection.value_z;
+    ops::r9700::linear::A8G64ActivationWorkspace planes{};
+    std::size_t required = 0U;
+    if (residual.ne[1] != 1 ||
+        !gdn_q4_pair_t1_selected(ops::r9700::linear::kQ4ActivationBits, 1U, query_key.qtype,
+                                 value_z.qtype) ||
+        !gdn_prefill_rows(query_key_output, kRows0, 1) ||
+        !gdn_prefill_rows(value_z_output, kRows1, 1) ||
+        !gdn_q4_front(residual, norm, eps, weights, g, beta, text_layer, stream, &planes,
+                      &required)) {
+        return false;
+    }
+    HIP_CHECK(ops::r9700::linear::a8q4g64_gdn_pair_t1(
+        {.input = nullptr,
+         .weight0_codes = static_cast<const std::uint8_t*>(query_key.qdata),
+         .weight0_code_bytes = static_cast<std::size_t>(query_key.qdata_bytes),
+         .weight0_scales = static_cast<const std::uint16_t*>(query_key.scales),
+         .weight0_scale_bytes = static_cast<std::size_t>(query_key.scale_bytes),
+         .output0 = static_cast<hip_bfloat16*>(query_key_output.data),
+         .weight1_codes = static_cast<const std::uint8_t*>(value_z.qdata),
+         .weight1_code_bytes = static_cast<std::size_t>(value_z.qdata_bytes),
+         .weight1_scales = static_cast<const std::uint16_t*>(value_z.scales),
+         .weight1_scale_bytes = static_cast<std::size_t>(value_z.scale_bytes),
+         .output1 = static_cast<hip_bfloat16*>(value_z_output.data),
+         .activation_workspace = impl_->activation.data,
+         .activation_workspace_bytes = required,
+         .tokens = 1U,
+         .columns = TextConfig::hidden},
+        stream));
+    return true;
+}
+
+bool Variant::ExecutionState::gdn_q4_normalized_front_record(
+    const Tensor& residual, const Tensor& norm, float eps, const GdnProjectionWeights& weights,
+    const GdnConvRecord& record, Tensor& g, Tensor& beta, WorkspaceArena& workspace,
+    std::int32_t text_layer, hipStream_t stream) {
+    constexpr std::int32_t kRows0 = 2 * TextConfig::key_dim;
+    constexpr std::int32_t kRows1 = 2 * TextConfig::value_dim;
+    const std::int32_t tokens = residual.ne[1];
+    const auto shared = [&](std::int32_t rows) {
+        return ops::r9700::linear::a8q4g64_shared_activation_supported(
+            static_cast<std::uint32_t>(tokens), TextConfig::hidden,
+            static_cast<std::uint32_t>(rows));
+    };
+    ops::r9700::linear::A8G64ActivationWorkspace planes{};
+    std::size_t required = 0U;
+    if (tokens <= 0 || !shared(kRows0) || !shared(kRows1) ||
+        !gdn_q4_front(residual, norm, eps, weights, g, beta, text_layer, stream, &planes,
+                      &required)) {
+        return false;
+    }
     const auto i32 = [](const Tensor* tensor) {
         return tensor == nullptr || tensor->data == nullptr
                    ? nullptr
@@ -1691,6 +1749,58 @@ void Variant::gdn_input_projection_snapshot(
         static_cast<hip_bfloat16*>(value.data), static_cast<hip_bfloat16*>(output_gate.data),
         static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(batch),
         static_cast<std::uint32_t>(conv_states.ne[2]), stream));
+}
+
+void Variant::gdn_front_snapshot(
+    const Tensor& residual, const Tensor& norm_weight, float eps,
+    const GdnProjectionWeights& weights, const Tensor& conv_weight, Tensor& conv_states,
+    const Tensor& valid_columns, const Tensor& initial_slots, const Tensor& snapshot_base_slots,
+    Tensor& hidden, Tensor& g, Tensor& beta, Tensor& query, Tensor& key, Tensor& value,
+    Tensor& output_gate, qwen3::TextPhase phase, WorkspaceArena& workspace, hipStream_t stream,
+    ExecutionState* execution, std::int32_t text_layer) {
+    const std::int32_t width = hidden.ne[1];
+    const std::int32_t batch = hidden.ne[2];
+    const std::int32_t tokens = width * batch;
+    const Tensor residual_flat = residual.view({TextConfig::hidden, tokens});
+    if (execution != nullptr && tokens == 1) {
+        require_gdn_conv_operands(hidden, conv_weight, conv_states, valid_columns, initial_slots,
+                                  1, 1);
+        require_i32_selector(snapshot_base_slots, batch, 1, false, "snapshot base slots");
+        require_bf16_shape(query, TextConfig::key_dim, width, batch, "snapshot query");
+        require_bf16_shape(key, TextConfig::key_dim, width, batch, "snapshot key");
+        require_bf16_shape(value, TextConfig::value_dim, width, batch, "snapshot value");
+        require_bf16_shape(output_gate, TextConfig::value_dim, width, batch,
+                           "snapshot output gate");
+        auto scope = workspace.scope();
+        Tensor query_key = workspace.alloc(DType::BF16, {2 * TextConfig::key_dim, tokens});
+        Tensor value_z = workspace.alloc(DType::BF16, {2 * TextConfig::value_dim, tokens});
+        if (execution->gdn_q4_normalized_front_t1(residual_flat, norm_weight, eps, weights, g,
+                                                  beta, query_key, value_z, text_layer,
+                                                  stream)) {
+            HIP_CHECK(ops::r9700::gdn::projection_conv_snapshot_bf16(
+                static_cast<const hip_bfloat16*>(query_key.data),
+                static_cast<const hip_bfloat16*>(value_z.data),
+                static_cast<const hip_bfloat16*>(conv_weight.data),
+                static_cast<hip_bfloat16*>(conv_states.data),
+                valid_columns.data == nullptr
+                    ? nullptr
+                    : static_cast<const std::int32_t*>(valid_columns.data),
+                static_cast<const std::int32_t*>(initial_slots.data),
+                static_cast<const std::int32_t*>(snapshot_base_slots.data),
+                static_cast<hip_bfloat16*>(query.data), static_cast<hip_bfloat16*>(key.data),
+                static_cast<hip_bfloat16*>(value.data),
+                static_cast<hip_bfloat16*>(output_gate.data), static_cast<std::uint32_t>(width),
+                static_cast<std::uint32_t>(batch), static_cast<std::uint32_t>(conv_states.ne[2]),
+                stream));
+            return;
+        }
+    }
+    Tensor hidden_flat = hidden.view({TextConfig::hidden, tokens});
+    gdn_norm_control_projection(residual_flat, norm_weight, eps, weights, hidden_flat, g, beta,
+                                stream);
+    gdn_input_projection_snapshot(hidden, weights, conv_weight, conv_states, valid_columns,
+                                  initial_slots, snapshot_base_slots, query, key, value,
+                                  output_gate, phase, workspace, stream, execution, text_layer);
 }
 
 void Variant::gdn_input_projection_record(

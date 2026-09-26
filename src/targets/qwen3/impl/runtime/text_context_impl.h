@@ -1155,7 +1155,9 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
     constexpr bool tap_controls = requires { tap.capture_gdn_controls(text_layer, h, g, beta, s); };
     const bool record_front = !tap_controls && ph == Phase::Verify &&
                               gdn_state_action_ == GdnStateAction::RecordForReplay;
-    if (!prefill_front && !record_front) {
+    const bool snapshot_front = !tap_controls && ph == Phase::Verify && T == 1 &&
+                                gdn_state_action_ != GdnStateAction::RecordForReplay;
+    if (!prefill_front && !record_front && !snapshot_front) {
         Variant::gdn_norm_control_projection(x, *w.input_norm, kCfg.rms_eps, *w.projection, h, g,
                                              beta, s);
         if constexpr (requires { tap.capture_gdn_controls(text_layer, h, g, beta, s); }) {
@@ -1224,10 +1226,19 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
                     linear_execution_, text_layer);
             }
         } else {
-            Variant::gdn_input_projection_snapshot(
-                projection_input, *w.projection, *w.conv1d, conv_states, valid,
-                *active_linear_state_slots_, *active_linear_state_slots_, query_output, key_output,
-                value_output, gate_output, ph, work_, s, linear_execution_, text_layer);
+            if (snapshot_front) {
+                Variant::gdn_front_snapshot(
+                    x, *w.input_norm, kCfg.rms_eps, *w.projection, *w.conv1d, conv_states, valid,
+                    *active_linear_state_slots_, *active_linear_state_slots_, projection_input, g,
+                    beta, query_output, key_output, value_output, gate_output, ph, work_, s,
+                    linear_execution_, text_layer);
+            } else {
+                Variant::gdn_input_projection_snapshot(
+                    projection_input, *w.projection, *w.conv1d, conv_states, valid,
+                    *active_linear_state_slots_, *active_linear_state_slots_, query_output,
+                    key_output, value_output, gate_output, ph, work_, s, linear_execution_,
+                    text_layer);
+            }
         }
         if constexpr (requires { tap.capture_gdn_projection(text_layer, z, qc, kc, vc, s); }) {
             tap.capture_gdn_projection(text_layer, z, qc, kc, vc, s);

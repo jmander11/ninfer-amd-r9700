@@ -3549,8 +3549,10 @@ hipError_t a8q4g64_gdn_pair_t1(
     constexpr std::uint32_t kPaddedColumns = 5120U;
     const std::size_t required_workspace =
         a8q4g64_activation_workspace_capacity_bytes(1U, kColumns);
+    // A null input means the workspace already holds the exact A8G64 planes (and status) of the
+    // represented row, prepared by another Op; the quantization is skipped.
     std::size_t input_bytes = 0U;
-    if (args.input == nullptr || args.tokens != 1U || args.columns != kColumns ||
+    if (args.tokens != 1U || args.columns != kColumns ||
         args.activation_workspace == nullptr ||
         args.activation_workspace_bytes != required_workspace ||
         !checked_mul(kColumns, sizeof(hip_bfloat16), &input_bytes)) {
@@ -3591,7 +3593,7 @@ hipError_t a8q4g64_gdn_pair_t1(
         input_bytes, args.activation_workspace_bytes,
         args.weight0_code_bytes, args.weight0_scale_bytes, kOutput0Bytes,
         args.weight1_code_bytes, args.weight1_scale_bytes, kOutput1Bytes};
-    for (unsigned index = 0U; index < 8U; ++index) {
+    for (unsigned index = args.input == nullptr ? 1U : 0U; index < 8U; ++index) {
         for (unsigned other = index + 1U; other < 8U; ++other) {
             if (ranges_overlap(pointers[index], sizes[index],
                                pointers[other], sizes[other])) {
@@ -3599,9 +3601,11 @@ hipError_t a8q4g64_gdn_pair_t1(
             }
         }
     }
-    const hipError_t quantized =
-        a8g64_quantize_activation({args.input, workspace}, stream);
-    if (quantized != hipSuccess) return quantized;
+    if (args.input != nullptr) {
+        const hipError_t quantized =
+            a8g64_quantize_activation({args.input, workspace}, stream);
+        if (quantized != hipSuccess) return quantized;
+    }
 #if defined(__HIPCC__)
     constexpr std::uint32_t kRows = kRows0 + kRows1;
     const dim3 grid((kRows + kThreads - 1U) / kThreads);

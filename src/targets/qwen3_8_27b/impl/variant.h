@@ -122,6 +122,20 @@ struct Variant {
         // into g/beta and the A8G64 planes from one kernel, then both GDN input projections from
         // those planes and the recorded convolution (fused into the projection epilogue for one
         // sequence of width 5..6). The normalized rows are not materialized.
+        // One sequence at T1: the same front kernel, then the T1 GDN pair projection of the
+        // prepared planes into query_key [4096] and value_z [12288].
+        [[nodiscard]] bool gdn_q4_normalized_front_t1(
+            const Tensor& residual, const Tensor& norm, float eps,
+            const GdnProjectionWeights& weights, Tensor& g, Tensor& beta,
+            Tensor& query_key_output, Tensor& value_z_output, std::int32_t text_layer,
+            hipStream_t stream);
+        // The front kernel shared by both routes: validates the operands, launches it into the
+        // activation region's (T, 5120) planes and records the gated-status handoff.
+        [[nodiscard]] bool gdn_q4_front(
+            const Tensor& residual, const Tensor& norm, float eps,
+            const GdnProjectionWeights& weights, Tensor& g, Tensor& beta,
+            std::int32_t text_layer, hipStream_t stream,
+            ops::r9700::linear::A8G64ActivationWorkspace* planes, std::size_t* required);
         [[nodiscard]] bool gdn_q4_normalized_front_record(
             const Tensor& residual, const Tensor& norm, float eps,
             const GdnProjectionWeights& weights, const GdnConvRecord& record, Tensor& g,
@@ -345,6 +359,17 @@ struct Variant {
         Tensor& beta, Tensor& conv_record, Tensor& query, Tensor& key, Tensor& value,
         Tensor& output_gate, qwen3::TextPhase phase, WorkspaceArena& workspace,
         hipStream_t stream, const Tensor* parent_index = nullptr,
+        ExecutionState* execution = nullptr, std::int32_t text_layer = -1);
+    // Snapshot front for one T1 sequence: owns the GDN input RMSNorm of `residual`, the a/b
+    // controls into g/beta, the input projections and the snapshot convolution
+    // (gdn_input_projection_snapshot's outputs); `hidden` is scratch for the unfused composition.
+    static void gdn_front_snapshot(
+        const Tensor& residual, const Tensor& norm_weight, float eps,
+        const GdnProjectionWeights& weights, const Tensor& conv_weight, Tensor& conv_states,
+        const Tensor& valid_columns, const Tensor& initial_slots,
+        const Tensor& snapshot_base_slots, Tensor& hidden, Tensor& g, Tensor& beta,
+        Tensor& query, Tensor& key, Tensor& value, Tensor& output_gate,
+        qwen3::TextPhase phase, WorkspaceArena& workspace, hipStream_t stream,
         ExecutionState* execution = nullptr, std::int32_t text_layer = -1);
     // The family provides the gated-RMSNorm parameters and the BF16 [128,48,T] normalized
     // scratch; the leaf owns whether the normalized output is materialized (always when

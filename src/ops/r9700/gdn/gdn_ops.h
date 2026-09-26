@@ -121,7 +121,7 @@ namespace ninfer::ops::r9700::gdn {
     const hip_bfloat16* b_weight, const float* a_log, const float* dt_bias,
     float* g, float* beta, std::uint32_t tokens, hipStream_t stream) noexcept;
 
-// Verification-width GDN front for T2..24: the unit-offset-capable K5120 RMSNorm of residual
+// Verification-width GDN front for T1..24: the unit-offset-capable K5120 RMSNorm of residual
 // [tokens,5120] (the row-CTA arithmetic of the eager RMSNorm, BF16 seam), the exact T1..24
 // control arithmetic of bf16_projected_control on that seam, and the exact A8G64 codec of the
 // same seam into `planes` (bound for tokens x 5120), whose status word is published without a

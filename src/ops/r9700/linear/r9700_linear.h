@@ -505,6 +505,8 @@ struct A8Q4G64KernelResources {
 // seven full-K production tuples are rejected; the candidate boundary retains WMMA.
 [[nodiscard]] hipError_t a8q4g64_linear_decode_dot8_t1(
     const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept;
+// A null args.input means activation_workspace already holds the exact A8G64 planes and status
+// of the row (prepared by another Op); the quantization launch is skipped.
 [[nodiscard]] hipError_t a8q4g64_gdn_pair_t1(
     const A8Q4G64GdnPairArgs& args, hipStream_t stream) noexcept;
 [[nodiscard]] hipError_t a8q4g64_gdn_pair_t1_resources(
