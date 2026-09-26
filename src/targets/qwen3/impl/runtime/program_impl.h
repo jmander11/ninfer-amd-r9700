@@ -49,13 +49,14 @@ using Clock = std::chrono::steady_clock;
 struct SegmentedKvTransactionBatch {
     std::array<std::optional<qwen3::PagedKVTransaction>, kMaximumConcurrency> transactions{};
     std::array<qwen3::PagedKVTransaction*, kMaximumConcurrency> ordered{};
-    std::array<std::uint32_t, kMaximumConcurrency> status{};
-    std::array<std::uint32_t, kMaximumConcurrency> cursor{};
+    std::uint32_t* status = nullptr;
+    std::uint32_t* cursor = nullptr;
     std::size_t size = 0;
     std::size_t opened = 0;
 
-    explicit SegmentedKvTransactionBatch(std::size_t count) : size(count) {
-        if (count == 0 || count > ordered.size()) {
+    SegmentedKvTransactionBatch(std::size_t count, KvResolutionWords words)
+        : status(words.status), cursor(words.cursor), size(count) {
+        if (count == 0 || count > ordered.size() || status == nullptr || cursor == nullptr) {
             throw std::invalid_argument("MTP segmented KV transaction batch size is invalid");
         }
     }
@@ -340,6 +341,7 @@ ProgramImplCore::ProgramImplCore(const LoadedModelData& model_in, const Sequence
       persistent(plan.persistent.bytes), workspace_storage(plan.workspace.capacity),
       work(DeviceSpan{workspace_storage.base(), workspace_storage.capacity()}),
       round_host(sizeof(TokenId)),
+      kv_resolution_host(4U * kMaximumConcurrency * sizeof(std::uint32_t)),
       ordinary_host(
           plan.speculative_backend == SpeculativeBackend::None
               ? std::make_optional<PinnedHostBuffer>(sizeof(qwen3::OrdinaryDecodeIngress) +
@@ -1109,6 +1111,10 @@ void ProgramImplCore::resolve_pending_batch(std::span<const std::uint32_t> lanes
     }
 
     const auto tail_started = Clock::now();
+    // The fold, compaction and hidden correction are ordered before the next round's work on the
+    // same stream, so the host prepares that round while they run. Only a context append's
+    // ingress copy still reads the pinned staging the next round rewrites.
+    bool ingress_copy_pending = false;
     try {
         // Target verification publishes every represented candidate column before tokens leave
         // Program. Resolve that temporary suffix through the typed codec before advancing the
@@ -1271,6 +1277,7 @@ void ProgramImplCore::resolve_pending_batch(std::span<const std::uint32_t> lanes
                 }
             }
             if (append_size != 0) {
+                ingress_copy_pending = true;
                 enqueue_dflash_context_append(
                     std::span<const std::uint32_t>(append_lanes.data(), append_size),
                     std::span<const std::uint32_t>(append_starts.data(), append_size),
@@ -1278,7 +1285,7 @@ void ProgramImplCore::resolve_pending_batch(std::span<const std::uint32_t> lanes
             }
         }
 
-        device.synchronize();
+        if (ingress_copy_pending) device.synchronize();
         work.reset();
     } catch (...) {
         try {
@@ -3084,7 +3091,7 @@ void ProgramImplCore::prepare_graphs() {
             device.synchronize();
 
             std::array<qwen3::PagedKVPublication, kMaximumConcurrency> publications{};
-            SegmentedKvTransactionBatch transactions(batch_size);
+            SegmentedKvTransactionBatch transactions(batch_size, kv_resolution_words(false));
             const auto* positions =
                 static_cast<const std::int32_t*>(io.ordinary->cache_positions.data);
             const auto* table_rows =
@@ -3155,8 +3162,8 @@ void ProgramImplCore::prepare_graphs() {
 
             std::array<qwen3::PagedKVPublication, kMaximumConcurrency> text_publications{};
             std::array<qwen3::PagedKVPublication, kMaximumConcurrency> mtp_publications{};
-            SegmentedKvTransactionBatch text_transactions(batch_size);
-            SegmentedKvTransactionBatch mtp_transactions(batch_size);
+            SegmentedKvTransactionBatch text_transactions(batch_size, kv_resolution_words(false));
+            SegmentedKvTransactionBatch mtp_transactions(batch_size, kv_resolution_words(true));
             auto* text_status = static_cast<std::uint32_t*>(io.text_kv_status.data);
             auto* text_cursor = static_cast<std::uint32_t*>(io.text_kv_cursor.data);
             auto* mtp_status = static_cast<std::uint32_t*>(io.backend_kv_status.data);
@@ -3203,9 +3210,9 @@ void ProgramImplCore::prepare_graphs() {
             mtp_transactions.enqueue_resolution();
             device.synchronize();
             text_transactions.finish_resolution(
-                {text_transactions.cursor.data(), batch_size});
+                {text_transactions.cursor, batch_size});
             mtp_transactions.finish_resolution(
-                {mtp_transactions.cursor.data(), batch_size});
+                {mtp_transactions.cursor, batch_size});
         };
 
         const auto planned_profiles = mtp_graph_profiles(capacity, capture_k);
@@ -3249,7 +3256,7 @@ void ProgramImplCore::prepare_graphs() {
             device.synchronize();
 
             std::array<qwen3::PagedKVPublication, kMaximumConcurrency> publications{};
-            SegmentedKvTransactionBatch transactions(batch_size);
+            SegmentedKvTransactionBatch transactions(batch_size, kv_resolution_words(false));
             const auto* base_frontiers =
                 static_cast<const std::int32_t*>(io.dflash_decode->execution_frontiers.data);
             const auto* table_rows =
@@ -3283,7 +3290,7 @@ void ProgramImplCore::prepare_graphs() {
                                           fixed_k, fixed_w, envelopes, nullptr);
             transactions.enqueue_resolution();
             device.synchronize();
-            transactions.finish_resolution({transactions.cursor.data(), batch_size});
+            transactions.finish_resolution({transactions.cursor, batch_size});
         };
 
         const auto batch_one_profiles = dflash_graph_profiles(capacity, fixed_k, 1, fixed_w);
@@ -3907,7 +3914,7 @@ ProgramImplCore::decode_ordinary_batch(std::span<const std::uint32_t> lanes,
             materialize_sequence_kv(sequence, frontier + 1, 0);
         }
 
-        SegmentedKvTransactionBatch text_transactions(lanes.size());
+        SegmentedKvTransactionBatch text_transactions(lanes.size(), kv_resolution_words(false));
         const auto* positions =
             static_cast<const std::int32_t*>(io.ordinary->cache_positions.data);
         const auto* table_rows =
@@ -4131,8 +4138,8 @@ ProgramImplCore::decode_mtp_batch(std::span<const std::uint32_t> lanes,
             realized_extent = std::max(realized_extent, extent);
         }
 
-        SegmentedKvTransactionBatch text_transactions(lanes.size());
-        SegmentedKvTransactionBatch mtp_transactions(lanes.size());
+        SegmentedKvTransactionBatch text_transactions(lanes.size(), kv_resolution_words(false));
+        SegmentedKvTransactionBatch mtp_transactions(lanes.size(), kv_resolution_words(true));
         const std::uint32_t target_width = batch_k + 1U;
         const auto* target_positions =
             static_cast<const std::int32_t*>(io.mtp_decode->target_positions.data);
@@ -4494,7 +4501,7 @@ ProgramImplCore::decode_dflash_batch(std::span<const std::uint32_t> lanes,
             realized_extent = std::max(realized_extent, extent);
         }
 
-        SegmentedKvTransactionBatch text_transactions(lanes.size());
+        SegmentedKvTransactionBatch text_transactions(lanes.size(), kv_resolution_words(false));
         const auto* base_frontiers =
             static_cast<const std::int32_t*>(io.dflash_decode->execution_frontiers.data);
         const auto* table_rows =

@@ -122,6 +122,13 @@ enum class PendingKind : std::uint8_t {
     Speculative,
 };
 
+// Host resolution words of one segmented transaction batch: pinned, so the status/cursor
+// readbacks stay asynchronous copies ordered before the round synchronization.
+struct KvResolutionWords {
+    std::uint32_t* status = nullptr;
+    std::uint32_t* cursor = nullptr;
+};
+
 struct PendingCandidate {
     PendingKind kind            = PendingKind::None;
     std::uint32_t base_E        = 0;
@@ -418,6 +425,13 @@ public:
 
     PinnedHostBuffer round_host;
     TokenId* host_tokens = nullptr;
+    // Pinned status/cursor words of the Text (false) and MTP (true) segmented KV batches.
+    PinnedHostBuffer kv_resolution_host;
+    [[nodiscard]] KvResolutionWords kv_resolution_words(bool mtp) const noexcept {
+        auto* words = static_cast<std::uint32_t*>(kv_resolution_host.data()) +
+                      (mtp ? 2U * kMaximumConcurrency : 0U);
+        return {words, words + kMaximumConcurrency};
+    }
     std::optional<PinnedHostBuffer> ordinary_host;
     qwen3::OrdinaryDecodeIngress* ordinary_host_ingress = nullptr;
     qwen3::OrdinaryDecodeEgress* ordinary_host_egress   = nullptr;
