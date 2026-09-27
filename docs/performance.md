@@ -81,6 +81,19 @@ NIAH: standard and multikey 8K-128K greedy 20/20 each, sampled multikey 50/50 (8
 standard and multikey greedy 5/5 each and sampled multikey 10/10, TTFT ~179 s (1350 tok/s prefill). Rejected: GPTQ on the attention projections too (8K multikey NIAH failed 5/10 sampled
 runs against 0/10); the news/llama.cpp-only calibration tied this one on PPL.
 
+**BF16-source admission cells** (`profiles/ppl/r9700-admission-gptq-20260927/`, chunk 2048, G16,
+against the retained source-BF16 references; tiers from `tools/ppl/README.md`):
+
+| Cell | dNLL vs BF16 | new severe (accuracy cap) | greedy flips | accuracy | capacity-speed |
+|---|---:|---:|---:|---|---|
+| 8K prefill | +0.0228 +/- 0.0039 | 2 (5) | 8.9% | fail (> 0.02) | pass |
+| 8K decode, graph = eager | +0.0218 +/- 0.0040 | 2 (5) | 9.1% | fail (> 0.02) | pass |
+| 32K prefill | +0.0185 +/- 0.0020 | 20 (17) | 8.4% | fail (severe) | pass |
+| 32K decode, graph = eager | +0.0179 +/- 0.0020 | 16 (17) | 8.5% | pass | pass |
+
+Same-route graph/eager decode is bit-identical at 8K and 32K (NLL and argmax), and whole-inference
+greedy tokens match graph/eager at C1..C4 (P2048/G256) and at P20480 for ordinary and DFlash.
+
 **Protected FP8 projections as FP8LUT4 (not selected, PPL-costing).** Re-encoding the 26
 row-scaled FP8 protections as GPTQ FP8LUT4 too (0.62 GB less per token) gives ordinary decode
 36.78 -> 38.27 tok/s (+4.0%) and prefill 8K +0.6%, at +0.003 +/- 0.002 nats/token paired against
