@@ -38,11 +38,13 @@ poisoned eager/captured output and scratch guards; its T1..6 fixed-context cells
 packed-route criterion. All packed decode contexts share one graph topology (split kernel plus
 merge).
 
-`ninfer_r9700_fp8_row_scaled_small_t_qual` checks the small-T (T <= 16) row-scaled E4M3 Linear
-route used by verification and ordinary decode (one 128-thread CTA per 16 rows, native FP8 WMMA,
-K split in four ordered quarters) on N7168/K5120 and N5120/K6144 at T=1,2,5,6,8,16 against an
-FP64 product of the consumed codes (BF16 half-ulp plus the FP32 accumulation bound), with output
-guards and nonfinite-input poisoning. `ninfer_r9700_swa_qual` includes the production C1 K5
+`ninfer_r9700_fp8_row_scaled_linear_qual` checks the row-scaled E4M3 Linear (`LinearExecution`):
+the small-T route used by verification and ordinary decode (one 128-thread CTA per 16 rows, native
+FP8 WMMA, K split in four ordered quarters) on N7168/K5120 and N5120/K6144 at T=1,2,5,6,8,16 over
+every element, and the prefill GEMM route (raw E4M3 staging) on N7168/K5120, N5120/K6144,
+N34816/K5120, N5120/K17408 and N4096/K5120 at T=17,300,2048 over sampled tokens and rows, against
+an FP64 product of the consumed codes (BF16 half-ulp plus the FP32 accumulation bound), with
+output guards and per-token nonfinite-input poisoning. `ninfer_r9700_swa_qual` includes the production C1 K5
 drafter block (T6 over a 4096-token window) with its timing.
 
 Selected concurrent Text localization uses the existing eager layer-boundary
@@ -676,32 +678,11 @@ WMMAs at occupancy 16; independent activation/scale and arithmetic-cleanup ceili
 VGPRs. The overlapping bounds are not additive. This does not prove practical-ceiling closure;
 that question remains open.
 
-The retained-production FP8 audit closes that projection family as the missing `>=51.439 ms`
-floor mechanism. At C1/P2048/G0/chunk4096, hipBLASLt solution `123104` accounts for 64 MLP
-gate/up calls (`[T,N,K]=[2048,34816,5120]`, `255.024909 ms`, `183.234` useful TFLOP/s) and 48
-GDN query/key calls (`[2048,4096,5120]`, `23.726265 ms`, `173.781` TFLOP/s). Solution `123100`
-accounts for the 32 full-attention query/key and gate/value calls
-(`[2048,7168,5120]`, `28.559464 ms`, `168.433` TFLOP/s). The fresh symbols match the retained
-loaded-ELF proofs of native gfx1201 `v_wmma_f32_16x16x16_fp8_fp8`; both use 192 architectural VGPR,
-zero private/scratch, and 25,088 or 12,544 bytes LDS. Do not confuse these row-scaled E4M3 FP8
-roles with the separate A8W8/IU8 CTA implementation.
-
-The shared-library-context startup regression uses
-`BUILD/src/ninfer_r9700_fp8_gate_up_qual --shared-context --output NEW_REPORT.json`.
-It prepares all three production FP8 shapes (N34816/N7168/N4096, K5120) before storage binding
-at startup widths 1/2/3/4/2048, rejects unbound execution, then compares against independent-context
-algorithm fingerprints prepared after binding (the former order). It checks sampled outputs
-against the represented-format FP64 oracle in eager and twice-replayed Device Graph execution
-at T4/T2048. All projections share one context and serialized activation region. Memory snapshots
-separate context creation, preparation, storage binding and later execution; they are diagnostics, not a
-substitute for real Engine startup headroom/capacity evidence. Reports are create-only.
-
-All ten supported zero-workspace gate/up catalog solutions have been timed, the closest alternate
-saves only a projected `0.212524 ms` over 64 calls, M128xN128 regressed, M128xN256 is
-resource-terminal, and adjacent consumer fusion is bounded below the floor deficit. No additional
-FP8 catalog, custom-kernel, fusion, or counter-only performance command is admitted. P2048 remains
-`1904.339303 tok/s`; the 2,000 tok/s floor is not passed, and whether to retain or revise it is now
-a product-contract/user decision. Candidate exhaustion alone is not practical-ceiling proof.
+The row-scaled E4M3 FP8 projections ran on hipBLASLt (solutions `123104`/`123100`, 168-183
+useful TFLOP/s at P2048) until 2026-09-27. They now run on the FP8LUT4 prefill GEMM with raw E4M3
+staging (~212-217 TFLOP/s at T2048), and hipBLASLt, its catalog/prefix qualifiers and its
+shared-context regression were removed. Do not confuse these row-scaled E4M3 FP8 roles with the
+separate A8W8/IU8 CTA implementation.
 
 Two M64xN256 Q4 prefill experiments are terminal rejections and their executable paths have been
 removed. The 16-wave/512-thread variant passed numerical qualification and improved the weighted

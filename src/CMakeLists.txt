@@ -87,7 +87,6 @@ target_compile_options(ninfer_r9700_core PRIVATE
   $<$<AND:$<COMPILE_LANGUAGE:HIP>,$<NOT:$<CONFIG:Release>>>:-gline-tables-only>)
 target_link_libraries(ninfer_r9700_core PUBLIC
   hip::host
-  roc::hipblaslt
   rocprofiler-sdk-roctx::rocprofiler-sdk-roctx-shared-library)
 add_library(ninfer::r9700_core ALIAS ninfer_r9700_core)
 
@@ -333,89 +332,15 @@ ninfer_r9700_internal_includes(ninfer_r9700_artifact_qual)
 target_include_directories(ninfer_r9700_artifact_qual PRIVATE ${PROJECT_SOURCE_DIR}/tests)
 target_link_libraries(ninfer_r9700_artifact_qual PRIVATE ninfer_artifact hip::host)
 
-# Isolated first-slice row-scaled-E4M3 gate_up execution. It owns fixed descriptors and one
-# installed top heuristic but is deliberately absent from target/Program dispatch until its
-# physical numerical and speed gates pass.
-# Small-T row-scaled E4M3 Linear route against an independent FP64 oracle of the consumed codes.
-add_executable(ninfer_r9700_fp8_row_scaled_small_t_qual
-  ${PROJECT_SOURCE_DIR}/tools/r9700/fp8_row_scaled_small_t_qual.hip)
-ninfer_r9700_internal_includes(ninfer_r9700_fp8_row_scaled_small_t_qual)
-set_target_properties(ninfer_r9700_fp8_row_scaled_small_t_qual PROPERTIES
+# Row-scaled E4M3 Linear (small-T and prefill routes) against an independent FP64 oracle of the
+# consumed codes.
+add_executable(ninfer_r9700_fp8_row_scaled_linear_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/fp8_row_scaled_linear_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_fp8_row_scaled_linear_qual)
+set_target_properties(ninfer_r9700_fp8_row_scaled_linear_qual PROPERTIES
   HIP_ARCHITECTURES gfx1201)
-target_link_libraries(ninfer_r9700_fp8_row_scaled_small_t_qual PRIVATE
-  ninfer_r9700_core hip::host roc::hipblaslt)
-
-add_executable(ninfer_r9700_fp8_gate_up_qual
-  ${PROJECT_SOURCE_DIR}/tools/r9700/fp8_gate_up_qual.hip)
-file(SHA256 ${PROJECT_SOURCE_DIR}/tools/r9700/fp8_gate_up_qual.hip
-  NINFER_R9700_FP8_GATE_UP_QUAL_SOURCE_SHA256)
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-  ${PROJECT_SOURCE_DIR}/tools/r9700/fp8_gate_up_qual.hip)
-ninfer_r9700_internal_includes(ninfer_r9700_fp8_gate_up_qual)
-target_compile_definitions(ninfer_r9700_fp8_gate_up_qual PRIVATE
-  NINFER_SOURCE_ROOT="${PROJECT_SOURCE_DIR}"
-  NINFER_QUAL_SOURCE_SHA256="${NINFER_R9700_FP8_GATE_UP_QUAL_SOURCE_SHA256}")
-set_target_properties(ninfer_r9700_fp8_gate_up_qual PROPERTIES
-  HIP_ARCHITECTURES gfx1201)
-target_link_libraries(ninfer_r9700_fp8_gate_up_qual PRIVATE
-  ninfer_r9700_core hip::host roc::hipblaslt)
-add_custom_command(TARGET ninfer_r9700_fp8_gate_up_qual POST_BUILD
-  COMMAND ${CMAKE_COMMAND}
-          -DINPUT=$<TARGET_FILE:ninfer_r9700_fp8_gate_up_qual>
-          -DOUTPUT=$<TARGET_FILE:ninfer_r9700_fp8_gate_up_qual>.sha256
-          -P ${PROJECT_SOURCE_DIR}/tools/cmake/write_sha256.cmake
-  VERBATIM)
-
-# Real-artifact T128/T129 exact-prefix discriminator for the two production row-FP8 shapes.
-# It is diagnostic-only and has no target routing edge.
-add_executable(ninfer_r9700_fp8_linear_prefix_discriminator
-  ${PROJECT_SOURCE_DIR}/tools/r9700/fp8_linear_prefix_discriminator.hip)
-ninfer_r9700_internal_includes(ninfer_r9700_fp8_linear_prefix_discriminator)
-set_target_properties(ninfer_r9700_fp8_linear_prefix_discriminator PROPERTIES
-  HIP_ARCHITECTURES gfx1201)
-target_link_libraries(ninfer_r9700_fp8_linear_prefix_discriminator PRIVATE
-  ninfer_artifact ninfer_r9700_core hip::host roc::hipblaslt)
-
-# Exact-shape catalog probe for the retained FP8 gate/up projection. This is intentionally
-# disconnected from production dispatch: it enumerates every installed hipBLASLt algorithm before
-# a bounded, independently checked timing qualifier admits any non-default algorithm.
-add_executable(ninfer_r9700_fp8_gate_up_catalog_qual
-  ${PROJECT_SOURCE_DIR}/tools/r9700/fp8_gate_up_catalog_qual.hip)
-set_target_properties(ninfer_r9700_fp8_gate_up_catalog_qual PROPERTIES
-  HIP_ARCHITECTURES gfx1201)
-target_link_libraries(ninfer_r9700_fp8_gate_up_catalog_qual PRIVATE
-  hip::host roc::hipblaslt)
-
-# The two pending post-gate/up decisions instantiate the same hardened qualifier contract and
-# prepared Linear execution owner at two explicit Qwen shapes. Compile-time identities keep the
-# runnable source direct and avoid generated/source-rewritten variants.
-function(ninfer_add_r9700_fp8_projection_qual target qualification rows middle last)
-  add_executable(${target} ${PROJECT_SOURCE_DIR}/tools/r9700/fp8_gate_up_qual.hip
-    ${PROJECT_SOURCE_DIR}/src/ops/r9700/linear/linear_execution.hip)
-  ninfer_r9700_internal_includes(${target})
-  target_compile_definitions(${target} PRIVATE
-    NINFER_FP8_FIXED_PROJECTION_ROWS=${rows}
-    NINFER_SOURCE_ROOT="${PROJECT_SOURCE_DIR}"
-    NINFER_QUAL_SOURCE_SHA256="${NINFER_R9700_FP8_GATE_UP_QUAL_SOURCE_SHA256}"
-    NINFER_QUAL_SCHEMA="ninfer.r9700.fp8_projection_qualification.v1"
-    NINFER_QUAL_ARTIFACT_TYPE="ninfer_r9700_fp8_projection_comparison"
-    NINFER_QUAL_SCHEMA_VERSION=1
-    NINFER_QUAL_HAS_ID=1
-    NINFER_QUALIFICATION_ID="${qualification}"
-    NINFER_ORACLE_MIDDLE_ROW=${middle}
-    NINFER_ORACLE_LAST_ROW=${last})
-  set_target_properties(${target} PROPERTIES HIP_ARCHITECTURES gfx1201)
-  target_link_libraries(${target} PRIVATE ninfer_r9700_core hip::host roc::hipblaslt)
-  add_custom_command(TARGET ${target} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -DINPUT=$<TARGET_FILE:${target}>
-            -DOUTPUT=$<TARGET_FILE:${target}>.sha256
-            -P ${PROJECT_SOURCE_DIR}/tools/cmake/write_sha256.cmake VERBATIM)
-endfunction()
-
-ninfer_add_r9700_fp8_projection_qual(
-  ninfer_r9700_fp8_attention_qk_gate_value_qual attention_qk_gate_value 7168 3584 7167)
-ninfer_add_r9700_fp8_projection_qual(
-  ninfer_r9700_fp8_gdn_query_key_qual gdn_query_key 4096 2048 4095)
+target_link_libraries(ninfer_r9700_fp8_row_scaled_linear_qual PRIVATE
+  ninfer_r9700_core hip::host)
 
 add_library(ninfer_r9700_hip_code_object_capture SHARED
   ${PROJECT_SOURCE_DIR}/tools/r9700/hip_code_object_capture.cpp)

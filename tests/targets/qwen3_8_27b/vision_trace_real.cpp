@@ -193,7 +193,7 @@ int run(const std::filesystem::path& artifact_path, const std::filesystem::path&
     // startup preparation authority as Package::plan_load for the non-speculative C1
     // Engine defaults, even though this diagnostic only executes the Vision tower.
     const ninfer::EngineOptions startup;
-    load.bindings.linear_prepared_widths = Variant::ExecutionState::eager_widths(
+    load.bindings.linear_widths = Variant::ExecutionState::eager_widths(
         std::min(startup.prefill_chunk, startup.max_context), 1U, {});
     ninfer::artifact::MaterializedArtifact materialized =
         ninfer::artifact::materialize(reader, load.materialization, device);

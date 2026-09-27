@@ -80,205 +80,45 @@ image emits native `v_cvt_pk_fp8_f32` for float-to-E4M3 conversion.
 ## BLAS API boundary
 
 Classic rocBLAS does not expose INT4 or FP8 in `rocblas_datatype`: its low-precision GEMM entries
-are BF16 and INT8. Its documented `rocblas_gemm_ex` type combinations likewise stop at INT8.
-Classic hipBLAS delegates `hipblasGemmEx` to that backend and documents BF16 and INT8, not INT4 or
-FP8. The generic `hipDataType` enumeration in `/opt/rocm/include/hip/library_types.h` contains
-`HIP_R_4I` and FP8 values, but that enumeration is shared infrastructure and does not add those
-types to classic hipBLAS GEMM.
+are BF16 and INT8. Classic hipBLAS delegates `hipblasGemmEx` to that backend and documents BF16 and
+INT8, not INT4 or FP8. hipBLASLt ships gfx1201 F8/B8 and INT8 solution families but no INT4 family.
 
-hipBLASLt is different. Its API consumes `hipDataType`, provides FP8 wrapper types, and this ROCm
-installation contains gfx1201 F8/B8 and INT8 Tensile solution/code-object families under
-`/opt/rocm/core-10.0/lib/hipblaslt/library/gfx1201/`. It therefore offers dense production FP8 and
-INT8 matmul solutions on gfx1201. That directory contains no INT4 (`I4`) solution family, so it is
-not a route for NInfer's packed signed-Q4G64 GEMMs. Some block-scaling enum values in
-`/opt/rocm/include/hipblaslt/hipblaslt.h` are explicitly marked not supported yet.
+NInfer has no rocBLAS, hipBLAS, or hipBLASLt call site and does not link them. Every Linear,
+including the row-scaled FP8 projections, runs on repository-owned HIP kernels. hipBLASLt served the
+row-scaled FP8 prefill projections until 2026-09-27; the FP8LUT4 prefill GEMM with raw E4M3 staging
+measured 15-44% faster per call at T2048 on every protected shape (`docs/performance.md`) and
+replaced it, and the library dependency was removed.
 
-NInfer has no rocBLAS or classic hipBLAS call site. Custom HIP kernels remain required for its
-packed Q4G64 artifact and paged FP8-K/INT4-V attention contracts. The selectable four-role
-row-scaled-FP8 profile uses hipBLASLt through `LinearExecution`; it binds the converter-produced
-E4M3 code/FP32 row-scale planes directly, prepares descriptors before timed/captured execution,
-and performs no runtime weight repack. Both routes keep activation quantization, page mapping,
-softmax, and semantic fusion boundaries under the owning Op.
+### Row-scaled FP8 Linear
 
-### Dense FP8 prefill escape-path boundary
-
-The installed hipBLASLt 1.4.1 library does expose a credible, separately quantized dense-prefill
-evaluation path. `HIP_R_8F_E4M3` is the OCP E4M3 input type, and the matching gfx1201 problem
-catalogs accept E4M3 A and B, BF16 C and D, `HIPBLAS_COMPUTE_32F`, and high-precision FP32
-accumulation. The four ordinary transpose families with scalar A/B scaling contain
-536/559/224/779 solutions; the directly useful ordinary-layout family additionally has 11
-outer-vector-scale solutions. Those decoded records bind `aType=bType=Float8`,
-`cType=dType=BFloat16`, `computeType=Float`, `highPrecisionAccumulate=true`, and
-`swizzleTensorA=swizzleTensorB=false`. This is shipped executable gfx1201 coverage, not datatype-
-enum inference.
-
-The C API boundary is `hipblasLtMatmulDescCreate`, `hipblasLtMatrixLayoutCreate`,
-`hipblasLtMatrixLayoutSetAttribute`, `hipblasLtMatmulDescSetAttribute`,
-`hipblasLtMatmulPreferenceSetAttribute`, `hipblasLtMatmulAlgoGetHeuristic`, and
-`hipblasLtMatmul`. A/B use `HIP_R_8F_E4M3`; C/D use `HIP_R_16BF`; compute and scale use FP32.
-`HIPBLASLT_MATMUL_DESC_A_SCALE_MODE` and `_B_SCALE_MODE` admit scalar FP32 scales or
-`HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F`, whose A and B vectors contain the logical M and N
-factors. The latter exactly supports one activation scale per token and one weight scale per
-output row. It does not reproduce G32/G64 inner-K group scaling. Several advertised block modes
-are explicitly marked unsupported, and no matching E4M3/E4M3-to-BF16 gfx1201 catalog inspected
-here binds an inner-K block-scale mode. Such a mode is therefore not part of this candidate.
-
-Ordinary row/column layouts and leading dimensions can describe a row-major, K128-padded
-`[N,K]` weight plane and transpose it logically. The matching solutions explicitly disable A/B
-swizzling, and hipBLASLt exposes no persistent offline-weight-prepack object for this family.
-Consequently a new artifact may store the final E4M3 code plane followed by FP32 row scales and
-bind it directly; runtime weight repacking is neither needed nor allowed. Algorithm selection is
-performed once at startup for the fixed shapes. The preference workspace bound and each returned
-heuristic's `workspaceSize` must be incorporated into the caller-owned stable arena. Catalog
-metadata permits up to four bytes per C element for global accumulation; a conservative reusable
-bound is therefore 285,212,672 bytes for P2048 or 1,140,850,688 bytes for P8192 at the largest
-N=34,816 output, pending actual heuristic selection.
-
-The existing inventories contain 28,424,681,472 K128-padded matrix code positions and 4,874,224
-matrix rows, plus 59,189,728 bytes of non-matrix tensor payload. An outer-vector E4M3 profile is
-therefore about 28,503,368,096 resident tensor bytes: one byte per padded code, 19,496,896 bytes
-of FP32 row scales, and the unchanged direct payload. It leaves about 4,782,628,448 bytes after a
-1-GiB sizing reserve on a 32-GiB card, before small object-alignment differences. The largest
-P8192 FP8 activation image is 142,639,104 bytes. Even the conservative 1.141-GB GEMM workspace
-therefore fits alongside the fixed cache and runtime much more plausibly than the W8/BF16
-fallback profiles, though resolved C=1..4 capacity remains a physical gate.
-
-At P2048 the declared dense-linear inventory is 101.08205531136 TFLOP-equivalents. A 2,000 tok/s
-whole-prefill target allows 1.024 seconds, so the linear calls require at least 98.713 TFLOP/s if
-they consume the entire budget, or 197.426 TFLOP/s if half is reserved for attention,
-normalization, quantization, and other work. One native K16 E4M3 WMMA carries half the operations
-of the measured K32 IU4 instruction; applying the measured 48.930-billion-WMMA/s issue rate only
-as an architectural scale gives an approximately 400.835-TFLOP/s FP8 ceiling. The stricter
-half-budget case is thus about 49.3% of that scale. Large, aligned P2048 shapes and thousands of
-shipped HPA solutions make that performance plausible, but not proven without exact-shape
-heuristic and physical A/B results.
-
-FP8 is not a drop-in reinterpretation of the selected integer artifact. E4M3 rowwise quantization
-has a different represented mathematical oracle and may be worse than the already measured
-W8G32 quality despite its exponent range. It needs BF16-source conversion, exact codec and
-complete-Op checks, the existing 8K/32K PPL and severe-position gates, and matched whole prefill.
-The audit verdict is therefore **go for one bounded evaluation candidate**, not production
-selection: row-scaled E4M3 weights bound directly from the artifact, per-token E4M3 activation
-quantization, FP32 HPA, BF16 output, startup-fixed algorithms, and no runtime weight repack.
-
-#### Repository integration design
-
-The candidate gets a distinct `F8E4M3_ROW_F32S` numeric format and
-`row-scaled-k128-v1` storage layout. It must not be represented as the existing
-`row-split-k128-v1`: that layout means grouped integer codes plus one FP16 scale per K group, and
-both its geometry and target row-view code depend on that meaning. The new rank-two layout stores
-an ordinary unswizzled E4M3 code plane of `N * align_up(K, 128)` bytes, zero E4M3 padding, then a
+The `F8E4M3_ROW_F32S` numeric format with the `row-scaled-k128-v1` storage layout stores an
+ordinary unswizzled E4M3 code plane of `N * align_up(K, 128)` bytes, zero E4M3 padding, then a
 256-byte-aligned plane of `N` little-endian FP32 dequantization multipliers. An all-zero row uses
-canonical positive-zero scale and zero codes. Conversion performs the only weight quantization;
-materialization binds
-the two planes directly and never repacks them.
+canonical positive-zero scale and zero codes. It must not be represented as `row-split-k128-v1`,
+which means grouped integer codes plus one FP16 scale per K group. Conversion performs the only
+weight quantization; materialization binds the two planes directly and never repacks them. The
+`QType`/`QuantLayout` view belongs to `src/core/tensor.h`; framing and plane construction to
+`src/artifact/`; the Python codec to `tools/artifact/` and `tools/convert/qwen3_8_27b_r9700/`.
 
-The corresponding `QType`/`QuantLayout` weight view belongs to `src/core/tensor.h`; framing,
-geometry, parsing, and direct plane construction belong to `src/artifact/reader.{h,cpp}`,
-`src/artifact/storage_layouts.cpp`, and `src/artifact/typed_binding.cpp`. The matching Python
-vocabulary and exact codec belong to `tools/artifact/numeric.py`, `tools/artifact/layouts.py`, and
-`tools/convert/qwen3_8_27b_r9700/`. The target adds one explicitly named all-matrix evaluation
-identity in `src/targets/qwen3_8_27b/export/ninfer/targets/qwen3_8_27b/package.h`,
-`impl/package_identity.cpp`, `impl/load/bindings.cpp`, and `impl/variant.cpp`; the 439 currently
-quantized matrix objects become row-scaled E4M3 while direct BF16/FP32/I32 objects remain
-unchanged. `bindings.cpp::row_view` needs an explicit row-scaled branch with a padded-K-byte code
-stride and four-byte scale stride, notably for packed attention and MTP parents.
+`ops::LinearExecution` (`src/ops/r9700/linear/linear_execution.{h,hip}`) is the Linear
+implementation profile. For represented BF16 `X[K,T]`, `fp8_quantize_activation` writes a
+token-major E4M3 `[T,K128]` image, `T` FP32 dequantization multipliers, and one status word per
+token into a caller-owned region; an all-zero token publishes positive-zero scale and zero codes,
+and a nonfinite token sets its status. T <= 16 then runs `fp8_small_t_linear`; T > 16 runs
+`fp8_row_scaled_prefill_linear`, the FP8LUT4 prefill GEMM staging raw E4M3 rows. Both compute
+`BF16(sum_k w[r,k] a[t,k] * ws[r] * as[t])` with FP8 WMMA and FP32 accumulation, apply both scales
+in the epilogue, and publish the canonical BF16 quiet NaN for every element of a flagged token.
+Construction rejects a weight whose N or K is not a multiple of 128; every Qwen3.8 protected
+projection qualifies.
 
-Dynamic activation quantization and matmul execution are one Linear implementation profile owned
-under `src/ops/r9700/linear/`. For represented BF16 `X[K,T]`, its HIP staging kernel writes an
-ordinary E4M3 `K128 x T` image and `T` FP32 dequantization multipliers into caller-owned workspace;
-each all-zero token again publishes positive-zero scale and zero codes. Nonfinite input sets a
-device-resident status and zeroes the affected token; the eventual matmul route must enqueue a
-post-matmul status consumer that poisons or rejects its output before publication because
-hipBLASLt cannot interpret that status itself. hipBLASLt views the artifact bytes as column-major
-`[K128,N]`, applies transpose to obtain `W[N,K128]`, and multiplies the column-major activation
-image `[K128,T]` to produce the existing column-major/BF16 `out[N,T]`. A uses the N-element weight
-row-scale vector, B the T-element token-scale vector, both with
-`HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F`; C/D are BF16, beta is zero, and compute is
-`HIPBLAS_COMPUTE_32F`.
-
-Current routing (2026-09-26): `LinearExecution` sends T <= 16 to `fp8_small_t_linear` and every
-T > 16 call whose rows and columns are multiples of 128 (every Qwen3.8 protected projection) to
-`fp8_row_scaled_prefill_linear`, the FP8LUT4 prefill GEMM staging raw E4M3 rows; that kernel
-applies the row and token scales and the per-token status poison in its epilogue. hipBLASLt is
-reached only for other shapes, which the loaded target does not bind. Its descriptors and
-heuristics are still prepared, as described below.
-
-hipBLASLt lifecycle is explicit rather than a function-static cache. A repository-internal
-`ops::LinearExecutionContext` owns one device-bound handle, created by the loaded target before
-the final free-memory capacity snapshot. Each selected Text projection has a loaded-target-owned
-`ops::LinearExecution` that borrows that context and owns its descriptors, heuristic results, and
-selected algorithms. Target-private leaf payloads carry borrowed executions; neither family
-runtime nor core device ownership depends on hipBLASLt. It prepares fixed decode/speculative and
-full prefill widths at target loading, before the final snapshot. Program construction binds the
-stable caller-owned activation region without rerunning heuristics. Execution before binding is
-rejected. It explicitly prepares any remaining realized prefill width before entering that
-chunk, so no descriptor creation, heuristic search, allocation, or weight transformation occurs
-inside a captured or timed Linear call. Its workspace contract is the aligned sum of the live
-E4M3 activation image, T FP32 scales, and the selected heuristic's `workspaceSize`; the static
-planner reserves the declared conservative maximum and `LinearExecution` rejects any selected
-heuristic that exceeds it. Small-T may select a separately qualified
-direct-E4M3 custom leaf, but it consumes the identical stored bytes and is not a second artifact
-path. Opaque library device resources are separate from this caller-owned workspace and must be
-resident before final capacity resolution; zero allowed matmul workspace does not mean zero
-library allocation. Physical startup qualification checks remaining headroom and any later
-preparation allocation instead of assuming a fixed library-memory allowance.
-
-The first fixed-shape owner retains the directly bound weight and caller-owned activation and
-hipBLASLt workspace addresses. Those regions, its represented-BF16 input, and its BF16 output are
-mutually disjoint; retained storage remains alive through owner destruction and submitted streams
-complete before any input/output storage is released. Calls on one hipBLASLt handle are externally
-serialized onto one stream. Its post-matmul status consumer is one CTA:
-it reads status once and returns on the finite fast path, or strided-fills the complete output with
-canonical BF16 quiet NaNs on rejection.
-
-The isolated evaluation closure adds
-`find_package(hipblaslt CONFIG REQUIRED)` and links `roc::hipblaslt` only into the R9700 Linear/core
-closure. The C boundary is the installed `/opt/rocm/include/hipblaslt/hipblaslt.h` interface named
-above; scale pointers use `HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER` and `_B_SCALE_POINTER`, and the
-two scale-mode attributes use `_A_SCALE_MODE` and `_B_SCALE_MODE`.
-
-The first vertical slice is deliberately one real dominant Text projection rather than a whole
-artifact conversion: encode and directly bind `text/layers/0/mlp/gate_up` at its exact
-`[34816,5120]` shape, dynamically quantize a represented BF16 `[5120,2048]` input, and execute the
-same `ops::linear` contract to BF16 `[34816,2048]`. Admission requires exact byte/layout checks,
-an independent FP64 oracle that decodes the stored E4M3 bytes and both FP32 scale vectors, no
-nonfinite output, retained hipBLASLt heuristic support, direct artifact pointer use, stable
-caller-owned workspace, and matched timing against the current Q4 projection. Only a passing
-slice justifies threading `LinearExecution` through the family runtime and converting the complete
-439-matrix evaluation artifact; whole-profile capacity, PPL, exact-token, decode, graph, and
-P2048-prefill gates then decide whether the candidate survives.
-
-The bounded first-slice qualifier times that complete FP8 sequence against the current
-`A8Q4G64-m64n128-pingpong-production` candidate boundary at the identical shape, including each
-route's activation quantization and output-status publication. Seven paired repetitions each run
-FP8/Q4 and then Q4/FP8, yielding fourteen raw samples per route and an even-sample median. Nine
-axis-sensitive represented-format FP64 oracle probes span three interior/corner tokens and three
-interior/corner rows, so K ordering and both scale axes are observable. The fresh, exclusively
-created report retains those results, the complete-time ratio, selected hipBLASLt workspace,
-no-clobber/nonfinite checks, canonical source identity, and source/executable SHA-256 values; the
-comparison validator rehashes those files, rechecks live power state, and derives the verdict.
-Admission is fail-closed to HIP device 0 identifying as the discrete
-AMD `1002:7551` Radeon AI PRO R9700, exact `gfx1201` wave32, and `auto` DPM profile both before
-allocation and after timing. The report also retains the PCI identity, HIP runtime/driver and
-hipBLASLt versions, ordered heuristic count and selected rank, opaque 16-byte algorithm identity,
-algorithm workspace limits, waves count, and exact matrix/transpose/scale descriptors.
-
-Executed-instruction admission is a separate post-admission trace. The host-only
-`tools/bench/prepare_fp8_gate_up_hardware_proof.py` creates a no-reuse rocprofv3 plan bound to the
-successful matched report. Its kernel trace runs the same executable to a separate fresh report.
-`tools/bench/validate_fp8_gate_up_hardware_proof.py` requires identical executable/source and
-hipBLASLt algorithm identities, joins each exact dispatch through rocprof's kernel-symbol and
-code-object tables, extracts the file-backed loaded ELF, and disassembles the dispatched symbol.
-It admits FP8 only when that symbol contains native FP8 WMMA/MFMA and admits the Q4 control only
-when its dispatched production symbol contains `v_wmma_i32_16x16x32_iu4`; kernel names alone are
-not evidence. The same loaded-ELF join retains one exact resource envelope across all sixteen
-dispatches: gate/up (also shared by GDN) uses 128 SGPR, 192 architectural VGPR, zero accumulator
-VGPR, 25,088 bytes of group-segment LDS, and zero private-segment bytes; attention query/key and
-gate/value uses 128/192/0 registers, 12,544 bytes of LDS, and zero private-segment bytes. The
-rocprof kernel-symbol schema exposes no SGPR/VGPR spill counts, so the proof records those counts
-as unavailable rather than inferring zero. A terminal hybrid trace must match the qualified ELF
-SHA and its available dispatch resource fields.
+Each selected Text projection has a loaded-target-owned `LinearExecution`. Program construction
+binds one stable caller-owned activation region (sized for the largest startup width) once; there is
+no descriptor, heuristic, library handle, or matmul workspace, and nothing is allocated inside a
+captured or timed call. The region, the weight, the BF16 input and the BF16 output are mutually
+disjoint. Projections of one input may share one quantization (`run_quantized`).
+`ninfer_r9700_fp8_row_scaled_linear_qual` checks both routes against an independent FP64 oracle of
+the decoded stored codes and both scale vectors on the real shapes (T=1..16 every element; T=17,
+300 and 2048 sampled tokens and rows), output guards, and per-token poisoning.
 
 ## Current source-to-ISA map
 
@@ -319,7 +159,7 @@ two IU8 WMMAs in both routes, ordinary QK emits one FP8 WMMA, dense initial-pref
 BF16 WMMAs, and the XAttention rank/consumer emit two/sixteen BF16 WMMAs. No selected embedded
 matrix symbol has an explicit load-cache modifier; that means default-temporal policy, not absent
 memory traffic. The Q4 CTA alone proves next-group code-load overlap. W8 uses single-tile LDS
-reuse, and the loaded hipBLASLt FP8 path advertises one-stage global-read prefetch, so neither is
+reuse, and the former hipBLASLt FP8 path advertised one-stage global-read prefetch, so neither is
 described as cross-operation overlap. This is a twelve-candidate static preflight, not proof that
 the eventual winner executed those symbols.
 

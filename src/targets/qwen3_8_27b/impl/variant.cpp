@@ -41,7 +41,6 @@ namespace {
 
 constexpr std::size_t kExecutionAlignment = 256U;
 constexpr std::size_t kSelectedRoleCount  = 7U;
-constexpr std::size_t kSelectedMatmulWorkspaceBytes = 0U;
 constexpr std::size_t kSelectedProjectionCount =
     3U * static_cast<std::size_t>(TextConfig::full_attention_layers()) +
     2U * static_cast<std::size_t>(TextConfig::gdn_layers());
@@ -73,11 +72,9 @@ std::size_t execution_activation_bytes(std::uint32_t prefill_tokens,
 std::size_t execution_storage_bytes(std::uint32_t prefill_tokens,
                                     std::uint32_t maximum_graph_tokens,
                                     std::uint32_t columns = TextConfig::hidden) {
-    const std::size_t activation = align_up(
+    return align_up(
         execution_activation_bytes(prefill_tokens, maximum_graph_tokens, columns), kExecutionAlignment,
         "R9700 FP8 execution activation alignment overflows");
-    return checked_add(activation, kSelectedMatmulWorkspaceBytes,
-                       "R9700 FP8 execution storage capacity overflows");
 }
 
 void validate_token_interval(std::int32_t first, std::int32_t last) {
@@ -324,8 +321,6 @@ Variant::ExecutionState::ExecutionState(const ModelView& model, DeviceSpan seria
                                         std::uint32_t maximum_concurrency,
                                         std::span<const std::uint32_t> verify_widths)
     : impl_(std::make_unique<Impl>()) {
-    const std::vector<std::uint32_t> prepared_widths = eager_widths(
-        prefill_tokens, maximum_concurrency, verify_widths);
     std::uint32_t maximum_verify_width = 1U;
     for (const auto width : verify_widths)
         maximum_verify_width = std::max(maximum_verify_width, width);
@@ -351,9 +346,6 @@ Variant::ExecutionState::ExecutionState(const ModelView& model, DeviceSpan seria
     }
     const std::size_t activation_bytes =
         execution_activation_bytes(prefill_tokens, maximum_graph_tokens, maximum_fp8_columns);
-    const std::size_t activation_region = align_up(
-        activation_bytes, kExecutionAlignment,
-        "R9700 FP8 execution activation alignment overflows");
     const std::size_t required = execution_storage_bytes(prefill_tokens, maximum_graph_tokens,
                                                         maximum_fp8_columns);
     if (serialized_storage.data == nullptr || serialized_storage.bytes < required ||
@@ -362,9 +354,6 @@ Variant::ExecutionState::ExecutionState(const ModelView& model, DeviceSpan seria
     }
     auto* base = static_cast<std::byte*>(serialized_storage.data);
     impl_->activation = serialized_storage;
-    void* const matmul = kSelectedMatmulWorkspaceBytes == 0U
-                             ? nullptr
-                             : static_cast<void*>(base + activation_region);
 
     const auto install = [&](SelectedLinearRole role, std::int32_t layer,
                              const Weight& weight, ops::LinearExecution* execution) {
@@ -378,11 +367,7 @@ Variant::ExecutionState::ExecutionState(const ModelView& model, DeviceSpan seria
         }
         slot.weight = &weight;
         slot.execution = execution;
-        for (const std::uint32_t width : prepared_widths) {
-            if (slot.execution->prepared_profile(width) == nullptr)
-                throw std::logic_error("R9700 loaded FP8 preparation omits a startup width");
-        }
-        slot.execution->bind_storage(base, activation_bytes, matmul, kSelectedMatmulWorkspaceBytes);
+        slot.execution->bind_storage(base, activation_bytes);
         ++impl_->selected;
     };
 
@@ -1583,35 +1568,19 @@ bool Variant::ExecutionState::run_shared(SelectedLinearRole first_role,
     }
     const auto tokens = static_cast<std::uint32_t>(input.ne[1]);
     if (!run(first_role, text_layer, input, first, first_output, stream)) return false;
-    if (second_slot.execution->prepared_profile(tokens) == nullptr) {
-        hipStreamCaptureStatus capture = hipStreamCaptureStatusNone;
-        HIP_CHECK(hipStreamIsCapturing(stream, &capture));
-        if (capture != hipStreamCaptureStatusNone) {
-            throw std::logic_error(
-                "R9700 FP8 projection width was not prepared before graph capture");
-        }
-        (void)second_slot.execution->prepare(tokens);
-    }
-    const auto* first_activation = first_slot.execution->activation_workspace(tokens);
-    const auto* second_activation = second_slot.execution->activation_workspace(tokens);
+    const auto first_activation = first_slot.execution->activation_workspace(tokens);
+    const auto second_activation = second_slot.execution->activation_workspace(tokens);
     if (second_output.dtype != DType::BF16 || second_output.data == nullptr ||
         !second_output.is_contiguous() || second_output.ne[0] != second.n ||
-        second_output.ne[1] != input.ne[1] || first_activation == nullptr ||
-        second_activation == nullptr || first_activation->codes != second_activation->codes ||
+        second_output.ne[1] != input.ne[1] || !first_activation ||
+        !second_activation || first_activation->codes != second_activation->codes ||
         first_activation->scales != second_activation->scales ||
         first_activation->status != second_activation->status) {
         // Not provably the same activation image: quantize again.
         return run(second_role, text_layer, input, second, second_output, stream);
     }
-    const ops::LinearExecution::LaunchStatus status = second_slot.execution->run_quantized(
-        tokens, static_cast<hip_bfloat16*>(second_output.data), stream);
-    if (status.hip != hipSuccess) HIP_CHECK(status.hip);
-    if (status.hipblaslt != HIPBLAS_STATUS_SUCCESS) {
-        std::ostringstream message;
-        message << "R9700 FP8 selected projection failed with hipBLASLt status "
-                << static_cast<int>(status.hipblaslt);
-        throw std::runtime_error(message.str());
-    }
+    HIP_CHECK(second_slot.execution->run_quantized(
+        tokens, static_cast<hip_bfloat16*>(second_output.data), stream));
     return true;
 }
 
@@ -1639,52 +1608,25 @@ bool Variant::ExecutionState::run(SelectedLinearRole role, std::int32_t text_lay
         throw std::invalid_argument("R9700 FP8 selected projection tensor geometry differs");
     }
     const auto tokens = static_cast<std::uint32_t>(input.ne[1]);
-    if (slot.execution->prepared_profile(tokens) == nullptr) {
-        hipStreamCaptureStatus capture = hipStreamCaptureStatusNone;
-        HIP_CHECK(hipStreamIsCapturing(stream, &capture));
-        if (capture != hipStreamCaptureStatusNone) {
-            throw std::logic_error(
-                "R9700 FP8 projection width was not prepared before graph capture");
-        }
-        (void)slot.execution->prepare(tokens);
-    }
-    const ops::LinearExecution::LaunchStatus status = slot.execution->run(
-        tokens, static_cast<const hip_bfloat16*>(input.data),
-        static_cast<hip_bfloat16*>(output.data), stream);
-    if (status.hip != hipSuccess) HIP_CHECK(status.hip);
-    if (status.hipblaslt != HIPBLAS_STATUS_SUCCESS) {
-        std::ostringstream message;
-        message << "R9700 FP8 selected projection failed with hipBLASLt status "
-                << static_cast<int>(status.hipblaslt);
-        throw std::runtime_error(message.str());
-    }
+    HIP_CHECK(slot.execution->run(tokens, static_cast<const hip_bfloat16*>(input.data),
+                                  static_cast<hip_bfloat16*>(output.data), stream));
     return true;
 }
 
-const ops::r9700::linear::Fp8ActivationWorkspace*
+std::optional<ops::r9700::linear::Fp8ActivationWorkspace>
 Variant::ExecutionState::fp8_small_activation(SelectedLinearRole role, std::int32_t text_layer,
-                                              const Weight& weight, std::uint32_t tokens,
-                                              hipStream_t stream) {
+                                              const Weight& weight, std::uint32_t tokens) const {
     if (impl_ == nullptr || weight.qtype != QType::F8E4M3_ROW_F32S || tokens == 0U ||
         tokens > ops::r9700::linear::kFp8SmallTokenLimit ||
         !ops::r9700::linear::fp8_small_t_supported(
             tokens, static_cast<std::uint32_t>(weight.n), static_cast<std::uint32_t>(weight.k),
             static_cast<std::uint32_t>(weight.padded_shape[1]))) {
-        return nullptr;
+        return std::nullopt;
     }
-    Impl::Slot& slot = impl_->slots[Impl::index(role, text_layer)];
+    const Impl::Slot& slot = impl_->slots[Impl::index(role, text_layer)];
     if (slot.execution == nullptr || slot.weight != &weight) {
         throw std::invalid_argument(
             "R9700 FP8 selected projection binding differs from Program state");
-    }
-    if (slot.execution->prepared_profile(tokens) == nullptr) {
-        hipStreamCaptureStatus capture = hipStreamCaptureStatusNone;
-        HIP_CHECK(hipStreamIsCapturing(stream, &capture));
-        if (capture != hipStreamCaptureStatusNone) {
-            throw std::logic_error(
-                "R9700 FP8 projection width was not prepared before graph capture");
-        }
-        (void)slot.execution->prepare(tokens);
     }
     return slot.execution->activation_workspace(tokens);
 }
@@ -1721,13 +1663,13 @@ bool Variant::ExecutionState::attention_fp8_normalized_projection(
         return false;
     }
     const auto width = static_cast<std::uint32_t>(tokens);
-    const auto* first = fp8_small_activation(SelectedLinearRole::AttentionQueryKey, text_layer,
-                                             query_key, width, stream);
-    const auto* second = first == nullptr
-        ? nullptr
-        : fp8_small_activation(SelectedLinearRole::AttentionGateValue, text_layer, gate_value,
-                               width, stream);
-    if (second == nullptr || first->codes != second->codes || first->scales != second->scales ||
+    const auto first = fp8_small_activation(SelectedLinearRole::AttentionQueryKey, text_layer,
+                                            query_key, width);
+    const auto second = first
+        ? fp8_small_activation(SelectedLinearRole::AttentionGateValue, text_layer, gate_value,
+                               width)
+        : std::nullopt;
+    if (!second || first->codes != second->codes || first->scales != second->scales ||
         first->status != second->status) {
         return false;
     }
@@ -1763,10 +1705,10 @@ bool Variant::ExecutionState::attention_fp8_gated_output(
         weight.k != TextConfig::query_size || weight.n != TextConfig::hidden) {
         return false;
     }
-    const auto* activation = fp8_small_activation(SelectedLinearRole::AttentionOutput,
-                                                  text_layer, weight,
-                                                  static_cast<std::uint32_t>(tokens), stream);
-    if (activation == nullptr) return false;
+    const auto activation = fp8_small_activation(SelectedLinearRole::AttentionOutput,
+                                                 text_layer, weight,
+                                                 static_cast<std::uint32_t>(tokens));
+    if (!activation) return false;
     HIP_CHECK(ops::r9700::linear::fp8_quantize_gated_activation(
         {.gate = static_cast<const hip_bfloat16*>(gate.data),
          .attention = static_cast<const float*>(attention_fp32.data),

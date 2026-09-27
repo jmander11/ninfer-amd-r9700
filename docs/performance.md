@@ -78,6 +78,11 @@ probe fails identically on the previous commit). Against the BF16 reference at 8
 (accumulation-order perturbation). Interleaved whole-prefill A/B (two pairs each): 32K +1.0% and
 +7.0% (noisy), 64K +0.8% and +1.4%.
 
+hipBLASLt was then removed entirely (build dependency, `LinearExecution` library context,
+descriptors, heuristics and matmul workspace, and the hipBLASLt-specific qualifiers above); FP8
+Linear qualification is now `ninfer_r9700_fp8_row_scaled_linear_qual` (small-T and prefill routes,
+FP64 oracle, per-token poison).
+
 ## Long-context prefill: six waves per SIMD and interleaved weight staging (2026-09-26, night)
 
 A 32K prefill trace (`profiles/rocprof/prefill-32k-fp8lut4-trace-20260926/`, attribution only)

@@ -896,7 +896,8 @@ The producer supports the terminal C1 P2048 route for either dense attention or 
 independently for every selected prefill chunk, reads each modeled matrix's shape and
 Q4G64/W8G32/F8E4M3-row format from the exact selected artifact, and accepts only the matching
 integer quantizer/CTA pair or FP8 quantizer/hipBLASLt/nonfinite-poison sequence in source call
-order. The four-role profile therefore assigns FP8 only to its exact 144 projection objects. A
+order (the FP8 form describes retained pre-2026-09-27 evidence; FP8 projections no longer use
+hipBLASLt). The four-role profile therefore assigns FP8 only to its exact 144 projection objects. A
 sparse full-attention layer requires one exact key-pack, rank, and selected G16/G32 flash-consumer
 sequence; a dense layer requires its single group-matched dense consumer. MTP,
 orchestration, runtime copies/fills, BF16 control projections, and other kernels remain explicit

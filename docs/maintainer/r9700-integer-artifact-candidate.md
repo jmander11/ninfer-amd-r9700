@@ -201,18 +201,13 @@ the identical Q4/W8 formats, layouts, byte counts, and runtime arithmetic while 
 per-group source-weight squared error. Row-scaled E4M3 FP8 is conditional: it is admitted only if
 exact DFlash shapes show a physical speed/quality benefit, and it first needs DFlash-owned prepared
 FP8 Linear instances because the current execution owner registers only selected Text FP8 roles.
-The selected Text projections borrow one explicit device-bound `LinearExecutionContext` owned by
-the loaded target. It is created before the final free-memory capacity snapshot, so hipBLASLt's
-opaque device resources are already resident when automatic KV capacity is resolved. Actual
-per-weight descriptors and startup-width algorithms are also prepared and retained by the loaded
-target before that snapshot; Program construction only binds their caller-owned activation/matmul
-region. Unbound prepared instances cannot execute. The region and library context are used serially.
-There is no per-projection library handle or assumed opaque-memory constant. The hybrid reservation
+Each selected Text projection owns a loaded-target `LinearExecution` (repository FP8 kernels, no
+library handle or matmul workspace); Program construction only binds its caller-owned activation
+region, unbound instances cannot execute, and the region is used serially. The hybrid reservation
 adds a separate 4 MiB physical allocation bound: each of its two Program arenas can waste less than
 one measured 2 MiB hipMalloc allocation unit. The page-independent bound preserves the affine KV
 curve and leaves nonhybrid reservations unchanged. Fresh physical startup evidence must still
-verify actual remaining headroom; a library
-OOM after planning is not a structured capacity exclusion.
+verify actual remaining headroom.
 Rolewise W8 promotion follows only if Q4 acceptance or generated-quality evidence identifies a
 sensitive family. Both selector codebooks, norms, convolution base kernels, and private persistent
 DFlash state stay BF16 in every recipe.

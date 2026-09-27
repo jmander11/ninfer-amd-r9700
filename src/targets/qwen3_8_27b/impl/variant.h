@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -311,9 +312,9 @@ struct Variant {
             std::uint32_t tokens, std::uint32_t columns) const;
         void fp8lut4_project(const ops::r9700::linear::Fp8ActivationWorkspace& image,
                          std::span<const Fp8Lut4Target> targets, hipStream_t stream) const;
-        [[nodiscard]] const ops::r9700::linear::Fp8ActivationWorkspace* fp8_small_activation(
-            SelectedLinearRole role, std::int32_t text_layer, const Weight& weight,
-            std::uint32_t tokens, hipStream_t stream);
+        [[nodiscard]] std::optional<ops::r9700::linear::Fp8ActivationWorkspace>
+        fp8_small_activation(SelectedLinearRole role, std::int32_t text_layer,
+                             const Weight& weight, std::uint32_t tokens) const;
         std::unique_ptr<Impl> impl_;
     };
 

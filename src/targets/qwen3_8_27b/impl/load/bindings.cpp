@@ -492,15 +492,12 @@ LoadedModelData::LoadedModelData(BindingPlan plan, artifact::MaterializedArtifac
     token_embedding        = materialized_weight(backing, plan.token_embedding, 248320, 5120);
     const auto prepare_linear = [&](const Weight& weight) -> ops::LinearExecution* {
         if (weight.qtype != QType::F8E4M3_ROW_F32S) return nullptr;
-        if (plan.linear_prepared_widths.empty())
-            throw std::invalid_argument("FP8 load plan has no startup preparation widths");
-        if (!linear_context) linear_context = std::make_unique<ops::LinearExecutionContext>();
-        const auto maximum = *std::max_element(plan.linear_prepared_widths.begin(),
-                                               plan.linear_prepared_widths.end());
+        if (plan.linear_widths.empty())
+            throw std::invalid_argument("FP8 load plan has no Linear widths");
+        const auto maximum =
+            *std::max_element(plan.linear_widths.begin(), plan.linear_widths.end());
         auto execution = std::make_unique<ops::LinearExecution>(
-            *linear_context, weight,
-            ops::LinearExecution::activation_workspace_capacity_bytes(maximum, weight.k), 0U);
-        for (const auto width : plan.linear_prepared_widths) (void)execution->prepare(width);
+            weight, ops::LinearExecution::activation_workspace_capacity_bytes(maximum, weight.k));
         auto* borrowed = execution.get();
         prepared_linears.push_back(std::move(execution));
         return borrowed;

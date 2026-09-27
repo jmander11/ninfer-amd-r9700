@@ -1,11 +1,13 @@
-// Qualification of the small-T (T <= 16) row-scaled E4M3 Linear route used by verification and
-// ordinary decode: the public LinearExecution run on the real Qwen3.8 attention projection shapes
-// (query-key/gate-value N7168/K5120 and output N5120/K6144). Evidence: the activation planes the
-// route consumed are read back and an independent FP64 product of the decoded E4M3 weight and
-// activation codes with their FP32 row/token scales checks every output element; output guards;
-// and a nonfinite input poisons every element with the canonical BF16 NaN.
+// Qualification of the row-scaled E4M3 Linear (LinearExecution): the small-T route (T <= 16,
+// verification and ordinary decode) and the prefill GEMM route (T > 16) on the real Qwen3.8
+// protected projection shapes. Evidence: the activation planes the route consumed are read back and
+// an independent FP64 product of the decoded E4M3 weight and activation codes with their FP32
+// row/token scales checks every output element (small T) or sampled tokens and rows (prefill);
+// output guards; and a nonfinite input token publishes the canonical BF16 NaN in exactly its row
+// while every other token's output is unchanged.
 #include "ninfer/types.h"
 #include "ops/r9700/linear/fp8_activation.h"
+#include "ops/r9700/linear/fp8_small_t_linear.h"
 #include "ops/r9700/linear/linear_execution.h"
 #include "../../tests/ops/fp8_int4_kv_oracle.h"
 
@@ -17,6 +19,7 @@
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -53,6 +56,19 @@ struct Rng {
     double uniform() { return (next() + 0.5) / 4294967296.0; }
 };
 
+// Every E4M3 code's exact value, decoded once by the independent oracle.
+const std::vector<double>& e4m3_values() {
+    static const std::vector<double> values = [] {
+        std::vector<double> table(256);
+        for (std::uint32_t code = 0; code < 256U; ++code)  // 0x7f/0xff are NaN, never produced
+            table[code] = (code & 0x7fU) == 0x7fU
+                ? std::numeric_limits<double>::quiet_NaN()
+                : oracle::decode_e4m3fn(static_cast<std::uint8_t>(code));
+        return table;
+    }();
+    return values;
+}
+
 constexpr std::size_t kGuard = 64;
 constexpr std::uint16_t kGuardBits = 0x7bcdU;
 constexpr std::uint16_t kCanonicalNan = 0x7fc0U;
@@ -60,7 +76,11 @@ constexpr std::uint16_t kCanonicalNan = 0x7fc0U;
 double run_shape(std::uint32_t rows, std::uint32_t columns, std::uint32_t tokens, Rng& rng) {
     std::vector<std::uint8_t> codes(static_cast<std::size_t>(rows) * columns);
     std::vector<float> row_scales(rows);
-    for (auto& code : codes) code = oracle::encode_e4m3fn(static_cast<float>((rng.uniform() - 0.5) * 6.0));
+    // Codes of uniform(-3, 3) values, drawn from a pre-encoded pool (the real shapes need up to
+    // 178M codes per call).
+    std::vector<std::uint8_t> pool(4096);
+    for (auto& code : pool) code = oracle::encode_e4m3fn(static_cast<float>((rng.uniform() - 0.5) * 6.0));
+    for (auto& code : codes) code = pool[rng.next() & 4095U];
     for (auto& scale : row_scales) scale = static_cast<float>(std::ldexp(0.5 + rng.uniform(), -8));
     // One contiguous persistent image: codes followed by row scales.
     Device<std::uint8_t> image(codes.size() + rows * sizeof(float));
@@ -95,17 +115,15 @@ double run_shape(std::uint32_t rows, std::uint32_t columns, std::uint32_t tokens
     const std::size_t storage_bytes =
         ninfer::ops::LinearExecution::activation_workspace_capacity_bytes(tokens, columns);
     Device<std::uint8_t> storage(storage_bytes);
-    ninfer::ops::LinearExecutionContext context;
-    ninfer::ops::LinearExecution execution(context, weight, storage_bytes, 0U);
-    execution.bind_storage(storage.data, storage_bytes, nullptr, 0U);
-    (void)execution.prepare(tokens);
+    ninfer::ops::LinearExecution execution(weight, storage_bytes);
+    execution.bind_storage(storage.data, storage_bytes);
     const std::size_t outputs = static_cast<std::size_t>(tokens) * rows;
     Device<hip_bfloat16> d_output(outputs + 2U * kGuard);
     std::vector<std::uint16_t> fill(outputs + 2U * kGuard, kGuardBits);
     const auto run = [&] {
         check(hipMemcpy(d_output.data, fill.data(), d_output.bytes(), hipMemcpyHostToDevice), "fill");
-        const auto status = execution.run(tokens, d_input.data, d_output.data + kGuard, nullptr);
-        require(status.ok(), "row-scaled E4M3 run failed");
+        check(execution.run(tokens, d_input.data, d_output.data + kGuard, nullptr),
+              "row-scaled E4M3 run");
         check(hipDeviceSynchronize(), "sync");
         std::vector<std::uint16_t> host(fill.size());
         check(hipMemcpy(host.data(), d_output.data, d_output.bytes(), hipMemcpyDeviceToHost), "read");
@@ -123,14 +141,25 @@ double run_shape(std::uint32_t rows, std::uint32_t columns, std::uint32_t tokens
     check(hipMemcpy(activation.data(), planes.codes, activation.size(), hipMemcpyDeviceToHost), "codes");
     check(hipMemcpy(token_scales.data(), planes.scales, tokens * sizeof(float), hipMemcpyDeviceToHost),
           "token scales");
+    // Every element at small T; at prefill widths the first, a middle, the last and the tile-edge
+    // tokens over every seventh row.
+    std::vector<std::uint32_t> checked_tokens;
+    if (tokens <= fp8::kFp8SmallTokenLimit) {
+        for (std::uint32_t token = 0; token < tokens; ++token) checked_tokens.push_back(token);
+    } else {
+        for (const std::uint32_t token : {0U, tokens / 2U, 255U, 256U, tokens - 1U})
+            if (token < tokens) checked_tokens.push_back(token);
+    }
+    const std::uint32_t row_step = tokens <= fp8::kFp8SmallTokenLimit ? 1U : 7U;
+    const std::vector<double>& decode = e4m3_values();
     double worst = 0.0;
-    for (std::uint32_t token = 0; token < tokens; ++token) {
-        for (std::uint32_t row = 0; row < rows; ++row) {
+    for (const std::uint32_t token : checked_tokens) {
+        for (std::uint32_t row = 0; row < rows; row += row_step) {
             double sum = 0.0, magnitude = 0.0;
             for (std::uint32_t k = 0; k < columns; ++k) {
                 const double term =
-                    oracle::decode_e4m3fn(codes[static_cast<std::size_t>(row) * columns + k]) *
-                    oracle::decode_e4m3fn(activation[static_cast<std::size_t>(token) * columns + k]);
+                    decode[codes[static_cast<std::size_t>(row) * columns + k]] *
+                    decode[activation[static_cast<std::size_t>(token) * columns + k]];
                 sum += term;
                 magnitude += std::abs(term);
             }
@@ -154,13 +183,18 @@ double run_shape(std::uint32_t rows, std::uint32_t columns, std::uint32_t tokens
             worst = std::max(worst, error);
         }
     }
-    // A nonfinite represented input poisons every output element.
-    input[static_cast<std::size_t>(tokens - 1U) * columns + 3U] =
+    // A nonfinite represented input poisons exactly its token's output row.
+    const std::uint32_t bad_token = tokens / 2U;
+    input[static_cast<std::size_t>(bad_token) * columns + 3U] =
         hip_bfloat16(std::numeric_limits<float>::infinity());
     check(hipMemcpy(d_input.data, input.data(), d_input.bytes(), hipMemcpyHostToDevice), "poison input");
     const std::vector<std::uint16_t> poisoned = run();
-    for (std::size_t index = 0; index < outputs; ++index)
-        require(poisoned[kGuard + index] == kCanonicalNan, "nonfinite input did not poison output");
+    for (std::size_t index = 0; index < outputs; ++index) {
+        const bool bad = index / rows == bad_token;
+        require(bad ? poisoned[kGuard + index] == kCanonicalNan
+                    : poisoned[kGuard + index] == output[kGuard + index],
+                "nonfinite input did not poison exactly its token");
+    }
     return worst;
 }
 
@@ -175,12 +209,20 @@ int main() {
             for (const std::uint32_t tokens : {1U, 2U, 5U, 6U, 8U, 16U})
                 worst = std::max(worst, run_shape(rows, columns, tokens, rng));
         }
-        std::cout << "fp8_row_scaled_small_t: PASS N7168/K5120 and N5120/K6144 at T=1,2,5,6,8,16 "
+        // Prefill route: partial and full token tiles on every protected projection shape.
+        for (const auto [rows, columns] : {std::pair<std::uint32_t, std::uint32_t>{7168U, 5120U},
+                                           {5120U, 6144U}, {34816U, 5120U}, {5120U, 17408U},
+                                           {4096U, 5120U}}) {
+            for (const std::uint32_t tokens : {17U, 300U, 2048U})
+                worst = std::max(worst, run_shape(rows, columns, tokens, rng));
+        }
+        std::cout << "fp8_row_scaled_linear: PASS small T=1..16 and prefill T=17/300/2048 on "
+                     "N7168/K5120, N5120/K6144, N34816/K5120, N5120/K17408, N4096/K5120 "
                      "maximum_normalized_error="
                   << worst << " nonfinite_poison=PASS guards=PASS\n";
         return 0;
     } catch (const std::exception& error) {
-        std::cerr << "fp8_row_scaled_small_t: FAIL: " << error.what() << '\n';
+        std::cerr << "fp8_row_scaled_linear: FAIL: " << error.what() << '\n';
         return 1;
     }
 }

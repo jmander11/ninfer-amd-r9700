@@ -59,7 +59,6 @@ GDN_GROUPED_HEADS_TARGET := $(BUILD_DIR)/gdn_grouped_heads_qual
 SERVE_ENV_TARGET := $(BUILD_DIR)/serve_environment_qual
 HBM_TARGET := $(BUILD_DIR)/hbm_bandwidth_probe
 Q4_HARDWARE_PEAK_TARGET := $(BUILD_DIR)/q4_hardware_peak_probe
-FP8_HIPBLASLT_TARGET := $(BUILD_DIR)/fp8_hipblaslt_probe
 INT4_WMMA_TARGET := $(BUILD_DIR)/int4_wmma_qual
 W8A8_WMMA_TARGET := $(BUILD_DIR)/w8a8_wmma_linear_qual
 Q4G64_LINEAR_TARGET := $(BUILD_DIR)/q4g64_linear_qual
@@ -95,7 +94,6 @@ GDN_AFFINE_CHUNK_SOURCE := gdn_affine_chunk_qual.hip
 SERVE_ENV_SOURCE := serve_environment_qual.cpp
 HBM_SOURCE := hbm_bandwidth_probe.hip
 Q4_HARDWARE_PEAK_SOURCE := q4_hardware_peak_probe.hip
-FP8_HIPBLASLT_SOURCE := fp8_hipblaslt_probe.hip
 Q4_HARDWARE_PEAK_STATIC_CHECK := check_q4_hardware_peak_static.py
 INT4_WMMA_SOURCE := int4_wmma_qual.hip
 W8A8_WMMA_SOURCE := w8a8_wmma_linear_qual.hip
@@ -172,16 +170,9 @@ CXXFLAGS := -O3 -std=c++20 --offload-arch=$(ARCH) -I../../src $(SYSTEM_INCLUDES)
 LDFLAGS := -L$(ROCM_ROOT)/lib -Wl,-rpath,$(ROCM_ROOT)/lib
 
 
-.PHONY: all clean hbm fp8-hipblaslt-probe int4-wmma int4-wmma-isa int4-wmma-resources w8a8-wmma w8a8-prefill-cta-regression w8a8-prefill-cta-lds-scope-regression w8a8-prefill-cta-lds-scope-benchmark w8a8-prefill-cta-lds-scope-report w8a8-wmma-isa w8a8-wmma-resources prefill-cta-static-q4 prefill-cta-static-w8 prefill-cta-static-incumbent-diagnostic q4g64-linear a8q4-shape-sweep a8q4-gdn-pair-t1 a8q4-gdn-pair-t1-static a8q4-dflash-small-t-build a8q4-dflash-small-t-static a8q4-dflash-small-t-test a8q4-dflash-small-t-screen a8q4-dflash-mlp-down-small-t-build a8q4-dflash-mlp-down-small-t-static a8q4-dflash-mlp-down-small-t-static-test a8q4-prefill-cta-regression a8q4-prefill-cta-lds-scope-regression a8q4-prefill-cta-lds-scope-benchmark a8q4-prefill-cta-lds-scope-report a8q4-prefill-cta-m64n64-regression q4g64-linear-isa q4g64-linear-resources xattention-isa xattention-resources xattention-reports split512-attention split512-attention-isa split512-attention-resources dense-prefill-attention dense-prefill-attention-isa dense-prefill-attention-static dense-prefill-attention-static-test isa kv-resources linear-isa linear-resources eager-isa rmsnorm-prefill-static rmsnorm-prefill-static-test rmsnorm-prefill-benchmark rmsnorm-k256-prefill-static rmsnorm-k256-prefill-static-test rmsnorm-k256-prefill-benchmark rmsnorm-decode-production-static rmsnorm-decode-production-static-test rmsnorm-decode-production-routing-test rmsnorm-decode-production-regression rmsnorm-dflash-rows56-build rmsnorm-dflash-rows56-static rmsnorm-dflash-rows56-static-test rmsnorm-dflash-rows56-screen gated-rmsnorm-prefill-static gated-rmsnorm-prefill-static-test gated-rmsnorm-prefill-path-test gated-rmsnorm-prefill-benchmark gated-rmsnorm-k128-production-static gated-rmsnorm-k128-production-static-test silu-mul-split-prefill-static silu-mul-split-prefill-static-test silu-mul-split-prefill-benchmark gdn-isa gdn-prefill-benchmark gdn-prefill-static gdn-prefill-static-test gdn-recurrence-resources gdn-recurrence-exact-discriminator gdn-verify-wave-static sampling-isa rope-resources run sanitize rocm-tool-audit rocm-tool-audit-test profile-trace profile-attention-trace profile-pmc
+.PHONY: all clean hbm int4-wmma int4-wmma-isa int4-wmma-resources w8a8-wmma w8a8-prefill-cta-regression w8a8-prefill-cta-lds-scope-regression w8a8-prefill-cta-lds-scope-benchmark w8a8-prefill-cta-lds-scope-report w8a8-wmma-isa w8a8-wmma-resources prefill-cta-static-q4 prefill-cta-static-w8 prefill-cta-static-incumbent-diagnostic q4g64-linear a8q4-shape-sweep a8q4-gdn-pair-t1 a8q4-gdn-pair-t1-static a8q4-dflash-small-t-build a8q4-dflash-small-t-static a8q4-dflash-small-t-test a8q4-dflash-small-t-screen a8q4-dflash-mlp-down-small-t-build a8q4-dflash-mlp-down-small-t-static a8q4-dflash-mlp-down-small-t-static-test a8q4-prefill-cta-regression a8q4-prefill-cta-lds-scope-regression a8q4-prefill-cta-lds-scope-benchmark a8q4-prefill-cta-lds-scope-report a8q4-prefill-cta-m64n64-regression q4g64-linear-isa q4g64-linear-resources xattention-isa xattention-resources xattention-reports split512-attention split512-attention-isa split512-attention-resources dense-prefill-attention dense-prefill-attention-isa dense-prefill-attention-static dense-prefill-attention-static-test isa kv-resources linear-isa linear-resources eager-isa rmsnorm-prefill-static rmsnorm-prefill-static-test rmsnorm-prefill-benchmark rmsnorm-k256-prefill-static rmsnorm-k256-prefill-static-test rmsnorm-k256-prefill-benchmark rmsnorm-decode-production-static rmsnorm-decode-production-static-test rmsnorm-decode-production-routing-test rmsnorm-decode-production-regression rmsnorm-dflash-rows56-build rmsnorm-dflash-rows56-static rmsnorm-dflash-rows56-static-test rmsnorm-dflash-rows56-screen gated-rmsnorm-prefill-static gated-rmsnorm-prefill-static-test gated-rmsnorm-prefill-path-test gated-rmsnorm-prefill-benchmark gated-rmsnorm-k128-production-static gated-rmsnorm-k128-production-static-test silu-mul-split-prefill-static silu-mul-split-prefill-static-test silu-mul-split-prefill-benchmark gdn-isa gdn-prefill-benchmark gdn-prefill-static gdn-prefill-static-test gdn-recurrence-resources gdn-recurrence-exact-discriminator gdn-verify-wave-static sampling-isa rope-resources run sanitize rocm-tool-audit rocm-tool-audit-test profile-trace profile-attention-trace profile-pmc
 
 all: $(PROBE_TARGET) $(KV_TARGET) $(HIP_DEVICE_TARGET) $(LINEAR_TARGET) $(EAGER_TARGET) $(GDN_TARGET) $(GDN_RECURRENCE_TARGET) $(SAMPLING_TARGET) $(ROPE_TARGET) $(SERVE_ENV_TARGET)
-
-$(FP8_HIPBLASLT_TARGET): $(FP8_HIPBLASLT_SOURCE) Makefile
-	mkdir -p $(BUILD_DIR)
-	$(HIPCC) $(CXXFLAGS) $< $(LDFLAGS) -lhipblaslt -o $@
-
-fp8-hipblaslt-probe: $(FP8_HIPBLASLT_TARGET)
-	./$(FP8_HIPBLASLT_TARGET)
 
 $(PROBE_TARGET): $(PROBE_SOURCE) $(KV_ORACLE) Makefile
 	mkdir -p $(BUILD_DIR)

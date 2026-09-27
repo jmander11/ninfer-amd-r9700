@@ -118,7 +118,8 @@ struct DFlash2Plan {
 struct BindingPlan {
     qwen3::FrontendResourcePlan frontend;
     qwen3::StartupFeatures features;
-    std::vector<std::uint32_t> linear_prepared_widths;
+    // Token widths of FP8 Linear calls; the largest sizes each activation image.
+    std::vector<std::uint32_t> linear_widths;
 
     WeightPlan token_embedding;
     std::array<TextLayerPlan, kTextLayers> text_layers;
@@ -201,9 +202,7 @@ public:
     LoadedModelData& operator=(LoadedModelData&&)      = delete;
 
     artifact::MaterializedArtifact backing;
-    // Library-owned device resources are live before the registry's final
-    // capacity snapshot; borrowed by the Program's serialized FP8 projections.
-    std::unique_ptr<ops::LinearExecutionContext> linear_context;
+    // Borrowed by the Program's serialized FP8 projections.
     std::vector<std::unique_ptr<ops::LinearExecution>> prepared_linears;
     qwen3::FrontendResources frontend;
     RuntimeModelView runtime;

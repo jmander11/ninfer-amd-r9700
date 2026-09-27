@@ -143,12 +143,6 @@ int main() {
         adaptive_width_contract();
         static_assert(!std::is_copy_constructible_v<Variant::ExecutionState>);
         static_assert(!std::is_move_constructible_v<Variant::ExecutionState>);
-        // Prepared executions borrow a stable, explicitly owned device context.
-        static_assert(!std::is_copy_constructible_v<ninfer::ops::LinearExecutionContext>);
-        static_assert(!std::is_move_constructible_v<ninfer::ops::LinearExecutionContext>);
-        static_assert(std::is_constructible_v<ninfer::ops::LinearExecution,
-            ninfer::ops::LinearExecutionContext&, const ninfer::Weight&,
-            std::size_t, std::size_t>);
         static_assert(Variant::runtime_allocation_overhead_bound(
             detail::WeightsProfile::R9700Q4G64Fp8FourRoleN16K16Evaluation) == (4U << 20U));
         static_assert(Variant::runtime_allocation_overhead_bound(
