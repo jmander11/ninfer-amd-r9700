@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <type_traits>
 
 namespace ninfer::ops::r9700::kv {
 namespace {
@@ -597,6 +598,9 @@ hipError_t fused_attention_dispatch(const Fp8Int4KvAttentionArgs& a, hipStream_t
 // it by 2^8, keeping FP16 probabilities finite. Probabilities are packed to FP16
 // once and the denominator sums exactly those FP16 values in FP32, so numerator and
 // denominator use identical weights.
+// The kernel is held to 240 VGPRs (six waves per SIMD) so two 12-wave CTAs share a
+// WGP: one CTA's staging and barriers overlap the other's WMMA. At 255 VGPRs only one
+// fits and staging is fully exposed (9-14% slower at T2048, 8K-64K context).
 inline constexpr std::uint32_t kDensePrefillRows = 32U;
 inline constexpr std::uint32_t kDensePrefillKeys = 32U;
 inline constexpr std::uint32_t kDensePrefillWaves = 12U;
@@ -842,11 +846,13 @@ __device__ __forceinline__ bool dense_load_query(const Fp8Int4KvAttentionArgs& a
 // One staged block of 16 * KeyTiles keys of the online Softmax for this wave's sixteen lane rows:
 // S^T = K Q^T (KeyTiles key tiles x 16 feature tiles of BF16 WMMA), masking, the log2-domain origin
 // update, FP16 probabilities, and O += P V (16 feature tiles x KeyTiles key tiles of FP16 WMMA).
-template <std::uint32_t KeyTiles>
+// RowContext is this lane's causal context, or a pointer to its LDS entry: the prefill kernel
+// re-reads it on masked blocks only, so it does not occupy a VGPR across the block loop.
+template <std::uint32_t KeyTiles, class RowContext>
 __device__ __forceinline__ void dense_attention_block(
     const std::uint16_t* staged_keys, const std::uint16_t* staged_values,
     std::uint32_t key_base, bool page_valid,
-    std::uint32_t full_context, std::uint32_t row_context, std::uint32_t axis,
+    std::uint32_t full_context, RowContext row_context_source, std::uint32_t axis,
     std::uint32_t half, float scale_log2, const I16x8 (&query)[16], F32x8 (&numerator)[16],
     float& reference, float& denominator) {
     constexpr std::uint32_t value_pitch = 16U * KeyTiles + 8U;
@@ -874,6 +880,14 @@ __device__ __forceinline__ void dense_attention_block(
             for (std::uint32_t item = 0U; item < 8U; ++item)
                 block_maximum = fmaxf(block_maximum, scores[key_tile][item]);
     } else {
+        std::uint32_t row_context;
+        if constexpr (std::is_pointer_v<RowContext>) {
+            RowContext entry = row_context_source;
+            asm volatile("" : "+v"(entry));
+            row_context = *entry;
+        } else {
+            row_context = row_context_source;
+        }
         bool poisoned = false;
 #pragma unroll
         for (std::uint32_t key_tile = 0U; key_tile < KeyTiles; ++key_tile) {
@@ -940,12 +954,13 @@ __device__ __forceinline__ void dense_attention_block(
 }
 
 template <std::uint32_t Group>
-__global__ __launch_bounds__(kDensePrefillThreads)
+__global__ __launch_bounds__(kDensePrefillThreads) __attribute__((amdgpu_waves_per_eu(6)))
 void dense_prefill_kernel(Fp8Int4KvAttentionArgs a) {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
     __shared__ DensePrefillShared shared;
     const std::uint32_t tid = threadIdx.x, lane = tid % 32U;
-    // Wave-uniform values live in scalar registers; the 192 persistent Q/O VGPRs leave no slack.
+    // Wave-uniform values live in scalar registers; the 192 persistent Q/O VGPRs leave 48 of the
+    // 240-VGPR (six waves per SIMD) budget.
     const std::uint32_t wave = __builtin_amdgcn_readfirstlane(tid / 32U);
     const std::uint32_t axis = lane % 16U, half = lane / 16U;
     const std::uint32_t head = wave % 6U, row_tile = wave / 6U;
@@ -976,8 +991,9 @@ void dense_prefill_kernel(Fp8Int4KvAttentionArgs a) {
 #pragma unroll
     for (std::uint32_t tile_f = 0U; tile_f < 16U; ++tile_f) numerator[tile_f] = F32x8{};
     float reference = -INFINITY;  // log2-domain Softmax origin of this lane's query row
-    // This lane's keys only; the half-wave pair is summed at the end.
-    float denominator = nonfinite ? __builtin_nanf("") : 0.0F;
+    // This lane's keys only; the half-wave pair is summed at the end. A nonfinite query is applied
+    // after the loop, where its lane mask costs no VGPR.
+    float denominator = 0.0F;
     const float scale_log2 = a.attention_scale * 1.4426950408889634F;
 
     for (std::uint32_t key_base = 0U; key_base < maximum_context; key_base += kDensePrefillKeys) {
@@ -1001,14 +1017,15 @@ void dense_prefill_kernel(Fp8Int4KvAttentionArgs a) {
                                                                kv_head));
         }
         dense_prefill_barrier();
-        // Phase boundaries bound register live ranges at the 256-VGPR budget.
+        // Phase boundaries bound register live ranges at the 240-VGPR budget.
         __builtin_amdgcn_sched_barrier(0);
         dense_attention_block<2U>(shared.keys, shared.values, key_base, page_valid,
-                                  full_context, row_context, axis, half, scale_log2, query,
-                                  numerator, reference, denominator);
+                                  full_context, &shared.row_context[lane_row], axis, half,
+                                  scale_log2, query, numerator, reference, denominator);
         dense_prefill_barrier();
     }
 
+    if (nonfinite) denominator = __builtin_nanf("");
     const float row_denominator = denominator + __shfl_xor(denominator, 16, 32);
     const std::uint32_t page_fault_from = shared.page_fault_from;
 #pragma unroll

@@ -257,7 +257,7 @@ void host_predicate_regression() {
     rejected(bad, "context shorter than query rows was accepted");
 }
 void run_case(std::uint32_t rows, std::uint32_t group, std::uint32_t context,
-              std::uint16_t uniform_scale = 0U) {
+              std::uint16_t uniform_scale = 0U, std::uint32_t timed_iterations = 0U) {
     Fixture fixture = make_fixture(group, context);
     if (uniform_scale != 0U) std::fill(fixture.scales.begin(), fixture.scales.end(), uniform_scale);
     const auto queries = make_queries(rows);
@@ -309,6 +309,28 @@ void run_case(std::uint32_t rows, std::uint32_t group, std::uint32_t context,
                 fail("dense attention differs from independent FP64 oracle");
             }
         }
+    }
+    if (timed_iterations != 0U) {
+        // Unprofiled event timing after the oracle pass: median of individually timed launches.
+        for (unsigned warm = 0; warm < 3; ++warm) HIP_CHECK(launch_selected_dense(args, nullptr));
+        std::vector<float> samples;
+        Event start, stop;
+        for (std::uint32_t iteration = 0U; iteration < timed_iterations; ++iteration) {
+            HIP_CHECK(hipEventRecord(start.get(), nullptr));
+            HIP_CHECK(launch_selected_dense(args, nullptr));
+            HIP_CHECK(hipEventRecord(stop.get(), nullptr));
+            HIP_CHECK(hipEventSynchronize(stop.get()));
+            float milliseconds = 0.0F;
+            HIP_CHECK(hipEventElapsedTime(&milliseconds, start.get(), stop.get()));
+            samples.push_back(milliseconds);
+        }
+        std::sort(samples.begin(), samples.end());
+        double visible = 0.0;
+        for (const auto position : positions) visible += static_cast<double>(position) + 1.0;
+        const double median = samples[samples.size() / 2U];
+        std::cout << "timing rows=" << rows << " context=" << context << " group=" << group
+                  << " median_ms=" << median << " min_ms=" << samples.front()
+                  << " useful_tflops=" << 4.0 * kHq * kD * visible / (median * 1.0e9) << "\n";
     }
     if (rows == 1537U) {
         hipStream_t stream{};
@@ -466,6 +488,15 @@ void run_case(std::uint32_t rows, std::uint32_t group, std::uint32_t context,
 int main(int argc, char** argv) {
     try {
         host_predicate_regression();
+        if (argc == 6 && std::string(argv[1]) == "--time") {
+            const auto rows = static_cast<std::uint32_t>(std::stoul(argv[2]));
+            const auto context = static_cast<std::uint32_t>(std::stoul(argv[3]));
+            const auto group = static_cast<std::uint32_t>(std::stoul(argv[4]));
+            if (!kv::use_dense_prefill_attention(rows, context) || (group != 16U && group != 32U))
+                fail("invalid dense attention timing shape");
+            run_case(rows, group, context, 0U, static_cast<std::uint32_t>(std::stoul(argv[5])));
+            return 0;
+        }
         if (argc == 4) {
             const auto rows = static_cast<std::uint32_t>(std::stoul(argv[1]));
             const auto context = static_cast<std::uint32_t>(std::stoul(argv[2]));
@@ -475,7 +506,7 @@ int main(int argc, char** argv) {
             run_case(rows, group, context);
             return 0;
         }
-        if (argc != 1) fail("usage: dense_prefill_attention_qual [rows context value-group]");
+        if (argc != 1) fail("usage: dense_prefill_attention_qual [rows context value-group | --time rows context value-group iterations]");
         for (const std::uint32_t group : {16U, 32U}) {
             for (const std::uint32_t rows : {128U, 129U, 512U, 1024U, 2048U, 4096U}) {
                 run_case(rows, group, rows);

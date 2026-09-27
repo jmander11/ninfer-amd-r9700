@@ -13,8 +13,8 @@ class DensePrefillAttentionStaticTest(unittest.TestCase):
     symbol = ("_ZN6ninfer3ops5r97002kv20dense_prefill_kernelILj16EEEv"
               "NS2_22Fp8Int4KvAttentionArgsE")
 
-    def fixture(self, root: Path, *, lds: int = PROFILE["lds"], vgpr: int = 246,
-                scratch: int = 0, occupancy: int = 5, maximum_workgroup: int = 384,
+    def fixture(self, root: Path, *, lds: int = PROFILE["lds"], vgpr: int = 240,
+                scratch: int = 0, occupancy: int = 6, maximum_workgroup: int = 384,
                 vgpr_spills: int = 0, bf16: int = 32, f16: int = 32, barriers: int = 3,
                 additional: str = "") -> tuple[Path, Path]:
         symbol = self.symbol
@@ -73,7 +73,8 @@ amdhsa.kernels:
              "unexpected matrix opcodes"),
             (dict(barriers=2), "barrier pairs"),
             (dict(lds=37537), "LDS size"),
-            (dict(vgpr=257), "resources fail"),
+            (dict(vgpr=241), "resources fail"),
+            (dict(occupancy=5), "resources fail"),
             (dict(scratch=4), "all must be zero"),
             (dict(vgpr_spills=1), "all must be zero"),
             (dict(maximum_workgroup=256), "execution mode"),

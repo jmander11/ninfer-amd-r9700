@@ -222,12 +222,19 @@ __global__ __launch_bounds__(32U * kGemvSplit) void fp8lut4_t1_kernel(KernelArgs
 // weight row into the double-buffered LDS tile; the waves read the activation fragments straight
 // from global memory, 32 contiguous bytes per lane, paired with the identical permutation of the
 // decoded weight bytes. Scales apply once in the epilogue.
+//
+// The next slab is decoded and staged before the last of the four 16-column chunks, so its
+// codebook read and decode VALU interleave with WMMAs instead of running between the last WMMA
+// and the barrier (6-8% at T2048). The kernel is held to 240 VGPRs (six waves per SIMD), so three
+// CTAs share a WGP instead of two (6-10% at T2048).
+constexpr std::uint32_t kStageChunk = 3U;
 constexpr std::uint32_t kPrefillTokens = 256U;
 constexpr std::uint32_t kPrefillRows = 128U;
 constexpr std::uint32_t kSlabStride = 72U;  // 64 bytes + 8: two-way LDS conflicts at most
 
 template <bool kAccumulate, bool kSiluPair>
-__global__ __launch_bounds__(256) void fp8lut4_prefill_kernel(KernelArgs a) {
+__global__ __launch_bounds__(256) __attribute__((amdgpu_waves_per_eu(6)))
+void fp8lut4_prefill_kernel(KernelArgs a) {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
     __shared__ uint2 table[256];
     __shared__ __attribute__((aligned(16))) std::uint8_t slab[2][kPrefillRows * kSlabStride];
@@ -299,6 +306,7 @@ __global__ __launch_bounds__(256) void fp8lut4_prefill_kernel(KernelArgs a) {
         const std::uint8_t* tile = slab[s & 1U];
 #pragma unroll
         for (std::uint32_t chunk = 0; chunk < 4U; ++chunk) {
+            if (chunk == kStageChunk && more) stage(next, (s + 1U) & 1U);
             I32x2 weight[4];
 #pragma unroll
             for (std::uint32_t j = 0; j < 4U; ++j) {
@@ -319,10 +327,7 @@ __global__ __launch_bounds__(256) void fp8lut4_prefill_kernel(KernelArgs a) {
                         __builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8_w32_gfx12(weight[j], x, accumulator[j][i]);
             }
         }
-        if (more) {
-            stage(next, (s + 1U) & 1U);
-            current = next;
-        }
+        if (more) current = next;
         __syncthreads();
     }
 

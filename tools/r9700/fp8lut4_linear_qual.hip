@@ -315,8 +315,11 @@ void time_shapes(hipStream_t stream, Rng& rng) {
         for (const auto& shape : shapes) {
             Weight weight(shape.rows, shape.columns, rng);
             Activation activation(tokens, shape.columns);
-            Device<hip_bfloat16> input(static_cast<std::size_t>(tokens) * shape.columns);
-            check(hipMemset(input.data, 0, input.count * sizeof(hip_bfloat16)), "input");
+            // Representative (nonzero) activations: WMMA power, and so clocks, depend on the data.
+            std::vector<hip_bfloat16> host(static_cast<std::size_t>(tokens) * shape.columns);
+            for (auto& x : host) x = hip_bfloat16(static_cast<float>(rng.normal()));
+            Device<hip_bfloat16> input(host.size());
+            input.upload(host);
             check(linear::fp8_quantize_activation({input.data, activation.workspace}, stream), "q");
             Device<hip_bfloat16> output(static_cast<std::size_t>(tokens) * shape.rows);
             const auto launch = [&] {

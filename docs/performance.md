@@ -60,6 +60,44 @@ expected value exactly.
 Copy bus rate counts both the read and write traffic. This is the hardware bandwidth bound, not a
 model or individual-Op throughput claim.
 
+## Long-context prefill: six waves per SIMD and interleaved weight staging (2026-09-26, night)
+
+A 32K prefill trace (`profiles/rocprof/prefill-32k-fp8lut4-trace-20260926/`, attribution only)
+put 66% of kernel time in the FP8LUT4 prefill GEMM and 18% in fused dense prefill attention.
+Both kernels sat just above the gfx1201 240-VGPR cliff (255 and 243 VGPRs, occupancy 5), so a
+WGP held one attention CTA or two GEMM CTAs and staging/barriers ran exposed.
+
+- **Dense prefill attention** is capped at six waves per SIMD (`amdgpu_waves_per_eu(6)`, 240
+  VGPRs, no spill): each lane's causal context is re-read from LDS on masked blocks, and a
+  nonfinite query poisons the denominator after the block loop. Two 12-wave CTAs now share a
+  WGP. T2048 (`dense_prefill_attention_qual --time 2048 <context> 16 30`): 3.86 / 15.48 / 32.56
+  ms -> 3.50 / 13.97 / 27.96 ms at context 8K / 32K / 64K (~116 useful TFLOP/s at 64K). The
+  split verification kernel shares the block arithmetic and is unchanged (234 VGPRs).
+- **FP8LUT4 prefill GEMM** is capped at 240 VGPRs (three CTAs per WGP instead of two) and
+  decodes/stages the next slab before the last of the four 16-column chunks instead of after the
+  last WMMA. T2048 (`ninfer_r9700_fp8lut4_linear_qual --time`, random activations): gate/up
+  176 -> 207, down 180 -> 209, GDN v/z 175 -> 210, attention 188 -> 216, output 190 -> 216,
+  GDN q/k 189 -> 216 TFLOP/s.
+
+Neither change alters arithmetic order: the 4K code prefill PPL rerun reproduces the committed
+sum NLL bit-for-bit (1645.4861488342285, `profiles/ppl/r9700-cb4-final-20260926/`). Both
+kernels pass their FP64 oracles; the static attention profile now pins 240 VGPRs / occupancy 6.
+
+Whole prefill, same session, same command (`ninfer_bench -p`, chunk 2048, C1, code corpus,
+`profiles/bench/r9700-long-prefill-20260926/`): 32K 2630 -> 2943 tok/s (+11.9%), 64K 2218 ->
+2489 tok/s (+12.2%); attention alone accounted for +2.3% / +3.8%. The documented context ladder
+(DFlash backend loaded, max context 131200) reads 8K 3352, 32K 2894, 64K 2455 tok/s.
+
+**Measured out or bounded.** Grouped LDS fragment prefetch in attention (PF 2/4/8: no change at
+six waves per SIMD), one-block-ahead page-table reads (no change), an LDS-only GEMM slab barrier
+(<1%), a split codebook read ahead of the decode (<1%). One LDS fragment per WMMA bounds this
+attention structure: an isolated FP16 WMMA loop reaches ~180 TFLOP/s but ~140 with one
+`ds_load_b128` per WMMA. The GEMM's decode/staging still costs ~20% (skipping it measured +24%);
+the isolated FP8 WMMA ceiling is ~340 TFLOP/s. The chunked GDN prefill (0.63 ms per 2048 tokens,
+~4% of prefill) is latency-bound on one 8-wave CTA per value head; ablation attributes ~26% of
+it to the intra-chunk A/P products and ~13% to the q/k normalization loads, which a parallel
+precompute pass with a workspace would take off the serial chain (estimated 1-2% of prefill).
+
 ## FP8LUT4 Text weights and per-token E4M3 activations (2026-09-26, evening)
 
 The Text-layer Q4G64 projections of the selective-cap DFlash2 base were re-encoded from BF16 as

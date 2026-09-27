@@ -31,12 +31,14 @@ greedy DFlash can differ from greedy ordinary decode on near-ties. See `docs/per
 
 ### Prefill · 2026-09-26 (FP8LUT4 artifact)
 
-Single-request prefill, chunk 2,048, same host and power: **4K ~3,050, 8K 2,791,
-32K 2,446, 64K 2,098 tok/s** (+16% to +36% over the previous Q4 artifact, which
-measured 8K 2,046, 32K 2,075 and 64K 1,804 in the same session). Ordinary and
-DFlash2 decode are unchanged within noise. Results are workload-specific, not a
-claimed hardware ceiling. Methodology, quality checks and evidence:
-`docs/performance.md`.
+Single-request prefill, chunk 2,048, same host and power: **8K 3,352, 32K 2,894,
+64K 2,455 tok/s** (context ladder). Six-waves-per-SIMD attention and GEMM kernels
+with interleaved weight staging added +12% at 32K and 64K over the first FP8LUT4
+build in a same-session A/B, with bit-identical PPL. That build was itself +16% to +36% over
+the previous Q4 artifact (8K 2,046, 32K 2,075, 64K 1,804). Ordinary and DFlash2
+decode were unchanged within noise by the FP8LUT4 migration. Results are
+workload-specific, not a claimed hardware ceiling. Methodology, quality checks
+and evidence: `docs/performance.md`.
 
 ## Model and precision
 

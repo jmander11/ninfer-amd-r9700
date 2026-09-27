@@ -762,8 +762,9 @@ block is decoded once into LDS (exact BF16 K; FP16 V/8 from exact n/8 times the 
 each wave computes S^T=K Q^T with 32 BF16 WMMAs, updates online FP32 Softmax (reference raised
 only when a block exceeds it by 2^8), and accumulates O+=P V with 32 FP16 WMMAs. The denominator
 sums exactly the FP16 probabilities in FP32. Blocks fully visible to every row skip masking; a
-nonfinite visible score poisons its row through a NaN denominator. P<128, tree attention, and
-other layouts retain their prior routes.
+nonfinite visible score poisons its row through a NaN denominator. The kernel is held to 240
+VGPRs (six waves per SIMD) so two CTAs share a WGP. P<128, tree attention, and other layouts
+retain their prior routes.
 
 After the serialized campaign permits a new build/GPU run, execute the independent FP64 harness:
 
@@ -771,6 +772,8 @@ After the serialized campaign permits a new build/GPU run, execute the independe
 make -C tools/r9700 -j12 dense-prefill-attention
 # One explicit shape (rows, visible context, value group):
 tools/r9700/build/dense_prefill_attention_qual 1537 12288 16
+# Oracle check, then the median of N individually event-timed launches:
+tools/r9700/build/dense_prefill_attention_qual --time 2048 65536 16 30
 ```
 
 It covers G16/G32 initial prefixes, appended 8K/32K contexts, 8192 query rows, key-block and page
@@ -782,9 +785,9 @@ positions, page-table rows and physical pages, and eager/Device Graph replay. Th
 report zero scratch/spills. `dense-prefill-attention-isa` prints the selected kernel's WMMA and
 resource lines; `dense-prefill-attention-static` with `DENSE_ATTN_ASSEMBLY`, `DENSE_ATTN_METADATA`,
 the exact mangled `DENSE_ATTN_SYMBOL` and `DENSE_ATTN_VALUE_GROUP` requires 32 BF16 and 32 FP16
-WMMAs, native FP32 exp, three barrier pairs, 37,536-byte LDS, at most 256 next-free VGPRs,
-occupancy at least 5, 384-thread wave32 WGP execution and zero private/scratch/spills. Current
-G16/G32 kernels use 246/244 next-free VGPRs. Timing, whole-model results and quality checks are in
+WMMAs, native FP32 exp, three barrier pairs, 37,552-byte LDS, at most 240 next-free VGPRs,
+occupancy at least 6, 384-thread wave32 WGP execution and zero private/scratch/spills. Current
+G16/G32 kernels use 240 next-free VGPRs. Timing, whole-model results and quality checks are in
 `docs/performance.md`.
 
 Historical score-panel evidence (superseded by the fused route): for G16 and G32 at
