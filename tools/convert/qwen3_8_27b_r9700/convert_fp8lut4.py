@@ -1,8 +1,8 @@
-"""Create-only conversion of the CB4G32 Text recipe on the selective-cap DFlash2 base.
+"""Create-only conversion of the FP8LUT4 Text recipe on the selective-cap DFlash2 base.
 
 Every Text-layer projection the base stores as Q4G64 is re-encoded from the original BF16
-checkpoint as CB4G32_F32S (`cb4_codec`), MLP gate/up rows in the interleaved SiLU-pair order
-(`cb4_codec.interleave_gate_up`); every other object (FP8 protections, embeddings, head,
+checkpoint as FP8LUT4 (`fp8lut4_codec`), MLP gate/up rows in the interleaved SiLU-pair order
+(`fp8lut4_codec.interleave_gate_up`); every other object (FP8 protections, embeddings, head,
 MTP, DFlash2 companion, Vision, resources) is copied byte-exact from the base artifact.
 """
 from __future__ import annotations
@@ -18,9 +18,9 @@ from tools.artifact.container import (
 )
 
 BASE_WEIGHTS_ID = "r9700-q4-fp8-selective-cap-n16k16-dflash2-q4-eval"
-WEIGHTS_ID = "r9700-cb4-fp8-selective-cap-dflash2-q4-eval"
-CB4 = "CB4G32_F32S"
-CB4_LAYOUT = "r9700-cb4g32-n16k64-v1"
+WEIGHTS_ID = "r9700-fp8lut4-fp8-selective-cap-dflash2-q4-eval"
+FP8LUT4 = "FP8LUT4"
+FP8LUT4_LAYOUT = "r9700-fp8lut4-n16k64-v1"
 
 
 def selected(obj) -> bool:
@@ -45,7 +45,7 @@ def copied(artifact, name):
 def convert(args) -> None:
     import torch
     from tools.convert.common.safetensors import ShardReader
-    from . import cb4_codec, source, source_recipe
+    from . import fp8lut4_codec, source, source_recipe
 
     receipt = Path(str(args.out) + ".conversion.json")
     if args.out.exists() or receipt.exists():
@@ -61,7 +61,7 @@ def convert(args) -> None:
         if base.identity.weights_id != BASE_WEIGHTS_ID:
             raise ValueError(f"base must be {BASE_WEIGHTS_ID}, got {base.identity.weights_id}")
         stored = tuple(
-            StoredTensor(o.name, o.shape, CB4, CB4_LAYOUT) if selected(o)
+            StoredTensor(o.name, o.shape, FP8LUT4, FP8LUT4_LAYOUT) if selected(o)
             else StoredTensor(o.name, o.shape, o.format, o.layout) if isinstance(o, TensorObject)
             else StoredResource(o.name, o.encoding, o.bytes)
             for o in base.objects)
@@ -73,10 +73,10 @@ def convert(args) -> None:
                     tensor = source_recipe.materialize_recipe(
                         source_recipe.RECIPES_BY_NAME[obj.name], reader)
                     if obj.name.endswith("/mlp/gate_up"):
-                        tensor = cb4_codec.interleave_gate_up(tensor)
-                    record["origin"] = "original-bf16-source-cb4"
+                        tensor = fp8lut4_codec.interleave_gate_up(tensor)
+                    record["origin"] = "original-bf16-source-fp8lut4"
                     writer.write(obj.name, recorded(
-                        cb4_codec.encode_chunks(tensor, device=args.device), record))
+                        fp8lut4_codec.encode_chunks(tensor, device=args.device), record))
                     del tensor
                     print(obj.name, flush=True)
                 else:

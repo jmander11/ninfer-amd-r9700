@@ -1,7 +1,7 @@
 #include "ops/r9700/gdn/gdn_ops.h"
 #include "ops/r9700/linear/a8g64_codec.h"
 #include "ops/r9700/linear/a8q4_pipeline_impl.h"
-#include "ops/r9700/linear/cb4_pipeline_impl.h"
+#include "ops/r9700/linear/fp8lut4_pipeline_impl.h"
 #include "ops/r9700/linear/fp8_encode_impl.h"
 #include "ops/r9700/linear/r9700_linear.h"
 
@@ -500,34 +500,34 @@ __global__ __launch_bounds__(32U * kPairConvSplit) void gdn_pair_conv_record_ker
     }
 }
 
-// The CB4G32 form of gdn_pair_conv_record_kernel: CTAs [0, 256) own the query-key row blocks of
+// The FP8LUT4 form of gdn_pair_conv_record_kernel: CTAs [0, 256) own the query-key row blocks of
 // one per-token E4M3 image, the rest the value-z row blocks; each block's BF16 outputs (canonical
 // NaN for a flagged token) are staged, then every row runs the recorded convolution of its
 // channel (value-z rows 6144.. are the output gate z).
-constexpr std::uint32_t kCb4PairSplit = linear::cb4::kVerifySplit;
-constexpr std::uint32_t kCb4PairSteps = linear::cb4::kVerifySteps;
+constexpr std::uint32_t kFp8Lut4PairSplit = linear::fp8lut4::kVerifySplit;
+constexpr std::uint32_t kFp8Lut4PairSteps = linear::fp8lut4::kVerifySteps;
 template <unsigned T>
-__global__ __launch_bounds__(32U * kCb4PairSplit) void gdn_cb4_pair_conv_record_kernel(
+__global__ __launch_bounds__(32U * kFp8Lut4PairSplit) void gdn_fp8lut4_pair_conv_record_kernel(
     const std::uint8_t* activation, const float* token_scales, const std::uint32_t* status,
-    linear::Cb4Weight query_key, linear::Cb4Weight value_z, const hip_bfloat16* conv_weight,
+    linear::Fp8Lut4Weight query_key, linear::Fp8Lut4Weight value_z, const hip_bfloat16* conv_weight,
     const hip_bfloat16* conv_states, const std::int32_t* valid_columns,
     const std::int32_t* initial_state_slots, const std::int32_t* parent_index,
     hip_bfloat16* conv_record, hip_bfloat16* query, hip_bfloat16* key, hip_bfloat16* value,
     hip_bfloat16* z, std::uint32_t state_slots) {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
     __shared__ uint2 table[256];
-    __shared__ float partial[kCb4PairSplit][8][32];
+    __shared__ float partial[kFp8Lut4PairSplit][8][32];
     __shared__ hip_bfloat16 staged[16][T];
     constexpr unsigned kQueryKeyTiles = (kProjectionQueryRows + kProjectionKeyRows) / 16U;
     const bool second = blockIdx.x >= kQueryKeyTiles;
-    const linear::Cb4Weight weight = second ? value_z : query_key;
+    const linear::Fp8Lut4Weight weight = second ? value_z : query_key;
     const std::uint32_t row_base = (second ? blockIdx.x - kQueryKeyTiles : blockIdx.x) * 16U;
-    linear::cb4::load_table(table, 32U * kCb4PairSplit);
+    linear::fp8lut4::load_table(table, 32U * kFp8Lut4PairSplit);
     const auto stage = [&](std::uint32_t token, std::uint32_t row, float y) {
         staged[row - row_base][token] = status[token] != linear::Fp8ActivationOk
             ? hip_bfloat16(__builtin_nanf("")) : hip_bfloat16(y);
     };
-    linear::cb4::small_t_rows<kCb4PairSplit, kCb4PairSteps>(
+    linear::fp8lut4::small_t_rows<kFp8Lut4PairSplit, kFp8Lut4PairSteps>(
         weight, row_base, activation, token_scales, T, table, partial, stage);
     __syncthreads();
     if (threadIdx.x >= 16U) return;
@@ -1226,9 +1226,9 @@ hipError_t gdn_pair_conv_record_bf16(
     });
 }
 
-hipError_t gdn_cb4_pair_conv_record_bf16(
-    const linear::Fp8ActivationWorkspace& image, const linear::Cb4Weight& query_key,
-    const linear::Cb4Weight& value_z, const hip_bfloat16* conv_weight,
+hipError_t gdn_fp8lut4_pair_conv_record_bf16(
+    const linear::Fp8ActivationWorkspace& image, const linear::Fp8Lut4Weight& query_key,
+    const linear::Fp8Lut4Weight& value_z, const hip_bfloat16* conv_weight,
     const hip_bfloat16* conv_states, const std::int32_t* valid_columns,
     const std::int32_t* initial_state_slots, const std::int32_t* parent_index,
     hip_bfloat16* conv_record, hip_bfloat16* query, hip_bfloat16* key, hip_bfloat16* value,
@@ -1239,7 +1239,7 @@ hipError_t gdn_cb4_pair_conv_record_bf16(
         query_key.rows == kProjectionQueryRows + kProjectionKeyRows &&
         value_z.rows == kProjectionValueZRows && query_key.columns == kControlColumns &&
         value_z.columns == kControlColumns &&
-        linear::cb4_linear_supported(width, query_key.rows, query_key.columns) &&
+        linear::fp8lut4_linear_supported(width, query_key.rows, query_key.columns) &&
         query_key.codes != nullptr && value_z.codes != nullptr && conv_weight != nullptr &&
         conv_states != nullptr && initial_state_slots != nullptr && conv_record != nullptr &&
         query != nullptr && key != nullptr && value != nullptr && z != nullptr &&
@@ -1247,13 +1247,13 @@ hipError_t gdn_cb4_pair_conv_record_bf16(
     return checked_launch(valid, [&] {
         const dim3 grid((query_key.rows + value_z.rows) / 16U);
         const auto launch = [&](auto kernel) {
-            hipLaunchKernelGGL(kernel, grid, dim3(32U * kCb4PairSplit), 0, stream,
+            hipLaunchKernelGGL(kernel, grid, dim3(32U * kFp8Lut4PairSplit), 0, stream,
                                image.codes, image.scales, image.status, query_key, value_z,
                                conv_weight, conv_states, valid_columns, initial_state_slots,
                                parent_index, conv_record, query, key, value, z, state_slots);
         };
-        if (width == 5U) launch(gdn_cb4_pair_conv_record_kernel<5>);
-        else launch(gdn_cb4_pair_conv_record_kernel<6>);
+        if (width == 5U) launch(gdn_fp8lut4_pair_conv_record_kernel<5>);
+        else launch(gdn_fp8lut4_pair_conv_record_kernel<6>);
     });
 }
 

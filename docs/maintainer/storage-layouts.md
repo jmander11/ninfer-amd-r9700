@@ -69,9 +69,9 @@ This layout accepts rank-two `F8E4M3_ROW_F32S` matrices `[N,K]`. It pads K upwar
 stores the row-major E4M3FN code plane `[N][Kpad]` at offset zero (padding codes zero), then the
 little-endian FP32 row multipliers `[N]` at the next 256-byte boundary.
 
-## `r9700-cb4g32-n16k64-v1`
+## `r9700-fp8lut4-n16k64-v1`
 
-This layout accepts rank-two `CB4G32_F32S` matrices `[N,K]` with `N` divisible by 16 and pads K
+This layout accepts rank-two `FP8LUT4` matrices `[N,K]` with `N` divisible by 16 and pads K
 upward to 128. The code and group planes are ordered in N16 x K64 tiles: tile index
 `(r / 16) * (Kpad / 64) + k / 64`, and within a tile slot `16 * ((k % 64) / 32) + r % 16`.
 

@@ -59,9 +59,9 @@ validates inventories, and reads back the complete output against its conversion
 
 ### Selected local compact deployment
 
-The user-selected local deployment is the CB4G32 Text recipe
-`r9700-cb4-fp8-selective-cap-dflash2-q4-eval` (below), installed under
-`/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-cb4-fp8-selective-cap/` and named by
+The user-selected local deployment is the FP8LUT4 Text recipe
+`r9700-fp8lut4-fp8-selective-cap-dflash2-q4-eval` (below), installed under
+`/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-fp8lut4-fp8-selective-cap/` and named by
 `.env.example`/`compose.yaml`. It is derived from the Q4 selective-cap pair, which remains
 installed as its conversion base: `r9700-q4-fp8-selective-cap-n16k16-eval`
 (15,793,065,984 bytes) and its `r9700-q4-fp8-selective-cap-n16k16-dflash2-q4-eval`
@@ -86,23 +86,23 @@ the nonzero mixed prefill A4 families remain evaluators.
 The current build/run configuration is G16, dense, chunk2048, W8 activation bits8;
 see `docs/performance.md` for quality tradeoffs and delivery evidence.
 
-### CB4G32 Text recipe
+### FP8LUT4 Text recipe
 
-`r9700-cb4-fp8-selective-cap-dflash2-q4-eval` (profile
-`R9700Cb4Fp8SelectiveCapDFlash2Q4Evaluation`, 17,017,223,680 bytes) is the selective-cap DFlash2
+`r9700-fp8lut4-fp8-selective-cap-dflash2-q4-eval` (profile
+`R9700Fp8Lut4Fp8SelectiveCapDFlash2Q4Evaluation`, 17,017,223,680 bytes) is the selective-cap DFlash2
 companion with every Text-layer projection the base stores as Q4G64 re-encoded from the original
-BF16 checkpoint as `CB4G32_F32S` in `r9700-cb4g32-n16k64-v1` (see `tensor-formats.md`), including
+BF16 checkpoint as `FP8LUT4` in `r9700-fp8lut4-n16k64-v1` (see `tensor-formats.md`), including
 GDN value_z. The 26 FP8 protections, embedding, output head, MTP, DFlash2 companion, Vision and
 resources are copied byte-exact from the base. MLP gate/up rows are stored gate/up interleaved in
 16-row tiles (stored row `16 b + i` is gate feature `8 b + i` for `i < 8`, else up feature
 `8 b + i - 8`) so the projection publishes the SiLU-gated activation directly; no other object is
 permuted. The binder uses the selective-cap base inventory and switches exactly its Text-layer Q4
-matrices to CB4. Installed at
-`/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-cb4-fp8-selective-cap/`. Conversion (GPU
+matrices to FP8LUT4. Installed at
+`/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-fp8lut4-fp8-selective-cap/`. Conversion (GPU
 search optional, create-only, validated readback):
 
 ```bash
-python3.11 -m tools.convert.qwen3_8_27b_r9700.convert_cb4 \
+python3.11 -m tools.convert.qwen3_8_27b_r9700.convert_fp8lut4 \
   --base <qwen3.8-27b-r9700-q4-fp8-selective-cap-n16k16-dflash2-q4-eval.ninfer> \
   --model /ssdpool2nvme/local_llm/models/qwen3.8-27b-bf16 --out <new.ninfer> --device cuda
 ```

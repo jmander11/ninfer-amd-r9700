@@ -29,7 +29,7 @@ repetitions and 44 cold-transition cases matched ordinary greedy tokens exactly 
 since 2026-09-25 verification attention keeps BF16 queries (ordinary decode uses FP8 queries), so
 greedy DFlash can differ from greedy ordinary decode on near-ties. See `docs/performance.md`.
 
-### Prefill · 2026-09-26 (CB4 artifact)
+### Prefill · 2026-09-26 (FP8LUT4 artifact)
 
 Single-request prefill, chunk 2,048, same host and power: **4K ~3,050, 8K 2,791,
 32K 2,446, 64K 2,098 tok/s** (+16% to +36% over the previous Q4 artifact, which
@@ -41,8 +41,8 @@ claimed hardware ceiling. Methodology, quality checks and evidence:
 ## Model and precision
 
 - **17.02 GB DFlash-enabled artifact** (decimal file size, not VRAM),
-  `r9700-cb4-fp8-selective-cap-dflash2-q4-eval`.
-- Text-layer weights in CB4G32 (4-bit codes with a per-32 codebook of exact E4M3
+  `r9700-fp8lut4-fp8-selective-cap-dflash2-q4-eval`.
+- Text-layer weights in FP8LUT4 (4-bit codes with a per-32 codebook of exact E4M3
   values, FP32 row scale); 26 protected projections in FP8; Q4 embedding/output
   head, MTP and DFlash with BF16 codebooks.
 - Per-token FP8 E4M3 activations for every Text projection (prefill, ordinary
@@ -56,8 +56,8 @@ universal quality equivalence; the BF16-source production-admission campaign
 remains unfinished.
 
 Artifacts are not bundled. The installed artifact and its conversion receipt are
-under `/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-cb4-fp8-selective-cap/`.
-Conversion and binding details: `docs/maintainer/qwen3.8-27b-artifact.md` (CB4G32 Text recipe).
+under `/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-fp8lut4-fp8-selective-cap/`.
+Conversion and binding details: `docs/maintainer/qwen3.8-27b-artifact.md` (FP8LUT4 Text recipe).
 
 ## Build
 

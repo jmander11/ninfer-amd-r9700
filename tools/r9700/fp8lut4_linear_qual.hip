@@ -1,8 +1,8 @@
-// Qualification of the CB4G32 x per-token E4M3 Linear (cb4_linear) against an FP64 oracle that
+// Qualification of the FP8LUT4 x per-token E4M3 Linear (fp8lut4_linear) against an FP64 oracle that
 // decodes the stored codes through an independently rounded codebook: every group code's table,
 // small-T and prefill widths on the real Qwen3.8 projection shapes, the residual epilogue and the
 // poisoned-activation contract. Optional timing (--time) on the same shapes.
-#include "ops/r9700/linear/cb4_linear.h"
+#include "ops/r9700/linear/fp8lut4_linear.h"
 #include "ops/r9700/linear/fp8_activation.h"
 #include "../../tests/ops/fp8_int4_kv_oracle.h"
 
@@ -79,7 +79,7 @@ std::vector<double> reference_codebook() {
 }
 
 void check_table(const std::vector<double>& book) {
-    const auto& table = linear::cb4_magnitude_table();
+    const auto& table = linear::fp8lut4_magnitude_table();
     for (int code = 0; code < 256; ++code)
         for (int j = 0; j < 8; ++j)
             require(oracle::decode_e4m3fn(table[code][j]) == book[code * 8 + j],
@@ -108,10 +108,10 @@ struct Weight {
         device_groups.upload(groups);
         device_scales.upload(scales);
     }
-    linear::Cb4Weight view() const {
+    linear::Fp8Lut4Weight view() const {
         return {device_codes.data, device_groups.data, device_scales.data, rows, columns};
     }
-    // r9700-cb4g32-n16k64-v1: tile (r / 16) * (K / 64) + k / 64, slot 16 * ((k % 64) / 32) + r % 16.
+    // r9700-fp8lut4-n16k64-v1: tile (r / 16) * (K / 64) + k / 64, slot 16 * ((k % 64) / 32) + r % 16.
     double value(const std::vector<double>& book, std::uint32_t r, std::uint32_t k) const {
         const std::size_t tile = static_cast<std::size_t>(r / 16U) * (columns / 64U) + k / 64U;
         const std::uint32_t slot = 16U * ((k % 64U) / 32U) + r % 16U;
@@ -151,8 +151,8 @@ void run_case(const std::vector<double>& book, std::uint32_t rows, std::uint32_t
     for (auto& b : base) b = hip_bfloat16(static_cast<float>(rng.normal()));
     Device<hip_bfloat16> output(base.size());
     output.upload(base);
-    check(linear::cb4_linear(weight.view(), activation.workspace,
-                             {.leading = output.data, .accumulate = accumulate}, stream), "cb4");
+    check(linear::fp8lut4_linear(weight.view(), activation.workspace,
+                             {.leading = output.data, .accumulate = accumulate}, stream), "fp8lut4");
     check(hipStreamSynchronize(stream), "sync");
     const auto got = output.download();
     if (poison) {
@@ -220,7 +220,7 @@ void run_pair(const std::vector<double>& book, std::uint32_t rows0, std::uint32_
     Device<hip_bfloat16> leading(static_cast<std::size_t>(tokens) * split0),
         trailing(static_cast<std::size_t>(tokens) * (rows0 - split0)),
         other(static_cast<std::size_t>(tokens) * rows1);
-    check(linear::cb4_linear_pair(first.view(), {leading.data, trailing.data, split0, false},
+    check(linear::fp8lut4_linear_pair(first.view(), {leading.data, trailing.data, split0, false},
                                   second.view(), {.leading = other.data}, activation.workspace,
                                   stream), "pair");
     check(hipStreamSynchronize(stream), "sync");
@@ -271,7 +271,7 @@ void run_silu(const std::vector<double>& book, std::uint32_t rows, std::uint32_t
     check(linear::fp8_quantize_activation({device_input.data, activation.workspace}, stream), "q");
     const std::uint32_t features = rows / 2U;
     Device<hip_bfloat16> output(static_cast<std::size_t>(tokens) * features);
-    check(linear::cb4_linear(weight.view(), activation.workspace,
+    check(linear::fp8lut4_linear(weight.view(), activation.workspace,
                              {.leading = output.data, .silu_pair = true}, stream), "silu");
     check(hipStreamSynchronize(stream), "sync");
     std::vector<std::uint8_t> codes(static_cast<std::size_t>(tokens) * columns);
@@ -320,8 +320,8 @@ void time_shapes(hipStream_t stream, Rng& rng) {
             check(linear::fp8_quantize_activation({input.data, activation.workspace}, stream), "q");
             Device<hip_bfloat16> output(static_cast<std::size_t>(tokens) * shape.rows);
             const auto launch = [&] {
-                check(linear::cb4_linear(weight.view(), activation.workspace,
-                                         {.leading = output.data}, stream), "cb4");
+                check(linear::fp8lut4_linear(weight.view(), activation.workspace,
+                                         {.leading = output.data}, stream), "fp8lut4");
             };
             for (int i = 0; i < 10; ++i) launch();
             hipEvent_t begin, end;
@@ -382,7 +382,7 @@ int main(int argc, char** argv) {
         run_case(book, 7168, 5120, 1, false, true, rng, stream);
         run_case(book, 7168, 5120, 6, false, true, rng, stream);
         run_case(book, 7168, 5120, 300, false, true, rng, stream);
-        std::cout << "cb4 linear qualification: PASS\n";
+        std::cout << "fp8lut4 linear qualification: PASS\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "FAIL: " << error.what() << "\n";

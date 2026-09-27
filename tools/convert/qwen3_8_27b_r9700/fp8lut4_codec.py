@@ -1,11 +1,11 @@
-"""Source quantizer for the CB4G32 codebook weight format.
+"""Source quantizer for the FP8LUT4 codebook weight format.
 
 Each row gets one FP32 multiplier R = max|w| / (7.5 * 16), so the largest group's natural
 codebook exponent is 4. Every 32-wide group then chooses the group code (exponent E and mantissa
 step m) among E in {e0 - 1, e0, e0 + 1} (e0 = floor(log2(max|group| / (7.5 R)))) and all eight m,
 minimizing the decoded squared error; each element takes the nearest codebook magnitude and its
 own sign (zero magnitudes keep a clear sign bit). Ties keep the earliest candidate in (E, m) order and the smaller magnitude. The selected
-words are exactly those `tools.artifact.decode_cb4` reconstructs.
+words are exactly those `tools.artifact.decode_fp8lut4` reconstructs.
 """
 
 from __future__ import annotations
@@ -14,14 +14,14 @@ from typing import Iterator
 
 import torch
 
-from tools.artifact.layouts import cb4_geometry, cb4_magnitude_table, cb4_tile_codes, cb4_tile_groups
+from tools.artifact.layouts import fp8lut4_geometry, fp8lut4_magnitude_table, fp8lut4_tile_codes, fp8lut4_tile_groups
 
 GROUP = 32
 _E_MIN, _E_MAX = -26, 5
 
 
 def _magnitudes(device: torch.device) -> torch.Tensor:
-    words = torch.tensor(cb4_magnitude_table(), dtype=torch.uint8)
+    words = torch.tensor(fp8lut4_magnitude_table(), dtype=torch.uint8)
     return words.view(torch.float8_e4m3fn).to(torch.float32).to(device)  # [256, 8]
 
 
@@ -30,9 +30,9 @@ def quantize_rows(weight: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, tor
     row multipliers FP32 [r])."""
 
     if weight.dtype != torch.float32 or weight.dim() != 2 or weight.shape[1] % GROUP:
-        raise ValueError("CB4 quantization requires FP32 [rows, K] with K % 32 == 0")
+        raise ValueError("FP8LUT4 quantization requires FP32 [rows, K] with K % 32 == 0")
     if not bool(torch.isfinite(weight).all()):
-        raise ValueError("CB4 quantization source contains NaN or infinity")
+        raise ValueError("FP8LUT4 quantization source contains NaN or infinity")
     rows, columns = weight.shape
     table = _magnitudes(weight.device)
     rowmax = weight.abs().amax(1)
@@ -67,7 +67,7 @@ def quantize_rows(weight: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, tor
 
 
 def interleave_gate_up(weight: torch.Tensor) -> torch.Tensor:
-    """[gate; up] rows [2F, K] -> the CB4 MLP storage order: stored row 16 b + i is gate feature
+    """[gate; up] rows [2F, K] -> the FP8LUT4 MLP storage order: stored row 16 b + i is gate feature
     8 b + i (i < 8) or up feature 8 b + i - 8, so one 16-row tile holds eight gate features and the
     matching eight up features (the SiLU-pair epilogue's operand pairs)."""
 
@@ -79,14 +79,14 @@ def interleave_gate_up(weight: torch.Tensor) -> torch.Tensor:
 
 def encode_chunks(weight: torch.Tensor, *, device: str | torch.device = "cpu",
                   rows_per_chunk: int = 2048) -> Iterator[bytes]:
-    """Yield one r9700-cb4g32-n16k64-v1 payload for represented BF16 [N, K] in plane order."""
+    """Yield one r9700-fp8lut4-n16k64-v1 payload for represented BF16 [N, K] in plane order."""
 
     if weight.dim() != 2 or weight.dtype != torch.bfloat16:
-        raise TypeError("CB4 encoding requires a represented BF16 rank-2 matrix")
+        raise TypeError("FP8LUT4 encoding requires a represented BF16 rank-2 matrix")
     rows, columns = weight.shape
-    geometry = cb4_geometry((rows, columns))
+    geometry = fp8lut4_geometry((rows, columns))
     if rows_per_chunk % 16:
-        raise ValueError("CB4 encoding chunks must hold whole 16-row tiles")
+        raise ValueError("FP8LUT4 encoding chunks must hold whole 16-row tiles")
     codes_out, groups_out, scales_out = [], [], []
     for begin in range(0, rows, rows_per_chunk):
         block = weight[begin:begin + rows_per_chunk].to(device=device, dtype=torch.float32)
@@ -94,8 +94,8 @@ def encode_chunks(weight: torch.Tensor, *, device: str | torch.device = "cpu",
             block = torch.nn.functional.pad(block, (0, geometry.k_pad - columns))
         codes, groups, scales = quantize_rows(block)
         codes = codes.cpu()
-        codes_out.append(cb4_tile_codes(codes[:, 0::2] | (codes[:, 1::2] << 4)).numpy().tobytes())
-        groups_out.append(cb4_tile_groups(groups.cpu()).numpy().tobytes())
+        codes_out.append(fp8lut4_tile_codes(codes[:, 0::2] | (codes[:, 1::2] << 4)).numpy().tobytes())
+        groups_out.append(fp8lut4_tile_groups(groups.cpu()).numpy().tobytes())
         scales_out.append(scales.cpu().numpy().astype("<f4").tobytes())
     yield from codes_out
     yield bytes(geometry.group_offset - geometry.code_bytes)

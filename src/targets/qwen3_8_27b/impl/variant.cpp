@@ -17,7 +17,7 @@
 #include "ninfer/types.h"
 #include "ops/r9700/gdn/gdn_ops.h"
 #include "ops/r9700/kv/r9700_attention_profile.h"
-#include "ops/r9700/linear/cb4_linear.h"
+#include "ops/r9700/linear/fp8lut4_linear.h"
 #include "ops/r9700/linear/fp8_small_t_linear.h"
 #include "ops/r9700/linear/linear_execution.h"
 #include "ops/r9700/linear/r9700_linear.h"
@@ -201,10 +201,10 @@ void project_gdn_inputs(const Tensor& hidden, const Variant::GdnProjectionWeight
     const std::int32_t tokens = hidden.ne[1] * hidden.ne[2];
     Tensor hidden_flat = hidden.view({hidden.ne[0], tokens});
     if (execution != nullptr) {
-        const Variant::ExecutionState::Cb4Target targets[] = {
+        const Variant::ExecutionState::Fp8Lut4Target targets[] = {
             {weights.input_projection.query_key, query_key, nullptr, false},
             {weights.input_projection.value_z, value_z, nullptr, false}};
-        if (execution->cb4_projections(hidden_flat, targets, stream)) return;
+        if (execution->fp8lut4_projections(hidden_flat, targets, stream)) return;
     }
     if (execution != nullptr && execution->gdn_q4_pair_t1(
             hidden_flat, weights.input_projection.query_key,
@@ -440,10 +440,10 @@ void Variant::ExecutionState::linear(const Tensor& input, const Weight& weight, 
     ops::linear(input, weight, output, DeviceSpan{impl_->activation.data, required}, stream);
 }
 
-bool Variant::ExecutionState::cb4_targets_supported(
-    std::uint32_t tokens, std::uint32_t columns, std::span<const Cb4Target> targets) const noexcept {
+bool Variant::ExecutionState::fp8lut4_targets_supported(
+    std::uint32_t tokens, std::uint32_t columns, std::span<const Fp8Lut4Target> targets) const noexcept {
     if (impl_ == nullptr || targets.empty() || tokens == 0U) return false;
-    for (const Cb4Target& target : targets) {
+    for (const Fp8Lut4Target& target : targets) {
         const Weight& weight = target.weight;
         const std::int32_t leading = target.leading.ne[0];
         const std::int32_t trailing = target.trailing == nullptr ? 0 : target.trailing->ne[0];
@@ -453,7 +453,7 @@ bool Variant::ExecutionState::cb4_targets_supported(
                    static_cast<std::int64_t>(output.ne[1]) * output.ne[2] * output.ne[3] ==
                        static_cast<std::int64_t>(tokens);
         };
-        if (weight.qtype != QType::CB4G32_F32S || weight.layout != QuantLayout::Cb4N16K64 ||
+        if (weight.qtype != QType::FP8LUT4 || weight.layout != QuantLayout::Fp8Lut4N16K64 ||
             weight.padded_shape[1] != static_cast<std::int32_t>(columns) ||
             weight.k != static_cast<std::int32_t>(columns) || !valid_output(target.leading) ||
             (target.trailing != nullptr &&
@@ -461,7 +461,7 @@ bool Variant::ExecutionState::cb4_targets_supported(
             (target.silu_pair
                  ? (target.trailing != nullptr || target.accumulate || 2 * leading != weight.n)
                  : leading + trailing != weight.n) ||
-            !ops::r9700::linear::cb4_linear_supported(tokens, static_cast<std::uint32_t>(weight.n),
+            !ops::r9700::linear::fp8lut4_linear_supported(tokens, static_cast<std::uint32_t>(weight.n),
                                                       columns)) {
             return false;
         }
@@ -469,12 +469,12 @@ bool Variant::ExecutionState::cb4_targets_supported(
     return true;
 }
 
-ops::r9700::linear::Fp8ActivationWorkspace Variant::ExecutionState::cb4_image(
+ops::r9700::linear::Fp8ActivationWorkspace Variant::ExecutionState::fp8lut4_image(
     std::uint32_t tokens, std::uint32_t columns) const {
     namespace linear = ops::r9700::linear;
     const std::size_t bytes = linear::fp8_activation_workspace_capacity_bytes(tokens, columns);
     if (bytes == 0U || bytes > impl_->activation.bytes) {
-        throw std::invalid_argument("R9700 CB4 activation image exceeds the serialized region");
+        throw std::invalid_argument("R9700 FP8LUT4 activation image exceeds the serialized region");
     }
     linear::Fp8ActivationWorkspace image{};
     HIP_CHECK(linear::fp8_bind_activation_workspace(impl_->activation.data, bytes, tokens, columns,
@@ -482,19 +482,19 @@ ops::r9700::linear::Fp8ActivationWorkspace Variant::ExecutionState::cb4_image(
     return image;
 }
 
-void Variant::ExecutionState::cb4_project(const ops::r9700::linear::Fp8ActivationWorkspace& image,
-                                          std::span<const Cb4Target> targets,
+void Variant::ExecutionState::fp8lut4_project(const ops::r9700::linear::Fp8ActivationWorkspace& image,
+                                          std::span<const Fp8Lut4Target> targets,
                                           hipStream_t stream) const {
     namespace linear = ops::r9700::linear;
-    const auto view = [&](const Cb4Target& target) {
+    const auto view = [&](const Fp8Lut4Target& target) {
         const Weight& weight = target.weight;
-        return linear::Cb4Weight{static_cast<const std::uint8_t*>(weight.qdata),
+        return linear::Fp8Lut4Weight{static_cast<const std::uint8_t*>(weight.qdata),
                                  static_cast<const std::uint8_t*>(weight.qhigh),
                                  static_cast<const float*>(weight.scales),
                                  static_cast<std::uint32_t>(weight.n), image.padded_columns};
     };
-    const auto output = [](const Cb4Target& target) {
-        linear::Cb4Output out{.leading = static_cast<hip_bfloat16*>(target.leading.data),
+    const auto output = [](const Fp8Lut4Target& target) {
+        linear::Fp8Lut4Output out{.leading = static_cast<hip_bfloat16*>(target.leading.data),
                               .accumulate = target.accumulate, .silu_pair = target.silu_pair};
         if (target.trailing != nullptr) {
             out.trailing = static_cast<hip_bfloat16*>(target.trailing->data);
@@ -505,14 +505,14 @@ void Variant::ExecutionState::cb4_project(const ops::r9700::linear::Fp8Activatio
     std::size_t index = 0;
     // Consecutive targets of equal epilogue kind share one launch.
     for (; index + 1U < targets.size(); index += 2U) {
-        const Cb4Target& first = targets[index];
-        const Cb4Target& second = targets[index + 1U];
+        const Fp8Lut4Target& first = targets[index];
+        const Fp8Lut4Target& second = targets[index + 1U];
         if (first.accumulate != second.accumulate || first.silu_pair || second.silu_pair) break;
-        HIP_CHECK(linear::cb4_linear_pair(view(first), output(first), view(second),
+        HIP_CHECK(linear::fp8lut4_linear_pair(view(first), output(first), view(second),
                                           output(second), image, stream));
     }
     for (; index < targets.size(); ++index)
-        HIP_CHECK(linear::cb4_linear(view(targets[index]), image, output(targets[index]), stream));
+        HIP_CHECK(linear::fp8lut4_linear(view(targets[index]), image, output(targets[index]), stream));
 }
 
 namespace {
@@ -524,63 +524,63 @@ std::uint32_t tensor_columns(const Tensor& tensor) {
 
 } // namespace
 
-bool Variant::ExecutionState::cb4_projections(const Tensor& input,
-                                              std::span<const Cb4Target> targets,
+bool Variant::ExecutionState::fp8lut4_projections(const Tensor& input,
+                                              std::span<const Fp8Lut4Target> targets,
                                               hipStream_t stream) {
     if (input.dtype != DType::BF16 || input.data == nullptr || !input.is_contiguous() ||
         input.ne[0] <= 0 || input.ne[1] <= 0)
         return false;
     const std::uint32_t tokens = tensor_columns(input);
     const auto columns = static_cast<std::uint32_t>(input.ne[0]);
-    if (!cb4_targets_supported(tokens, columns, targets)) return false;
-    const auto image = cb4_image(tokens, columns);
+    if (!fp8lut4_targets_supported(tokens, columns, targets)) return false;
+    const auto image = fp8lut4_image(tokens, columns);
     HIP_CHECK(ops::r9700::linear::fp8_quantize_activation(
         {static_cast<const hip_bfloat16*>(input.data), image}, stream));
-    cb4_project(image, targets, stream);
+    fp8lut4_project(image, targets, stream);
     return true;
 }
 
-bool Variant::ExecutionState::cb4_normalized_projections(const Tensor& residual,
+bool Variant::ExecutionState::fp8lut4_normalized_projections(const Tensor& residual,
                                                          const Tensor& norm, float eps,
-                                                         std::span<const Cb4Target> targets,
+                                                         std::span<const Fp8Lut4Target> targets,
                                                          hipStream_t stream) {
     if (residual.dtype != DType::BF16 || residual.ne[0] != TextConfig::hidden ||
         !residual.is_contiguous() || norm.dtype != DType::BF16 || norm.ne[0] != TextConfig::hidden)
         return false;
     const std::uint32_t tokens = tensor_columns(residual);
-    if (!cb4_targets_supported(tokens, TextConfig::hidden, targets)) return false;
-    const auto image = cb4_image(tokens, TextConfig::hidden);
+    if (!fp8lut4_targets_supported(tokens, TextConfig::hidden, targets)) return false;
+    const auto image = fp8lut4_image(tokens, TextConfig::hidden);
     HIP_CHECK(ops::r9700::linear::fp8_quantize_normalized_activation(
         {.input = static_cast<const hip_bfloat16*>(residual.data),
          .weight = static_cast<const hip_bfloat16*>(norm.data), .eps = eps, .unit_offset = true,
          .workspace = image},
         stream));
-    cb4_project(image, targets, stream);
+    fp8lut4_project(image, targets, stream);
     return true;
 }
 
-bool Variant::ExecutionState::cb4_gated_projections(const Tensor& gate,
+bool Variant::ExecutionState::fp8lut4_gated_projections(const Tensor& gate,
                                                     const Tensor& attention_fp32,
-                                                    std::span<const Cb4Target> targets,
+                                                    std::span<const Fp8Lut4Target> targets,
                                                     hipStream_t stream) {
     if (gate.dtype != DType::BF16 || attention_fp32.dtype != DType::FP32 ||
         !gate.is_contiguous() || !attention_fp32.is_contiguous() ||
         gate.numel() != attention_fp32.numel() || gate.numel() % TextConfig::query_size != 0)
         return false;
     const auto tokens = static_cast<std::uint32_t>(gate.numel() / TextConfig::query_size);
-    if (!cb4_targets_supported(tokens, TextConfig::query_size, targets)) return false;
-    const auto image = cb4_image(tokens, TextConfig::query_size);
+    if (!fp8lut4_targets_supported(tokens, TextConfig::query_size, targets)) return false;
+    const auto image = fp8lut4_image(tokens, TextConfig::query_size);
     HIP_CHECK(ops::r9700::linear::fp8_quantize_gated_activation(
         {static_cast<const hip_bfloat16*>(gate.data), static_cast<const float*>(attention_fp32.data),
          image},
         stream));
-    cb4_project(image, targets, stream);
+    fp8lut4_project(image, targets, stream);
     return true;
 }
 
-bool Variant::ExecutionState::cb4_gated_rmsnorm_projections(
+bool Variant::ExecutionState::fp8lut4_gated_rmsnorm_projections(
     const Tensor& recurrent_output, const Tensor& norm, const Tensor& z, float eps,
-    std::span<const Cb4Target> targets, hipStream_t stream) {
+    std::span<const Fp8Lut4Target> targets, hipStream_t stream) {
     if (recurrent_output.dtype != DType::BF16 || z.dtype != DType::BF16 ||
         norm.dtype != DType::BF16 || norm.numel() != 128 || !recurrent_output.is_contiguous() ||
         !z.is_contiguous() || recurrent_output.numel() != z.numel() ||
@@ -588,14 +588,14 @@ bool Variant::ExecutionState::cb4_gated_rmsnorm_projections(
         return false;
     const auto tokens =
         static_cast<std::uint32_t>(recurrent_output.numel() / TextConfig::value_dim);
-    if (!cb4_targets_supported(tokens, TextConfig::value_dim, targets)) return false;
-    const auto image = cb4_image(tokens, TextConfig::value_dim);
+    if (!fp8lut4_targets_supported(tokens, TextConfig::value_dim, targets)) return false;
+    const auto image = fp8lut4_image(tokens, TextConfig::value_dim);
     HIP_CHECK(ops::r9700::linear::fp8_quantize_gated_rmsnorm_activation(
         {.input = static_cast<const hip_bfloat16*>(recurrent_output.data),
          .gate = static_cast<const hip_bfloat16*>(z.data),
          .weight = static_cast<const hip_bfloat16*>(norm.data), .eps = eps, .workspace = image},
         stream));
-    cb4_project(image, targets, stream);
+    fp8lut4_project(image, targets, stream);
     return true;
 }
 
@@ -924,7 +924,7 @@ bool Variant::ExecutionState::gdn_q4_front(
 
 namespace {
 
-ops::r9700::linear::Cb4Weight cb4_view(const Weight& weight) {
+ops::r9700::linear::Fp8Lut4Weight fp8lut4_view(const Weight& weight) {
     return {static_cast<const std::uint8_t*>(weight.qdata),
             static_cast<const std::uint8_t*>(weight.qhigh),
             static_cast<const float*>(weight.scales), static_cast<std::uint32_t>(weight.n),
@@ -944,10 +944,10 @@ bool Variant::ExecutionState::gdn_q4_normalized_front_t1(
     ops::r9700::linear::Fp8ActivationWorkspace image{};
     if (residual.ne[1] == 1 && gdn_prefill_rows(query_key_output, kRows0, 1) &&
         gdn_prefill_rows(value_z_output, kRows1, 1) &&
-        gdn_cb4_front(residual, norm, eps, weights, g, beta, stream, &image)) {
-        HIP_CHECK(ops::r9700::linear::cb4_linear_pair(
-            cb4_view(query_key), {.leading = static_cast<hip_bfloat16*>(query_key_output.data)},
-            cb4_view(value_z), {.leading = static_cast<hip_bfloat16*>(value_z_output.data)},
+        gdn_fp8lut4_front(residual, norm, eps, weights, g, beta, stream, &image)) {
+        HIP_CHECK(ops::r9700::linear::fp8lut4_linear_pair(
+            fp8lut4_view(query_key), {.leading = static_cast<hip_bfloat16*>(query_key_output.data)},
+            fp8lut4_view(value_z), {.leading = static_cast<hip_bfloat16*>(value_z_output.data)},
             image, stream));
         return true;
     }
@@ -982,7 +982,7 @@ bool Variant::ExecutionState::gdn_q4_normalized_front_t1(
     return true;
 }
 
-bool Variant::ExecutionState::gdn_cb4_front(const Tensor& residual, const Tensor& norm,
+bool Variant::ExecutionState::gdn_fp8lut4_front(const Tensor& residual, const Tensor& norm,
                                             float eps, const GdnProjectionWeights& weights,
                                             Tensor& g, Tensor& beta, hipStream_t stream,
                                             ops::r9700::linear::Fp8ActivationWorkspace* image) {
@@ -1000,8 +1000,8 @@ bool Variant::ExecutionState::gdn_cb4_front(const Tensor& residual, const Tensor
     };
     const Weight& query_key = weights.input_projection.query_key;
     const Weight& value_z = weights.input_projection.value_z;
-    if (impl_ == nullptr || tokens <= 0 || query_key.qtype != QType::CB4G32_F32S ||
-        value_z.qtype != QType::CB4G32_F32S ||
+    if (impl_ == nullptr || tokens <= 0 || query_key.qtype != QType::FP8LUT4 ||
+        value_z.qtype != QType::FP8LUT4 ||
         !ops::r9700::gdn::bf16_gdn_normalized_front_supported(static_cast<std::uint32_t>(tokens)) ||
         !gdn_prefill_rows(residual, TextConfig::hidden, tokens) ||
         !gdn_prefill_rows(norm, TextConfig::hidden, 1) ||
@@ -1010,7 +1010,7 @@ bool Variant::ExecutionState::gdn_cb4_front(const Tensor& residual, const Tensor
         !fp32_rows(g, tokens) || !fp32_rows(beta, tokens)) {
         return false;
     }
-    *image = cb4_image(static_cast<std::uint32_t>(tokens), TextConfig::hidden);
+    *image = fp8lut4_image(static_cast<std::uint32_t>(tokens), TextConfig::hidden);
     HIP_CHECK(ops::r9700::gdn::fp8_gdn_normalized_front(
         static_cast<const hip_bfloat16*>(residual.data),
         static_cast<const hip_bfloat16*>(norm.data), eps, true,
@@ -1038,14 +1038,14 @@ bool Variant::ExecutionState::gdn_q4_normalized_front_record(
         return static_cast<hip_bfloat16*>(tensor.data);
     };
     ops::r9700::linear::Fp8ActivationWorkspace image{};
-    if (gdn_cb4_front(residual, norm, eps, weights, g, beta, stream, &image)) {
+    if (gdn_fp8lut4_front(residual, norm, eps, weights, g, beta, stream, &image)) {
         const auto width = static_cast<std::uint32_t>(record.query.ne[1]);
         const auto batch = static_cast<std::uint32_t>(record.query.ne[2]);
         const auto state_slots = static_cast<std::uint32_t>(record.conv_states.ne[2]);
-        const auto query_key = cb4_view(weights.input_projection.query_key);
-        const auto value_z = cb4_view(weights.input_projection.value_z);
+        const auto query_key = fp8lut4_view(weights.input_projection.query_key);
+        const auto value_z = fp8lut4_view(weights.input_projection.value_z);
         if (ops::r9700::gdn::gdn_pair_conv_record_supported(width, batch)) {
-            HIP_CHECK(ops::r9700::gdn::gdn_cb4_pair_conv_record_bf16(
+            HIP_CHECK(ops::r9700::gdn::gdn_fp8lut4_pair_conv_record_bf16(
                 image, query_key, value_z,
                 static_cast<const hip_bfloat16*>(record.conv_weight.data),
                 static_cast<const hip_bfloat16*>(record.conv_states.data),
@@ -1058,7 +1058,7 @@ bool Variant::ExecutionState::gdn_q4_normalized_front_record(
         auto scope = workspace.scope();
         Tensor query_key_output = workspace.alloc(DType::BF16, {kRows0, tokens});
         Tensor value_z_output = workspace.alloc(DType::BF16, {kRows1, tokens});
-        HIP_CHECK(ops::r9700::linear::cb4_linear_pair(
+        HIP_CHECK(ops::r9700::linear::fp8lut4_linear_pair(
             query_key, {.leading = static_cast<hip_bfloat16*>(query_key_output.data)}, value_z,
             {.leading = static_cast<hip_bfloat16*>(value_z_output.data)}, image, stream));
         HIP_CHECK(ops::r9700::gdn::projection_conv_record_bf16(
@@ -1879,9 +1879,9 @@ void Variant::attention_projection(const Tensor& hidden,
         return;
     }
     if (execution != nullptr) {
-        const ExecutionState::Cb4Target targets[] = {{weights.query_key, query, &key, false},
+        const ExecutionState::Fp8Lut4Target targets[] = {{weights.query_key, query, &key, false},
                                                      {weights.gate_value, gate, &value, false}};
-        if (execution->cb4_projections(hidden, targets, stream)) return;
+        if (execution->fp8lut4_projections(hidden, targets, stream)) return;
     }
     if (execution != nullptr && weights.query_key.qtype == QType::F8E4M3_ROW_F32S &&
         weights.gate_value.qtype == QType::F8E4M3_ROW_F32S) {
@@ -1929,9 +1929,9 @@ bool Variant::attention_normalized_projection(
     const FullAttentionProjectionWeights& weights, Tensor& query, Tensor& gate, Tensor& key,
     Tensor& value, hipStream_t stream, ExecutionState* execution, std::int32_t text_layer) {
     if (execution != nullptr) {
-        const ExecutionState::Cb4Target targets[] = {{weights.query_key, query, &key, false},
+        const ExecutionState::Fp8Lut4Target targets[] = {{weights.query_key, query, &key, false},
                                                      {weights.gate_value, gate, &value, false}};
-        if (execution->cb4_normalized_projections(residual, norm, eps, targets, stream))
+        if (execution->fp8lut4_normalized_projections(residual, norm, eps, targets, stream))
             return true;
     }
     return execution != nullptr &&
@@ -1948,8 +1948,8 @@ bool Variant::attention_gated_output_projection(const Tensor& gate, const Tensor
                                                 hipStream_t stream, ExecutionState* execution,
                                                 std::int32_t text_layer) {
     if (execution != nullptr) {
-        const ExecutionState::Cb4Target targets[] = {{weight, residual, nullptr, true}};
-        if (execution->cb4_gated_projections(gate, attention_fp32, targets, stream)) return true;
+        const ExecutionState::Fp8Lut4Target targets[] = {{weight, residual, nullptr, true}};
+        if (execution->fp8lut4_gated_projections(gate, attention_fp32, targets, stream)) return true;
     }
     return execution != nullptr &&
            (execution->attention_fp8_gated_output(gate, attention_fp32, weight, residual,
@@ -2101,8 +2101,8 @@ void Variant::attention_output_projection(const Tensor& attention, const Weight&
         return;
     }
     if (execution != nullptr) {
-        const ExecutionState::Cb4Target targets[] = {{weight, residual, nullptr, true}};
-        if (execution->cb4_projections(attention, targets, stream)) return;
+        const ExecutionState::Fp8Lut4Target targets[] = {{weight, residual, nullptr, true}};
+        if (execution->fp8lut4_projections(attention, targets, stream)) return;
     }
     auto scope = workspace.scope();
     Tensor delta = workspace.alloc(DType::BF16, {TextConfig::hidden, attention.ne[1]});
@@ -2204,13 +2204,13 @@ void Variant::gdn_input_projection_prefill_p2048(
     Tensor projected_value = workspace.alloc(DType::BF16, {TextConfig::value_dim, kTokens});
     bool projected = false;
     if (execution != nullptr &&
-        weights.input_projection.query_key.qtype == QType::CB4G32_F32S) {
+        weights.input_projection.query_key.qtype == QType::FP8LUT4) {
         ops::rmsnorm(residual, norm_weight, eps, true, hidden, stream);
         Tensor output_gate_flat = output_gate.view({TextConfig::value_dim, kTokens});
-        const ExecutionState::Cb4Target targets[] = {
+        const ExecutionState::Fp8Lut4Target targets[] = {
             {weights.input_projection.query_key, query_key, nullptr, false},
             {weights.input_projection.value_z, projected_value, &output_gate_flat, false}};
-        projected = execution->cb4_projections(hidden, targets, stream);
+        projected = execution->fp8lut4_projections(hidden, targets, stream);
     }
     if (!projected &&
         (execution == nullptr ||
@@ -2421,8 +2421,8 @@ void Variant::gdn_output_projection(const Tensor& recurrent_output, const Tensor
     // The output gate and the activation workspace may still belong to the side projection.
     if (execution != nullptr) execution->join_gdn_gate(stream);
     if (!materialize_normalized && execution != nullptr) {
-        const ExecutionState::Cb4Target targets[] = {{weight, residual, nullptr, true}};
-        if (execution->cb4_gated_rmsnorm_projections(recurrent_output, norm, gate, eps, targets,
+        const ExecutionState::Fp8Lut4Target targets[] = {{weight, residual, nullptr, true}};
+        if (execution->fp8lut4_gated_rmsnorm_projections(recurrent_output, norm, gate, eps, targets,
                                                      stream))
             return;
     }
@@ -2434,8 +2434,8 @@ void Variant::gdn_output_projection(const Tensor& recurrent_output, const Tensor
     ops::gated_rmsnorm(recurrent_output, norm, gate, eps, normalized, stream);
     const Tensor hidden = normalized.view({TextConfig::value_dim, normalized.ne[2]});
     if (execution != nullptr) {
-        const ExecutionState::Cb4Target targets[] = {{weight, residual, nullptr, true}};
-        if (execution->cb4_projections(hidden, targets, stream)) return;
+        const ExecutionState::Fp8Lut4Target targets[] = {{weight, residual, nullptr, true}};
+        if (execution->fp8lut4_projections(hidden, targets, stream)) return;
     }
     if (execution != nullptr &&
         (execution->projected_residual_t1(hidden, weight, residual, phase, ordinary_decode,
@@ -2468,18 +2468,18 @@ void post_mixer_body(const Tensor& hidden, const Variant::PostMixerWeights& weig
                     std::int32_t text_layer,
                     const Tensor* norm, float eps, bool ordinary_decode) {
     auto outer = workspace.scope();
-    if (execution != nullptr && weights.gate_up.qtype == QType::CB4G32_F32S &&
-        weights.down.qtype == QType::CB4G32_F32S) {
+    if (execution != nullptr && weights.gate_up.qtype == QType::FP8LUT4 &&
+        weights.down.qtype == QType::FP8LUT4) {
         // gate/up rows are interleaved: the projection publishes the SiLU-gated activation.
         Tensor activation = workspace.alloc(DType::BF16, {TextConfig::intermediate, hidden.ne[1]});
-        const Variant::ExecutionState::Cb4Target up[] = {
+        const Variant::ExecutionState::Fp8Lut4Target up[] = {
             {weights.gate_up, activation, nullptr, false, true}};
         const bool projected =
-            norm != nullptr ? execution->cb4_normalized_projections(residual, *norm, eps, up, stream)
-                            : execution->cb4_projections(hidden, up, stream);
-        const Variant::ExecutionState::Cb4Target down[] = {{weights.down, residual, nullptr, true}};
-        if (projected && execution->cb4_projections(activation, down, stream)) return;
-        throw std::logic_error("R9700 CB4 MLP projection is unsupported at this width");
+            norm != nullptr ? execution->fp8lut4_normalized_projections(residual, *norm, eps, up, stream)
+                            : execution->fp8lut4_projections(hidden, up, stream);
+        const Variant::ExecutionState::Fp8Lut4Target down[] = {{weights.down, residual, nullptr, true}};
+        if (projected && execution->fp8lut4_projections(activation, down, stream)) return;
+        throw std::logic_error("R9700 FP8LUT4 MLP projection is unsupported at this width");
     }
     const auto project_gate_up = [&](Tensor& gate_up) {
         if (norm != nullptr) {

@@ -38,7 +38,7 @@ evidence.
 `F8E4M3_ROW_F32S`: one OCP E4M3FN code per element and one finite, nonnegative FP32 multiplier per
 row; the logical value is `decode_e4m3fn(code) * row_scale`.
 
-## Grouped codebook: `CB4G32_F32S`
+## Grouped codebook: `FP8LUT4`
 
 Four-bit sign-magnitude codes (bit 3 sign, bits 0..2 magnitude index `j`), one group code byte per
 32 columns and one finite, nonnegative FP32 multiplier `R` per row. Group code `b` selects
@@ -49,11 +49,11 @@ group-normalized weights). The logical value is `+-magnitude(b, j) * R`. Every d
 is an exact E4M3 value, so the Linear folds each group's scale into the FP8 weight operand and
 applies only `R` and the per-token activation scale after the K sum.
 
-Source conversion (`tools/convert/qwen3_8_27b_r9700/cb4_codec.py`) sets `R = max|row| / 120` and,
+Source conversion (`tools/convert/qwen3_8_27b_r9700/fp8lut4_codec.py`) sets `R = max|row| / 120` and,
 for every group, chooses `(E, m)` among `E` in `{e0 - 1, e0, e0 + 1}` (e0 from the group maximum)
 and all eight `m` by minimum decoded squared error, each element taking its nearest magnitude. On
 the Qwen3.8 BF16 weights this has 0.82x the relative L2 error of Q4G64 absmax at the same 4.25
-bits per weight. CB4 Linears consume per-token E4M3 activation images (codes, FP32 token scales,
+bits per weight. FP8LUT4 Linears consume per-token E4M3 activation images (codes, FP32 token scales,
 one status word per token; a flagged token's outputs are the canonical BF16 NaN).
 
 The growing attention cache is not a persistent tensor numeric format. It is runtime state with

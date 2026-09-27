@@ -1,4 +1,4 @@
-"""CPU checks for the CB4G32 codebook codec: exact E4M3 words, payload framing, reconstruction."""
+"""CPU checks for the FP8LUT4 codebook codec: exact E4M3 words, payload framing, reconstruction."""
 
 from __future__ import annotations
 
@@ -6,13 +6,13 @@ import unittest
 
 import torch
 
-from tools.artifact.layouts import cb4_geometry, cb4_magnitude_table, decode_cb4, encode_cb4_planes
+from tools.artifact.layouts import fp8lut4_geometry, fp8lut4_magnitude_table, decode_fp8lut4, encode_fp8lut4_planes
 from tools.artifact.numeric import round_e4m3fn_magnitude
 
-from .cb4_codec import encode_chunks, interleave_gate_up, quantize_rows
+from .fp8lut4_codec import encode_chunks, interleave_gate_up, quantize_rows
 
 
-class Cb4CodecTest(unittest.TestCase):
+class Fp8Lut4CodecTest(unittest.TestCase):
     def test_e4m3_rounding_matches_torch_ties_to_even_with_saturation(self) -> None:
         for numerator in range(0, 520):
             for exponent in range(-30, 10):
@@ -21,7 +21,7 @@ class Cb4CodecTest(unittest.TestCase):
                 self.assertEqual(round_e4m3fn_magnitude(numerator, exponent), expected)
 
     def test_group_codebook_is_monotone_and_spans_the_exponent_range(self) -> None:
-        table = torch.tensor(cb4_magnitude_table(), dtype=torch.uint8)
+        table = torch.tensor(fp8lut4_magnitude_table(), dtype=torch.uint8)
         values = table.view(torch.float8_e4m3fn).to(torch.float64)
         self.assertTrue(bool((values[:, 1:] >= values[:, :-1]).all()))
         self.assertEqual(values[26 * 8].tolist(), [0.0, 0.8125, 1.75, 2.5, 3.5, 4.5, 6.0, 7.5])
@@ -36,12 +36,12 @@ class Cb4CodecTest(unittest.TestCase):
         source[5] = 0.0                                          # zero row
         weight = source.to(torch.bfloat16)
         payload = b"".join(encode_chunks(weight, rows_per_chunk=16))
-        geometry = cb4_geometry((48, 200))
+        geometry = fp8lut4_geometry((48, 200))
         self.assertEqual(len(payload), geometry.payload_bytes)
-        decoded = decode_cb4(payload, (48, 200))
+        decoded = decode_fp8lut4(payload, (48, 200))
         padded = torch.nn.functional.pad(weight.float(), (0, geometry.k_pad - 200))
         codes, groups, scales = quantize_rows(padded)
-        table = torch.tensor(cb4_magnitude_table(), dtype=torch.uint8)
+        table = torch.tensor(fp8lut4_magnitude_table(), dtype=torch.uint8)
         magnitude = table.view(torch.float8_e4m3fn).to(torch.float64)[
             groups.long().repeat_interleave(32, 1), (codes & 7).long()]
         expected = torch.where((codes & 8) != 0, -magnitude, magnitude) * scales.double()[:, None]
@@ -57,8 +57,8 @@ class Cb4CodecTest(unittest.TestCase):
         codes[21, 2 * 64 + 32 + 6] = 5            # r=21: b=1, s=2, half=1, byte 3 low nibble
         codes[21, 2 * 64 + 32 + 7] = 9            # same byte, high nibble
         groups[21, 2 * 2 + 1] = 77                # k/32 = 5 -> s=2, half=1
-        payload = encode_cb4_planes(codes, groups, torch.ones(32))
-        geometry = cb4_geometry((32, 256))
+        payload = encode_fp8lut4_planes(codes, groups, torch.ones(32))
+        geometry = fp8lut4_geometry((32, 256))
         tile = 1 * (256 // 64) + 2
         slot = 16 * 1 + 21 % 16
         self.assertEqual(payload[tile * 512 + slot * 16 + 3], 5 | (9 << 4))

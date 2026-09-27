@@ -27,7 +27,7 @@ enum class NumericFormat {
     Q6G64_F16S,
     W8G32_F16S,
     F8E4M3_ROW_F32S,
-    CB4G32_F32S,
+    FP8LUT4,
 };
 
 enum class StorageLayout {
@@ -36,7 +36,7 @@ enum class StorageLayout {
     RowScaledK128V1,
     R9700Q4G64N16K16V1,
     R9700W8G32N16K16V1,
-    R9700Cb4G32N16K64V1,
+    R9700Fp8Lut4N16K64V1,
 };
 
 enum class ResourceEncoding {
@@ -85,7 +85,7 @@ struct RowScaledGeometry {
 RowScaledGeometry row_scaled_geometry(NumericFormat format,
                                       std::span<const std::uint64_t> shape);
 
-// r9700-cb4g32-n16k64-v1 (N % 16 == 0, K128 padding): N16 x K64 tiles, tile index
+// r9700-fp8lut4-n16k64-v1 (N % 16 == 0, K128 padding): N16 x K64 tiles, tile index
 // (r / 16) * (K / 64) + k / 64; slot 16 * ((k % 64) / 32) + r % 16 of a tile holds 16 packed code
 // bytes (32 four-bit codes, low nibble = even k) in the 512-byte code tile and one group code in
 // the 32-byte group tile; FP32 row multipliers [N] follow. Planes are 256-byte aligned.
@@ -101,7 +101,7 @@ struct CodebookGeometry {
     std::uint64_t encoded_bytes      = 0;
 };
 
-CodebookGeometry r9700_cb4g32_geometry(std::span<const std::uint64_t> shape);
+CodebookGeometry r9700_fp8lut4_geometry(std::span<const std::uint64_t> shape);
 
 struct TensorDescriptor {
     std::string name;

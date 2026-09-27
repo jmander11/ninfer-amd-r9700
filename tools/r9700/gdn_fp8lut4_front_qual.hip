@@ -1,12 +1,12 @@
-// Qualifies the CB4G32 GDN verification front on physical gfx1201:
+// Qualifies the FP8LUT4 GDN verification front on physical gfx1201:
 //   * fp8_gdn_normalized_front: g/beta bitwise equal to the A8G64 front (the same seam and control
 //     arithmetic), and the per-token E4M3 image bitwise equal to fp8_quantize_activation of that
 //     front's published seam, for T in {1, 2, 5, 6, 12, 16}, with a nonfinite token flagged;
-//   * gdn_cb4_pair_conv_record_bf16 bitwise equal to cb4_linear_pair followed by
-//     projection_conv_record_bf16 (chain, tree and partial columns; a poisoned token). The CB4
-//     projection itself is qualified against its FP64 oracle by ninfer_r9700_cb4_linear_qual.
+//   * gdn_fp8lut4_pair_conv_record_bf16 bitwise equal to fp8lut4_linear_pair followed by
+//     projection_conv_record_bf16 (chain, tree and partial columns; a poisoned token). The FP8LUT4
+//     projection itself is qualified against its FP64 oracle by ninfer_r9700_fp8lut4_linear_qual.
 #include "ops/r9700/gdn/gdn_ops.h"
-#include "ops/r9700/linear/cb4_linear.h"
+#include "ops/r9700/linear/fp8lut4_linear.h"
 #include "ops/r9700/linear/fp8_activation.h"
 #include "ops/r9700/linear/r9700_linear.h"
 
@@ -117,11 +117,11 @@ void run_front(unsigned T, bool poison, hipStream_t s) {
     std::cout << label << ": bitwise\n";
 }
 
-struct Cb4Matrix {
+struct Fp8Lut4Matrix {
     Device<std::uint8_t> codes, groups;
     Device<float> scales;
     unsigned rows;
-    Cb4Matrix(unsigned n, Rng& rng) : codes(std::size_t(n) * K / 2), groups(std::size_t(n) * K / 32), scales(n), rows(n) {
+    Fp8Lut4Matrix(unsigned n, Rng& rng) : codes(std::size_t(n) * K / 2), groups(std::size_t(n) * K / 32), scales(n), rows(n) {
         std::vector<std::uint8_t> c(codes.count), g(groups.count);
         for (auto& v : c) v = std::uint8_t(rng.next());
         for (auto& v : g) v = std::uint8_t((20U + rng.next() % 10U) << 3U | (rng.next() & 7U));
@@ -129,7 +129,7 @@ struct Cb4Matrix {
         for (auto& v : r) v = float(std::ldexp(1.0 + rng.uniform(), -10));
         codes.put(c); groups.put(g); scales.put(r);
     }
-    lin::Cb4Weight view() const { return {codes.data, groups.data, scales.data, rows, K}; }
+    lin::Fp8Lut4Weight view() const { return {codes.data, groups.data, scales.data, rows, K}; }
 };
 
 struct Case { unsigned width; bool tree; bool partial; bool poison; };
@@ -144,7 +144,7 @@ void run_pair(const Case& c, hipStream_t s) {
     if (c.poison) x[std::size_t(T / 2U) * K + 11U] = hip_bfloat16(NAN);
     for (auto& v : conv_weight) v = hip_bfloat16(float(rng.uniform() - 0.5));
     for (auto& v : states) v = hip_bfloat16(float(2.0 * rng.uniform() - 1.0));
-    Cb4Matrix qk(QK, rng), vz(VZ, rng);
+    Fp8Lut4Matrix qk(QK, rng), vz(VZ, rng);
     const std::int32_t initial_slot = 1, valid = c.partial ? std::int32_t(T - 2) : std::int32_t(T);
     std::vector<std::int32_t> parents(T);
     for (unsigned t = 0; t < T; ++t) parents[t] = c.tree ? (t == 0 ? -1 : std::int32_t(t / 2)) : std::int32_t(t) - 1;
@@ -164,13 +164,13 @@ void run_pair(const Case& c, hipStream_t s) {
     };
     const auto poison_outputs = [&] { record.poison(); query.poison(); key.poison(); value.poison(); z.poison(); };
     poison_outputs();
-    check(gdn::gdn_cb4_pair_conv_record_bf16(image.workspace, qk.view(), vz.view(), d_conv_weight.data,
+    check(gdn::gdn_fp8lut4_pair_conv_record_bf16(image.workspace, qk.view(), vz.view(), d_conv_weight.data,
                                              d_states.data, d_valid.data, d_initial.data, parent_arg,
                                              record.data, query.data, key.data, value.data, z.data, T,
                                              Slots, s), "fused");
     const Outputs fused = collect();
     poison_outputs();
-    check(lin::cb4_linear_pair(qk.view(), {.leading = qk_out.data}, vz.view(), {.leading = vz_out.data},
+    check(lin::fp8lut4_linear_pair(qk.view(), {.leading = qk_out.data}, vz.view(), {.leading = vz_out.data},
                                image.workspace, s), "pair");
     check(gdn::projection_conv_record_bf16(qk_out.data, vz_out.data, d_conv_weight.data, d_states.data,
                                            d_valid.data, d_initial.data, parent_arg, record.data,
@@ -196,7 +196,7 @@ int main() {
                              Case{6, true, false, false}, Case{6, false, true, false},
                              Case{5, true, true, false}, Case{6, false, false, true}})
             run_pair(c, s);
-        std::cout << "gdn cb4 front qualification: PASS\n";
+        std::cout << "gdn fp8lut4 front qualification: PASS\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "FAIL: " << error.what() << "\n";

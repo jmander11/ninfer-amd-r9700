@@ -4,7 +4,7 @@
 #include "ninfer/ops/rmsnorm.h"
 
 #include "core/device.h"
-#include "ops/r9700/linear/cb4_linear.h"
+#include "ops/r9700/linear/fp8lut4_linear.h"
 #include "ops/r9700/linear/fp8_activation.h"
 #include "ops/r9700/linear/r9700_linear.h"
 #include "ops/r9700/linear/r9700_q4_activation_profile.h"
@@ -117,7 +117,7 @@ std::size_t linear_workspace_capacity_bytes(QType qtype, std::int32_t tokens,
                           checked_tokens, checked_columns)
                     : r9700::linear::q4g64_activation_workspace_capacity_bytes(
                           checked_tokens, checked_columns);
-    } else if (qtype == QType::CB4G32_F32S) {
+    } else if (qtype == QType::FP8LUT4) {
         bytes = r9700::linear::fp8_activation_workspace_capacity_bytes(checked_tokens,
                                                                       checked_columns);
     } else if (qtype == QType::W8G32_F16S &&
@@ -133,8 +133,8 @@ std::size_t linear_workspace_capacity_bytes(QType qtype, std::int32_t tokens,
 
 namespace {
 
-// CB4G32 x per-token E4M3: quantize the represented BF16 rows, then the codebook GEMM.
-void cb4_linear_with_workspace(const Tensor& x, const Weight& weight, Tensor& output,
+// FP8LUT4 x per-token E4M3: quantize the represented BF16 rows, then the codebook GEMM.
+void fp8lut4_linear_with_workspace(const Tensor& x, const Weight& weight, Tensor& output,
                                DeviceSpan activation, hipStream_t stream) {
     if (x.dtype != DType::BF16 || output.dtype != DType::BF16 || x.ne[2] != 1 || x.ne[3] != 1 ||
         output.ne[2] != 1 || output.ne[3] != 1) {
@@ -146,11 +146,11 @@ void cb4_linear_with_workspace(const Tensor& x, const Weight& weight, Tensor& ou
     const std::uint32_t padded = padded_columns(columns);
     if (output.ne[1] != x.ne[1] || weight.ndim != 2 || weight.n != output.ne[0] ||
         weight.k != x.ne[0] || !x.is_contiguous() || !output.is_contiguous() ||
-        weight.layout != QuantLayout::Cb4N16K64 || weight.group != 32 || weight.qdata == nullptr ||
+        weight.layout != QuantLayout::Fp8Lut4N16K64 || weight.group != 32 || weight.qdata == nullptr ||
         weight.qhigh == nullptr || weight.scales == nullptr ||
         weight.padded_shape[1] != static_cast<std::int32_t>(padded) || padded != columns ||
-        !r9700::linear::cb4_linear_supported(tokens, rows, padded)) {
-        throw std::invalid_argument("linear: malformed or unsupported CB4G32_F32S projection");
+        !r9700::linear::fp8lut4_linear_supported(tokens, rows, padded)) {
+        throw std::invalid_argument("linear: malformed or unsupported FP8LUT4 projection");
     }
     const std::size_t image_bytes =
         r9700::linear::fp8_activation_workspace_capacity_bytes(tokens, columns);
@@ -162,7 +162,7 @@ void cb4_linear_with_workspace(const Tensor& x, const Weight& weight, Tensor& ou
                                                            columns, &image));
     HIP_CHECK(r9700::linear::fp8_quantize_activation(
         {static_cast<const hip_bfloat16*>(x.data), image}, stream));
-    HIP_CHECK(r9700::linear::cb4_linear(
+    HIP_CHECK(r9700::linear::fp8lut4_linear(
         {static_cast<const std::uint8_t*>(weight.qdata),
          static_cast<const std::uint8_t*>(weight.qhigh), static_cast<const float*>(weight.scales),
          rows, padded},
@@ -172,8 +172,8 @@ void cb4_linear_with_workspace(const Tensor& x, const Weight& weight, Tensor& ou
 void linear_with_workspace(const Tensor& x, const Weight& weight, Tensor& output,
                             DeviceSpan activation,
                             hipStream_t stream) {
-    if (weight.qtype == QType::CB4G32_F32S) {
-        cb4_linear_with_workspace(x, weight, output, activation, stream);
+    if (weight.qtype == QType::FP8LUT4) {
+        fp8lut4_linear_with_workspace(x, weight, output, activation, stream);
         return;
     }
     if (weight.qtype == QType::W8G32_F16S) {

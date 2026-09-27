@@ -23,8 +23,8 @@ StorageLayout storage_layout_for(NumericFormat format) {
         return StorageLayout::RowSplitK128V1;
     case NumericFormat::F8E4M3_ROW_F32S:
         return StorageLayout::RowScaledK128V1;
-    case NumericFormat::CB4G32_F32S:
-        return StorageLayout::R9700Cb4G32N16K64V1;
+    case NumericFormat::FP8LUT4:
+        return StorageLayout::R9700Fp8Lut4N16K64V1;
     }
     throw std::logic_error("unhandled numeric format");
 }
@@ -48,8 +48,8 @@ QType qtype_for(NumericFormat format) {
         return QType::W8G32_F16S;
     case NumericFormat::F8E4M3_ROW_F32S:
         return QType::F8E4M3_ROW_F32S;
-    case NumericFormat::CB4G32_F32S:
-        return QType::CB4G32_F32S;
+    case NumericFormat::FP8LUT4:
+        return QType::FP8LUT4;
     }
     throw std::logic_error("unhandled numeric format");
 }
@@ -147,18 +147,18 @@ Weight row_scaled_weight(const MaterializedArtifact& materialized, ObjectHandle 
 }
 
 // Codes in qdata, group codes in qhigh, FP32 row multipliers in scales.
-Weight r9700_cb4g32_weight(const MaterializedArtifact& materialized, ObjectHandle handle,
+Weight r9700_fp8lut4_weight(const MaterializedArtifact& materialized, ObjectHandle handle,
                            std::int32_t rows, std::int32_t columns) {
     const std::array<std::uint64_t, 2> shape = {static_cast<std::uint64_t>(rows),
                                                 static_cast<std::uint64_t>(columns)};
-    const CodebookGeometry geometry = r9700_cb4g32_geometry(shape);
+    const CodebookGeometry geometry = r9700_fp8lut4_geometry(shape);
     const auto* bytes = static_cast<const std::byte*>(materialized.device_data(handle));
     Weight out{};
     out.payload          = bytes;
     out.payload_bytes    = geometry.encoded_bytes;
     out.high_plane_bytes = geometry.group_plane_bytes;
-    out.qtype            = QType::CB4G32_F32S;
-    out.layout           = QuantLayout::Cb4N16K64;
+    out.qtype            = QType::FP8LUT4;
+    out.layout           = QuantLayout::Fp8Lut4N16K64;
     out.group_size       = 32;
     out.qdata            = bytes;
     out.qdata_bytes      = geometry.code_plane_bytes;
@@ -254,8 +254,8 @@ Weight materialized_weight(const MaterializedArtifact& materialized, ObjectHandl
     if (layout == StorageLayout::R9700Q4G64N16K16V1) {
         return r9700_q4_n16k16_weight(materialized, handle, rows, columns);
     }
-    if (layout == StorageLayout::R9700Cb4G32N16K64V1) {
-        return r9700_cb4g32_weight(materialized, handle, rows, columns);
+    if (layout == StorageLayout::R9700Fp8Lut4N16K64V1) {
+        return r9700_fp8lut4_weight(materialized, handle, rows, columns);
     }
     return row_split_weight(materialized, handle, format, rows, columns);
 }

@@ -1,5 +1,5 @@
-#include "ops/r9700/linear/cb4_linear.h"
-#include "ops/r9700/linear/cb4_pipeline_impl.h"
+#include "ops/r9700/linear/fp8lut4_linear.h"
+#include "ops/r9700/linear/fp8lut4_pipeline_impl.h"
 
 #include <hip/hip_runtime.h>
 
@@ -9,9 +9,9 @@
 namespace ninfer::ops::r9700::linear {
 namespace {
 
-using cb4::decode8;
-using cb4::F32x8;
-using cb4::I32x2;
+using fp8lut4::decode8;
+using fp8lut4::F32x8;
+using fp8lut4::I32x2;
 
 constexpr std::uint16_t kCanonicalBf16QuietNan = 0x7FC0U;
 
@@ -29,10 +29,10 @@ __device__ __forceinline__ float bf16_float(std::uint16_t bits) {
 
 // One launch projects `weight` (and, small T, `second` in CTAs past weight.rows / 16).
 struct KernelArgs {
-    Cb4Weight weight{};
-    Cb4Output output{};
-    Cb4Weight second{};
-    Cb4Output second_output{};
+    Fp8Lut4Weight weight{};
+    Fp8Lut4Output output{};
+    Fp8Lut4Weight second{};
+    Fp8Lut4Output second_output{};
     const std::uint8_t* activation = nullptr;
     const float* token_scales = nullptr;
     const std::uint32_t* status = nullptr;
@@ -40,8 +40,8 @@ struct KernelArgs {
 };
 
 // Element (token, row) of one published output.
-__device__ __forceinline__ std::uint16_t* output_at(const Cb4Weight& weight,
-                                                    const Cb4Output& output, std::uint32_t token,
+__device__ __forceinline__ std::uint16_t* output_at(const Fp8Lut4Weight& weight,
+                                                    const Fp8Lut4Output& output, std::uint32_t token,
                                                     std::uint32_t row) {
     const std::uint32_t rows = weight.rows, split = output.split;
     const bool leading = split == 0U || row < split;
@@ -66,18 +66,18 @@ __device__ __forceinline__ std::uint16_t silu_pair_value(float gate, float up) {
 
 // ---- Small T (T <= 16): one CTA per 16 rows of the first or the second projection.
 template <bool kAccumulate, bool kSiluPair, std::uint32_t kSplit, std::uint32_t kSteps>
-__global__ __launch_bounds__(32U * kSplit) void cb4_small_t_kernel(KernelArgs a) {
+__global__ __launch_bounds__(32U * kSplit) void fp8lut4_small_t_kernel(KernelArgs a) {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
     __shared__ uint2 table[256];
     __shared__ float partial[kSplit][8][32];
-    __shared__ float staged[kSiluPair ? 16 : 1][cb4::kSmallTokens];
+    __shared__ float staged[kSiluPair ? 16 : 1][fp8lut4::kSmallTokens];
     const std::uint32_t first_blocks = a.weight.rows / 16U;
     const bool second = blockIdx.x >= first_blocks;
     // By value: the CTA-uniform selection stays in scalar registers.
-    const Cb4Weight weight = second ? a.second : a.weight;
-    const Cb4Output output = second ? a.second_output : a.output;
+    const Fp8Lut4Weight weight = second ? a.second : a.weight;
+    const Fp8Lut4Output output = second ? a.second_output : a.output;
     const std::uint32_t row_base = (second ? blockIdx.x - first_blocks : blockIdx.x) * 16U;
-    cb4::load_table(table, 32U * kSplit);
+    fp8lut4::load_table(table, 32U * kSplit);
     const auto publish = [&](std::uint32_t token, std::uint32_t row, float value) {
             if constexpr (kSiluPair) {
                 staged[row - row_base][token] = value;
@@ -92,7 +92,7 @@ __global__ __launch_bounds__(32U * kSplit) void cb4_small_t_kernel(KernelArgs a)
                 *out = round_bf16(value);
             }
         };
-    cb4::small_t_rows<kSplit, kSteps>(
+    fp8lut4::small_t_rows<kSplit, kSteps>(
         weight, row_base, a.activation, a.token_scales, a.tokens, table, partial, publish);
     if constexpr (kSiluPair) {
         __syncthreads();
@@ -119,16 +119,16 @@ __global__ __launch_bounds__(32U * kSplit) void cb4_small_t_kernel(KernelArgs a)
 constexpr std::uint32_t kGemvSplit = 4U, kGemvSteps = 4U;
 
 template <bool kAccumulate, bool kSiluPair>
-__global__ __launch_bounds__(32U * kGemvSplit) void cb4_t1_kernel(KernelArgs a) {
+__global__ __launch_bounds__(32U * kGemvSplit) void fp8lut4_t1_kernel(KernelArgs a) {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
     __shared__ uint2 table[256];
     __shared__ float partial[kGemvSplit][32];
     const std::uint32_t first_blocks = a.weight.rows / 32U;
     const bool second = blockIdx.x >= first_blocks;
-    const Cb4Weight weight = second ? a.second : a.weight;
-    const Cb4Output output = second ? a.second_output : a.output;
+    const Fp8Lut4Weight weight = second ? a.second : a.weight;
+    const Fp8Lut4Output output = second ? a.second_output : a.output;
     const std::uint32_t row_base = (second ? blockIdx.x - first_blocks : blockIdx.x) * 32U;
-    cb4::load_table(table, 32U * kGemvSplit);
+    fp8lut4::load_table(table, 32U * kGemvSplit);
     const std::uint32_t lane = threadIdx.x & 31U, wave = threadIdx.x >> 5U;
     const std::uint32_t row = row_base + lane;
     const std::uint32_t columns = weight.columns, steps_total = columns / 64U;
@@ -227,7 +227,7 @@ constexpr std::uint32_t kPrefillRows = 128U;
 constexpr std::uint32_t kSlabStride = 72U;  // 64 bytes + 8: two-way LDS conflicts at most
 
 template <bool kAccumulate, bool kSiluPair>
-__global__ __launch_bounds__(256) void cb4_prefill_kernel(KernelArgs a) {
+__global__ __launch_bounds__(256) void fp8lut4_prefill_kernel(KernelArgs a) {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
     __shared__ uint2 table[256];
     __shared__ __attribute__((aligned(16))) std::uint8_t slab[2][kPrefillRows * kSlabStride];
@@ -239,7 +239,7 @@ __global__ __launch_bounds__(256) void cb4_prefill_kernel(KernelArgs a) {
     const std::uint32_t row_base = blockIdx.y * kPrefillRows;
     const std::uint32_t columns = a.weight.columns;
     const std::uint32_t tokens = a.tokens;
-    cb4::load_table(table, 256U);
+    fp8lut4::load_table(table, 256U);
 
     // Weight staging: thread -> (row, 32-column half of the slab).
     const std::uint32_t stage_row = thread >> 1U, stage_half = thread & 1U;
@@ -392,24 +392,24 @@ template <std::uint32_t kSplit, std::uint32_t kSteps>
 void launch_small_depth(const KernelArgs& args, hipStream_t stream) {
     const dim3 grid((args.weight.rows + args.second.rows) / 16U), block(32U * kSplit);
     if (args.output.silu_pair)
-        hipLaunchKernelGGL((cb4_small_t_kernel<false, true, kSplit, kSteps>), grid, block, 0, stream, args);
+        hipLaunchKernelGGL((fp8lut4_small_t_kernel<false, true, kSplit, kSteps>), grid, block, 0, stream, args);
     else if (args.output.accumulate)
-        hipLaunchKernelGGL((cb4_small_t_kernel<true, false, kSplit, kSteps>), grid, block, 0, stream, args);
+        hipLaunchKernelGGL((fp8lut4_small_t_kernel<true, false, kSplit, kSteps>), grid, block, 0, stream, args);
     else
-        hipLaunchKernelGGL((cb4_small_t_kernel<false, false, kSplit, kSteps>), grid, block, 0, stream, args);
+        hipLaunchKernelGGL((fp8lut4_small_t_kernel<false, false, kSplit, kSteps>), grid, block, 0, stream, args);
 }
 
 hipError_t launch_small(const KernelArgs& args, hipStream_t stream) {
     if (args.tokens == 1U) {
         const dim3 grid((args.weight.rows + args.second.rows) / 32U), block(32U * kGemvSplit);
         if (args.output.silu_pair)
-            hipLaunchKernelGGL((cb4_t1_kernel<false, true>), grid, block, 0, stream, args);
+            hipLaunchKernelGGL((fp8lut4_t1_kernel<false, true>), grid, block, 0, stream, args);
         else if (args.output.accumulate)
-            hipLaunchKernelGGL((cb4_t1_kernel<true, false>), grid, block, 0, stream, args);
+            hipLaunchKernelGGL((fp8lut4_t1_kernel<true, false>), grid, block, 0, stream, args);
         else
-            hipLaunchKernelGGL((cb4_t1_kernel<false, false>), grid, block, 0, stream, args);
+            hipLaunchKernelGGL((fp8lut4_t1_kernel<false, false>), grid, block, 0, stream, args);
     } else {
-        launch_small_depth<cb4::kVerifySplit, cb4::kVerifySteps>(args, stream);
+        launch_small_depth<fp8lut4::kVerifySplit, fp8lut4::kVerifySteps>(args, stream);
     }
     return hipGetLastError();
 }
@@ -418,15 +418,15 @@ hipError_t launch_prefill(const KernelArgs& args, hipStream_t stream) {
     const dim3 grid((args.tokens + kPrefillTokens - 1U) / kPrefillTokens,
                     args.weight.rows / kPrefillRows);
     if (args.output.silu_pair)
-        hipLaunchKernelGGL((cb4_prefill_kernel<false, true>), grid, dim3(256), 0, stream, args);
+        hipLaunchKernelGGL((fp8lut4_prefill_kernel<false, true>), grid, dim3(256), 0, stream, args);
     else if (args.output.accumulate)
-        hipLaunchKernelGGL((cb4_prefill_kernel<true, false>), grid, dim3(256), 0, stream, args);
+        hipLaunchKernelGGL((fp8lut4_prefill_kernel<true, false>), grid, dim3(256), 0, stream, args);
     else
-        hipLaunchKernelGGL((cb4_prefill_kernel<false, false>), grid, dim3(256), 0, stream, args);
+        hipLaunchKernelGGL((fp8lut4_prefill_kernel<false, false>), grid, dim3(256), 0, stream, args);
     return hipGetLastError();
 }
 
-bool valid_target(const Cb4Weight& weight, const Cb4Output& output,
+bool valid_target(const Fp8Lut4Weight& weight, const Fp8Lut4Output& output,
                   const Fp8ActivationWorkspace& activation) noexcept {
     return weight.codes != nullptr && weight.groups != nullptr && weight.scales != nullptr &&
            output.leading != nullptr &&
@@ -434,10 +434,10 @@ bool valid_target(const Cb4Weight& weight, const Cb4Output& output,
                                    output.split < weight.rows)) &&
            (!output.silu_pair || (output.split == 0U && !output.accumulate)) &&
            activation.padded_columns == weight.columns &&
-           cb4_linear_supported(activation.tokens, weight.rows, weight.columns);
+           fp8lut4_linear_supported(activation.tokens, weight.rows, weight.columns);
 }
 
-KernelArgs kernel_args(const Cb4Weight& weight, const Cb4Output& output,
+KernelArgs kernel_args(const Fp8Lut4Weight& weight, const Fp8Lut4Output& output,
                        const Fp8ActivationWorkspace& activation) noexcept {
     KernelArgs args;
     args.weight = weight;
@@ -451,32 +451,32 @@ KernelArgs kernel_args(const Cb4Weight& weight, const Cb4Output& output,
 
 } // namespace
 
-const std::array<std::array<std::uint8_t, 8>, 256>& cb4_magnitude_table() noexcept {
-    return cb4::kTable;
+const std::array<std::array<std::uint8_t, 8>, 256>& fp8lut4_magnitude_table() noexcept {
+    return fp8lut4::kTable;
 }
 
-bool cb4_linear_supported(std::uint32_t tokens, std::uint32_t rows,
+bool fp8lut4_linear_supported(std::uint32_t tokens, std::uint32_t rows,
                           std::uint32_t columns) noexcept {
     if (tokens == 0U || rows == 0U || columns == 0U || columns % 128U != 0U) return false;
-    if (tokens <= cb4::kSmallTokens)
+    if (tokens <= fp8lut4::kSmallTokens)
         return (tokens == 1U ? rows % 32U == 0U && (columns / 64U) % 16U == 0U
                              : rows % 16U == 0U && (columns / 64U) % 8U == 0U);
     return rows % kPrefillRows == 0U;
 }
 
-hipError_t cb4_linear(const Cb4Weight& weight, const Fp8ActivationWorkspace& activation,
-                      const Cb4Output& output, hipStream_t stream) noexcept {
+hipError_t fp8lut4_linear(const Fp8Lut4Weight& weight, const Fp8ActivationWorkspace& activation,
+                      const Fp8Lut4Output& output, hipStream_t stream) noexcept {
     if (activation.codes == nullptr || activation.scales == nullptr ||
         activation.status == nullptr || !valid_target(weight, output, activation)) {
         return hipErrorInvalidValue;
     }
     const KernelArgs args = kernel_args(weight, output, activation);
-    return activation.tokens <= cb4::kSmallTokens ? launch_small(args, stream)
+    return activation.tokens <= fp8lut4::kSmallTokens ? launch_small(args, stream)
                                                   : launch_prefill(args, stream);
 }
 
-hipError_t cb4_linear_pair(const Cb4Weight& first, const Cb4Output& first_output,
-                           const Cb4Weight& second, const Cb4Output& second_output,
+hipError_t fp8lut4_linear_pair(const Fp8Lut4Weight& first, const Fp8Lut4Output& first_output,
+                           const Fp8Lut4Weight& second, const Fp8Lut4Output& second_output,
                            const Fp8ActivationWorkspace& activation, hipStream_t stream) noexcept {
     if (activation.codes == nullptr || activation.scales == nullptr ||
         activation.status == nullptr || !valid_target(first, first_output, activation) ||
@@ -485,9 +485,9 @@ hipError_t cb4_linear_pair(const Cb4Weight& first, const Cb4Output& first_output
         second_output.silu_pair) {
         return hipErrorInvalidValue;
     }
-    if (activation.tokens > cb4::kSmallTokens) {
-        const hipError_t result = cb4_linear(first, activation, first_output, stream);
-        return result != hipSuccess ? result : cb4_linear(second, activation, second_output, stream);
+    if (activation.tokens > fp8lut4::kSmallTokens) {
+        const hipError_t result = fp8lut4_linear(first, activation, first_output, stream);
+        return result != hipSuccess ? result : fp8lut4_linear(second, activation, second_output, stream);
     }
     KernelArgs args = kernel_args(first, first_output, activation);
     args.second = second;

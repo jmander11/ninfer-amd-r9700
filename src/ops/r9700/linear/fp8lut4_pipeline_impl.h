@@ -1,8 +1,8 @@
 #pragma once
 
-// Device-side pieces of the CB4G32 x per-token E4M3 Linear shared by the Linear kernels and fused
+// Device-side pieces of the FP8LUT4 x per-token E4M3 Linear shared by the Linear kernels and fused
 // consumers (e.g. the GDN projection-convolution epilogue).
-#include "ops/r9700/linear/cb4_linear.h"
+#include "ops/r9700/linear/fp8lut4_linear.h"
 
 #include <hip/hip_bfloat16.h>
 #include <hip/hip_runtime.h>
@@ -12,7 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace ninfer::ops::r9700::linear::cb4 {
+namespace ninfer::ops::r9700::linear::fp8lut4 {
 
 inline constexpr std::uint32_t kBaseSixteenths[8] = {0U, 13U, 27U, 41U, 56U, 74U, 94U, 120U};
 
@@ -111,7 +111,7 @@ __device__ __forceinline__ void load_table(uint2* table, std::uint32_t threads) 
 // waiting: the first batch of weight and activation loads is in flight before the CTA barrier that
 // publishes the codebook.
 template <std::uint32_t kSplit, std::uint32_t kSteps, class Publish>
-__device__ __forceinline__ void small_t_rows(const Cb4Weight& weight, std::uint32_t row_base,
+__device__ __forceinline__ void small_t_rows(const Fp8Lut4Weight& weight, std::uint32_t row_base,
                                              const std::uint8_t* activation_codes,
                                              const float* token_scales, std::uint32_t tokens,
                                              const uint2* table, float (&partial)[kSplit][8][32],
@@ -199,4 +199,4 @@ __device__ __forceinline__ void small_t_rows(const Cb4Weight& weight, std::uint3
 inline constexpr std::uint32_t kSmallTokens = 16U;
 inline constexpr std::uint32_t kVerifySplit = 4U, kVerifySteps = 2U;
 
-} // namespace ninfer::ops::r9700::linear::cb4
+} // namespace ninfer::ops::r9700::linear::fp8lut4
