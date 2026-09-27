@@ -253,11 +253,10 @@ not things to download or regenerate unless in scope.
 
 ## Local build and deployment workflow
 
-Host-load rule for every build, experiment, and campaign: run at most one heavyweight job at a
-time on this shared host, and never overlap them across agents or background tasks. A heavyweight
-job is one build (explicitly capped with `--parallel 14` or fewer; never uncapped), one model
-creation/conversion/readback, or one GPU inference/PPL/benchmark/profiler run. Wait for the
-current one to finish before starting the next, and reduce or stop on memory or I/O pressure.
+GPU work in both repos must hold `flock --exclusive /ssdpool2nvme/local_llm/.ninfer-coordination/gpu.lock <command>`
+through all child work. Never delete the lock; coordinate existing unleased GPU jobs/servers with their owner.
+Builds need no lock: one build per agent, 12 jobs default, 14 maximum. Overlap is allowed;
+reduce concurrency on memory/I/O pressure. This supersedes older shared-host rules.
 
 For source-only development, prefer incremental CMake/Ninja builds, defaulting to 12 jobs
 (maximum 14). For Compose deployment, stop the server and run
@@ -267,7 +266,7 @@ updates the runtime image; run relevant tests separately. First-time builder set
 The helper automatically loads the trusted repo `.env` and exports its settings to the builder.
 Use full image builds for Dockerfile, toolchain or runtime dependency changes;
 `docker compose up -d --build` builds the image, not the incremental hot-patch path.
-The host-load rule above applies to the builder too; it has no memory limit;
+The per-agent build cap above applies to the builder too; it has no memory limit;
 Compose's 24 GiB/no-swap limit applies only to the server. Host port defaults to 8001;
 disk prefixes persist under `/ssdpool2nvme/local_llm/cache_r9700/prefix`.
 See `docs/containers.md` for setup and validation details.

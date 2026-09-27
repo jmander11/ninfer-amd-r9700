@@ -95,8 +95,8 @@ docker buildx build --load --target runtime --tag local/ninfer-r9700:local \
 ```
 
 Image builds default to 12 compile jobs; `--build-arg NINFER_BUILD_JOBS=8`
-overrides this within the enforced range 1–14. Build and GPU/model jobs must run
-serially on the shared host. These are native AMD images: no NVIDIA Container
+overrides this within the enforced range 1–14. Each agent may run one build at a time;
+GPU jobs use the shared lock in `AGENTS.md`. These are native AMD images: no NVIDIA Container
 Toolkit or `--gpus all` is needed.
 
 Both contexts must contain their `bin` and `lib` directories; do not provide a

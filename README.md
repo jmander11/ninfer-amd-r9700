@@ -81,8 +81,8 @@ cmake -S . -B build-r9700 -G Ninja \
 cmake --build build-r9700 --parallel 4
 ```
 
-Only `gfx1201` is supported. Serialize builds, model conversion and GPU jobs on
-the shared host; never use uncapped build parallelism (maximum 14 jobs).
+Only `gfx1201` is supported. Serialize GPU work with the shared lock in `AGENTS.md`.
+Each agent may run one build at a time, capped at 12 compiler jobs by default (14 maximum).
 
 For the native ROCm Docker image, dedicated development container and GPU device
 passthrough commands, see `docs/containers.md`. No NVIDIA container runtime is needed.
