@@ -45,20 +45,22 @@ and evidence: `docs/performance.md`.
 - **17.02 GB DFlash-enabled artifact** (decimal file size, not VRAM),
   `r9700-fp8lut4-fp8-selective-cap-dflash2-q4-eval`.
 - Text-layer weights in FP8LUT4 (4-bit codes with a per-32 codebook of exact E4M3
-  values, FP32 row scale); 26 protected projections in FP8; Q4 embedding/output
+  values, FP32 row scale; GDN and MLP GPTQ-rounded on real-session calibration); 26 protected
+  projections in FP8; Q4 embedding/output
   head, MTP and DFlash with BF16 codebooks.
 - Per-token FP8 E4M3 activations for every Text projection (prefill, ordinary
   decode and DFlash verification); Q4 A8 for the head, MTP and drafter.
 - Fixed cache: FP8 E4M3FN keys, INT4 values, FP16 value scales. DFlash state is BF16.
 
-Against a BF16 reference at 8K, the mean NLL increase is +0.022 (prefill) and
-+0.024 (decode), about a third below the previous Q4 artifact; NIAH exact-answer
-retrieval passes 8K-128K at five positions (standard and multikey). This is not
+Against a BF16 reference at 8K, the mean NLL increase is +0.023 (prefill), about a third below
+the previous Q4 artifact. At 4K it is 0.024 nats/token below the 5090 NVFP4 build on the same
+wiki/technical/code windows (about 2.4% lower PPL). NIAH exact-answer retrieval passes 8K-128K at
+five positions (standard and multikey). This is not
 universal quality equivalence; the BF16-source production-admission campaign
 remains unfinished.
 
 Artifacts are not bundled. The installed artifact and its conversion receipt are
-under `/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-fp8lut4-fp8-selective-cap/`.
+under `/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-fp8lut4-gptq-usage/`.
 Conversion and binding details: `docs/maintainer/qwen3.8-27b-artifact.md` (FP8LUT4 Text recipe).
 
 ## Build
