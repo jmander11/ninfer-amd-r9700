@@ -197,6 +197,13 @@ row-scale vector, B the T-element token-scale vector, both with
 `HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F`; C/D are BF16, beta is zero, and compute is
 `HIPBLAS_COMPUTE_32F`.
 
+Current routing (2026-09-26): `LinearExecution` sends T <= 16 to `fp8_small_t_linear` and every
+T > 16 call whose rows and columns are multiples of 128 (every Qwen3.8 protected projection) to
+`fp8_row_scaled_prefill_linear`, the FP8LUT4 prefill GEMM staging raw E4M3 rows; that kernel
+applies the row and token scales and the per-token status poison in its epilogue. hipBLASLt is
+reached only for other shapes, which the loaded target does not bind. Its descriptors and
+heuristics are still prepared, as described below.
+
 hipBLASLt lifecycle is explicit rather than a function-static cache. A repository-internal
 `ops::LinearExecutionContext` owns one device-bound handle, created by the loaded target before
 the final free-memory capacity snapshot. Each selected Text projection has a loaded-target-owned

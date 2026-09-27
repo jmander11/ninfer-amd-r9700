@@ -225,6 +225,14 @@ struct LinearExecution::Impl {
                         profile.activation, output, stream),
                     HIPBLAS_STATUS_SUCCESS};
         }
+        if (r9700::linear::fp8_row_scaled_prefill_supported(tokens, rows, columns,
+                                                            padded_columns)) {
+            return {r9700::linear::fp8_row_scaled_prefill_linear(
+                        {static_cast<const std::uint8_t*>(weight_codes),
+                         static_cast<const float*>(weight_scales), rows},
+                        profile.activation, output, stream),
+                    HIPBLAS_STATUS_SUCCESS};
+        }
         constexpr float alpha = 1.0F;
         constexpr float beta  = 0.0F;
         const hipblasStatus_t matmul_status = hipblasLtMatmul(

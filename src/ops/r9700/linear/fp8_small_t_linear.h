@@ -52,4 +52,16 @@ struct Fp8SmallTPairSplitArgs {
                                               hip_bfloat16* residual,
                                               hipStream_t stream) noexcept;
 
+// Prefill (T > 16) row-scaled E4M3 projection with the same result contract as
+// fp8_small_t_linear: the FP8LUT4 prefill GEMM (fp8lut4_linear.hip) staging the raw E4M3 rows
+// instead of decoding codebook codes. Columns must be a multiple of 128 and unpadded, rows a
+// multiple of 128. output [T, rows].
+[[nodiscard]] bool fp8_row_scaled_prefill_supported(std::uint32_t tokens, std::uint32_t rows,
+                                                    std::uint32_t columns,
+                                                    std::uint32_t padded_columns) noexcept;
+[[nodiscard]] hipError_t fp8_row_scaled_prefill_linear(const Fp8RowScaledWeight& weight,
+                                                       const Fp8ActivationWorkspace& activation,
+                                                       hip_bfloat16* output,
+                                                       hipStream_t stream) noexcept;
+
 } // namespace ninfer::ops::r9700::linear

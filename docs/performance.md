@@ -60,6 +60,24 @@ expected value exactly.
 Copy bus rate counts both the read and write traffic. This is the hardware bandwidth bound, not a
 model or individual-Op throughput claim.
 
+## Protected FP8 projections on the prefill GEMM (2026-09-27)
+
+The 26 selective-cap FP8 projections ran T > 16 through hipBLASLt (MT128x128x32 solutions, 4.8%
+of 32K prefill kernel time). They now run on the FP8LUT4 prefill GEMM with raw E4M3 staging
+(`fp8_row_scaled_prefill_linear`), with scales and per-token poison in the epilogue. Per call at
+T2048 (hipBLASLt from the 32K trace, ours from a scratch event-timed harness with random data):
+gate/up 4059 -> 3441 us, down 5120x17408 3063 -> 1717 us, attention input 7168x5120 910 -> 705 us,
+output 5120x6144 764 -> 600 us. The kernel sits at the same ~212-217 TFLOP/s as FP8LUT4, which
+matches the recorded power bound at 300 W rather than a decode cost.
+
+Qualification: `ninfer_r9700_fp8_gate_up_qual --selective-protected` and `--shared-context`
+pass with zero BF16-step error against their FP64 oracles at T2047/T2048 (the default mode's A8Q4
+probe fails identically on the previous commit). Against the BF16 reference at 8K
+(`tools/ppl/corpus.ids`, chunk 2048) dNLL is +0.02175 vs +0.02206 for hipBLASLt (paired
+-0.0003 +/- 0.0034), flips 380 vs 382; 4K code/wiki/technical PPL moves +0.33/+0.09/+0.08%
+(accumulation-order perturbation). Interleaved whole-prefill A/B (two pairs each): 32K +1.0% and
++7.0% (noisy), 64K +0.8% and +1.4%.
+
 ## Long-context prefill: six waves per SIMD and interleaved weight staging (2026-09-26, night)
 
 A 32K prefill trace (`profiles/rocprof/prefill-32k-fp8lut4-trace-20260926/`, attribution only)

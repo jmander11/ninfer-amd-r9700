@@ -1,5 +1,6 @@
 #include "ops/r9700/linear/fp8lut4_linear.h"
 #include "ops/r9700/linear/fp8lut4_pipeline_impl.h"
+#include "ops/r9700/linear/fp8_small_t_linear.h"
 
 #include <hip/hip_runtime.h>
 
@@ -226,13 +227,15 @@ __global__ __launch_bounds__(32U * kGemvSplit) void fp8lut4_t1_kernel(KernelArgs
 // The next slab is decoded and staged before the last of the four 16-column chunks, so its
 // codebook read and decode VALU interleave with WMMAs instead of running between the last WMMA
 // and the barrier (6-8% at T2048). The kernel is held to 240 VGPRs (six waves per SIMD), so three
-// CTAs share a WGP instead of two (6-10% at T2048).
+// CTAs share a WGP instead of two (6-10% at T2048). kRawFp8 serves row-scaled E4M3 weights
+// (row-major, fp8_row_scaled_prefill_linear): the staging copies each (row, half) slot's 32 raw
+// bytes, loaded where they are stored, and the codebook is not loaded.
 constexpr std::uint32_t kStageChunk = 3U;
 constexpr std::uint32_t kPrefillTokens = 256U;
 constexpr std::uint32_t kPrefillRows = 128U;
 constexpr std::uint32_t kSlabStride = 72U;  // 64 bytes + 8: two-way LDS conflicts at most
 
-template <bool kAccumulate, bool kSiluPair>
+template <bool kAccumulate, bool kSiluPair, bool kRawFp8 = false>
 __global__ __launch_bounds__(256) __attribute__((amdgpu_waves_per_eu(6)))
 void fp8lut4_prefill_kernel(KernelArgs a) {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
@@ -246,7 +249,7 @@ void fp8lut4_prefill_kernel(KernelArgs a) {
     const std::uint32_t row_base = blockIdx.y * kPrefillRows;
     const std::uint32_t columns = a.weight.columns;
     const std::uint32_t tokens = a.tokens;
-    fp8lut4::load_table(table, 256U);
+    if constexpr (!kRawFp8) fp8lut4::load_table(table, 256U);
 
     // Weight staging: thread -> (row, 32-column half of the slab).
     const std::uint32_t stage_row = thread >> 1U, stage_half = thread & 1U;
@@ -254,7 +257,10 @@ void fp8lut4_prefill_kernel(KernelArgs a) {
     const std::size_t stage_tile =
         static_cast<std::size_t>((row_base + stage_row) / 16U) * (columns / 64U);
     const std::uint32_t stage_slot = stage_half * 16U + stage_row % 16U;
-    const std::uint8_t* stage_codes = a.weight.codes + stage_tile * 512U + stage_slot * 16U;
+    // Raw E4M3 rows: the same (row, half) slot read straight from the row-major weight.
+    const std::uint8_t* stage_codes = kRawFp8
+        ? a.weight.codes + static_cast<std::size_t>(row_base + stage_row) * columns + stage_half * 32U
+        : a.weight.codes + stage_tile * 512U + stage_slot * 16U;
     const std::uint8_t* stage_groups = a.weight.groups + stage_tile * 32U + stage_slot;
     const std::uint32_t stage_offset = stage_row * kSlabStride + stage_half * 32U;
     // Activation fragments: token rows clamp to the last token (their results are never stored).
@@ -273,8 +279,12 @@ void fp8lut4_prefill_kernel(KernelArgs a) {
     struct Load { uint4 w; std::uint32_t g; uint4 x[4][2]; };
     const auto load = [&](std::uint32_t slab_index) {
         Load value;
-        value.w = *reinterpret_cast<const uint4*>(stage_codes + static_cast<std::size_t>(slab_index) * 512U);
-        value.g = stage_groups[static_cast<std::size_t>(slab_index) * 32U];
+        if constexpr (kRawFp8) {
+            (void)slab_index;  // raw rows are copied at staging time
+        } else {
+            value.w = *reinterpret_cast<const uint4*>(stage_codes + static_cast<std::size_t>(slab_index) * 512U);
+            value.g = stage_groups[static_cast<std::size_t>(slab_index) * 32U];
+        }
 #pragma unroll
         for (std::uint32_t i = 0; i < 4U; ++i) {
             const uint4* x = reinterpret_cast<const uint4*>(fragment[i] +
@@ -283,6 +293,18 @@ void fp8lut4_prefill_kernel(KernelArgs a) {
             value.x[i][1] = x[1];
         }
         return value;
+    };
+    // Raw E4M3 rows are copied through loop-local registers (never part of the carried Load).
+    const auto load_raw = [&](std::uint32_t slab_index, uint4 (&raw)[2]) {
+        const uint4* source = reinterpret_cast<const uint4*>(
+            stage_codes + static_cast<std::size_t>(slab_index) * 64U);
+        raw[0] = source[0];
+        raw[1] = source[1];
+    };
+    const auto store_raw = [&](const uint4 (&raw)[2], std::uint32_t buffer) {
+        uint4* target = reinterpret_cast<uint4*>(&slab[buffer][stage_offset]);
+        target[0] = raw[0];
+        target[1] = raw[1];
     };
     const auto stage = [&](const Load& value, std::uint32_t buffer) {
         const uint2 book = table[value.g];
@@ -297,7 +319,13 @@ void fp8lut4_prefill_kernel(KernelArgs a) {
     const std::uint32_t slabs = columns / 64U;
     Load current = load(0U);
     __syncthreads();  // table
-    stage(current, 0U);
+    if constexpr (kRawFp8) {
+        uint4 raw[2];
+        load_raw(0U, raw);
+        store_raw(raw, 0U);
+    } else {
+        stage(current, 0U);
+    }
     __syncthreads();
     for (std::uint32_t s = 0; s < slabs; ++s) {
         const bool more = s + 1U < slabs;
@@ -306,7 +334,16 @@ void fp8lut4_prefill_kernel(KernelArgs a) {
         const std::uint8_t* tile = slab[s & 1U];
 #pragma unroll
         for (std::uint32_t chunk = 0; chunk < 4U; ++chunk) {
-            if (chunk == kStageChunk && more) stage(next, (s + 1U) & 1U);
+            if constexpr (kRawFp8) {
+                // Loaded where it is stored: a register lifetime across chunks spills at 240.
+                if (chunk == kStageChunk && more) {
+                    uint4 raw[2];
+                    load_raw(s + 1U, raw);
+                    store_raw(raw, (s + 1U) & 1U);
+                }
+            } else {
+                if (chunk == kStageChunk && more) stage(next, (s + 1U) & 1U);
+            }
             I32x2 weight[4];
 #pragma unroll
             for (std::uint32_t j = 0; j < 4U; ++j) {
@@ -455,6 +492,37 @@ KernelArgs kernel_args(const Fp8Lut4Weight& weight, const Fp8Lut4Output& output,
 }
 
 } // namespace
+
+bool fp8_row_scaled_prefill_supported(std::uint32_t tokens, std::uint32_t rows,
+                                      std::uint32_t columns,
+                                      std::uint32_t padded_columns) noexcept {
+    return tokens > kFp8SmallTokenLimit && rows != 0U && rows % kPrefillRows == 0U &&
+           columns != 0U && columns % 128U == 0U && padded_columns == columns;
+}
+
+hipError_t fp8_row_scaled_prefill_linear(const Fp8RowScaledWeight& weight,
+                                         const Fp8ActivationWorkspace& activation,
+                                         hip_bfloat16* output, hipStream_t stream) noexcept {
+    if (weight.codes == nullptr || weight.scales == nullptr || output == nullptr ||
+        activation.codes == nullptr || activation.scales == nullptr ||
+        activation.status == nullptr ||
+        !fp8_row_scaled_prefill_supported(activation.tokens, weight.rows, activation.columns,
+                                          activation.padded_columns)) {
+        return hipErrorInvalidValue;
+    }
+    KernelArgs args;
+    args.weight = Fp8Lut4Weight{weight.codes, nullptr, weight.scales, weight.rows,
+                                activation.padded_columns};
+    args.output = Fp8Lut4Output{.leading = output};
+    args.activation = activation.codes;
+    args.token_scales = activation.scales;
+    args.status = activation.status;
+    args.tokens = activation.tokens;
+    const dim3 grid((args.tokens + kPrefillTokens - 1U) / kPrefillTokens, weight.rows / kPrefillRows);
+    hipLaunchKernelGGL((fp8lut4_prefill_kernel<false, false, true>), grid, dim3(256), 0, stream,
+                       args);
+    return hipGetLastError();
+}
 
 const std::array<std::array<std::uint8_t, 8>, 256>& fp8lut4_magnitude_table() noexcept {
     return fp8lut4::kTable;
