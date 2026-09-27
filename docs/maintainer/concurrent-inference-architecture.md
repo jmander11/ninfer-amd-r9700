@@ -1434,7 +1434,9 @@ fixed policy on a particular artifact.
 
 R9700 DFlash is chain-only, K<=5, W=K+1 including the target anchor; no packed-tree or two-block
 product schedule is exposed. The fixed-policy production comparison uses K4/W5 and K5/W6, not the
-retired K1..11 shortlist. DFlash companion 也不自动继承固定 Q4 recipe：它从真实
+retired K1..11 shortlist. Fixed K6/K7 chains and fixed-budget W8 root-sibling/best-first trees were
+measured on 2026-09-27 and rejected: none beat K5 chain throughput at C1 or C4.
+DFlash companion 也不自动继承固定 Q4 recipe：它从真实
 BF16 DFlash2 checkpoint 独立比较 canonical Q4G64、source-MSE Q4G64 与 source-MSE W8G32，只有物理
 small-width speed 和 quality 同时支持时才加入 row-scaled E4M3。所有 recipe 保留 BF16 selector codebooks
 和 private BF16 state。

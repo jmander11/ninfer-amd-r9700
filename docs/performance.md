@@ -60,6 +60,26 @@ expected value exactly.
 Copy bus rate counts both the read and write traffic. This is the hardware bandwidth bound, not a
 model or individual-Op throughput claim.
 
+## Rejected research ports (2026-09-27)
+
+Candidates from the R9700 research campaign, measured and not adopted; their code is removed.
+Evidence: `profiles/bench/r9700-feature-ports-20260927/`.
+
+| Candidate | Result |
+|---|---|
+| DFlash K6/K7 fixed chains | +0.2–0.26 tokens/round but ~14% (C1) / ~10% (C4) longer rounds; paired decode rate vs K5 0.95/0.99 (C1), 0.94/0.96 (C4) |
+| Fixed-budget W8 trees (K7) | root-sibling 0.87 (C1) / 0.88 (C4) of K5 chain; normalized best-first 0.97 / 1.01 (parity, never faster) |
+| Exact FP8LUT4 nibble repacking | complete-Op change 0.3% slower to 3.3% faster; word-at-a-time scheduling 35–62% slower at T1 |
+| Grammar-mask overlap with target forward | default HIP serializes the graph; no measured benefit |
+| 16-key dense-prefill attention | 22.5% slower at P2048/context 65536 |
+| Conditional live-context verify split | some Ops 12–30% faster, but no matched whole-Engine gain |
+| Shared GDN normalization / compact A/P+V64 prep | 13% / 2.83x slower complete Op |
+| Post-idle keepwarm pulses | 1 ms pulses save 0.5 ms cached wake-up at ~12 W; 10 ms no benefit |
+
+Horizon/tree economics: graphs on, 12 manifest scenario prompts x {greedy, two p-less seeds},
+768-token limit, ABC/CBA order over two passes, paired per-request decode rate against K5 chain.
+Outputs differ across verify widths, so this is a matched-workload, not token-identical, comparison.
+
 ## GPTQ rounding for FP8LUT4 weights (2026-09-27)
 
 Converter-only change (identical format, size and kernels, so speed is unchanged): GDN and MLP
