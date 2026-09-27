@@ -60,6 +60,39 @@ expected value exactly.
 Copy bus rate counts both the read and write traffic. This is the hardware bandwidth bound, not a
 model or individual-Op throughput claim.
 
+## GPTQ rounding for FP8LUT4 weights (2026-09-27)
+
+Converter-only change (identical format, size and kernels, so speed is unchanged): GDN and MLP
+FP8LUT4 projections are GPTQ-rounded against BF16-reference input second moments of 128 x 2048
+calibration tokens from real opencode/OpenWebUI sessions plus code and news (recipe in
+`qwen3.8-27b-artifact.md`). Held-out layer output error falls 40-80% for GDN projections and
+12-20% for MLP (after raising MLP-down damping to 0.3; it overfits at 0.01). Paired against the
+independently rounded artifact (`profiles/ppl/r9700-fp8lut4-gptq-20260927/`):
+
+| Evaluation | dNLL/token vs previous |
+|---|---:|
+| 4K prefill wiki / technical / code | +0.0047 / -0.0151 / -0.0146 (pooled -0.0083 +/- 0.0036) |
+| 4K decode-schedule spans, pooled | -0.030 +/- 0.014 |
+| 8K WikiText (4095 positions) | +0.0011 +/- 0.0036 |
+
+Against BF16 at 8K: +0.0228 (previous +0.0218, within noise), top-1 agreement 91.06% (90.72%).
+NIAH: standard and multikey 8K-128K greedy 20/20 each, sampled multikey 50/50 (8K) and 45/45
+(32K-128K). Rejected: GPTQ on the attention projections too (8K multikey NIAH failed 5/10 sampled
+runs against 0/10); the news/llama.cpp-only calibration tied this one on PPL.
+
+**Protected FP8 projections as FP8LUT4 (not selected, PPL-costing).** Re-encoding the 26
+row-scaled FP8 protections as GPTQ FP8LUT4 too (0.62 GB less per token) gives ordinary decode
+36.78 -> 38.27 tok/s (+4.0%) and prefill 8K +0.6%, at +0.003 +/- 0.002 nats/token paired against
+the GPTQ artifact (8K +0.0022, 4K prefill +0.0036, 4K decode +0.0049); NIAH passes.
+
+**Decode bound.** A DFlash P4096/G128 kernel profile of the GPTQ artifact puts the FP8LUT4 small-T
+projections at 500-555 GB/s effective weight reads (gate/up 10.6 ms, accumulating projections 7.6
+ms and GDN pair/convolution 4.3 ms per round), the drafter's A8Q4G64 at ~480 GB/s and the row
+FP8 projections at ~530 GB/s, against ~612 GB/s for a synthetic contiguous read: decode is within
+10-20% of weight bandwidth, so further gains need fewer bytes per round. Dropping the two final
+byte permutes of the FP8LUT4 decode (repacked nibble order, measured as a wrong-output ceiling)
+changes T1 by nothing, T6 by 0 to -3.8% and prefill GEMMs by -0.7 to -2.7%; not pursued.
+
 ## Protected FP8 projections on the prefill GEMM (2026-09-27)
 
 The 26 selective-cap FP8 projections ran T > 16 through hipBLASLt (MT128x128x32 solutions, 4.8%

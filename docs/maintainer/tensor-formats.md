@@ -53,7 +53,9 @@ Source conversion (`tools/convert/qwen3_8_27b_r9700/fp8lut4_codec.py`) sets `R =
 for every group, chooses `(E, m)` among `E` in `{e0 - 1, e0, e0 + 1}` (e0 from the group maximum)
 and all eight `m` by minimum decoded squared error, each element taking its nearest magnitude. On
 the Qwen3.8 BF16 weights this has 0.82x the relative L2 error of Q4G64 absmax at the same 4.25
-bits per weight. FP8LUT4 Linears consume per-token E4M3 activation images (codes, FP32 token scales,
+bits per weight. Given a projection's input second moments it instead rounds column-sequentially
+with GPTQ error compensation (the group code searched on the error-updated weights, weighted by
+the inverse-Hessian Cholesky diagonal); the stored format is unchanged. FP8LUT4 Linears consume per-token E4M3 activation images (codes, FP32 token scales,
 one status word per token; a flagged token's outputs are the canonical BF16 NaN).
 
 The growing attention cache is not a persistent tensor numeric format. It is runtime state with

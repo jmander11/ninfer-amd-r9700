@@ -2,8 +2,11 @@
 
 Every Text-layer projection the base stores as Q4G64 is re-encoded from the original BF16
 checkpoint as FP8LUT4 (`fp8lut4_codec`), MLP gate/up rows in the interleaved SiLU-pair order
-(`fp8lut4_codec.interleave_gate_up`); every other object (FP8 protections, embeddings, head,
-MTP, DFlash2 companion, Vision, resources) is copied byte-exact from the base artifact.
+(`fp8lut4_codec.interleave_gate_up`), with GPTQ error-compensated rounding against the input
+second moments of the calibration sequences (`calibration.InputMoments`, evaluated layer-major
+through the BF16 reference in lock-step with the object order); every other object (FP8
+protections, embeddings, head, MTP, DFlash2 companion, Vision, resources) is copied byte-exact
+from the base artifact.
 """
 from __future__ import annotations
 
@@ -16,6 +19,11 @@ from tools.artifact.container import (
     Artifact, ArtifactIdentity, ArtifactWriter, TensorObject,
     TensorSpec as StoredTensor, ResourceSpec as StoredResource,
 )
+
+# Mean-diagonal GPTQ damping per calibrated input, selected on held-out calibration sequences:
+# the 17408-wide MLP down input overfits at low damping.
+DAMPING = {"mlp/down": 0.3}
+DEFAULT_DAMPING = 0.1
 
 BASE_WEIGHTS_ID = "r9700-q4-fp8-selective-cap-n16k16-dflash2-q4-eval"
 WEIGHTS_ID = "r9700-fp8lut4-fp8-selective-cap-dflash2-q4-eval"
@@ -46,6 +54,7 @@ def convert(args) -> None:
     import torch
     from tools.convert.common.safetensors import ShardReader
     from . import fp8lut4_codec, source, source_recipe
+    from .calibration import InputMoments
 
     receipt = Path(str(args.out) + ".conversion.json")
     if args.out.exists() or receipt.exists():
@@ -55,8 +64,14 @@ def convert(args) -> None:
     if metadata.source_shard_count != 18 or metadata.source_dtype_counts != {"BF16": 1199}:
         raise ValueError("requires the complete original BF16 source")
     torch.set_num_threads(8)
+    device = torch.device(args.device)
+    moments = InputMoments(args.model, args.calibration, device)
     report = dict(recipe=WEIGHTS_ID, base=str(args.base.resolve()),
-                  source_model=str(args.model.resolve()), objects=[])
+                  source_model=str(args.model.resolve()),
+                  calibration=dict(ids=str(args.calibration.resolve()),
+                                   sha256=hashlib.sha256(args.calibration.read_bytes()).hexdigest(),
+                                   tokens=moments.tokens, rounding="gptq-block128", damping=dict(DAMPING, default=DEFAULT_DAMPING)),
+                  objects=[])
     with Artifact(args.base) as base, ShardReader(args.model) as reader:
         if base.identity.weights_id != BASE_WEIGHTS_ID:
             raise ValueError(f"base must be {BASE_WEIGHTS_ID}, got {base.identity.weights_id}")
@@ -66,18 +81,29 @@ def convert(args) -> None:
             else StoredResource(o.name, o.encoding, o.bytes)
             for o in base.objects)
         identity = ArtifactIdentity(base.identity.model_id, WEIGHTS_ID)
+        layer_moments: dict[str, torch.Tensor] = {}
         with ArtifactWriter(args.out, identity, stored) as writer:
             for obj in base.objects:
                 record = dict(name=obj.name)
                 if selected(obj):
+                    layer = int(obj.name.split("/")[2])
+                    while moments.next_layer <= layer:
+                        layer_moments = moments.layer(moments.next_layer)
+                    if moments.next_layer != layer + 1:
+                        raise ValueError(f"{obj.name} is out of layer-major order")
                     tensor = source_recipe.materialize_recipe(
                         source_recipe.RECIPES_BY_NAME[obj.name], reader)
                     if obj.name.endswith("/mlp/gate_up"):
                         tensor = fp8lut4_codec.interleave_gate_up(tensor)
-                    record["origin"] = "original-bf16-source-fp8lut4"
-                    writer.write(obj.name, recorded(
-                        fp8lut4_codec.encode_chunks(tensor, device=args.device), record))
-                    del tensor
+                    role = "/".join(obj.name.split("/")[3:])
+                    calibration = None if role.startswith("attention/") else fp8lut4_codec.Calibration(
+                        layer_moments[role], DAMPING.get(role, DEFAULT_DAMPING))
+                    record["origin"] = ("original-bf16-source-fp8lut4" if calibration is None
+                                        else "original-bf16-source-fp8lut4-gptq")
+                    writer.write(obj.name, recorded(fp8lut4_codec.encode_chunks(
+                        tensor, device=device, rows_per_chunk=tensor.shape[0],
+                        calibration=calibration), record))
+                    del tensor, calibration
                     print(obj.name, flush=True)
                 else:
                     record["origin"] = "base-copy-exact"
@@ -112,14 +138,17 @@ def main() -> None:
     parser.add_argument("--base", type=Path)
     parser.add_argument("--model", type=Path)
     parser.add_argument("--out", type=Path)
-    parser.add_argument("--device", default="cpu", help="torch device for the codebook search")
+    parser.add_argument("--calibration", type=Path,
+                        help="calibration token ids, one equal-length sequence per line")
+    parser.add_argument("--device", default="cuda:0",
+                        help="torch device for the BF16 calibration pass and GPTQ")
     parser.add_argument("--validate", type=Path)
     args = parser.parse_args()
     if args.validate:
         validate(args.validate)
         print("PASS: identity and every payload digest")
         return
-    for key in ("base", "model", "out"):
+    for key in ("base", "model", "out", "calibration"):
         if getattr(args, key) is None:
             parser.error(f"--{key} is required")
     convert(args)

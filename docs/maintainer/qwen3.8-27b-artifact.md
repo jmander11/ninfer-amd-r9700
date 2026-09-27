@@ -98,13 +98,27 @@ resources are copied byte-exact from the base. MLP gate/up rows are stored gate/
 `8 b + i - 8`) so the projection publishes the SiLU-gated activation directly; no other object is
 permuted. The binder uses the selective-cap base inventory and switches exactly its Text-layer Q4
 matrices to FP8LUT4. Installed at
-`/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-fp8lut4-fp8-selective-cap/`. Conversion (GPU
-search optional, create-only, validated readback):
+`/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-fp8lut4-fp8-selective-cap/`.
+
+The GDN and MLP FP8LUT4 words are GPTQ-rounded: the BF16 reference
+(`tools/reference/qwen3_8_27b_bf16`) evaluates 128 calibration sequences of 2048 tokens
+layer-major, in lock-step with the object order, and each projection is rounded
+column-sequentially against its inputs' second moments (`fp8lut4_codec.Calibration`; mean-diagonal
+damping 0.3 for MLP down, 0.1 otherwise, chosen on held-out calibration sequences). Attention
+projections keep independent rounding: GPTQ there failed 8K multikey NIAH (5/10 sampled runs).
+The calibration set (`calibration_corpus.py`) is 64 windows of rendered opencode sessions, 20 of
+OpenWebUI conversations, 28 of llama.cpp sources and 16 of news text; no window shares a 32-token
+span with the PPL corpora, and its manifest records every input file. Conversion needs the GPU
+(~45 min), is create-only, and validates its readback. The GPTQ conversion is at
+`/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-fp8lut4-gptq-usage/` (same identity and
+format) until it replaces the installed independently rounded file.
 
 ```bash
 python3.11 -m tools.convert.qwen3_8_27b_r9700.convert_fp8lut4 \
   --base <qwen3.8-27b-r9700-q4-fp8-selective-cap-n16k16-dflash2-q4-eval.ninfer> \
-  --model /ssdpool2nvme/local_llm/models/qwen3.8-27b-bf16 --out <new.ninfer> --device cuda
+  --model /ssdpool2nvme/local_llm/models/qwen3.8-27b-bf16 \
+  --calibration /ssdpool2nvme/local_llm/models/qwen3.8-27b-calibration/calibration-usage-128x2048.ids \
+  --out <new.ninfer>
 ```
 
 Its Linears run per-token E4M3 activations: prefill a 256-token x 128-row FP8 WMMA GEMM with the

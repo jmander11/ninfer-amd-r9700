@@ -9,7 +9,7 @@ import torch
 from tools.artifact.layouts import fp8lut4_geometry, fp8lut4_magnitude_table, decode_fp8lut4, encode_fp8lut4_planes
 from tools.artifact.numeric import round_e4m3fn_magnitude
 
-from .fp8lut4_codec import encode_chunks, interleave_gate_up, quantize_rows
+from .fp8lut4_codec import Calibration, encode_chunks, interleave_gate_up, quantize_rows
 
 
 class Fp8Lut4CodecTest(unittest.TestCase):
@@ -71,6 +71,31 @@ class Fp8Lut4CodecTest(unittest.TestCase):
         stored = interleave_gate_up(weight)[:, 0].tolist()
         # Tile 1: gate features 8..15, then up features 8..15 (source rows 40..47).
         self.assertEqual(stored[16:32], list(range(8, 16)) + list(range(40, 48)))
+
+    def test_calibrated_rounding_reduces_output_error_and_round_trips(self) -> None:
+        generator = torch.Generator().manual_seed(5)
+        columns = 256
+        mixing = torch.randn(columns, columns, generator=generator) * 0.3 + torch.eye(columns)
+        inputs = (torch.randn(4096, columns, generator=generator) @ mixing) * torch.exp(
+            torch.randn(columns, generator=generator))
+        inputs[:, 40] = 0.0                                      # never-active input
+        weight = torch.randn(32, columns, generator=generator).to(torch.bfloat16)
+        calibration = Calibration(inputs.t() @ inputs, 0.01)
+        table = torch.tensor(fp8lut4_magnitude_table(), dtype=torch.uint8)
+
+        def decoded(codes, groups, scales):
+            magnitude = table.view(torch.float8_e4m3fn).to(torch.float64)[
+                groups.long().repeat_interleave(32, 1), (codes & 7).long()]
+            return torch.where((codes & 8) != 0, -magnitude, magnitude) * scales.double()[:, None]
+
+        def output_error(words):
+            return ((decoded(*words) - weight.double()) @ inputs.double().t()).norm().item()
+
+        calibrated = quantize_rows(weight.float(), calibration)
+        self.assertLess(output_error(calibrated), 0.8 * output_error(quantize_rows(weight.float())))
+        self.assertTrue(bool((decoded(*calibrated)[:, 40] == 0).all()))
+        payload = b"".join(encode_chunks(weight, rows_per_chunk=16, calibration=calibration))
+        self.assertTrue(torch.equal(decode_fp8lut4(payload, (32, columns)), decoded(*calibrated)))
 
     def test_nonfinite_source_is_rejected(self) -> None:
         weight = torch.zeros(2, 64)
