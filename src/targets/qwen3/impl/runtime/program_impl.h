@@ -221,6 +221,17 @@ DecodeGraphProfile& select_graph_profile(DecodeGraphFamily& family, std::uint32_
     return *it;
 }
 
+// The planned execution profile containing `frontier`. Graph and eager decode both execute a
+// transaction under its maximum frontier: attention split sizes and envelopes derive from that
+// bound, so eager execution is exactly the computation a captured graph replays.
+GraphExecutionProfile planned_execution_profile(const std::vector<GraphExecutionProfile>& profiles,
+                                                std::uint32_t frontier, const char* label) {
+    for (const GraphExecutionProfile& profile : profiles) {
+        if (profile.min <= frontier && frontier <= profile.max) { return profile; }
+    }
+    throw std::logic_error(std::string(label) + " execution profile coverage is incomplete");
+}
+
 void validate_graph_profiles(const std::vector<GraphExecutionProfile>& profiles,
                              std::uint32_t max_frontier, const char* label) {
     if (profiles.empty() || profiles.front().min != 0 || profiles.back().max != max_frontier) {
@@ -3888,13 +3899,14 @@ ProgramImplCore::decode_ordinary_batch(std::span<const std::uint32_t> lanes,
 
     try {
         DecodeGraphExecutable* executable = nullptr;
-        std::uint32_t transaction_maximum_frontier = maximum_frontier;
+        const std::uint32_t transaction_maximum_frontier =
+            planned_execution_profile(ordinary_graph_profiles(capacity), maximum_frontier,
+                                      "ordinary batch").max;
         if (use_device_graph) {
             DecodeGraphProfile& profile =
                 select_graph_profile(ordinary_graphs, static_cast<std::uint32_t>(lanes.size()),
                                      maximum_frontier, "ordinary batch");
             executable = &install_graph_profile(ordinary_graphs, profile, "ordinary batch");
-            transaction_maximum_frontier = profile.max_execution_frontier;
         }
 
         for (std::size_t row = 0; row < lanes.size(); ++row) {
@@ -4091,13 +4103,14 @@ ProgramImplCore::decode_mtp_batch(std::span<const std::uint32_t> lanes,
 
     try {
         DecodeGraphExecutable* executable = nullptr;
-        std::uint32_t transaction_maximum_frontier = maximum_frontier;
+        const std::uint32_t transaction_maximum_frontier =
+            planned_execution_profile(mtp_graph_profiles(capacity, batch_k), maximum_frontier,
+                                      "MTP batch").max;
         if (use_device_graph) {
             DecodeGraphProfile& profile =
                 select_graph_profile(mtp_graphs, static_cast<std::uint32_t>(lanes.size()),
                                      maximum_frontier, "MTP batch", batch_k);
             executable = &install_graph_profile(mtp_graphs, profile, "MTP batch");
-            transaction_maximum_frontier = profile.max_execution_frontier;
         }
 
         std::uint32_t realized_extent = 0;
@@ -4447,16 +4460,18 @@ ProgramImplCore::decode_dflash_batch(std::span<const std::uint32_t> lanes,
     }
     try {
         DecodeGraphExecutable* executable   = nullptr;
-        std::uint32_t transaction_maximum_frontier = maximum_frontier;
-        schedule::DFlashEnvelopes envelopes = dflash_envelopes(0, maximum_frontier, batch_k);
+        const GraphExecutionProfile planned = planned_execution_profile(
+            dflash_graph_profiles(capacity, batch_k, static_cast<std::uint32_t>(lanes.size()),
+                                  live_w),
+            maximum_frontier, "DFlash batch");
+        const std::uint32_t transaction_maximum_frontier = planned.max;
+        const schedule::DFlashEnvelopes envelopes =
+            dflash_envelopes(planned.min, planned.max, batch_k);
         if (use_device_graph) {
             DecodeGraphProfile& profile =
                 select_graph_profile(dflash_graphs, static_cast<std::uint32_t>(lanes.size()),
                                      maximum_frontier, "DFlash batch", batch_k);
             executable      = &install_graph_profile(dflash_graphs, profile, "DFlash batch");
-            envelopes       = dflash_envelopes(profile.min_execution_frontier,
-                                               profile.max_execution_frontier, batch_k);
-            transaction_maximum_frontier = profile.max_execution_frontier;
         }
 
         std::array<std::uint32_t, kMaximumConcurrency> text_target_columns{};

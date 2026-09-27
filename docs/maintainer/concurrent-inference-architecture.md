@@ -1346,7 +1346,10 @@ fill pinned ingress rows [0,B)
 ```
 
 Cross-page materialization 发生在 replay 前的同一 execution lane，不改变 captured pool/table bases，也不形成
-graph key。Graph-off mode 按相同顺序 eager 提交这些动作。
+graph key。Graph-off mode 按相同顺序 eager 提交这些动作，并且与 graph mode 一样在所选 planned profile 的
+maximum execution frontier 下执行该 transaction（attention split 大小与 DFlash envelopes 由该上界决定），因此
+eager 与 captured replay 逐位相同；以 live frontier 执行会在 16K 以上改变 packed decode split，破坏 graph/eager
+精确性。
 
 不得为每个 `B`、profile 或 captured definition 复制 logits、hidden、workspace 或 per-sequence state。
 Model/control ingress、forward 和 result egress 不存在 per-row device submission；跨 page 时的 table
