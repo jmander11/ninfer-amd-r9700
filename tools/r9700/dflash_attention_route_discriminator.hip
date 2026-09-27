@@ -1,3 +1,4 @@
+#include "qualification_device_guard.h"
 #include "core/device.h"
 #include "core/decode_graph.h"
 #include "ops/r9700/kv/fp8_int4_kv_attention.h"
@@ -167,7 +168,7 @@ Fixture make_fixture() {
         .physical_scales = std::vector<std::uint16_t>(kPhysicalTokens * kKvHeads * kGroups)};
     if (kW6Context > 135U) {
         fixture.pages.resize((kW6Context + kPageSize - 1U) / kPageSize);
-        // 67 physical pages, relatively-prime stride17: a nonmonotonic injective
+        // Physical page count is relatively prime to stride17: a nonmonotonic injective
         // logical-page mapping, with spare pages to catch accidental contiguous reads.
         for (std::size_t page = 0; page < fixture.pages.size(); ++page)
             fixture.pages[page] = static_cast<std::uint32_t>((page*17U + 2U) % kPhysicalPages);
@@ -393,7 +394,33 @@ double median(std::array<double, kTrials> values) {
 int main(int argc, char** argv) {
     try {
         const bool long_context = argc == 2 && std::string_view(argv[1]) == "--long-context";
-        if (argc != 1 && !long_context) fail("usage: dflash_attention_route_discriminator [--long-context]");
+        const bool live_cell = argc == 5 && std::string_view(argv[1]) == "--live-context-cell";
+        const bool live_context = live_cell ||
+            (argc == 2 && std::string_view(argv[1]) == "--live-context");
+        if (argc != 1 && !long_context && !live_context)
+            fail("usage: dflash_attention_route_discriminator [--long-context|--live-context|--live-context-cell ENVELOPE ROWS LIVE]");
+        std::vector<std::size_t> selected_envelopes{8192U, 65536U};
+        std::vector<std::uint32_t> selected_widths{1U, 4U, 6U};
+        std::vector<std::size_t> selected_live{4097U, 65U, 257U};
+        if (live_cell) {
+            const auto envelope = std::stoul(argv[2]);
+            const auto rows = std::stoul(argv[3]);
+            const auto live = std::stoul(argv[4]);
+            if ((envelope != 8192U && envelope != 65536U) ||
+                (rows != 1U && rows != 4U && rows != 6U) ||
+                live < rows || live > envelope)
+                fail("live-context cell requires envelope8192/65536, rows1/4/6 and rows<=live<=envelope");
+            selected_envelopes = {envelope};
+            selected_widths = {static_cast<std::uint32_t>(rows)};
+            selected_live = {live};
+        }
+        if (live_context) {
+            kW1Context = 65531U;
+            kW5Context = 65535U;
+            kW6Context = 65536U;
+            kPhysicalPages = 1027U;
+            kPhysicalTokens = kPhysicalPages * kPageSize;
+        }
         if (long_context) {
             kW1Context = 4097U;
             kW5Context = 4101U;
@@ -419,21 +446,12 @@ int main(int argc, char** argv) {
             kv::use_text_p129_wmma_tail(kTextRows, 130U)) {
             fail("attention parity selector escaped its exact Text/packed cells");
         }
-        ninfer::DeviceContext device(0);
-        if (!device.is_gfx1201() || device.props.warpSize != 32) {
-            fail("physical device is not wave32 gfx1201");
-        }
-        if (std::string(device.props.name) != "AMD Radeon AI PRO R9700") {
-            fail("physical device is not AMD Radeon AI PRO R9700");
-        }
-        int selected_device = -1;
-        hip_check(hipGetDevice(&selected_device), "hipGetDevice");
+        constexpr const char* split_geometry = "host-envelope-production";
+        const int selected_device = ninfer::r9700_qualification::device_guard().select();
+        ninfer::DeviceContext device(selected_device);
         std::array<char, 32> pci{};
         hip_check(hipDeviceGetPCIBusId(pci.data(), static_cast<int>(pci.size()), selected_device),
                   "hipDeviceGetPCIBusId");
-        if (selected_device != 0 || std::string(pci.data()) != "0000:13:00.0") {
-            fail("physical device is not device0 at PCI 0000:13:00.0");
-        }
         const Fixture fixture = make_fixture();
         const std::vector<hip_bfloat16> queries = [&] {
             std::vector<hip_bfloat16> result;
@@ -521,6 +539,135 @@ int main(int argc, char** argv) {
                 .value_scale_layout = kv::Fp8Int4KvPlaneLayout::FeatureFastest,
                 .score_workspace = scores, .output = output};
         };
+        if (live_context) {
+            // The target passes a captured frontier envelope as context while row_positions
+            // supply the live causal frontier. Keep one executable and allocation per envelope
+            // and width, replaying shorter and then longer contexts to expose stale partials.
+            Json cells = Json::array();
+            for (const std::size_t envelope : selected_envelopes)
+            for (const std::uint32_t rows : selected_widths) {
+                const std::size_t elements = rows * row_elements;
+                const std::size_t workspace_elements =
+                    kv::fp8_int4_kv_attention_packed_decode_workspace_bytes(envelope, rows) /
+                    sizeof(float);
+                DeviceArray<float> output(elements + 2U), scores(workspace_elements + 2U);
+                DeviceArray<std::int32_t> positions(rows);
+                auto packed = args(rows, envelope, positions.get(), scores.get() + 1U,
+                                   output.get() + 1U);
+                const auto launch = [&] {
+                    return kv::fp8_int4_kv_attention_packed_decode(packed, device.stream);
+                };
+                // Capture performs no reads of the positions payload; initialize it anyway so
+                // this fixture remains valid if capture setup later adds device work.
+                upload(positions, std::vector<std::int32_t>(rows, 0));
+                ninfer::DecodeGraphDefinition definition;
+                definition.capture(device.stream, [&] {
+                    hip_check(launch(), "capture live-context packed attention");
+                });
+                ninfer::DecodeGraphExecutable executable;
+                executable.instantiate(definition);
+                executable.upload(device.stream);
+                const auto replay = [&] {
+                    executable.launch(device.stream);
+                    return hipGetLastError();
+                };
+                // Zero live maximum must still overwrite every fixed-grid partial and
+                // propagate invalid rows. It must not divide by zero or reuse old payload.
+                upload(positions, std::vector<std::int32_t>(rows, -1));
+                fill_guarded(output, elements);
+                fill_guarded(scores, workspace_elements);
+                hip_check(replay(), "live-context all-invalid graph");
+                device.synchronize();
+                const auto invalid = read_guarded(output, elements, "live-context all-invalid");
+                if (!std::all_of(invalid.begin(), invalid.end(),
+                                 [](float value) { return std::isnan(value); }))
+                    fail("live-context all-invalid rows were not poisoned");
+                require_guard_canaries(scores, "live-context all-invalid workspace");
+                for (const std::size_t live : selected_live) {
+                    std::vector<std::int32_t> host_positions(rows);
+                    for (std::uint32_t row = 0; row < rows; ++row)
+                        host_positions[row] = static_cast<std::int32_t>(live - rows + row);
+                    upload(positions, host_positions);
+                    const auto expected = attention_oracle(fixture, fixture.queries, rows,
+                                                           host_positions);
+                    fill_guarded(output, elements);
+                    // Poison every partial before the eager launch. A missing empty-split
+                    // write must not be hidden by zero-initialized allocation or prior replay.
+                    fill_guarded(scores, workspace_elements);
+                    hip_check(launch(), "live-context packed eager");
+                    device.synchronize();
+                    const auto eager = read_guarded(output, elements, "live-context eager");
+                    const auto error = require_oracle(eager, expected, 2.0e-3,
+                                                      "live-context public BF16 attention");
+                    require_guard_canaries(scores, "live-context eager workspace");
+                    fill_guarded(output, elements);
+                    fill_guarded(scores, workspace_elements);
+                    hip_check(replay(), "live-context graph replay");
+                    device.synchronize();
+                    const auto graph = read_guarded(output, elements, "live-context graph");
+                    if (!std::equal(eager.begin(), eager.end(), graph.begin(),
+                        [](float a, float b) {
+                            return std::bit_cast<std::uint32_t>(a) ==
+                                   std::bit_cast<std::uint32_t>(b);
+                        })) fail("live-context eager/graph mismatch");
+                    require_guard_canaries(scores, "live-context graph workspace");
+                    // Same represented queries/cache and causal positions, with a tight host
+                    // frontier. Different split association need only satisfy the oracle.
+                    auto tight = packed;
+                    tight.context = live;
+                    const auto launch_tight = [&] {
+                        return kv::fp8_int4_kv_attention_packed_decode(tight, device.stream);
+                    };
+                    hip_check(launch_tight(), "live-context tight control");
+                    device.synchronize();
+                    const auto tight_error = require_oracle(
+                        read_guarded(output, elements, "live-context tight output"), expected,
+                        2.0e-3, "live-context tight oracle");
+                    ninfer::r9700_qualification::device_guard().check("after-oracle-before-timing");
+                    std::array<double, kTrials> eager_ms{}, graph_ms{}, tight_ms{};
+                    for (int trial = 0; trial < kTrials; ++trial) {
+                        if ((trial & 1) == 0) {
+                            eager_ms[trial] = time_ms(device.stream, launch);
+                            graph_ms[trial] = time_ms(device.stream, replay);
+                            tight_ms[trial] = time_ms(device.stream, launch_tight);
+                        } else {
+                            tight_ms[trial] = time_ms(device.stream, launch_tight);
+                            graph_ms[trial] = time_ms(device.stream, replay);
+                            eager_ms[trial] = time_ms(device.stream, launch);
+                        }
+                    }
+                    ninfer::r9700_qualification::device_guard().check("after-timing");
+                    // Replay after the tight control without resetting the workspace: the
+                    // captured operation must overwrite all partials its merge consumes.
+                    hip_check(replay(), "live-context graph after tight control");
+                    device.synchronize();
+                    require_oracle(read_guarded(output, elements, "live-context final replay"),
+                                   expected, 2.0e-3, "live-context final replay oracle");
+                    require_guard_canaries(scores, "live-context timed workspace");
+                    cells.push_back({{"rows", rows}, {"envelope", envelope},
+                        {"live_context", live}, {"positions", host_positions},
+                        {"workspace_bytes", workspace_elements * sizeof(float)},
+                        {"oracle_max_absolute", error.maximum_absolute},
+                        {"tight_oracle_max_absolute", tight_error.maximum_absolute},
+                        {"eager_graph_bitwise_equal", true},
+                        {"complete_verify_merge_eager_ms", median(eager_ms)},
+                        {"complete_verify_merge_graph_ms", median(graph_ms)},
+                        {"complete_verify_merge_tight_eager_ms", median(tight_ms)}});
+                }
+            }
+            std::cout << Json{{"schema_version", 1},
+                {"qualification", "packed_attention_live_context_envelope"},
+                {"split_geometry", split_geometry}, {"all_invalid_zero_maximum", true},
+                {"hardware", {{"device", selected_device}, {"name", device.props.name},
+                              {"architecture", "gfx1201"}, {"pci_bus_id", pci.data()}}},
+                {"oracle", "FP64 from public BF16 Q, FP8 K, signed INT4 V and FP16 scales"},
+                {"criterion", "absolute <= 2e-3 or relative <= 2e-3"},
+                {"timing", {{"scope", "complete verify plus merge"},
+                            {"trials", kTrials}, {"iterations_per_trial", kTimingIterations},
+                            {"warmup_per_trial", 3}}},
+                {"cells", cells}}.dump(2) << '\n';
+            return 0;
+        }
         // Widths 1..4 (ordinary decode, MTP, short DFlash chains) use the same dynamic-row device
         // instructions as W5/W6. Exercise their public inputs directly, including compact-C
         // page-table selection and distinct causal prefixes.
@@ -1049,6 +1196,7 @@ int main(int argc, char** argv) {
                         })) {
             fail("captured Text P129 tail candidate differs from eager execution");
         }
+        ninfer::r9700_qualification::device_guard().check("after-oracle-before-timing");
         std::array<double, kTrials> wmma_samples{};
         std::array<double, kTrials> fused_samples{};
         std::array<double, kTrials> batched_samples{};
@@ -1097,15 +1245,17 @@ int main(int argc, char** argv) {
                 });
             }
         }
+        ninfer::r9700_qualification::device_guard().check("after-timing");
         const Json report{
             {"schema_version", 3},
             {"qualification", "text_p129_and_dflash_verify_attention_parity_discriminator"},
+            {"split_geometry", split_geometry},
             {"small_width_qualification", small_width_cells},
             {"w4_w5_w6_invalid_page_metadata_poison", true},
             {"selector", {{"name", "NINFER_R9700_TEXT_P129_WMMA_TAIL_CANDIDATE"},
                            {"compiled", kv::kTextP129WmmaTailCandidate},
                            {"default", false}}},
-            {"hardware", {{"device", 0}, {"name", device.props.name},
+            {"hardware", {{"device", selected_device}, {"name", device.props.name},
                            {"architecture", "gfx1201"}, {"wave_size", 32},
                            {"pci_bus_id", pci.data()}}},
             {"geometry", {{"query_heads", 24}, {"kv_heads", 4}, {"head_dim", 256},

@@ -1,3 +1,4 @@
+#include "qualification_device_guard.h"
 #include "ops/r9700/kv/fp8_int4_kv_attention.h"
 #include "ops/r9700/kv/r9700_attention_profile.h"
 #include "../../tests/ops/fp8_int4_kv_oracle.h"
@@ -310,6 +311,7 @@ void run_case(std::uint32_t rows, std::uint32_t group, std::uint32_t context,
             }
         }
     }
+    ninfer::r9700_qualification::device_guard().check("after-oracle-before-timing");
     if (timed_iterations != 0U) {
         // Unprofiled event timing after the oracle pass: median of individually timed launches.
         for (unsigned warm = 0; warm < 3; ++warm) HIP_CHECK(launch_selected_dense(args, nullptr));
@@ -324,6 +326,7 @@ void run_case(std::uint32_t rows, std::uint32_t group, std::uint32_t context,
             HIP_CHECK(hipEventElapsedTime(&milliseconds, start.get(), stop.get()));
             samples.push_back(milliseconds);
         }
+        ninfer::r9700_qualification::device_guard().check("after-timing");
         std::sort(samples.begin(), samples.end());
         double visible = 0.0;
         for (const auto position : positions) visible += static_cast<double>(position) + 1.0;
@@ -487,26 +490,27 @@ void run_case(std::uint32_t rows, std::uint32_t group, std::uint32_t context,
 
 int main(int argc, char** argv) {
     try {
+        const bool timed = argc == 6 && std::string(argv[1]) == "--time";
+        if (argc != 1 && argc != 4 && !timed)
+            fail("usage: dense_prefill_attention_qual [rows context value-group | --time rows context value-group iterations]");
+        std::uint32_t rows = 0, context = 0, group = 0, iterations = 0;
+        if (argc != 1) {
+            const int first = timed ? 2 : 1;
+            rows = static_cast<std::uint32_t>(std::stoul(argv[first]));
+            context = static_cast<std::uint32_t>(std::stoul(argv[first + 1]));
+            group = static_cast<std::uint32_t>(std::stoul(argv[first + 2]));
+            if (timed) iterations = static_cast<std::uint32_t>(std::stoul(argv[5]));
+            if (!kv::use_dense_prefill_attention(rows, context) ||
+                (group != 16U && group != 32U) || (timed && iterations == 0U))
+                fail("invalid dense attention qualification/timing shape");
+        }
         host_predicate_regression();
-        if (argc == 6 && std::string(argv[1]) == "--time") {
-            const auto rows = static_cast<std::uint32_t>(std::stoul(argv[2]));
-            const auto context = static_cast<std::uint32_t>(std::stoul(argv[3]));
-            const auto group = static_cast<std::uint32_t>(std::stoul(argv[4]));
-            if (!kv::use_dense_prefill_attention(rows, context) || (group != 16U && group != 32U))
-                fail("invalid dense attention timing shape");
-            run_case(rows, group, context, 0U, static_cast<std::uint32_t>(std::stoul(argv[5])));
+        ninfer::r9700_qualification::device_guard().select();
+        std::cerr << "dense-prefill key-block=32 production\n";
+        if (argc != 1) {
+            run_case(rows, group, context, 0U, iterations);
             return 0;
         }
-        if (argc == 4) {
-            const auto rows = static_cast<std::uint32_t>(std::stoul(argv[1]));
-            const auto context = static_cast<std::uint32_t>(std::stoul(argv[2]));
-            const auto group = static_cast<std::uint32_t>(std::stoul(argv[3]));
-            if (!kv::use_dense_prefill_attention(rows, context) || (group != 16U && group != 32U))
-                fail("invalid dense attention qualification shape");
-            run_case(rows, group, context);
-            return 0;
-        }
-        if (argc != 1) fail("usage: dense_prefill_attention_qual [rows context value-group | --time rows context value-group iterations]");
         for (const std::uint32_t group : {16U, 32U}) {
             for (const std::uint32_t rows : {128U, 129U, 512U, 1024U, 2048U, 4096U}) {
                 run_case(rows, group, rows);

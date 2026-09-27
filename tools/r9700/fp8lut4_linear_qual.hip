@@ -2,6 +2,7 @@
 // decodes the stored codes through an independently rounded codebook: every group code's table,
 // small-T and prefill widths on the real Qwen3.8 projection shapes, the residual epilogue and the
 // poisoned-activation contract. Optional timing (--time) on the same shapes.
+#include "qualification_device_guard.h"
 #include "ops/r9700/linear/fp8lut4_linear.h"
 #include "ops/r9700/linear/fp8_activation.h"
 #include "../../tests/ops/fp8_int4_kv_oracle.h"
@@ -10,6 +11,7 @@
 #include <hip/hip_runtime.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -105,6 +107,7 @@ struct Weight {
         }
         for (auto& s : scales) s = static_cast<float>(std::ldexp(1.0 + rng.uniform(), -9));
         device_codes.upload(codes);
+
         device_groups.upload(groups);
         device_scales.upload(scales);
     }
@@ -134,7 +137,8 @@ struct Activation {
 };
 
 void run_case(const std::vector<double>& book, std::uint32_t rows, std::uint32_t columns,
-              std::uint32_t tokens, bool accumulate, bool poison, Rng& rng, hipStream_t stream) {
+              std::uint32_t tokens, bool accumulate, bool poison, Rng& rng, hipStream_t stream,
+              bool timed = false, bool graph_timing = false) {
     const std::string label = "N" + std::to_string(rows) + " K" + std::to_string(columns) + " T" +
                               std::to_string(tokens) + (accumulate ? " residual" : "") +
                               (poison ? " poisoned" : "");
@@ -146,6 +150,9 @@ void run_case(const std::vector<double>& book, std::uint32_t rows, std::uint32_t
     Device<hip_bfloat16> device_input(input.size());
     device_input.upload(input);
     Activation activation(tokens, columns);
+    if (graph_timing)
+        check(hipMemsetAsync(activation.storage.data, 0xff, activation.storage.count, stream),
+              "poison represented activation storage before excluded producer");
     check(linear::fp8_quantize_activation({device_input.data, activation.workspace}, stream), "quantize");
     std::vector<hip_bfloat16> base(static_cast<std::size_t>(tokens) * rows);
     for (auto& b : base) b = hip_bfloat16(static_cast<float>(rng.normal()));
@@ -154,7 +161,30 @@ void run_case(const std::vector<double>& book, std::uint32_t rows, std::uint32_t
     check(linear::fp8lut4_linear(weight.view(), activation.workspace,
                              {.leading = output.data, .accumulate = accumulate}, stream), "fp8lut4");
     check(hipStreamSynchronize(stream), "sync");
+    constexpr int graph_batch = 32;
+    hipGraph_t graph = nullptr;
+    hipGraphExec_t executable = nullptr;
+    const auto launch = [&] {
+        check(linear::fp8lut4_linear(weight.view(), activation.workspace,
+                                    {.leading = output.data}, stream), "timed fp8lut4");
+    };
+    if (graph_timing) {
+        require(timed && !accumulate && !poison, "graph timing requires plain Linear");
+        check(hipStreamBeginCapture(stream, hipStreamCaptureModeThreadLocal), "begin graph capture");
+        for (int i = 0; i < graph_batch; ++i) launch();
+        check(hipStreamEndCapture(stream, &graph), "end graph capture");
+        check(hipGraphInstantiate(&executable, graph, nullptr, nullptr, 0), "instantiate graph");
+        // No global Linear scratch exists: activation storage is a represented input, while
+        // partial reductions live in LDS. Poison output so an empty/stale graph cannot pass.
+        check(hipMemsetAsync(output.data, 0xff, output.count * sizeof(hip_bfloat16), stream),
+              "poison graph output");
+        check(hipGraphLaunch(executable, stream), "qualify graph replay");
+        check(hipStreamSynchronize(stream), "sync qualified graph");
+    }
     const auto got = output.download();
+    if (graph_timing)
+        for (const auto value : got)
+            require(std::isfinite(bf16_value(value.data)), label + " captured replay left nonfinite output");
     if (poison) {
         // The nonfinite element belongs to token poisoned_token; exactly its outputs are NaN.
         const std::uint32_t poisoned_token =
@@ -196,11 +226,49 @@ void run_case(const std::vector<double>& book, std::uint32_t rows, std::uint32_t
             // BF16 output rounding(s) plus FP32 accumulation of the K products.
             const double bound = (std::abs(expected) + std::abs(prior)) / 128.0 +
                                  magnitude * scale * std::ldexp(1.0, -16) + 1e-30;
+            require(std::isfinite(error) && std::isfinite(bound), label + " nonfinite oracle error");
             worst = std::max(worst, error / bound);
         }
     }
     require(worst <= 1.0, label + " FP64 oracle bound exceeded: " + std::to_string(worst));
     std::cout << label << ": worst/bound " << worst << "\n";
+    if (timed) {
+        require(!accumulate && !poison, "timing requires the nonaccumulating Linear output");
+        ninfer::r9700_qualification::device_guard().check("after-linear-oracle-before-timing");
+        const auto replay = [&] {
+            if (graph_timing) check(hipGraphLaunch(executable, stream), "timed graph replay");
+            else launch();
+        };
+        for (int i = 0; i < (graph_timing ? 3 : 10); ++i) replay();
+        check(hipStreamSynchronize(stream), "warmup complete");
+        hipEvent_t begin, end;
+        check(hipEventCreate(&begin), "event");
+        check(hipEventCreate(&end), "event");
+        constexpr std::size_t trials = 7U;
+        std::array<double, trials> samples{};
+        const int iterations = graph_timing ? (tokens > 16U ? 2 : 16) : (tokens > 16U ? 20 : 200);
+        for (auto& sample : samples) {
+            check(hipEventRecord(begin, stream), "record");
+            for (int i = 0; i < iterations; ++i) replay();
+            check(hipEventRecord(end, stream), "record");
+            check(hipEventSynchronize(end), "sync");
+            float ms = 0.0F;
+            check(hipEventElapsedTime(&ms, begin, end), "elapsed");
+            sample = 1e3 * ms / (iterations * (graph_timing ? graph_batch : 1));
+        }
+        check(hipEventDestroy(begin), "destroy event");
+        check(hipEventDestroy(end), "destroy event");
+        ninfer::r9700_qualification::device_guard().check("after-linear-timing");
+        std::sort(samples.begin(), samples.end());
+        std::cout << "complete_linear " << label << " median_us=" << samples[trials / 2U]
+                  << " min_us=" << samples.front() << " max_us=" << samples.back()
+                  << " trials=" << trials << " iterations=" << iterations
+                  << " execution=" << (graph_timing ? "graph" : "eager")
+                  << " ops_per_replay=" << (graph_timing ? graph_batch : 1)
+                  << " activation_quantize_included=false linear_global_scratch_bytes=0\n";
+        if (executable != nullptr) check(hipGraphExecDestroy(executable), "destroy graph executable");
+        if (graph != nullptr) check(hipGraphDestroy(graph), "destroy graph");
+    }
 }
 
 // Two projections of one image in one launch; the first publishes rows [0, split) and [split, N)
@@ -240,6 +308,8 @@ void run_pair(const std::vector<double>& book, std::uint32_t rows0, std::uint32_
         }
         const double scale = static_cast<double>(weight.scales[r]) * token_scales[t];
         const double expected = sum * scale;
+        require(std::isfinite(got) && std::isfinite(expected) && std::isfinite(magnitude),
+                label + " nonfinite paired output/oracle");
         worst = std::max(worst, std::abs(got - expected) /
                                     (std::abs(expected) / 128.0 + magnitude * scale * std::ldexp(1.0, -16) + 1e-30));
     };
@@ -260,7 +330,7 @@ void run_pair(const std::vector<double>& book, std::uint32_t rows0, std::uint32_
 // SiLU-pair epilogue: rows interleaved gate/up in 16-row tiles; output [T, rows / 2] against the
 // FP64 silu(g) * u with the three BF16 roundings (g, u, output) and FP32 accumulation bounded.
 void run_silu(const std::vector<double>& book, std::uint32_t rows, std::uint32_t columns,
-              std::uint32_t tokens, Rng& rng, hipStream_t stream) {
+              std::uint32_t tokens, Rng& rng, hipStream_t stream, bool every_token = false, bool graph_timing = false) {
     const std::string label = "silu pair N" + std::to_string(rows) + " T" + std::to_string(tokens);
     Weight weight(rows, columns, rng);
     std::vector<hip_bfloat16> input(static_cast<std::size_t>(tokens) * columns);
@@ -268,18 +338,44 @@ void run_silu(const std::vector<double>& book, std::uint32_t rows, std::uint32_t
     Device<hip_bfloat16> device_input(input.size());
     device_input.upload(input);
     Activation activation(tokens, columns);
+    if (graph_timing)
+        check(hipMemsetAsync(activation.storage.data, 0xff, activation.storage.count, stream), "poison SiLU activation arena");
     check(linear::fp8_quantize_activation({device_input.data, activation.workspace}, stream), "q");
     const std::uint32_t features = rows / 2U;
     Device<hip_bfloat16> output(static_cast<std::size_t>(tokens) * features);
     check(linear::fp8lut4_linear(weight.view(), activation.workspace,
                              {.leading = output.data, .silu_pair = true}, stream), "silu");
     check(hipStreamSynchronize(stream), "sync");
+    constexpr int graph_batch = 32;
+    hipGraph_t graph = nullptr;
+    hipGraphExec_t executable = nullptr;
+    if (graph_timing) {
+        require(tokens == 1 && rows == 34816 && columns == 5120,
+                "SiLU timing is restricted to the actual T1 gate/up cell");
+        check(hipStreamBeginCapture(stream, hipStreamCaptureModeThreadLocal), "capture SiLU");
+        for (int i = 0; i < graph_batch; ++i)
+            check(linear::fp8lut4_linear(weight.view(), activation.workspace,
+                  {.leading = output.data, .silu_pair = true}, stream), "captured SiLU");
+        check(hipStreamEndCapture(stream, &graph), "end SiLU capture");
+        check(hipGraphInstantiate(&executable, graph, nullptr, nullptr, 0), "instantiate SiLU");
+        check(hipMemsetAsync(output.data, 0xff, output.count * sizeof(hip_bfloat16), stream),
+              "poison SiLU output before qualified replay");
+        check(hipGraphLaunch(executable, stream), "qualify SiLU replay");
+        check(hipStreamSynchronize(stream), "sync SiLU replay");
+    }
     std::vector<std::uint8_t> codes(static_cast<std::size_t>(tokens) * columns);
     std::vector<float> token_scales(tokens);
     check(hipMemcpy(codes.data(), activation.workspace.codes, codes.size(), hipMemcpyDeviceToHost), "c");
     check(hipMemcpy(token_scales.data(), activation.workspace.scales, tokens * 4U, hipMemcpyDeviceToHost), "s");
     const auto got = output.download();
+    if (graph_timing)
+        for (const auto value : got)
+            require(std::isfinite(bf16_value(value.data)), "SiLU replay left nonfinite output");
     std::vector<std::uint32_t> sample_tokens{0U, tokens / 2U, tokens - 1U};
+    if (every_token) {
+        sample_tokens.clear();
+        for (std::uint32_t token = 0U; token < tokens; ++token) sample_tokens.push_back(token);
+    }
     double worst = 0.0;
     for (std::uint32_t f = 0; f < features; f += 37U) {
         const std::uint32_t gate_row = (f / 8U) * 16U + f % 8U, up_row = gate_row + 8U;
@@ -300,68 +396,119 @@ void run_silu(const std::vector<double>& book, std::uint32_t rows, std::uint32_t
             const double bound = 1.5 * (1.1 * std::abs(u) * dg + std::abs(silu) * du +
                                         std::abs(expected) / 256.0) + 1e-30;
             const double value = bf16_value(got[static_cast<std::size_t>(t) * features + f].data);
+            require(std::isfinite(value) && std::isfinite(expected) && std::isfinite(bound),
+                    label + " nonfinite SiLU output/oracle");
             worst = std::max(worst, std::abs(value - expected) / bound);
         }
     }
     require(worst <= 1.0, label + " FP64 oracle bound exceeded: " + std::to_string(worst));
     std::cout << label << ": worst/bound " << worst << "\n";
-}
-
-void time_shapes(hipStream_t stream, Rng& rng) {
-    struct Shape { std::uint32_t rows, columns; const char* name; };
-    const Shape shapes[] = {{34816, 5120, "gate/up"}, {5120, 17408, "down"}, {12288, 5120, "gdn v/z"},
-                            {7168, 5120, "attention"}, {5120, 6144, "output"}, {4096, 5120, "gdn q/k"}};
-    for (const std::uint32_t tokens : {1U, 6U, 2048U}) {
-        for (const auto& shape : shapes) {
-            Weight weight(shape.rows, shape.columns, rng);
-            Activation activation(tokens, shape.columns);
-            // Representative (nonzero) activations: WMMA power, and so clocks, depend on the data.
-            std::vector<hip_bfloat16> host(static_cast<std::size_t>(tokens) * shape.columns);
-            for (auto& x : host) x = hip_bfloat16(static_cast<float>(rng.normal()));
-            Device<hip_bfloat16> input(host.size());
-            input.upload(host);
-            check(linear::fp8_quantize_activation({input.data, activation.workspace}, stream), "q");
-            Device<hip_bfloat16> output(static_cast<std::size_t>(tokens) * shape.rows);
-            const auto launch = [&] {
-                check(linear::fp8lut4_linear(weight.view(), activation.workspace,
-                                         {.leading = output.data}, stream), "fp8lut4");
-            };
-            for (int i = 0; i < 10; ++i) launch();
-            hipEvent_t begin, end;
-            check(hipEventCreate(&begin), "event");
-            check(hipEventCreate(&end), "event");
-            const int iterations = tokens > 16U ? 20 : 200;
+    if (graph_timing) {
+        ninfer::r9700_qualification::device_guard().check("after-SiLU-oracle-before-timing");
+        for (int i = 0; i < 3; ++i) check(hipGraphLaunch(executable, stream), "warm SiLU graph");
+        check(hipStreamSynchronize(stream), "warm SiLU complete");
+        hipEvent_t begin, end;
+        check(hipEventCreate(&begin), "event");
+        check(hipEventCreate(&end), "event");
+        constexpr std::size_t trials = 7;
+        constexpr int iterations = 16;
+        std::array<double, trials> samples{};
+        for (auto& sample : samples) {
             check(hipEventRecord(begin, stream), "record");
-            for (int i = 0; i < iterations; ++i) launch();
+            for (int i = 0; i < iterations; ++i)
+                check(hipGraphLaunch(executable, stream), "timed SiLU graph");
             check(hipEventRecord(end, stream), "record");
             check(hipEventSynchronize(end), "sync");
-            float ms = 0.0F;
+            float ms = 0;
             check(hipEventElapsedTime(&ms, begin, end), "elapsed");
-            const double us = 1e3 * ms / iterations;
-            const double flops = 2.0 * tokens * shape.rows * static_cast<double>(shape.columns);
-            const double bytes = shape.rows * (shape.columns * (0.5 + 1.0 / 32.0) + 4.0);
-            std::cout << shape.name << " T" << tokens << ": " << us << " us, "
-                      << (tokens > 16U ? flops / us / 1e6 : bytes / us / 1e3)
-                      << (tokens > 16U ? " TFLOP/s\n" : " GB/s\n");
-            (void)hipEventDestroy(begin);
-            (void)hipEventDestroy(end);
+            sample = 1e3 * ms / (iterations * graph_batch);
         }
+        check(hipEventDestroy(begin), "destroy event");
+        check(hipEventDestroy(end), "destroy event");
+        ninfer::r9700_qualification::device_guard().check("after-SiLU-timing");
+        std::sort(samples.begin(), samples.end());
+        std::cout << "complete_linear_silu N34816 K5120 T1 median_us=" << samples[trials/2]
+                  << " min_us=" << samples.front() << " max_us=" << samples.back()
+                  << " trials=7 iterations=16 execution=graph ops_per_replay=32"
+                     " activation_quantize_included=false linear_global_scratch_bytes=0\n";
+        check(hipGraphExecDestroy(executable), "destroy SiLU executable");
+        check(hipGraphDestroy(graph), "destroy SiLU graph");
     }
+
+}
+
+void time_shapes(const std::vector<double>& book, hipStream_t stream, Rng& rng) {
+    struct Shape { std::uint32_t rows, columns; };
+    const Shape shapes[] = {{34816, 5120}, {5120, 17408}, {12288, 5120},
+                            {7168, 5120}, {5120, 6144}, {4096, 5120}};
+    for (const std::uint32_t tokens : {1U, 6U, 2048U})
+        for (const auto& shape : shapes)
+            run_case(book, shape.rows, shape.columns, tokens, false, false, rng, stream, true);
 }
 
 } // namespace
 
 int main(int argc, char** argv) {
     try {
+        const bool silu_graph = argc == 2 && std::string(argv[1]) == "--time-silu-t1-graph";
+        const bool timed = argc == 2 && std::string(argv[1]) == "--time";
+        const bool t1_only = argc == 2 && std::string(argv[1]) == "--verify-t1";
+        const bool graph_cell = argc == 5 && std::string(argv[1]) == "--time-cell-graph";
+        const bool one_cell = graph_cell || (argc == 5 && std::string(argv[1]) == "--time-cell");
+        if (argc != 1 && !timed && !one_cell && !t1_only && !silu_graph)
+            throw std::invalid_argument("usage: fp8lut4_linear_qual [--time-silu-t1-graph | --verify-t1 | --time | --time-cell T N K | --time-cell-graph T N K]");
+        std::uint32_t selected_tokens = 0, selected_rows = 0, selected_columns = 0;
+        if (one_cell) {
+            const auto tokens = std::stoul(argv[2]);
+            const auto rows = std::stoul(argv[3]);
+            const auto columns = std::stoul(argv[4]);
+            require(tokens == 1U || tokens == 6U || tokens == 2048U,
+                    "time-cell T must select an existing timing width");
+            require((rows == 34816U && columns == 5120U) ||
+                    (rows == 5120U && columns == 17408U) ||
+                    (rows == 12288U && columns == 5120U) ||
+                    (rows == 7168U && columns == 5120U) ||
+                    (rows == 5120U && columns == 6144U) ||
+                    (rows == 4096U && columns == 5120U),
+                    "time-cell N/K must select an existing timing projection");
+            selected_tokens = static_cast<std::uint32_t>(tokens);
+            selected_rows = static_cast<std::uint32_t>(rows);
+            selected_columns = static_cast<std::uint32_t>(columns);
+        }
+        ninfer::r9700_qualification::device_guard().select();
+
+        std::cout << "physical_packing=production\n";
+
         hipStream_t stream = nullptr;
         check(hipStreamCreate(&stream), "stream");
         Rng rng{0xcb4cb4ULL};
-        if (argc > 1 && std::string(argv[1]) == "--time") {
-            time_shapes(stream, rng);
-            return 0;
-        }
         const auto book = reference_codebook();
         check_table(book);
+        if (silu_graph) {
+            run_silu(book, 34816, 5120, 1, rng, stream, true, true);
+            check(hipStreamDestroy(stream), "destroy stream");
+            return 0;
+        }
+        if (t1_only) {
+            run_pair(book, 7168, 6144, 7168, 5120, 1, rng, stream);
+            run_silu(book, 34816, 5120, 1, rng, stream, true);
+            run_case(book, 5120, 6144, 1, true, false, rng, stream);
+            run_case(book, 5120, 17408, 1, true, false, rng, stream);
+            run_case(book, 7168, 5120, 1, false, true, rng, stream);
+            ninfer::r9700_qualification::device_guard().check("after-T1-linear-oracles");
+            check(hipStreamDestroy(stream), "destroy stream");
+            std::cout << "fp8lut4 T1 plain/pair/SiLU/residual/poison qualification: PASS\n";
+            return 0;
+        }
+        if (one_cell) {
+            // Both executables start from the same seed and unmodified logical host codes.
+            // This fixture's independent oracle always runs before its timing window.
+            run_case(book, selected_rows, selected_columns, selected_tokens,
+                     false, false, rng, stream, true, graph_cell);
+            check(hipStreamDestroy(stream), "destroy stream");
+            std::cout << "fp8lut4 linear selected-cell qualification: PASS\n";
+            return 0;
+        }
         struct Shape { std::uint32_t rows, columns; };
         const Shape shapes[] = {{34816, 5120}, {5120, 17408}, {12288, 5120}, {7168, 5120},
                                 {5120, 6144}, {4096, 5120}, {1280, 5120}, {5120, 25600}};
@@ -385,6 +532,9 @@ int main(int argc, char** argv) {
         run_case(book, 7168, 5120, 1, false, true, rng, stream);
         run_case(book, 7168, 5120, 6, false, true, rng, stream);
         run_case(book, 7168, 5120, 300, false, true, rng, stream);
+        ninfer::r9700_qualification::device_guard().check("after-linear-suite");
+        if (timed) time_shapes(book, stream, rng);
+        check(hipStreamDestroy(stream), "destroy stream");
         std::cout << "fp8lut4 linear qualification: PASS\n";
         return 0;
     } catch (const std::exception& error) {

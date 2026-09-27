@@ -560,8 +560,13 @@ add_executable(ninfer_r9700_dflash_attention_route_discriminator
 ninfer_r9700_internal_includes(ninfer_r9700_dflash_attention_route_discriminator)
 set_target_properties(ninfer_r9700_dflash_attention_route_discriminator PROPERTIES
   HIP_ARCHITECTURES gfx1201)
-target_link_libraries(ninfer_r9700_dflash_attention_route_discriminator
-  PRIVATE ninfer_r9700_core hip::host)
+target_link_libraries(ninfer_r9700_dflash_attention_route_discriminator PRIVATE ninfer_r9700_core hip::host)
+
+add_executable(ninfer_r9700_dense_prefill_attention_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/dense_prefill_attention_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_dense_prefill_attention_qual)
+set_target_properties(ninfer_r9700_dense_prefill_attention_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_dense_prefill_attention_qual PRIVATE ninfer_r9700_core hip::host)
 
 # Retained numerical and physical regression harness for the admitted split-512 long-context
 # production route. It calls the semantic entry point directly to compare both implementations.
