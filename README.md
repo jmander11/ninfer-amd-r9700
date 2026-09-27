@@ -113,4 +113,4 @@ and reports: `profiles/bench/r9700-remaining-candidates-20260924/`.
 - `docs/serving.md` — OpenAI/Anthropic endpoints and request lifecycle.
 - `docs/performance.md` — benchmarks, recipes, quality comparisons and limitations.
 - `docs/README.md` — architecture, artifact formats, conversion and kernel development.
-- `plans/r9700-autonomous-todos.md` — current development status and paused campaigns.
+- `plans/r9700-autonomous-todos.md` — live development work items.

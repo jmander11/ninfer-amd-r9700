@@ -3738,7 +3738,7 @@ Sealed evidence is `profiles/bench/r9700-gate-up-prefetch-qualification-20260920
 closure SHA-256 is `8e08b7a134601a6dddb5c16c5a74b7b19ed6f635bf435f50ee50b742c75ac4db`.
 Its scripts are retained provenance, not rerunnable commands. A GDN projection/control
 heterogeneous grid has independently reviewed CPU/static feasibility (`SHIP`), with the complete
-contract and next qualification gate in `plans/r9700-autonomous-todos.md`. The `112x256` grid
+contract and next qualification gate in the retired 2026-09 ledger (git history). The `112x256` grid
 assigns CTAs `0..63` to paired Q4 and `64..111` to control heads `0..47`; CTA-uniform branches
 confine the nine control barriers. Emitted gfx1201 code preserves native IU4 and the incumbent
 control reduction/BF16 seams, using 34 VGPR, 52 SGPR, 2048 bytes LDS, compiler occupancy 16, and

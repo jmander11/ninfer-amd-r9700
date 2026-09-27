@@ -2093,7 +2093,7 @@ Replace functional routes with measured gfx1201 families:
   value-Z, g, and beta; convolution/state remain after the boundary, through the existing GDN
   leaf family, with explicit caller-owned scratch. Scope is ordinary base Text T1 exact
   Q4+BF16_CTRL. The detailed native-IU4, BF16 reduction/seam, branch/barrier, LDS/resource gate
-  and `0.896 ms/token` ideal bound are in `plans/r9700-autonomous-todos.md`; full
+  and `0.896 ms/token` ideal bound are in the retired 2026-09 ledger (git history); full
   control+quantize+pair qualification/timing follows only after static feasibility and review.
   Normalization fusion remains second. No GPU action is currently admitted.
   The following GDN projection/control heterogeneous-grid direct qualification passed. The reviewed

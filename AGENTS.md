@@ -127,7 +127,7 @@ routing map, not a mandatory reading list:
 
 Upstream `experimental` is reconciled through `e04fad3728573a0109236929f5d473475a8657f2`
 via custom AMD ports (`7187d95d`, `2eab0a50`, `49c896dd`), not merged ancestry.
-Unsupported NVIDIA paths were excluded; decisions are in `plans/r9700-autonomous-todos.md`.
+Unsupported NVIDIA paths were excluded; decisions are in `docs/maintainer/upstream-sync.md`.
 For future syncs, review upstream changes after this baseline against current AMD behavior,
 not `HEAD..upstream`; re-establish the baseline if upstream history was rewritten. Record
 source commits and advance the baseline only after each change is ported, already equivalent,

@@ -1383,7 +1383,7 @@ heads retain the former 256-thread strided reduction; the production control now
 16-byte vector per thread over 640 threads, so the grid qualifier's exact incumbent `g` parity
 no longer holds until the candidate adopts that association. Next prepare
 and independently review complete control+quantize+pair numerical, graph/workspace, and timing
-qualification as specified in `plans/r9700-autonomous-todos.md`. Finish this bounded decision,
+qualification as specified in the retired 2026-09 ledger (git history). Finish this bounded decision,
 then switch to recipe-independent DFlash optimization before another base-decode mechanism;
 normalization fusion is deferred. No physical command is currently runnable. Reopening a rejected
 mechanism requires a distinct mechanism and new bound.
