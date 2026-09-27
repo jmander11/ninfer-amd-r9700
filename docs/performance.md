@@ -60,6 +60,46 @@ expected value exactly.
 Copy bus rate counts both the read and write traffic. This is the hardware bandwidth bound, not a
 model or individual-Op throughput claim.
 
+## Long-context prefill attribution and exhausted mechanisms (2026-09-27)
+
+Production `r9700-fp8lut4` artifact, C1, chunk 2048, code corpus. 128K prefill measures 1,901
+tok/s (68.96 s; kernel time 68.16 s, so host gaps are ~1%). Kernel shares
+(`profiles/rocprof/prefill-128k-fp8lut4-trace-20260927/`, attribution only): dense prefill
+attention 47.2% (~105 useful TFLOP/s averaged over the growing context), FP8LUT4 prefill GEMMs
+44.3%, chunked GDN 3.2%, everything else below 1.5% each. At 240K attention is the majority.
+
+Dense prefill attention ablations (`dense_prefill_attention_qual --time 2048 131072 16`, median of
+10, oracle check disabled for the ablated builds; production 56.2 ms, 116 TFLOP/s):
+
+| Removed | ms | Share |
+|---|---:|---:|
+| exp2 in the online Softmax | 56.3 | 0% |
+| end-of-block barrier | 56.2 | 0% |
+| FP8/INT4 -> BF16/FP16 conversion (raw K/V still loaded and stored) | 54.5 | 4.6% |
+| all K/V staging (loads, conversion, LDS stores) | 50.5 | 10% |
+| QK WMMAs | 33.7 | 40% |
+| PV WMMAs | 37.4 | 33% |
+
+The kernel is WMMA plus one LDS fragment per WMMA, which an isolated loop bounds near 140 TFLOP/s
+(180 with no LDS load, 155 with one load per two WMMAs). Measured out:
+
+- **Paired-wave split** (two waves share a head, each owning half of D for both row tiles, so
+  every K/V fragment feeds two WMMAs; partial scores and probabilities exchanged through LDS):
+  a structure microbenchmark with the exact per-block load, exchange and barrier counts runs at
+  ~120 TFLOP/s against ~126 for the current structure; the two extra barriers per block cost more
+  than the halved fragment loads. Not built.
+- **Staging**: the remaining 5.5% is exposed global-load latency. Hiding it needs a register
+  prefetch of the next block (it spilled at 256 VGPRs; the budget is now 240) or a VMEM-to-LDS load, which gfx1201
+  lacks. Converting K/V once per chunk instead of once per CTA would need a transient BF16 copy of
+  the whole context (~1 GB at 256K), i.e. a second cache representation.
+- **Prefill chunk 4096** (`profiles/bench/r9700-longctx-chunk-20260927/`, alternating pairs):
+  32K 2847/2790 -> 2875/2862 tok/s (+1-2.5%, within run-to-run spread), 128K 1905/1906 ->
+  1862/1864 tok/s (-2.3%). The default stays 2048.
+
+FP8LUT4 GEMM repacking was measured by the research ports below (at most 3.3%, mixed) and the
+GEMM's redundant per-CTA decode cannot be shared without a cross-CTA or runtime-repacked weight
+path. No long-context prefill mechanism with a credible whole-prefill bound remains.
+
 ## Rejected research ports (2026-09-27)
 
 Candidates from the R9700 research campaign, measured and not adopted; their code is removed.
