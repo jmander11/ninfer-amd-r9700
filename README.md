@@ -54,8 +54,8 @@ and evidence: `docs/performance.md`.
 
 Against a BF16 reference at 8K, the mean NLL increase is +0.023 (prefill), about a third below
 the previous Q4 artifact. At 4K it is 0.024 nats/token below the 5090 NVFP4 build on the same
-wiki/technical/code windows (about 2.4% lower PPL). NIAH exact-answer retrieval passes 8K-128K at
-five positions (standard and multikey). This is not
+wiki/technical/code windows (about 2.4% lower PPL). NIAH exact-answer retrieval passes 8K-128K and 240K (the
+opencode compaction point, 241K-token prompts) at five positions, standard and multikey. This is not
 universal quality equivalence; the BF16-source production-admission campaign
 remains unfinished.
 

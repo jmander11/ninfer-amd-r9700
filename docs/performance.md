@@ -77,7 +77,8 @@ independently rounded artifact (`profiles/ppl/r9700-fp8lut4-gptq-20260927/`):
 
 Against BF16 at 8K: +0.0228 (previous +0.0218, within noise), top-1 agreement 91.06% (90.72%).
 NIAH: standard and multikey 8K-128K greedy 20/20 each, sampled multikey 50/50 (8K) and 45/45
-(32K-128K). Rejected: GPTQ on the attention projections too (8K multikey NIAH failed 5/10 sampled
+(32K-128K); at 240K (new fixtures, 239,969/241,006-token prompts, the opencode compaction point)
+standard and multikey greedy 5/5 each and sampled multikey 10/10, TTFT ~179 s (1350 tok/s prefill). Rejected: GPTQ on the attention projections too (8K multikey NIAH failed 5/10 sampled
 runs against 0/10); the news/llama.cpp-only calibration tied this one on PPL.
 
 **Protected FP8 projections as FP8LUT4 (not selected, PPL-costing).** Re-encoding the 26

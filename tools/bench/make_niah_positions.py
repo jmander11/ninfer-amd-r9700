@@ -86,7 +86,8 @@ LENGTH_CHARS = {
     "100k": 429_959,
     "128k": 554_226,
     "150k": 644_938,
-    "200k": 822_000,   # new long end (~200k tokens)
+    "200k": 822_000,   # ~200k tokens
+    "240k": 1_022_700, # long end (~240k tokens, the opencode compaction point; fits the 262k context)
     "256k": 1_108_554,  # the master stream (reference; overflows the 262k context)
 }
 # Position name -> fraction of document depth at which the needle is spliced.
