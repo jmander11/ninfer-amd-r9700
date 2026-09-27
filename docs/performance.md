@@ -75,6 +75,7 @@ Evidence: `profiles/bench/r9700-feature-ports-20260927/`.
 | Conditional live-context verify split | some Ops 12–30% faster, but no matched whole-Engine gain |
 | Shared GDN normalization / compact A/P+V64 prep | 13% / 2.83x slower complete Op |
 | Post-idle keepwarm pulses | 1 ms pulses save 0.5 ms cached wake-up at ~12 W; 10 ms no benefit |
+| DFlash committed-history copy drafting (output-identical) | 1.06–1.09x on verbatim-document and one-line-edit requests, but 0.980 (C1) / 0.975 (C4) paired decode rate on the general scenario corpus, where matches occur in ~4% of rounds; the neural drafter already accepts ~5 tokens/round on verbatim text, so copying saves only drafter compute. Not useful |
 
 Horizon/tree economics: graphs on, 12 manifest scenario prompts x {greedy, two p-less seeds},
 768-token limit, ABC/CBA order over two passes, paired per-request decode rate against K5 chain.
