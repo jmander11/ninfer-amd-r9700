@@ -59,9 +59,13 @@ validates inventories, and reads back the complete output against its conversion
 
 ### Selected local compact deployment
 
-The user-selected local profile retains `r9700-q4-fp8-selective-cap-n16k16-eval`
+The user-selected local deployment is the CB4G32 Text recipe
+`r9700-cb4-fp8-selective-cap-dflash2-q4-eval` (below), installed under
+`/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-cb4-fp8-selective-cap/` and named by
+`.env.example`/`compose.yaml`. It is derived from the Q4 selective-cap pair, which remains
+installed as its conversion base: `r9700-q4-fp8-selective-cap-n16k16-eval`
 (15,793,065,984 bytes) and its `r9700-q4-fp8-selective-cap-n16k16-dflash2-q4-eval`
-companion (17,002,543,616 bytes). Both are installed under
+companion (17,002,543,616 bytes), both under
 `/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-q4-fp8-selective-cap/`, with exact identity
 as filename stem after `qwen3.8-27b-`. The adjacent README records executable creation/build/run
 commands; conversion receipts retain source paths and every payload origin/hash. Selection

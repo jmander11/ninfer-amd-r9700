@@ -29,33 +29,35 @@ repetitions and 44 cold-transition cases matched ordinary greedy tokens exactly 
 since 2026-09-25 verification attention keeps BF16 queries (ordinary decode uses FP8 queries), so
 greedy DFlash can differ from greedy ordinary decode on near-ties. See `docs/performance.md`.
 
-### Prefill and ordinary decode · 2026-09-25
+### Prefill · 2026-09-26 (CB4 artifact)
 
-| C1, no speculation | Prefill tok/s | Decode tok/s |
-|---|---:|---:|
-| 4K prompt (workload above) | **2,173.84** | 30.18 |
-
-Longer single-request prefill (cycled code corpus, chunk 2,048, one screen each):
-**8K 1,976, 32K 1,765, 64K 1,514 tok/s**. DFlash2 prefill was not remeasured.
-Keep chunk **2,048**: tested 4,096 chunks were 3.6–4.2% slower. Results are
-workload-specific, not a claimed hardware ceiling. Methodology, quality checks
-and committed evidence: `docs/performance.md`.
+Single-request prefill, chunk 2,048, same host and power: **4K ~3,050, 8K 2,791,
+32K 2,446, 64K 2,098 tok/s** (+16% to +36% over the previous Q4 artifact, which
+measured 8K 2,046, 32K 2,075 and 64K 1,804 in the same session). Ordinary and
+DFlash2 decode are unchanged within noise. Results are workload-specific, not a
+claimed hardware ceiling. Methodology, quality checks and evidence:
+`docs/performance.md`.
 
 ## Model and precision
 
-- **15.79 GB base / 17.00 GB DFlash-enabled artifact** (decimal file sizes, not VRAM).
-- Selective Q4/FP8 weights, Q4 embedding/output head; Q4 DFlash with BF16 codebooks.
-- A8 activations for every Q4 operation (prefill, ordinary decode and DFlash
-  verification); FP8 activations for the protected FP8 projections.
+- **17.02 GB DFlash-enabled artifact** (decimal file size, not VRAM),
+  `r9700-cb4-fp8-selective-cap-dflash2-q4-eval`.
+- Text-layer weights in CB4G32 (4-bit codes with a per-32 codebook of exact E4M3
+  values, FP32 row scale); 26 protected projections in FP8; Q4 embedding/output
+  head, MTP and DFlash with BF16 codebooks.
+- Per-token FP8 E4M3 activations for every Text projection (prefill, ordinary
+  decode and DFlash verification); Q4 A8 for the head, MTP and drafter.
 - Fixed cache: FP8 E4M3FN keys, INT4 values, FP16 value scales. DFlash state is BF16.
 
-On three matched 4K texts, prefill PPL is within **−1.37% to +0.06% of the 5090
-NVFP4 reference** (worst: code, +0.06%). This is not universal quality equivalence;
-the separate BF16-source production-admission campaign remains unfinished.
+Against a BF16 reference at 8K, the mean NLL increase is +0.022 (prefill) and
++0.024 (decode), about a third below the previous Q4 artifact; NIAH exact-answer
+retrieval passes 8K-128K at five positions (standard and multikey). This is not
+universal quality equivalence; the BF16-source production-admission campaign
+remains unfinished.
 
-Artifacts are not bundled. The installed recipe and creation receipts are under
-`/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-q4-fp8-selective-cap/`.
-Conversion and binding details: `docs/maintainer/r9700-integer-artifact-candidate.md`.
+Artifacts are not bundled. The installed artifact and its conversion receipt are
+under `/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-cb4-fp8-selective-cap/`.
+Conversion and binding details: `docs/maintainer/qwen3.8-27b-artifact.md` (CB4G32 Text recipe).
 
 ## Build
 

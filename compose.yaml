@@ -38,7 +38,7 @@ services:
     stop_grace_period: 2m
     command:
       - ninfer-serve
-      - /models/${NINFER_MODEL:-qwen3.8-27b-r9700-q4-fp8-selective-cap/qwen3.8-27b-r9700-q4-fp8-selective-cap-n16k16-dflash2-q4-eval.ninfer}
+      - /models/${NINFER_MODEL:-qwen3.8-27b-r9700-cb4-fp8-selective-cap/qwen3.8-27b-r9700-cb4-fp8-selective-cap-dflash2-q4-eval.ninfer}
       - --host
       - 0.0.0.0
       - --port
