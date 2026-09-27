@@ -93,6 +93,15 @@ FP8 projections at ~530 GB/s, against ~612 GB/s for a synthetic contiguous read:
 byte permutes of the FP8LUT4 decode (repacked nibble order, measured as a wrong-output ceiling)
 changes T1 by nothing, T6 by 0 to -3.8% and prefill GEMMs by -0.7 to -2.7%; not pursued.
 
+**Measured or assessed out.** *KV values:* in the BF16-source cache-only scorer at 8K (FP8 keys,
+G16 values), replacing uniform INT4 levels with the FP8LUT4 non-uniform magnitude shape (and a
+per-group scale search) changes NLL by -0.0003 +/- 0.0012 against G16 INT4; a six-way per-group
+scale search on the INT4 levels gives -0.0010 +/- 0.0009, half of the cache's whole +0.0019 cost at
+best. *GDN chunk-scan split:* precomputing the chunk-local U = T beta V, W = T beta Gamma K, P and
+the scaled Q/K operands would make the state scan independent per 16-row wave (384 CTAs instead of
+48), but writes and rereads ~113 MB per layer per 2048 tokens (~0.38 ms of DRAM time against the
+fused kernel's 0.63 ms), so the estimated gain is ~1% of prefill; not implemented.
+
 ## Protected FP8 projections on the prefill GEMM (2026-09-27)
 
 The 26 selective-cap FP8 projections ran T > 16 through hipBLASLt (MT128x128x32 solutions, 4.8%
