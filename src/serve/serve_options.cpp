@@ -103,7 +103,7 @@ std::string serve_usage_text(const char* argv0) {
            "[--max-pending-requests N] [--pending-timeout-ms N] "
            "[--prefill-chunk N] [--log-stats-interval-ms N] [--device N] "
            "[--max-request-mib N] [--request-log-jsonl FILE] "
-           "[--response-store-max-records N] [--response-store-max-mib N] "
+           "[--response-store-location DIR] [--response-store-max-records N] [--response-store-max-mib N] "
            "[--spec mtp|dflash --draft-tokens N] "
            "[--adaptive-draft] [--dflash-verify-width N] "
            "[--default-max-tokens N] "
@@ -120,8 +120,8 @@ std::string serve_usage_text(const char* argv0) {
            "       --max-request-mib defaults to 384 and is enforced before JSON parsing\n"
            "       --request-log-jsonl appends full-precision server/request records\n"
            "       --model-id overrides the artifact identity.model_id reported by the server\n"
-           "       Responses state is process-local and bounded to 1024 records / 256 MiB by "
-           "default\n"
+           "       Responses history is memory-only by default; --response-store-location persists it\n"
+           "       Response history defaults to 1024 records / 256 MiB\n"
            "       --log-stats-interval-ms defaults to 5000; 0 disables periodic throughput logs\n"
            "       --vision enables media and loads the fixed Vision GPU allocations\n"
            "       --kv-capacity auto leaves " +
@@ -229,6 +229,11 @@ ServeOptions parse_serve_options(int argc, char** argv) {
             options.request_log_jsonl = require_value("--request-log-jsonl");
             if (options.request_log_jsonl.empty()) {
                 throw std::invalid_argument("--request-log-jsonl must not be empty");
+            }
+        } else if (arg == "--response-store-location") {
+            options.response_store_location = require_value("--response-store-location");
+            if (options.response_store_location.empty()) {
+                throw std::invalid_argument("--response-store-location must not be empty");
             }
         } else if (arg == "--response-store-max-records") {
             const int records = parse_nonnegative_int(require_value("--response-store-max-records"),

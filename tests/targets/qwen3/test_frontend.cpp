@@ -1840,6 +1840,66 @@ int test_declared_tool_publication() {
     return failures;
 }
 
+int test_json_output_with_tool_history() {
+    auto owned = resources();
+    auto tokenizer = nlohmann::json::parse(owned.tokenizer_json);
+    auto config = nlohmann::json::parse(owned.tokenizer_config_json);
+    for (int c = 32; c < 127; ++c) {
+        if (c == 'x') { continue; }
+        auto token = added(1000 + c, std::string(1, static_cast<char>(c)));
+        tokenizer["added_tokens"].push_back(token);
+        token.erase("id");
+        config["added_tokens_decoder"][std::to_string(1000 + c)] = std::move(token);
+    }
+    const std::string value = R"({"literal":"<tool_call><function=f>"})";
+    auto token = nlohmann::json{{"id", 2000}, {"content", value}, {"special", false},
+        {"single_word", false}, {"lstrip", false}, {"rstrip", false}, {"normalized", false}};
+    tokenizer["added_tokens"].push_back(token);
+    token.erase("id");
+    config["added_tokens_decoder"]["2000"] = token;
+    owned.tokenizer_json = tokenizer.dump();
+    owned.tokenizer_config_json = config.dump();
+    const auto frontend = FrontendFactory::create_component(owned);
+    ninfer::PromptInput input;
+    input.options.enable_thinking = false;
+    input.options.output_json_schema = R"({"type":"object"})";
+    ninfer::ChatMessage user;
+    user.role = ninfer::ChatRole::User;
+    user.parts.push_back(ninfer::MessagePart{.text = "x"});
+    input.messages.push_back(std::move(user));
+    ninfer::ChatMessage history;
+    history.role = ninfer::ChatRole::Tool;
+    history.tool_call_id = "prior";
+    history.parts.push_back(ninfer::MessagePart{.text = "x"});
+    input.messages.push_back(std::move(history));
+    auto prompt = frontend.prepare(std::move(input));
+    auto output = frontend.make_output_session(prompt, {});
+    int failures = check(output.has_tool_grammar(), "JSON output grammar missing");
+    const std::array<ninfer::TokenId, 1> tokens{2000};
+    (void)output.preview(tokens, 100, ninfer::FinishReason::OutputLimit);
+    output.discard_preview();
+    (void)output.preview(tokens, 100, ninfer::FinishReason::OutputLimit);
+    std::string content;
+    for (const auto& delta : output.commit_preview()) { content += delta.text; }
+    failures += check(content == value && output.tool_calls().empty(),
+                      "JSON literal tool markup was interpreted or withheld");
+    failures += check(output.model_stop_tokens_allowed(), "JSON literal blocked model stop");
+    const std::array<ninfer::TokenId, 1> eos{6};
+    auto decision = output.preview(eos, 100, ninfer::FinishReason::OutputLimit);
+    failures += check(decision.finish_reason == ninfer::FinishReason::StopToken,
+                      "completed JSON did not finish at model stop");
+    (void)output.commit_preview();
+    ninfer::StopPolicy stop;
+    stop.strings.push_back({"}"});
+    bool rejected = false;
+    try { (void)frontend.make_output_session(prompt, stop); }
+    catch (const ninfer::RequestError& error) {
+        rejected = error.kind() == ninfer::RequestErrorKind::InvalidOutputSchema;
+    }
+    failures += check(rejected, "public Engine JSON accepted a truncating custom stop");
+    return failures;
+}
+
 int main() {
     if (std::getenv("NINFER_BENCH_ENCODE") != nullptr) { return run_encode_bench(); }
     const FrontendResources owned = resources();
@@ -1865,5 +1925,6 @@ int main() {
     failures += test_utf8_and_hidden_eos(frontend);
     failures += test_disabled_vision();
     failures += test_declared_tool_publication();
+    failures += test_json_output_with_tool_history();
     return failures == 0 ? 0 : 1;
 }

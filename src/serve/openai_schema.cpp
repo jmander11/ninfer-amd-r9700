@@ -445,19 +445,7 @@ void reject_unsupported_features(const Json& body) {
             throw ApiException(std::move(error));
         }
     }
-    if (body.contains("response_format") && !body.at("response_format").is_null()) {
-        const Json& fmt  = body.at("response_format");
-        std::string type = fmt.is_object() && fmt.contains("type") && fmt.at("type").is_string()
-                               ? fmt.at("type").get<std::string>()
-                               : std::string();
-        if (type != "text") {
-            ApiError error;
-            error.message = "only response_format {type:text} is supported";
-            error.param   = "response_format";
-            error.code    = "response_format_not_supported";
-            throw ApiException(std::move(error));
-        }
-    }
+
 }
 
 Json base_chunk(const std::string& id, const std::string& model, std::int64_t created) {
@@ -794,6 +782,58 @@ void apply_ninfer_object(const Json& ninfer, GenerationRequest& out) {
     out.capture_context_checkpoint = ninfer.at("capture_context_checkpoint").get<bool>();
 }
 
+std::optional<std::string> parse_output_format(const Json& format, bool responses,
+                                              const std::string& param) {
+    if (format.is_null()) { return std::nullopt; }
+    if (!format.is_object() || !format.contains("type") || !format["type"].is_string()) {
+        bad_request("output format must contain a string type", param, "invalid_output_format");
+    }
+    const auto type = format["type"].get<std::string>();
+    if (type == "text" || type == "json_object") {
+        if (format.size() != 1) {
+            bad_request("unexpected output format field", param, "invalid_output_format");
+        }
+        return type == "text" ? std::nullopt : std::optional<std::string>(R"({"type":"object"})");
+    }
+    if (type != "json_schema") {
+        bad_request("unsupported output format type", param, "invalid_output_format");
+    }
+    if (!responses && (!format.contains("json_schema") || format.size() != 2)) {
+        bad_request("json_schema format requires a json_schema object", param, "invalid_output_format");
+    }
+    const auto& definition = responses ? format : format["json_schema"];
+    if (!definition.is_object() || !definition.contains("name") ||
+        !definition["name"].is_string() || definition["name"].get<std::string>().empty() ||
+        !definition.contains("schema") ||
+        (!definition["schema"].is_object() && !definition["schema"].is_boolean())) {
+        bad_request("json_schema requires a name and an object or boolean schema", param,
+                    "invalid_output_format");
+    }
+    const auto name = definition["name"].get<std::string>();
+    if (name.size() > 64 || !std::all_of(name.begin(), name.end(), [](unsigned char c) {
+            return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                   (c >= '0' && c <= '9') || c == '_' || c == '-';
+        })) {
+        bad_request("schema name must be 1..64 letters, digits, underscores or hyphens", param,
+                    "invalid_output_format");
+    }
+    for (auto it = definition.begin(); it != definition.end(); ++it) {
+        if (it.key() == "name" || it.key() == "schema" || (responses && it.key() == "type")) { continue; }
+        if (it.key() == "description" && it.value().is_string()) { continue; }
+        if (it.key() == "strict" && (it.value().is_boolean() || it.value().is_null())) { continue; }
+        bad_request("invalid json_schema field: " + it.key(), param, "invalid_output_format");
+    }
+    return definition["schema"].dump();
+}
+
+void validate_output_format_combination(const GenerationRequest& request,
+                                        const std::string& param) {
+    if (request.output_json_schema && (request.uses_tools() || !request.stop_strings.empty())) {
+        bad_request("structured output cannot be combined with active tools or custom stop strings",
+                    param, "invalid_output_format");
+    }
+}
+
 GenerationRequest parse_chat_completion_request(const Json& body, const RequestLimits& limits) {
     require_object(body);
     reject_unsupported_features(body);
@@ -810,6 +850,10 @@ GenerationRequest parse_chat_completion_request(const Json& body, const RequestL
     parse_messages(body, out);
     parse_stop(body, out);
     parse_sampling(body, out);
+    if (body.contains("response_format")) {
+        out.output_json_schema = parse_output_format(body["response_format"], false, "response_format");
+    }
+    validate_output_format_combination(out, "response_format");
 
     out.stream = get_bool(body, "stream", false);
     if (body.contains("stream_options") && body.at("stream_options").is_object()) {

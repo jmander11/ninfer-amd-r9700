@@ -949,7 +949,7 @@ runtime::OutputDecision OutputSession::preview(std::span<const TokenId> tokens,
     const auto complete = [&](std::uint32_t count, FinishReason reason,
                               bool reject_generated_round = false) {
         if (impl_->tool_grammar) { impl_->tool_grammar->preview(tokens.first(count)); }
-        if (impl_->grammar_data && !impl_->raw) {
+        if (impl_->grammar_data && !impl_->grammar_data->definitions.empty() && !impl_->raw) {
             impl_->preview_tools = impl_->tools;
             impl_->preview_tools.filter(impl_->preview_output, *impl_->grammar_data,
                                          reason != FinishReason::None);
@@ -1046,7 +1046,7 @@ runtime::OutputDecision OutputSession::preview_terminal(FinishReason reason) {
     terminalize(impl_->preview_state, impl_->policy, impl_->preview_output, 0,
                 impl_->tool_output_enabled);
     if (impl_->tool_grammar) { impl_->tool_grammar->preview({}); }
-    if (impl_->grammar_data && !impl_->raw) {
+    if (impl_->grammar_data && !impl_->grammar_data->definitions.empty() && !impl_->raw) {
         impl_->preview_tools = impl_->tools;
         impl_->preview_tools.filter(impl_->preview_output, *impl_->grammar_data, true);
     }
@@ -1058,7 +1058,7 @@ PublishedOutput OutputSession::commit_preview() noexcept {
     if (impl_ == nullptr || !impl_->preview_ready) { std::terminate(); }
     using std::swap;
     if (impl_->tool_grammar) { impl_->tool_grammar->commit_preview(); }
-    if (impl_->grammar_data && !impl_->raw) { swap(impl_->tools, impl_->preview_tools); }
+    if (impl_->grammar_data && !impl_->grammar_data->definitions.empty() && !impl_->raw) { swap(impl_->tools, impl_->preview_tools); }
     swap(impl_->state, impl_->preview_state);
     PublishedOutput output = std::move(impl_->preview_output);
     impl_->preview_output.clear();
@@ -1197,9 +1197,9 @@ const PreparedPromptData& FrontendTestAccess::inspect(const PreparedPrompt& prom
 PreparedPrompt Frontend::prepare(PromptInput input) const {
     const auto start                      = Clock::now();
     const PromptOptions options           = input.options;
-    const bool tool_output_enabled        = enables_tool_output(input);
+    const bool tool_output_enabled        = !options.output_json_schema && enables_tool_output(input);
     const auto grammar = options.add_generation_prompt
-        ? impl_->tool_grammar.compile(options.tool_jsons, options.enable_thinking) : nullptr;
+        ? impl_->tool_grammar.compile(options.tool_jsons, options.enable_thinking, options.require_tool_call, options.output_json_schema) : nullptr;
     const auto recovery = GenerationRecoveryContext::analyze(input);
     const auto finish = [&](std::unique_ptr<PreparedPromptData> data) {
         data->tool_grammar = grammar;
@@ -1279,6 +1279,12 @@ OutputSession Frontend::make_output_session(const PreparedPrompt& prompt,
                                             const StopPolicy& caller_stop,
                                             const OutputOptions& output) const {
     if (prompt.data_ == nullptr) { throw std::invalid_argument("prepared prompt is empty"); }
+    if (prompt.data_->tool_grammar && prompt.data_->tool_grammar->definitions.empty() &&
+        (!caller_stop.strings.empty() || !caller_stop.token_ids.empty() ||
+         !caller_stop.include_model_defaults || caller_stop.publish_stop_token || output.raw)) {
+        throw RequestError(RequestErrorKind::InvalidOutputSchema,
+                           "structured output requires model stops and parsed output");
+    }
     StopPolicy policy = merge_stop_policy(*impl_->tokenizer, caller_stop);
     if (output.raw) { policy.publish_stop_token = true; }
     return OutputSession(std::make_unique<OutputSession::Impl>(
@@ -1293,9 +1299,9 @@ PreparedPrompt EncodedHistoryPrepare::prepare(const Frontend& frontend, PromptIn
                                               frontend_internal::EncodedHistoryCache& cache) {
     const auto start                      = Clock::now();
     const PromptOptions options           = input.options;
-    const bool tool_output_enabled        = enables_tool_output(input);
+    const bool tool_output_enabled        = !options.output_json_schema && enables_tool_output(input);
     const auto grammar = options.add_generation_prompt
-        ? frontend.impl_->tool_grammar.compile(options.tool_jsons, options.enable_thinking) : nullptr;
+        ? frontend.impl_->tool_grammar.compile(options.tool_jsons, options.enable_thinking, options.require_tool_call, options.output_json_schema) : nullptr;
     const auto recovery = GenerationRecoveryContext::analyze(input);
     const auto finish = [&](std::unique_ptr<PreparedPromptData> data) {
         data->tool_grammar = grammar;

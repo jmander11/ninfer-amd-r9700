@@ -21,6 +21,7 @@ namespace ninfer::serve {
 struct RequestLifetime;
 struct RequestCapacity;
 struct MediaInputCapacity;
+struct CandidateScoreRequest;
 
 struct GenerationMetrics {
     ninfer::GenerationRecoveryStats recovery;
@@ -138,6 +139,10 @@ public:
     // Consumes prepared.generation. A PreparedRequest is single-use.
     GenerationOutcome run(PreparedRequest& prepared, std::uint64_t request_id, const StreamSink* sink,
                           std::function<bool()> is_cancelled = {});
+
+    [[nodiscard]] std::vector<ninfer::ScoreResult>
+    score_candidates(const CandidateScoreRequest& request,
+                     std::function<bool()> is_cancelled = {}) const;
 
     void warmup();
 

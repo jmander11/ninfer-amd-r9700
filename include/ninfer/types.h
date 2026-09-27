@@ -358,6 +358,10 @@ struct PromptOptions {
     bool preserve_thinking = false;
     bool add_vision_id     = false;
     std::vector<std::string> tool_jsons;
+    // Require a schema-valid call before the content phase may finish.
+    bool require_tool_call = false;
+    // JSON Schema for the content phase; reasoning remains a separate channel.
+    std::optional<std::string> output_json_schema;
 };
 
 struct PromptInput {
@@ -367,6 +371,7 @@ struct PromptInput {
 
 enum class RequestErrorKind : std::uint8_t {
     InvalidToolSchema,
+    InvalidOutputSchema,
     ContextLengthExceeded,
     MediaBudgetExceeded,
     Overloaded,

@@ -238,6 +238,7 @@ struct GenerationRequest {
     std::vector<ToolDefinition> tools;
     std::size_t tool_name_max_length = 64;
     ToolChoice tool_choice;
+    std::optional<std::string> output_json_schema;
     std::vector<std::string> stop_strings;
     int max_tokens      = 0; // 0 => use server default
     bool max_tokens_set = false;

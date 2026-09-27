@@ -62,7 +62,9 @@ class ToolGrammarCompiler {
 public:
     explicit ToolGrammarCompiler(std::shared_ptr<const Tokenizer> tokenizer);
     [[nodiscard]] std::shared_ptr<const ToolGrammarData>
-    compile(std::span<const std::string> tools, bool starts_in_reasoning);
+    compile(std::span<const std::string> tools, bool starts_in_reasoning,
+            bool require_tool_call = false,
+            const std::optional<std::string>& output_json_schema = std::nullopt);
 
 private:
     std::shared_ptr<const Tokenizer> tokenizer_;

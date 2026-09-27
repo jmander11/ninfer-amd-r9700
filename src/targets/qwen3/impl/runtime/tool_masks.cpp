@@ -1,5 +1,6 @@
 #include "targets/qwen3/impl/runtime/tool_masks.h"
 #include "core/device.h"
+#include "core/roctx.h"
 
 #include <algorithm>
 #include <array>
@@ -101,6 +102,9 @@ const ops::SamplingConfig* ToolMaskExchange::enqueue(
 
 void ToolMaskExchange::match(void* opaque) noexcept {
     auto& self = *static_cast<ToolMaskExchange*>(opaque);
+    // Runs at graph replay, on the HIP callback thread; ordinary execution has no enabled range.
+    roctx::ScopedRange range(roctx::Name::ToolMaskMatch, roctx::Category::Control,
+                             self.configs_.size());
     try { self.fill(); }
     catch (...) {
         self.error_ = std::current_exception();

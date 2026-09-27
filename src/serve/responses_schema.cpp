@@ -513,17 +513,35 @@ void parse_tool_choice(const Json& body, ResponsesRequest& out) {
         } else if (value == "none") {
             out.generation.tool_choice.mode = ToolChoiceMode::None;
         } else if (value == "required") {
-            bad_request("tool_choice 'required' is not supported", "tool_choice",
-                        "tool_choice_not_supported");
+            out.generation.tool_choice.mode = ToolChoiceMode::Required;
         } else {
-            bad_request("tool_choice must be 'auto' or 'none'", "tool_choice");
+            bad_request("tool_choice must be 'auto', 'none', 'required', or a function choice",
+                        "tool_choice");
         }
         out.tool_choice = value;
     } else if (choice.is_object()) {
-        bad_request("named tool_choice is not supported", "tool_choice",
-                    "tool_choice_not_supported");
+        if (!choice.contains("type") || !choice.at("type").is_string() ||
+            choice.at("type") != "function") {
+            bad_request("only function tool_choice objects are supported", "tool_choice",
+                        "tool_choice_not_supported");
+        }
+        out.generation.tool_choice.mode = ToolChoiceMode::Named;
+        out.generation.tool_choice.name = require_function_name(choice, "tool_choice");
+        out.tool_choice = Json{{"type", "function"}, {"name", out.generation.tool_choice.name}};
     } else {
         bad_request("tool_choice must be a string or object", "tool_choice");
+    }
+    if ((out.generation.tool_choice.mode == ToolChoiceMode::Required ||
+         out.generation.tool_choice.mode == ToolChoiceMode::Named) && out.generation.tools.empty()) {
+        bad_request("tool_choice requires tools", "tool_choice");
+    }
+    if (out.generation.tool_choice.mode == ToolChoiceMode::Named &&
+        !std::any_of(out.generation.tools.begin(), out.generation.tools.end(),
+                     [&](const ToolDefinition& tool) {
+                         return tool.name == out.generation.tool_choice.name;
+                     })) {
+        bad_request("tool_choice references unknown function: " + out.generation.tool_choice.name,
+                    "tool_choice");
     }
 }
 
@@ -690,20 +708,7 @@ void reject_server_managed_features(const Json& body) {
                             "text_option_not_supported");
             }
         }
-        if (body.at("text").contains("format") && !body.at("text").at("format").is_null()) {
-            const Json& format = body.at("text").at("format");
-            if (!format.is_object() || !format.contains("type") || !format.at("type").is_string() ||
-                format.at("type").get<std::string>() != "text") {
-                bad_request("only text.format {type:'text'} is supported", "text",
-                            "structured_outputs_not_supported");
-            }
-            for (auto it = format.begin(); it != format.end(); ++it) {
-                if (it.key() != "type") {
-                    bad_request("only text.format {type:'text'} is supported", "text",
-                                "structured_outputs_not_supported");
-                }
-            }
-        }
+
     }
 }
 
@@ -741,6 +746,12 @@ ResponsesRequest parse_request_impl(const Json& body, const RequestLimits& limit
     validate_metadata(body, out);
     parse_tools(body, out);
     parse_tool_choice(body, out);
+    if (body.contains("text") && body["text"].is_object() &&
+        body["text"].contains("format") && !body["text"]["format"].is_null()) {
+        out.text_format = body["text"]["format"];
+        out.generation.output_json_schema = parse_output_format(out.text_format, true, "text.format");
+    }
+    validate_output_format_combination(out.generation, "text.format");
     parse_reasoning(body, out);
     out.generation.preserve_thinking = parse_openai_preserve_thinking(body);
     if (body.contains("ninfer") && !body.at("ninfer").is_null()) {
@@ -834,7 +845,7 @@ Json response_common(const std::string& id, std::int64_t created_at,
         {"service_tier", "default"},
         {"store", request.store},
         {"temperature", runtime.temperature},
-        {"text", Json{{"format", Json{{"type", "text"}}}}},
+        {"text", Json{{"format", request.text_format}}},
         {"tool_choice", request.tool_choice},
         {"tools", request.tools},
         {"top_logprobs", 0},

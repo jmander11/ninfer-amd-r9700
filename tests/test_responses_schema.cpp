@@ -335,15 +335,62 @@ int test_explicit_rejections() {
     Json required           = base;
     required["tools"]       = Json::array({Json{{"type", "function"}, {"name", "f"}}});
     required["tool_choice"] = "required";
-    failures += check(api_code([&] { (void)parse_responses_request(required, limits()); }) ==
-                          "tool_choice_not_supported",
-                      "required tool choice rejected explicitly");
+    const auto required_request = parse_responses_request(required, limits());
+    failures += check(required_request.generation.tool_choice.mode == ToolChoiceMode::Required &&
+                          required_request.tool_choice == "required",
+                      "required tool choice preserved");
+    auto required_input = to_prompt_input(required_request.generation, {}, unused_media);
+    failures += check(required_input.options.require_tool_call &&
+                          required_input.options.tool_jsons.size() == 1,
+                      "required choice activates mandatory-call grammar");
+    Json named = required;
+    named["tools"].push_back(Json{{"type", "function"}, {"name", "other"}});
+    named["tool_choice"] = Json{{"type", "function"}, {"name", "f"}};
+    const auto named_request = parse_responses_request(named, limits());
+    const auto named_input = to_prompt_input(named_request.generation, {}, unused_media);
+    failures += check(named_request.generation.tool_choice.mode == ToolChoiceMode::Named &&
+                          named_request.generation.tool_choice.name == "f" &&
+                          named_request.tool_choice == named["tool_choice"] &&
+                          named_input.options.require_tool_call &&
+                          named_input.options.tool_jsons.size() == 1 &&
+                          Json::parse(named_input.options.tool_jsons.front())["function"]["name"] == "f",
+                      "named choice enforces only the selected function");
+    for (const Json& choice : {Json("required"), named["tool_choice"]}) {
+        auto missing_tools = base;
+        missing_tools["tool_choice"] = choice;
+        failures += check(throws_api([&] { (void)parse_responses_request(missing_tools, limits()); }),
+                          "forced tool choice requires declarations");
+    }
+    for (const Json& choice : {Json{{"type", "function"}, {"name", "missing"}},
+                               Json{{"type", "function"}},
+                               Json{{"type", "function"}, {"name", "bad>name"}},
+                               Json{{"type", "web_search"}},
+                               Json{{"type", "function"}, {"function", {{"name", "f"}}}}}) {
+        named["tool_choice"] = choice;
+        failures += check(throws_api([&] { (void)parse_responses_request(named, limits()); }),
+                          "invalid or unknown flat Responses tool choice rejected");
+    }
+    for (const auto* choice : {"auto", "none"}) {
+        required["tool_choice"] = choice;
+        const auto optional = parse_responses_request(required, limits());
+        failures += check(!to_prompt_input(optional.generation, {}, unused_media).options.require_tool_call,
+                          "auto/none do not require calls");
+    }
 
     Json structured    = base;
     structured["text"] = Json{{"format", Json{{"type", "json_schema"}}}};
     failures += check(api_code([&] { (void)parse_responses_request(structured, limits()); }) ==
-                          "structured_outputs_not_supported",
-                      "structured output rejected");
+                          "invalid_output_format",
+                      "incomplete structured format rejected");
+
+    structured["text"]["format"] = Json{{"type", "json_schema"}, {"name", "result"},
+        {"strict", true}, {"schema", Json{{"type", "boolean"}}}};
+    auto json_response = parse_responses_request(structured, limits());
+    failures += check(json_response.generation.output_json_schema ==
+                          std::optional<std::string>(R"({"type":"boolean"})"),
+                      "Responses schema retained");
+    failures += check(json_response.text_format == structured["text"]["format"],
+                      "Responses format retained for echo");
 
     Json background          = base;
     background["background"] = true;
@@ -485,9 +532,12 @@ int test_sse_sequence() {
     return failures;
 }
 
-int test_sse_function_call() {
+int test_sse_function_call(const Json& choice) {
     ResponsesRequest request = parse_responses_request(Json{{"model", "qwen3.8-27b"},
                                                             {"input", "weather"},
+                                                            {"tools", Json::array({Json{{"type", "function"},
+                                                                                       {"name", "weather"}}})},
+                                                            {"tool_choice", choice},
                                                             {"max_output_tokens", 32},
                                                             {"stream", true}},
                                                        limits());
@@ -515,6 +565,8 @@ int test_sse_function_call() {
     }
     failures +=
         check(arguments == R"({"city":"Paris"})", "function argument deltas reconstruct arguments");
+    failures += check(finish.response.body.at("tool_choice") == choice,
+                      "function stream preserves requested tool choice");
     const Json& item = finish.response.body.at("output").at(0);
     failures += check(item.at("type") == "function_call" && item.at("id") == item_id &&
                           item.at("call_id") == "call_weather" && item_id != "call_weather",
@@ -618,7 +670,9 @@ int main() {
     failures += test_explicit_rejections();
     failures += test_response_object();
     failures += test_sse_sequence();
-    failures += test_sse_function_call();
+    failures += test_sse_function_call("auto");
+    failures += test_sse_function_call("required");
+    failures += test_sse_function_call(Json{{"type", "function"}, {"name", "weather"}});
     failures += test_input_tokens_schema();
     failures += test_system_prepend();
     if (failures == 0) { std::cout << "ok\n"; }

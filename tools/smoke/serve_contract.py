@@ -127,6 +127,7 @@ def parse_openai_stream(response: Response) -> tuple[str, str, str, dict[str, An
     reasoning: list[str] = []
     finish_reason: str | None = None
     usage: dict[str, Any] | None = None
+    saw_usage_trailer = False
     saw_role = False
     saw_done = False
     for block in response.body.decode("utf-8").replace("\r\n", "\n").split("\n\n"):
@@ -151,15 +152,19 @@ def parse_openai_stream(response: Response) -> tuple[str, str, str, dict[str, An
             raise ContractError("OpenAI stream event is missing choices")
         event_usage = event.get("usage")
         if event_usage is not None:
-            if choices:
-                raise ContractError("OpenAI usage event unexpectedly contains choices")
-            if usage is not None:
-                raise ContractError("OpenAI stream emitted usage more than once")
-            if finish_reason is None:
-                raise ContractError("OpenAI stream emitted usage before its finish event")
-            usage = event_usage
-            continue
-        if usage is not None:
+            if not isinstance(event_usage, dict):
+                raise ContractError("OpenAI stream usage is not an object")
+            if not choices:
+                if finish_reason is None:
+                    raise ContractError("OpenAI stream emitted usage before its finish event")
+                if saw_usage_trailer:
+                    raise ContractError("OpenAI stream emitted duplicate usage trailers")
+                if usage is not None and event_usage != usage:
+                    raise ContractError("OpenAI finish and trailer usage disagree")
+                usage = event_usage
+                saw_usage_trailer = True
+                continue
+        if saw_usage_trailer:
             raise ContractError("OpenAI stream emitted an event after usage")
         if len(choices) != 1:
             raise ContractError("ordinary OpenAI stream event must contain one choice")
@@ -182,11 +187,15 @@ def parse_openai_stream(response: Response) -> tuple[str, str, str, dict[str, An
                 raise ContractError("OpenAI reasoning delta is not a string")
             reasoning.append(delta["reasoning_content"])
         reason = choice.get("finish_reason")
+        if event_usage is not None and reason is None:
+            raise ContractError("OpenAI stream emitted usage before its finish event")
         if reason is not None:
             if finish_reason is not None or reason not in {"stop", "length", "tool_calls"}:
                 raise ContractError(f"invalid or duplicate OpenAI finish reason: {reason!r}")
             finish_reason = reason
-    if not saw_role or not saw_done or finish_reason is None or usage is None:
+            if event_usage is not None:
+                usage = event_usage
+    if not saw_role or not saw_done or finish_reason is None or usage is None or not saw_usage_trailer:
         raise ContractError("OpenAI stream did not complete its role/finish/usage/[DONE] contract")
     prompt, completion = require_usage(usage, "prompt_tokens", "completion_tokens")
     if usage.get("total_tokens") != prompt + completion:

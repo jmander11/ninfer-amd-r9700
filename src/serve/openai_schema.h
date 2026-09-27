@@ -20,6 +20,12 @@ namespace ninfer::serve {
 
 // Parse an already-decoded JSON body into a GenerationRequest. Throws ApiException
 // on malformed or unsupported requests (n>1, tools, non-text response_format, ...).
+// Parse the two OpenAI structured-format envelopes into one owning schema.
+std::optional<std::string> parse_output_format(const nlohmann::json& format,
+                                              bool responses, const std::string& param);
+void validate_output_format_combination(const GenerationRequest& request,
+                                        const std::string& param);
+
 GenerationRequest parse_chat_completion_request(const nlohmann::json& body,
                                                 const RequestLimits& limits);
 

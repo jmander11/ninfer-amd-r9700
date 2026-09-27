@@ -224,8 +224,19 @@ ToolGrammarCompiler::ToolGrammarCompiler(std::shared_ptr<const Tokenizer> tokeni
     : tokenizer_(std::move(tokenizer)) {}
 
 std::shared_ptr<const ToolGrammarData>
-ToolGrammarCompiler::compile(std::span<const std::string> tools, bool starts_in_reasoning) {
-    if (tools.empty()) { return {}; }
+ToolGrammarCompiler::compile(std::span<const std::string> tools, bool starts_in_reasoning,
+                             bool require_tool_call, const std::optional<std::string>& output_json_schema) {
+    if (output_json_schema && (!tools.empty() || require_tool_call)) {
+        throw RequestError(RequestErrorKind::InvalidOutputSchema,
+                           "structured output cannot be combined with active tools");
+    }
+    if (tools.empty() && !output_json_schema) {
+        if (require_tool_call) {
+            throw RequestError(RequestErrorKind::InvalidToolSchema,
+                               "a required tool call needs declared tools");
+        }
+        return {};
+    }
     std::vector<ToolGrammarData::Definition> definitions;
     auto tags = Json::array();
     std::set<std::string> names;
@@ -262,13 +273,46 @@ ToolGrammarCompiler::compile(std::span<const std::string> tools, bool starts_in_
     Json format{{"type", "triggered_tags"}, {"triggers", {"<tool_call"}}, {"tags", tags},
                 {"excludes", {"</invoke", "</parameter", "</function", "</tool_call",
                                "<invoke", "<parameter", "<function"}}};
+    if (require_tool_call) {
+        // The first content item must be a declared call, not merely a promise
+        // in the prompt. Subsequent calls/prose retain the normal dispatch grammar.
+        // Whitespace accommodates the thinking-close boundary without permitting
+        // an arbitrary free-text answer or an early model stop.
+        format = Json{{"type", "sequence"}, {"elements", Json::array({
+            Json{{"type", "regex"}, {"pattern", R"([ \t\r\n]*)"}},
+            Json{{"type", "or"}, {"elements", tags}}, format})}};
+    }
+    if (output_json_schema) {
+        try {
+            auto schema = Json::parse(*output_json_schema);
+            check_schema(schema);
+            name_required_properties(schema);
+            // Structural json_schema nodes force strict_mode=true, which silently
+            // closes unspecified properties/items. Compile the declared JSON semantics.
+            const auto json_grammar = xgrammar::Grammar::FromJSONSchema(
+                schema.dump(), true, std::nullopt, std::nullopt, false,
+                std::nullopt, false, true);
+            format = Json{{"type", "sequence"}, {"elements", Json::array({
+                Json{{"type", "regex"}, {"pattern", R"([ \t\r\n]*)"}},
+                Json{{"type", "grammar"}, {"grammar", json_grammar.ToString()}},
+                Json{{"type", "regex"}, {"pattern", R"([ \t\r\n]*)"}}})}};
+        } catch (const Json::exception& error) {
+            throw RequestError(RequestErrorKind::InvalidOutputSchema,
+                               std::string("invalid output schema: ") + error.what());
+        } catch (const std::invalid_argument& error) {
+            throw RequestError(RequestErrorKind::InvalidOutputSchema, error.what());
+        } catch (const std::runtime_error& error) {
+            throw RequestError(RequestErrorKind::InvalidOutputSchema, error.what());
+        }
+    }
     if (starts_in_reasoning) {
         format = Json{{"type", "sequence"}, {"elements", Json::array({
             // A tool envelope belongs to the content/call phase. Without this
             // exclusion, the model can rehearse complete calls indefinitely
             // inside reasoning, where they must never be published as calls.
             Json{{"type", "tag"}, {"begin", ""},
-                 {"content", Json{{"type", "any_text"}, {"excludes", {"<tool_call"}}}},
+                 {"content", output_json_schema ? Json{{"type", "any_text"}}
+                     : Json{{"type", "any_text"}, {"excludes", {"<tool_call"}}}},
                  {"end", "</think>"}}, format})}};
     }
     std::scoped_lock lock(mutex_);
@@ -298,8 +342,10 @@ ToolGrammarCompiler::compile(std::span<const std::string> tools, bool starts_in_
         // runtime_error, including its non-public LogFatalError. Translate only
         // the client-schema compilation boundary; allocation failures and
         // runtime matcher/initialization failures retain their original type.
-        throw RequestError(RequestErrorKind::InvalidToolSchema,
-                           std::string("invalid or unsupported tool schema: ") + error.what());
+        throw RequestError(output_json_schema ? RequestErrorKind::InvalidOutputSchema
+                                             : RequestErrorKind::InvalidToolSchema,
+                           std::string(output_json_schema ? "invalid or unsupported output schema: "
+                                                         : "invalid or unsupported tool schema: ") + error.what());
     }
 }
 

@@ -141,6 +141,7 @@ if(TARGET ninfer_serve)
       openai_schema
       responses_schema
       response_store
+      score_schema
       anthropic_schema
       serve_options
       request_log)

@@ -3,6 +3,8 @@
 // Small fixed-capacity request scheduling and batched decode execution for every backend.
 
 #include "ninfer/types.h"
+#include "core/arena.h"
+#include "core/device.h"
 #include "runtime/contract/types.h"
 #include "runtime/engine/admission_policy.h"
 #include "runtime/engine/request_memory.h"
@@ -209,9 +211,16 @@ public:
         return out;
     }
 
-    [[nodiscard]] ScoreResult score(targets::qwen3::PreparedPrompt prompt,
-                                    ScoreOptions options = {}) {
-        std::scoped_lock execution_lock(execution_mutex_);
+    [[nodiscard]] std::vector<ScoreResult>
+    score_many(std::vector<targets::qwen3::PreparedPrompt> prompts,
+               std::span<const ScoreOptions> options, const CancellationView& cancellation) {
+        // Idle KV maintenance does not occupy the Engine. Wait for its short host
+        // submission section before testing foreground execution ownership.
+        std::unique_lock maintenance_lock(idle_maintenance_mutex_);
+        std::unique_lock execution_lock(execution_mutex_, std::try_to_lock);
+        if (!execution_lock.owns_lock()) {
+            throw RequestError(RequestErrorKind::Overloaded, "score requires an idle Engine");
+        }
         {
             std::lock_guard lock(queue_mutex_);
             if (stopping_ || failed_) {
@@ -229,24 +238,32 @@ public:
             }
         }
 
-        ResolvedExecutionOptions execution;
-        execution.sampling.temperature    = 0.0F;
-        execution.requested_output_tokens = std::max(1u, prompt.summary().prompt_tokens);
-        execution.allow_prefix_reuse      = false;
-        BasePlan base                     = instance_.program->plan_request_base(prompt, execution);
-        Plan plan                         = instance_.program->plan_request_for_lane(0, prompt, base);
-        const RequestPlanSummary summary = plan.summary();
-        instance_.request_memory.activate(summary.transient_bytes, summary.transient_alignment);
-        try {
-            ScoreResult result =
-                instance_.program->score(std::move(prompt), std::move(plan),
-                                         instance_.request_memory.region(), options);
-            instance_.request_memory.deactivate();
-            return result;
-        } catch (...) {
-            instance_.request_memory.deactivate();
-            throw;
+        maintenance_lock.unlock();
+        std::vector<ScoreResult> results;
+        results.reserve(prompts.size());
+        for (std::size_t index = 0; index < prompts.size(); ++index) {
+            if (cancellation.requested()) { throw std::runtime_error("score batch cancelled"); }
+            auto& prompt = prompts[index];
+            ResolvedExecutionOptions execution;
+            execution.sampling.temperature    = 0.0F;
+            execution.requested_output_tokens = std::max(1u, prompt.summary().prompt_tokens);
+            execution.allow_prefix_reuse      = false;
+            BasePlan base                     = instance_.program->plan_request_base(prompt, execution);
+            Plan plan                         = instance_.program->plan_request_for_lane(0, prompt, base);
+            const RequestPlanSummary summary = plan.summary();
+            instance_.request_memory.activate(summary.transient_bytes, summary.transient_alignment);
+            try {
+                ScoreResult result =
+                    instance_.program->score(std::move(prompt), std::move(plan),
+                                             instance_.request_memory.region(), options[index]);
+                instance_.request_memory.deactivate();
+                results.push_back(std::move(result));
+            } catch (...) {
+                instance_.request_memory.deactivate();
+                throw;
+            }
         }
+        return results;
     }
 
     [[nodiscard]] RuntimeStats runtime_stats() const {
@@ -2105,6 +2122,27 @@ private:
         for (const auto& request : pending) { complete_error(request, error); }
     }
 
+    Clock::time_point poll_idle(bool& copies_ready) {
+        // score_many owns execution on the caller thread while slots still look idle.
+        std::lock_guard maintenance_lock(idle_maintenance_mutex_);
+        std::unique_lock execution_lock(execution_mutex_, std::try_to_lock);
+        if (!execution_lock.owns_lock()) return Clock::now() + std::chrono::milliseconds(10);
+        {
+            std::lock_guard lock(queue_mutex_);
+            if (stopping_ || !pending_.empty()) return Clock::now();
+            for (const auto& slot : slots_) if (slot) return Clock::now();
+        }
+        // Scoring can run while slots are empty. Idle KV maintenance therefore also
+        // needs execution ownership, and must not call HIP under the queue mutex.
+        if (!copy_hold_) {
+            try {
+                copies_ready = instance_.program->kv_copies_ready();
+                if (copies_ready) instance_.program->request_idle_spill();
+            } catch (...) {}
+        }
+        return Clock::time_point::max();
+    }
+
     void worker_loop() noexcept {
         // Once a decode-ready donor exists, successful binds spend frozen free-lane debt without
         // refund. A maximal decode is the only operation that refreshes it.
@@ -2137,18 +2175,19 @@ private:
                     }
                     if (!active) {
                         bool copies_ready = false;
-                        if (!copy_hold_) {
-                            try {
-                                copies_ready = instance_.program->kv_copies_ready();
-                                if (copies_ready) { instance_.program->request_idle_spill(); }
-                            } catch (...) {}
-                        }
-                        if (copies_ready) {
-                            queue_cv_.wait(lock, [&] { return stopping_ || !pending_.empty(); });
-                        } else {
-                            queue_cv_.wait_for(lock, std::chrono::milliseconds(20),
-                                              [&] { return stopping_ || !pending_.empty(); });
-                        }
+                        lock.unlock();
+                        Clock::time_point wake;
+                        try { wake = poll_idle(copies_ready); }
+                        catch (...) { fail_all(std::current_exception()); return; }
+                        if (!copies_ready) wake = std::min(wake, Clock::now() + std::chrono::milliseconds(20));
+                        lock.lock();
+                        const auto ready = [&] {
+                            return stopping_ || !pending_.empty();
+                        };
+                        if (wake == Clock::time_point::max()) queue_cv_.wait(lock, ready);
+                        else queue_cv_.wait_until(lock, wake, ready);
+                        // Idle maintenance never enters a decode round.
+                        if (!stopping_ && pending_.empty()) continue;
                     }
                 }
                 if (stopping_) {
@@ -2254,6 +2293,8 @@ private:
     const AdmissionResources admission_capacity_;
     LoadProgress load_progress_;
     const bool generation_recovery_;
+
+    std::mutex idle_maintenance_mutex_; // Idle submission versus score admission; never on decode path.
 
     mutable std::mutex execution_mutex_;
     mutable std::mutex queue_mutex_;

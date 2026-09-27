@@ -78,6 +78,7 @@ enum class Name : std::size_t {
     PrefillGdn,
     VerifyGdn,
     PrefillChunk,
+    ToolMaskMatch,
     Count,
 };
 
@@ -133,6 +134,7 @@ enum class Name : std::size_t {
         "prefill.gdn",
         "verify.gdn",
         "prefill.chunk",
+        "tool_mask.match",
     };
     const std::size_t index = static_cast<std::size_t>(name);
     return index < names.size() ? names[index] : "unknown";

@@ -146,10 +146,10 @@ request is enqueued. Anthropic Messages does not accept this object.
 `POST /v1/responses/input_tokens` allows `ninfer` only when omitted or JSON `null`.
 
 Streaming begins with an assistant-role chunk, sends separate reasoning and content deltas, then a
-finish-reason chunk and `[DONE]`. When `stream_options.include_usage` is true, a final empty
-`choices` chunk contains completed usage. Non-stream responses and the stream usage/finish chunks
-carry the per-request stats exactly once, in two OpenAI-standard details sub-objects (no top-level
-duplicates, no Ollama-compat aliases):
+finish-reason chunk, an empty `choices` usage trailer, and `[DONE]`. The finish chunk and trailer
+both contain the same completed usage, including when `stream_options.include_usage` is false.
+Non-stream responses and each stream usage/finish chunk place the per-request stats in two
+OpenAI-standard details sub-objects (no top-level duplicates, no Ollama-compat aliases):
 
 - `usage.prompt_tokens_details` — OpenAI-standard `cached_tokens` (prompt tokens served from
   prefix reuse, no recompute) plus engine stats under the `ninfer` namespace: `reuse_source`
@@ -277,9 +277,9 @@ wire response contains typed `output` Items.
 | `reasoning.effort` | `none` disables thinking; `low`, `medium`, or `xhigh` selects an effort exposed by the loaded chat template; `minimal`, `high`, and `max` return `reasoning_effort_not_supported` for the registered templates |
 | `chat_template_kwargs.preserve_thinking` | optional boolean controlling whether closed-turn reasoning remains in reconstructed prompts |
 | `preserve_thinking` | top-level alias for the same option; conflicting values are rejected |
-| `text.format` | omitted or `{"type":"text"}` only |
+| `text.format` | text, JSON object, or named JSON schema; see structured output below |
 | `tools` | flat Responses function definitions; see below |
-| `tool_choice` | `auto` or `none` |
+| `tool_choice` | `auto`, `none`, `required`, or `{"type":"function","name":"..."}` |
 | `parallel_tool_calls` | omitted or `true` |
 | `truncation` | omitted or `disabled`; overlong input fails instead of silently dropping Items |
 | `top_logprobs` | omitted or `0` |
@@ -354,8 +354,18 @@ rather than silently ignored, with HTTP 400, `code: invalid_tool_schema`, and
 `param: tools` on the OpenAI error surface. Malformed schemas, patterns and unresolved
 references use the same classification and retain the compiler diagnostic.
 This is not full JSON Schema or OpenAI strict-tool parity:
-`strict:true`, `tool_choice:required`, named tool choice,
-hosted tools, MCP tools, and custom free-form tools are rejected.
+`strict:true`, hosted tools, MCP tools, and custom free-form tools are rejected.
+
+`tool_choice:"required"` requires at least one declared function call. A named
+Responses choice uses the flat object `{"type":"function","name":"weather"}`
+and restricts calls to that declared function. Both modes require current tools;
+unknown names are rejected. The shared token grammar enforces a call as the first
+non-whitespace content after optional thinking, with schema-valid arguments; filtering
+tool declarations alone is not the enforcement. Subsequent prose and calls remain
+allowed, and the normal function-call SSE events and completed Items are unchanged.
+Chat Completions and Anthropic required/named choices use the same enforcement.
+Output limits or cancellation can still interrupt a call and produce an incomplete
+response; a required choice does not manufacture a completed call.
 
 Qwen argument framing uses exactly one LF before and after each parameter value.
 Declared arguments may appear in any order, independently of the order of
@@ -529,15 +539,36 @@ Long reasoning is not by itself a loop or a reason to truncate output.
 
 ### Local response state and resources
 
-`store` defaults to `true`. Stored Responses live only in this server process and are bounded by an
-LRU store. They are lost on restart and are not OpenAI's durable cloud retention service.
+`store` defaults to `true`. Stored Responses are bounded by an LRU store. By default
+it is process-local. Set `--response-store-location DIR` to retain terminal objects,
+normalized input Items, thinking policy and the shared conversation DAG across restarts.
+The directory is exclusively owned by one server process. This is local protocol-history
+persistence, not numerical checkpoint storage or OpenAI's cloud retention service.
+
+Persistent mutations and LRU access order are committed through an atomic, synced manifest;
+immutable context nodes are shared between branches. A successful stored terminal response or
+delete is durable before its HTTP success is published. Streaming deltas alone do not create
+a stored entry. A disconnect after the terminal object has been stored can leave a retrievable
+ID even if the client did not receive its final SSE event. Unpublished payloads and unreachable
+ancestors are reclaimed after a commit or on startup. I/O publication failure returns an
+error and disables store access until restart rather than serving divergent memory/disk state.
+A missing or malformed committed payload fails startup rather than silently dropping history.
+
+The existing record and memory-accounting limits apply after restart; lowering them evicts
+least-recently used public IDs on startup. They are not exact filesystem-byte quotas: JSON
+serialization and transient old/new payloads need additional disk space. The directory contains
+conversation and media source data in plaintext; use a dedicated location with appropriate local
+permissions. Owned media bytes are retained; external media URLs/paths are reacquired when a
+continuation is prepared, as with the process-local store.
 
 `previous_response_id` reconstructs the complete stored input/output Item history before the new
 input. The current `instructions` value is placed first but is not saved into the continuation
 context, matching the Responses rule that previous top-level instructions do not carry forward.
 Function definitions are request configuration rather than conversation Items and must be sent
 again on tool-result turns. The reconstructed prompt follows the ordinary Engine path, so resident
-prefix reuse applies naturally.
+prefix reuse applies naturally. After restart the model can recompute this history or use an
+independently valid existing prefix cache. This store does not serialize GPU KV, GDN or DFlash
+state and makes no fast numerical-resume promise.
 
 A stored Response also retains its resolved `preserve_thinking` value. A child which omits the
 field inherits the parent value. An explicit different value creates a new semantic branch; prompt
@@ -559,6 +590,40 @@ explicit deletion also make an ID unavailable. A single Response larger than the
 capacity fails with `response_store_capacity_exceeded` rather than silently pretending it was
 stored.
 
+### Candidate continuation scoring
+
+`POST /v1/score` is a local, non-streaming scoring API:
+
+```json
+{"model":"qwen3.8-27b","messages":[{"role":"user","content":"Name a primary color."}],"candidates":["red","blue"]}
+```
+
+It accepts `model`, `messages`, 1–16 nonempty string `candidates`, and the existing
+`enable_thinking`, `preserve_thinking`, `reasoning_effort` and `chat_template_kwargs`
+controls. Context may include text and tool history; media, active tool declarations,
+sampling controls, output formats and generation options are rejected. The model field
+is informational, as on other endpoints. Each candidate is appended as the final assistant
+message to the same history; candidates never see one another.
+
+Scores use the qualified teacher-forced prefill path and exactly the final-assistant boundary
+used by `ninfer-ppl --score-last-message`. The scored suffix includes template-generated
+reasoning framing, if any, and the assistant turn closure. Thus these are probabilities of
+**rendered assistant continuations**, not just bare strings. The response has
+`object:"candidate_scores"`, `scoring:"rendered_assistant"`, `schedule:"prefill"`, and a `data`
+array in input order. Each entry contains `index`, `text`, `prompt_tokens`, `scored_tokens`,
+`sum_nll`, `mean_nll`, `log_probability` (negative sum NLL), and `score_seconds`.
+`mean_nll` divides by `scored_tokens`; both quantities are exposed because candidates of
+different lengths can rank differently by sum and mean. No calibrated confidence or
+closed-set normalization is claimed. `usage` sums prompt and scored tokens across entries.
+Nonfinite or empty scores fail the entire request instead of producing a partial ranking.
+
+Scoring requires an idle Engine and returns HTTP429 when it is busy. One execution reservation
+covers all candidates; normal generation cannot interleave with scoring resets. Requests
+arriving afterward may queue normally. Each prepared sequence must fit `--max-context`, and
+the aggregate token count must not exceed four times that limit. A client disconnect is checked
+between candidates; it does not interrupt a running prefill chunk. This API reuses existing
+scoring arithmetic, not computed shared-prefix state, and does not claim a branch-scoring speedup.
+
 ### Responses input token count
 
 `POST /v1/responses/input_tokens` accepts exactly `model` and `input`, performs the same typed Item,
@@ -575,9 +640,40 @@ curl http://127.0.0.1:8080/v1/responses/input_tokens \
 ```
 
 Unsupported Create fields include Conversations, prompt templates, context management, hosted
-moderation, prompt-cache controls, safety/user identifiers, Structured Outputs/JSON mode,
+moderation, prompt-cache controls, safety/user identifiers,
 non-empty `include`, background execution, compaction, files/audio, and OpenAI-hosted/MCP/custom
 tools. These are compatibility boundaries, not silently accepted placeholders.
+
+## Structured JSON output
+
+Chat Completions accepts `response_format:{"type":"json_object"}` or
+`response_format:{"type":"json_schema","json_schema":{"name":"result","schema":{...},"strict":true}}`.
+Responses accepts the equivalent `text.format`, with `name`, `schema`, optional `description`
+and optional `strict` directly alongside `type:"json_schema"`. Omitted/null formats and
+`{"type":"text"}` retain normal text output. Schema names use 1–64 letters, digits, underscores
+or hyphens. Responses echoes the requested format in created and terminal objects.
+
+JSON object mode enforces an object; schema mode enforces the supported schema on one JSON value.
+The same schema subset and unsupported-assertion checks described for tools apply. `strict` is
+accepted as a boolean/null; supported assertions are enforced regardless of its value. Unsupported
+schemas fail with HTTP400 `invalid_output_schema`, rather than being silently weakened. Format
+shape/combination errors use `invalid_output_format`. The error parameter is `response_format`
+for Chat or `text.format` for Responses.
+
+Optional reasoning remains a separate unconstrained channel before the JSON content. Ordinary,
+MTP and DFlash sampling use the same grammar preview/commit and tree-mask machinery; JSON does
+not force target-only decoding. Active tools and custom stops cannot be combined with JSON output;
+tool history remains valid input. Literal tool markup inside JSON strings remains data.
+Content streams incrementally and may be incomplete on output/context limits or cancellation;
+only normal model-stop completion guarantees the completed constrained value. No tools execute.
+The public Engine uses `PromptOptions.output_json_schema` and requires its default model stops
+and parsed output for this mode.
+
+The real-engine smoke client is `python3.11 -m tools.smoke.serve_features --model MODEL
+--base-url BASE --concurrency 1` (use concurrency4 for a C4 server). Run it against each
+qualified ordinary/MTP/DFlash configuration under the shared GPU lease. `--save-response FILE`
+and, after restarting with the same store directory, `--restore-response FILE` exercise durable
+retrieval and descendant continuation. The client does not start or stop servers.
 
 ## Anthropic Messages
 
@@ -658,6 +754,7 @@ curl http://127.0.0.1:8080/v1/models \
 | `--device N` | HIP device index | `0` |
 | `--max-request-mib N` | body-size limit before JSON parsing | `384` |
 | `--request-log-jsonl FILE` | append full-precision server/request records | disabled |
+| `--response-store-location DIR` | optional directory for restart-persistent Responses history | unset (process-local) |
 | `--response-store-max-records N` | maximum locally retained Responses objects | `1024` |
 | `--response-store-max-mib N` | total local Response envelope/Item/context budget | `256` |
 | `--spec mtp\|dflash` | speculative backend | off |
@@ -923,8 +1020,7 @@ context-capacity finishes map to `length`/ `max_tokens`; ordinary model or strin
 `stop`/ `end_turn`.
 
 Function tools are rendered into the model prompt and generated calls are parsed into protocol
-responses. NInfer does not execute tools and does not enforce client JSON Schema through constrained
-decoding.
+responses. NInfer does not execute tools; its supported schema subset is enforced during decoding.
 
 Prompt-token usage includes chat-template and expanded media tokens. Generated-token usage comes
 from accepted output token IDs, including a stop token whose decoded text may be withheld.

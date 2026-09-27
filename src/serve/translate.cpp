@@ -235,6 +235,9 @@ ninfer::PromptInput to_prompt_input(const GenerationRequest& request,
     input.options.preserve_thinking     = semantics.preserve_thinking;
     input.options.add_vision_id         = false;
     input.options.tool_jsons            = effective_tool_jsons(request);
+    input.options.output_json_schema    = request.output_json_schema;
+    input.options.require_tool_call = request.tool_choice.mode == ToolChoiceMode::Required ||
+                                      request.tool_choice.mode == ToolChoiceMode::Named;
     apply_leading_system_prepend(input.messages, system_prepend);
     return input;
 }

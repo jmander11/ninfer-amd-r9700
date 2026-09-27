@@ -263,6 +263,8 @@ if(NINFER_BUILD_APPS)
     serve/request_log.cpp
     serve/http_server.cpp
     serve/responses_http.cpp
+    serve/score_schema.cpp
+    serve/score_http.cpp
     serve/serve_options.cpp)
   ninfer_r9700_internal_includes(ninfer_serve)
   target_include_directories(ninfer_serve PRIVATE

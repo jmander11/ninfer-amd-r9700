@@ -1,4 +1,5 @@
 #include "serve/generation_service.h"
+#include "serve/score_schema.h"
 
 #include "product/media_acquire/acquire.h"
 #include "serve/console_log.h"
@@ -83,6 +84,11 @@ ApiError request_error_to_api_error(const ninfer::RequestError& exception) {
     error.param   = "messages";
     error.message = exception.what();
     switch (exception.kind()) {
+    case ninfer::RequestErrorKind::InvalidOutputSchema:
+        error.status = 400;
+        error.code = "invalid_output_schema";
+        error.param = "response_format";
+        break;
     case ninfer::RequestErrorKind::InvalidToolSchema:
         error.status = 400;
         error.code = "invalid_tool_schema";
@@ -448,6 +454,56 @@ int GenerationService::count_prompt_tokens(const GenerationRequest& request,
     } catch (const ApiException&) { throw; } catch (const ninfer::RequestError& exception) {
         throw_request_error(exception);
     } catch (const std::invalid_argument& exception) { throw_invalid_input(exception); }
+}
+
+std::vector<ninfer::ScoreResult>
+GenerationService::score_candidates(const CandidateScoreRequest& request,
+                                     std::function<bool()> is_cancelled) const {
+    const auto lifetime = acquire_request_lifetime();
+    const auto semantics = resolve_prompt_semantics(request.context, options_, prompt_capabilities_);
+    try {
+        auto input = to_prompt_input(request.context, semantics,
+            [](const ContentPart&) -> ninfer::OwnedMedia {
+                throw std::invalid_argument("candidate scoring does not support media");
+            }, options_.system_prepend);
+        input.options.add_generation_prompt = false;
+        std::vector<ninfer::PreparedPrompt> prompts;
+        std::vector<ninfer::ScoreOptions> score_options;
+        std::uint64_t total_tokens = 0;
+        for (const auto& candidate : request.candidates) {
+            check_preparation_control(lifetime->deadline, is_cancelled);
+            auto branch = input;
+            ninfer::ChatMessage assistant;
+            assistant.role = ninfer::ChatRole::Assistant;
+            ninfer::MessagePart content;
+            content.text = candidate;
+            assistant.parts.push_back(std::move(content));
+            branch.messages.push_back(std::move(assistant));
+            auto prompt = engine_->prepare(std::move(branch));
+            const auto& summary = prompt.summary();
+            const auto boundary = summary.final_assistant_token_begin;
+            if (!boundary || *boundary == 0 || *boundary >= summary.prompt_tokens) {
+                throw std::logic_error("prepared assistant scoring boundary is invalid");
+            }
+            total_tokens += summary.prompt_tokens;
+            if (summary.prompt_tokens > options_.max_context) {
+                throw ninfer::RequestError(ninfer::RequestErrorKind::ContextLengthExceeded,
+                    "score sequence exceeds the configured max_context");
+            }
+            if (total_tokens > std::uint64_t{options_.max_context} * 4) {
+                throw std::invalid_argument("score batch exceeds 4 * max_context total tokens");
+            }
+            ninfer::ScoreOptions options;
+            options.skip_tokens = *boundary - 1;
+            score_options.push_back(options);
+            prompts.push_back(std::move(prompt));
+        }
+        check_preparation_control(lifetime->deadline, is_cancelled);
+        return engine_->score_many(std::move(prompts), std::move(score_options),
+                                   ninfer::CancellationView(std::move(is_cancelled)));
+    } catch (const ApiException&) { throw; }
+    catch (const ninfer::RequestError& exception) { throw_request_error(exception); }
+    catch (const std::invalid_argument& exception) { throw_invalid_input(exception); }
 }
 
 GenerationOutcome GenerationService::run(PreparedRequest& prepared, std::uint64_t request_id,

@@ -294,24 +294,46 @@ GenerationResult Engine::generate(PreparedPrompt prompt, RequestOptions options,
 }
 
 ScoreResult Engine::score(PreparedPrompt prompt, ScoreOptions options) {
+    std::vector<PreparedPrompt> prompts;
+    prompts.push_back(std::move(prompt));
+    auto results = score_many(std::move(prompts), {options});
+    return std::move(results.front());
+}
+
+std::vector<ScoreResult> Engine::score_many(std::vector<PreparedPrompt> prompts,
+                                           std::vector<ScoreOptions> options,
+                                           const CancellationView& cancellation) {
     if (impl_ == nullptr) { throw std::logic_error("Engine is moved from"); }
-    if (prompt.impl_ == nullptr) { throw std::invalid_argument("PreparedPrompt is empty"); }
-    const PromptSummary prompt_summary = prompt.impl_->summary;
-    if (prompt_summary.prompt_tokens > impl_->options.max_context) {
-        throw RequestError(
-            RequestErrorKind::ContextLengthExceeded,
-            context_capacity_error(prompt_summary.prompt_tokens, impl_->options.max_context));
+    if (prompts.empty() || prompts.size() > 16 || options.size() != prompts.size()) {
+        throw std::invalid_argument("score_many requires 1..16 prompts with one option per prompt");
     }
-    if (prompt_summary.prompt_tokens < 2) {
-        throw std::invalid_argument("score requires at least two prompt tokens");
+    std::uint64_t total_tokens = 0;
+    for (std::size_t i = 0; i < prompts.size(); ++i) {
+        const auto& prompt = prompts[i];
+        if (prompt.impl_ == nullptr) { throw std::invalid_argument("PreparedPrompt is empty"); }
+        const auto count = prompt.impl_->summary.prompt_tokens;
+        if (count > impl_->options.max_context) {
+            throw RequestError(RequestErrorKind::ContextLengthExceeded,
+                               context_capacity_error(count, impl_->options.max_context));
+        }
+        if (count < 2 || (options[i].schedule == ScoreSchedule::Decode && count < 3)) {
+            throw std::invalid_argument("score sequence has too few tokens for its schedule");
+        }
+        if (options[i].skip_tokens && *options[i].skip_tokens > count - 2) {
+            throw std::invalid_argument("score skip leaves no teacher-forced target");
+        }
+        total_tokens += count;
     }
-    if (options.schedule == ScoreSchedule::Decode && prompt_summary.prompt_tokens < 3) {
-        throw std::invalid_argument("decode score requires at least three prompt tokens");
+    if (total_tokens > std::uint64_t{impl_->options.max_context} * 4) {
+        throw std::invalid_argument("score batch exceeds 4 * max_context prepared tokens");
     }
     if (impl_->executor == nullptr) {
         throw std::logic_error("concurrent Engine executor is unavailable");
     }
-    return impl_->executor->score(std::move(prompt.impl_->value), options);
+    std::vector<targets::qwen3::PreparedPrompt> prepared;
+    prepared.reserve(prompts.size());
+    for (auto& prompt : prompts) { prepared.push_back(std::move(prompt.impl_->value)); }
+    return impl_->executor->score_many(std::move(prepared), options, cancellation);
 }
 
 const EngineOptions& Engine::options() const {

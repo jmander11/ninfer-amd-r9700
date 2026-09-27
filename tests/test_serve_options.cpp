@@ -193,9 +193,10 @@ int main() {
 
     const ServeOptions response_store =
         parse({"ninfer-serve", "model.ninfer", "--response-store-max-records", "42",
-               "--response-store-max-mib", "8"});
+               "--response-store-max-mib", "8", "--response-store-location", "/tmp/response-history"});
     failures += check(response_store.response_store_max_records == 42 &&
-                          response_store.response_store_max_bytes == (8ULL << 20),
+                          response_store.response_store_max_bytes == (8ULL << 20) &&
+                          response_store.response_store_location == "/tmp/response-history",
                       "Responses store limits did not reach serving options");
 
     const ServeOptions sampling =

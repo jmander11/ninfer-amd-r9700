@@ -92,8 +92,16 @@ public:
                               const CancellationView& cancellation = {});
 
     // Teacher-forced next-token NLL over a prepared token sequence. Does not sample, decode,
-    // or change generate/serve graphs. Used only by the perplexity tool.
+    // or change generate/serve graphs. Requires an idle Engine.
     [[nodiscard]] ScoreResult score(PreparedPrompt prompt, ScoreOptions options = {});
+
+    // One idle admission and execution reservation for the complete batch. No
+    // generation can interleave between candidates. Each sequence is evaluated
+    // independently; this does not promise shared-prefix computation reuse.
+    // At most 16 sequences and 4 * max_context aggregate prepared tokens.
+    [[nodiscard]] std::vector<ScoreResult>
+    score_many(std::vector<PreparedPrompt> prompts, std::vector<ScoreOptions> options,
+               const CancellationView& cancellation = {});
 
     [[nodiscard]] const EngineOptions& options() const;
     [[nodiscard]] LoadSummary load_summary() const;

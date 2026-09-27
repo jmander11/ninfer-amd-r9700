@@ -182,7 +182,8 @@ httplib::Server::HandlerResponse handle_unrendered_http_error(const ServeOptions
 
 HttpServer::HttpServer(ServeOptions options)
     : options_(std::move(options)),
-      response_store_(options_.response_store_max_records, options_.response_store_max_bytes),
+      response_store_(options_.response_store_max_records, options_.response_store_max_bytes,
+                      options_.response_store_location),
       request_jsonl_(options_.request_log_jsonl, options_.artifact_path) {
     const std::size_t queued_requests =
         static_cast<std::size_t>(options_.max_concurrency) + options_.max_pending_requests;
@@ -350,6 +351,9 @@ void HttpServer::register_routes() {
                  });
     server_.Post("/v1/responses", [this](const httplib::Request& req, httplib::Response& res) {
         handle_responses(req, res);
+    });
+    server_.Post("/v1/score", [this](const httplib::Request& req, httplib::Response& res) {
+        handle_score(req, res);
     });
     server_.Post("/v1/responses/input_tokens",
                  [this](const httplib::Request& req, httplib::Response& res) {

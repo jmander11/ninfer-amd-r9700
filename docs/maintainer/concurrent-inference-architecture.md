@@ -1672,3 +1672,31 @@ admission。Later arrivals 从未成为 H 的 donor，也不能恢复已消费�
 - [ReplaySSM GDN technical reference](replayssm-gdn.md)
 - [Serving behavior](../serving.md)
 - [Qwen3.8-27B model semantics](qwen3.8-27b-model.md)
+
+### Idle maintenance and scoring ownership
+
+Idle KV copy readiness and spill submission run under execution ownership after
+rechecking the queue and active slots. The queue mutex is released before any Program
+or HIP call. If scoring holds execution ownership while slots appear empty, the worker
+skips Program access and retries after a bounded wait. A short idle-maintenance mutex
+serializes this host submission section with `score_many` admission, so maintenance
+alone cannot make an otherwise idle Engine report overloaded. Scoring releases that
+mutex after reserving execution ownership; normal decode never takes it.
+
+### Speculative grammar exchange
+
+`ToolMaskExchange` enqueues candidate IDs, parents and valid-column downloads, the CPU
+grammar callback, and mask/sampling-configuration uploads on the owning compute stream.
+Target verification follows on that same stream: embedding through LM head, masked argmax,
+then acceptance. Stream order guarantees the callback observes downloaded inputs and target
+sampling observes completed masks. Callback code calls no HIP APIs. Ordinary and prefill
+root masking use their existing synchronized CPU boundary.
+
+Bindings change at synchronized round boundaries; lane release and Program teardown retain
+the owning execution boundary before request/OutputSession storage is released. The mask
+exchange owns stable pinned staging storage for capture/replay, but no separate stream or
+dependency events. Callback ROCtx attribution remains available through the explicit diagnostic.
+The auxiliary-stream candidate was rejected: the installed default graph scheduler serialized
+it, paired request results established no benefit, and a process-local no-collapse profiling
+check stalled. Historical evidence is retained under
+`profiles/bench/r9700-feature-ports-20260927/grammar-scheduler-analysis.md`.

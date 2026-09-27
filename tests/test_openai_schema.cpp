@@ -396,9 +396,23 @@ int test_reject_unsupported() {
 
     Json rf               = base;
     rf["response_format"] = Json{{"type", "json_object"}};
-    failures +=
-        check(throws_api([&] { (void)parse_chat_completion_request(rf, default_limits()); }),
-              "json response_format rejected");
+    failures += check(parse_chat_completion_request(rf, default_limits()).output_json_schema ==
+                          std::optional<std::string>(R"({"type":"object"})"),
+                      "JSON object format reaches the runtime schema");
+    rf["response_format"] = Json{{"type", "json_schema"}, {"json_schema",
+        Json{{"name", "result"}, {"strict", true}, {"schema", Json{{"type", "boolean"}}}}}};
+    const auto structured = parse_chat_completion_request(rf, default_limits());
+    failures += check(structured.output_json_schema == std::optional<std::string>(R"({"type":"boolean"})"),
+                      "named JSON schema retained");
+    failures += check(to_prompt_input(structured, {}, {}).options.output_json_schema ==
+                          structured.output_json_schema, "JSON schema reaches Engine prompt");
+    rf["stop"] = "}";
+    failures += check(throws_api([&] { (void)parse_chat_completion_request(rf, default_limits()); }),
+                      "custom stop cannot truncate structured output as a normal completion");
+    rf.erase("stop");
+    rf["response_format"]["json_schema"]["strict"] = "yes";
+    failures += check(throws_api([&] { (void)parse_chat_completion_request(rf, default_limits()); }),
+                      "malformed strict field rejected");
 
     Json rf_text               = base;
     rf_text["response_format"] = Json{{"type", "text"}};

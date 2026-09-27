@@ -6,6 +6,10 @@ DFlash2 speculative decoding, fixed concurrency of 1–4 requests, prefix cachin
 Device Graphs and perplexity scoring. This is a target-specific AMD engine, not
 a general multi-model or multi-GPU framework.
 
+Serving includes constrained JSON/schema output, required or named tool calls,
+optional restart-persistent Responses history, and candidate scoring through
+`POST /v1/score`. Protocols, options and scoring semantics are in `docs/serving.md`.
+
 ## Performance
 
 One R9700, ROCm 10, Release build, power `auto`, Device Graphs, dense G16 attention.

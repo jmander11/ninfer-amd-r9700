@@ -1,0 +1,85 @@
+{
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "echo_record",
+        "description": "Emit the complete twelve-field record with the exact required values.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "field00": {
+              "type": "string",
+              "const": "value00"
+            },
+            "field01": {
+              "type": "string",
+              "const": "value01"
+            },
+            "field02": {
+              "type": "string",
+              "const": "value02"
+            },
+            "field03": {
+              "type": "string",
+              "const": "value03"
+            },
+            "field04": {
+              "type": "string",
+              "const": "value04"
+            },
+            "field05": {
+              "type": "string",
+              "const": "value05"
+            },
+            "field06": {
+              "type": "string",
+              "const": "value06"
+            },
+            "field07": {
+              "type": "string",
+              "const": "value07"
+            },
+            "field08": {
+              "type": "string",
+              "const": "value08"
+            },
+            "field09": {
+              "type": "string",
+              "const": "value09"
+            },
+            "field10": {
+              "type": "string",
+              "const": "value10"
+            },
+            "field11": {
+              "type": "string",
+              "const": "value11"
+            }
+          },
+          "required": [
+            "field00",
+            "field01",
+            "field02",
+            "field03",
+            "field04",
+            "field05",
+            "field06",
+            "field07",
+            "field08",
+            "field09",
+            "field10",
+            "field11"
+          ],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "messages": [
+    {
+      "role": "user",
+      "content": "Call echo_record once with every field at its required value. Do not answer in prose."
+    }
+  ]
+}

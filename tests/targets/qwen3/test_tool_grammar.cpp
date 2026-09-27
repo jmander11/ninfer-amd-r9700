@@ -241,6 +241,79 @@ int main(int argc, char** argv) {
     auto check = [&](bool condition, const char* label) {
         if (!condition) { ++failures; std::cerr << label << '\n'; }
     };
+    for (bool reasoning : {false, true}) {
+        const auto grammar = compiler.compile({}, reasoning, false,
+            R"({"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"],"additionalProperties":false})");
+        const std::string prefix = reasoning ? "Reasoning about a call.</think>\n\n" : "";
+        xgrammar::GrammarMatcher good(grammar->compiled);
+        check(good.AcceptString(prefix + R"({"ok":true})") && good.AcceptToken(7),
+              "schema accepts complete JSON after optional reasoning");
+        xgrammar::GrammarMatcher early(grammar->compiled);
+        check(early.AcceptString(prefix + R"({"ok":)") && !early.AcceptToken(7),
+              "schema forbids premature EOS");
+        check(early.AcceptToken(3), "schema accepts represented boolean token");
+        check(early.AcceptString("}") && !early.AcceptString(" prose"),
+              "schema forbids content after the JSON value");
+        xgrammar::GrammarMatcher bad(grammar->compiled);
+        check(!bad.AcceptString(prefix + R"({"wrong":true})"), "schema rejects wrong key");
+        const auto scalar = compiler.compile({}, reasoning, false, R"({"type":"boolean"})");
+        fi::ToolGrammarState state(scalar);
+        if (reasoning) {
+            const std::array<ninfer::TokenId, 2> reasoning_tokens{10, 11};
+            state.preview(reasoning_tokens);
+            state.commit_preview();
+        }
+        const std::array<ninfer::TokenId, 1> value{3};
+        state.preview(value);
+        state.discard_preview();
+        state.preview(value);
+        state.commit_preview();
+        const std::array<ninfer::TokenId, 1> eos{7};
+        state.preview(eos);
+        state.commit_preview();
+    }
+    try {
+        (void)compiler.compile({}, false, false, R"({"type":"integer","multipleOf":2})");
+        check(false, "unsupported schema assertion admitted");
+    } catch (const ninfer::RequestError& error) {
+        check(error.kind() == ninfer::RequestErrorKind::InvalidOutputSchema,
+              "schema failure classified as output schema");
+    }
+    for (bool reasoning : {false, true}) {
+        const auto required = compiler.compile(tools, reasoning, true);
+        const std::string prefix = reasoning ? "Reasoning about a call.</think>\n\n" : "";
+        xgrammar::GrammarMatcher empty(required->compiled);
+        check(empty.AcceptString(prefix) && !empty.AcceptToken(7),
+              "required call admitted EOS before a call");
+        xgrammar::GrammarMatcher prose(required->compiled);
+        check(!prose.AcceptString(prefix + "Plain answer."),
+              "required call admitted a prose-only answer");
+        xgrammar::GrammarMatcher wrong(required->compiled);
+        check(!wrong.AcceptString(prefix + envelope("other", {})),
+              "required call admitted an undeclared function");
+        const auto call = envelope("read", {{"filePath", "true"}, {"limit", "64"}});
+        xgrammar::GrammarMatcher valid(required->compiled);
+        check(valid.AcceptString(prefix + call + "Done." + call) && valid.AcceptToken(7),
+              "required call rejected valid call, subsequent prose/call, or stop");
+        fi::ToolGrammarState state(required);
+        std::vector<ninfer::TokenId> tokens;
+        if (reasoning) { tokens = {10, 11}; }
+        tokens.insert(tokens.end(), {1, 2, 3, 4, 5, 6});
+        const std::vector<ninfer::TokenId> root{0};
+        const std::vector<std::int32_t> parents{-1};
+        std::vector<std::uint32_t> masks(fi::ToolGrammarState::mask_words);
+        const auto can_stop = [&] {
+            state.fill_masks(root, parents, masks);
+            return (masks[7 / 32] & (1u << (7 % 32))) != 0;
+        };
+        check(!can_stop(), "required committed grammar starts terminable");
+        state.preview(tokens);
+        state.discard_preview();
+        check(!can_stop(), "discarded required call changed committed state");
+        state.preview(tokens);
+        state.commit_preview();
+        check(can_stop(), "committed required call cannot terminate");
+    }
     auto schema_grammar = [&](const Json& schema) {
         return compiler.compile(std::vector<std::string>{Json{{"type", "function"},
             {"function", Json{{"name", "check"}, {"parameters", schema}}}}.dump()}, false);

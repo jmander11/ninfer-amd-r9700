@@ -45,6 +45,7 @@ void write_error(httplib::Response& response, const ApiError& error) {
 }
 
 ApiError responses_error(ApiError error) {
+    if (error.param == "response_format") { error.param = "text.format"; }
     if (error.param == "messages") { error.param = "input"; }
     return error;
 }
@@ -358,50 +359,58 @@ void HttpServer::handle_response_input_tokens(const httplib::Request& req, httpl
 }
 
 void HttpServer::handle_response_get(const httplib::Request& req, httplib::Response& res) {
-    const std::string id                               = path_response_id(req);
-    const std::shared_ptr<const StoredResponse> stored = response_store_.get(id);
-    if (!stored) {
-        write_error(res, response_not_found(id));
-        return;
-    }
-    res.set_content(stored->response.dump(), "application/json");
+    try {
+        const std::string id                               = path_response_id(req);
+        const std::shared_ptr<const StoredResponse> stored = response_store_.get(id);
+        if (!stored) {
+            write_error(res, response_not_found(id));
+            return;
+        }
+        res.set_content(stored->response.dump(), "application/json");
+    } catch (const std::exception& exception) { write_error(res, internal_error(exception)); }
 }
 
 void HttpServer::handle_response_delete(const httplib::Request& req, httplib::Response& res) {
-    const std::string id = path_response_id(req);
-    if (!response_store_.erase(id)) {
-        write_error(res, response_not_found(id));
-        return;
-    }
-    res.set_content(Json{{"id", id}, {"object", "response.deleted"}, {"deleted", true}}.dump(),
-                    "application/json");
+    try {
+        const std::string id = path_response_id(req);
+        if (!response_store_.erase(id)) {
+            write_error(res, response_not_found(id));
+            return;
+        }
+        res.set_content(Json{{"id", id}, {"object", "response.deleted"}, {"deleted", true}}.dump(),
+                        "application/json");
+    } catch (const std::exception& exception) { write_error(res, internal_error(exception)); }
 }
 
 void HttpServer::handle_response_input_items(const httplib::Request& req, httplib::Response& res) {
-    const std::string id                               = path_response_id(req);
-    const std::shared_ptr<const StoredResponse> stored = response_store_.get(id);
-    if (!stored) {
-        write_error(res, response_not_found(id));
-        return;
-    }
     try {
+        const std::string id                               = path_response_id(req);
+        const std::shared_ptr<const StoredResponse> stored = response_store_.get(id);
+        if (!stored) {
+            write_error(res, response_not_found(id));
+            return;
+        }
         res.set_content(paginated_input_items(req, stored->input_items).dump(), "application/json");
-    } catch (const ApiException& exception) { write_error(res, exception.error()); }
+    } catch (const ApiException& exception) {
+        write_error(res, exception.error());
+    } catch (const std::exception& exception) { write_error(res, internal_error(exception)); }
 }
 
 void HttpServer::handle_response_cancel(const httplib::Request& req, httplib::Response& res) {
-    const std::string id = path_response_id(req);
-    if (!response_store_.get(id)) {
-        write_error(res, response_not_found(id));
-        return;
-    }
-    ApiError error;
-    error.status  = 400;
-    error.type    = "invalid_request_error";
-    error.code    = "background_not_supported";
-    error.message = "only background responses can be cancelled; NInfer does not support "
-                    "background execution";
-    write_error(res, error);
+    try {
+        const std::string id = path_response_id(req);
+        if (!response_store_.get(id)) {
+            write_error(res, response_not_found(id));
+            return;
+        }
+        ApiError error;
+        error.status  = 400;
+        error.type    = "invalid_request_error";
+        error.code    = "background_not_supported";
+        error.message = "only background responses can be cancelled; NInfer does not support "
+                        "background execution";
+        write_error(res, error);
+    } catch (const std::exception& exception) { write_error(res, internal_error(exception)); }
 }
 
 void HttpServer::handle_response_compact(const httplib::Request&, httplib::Response& res) {
