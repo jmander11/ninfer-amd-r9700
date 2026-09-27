@@ -180,7 +180,7 @@ precompute pass with a workspace would take off the serial chain (estimated 1-2%
 ## FP8LUT4 Text weights and per-token E4M3 activations (2026-09-26, evening)
 
 The Text-layer Q4G64 projections of the selective-cap DFlash2 base were re-encoded from BF16 as
-`FP8LUT4` (`r9700-fp8lut4-fp8-selective-cap-dflash2-q4-eval`; codec in `tensor-formats.md`,
+`FP8LUT4` (now `r9700-fp8lut4`; codec in `tensor-formats.md`,
 recipe in `qwen3.8-27b-artifact.md`). Each 32-column group selects an eight-magnitude codebook
 whose values are exact E4M3, so every Linear runs FP8 x FP8 WMMA with only the FP32 row scale
 and the per-token activation scale applied after the K sum: prefill is a 256-token x 128-row

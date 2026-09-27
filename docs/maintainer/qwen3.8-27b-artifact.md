@@ -59,9 +59,9 @@ validates inventories, and reads back the complete output against its conversion
 
 ### Selected local compact deployment
 
-The user-selected local deployment is the FP8LUT4 Text recipe
-`r9700-fp8lut4-fp8-selective-cap-dflash2-q4-eval` (below, GPTQ conversion), installed under
-`/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-fp8lut4-gptq-usage/` and named by
+The admitted production deployment is the FP8LUT4 Text recipe `r9700-fp8lut4` (below, GPTQ
+conversion), installed under
+`/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-fp8lut4/` and named by
 `.env.example`/`compose.yaml`. It is derived from the Q4 selective-cap pair, which remains
 installed as its conversion base: `r9700-q4-fp8-selective-cap-n16k16-eval`
 (15,793,065,984 bytes) and its `r9700-q4-fp8-selective-cap-n16k16-dflash2-q4-eval`
@@ -88,8 +88,8 @@ see `docs/performance.md` for quality tradeoffs and delivery evidence.
 
 ### FP8LUT4 Text recipe
 
-`r9700-fp8lut4-fp8-selective-cap-dflash2-q4-eval` (profile
-`R9700Fp8Lut4Fp8SelectiveCapDFlash2Q4Evaluation`, 17,017,223,680 bytes) is the selective-cap DFlash2
+`r9700-fp8lut4` (profile `R9700Fp8Lut4`, 17,017,223,680 bytes; admitted 2026-09-27, see
+`docs/performance.md`) is the selective-cap DFlash2
 companion with every Text-layer projection the base stores as Q4G64 re-encoded from the original
 BF16 checkpoint as `FP8LUT4` in `r9700-fp8lut4-n16k64-v1` (see `tensor-formats.md`), including
 GDN value_z. The 26 FP8 protections, embedding, output head, MTP, DFlash2 companion, Vision and
@@ -109,7 +109,7 @@ The calibration set (`calibration_corpus.py`) is 64 windows of rendered opencode
 OpenWebUI conversations, 28 of llama.cpp sources and 16 of news text; no window shares a 32-token
 span with the PPL corpora, and its manifest records every input file. Conversion needs the GPU
 (~45 min), is create-only, and validates its readback; the installed file is
-`/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-fp8lut4-gptq-usage/qwen3.8-27b-r9700-fp8lut4-gptq-usage-dflash2-q4-eval.ninfer`.
+`/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-fp8lut4/qwen3.8-27b-r9700-fp8lut4.ninfer`.
 
 ```bash
 python3.11 -m tools.convert.qwen3_8_27b_r9700.convert_fp8lut4 \

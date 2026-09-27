@@ -26,7 +26,7 @@ DAMPING = {"mlp/down": 0.3}
 DEFAULT_DAMPING = 0.1
 
 BASE_WEIGHTS_ID = "r9700-q4-fp8-selective-cap-n16k16-dflash2-q4-eval"
-WEIGHTS_ID = "r9700-fp8lut4-fp8-selective-cap-dflash2-q4-eval"
+WEIGHTS_ID = "r9700-fp8lut4"
 FP8LUT4 = "FP8LUT4"
 FP8LUT4_LAYOUT = "r9700-fp8lut4-n16k64-v1"
 

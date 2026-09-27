@@ -43,7 +43,7 @@ and evidence: `docs/performance.md`.
 ## Model and precision
 
 - **17.02 GB DFlash-enabled artifact** (decimal file size, not VRAM),
-  `r9700-fp8lut4-fp8-selective-cap-dflash2-q4-eval`.
+  `qwen3.8-27b/r9700-fp8lut4` (the admitted production weights).
 - Text-layer weights in FP8LUT4 (4-bit codes with a per-32 codebook of exact E4M3
   values, FP32 row scale; GDN and MLP GPTQ-rounded on real-session calibration); 26 protected
   projections in FP8; Q4 embedding/output
@@ -55,12 +55,13 @@ and evidence: `docs/performance.md`.
 Against a BF16 reference at 8K, the mean NLL increase is +0.023 (prefill), about a third below
 the previous Q4 artifact. At 4K it is 0.024 nats/token below the 5090 NVFP4 build on the same
 wiki/technical/code windows (about 2.4% lower PPL). NIAH exact-answer retrieval passes 8K-128K and 240K (the
-opencode compaction point, 241K-token prompts) at five positions, standard and multikey. This is not
-universal quality equivalence; the BF16-source production-admission campaign
-remains unfinished.
+opencode compaction point, 241K-token prompts) at five positions, standard and multikey.
+Admission against the source-BF16 reference (2026-09-27): +0.023/+0.018 at 8K/32K prefill, closer
+to BF16 than the 5090 NVFP4 build on the same positions (+0.032/+0.027); graph/eager decode and
+whole-inference greedy tokens are exact. This is not universal quality equivalence.
 
 Artifacts are not bundled. The installed artifact and its conversion receipt are
-under `/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-fp8lut4-gptq-usage/`.
+under `/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-fp8lut4/`.
 Conversion and binding details: `docs/maintainer/qwen3.8-27b-artifact.md` (FP8LUT4 Text recipe).
 
 ## Build
