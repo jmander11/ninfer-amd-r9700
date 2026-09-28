@@ -190,6 +190,16 @@ endif()
 
 project(ninfer LANGUAGES C CXX HIP)
 
+# The build host is shared with GPU work and other agents: Ninja never runs more than
+# NINFER_BUILD_JOBS compile or link jobs, whatever -j a caller passes (bare Ninja uses cores+2).
+set(NINFER_BUILD_JOBS 8 CACHE STRING "Maximum concurrent Ninja compile/link jobs (1..8)")
+if(NOT NINFER_BUILD_JOBS MATCHES "^[1-8]$")
+  message(FATAL_ERROR "NINFER_BUILD_JOBS must be 1..8")
+endif()
+set_property(GLOBAL APPEND PROPERTY JOB_POOLS ninfer_jobs=${NINFER_BUILD_JOBS})
+set(CMAKE_JOB_POOL_COMPILE ninfer_jobs)
+set(CMAKE_JOB_POOL_LINK ninfer_jobs)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_HIP_STANDARD 20)

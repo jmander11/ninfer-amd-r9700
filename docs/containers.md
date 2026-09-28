@@ -94,8 +94,8 @@ docker buildx build --load --target runtime --tag local/ninfer-r9700:local \
   --build-context python311=/absolute/path/to/self-contained-python-3.11 .
 ```
 
-Image builds default to 12 compile jobs; `--build-arg NINFER_BUILD_JOBS=8`
-overrides this within the enforced range 1–14. Each agent may run one build at a time;
+Image builds default to 8 compile jobs; `--build-arg NINFER_BUILD_JOBS=4`
+lowers this within the enforced range 1–8, which the CMake Ninja job pool also enforces. Each agent may run one build at a time;
 GPU jobs use the shared lock in `AGENTS.md`. These are native AMD images: no NVIDIA Container
 Toolkit or `--gpus all` is needed.
 
@@ -128,14 +128,14 @@ until the user recreates it. No packages are installed into an existing containe
 Setup configures the mounted build volume. Compile the applications explicitly:
 
 ```sh
-docker exec ninfer-r9700-builder cmake --build /build --parallel 12 \
+docker exec ninfer-r9700-builder cmake --build /build --parallel 8 \
   --target ninfer ninfer-serve ninfer-ppl
 docker exec ninfer-r9700-builder /build/apps/ninfer --help
 ```
 
 This is the incremental development path: CMake/Ninja retain objects in `/build`
 and rebuild affected dependencies after edits to the live `/src` checkout. Native
-`cmake --build build-r9700 --parallel 12 --target ninfer-serve` is incremental too.
+`cmake --build build-r9700 --parallel 8 --target ninfer-serve` is incremental too.
 The Compose runtime image is separate: its Dockerfile caches complete build layers,
 but a changed source snapshot invalidates the compile layer and recompiles the apps.
 Building in the development container does not update the Compose runtime image.
@@ -152,7 +152,7 @@ docker compose up -d --no-build --wait server
 The helper automatically sources the trusted checkout's `.env` when present and
 exports its settings to the builder, even when invoked from another directory.
 Values assigned in `.env` replace same-named shell values. `NINFER_DEV_JOBS` selects
-parallelism, falling back to `NINFER_BUILD_JOBS` and then 12.
+parallelism, falling back to `NINFER_BUILD_JOBS` and then 8.
 The first invocation creates the development builder if absent; later invocations
 reuse its persistent objects. The previous runtime image receives a `-rollback`
 tag. This helper was inspected, not executed in the Compose validation below.
@@ -257,7 +257,7 @@ unrelated benchmark processes: the maintainer still schedules the sole GPU.
 Python tests with Python 3.11. The selected interpreter must already provide
 `pytest` and `torch`; the runner does not install or upgrade dependencies.
 `NINFER_DEV_JOBS` controls setup, test-runner and hot-patch build parallelism
-(default 12, enforced range 1–14). CTest arguments follow `--`.
+(default 8, enforced range 1–8). CTest arguments follow `--`.
 
 ## Runtime and incremental app deployment
 

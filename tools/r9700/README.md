@@ -750,7 +750,7 @@ retain their prior routes.
 After the serialized campaign permits a new build/GPU run, execute the independent FP64 harness:
 
 ```sh
-make -C tools/r9700 -j12 dense-prefill-attention
+make -C tools/r9700 -j8 dense-prefill-attention
 # One explicit shape (rows, visible context, value group):
 tools/r9700/build/dense_prefill_attention_qual 1537 12288 16
 # Oracle check, then the median of N individually event-timed launches:

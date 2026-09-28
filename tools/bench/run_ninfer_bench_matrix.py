@@ -3775,6 +3775,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "--build",
                 str(REPO_ROOT / "build-r9700"),
                 "--parallel",
+                "8",
                 "--target",
                 "ninfer_bench",
             ],

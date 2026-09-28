@@ -7,7 +7,7 @@ services:
       context: .
       target: runtime
       args:
-        NINFER_BUILD_JOBS: ${NINFER_BUILD_JOBS:-12}
+        NINFER_BUILD_JOBS: ${NINFER_BUILD_JOBS:-8}
       additional_contexts:
         rocm: ${NINFER_ROCM_CONTEXT:-/opt/rocm/core-10.0}
         python311: ${NINFER_PYTHON_CONTEXT:?Set the self-contained Python 3.11 root in .env}

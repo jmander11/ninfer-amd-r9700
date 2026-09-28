@@ -1214,7 +1214,7 @@ throughput than the code fixture reinforces that the83.75 result is workload
 dependent, not a universal server speed promise.
 
 Deployment: `bash scripts/hot-patch.sh --image-only` rebuilt the three apps
-incrementally with12 jobs; `docker compose up -d --no-build --wait server`
+incrementally with 8 jobs; `docker compose up -d --no-build --wait server`
 started the healthy updated image on host port8001. The installed server binary
 matches the exported build. Chat/Responses/Anthropic/SSE smoke requests pass,
 including observed disk and RAM restoration. Preserve-thinking is enabled.

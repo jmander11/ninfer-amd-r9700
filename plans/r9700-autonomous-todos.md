@@ -9,8 +9,8 @@ FP8LUT4 artifact was admitted; it remains in git history.
 ## Standing constraints
 
 - GPU work holds `flock --exclusive /ssdpool2nvme/local_llm/.ninfer-coordination/gpu.lock`
-  through all child work (shared with the `ninfer-amd-r9700-2` agent); builds use 12 jobs
-  (maximum 14), one build per agent.
+  through all child work (shared with the `ninfer-amd-r9700-2` agent); builds use at most 8
+  jobs, one build per agent.
 - Precision: QK stays BF16 and PV FP16 (no FP8 QK/PV, no Sage-style attention); changes that cost
   PPL are measured last, left uncommitted and reported for the user's decision.
 - Clocks, power and voltage are unchanged until the user starts `CLOCKS-README`.

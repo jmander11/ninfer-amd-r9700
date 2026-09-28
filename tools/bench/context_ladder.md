@@ -10,7 +10,7 @@ the responsibility of the original package. `manifest.json` records the workload
 re-reading a large weight payload to hash it. Keep artifacts immutable during a campaign.
 
 Stop Compose first. Keep inference, profiling, compilation and conversion serial; build with
-12 jobs (maximum14). The runner requires the R9700's power mode already be `auto`, and never changes it.
+at most 8 jobs. The runner requires the R9700's power mode already be `auto`, and never changes it.
 It does not stop other GPU applications or restart the server. Do not run another GPU job alongside it.
 
 ## Speed
@@ -59,7 +59,7 @@ NINFER_R9700_XATTENTION_TAU_PERMILLE=900
 
 Configure the separate build with the dense build's remaining options explicitly; do not assume
 CMake defaults match its activation profile. Build `ninfer_bench` and `ninfer-ppl` there, serially,
-with `cmake --build <qualification-build> --parallel 12 --target ninfer_bench ninfer-ppl`.
+with `cmake --build <qualification-build> --parallel 8 --target ninfer_bench ninfer-ppl`.
 This is not a product runtime attention flag and does not promote XAttention.
 
 Repeat the speed command with the qualification binary, `--attention b128-s16-tau900`, and a

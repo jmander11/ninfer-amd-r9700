@@ -255,11 +255,12 @@ not things to download or regenerate unless in scope.
 
 GPU work in both repos must hold `flock --exclusive /ssdpool2nvme/local_llm/.ninfer-coordination/gpu.lock <command>`
 through all child work. Never delete the lock; coordinate existing unleased GPU jobs/servers with their owner.
-Builds need no lock: one build per agent, 12 jobs default, 14 maximum. Overlap is allowed;
-reduce concurrency on memory/I/O pressure. This supersedes older shared-host rules.
+Builds need no lock: one build per agent, at most 8 jobs (the CMake Ninja job pool enforces
+`NINFER_BUILD_JOBS`, default 8, whatever `-j` is passed). Overlap is allowed; reduce concurrency
+on memory/I/O pressure. This supersedes older shared-host rules.
 
-For source-only development, prefer incremental CMake/Ninja builds, defaulting to 12 jobs
-(maximum 14). For Compose deployment, stop the server and run
+For source-only development, prefer incremental CMake/Ninja builds, with 8 jobs
+(the maximum). For Compose deployment, stop the server and run
 `bash scripts/hot-patch.sh --image-only`,
 then `docker compose up -d --no-build --wait server`. The helper retains build objects and
 updates the runtime image; run relevant tests separately. First-time builder setup may be slow.

@@ -56,7 +56,7 @@ integer-product work only: there is no speed action or implied tok/s estimate.
 Commands/results: `profiles/ppl/r9700-endpoint-precision-20260923/`.
 
 On this shared machine, serialize conversion/readback, builds, and GPU jobs; never overlap
-them across agents. Explicitly cap CMake builds with `--parallel 14` or fewer jobs and
+them across agents. Explicitly cap CMake builds with `--parallel 8` or fewer jobs and
 reduce/stop on memory or I/O pressure. A build-job cap is not a memory limit.
 
 Use Python3.11 and an explicit `--out` directory. Actions, in order, are

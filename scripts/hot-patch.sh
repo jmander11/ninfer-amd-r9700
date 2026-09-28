@@ -29,8 +29,8 @@ while (($#)); do
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
-jobs="${NINFER_DEV_JOBS:-${NINFER_BUILD_JOBS:-12}}"
-[[ "$jobs" =~ ^([1-9]|1[0-4])$ ]] || { echo 'NINFER_DEV_JOBS must be 1..14.' >&2; exit 2; }
+jobs="${NINFER_DEV_JOBS:-${NINFER_BUILD_JOBS:-8}}"
+[[ "$jobs" =~ ^[1-8]$ ]] || { echo 'NINFER_DEV_JOBS must be 1..8.' >&2; exit 2; }
 export NINFER_DEV_JOBS="$jobs"
 ((image_only && export_only)) && { echo 'Choose image-only or export-only.' >&2; exit 2; }
 bash "$repo_root/scripts/dev-setup.sh"
