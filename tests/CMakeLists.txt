@@ -36,6 +36,11 @@ set_tests_properties(ninfer_kv_disk_cache_test PROPERTIES
 add_test(NAME ninfer_kv_disk_crc_host_test COMMAND ninfer_kv_disk_cache_test --crc-only)
 set_tests_properties(ninfer_kv_disk_crc_host_test PROPERTIES LABELS "host")
 
+ninfer_add_r9700_test(ninfer_media_decode_test
+  SOURCES test_media_decode.cpp
+  LIBRARIES ninfer_media_decode)
+set_tests_properties(ninfer_media_decode_test PROPERTIES LABELS "host")
+
 # The public headers must remain independent of repository-private and device headers.
 add_executable(ninfer_public_api_test test_public_api.cpp)
 target_include_directories(ninfer_public_api_test PRIVATE ${PROJECT_SOURCE_DIR}/include)
