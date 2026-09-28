@@ -3,6 +3,7 @@
 #include "device.h"
 
 #include <cstdio>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 
@@ -34,6 +35,39 @@ void discard_capture(hipStream_t stream) noexcept {
     hipGraph_t discard = nullptr;
     log_hip_error("hipStreamEndCapture(discard)", hipStreamEndCapture(stream, &discard));
     destroy_graph(discard);
+}
+
+std::string describe_graph_node(hipGraphNode_t node) {
+    if (node == nullptr) { return "none"; }
+    hipGraphNodeType type{};
+    const hipError_t error = hipGraphNodeGetType(node, &type);
+    if (error != hipSuccess) { return std::string("unavailable:") + hipGetErrorName(error); }
+    std::ostringstream out;
+    out << "type=" << static_cast<int>(type);
+    if (type == hipGraphNodeTypeKernel) {
+        hipKernelNodeParams params{};
+        if (hipGraphKernelNodeGetParams(node, &params) == hipSuccess) {
+            const char* name = hipKernelNameRefByPtr(params.func, nullptr);
+            out << " kernel=" << (name != nullptr ? name : "unknown")
+                << " grid=" << params.gridDim.x << ',' << params.gridDim.y << ',' << params.gridDim.z
+                << " block=" << params.blockDim.x << ',' << params.blockDim.y << ','
+                << params.blockDim.z << " shared_bytes=" << params.sharedMemBytes;
+        }
+    } else if (type == hipGraphNodeTypeMemcpy) {
+        hipMemcpy3DParms params{};
+        if (hipGraphMemcpyNodeGetParams(node, &params) == hipSuccess) {
+            out << " memcpy_kind=" << static_cast<int>(params.kind) << " extent="
+                << params.extent.width << ',' << params.extent.height << ',' << params.extent.depth
+                << " src_pitch=" << params.srcPtr.pitch << " dst_pitch=" << params.dstPtr.pitch;
+        }
+    } else if (type == hipGraphNodeTypeMemset) {
+        hipMemsetParams params{};
+        if (hipGraphMemsetNodeGetParams(node, &params) == hipSuccess) {
+            out << " memset_width=" << params.width << " height=" << params.height
+                << " pitch=" << params.pitch << " element_bytes=" << params.elementSize;
+        }
+    }
+    return out.str();
 }
 
 } // namespace
@@ -123,7 +157,8 @@ void DecodeGraphExecutable::update(const DecodeGraphDefinition& definition) {
     if (error != hipSuccess || result != hipGraphExecUpdateSuccess) {
         throw std::runtime_error(
             "HIP Graph executable update failed: " + std::string(hipGetErrorString(error)) +
-            " (update result " + std::to_string(static_cast<int>(result)) + ")");
+            " (update result " + std::to_string(static_cast<int>(result)) + "); error_node={" +
+            describe_graph_node(error_node) + "}");
     }
 }
 

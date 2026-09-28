@@ -262,13 +262,35 @@ DecodeGraphTopology& select_graph_topology(DecodeGraphFamily& family, std::uint3
     return *it;
 }
 
+// Installs a profile's definition into its topology executable; a failed update names the
+// profile transition (batch, draft width, frontier range, topology).
+void update_graph_profile(DecodeGraphFamily& family, DecodeGraphTopology& topology,
+                          std::size_t profile_index, const char* label) {
+    const auto describe = [](const DecodeGraphProfile& profile) {
+        return "B=" + std::to_string(profile.batch_size) + " k=" +
+               std::to_string(profile.draft_tokens) + " frontier=" +
+               std::to_string(profile.min_execution_frontier) + ".." +
+               std::to_string(profile.max_execution_frontier) +
+               " topology=" + std::to_string(profile.topology_class);
+    };
+    try {
+        topology.executable.update(family.profiles[profile_index].definition);
+    } catch (const std::exception& error) {
+        throw std::runtime_error(
+            std::string(label) + " graph profile {" +
+            (topology.installed_profile ? describe(family.profiles[*topology.installed_profile])
+                                        : std::string("unknown")) +
+            "} -> {" + describe(family.profiles[profile_index]) + "}: " + error.what());
+    }
+    topology.installed_profile = profile_index;
+}
+
 DecodeGraphExecutable& install_graph_profile(DecodeGraphFamily& family, DecodeGraphProfile& profile,
                                              const char* label) {
     DecodeGraphTopology& topology   = select_graph_topology(family, profile.topology_class, label);
     const std::size_t profile_index = static_cast<std::size_t>(&profile - family.profiles.data());
     if (topology.installed_profile != profile_index) {
-        topology.executable.update(profile.definition);
-        topology.installed_profile = profile_index;
+        update_graph_profile(family, topology, profile_index, label);
     }
     return topology.executable;
 }
@@ -300,10 +322,8 @@ void instantiate_graph_family(DecodeGraphFamily& family, const char* label, Devi
     }
 
     const auto install_and_upload = [&](DecodeGraphTopology& topology, std::size_t profile_index) {
-        DecodeGraphProfile& profile = family.profiles[profile_index];
         if (topology.installed_profile != profile_index) {
-            topology.executable.update(profile.definition);
-            topology.installed_profile = profile_index;
+            update_graph_profile(family, topology, profile_index, label);
         }
         topology.executable.upload(device.stream);
         device.synchronize();
