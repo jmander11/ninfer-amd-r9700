@@ -86,7 +86,6 @@ cache::DiskOpenConfig config(const std::filesystem::path& path, Pool& pool,
     result.ram = &ram;
     result.text_pool = pool.storage.get();
     result.logical_page_bytes = ninfer::paged_kv_logical_page_bytes(*pool.storage);
-    result.gdn_staging_bytes = 256;
     result.fingerprint = cache::make_disk_fingerprint(
         "qwen3.8-27b", "r9700-int-candidate", "fixed-cache-test-artifact",
         ninfer::SpeculativeBackend::None, *pool.storage, nullptr, pool.semantics(),
