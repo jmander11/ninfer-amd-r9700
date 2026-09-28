@@ -5,7 +5,8 @@ The calibration sequences are evaluated through the checkpoint-direct BF16 refer
 hidden state resident on the device. While layer L runs, each projection input is accumulated
 as H = sum_t x_t x_t^T in FP32; `layer(L)` returns those matrices keyed by the artifact object
 suffix they calibrate. Layers must be requested in ascending order; later layers see the BF16
-(not the quantized) outputs of earlier ones.
+(not the quantized) outputs of earlier ones. After the last layer, `final()` returns the second
+moment of the output-head input.
 """
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ from pathlib import Path
 import torch
 
 from tools.reference.qwen3_8_27b_bf16 import backend
+from tools.reference.qwen3_8_27b_bf16.protocol import LAYERS
 
 # Source projection whose input calibrates each artifact object (all consumers of one input
 # share its matrix).
@@ -89,6 +91,18 @@ class InputMoments:
         torch.cuda.empty_cache()
         self.next_layer += 1
         return {suffix: moments[name] for name in moments for suffix in _INPUT_OF[name]}
+
+    def final(self) -> torch.Tensor:
+        """Second moment of the output-head input (the final RMSNorm of the last layer's output)."""
+        if self.next_layer != LAYERS:
+            raise ValueError("output-head moments require every Text layer first")
+        norm = self.checkpoint.load("model.language_model.norm.weight", self.device)
+        moment = None
+        with torch.inference_mode():
+            for hidden in self.hidden:
+                rows = backend._rmsnorm(hidden, norm).float()
+                moment = rows.t() @ rows if moment is None else moment.addmm_(rows.t(), rows)
+        return moment
 
 
 __all__ = ["InputMoments", "read_sequences"]

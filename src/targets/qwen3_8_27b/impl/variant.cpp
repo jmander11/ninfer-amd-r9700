@@ -2663,6 +2663,10 @@ std::size_t Variant::linear_workspace_capacity_bytes(WeightsProfile profile,
     const auto capped_base = fp8_capped_base_profile(profile);
     if (capped_base != profile) {
         const auto base = linear_workspace_capacity_bytes(capped_base, tokens);
+        if (is_fp8lut4_head_profile(profile)) {
+            return std::max(base, ops::linear_workspace_capacity_bytes(QType::FP8LUT4, tokens,
+                                                                       TextConfig::hidden));
+        }
         return fp8_capped_w8_head(profile) ? std::max(base,
             ops::linear_workspace_capacity_bytes(QType::W8G32_F16S, tokens, TextConfig::hidden)) : base;
     }

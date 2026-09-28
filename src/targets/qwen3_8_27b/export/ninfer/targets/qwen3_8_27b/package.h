@@ -60,6 +60,8 @@ enum class WeightsProfile : std::uint8_t {
     // The admitted production profile: the selective-cap DFlash2 base with every remaining Q4 Text
     // matrix in (GPTQ-rounded) FP8LUT4.
     R9700Fp8Lut4,
+    // R9700Fp8Lut4 with the output head also GPTQ-rounded FP8LUT4 (evaluation).
+    R9700Fp8Lut4HeadEvaluation,
 #define NINFER_QWEN38_FP8_ENDPOINT(symbol, id, base, embed, head) symbol,
 #include "targets/qwen3_8_27b/impl/load/fp8_endpoint_selection.inc"
 #undef NINFER_QWEN38_FP8_ENDPOINT
@@ -68,6 +70,7 @@ enum class WeightsProfile : std::uint8_t {
 [[nodiscard]] constexpr WeightsProfile fp8_capped_base_profile(WeightsProfile profile) noexcept {
     switch (profile) {
     case WeightsProfile::R9700Fp8Lut4:
+    case WeightsProfile::R9700Fp8Lut4HeadEvaluation:
         return WeightsProfile::R9700Q4Fp8SelectiveCapDFlash2Q4Evaluation;
 #define NINFER_QWEN38_FP8_ENDPOINT(symbol, id, base, embed, head) \
     case WeightsProfile::symbol: return WeightsProfile::base;
@@ -99,7 +102,13 @@ enum class WeightsProfile : std::uint8_t {
 
 // Text projections that the base recipe stores as Q4G64 are FP8LUT4 codebook matrices.
 [[nodiscard]] constexpr bool is_fp8lut4_text_profile(WeightsProfile profile) noexcept {
-    return profile == WeightsProfile::R9700Fp8Lut4;
+    return profile == WeightsProfile::R9700Fp8Lut4 ||
+           profile == WeightsProfile::R9700Fp8Lut4HeadEvaluation;
+}
+
+// The output head is an FP8LUT4 codebook matrix too.
+[[nodiscard]] constexpr bool is_fp8lut4_head_profile(WeightsProfile profile) noexcept {
+    return profile == WeightsProfile::R9700Fp8Lut4HeadEvaluation;
 }
 
 [[nodiscard]] constexpr bool is_fp8_capped_profile(WeightsProfile profile) noexcept {

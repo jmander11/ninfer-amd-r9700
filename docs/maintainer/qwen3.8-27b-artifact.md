@@ -62,12 +62,11 @@ validates inventories, and reads back the complete output against its conversion
 The admitted production deployment is the FP8LUT4 Text recipe `r9700-fp8lut4` (below, GPTQ
 conversion), installed under
 `/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-fp8lut4/` and named by
-`.env.example`/`compose.yaml`. It is derived from the Q4 selective-cap pair, which remains
-installed as its conversion base: `r9700-q4-fp8-selective-cap-n16k16-eval`
-(15,793,065,984 bytes) and its `r9700-q4-fp8-selective-cap-n16k16-dflash2-q4-eval`
-companion (17,002,543,616 bytes), both under
-`/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-q4-fp8-selective-cap/`, with exact identity
-as filename stem after `qwen3.8-27b-`. The adjacent README records executable creation/build/run
+`.env.example`/`compose.yaml`. Its conversion base, the Q4 selective-cap DFlash2 companion
+`r9700-q4-fp8-selective-cap-n16k16-dflash2-q4-eval` (17,002,543,616 bytes), remains installed
+under `/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-q4-fp8-selective-cap/`, with exact
+identity as filename stem after `qwen3.8-27b-`; the companion-free selective-cap base and the
+donors below were deleted as superseded (2026-09-28) and are recreated only with the commands below. The adjacent README records executable creation/build/run
 commands; conversion receipts retain source paths and every payload origin/hash. Selection
 changes no stored bytes, and does not rename the provisional identities or waive BF16-source gates.
 
@@ -119,7 +118,16 @@ python3.11 -m tools.convert.qwen3_8_27b_r9700.convert_fp8lut4 \
   --out <new.ninfer>
 ```
 
-Its Linears run per-token E4M3 activations: prefill a 256-token x 128-row FP8 WMMA GEMM with the
+`r9700-fp8lut4-head-eval` (profile `R9700Fp8Lut4HeadEvaluation`, 17,018,216,960 bytes) is the
+same artifact with the Q4G64 target output head (248320 x 5120) also GPTQ-encoded as FP8LUT4,
+against the second moment of the final-RMSNorm output over the same calibration sequences with
+damping 0.1 (`convert_fp8lut4 --head`, optionally `--reuse-layers` with the production file to
+skip the layer pass). The draft head and every other object are unchanged. The head runs through
+the `ops::linear` FP8LUT4 route at every width. It is installed under
+`/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-fp8lut4-head-eval/`; its evidence is in
+`docs/performance.md`, and it is an evaluation identity, not a production selection.
+
+FP8LUT4 Linears run per-token E4M3 activations: prefill a 256-token x 128-row FP8 WMMA GEMM with the
 group scale folded into the decoded weight bytes, verification widths a small-T WMMA kernel, one
 token an FP8 dot4 GEMV. Quality and speed evidence are in `docs/performance.md`.
 

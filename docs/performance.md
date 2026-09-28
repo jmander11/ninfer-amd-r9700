@@ -178,6 +178,27 @@ against the retained source-BF16 references; tiers from `tools/ppl/README.md`):
 Same-route graph/eager decode is bit-identical at 8K and 32K (NLL and argmax), and whole-inference
 greedy tokens match graph/eager at C1..C4 (P2048/G256) and at P20480 for ordinary and DFlash.
 
+**Output head as GPTQ FP8LUT4 (`r9700-fp8lut4-head-eval`, 2026-09-28).** The Q4G64 target head
+re-encoded as FP8LUT4 at the same 4.25 bits/weight, GPTQ-rounded against the final-norm second
+moment (damping 0.1; recipe in `qwen3.8-27b-artifact.md`). Same BF16-source cells
+(`profiles/ppl/r9700-head-eval-20260927/`):
+
+| Cell | production dNLL vs BF16 | head dNLL vs BF16 | paired head - production | greedy flips |
+|---|---:|---:|---:|---:|
+| 8K prefill | +0.0228 | +0.0145 | -0.0083 +/- 0.0027 | 8.9% -> 7.0% |
+| 8K decode | +0.0218 | +0.0135 | | 9.1% -> 7.3% |
+| 32K prefill | +0.0185 | +0.0128 | -0.0057 +/- 0.0013 | 8.4% -> 7.8% |
+| 32K decode | +0.0179 | +0.0128 | | 8.5% -> 7.7% |
+
+New severe tokens are unchanged within noise (32K prefill 19 vs 20). Speed is unchanged (grouped
+A/B, `profiles/bench/r9700-head-eval-speed-20260927/aba/`: ordinary decode 36.95 vs 36.93 tok/s,
+DFlash round 31.41 vs 31.43 ms, prefill within noise). DFlash acceptance over ten 1024-token
+prompts x 512 greedy tokens (`.../accept2/`) is 3.72 vs 3.79 tokens/round: fewer rounds on 7 of
+10 prompts, the total set by one low-acceptance fixture prompt (301 vs 245 rounds) where the
+greedy continuations diverge. NIAH (`profiles/bench/r9700-niah-fp8lut4-head-20260928/`): standard
+and multikey greedy 20/20 each at 8K-128K and 5/5 each at 240K, sampled multikey 50/50 (8K) and
+45/45 (32K-128K), identical to production.
+
 **Protected FP8 projections as FP8LUT4 (not selected, PPL-costing).** Re-encoding the 26
 row-scaled FP8 protections as GPTQ FP8LUT4 too (0.62 GB less per token) gives ordinary decode
 36.78 -> 38.27 tok/s (+4.0%) and prefill 8K +0.6%, at +0.003 +/- 0.002 nats/token paired against

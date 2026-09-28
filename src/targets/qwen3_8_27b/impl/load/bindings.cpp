@@ -318,6 +318,7 @@ ArtifactLoadPlan bind_artifact(artifact::Binder& binder, WeightsProfile weights_
                                qwen3::StartupFeatures features) {
     // An FP8LUT4 Text profile binds exactly its base recipe except for the Text-layer Q4 matrices.
     const bool fp8lut4_text = is_fp8lut4_text_profile(weights_profile);
+    const bool fp8lut4_head = is_fp8lut4_head_profile(weights_profile);
     if (fp8lut4_text) weights_profile = fp8_capped_base_profile(weights_profile);
     (void)matrix_format(weights_profile, false);
     ArtifactLoadPlan load_plan;
@@ -339,6 +340,9 @@ ArtifactLoadPlan bind_artifact(artifact::Binder& binder, WeightsProfile weights_
         binder.materialize_on_device(handle);
         out.output_head = WeightPlan{.object=handle, .format=NumericFormat::W8G32_F16S,
                                     .layout=artifact::StorageLayout::R9700W8G32N16K16V1};
+    } else if (fp8lut4_head) {
+        out.output_head = bind_weight(binder, "text/output_head", NumericFormat::FP8LUT4,
+                                      {248320, 5120});
     } else {
         out.output_head = bind_weight(binder, "text/output_head",
                                   is_selective_protected_profile(weights_profile)
