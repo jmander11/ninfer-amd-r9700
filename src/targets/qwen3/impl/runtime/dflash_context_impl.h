@@ -41,7 +41,6 @@ DFlashFullBF16LayerView DFlashFullBF16Cache::layer_view(std::uint32_t layer) con
 DFlashPersistentState::DFlashPersistentState(DeviceSpan backing,
                                              const DFlashPersistentLayout& layout)
     : local(backing, layout.local),
-      rewrite_checkpoint_local(backing, layout.rewrite_checkpoint_local),
       staging_local(backing, layout.staging_local),
       prefill_features(layout.prefill_features.bind(backing)),
       prefill_positions(layout.prefill_positions.bind(backing)),
@@ -49,18 +48,13 @@ DFlashPersistentState::DFlashPersistentState(DeviceSpan backing,
     if (layout.full) { full.emplace(backing, *layout.full); }
     const bool local_ok =
         local.layer_count() == DFlashConfig::local_layers &&
-        rewrite_checkpoint_local.layer_count() == DFlashConfig::local_layers &&
         staging_local.layer_count() == DFlashConfig::local_layers &&
         local.capacity() == DFlashConfig::local_capacity &&
-        rewrite_checkpoint_local.capacity() == DFlashConfig::local_capacity &&
         staging_local.capacity() == DFlashConfig::local_capacity &&
         local.num_kv_heads() == DFlashConfig::kv_heads &&
-        rewrite_checkpoint_local.num_kv_heads() == DFlashConfig::kv_heads &&
         staging_local.num_kv_heads() == DFlashConfig::kv_heads &&
         local.head_dim() == DFlashConfig::head_dim &&
-        rewrite_checkpoint_local.head_dim() == DFlashConfig::head_dim &&
         staging_local.head_dim() == DFlashConfig::head_dim &&
-        local.lane_capacity() == rewrite_checkpoint_local.lane_capacity() &&
         staging_local.lane_capacity() == 1;
     if (!local_ok) {
         throw std::invalid_argument("DFlash persistent cache layout is invalid");
@@ -87,14 +81,6 @@ CyclicKVCacheLayerView DFlashPersistentState::local_layer(std::uint32_t layer) c
 DFlashFullBF16LayerView DFlashPersistentState::full_batch_layer(std::uint32_t layer) const {
     if (!full) { throw std::logic_error("DFlash Full pool is unavailable"); }
     return full->layer_view(layer);
-}
-
-void DFlashPersistentState::save_rewrite_checkpoint(std::int32_t lane, hipStream_t stream) {
-    rewrite_checkpoint_local.copy_lane_from(local, lane, stream);
-}
-
-void DFlashPersistentState::restore_rewrite_checkpoint(std::int32_t lane, hipStream_t stream) {
-    local.copy_lane_from(rewrite_checkpoint_local, lane, stream);
 }
 
 } // namespace ninfer::targets::qwen3::detail::NINFER_QWEN3_RUNTIME_NS

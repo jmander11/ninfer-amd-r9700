@@ -72,8 +72,9 @@ MTP Engine:
 Text and MTP are physically separate because they have different layer counts and publication
 frontiers. Each pool nevertheless uses the same allocator semantics and current codec profile.
 
-The selected DFlash2 target has no DFlash growing full-context layers. Its local, rewrite, and
-staging state is fixed BF16 cyclic storage with separate ownership. GDN convolution and recurrence
+The selected DFlash2 target has no DFlash growing full-context layers. Its local and staging
+state is fixed BF16 cyclic storage with separate ownership; the rewrite checkpoint's cyclic lane
+lives in a lane-owned pinned host image with the rewrite GDN image. GDN convolution and recurrence
 state, Vision intermediates, and operator-transient query K/V are also outside this store.
 
 ## 4. Capacity resolution

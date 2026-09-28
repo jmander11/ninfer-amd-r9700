@@ -1031,20 +1031,17 @@ void test_prefill_context_marks() {
            "response rewrite also wins a same-F ladder tie");
 
     using Slots = q3::detail::mechanism_slots::LinearStateSlots;
-    expect(Slots::state_slot_count(1, true) == 3, "C=1 MTP/DFlash GDN pool is 2C+1");
-    expect(Slots::staging_state_slot(1) == 2, "C=1 staging is slot 2C");
+    expect(Slots::state_slot_count(1, true) == 2, "C=1 MTP/DFlash GDN pool is C+1");
+    expect(Slots::staging_state_slot(1) == 1, "C=1 staging is slot C");
     expect(Slots::current_state_slot(0, 1) == 0, "C=1 current is slot 0");
-    expect(Slots::rewrite_checkpoint_state_slot(0, 1) == 1, "C=1 rewrite is slot C");
-    expect(Slots::state_slot_count(1, false) == 2, "ordinary GDN pool is 2C, no staging");
-    expect(Slots::state_slot_count(2, true) == 5, "C=2 MTP/DFlash GDN pool is 2C+1");
-    expect(Slots::staging_state_slot(2) == 4, "C=2 staging is slot 2C");
+    expect(Slots::state_slot_count(1, false) == 1, "ordinary GDN pool is C, no staging");
+    expect(Slots::state_slot_count(2, true) == 3, "C=2 MTP/DFlash GDN pool is C+1");
+    expect(Slots::staging_state_slot(2) == 2, "C=2 staging is slot C");
     expect(Slots::current_state_slot(1, 2) == 1, "C=2 lane 1 current is slot 1");
-    expect(Slots::rewrite_checkpoint_state_slot(1, 2) == 3, "C=2 lane 1 rewrite is slot C+1");
-    expect(Slots::state_slot_count(4, true) == 9, "C=4 MTP/DFlash GDN pool is 2C+1");
-    expect(Slots::staging_state_slot(4) == 8, "C=4 staging is slot 2C");
+    expect(Slots::state_slot_count(4, true) == 5, "C=4 MTP/DFlash GDN pool is C+1");
+    expect(Slots::staging_state_slot(4) == 4, "C=4 staging is slot C");
     expect(Slots::current_state_slot(3, 4) == 3, "C=4 last-lane current is slot 3");
-    expect(Slots::rewrite_checkpoint_state_slot(3, 4) == 7, "C=4 last-lane rewrite is slot C+3");
-    expect(Slots::staging_state_slot(3) == 6, "C=3 staging is slot 2C");
+    expect(Slots::staging_state_slot(3) == 3, "C=3 staging is slot C");
     expect_throw([] { (void)Slots::state_slot_count(5, true); },
                  "Linear Attention state slots accepted non-product C=5");
 }

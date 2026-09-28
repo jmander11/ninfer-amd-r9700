@@ -35,7 +35,6 @@ private:
 
 struct DFlashPersistentState {
     CyclicKVCache local;
-    CyclicKVCache rewrite_checkpoint_local;
     CyclicKVCache staging_local;
     std::optional<DFlashFullBF16Cache> full;
     Tensor prefill_features;
@@ -46,8 +45,6 @@ struct DFlashPersistentState {
 
     [[nodiscard]] CyclicKVCacheLayerView local_layer(std::uint32_t layer) const;
     [[nodiscard]] DFlashFullBF16LayerView full_batch_layer(std::uint32_t layer) const;
-    void save_rewrite_checkpoint(std::int32_t lane, hipStream_t stream);
-    void restore_rewrite_checkpoint(std::int32_t lane, hipStream_t stream);
 };
 
 } // namespace ninfer::targets::qwen3::detail::NINFER_QWEN3_RUNTIME_NS

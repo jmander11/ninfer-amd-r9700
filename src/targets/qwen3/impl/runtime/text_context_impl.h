@@ -202,13 +202,13 @@ void DFlashFeatureSink::capture_positions(const Tensor& source, hipStream_t stre
                             hipMemcpyDeviceToDevice, stream));
 }
 
-void DFlashFeatureSink::consume_prefill_chunk(std::int32_t tokens, bool rewrite_checkpoint) {
+void DFlashFeatureSink::consume_prefill_chunk(std::int32_t tokens) {
     if (!consume_prefill || tokens != active_tokens) {
         throw std::logic_error("DFlash prefill feature consumer is unavailable");
     }
     Tensor feature_window  = features->slice(1, 0, tokens);
     Tensor position_window = positions->slice(0, 0, tokens);
-    consume_prefill(feature_window, position_window, rewrite_checkpoint);
+    consume_prefill(feature_window, position_window);
 }
 
 TextContext::TextContext(DeviceContext& ctx, const LoadedModelData& weights,
@@ -231,7 +231,7 @@ TextContext::TextContext(DeviceContext& ctx, const LoadedModelData& weights,
     if (mtp_enabled() && !io_.mtp_decode && !io_.mtp) {
         throw std::invalid_argument("MTP TextContext requires MTP round state");
     }
-    set_linear_state_slots(0, state_.slot_count() > 1 ? 1 : 0);
+    set_linear_state_slot(0);
     bind();
 }
 
@@ -308,14 +308,11 @@ void TextContext::set_mtp_kv_transactions(
     mtp_kv_transactions_ = transactions;
 }
 
-void TextContext::set_linear_state_slots(std::int32_t current_slot,
-                                         std::int32_t rewrite_checkpoint_slot) {
-    if (current_slot < 0 || current_slot >= state_.slot_count() || rewrite_checkpoint_slot < 0 ||
-        rewrite_checkpoint_slot >= state_.slot_count() || current_slot == rewrite_checkpoint_slot) {
-        throw std::invalid_argument("TextContext Linear Attention slots are invalid");
+void TextContext::set_linear_state_slot(std::int32_t current_slot) {
+    if (current_slot < 0 || current_slot >= state_.slot_count()) {
+        throw std::invalid_argument("TextContext Linear Attention slot is invalid");
     }
-    linear_state_current_slot_            = current_slot;
-    linear_state_rewrite_checkpoint_slot_ = rewrite_checkpoint_slot;
+    linear_state_current_slot_ = current_slot;
 }
 
 void TextContext::set_gdn_state_action(GdnStateAction action,
@@ -1517,7 +1514,6 @@ TextContext::prefill_impl(std::span<const int> ids, const TextPrefill* text_pref
         checkpoint_abs > base64 && checkpoint_abs <= base64 + static_cast<std::int64_t>(T);
     const int checkpoint_rel =
         has_rewrite_checkpoint ? static_cast<int>(checkpoint_abs - base64) : -1;
-    const std::int32_t rewrite_checkpoint_slot = linear_state_rewrite_checkpoint_slot_;
 
     const bool prepare_mtp_prompt = mtp_enabled() && io_.mtp.has_value();
     if (prepare_mtp_prompt &&
@@ -1792,13 +1788,9 @@ TextContext::prefill_impl(std::span<const int> ids, const TextPrefill* text_pref
             }
         }
 
-        if constexpr (requires { tap.consume_prefill_chunk(len, false); }) {
+        if constexpr (requires { tap.consume_prefill_chunk(len); }) {
             work_.reset();
-            tap.consume_prefill_chunk(len, checkpoint_rel > 0 && t0 + len == checkpoint_rel);
-        }
-
-        if (checkpoint_rel > 0 && t0 + len == checkpoint_rel) {
-            state_.copy_slot(linear_state_current_slot_, rewrite_checkpoint_slot, s);
+            tap.consume_prefill_chunk(len);
         }
 
         t0 += len;

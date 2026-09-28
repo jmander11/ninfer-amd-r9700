@@ -64,12 +64,21 @@ CUDA paths, NVFP4 and additional model targets are excluded by the product contr
   C1 prefill for about 24K tokens of C4 capacity.
 - Not ported: `45bef20a` (report instead of fail on the device-wide graph memory delta). R9700 GPU
   jobs are serialized by the shared GPU lock, and the startup check is the only calibration guard
-  for the graph allowance here. `3e18ef63` (rewrite checkpoints in lane-owned pinned host memory):
-  on the R9700 it freed 29K C4 DFlash tokens but added 18-27 ms to checkpoint-capturing and
-  31-61 ms to checkpoint-restoring requests' TTFT, with no capacity gain at C1.
+  for the graph allowance here.
   `482274b9` (tool-grammar mask overlap with DFlash2 C4/C6 verify on a second stream): this
   ROCm serializes concurrent graph branches (`docs/performance.md`), so the overlap cannot occur;
   its research documents are NVIDIA-specific.
+- Ported with an R9700 copy path: `3e18ef63` (rewrite checkpoints in lane-owned pinned host
+  memory; its graph-allowance change is not ported, the R9700-calibrated constants apply). A first
+  direct port added 18-27 ms to checkpoint-capturing and 31-61 ms to checkpoint-restoring requests'
+  TTFT: its GDN images moved with `hipMemcpy2DAsync`, whose ROCm host rect path pins the host range
+  per call and copies with a shader or line-staged transfers. The port copies one contiguous range
+  per layer and component, captures through the staging slot (device snapshot, then D2H on
+  `copy_stream` behind later work), and restores from staging on device while it still holds the
+  lane's image. Measured with the card on a chipset PCIe Gen4 x4 link, versus the pre-port build:
+  checkpoint-capturing TTFT 149 -> 112-121 ms (DFlash) and 131 -> 105-111 ms (MTP), staging-hit
+  restores unchanged, staging-miss restores +7-8 ms; C4 DFlash auto capacity 496192 -> 525632
+  tokens.
 - Equivalent: `b71eebf3` (R9700-calibrated DFlash graph allowance), `c36f38c4` (host round
   preparation during the commit tail), `c7bc4cbe` (8 build jobs; `9e0795ac`), `34c7119b`
   (adaptive DFlash K locked at the cheapest k on warm requests; fixed by `a7880a27`, which credits

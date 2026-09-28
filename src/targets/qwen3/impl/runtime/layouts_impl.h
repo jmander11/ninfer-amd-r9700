@@ -211,10 +211,6 @@ PersistentLayout persistent_layout(const SequencePlanImpl& plan) {
                                                 DFlashConfig::local_capacity,
                                                 DFlashConfig::kv_heads, DFlashConfig::head_dim,
                                                 static_cast<std::int32_t>(plan.max_concurrency));
-            dflash.rewrite_checkpoint_local = plan_cyclic_kv_cache(
-                builder, DFlashConfig::local_layers, DFlashConfig::local_capacity,
-                DFlashConfig::kv_heads, DFlashConfig::head_dim,
-                static_cast<std::int32_t>(plan.max_concurrency));
             dflash.staging_local = plan_cyclic_kv_cache(
                 builder, DFlashConfig::local_layers, DFlashConfig::local_capacity,
                 DFlashConfig::kv_heads, DFlashConfig::head_dim, 1);

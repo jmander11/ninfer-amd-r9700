@@ -1094,15 +1094,20 @@ rewritten suffix; matching KV tokens alone never authorize a partial hit. MTP or
 freeze current GDN at committed chunk ends that have reached a context mark (default 24576, 36864,
 53248, 77824, 102400, 151552, or `--context-checkpoints a,b,c`); a later prompt that matches that prefix restores GDN into current and hidden into
 `tail_hidden` as `restore_context_checkpoint`. DFlash2 also restores that lane's cyclic local K/V
-and `dflash_context_frontier`. Slot `2C` is the Engine-wide GDN image for that
+and `dflash_context_frontier`. Slot `C` is the Engine-wide GDN image for that
 freeze and for the turn-rollback pin: on `append_frontier` occupy with `E>0` and a
-real suffix (`prompt_tokens > E`), current GDN and `tail_hidden` are copied to `2C` before suffix
+real suffix (`prompt_tokens > E`), current GDN and `tail_hidden` are copied to `C` before suffix
 prefill so a later edit of the last user turn can restore that completed `E` as
 `restore_turn_rollback`. The same slot is written on an exact-hit / decode-only request
 (`prompt_tokens == E`) when `ninfer.capture_context_checkpoint` is true, unless a context-checkpoint
 head already sits at that `E` (skip, `captured_tokens = 0`; the rollback slot stays empty until a
 later `true` at a new `E`). A later exact-hit `true` replaces the one rollback pin and leaves
-ladder heads. Ladder freeze borrows `2C` and reloads the rollback image afterward.
+ladder heads. Ladder freeze borrows `C` and reloads the rollback image afterward. The rewrite
+checkpoints (`restore_turn_checkpoint`, `restore_response_checkpoint`) keep their GDN and DFlash
+state in lane-owned pinned host memory, about 187 MiB per lane with DFlash, rather than VRAM:
+capture snapshots the lane into staging on device and drains it to the host image on the copy
+stream behind later work, and restore copies staging back on device while it still holds that
+image, otherwise H2D from the image before the suffix prefill.
 Same last user regenerate still hits rewrite (`TurnClosure` is longer than rollback `E`). With stable
 `preserve_thinking=true`, the auxiliary checkpoint rolls to the prompt frontier after the current
 response's complete deterministic generation prologue. For thinking generation this includes

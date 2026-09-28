@@ -324,8 +324,9 @@ prints capacity plus `used`/`entries`. Serve `[req] done` and throughput lines p
 host-resident `kv-ram=` used bytes plus `n=` / `restores=` / `evicts=` / `drops=` / `save=` /
 `load=`. When disk is enabled the same lines also print `kv-disk=` occupancy and counters. `kv-ram=` / `n=` exclude a chat after consume following a restore onto a KV lane; a later
 spill recaptures it as a new FIFO tail. RAM `save=` / `load=` are HIP event elapsed for that request's
-RAM-tier D2H capture and H2D unpack of the FIFO bundle (Main+backend KV, rewrite GDN, and any ladder
-GDN/cyclic images in the same copy span). Disk `save=` is spill-session wall harvested onto the
+RAM-tier D2H capture and H2D unpack of the FIFO bundle (Main+backend KV, current GDN/cyclic state,
+and hidden); rewrite-checkpoint and ladder GDN/cyclic images already live in pinned host memory and
+are copied host-to-host outside that span. Disk `save=` is spill-session wall harvested onto the
 request; disk `load=` is the host wall from the first live SSD read of that
 restore until the last page or state object has arrived in the pinned host window (not H2D, and not a
 sum of overlapped SSD and copy clocks). Disk `h2d=` is the host wall from that last host arrival until

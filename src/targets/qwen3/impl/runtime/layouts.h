@@ -25,7 +25,6 @@ using TensorLayout = TensorRegion;
 
 struct DFlashPersistentLayout {
     CyclicKVCacheLayout local;
-    CyclicKVCacheLayout rewrite_checkpoint_local;
     CyclicKVCacheLayout staging_local;
     // DFlash Full attention is a distinct BF16 state contract. It must never inherit the Text/MTP
     // FP8-K/INT4-V codec merely because both states use physical pages.
@@ -46,8 +45,8 @@ struct DFlashPersistentLayout {
     TensorLayout pending_features;
 
     [[nodiscard]] std::size_t kv_payload_bytes() const noexcept {
-        return local.payload_bytes() + rewrite_checkpoint_local.payload_bytes() +
-               staging_local.payload_bytes() + (full ? full->payload_bytes() : 0);
+        return local.payload_bytes() + staging_local.payload_bytes() +
+               (full ? full->payload_bytes() : 0);
     }
 };
 

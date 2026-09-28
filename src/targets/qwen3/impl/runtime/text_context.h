@@ -126,7 +126,7 @@ struct PrefillChunkResult {
 
 struct DFlashFeatureSink {
     static constexpr bool enabled = true;
-    using PrefillConsumer         = std::function<void(const Tensor&, const Tensor&, bool)>;
+    using PrefillConsumer         = std::function<void(const Tensor&, const Tensor&)>;
 
     Tensor* features                  = nullptr;
     Tensor* positions                 = nullptr;
@@ -143,7 +143,7 @@ struct DFlashFeatureSink {
     void begin(const Tensor& value);
     void capture_layer(int layer, const Tensor& value, hipStream_t stream);
     void capture_positions(const Tensor& source, hipStream_t stream);
-    void consume_prefill_chunk(std::int32_t tokens, bool rewrite_checkpoint);
+    void consume_prefill_chunk(std::int32_t tokens);
 };
 
 class VisionPrefillSession;
@@ -185,7 +185,7 @@ public:
 
     void set_mtp_proposal_extent(std::uint32_t extent) noexcept { mtp_proposal_extent_ = extent; }
 
-    void set_linear_state_slots(std::int32_t current_slot, std::int32_t rewrite_checkpoint_slot);
+    void set_linear_state_slot(std::int32_t current_slot);
     void set_gdn_state_action(GdnStateAction action, const GdnReplayRecords* replay_records);
     void set_tree_verify(const Tensor* parent_index, const Tensor* ancestor_mask,
                          const Tensor* prefix_lengths);
@@ -367,7 +367,6 @@ private:
     std::int32_t active_sequence_row_                     = 0;
     std::int32_t rope_delta_                              = 0;
     std::int32_t linear_state_current_slot_               = 0;
-    std::int32_t linear_state_rewrite_checkpoint_slot_    = 0;
     GdnStateAction gdn_state_action_                      = GdnStateAction::UpdateInPlace;
     const GdnReplayRecords* replay_records_               = nullptr;
     std::int64_t prefill_rewrite_checkpoint_frontier_     = -1;

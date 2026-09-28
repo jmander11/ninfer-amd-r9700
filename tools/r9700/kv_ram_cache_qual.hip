@@ -1,6 +1,8 @@
 #include "core/arena.h"
+#include "core/cyclic_kv_cache.h"
 #include "core/device.h"
 #include "core/fp8_int4_paged_kv_cache.h"
+#include "core/linear_attention_state.h"
 #include "targets/qwen3/impl/runtime/kv_ram_cache.h"
 #include "targets/qwen3/impl/runtime/prefix_identity.h"
 
@@ -343,6 +345,117 @@ void failed_unpack_fences_enqueued_reads(ninfer::DeviceContext& device,
     require(fenced, "a failed restore left its enqueued H2D reads unfenced");
 }
 
+// Rewrite checkpoints live in lane-owned pinned host images. The RAM tier copies those images
+// host-to-host on capture and restore, beside the device GDN/DFlash current state. Exact bytes.
+void rewrite_images_round_trip(ninfer::DeviceContext& device,
+                               const ninfer::Fp8KInt4VPagedKVSpec& text_spec) {
+    CopyFixture fixture(text_spec);
+    ninfer::LayoutBuilder state_builder;
+    const auto gdn_layout = ninfer::plan_linear_attention_state_pool(
+        state_builder, ninfer::LinearAttentionStatePoolSpec{.layers         = 3,
+                                                            .conv_channels  = 40,
+                                                            .conv_width     = 3,
+                                                            .value_heads    = 2,
+                                                            .value_head_dim = 8,
+                                                            .key_head_dim   = 8,
+                                                            .slot_count     = 2});
+    const auto cyclic_layout = ninfer::plan_cyclic_kv_cache(state_builder, 2, 128, 2, 16, 2);
+    ninfer::DeviceBuffer state_backing(state_builder.finish(256));
+    const ninfer::DeviceSpan state_span{state_backing.data(), state_backing.size()};
+    ninfer::LinearAttentionStatePool gdn(state_span, gdn_layout);
+    ninfer::CyclicKVCache cyclic(state_span, cyclic_layout);
+    constexpr std::int32_t lane = 1;
+
+    const auto pattern = [](std::size_t bytes, std::uint32_t seed) {
+        std::vector<std::uint8_t> out(bytes);
+        for (std::uint8_t& byte : out) {
+            seed = seed * 1664525U + 1013904223U;
+            byte = static_cast<std::uint8_t>(seed >> 24);
+        }
+        return out;
+    };
+    const std::size_t conv_bytes   = gdn.conv_host_image_bytes();
+    const std::size_t rec_bytes    = gdn.recurrent_host_image_bytes();
+    const std::size_t cyclic_bytes = cyclic.lane_host_bytes();
+    const auto current_conv        = pattern(conv_bytes, 11);
+    const auto current_rec         = pattern(rec_bytes, 12);
+    const auto current_cyclic      = pattern(cyclic_bytes, 13);
+    const auto rewrite_conv        = pattern(conv_bytes, 21);
+    const auto rewrite_rec         = pattern(rec_bytes, 22);
+    const auto rewrite_cyclic      = pattern(cyclic_bytes, 23);
+    gdn.unpack_slot_from_host(lane, current_conv.data(), current_rec.data(), device.stream);
+    cyclic.copy_lane_from_host(current_cyclic.data(), lane, device.stream);
+    ninfer::DeviceBuffer hidden_bytes(2 * 1024);
+    hidden_bytes.fill(0x5a);
+    ninfer::Tensor tail_hidden(hidden_bytes.data(), ninfer::DType::U8, {1024});
+    ninfer::Tensor rewrite_hidden(static_cast<std::uint8_t*>(hidden_bytes.data()) + 1024,
+                                  ninfer::DType::U8, {1024});
+
+    q3::detail::KVRamCache cache(64ULL << 20);
+    std::uint64_t entry_id = 0;
+    {
+        auto source = fixture.pool->reserve(1);
+        source.materialize_pages(1, device.stream);
+        device.order_copy_after_compute();
+        HiddenCapture capture(fixture, source, 1101, tail_hidden, device.copy_stream);
+        capture.source.gdn                       = &gdn;
+        capture.source.gdn_current_slot          = lane;
+        capture.source.dflash_local              = &cyclic;
+        capture.source.dflash_lane               = lane;
+        capture.source.rewrite_valid             = true;
+        capture.source.rewrite_frontier          = 4;
+        capture.source.rewrite_checkpoint_hidden = &rewrite_hidden;
+        capture.source.rewrite_state = {rewrite_conv.data(), rewrite_rec.data(),
+                                        rewrite_cyclic.data()};
+        const auto result = cache.capture(capture.source);
+        device.synchronize_all();
+        source.release();
+        require(result.status == q3::detail::RamCaptureStatus::Captured,
+                "rewrite-image capture failed");
+        entry_id = result.entry_id;
+    }
+
+    gdn.zero_slot(lane, device.stream);
+    std::vector<std::uint8_t> zero_cyclic(cyclic_bytes, 0);
+    cyclic.copy_lane_from_host(zero_cyclic.data(), lane, device.stream);
+    auto dest = fixture.pool->reserve(1);
+    dest.materialize_pages(1, device.stream);
+    HIP_CHECK(hipStreamSynchronize(device.stream));
+    std::vector<std::uint8_t> out_conv(conv_bytes, 0);
+    std::vector<std::uint8_t> out_rec(rec_bytes, 0);
+    std::vector<std::uint8_t> out_cyclic(cyclic_bytes, 0);
+    q3::detail::RamRestoreTarget target;
+    target.text             = &dest;
+    target.text_pool        = fixture.pool.get();
+    target.text_semantics   = fixture.semantics;
+    target.text_dst_pages   = 1;
+    target.gdn              = &gdn;
+    target.gdn_current_slot = lane;
+    target.rewrite_state    = {out_conv.data(), out_rec.data(), out_cyclic.data()};
+    target.tail_hidden      = &tail_hidden;
+    target.rewrite_checkpoint_hidden = &rewrite_hidden;
+    target.dflash_local     = &cyclic;
+    target.dflash_lane      = lane;
+    target.stream           = device.copy_stream;
+    cache.claim(entry_id);
+    const q3::detail::RamRestoredHost restored = cache.unpack_device(entry_id, target);
+    cache.consume(entry_id);
+    device.synchronize_all();
+    std::vector<std::uint8_t> back_conv(conv_bytes);
+    std::vector<std::uint8_t> back_rec(rec_bytes);
+    std::vector<std::uint8_t> back_cyclic(cyclic_bytes);
+    gdn.pack_slot_to_host(lane, back_conv.data(), back_rec.data(), device.stream);
+    cyclic.copy_lane_to_host(lane, back_cyclic.data(), device.stream);
+    HIP_CHECK(hipStreamSynchronize(device.stream));
+    dest.release();
+    require(restored.rewrite_valid && restored.rewrite_frontier == 4,
+            "RAM restore lost the rewrite checkpoint metadata");
+    require(out_conv == rewrite_conv && out_rec == rewrite_rec && out_cyclic == rewrite_cyclic,
+            "RAM restore did not reproduce the rewrite host images byte-exactly");
+    require(back_conv == current_conv && back_rec == current_rec && back_cyclic == current_cyclic,
+            "RAM restore did not reproduce the current GDN/DFlash lane byte-exactly");
+}
+
 } // namespace
 
 int main() {
@@ -534,6 +647,7 @@ int main() {
         two_pending_loads_fold_as_loads(device, text_spec);
         stream_wait_does_not_block_host(device, text_spec);
         failed_unpack_fences_enqueued_reads(device, text_spec);
+        rewrite_images_round_trip(device, text_spec);
 
         std::cout << "kv_ram_cache: PASS text_planes=" << text_source_pool.plane_count()
                   << " mtp_planes=" << mtp_source_pool.plane_count()

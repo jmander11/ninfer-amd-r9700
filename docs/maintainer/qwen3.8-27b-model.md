@@ -279,17 +279,28 @@ on = gated_rmsnorm(o, gdn_norm, z)    # RMSNorm(o) * SiLU(z)
 x  = x + out_projection(on)
 ```
 
-For `C=max_concurrency`, the Program reserves `2C` complete all-layer GDN state slots when speculation
-is off, and `2C+1` when MTP or DFlash is on:
+For `C=max_concurrency`, the Program reserves `C` complete all-layer GDN state slots when speculation
+is off, and `C+1` when MTP or DFlash is on:
 
 - `[0,C)` is the current committed convolution history and FP32 recurrent state for each lane;
-- `[C,2C)` is the corresponding turn checkpoint used by thinking-aware prefix reuse;
-- slot `2C` (MTP or DFlash) is Engine-wide GDN storage: the hot turn-rollback occupant, borrowed by
-  prefill context-checkpoint freeze (then reloaded). It is not a rewrite slot. Staging hidden is a
+- slot `C` (MTP or DFlash) is Engine-wide GDN storage: the hot turn-rollback occupant, borrowed by
+  prefill context-checkpoint freeze (then reloaded) and by rewrite-checkpoint capture. Staging hidden is a
   separate `[5120,1]` BF16 tensor, not `[5120,2C]`. DFlash2 checkpoint heads snapshot cyclic through
   a matching 1-lane Engine-wide staging window (D2D live→staging on compute, D2H from staging on
   `copy_stream`) so suffix prefill can mutate live local; restore writes the host image back and
   sets `dflash_context_frontier` to `F`.
+
+The turn (rewrite) checkpoint used by thinking-aware prefix reuse is not a device slot. Each lane
+owns a startup-allocated pinned host image (48 × 60 KiB convolution + 48 × 3 MiB recurrent, plus
+the 40 MiB DFlash cyclic lane when DFlash is on; about 187 MiB per lane) with one completion
+event. Capture runs after the prefill chunk that ends at the rewrite frontier: MTP/DFlash engines
+copy the lane's GDN slot and DFlash lane into the staging slot and staging lane on the compute
+stream, then `copy_stream` drains staging into the image with one linear copy per layer and
+component while later prefill and decode continue. Ordinary engines have no staging slot and copy
+the live slot to the image on the compute stream. Restore copies staging back on device while
+staging still holds that lane's image generation; otherwise the compute stream waits for the
+image event and copies the image to the current slot and DFlash lane with the same per-layer
+linear H2D copies. The rewrite hidden stays a device `[5120,C]` tensor.
 
 When MTP or DFlash is enabled, a separate Program-owned ReplaySSM arena holds `C` physical record
 rows for every GDN layer. Its startup-fixed storage width is the maximum captured `K+1` for MTP
@@ -545,10 +556,11 @@ Let `C=max_concurrency`.
 |---|---|---|
 | Text GQA KV | 16 layers × context × 4 heads × 256 | active sequence |
 | MTP KV | 1 layer × context × 4 heads × 256 | active sequence when MTP enabled |
-| GDN convolution history | 48 layers × 10240 × 3 × `2C` BF16, plus one staging slot when MTP or DFlash is on | Program lifetime; current, turn-checkpoint, and checkpoint staging slots |
-| GDN recurrent matrices | 48 layers × 48 heads × 128 × 128 × `2C` FP32, plus one staging slot when MTP or DFlash is on | Program lifetime; current, turn-checkpoint, and checkpoint staging slots |
+| GDN convolution history | 48 layers × 10240 × 3 × `C` BF16, plus one staging slot when MTP or DFlash is on | Program lifetime; current and checkpoint staging slots |
+| GDN recurrent matrices | 48 layers × 48 heads × 128 × 128 × `C` FP32, plus one staging slot when MTP or DFlash is on | Program lifetime; current and checkpoint staging slots |
+| Rewrite-checkpoint images | pinned host: one GDN slot image (and one DFlash local lane image when DFlash is on) per lane | Program lifetime; valid while the lane holds a rewrite checkpoint |
 | ReplaySSM records | 48 layers × `C` rows × fixed verify width (`draft_window+1` for MTP; resolved `dflash_verify_width` for DFlash) convolution/key/value/gate columns | Program lifetime when MTP or DFlash enabled; one pending round |
-| DFlash2 local K/V | current and rewrite: 5 layers × 2048 × 8 heads × 128 × 2 planes × `C` lanes; plus one 1-lane checkpoint staging window | Program lifetime when DFlash enabled |
+| DFlash2 local K/V | 5 layers × 2048 × 8 heads × 128 × 2 planes × `C` lanes; plus one 1-lane checkpoint staging window | Program lifetime when DFlash enabled |
 | DFlash2 target features | prefill `[25600,P]` plus pending `[25600,dflash_verify_width,C]` BF16 | Program lifetime when DFlash enabled |
 | Continuation hidden | current and turn-checkpoint `[5120,C]` BF16 stores; MTP/DFlash staging `[5120,1]` | Program lifetime |
 | Text step buffers | token, positions, logits, verify/draft/sampling tensors | Program lifetime |

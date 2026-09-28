@@ -18,7 +18,7 @@ DFlashFeatureSink make_dflash_prefill_sink(PrefillContext& state) {
         throw std::logic_error("DFlash prefill controls are unavailable");
     }
     return dflash_feature_sink(
-        state, [&state](const Tensor& features, const Tensor& positions, bool rewrite_checkpoint) {
+        state, [&state](const Tensor& features, const Tensor& positions) {
             auto& frame  = *state.execution.io.dflash_decode;
             Tensor count = frame.append_counts.slice(0, 0, 1);
             Tensor lane  = frame.lanes.slice(0, 0, 1);
@@ -26,10 +26,6 @@ DFlashFeatureSink make_dflash_prefill_sink(PrefillContext& state) {
             ops::set_i32_scalar(count, features.ne[1], state.execution.device.stream);
             const auto exact = static_cast<std::uint32_t>(features.ne[1]);
             dflash_append_context(state, features, positions, count, lane, row, {exact, exact});
-            if (rewrite_checkpoint) {
-                state.dflash->save_rewrite_checkpoint(state.dflash_host_ingress->lanes[0],
-                                                      state.execution.device.stream);
-            }
         });
 }
 
@@ -37,10 +33,9 @@ DFlashFeatureSink make_dflash_prefill_sink(PrefillContext& state) {
 
 void configure_text_card(TextContext& card, const ExecutionCore& execution,
                          const ops::SamplingConfig* sampling, std::int32_t current_state_slot,
-                         std::int32_t rewrite_checkpoint_state_slot,
                          std::uint32_t mtp_proposal_extent) {
     card.set_sampling(sampling);
-    card.set_linear_state_slots(current_state_slot, rewrite_checkpoint_state_slot);
+    card.set_linear_state_slot(current_state_slot);
     card.set_gdn_state_action(GdnStateAction::UpdateInPlace, nullptr);
     card.set_mtp_proposal_extent(mtp_proposal_extent);
     if (execution.proposal_head == ProposalHead::Full) {
@@ -60,7 +55,7 @@ namespace {
 void attach_prefill_state(TextContext& card, PrefillContext& state,
                           std::optional<std::uint32_t> rewrite_checkpoint_capture_frontier) {
     configure_text_card(card, state.execution, state.sampling, state.current_state_slot,
-                        state.rewrite_checkpoint_state_slot, state.mtp_proposal_extent);
+                        state.mtp_proposal_extent);
     if (state.text_kv_allocation == nullptr || state.text_kv_publication == nullptr ||
         state.text_kv_status == nullptr) {
         throw std::logic_error("Text prefill has no FP8-K/INT4-V transaction authority");
