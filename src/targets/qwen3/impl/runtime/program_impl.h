@@ -2556,6 +2556,12 @@ qwen3::detail::KvDiskSnapshot ProgramImplCore::kv_disk_snapshot() const noexcept
     return kv_disk_cache_ ? kv_disk_cache_->snapshot() : qwen3::detail::KvDiskSnapshot{};
 }
 
+std::optional<qwen3::detail::KvDiskSnapshot>
+ProgramImplCore::try_kv_disk_snapshot() const noexcept {
+    return kv_disk_cache_ ? kv_disk_cache_->try_snapshot()
+                          : std::optional{qwen3::detail::KvDiskSnapshot{}};
+}
+
 qwen3::detail::KvDiskCopySeconds ProgramImplCore::harvest_kv_disk_copy_seconds() {
     return kv_disk_cache_ ? kv_disk_cache_->harvest_copy_seconds()
                           : qwen3::detail::KvDiskCopySeconds{};

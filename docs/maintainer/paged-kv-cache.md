@@ -351,6 +351,12 @@ Bounded reader/staging resources may overlap validated page copies with further 
 is not published until all state owners and the copy event complete. Cancellation drains I/O and
 releases the pinned entry generation without deleting its durable source. Emergency spill needed
 for admission excludes restore payload reads; idle spill rechecks its epoch and RAM residency.
+An admission waits only for its own entry's spill, never for another entry's spill batches.
+Pack compaction does not start while a restore, reader claim, or payload I/O still uses the
+current generation; an emergency spill then appends past the garbage threshold inside the
+copy-on-write reserve, and an idle spill defers without marking its entry failed, so compaction
+runs at the next quiescent admission. Stats observers read the disk tier without blocking on its
+index lock and never see its counters step backwards.
 Durable publication orders pack namespace, map, entry and manifest before final synchronization.
 Orderly shutdown captures retained device state, flushes nondurable RAM and outstanding writes,
 then releases lanes. None of this adds active-request preemption or a second growing-cache format.

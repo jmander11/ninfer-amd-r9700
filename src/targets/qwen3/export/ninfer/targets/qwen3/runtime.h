@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 
 namespace ninfer {
@@ -217,6 +218,7 @@ public:
     [[nodiscard]] qwen3::detail::KvRamSnapshot kv_ram_snapshot() const noexcept;
     qwen3::detail::KvRamCopySeconds harvest_kv_ram_copy_seconds();
     [[nodiscard]] qwen3::detail::KvDiskSnapshot kv_disk_snapshot() const noexcept;
+    [[nodiscard]] std::optional<qwen3::detail::KvDiskSnapshot> try_kv_disk_snapshot() const noexcept;
     qwen3::detail::KvDiskCopySeconds harvest_kv_disk_copy_seconds();
     [[nodiscard]] bool kv_ram_copies_ready() const;
     [[nodiscard]] bool kv_disk_copies_ready() const;

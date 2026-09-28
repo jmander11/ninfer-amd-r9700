@@ -149,7 +149,10 @@ void DeviceBuffer::require_range(std::size_t offset, std::size_t count, const ch
 
 void DeviceBuffer::fill(int value) {
     if (bytes == 0) { return; }
-    const hipError_t error = hipMemset(p, value, bytes);
+    // hipMemset may return before the device write lands; this helper is synchronous, so
+    // settle the null stream it uses before callers submit consumers on non-blocking streams.
+    hipError_t error = hipMemset(p, value, bytes);
+    if (error == hipSuccess) { error = hipStreamSynchronize(nullptr); }
     if (error != hipSuccess) { allocation_error("hipMemset", error); }
 }
 
