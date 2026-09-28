@@ -36,7 +36,7 @@ The latest accepted measurements use:
 | GPU | AMD Radeon AI PRO R9700 |
 | architecture | `gfx1201`, wave32 |
 | driver | `7.1.3.31500000` |
-| kernel | `7.0.0-30-generic` |
+| kernel | `7.0.0-34-generic` |
 | HIP | `7.15.26333` |
 | compiler | AMD Clang 23 under `/opt/rocm/core-10.0` |
 | build | Release, exact `gfx1201` code object |
@@ -59,6 +59,26 @@ expected value exactly.
 
 Copy bus rate counts both the read and write traffic. This is the hardware bandwidth bound, not a
 model or individual-Op throughput claim.
+
+## Current production (2026-09-28)
+
+Artifact `qwen3.8-27b-r9700-fp8lut4` (FP8LUT4 Text and output head, 26 row-scaled FP8
+protections); `compose.yaml` serving: DFlash `--draft-tokens 7 --adaptive-draft --lm-head-draft`,
+Device Graphs, prefill chunk 2048. Latest measurement of each phase; the dated sections below are
+the history behind them.
+
+| Phase | Measurement | Result | Source section |
+|---|---|---|---|
+| Decode C1 | 12-prompt corpus, 768 new tokens, greedy + 2 p-less seeds | 90.6 tok/s per request (2.86 tok/round, 31.6 ms/round) | Adaptive K{3..7} default |
+| Decode C4 | same corpus, 4 concurrent | 69.5 tok/s per request, 182 tok/s aggregate (2.71 tok/round, 39.1 ms/round) | Adaptive K{3..7} default |
+| Prefill 2K | C1, 1,992-token prompt | ~3,000 tok/s, TTFT ~0.65 s | server logs, `profiles/bench/r9700-stall-probe-20260927/` |
+| Prefill 32K | C1, code corpus | 2,790–2,850 tok/s | Long-context prefill attribution |
+| Prefill 128K | C1, code corpus | 1,901 tok/s (69.0 s) | Long-context prefill attribution |
+
+Decode depends on DFlash acceptance and therefore on the prompt mix; compare only within one
+harness (`profiles/bench/r9700-w8-kernels-20260927/k_economics.py`). C2/C3 decode has not been
+remeasured since the two-tile kernels. Prefill rows predate the 2026-09-28 output-head and
+attention GPTQ reconversions, which change weight values but not formats or routes.
 
 ## Long-context prefill attribution and exhausted mechanisms (2026-09-27)
 
