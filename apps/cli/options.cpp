@@ -114,6 +114,7 @@ std::string usage_text(const char* argv0) {
            "       [--device N]\n"
            "       [--spec mtp|dflash --draft-tokens N]\n"
            "       [--adaptive-draft] [--dflash-verify-width N] [--lm-head-draft]\n"
+           "       [--dflash-p-less-draft-temperature T]\n"
            "       [--temperature F] [--top-p F] [--top-k N] [--min-p F]\n"
            "       [--presence-penalty F] [--frequency-penalty F] [--seed N] [--greedy]\n"
            "       [--no-p-less-sampling]\n"
@@ -189,6 +190,9 @@ Options parse_options(int argc, char** argv) {
             options.speculative.draft_tokens = parse_u32(value(arg), "draft-tokens");
         } else if (arg == "--adaptive-draft") {
             options.speculative.adaptive_draft = true;
+        } else if (arg == "--dflash-p-less-draft-temperature") {
+            options.speculative.dflash_p_less_draft_temperature =
+                parse_float(value(arg), "dflash-p-less-draft-temperature", 0.0F, 2.0F);
         } else if (arg == "--dflash-verify-width") {
             options.speculative.dflash_verify_width =
                 parse_u32(value(arg), "dflash-verify-width");

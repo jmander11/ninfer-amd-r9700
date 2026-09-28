@@ -387,6 +387,7 @@ public:
     const std::uint32_t draft_window;
     const std::uint32_t dflash_verify_width;
     const bool adaptive_draft;
+    const float p_less_draft_temperature;
     const std::vector<std::uint32_t> captured_ks;
     std::array<qwen3::AdaptiveRoundTimeState, kMaximumConcurrency> adaptive_t_by_batch{};
     std::array<qwen3::AdaptiveBatchKState, kMaximumConcurrency> adaptive_batch_k_by_c{};

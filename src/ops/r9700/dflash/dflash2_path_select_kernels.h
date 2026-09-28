@@ -280,8 +280,12 @@ __launch_bounds__(kDflash2PathSelectBlock) __global__
     const int tid = static_cast<int>(threadIdx.x);
     if (b >= batch) { return; }
     const SamplingConfig cfg       = configs[b];
-    // P-less temperature belongs to the target distribution; its draft proposal is a point mass.
-    const float temperature        = (force_greedy || cfg.p_less != 0) ? 0.0f : cfg.temperature;
+    // q written below is the law each draft is drawn from (one-hot when greedy); verification
+    // accepts with min(1, p/q) under every target sampler, p-less included. P-less rows draw at
+    // their own draft temperature: the shortlist softmax at the p-less target temperature itself
+    // accepts less than argmax, while a lower one accepts more.
+    const float temperature =
+        force_greedy ? 0.0f : (cfg.p_less != 0 ? cfg.draft_temperature : cfg.temperature);
     const unsigned long long seed  = cfg.seed ^ seed_xor;
 
     __shared__ float scores[kDflash2PathSelectK];

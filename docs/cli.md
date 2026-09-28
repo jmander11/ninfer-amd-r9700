@@ -163,6 +163,7 @@ R9700 speed recommendations require R9700 end-to-end measurements; NVIDIA timing
 | `--draft-tokens N` | MTP `1..5`, DFlash2 `1..7` | unset |
 | `--adaptive-draft` | pick live draft K in `{3..N}` (DFlash `--draft-tokens N>=5`; MTP `{3,4,5}`) by locking `E[Y]/T(k,C,L)` (nested `r_i`; least-squares T; at most one probe of an unmeasured k; 1 ms switch cost). `--draft-tokens 4` stays `{4}` | off |
 | `--dflash-verify-width N` | DFlash2 chain verify width `W=k+1`, `2..8` | auto |
+| `--dflash-p-less-draft-temperature T` | DFlash2 draft temperature `0..2` for p-less requests: drafts are drawn from the 16-candidate path-select softmax at `T` and verified against that proposal, so output stays exactly the p-less target distribution. `0` drafts greedily. At p-less `T=1.5` on the R9700 (K7 adaptive, 6 prompts x 2 seeds), `0.4` gave +9.9% decode over greedy drafts (acceptance 3.32 -> 3.56 tok/round) | 0.4 |
 | `--lm-head-draft` | optimized proposal head | off |
 | `--vision` | enable image/video input and load Vision GPU allocations | off |
 | `--no-device-graph` | disable Device Graph decode | graphs on |
@@ -205,7 +206,8 @@ content. There is no CLI flag. P-less membership is `p_v ≥ max(L·exp(-2ε/T),
 `ε = 1/16` (first-order softmax perturbation of the logits) and `M = 1024`; L is the
 unperturbed collision probability, and an empty set falls back to the eligible mode.
 Under MTP or DFlash2,
-p-less applies at every hop (chain Leviathan with one-hot draft `q`) and to the bonus after a full
+p-less applies at every hop (chain Leviathan with the recorded draft `q`; DFlash2 drafts are sampled
+at `--dflash-p-less-draft-temperature`, MTP drafts are one-hot) and to the bonus after a full
 accept. The cycle exclusion applies only to the first hop's next-token decision; later hops use
 their unmodified p-less candidate sets. Temperature zero remains greedy at every hop.
 The reasoning terminator (including split-token forms) and model stop tokens are never

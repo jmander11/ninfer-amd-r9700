@@ -304,8 +304,9 @@ ChainExpected chain_oracle(
     for (int row = 0; row < batch; ++row) {
         const int extent = std::clamp(extents[static_cast<std::size_t>(row)], 0, k);
         const auto& config = configs[static_cast<std::size_t>(row)];
-        const auto* effective_ids = config.p_less != 0 ? nullptr : selector_ids;
-        const auto* effective_q = config.p_less != 0 ? nullptr : selector_q;
+        // The recorded selector q is the proposal law under every target sampler, p-less included.
+        const auto* effective_ids = selector_ids;
+        const auto* effective_q = selector_q;
         int accepted = 0;
         int terminal = 0;
         if (!(config.temperature > 0.0F)) {

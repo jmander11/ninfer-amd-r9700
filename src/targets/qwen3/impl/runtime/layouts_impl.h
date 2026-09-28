@@ -874,6 +874,7 @@ std::unique_ptr<SequencePlanImpl> build_sequence_candidate(const SequencePlannin
     impl->prefill_chunk       = inputs.prefill_chunk;
     impl->draft_window        = inputs.draft_window;
     impl->adaptive_draft = inputs.adaptive_draft;
+    impl->p_less_draft_temperature = inputs.p_less_draft_temperature;
     impl->captured_ks = qwen3::adaptive_draft_ks(inputs.speculative_backend, inputs.draft_window, inputs.adaptive_draft);
     impl->dflash_verify_width =
         inputs.speculative_backend == SpeculativeBackend::DFlash
@@ -1053,6 +1054,7 @@ make_sequence_planner_impl(DeviceContext& device, const EngineOptions& options,
         .draft_window        = options.speculative.draft_tokens,
         .dflash_verify_width = options.speculative.dflash_verify_width,
         .adaptive_draft      = options.speculative.adaptive_draft,
+        .p_less_draft_temperature = options.speculative.dflash_p_less_draft_temperature,
         .speculative_backend = options.speculative.backend,
         .proposal_head  = options.speculative.proposal_head,
         .features       = qwen3::startup_features(options),
