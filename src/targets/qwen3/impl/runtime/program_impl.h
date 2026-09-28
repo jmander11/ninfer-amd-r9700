@@ -2619,6 +2619,19 @@ qwen3::detail::KvDiskCopySeconds ProgramImplCore::harvest_kv_disk_copy_seconds()
                           : qwen3::detail::KvDiskCopySeconds{};
 }
 
+qwen3::detail::KvGpuSnapshot ProgramImplCore::kv_gpu_snapshot() const noexcept {
+    const auto pool_snapshot = [](const PagedKVPool& pool) {
+        return qwen3::detail::KvGpuPoolSnapshot{.page_group_count = pool.page_group_count(),
+                                                .entitled_pages   = pool.entitled_pages(),
+                                                .mapped_pages     = pool.mapped_pages(),
+                                                .free_pages       = pool.free_pages()};
+    };
+    qwen3::detail::KvGpuSnapshot out;
+    if (decoder) { out.main = pool_snapshot(decoder->text_kv.pool()); }
+    if (const PagedKVPool* backend = backend_kv_pool()) { out.spec = pool_snapshot(*backend); }
+    return out;
+}
+
 bool ProgramImplCore::kv_ram_copies_ready() const {
     return !kv_ram_cache_ || kv_ram_cache_->pending_copies_ready();
 }

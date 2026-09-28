@@ -40,6 +40,8 @@ A later request cannot enable a capability omitted at startup.
 | Method and path | Behavior |
 |---|---|
 | `GET /health` | process health |
+| `GET /metrics` | Prometheus text exposition 0.0.4 of the process snapshot |
+| `GET /metrics.json` | the same snapshot as JSON |
 | `GET /v1/models` | configured OpenAI model alias |
 | `GET /v1/models/{id}` | lookup of the configured alias |
 | `POST /v1/chat/completions` | OpenAI-style chat generation |
@@ -185,12 +187,11 @@ OpenAI-standard details sub-objects (no top-level duplicates, no Ollama-compat a
   0 when thinking is off) and, when speculation is active, `accepted_prediction_tokens` /
   `rejected_prediction_tokens`.
 
-When `--kv-ram-capacity` is enabled, the `ninfer` namespace also carries a `kv_ram` object — the
-same live host-KV figures as the serve `[req] done` line: engine-wide gauges `used_bytes` /
-`entry_count`, this request's D2H/H2D `save_ms` / `load_ms`, and engine-lifetime cumulative
-`lifetime.{captures,restores,evictions,drops}`. It is omitted when the RAM tier is off. When
-`--kv-disk-capacity` is enabled, `kv_disk` is the same gauges plus this request's SSD-to-host
-`load_ms` and post-disk `h2d_ms`.
+When this request copied KV through a host tier, the `ninfer` namespace carries `kv_ram` with this
+request's HIP D2H/H2D `save_ms` / `load_ms` and/or `kv_disk` with its `save_ms`, SSD-to-host
+`load_ms`, and post-disk `h2d_ms`. Each object is omitted when the request did not copy through
+that tier. Process occupancy and lifetime capture/restore/eviction/drop counters are on
+[`GET /metrics`](#metrics), not on the per-request usage object.
 
 ### Multimodal request
 
@@ -744,7 +745,9 @@ curl http://127.0.0.1:8080/v1/messages/count_tokens \
 ## Authentication and CORS
 
 Pass `--api-key VALUE` to require the same value as an OpenAI bearer token or Anthropic
-`x-api-key` header. `GET /health` and CORS preflight requests remain unauthenticated.
+`x-api-key` header. `GET /health`, `GET /metrics`, `GET /metrics.json`, and CORS preflight
+requests remain unauthenticated. Binding a non-loopback `--host` therefore exposes occupancy, queue
+depth, and token totals to anyone who can reach the port.
 
 ```bash
 curl http://127.0.0.1:8080/v1/models \
@@ -829,6 +832,77 @@ no OpenAI or Anthropic schema field for this mode.
 
 Run `./build-r9700/apps/ninfer-serve --help` for the exact option contract.
 
+## Metrics
+
+`GET /metrics` is Prometheus text exposition 0.0.4 (`text/plain; version=0.0.4`).
+`GET /metrics.json` renders the same snapshot as JSON: counter totals and histogram `count` / `sum`,
+not rates. Both read the public Engine `RuntimeStats` once per scrape plus the serve-owned
+counters; a scrape never queries the HIP device. Device-memory families are the startup
+measurements.
+
+```bash
+curl -s http://127.0.0.1:8080/metrics | head
+curl -s http://127.0.0.1:8080/metrics.json | jq .scheduler,.gpu_kv,.kv_ram,.speculative,.recovery,.phases
+```
+
+```yaml
+scrape_configs:
+  - job_name: ninfer
+    scrape_interval: 2s
+    static_configs: [{ targets: ["127.0.0.1:8080"] }]
+```
+
+| Family group | Signals |
+|---|---|
+| identity | `ninfer_engine_info` (target, weights, model alias, `spec`, `kv_cache_format="fp8-k-int4-v"`, compile-bound `kv_value_group` and `xattention` profile, Device Graph, prefix reuse, Vision, auth/CORS) and `ninfer_build_info` (HIP compile/runtime/driver version, `gpu_arch`, `gpu_name`) |
+| startup | context, prefill chunk, pending timeout, default output budget, draft/DFlash verify width, load seconds, arena capacities, `ninfer_device_graph_{allowance,observed}_bytes`, and `ninfer_device_memory_bytes{kind}` (`total`, `available_after_weights`, `runtime_reservation`, `kv_payload`, `available_after_startup`) as measured once at startup |
+| scheduler | `ninfer_scheduler_{running,prefilling,decode_ready,waiting}_requests`, configured concurrency and FIFO depth, and `ninfer_engine_{computed_prefill_tokens,committed_decode_tokens,decode_rounds,decode_row_rounds}_total` |
+| device KV | `ninfer_gpu_kv_pages{pool,state}` for `pool="main"` (FP8-K/INT4-V Text) and `pool="spec"` (the MTP paged pool; 0 without MTP, including DFlash2 whose private BF16 state is not paged) with `state` `capacity` / `entitled` / `mapped` / `free`, and `ninfer_gpu_kv_capacity_tokens{pool}` (64 tokens per page group) |
+| host KV tiers | `ninfer_kv_{ram,disk}_{capacity_bytes,used_bytes,entries}`, `_{captures,restores,evictions,drops}_total`, `_{save,load}_seconds_total`, `ninfer_kv_disk_h2d_seconds_total`, and `ninfer_kv_cache_fallbacks_total` (failed host restores requeued for cold prefill) |
+| prefix reuse | `ninfer_prefix_reuse_requests_total{path,source}`, `ninfer_prefix_cache_{hit_tokens_total{source},query_tokens_total}`, and context-checkpoint restored/captured tokens and capture requests |
+| speculation | MTP/DFlash rounds, draft/accepted tokens, fallback steps, accepted tokens by draft position 0-14, rounds by live draft width 1-15, and the `ninfer_speculative_live_k` histogram |
+| recovery | `ninfer_recovery_events_total{kind,cause}`, true `ninfer_recovery_cycle_exclusions_total`, discarded reasoning tokens and tool calls, and the `ninfer_recovery_attempts` histogram |
+| generation | `ninfer_generation_requests_total{protocol,result,stream,thinking,tools}`, TTFT / end-to-end / inter-token latency histograms, phase and per-request KV copy histograms, prompt/completion/reasoning/computed-prefill token histograms, prefill and decode tok/s histograms, finish reasons, tool calls, ignored tool markup, media requests, and token-count requests |
+| HTTP | `ninfer_http_requests_total{method,protocol,route,status}`, `ninfer_http_request_duration_seconds{protocol,route}`, `ninfer_http_in_flight_requests`, `ninfer_api_errors_total{code}` over a closed code set, and Responses store records/bytes and caps |
+
+| Question | Signal |
+|---|---|
+| In flight? | `ninfer_http_in_flight_requests` vs `ninfer_scheduler_running_requests` vs `ninfer_scheduler_waiting_requests` |
+| Concurrent decode? | `rate(ninfer_engine_decode_row_rounds_total)/rate(ninfer_engine_decode_rounds_total)` > 1 |
+| Device KV tight? | `ninfer_gpu_kv_pages{pool="main",state="entitled"} / ninfer_gpu_kv_pages{pool="main",state="capacity"}` |
+| RAM cache working? | `ninfer_kv_ram_used_bytes` > 0, restores rising, `ninfer_prefix_reuse_requests_total{source="host_ram"}` |
+| Disk cache working? | `ninfer_kv_disk_*` and `source="host_disk"`; `ninfer_kv_cache_fallbacks_total` staying flat |
+| Prefix hit rate | `rate(ninfer_prefix_cache_hit_tokens_total)/rate(ninfer_prefix_cache_query_tokens_total)` |
+| MTP/DFlash healthy? | `rate(ninfer_speculative_accepted_tokens_total)/rate(ninfer_speculative_draft_tokens_total)` |
+| Why is TTFT high? | phase p95 of `queue`, `copy_hold`, `prefill`, `media_fetch`; one JSONL `request_done` for the joint view |
+| Disk restore on the critical path? | `copy_hold` p95 and `ninfer_generation_kv_copy_seconds{tier="disk",op="h2d"}` |
+| Recovery burning time? | `ninfer_generation_phase_seconds{phase="recovery"}` vs `{phase="decode"}` |
+
+`ninfer_generation_phase_seconds{phase}` has the closed phases `prepare_cpu`, `media_wait`,
+`media_fetch`, `queue`, `copy_hold`, `vision`, `prefill`, `decode`, `recovery`, and `http_tail`
+(definitions under `request_done.timings_seconds` below); only positive phases are observed. Phase
+samples need not sum to end-to-end: recovery re-prefill, HIP copy time, and copy-hold wall overlap.
+`ninfer_generation_inter_token_latency_seconds` is decode seconds per decode-evaluated output token
+(TPOT); `ninfer_generation_output_tokens_per_second` is its inverse and matches NInfer tok/s
+reports. Latency, token, finish-reason, prefix, and speculative families observe successful
+generations only; `ninfer_generation_requests_total` also counts `rejected`, `error`, and `cancelled`
+attempts. `ninfer_recovery_events_total{kind="cycle_exclusion"}` counts published events, which are
+powers-of-two samples; the true exclusion count is `ninfer_recovery_cycle_exclusions_total`.
+Exhausted-recovery details collapse into the closed causes `retry_budget`, `output_budget`,
+`lane_rebuild`, `prologue`, and `other`; the JSONL `recovery` event keeps the raw text.
+
+```promql
+rate(ninfer_engine_committed_decode_tokens_total[1m])
+histogram_quantile(0.95, rate(ninfer_generation_ttft_seconds_bucket[5m]))
+histogram_quantile(0.95, rate(ninfer_generation_inter_token_latency_seconds_bucket[5m]))
+histogram_quantile(0.95, rate(ninfer_generation_phase_seconds_bucket{phase="queue"}[5m]))
+histogram_quantile(0.95, rate(ninfer_generation_phase_seconds_bucket{phase="copy_hold"}[5m]))
+rate(ninfer_prefix_cache_hit_tokens_total[5m])
+  / rate(ninfer_prefix_cache_query_tokens_total[5m])
+rate(ninfer_speculative_accepted_tokens_total[5m])
+  / rate(ninfer_speculative_draft_tokens_total[5m])
+```
+
 ## Structured request log
 
 `--request-log-jsonl FILE` enables the machine-readable measurement log. The server opens `FILE`
@@ -841,7 +915,7 @@ is also rejected if it resolves to the model artifact.
   --request-log-jsonl profiles/bench/run/server.requests.jsonl
 ```
 
-Every line is one `ninfer_serve_request_log` schema-v21 JSON object. All events carry
+Every line is one `ninfer_serve_request_log` schema-v22 JSON object. All events carry
 `timestamp_unix_ms` and a process-unique `server_instance_id`; request IDs are monotonic only within
 that server instance.
 
@@ -850,9 +924,10 @@ that server instance.
 | `server_start` | target/weights identity and artifact, resolved Engine, compile-bound Text-prefill/XAttention identity, registered thinking/non-thinking sampler defaults plus process overrides, thinking-history defaults, weights/sequence/workspace/request-transient arenas, KV sizing ledger, pinned-host KV RAM capacity/occupancy, Device Graph observed/allowance bytes, HIP/GPU environment, and redacted argv |
 | `request_start` | protocol, resolved sampler and seed (including `p_less`), thinking modes, Responses semantic-change flag, output budget, stream/message/tool shape |
 | `request_rejected` | parsed request shape, media-item count, `phase: "prepare"`, and the exact HTTP status/type/code/parameter/message for a synchronous preparation rejection |
-| `request_done` | finish reason, prompt/completion/cache/computed-prefill tokens, prefix reuse path, `reuse_source` (`none` / `vram_resident` / `host_ram` / `host_disk`), `context_checkpoint` (`restored_tokens` / `captured_tokens`), unrounded phase seconds including `kv_ram_save` / `kv_ram_load` / `kv_disk_save` / `kv_disk_load` / `kv_disk_h2d`, complete speculative-decoding counters, `tool_call_count`, and `ignored_qwen_tool_call_names` (empty unless a tools-off completion contained parseable Qwen `<tool_call>` markup) |
+| `request_done` | finish reason, prompt/completion/cache/computed-prefill tokens, prefix reuse path, `reuse_source` (`none` / `vram_resident` / `host_ram` / `host_disk`), `context_checkpoint` (`restored_tokens` / `captured_tokens`), this request's unrounded phase clocks, `recovery` totals (including the true `cycle_exclusions`), complete speculative-decoding counters, `tool_call_count`, and `ignored_qwen_tool_call_names` (empty unless a tools-off completion contained parseable Qwen `<tool_call>` markup). Process KV occupancy and lifetime tier counters are not on this event |
+| `recovery` | one line per published Engine recovery event: `request.id`, `kind`, raw `cause` (including the exhausted detail), attempts, cycle exclusions, discarded tool calls and reasoning tokens, generated tokens, and remaining tokens |
 | `request_error` | the resolved request configuration and generation error message |
-| `throughput` | interval token deltas and rates, scheduler occupancy, interval `timings_seconds.kv_ram_save` / `kv_ram_load`, and decode-round batch statistics |
+| `throughput` | interval token deltas and rates, scheduler occupancy including device KV pages (`gpu_kv_{main,spec}_{capacity,entitled,mapped,free}_pages`) and absolute `kv_cache_fallbacks`, interval `timings_seconds.kv_ram_save` / `kv_ram_load` / `kv_disk_save` / `kv_disk_load` / `kv_disk_h2d`, and decode-round batch statistics |
 
 `server_start.engine.xattention_qualification` is always present. It is `false` in the ordinary
 product build. The OFF-by-default qualification build reports `true` plus the exact
@@ -861,8 +936,16 @@ product build. The OFF-by-default qualification build reports `true` plus the ex
 selectors. `server_start.engine.kv_value_group` likewise records the compile-bound G16/G32 Text
 and MTP value-cache group; it is not a runtime cache selector.
 
-`request_done.timings_seconds` contains `prepare`, `ttft`, `vision`, `prefill`, `decode`, `total`,
-`kv_ram_save`, and `kv_ram_load` as full-precision JSON numbers. `kv_ram_save` / `kv_ram_load` are
+`request_done.timings_seconds` contains `prepare`, `prepare_cpu`, `media_wait`, `media_fetch`,
+`queued`, `copy_hold`, `ttft`, `vision`, `prefill`, `decode`, `total`, `recovery_prepare`,
+`recovery_prefill`, `kv_ram_save`, `kv_ram_load`, `kv_disk_save`, `kv_disk_load`, `kv_disk_h2d`,
+and `http_tail` as full-precision JSON numbers. They need not sum to `total`: recovery re-prefill,
+HIP copy time, and copy-hold wall overlap. `prepare_cpu` is `prepare` minus the media permit wait
+(`media_wait`) and media acquisition (`media_fetch`). `queued` is pending-FIFO wall from Engine
+submit until admission, including a requeue after a failed host restore, and excludes copy-hold.
+`copy_hold` is wall blocked on victim spill or RAM/disk restore until prefill starts. `http_tail`
+is the HTTP handler clock minus engine end-to-end, so it includes JSON parsing and the SSE or JSON
+body built after the Engine result. `kv_ram_save` / `kv_ram_load` are
 HIP event elapsed for that request's RAM-tier FIFO D2H capture and H2D unpack (Main KV, optional
 MTP KV or DFlash cyclic state, and GDN images in the same copy span). They are not admission wait.
 Live-lane context-checkpoint freeze D2H and a
@@ -962,17 +1045,20 @@ resolved capacity, runtime reservation, free memory after weights, automatic hea
 slack, actual free memory after complete startup, observed Graph memory, and pinned-host KV RAM
 occupancy in MiB. When `--kv-ram-capacity` is enabled, a post-warmup line reprints occupancy,
 periodic throughput lines print live host-resident `kv-ram=` used bytes plus `n=` / `restores=` /
-`evicts=` / `drops=` / `save=` / `load=`, and each `[req] done` line includes `reuse_source=` plus
-the same occupancy and counters. When `--kv-disk-capacity` is enabled, those lines also print
-`kv-disk=` occupancy and counters. `kv-ram=` / `n=` count chats still in the host FIFO, not chats
+`evicts=` / `drops=` / `save=` / `load=`, plus device KV page entitlement (`gpu-kv=entitled/capacity`
+and `spec=` when a speculative pool exists) and non-zero `cache_fallbacks=`. Each `[req] done` line
+includes `reuse_source=` and this request's non-zero `kv_ram_save=` / `kv_ram_load=` /
+`kv_disk_save=` / `kv_disk_load=` / `kv_disk_h2d=` milliseconds; it does not print process
+occupancy. When `--kv-disk-capacity` is enabled, throughput lines also print `kv-disk=` occupancy,
+counters, and interval `h2d=`. `kv-ram=` / `n=` count chats still in the host FIFO, not chats
 already consumed after a restore onto a KV lane. RAM `save=` / `load=` are HIP D2H/H2D elapsed for
 that request or the throughput interval. Disk `save=` is spill-session wall harvested onto the
 request; disk `load=` is the host wall from the first live SSD read of that restore until the last
 page or state object has arrived in the pinned host window. Disk `h2d=` is the host wall from that
 last host arrival until the restore's page and state H2D complete (extra copy time after SSD is
-idle, not the overlapping first-to-last copy span). `restores=` / `evicts=` / `drops=` are lifetime counters
-on both human lines; lifetime capture counts stay in JSONL.
-Exact RAM byte occupancy remains in `server_start`, `request_done`, and `throughput` JSONL; set
+idle, not the overlapping first-to-last copy span). `restores=` / `evicts=` / `drops=` are lifetime
+counters; lifetime capture counts stay in JSONL and on `GET /metrics`.
+Exact RAM byte occupancy remains in `server_start` and `throughput` JSONL and on `GET /metrics`; set
 `NINFER_KV_RAM_LOG_BYTES=1` to print those byte values on the human lines. A new capture may still
 reap or evict while logged `kv-ram=` looks low. An explicit capacity is never silently reduced, and
 neither policy permits request-time pool growth.

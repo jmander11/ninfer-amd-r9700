@@ -12,8 +12,8 @@ device backend or duplicate production kernels inside tests.
 - `artifact/` covers generic container framing and the supported direct and row-split layouts.
 - `targets/qwen3/` covers family-owned runtime mechanisms used by Qwen3.8-27B without
   requiring checkpoint resources.
-- protocol tests cover the advertised OpenAI, Anthropic, Responses, request-log, and server-option
-  behavior.
+- protocol tests cover the advertised OpenAI, Anthropic, Responses, request-log, Prometheus
+  `/metrics` exposition, and server-option behavior.
 - `tools/r9700/*_qual` owns physical gfx1201 operator, cache, transaction, runtime, and Engine
   qualification against independent exact or FP64 oracles.
 

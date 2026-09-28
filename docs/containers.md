@@ -184,8 +184,9 @@ python3.11 tools/smoke/serve_cache.py --base-url http://127.0.0.1:8001
 ```
 
 The HTTP smoke sends Chat, Responses, Anthropic and streaming requests without a
-temperature override, checks generated output and both cache-stat objects, and
-reports cache observations. It does not prove disk restoration; the separate
+temperature override, checks generated output, requires both cache tiers enabled on
+`GET /metrics.json`, checks the `GET /metrics` exposition and generation count, and
+reports per-request copy times plus the scheduler, device-KV and tier snapshot. It does not prove disk restoration; the separate
 restart qualifier explicitly requires a disk hit and cold-output parity.
 
 Validation on2026-09-24: rebuilt native gfx1201 suite86/86 passed, including physical

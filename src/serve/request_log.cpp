@@ -69,24 +69,6 @@ std::string hip_uuid_string(const hipUUID& uuid) {
     return out.str();
 }
 
-const char* finish_reason_name(ninfer::FinishReason reason) {
-    switch (reason) {
-    case ninfer::FinishReason::None:
-        return "none";
-    case ninfer::FinishReason::OutputLimit:
-        return "output_limit";
-    case ninfer::FinishReason::ContextCapacity:
-        return "context_capacity";
-    case ninfer::FinishReason::StopToken:
-        return "stop_token";
-    case ninfer::FinishReason::StopString:
-        return "stop_string";
-    case ninfer::FinishReason::Cancelled:
-        return "cancelled";
-    }
-    return "unknown";
-}
-
 std::string tool_choice_name(const ToolChoice& choice) {
     switch (choice.mode) {
     case ToolChoiceMode::Auto:
@@ -97,46 +79,6 @@ std::string tool_choice_name(const ToolChoice& choice) {
         return "required";
     case ToolChoiceMode::Named:
         return choice.name.empty() ? "named" : choice.name;
-    }
-    return "unknown";
-}
-
-const char* kv_capacity_mode_name(ninfer::KvCapacityMode mode) {
-    return mode == ninfer::KvCapacityMode::Automatic ? "auto" : "explicit";
-}
-
-const char* proposal_head_name(ninfer::ProposalHead proposal) {
-    return proposal == ninfer::ProposalHead::Optimized ? "optimized" : "full";
-}
-
-const char* prefix_reuse_source_name(ninfer::PrefixReuseSource source) {
-    switch (source) {
-    case ninfer::PrefixReuseSource::None:
-        return "none";
-    case ninfer::PrefixReuseSource::VramResident:
-        return "vram_resident";
-    case ninfer::PrefixReuseSource::HostRam:
-        return "host_ram";
-    case ninfer::PrefixReuseSource::HostDisk:
-        return "host_disk";
-    }
-    return "unknown";
-}
-
-const char* prefix_reuse_path_name(ninfer::PrefixReusePath path) {
-    switch (path) {
-    case ninfer::PrefixReusePath::FullReset:
-        return "full_reset";
-    case ninfer::PrefixReusePath::AppendAtFrontier:
-        return "append_frontier";
-    case ninfer::PrefixReusePath::RestoreTurnCheckpoint:
-        return "restore_turn_checkpoint";
-    case ninfer::PrefixReusePath::RestoreResponseCheckpoint:
-        return "restore_response_checkpoint";
-    case ninfer::PrefixReusePath::RestoreContextCheckpoint:
-        return "restore_context_checkpoint";
-    case ninfer::PrefixReusePath::RestoreTurnRollback:
-        return "restore_turn_rollback";
     }
     return "unknown";
 }
@@ -332,16 +274,13 @@ std::string format_kv_ram_live(const ninfer::MemorySummary& memory, std::uint64_
 
 std::string format_kv_disk_live(const ninfer::MemorySummary& memory, std::uint64_t restores,
                                 std::uint64_t evictions, std::uint64_t drops, double save_seconds,
-                                double load_seconds,
-                                std::optional<double> h2d_seconds = std::nullopt) {
+                                double load_seconds, double h2d_seconds) {
     std::ostringstream out;
     out << " kv-disk=" << format_kv_ram_size(memory.kv_disk_used_bytes, kv_ram_log_exact_bytes())
         << " n=" << memory.kv_disk_entry_count << " restores=" << restores
         << " evicts=" << evictions << " drops=" << drops << std::fixed << std::setprecision(0)
-        << " save=" << (save_seconds * 1000.0) << "ms load=" << (load_seconds * 1000.0) << "ms";
-    if (h2d_seconds) {
-        out << " h2d=" << (*h2d_seconds * 1000.0) << "ms";
-    }
+        << " save=" << (save_seconds * 1000.0) << "ms load=" << (load_seconds * 1000.0)
+        << "ms h2d=" << (h2d_seconds * 1000.0) << "ms";
     return out.str();
 }
 
@@ -405,17 +344,8 @@ std::string format_request_start(const RequestLogContext& context) {
 }
 
 std::string format_recovery_event(std::uint64_t request_id, const ninfer::RecoveryEvent& event) {
-    const char* stage = "unknown";
-    switch (event.kind) {
-    case ninfer::RecoveryEventKind::CycleExclusion: stage = "cycle_exclusion"; break;
-    case ninfer::RecoveryEventKind::RetryTriggered: stage = "retry_triggered"; break;
-    case ninfer::RecoveryEventKind::RetryStarted: stage = "retry_started"; break;
-    case ninfer::RecoveryEventKind::RetryPrefillComplete: stage = "retry_prefill_complete"; break;
-    case ninfer::RecoveryEventKind::Finished: stage = "finished"; break;
-    case ninfer::RecoveryEventKind::Exhausted: stage = "exhausted"; break;
-    }
     std::ostringstream out;
-    out << "[req " << request_id << "] recovery event=" << stage
+    out << "[req " << request_id << "] recovery event=" << recovery_event_kind_name(event.kind)
         << " cause=" << event.cause << " attempts=" << event.attempts
         << " cycle_exclusions=" << event.cycle_exclusions
         << " discarded_tool_calls=" << event.discarded_tool_calls
@@ -458,24 +388,16 @@ std::string format_request_done(const RequestLogContext& context,
         << " reuse_source=" << prefix_reuse_source_name(metrics.prefix_reuse_source)
         << format_context_checkpoint(metrics.restored_context_checkpoint_tokens,
                                      metrics.captured_context_checkpoint_tokens);
-    if (metrics.kv_ram_capacity_bytes != 0) {
-        ninfer::MemorySummary occupancy;
-        occupancy.kv_ram_capacity_bytes = metrics.kv_ram_capacity_bytes;
-        occupancy.kv_ram_used_bytes     = metrics.kv_ram_used_bytes;
-        occupancy.kv_ram_entry_count    = metrics.kv_ram_entry_count;
-        out << format_kv_ram_live(occupancy, metrics.kv_ram_restores, metrics.kv_ram_evictions,
-                                  metrics.kv_ram_drops, metrics.kv_ram_save_seconds,
-                                  metrics.kv_ram_load_seconds);
-    }
-    if (metrics.kv_disk_capacity_bytes != 0) {
-        ninfer::MemorySummary occupancy;
-        occupancy.kv_disk_capacity_bytes = metrics.kv_disk_capacity_bytes;
-        occupancy.kv_disk_used_bytes     = metrics.kv_disk_used_bytes;
-        occupancy.kv_disk_entry_count    = metrics.kv_disk_entry_count;
-        out << format_kv_disk_live(occupancy, metrics.kv_disk_restores, metrics.kv_disk_evictions,
-                                   metrics.kv_disk_drops, metrics.kv_disk_save_seconds,
-                                   metrics.kv_disk_load_seconds, metrics.kv_disk_h2d_seconds);
-    }
+    const auto append_copy_ms = [&](const char* name, double seconds) {
+        if (!(seconds > 0.0)) { return; }
+        out << ' ' << name << '=' << std::fixed << std::setprecision(0) << (seconds * 1000.0)
+            << "ms";
+    };
+    append_copy_ms("kv_ram_save", metrics.kv_ram_save_seconds);
+    append_copy_ms("kv_ram_load", metrics.kv_ram_load_seconds);
+    append_copy_ms("kv_disk_save", metrics.kv_disk_save_seconds);
+    append_copy_ms("kv_disk_load", metrics.kv_disk_load_seconds);
+    append_copy_ms("kv_disk_h2d", metrics.kv_disk_h2d_seconds);
     if (!outcome.ignored_qwen_tool_call_names.empty()) {
         out << " ignored_tool_calls=";
         for (std::size_t i = 0; i < outcome.ignored_qwen_tool_call_names.size(); ++i) {
@@ -586,7 +508,19 @@ std::string format_throughput(const ThroughputReport& report) {
         occupancy.kv_disk_entry_count    = report.kv_disk_entry_count;
         out << format_kv_disk_live(occupancy, report.scheduler.kv_disk_restores,
                                    report.scheduler.kv_disk_evictions, report.scheduler.kv_disk_drops,
-                                   report.kv_disk_save_seconds, report.kv_disk_load_seconds);
+                                   report.kv_disk_save_seconds, report.kv_disk_load_seconds,
+                                   report.kv_disk_h2d_seconds);
+    }
+    if (report.scheduler.gpu_kv_main_capacity_pages != 0) {
+        out << " gpu-kv=" << report.scheduler.gpu_kv_main_entitled_pages << '/'
+            << report.scheduler.gpu_kv_main_capacity_pages;
+        if (report.scheduler.gpu_kv_spec_capacity_pages != 0) {
+            out << " spec=" << report.scheduler.gpu_kv_spec_entitled_pages << '/'
+                << report.scheduler.gpu_kv_spec_capacity_pages;
+        }
+    }
+    if (report.scheduler.kv_cache_fallbacks != 0) {
+        out << " cache_fallbacks=" << report.scheduler.kv_cache_fallbacks;
     }
     return out.str();
 }
@@ -735,35 +669,54 @@ std::string format_request_done_json(const std::string& server_instance_id, std:
              {"context_checkpoint",
               context_checkpoint_json(outcome.metrics.restored_context_checkpoint_tokens,
                                       outcome.metrics.captured_context_checkpoint_tokens)},
-             {"kv_ram_capacity_bytes", outcome.metrics.kv_ram_capacity_bytes},
-             {"kv_ram_used_bytes", outcome.metrics.kv_ram_used_bytes},
-             {"kv_ram_entry_count", outcome.metrics.kv_ram_entry_count},
-             {"kv_ram_captures", outcome.metrics.kv_ram_captures},
-             {"kv_ram_restores", outcome.metrics.kv_ram_restores},
-             {"kv_ram_evictions", outcome.metrics.kv_ram_evictions},
-             {"kv_ram_drops", outcome.metrics.kv_ram_drops},
-             {"kv_disk_capacity_bytes", outcome.metrics.kv_disk_capacity_bytes},
-             {"kv_disk_used_bytes", outcome.metrics.kv_disk_used_bytes},
-             {"kv_disk_entry_count", outcome.metrics.kv_disk_entry_count},
-             {"kv_disk_captures", outcome.metrics.kv_disk_captures},
-             {"kv_disk_restores", outcome.metrics.kv_disk_restores},
-             {"kv_disk_evictions", outcome.metrics.kv_disk_evictions},
-             {"kv_disk_drops", outcome.metrics.kv_disk_drops},
              {"tool_call_count", outcome.tool_calls.size()},
              {"ignored_qwen_tool_call_names", outcome.ignored_qwen_tool_call_names}};
+    const ninfer::GenerationRecoveryStats& recovery = outcome.metrics.recovery;
+    record["recovery"] = Json{{"attempts", recovery.attempts},
+                              {"discarded_tool_calls", recovery.discarded_tool_calls},
+                              {"discarded_reasoning_tokens", recovery.discarded_reasoning_tokens},
+                              {"prefill_samples", recovery.prefill_samples},
+                              {"prefill_tokens", recovery.prefill_tokens},
+                              {"prepare_seconds", recovery.prepare_seconds},
+                              {"prefill_seconds", recovery.prefill_seconds},
+                              {"cycle_exclusions", recovery.cycle_exclusions}};
     record["timings_seconds"] = Json{
         {"prepare", outcome.metrics.prepare_seconds},
+        {"prepare_cpu", outcome.metrics.prepare_cpu_seconds},
+        {"media_wait", outcome.metrics.media_wait_seconds},
+        {"media_fetch", outcome.metrics.media_fetch_seconds},
+        {"queued", outcome.metrics.queued_seconds},
+        {"copy_hold", outcome.metrics.copy_hold_seconds},
         {"ttft", outcome.metrics.ttft_seconds},
         {"vision", outcome.metrics.vision_seconds},
         {"prefill", outcome.metrics.prefill_seconds},
         {"decode", outcome.metrics.decode_seconds},
         {"total", outcome.metrics.total_seconds},
+        {"recovery_prepare", recovery.prepare_seconds},
+        {"recovery_prefill", recovery.prefill_seconds},
         {"kv_ram_save", outcome.metrics.kv_ram_save_seconds},
         {"kv_ram_load", outcome.metrics.kv_ram_load_seconds},
         {"kv_disk_save", outcome.metrics.kv_disk_save_seconds},
         {"kv_disk_load", outcome.metrics.kv_disk_load_seconds},
-        {"kv_disk_h2d", outcome.metrics.kv_disk_h2d_seconds}};
+        {"kv_disk_h2d", outcome.metrics.kv_disk_h2d_seconds},
+        {"http_tail", outcome.metrics.http_tail_seconds}};
     record["speculative"] = speculative_json(outcome.metrics);
+    return record.dump();
+}
+
+std::string format_recovery_event_json(const std::string& server_instance_id,
+                                       std::uint64_t timestamp, std::uint64_t request_id,
+                                       const ninfer::RecoveryEvent& event) {
+    Json record       = event_base(server_instance_id, timestamp, "recovery");
+    record["request"] = Json{{"id", request_id}};
+    record["kind"]    = recovery_event_kind_name(event.kind);
+    record["cause"]   = event.cause;
+    record["attempts"]                   = event.attempts;
+    record["cycle_exclusions"]           = event.cycle_exclusions;
+    record["discarded_tool_calls"]       = event.discarded_tool_calls;
+    record["discarded_reasoning_tokens"] = event.discarded_reasoning_tokens;
+    record["generated_tokens"]           = event.generated_tokens;
+    record["remaining_tokens"]           = event.remaining_tokens;
     return record.dump();
 }
 
@@ -814,12 +767,30 @@ std::string format_throughput_json(const std::string& server_instance_id, std::u
                                   {"kv_disk_drops", report.scheduler.kv_disk_drops},
                                   {"kv_disk_capacity_bytes", report.kv_disk_capacity_bytes},
                                   {"kv_disk_used_bytes", report.kv_disk_used_bytes},
-                                  {"kv_disk_entry_count", report.kv_disk_entry_count}};
+                                  {"kv_disk_entry_count", report.kv_disk_entry_count},
+                                  {"kv_cache_fallbacks", report.scheduler.kv_cache_fallbacks},
+                                  {"gpu_kv_main_capacity_pages",
+                                   report.scheduler.gpu_kv_main_capacity_pages},
+                                  {"gpu_kv_main_entitled_pages",
+                                   report.scheduler.gpu_kv_main_entitled_pages},
+                                  {"gpu_kv_main_mapped_pages",
+                                   report.scheduler.gpu_kv_main_mapped_pages},
+                                  {"gpu_kv_main_free_pages",
+                                   report.scheduler.gpu_kv_main_free_pages},
+                                  {"gpu_kv_spec_capacity_pages",
+                                   report.scheduler.gpu_kv_spec_capacity_pages},
+                                  {"gpu_kv_spec_entitled_pages",
+                                   report.scheduler.gpu_kv_spec_entitled_pages},
+                                  {"gpu_kv_spec_mapped_pages",
+                                   report.scheduler.gpu_kv_spec_mapped_pages},
+                                  {"gpu_kv_spec_free_pages",
+                                   report.scheduler.gpu_kv_spec_free_pages}};
     record["timings_seconds"] =
         Json{{"kv_ram_save", report.kv_ram_save_seconds},
              {"kv_ram_load", report.kv_ram_load_seconds},
              {"kv_disk_save", report.kv_disk_save_seconds},
-             {"kv_disk_load", report.kv_disk_load_seconds}};
+             {"kv_disk_load", report.kv_disk_load_seconds},
+             {"kv_disk_h2d", report.kv_disk_h2d_seconds}};
     record["decode_batch"] = Json{{"rounds", report.decode_rounds},
                                   {"row_rounds", report.decode_row_rounds},
                                   {"average_size", std::move(average_batch)}};
@@ -908,6 +879,11 @@ void write_request_done_logs(JsonlRequestLog& jsonl, const RequestLogContext& co
                           format_ignored_qwen_tool_call_markup(context, outcome));
     }
     jsonl.write_request_done(context, outcome);
+}
+
+void JsonlRequestLog::write_recovery(std::uint64_t request_id, const ninfer::RecoveryEvent& event) {
+    if (!enabled()) { return; }
+    append(format_recovery_event_json(server_instance_id_, unix_time_ms(), request_id, event));
 }
 
 void JsonlRequestLog::write_request_error(const RequestLogContext& context,

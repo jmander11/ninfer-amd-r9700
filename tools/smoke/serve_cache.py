@@ -21,6 +21,9 @@ def main():
             return json.load(response)
 
     assert request('/health')['status'] == 'ok'
+    before = request('/metrics.json')
+    assert before['kv_ram']['capacity_bytes'] > 0 and before['kv_disk']['capacity_bytes'] > 0, \
+        'both cache tiers must be enabled'
     models = request('/v1/models')['data']
     assert models
     model = models[0]['id']
@@ -36,7 +39,7 @@ def main():
         assert reply['usage']['completion_tokens'] > 0
         details = reply['usage']['prompt_tokens_details']
         stats = details['ninfer']
-        assert 'kv_ram' in stats and 'kv_disk' in stats, 'both cache tiers must be enabled'
+        assert 'used_bytes' not in stats.get('kv_ram', {}), 'usage still carries process occupancy'
         results.append({'cached_tokens': details['cached_tokens'], 'stats': stats})
     response = request('/v1/responses', {
         'model': model, 'input': 'Say hello.', 'max_output_tokens': 32,
@@ -56,9 +59,19 @@ def main():
     with urllib.request.urlopen(req, timeout=300) as stream:
         events = stream.read().decode()
     assert 'data: [DONE]' in events and 'chat.completion.chunk' in events
+    after = request('/metrics.json')
+    requests_after = after['generation']['requests_total']
+    assert requests_after - before['generation']['requests_total'] == 6, 'generation count drifted'
+    with urllib.request.urlopen(args.base_url.rstrip('/') + '/metrics', timeout=60) as response:
+        exposition = response.read().decode()
+        assert response.headers['Content-Type'].startswith('text/plain; version=0.0.4')
+    assert 'ninfer_gpu_kv_pages{pool="main",state="capacity"}' in exposition
     print(json.dumps({'status': 'PASS', 'model': model,
-                      'routes': ['chat', 'responses', 'messages', 'chat_sse'],
-                      'chat_cache_observations': results}, indent=2))
+                      'routes': ['chat', 'responses', 'messages', 'chat_sse', 'metrics'],
+                      'chat_cache_observations': results,
+                      'metrics': {key: after[key] for key in
+                                  ('scheduler', 'gpu_kv', 'kv_ram', 'kv_disk', 'prefix_reuse')}},
+                     indent=2))
 
 
 if __name__ == '__main__':

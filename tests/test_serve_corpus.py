@@ -100,7 +100,7 @@ class ServeCorpusTest(unittest.TestCase):
         self.assertEqual(command[command.index("--max-concurrency") + 1], "1")
 
         start = {
-            "artifact_type": "ninfer_serve_request_log", "schema_version": 21,
+            "artifact_type": "ninfer_serve_request_log", "schema_version": 22,
             "event": "server_start", "server_instance_id": "server",
             "engine": {
                 "device": 0, "max_concurrency": 1,
@@ -146,15 +146,15 @@ class ServeCorpusTest(unittest.TestCase):
             with self.assertRaisesRegex(CampaignError, "prefill chunk differs"):
                 load_existing_records(path, {spec.key: spec}, 1, 16, "dense")
 
-    def test_request_log_v21_identity_is_accepted(self) -> None:
+    def test_request_log_v22_identity_is_accepted(self) -> None:
         current = {
             "artifact_type": "ninfer_serve_request_log",
-            "schema_version": 21,
+            "schema_version": 22,
             "event": "server_start",
         }
         require_server_log_identity(current, "server_start")
 
-        stale = dict(current, schema_version=20)
+        stale = dict(current, schema_version=21)
         with self.assertRaises(CampaignError):
             require_server_log_identity(stale, "server_start")
 

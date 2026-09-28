@@ -3,6 +3,7 @@
 #include "ninfer/types.h"
 #include "runtime/contract/transient_region.h"
 #include "runtime/contract/types.h"
+#include "targets/qwen3/impl/runtime/kv_gpu_snapshot.h"
 #include "targets/qwen3/impl/runtime/kv_ram_snapshot.h"
 #include "targets/qwen3/impl/runtime/kv_disk_snapshot.h"
 #include <ninfer/targets/qwen3/prepared_prompt.h>
@@ -226,6 +227,7 @@ public:
     qwen3::detail::KvRamCopySeconds harvest_kv_ram_copy_seconds();
     [[nodiscard]] std::optional<qwen3::detail::KvDiskSnapshot> try_kv_disk_snapshot() const noexcept;
     qwen3::detail::KvDiskCopySeconds harvest_kv_disk_copy_seconds();
+    [[nodiscard]] qwen3::detail::KvGpuSnapshot kv_gpu_snapshot() const noexcept;
     [[nodiscard]] bool kv_ram_copies_ready() const;
     [[nodiscard]] bool kv_disk_copies_ready() const;
     [[nodiscard]] bool kv_disk_restore_failed() const;

@@ -352,6 +352,17 @@ private:
         out.kv_ram_entry_count    = ram.entry_count;
     }
 
+    static void assign_kv_gpu_stats(RuntimeStats& out, const auto& gpu) noexcept {
+        out.gpu_kv_main_capacity_pages = gpu.main.page_group_count;
+        out.gpu_kv_main_entitled_pages = gpu.main.entitled_pages;
+        out.gpu_kv_main_mapped_pages   = gpu.main.mapped_pages;
+        out.gpu_kv_main_free_pages     = gpu.main.free_pages;
+        out.gpu_kv_spec_capacity_pages = gpu.spec.page_group_count;
+        out.gpu_kv_spec_entitled_pages = gpu.spec.entitled_pages;
+        out.gpu_kv_spec_mapped_pages   = gpu.spec.mapped_pages;
+        out.gpu_kv_spec_free_pages     = gpu.spec.free_pages;
+    }
+
     static void assign_kv_disk_stats(RuntimeStats& out, const auto& disk) noexcept {
         out.kv_disk_captures       = disk.captures;
         out.kv_disk_restores       = disk.restores;
@@ -398,6 +409,7 @@ private:
             if (slots_[lane]->decode_ready) { ++snapshot.decode_ready_requests; }
         }
         assign_kv_ram_stats(snapshot, instance_.program->kv_ram_snapshot());
+        assign_kv_gpu_stats(snapshot, instance_.program->kv_gpu_snapshot());
         // The disk tier's mutex can be held by its worker for file I/O; a
         // decode-loop stats publication keeps the last snapshot instead of waiting.
         const auto disk = instance_.program->try_kv_disk_snapshot();
@@ -483,6 +495,7 @@ private:
               resident_prompt_tokens(summary.prompt_tokens),
               prepare_seconds(frontend_seconds), options(std::move(request_options)),
               delivery(output_delivery), deadline(limit), submitted(submit_time),
+              pending_since(submit_time),
               stop_suppression_active(options.execution.suppressed_token_count != 0) {
             if (generation_recovery && options.execution.sampling.p_less && !options.output.raw) {
                 recovery_context = output.generation_recovery_context();
@@ -504,6 +517,10 @@ private:
         Clock::time_point deadline;
         bool cache_fallback = false;
         Clock::time_point submitted;
+        Clock::time_point pending_since;
+        double queued_seconds = 0;
+        double copy_hold_seconds = 0;
+        std::optional<Clock::time_point> copy_hold_started;
         std::optional<Clock::time_point> first_token;
         std::optional<GenerationBudget> budget;
         std::optional<BeginSummary> begin;
@@ -701,6 +718,9 @@ private:
     }
 
     void complete_error(std::shared_ptr<Request> request, std::exception_ptr error) {
+        end_copy_hold(request);
+        request->recovery.cycle_exclusions = request->cycle_exclusions;
+        error = attach_recovery_stats(std::move(error), request->recovery);
         release_planning_state(request);
         request->prompt = {};
         request->host_input.reset();
@@ -750,6 +770,7 @@ private:
         const auto calls = request->output.tool_calls();
         if (reason != FinishReason::Cancelled) { result.tool_calls.assign(calls.begin(), calls.end()); }
         result.recovery = request->recovery;
+        result.recovery.cycle_exclusions = request->cycle_exclusions;
         if (!request->output.has_tool_grammar()) {
             result.undeclared_tool_call_names =
                 targets::qwen3::unconstrained_tool_call_names(result.content, 128);
@@ -798,6 +819,9 @@ private:
         result.timings.total_seconds =
             request->prepare_seconds +
             std::chrono::duration<double>(Clock::now() - request->submitted).count();
+        end_copy_hold(request);
+        result.timings.queued_seconds    = request->queued_seconds;
+        result.timings.copy_hold_seconds = request->copy_hold_seconds;
         retire_request(request);
         {
             std::lock_guard lock(request->mutex);
@@ -938,13 +962,8 @@ private:
                 throw CacheRestoreFailure("disk cache restore failed");
             }
             const auto first = begin_recovery_prefill(request, lane, std::move(host_plan));
-            const auto copies = instance_.program->harvest_kv_ram_copy_seconds();
-            request->kv_ram_save_seconds += copies.save;
-            request->kv_ram_load_seconds += copies.load;
-            const auto disk_copies = instance_.program->harvest_kv_disk_copy_seconds();
-            request->kv_disk_save_seconds += disk_copies.save;
-            request->kv_disk_load_seconds += disk_copies.load;
-            request->kv_disk_h2d_seconds += disk_copies.h2d;
+            add_kv_ram_copies(*request, instance_.program->harvest_kv_ram_copy_seconds());
+            add_kv_disk_copies(*request, instance_.program->harvest_kv_disk_copy_seconds());
             if (ram) {
                 instance_.program->consume_ram_entry(ram_entry_id);
                 ram_claimed = false;
@@ -1360,9 +1379,11 @@ private:
             const auto now = Clock::now();
             for (auto it = pending_.begin(); it != pending_.end();) {
                 if ((*it)->cancelled.load(std::memory_order_acquire)) {
+                    account_left_pending(**it, now);
                     cancelled.push_back(*it);
                     it = pending_.erase(it);
                 } else if (!(*it)->cache_fallback && now >= (*it)->deadline) {
+                    account_left_pending(**it, now);
                     expired.push_back(*it);
                     it = pending_.erase(it);
                 } else {
@@ -1494,11 +1515,55 @@ private:
         return {pending_.begin(), pending_.end()};
     }
 
+    static void account_left_pending(Request& request, Clock::time_point now) noexcept {
+        request.queued_seconds +=
+            std::chrono::duration<double>(now - request.pending_since).count();
+        request.pending_since = now;
+    }
+
+    static void begin_copy_hold(Request& request) noexcept {
+        if (!request.copy_hold_started) { request.copy_hold_started = Clock::now(); }
+    }
+
+    static void end_copy_hold(const std::shared_ptr<Request>& request) noexcept {
+        if (!request || !request->copy_hold_started) { return; }
+        request->copy_hold_seconds +=
+            std::chrono::duration<double>(Clock::now() - *request->copy_hold_started).count();
+        request->copy_hold_started.reset();
+    }
+
+    // Engine errors that end an admitted request carry its recovery totals to the caller.
+    [[nodiscard]] static std::exception_ptr
+    attach_recovery_stats(std::exception_ptr error, const GenerationRecoveryStats& stats) {
+        if (!error) { return error; }
+        try {
+            std::rethrow_exception(error);
+        } catch (const RequestError& request_error) {
+            return std::make_exception_ptr(
+                RequestError(request_error.kind(), request_error.what(), stats));
+        } catch (...) {
+            return error;
+        }
+    }
+
+    void add_kv_ram_copies(Request& request, const auto& copies) noexcept {
+        request.kv_ram_save_seconds += copies.save;
+        request.kv_ram_load_seconds += copies.load;
+    }
+
+    void add_kv_disk_copies(Request& request, const auto& copies) noexcept {
+        request.kv_disk_save_seconds += copies.save;
+        request.kv_disk_load_seconds += copies.load;
+        request.kv_disk_h2d_seconds += copies.h2d;
+        cumulative_stats_.kv_disk_h2d_seconds += copies.h2d;
+    }
+
     [[nodiscard]] bool erase_pending(const std::shared_ptr<Request>& request) {
         std::lock_guard lock(queue_mutex_);
         const auto it = std::find(pending_.begin(), pending_.end(), request);
         if (it == pending_.end()) { return false; }
         pending_.erase(it);
+        account_left_pending(*request, Clock::now());
         published_waiting_requests_.store(static_cast<std::uint32_t>(pending_.size()),
                                           std::memory_order_relaxed);
         return true;
@@ -1691,15 +1756,10 @@ private:
     void harvest_kv_copy_seconds(const std::shared_ptr<Request>& request) noexcept {
         if (request == nullptr) { return; }
         try {
-            const auto copies = instance_.program->harvest_kv_ram_copy_seconds();
-            request->kv_ram_save_seconds += copies.save;
-            request->kv_ram_load_seconds += copies.load;
+            add_kv_ram_copies(*request, instance_.program->harvest_kv_ram_copy_seconds());
         } catch (...) {}
         try {
-            const auto copies = instance_.program->harvest_kv_disk_copy_seconds();
-            request->kv_disk_save_seconds += copies.save;
-            request->kv_disk_load_seconds += copies.load;
-            request->kv_disk_h2d_seconds += copies.h2d;
+            add_kv_disk_copies(*request, instance_.program->harvest_kv_disk_copy_seconds());
         } catch (...) {}
     }
 
@@ -1746,6 +1806,7 @@ private:
         try {
             instance_.program->abort_lane(lane);
         } catch (...) {}
+        end_copy_hold(copy_hold_->request);
         copy_hold_.reset();
     }
 
@@ -1816,15 +1877,11 @@ private:
                 prefill_lane_ = lane;
                 transient     = instance_.request_memory.region();
             }
+            end_copy_hold(request);
             const PrefillStepResult first = instance_.program->start_prefill_lane(
                 lane, std::move(request->prompt), std::move(hold.plan), transient, &request->output);
-            const auto copies = instance_.program->harvest_kv_ram_copy_seconds();
-            request->kv_ram_save_seconds += copies.save;
-            request->kv_ram_load_seconds += copies.load;
-            const auto disk_copies = instance_.program->harvest_kv_disk_copy_seconds();
-            request->kv_disk_save_seconds += disk_copies.save;
-            request->kv_disk_load_seconds += disk_copies.load;
-            request->kv_disk_h2d_seconds += disk_copies.h2d;
+            add_kv_ram_copies(*request, instance_.program->harvest_kv_ram_copy_seconds());
+            add_kv_disk_copies(*request, instance_.program->harvest_kv_disk_copy_seconds());
             if (hold.ram_hit) {
                 instance_.program->consume_ram_entry(hold.ram_entry_id);
                 hold.ram_consumed = true;
@@ -1866,6 +1923,7 @@ private:
             }
             if (copy_hold_->disk_hit) { instance_.program->invalidate_disk_entry(disk_entry_id); }
             instance_.program->abort_lane(lane);
+            end_copy_hold(request);
             copy_hold_.reset();
             slots_[lane].reset();
             invalidate_lane_plans(lane);
@@ -1877,6 +1935,7 @@ private:
             request->backfill_epoch = 0;
             request->backfill_class = BackfillClass::None;
             request->cache_fallback = true;
+            ++cumulative_stats_.kv_cache_fallbacks;
             request->options.execution.force_cold_prefill = true;
             {
                 std::lock_guard lock(queue_mutex_);
@@ -1884,6 +1943,7 @@ private:
                     pending_.begin(), pending_.end(), request->queue_order,
                     [](const auto& queued, std::uint64_t order) { return queued->queue_order < order; });
                 pending_.insert(position, request);
+                request->pending_since = Clock::now();
                 published_waiting_requests_.store(static_cast<std::uint32_t>(pending_.size()),
                                                   std::memory_order_relaxed);
             }
@@ -2072,13 +2132,8 @@ private:
                 request->lane_plans[lane].reset();
             }
             if (!erase_pending(request)) {
-                const auto copies = instance_.program->harvest_kv_ram_copy_seconds();
-                request->kv_ram_save_seconds += copies.save;
-                request->kv_ram_load_seconds += copies.load;
-                const auto disk_copies = instance_.program->harvest_kv_disk_copy_seconds();
-                request->kv_disk_save_seconds += disk_copies.save;
-                request->kv_disk_load_seconds += disk_copies.load;
-                request->kv_disk_h2d_seconds += disk_copies.h2d;
+                add_kv_ram_copies(*request, instance_.program->harvest_kv_ram_copy_seconds());
+                add_kv_disk_copies(*request, instance_.program->harvest_kv_disk_copy_seconds());
                 rollback_ram_captures();
                 release_host_if_needed();
                 return AdmissionProgress::None;
@@ -2121,6 +2176,7 @@ private:
                 .victim_count    = victim_count,
                 .needs_prefill   = needs_prefill,
             });
+            begin_copy_hold(*request);
             ram_claimed  = false;
             disk_claimed = false;
             publish_runtime_stats();
@@ -2134,15 +2190,10 @@ private:
                 instance_.program->synchronize_all();
             } catch (...) {}
             try {
-                const auto copies = instance_.program->harvest_kv_ram_copy_seconds();
-                request->kv_ram_save_seconds += copies.save;
-                request->kv_ram_load_seconds += copies.load;
+                add_kv_ram_copies(*request, instance_.program->harvest_kv_ram_copy_seconds());
             } catch (...) {}
             try {
-                const auto copies = instance_.program->harvest_kv_disk_copy_seconds();
-                request->kv_disk_save_seconds += copies.save;
-                request->kv_disk_load_seconds += copies.load;
-                request->kv_disk_h2d_seconds += copies.h2d;
+                add_kv_disk_copies(*request, instance_.program->harvest_kv_disk_copy_seconds());
             } catch (...) {}
             if (!(copy_hold_ && copy_hold_->lane == lane)) {
                 rollback_ram_captures();

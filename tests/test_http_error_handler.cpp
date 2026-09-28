@@ -1,5 +1,6 @@
 #include "serve/generation_service.h"
 #include "serve/http_server.h"
+#include "serve/metrics.h"
 
 #include <nlohmann/json.hpp>
 
@@ -21,6 +22,11 @@ int check(bool condition, const char* message) {
 
 int main() {
     int failures = 0;
+    failures += check(ninfer::serve::is_unauthenticated_path("/health") &&
+                          ninfer::serve::is_unauthenticated_path("/metrics") &&
+                          ninfer::serve::is_unauthenticated_path("/metrics.json") &&
+                          !ninfer::serve::is_unauthenticated_path("/v1/chat/completions"),
+                      "metrics routes are authenticated");
     ServeOptions options;
     options.max_request_bytes = 1234;
 
@@ -36,11 +42,16 @@ int main() {
                              "vision tokens exceed processor budget"));
     failures += check(media_budget.status == 400 && media_budget.code == "media_budget_exceeded",
                       "media resource rejection did not map to HTTP 400");
+    ninfer::GenerationRecoveryStats recovery;
+    recovery.attempts         = 2;
+    recovery.cycle_exclusions = 5;
     const auto exhausted = ninfer::serve::request_error_to_api_error(ninfer::RequestError(
-        ninfer::RequestErrorKind::RecoveryExhausted, "bounded recovery exhausted"));
+        ninfer::RequestErrorKind::RecoveryExhausted, "bounded recovery exhausted", recovery));
     failures += check(exhausted.status == 500 && exhausted.type == "server_error" &&
                           exhausted.code == "generation_recovery_exhausted" && exhausted.param.empty(),
                       "recovery exhaustion lost its explicit request-local error");
+    failures += check(exhausted.recovery.attempts == 2 && exhausted.recovery.cycle_exclusions == 5,
+                      "Engine recovery totals did not reach the API error");
     const ninfer::serve::ApiError context_limit = ninfer::serve::request_error_to_api_error(
         ninfer::RequestError(ninfer::RequestErrorKind::ContextLengthExceeded,
                              "prepared prompt has 200 tokens, exceeding Engine max_context 128"));

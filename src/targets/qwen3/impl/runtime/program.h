@@ -13,6 +13,7 @@
 #include "targets/qwen3/impl/runtime/context_checkpoint.h"
 #include "targets/qwen3/impl/runtime/adaptive_draft.h"
 #include "targets/qwen3/impl/runtime/context_checkpoint_image.h"
+#include "targets/qwen3/impl/runtime/kv_gpu_snapshot.h"
 #include "targets/qwen3/impl/runtime/kv_ram_cache.h"
 #include "targets/qwen3/impl/runtime/kv_disk_cache.h"
 #include "targets/qwen3/impl/runtime/layouts.h"
@@ -360,6 +361,7 @@ public:
     qwen3::detail::KvRamCopySeconds harvest_kv_ram_copy_seconds();
     [[nodiscard]] std::optional<qwen3::detail::KvDiskSnapshot> try_kv_disk_snapshot() const noexcept;
     qwen3::detail::KvDiskCopySeconds harvest_kv_disk_copy_seconds();
+    [[nodiscard]] qwen3::detail::KvGpuSnapshot kv_gpu_snapshot() const noexcept;
     [[nodiscard]] bool kv_ram_copies_ready() const;
     [[nodiscard]] bool kv_disk_copies_ready() const;
     [[nodiscard]] bool kv_disk_restore_failed() const;

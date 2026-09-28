@@ -18,10 +18,7 @@ void HttpServer::handle_score(const httplib::Request& request, httplib::Response
             return request.is_connection_alive && !request.is_connection_alive();
         });
         response.set_content(make_candidate_score_response(parsed, scores).dump(), "application/json");
-    } catch (const ApiException& exception) {
-        response.status = exception.error().status;
-        response.set_content(make_error_body(exception.error()), "application/json");
-    }
+    } catch (const ApiException& exception) { emit_openai_error(response, exception.error()); }
 }
 
 } // namespace ninfer::serve

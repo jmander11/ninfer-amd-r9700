@@ -60,7 +60,7 @@ DEFAULT_FIXTURES = [
 NIAH_LENGTHS = ("8k", "32k", "64k", "100k", "128k", "150k", "200k", "240k")
 NIAH_POSITIONS = ("start", "q25", "mid", "q75", "end")
 SERVER_LOG_ARTIFACT_TYPE = "ninfer_serve_request_log"
-SERVER_LOG_SCHEMA_VERSION = 20
+SERVER_LOG_SCHEMA_VERSION = 22
 XATTENTION_PROFILES = ("dense", "b128-s16-tau900")
 NIAH_ENGINE_PROFILE = {
     "max_context": 262144,
