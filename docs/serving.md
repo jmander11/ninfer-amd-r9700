@@ -28,11 +28,11 @@ server must accept image or video input. Speculative residency is likewise froze
 `--lm-head-draft` additionally loads the optimized proposal head. Qwen3.8-27B DFlash2 is available
 when `dflash/` is present and can be combined with `--vision`; the text-only companion consumes
 Vision-composed target hidden features. Verify is chain `W=k+1` for `k` in `1..7`; R9700 draft-window recommendations require local end-to-end measurements.
-`--adaptive-draft` picks live k in `{3,4,5}` after each round by locking
+`--adaptive-draft` picks live k in `{3..N}` (DFlash `--draft-tokens N>=5`; MTP `{3,4,5}`) after each round by locking
 `argmax E[Y(k)] / T(k,C,L)` from nested hop-survival `r_i` and online least-squares round time
 (shared slope, per-k intercept). An unmeasured k is probed at most once and dropped when
 dominated; switching k costs 1 ms. That is a sticky policy, not a once-per-launch latch: see
-[adaptive draft length](maintainer/qwen3.8-27b-model.md#81-adaptive-draft-length). Frozen `--draft-tokens 4` stays `{4}`.
+[adaptive drafting](maintainer/qwen3.8-27b-model.md). Frozen `--draft-tokens 4` stays `{4}`.
 A later request cannot enable a capability omitted at startup.
 
 ## Endpoints
@@ -775,7 +775,7 @@ curl http://127.0.0.1:8080/v1/models \
 | `--response-store-max-mib N` | total local Response envelope/Item/context budget | `256` |
 | `--spec mtp\|dflash` | speculative backend | off |
 | `--draft-tokens N` | MTP `1..5`, DFlash2 `1..7` | unset |
-| `--adaptive-draft` | pick live draft K in `{3,4,5}` by locking `E[Y]/T(k,C,L)` (nested `r_i`; least-squares T; at most one probe of an unmeasured k; 1 ms switch cost). `--draft-tokens 4` stays `{4}` | off |
+| `--adaptive-draft` | pick live draft K in `{3..N}` (DFlash `--draft-tokens N>=5`; MTP `{3,4,5}`) by locking `E[Y]/T(k,C,L)` (nested `r_i`; least-squares T; at most one probe of an unmeasured k; 1 ms switch cost). `--draft-tokens 4` stays `{4}` | off |
 | `--dflash-verify-width N` | DFlash2 chain verify width `W=k+1`, `2..8` | auto |
 | `--lm-head-draft` | optimized proposal head | off |
 | `--default-max-tokens N` | output limit when omitted by a request | `8192` |

@@ -62,7 +62,7 @@ services:
       - --spec
       - dflash
       - --draft-tokens
-      - "${NINFER_DRAFT_TOKENS:-5}"
+      - "${NINFER_DRAFT_TOKENS:-7}"
       - --adaptive-draft
       - --lm-head-draft
       - --preserve-thinking

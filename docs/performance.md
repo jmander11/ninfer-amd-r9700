@@ -100,10 +100,27 @@ FP8LUT4 GEMM repacking was measured by the research ports below (at most 3.3%, m
 GEMM's redundant per-CTA decode cannot be shared without a cross-CTA or runtime-repacked weight
 path. No long-context prefill mechanism with a credible whole-prefill bound remains.
 
+## Two-tile small-T FP8 Linear for T 17..32 (2026-09-28)
+
+Above T16 (C3/C4 DFlash verify) every FP8LUT4 Linear, the output head and the row-scaled FP8
+projections fell to the prefill GEMM. Both small-T kernels now add a second 16-token WMMA tile on
+the same decoded weights; T > 32 keeps the prefill GEMM. FP64-oracle qualified on all production
+shapes at T17..32 (`fp8lut4_linear_qual`, `fp8_row_scaled_linear_qual`, `attention_fused_qual`).
+`--time-cell`, median us:
+
+| N x K | T16 | T24 before (prefill) | T24 two-tile |
+|---|---:|---:|---:|
+| 34816 x 5120 | 162 | 474 | 171 |
+| 5120 x 17408 | 38 | 339 | 57 |
+| 12288 x 5120 | 31 | 157 | 47 |
+| 7168 x 5120 | 20 | 105 | 31 |
+| 5120 x 6144 | 18 | 118 | 28 |
+
+Evidence: `profiles/bench/r9700-fp8lut4-small-t-20260928/`.
+
 ## DFlash K6/K7 chains (2026-09-27)
 
-Fixed K6/K7 (W7/W8) chains are supported (`--draft-tokens 6|7`, fixed only; `--adaptive-draft`
-stays `{3,4,5}`). Their earlier ~4 ms (C1) / ~16 ms (C4) round penalty was route fallback, removed by
+Fixed K6/K7 (W7/W8) chains are supported (`--draft-tokens 6|7`). Their earlier ~4 ms (C1) / ~16 ms (C4) round penalty was route fallback, removed by
 7-8-row A8Q4 small-batch drafter projections, W7/W8 GDN pair conv/record and a T<=32 normalized GDN
 front (all qualified against their FP64/exact oracles, `tools/r9700`). Production
 `qwen3.8-27b-r9700-fp8lut4`, `--lm-head-draft`, Device Graphs, 12-prompt corpus x greedy + two
@@ -116,13 +133,28 @@ p-less seeds, ABC/CBA order, paired per-request decode rate with 95% bootstrap i
 | 1 | fixed K7 vs production adaptive K5 | 3.00 / 2.79 | 31.7 / 31.2 | 1.098 (1.040–1.160) |
 | 4 | fixed K7 vs production adaptive K5 | 3.01 / 2.57 | 77.0 / 43.6 | 0.672 (0.653–0.691) |
 
-Production keeps adaptive K5. At C4, adaptive runs mostly K3 because every FP8LUT4 target Linear
-above 16 tokens (C4 x W>=5) leaves the small-T route for the prefill kernel
-(`fp8lut4::kSmallTokens`), nearly doubling the round; fixed K5/K7 pay that cliff. Fixed K7 is the
-better choice for single-request (C1) serving. Adaptive `{3..7}` measured 0.92x adaptive K5 at C1:
-each request's first round picks the lowest measured T(k) before any hop is observed, and deeper
-hops then never earn credit, so it settled on K4; the adaptive set therefore stays `{3,4,5}`.
-Evidence: `profiles/bench/r9700-w8-kernels-20260927/`.
+At the time, C4 adaptive ran mostly K3 because every FP8LUT4 target Linear above 16 tokens
+(C4 x W>=5) left the small-T route for the prefill kernel, nearly doubling the round; fixed K5/K7
+paid that cliff. Adaptive `{3..7}` then measured 0.92x adaptive K5 at C1: each request's first round
+picked the lowest measured T(k) before any hop was observed, and deeper hops never earned credit,
+so it settled on K4. Both are fixed on 2026-09-28 (below). Evidence:
+`profiles/bench/r9700-w8-kernels-20260927/`.
+
+### Adaptive K{3..7} production default (2026-09-28)
+
+`compose.yaml` now runs `--draft-tokens 7 --adaptive-draft`: the two-tile kernels above plus a
+DFlash adaptive policy that continues the deepest observed hop acceptance into unseen hops (new
+hops start from it, Beta weight 4). Paired decode rate vs the `40c5eab8` server at adaptive K5,
+same harness, 95% bootstrap:
+
+| | C1 | C4 |
+|---|---|---|
+| two-tile kernels, adaptive K5 | 1.000 | 1.225 (1.184–1.275) |
+| + policy, adaptive K7 | 1.074 (1.024–1.123) | 1.251 (1.212–1.294) |
+| C4 cohort tokens/s | | 156 -> 182 |
+
+C1 uses the second pass only (the first baseline cell loaded the artifact before its 04:02
+reconversion); C4 is n=66. Evidence: `profiles/bench/r9700-w8-kernels-20260927/overnight-economics/`.
 
 ## Rejected research ports (2026-09-27)
 

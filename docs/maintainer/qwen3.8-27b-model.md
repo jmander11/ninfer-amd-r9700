@@ -393,8 +393,11 @@ Q4G64, source-MSE Q4G64, and source-MSE W8G32, with row-scaled E4M3 conditional 
 quality evidence. Both selector codebooks and all private persistent DFlash state remain BF16.
 
 Optional adaptive drafting is fixed on/off at startup. It reserves and captures the supported
-K={3,4,5} graph set, chooses one live K per compact batch from measured round time and conditional
-acceptance, and respects row budgets. Storage and previous pending feature views keep the maximum
+K graph set (DFlash `{3..N}` for `--draft-tokens N>=5`, MTP `{3,4,5}`), chooses one live K per
+compact batch from measured round time and conditional acceptance, and respects row budgets. For
+DFlash, hops deeper than a request has observed continue its deepest observed conditional
+acceptance, and a newly reached hop starts from that value (Beta weight 4), so a request that
+started at a shallow K can still move to a deeper one. Storage and previous pending feature views keep the maximum
 captured width when K shrinks; only the live proposal/verification views shrink. This policy does
 not change the target sampling law or imply a measured advantage over fixed K.
 

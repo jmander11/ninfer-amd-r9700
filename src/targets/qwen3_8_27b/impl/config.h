@@ -91,7 +91,7 @@ struct DFlashConfig {
     static constexpr float rope_theta      = 1.0e7F;
     static constexpr float attention_scale = 0.08838834764831845F;
     static constexpr std::array<int, feature_layers> target_feature_layers{5, 19, 33, 47, 61};
-    // Chain verify only: W=k+1; adaptive execution selects k in {3,4,5}; K6/K7 are fixed-only.
+    // Chain verify only: W=k+1; adaptive execution selects k in {3..N} (N = draft tokens <= 7).
     static constexpr bool tree_verify      = false;
     static constexpr int verify_width      = 0;
     // 1 was A/B'd: greedy 128-tok 4.10 tok/round / 211 tok/s vs keep 4.23 / 239. Leave off.
