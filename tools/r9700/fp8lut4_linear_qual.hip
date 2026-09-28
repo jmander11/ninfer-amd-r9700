@@ -462,8 +462,7 @@ int main(int argc, char** argv) {
             const auto tokens = std::stoul(argv[2]);
             const auto rows = std::stoul(argv[3]);
             const auto columns = std::stoul(argv[4]);
-            require(tokens == 1U || tokens == 6U || tokens == 2048U,
-                    "time-cell T must select an existing timing width");
+            require(tokens >= 1U && tokens <= 2048U, "time-cell T must be in 1..2048");
             require((rows == 34816U && columns == 5120U) ||
                     (rows == 5120U && columns == 17408U) ||
                     (rows == 12288U && columns == 5120U) ||
@@ -513,24 +512,31 @@ int main(int argc, char** argv) {
         const Shape shapes[] = {{34816, 5120}, {5120, 17408}, {12288, 5120}, {7168, 5120},
                                 {5120, 6144}, {4096, 5120}, {1280, 5120}, {5120, 25600}};
         for (const auto& shape : shapes)
-            for (const std::uint32_t tokens : {1U, 5U, 6U, 16U})
+            for (const std::uint32_t tokens : {1U, 5U, 6U, 16U, 17U, 20U, 24U, 32U})
                 run_case(book, shape.rows, shape.columns, tokens, false, false, rng, stream);
+        // FP8LUT4 output head (N248320/K5120): C1..C4 verification widths up to T32.
+        for (const std::uint32_t tokens : {1U, 6U, 16U, 24U, 32U})
+            run_case(book, 248320, 5120, tokens, false, false, rng, stream);
         for (const std::uint32_t tokens : {17U, 130U, 2048U}) {
             run_case(book, 5120, 17408, tokens, false, false, rng, stream);
             run_case(book, 7168, 5120, tokens, false, false, rng, stream);
         }
-        for (const std::uint32_t tokens : {1U, 6U, 16U, 130U, 2048U})
+        for (const std::uint32_t tokens : {1U, 6U, 16U, 24U, 32U, 130U, 2048U})
             run_silu(book, 34816, 5120, tokens, rng, stream);
         run_pair(book, 7168, 6144, 7168, 5120, 6, rng, stream);
         run_pair(book, 7168, 6144, 7168, 5120, 1, rng, stream);
         run_pair(book, 12288, 6144, 4096, 5120, 5, rng, stream);
+        run_pair(book, 7168, 6144, 7168, 5120, 24, rng, stream);
+        run_pair(book, 12288, 6144, 4096, 5120, 32, rng, stream);
         run_pair(book, 7168, 6144, 7168, 5120, 130, rng, stream);
         run_case(book, 5120, 6144, 1, true, false, rng, stream);
         run_case(book, 5120, 17408, 1, true, false, rng, stream);
         run_case(book, 5120, 6144, 6, true, false, rng, stream);
+        run_case(book, 5120, 17408, 24, true, false, rng, stream);
         run_case(book, 5120, 6144, 2048, true, false, rng, stream);
         run_case(book, 7168, 5120, 1, false, true, rng, stream);
         run_case(book, 7168, 5120, 6, false, true, rng, stream);
+        run_case(book, 7168, 5120, 28, false, true, rng, stream);
         run_case(book, 7168, 5120, 300, false, true, rng, stream);
         ninfer::r9700_qualification::device_guard().check("after-linear-suite");
         if (timed) time_shapes(book, stream, rng);

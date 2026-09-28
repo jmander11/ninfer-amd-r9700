@@ -14,8 +14,8 @@
 namespace ninfer::ops {
 
 // Row-scaled-E4M3 Linear bound to one directly bound Weight: per-token E4M3 quantization of the
-// represented BF16 input followed by fp8_small_t_linear (T <= 16) or
-// fp8_row_scaled_prefill_linear (T > 16). N and K must be multiples of 128 (every Qwen3.8
+// represented BF16 input followed by fp8_small_t_linear (T <= 32) or
+// fp8_row_scaled_prefill_linear (T > 32). N and K must be multiples of 128 (every Qwen3.8
 // protected projection); other weights are rejected at construction. The activation image lives
 // in one caller-owned region bound once before any launch.
 class LinearExecution final {

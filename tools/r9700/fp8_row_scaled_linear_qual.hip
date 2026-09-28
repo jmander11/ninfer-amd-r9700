@@ -209,14 +209,21 @@ int main() {
             for (const std::uint32_t tokens : {1U, 2U, 5U, 6U, 8U, 16U})
                 worst = std::max(worst, run_shape(rows, columns, tokens, rng));
         }
+        // Two-tile small route (T 17..32) on every protected projection shape.
+        for (const auto [rows, columns] : {std::pair<std::uint32_t, std::uint32_t>{7168U, 5120U},
+                                           {5120U, 6144U}, {34816U, 5120U}, {5120U, 17408U},
+                                           {4096U, 5120U}}) {
+            for (const std::uint32_t tokens : {17U, 24U, 32U})
+                worst = std::max(worst, run_shape(rows, columns, tokens, rng));
+        }
         // Prefill route: partial and full token tiles on every protected projection shape.
         for (const auto [rows, columns] : {std::pair<std::uint32_t, std::uint32_t>{7168U, 5120U},
                                            {5120U, 6144U}, {34816U, 5120U}, {5120U, 17408U},
                                            {4096U, 5120U}}) {
-            for (const std::uint32_t tokens : {17U, 300U, 2048U})
+            for (const std::uint32_t tokens : {33U, 300U, 2048U})
                 worst = std::max(worst, run_shape(rows, columns, tokens, rng));
         }
-        std::cout << "fp8_row_scaled_linear: PASS small T=1..16 and prefill T=17/300/2048 on "
+        std::cout << "fp8_row_scaled_linear: PASS small T=1..32 and prefill T=33/300/2048 on "
                      "N7168/K5120, N5120/K6144, N34816/K5120, N5120/K17408, N4096/K5120 "
                      "maximum_normalized_error="
                   << worst << " nonfinite_poison=PASS guards=PASS\n";

@@ -100,7 +100,7 @@ __device__ __forceinline__ void load_table(uint2* table, std::uint32_t threads) 
     for (std::uint32_t i = threadIdx.x; i < 256U; i += threads) table[i] = kDeviceTable.words[i];
 }
 
-// Small T (T <= 16): 16 weight rows [row_base, row_base + 16), kSplit waves each owning a
+// Small T (T <= 16 per token tile, kTiles tiles): 16 weight rows [row_base, row_base + 16), kSplit waves each owning a
 // contiguous K range. Lane (axis = lane & 15, half = lane >> 4) streams slot 16 half + axis of the
 // row block's N16 x K64 tile per 64-column step (one contiguous 512-byte code tile per wave), i.e.
 // row `axis`'s 32-column group `2 step + half`, and the same 32 activation bytes of token `axis`; the
@@ -109,47 +109,58 @@ __device__ __forceinline__ void load_table(uint2* table, std::uint32_t threads) 
 // in-order combine of the K splits, wave 0 calls publish(token, row, sum * R[row] * s[token]) for
 // every token < tokens (rows half * 8 + item of its lane). The caller issues load_table without
 // waiting: the first batch of weight and activation loads is in flight before the CTA barrier that
-// publishes the codebook.
-template <std::uint32_t kSplit, std::uint32_t kSteps, class Publish>
+// publishes the codebook. kTiles = 2 serves T 17..32: each decoded weight fragment also feeds the
+// WMMA of token tile 1 (tokens 16 + axis), so weight traffic and decode stay those of one tile.
+template <std::uint32_t kSplit, std::uint32_t kSteps, std::uint32_t kTiles, class Publish>
 __device__ __forceinline__ void small_t_rows(const Fp8Lut4Weight& weight, std::uint32_t row_base,
                                              const std::uint8_t* activation_codes,
                                              const float* token_scales, std::uint32_t tokens,
-                                             const uint2* table, float (&partial)[kSplit][8][32],
+                                             const uint2* table,
+                                             float (&partial)[kSplit][kTiles][8][32],
                                              Publish&& publish) {
+    static_assert(kTiles == 1U || kTiles == 2U);
     const std::uint32_t lane = threadIdx.x & 31U, wave = threadIdx.x >> 5U;
     const std::uint32_t axis = lane & 15U, half = lane >> 4U;
     const std::uint32_t columns = weight.columns;
     const std::uint32_t steps = columns / 64U / kSplit;
     const std::uint32_t k_base = wave * steps * 64U + half * 32U;
-    const bool token = axis < tokens;
+    bool token[kTiles];
+#pragma unroll
+    for (std::uint32_t tile = 0; tile < kTiles; ++tile) token[tile] = tile * 16U + axis < tokens;
     // N16 x K64 tiles: this lane's slot of the wave's first tile; one tile per step.
     const std::size_t first_tile =
         static_cast<std::size_t>(row_base / 16U) * (columns / 64U) + wave * steps;
     const std::uint32_t slot = half * 16U + axis;
     const std::uint8_t* codes = weight.codes + first_tile * 512U + slot * 16U;
     const std::uint8_t* groups = weight.groups + first_tile * 32U + slot;
-    const std::uint8_t* activation =
-        activation_codes + static_cast<std::size_t>(token ? axis : 0U) * columns + k_base;
-    struct Batch { uint4 w[kSteps]; std::uint32_t g[kSteps]; uint4 x[kSteps][2]; };
+    const std::uint8_t* activation[kTiles];
+#pragma unroll
+    for (std::uint32_t tile = 0; tile < kTiles; ++tile)
+        activation[tile] = activation_codes +
+            static_cast<std::size_t>(token[tile] ? tile * 16U + axis : 0U) * columns + k_base;
+    struct Batch { uint4 w[kSteps]; std::uint32_t g[kSteps]; uint4 x[kSteps][kTiles][2]; };
     const auto load = [&](std::uint32_t step) {
         Batch value;
 #pragma unroll
         for (std::uint32_t i = 0; i < kSteps; ++i) {
             value.w[i] = *reinterpret_cast<const uint4*>(codes + static_cast<std::size_t>(step + i) * 512U);
             value.g[i] = groups[static_cast<std::size_t>(step + i) * 32U];
-            if (token) {
-                const uint4* x = reinterpret_cast<const uint4*>(
-                    activation + static_cast<std::size_t>(step + i) * 64U);
-                value.x[i][0] = x[0];
-                value.x[i][1] = x[1];
-            } else {
-                value.x[i][0] = uint4{};
-                value.x[i][1] = uint4{};
+#pragma unroll
+            for (std::uint32_t tile = 0; tile < kTiles; ++tile) {
+                if (token[tile]) {
+                    const uint4* x = reinterpret_cast<const uint4*>(
+                        activation[tile] + static_cast<std::size_t>(step + i) * 64U);
+                    value.x[i][tile][0] = x[0];
+                    value.x[i][tile][1] = x[1];
+                } else {
+                    value.x[i][tile][0] = uint4{};
+                    value.x[i][tile][1] = uint4{};
+                }
             }
         }
         return value;
     };
-    F32x8 accumulator{};
+    F32x8 accumulator[kTiles]{};
     const auto consume = [&](const Batch& value) {
 #pragma unroll
         for (std::uint32_t i = 0; i < kSteps; ++i) {
@@ -157,15 +168,18 @@ __device__ __forceinline__ void small_t_rows(const Fp8Lut4Weight& weight, std::u
             const uint2 w0 = decode8(value.w[i].x, book), w1 = decode8(value.w[i].y, book);
             const uint2 w2 = decode8(value.w[i].z, book), w3 = decode8(value.w[i].w, book);
             const std::uint32_t w[8]{w0.x, w0.y, w1.x, w1.y, w2.x, w2.y, w3.x, w3.y};
-            const std::uint32_t x[8]{value.x[i][0].x, value.x[i][0].y, value.x[i][0].z,
-                                     value.x[i][0].w, value.x[i][1].x, value.x[i][1].y,
-                                     value.x[i][1].z, value.x[i][1].w};
 #pragma unroll
-            for (std::uint32_t chunk = 0; chunk < 4U; ++chunk) {
-                accumulator = __builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8_w32_gfx12(
-                    I32x2{static_cast<int>(w[2U * chunk]), static_cast<int>(w[2U * chunk + 1U])},
-                    I32x2{static_cast<int>(x[2U * chunk]), static_cast<int>(x[2U * chunk + 1U])},
-                    accumulator);
+            for (std::uint32_t tile = 0; tile < kTiles; ++tile) {
+                const uint4* xt = value.x[i][tile];
+                const std::uint32_t x[8]{xt[0].x, xt[0].y, xt[0].z, xt[0].w,
+                                         xt[1].x, xt[1].y, xt[1].z, xt[1].w};
+#pragma unroll
+                for (std::uint32_t chunk = 0; chunk < 4U; ++chunk) {
+                    accumulator[tile] = __builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8_w32_gfx12(
+                        I32x2{static_cast<int>(w[2U * chunk]), static_cast<int>(w[2U * chunk + 1U])},
+                        I32x2{static_cast<int>(x[2U * chunk]), static_cast<int>(x[2U * chunk + 1U])},
+                        accumulator[tile]);
+                }
             }
         }
     };
@@ -178,17 +192,26 @@ __device__ __forceinline__ void small_t_rows(const Fp8Lut4Weight& weight, std::u
     }
     consume(current);
 #pragma unroll
-    for (std::uint32_t item = 0; item < 8U; ++item) partial[wave][item][lane] = accumulator[item];
+    for (std::uint32_t tile = 0; tile < kTiles; ++tile)
+#pragma unroll
+        for (std::uint32_t item = 0; item < 8U; ++item)
+            partial[wave][tile][item][lane] = accumulator[tile][item];
     __syncthreads();
-    if (wave == 0U && token) {
-        const float token_scale = token_scales[axis];
+    if (wave == 0U) {
 #pragma unroll
-        for (std::uint32_t item = 0; item < 8U; ++item) {
-            float sum = partial[0][item][lane];
+        for (std::uint32_t tile = 0; tile < kTiles; ++tile) {
+            if (!token[tile]) continue;
+            const std::uint32_t t = tile * 16U + axis;
+            const float token_scale = token_scales[t];
 #pragma unroll
-            for (std::uint32_t split = 1; split < kSplit; ++split) sum += partial[split][item][lane];
-            const std::uint32_t row = row_base + half * 8U + item;
-            publish(axis, row, sum * weight.scales[row] * token_scale);
+            for (std::uint32_t item = 0; item < 8U; ++item) {
+                float sum = partial[0][tile][item][lane];
+#pragma unroll
+                for (std::uint32_t split = 1; split < kSplit; ++split)
+                    sum += partial[split][tile][item][lane];
+                const std::uint32_t row = row_base + half * 8U + item;
+                publish(t, row, sum * weight.scales[row] * token_scale);
+            }
         }
     }
 }
@@ -197,6 +220,8 @@ __device__ __forceinline__ void small_t_rows(const Fp8Lut4Weight& weight, std::u
 // inference (DFlash rounds 1.2% faster than two halves of four; eight splits of two 2% slower).
 // One token uses the dedicated GEMV. small_t_rows needs (columns / 64) divisible by 8.
 inline constexpr std::uint32_t kSmallTokens = 16U;
+// T 17..32: two token tiles over the same weight stream.
+inline constexpr std::uint32_t kSmallTwoTileTokens = 32U;
 inline constexpr std::uint32_t kVerifySplit = 4U, kVerifySteps = 2U;
 
 } // namespace ninfer::ops::r9700::linear::fp8lut4

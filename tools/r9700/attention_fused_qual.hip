@@ -203,13 +203,16 @@ void run_front(std::uint32_t tokens, Rng& rng, bool poison) {
                               tokens, eps, true, g_stream), "rmsnorm");
     check(fp8::fp8_quantize_activation({reinterpret_cast<const hip_bfloat16*>(h.data),
                                         reference.workspace}, g_stream), "quantize");
-    check(fp8::fp8_small_t_linear(query_key.view(kPair), reference.workspace,
-                                  reinterpret_cast<hip_bfloat16*>(qk.data), g_stream), "qk");
-    check(fp8::fp8_small_t_linear(gate_value.view(kPair), reference.workspace,
-                                  reinterpret_cast<hip_bfloat16*>(gv.data), g_stream), "gv");
     fused.poison_status();
     check(fp8::fp8_quantize_normalized_activation(
               {x_bf16, norm_bf16, eps, true, fused.workspace}, g_stream), "fused quantize");
+    // Above T24 the unfused image differs by the eager RMSNorm reduction order, so the unfused
+    // projections consume the fused image and still check the split placement byte for byte.
+    const auto& projected = tokens <= 24U ? reference.workspace : fused.workspace;
+    check(fp8::fp8_small_t_linear(query_key.view(kPair), projected,
+                                  reinterpret_cast<hip_bfloat16*>(qk.data), g_stream), "qk");
+    check(fp8::fp8_small_t_linear(gate_value.view(kPair), projected,
+                                  reinterpret_cast<hip_bfloat16*>(gv.data), g_stream), "gv");
     check(fp8::fp8_small_t_pair_split(
               {query_key.view(kPair), gate_value.view(kPair), kQuery,
                reinterpret_cast<hip_bfloat16*>(q.data), reinterpret_cast<hip_bfloat16*>(k.data),
@@ -219,7 +222,9 @@ void run_front(std::uint32_t tokens, Rng& rng, bool poison) {
     require(reference.status() == (poison ? fp8::Fp8ActivationNonfinite : fp8::Fp8ActivationOk),
             label + " reference status");
     require(fused.status() == reference.status(), label + " fused status");
-    if (!poison) {
+    // Byte parity holds while eager RMSNorm takes the rows4 route the fused producer mirrors
+    // (T <= 24); fp8_producers_qual checks the producer against its FP64 oracle at every width.
+    if (!poison && tokens <= 24U) {
         const auto reference_bytes = reference.image();
         const auto fused_bytes = fused.image();
         require(reference_bytes == fused_bytes, label + " activation image differs");
@@ -469,11 +474,11 @@ int main() {
     try {
         check(hipStreamCreate(&g_stream), "stream");
         Rng rng{0x5eed1234ULL};
-        for (const std::uint32_t tokens : {1U, 2U, 5U, 6U, 8U, 16U}) {
+        for (const std::uint32_t tokens : {1U, 2U, 5U, 6U, 8U, 16U, 17U, 24U, 32U}) {
             run_front(tokens, rng, false);
             run_output(tokens, rng, false);
         }
-        for (const std::uint32_t tokens : {1U, 6U, 16U}) {
+        for (const std::uint32_t tokens : {1U, 6U, 16U, 24U}) {
             run_front(tokens, rng, true);
             run_output(tokens, rng, true);
         }

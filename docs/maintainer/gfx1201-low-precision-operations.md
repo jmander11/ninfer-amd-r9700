@@ -104,7 +104,7 @@ weight quantization; materialization binds the two planes directly and never rep
 implementation profile. For represented BF16 `X[K,T]`, `fp8_quantize_activation` writes a
 token-major E4M3 `[T,K128]` image, `T` FP32 dequantization multipliers, and one status word per
 token into a caller-owned region; an all-zero token publishes positive-zero scale and zero codes,
-and a nonfinite token sets its status. T <= 16 then runs `fp8_small_t_linear`; T > 16 runs
+and a nonfinite token sets its status. T <= 32 then runs `fp8_small_t_linear` (one 16-token WMMA tile, or two for T 17..32); T > 32 runs
 `fp8_row_scaled_prefill_linear`, the FP8LUT4 prefill GEMM staging raw E4M3 rows. Both compute
 `BF16(sum_k w[r,k] a[t,k] * ws[r] * as[t])` with FP8 WMMA and FP32 accumulation, apply both scales
 in the epilogue, and publish the canonical BF16 quiet NaN for every element of a flagged token.

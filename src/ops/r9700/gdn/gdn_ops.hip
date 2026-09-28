@@ -516,7 +516,7 @@ __global__ __launch_bounds__(32U * kFp8Lut4PairSplit) void gdn_fp8lut4_pair_conv
     hip_bfloat16* z, std::uint32_t state_slots) {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
     __shared__ uint2 table[256];
-    __shared__ float partial[kFp8Lut4PairSplit][8][32];
+    __shared__ float partial[kFp8Lut4PairSplit][1][8][32];
     __shared__ hip_bfloat16 staged[16][T];
     constexpr unsigned kQueryKeyTiles = (kProjectionQueryRows + kProjectionKeyRows) / 16U;
     const bool second = blockIdx.x >= kQueryKeyTiles;
@@ -527,7 +527,7 @@ __global__ __launch_bounds__(32U * kFp8Lut4PairSplit) void gdn_fp8lut4_pair_conv
         staged[row - row_base][token] = status[token] != linear::Fp8ActivationOk
             ? hip_bfloat16(__builtin_nanf("")) : hip_bfloat16(y);
     };
-    linear::fp8lut4::small_t_rows<kFp8Lut4PairSplit, kFp8Lut4PairSteps>(
+    linear::fp8lut4::small_t_rows<kFp8Lut4PairSplit, kFp8Lut4PairSteps, 1U>(
         weight, row_base, activation, token_scales, T, table, partial, stage);
     __syncthreads();
     if (threadIdx.x >= 16U) return;

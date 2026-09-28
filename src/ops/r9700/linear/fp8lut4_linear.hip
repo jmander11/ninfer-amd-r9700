@@ -65,13 +65,15 @@ __device__ __forceinline__ std::uint16_t silu_pair_value(float gate, float up) {
     return round_bf16(g * __builtin_amdgcn_rcpf(1.0F + __expf(-g)) * u);
 }
 
-// ---- Small T (T <= 16): one CTA per 16 rows of the first or the second projection.
-template <bool kAccumulate, bool kSiluPair, std::uint32_t kSplit, std::uint32_t kSteps>
+// ---- Small T (T <= 16 per token tile; kTiles = 2 serves T 17..32): one CTA per 16 rows of the
+// first or the second projection.
+template <bool kAccumulate, bool kSiluPair, std::uint32_t kSplit, std::uint32_t kSteps,
+          std::uint32_t kTiles>
 __global__ __launch_bounds__(32U * kSplit) void fp8lut4_small_t_kernel(KernelArgs a) {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
     __shared__ uint2 table[256];
-    __shared__ float partial[kSplit][8][32];
-    __shared__ float staged[kSiluPair ? 16 : 1][fp8lut4::kSmallTokens];
+    __shared__ float partial[kSplit][kTiles][8][32];
+    __shared__ float staged[kSiluPair ? 16 : 1][16U * kTiles];
     const std::uint32_t first_blocks = a.weight.rows / 16U;
     const bool second = blockIdx.x >= first_blocks;
     // By value: the CTA-uniform selection stays in scalar registers.
@@ -93,7 +95,7 @@ __global__ __launch_bounds__(32U * kSplit) void fp8lut4_small_t_kernel(KernelArg
                 *out = round_bf16(value);
             }
         };
-    fp8lut4::small_t_rows<kSplit, kSteps>(
+    fp8lut4::small_t_rows<kSplit, kSteps, kTiles>(
         weight, row_base, a.activation, a.token_scales, a.tokens, table, partial, publish);
     if constexpr (kSiluPair) {
         __syncthreads();
@@ -430,15 +432,15 @@ void fp8lut4_prefill_kernel(KernelArgs a) {
 #endif
 }
 
-template <std::uint32_t kSplit, std::uint32_t kSteps>
+template <std::uint32_t kSplit, std::uint32_t kSteps, std::uint32_t kTiles>
 void launch_small_depth(const KernelArgs& args, hipStream_t stream) {
     const dim3 grid((args.weight.rows + args.second.rows) / 16U), block(32U * kSplit);
     if (args.output.silu_pair)
-        hipLaunchKernelGGL((fp8lut4_small_t_kernel<false, true, kSplit, kSteps>), grid, block, 0, stream, args);
+        hipLaunchKernelGGL((fp8lut4_small_t_kernel<false, true, kSplit, kSteps, kTiles>), grid, block, 0, stream, args);
     else if (args.output.accumulate)
-        hipLaunchKernelGGL((fp8lut4_small_t_kernel<true, false, kSplit, kSteps>), grid, block, 0, stream, args);
+        hipLaunchKernelGGL((fp8lut4_small_t_kernel<true, false, kSplit, kSteps, kTiles>), grid, block, 0, stream, args);
     else
-        hipLaunchKernelGGL((fp8lut4_small_t_kernel<false, false, kSplit, kSteps>), grid, block, 0, stream, args);
+        hipLaunchKernelGGL((fp8lut4_small_t_kernel<false, false, kSplit, kSteps, kTiles>), grid, block, 0, stream, args);
 }
 
 hipError_t launch_small(const KernelArgs& args, hipStream_t stream) {
@@ -450,8 +452,10 @@ hipError_t launch_small(const KernelArgs& args, hipStream_t stream) {
             hipLaunchKernelGGL((fp8lut4_t1_kernel<true, false>), grid, block, 0, stream, args);
         else
             hipLaunchKernelGGL((fp8lut4_t1_kernel<false, false>), grid, block, 0, stream, args);
+    } else if (args.tokens <= fp8lut4::kSmallTokens) {
+        launch_small_depth<fp8lut4::kVerifySplit, fp8lut4::kVerifySteps, 1U>(args, stream);
     } else {
-        launch_small_depth<fp8lut4::kVerifySplit, fp8lut4::kVerifySteps>(args, stream);
+        launch_small_depth<fp8lut4::kVerifySplit, fp8lut4::kVerifySteps, 2U>(args, stream);
     }
     return hipGetLastError();
 }
@@ -528,13 +532,19 @@ const std::array<std::array<std::uint8_t, 8>, 256>& fp8lut4_magnitude_table() no
     return fp8lut4::kTable;
 }
 
+namespace {
+bool small_route(std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns) noexcept {
+    if (tokens == 1U) return rows % 32U == 0U && (columns / 64U) % 16U == 0U;
+    return tokens <= fp8lut4::kSmallTwoTileTokens && rows % 16U == 0U &&
+           (columns / 64U) % 8U == 0U;
+}
+}  // namespace
+
 bool fp8lut4_linear_supported(std::uint32_t tokens, std::uint32_t rows,
                           std::uint32_t columns) noexcept {
     if (tokens == 0U || rows == 0U || columns == 0U || columns % 128U != 0U) return false;
-    if (tokens <= fp8lut4::kSmallTokens)
-        return (tokens == 1U ? rows % 32U == 0U && (columns / 64U) % 16U == 0U
-                             : rows % 16U == 0U && (columns / 64U) % 8U == 0U);
-    return rows % kPrefillRows == 0U;
+    if (tokens <= fp8lut4::kSmallTokens) return small_route(tokens, rows, columns);
+    return small_route(tokens, rows, columns) || rows % kPrefillRows == 0U;
 }
 
 hipError_t fp8lut4_linear(const Fp8Lut4Weight& weight, const Fp8ActivationWorkspace& activation,
@@ -544,8 +554,8 @@ hipError_t fp8lut4_linear(const Fp8Lut4Weight& weight, const Fp8ActivationWorksp
         return hipErrorInvalidValue;
     }
     const KernelArgs args = kernel_args(weight, output, activation);
-    return activation.tokens <= fp8lut4::kSmallTokens ? launch_small(args, stream)
-                                                  : launch_prefill(args, stream);
+    return small_route(activation.tokens, weight.rows, weight.columns)
+               ? launch_small(args, stream) : launch_prefill(args, stream);
 }
 
 hipError_t fp8lut4_linear_pair(const Fp8Lut4Weight& first, const Fp8Lut4Output& first_output,
@@ -558,7 +568,8 @@ hipError_t fp8lut4_linear_pair(const Fp8Lut4Weight& first, const Fp8Lut4Output& 
         second_output.silu_pair) {
         return hipErrorInvalidValue;
     }
-    if (activation.tokens > fp8lut4::kSmallTokens) {
+    if (!small_route(activation.tokens, first.rows, first.columns) ||
+        !small_route(activation.tokens, second.rows, second.columns)) {
         const hipError_t result = fp8lut4_linear(first, activation, first_output, stream);
         return result != hipSuccess ? result : fp8lut4_linear(second, activation, second_output, stream);
     }
