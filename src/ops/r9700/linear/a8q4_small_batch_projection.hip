@@ -26,6 +26,7 @@ __global__ __launch_bounds__((32 * k_split<N, K>())) void small_batch_projection
 }
 template <unsigned N, unsigned K, unsigned T>
 hipError_t launch_width(const A8Q4G64LinearArgs& a, hipStream_t stream) {
+    // The paired tail holds at most eight tokens (one half-wave WMMA column); T28/32 use the tiled body.
     if constexpr (N == 34816 && K == 5120 && (T == 18 || T == 20 || T == 24)) {
         if (a.accumulate_output) return hipErrorInvalidValue;
         hipLaunchKernelGGL((detail::gate_up_paired_tiles_kernel<T>),dim3(N/16),dim3(32),0,stream,
@@ -105,12 +106,16 @@ hipError_t launch_pair(const A8Q4G64LinearArgs& a, const A8Q4G64LinearArgs& b,
     switch (a.tokens) {
     case 5: return launch_pair_width<N0,N1,K,5>(a,b,stream);
     case 6: return launch_pair_width<N0,N1,K,6>(a,b,stream);
+    case 7: return launch_pair_width<N0,N1,K,7>(a,b,stream);
+    case 8: return launch_pair_width<N0,N1,K,8>(a,b,stream);
     case 10: return launch_pair_width<N0,N1,K,10>(a,b,stream);
     case 12: return launch_pair_width<N0,N1,K,12>(a,b,stream);
     case 15: return launch_pair_width<N0,N1,K,15>(a,b,stream);
     case 18: return launch_pair_width<N0,N1,K,18>(a,b,stream);
     case 20: return launch_pair_width<N0,N1,K,20>(a,b,stream);
     case 24: return launch_pair_width<N0,N1,K,24>(a,b,stream);
+    case 28: return launch_pair_width<N0,N1,K,28>(a,b,stream);
+    case 32: return launch_pair_width<N0,N1,K,32>(a,b,stream);
     }
     return hipErrorNotSupported;
 }
@@ -134,10 +139,14 @@ hipError_t launch_prepared(const A8Q4G64LinearArgs& a, hipStream_t stream) {
         case 18: return launch_width<N,K,18>(a,stream);
         case 20: return launch_width<N,K,20>(a,stream);
         case 24: return launch_width<N,K,24>(a,stream);
+        case 28: return launch_width<N,K,28>(a,stream);
+        case 32: return launch_width<N,K,32>(a,stream);
         }
     }
     if(a.tokens==5)return launch_width<N,K,5>(a,stream);
     if(a.tokens==6)return launch_width<N,K,6>(a,stream);
+    if(a.tokens==7)return launch_width<N,K,7>(a,stream);
+    if(a.tokens==8)return launch_width<N,K,8>(a,stream);
     return hipErrorInvalidValue;
 }
 template <unsigned N, unsigned K>
@@ -164,8 +173,9 @@ bool detail::use_a8q4_small_batch_projection_pair(const A8Q4G64LinearArgs& a,
         a.activation_high_codes == b.activation_high_codes &&
         a.activation_scales == b.activation_scales && a.activation_status == b.activation_status &&
         !a.accumulate_output && !b.accumulate_output;
-    const bool widths = a.tokens == 5U || a.tokens == 6U || a.tokens == 10U || a.tokens == 12U ||
-        a.tokens == 15U || a.tokens == 18U || a.tokens == 20U || a.tokens == 24U;
+    const bool widths = (a.tokens >= 5U && a.tokens <= 8U) || a.tokens == 10U ||
+        a.tokens == 12U || a.tokens == 15U || a.tokens == 18U || a.tokens == 20U ||
+        a.tokens == 24U || a.tokens == 28U || a.tokens == 32U;
     return same_activation && widths &&
         ((a.rows == 4096U && b.rows == 12288U) || (a.rows == 7168U && b.rows == 7168U));
 }

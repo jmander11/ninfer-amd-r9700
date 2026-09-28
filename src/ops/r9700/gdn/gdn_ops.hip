@@ -654,7 +654,7 @@ __global__ __launch_bounds__(kControlT1Threads) void bf16_projected_control_t1_k
 // j's wave partials). CTA token % kControlHeads encodes the token's seam with the exact A8G64
 // codec (and publishes it to `hidden` when non-null); CTA 0, which sees every seam value,
 // plain-stores the nonfinite/overflow status word, so no reset launch is needed.
-constexpr std::uint32_t kFrontMaximumTokens = 24U;
+constexpr std::uint32_t kFrontMaximumTokens = 32U;
 constexpr std::uint32_t kFrontPassTokens = 8U;
 constexpr std::uint32_t kFrontWaves = kControlT1Threads / 32U;
 
@@ -1193,7 +1193,7 @@ hipError_t projection_conv_record_bf16(
 }
 
 bool gdn_pair_conv_record_supported(std::uint32_t width, std::uint32_t batch) noexcept {
-    return batch == 1U && (width == 5U || width == 6U);
+    return batch == 1U && width >= 5U && width <= 8U;
 }
 
 hipError_t gdn_pair_conv_record_bf16(
@@ -1221,8 +1221,12 @@ hipError_t gdn_pair_conv_record_bf16(
                                conv_weight, conv_states, valid_columns, initial_state_slots,
                                parent_index, conv_record, query, key, value, z, state_slots);
         };
-        if (width == 5U) launch(gdn_pair_conv_record_kernel<5>);
-        else launch(gdn_pair_conv_record_kernel<6>);
+        switch (width) {
+        case 5U: launch(gdn_pair_conv_record_kernel<5>); break;
+        case 6U: launch(gdn_pair_conv_record_kernel<6>); break;
+        case 7U: launch(gdn_pair_conv_record_kernel<7>); break;
+        default: launch(gdn_pair_conv_record_kernel<8>); break;
+        }
     });
 }
 
@@ -1252,8 +1256,12 @@ hipError_t gdn_fp8lut4_pair_conv_record_bf16(
                                conv_weight, conv_states, valid_columns, initial_state_slots,
                                parent_index, conv_record, query, key, value, z, state_slots);
         };
-        if (width == 5U) launch(gdn_fp8lut4_pair_conv_record_kernel<5>);
-        else launch(gdn_fp8lut4_pair_conv_record_kernel<6>);
+        switch (width) {
+        case 5U: launch(gdn_fp8lut4_pair_conv_record_kernel<5>); break;
+        case 6U: launch(gdn_fp8lut4_pair_conv_record_kernel<6>); break;
+        case 7U: launch(gdn_fp8lut4_pair_conv_record_kernel<7>); break;
+        default: launch(gdn_fp8lut4_pair_conv_record_kernel<8>); break;
+        }
     });
 }
 

@@ -1,7 +1,7 @@
 // Qualifies the FP8LUT4 GDN verification front on physical gfx1201:
 //   * fp8_gdn_normalized_front: g/beta bitwise equal to the A8G64 front (the same seam and control
 //     arithmetic), and the per-token E4M3 image bitwise equal to fp8_quantize_activation of that
-//     front's published seam, for T in {1, 2, 5, 6, 12, 16}, with a nonfinite token flagged;
+//     front's published seam, for T in {1, 2, 5, 6, 7, 8, 12, 16, 24, 28, 32}, with a nonfinite token flagged;
 //   * gdn_fp8lut4_pair_conv_record_bf16 bitwise equal to fp8lut4_linear_pair followed by
 //     projection_conv_record_bf16 (chain, tree and partial columns; a poisoned token). The FP8LUT4
 //     projection itself is qualified against its FP64 oracle by ninfer_r9700_fp8lut4_linear_qual.
@@ -190,11 +190,13 @@ int main() {
     try {
         hipStream_t s = nullptr;
         check(hipStreamCreate(&s), "stream");
-        for (const unsigned T : {1U, 2U, 5U, 6U, 12U, 16U}) run_front(T, false, s);
+        for (const unsigned T : {1U, 2U, 5U, 6U, 7U, 8U, 12U, 16U, 24U, 28U, 32U}) run_front(T, false, s);
         run_front(6U, true, s);
         for (const Case c : {Case{5, false, false, false}, Case{6, false, false, false},
                              Case{6, true, false, false}, Case{6, false, true, false},
-                             Case{5, true, true, false}, Case{6, false, false, true}})
+                             Case{5, true, true, false}, Case{6, false, false, true},
+                             Case{7, false, false, false}, Case{7, false, true, true},
+                             Case{8, false, false, false}, Case{8, true, false, true}})
             run_pair(c, s);
         std::cout << "gdn fp8lut4 front qualification: PASS\n";
         return 0;

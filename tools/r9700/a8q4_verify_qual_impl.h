@@ -320,7 +320,7 @@ void cell(unsigned t,hipStream_t s,std::ostream& out) {
     const auto valid=arguments(t,input,*weights[0],candidate);
     auto reject=[&](auto a,hipStream_t stream){if(owning_launch(a,stream)!=hipErrorInvalidValue)fail("malformed accepted");++malformed;};
     reject(valid,nullptr);
-    auto bad=valid;bad.tokens=1;reject(bad,s);bad=valid;bad.tokens=7;reject(bad,s);
+    auto bad=valid;bad.tokens=1;reject(bad,s);bad=valid;bad.tokens=9;reject(bad,s);
     bad=valid;bad.rows=N-16;reject(bad,s);bad=valid;bad.columns-=64;reject(bad,s);
     bad=valid;bad.padded_columns-=64;reject(bad,s);
     bad=valid;--bad.weight_code_bytes;reject(bad,s);bad=valid;--bad.weight_scale_bytes;reject(bad,s);
@@ -519,9 +519,9 @@ int main(int argc,char** argv) {
            shape!=std::array<unsigned,2>{1280,5120} &&
            shape!=std::array<unsigned,2>{5120,4096})continue;
         N=shape[0];K=shape[1];G=K/64;
-        for(unsigned t:{1U,2U,3U,4U,5U,6U,10U,12U,15U,18U,20U,24U}) {
+        for(unsigned t:{1U,2U,3U,4U,5U,6U,7U,8U,10U,12U,15U,18U,20U,24U,28U,32U}) {
             if(concurrent_only && t<10)continue;
-            if(draft_only && t!=5 && t!=6)continue;
+            if(draft_only && (t<5 || t>8))continue;
             if(!linear::detail::use_a8q4_small_batch_projection(t,N,K,K))continue;
             if(!first)out<<',';first=false;cell(t,stream,out);
         }
@@ -529,7 +529,7 @@ int main(int argc,char** argv) {
     out<<"],\"pairs\":[";
     if(!mlp_only && !output_only && !draft_only) {
         bool first_pair=true;
-        for(unsigned t:{5U,6U,12U}) {
+        for(unsigned t:{5U,6U,7U,8U,12U,28U,32U}) {
             for(const auto& pair:{std::array<unsigned,2>{4096,12288},std::array<unsigned,2>{7168,7168}}) {
                 if(!first_pair)out<<',';first_pair=false;pair_cell(t,pair[0],pair[1],stream,out);
             }

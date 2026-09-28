@@ -1,5 +1,5 @@
 // Qualifies the fused GDN pair projection + recorded convolution
-// (ops::r9700::gdn::gdn_pair_conv_record_bf16) on physical gfx1201 at widths 5 and 6, with and
+// (ops::r9700::gdn::gdn_pair_conv_record_bf16) on physical gfx1201 at widths 5 through 8, with and
 // without a parent-index tree and a partially valid sequence:
 //   * z and the convolution record (the BF16 projections) against an FP64 projection of the
 //     decoded A8G64 activation and Q4 weights (relative L2 <= 1e-2 per token, every element
@@ -239,14 +239,15 @@ int main(int argc, char** argv) {
         hipStream_t s{};
         check(hipStreamCreateWithFlags(&s, hipStreamNonBlocking), "stream");
         require(gdn::gdn_pair_conv_record_supported(6, 1) && !gdn::gdn_pair_conv_record_supported(6, 2) &&
-                    !gdn::gdn_pair_conv_record_supported(7, 1),
+                    gdn::gdn_pair_conv_record_supported(8, 1) && !gdn::gdn_pair_conv_record_supported(9, 1),
                 "unexpected fused support set");
         std::ostringstream out;
         out << std::setprecision(6) << "{\"schema\":\"ninfer.r9700.gdn-pair-conv-record.v1\",\"target\":\"gfx1201\","
                "\"oracle\":\"FP64 projection of decoded planes (rel L2<=1e-2, elements<=1e-2 max); FP64 conv+SiLU of the record (one BF16 step)\","
                "\"composition_bitwise\":true,\"poison_bitwise\":true,\"cases\":[";
         bool first = true;
-        for (const Case c : {Case{6, false, false}, Case{6, true, false}, Case{6, false, true}, Case{5, true, true}}) {
+        for (const Case c : {Case{6, false, false}, Case{6, true, false}, Case{6, false, true}, Case{5, true, true},
+                             Case{7, false, false}, Case{7, false, true}, Case{8, false, false}, Case{8, true, true}}) {
             if (!first) out << ',';
             first = false;
             run_case(c, s, out);

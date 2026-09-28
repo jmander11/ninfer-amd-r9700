@@ -1,13 +1,13 @@
 // Qualifies the verification-width GDN front (ops::r9700::gdn::bf16_gdn_normalized_front) at its
-// semantic boundaries on physical gfx1201, for T in {2, 5, 6, 12, 18, 24}:
+// semantic boundaries on physical gfx1201, for T in {1, 2, 5, 6, 12, 18, 24, 28, 32}:
 //   * the published BF16 RMSNorm seam against FP64 x * rsqrt(mean(x^2) + eps) * (1 + w);
 //   * g/beta against the independent FP64 control oracle of that seam (BF16 dot seams with the
 //     FP32-accumulation neighbour, FP64 gates), under the existing public control criteria;
 //   * the A8G64 planes against an exact host codec of that seam, byte for byte;
 //   * the production call (no seam output) bitwise equal to the seam-publishing call;
 //   * a stale status word replaced without a reset launch, and the nonfinite/overflow flags;
-//   * supplementary parity with the eager RMSNorm + T1..24 control + small-T codec composition,
-//     and the A/B time of the two routes.
+//   * supplementary bitwise parity with the eager RMSNorm + control + small-T codec composition
+//     at T<=24, where eager RMSNorm and control use the same rows4/T1 arithmetic, and A/B time.
 #include "ninfer/ops/rmsnorm.h"
 #include "ninfer/types.h"
 #include "ops/r9700/gdn/gdn_ops.h"
@@ -311,9 +311,12 @@ Result cell(unsigned t, hipStream_t s) {
     composition();
     check(hipStreamSynchronize(s), "sync");
     const auto [composed, composed_status] = plane_bytes(d_ws2, planes2);
-    require(composed_status == 0U && same(d_hidden.get(), seam) && same(composed.low, actual.low) &&
-                same(composed.high, actual.high) && same(composed.scales, actual.scales) &&
-                same(d_g2.get(), g) && same(d_beta2.get(), beta),
+    // Bitwise parity holds only while eager rmsnorm takes the rows4 CTA route the front mirrors
+    // (T <= 24); wider eager rmsnorm uses the generic row kernel with another reduction order.
+    require(composed_status == 0U, "eager composition status");
+    require(t > 24U || (same(d_hidden.get(), seam) && same(composed.low, actual.low) &&
+                        same(composed.high, actual.high) && same(composed.scales, actual.scales) &&
+                        same(d_g2.get(), g) && same(d_beta2.get(), beta)),
             "front differs from the eager composition");
     // (7) A/B time.
     hipEvent_t e0, e1;
@@ -349,15 +352,16 @@ int main(int argc, char** argv) {
         hipStream_t s{};
         check(hipStreamCreateWithFlags(&s, hipStreamNonBlocking), "stream");
         require(!gdn::bf16_gdn_normalized_front_supported(0) &&
-                    !gdn::bf16_gdn_normalized_front_supported(25),
-                "front admits a width outside T1..24");
+                    gdn::bf16_gdn_normalized_front_supported(32) &&
+                    !gdn::bf16_gdn_normalized_front_supported(33),
+                "front support set is not T1..32");
         std::ostringstream out;
         out << std::setprecision(6);
         out << "{\"schema\":\"ninfer.r9700.gdn-normalized-front.v1\",\"target\":\"gfx1201\","
                "\"oracle\":\"FP64 RMSNorm seam (|err|<=(2^-8+2^-16)|ref|); FP64 control oracle of the seam; exact A8G64 codec of the seam\","
                "\"production_equals_seam_call\":true,\"status_flags\":true,\"composition_parity\":true,\"cells\":[";
         bool first = true;
-        for (unsigned t : {1U, 2U, 5U, 6U, 12U, 18U, 24U}) {
+        for (unsigned t : {1U, 2U, 5U, 6U, 12U, 18U, 24U, 28U, 32U}) {
             const Result r = cell(t, s);
             out << (first ? "" : ",") << "{\"tokens\":" << t << ",\"max_seam_error\":" << r.seam
                 << ",\"max_g_error\":" << r.g << ",\"max_beta_error\":" << r.beta

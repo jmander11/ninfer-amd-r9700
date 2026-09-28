@@ -132,9 +132,10 @@ namespace ninfer::ops::r9700::gdn {
     const hip_bfloat16* b_weight, const float* a_log, const float* dt_bias,
     float* g, float* beta, std::uint32_t tokens, hipStream_t stream) noexcept;
 
-// Verification-width GDN front for T1..24: the unit-offset-capable K5120 RMSNorm of residual
-// [tokens,5120] (the row-CTA arithmetic of the eager RMSNorm, BF16 seam), the exact T1..24
-// control arithmetic of bf16_projected_control on that seam, and the exact A8G64 codec of the
+// Verification-width GDN front for T1..32: the unit-offset-capable K5120 RMSNorm of residual
+// [tokens,5120] (the row-CTA arithmetic of the eager RMSNorm, BF16 seam), the T1 control
+// arithmetic of bf16_projected_control (exactly its T1..24 route; above 24 that Op uses its wide
+// route, so only the FP64 control oracle relates them) on that seam, and the exact A8G64 codec of the
 // same seam into `planes` (bound for tokens x 5120), whose status word is published without a
 // reset launch. `hidden`, when non-null, receives the BF16 seam rows; `clear_status`, when
 // non-null, is a later Op's status word (disjoint from every operand) that CTA 0 zeroes.
