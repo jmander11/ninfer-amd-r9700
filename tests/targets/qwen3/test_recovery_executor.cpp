@@ -536,10 +536,12 @@ public:
     [[nodiscard]] std::uint64_t pending_disk_restore_ticket() const noexcept { return 0; }
     [[nodiscard]] bool has_retained_lane(std::uint32_t) const noexcept { return false; }
     [[nodiscard]] std::uint64_t retained_use_tick(std::uint32_t) const noexcept { return 0; }
-    [[nodiscard]] bool capture_retained_lane(std::uint32_t, std::uint64_t* = nullptr, bool = true) {
+    [[nodiscard]] bool capture_retained_lane(std::uint32_t, std::uint64_t* = nullptr, bool = true,
+                                             bool* = nullptr, std::span<const std::uint64_t> = {}) {
         return false;
     }
     [[nodiscard]] bool disk_restore_ready(std::uint64_t) const { return true; }
+    [[nodiscard]] bool kv_ram_reclaim_pending() const { return false; }
     [[nodiscard]] bool claim_disk_entry(std::uint64_t entry_id, std::uint32_t, std::uint64_t,
                                         std::uint64_t, std::uint32_t, ninfer::PrefixReusePath,
                                         std::uint64_t) {

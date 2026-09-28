@@ -4,6 +4,7 @@
 #include "targets/qwen3/impl/runtime/kv_disk_cache.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -508,8 +509,20 @@ void plan_match_during_compaction(ninfer::DeviceContext& device) {
             "compaction-lock maintenance did not publish a new generation");
 }
 
+// Retries a non-blocking reclaim until it evicts. Reclaim has side effects, so it must not be a
+// wait_pred predicate, which evaluates once more after succeeding.
+bool reclaim_until_evicted(cache::KVDiskCache& disk, cache::RamReclaim& result) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+    while (result != cache::RamReclaim::Evicted && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        result = disk.reclaim_ram_entry(false);
+    }
+    return result == cache::RamReclaim::Evicted;
+}
+
 // Reclaiming RAM for a capture while other lanes decode must not wait on a disk write: a
-// disk-durable entry is evicted first, and without one the oldest entry is dropped unsaved.
+// disk-durable entry is evicted first, and without one the oldest entry is spilled on the disk
+// worker and evicted once durable, never dropped unsaved and never spilled synchronously.
 void ram_reclaim_never_blocks_on_disk(ninfer::DeviceContext& device) {
     TemporaryDirectory directory;
     Pool pool(8);
@@ -518,8 +531,8 @@ void ram_reclaim_never_blocks_on_disk(ninfer::DeviceContext& device) {
     allocation.materialize_pages(3, device.stream);
     cache::KVDiskCache disk(
         config(directory.path, pool, ram, ninfer::KvDiskCompress::Off, 64ULL << 20));
-    const auto older = capture_tokens(ram, pool, allocation, device,
-                                      std::vector<ninfer::TokenId>(64, 27));
+    const std::vector<ninfer::TokenId> older_tokens(64, 27);
+    const auto older = capture_tokens(ram, pool, allocation, device, older_tokens);
     disk.note_ram_resident(older, 0);
     const auto newer = capture_tokens(ram, pool, allocation, device,
                                       std::vector<ninfer::TokenId>(64, 28));
@@ -542,15 +555,110 @@ void ram_reclaim_never_blocks_on_disk(ninfer::DeviceContext& device) {
     started = std::chrono::steady_clock::now();
     result  = disk.reclaim_ram_entry(false);
     elapsed = std::chrono::steady_clock::now() - started;
-    const bool unsaved_dropped = result == cache::RamReclaim::Evicted && !resident(older);
-    const bool unsaved_prompt  = elapsed <= std::chrono::milliseconds(500);
-    const bool drop_counted    = disk.snapshot().drops == drops + 1;
+    const bool unsaved_kept   = result == cache::RamReclaim::Pending && resident(older);
+    const bool unsaved_prompt = elapsed <= std::chrono::milliseconds(500);
     disk.test_set_payload_io_stall_ms(0);
+    const bool evicted_once_durable = reclaim_until_evicted(disk, result);
+    auto ledger = older_tokens;
+    ledger.push_back(0);
+    const auto prompt = text_prompt(ledger);
+    const bool on_disk = disk.plan_match(prompt, cache::prefix_hash_chain(prompt)).has_value();
     require(durable_first, "non-blocking reclaim did not evict the disk-durable entry first");
     require(durable_prompt, "reclaim of a durable entry waited on disk I/O");
-    require(unsaved_dropped, "non-blocking reclaim did not drop the unsaved oldest entry");
+    require(unsaved_kept, "non-blocking reclaim did not defer the unsaved oldest entry to its spill");
     require(unsaved_prompt, "non-blocking reclaim spilled synchronously");
-    require(drop_counted, "dropping an unsaved RAM entry was not counted");
+    require(evicted_once_durable && !resident(older),
+            "non-blocking reclaim never evicted the spilled entry");
+    require(disk.snapshot().drops == drops, "non-blocking reclaim dropped an unsaved RAM entry");
+    require(on_disk, "reclaimed RAM entry is not on disk");
+}
+
+// Under sustained load write-behind is still spilling the oldest entry when RAM fills. That entry
+// is I/O-pinned, so it is not an eviction candidate; reclaim must finish its spill and evict it
+// rather than drop a newer entry.
+void ram_reclaim_waits_for_inflight_spill(ninfer::DeviceContext& device) {
+    TemporaryDirectory directory;
+    Pool pool(8);
+    cache::KVRamCache ram(64ULL << 20);
+    auto allocation = pool.storage->reserve(4);
+    allocation.materialize_pages(3, device.stream);
+    cache::KVDiskCache disk(
+        config(directory.path, pool, ram, ninfer::KvDiskCompress::Off, 64ULL << 20));
+    const auto older = capture_tokens(ram, pool, allocation, device,
+                                      std::vector<ninfer::TokenId>(64, 37));
+    disk.note_ram_resident(older, 0);
+    const auto newer = capture_tokens(ram, pool, allocation, device,
+                                      std::vector<ninfer::TokenId>(64, 38));
+    disk.note_ram_resident(newer, 0);
+    disk.test_set_payload_io_stall_ms(300);
+    disk.request_idle_spill();
+    if (!wait_pred([&] { return ram.test_io_pins(older) != 0; }, std::chrono::seconds(5))) {
+        disk.test_set_payload_io_stall_ms(0);
+        require(false, "ram-reclaim-inflight write-behind never started");
+    }
+    const auto resident = [&](std::uint64_t id) {
+        const auto ids = ram.fifo_ids();
+        return std::find(ids.begin(), ids.end(), id) != ids.end();
+    };
+    const auto drops   = disk.snapshot().drops;
+    const auto started = std::chrono::steady_clock::now();
+    auto result        = disk.reclaim_ram_entry(false);
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    const bool newer_kept = result != cache::RamReclaim::Evicted && resident(newer);
+    const bool prompt     = elapsed <= std::chrono::milliseconds(200);
+    const bool evicted    = reclaim_until_evicted(disk, result);
+    disk.test_set_payload_io_stall_ms(0);
+    require(newer_kept, "reclaim dropped a newer entry while the oldest was spilling");
+    require(prompt, "non-blocking reclaim waited for the in-flight spill");
+    require(evicted && !resident(older) && resident(newer),
+            "reclaim did not evict the spilled oldest entry");
+    require(disk.snapshot().drops == drops, "reclaim dropped an unsaved RAM entry");
+}
+
+// A non-blocking reclaim for an admission's second capture must not target the entry its first
+// capture just made: the deferral would roll that entry back, the retry would recapture and
+// target it again, and admission would defer until no other lane decodes. With every older entry
+// unsavable this generation, the oldest one is dropped unsaved instead; with nothing else left
+// the capture is refused rather than deferred.
+void ram_reclaim_skips_attempt_captures(ninfer::DeviceContext& device) {
+    TemporaryDirectory directory;
+    Pool pool(8);
+    cache::KVRamCache ram(64ULL << 20);
+    auto allocation = pool.storage->reserve(4);
+    allocation.materialize_pages(3, device.stream);
+    cache::KVDiskCache disk(
+        config(directory.path, pool, ram, ninfer::KvDiskCompress::Off, 64ULL << 20));
+    const auto older = capture_tokens(ram, pool, allocation, device,
+                                      std::vector<ninfer::TokenId>(64, 47));
+    disk.note_ram_resident(older, 0);
+    disk.test_arm_fail_prepare_spill();
+    require(!disk.emergency_spill_ram(older), "ram-reclaim-attempt fixture spill did not fail");
+    const auto attempt = capture_tokens(ram, pool, allocation, device,
+                                        std::vector<ninfer::TokenId>(64, 48));
+    disk.note_ram_resident(attempt, 0);
+    // Any disk write from here on would take seconds.
+    disk.test_set_payload_io_stall_ms(2000);
+    const auto resident = [&](std::uint64_t id) {
+        const auto ids = ram.fifo_ids();
+        return std::find(ids.begin(), ids.end(), id) != ids.end();
+    };
+    const std::array<std::uint64_t, 1> keep{attempt};
+    const auto drops   = disk.snapshot().drops;
+    const auto started = std::chrono::steady_clock::now();
+    const auto first   = disk.reclaim_ram_entry(false, keep);
+    const bool dropped_older = first == cache::RamReclaim::Evicted && !resident(older) &&
+                               resident(attempt) && !disk.ram_reclaim_pending();
+    const bool drop_counted  = disk.snapshot().drops == drops + 1;
+    const auto second        = disk.reclaim_ram_entry(false, keep);
+    const bool refused       = second == cache::RamReclaim::NoVictim && resident(attempt) &&
+                               !disk.ram_reclaim_pending();
+    const bool prompt = std::chrono::steady_clock::now() - started <= std::chrono::milliseconds(500);
+    disk.test_set_payload_io_stall_ms(0);
+    require(dropped_older,
+            "reclaim targeted this attempt's capture instead of dropping the unsavable older entry");
+    require(drop_counted, "dropping the unsavable older entry was not counted");
+    require(refused, "reclaim with only this attempt's capture left did not refuse the capture");
+    require(prompt, "reclaim excluding this attempt's capture waited on disk I/O");
 }
 
 // restore_device waits for another entry's in-flight window reads. The readiness probe lets
@@ -607,6 +715,8 @@ void run_stall_cases(ninfer::DeviceContext& device) {
     spill_pin_waits_only_its_entry(device);
     plan_match_during_compaction(device);
     ram_reclaim_never_blocks_on_disk(device);
+    ram_reclaim_waits_for_inflight_spill(device);
+    ram_reclaim_skips_attempt_captures(device);
     restore_setup_ready_tracks_window_reads(device);
 }
 

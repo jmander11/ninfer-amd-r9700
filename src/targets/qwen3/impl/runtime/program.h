@@ -331,12 +331,18 @@ public:
     [[nodiscard]] std::uint64_t retained_use_tick(std::uint32_t lane) const noexcept;
     void evict_retained_lane(std::uint32_t lane) noexcept;
     // `may_block` permits a synchronous disk spill to free RAM; callers pass
-    // false while other lanes are decoding.
+    // false while other lanes are decoding. Without it a full RAM tier whose
+    // entries are not yet on disk starts their spill on the disk worker and
+    // returns false with `*deferred` set; retry after kv_ram_reclaim_pending() clears.
+    // `attempt_ram_ids` are entries captured earlier in the same admission attempt, which a
+    // deferral rolls back; they are never spilled or dropped to make room for this capture.
     [[nodiscard]] bool capture_retained_lane(std::uint32_t lane, std::uint64_t* ram_entry_id = nullptr,
-                                             bool may_block = true);
+                                             bool may_block = true, bool* deferred = nullptr,
+                                             std::span<const std::uint64_t> attempt_ram_ids = {});
     void restore_ram_entry(std::uint32_t lane, std::uint64_t entry_id, const RequestPlan& plan);
     void restore_disk_entry(std::uint32_t lane, std::uint64_t entry_id, const RequestPlan& plan);
     [[nodiscard]] bool disk_restore_ready(std::uint64_t entry_id) const;
+    [[nodiscard]] bool kv_ram_reclaim_pending() const;
     void claim_ram_entry(std::uint64_t entry_id);
     void release_ram_entry(std::uint64_t entry_id);
     void consume_ram_entry(std::uint64_t entry_id);

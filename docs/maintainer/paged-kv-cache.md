@@ -343,10 +343,15 @@ its preparation can overlap artifact materialization.
 `--kv-disk-capacity` and `--kv-disk-location` enable an inclusive persistent SSD tier; a nonzero RAM
 tier is required. Each RAM capture requests a write-behind spill on the disk worker, so entries
 usually become durable while other requests decode. When a capture needs RAM, the oldest unpinned
-disk-durable entry is evicted first. Without one, the oldest entry is spilled synchronously only
-when no other lane is decoding; otherwise it is dropped unsaved, so decoding never waits for a disk
-write. A disk restore whose setup would wait for another entry's window reads holds admission
-while other lanes keep decoding. Disk version 7 stores raw or Zstd-compressed exact logical-page payloads plus
+disk-durable entry is evicted first. Without one, the in-flight write-behind spill, or else the
+oldest savable entry, is spilled first: synchronously when no other lane is decoding, otherwise at
+emergency priority on the disk worker while the admission stays queued, claims and captures
+nothing, and the other lanes keep decoding. The admission retries once that spill commits, so
+decoding never waits for a disk write and an entry is dropped unsaved only when the disk cannot
+store it; when disk bandwidth is the limit, admission (TTFT) waits for it. Entries captured
+earlier in the same admission attempt, which the deferral rolls back, are never the spill it waits
+on nor the unsaved drop, so the retried attempt cannot defer on its own capture. A disk restore whose
+setup would wait for another entry's window reads holds admission while other lanes keep decoding. Disk version 7 stores raw or Zstd-compressed exact logical-page payloads plus
 complete checkpoint state. Packing respects each of the three planes' slab and intra-page order;
 scatter restores represented bytes without dequantization. Durable identity binds model, weights,
 artifact, fixed codec semantics and Vision-aware prefix identity, but excludes pool allocation
@@ -358,7 +363,8 @@ Bounded reader/staging resources may overlap validated page copies with further 
 is not published until all state owners and the copy event complete. Cancellation drains I/O and
 releases the pinned entry generation without deleting its durable source. Emergency spill needed
 for admission excludes restore payload reads; idle spill rechecks its epoch and RAM residency.
-An admission waits only for its own entry's spill, never for another entry's spill batches.
+A blocking admission waits only for its reclaim victim's spill (or a reclaim spill already at
+emergency priority), never for another entry's write-behind batches.
 Spill admission only requests pack compaction; the disk worker runs it between its queued jobs,
 copying a snapshot of live extents in 64 MiB slices with the cache mutex released, then copying
 objects committed to the source generation meanwhile. Lookups, claims, and statistics therefore

@@ -198,12 +198,14 @@ public:
     void evict_retained_lane(std::uint32_t lane) noexcept;
     [[nodiscard]] bool capture_retained_lane(std::uint32_t lane,
                                              std::uint64_t* ram_entry_id = nullptr,
-                                             bool may_block = true);
+                                             bool may_block = true, bool* deferred = nullptr,
+                                             std::span<const std::uint64_t> attempt_ram_ids = {});
     void restore_ram_entry(std::uint32_t lane, std::uint64_t entry_id,
                            const RequestPlan<Variant>& plan);
     void restore_disk_entry(std::uint32_t lane, std::uint64_t entry_id,
                             const RequestPlan<Variant>& plan);
     [[nodiscard]] bool disk_restore_ready(std::uint64_t entry_id) const;
+    [[nodiscard]] bool kv_ram_reclaim_pending() const;
     void claim_ram_entry(std::uint64_t entry_id);
     void release_ram_entry(std::uint64_t entry_id);
     void consume_ram_entry(std::uint64_t entry_id);

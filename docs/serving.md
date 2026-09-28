@@ -1016,7 +1016,11 @@ the live pinned log, but other-lane restore after eviction needs the FIFO.
 `--kv-disk-capacity` is a third-tier SSD budget in unique object bytes. It requires
 `--kv-ram-capacity > 0` and `--kv-disk-location`. Disk is inclusive of VRAM/RAM hits; equal reuse
 length prefers VRAM, then RAM, then disk. `--kv-disk-compress` is not part of the directory
-fingerprint and affects new GDN/hidden/cyclic writes only.
+fingerprint and affects new GDN/hidden/cyclic writes only. When an admission's captures need RAM
+and no RAM entry is on disk yet, one is spilled before it is evicted: while other requests decode,
+the admission stays queued (`queued` phase, bounded by `--pending-timeout-ms`) until that spill
+commits instead of dropping the entry unsaved, so a disk-bandwidth-bound load trades TTFT for
+retained prefixes.
 Runtime cache capacity or optional capture-allocation failures skip the capture and do not reject
 generation. Optional cache-lookup allocation failure leaves normal cold admission available.
 If a disk cache read or optional RAM/disk restore metadata or HIP-event allocation fails before

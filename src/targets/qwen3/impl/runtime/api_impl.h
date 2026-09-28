@@ -267,8 +267,9 @@ void Program<Variant>::evict_retained_lane(std::uint32_t lane) noexcept {
 
 template <>
 bool Program<Variant>::capture_retained_lane(std::uint32_t lane, std::uint64_t* ram_entry_id,
-                                             bool may_block) {
-    return impl_->capture_retained_lane(lane, ram_entry_id, may_block);
+                                             bool may_block, bool* deferred,
+                                             std::span<const std::uint64_t> attempt_ram_ids) {
+    return impl_->capture_retained_lane(lane, ram_entry_id, may_block, deferred, attempt_ram_ids);
 }
 
 template <>
@@ -286,6 +287,11 @@ void Program<Variant>::restore_disk_entry(std::uint32_t lane, std::uint64_t entr
 template <>
 bool Program<Variant>::disk_restore_ready(std::uint64_t entry_id) const {
     return impl_->disk_restore_ready(entry_id);
+}
+
+template <>
+bool Program<Variant>::kv_ram_reclaim_pending() const {
+    return impl_->kv_ram_reclaim_pending();
 }
 
 template <>
