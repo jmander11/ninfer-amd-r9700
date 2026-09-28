@@ -4,13 +4,21 @@
 #include "targets/qwen3/impl/runtime/kv_disk_cache.h"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <unistd.h>
+#include <vector>
 
 namespace {
 namespace q3 = ninfer::targets::qwen3;
@@ -78,10 +86,11 @@ q3::PreparedPromptData prompt(std::size_t tokens = 130) {
 }
 
 cache::DiskOpenConfig config(const std::filesystem::path& path, Pool& pool,
-                              cache::KVRamCache& ram, ninfer::KvDiskCompress compression) {
+                              cache::KVRamCache& ram, ninfer::KvDiskCompress compression,
+                              std::size_t capacity_bytes = 32ULL << 20) {
     cache::DiskOpenConfig result;
     result.location = path;
-    result.capacity_bytes = 32ULL << 20;
+    result.capacity_bytes = capacity_bytes;
     result.compress = compression;
     result.max_context = 256;
     result.ram = &ram;
@@ -250,6 +259,357 @@ void run_roundtrip(ninfer::DeviceContext& device, ninfer::KvDiskCompress compres
     reopened.invalidate_entry(match->entry_id);
     require(!reopened.plan_match(retained, chain), "invalidated corrupt prefix remained reusable");
 }
+
+// ---- Disk I/O stays off the decode and admission paths ----
+
+template <class Predicate>
+bool wait_pred(Predicate predicate, std::chrono::milliseconds limit) {
+    const auto deadline = std::chrono::steady_clock::now() + limit;
+    while (!predicate() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return predicate();
+}
+
+// Blocks a stream behind a host callback until released, so copies enqueued after it stay pending.
+struct StreamGate {
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool released = false;
+    bool finished = false;
+    bool launched = false;
+    static void callback(void* pointer) {
+        auto& gate = *static_cast<StreamGate*>(pointer);
+        std::unique_lock lock(gate.mutex);
+        gate.cv.wait(lock, [&] { return gate.released; });
+        gate.finished = true;
+        gate.cv.notify_all();
+    }
+    void launch(hipStream_t stream) {
+        HIP_CHECK(hipLaunchHostFunc(stream, callback, this));
+        launched = true;
+    }
+    void release() {
+        std::lock_guard lock(mutex);
+        released = true;
+        cv.notify_all();
+    }
+    ~StreamGate() {
+        release();
+        if (launched) {
+            std::unique_lock lock(mutex);
+            cv.wait(lock, [&] { return finished; });
+        }
+    }
+};
+
+q3::PreparedPromptData text_prompt(const std::vector<ninfer::TokenId>& tokens) {
+    q3::PreparedPromptData result;
+    result.token_ids = tokens;
+    result.token_types.assign(tokens.size(), 0);
+    result.positions.resize(tokens.size() * 3);
+    for (std::size_t i = 0; i < tokens.size(); ++i) {
+        for (std::size_t axis = 0; axis < 3; ++axis) {
+            result.positions[axis * tokens.size() + i] = static_cast<std::int32_t>(i);
+        }
+    }
+    return result;
+}
+
+// A Text-only retained lane whose ledger is `tokens` plus one uncommitted token, so a lookup of
+// `retained` reuses the whole `tokens` prefix without requiring tail hidden state.
+struct TextCapture {
+    q3::PreparedPromptData retained;
+    cache::ResidentPrefixIdentity identity;
+    cache::RamCaptureSource source;
+
+    TextCapture(const std::vector<ninfer::TokenId>& tokens, ninfer::PagedKVAllocation& allocation,
+                Pool& pool, hipStream_t stream) {
+        auto ledger = tokens;
+        ledger.push_back(0);
+        retained = text_prompt(ledger);
+        identity.assign(retained);
+        const auto frontier       = static_cast<std::uint32_t>(tokens.size());
+        source.execution_frontier = frontier;
+        source.ledger_frontier    = frontier + 1;
+        source.text_kv_valid      = frontier;
+        source.ledger             = retained.token_ids;
+        source.identity           = &identity;
+        source.hash_f             = cache::prefix_hash_at(retained.token_ids, identity, frontier);
+        source.text               = &allocation;
+        source.text_pool          = pool.storage.get();
+        source.text_semantics     = pool.semantics();
+        source.stream             = stream;
+    }
+    TextCapture(const TextCapture&)            = delete;
+    TextCapture& operator=(const TextCapture&) = delete;
+};
+
+std::uint64_t capture_tokens(cache::KVRamCache& ram, Pool& pool,
+                             ninfer::PagedKVAllocation& allocation, ninfer::DeviceContext& device,
+                             const std::vector<ninfer::TokenId>& tokens) {
+    TextCapture capture(tokens, allocation, pool, device.copy_stream);
+    const auto result = ram.capture(capture.source);
+    require(result.status == cache::RamCaptureStatus::Captured, "stall fixture RAM capture failed");
+    device.synchronize_all();
+    ram.wait_pending_copies();
+    return result.entry_id;
+}
+
+std::vector<std::uint8_t> read_bytes(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+// An idle prepare that makes capacity releases the mutex for the eviction's MANIFEST write. A
+// cancellation in that window must stop the spill before it installs; otherwise
+// cancel_idle_spill waits for the whole idle image write.
+void idle_cancel_during_capacity_eviction(ninfer::DeviceContext& device) {
+    TemporaryDirectory directory;
+    Pool pool(8);
+    cache::KVRamCache ram(64ULL << 20);
+    auto allocation = pool.storage->reserve(4);
+    allocation.materialize_pages(3, device.stream);
+    auto options = config(directory.path, pool, ram, ninfer::KvDiskCompress::Off, 64ULL << 20);
+    const auto first = capture_tokens(ram, pool, allocation, device,
+                                      std::vector<ninfer::TokenId>(64, 21));
+    std::size_t used = 0;
+    {
+        cache::KVDiskCache disk(options);
+        disk.note_ram_resident(first, 0);
+        require(disk.emergency_spill_ram(first), "idle-cancel-evict first spill failed");
+        disk.wait_idle_and_fsync();
+        used = disk.snapshot().used_bytes;
+    }
+    options.capacity_bytes = used;
+    cache::KVDiskCache disk(options);
+    const auto second = capture_tokens(ram, pool, allocation, device,
+                                       std::vector<ninfer::TokenId>(64, 22));
+    disk.note_ram_resident(second, 0);
+    disk.test_set_manifest_io_stall_ms(300);
+    disk.test_set_payload_io_stall_ms(2000);
+    disk.request_idle_spill();
+    if (!wait_pred([&] { return disk.test_manifest_io_entered(); }, std::chrono::seconds(5))) {
+        disk.test_set_manifest_io_stall_ms(0);
+        disk.test_set_payload_io_stall_ms(0);
+        disk.cancel_idle_spill();
+        require(false, "idle-cancel-evict idle prepare did not reach capacity eviction");
+    }
+    const auto started = std::chrono::steady_clock::now();
+    disk.cancel_idle_spill();
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    disk.test_set_manifest_io_stall_ms(0);
+    disk.test_set_payload_io_stall_ms(0);
+    const bool durable = disk.ram_is_durable(second);
+    disk.wait_idle_and_fsync();
+    require(elapsed <= std::chrono::milliseconds(1200),
+            "idle cancel waited for a spill installed after cancellation");
+    require(!durable, "idle spill committed after cancellation");
+}
+
+// Pinning an entry for a disk spill waits for that entry's own device copies, not every pending
+// RAM copy: an unrelated gated capture must not stall it.
+void spill_pin_waits_only_its_entry(ninfer::DeviceContext& device) {
+    TemporaryDirectory directory;
+    Pool pool(8);
+    cache::KVRamCache ram(64ULL << 20);
+    auto allocation = pool.storage->reserve(4);
+    allocation.materialize_pages(3, device.stream);
+    HIP_CHECK(hipStreamSynchronize(device.stream));
+    cache::KVDiskCache disk(
+        config(directory.path, pool, ram, ninfer::KvDiskCompress::Off, 64ULL << 20));
+    hipStream_t side = nullptr;
+    HIP_CHECK(hipStreamCreateWithFlags(&side, hipStreamNonBlocking));
+    constexpr std::size_t kDelayBytes = 256ULL << 20;
+    ninfer::DeviceBuffer delay_source(kDelayBytes);
+    ninfer::PinnedHostBuffer delay_destination(kDelayBytes);
+    bool prompt = false;
+    bool spilled = false;
+    {
+        StreamGate gate;
+        gate.launch(side);
+        TextCapture unrelated(std::vector<ninfer::TokenId>(64, 23), allocation, pool, side);
+        const bool gated = ram.capture(unrelated.source).status == cache::RamCaptureStatus::Captured;
+        // Keep the spilled entry's own D2H in flight briefly behind a large copy.
+        HIP_CHECK(hipMemcpyAsync(delay_destination.data(), delay_source.data(), kDelayBytes,
+                                 hipMemcpyDeviceToHost, device.copy_stream));
+        TextCapture own(std::vector<ninfer::TokenId>(64, 24), allocation, pool, device.copy_stream);
+        const auto captured = ram.capture(own.source);
+        if (gated && captured.status == cache::RamCaptureStatus::Captured) {
+            disk.note_ram_resident(captured.entry_id, 0);
+            std::atomic<bool> done{false};
+            std::atomic<bool> result{false};
+            std::thread spiller([&] {
+                try {
+                    result.store(disk.emergency_spill_ram(captured.entry_id));
+                } catch (...) {}
+                done.store(true);
+            });
+            prompt = wait_pred([&] { return done.load(); }, std::chrono::milliseconds(1500));
+            gate.release();
+            spiller.join();
+            spilled = result.load();
+        }
+        gate.release();
+        require(gated && captured.status == cache::RamCaptureStatus::Captured,
+                "spill-own-copy fixture capture failed");
+    }
+    device.synchronize_all();
+    HIP_CHECK(hipStreamSynchronize(side));
+    HIP_CHECK(hipStreamDestroy(side));
+    disk.wait_idle_and_fsync();
+    require(prompt, "disk spill pin waited for an unrelated gated RAM copy");
+    require(spilled, "spill-own-copy spill failed");
+}
+
+// Compaction copies the whole live pack store. Lookups on the scheduler thread must not wait for
+// that copy, and the worker still publishes the new generation.
+void plan_match_during_compaction(ninfer::DeviceContext& device) {
+    TemporaryDirectory directory;
+    Pool pool(8);
+    cache::KVRamCache ram(64ULL << 20);
+    auto allocation = pool.storage->reserve(4);
+    allocation.materialize_pages(3, device.stream);
+    const auto options =
+        config(directory.path, pool, ram, ninfer::KvDiskCompress::Off, 64ULL << 20);
+    const std::vector<ninfer::TokenId> tokens_a(64, 25);
+    const std::vector<ninfer::TokenId> tokens_b(128, 26);
+    {
+        cache::KVDiskCache disk(options);
+        for (const auto* tokens : {&tokens_a, &tokens_b}) {
+            const auto ram_id = capture_tokens(ram, pool, allocation, device, *tokens);
+            disk.note_ram_resident(ram_id, 0);
+            require(disk.emergency_spill_ram(ram_id), "compaction-lock fixture spill failed");
+        }
+        require(disk.test_fifo_evict_one(), "compaction-lock fixture eviction failed");
+    }
+    const auto before = read_bytes(directory.path / "PACKSET");
+    cache::KVDiskCache disk(options);
+    disk.test_set_compaction_copy_stall_ms(300);
+    std::thread maintenance([&] { disk.wait_idle_and_fsync(); });
+    if (!wait_pred([&] { return disk.test_compaction_copy_entered(); }, std::chrono::seconds(5))) {
+        disk.test_set_compaction_copy_stall_ms(0);
+        maintenance.join();
+        require(false, "compaction-lock maintenance never started copying");
+    }
+    auto ledger = tokens_b;
+    ledger.push_back(0);
+    const auto prompt  = text_prompt(ledger);
+    const auto started = std::chrono::steady_clock::now();
+    const auto match   = disk.plan_match(prompt, cache::prefix_hash_chain(prompt));
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    disk.test_set_compaction_copy_stall_ms(0);
+    maintenance.join();
+    const auto after = read_bytes(directory.path / "PACKSET");
+    require(elapsed <= std::chrono::milliseconds(150), "plan_match waited for the compaction copy");
+    require(match.has_value(), "compaction-lock lost the retained entry");
+    require(before.size() == 32 && after.size() == 32 &&
+                std::memcmp(before.data() + 12, after.data() + 12, sizeof(std::uint64_t)) != 0,
+            "compaction-lock maintenance did not publish a new generation");
+}
+
+// Reclaiming RAM for a capture while other lanes decode must not wait on a disk write: a
+// disk-durable entry is evicted first, and without one the oldest entry is dropped unsaved.
+void ram_reclaim_never_blocks_on_disk(ninfer::DeviceContext& device) {
+    TemporaryDirectory directory;
+    Pool pool(8);
+    cache::KVRamCache ram(64ULL << 20);
+    auto allocation = pool.storage->reserve(4);
+    allocation.materialize_pages(3, device.stream);
+    cache::KVDiskCache disk(
+        config(directory.path, pool, ram, ninfer::KvDiskCompress::Off, 64ULL << 20));
+    const auto older = capture_tokens(ram, pool, allocation, device,
+                                      std::vector<ninfer::TokenId>(64, 27));
+    disk.note_ram_resident(older, 0);
+    const auto newer = capture_tokens(ram, pool, allocation, device,
+                                      std::vector<ninfer::TokenId>(64, 28));
+    disk.note_ram_resident(newer, 0);
+    require(disk.emergency_spill_ram(newer), "ram-reclaim fixture spill failed");
+    disk.wait_idle_and_fsync();
+    // Any disk write from here on would take seconds.
+    disk.test_set_payload_io_stall_ms(2000);
+    const auto resident = [&](std::uint64_t id) {
+        const auto ids = ram.fifo_ids();
+        return std::find(ids.begin(), ids.end(), id) != ids.end();
+    };
+    auto started = std::chrono::steady_clock::now();
+    auto result  = disk.reclaim_ram_entry(false);
+    auto elapsed = std::chrono::steady_clock::now() - started;
+    const bool durable_first =
+        result == cache::RamReclaim::Evicted && !resident(newer) && resident(older);
+    const bool durable_prompt = elapsed <= std::chrono::milliseconds(500);
+    const auto drops = disk.snapshot().drops;
+    started = std::chrono::steady_clock::now();
+    result  = disk.reclaim_ram_entry(false);
+    elapsed = std::chrono::steady_clock::now() - started;
+    const bool unsaved_dropped = result == cache::RamReclaim::Evicted && !resident(older);
+    const bool unsaved_prompt  = elapsed <= std::chrono::milliseconds(500);
+    const bool drop_counted    = disk.snapshot().drops == drops + 1;
+    disk.test_set_payload_io_stall_ms(0);
+    require(durable_first, "non-blocking reclaim did not evict the disk-durable entry first");
+    require(durable_prompt, "reclaim of a durable entry waited on disk I/O");
+    require(unsaved_dropped, "non-blocking reclaim did not drop the unsaved oldest entry");
+    require(unsaved_prompt, "non-blocking reclaim spilled synchronously");
+    require(drop_counted, "dropping an unsaved RAM entry was not counted");
+}
+
+// restore_device waits for another entry's in-flight window reads. The readiness probe lets
+// admission keep decoding instead of taking that wait.
+void restore_setup_ready_tracks_window_reads(ninfer::DeviceContext& device) {
+    TemporaryDirectory directory;
+    Pool pool(8);
+    cache::KVRamCache ram(32ULL << 20);
+    auto allocation = pool.storage->reserve(2);
+    allocation.materialize_pages(1, device.stream);
+    cache::KVDiskCache disk(
+        config(directory.path, pool, ram, ninfer::KvDiskCompress::Off, 32ULL << 20));
+    struct BarrierGuard {
+        cache::KVDiskCache& disk;
+        ~BarrierGuard() { disk.test_release_page_read_barrier(); }
+    } barrier{disk};
+    const std::vector<ninfer::TokenId> tokens_a{12, 13, 14, 15};
+    const std::vector<ninfer::TokenId> tokens_b{16, 17, 18, 19};
+    for (const auto* tokens : {&tokens_a, &tokens_b}) {
+        const auto ram_id = capture_tokens(ram, pool, allocation, device, *tokens);
+        disk.note_ram_resident(ram_id, 0);
+        require(disk.emergency_spill_ram(ram_id), "restore-ready fixture spill failed");
+    }
+    auto ledger_a = tokens_a;
+    ledger_a.push_back(0);
+    auto ledger_b = tokens_b;
+    ledger_b.push_back(0);
+    const auto prompt_a = text_prompt(ledger_a);
+    const auto prompt_b = text_prompt(ledger_b);
+    const auto match_a  = disk.plan_match(prompt_a, cache::prefix_hash_chain(prompt_a));
+    const auto match_b  = disk.plan_match(prompt_b, cache::prefix_hash_chain(prompt_b));
+    require(match_a && match_b && disk.claim(match_b->entry_id),
+            "restore-ready fixture could not claim the prefetched entry");
+    const bool idle_ready = disk.restore_setup_ready(match_a->entry_id);
+    disk.test_arm_page_read_barrier();
+    disk.prefetch_window(match_b->entry_id, 1, 0);
+    if (!wait_pred([&] { return disk.test_page_read_entered(); }, std::chrono::seconds(2))) {
+        disk.test_release_page_read_barrier();
+        disk.release(match_b->entry_id);
+        require(false, "restore-ready prefetch did not enter its page read");
+    }
+    const bool busy_ready = disk.restore_setup_ready(match_a->entry_id);
+    disk.test_release_page_read_barrier();
+    const bool drained_ready = wait_pred(
+        [&] { return disk.restore_setup_ready(match_a->entry_id); }, std::chrono::seconds(2));
+    disk.release(match_b->entry_id);
+    require(idle_ready, "restore setup reported busy with no window reads");
+    require(!busy_ready, "restore setup reported ready while another entry's read was in flight");
+    require(drained_ready, "restore setup stayed busy after the window read finished");
+}
+
+void run_stall_cases(ninfer::DeviceContext& device) {
+    idle_cancel_during_capacity_eviction(device);
+    spill_pin_waits_only_its_entry(device);
+    plan_match_during_compaction(device);
+    ram_reclaim_never_blocks_on_disk(device);
+    restore_setup_ready_tracks_window_reads(device);
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -260,9 +620,17 @@ int main(int argc, char** argv) {
             return 0;
         }
         ninfer::DeviceContext device;
+        if (argc == 3 && std::string_view(argv[1]) == "--case" &&
+            std::string_view(argv[2]) == "stalls") {
+            run_stall_cases(device);
+            std::cout << "disk tier stays off decode and admission paths: PASS\n";
+            return 0;
+        }
         run_roundtrip(device, ninfer::KvDiskCompress::Off);
         run_roundtrip(device, ninfer::KvDiskCompress::Zstd);
+        run_stall_cases(device);
         std::cout << "fixed RAM/SSD cache exact bytes, restart, Vision identity, CRC and invalidation: PASS\n";
+        std::cout << "disk tier stays off decode and admission paths: PASS\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "fixed cache: FAIL: " << error.what() << '\n';

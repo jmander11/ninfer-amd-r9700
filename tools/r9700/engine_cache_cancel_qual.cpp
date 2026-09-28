@@ -1,12 +1,14 @@
 #include "ninfer/engine.h"
 
 #include <algorithm>
+#include <chrono>
 #include <exception>
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -101,14 +103,28 @@ int qualify_disk_restart(const std::filesystem::path& artifact,
     }
     {
         ninfer::Engine engine(options());
-        const auto before = engine.runtime_stats();
+        // Stats read the disk tier without waiting for its index lock, so a read that races the
+        // disk worker keeps the last snapshot; poll briefly for the first one.
+        const auto disk_stats = [&](auto satisfied) {
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+            auto stats = engine.runtime_stats();
+            while (!satisfied(stats) && std::chrono::steady_clock::now() < deadline) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                stats = engine.runtime_stats();
+            }
+            return stats;
+        };
+        const auto before =
+            disk_stats([](const ninfer::RuntimeStats& stats) { return stats.kv_disk_entry_count > 0; });
         require(before.kv_disk_entry_count > 0, "restart did not recover durable SSD entries");
         require(before.kv_ram_restores == 0, "fresh Engine already restored RAM state");
         const auto restored = engine.generate(engine.prepare_tokens(continued), request_options());
         require(restored.prefix_reuse_source == ninfer::PrefixReuseSource::HostDisk &&
                     restored.reused_prompt_tokens > 0,
                 "fresh Engine continuation did not exercise SSD restore");
-        require(engine.runtime_stats().kv_disk_restores > before.kv_disk_restores,
+        require(disk_stats([&](const ninfer::RuntimeStats& stats) {
+                    return stats.kv_disk_restores > before.kv_disk_restores;
+                }).kv_disk_restores > before.kv_disk_restores,
                 "SSD restore counter did not advance");
         const auto cold = engine.generate(engine.prepare_tokens(continued), request_options(false));
         require_same_output(restored, cold);

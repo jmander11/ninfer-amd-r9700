@@ -5,11 +5,17 @@
 #include "targets/qwen3/impl/runtime/prefix_identity.h"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
+#include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -103,6 +109,238 @@ bool all_bytes_equal(const ninfer::DeviceBuffer& buffer, std::uint8_t value) {
     return std::all_of(host.begin(), host.end(), [value](std::uint8_t byte) {
         return byte == value;
     });
+}
+
+
+// Blocks a stream behind a host callback until released, so copies enqueued after it stay pending.
+struct StreamGate {
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool released = false;
+    bool finished = false;
+    bool launched = false;
+    static void callback(void* pointer) {
+        auto& gate = *static_cast<StreamGate*>(pointer);
+        std::unique_lock lock(gate.mutex);
+        gate.cv.wait(lock, [&] { return gate.released; });
+        gate.finished = true;
+        gate.cv.notify_all();
+    }
+    void launch(hipStream_t stream) {
+        HIP_CHECK(hipLaunchHostFunc(stream, callback, this));
+        launched = true;
+    }
+    void release() {
+        std::lock_guard lock(mutex);
+        released = true;
+        cv.notify_all();
+    }
+    ~StreamGate() {
+        release();
+        if (launched) {
+            std::unique_lock lock(mutex);
+            cv.wait(lock, [&] { return finished; });
+        }
+    }
+};
+
+// One-page Text pool plus a retained-lane capture source with a tail-hidden image.
+struct CopyFixture {
+    ninfer::Fp8KInt4VPagedKVSpec spec;
+    ninfer::Fp8KInt4VSemanticFingerprint semantics;
+    ninfer::Fp8KInt4VPagedKVPoolLayout layout;
+    std::unique_ptr<ninfer::DeviceBuffer> backing;
+    std::unique_ptr<ninfer::PagedKVPool> pool;
+
+    explicit CopyFixture(const ninfer::Fp8KInt4VPagedKVSpec& text_spec) : spec(text_spec) {
+        semantics = ninfer::fp8_k_int4_v_semantic_fingerprint(spec);
+        ninfer::LayoutBuilder builder;
+        layout  = ninfer::plan_fp8_k_int4_v_paged_kv_pool(builder, spec);
+        backing = std::make_unique<ninfer::DeviceBuffer>(builder.finish(256));
+        pool    = std::make_unique<ninfer::PagedKVPool>(
+            ninfer::DeviceSpan{backing->data(), backing->size()}, layout.storage);
+    }
+};
+
+struct HiddenCapture {
+    q3::PreparedPromptData prompt;
+    q3::detail::ResidentPrefixIdentity identity;
+    q3::detail::RamCaptureSource source;
+
+    HiddenCapture(CopyFixture& fixture, const ninfer::PagedKVAllocation& allocation,
+                  std::int32_t first_token, const ninfer::Tensor& hidden, hipStream_t stream)
+        : prompt(prompt_data(first_token)) {
+        identity.assign(prompt);
+        source.execution_frontier = 6;
+        source.ledger_frontier    = 7;
+        source.text_kv_valid      = 6;
+        source.tail_hidden_valid  = true;
+        source.ledger             = prompt.token_ids;
+        source.identity           = &identity;
+        source.hash_f             = q3::detail::prefix_hash_at(prompt.token_ids, identity, 6);
+        source.text               = &allocation;
+        source.text_pool          = fixture.pool.get();
+        source.text_semantics     = fixture.semantics;
+        source.tail_hidden        = &hidden;
+        source.stream             = stream;
+    }
+    HiddenCapture(const HiddenCapture&)            = delete;
+    HiddenCapture& operator=(const HiddenCapture&) = delete;
+};
+
+// Two restores in one round each own an in-flight H2D. Consuming the first must account its copy
+// as a load, not orphan it as save time.
+void two_pending_loads_fold_as_loads(ninfer::DeviceContext& device,
+                                     const ninfer::Fp8KInt4VPagedKVSpec& text_spec) {
+    CopyFixture fixture(text_spec);
+    constexpr std::size_t kBulkBytes = 8ULL << 20;
+    ninfer::DeviceBuffer bulk(kBulkBytes);
+    bulk.fill(0x3c);
+    ninfer::Tensor hidden(bulk.data(), ninfer::DType::U8, {static_cast<std::int32_t>(kBulkBytes)});
+    q3::detail::KVRamCache cache(64ULL << 20);
+    std::vector<std::uint64_t> ids;
+    for (const std::int32_t first : {701, 801}) {
+        auto source = fixture.pool->reserve(1);
+        source.materialize_pages(1, device.stream);
+        device.order_copy_after_compute();
+        HiddenCapture capture(fixture, source, first, hidden, device.copy_stream);
+        const auto result = cache.capture(capture.source);
+        device.synchronize_all();
+        source.release();
+        require(result.status == q3::detail::RamCaptureStatus::Captured, "two-load capture failed");
+        ids.push_back(result.entry_id);
+    }
+    (void)cache.harvest_copy_seconds();
+    auto dest_a = fixture.pool->reserve(1);
+    auto dest_b = fixture.pool->reserve(1);
+    dest_a.materialize_pages(1, device.stream);
+    dest_b.materialize_pages(1, device.stream);
+    HIP_CHECK(hipStreamSynchronize(device.stream));
+    ninfer::DeviceBuffer out_a(kBulkBytes);
+    ninfer::DeviceBuffer out_b(kBulkBytes);
+    ninfer::Tensor out_a_t(out_a.data(), ninfer::DType::U8, {static_cast<std::int32_t>(kBulkBytes)});
+    ninfer::Tensor out_b_t(out_b.data(), ninfer::DType::U8, {static_cast<std::int32_t>(kBulkBytes)});
+    const auto restore = [&](std::uint64_t id, ninfer::PagedKVAllocation& dest,
+                             ninfer::Tensor& out) {
+        q3::detail::RamRestoreTarget target;
+        target.text           = &dest;
+        target.text_pool      = fixture.pool.get();
+        target.text_semantics = fixture.semantics;
+        target.text_dst_pages = 1;
+        target.tail_hidden    = &out;
+        target.stream         = device.copy_stream;
+        cache.claim(id);
+        (void)cache.unpack_device(id, target);
+    };
+    restore(ids[0], dest_a, out_a_t);
+    restore(ids[1], dest_b, out_b_t);
+    cache.consume(ids[0]);
+    cache.consume(ids[1]);
+    const auto loaded = cache.harvest_copy_seconds();
+    device.synchronize_all();
+    dest_a.release();
+    dest_b.release();
+    if (loaded.save != 0.0 || loaded.load <= 0.0) {
+        std::cerr << "two pending loads harvested save=" << loaded.save
+                  << " load=" << loaded.load << '\n';
+    }
+    require(loaded.save == 0.0 && loaded.load > 0.0,
+            "a second restore orphaned the first restore's load as save time");
+}
+
+// A stream-ordered wait must order the consumer stream without blocking the host.
+void stream_wait_does_not_block_host(ninfer::DeviceContext& device,
+                                     const ninfer::Fp8KInt4VPagedKVSpec& text_spec) {
+    CopyFixture fixture(text_spec);
+    q3::detail::KVRamCache cache(64ULL << 20);
+    auto source = fixture.pool->reserve(1);
+    source.materialize_pages(1, device.stream);
+    HIP_CHECK(hipStreamSynchronize(device.stream));
+    ninfer::DeviceBuffer bulk(1ULL << 20);
+    ninfer::Tensor hidden(bulk.data(), ninfer::DType::U8, {1 << 20});
+    bool captured = false;
+    bool prompt = false;
+    {
+        StreamGate gate;
+        gate.launch(device.copy_stream);
+        HiddenCapture capture(fixture, source, 901, hidden, device.copy_stream);
+        captured = cache.capture(capture.source).status == q3::detail::RamCaptureStatus::Captured;
+        if (captured) {
+            std::atomic<bool> returned{false};
+            std::thread waiter([&] {
+                try {
+                    cache.wait_pending_copies_on_stream(device.stream);
+                } catch (...) {}
+                returned.store(true);
+            });
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+            while (!returned.load() && std::chrono::steady_clock::now() < deadline) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            prompt = returned.load();
+            gate.release();
+            waiter.join();
+        }
+    }
+    device.synchronize_all();
+    source.release();
+    require(captured, "stream-wait capture failed");
+    require(prompt, "stream-ordered RAM wait blocked the host on a gated copy");
+}
+
+// A restore that fails validation after enqueueing H2D reads must still fence the record;
+// otherwise its host block looks idle while a copy reads it.
+void failed_unpack_fences_enqueued_reads(ninfer::DeviceContext& device,
+                                         const ninfer::Fp8KInt4VPagedKVSpec& text_spec) {
+    CopyFixture fixture(text_spec);
+    q3::detail::KVRamCache cache(64ULL << 20);
+    ninfer::DeviceBuffer bulk(1ULL << 20);
+    ninfer::Tensor hidden(bulk.data(), ninfer::DType::U8, {1 << 20});
+    std::uint64_t entry_id = 0;
+    {
+        auto source = fixture.pool->reserve(1);
+        source.materialize_pages(1, device.stream);
+        HIP_CHECK(hipStreamSynchronize(device.stream));
+        HiddenCapture capture(fixture, source, 1001, hidden, device.copy_stream);
+        const auto result = cache.capture(capture.source);
+        device.synchronize_all();
+        source.release();
+        require(result.status == q3::detail::RamCaptureStatus::Captured,
+                "failed-unpack capture failed");
+        entry_id = result.entry_id;
+    }
+    auto dest = fixture.pool->reserve(1);
+    dest.materialize_pages(1, device.stream);
+    HIP_CHECK(hipStreamSynchronize(device.stream));
+    q3::detail::RamRestoreTarget target;
+    target.text           = &dest;
+    target.text_pool      = fixture.pool.get();
+    target.text_semantics = fixture.semantics;
+    target.text_dst_pages = 1;
+    target.stream         = device.copy_stream;
+    // A context-checkpoint restore naming a frontier with no stored head fails after the text
+    // pages are already enqueued.
+    target.reuse      = ninfer::PrefixReusePath::RestoreContextCheckpoint;
+    target.reuse_base = 3;
+    cache.claim(entry_id);
+    bool threw = false;
+    bool fenced = false;
+    {
+        StreamGate gate;
+        gate.launch(device.copy_stream);
+        try {
+            (void)cache.unpack_device(entry_id, target);
+        } catch (const std::logic_error&) {
+            threw = true;
+        }
+        fenced = threw && !cache.copies_ready(entry_id);
+        gate.release();
+    }
+    device.synchronize_all();
+    cache.release(entry_id);
+    dest.release();
+    require(threw, "failed-unpack fixture did not reject the missing head");
+    require(fenced, "a failed restore left its enqueued H2D reads unfenced");
 }
 
 } // namespace
@@ -292,6 +530,10 @@ int main() {
         const auto eviction = eviction_cache.snapshot();
         require(eviction.entry_count == 1 && eviction.captures == 2 && eviction.evictions == 1,
                 "unpinned FIFO entry was not evicted for the replacement image");
+
+        two_pending_loads_fold_as_loads(device, text_spec);
+        stream_wait_does_not_block_host(device, text_spec);
+        failed_unpack_fences_enqueued_reads(device, text_spec);
 
         std::cout << "kv_ram_cache: PASS text_planes=" << text_source_pool.plane_count()
                   << " mtp_planes=" << mtp_source_pool.plane_count()

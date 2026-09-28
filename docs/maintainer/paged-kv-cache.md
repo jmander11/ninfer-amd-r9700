@@ -339,7 +339,12 @@ The startup pinned arena is mmap-backed, prefaulted, and registered independentl
 its preparation can overlap artifact materialization.
 
 `--kv-disk-capacity` and `--kv-disk-location` enable an inclusive persistent SSD tier; a nonzero RAM
-tier is required. Disk version 7 stores raw or Zstd-compressed exact logical-page payloads plus
+tier is required. Each RAM capture requests a write-behind spill on the disk worker, so entries
+usually become durable while other requests decode. When a capture needs RAM, the oldest unpinned
+disk-durable entry is evicted first. Without one, the oldest entry is spilled synchronously only
+when no other lane is decoding; otherwise it is dropped unsaved, so decoding never waits for a disk
+write. A disk restore whose setup would wait for another entry's window reads holds admission
+while other lanes keep decoding. Disk version 7 stores raw or Zstd-compressed exact logical-page payloads plus
 complete checkpoint state. Packing respects each of the three planes' slab and intra-page order;
 scatter restores represented bytes without dequantization. Durable identity binds model, weights,
 artifact, fixed codec semantics and Vision-aware prefix identity, but excludes pool allocation
@@ -352,15 +357,20 @@ is not published until all state owners and the copy event complete. Cancellatio
 releases the pinned entry generation without deleting its durable source. Emergency spill needed
 for admission excludes restore payload reads; idle spill rechecks its epoch and RAM residency.
 An admission waits only for its own entry's spill, never for another entry's spill batches.
-Pack compaction does not start while a restore, reader claim, or payload I/O still uses the
-current generation; an emergency spill then appends past the garbage threshold, and an idle
-spill defers without marking its entry failed, so compaction runs at the next quiescent admission.
-The deferred spill's room check counts the current compaction copy but not later appends, so a
-compaction that no longer fits falls back to low-space eviction. At most one spill session is
+Spill admission only requests pack compaction; the disk worker runs it between its queued jobs,
+copying a snapshot of live extents in 64 MiB slices with the cache mutex released, then copying
+objects committed to the source generation meanwhile. Lookups, claims, and statistics therefore
+never wait for the copy. Publication switches object locations to the new generation and waits
+only for no spill session or payload I/O; restores and reader claims continue across it on their
+generation leases. While compaction is pending an idle spill defers without marking its entry
+failed, and an emergency spill appends past the garbage threshold inside the copy-on-write
+reserve. A spill's room check counts the pending compaction copy but not later appends, so a
+compaction that no longer fits falls back to low-space eviction; a failed compaction is not
+retried until the durable generation changes. At most one spill session is
 installed: emergency preparation excludes the worker's idle preparation, and session teardown
 releases pins and resets the session in one critical section before unlinking its draft objects.
-Stats observers read the disk tier without blocking on its
-index lock and never see its counters step backwards.
+Stats observers and the scheduler's stats publication read the disk tier without blocking on
+its index lock and never see its counters step backwards.
 Durable publication orders pack namespace, map, entry and manifest before final synchronization.
 Orderly shutdown captures retained device state, flushes nondurable RAM and outstanding writes,
 then releases lanes. None of this adds active-request preemption or a second growing-cache format.
