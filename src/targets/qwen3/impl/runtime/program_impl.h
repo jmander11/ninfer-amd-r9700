@@ -163,7 +163,10 @@ void arm_typical_exclude(RequestControl& request, const SequenceState& sequence)
     }
 }
 
-void rollback_sampling_counts(const ops::SamplingConfig& sampling,
+// The counts are read and written on the compute stream, ordered against the speculative tail that
+// produced them and the next round that consumes them. Each write is settled before `count` is
+// reused, so a pageable host source is never read after it changes.
+void rollback_sampling_counts(const DeviceContext& device, const ops::SamplingConfig& sampling,
                               std::span<const TokenId> tokens) {
     if (sampling.temperature <= 0.0F || sampling.token_counts == nullptr) { return; }
     for (std::size_t index = 0; index < tokens.size(); ++index) {
@@ -176,14 +179,16 @@ void rollback_sampling_counts(const ops::SamplingConfig& sampling,
             std::count(tokens.begin() + static_cast<std::ptrdiff_t>(index), tokens.end(),
                        tokens[index]));
         std::int32_t count = 0;
-        HIP_CHECK(hipMemcpy(&count, sampling.token_counts + tokens[index], sizeof(count),
-                              hipMemcpyDeviceToHost));
+        HIP_CHECK(hipMemcpyAsync(&count, sampling.token_counts + tokens[index], sizeof(count),
+                                 hipMemcpyDeviceToHost, device.stream));
+        device.synchronize();
         if (count < occurrences) {
             throw std::logic_error("rejected sampling token count underflow");
         }
         count -= occurrences;
-        HIP_CHECK(hipMemcpy(sampling.token_counts + tokens[index], &count, sizeof(count),
-                              hipMemcpyHostToDevice));
+        HIP_CHECK(hipMemcpyAsync(sampling.token_counts + tokens[index], &count, sizeof(count),
+                                 hipMemcpyHostToDevice, device.stream));
+        device.synchronize();
     }
 }
 
@@ -1329,7 +1334,7 @@ void ProgramImplCore::resolve_pending_batch(std::span<const std::uint32_t> lanes
                         ? mtp_host_egress->licensed_tokens.data() + row * width
                         : dflash_host_egress->licensed_tokens.data() + row * width;
                 rollback_sampling_counts(
-                    request.sampling_host,
+                    device, request.sampling_host,
                     std::span<const TokenId>(token_base, pending.produced));
                 rollback_speculative_stats(request, pending);
                 sequence.tail_hidden_valid = false;

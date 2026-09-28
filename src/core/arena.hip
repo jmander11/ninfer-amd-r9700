@@ -159,6 +159,9 @@ void DeviceBuffer::copy_from_host(const void* source, std::size_t count, std::si
     const hipError_t error = hipMemcpy(static_cast<std::uint8_t*>(p) + offset, source, count,
                                        hipMemcpyHostToDevice);
     if (error != hipSuccess) { allocation_error("hipMemcpy host-to-device", error); }
+    // Settle the null stream before callers submit consumers on non-blocking streams.
+    const hipError_t settled = hipStreamSynchronize(nullptr);
+    if (settled != hipSuccess) { allocation_error("host-to-device copy synchronization", settled); }
 }
 
 void DeviceBuffer::copy_to_host(void* destination, std::size_t count, std::size_t offset) const {
