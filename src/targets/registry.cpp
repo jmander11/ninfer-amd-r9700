@@ -8,6 +8,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <exception>
 #include <future>
 #include <stdexcept>
 #include <string>
@@ -85,6 +86,22 @@ std::size_t current_free_device_bytes(const DeviceContext& device) {
     return free_bytes;
 }
 
+// Automatic sizing claims nearly all free device memory, so memory taken by another process
+// between sizing and allocation (or before startup) surfaces here. Name the knob that fixes it.
+template <class Fn>
+decltype(auto) with_automatic_headroom_hint(const KvCapacityPolicy& policy, Fn&& fn) {
+    if (policy.mode != KvCapacityMode::Automatic) { return fn(); }
+    try {
+        return fn();
+    } catch (const std::exception& error) {
+        throw std::runtime_error(
+            std::string(error.what()) + " (automatic KV capacity left " +
+            std::to_string(policy.automatic_headroom_bytes / (1024ULL * 1024ULL)) +
+            " MiB of device memory free; if a desktop or another process also uses this GPU, "
+            "raise --kv-capacity-headroom or set --kv-capacity N)");
+    }
+}
+
 template <class Target, class Loaded, class Instance>
 ConstructedTarget construct_registered(const EngineOptions& options, DeviceContext& device,
                                        artifact::Reader& reader, Clock::time_point load_start,
@@ -104,7 +121,9 @@ ConstructedTarget construct_registered(const EngineOptions& options, DeviceConte
     const std::size_t preflight_runtime_bytes =
         runtime_bytes_after_planned_weights(device,
                                             load_plan.materialization().device_capacity_bytes);
-    (void)runtime::resolve_kv_capacity(options.kv_capacity, curve, preflight_runtime_bytes);
+    with_automatic_headroom_hint(options.kv_capacity, [&] {
+        (void)runtime::resolve_kv_capacity(options.kv_capacity, curve, preflight_runtime_bytes);
+    });
 
     std::future<std::unique_ptr<HostPinnedArena>> kv_ram_future;
     if (options.kv_ram_capacity_bytes != 0) {
@@ -124,8 +143,10 @@ ConstructedTarget construct_registered(const EngineOptions& options, DeviceConte
     auto model = Target::construct_loaded_model(std::move(load_plan), std::move(materialized));
     device.synchronize();
     runtime::KvCapacityResolution capacity_resolution =
-        runtime::resolve_kv_capacity(options.kv_capacity, curve,
-                                     current_free_device_bytes(device));
+        with_automatic_headroom_hint(options.kv_capacity, [&] {
+            return runtime::resolve_kv_capacity(options.kv_capacity, curve,
+                                                current_free_device_bytes(device));
+        });
     auto sequence_plan = std::move(sequence_planner).finalize(capacity_resolution.main_page_groups);
     if (sequence_plan.device_reservation_bytes() != capacity_resolution.runtime_reservation_bytes ||
         sequence_plan.kv_capacity() != capacity_resolution.resolved_tokens) {
@@ -134,10 +155,13 @@ ConstructedTarget construct_registered(const EngineOptions& options, DeviceConte
     auto loaded   = std::make_unique<Loaded>(std::move(model));
     std::unique_ptr<HostPinnedArena> kv_ram_arena;
     if (kv_ram_future.valid()) { kv_ram_arena = kv_ram_future.get(); }
-    auto instance = std::make_unique<Instance>(std::move(loaded), capacity_resolution,
-                                               std::move(sequence_plan), device,
-                                               std::move(kv_ram_arena));
-    device.synchronize();
+    auto instance = with_automatic_headroom_hint(options.kv_capacity, [&] {
+        auto constructed = std::make_unique<Instance>(std::move(loaded), capacity_resolution,
+                                                      std::move(sequence_plan), device,
+                                                      std::move(kv_ram_arena));
+        device.synchronize();
+        return constructed;
+    });
     instance->kv_capacity_resolution.available_after_startup_bytes =
         current_free_device_bytes(device);
 

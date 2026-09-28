@@ -758,6 +758,7 @@ curl http://127.0.0.1:8080/v1/models \
 | `--model-id ID` | override the public OpenAI model alias | artifact `identity.model_id` |
 | `--max-context N` | logical context ceiling of each sequence | `8192` |
 | `--kv-capacity N\|auto` | explicit shared Main Text KV capacity, or maximize it from remaining GPU memory; omitted means `--max-context` | `8192` |
+| `--kv-capacity-headroom MiB` | device memory `--kv-capacity auto` leaves free; requires `auto` | `64` |
 | `--kv-ram-capacity off\|N` | pinned host KV prefix-cache capacity in MiB; `off` disables the tier | `off` |
 | `--kv-disk-capacity off\|N` | SSD KV prefix-cache unique-object capacity in MiB; `off` disables the tier | `off` |
 | `--kv-disk-location PATH` | directory for the SSD page store; required iff `--kv-disk-capacity` is enabled | unset |
@@ -917,7 +918,8 @@ sequence's logical ceiling; the latter sizes the shared Main Text KV pool used b
 requests and retained prefixes. Both are represented with 64-token pages internally, while a
 sequence can never cross the exact `--max-context` frontier. `--kv-capacity N` requests an explicit
 capacity; `--kv-capacity auto` chooses the largest legal capacity that fits the memory remaining
-after weights are loaded while keeping 1 GiB of sizing headroom. When omitted it follows
+after weights are loaded, leaving `--kv-capacity-headroom` MiB free (default 64; raise it when a
+desktop or another process shares the GPU). When omitted it follows
 `--max-context`, preserving one full-length request's capacity. The shared pool is fixed at startup
 and is not divided evenly among request lanes. `--kv-ram-capacity` is a separate pinned-host budget
 in MiB for completed prefix bundles and does not change GPU pool sizing. One long MTP chat with five

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -97,7 +98,8 @@ KvDiskCompress parse_kv_disk_compress(const char* text) {
 std::string serve_usage_text(const char* argv0) {
     return std::string("usage: ") + argv0 +
            " <model.ninfer> [--host H] [--port N] [--api-key KEY] "
-           "[--model-id ID] [--max-context N] [--kv-capacity N|auto] [--kv-ram-capacity off|N] "
+           "[--model-id ID] [--max-context N] [--kv-capacity N|auto] [--kv-capacity-headroom MiB] "
+           "[--kv-ram-capacity off|N] "
            "[--kv-disk-capacity off|N] [--kv-disk-location PATH] [--kv-disk-compress off|zstd] "
            "[--max-concurrency 1..4] [--no-generation-recovery] "
            "[--max-pending-requests N] [--pending-timeout-ms N] "
@@ -124,9 +126,10 @@ std::string serve_usage_text(const char* argv0) {
            "       Response history defaults to 1024 records / 256 MiB\n"
            "       --log-stats-interval-ms defaults to 5000; 0 disables periodic throughput logs\n"
            "       --vision enables media and loads the fixed Vision GPU allocations\n"
-           "       --kv-capacity auto leaves " +
+           "       --kv-capacity auto sizes KV from all free GPU memory except --kv-capacity-headroom "
+           "MiB (default " +
            std::to_string(kDefaultKvCapacityHeadroomBytes / (1024ULL * 1024ULL)) +
-           " MiB of sizing headroom\n"
+           "); raise it when a desktop or other process shares the GPU\n"
            "       --kv-ram-capacity sets pinned host KV prefix-cache capacity in MiB (default off)\n"
            "       --kv-disk-capacity sets SSD KV prefix-cache unique-object capacity in MiB (default off)\n"
            "       --kv-disk-location is required iff --kv-disk-capacity is enabled\n"
@@ -161,6 +164,7 @@ ServeOptions parse_serve_options(int argc, char** argv) {
     }
     bool default_max_tokens_explicit = false;
     bool kv_capacity_explicit        = false;
+    std::optional<std::uint64_t> kv_capacity_headroom_mib;
     if (argc >= 2 && (std::string(argv[1]) == "--help" || std::string(argv[1]) == "-h")) {
         options.help_requested = true;
         return options;
@@ -190,6 +194,9 @@ ServeOptions parse_serve_options(int argc, char** argv) {
         } else if (arg == "--kv-capacity") {
             options.kv_capacity  = parse_kv_capacity(require_value("--kv-capacity"));
             kv_capacity_explicit = true;
+        } else if (arg == "--kv-capacity-headroom") {
+            kv_capacity_headroom_mib =
+                parse_u64(require_value("--kv-capacity-headroom"), "kv-capacity-headroom");
         } else if (arg == "--kv-ram-capacity") {
             options.kv_ram_capacity_bytes =
                 parse_kv_ram_capacity_bytes(require_value("--kv-ram-capacity"));
@@ -323,6 +330,17 @@ ServeOptions parse_serve_options(int argc, char** argv) {
     }
     if (!kv_capacity_explicit) {
         options.kv_capacity = KvCapacityPolicy::explicit_capacity(options.max_context);
+    }
+    if (kv_capacity_headroom_mib) {
+        if (options.kv_capacity.mode != KvCapacityMode::Automatic) {
+            throw std::invalid_argument("--kv-capacity-headroom requires --kv-capacity auto");
+        }
+        constexpr std::uint64_t mib = 1024ULL * 1024ULL;
+        if (*kv_capacity_headroom_mib > std::numeric_limits<std::size_t>::max() / mib) {
+            throw std::invalid_argument("--kv-capacity-headroom is too large");
+        }
+        options.kv_capacity.automatic_headroom_bytes =
+            static_cast<std::size_t>(*kv_capacity_headroom_mib * mib);
     }
     if (options.port <= 0 || options.port > 65535) {
         throw std::invalid_argument("--port must be in [1,65535]");

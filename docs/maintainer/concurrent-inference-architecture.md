@@ -691,7 +691,7 @@ The optional MTP KV pool is physically separate from Main Text but is sized by t
 target-specific profile. 设 `S=max_context`、`P` 为 page size、`L=ceil(S/P)`、
 `C=max_concurrency`、`M_min=max(L,C)`、`M_max=C*L`。Explicit policy 从用户 token capacity 得到
 `M=ceil(K_main/P)`；Automatic policy 在权重加载后保留 headroom `R`，从完整 target physical layout 的
-reservation curve 直接求出 `F-R` 可容纳的最大 `M`。CLI/server 使用 `R=1 GiB`，并在完整 startup 后
+reservation curve 直接求出 `F-R` 可容纳的最大 `M`。CLI/server 默认 `R=64 MiB`（`--kv-capacity-headroom`），并在完整 startup 后
 报告实际 free memory。Main Text uses `M` physical page groups and each allocation has logical
 capacity `L`; MTP uses
 `M + C*ceil((K_draft-1)/P)` 个 physical groups，logical capacity 同样为 `L`，其中 `K_draft` 是

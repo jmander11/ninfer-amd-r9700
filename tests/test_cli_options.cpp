@@ -92,6 +92,19 @@ int main() {
                           help.find("--kv-ram-capacity") != std::string::npos,
                       "CLI help omits the fixed-cache capacity controls");
 
+    const ninfer::cli::Options headroom =
+        parse({"ninfer", "model.ninfer", "--prompt", "hi", "--kv-capacity", "auto",
+               "--kv-capacity-headroom", "512"});
+    failures += check(headroom.kv_capacity.mode == ninfer::KvCapacityMode::Automatic &&
+                          headroom.kv_capacity.automatic_headroom_bytes ==
+                              512ULL * 1024ULL * 1024ULL,
+                      "--kv-capacity-headroom did not set automatic headroom in MiB");
+    bool headroom_rejected = false;
+    try {
+        (void)parse({"ninfer", "model.ninfer", "--prompt", "hi", "--kv-capacity-headroom", "512"});
+    } catch (const std::invalid_argument&) { headroom_rejected = true; }
+    failures += check(headroom_rejected, "--kv-capacity-headroom without auto was accepted");
+
     const ninfer::cli::Options mtp_vision =
         parse({"ninfer", "model.ninfer", "--prompt", "hi", "--spec", "mtp",
                "--draft-tokens", "3", "--vision"});

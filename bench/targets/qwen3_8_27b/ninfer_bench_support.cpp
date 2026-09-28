@@ -293,7 +293,7 @@ std::string usage_text(std::string_view program) {
         << ")\n"
         << "  --max-ctx <tokens>          override auto-sized context capacity\n"
         << "  --kv-capacity <workload|auto> exact workload capacity or maximum capacity with\n"
-        << "                              the standard 1 GiB headroom (default: workload)\n"
+        << "                              the default 64 MiB headroom (default: workload)\n"
         << "  --prefill-chunk <tokens>    multiple of " << kPrefillChunkAlignment
         << " (default: " << kDefaultPrefillChunk << ")\n"
         << "  --concurrency <1..4>        concurrent Engine lanes (default: 1);\n"

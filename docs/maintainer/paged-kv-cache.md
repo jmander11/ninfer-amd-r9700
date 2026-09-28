@@ -101,8 +101,10 @@ B_step = B(M_min+1) - B(M_min)
 M      = min(M_max, M_min + floor((F-R-B_min)/B_step))
 ```
 
-`F` is device memory available after weights and `R` is the configured sizing headroom. The CLI
-and server default to 1 GiB. The same production layout builder supplies `B_min` and `B_step`; the
+`F` is device memory available after weights and `R` is the configured sizing headroom
+(`--kv-capacity-headroom`, default 64 MiB). The Engine allocates no device memory after startup, so
+`R` only covers driver-side growth such as lazily allocated kernel scratch; raise it when a desktop
+or another process shares the GPU. Startup failures in automatic mode name the option. The same production layout builder supplies `B_min` and `B_step`; the
 common resolver does not duplicate model dimensions or bytes-per-token formulas.
 
 The runtime reports configured `S`, resolved `M*P`, page counts, reservation bytes, headroom, and

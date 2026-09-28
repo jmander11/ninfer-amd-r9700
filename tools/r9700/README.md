@@ -1184,7 +1184,9 @@ W8 route additionally owns complete `[248320,5120]` device code/scale extents, p
 checks IDs through 248319 bit-exactly against signed-code times stored-FP16-scale, and rejects a
 short payload and incorrect K padding. Its 1,288.36 MiB fixture measured 0.013 ms for the eight-row
 gather in the qualifying ROCm-event observation; that timing describes the check, not an embedding
-route selection. MTP cases also reject malformed logical shapes and partial byte-range aliases. Build and run the
+route selection. The production Q4G64 N16K16 embedding route is checked the same way at the
+complete `[248320,5120]` extent against independent logical codes times stored-FP16 scales; the structural corpus uses 104 features so the final code word
+exercises the partial-word stores. MTP cases also reject malformed logical shapes and partial byte-range aliases. Build and run the
 standalone form with
 `make -C tools/r9700 build/eager_op_qual`.
 
