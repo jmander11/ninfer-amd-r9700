@@ -200,6 +200,23 @@ greedy continuations diverge. NIAH (`profiles/bench/r9700-niah-fp8lut4-head-2026
 and multikey greedy 20/20 each at 8K-128K and 5/5 each at 240K, sampled multikey 50/50 (8K) and
 45/45 (32K-128K), identical to production.
 
+**Attention gate/value and output GPTQ (promoted into `r9700-fp8lut4`, 2026-09-28).** The 7
+FP8LUT4 attention gate/value and 13 output projections GPTQ-rounded (damping 0.1) instead of
+independently; query/key stays independent (GPTQ there failed 8K multikey NIAH). Paired against
+the head-promoted production artifact (`profiles/ppl/r9700-attn-vo-gptq-20260928/`):
+
+| Cell | dNLL vs BF16 | paired - previous | new severe (cap) | greedy flips |
+|---|---:|---:|---:|---:|
+| 8K prefill | +0.0129 | -0.0017 +/- 0.0023 | 3 (5) | 7.8% |
+| 8K decode | +0.0122 | -0.0013 +/- 0.0023 | 2 (5) | 7.4% |
+| 32K prefill | +0.0113 | -0.0015 +/- 0.0012 | 13 (17), was 19 | 6.8% |
+| 32K decode | +0.0099 | -0.0028 +/- 0.0012 | 13 (17) | 6.6% |
+
+All four cells move the same way, and 32K prefill now passes its severe cap. NIAH
+(`profiles/bench/r9700-niah-attn-vo-gptq-20260928/`): standard and multikey greedy 20/20 each at
+8K-128K and 5/5 each at 240K, sampled multikey 50/50 (8K) and 45/45 (32K-128K). Format, size and
+kernels are unchanged, so speed is too.
+
 **Protected FP8 projections as FP8LUT4 (not selected, PPL-costing).** Re-encoding the 26
 row-scaled FP8 protections as GPTQ FP8LUT4 too (0.62 GB less per token) gives ordinary decode
 36.78 -> 38.27 tok/s (+4.0%) and prefill 8K +0.6%, at +0.003 +/- 0.002 nats/token paired against

@@ -7,8 +7,9 @@ the input second moments of the calibration sequences (`calibration.InputMoments
 layer-major through the BF16 reference in lock-step with the object order; the head against the
 final-norm moments). Every other object (FP8 protections, embeddings, draft head, MTP,
 DFlash2 companion, Vision, resources) is copied byte-exact from the base artifact.
-`--reuse-layers` copies the Text-layer FP8LUT4 objects byte-exact from an existing
-`r9700-fp8lut4` artifact converted with the same calibration and damping.
+`--reuse-layers` copies each Text-layer FP8LUT4 object byte-exact from an existing
+`r9700-fp8lut4` artifact of the same calibration and damping whose receipt records the same
+rounding (GPTQ or independent) for it; the others are re-encoded.
 """
 from __future__ import annotations
 
@@ -27,6 +28,9 @@ from tools.artifact.container import (
 # the 17408-wide MLP down input overfits at low damping.
 DAMPING = {"mlp/down": 0.3}
 DEFAULT_DAMPING = 0.1
+# Roles rounded independently (no GPTQ): GPTQ on attention query/key too failed 8K multikey NIAH,
+# while GPTQ on gate/value and output passes it and lowers NLL.
+INDEPENDENT_ROLES = ("attention/query_key",)
 HEAD = "text/output_head"
 HEAD_DAMPING = 0.1
 
@@ -83,6 +87,7 @@ def convert(args) -> None:
                 prior["source_model"] != str(args.model.resolve())):
             raise ValueError("--reuse-layers needs an r9700-fp8lut4 artifact of this calibration")
         prior_digests = {row["name"]: row["sha256"] for row in prior["objects"]}
+        prior_origins = {row["name"]: row["origin"] for row in prior["objects"]}
         reuse = Artifact(args.reuse_layers)
         if reuse.identity.weights_id != WEIGHTS_ID:
             reuse.close()
@@ -93,7 +98,8 @@ def convert(args) -> None:
                                    sha256=calibration_sha, tokens=moments.tokens,
                                    rounding="gptq-block128",
                                    damping=dict(DAMPING, default=DEFAULT_DAMPING,
-                                                output_head=HEAD_DAMPING)),
+                                                output_head=HEAD_DAMPING),
+                                   independent_roles=list(INDEPENDENT_ROLES)),
                   objects=[])
     with Artifact(args.base) as base, ShardReader(args.model) as reader, \
             (reuse if reuse is not None else contextlib.nullcontext()):
@@ -121,36 +127,36 @@ def convert(args) -> None:
                         calibration=calibration), record))
                     del tensor, calibration
                     print(obj.name, flush=True)
-                elif selected(obj) and reuse is not None:
-                    layer = int(obj.name.split("/")[2])
-                    while moments.next_layer <= layer:
-                        moments.layer(moments.next_layer)
-                    record["origin"] = "reused-fp8lut4-gptq"
-                    if reuse.find(obj.name).format != FP8LUT4:
-                        raise ValueError(f"reused {obj.name} is not FP8LUT4")
-                    writer.write(obj.name, recorded(copied(reuse, obj.name), record))
-                    if record["sha256"] != prior_digests.get(obj.name):
-                        raise ValueError(f"reused {obj.name} differs from its receipt")
                 elif selected(obj):
                     layer = int(obj.name.split("/")[2])
                     while moments.next_layer <= layer:
                         layer_moments = moments.layer(moments.next_layer)
                     if moments.next_layer != layer + 1:
                         raise ValueError(f"{obj.name} is out of layer-major order")
-                    tensor = source_recipe.materialize_recipe(
-                        source_recipe.RECIPES_BY_NAME[obj.name], reader)
-                    if obj.name.endswith("/mlp/gate_up"):
-                        tensor = fp8lut4_codec.interleave_gate_up(tensor)
                     role = "/".join(obj.name.split("/")[3:])
-                    calibration = None if role.startswith("attention/") else fp8lut4_codec.Calibration(
-                        layer_moments[role], DAMPING.get(role, DEFAULT_DAMPING))
-                    record["origin"] = ("original-bf16-source-fp8lut4" if calibration is None
-                                        else "original-bf16-source-fp8lut4-gptq")
-                    writer.write(obj.name, recorded(fp8lut4_codec.encode_chunks(
-                        tensor, device=device, rows_per_chunk=tensor.shape[0],
-                        calibration=calibration), record))
-                    del tensor, calibration
-                    print(obj.name, flush=True)
+                    gptq = role not in INDEPENDENT_ROLES
+                    rounding = "fp8lut4-gptq" if gptq else "fp8lut4"
+                    if reuse is not None and prior_origins[obj.name].endswith("-" + rounding):
+                        # Same rounding as this recipe: copy the prior encoding byte-exact.
+                        record["origin"] = "reused-" + rounding
+                        if reuse.find(obj.name).format != FP8LUT4:
+                            raise ValueError(f"reused {obj.name} is not FP8LUT4")
+                        writer.write(obj.name, recorded(copied(reuse, obj.name), record))
+                        if record["sha256"] != prior_digests.get(obj.name):
+                            raise ValueError(f"reused {obj.name} differs from its receipt")
+                    else:
+                        tensor = source_recipe.materialize_recipe(
+                            source_recipe.RECIPES_BY_NAME[obj.name], reader)
+                        if obj.name.endswith("/mlp/gate_up"):
+                            tensor = fp8lut4_codec.interleave_gate_up(tensor)
+                        calibration = fp8lut4_codec.Calibration(
+                            layer_moments[role], DAMPING.get(role, DEFAULT_DAMPING)) if gptq else None
+                        record["origin"] = "original-bf16-source-" + rounding
+                        writer.write(obj.name, recorded(fp8lut4_codec.encode_chunks(
+                            tensor, device=device, rows_per_chunk=tensor.shape[0],
+                            calibration=calibration), record))
+                        del tensor, calibration
+                        print(obj.name, flush=True)
                 else:
                     record["origin"] = "base-copy-exact"
                     writer.write(obj.name, recorded(copied(base, obj.name), record))

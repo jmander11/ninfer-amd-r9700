@@ -100,13 +100,14 @@ permuted. The binder uses the selective-cap base inventory and switches exactly 
 matrices and output head to FP8LUT4; the head runs through the `ops::linear` FP8LUT4 route at
 every width.
 
-The GDN and MLP FP8LUT4 words are GPTQ-rounded: the BF16 reference
+The FP8LUT4 words except attention query/key are GPTQ-rounded: the BF16 reference
 (`tools/reference/qwen3_8_27b_bf16`) evaluates 128 calibration sequences of 2048 tokens
 layer-major, in lock-step with the object order, and each projection is rounded
 column-sequentially against its inputs' second moments (`fp8lut4_codec.Calibration`; mean-diagonal
 damping 0.3 for MLP down, 0.1 otherwise, chosen on held-out calibration sequences); the output
-head is rounded the same way against the second moment of the final-RMSNorm output (damping 0.1). Attention
-projections keep independent rounding: GPTQ there failed 8K multikey NIAH (5/10 sampled runs).
+head is rounded the same way against the second moment of the final-RMSNorm output (damping
+0.1). Attention gate/value and output joined on 2026-09-28; attention query/key keeps
+independent rounding: GPTQ there failed 8K multikey NIAH (5/10 sampled runs).
 The calibration set (`calibration_corpus.py`) is 64 windows of rendered opencode sessions, 20 of
 OpenWebUI conversations, 28 of llama.cpp sources and 16 of news text; no window shares a 32-token
 span with the PPL corpora, and its manifest records every input file. Conversion needs the GPU
@@ -121,9 +122,10 @@ python3.11 -m tools.convert.qwen3_8_27b_r9700.convert_fp8lut4 \
   --out <new.ninfer>
 ```
 
-`--reuse-layers <existing r9700-fp8lut4.ninfer>` copies the Text-layer objects byte-exact from an
-artifact of the same calibration and damping (checked against its receipt), leaving only the
-calibration pass and the head encoding.
+`--reuse-layers <existing r9700-fp8lut4.ninfer>` copies each Text-layer object byte-exact from an
+artifact of the same calibration and damping whose receipt records the same rounding (GPTQ or
+independent) for it (digests checked against that receipt); the calibration pass, the head and
+any object whose rounding changed are encoded afresh.
 
 FP8LUT4 Linears run per-token E4M3 activations: prefill a 256-token x 128-row FP8 WMMA GEMM with the
 group scale folded into the decoded weight bytes, verification widths a small-T WMMA kernel, one
