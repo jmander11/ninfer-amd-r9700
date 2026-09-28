@@ -26,8 +26,8 @@ FP8LUT4 artifact was admitted; it remains in git history.
 - [ ] `QUALITY-GAINS` Cheap quality improvements measured against the BF16 8K/32K admission
   cells. Done 2026-09-28: the GPTQ FP8LUT4 output head (-0.006 to -0.008 nats/token, promoted
   into `r9700-fp8lut4`); GPTQ on attention gate/value and output (-0.0013 to -0.0028, NIAH
-  passes; query/key stays independent). Remaining: GPTQ activation ordering, a larger usage
-  calibration set. Decode
+  passes; query/key stays independent). Rejected: group-wise GPTQ activation ordering (+0.0003 to
+  +0.0043). Remaining: a larger usage calibration set. Decode
   is not a lever here: Q4G64 and FP8LUT4 are the same size and the Q4 drafter kernels already
   read at ~600 GB/s.
 - [ ] `CLOCKS-README` [user-gated; `LONGCTX-PREFILL` is closed] Matched README benchmarks at stock

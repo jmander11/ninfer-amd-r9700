@@ -217,6 +217,13 @@ All four cells move the same way, and 32K prefill now passes its severe cap. NIA
 8K-128K and 5/5 each at 240K, sampled multikey 50/50 (8K) and 45/45 (32K-128K). Format, size and
 kernels are unchanged, so speed is too.
 
+**GPTQ activation ordering (rejected, 2026-09-28).** Group-wise act-order (32-wide groups in
+descending diag(H) energy, columns within a group likewise, so each codebook search still sees one
+contiguous group) on every GPTQ role and the head lowered synthetic calibrated output error 2-6%,
+but against the attention-GPTQ production artifact it is worse in all four BF16-source cells:
++0.0013 / +0.0043 / +0.0003 / +0.0038 nats/token (8K prefill, 8K decode, 32K prefill, 32K decode;
+`profiles/ppl/r9700-actorder-20260928/`). Not adopted; the code was removed.
+
 **Protected FP8 projections as FP8LUT4 (not selected, PPL-costing).** Re-encoding the 26
 row-scaled FP8 protections as GPTQ FP8LUT4 too (0.62 GB less per token) gives ordinary decode
 36.78 -> 38.27 tok/s (+4.0%) and prefill 8K +0.6%, at +0.003 +/- 0.002 nats/token paired against
