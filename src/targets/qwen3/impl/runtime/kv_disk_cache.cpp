@@ -1129,6 +1129,7 @@ KVDiskCache::KVDiskCache(DiskOpenConfig config) : config_(std::move(config)) {
             throw std::runtime_error(std::string(what) + ": " + hipGetErrorName(err));
         }
     };
+    require_hip(hipGetDevice(&hip_device_), "KV disk cache device query failed");
     try {
         require_hip(hipHostAlloc(&restore_window_allocation_,
                                    restore_window_bytes_ + kDiskPageIoAlignment - 1,
@@ -8024,6 +8025,8 @@ void KVDiskCache::stop_io_threads() noexcept {
 }
 
 void KVDiskCache::restore_loop() {
+    // A bind failure resurfaces on this thread's first checked HIP call.
+    (void)hipSetDevice(hip_device_);
     for (;;) {
         Job job;
         {
@@ -8079,6 +8082,8 @@ void KVDiskCache::restore_loop() {
 }
 
 void KVDiskCache::io_loop() {
+    // A bind failure resurfaces on this thread's first checked HIP call.
+    (void)hipSetDevice(hip_device_);
     for (;;) {
         Job job;
         {

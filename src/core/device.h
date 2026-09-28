@@ -29,6 +29,8 @@ struct DeviceContext {
     DeviceContext& operator=(DeviceContext&& other) noexcept;
 
     [[nodiscard]] bool is_gfx1201() const noexcept;
+    void bind_to_current_thread() const;
+    void bind_to_current_thread_noexcept() const noexcept;
     [[nodiscard]] std::size_t total_vram() const noexcept;
     void synchronize() const;
     void synchronize_all() const;

@@ -140,10 +140,11 @@ public:
         active            = std::move(constructed.active);
         load              = std::move(constructed.load);
         sampling_defaults = constructed.sampling_defaults;
-        executor          = std::make_unique<Executor>(*active, options);
+        executor          = std::make_unique<Executor>(*active, device, options);
     }
 
     ~Impl() noexcept {
+        device.bind_to_current_thread_noexcept();
         executor.reset();
         try {
             device.synchronize_all();

@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <deque>
 #include <exception>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -45,7 +46,8 @@ public:
     using Plan     = typename Package::RequestPlan;
     using Clock    = std::chrono::steady_clock;
 
-    ConcurrentExecutor(Instance& instance, const EngineOptions& options)
+    ConcurrentExecutor(Instance& instance, const DeviceContext& device,
+                       const EngineOptions& options)
         : instance_(instance), max_concurrency_(options.max_concurrency),
           max_outstanding_(static_cast<std::size_t>(options.max_concurrency) +
                            options.max_pending_requests),
@@ -64,7 +66,26 @@ public:
         // the Engine. An idle worker may otherwise wait indefinitely before its
         // first request-driven snapshot.
         publish_runtime_stats();
-        worker_ = std::thread([this] { worker_loop(); });
+        // The worker issues all model HIP work; bind it to the Engine device before the first
+        // request so a non-zero --device never falls back to the thread-default device 0.
+        std::promise<void> startup;
+        std::future<void> started = startup.get_future();
+        worker_ = std::thread([this, &device, startup = std::move(startup)]() mutable {
+            try {
+                device.bind_to_current_thread();
+                startup.set_value();
+            } catch (...) {
+                startup.set_exception(std::current_exception());
+                return;
+            }
+            worker_loop();
+        });
+        try {
+            started.get();
+        } catch (...) {
+            worker_.join();
+            throw;
+        }
     }
 
     ~ConcurrentExecutor() noexcept {

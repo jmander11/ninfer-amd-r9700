@@ -154,6 +154,15 @@ bool DeviceContext::is_gfx1201() const noexcept {
     return std::string_view(props.gcnArchName) == "gfx1201";
 }
 
+void DeviceContext::bind_to_current_thread() const {
+    const hipError_t error = hipSetDevice(device);
+    if (error != hipSuccess) { throw std::runtime_error(hip_error_message("hipSetDevice", error)); }
+}
+
+void DeviceContext::bind_to_current_thread_noexcept() const noexcept {
+    log_hip_error("hipSetDevice", hipSetDevice(device));
+}
+
 std::size_t DeviceContext::total_vram() const noexcept { return props.totalGlobalMem; }
 
 void DeviceContext::synchronize() const {
