@@ -4,6 +4,8 @@
 #include "ninfer/ops/linear.h"
 #include <cstring>
 #include <functional>
+#include <sys/file.h>
+#include <thread>
 
 namespace {
 constexpr unsigned Copies=3;
@@ -39,6 +41,29 @@ template<class T> struct Guarded {
         }
     }
 };
+// Optional in-process GPU lease: the FP64 CPU references run unleased and the
+// lease covers only device allocation, launches and readbacks of each cell.
+// Do not also wrap the process in flock(1) on the same path (self-deadlock).
+std::filesystem::path gpu_lock_path;
+struct GpuLease {
+    int fd=-1;
+    GpuLease() {
+        if(gpu_lock_path.empty())return;
+        fd=::open(gpu_lock_path.c_str(),O_RDONLY|O_CLOEXEC);
+        if(fd<0)fail("cannot open GPU lock "+gpu_lock_path.string());
+        while(::flock(fd,LOCK_EX)!=0)if(errno!=EINTR){::close(fd);fail("cannot take GPU lock");}
+    }
+    ~GpuLease(){if(fd>=0)::close(fd);}
+    GpuLease(const GpuLease&)=delete;GpuLease& operator=(const GpuLease&)=delete;
+};
+// Each index is evaluated by one thread in its own fixed order, so results are
+// identical to the sequential loop.
+void parallel_for(unsigned count,const std::function<void(unsigned)>& body) {
+    const unsigned workers=std::max(1U,std::min({count,8U,std::max(1U,std::thread::hardware_concurrency()/2)}));
+    std::vector<std::thread> threads;
+    for(unsigned w=0;w<workers;++w)threads.emplace_back([&,w]{for(unsigned i=w;i<count;i+=workers)body(i);});
+    for(auto& thread:threads)thread.join();
+}
 template<class T> void exact(const std::vector<T>& a,const std::vector<T>& b,const char* why) {
     if(a.size()!=b.size() || std::memcmp(a.data(),b.data(),a.size()*sizeof(T)))fail(why);
 }
@@ -86,7 +111,7 @@ std::vector<double> oracle(unsigned t,const HostActivation& a,const DecodeDot8We
                            std::vector<double>* absolute_group_sums=nullptr) {
     std::vector<double> result(t*N);
     if(absolute_group_sums)absolute_group_sums->assign(t*N,0.0);
-    for(unsigned token=0;token<t;++token)for(unsigned row=0;row<N;++row) {
+    parallel_for(N,[&](unsigned row){for(unsigned token=0;token<t;++token) {
         double sum=0;
         for(unsigned group=0;group<G;++group) {
             int dot=0;
@@ -103,7 +128,7 @@ std::vector<double> oracle(unsigned t,const HostActivation& a,const DecodeDot8We
             if(absolute_group_sums)(*absolute_group_sums)[token*N+row]+=std::abs(term);
         }
         result[token*N+row]=sum;
-    }
+    }});
     return result;
 }
 struct Error {double relative_l2=0,maximum_absolute=0,reference_maximum=0;};
@@ -169,7 +194,9 @@ PublicReference public_oracle(unsigned tokens,const std::vector<hip_bfloat16>& i
     std::vector<double> decoded_scales(weights.scales.size());
     for(std::size_t i=0;i<decoded_scales.size();++i)
         decoded_scales[i]=half_value(weights.scales[i]);
-    for(unsigned token=0;token<tokens;++token)for(const unsigned row:reference.rows) {
+    const auto count=static_cast<unsigned>(reference.rows.size());
+    reference.values.resize(static_cast<std::size_t>(tokens)*count);
+    parallel_for(count,[&](unsigned i){const unsigned row=reference.rows[i];for(unsigned token=0;token<tokens;++token) {
         double sum=0;
         for(unsigned k=0;k<K;++k) {
             const unsigned group=k/64,lane=k%64;
@@ -179,8 +206,8 @@ PublicReference public_oracle(unsigned tokens,const std::vector<hip_bfloat16>& i
             const double scale=decoded_scales[(row/16)*G*16+group*16+row%16];
             sum+=static_cast<double>(static_cast<float>(input[token*K+k]))*code*scale;
         }
-        reference.values.push_back(sum);
-    }
+        reference.values[static_cast<std::size_t>(token)*count+i]=sum;
+    }});
     return reference;
 }
 struct PublicError {
@@ -259,15 +286,38 @@ void codec(unsigned t,Output& o,const HostActivation& expected,hipStream_t s) {
     transfer(&status,w.status,4,hipMemcpyDeviceToHost,s);
     if(low!=expected.low || high!=expected.high || scales!=expected.scales || status)fail("exact A8 codec/status failed");
 }
-void cell(unsigned t,hipStream_t s,std::ostream& out) {
-    const auto host=make_decode_dot8_weights(N,K);const auto base=make_decode_dot8_input(K);
-    std::vector<hip_bfloat16> x(t*K);
+// One represented public input with its complete CPU references.
+struct Fixture {
+    std::vector<hip_bfloat16> x;HostActivation represented;A8ErrorBudget budget;PublicReference reference;
+};
+Fixture fixture(unsigned t,std::vector<hip_bfloat16> x,const DecodeDot8Weights& host) {
+    Fixture f{std::move(x)};f.represented=quantize_host(f.x,t,K);
+    f.budget=a8_error_budget(t,f.represented,host);f.reference=public_oracle(t,f.x,host);return f;
+}
+// Device outputs of one verification pass, compared after the GPU lease ends.
+struct Run {
+    const Fixture* fixture;bool eager;
+    std::vector<hip_bfloat16> control;std::array<std::vector<hip_bfloat16>,Copies> actual;
+};
+std::vector<hip_bfloat16> activation(unsigned t) {
+    const auto base=make_decode_dot8_input(K);std::vector<hip_bfloat16> x(t*K);
     for(unsigned token=0;token<t;++token)for(unsigned k=0;k<K;++k)
         x[token*K+k]=hip_bfloat16(static_cast<float>(base[(k/64)*64+(k+token*13)%64])*(token+4)/8.0F);
+    return x;
+}
+void cell(unsigned t,hipStream_t s,std::ostream& out) {
+    const auto host=make_decode_dot8_weights(N,K);const auto x=activation(t);
+    auto poisoned=x;poisoned[(t>1U?K:0U)+17].data=0x7fc1;
+    auto negated=x;for(auto& v:negated)v=hip_bfloat16(-0.75F*static_cast<float>(v));
+    const Fixture original=fixture(t,x,host),negative=fixture(t,std::move(negated),host),
+        zero=fixture(t,std::vector<hip_bfloat16>(t*K,hip_bfloat16(0.0F)),host);
+    std::vector<Run> runs;unsigned malformed=0;
+    {
+    const GpuLease lease;
     Guarded<hip_bfloat16> input(x.size(),s);input.put(x,s);Output candidate(t,s),control(t,s);
     std::array<std::unique_ptr<Weights>,Copies> weights;
     for(auto& w:weights)w=std::make_unique<Weights>(host,s);
-    const auto valid=arguments(t,input,*weights[0],candidate);unsigned malformed=0;
+    const auto valid=arguments(t,input,*weights[0],candidate);
     auto reject=[&](auto a,hipStream_t stream){if(owning_launch(a,stream)!=hipErrorInvalidValue)fail("malformed accepted");++malformed;};
     reject(valid,nullptr);
     auto bad=valid;bad.tokens=1;reject(bad,s);bad=valid;bad.tokens=7;reject(bad,s);
@@ -286,12 +336,8 @@ void cell(unsigned t,hipStream_t s,std::ostream& out) {
     std::array<std::unique_ptr<Graph>,Copies> graphs;
     for(unsigned i=0;i<Copies;++i)
         graphs[i]=std::make_unique<Graph>(s,[&]{launch(arguments(t,input,*weights[i],candidate),s);});
-    double max_l2=0,max_abs=0,max_gross_fraction=0;unsigned cases=0,mutations_rejected=0;
-    PublicError public_error{};std::vector<unsigned> public_rows;
-    auto verify_fixture=[&](bool eager){
-        const auto represented=quantize_host(x,t,K);const auto budget=a8_error_budget(t,represented,host);
-        const auto& expected=budget.represented;
-        const auto public_expected=public_oracle(t,x,host);public_rows=public_expected.rows;
+    auto run_fixture=[&](const Fixture& f,bool eager){
+        Run run{&f,eager};
         // An unchanged generic route is supplementary regression evidence, not
         // the oracle. Check it against the same complete public-input formula.
         const auto control_args=arguments(t,input,*weights[0],control);
@@ -302,25 +348,7 @@ void cell(unsigned t,hipStream_t s,std::ostream& out) {
             control_args.weight_codes,control_args.weight_code_bytes,
             control_args.weight_scales,control_args.weight_scale_bytes,
             control_args.output,t,N,K,K},s));
-        const auto control_values=control.value.read(s);
-        compare_public(t,control_values,public_expected,budget);
-        if(eager) {
-            // A profile allowance must not make this a plausibility test.
-            // Deliberately corrupt a real output at its largest-magnitude row.
-            const auto largest=static_cast<std::size_t>(std::max_element(
-                control_values.begin(),control_values.end(),[](auto a,auto b){
-                    return std::abs(static_cast<float>(a))<std::abs(static_cast<float>(b));
-                })-control_values.begin());
-            for(float multiplier:{-1.0F,0.0F,1.125F}) {
-                auto damaged=control_values;
-                damaged[largest]=hip_bfloat16(multiplier*static_cast<float>(damaged[largest]));
-                bool rejected=false;
-                try {(void)compare_public(t,damaged,public_expected,budget);}
-                catch(const std::runtime_error&){rejected=true;}
-                if(!rejected)fail("A8 criterion accepted output corruption");
-                ++mutations_rejected;
-            }
-        }
+        run.control=control.value.read(s);
         launch(arguments(t,input,*weights[0],candidate),s);
         const auto eager_reference=candidate.value.read(s);
         for(unsigned i=0;i<Copies;++i) {
@@ -329,9 +357,54 @@ void cell(unsigned t,hipStream_t s,std::ostream& out) {
             HIP_CHECK(hipMemsetAsync(candidate.scratch.data(),0xff,candidate.scratch.bytes(),s));
             if(eager)launch(arguments(t,input,*weights[i],candidate),s);
             else graphs[i]->run(s);
-            codec(t,candidate,represented,s);const auto actual=candidate.value.read(s);
-            const auto e=compare(actual,expected);
-            const auto pe=compare_public(t,actual,public_expected,budget);
+            codec(t,candidate,f.represented,s);run.actual[i]=candidate.value.read(s);
+            candidate.value.guards(s);candidate.scratch.guards(s);
+            exact(run.actual[i],eager_reference,"public eager/graph/allocation BF16 mismatch");
+            exact(input.read(s),f.x,"hidden mutation");input.guards(s);
+            exact(weights[i]->codes.read(s),host.codes,"code mutation");
+            exact(weights[i]->scales.read(s),host.scales,"scale mutation");
+            weights[i]->codes.guards(s);weights[i]->scales.guards(s);
+        }
+        runs.push_back(std::move(run));
+    };
+    run_fixture(original,true);run_fixture(original,false);
+    input.put(poisoned,s);graphs[0]->run(s);
+    for(auto* o:{&candidate}) {
+        const auto values=o->value.read(s);
+        if(!std::all_of(values.begin(),values.end(),[](auto v){return v.data==0x7fc1;}))fail("poison output/status propagation");
+        std::uint32_t status=0;transfer(&status,workspace(t,*o).status,4,hipMemcpyDeviceToHost,s);
+        if(!status)fail("poison status absent");
+    }
+    input.put(negative.x,s);
+    HIP_CHECK(hipMemsetAsync(candidate.scratch.data(),0xff,candidate.scratch.bytes(),s));run_fixture(negative,false);
+    input.put(zero.x,s);run_fixture(zero,false);
+    input.put(original.x,s);run_fixture(original,false);power();
+    }
+    double max_l2=0,max_abs=0,max_gross_fraction=0;unsigned mutations_rejected=0;
+    PublicError public_error{};
+    for(const auto& run:runs) {
+        const auto& f=*run.fixture;
+        compare_public(t,run.control,f.reference,f.budget);
+        if(run.eager) {
+            // A profile allowance must not make this a plausibility test.
+            // Deliberately corrupt a real output at its largest-magnitude row.
+            const auto largest=static_cast<std::size_t>(std::max_element(
+                run.control.begin(),run.control.end(),[](auto a,auto b){
+                    return std::abs(static_cast<float>(a))<std::abs(static_cast<float>(b));
+                })-run.control.begin());
+            for(float multiplier:{-1.0F,0.0F,1.125F}) {
+                auto damaged=run.control;
+                damaged[largest]=hip_bfloat16(multiplier*static_cast<float>(damaged[largest]));
+                bool rejected=false;
+                try {(void)compare_public(t,damaged,f.reference,f.budget);}
+                catch(const std::runtime_error&){rejected=true;}
+                if(!rejected)fail("A8 criterion accepted output corruption");
+                ++mutations_rejected;
+            }
+        }
+        for(const auto& actual:run.actual) {
+            const auto e=compare(actual,f.budget.represented);
+            const auto pe=compare_public(t,actual,f.reference,f.budget);
             public_error.relative_rms=std::max(public_error.relative_rms,pe.relative_rms);
             public_error.gross_rms=std::max(public_error.gross_rms,pe.gross_rms);
             public_error.public_bound_fraction=std::max(public_error.public_bound_fraction,pe.public_bound_fraction);
@@ -340,27 +413,9 @@ void cell(unsigned t,hipStream_t s,std::ostream& out) {
                                                                pe.zero_reference_nonzero_tokens);
             max_l2=std::max(max_l2,e.relative_l2);max_abs=std::max(max_abs,e.maximum_absolute);
             max_gross_fraction=std::max(max_gross_fraction,e.maximum_absolute/(0.01*e.reference_maximum+1e-5));
-            candidate.value.guards(s);candidate.scratch.guards(s);
-            exact(actual,eager_reference,"public eager/graph/allocation BF16 mismatch");
-            exact(input.read(s),x,"hidden mutation");input.guards(s);
-            exact(weights[i]->codes.read(s),host.codes,"code mutation");
-            exact(weights[i]->scales.read(s),host.scales,"scale mutation");
-            weights[i]->codes.guards(s);weights[i]->scales.guards(s);
         }
-        ++cases;
-    };
-    verify_fixture(true);verify_fixture(false);
-    const auto original=x;x[(t>1U?K:0U)+17].data=0x7fc1;input.put(x,s);graphs[0]->run(s);
-    for(auto* o:{&candidate}) {
-        const auto values=o->value.read(s);
-        if(!std::all_of(values.begin(),values.end(),[](auto v){return v.data==0x7fc1;}))fail("poison output/status propagation");
-        std::uint32_t status=0;transfer(&status,workspace(t,*o).status,4,hipMemcpyDeviceToHost,s);
-        if(!status)fail("poison status absent");
     }
-    x=original;for(auto& v:x)v=hip_bfloat16(-0.75F*static_cast<float>(v));input.put(x,s);
-    HIP_CHECK(hipMemsetAsync(candidate.scratch.data(),0xff,candidate.scratch.bytes(),s));verify_fixture(false);
-    std::fill(x.begin(),x.end(),hip_bfloat16(0.0F));input.put(x,s);verify_fixture(false);
-    x=original;input.put(x,s);verify_fixture(false);power();
+    const auto cases=static_cast<unsigned>(runs.size());
     out<<"{\"tokens\":"<<t<<",\"rows\":"<<N<<",\"columns\":"<<K<<",\"correctness\":{"
        <<"\"maximum_relative_l2\":"<<max_l2<<",\"maximum_absolute\":"<<max_abs
        <<",\"maximum_gross_cap_fraction\":"<<max_gross_fraction
@@ -377,21 +432,25 @@ void cell(unsigned t,hipStream_t s,std::ostream& out) {
        <<",\"historical_2pct_rms_10pct_gross_pass\":"
        <<(public_error.relative_rms<=0.02 && public_error.gross_rms<=0.10 &&
           public_error.zero_reference_nonzero_tokens==0?"true":"false")
-       <<",\"rows_checked\":"<<public_rows.size()<<",\"generic_control_oracle_checked\":true}}";
+       <<",\"rows_checked\":"<<original.reference.rows.size()<<",\"generic_control_oracle_checked\":true}}";
 }
 }
 // The paired small-batch launch (two projections of one prepared activation) through the public
 // shared-activation Op, each output checked against the complete FP64 public oracle bound.
 void pair_cell(unsigned t,unsigned n0,unsigned n1,hipStream_t s,std::ostream& out) {
     K=5120;G=K/64;
-    const auto base=make_decode_dot8_input(K);
-    std::vector<hip_bfloat16> x(t*K);
-    for(unsigned token=0;token<t;++token)for(unsigned k=0;k<K;++k)
-        x[token*K+k]=hip_bfloat16(static_cast<float>(base[(k/64)*64+(k+token*13)%64])*(token+4)/8.0F);
-    Guarded<hip_bfloat16> input(x.size(),s);input.put(x,s);
-    Guarded<std::uint8_t> scratch(linear::a8q4g64_activation_workspace_capacity_bytes(t,K),s);
+    const auto x=activation(t);const auto represented=quantize_host(x,t,K);
     const std::array<unsigned,2> rows{n0,n1};
     std::array<DecodeDot8Weights,2> host{make_decode_dot8_weights(n0,K),make_decode_dot8_weights(n1,K)};
+    std::array<A8ErrorBudget,2> budgets;std::array<PublicReference,2> references;
+    for(unsigned i=0;i<2;++i) {
+        N=rows[i];budgets[i]=a8_error_budget(t,represented,host[i]);references[i]=public_oracle(t,x,host[i]);
+    }
+    std::array<std::vector<hip_bfloat16>,2> actual;
+    {
+    const GpuLease lease;
+    Guarded<hip_bfloat16> input(x.size(),s);input.put(x,s);
+    Guarded<std::uint8_t> scratch(linear::a8q4g64_activation_workspace_capacity_bytes(t,K),s);
     std::array<std::unique_ptr<Weights>,2> weights{std::make_unique<Weights>(host[0],s),
                                                    std::make_unique<Weights>(host[1],s)};
     std::array<std::unique_ptr<Guarded<hip_bfloat16>>,2> outputs{
@@ -406,18 +465,16 @@ void pair_cell(unsigned t,unsigned n0,unsigned n1,hipStream_t s,std::ostream& ou
     HIP_CHECK(hipMemsetAsync(scratch.data(),0xff,scratch.bytes(),s));  // stale status/planes
     HIP_CHECK(linear::a8q4g64_shared_activation_linear(args,s));
     HIP_CHECK(hipStreamSynchronize(s));
-    const auto represented=quantize_host(x,t,K);
+    for(unsigned i=0;i<2;++i){actual[i]=outputs[i]->read(s);outputs[i]->guards(s);}
+    scratch.guards(s);input.guards(s);
+    }
     double worst_public=0,worst_arithmetic=0;
     for(unsigned i=0;i<2;++i) {
         N=rows[i];
-        const auto budget=a8_error_budget(t,represented,host[i]);
-        const auto reference=public_oracle(t,x,host[i]);
-        const auto error=compare_public(t,outputs[i]->read(s),reference,budget);
+        const auto error=compare_public(t,actual[i],references[i],budgets[i]);
         worst_public=std::max(worst_public,error.public_bound_fraction);
         worst_arithmetic=std::max(worst_arithmetic,error.arithmetic_bound_fraction);
-        outputs[i]->guards(s);
     }
-    scratch.guards(s);input.guards(s);
     out<<"{\"tokens\":"<<t<<",\"rows\":["<<n0<<','<<n1<<"],\"columns\":"<<K
        <<",\"maximum_public_norm_bound_fraction\":"<<worst_public
        <<",\"maximum_arithmetic_norm_bound_fraction\":"<<worst_arithmetic<<'}';
@@ -426,14 +483,17 @@ void pair_cell(unsigned t,unsigned n0,unsigned n1,hipStream_t s,std::ostream& ou
 int main(int argc,char** argv) {
  try {
     bool mlp_only=false,output_only=false,draft_only=false,projection_only=false,concurrent_only=false;
-    mlp_only=argc==4 && std::string_view(argv[3])=="--mlp-only";
-    output_only=argc==4 && std::string_view(argv[3])=="--output-only";
-    draft_only=argc==4 && std::string_view(argv[3])=="--draft-only";
-    projection_only=argc==4 && std::string_view(argv[3])=="--projection-only";
-    concurrent_only=argc==4 && std::string_view(argv[3])=="--concurrent-only";
-    if((argc!=3 && !mlp_only && !output_only && !draft_only && !projection_only && !concurrent_only) || std::string_view(argv[1])!="--out-json")
-        fail("usage: selected_q4_qual --out-json FRESH.json [--mlp-only|--output-only|--draft-only|--projection-only|--concurrent-only]");
-    const std::filesystem::path output=argv[2];require_fresh_output(output);power();
+    std::vector<std::string_view> args(argv+1,argv+argc);
+    if(args.size()>=2 && args[args.size()-2]=="--gpu-lock"){gpu_lock_path=args.back();args.resize(args.size()-2);}
+    const bool scoped=args.size()==3;
+    mlp_only=scoped && args[2]=="--mlp-only";
+    output_only=scoped && args[2]=="--output-only";
+    draft_only=scoped && args[2]=="--draft-only";
+    projection_only=scoped && args[2]=="--projection-only";
+    concurrent_only=scoped && args[2]=="--concurrent-only";
+    if((args.size()!=2 && !mlp_only && !output_only && !draft_only && !projection_only && !concurrent_only) || args[0]!="--out-json")
+        fail("usage: selected_q4_qual --out-json FRESH.json [--mlp-only|--output-only|--draft-only|--projection-only|--concurrent-only] [--gpu-lock PATH]");
+    const std::filesystem::path output=std::string(args[1]);require_fresh_output(output);power();
     HIP_CHECK(hipSetDevice(0));hipDeviceProp_t props{};HIP_CHECK(hipGetDeviceProperties(&props,0));
     char pci[32]{};HIP_CHECK(hipDeviceGetPCIBusId(pci,sizeof(pci),0));
     if(std::string_view(props.name)!="AMD Radeon AI PRO R9700" || std::string_view(props.gcnArchName)!="gfx1201" ||
