@@ -373,16 +373,16 @@ One propose block:
 4. Path selector (`dflash2_path_select`): unsorted top-16 of those logits, then the Markov score
    `score = unary + ⟨pred_code(prev) ⊙ W_h h_t , succ_code(cand)⟩`. Greedy chooses the maximum;
    ordinary truncated sampling draws from the temperature-scaled 16-way distribution and retains
-   that row as `q`. P-less always uses the greedy draft and records point-mass q; its temperature
-   controls the target distribution, not a nearly uniform draft shortlist.
+   that row as `q`. P-less draws from the same 16-way distribution at its separate draft
+   temperature (`--dflash-p-less-draft-temperature`, default 0.4; 0 is greedy with point-mass q);
+   its own temperature controls the target distribution.
    Selector RNG is keyed by request seed and absolute token position, independent of compact batch
    row. `--lm-head-draft` runs top-16 on the shortlist and gathers codebooks by token id.
 5. The 27B target verifies the chain in one causal forward of width `W=k+1`. Greedy accepts the
    matching prefix. Sampling uses Leviathan `min(1,p/q)` acceptance and samples the first correction
    from normalized `max(0,p-q)`; all-accepted rounds sample a target bonus. ReplaySSM Fold commits
-   the corresponding sequential prefix. Under p-less, verification uses point-mass q at each
-   drafted token regardless of a supplied selector-q buffer, full eligible-vocabulary target
-   support, and the first-position-only cycle-exit restriction. The R9700 package does not expose
+   the corresponding sequential prefix. Under p-less, verification uses the recorded selector q,
+   full eligible-vocabulary target support, and the first-position-only cycle-exit restriction. The R9700 package does not expose
    packed-tree or two-block runtime schedules. Production performance claims require matched
    whole-round acceptance and throughput evidence.
 

@@ -9,6 +9,7 @@
 #include <array>
 #include <bit>
 #include <cmath>
+#include <limits>
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
@@ -592,6 +593,124 @@ void run_chain(ninfer::DeviceContext& device, const Corpus& corpus,
     }
 }
 
+// P-less rows draw each hop from the 16-candidate softmax at their draft temperature and record
+// that law as q. Following the kernel's own picks, q must equal the FP64 softmax of the Markov
+// scores, every pick must lie in the support, and over independent seeds the first hop's picks
+// must follow q (chi-square).
+void run_sampled_chain(ninfer::DeviceContext& device, const Corpus& corpus,
+                       const ProjectionFixture& projection, DeviceFixture& data) {
+    constexpr float kDraftTemperature = 0.4F;
+    constexpr int kSeeds = 4000;
+    std::vector<ninfer::ops::SamplingConfig> configs(kB);
+    for (int row = 0; row < kB; ++row) {
+        configs[row].temperature = 2.0F;
+        configs[row].p_less = 1;
+        configs[row].draft_temperature = kDraftTemperature;
+        configs[row].seed = 197 + row;
+    }
+    ninfer::Tensor logits(data.logits.data(), ninfer::DType::BF16, {kV, kT, kB});
+    ninfer::Tensor hidden(data.hidden.data(), ninfer::DType::BF16, {kH, kT, kB});
+    ninfer::Tensor pred(data.predecessor.data(), ninfer::DType::BF16, {kR, kCodebookRows});
+    ninfer::Tensor succ(data.successor.data(), ninfer::DType::BF16, {kR, kCodebookRows});
+    ninfer::Tensor anchors(data.anchors.data(), ninfer::DType::I32, {kB});
+    ninfer::Tensor positions(data.positions.data(), ninfer::DType::I32, {kB});
+    ninfer::Tensor path(data.path.data(), ninfer::DType::I32, {kT, kB});
+    ninfer::Tensor selector_ids(data.selector_ids.data(), ninfer::DType::I32, {kTop, kT, kB});
+    ninfer::Tensor selector_q(data.selector_q.data(), ninfer::DType::FP32, {kTop, kT, kB});
+    const auto projected = project_hidden(corpus, projection, ProjectionKind::BF16);
+    ninfer::WorkspaceArena workspace(ninfer::ops::dflash2_path_select_workspace_capacity_bytes(
+        projection.bf16_view.qtype, kT, kT, kB));
+    const auto invoke = [&] {
+        data.configs.copy_from_host(configs.data(), configs.size() * sizeof(configs[0]));
+        ninfer::ops::dflash2_path_select(
+            logits, hidden, projection.bf16_view, pred, succ, anchors, positions,
+            static_cast<const ninfer::ops::SamplingConfig*>(data.configs.data()), path,
+            workspace, device.stream, nullptr, &selector_ids, &selector_q);
+        device.synchronize();
+    };
+    const auto oracle_q = [&](int token, int batch, int previous) {
+        const auto candidates = topk(corpus, token, batch, false);
+        std::vector<double> scores(kTop);
+        double best = -std::numeric_limits<double>::infinity();
+        for (int index = 0; index < kTop; ++index) {
+            scores[index] = markov_score(corpus, projected, candidates[index], previous, token,
+                                         batch);
+            best = std::max(best, scores[index]);
+        }
+        double sum = 0.0;
+        for (double& score : scores) {
+            score = std::exp((score - best) / kDraftTemperature);
+            sum += score;
+        }
+        for (double& score : scores) score /= sum;
+        return std::make_pair(candidates, scores);
+    };
+
+    invoke();
+    const auto picks = download<std::int32_t>(data.path, kT * kB);
+    const auto ids = download<std::int32_t>(data.selector_ids, kTop * kT * kB);
+    const auto q = download<float>(data.selector_q, kTop * kT * kB);
+    for (int batch = 0; batch < kB; ++batch) {
+        int previous = corpus.anchors[batch];
+        for (int token = 0; token < kT; ++token) {
+            const std::size_t column = column_index(token, batch);
+            const auto [candidates, law] = oracle_q(token, batch, previous);
+            bool picked_in_support = false;
+            for (int index = 0; index < kTop; ++index) {
+                if (ids[column * kTop + index] != candidates[index].token) {
+                    fail("sampled chain top-k support differs from the FP64 oracle");
+                }
+                if (std::abs(static_cast<double>(q[column * kTop + index]) - law[index]) > 5e-3) {
+                    fail("sampled chain q differs from the FP64 draft-temperature softmax");
+                }
+                picked_in_support |= picks[column] == candidates[index].token &&
+                                     q[column * kTop + index] > 0.0F;
+            }
+            if (!picked_in_support) fail("sampled chain draft lies outside its q support");
+            previous = picks[column];
+        }
+    }
+
+    const auto [first_candidates, first_law] = oracle_q(0, 0, corpus.anchors[0]);
+    std::vector<int> counts(kTop, 0);
+    for (int seed = 0; seed < kSeeds; ++seed) {
+        configs[0].seed = 1000003ULL * static_cast<unsigned long long>(seed) + 17ULL;
+        invoke();
+        const std::int32_t pick = download<std::int32_t>(data.path, 1)[0];
+        for (int index = 0; index < kTop; ++index) {
+            if (first_candidates[index].token == pick) ++counts[index];
+        }
+    }
+    double chi_square = 0.0;
+    int bins = 0;
+    double pooled_expected = 0.0;
+    double pooled_observed = 0.0;
+    for (int index = 0; index < kTop; ++index) {
+        const double expected = first_law[index] * kSeeds;
+        if (expected < 5.0) {
+            pooled_expected += expected;
+            pooled_observed += counts[index];
+            continue;
+        }
+        chi_square += (counts[index] - expected) * (counts[index] - expected) / expected;
+        ++bins;
+    }
+    if (pooled_expected >= 5.0) {
+        chi_square += (pooled_observed - pooled_expected) * (pooled_observed - pooled_expected) /
+                      pooled_expected;
+        ++bins;
+    }
+    // Critical value at p = 0.001 for up to 15 degrees of freedom.
+    constexpr double kChiSquareCritical = 37.7;
+    if (bins > 1 && chi_square > kChiSquareCritical) {
+        fail("sampled chain first-hop picks do not follow q (chi-square " +
+             std::to_string(chi_square) + ")");
+    }
+    std::cout << "dflash2-sampled-p-less: PASS draft_T=" << kDraftTemperature
+              << " q=FP64-softmax seeds=" << kSeeds << " chi_square=" << chi_square
+              << " bins=" << bins << '\n';
+}
+
 void run_tree(ninfer::DeviceContext& device, const Corpus& corpus,
               const ProjectionFixture& projection, DeviceFixture& data, ProjectionKind kind) {
     ninfer::Tensor logits(data.logits.data(), ninfer::DType::BF16, {kV, kT, kB});
@@ -770,6 +889,7 @@ int main(int argc, char** argv) {
         run_chain(device, corpus, projection, data, ProjectionKind::Q4, false);
         run_chain(device, corpus, projection, data, ProjectionKind::Q4, true);
         run_chain(device, corpus, projection, data, ProjectionKind::Q4, true, true, true);
+        run_sampled_chain(device, corpus, projection, data);
         run_tree(device, corpus, projection, data, ProjectionKind::W8);
         run_tree(device, corpus, projection, data, ProjectionKind::Q4);
         run_malformed_planes(device, projection, data);

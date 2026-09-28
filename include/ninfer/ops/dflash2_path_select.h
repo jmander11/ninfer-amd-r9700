@@ -43,11 +43,11 @@ inline constexpr std::int32_t kDflash2VerifyWidth              = 12;
  *       + sum_{r=0}^{255} (pred_code[r, prev[t-1,b]] * h[r,t,b]) * succ_code[r, candidates[c]].
  *
  *   configs is a device-resident SamplingConfig[B] (same buffer the round copies into ingress).
- *   If configs[b].temperature <= 0 or configs[b].p_less != 0, path[t,b] is the candidate with
- *   the greatest score; equal scores select the lower token id. P-less temperature controls
- *   the target distribution, not the draft scores. If temperature > 0 and p_less == 0,
- *   the 16 scores are softmax-normalized
- *   after dividing by temperature and one candidate is drawn by inverse-CDF using
+ *   The draft temperature is configs[b].temperature, or configs[b].draft_temperature when
+ *   configs[b].p_less != 0 (the p-less temperature controls the target distribution). If it is
+ *   <= 0, path[t,b] is the candidate with the greatest score; equal scores select the lower
+ *   token id. Otherwise the 16 scores are softmax-normalized
+ *   after dividing by that temperature and one candidate is drawn by inverse-CDF using
  *
  *     u = splitmix64(configs[b].seed ^ seed_xor,
  *                    logical_positions[b] + position_offset + t + 1,
@@ -56,9 +56,9 @@ inline constexpr std::int32_t kDflash2VerifyWidth              = 12;
  *   Then prev[t,b] = path[t,b]. Candidate order does not affect the selected token.
  *   An internal force_greedy call may override temperature for an intermediate refinement pass.
  *   When selector_ids / selector_q are non-null they receive the 16 candidate token ids and
- *   the proposal distribution q: one-hot at the greedy/p-less pick, else the 16-way softmax.
- *   Truncated-sampling chain Leviathan accept uses this q; p-less accept ignores recorded q
- *   and uses one-hot at the drafted token. Null selectors also imply one-hot at path[t,b].
+ *   the proposal distribution q: one-hot at a greedy pick, else the 16-way softmax the draft
+ *   was drawn from. Chain Leviathan accept uses this q for truncated sampling and p-less alike.
+ *   Null selectors imply one-hot at path[t,b].
  *
  * Logical shapes:
  *   logits is contiguous BF16 [V,T] or [V,T,B] with V>=16. hidden is contiguous BF16 [5120,T] or

@@ -566,7 +566,9 @@ about 55% of KV bandwidth; chunk caps of 48 and 96 were no better than 64.
 **Measured out.** Sampled drafter proposals under p-less T1.5 (the selector's softmax over its
 top-16 at draft temperature 1.0 or 1.5, with residual resampling on rejection): 7 prompt types x 3
 seeds, 256 tokens, fixed K5. Greedy proposals accepted 2.59 tokens/round (52.3%), sampled 2.04
-(T1.0) and 1.91 (T1.5), and greedy won in every category, so proposals stay greedy. Overlapping
+(T1.0) and 1.91 (T1.5), and greedy won in every category. Superseded 2026-09-28: a low draft
+temperature does beat greedy (0.4: +9.9% decode at p-less T1.5, upstream 5d6f6bf2 port,
+`docs/cli.md`); only drafting at the target temperature loses. Overlapping
 the GDN control projection with the input projection needs concurrent graph branches, which this
 ROCm serializes unless `DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING=1` is set (a debug switch; it does not
 change the current single-branch graph).
