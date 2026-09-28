@@ -4641,7 +4641,7 @@ ProgramImplCore::decode_dflash_batch(std::span<const std::uint32_t> lanes,
             // compact batch and its real per-row budgets.
             if (adaptive_draft && extent > 0) {
                 qwen3::adaptive_record_round(request.adaptive,
-                    static_cast<std::uint32_t>(accepted_i), extent, batch_k);
+                    static_cast<std::uint32_t>(accepted_i), extent, batch_k, true);
             }
             sequence.dflash_context_frontier = base_E;
             request.speculative_stats.live_draft_tokens = request.adaptive.live_k;

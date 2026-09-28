@@ -2,13 +2,17 @@
 
 // Family host policy for adaptive draft length. No HIP.
 //
-// Objective: match the best constant-k policy in {3,4,5}. Mixing k forks the
-// greedy DFlash/MTP path, so this is not a mixing bandit.
+// Objective: match the best constant-k policy in the captured set ({3,4,5} for
+// MTP, {3..N} for DFlash --draft-tokens N>=5). Mixing k forks the greedy
+// DFlash/MTP path, so this is not a mixing bandit.
 //
 // Y(k) = 1 + sum_{i<k} q_i with q_i = prod_{j<=i} r_j and
 // r_i = P(accepted > i | accepted > i-1). r_i is a discounted Beta, updated
-// only when the prefix reached i. Unseen r_i are not invented in E[Y]; they
-// appear only as r=1 in an optimistic bound used to drop dominated k.
+// only when the prefix reached i. For MTP, unseen r_i are not invented in
+// E[Y]; they appear only as r=1 in an optimistic bound used to drop dominated
+// k. DFlash continues the deepest observed r into unseen deeper hops: a request
+// that starts at a shallow k never observes deeper hops, so without that
+// continuation a deeper k could never earn credit however flat T(k) is.
 //
 // T(k,C,L) = a_{C,k} + c_C L from online least squares (shared slope, per-k
 // intercept). Unmeasured T(k) is extrapolated as max(T(k-1), 2 T(k-1)-T(k-2))
@@ -34,13 +38,18 @@ inline constexpr float kAdaptiveDiscount          = 1.0f - kAdaptiveEwmaAlpha;
 inline constexpr float kAdaptiveBetaPrior         = 1.0f;
 inline constexpr std::uint32_t kAdaptiveTBins     = 16;
 inline constexpr float kAdaptiveSwitchSeconds     = 0.001f;
+// Deepest tracked hop: DFlash chains up to K7.
+inline constexpr std::uint32_t kAdaptiveMaximumHops = 7;
+// DFlash: a newly reached hop starts from the continued r with this Beta weight,
+// so one early rejection cannot drop it (and every deeper hop) to 1/3.
+inline constexpr float kAdaptiveContinuedPriorWeight = 4.0f;
 
 struct AdaptiveDraftState {
     std::uint32_t live_k      = 0;
     std::uint32_t rounds_at_k = 0;
     std::uint32_t observed    = 0;
-    float alpha[5]            = {};
-    float beta[5]             = {};
+    float alpha[kAdaptiveMaximumHops] = {};
+    float beta[kAdaptiveMaximumHops]  = {};
     std::uint8_t r_seen       = 0;
     std::uint64_t rounds_hist[16] = {};
 };
@@ -65,6 +74,8 @@ struct AdaptiveDraftConfig {
     float switch_seconds                     = kAdaptiveSwitchSeconds;
     // DFlash target-only rows still publish one token. MTP retains its policy.
     bool count_target_only_rows              = false;
+    // DFlash: unseen deeper hops continue the deepest observed r_i.
+    bool extrapolate_unseen_hops             = false;
 };
 
 [[nodiscard]] inline std::vector<std::uint32_t>
@@ -75,8 +86,9 @@ adaptive_draft_ks(SpeculativeBackend backend, std::uint32_t n, bool adaptive) {
         for (std::uint32_t k = 3; k <= 5 && k <= n; ++k) { out.push_back(k); }
         return out.empty() ? std::vector<std::uint32_t>{n} : out;
     }
-    if (n >= 5) { return {3, 4, 5}; }
-    return {n};
+    if (n < 5) { return {n}; }
+    for (std::uint32_t k = 3; k <= n; ++k) { out.push_back(k); }
+    return out;
 }
 
 [[nodiscard]] inline std::uint32_t
@@ -156,7 +168,7 @@ namespace detail {
 }
 
 [[nodiscard]] inline bool r_seen_at(const AdaptiveDraftState& state, std::uint32_t i) {
-    return i < 5 && ((state.r_seen >> i) & 1U) != 0;
+    return i < kAdaptiveMaximumHops && ((state.r_seen >> i) & 1U) != 0;
 }
 
 [[nodiscard]] inline float r_mean(const AdaptiveDraftState& state, std::uint32_t i) {
@@ -169,10 +181,27 @@ namespace detail {
 [[nodiscard]] inline float expected_tokens(const AdaptiveDraftState& state, std::uint32_t k) {
     float e               = 1.0f;
     float run             = 1.0f;
-    const std::uint32_t n = std::min(k, 5U);
+    const std::uint32_t n = std::min(k, kAdaptiveMaximumHops);
     for (std::uint32_t i = 0; i < n; ++i) {
         if (!r_seen_at(state, i)) { return e; }
         run *= r_mean(state, i);
+        e += run;
+    }
+    return e;
+}
+
+// Unseen r_i after an identified prefix continue the deepest observed r. No
+// data at hop 0 stays E[Y]=1.
+[[nodiscard]] inline float expected_tokens_extrapolated(const AdaptiveDraftState& state,
+                                                        std::uint32_t k) {
+    float e               = 1.0f;
+    float run             = 1.0f;
+    float r               = 0.0f;
+    const std::uint32_t n = std::min(k, kAdaptiveMaximumHops);
+    for (std::uint32_t i = 0; i < n; ++i) {
+        if (r_seen_at(state, i)) { r = r_mean(state, i); }
+        else if (i == 0) { return e; }
+        run *= r;
         e += run;
     }
     return e;
@@ -184,7 +213,7 @@ namespace detail {
                                                       std::uint32_t k) {
     float e               = 1.0f;
     float run             = 1.0f;
-    const std::uint32_t n = std::min(k, 5U);
+    const std::uint32_t n = std::min(k, kAdaptiveMaximumHops);
     for (std::uint32_t i = 0; i < n; ++i) {
         if (!r_seen_at(state, i)) {
             if (i == 0) { return 1.0f; }
@@ -252,14 +281,17 @@ inline void t_lookup(const AdaptiveRoundTimeState* st, std::uint32_t k, std::uin
 
 [[nodiscard]] inline float row_sum_e(std::span<const AdaptiveDraftState* const> states,
                                      std::span<const std::uint32_t> row_cap, std::uint32_t k,
-                                     bool optimistic, bool count_target_only_rows = false) {
+                                     bool optimistic, bool count_target_only_rows = false,
+                                     bool extrapolate_unseen_hops = false) {
     float sum_e = 0.0f;
     for (std::size_t r = 0; r < states.size(); ++r) {
         const AdaptiveDraftState* st = states[r];
         if (st == nullptr) { continue; }
         const std::uint32_t kr = r < row_cap.size() ? std::min(k, row_cap[r]) : k;
         if (kr == 0 && !count_target_only_rows) { continue; }
-        sum_e += optimistic ? expected_tokens_optimistic(*st, kr) : expected_tokens(*st, kr);
+        sum_e += optimistic                ? expected_tokens_optimistic(*st, kr)
+                 : extrapolate_unseen_hops ? expected_tokens_extrapolated(*st, kr)
+                                           : expected_tokens(*st, kr);
     }
     return sum_e;
 }
@@ -279,15 +311,23 @@ inline void t_lookup(const AdaptiveRoundTimeState* st, std::uint32_t k, std::uin
     return k < kAdaptiveTBins && st.n[k] > 0.0f;
 }
 
+// Seen hops are contiguous from 0: hop i is observed only after hops 0..i-1.
 inline void adaptive_observe_hops(AdaptiveDraftState& state, std::uint32_t accepted,
-                                  std::uint32_t drafted, float discount = kAdaptiveDiscount) {
-    const std::uint32_t n = std::min(drafted, 5U);
+                                  std::uint32_t drafted, float discount = kAdaptiveDiscount,
+                                  bool continued_prior = false) {
+    const std::uint32_t n = std::min(drafted, kAdaptiveMaximumHops);
     for (std::uint32_t i = 0; i < n; ++i) {
         if (i > 0 && accepted <= i - 1U) { break; }
         const float x = accepted > i ? 1.0f : 0.0f;
         if (!detail::r_seen_at(state, i)) {
-            state.alpha[i] = kAdaptiveBetaPrior;
-            state.beta[i]  = kAdaptiveBetaPrior;
+            if (continued_prior && i > 0) {
+                const float r  = detail::r_mean(state, i - 1U);
+                state.alpha[i] = kAdaptiveContinuedPriorWeight * r;
+                state.beta[i]  = kAdaptiveContinuedPriorWeight * (1.0f - r);
+            } else {
+                state.alpha[i] = kAdaptiveBetaPrior;
+                state.beta[i]  = kAdaptiveBetaPrior;
+            }
             state.r_seen |= static_cast<std::uint8_t>(1U << i);
         }
         state.alpha[i] = discount * state.alpha[i] + x;
@@ -295,9 +335,11 @@ inline void adaptive_observe_hops(AdaptiveDraftState& state, std::uint32_t accep
     }
 }
 
+// DFlash passes continued_prior=true (matching its extrapolated E[Y]).
 inline void adaptive_record_round(AdaptiveDraftState& state, std::uint32_t accepted,
-                                  std::uint32_t drafted, std::uint32_t round_k) {
-    adaptive_observe_hops(state, accepted, drafted);
+                                  std::uint32_t drafted, std::uint32_t round_k,
+                                  bool continued_prior = false) {
+    adaptive_observe_hops(state, accepted, drafted, kAdaptiveDiscount, continued_prior);
     state.observed += 1;
     state.rounds_at_k += 1;
     if (round_k < 16) { state.rounds_hist[round_k] += 1; }
@@ -327,7 +369,8 @@ adaptive_select_k(const AdaptiveDraftConfig& cfg,
         detail::t_lookup(cfg.round_time, k, cfg.length_tokens, t, measured);
         if (!measured || !(t > 0.0f)) { continue; }
         const float e = detail::row_sum_e(states, row_cap, k, false,
-                                          cfg.count_target_only_rows);
+                                          cfg.count_target_only_rows,
+                                          cfg.extrapolate_unseen_hops);
         if (!(e > 0.0f)) { continue; }
         const float t_eff =
             t + ((live_k != 0 && k != live_k) ? cfg.switch_seconds : 0.0f);
@@ -397,6 +440,7 @@ adaptive_select_k(const AdaptiveDraftConfig& cfg,
     AdaptiveDraftConfig physical = cfg;
     physical.captured_ks = eligible;
     physical.count_target_only_rows = true;
+    physical.extrapolate_unseen_hops = true;
     return adaptive_select_k(physical, states, logical_extents, eligible.back(), live_k);
 }
 

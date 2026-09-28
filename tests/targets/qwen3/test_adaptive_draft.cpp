@@ -35,7 +35,7 @@ void plant_r(q36::AdaptiveDraftState& state, std::uint32_t live_k,
     state.rounds_at_k = 32;
     std::uint32_t i   = 0;
     for (float r : rs) {
-        if (i >= 5) { break; }
+        if (i >= q36::kAdaptiveMaximumHops) { break; }
         const float nn   = static_cast<float>(n);
         state.alpha[i]   = r * nn + 1.0f;
         state.beta[i]    = (1.0f - r) * nn + 1.0f;
@@ -75,8 +75,9 @@ void test_capture_set() {
                        std::string_view msg) { expect(got == want, msg); };
     eq(q36::adaptive_draft_ks(SpeculativeBackend::Mtp, 5, false), {5}, "frozen MTP {N}");
     eq(q36::adaptive_draft_ks(SpeculativeBackend::Mtp, 5, true), {3, 4, 5}, "MTP adaptive {3,4,5}");
-    eq(q36::adaptive_draft_ks(SpeculativeBackend::DFlash, 7, true), {3, 4, 5},
-       "DFlash N>=5 {3,4,5}");
+    eq(q36::adaptive_draft_ks(SpeculativeBackend::DFlash, 5, true), {3, 4, 5}, "DFlash N=5 {3,4,5}");
+    eq(q36::adaptive_draft_ks(SpeculativeBackend::DFlash, 7, true), {3, 4, 5, 6, 7},
+       "DFlash N=7 {3..7}");
     eq(q36::adaptive_draft_ks(SpeculativeBackend::DFlash, 4, true), {4}, "DFlash N=4 frozen {4}");
     eq(q36::adaptive_draft_ks(SpeculativeBackend::DFlash, 7, false), {7}, "frozen DFlash {N}");
 }
@@ -425,6 +426,99 @@ void test_t_survives_request_seed() {
            "T is server-global; hop posterior is per-request");
 }
 
+void test_dflash_extrapolates_deepest_observed_r() {
+    q36::AdaptiveDraftState state;
+    plant_r(state, 3, {0.80f, 0.625f, 0.60f});
+    const float y3 = q36::detail::expected_tokens(state, 3);
+    const float q2 = 0.80f * 0.625f * 0.60f;
+    expect_near(q36::detail::expected_tokens_extrapolated(state, 5),
+                y3 + q2 * 0.60f + q2 * 0.36f, 0.02f,
+                "unseen r3,r4 continue the deepest observed r2");
+    expect_near(q36::detail::expected_tokens_extrapolated(state, 3), y3, 1e-6f,
+                "identified hops are unchanged");
+    q36::AdaptiveDraftState cold;
+    q36::seed_adaptive_draft_state(cold, 0);
+    expect_near(q36::detail::expected_tokens_extrapolated(cold, 7), 1.0f, 1e-6f,
+                "no hop 0 data keeps E[Y]=1");
+}
+
+void test_dflash_shallow_start_reaches_deep_k_when_t_is_flat() {
+    // A request that started at K4 has never observed hops 4..6.
+    q36::AdaptiveDraftState state;
+    plant_r(state, 4, {0.85f, 0.80f, 0.78f, 0.75f});
+    const q36::AdaptiveDraftState* states[] = {&state};
+    const std::uint32_t ks[] = {3, 4, 5, 6, 7};
+    const std::uint32_t extents[] = {7};
+    q36::AdaptiveRoundTimeState flat;
+    for (std::uint32_t k = 3; k <= 7; ++k) plant_t(flat, k, 0.0310f + 0.0001f * k);
+    auto cfg = cfg_of(ks, flat, 512, 0.001f);
+    expect(q36::adaptive_dflash_physical_k(cfg, states, extents, 8, 4) == 7,
+           "near-flat T: continued deep hops make K7 win over the live K4");
+    q36::AdaptiveRoundTimeState cliff;
+    plant_t(cliff, 3, 0.044f);
+    for (std::uint32_t k = 4; k <= 7; ++k) plant_t(cliff, k, 0.077f);
+    cfg.round_time = &cliff;
+    expect(q36::adaptive_dflash_physical_k(cfg, states, extents, 8, 3) == 3,
+           "a T cliff above K3 keeps K3");
+    const std::uint32_t k5[] = {3, 4, 5};
+    auto mtp_like = cfg_of(k5, flat, 512, 0.001f);
+    expect(pick(mtp_like, state, 5, 4) == 4,
+           "without continuation (MTP) the unseen hop earns no credit");
+}
+
+void test_dflash_rejecting_hop_gives_little_deep_credit() {
+    q36::AdaptiveDraftState state;
+    plant_r(state, 4, {0.90f, 0.85f, 0.80f, 0.05f});
+    const q36::AdaptiveDraftState* states[] = {&state};
+    const std::uint32_t ks[] = {3, 4, 5, 6, 7};
+    const std::uint32_t extents[] = {7};
+    q36::AdaptiveRoundTimeState t;
+    for (std::uint32_t k = 3; k <= 7; ++k) plant_t(t, k, 0.030f + 0.0005f * k);
+    auto cfg = cfg_of(ks, t, 512, 0.001f);
+    expect(q36::adaptive_dflash_physical_k(cfg, states, extents, 8, 4) <= 4,
+           "a hop that almost always rejects is not continued into deeper credit");
+}
+
+// Closed loop from a cold request: each hop is accepted with probability p, the
+// policy picks the physical K, and the round is recorded as the engine does.
+std::uint32_t dflash_closed_loop_deep_rounds(float p, const q36::AdaptiveRoundTimeState& t,
+                                             std::uint32_t deep_k, std::uint64_t seed) {
+    const std::uint32_t ks[] = {3, 4, 5, 6, 7};
+    const std::uint32_t extents[] = {7};
+    auto cfg = cfg_of(ks, t, 512, 0.001f);
+    q36::AdaptiveDraftState state;
+    q36::seed_adaptive_draft_state(state, 0);
+    const q36::AdaptiveDraftState* states[] = {&state};
+    std::uint32_t live = 0, deep = 0;
+    for (int round = 0; round < 300; ++round) {
+        live = q36::adaptive_dflash_physical_k(cfg, states, extents, 8, live);
+        state.live_k = live;
+        std::uint32_t accepted = 0;
+        while (accepted < live) {
+            seed = seed * 6364136223846793005ULL + 1442695040888963407ULL;
+            if (static_cast<float>(seed >> 40) / 16777216.0f >= p) break;
+            ++accepted;
+        }
+        q36::adaptive_record_round(state, accepted, live, live, true);
+        if (round >= 100 && live == deep_k) ++deep;
+    }
+    return deep;
+}
+
+void test_dflash_closed_loop_settles_on_the_best_k() {
+    q36::AdaptiveRoundTimeState flat;
+    for (std::uint32_t k = 3; k <= 7; ++k) plant_t(flat, k, 0.0310f + 0.0001f * k);
+    q36::AdaptiveRoundTimeState cliff;
+    plant_t(cliff, 3, 0.044f);
+    for (std::uint32_t k = 4; k <= 7; ++k) plant_t(cliff, k, 0.077f);
+    for (std::uint64_t seed : {1ULL, 2ULL, 3ULL, 4ULL, 5ULL}) {
+        expect(dflash_closed_loop_deep_rounds(0.8f, flat, 7, seed) >= 180,
+               "flat T, high acceptance: a cold request settles on K7");
+        expect(dflash_closed_loop_deep_rounds(0.8f, cliff, 3, seed) >= 180,
+               "T cliff above K3: a cold request stays on K3");
+    }
+}
+
 void test_optimistic_cold_start_does_not_invent_all_success() {
     q36::AdaptiveDraftState state;
     q36::seed_adaptive_draft_state(state, 0);
@@ -459,6 +553,10 @@ int main() {
     test_budget_clamp();
     test_dflash_physical_tail_route();
     test_t_survives_request_seed();
+    test_dflash_extrapolates_deepest_observed_r();
+    test_dflash_shallow_start_reaches_deep_k_when_t_is_flat();
+    test_dflash_rejecting_hop_gives_little_deep_credit();
+    test_dflash_closed_loop_settles_on_the_best_k();
     test_optimistic_cold_start_does_not_invent_all_success();
     if (failures != 0) {
         std::cerr << failures << " adaptive draft host checks failed\n";

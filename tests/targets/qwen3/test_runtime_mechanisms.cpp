@@ -1187,9 +1187,8 @@ void test_adaptive_capture_and_topology() {
     };
     same(q3::adaptive_draft_ks(SpeculativeBackend::Mtp, 5, false), {5}, "frozen MTP {N}");
     same(q3::adaptive_draft_ks(SpeculativeBackend::Mtp, 5, true), {3, 4, 5}, "MTP adaptive set");
-    same(q3::adaptive_draft_ks(SpeculativeBackend::DFlash, 7, true), {3, 4, 5}, "DFlash {3,4,5}");
-    same(q3::adaptive_draft_ks(SpeculativeBackend::DFlash, 6, true), {3, 4, 5},
-         "DFlash N=6 still {3,4,5}");
+    same(q3::adaptive_draft_ks(SpeculativeBackend::DFlash, 7, true), {3, 4, 5, 6, 7}, "DFlash {3..7}");
+    same(q3::adaptive_draft_ks(SpeculativeBackend::DFlash, 6, true), {3, 4, 5, 6}, "DFlash {3..6}");
     const std::uint32_t c        = 3;
     const std::uint32_t planned  = 0;
     const std::uint32_t k_stride = q3::adaptive_k_stride(c, planned);
