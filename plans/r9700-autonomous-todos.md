@@ -23,11 +23,10 @@ FP8LUT4 artifact was admitted; it remains in git history.
   (attention 47%, FP8LUT4 GEMMs 44%), attention ablations, paired-wave split rejected at Layer 0,
   staging latency unhideable on gfx1201 at the 240-VGPR budget, chunk 4096 mixed (default 2048).
   No mechanism with a credible whole-prefill bound remains; `docs/performance.md` has the evidence.
-- [ ] `DECODE-BYTES` Decode is bandwidth-bound (T1 projections at 500-555 GB/s of ~612 GB/s); the
-  remaining lever is fewer bytes: the draft/output head and the DFlash drafter matrices, still
-  Q4G64, as FP8LUT4 (converter plus DFlash acceptance and exact-token checks).
 - [ ] `QUALITY-GAINS` Cheap quality improvements measured against the BF16 8K/32K admission
-  cells: attention-role GPTQ with per-role damping (full attention GPTQ failed 8K multikey NIAH),
-  GPTQ activation ordering, a larger usage calibration set.
+  cells: the Q4G64 target output head as (GPTQ) FP8LUT4 at the same 4.25 bits/weight,
+  attention-role GPTQ with per-role damping (full attention GPTQ failed 8K multikey NIAH), GPTQ
+  activation ordering, a larger usage calibration set. Decode is not a lever here: Q4G64 and
+  FP8LUT4 are the same size and the Q4 drafter/head kernels already read at ~600 GB/s.
 - [ ] `CLOCKS-README` [user-gated; `LONGCTX-PREFILL` is closed] Matched README benchmarks at stock
   clocks and at the user's undervolted/higher-clock setting.
