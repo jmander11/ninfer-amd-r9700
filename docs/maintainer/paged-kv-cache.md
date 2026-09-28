@@ -353,9 +353,13 @@ releases the pinned entry generation without deleting its durable source. Emerge
 for admission excludes restore payload reads; idle spill rechecks its epoch and RAM residency.
 An admission waits only for its own entry's spill, never for another entry's spill batches.
 Pack compaction does not start while a restore, reader claim, or payload I/O still uses the
-current generation; an emergency spill then appends past the garbage threshold inside the
-copy-on-write reserve, and an idle spill defers without marking its entry failed, so compaction
-runs at the next quiescent admission. Stats observers read the disk tier without blocking on its
+current generation; an emergency spill then appends past the garbage threshold, and an idle
+spill defers without marking its entry failed, so compaction runs at the next quiescent admission.
+The deferred spill's room check counts the current compaction copy but not later appends, so a
+compaction that no longer fits falls back to low-space eviction. At most one spill session is
+installed: emergency preparation excludes the worker's idle preparation, and session teardown
+releases pins and resets the session in one critical section before unlinking its draft objects.
+Stats observers read the disk tier without blocking on its
 index lock and never see its counters step backwards.
 Durable publication orders pack namespace, map, entry and manifest before final synchronization.
 Orderly shutdown captures retained device state, flushes nondurable RAM and outstanding writes,

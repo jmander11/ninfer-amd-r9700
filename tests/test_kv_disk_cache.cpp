@@ -4,7 +4,6 @@
 #include "targets/qwen3/impl/runtime/kv_disk_cache.h"
 
 #include <algorithm>
-#include <array>
 #include <cstring>
 #include <filesystem>
 #include <iostream>
@@ -24,8 +23,10 @@ void require(bool value, const char* message) {
 struct TemporaryDirectory {
     std::filesystem::path path;
     TemporaryDirectory() {
-        std::array<char, 40> pattern{};
-        std::strcpy(pattern.data(), "/tmp/ninfer-fixed-kv-XXXXXX");
+        // temp_directory_path honors TMPDIR, which the unit-test runner points at the build
+        // tree so fsync-heavy disk-tier scratch stays off a container overlay.
+        std::string pattern =
+            (std::filesystem::temp_directory_path() / "ninfer-fixed-kv-XXXXXX").string();
         const char* created = ::mkdtemp(pattern.data());
         if (!created) { throw std::runtime_error("mkdtemp failed"); }
         path = created;

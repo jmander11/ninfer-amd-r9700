@@ -60,7 +60,20 @@ fi
 cmake --build "$build_dir" --parallel "$jobs"
 selection=()
 ((gpu)) || selection+=(-LE r9700)
-ctest --test-dir "$build_dir" --output-on-failure "${selection[@]}" "${ctest_args[@]}"
+# Disk-tier tests fsync heavily. Keep their scratch files on the build tree's filesystem
+# instead of the container overlay, unless the caller chose a TMPDIR.
+scratch=""
+if [[ -z "${TMPDIR:-}" ]]; then
+  scratch="$(mktemp -d "$build_dir/test-tmp.XXXXXX")"
+  export TMPDIR="$scratch"
+fi
+status=0
+ctest --test-dir "$build_dir" --output-on-failure "${selection[@]}" "${ctest_args[@]}" || status=$?
+if [[ -n "$scratch" ]]; then
+  rm -rf "$scratch"
+  unset TMPDIR
+fi
+((status == 0)) || exit "$status"
 if [[ -n "$artifact" ]]; then
   "$build_dir/src/ninfer_r9700_engine_cache_cancel_qual" "$artifact"
 fi
