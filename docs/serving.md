@@ -69,7 +69,8 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 The endpoint supports:
 
 - `system`, `developer`, `user`, `assistant`, and `tool` history;
-- string content and ordered text, `image_url`, and `video_url` parts;
+- string content and ordered text, `image_url`, and `video_url` parts; tool messages accept a
+  string or text parts only;
 - `max_completion_tokens` and the legacy `max_tokens` spelling;
 - `temperature`, `top_p`, `top_k`, presence/frequency penalties, and a nonnegative `seed`
   (top-p/top-k/penalties are ignored by default p-less; `--no-p-less-sampling` opts out);
@@ -697,7 +698,10 @@ the top-level system instruction. A system section must follow a user/tool-resul
 final or immediately precede an assistant message; it cannot interrupt a tool-use/tool-result pair.
 Consecutive system messages remain separate ordered turns.
 
-`thinking.type: "disabled"` disables thinking; other supported values enable it.
+`thinking.type: "disabled"` disables thinking; other supported values enable it. Returned thinking
+blocks carry the message id as a non-empty opaque `signature` (a `signature_delta` just before the
+block's `content_block_stop` when streaming); echoed thinking text is lowered directly into history
+and the signature is not validated.
 The independent top-level `preserve_thinking` boolean controls closed-turn history and otherwise
 uses the server default.
 
