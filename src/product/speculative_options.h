@@ -9,7 +9,7 @@
 namespace ninfer::product {
 
 inline constexpr std::uint32_t kMaximumMtpDraftTokens    = 5;
-inline constexpr std::uint32_t kMaximumDFlashDraftTokens = 5;
+inline constexpr std::uint32_t kMaximumDFlashDraftTokens = 7;
 
 [[nodiscard]] inline SpeculativeBackend parse_speculative_backend(std::string_view value) {
     if (value == "mtp") { return SpeculativeBackend::Mtp; }
@@ -49,7 +49,7 @@ inline void validate_speculative_cli_options(const SpeculativeOptions& options) 
         return;
     case SpeculativeBackend::DFlash:
         if (options.draft_tokens == 0 || options.draft_tokens > kMaximumDFlashDraftTokens) {
-            throw std::invalid_argument("--spec dflash requires --draft-tokens in [1,5]");
+            throw std::invalid_argument("--spec dflash requires --draft-tokens in [1,7]");
         }
         if (options.dflash_verify_width != 0 &&
             options.dflash_verify_width != options.draft_tokens + 1) {

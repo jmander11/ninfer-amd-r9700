@@ -100,6 +100,30 @@ FP8LUT4 GEMM repacking was measured by the research ports below (at most 3.3%, m
 GEMM's redundant per-CTA decode cannot be shared without a cross-CTA or runtime-repacked weight
 path. No long-context prefill mechanism with a credible whole-prefill bound remains.
 
+## DFlash K6/K7 chains (2026-09-27)
+
+Fixed K6/K7 (W7/W8) chains are supported (`--draft-tokens 6|7`, fixed only; `--adaptive-draft`
+stays `{3,4,5}`). Their earlier ~4 ms (C1) / ~16 ms (C4) round penalty was route fallback, removed by
+7-8-row A8Q4 small-batch drafter projections, W7/W8 GDN pair conv/record and a T<=32 normalized GDN
+front (all qualified against their FP64/exact oracles, `tools/r9700`). Production
+`qwen3.8-27b-r9700-fp8lut4`, `--lm-head-draft`, Device Graphs, 12-prompt corpus x greedy + two
+p-less seeds, ABC/CBA order, paired per-request decode rate with 95% bootstrap interval:
+
+| C | arm | tokens/round | ms/round | vs baseline |
+|---|---|---|---|---|
+| 1 | fixed K7 vs fixed K5 | 3.00 / 2.79 | 31.7 / 31.2 | 1.098 (1.059–1.142) |
+| 4 | fixed K7 vs fixed K5 | 3.01 / 2.77 | 77.4 / 78.9 | 1.126 (1.099–1.154) |
+| 1 | fixed K7 vs production adaptive K5 | 3.00 / 2.79 | 31.7 / 31.2 | 1.098 (1.040–1.160) |
+| 4 | fixed K7 vs production adaptive K5 | 3.01 / 2.57 | 77.0 / 43.6 | 0.672 (0.653–0.691) |
+
+Production keeps adaptive K5. At C4, adaptive runs mostly K3 because every FP8LUT4 target Linear
+above 16 tokens (C4 x W>=5) leaves the small-T route for the prefill kernel
+(`fp8lut4::kSmallTokens`), nearly doubling the round; fixed K5/K7 pay that cliff. Fixed K7 is the
+better choice for single-request (C1) serving. Adaptive `{3..7}` measured 0.92x adaptive K5 at C1:
+each request's first round picks the lowest measured T(k) before any hop is observed, and deeper
+hops then never earn credit, so it settled on K4; the adaptive set therefore stays `{3,4,5}`.
+Evidence: `profiles/bench/r9700-w8-kernels-20260927/`.
+
 ## Rejected research ports (2026-09-27)
 
 Candidates from the R9700 research campaign, measured and not adopted; their code is removed.
@@ -107,7 +131,6 @@ Evidence: `profiles/bench/r9700-feature-ports-20260927/`.
 
 | Candidate | Result |
 |---|---|
-| DFlash K6/K7 fixed chains | +0.2–0.26 tokens/round but ~14% (C1) / ~10% (C4) longer rounds; paired decode rate vs K5 0.95/0.99 (C1), 0.94/0.96 (C4) |
 | Fixed-budget W8 trees (K7) | root-sibling 0.87 (C1) / 0.88 (C4) of K5 chain; normalized best-first 0.97 / 1.01 (parity, never faster) |
 | Exact FP8LUT4 nibble repacking | complete-Op change 0.3% slower to 3.3% faster; word-at-a-time scheduling 35–62% slower at T1 |
 | Grammar-mask overlap with target forward | default HIP serializes the graph; no measured benefit |

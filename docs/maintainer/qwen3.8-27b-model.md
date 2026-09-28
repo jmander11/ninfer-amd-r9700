@@ -356,7 +356,7 @@ not context. There is no growing DFlash Full pool.
 One propose block:
 
 1. Query rows are the anchor embedding plus the configured K MASK embeddings (id **248070**) at
-   positions `E .. E+K`. The R9700 product uses a single block, K<=5, within the checkpoint's native
+   positions `E .. E+K`. The R9700 product uses a single block, K<=7, within the checkpoint's native
    block capacity. `input_embedding_scale` is 1.0.
 2. For each of the five layers, from pinned `Qwen3DFlashDecoderLayer`:
    - `h = RMSNorm(residual, input_norm)`

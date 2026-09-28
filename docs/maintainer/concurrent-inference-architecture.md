@@ -1415,7 +1415,7 @@ backend；迁移与后续改动必须继续保护它现有的graph/eager语义�
 `DecodeRound(all decode-ready requests)`。
 
 Without adaptive drafting, the proposal window is startup-fixed and only that K is planned and
-captured. Startup-enabled adaptive drafting preplans the bounded supported K set (DFlash {3,4,5}),
+captured. Startup-enabled adaptive drafting preplans the bounded supported K set (DFlash and MTP {3,4,5}; DFlash K6/K7 are fixed-only),
 with separate K-specific graph definitions and accounted memory. At each round boundary one K is
 selected for the whole compact batch. Each row's remaining output/context budget constrains its
 logical proposals and publication, not necessarily DFlash's physical captured K. DFlash can
@@ -1432,10 +1432,11 @@ acceptance is observed only for actual proposals. MTP retains its existing budge
 These are functional scheduling semantics, not a claim that adaptive K beats a physically qualified
 fixed policy on a particular artifact.
 
-R9700 DFlash is chain-only, K<=5, W=K+1 including the target anchor; no packed-tree or two-block
-product schedule is exposed. The fixed-policy production comparison uses K4/W5 and K5/W6, not the
-retired K1..11 shortlist. Fixed K6/K7 chains and fixed-budget W8 root-sibling/best-first trees were
-measured on 2026-09-27 and rejected: none beat K5 chain throughput at C1 or C4.
+R9700 DFlash is chain-only, K<=7, W=K+1<=8 including the target anchor; no packed-tree or
+two-block product schedule is exposed. K6/K7 are fixed-only: with 7-8-row / 32-token drafter and
+GDN routes they beat K5 at C1, but at C4 the FP8LUT4 target Linear leaves its small-T route above
+16 tokens, so production keeps adaptive {3,4,5} (2026-09-27, `docs/performance.md`); fixed-budget
+W8 root-sibling/best-first trees remain rejected.
 DFlash companion 也不自动继承固定 Q4 recipe：它从真实
 BF16 DFlash2 checkpoint 独立比较 canonical Q4G64、source-MSE Q4G64 与 source-MSE W8G32，只有物理
 small-width speed 和 quality 同时支持时才加入 row-scaled E4M3。所有 recipe 保留 BF16 selector codebooks

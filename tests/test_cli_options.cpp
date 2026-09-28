@@ -97,7 +97,7 @@ int main() {
         (void)parse({"ninfer", "model.ninfer", "--prompt", "hi", "--spec", "dflash",
                      "--draft-tokens", "11", "--vision"});
     } catch (const std::invalid_argument&) { dflash_vision_rejected = true; }
-    failures += check(dflash_vision_rejected, "DFlash accepted draft length above five");
+    failures += check(dflash_vision_rejected, "DFlash accepted draft length above seven");
 
     if (failures == 0) { std::cout << "ok\n"; }
     return failures == 0 ? 0 : 1;

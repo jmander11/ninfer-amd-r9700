@@ -141,7 +141,7 @@ def selected_expected(value: dict, role: str) -> tuple:
     base = integer(value.get("base_frontier"), "base_frontier")
     flat = integer(value.get("flat_column"), "flat_column")
     if not (1 <= batch <= 4 and 0 <= row < batch and 0 <= lane < 4 and
-            1 <= width <= 6 and 0 <= column < width and frontier > 0 and
+            1 <= width <= 8 and 0 <= column < width and frontier > 0 and
             base >= 0 and base + column + 1 == frontier and flat == row * width + column):
         fail("selected trace geometry/frontier is invalid")
     if role == "target-ordinary-selected" and width != 1:

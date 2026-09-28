@@ -26,10 +26,10 @@ class BenchMatrixTest(unittest.TestCase):
             current = {**legacy, "schema_version": version,
                        "phase_timing_semantics": PHASE_TIMING_SEMANTICS}
             self.assertTrue(prefill_timing_eligible(current))
-        for k in range(1, 6):
+        for k in range(1, 8):
             self.assertEqual(resolved_dflash_verify_width(k, 0), k + 1)
             self.assertEqual(resolved_dflash_topology(k, k + 1), "single-block-chain")
-        for k, width in ((4, 6), (6, 7), (7, 12), (11, 12)):
+        for k, width in ((4, 6), (8, 9), (7, 12), (11, 12)):
             with self.assertRaises(ValueError):
                 resolved_dflash_verify_width(k, width)
 

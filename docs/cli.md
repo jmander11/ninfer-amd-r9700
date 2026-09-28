@@ -125,7 +125,7 @@ DFlash2 supports Vision-composed target hidden features and target MRoPE verific
 ```
 
 For Qwen3.8-27B DFlash2, the R9700 artifact must contain the appended `dflash/` objects. The native
-runtime uses chain verification with K in 1..5; `--dflash-verify-width` must equal K+1
+runtime uses chain verification with K in 1..7; `--dflash-verify-width` must equal K+1
 when explicitly supplied.
 
 ```bash
@@ -136,7 +136,9 @@ when explicitly supplied.
 ```
 
 MTP and DFlash cannot be enabled together. DFlash requires appended `dflash/` objects and
-uses chain verification `W=k+1`, `k` in `1..5`. `--adaptive-draft` selects live K from `{3,4,5}`
+uses chain verification `W=k+1`, `k` in `1..7`. `--adaptive-draft` selects live K from `{3,4,5}`
+(for `--draft-tokens` 5..7; K6/K7 are fixed-only). Fixed K7 decodes ~10% faster than
+adaptive K5 for one active request but ~33% slower at four (see `docs/performance.md`).
 using measured expected yield divided by round time; explicit `--draft-tokens 4` stays fixed.
 For DFlash, K describes the physical captured graph. Per-request output and context limits
 still clip the logical proposals and published tokens. Near an output limit, a larger padded
@@ -158,9 +160,9 @@ R9700 speed recommendations require R9700 end-to-end measurements; NVIDIA timing
 | `--max-new N` | requested output-token limit | `128` |
 | `--device N` | HIP device index | `0` |
 | `--spec mtp\|dflash` | speculative backend | off |
-| `--draft-tokens N` | MTP and DFlash2 `1..5` | unset |
+| `--draft-tokens N` | MTP `1..5`, DFlash2 `1..7` | unset |
 | `--adaptive-draft` | pick live draft K in `{3,4,5}` by locking `E[Y]/T(k,C,L)` (nested `r_i`; least-squares T; at most one probe of an unmeasured k; 1 ms switch cost). `--draft-tokens 4` stays `{4}` | off |
-| `--dflash-verify-width N` | DFlash2 chain verify width `W=k+1`, `2..6` | auto |
+| `--dflash-verify-width N` | DFlash2 chain verify width `W=k+1`, `2..8` | auto |
 | `--lm-head-draft` | optimized proposal head | off |
 | `--vision` | enable image/video input and load Vision GPU allocations | off |
 | `--no-device-graph` | disable Device Graph decode | graphs on |

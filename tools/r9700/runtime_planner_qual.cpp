@@ -208,7 +208,7 @@ void qualify_host_attention_parity_routing() {
     const std::size_t kW6C135Bytes = verify_bytes(6U, 135U);
     const bool text_enabled = kv::kTextP129WmmaTailCandidate;
     for (const std::size_t context : {64U, 133U, 4100U, 8191U, 8192U, 15200U, 32768U, 262144U}) {
-        for (std::uint32_t rows = 1U; rows <= 6U; ++rows) {
+        for (std::uint32_t rows = 1U; rows <= 8U; ++rows) {
             require(kv::use_packed_decode_attention(rows, context, false) &&
                         q27::r9700_full_attention_workspace_capacity_bytes(rows, context, false) >=
                             verify_bytes(rows, context),
@@ -219,7 +219,7 @@ void qualify_host_attention_parity_routing() {
                 !kv::use_packed_decode_attention(4U, 262145U, false) &&
                 !kv::use_packed_decode_attention(4U, 134U, true) &&
                 !kv::use_packed_decode_attention(0U, 134U, false) &&
-                !kv::use_packed_decode_attention(7U, 135U, false) &&
+                !kv::use_packed_decode_attention(9U, 135U, false) &&
                 kv::use_text_p129_wmma_tail(129U, 129U) == text_enabled &&
                 !kv::use_text_p129_wmma_tail(128U, 128U) &&
                 !kv::use_text_p129_wmma_tail(129U, 130U),

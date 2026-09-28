@@ -1060,7 +1060,7 @@ inline constexpr std::uint32_t kDenseVerifyComputeWaves = 3U;
 inline constexpr std::uint32_t kDenseVerifyThreads = 2U * kDenseVerifyComputeWaves * 32U;
 inline constexpr std::uint32_t kDenseVerifyLoaders = kDenseVerifyComputeWaves * 32U;
 inline constexpr std::uint32_t kDenseVerifyKeyItems = 128U * kDenseVerifyKeys / 16U;
-static_assert(kDenseVerifyComputeWaves * 16U >= 6U * 6U);
+static_assert(kDenseVerifyComputeWaves * 16U >= 8U * 6U);
 // Two loader items per thread: a key item, then a key (wave 3) or value (waves 4..5) item.
 static_assert(kDenseVerifyKeyItems + 4U * kDenseVerifyKeys == 2U * kDenseVerifyLoaders);
 static_assert(kDenseVerifyKeyItems - kDenseVerifyLoaders == 32U);
@@ -1532,7 +1532,7 @@ hipError_t fp8_int4_kv_attention_packed_decode(
         !a.page_table_pages || !a.context ||
         a.context > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max()) ||
         !a.physical_tokens || a.physical_tokens % kPageSize || a.query_heads != 24U ||
-        a.kv_heads != 4U || a.q_to_kv != 6U || (a.query_rows < 1U || a.query_rows > 6U) ||
+        a.kv_heads != 4U || a.q_to_kv != 6U || (a.query_rows < 1U || a.query_rows > 8U) ||
         !a.row_positions || !a.score_workspace ||
         !a.output || !std::isfinite(a.attention_scale) || !(a.attention_scale > 0.0F) ||
         (a.page_table_row != nullptr &&

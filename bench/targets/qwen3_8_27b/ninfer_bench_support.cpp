@@ -303,10 +303,10 @@ std::string usage_text(std::string_view program) {
         << "                              pending deadline; the product default is unchanged\n"
          << "  --spec <mtp|dflash>       speculative backend (default: mtp); dflash requires\n"
          << "                              the artifact to contain dflash/ objects\n"
-         << "  --draft-tokens <0..5>     speculative draft window: mtp [0,5] (0 = none),\n"
-         << "                              dflash [1,5] (default: 0)\n"
+         << "  --draft-tokens <0..7>     speculative draft window: mtp [0,5] (0 = none),\n"
+         << "                              dflash [1,7] (default: 0)\n"
          << "  --adaptive-draft            pick live K in {3,4,5} by locking E[Y]/T(k,C,L); requires --spec mtp|dflash\n"
-         << "  --dflash-verify-width <0|2..6> DFlash chain width; 0 = K+1; explicit width\n"
+         << "  --dflash-verify-width <0|2..8> DFlash chain width; 0 = K+1; explicit width\n"
          << "                              must equal K+1 (dflash only)\n"
          << "  --lm-head-draft             use the optimized proposal head; requires --draft-tokens\n"
          << "                              greater than zero\n"
@@ -392,13 +392,13 @@ BenchOptions parse_args(int argc, char** argv) {
         } else if (arg == "--draft-tokens") {
             options.draft_tokens = parse_u32(value("--draft-tokens"), "draft-tokens", true);
             if (options.draft_tokens > kMaxDFlashDraftTokens) {
-                throw std::invalid_argument("--draft-tokens must be in [0,5]");
+                throw std::invalid_argument("--draft-tokens must be in [0,7]");
             }
         } else if (arg == "--dflash-verify-width") {
             options.dflash_verify_width =
                 parse_u32(value("--dflash-verify-width"), "dflash-verify-width", true);
             if (options.dflash_verify_width > kMaxDFlashVerifyWidth) {
-                throw std::invalid_argument("--dflash-verify-width must be 0 or chain K+1 in [2,6]");
+                throw std::invalid_argument("--dflash-verify-width must be 0 or chain K+1 in [2,8]");
             }
         } else if (arg == "--lm-head-draft") {
             options.proposal_head = ProposalHead::Optimized;
@@ -439,13 +439,13 @@ BenchOptions parse_args(int argc, char** argv) {
     }
     if (options.spec_backend == SpeculativeBackend::DFlash &&
         (options.draft_tokens == 0 || options.draft_tokens > kMaxDFlashDraftTokens)) {
-        throw std::invalid_argument("--spec dflash requires --draft-tokens in [1,5]");
+        throw std::invalid_argument("--spec dflash requires --draft-tokens in [1,7]");
     }
     if (options.dflash_verify_width != 0 && options.spec_backend != SpeculativeBackend::DFlash) {
         throw std::invalid_argument("--dflash-verify-width requires --spec dflash");
     }
     if (options.dflash_verify_width != 0 && options.dflash_verify_width < 2) {
-        throw std::invalid_argument("--dflash-verify-width must be 0 or chain K+1 in [2,6]");
+        throw std::invalid_argument("--dflash-verify-width must be 0 or chain K+1 in [2,8]");
     }
     if (options.spec_backend == SpeculativeBackend::DFlash) {
         (void)resolved_dflash_verify_width(options.draft_tokens, options.dflash_verify_width);
@@ -586,7 +586,7 @@ std::string decode_path_name(bool use_device_graph, const SpeculativeOptions& sp
 std::uint32_t resolved_dflash_verify_width(std::uint32_t draft_tokens,
                                            std::uint32_t requested_width) {
     if (draft_tokens == 0) { return 0; }
-    if (draft_tokens > 5) { throw std::invalid_argument("DFlash2 requires K in [1,5]"); }
+    if (draft_tokens > kMaxDFlashDraftTokens) { throw std::invalid_argument("DFlash2 requires K in [1,7]"); }
     if (requested_width != 0 && requested_width != draft_tokens + 1) {
         throw std::invalid_argument("DFlash2 requires chain W=K+1");
     }

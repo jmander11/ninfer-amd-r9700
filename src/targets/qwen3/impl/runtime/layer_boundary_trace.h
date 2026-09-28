@@ -747,7 +747,7 @@ private:
                                 call_.column == 128 && call_.frontier == 129;
         const bool text_append = call_.role == Role::TextAppend && call_.width == 1 &&
                                  call_.column == 0 && call_.frontier == 129;
-        const bool selected = selected_role(call_.role) && call_.width >= 1 && call_.width <= 6 &&
+        const bool selected = selected_role(call_.role) && call_.width >= 1 && call_.width <= 8 &&
             (call_.role != Role::SelectedOrdinary || call_.width == 1);
         if ((!selected && call_.batch != 1) ||
             !(selected || target_ordinary || target_dflash || text_fresh || text_append)) {

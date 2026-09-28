@@ -338,10 +338,10 @@ void qualify_long_dflash(ninfer::DeviceContext& device) {
                         represented_bf16(mean + (static_cast<int>(hash % 101U) - 50) / 64.0F);
                 }
         const auto cache = encode_cache(source_keys, source_values, pages, physical_pages);
-        for (const std::uint32_t rows : {4U, 5U, 6U}) {
-            // Both extents cover the three widths; together they select every compact C1..4 row.
-            const std::int32_t selected_row = rows == 4U ? 0 :
-                (rows == 6U ? 3 : (context == 15200U ? 1 : 2));
+        for (const std::uint32_t rows : {4U, 5U, 6U, 7U, 8U}) {
+            // Both extents cover the five widths; together they select every compact C1..4 row.
+            const std::int32_t selected_row = rows == 4U || rows == 8U ? 0 :
+                (rows == 6U ? 3 : ((context == 15200U) == (rows == 5U) ? 1 : 2));
             allocation.unbind_row();
             const auto& tables = typed_cache.pool().block_tables();
             HIP_CHECK(hipMemsetAsync(tables.data, 0xff, tables.bytes(), device.stream));
@@ -497,7 +497,8 @@ int main() {
             fail("dense-prefill row/context classifier is not the admitted boundary");
         }
         if (!selects_packed(1U, 64U, false) || !selects_packed(6U, 262144U, false) ||
-            selects_packed(1U, 63U, false) || selects_packed(7U, 4096U, false) ||
+            !selects_packed(8U, 262144U, false) ||
+            selects_packed(1U, 63U, false) || selects_packed(9U, 4096U, false) ||
             selects_packed(0U, 4096U, false) || selects_packed(4U, 4096U, true) ||
             selects_packed(1U, 262145U, false)) {
             fail("packed decode row/context/tree classifier is not the admitted boundary");

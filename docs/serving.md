@@ -27,7 +27,7 @@ server must accept image or video input. Speculative residency is likewise froze
 `--spec mtp|dflash` and `--draft-tokens`; omitting `--spec` loads neither backend.
 `--lm-head-draft` additionally loads the optimized proposal head. Qwen3.8-27B DFlash2 is available
 when `dflash/` is present and can be combined with `--vision`; the text-only companion consumes
-Vision-composed target hidden features. Verify is chain `W=k+1` for `k` in `1..5`; R9700 draft-window recommendations require local end-to-end measurements.
+Vision-composed target hidden features. Verify is chain `W=k+1` for `k` in `1..7`; R9700 draft-window recommendations require local end-to-end measurements.
 `--adaptive-draft` picks live k in `{3,4,5}` after each round by locking
 `argmax E[Y(k)] / T(k,C,L)` from nested hop-survival `r_i` and online least-squares round time
 (shared slope, per-k intercept). An unmeasured k is probed at most once and dropped when
@@ -774,9 +774,9 @@ curl http://127.0.0.1:8080/v1/models \
 | `--response-store-max-records N` | maximum locally retained Responses objects | `1024` |
 | `--response-store-max-mib N` | total local Response envelope/Item/context budget | `256` |
 | `--spec mtp\|dflash` | speculative backend | off |
-| `--draft-tokens N` | MTP and DFlash2 `1..5` | unset |
+| `--draft-tokens N` | MTP `1..5`, DFlash2 `1..7` | unset |
 | `--adaptive-draft` | pick live draft K in `{3,4,5}` by locking `E[Y]/T(k,C,L)` (nested `r_i`; least-squares T; at most one probe of an unmeasured k; 1 ms switch cost). `--draft-tokens 4` stays `{4}` | off |
-| `--dflash-verify-width N` | DFlash2 chain verify width `W=k+1`, `2..6` | auto |
+| `--dflash-verify-width N` | DFlash2 chain verify width `W=k+1`, `2..8` | auto |
 | `--lm-head-draft` | optimized proposal head | off |
 | `--default-max-tokens N` | output limit when omitted by a request | `8192` |
 | `--vision` | enable media input and load Vision GPU allocations | off |

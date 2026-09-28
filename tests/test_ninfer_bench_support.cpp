@@ -827,10 +827,11 @@ int test_attention_parity_selector_scope() {
                            kv::use_packed_decode_attention(2U, 320U, false) &&
                            kv::use_packed_decode_attention(4U, 133U, false) &&
                            kv::use_packed_decode_attention(5U, 8192U, false) &&
-                           kv::use_packed_decode_attention(6U, 262144U, false),
+                           kv::use_packed_decode_attention(6U, 262144U, false) &&
+                           kv::use_packed_decode_attention(8U, 65536U, false),
                        "packed decode route selected cells (production)");
     failures += expect(!kv::use_packed_decode_attention(0U, 134U, false) &&
-                           !kv::use_packed_decode_attention(7U, 135U, false) &&
+                           !kv::use_packed_decode_attention(9U, 135U, false) &&
                            !kv::use_packed_decode_attention(5U, 134U, true) &&
                            !kv::use_packed_decode_attention(1U, 63U, false) &&
                            !kv::use_packed_decode_attention(6U, 262145U, false),

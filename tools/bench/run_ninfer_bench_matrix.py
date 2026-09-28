@@ -225,8 +225,8 @@ def dflash_args(k: int, verify_width: int) -> tuple[str, ...]:
 def resolved_dflash_verify_width(draft_tokens: int, requested_width: int) -> int:
     if draft_tokens == 0:
         return 0
-    if not 1 <= draft_tokens <= 5 or requested_width not in (0, draft_tokens + 1):
-        raise ValueError("DFlash requires chain K in [1, 5] and W=K+1")
+    if not 1 <= draft_tokens <= 7 or requested_width not in (0, draft_tokens + 1):
+        raise ValueError("DFlash requires chain K in [1, 7] and W=K+1")
     return draft_tokens + 1
 
 

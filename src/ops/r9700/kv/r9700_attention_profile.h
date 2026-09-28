@@ -43,13 +43,13 @@ inline constexpr bool kTextP129WmmaTailCandidate =
            visible_context <= kDensePrefillMaximumContext;
 }
 
-// Production packed decode route for 1..6 causal rows per sequence (ordinary decode, MTP and
+// Production packed decode route for 1..8 causal rows per sequence (ordinary decode, MTP and
 // DFlash chain verification): non-tree execution with host-fixed row counts and context
 // 64..262144. The caller must additionally require G16, token-fastest FP8 keys, and
 // feature-fastest INT4/FP16 values and scales; other cells retain the split/fused fallback.
 [[nodiscard]] constexpr bool use_packed_decode_attention(
     std::uint32_t query_rows, std::size_t visible_context, bool tree_or_device_count) noexcept {
-    return (query_rows >= 1U && query_rows <= 6U) && !tree_or_device_count &&
+    return (query_rows >= 1U && query_rows <= 8U) && !tree_or_device_count &&
            visible_context >= kPackedDecodeMinimumContext &&
            visible_context <= kPackedDecodeMaximumContext;
 }

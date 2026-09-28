@@ -435,7 +435,7 @@ int main(int argc, char** argv) {
             !kv::use_packed_decode_attention(1U, kW1Context, false) ||
             !kv::use_packed_decode_attention(4U, kW5Context, false) ||
             kv::use_packed_decode_attention(0U, kW5Context, false) ||
-            kv::use_packed_decode_attention(7U, kW6Context, false) ||
+            kv::use_packed_decode_attention(9U, kW6Context, false) ||
             kv::use_packed_decode_attention(kW5, kW5Context, true) ||
             kv::use_packed_decode_attention(kW6, kW6Context, true) ||
             kv::use_packed_decode_attention(kW5, 63U, false) ||
@@ -837,10 +837,10 @@ int main(int argc, char** argv) {
         wrong_width.query_rows = 0U;
         if (kv::fp8_int4_kv_attention_packed_decode(wrong_width, device.stream) !=
             hipErrorInvalidValue) fail("packed decode accepted zero rows");
-        auto wrong_width_w7 = w6_batched;
-        wrong_width_w7.query_rows = 7U;
-        if (kv::fp8_int4_kv_attention_packed_decode(wrong_width_w7, device.stream) !=
-            hipErrorInvalidValue) fail("batched W5/W6 WMMA accepted W7");
+        auto wrong_width_w9 = w6_batched;
+        wrong_width_w9.query_rows = 9U;
+        if (kv::fp8_int4_kv_attention_packed_decode(wrong_width_w9, device.stream) !=
+            hipErrorInvalidValue) fail("packed decode accepted W9");
         auto missing_positions = w5_batched;
         missing_positions.row_positions = nullptr;
         if (kv::fp8_int4_kv_attention_packed_decode(missing_positions, device.stream) !=

@@ -29,8 +29,8 @@ inline constexpr std::uint32_t kDefaultPrefillChunk   = ninfer::kDefaultPrefillC
 inline constexpr std::uint32_t kPrefillChunkAlignment = 128;
 inline constexpr std::uint32_t kKvPageTokens          = 64;
 inline constexpr std::uint32_t kMaxMtpDraftTokens     = 5;
-inline constexpr std::uint32_t kMaxDFlashDraftTokens  = 5;
-inline constexpr std::uint32_t kMaxDFlashVerifyWidth  = 6;
+inline constexpr std::uint32_t kMaxDFlashDraftTokens  = 7;
+inline constexpr std::uint32_t kMaxDFlashVerifyWidth  = 8;
 inline constexpr std::uint32_t kBenchmarkPendingTimeoutMs = 0xffffffffU;
 
 enum class TestKind { Prefill, Decode, PrefillDecode, WholeInference };
