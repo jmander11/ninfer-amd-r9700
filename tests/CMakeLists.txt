@@ -119,6 +119,11 @@ ninfer_add_r9700_test(ninfer_typical_cycle_test
 ninfer_add_r9700_test(ninfer_generation_recovery_test
   SOURCES targets/qwen3/test_generation_recovery.cpp
   LIBRARIES ninfer_engine)
+ninfer_add_r9700_test(ninfer_qwen3_recovery_executor_test
+  SOURCES targets/qwen3/test_recovery_executor.cpp
+  LIBRARIES ninfer_engine)
+target_compile_definitions(ninfer_qwen3_recovery_executor_test PRIVATE
+  NINFER_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 ninfer_add_r9700_test(ninfer_tool_grammar_test
   SOURCES targets/qwen3/test_tool_grammar.cpp
   LIBRARIES ninfer_engine)

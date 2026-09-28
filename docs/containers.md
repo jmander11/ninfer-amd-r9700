@@ -173,7 +173,7 @@ server and any other GPU owner; never overlap them with builds or model conversi
 docker compose stop server
 # Existing native build, rebuilt first; all registered host and GPU CTests, serially:
 bash scripts/run-unit-tests.sh --gpu -- --parallel 1
-# Real-artifact RAM continuation/cancellation (ordinary greedy execution):
+# Real-artifact RAM continuation/cancellation and recovery-on-resident-KV qualification:
 bash scripts/run-unit-tests.sh --real /absolute/path/to/exact-model.ninfer -- --parallel 1
 # Restart/persistence proof requires a fresh directory whose parent already exists:
 build-r9700/src/ninfer_r9700_engine_cache_cancel_qual /absolute/path/to/exact-model.ninfer \
@@ -228,7 +228,12 @@ NINFER_PYTHON=/absolute/path/to/python3.11 bash scripts/run-unit-tests.sh --pyth
 ```
 
 `--real` runs the public-Engine ordinary cancellation and RAM continuation
-qualifier with that exact artifact (one active request, greedy, 16-token outputs).
+qualifier with that exact artifact (one active request, greedy, 16-token outputs),
+then `ninfer_r9700_recovery_kv_qual ARTIFACT mtp`. That Program-level qualifier
+prefills only the generation-recovery suffix from a retained lane, restores a
+captured RAM image after three lane aborts, and requires two decoded retries to
+reproduce the undecoded control's committed GDN/hidden state and greedy
+continuation; run it again with `dflash` or `none` for the other backends.
 It does not infer a model filename or silently skip a missing artifact. Paths
 passed with `--builder` are container paths. `--gpu` enables registered physical
 tests; it does not select a cache dtype. All product tests use FP8 E4M3FN keys,

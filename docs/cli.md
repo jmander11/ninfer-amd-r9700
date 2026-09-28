@@ -222,8 +222,8 @@ and tools-off/raw output remain allowed. This is a sampling-domain constraint,
 not response-text deletion or an automatic retry.
 
 With current declared tools, Engine separately withholds suspected duplicate-tool loops
-using repeated reasoning, identical calls and unchanged associated results. It can rebuild
-the internal context and retry at most twice, within the original output budget and resource
+using repeated reasoning, identical calls and unchanged associated results. It can extend
+the cached context and retry at most twice, within the original output budget and resource
 reservation. Rejected calls are not printed or executed; already printed reasoning/prose is
 not retracted. Exhaustion is an explicit request error, not forced EOS or an engine shutdown.
 For text-only thinking requests, persistent reasoning can also trigger an internal retry:
@@ -234,11 +234,14 @@ repetition-evidence threshold, not a 4,096-token reasoning limit. The occurrence
 have a fixed separation,
 so changing words elsewhere in a multi-paragraph loop does not hide the repeated passage.
 Hashes locate candidates; exact token comparison confirms them. Two copies alone do not
-trigger a retry. Long reasoning without that repetition is not limited. The failed
-generated reasoning and closed historical reasoning are omitted from
-the internal retry context; original user content and actual tool results are preserved,
-and an explicitly labeled engine system notice asks for concrete progress. No call or
-tool result is invented. Reasoning and duplicate-tool recovery share the two-retry budget.
+trigger a retry. Long reasoning without that repetition is not limited. The retry keeps
+the cached prompt, including historical reasoning. It closes the open think turn and
+appends the notice or rejected-call feedback; only the failed generation is omitted. A
+later retry appends another notice after the first; the earlier notice stays. A ready
+checkpoint at the prompt frontier is restored and only the appended suffix is prefilled.
+Original user content and actual tool results stay in that prompt, and an explicitly
+labeled engine system notice asks for concrete progress. No call or tool result is
+invented. Reasoning and duplicate-tool recovery share the two-retry budget.
 Raw output and media inputs do not use these internal retries. See the serving reference
 for the detector's conservative scope and recovery usage fields.
 

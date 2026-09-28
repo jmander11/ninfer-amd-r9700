@@ -304,6 +304,21 @@ set_target_properties(ninfer_r9700_engine_cache_cancel_qual PROPERTIES
   HIP_ARCHITECTURES gfx1201 LINKER_LANGUAGE HIP)
 target_link_libraries(ninfer_r9700_engine_cache_cancel_qual PRIVATE ninfer_engine)
 
+# Manual Program-level generation-recovery qualification on resident, retained, and RAM-restored
+# KV; requires an explicit artifact and a speculative backend argument.
+add_executable(ninfer_r9700_recovery_kv_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/recovery_kv_qual.cpp)
+ninfer_r9700_internal_includes(ninfer_r9700_recovery_kv_qual)
+set_target_properties(ninfer_r9700_recovery_kv_qual PROPERTIES
+  HIP_ARCHITECTURES gfx1201 LINKER_LANGUAGE HIP)
+target_link_libraries(ninfer_r9700_recovery_kv_qual PRIVATE
+  ninfer_engine
+  ninfer_r9700_qwen3_8_27b_runtime
+  ninfer_r9700_target_bindings
+  ninfer_artifact
+  ninfer_r9700_core
+  hip::host)
+
 # Sole-target selection and startup device-memory/capacity planning. This compile-only object
 # boundary checks the registry against native HIP and the Qwen3.8-27B R9700 package identity
 # without claiming that the still excluded package schedule and Engine are linkable.

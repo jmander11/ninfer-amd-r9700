@@ -152,15 +152,24 @@ For p-less, non-raw, text-only thinking requests, bounded recovery may withhold 
 call or interrupt persistent reasoning at a committed round boundary. Reasoning retries additionally
 require positive temperature, three disjoint exact occurrences of a 256-token passage, and at least
 4096 distinct redundant tokens. This is not a reasoning-length limit. The detector resets per attempt.
-The family owns the original input and repairs it by removing failed/historical reasoning and adding
-a labeled system notice, without inventing a user turn or call result.
+The family owns the original input. A retry splices onto the resident prompt tokens, keeping
+historical reasoning: it closes the open think turn, appends a labeled system notice or
+rejected-call feedback, and reopens the thinking prologue. Only the failed generation is omitted; a
+second retry appends its notice after the first retry's prompt. It invents no user turn or call
+result. A splice whose suffix does not round-trip through the tokenizer exhausts recovery.
 
-At most two repairs consume reserved cold-prefill entitlement and the original remaining output
-budget. A retry keeps its lane/admission, leaves the decode-ready set, clears complete KV/GDN/
-speculative state, and prefills without prefix reuse or checkpoint capture. It cannot truncate KV
-while retaining stale recurrent state. Other requests keep maximal-batch scheduling outside that
-exclusive prefill. Calls remain unpublished until accepted; already streamed prose/reasoning cannot
-be retracted. Extra prefill work and recovery events are reported separately from original prompt
+At most two retries consume the reserved retry service work and the original remaining output
+budget, each within the original context entitlement. A retry keeps its lane/admission and leaves
+the decode-ready set. With prefix reuse enabled it retains the lane in place and plans the spliced
+prompt against it: a ready prompt-frontier checkpoint (the live frontier, the response-replay
+rewrite checkpoint, or a context checkpoint) is restored and only the suffix is prefilled, with the
+typed FP8-K/INT4-V pages, GDN state, and MTP/DFlash proposal state of that checkpoint. Only when no
+resident checkpoint is reusable does it take the longer RAM or disk image onto the aborted lane, and
+a failed host restore cold-prefills the same lane without sticking a cold fallback. It never trims
+KV at an arbitrary token while retaining stale recurrent state, and it captures no turn rollback
+checkpoint. Other requests keep maximal-batch scheduling outside that exclusive prefill; a
+host-restore retry blocks them for the copy. Calls remain unpublished until accepted; already
+streamed prose/reasoning cannot be retracted. Extra prefill work and recovery events are reported separately from original prompt
 usage. Exhaustion is a request error, not synthetic EOS, engine shutdown, or a promise of progress.
 
 ---
@@ -526,8 +535,9 @@ service work = known Text/Vision suffix-prefill and finalization work
 Output 部分使用声明的 finite effective output bound，不预测 prompt 内容、reasoning difficulty 或实际 EOS。
 Prefill 部分使用已经 bounded 的 target scheduling-unit profiles；短 output 不能抵消任意长的 Text/Vision
 prefill。当前 Qwen3 profile 以 externally scheduled prefill/finalization steps 的有限上界作为 prefill
-quanta，并把每个 effective remaining output token 计为一个 decode quantum；prompt snapshot 和 Vision item
-造成的已知 prefill split 在 planning 时计入。Selected speculative backend 可以影响 target 的统一 work
+quanta，并把每个 effective remaining output token 计为一个 decode quantum；prefill quanta 按执行时同一
+chunk policy（含 irregular-tail 4096 规则）逐步模拟 rewrite checkpoint、Vision item/MTP shifted consumer
+以及多模态 prompt 的历史 assistant turn-closure frontier 造成的 split，而不是每个 split 只加一个 quantum。Selected speculative backend 可以影响 target 的统一 work
 projection，但不会在 Scheduler 中产生 MTP/DFlash policy branches。
 
 Projection 只服务以下两件事：选择 frozen incumbent donor order，以及约束 temporal borrowing。它不是
@@ -753,7 +763,12 @@ Qwen frontend 从有效 `preserve_thinking` 语义发布 desired checkpoint：`f
 之后第一条 assistant opener 的末尾；`true` 选择本次完整 deterministic generation prologue 的末尾，
 即当前 prompt frontier。Thinking generation 包含 `<think>\n`，non-thinking generation 包含完整 empty
 thinking block。Boundary 先作为 byte offset 产生，再独立 tokenize 并验证为完整 prompt token prefix；
-schema adapter 不推断或改写这些 target-private 语义。
+schema adapter 不推断或改写这些 target-private 语义。`false` 时 frontend 另外发布每个历史 assistant
+opener 末尾的 turn-closure token frontier（按 turn 顺序、以不相交区间 tokenize 并对照完整编码验证）。
+多模态 prompt 的 cold prefill 在这些 frontier 处切分 chunk，使其 state 与早先 turn 捕获的 checkpoint
+一致；多模态 prompt 中不含 Vision item 的 suffix 仍按 prompt 的 3-axis MRoPE position 执行，而不是
+1-D text RoPE。Vision chunk 在第一个 image Text column 处切分以匹配 reused text-only prefix，同时该
+chunk 仍携带 MTP shifted input 所需的 image embedding。
 
 Admission 在同一 lane 成功时消费 retained entry，并把 SequenceState ownership 转移给新 request：
 

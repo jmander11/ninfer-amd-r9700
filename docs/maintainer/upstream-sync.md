@@ -48,7 +48,11 @@ The baseline above advances once every commit below is ported, equivalent or dis
   UTF-8 repair, `1c0b8f5f` tool-schema keyword relaxation, `0fe9b7ff` + `8f0082d3` literal client
   text encoding, `dfc818ae` unread disk scratch and grammar heap trim (its tokenizer blob packing is
   not ported: the AMD tokenizer tables differ and the saving is host memory only), `5b5d3caa`
-  worker and disk-thread device binding, disk tier `cb6ec221`, `8c232d01`, `931617b2`.
+  worker and disk-thread device binding, disk tier `cb6ec221`, `8c232d01`, `931617b2`, recovery
+  on resident KV `d29841e0` + `550560fe` with merge `92388a91`'s literal-span adaptation (the
+  executor probe test binds a probe device instead of a HIP device; the Program-level real test is
+  `ninfer_r9700_recovery_kv_qual`; the CUDA test-only stream-order fix in `test_state_store.cpp`
+  and the real prefix/disk/DFlash-cancel test edits have no AMD counterpart).
 - Not ported: `45bef20a` (report instead of fail on the device-wide graph memory delta). R9700 GPU
   jobs are serialized by the shared GPU lock, and the startup check is the only calibration guard
   for the graph allowance here.
@@ -57,6 +61,5 @@ The baseline above advances once every commit below is ported, equivalent or dis
 - Excluded (NVIDIA, NVFP4/TMA/tensor-core, or C > 4): `c62f7ead`, `c1da30a8`, `fda2972d`,
   `fccf6613`, `b83885e3`, `79033d70`, `4ca53273`, `6ab11dfa`, `43b49f9e`, `9b8fcce1`, `e800379e`,
   `41f331af`, `724dd314`, `91e41952`; upstream docs `7e303491`, `c40469f3`, `f74915f9`.
-- Pending: recovery on resident KV `d29841e0` + `550560fe` (merge `92388a91`); DFlash2 p-less
-  draft temperature `5d6f6bf2`; Prometheus `/metrics` `a7cbe5c9`; graph-update diagnostics
-  `9f020ed7`; to measure: `3e18ef63`, `f3c15618`, `724de290`.
+- Pending: DFlash2 p-less draft temperature `5d6f6bf2`; Prometheus `/metrics` `a7cbe5c9`;
+  graph-update diagnostics `9f020ed7`; to measure: `3e18ef63`, `f3c15618`, `724de290`.

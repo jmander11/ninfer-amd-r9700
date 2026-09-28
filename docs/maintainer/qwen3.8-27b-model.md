@@ -435,9 +435,10 @@ does not fit.
 
 Rejected publication/recovery rounds restore typed Text/MTP publication to the round base, undo
 unpublished sampling-count/statistics changes, and invalidate speculative tail state. Reported
-accepted drafts count only the committed licensed prefix. A bounded repetition retry rebuilds
-complete state by cold prefill on the same admitted lane, not by arbitrary KV truncation with
-stale GDN recurrence. Its request budget and publication semantics are defined in
+accepted drafts count only the committed licensed prefix. A bounded repetition retry restores a
+complete prompt-frontier checkpoint on the same admitted lane and prefills only the recovery
+suffix, cold-prefilling when none is ready; it never truncates KV at an arbitrary token with stale
+GDN recurrence. Its request budget and publication semantics are defined in
 `concurrent-inference-architecture.md`.
 
 ## 10. Vision preprocessing

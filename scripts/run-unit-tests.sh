@@ -76,6 +76,7 @@ fi
 ((status == 0)) || exit "$status"
 if [[ -n "$artifact" ]]; then
   "$build_dir/src/ninfer_r9700_engine_cache_cancel_qual" "$artifact"
+  "$build_dir/src/ninfer_r9700_recovery_kv_qual" "$artifact" mtp
 fi
 if ((run_python)); then
   "$python" -c 'import sys; assert sys.version_info[:2] == (3, 11); import pytest, torch'

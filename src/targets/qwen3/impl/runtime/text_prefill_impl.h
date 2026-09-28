@@ -53,14 +53,12 @@ void configure_text_card(TextContext& card, const ExecutionCore& execution,
     }
 }
 
-PrefillChunkResult prefill_text_chunk(
-    PrefillContext& state, std::span<const TokenId> ids, std::uint32_t nominal_length,
-    std::optional<std::uint32_t> rewrite_checkpoint_capture_frontier, bool finalize_at_end) {
-    TextContext card(state.execution.device, state.execution.model,
-                     state.execution.linear_execution, state.execution.work,
-                     state.text_kv, state.execution.linear_attention, state.execution.io,
-                     state.execution.prefill_hidden, state.execution.prefill_chunk,
-                     state.text_kv_base, state.mtp_kv, &state.text_cache, state.mtp_cache);
+namespace {
+
+// Every prefill card commits through the same FP8-K/INT4-V transactions and captures the
+// same rewrite checkpoint outputs; the callers differ only in token and position inputs.
+void attach_prefill_state(TextContext& card, PrefillContext& state,
+                          std::optional<std::uint32_t> rewrite_checkpoint_capture_frontier) {
     configure_text_card(card, state.execution, state.sampling, state.current_state_slot,
                         state.rewrite_checkpoint_state_slot, state.mtp_proposal_extent);
     if (state.text_kv_allocation == nullptr || state.text_kv_publication == nullptr ||
@@ -82,6 +80,19 @@ PrefillChunkResult prefill_text_chunk(
         rewrite_checkpoint_capture_frontier
             ? static_cast<std::int64_t>(*rewrite_checkpoint_capture_frontier)
             : -1);
+}
+
+} // namespace
+
+PrefillChunkResult prefill_text_chunk(
+    PrefillContext& state, std::span<const TokenId> ids, std::uint32_t nominal_length,
+    std::optional<std::uint32_t> rewrite_checkpoint_capture_frontier, bool finalize_at_end) {
+    TextContext card(state.execution.device, state.execution.model,
+                     state.execution.linear_execution, state.execution.work,
+                     state.text_kv, state.execution.linear_attention, state.execution.io,
+                     state.execution.prefill_hidden, state.execution.prefill_chunk,
+                     state.text_kv_base, state.mtp_kv, &state.text_cache, state.mtp_cache);
+    attach_prefill_state(card, state, rewrite_checkpoint_capture_frontier);
     const std::span<const int> prompt(ids.data(), ids.size());
     if (state.dflash != nullptr) {
         DFlashFeatureSink sink = make_dflash_prefill_sink(state);
@@ -89,6 +100,23 @@ PrefillChunkResult prefill_text_chunk(
                                   sink);
     }
     return card.prefill_chunk(prompt, state.text_kv_base, nominal_length, finalize_at_end);
+}
+
+PrefillChunkResult prefill_mrope_text_chunk(
+    PrefillContext& state, const PreparedPromptData& prompt, std::uint32_t nominal_length,
+    std::optional<std::uint32_t> rewrite_checkpoint_capture_frontier, bool finalize_at_end) {
+    TextContext card(state.execution.device, state.execution.model,
+                     state.execution.linear_execution, state.execution.work,
+                     state.text_kv, state.execution.linear_attention, state.execution.io,
+                     state.execution.prefill_hidden, state.execution.prefill_chunk,
+                     state.text_kv_base, state.mtp_kv, &state.text_cache, state.mtp_cache);
+    attach_prefill_state(card, state, rewrite_checkpoint_capture_frontier);
+    if (state.dflash != nullptr) {
+        DFlashFeatureSink sink = make_dflash_prefill_sink(state);
+        return card.prefill_mrope_chunk(prompt, state.text_kv_base, nominal_length, finalize_at_end,
+                                        sink);
+    }
+    return card.prefill_mrope_chunk(prompt, state.text_kv_base, nominal_length, finalize_at_end);
 }
 
 PrefillChunkResult
@@ -101,28 +129,7 @@ prefill_multimodal_chunk(PrefillContext& state, const PreparedPromptData& prompt
                      state.text_kv, state.execution.linear_attention, state.execution.io,
                      state.execution.prefill_hidden, state.execution.prefill_chunk,
                      state.text_kv_base, state.mtp_kv, &state.text_cache, state.mtp_cache);
-    configure_text_card(card, state.execution, state.sampling, state.current_state_slot,
-                        state.rewrite_checkpoint_state_slot, state.mtp_proposal_extent);
-    if (state.text_kv_allocation == nullptr || state.text_kv_publication == nullptr ||
-        state.text_kv_status == nullptr) {
-        throw std::logic_error("multimodal Text prefill has no FP8-K/INT4-V transaction authority");
-    }
-    card.set_prefill_text_kv_authority(state.text_cache, *state.text_kv_allocation,
-                                       *state.text_kv_publication, state.text_kv_status);
-    if (state.mtp_cache != nullptr) {
-        if (state.mtp_kv_allocation == nullptr || state.mtp_kv_publication == nullptr ||
-            state.mtp_kv_status == nullptr) {
-            throw std::logic_error(
-                "multimodal MTP prefill has no FP8-K/INT4-V transaction authority");
-        }
-        card.set_prefill_mtp_kv_authority(*state.mtp_cache, *state.mtp_kv_allocation,
-                                          *state.mtp_kv_publication, state.mtp_kv_status);
-    }
-    card.set_rewrite_checkpoint_hidden_output(state.rewrite_checkpoint_hidden);
-    card.set_prefill_rewrite_checkpoint_frontier(
-        rewrite_checkpoint_capture_frontier
-            ? static_cast<std::int64_t>(*rewrite_checkpoint_capture_frontier)
-            : -1);
+    attach_prefill_state(card, state, rewrite_checkpoint_capture_frontier);
     if (state.dflash != nullptr) {
         DFlashFeatureSink sink = make_dflash_prefill_sink(state);
         return card.prefill_chunk(prompt, state.text_kv_base, nominal_length, vision,
