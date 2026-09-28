@@ -44,10 +44,6 @@ Package::WeightsProfile Package::resolve_weights(const artifact::ArtifactIdentit
         return WeightsProfile::R9700Fp8Lut4;
     }
     if (identity.model_id == model_id &&
-        identity.weights_id == "r9700-fp8lut4-head-eval") {
-        return WeightsProfile::R9700Fp8Lut4HeadEvaluation;
-    }
-    if (identity.model_id == model_id &&
         identity.weights_id == "r9700-q4-fp8-selective-cap-n16k16-dflash2-q4-eval") {
         return WeightsProfile::R9700Q4Fp8SelectiveCapDFlash2Q4Evaluation;
     }

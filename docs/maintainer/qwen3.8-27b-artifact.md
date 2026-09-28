@@ -87,22 +87,25 @@ see `docs/performance.md` for quality tradeoffs and delivery evidence.
 
 ### FP8LUT4 Text recipe
 
-`r9700-fp8lut4` (profile `R9700Fp8Lut4`, 17,017,223,680 bytes; admitted 2026-09-27, see
-`docs/performance.md`) is the selective-cap DFlash2
-companion with every Text-layer projection the base stores as Q4G64 re-encoded from the original
-BF16 checkpoint as `FP8LUT4` in `r9700-fp8lut4-n16k64-v1` (see `tensor-formats.md`), including
-GDN value_z. The 26 FP8 protections, embedding, output head, MTP, DFlash2 companion, Vision and
-resources are copied byte-exact from the base. MLP gate/up rows are stored gate/up interleaved in
+`r9700-fp8lut4` (profile `R9700Fp8Lut4`, 17,018,216,960 bytes; admitted 2026-09-27, output head
+added 2026-09-28, see `docs/performance.md`) is the selective-cap DFlash2
+companion with every Text-layer projection the base stores as Q4G64, and the target output head
+(248320 x 5120), re-encoded from the original BF16 checkpoint as `FP8LUT4` in
+`r9700-fp8lut4-n16k64-v1` (see `tensor-formats.md`), including GDN value_z. The 26 FP8
+protections, embedding, draft head, MTP, DFlash2 companion, Vision and resources are copied
+byte-exact from the base. MLP gate/up rows are stored gate/up interleaved in
 16-row tiles (stored row `16 b + i` is gate feature `8 b + i` for `i < 8`, else up feature
 `8 b + i - 8`) so the projection publishes the SiLU-gated activation directly; no other object is
 permuted. The binder uses the selective-cap base inventory and switches exactly its Text-layer Q4
-matrices to FP8LUT4.
+matrices and output head to FP8LUT4; the head runs through the `ops::linear` FP8LUT4 route at
+every width.
 
 The GDN and MLP FP8LUT4 words are GPTQ-rounded: the BF16 reference
 (`tools/reference/qwen3_8_27b_bf16`) evaluates 128 calibration sequences of 2048 tokens
 layer-major, in lock-step with the object order, and each projection is rounded
 column-sequentially against its inputs' second moments (`fp8lut4_codec.Calibration`; mean-diagonal
-damping 0.3 for MLP down, 0.1 otherwise, chosen on held-out calibration sequences). Attention
+damping 0.3 for MLP down, 0.1 otherwise, chosen on held-out calibration sequences); the output
+head is rounded the same way against the second moment of the final-RMSNorm output (damping 0.1). Attention
 projections keep independent rounding: GPTQ there failed 8K multikey NIAH (5/10 sampled runs).
 The calibration set (`calibration_corpus.py`) is 64 windows of rendered opencode sessions, 20 of
 OpenWebUI conversations, 28 of llama.cpp sources and 16 of news text; no window shares a 32-token
@@ -118,14 +121,9 @@ python3.11 -m tools.convert.qwen3_8_27b_r9700.convert_fp8lut4 \
   --out <new.ninfer>
 ```
 
-`r9700-fp8lut4-head-eval` (profile `R9700Fp8Lut4HeadEvaluation`, 17,018,216,960 bytes) is the
-same artifact with the Q4G64 target output head (248320 x 5120) also GPTQ-encoded as FP8LUT4,
-against the second moment of the final-RMSNorm output over the same calibration sequences with
-damping 0.1 (`convert_fp8lut4 --head`, optionally `--reuse-layers` with the production file to
-skip the layer pass). The draft head and every other object are unchanged. The head runs through
-the `ops::linear` FP8LUT4 route at every width. It is installed under
-`/ssdpool2nvme/local_llm/models/qwen3.8-27b-r9700-fp8lut4-head-eval/`; its evidence is in
-`docs/performance.md`, and it is an evaluation identity, not a production selection.
+`--reuse-layers <existing r9700-fp8lut4.ninfer>` copies the Text-layer objects byte-exact from an
+artifact of the same calibration and damping (checked against its receipt), leaving only the
+calibration pass and the head encoding.
 
 FP8LUT4 Linears run per-token E4M3 activations: prefill a 256-token x 128-row FP8 WMMA GEMM with the
 group scale folded into the decoded weight bytes, verification widths a small-T WMMA kernel, one

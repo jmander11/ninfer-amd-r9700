@@ -85,10 +85,11 @@ compiled only for `gfx1201` and tuned on one AMD Radeon AI PRO R9700. The sole s
 Qwen3.8-27B. Its growing Text/MTP cache has exactly three planes: FP8 E4M3FN keys, signed INT4
 values, and FP16 value scales; there is no cache dtype selector, K scale, alternate cache path, or
 retained compatibility backend. The production weights are `qwen3.8-27b/r9700-fp8lut4` (profile
-`R9700Fp8Lut4`): GPTQ-rounded FP8LUT4 Text projections with 26 row-scaled FP8 protections, admitted
-2026-09-27 by the BF16-source PPL, exact-token, and whole-inference gates as closer to BF16 than the
-5090 NVFP4 build. Other `-eval` identities remain evaluation and conversion-base artifacts. DFlash2 keeps its
-model-specified BF16 selector codebook and private fixed BF16 state.
+`R9700Fp8Lut4`): GPTQ-rounded FP8LUT4 Text projections and output head with 26 row-scaled FP8
+protections, admitted 2026-09-27 (output head 2026-09-28) by the BF16-source PPL, exact-token,
+and whole-inference gates as closer to BF16 than the 5090 NVFP4 build. Other `-eval` identities
+remain evaluation and conversion-base artifacts. DFlash2 keeps its model-specified BF16 selector
+codebook and private fixed BF16 state.
 
 The workload is one R9700, one resident model instance, and a startup-fixed one to four active
 requests. The Engine forms one compact decode batch per round boundary with bounded FIFO ingress

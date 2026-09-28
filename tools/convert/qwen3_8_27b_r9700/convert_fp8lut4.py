@@ -1,12 +1,11 @@
 """Create-only conversion of the FP8LUT4 Text recipe on the selective-cap DFlash2 base.
 
-Every Text-layer projection the base stores as Q4G64 is re-encoded from the original BF16
-checkpoint as FP8LUT4 (`fp8lut4_codec`), MLP gate/up rows in the interleaved SiLU-pair order
-(`fp8lut4_codec.interleave_gate_up`), with GPTQ error-compensated rounding against the input
-second moments of the calibration sequences (`calibration.InputMoments`, evaluated layer-major
-through the BF16 reference in lock-step with the object order). With `--head`, the output head
-is re-encoded the same way against the final-norm moments (evaluation identity
-`r9700-fp8lut4-head-eval`). Every other object (FP8 protections, embeddings, draft head, MTP,
+Every Text-layer projection the base stores as Q4G64, and the output head, is re-encoded from the
+original BF16 checkpoint as FP8LUT4 (`fp8lut4_codec`), MLP gate/up rows in the interleaved
+SiLU-pair order (`fp8lut4_codec.interleave_gate_up`), with GPTQ error-compensated rounding against
+the input second moments of the calibration sequences (`calibration.InputMoments`, evaluated
+layer-major through the BF16 reference in lock-step with the object order; the head against the
+final-norm moments). Every other object (FP8 protections, embeddings, draft head, MTP,
 DFlash2 companion, Vision, resources) is copied byte-exact from the base artifact.
 `--reuse-layers` copies the Text-layer FP8LUT4 objects byte-exact from an existing
 `r9700-fp8lut4` artifact converted with the same calibration and damping.
@@ -33,14 +32,13 @@ HEAD_DAMPING = 0.1
 
 BASE_WEIGHTS_ID = "r9700-q4-fp8-selective-cap-n16k16-dflash2-q4-eval"
 WEIGHTS_ID = "r9700-fp8lut4"
-HEAD_WEIGHTS_ID = "r9700-fp8lut4-head-eval"
 FP8LUT4 = "FP8LUT4"
 FP8LUT4_LAYOUT = "r9700-fp8lut4-n16k64-v1"
 
 
-def selected(obj, head: bool) -> bool:
+def selected(obj) -> bool:
     return (isinstance(obj, TensorObject) and obj.format == "Q4G64_F16S" and
-            (obj.name.startswith("text/layers/") or (head and obj.name == HEAD)))
+            (obj.name.startswith("text/layers/") or obj.name == HEAD))
 
 
 def recorded(chunks, record):
@@ -74,13 +72,13 @@ def convert(args) -> None:
     torch.set_num_threads(8)
     device = torch.device(args.device)
     moments = InputMoments(args.model, args.calibration, device)
-    weights_id = HEAD_WEIGHTS_ID if args.head else WEIGHTS_ID
     calibration_sha = hashlib.sha256(args.calibration.read_bytes()).hexdigest()
     reuse = None
     if args.reuse_layers is not None:
         prior = json.loads(Path(str(args.reuse_layers) + ".conversion.json").read_text())
+        layer_damping = {k: v for k, v in prior["calibration"]["damping"].items() if k != "output_head"}
         if (prior["recipe"] != WEIGHTS_ID or prior["calibration"]["sha256"] != calibration_sha or
-                prior["calibration"]["damping"] != dict(DAMPING, default=DEFAULT_DAMPING) or
+                layer_damping != dict(DAMPING, default=DEFAULT_DAMPING) or
                 prior["base"] != str(args.base.resolve()) or
                 prior["source_model"] != str(args.model.resolve())):
             raise ValueError("--reuse-layers needs an r9700-fp8lut4 artifact of this calibration")
@@ -89,29 +87,29 @@ def convert(args) -> None:
         if reuse.identity.weights_id != WEIGHTS_ID:
             reuse.close()
             raise ValueError("--reuse-layers artifact identity is not r9700-fp8lut4")
-    report = dict(recipe=weights_id, base=str(args.base.resolve()),
+    report = dict(recipe=WEIGHTS_ID, base=str(args.base.resolve()),
                   source_model=str(args.model.resolve()),
                   calibration=dict(ids=str(args.calibration.resolve()),
                                    sha256=calibration_sha, tokens=moments.tokens,
                                    rounding="gptq-block128",
                                    damping=dict(DAMPING, default=DEFAULT_DAMPING,
-                                                **({"output_head": HEAD_DAMPING} if args.head else {}))),
+                                                output_head=HEAD_DAMPING)),
                   objects=[])
     with Artifact(args.base) as base, ShardReader(args.model) as reader, \
             (reuse if reuse is not None else contextlib.nullcontext()):
         if base.identity.weights_id != BASE_WEIGHTS_ID:
             raise ValueError(f"base must be {BASE_WEIGHTS_ID}, got {base.identity.weights_id}")
         stored = tuple(
-            StoredTensor(o.name, o.shape, FP8LUT4, FP8LUT4_LAYOUT) if selected(o, args.head)
+            StoredTensor(o.name, o.shape, FP8LUT4, FP8LUT4_LAYOUT) if selected(o)
             else StoredTensor(o.name, o.shape, o.format, o.layout) if isinstance(o, TensorObject)
             else StoredResource(o.name, o.encoding, o.bytes)
             for o in base.objects)
-        identity = ArtifactIdentity(base.identity.model_id, weights_id)
+        identity = ArtifactIdentity(base.identity.model_id, WEIGHTS_ID)
         layer_moments: dict[str, torch.Tensor] = {}
         with ArtifactWriter(args.out, identity, stored) as writer:
             for obj in base.objects:
                 record = dict(name=obj.name)
-                if selected(obj, args.head) and obj.name == HEAD:
+                if selected(obj) and obj.name == HEAD:
                     while moments.next_layer < LAYERS:
                         moments.layer(moments.next_layer)
                     calibration = fp8lut4_codec.Calibration(moments.final(), HEAD_DAMPING)
@@ -123,7 +121,7 @@ def convert(args) -> None:
                         calibration=calibration), record))
                     del tensor, calibration
                     print(obj.name, flush=True)
-                elif selected(obj, args.head) and reuse is not None:
+                elif selected(obj) and reuse is not None:
                     layer = int(obj.name.split("/")[2])
                     while moments.next_layer <= layer:
                         moments.layer(moments.next_layer)
@@ -133,7 +131,7 @@ def convert(args) -> None:
                     writer.write(obj.name, recorded(copied(reuse, obj.name), record))
                     if record["sha256"] != prior_digests.get(obj.name):
                         raise ValueError(f"reused {obj.name} differs from its receipt")
-                elif selected(obj, args.head):
+                elif selected(obj):
                     layer = int(obj.name.split("/")[2])
                     while moments.next_layer <= layer:
                         layer_moments = moments.layer(moments.next_layer)
@@ -192,8 +190,6 @@ def main() -> None:
                         help="calibration token ids, one equal-length sequence per line")
     parser.add_argument("--device", default="cuda:0",
                         help="torch device for the BF16 calibration pass and GPTQ")
-    parser.add_argument("--head", action="store_true",
-                        help="also GPTQ-encode the output head (evaluation identity)")
     parser.add_argument("--reuse-layers", type=Path,
                         help="copy the Text-layer FP8LUT4 objects from this r9700-fp8lut4 artifact")
     parser.add_argument("--validate", type=Path)

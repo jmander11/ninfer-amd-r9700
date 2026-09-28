@@ -178,7 +178,8 @@ against the retained source-BF16 references; tiers from `tools/ppl/README.md`):
 Same-route graph/eager decode is bit-identical at 8K and 32K (NLL and argmax), and whole-inference
 greedy tokens match graph/eager at C1..C4 (P2048/G256) and at P20480 for ordinary and DFlash.
 
-**Output head as GPTQ FP8LUT4 (`r9700-fp8lut4-head-eval`, 2026-09-28).** The Q4G64 target head
+**Output head as GPTQ FP8LUT4 (promoted into `r9700-fp8lut4`, 2026-09-28).** Measured as the
+evaluation identity `r9700-fp8lut4-head-eval`, since folded into production. The Q4G64 target head
 re-encoded as FP8LUT4 at the same 4.25 bits/weight, GPTQ-rounded against the final-norm second
 moment (damping 0.1; recipe in `qwen3.8-27b-artifact.md`). Same BF16-source cells
 (`profiles/ppl/r9700-head-eval-20260927/`):

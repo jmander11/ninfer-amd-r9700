@@ -24,9 +24,10 @@ FP8LUT4 artifact was admitted; it remains in git history.
   staging latency unhideable on gfx1201 at the 240-VGPR budget, chunk 4096 mixed (default 2048).
   No mechanism with a credible whole-prefill bound remains; `docs/performance.md` has the evidence.
 - [ ] `QUALITY-GAINS` Cheap quality improvements measured against the BF16 8K/32K admission
-  cells: the Q4G64 target output head as (GPTQ) FP8LUT4 at the same 4.25 bits/weight,
-  attention-role GPTQ with per-role damping (full attention GPTQ failed 8K multikey NIAH), GPTQ
-  activation ordering, a larger usage calibration set. Decode is not a lever here: Q4G64 and
-  FP8LUT4 are the same size and the Q4 drafter/head kernels already read at ~600 GB/s.
+  cells. Done 2026-09-28: the GPTQ FP8LUT4 output head (-0.006 to -0.008 nats/token, promoted
+  into `r9700-fp8lut4`). Remaining: attention-role GPTQ with per-role damping (full attention
+  GPTQ failed 8K multikey NIAH), GPTQ activation ordering, a larger usage calibration set. Decode
+  is not a lever here: Q4G64 and FP8LUT4 are the same size and the Q4 drafter kernels already
+  read at ~600 GB/s.
 - [ ] `CLOCKS-README` [user-gated; `LONGCTX-PREFILL` is closed] Matched README benchmarks at stock
   clocks and at the user's undervolted/higher-clock setting.
