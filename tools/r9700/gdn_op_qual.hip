@@ -250,8 +250,8 @@ void qualify_conv_and_controls(hipStream_t stream) {
     DeviceBuffer<hip_bfloat16> d_history_in(initial_history.size());
     DeviceBuffer<hip_bfloat16> d_history_out(initial_history.size());
     copy_to_device(d_weight, weight);
-    constexpr std::array<std::uint32_t, 15> token_cases{
-        1, 2, 3, 4, 5, 6, 7, 8, 17, 63, 64, 65, 128, 1024, 2048};
+    constexpr std::array<std::uint32_t, 18> token_cases{
+        1, 2, 3, 4, 5, 6, 7, 8, 17, 31, 32, 33, 63, 64, 65, 128, 1024, 2048};
     for (const std::uint32_t tokens : token_cases) {
         const std::size_t elements = static_cast<std::size_t>(tokens) * kChannels;
         const std::vector<hip_bfloat16> input = bf16_fixture(elements, tokens + 11U);
@@ -988,7 +988,7 @@ int main(int argc, char** argv) {
         qualify_batched_projection_conv(stream);
         qualify_recurrent_and_transactions(stream);
         HIP_CHECK(hipStreamDestroy(stream));
-        std::cout << "r9700_gdn_op_qualification: PASS conv=T1..8/17/63/64/65/128/1024/2048 "
+        std::cout << "r9700_gdn_op_qualification: PASS conv=T1..8/17/31/32/33/63/64/65/128/1024/2048 "
                      "B=1..4 tree/snapshot C=10240 Hq=16 Hv=48 K=V=128\n";
         return 0;
     } catch (const std::exception& error) {

@@ -1026,7 +1026,7 @@ hipError_t causal_conv1d_silu_bf16(const hip_bfloat16* input, const hip_bfloat16
         history_out != nullptr && output != nullptr && channels != 0 && tokens != 0 &&
         valid_stream(stream);
     if (!valid) { return hipErrorInvalidValue; }
-    if (tokens >= 64U) {
+    if (tokens >= 32U) {
         return launch_causal_conv1d_silu_prefill<4U>(
             input, weight, history_in, history_out, output, channels, tokens, stream);
     }

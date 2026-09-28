@@ -33,7 +33,8 @@ namespace ninfer::ops::r9700::gdn {
                                                   hipStream_t stream) noexcept;
 
 // Direct regression boundaries for the causal-convolution dispatch. Production selects token
-// tile 4 at T>=64 and preserves the serial incumbent below that stable physical crossover. The
+// tile 4 at T>=32 and preserves the serial incumbent below that physical crossover (C=10240:
+// serial 16.8/20.6/29.2 us against tile 4 17.9/18.8/20.9 us at T=16/32/64). The
 // candidate boundary retains the qualified 4/8/16/32 sweep; the incumbent boundary bypasses
 // production selection so later comparisons cannot accidentally time the selected route twice.
 [[nodiscard]] hipError_t causal_conv1d_silu_prefill_qualification(
