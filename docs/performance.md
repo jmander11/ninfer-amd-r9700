@@ -252,6 +252,62 @@ shapes at T17..32 (`fp8lut4_linear_qual`, `fp8_row_scaled_linear_qual`, `attenti
 
 Evidence: `profiles/bench/r9700-fp8lut4-small-t-20260928/`.
 
+## Activation codec and residual rounding (rejected, 2026-09-28)
+
+Each candidate was isolated in the checkpoint-direct BF16 scorer (BF16 weights, BF16 KV) by
+changing only the Linear-input or residual boundary. Results are paired against an unmodified run
+of the same harness (prefill schedule, `corpus.ids`), in dNLL nats/token:
+
+| Boundary change | 8K | 32K |
+|---|---:|---:|
+| production per-token E4M3 activation (scale absmax/448) | +0.0034 +/- 0.0013 | +0.0026 +/- 0.0008 |
+| E4M3 with one scale per 64 columns (G64) | | +0.0014 +/- 0.0006 |
+| E4M3 G32 (G128 / G512) | -0.0002 +/- 0.0010 (+0.0022 / +0.0029) | |
+| G32 on RMSNorm-fed inputs only / attention+GDN output inputs only / MLP down only | +0.0013 / +0.0013 / +0.0034 | |
+| per-token scale chosen by minimum squared error (8 / 32 candidates) | +0.0017 / +0.0027 | |
+| residual add rounded once, `BF16(x + y)` instead of `BF16(x + BF16(y))` | +0.0009 +/- 0.0005 | |
+
+The activation codec accounts for about a quarter of production's BF16-source gap. The gain from
+finer scales comes from exactly encoding each group's largest (error-energy-dominant) element,
+not from subnormals: subnormals are under 0.8% of elements even per-token. Only 64-column groups
+fit the kernels, because each FP8 WMMA pairs two 32-column weight groups; G32 needs regrouped
+operands. The prefill GEMM can't hold a second accumulator set, so it must rescale its
+accumulators at every group boundary. A timed probe of that rescale (T2048, `--time-cell`,
+scale ratios of one) cost +19-24% for G64 and +53-70% for G32 on the gate/up, down and 12288-row
+projections; the WMMAs share the VALU issue with the rescale multiplies. G64's paired gain over
+per-token is 0.0012 +/- 0.0009 at 32K. Neither granularity is worth its prefill cost. Single
+rounding moves away from the BF16 formula, which itself rounds the Linear output before the
+residual add. None of these is adopted. Evidence: `profiles/ppl/r9700-activation-codec-ref-20260928/`.
+
+Follow-up screens used the same harness:
+
+| Boundary change | 8K | 32K |
+|---|---:|---:|
+| production Q4G64 token embedding (artifact bits) vs BF16 | -0.0008 +/- 0.0006 | +0.0002 +/- 0.0004 |
+| FP8LUT4 token embedding (production encoder) minus production Q4G64 | +0.0015 +/- 0.0007 | -0.0006 +/- 0.0004 |
+| chunked-GDN FP16 operand emulation (validated at 5.3e-4 relative state error) vs FP32 | +0.0006 +/- 0.0005 | -0.0004 +/- 0.0003 |
+| G64 activation scales for scored (decode) positions and head only, minus all per-token | -0.0026 +/- 0.0015 | -0.0015 +/- 0.0009 |
+
+Embedding quantization and the chunked-GDN FP16 operands have no measurable cost, so neither
+change is worth making. Decode-only G64 keeps prompt positions per-token (the prefill GEMM is
+unchanged) and recovers about as much as G64 everywhere in the BF16-weight harness.
+
+**Decode-only G64 on the production gate (rejected).** Implemented as grouped activation images
+for T <= 32. Every small-T FP8 consumer (T1 GEMV, small-T and two-tile WMMA, protected
+row-scaled small-T, the GDN fused projection) adds each 64-column step times its group scale.
+Every producer publishes max|group| / 448. The implementation passed the producer, Linear,
+row-scaled, attention-fused and GDN-front FP64 oracles. Against the same HEAD binary on
+`r9700-fp8lut4` (`profiles/ppl/r9700-decode-g64-20260929/`, patch retained there):
+
+| Cell | baseline dNLL vs BF16 | candidate | paired candidate - baseline | flips |
+|---|---:|---:|---:|---:|
+| prefill 8K (control) | +0.0129 | +0.0129 | byte-identical | 7.79% / 7.79% |
+| decode 8K, graph | +0.0122 | +0.0121 | -0.0001 +/- 0.0018 | 7.40% / 7.30% |
+| decode 32K, graph | +0.0099 | +0.0111 | +0.0012 +/- 0.0009 | 6.60% / 6.35% |
+
+With FP8LUT4 weights the reference's predicted gain (-0.0015 at 32K) does not appear, so the code
+was reverted without speed or NIAH runs.
+
 ## DFlash K6/K7 chains (2026-09-27)
 
 Fixed K6/K7 (W7/W8) chains are supported (`--draft-tokens 6|7`). Their earlier ~4 ms (C1) / ~16 ms (C4) round penalty was route fallback, removed by
