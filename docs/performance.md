@@ -105,6 +105,27 @@ poisoning). Median per-layer times, G16:
 unchanged (550,528 tokens). Evidence: `profiles/bench/r9700-attn-midrows-20260928/`,
 `profiles/bench/r9700-decode-study-20260928/`.
 
+## Decode step attribution (2026-09-29)
+
+C1, production artifact, Device Graphs, `ninfer_bench` region traces (kernel durations) against
+unprofiled wall time. Plain T1 decode: 26.52 ms per step, 703 kernels, 25.38 ms kernel time.
+DFlash K7: 31.31 ms per round, 827 kernels, 30.03 ms kernel time.
+
+| Part of a DFlash K7 round | ms | Note |
+|---|---:|---|
+| Target FP8LUT4/FP8 Linears (W8 verify, head, GDN pair) | 24.3 | 570-635 GB/s; e.g. gate/up 95 MB in 154 us (620 GB/s), head 675 MB in 1.1 ms (635 GB/s) |
+| Drafter Q4 Linears | 2.6 | shortlist head ~590 GB/s; narrow N6144/N4096 projections 470-530 GB/s |
+| GDN state (record 48 x 13.5 us, replay fold 0.53 ms, normalized front 48 x 9 us) | 1.6 | record/front are latency-bound, fold streams state at ~570 GB/s |
+| Activation quantization (~250 launches of 2.5-3.3 us) | 0.8 | per-token E4M3 scale needs a row-wide max |
+| Other small kernels (attention, KV append, norms, DFlash control) | 0.8 | |
+| Inter-kernel gaps | ~1.3 | evenly ~1.5 us per boundary, no host stalls |
+
+Weight streaming is already at ~95% of the 636 GB/s read peak, so the old 500-555 GB/s figure
+is superseded. What is left over pure streaming is ~3-4 ms per round, spread over many small
+kernels and launch boundaries; the recoverable part is estimated at 3-5% of a round, each
+candidate (quantization/launch fusion, GDN record and front, narrow drafter projections)
+around 1%. Evidence: `profiles/bench/r9700-decode-bw-20260929/`.
+
 ## Batched DFlash drafting at C2..C4 (2026-09-28)
 
 The DFlash2 drafter ran batched across requests only at `k == 4` (an upstream gate from when K4
