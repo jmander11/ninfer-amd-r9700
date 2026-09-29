@@ -4,6 +4,7 @@
 
 #include "targets/qwen3/impl/runtime/linear_state_slots.h"
 #include "targets/qwen3/impl/runtime/prompt_embedding_staging.h"
+#include "targets/qwen3/impl/runtime/tool_masks.h"
 
 #include "core/arena.h"
 #include "core/device.h"
@@ -170,7 +171,13 @@ public:
         proposal_head_n_   = count;
     }
 
-    void set_sampling(const ops::SamplingConfig* config) noexcept { sampling_config_ = config; }
+    // `exchange`, when set, supplies `config` as a speculative tool-mask reply that the stream
+    // acquires before its first read of the configs.
+    void set_sampling(const ops::SamplingConfig* config,
+                      qwen3::ToolMaskExchange* exchange = nullptr) noexcept {
+        sampling_config_   = config;
+        sampling_exchange_ = exchange;
+    }
 
     void set_prefill_rewrite_checkpoint_frontier(std::int64_t position) noexcept {
         prefill_rewrite_checkpoint_frontier_ = position;
@@ -387,6 +394,7 @@ private:
     const std::int32_t* proposal_head_ids_      = nullptr;
     int proposal_head_n_                        = 0;
     const ops::SamplingConfig* sampling_config_ = nullptr;
+    qwen3::ToolMaskExchange* sampling_exchange_ = nullptr;
     MtpW mtp_;
     std::array<FullLayerW, TextConfig::full_attention_layers()> full_{};
     std::array<GdnLayerW, TextConfig::gdn_layers()> gdn_{};

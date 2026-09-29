@@ -143,15 +143,22 @@ The four candidates were then worked through; none yields an admissible gain:
   scale needs a grid-wide maximum. Quantizing inside the down projection instead would double
   its per-CTA L2 activation reads (BF16 instead of FP8, 278 KB per CTA at T8).
 
-Two further per-round costs were found and left unchanged:
+Two further per-round costs were found:
 
 - The speculative tool-mask exchange (ids readback, a Device Graph host node for the grammar
-  match, a 248 KB mask upload) costs ~0.1 ms/round without tools and 0.21 ms/round with six
-  declared tools (server, identical outputs, 193.0 vs 194.3 tok/s). HIP does not overlap it as
-  a graph branch: a side-stream branch executes serially, `DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING`
-  makes rounds 2.3x slower, and a captured `hipEventWaitExternal` wait crashes in
-  `hipStreamWaitEvent` (a manually added event-wait node works). Removing it needs a GPU/host
-  mailbox with a device spin instead of the host node.
+  match, a 248 KB mask upload) cost ~0.1 ms/round without tools and 0.21 ms/round with six
+  declared tools (server, identical outputs, 193.0 vs 194.3 tok/s with the exchange removed).
+  HIP does not overlap it as a graph branch: a side-stream branch executes serially,
+  `DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING` makes rounds 2.3x slower, and a captured
+  `hipEventWaitExternal` wait crashes in `hipStreamWaitEvent` (a manually added event-wait node
+  works). It is now a host mailbox answered by a matcher thread during the target forward
+  (`docs/maintainer/concurrent-inference-architecture.md`, Speculative grammar exchange), with
+  null masks for all-permitted rows and one broadcast mask per row when its nodes share a
+  grammar state; a first version that copied every node's mask recovered only 0.8 of the 1.4
+  tok/s. C1 K7, identical outputs: 192.9 -> 194.3 tok/s with six tools (the no-exchange
+  ceiling), 188.0 -> 188.4 without; `ninfer_bench` P512/G256 31.33 -> 31.25 ms/round, greedy
+  tokens identical. `tools/smoke/serve_features.py` (structured output, forced tools) passes
+  at C1 and C2.
 - The pinned-host Q4N16K16 token embedding costs 50 us (target) plus 16.5 us (drafter) per
   round: one row gather touches 320 interleaved 128-byte lines over PCIe. A row-contiguous
   host embedding layout is an artifact change.

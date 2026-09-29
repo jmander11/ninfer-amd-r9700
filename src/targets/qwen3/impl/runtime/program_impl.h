@@ -285,6 +285,17 @@ void update_graph_profile(DecodeGraphFamily& family, DecodeGraphTopology& topolo
     topology.installed_profile = profile_index;
 }
 
+// Keeps the tool-mask matcher armed exactly while one speculative round can execute.
+struct ToolMaskRoundGuard {
+    explicit ToolMaskRoundGuard(qwen3::ToolMaskExchange& exchange) : exchange(exchange) {
+        exchange.arm();
+    }
+    ~ToolMaskRoundGuard() { exchange.disarm(); }
+    ToolMaskRoundGuard(const ToolMaskRoundGuard&)            = delete;
+    ToolMaskRoundGuard& operator=(const ToolMaskRoundGuard&) = delete;
+    qwen3::ToolMaskExchange& exchange;
+};
+
 DecodeGraphExecutable& install_graph_profile(DecodeGraphFamily& family, DecodeGraphProfile& profile,
                                              const char* label) {
     DecodeGraphTopology& topology   = select_graph_topology(family, profile.topology_class, label);
@@ -3365,11 +3376,13 @@ void ProgramImplCore::prepare_graphs() {
                 mtp_transactions.close_captured();
                 return;
             }
+            const ToolMaskRoundGuard tool_mask_round(*tool_masks);
             schedule::mtp_decode_batch(mtp_state, static_cast<std::int32_t>(batch_size), k,
                                        nullptr);
             text_transactions.enqueue_resolution();
             mtp_transactions.enqueue_resolution();
             device.synchronize();
+            tool_masks->finish_round();
             text_transactions.finish_resolution(
                 {text_transactions.cursor, batch_size});
             mtp_transactions.finish_resolution(
@@ -3447,10 +3460,12 @@ void ProgramImplCore::prepare_graphs() {
                 transactions.close_captured();
                 return;
             }
+            const ToolMaskRoundGuard tool_mask_round(*tool_masks);
             schedule::dflash_decode_batch(dflash_state, static_cast<std::int32_t>(batch_size),
                                           fixed_k, fixed_w, envelopes, nullptr);
             transactions.enqueue_resolution();
             device.synchronize();
+            tool_masks->finish_round();
             transactions.finish_resolution({transactions.cursor, batch_size});
         };
 
@@ -4368,6 +4383,7 @@ ProgramImplCore::decode_mtp_batch(std::span<const std::uint32_t> lanes,
                                                  mtp_transactions.binding(), tool_masks.get()};
 
         bind_tool_mask_batch(lanes);
+        const ToolMaskRoundGuard tool_mask_round(*tool_masks);
         mark_workspace_usage(workspace_plan.mtp_round);
         const auto started = Clock::now();
         if (executable != nullptr) {
@@ -4395,7 +4411,7 @@ ProgramImplCore::decode_mtp_batch(std::span<const std::uint32_t> lanes,
             {text_retained_frontiers.data(), lanes.size()});
         mtp_transactions.finish_resolution(
             {mtp_retained_frontiers.data(), lanes.size()});
-        tool_masks->rethrow_error();
+        tool_masks->finish_round();
         // Fallback (extent 0) is not a k-draft round; do not fit T(batch_k) from it.
         if (adaptive_draft && realized_extent > 0) {
             qwen3::adaptive_observe_round_time(adaptive_t_by_batch[batch_idx], batch_k,
@@ -4715,6 +4731,7 @@ ProgramImplCore::decode_dflash_batch(std::span<const std::uint32_t> lanes,
                                                     text_transactions.binding(), tool_masks.get()};
 
         bind_tool_mask_batch(lanes);
+        const ToolMaskRoundGuard tool_mask_round(*tool_masks);
         mark_workspace_usage(workspace_plan.dflash_round);
         const auto started = Clock::now();
         if (executable != nullptr) { text_transactions.mark_graph_replay(device.stream); }
@@ -4736,7 +4753,7 @@ ProgramImplCore::decode_dflash_batch(std::span<const std::uint32_t> lanes,
             static_cast<std::int32_t>(lanes.size()), static_cast<std::int32_t>(width),
             static_cast<std::int32_t>(live_w), TextConfig::token_domain,
             dflash_uses_tree_verify(batch_k, live_w));
-        tool_masks->rethrow_error();
+        tool_masks->finish_round();
         // Fallback (extent 0) is not a k-draft round; do not fit T(batch_k) from it.
         if (adaptive_draft && realized_extent > 0) {
             qwen3::adaptive_observe_round_time(adaptive_t_by_batch[batch_idx], batch_k,

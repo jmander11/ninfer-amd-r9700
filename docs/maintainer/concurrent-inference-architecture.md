@@ -137,9 +137,10 @@ backfilled decode-ready requests 仍进入同一个 maximal compact batch。
 The Qwen frontend owns compiled tool schemas, transactional grammar state, and typed completed
 calls. Program owns planner-accounted device eligibility masks and pinned exchange storage.
 Ordinary sampling uses one mask per compact row; speculative verification uses one per actual
-chain position or tree node. HIP Graph host nodes fork grammar state after proposal metadata
-arrives on the host, then upload target masks. Proposals do not advance committed grammar; only
-the accepted publication transaction does. Callback errors surface before publication.
+chain position or tree node. A Program-owned matcher thread forks grammar state once proposal
+metadata reaches the host mailbox, while the target forward runs; target sampling acquires the
+masks. Proposals do not advance committed grammar; only the accepted publication transaction
+does. Matcher errors and missing replies surface before publication.
 
 P-less sampling evaluates the eligible full-vocabulary softmax. With temperature T>0, collision
 mass L=sum(p²), and epsilon=0.0625, membership is p>=max(L*exp(-2*epsilon/T),1/1024).
@@ -1708,18 +1709,24 @@ mutex after reserving execution ownership; normal decode never takes it.
 
 ### Speculative grammar exchange
 
-`ToolMaskExchange` enqueues candidate IDs, parents and valid-column downloads, the CPU
-grammar callback, and mask/sampling-configuration uploads on the owning compute stream.
-Target verification follows on that same stream: embedding through LM head, masked argmax,
-then acceptance. Stream order guarantees the callback observes downloaded inputs and target
-sampling observes completed masks. Callback code calls no HIP APIs. Ordinary and prefill
-root masking use their existing synchronized CPU boundary.
+`ToolMaskExchange` owns a fine-grained coherent host mailbox and a matcher thread; the round's
+Device Graph contains no host node. Once the verification IDs exist, a publish kernel on the
+compute stream copies IDs, parents and valid-column counts into the mailbox and raises its
+request number with a system-scope release. The matcher, armed from before the round's launch
+until `finish_round()` after its synchronization, polls the request (20 us), runs the grammar
+and posts the sampling configurations, the restricted mask rows and a release of the reply
+number. Rows whose masks permit the whole token domain carry a null mask; a row whose nodes share
+one mask publishes it once with column stride zero. Target verification then runs embedding
+through LM head, and an acquire kernel before the masked argmax waits for the reply and copies
+the configurations and restricted rows into the planned device buffers, so the host match
+overlaps the target forward. Without a reply within two seconds the round samples with the bound
+unmasked configurations and `finish_round()` throws before publication; a request left
+unanswered is retired then, never answered against later bindings. Ordinary and prefill root
+masking use their existing synchronized CPU boundary.
 
-Bindings change at synchronized round boundaries; lane release and Program teardown retain
-the owning execution boundary before request/OutputSession storage is released. The mask
-exchange owns stable pinned staging storage for capture/replay, but no separate stream or
-dependency events. Callback ROCtx attribution remains available through the explicit diagnostic.
-The auxiliary-stream candidate was rejected: the installed default graph scheduler serialized
-it, paired request results established no benefit, and a process-local no-collapse profiling
-check stalled. Historical evidence is retained under
-`profiles/bench/r9700-feature-ports-20260927/grammar-scheduler-analysis.md`.
+Bindings change at synchronized round boundaries, which the matcher cannot overlap: it holds the
+exchange mutex while answering. Lane release and Program teardown retain the owning execution
+boundary before request/OutputSession storage is released. Graph-branch alternatives are not
+available on this HIP: a side-stream branch executes serially, segment scheduling makes rounds
+2.3x slower, and a captured external event wait crashes (`docs/performance.md`, Decode step
+attribution).

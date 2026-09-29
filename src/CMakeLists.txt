@@ -186,7 +186,7 @@ add_library(ninfer_r9700_qwen3_8_27b_runtime STATIC
   targets/qwen3/impl/frontend/tokenizer.cpp
   targets/qwen3/impl/state/round_state.cpp
   targets/qwen3/impl/runtime/visual_scatter.cpp
-  targets/qwen3/impl/runtime/tool_masks.cpp
+  targets/qwen3/impl/runtime/tool_masks.hip
   targets/qwen3/impl/runtime/prompt_embedding_staging.cpp
   targets/qwen3/impl/vision/control.cpp)
 if(NINFER_R9700_XATTENTION_QUALIFICATION)
