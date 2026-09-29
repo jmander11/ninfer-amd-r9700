@@ -1196,6 +1196,10 @@ bool gdn_pair_conv_record_supported(std::uint32_t width, std::uint32_t batch) no
     return batch == 1U && width >= 5U && width <= 8U;
 }
 
+bool gdn_fp8lut4_pair_conv_record_supported(std::uint32_t width, std::uint32_t batch) noexcept {
+    return batch == 1U && width >= 4U && width <= 8U;
+}
+
 hipError_t gdn_pair_conv_record_bf16(
     const linear::A8G64ActivationWorkspace& planes, const std::uint8_t* query_key_codes,
     const std::uint16_t* query_key_scales, const std::uint8_t* value_z_codes,
@@ -1237,7 +1241,7 @@ hipError_t gdn_fp8lut4_pair_conv_record_bf16(
     const std::int32_t* initial_state_slots, const std::int32_t* parent_index,
     hip_bfloat16* conv_record, hip_bfloat16* query, hip_bfloat16* key, hip_bfloat16* value,
     hip_bfloat16* z, std::uint32_t width, std::uint32_t state_slots, hipStream_t stream) noexcept {
-    const bool valid = gdn_pair_conv_record_supported(width, 1U) && image.tokens == width &&
+    const bool valid = gdn_fp8lut4_pair_conv_record_supported(width, 1U) && image.tokens == width &&
         image.padded_columns == kControlColumns && image.codes != nullptr &&
         image.scales != nullptr && image.status != nullptr &&
         query_key.rows == kProjectionQueryRows + kProjectionKeyRows &&
@@ -1257,6 +1261,7 @@ hipError_t gdn_fp8lut4_pair_conv_record_bf16(
                                parent_index, conv_record, query, key, value, z, state_slots);
         };
         switch (width) {
+        case 4U: launch(gdn_fp8lut4_pair_conv_record_kernel<4>); break;
         case 5U: launch(gdn_fp8lut4_pair_conv_record_kernel<5>); break;
         case 6U: launch(gdn_fp8lut4_pair_conv_record_kernel<6>); break;
         case 7U: launch(gdn_fp8lut4_pair_conv_record_kernel<7>); break;

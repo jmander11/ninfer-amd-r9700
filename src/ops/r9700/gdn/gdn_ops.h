@@ -90,13 +90,16 @@ namespace ninfer::ops::r9700::gdn {
     hip_bfloat16* key, hip_bfloat16* value, hip_bfloat16* z, std::uint32_t width,
     std::uint32_t batch, std::uint32_t state_slots, hipStream_t stream) noexcept;
 
-// One sequence (batch 1) at verification widths 5..6: the Q4N16K16 query-key [4096,5120] and
+// One sequence (batch 1) at verification widths 5..8: the Q4N16K16 query-key [4096,5120] and
 // value-z [12288,5120] projections of prepared A8G64 `planes` (the small-batch pair arithmetic)
 // fused with projection_conv_record_bf16 on their BF16 values; value-z rows 6144.. publish z.
 // Bitwise the pair projection followed by projection_conv_record_bf16.
 [[nodiscard]] bool gdn_pair_conv_record_supported(std::uint32_t width, std::uint32_t batch) noexcept;
 // The same fused projection-convolution of one per-token E4M3 image over FP8LUT4 query-key
-// [4096, 5120] and value-z [12288, 5120] weights.
+// [4096, 5120] and value-z [12288, 5120] weights, at batch 1 and widths 4..8 (W4 is the C1
+// DFlash K3 chain).
+[[nodiscard]] bool gdn_fp8lut4_pair_conv_record_supported(std::uint32_t width,
+                                                          std::uint32_t batch) noexcept;
 [[nodiscard]] hipError_t gdn_fp8lut4_pair_conv_record_bf16(
     const linear::Fp8ActivationWorkspace& image, const linear::Fp8Lut4Weight& query_key,
     const linear::Fp8Lut4Weight& value_z, const hip_bfloat16* conv_weight,

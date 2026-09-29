@@ -1029,7 +1029,7 @@ bool Variant::ExecutionState::gdn_q4_normalized_front_record(
         const auto state_slots = static_cast<std::uint32_t>(record.conv_states.ne[2]);
         const auto query_key = fp8lut4_view(weights.input_projection.query_key);
         const auto value_z = fp8lut4_view(weights.input_projection.value_z);
-        if (ops::r9700::gdn::gdn_pair_conv_record_supported(width, batch)) {
+        if (ops::r9700::gdn::gdn_fp8lut4_pair_conv_record_supported(width, batch)) {
             HIP_CHECK(ops::r9700::gdn::gdn_fp8lut4_pair_conv_record_bf16(
                 image, query_key, value_z,
                 static_cast<const hip_bfloat16*>(record.conv_weight.data),

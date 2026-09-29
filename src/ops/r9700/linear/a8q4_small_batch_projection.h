@@ -4,9 +4,9 @@
 namespace ninfer::ops::r9700::linear {
 // Complete regression boundary: BF16 -> A8G64 -> signed Q4N16K16/G64 Linear,
 // T2..4 MLP/output: N34816/K5120, N5120/K17408, N5120/K6144.
-// Tiled T10/12/15/18/20/24/28/32 MLP: N34816/K5120, N5120/K17408.
-// Tiled T10/12/15/18/20/24/28/32 projections use all of the T5..8 shapes below.
-// T5..8 projections:
+// Tiled T10/12/14/15/16/18/20/21/24/28/32 (every C2..C4 DFlash chain width W5..8 and
+// C2/C4 W8/W4) MLP: N34816/K5120, N5120/K17408; tiled projections use all T5..8 shapes below.
+// T4..8 projections (T4 is the C1 DFlash K3 chain):
 // N34816/K5120, N5120/K6144, N12288/K5120, N4096/K5120.
 // T5..8 draft down/feature: N5120/K17408 and N5120/K25600.
 // T5..8 attention/auxiliary: N7168/K5120, N6144/K5120, N1280/K5120,
@@ -20,18 +20,20 @@ namespace detail {
 [[nodiscard]] constexpr bool use_a8q4_small_batch_projection(
     unsigned tokens, unsigned rows, unsigned columns, unsigned padded_columns) noexcept {
     return columns == padded_columns &&
-        (((tokens >= 5 && tokens <= 8) &&
+        (((tokens >= 4 && tokens <= 8) &&
           ((rows == 5120 && (columns == 4096 || columns == 6144 || columns == 17408 || columns == 25600)) ||
            ((rows == 34816 || rows == 12288 || rows == 4096 || rows == 7168 ||
              rows == 6144 || rows == 1280) && columns == 5120))) ||
          ((tokens >= 1 && tokens <= 4) && rows == 5120 && columns == 6144) ||
-         ((tokens == 10 || tokens == 12 || tokens == 15 || tokens == 18 ||
-           tokens == 20 || tokens == 24 || tokens == 28 || tokens == 32) &&
+         ((tokens == 10 || tokens == 12 || tokens == 14 || tokens == 15 || tokens == 16 ||
+           tokens == 18 || tokens == 20 || tokens == 21 || tokens == 24 || tokens == 28 ||
+           tokens == 32) &&
           ((rows == 5120 && (columns == 4096 || columns == 6144 || columns == 25600)) ||
            ((rows == 12288 || rows == 4096 || rows == 7168 || rows == 6144 ||
              rows == 1280) && columns == 5120))) ||
-         (((tokens >= 1 && tokens <= 4) || tokens == 10 || tokens == 12 || tokens == 15 ||
-           tokens == 18 || tokens == 20 || tokens == 24 || tokens == 28 || tokens == 32) &&
+         (((tokens >= 1 && tokens <= 4) || tokens == 10 || tokens == 12 || tokens == 14 ||
+           tokens == 15 || tokens == 16 || tokens == 18 || tokens == 20 || tokens == 21 ||
+           tokens == 24 || tokens == 28 || tokens == 32) &&
           ((rows == 34816 && columns == 5120) || (rows == 5120 && columns == 17408))));
 }
 // Internal prepared launch only: the generic owner has validated all planes,

@@ -635,6 +635,8 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
                 }
                 return finish(layout);
             };
+            // Sized at the widest captured chain; SWA split scratch is not monotone in width, so it
+            // covers every narrower adaptive width at the same batch.
             const auto dflash_proposal_capacity = [&](std::int32_t width, std::int32_t batch) {
                 WorkspaceLayoutBuilder layout;
                 const std::int32_t tokens = width * batch;
@@ -647,7 +649,7 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
                     auto attention = layout.scope();
                     (void)workspace_recipe::dflash_attention<DFlashConfig>(layout, tokens);
                     scratch(layout, ops::swa_workspace_capacity_bytes(
-                                        {0, plan.capacity}, width, width, batch));
+                                        {0, plan.capacity}, 1, width, batch));
                     scratch(layout, ops::grouped_dynamic_conv_prepare_workspace_capacity_bytes(
                                         dflash_matrix_qtype, width, width, batch));
                 }
@@ -675,7 +677,7 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
                         auto attention = layout.scope();
                         (void)workspace_recipe::dflash_attention<DFlashConfig>(layout, tokens);
                         scratch(layout, ops::swa_workspace_capacity_bytes(
-                                            {0, plan.capacity}, width, width, batch));
+                                            {0, plan.capacity}, 1, width, batch));
                         scratch(layout,
                                 ops::grouped_dynamic_conv_prepare_workspace_capacity_bytes(
                                     dflash_matrix_qtype, width, width, batch));

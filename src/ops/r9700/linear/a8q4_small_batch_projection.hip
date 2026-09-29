@@ -135,14 +135,18 @@ hipError_t launch_prepared(const A8Q4G64LinearArgs& a, hipStream_t stream) {
         switch(a.tokens) {
         case 10: return launch_width<N,K,10>(a,stream);
         case 12: return launch_width<N,K,12>(a,stream);
+        case 14: return launch_width<N,K,14>(a,stream);
         case 15: return launch_width<N,K,15>(a,stream);
+        case 16: return launch_width<N,K,16>(a,stream);
         case 18: return launch_width<N,K,18>(a,stream);
         case 20: return launch_width<N,K,20>(a,stream);
+        case 21: return launch_width<N,K,21>(a,stream);
         case 24: return launch_width<N,K,24>(a,stream);
         case 28: return launch_width<N,K,28>(a,stream);
         case 32: return launch_width<N,K,32>(a,stream);
         }
     }
+    if(a.tokens==4)return launch_width<N,K,4>(a,stream);
     if(a.tokens==5)return launch_width<N,K,5>(a,stream);
     if(a.tokens==6)return launch_width<N,K,6>(a,stream);
     if(a.tokens==7)return launch_width<N,K,7>(a,stream);

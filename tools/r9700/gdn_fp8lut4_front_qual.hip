@@ -192,7 +192,8 @@ int main() {
         check(hipStreamCreate(&s), "stream");
         for (const unsigned T : {1U, 2U, 5U, 6U, 7U, 8U, 12U, 16U, 24U, 28U, 32U}) run_front(T, false, s);
         run_front(6U, true, s);
-        for (const Case c : {Case{5, false, false, false}, Case{6, false, false, false},
+        for (const Case c : {Case{4, false, false, false}, Case{4, true, false, true},
+                             Case{5, false, false, false}, Case{6, false, false, false},
                              Case{6, true, false, false}, Case{6, false, true, false},
                              Case{5, true, true, false}, Case{6, false, false, true},
                              Case{7, false, false, false}, Case{7, false, true, true},

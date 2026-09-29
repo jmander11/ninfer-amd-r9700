@@ -33,12 +33,10 @@ FP8LUT4 artifact was admitted; it remains in git history.
 - [x] `ATTN-MIDROWS` Closed 2026-09-28: 9..127-row causal chunks run the dense prefill tile split
   over context chunks with the packed route's FP32 merge (19 rows at 22K: 34 -> 0.24 ms/layer;
   19-token follow-up TTFT at 22K 818 -> 240 ms); `docs/performance.md` has the evidence.
-- [ ] `DFLASH-BATCHED-DRAFT` At C2..C4 the DFlash drafter runs batched only for `k == 4`
-  (`lockstep_dflash4`); other K loop per request (C4 K5 ~6.4 vs ~2 ms/round). Batch every K,
-  add the missing small-batch drafter projection cells (T14/16/21), extend the fused GDN
-  pair conv/record kernel beyond batch 1 if C>1 falls back, and confirm adaptive picks the best
-  K afterwards. C1..C4 decode A/B on the study corpus.
-- [ ] `DFLASH-K3-ROUTES` C1 K3 (W4) misses the fused GDN pair conv/record and the T4 drafter
-  projections (+2.4 ms/round vs K4); add the W4/T4 cells.
+- [x] `DFLASH-BATCHED-DRAFT` Closed 2026-09-28: every chain K drafts batched at C2..C4, with
+  T14/T16/T21 small-batch cells; corpus aggregate +7.6% / +5.1% / +4.0% at C2 / C3 / C4. The
+  fused GDN pair stays batch-1 (C>1 split path is weight-bound at the same cost).
+- [x] `DFLASH-K3-ROUTES` Closed 2026-09-28: T4 drafter cells and the W4 FP8LUT4 GDN pair;
+  C1 K3 33.1 -> 30.6 ms/round.
 - [ ] `CLOCKS-README` [user-gated; `LONGCTX-PREFILL` is closed] Matched README benchmarks at stock
   clocks and at the user's undervolted/higher-clock setting.

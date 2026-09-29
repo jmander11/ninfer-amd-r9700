@@ -75,7 +75,7 @@ the history behind them.
 | Prefill 32K | C1, code corpus | 2,790–2,850 tok/s | Long-context prefill attribution |
 | Prefill 128K | C1, code corpus | 1,901 tok/s (69.0 s) | Long-context prefill attribution |
 | Short append | 19-token follow-up turn on a 22K conversation, host-RAM reuse | TTFT 240 ms (was 818 ms) | Mid-row attention route |
-| Decode C1..C4 | 13-prompt agent/code study corpus, p-less T1.5, 768 new tokens x 3 seeds | 90 / 138 / 172 / 195 tok/s aggregate | Decode study |
+| Decode C1..C4 | 13-prompt agent/code study corpus, p-less T1.5, 768 new tokens x 3 seeds | 90 / 148 / 181 / 204 tok/s aggregate | Batched DFlash drafting |
 
 Decode depends on DFlash acceptance and therefore on the prompt mix; compare only within one
 harness. Prefill rows predate the 2026-09-28 output-head and
@@ -105,15 +105,41 @@ poisoning). Median per-layer times, G16:
 unchanged (550,528 tokens). Evidence: `profiles/bench/r9700-attn-midrows-20260928/`,
 `profiles/bench/r9700-decode-study-20260928/`.
 
+## Batched DFlash drafting at C2..C4 (2026-09-28)
+
+The DFlash2 drafter ran batched across requests only at `k == 4` (an upstream gate from when K4
+was the production setting); every other chain K looped it per request, so C4 K5 spent ~6.4 ms
+per round drafting versus ~2 ms batched. All chain rounds now draft in one batched pass. The
+A8Q4 small-batch projections gained the T14/T16/T21 cells (C2 K6/K7, C3 K6, C4 K3; the general
+WMMA route before) and T4 for every drafter shape (C1 K3), and the fused FP8LUT4 GDN pair
+projection/convolution admits W4 (C1 K3). The new cells pass `ninfer_r9700_a8q4_small_batch_projection_qual`
+(FP64, 169 cells) and `ninfer_r9700_gdn_fp8lut4_front_qual` (bitwise against the composition).
+Greedy tokens match the unchanged-path reference at every C/K (C4 K6/K7 already differed from K4
+before the change: their 28/32-row verify takes different target routes). `ninfer_bench`
+P512/G256, ms per round, before -> after:
+
+| C | K3 | K4 | K5 | K6 | K7 |
+|---|---:|---:|---:|---:|---:|
+| 1 | 33.1 -> 30.6 | 30.8 | 31.1 | 31.2 | 31.5 |
+| 2 | 43.5 -> 39.3 | 39.5 | 42.2 -> 40.2 | 42.9 -> 40.7 | 44.2 -> 41.9 |
+| 3 | 51.4 -> 43.3 | 44.0 | 51.0 -> 46.9 | 52.2 -> 48.6 | 53.0 -> 49.5 |
+| 4 | 59.3 -> 47.5 | 49.9 | 58.1 -> 52.6 | 60.1 -> 55.3 | 61.3 -> 57.0 |
+
+On the study corpus (production adaptive K up to 7, same seeds) aggregate decode rises
+137.6 -> 148.0 (C2), 172.2 -> 180.9 (C3) and 196.5 -> 204.4 tok/s (C4, two seed sets each), and
+C4 adaptive now reaches 3.62 tokens per round (was 3.32) and matches fixed K4. The fused GDN
+pair kernel stays batch-1: at C>1 the split projection is weight-bound at the same cost and the
+separate convolution/record is ~0.3 ms per round. Evidence: `profiles/bench/r9700-dflash-batched-20260928/`.
+
 ## Decode study (2026-09-28)
 
 Production serving shape (DFlash p-less T1.5, adaptive K up to 7, draft temperature 0.4) on 13
 prompts (code, structured, story, translation, AIME, logic, 6K OWUI tools, 11K/22K agent code) x
 3 seeds x 768 tokens. At C1 adaptive stays at K7 (output identical to fixed K7): 106.8 tok/s vs
 fixed K5 101.4 and K3 80.7; draft temperature 0.4 and 0.6 tie (106.8 / 107.9), 0.8 gives 105.3,
-1.0 gives 101.8. Aggregate throughput is 90 / 138 / 172 / 195 tok/s at C1..C4. Round time is
+1.0 gives 101.8. Aggregate throughput is 90 / 138 / 172 / 195 tok/s at C1..C4. Round time was
 lowest at K4 for every C (C4: K3 59.3, K4 49.9, K5 58.1, K7 61.3 ms) because only `k == 4`
-runs the DFlash drafter batched; other K loop it per request (ledger `DFLASH-BATCHED-DRAFT`).
+ran the DFlash drafter batched; fixed below.
 Long-context plain decode rises from 26.8 ms/step at 512 to 36.9 at 200K: ~510 GB/s of KV
 reads, 80% of the read peak, so attention headroom is at most ~1.5% at 32K.
 
