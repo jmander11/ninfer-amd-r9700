@@ -40,3 +40,10 @@ FP8LUT4 artifact was admitted; it remains in git history.
   C1 K3 33.1 -> 30.6 ms/round.
 - [ ] `CLOCKS-README` [user-gated; `LONGCTX-PREFILL` is closed] Matched README benchmarks at stock
   clocks and at the user's undervolted/higher-clock setting.
+- [ ] `MIXED-PREFILL-DECODE` [final item; changes the product contract] Maximum aggregate
+  throughput at C2..C4: mix prefill work into decode rounds (or otherwise keep decode rows moving
+  during another request's prefill) so the GPU's bandwidth and compute stay busy; some prefill
+  speed may be traded for aggregate decode. Today prefill chunks alternate with decode rounds and
+  C4 lanes spend ~19% of request time waiting on other requests' prefill
+  (`profiles/bench/r9700-decode-study-20260928/`). Requires revising the non-goal in
+  `docs/maintainer/concurrent-inference-architecture.md` §1.2 and `AGENTS.md` together.

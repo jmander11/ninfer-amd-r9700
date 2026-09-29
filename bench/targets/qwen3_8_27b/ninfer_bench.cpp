@@ -303,9 +303,10 @@ int main(int argc, char** argv) {
         const ninfer::SpeculativeOptions spec_options{
             options.spec_backend, options.draft_tokens, options.proposal_head,
             options.dflash_verify_width, options.adaptive_draft};
+        // C > 1 pp+tg always isolates decode behind a one-token seed, like --isolate-prompt-decode.
         const std::uint32_t max_context = ninfer::bench::resolve_max_context(
             tests, options.max_context, spec_options, options.use_device_graph,
-            options.isolate_prompt_decode);
+            options.isolate_prompt_decode || options.concurrency > 1);
 
         ninfer::EngineOptions engine_options;
         engine_options.artifact_path = options.artifact_path;
