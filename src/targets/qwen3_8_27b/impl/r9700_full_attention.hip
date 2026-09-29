@@ -105,11 +105,24 @@ std::size_t r9700_full_attention_workspace_capacity_bytes(
         required = ops::r9700::kv::fp8_int4_kv_attention_split512_workspace_capacity_bytes(
             query_rows, visible_context);
     }
-    if (ops::r9700::kv::use_packed_decode_attention(query_rows, visible_context,
-                                                    tree_or_device_count)) {
+    // Planners size one call for the maximum row count, which must cover every narrower host-fixed
+    // call it bounds (a prefill tail or short append takes the packed or mid-row route).
+    const std::uint32_t packed_rows = std::min(query_rows, 8U);
+    if (packed_rows != 0U && ops::r9700::kv::use_packed_decode_attention(
+                                 packed_rows, visible_context, tree_or_device_count)) {
         required = std::max(
             required, ops::r9700::kv::fp8_int4_kv_attention_packed_decode_workspace_bytes(
-                          visible_context, query_rows));
+                          visible_context, packed_rows));
+    }
+    const std::uint32_t mid_rows_limit =
+        std::min(query_rows, ops::r9700::kv::kDensePrefillMinimumRows - 1U);
+    if (!tree_or_device_count) {
+        for (std::uint32_t rows = ops::r9700::kv::kMidRowsMinimumRows; rows <= mid_rows_limit;
+             ++rows) {
+            required = std::max(
+                required, ops::r9700::kv::fp8_int4_kv_attention_mid_rows_workspace_bytes(
+                              visible_context, rows));
+        }
     }
     // Dense prefill is fused and needs no workspace; the qualification-only P129 tail reuses
     // the single-row score workspace after the dense launch.
@@ -263,6 +276,21 @@ static hipError_t launch_r9700_attention(
         tail.score_workspace = static_cast<float*>(a.workspace);
         tail.output += 128U * row_elements;
         return ops::r9700::kv::fp8_int4_kv_attention_wmma(tail, stream);
+    }
+    if (ops::r9700::kv::use_mid_rows_attention(static_cast<std::uint32_t>(rows), raw.context,
+                                               tree_or_device_count) &&
+        a.ancestor_masks == nullptr && a.prefix_lengths == nullptr &&
+        raw.key_layout == ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest &&
+        raw.value_layout == ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest &&
+        raw.value_scale_layout == ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest) {
+        const std::size_t required = ops::r9700::kv::fp8_int4_kv_attention_mid_rows_workspace_bytes(
+            raw.context, static_cast<std::uint32_t>(rows));
+        if (required == 0U || a.workspace == nullptr || a.workspace_bytes < required) {
+            return hipErrorInvalidValue;
+        }
+        auto mid = raw;
+        mid.score_workspace = static_cast<float*>(a.workspace);
+        return ops::r9700::kv::fp8_int4_kv_attention_mid_rows(mid, stream);
     }
     if (ops::r9700::kv::use_packed_decode_attention(
             static_cast<std::uint32_t>(rows), raw.context, tree_or_device_count) &&

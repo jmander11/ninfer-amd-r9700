@@ -135,9 +135,27 @@ void qualify_host_split512_routing() {
                     kv::fp8_int4_kv_attention_split512_workspace_capacity_bytes(4U, 8192U) &&
                 q27::r9700_full_attention_workspace_capacity_bytes(4U, 8191U, true) == 0U,
             "packed/split-512 caller-owned workspace selection differs");
-    require(q27::r9700_full_attention_workspace_capacity_bytes(2048U, 2048U, false) == 0U &&
-                q27::r9700_full_attention_workspace_capacity_bytes(4096U, 262144U, false) == 0U,
-            "fused dense prefill must not reserve caller-owned attention workspace");
+    // A plan sized for its maximum row count and visible frontier covers every narrower
+    // host-fixed call (packed 1..8 and mid-row 9..127 rows) at every smaller frontier.
+    for (const std::uint32_t max_rows : {9U, 16U, 20U, 40U, 127U, 2048U}) {
+        for (std::size_t envelope = 64U; envelope <= 40960U; envelope += 64U) {
+            const std::size_t planned =
+                q27::r9700_full_attention_workspace_capacity_bytes(max_rows, envelope, false);
+            for (std::uint32_t rows = 1U; rows <= std::min(max_rows, 127U); ++rows) {
+                for (const std::size_t frontier : {envelope, envelope - 63U, envelope / 2U}) {
+                    if (frontier < rows) continue;
+                    const std::size_t call = rows <= 8U
+                        ? kv::fp8_int4_kv_attention_packed_decode_workspace_bytes(frontier, rows)
+                        : kv::fp8_int4_kv_attention_mid_rows_workspace_bytes(frontier, rows);
+                    require(call <= planned,
+                            "attention workspace plan does not cover a narrower call");
+                }
+            }
+        }
+    }
+    require(q27::r9700_full_attention_workspace_capacity_bytes(2048U, 262144U, false) <=
+                std::size_t{512U} * 24U * 258U * sizeof(float),
+            "dense prefill plans more attention workspace than the mid-row bound");
     const auto has_classes = [](const std::vector<Variant::GraphExecutionProfile>& profiles,
                                 std::initializer_list<std::uint32_t> wanted) {
         return std::all_of(wanted.begin(), wanted.end(), [&](std::uint32_t value) {
@@ -236,9 +254,14 @@ void qualify_host_attention_parity_routing() {
                     kW6C135Bytes &&
                 q27::r9700_full_attention_workspace_capacity_bytes(6U, 135U, true) == 0U,
             "packed decode production workspace escaped width/tree selection");
+    // The 129-row plan also covers every narrower host-fixed call at that frontier.
+    std::size_t narrower = kv::fp8_int4_kv_attention_packed_decode_workspace_bytes(129U, 8U);
+    for (std::uint32_t rows = 9U; rows <= 127U; ++rows)
+        narrower = std::max(narrower, kv::fp8_int4_kv_attention_mid_rows_workspace_bytes(129U, rows));
     require(q27::r9700_full_attention_workspace_capacity_bytes(129U, 129U, false) ==
-                (text_enabled ? q27::r9700_full_attention_score_workspace_capacity_bytes(129U)
-                              : 0U),
+                std::max(narrower,
+                         text_enabled ? q27::r9700_full_attention_score_workspace_capacity_bytes(129U)
+                                      : std::size_t{0U}),
             "Text P129 tail candidate changed the fused dense caller-owned workspace");
     std::printf("r9700_runtime_planner: PASS host attention parity routing/capacity "
                 "text_p129_selector=%u\n",

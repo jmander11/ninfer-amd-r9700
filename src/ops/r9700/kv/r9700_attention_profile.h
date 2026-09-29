@@ -43,6 +43,18 @@ inline constexpr bool kTextP129WmmaTailCandidate =
            visible_context <= kDensePrefillMaximumContext;
 }
 
+// Host-fixed causal rows between the packed decode route (1..8) and dense prefill (>= 128), such
+// as short appended turns and prompt tails: the dense-prefill tiles split over the context, merged
+// in FP32, so a short chunk against a long cache keeps every CTA busy.
+inline constexpr std::uint32_t kMidRowsMinimumRows = 9U;
+[[nodiscard]] constexpr bool use_mid_rows_attention(std::uint32_t query_rows,
+                                                    std::size_t visible_context,
+                                                    bool tree_or_device_count) noexcept {
+    return !tree_or_device_count && query_rows >= kMidRowsMinimumRows &&
+           query_rows < kDensePrefillMinimumRows && visible_context >= query_rows &&
+           visible_context <= kDensePrefillMaximumContext;
+}
+
 // Production packed decode route for 1..8 causal rows per sequence (ordinary decode, MTP and
 // DFlash chain verification): non-tree execution with host-fixed row counts and context
 // 64..262144. The caller must additionally require G16, token-fastest FP8 keys, and

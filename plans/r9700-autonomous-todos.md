@@ -30,12 +30,9 @@ FP8LUT4 artifact was admitted; it remains in git history.
   +0.0043). Remaining: a larger usage calibration set. Decode
   is not a lever here: Q4G64 and FP8LUT4 are the same size and the Q4 drafter kernels already
   read at ~600 GB/s.
-- [ ] `ATTN-MIDROWS` Prefill chunks of 9..127 rows (short follow-up turns and tool results,
-  and prompt tails with `P mod 2048` in 9..127) fall between the packed decode route (1..8 rows)
-  and dense prefill (>=128 rows) onto `fused_attention_causal_kernel`, one query row per CTA:
-  34 ms/layer, 547 ms per request at 22K context. Route them through a qualified long-context
-  kernel (dense prefill partial tile or 8-row packed slices, whichever is faster), FP64 oracle,
-  TTFT A/B. Evidence: `profiles/bench/r9700-decode-study-20260928/`.
+- [x] `ATTN-MIDROWS` Closed 2026-09-28: 9..127-row causal chunks run the dense prefill tile split
+  over context chunks with the packed route's FP32 merge (19 rows at 22K: 34 -> 0.24 ms/layer;
+  19-token follow-up TTFT at 22K 818 -> 240 ms); `docs/performance.md` has the evidence.
 - [ ] `DFLASH-BATCHED-DRAFT` At C2..C4 the DFlash drafter runs batched only for `k == 4`
   (`lockstep_dflash4`); other K loop per request (C4 K5 ~6.4 vs ~2 ms/round). Batch every K,
   add the missing small-batch drafter projection cells (T14/16/21), extend the fused GDN

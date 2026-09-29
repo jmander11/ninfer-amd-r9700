@@ -953,9 +953,13 @@ __device__ __forceinline__ void dense_attention_block(
     }
 }
 
-template <std::uint32_t Group>
-__global__ __launch_bounds__(kDensePrefillThreads) __attribute__((amdgpu_waves_per_eu(6)))
-void dense_prefill_kernel(Fp8Int4KvAttentionArgs a) {
+// One CTA per KV head and 32-row tile. Split launches add a context-chunk axis: each CTA covers
+// keys [chunk * chunk_keys, +chunk_keys) and writes the dense-verify partial layout (unnormalized
+// FP32 numerator, log2-domain origin, FP32 denominator) for dense_verify_merge_kernel; a row whose
+// causal context ends before the chunk keeps origin -inf and zero numerator and denominator.
+template <std::uint32_t Group, bool Split>
+__device__ __forceinline__ void dense_prefill_body(const Fp8Int4KvAttentionArgs& a,
+                                                   std::uint32_t chunk_keys, float* partial) {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
     __shared__ DensePrefillShared shared;
     const std::uint32_t tid = threadIdx.x, lane = tid % 32U;
@@ -984,6 +988,32 @@ void dense_prefill_kernel(Fp8Int4KvAttentionArgs a) {
         (static_cast<std::size_t>(__builtin_amdgcn_readfirstlane(
              static_cast<std::uint32_t>(shared.table_offset >> 32U))) << 32U);
 
+    // Chunk bounds are wave-uniform scalars beside the 192 persistent Q/O VGPRs.
+    const std::uint32_t key_begin =
+        Split ? __builtin_amdgcn_readfirstlane(blockIdx.z * chunk_keys) : 0U;
+    const std::uint32_t key_end =
+        Split ? __builtin_amdgcn_readfirstlane(min(maximum_context, key_begin + chunk_keys))
+              : maximum_context;
+    if constexpr (Split) {
+        // A chunk past every row's causal context contributes nothing: origin -inf, zero
+        // numerator and denominator (NaN for an invalid row, as its other chunks write).
+        if (key_begin >= key_end) {
+            if (lane_row < tile_rows) {
+                float* const out = partial + ((static_cast<std::size_t>(blockIdx.z) * a.query_rows +
+                                               row_base + lane_row) * 24U + query_head) *
+                                                 kDenseVerifyPartialStride;
+                for (std::uint32_t feature = half * 128U; feature < half * 128U + 128U; ++feature)
+                    out[feature] = 0.0F;
+                if (half == 0U) {
+                    out[kHeadDim] = -INFINITY;
+                    out[kHeadDim + 1U] = ((shared.invalid_rows >> lane_row) & 1U) != 0U
+                        ? __builtin_nanf("") : 0.0F;
+                }
+            }
+            return;
+        }
+    }
+
     I16x8 query[16];
     const bool nonfinite = dense_load_query(a, row_context != 0U, row_base + lane_row,
                                             query_head, half, query);
@@ -996,7 +1026,7 @@ void dense_prefill_kernel(Fp8Int4KvAttentionArgs a) {
     float denominator = 0.0F;
     const float scale_log2 = a.attention_scale * 1.4426950408889634F;
 
-    for (std::uint32_t key_base = 0U; key_base < maximum_context; key_base += kDensePrefillKeys) {
+    for (std::uint32_t key_base = key_begin; key_base < key_end; key_base += kDensePrefillKeys) {
         const std::size_t page = a.page_table[table_offset + key_base / kPageSize];
         const bool page_valid = page < physical_pages;
         if (!page_valid) {
@@ -1028,6 +1058,37 @@ void dense_prefill_kernel(Fp8Int4KvAttentionArgs a) {
     if (nonfinite) denominator = __builtin_nanf("");
     const float row_denominator = denominator + __shfl_xor(denominator, 16, 32);
     const std::uint32_t page_fault_from = shared.page_fault_from;
+    if constexpr (Split) {
+        // Lane coordinates are recomputed rather than held live across the key loop.
+        std::uint32_t thread = threadIdx.x;
+        asm volatile("" : "+v"(thread));
+        const std::uint32_t out_axis = thread % 16U, out_half = (thread % 32U) / 16U;
+        const std::uint32_t out_row = row_tile * 16U + out_axis;
+        float* const head_partial =
+            partial + ((static_cast<std::size_t>(blockIdx.z) * a.query_rows + row_base) * 24U +
+                       query_head) * kDenseVerifyPartialStride;
+        const auto slot = [&](std::uint32_t row) {
+            return head_partial + static_cast<std::size_t>(row) * 24U * kDenseVerifyPartialStride;
+        };
+#pragma unroll
+        for (std::uint32_t item = 0U; item < 8U; ++item) {
+            const std::uint32_t row = row_tile * 16U + out_half * 8U + item;
+            if (row >= tile_rows) continue;
+            float* numerator_out = slot(row) + out_axis;
+#pragma unroll
+            for (std::uint32_t tile_f = 0U; tile_f < 16U; ++tile_f)
+                numerator_out[tile_f * 16U] = numerator[tile_f][item];
+        }
+        // Lane `axis` of the first half owns row `lane_row`'s origin and denominator.
+        if (out_half == 0U && out_row < tile_rows) {
+            const bool invalid = ((shared.invalid_rows >> out_row) & 1U) != 0U ||
+                                 shared.row_context[out_row] > page_fault_from;
+            float* out = slot(out_row);
+            out[kHeadDim] = reference;
+            out[kHeadDim + 1U] = invalid ? __builtin_nanf("") : row_denominator;
+        }
+        return;
+    }
 #pragma unroll
     for (std::uint32_t item = 0U; item < 8U; ++item) {
         const std::uint32_t row = row_tile * 16U + half * 8U + item;
@@ -1046,8 +1107,21 @@ void dense_prefill_kernel(Fp8Int4KvAttentionArgs a) {
                                                              : numerator[tile_f][item] * normalize;
     }
 #else
-    (void)a;
+    (void)a; (void)chunk_keys; (void)partial;
 #endif
+}
+
+template <std::uint32_t Group>
+__global__ __launch_bounds__(kDensePrefillThreads) __attribute__((amdgpu_waves_per_eu(6)))
+void dense_prefill_kernel(Fp8Int4KvAttentionArgs a) {
+    dense_prefill_body<Group, false>(a, 0U, nullptr);
+}
+
+template <std::uint32_t Group>
+__global__ __launch_bounds__(kDensePrefillThreads) __attribute__((amdgpu_waves_per_eu(6)))
+void dense_prefill_split_kernel(Fp8Int4KvAttentionArgs a, std::uint32_t chunk_keys,
+                                float* partial) {
+    dense_prefill_body<Group, true>(a, chunk_keys, partial);
 }
 
 // Split-context packed decode (1..6 rows): one CTA per KV head and context chunk of
@@ -1430,16 +1504,18 @@ hipError_t fp8_int4_kv_attention_dense_prefill(const Fp8Int4KvAttentionArgs& a,
 }
 
 hipError_t fp8_int4_kv_attention_dense_prefill_resources(
-    std::uint32_t value_group, DensePrefillWmmaResources* resources) noexcept {
+    std::uint32_t value_group, bool split, DensePrefillWmmaResources* resources) noexcept {
     if (resources == nullptr || (value_group != 16U && value_group != 32U)) {
         return hipErrorInvalidValue;
     }
 #if defined(__HIPCC__)
     hipFuncAttributes attributes{};
-    const hipError_t error = hipFuncGetAttributes(
-        &attributes, value_group == 16U
-            ? reinterpret_cast<const void*>(dense_prefill_kernel<16U>)
-            : reinterpret_cast<const void*>(dense_prefill_kernel<32U>));
+    const void* kernel =
+        split ? (value_group == 16U ? reinterpret_cast<const void*>(dense_prefill_split_kernel<16U>)
+                                    : reinterpret_cast<const void*>(dense_prefill_split_kernel<32U>))
+              : (value_group == 16U ? reinterpret_cast<const void*>(dense_prefill_kernel<16U>)
+                                    : reinterpret_cast<const void*>(dense_prefill_kernel<32U>));
+    const hipError_t error = hipFuncGetAttributes(&attributes, kernel);
     if (error != hipSuccess) return error;
     *resources = DensePrefillWmmaResources{
         attributes.numRegs, static_cast<int>(attributes.sharedSizeBytes),
@@ -1515,7 +1591,88 @@ std::uint32_t dense_verify_chunk_keys(std::size_t context) noexcept {
                                       kDensePrefillKeys);
 }
 
+// Mid-row split: enough context chunks that the 4 x row-tile x chunk grid reaches
+// kMidRowsTargetCtas, each chunk at least kDenseVerifyMinimumChunkKeys keys, and at most
+// kMidRowsPartialRows row-chunk partial slots (12.7 MiB of FP32 partials).
+inline constexpr std::uint32_t kMidRowsTargetCtas = 128U;
+inline constexpr std::uint32_t kMidRowsPartialRows = 512U;
+
+struct MidRowsSplit {
+    std::uint32_t chunks = 0U;
+    std::uint32_t chunk_keys = 0U;
+};
+
+// Chunk bound before key rounding: monotonic in the context, so a workspace sized at a frontier
+// envelope covers every smaller context; the realized split never exceeds it.
+std::uint32_t mid_rows_chunk_bound(std::size_t context, std::uint32_t rows) noexcept {
+    const std::uint32_t tiles = (rows + kDensePrefillRows - 1U) / kDensePrefillRows;
+    std::size_t chunks = (kMidRowsTargetCtas + 4U * tiles - 1U) / (4U * tiles);
+    chunks = std::min<std::size_t>(chunks, kMidRowsPartialRows / rows);
+    chunks = std::min<std::size_t>(chunks, kDenseVerifyMaximumChunks);
+    chunks = std::min<std::size_t>(
+        chunks, (context + kDenseVerifyMinimumChunkKeys - 1U) / kDenseVerifyMinimumChunkKeys);
+    return static_cast<std::uint32_t>(std::max<std::size_t>(chunks, 1U));
+}
+
+MidRowsSplit mid_rows_split(std::size_t context, std::uint32_t rows) noexcept {
+    const std::size_t chunks = mid_rows_chunk_bound(context, rows);
+    const std::size_t keys = (context + chunks - 1U) / chunks;
+    const auto chunk_keys = static_cast<std::uint32_t>(
+        (keys + kDensePrefillKeys - 1U) / kDensePrefillKeys * kDensePrefillKeys);
+    return {static_cast<std::uint32_t>((context + chunk_keys - 1U) / chunk_keys), chunk_keys};
+}
+
 } // namespace
+
+std::size_t fp8_int4_kv_attention_mid_rows_workspace_bytes(
+    std::size_t context, std::uint32_t rows) noexcept {
+    if (!use_mid_rows_attention(rows, context, false)) return 0U;
+    return static_cast<std::size_t>(mid_rows_chunk_bound(context, rows)) * rows * 24U *
+           kDenseVerifyPartialStride * sizeof(float);
+}
+
+hipError_t fp8_int4_kv_attention_mid_rows(const Fp8Int4KvAttentionArgs& a,
+                                          hipStream_t stream) noexcept {
+    if (!a.query || !a.key_codes || !a.value_codes || !a.value_scale_bits ||
+        !a.page_table || !a.page_table_pages || !a.context ||
+        a.context > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max()) ||
+        !a.physical_tokens || a.physical_tokens % kPageSize || a.query_heads != 24U ||
+        a.kv_heads != 4U || a.q_to_kv != 6U ||
+        !use_mid_rows_attention(a.query_rows, a.context, false) || !a.row_positions ||
+        a.ancestor_masks || a.prefix_lengths || a.prefix_length_stride > 1U ||
+        a.active_query_rows || !a.score_workspace || !a.output ||
+        !std::isfinite(a.attention_scale) || !(a.attention_scale > 0.0F) ||
+        a.key_layout != Fp8Int4KvPlaneLayout::TokenFastest ||
+        a.value_layout != Fp8Int4KvPlaneLayout::FeatureFastest ||
+        a.value_scale_layout != Fp8Int4KvPlaneLayout::FeatureFastest ||
+        (a.page_table_row != nullptr &&
+         (a.page_table_row_stride < a.page_table_pages ||
+          a.page_table_row_count == 0U)) ||
+        a.page_table_pages < (a.context + kPageSize - 1U) / kPageSize ||
+        (a.value_group != 16U && a.value_group != 32U)) {
+        return hipErrorInvalidValue;
+    }
+#if defined(__HIPCC__)
+    const MidRowsSplit split = mid_rows_split(a.context, a.query_rows);
+    const dim3 grid(4U, (a.query_rows + kDensePrefillRows - 1U) / kDensePrefillRows,
+                    split.chunks);
+    if (a.value_group == 16U) {
+        hipLaunchKernelGGL((dense_prefill_split_kernel<16U>), grid, dim3(kDensePrefillThreads),
+                           0, stream, a, split.chunk_keys, a.score_workspace);
+    } else {
+        hipLaunchKernelGGL((dense_prefill_split_kernel<32U>), grid, dim3(kDensePrefillThreads),
+                           0, stream, a, split.chunk_keys, a.score_workspace);
+    }
+    const hipError_t error = hipGetLastError();
+    if (error != hipSuccess) return error;
+    hipLaunchKernelGGL(dense_verify_merge_kernel, dim3(24U, a.query_rows), dim3(kHeadDim), 0,
+                       stream, a, split.chunks, a.score_workspace);
+    return hipGetLastError();
+#else
+    (void)stream;
+    return hipErrorNotSupported;
+#endif
+}
 
 std::size_t fp8_int4_kv_attention_packed_decode_workspace_bytes(
     std::size_t context, std::uint32_t rows) noexcept {

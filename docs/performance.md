@@ -74,11 +74,48 @@ the history behind them.
 | Prefill 2K | C1, 1,992-token prompt | ~3,000 tok/s, TTFT ~0.65 s | server logs, `profiles/bench/r9700-stall-probe-20260927/` |
 | Prefill 32K | C1, code corpus | 2,790–2,850 tok/s | Long-context prefill attribution |
 | Prefill 128K | C1, code corpus | 1,901 tok/s (69.0 s) | Long-context prefill attribution |
+| Short append | 19-token follow-up turn on a 22K conversation, host-RAM reuse | TTFT 240 ms (was 818 ms) | Mid-row attention route |
+| Decode C1..C4 | 13-prompt agent/code study corpus, p-less T1.5, 768 new tokens x 3 seeds | 90 / 138 / 172 / 195 tok/s aggregate | Decode study |
 
 Decode depends on DFlash acceptance and therefore on the prompt mix; compare only within one
-harness (`profiles/bench/r9700-w8-kernels-20260927/k_economics.py`). C2/C3 decode has not been
-remeasured since the two-tile kernels. Prefill rows predate the 2026-09-28 output-head and
+harness. Prefill rows predate the 2026-09-28 output-head and
 attention GPTQ reconversions, which change weight values but not formats or routes.
+
+## Mid-row attention route (2026-09-28)
+
+Causal chunks of 9..127 rows (short appended turns and tool results, prompt tails with
+`P mod 2048` in 9..127) fell between the packed decode route (1..8 rows) and dense prefill
+(>= 128) onto the fused one-query-row-per-CTA kernel, which re-reads the whole cache for every
+row and head: 34 ms per layer for 19 rows at 22K context, 547 ms of a 19-token follow-up's
+591 ms prefill. They now run the dense prefill tile split over context chunks with the packed
+route's FP32 merge (`fp8_int4_kv_attention_mid_rows`; 239 VGPRs, no spill; the production dense
+kernel is unchanged, interleaved A/B within noise). FP64 oracle: `dense_prefill_attention_qual`
+(rows 9..127, contexts to 262K, chunks that start inside the query rows, per-chunk NaN
+poisoning). Median per-layer times, G16:
+
+| rows | 2K | 8K | 22K | 32K | 131K |
+|---:|---:|---:|---:|---:|---:|
+| 9 | 0.05 | 0.10 | 0.20 | 0.27 | 1.00 |
+| 19 | 0.12 | 0.12 | 0.24 | 0.33 | 1.22 |
+| 64 | 0.08 | 0.17 | 0.36 | 0.51 | 2.10 |
+| 127 | 0.12 | 0.29 | 0.69 | 1.02 | 4.22 |
+
+(ms; 19 rows at 22K was 34 ms.) End to end, a 19-token follow-up restored from host RAM: TTFT
+418 / 429 / 818 ms -> 220 / 183 / 240 ms at 8K / 11K / 22K. C4 DFlash auto KV capacity is
+unchanged (550,528 tokens). Evidence: `profiles/bench/r9700-attn-midrows-20260928/`,
+`profiles/bench/r9700-decode-study-20260928/`.
+
+## Decode study (2026-09-28)
+
+Production serving shape (DFlash p-less T1.5, adaptive K up to 7, draft temperature 0.4) on 13
+prompts (code, structured, story, translation, AIME, logic, 6K OWUI tools, 11K/22K agent code) x
+3 seeds x 768 tokens. At C1 adaptive stays at K7 (output identical to fixed K7): 106.8 tok/s vs
+fixed K5 101.4 and K3 80.7; draft temperature 0.4 and 0.6 tie (106.8 / 107.9), 0.8 gives 105.3,
+1.0 gives 101.8. Aggregate throughput is 90 / 138 / 172 / 195 tok/s at C1..C4. Round time is
+lowest at K4 for every C (C4: K3 59.3, K4 49.9, K5 58.1, K7 61.3 ms) because only `k == 4`
+runs the DFlash drafter batched; other K loop it per request (ledger `DFLASH-BATCHED-DRAFT`).
+Long-context plain decode rises from 26.8 ms/step at 512 to 36.9 at 200K: ~510 GB/s of KV
+reads, 80% of the read peak, so attention headroom is at most ~1.5% at 32K.
 
 ## Long-context prefill attribution and exhausted mechanisms (2026-09-27)
 

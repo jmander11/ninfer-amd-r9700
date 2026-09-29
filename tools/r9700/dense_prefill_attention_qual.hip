@@ -166,8 +166,11 @@ std::vector<std::int32_t> make_positions(std::uint32_t rows) {
     return result;
 }
 
+// Rows below the dense-prefill minimum take the production mid-row split route.
 hipError_t launch_selected_dense(const kv::Fp8Int4KvAttentionArgs& args, hipStream_t stream) {
-    return kv::fp8_int4_kv_attention_dense_prefill(args, stream);
+    return args.query_rows < kv::kDensePrefillMinimumRows
+               ? kv::fp8_int4_kv_attention_mid_rows(args, stream)
+               : kv::fp8_int4_kv_attention_dense_prefill(args, stream);
 }
 
 std::array<double, kD> expected_vector(const Fixture& fixture, const std::vector<hip_bfloat16>& queries,
@@ -219,10 +222,16 @@ double expected(const Fixture& fixture, const std::vector<hip_bfloat16>& queries
 
 void host_predicate_regression() {
     for (const std::uint32_t group : {16U, 32U}) {
-        kv::DensePrefillWmmaResources resources{};
-        HIP_CHECK(kv::fp8_int4_kv_attention_dense_prefill_resources(group, &resources));
-        if (resources.local_bytes != 0 || resources.static_shared_bytes > 65536)
-            fail("fused dense prefill spills or exceeds the LDS limit");
+        for (const bool split : {false, true}) {
+            kv::DensePrefillWmmaResources resources{};
+            HIP_CHECK(kv::fp8_int4_kv_attention_dense_prefill_resources(group, split, &resources));
+            std::cerr << "dense-prefill G" << group << (split ? " split" : "")
+                      << " vgpr=" << resources.registers << " lds=" << resources.static_shared_bytes
+                      << " scratch=" << resources.local_bytes << '\n';
+            if (resources.local_bytes != 0 || resources.static_shared_bytes > 65536 ||
+                resources.registers > 240)
+                fail("dense prefill tile spills or exceeds the LDS or 240-VGPR budget");
+        }
     }
     kv::Fp8Int4KvAttentionArgs args{};
     args.query = reinterpret_cast<const hip_bfloat16*>(1U);
@@ -256,6 +265,26 @@ void host_predicate_regression() {
     rejected(bad, "tree metadata was accepted");
     bad = args; bad.context = 2047U;
     rejected(bad, "context shorter than query rows was accepted");
+
+    auto mid = args;
+    mid.query_rows = 19U;
+    mid.score_workspace = reinterpret_cast<float*>(1U);
+    bad = mid; bad.score_workspace = nullptr;
+    rejected(bad, "mid-row launch without partial workspace was accepted");
+    bad = mid; bad.active_query_rows = reinterpret_cast<const std::int32_t*>(1U);
+    rejected(bad, "mid-row launch with device-selected rows was accepted");
+    bad = mid; bad.ancestor_masks = reinterpret_cast<const std::int32_t*>(1U);
+    rejected(bad, "mid-row launch with tree metadata was accepted");
+    bad = mid; bad.query_rows = 8U;
+    rejected(bad, "packed-decode row count took the mid-row route");
+    bad = mid; bad.context = 18U;
+    rejected(bad, "mid-row context shorter than query rows was accepted");
+    if (kv::fp8_int4_kv_attention_mid_rows_workspace_bytes(2048U, 8U) != 0U ||
+        kv::fp8_int4_kv_attention_mid_rows_workspace_bytes(2048U, 128U) != 0U ||
+        kv::fp8_int4_kv_attention_mid_rows_workspace_bytes(2048U, 9U) == 0U ||
+        kv::fp8_int4_kv_attention_mid_rows_workspace_bytes(262144U, 127U) >
+            std::size_t{512U} * 24U * 258U * sizeof(float))
+        fail("mid-row workspace predicate or bound changed");
 }
 void run_case(std::uint32_t rows, std::uint32_t group, std::uint32_t context,
               std::uint16_t uniform_scale = 0U, std::uint32_t timed_iterations = 0U) {
@@ -272,6 +301,8 @@ void run_case(std::uint32_t rows, std::uint32_t group, std::uint32_t context,
     DeviceBuffer<std::uint32_t> d_pages(fixture.pages.size());
     DeviceBuffer<std::int32_t> d_positions(positions.size());
     DeviceBuffer<float> d_output(static_cast<std::size_t>(rows) * kHq * kD);
+    const std::size_t partial_bytes = kv::fp8_int4_kv_attention_mid_rows_workspace_bytes(context, rows);
+    DeviceBuffer<float> d_partial(std::max<std::size_t>(partial_bytes / sizeof(float), 1U));
     HIP_CHECK(hipMemcpy(d_queries.get(), queries.data(), d_queries.bytes(), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d_keys.get(), fixture.keys.data(), d_keys.bytes(), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d_values.get(), fixture.values.data(), d_values.bytes(), hipMemcpyHostToDevice));
@@ -289,6 +320,7 @@ void run_case(std::uint32_t rows, std::uint32_t group, std::uint32_t context,
         .value_layout=kv::Fp8Int4KvPlaneLayout::FeatureFastest,
         .value_scale_layout=kv::Fp8Int4KvPlaneLayout::FeatureFastest,
         .output=d_output.get()};
+    if (partial_bytes != 0U) args.score_workspace = d_partial.get();
     HIP_CHECK(launch_selected_dense(args, nullptr));
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<float> output(static_cast<std::size_t>(rows) * kHq * kD);
@@ -334,6 +366,48 @@ void run_case(std::uint32_t rows, std::uint32_t group, std::uint32_t context,
         std::cout << "timing rows=" << rows << " context=" << context << " group=" << group
                   << " median_ms=" << median << " min_ms=" << samples.front()
                   << " useful_tflops=" << 4.0 * kHq * kD * visible / (median * 1.0e9) << "\n";
+    }
+    if (rows == 19U && context == 22281U) {
+        // Mid-row poisoning is per chunk: an invalid position poisons exactly its row, and a
+        // missing physical page at key 22272 poisons exactly the rows whose context passes it.
+        auto malformed_positions = positions;
+        malformed_positions[5] = -1;
+        HIP_CHECK(hipMemcpy(d_positions.get(), malformed_positions.data(), d_positions.bytes(),
+                            hipMemcpyHostToDevice));
+        HIP_CHECK(launch_selected_dense(args, nullptr));
+        HIP_CHECK(hipDeviceSynchronize());
+        std::vector<float> poisoned(output.size());
+        HIP_CHECK(hipMemcpy(poisoned.data(), d_output.get(), d_output.bytes(), hipMemcpyDeviceToHost));
+        for (std::uint32_t row = 0U; row < rows; ++row) {
+            const auto begin = poisoned.begin() + static_cast<std::ptrdiff_t>(row * kHq * kD);
+            const bool all_nan = std::all_of(begin, begin + kHq * kD,
+                                             [](float value) { return std::isnan(value); });
+            const bool same = std::equal(begin, begin + kHq * kD,
+                                         output.begin() + static_cast<std::ptrdiff_t>(row * kHq * kD));
+            if (row == 5U ? !all_nan : !same)
+                fail("mid-row invalid position did not poison exactly its row");
+        }
+        HIP_CHECK(hipMemcpy(d_positions.get(), positions.data(), d_positions.bytes(),
+                            hipMemcpyHostToDevice));
+        auto faulted_pages = fixture.pages;
+        faulted_pages[22272U / kPage] = static_cast<std::uint32_t>(fixture.physical_tokens / kPage);
+        HIP_CHECK(hipMemcpy(d_pages.get(), faulted_pages.data(), d_pages.bytes(),
+                            hipMemcpyHostToDevice));
+        HIP_CHECK(launch_selected_dense(args, nullptr));
+        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK(hipMemcpy(poisoned.data(), d_output.get(), d_output.bytes(), hipMemcpyDeviceToHost));
+        for (std::uint32_t row = 0U; row < rows; ++row) {
+            const auto begin = poisoned.begin() + static_cast<std::ptrdiff_t>(row * kHq * kD);
+            const bool past_fault = static_cast<std::uint32_t>(positions[row]) + 1U > 22272U;
+            const bool all_nan = std::all_of(begin, begin + kHq * kD,
+                                             [](float value) { return std::isnan(value); });
+            const bool same = std::equal(begin, begin + kHq * kD,
+                                         output.begin() + static_cast<std::ptrdiff_t>(row * kHq * kD));
+            if (past_fault ? !all_nan : !same)
+                fail("mid-row page fault did not poison exactly the rows past it");
+        }
+        HIP_CHECK(hipMemcpy(d_pages.get(), fixture.pages.data(), d_pages.bytes(),
+                            hipMemcpyHostToDevice));
     }
     if (rows == 1537U) {
         hipStream_t stream{};
@@ -500,7 +574,8 @@ int main(int argc, char** argv) {
             context = static_cast<std::uint32_t>(std::stoul(argv[first + 1]));
             group = static_cast<std::uint32_t>(std::stoul(argv[first + 2]));
             if (timed) iterations = static_cast<std::uint32_t>(std::stoul(argv[5]));
-            if (!kv::use_dense_prefill_attention(rows, context) ||
+            if ((!kv::use_dense_prefill_attention(rows, context) &&
+                 !kv::use_mid_rows_attention(rows, context, false)) ||
                 (group != 16U && group != 32U) || (timed && iterations == 0U))
                 fail("invalid dense attention qualification/timing shape");
         }
@@ -535,8 +610,26 @@ int main(int argc, char** argv) {
             // The private FP16 PV operands use V/8: cover both finite scale extremes.
             run_case(128U, group, 32768U, 0x7bffU);
             run_case(128U, group, 32768U, 0x0001U);
+            // Mid-row split route: row tiles 1..4, fresh and appended contexts, chunk and page
+            // boundaries, and a final chunk that starts inside the query rows (rows whose
+            // context ends before it see only masked keys there).
+            for (const std::uint32_t rows : {9U, 16U, 19U, 31U, 32U, 33U, 64U, 100U, 127U}) {
+                run_case(rows, group, rows);
+                run_case(rows, group, 2049U);
+                run_case(rows, group, 22229U);
+            }
+            for (const std::uint32_t context : {255U, 256U, 257U, 4095U, 4097U, 32768U, 131072U})
+                run_case(19U, group, context);
+            run_case(127U, group, 262144U);
+            run_case(19U, group, 22281U);   // poisoning: rows straddle the page at key 22272
+            run_case(19U, group, 1793U);    // last chunk starts at 1792: 18 rows fully masked there
+            run_case(19U, group, 20817U);
+            run_case(64U, group, 2078U);
+            run_case(127U, group, 797U);
+            run_case(127U, group, 32768U, 0x7bffU);
+            run_case(19U, group, 32768U, 0x0001U);
         }
-        std::cout << "production dense G16/G32 FP64 qualification: PASS\n";
+        std::cout << "production dense and mid-row G16/G32 FP64 qualification: PASS\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
