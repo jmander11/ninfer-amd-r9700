@@ -126,6 +126,36 @@ kernels and launch boundaries; the recoverable part is estimated at 3-5% of a ro
 candidate (quantization/launch fusion, GDN record and front, narrow drafter projections)
 around 1%. Evidence: `profiles/bench/r9700-decode-bw-20260929/`.
 
+The four candidates were then worked through; none yields an admissible gain:
+
+- Narrow drafter projections: a per-shape `k_split` sweep (2 to 20 waves per tile, T8,
+  DRAM-cold) finds no cell faster than production for any drafter shape. The N5120/K25600
+  feature projection's in-graph 177 us (115 us in the one round without a preceding fold,
+  123 us isolated) is the replay fold's dirty-line writeback landing on the next kernel.
+- GDN normalized front: one CTA per (head, token) is bitwise equal but slower at T8, 12.9 vs
+  12.0 us per launch in a 48-launch graph (faster only at T4, 9.8 vs 10.3).
+- GDN record: the recurrence costs ~0.1 us per token; the kernel is bound by streaming each
+  layer's 3 MB state plus launch. Overlapping the other state stream, the 0.53 ms replay fold,
+  with the drafter on a second stream (low or high priority) gives no reliable gain: C1 K7
+  31.48 vs 31.54 ms/round over four interleaved pairs, C4 13.98 vs 13.99 ms per lane-round.
+- Activation quantization: every layer's quantizers are fused into their producers (norm,
+  gated norm, attention gate) except the one after the SwiGLU gate/up, whose per-token E4M3
+  scale needs a grid-wide maximum. Quantizing inside the down projection instead would double
+  its per-CTA L2 activation reads (BF16 instead of FP8, 278 KB per CTA at T8).
+
+Two further per-round costs were found and left unchanged:
+
+- The speculative tool-mask exchange (ids readback, a Device Graph host node for the grammar
+  match, a 248 KB mask upload) costs ~0.1 ms/round without tools and 0.21 ms/round with six
+  declared tools (server, identical outputs, 193.0 vs 194.3 tok/s). HIP does not overlap it as
+  a graph branch: a side-stream branch executes serially, `DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING`
+  makes rounds 2.3x slower, and a captured `hipEventWaitExternal` wait crashes in
+  `hipStreamWaitEvent` (a manually added event-wait node works). Removing it needs a GPU/host
+  mailbox with a device spin instead of the host node.
+- The pinned-host Q4N16K16 token embedding costs 50 us (target) plus 16.5 us (drafter) per
+  round: one row gather touches 320 interleaved 128-byte lines over PCIe. A row-contiguous
+  host embedding layout is an artifact change.
+
 ## Batched DFlash drafting at C2..C4 (2026-09-28)
 
 The DFlash2 drafter ran batched across requests only at `k == 4` (an upstream gate from when K4
