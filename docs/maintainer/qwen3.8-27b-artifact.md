@@ -64,8 +64,11 @@ into one pinned host backing (not the device arena), and the materializer fills 
 direct-I/O staging slots as device tensors and requires its device address to equal its host
 address. The load summary reports it as `mapped_host_bytes` (CLI `weight pinned host`,
 `server_start.artifact.mapped_host_bytes`); the freed VRAM (675,430,400 bytes for the Q4G64
-N16K16 table, 1,350,860,800 for W8G32) goes to the automatic KV pool. `text/output_head` and all
-other tensors stay in VRAM. Stored bytes and layouts are unchanged; there is no runtime repacking.
+table, 1,350,860,800 for W8G32) goes to the automatic KV pool. `text/output_head` and all other
+tensors stay in VRAM. A quantized table is stored `row-split-k128-v1`, so one row is a contiguous
+run of codes (2,560 bytes for Q4G64) and of FP16 scales (160 bytes); there is no runtime
+repacking. `convert_fp8lut4` writes the embedding in that layout (an exact permutation of the
+base's N16K16 table), and `transcode_embedding_rows.py` revises an existing artifact.
 
 The table is only row-gathered, through two routes with bit-identical results
 (`hip_bfloat16(code * fp16 scale)`, or the stored BF16 value):
@@ -74,8 +77,8 @@ The table is only row-gathered, through two routes with bit-identical results
   bridge steps, and the final MTP prefill column that holds the sampled token) have device-only
   ids inside captured Device Graphs, so `ops::embedding` reads their rows in place through the
   table's fixed unified address. At most a few dozen rows are read per round.
-- Prompt tokens are known on the host. Reading a Q4 N16K16 row in place touches one 8-byte word
-  per 128-byte line (about 16x PCIe amplification), which cost 1.0% of C1 8K prefill. Instead the
+- Prompt tokens are known on the host. Reading rows in place over PCIe cost 1.0% of C1 8K
+  prefill when the table was N16K16-tiled (one 8-byte word per 128-byte line). Instead the
   Program-owned `PromptEmbeddingStaging` gathers a prefill window's distinct rows on the host
   (`ops::stage_embedding_rows`, into a compact table of the same format plus one I32 slot per
   token), copies that image on the load stream into a fixed device region sized for
@@ -364,9 +367,11 @@ G32 to 262,144/326,656/313,984/301,248 tokens; these are retained facts, not reu
 manifests.
 
 The C++ binder consumes Q4G64/W8G32 planes directly according to each explicit identity. Q4G64
-uses the Q4-only `r9700-q4g64-n16-k16-v1` persistent order; W8G32 remains row-split except
-the explicitly tiled selective-companion output head described above. The converter and explicit
-offline `transcode_q4_n16k16.py`/`transcode_w8_head.py` tools write these layouts; runtime binding never repacks. The
+matrices use the Q4-only `r9700-q4g64-n16-k16-v1` persistent order and the Q4G64 token
+embedding uses `row-split-k128-v1`; W8G32 remains row-split except the explicitly tiled
+selective-companion output head described above. The converter and explicit offline
+`transcode_q4_n16k16.py`/`transcode_embedding_rows.py`/`transcode_w8_head.py` tools write these
+layouts; runtime binding never repacks. The
 runtime quantizes represented BF16 activations into caller-owned, compile-selected A4G64 or A8G64
 evaluation scratch and launches the qualified native signed-INT4 WMMA route without hidden
 allocation or runtime weight repacking.

@@ -733,10 +733,10 @@ __global__ void embedding_gather_q6_kernel(const std::uint8_t* low_codes,
     output[index] = hip_bfloat16(static_cast<float>(code) * scale);
 }
 
-// One block per token; each thread decodes one Q4N16K16 code word (16 consecutive features of
-// one row, the longest contiguous run a row has in this layout) with one 8-byte code load and
-// one scale load, then stores 32 output bytes. Keeping one wide request per word matters when the
-// table is pinned host memory read over PCIe.
+// One block per token; each thread decodes 32 consecutive features of the row-contiguous
+// (row-split) code plane with one 16-byte code load and its group's scale, then stores 64
+// output bytes. A 5120-feature row is 2560 contiguous code bytes plus 160 scale bytes, so a
+// gather from pinned host memory over PCIe reads only the row's own lines.
 __global__ void embedding_gather_q4_kernel(const std::uint8_t* codes,
                                            const std::uint16_t* scales,
                                            const std::int32_t* ids,
@@ -745,47 +745,43 @@ __global__ void embedding_gather_q4_kernel(const std::uint8_t* codes,
                                            std::uint32_t padded_features,
                                            bool vector_store) {
     constexpr std::uint32_t group_size = 64;
-    constexpr std::uint32_t word_features = 16;
+    constexpr std::uint32_t chunk_features = 32;
     const std::uint32_t token = blockIdx.x;
-    const std::uint32_t groups_per_row = padded_features / group_size;
-    const std::uint32_t words = (features + word_features - 1U) / word_features;
+    const std::uint32_t chunks = (features + chunk_features - 1U) / chunk_features;
     const std::size_t row = static_cast<std::size_t>(ids[token]);
-    const std::size_t tile_group = (row >> 4U) * groups_per_row;
+    const std::uint8_t* row_codes = codes + row * (padded_features / 2U);
+    const std::uint16_t* row_scales = scales + row * (padded_features / group_size);
     hip_bfloat16* token_output = output + static_cast<std::size_t>(token) * features;
-    for (std::uint32_t word = threadIdx.x; word < words; word += blockDim.x) {
-        const std::uint32_t group = word / 4U;
-        const std::size_t code_word = ((tile_group + group) * 4U + word % 4U) * 16U + (row & 15U);
-        const uint2 packed = *reinterpret_cast<const uint2*>(codes + code_word * 8U);
-        const float scale = __half2float(
-            __ushort_as_half(scales[(tile_group + group) * 16U + (row & 15U)]));
-        const std::uint64_t bits =
-            static_cast<std::uint64_t>(packed.x) | (static_cast<std::uint64_t>(packed.y) << 32U);
-        std::uint16_t values[word_features];
+    for (std::uint32_t chunk = threadIdx.x; chunk < chunks; chunk += blockDim.x) {
+        const uint4 packed = *reinterpret_cast<const uint4*>(row_codes + chunk * 16U);
+        const float scale = __half2float(__ushort_as_half(row_scales[chunk / 2U]));
+        const std::uint32_t words[4] = {packed.x, packed.y, packed.z, packed.w};
+        std::uint32_t pairs[chunk_features / 2];
 #pragma unroll
-        for (std::uint32_t lane = 0; lane < word_features; ++lane) {
-            const auto nibble = static_cast<std::uint32_t>((bits >> (lane * 4U)) & 0x0fU);
-            const int code = static_cast<int>(nibble ^ 8U) - 8;
-            values[lane] = hip_bfloat16(static_cast<float>(code) * scale).data;
+        for (std::uint32_t lane = 0; lane < chunk_features; lane += 2U) {
+            const std::uint32_t word = words[lane / 8U];
+            const auto even = static_cast<std::uint32_t>((word >> ((lane % 8U) * 4U)) & 0x0fU);
+            const auto odd = static_cast<std::uint32_t>((word >> ((lane % 8U) * 4U + 4U)) & 0x0fU);
+            const std::uint16_t low =
+                hip_bfloat16(static_cast<float>(static_cast<int>(even ^ 8U) - 8) * scale).data;
+            const std::uint16_t high =
+                hip_bfloat16(static_cast<float>(static_cast<int>(odd ^ 8U) - 8) * scale).data;
+            pairs[lane / 2U] = low | (static_cast<std::uint32_t>(high) << 16U);
         }
-        const std::uint32_t feature = word * word_features;
-        if (vector_store && feature + word_features <= features) {
-            uint4 low;
-            uint4 high;
-            low.x  = values[0] | (static_cast<std::uint32_t>(values[1]) << 16U);
-            low.y  = values[2] | (static_cast<std::uint32_t>(values[3]) << 16U);
-            low.z  = values[4] | (static_cast<std::uint32_t>(values[5]) << 16U);
-            low.w  = values[6] | (static_cast<std::uint32_t>(values[7]) << 16U);
-            high.x = values[8] | (static_cast<std::uint32_t>(values[9]) << 16U);
-            high.y = values[10] | (static_cast<std::uint32_t>(values[11]) << 16U);
-            high.z = values[12] | (static_cast<std::uint32_t>(values[13]) << 16U);
-            high.w = values[14] | (static_cast<std::uint32_t>(values[15]) << 16U);
+        const std::uint32_t feature = chunk * chunk_features;
+        if (vector_store && feature + chunk_features <= features) {
             auto* destination = reinterpret_cast<uint4*>(token_output + feature);
-            destination[0] = low;
-            destination[1] = high;
+#pragma unroll
+            for (std::uint32_t v = 0; v < 4U; ++v)
+                destination[v] = uint4{pairs[4U * v], pairs[4U * v + 1U], pairs[4U * v + 2U],
+                                       pairs[4U * v + 3U]};
         } else {
 #pragma unroll
-            for (std::uint32_t lane = 0; lane < word_features; ++lane) {
-                if (feature + lane < features) { token_output[feature + lane].data = values[lane]; }
+            for (std::uint32_t lane = 0; lane < chunk_features; ++lane) {
+                if (feature + lane < features) {
+                    token_output[feature + lane].data = static_cast<std::uint16_t>(
+                        pairs[lane / 2U] >> ((lane % 2U) * 16U));
+                }
             }
         }
     }
@@ -1417,15 +1413,15 @@ hipError_t embedding_gather_q4g64_f16s(
     std::uint32_t features, std::uint32_t padded_features, std::uint32_t rows,
     hipStream_t stream) noexcept {
     const std::size_t elements = static_cast<std::size_t>(features) * rows;
-    // One thread per 16-feature code word, rounded to whole wave32 waves (320 for D=5120).
-    const std::uint32_t words = (features + 15U) / 16U;
-    const std::uint32_t threads = std::min<std::uint32_t>((words + 31U) / 32U * 32U, 1024U);
+    // One thread per 32-feature chunk, rounded to whole wave32 waves (160 for D=5120).
+    const std::uint32_t chunks = (features + 31U) / 32U;
+    const std::uint32_t threads = std::min<std::uint32_t>((chunks + 31U) / 32U * 32U, 1024U);
     const bool vector_store =
         (reinterpret_cast<std::uintptr_t>(output) & 15U) == 0U && features % 8U == 0U;
     return checked_launch(codes != nullptr && scales != nullptr && ids != nullptr &&
                               output != nullptr && vocabulary != 0 && features != 0 &&
                               padded_features >= features && padded_features % 128U == 0U &&
-                              vocabulary % 16U == 0U && rows != 0 &&
+                              rows != 0 &&
                               valid_linear_count(elements) && valid_stream(stream),
                           [&] { hipLaunchKernelGGL(embedding_gather_q4_kernel, dim3(rows),
                                                    dim3(threads), 0, stream, codes, scales, ids,

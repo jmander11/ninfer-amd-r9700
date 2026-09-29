@@ -5,8 +5,10 @@ original BF16 checkpoint as FP8LUT4 (`fp8lut4_codec`), MLP gate/up rows in the i
 SiLU-pair order (`fp8lut4_codec.interleave_gate_up`), with GPTQ error-compensated rounding against
 the input second moments of the calibration sequences (`calibration.InputMoments`, evaluated
 layer-major through the BF16 reference in lock-step with the object order; the head against the
-final-norm moments). Every other object (FP8 protections, embeddings, draft head, MTP,
-DFlash2 companion, Vision, resources) is copied byte-exact from the base artifact.
+final-norm moments). The token embedding is stored row-split (`row-split-k128-v1`), an exact
+permutation of the base's N16K16 codes and scales, because it is only row-gathered from pinned
+host memory. Every other object (FP8 protections, draft head, MTP, DFlash2 companion, Vision,
+resources) is copied byte-exact from the base artifact.
 `--reuse-layers` copies each Text-layer FP8LUT4 object byte-exact from an existing
 `r9700-fp8lut4` artifact of the same calibration and damping whose receipt records the same
 rounding (GPTQ or independent) for it; the others are re-encoded.
@@ -23,6 +25,7 @@ from tools.artifact.container import (
     Artifact, ArtifactIdentity, ArtifactWriter, TensorObject,
     TensorSpec as StoredTensor, ResourceSpec as StoredResource,
 )
+from tools.artifact.layouts import transcode_q4_n16k16
 
 # Mean-diagonal GPTQ damping per calibrated input, selected on held-out calibration sequences:
 # the 17408-wide MLP down input overfits at low damping.
@@ -33,6 +36,8 @@ DEFAULT_DAMPING = 0.1
 INDEPENDENT_ROLES = ("attention/query_key",)
 HEAD = "text/output_head"
 HEAD_DAMPING = 0.1
+EMBEDDING = "text/token_embedding"
+ROW_SPLIT = "row-split-k128-v1"
 
 BASE_WEIGHTS_ID = "r9700-q4-fp8-selective-cap-n16k16-dflash2-q4-eval"
 WEIGHTS_ID = "r9700-fp8lut4"
@@ -57,6 +62,11 @@ def copied(artifact, name):
     with artifact.payload(name) as payload:
         for begin in range(0, len(payload), 8 << 20):
             yield bytes(payload[begin:begin + (8 << 20)])
+
+
+def row_split(artifact, obj):
+    with artifact.payload(obj.name) as payload:
+        yield from transcode_q4_n16k16(payload, obj.shape, inverse=True)
 
 
 def convert(args) -> None:
@@ -107,6 +117,7 @@ def convert(args) -> None:
             raise ValueError(f"base must be {BASE_WEIGHTS_ID}, got {base.identity.weights_id}")
         stored = tuple(
             StoredTensor(o.name, o.shape, FP8LUT4, FP8LUT4_LAYOUT) if selected(o)
+            else StoredTensor(o.name, o.shape, o.format, ROW_SPLIT) if o.name == EMBEDDING
             else StoredTensor(o.name, o.shape, o.format, o.layout) if isinstance(o, TensorObject)
             else StoredResource(o.name, o.encoding, o.bytes)
             for o in base.objects)
@@ -157,6 +168,11 @@ def convert(args) -> None:
                             calibration=calibration), record))
                         del tensor, calibration
                         print(obj.name, flush=True)
+                elif obj.name == EMBEDDING:
+                    if obj.format != "Q4G64_F16S" or obj.layout != "r9700-q4g64-n16-k16-v1":
+                        raise ValueError(f"base {EMBEDDING} is not Q4G64 N16K16")
+                    record["origin"] = "base-transcode-row-split"
+                    writer.write(obj.name, recorded(row_split(base, obj), record))
                 else:
                     record["origin"] = "base-copy-exact"
                     writer.write(obj.name, recorded(copied(base, obj.name), record))

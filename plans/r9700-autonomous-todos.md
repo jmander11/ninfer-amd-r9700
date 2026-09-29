@@ -41,8 +41,8 @@ FP8LUT4 artifact was admitted; it remains in git history.
 - [x] `DECODE-BANDWIDTH` Closed 2026-09-29 (`docs/performance.md`, Decode step attribution):
   weight streaming runs at ~95% of the read peak; the four small-kernel candidates (quantization
   fusion, GDN record and front, narrow drafter projections) and an overlapped replay fold gave
-  no admissible gain. Left for a user decision: a graph-host-node-free tool-mask exchange
-  (~0.2 ms/round with tools) and a row-contiguous host embedding (~0.07 ms/round, artifact change).
+  no admissible gain. Follow-ups done: the tool-mask exchange is a host mailbox (+0.7% with
+  tools) and the Q4G64 token embedding is stored row-split (gathers ~50 -> ~7 us).
 - [ ] `CLOCKS-README` [user-gated; `LONGCTX-PREFILL` is closed] Matched README benchmarks at stock
   clocks and at the user's undervolted/higher-clock setting.
 - [ ] `MIXED-PREFILL-DECODE` [final item; changes the product contract] Maximum aggregate

@@ -21,6 +21,7 @@ from tools.artifact.layouts import (
     row_split_geometry,
     q4_n16k16_geometry,
     split_row_planes,
+    transcode_q4_n16k16,
 )
 
 
@@ -98,8 +99,8 @@ def test_row_split_geometry_and_encoded_size_are_derived_from_format_and_shape()
         4352,
         0,
     )
-    with pytest.raises(ValueError, match="does not accept"):
-        row_split_geometry("Q4G64_F16S", (16, 4304))
+    q4 = row_split_geometry("Q4G64_F16S", (16, 4304))
+    assert (q4.k_pad, q4.base_row_bytes, q4.high_bytes, q4.scale_row_bytes) == (4352, 2176, 0, 136)
 
 
 def test_row_scaled_geometry_is_distinct_and_k128_padded():
@@ -184,8 +185,28 @@ def test_q4_n16k16_exact_tile_order_and_round_trip():
     assert torch.equal(decoded_scales, scales)
     assert torch.equal(decoded_codes, codes)
     assert encoded_size("r9700-q4g64-n16-k16-v1", "Q4G64_F16S", shape) == geometry.payload_bytes
-    with pytest.raises(ValueError, match="does not accept"):
-        encoded_size("row-split-k128-v1", "Q4G64_F16S", shape)
+
+
+def test_q4_row_split_is_an_exact_permutation_of_n16k16():
+    shape = (32, 130)
+    geometry = q4_n16k16_geometry(shape)
+    generator = torch.Generator().manual_seed(3)
+    codes = torch.randint(-8, 8, (32, geometry.groups_per_row, 64), dtype=torch.int8,
+                          generator=generator)
+    codes[:, 2, 130 - 128:] = 0  # K padding (features 130..255) codes are zero
+    codes[:, 3] = 0
+    scales = (torch.rand((32, geometry.groups_per_row), generator=generator) + 0.01).half()
+    rows = encode_row_split(codes, scales, "Q4G64_F16S", shape)
+    tiled = encode_q4_n16k16(codes, scales, shape)
+    assert encoded_size("row-split-k128-v1", "Q4G64_F16S", shape) == len(rows) == len(tiled)
+    # Row r's codes are one contiguous run and its scales follow the aligned code plane.
+    assert rows[5 * geometry.groups_per_row * 32:6 * geometry.groups_per_row * 32] == bytes(
+        (int(codes[5].flatten()[2 * i]) & 15) | ((int(codes[5].flatten()[2 * i + 1]) & 15) << 4)
+        for i in range(geometry.groups_per_row * 32))
+    decoded_scales, decoded_codes = decode_row_split_codes(rows, "Q4G64_F16S", shape)
+    assert torch.equal(decoded_scales, scales) and torch.equal(decoded_codes, codes)
+    assert b"".join(transcode_q4_n16k16(rows, shape)) == tiled
+    assert b"".join(transcode_q4_n16k16(tiled, shape, inverse=True)) == rows
 
 
 def test_consecutive_views_arbitrary_gathers_and_standalone_assembly():

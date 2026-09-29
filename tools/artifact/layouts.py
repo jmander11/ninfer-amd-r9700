@@ -130,7 +130,7 @@ CONTIGUOUS_LE_V1 = Layout(
 ROW_SPLIT_K128_V1 = Layout(
     "row-split-k128-v1",
     256,
-    frozenset(("Q5G64_F16S", "Q6G64_F16S", "W8G32_F16S")),
+    frozenset(("Q4G64_F16S", "Q5G64_F16S", "Q6G64_F16S", "W8G32_F16S")),
 )
 R9700_Q4G64_N16_K16_V1 = Layout(
     "r9700-q4g64-n16-k16-v1", 256, frozenset(("Q4G64_F16S",))
@@ -214,8 +214,6 @@ def row_split_geometry(
     spec = _format(format)
     if not isinstance(spec, QuantFormat):
         raise ValueError("row-split-k128-v1 requires a grouped quantized format")
-    if spec.name == "Q4G64_F16S":
-        raise ValueError("row-split-k128-v1 does not accept Q4G64_F16S")
     n, k = _shape(shape, rank=2)
     k_pad = align_up(k, K_ALIGNMENT)
     groups_per_row = k_pad // spec.group_size
@@ -270,6 +268,40 @@ def w8_n16k16_geometry(shape: Sequence[int]) -> RowSplitGeometry:
     if n % 16:
         raise ValueError("r9700-w8g32-n16-k16-v1 requires N divisible by 16")
     return row_split_geometry("W8G32_F16S", shape)
+
+
+def transcode_q4_n16k16(source: bytes | bytearray | memoryview,
+                        shape: Sequence[int], *, inverse: bool = False):
+    """Stream an exact Q4 code/FP16-word permutation in bounded N16 blocks.
+
+    Forward consumes row-split and yields N16/K16; inverse consumes N16/K16
+    and yields row-split. Both layouts have identical plane sizes and offsets.
+    """
+    import numpy as np
+
+    geometry = q4_n16k16_geometry(shape)
+    view = memoryview(source)
+    if view.nbytes != geometry.payload_bytes:
+        raise ValueError("Q4 transcode payload size differs from descriptor")
+    groups = geometry.groups_per_row
+    code_block = 16 * groups * 32
+    scale_block = 16 * groups * 2
+    for offset in range(0, geometry.base_bytes, code_block):
+        raw = np.frombuffer(view[offset:offset + code_block], dtype=np.uint8)
+        if inverse:
+            block = raw.reshape(groups, 4, 16, 8).transpose(2, 0, 1, 3)
+        else:
+            block = raw.reshape(16, groups, 4, 8).transpose(1, 2, 0, 3)
+        yield block.tobytes()
+    yield bytes(view[geometry.base_bytes:geometry.scale_offset])
+    for offset in range(geometry.scale_offset, geometry.payload_bytes, scale_block):
+        # Keep FP16 words as two uninterpreted bytes, including signed zero.
+        raw = np.frombuffer(view[offset:offset + scale_block], dtype=np.uint8)
+        if inverse:
+            block = raw.reshape(groups, 16, 2).transpose(1, 0, 2)
+        else:
+            block = raw.reshape(16, groups, 2).transpose(1, 0, 2)
+        yield block.tobytes()
 
 
 def transcode_w8_n16k16(source: bytes | bytearray | memoryview,

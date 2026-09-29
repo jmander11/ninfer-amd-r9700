@@ -12,8 +12,6 @@ namespace {
 
 constexpr std::uint64_t kPlaneAlignment = 256;
 constexpr std::uint32_t kQ4Group        = 64;
-constexpr std::uint32_t kQ4TileRows     = 16;
-constexpr std::uint32_t kQ4WordFeatures = 16;
 constexpr std::uint32_t kW8Group        = 32;
 // Rows per host worker. Prompt windows are gathered from host DRAM, whose per-core bandwidth
 // bounds a synchronous (not prefetched) window; a few workers cut that latency.
@@ -34,10 +32,6 @@ struct CompactGeometry {
 
 std::uint32_t padded_features(std::int32_t features) {
     return static_cast<std::uint32_t>(align_up(static_cast<std::uint64_t>(features), 128U));
-}
-
-std::uint64_t compact_rows(QType qtype, std::uint64_t distinct) {
-    return qtype == QType::Q4G64_F16S ? align_up(distinct, kQ4TileRows) : distinct;
 }
 
 CompactGeometry compact_geometry(QType qtype, std::int32_t features, std::uint64_t rows) {
@@ -82,12 +76,11 @@ void require_stageable(const Weight& table) {
         }
         return;
     case QType::Q4G64_F16S:
-        if (table.layout != QuantLayout::Q4N16K16 || table.group_size != kQ4Group ||
+        if (table.layout != QuantLayout::RowSplit || table.group_size != kQ4Group ||
             table.group != static_cast<std::int32_t>(kQ4Group) ||
             table.scale_dtype != DType::FP16 || table.padded_shape[1] != padded ||
-            table.shape[0] % static_cast<std::int32_t>(kQ4TileRows) != 0 ||
             table.qhigh != nullptr || table.scales == nullptr) {
-            throw std::invalid_argument("embedding staging: malformed Q4G64_F16S Q4N16K16 table");
+            throw std::invalid_argument("embedding staging: malformed Q4G64_F16S RowSplit table");
         }
         return;
     case QType::W8G32_F16S:
@@ -117,59 +110,24 @@ void copy_rows(const Weight& table, std::span<const std::int32_t> rows, std::siz
                         source + static_cast<std::uint64_t>(rows[slot]) * row_bytes, row_bytes);
         }
     } break;
-    case QType::Q4G64_F16S: {
-        // Row r's w-th 16-feature code word sits at word ((r/16)*W + w)*16 + r%16, and its
-        // group-g scale at ((r/16)*G + g)*16 + r%16: the compact table keeps that tiling.
-        const auto* source_words  = static_cast<const std::uint64_t*>(table.qdata);
-        const auto* source_scales = static_cast<const std::uint16_t*>(table.scales);
-        auto* words  = reinterpret_cast<std::uint64_t*>(compact);
-        auto* scales = reinterpret_cast<std::uint16_t*>(compact + geometry.scale_offset);
-        const std::uint64_t row_words = padded / kQ4WordFeatures;
-        const std::uint64_t groups    = padded / kQ4Group;
-        for (std::size_t slot = first; slot < last; ++slot) {
-            const auto row           = static_cast<std::uint64_t>(rows[slot]);
-            const std::uint64_t* src = source_words + (row / 16U) * row_words * 16U + row % 16U;
-            std::uint64_t* dst       = words + (slot / 16U) * row_words * 16U + slot % 16U;
-            for (std::uint64_t word = 0; word < row_words; ++word) {
-                dst[word * 16U] = src[word * 16U];
-            }
-            const std::uint16_t* src_scale =
-                source_scales + (row / 16U) * groups * 16U + row % 16U;
-            std::uint16_t* dst_scale = scales + (slot / 16U) * groups * 16U + slot % 16U;
-            for (std::uint64_t group = 0; group < groups; ++group) {
-                dst_scale[group * 16U] = src_scale[group * 16U];
-            }
-        }
-    } break;
+    case QType::Q4G64_F16S:
     case QType::W8G32_F16S: {
+        const std::uint64_t code_row_bytes =
+            table.qtype == QType::Q4G64_F16S ? padded / 2U : padded;
+        const std::uint64_t scale_row_bytes =
+            (padded / (table.qtype == QType::Q4G64_F16S ? kQ4Group : kW8Group)) * 2U;
         const auto* source_codes  = static_cast<const std::byte*>(table.qdata);
         const auto* source_scales = static_cast<const std::byte*>(table.scales);
-        const std::uint64_t scale_row_bytes = (padded / kW8Group) * 2U;
         for (std::size_t slot = first; slot < last; ++slot) {
             const auto row = static_cast<std::uint64_t>(rows[slot]);
-            std::memcpy(compact + slot * padded, source_codes + row * padded, padded);
+            std::memcpy(compact + slot * code_row_bytes, source_codes + row * code_row_bytes,
+                        code_row_bytes);
             std::memcpy(compact + geometry.scale_offset + slot * scale_row_bytes,
                         source_scales + row * scale_row_bytes, scale_row_bytes);
         }
     } break;
     default:
         throw std::logic_error("embedding staging: unsupported table encoding");
-    }
-}
-
-// Zero tile-padding rows [distinct,rows) of a compact Q4 table.
-void zero_q4_padding(const Weight& table, std::size_t distinct, std::size_t rows,
-                     std::byte* compact, const CompactGeometry& geometry) {
-    const std::uint64_t padded    = padded_features(table.shape[1]);
-    const std::uint64_t row_words = padded / kQ4WordFeatures;
-    const std::uint64_t groups    = padded / kQ4Group;
-    auto* words  = reinterpret_cast<std::uint64_t*>(compact);
-    auto* scales = reinterpret_cast<std::uint16_t*>(compact + geometry.scale_offset);
-    for (std::size_t slot = distinct; slot < rows; ++slot) {
-        std::uint64_t* dst = words + (slot / 16U) * row_words * 16U + slot % 16U;
-        for (std::uint64_t word = 0; word < row_words; ++word) { dst[word * 16U] = 0; }
-        std::uint16_t* dst_scale = scales + (slot / 16U) * groups * 16U + slot % 16U;
-        for (std::uint64_t group = 0; group < groups; ++group) { dst_scale[group * 16U] = 0; }
     }
 }
 
@@ -181,7 +139,7 @@ std::uint64_t embedding_stage_capacity_bytes(QType qtype, std::int32_t features,
         throw std::invalid_argument("embedding staging capacity needs positive features and ids");
     }
     const auto count = static_cast<std::uint64_t>(ids);
-    return slot_bytes(count) + compact_geometry(qtype, features, compact_rows(qtype, count)).bytes;
+    return slot_bytes(count) + compact_geometry(qtype, features, count).bytes;
 }
 
 EmbeddingStage stage_embedding_rows(std::span<const std::int32_t> ids, const Weight& table,
@@ -201,7 +159,7 @@ EmbeddingStage stage_embedding_rows(std::span<const std::int32_t> ids, const Wei
     std::sort(distinct.begin(), distinct.end());
     distinct.erase(std::unique(distinct.begin(), distinct.end()), distinct.end());
 
-    const std::uint64_t rows = compact_rows(table.qtype, distinct.size());
+    const std::uint64_t rows = distinct.size();
     const CompactGeometry geometry = compact_geometry(table.qtype, table.shape[1], rows);
     const std::uint64_t table_offset = slot_bytes(ids.size());
     const std::uint64_t bytes = table_offset + geometry.bytes;
@@ -218,7 +176,8 @@ EmbeddingStage stage_embedding_rows(std::span<const std::int32_t> ids, const Wei
     std::byte* compact = image.data() + table_offset;
     const std::size_t workers = std::clamp<std::size_t>(distinct.size() / kRowsPerWorker, 1,
                                                         kMaximumWorkers);
-    // Whole 16-row tiles per worker so no two workers write the same cache lines.
+    // Whole 16-row blocks per worker (16 scale rows fill whole cache lines) so no two workers
+    // write the same cache lines.
     const std::size_t share =
         static_cast<std::size_t>(align_up((distinct.size() + workers - 1) / workers, 16U));
     // jthread joins on unwinding, so a throwing launch cannot terminate the process.
@@ -233,9 +192,6 @@ EmbeddingStage stage_embedding_rows(std::span<const std::int32_t> ids, const Wei
     }
     copy_rows(table, distinct, 0, std::min(distinct.size(), share), compact, geometry);
     for (std::jthread& helper : helpers) { helper.join(); }
-    if (table.qtype == QType::Q4G64_F16S) {
-        zero_q4_padding(table, distinct.size(), static_cast<std::size_t>(rows), compact, geometry);
-    }
     return EmbeddingStage{.ids   = static_cast<std::int32_t>(ids.size()),
                           .rows  = static_cast<std::int32_t>(rows),
                           .bytes = bytes};
@@ -251,8 +207,7 @@ StagedEmbedding staged_embedding(const EmbeddingStage& stage, const Weight& tabl
     const auto rows = static_cast<std::uint64_t>(stage.rows);
     const CompactGeometry geometry = compact_geometry(table.qtype, table.shape[1], rows);
     const std::uint64_t table_offset = slot_bytes(static_cast<std::uint64_t>(stage.ids));
-    if (stage.bytes != table_offset + geometry.bytes ||
-        (table.qtype == QType::Q4G64_F16S && rows % kQ4TileRows != 0)) {
+    if (stage.bytes != table_offset + geometry.bytes) {
         throw std::invalid_argument("staged embedding: stage does not match the table encoding");
     }
     auto* base = static_cast<std::byte*>(device_image);

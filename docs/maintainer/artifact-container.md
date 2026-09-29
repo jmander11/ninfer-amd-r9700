@@ -54,9 +54,10 @@ stream (mapped-host bytes are copied from the slots by the host). It verifies th
 and sizes equal the reader descriptors before copying and publishes completion only after the
 stream is synchronized. Statistics report H2D and mapped-host bytes separately.
 
-No object is implicitly converted during loading. `Q4G64_F16S` accepts only
-`r9700-q4g64-n16-k16-v1`; old row-split Q4 artifacts are rejected and may be migrated only by the
-one-shot offline transcoder before startup. A descriptor's format and layout are immutable
+No object is implicitly converted during loading. Q4G64 Linear matrices bind only
+`r9700-q4g64-n16-k16-v1` and the Q4G64 token embedding binds only `row-split-k128-v1`; an artifact
+in another layout is rejected and may be migrated only by the offline transcoders
+(`transcode_q4_n16k16.py`, `transcode_embedding_rows.py`) before startup. A descriptor's format and layout are immutable
 persistent semantics. Exact byte layout is defined in `storage-layouts.md`; numeric reconstruction
 is defined in `tensor-formats.md`; the current target inventory and conversion gate are defined in
 `r9700-integer-artifact-candidate.md`.

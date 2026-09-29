@@ -159,9 +159,16 @@ Two further per-round costs were found:
   ceiling), 188.0 -> 188.4 without; `ninfer_bench` P512/G256 31.33 -> 31.25 ms/round, greedy
   tokens identical. `tools/smoke/serve_features.py` (structured output, forced tools) passes
   at C1 and C2.
-- The pinned-host Q4N16K16 token embedding costs 50 us (target) plus 16.5 us (drafter) per
-  round: one row gather touches 320 interleaved 128-byte lines over PCIe. A row-contiguous
-  host embedding layout is an artifact change.
+- The pinned-host Q4N16K16 token embedding cost 50 us (target) plus 16.5 us (drafter) per
+  round: one row gather touches 320 interleaved 128-byte lines over PCIe. The Q4G64 embedding
+  is now stored `row-split-k128-v1` (one contiguous 2,560-byte code run and 160-byte scale run
+  per row; `transcode_embedding_rows.py` revised `r9700-fp8lut4` losslessly, every other
+  payload byte-identical and the embedding's inverse permutation exact). The gather reads one
+  16-byte code chunk per 32 features. `ninfer_r9700_eager_qual` product-shape and pinned-host
+  (in place, staged, shifted MTP window) embedding checks pass exactly; greedy DFlash K7
+  tokens are identical to the tiled artifact. Kernel trace, P512/G128 C1 K7: target gather
+  ~50 -> ~7 us, drafter gather 16.5 -> 4.8 us; unprofiled P512/G256 31.264 -> 31.234 ms/round
+  (three interleaved pairs, loaded host).
 
 ## Batched DFlash drafting at C2..C4 (2026-09-28)
 

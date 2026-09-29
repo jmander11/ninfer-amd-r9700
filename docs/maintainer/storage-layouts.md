@@ -11,8 +11,8 @@ The encoded byte count is `product(shape) * word_bytes`.
 
 ## `row-split-k128-v1`
 
-This layout accepts rank-two grouped signed-integer matrices `[N,K]` in `Q5G64_F16S`,
-`Q6G64_F16S`, or `W8G32_F16S`. It pads K upward to 128 and stores three planes:
+This layout accepts rank-two grouped signed-integer matrices `[N,K]` in `Q4G64_F16S`,
+`Q5G64_F16S`, `Q6G64_F16S`, or `W8G32_F16S`. It pads K upward to 128 and stores three planes:
 
 1. low code plane at offset zero;
 2. optional high-bit plane at the next 256-byte boundary;
@@ -27,12 +27,14 @@ The registered group and plane widths are:
 
 | Format | group | low bytes/group | high bytes/group | scale bytes/group |
 |---|---:|---:|---:|---:|
+| `Q4G64_F16S` | 64 | 32 | 0 | 2 |
 | `Q5G64_F16S` | 64 | 32 | 8 | 2 |
 | `Q6G64_F16S` | 64 | 32 | 16 | 2 |
 | `W8G32_F16S` | 32 | 32 | 0 | 2 |
 
-The logical reconstruction is `float(code) * float(fp16_scale)` at each element. The R9700
-candidate uses W8G32 for every persistent quantized matrix and consumes these planes directly.
+The logical reconstruction is `float(code) * float(fp16_scale)` at each element. On the R9700,
+`Q4G64_F16S` uses this layout only for the row-gathered token embedding; W8G32 objects other than
+the tiled companion head use it.
 
 ## `r9700-q4g64-n16-k16-v1`
 
@@ -42,9 +44,9 @@ ordering each code plane as `[N/16][Kpad/64][4 K16 pairs][16 rows][8 bytes]` and
 `[N/16][Kpad/64][16 rows]`. Thus code pair `(row, group, pair)` is the little-endian u64 at
 `((((row/16)*groups+group)*4+pair)*16+(row%16))`; its scale is the u16 at
 `(((row/16)*groups+group)*16+(row%16))`. The code plane starts at zero and the scale plane begins at
-the next 256-byte boundary. This is the sole accepted persistent layout for `Q4G64_F16S`; legacy
-row-split Q4 descriptors are rejected. Conversion or the explicit offline transcoder writes this
-order once, and loading performs no repack.
+the next 256-byte boundary; plane sizes and offsets equal row-split Q4. This is the persistent
+layout of every `Q4G64_F16S` Linear matrix (the token embedding is row-split). Conversion or the
+explicit offline transcoders write this order once, and loading performs no repack.
 
 ## `r9700-w8g32-n16-k16-v1`
 

@@ -120,6 +120,7 @@ void test_registered_sizes() {
         tensor_encoded_size(direct, NumericFormat::FP32, {}) != 4 ||
         tensor_encoded_size(direct, NumericFormat::I32, shape_2) != 8 ||
         tensor_encoded_size(q4n16, NumericFormat::Q4G64_F16S, q4_shape) != 1088 ||
+        tensor_encoded_size(rows, NumericFormat::Q4G64_F16S, q4_shape) != 1088 ||
         tensor_encoded_size(rows, NumericFormat::Q5G64_F16S, q5_shape) != 528 ||
         tensor_encoded_size(rows, NumericFormat::Q6G64_F16S, q6_shape) != 516 ||
         tensor_encoded_size(rows, NumericFormat::W8G32_F16S, w8_shape) != 264 ||
@@ -135,9 +136,6 @@ void test_registered_sizes() {
         fp8_geometry.encoded_bytes != 520) {
         throw std::runtime_error("FP8 row-scaled geometry is wrong");
     }
-    expect_artifact_error(
-        [&] { (void)tensor_encoded_size(rows, NumericFormat::Q4G64_F16S, q4_shape); },
-        "Q4 format in obsolete row-split layout");
     expect_artifact_error(
         [&] { (void)tensor_encoded_size(w8n16, NumericFormat::Q4G64_F16S, q4_shape); },
         "Q4 format in W8 tiled layout");

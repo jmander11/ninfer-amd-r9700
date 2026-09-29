@@ -28,20 +28,18 @@ std::uint64_t align(std::uint64_t value, std::uint64_t alignment) {
     return (value + alignment - 1U) / alignment * alignment;
 }
 
-// r9700-q4g64-n16k16-v1: feature f of row r is nibble f%16 of the 8-byte word
-// ((r/16*G + f/64)*4 + f%64/16)*16 + r%16; the group-g FP16 scale is at (r/16*G + g)*16 + r%16.
+// row-split-k128-v1 Q4G64: feature f of row r is the low (even f) or high nibble of code byte
+// r*Kpad/2 + f/2; the group-g FP16 scale is at r*G + g.
 int q4_code(const std::uint8_t* codes, std::uint32_t groups, std::size_t row,
             std::uint32_t feature) {
-    const std::size_t word =
-        (((row / 16U) * groups + feature / 64U) * 4U + (feature % 64U) / 16U) * 16U + row % 16U;
-    const std::uint8_t byte = codes[word * 8U + (feature % 16U) / 2U];
+    const std::uint8_t byte = codes[row * groups * 32U + feature / 2U];
     const int nibble = (feature % 2U) == 0U ? (byte & 0x0f) : (byte >> 4U);
     return nibble >= 8 ? nibble - 16 : nibble;
 }
 
 std::uint16_t q4_scale(const std::uint16_t* scales, std::uint32_t groups, std::size_t row,
                        std::uint32_t group) {
-    return scales[((row / 16U) * groups + group) * 16U + row % 16U];
+    return scales[row * groups + group];
 }
 
 struct Table {
@@ -71,7 +69,7 @@ Table make_q4(std::int32_t vocabulary, std::int32_t features) {
     w.scales = table.payload.data() + scale_offset;
     w.scale_bytes = scale_bytes;
     w.qtype = QType::Q4G64_F16S;
-    w.layout = QuantLayout::Q4N16K16;
+    w.layout = QuantLayout::RowSplit;
     w.group_size = 64;
     w.group = 64;
     w.scale_dtype = DType::FP16;
@@ -198,7 +196,7 @@ void check_table(const Table& table, const std::string& label) {
         const ninfer::ops::EmbeddingStage stage =
             ninfer::ops::stage_embedding_rows(window, source, image);
         const std::size_t distinct = std::set<std::int32_t>(window.begin(), window.end()).size();
-        const std::size_t rows = source.qtype == QType::Q4G64_F16S ? align(distinct, 16) : distinct;
+        const std::size_t rows = distinct;
         require(stage.ids == static_cast<std::int32_t>(window.size()) &&
                     stage.rows == static_cast<std::int32_t>(rows) && stage.bytes <= capacity,
                 label + ": stage extent");
@@ -211,16 +209,6 @@ void check_table(const Table& table, const std::string& label) {
                         image.data() + stage.bytes,
                 label + ": staged view geometry");
         require_rows(source, staged, window, label);
-        if (source.qtype == QType::Q4G64_F16S) {
-            const auto padded = static_cast<std::uint32_t>(source.padded_shape[1]);
-            for (std::size_t slot = distinct; slot < rows; ++slot) {
-                for (std::uint32_t f = 0; f < static_cast<std::uint32_t>(source.shape[1]); ++f) {
-                    require(q4_code(static_cast<const std::uint8_t*>(staged.table.qdata),
-                                    padded / 64U, slot, f) == 0,
-                            label + ": Q4 tile padding is not zero");
-                }
-            }
-        }
         std::vector<std::byte> small(stage.bytes - 1U);
         bool rejected = false;
         try {
@@ -242,13 +230,13 @@ void check_table(const Table& table, const std::string& label) {
 
 int main() {
     try {
-        // Q4: 3 tiles, K padded 320 -> 384; enough distinct rows to split across workers is
-        // covered by the large table below.
-        check_table(make_q4(48, 320), "q4");
+        // Q4: K padded 320 -> 384, an odd vocabulary; enough distinct rows to split across
+        // workers is covered by the large table below.
+        check_table(make_q4(47, 320), "q4");
         check_table(make_q4(4096, 256), "q4-workers");
         check_table(make_w8(40, 200), "w8");
         check_table(make_bf16(30, 24), "bf16");
-        std::cout << "embedding_staging: PASS q4 w8 bf16 exact rows, tile padding, bounds\n";
+        std::cout << "embedding_staging: PASS q4 w8 bf16 exact rows, bounds\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "embedding_staging: FAIL: " << error.what() << '\n';

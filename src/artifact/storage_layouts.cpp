@@ -36,7 +36,7 @@ struct QuantGeometry {
 QuantGeometry quant_geometry(NumericFormat format) {
     switch (format) {
     case NumericFormat::Q4G64_F16S:
-        throw ArtifactError("row-split-k128-v1 does not accept Q4G64_F16S");
+        return {64, 32, 0};
     case NumericFormat::Q5G64_F16S:
         return {64, 32, 8};
     case NumericFormat::Q6G64_F16S:

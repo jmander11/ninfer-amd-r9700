@@ -16,8 +16,8 @@ namespace ninfer::ops {
  *   ideal[d,t] = dequantize(table)[ids[t],d].
  *
  * `ids` is contiguous I32 [T], `out` is contiguous BF16 [D,T], and every id is in
- * [0,vocab). `table` has logical shape [vocab,D] and is contiguous BF16_CTRL,
- * Q4G64_F16S Q4N16K16, or Q6G64_F16S/W8G32_F16S RowSplit with FP16 scales. Dense BF16 values are
+ * [0,vocab). `table` has logical shape [vocab,D] and is contiguous BF16_CTRL, or
+ * Q4G64_F16S/Q6G64_F16S/W8G32_F16S RowSplit (row-contiguous planes) with FP16 scales. Dense BF16 values are
  * copied bit-exactly. For
  * quantized tables, the oracle independently decodes each signed code and multiplies it by the
  * exact stored FP16 scale in FP64; the BF16 output is promoted and compared directly with that
@@ -42,14 +42,13 @@ void embedding(const Tensor& ids, const Weight& table, Tensor& out, hipStream_t 
  *
  * bit-exactly. The staging itself is an exact transform: its oracle compares the logical code and
  * scale (or BF16 value) of every staged slot's row with the source row. Supported tables are the
- * bound token-embedding encodings: BF16_CTRL Contiguous, Q4G64_F16S Q4N16K16 (compact rows padded
- * to the 16-row tile with zero rows) and W8G32_F16S RowSplit. `ids` is nonempty, may repeat, and
+ * bound token-embedding encodings: BF16_CTRL Contiguous and Q4G64_F16S/W8G32_F16S RowSplit. `ids` is nonempty, may repeat, and
  * every id is in [0,vocab). `image` must hold embedding_stage_capacity_bytes(table.qtype, D,
  * ids.size()). There is no device work.
  */
 struct EmbeddingStage {
     std::int32_t ids    = 0; // staged slots, one per id
-    std::int32_t rows   = 0; // compact-table rows, including tile padding
+    std::int32_t rows   = 0; // compact-table rows, one per distinct id
     std::uint64_t bytes = 0; // image prefix that the device copy must contain
 };
 

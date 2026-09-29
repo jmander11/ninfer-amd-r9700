@@ -332,13 +332,18 @@ ArtifactLoadPlan bind_artifact(artifact::Binder& binder, WeightsProfile weights_
     out.features     = features;
 
     // The embedding is only row-gathered, so it lives in pinned host memory and its VRAM goes to
-    // the KV pool: prompt rows are staged by the host, generated rows are read in place.
+    // the KV pool: prompt rows are staged by the host, generated rows are read in place over
+    // PCIe. Quantized tables are therefore stored row-contiguous (row-split), so a gathered row
+    // reads only its own contiguous code and scale bytes.
     const NumericFormat embedding_format = base_token_embedding_format(weights_profile);
+    const artifact::StorageLayout embedding_layout = embedding_format == NumericFormat::BF16
+        ? artifact::StorageLayout::ContiguousLeV1 : artifact::StorageLayout::RowSplitK128V1;
     out.token_embedding = WeightPlan{
         .object = artifact::bind_tensor(binder, "text/token_embedding", embedding_format,
-                                        {248320, 5120}, artifact::TensorPlacement::MappedHost),
+                                        embedding_layout, {248320, 5120},
+                                        artifact::TensorPlacement::MappedHost),
         .format = embedding_format,
-        .layout = artifact::storage_layout_for(embedding_format)};
+        .layout = embedding_layout};
     bind_r9700_text_layers(binder, out, weights_profile, fp8lut4_text);
     out.final_norm =
         artifact::bind_device_tensor(binder, "text/final_norm", NumericFormat::BF16, {5120});

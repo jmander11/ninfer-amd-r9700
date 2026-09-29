@@ -889,8 +889,9 @@ void qualify_w8_embedding_product_shape(hipStream_t stream) {
               << " resident_mib=" << resident_mib << " kernel_ms=" << milliseconds << '\n';
 }
 
-// Production Q4G64 N16K16 token embedding at the product shape. Selected rows are encoded from independent logical codes/scales; the oracle decodes those
-// logical values, never the tiled storage.
+// Production Q4G64 row-split token embedding at the product shape. Selected rows are encoded
+// from independent logical codes/scales; the oracle decodes those logical values, never the
+// stored planes.
 void qualify_q4_embedding_product_shape(hipStream_t stream) {
     using ninfer::DType;
     using ninfer::QType;
@@ -918,15 +919,12 @@ void qualify_q4_embedding_product_shape(hipStream_t stream) {
         for (std::uint32_t scale_group = 0; scale_group < groups; ++scale_group) {
             const float scale_value =
                 static_cast<float>(1U + (row + 5U * scale_group) % 9U) / 64.0F;
-            scales[((row >> 4U) * groups + scale_group) * 16U + (row & 15U)] =
+            scales[row * groups + scale_group] =
                 std::bit_cast<std::uint16_t>(static_cast<_Float16>(scale_value));
         }
         for (std::uint32_t feature = 0; feature < kHidden; ++feature) {
             const int code = static_cast<int>((row * 7U + feature * 3U) % 16U) - 8;
-            const std::size_t word =
-                (((row >> 4U) * groups + feature / group) * 4U + (feature % group) / 16U) * 16U +
-                (row & 15U);
-            auto& packed = codes[word * 8U + (feature % 16U) / 2U];
+            auto& packed = codes[row * (padded / 2U) + feature / 2U];
             packed = static_cast<std::uint8_t>(
                 (packed & ((feature & 1U) == 0U ? 0xf0U : 0x0fU)) |
                 ((static_cast<std::uint32_t>(code) & 0x0fU) << ((feature & 1U) * 4U)));
@@ -957,7 +955,7 @@ void qualify_q4_embedding_product_shape(hipStream_t stream) {
     table.scale_bytes = scale_elements * sizeof(std::uint16_t);
     table.qtype = QType::Q4G64_F16S;
     table.group_size = table.group = group;
-    table.layout = QuantLayout::Q4N16K16;
+    table.layout = QuantLayout::RowSplit;
     table.scale_dtype = DType::FP16;
     table.ndim = 2;
     table.n = table.shape[0] = table.padded_shape[0] = static_cast<std::int32_t>(kVocabPhysical);
@@ -983,7 +981,7 @@ void qualify_q4_embedding_product_shape(hipStream_t stream) {
               << " kernel_ms=" << milliseconds << '\n';
 }
 
-// Production Q4G64 N16K16 token embedding resident in pinned host memory, at the product shape,
+// Production Q4G64 row-split token embedding resident in pinned host memory, at the product shape,
 // through both routes the runtime uses: generated-token ids gathered on the device from the
 // table in place, and a prompt window staged by the host (distinct rows into a compact image),
 // copied to the device and gathered from there, including the shifted MTP window. Every row is
@@ -1042,14 +1040,11 @@ void qualify_q4_embedding_host_routes(hipStream_t stream) {
         if (encoded[row]) { continue; }
         encoded[row] = true;
         for (std::uint32_t scale_group = 0; scale_group < groups; ++scale_group) {
-            scales[((row >> 4U) * groups + scale_group) * 16U + (row & 15U)] =
+            scales[row * groups + scale_group] =
                 std::bit_cast<std::uint16_t>(static_cast<_Float16>(logical_scale(row, scale_group)));
         }
         for (std::uint32_t feature = 0; feature < kHidden; ++feature) {
-            const std::size_t word =
-                (((row >> 4U) * groups + feature / group) * 4U + (feature % group) / 16U) * 16U +
-                (row & 15U);
-            auto& packed = codes[word * 8U + (feature % 16U) / 2U];
+            auto& packed = codes[row * (padded / 2U) + feature / 2U];
             packed = static_cast<std::uint8_t>(
                 (packed & ((feature & 1U) == 0U ? 0xf0U : 0x0fU)) |
                 ((static_cast<std::uint32_t>(logical_code(row, feature)) & 0x0fU)
@@ -1075,7 +1070,7 @@ void qualify_q4_embedding_host_routes(hipStream_t stream) {
     table.scale_bytes = scale_elements * sizeof(std::uint16_t);
     table.qtype = QType::Q4G64_F16S;
     table.group_size = table.group = group;
-    table.layout = QuantLayout::Q4N16K16;
+    table.layout = QuantLayout::RowSplit;
     table.scale_dtype = DType::FP16;
     table.ndim = 2;
     table.n = table.shape[0] = table.padded_shape[0] = static_cast<std::int32_t>(kVocabPhysical);
@@ -1450,36 +1445,21 @@ void qualify_public_extended_paths(hipStream_t stream) {
     constexpr std::uint32_t q6_groups = embed_padded / 64;
     constexpr std::uint32_t w8_groups = embed_padded / 32;
     const std::vector<std::int32_t> embed_ids{15, 1, 9};
-    std::vector<std::uint8_t> q4_codes(embed_vocab * embed_padded / 2, 0);
-    std::vector<std::uint16_t> q4_scales(embed_vocab * q6_groups);
-    std::vector<std::uint8_t> q4_codes_row(q4_codes.size(), 0);
-    std::vector<std::uint16_t> q4_scales_row(q4_scales.size());
+    // Q4 row-split storage is the logical row order: codes [vocab][Kpad/2], scales [vocab][G].
+    std::vector<std::uint8_t> q4_codes_row(embed_vocab * embed_padded / 2, 0);
+    std::vector<std::uint16_t> q4_scales_row(embed_vocab * q6_groups);
     std::vector<std::uint8_t> q6_low(embed_vocab * q6_groups * 32, 0);
     std::vector<std::uint8_t> q6_high(embed_vocab * q6_groups * 16, 0);
     std::vector<std::uint16_t> q6_scales(embed_vocab * q6_groups);
     std::vector<std::uint8_t> w8_codes(embed_vocab * embed_padded);
     std::vector<std::uint16_t> w8_scales(embed_vocab * w8_groups);
-    for (std::size_t logical_group = 0; logical_group < q4_scales.size(); ++logical_group) {
-        const std::size_t row = logical_group / q6_groups;
-        const std::size_t group = logical_group % q6_groups;
-        const std::size_t scale_index =
-            ((row >> 4U) * q6_groups + group) * 16U + (row & 15U);
+    for (std::size_t logical_group = 0; logical_group < q4_scales_row.size(); ++logical_group) {
         const std::uint16_t scale = std::bit_cast<std::uint16_t>(static_cast<_Float16>(
             0.0625F * static_cast<float>(1 + logical_group % 4)));
         q4_scales_row[logical_group] = scale;
-        q4_scales[scale_index] = scale;
         for (std::uint32_t lane = 0; lane < 64; ++lane) {
             const int signed_code =
                 static_cast<int>((logical_group * 13 + lane * 3) % 16) - 8;
-            const std::size_t pair = lane / 16U;
-            const std::size_t within = lane % 16U;
-            const std::size_t word_index =
-                (((row >> 4U) * q6_groups + group) * 4U + pair) * 16U +
-                (row & 15U);
-            auto& packed = q4_codes[word_index * 8U + within / 2U];
-            packed = static_cast<std::uint8_t>(
-                packed | ((static_cast<std::uint32_t>(signed_code) & 0x0fU)
-                           << ((lane & 1U) * 4U)));
             auto& logical_packed = q4_codes_row[logical_group * 32U + lane / 2U];
             logical_packed = static_cast<std::uint8_t>(
                 logical_packed | ((static_cast<std::uint32_t>(signed_code) & 0x0fU)
@@ -1508,8 +1488,8 @@ void qualify_public_extended_paths(hipStream_t stream) {
         w8_codes[index] = static_cast<std::uint8_t>(
             static_cast<std::int8_t>(static_cast<int>((index * 11 + 7) % 255) - 127));
     }
-    DeviceBuffer<std::uint8_t> d_q4_codes(q4_codes.size());
-    DeviceBuffer<std::uint16_t> d_q4_scales(q4_scales.size());
+    DeviceBuffer<std::uint8_t> d_q4_codes(q4_codes_row.size());
+    DeviceBuffer<std::uint16_t> d_q4_scales(q4_scales_row.size());
     DeviceBuffer<std::uint8_t> d_q6_low(q6_low.size());
     DeviceBuffer<std::uint8_t> d_q6_high(q6_high.size());
     DeviceBuffer<std::uint16_t> d_q6_scales(q6_scales.size());
@@ -1517,8 +1497,8 @@ void qualify_public_extended_paths(hipStream_t stream) {
     DeviceBuffer<std::uint16_t> d_w8_scales(w8_scales.size());
     DeviceBuffer<std::int32_t> d_embed_ids(embed_ids.size());
     DeviceBuffer<hip_bfloat16> d_embed_output(embed_features * embed_rows);
-    copy_to_device(d_q4_codes, q4_codes);
-    copy_to_device(d_q4_scales, q4_scales);
+    copy_to_device(d_q4_codes, q4_codes_row);
+    copy_to_device(d_q4_scales, q4_scales_row);
     copy_to_device(d_q6_low, q6_low);
     copy_to_device(d_q6_high, q6_high);
     copy_to_device(d_q6_scales, q6_scales);
@@ -1532,7 +1512,7 @@ void qualify_public_extended_paths(hipStream_t stream) {
                                 static_cast<std::int32_t>(embed_rows)});
     Weight q4{};
     q4.qtype = QType::Q4G64_F16S;
-    q4.layout = QuantLayout::Q4N16K16;
+    q4.layout = QuantLayout::RowSplit;
     q4.ndim = 2;
     q4.n = q4.shape[0] = q4.padded_shape[0] = embed_vocab;
     q4.k = q4.shape[1] = embed_features;
@@ -1540,9 +1520,9 @@ void qualify_public_extended_paths(hipStream_t stream) {
     q4.group_size = q4.group = 64;
     q4.scale_dtype = DType::FP16;
     q4.qdata = d_q4_codes.get();
-    q4.qdata_bytes = q4_codes.size();
+    q4.qdata_bytes = q4_codes_row.size();
     q4.scales = d_q4_scales.get();
-    q4.scale_bytes = q4_scales.size() * sizeof(std::uint16_t);
+    q4.scale_bytes = q4_scales_row.size() * sizeof(std::uint16_t);
     q4.payload_bytes = ((q4.qdata_bytes + 255U) / 256U) * 256U + q4.scale_bytes;
     ninfer::ops::embedding(embed_ids_tensor, q4, embed_output_tensor, stream);
     HIP_CHECK(hipStreamSynchronize(stream));
@@ -1573,10 +1553,10 @@ void qualify_public_extended_paths(hipStream_t stream) {
     } catch (const std::invalid_argument&) {
     }
     malformed_q4 = q4;
-    malformed_q4.layout = QuantLayout::RowSplit;
+    malformed_q4.layout = QuantLayout::Q4N16K16;
     try {
         ninfer::ops::embedding(embed_ids_tensor, malformed_q4, embed_output_tensor, stream);
-        fail("public Q4 embedding accepted the retired RowSplit layout");
+        fail("public Q4 embedding accepted the retired Q4N16K16 layout");
     } catch (const std::invalid_argument&) {
     }
     Tensor aliased_q4_output(d_q4_codes.get(), DType::BF16,

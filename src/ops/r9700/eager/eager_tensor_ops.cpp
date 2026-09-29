@@ -701,13 +701,13 @@ void embedding(const Tensor& ids, const Weight& table, Tensor& output, hipStream
     } break;
     case QType::Q4G64_F16S: {
         const auto padded = align_up_i32(table.shape[1], 128, "embedding");
-        if (table.layout != QuantLayout::Q4N16K16 || table.group_size != 64 ||
+        if (table.layout != QuantLayout::RowSplit || table.group_size != 64 ||
             table.group != 64 ||
             table.scale_dtype != DType::FP16 || table.padded_shape[0] != table.shape[0] ||
-            table.padded_shape[1] != padded || table.shape[0] % 16 != 0 ||
+            table.padded_shape[1] != padded ||
             table.qdata == nullptr || table.qhigh != nullptr || table.high_plane_bytes != 0 ||
             table.scales == nullptr) {
-            throw std::invalid_argument("embedding: malformed Q4G64_F16S Q4N16K16 table");
+            throw std::invalid_argument("embedding: malformed Q4G64_F16S RowSplit table");
         }
         const std::uint64_t code_bytes = checked_mul(
             vocabulary, static_cast<std::uint64_t>(padded / 2), "embedding");
