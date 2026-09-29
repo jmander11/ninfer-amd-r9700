@@ -38,6 +38,10 @@ FP8LUT4 artifact was admitted; it remains in git history.
   fused GDN pair stays batch-1 (C>1 split path is weight-bound at the same cost).
 - [x] `DFLASH-K3-ROUTES` Closed 2026-09-28: T4 drafter cells and the W4 FP8LUT4 GDN pair;
   C1 K3 33.1 -> 30.6 ms/round.
+- [ ] `DECODE-BANDWIDTH` Decode steps stream weights at ~500-555 GB/s against the 636 GB/s read
+  peak. Attribute a whole C1 decode step (plain T1 and production DFlash K7) into weight
+  streaming, small kernels, launch gaps and tails with achieved bandwidth per kernel family, then
+  optimize whatever part of the gap is recoverable (Layer 0-3 procedure, FP64 oracle, A/B).
 - [ ] `CLOCKS-README` [user-gated; `LONGCTX-PREFILL` is closed] Matched README benchmarks at stock
   clocks and at the user's undervolted/higher-clock setting.
 - [ ] `MIXED-PREFILL-DECODE` [final item; changes the product contract] Maximum aggregate
