@@ -6,7 +6,10 @@ import unittest
 from pathlib import Path
 
 from tools.bench.run_ninfer_bench_matrix import (
+    DECODE_ATTENTION_PROFILE,
+    PACKED_DECODE_MIN_CONTEXT,
     REPORT_SCHEMA_VERSION,
+    SPLIT512_MIN_CONTEXT,
     PHASE_TIMING_SEMANTICS,
     R9700_KV_PLANE_LAYOUTS,
     BenchCase,
@@ -85,10 +88,10 @@ class BenchMatrixTest(unittest.TestCase):
                         "q4_prefill_cta_profile":
                             "m64n128-pingpong-n16-k16-scalar-base-production",
                         "w8_activation_bits": 16,
-                        "fp8_qk_wmma_enabled": True,
-                        "fp8_qk_wmma_profile": "t1-ge64-t2-ge320-t3plus-stream-v1",
-                        "fp8_qk_wmma_t1_min_context": 64,
-                        "fp8_qk_wmma_t2_min_context": 320,
+                        "split512_enabled": True,
+                        "decode_attention_profile": DECODE_ATTENTION_PROFILE,
+                        "packed_decode_min_context": PACKED_DECODE_MIN_CONTEXT,
+                        "split512_min_context": SPLIT512_MIN_CONTEXT,
                         "xattention_qualification": False,
                         "draft_tokens": 5,
                         "spec": "mtp",
@@ -177,9 +180,10 @@ class BenchMatrixTest(unittest.TestCase):
             "m64n128-pingpong-n16-k16-scalar-base-production"
         )
         assert row["w8_activation_bits"] == 16
-        assert row["fp8_qk_wmma_enabled"] is True
-        assert row["fp8_qk_wmma_t1_min_context"] == 64
-        assert row["fp8_qk_wmma_t2_min_context"] == 320
+        assert row["split512_enabled"] is True
+        assert row["decode_attention_profile"] == DECODE_ATTENTION_PROFILE
+        assert row["packed_decode_min_context"] == PACKED_DECODE_MIN_CONTEXT
+        assert row["split512_min_context"] == SPLIT512_MIN_CONTEXT
         assert row["xattention_qualification"] is False
         assert row["xattention_profile"] is None
         assert row["host_to_device_bytes"] == 17_400_000_000
