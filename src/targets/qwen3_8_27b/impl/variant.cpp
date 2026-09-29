@@ -2657,6 +2657,20 @@ QType Variant::dflash_matrix_qtype(WeightsProfile profile) {
     throw std::invalid_argument("invalid R9700 target DFlash matrix profile");
 }
 
+QType Variant::token_embedding_qtype(WeightsProfile profile) {
+    validate_profile(profile);
+    switch (token_embedding_format(profile)) {
+    case artifact::NumericFormat::BF16:
+        return QType::BF16_CTRL;
+    case artifact::NumericFormat::Q4G64_F16S:
+        return QType::Q4G64_F16S;
+    case artifact::NumericFormat::W8G32_F16S:
+        return QType::W8G32_F16S;
+    default:
+        throw std::logic_error("R9700 token embedding format has no staging encoding");
+    }
+}
+
 std::size_t Variant::linear_workspace_capacity_bytes(WeightsProfile profile,
                                                      std::int32_t tokens) {
     validate_profile(profile);

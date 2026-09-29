@@ -707,6 +707,8 @@ struct LoadSummary {
     double upload_seconds              = 0.0;
     std::uint64_t artifact_bytes_read  = 0;
     std::uint64_t host_to_device_bytes = 0;
+    // Weights materialized in pinned host memory and read by kernels in place.
+    std::uint64_t mapped_host_bytes    = 0;
     std::uint64_t peak_staging_bytes   = 0;
     std::size_t tensor_count           = 0;
     std::size_t resource_count         = 0;

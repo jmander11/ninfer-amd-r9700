@@ -921,7 +921,7 @@ that server instance.
 
 | Event | Contents |
 |---|---|
-| `server_start` | target/weights identity and artifact, resolved Engine, compile-bound Text-prefill/XAttention identity, registered thinking/non-thinking sampler defaults plus process overrides, thinking-history defaults, weights/sequence/workspace/request-transient arenas, KV sizing ledger, pinned-host KV RAM capacity/occupancy, Device Graph observed/allowance bytes, HIP/GPU environment, and redacted argv |
+| `server_start` | target/weights identity and artifact (including `mapped_host_bytes`, the weights held in pinned host memory), resolved Engine, compile-bound Text-prefill/XAttention identity, registered thinking/non-thinking sampler defaults plus process overrides, thinking-history defaults, weights/sequence/workspace/request-transient arenas, KV sizing ledger, pinned-host KV RAM capacity/occupancy, Device Graph observed/allowance bytes, HIP/GPU environment, and redacted argv |
 | `request_start` | protocol, resolved sampler and seed (including `p_less`), thinking modes, Responses semantic-change flag, output budget, stream/message/tool shape |
 | `request_rejected` | parsed request shape, media-item count, `phase: "prepare"`, and the exact HTTP status/type/code/parameter/message for a synchronous preparation rejection |
 | `request_done` | finish reason, prompt/completion/cache/computed-prefill tokens, prefix reuse path, `reuse_source` (`none` / `vram_resident` / `host_ram` / `host_disk`), `context_checkpoint` (`restored_tokens` / `captured_tokens`), this request's unrounded phase clocks, `recovery` totals (including the true `cycle_exclusions`), complete speculative-decoding counters, `tool_call_count`, and `ignored_qwen_tool_call_names` (empty unless a tools-off completion contained parseable Qwen `<tool_call>` markup). Process KV occupancy and lifetime tier counters are not on this event |
@@ -1007,7 +1007,8 @@ requests and retained prefixes. Both are represented with 64-token pages interna
 sequence can never cross the exact `--max-context` frontier. `--kv-capacity N` requests an explicit
 capacity; `--kv-capacity auto` chooses the largest legal capacity that fits the memory remaining
 after weights are loaded, leaving `--kv-capacity-headroom` MiB free (default 64; raise it when a
-desktop or another process shares the GPU). When omitted it follows
+desktop or another process shares the GPU). The token embedding is held in pinned host memory, not
+VRAM. When omitted it follows
 `--max-context`, preserving one full-length request's capacity. The shared pool is fixed at startup
 and is not divided evenly among request lanes. `--kv-ram-capacity` is a separate pinned-host budget
 in MiB for completed prefix bundles and does not change GPU pool sizing. One long MTP chat with five

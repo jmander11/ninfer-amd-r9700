@@ -116,6 +116,8 @@ Q4_ACTIVATION_PROFILE := ../../src/ops/r9700/linear/r9700_q4_activation_profile.
 EAGER_IMPL := ../../src/ops/r9700/eager/eager_ops.hip
 EAGER_HEADER := ../../src/ops/r9700/eager/eager_ops.h
 EAGER_TENSOR_IMPL := ../../src/ops/r9700/eager/eager_tensor_ops.cpp
+EAGER_STAGING_IMPL := ../../src/ops/r9700/eager/embedding_staging.cpp
+EAGER_PUBLIC_HEADER := ../../include/ninfer/ops/embedding.h
 MTP_PACK_HEADER := ../../include/ninfer/ops/mtp_pack.h
 GDN_IMPL := ../../src/ops/r9700/gdn/gdn_ops.hip
 GDN_HEADER := ../../src/ops/r9700/gdn/gdn_ops.h
@@ -237,10 +239,12 @@ $(LINEAR_TARGET): $(LINEAR_SOURCE) $(LINEAR_IMPL) $(LINEAR_HEADER) $(LINEAR_TENS
 		$(HIP_DEVICE_IMPL) $(CORE_DTYPE_IMPL) $(CORE_TENSOR_IMPL) $(LDFLAGS) -o $@
 
 $(EAGER_TARGET): $(EAGER_SOURCE) $(EAGER_IMPL) $(EAGER_HEADER) $(EAGER_TENSOR_IMPL) $(MTP_PACK_HEADER) \
+	$(EAGER_STAGING_IMPL) $(EAGER_PUBLIC_HEADER) \
 	$(HIP_DEVICE_IMPL) $(CORE_DTYPE_IMPL) $(CORE_TENSOR_IMPL) Makefile
 	mkdir -p $(BUILD_DIR)
 	$(HIPCC) $(CXXFLAGS) -I../../include $(EAGER_SOURCE) $(EAGER_IMPL) $(EAGER_TENSOR_IMPL) \
-		$(HIP_DEVICE_IMPL) $(CORE_DTYPE_IMPL) $(CORE_TENSOR_IMPL) $(LDFLAGS) -o $@
+		$(EAGER_STAGING_IMPL) $(HIP_DEVICE_IMPL) $(CORE_DTYPE_IMPL) $(CORE_TENSOR_IMPL) \
+		$(LDFLAGS) -pthread -o $@
 
 $(RMSNORM_PREFILL_TARGET): $(RMSNORM_PREFILL_SOURCE) $(EAGER_IMPL) $(EAGER_HEADER) Makefile
 	mkdir -p $(BUILD_DIR)

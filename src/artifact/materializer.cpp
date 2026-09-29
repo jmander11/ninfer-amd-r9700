@@ -6,6 +6,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <cstring>
 #include <deque>
 #include <exception>
 #include <future>
@@ -162,6 +163,8 @@ struct CopyRange {
     std::uint64_t source_begin = 0;
     std::uint64_t source_end   = 0;
     std::byte* destination     = nullptr;
+    // Mapped host placements are copied from the staging slot by the host; the rest go H2D.
+    bool host = false;
 };
 
 struct ReadSpan {
@@ -228,8 +231,9 @@ MaterializedArtifact materialize(const Reader& reader, const MaterializationPlan
     }
 
     std::vector<CopyRange> ranges;
-    ranges.reserve(plan.device_objects.size());
+    ranges.reserve(plan.device_objects.size() + plan.mapped_host_objects.size());
     std::uint64_t copied         = 0;
+    std::uint64_t host_copied    = 0;
     std::uint64_t last_published = 0;
     std::uint64_t total          = 0;
     for (const DeviceMaterialization& placement : plan.device_objects) {
@@ -253,6 +257,42 @@ MaterializedArtifact materialize(const Reader& reader, const MaterializationPlan
         total = checked_add(total, placement.bytes, "artifact tensor byte count overflows u64");
     }
     if (ranges.empty()) { throw ArtifactError("materialization plan has no device tensors"); }
+    if (!plan.mapped_host_objects.empty()) {
+        const std::uint64_t host_capacity = plan.mapped_host_capacity_bytes;
+        if (host_capacity == 0 || host_capacity > static_cast<std::uint64_t>(SIZE_MAX)) {
+            throw ArtifactError("artifact mapped host backing size is invalid");
+        }
+        out.mapped_host_ = std::make_unique<PinnedHostBuffer>(
+            static_cast<std::size_t>(host_capacity), Reader::direct_io_alignment);
+        auto* base = static_cast<std::byte*>(out.mapped_host_->data());
+        // Kernels read these tensors through the same pointer the host uses.
+        void* device_address = nullptr;
+        HIP_CHECK(hipHostGetDevicePointer(&device_address, base, 0));
+        if (device_address != base) {
+            throw ArtifactError("mapped host backing has a different device address");
+        }
+        for (const DeviceMaterialization& placement : plan.mapped_host_objects) {
+            const PayloadSpan payload =
+                reader.payload(reader.objects().at(placement.object.index));
+            if (payload.data.size() != placement.bytes || placement.bytes > host_capacity ||
+                placement.offset > host_capacity - placement.bytes ||
+                placement.offset % placement.alignment != 0) {
+                throw ArtifactError("mapped host materialization plan does not match artifact payload");
+            }
+            std::byte* destination = base + placement.offset;
+            out.objects_.at(placement.object.index).device = destination;
+            ranges.push_back(CopyRange{
+                .source_begin = payload.absolute_offset,
+                .source_end   = checked_add(payload.absolute_offset, placement.bytes,
+                                            "artifact tensor source range overflows u64"),
+                .destination  = destination,
+                .host         = true,
+            });
+            total = checked_add(total, placement.bytes, "artifact tensor byte count overflows u64");
+            out.stats_.mapped_host_bytes += placement.bytes;
+        }
+        out.stats_.tensor_count += plan.mapped_host_objects.size();
+    }
     std::sort(ranges.begin(), ranges.end(), [](const CopyRange& a, const CopyRange& b) {
         return a.source_begin < b.source_begin;
     });
@@ -345,10 +385,18 @@ MaterializedArtifact materialize(const Reader& reader, const MaterializationPlan
             const std::uint64_t copy_end   = std::min(chunk_end, range.source_end);
             if (copy_begin < copy_end) {
                 const auto amount = static_cast<std::size_t>(copy_end - copy_begin);
-                HIP_CHECK(hipMemcpyAsync(
-                    range.destination + static_cast<std::size_t>(copy_begin - range.source_begin),
-                    slot.data() + static_cast<std::size_t>(copy_begin - chunk.source),
-                    amount, hipMemcpyHostToDevice, device.load_stream));
+                std::byte* destination =
+                    range.destination + static_cast<std::size_t>(copy_begin - range.source_begin);
+                const std::byte* source =
+                    slot.data() + static_cast<std::size_t>(copy_begin - chunk.source);
+                if (range.host) {
+                    std::memcpy(destination, source, amount);
+                    host_copied =
+                        checked_add(host_copied, amount, "artifact copied byte count overflows u64");
+                } else {
+                    HIP_CHECK(hipMemcpyAsync(destination, source, amount, hipMemcpyHostToDevice,
+                                             device.load_stream));
+                }
                 copied = checked_add(copied, amount, "artifact copied byte count overflows u64");
             }
             if (range.source_end <= chunk_end) {
@@ -375,7 +423,10 @@ MaterializedArtifact materialize(const Reader& reader, const MaterializationPlan
     if (copied != total || next_range != ranges.size()) {
         throw ArtifactError("direct materialization did not cover every tensor byte");
     }
-    out.stats_.h2d_bytes = copied;
+    if (host_copied != out.stats_.mapped_host_bytes) {
+        throw ArtifactError("direct materialization did not cover every mapped host byte");
+    }
+    out.stats_.h2d_bytes = copied - host_copied;
     out.stats_.upload_seconds =
         std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
     if (progress != nullptr && progress->callback) { progress->callback("weights", copied, total); }

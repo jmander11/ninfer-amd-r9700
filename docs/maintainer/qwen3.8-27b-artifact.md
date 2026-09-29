@@ -57,6 +57,34 @@ selective-protected tiled-head DFlash donor. It copies represented payloads exac
 validates inventories, and reads back the complete output against its conversion receipt.
 `--validate PATH` repeats that check when needed. These identities do not promote a recipe.
 
+### Token embedding placement
+
+Every profile binds `text/token_embedding` with `TensorPlacement::MappedHost`: the binder plans it
+into one pinned host backing (not the device arena), and the materializer fills it from the same
+direct-I/O staging slots as device tensors and requires its device address to equal its host
+address. The load summary reports it as `mapped_host_bytes` (CLI `weight pinned host`,
+`server_start.artifact.mapped_host_bytes`); the freed VRAM (675,430,400 bytes for the Q4G64
+N16K16 table, 1,350,860,800 for W8G32) goes to the automatic KV pool. `text/output_head` and all
+other tensors stay in VRAM. Stored bytes and layouts are unchanged; there is no runtime repacking.
+
+The table is only row-gathered, through two routes with bit-identical results
+(`hip_bfloat16(code * fp16 scale)`, or the stored BF16 value):
+
+- Generated tokens (ordinary decode, DFlash/MTP verify, the DFlash drafter block, MTP draft and
+  bridge steps, and the final MTP prefill column that holds the sampled token) have device-only
+  ids inside captured Device Graphs, so `ops::embedding` reads their rows in place through the
+  table's fixed unified address. At most a few dozen rows are read per round.
+- Prompt tokens are known on the host. Reading a Q4 N16K16 row in place touches one 8-byte word
+  per 128-byte line (about 16x PCIe amplification), which cost 1.0% of C1 8K prefill. Instead the
+  Program-owned `PromptEmbeddingStaging` gathers a prefill window's distinct rows on the host
+  (`ops::stage_embedding_rows`, into a compact table of the same format plus one I32 slot per
+  token), copies that image on the load stream into a fixed device region sized for
+  `min(prefill_chunk, max_context) + 1` ids, and `ops::embedding` gathers the chunk and the
+  shifted MTP window from it. After a chunk is enqueued, and while it runs, the host stages the
+  next window of the same prompt and starts its copy behind the chunk's reads (an event recorded
+  after the last staged read), so only a prompt's first chunk stages synchronously. A chunk
+  reuses the staged image only if its window is a prefix of the staged ids.
+
 ### Selected local compact deployment
 
 The admitted production deployment is the FP8LUT4 Text recipe `r9700-fp8lut4` (below, GPTQ

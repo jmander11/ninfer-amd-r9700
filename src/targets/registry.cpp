@@ -173,6 +173,7 @@ ConstructedTarget construct_registered(const EngineOptions& options, DeviceConte
     summary.upload_seconds       = stats.upload_seconds;
     summary.artifact_bytes_read  = stats.file_bytes;
     summary.host_to_device_bytes = stats.h2d_bytes;
+    summary.mapped_host_bytes    = stats.mapped_host_bytes;
     summary.peak_staging_bytes   = stats.peak_staging_bytes;
     summary.tensor_count         = stats.tensor_count;
     summary.resource_count       = stats.resource_count;

@@ -59,9 +59,22 @@ CUDA paths, NVFP4 and additional model targets are excluded by the product contr
   exclusion of an attempt's own captures from reclaim targets, which upstream lacks).
 - Ported with R9700 measurement: `724de290` causal-conv crossover, here T>=32 rather than T>8
   (`bfbec72c`; the AMD serial/tiled crossover lies between 16 and 32 at C=10240); `f3c15618`
-  headroom half only (`4b4588f9`, `--kv-capacity-headroom`, default 64 MiB). Its host-resident
-  token embedding is not ported: in the Q4G64 N16K16 tile layout the PCIe row gather cost 1.0%
-  C1 prefill for about 24K tokens of C4 capacity.
+  headroom half (`4b4588f9`, `--kv-capacity-headroom`, default 64 MiB).
+- Ported with an R9700 prompt route: `f3c15618` host-resident token embedding
+  (`TensorPlacement::MappedHost`, `mapped_host_bytes` in the load summary, CLI and `server_start`).
+  A direct port had kernels read every row from pinned memory; in the Q4G64 N16K16 tile layout a
+  row touches one 8-byte word per 128-byte line, and that 16x PCIe read amplification cost 1.0% C1
+  8K prefill (3385 -> 3351 tok/s) with decode unchanged. The port keeps the in-place gather only
+  for generated tokens (device ids in captured Device Graphs: decode, verify, drafter, MTP steps).
+  Prompt rows are host-staged: the host gathers a window's distinct rows into a compact image of
+  the same format (`ops::stage_embedding_rows`), the load stream copies it into a fixed
+  persistent region, and the existing gather kernel reads it there; the next chunk's window is
+  staged and copied while the current chunk runs, so only a prompt's first chunk stages
+  synchronously. The materializer fills the pinned backing from the direct-I/O slots rather than
+  from the page cache. Measured with the card on a chipset PCIe x4 link: greedy tokens
+  identical (DFlash, MTP, 8K multi-chunk, vision); C1 8K prefill at chunk 2048 3389 -> 3385 tok/s
+  (noise), at chunk 4096 3257 -> 3243 (-0.4%, the synchronous first chunk is half the prompt);
+  decode unchanged; C4 DFlash auto capacity 525632 -> 550528 tokens.
 - Not ported: `45bef20a` (report instead of fail on the device-wide graph memory delta). R9700 GPU
   jobs are serialized by the shared GPU lock, and the startup check is the only calibration guard
   for the graph allowance here.

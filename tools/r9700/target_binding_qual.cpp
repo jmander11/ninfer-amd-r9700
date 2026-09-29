@@ -93,7 +93,8 @@ ArtifactLoadPlan bind_complete(const std::filesystem::path& path,
     ArtifactLoadPlan plan = ninfer::targets::qwen3_8_27b::detail::bind_artifact(
         binder, WeightsProfile::R9700W8G32Candidate, features);
     require(plan.materialization.object_count == 1124 &&
-                plan.materialization.device_objects.size() == 1118 &&
+                plan.materialization.device_objects.size() == 1117 &&
+                plan.materialization.mapped_host_objects.size() == 1 &&
                 plan.materialization.host_objects.size() == 6 &&
                 plan.materialization.device_capacity_bytes > 0,
             "candidate materialization plan is incomplete");
@@ -149,7 +150,8 @@ ArtifactLoadPlan bind_evaluation(const std::filesystem::path& path,
     ArtifactLoadPlan plan = ninfer::targets::qwen3_8_27b::detail::bind_artifact(
         binder, profile, features);
     require(plan.materialization.object_count == 1124 &&
-                plan.materialization.device_objects.size() == 1118 &&
+                plan.materialization.device_objects.size() == 1117 &&
+                plan.materialization.mapped_host_objects.size() == 1 &&
                 plan.materialization.host_objects.size() == 6,
             "evaluation materialization plan is incomplete");
 
@@ -220,10 +222,12 @@ ArtifactLoadPlan bind_dflash_q4_evaluation(const std::filesystem::path& path,
         binder, profile, features);
     require(plan.materialization.object_count == 1190,
             "DFlash2 evaluation materialization object count differs");
-    if (plan.materialization.device_objects.size() != 1172) {
+    if (plan.materialization.device_objects.size() != 1171 ||
+        plan.materialization.mapped_host_objects.size() != 1) {
         throw std::runtime_error(
-            "DFlash2 evaluation device-object count differs: got " +
-            std::to_string(plan.materialization.device_objects.size()));
+            "DFlash2 evaluation device/mapped-host object count differs: got " +
+            std::to_string(plan.materialization.device_objects.size()) + "/" +
+            std::to_string(plan.materialization.mapped_host_objects.size()));
     }
     require(plan.materialization.host_objects.size() == 6,
             "DFlash2 evaluation host-object count differs");
@@ -332,7 +336,8 @@ ArtifactLoadPlan bind_w8_bf16_embedding(const std::filesystem::path& path) {
     ArtifactLoadPlan plan = ninfer::targets::qwen3_8_27b::detail::bind_artifact(
         binder, WeightsProfile::R9700W8Bf16EmbeddingEvaluation, features);
     require(plan.materialization.object_count == 1124 &&
-                plan.materialization.device_objects.size() == 1118 &&
+                plan.materialization.device_objects.size() == 1117 &&
+                plan.materialization.mapped_host_objects.size() == 1 &&
                 plan.materialization.host_objects.size() == 6,
             "W8/BF16-embedding materialization plan is incomplete");
     require_w8_workspace_profile(WeightsProfile::R9700W8Bf16EmbeddingEvaluation);
@@ -421,7 +426,8 @@ ArtifactLoadPlan bind_w8_bf16_attention_vo(const std::filesystem::path& path) {
     ArtifactLoadPlan plan = ninfer::targets::qwen3_8_27b::detail::bind_artifact(
         binder, WeightsProfile::R9700W8Bf16AttentionValueOutputEvaluation, features);
     require(plan.materialization.object_count == 1124 &&
-                plan.materialization.device_objects.size() == 1118 &&
+                plan.materialization.device_objects.size() == 1117 &&
+                plan.materialization.mapped_host_objects.size() == 1 &&
                 plan.materialization.host_objects.size() == 6,
             "W8/BF16-attention materialization plan is incomplete");
     require_w8_workspace_profile(WeightsProfile::R9700W8Bf16AttentionValueOutputEvaluation);
@@ -510,7 +516,8 @@ ArtifactLoadPlan bind_w8_bf16_attention_qk(const std::filesystem::path& path) {
     ArtifactLoadPlan plan = ninfer::targets::qwen3_8_27b::detail::bind_artifact(
         binder, WeightsProfile::R9700W8Bf16AttentionQueryKeyEvaluation, features);
     require(plan.materialization.object_count == 1124 &&
-                plan.materialization.device_objects.size() == 1118 &&
+                plan.materialization.device_objects.size() == 1117 &&
+                plan.materialization.mapped_host_objects.size() == 1 &&
                 plan.materialization.host_objects.size() == 6,
             "W8/BF16-attention-QK materialization plan is incomplete");
     require_w8_workspace_profile(WeightsProfile::R9700W8Bf16AttentionQueryKeyEvaluation);
@@ -599,7 +606,8 @@ ArtifactLoadPlan bind_w8_bf16_gdn_qk(const std::filesystem::path& path) {
     ArtifactLoadPlan plan = ninfer::targets::qwen3_8_27b::detail::bind_artifact(
         binder, WeightsProfile::R9700W8Bf16GdnQueryKeyEvaluation, features);
     require(plan.materialization.object_count == 1124 &&
-                plan.materialization.device_objects.size() == 1118 &&
+                plan.materialization.device_objects.size() == 1117 &&
+                plan.materialization.mapped_host_objects.size() == 1 &&
                 plan.materialization.host_objects.size() == 6,
             "W8/BF16-GDN-QK materialization plan is incomplete");
     require_w8_workspace_profile(WeightsProfile::R9700W8Bf16GdnQueryKeyEvaluation);
@@ -715,9 +723,11 @@ ArtifactLoadPlan bind_fp8_q4_hybrid(const std::filesystem::path& path) {
     ArtifactLoadPlan plan = ninfer::targets::qwen3_8_27b::detail::bind_artifact(
         binder, WeightsProfile::R9700Q4G64Fp8FourRoleN16K16Evaluation, features);
     require(plan.materialization.object_count == 1124 &&
-                plan.materialization.device_objects.size() == 1118 &&
+                plan.materialization.device_objects.size() == 1117 &&
+                plan.materialization.mapped_host_objects.size() == 1 &&
                 plan.materialization.host_objects.size() == 6 &&
-                plan.materialization.device_capacity_bytes == 21'540'531'712ULL,
+                plan.materialization.device_capacity_bytes == 20'865'101'312ULL &&
+                plan.materialization.mapped_host_capacity_bytes == 675'430'400ULL,
             "FP8/Q4 hybrid materialization plan or aligned arena differs");
     require(plan.bindings.token_embedding.format == NumericFormat::Q4G64_F16S &&
                 plan.bindings.output_head.format == NumericFormat::Q4G64_F16S &&
@@ -793,7 +803,8 @@ int main(int argc, char** argv) {
             };
             const auto plan = bind(reader);
             require(plan.materialization.object_count == (companion ? 1190U : 1124U) &&
-                    (companion || plan.materialization.device_objects.size() == 1118U) &&
+                    (companion || plan.materialization.device_objects.size() == 1117U) &&
+                    plan.materialization.mapped_host_objects.size() == 1U &&
                     plan.bindings.token_embedding.format == NumericFormat::Q4G64_F16S &&
                     plan.bindings.output_head.format == NumericFormat::Q4G64_F16S,
                     "capped base materialization/endpoints differ");
@@ -859,8 +870,10 @@ int main(int argc, char** argv) {
             };
             const auto plan = bind(argv[2]);
             require(plan.materialization.object_count == 1124 &&
-                    plan.materialization.device_objects.size() == 1118 &&
-                    plan.materialization.device_capacity_bytes == 17'665'277'440ULL,
+                    plan.materialization.device_objects.size() == 1117 &&
+                    plan.materialization.mapped_host_objects.size() == 1 &&
+                    plan.materialization.device_capacity_bytes == 16'314'416'640ULL &&
+                    plan.materialization.mapped_host_capacity_bytes == 1'350'860'800ULL,
                     "protected exact inventory/arena differs");
             namespace selective = ninfer::targets::qwen3_8_27b::detail::selective_protected;
             for (std::size_t layer = 0; layer < 64; ++layer) {
@@ -917,6 +930,7 @@ int main(int argc, char** argv) {
         const ArtifactLoadPlan fp8_q4_hybrid = bind_fp8_q4_hybrid(argv[13]);
         std::cout << "r9700_target_binding: PASS objects=" << plan.materialization.object_count
                   << " device=" << plan.materialization.device_objects.size()
+                  << " mapped_host=" << plan.materialization.mapped_host_objects.size()
                   << " host=" << plan.materialization.host_objects.size()
                   << " w8_matrices=439 q4_matrices=439 mixed_q4=183 mixed_w8=256"
                   << " mixed_mse_q4=183 mixed_mse_w8=256"

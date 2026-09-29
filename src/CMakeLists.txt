@@ -31,6 +31,7 @@ add_library(ninfer_r9700_core STATIC
   targets/qwen3/impl/state/decoder_state_transaction.hip
   targets/qwen3_8_27b/impl/r9700_full_attention.hip
   ops/r9700/eager/eager_tensor_ops.cpp
+  ops/r9700/eager/embedding_staging.cpp
   ops/r9700/eager/eager_ops.hip
   ops/r9700/gdn/causal_conv1d_silu.cpp
   ops/r9700/gdn/gdn_gating.cpp
@@ -85,8 +86,10 @@ set_target_properties(ninfer_r9700_core PROPERTIES
   HIP_ARCHITECTURES gfx1201)
 target_compile_options(ninfer_r9700_core PRIVATE
   $<$<AND:$<COMPILE_LANGUAGE:HIP>,$<NOT:$<CONFIG:Release>>>:-gline-tables-only>)
+find_package(Threads REQUIRED)
 target_link_libraries(ninfer_r9700_core PUBLIC
   hip::host
+  Threads::Threads
   rocprofiler-sdk-roctx::rocprofiler-sdk-roctx-shared-library)
 add_library(ninfer::r9700_core ALIAS ninfer_r9700_core)
 
@@ -184,6 +187,7 @@ add_library(ninfer_r9700_qwen3_8_27b_runtime STATIC
   targets/qwen3/impl/state/round_state.cpp
   targets/qwen3/impl/runtime/visual_scatter.cpp
   targets/qwen3/impl/runtime/tool_masks.cpp
+  targets/qwen3/impl/runtime/prompt_embedding_staging.cpp
   targets/qwen3/impl/vision/control.cpp)
 if(NINFER_R9700_XATTENTION_QUALIFICATION)
   target_compile_definitions(ninfer_r9700_qwen3_8_27b_runtime PUBLIC

@@ -524,6 +524,8 @@ struct Variant {
     // the selected profile. The family schedule adds this reserve to every phase whose live
     // workspace may contain a candidate linear call.
     [[nodiscard]] static QType dflash_matrix_qtype(WeightsProfile weights_profile);
+    // Encoding of the pinned-host token embedding the profile binds; sizes prompt staging.
+    [[nodiscard]] static QType token_embedding_qtype(WeightsProfile weights_profile);
     [[nodiscard]] static std::size_t
     linear_workspace_capacity_bytes(WeightsProfile weights_profile, std::int32_t tokens);
     [[nodiscard]] static std::size_t

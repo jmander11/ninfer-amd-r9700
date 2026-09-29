@@ -2,6 +2,7 @@
 #include "targets/qwen3/impl/runtime/layouts.h"
 #include "targets/qwen3/impl/runtime/linear_state_slots.h"
 #include "targets/qwen3/impl/runtime/context_checkpoint.h"
+#include "targets/qwen3/impl/runtime/prompt_embedding_staging.h"
 #include "targets/qwen3/impl/runtime/vision_context.h"
 #include "targets/qwen3/impl/runtime/workspace_recipe.h"
 
@@ -260,6 +261,14 @@ PersistentLayout persistent_layout(const SequencePlanImpl& plan) {
                      .enable_dflash        = plan.features.dflash()});
     out.prefill_hidden = add_tensor(
         builder, DType::BF16, {TextConfig::hidden, effective_prefill_chunk}, "step prefill hidden");
+    // A chunk's prompt window carries one id past the chunk for the shifted MTP embedding.
+    out.prompt_embedding_ids = checked_i32(static_cast<std::uint64_t>(effective_prefill_chunk) + 1U,
+                                           "prompt embedding window exceeds int32");
+    out.prompt_embedding_image = builder.add(
+        static_cast<std::size_t>(PromptEmbeddingStaging::capacity_bytes(
+            Variant::token_embedding_qtype(plan.weights_profile), TextConfig::hidden,
+            out.prompt_embedding_ids)),
+        kArenaAlign, "prompt embedding staging");
     qwen3::complete_round_state_layout(builder, out.round);
     const auto i32 = [&](std::size_t n, const char* label) {
         return add_tensor(builder, DType::I32, {static_cast<std::int32_t>(n)}, label);
@@ -450,13 +459,13 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
         }
     };
     const auto mtp_prefill_chunk = [&](WorkspaceLayoutBuilder& layout, std::int32_t first,
-                                       std::int32_t last, bool preembedded) {
+                                       std::int32_t last) {
         auto call = layout.scope();
         matrix(layout, DType::BF16, TextConfig::hidden, 1);
         matrix(layout, DType::BF16, TextConfig::hidden, 1);
         {
             auto bulk = layout.scope();
-            mtp_stem(layout, last, preembedded);
+            mtp_stem(layout, last, true);
             matrix(layout, DType::BF16, TextConfig::kv_size, last);
             matrix(layout, DType::BF16, TextConfig::kv_size, last);
             scratch(layout, Variant::mtp_kv_projection_workspace_capacity_bytes(first, last));
@@ -500,12 +509,12 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
         text_common_root(mtp_prefill, chunk);
         target_body(mtp_prefill, 1, chunk, qwen3::TextPhase::Prefill, GdnWorkspacePath::Prefill,
                     1, 1, chunk, text_envelope);
-        matrix(mtp_prefill, DType::I32, 1, chunk);
+        // Shifted prompt embeddings, gathered by the prefill from its host-staged rows.
+        matrix(mtp_prefill, DType::BF16, TextConfig::hidden, chunk);
         if (plan.features.vision) {
-            matrix(mtp_prefill, DType::BF16, TextConfig::hidden, chunk);
             (void)workspace_recipe::visual_scatter_indices(mtp_prefill, chunk);
         }
-        mtp_prefill_chunk(mtp_prefill, 1, chunk, plan.features.vision);
+        mtp_prefill_chunk(mtp_prefill, 1, chunk);
         for (std::int32_t i = 1; i < drafts; ++i) {
             matrix(mtp_prefill, DType::BF16, TextConfig::hidden, 1);
             mtp_full_call(mtp_prefill, 1, text_envelope, true);

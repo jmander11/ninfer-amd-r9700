@@ -3,6 +3,7 @@
 // Qwen3 family runtime implementation; instantiated only by exact variants.
 
 #include "targets/qwen3/impl/runtime/linear_state_slots.h"
+#include "targets/qwen3/impl/runtime/prompt_embedding_staging.h"
 
 #include "core/arena.h"
 #include "core/device.h"
@@ -184,6 +185,10 @@ public:
     }
 
     void set_mtp_proposal_extent(std::uint32_t extent) noexcept { mtp_proposal_extent_ = extent; }
+    // Prefill gathers prompt embedding rows through the Program's host staging.
+    void set_prompt_embedding_staging(PromptEmbeddingStaging* staging) noexcept {
+        prompt_embedding_ = staging;
+    }
 
     void set_linear_state_slot(std::int32_t current_slot);
     void set_gdn_state_action(GdnStateAction action, const GdnReplayRecords* replay_records);
@@ -298,14 +303,15 @@ private:
                                   Tensor& hidden, Tensor& logits, Tensor& target_tokens, Tap& tap,
                                   bool reset_workspace);
 
-    void mtp_forward_stem(const Tensor& ids, const Tensor& hidden, const Tensor* input_embeddings,
+    // Gathers `ids` unless `input_embeddings` supplies the columns of `hidden`.
+    void mtp_forward_stem(const Tensor* ids, const Tensor& hidden, const Tensor* input_embeddings,
                           Tensor& x, Tensor& ah);
     void mtp_forward_tail(Tensor& x, const Tensor& ah, const Tensor& positions,
                           const Tensor& rope_positions, Tensor& mtp_hidden);
     void mtp_forward_core(const Tensor& ids, const Tensor& hidden, const Tensor& positions,
                           const Tensor& rope_positions, Tensor& mtp_hidden,
                           const Tensor* input_embeddings);
-    void mtp_prefill_chunk(const Tensor& ids, const Tensor& hidden, const Tensor* input_embeddings,
+    void mtp_prefill_chunk(const Tensor& input_embeddings, const Tensor& hidden,
                            const Tensor& positions, const Tensor& rope_positions,
                            bool final_chunk, Tensor* final_hidden, Tensor* logits,
                            Tensor* draft_token);
@@ -374,6 +380,7 @@ private:
     Tensor* rewrite_checkpoint_hidden_output_             = nullptr;
     std::uint32_t mtp_proposal_extent_                    = 0;
     const Weight* embed_                        = nullptr;
+    PromptEmbeddingStaging* prompt_embedding_   = nullptr;
     const Tensor* final_norm_                   = nullptr;
     const Weight* lm_head_                      = nullptr;
     const Weight* proposal_head_                = nullptr;

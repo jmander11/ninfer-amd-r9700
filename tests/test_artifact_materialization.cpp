@@ -176,6 +176,48 @@ int main() {
         require(materialized.device_arena().capacity() == plan.device_capacity_bytes &&
                     materialized.device_arena().used() == plan.device_capacity_bytes,
                 "materialized tensor does not own the planned device backing");
+
+        // Mapped host placement: outside the device backing, pinned, read by kernels in place.
+        ninfer::artifact::Binder mapped_binder(reader);
+        mapped_binder.retain_on_host(mapped_binder.require_resource(
+            "frontend/test.json", ninfer::artifact::ResourceEncoding::RawBytesV1));
+        const auto mapped =
+            mapped_binder.require_tensor("weights/test", ninfer::artifact::NumericFormat::BF16,
+                                         ninfer::artifact::StorageLayout::ContiguousLeV1,
+                                         tensor_shape);
+        mapped_binder.materialize_on_mapped_host(mapped);
+        const auto mapped_device =
+            mapped_binder.require_tensor("weights/second", ninfer::artifact::NumericFormat::BF16,
+                                         ninfer::artifact::StorageLayout::ContiguousLeV1,
+                                         second_shape);
+        mapped_binder.materialize_on_device(mapped_device);
+        mapped_binder.validate_only(mapped_binder.require_tensor(
+            "weights/fp8-row", ninfer::artifact::NumericFormat::F8E4M3_ROW_F32S,
+            ninfer::artifact::StorageLayout::RowScaledK128V1, fp8_shape));
+        const auto mapped_plan = mapped_binder.finish();
+        require(mapped_plan.device_capacity_bytes == kSecondTensor.size() &&
+                    mapped_plan.device_objects.size() == 1 &&
+                    mapped_plan.mapped_host_capacity_bytes == kTensor.size() &&
+                    mapped_plan.mapped_host_objects.size() == 1,
+                "mapped host tensor was charged to the device backing");
+        auto mapped_materialized = ninfer::artifact::materialize(reader, mapped_plan, device);
+        void* mapped_data = mapped_materialized.device_data(mapped);
+        hipPointerAttribute_t attributes{};
+        HIP_CHECK(hipPointerGetAttributes(&attributes, mapped_data));
+        require(attributes.type == hipMemoryTypeHost && attributes.devicePointer == mapped_data &&
+                    attributes.hostPointer == mapped_data,
+                "mapped host tensor is not pinned at its unified device address");
+        require(std::equal(kTensor.begin(), kTensor.end(),
+                           static_cast<const std::byte*>(mapped_data)),
+                "mapped host tensor payload differs from the artifact");
+        std::array<std::byte, kSecondTensor.size()> mapped_second{};
+        HIP_CHECK(hipMemcpy(mapped_second.data(), mapped_materialized.device_data(mapped_device),
+                            mapped_second.size(), hipMemcpyDeviceToHost));
+        require(mapped_second == kSecondTensor, "device tensor beside a mapped one differs");
+        const auto& mapped_stats = mapped_materialized.stats();
+        require(mapped_stats.tensor_count == 2 && mapped_stats.mapped_host_bytes == kTensor.size() &&
+                    mapped_stats.h2d_bytes == kSecondTensor.size(),
+                "mapped host materialization statistics are incomplete");
         std::cout << "artifact_materialization: PASS h2d_bytes=" << stats.h2d_bytes
                   << " staging_bytes=" << stats.peak_staging_bytes << '\n';
         return 0;

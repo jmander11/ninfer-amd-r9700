@@ -20,6 +20,7 @@
 #include "targets/qwen3/impl/runtime/dflash_context.h"
 #include "targets/qwen3/impl/runtime/linear_state_slots.h"
 #include "targets/qwen3/impl/runtime/prefix_identity.h"
+#include "targets/qwen3/impl/runtime/prompt_embedding_staging.h"
 #include "targets/qwen3/impl/runtime/text_context.h"
 #include "targets/qwen3/impl/runtime/tool_masks.h"
 #include "targets/qwen3/impl/runtime/vision_context.h"
@@ -442,6 +443,7 @@ public:
     Tensor tail_hidden_store;
     Tensor rewrite_checkpoint_hidden_store;
     Tensor staging_hidden;
+    std::unique_ptr<PromptEmbeddingStaging> prompt_embedding;
 
     std::array<SequenceState, kMaximumConcurrency> sequences;
     std::array<RequestControl, kMaximumConcurrency> requests;

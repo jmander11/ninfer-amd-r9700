@@ -67,6 +67,9 @@ struct PersistentLayout {
     // is deliberately outside WorkspaceArena so graph-captured activation addresses never alias
     // schedule scratch.
     std::optional<LayoutRegion> linear_execution;
+    // Device copy of the host-staged prompt embedding rows of one prefill window.
+    LayoutRegion prompt_embedding_image;
+    std::int32_t prompt_embedding_ids = 0;
     std::size_t bytes            = 0;
     std::size_t kv_payload_bytes = 0;
 };

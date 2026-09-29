@@ -290,7 +290,9 @@ layout. This includes the selected speculative backend, fixed sequence state, wo
 request transient, and Device Graph allowance, while leaving `--kv-capacity-headroom` MiB (default
 64) unallocated. The Engine allocates all device memory at startup, so the default only covers
 driver-side growth such as lazily allocated kernel scratch; raise it when a desktop or another
-process uses the same GPU. A startup failure in automatic mode names this option. It does not probe
+process uses the same GPU. A startup failure in automatic mode names this option. The token
+embedding is held in pinned host memory rather than VRAM (the load summary's `weight pinned host`),
+so it is not part of the device weights. It does not probe
 allocations or resize the pool at request time. The single-request
 CLI normally leaves the option omitted so it follows
 `--max-context`; the distinction matters primarily to a concurrent Engine or server.

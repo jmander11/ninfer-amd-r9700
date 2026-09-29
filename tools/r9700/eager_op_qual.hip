@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -28,6 +29,7 @@
 #include <iostream>
 #include <limits>
 #include <numbers>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -981,6 +983,182 @@ void qualify_q4_embedding_product_shape(hipStream_t stream) {
               << " kernel_ms=" << milliseconds << '\n';
 }
 
+// Production Q4G64 N16K16 token embedding resident in pinned host memory, at the product shape,
+// through both routes the runtime uses: generated-token ids gathered on the device from the
+// table in place, and a prompt window staged by the host (distinct rows into a compact image),
+// copied to the device and gathered from there, including the shifted MTP window. Every row is
+// encoded from independent logical codes/scales and the oracle decodes those logical values.
+void qualify_q4_embedding_host_routes(hipStream_t stream) {
+    using ninfer::DType;
+    using ninfer::QType;
+    using ninfer::QuantLayout;
+    using ninfer::Tensor;
+    using ninfer::Weight;
+
+    constexpr std::uint32_t group = 64;
+    constexpr std::uint32_t padded = kHidden;
+    constexpr std::uint32_t groups = padded / group;
+    constexpr std::size_t kWindow = 4097;  // prefill chunk 4096 plus the shifted MTP id
+    const std::size_t code_bytes = static_cast<std::size_t>(kVocabPhysical) * padded / 2U;
+    const std::size_t scale_elements = static_cast<std::size_t>(kVocabPhysical) * groups;
+    const std::size_t scale_offset = (code_bytes + 255U) / 256U * 256U;
+    const std::size_t payload_bytes = scale_offset + scale_elements * sizeof(std::uint16_t);
+
+    // A prompt-like window: repeated boundary rows plus pseudo-random rows with repeats.
+    std::vector<std::int32_t> ids;
+    ids.reserve(kWindow);
+    constexpr std::array<std::int32_t, 9> boundary{
+        0, 17, 513, 4096, 65535, 131071, 248076, 248319, 15};
+    std::uint32_t state = 0x9e3779b9U;
+    while (ids.size() < kWindow) {
+        if (ids.size() % 64U < boundary.size()) {
+            ids.push_back(boundary[ids.size() % 64U]);
+        } else {
+            state = state * 1664525U + 1013904223U;
+            ids.push_back(static_cast<std::int32_t>((state >> 8U) % (ids.size() % 3U == 0U
+                                                                         ? 4096U
+                                                                         : kVocabPhysical)));
+        }
+    }
+
+    void* host_payload = nullptr;
+    HIP_CHECK(hipHostMalloc(&host_payload, payload_bytes));
+    std::memset(host_payload, 0, payload_bytes);
+    auto* codes = static_cast<std::uint8_t*>(host_payload);
+    auto* scales = reinterpret_cast<std::uint16_t*>(codes + scale_offset);
+    const auto logical_code = [](std::size_t row, std::uint32_t feature) {
+        // The word term distinguishes the four code words of a group.
+        return static_cast<int>(
+                   (row * 11U + feature * 5U + (feature / 16U) * 3U + (row >> 7U)) % 16U) -
+               8;
+    };
+    const auto logical_scale = [](std::size_t row, std::uint32_t scale_group) {
+        return static_cast<float>(static_cast<_Float16>(
+            static_cast<float>(1U + (row * 3U + 7U * scale_group) % 97U) / 1024.0F));
+    };
+    std::vector<bool> encoded(kVocabPhysical, false);
+    for (const std::int32_t id : ids) {
+        const std::size_t row = static_cast<std::size_t>(id);
+        if (encoded[row]) { continue; }
+        encoded[row] = true;
+        for (std::uint32_t scale_group = 0; scale_group < groups; ++scale_group) {
+            scales[((row >> 4U) * groups + scale_group) * 16U + (row & 15U)] =
+                std::bit_cast<std::uint16_t>(static_cast<_Float16>(logical_scale(row, scale_group)));
+        }
+        for (std::uint32_t feature = 0; feature < kHidden; ++feature) {
+            const std::size_t word =
+                (((row >> 4U) * groups + feature / group) * 4U + (feature % group) / 16U) * 16U +
+                (row & 15U);
+            auto& packed = codes[word * 8U + (feature % 16U) / 2U];
+            packed = static_cast<std::uint8_t>(
+                (packed & ((feature & 1U) == 0U ? 0xf0U : 0x0fU)) |
+                ((static_cast<std::uint32_t>(logical_code(row, feature)) & 0x0fU)
+                 << ((feature & 1U) * 4U)));
+        }
+    }
+    std::vector<std::uint16_t> expected(static_cast<std::size_t>(kHidden) * ids.size());
+    for (std::size_t column = 0; column < ids.size(); ++column) {
+        const std::size_t row = static_cast<std::size_t>(ids[column]);
+        for (std::uint32_t feature = 0; feature < kHidden; ++feature) {
+            expected[column * kHidden + feature] = bf16_rne_bits(
+                static_cast<float>(logical_code(row, feature)) *
+                logical_scale(row, feature / group));
+        }
+    }
+
+    Weight table{};
+    table.payload = host_payload;
+    table.payload_bytes = payload_bytes;
+    table.qdata = host_payload;
+    table.qdata_bytes = code_bytes;
+    table.scales = codes + scale_offset;
+    table.scale_bytes = scale_elements * sizeof(std::uint16_t);
+    table.qtype = QType::Q4G64_F16S;
+    table.group_size = table.group = group;
+    table.layout = QuantLayout::Q4N16K16;
+    table.scale_dtype = DType::FP16;
+    table.ndim = 2;
+    table.n = table.shape[0] = table.padded_shape[0] = static_cast<std::int32_t>(kVocabPhysical);
+    table.k = table.shape[1] = table.padded_shape[1] = static_cast<std::int32_t>(kHidden);
+
+    const auto columns = static_cast<std::int32_t>(ids.size());
+    DeviceBuffer<hip_bfloat16> d_output(static_cast<std::size_t>(kHidden) * ids.size());
+    Tensor output_tensor(d_output.get(), DType::BF16,
+                         {static_cast<std::int32_t>(kHidden), columns});
+    hipEvent_t start = nullptr;
+    hipEvent_t stop = nullptr;
+    HIP_CHECK(hipEventCreate(&start));
+    HIP_CHECK(hipEventCreate(&stop));
+    const auto timed = [&](auto&& body) {
+        HIP_CHECK(hipEventRecord(start, stream));
+        body();
+        HIP_CHECK(hipEventRecord(stop, stream));
+        HIP_CHECK(hipEventSynchronize(stop));
+        float milliseconds = 0.0F;
+        HIP_CHECK(hipEventElapsedTime(&milliseconds, start, stop));
+        return milliseconds;
+    };
+
+    // Generated-token route: device ids, table read in place through its unified address.
+    DeviceBuffer<std::int32_t> d_ids(ids.size());
+    copy_to_device(d_ids, ids);
+    Tensor ids_tensor(d_ids.get(), DType::I32, {columns});
+    const float in_place_ms =
+        timed([&] { ninfer::ops::embedding(ids_tensor, table, output_tensor, stream); });
+    require_bf16_exact(copy_to_host(d_output), expected, "host-resident Q4 embedding in place");
+
+    // Prompt route: host-staged compact image, one H2D copy, gather from device memory.
+    const std::uint64_t capacity = ninfer::ops::embedding_stage_capacity_bytes(
+        QType::Q4G64_F16S, static_cast<std::int32_t>(kHidden), columns);
+    void* host_image = nullptr;
+    HIP_CHECK(hipHostMalloc(&host_image, capacity));
+    DeviceBuffer<std::uint8_t> d_image(capacity);
+    const auto staging_start = std::chrono::steady_clock::now();
+    const ninfer::ops::EmbeddingStage stage = ninfer::ops::stage_embedding_rows(
+        ids, table, std::span<std::byte>(static_cast<std::byte*>(host_image), capacity));
+    const double staging_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - staging_start).count();
+    if (stage.ids != columns || stage.rows % 16 != 0 || stage.bytes > capacity) {
+        fail("prompt embedding stage has the wrong extent");
+    }
+    const float copy_ms = timed([&] {
+        HIP_CHECK(hipMemcpyAsync(d_image.get(), host_image, stage.bytes, hipMemcpyHostToDevice,
+                                 stream));
+    });
+    const ninfer::ops::StagedEmbedding staged =
+        ninfer::ops::staged_embedding(stage, table, d_image.get());
+    HIP_CHECK(hipMemsetAsync(d_output.get(), 0xff, d_output.size() * sizeof(hip_bfloat16),
+                             stream));
+    const float staged_ms = timed(
+        [&] { ninfer::ops::embedding(staged.slots, staged.table, output_tensor, stream); });
+    require_bf16_exact(copy_to_host(d_output), expected, "host-staged Q4 prompt embedding");
+
+    // Shifted MTP window: slots [1,window) against ids [1,window).
+    Tensor shifted_output = output_tensor.slice(1, 0, columns - 1);
+    HIP_CHECK(hipMemsetAsync(d_output.get(), 0xff, d_output.size() * sizeof(hip_bfloat16),
+                             stream));
+    ninfer::ops::embedding(staged.slots.slice(0, 1, columns - 1), staged.table, shifted_output,
+                           stream);
+    HIP_CHECK(hipStreamSynchronize(stream));
+    std::vector<hip_bfloat16> shifted = copy_to_host(d_output);
+    shifted.resize(static_cast<std::size_t>(kHidden) * (ids.size() - 1U));
+    require_bf16_exact(shifted,
+                       std::vector<std::uint16_t>(expected.begin() + kHidden, expected.end()),
+                       "host-staged shifted Q4 prompt embedding");
+
+    HIP_CHECK(hipEventDestroy(stop));
+    HIP_CHECK(hipEventDestroy(start));
+    HIP_CHECK(hipHostFree(host_image));
+    HIP_CHECK(hipHostFree(host_payload));
+    std::cout << "q4-embedding-host-routes: shape=[" << kVocabPhysical << ',' << kHidden
+              << "] window=" << columns << " distinct_rows=" << stage.rows
+              << " exact_code_times_fp16_scale=PASS(in_place,staged,shifted)"
+              << " in_place_kernel_ms=" << in_place_ms << " host_stage_ms=" << staging_ms
+              << " h2d_ms=" << copy_ms << " image_mib="
+              << static_cast<double>(stage.bytes) / static_cast<double>(1U << 20U)
+              << " staged_kernel_ms=" << staged_ms << '\n';
+}
+
 void qualify_public_extended_paths(hipStream_t stream) {
     using ninfer::DType;
     using ninfer::QType;
@@ -1489,6 +1667,7 @@ int main() {
         qualify_embedding(stream);
         qualify_w8_embedding_product_shape(stream);
         qualify_q4_embedding_product_shape(stream);
+        qualify_q4_embedding_host_routes(stream);
         qualify_argmax(stream);
         qualify_public_extended_paths(stream);
         HIP_CHECK(hipStreamDestroy(stream));

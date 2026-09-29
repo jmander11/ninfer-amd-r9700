@@ -44,12 +44,15 @@ real BF16-source quality, capacity, and whole-inference Pareto gates select the 
 
 ## Planning and materialization
 
-The binder consumes every target-owned object exactly once and produces host-resource and
-device-tensor placements. Device placements are 256-byte aligned. Materialization allocates one
-device arena, retains only requested resources on the host, coalesces aligned direct-I/O spans,
-and uses pinned staging slots plus the owning HIP load stream. It verifies that planned offsets and
-sizes equal the reader descriptors before copying and publishes completion only after the stream is
-synchronized.
+The binder consumes every target-owned object exactly once and produces host-resource,
+device-tensor, and mapped-host-tensor placements. Tensor placements keep their device alignment
+(256 bytes). Materialization allocates one device arena and, when any tensor is placed
+`MappedHost`, one pinned host backing whose device address must equal its host address; kernels
+read those tensors in place. It retains only requested resources on the host, coalesces aligned
+direct-I/O spans for both tensor placements, and uses pinned staging slots plus the owning HIP load
+stream (mapped-host bytes are copied from the slots by the host). It verifies that planned offsets
+and sizes equal the reader descriptors before copying and publishes completion only after the
+stream is synchronized. Statistics report H2D and mapped-host bytes separately.
 
 No object is implicitly converted during loading. `Q4G64_F16S` accepts only
 `r9700-q4g64-n16-k16-v1`; old row-split Q4 artifacts are rejected and may be migrated only by the

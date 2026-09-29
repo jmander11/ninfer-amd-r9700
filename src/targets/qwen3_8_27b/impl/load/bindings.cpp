@@ -83,7 +83,7 @@ NumericFormat dflash_matrix_format(WeightsProfile profile) {
     throw std::invalid_argument("qwen3_8_27b_r9700: profile has no DFlash2 matrix recipe");
 }
 
-NumericFormat token_embedding_format(WeightsProfile profile) {
+NumericFormat base_token_embedding_format(WeightsProfile profile) {
     if (is_selective_protected_profile(profile) || fp8_capped_w8_embedding(profile))
         return NumericFormat::W8G32_F16S;
     if (profile == WeightsProfile::R9700W8Bf16EmbeddingEvaluation) {
@@ -314,6 +314,11 @@ void validate_draft_ids(const artifact::Binder& binder, artifact::ObjectHandle h
 
 } // namespace
 
+NumericFormat token_embedding_format(WeightsProfile profile) {
+    if (is_fp8lut4_text_profile(profile)) profile = fp8_capped_base_profile(profile);
+    return base_token_embedding_format(profile);
+}
+
 ArtifactLoadPlan bind_artifact(artifact::Binder& binder, WeightsProfile weights_profile,
                                qwen3::StartupFeatures features) {
     // An FP8LUT4 Text profile binds exactly its base recipe except for the Text-layer Q4 matrices
@@ -326,9 +331,14 @@ ArtifactLoadPlan bind_artifact(artifact::Binder& binder, WeightsProfile weights_
     out.frontend     = qwen3::bind_frontend_resources(binder);
     out.features     = features;
 
-    out.token_embedding =
-        bind_weight(binder, "text/token_embedding", token_embedding_format(weights_profile),
-                    {248320, 5120});
+    // The embedding is only row-gathered, so it lives in pinned host memory and its VRAM goes to
+    // the KV pool: prompt rows are staged by the host, generated rows are read in place.
+    const NumericFormat embedding_format = base_token_embedding_format(weights_profile);
+    out.token_embedding = WeightPlan{
+        .object = artifact::bind_tensor(binder, "text/token_embedding", embedding_format,
+                                        {248320, 5120}, artifact::TensorPlacement::MappedHost),
+        .format = embedding_format,
+        .layout = artifact::storage_layout_for(embedding_format)};
     bind_r9700_text_layers(binder, out, weights_profile, fp8lut4_text);
     out.final_norm =
         artifact::bind_device_tensor(binder, "text/final_norm", NumericFormat::BF16, {5120});

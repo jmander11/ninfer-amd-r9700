@@ -71,6 +71,7 @@ void attach_prefill_state(TextContext& card, PrefillContext& state,
                                           *state.mtp_kv_publication, state.mtp_kv_status);
     }
     card.set_rewrite_checkpoint_hidden_output(state.rewrite_checkpoint_hidden);
+    card.set_prompt_embedding_staging(state.prompt_embedding);
     card.set_prefill_rewrite_checkpoint_frontier(
         rewrite_checkpoint_capture_frontier
             ? static_cast<std::int64_t>(*rewrite_checkpoint_capture_frontier)

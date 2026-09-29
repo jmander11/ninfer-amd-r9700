@@ -144,6 +144,8 @@ struct ArtifactLoadPlan {
 
 ArtifactLoadPlan bind_artifact(artifact::Binder& binder, WeightsProfile weights_profile,
                                qwen3::StartupFeatures features);
+// Format of the pinned-host `text/token_embedding` that `bind_artifact` binds for `profile`.
+[[nodiscard]] artifact::NumericFormat token_embedding_format(WeightsProfile profile);
 
 struct DensePostMixerPayload {
     Weight gate_up;

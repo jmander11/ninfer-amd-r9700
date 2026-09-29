@@ -394,11 +394,13 @@ const MtpW& TextContext::mtp_weights() const {
     return mtp_;
 }
 
-void TextContext::mtp_forward_stem(const Tensor& ids, const Tensor& hidden,
+void TextContext::mtp_forward_stem(const Tensor* ids, const Tensor& hidden,
                                    const Tensor* input_embeddings, Tensor& x, Tensor& ah) {
-    hipStream_t s      = ctx_.stream;
-    const int T        = ids.ne[0] * ids.ne[1];
-    Tensor flat_ids    = ids.view({T});
+    hipStream_t s = ctx_.stream;
+    if (hidden.numel() <= 0 || hidden.numel() % kCfg.hidden != 0) {
+        throw std::invalid_argument("MTP stem hidden must hold whole columns");
+    }
+    const int T        = static_cast<int>(hidden.numel() / kCfg.hidden);
     Tensor flat_hidden = hidden.view({kCfg.hidden, T});
 
     auto roots = workspace_recipe::mtp_stem<TextConfig>(work_, T, input_embeddings == nullptr);
@@ -411,8 +413,11 @@ void TextContext::mtp_forward_stem(const Tensor& ids, const Tensor& hidden,
         }
         emb = input_embeddings->view({kCfg.hidden, T});
     } else {
+        if (ids == nullptr || ids->numel() != T) {
+            throw std::invalid_argument("MTP stem ids do not match its hidden columns");
+        }
         emb = roots.embedding;
-        ops::embedding(flat_ids, *embed_, emb, s);
+        ops::embedding(ids->view({T}), *embed_, emb, s);
     }
 
     Tensor e = roots.normalized_embedding;
@@ -536,22 +541,23 @@ void TextContext::mtp_forward_core(const Tensor& ids, const Tensor& hidden, cons
     auto scratch_scope = work_.scope();
     Tensor x;
     Tensor ah;
-    mtp_forward_stem(ids, hidden, input_embeddings, x, ah);
+    mtp_forward_stem(&ids, hidden, input_embeddings, x, ah);
     mtp_forward_tail(x, ah, positions, rope_positions, mtp_hidden);
 }
 
-void TextContext::mtp_prefill_chunk(const Tensor& ids, const Tensor& hidden,
-                                    const Tensor* input_embeddings, const Tensor& positions,
-                                    const Tensor& rope_positions, bool final_chunk,
-                                    Tensor* final_hidden, Tensor* logits, Tensor* draft_token) {
+void TextContext::mtp_prefill_chunk(const Tensor& input_embeddings, const Tensor& hidden,
+                                    const Tensor& positions, const Tensor& rope_positions,
+                                    bool final_chunk, Tensor* final_hidden, Tensor* logits,
+                                    Tensor* draft_token) {
     if (!mtp_kv_.valid()) { throw std::runtime_error("MTP prefill is not enabled"); }
-    const int T = ids.ne[0];
+    const int T = input_embeddings.ne[1];
     if (T <= 0 || static_cast<std::uint32_t>(T) > prefill_chunk_) {
         throw std::invalid_argument("MTP prefill chunk T must be in [1,prefill_chunk]");
     }
     roctx::ScopedRange mtp_prefill_range(roctx::Name::PrefillMtpChunk, roctx::Category::Mtp,
                                         static_cast<std::uint64_t>(T));
-    require_tensor_shape(ids, DType::I32, {T}, "MTP prefill ids");
+    require_tensor_shape(input_embeddings, DType::BF16, {kCfg.hidden, T},
+                         "MTP prefill input embeddings");
     require_tensor_shape(hidden, DType::BF16, {kCfg.hidden, T}, "MTP prefill hidden");
     require_tensor_shape(positions, DType::I32, {T}, "MTP prefill positions");
     if (rope_positions.dtype != DType::I32 || rope_positions.ne[0] != T ||
@@ -596,7 +602,7 @@ void TextContext::mtp_prefill_chunk(const Tensor& ids, const Tensor& hidden,
         auto bulk_scope = work_.scope();
         Tensor x;
         Tensor ah;
-        mtp_forward_stem(ids, hidden, input_embeddings, x, ah);
+        mtp_forward_stem(nullptr, hidden, &input_embeddings, x, ah);
 
         Tensor k_flat = work_.alloc(DType::BF16, {kCfg.kv_size, T});
         Tensor v_flat = work_.alloc(DType::BF16, {kCfg.kv_size, T});
@@ -1479,6 +1485,12 @@ TextContext::prefill_impl(std::span<const int> ids, const TextPrefill* text_pref
         prefill_text_kv_publication_ == nullptr || prefill_text_kv_status_ == nullptr) {
         throw std::logic_error("Text prefill requires explicit FP8-K/INT4-V KV authority");
     }
+    if (prompt_embedding_ == nullptr || (text_prefill == nullptr) == (multimodal == nullptr)) {
+        throw std::logic_error("Text prefill requires one full prompt and its embedding staging");
+    }
+    // Prompt token ids are known on the host: their embedding rows are host-staged.
+    const std::span<const int> prompt =
+        multimodal != nullptr ? multimodal->token_ids : text_prefill->token_ids;
 
     if (text_prefill != nullptr) {
         if (multimodal != nullptr || base != text_prefill->begin ||
@@ -1563,7 +1575,6 @@ TextContext::prefill_impl(std::span<const int> ids, const TextPrefill* text_pref
             const auto roots             = workspace_recipe::text_prefill_roots<TextConfig>(
                 work_, len, rope_axes, static_cast<std::int32_t>(local_scatter_indices.size()));
             Tensor ids_device = roots.ids;
-            copy_i32(ids.data() + t0, ids_device, s);
 
             Tensor positions = roots.positions;
             ops::fill_i32_positions(positions, base_i + t0, s);
@@ -1602,7 +1613,13 @@ TextContext::prefill_impl(std::span<const int> ids, const TextPrefill* text_pref
             ScopedPositions scoped_cache(active_cache_positions_, positions);
             ScopedPositions scoped_rope(active_rope_positions_, rope_positions);
             Tensor x = roots.residual;
-            ops::embedding(ids_device, *embed_, x, s);
+            // The window carries the id after the chunk for the shifted MTP embedding.
+            auto prompt_rows = prompt_embedding_->acquire(prompt.subspan(
+                prompt_t0, std::min<std::size_t>(static_cast<std::size_t>(len) + 1U,
+                                                 prompt.size() - prompt_t0)));
+            ops::embedding(prompt_rows.view().slots.slice(0, 0, len), prompt_rows.view().table, x,
+                           s);
+            if (!prepare_mtp_prompt) { prompt_rows.end(); }
             if (!local_scatter_indices.empty()) {
                 Tensor indices_device = roots.scatter_indices;
                 copy_i32(local_scatter_indices.data(), indices_device, s);
@@ -1617,6 +1634,7 @@ TextContext::prefill_impl(std::span<const int> ids, const TextPrefill* text_pref
                 layer_boundary_trace::matches(layer_boundary_trace::Role::TextAppend) &&
                 base == 128U && T == 1 && t0 == 0 && len == 1;
             if (trace_fresh || trace_append) {
+                copy_i32(ids.data() + t0, ids_device, s);
                 layer_boundary_trace::Session trace(
                     {.role       = trace_fresh ? layer_boundary_trace::Role::TextFresh
                                                : layer_boundary_trace::Role::TextAppend,
@@ -1670,67 +1688,44 @@ TextContext::prefill_impl(std::span<const int> ids, const TextPrefill* text_pref
             }
 
             if (prepare_mtp_prompt) {
-                const std::uint32_t alignment_tokens =
-                    multimodal != nullptr ? static_cast<std::uint32_t>(multimodal->token_ids.size())
-                    : text_prefill != nullptr
-                        ? static_cast<std::uint32_t>(text_prefill->token_ids.size())
-                        : static_cast<std::uint32_t>(T);
-                const std::uint32_t alignment_begin =
-                    multimodal != nullptr || text_prefill != nullptr
-                        ? prompt_t0
-                        : static_cast<std::uint32_t>(t0);
+                const auto alignment_tokens = static_cast<std::uint32_t>(prompt.size());
                 const qwen3::MtpAlignmentWindow mtp_window = qwen3::plan_mtp_alignment_window(
-                    alignment_tokens, alignment_begin, static_cast<std::uint32_t>(len));
-                const std::span<const int> alignment_ids =
-                    multimodal != nullptr     ? multimodal->token_ids
-                    : text_prefill != nullptr ? text_prefill->token_ids
-                                              : ids;
-                std::vector<int> mtp_ids_host(static_cast<std::size_t>(len));
+                    alignment_tokens, prompt_t0, static_cast<std::uint32_t>(len));
+                if (mtp_window.shifted_embedding_begin != prompt_t0 + 1U) {
+                    throw std::logic_error("MTP prefill embedding is not shifted by one token");
+                }
                 const int prompt_columns =
                     len - static_cast<int>(mtp_window.final_column_uses_generated_token);
-                for (int j = 0; j < prompt_columns; ++j) {
-                    mtp_ids_host[static_cast<std::size_t>(j)] =
-                        alignment_ids[static_cast<std::size_t>(mtp_window.shifted_embedding_begin) +
-                                      static_cast<std::size_t>(j)];
-                }
-                Tensor mtp_ids = work_.alloc(DType::I32, {len});
+                Tensor mtp_input_embeddings = work_.alloc(DType::BF16, {kCfg.hidden, len});
                 if (prompt_columns > 0) {
-                    HIP_CHECK(hipMemcpyAsync(
-                        mtp_ids.data, mtp_ids_host.data(),
-                        static_cast<std::size_t>(prompt_columns) * sizeof(std::int32_t),
-                        hipMemcpyHostToDevice, s));
+                    Tensor columns = mtp_input_embeddings.slice(1, 0, prompt_columns);
+                    ops::embedding(prompt_rows.view().slots.slice(0, 1, prompt_columns),
+                                   prompt_rows.view().table, columns, s);
                 }
+                prompt_rows.end();
                 if (mtp_window.final_column_uses_generated_token) {
                     // Keep the sampled token on-device: a host sync here sat on the TTFT
-                    // critical path after every last prefill chunk with MTP enabled.
-                    Tensor last_id = mtp_ids.slice(0, len - 1, 1);
-                    HIP_CHECK(hipMemcpyAsync(last_id.data, io_.token.data, sizeof(std::int32_t),
-                                             hipMemcpyDeviceToDevice, s));
+                    // critical path after every last prefill chunk with MTP enabled. Its row is
+                    // read from the host-resident table in place, like every generated token.
+                    Tensor last_column = mtp_input_embeddings.slice(1, len - 1, 1);
+                    ops::embedding(io_.token, *embed_, last_column, s);
                 }
-                Tensor mtp_input_embeddings;
-                const Tensor* mtp_input_embeddings_ptr = nullptr;
-                if (multimodal != nullptr) {
-                    mtp_input_embeddings = work_.alloc(DType::BF16, {kCfg.hidden, len});
-                    ops::embedding(mtp_ids, *embed_, mtp_input_embeddings, s);
-                    if (vision_chunk.control != nullptr) {
-                        const qwen3::MtpVisualOverlap overlap = qwen3::shifted_visual_overlap(
-                            vision_chunk.control->scatter_indices, alignment_tokens, mtp_window);
-                        if (!overlap.empty()) {
-                            Tensor shifted_indices = workspace_recipe::visual_scatter_indices(
-                                work_, static_cast<std::int32_t>(overlap.size()));
-                            qwen3::detail::scatter_shifted_visual_embeddings(
-                                mtp_input_embeddings, vision_chunk.embeddings, overlap,
-                                shifted_indices, s);
-                        }
+                if (multimodal != nullptr && vision_chunk.control != nullptr) {
+                    const qwen3::MtpVisualOverlap overlap = qwen3::shifted_visual_overlap(
+                        vision_chunk.control->scatter_indices, alignment_tokens, mtp_window);
+                    if (!overlap.empty()) {
+                        Tensor shifted_indices = workspace_recipe::visual_scatter_indices(
+                            work_, static_cast<std::int32_t>(overlap.size()));
+                        qwen3::detail::scatter_shifted_visual_embeddings(
+                            mtp_input_embeddings, vision_chunk.embeddings, overlap,
+                            shifted_indices, s);
                     }
-                    mtp_input_embeddings_ptr = &mtp_input_embeddings;
                 }
                 if (is_last && mtp_proposal_extent_ != 0) {
                     Tensor logits = matrix_window(io_.logits, 1);
                     Tensor draft0 = io_.mtp->draft_tokens.slice(0, 0, 1);
-                    mtp_prefill_chunk(mtp_ids, xf, mtp_input_embeddings_ptr, positions,
-                                      rope_positions, true, &io_.mtp->ar_hidden,
-                                      &logits, &draft0);
+                    mtp_prefill_chunk(mtp_input_embeddings, xf, positions, rope_positions, true,
+                                      &io_.mtp->ar_hidden, &logits, &draft0);
 
                     Tensor ar_position = io_.mtp->position.slice(0, 0, 1);
                     ops::set_i32_scalar(ar_position, base_i + T, s);
@@ -1772,8 +1767,8 @@ TextContext::prefill_impl(std::span<const int> ids, const TextPrefill* text_pref
                             retained_mtp_frontier);
                     }
                 } else {
-                    mtp_prefill_chunk(mtp_ids, xf, mtp_input_embeddings_ptr, positions,
-                                      rope_positions, false, nullptr, nullptr, nullptr);
+                    mtp_prefill_chunk(mtp_input_embeddings, xf, positions, rope_positions, false,
+                                      nullptr, nullptr, nullptr);
                 }
             }
 
@@ -1798,6 +1793,16 @@ TextContext::prefill_impl(std::span<const int> ids, const TextPrefill* text_pref
     }
 
     prefill_rewrite_checkpoint_frontier_ = -1;
+
+    // Stage the next chunk's prompt rows while this chunk executes; the host would otherwise
+    // only wait below. The next chunk reuses them if its window is a prefix of these ids.
+    const std::size_t next_prompt_token = static_cast<std::size_t>(base) + static_cast<std::size_t>(t0);
+    if (next_prompt_token < prompt.size()) {
+        prompt_embedding_->prefetch(prompt.subspan(
+            next_prompt_token,
+            std::min<std::size_t>(static_cast<std::size_t>(prompt_embedding_->capacity_ids()),
+                                  prompt.size() - next_prompt_token)));
+    }
 
     ctx_.synchronize();
     work_.reset();

@@ -96,6 +96,7 @@ int main() {
     load.upload_seconds       = 0.345678901234;
     load.artifact_bytes_read  = 1000;
     load.host_to_device_bytes = 900;
+    load.mapped_host_bytes    = 64;
     load.peak_staging_bytes   = 128;
     load.tensor_count         = 42;
     load.resource_count       = 6;
@@ -145,6 +146,8 @@ int main() {
     failures += check(server.at("artifact").at("weights_id") == "fixture-weights",
                       "server weights id missing");
     failures += check(server.at("artifact").at("size_bytes") == 123456, "artifact size missing");
+    failures += check(server.at("artifact").at("mapped_host_bytes") == 64,
+                      "pinned-host weight bytes missing");
     failures += check(server.at("engine").at("max_context") == 262144, "max context missing");
     failures += check(server.at("engine").at("kv_value_group") ==
                           NINFER_R9700_KV_VALUE_GROUP,

@@ -85,6 +85,11 @@ ninfer_add_r9700_test(ninfer_artifact_reader_test
 ninfer_add_r9700_test(ninfer_tensor_test
   SOURCES test_tensor.cpp
   LIBRARIES ninfer_r9700_core)
+# Exact oracle for host staging of prompt embedding rows.
+ninfer_add_r9700_test(ninfer_embedding_staging_test
+  SOURCES ops/test_embedding_staging.cpp
+  LIBRARIES ninfer_r9700_core)
+set_tests_properties(ninfer_embedding_staging_test PROPERTIES LABELS "host")
 ninfer_add_r9700_test(ninfer_pinned_arena_recovery_test
   SOURCES test_pinned_arena_recovery.cpp
   LIBRARIES ninfer_r9700_core)

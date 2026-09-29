@@ -455,6 +455,9 @@ ProgramImplCore::ProgramImplCore(const LoadedModelData& model_in, const Sequence
     if (plan.persistent.staging_hidden) {
         staging_hidden = plan.persistent.staging_hidden->bind(backing);
     }
+    prompt_embedding = std::make_unique<PromptEmbeddingStaging>(
+        device, model.token_embedding, plan.persistent.prompt_embedding_image.bind(backing),
+        plan.persistent.prompt_embedding_ids);
     for (std::uint32_t lane = 0; lane < max_concurrency; ++lane) {
         SequenceState& sequence = sequences[lane];
         sequence.lane           = lane;
@@ -3763,7 +3766,8 @@ runtime::PrefillStepResult ProgramImplCore::advance_prefill(SequenceState& seque
                                                            : nullptr,
             speculative_backend == SpeculativeBackend::Mtp
                 ? static_cast<std::uint32_t*>(io.backend_kv_status.data) + sequence.lane
-                : nullptr};
+                : nullptr,
+            prompt_embedding.get()};
 
         if (staged.mtp_bridge == MtpBridgeMode::BeforeSuffix) {
             if (staged.cursor != staged.base || staged.base == 0 ||

@@ -108,6 +108,12 @@ M      = min(M_max, M_min + floor((F-R-B_min)/B_step))
 or another process shares the GPU. Startup failures in automatic mode name the option. The same production layout builder supplies `B_min` and `B_step`; the
 common resolver does not duplicate model dimensions or bytes-per-token formulas.
 
+The token embedding is materialized in pinned host memory, not in the device weights, so `F`
+includes its size (675,430,400 bytes for the production Q4G64 table). Persistent state includes
+the fixed device region that receives host-staged prompt embedding rows: one compact image for
+`min(prefill_chunk, S) + 1` ids, about 11 MiB for the Q4 table at chunk 4096
+(`docs/maintainer/qwen3.8-27b-artifact.md`, token embedding placement).
+
 The runtime reports configured `S`, resolved `M*P`, page counts, reservation bytes, headroom, and
 planned slack. Tail capacity created by page rounding is storage padding and never permits a
 sequence frontier beyond `S`.

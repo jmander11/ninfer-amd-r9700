@@ -18,6 +18,7 @@
 #include "targets/qwen3/impl/runtime/vision_context.h"
 #include "targets/qwen3/impl/runtime/vision_prefill.h"
 #include "targets/qwen3/impl/runtime/prefill_schedule.h"
+#include "targets/qwen3/impl/runtime/prompt_embedding_staging.h"
 
 #include <algorithm>
 #include <array>
@@ -67,6 +68,7 @@ struct PrefillContext {
     PagedKVAllocation* mtp_kv_allocation                    = nullptr;
     qwen3::PagedKVPublication* mtp_kv_publication         = nullptr;
     std::uint32_t* mtp_kv_status                            = nullptr;
+    PromptEmbeddingStaging* prompt_embedding                = nullptr;
 };
 
 struct OrdinaryBatchContext {
