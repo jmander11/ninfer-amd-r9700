@@ -6589,7 +6589,10 @@ RamReclaim KVDiskCache::reclaim_ram_entry(bool may_block, std::span<const std::u
     };
     std::vector<std::uint64_t> candidates = ram.unpinned_ids();
     if (candidates.empty()) {
-        if (const std::uint64_t spilling = live_spill_ram(); spilling != 0 && !kept(spilling)) {
+        // A blocking reclaim rolls nothing back, so waiting on the attempt's own
+        // capture's spill frees room instead of dropping an entry unsaved.
+        if (const std::uint64_t spilling = live_spill_ram();
+            spilling != 0 && (may_block || !kept(spilling))) {
             if (may_block) { return wait_live_spill(spilling); }
             std::lock_guard lock(mutex_);
             if (spill_live_locked() && !kept(spill_->ram_id)) {
