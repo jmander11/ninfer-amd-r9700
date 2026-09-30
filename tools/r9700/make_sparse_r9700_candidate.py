@@ -85,16 +85,20 @@ def build_objects(specs: tuple[object, ...], *, wrong_token_format: bool,
             spec = tensor_spec(spec.name, spec.shape, "Q4G64_F16S")
         if hasattr(spec, "format"):
             numeric_format = spec.format
+            layout = spec.layout
+            if spec.name == "text/token_embedding" and numeric_format != "BF16":
+                # The binder requires every quantized token embedding row-split (host gathers).
+                layout = "row-split-k128-v1"
             if wrong_token_format and spec.name == "text/token_embedding":
                 numeric_format = "Q6G64_F16S"
-            size = encoded_size(spec.layout, numeric_format, spec.shape)
+            size = encoded_size(layout, numeric_format, spec.shape)
             offset = align_up(cursor, 256)
             obj = {
                 "name": spec.name,
                 "kind": "tensor",
                 "shape": list(spec.shape),
                 "format": numeric_format,
-                "layout": spec.layout,
+                "layout": layout,
                 "offset": offset,
                 "bytes": size,
             }
