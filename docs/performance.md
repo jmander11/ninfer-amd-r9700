@@ -185,8 +185,10 @@ split:
 | 384 | 0.95 -> 0.82 | 2.57 -> 2.14 | 7.00 -> 5.79 | 13.35 -> 11.07 |
 | 768 | 1.60 -> 1.55 | 4.33 -> 4.09 | 13.28 -> 10.97 | 26.54 -> 21.88 |
 
-512 rows stay dense (the grid already fills whole waves). With 16 full-attention layers, a
-128-row append at 131K saves ~87 ms of prefill attention. Fixed 256- and 128-CTA targets were
+512 rows stay dense (the grid already fills whole waves). End to end (C1 DFlash serve, no
+thinking, follow-up turns on a resident 130K conversation, four turns each, pre-split binary vs
+this build): 217-token appends TTFT 341 -> 291 ms, 654-token appends 719 -> 648 ms
+(`e2e/append_ttft.py`, `e2e/results.txt`). Fixed 256- and 128-CTA targets were
 rejected (slower at 9..127 and at 192/384 rows respectively). Evidence:
 `profiles/bench/r9700-split-append-20260930/`.
 
