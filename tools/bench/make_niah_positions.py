@@ -25,11 +25,9 @@ the same arguments reproduces the identical fixture byte-for-byte, so committed
 fixtures are reproducible. The master stream is read from a committed fixture,
 never regenerated from scratch.
 
-Length presets map to target document character counts. 200k (822,000 chars,
-~200k tokens) is the long end of the ladder -- it fits inside the 262k context,
-unlike the 256k fixture (1,108,554 chars, ~277k tokens) which overflows it. So
-256k is the master (a content source), not a runnable ladder rung at the 262k
-context.
+Length presets map to target document character counts (~4.26 chars/token with the
+Qwen3.8 tokenizer). 260k is the whole master stream (1,108,548 chars, ~260.1k prompt
+tokens): the long end of the ladder, ~2k tokens under the 262,144 context.
 
 Position fractions (where the needle sits within the document):
     start  0.00  needle is the first thing in the document
@@ -77,8 +75,7 @@ QUESTION = (
 )
 
 # Length preset -> target document character count (clean, ~4.1 chars/token).
-# 200k is the new long end (fits the 262k context). 256k is the master stream
-# (overflows the 262k context, so it is the content source, not a rung).
+# 260k is the whole master stream and the long end (~260.1k tokens, fits the 262,144 context).
 LENGTH_CHARS = {
     "8k": 31_967,
     "32k": 137_026,
@@ -87,8 +84,8 @@ LENGTH_CHARS = {
     "128k": 554_226,
     "150k": 644_938,
     "200k": 822_000,   # ~200k tokens
-    "240k": 1_022_700, # long end (~240k tokens, the opencode compaction point; fits the 262k context)
-    "256k": 1_108_554,  # the master stream (reference; overflows the 262k context)
+    "240k": 1_022_700, # ~240k tokens, the opencode compaction point
+    "260k": 1_108_548, # whole master stream: ~260.1k tokens, ~261.1k with --multikey
 }
 # Position name -> fraction of document depth at which the needle is spliced.
 POS_FRACTION = {
