@@ -1591,31 +1591,13 @@ std::uint32_t dense_verify_chunk_keys(std::size_t context) noexcept {
                                       kDensePrefillKeys);
 }
 
-// Mid-row split: enough context chunks that the 4 x row-tile x chunk grid reaches
-// kMidRowsTargetCtas, each chunk at least kDenseVerifyMinimumChunkKeys keys, and at most
-// kMidRowsPartialRows row-chunk partial slots (12.7 MiB of FP32 partials).
-inline constexpr std::uint32_t kMidRowsTargetCtas = 128U;
-inline constexpr std::uint32_t kMidRowsPartialRows = 512U;
-
 struct MidRowsSplit {
     std::uint32_t chunks = 0U;
     std::uint32_t chunk_keys = 0U;
 };
 
-// Chunk bound before key rounding: monotonic in the context, so a workspace sized at a frontier
-// envelope covers every smaller context; the realized split never exceeds it.
-std::uint32_t mid_rows_chunk_bound(std::size_t context, std::uint32_t rows) noexcept {
-    const std::uint32_t tiles = (rows + kDensePrefillRows - 1U) / kDensePrefillRows;
-    std::size_t chunks = (kMidRowsTargetCtas + 4U * tiles - 1U) / (4U * tiles);
-    chunks = std::min<std::size_t>(chunks, kMidRowsPartialRows / rows);
-    chunks = std::min<std::size_t>(chunks, kDenseVerifyMaximumChunks);
-    chunks = std::min<std::size_t>(
-        chunks, (context + kDenseVerifyMinimumChunkKeys - 1U) / kDenseVerifyMinimumChunkKeys);
-    return static_cast<std::uint32_t>(std::max<std::size_t>(chunks, 1U));
-}
-
 MidRowsSplit mid_rows_split(std::size_t context, std::uint32_t rows) noexcept {
-    const std::size_t chunks = mid_rows_chunk_bound(context, rows);
+    const std::size_t chunks = mid_rows_chunks(context, rows);
     const std::size_t keys = (context + chunks - 1U) / chunks;
     const auto chunk_keys = static_cast<std::uint32_t>(
         (keys + kDensePrefillKeys - 1U) / kDensePrefillKeys * kDensePrefillKeys);
@@ -1626,9 +1608,29 @@ MidRowsSplit mid_rows_split(std::size_t context, std::uint32_t rows) noexcept {
 
 std::size_t fp8_int4_kv_attention_mid_rows_workspace_bytes(
     std::size_t context, std::uint32_t rows) noexcept {
-    if (!use_mid_rows_attention(rows, context, false)) return 0U;
-    return static_cast<std::size_t>(mid_rows_chunk_bound(context, rows)) * rows * 24U *
+    // Sized for every row count the route may take at this context, independent of whether the
+    // wave model splits it, so a plan at a frontier envelope covers every smaller call.
+    if (rows < kMidRowsMinimumRows || rows > kMidRowsMaximumRows || context < rows ||
+        context > kDensePrefillMaximumContext)
+        return 0U;
+    return static_cast<std::size_t>(mid_rows_chunk_limit(context, rows)) * rows * 24U *
            kDenseVerifyPartialStride * sizeof(float);
+}
+
+std::size_t fp8_int4_kv_attention_mid_rows_workspace_capacity_bytes(
+    std::size_t context, std::uint32_t max_rows) noexcept {
+    const std::uint32_t rows = std::min(max_rows, kMidRowsMaximumRows);
+    if (rows < kMidRowsMinimumRows || context < kMidRowsMinimumRows ||
+        context > kDensePrefillMaximumContext)
+        return 0U;
+    // Each call needs rows x min(64, 2048 / rows, ceil(context / 256)) slots, which is at most
+    // min(2048, max_rows x min(64, ceil(context / 256))).
+    const std::size_t per_row = std::min<std::size_t>(
+        kMidRowsMaximumChunks,
+        (context + kMidRowsMinimumChunkKeys - 1U) / kMidRowsMinimumChunkKeys);
+    const std::size_t slots =
+        std::min<std::size_t>(kMidRowsPartialRows, static_cast<std::size_t>(rows) * per_row);
+    return slots * 24U * kDenseVerifyPartialStride * sizeof(float);
 }
 
 hipError_t fp8_int4_kv_attention_mid_rows(const Fp8Int4KvAttentionArgs& a,

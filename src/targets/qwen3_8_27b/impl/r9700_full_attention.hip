@@ -114,15 +114,10 @@ std::size_t r9700_full_attention_workspace_capacity_bytes(
             required, ops::r9700::kv::fp8_int4_kv_attention_packed_decode_workspace_bytes(
                           visible_context, packed_rows));
     }
-    const std::uint32_t mid_rows_limit =
-        std::min(query_rows, ops::r9700::kv::kDensePrefillMinimumRows - 1U);
     if (!tree_or_device_count) {
-        for (std::uint32_t rows = ops::r9700::kv::kMidRowsMinimumRows; rows <= mid_rows_limit;
-             ++rows) {
-            required = std::max(
-                required, ops::r9700::kv::fp8_int4_kv_attention_mid_rows_workspace_bytes(
-                              visible_context, rows));
-        }
+        required = std::max(
+            required, ops::r9700::kv::fp8_int4_kv_attention_mid_rows_workspace_capacity_bytes(
+                          visible_context, query_rows));
     }
     // Dense prefill is fused and needs no workspace; the qualification-only P129 tail reuses
     // the single-row score workspace after the dense launch.
@@ -248,6 +243,22 @@ static hipError_t launch_r9700_attention(
 #endif
     const bool tree_or_device_count =
         a.ancestor_masks != nullptr || a.active_query_rows != nullptr;
+    // Host-fixed rows that would underfill the unsplit dense grid take the split route first.
+    if (ops::r9700::kv::use_mid_rows_attention(static_cast<std::uint32_t>(rows), raw.context,
+                                               tree_or_device_count) &&
+        a.ancestor_masks == nullptr && a.prefix_lengths == nullptr &&
+        raw.key_layout == ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest &&
+        raw.value_layout == ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest &&
+        raw.value_scale_layout == ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest) {
+        const std::size_t required = ops::r9700::kv::fp8_int4_kv_attention_mid_rows_workspace_bytes(
+            raw.context, static_cast<std::uint32_t>(rows));
+        if (required == 0U || a.workspace == nullptr || a.workspace_bytes < required) {
+            return hipErrorInvalidValue;
+        }
+        auto mid = raw;
+        mid.score_workspace = static_cast<float*>(a.workspace);
+        return ops::r9700::kv::fp8_int4_kv_attention_mid_rows(mid, stream);
+    }
     const bool dense_prefill = ops::r9700::kv::use_dense_prefill_attention(
         static_cast<std::uint32_t>(rows), raw.context) &&
         a.ancestor_masks == nullptr && a.prefix_lengths == nullptr &&
@@ -276,21 +287,6 @@ static hipError_t launch_r9700_attention(
         tail.score_workspace = static_cast<float*>(a.workspace);
         tail.output += 128U * row_elements;
         return ops::r9700::kv::fp8_int4_kv_attention_wmma(tail, stream);
-    }
-    if (ops::r9700::kv::use_mid_rows_attention(static_cast<std::uint32_t>(rows), raw.context,
-                                               tree_or_device_count) &&
-        a.ancestor_masks == nullptr && a.prefix_lengths == nullptr &&
-        raw.key_layout == ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest &&
-        raw.value_layout == ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest &&
-        raw.value_scale_layout == ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest) {
-        const std::size_t required = ops::r9700::kv::fp8_int4_kv_attention_mid_rows_workspace_bytes(
-            raw.context, static_cast<std::uint32_t>(rows));
-        if (required == 0U || a.workspace == nullptr || a.workspace_bytes < required) {
-            return hipErrorInvalidValue;
-        }
-        auto mid = raw;
-        mid.score_workspace = static_cast<float*>(a.workspace);
-        return ops::r9700::kv::fp8_int4_kv_attention_mid_rows(mid, stream);
     }
     if (ops::r9700::kv::use_packed_decode_attention(
             static_cast<std::uint32_t>(rows), raw.context, tree_or_device_count) &&

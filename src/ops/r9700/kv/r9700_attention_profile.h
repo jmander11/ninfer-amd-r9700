@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 
@@ -43,16 +44,60 @@ inline constexpr bool kTextP129WmmaTailCandidate =
            visible_context <= kDensePrefillMaximumContext;
 }
 
-// Host-fixed causal rows between the packed decode route (1..8) and dense prefill (>= 128), such
-// as short appended turns and prompt tails: the dense-prefill tiles split over the context, merged
-// in FP32, so a short chunk against a long cache keeps every CTA busy.
+// Mid-row split: the dense-prefill tiles (4 KV heads x 32-row tiles per CTA, one resident CTA per
+// compute unit) split over context chunks into FP32 partials, merged stably. The chunk count
+// minimizes whole waves of kMidRowsWaveCtas CTAs times the keys each CTA streams plus a fixed
+// per-CTA overhead, within at most kMidRowsMaximumChunks chunks of at least
+// kMidRowsMinimumChunkKeys keys and kMidRowsPartialRows row-chunk partial slots (50.7 MiB).
 inline constexpr std::uint32_t kMidRowsMinimumRows = 9U;
+inline constexpr std::uint32_t kMidRowsMaximumRows = 1023U;
+inline constexpr std::uint32_t kMidRowsWaveCtas = 64U;
+inline constexpr std::uint32_t kMidRowsMaximumChunks = 64U;
+inline constexpr std::uint32_t kMidRowsMinimumChunkKeys = 256U;
+inline constexpr std::uint32_t kMidRowsPartialRows = 2048U;
+inline constexpr std::size_t kMidRowsChunkOverheadKeys = 64U;
+
+// Largest chunk count for (context, rows): monotonic in the context, so a workspace sized at a
+// frontier envelope covers every smaller context.
+[[nodiscard]] constexpr std::uint32_t mid_rows_chunk_limit(std::size_t visible_context,
+                                                           std::uint32_t query_rows) noexcept {
+    std::size_t limit = kMidRowsMaximumChunks;
+    if (query_rows != 0U) limit = std::min<std::size_t>(limit, kMidRowsPartialRows / query_rows);
+    limit = std::min<std::size_t>(
+        limit, (visible_context + kMidRowsMinimumChunkKeys - 1U) / kMidRowsMinimumChunkKeys);
+    return static_cast<std::uint32_t>(std::max<std::size_t>(limit, 1U));
+}
+
+[[nodiscard]] constexpr std::uint32_t mid_rows_chunks(std::size_t visible_context,
+                                                      std::uint32_t query_rows) noexcept {
+    const std::size_t ctas = 4U * ((static_cast<std::size_t>(query_rows) + 31U) / 32U);
+    const std::uint32_t limit = mid_rows_chunk_limit(visible_context, query_rows);
+    std::uint32_t best = 1U;
+    std::size_t best_cost = 0U;
+    for (std::uint32_t chunks = 1U; chunks <= limit; ++chunks) {
+        const std::size_t waves = (ctas * chunks + kMidRowsWaveCtas - 1U) / kMidRowsWaveCtas;
+        const std::size_t cost =
+            waves * ((visible_context + chunks - 1U) / chunks + kMidRowsChunkOverheadKeys);
+        if (chunks == 1U || cost < best_cost) {
+            best = chunks;
+            best_cost = cost;
+        }
+    }
+    return best;
+}
+
+// Host-fixed causal rows above the packed decode route (1..8), such as appended turns, tool
+// results and prompt tails, take the split so a short call against a long cache keeps every CTA
+// busy: always below dense prefill's 128 rows, and up to 1023 rows whenever the wave model splits
+// the context (it takes precedence over dense prefill there).
 [[nodiscard]] constexpr bool use_mid_rows_attention(std::uint32_t query_rows,
                                                     std::size_t visible_context,
                                                     bool tree_or_device_count) noexcept {
     return !tree_or_device_count && query_rows >= kMidRowsMinimumRows &&
-           query_rows < kDensePrefillMinimumRows && visible_context >= query_rows &&
-           visible_context <= kDensePrefillMaximumContext;
+           query_rows <= kMidRowsMaximumRows && visible_context >= query_rows &&
+           visible_context <= kDensePrefillMaximumContext &&
+           (query_rows < kDensePrefillMinimumRows ||
+            mid_rows_chunks(visible_context, query_rows) >= 2U);
 }
 
 // Production packed decode route for 1..8 causal rows per sequence (ordinary decode, MTP and

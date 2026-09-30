@@ -136,12 +136,13 @@ void qualify_host_split512_routing() {
                 q27::r9700_full_attention_workspace_capacity_bytes(4U, 8191U, true) == 0U,
             "packed/split-512 caller-owned workspace selection differs");
     // A plan sized for its maximum row count and visible frontier covers every narrower
-    // host-fixed call (packed 1..8 and mid-row 9..127 rows) at every smaller frontier.
-    for (const std::uint32_t max_rows : {9U, 16U, 20U, 40U, 127U, 2048U}) {
+    // host-fixed call (packed 1..8 and mid-row 9..1023 rows) at every smaller frontier.
+    for (const std::uint32_t max_rows : {9U, 16U, 20U, 40U, 127U, 300U, 2048U}) {
         for (std::size_t envelope = 64U; envelope <= 40960U; envelope += 64U) {
             const std::size_t planned =
                 q27::r9700_full_attention_workspace_capacity_bytes(max_rows, envelope, false);
-            for (std::uint32_t rows = 1U; rows <= std::min(max_rows, 127U); ++rows) {
+            for (std::uint32_t rows = 1U; rows <= std::min(max_rows, kv::kMidRowsMaximumRows);
+                 ++rows) {
                 for (const std::size_t frontier : {envelope, envelope - 63U, envelope / 2U}) {
                     if (frontier < rows) continue;
                     const std::size_t call = rows <= 8U
@@ -154,7 +155,7 @@ void qualify_host_split512_routing() {
         }
     }
     require(q27::r9700_full_attention_workspace_capacity_bytes(2048U, 262144U, false) <=
-                std::size_t{512U} * 24U * 258U * sizeof(float),
+                std::size_t{kv::kMidRowsPartialRows} * 24U * 258U * sizeof(float),
             "dense prefill plans more attention workspace than the mid-row bound");
     const auto has_classes = [](const std::vector<Variant::GraphExecutionProfile>& profiles,
                                 std::initializer_list<std::uint32_t> wanted) {
@@ -256,8 +257,11 @@ void qualify_host_attention_parity_routing() {
             "packed decode production workspace escaped width/tree selection");
     // The 129-row plan also covers every narrower host-fixed call at that frontier.
     std::size_t narrower = kv::fp8_int4_kv_attention_packed_decode_workspace_bytes(129U, 8U);
-    for (std::uint32_t rows = 9U; rows <= 127U; ++rows)
-        narrower = std::max(narrower, kv::fp8_int4_kv_attention_mid_rows_workspace_bytes(129U, rows));
+    for (std::uint32_t rows = 9U; rows <= 129U; ++rows)
+        require(kv::fp8_int4_kv_attention_mid_rows_workspace_bytes(129U, rows) <=
+                    kv::fp8_int4_kv_attention_mid_rows_workspace_capacity_bytes(129U, 129U),
+                "mid-row capacity bound does not cover a narrower call");
+    narrower = std::max(narrower, kv::fp8_int4_kv_attention_mid_rows_workspace_capacity_bytes(129U, 129U));
     require(q27::r9700_full_attention_workspace_capacity_bytes(129U, 129U, false) ==
                 std::max(narrower,
                          text_enabled ? q27::r9700_full_attention_score_workspace_capacity_bytes(129U)

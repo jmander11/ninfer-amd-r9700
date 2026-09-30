@@ -134,14 +134,19 @@ struct DensePrefillWmmaResources {
 [[nodiscard]] hipError_t fp8_int4_kv_attention_dense_prefill_resources(
     std::uint32_t value_group, bool split, DensePrefillWmmaResources* resources) noexcept;
 
-// Production mid-row route (use_mid_rows_attention: 9..127 host-fixed causal rows, such as short
-// appended turns and prompt tails): the dense-prefill tile arithmetic above, split over context
-// chunks into the caller-owned FP32 partial workspace and normalized by the stable FP32 merge of
-// the packed decode route. Row positions are absolute; invalid positions, page-table rows and
+// Production mid-row route (use_mid_rows_attention: 9..127 host-fixed causal rows, and up to 1023
+// rows when the wave model splits the context, such as appended turns, tool results and prompt
+// tails): the dense-prefill tile arithmetic above, split over context chunks into the
+// caller-owned FP32 partial workspace and normalized by the stable FP32 merge of the packed
+// decode route. Row positions are absolute; invalid positions, page-table rows and
 // physical pages poison exactly the dependent rows with NaN. Device-selected row counts and tree
 // metadata are rejected.
 [[nodiscard]] std::size_t fp8_int4_kv_attention_mid_rows_workspace_bytes(
     std::size_t context, std::uint32_t rows) noexcept;
+// Closed-form planning bound covering every mid-row call of at most `max_rows` rows at every
+// context up to `context`: min(kMidRowsPartialRows, max_rows x chunk limit) partial slots.
+[[nodiscard]] std::size_t fp8_int4_kv_attention_mid_rows_workspace_capacity_bytes(
+    std::size_t context, std::uint32_t max_rows) noexcept;
 [[nodiscard]] hipError_t fp8_int4_kv_attention_mid_rows(const Fp8Int4KvAttentionArgs& args,
                                                         hipStream_t stream) noexcept;
 

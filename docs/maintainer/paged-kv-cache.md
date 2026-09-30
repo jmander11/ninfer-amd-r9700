@@ -481,14 +481,17 @@ transaction ownership. Separate ordered append followed by the selected attentio
 qualified architecture. Host-fixed 1..6-row decode (ordinary T=1, MTP and DFlash chain
 verification; non-tree, contexts 64..262144) runs the packed decode route: the dense attention
 arithmetic split over context chunks with a stable FP32 merge and a bounded caller-owned partial
-workspace. Host-fixed 9..127-row causal chunks (short appended turns and prompt tails) run the
-mid-row route: the 32-row dense prefill tiles split over at most 64 context chunks into at most
-512 row-chunk FP32 partials, merged by the same stable FP32 merge. 128 rows and above take dense
-prefill. At context 8,192 and above, fixed-width T=4 with packed-tree or device-active-row
-metadata uses the three-stage split-512 leaf with caller-owned score/partial/merge storage;
-remaining shapes use fused QK/online-FP32-softmax/PV. Planned attention workspace covers every
-narrower host-fixed row count at every smaller frontier, because planners size one call from the
-maximum row count and visible envelope.
+workspace. Host-fixed 9..127-row causal chunks (appended turns, tool results and prompt tails)
+run the mid-row route: the 32-row dense prefill tiles split over at most 64 context chunks into at
+most 2048 row-chunk FP32 partials (50.7 MB), merged by the same stable FP32 merge. The chunk
+count minimizes whole 64-CTA waves times keys per CTA plus a fixed overhead; host-fixed
+128..1023-row calls take this route whenever that splits the context and dense prefill
+otherwise, as do 1024 rows and above and device-counted rows. At context 8,192 and above,
+fixed-width T=4 with packed-tree or device-active-row metadata uses the three-stage split-512
+leaf with caller-owned score/partial/merge storage; remaining shapes use fused
+QK/online-FP32-softmax/PV. Planned attention workspace covers every narrower host-fixed row
+count at every smaller frontier, because planners size one call from the maximum row count and
+visible envelope.
 
 Final admission additionally requires:
 

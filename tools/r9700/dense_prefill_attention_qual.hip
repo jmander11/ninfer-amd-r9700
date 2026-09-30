@@ -166,11 +166,15 @@ std::vector<std::int32_t> make_positions(std::uint32_t rows) {
     return result;
 }
 
-// Rows below the dense-prefill minimum take the production mid-row split route.
+// Host-fixed rows the mid-row predicate admits take the production split route; device-counted
+// rows stay on the unsplit dense route, as in the leaf.
 hipError_t launch_selected_dense(const kv::Fp8Int4KvAttentionArgs& args, hipStream_t stream) {
-    return args.query_rows < kv::kDensePrefillMinimumRows
-               ? kv::fp8_int4_kv_attention_mid_rows(args, stream)
-               : kv::fp8_int4_kv_attention_dense_prefill(args, stream);
+    if (kv::use_mid_rows_attention(args.query_rows, args.context,
+                                   args.active_query_rows != nullptr))
+        return kv::fp8_int4_kv_attention_mid_rows(args, stream);
+    auto dense = args;
+    dense.score_workspace = nullptr;
+    return kv::fp8_int4_kv_attention_dense_prefill(dense, stream);
 }
 
 std::array<double, kD> expected_vector(const Fixture& fixture, const std::vector<hip_bfloat16>& queries,
@@ -251,7 +255,12 @@ void host_predicate_regression() {
     args.value_scale_layout = kv::Fp8Int4KvPlaneLayout::FeatureFastest;
     args.output = reinterpret_cast<float*>(1U);
     auto rejected = [&](const kv::Fp8Int4KvAttentionArgs& candidate, const char* label) {
-        if (launch_selected_dense(candidate, nullptr) != hipErrorInvalidValue) fail(label);
+        if (kv::fp8_int4_kv_attention_dense_prefill(candidate, nullptr) != hipErrorInvalidValue)
+            fail(label);
+    };
+    auto rejected_mid = [&](const kv::Fp8Int4KvAttentionArgs& candidate, const char* label) {
+        if (kv::fp8_int4_kv_attention_mid_rows(candidate, nullptr) != hipErrorInvalidValue)
+            fail(label);
     };
     auto bad = args; bad.score_workspace = reinterpret_cast<float*>(1U);
     rejected(bad, "score workspace was accepted");
@@ -270,21 +279,24 @@ void host_predicate_regression() {
     mid.query_rows = 19U;
     mid.score_workspace = reinterpret_cast<float*>(1U);
     bad = mid; bad.score_workspace = nullptr;
-    rejected(bad, "mid-row launch without partial workspace was accepted");
+    rejected_mid(bad, "mid-row launch without partial workspace was accepted");
     bad = mid; bad.active_query_rows = reinterpret_cast<const std::int32_t*>(1U);
-    rejected(bad, "mid-row launch with device-selected rows was accepted");
+    rejected_mid(bad, "mid-row launch with device-selected rows was accepted");
     bad = mid; bad.ancestor_masks = reinterpret_cast<const std::int32_t*>(1U);
-    rejected(bad, "mid-row launch with tree metadata was accepted");
+    rejected_mid(bad, "mid-row launch with tree metadata was accepted");
     bad = mid; bad.query_rows = 8U;
-    rejected(bad, "packed-decode row count took the mid-row route");
+    rejected_mid(bad, "packed-decode row count took the mid-row route");
     bad = mid; bad.context = 18U;
-    rejected(bad, "mid-row context shorter than query rows was accepted");
+    rejected_mid(bad, "mid-row context shorter than query rows was accepted");
     if (kv::fp8_int4_kv_attention_mid_rows_workspace_bytes(2048U, 8U) != 0U ||
-        kv::fp8_int4_kv_attention_mid_rows_workspace_bytes(2048U, 128U) != 0U ||
+        kv::fp8_int4_kv_attention_mid_rows_workspace_bytes(2048U, 1024U) != 0U ||
         kv::fp8_int4_kv_attention_mid_rows_workspace_bytes(2048U, 9U) == 0U ||
-        kv::fp8_int4_kv_attention_mid_rows_workspace_bytes(262144U, 127U) >
-            std::size_t{512U} * 24U * 258U * sizeof(float))
-        fail("mid-row workspace predicate or bound changed");
+        kv::fp8_int4_kv_attention_mid_rows_workspace_bytes(2048U, 1023U) == 0U)
+        fail("mid-row workspace predicate changed");
+    for (std::uint32_t rows = kv::kMidRowsMinimumRows; rows <= kv::kMidRowsMaximumRows; ++rows)
+        if (kv::fp8_int4_kv_attention_mid_rows_workspace_bytes(262144U, rows) >
+            std::size_t{2048U} * 24U * 258U * sizeof(float))
+            fail("mid-row workspace exceeds its partial-slot bound");
 }
 void run_case(std::uint32_t rows, std::uint32_t group, std::uint32_t context,
               std::uint16_t uniform_scale = 0U, std::uint32_t timed_iterations = 0U) {
@@ -320,7 +332,7 @@ void run_case(std::uint32_t rows, std::uint32_t group, std::uint32_t context,
         .value_layout=kv::Fp8Int4KvPlaneLayout::FeatureFastest,
         .value_scale_layout=kv::Fp8Int4KvPlaneLayout::FeatureFastest,
         .output=d_output.get()};
-    if (partial_bytes != 0U) args.score_workspace = d_partial.get();
+    if (kv::use_mid_rows_attention(rows, context, false)) args.score_workspace = d_partial.get();
     HIP_CHECK(launch_selected_dense(args, nullptr));
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<float> output(static_cast<std::size_t>(rows) * kHq * kD);
@@ -431,11 +443,19 @@ void run_case(std::uint32_t rows, std::uint32_t group, std::uint32_t context,
         HIP_CHECK(hipStreamDestroy(stream));
     }
     if (rows == 129U || rows == 1537U) {
-        const std::vector<float> baseline_output = output;
+        // Device-counted rows take the unsplit dense route, so its full-count output is the
+        // exact baseline for the active-row prefix.
         DeviceBuffer<std::int32_t> d_active(1U);
-        std::int32_t active = rows == 129U ? 127 : static_cast<std::int32_t>(rows / 2U + 3U);
+        std::int32_t active = static_cast<std::int32_t>(rows);
         HIP_CHECK(hipMemcpy(d_active.get(), &active, sizeof(active), hipMemcpyHostToDevice));
         args.active_query_rows = d_active.get();
+        HIP_CHECK(launch_selected_dense(args, nullptr));
+        HIP_CHECK(hipDeviceSynchronize());
+        std::vector<float> baseline_output(output.size());
+        HIP_CHECK(hipMemcpy(baseline_output.data(), d_output.get(), d_output.bytes(),
+                            hipMemcpyDeviceToHost));
+        active = rows == 129U ? 127 : static_cast<std::int32_t>(rows / 2U + 3U);
+        HIP_CHECK(hipMemcpy(d_active.get(), &active, sizeof(active), hipMemcpyHostToDevice));
         HIP_CHECK(hipMemset(d_output.get(), 0xff, d_output.bytes()));
         HIP_CHECK(launch_selected_dense(args, nullptr));
         HIP_CHECK(hipDeviceSynchronize());
@@ -628,6 +648,15 @@ int main(int argc, char** argv) {
             run_case(127U, group, 797U);
             run_case(127U, group, 32768U, 0x7bffU);
             run_case(19U, group, 32768U, 0x0001U);
+            // Split route above 127 rows (appended tool results and turns): wave-model chunking
+            // of 5..31 row tiles, fresh and long contexts, and the dense fallback at one chunk.
+            for (const std::uint32_t rows : {128U, 129U, 192U, 255U, 384U, 767U, 768U}) {
+                run_case(rows, group, rows);
+                run_case(rows, group, 22229U);
+                run_case(rows, group, 131072U);
+            }
+            run_case(192U, group, 32768U, 0x7bffU);
+            run_case(384U, group, 262144U);
         }
         std::cout << "production dense and mid-row G16/G32 FP64 qualification: PASS\n";
         return 0;

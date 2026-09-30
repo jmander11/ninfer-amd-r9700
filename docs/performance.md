@@ -161,6 +161,35 @@ poisoning). Median per-layer times, G16:
 unchanged (550,528 tokens). Evidence: `profiles/bench/r9700-attn-midrows-20260928/`,
 `profiles/bench/r9700-decode-study-20260928/`.
 
+## Mid-row split extended to 1023 rows (2026-09-30)
+
+Idea port of upstream 9639c32f (split attention for mid-sized appends). A dense-prefill call
+launches 4 KV heads x ceil(rows/32) row tiles, so 128..~500-row calls (tool results, medium
+appended turns, prompt tails) fill only 16..64 of the 64 CUs' CTA slots while each CTA streams
+the whole context. Host-fixed 9..1023-row causal calls now take the mid-row split whenever the
+wave model splits the context: the chunk count minimizes `ceil(ctas*c/64) * (ceil(ctx/c) + 64)`
+over at most 64 chunks, at least 256 keys per chunk and at most 2048 row-chunk FP32 partials; 1024
+rows and above, device-counted rows and calls the model does not split stay on dense prefill. The
+kernels are unchanged and 9..127-row timings are within noise. The partial buffer is at most
+50.7 MB, inside the existing 530 MB workspace plan, so C4 DFlash auto KV capacity is unchanged by this
+route (560,448 tokens with the 21-protection weights). FP64 oracle: `dense_prefill_attention_qual`
+(rows 128..768 at their own length, 22,229 and 131,072 keys; 192 rows at a V-scale extreme; 384
+rows at 262,144), `runtime_planner_qual` workspace coverage. Median per-layer ms, G16, dense ->
+split:
+
+| rows | 8K | 22K | 65K | 131K |
+|---:|---:|---:|---:|---:|
+| 128 | 0.62 -> 0.28 | 1.64 -> 0.72 | 4.83 -> 2.11 | 9.56 -> 4.09 |
+| 192 | 0.65 -> 0.42 | 1.76 -> 1.11 | 5.15 -> 3.07 | 9.82 -> 5.84 |
+| 256 | 0.69 -> 0.53 | 1.85 -> 1.44 | 5.43 -> 4.10 | 10.23 -> 7.73 |
+| 384 | 0.95 -> 0.82 | 2.57 -> 2.14 | 7.00 -> 5.79 | 13.35 -> 11.07 |
+| 768 | 1.60 -> 1.55 | 4.33 -> 4.09 | 13.28 -> 10.97 | 26.54 -> 21.88 |
+
+512 rows stay dense (the grid already fills whole waves). With 16 full-attention layers, a
+128-row append at 131K saves ~87 ms of prefill attention. Fixed 256- and 128-CTA targets were
+rejected (slower at 9..127 and at 192/384 rows respectively). Evidence:
+`profiles/bench/r9700-split-append-20260930/`.
+
 ## Decode step attribution (2026-09-29)
 
 C1, production artifact, Device Graphs, `ninfer_bench` region traces (kernel durations) against
