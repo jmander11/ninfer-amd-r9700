@@ -128,7 +128,7 @@ routing map, not a mandatory reading list:
 
 ## Upstream synchronization
 
-Upstream `experimental` is reconciled through `34c7119b00fd10b64553cdcf4c295f01ac84f605`
+Upstream `experimental` is reconciled through `9639c32f32027630cd361407807fc004cd91ce13`
 via custom AMD ports, not merged ancestry.
 Unsupported NVIDIA paths were excluded; decisions are in `docs/maintainer/upstream-sync.md`.
 For future syncs, review upstream changes after this baseline against current AMD behavior,

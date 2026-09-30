@@ -5,10 +5,10 @@ repository by custom AMD ports, not merged ancestry; `AGENTS.md` states the sync
 
 ## Baseline
 
-Reconciled through upstream `34c7119b00fd10b64553cdcf4c295f01ac84f605` (2026-09-28). The previous baseline
-`e04fad3728573a0109236929f5d473475a8657f2` (2026-09-21, AMD ports `7187d95d`, `2eab0a50`,
-`49c896dd`) was advanced by the dispositions below. The next sync reviews upstream changes after
-`34c7119b` against current AMD behavior.
+Reconciled through upstream `9639c32f32027630cd361407807fc004cd91ce13` (2026-09-30), advanced
+from `34c7119b` (2026-09-28) and `e04fad3728573a0109236929f5d473475a8657f2` (2026-09-21, AMD
+ports `7187d95d`, `2eab0a50`, `49c896dd`) by the dispositions below. The next sync reviews upstream changes after `9639c32f`
+against current AMD behavior.
 
 ## Ported features (`c450798c..e04fad37`)
 
@@ -103,8 +103,21 @@ CUDA paths, NVFP4 and additional model targets are excluded by the product contr
 
 Evidence: `profiles/bench/r9700-upstream-sync-20260928/`.
 
-## After `34c7119b` (not reconciled; baseline unchanged)
+## `34c7119b..9639c32f` (14 upstream commits, reconciled 2026-09-30)
 
-- Partially ported: `42d7fa75` (NIAH), only its 260K multi-key fixtures
-  (`examples/cli/messages/long_niah_multikey_260k_*.json`); the local `run_niah_check` already
-  reads them. Its other fixtures and checker options are not yet dispositioned.
+- Ported: `42d7fa75` multi-key NIAH (`1a6eb119`: 32K/240K/260K lengths, the 260K single-key
+  fixtures, `run_niah_check --multikey`; all ten 260K fixtures regenerate byte-exact), `8aa4ce07`
+  preserve-thinking replay at the generation opener (`b9dd0450`), `5342e7a9` p-less block
+  verification (`d1f56ed8`; FP64 block oracle, greedy tokens unchanged, p-less accepted length
+  within noise on R9700: C1 3.62 -> 3.57 tokens/round, C4 3.51 -> 3.51).
+- Ported as an idea: `9639c32f` short-append attention (`2fa61af7`). Its decode-chunked small
+  appends match the existing 1..8-row packed decode and 9..127-row mid-row routes; its grid.z
+  key split for wider calls becomes the mid-row split for 128..1023 rows under a whole-wave cost
+  model (128 rows at 131K: 9.56 -> 4.09 ms per layer). 1024-row calls fill whole waves and stay
+  dense.
+- Already equivalent: `c9a04602` (`d0e58c0a`, `23877a2e`), `db2b7153` (`455e45ef`), `1e4dc811`
+  (`3c4b4ce6`), `9b7d1277` (`2a8b033f`), `37c63461` (the host tool-mask mailbox already runs plain
+  rounds at the no-exchange ceiling), and the `94d97c11` DFlash2 draft-temperature contract.
+- Excluded: `34ed7bc6` (NVFP4 A8 gate/up scratch), the `94d97c11` sparse-attention flags (no
+  runtime sparse-attention knobs here), and the NVIDIA measurement records `f33ff218`, `163c6b38`,
+  `ceeac05d`.
