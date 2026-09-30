@@ -47,12 +47,13 @@ and evidence: `docs/performance.md`.
 
 ## Model and precision
 
-- **17.02 GB DFlash-enabled artifact** (decimal file size, not VRAM),
+- **16.75 GB DFlash-enabled artifact** (decimal file size, not VRAM),
   `qwen3.8-27b/r9700-fp8lut4` (the admitted production weights).
-- Text-layer weights in FP8LUT4 (4-bit codes with a per-32 codebook of exact E4M3
-  values, FP32 row scale; GDN and MLP GPTQ-rounded on real-session calibration); 26 protected
-  projections in FP8; Q4 embedding/output
-  head, MTP and DFlash with BF16 codebooks.
+- Text-layer weights and output head in FP8LUT4 (4-bit codes with a per-32 codebook of exact E4M3
+  values, FP32 row scale; GPTQ-rounded on real-session calibration except attention query/key);
+  21 protected attention projections in FP8; Q4 embedding, MTP and DFlash with BF16 codebooks.
+- Measured closer to the BF16 source than the 5090 NVFP4 build on every 8K/32K prefill and
+  decode PPL cell.
 - Per-token FP8 E4M3 activations for every Text projection (prefill, ordinary
   decode and DFlash verification); Q4 A8 for the head, MTP and drafter.
 - Fixed cache: FP8 E4M3FN keys, INT4 values, FP16 value scales. DFlash state is BF16.

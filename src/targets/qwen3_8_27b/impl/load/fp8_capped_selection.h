@@ -15,10 +15,13 @@ inline constexpr Matrix matrices[] = {
 #undef NINFER_QWEN38_FP8_CAP_RECIPE
 };
 
+// The FP8LUT4 Text profile has its own protection set; every other profile uses its base recipe's.
 constexpr artifact::NumericFormat matrix_format(WeightsProfile profile, std::string_view name) {
-    profile = fp8_capped_base_profile(profile);
-    if (profile == WeightsProfile::R9700Q4Fp8SelectiveCapDFlash2Q4Evaluation)
-        profile = WeightsProfile::R9700Q4Fp8SelectiveCapEvaluation;
+    if (!is_fp8lut4_text_profile(profile)) {
+        profile = fp8_capped_base_profile(profile);
+        if (profile == WeightsProfile::R9700Q4Fp8SelectiveCapDFlash2Q4Evaluation)
+            profile = WeightsProfile::R9700Q4Fp8SelectiveCapEvaluation;
+    }
     for (const auto& matrix : matrices)
         if (matrix.profile == profile && matrix.name == name)
             return artifact::NumericFormat::F8E4M3_ROW_F32S;

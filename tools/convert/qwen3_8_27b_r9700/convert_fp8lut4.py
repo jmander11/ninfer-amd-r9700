@@ -1,13 +1,15 @@
 """Create-only conversion of the FP8LUT4 Text recipe on the selective-cap DFlash2 base.
 
-Every Text-layer projection the base stores as Q4G64, and the output head, is re-encoded from the
-original BF16 checkpoint as FP8LUT4 (`fp8lut4_codec`), MLP gate/up rows in the interleaved
-SiLU-pair order (`fp8lut4_codec.interleave_gate_up`), with GPTQ error-compensated rounding against
-the input second moments of the calibration sequences (`calibration.InputMoments`, evaluated
-layer-major through the BF16 reference in lock-step with the object order; the head against the
-final-norm moments). The token embedding is stored row-split (`row-split-k128-v1`), an exact
+Every Text-layer projection except the 21 FP8 protections of `fp8_capped_selection.inc` (the
+5090 NVFP4 reference's BF16 set plus the attention input projections at layers 27/31/51), and the
+output head, is re-encoded from the original BF16 checkpoint as FP8LUT4 (`fp8lut4_codec`), MLP
+gate/up rows in the interleaved SiLU-pair order (`fp8lut4_codec.interleave_gate_up`), with GPTQ
+error-compensated rounding against the input second moments of the calibration sequences
+(`calibration.InputMoments`, evaluated layer-major through the BF16 reference in lock-step with
+the object order; the head against the final-norm moments). This includes the base's FP8 matrices
+outside the protections. The token embedding is stored row-split (`row-split-k128-v1`), an exact
 permutation of the base's N16K16 codes and scales, because it is only row-gathered from pinned
-host memory. Every other object (FP8 protections, draft head, MTP, DFlash2 companion, Vision,
+host memory. Every other object (the FP8 protections, draft head, MTP, DFlash2 companion, Vision,
 resources) is copied byte-exact from the base artifact.
 `--reuse-layers` copies each Text-layer FP8LUT4 object byte-exact from an existing
 `r9700-fp8lut4` artifact of the same calibration and damping whose receipt records the same
@@ -26,6 +28,8 @@ from tools.artifact.container import (
     TensorSpec as StoredTensor, ResourceSpec as StoredResource,
 )
 from tools.artifact.layouts import transcode_q4_n16k16
+from .convert_fp8_capped import selections
+from .e4m3_inventory import F8E4M3_ROW_F32S
 
 # Mean-diagonal GPTQ damping per calibrated input, selected on held-out calibration sequences:
 # the 17408-wide MLP down input overfits at low damping.
@@ -43,11 +47,22 @@ BASE_WEIGHTS_ID = "r9700-q4-fp8-selective-cap-n16k16-dflash2-q4-eval"
 WEIGHTS_ID = "r9700-fp8lut4"
 FP8LUT4 = "FP8LUT4"
 FP8LUT4_LAYOUT = "r9700-fp8lut4-n16k64-v1"
+# The Text projections kept as row-scaled FP8 (the binder reads the same authority entry).
+PROTECTED = frozenset(selections()[0]["R9700Fp8Lut4"])
 
 
 def selected(obj) -> bool:
-    return (isinstance(obj, TensorObject) and obj.format == "Q4G64_F16S" and
-            (obj.name.startswith("text/layers/") or obj.name == HEAD))
+    if not isinstance(obj, TensorObject):
+        return False
+    if obj.name == HEAD:
+        return obj.format == "Q4G64_F16S"
+    if not obj.name.startswith("text/layers/"):
+        return False
+    if obj.name in PROTECTED:
+        if obj.format != F8E4M3_ROW_F32S:
+            raise ValueError(f"base protection {obj.name} is not row-scaled FP8")
+        return False
+    return obj.format in ("Q4G64_F16S", F8E4M3_ROW_F32S)
 
 
 def recorded(chunks, record):
@@ -110,7 +125,7 @@ def convert(args) -> None:
                                    damping=dict(DAMPING, default=DEFAULT_DAMPING,
                                                 output_head=HEAD_DAMPING),
                                    independent_roles=list(INDEPENDENT_ROLES)),
-                  objects=[])
+                  fp8_protections=sorted(PROTECTED), objects=[])
     with Artifact(args.base) as base, ShardReader(args.model) as reader, \
             (reuse if reuse is not None else contextlib.nullcontext()):
         if base.identity.weights_id != BASE_WEIGHTS_ID:

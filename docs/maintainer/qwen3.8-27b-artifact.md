@@ -118,18 +118,21 @@ see `docs/performance.md` for quality tradeoffs and delivery evidence.
 
 ### FP8LUT4 Text recipe
 
-`r9700-fp8lut4` (profile `R9700Fp8Lut4`, 17,018,216,960 bytes; admitted 2026-09-27, output head
-added 2026-09-28, see `docs/performance.md`) is the selective-cap DFlash2
-companion with every Text-layer projection the base stores as Q4G64, and the target output head
-(248320 x 5120), re-encoded from the original BF16 checkpoint as `FP8LUT4` in
-`r9700-fp8lut4-n16k64-v1` (see `tensor-formats.md`), including GDN value_z. The 26 FP8
-protections, embedding, draft head, MTP, DFlash2 companion, Vision and resources are copied
-byte-exact from the base. MLP gate/up rows are stored gate/up interleaved in
-16-row tiles (stored row `16 b + i` is gate feature `8 b + i` for `i < 8`, else up feature
-`8 b + i - 8`) so the projection publishes the SiLU-gated activation directly; no other object is
-permuted. The binder uses the selective-cap base inventory and switches exactly its Text-layer Q4
-matrices and output head to FP8LUT4; the head runs through the `ops::linear` FP8LUT4 route at
-every width.
+`r9700-fp8lut4` (profile `R9700Fp8Lut4`, 16,752,796,160 bytes; admitted 2026-09-27, output head
+added 2026-09-28, protections reduced to 21 on 2026-09-30, see `docs/performance.md`) is the
+selective-cap DFlash2 companion with every Text-layer projection outside its 21 FP8 protections,
+and the target output head (248320 x 5120), re-encoded from the original BF16 checkpoint as
+`FP8LUT4` in `r9700-fp8lut4-n16k64-v1` (see `tensor-formats.md`), including GDN value_z. The
+protections are the `R9700Fp8Lut4` entries of `fp8_capped_selection.inc`, read by both the binder
+and the converter: the 5090 NVFP4 reference's BF16 set (attention query/key and gate/value at
+layers 3, 7, 11, 15, 19 and 23, attention output 3 and 7, GDN output 4) plus attention query/key
+and gate/value at layers 27, 31 and 51, kept as FP8 pairs so each layer's input projections share
+one route. They, the embedding, draft head, MTP, DFlash2 companion, Vision and resources are copied
+byte-exact from the base; the base's other five FP8 matrices (attention output 11, MLP gate/up and
+down at layers 62 and 63) are re-encoded like every other projection. MLP gate/up rows are stored
+gate/up interleaved in 16-row tiles (stored row `16 b + i` is gate feature `8 b + i` for `i < 8`,
+else up feature `8 b + i - 8`) so the projection publishes the SiLU-gated activation directly; no
+other object is permuted. The head runs through the `ops::linear` FP8LUT4 route at every width.
 
 The FP8LUT4 words except attention query/key are GPTQ-rounded: the BF16 reference
 (`tools/reference/qwen3_8_27b_bf16`) evaluates 128 calibration sequences of 2048 tokens

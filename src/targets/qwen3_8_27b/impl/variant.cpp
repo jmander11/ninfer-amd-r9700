@@ -402,6 +402,7 @@ Variant::ExecutionState::ExecutionState(const ModelView& model, DeviceSpan seria
     if (impl_->selected != 0U && impl_->selected != kSelectedProjectionCount &&
         impl_->selected != 3U && impl_->selected != 22U &&
         impl_->selected != 11U && impl_->selected != 12U && impl_->selected != 15U &&
+        impl_->selected != 21U &&
         impl_->selected != 32U &&
         impl_->selected != 80U && impl_->selected != 26U) {
         throw std::invalid_argument(

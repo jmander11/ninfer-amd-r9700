@@ -62,7 +62,7 @@ model or individual-Op throughput claim.
 
 ## Current production (2026-09-28)
 
-Artifact `qwen3.8-27b-r9700-fp8lut4` (FP8LUT4 Text and output head, 26 row-scaled FP8
+Artifact `qwen3.8-27b-r9700-fp8lut4` (FP8LUT4 Text and output head, 21 row-scaled FP8
 protections); `compose.yaml` serving: DFlash `--draft-tokens 7 --adaptive-draft --lm-head-draft`,
 Device Graphs, prefill chunk 2048. Latest measurement of each phase; the dated sections below are
 the history behind them.
@@ -79,7 +79,63 @@ the history behind them.
 
 Decode depends on DFlash acceptance and therefore on the prompt mix; compare only within one
 harness. Prefill rows predate the 2026-09-28 output-head and
-attention GPTQ reconversions, which change weight values but not formats or routes.
+attention GPTQ reconversions, which change weight values but not formats or routes, and all rows
+predate the 2026-09-30 reduction to 21 protections (C1 decode +2.3%, C4 unchanged, prefill +0.4%).
+
+## FP8 protections reduced to 21 against the 5090 NVFP4 build (2026-09-30)
+
+The admission bar is now "no worse than the 5090 NVFP4 build", measured directly: the frozen
+5090 scorer (`r9700-nvfp4-multitext-pareto-20260922/bin/nvidia-ppl`, standard NVFP4 artifact
+and NVFP4 cache) on the same BF16-source cells. NVFP4 vs BF16, dNLL nats/token:
+
+| Cell | NVFP4 | 26-protection production | 21 protections | 21 minus NVFP4 |
+|---|---:|---:|---:|---:|
+| 8K prefill | +0.0355 | +0.0129 | +0.0146 | -0.0209 +/- 0.0057 |
+| 8K decode | +0.0159 | +0.0122 | +0.0134 | -0.0025 +/- 0.0048 |
+| 32K prefill | +0.0227 | +0.0113 | +0.0116 | -0.0111 +/- 0.0029 |
+| 32K decode | +0.0150 | +0.0099 | +0.0119 | -0.0031 +/- 0.0025 |
+
+NVFP4's prefill is much further from BF16 than its decode, so the usable margin is the decode
+one, about 0.004-0.005 nats/token for the 26-protection artifact. On the three 4K fixture texts
+(prefill) NVFP4 is +0.044, production +0.015. The 26 protections were the NVFP4 reference's
+BF16 set (15 in the split layout) plus 11 from an unqualified NVIDIA selective-FP8 experiment.
+Of those 11, attention query/key and gate/value at layers 27/31/51 stay FP8 (protected
+query/key is not demoted, and a split FP8/FP8LUT4 pair loses the fused input-projection route);
+attention output
+11 and MLP gate/up and down at layers 62/63 become GPTQ FP8LUT4. File 17.02 -> 16.75 GB.
+Paired against production: +0.0017 / +0.0012 / +0.0003 / +0.0019 +/- 0.001-0.002 (cells as
+above); new severe 4/3/14/15 within caps 5/5/17/17. NIAH: standard and multikey greedy 20/20 each
+at 8K-128K, 5/5 each at 240K, multikey 5/5 at 260K (261,131-token prompts), sampled multikey
+50/50 (8K) and 45/45 (32K-128K). Graph and eager greedy tokens are identical at C1..C4 P2048/G256
+and C1 P20480, ordinary and DFlash; greedy DFlash differs from ordinary decode at C1 after a near
+tie in both artifacts (production at token 12 of the P20480 cell), not at C2..C4.
+Speed, interleaved against production: ordinary decode 37.00 -> 37.62 tok/s (+1.7%), prefill
++0.4%, DFlash round 32.15 -> 31.98 ms; production serving shape (p-less T1.5, K7 adaptive,
+13-prompt study workload x 3 seeds) C1 90.8 -> 92.9 tok/s (+2.3%), C4 205.6 -> 205.7 tok/s.
+DFlash acceptance over ten fixed prompts 4.07 -> 4.25 tokens/round (greedy trajectories diverge).
+Removing the remaining non-query/key protections (attention output 3/7, GDN output 4: 44 MB) is
+below measurement resolution and was not pursued. Evidence:
+`profiles/ppl/r9700-nvfp4-budget-20260929/`, `profiles/ppl/r9700-fp8lut4-p21-20260929/`,
+`profiles/bench/r9700-fp8lut4-p21-20260929/`.
+
+**3-bit MLP gate/up (rejected, PPL-costing).** A sign + 2-bit format (FP8LUT4 book positions
+{1, 3, 5, 7}, the lowest-error 4-of-8 subset on sampled gate/up rows: relative L2 1.9x, calibrated
+output error ~3.6x the 4-bit codes) was measured exactly by encoding it as restricted FP8LUT4
+words (GPTQ, damping 0.1) on the 21-protection artifact. It would save ~22 MB per layer per step
+(~36 us per round at 620 GB/s; no 3-bit kernel was built). dNLL vs BF16, and minus NVFP4:
+
+| gate/up layers at 3 bits | 8K prefill | 8K decode | 32K prefill | 32K decode | new severe over cap |
+|---|---:|---:|---:|---:|---|
+| none (21 protections) | +0.0146 (-0.021) | +0.0134 (-0.003) | +0.0116 (-0.011) | +0.0119 (-0.003) | none |
+| 12 mid (0,1,28,34-36,38,40,48-51) | +0.0209 (-0.015) | +0.0184 (+0.003) | +0.0142 (-0.009) | +0.0142 (-0.001) | 32K prefill 22/17 |
+| 12 late (52-63) | +0.0206 (-0.015) | +0.0191 (+0.003) | +0.0181 (-0.005) | +0.0184 (+0.003) | 3 of 4 cells |
+| all 64 | +0.0302 (-0.005) | +0.0267 (+0.011) | +0.0266 (+0.004) | +0.0262 (+0.011) | all 4 cells |
+
+Every subset puts decode behind NVFP4 or breaks a severe cap, so no 3-bit set is admissible under
+the NVFP4 bar. Per-layer calibrated error ranks the late layers cheapest, yet they carry about half
+of the all-layer NLL cost; the proxy does not predict model sensitivity. Evidence:
+`profiles/ppl/r9700-fp8lut4-lut3-20260930/` (receipts with per-layer errors; the evaluation-only
+encoder option is kept there as a patch).
 
 ## Mid-row attention route (2026-09-28)
 

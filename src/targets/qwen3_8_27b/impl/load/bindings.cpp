@@ -321,8 +321,9 @@ NumericFormat token_embedding_format(WeightsProfile profile) {
 
 ArtifactLoadPlan bind_artifact(artifact::Binder& binder, WeightsProfile weights_profile,
                                qwen3::StartupFeatures features) {
-    // An FP8LUT4 Text profile binds exactly its base recipe except for the Text-layer Q4 matrices
-    // and the output head.
+    // An FP8LUT4 Text profile binds exactly its base recipe except for the Text-layer matrices
+    // outside its own FP8 protection set and the output head.
+    const WeightsProfile text_profile = weights_profile;
     const bool fp8lut4_text = is_fp8lut4_text_profile(weights_profile);
     if (fp8lut4_text) weights_profile = fp8_capped_base_profile(weights_profile);
     (void)matrix_format(weights_profile, false);
@@ -344,7 +345,7 @@ ArtifactLoadPlan bind_artifact(artifact::Binder& binder, WeightsProfile weights_
                                         artifact::TensorPlacement::MappedHost),
         .format = embedding_format,
         .layout = embedding_layout};
-    bind_r9700_text_layers(binder, out, weights_profile, fp8lut4_text);
+    bind_r9700_text_layers(binder, out, text_profile, fp8lut4_text);
     out.final_norm =
         artifact::bind_device_tensor(binder, "text/final_norm", NumericFormat::BF16, {5120});
     if (weights_profile == WeightsProfile::R9700Q4SelectiveProtectedDFlash2Q4Evaluation ||

@@ -1,4 +1,28 @@
 // Fixed evaluation identities and exact FP8 matrix inventories; shared with the converter.
+// Production FP8LUT4 Text protections (no separate identity): the 5090 NVFP4 reference's BF16
+// set (default-protected) plus the selective cap's attention input projections at layers 27/31/51,
+// kept as a query/key + gate/value FP8 pair so both still run through one fused pair route.
+NINFER_QWEN38_FP8_CAP_MATRIX(R9700Fp8Lut4, "text/layers/3/attention/query_key")
+NINFER_QWEN38_FP8_CAP_MATRIX(R9700Fp8Lut4, "text/layers/3/attention/gate_value")
+NINFER_QWEN38_FP8_CAP_MATRIX(R9700Fp8Lut4, "text/layers/7/attention/query_key")
+NINFER_QWEN38_FP8_CAP_MATRIX(R9700Fp8Lut4, "text/layers/7/attention/gate_value")
+NINFER_QWEN38_FP8_CAP_MATRIX(R9700Fp8Lut4, "text/layers/11/attention/query_key")
+NINFER_QWEN38_FP8_CAP_MATRIX(R9700Fp8Lut4, "text/layers/11/attention/gate_value")
+NINFER_QWEN38_FP8_CAP_MATRIX(R9700Fp8Lut4, "text/layers/15/attention/query_key")
+NINFER_QWEN38_FP8_CAP_MATRIX(R9700Fp8Lut4, "text/layers/15/attention/gate_value")
+NINFER_QWEN38_FP8_CAP_MATRIX(R9700Fp8Lut4, "text/layers/19/attention/query_key")
+NINFER_QWEN38_FP8_CAP_MATRIX(R9700Fp8Lut4, "text/layers/19/attention/gate_value")
+NINFER_QWEN38_FP8_CAP_MATRIX(R9700Fp8Lut4, "text/layers/23/attention/query_key")
+NINFER_QWEN38_FP8_CAP_MATRIX(R9700Fp8Lut4, "text/layers/23/attention/gate_value")
+NINFER_QWEN38_FP8_CAP_MATRIX(R9700Fp8Lut4, "text/layers/27/attention/query_key")
+NINFER_QWEN38_FP8_CAP_MATRIX(R9700Fp8Lut4, "text/layers/27/attention/gate_value")
+NINFER_QWEN38_FP8_CAP_MATRIX(R9700Fp8Lut4, "text/layers/31/attention/query_key")
+NINFER_QWEN38_FP8_CAP_MATRIX(R9700Fp8Lut4, "text/layers/31/attention/gate_value")
+NINFER_QWEN38_FP8_CAP_MATRIX(R9700Fp8Lut4, "text/layers/51/attention/query_key")
+NINFER_QWEN38_FP8_CAP_MATRIX(R9700Fp8Lut4, "text/layers/51/attention/gate_value")
+NINFER_QWEN38_FP8_CAP_MATRIX(R9700Fp8Lut4, "text/layers/3/attention/output")
+NINFER_QWEN38_FP8_CAP_MATRIX(R9700Fp8Lut4, "text/layers/7/attention/output")
+NINFER_QWEN38_FP8_CAP_MATRIX(R9700Fp8Lut4, "text/layers/4/gdn/output")
 NINFER_QWEN38_FP8_CAP_RECIPE(R9700Q4Fp8OutputOnlyEvaluation, "r9700-q4-fp8-output-only-n16k16-eval")
 NINFER_QWEN38_FP8_CAP_MATRIX(R9700Q4Fp8OutputOnlyEvaluation, "text/layers/3/attention/output")
 NINFER_QWEN38_FP8_CAP_MATRIX(R9700Q4Fp8OutputOnlyEvaluation, "text/layers/7/attention/output")

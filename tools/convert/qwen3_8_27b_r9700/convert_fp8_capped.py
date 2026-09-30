@@ -24,19 +24,27 @@ from .e4m3_inventory import F8E4M3_ROW_F32S, ROW_SCALED_LAYOUT
 AUTHORITY = Path(__file__).resolve().parents[3] / 'src/targets/qwen3_8_27b/impl/load/fp8_capped_selection.inc'
 
 
-def recipes():
+def selections():
+    """Every profile symbol's selected FP8 matrices, and the identities of the capped recipes."""
     text = AUTHORITY.read_text()
     identities = dict(re.findall(r'NINFER_QWEN38_FP8_CAP_RECIPE\(\s*(\w+)\s*,\s*"([^"]+)"\s*\)', text))
-    selected = {key: set() for key in identities}
+    selected = {}
     for key, name in re.findall(r'NINFER_QWEN38_FP8_CAP_MATRIX\(\s*(\w+)\s*,\s*"([^"]+)"\s*\)', text):
-        if name in selected[key]:
+        if name in selected.setdefault(key, set()):
             raise ValueError(f'duplicate selected matrix: {key}/{name}')
         selected[key].add(name)
     base = {s.name: s for s in q4_inventory.TENSOR_SPECS}
     for key, names in selected.items():
-        if not names or any(n not in base or base[n].format != q4_inventory.Q4 for n in names):
-            raise ValueError(f'capped recipe must replace existing Q4 matrices: {key}')
-    return {identities[key]: names for key,names in selected.items()}
+        if any(n not in base or base[n].format != q4_inventory.Q4 for n in names):
+            raise ValueError(f'FP8 selection must replace existing Q4 matrices: {key}')
+    return selected, identities
+
+
+def recipes():
+    selected, identities = selections()
+    if any(not selected.get(key) for key in identities):
+        raise ValueError('capped recipe has no selected matrices')
+    return {identities[key]: selected[key] for key in identities}
 
 
 def specs_for(selected):

@@ -43,6 +43,12 @@ FP8LUT4 artifact was admitted; it remains in git history.
   fusion, GDN record and front, narrow drafter projections) and an overlapped replay fold gave
   no admissible gain. Follow-ups done: the tool-mask exchange is a host mailbox (+0.7% with
   tools) and the Q4G64 token embedding is stored row-split (gathers ~50 -> ~7 us).
+- [x] `NVFP4-MATCH` Closed 2026-09-30: the weight bar is "no worse than the 5090 NVFP4 build",
+  measured with the frozen 5090 scorer on the BF16-source cells (NVFP4 decode is only ~0.004-0.005
+  nats/token behind production, prefill ~0.01-0.02). Protections 26 -> 21 (16.75 GB; C1 decode
+  +2.3%, C4 unchanged); 3-bit MLP gate/up is not admissible (all layers, the 12 lowest-error
+  late layers and 12 mid layers each fall behind NVFP4 on decode or break a severe cap).
+  `docs/performance.md` has the evidence.
 - [ ] `CLOCKS-README` [user-gated; `LONGCTX-PREFILL` is closed] Matched README benchmarks at stock
   clocks and at the user's undervolted/higher-clock setting.
 - [ ] `MIXED-PREFILL-DECODE` [final item; changes the product contract] Maximum aggregate
