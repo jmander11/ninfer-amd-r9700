@@ -102,3 +102,9 @@ CUDA paths, NVFP4 and additional model targets are excluded by the product contr
   `7e303491`, `c40469f3`, `f74915f9`.
 
 Evidence: `profiles/bench/r9700-upstream-sync-20260928/`.
+
+## After `34c7119b` (not reconciled; baseline unchanged)
+
+- Partially ported: `42d7fa75` (NIAH), only its 260K multi-key fixtures
+  (`examples/cli/messages/long_niah_multikey_260k_*.json`); the local `run_niah_check` already
+  reads them. Its other fixtures and checker options are not yet dispositioned.
