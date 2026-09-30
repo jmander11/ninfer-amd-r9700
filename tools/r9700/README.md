@@ -1111,8 +1111,12 @@ gfx1201 archive; the retired wrapper, launcher, kernel, and duplicate legacy tes
 It exhausts K=1..8, W=2..16, and B=1..4, then checks mixed greedy/stochastic rows at both the
 512-token single-workgroup boundary and the full 248320-token Qwen3.8 vocabulary. An independent
 host oracle rebuilds the represented-BF16 top-20 distribution in FP64, applies penalties and the
-round-local path overlay, uses the exact counter RNG, and evaluates selector-q Leviathan residuals
-and SpecInfer child membership. Exact comparisons cover every accepted token, count, anchor,
+round-local path overlay, uses the exact counter RNG, and evaluates selector-q Leviathan residuals,
+p-less block verification (Sun et al. 2024, Algorithm 2) with forced one- and two-draft accepts, and
+SpecInfer child membership. Statistical p-less block-verification cases at V=64 and V=248077 of
+248320 physical rows check the first two emitted tokens against the p-less law by chi-square and
+the mean accepted length against an FP64 enumeration of Algorithm 2, including a chained second
+round from the same seed. Exact comparisons cover every accepted token, count, anchor,
 length, accepted column, fold path, optional token-count publication, immutable input, and BF16
 hidden selection bit. A captured full-vocabulary-style multi-stage chain replays at fixed addresses
 with dynamic input state. The selected caller-owned partial/distribution pipeline uses no hidden

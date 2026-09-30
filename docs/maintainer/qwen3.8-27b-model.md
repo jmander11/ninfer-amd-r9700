@@ -387,13 +387,17 @@ One propose block:
    that row as `q`. P-less draws from the same 16-way distribution at its separate draft
    temperature (`--dflash-p-less-draft-temperature`, default 0.4; 0 is greedy with point-mass q);
    its own temperature controls the target distribution.
-   Selector RNG is keyed by request seed and absolute token position, independent of compact batch
-   row. `--lm-head-draft` runs top-16 on the shortlist and gathers codebooks by token id.
+   Selector RNG is keyed by request seed, the round's first position, and the hop, independent of
+   compact batch row. `--lm-head-draft` runs top-16 on the shortlist and gathers codebooks by token id.
 5. The 27B target verifies the chain in one causal forward of width `W=k+1`. Greedy accepts the
    matching prefix. Sampling uses Leviathan `min(1,p/q)` acceptance and samples the first correction
    from normalized `max(0,p-q)`; all-accepted rounds sample a target bonus. ReplaySSM Fold commits
    the corresponding sequential prefix. Under p-less, verification uses the recorded selector q,
-   full eligible-vocabulary target support, and the first-position-only cycle-exit restriction. The R9700 package does not expose
+   full eligible-vocabulary target support, and the first-position-only cycle-exit restriction, and
+   replaces per-hop Leviathan with block verification (Sun et al. 2024) over the chain: exact, never
+   shorter in expectation, correction from normalized `max(0, p_τ p' − q)`, bonus from its column's
+   p-less distribution. Draft and block-accept uniforms are keyed by the round's first position and
+   the hop, so a round never reuses a uniform the previous round conditioned on. The R9700 package does not expose
    packed-tree or two-block runtime schedules. Production performance claims require matched
    whole-round acceptance and throughput evidence.
 
@@ -425,7 +429,8 @@ For `k` configured draft tokens, the runtime prepares a candidate window, runs t
 and accepts only the prefix licensed by the target distribution.
 
 In greedy mode, MTP and DFlash2 accept the longest draft prefix matching the target argmax. In
-sampling mode both use chain rejection sampling against the represented target distribution. A bad
+sampling mode both use chain rejection sampling against the represented target distribution
+(per-hop Leviathan for truncated sampling, block verification for p-less). A bad
 draft therefore reduces acceptance and throughput; it must not change the distribution of emitted
 target tokens. DFlash2 differs by producing the whole candidate chain in one masked-block forward.
 

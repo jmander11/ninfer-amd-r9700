@@ -50,14 +50,18 @@ inline constexpr std::int32_t kDflash2VerifyWidth              = 12;
  *   after dividing by that temperature and one candidate is drawn by inverse-CDF using
  *
  *     u = splitmix64(configs[b].seed ^ seed_xor,
- *                    logical_positions[b] + position_offset + t + 1,
- *                    purpose=16) in [0,1).
+ *                    logical_positions[b] + position_offset + 1,
+ *                    purpose=16, hop=t) in [0,1),
+ *
+ *   keyed by the round's first position and the hop so a later round never reuses a draft
+ *   uniform.
  *
  *   Then prev[t,b] = path[t,b]. Candidate order does not affect the selected token.
  *   An internal force_greedy call may override temperature for an intermediate refinement pass.
  *   When selector_ids / selector_q are non-null they receive the 16 candidate token ids and
  *   the proposal distribution q: one-hot at a greedy pick, else the 16-way softmax the draft
- *   was drawn from. Chain Leviathan accept uses this q for truncated sampling and p-less alike.
+ *   was drawn from. Chain accept uses this q for truncated-sampling Leviathan and p-less block
+ *   verification alike.
  *   Null selectors imply one-hot at path[t,b].
  *
  * Logical shapes:

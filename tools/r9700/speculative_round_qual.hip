@@ -16,6 +16,7 @@
 #include <iostream>
 #include <limits>
 #include <numeric>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -84,12 +85,13 @@ unsigned long long splitmix64(unsigned long long value) {
     return value ^ (value >> 31);
 }
 
-float uniform(unsigned long long seed, int position, int purpose) {
+float uniform(unsigned long long seed, int position, int purpose, unsigned int sub = 0U) {
     unsigned long long key = splitmix64(
         seed ^ (static_cast<unsigned long long>(static_cast<unsigned int>(position)) *
                 0xD1B54A32D192ED03ULL));
     key = splitmix64(key ^
-                     (static_cast<unsigned long long>(static_cast<unsigned int>(purpose)) << 21));
+                     (static_cast<unsigned long long>(static_cast<unsigned int>(purpose)) << 21) ^
+                     (static_cast<unsigned long long>(sub) * 0x2545F4914F6CDD1DULL));
     return static_cast<float>(static_cast<unsigned int>(key >> 40)) *
            (1.0F / 16777216.0F);
 }
@@ -232,15 +234,17 @@ float q_probability(const std::vector<int>* selector_ids, const std::vector<floa
     return 0.0F;
 }
 
+// Inverse CDF of max(0, weight p - q); weight = 1 is the Leviathan residual and p-less block
+// verification passes its acceptance weight p_tau. A null selector is one-hot q at the draft.
 int pick_residual(const Distribution& distribution, const std::vector<int>* selector_ids,
                   const std::vector<float>* selector_q, int base, int selector_count,
-                  int draft, float draw) {
+                  int draft, float draw, double weight = 1.0) {
     if (selector_ids == nullptr || selector_q == nullptr) { return pick(distribution, draft, draw); }
     std::vector<double> residual(distribution.ids.size());
     double mass = 0.0;
     for (std::size_t index = 0; index < distribution.ids.size(); ++index) {
         residual[index] = std::max(
-            0.0, distribution.probabilities[index] -
+            0.0, weight * distribution.probabilities[index] -
                      static_cast<double>(q_probability(selector_ids, selector_q, base,
                                                        selector_count, distribution.ids[index])));
         mass += residual[index];
@@ -256,6 +260,84 @@ int pick_residual(const Distribution& distribution, const std::vector<int>* sele
         if (target < cumulative) { break; }
     }
     return selected;
+}
+
+double probability_of(const Distribution& distribution, int token) {
+    for (std::size_t index = 0; index < distribution.ids.size(); ++index) {
+        if (distribution.ids[index] == token) { return distribution.probabilities[index]; }
+    }
+    return 0.0;
+}
+
+// Block verification (Sun et al. 2024, Algorithm 2) for one p-less chain row, evaluated in FP64
+// from the independent p-less column laws p'_i and the recorded proposal laws q_i (one-hot at
+// the draft when no selector is recorded): p_0 = 1, p_i = min(p_{i-1} p'_{i-1}(d)/q_{i-1}(d), 1),
+// h_i = Z_i/(Z_i + 1 - p_i) with Z_i = sum_x max(p_i p'_i(x) - q_i(x), 0) for i < extent, and
+// h_extent = p_extent. None of this depends on the seed.
+struct BlockLaws {
+    std::vector<Distribution> columns;
+    std::vector<double> weight;
+    std::vector<double> h;
+};
+
+BlockLaws p_less_block_laws(const hip_bfloat16* row_logits, int token_domain, int extent,
+                            const ninfer::ops::SamplingConfig& config, const int* row_drafts,
+                            const std::vector<int>* selector_ids,
+                            const std::vector<float>* selector_q, int selector_row_base,
+                            int selector_count) {
+    BlockLaws laws;
+    for (int column = 0; column <= extent; ++column) {
+        laws.columns.push_back(distribution_oracle(
+            row_logits + static_cast<std::size_t>(column) * token_domain, token_domain,
+            column_config(config, column), nullptr, {}));
+    }
+    const auto q_at = [&](int hop, int token) {
+        if (selector_ids == nullptr || selector_q == nullptr) {
+            return token == row_drafts[hop] ? 1.0 : 0.0;
+        }
+        return static_cast<double>(q_probability(selector_ids, selector_q,
+                                                 selector_row_base + selector_count * hop,
+                                                 selector_count, token));
+    };
+    laws.weight.assign(static_cast<std::size_t>(extent) + 1, 1.0);
+    laws.h.assign(static_cast<std::size_t>(extent) + 1, 1.0);
+    for (int i = 1; i <= extent; ++i) {
+        const int draft = row_drafts[i - 1];
+        const double qd = q_at(i - 1, draft);
+        const double p =
+            qd > 0.0 ? std::min(laws.weight[static_cast<std::size_t>(i - 1)] *
+                                    probability_of(laws.columns[static_cast<std::size_t>(i - 1)],
+                                                   draft) /
+                                    qd,
+                                1.0)
+                     : 0.0;
+        laws.weight[static_cast<std::size_t>(i)] = p;
+        double h = p;
+        if (i < extent) {
+            // Tokens outside the p' support contribute max(-q, 0) = 0.
+            const Distribution& column = laws.columns[static_cast<std::size_t>(i)];
+            double z = 0.0;
+            for (std::size_t index = 0; index < column.ids.size(); ++index) {
+                z += std::max(p * column.probabilities[index] - q_at(i, column.ids[index]), 0.0);
+            }
+            const double denominator = z + 1.0 - p;
+            h = denominator > 0.0 ? z / denominator : 1.0;
+        }
+        laws.h[static_cast<std::size_t>(i)] = h;
+    }
+    return laws;
+}
+
+// tau = max{i : eta_i <= h_i}; eta_i is keyed by the round's first position with sub-key i.
+int block_tau(const BlockLaws& laws, unsigned long long seed, int length) {
+    int tau = 0;
+    for (int i = 1; i < static_cast<int>(laws.h.size()); ++i) {
+        const float eta = uniform(seed, length + 1,
+                                  ninfer::ops::kSamplePurposeSpeculativeBlockAccept,
+                                  static_cast<unsigned int>(i));
+        if (static_cast<double>(eta) <= laws.h[static_cast<std::size_t>(i)]) { tau = i; }
+    }
+    return tau;
 }
 
 std::vector<hip_bfloat16> make_logits(int token_domain, int columns, int batch) {
@@ -323,7 +405,30 @@ ChainExpected chain_oracle(
             const std::vector<int>* counts = has_counts[static_cast<std::size_t>(row)]
                                                  ? &row_counts
                                                  : nullptr;
-            for (int column = 0; column <= extent; ++column) {
+            const int length = initial_lengths[static_cast<std::size_t>(row)];
+            if (config.p_less != 0) {
+                const int selector_row_base = selector_count * row * k;
+                const BlockLaws laws = p_less_block_laws(
+                    logits.data() + static_cast<std::size_t>(row) * columns * token_domain,
+                    token_domain, extent, config, drafts.data() + static_cast<std::size_t>(row) * k,
+                    effective_ids, effective_q, selector_row_base, selector_count);
+                accepted = block_tau(laws, config.seed, length);
+                const Distribution& column = laws.columns[static_cast<std::size_t>(accepted)];
+                if (accepted < extent) {
+                    terminal = pick_residual(
+                        column, effective_ids, effective_q,
+                        selector_row_base + selector_count * accepted, selector_count,
+                        drafts[static_cast<std::size_t>(row * k + accepted)],
+                        uniform(config.seed, length + accepted + 1,
+                                ninfer::ops::kSamplePurposeSpeculativeCorrection),
+                        laws.weight[static_cast<std::size_t>(accepted)]);
+                } else {
+                    terminal = pick(column, -1,
+                                    uniform(config.seed, length + extent + 1,
+                                            ninfer::ops::kSamplePurposeSpeculativeBonus));
+                }
+            }
+            for (int column = 0; config.p_less == 0 && column <= extent; ++column) {
                 std::vector<int> overlay;
                 for (int index = 0; index < column; ++index) {
                     overlay.push_back(drafts[static_cast<std::size_t>(row * k + index)]);
@@ -451,16 +556,6 @@ void run_chain_case(ninfer::DeviceContext& device, int token_domain, int k, int 
                 for (int token = 0; token < 64; ++token)
                     if ((token + column + row) % 5 == 0)
                         masks[(row * columns + column) * mask_words + token / 32] &= ~(1U << (token % 32));
-            // Force meaningful q-contract distinctions: row1 records q(d)=0 but must accept
-            // under p-less point-mass q; row2's draw rejects under q=1, not under recorded .35.
-            if (row < 3) {
-                for (;;) {
-                    const float draw = uniform(config.seed, lengths[row] + 1,
-                        ninfer::ops::kSamplePurposeSpeculativeAccept);
-                    if ((row < 2 && draw < 0.005F) || (row == 2 && draw > 0.03F && draw < 0.04F)) break;
-                    ++config.seed;
-                }
-            }
         }
         has_counts[static_cast<std::size_t>(row)] = !greedy && row % 4 != 3;
         counts[static_cast<std::size_t>(row) * token_domain + (13 + row * 503) % token_domain] =
@@ -485,6 +580,28 @@ void run_chain_case(ninfer::DeviceContext& device, int token_domain, int k, int 
                     selector_q[static_cast<std::size_t>(base + candidate)] =
                         0.2F / static_cast<float>(candidate);
                 }
+            }
+        }
+    }
+
+    if (p_less) {
+        // Force block-verification outcomes the exact comparison must distinguish: row 0 accepts
+        // one draft and row 2 two, so the correction samples max(0, p_tau p' - q) with p_tau < 1.
+        // Row 1's recorded q(d0) = 0 under the selector (p_1 = 0) and row 3 keep their natural
+        // outcome.
+        for (int row = 0; row < std::min(batch, 3); row += 2) {
+            auto& config = configs[static_cast<std::size_t>(row)];
+            const int want = row == 0 ? 1 : 2;
+            const BlockLaws laws = p_less_block_laws(
+                logits.data() + static_cast<std::size_t>(row) * columns * token_domain,
+                token_domain, extents[static_cast<std::size_t>(row)], config,
+                drafts.data() + static_cast<std::size_t>(row) * k,
+                use_selector ? &selector_ids : nullptr, use_selector ? &selector_q : nullptr,
+                selector_count * row * k, selector_count);
+            int attempts = 0;
+            while (block_tau(laws, config.seed, lengths[static_cast<std::size_t>(row)]) != want) {
+                ++config.seed;
+                require(++attempts < 10000000, "no seed reaches the requested block length");
             }
         }
     }
@@ -605,6 +722,309 @@ void run_chain_case(ninfer::DeviceContext& device, int token_domain, int k, int 
         }
         HIP_CHECK(hipGraphExecDestroy(executable)); HIP_CHECK(hipGraphDestroy(graph));
     }
+}
+
+// P-less block verification law over a two-draft chain with fractional selector q. Drafts are
+// drawn on the host from two different 16-way q that leave real target mass uncovered. The first
+// two emitted tokens (the second drawn from the oracle when a round emits one) must follow
+// p'_0 x p'_1, and the mean accepted length must match an independent FP64 enumeration of
+// Algorithm 2 over every draft pair. `chained` gives every column the same law and runs a second
+// round per trial from where the first ended with the same seed: its accepted length must also
+// match, which fails if a round reuses a uniform the previous round's acceptance conditioned on.
+// physical_rows > token_domain places high logits outside the domain.
+void run_p_less_block_statistics(ninfer::DeviceContext& device, int physical_rows,
+                                 int token_domain, bool chained) {
+    constexpr int active = 64;
+    constexpr int k = 2;
+    constexpr int columns = k + 1;
+    constexpr int cap = 16;
+    constexpr int batch = 4;
+    constexpr int trials = 60000;
+    constexpr int launches = trials / batch;
+    constexpr float temperature = 1.5F;
+    const std::string label = "p-less block verification V=" + std::to_string(token_domain) +
+                              (chained ? " chained" : "");
+
+    std::vector<hip_bfloat16> column_logits(static_cast<std::size_t>(physical_rows) * columns,
+                                            bf16(-20.0F));
+    for (int column = 0; column < columns; ++column) {
+        const float shift = chained ? 0.0F : 0.13F * static_cast<float>(column);
+        auto* base = column_logits.data() + static_cast<std::size_t>(column) * physical_rows;
+        for (int token = 0; token < active; ++token) {
+            base[token] = bf16(2.5F * std::sin((0.7F + shift) * static_cast<float>(token)) +
+                               0.04F * static_cast<float>(token));
+        }
+        for (int token = token_domain; token < physical_rows; ++token) {
+            base[token] = bf16(100.0F);
+        }
+    }
+    std::vector<hip_bfloat16> logits;
+    logits.reserve(column_logits.size() * batch);
+    for (int row = 0; row < batch; ++row) {
+        logits.insert(logits.end(), column_logits.begin(), column_logits.end());
+    }
+
+    ninfer::ops::SamplingConfig config{};
+    config.temperature = temperature;
+    config.p_less = 1;
+    std::vector<std::vector<double>> target(
+        columns, std::vector<double>(static_cast<std::size_t>(token_domain)));
+    std::vector<std::vector<int>> support(columns);
+    for (int column = 0; column < columns; ++column) {
+        std::vector<double> values(static_cast<std::size_t>(token_domain));
+        for (int token = 0; token < token_domain; ++token) {
+            values[static_cast<std::size_t>(token)] = represented(
+                column_logits[static_cast<std::size_t>(column) * physical_rows + token]);
+        }
+        const auto law = sampling_reference::p_less(values, config);
+        support[static_cast<std::size_t>(column)] = law.ids;
+        for (std::size_t index = 0; index < law.ids.size(); ++index) {
+            target[static_cast<std::size_t>(column)][static_cast<std::size_t>(law.ids[index])] =
+                law.probabilities[index];
+        }
+    }
+
+    // Hop-major selector q [cap, k] with distinct ids, replicated for every row.
+    std::vector<int> ids(static_cast<std::size_t>(cap) * k);
+    std::vector<float> q(static_cast<std::size_t>(cap) * k);
+    for (int hop = 0; hop < k; ++hop) {
+        double total = 0.0;
+        std::vector<double> weights(cap);
+        for (int c = 0; c < cap; ++c) {
+            const int token = (c * (5 + 2 * hop) + 3 + hop) % active;
+            ids[static_cast<std::size_t>(hop * cap + c)] = token;
+            weights[static_cast<std::size_t>(c)] = std::exp(
+                static_cast<double>(represented(
+                    column_logits[static_cast<std::size_t>(hop) * physical_rows + token])) /
+                    0.8 +
+                0.3 * std::cos(static_cast<double>(c + hop)));
+            total += weights[static_cast<std::size_t>(c)];
+        }
+        for (int c = 0; c < cap; ++c) {
+            q[static_cast<std::size_t>(hop * cap + c)] =
+                static_cast<float>(weights[static_cast<std::size_t>(c)] / total);
+        }
+    }
+    const auto q_at = [&](int hop, int token) {
+        for (int c = 0; c < cap; ++c) {
+            if (ids[static_cast<std::size_t>(hop * cap + c)] == token) {
+                return static_cast<double>(q[static_cast<std::size_t>(hop * cap + c)]);
+            }
+        }
+        return 0.0;
+    };
+    double uncovered = 1.0;
+    for (int c = 0; c < cap; ++c) {
+        uncovered -= target[1][static_cast<std::size_t>(ids[static_cast<std::size_t>(cap + c)])];
+    }
+
+    // Independent enumeration of Algorithm 2 for K=2 over every draft pair:
+    // E[tau] = 2 h_2 + (1 - h_2) h_1 and E[tau^2] = 4 h_2 + (1 - h_2) h_1.
+    double mean_tau = 0.0;
+    double mean_tau2 = 0.0;
+    for (int c0 = 0; c0 < cap; ++c0) {
+        for (int c1 = 0; c1 < cap; ++c1) {
+            const int d0 = ids[static_cast<std::size_t>(c0)];
+            const int d1 = ids[static_cast<std::size_t>(cap + c1)];
+            const double w = static_cast<double>(q[static_cast<std::size_t>(c0)]) *
+                             static_cast<double>(q[static_cast<std::size_t>(cap + c1)]);
+            const double p1 = std::min(target[0][static_cast<std::size_t>(d0)] / q_at(0, d0), 1.0);
+            double z1 = 0.0;
+            for (int x = 0; x < token_domain; ++x) {
+                z1 += std::max(p1 * target[1][static_cast<std::size_t>(x)] - q_at(1, x), 0.0);
+            }
+            const double denominator = z1 + 1.0 - p1;
+            const double h1 = denominator > 0.0 ? z1 / denominator : 1.0;
+            const double h2 =
+                std::min(p1 * target[1][static_cast<std::size_t>(d1)] / q_at(1, d1), 1.0);
+            mean_tau += w * (2.0 * h2 + (1.0 - h2) * h1);
+            mean_tau2 += w * (4.0 * h2 + (1.0 - h2) * h1);
+        }
+    }
+    const double sd_tau = std::sqrt(std::max(mean_tau2 - mean_tau * mean_tau, 1e-12));
+
+    std::vector<int> selector_ids;
+    std::vector<float> selector_q;
+    for (int row = 0; row < batch; ++row) {
+        selector_ids.insert(selector_ids.end(), ids.begin(), ids.end());
+        selector_q.insert(selector_q.end(), q.begin(), q.end());
+    }
+    const std::vector<int> targets(static_cast<std::size_t>(columns) * batch, 0);
+    const std::vector<int> extents(batch, k);
+    const std::vector<int> start_lengths(batch, 40);
+    ninfer::DeviceBuffer d_targets(targets.size() * sizeof(int));
+    ninfer::DeviceBuffer d_logits(logits.size() * sizeof(hip_bfloat16));
+    ninfer::DeviceBuffer d_drafts(static_cast<std::size_t>(k) * batch * sizeof(int));
+    ninfer::DeviceBuffer d_extents(extents.size() * sizeof(int));
+    ninfer::DeviceBuffer d_lengths(static_cast<std::size_t>(batch) * sizeof(int));
+    ninfer::DeviceBuffer d_anchors(static_cast<std::size_t>(batch) * sizeof(int));
+    ninfer::DeviceBuffer d_licensed(static_cast<std::size_t>(columns) * batch * sizeof(int));
+    ninfer::DeviceBuffer d_licensed_counts(static_cast<std::size_t>(batch) * sizeof(int));
+    ninfer::DeviceBuffer d_accepted(static_cast<std::size_t>(batch) * sizeof(int));
+    ninfer::DeviceBuffer d_configs(static_cast<std::size_t>(batch) * sizeof(config));
+    ninfer::DeviceBuffer d_selector_ids(selector_ids.size() * sizeof(int));
+    ninfer::DeviceBuffer d_selector_q(selector_q.size() * sizeof(float));
+    d_targets.copy_from_host(targets.data(), targets.size() * sizeof(int));
+    d_logits.copy_from_host(logits.data(), logits.size() * sizeof(hip_bfloat16));
+    d_extents.copy_from_host(extents.data(), extents.size() * sizeof(int));
+    d_selector_ids.copy_from_host(selector_ids.data(), selector_ids.size() * sizeof(int));
+    d_selector_q.copy_from_host(selector_q.data(), selector_q.size() * sizeof(float));
+
+    ninfer::Tensor target_tensor(d_targets.data(), ninfer::DType::I32, {columns, batch});
+    ninfer::Tensor logits_tensor(d_logits.data(), ninfer::DType::BF16,
+                                 {physical_rows, columns, batch});
+    ninfer::Tensor draft_tensor(d_drafts.data(), ninfer::DType::I32, {k, batch});
+    ninfer::Tensor extent_tensor(d_extents.data(), ninfer::DType::I32, {batch});
+    ninfer::Tensor length_tensor(d_lengths.data(), ninfer::DType::I32, {batch});
+    ninfer::Tensor anchor_tensor(d_anchors.data(), ninfer::DType::I32, {batch});
+    ninfer::Tensor licensed_tensor(d_licensed.data(), ninfer::DType::I32, {columns, batch});
+    ninfer::Tensor licensed_count_tensor(d_licensed_counts.data(), ninfer::DType::I32, {batch});
+    ninfer::Tensor accepted_tensor(d_accepted.data(), ninfer::DType::I32, {batch});
+    ninfer::Tensor selector_ids_tensor(d_selector_ids.data(), ninfer::DType::I32, {cap, k, batch});
+    ninfer::Tensor selector_q_tensor(d_selector_q.data(), ninfer::DType::FP32, {cap, k, batch});
+    ninfer::DeviceArena workspace(std::max<std::size_t>(
+        ninfer::ops::speculative_accept_greedy_drafts_workspace_capacity_bytes(token_domain, k, k,
+                                                                               batch, batch),
+        1));
+
+    std::mt19937_64 rng(chained ? 0xc4a1ULL : 0xb10cULL);
+    std::discrete_distribution<int> draw0(q.begin(), q.begin() + cap);
+    std::discrete_distribution<int> draw1(q.begin() + cap, q.end());
+    std::discrete_distribution<int> oracle1(target[1].begin(), target[1].end());
+    std::vector<int> licensed;
+    std::vector<int> accepted;
+    const auto run_round = [&]() {
+        std::vector<int> drafts(static_cast<std::size_t>(k) * batch);
+        for (int row = 0; row < batch; ++row) {
+            drafts[static_cast<std::size_t>(row * k)] = ids[static_cast<std::size_t>(draw0(rng))];
+            drafts[static_cast<std::size_t>(row * k + 1)] =
+                ids[static_cast<std::size_t>(cap + draw1(rng))];
+        }
+        d_drafts.copy_from_host(drafts.data(), drafts.size() * sizeof(int));
+        ninfer::ops::speculative_accept_greedy_drafts(
+            target_tensor, logits_tensor, draft_tensor, extent_tensor, length_tensor,
+            anchor_tensor, licensed_tensor, licensed_count_tensor, accepted_tensor, token_domain,
+            static_cast<const ninfer::ops::SamplingConfig*>(d_configs.data()), workspace,
+            device.stream, &selector_ids_tensor, &selector_q_tensor);
+        device.synchronize();
+        licensed = copy_from<int>(d_licensed, static_cast<std::size_t>(columns) * batch);
+        accepted = copy_from<int>(d_accepted, batch);
+    };
+
+    const auto top3 = [&](int column) {
+        std::vector<int> order = support[static_cast<std::size_t>(column)];
+        std::sort(order.begin(), order.end(), [&](int a, int b) {
+            return target[static_cast<std::size_t>(column)][static_cast<std::size_t>(a)] >
+                   target[static_cast<std::size_t>(column)][static_cast<std::size_t>(b)];
+        });
+        order.resize(std::min<std::size_t>(3, order.size()));
+        return order;
+    };
+    const std::vector<int> top0 = top3(0);
+    const std::vector<int> top1 = top3(1);
+    const auto bucket = [](const std::vector<int>& top, int token) {
+        const auto it = std::find(top.begin(), top.end(), token);
+        return it == top.end() ? static_cast<int>(top.size()) : static_cast<int>(it - top.begin());
+    };
+    const int b0 = static_cast<int>(top0.size()) + 1;
+    const int b1 = static_cast<int>(top1.size()) + 1;
+    std::vector<long long> observed(static_cast<std::size_t>(b0 * b1), 0);
+    std::vector<long long> marginal0(static_cast<std::size_t>(token_domain), 0);
+    std::vector<long long> marginal1(static_cast<std::size_t>(token_domain), 0);
+    double tau_sum = 0.0;
+    double second_tau_sum = 0.0;
+    std::vector<ninfer::ops::SamplingConfig> configs(batch, config);
+    for (int launch = 0; launch < launches; ++launch) {
+        for (int row = 0; row < batch; ++row) {
+            configs[static_cast<std::size_t>(row)].seed =
+                0x9e3779b97f4a7c15ULL * static_cast<unsigned long long>(launch * batch + row + 1);
+        }
+        d_configs.copy_from_host(configs.data(), configs.size() * sizeof(config));
+        d_lengths.copy_from_host(start_lengths.data(), start_lengths.size() * sizeof(int));
+        run_round();
+        std::vector<int> first(static_cast<std::size_t>(batch) * 2);
+        for (int row = 0; row < batch; ++row) {
+            const int a = accepted[static_cast<std::size_t>(row)];
+            require(a >= 0 && a <= k, label + ": accepted length out of range");
+            tau_sum += a;
+            first[static_cast<std::size_t>(row * 2)] =
+                licensed[static_cast<std::size_t>(row * columns)];
+            first[static_cast<std::size_t>(row * 2 + 1)] =
+                a >= 1 ? licensed[static_cast<std::size_t>(row * columns + 1)] : oracle1(rng);
+        }
+        if (chained) {
+            // Lengths now hold where each row's first round ended; same seeds, fresh drafts.
+            run_round();
+            for (int row = 0; row < batch; ++row) {
+                second_tau_sum += accepted[static_cast<std::size_t>(row)];
+            }
+        }
+        for (int row = 0; row < batch; ++row) {
+            const int t0 = first[static_cast<std::size_t>(row * 2)];
+            const int t1 = first[static_cast<std::size_t>(row * 2 + 1)];
+            require(t0 >= 0 && t0 < token_domain && t1 >= 0 && t1 < token_domain,
+                    label + ": emitted token out of range");
+            require(target[0][static_cast<std::size_t>(t0)] > 0.0 &&
+                        target[1][static_cast<std::size_t>(t1)] > 0.0,
+                    label + ": emitted token outside the p-less support");
+            ++marginal0[static_cast<std::size_t>(t0)];
+            ++marginal1[static_cast<std::size_t>(t1)];
+            ++observed[static_cast<std::size_t>(bucket(top0, t0) * b1 + bucket(top1, t1))];
+        }
+    }
+
+    const auto chi2_marginal = [&](const std::vector<long long>& counts, int column, double& dof) {
+        double chi2 = 0.0;
+        for (const int token : support[static_cast<std::size_t>(column)]) {
+            const double expected =
+                target[static_cast<std::size_t>(column)][static_cast<std::size_t>(token)] * trials;
+            const double diff =
+                static_cast<double>(counts[static_cast<std::size_t>(token)]) - expected;
+            chi2 += diff * diff / expected;
+        }
+        dof = std::max(
+            1.0, static_cast<double>(support[static_cast<std::size_t>(column)].size()) - 1.0);
+        return chi2;
+    };
+    double dof0 = 0.0;
+    double dof1 = 0.0;
+    const double chi0 = chi2_marginal(marginal0, 0, dof0);
+    const double chi1 = chi2_marginal(marginal1, 1, dof1);
+    double chi_joint = 0.0;
+    for (int a = 0; a < b0; ++a) {
+        double pa = 0.0;
+        for (const int token : support[0]) {
+            if (bucket(top0, token) == a) { pa += target[0][static_cast<std::size_t>(token)]; }
+        }
+        for (int b = 0; b < b1; ++b) {
+            double pb = 0.0;
+            for (const int token : support[1]) {
+                if (bucket(top1, token) == b) { pb += target[1][static_cast<std::size_t>(token)]; }
+            }
+            const double expected = pa * pb * trials;
+            if (!(expected > 0.0)) { continue; }
+            const double diff =
+                static_cast<double>(observed[static_cast<std::size_t>(a * b1 + b)]) - expected;
+            chi_joint += diff * diff / expected;
+        }
+    }
+    const double dof_joint = static_cast<double>(b0 * b1 - 1);
+    const auto limit = [](double dof) { return dof + 6.0 * std::sqrt(2.0 * dof); };
+    const double tau_tolerance = 5.0 * sd_tau / std::sqrt(static_cast<double>(trials));
+    const double mean_observed = tau_sum / trials;
+    const double second_mean = second_tau_sum / trials;
+    std::cout << label << ": chi2 t0=" << chi0 << " (" << limit(dof0) << ") t1=" << chi1 << " ("
+              << limit(dof1) << ") joint=" << chi_joint << " (" << limit(dof_joint)
+              << ") E[tau]=" << mean_observed
+              << (chained ? " round2=" + std::to_string(second_mean) : std::string())
+              << " exact=" << mean_tau << " tol=" << tau_tolerance << " uncovered=" << uncovered
+              << '\n';
+    require(uncovered > 0.05, label + ": selector q must leave target mass uncovered");
+    require(chi0 < limit(dof0) && chi1 < limit(dof1) && chi_joint < limit(dof_joint),
+            label + ": emitted tokens do not follow the p-less target law");
+    require(std::abs(mean_observed - mean_tau) < tau_tolerance &&
+                (!chained || std::abs(second_mean - mean_tau) < tau_tolerance),
+            label + ": accepted length differs from the Algorithm 2 enumeration");
 }
 
 void qualify_prepare(ninfer::DeviceContext& device) {
@@ -1345,6 +1765,11 @@ int main() {
         for (int tokens : {127, 257, kRealVocabulary}) {
             run_chain_case(device, tokens, 5, 4, false, true, true);
             run_chain_case(device, tokens, 4, 4, false, false, true);
+        }
+        // Both verify routes: single-workgroup (V=64) and multi-block finalize (product V).
+        for (const bool chained : {false, true}) {
+            run_p_less_block_statistics(device, 64, 64, chained);
+            run_p_less_block_statistics(device, kRealVocabulary, 248077, chained);
         }
         for (int width = 2; width <= 16; ++width) {
             for (int batch = 1; batch <= static_cast<int>(ninfer::kMaximumConcurrency); ++batch) {
