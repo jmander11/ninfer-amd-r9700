@@ -118,6 +118,8 @@ Evidence: `profiles/bench/r9700-upstream-sync-20260928/`.
 - Already equivalent: `c9a04602` (`d0e58c0a`, `23877a2e`), `db2b7153` (`455e45ef`), `1e4dc811`
   (`3c4b4ce6`), `9b7d1277` (`2a8b033f`), `37c63461` (the host tool-mask mailbox already runs plain
   rounds at the no-exchange ceiling), and the `94d97c11` DFlash2 draft-temperature contract.
-- Excluded: `34ed7bc6` (NVFP4 A8 gate/up scratch), the `94d97c11` sparse-attention flags (no
-  runtime sparse-attention knobs here), and the NVIDIA measurement records `f33ff218`, `163c6b38`,
-  `ceeac05d`.
+- Excluded: `34ed7bc6` (NVFP4 A8 gate/up scratch), the `94d97c11` rows for the NVFP4-KV
+  `--sage`, `--keep-frac` and `--xattn-tau` flags (XAttention exists here only as the
+  compile-time qualification build with fixed tau, not a runtime flag; Sparge is not implemented;
+  Sage is rejected by the precision policy), and the NVIDIA measurement records `f33ff218`,
+  `163c6b38`, `ceeac05d`.
