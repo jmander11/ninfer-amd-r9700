@@ -403,6 +403,26 @@ The other points of each C:
 | 3 | 240 | 1 | 0.355 | 89 | 2,293 | 1.043 |
 | 3 | 496 | 2 | 0.337 | 84 | 2,322 | 1.033 |
 
+C5..C8 (2026-10-01, after the C5..C8 verify-width kernels; build 83175b29; two runs per cell,
+five at C8 for 1024/2048; `profiles/bench/r9700-c8-20260930/score/`). Columns are the forward
+width N (`--mixed-forward N`, D=1); each C normalizes by its own prefill-first rate (3,339-3,362
+tok/s). The 1024 decode share is 0.146 / 0.151 / 0.157 / 0.160 at C5 / C6 / C7 / C8:
+
+| C | 768 | 1024 (auto) | 1280 | 1536 | 2048 |
+|---|---:|---:|---:|---:|---:|
+| 5 | 1.037 / 1.044 | **1.056 / 1.064** | 1.028 / 1.030 | 1.034 / 1.037 | 1.044 / 1.047 |
+| 6 | 1.023 / 1.021 | **1.043 / 1.059** | 1.023 / 1.022 | 1.030 / 1.035 | 1.036 / 1.039 |
+| 7 | 1.040 / 1.036 | **1.056 / 1.053** | 1.027 / 1.029 | 1.035 / 1.038 | 1.038 / 1.041 |
+| 8 | 1.003 / 1.005 | **1.031** (5 runs, 1.028-1.035) | 1.005 / 1.022 | 1.019 / 1.013 | 1.032 (5 runs, 1.022-1.041) |
+
+`auto` (1024) is the best width at C5..C7 and ties 2048 at C8, where 1024 also keeps the
+higher decode share (0.160 against 0.101) and half the decode stall. The C8 score is lower because
+its mixed round carries seven lanes of decode-side work (drafter, GDN replay fold and record, verify
+attention), so mixed prefill drops to ~2,910 tok/s against ~3,000-3,075 at C5..C7.
+C8 at the production context (32K, `--kv-capacity auto`, `--mixed-forward auto`) starts with the
+maximum 262,144-token KV capacity, a 265 MB workspace (mixed layout included), 1.12 GB of Device
+Graphs against a 2.32 GB allowance and 6.7 GB of planned slack.
+
 C=1 has no decode lane during a prefill, so every policy reduces to prefill-first there.
 
 Long context (C4, current build, `--contention L,R --contention-context L`: the 3 decode lanes

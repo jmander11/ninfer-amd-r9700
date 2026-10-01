@@ -59,9 +59,8 @@ FP8LUT4 artifact was admitted; it remains in git history.
   stall check, and the kernel fixes that made mixed rounds cheap are in `docs/performance.md`
   "Mixed prefill/decode frontier". Architecture: `concurrent-inference-architecture.md` §1.2,
   §2.5, §7.3, §8.9.
-- [ ] `C8-CONCURRENCY` [changed the product contract] The startup-fixed maximum concurrency is
-  C=1..8 (`kMaximumConcurrency` = 8), including DFlash with adaptive draft length and mixed
-  prefill/decode rounds (§8.9 aligned slice `S = 1024 - 8(C-1)`: 992/984/976/968 at C5..C8).
-  Remaining: bring the C5..C8 verify-width kernels (T 33..64: FP8LUT4/FP8 small-T Linears, the
-  GDN normalized front, drafter A8Q4 tables, SWA split) to maximum speed, then measure the best
-  mixed-round score for C5..C8 and record it in `docs/performance.md`.
+- [x] `C8-CONCURRENCY` [changed the product contract] Done 2026-10-01 (83175b29). The startup-fixed
+  maximum concurrency is C=1..8, including DFlash adaptive draft and mixed rounds. C5..C8
+  verify-width kernels (SWA split, FP8LUT4 deep mid-T, A8Q4 token-tile) match their C4 per-call
+  efficiency; `--mixed-forward auto` (1024) is the best width at C5..C8. `docs/performance.md`
+  has the evidence.
