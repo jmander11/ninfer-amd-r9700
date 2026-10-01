@@ -702,7 +702,8 @@ python3 tools/bench/run_ninfer_bench_matrix.py --preset full --suite mtp_sweep \
 # Native Engine concurrency decomposition at every supported fixed C.
 python3 tools/bench/run_ninfer_bench_matrix.py --preset concurrency \
   --weights /absolute/path/to/selected.ninfer \
-  --concurrency 1 --concurrency 2 --concurrency 3 --concurrency 4
+  --concurrency 1 --concurrency 2 --concurrency 3 --concurrency 4 \
+  --concurrency 5 --concurrency 6 --concurrency 7 --concurrency 8
 ```
 
 The `prefill-chunk` preset writes schema-v23 raw reports and a schema-v14 manifest, binding prompt,

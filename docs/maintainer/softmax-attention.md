@@ -235,8 +235,8 @@ capacity results.
 
 Whole-inference admission is a dense-versus-sparse decision, not merely a choice between sparse
 G16 and G32. The all-Q4 route comparison therefore contains four same-artifact candidates: dense
-G16, dense G32, XAttention G16, and XAttention G32. Under the C=1..4 product cap the mixed recipe
-is also capacity-eligible, so the final product comparison must add the equivalent four
+G16, dense G32, XAttention G16, and XAttention G32. Under the former C=1..4 product cap the mixed
+recipe was also capacity-eligible, so that product comparison had to add the equivalent four
 mixed-recipe candidates, with matched dense/XAttention schema-v6 PPL and fresh C=1..4
 capacity/whole evidence. Each dense candidate needs its own fresh
    schema-v14 capacity/whole pair from one current dense executable. Each spec-none ordinary whole

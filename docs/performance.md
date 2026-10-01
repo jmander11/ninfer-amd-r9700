@@ -3617,7 +3617,7 @@ new-severe budget. The mixed source-MSE recipe measured within the accuracy tier
 with one new-severe position of margin at 32K. Direct G16/G32 NLL
 differences are diagnostic and do not choose a group: three of four are within two paired standard
 errors, while all-Q4 at 32K favors G16 by 0.001471 mean NLL (2.18 standard errors). Under the
-current C=1..4 product cap, both recipes and both cache groups remain capacity candidates.
+former C=1..4 product cap, both recipes and both cache groups remained capacity candidates.
 
 The table above is retained historical one-realization evidence, not current admission. The old
 source scorer was nondeterministic at both lengths; long-context tracing localized its first

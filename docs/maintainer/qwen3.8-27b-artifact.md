@@ -360,11 +360,11 @@ mixed artifact with adaptive-A8 W8 execution is the Q4-containing leader at +0.0
 6.544746). Its three new NLL-at-least-10 positions are within the five-position 8K budget, so it
 is quality-eligible. The
 all-Q4+A8 row meets the capacity-speed tier at +0.039509 mean NLL and nine new severe positions.
-Both A8 profiles retain their quality evidence. Under the C=1..4 product cap, both recipes and
-both G16/G32 cache groups remain capacity candidates. The earlier mixed-recipe C7/C8 startup
-failures are retained as out-of-scope stress evidence and no longer exclude it. Fresh exact C=1..4
-capacity and whole-inference evidence is required for selection; the earlier C=1..8 manifests are
-historical rather than current product evidence.
+Both A8 profiles retain their quality evidence. Under the former C=1..4 product cap, both recipes
+and both G16/G32 cache groups remained capacity candidates. The earlier mixed-recipe C7/C8 startup
+failures were then retained as out-of-scope stress evidence and no longer excluded it. Fresh exact
+C=1..4 capacity and whole-inference evidence was required for that selection; the earlier C=1..8
+manifests are historical rather than current product evidence.
 Their historical mixed C=1..4 rows resolved G16 to 262,144/314,112/301,888/289,664 tokens and
 G32 to 262,144/326,656/313,984/301,248 tokens; these are retained facts, not reusable admission
 manifests.
@@ -499,7 +499,7 @@ objects, for 1,190 objects total. This is an evaluation control only; it neither
 production DFlash matrix recipe nor authorizes production routing.
 
 These fixed canonical-Q4 companions are converter, binder, and historical evaluator controls;
-they do not select the production DFlash matrix recipe. After the base C=1..4 decision, a
+they do not select the production DFlash matrix recipe. After the base-artifact decision, a
 recipe-aware converter can append matrices derived directly from the real BF16 DFlash2
 checkpoint. `convert_dflash2_q4 --matrix-recipe` selects `canonical-q4g64` (default),
 `source-mse-q4g64`, or `source-mse-w8g32` consistently for preflight, conversion, and

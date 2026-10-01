@@ -357,8 +357,9 @@ tier uses paired mean-NLL delta at most 0.02 and at most
 uses at most `ln(1.05) = 0.048790164` mean-NLL delta and
 `ceil(0.0025 * scored positions)` new severe positions. BF16 greedy-token flip count and rate
 remain diagnostics. Selection then retains every non-dominated
-profile after matched 8K/32K and C=1..4 measurement: A dominates B only when it is no worse in
-mean-NLL delta, new-severe-position rate, resolved capacity, and every required whole-inference
+profile after matched 8K/32K and C=1..4 measurement (the former product cap): A dominates B only
+when it is no worse in mean-NLL delta, new-severe-position rate, resolved capacity, and every
+required whole-inference
 throughput cell, and is strictly better in at least one. PPL scorer wall time is never a throughput
 objective.
 
@@ -378,13 +379,14 @@ workload arbitrarily and follows the product priority of end-to-end performance 
 quality and capacity constraints are satisfied.
 
 The earlier layout-bearing all-Q4 capacity evidence is exact historical measurement but does not
-choose the cache group and is not current C=1..4 product evidence. The schema-v12 G16/G32 manifests
+choose the cache group and is not current product evidence. The schema-v12 G16/G32 manifests
 and schema-v19 reports, including C=1..8 maxima,
 binding constraints, artifact hash, executable hashes, and superseded-run boundary, are recorded
 in `paged-kv-cache.md` and `performance.md`. Matched phase and whole-inference evidence remains the
-missing input to the schema-v7 selection record. The restored mixed recipe likewise requires fresh
-C=1..4 capacity/whole evidence for dense and XAttention G16/G32 candidates, plus matched sparse
-quality, so the final comparison covers both weight recipes rather than only all-Q4.
+missing input to the schema-v7 selection record. Under the former C=1..4 cap,
+the restored mixed recipe likewise required fresh C=1..4 capacity/whole evidence for dense and
+XAttention G16/G32 candidates, plus matched sparse
+quality, so the final comparison covered both weight recipes rather than only all-Q4.
 
 The same-size `r9700-w8g32-mse-eval` candidate changes only the source-to-W8 scale objective.
 For each represented-BF16 G32 group, it includes the canonical FP16(absmax/127) baseline and
