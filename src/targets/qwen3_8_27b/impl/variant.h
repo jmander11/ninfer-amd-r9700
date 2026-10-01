@@ -94,11 +94,13 @@ struct Variant {
         // - the BF16 rows `input` [K, T];
         [[nodiscard]] bool fp8lut4_projections(const Tensor& input, std::span<const Fp8Lut4Target> targets,
                                            hipStream_t stream);
-        // - RMSNorm (unit offset) of `residual` [5120, T];
+        // - RMSNorm (unit offset) of `residual` [5120, T], also published to a non-null
+        //   `normalized` [5120, T];
         [[nodiscard]] bool fp8lut4_normalized_projections(const Tensor& residual, const Tensor& norm,
                                                       float eps,
                                                       std::span<const Fp8Lut4Target> targets,
-                                                      hipStream_t stream);
+                                                      hipStream_t stream,
+                                                      Tensor* normalized = nullptr);
         // - the attention output gate BF16(BF16(attention) * sigmoid(gate)) [6144, T];
         [[nodiscard]] bool fp8lut4_gated_projections(const Tensor& gate, const Tensor& attention_fp32,
                                                  std::span<const Fp8Lut4Target> targets,
@@ -129,7 +131,7 @@ struct Variant {
         [[nodiscard]] bool gdn_q4_pair_shared(
             const Tensor& input, const Weight& query_key, const Weight& value_z,
             Tensor& query_key_output, Tensor& value_z_output, hipStream_t stream);
-        // Ordinary P2048 GDN front: the input RMSNorm of `residual` feeds the shared codec
+        // Ordinary prefill GDN front: the input RMSNorm of `residual` feeds the shared codec
         // directly and is published to `normalized`; the query-key, value and output-gate rows
         // (the value-z matrix split at value_dim) are projected from the same planes.
         // The output-gate projection runs on a private side stream, overlapping the
@@ -295,6 +297,11 @@ struct Variant {
         eager_widths(std::uint32_t prefill_tokens, std::uint32_t maximum_concurrency,
                      std::span<const std::uint32_t> verify_widths);
 
+        // Whether every target runs on the FP8LUT4 projection route (FP8LUT4 weights, or
+        // row-scaled E4M3 protections at prefill widths) over a [columns, tokens] image.
+        [[nodiscard]] bool fp8lut4_targets_supported(std::uint32_t tokens, std::uint32_t columns,
+                                                 std::span<const Fp8Lut4Target> targets) const noexcept;
+
     private:
         struct Impl;
         [[nodiscard]] ops::r9700::linear::FusedSiluA8Q4G64DownArgs fused_down_args(
@@ -306,8 +313,6 @@ struct Variant {
                                          const GdnProjectionWeights& weights, Tensor& g,
                                          Tensor& beta, hipStream_t stream,
                                          ops::r9700::linear::Fp8ActivationWorkspace* image);
-        [[nodiscard]] bool fp8lut4_targets_supported(std::uint32_t tokens, std::uint32_t columns,
-                                                 std::span<const Fp8Lut4Target> targets) const noexcept;
         [[nodiscard]] ops::r9700::linear::Fp8ActivationWorkspace fp8lut4_image(
             std::uint32_t tokens, std::uint32_t columns) const;
         void fp8lut4_project(const ops::r9700::linear::Fp8ActivationWorkspace& image,
@@ -360,6 +365,23 @@ struct Variant {
     [[nodiscard]] static std::size_t full_attention_workspace_capacity_bytes(
         std::int32_t maximum_query_rows, std::uint32_t maximum_visible_context,
         bool tree_or_device_count);
+    // One causal sequence of a compact decode batch: its query/position/output panels and the
+    // read capability its append transaction produced.
+    struct FullAttentionSequence {
+        Tensor query;
+        qwen3::PagedKVLayerRead cache_read;
+        Tensor cache_positions;
+        Tensor output;
+    };
+    // Attends every sequence of the batch in one launch when all of them take the batched route,
+    // with each sequence's output bytes equal to its full_attention call. False, launching
+    // nothing, when some sequence is outside that route; the caller then attends one by one.
+    [[nodiscard]] static bool full_attention_sequences(
+        std::span<const FullAttentionSequence> sequences, WorkspaceArena& workspace,
+        hipStream_t stream);
+    [[nodiscard]] static std::size_t full_attention_sequences_workspace_capacity_bytes(
+        std::int32_t sequences, std::int32_t maximum_query_rows,
+        std::uint32_t maximum_visible_context);
 #if defined(NINFER_R9700_XATTENTION_QUALIFICATION)
     // Compile-isolated model-gate leaf. The ordinary target library has neither this declaration
     // nor its sparse Op object, so no runtime selector or disabled-path branch reaches production.
@@ -401,14 +423,15 @@ struct Variant {
                                      WorkspaceArena& workspace, hipStream_t stream,
                                      ExecutionState* execution = nullptr,
                                      std::int32_t text_layer = -1);
-    [[nodiscard]] static constexpr bool gdn_input_projection_prefill_p2048_selected(
-        qwen3::TextPhase phase, std::int32_t tokens) noexcept {
-        return phase == qwen3::TextPhase::Prefill && tokens == 2048;
+    [[nodiscard]] static constexpr bool gdn_input_projection_prefill_selected(
+        qwen3::TextPhase phase) noexcept {
+        return phase == qwen3::TextPhase::Prefill;
     }
-    // Ordinary P2048 prefill owns the whole GDN front: the input RMSNorm of `residual` (published
-    // to `hidden`), the a/b control projection into g/beta, the query-key/value-z projections
-    // and the convolution scatter. The A8 route normalizes straight into the shared codec.
-    static void gdn_input_projection_prefill_p2048(
+    // Ordinary one-sequence prefill (any width) owns the whole GDN front: the input RMSNorm of
+    // `residual` (published to `hidden`), the a/b control projection into g/beta, the
+    // query-key/value-z projections and the convolution scatter. The A8 route normalizes straight
+    // into the shared codec.
+    static void gdn_input_projection_prefill(
         const Tensor& residual, const Tensor& norm_weight, float eps,
         const GdnProjectionWeights& weights, const Tensor& conv_weight, Tensor& conv_state,
         Tensor& hidden, Tensor& g, Tensor& beta, Tensor& query, Tensor& key, Tensor& value,
@@ -442,6 +465,19 @@ struct Variant {
         Tensor& output_gate, qwen3::TextPhase phase, WorkspaceArena& workspace,
         hipStream_t stream, const Tensor* parent_index = nullptr,
         ExecutionState* execution = nullptr, std::int32_t text_layer = -1);
+    // Mixed front: one prefill owner's leading `prefill_columns` columns of `residual`
+    // [hidden,T] followed by a record-verify batch of `conv_record`'s [conv,width,batch] columns.
+    // Normalization, a/b controls and the input projections run once over all T columns; the
+    // owner convolves through its single `prefill_conv_state` and the batch through the record
+    // path. query/key/value/output_gate are the aggregate [rows,T] outputs.
+    static void gdn_front_mixed(
+        const Tensor& residual, const Tensor& norm_weight, float eps,
+        const GdnProjectionWeights& weights, const Tensor& conv_weight,
+        Tensor& prefill_conv_state, const Tensor& conv_states, const Tensor& valid_columns,
+        const Tensor& initial_slots, std::int32_t prefill_columns, Tensor& hidden, Tensor& g,
+        Tensor& beta, Tensor& conv_record, Tensor& query, Tensor& key, Tensor& value,
+        Tensor& output_gate, WorkspaceArena& workspace, hipStream_t stream,
+        ExecutionState* execution, std::int32_t text_layer);
     // Snapshot front for one T1 sequence: owns the GDN input RMSNorm of `residual`, the a/b
     // controls into g/beta, the input projections and the snapshot convolution
     // (gdn_input_projection_snapshot's outputs); `hidden` is scratch for the unfused composition.

@@ -132,6 +132,14 @@ struct EngineOptions {
     std::uint32_t max_pending_requests = 16;
     std::uint32_t pending_timeout_ms   = 30000;
     std::uint32_t prefill_chunk        = kDefaultPrefillChunk;
+    // Prompt tokens of the prefill owner advanced per slice while other requests are
+    // decode-ready; 0 runs the owner's whole prefill before the next decode round. A DFlash
+    // text owner's slice shares the target forward of every prefill_slice_rounds-th decode round,
+    // widened by the verify columns that round leaves unused, so the mixed forward is always
+    // prefill_slice + (C-1) x verify width; other owners run it as a separate step after
+    // prefill_slice_rounds decode rounds.
+    std::uint32_t prefill_slice        = 0;
+    std::uint32_t prefill_slice_rounds = 1;
     std::size_t kv_ram_capacity_bytes  = 0;
     std::size_t kv_disk_capacity_bytes = 0;
     std::filesystem::path kv_disk_location;

@@ -8,6 +8,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 
 namespace ninfer::targets::qwen3_8_27b::detail {
 
@@ -53,6 +54,19 @@ struct R9700FullAttentionArgs {
 // The default-off Text parity profile additionally overwrites only P129's tail with W1 WMMA.
 [[nodiscard]] hipError_t r9700_qwen3_8_27b_full_attention(const R9700FullAttentionArgs& args,
                                                       hipStream_t stream) noexcept;
+
+// Sequence batch of one compact decode round (at most four sequences of one cache, each with its
+// own read capability, positions, output and workspace): true when every sequence is a
+// non-tree host-fixed call on the packed decode route, which then serves the whole batch as one
+// split launch and one merge launch with each sequence's output bytes equal to its single call.
+[[nodiscard]] bool r9700_full_attention_sequences_supported(
+    std::span<const R9700FullAttentionArgs> sequences, hipStream_t stream) noexcept;
+// One sequence's 256-byte-aligned slice of the batch workspace, or zero off the packed route. It
+// is monotonic in rows and context, so a stride sized at the envelope maxima covers every call.
+[[nodiscard]] std::size_t r9700_full_attention_sequence_workspace_stride_bytes(
+    std::uint32_t query_rows, std::size_t visible_context) noexcept;
+[[nodiscard]] hipError_t r9700_qwen3_8_27b_full_attention_sequences(
+    std::span<const R9700FullAttentionArgs> sequences, hipStream_t stream) noexcept;
 
 #if defined(NINFER_R9700_XATTENTION_QUALIFICATION)
 // Private model-gate route compiled only into an explicitly configured qualification build.

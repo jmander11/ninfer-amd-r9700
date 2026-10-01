@@ -139,14 +139,14 @@ enum class A8Q4PrefillRoute : std::uint8_t {
     M64N128PingPongProduction,
 };
 
-// The cooperative prefill CTA is admitted only for the exact Text and bulk-MTP
-// matrix tuples and token extents covered by the retained R9700 qualification.
-// Shape matching keeps every decode, tail chunk, Vision, and DFlash leaf on its
-// existing route without adding a runtime selector or repacking weights.
+// The cooperative prefill CTA (128-token tiles, partial tiles predicated) is admitted for the
+// Text, bulk-MTP and DFlash-context matrix tuples above the largest decode/verification width
+// (32), where it is 1.1-3.6x faster than the WMMA32 and single-bank routes (DFlash context
+// N5120/K25600: T64 651 -> 361 us, T512 3650 -> 971 us); decode and verification widths keep
+// their routes.
 [[nodiscard]] constexpr bool use_a8q4_prefill_cta(
     std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns) noexcept {
-    const bool qualified_tokens =
-        tokens == 1024U || tokens == 2048U || tokens == 4096U || tokens == 8192U;
+    const bool qualified_tokens = tokens > 32U;
     const bool qualified_shape =
         ((rows == 7168U || rows == 4096U || rows == 12288U || rows == 34816U ||
           rows == 1024U || rows == 6144U) &&

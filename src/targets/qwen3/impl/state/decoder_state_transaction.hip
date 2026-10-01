@@ -5,6 +5,7 @@
 #include "ops/r9700/kv/fp8_int4_kv_compact.h"
 
 #include <algorithm>
+#include <array>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
@@ -353,10 +354,9 @@ void PagedKVTransaction::begin_device_segment(const std::int32_t* device_positio
     segment_open_ = true;
 }
 
-void PagedKVTransaction::launch_append_layer(std::uint32_t layer,
-                                             const hip_bfloat16* keys,
-                                             const hip_bfloat16* values,
-                                             hipStream_t stream) {
+ops::r9700::kv::Fp8Int4KvAppendArgs PagedKVTransaction::prepare_append_layer(
+    std::uint32_t layer, const hip_bfloat16* keys, const hip_bfloat16* values,
+    hipStream_t stream) {
     require_open("launch append");
     if (!append_mode_) {
         throw std::logic_error("cannot append through a compaction transaction");
@@ -410,12 +410,60 @@ void PagedKVTransaction::launch_append_layer(std::uint32_t layer,
         .value_scale_layout = raw_layout(binding.cache.plane_layouts.value_scale),
     };
     launched_ = true;
-    HIP_CHECK(ops::r9700::kv::fp8_int4_kv_append(args, stream));
+    return args;
+}
+
+void PagedKVTransaction::record_append_layer(std::uint32_t layer) noexcept {
     layers_launched_ |= 1ULL << layer;
     published_frontier_ = segmented_mode_
                               ? visible_frontier_limit_
                               : publication_->valid_frontier +
                                     static_cast<std::uint32_t>(position_count_);
+}
+
+void PagedKVTransaction::launch_append_layer(std::uint32_t layer,
+                                             const hip_bfloat16* keys,
+                                             const hip_bfloat16* values,
+                                             hipStream_t stream) {
+    const ops::r9700::kv::Fp8Int4KvAppendArgs args =
+        prepare_append_layer(layer, keys, values, stream);
+    HIP_CHECK(ops::r9700::kv::fp8_int4_kv_append(args, stream));
+    record_append_layer(layer);
+}
+
+void PagedKVTransaction::launch_append_layers(std::span<PagedKVTransaction* const> transactions,
+                                              std::uint32_t layer,
+                                              std::span<const hip_bfloat16* const> keys,
+                                              std::span<const hip_bfloat16* const> values,
+                                              hipStream_t stream) {
+    if (transactions.empty() || transactions.size() > ops::r9700::kv::kAppendMaximumSequences ||
+        keys.size() != transactions.size() || values.size() != transactions.size()) {
+        throw std::invalid_argument("FP8-K/INT4-V batched append has an invalid sequence count");
+    }
+    std::array<ops::r9700::kv::Fp8Int4KvAppendArgs, ops::r9700::kv::kAppendMaximumSequences>
+        args{};
+    // Reject a malformed batch before staging any transaction; a per-transaction contract
+    // failure in prepare_append_layer leaves the batch uncommittable, as a per-sequence append
+    // failure did.
+    for (std::size_t i = 0; i < transactions.size(); ++i) {
+        PagedKVTransaction* const transaction = transactions[i];
+        if (transaction == nullptr || transactions.front() == nullptr ||
+            transaction->cache_ != transactions.front()->cache_ ||
+            std::find(transactions.begin(), transactions.begin() + static_cast<std::ptrdiff_t>(i),
+                      transaction) != transactions.begin() + static_cast<std::ptrdiff_t>(i)) {
+            throw std::invalid_argument(
+                "FP8-K/INT4-V batched append requires distinct transactions of one cache");
+        }
+    }
+    for (std::size_t i = 0; i < transactions.size(); ++i) {
+        args[i] = transactions[i]->prepare_append_layer(layer, keys[i], values[i], stream);
+    }
+    HIP_CHECK(ops::r9700::kv::fp8_int4_kv_append(
+        std::span<const ops::r9700::kv::Fp8Int4KvAppendArgs>(args.data(), transactions.size()),
+        stream));
+    for (PagedKVTransaction* const transaction : transactions) {
+        transaction->record_append_layer(layer);
+    }
 }
 
 void PagedKVTransaction::end_device_segment(hipStream_t stream) {

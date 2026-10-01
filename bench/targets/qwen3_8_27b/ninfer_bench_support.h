@@ -67,10 +67,21 @@ struct BenchOptions {
     std::vector<int> n_gen;
     std::vector<std::pair<int, int>> prompt_gen;
     std::vector<std::pair<int, int>> whole_inference;
+    // --contention P,R: C-1 lanes decode while one lane runs R fresh P-token prefills.
+    std::optional<std::pair<int, int>> contention;
+    // --contention-context L: prompt tokens of each contention decode lane.
+    std::uint32_t contention_context = 512;
+    // --contention-lanes N: decoding lanes during contention (default: C-1).
+    std::uint32_t contention_lanes = 0;
+    // --pair-check P,G: lane A decodes while lane B prefills P tokens, then both generate;
+    // reports both greedy token streams for schedule-invariance comparisons.
+    std::optional<std::pair<int, int>> pair_check;
     int repetitions = kDefaultRepetitions;
     int warmup      = kDefaultWarmup;
     std::optional<std::uint32_t> max_context;
     std::uint32_t prefill_chunk    = kDefaultPrefillChunk;
+    std::uint32_t prefill_slice    = 0;
+    std::uint32_t prefill_slice_rounds = 1;
     std::uint32_t concurrency      = 1;
     SpeculativeBackend spec_backend    = SpeculativeBackend::Mtp;
     std::uint32_t draft_tokens         = 0;

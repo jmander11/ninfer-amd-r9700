@@ -29,7 +29,8 @@ model execution：一次 model traversal、一次 Device Graph replay 和一组 
 ### 1.2 Non-goals
 
 - request preemption、swap、pause/resume，或把 **active** request 的 KV 迁出 GPU；
-- 多请求 batched prefill 或 prefill/decode mixed forward；
+- 多请求 batched prefill（同一时刻只有一个 prefill owner；§8.9 的 mixed round 只把该 owner 的一个
+  bounded slice 并入 DFlash decode round 的 target forward）；
 - 多 GPU 或 distributed inference；
 - priority、tenant QoS 或 deadline-aware GPU scheduling；
 - 面向数十至数百请求的通用 continuous batching；
@@ -86,8 +87,12 @@ NInfer 不支持 preemption，因此 request 只有在其 prompt、声明的最�
 
 ### 2.5 One prefill owner
 
-同一时刻最多有一个 admitted request 拥有 prefill/finalization path。Suffix prefill 以 bounded chunk 为
-单位，在 decode rounds 之间运行。其他等待请求仍留在 host queue，不占 slot 或 model state。
+同一时刻最多有一个 admitted request 拥有 prefill/finalization path。Suffix prefill 以 bounded step 为
+单位推进：`prefill_slice=0` 时 owner 的整个 prefill 在下一个 decode round 之前连续完成
+（prefill-first）；`prefill_slice=S>0` 且存在 decode-ready request 时，独立 step 最多推进 S 个 prompt
+tokens，mixed step 推进 S 加上该 round 未用的 verify columns（§8.9），并按 §7.3 与 decode rounds
+交错或并入 mixed round。其他等待请求仍留在 host queue，不占 slot
+或 model state。
 
 ### 2.6 Single GPU execution owner
 
@@ -226,7 +231,7 @@ usage. Exhaustion is a request error, not synthetic EOS, engine shutdown, or a p
 | Server Frontend | 请求校验、有界 CPU preparation/pending work、取消输入和响应 I/O |
 | GPU Executor | admission、boundary processing、状态提交和全部 GPU submission |
 | Slot Table | 保存 admitted requests 的稳定控制状态 |
-| Scheduler | 在 boundary 执行 protected-head admission，并选择下一 `PrefillChunk` 或完整 active `DecodeRound` |
+| Scheduler | 在 boundary 执行 protected-head admission，并选择下一 `PrefillChunk`、`MixedRound` 或完整 active `DecodeRound` |
 | Target Batch Assembler | 把 round membership 转成 target 所需的 typed controls 和 state selectors |
 | Model Runtime | 持有唯一 resident model、共享 execution memory 和 graph assets，执行 whole-batch schedule |
 | DecodeBatchFrame | 一份最大容量为 `C` 的地址稳定 round staging；每轮只使用 exact-`B` prefix |
@@ -922,11 +927,12 @@ spill/allocation failure does not turn active requests into offloaded/preempted 
 
 ### 7.1 GPU scheduling units
 
-Scheduler 只提交两类 GPU compute work：
+Scheduler 只提交三类 GPU compute work：
 
 ```text
 PrefillChunk(request)
 DecodeRound(all decode-ready requests)
+MixedRound(all decode-ready requests, one prefill slice of the owner)   # DFlash only, §8.9
 ```
 
 完整 request 不是 scheduling unit。所有 **compute** GPU work 在 `device.stream` 上串行执行。
@@ -965,36 +971,41 @@ boundary 最多发布一个新 admitted request。
 
 ### 7.3 Decode/prefill policy
 
-调度策略为：
+调度策略由两个 startup-fixed 参数决定：`prefill_slice=S`（每个 slice 的 prompt tokens，`0` 表示
+prefill-first）和 `prefill_slice_rounds=D`（每个 slice 对应的 decode rounds，`D>=1`）：
 
 ```text
-if the completed unit was a DecodeRound and a prefill owner exists:
-    run one latency-bounded PrefillChunk
+if a prefill owner exists:
+    if S == 0 or no request is DECODE_READY:
+        run the owner's next PrefillChunk (up to prefill_chunk tokens)
+    else if the owner is mixable (§8.9):
+        run D-1 DecodeRounds, then one MixedRound whose owner fills S + (C-1)W columns
+        less the round's live verify columns
+    else:
+        run D DecodeRounds, then one PrefillChunk of <= S tokens
 else if one or more requests are DECODE_READY:
     run one DecodeRound containing all of them
-else if a prefill owner exists:
-    run the next PrefillChunk
 else:
     remain idle
 ```
 
-因此 decode 和 prefill 同时持续 runnable 时：
-
-```text
-DecodeRound -> PrefillChunk -> DecodeRound -> PrefillChunk -> ...
-```
-
-没有 decode-ready request 时，prefill chunks 连续执行；没有 prefill owner 时，decode rounds 连续执行。
+`S=0` 时 decode 在整个 prompt 的 prefill 期间停顿，prefill 吞吐最高；`S>0` 用 prefill 吞吐换取
+decode 进度。Mixed slice 与 decode rows 共享一次 weight stream，因此同等 decode 份额下 mixed round
+的 decode 停顿只有一个 round 的时长，而 separate `PrefillChunk` 的停顿是整个 slice 的时长。实测
+frontier 见 [`performance.md`](../performance.md#mixed-prefilldecode-frontier-2026-09-29)。没有 decode-ready
+request 时，prefill chunks 以完整 `prefill_chunk` 连续执行；没有 prefill owner 时，decode rounds
+连续执行。
 
 当没有 prefill owner 而 ordered pending queue 非空时，§5 选中的 head 或 backfill request 占用下一次
 prefill/finalization opportunity：GPU idle 时可以立即 admission；已有 decode-ready rows 时，先完成一个
 DecodeRound，再 admission selected request 并执行它的 first prefill/finalization unit。若该 unit 未完成，
-它成为唯一 prefill owner并进入上述交替；若它完成，request 在下一 boundary 加入 decode batch。持续
+它成为唯一 prefill owner并进入上述策略；若它完成，request 在下一 boundary 加入 decode batch。持续
 ingress 因此不能在两个 donor progress rounds 之间连续 admission 多个 requests，也不能无限延迟 frozen
 frontier 的 decode progress。
 
-Prefill chunk profile 限制插入两个 decode rounds 之间的 GPU 时间。其具体 token/media extent 是经过
-target 和 hardware qualification 的配置，不属于 scheduler semantic。Vision 和其他 prefill GPU phases
+`S>0` 时 slice 限制插入两个 decode rounds 之间（或并入一个 mixed round）的 prompt work；`S=0`
+时 decode 停顿覆盖 owner 的整个 prefill。Chunk/slice 的具体 token/media extent 是经过 target 和
+hardware qualification 的配置，不属于 scheduler semantic。Vision 和其他 prefill GPU phases
 必须本身构成 bounded unit，或已被计入该 chunk 的 latency bound；不存在 scheduler 之外的
 unbounded prefill work。
 
@@ -1243,6 +1254,58 @@ request-local ordinary decode path。
 Prefill 仍是单 sequence unit。它独占自己的 `SequenceState`，但复用 Model Runtime 和 shared workspace；
 它不占有一个长期 `DecodeBatchFrame` row。Final prefill 建立完整 decode cursor 后，该 request 只在下一
 boundary 通过正常 batch assembly 加入 ordinary decode。
+
+### 8.9 Mixed prefill/decode round
+
+With DFlash, a mixable owner's slice shares the target forward of a decode round. The owner is
+mixable while it is Prefilling a text-only prompt: no Vision/media phase and no MTP bridge
+preparation. Other owners use the separate-step path of §7.3. A tool-grammar owner's final step
+mixes too: its first-token root mask occupies the exchange's last row, which a verify batch
+(at most C-1 rows while a request prefills) never reaches, and computing it leaves the batch's
+bindings intact (Speculative grammar exchange).
+
+```text
+columns = [owner slice (S_eff tokens) | verify rows (B x W_live)]
+S_eff   = min(remaining prompt, S + (C-1)W - B x W_live)
+```
+
+The forward width is fixed at `S + (C-1)W`. The owner takes the verify columns a round leaves
+unused, when fewer than `C-1` requests decode or adaptive draft length gives `W_live < W`, so the
+aligned forward width holds in every round. Choose `S` so that `S + (C-1)W` is a multiple of 256
+(1000 at C4, 1008 at C3, 1016 at C2 with W=8).
+
+- Linears, norms and MLP run once over all columns, so the weights stream once for both the
+  owner's prompt tokens and the verify rows.
+- Attention runs per segment: the owner's KV transaction and causal prefill attention first,
+  then each verify row against its own cache. Verify KV status is indexed by lane.
+- GDN: the owner uses the prefill convolution and chunked recurrence on its own current slot;
+  verify rows use the record path over their column range.
+- DFlash feature capture is split between the owner's prefill sink and the verify taps. The
+  owner's DFlash context append runs after the round's egress. The owner stages its ingress
+  in frame slot `C-1`, because the owner is never a member and `B <= C-1`.
+- Final owner steps finalize and sample as in ordinary prefill.
+- Admission with decode-ready requests and a configured slice does not run a mixable owner's
+  first step: `start_prefill_lane` returns without progress, and the first slice joins the next
+  round, so decode never stalls for a separate first step. That empty step spends no service
+  quantum and does not restart the `D` cadence.
+- The owner's KV transaction is committed as the round's last host action, after the owner and
+  verify tails, the egress copy and the owner context append are enqueued. Its status read
+  therefore waits on the finished round instead of stalling submission between the last layer
+  and the tails.
+- Capacity: `S <= prefill_chunk - (C-1)W` (rounded down to a multiple of 128 when that bound
+  exceeds 4096), clamped at plan time, so the mixed forward fits the chunk. The plan rejects a
+  chunk that cannot hold `(C-1)W` verify columns plus one prompt token. The workspace plan
+  reserves a separate `dflash_mixed` layout of `S + (C-1)W` columns with an owner of up to
+  `S + (C-1)W - 2B` columns at each batch `B` (verify panels are at least two columns wide).
+- Mixed rounds are eager. Pure decode rounds keep their Device Graph definitions, and
+  adaptive-draft round-time observation skips mixed rounds.
+
+The owner's prefill Ops and state transitions are those of prefill-first; greedy owner tokens
+matched prefill-first in every pair check, and 8K PPL is identical at chunk 2048 and 256. Verify rows take the wide-T Linear/norm routes of the mixed width.
+They are checked against the same Op oracles, but they are not bitwise equal to a pure decode
+round, so greedy streams may diverge at near-ties. The owner's KV commit synchronizes at the end
+of the round, so a mixed step's prefill timing and the decode round time both span the whole
+mixed round.
 
 ---
 
@@ -1724,8 +1787,11 @@ through LM head, and an acquire kernel before the masked argmax waits for the re
 the configurations and restricted rows into the planned device buffers, so the host match
 overlaps the target forward. Without a reply within two seconds the round samples with the bound
 unmasked configurations and `finish_round()` throws before publication; a request left
-unanswered is retired then, never answered against later bindings. Ordinary and prefill root
-masking use their existing synchronized CPU boundary.
+unanswered is retired then, never answered against later bindings. Ordinary root masking uses
+its synchronized CPU boundary. A prefilling request's root mask is written into the last row
+without rebinding, at admission and again before its final step (another prefilling request may
+have written the shared row since); inside a mixed round that host fill precedes the runner's
+enqueue, so the armed matcher is still idle.
 
 Bindings change at synchronized round boundaries, which the matcher cannot overlap: it holds the
 exchange mutex while answering. Lane release and Program teardown retain the owning execution

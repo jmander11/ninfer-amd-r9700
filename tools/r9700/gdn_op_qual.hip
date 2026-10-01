@@ -251,7 +251,7 @@ void qualify_conv_and_controls(hipStream_t stream) {
     DeviceBuffer<hip_bfloat16> d_history_out(initial_history.size());
     copy_to_device(d_weight, weight);
     constexpr std::array<std::uint32_t, 18> token_cases{
-        1, 2, 3, 4, 5, 6, 7, 8, 17, 31, 32, 33, 63, 64, 65, 128, 1024, 2048};
+        1, 2, 3, 4, 5, 6, 7, 8, 17, 31, 32, 33, 63, 64, 65, 128, 1025, 2048};
     for (const std::uint32_t tokens : token_cases) {
         const std::size_t elements = static_cast<std::size_t>(tokens) * kChannels;
         const std::vector<hip_bfloat16> input = bf16_fixture(elements, tokens + 11U);
@@ -350,18 +350,22 @@ void qualify_conv_and_controls(hipStream_t stream) {
                                "token-tiled causal conv in-place history");
         }
 
-        if (tokens == 2048U) {
+        // Direct scatter from separate projection rows, with the value projection either
+        // standalone (stride 6144) or the leading half of the [value,z] rows (stride 12288).
+        for (const std::uint32_t value_stride : {6144U, 12288U}) {
             constexpr std::size_t kQueryKeyRows = 4096U;
             constexpr std::size_t kValueRows = 6144U;
+            const std::string label = "direct-scatter T" + std::to_string(tokens) + " stride " +
+                                      std::to_string(value_stride);
             std::vector<hip_bfloat16> query_key(
                 static_cast<std::size_t>(tokens) * kQueryKeyRows);
-            std::vector<hip_bfloat16> projected_value(
-                static_cast<std::size_t>(tokens) * kValueRows);
+            std::vector<hip_bfloat16> projected_value =
+                bf16_fixture(static_cast<std::size_t>(tokens) * value_stride, 449U);
             for (std::size_t token = 0; token < tokens; ++token) {
                 std::copy_n(input.data() + token * kChannels, kQueryKeyRows,
                             query_key.data() + token * kQueryKeyRows);
                 std::copy_n(input.data() + token * kChannels + kQueryKeyRows, kValueRows,
-                            projected_value.data() + token * kValueRows);
+                            projected_value.data() + token * value_stride);
             }
             DeviceBuffer<hip_bfloat16> d_query_key(query_key.size());
             DeviceBuffer<hip_bfloat16> d_projected_value(projected_value.size());
@@ -370,32 +374,41 @@ void qualify_conv_and_controls(hipStream_t stream) {
             DeviceBuffer<hip_bfloat16> d_value(static_cast<std::size_t>(tokens) * kValueRows);
             copy_to_device(d_query_key, query_key);
             copy_to_device(d_projected_value, projected_value);
-            copy_to_device(d_history_in, initial_history);
-            HIP_CHECK(projection_conv_prefill_p2048_direct_scatter_bf16(
-                d_query_key.get(), d_projected_value.get(), d_weight.get(), d_history_in.get(),
-                d_history_in.get(), d_query.get(), d_key.get(), d_value.get(), tokens, stream));
-            HIP_CHECK(hipStreamSynchronize(stream));
-
-            const auto query_output = copy_to_host(d_query);
-            const auto key_output = copy_to_host(d_key);
-            const auto value_output = copy_to_host(d_value);
-            require_bf16_scatter_exact(query_output, incumbent_output, kChannels, 0U, 2048U,
-                                       "P2048 direct-scatter query parity");
-            require_bf16_scatter_exact(key_output, incumbent_output, kChannels, 2048U, 2048U,
-                                       "P2048 direct-scatter key parity");
-            require_bf16_scatter_exact(value_output, incumbent_output, kChannels, 4096U,
-                                       kValueRows, "P2048 direct-scatter value parity");
-            require_bf16_exact(copy_to_host(d_history_in), expected_history,
-                               "P2048 direct-scatter in-place history");
-            if (projection_conv_prefill_p2048_direct_scatter_bf16(
-                    d_query_key.get(), d_projected_value.get(), d_weight.get(),
+            for (const bool in_place : {true, false}) {
+                copy_to_device(d_history_in, initial_history);
+                hip_bfloat16* history_out = in_place ? d_history_in.get() : d_history_out.get();
+                HIP_CHECK(projection_conv_prefill_direct_scatter_bf16(
+                    d_query_key.get(), d_projected_value.get(), value_stride, d_weight.get(),
+                    d_history_in.get(), history_out, d_query.get(), d_key.get(), d_value.get(),
+                    tokens, stream));
+                HIP_CHECK(hipStreamSynchronize(stream));
+                require_bf16_scatter_exact(copy_to_host(d_query), incumbent_output, kChannels, 0U,
+                                           2048U, (label + " query parity").c_str());
+                require_bf16_scatter_exact(copy_to_host(d_key), incumbent_output, kChannels,
+                                           2048U, 2048U, (label + " key parity").c_str());
+                require_bf16_scatter_exact(copy_to_host(d_value), incumbent_output, kChannels,
+                                           4096U, kValueRows, (label + " value parity").c_str());
+                require_bf16_exact(in_place ? copy_to_host(d_history_in)
+                                            : copy_to_host(d_history_out),
+                                   expected_history, (label + " history").c_str());
+                if (!in_place) {
+                    require_bf16_exact(copy_to_host(d_history_in), initial_history,
+                                       (label + " immutable input history").c_str());
+                }
+            }
+            if (projection_conv_prefill_direct_scatter_bf16(
+                    d_query_key.get(), d_projected_value.get(), value_stride, d_weight.get(),
                     d_history_in.get(), d_history_in.get(), d_query.get(), d_key.get(),
-                    d_value.get(), tokens - 1U, stream) != hipErrorInvalidValue ||
-                projection_conv_prefill_p2048_direct_scatter_bf16(
-                    d_query_key.get(), d_projected_value.get(), d_weight.get(),
+                    d_value.get(), 0U, stream) != hipErrorInvalidValue ||
+                projection_conv_prefill_direct_scatter_bf16(
+                    d_query_key.get(), d_projected_value.get(), 10240U, d_weight.get(),
+                    d_history_in.get(), d_history_in.get(), d_query.get(), d_key.get(),
+                    d_value.get(), tokens, stream) != hipErrorInvalidValue ||
+                projection_conv_prefill_direct_scatter_bf16(
+                    d_query_key.get(), d_projected_value.get(), value_stride, d_weight.get(),
                     d_history_in.get(), d_history_in.get(), d_query_key.get(), d_key.get(),
                     d_value.get(), tokens, stream) != hipErrorInvalidValue) {
-                fail("P2048 direct-scatter malformed or overlap contract was accepted");
+                fail(label + " malformed or overlap contract was accepted");
             }
         }
     }
@@ -539,9 +552,8 @@ void benchmark_conv_prefill_candidates(hipStream_t stream) {
     }
 }
 
-void benchmark_projection_conv_direct_scatter(hipStream_t stream) {
+void benchmark_projection_conv_direct_scatter(hipStream_t stream, std::uint32_t tokens) {
     using namespace ninfer::ops::r9700::gdn;
-    constexpr std::uint32_t tokens = 2048U;
     constexpr std::size_t query_key_rows = 4096U;
     constexpr std::size_t value_rows = 6144U;
     const auto query_key = bf16_fixture(tokens * query_key_rows, 431U, 127.0F);
@@ -592,13 +604,14 @@ void benchmark_projection_conv_direct_scatter(hipStream_t stream) {
         return hipGetLastError();
     };
     const auto challenger = [&]() {
-        return projection_conv_prefill_p2048_direct_scatter_bf16(
-            d_query_key.get(), d_projected_value.get(), d_weight.get(), d_history_in.get(),
-            d_history_out.get(), d_query.get(), d_key.get(), d_value.get(), tokens, stream);
+        return projection_conv_prefill_direct_scatter_bf16(
+            d_query_key.get(), d_projected_value.get(), value_rows, d_weight.get(),
+            d_history_in.get(), d_history_out.get(), d_query.get(), d_key.get(), d_value.get(),
+            tokens, stream);
     };
     const float incumbent_ms = median_kernel_ms(stream, incumbent);
     const float challenger_ms = median_kernel_ms(stream, challenger);
-    std::cout << "projection_conv_p2048 incumbent_ms=" << incumbent_ms
+    std::cout << "projection_conv T" << tokens << " incumbent_ms=" << incumbent_ms
               << " direct_scatter_ms=" << challenger_ms
               << " projected_48_call_saving_ms=" << 48.0F * (incumbent_ms - challenger_ms)
               << '\n';
@@ -786,6 +799,92 @@ void qualify_batched_projection_conv(hipStream_t stream) {
             d_initial.get(), nullptr, d_record.get(), d_query.get(), d_key.get(), d_value.get(),
             d_z.get(), 1, batch, state_slots, stream) != hipErrorInvalidValue) {
         fail("batched projection-convolution boundary did not reject malformed input");
+    }
+}
+
+// A mixed round's single convolution launch: bitwise the owner's direct scatter followed by the
+// verify batch's record over combined [value, z] rows, from identically poisoned outputs.
+void qualify_mixed_projection_conv(hipStream_t stream) {
+    using namespace ninfer::ops::r9700::gdn;
+    constexpr std::uint32_t query_key_rows = 4096;
+    constexpr std::uint32_t value_rows = 6144;
+    constexpr std::uint32_t state_slots = 8;
+    const auto weight = bf16_fixture(static_cast<std::size_t>(kChannels) * 4U, 211U, 1024.0F);
+    const auto states =
+        bf16_fixture(static_cast<std::size_t>(state_slots) * 3U * kChannels, 223U, 257.0F);
+    const auto history = bf16_fixture(static_cast<std::size_t>(kChannels) * 3U, 227U, 257.0F);
+    DeviceBuffer<hip_bfloat16> d_weight(weight.size());
+    DeviceBuffer<hip_bfloat16> d_states(states.size());
+    DeviceBuffer<hip_bfloat16> d_history(history.size());
+    copy_to_device(d_weight, weight);
+    copy_to_device(d_states, states);
+    struct Case { std::uint32_t owner, width, batch; std::vector<std::int32_t> valid, slots; };
+    const std::vector<Case> cases{{1U, 8U, 1U, {8}, {5}},
+                                  {7U, 8U, 3U, {8, 5, 1}, {5, 6, 7}},
+                                  {1000U, 8U, 4U, {8, 8, 3, 2}, {4, 5, 6, 7}},
+                                  {2040U, 2U, 4U, {2, 1, 2, 2}, {1, 2, 3, 4}}};
+    for (const Case& c : cases) {
+        const std::uint32_t columns = c.owner + c.width * c.batch;
+        const auto query_key =
+            bf16_fixture(static_cast<std::size_t>(columns) * query_key_rows, 229U + c.owner, 257.0F);
+        const auto projected =
+            bf16_fixture(static_cast<std::size_t>(columns) * value_rows, 233U + c.owner, 257.0F);
+        DeviceBuffer<hip_bfloat16> d_query_key(query_key.size()), d_projected(projected.size());
+        DeviceBuffer<hip_bfloat16> d_query(static_cast<std::size_t>(columns) * 2048U);
+        DeviceBuffer<hip_bfloat16> d_key(static_cast<std::size_t>(columns) * 2048U);
+        DeviceBuffer<hip_bfloat16> d_value(static_cast<std::size_t>(columns) * value_rows);
+        DeviceBuffer<hip_bfloat16> d_record(static_cast<std::size_t>(c.width) * c.batch * kChannels);
+        DeviceBuffer<std::int32_t> d_valid(c.batch), d_slots(c.batch);
+        // The reference record reads the verify columns' combined [value, z] rows.
+        const std::size_t verify_columns = static_cast<std::size_t>(c.width) * c.batch;
+        std::vector<hip_bfloat16> value_z =
+            bf16_fixture(verify_columns * 2U * value_rows, 239U + c.owner, 257.0F);
+        for (std::size_t column = 0; column < verify_columns; ++column)
+            std::copy_n(projected.data() + (c.owner + column) * value_rows, value_rows,
+                        value_z.data() + column * 2U * value_rows);
+        DeviceBuffer<hip_bfloat16> d_value_z(value_z.size()), d_z(verify_columns * value_rows);
+        copy_to_device(d_value_z, value_z);
+        copy_to_device(d_query_key, query_key);
+        copy_to_device(d_projected, projected);
+        copy_to_device(d_valid, c.valid);
+        copy_to_device(d_slots, c.slots);
+        const auto reset = [&] {
+            copy_to_device(d_history, history);
+            for (auto* buffer : {&d_query, &d_key, &d_value, &d_record})
+                HIP_CHECK(hipMemsetAsync(buffer->get(), 0xff,
+                                         buffer->size() * sizeof(hip_bfloat16), stream));
+        };
+        const auto at = [&](const DeviceBuffer<hip_bfloat16>& buffer, std::size_t rows) {
+            return buffer.get() + rows * c.owner;
+        };
+        reset();
+        HIP_CHECK(projection_conv_prefill_direct_scatter_bf16(
+            d_query_key.get(), d_projected.get(), value_rows, d_weight.get(), d_history.get(),
+            d_history.get(), d_query.get(), d_key.get(), d_value.get(), c.owner, stream));
+        HIP_CHECK(projection_conv_record_bf16(
+            at(d_query_key, query_key_rows), d_value_z.get(), d_weight.get(), d_states.get(),
+            d_valid.get(), d_slots.get(), nullptr, d_record.get(), at(d_query, 2048U),
+            at(d_key, 2048U), at(d_value, value_rows), d_z.get(), c.width, c.batch, state_slots,
+            stream));
+        HIP_CHECK(hipStreamSynchronize(stream));
+        const auto query = copy_to_host(d_query), key = copy_to_host(d_key);
+        const auto value = copy_to_host(d_value), record = copy_to_host(d_record);
+        const auto published = copy_to_host(d_history);
+        reset();
+        HIP_CHECK(projection_conv_mixed_split_bf16(
+            d_query_key.get(), d_projected.get(), d_weight.get(), d_history.get(),
+            d_history.get(), d_query.get(), d_key.get(), d_value.get(), c.owner,
+            d_states.get(), d_valid.get(), d_slots.get(), d_record.get(), c.width, c.batch,
+            state_slots, stream));
+        HIP_CHECK(hipStreamSynchronize(stream));
+        const std::string label = "mixed conv owner " + std::to_string(c.owner) + " batch " +
+                                  std::to_string(c.batch);
+        require_bf16_exact(copy_to_host(d_query), query, (label + " query").c_str());
+        require_bf16_exact(copy_to_host(d_key), key, (label + " key").c_str());
+        require_bf16_exact(copy_to_host(d_value), value, (label + " value").c_str());
+        require_bf16_exact(copy_to_host(d_record), record, (label + " record").c_str());
+        require_bf16_exact(copy_to_host(d_history), published, (label + " history").c_str());
+        require_bf16_exact(copy_to_host(d_states), states, (label + " state pool").c_str());
     }
 }
 
@@ -980,16 +1079,18 @@ int main(int argc, char** argv) {
             return 0;
         }
         if (direct_scatter_benchmark) {
-            benchmark_projection_conv_direct_scatter(stream);
+            for (const std::uint32_t tokens : {40U, 104U, 2048U})
+                benchmark_projection_conv_direct_scatter(stream, tokens);
             HIP_CHECK(hipStreamDestroy(stream));
             std::cout << "r9700_gdn_projection_conv_direct_scatter: PASS\n";
             return 0;
         }
         qualify_batched_projection_conv(stream);
+        qualify_mixed_projection_conv(stream);
         qualify_recurrent_and_transactions(stream);
         HIP_CHECK(hipStreamDestroy(stream));
-        std::cout << "r9700_gdn_op_qualification: PASS conv=T1..8/17/31/32/33/63/64/65/128/1024/2048 "
-                     "B=1..4 tree/snapshot C=10240 Hq=16 Hv=48 K=V=128\n";
+        std::cout << "r9700_gdn_op_qualification: PASS conv=T1..8/17/31/32/33/63/64/65/128/1025/2048 "
+                     "B=1..4 tree/snapshot mixed C=10240 Hq=16 Hv=48 K=V=128\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "r9700_gdn_op_qualification: FAIL: " << error.what() << '\n';

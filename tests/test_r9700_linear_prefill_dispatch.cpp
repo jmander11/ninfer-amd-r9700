@@ -71,10 +71,13 @@ static_assert(linear::kQ4ActivationBits != 8U ||
 static_assert(linear::kW8ActivationBits != 8U ||
               accepts_cartesian(kW8Shapes, linear::use_a8w8_prefill_cta));
 
-static_assert(!linear::use_a8q4_prefill_cta(128U, 7168U, 5120U));
-static_assert(!linear::use_a8q4_prefill_cta(129U, 7168U, 5120U));
-static_assert(!linear::use_a8q4_prefill_cta(1023U, 7168U, 5120U));
-static_assert(!linear::use_a8q4_prefill_cta(8193U, 7168U, 5120U));
+static_assert(!linear::use_a8q4_prefill_cta(32U, 7168U, 5120U));
+static_assert(linear::kQ4ActivationBits != 8U || linear::use_a8q4_prefill_cta(33U, 7168U, 5120U));
+static_assert(linear::kQ4ActivationBits != 8U ||
+              (linear::use_a8q4_prefill_cta(129U, 7168U, 5120U) &&
+               linear::use_a8q4_prefill_cta(1023U, 7168U, 5120U) &&
+               linear::use_a8q4_prefill_cta(232U, 6144U, 5120U) &&
+               linear::use_a8q4_prefill_cta(488U, 5120U, 25600U)));
 static_assert(!linear::use_a8q4_prefill_cta(4096U, 5120U, 5120U));
 static_assert(!linear::use_a8q4_prefill_cta(4096U, 5120U, 20480U));
 
@@ -117,6 +120,8 @@ static_assert(!linear::is_a8q4_dflash_mlp_down_t5_eligible(
 static_assert(linear::select_a8q4_prefill_route(2048U, 7168U, 5120U) ==
               linear::A8Q4PrefillRoute::M64N128PingPongProduction);
 static_assert(linear::select_a8q4_prefill_route(512U, 7168U, 5120U) ==
+              linear::A8Q4PrefillRoute::M64N128PingPongProduction);
+static_assert(linear::select_a8q4_prefill_route(32U, 7168U, 5120U) ==
               linear::A8Q4PrefillRoute::Wmma32);
 static_assert(linear::select_a8q4_prefill_route(2048U, 5120U, 25600U) ==
               linear::A8Q4PrefillRoute::M64N128PingPongProduction);

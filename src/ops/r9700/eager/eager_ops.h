@@ -150,17 +150,17 @@ static_assert(!rmsnorm_k256_token8_selected(5120U, 2048U));
     const hip_bfloat16* input, const hip_bfloat16* weight, hip_bfloat16* output,
     std::uint32_t rows, float eps, bool unit_offset, hipStream_t stream) noexcept;
 
-// The fixed K5120 small-token route assigns one row to one 256-thread CTA and reduces the
-// FP32 sum of squares across all eight wave32 waves. Other shapes retain the established routes.
-[[nodiscard]] constexpr bool rmsnorm_k5120_small_t_selected(
+// The fixed K5120 route assigns one row to one 640-thread CTA and reduces the FP32 sum of
+// squares across all twenty wave32 waves, at every width: decode rows, mixed decode/prefill units
+// and prefill chunks share one arithmetic (the fused normalized producers use the same order).
+[[nodiscard]] constexpr bool rmsnorm_k5120_row_cta_selected(
     std::uint32_t features, std::uint32_t rows) noexcept {
-    return features == 5120U && rows >= 1U && rows <= 24U;
+    return features == 5120U && rows >= 1U;
 }
-static_assert(rmsnorm_k5120_small_t_selected(5120U, 1U));
-static_assert(rmsnorm_k5120_small_t_selected(5120U, 24U));
-static_assert(!rmsnorm_k5120_small_t_selected(5120U, 0U));
-static_assert(!rmsnorm_k5120_small_t_selected(5120U, 25U));
-static_assert(!rmsnorm_k5120_small_t_selected(256U, 4U));
+static_assert(rmsnorm_k5120_row_cta_selected(5120U, 1U));
+static_assert(rmsnorm_k5120_row_cta_selected(5120U, 2048U));
+static_assert(!rmsnorm_k5120_row_cta_selected(5120U, 0U));
+static_assert(!rmsnorm_k5120_row_cta_selected(256U, 4U));
 // Direct regression boundary for the production fixed-K256 token8 route. It retains the incumbent
 // feature-order FP32 FMA chain and BF16 result while assigning one logical row to each wave.
 [[nodiscard]] hipError_t rmsnorm_k256_token8_qualification(

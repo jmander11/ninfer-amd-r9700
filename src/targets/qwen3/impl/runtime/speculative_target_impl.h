@@ -6,8 +6,8 @@
 
 namespace ninfer::targets::qwen3::detail::NINFER_QWEN3_RUNTIME_NS::schedule {
 
-void target_verify_accept(ExecutionCore& execution, Tensor& continuation_hidden_store,
-                          TextContext& card, TargetVerifyFrameView frame, bool reset_workspace) {
+TargetVerifyFrameView target_verify_prepare(ExecutionCore& execution, TextContext& card,
+                                            TargetVerifyFrameView frame) {
     if (frame.replay_records == nullptr) {
         throw std::logic_error("speculative target verify has no ReplaySSM record storage");
     }
@@ -28,6 +28,12 @@ void target_verify_accept(ExecutionCore& execution, Tensor& continuation_hidden_
     if (tree) {
         card.set_tree_verify(&frame.parent_index, &frame.ancestor_mask, &frame.prefix_lengths);
     }
+    return frame;
+}
+
+void target_verify_accept(ExecutionCore& execution, Tensor& continuation_hidden_store,
+                          TextContext& card, TargetVerifyFrameView frame, bool reset_workspace) {
+    frame = target_verify_prepare(execution, card, frame);
     if (frame.feature_sink != nullptr) {
         card.target_verify_batch(frame.ids, frame.cache_positions, frame.rope_positions,
                                  frame.valid_columns, frame.kv_table_rows, frame.lanes,
@@ -39,6 +45,12 @@ void target_verify_accept(ExecutionCore& execution, Tensor& continuation_hidden_
                                  frame.target_hidden, frame.target_logits, frame.target_tokens,
                                  reset_workspace);
     }
+    target_verify_resolve(execution, continuation_hidden_store, card, frame);
+}
+
+void target_verify_resolve(ExecutionCore& execution, Tensor& continuation_hidden_store,
+                           TextContext& card, TargetVerifyFrameView frame) {
+    const bool tree = frame.tree_verify;
     if (tree) {
         ops::speculative_accept_tree_drafts(
             frame.target_tokens, frame.target_logits, frame.ids, frame.parent_index,

@@ -680,8 +680,8 @@ void propose_batch_impl(DFlashBatchContext& state, qwen3::DFlashDecodeState& fra
 
 auto dflash_decode_batch_body(DFlashBatchContext& state, std::int32_t batch_size, std::uint32_t k,
                               std::uint32_t verify_width, DFlashEnvelopes envelopes,
-                              bool exact_sequence_envelopes) {
-    return [&state, batch_size, k, verify_width, envelopes, exact_sequence_envelopes] {
+                              bool exact_sequence_envelopes, DFlashMixedOwner* owner = nullptr) {
+    return [&state, batch_size, k, verify_width, envelopes, exact_sequence_envelopes, owner] {
         if (batch_size <= 0 || batch_size > static_cast<std::int32_t>(kMaximumConcurrency) ||
             k == 0 || k > kDFlashDecodeMaximumDrafts || verify_width < 2) {
             throw std::logic_error("DFlash decode batch state is incomplete");
@@ -807,11 +807,31 @@ auto dflash_decode_batch_body(DFlashBatchContext& state, std::int32_t batch_size
                                                    cache_positions, state.execution.device.stream);
         }
 
-        TextContext card(state.execution.device, state.execution.model,
-                         state.execution.linear_execution, state.execution.work, {},
-                         state.execution.linear_attention, state.execution.io,
-                         state.execution.prefill_hidden, state.execution.prefill_chunk, 0, {},
-                         &state.text_cache);
+        // A mixed round's card carries the prefill owner's KV authority, base and state slot;
+        // the verify batch binds through its transactions and frame exactly as alone.
+        std::optional<TextContext> card_storage;
+        if (owner != nullptr) {
+            if (use_tree || owner->prefill == nullptr) {
+                throw std::logic_error("mixed DFlash rounds require chain verification");
+            }
+            PrefillContext& prefill = *owner->prefill;
+            card_storage.emplace(state.execution.device, state.execution.model,
+                                 state.execution.linear_execution, state.execution.work,
+                                 prefill.text_kv, state.execution.linear_attention,
+                                 state.execution.io, state.execution.prefill_hidden,
+                                 state.execution.prefill_chunk, prefill.text_kv_base,
+                                 prefill.mtp_kv, &state.text_cache, prefill.mtp_cache);
+            attach_prefill_state(*card_storage, prefill,
+                                 owner->rewrite_checkpoint_capture_frontier);
+        } else {
+            card_storage.emplace(state.execution.device, state.execution.model,
+                                 state.execution.linear_execution, state.execution.work,
+                                 qwen3::PagedKVCacheView{}, state.execution.linear_attention,
+                                 state.execution.io, state.execution.prefill_hidden,
+                                 state.execution.prefill_chunk, 0U, qwen3::PagedKVCacheView{},
+                                 &state.text_cache);
+        }
+        TextContext& card = *card_storage;
         if (!state.text_kv_transactions.empty()) {
             card.set_text_kv_transactions(state.text_kv_transactions);
         }
@@ -873,8 +893,25 @@ auto dflash_decode_batch_body(DFlashBatchContext& state, std::int32_t batch_size
                 all_positions + static_cast<std::size_t>(row) * verify_width, verify_width,
                 all_counts + row);
         }
-        target_verify_accept(state.execution, state.continuation_hidden_store, card, verify_frame,
-                             !compact);
+        std::optional<DFlashFeatureSink> owner_sink;
+        std::optional<qwen3::PagedKVTransaction> owner_transaction;
+        std::uint32_t owner_frontier = 0;
+        if (owner != nullptr) {
+            verify_frame = target_verify_prepare(state.execution, card, verify_frame);
+            if (!compact) { state.execution.work.reset(); }
+            owner_sink.emplace(make_dflash_prefill_sink(*owner->prefill));
+            owner->result = card.mixed_prefill_verify(
+                owner->slice, *owner_sink, verify_frame.ids, verify_frame.cache_positions,
+                verify_frame.rope_positions, verify_frame.valid_columns,
+                verify_frame.kv_table_rows, verify_frame.lanes, verify_frame.target_hidden,
+                verify_frame.target_logits, verify_frame.target_tokens, sink, owner_transaction,
+                owner_frontier);
+            target_verify_resolve(state.execution, state.continuation_hidden_store, card,
+                                  verify_frame);
+        } else {
+            target_verify_accept(state.execution, state.continuation_hidden_store, card,
+                                 verify_frame, !compact);
+        }
         for (qwen3::PagedKVTransaction* transaction : state.text_kv_transactions) {
             transaction->end_device_segment(state.execution.device.stream);
         }
@@ -890,6 +927,20 @@ auto dflash_decode_batch_body(DFlashBatchContext& state, std::int32_t batch_size
         HIP_CHECK(hipMemcpyAsync(&state.host_egress, frame.egress.data,
                                    sizeof(qwen3::DFlashDecodeEgress), hipMemcpyDeviceToHost,
                                    state.execution.device.stream));
+        if (owner_sink) {
+            // The owner's chunk joins its drafter context after the batch no longer reads
+            // workspace: accept, compaction and the egress copy are ordered before it.
+            state.execution.work.reset();
+            owner_sink->consume_prefill_chunk(
+                static_cast<std::int32_t>(owner->result.processed_tokens));
+        }
+        if (owner_transaction) {
+            // Last host action of the round: the commit's status read waits for the whole
+            // round instead of stalling submission between the last layer and the tails.
+            if (owner_transaction->commit() != owner_frontier) {
+                throw std::logic_error("mixed prefill KV transaction published a wrong frontier");
+            }
+        }
     };
 }
 
@@ -922,6 +973,14 @@ void capture_dflash_decode_batch(DFlashBatchContext& state, std::int32_t batch_s
                                  DecodeGraphDefinition& definition) {
     auto body = dflash_decode_batch_body(state, batch_size, k, verify_width, envelopes, false);
     capture_graph(state, definition, body);
+}
+
+void dflash_mixed_batch(DFlashBatchContext& state, DFlashMixedOwner& owner,
+                        std::int32_t batch_size, std::uint32_t k, std::uint32_t verify_width,
+                        DFlashEnvelopes envelopes) {
+    auto body = dflash_decode_batch_body(state, batch_size, k, verify_width, envelopes, true,
+                                         &owner);
+    run_prepared(state, nullptr, body);
 }
 
 void dflash_decode_batch(DFlashBatchContext& state, std::int32_t batch_size, std::uint32_t k,

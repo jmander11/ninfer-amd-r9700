@@ -775,6 +775,8 @@ curl http://127.0.0.1:8080/v1/models \
 | `--max-pending-requests N` | additional requests allowed to wait for admission | `16` |
 | `--pending-timeout-ms N` | maximum preparation-plus-admission wait | `30000` |
 | `--prefill-chunk N` | text-prefill chunk | `4096` |
+| `--prefill-slice N` | prompt tokens a prefill owner advances per slice while other requests are decoding; `0` runs each prompt's whole prefill first. With DFlash a text owner's slice rides inside a decode round (one mixed forward of `N + (C-1)*W` columns, the owner taking any verify columns the round leaves unused); other owners run it as a separate step. Clamped to `--prefill-chunk - (C-1)*W` under DFlash (rounded down to a multiple of 128 above 4096). Use `1024 - 8*(C-1)` (1000 at C=4). See [prefill/decode frontier](performance.md#mixed-prefilldecode-frontier-2026-09-29) | `0` |
+| `--prefill-slice-rounds N` | decode rounds per prefill slice (`1` = every decode round carries one slice) | `1` |
 | `--log-stats-interval-ms N` | aggregate throughput report interval; `0` disables it | `5000` |
 | `--device N` | HIP device index | `0` |
 | `--max-request-mib N` | body-size limit before JSON parsing | `384` |

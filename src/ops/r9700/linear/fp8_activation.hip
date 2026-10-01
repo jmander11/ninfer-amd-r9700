@@ -4,6 +4,7 @@
 #include <hip/amd_detail/amd_hip_fp8.h>
 #include <hip/hip_runtime.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -17,8 +18,9 @@ using fp8_encode::encode_rows;
 using fp8_encode::unpack8;
 
 constexpr std::uint32_t kWaveSize        = 32U;
-constexpr std::uint32_t kBlockSize       = 1024U;
+constexpr std::uint32_t kBlockSize       = 256U;
 constexpr std::uint32_t kWavesPerBlock   = kBlockSize / kWaveSize;
+constexpr std::uint32_t kQuantizeResidentBlocks = 128U;
 constexpr std::uint32_t kColumnAlignment = 128U;
 constexpr std::size_t kPlaneAlignment    = 256U;
 constexpr float kE4M3FiniteMaximum       = 448.0F;
@@ -123,10 +125,9 @@ bool valid_workspace(const Fp8ActivationWorkspace& workspace) noexcept {
                            status_bytes(workspace));
 }
 
-__global__ __launch_bounds__(kBlockSize) void fp8_quantize_activation_kernel(
-    const hip_bfloat16* input, std::uint8_t* codes, float* scales, std::uint32_t* status,
-    std::uint32_t columns, std::uint32_t padded) {
-    const std::uint32_t token = blockIdx.x;
+__device__ __forceinline__ void quantize_activation_row(
+    std::uint32_t token, const hip_bfloat16* input, std::uint8_t* codes, float* scales,
+    std::uint32_t* status, std::uint32_t columns, std::uint32_t padded) {
     const std::uint32_t lane = threadIdx.x % kWaveSize;
     const std::uint32_t wave = threadIdx.x / kWaveSize;
     float local_maximum = 0.0F;
@@ -223,7 +224,18 @@ __global__ __launch_bounds__(kBlockSize) void fp8_quantize_activation_kernel(
     }
 }
 
-// K5120 RMSNorm with the eager small-T reduction: one 16-byte vector per thread of a 640-thread
+// A resident grid strides over tokens: grids beyond about 2048 waves paid a ~30 us dispatch
+// penalty on gfx1201 whatever the row width. Each token row is quantized independently.
+__global__ __launch_bounds__(kBlockSize) void fp8_quantize_activation_kernel(
+    const hip_bfloat16* input, std::uint8_t* codes, float* scales, std::uint32_t* status,
+    std::uint32_t tokens, std::uint32_t columns, std::uint32_t padded) {
+    for (std::uint32_t token = blockIdx.x; token < tokens; token += gridDim.x) {
+        quantize_activation_row(token, input, codes, scales, status, columns, padded);
+        __syncthreads();  // the next row reuses the block's reduction storage
+    }
+}
+
+// K5120 RMSNorm with the eager row-CTA reduction: one 16-byte vector per thread of a 640-thread
 // row, per-thread FMA sum of squares, wave butterfly, then the wave sums in ascending order.
 constexpr std::uint32_t kNormFeatures = 5120U;
 constexpr std::uint32_t kNormThreads = kNormFeatures / 8U;
@@ -255,7 +267,7 @@ __device__ __forceinline__ void norm_vector_apply(float (&values)[8], uint4 gain
 
 __global__ __launch_bounds__(kNormThreads) void fp8_quantize_normalized_kernel(
     const hip_bfloat16* input, const hip_bfloat16* weight, float eps, bool unit_offset,
-    std::uint8_t* codes, float* scales, std::uint32_t* status) {
+    std::uint8_t* codes, float* scales, std::uint32_t* status, hip_bfloat16* normalized) {
     const std::uint32_t lane = threadIdx.x % kWaveSize, wave = threadIdx.x / kWaveSize;
     const auto* rows = reinterpret_cast<const uint4*>(input);
     const auto* gains = reinterpret_cast<const uint4*>(weight);
@@ -271,6 +283,18 @@ __global__ __launch_bounds__(kNormThreads) void fp8_quantize_normalized_kernel(
     for (std::uint32_t index = 0; index < kNormWaves; ++index) block_sum += wave_sums[index];
     const float inverse = rsqrtf(block_sum / static_cast<float>(kNormFeatures) + eps);
     norm_vector_apply(values, gains[threadIdx.x], inverse, unit_offset);
+    if (normalized != nullptr) {
+        // The values are BF16-represented: the high halves are their exact BF16 bits.
+        std::uint32_t words[4];
+#pragma unroll
+        for (int w = 0; w < 4; ++w) {
+            words[w] = (__float_as_uint(values[2 * w]) >> 16) |
+                       (__float_as_uint(values[2 * w + 1]) & 0xffff0000U);
+        }
+        reinterpret_cast<uint4*>(normalized)[static_cast<std::size_t>(token) * kNormThreads +
+                                             threadIdx.x] = uint4{words[0], words[1], words[2],
+                                                                  words[3]};
+    }
     encode_row8<kNormThreads>(values, threadIdx.x, token, codes, scales, kNormFeatures, status);
 }
 
@@ -391,10 +415,10 @@ hipError_t fp8_quantize_activation(const Fp8ActivationQuantizeArgs& args,
         return hipErrorInvalidValue;
     }
     hipLaunchKernelGGL(fp8_quantize_activation_kernel,
-                       dim3(args.workspace.tokens), dim3(kBlockSize), 0,
-                       stream, args.input, args.workspace.codes, args.workspace.scales,
-                       args.workspace.status, args.workspace.columns,
-                       args.workspace.padded_columns);
+                       dim3(std::min(args.workspace.tokens, kQuantizeResidentBlocks)),
+                       dim3(kBlockSize), 0, stream, args.input, args.workspace.codes,
+                       args.workspace.scales, args.workspace.status, args.workspace.tokens,
+                       args.workspace.columns, args.workspace.padded_columns);
     return hipGetLastError();
 }
 
@@ -414,10 +438,20 @@ hipError_t fp8_quantize_normalized_activation(const Fp8NormalizedQuantizeArgs& a
         ranges_overlap(args.input, input_bytes, workspace.status, status_bytes(workspace))) {
         return hipErrorInvalidValue;
     }
+    if (args.normalized != nullptr &&
+        (reinterpret_cast<std::uintptr_t>(args.normalized) % 16U != 0U ||
+         ranges_overlap(args.normalized, input_bytes, args.input, input_bytes) ||
+         ranges_overlap(args.normalized, input_bytes, args.weight,
+                        kNormFeatures * sizeof(hip_bfloat16)) ||
+         ranges_overlap(args.normalized, input_bytes, workspace.codes, workspace.code_bytes) ||
+         ranges_overlap(args.normalized, input_bytes, workspace.scales, workspace.scale_bytes) ||
+         ranges_overlap(args.normalized, input_bytes, workspace.status, status_bytes(workspace)))) {
+        return hipErrorInvalidValue;
+    }
     hipLaunchKernelGGL(fp8_quantize_normalized_kernel,
                        dim3(workspace.tokens), dim3(kNormThreads), 0,
                        stream, args.input, args.weight, args.eps, args.unit_offset,
-                       workspace.codes, workspace.scales, workspace.status);
+                       workspace.codes, workspace.scales, workspace.status, args.normalized);
     return hipGetLastError();
 }
 

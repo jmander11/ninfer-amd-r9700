@@ -150,6 +150,16 @@ struct DFlashFeatureSink {
 
 class VisionPrefillSession;
 
+// One text-only prefill-owner chunk that shares a Text forward with a DFlash verify batch. The
+// owner's columns lead the aggregate; row-wise Linears, norms and the post-mixer run once over
+// every column, while KV append, attention, convolution and recurrence stay per sequence.
+struct MixedPrefillSlice {
+    std::span<const int> prompt;                 // full prompt token ids
+    std::uint32_t nominal_length       = 0;      // requested extent from the KV base
+    bool finalize_at_end               = false;  // sample the first token after the prompt
+    const ops::SamplingConfig* sampling = nullptr;
+};
+
 class TextContext {
 public:
     TextContext(DeviceContext& ctx, const LoadedModelData& weights,
@@ -272,6 +282,21 @@ public:
                              Tensor& hidden, Tensor& logits, Tensor& target_tokens,
                              DFlashFeatureSink& sink,
                              bool reset_workspace = true);
+    // Mixed unit: the prefill owner (prefill KV authority, linear-state slot and KV base as for
+    // prefill_chunk) followed by the verify batch (as for target_verify_batch, whose Text KV
+    // transactions and replay-record state action the caller binds). Never resets the workspace.
+    // The owner's KV transaction is returned open in `owner_transaction` with its expected
+    // frontier: the caller commits it after the round's remaining work is enqueued, so the
+    // commit's status read does not stall the host between the last layer and the tails.
+    [[nodiscard]] PrefillChunkResult
+    mixed_prefill_verify(const MixedPrefillSlice& slice, DFlashFeatureSink& prefill_sink,
+                         const Tensor& ids, const Tensor& cache_positions,
+                         const Tensor& rope_positions, const Tensor& valid_columns,
+                         const Tensor& kv_table_rows, const Tensor& linear_state_slots,
+                         Tensor& hidden, Tensor& logits, Tensor& target_tokens,
+                         DFlashFeatureSink& verify_sink,
+                         std::optional<qwen3::PagedKVTransaction>& owner_transaction,
+                         std::uint32_t& owner_frontier);
     void mtp_forward_decode_batch(const Tensor& ids, const Tensor& hidden,
                                   const Tensor& cache_positions, const Tensor& rope_positions,
                                   const Tensor& valid_columns, const Tensor& kv_table_rows,
@@ -298,6 +323,7 @@ private:
     template <class Tap>
     void gdn_mix(const GdnLayerW& weights, Tensor& x, int index, int text_layer, Phase phase,
                  Tap& tap);
+    void gdn_mix_mixed(const GdnLayerW& weights, Tensor& x, int index, int text_layer);
     void mlp_tail(const Tensor* post_norm, const MlpW& weights, Tensor& x, int text_layer,
                   Phase phase);
     void run_layers(Tensor& x, Phase phase);
@@ -376,6 +402,9 @@ private:
     std::span<qwen3::PagedKVTransaction* const> mtp_kv_transactions_;
     std::int32_t active_sequence_batch_                   = 0;
     std::int32_t active_sequence_width_                   = 0;
+    // Mixed unit: leading prefill-owner columns and their KV transaction.
+    std::int32_t mixed_prefill_columns_                   = 0;
+    qwen3::PagedKVTransaction* mixed_prefill_transaction_ = nullptr;
     bool active_ordinary_decode_                          = false;
     std::int32_t active_sequence_row_                     = 0;
     std::int32_t rope_delta_                              = 0;

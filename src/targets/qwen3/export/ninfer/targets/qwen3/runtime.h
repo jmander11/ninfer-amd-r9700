@@ -172,11 +172,23 @@ public:
                                                                 PreparedPrompt&& prompt,
                                                                 RequestPlan<Variant>&& plan,
                                                                 runtime::TransientRegion transient,
-                                                                const OutputSession* output = nullptr);
-    [[nodiscard]] runtime::PrefillStepResult advance_prefill_lane(std::uint32_t lane);
+                                                                const OutputSession* output = nullptr,
+                                                                bool decode_waiting = false);
+    // With decode_waiting and a configured slice, a mixable owner returns without progress
+    // (0 tokens, incomplete): its first slice runs in the next mixed round.
+    // decode_waiting bounds the step by the configured prefill slice instead of the chunk.
+    [[nodiscard]] runtime::PrefillStepResult advance_prefill_lane(std::uint32_t lane,
+                                                                  bool decode_waiting = false);
     [[nodiscard]] runtime::BatchedGeneratedRound
     decode_batch(std::span<const std::uint32_t> lanes,
                  std::span<const runtime::RoundBudget> budgets);
+    // Whether the staged owner's next step can join a decode round's target forward, and that
+    // round: one DFlash round for `lanes` that also advances the owner's next chunk.
+    [[nodiscard]] bool prefill_mixable(std::uint32_t lane) const noexcept;
+    [[nodiscard]] runtime::MixedGeneratedRound
+    decode_batch_with_prefill(std::span<const std::uint32_t> lanes,
+                              std::span<const runtime::RoundBudget> budgets,
+                              std::uint32_t prefill_lane);
     void set_suppressed_tokens_lane(std::uint32_t lane, std::span<const TokenId> tokens);
     void clear_suppressed_tokens_lane(std::uint32_t lane);
     void set_typical_cycle_reasoning_lane(std::uint32_t lane, bool enabled);

@@ -103,7 +103,7 @@ std::string serve_usage_text(const char* argv0) {
            "[--kv-disk-capacity off|N] [--kv-disk-location PATH] [--kv-disk-compress off|zstd] "
            "[--max-concurrency 1..4] [--no-generation-recovery] "
            "[--max-pending-requests N] [--pending-timeout-ms N] "
-           "[--prefill-chunk N] [--log-stats-interval-ms N] [--device N] "
+           "[--prefill-chunk N] [--prefill-slice N] [--prefill-slice-rounds N] [--log-stats-interval-ms N] [--device N] "
            "[--max-request-mib N] [--request-log-jsonl FILE] "
            "[--response-store-location DIR] [--response-store-max-records N] [--response-store-max-mib N] "
            "[--spec mtp|dflash --draft-tokens N] "
@@ -223,6 +223,12 @@ ServeOptions parse_serve_options(int argc, char** argv) {
         } else if (arg == "--prefill-chunk") {
             options.prefill_chunk = static_cast<std::uint32_t>(
                 parse_nonnegative_int(require_value("--prefill-chunk"), "prefill-chunk"));
+        } else if (arg == "--prefill-slice") {
+            options.prefill_slice = static_cast<std::uint32_t>(
+                parse_nonnegative_int(require_value("--prefill-slice"), "prefill-slice"));
+        } else if (arg == "--prefill-slice-rounds") {
+            options.prefill_slice_rounds = static_cast<std::uint32_t>(parse_nonnegative_int(
+                require_value("--prefill-slice-rounds"), "prefill-slice-rounds"));
         } else if (arg == "--log-stats-interval-ms") {
             options.log_stats_interval_ms = static_cast<std::uint32_t>(parse_nonnegative_int(
                 require_value("--log-stats-interval-ms"), "log-stats-interval-ms"));
@@ -367,6 +373,9 @@ ServeOptions parse_serve_options(int argc, char** argv) {
     }
     if (options.prefill_chunk == 0 || options.prefill_chunk % 128 != 0) {
         throw std::invalid_argument("--prefill-chunk must be a positive multiple of 128");
+    }
+    if (options.prefill_slice_rounds == 0) {
+        throw std::invalid_argument("--prefill-slice-rounds must be positive");
     }
     product::validate_speculative_cli_options(options.speculative);
     if (default_max_tokens_explicit) {

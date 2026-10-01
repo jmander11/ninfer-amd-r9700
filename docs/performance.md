@@ -137,6 +137,405 @@ of the all-layer NLL cost; the proxy does not predict model sensitivity. Evidenc
 `profiles/ppl/r9700-fp8lut4-lut3-20260930/` (receipts with per-layer errors; the evaluation-only
 encoder option is kept there as a patch).
 
+## Mixed prefill/decode frontier (2026-09-29)
+
+C4 contention bench: 3 lanes decode with 6144-token outputs while the 4th lane runs three fresh
+8,192-token prefills (`ninfer_bench --contention 8192,3`), with production DFlash (K7 adaptive,
+LM-head draft) and prefill chunk 2048. **Decode share** is the decode rounds/s during the prefills
+divided by the mean decode-only rate of 4 s windows before and after (acceptance drifts along the
+greedy corpus). Aggregate decode is that share times the median decode-only rate (215 tok/s).
+**Stall** is the longest decode gap inserted by one prefill step or mixed round. S is
+`--prefill-slice`, and D is `--prefill-slice-rounds`.
+
+Pareto frontier after the small-T prefill work below (sweep `fused6`; time-share rows from
+`ts3`; aggregate decode at the 222 tok/s decode-only reference; stall is the mixed round time):
+
+| Policy | S | D | Decode share | Aggregate decode tok/s | Prefill tok/s | Stall |
+|---|---:|---:|---:|---:|---:|---:|
+| Prefill-first (default) | 0 | – | 0.016 | 4 | 3,319 | whole prompt (2.5 s) |
+| Mixed | 2024 | 1 | 0.076 | 17 | 3,174 | ~0.52 s |
+| Mixed | 1000 | 1 | 0.132 | 29 | 3,044 | ~0.30 s |
+| Mixed | 488 | 1 | 0.215 | 48 | 2,736 | ~0.18 s |
+| Mixed | 1000 | 2 | 0.221 | 49 | 2,705 | ~0.30 s |
+| Mixed | 1000 | 4 | 0.358 | 79 | 2,255 | ~0.30 s |
+| Mixed | 232 | 1 | 0.375 | 83 | 2,157 | ~0.11 s |
+| Mixed | 488 | 4 | 0.527 | 117 | 1,670 | ~0.18 s |
+| Mixed | 232 | 2 | 0.535 | 119 | 1,589 | ~0.11 s |
+| Mixed | 104 | 1 | 0.537 | 119 | 1,442 | ~0.07 s |
+| Mixed | 488 | 8 | 0.696 | 155 | 1,100 | ~0.18 s |
+| Mixed | 232 | 4 | 0.709 | 157 | 1,029 | ~0.11 s |
+
+**Score** (prefill tok/s ÷ 3,319 + decode share; time-sharing ≈ 1.0) from the D=1 sweep `fused7`.
+The other slices are the remaining 256-aligned widths: S + 24 verify columns = 768 / 1280 / 1536.
+
+| S | 488 | 744 | 1000 | 1256 | 1512 | 2024 (`fused6`) |
+|---|---:|---:|---:|---:|---:|---:|
+| Decode share | 0.215 | 0.165 | 0.132 | 0.103 | 0.090 | 0.076 |
+| Prefill tok/s | 2,736 | 2,871 | 3,040 | 3,049 | 3,116 | 3,174 |
+| Score | 1.039 | 1.030 | **1.048** | 1.022 | 1.029 | 1.032 |
+
+S=1000 at D=1 has the highest score (1.048 in `fused6` and again in `fused7`). D>1 always lowers
+the score. Its extra rounds are plain graph decode rounds at decode-only speed (39.7 ms against
+39.4 ms), so they move the operating point along the time-share line.
+
+The scores do not follow per-width prefill cost; they also depend on how the 8,192-token prompts
+split into slices (8 × 1000 + 192, but 11 × 744 + 8). Whole-model prefill runs at 3,414–3,483
+tok/s at every 256-multiple width from 768 to 2048. Other widths lose 3–5% (T896 3,311 and T1152
+3,279 tok/s).
+
+Trace attribution (`prof/mixed232`) puts a mixed round's decode side at ~16–20 ms against a
+39.4 ms decode round:
+- drafter 6.2 ms;
+- GDN fold 1.7 ms;
+- verify head and sampling 1.7 ms;
+- verify-column GDN record, per-lane attention and copies ~3.7 ms;
+- the 24 GEMM columns ~3.6 ms.
+
+Costs that decode rounds share barely change the score, because the decode-only reference
+improves with them. They still raise absolute decode tok/s. The mixed round is not host-bound:
+the submitting thread peaks at 19% of a core with the GPU 85–100% busy. Eager and graph
+dispatch cost the same per kernel, so capturing the mixed round as a graph gains nothing.
+
+Later mixed-round changes (interleaved A/B, pinned binary, two rounds each; `fsb_*` baseline,
+`fsn_*` new):
+- **Adopted: the first slice joins a mixed round.** Admission with decode-ready requests no
+  longer runs the first slice as its own step, and the owner's KV commit moved from between the
+  last layer and the tails to the end of the round. Each 8K prompt gets one more mixed round.
+
+  | S | Score before (2 runs) | Score after (2 runs) |
+  |---|---|---|
+  | 1000 | 1.045 / 1.042 | 1.057 / 1.049 |
+  | 488 | 1.039 / 1.033 | 1.043 / 1.044 |
+  | 232 | 1.027 / 1.019 | 1.030 / 1.023 |
+
+  The prefilling request's greedy tokens stay bit-identical. The co-running decode lane
+  diverges at a near-tie (token 94–100), because one more of its rounds runs at mixed width.
+  For prompts no longer than S, which were never mixed before, the decode stall of one
+  standalone slice (~0.3 s at S=1000) is gone.
+- **Rejected: the owner's DFlash context append on a second stream**, overlapping the next
+  round's drafter. Greedy outputs were identical, but the whole contention window changed by
+  −0.4% at S=1000 (noise), +0.5% at S=488 and +1.8% at S=232.
+
+Later bitwise changes (pinned binaries; 8K PPL mean NLL 1.8781831196376255 unchanged; greedy
+pair checks at S=1000/488 identical; score A/B at C4 with R=6):
+- **Adopted: split GDN input projections in mixed rounds.** The FP8LUT4 value-z projection
+  writes the value rows and the output gate as separate targets, removing the per-layer owner
+  gate copy. Score at S=1000 rose by about 0.006.
+- **Adopted: row-scaled protections on the fused prefill routes.** The 26 row-scaled E4M3
+  protections use the FP8LUT4 prefill kernels' split, accumulate and SiLU-less MLP epilogues at
+  T > 128. GDN output layer 4 keeps its standalone gated RMSNorm, because the fused producer's
+  per-head reduction order is not bitwise. Prefill-first rose from 3,510–3,525 to 3,530–3,532
+  tok/s at T2048 and mixed prefill by ~0.6%. The score is unchanged (~1.061), because both sides
+  of the ratio moved.
+- **Adopted: three launch fusions.** The wide GDN control projection is split by 16-head group
+  (grid ×3). The GDN input RMSNorm now comes from the fused norm-and-E4M3 producer's BF16 side
+  output. A mixed round's owner direct scatter, history publish and verify record convolution run
+  as one launch (119 VGPRs, 12 waves/SIMD, no scratch). All three are score-neutral within noise
+  (1.063 against 1.064).
+- **Adopted: batched verify attention.** The KV append, packed-decode attention and merge of all
+  B verify sequences run as one launch each (grid z = sequence), instead of three per sequence per
+  attention layer. Decode rose from 201.6 to 203.2 tok/s at C2 and from 239.2 to 241.5 tok/s at
+  C4 (`-pg 512,512`, two runs). The score is unchanged (1.061–1.062 at S=1000).
+- **Rejected: the owner's chunked recurrence concurrent with the verify ReplaySSM record** on a
+  side stream (fork/join per GDN layer). The score fell from 1.064 to 1.035 at S=1000 and to 0.967
+  at S=232. Mixed prefill lost ~8 ms per round, ~170 µs per layer, far more than the 43 µs record.
+  The same reason rules out moving the GDN replay fold or the verify attention onto a side lane
+  under the owner's work.
+- **Not pursued:** releasing the host on the egress event (~0.35 ms per round, about +0.0013
+  score), and folding the owner's DFlash context append into the next verify append (~0.7 ms, and
+  it changes drafter bits). Both are below the ±0.002 score noise. What remains of a mixed round's
+  decode side (drafter ~6.3 ms, verify tail 1.4 ms, round boundary ~0.4 ms) is also in a decode
+  round, so speeding it up does not move the score.
+
+**How this compares with other engines.** No engine or paper we found uses an additive score
+like this one. vLLM (V1 chunked prefill, decode-first) and SGLang ship a fixed per-forward token
+budget sized by GPU memory: 2048 on a 32 GB GPU, 8192 on H100-class GPUs. vLLM documents smaller
+budgets as better ITL and larger as better TTFT. TensorRT-LLM tunes `max_num_tokens` (default
+8192) for throughput at equal latency. llama.cpp fills an `n_batch` of 2048 with decode tokens
+first. Sarathi-Serve picks the largest token budget whose batch time meets a P99 time-between-
+tokens SLO (512 strict, 2048 relaxed), and notes the tile-quantization cliff (257 tokens up to
++32% over 256). DistServe measures goodput under TTFT and TPOT SLOs.
+
+The score here measures only the co-batching gain over time-sharing, which scores 1.0. It does
+not choose a latency point. Its maximum at S=1000 (a 1024-column forward) is a hardware-efficiency
+optimum. S also sets the decode lanes' round time during a prefill: ~0.18 s at S=488, ~0.30 s at
+S=1000 and ~0.52 s at S=2024, against 39 ms for a decode-only round. The TTFT cost at S=1000 is
+~8% (2.7 s against 2.5 s for an 8K prompt). S=1000 is the default choice for local use. If a
+deployment has an inter-token latency target, the rule is the largest S whose mixed round meets
+it, rounded so S + (C-1)·8 is a multiple of 256 (S=488 for ~0.2 s). With no decode-ready request
+the owner runs prefill-first chunks regardless of S.
+
+**Adopted: tile-filling mixed slices.** A mixed round's owner now takes the verify columns its
+round leaves unused, so the forward stays at S + 8·(C−1) = 1024 when fewer than C−1 requests
+decode or adaptive draft length shortens the verify panels. At C4, S=1000 (`--contention-lanes`,
+two interleaved runs, `tfo_*` fixed against `tfn_*` filled):
+
+| Decoding lanes | Owner slice (fixed → filled) | Prefill tok/s | Score |
+|---:|---|---|---|
+| 1 | 1000 → 1016 | 3,130 / 3,140 → 3,163 / 3,163 | 1.057 / 1.060 → 1.069 / 1.068 |
+| 2 | 1000 → 1008 | 3,091 / 3,091 → 3,100 / 3,101 | 1.059 / 1.058 → 1.061 / 1.062 |
+| 3 | 1000 (unchanged) | 3,057 / 3,060 → 3,061 / 3,058 | 1.063 / 1.064 → 1.064 / 1.063 |
+
+Decode share and decode tok/s are unchanged, TTFT drops by ~0.02 s with one decoding lane, and
+the greedy pair check stays identical.
+
+**Final validation (2026-09-30, rebased onto upstream 0eab8185, 21-protection production
+artifact; pinned binaries, against an upstream-only build of 0eab8185).**
+- Quals, all pass:
+  - GDN (including the single mixed convolution launch);
+  - FP8 producers (with the normalized side output);
+  - projected controls, normalized front and pair convolution record;
+  - FP8LUT4 front and Linear, and row-scaled Linear (small and prefill T);
+  - eager and fused attention;
+  - dense prefill and mid-row attention;
+  - the dense-verify route discriminator (sequence batch, default, long context);
+  - full-attention leaf and KV;
+  - engine boundary and engine cache/cancel.
+- ctest: all 91 tests pass.
+- 8K PPL mean NLL: 1.8803156 against upstream's 1.8802432. The K5120 RMSNorm row-CTA route at
+  every width, which the fused normalized producers share, is qualified against the oracle but
+  not bitwise upstream's token8/generic RMSNorm at 25+ rows.
+- Greedy pair checks at S=1000/488: the prefilling request is identical to prefill-first. The
+  co-running decode lane diverges at a near tie (token 102–107), because its rows run at the
+  mixed width in mixed rounds.
+- Acceptance-free speed against upstream, interleaved over three rounds:
+
+  | Workload | Upstream | This build |
+  |---|---:|---:|
+  | Plain decode C1 (tok/s) | 37.9 | 37.9 |
+  | Plain decode C4 (tok/s) | 122.7 | 125.2 |
+  | Prefill-first T512 (tok/s) | 2,946 | 3,242 |
+  | Prefill-first T1024 (tok/s) | 3,307 | 3,485 |
+  | Prefill-first T2048 (tok/s) | 3,455 | 3,539 |
+
+  DFlash `-pg` tok/s is not comparable across builds whose greedy text differs, because
+  acceptance follows the text.
+- C4 score (this build): S=1000 1.060 / 1.063, S=488 1.053 / 1.052, one decode lane at S=1000
+  1.070.
+- Serve (C3, `--prefill-slice 1008`, two streaming decodes while a 9,593-token prompt arrives):
+  the long request answers correctly in 3.18 s, and each stream's largest gap is 0.33 s, against
+  2.99 s prefill-first. A 0.62 s gap in one run was a transient host stall; two reruns gave
+  0.33 s, as did the pre-sync build.
+- Tool-grammar owners mix their final step (2026-09-30). Their first-token root mask was moved
+  to the exchange's last row, so these steps no longer run alone. The serve A/B used the same
+  server as above, with two streaming decodes and `tool_choice: required` requests of 307–9,868
+  prompt tokens, two passes each. All 20 calls were schema-valid and identical across the
+  builds. Tool-request latency fell by 0.02–0.09 s at every size. The streams' largest gap fell
+  from 0.188/0.263 s to 0.149/0.218 s at 307/539 tokens, and from 0.341–0.353 s to 0.304–0.331 s
+  at 2.9K–9.9K tokens. Script: `profiles/bench/r9700-mixed-pd-20260929/serve_tool.sh`.
+
+Remaining score options were assessed against a per-round cost model that reproduces the
+measured score (a 1000-slice round is worth ~1.07, the 192-token final slice ~0.93, a plain decode
+round 1.0). All of them are exhausted:
+- **Slice size.** Merging the final remainder into the previous slice models −0.001, an even
+  9-way split is worse, and S=1024 (a 1048-column forward) is worse. Going from S=2024 to 1000
+  adds a forward worth ~1.19 of its cost; going below 1000 adds one worth <1.
+- **Adaptive draft length.** Mixed forwards stay inside the 1024 tile at K3..K7. A tile-filling
+  slice rule would help only low-acceptance production rounds; the bench score is unchanged.
+  Lowering K in mixed rounds would raise the score while cutting real decode tokens, so it games
+  the metric.
+- **Scheduling.** The first and last slices are both mixed. The prefill-first baseline uses the
+  faster 2048 chunk. Two decode rounds cannot share a forward, because each round's drafts depend
+  on the previous round's acceptance.
+- **Mixed-only kernels.** Nothing above ~0.5 ms per round remains that is not rejected above.
+
+Repeat runs of one configuration span 1.055–1.068 at C4, so gains below ~0.004 are not
+measurable with this bench.
+
+Score by concurrency (the new build; prefill-first rate of each C as the normalizer; D=1
+unless noted; `c2`, `c3`, `fsn_1`). S + 8·(C−1) columns fill a 256-multiple forward:
+
+| C | Decode-only tok/s | Best S | Score | Decode share / tok/s | Prefill tok/s |
+|---|---:|---:|---:|---|---:|
+| 2 | 135 | 1016 | 1.065 | 0.121 / 16 | 3,143 |
+| 3 | 250 | 1008 | 1.054 | 0.131 / 33 | 3,077 |
+| 4 | 239 | 1000 | 1.057 | 0.145 / 35 | 3,028 |
+
+The other points of each C:
+
+| C | S | D | Decode share | Decode tok/s | Prefill tok/s | Score |
+|---|---:|---:|---:|---:|---:|---:|
+| 2 | 504 | 1 | 0.198 | 27 | 2,850 | 1.054 |
+| 2 | 1016 | 2 | 0.201 | 27 | 2,857 | 1.059 |
+| 2 | 504 | 2 | 0.318 | 43 | 2,419 | 1.044 |
+| 2 | 248 | 1 | 0.313 | 42 | 2,319 | 1.009 |
+| 2 | 2040 | 1 | 0.069 | 9 | 2,992 | 0.967 |
+| 3 | 2032 | 1 | 0.082 | 21 | 3,202 | 1.042 |
+| 3 | 1008 | 2 | 0.214 | 53 | 2,782 | 1.048 |
+| 3 | 496 | 1 | 0.212 | 53 | 2,765 | 1.041 |
+| 3 | 240 | 1 | 0.355 | 89 | 2,293 | 1.043 |
+| 3 | 496 | 2 | 0.337 | 84 | 2,322 | 1.033 |
+
+C=1 has no decode lane during a prefill, so every policy reduces to prefill-first there.
+
+Long context (C4, current build, `--contention L,R --contention-context L`: the 3 decode lanes
+hold L-token prompts while the owner prefills fresh L-token prompts; R=2 at 32K/64K, R=1 at 128K;
+`long_*`). Score normalizes by the same-context prefill-first rate:
+
+| Context | Prefill-first tok/s (TTFT) | S=488 | S=1000 | S=1528 | S=2024 |
+|---|---|---:|---:|---:|---:|
+| 8K owner, 512 decode | 3,332 (2.5 s) | – | **1.061** | – | – |
+| 32K | 2,923 (11.2 s) | 1.033 | **1.039** | 0.982 | 1.025 |
+| 64K | 2,480 (26.4 s) | 1.025 | **1.030** | – | – |
+| 128K | 1,905 (68.8 s) | 1.013 | **1.021** | 0.988 | 1.013 |
+
+| Context | S=1000 decode share / TTFT | S=488 decode share / TTFT |
+|---|---|---|
+| 32K | 0.128 / 12.3 s | 0.230 / 14.0 s |
+| 64K | 0.121 / 29.1 s | 0.218 / 32.8 s |
+| 128K | 0.112 / 75.7 s | 0.205 / 85.1 s |
+
+S=1000 stays best at every context, and D=1 remains the rule. The score falls with context, because
+each mixed round's owner slice carries the whole-context attention over the prompt so far, which
+lengthens the round the decode lanes wait on. It is also because the decode lanes' own verify
+attention grows. S=1528 (a 1552-column forward) is not 256-aligned and loses 3–5%.
+
+The bench corpus has 65,536 tokens and 682 distinct IDs and wraps. Long prompts therefore repeat,
+which inflates DFlash acceptance: decode-only rates of 290–450 tok/s at long context are not
+representative of natural text. Shares and scores are ratios within one run and are less
+affected.
+
+Dominated by these: every time-share point (2048-token chunks after D decode rounds):
+
+| D | Decode share | Prefill tok/s |
+|---:|---:|---:|
+| 1 | 0.065 | 2,864 |
+| 2 | 0.114 | 2,724 |
+| 4 | 0.196 | 2,488 |
+| 8 | 0.324 | 2,102 |
+| 16 | 0.483 | 1,589 |
+| 32 | 0.643 | 1,066 |
+
+The mixed line now sits 4–10% above the time-share line P≈3,300·(1−share). The gain grows with
+decode share. Each mixed round fuses one decode round into a prefill step for ~12 ms of extra wall
+time, against 45 ms for a separate decode round. At S=232, a mixed round's 232 prompt tokens cost
+63 ms over the decode-only round (~3,650 tok/s marginal), above the full-chunk rate.
+
+The same sweep before the small-T prefill work (`fused4`/`fused5`) had these points:
+- S=488: 0.204 / 2,568
+- S=232: 0.343 / 1,980
+- S=488, D=4: 0.499 / 1,620
+- S=1000, D=4: 0.338 / 2,194
+
+Full-chunk mixing (S=2024: 2024 prompt + 24 verify columns fill the 2048 chunk) at D=1/2/4/8/16
+gave 0.069/3,038, 0.118/2,872, 0.205/2,598, 0.336/2,180 and 0.497/1,636 on that earlier build:
+3–6% above time-share at each D, and equal to S=1000 at twice the stall. Fusion saves one decode
+round's non-Linear work per slice, so large slices stay close to the time-share line. The middle of
+the frontier needed 128–512-token prefill near 2048-chunk efficiency (next section).
+
+Larger S with D>1 amortizes each mixed round's fixed excess (the owner's attention/GDN segments,
+verify rows and host-side slice work), which is why S=1000/488 with D=2..8 dominates small S at
+D=1 at equal share.
+
+Mixed-round overheads removed during the campaign:
+- A mid-T FP8LUT4/raw-FP8 Linear route for T 33..128, 8 waves × (16-row block, K split).
+  Whole-model T=48..128 prefill went from ~95 to 47–71 ms.
+- K5120 RMSNorm takes the row-CTA route at every width. 25..127 rows had fallen to the generic
+  kernel (10× slower), and ≥128 rows used the serial token8 chain (115 → 47 µs per call at T2048).
+  This matches the fused normalized producers' reduction order at every width.
+- The plain per-token E4M3 quantizer now runs on a resident 128×256 grid striding tokens. Grids
+  above ~2048 waves paid a ~30 µs dispatch cliff: T64 dropped from 35 to 6.5 µs, and T2048/K5120
+  from 85 to 50 µs, which also speeds ordinary prefill.
+- The GDN projection→conv direct scatter now serves any T and the combined [value,z] rows.
+  It replaces 3 copies, the conv and 3 extracts: T40 dropped from 45 to 21 µs per layer, and
+  P2048 from 0.53 to 0.20 ms.
+
+In total, the mixed round at S=40 went from 72.8 to 61.9 ms. Evidence:
+`profiles/bench/r9700-mixed-pd-20260929/` (`frontier.py ts3 fused4 fused5 fused6`, kernel traces
+in `prof/`).
+
+### Small-T prefill (2026-09-29)
+
+Whole-model prefill step (C1, production DFlash, `ninfer_bench -p T`; ms, then tok/s):
+
+| T | 64 | 128 | 256 | 384 | 512 | 768 | 1024 | 2048 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Before | 57.0 | 71.1 | 102.5 | 162.7 | 173.2 | 286.7 | 306.9 | 598.5 |
+| After | 41.7 | 58.2 | 89.5 | 134.1 | 158.7 | 227.5 | 298.6 | 597.3 |
+| tok/s | 1,534 | 2,201 | 2,859 | 2,863 | 3,225 | 3,376 | 3,430 | 3,429 |
+
+Changes:
+- **FP8LUT4/raw-FP8 prefill Linear CTA shapes.** The CTA is (G×64 tokens)×(8/G×R rows), with
+  256×128, 256×64 and 512×64 selected by `prefill_shape`, and 16-token fragments past T skip
+  their activation loads and WMMAs. Every shape publishes identical bits (one wave's same-order K
+  accumulation per output).
+  - T ≤ 256 with fewer than 96 128-row CTAs use 64-row CTAs: N5120/7168/4096 are 16–20% faster
+    per launch.
+  - Wide N uses 512-token tiles wherever they add no padding: T2048 588 → 583 ms.
+  - Narrow N uses one 512-token tile at T 257..511 (T288 129 → 113 ms). Above that, 512-token
+    tiles lose 15–35% per launch at T2048 in the model, because they double the re-reads of the
+    large K17408 activation images, even though they win in an isolated hot-cache benchmark.
+  - The rule was chosen by interleaved whole-model runs. A 256×32 shape was 40–75% slower
+    everywhere and was rejected.
+- **GDN prefill front for every width.** The formerly P2048-only leaf (norm, controls, split
+  value/gate projection, conv direct scatter) now serves every ordinary prefill width. This
+  removes 288 launches per step at T ≠ 2048, bitwise-identical.
+- **A8Q4 M128 prefill CTA with predicated partial tiles, admitted above T32.** This serves the
+  DFlash context projections of every prefill step and mixed slice. The N5120/K25600 feature
+  projection went from 651 to 361 µs at T64 and from 3,650 to 971 µs at T512; the per-layer
+  N6144/K5120 projection from 834 to 235 µs at T512. These had used the WMMA32 route except at
+  exactly 1024/2048/4096/8192.
+
+Measured and not adopted (interleaved whole-model `ninfer_bench -p`, bitwise-identical candidates):
+- **Mid-T token split** (two token parts per narrow-N launch at T 49..128). It saved 5–16 µs per
+  launch in isolation, but the whole step moved only −1.7% at T64 and ±0.4% at T 80..128.
+  The mid-T kernel still beats every prefill shape at T ≤ 128 by 18–120%.
+- **4-wave CTAs** (256×32 and 256×64 rows) for narrow N. At T ≤ 256 they do not beat 8-wave
+  256×64, so per-wave intensity rather than CTA balance limits the 5120-row launches. Whole
+  steps moved −2.8% at T520 but +0.5–1% at T640/1032. A mixed round reaches T513+ only if
+  S + (C−1)·W > 512; S=488 at C4 is exactly 512.
+- **Launch gaps.** Eager and HIP-graph dispatch cost the same on this ROCm: 3.2 µs per empty
+  kernel, ~1 µs on a busy stream, in a 1,000-kernel chain. Prefill graph capture therefore
+  cannot recover the ~4.5 µs ramp and tail per boundary. `HIP_FORCE_DEV_KERNARG=1` changed
+  nothing.
+- **GDN chunked recurrence split over value rows** (two 4-wave CTAs per head, each recomputing
+  the shared per-chunk k normalization, A/P and diagonal): 0.63 → 1.55 ms at T2048. At 58.9 KB of
+  LDS only two CTAs fit per WGP. The kernel already uses 256 VGPRs (one spill), which leaves no
+  room to prefetch the next chunk's loads in registers.
+
+Remaining costs at T2048:
+- **Linears:** about 470 ms, at the ~210 TFLOP/s power bound (T256 ~205 wide, ~155 for the
+  5120-row down/output launches).
+- **GDN chunked recurrence:** 33 ms, latency-bound on 48 CTAs as above.
+- **Memory-bound helpers near DRAM bandwidth:**
+  - activation quantization: 15 ms at ~580 GB/s (92% of the read peak);
+  - GDN conv scatter: 9 ms at ~440 GB/s;
+  - GDN controls: 3 ms.
+  Fusing the input RMSNorm with its quantizer would save at most ~2 ms.
+- **Inter-kernel gaps:** about 9 ms per step, from 1,062 launches (see above).
+
+Verification:
+- `ninfer_r9700_fp8lut4_linear_qual` and `ninfer_r9700_fp8_row_scaled_linear_qual` pass at T
+  33..128 (mid-T, including 65/80/113) and 130/200/300/640/1000/2048, with SiLU, residual, poison and split cases on every shape.
+- `a8q4_shape_sweep_qual --prefill-cta-regression` passes, with the context shapes at T
+  33..1000 partial tiles.
+- The RMSNorm production regression passes, with exact same-column invariance at T1..128, 255,
+  256 and 2048.
+- PPL on `tools/ppl/corpus.ids` at 8K:
+  - Chunks 2048 and 256 are bitwise-identical, at mean NLL 1.878183.
+  - Chunk 384 gives 1.878221.
+  - The morning's recorded baseline was 1.878510.
+
+Serve check (C3, prefill chunk 2048): two greedy 700-token streams run while a 9,593-token prompt
+arrives.
+
+| Config | Worst stream gap | Long request latency |
+|---|---:|---:|
+| Prefill-first | 3.08 s | 3.09 s |
+| S=488, D=2 | 0.204 s | 4.51 s |
+| S=232, D=1 | 0.204 s | 4.78 s |
+| S=40, D=1 | 0.088 s | 9.35 s |
+
+All four runs answered the needle correctly. In these runs the worst gap came at admission,
+where the owner's first slice ran as a separate step; that slice now joins a mixed round (see
+the frontier section). Later gaps are the mixed rounds (~0.12 s at S=232).
+
+Correctness (`--pair-check 3000,64`, C2):
+- The prefilling request's 64 greedy tokens are bit-identical to prefill-first at S=40/120/2040.
+- The co-running decode lane's verify rows use the mixed width's Linear/norm routes (same Op
+  oracles), so its greedy stream can flip at a near-tie (first difference at token 33–139 of
+  256).
+
 ## Mid-row attention route (2026-09-28)
 
 Causal chunks of 9..127 rows (short appended turns and tool results, prompt tails with
@@ -861,7 +1260,7 @@ N34816/K5120 169→154 µs, N5120/K17408 94→79 µs, N5120/K6144 42→33 µs, N
 N1280/K5120 25→7.5 µs (85–94% of DRAM bandwidth for the large shapes). Only the FP32 association
 changes; the small-batch qualifier's FP64 bound still holds (89 cells, maximum budget use 0.888).
 Latency-bound kernels: K5120 small-T RMSNorm keeps a row in registers, one 16-byte vector per
-thread (7.7→1.8 µs, also used by ordinary decode); the BF16 GDN control projection likewise
+thread (7.7→1.8 µs, also used by ordinary decode and T25..127 mixed decode/prefill units); the BF16 GDN control projection likewise
 (9.9→5.1 µs, still bitwise equal across T1..24); the GDN verify record splits value rows over four
 CTAs and stages every token's normalized q/k first (15→11 µs, bit-identical); the drafter's column
 top-16 keeps register lists with wave-shuffle merges (0.33→0.06 ms per round, exact); verification

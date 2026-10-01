@@ -34,6 +34,7 @@ using ninfer::TokenId;
 using ninfer::runtime::AdmissionResources;
 using ninfer::runtime::BatchedGeneratedRound;
 using ninfer::runtime::CacheRestoreFailure;
+using ninfer::runtime::MixedGeneratedRound;
 using ninfer::runtime::PrefillStepResult;
 using ninfer::runtime::RequestPlanSummary;
 using ninfer::runtime::RoundBudget;
@@ -478,7 +479,7 @@ public:
 
     [[nodiscard]] PrefillStepResult start_prefill_lane(std::uint32_t lane, PreparedPrompt prompt,
                                                        ProbePlan plan, TransientRegion,
-                                                       const OutputSession*) {
+                                                       const OutputSession*, bool) {
         note("start_prefill");
         ++prefill_count;
         aborts_at_prefill = abort_count;
@@ -551,8 +552,13 @@ public:
         return script != CacheCase::RecoveryDiskClaimMiss;
     }
     [[nodiscard]] bool revert_cancelled_prefill_lane(std::uint32_t) { return true; }
-    [[nodiscard]] PrefillStepResult advance_prefill_lane(std::uint32_t) {
+    [[nodiscard]] PrefillStepResult advance_prefill_lane(std::uint32_t, bool) {
         throw std::logic_error("cold prefill did not complete in one step");
+    }
+    [[nodiscard]] bool prefill_mixable(std::uint32_t) const noexcept { return false; }
+    [[nodiscard]] MixedGeneratedRound decode_batch_with_prefill(
+        std::span<const std::uint32_t>, std::span<const RoundBudget>, std::uint32_t) {
+        throw std::logic_error("recovery probe never mixes prefill into decode");
     }
     [[nodiscard]] BatchedGeneratedRound decode_batch(std::span<const std::uint32_t>,
                                                      std::span<const RoundBudget>) {

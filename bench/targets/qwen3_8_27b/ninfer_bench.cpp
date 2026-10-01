@@ -17,6 +17,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -263,6 +264,179 @@ void prime_decode_graph(ninfer::Engine& engine, ninfer::bench::BenchEnvironment&
     env.decode_graph_primed = true;
 }
 
+struct StatsWindow {
+    double seconds                 = 0.0;
+    std::uint64_t decode_tokens     = 0;
+    std::uint64_t decode_rounds     = 0;
+    std::uint64_t decode_row_rounds = 0;
+    std::uint64_t prefill_tokens    = 0;
+};
+
+StatsWindow stats_window(const ninfer::RuntimeStats& before, const ninfer::RuntimeStats& after,
+                         std::chrono::steady_clock::time_point begin,
+                         std::chrono::steady_clock::time_point end) {
+    return StatsWindow{
+        .seconds           = std::chrono::duration<double>(end - begin).count(),
+        .decode_tokens     = after.committed_decode_tokens - before.committed_decode_tokens,
+        .decode_rounds     = after.decode_rounds - before.decode_rounds,
+        .decode_row_rounds = after.decode_row_rounds - before.decode_row_rounds,
+        .prefill_tokens    = after.computed_prefill_tokens - before.computed_prefill_tokens,
+    };
+}
+
+std::string window_json(const char* label, const StatsWindow& w) {
+    std::ostringstream out;
+    out << "  \"" << label << "\": {\"seconds\": " << w.seconds
+        << ", \"decode_tokens\": " << w.decode_tokens << ", \"decode_rounds\": " << w.decode_rounds
+        << ", \"decode_row_rounds\": " << w.decode_row_rounds
+        << ", \"prefill_tokens\": " << w.prefill_tokens
+        << ", \"decode_tok_s\": " << w.decode_tokens / w.seconds
+        << ", \"decode_rounds_s\": " << w.decode_rounds / w.seconds
+        << ", \"prefill_tok_s\": " << w.prefill_tokens / w.seconds << "}";
+    return out.str();
+}
+
+// C-1 lanes decode continuously while the remaining lane runs R fresh P-token prefills back to
+// back. Decode-only windows before and after bracket acceptance drift of the decoding lanes.
+std::string run_contention(ninfer::Engine& engine, const ninfer::bench::BenchOptions& options,
+                           const std::vector<ninfer::TokenId>& corpus,
+                           std::uint32_t decode_output_tokens) {
+    using Clock = std::chrono::steady_clock;
+    const auto [prefill_tokens, prefills] = *options.contention;
+    const std::uint32_t decode_lanes =
+        options.contention_lanes != 0 ? options.contention_lanes : options.concurrency - 1U;
+    const int decode_prompt_tokens        = static_cast<int>(options.contention_context);
+    constexpr auto kBaselineWindow        = std::chrono::seconds(4);
+
+    ninfer::RequestOptions decode;
+    decode.execution.requested_output_tokens = decode_output_tokens;
+    decode.execution.allow_prefix_reuse      = false;
+    decode.execution.sampling.temperature    = 0.0F;
+    decode.stop.include_model_defaults       = false;
+    decode.output.raw                        = true;
+    decode.output.preserve_special_tokens    = true;
+    const std::uint64_t rounds_before = engine.runtime_stats().decode_rounds;
+    std::vector<ninfer::GenerationHandle> decoding;
+    for (std::uint32_t lane = 0; lane < decode_lanes; ++lane) {
+        decoding.push_back(engine.submit(
+            engine.prepare_tokens(ninfer::bench::prompt_slice(corpus, decode_prompt_tokens,
+                                                              4099U * lane),
+                                  false),
+            decode, ninfer::OutputDelivery::TerminalOnly, kBenchmarkPendingDeadline));
+    }
+    // The decode lanes prefill first: allow about 1000 prompt tokens per second per lane.
+    const auto ready_deadline =
+        Clock::now() + std::chrono::seconds(120 + decode_lanes * options.contention_context / 1000U);
+    for (;;) {
+        const ninfer::RuntimeStats stats = engine.runtime_stats();
+        if (stats.decode_ready_requests == decode_lanes && stats.prefilling_requests == 0 &&
+            stats.decode_rounds >= rounds_before + 16U) {
+            break;
+        }
+        if (Clock::now() > ready_deadline) {
+            throw std::runtime_error("contention decode lanes did not become decode-ready");
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+
+    const auto baseline = [&] {
+        const ninfer::RuntimeStats before = engine.runtime_stats();
+        const auto begin                  = Clock::now();
+        std::this_thread::sleep_for(kBaselineWindow);
+        return stats_window(before, engine.runtime_stats(), begin, Clock::now());
+    };
+    const StatsWindow before_window = baseline();
+
+    ninfer::RequestOptions prefill = decode;
+    prefill.execution.requested_output_tokens = 1;
+    std::vector<double> ttft;
+    const ninfer::RuntimeStats contention_before = engine.runtime_stats();
+    const auto contention_begin                  = Clock::now();
+    for (int index = 0; index < prefills; ++index) {
+        auto prompt = engine.prepare_tokens(
+            ninfer::bench::prompt_slice(corpus, prefill_tokens,
+                                        20011U + 7919U * static_cast<std::size_t>(index)),
+            false);
+        const auto submitted = Clock::now();
+        ninfer::GenerationResult result =
+            engine.submit(std::move(prompt), prefill, ninfer::OutputDelivery::TerminalOnly,
+                          kBenchmarkPendingDeadline)
+                .wait();
+        ttft.push_back(std::chrono::duration<double>(Clock::now() - submitted).count());
+        if (result.generated_token_ids.size() != 1U) {
+            throw std::runtime_error("contention prefill did not generate its token");
+        }
+    }
+    const StatsWindow contention = stats_window(contention_before, engine.runtime_stats(),
+                                                contention_begin, Clock::now());
+    const StatsWindow after_window = baseline();
+    const ninfer::RuntimeStats finished = engine.runtime_stats();
+    if (finished.decode_ready_requests != decode_lanes) {
+        throw std::runtime_error("a decode lane finished before the contention windows closed; "
+                                 "raise the decode output budget");
+    }
+    decoding.clear();
+
+    std::ostringstream out;
+    out << "{\n  \"concurrency\": " << options.concurrency
+        << ", \"prefill_tokens\": " << prefill_tokens << ", \"prefills\": " << prefills
+        << ", \"prefill_chunk\": " << options.prefill_chunk
+        << ", \"prefill_slice\": " << options.prefill_slice
+        << ", \"prefill_slice_rounds\": " << options.prefill_slice_rounds
+        << ", \"decode_context\": " << options.contention_context
+        << ", \"decode_lanes\": " << decode_lanes << ",\n  \"ttft_s\": [";
+    for (std::size_t i = 0; i < ttft.size(); ++i) { out << (i ? ", " : "") << ttft[i]; }
+    out << "],\n" << window_json("decode_only_before", before_window) << ",\n"
+        << window_json("contention", contention) << ",\n"
+        << window_json("decode_only_after", after_window) << "\n}\n";
+    return out.str();
+}
+
+// Lane A decodes 4 * G tokens from a 512-token prompt; once it is decode-ready, lane B prefills a
+// fresh P-token prompt and generates G tokens. Greedy streams depend on the schedule only through
+// numerics, so comparing runs across prefill policies checks the mixed paths end to end.
+std::string run_pair_check(ninfer::Engine& engine, const ninfer::bench::BenchOptions& options,
+                           const std::vector<ninfer::TokenId>& corpus) {
+    const auto [prompt_tokens, generated] = *options.pair_check;
+    ninfer::RequestOptions request;
+    request.execution.allow_prefix_reuse   = false;
+    request.execution.sampling.temperature = 0.0F;
+    request.stop.include_model_defaults    = false;
+    request.output.raw                     = true;
+    request.output.preserve_special_tokens = true;
+    ninfer::RequestOptions decode_a = request;
+    decode_a.execution.requested_output_tokens = static_cast<std::uint32_t>(4 * generated);
+    ninfer::RequestOptions prefill_b = request;
+    prefill_b.execution.requested_output_tokens = static_cast<std::uint32_t>(generated);
+    const std::uint64_t rounds_before = engine.runtime_stats().decode_rounds;
+    ninfer::GenerationHandle a = engine.submit(
+        engine.prepare_tokens(ninfer::bench::prompt_slice(corpus, 512, 101U), false), decode_a,
+        ninfer::OutputDelivery::TerminalOnly, kBenchmarkPendingDeadline);
+    while (engine.runtime_stats().decode_rounds < rounds_before + 4U) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    ninfer::GenerationHandle b = engine.submit(
+        engine.prepare_tokens(ninfer::bench::prompt_slice(corpus, prompt_tokens, 30011U), false),
+        prefill_b, ninfer::OutputDelivery::TerminalOnly, kBenchmarkPendingDeadline);
+    const ninfer::GenerationResult rb = b.wait();
+    const ninfer::GenerationResult ra = a.wait();
+    std::ostringstream out;
+    const auto emit = [&](const char* label, const ninfer::GenerationResult& r) {
+        out << "  \"" << label << "\": [";
+        for (std::size_t i = 0; i < r.generated_token_ids.size(); ++i) {
+            out << (i ? "," : "") << r.generated_token_ids[i];
+        }
+        out << "]";
+    };
+    out << "{\n  \"prefill_slice\": " << options.prefill_slice
+        << ",\n  \"prefill_slice_rounds\": " << options.prefill_slice_rounds << ",\n";
+    emit("a", ra);
+    out << ",\n";
+    emit("b", rb);
+    out << "\n}\n";
+    return out.str();
+}
+
 void write_output(const ninfer::bench::BenchOptions& options, const std::string& text) {
     if (options.output_file.empty()) {
         std::cout << text;
@@ -304,9 +478,19 @@ int main(int argc, char** argv) {
             options.spec_backend, options.draft_tokens, options.proposal_head,
             options.dflash_verify_width, options.adaptive_draft};
         // C > 1 pp+tg always isolates decode behind a one-token seed, like --isolate-prompt-decode.
-        const std::uint32_t max_context = ninfer::bench::resolve_max_context(
-            tests, options.max_context, spec_options, options.use_device_graph,
-            options.isolate_prompt_decode || options.concurrency > 1);
+        constexpr std::uint32_t kContentionDecodeTokens = 6144;
+        const std::uint32_t max_context =
+            options.pair_check
+                ? static_cast<std::uint32_t>(std::max(options.pair_check->first,
+                                                      512 + 4 * options.pair_check->second) +
+                                             256)
+            : options.contention
+                ? options.max_context.value_or(std::max<std::uint32_t>(
+                      static_cast<std::uint32_t>(options.contention->first) + 128U,
+                      options.contention_context + kContentionDecodeTokens + 128U))
+                : ninfer::bench::resolve_max_context(
+                      tests, options.max_context, spec_options, options.use_device_graph,
+                      options.isolate_prompt_decode || options.concurrency > 1);
 
         ninfer::EngineOptions engine_options;
         engine_options.artifact_path = options.artifact_path;
@@ -321,6 +505,8 @@ int main(int argc, char** argv) {
                                                ninfer::bench::concurrent_kv_capacity_tokens(
                                                    max_context, options.concurrency));
         engine_options.prefill_chunk = options.prefill_chunk;
+        engine_options.prefill_slice = options.prefill_slice;
+        engine_options.prefill_slice_rounds = options.prefill_slice_rounds;
         engine_options.speculative.backend       = options.draft_tokens == 0
                                                        ? ninfer::SpeculativeBackend::None
                                                        : options.spec_backend;
@@ -368,6 +554,14 @@ int main(int argc, char** argv) {
         env.memory = engine.memory_summary();
 
         prime_decode_graph(engine, env, corpus);
+        if (options.contention) {
+            write_output(options, run_contention(engine, options, corpus, kContentionDecodeTokens));
+            return 0;
+        }
+        if (options.pair_check) {
+            write_output(options, run_pair_check(engine, options, corpus));
+            return 0;
+        }
 
         std::vector<ninfer::bench::TestResult> results;
         results.reserve(tests.size());

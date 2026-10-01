@@ -967,11 +967,21 @@ void TextContext::attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_la
                            Tap& tap) {
     hipStream_t s = ctx_.stream;
     const int T    = x.ne[1];
+    // A mixed unit's leading prefill-owner columns precede the uniform sequence batch.
+    const std::int32_t mixed_columns    = mixed_prefill_columns_;
+    const std::int32_t sequence_columns = T - mixed_columns;
     const std::int32_t sequence_batch = active_sequence_batch_ != 0 ? active_sequence_batch_ : 1;
-    const std::int32_t sequence_width = active_sequence_batch_ != 0 ? active_sequence_width_ : T;
-    if (sequence_width <= 0 || sequence_width * sequence_batch != T ||
+    const std::int32_t sequence_width =
+        active_sequence_batch_ != 0 ? active_sequence_width_ : sequence_columns;
+    if (sequence_width <= 0 || sequence_width * sequence_batch != sequence_columns ||
         text_kv_transactions_.size() != static_cast<std::size_t>(sequence_batch)) {
         throw std::logic_error("Text FP8-K/INT4-V transaction binding does not match columns");
+    }
+    if (mixed_columns != 0 &&
+        (mixed_columns < 0 || active_sequence_batch_ == 0 || mixed_prefill_transaction_ == nullptr ||
+         mixed_prefill_transaction_->position_count() !=
+             static_cast<std::size_t>(mixed_columns))) {
+        throw std::logic_error("mixed Text prefill columns do not match their KV transaction");
     }
     const bool has_ancestor_masks =
         active_ancestor_mask_ != nullptr && active_ancestor_mask_->data != nullptr;
@@ -980,13 +990,14 @@ void TextContext::attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_la
     if (has_ancestor_masks != has_prefix_lengths) {
         throw std::logic_error("Text packed-tree attention metadata must be paired");
     }
-    if (has_ancestor_masks && active_sequence_batch_ == 0) {
+    if (has_ancestor_masks && (active_sequence_batch_ == 0 || mixed_columns != 0)) {
         throw std::logic_error("Text packed-tree attention requires an explicit sequence batch");
     }
     for (const qwen3::PagedKVTransaction* transaction : text_kv_transactions_) {
         const std::size_t extent = transaction->position_count();
         if (extent == 0 || extent > static_cast<std::size_t>(sequence_width) ||
-            (ph == Phase::Prefill && extent != static_cast<std::size_t>(sequence_width))) {
+            (ph == Phase::Prefill && mixed_columns == 0 &&
+             extent != static_cast<std::size_t>(sequence_width))) {
             throw std::logic_error(
                 "Text FP8-K/INT4-V transaction extent does not match actual schedule width");
         }
@@ -1018,7 +1029,8 @@ void TextContext::attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_la
         ops::rmsnorm(x, *w.input_norm, kCfg.rms_eps, true, h, s);
         if constexpr (traced_norm) tap.capture_attention_stage(text_layer, "norm_h", h, s);
         const std::int32_t route_tokens =
-            packed_route_tokens(active_sequence_batch_, active_sequence_width_);
+            mixed_columns != 0 ? 0
+                               : packed_route_tokens(active_sequence_batch_, active_sequence_width_);
         Variant::attention_projection(h, *w.projection, q_flat, gate_flat, k_flat, v_flat, ph,
                                       work_, s, route_tokens, linear_execution_, text_layer);
     }
@@ -1067,39 +1079,51 @@ void TextContext::attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_la
         has_prefix_lengths
             ? static_cast<const std::int32_t*>(active_prefix_lengths_->data)
             : nullptr;
-    const std::size_t key_stride = static_cast<std::size_t>(kCfg.kv_size) * sequence_width;
-    const std::size_t query_stride = static_cast<std::size_t>(kCfg.q_size) * sequence_width;
-    for (std::int32_t sequence = 0; sequence < sequence_batch; ++sequence) {
-        qwen3::PagedKVTransaction& transaction = *text_kv_transactions_[sequence];
-        const auto live_width = static_cast<std::int32_t>(transaction.position_count());
-        const std::size_t key_offset = static_cast<std::size_t>(sequence) * key_stride;
-        const std::size_t query_offset = static_cast<std::size_t>(sequence) * query_stride;
-        // Attention writes every live column of its panel; only padded columns need zeros.
-        if (live_width < sequence_width) {
+    // Attention writes every live column of a panel; only its padded columns need zeros.
+    const auto zero_padding = [&](std::int32_t column, std::int32_t panel_width,
+                                  std::int32_t live_width) {
+        if (live_width < panel_width) {
+            const std::size_t query_offset = static_cast<std::size_t>(kCfg.q_size) * column;
             HIP_CHECK(hipMemsetAsync(
                 all_attention + query_offset + static_cast<std::size_t>(kCfg.q_size) * live_width,
                 0,
-                static_cast<std::size_t>(kCfg.q_size) * (sequence_width - live_width) *
+                static_cast<std::size_t>(kCfg.q_size) * (panel_width - live_width) *
                     sizeof(float),
                 s));
         }
+    };
+    const auto query_panel = [&](std::int32_t column, std::int32_t live_width) {
+        return Tensor(const_cast<hip_bfloat16*>(all_queries +
+                                                static_cast<std::size_t>(kCfg.q_size) * column),
+                      DType::BF16, {kCfg.head_dim, kCfg.n_q, live_width});
+    };
+    const auto position_panel = [&](std::int32_t column, std::int32_t live_width) {
+        return Tensor(const_cast<std::int32_t*>(all_positions + column), DType::I32,
+                      {live_width});
+    };
+    const auto attention_panel = [&](std::int32_t column, std::int32_t live_width) {
+        return Tensor(all_attention + static_cast<std::size_t>(kCfg.q_size) * column,
+                      DType::FP32, {kCfg.head_dim, kCfg.n_q, live_width});
+    };
+    // One sequence panel: `column` is its first aggregate column, `panel_width` its padded width
+    // and `sequence` its packed-tree row (negative outside the uniform sequence batch).
+    const auto attend = [&](qwen3::PagedKVTransaction& transaction, std::int32_t column,
+                            std::int32_t panel_width, std::int32_t sequence) {
+        const auto live_width = static_cast<std::int32_t>(transaction.position_count());
+        const std::size_t key_offset = static_cast<std::size_t>(kCfg.kv_size) * column;
+        zero_padding(column, panel_width, live_width);
         transaction.launch_append_layer(static_cast<std::uint32_t>(fidx),
                                         all_keys + key_offset, all_values + key_offset, s);
         const qwen3::PagedKVLayerRead cache_read =
             transaction.pending_layer_read(static_cast<std::uint32_t>(fidx));
-        Tensor query_panel(const_cast<hip_bfloat16*>(all_queries + query_offset), DType::BF16,
-                           {kCfg.head_dim, kCfg.n_q, live_width});
-        Tensor position_panel(
-            const_cast<std::int32_t*>(
-                all_positions + static_cast<std::size_t>(sequence) * sequence_width),
-            DType::I32, {live_width});
-        Tensor attention_panel(all_attention + query_offset, DType::FP32,
-                               {kCfg.head_dim, kCfg.n_q, live_width});
+        Tensor queries = query_panel(column, live_width);
+        Tensor positions = position_panel(column, live_width);
+        Tensor attention = attention_panel(column, live_width);
         Tensor ancestor_panel;
         Tensor prefix_panel;
         const Tensor* ancestor_panel_ptr = nullptr;
         const Tensor* prefix_panel_ptr = nullptr;
-        if (has_ancestor_masks) {
+        if (has_ancestor_masks && sequence >= 0) {
             ancestor_panel = Tensor(
                 const_cast<std::int32_t*>(
                     all_ancestor_masks + static_cast<std::size_t>(sequence) * sequence_width),
@@ -1117,14 +1141,80 @@ void TextContext::attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_la
                                         prefix_panel_ptr, s);
         }
 #if defined(NINFER_R9700_XATTENTION_QUALIFICATION)
-        if (ph == Phase::Prefill) {
-            Variant::text_prefill_attention(query_panel, cache_read, position_panel,
-                                            attention_panel, work_, s);
+        // Prompt panels only (plain prefill or a mixed round's owner); verify panels keep the
+        // production route.
+        if (ph == Phase::Prefill && (sequence < 0 || active_sequence_batch_ == 0)) {
+            Variant::text_prefill_attention(queries, cache_read, positions, attention, work_, s);
         } else
 #endif
         {
-            Variant::full_attention(query_panel, cache_read, position_panel, attention_panel,
-                                    work_, s, ancestor_panel_ptr, prefix_panel_ptr, nullptr);
+            Variant::full_attention(queries, cache_read, positions, attention, work_, s,
+                                    ancestor_panel_ptr, prefix_panel_ptr, nullptr);
+        }
+    };
+    if (mixed_columns != 0) { attend(*mixed_prefill_transaction_, 0, mixed_columns, -1); }
+    // A uniform causal sequence batch (ordinary decode, MTP and chain verification, and a mixed
+    // round's verify part) appends every sequence's panel in one codec launch, then attends all
+    // sequences in one split launch and one merge when each takes the batched route, or one by
+    // one otherwise. Every launch's arguments are the per-sequence ones (stable device table rows
+    // and positions, host-fixed frontiers), so a captured graph replays them as before.
+    const bool batched_sequences = active_sequence_batch_ != 0 && !has_ancestor_masks;
+    if (batched_sequences) {
+        const auto count = static_cast<std::size_t>(sequence_batch);
+        std::array<qwen3::PagedKVTransaction*, kMaximumConcurrency> transactions{};
+        std::array<const hip_bfloat16*, kMaximumConcurrency> sequence_keys{};
+        std::array<const hip_bfloat16*, kMaximumConcurrency> sequence_values{};
+        std::array<std::int32_t, kMaximumConcurrency> live_widths{};
+        for (std::size_t sequence = 0; sequence < count; ++sequence) {
+            const std::int32_t column =
+                mixed_columns + static_cast<std::int32_t>(sequence) * sequence_width;
+            transactions[sequence] = text_kv_transactions_[sequence];
+            live_widths[sequence] =
+                static_cast<std::int32_t>(transactions[sequence]->position_count());
+            zero_padding(column, sequence_width, live_widths[sequence]);
+            const std::size_t key_offset = static_cast<std::size_t>(kCfg.kv_size) * column;
+            sequence_keys[sequence] = all_keys + key_offset;
+            sequence_values[sequence] = all_values + key_offset;
+        }
+        qwen3::PagedKVTransaction::launch_append_layers(
+            std::span<qwen3::PagedKVTransaction* const>(transactions.data(), count),
+            static_cast<std::uint32_t>(fidx),
+            std::span<const hip_bfloat16* const>(sequence_keys.data(), count),
+            std::span<const hip_bfloat16* const>(sequence_values.data(), count), s);
+        std::array<Variant::FullAttentionSequence, kMaximumConcurrency> sequences{};
+        for (std::size_t sequence = 0; sequence < count; ++sequence) {
+            const std::int32_t column =
+                mixed_columns + static_cast<std::int32_t>(sequence) * sequence_width;
+            sequences[sequence] = Variant::FullAttentionSequence{
+                .query = query_panel(column, live_widths[sequence]),
+                .cache_read =
+                    transactions[sequence]->pending_layer_read(static_cast<std::uint32_t>(fidx)),
+                .cache_positions = position_panel(column, live_widths[sequence]),
+                .output = attention_panel(column, live_widths[sequence]),
+            };
+            const Tensor* const causal = nullptr;
+            if constexpr (requires {
+                              tap.capture_attention_cache(text_layer,
+                                                          sequences[sequence].cache_read, causal,
+                                                          causal, s);
+                          }) {
+                tap.capture_attention_cache(text_layer, sequences[sequence].cache_read, causal,
+                                            causal, s);
+            }
+        }
+        if (!Variant::full_attention_sequences(
+                std::span<const Variant::FullAttentionSequence>(sequences.data(), count), work_,
+                s)) {
+            for (std::size_t sequence = 0; sequence < count; ++sequence) {
+                Variant::full_attention(sequences[sequence].query, sequences[sequence].cache_read,
+                                        sequences[sequence].cache_positions,
+                                        sequences[sequence].output, work_, s);
+            }
+        }
+    } else {
+        for (std::int32_t sequence = 0; sequence < sequence_batch; ++sequence) {
+            attend(*text_kv_transactions_[sequence], mixed_columns + sequence * sequence_width,
+                   sequence_width, sequence);
         }
     }
     if constexpr (requires {
@@ -1167,6 +1257,10 @@ void TextContext::attn_mix(const FullLayerW& w, Tensor& x, int fidx, int text_la
 template <class Tap>
 void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_layer, Phase ph,
                           Tap& tap) {
+    if (mixed_prefill_columns_ != 0) {
+        gdn_mix_mixed(w, x, gidx, text_layer);
+        return;
+    }
     hipStream_t s = ctx_.stream;
     const int T    = x.ne[1];
 
@@ -1174,9 +1268,9 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
     Tensor h           = control.hidden;
     Tensor g           = control.g;
     Tensor beta        = control.beta;
-    // The ordinary P2048 prefill leaf owns the whole GDN front, including this normalization; so
-    // does the verification record leaf unless the tap observes the normalized controls.
-    const bool prefill_front = Variant::gdn_input_projection_prefill_p2048_selected(ph, T);
+    // The ordinary prefill leaf owns the whole GDN front, including this normalization; so does
+    // the verification record leaf unless the tap observes the normalized controls.
+    const bool prefill_front = Variant::gdn_input_projection_prefill_selected(ph);
     constexpr bool tap_controls = requires { tap.capture_gdn_controls(text_layer, h, g, beta, s); };
     const bool record_front = !tap_controls && ph == Phase::Verify &&
                               gdn_state_action_ == GdnStateAction::RecordForReplay;
@@ -1333,7 +1427,7 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
     Tensor conv_state =
         state_.conv_slot(static_cast<std::uint32_t>(gidx), linear_state_current_slot_);
     if (prefill_front) {
-        Variant::gdn_input_projection_prefill_p2048(
+        Variant::gdn_input_projection_prefill(
             x, *w.input_norm, kCfg.rms_eps, *w.projection, *w.conv1d, conv_state, h, g, beta, qc,
             kc, vc, projection.output_gate, ph, work_, s, linear_execution_, text_layer);
         if constexpr (requires { tap.capture_gdn_controls(text_layer, h, g, beta, s); }) {
@@ -1396,6 +1490,95 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
     if constexpr (requires { tap.capture_gdn_residual(text_layer, x, s); }) {
         tap.capture_gdn_residual(text_layer, x, s);
     }
+}
+
+// Mixed unit: the owner's leading columns run the ordinary prefill recurrence on its current
+// state slot; the verify batch records ReplaySSM transitions exactly as gdn_mix's Verify path.
+void TextContext::gdn_mix_mixed(const GdnLayerW& w, Tensor& x, int gidx, int text_layer) {
+    hipStream_t s        = ctx_.stream;
+    const int T          = x.ne[1];
+    const std::int32_t owner = mixed_prefill_columns_;
+    const std::int32_t width = active_sequence_width_;
+    const std::int32_t batch = active_sequence_batch_;
+    if (owner <= 0 || width <= 0 || batch <= 0 || owner + width * batch != T ||
+        active_linear_state_slots_ == nullptr || replay_records_ == nullptr ||
+        gdn_state_action_ != GdnStateAction::RecordForReplay ||
+        (active_parent_index_ != nullptr && active_parent_index_->data != nullptr)) {
+        throw std::logic_error("mixed GDN requires an owner chunk and a chain record batch");
+    }
+    const std::int32_t verify = width * batch;
+    const auto control    = workspace_recipe::gdn_control<TextConfig>(work_, T);
+    auto projection       = workspace_recipe::gdn_projection<TextConfig>(work_, T);
+    Tensor& conv_states   = state_.conv.at(static_cast<std::size_t>(gidx));
+    Tensor owner_conv     =
+        state_.conv_slot(static_cast<std::uint32_t>(gidx), linear_state_current_slot_);
+    const Tensor valid = active_valid_columns_ != nullptr ? *active_valid_columns_ : Tensor{};
+    const GdnReplayRecordLayer persistent_records =
+        replay_records_->layer(gidx, active_sequence_row_, batch);
+    GdnReplayRecordLayer live_records = persistent_records;
+    const GdnReplayRecordSpec& spec   = replay_records_->spec;
+    const bool pack_replay            = width != spec.width;
+    if (pack_replay) {
+        live_records.conv = work_.alloc(DType::BF16, {spec.conv_channels, width, batch});
+        live_records.key =
+            work_.alloc(DType::BF16, {spec.key_dim, spec.qk_heads, width, batch});
+        live_records.value =
+            work_.alloc(DType::BF16, {spec.value_dim, spec.value_heads, width, batch});
+        live_records.gate = work_.alloc(DType::FP32, {2, spec.value_heads, width, batch});
+    }
+    Tensor hidden = control.hidden;
+    Tensor g      = control.g;
+    Tensor beta   = control.beta;
+    Variant::gdn_front_mixed(x, *w.input_norm, kCfg.rms_eps, *w.projection, *w.conv1d,
+                             owner_conv, conv_states, valid, *active_linear_state_slots_, owner,
+                             hidden, g, beta, live_records.conv, projection.query,
+                             projection.key, projection.value, projection.output_gate, work_, s,
+                             linear_execution_, text_layer);
+
+    Tensor o = workspace_recipe::gdn_recurrent_output<TextConfig>(work_, T);
+    {
+        Tensor q_owner = projection.query.slice(1, 0, owner)
+                             .view({kCfg.gdn_k_dim, kCfg.gdn_k_heads, owner});
+        Tensor k_owner =
+            projection.key.slice(1, 0, owner).view({kCfg.gdn_k_dim, kCfg.gdn_k_heads, owner});
+        Tensor v_owner = projection.value.slice(1, 0, owner)
+                             .view({kCfg.gdn_v_dim, kCfg.gdn_v_heads, owner});
+        Tensor o_owner = o.slice(1, 0, owner).view({kCfg.gdn_v_dim, kCfg.gdn_v_heads, owner});
+        Tensor g_owner    = g.slice(1, 0, owner);
+        Tensor beta_owner = beta.slice(1, 0, owner);
+        Tensor recurrent_state =
+            state_.recurrent_slot(static_cast<std::uint32_t>(gidx), linear_state_current_slot_);
+        ops::gated_delta_net(q_owner, k_owner, v_owner, g_owner, beta_owner, kGdnScale,
+                             /*normalize_qk=*/true, recurrent_state, o_owner, s);
+    }
+    {
+        Tensor q_batch = projection.query.slice(1, owner, verify)
+                             .view({kCfg.gdn_k_dim, kCfg.gdn_k_heads, width, batch});
+        Tensor k_batch = projection.key.slice(1, owner, verify)
+                             .view({kCfg.gdn_k_dim, kCfg.gdn_k_heads, width, batch});
+        Tensor v_batch = projection.value.slice(1, owner, verify)
+                             .view({kCfg.gdn_v_dim, kCfg.gdn_v_heads, width, batch});
+        Tensor g_batch    = g.slice(1, owner, verify).view({kCfg.gdn_v_heads, width, batch});
+        Tensor beta_batch = beta.slice(1, owner, verify).view({kCfg.gdn_v_heads, width, batch});
+        Tensor out_batch  = o.slice(1, owner, verify)
+                               .view({kCfg.gdn_v_dim, kCfg.gdn_v_heads, width, batch});
+        Tensor& recurrent_states = state_.recurrent.at(static_cast<std::size_t>(gidx));
+        auto fold_scope          = work_.scope();
+        ops::gated_delta_net_replay_record(q_batch, k_batch, v_batch, g_batch, beta_batch,
+                                           kGdnScale, recurrent_states, valid,
+                                           *active_linear_state_slots_, live_records.key,
+                                           live_records.value, live_records.gate, out_batch, s,
+                                           nullptr, &work_);
+        if (pack_replay) { qwen3::pack_replay_record_layer(persistent_records, live_records, s); }
+    }
+
+    Tensor on = workspace_recipe::gdn_normalized_output<TextConfig>(work_, T).view(
+        {kCfg.gdn_v_dim, kCfg.gdn_v_heads, T});
+    Tensor z  = projection.output_gate.view({kCfg.gdn_v_dim, kCfg.gdn_v_heads, T});
+    Tensor o3 = o.view({kCfg.gdn_v_dim, kCfg.gdn_v_heads, T});
+    Variant::gdn_output_projection(o3, *w.gdn_norm, z, kCfg.rms_eps, on, false, *w.out_proj, x,
+                                   Phase::Prefill, work_, s, 0, linear_execution_, text_layer,
+                                   false);
 }
 
 void TextContext::mlp_tail(const Tensor* post_norm, const MlpW& m, Tensor& x,
@@ -1809,6 +1992,179 @@ TextContext::prefill_impl(std::span<const int> ids, const TextPrefill* text_pref
     work_.reset();
     return PrefillChunkResult{.processed_tokens = static_cast<std::uint32_t>(t0),
                               .finalized        = finalize_at_end && t0 == T};
+}
+
+namespace {
+
+// Splits a mixed unit's layer captures: the owner's leading columns feed its prefill sink and
+// the remaining columns the verify batch sink.
+struct MixedFeatureTap {
+    static constexpr bool enabled = true;
+    DFlashFeatureSink& prefill;
+    DFlashFeatureSink& verify;
+    std::int32_t owner_columns;
+
+    void begin(const Tensor& x) {
+        prefill.begin(x.slice(1, 0, owner_columns));
+        verify.begin(x.slice(1, owner_columns, x.ne[1] - owner_columns));
+    }
+    void capture_layer(int layer, const Tensor& x, hipStream_t stream) {
+        prefill.capture_layer(layer, x.slice(1, 0, owner_columns), stream);
+        verify.capture_layer(layer, x.slice(1, owner_columns, x.ne[1] - owner_columns), stream);
+    }
+};
+
+} // namespace
+
+PrefillChunkResult TextContext::mixed_prefill_verify(
+    const MixedPrefillSlice& slice, DFlashFeatureSink& prefill_sink, const Tensor& ids,
+    const Tensor& cache_positions, const Tensor& rope_positions, const Tensor& valid_columns,
+    const Tensor& kv_table_rows, const Tensor& linear_state_slots, Tensor& hidden,
+    Tensor& logits, Tensor& target_tokens, DFlashFeatureSink& verify_sink,
+    std::optional<qwen3::PagedKVTransaction>& owner_transaction, std::uint32_t& owner_frontier) {
+    hipStream_t s            = ctx_.stream;
+    const std::uint32_t base = text_kv_base_;
+    const std::span<const int> prompt = slice.prompt;
+    if (prefill_text_kv_cache_ == nullptr || prefill_text_kv_allocation_ == nullptr ||
+        prefill_text_kv_publication_ == nullptr || prefill_text_kv_status_ == nullptr ||
+        prompt_embedding_ == nullptr || slice.sampling == nullptr) {
+        throw std::logic_error("mixed prefill requires its KV authority, staging and sampler");
+    }
+    if (base >= prompt.size() || slice.nominal_length == 0 ||
+        slice.nominal_length > prompt.size() - base ||
+        prompt.size() > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max())) {
+        throw std::invalid_argument("mixed prefill chunk is outside the prompt");
+    }
+    // The owner's extent follows prefill_impl: stop at the rewrite checkpoint and split frontiers.
+    auto len = static_cast<std::uint32_t>(slice.nominal_length);
+    const std::int64_t checkpoint_abs = prefill_rewrite_checkpoint_frontier_;
+    if (checkpoint_abs > static_cast<std::int64_t>(base) &&
+        checkpoint_abs < static_cast<std::int64_t>(base) + len) {
+        len = static_cast<std::uint32_t>(checkpoint_abs - static_cast<std::int64_t>(base));
+    }
+    len = qwen3::detail::cap_prefill_at_frontiers(base, len, prefill_split_frontiers_);
+    const bool is_last = slice.finalize_at_end && base + len == prompt.size();
+    const auto owner   = static_cast<std::int32_t>(len);
+
+    const std::int32_t width = ids.ne[0];
+    const std::int32_t batch = ids.ne[1];
+    if (width <= 0 || width > static_cast<std::int32_t>(kDFlashDecodeMaximumWidth) || batch <= 0 ||
+        batch >= static_cast<std::int32_t>(kMaximumConcurrency) + 1) {
+        throw std::invalid_argument("mixed verify batch shape is outside the supported domain");
+    }
+    const std::int32_t verify = width * batch;
+    const std::int32_t T      = owner + verify;
+    require_tensor_shape(ids, DType::I32, {width, batch}, "mixed verify ids");
+    require_tensor_shape(cache_positions, DType::I32, {width, batch}, "mixed verify positions");
+    require_tensor_shape(rope_positions, DType::I32, {width, batch}, "mixed verify RoPE");
+    require_tensor_shape(valid_columns, DType::I32, {batch}, "mixed verify valid columns");
+    require_tensor_shape(kv_table_rows, DType::I32, {batch}, "mixed verify KV rows");
+    require_tensor_shape(linear_state_slots, DType::I32, {batch}, "mixed verify state slots");
+    require_tensor_shape(hidden, DType::BF16, {kCfg.hidden, width, batch}, "mixed verify hidden");
+    require_tensor_shape(logits, DType::BF16, {kCfg.vocab, width, batch}, "mixed verify logits");
+    require_tensor_shape(target_tokens, DType::I32, {width, batch}, "mixed verify tokens");
+
+    // Text-only owner: one-axis RoPE with no MRoPE delta.
+    rope_delta_ = 0;
+    ops::set_i32_scalar(io_.rope_delta, 0, s);
+
+    Tensor x              = work_.alloc(DType::BF16, {kCfg.hidden, T});
+    Tensor positions      = work_.alloc(DType::I32, {T});
+    Tensor rope_all       = work_.alloc(DType::I32, {T});
+    Tensor owner_positions = positions.slice(0, 0, owner);
+    Tensor owner_rope      = rope_all.slice(0, 0, owner);
+    ops::fill_i32_positions(owner_positions, static_cast<std::int32_t>(base), s);
+    ops::fill_i32_positions(owner_rope, static_cast<std::int32_t>(base), s);
+    HIP_CHECK(hipMemcpyAsync(static_cast<std::int32_t*>(positions.data) + owner,
+                             cache_positions.data, static_cast<std::size_t>(verify) * sizeof(std::int32_t),
+                             hipMemcpyDeviceToDevice, s));
+    HIP_CHECK(hipMemcpyAsync(static_cast<std::int32_t*>(rope_all.data) + owner,
+                             rope_positions.data, static_cast<std::size_t>(verify) * sizeof(std::int32_t),
+                             hipMemcpyDeviceToDevice, s));
+
+    owner_transaction.emplace(prefill_text_kv_cache_->begin_device_append(
+        *prefill_text_kv_allocation_, *prefill_text_kv_publication_,
+        static_cast<const std::int32_t*>(positions.data), static_cast<std::size_t>(owner),
+        qwen3::PagedKVTransactionWorkspace{
+            .positions         = nullptr,
+            .position_capacity = 0,
+            .status            = prefill_text_kv_status_,
+        }));
+
+    {
+        auto prompt_rows = prompt_embedding_->acquire(prompt.subspan(base, len));
+        Tensor owner_x   = x.slice(1, 0, owner);
+        ops::embedding(prompt_rows.view().slots.slice(0, 0, owner), prompt_rows.view().table,
+                       owner_x, s);
+        prompt_rows.end();
+    }
+    Tensor verify_x = x.slice(1, owner, verify);
+    ops::embedding(ids.view({verify}), *embed_, verify_x, s);
+
+    {
+        ScopedPositions cache_binding(active_cache_positions_, positions);
+        ScopedPositions rope_binding(active_rope_positions_, rope_all);
+        ScopedValue<const Tensor*> state_binding(active_linear_state_slots_, &linear_state_slots);
+        ScopedValue<const Tensor*> valid_binding(active_valid_columns_, &valid_columns);
+        ScopedValue<std::int32_t> batch_binding(active_sequence_batch_, batch);
+        ScopedValue<std::int32_t> width_binding(active_sequence_width_, width);
+        ScopedValue<std::int32_t> owner_binding(mixed_prefill_columns_, owner);
+        ScopedValue<qwen3::PagedKVTransaction*> owner_kv(mixed_prefill_transaction_,
+                                                          &*owner_transaction);
+        MixedFeatureTap tap{prefill_sink, verify_sink, owner};
+        tap.begin(x);
+        run_layers(x, Phase::Prefill, tap);
+    }
+    owner_frontier = base + len;
+    prefill_sink.capture_positions(owner_positions, s);
+    verify_sink.capture_positions(cache_positions, s);
+
+    // Owner tail, as prefill_impl: final-norm rows for the rewrite checkpoint and DFlash
+    // consumer, and the first sampled token after the prompt.
+    Tensor xf = matrix_window(prefill_hidden_, owner);
+    ops::rmsnorm(x.slice(1, 0, owner), *final_norm_, kCfg.rms_eps, true, xf, s);
+    if (is_last) {
+        Tensor last_xf       = xf.slice(1, owner - 1, 1);
+        Tensor owner_logits  = matrix_window(io_.logits, 1);
+        run_linear(last_xf, *lm_head_, owner_logits, s);
+        const auto total = static_cast<std::int32_t>(prompt.size());
+        ops::set_i32_scalar(io_.pos, total, s);
+        ops::set_i32_scalar(io_.rope_pos, total, s);
+        ops::sample(owner_logits, io_.token, kCfg.token_domain, slice.sampling, io_.pos,
+                    ops::kSamplePurposePrefill, work_, s);
+    }
+    if (checkpoint_abs == static_cast<std::int64_t>(base) + len &&
+        rewrite_checkpoint_hidden_output_ != nullptr) {
+        require_tensor_shape(*rewrite_checkpoint_hidden_output_, DType::BF16, {kCfg.hidden, 1},
+                             "rewrite checkpoint hidden output");
+        const Tensor checkpoint_hidden = xf.slice(1, owner - 1, 1);
+        HIP_CHECK(hipMemcpyAsync(rewrite_checkpoint_hidden_output_->data, checkpoint_hidden.data,
+                                 checkpoint_hidden.bytes(), hipMemcpyDeviceToDevice, s));
+    }
+    prefill_rewrite_checkpoint_frontier_ = -1;
+
+    // Verify tail, as target_verify_batch_impl.
+    Tensor flat_hidden = hidden.view({kCfg.hidden, verify});
+    Tensor flat_logits = logits.view({kCfg.vocab, verify});
+    Tensor flat_tokens = target_tokens.view({verify});
+    ops::rmsnorm(verify_x, *final_norm_, kCfg.rms_eps, true, flat_hidden, s);
+    run_linear(flat_hidden, *lm_head_, flat_logits, s);
+    if (sampling_exchange_ != nullptr) { sampling_exchange_->acquire(s); }
+    if (sampling_config_ != nullptr) {
+        ops::argmax(flat_logits, flat_tokens, kCfg.token_domain, sampling_config_, width, s);
+    } else {
+        ops::argmax(flat_logits, flat_tokens, kCfg.token_domain, s);
+    }
+
+    // Stage the owner's next chunk rows while this unit executes.
+    const std::size_t next_prompt_token = static_cast<std::size_t>(base) + len;
+    if (next_prompt_token < prompt.size()) {
+        prompt_embedding_->prefetch(prompt.subspan(
+            next_prompt_token,
+            std::min<std::size_t>(static_cast<std::size_t>(prompt_embedding_->capacity_ids()),
+                                  prompt.size() - next_prompt_token)));
+    }
+    return PrefillChunkResult{.processed_tokens = len, .finalized = is_last};
 }
 
 PrefillChunkResult TextContext::prefill_chunk(std::span<const int> full_ids, std::uint32_t begin,

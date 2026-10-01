@@ -19,6 +19,8 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <memory>
+#include <random>
 #include <span>
 #include <sstream>
 #include <stdexcept>
@@ -389,16 +391,298 @@ double median(std::array<double, kTrials> values) {
     return values[kTrials / 2];
 }
 
+// Sequence-batched packed decode and append: every sequence of one batched launch must produce the
+// exact bytes of its own one-sequence launch from identically poisoned outputs, workspaces and cache
+// planes. The pool is shared as in production: disjoint shuffled physical pages per sequence, either
+// selected through device table rows of one pool-wide table or passed as direct page tables.
+Json sequence_batch_qualification(ninfer::DeviceContext& device) {
+    constexpr std::array<std::size_t, 4> kContexts{37U, 600U, 4100U, 33000U};
+    constexpr std::size_t kSparePages = 7U;
+    constexpr std::size_t kRowElements = static_cast<std::size_t>(kQueryHeads) * kHeadDim;
+    std::array<std::size_t, 4> page_counts{};
+    std::size_t pool_pages = kSparePages, table_stride = 0U;
+    for (std::size_t i = 0; i < kContexts.size(); ++i) {
+        page_counts[i] = (kContexts[i] + kPageSize - 1U) / kPageSize;
+        pool_pages += page_counts[i];
+        table_stride = std::max(table_stride, page_counts[i]);
+    }
+    const std::size_t pool_tokens = pool_pages * kPageSize;
+    std::mt19937 random(0x5eb7a11U);
+    std::vector<std::uint32_t> physical(pool_pages);
+    for (std::size_t page = 0; page < pool_pages; ++page)
+        physical[page] = static_cast<std::uint32_t>(page);
+    std::shuffle(physical.begin(), physical.end(), random);
+    // Pool-wide table [4][stride]; rows beyond a sequence's pages hold an out-of-pool page.
+    std::vector<std::uint32_t> tables(4U * table_stride, static_cast<std::uint32_t>(pool_pages));
+    std::size_t next_page = 0U;
+    for (std::size_t i = 0; i < kContexts.size(); ++i)
+        for (std::size_t page = 0; page < page_counts[i]; ++page)
+            tables[i * table_stride + page] = physical[next_page++];
+    std::vector<std::uint8_t> keys(pool_tokens * kKvHeads * kHeadDim);
+    std::vector<std::uint8_t> values(pool_tokens * kKvHeads * kHeadDim / 2U);
+    std::vector<std::uint16_t> scales(pool_tokens * kKvHeads * kGroups);
+    for (auto& code : keys) {
+        code = static_cast<std::uint8_t>(random());
+        if ((code & 0x7fU) == 0x7fU) code = static_cast<std::uint8_t>(code - 1U); // no E4M3FN NaN
+    }
+    for (auto& code : values) {
+        code = static_cast<std::uint8_t>(random());
+        if ((code & 0x0fU) == 0x08U) code = static_cast<std::uint8_t>(code & 0xf0U);
+        if ((code & 0xf0U) == 0x80U) code = static_cast<std::uint8_t>(code & 0x0fU);
+    }
+    // Positive binary16 scales in [2^-10, 2^-3).
+    for (auto& bits : scales)
+        bits = static_cast<std::uint16_t>(((5U + random() % 7U) << 10U) | (random() & 0x3ffU));
+    std::uniform_real_distribution<float> uniform(-2.0F, 2.0F);
+    std::vector<hip_bfloat16> queries(8U * kRowElements * kContexts.size());
+    for (auto& query : queries) query = hip_bfloat16(represented_bf16(uniform(random)));
+    DeviceArray<std::uint8_t> d_keys(keys.size()), d_values(values.size());
+    DeviceArray<std::uint16_t> d_scales(scales.size());
+    DeviceArray<std::uint32_t> d_tables(tables.size());
+    DeviceArray<hip_bfloat16> d_queries(queries.size());
+    DeviceArray<std::int32_t> d_table_rows(4U);
+    upload(d_keys, keys);
+    upload(d_values, values);
+    upload(d_scales, scales);
+    upload(d_tables, tables);
+    upload(d_queries, queries);
+    upload(d_table_rows, std::vector<std::int32_t>{0, 1, 2, 3});
+
+    struct Case {
+        const char* name;
+        std::vector<std::size_t> sequences;
+        std::vector<std::uint32_t> rows;
+        bool table_rows;
+    };
+    const std::vector<Case> cases{
+        {"b1_w8_table_row", {3U}, {8U}, true},
+        {"b2_w8_table_rows", {1U, 3U}, {8U, 8U}, true},
+        {"b3_w8_table_rows", {1U, 2U, 3U}, {8U, 8U, 8U}, true},
+        {"b4_w8_table_rows", {0U, 1U, 2U, 3U}, {8U, 8U, 8U, 8U}, true},
+        {"b4_mixed_rows_direct_tables", {3U, 0U, 2U, 1U}, {8U, 5U, 1U, 7U}, false},
+    };
+    Json attention_cells = Json::array();
+    for (const Case& cell : cases) {
+        const std::size_t count = cell.sequences.size();
+        std::vector<std::unique_ptr<DeviceArray<float>>> outputs, workspaces;
+        std::vector<std::unique_ptr<DeviceArray<std::int32_t>>> positions;
+        std::vector<kv::Fp8Int4KvAttentionArgs> args(count);
+        std::vector<std::size_t> elements(count), workspace_elements(count);
+        for (std::size_t i = 0; i < count; ++i) {
+            const std::size_t sequence = cell.sequences[i];
+            const std::size_t context = kContexts[sequence];
+            const std::uint32_t rows = cell.rows[i];
+            elements[i] = rows * kRowElements;
+            workspace_elements[i] =
+                kv::fp8_int4_kv_attention_packed_decode_workspace_bytes(context, rows) /
+                sizeof(float);
+            outputs.push_back(std::make_unique<DeviceArray<float>>(elements[i] + 2U));
+            workspaces.push_back(
+                std::make_unique<DeviceArray<float>>(workspace_elements[i] + 2U));
+            positions.push_back(std::make_unique<DeviceArray<std::int32_t>>(rows));
+            std::vector<std::int32_t> host_positions(rows);
+            for (std::uint32_t row = 0; row < rows; ++row)
+                host_positions[row] = static_cast<std::int32_t>(context - rows + row);
+            upload(*positions.back(), host_positions);
+            args[i] = kv::Fp8Int4KvAttentionArgs{
+                .query = d_queries.get() + sequence * 8U * kRowElements,
+                .key_codes = d_keys.get(), .value_codes = d_values.get(),
+                .value_scale_bits = d_scales.get(),
+                .page_table = cell.table_rows ? d_tables.get()
+                                              : d_tables.get() + sequence * table_stride,
+                .page_table_pages = static_cast<std::uint32_t>(table_stride),
+                .page_table_row = cell.table_rows ? d_table_rows.get() + sequence : nullptr,
+                .page_table_row_stride = static_cast<std::uint32_t>(table_stride),
+                .page_table_row_count = 4U,
+                .context = context, .physical_tokens = pool_tokens,
+                .query_heads = kQueryHeads, .kv_heads = kKvHeads, .q_to_kv = kQueriesPerKv,
+                .value_group = kValueGroup, .query_rows = rows,
+                .row_positions = positions.back()->get(), .attention_scale = kAttentionScale,
+                .key_layout = kv::Fp8Int4KvPlaneLayout::TokenFastest,
+                .value_layout = kv::Fp8Int4KvPlaneLayout::FeatureFastest,
+                .value_scale_layout = kv::Fp8Int4KvPlaneLayout::FeatureFastest,
+                .score_workspace = workspaces.back()->get() + 1U,
+                .output = outputs.back()->get() + 1U};
+        }
+        const auto poison = [&] {
+            for (std::size_t i = 0; i < count; ++i) {
+                fill_guarded(*outputs[i], elements[i]);
+                fill_guarded(*workspaces[i], workspace_elements[i]);
+            }
+        };
+        const auto read_outputs = [&](const char* label) {
+            std::vector<std::vector<std::uint32_t>> result;
+            for (std::size_t i = 0; i < count; ++i) {
+                const auto values = read_guarded(*outputs[i], elements[i], label);
+                require_guard_canaries(*workspaces[i], label);
+                std::vector<std::uint32_t> bits(values.size());
+                std::transform(values.begin(), values.end(), bits.begin(),
+                               [](float value) { return std::bit_cast<std::uint32_t>(value); });
+                result.push_back(std::move(bits));
+            }
+            return result;
+        };
+        const auto serial = [&] {
+            for (const auto& sequence : args) {
+                if (const hipError_t error =
+                        kv::fp8_int4_kv_attention_packed_decode(sequence, device.stream);
+                    error != hipSuccess)
+                    return error;
+            }
+            return hipSuccess;
+        };
+        const auto batched = [&] {
+            return kv::fp8_int4_kv_attention_packed_decode(
+                std::span<const kv::Fp8Int4KvAttentionArgs>(args), device.stream);
+        };
+        poison();
+        hip_check(serial(), "sequence-batch per-sequence packed decode");
+        device.synchronize();
+        const auto reference = read_outputs("sequence-batch per-sequence");
+        std::size_t nonfinite = 0U;
+        for (const auto& sequence : reference)
+            nonfinite += static_cast<std::size_t>(std::count_if(
+                sequence.begin(), sequence.end(), [](std::uint32_t bits) {
+                    return !std::isfinite(std::bit_cast<float>(bits));
+                }));
+        if (nonfinite != 0U) fail(std::string(cell.name) + " reference has nonfinite outputs");
+        poison();
+        hip_check(batched(), "sequence-batch batched packed decode");
+        device.synchronize();
+        if (read_outputs("sequence-batch batched eager") != reference)
+            fail(std::string(cell.name) + " batched eager bytes differ from per-sequence");
+        ninfer::DecodeGraphDefinition definition;
+        definition.capture(device.stream,
+                           [&] { hip_check(batched(), "capture sequence-batch packed decode"); });
+        ninfer::DecodeGraphExecutable executable;
+        executable.instantiate(definition);
+        executable.upload(device.stream);
+        poison();
+        executable.launch(device.stream);
+        hip_check(hipGetLastError(), "sequence-batch graph replay");
+        device.synchronize();
+        if (read_outputs("sequence-batch batched graph") != reference)
+            fail(std::string(cell.name) + " batched graph bytes differ from per-sequence");
+        std::array<double, kTrials> serial_ms{}, batched_ms{};
+        for (int trial = 0; trial < kTrials; ++trial) {
+            if (trial % 2 == 0) {
+                serial_ms[trial] = time_ms(device.stream, serial);
+                batched_ms[trial] = time_ms(device.stream, batched);
+            } else {
+                batched_ms[trial] = time_ms(device.stream, batched);
+                serial_ms[trial] = time_ms(device.stream, serial);
+            }
+        }
+        Json contexts = Json::array();
+        for (const std::size_t sequence : cell.sequences) contexts.push_back(kContexts[sequence]);
+        attention_cells.push_back({{"name", cell.name}, {"contexts", contexts},
+                                   {"rows", cell.rows}, {"device_table_rows", cell.table_rows},
+                                   {"eager_bytes_equal", true}, {"graph_bytes_equal", true},
+                                   {"serial_median_ms", median(serial_ms)},
+                                   {"batched_median_ms", median(batched_ms)}});
+    }
+
+    // Append: four sequences write disjoint suffixes into one poisoned pool; one uses a device
+    // token count, one a device table row, and one a gapped position panel (InvalidPosition).
+    constexpr std::size_t kAppendRows = 8U;
+    std::vector<float> source_values(kContexts.size() * kAppendRows * kKvHeads * kHeadDim);
+    std::vector<hip_bfloat16> append_keys(source_values.size()), append_values(source_values.size());
+    for (std::size_t i = 0; i < source_values.size(); ++i) {
+        append_keys[i] = hip_bfloat16(represented_bf16(uniform(random)));
+        append_values[i] = hip_bfloat16(represented_bf16(uniform(random)));
+    }
+    DeviceArray<hip_bfloat16> d_append_keys(append_keys.size()), d_append_values(append_values.size());
+    upload(d_append_keys, append_keys);
+    upload(d_append_values, append_values);
+    std::vector<std::uint32_t> append_positions(kContexts.size() * kAppendRows);
+    for (std::size_t i = 0; i < kContexts.size(); ++i)
+        for (std::size_t row = 0; row < kAppendRows; ++row)
+            append_positions[i * kAppendRows + row] =
+                static_cast<std::uint32_t>(kContexts[i] - kAppendRows + row + (i == 2U && row == 5U));
+    DeviceArray<std::uint32_t> d_append_positions(append_positions.size());
+    upload(d_append_positions, append_positions);
+    DeviceArray<std::int32_t> d_token_count(1U);
+    upload(d_token_count, std::vector<std::int32_t>{5});
+    DeviceArray<std::uint32_t> d_status(kContexts.size());
+    std::vector<kv::Fp8Int4KvAppendArgs> append(kContexts.size());
+    const std::size_t source_stride = kAppendRows * kKvHeads * kHeadDim;
+    for (std::size_t i = 0; i < kContexts.size(); ++i) {
+        append[i] = kv::Fp8Int4KvAppendArgs{
+            .keys = d_append_keys.get() + i * source_stride,
+            .values = d_append_values.get() + i * source_stride,
+            .positions = d_append_positions.get() + i * kAppendRows,
+            .tokens = i == 0U ? 3U : kAppendRows,
+            .token_count = i == 1U ? d_token_count.get() : nullptr,
+            .first_position = static_cast<std::uint32_t>(kContexts[i] - kAppendRows),
+            .kv_heads = kKvHeads,
+            .page_table = i == 3U ? d_tables.get() : d_tables.get() + i * table_stride,
+            .page_table_pages = static_cast<std::uint32_t>(table_stride),
+            .page_table_row = i == 3U ? d_table_rows.get() + i : nullptr,
+            .page_table_row_stride = static_cast<std::uint32_t>(table_stride),
+            .page_table_row_count = 4U,
+            .physical_tokens = pool_tokens,
+            .key_codes = d_keys.get(), .value_codes = d_values.get(),
+            .value_scale_bits = d_scales.get(),
+            .status = d_status.get() + i, .value_group = kValueGroup,
+            .key_layout = kv::Fp8Int4KvPlaneLayout::TokenFastest,
+            .value_layout = kv::Fp8Int4KvPlaneLayout::FeatureFastest,
+            .value_scale_layout = kv::Fp8Int4KvPlaneLayout::FeatureFastest};
+    }
+    const auto reset_pool = [&] {
+        upload(d_keys, keys);
+        upload(d_values, values);
+        upload(d_scales, scales);
+        upload(d_status, std::vector<std::uint32_t>(kContexts.size(), 0U));
+    };
+    reset_pool();
+    for (const auto& sequence : append)
+        hip_check(kv::fp8_int4_kv_append(sequence, device.stream), "per-sequence append");
+    device.synchronize();
+    const auto reference_keys = download(d_keys);
+    const auto reference_values = download(d_values);
+    const auto reference_scales = download(d_scales);
+    const auto reference_status = download(d_status);
+    if (reference_status != std::vector<std::uint32_t>{0U, 0U, kv::Fp8Int4KvAppendInvalidPosition, 0U})
+        fail("per-sequence append status is not the fixture's expected isolation");
+    if (reference_keys == keys || reference_values == values || reference_scales == scales)
+        fail("per-sequence append wrote no cache bytes");
+    reset_pool();
+    hip_check(kv::fp8_int4_kv_append(std::span<const kv::Fp8Int4KvAppendArgs>(append),
+                                     device.stream),
+              "batched append");
+    device.synchronize();
+    if (download(d_keys) != reference_keys || download(d_values) != reference_values ||
+        download(d_scales) != reference_scales || download(d_status) != reference_status)
+        fail("batched append bytes or status differ from per-sequence launches");
+    return {{"attention", attention_cells},
+            {"attention_criterion", "per-sequence output bytes and output/workspace canaries "
+                                    "equal to one-sequence launches, eager and graph replay"},
+            {"append", {{"sequences", kContexts.size()}, {"rows", {3, 8, 8, 8}},
+                        {"device_token_count_sequence", 1}, {"device_table_row_sequence", 3},
+                        {"invalid_position_sequence", 2},
+                        {"status", reference_status}, {"plane_bytes_equal", true}}},
+            {"context37_note", "below the packed routing minimum; compared at Op level only"},
+            {"timing", {{"evidence_eligible", false}, {"diagnostic_only", true},
+                        {"iterations", kTimingIterations}, {"trials", kTrials}}}};
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
     try {
+        if (argc == 2 && std::string_view(argv[1]) == "--sequence-batch") {
+            const int selected_device = ninfer::r9700_qualification::device_guard().select();
+            ninfer::DeviceContext device(selected_device);
+            std::cout << Json{{"sequence_batch", sequence_batch_qualification(device)}}.dump(2)
+                      << '\n';
+            return 0;
+        }
         const bool long_context = argc == 2 && std::string_view(argv[1]) == "--long-context";
         const bool live_cell = argc == 5 && std::string_view(argv[1]) == "--live-context-cell";
         const bool live_context = live_cell ||
             (argc == 2 && std::string_view(argv[1]) == "--live-context");
         if (argc != 1 && !long_context && !live_context)
-            fail("usage: dflash_attention_route_discriminator [--long-context|--live-context|--live-context-cell ENVELOPE ROWS LIVE]");
+            fail("usage: dflash_attention_route_discriminator [--long-context|--live-context|--live-context-cell ENVELOPE ROWS LIVE|--sequence-batch]");
         std::vector<std::size_t> selected_envelopes{8192U, 65536U};
         std::vector<std::uint32_t> selected_widths{1U, 4U, 6U};
         std::vector<std::size_t> selected_live{4097U, 65U, 257U};

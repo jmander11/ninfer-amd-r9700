@@ -1082,8 +1082,9 @@ PrefillResult run_prefill_case(Shape shape, std::uint32_t tokens,
     const std::array<std::uint32_t, 8> sampled_rows{
         0U, 1U, 15U, 16U, shape.rows / 3U, shape.rows / 2U,
         shape.rows - 2U, shape.rows - 1U};
-    const std::array<std::uint32_t, 8> sampled_tokens{
+    std::array<std::uint32_t, 8> sampled_tokens{
         0U, 31U, 32U, 63U, 64U, tokens / 3U, tokens / 2U, tokens - 1U};
+    for (std::uint32_t& token : sampled_tokens) token = std::min(token, tokens - 1U);
     std::uint64_t maximum_steps = 0;
     const auto check_output = [&](std::uint32_t token, std::uint32_t row) {
         double sum = 0.0;
@@ -1777,7 +1778,14 @@ int main(int argc, char** argv) {
             }
             std::vector<LdsScopeEvidence> evidence;
             for (const Shape shape : prefill_shapes) {
-                for (const std::uint32_t tokens : {1024U, 2048U, 4096U, 8192U}) {
+                // Partial 128-token tiles (mixed-round slices and final chunks) on the
+                // DFlash-context and attention-QKV tuples, then the full-chunk extents.
+                const bool partial = shape.columns == 25600U ||
+                    (shape.rows == 6144U && shape.columns == 5120U) ||
+                    (shape.rows == 7168U && shape.columns == 5120U);
+                std::vector<std::uint32_t> extents{1024U, 2048U, 4096U, 8192U};
+                if (partial) extents.insert(extents.begin(), {33U, 40U, 100U, 129U, 232U, 488U, 1000U});
+                for (const std::uint32_t tokens : extents) {
                     const PrefillResult result = run_prefill_case(
                         shape, tokens, false, false,
                         lds_scope_regression || lds_scope_benchmark, nullptr,
@@ -1838,7 +1846,7 @@ int main(int argc, char** argv) {
                               : lds_scope_regression
                               ? "A8Q4 LDS-scope/production CTA bit-exact regression: PASS ("
                               : "A8Q4 cooperative prefill CTA regression: PASS (")
-                      << "exact tail case and six Text, two MTP and two DFlash2 context shapes at four token extents)\n";
+                      << "exact tail case and six Text, two MTP and two DFlash2 context shapes at full and partial token extents)\n";
             return 0;
         }
         std::vector<Result> results;

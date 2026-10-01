@@ -568,6 +568,8 @@ std::string format_server_start_json(
           {"max_pending_requests", options.max_pending_requests},
           {"pending_timeout_ms", options.pending_timeout_ms},
           {"prefill_chunk", options.prefill_chunk},
+          {"prefill_slice", options.prefill_slice},
+          {"prefill_slice_rounds", options.prefill_slice_rounds},
           {"log_stats_interval_ms", options.log_stats_interval_ms},
           {"kv_cache_format", "fp8-k-int4-v"},
           {"kv_value_group", NINFER_R9700_KV_VALUE_GROUP},

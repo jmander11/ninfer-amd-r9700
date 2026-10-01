@@ -11,6 +11,7 @@
 #include "targets/qwen3_8_27b/impl/config.h"
 
 #include <algorithm>
+#include <array>
 #include <limits>
 
 namespace ninfer::targets::qwen3_8_27b::detail {
@@ -23,6 +24,7 @@ constexpr std::uint32_t kQueriesPerKv = 6;
 constexpr std::uint32_t kPageSize = 64;
 constexpr std::uint32_t kMaximumRows = kNativeContext;
 constexpr float kQwenAttentionScale = 0.0625F;
+constexpr std::size_t kSequenceWorkspaceAlignment = 256U;
 
 [[nodiscard]] bool layout_valid(Fp8KInt4VPlaneLayout layout) noexcept {
     return layout == Fp8KInt4VPlaneLayout::FeatureFastestPageMajor ||
@@ -128,13 +130,10 @@ std::size_t r9700_full_attention_workspace_capacity_bytes(
     return required;
 }
 
-static hipError_t launch_r9700_attention(
-    const R9700FullAttentionArgs& a,
-#if defined(NINFER_R9700_XATTENTION_QUALIFICATION)
-    bool xattention_prefill, void* xattention_workspace,
-    std::size_t xattention_workspace_bytes,
-#endif
-    hipStream_t stream) noexcept {
+// Validates one call against its cache capability and forms the raw Op arguments (without route
+// workspace).
+static hipError_t raw_attention_args(const R9700FullAttentionArgs& a, hipStream_t stream,
+                                     ops::r9700::kv::Fp8Int4KvAttentionArgs& raw) noexcept {
     if (!a.cache_read.valid_for(stream) ||
         (a.ancestor_masks == nullptr) != (a.prefix_lengths == nullptr) ||
         (a.ancestor_masks != nullptr && a.row_positions == nullptr) ||
@@ -191,7 +190,7 @@ static hipError_t launch_r9700_attention(
         return hipErrorInvalidValue;
     }
 
-    const ops::r9700::kv::Fp8Int4KvAttentionArgs raw{
+    raw = ops::r9700::kv::Fp8Int4KvAttentionArgs{
         .query = static_cast<const hip_bfloat16*>(a.query.data),
         .key_codes = static_cast<const std::uint8_t*>(cache.key_fp8_pages.data),
         .value_codes = static_cast<const std::uint8_t*>(cache.value_int4_pages.data),
@@ -222,6 +221,33 @@ static hipError_t launch_r9700_attention(
         .value_scale_layout = raw_layout(cache.plane_layouts.value_scale),
         .output = static_cast<float*>(a.output.data),
     };
+    return hipSuccess;
+}
+
+// The packed decode route's cell: host-fixed causal 1..8 rows, G16, token-fastest FP8 keys and
+// feature-fastest INT4/FP16 values and scales.
+[[nodiscard]] static bool packed_decode_route(const ops::r9700::kv::Fp8Int4KvAttentionArgs& raw,
+                                              bool tree_or_device_count) noexcept {
+    return ops::r9700::kv::use_packed_decode_attention(raw.query_rows, raw.context,
+                                                       tree_or_device_count) &&
+           raw.value_group == 16U &&
+           raw.key_layout == ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest &&
+           raw.value_layout == ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest &&
+           raw.value_scale_layout == ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest;
+}
+
+static hipError_t launch_r9700_attention(
+    const R9700FullAttentionArgs& a,
+#if defined(NINFER_R9700_XATTENTION_QUALIFICATION)
+    bool xattention_prefill, void* xattention_workspace,
+    std::size_t xattention_workspace_bytes,
+#endif
+    hipStream_t stream) noexcept {
+    ops::r9700::kv::Fp8Int4KvAttentionArgs raw{};
+    if (const hipError_t error = raw_attention_args(a, stream, raw); error != hipSuccess) {
+        return error;
+    }
+    const std::int32_t rows = a.query.ne[2];
 #if defined(NINFER_R9700_XATTENTION_QUALIFICATION)
     if (xattention_prefill) {
         if (a.ancestor_masks != nullptr || a.prefix_lengths != nullptr ||
@@ -288,12 +314,7 @@ static hipError_t launch_r9700_attention(
         tail.output += 128U * row_elements;
         return ops::r9700::kv::fp8_int4_kv_attention_wmma(tail, stream);
     }
-    if (ops::r9700::kv::use_packed_decode_attention(
-            static_cast<std::uint32_t>(rows), raw.context, tree_or_device_count) &&
-        raw.value_group == 16U &&
-        raw.key_layout == ops::r9700::kv::Fp8Int4KvPlaneLayout::TokenFastest &&
-        raw.value_layout == ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest &&
-        raw.value_scale_layout == ops::r9700::kv::Fp8Int4KvPlaneLayout::FeatureFastest) {
+    if (packed_decode_route(raw, tree_or_device_count)) {
         const std::size_t required =
             ops::r9700::kv::fp8_int4_kv_attention_packed_decode_workspace_bytes(
                 raw.context, static_cast<std::uint32_t>(rows));
@@ -325,6 +346,62 @@ hipError_t r9700_qwen3_8_27b_full_attention(const R9700FullAttentionArgs& args,
 #if defined(NINFER_R9700_XATTENTION_QUALIFICATION)
         false, nullptr, 0U,
 #endif
+        stream);
+}
+
+std::size_t r9700_full_attention_sequence_workspace_stride_bytes(
+    std::uint32_t query_rows, std::size_t visible_context) noexcept {
+    if (!ops::r9700::kv::use_packed_decode_attention(query_rows, visible_context, false)) {
+        return 0U;
+    }
+    const std::size_t bytes = ops::r9700::kv::fp8_int4_kv_attention_packed_decode_workspace_bytes(
+        visible_context, query_rows);
+    return (bytes + kSequenceWorkspaceAlignment - 1U) / kSequenceWorkspaceAlignment *
+           kSequenceWorkspaceAlignment;
+}
+
+bool r9700_full_attention_sequences_supported(
+    std::span<const R9700FullAttentionArgs> sequences, hipStream_t stream) noexcept {
+    if (sequences.empty() || sequences.size() > ops::r9700::kv::kPackedDecodeMaximumSequences) {
+        return false;
+    }
+    for (const R9700FullAttentionArgs& sequence : sequences) {
+        ops::r9700::kv::Fp8Int4KvAttentionArgs raw{};
+        if (sequence.ancestor_masks != nullptr || sequence.prefix_lengths != nullptr ||
+            sequence.active_query_rows != nullptr ||
+            raw_attention_args(sequence, stream, raw) != hipSuccess ||
+            !packed_decode_route(raw, false)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+hipError_t r9700_qwen3_8_27b_full_attention_sequences(
+    std::span<const R9700FullAttentionArgs> sequences, hipStream_t stream) noexcept {
+    if (!r9700_full_attention_sequences_supported(sequences, stream)) {
+        return hipErrorInvalidValue;
+    }
+    std::array<ops::r9700::kv::Fp8Int4KvAttentionArgs,
+               ops::r9700::kv::kPackedDecodeMaximumSequences>
+        raw{};
+    for (std::size_t i = 0; i < sequences.size(); ++i) {
+        const R9700FullAttentionArgs& sequence = sequences[i];
+        if (const hipError_t error = raw_attention_args(sequence, stream, raw[i]);
+            error != hipSuccess) {
+            return error;
+        }
+        const std::size_t required =
+            ops::r9700::kv::fp8_int4_kv_attention_packed_decode_workspace_bytes(
+                raw[i].context, raw[i].query_rows);
+        if (required == 0U || sequence.workspace == nullptr ||
+            sequence.workspace_bytes < required) {
+            return hipErrorInvalidValue;
+        }
+        raw[i].score_workspace = static_cast<float*>(sequence.workspace);
+    }
+    return ops::r9700::kv::fp8_int4_kv_attention_packed_decode(
+        std::span<const ops::r9700::kv::Fp8Int4KvAttentionArgs>(raw.data(), sequences.size()),
         stream);
 }
 

@@ -11,25 +11,22 @@
 #include <stdexcept>
 
 namespace ninfer::targets::qwen3::detail::NINFER_QWEN3_RUNTIME_NS::schedule {
-namespace {
-
 DFlashFeatureSink make_dflash_prefill_sink(PrefillContext& state) {
     if (!state.execution.io.dflash_decode || state.dflash_host_ingress == nullptr) {
         throw std::logic_error("DFlash prefill controls are unavailable");
     }
     return dflash_feature_sink(
         state, [&state](const Tensor& features, const Tensor& positions) {
-            auto& frame  = *state.execution.io.dflash_decode;
-            Tensor count = frame.append_counts.slice(0, 0, 1);
-            Tensor lane  = frame.lanes.slice(0, 0, 1);
-            Tensor row   = frame.dflash_kv_table_rows.slice(0, 0, 1);
+            auto& frame      = *state.execution.io.dflash_decode;
+            const auto slot  = frame.lanes.ne[0] - 1;
+            Tensor count = frame.append_counts.slice(0, slot, 1);
+            Tensor lane  = frame.lanes.slice(0, slot, 1);
+            Tensor row   = frame.dflash_kv_table_rows.slice(0, slot, 1);
             ops::set_i32_scalar(count, features.ne[1], state.execution.device.stream);
             const auto exact = static_cast<std::uint32_t>(features.ne[1]);
             dflash_append_context(state, features, positions, count, lane, row, {exact, exact});
         });
 }
-
-} // namespace
 
 void configure_text_card(TextContext& card, const ExecutionCore& execution,
                          const ops::SamplingConfig* sampling, std::int32_t current_state_slot,
@@ -47,8 +44,6 @@ void configure_text_card(TextContext& card, const ExecutionCore& execution,
         throw std::runtime_error("optimized proposal head is unavailable");
     }
 }
-
-namespace {
 
 // Every prefill card commits through the same FP8-K/INT4-V transactions and captures the
 // same rewrite checkpoint outputs; the callers differ only in token and position inputs.
@@ -77,8 +72,6 @@ void attach_prefill_state(TextContext& card, PrefillContext& state,
             ? static_cast<std::int64_t>(*rewrite_checkpoint_capture_frontier)
             : -1);
 }
-
-} // namespace
 
 PrefillChunkResult prefill_text_chunk(
     PrefillContext& state, std::span<const TokenId> ids, std::uint32_t nominal_length,

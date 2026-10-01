@@ -14,13 +14,16 @@ attention arithmetic. Tree/device-count forms and other layouts retain their exi
 including split512 for tree/device-count T=4 at context 8192 and above. The workspace planner owns the bounded partials. Qualification also
 checks invalid device page-table rows and physical pages poison every represented row (1..6)
 without touching workspace guards; `check_attention_parity_static.py` pins the split kernel's
-resources (249 VGPRs, no scratch, 32 BF16 and 32 FP16 WMMAs) and the merge kernel.
+resources (235 VGPRs, no scratch, 16 BF16 and 16 FP16 WMMAs) and the merge kernel. A compact batch
+of up to four sequences shares one split launch and one merge (grid z = sequence, per-sequence
+kernarg slots and workspace), and one append codec launch (grid y = sequence).
 
 Focused qualification (JSON on stdout):
 
 ```bash
 build-r9700/src/ninfer_r9700_dflash_attention_route_discriminator
 build-r9700/src/ninfer_r9700_dflash_attention_route_discriminator --long-context
+build-r9700/src/ninfer_r9700_dflash_attention_route_discriminator --sequence-batch
 build-r9700/src/ninfer_r9700_runtime_planner_qual --host-attention-parity-routing
 build-r9700/src/ninfer_r9700_runtime_planner_qual --host-dflash-graph-allowance
 build-r9700/src/ninfer_r9700_full_attention_qual
@@ -28,7 +31,12 @@ build-r9700/src/ninfer_r9700_full_attention_qual
 
 The discriminator retains W5/W6 and adds widths 1..4 at context64 and133 (4100 with
 `--long-context`), compact C1..4 device page-table selection, causal prefixes,
-invalid-row poisoning, eager/graph equality, and workspace/output guards.
+invalid-row poisoning, eager/graph equality, and workspace/output guards. `--sequence-batch`
+requires the B=1..4 sequence-batched packed launch (contexts 37/600/4100/33000 over one shuffled
+shared pool, W8 and mixed W8/5/1/7 rows, device table rows and direct tables) to equal each
+sequence's one-sequence launch byte for byte, eager and graph-replayed, from poisoned outputs and
+workspaces, and the batched append (prefix, device-count, table-row and invalid-position
+sequences) to equal per-sequence appends in every plane byte and status word.
 Cold-start fixed K3 and adaptive Engine exact-token tests remain required: a
 warmed adaptive benchmark can stop choosing K3 and conceal a W4 route mismatch.
 The public leaf qualifier additionally covers contexts15200/32768, W4..6,
@@ -1194,12 +1202,12 @@ exercises the partial-word stores. MTP cases also reject malformed logical shape
 standalone form with
 `make -C tools/r9700 build/eager_op_qual`.
 
-K5120 small-token RMSNorm uses the ordinary parallel-CTA arithmetic consistently at T1..24,
-including speculative verification batches. `make -C tools/r9700
-rmsnorm-decode-production-regression` checks the represented-input FP64 oracle and exact
-same-column equality against T1 at every width, plus eager/graph equality at T2/5/6/10/24.
-There is no rows5/6 candidate build flag. T25..127 and other feature widths retain their
-existing routes; T>=128 prefill remains unchanged.
+K5120 RMSNorm uses the parallel row-CTA arithmetic at every width: decode, speculative
+verification batches, mixed decode/prefill units and prefill chunks (unaligned T>=128 rows keep
+the byte-copy token8 route). `make -C tools/r9700 rmsnorm-decode-production-regression` checks
+the represented-input FP64 oracle and exact same-column equality against T1 at T1..128, 255, 256
+and 2048, plus eager/graph equality at T2/5/6/10/24/64/127. There is no rows5/6 candidate build
+flag; other feature widths retain their existing routes.
 
 `rmsnorm_prefill_qual` retains the direct regression boundary for the production K5120 prefill
 route selected at T>=128. One 256-thread workgroup assigns each of its eight wave32 waves
@@ -1256,9 +1264,8 @@ RMSNorm alone did not restore whole-model parity. With the protected BF16 projec
 projected GDN control and replay-fold corrections, the P89/G128 C1–4 DFlash K4/K5 graph
 and C2–4 eager matrix now passes exact ordinary-token parity. Retained intermediate failures
 and final scope are documented in `docs/performance.md`; this is not universal-context admission.
-K5120 rows 25 through 127 retain the generic route, K5120 rows at or above
-128 retain the token8 prefill route, and every other feature width retains its existing specialized
-or generic fallback. Check the host selection boundary and gfx1201 resources without GPU execution
+Aligned K5120 rows of every width take the row-CTA route, and every other feature width
+retains its existing specialized or generic fallback. Check the host selection boundary and gfx1201 resources without GPU execution
 with:
 
 ```bash

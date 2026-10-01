@@ -311,8 +311,8 @@ Result cell(unsigned t, hipStream_t s) {
     composition();
     check(hipStreamSynchronize(s), "sync");
     const auto [composed, composed_status] = plane_bytes(d_ws2, planes2);
-    // Bitwise parity holds only while eager rmsnorm takes the rows4 CTA route the front mirrors
-    // (T <= 24); wider eager rmsnorm uses the generic row kernel with another reduction order.
+    // Bitwise parity holds only at T <= 24: eager rmsnorm keeps the row-CTA route the front
+    // mirrors at every width, but the BF16 GDN control projection changes route above T24.
     require(composed_status == 0U, "eager composition status");
     require(t > 24U || (same(d_hidden.get(), seam) && same(composed.low, actual.low) &&
                         same(composed.high, actual.high) && same(composed.scales, actual.scales) &&

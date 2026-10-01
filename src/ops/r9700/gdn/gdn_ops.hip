@@ -24,17 +24,17 @@ constexpr std::uint32_t kProjectionValueRows = 6144;
 constexpr std::uint32_t kProjectionValueZRows = 12288;
 constexpr std::uint32_t kProjectionChannels =
     kProjectionQueryRows + kProjectionKeyRows + kProjectionValueRows;
-constexpr std::uint32_t kProjectionPrefillTokens = 2048;
 constexpr std::uint32_t kMaximumVerifyWidth = 16;
 constexpr std::uint32_t kMaximumBatch = kMaximumConcurrency;
 constexpr std::uint32_t kControlHeads = 48;
 constexpr std::uint32_t kControlColumns = 5120;
 constexpr std::uint32_t kControlT1MaximumTokens = 24;
-// Wider launches: one CTA per 16 tokens, eight waves splitting K, six WMMA row tiles (a|b).
+// Wider launches: one CTA per 16 tokens and 16-head group, eight waves splitting K, the a and b
+// WMMA row tiles of its heads.
 constexpr std::uint32_t kControlWideTokens = 16;
 constexpr std::uint32_t kControlWideSplits = 8;
 constexpr std::uint32_t kControlWideSplitColumns = kControlColumns / kControlWideSplits;
-constexpr std::uint32_t kControlWideTiles = 2U * kControlHeads / 16U;
+static_assert(kControlHeads % 16U == 0U);
 static_assert(kControlColumns % (kControlWideSplits * 16U) == 0U);
 
 [[nodiscard]] bool valid_stream(hipStream_t stream) noexcept { return stream != nullptr; }
@@ -205,167 +205,6 @@ __device__ __forceinline__ void publish_projection_output(
     }
 }
 
-// Eight channels (one 16-byte BF16 vector) per thread over TokenTile consecutive tokens: the three
-// history columns and the tile's inputs are each read once, carried in registers, and the outputs
-// are published as 16-byte vectors. Per element the arithmetic is the recorded convolution's
-// (w0 h0 + w1 h1 + w2 h2 + w3 x as one FMA chain, SiLU, BF16).
-template <std::uint32_t TokenTile>
-__global__ __launch_bounds__(kBlock) void projection_conv_prefill_direct_scatter_kernel(
-    const hip_bfloat16* query_key, const hip_bfloat16* projected_value,
-    const hip_bfloat16* conv_weight, const hip_bfloat16* history_in,
-    hip_bfloat16* query, hip_bfloat16* key, hip_bfloat16* value) {
-    constexpr std::uint32_t kVectors = kProjectionChannels / 8U;
-    const std::uint32_t vector = blockIdx.x * blockDim.x + threadIdx.x;
-    if (vector >= kVectors) { return; }
-    const std::uint32_t channel = vector * 8U;
-    const std::uint32_t token_begin = blockIdx.y * TokenTile;
-    const auto load = [](const hip_bfloat16* base, std::size_t offset, float (&out)[8]) {
-        const uint4 packed = *reinterpret_cast<const uint4*>(base + offset);
-        const std::uint32_t words[4] = {packed.x, packed.y, packed.z, packed.w};
-#pragma unroll
-        for (std::uint32_t item = 0; item < 8U; ++item)
-            out[item] = __uint_as_float((item & 1U) ? words[item / 2U] & 0xffff0000U
-                                                    : words[item / 2U] << 16U);
-    };
-    // Represented input of token `source` (negative: the history columns).
-    const auto represented = [&](std::int32_t source, float (&out)[8]) {
-        if (source < 0) {
-            load(history_in, static_cast<std::size_t>(source + 3) * kProjectionChannels + channel,
-                 out);
-        } else if (channel < kProjectionQueryRows + kProjectionKeyRows) {
-            load(query_key,
-                 static_cast<std::size_t>(source) * (kProjectionQueryRows + kProjectionKeyRows) +
-                     channel,
-                 out);
-        } else {
-            load(projected_value,
-                 static_cast<std::size_t>(source) * kProjectionValueRows +
-                     (channel - kProjectionQueryRows - kProjectionKeyRows),
-                 out);
-        }
-    };
-    float w[4][8];
-#pragma unroll
-    for (std::uint32_t tap = 0; tap < 4U; ++tap)
-        load(conv_weight, static_cast<std::size_t>(tap) * kProjectionChannels + channel, w[tap]);
-    float h0[8], h1[8], h2[8];
-    represented(static_cast<std::int32_t>(token_begin) - 3, h0);
-    represented(static_cast<std::int32_t>(token_begin) - 2, h1);
-    represented(static_cast<std::int32_t>(token_begin) - 1, h2);
-    hip_bfloat16* destination;
-    std::size_t stride, offset;
-    if (channel < kProjectionQueryRows) {
-        destination = query; stride = kProjectionQueryRows; offset = channel;
-    } else if (channel < kProjectionQueryRows + kProjectionKeyRows) {
-        destination = key; stride = kProjectionKeyRows; offset = channel - kProjectionQueryRows;
-    } else {
-        destination = value; stride = kProjectionValueRows;
-        offset = channel - kProjectionQueryRows - kProjectionKeyRows;
-    }
-#pragma unroll
-    for (std::uint32_t local = 0; local < TokenTile; ++local) {
-        const std::uint32_t token = token_begin + local;
-        float current[8];
-        represented(static_cast<std::int32_t>(token), current);
-        std::uint32_t words[4] = {};
-#pragma unroll
-        for (std::uint32_t item = 0; item < 8U; ++item) {
-            float sum = fmaf(w[0][item], h0[item], 0.0F);
-            sum = fmaf(w[1][item], h1[item], sum);
-            sum = fmaf(w[2][item], h2[item], sum);
-            sum = fmaf(w[3][item], current[item], sum);
-            const hip_bfloat16 output(sum / (1.0F + expf(-sum)));
-            words[item / 2U] |= static_cast<std::uint32_t>(output.data) << ((item & 1U) * 16U);
-            h0[item] = h1[item];
-            h1[item] = h2[item];
-            h2[item] = current[item];
-        }
-        *reinterpret_cast<uint4*>(destination + static_cast<std::size_t>(token) * stride + offset) =
-            uint4{words[0], words[1], words[2], words[3]};
-    }
-}
-
-__global__ __launch_bounds__(kBlock) void projection_prefill_publish_history_kernel(
-    const hip_bfloat16* query_key, const hip_bfloat16* projected_value,
-    hip_bfloat16* history_out) {
-    const std::uint32_t channel = blockIdx.x * blockDim.x + threadIdx.x;
-    if (channel >= kProjectionChannels) { return; }
-#pragma unroll
-    for (std::uint32_t history_column = 0; history_column < 3U; ++history_column) {
-        constexpr std::uint32_t kTailBegin = kProjectionPrefillTokens - 3U;
-        history_out[static_cast<std::size_t>(history_column) * kProjectionChannels + channel] =
-            projection_value<kProjectionValueRows>(query_key, projected_value,
-                                                   kTailBegin + history_column, channel);
-    }
-}
-
-__global__ void projection_conv_snapshot_kernel(
-    const hip_bfloat16* query_key, const hip_bfloat16* value_z,
-    const hip_bfloat16* conv_weight, hip_bfloat16* conv_states,
-    const std::int32_t* valid_columns, const std::int32_t* initial_state_slots,
-    const std::int32_t* snapshot_base_slots, hip_bfloat16* query, hip_bfloat16* key,
-    hip_bfloat16* value, hip_bfloat16* z, std::uint32_t width,
-    std::uint32_t state_slots) {
-    const std::uint32_t channel = blockIdx.x * blockDim.x + threadIdx.x;
-    const std::uint32_t batch_index = blockIdx.y;
-    if (channel >= kProjectionChannels) { return; }
-
-    const std::int32_t valid_raw = valid_columns == nullptr
-        ? static_cast<std::int32_t>(width)
-        : valid_columns[batch_index];
-    const std::uint32_t valid = valid_raw <= 0
-        ? 0U
-        : min(static_cast<std::uint32_t>(valid_raw), width);
-    const std::int32_t initial_raw = initial_state_slots[batch_index];
-    const std::int32_t base_raw = snapshot_base_slots[batch_index];
-    const bool valid_initial = initial_raw >= 0 &&
-        static_cast<std::uint32_t>(initial_raw) < state_slots;
-    const bool valid_destination = base_raw >= 0 &&
-        static_cast<std::uint64_t>(base_raw) + valid <= state_slots;
-
-    const std::size_t initial_base = valid_initial
-        ? static_cast<std::size_t>(initial_raw) * 3U * kProjectionChannels
-        : 0U;
-    float h0 = valid_initial
-        ? static_cast<float>(conv_states[initial_base + channel]) : 0.0F;
-    float h1 = valid_initial
-        ? static_cast<float>(conv_states[initial_base + kProjectionChannels + channel]) : 0.0F;
-    float h2 = valid_initial
-        ? static_cast<float>(conv_states[initial_base + 2U * kProjectionChannels + channel]) : 0.0F;
-    const float w0 = static_cast<float>(conv_weight[channel]);
-    const float w1 = static_cast<float>(conv_weight[kProjectionChannels + channel]);
-    const float w2 = static_cast<float>(conv_weight[2U * kProjectionChannels + channel]);
-    const float w3 = static_cast<float>(conv_weight[3U * kProjectionChannels + channel]);
-
-    for (std::uint32_t token = 0; token < width; ++token) {
-        const std::size_t column = static_cast<std::size_t>(batch_index) * width + token;
-        if (channel < kProjectionValueRows) {
-            z[column * kProjectionValueRows + channel] =
-                value_z[column * kProjectionValueZRows + kProjectionValueRows + channel];
-        }
-        if (token >= valid || !valid_initial || !valid_destination) {
-            publish_projection_output(hip_bfloat16(0.0F), query, key, value, column, channel);
-            continue;
-        }
-        const hip_bfloat16 represented = projection_value(query_key, value_z, column, channel);
-        const float current = static_cast<float>(represented);
-        float sum = fmaf(w0, h0, 0.0F);
-        sum = fmaf(w1, h1, sum);
-        sum = fmaf(w2, h2, sum);
-        sum = fmaf(w3, current, sum);
-        publish_projection_output(hip_bfloat16(sum / (1.0F + expf(-sum))), query, key, value,
-                                  column, channel);
-        h0 = h1;
-        h1 = h2;
-        h2 = current;
-        const std::size_t destination_base =
-            (static_cast<std::size_t>(base_raw) + token) * 3U * kProjectionChannels;
-        conv_states[destination_base + channel] = hip_bfloat16(h0);
-        conv_states[destination_base + kProjectionChannels + channel] = hip_bfloat16(h1);
-        conv_states[destination_base + 2U * kProjectionChannels + channel] = hip_bfloat16(h2);
-    }
-}
-
 // The recorded causal convolution of one channel of one sequence (width columns starting at
 // batch_index * width): `represented(column)` is the channel's BF16 projection of that column.
 // Shared by the standalone record kernel and the fused GDN pair epilogue.
@@ -433,6 +272,218 @@ __device__ __forceinline__ void conv_record_channel(
         saved0[token] = h1;
         saved1[token] = h2;
         saved2[token] = current;
+    }
+}
+
+// Eight channels (one 16-byte BF16 vector) per thread over TokenTile consecutive tokens: the three
+// history columns and the tile's inputs are each read once, carried in registers, and the outputs
+// are published as 16-byte vectors. Per element the arithmetic is the recorded convolution's
+// (w0 h0 + w1 h1 + w2 h2 + w3 x as one FMA chain, SiLU, BF16). Token t's value projection is
+// read at projected_value + t * ValueStride.
+// The first token tile also publishes history_out column j, the represented column tokens+j of
+// concat(history_in, projection): only that tile reads history_in, and each thread reads its own
+// channels before writing them, so history_in and history_out may be the same storage.
+// Blocks past the token tiles (Record) run the recorded convolution of a verify batch over the
+// separately projected value rows, 40 blocks of kBlock channels per sequence.
+struct ProjectionConvRecordOperands {
+    const hip_bfloat16* query_key = nullptr;
+    const hip_bfloat16* projected_value = nullptr;
+    const hip_bfloat16* conv_states = nullptr;
+    const std::int32_t* valid_columns = nullptr;
+    const std::int32_t* initial_state_slots = nullptr;
+    hip_bfloat16* conv_record = nullptr;
+    hip_bfloat16* query = nullptr;
+    hip_bfloat16* key = nullptr;
+    hip_bfloat16* value = nullptr;
+    std::uint32_t width = 0;
+    std::uint32_t state_slots = 0;
+};
+constexpr std::uint32_t kScatterBlocksX = kProjectionChannels / 8U / kBlock;
+constexpr std::uint32_t kRecordBlocksPerSequence = kProjectionChannels / kBlock;
+static_assert(kProjectionChannels % (8U * kBlock) == 0U);
+static_assert(kRecordBlocksPerSequence % kScatterBlocksX == 0U);
+
+template <std::uint32_t TokenTile, std::uint32_t ValueStride, bool Record>
+__global__ __launch_bounds__(kBlock) void projection_conv_prefill_direct_scatter_kernel(
+    const hip_bfloat16* query_key, const hip_bfloat16* projected_value,
+    const hip_bfloat16* conv_weight, const hip_bfloat16* history_in, hip_bfloat16* history_out,
+    hip_bfloat16* query, hip_bfloat16* key, hip_bfloat16* value, std::uint32_t tokens,
+    std::uint32_t token_tiles, ProjectionConvRecordOperands record) {
+    if constexpr (Record) {
+        if (blockIdx.y >= token_tiles) {
+            const std::uint32_t block = (blockIdx.y - token_tiles) * kScatterBlocksX + blockIdx.x;
+            const std::uint32_t channel = (block % kRecordBlocksPerSequence) * kBlock + threadIdx.x;
+            conv_record_channel(
+                [&](std::size_t column) {
+                    return projection_value<kProjectionValueRows>(
+                        record.query_key, record.projected_value, column, channel);
+                },
+                conv_weight, record.conv_states, record.valid_columns,
+                record.initial_state_slots, nullptr, record.conv_record, record.query,
+                record.key, record.value, record.width, record.state_slots,
+                block / kRecordBlocksPerSequence, channel);
+            return;
+        }
+    }
+    const std::uint32_t vector = blockIdx.x * blockDim.x + threadIdx.x;
+    const std::uint32_t channel = vector * 8U;
+    const std::uint32_t token_begin = blockIdx.y * TokenTile;
+    const auto load = [](const hip_bfloat16* base, std::size_t offset, float (&out)[8]) {
+        const uint4 packed = *reinterpret_cast<const uint4*>(base + offset);
+        const std::uint32_t words[4] = {packed.x, packed.y, packed.z, packed.w};
+#pragma unroll
+        for (std::uint32_t item = 0; item < 8U; ++item)
+            out[item] = __uint_as_float((item & 1U) ? words[item / 2U] & 0xffff0000U
+                                                    : words[item / 2U] << 16U);
+    };
+    // Represented input of token `source` (negative: the history columns).
+    const auto represented = [&](std::int32_t source, float (&out)[8]) {
+        if (source < 0) {
+            load(history_in, static_cast<std::size_t>(source + 3) * kProjectionChannels + channel,
+                 out);
+        } else if (channel < kProjectionQueryRows + kProjectionKeyRows) {
+            load(query_key,
+                 static_cast<std::size_t>(source) * (kProjectionQueryRows + kProjectionKeyRows) +
+                     channel,
+                 out);
+        } else {
+            load(projected_value,
+                 static_cast<std::size_t>(source) * ValueStride +
+                     (channel - kProjectionQueryRows - kProjectionKeyRows),
+                 out);
+        }
+    };
+    const auto store = [](hip_bfloat16* base, std::size_t offset, const float (&in)[8]) {
+        std::uint32_t words[4];
+#pragma unroll
+        for (std::uint32_t pair = 0; pair < 4U; ++pair)
+            words[pair] = (__float_as_uint(in[2U * pair]) >> 16U) |
+                          (__float_as_uint(in[2U * pair + 1U]) & 0xffff0000U);
+        *reinterpret_cast<uint4*>(base + offset) = uint4{words[0], words[1], words[2], words[3]};
+    };
+    float w[4][8];
+#pragma unroll
+    for (std::uint32_t tap = 0; tap < 4U; ++tap)
+        load(conv_weight, static_cast<std::size_t>(tap) * kProjectionChannels + channel, w[tap]);
+    float h0[8], h1[8], h2[8];
+    represented(static_cast<std::int32_t>(token_begin) - 3, h0);
+    represented(static_cast<std::int32_t>(token_begin) - 2, h1);
+    represented(static_cast<std::int32_t>(token_begin) - 1, h2);
+    if (blockIdx.y == 0U) {
+        // token_begin is 0: h0..h2 hold history_in columns 0..2 of this thread's channels.
+#pragma unroll
+        for (std::uint32_t column = 0; column < 3U; ++column) {
+            const std::uint32_t source = tokens + column;  // index in concat(history, x)
+            float published[8];
+            if (source < 3U) {
+#pragma unroll
+                for (std::uint32_t item = 0; item < 8U; ++item)
+                    published[item] = source == 0U ? h0[item] : source == 1U ? h1[item] : h2[item];
+            } else {
+                represented(static_cast<std::int32_t>(source - 3U), published);
+            }
+            store(history_out, static_cast<std::size_t>(column) * kProjectionChannels + channel,
+                  published);
+        }
+    }
+    hip_bfloat16* destination;
+    std::size_t stride, offset;
+    if (channel < kProjectionQueryRows) {
+        destination = query; stride = kProjectionQueryRows; offset = channel;
+    } else if (channel < kProjectionQueryRows + kProjectionKeyRows) {
+        destination = key; stride = kProjectionKeyRows; offset = channel - kProjectionQueryRows;
+    } else {
+        destination = value; stride = kProjectionValueRows;
+        offset = channel - kProjectionQueryRows - kProjectionKeyRows;
+    }
+#pragma unroll
+    for (std::uint32_t local = 0; local < TokenTile; ++local) {
+        const std::uint32_t token = token_begin + local;
+        if (token >= tokens) break;
+        float current[8];
+        represented(static_cast<std::int32_t>(token), current);
+        std::uint32_t words[4] = {};
+#pragma unroll
+        for (std::uint32_t item = 0; item < 8U; ++item) {
+            float sum = fmaf(w[0][item], h0[item], 0.0F);
+            sum = fmaf(w[1][item], h1[item], sum);
+            sum = fmaf(w[2][item], h2[item], sum);
+            sum = fmaf(w[3][item], current[item], sum);
+            const hip_bfloat16 output(sum / (1.0F + expf(-sum)));
+            words[item / 2U] |= static_cast<std::uint32_t>(output.data) << ((item & 1U) * 16U);
+            h0[item] = h1[item];
+            h1[item] = h2[item];
+            h2[item] = current[item];
+        }
+        *reinterpret_cast<uint4*>(destination + static_cast<std::size_t>(token) * stride + offset) =
+            uint4{words[0], words[1], words[2], words[3]};
+    }
+}
+
+__global__ void projection_conv_snapshot_kernel(
+    const hip_bfloat16* query_key, const hip_bfloat16* value_z,
+    const hip_bfloat16* conv_weight, hip_bfloat16* conv_states,
+    const std::int32_t* valid_columns, const std::int32_t* initial_state_slots,
+    const std::int32_t* snapshot_base_slots, hip_bfloat16* query, hip_bfloat16* key,
+    hip_bfloat16* value, hip_bfloat16* z, std::uint32_t width,
+    std::uint32_t state_slots) {
+    const std::uint32_t channel = blockIdx.x * blockDim.x + threadIdx.x;
+    const std::uint32_t batch_index = blockIdx.y;
+    if (channel >= kProjectionChannels) { return; }
+
+    const std::int32_t valid_raw = valid_columns == nullptr
+        ? static_cast<std::int32_t>(width)
+        : valid_columns[batch_index];
+    const std::uint32_t valid = valid_raw <= 0
+        ? 0U
+        : min(static_cast<std::uint32_t>(valid_raw), width);
+    const std::int32_t initial_raw = initial_state_slots[batch_index];
+    const std::int32_t base_raw = snapshot_base_slots[batch_index];
+    const bool valid_initial = initial_raw >= 0 &&
+        static_cast<std::uint32_t>(initial_raw) < state_slots;
+    const bool valid_destination = base_raw >= 0 &&
+        static_cast<std::uint64_t>(base_raw) + valid <= state_slots;
+
+    const std::size_t initial_base = valid_initial
+        ? static_cast<std::size_t>(initial_raw) * 3U * kProjectionChannels
+        : 0U;
+    float h0 = valid_initial
+        ? static_cast<float>(conv_states[initial_base + channel]) : 0.0F;
+    float h1 = valid_initial
+        ? static_cast<float>(conv_states[initial_base + kProjectionChannels + channel]) : 0.0F;
+    float h2 = valid_initial
+        ? static_cast<float>(conv_states[initial_base + 2U * kProjectionChannels + channel]) : 0.0F;
+    const float w0 = static_cast<float>(conv_weight[channel]);
+    const float w1 = static_cast<float>(conv_weight[kProjectionChannels + channel]);
+    const float w2 = static_cast<float>(conv_weight[2U * kProjectionChannels + channel]);
+    const float w3 = static_cast<float>(conv_weight[3U * kProjectionChannels + channel]);
+
+    for (std::uint32_t token = 0; token < width; ++token) {
+        const std::size_t column = static_cast<std::size_t>(batch_index) * width + token;
+        if (channel < kProjectionValueRows) {
+            z[column * kProjectionValueRows + channel] =
+                value_z[column * kProjectionValueZRows + kProjectionValueRows + channel];
+        }
+        if (token >= valid || !valid_initial || !valid_destination) {
+            publish_projection_output(hip_bfloat16(0.0F), query, key, value, column, channel);
+            continue;
+        }
+        const hip_bfloat16 represented = projection_value(query_key, value_z, column, channel);
+        const float current = static_cast<float>(represented);
+        float sum = fmaf(w0, h0, 0.0F);
+        sum = fmaf(w1, h1, sum);
+        sum = fmaf(w2, h2, sum);
+        sum = fmaf(w3, current, sum);
+        publish_projection_output(hip_bfloat16(sum / (1.0F + expf(-sum))), query, key, value,
+                                  column, channel);
+        h0 = h1;
+        h1 = h2;
+        h2 = current;
+        const std::size_t destination_base =
+            (static_cast<std::size_t>(base_raw) + token) * 3U * kProjectionChannels;
+        conv_states[destination_base + channel] = hip_bfloat16(h0);
+        conv_states[destination_base + kProjectionChannels + channel] = hip_bfloat16(h1);
+        conv_states[destination_base + 2U * kProjectionChannels + channel] = hip_bfloat16(h2);
     }
 }
 
@@ -857,6 +908,7 @@ __device__ __forceinline__ ControlBf16x8 load_control_bf16x8(const hip_bfloat16*
 
 // Tokens are WMMA rows and the stacked [a;b] weight rows are WMMA columns, so one lane holds
 // a[h,t] and b[h,t] for the same head in tiles i and i+3 and applies the control formula in place.
+// blockIdx.y selects the 16-head group i, so one CTA owns the a and b tiles of its heads.
 __global__ __launch_bounds__(kControlWideSplits * 32U) void bf16_projected_control_wide_kernel(
     const hip_bfloat16* hidden, const hip_bfloat16* a_weight, const hip_bfloat16* b_weight,
     const float* a_log, const float* dt_bias, float* g, float* beta, std::uint32_t tokens) {
@@ -866,52 +918,48 @@ __global__ __launch_bounds__(kControlWideSplits * 32U) void bf16_projected_contr
     const std::uint32_t lane_half = lane >> 4U;
     const std::uint32_t token_base = blockIdx.x * kControlWideTokens;
     const std::uint32_t column = split * kControlWideSplitColumns + lane_half * 8U;
+    const std::uint32_t group = blockIdx.y;
     // Rows past the token extent load the last valid token; their results are never stored.
     const hip_bfloat16* input = hidden +
         static_cast<std::size_t>(min(token_base + lane_row, tokens - 1U)) * kControlColumns +
         column;
-    const hip_bfloat16* weight[kControlWideTiles];
-#pragma unroll
-    for (std::uint32_t tile = 0; tile < kControlWideTiles; ++tile) {
-        const std::uint32_t head = (tile % 3U) * 16U + lane_row;
-        weight[tile] = (tile < 3U ? a_weight : b_weight) +
-            static_cast<std::size_t>(head) * kControlColumns + column;
-    }
-    ControlF32x8 accumulator[kControlWideTiles]{};
+    const std::size_t weight_row =
+        static_cast<std::size_t>(group * 16U + lane_row) * kControlColumns + column;
+    const hip_bfloat16* weight[2] = {a_weight + weight_row, b_weight + weight_row};
+    ControlF32x8 accumulator[2]{};
 #pragma unroll 4
     for (std::uint32_t offset = 0; offset < kControlWideSplitColumns; offset += 16U) {
         const ControlBf16x8 x = load_control_bf16x8(input + offset);
 #pragma unroll
-        for (std::uint32_t tile = 0; tile < kControlWideTiles; ++tile) {
+        for (std::uint32_t tile = 0; tile < 2U; ++tile) {
             accumulator[tile] = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(
                 x, load_control_bf16x8(weight[tile] + offset), accumulator[tile]);
         }
     }
     // Every wave publishes its K-split partials; all threads then reduce them in split order and
-    // apply the control formula to three of the 48x16 (head, token) outputs each.
-    __shared__ float partial[kControlWideSplits][kControlWideTiles][8][32];
+    // apply the control formula to one of the 16x16 (head, token) outputs each.
+    __shared__ float partial[kControlWideSplits][2][8][32];
 #pragma unroll
-    for (std::uint32_t tile = 0; tile < kControlWideTiles; ++tile) {
+    for (std::uint32_t tile = 0; tile < 2U; ++tile) {
 #pragma unroll
         for (std::uint32_t element = 0; element < 8U; ++element) {
             partial[split][tile][element][lane] = accumulator[tile][element];
         }
     }
     __syncthreads();
-    for (std::uint32_t item = threadIdx.x; item < 3U * 8U * 32U;
-         item += kControlWideSplits * 32U) {
-        const std::uint32_t item_lane = item % 32U;
-        const std::uint32_t element = (item / 32U) % 8U;
-        const std::uint32_t tile = item / 256U;
+    static_assert(kControlWideSplits * 32U == 8U * 32U);
+    {
+        const std::uint32_t item_lane = threadIdx.x % 32U;
+        const std::uint32_t element = threadIdx.x / 32U;
         const std::uint32_t token = token_base + (item_lane >> 4U) * 8U + element;
-        if (token >= tokens) continue;
+        if (token >= tokens) return;
         float a = 0.0F, b = 0.0F;
 #pragma unroll
         for (std::uint32_t source = 0; source < kControlWideSplits; ++source) {
-            a += partial[source][tile][element][item_lane];
-            b += partial[source][tile + 3U][element][item_lane];
+            a += partial[source][0][element][item_lane];
+            b += partial[source][1][element][item_lane];
         }
-        const std::uint32_t head = tile * 16U + (item_lane & 15U);
+        const std::uint32_t head = group * 16U + (item_lane & 15U);
         const std::size_t output = static_cast<std::size_t>(token) * kControlHeads + head;
         const float av = static_cast<float>(hip_bfloat16(a)) + dt_bias[head];
         const float softplus = av > 20.0F ? av : log1pf(expf(av));
@@ -1080,70 +1128,152 @@ hipError_t causal_conv1d_silu_prefill_qualification(
     }
 }
 
-hipError_t projection_conv_prefill_p2048_direct_scatter_bf16(
+namespace {
+
+template <std::uint32_t TokenTile, std::uint32_t ValueStride, bool Record>
+void launch_projection_conv_direct_scatter(
     const hip_bfloat16* query_key, const hip_bfloat16* projected_value,
-    const hip_bfloat16* conv_weight, const hip_bfloat16* history_in,
-    hip_bfloat16* history_out, hip_bfloat16* query, hip_bfloat16* key,
-    hip_bfloat16* value, std::uint32_t tokens, hipStream_t stream) noexcept {
+    const hip_bfloat16* conv_weight, const hip_bfloat16* history_in, hip_bfloat16* history_out,
+    hip_bfloat16* query, hip_bfloat16* key, hip_bfloat16* value, std::uint32_t tokens,
+    const ProjectionConvRecordOperands& record, std::uint32_t record_batch,
+    hipStream_t stream) {
+    const std::uint32_t token_tiles = (tokens + TokenTile - 1U) / TokenTile;
+    const std::uint32_t record_rows =
+        record_batch * (kRecordBlocksPerSequence / kScatterBlocksX);
+    hipLaunchKernelGGL(
+        HIP_KERNEL_NAME(projection_conv_prefill_direct_scatter_kernel<TokenTile, ValueStride,
+                                                                      Record>),
+        dim3(kScatterBlocksX, token_tiles + record_rows), dim3(kBlock), 0, stream, query_key,
+        projected_value, conv_weight, history_in, history_out, query, key, value, tokens,
+        token_tiles, record);
+}
+
+// Validates the one-sequence prefill convolution operands over `tokens` columns.
+[[nodiscard]] bool valid_direct_scatter(
+    const hip_bfloat16* query_key, const hip_bfloat16* projected_value,
+    std::uint32_t value_stride, const hip_bfloat16* conv_weight, const hip_bfloat16* history_in,
+    const hip_bfloat16* history_out, const hip_bfloat16* query, const hip_bfloat16* key,
+    const hip_bfloat16* value, std::uint32_t tokens, hipStream_t stream) noexcept {
     if (query_key == nullptr || projected_value == nullptr || conv_weight == nullptr ||
         history_in == nullptr || history_out == nullptr || query == nullptr || key == nullptr ||
-        value == nullptr || tokens != kProjectionPrefillTokens || !valid_stream(stream)) {
-        return hipErrorInvalidValue;
+        value == nullptr || tokens == 0U ||
+        (value_stride != kProjectionValueRows && value_stride != kProjectionValueZRows) ||
+        !valid_stream(stream)) {
+        return false;
     }
     // The convolution reads and publishes 16-byte channel vectors.
     for (const void* pointer : {static_cast<const void*>(query_key),
                                 static_cast<const void*>(projected_value),
                                 static_cast<const void*>(conv_weight),
                                 static_cast<const void*>(history_in),
+                                static_cast<const void*>(history_out),
                                 static_cast<const void*>(query), static_cast<const void*>(key),
                                 static_cast<const void*>(value)}) {
-        if (reinterpret_cast<std::uintptr_t>(pointer) % 16U != 0U) return hipErrorInvalidValue;
+        if (reinterpret_cast<std::uintptr_t>(pointer) % 16U != 0U) return false;
     }
-    constexpr std::size_t kQueryKeyElements =
-        static_cast<std::size_t>(kProjectionPrefillTokens) *
-        (kProjectionQueryRows + kProjectionKeyRows);
+    const std::size_t columns = tokens;
+    const std::size_t value_elements =
+        (columns - 1U) * value_stride + kProjectionValueRows;
     constexpr std::size_t kConvolutionWeightElements =
         static_cast<std::size_t>(kProjectionChannels) * 4U;
     constexpr std::size_t kHistoryElements =
         static_cast<std::size_t>(kProjectionChannels) * 3U;
-    constexpr std::size_t kQueryElements =
-        static_cast<std::size_t>(kProjectionPrefillTokens) * kProjectionQueryRows;
-    constexpr std::size_t kKeyElements =
-        static_cast<std::size_t>(kProjectionPrefillTokens) * kProjectionKeyRows;
-    constexpr std::size_t kValueElements =
-        static_cast<std::size_t>(kProjectionPrefillTokens) * kProjectionValueRows;
     const std::array<ByteRange, 8> ranges{
-        byte_range(query_key, kQueryKeyElements),
-        byte_range(projected_value, kValueElements),
+        byte_range(query_key, columns * (kProjectionQueryRows + kProjectionKeyRows)),
+        byte_range(projected_value, value_elements),
         byte_range(conv_weight, kConvolutionWeightElements),
         byte_range(history_in, kHistoryElements),
         byte_range(history_out, kHistoryElements),
-        byte_range(query, kQueryElements),
-        byte_range(key, kKeyElements),
-        byte_range(value, kValueElements),
+        byte_range(query, columns * kProjectionQueryRows),
+        byte_range(key, columns * kProjectionKeyRows),
+        byte_range(value, columns * kProjectionValueRows),
     };
     for (std::size_t lhs = 0; lhs < ranges.size(); ++lhs) {
         for (std::size_t rhs = lhs + 1; rhs < ranges.size(); ++rhs) {
             const bool exact_history_alias = lhs == 3U && rhs == 4U &&
                 ranges[lhs].first == ranges[rhs].first;
             if (!exact_history_alias && overlaps(ranges[lhs], ranges[rhs])) {
-                return hipErrorInvalidValue;
+                return false;
             }
         }
     }
-    constexpr std::uint32_t kTokenTile = 16U;
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(projection_conv_prefill_direct_scatter_kernel<kTokenTile>),
-        dim3((kProjectionChannels / 8U + kBlock - 1U) / kBlock,
-             kProjectionPrefillTokens / kTokenTile),
-        dim3(kBlock), 0, stream, query_key, projected_value, conv_weight, history_in, query, key,
-        value);
-    hipError_t status = hipGetLastError();
-    if (status != hipSuccess) { return status; }
-    hipLaunchKernelGGL(projection_prefill_publish_history_kernel,
-                       dim3((kProjectionChannels + kBlock - 1U) / kBlock), dim3(kBlock), 0,
-                       stream, query_key, projected_value, history_out);
+    return true;
+}
+
+// Wide prefill amortizes the history columns over 16 tokens; narrow owner slices keep enough
+// CTAs in flight with 4-token tiles.
+template <std::uint32_t ValueStride, bool Record>
+hipError_t dispatch_direct_scatter(
+    const hip_bfloat16* query_key, const hip_bfloat16* projected_value,
+    const hip_bfloat16* conv_weight, const hip_bfloat16* history_in, hip_bfloat16* history_out,
+    hip_bfloat16* query, hip_bfloat16* key, hip_bfloat16* value, std::uint32_t tokens,
+    const ProjectionConvRecordOperands& record, std::uint32_t record_batch,
+    hipStream_t stream) {
+    if (tokens >= 512U) {
+        launch_projection_conv_direct_scatter<16U, ValueStride, Record>(
+            query_key, projected_value, conv_weight, history_in, history_out, query, key, value,
+            tokens, record, record_batch, stream);
+    } else {
+        launch_projection_conv_direct_scatter<4U, ValueStride, Record>(
+            query_key, projected_value, conv_weight, history_in, history_out, query, key, value,
+            tokens, record, record_batch, stream);
+    }
     return hipGetLastError();
+}
+
+} // namespace
+
+hipError_t projection_conv_prefill_direct_scatter_bf16(
+    const hip_bfloat16* query_key, const hip_bfloat16* projected_value,
+    std::uint32_t value_stride, const hip_bfloat16* conv_weight, const hip_bfloat16* history_in,
+    hip_bfloat16* history_out, hip_bfloat16* query, hip_bfloat16* key, hip_bfloat16* value,
+    std::uint32_t tokens, hipStream_t stream) noexcept {
+    if (!valid_direct_scatter(query_key, projected_value, value_stride, conv_weight, history_in,
+                              history_out, query, key, value, tokens, stream)) {
+        return hipErrorInvalidValue;
+    }
+    return value_stride == kProjectionValueRows
+        ? dispatch_direct_scatter<kProjectionValueRows, false>(
+              query_key, projected_value, conv_weight, history_in, history_out, query, key,
+              value, tokens, {}, 0U, stream)
+        : dispatch_direct_scatter<kProjectionValueZRows, false>(
+              query_key, projected_value, conv_weight, history_in, history_out, query, key,
+              value, tokens, {}, 0U, stream);
+}
+
+hipError_t projection_conv_mixed_split_bf16(
+    const hip_bfloat16* query_key, const hip_bfloat16* projected_value,
+    const hip_bfloat16* conv_weight, const hip_bfloat16* history_in, hip_bfloat16* history_out,
+    hip_bfloat16* query, hip_bfloat16* key, hip_bfloat16* value, std::uint32_t owner_tokens,
+    const hip_bfloat16* conv_states, const std::int32_t* valid_columns,
+    const std::int32_t* initial_state_slots, hip_bfloat16* conv_record, std::uint32_t width,
+    std::uint32_t batch, std::uint32_t state_slots, hipStream_t stream) noexcept {
+    const std::size_t columns = static_cast<std::size_t>(owner_tokens) + std::size_t{width} * batch;
+    if (owner_tokens == 0U || width < 2U || width > kMaximumVerifyWidth || batch == 0U ||
+        batch > kMaximumBatch || state_slots == 0U || conv_states == nullptr || initial_state_slots == nullptr ||
+        conv_record == nullptr ||
+        columns > std::numeric_limits<std::uint32_t>::max() ||
+        !valid_direct_scatter(query_key, projected_value, kProjectionValueRows, conv_weight,
+                              history_in, history_out, query, key, value,
+                              static_cast<std::uint32_t>(columns), stream)) {
+        return hipErrorInvalidValue;
+    }
+    const auto at = [&](auto* base, std::size_t rows) { return base + rows * owner_tokens; };
+    const ProjectionConvRecordOperands record{
+        .query_key = at(query_key, kProjectionQueryRows + kProjectionKeyRows),
+        .projected_value = at(projected_value, kProjectionValueRows),
+        .conv_states = conv_states,
+        .valid_columns = valid_columns,
+        .initial_state_slots = initial_state_slots,
+        .conv_record = conv_record,
+        .query = at(query, kProjectionQueryRows),
+        .key = at(key, kProjectionKeyRows),
+        .value = at(value, kProjectionValueRows),
+        .width = width,
+        .state_slots = state_slots};
+    return dispatch_direct_scatter<kProjectionValueRows, true>(
+        query_key, projected_value, conv_weight, history_in, history_out, query, key, value,
+        owner_tokens, record, batch, stream);
 }
 
 hipError_t projection_conv_snapshot_bf16(
@@ -1323,7 +1453,8 @@ hipError_t bf16_projected_control(
                                dt_bias, g, beta);
         } else {
             hipLaunchKernelGGL(bf16_projected_control_wide_kernel,
-                               dim3((tokens + kControlWideTokens - 1U) / kControlWideTokens),
+                               dim3((tokens + kControlWideTokens - 1U) / kControlWideTokens,
+                                    kControlHeads / 16U),
                                dim3(kControlWideSplits * 32U), 0, stream, hidden, a_weight,
                                b_weight, a_log, dt_bias, g, beta, tokens);
         }

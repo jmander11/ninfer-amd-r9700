@@ -202,7 +202,7 @@ void run_case(const std::vector<double>& book, std::uint32_t rows, std::uint32_t
     check(hipMemcpy(token_scales.data(), activation.workspace.scales, tokens * sizeof(float),
                     hipMemcpyDeviceToHost), "scales");
     std::vector<std::uint32_t> sample_tokens;
-    for (std::uint32_t t = 0; t < tokens; t += tokens > 64U ? 131U : 1U) sample_tokens.push_back(t);
+    for (std::uint32_t t = 0; t < tokens; t += tokens > 128U ? 131U : tokens > 64U ? 7U : 1U) sample_tokens.push_back(t);
     sample_tokens.push_back(tokens - 1U);
     const std::uint32_t row_stride = rows > 8192U ? 97U : 13U;
     double worst = 0.0;
@@ -512,28 +512,38 @@ int main(int argc, char** argv) {
         const Shape shapes[] = {{34816, 5120}, {5120, 17408}, {12288, 5120}, {7168, 5120},
                                 {5120, 6144}, {4096, 5120}, {1280, 5120}, {5120, 25600}};
         for (const auto& shape : shapes)
-            for (const std::uint32_t tokens : {1U, 5U, 6U, 16U, 17U, 20U, 24U, 32U})
+            for (const std::uint32_t tokens : {1U, 5U, 6U, 16U, 17U, 20U, 24U, 32U, 33U, 57U, 65U, 80U, 96U, 97U, 113U, 128U})
                 run_case(book, shape.rows, shape.columns, tokens, false, false, rng, stream);
         // FP8LUT4 output head (N248320/K5120): C1..C4 verification widths up to T32.
         for (const std::uint32_t tokens : {1U, 6U, 16U, 24U, 32U})
             run_case(book, 248320, 5120, tokens, false, false, rng, stream);
-        for (const std::uint32_t tokens : {17U, 130U, 2048U}) {
+        // Prefill CTA shapes: 256x64 (T130/200 at N<12288), 512x64 (T300/1000/2048), 256x128
+        // (T640, and T <= 256 at N >= 12288), with partial token tiles.
+        for (const std::uint32_t tokens : {17U, 130U, 200U, 300U, 640U, 1000U, 2048U}) {
             run_case(book, 5120, 17408, tokens, false, false, rng, stream);
             run_case(book, 7168, 5120, tokens, false, false, rng, stream);
         }
-        for (const std::uint32_t tokens : {1U, 6U, 16U, 24U, 32U, 130U, 2048U})
+        for (const std::uint32_t tokens : {1U, 6U, 16U, 24U, 32U, 40U, 96U, 130U, 200U, 300U, 640U, 2048U})
             run_silu(book, 34816, 5120, tokens, rng, stream);
         run_pair(book, 7168, 6144, 7168, 5120, 6, rng, stream);
         run_pair(book, 7168, 6144, 7168, 5120, 1, rng, stream);
         run_pair(book, 12288, 6144, 4096, 5120, 5, rng, stream);
         run_pair(book, 7168, 6144, 7168, 5120, 24, rng, stream);
         run_pair(book, 12288, 6144, 4096, 5120, 32, rng, stream);
+        run_pair(book, 7168, 6144, 7168, 5120, 71, rng, stream);
         run_pair(book, 7168, 6144, 7168, 5120, 130, rng, stream);
+        run_pair(book, 12288, 6144, 4096, 5120, 200, rng, stream);
+        run_pair(book, 12288, 6144, 4096, 5120, 300, rng, stream);
         run_case(book, 5120, 6144, 1, true, false, rng, stream);
         run_case(book, 5120, 17408, 1, true, false, rng, stream);
         run_case(book, 5120, 6144, 6, true, false, rng, stream);
         run_case(book, 5120, 17408, 24, true, false, rng, stream);
+        run_case(book, 5120, 17408, 80, true, false, rng, stream);
+        run_case(book, 7168, 5120, 50, false, true, rng, stream);
         run_case(book, 5120, 6144, 2048, true, false, rng, stream);
+        run_case(book, 5120, 17408, 200, true, false, rng, stream);
+        run_case(book, 5120, 6144, 300, true, false, rng, stream);
+        run_case(book, 7168, 5120, 300, false, true, rng, stream);
         run_case(book, 7168, 5120, 1, false, true, rng, stream);
         run_case(book, 7168, 5120, 6, false, true, rng, stream);
         run_case(book, 7168, 5120, 28, false, true, rng, stream);

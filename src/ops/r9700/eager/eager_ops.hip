@@ -1074,13 +1074,14 @@ hipError_t rmsnorm_bf16(const hip_bfloat16* input, const hip_bfloat16* weight,
         input != nullptr && weight != nullptr && output != nullptr && features != 0 && rows != 0 &&
             std::isfinite(eps) && eps > 0.0F && valid_stream(stream),
         [&] {
-            if (rmsnorm_k5120_small_t_selected(features, rows) &&
+            if (rmsnorm_k5120_row_cta_selected(features, rows) &&
                 aligned16(input) && aligned16(weight) && aligned16(output)) {
                 hipLaunchKernelGGL(rmsnorm_k5120_rows4_cta_kernel, dim3(rows),
                                    dim3(kRmsnormK5120RowThreads), 0, stream, input, weight,
                                    output, eps, unit_offset);
                 return;
             }
+            // Unaligned K5120 rows keep the byte-copy token8 route at prefill widths.
             if (features == 5120U && rows >= 128U) {
                 constexpr std::uint32_t tokens_per_block = kBlock / 32U;
                 hipLaunchKernelGGL(rmsnorm_k5120_token8_kernel,

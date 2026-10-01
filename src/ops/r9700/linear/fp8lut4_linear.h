@@ -14,6 +14,8 @@ namespace ninfer::ops::r9700::linear {
 // sign-magnitude codes (bit 3 = sign, bits 0..2 = magnitude index) and one group code byte per
 // 32 columns in N16 x K64 tiles, and one FP32 row multiplier. Group code b selects E = (b >> 3) - 26, m = b & 7 and
 // the E4M3 magnitudes RNE(n_j * (8 + m) * 2^(E - 7)), n = {0, 13, 27, 41, 56, 74, 94, 120}.
+// Null `groups` instead names row-scaled E4M3 rows (row-major raw codes, as Fp8RowScaledWeight),
+// accepted where fp8_row_scaled_projection_supported holds, without `silu_pair`.
 struct Fp8Lut4Weight {
     const std::uint8_t* codes  = nullptr;
     const std::uint8_t* groups = nullptr;
@@ -44,6 +46,10 @@ struct Fp8Lut4Output {
 // is nonzero is the canonical BF16 quiet NaN. A split must be a multiple of 128 rows.
 [[nodiscard]] bool fp8lut4_linear_supported(std::uint32_t tokens, std::uint32_t rows,
                                         std::uint32_t columns) noexcept;
+// Row-scaled E4M3 rows through fp8lut4_linear: prefill widths (the prefill CTA and its split and
+// accumulate epilogues); narrower widths use the row-scaled small-T and mid-T routes.
+[[nodiscard]] bool fp8_row_scaled_projection_supported(std::uint32_t tokens, std::uint32_t rows,
+                                                       std::uint32_t columns) noexcept;
 [[nodiscard]] hipError_t fp8lut4_linear(const Fp8Lut4Weight& weight,
                                     const Fp8ActivationWorkspace& activation,
                                     const Fp8Lut4Output& output, hipStream_t stream) noexcept;

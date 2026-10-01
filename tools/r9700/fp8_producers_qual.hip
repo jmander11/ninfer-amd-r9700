@@ -112,6 +112,7 @@ struct Image {
     linear::Fp8ActivationWorkspace workspace{};
     Image(std::uint32_t tokens, std::uint32_t columns)
         : storage(linear::fp8_activation_workspace_capacity_bytes(tokens, columns)) {
+        check(hipMemset(storage.data, 0, storage.count), "clear");  // deterministic plane padding
         check(linear::fp8_bind_activation_workspace(storage.data, storage.count, tokens, columns, &workspace),
               "bind");
         const std::vector<std::uint32_t> stale(tokens, 7U);  // producers must overwrite every word
@@ -165,6 +166,30 @@ void run(std::uint32_t tokens, bool poison, Rng& rng, hipStream_t stream) {
                          (1.0 + static_cast<float>(w[k])));
         }
         check_image(image.workspace, v, tokens, K, "normalized" + suffix);
+        // The BF16 side output: the same image, and exactly the rows it encodes (a plain
+        // quantization of the side output reproduces it), each within one BF16 step of the oracle.
+        Device<hip_bfloat16> dn(x.size());
+        Image side(tokens, K), requantized(tokens, K);
+        linear::Fp8NormalizedQuantizeArgs args{dx.data, dw.data, 1e-6F, true, side.workspace};
+        args.normalized = dn.data;
+        check(linear::fp8_quantize_normalized_activation(args, stream), "normalized side");
+        check(linear::fp8_quantize_activation({dn.data, requantized.workspace}, stream), "requantize");
+        check(hipStreamSynchronize(stream), "sync");
+        const auto bytes = [&](const Image& i) {
+            std::vector<std::uint8_t> host(i.storage.count);
+            check(hipMemcpy(host.data(), i.storage.data, host.size(), hipMemcpyDeviceToHost), "image");
+            return host;
+        };
+        const auto reference = bytes(image);
+        require(bytes(side) == reference, "normalized side image differs" + suffix);
+        require(bytes(requantized) == reference, "normalized side rows differ from the image" + suffix);
+        const auto n = dn.download();
+        for (std::size_t i = 0; i < n.size(); ++i) {
+            if (!std::isfinite(v[i])) continue;
+            const double step = std::ldexp(std::max(std::abs(v[i]), 1e-30), -7);
+            require(std::abs(static_cast<float>(n[i]) - v[i]) <= step,
+                    "normalized side row outside one BF16 step" + suffix);
+        }
     }
     {  // Attention output gate (K6144).
         constexpr std::uint32_t K = 6144;

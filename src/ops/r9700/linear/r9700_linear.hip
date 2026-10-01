@@ -2593,7 +2593,8 @@ void a8q4g64_linear_prefill_cta_kernel(
     const std::uint16_t* activation_scales,
     const std::uint32_t* activation_status,
     const std::uint8_t* weight_codes, const std::uint16_t* weight_scales,
-    hip_bfloat16* output, std::uint32_t rows, std::uint32_t padded_columns) {
+    hip_bfloat16* output, std::uint32_t tokens, std::uint32_t rows,
+    std::uint32_t padded_columns) {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
     __shared__ A8Q4PrefillM128PingPong tiles;
     const std::uint32_t thread = threadIdx.x;
@@ -2617,8 +2618,9 @@ void a8q4g64_linear_prefill_cta_kernel(
                                                 lane_group * 8U + element;
                     const std::uint32_t row =
                         row_base + wave_row + row_fragment * 16U + axis;
-                    output[static_cast<std::size_t>(token) * rows + row] =
-                        conspicuous_bf16_nan();
+                    if (token < tokens)
+                        output[static_cast<std::size_t>(token) * rows + row] =
+                            conspicuous_bf16_nan();
                 }
             }
         }
@@ -2626,13 +2628,15 @@ void a8q4g64_linear_prefill_cta_kernel(
     }
 
     const std::uint32_t groups = padded_columns / kQ4Group;
+    // Rows of a partial token tile stage the last real token: their products are never stored.
+    const auto staged_token = [&](std::uint32_t token) { return token < tokens ? token : tokens - 1U; };
     A8Q4PrefillM128Offsets offsets;
     offsets.activation =
-        (token_base + (thread >> 1U)) * (padded_columns / 2U) + (thread & 1U) * 16U;
+        staged_token(token_base + (thread >> 1U)) * (padded_columns / 2U) + (thread & 1U) * 16U;
     offsets.weight = (row_base / 16U + (thread >> 5U)) * groups * 512U + (thread & 31U) * 16U;
     offsets.activation_scale = thread < kA8Q4M128PrefillTokenTile;
     offsets.scale = offsets.activation_scale
-        ? (token_base + thread) * groups * 2U
+        ? staged_token(token_base + thread) * groups * 2U
         : static_cast<std::uint32_t>(
               q4_n16k16_scale_index(row_base + thread - kA8Q4M128PrefillTokenTile, 0U, groups) *
               sizeof(std::uint16_t));
@@ -2668,6 +2672,7 @@ void a8q4g64_linear_prefill_cta_kernel(
                 const std::uint32_t token = token_base + wave_token + fragment * 16U +
                                             lane_group * 8U + element;
                 const std::uint32_t row = row_base + wave_row + row_fragment * 16U + axis;
+                if (token >= tokens) continue;
                 hip_bfloat16& target = output[static_cast<std::size_t>(token) * rows + row];
                 const hip_bfloat16 projection =
                     static_cast<hip_bfloat16>(totals[fragment][row_fragment][element]);
@@ -2683,7 +2688,7 @@ void a8q4g64_linear_prefill_cta_kernel(
 #else
     (void)activation_low_codes; (void)activation_high_codes;
     (void)activation_scales; (void)activation_status; (void)weight_codes;
-    (void)weight_scales; (void)output; (void)rows; (void)padded_columns;
+    (void)weight_scales; (void)output; (void)tokens; (void)rows; (void)padded_columns;
 #endif
 }
 
@@ -3957,30 +3962,29 @@ hipError_t a8q4g64_linear_prefill_cta_m128n128_qualification(
 
 hipError_t a8q4g64_linear_prefill_cta(
     const A8Q4G64LinearArgs& args, hipStream_t stream) noexcept {
-    if (!valid_a8q4_linear_args(args, true) || args.tokens <= 128U) {
+    if (!valid_a8q4_linear_args(args, true) || args.tokens <= 32U) {
         return hipErrorInvalidValue;
     }
-    // The M128xN128 kernel has no tile predicates and uses U32 byte offsets. The size_t-addressed
-    // single-bank kernel remains the complete direct-call fallback for every
+    // The M128xN128 kernel predicates partial token tiles and uses U32 byte offsets. The
+    // size_t-addressed single-bank kernel remains the complete direct-call fallback for every
     // tuple outside the qualified inventory.
     if (!use_a8q4_prefill_cta(args.tokens, args.rows, args.columns) ||
         args.columns != args.padded_columns ||
-        args.tokens % kA8Q4M128PrefillTokenTile != 0U ||
         args.rows % kA8Q4M128PrefillTokenTile != 0U ||
         !scalar_base_offsets_fit(args.tokens, args.rows, args.padded_columns)) {
         if (args.accumulate_output) return hipErrorInvalidValue;
         return a8q4g64_linear_prefill_cta_m64n128_regression(args, stream);
     }
 #if defined(__HIPCC__)
-    const dim3 grid(args.tokens / kA8Q4M128PrefillTokenTile,
+    const dim3 grid((args.tokens + kA8Q4M128PrefillTokenTile - 1U) / kA8Q4M128PrefillTokenTile,
                     args.rows / kA8Q4M128PrefillTokenTile);
     hipLaunchKernelGGL(args.accumulate_output ? a8q4g64_linear_prefill_cta_kernel<true>
                                               : a8q4g64_linear_prefill_cta_kernel<false>,
                        grid, dim3(kA8Q4M128ProductionThreads), 0, stream,
                        args.activation_low_codes, args.activation_high_codes,
                        args.activation_scales, args.activation_status,
-                       args.weight_codes, args.weight_scales, args.output, args.rows,
-                       args.padded_columns);
+                       args.weight_codes, args.weight_scales, args.output, args.tokens,
+                       args.rows, args.padded_columns);
     return hipGetLastError();
 #else
     (void)stream;

@@ -63,8 +63,8 @@ def main() -> int:
     # DFlash split-context verification: the packed, warp-specialized, double-buffered dense verify
     # kernel (three compute and three loader waves, 16-key blocks) and its merge.
     expected = {
-        "dense_verify_kernelILj16EE": ((41656, 0, 107, 234, 10, 32, 1024), 5),
-        "dense_verify_merge_kernel": ((768, 0, 28, 29, 0, 32, 1024), 16),
+        "dense_verify_kernelILj16EE": ((41656, 0, 107, 235, 4, 32, 1024), 5),
+        "dense_verify_merge_kernel": ((768, 0, 26, 29, 0, 32, 1024), 16),
     }
     for symbol, (wanted, wanted_occupancy) in expected.items():
         actual = resources(text, symbol)

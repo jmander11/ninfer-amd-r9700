@@ -19,6 +19,7 @@
 #include "targets/qwen3/impl/runtime/layouts.h"
 #include "targets/qwen3/impl/runtime/dflash_context.h"
 #include "targets/qwen3/impl/runtime/linear_state_slots.h"
+#include "targets/qwen3/impl/runtime/prefill_schedule.h"
 #include "targets/qwen3/impl/runtime/prefix_identity.h"
 #include "targets/qwen3/impl/runtime/prompt_embedding_staging.h"
 #include "targets/qwen3/impl/runtime/text_context.h"
@@ -28,6 +29,7 @@
 
 #include <cstdint>
 #include <array>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -35,6 +37,7 @@
 #include <vector>
 
 namespace ninfer::targets::qwen3::detail::NINFER_QWEN3_RUNTIME_NS {
+namespace schedule { struct PrefillContext; }
 
 using PreparedPromptData    = qwen3::PreparedPromptData;
 using RewriteCheckpointKind = qwen3::RewriteCheckpointKind;
@@ -308,11 +311,25 @@ public:
                                                                 PreparedPromptData&& prompt,
                                                                 RequestPlan&& plan,
                                                                 runtime::TransientRegion transient,
-                                                                const qwen3::OutputSession* output = nullptr);
-    [[nodiscard]] runtime::PrefillStepResult advance_prefill_lane(std::uint32_t lane);
+                                                                const qwen3::OutputSession* output = nullptr,
+                                                                bool decode_waiting = false);
+    // With decode_waiting and a configured prefill_slice, a mixable owner returns without
+    // progress (0 tokens, incomplete): its first slice runs in the next mixed round.
+    // decode_waiting bounds the step by prefill_slice (when configured) instead of prefill_chunk.
+    [[nodiscard]] runtime::PrefillStepResult advance_prefill_lane(std::uint32_t lane,
+                                                                  bool decode_waiting = false);
     [[nodiscard]] runtime::BatchedGeneratedRound
     decode_batch(std::span<const std::uint32_t> lanes,
                  std::span<const runtime::RoundBudget> budgets);
+    // True when the staged owner's next step can share a DFlash round's target forward: a
+    // text-only prompt with prompt tokens left and no MTP bridge.
+    [[nodiscard]] bool prefill_mixable(std::uint32_t lane) const noexcept;
+    // One DFlash round for `lanes` that also advances the owner's next chunk (bounded by the
+    // prefill slice and the prefill workspace) in the same target forward.
+    [[nodiscard]] runtime::MixedGeneratedRound
+    decode_batch_with_prefill(std::span<const std::uint32_t> lanes,
+                              std::span<const runtime::RoundBudget> budgets,
+                              std::uint32_t prefill_lane);
     void set_suppressed_tokens_lane(std::uint32_t lane, std::span<const TokenId> tokens);
     void clear_suppressed_tokens_lane(std::uint32_t lane);
     void set_typical_cycle_reasoning_lane(std::uint32_t lane, bool enabled);
@@ -407,6 +424,7 @@ public:
     const std::uint32_t kv_capacity;
     const std::uint32_t max_concurrency;
     const std::uint32_t prefill_chunk;
+    const std::uint32_t prefill_slice;
     const std::uint32_t draft_window;
     const std::uint32_t dflash_verify_width;
     const bool adaptive_draft;
@@ -491,8 +509,32 @@ private:
     void copy_round_token();
     void resolve_non_speculative_pending(SequenceState& sequence, RequestControl& request,
                                          std::uint32_t accepted_tokens, bool terminal);
-    [[nodiscard]] runtime::PrefillStepResult advance_prefill(SequenceState& sequence,
-                                                             RequestControl& request);
+    // Runs the owner's chunk inside a mixed DFlash round instead of alone: receives the owner's
+    // schedule state, nominal extent, final-candidate flag and rewrite capture frontier.
+    using MixedChunkRunner = std::function<schedule::PrefillChunkResult(
+        schedule::PrefillContext&, std::uint32_t, bool, std::optional<std::uint32_t>)>;
+    // Binds the prefill owner's root sampling (tool-grammar root mask included) on its lane.
+    void bind_prefill_sampling(SequenceState& sequence, RequestControl& request);
+    [[nodiscard]] runtime::PrefillStepResult advance_prefill(
+        SequenceState& sequence, RequestControl& request, bool decode_waiting,
+        const MixedChunkRunner* mixed = nullptr, std::uint32_t step_cap = 0);
+    // Largest prompt extent of one prefill step; admission projects service work with the
+    // slice because any step may run while decode rows wait.
+    [[nodiscard]] std::uint32_t prefill_step_tokens(bool decode_waiting) const noexcept {
+        return decode_waiting && prefill_slice != 0 ? prefill_slice : prefill_chunk;
+    }
+    // Step extent the admission projection counts with. A mixed step can leave the cursor
+    // unaligned, after which a step above the irregular split may split at it, so a slice above
+    // that split is projected at the split; every non-final step still advances at least that.
+    [[nodiscard]] std::uint32_t projected_step_tokens() const noexcept {
+        const std::uint32_t tokens = prefill_step_tokens(true);
+        return prefill_slice != 0 ? std::min(tokens, kIrregularPrefillSplit) : tokens;
+    }
+    // Target width of a mixed round: the slice beside every other lane's full verify panel. A
+    // round with fewer or narrower verify panels gives the owner the unused columns.
+    [[nodiscard]] std::uint32_t mixed_forward_tokens() const noexcept {
+        return prefill_slice + (max_concurrency - 1U) * dflash_verify_width;
+    }
     void enqueue_dflash_context_append(std::span<const std::uint32_t> lanes,
                                        std::span<const std::uint32_t> starts,
                                        std::span<const std::uint32_t> counts);
@@ -506,7 +548,9 @@ private:
                      std::span<const runtime::RoundBudget> budgets);
     [[nodiscard]] runtime::BatchedGeneratedRound
     decode_dflash_batch(std::span<const std::uint32_t> lanes,
-                        std::span<const runtime::RoundBudget> budgets);
+                        std::span<const runtime::RoundBudget> budgets,
+                        std::optional<std::uint32_t> prefill_lane = std::nullopt,
+                        runtime::PrefillStepResult* prefill_step = nullptr);
     void reserve_sequence_kv(SequenceState& sequence, std::uint32_t text_pages,
                              std::uint32_t backend_pages);
     void resize_sequence_kv_entitlement(SequenceState& sequence, std::uint32_t text_pages,

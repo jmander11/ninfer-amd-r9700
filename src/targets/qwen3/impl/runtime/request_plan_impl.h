@@ -203,11 +203,11 @@ ProgramImplCore::plan_request_base(const PreparedPromptData& prompt,
         base->rewrite_checkpoint = candidate;
     }
     base->summary.service_work_quanta =
-        projected_service_work(base->summary, prompt, 0, prefill_chunk, cold_vision_uses,
+        projected_service_work(base->summary, prompt, 0, projected_step_tokens(), cold_vision_uses,
                                base->rewrite_checkpoint);
     if (prompt.generation_recovery && base->sampling.p_less) {
         base->summary.service_work_quanta += qwen3::GenerationRecoveryContext::maximum_attempts *
-            (schedule::prefill_chunk_count(reserved_context_tokens, prefill_chunk) + 2ULL);
+            (schedule::prefill_chunk_count(reserved_context_tokens, projected_step_tokens()) + 2ULL);
     }
     return RequestBasePlan(std::move(base));
 }
@@ -344,7 +344,7 @@ void ProgramImplCore::finish_request_plan(RequestPlanImpl& plan, const ResidentS
     }
 
     plan.summary.service_work_quanta = projected_service_work(
-        plan.summary, prompt, plan.reuse_base, prefill_chunk,
+        plan.summary, prompt, plan.reuse_base, projected_step_tokens(),
         plan.vision ? std::span<const VisionUseSpan>(plan.vision->uses)
                     : std::span<const VisionUseSpan>{},
         plan.rewrite_checkpoint_capture);
@@ -352,7 +352,7 @@ void ProgramImplCore::finish_request_plan(RequestPlanImpl& plan, const ResidentS
         plan.summary.service_work_quanta += qwen3::GenerationRecoveryContext::maximum_attempts *
             (schedule::prefill_chunk_count(plan.summary.prompt_tokens +
                 (plan.summary.effective_output_tokens == 0 ? 0U :
-                 plan.summary.effective_output_tokens - 1U), prefill_chunk) + 2ULL);
+                 plan.summary.effective_output_tokens - 1U), projected_step_tokens()) + 2ULL);
     }
 }
 

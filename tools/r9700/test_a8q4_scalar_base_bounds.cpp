@@ -85,7 +85,7 @@ int main() {
     require(maxima.weight_code == 89128959U, "weight-code maximum changed");
     require(maxima.activation_scale == 4456447U, "activation-scale maximum changed");
     require(maxima.weight_scale == 5570559U, "weight-scale maximum changed");
-    require(!use_a8q4_prefill_cta(1023U, 1024U, 5120U) &&
+    require(!use_a8q4_prefill_cta(32U, 1024U, 5120U) &&
                 !use_a8q4_prefill_cta(1024U, 1024U, 5056U) &&
                 !use_a8q4_prefill_cta(1024U, 128U, 5120U),
             "active dispatch predicate admits an off-inventory tuple");

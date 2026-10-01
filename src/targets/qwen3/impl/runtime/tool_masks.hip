@@ -209,13 +209,24 @@ const std::uint32_t* ToolMaskExchange::device_mask(std::size_t row) const {
 }
 
 ops::SamplingConfig ToolMaskExchange::root(std::size_t row, hipStream_t stream) {
-    auto config = configs_.at(row);
+    return root_into(outputs_.at(row), configs_.at(row), row, stream);
+}
+
+ops::SamplingConfig ToolMaskExchange::prefill_root(const OutputSession* output,
+                                                   ops::SamplingConfig config,
+                                                   hipStream_t stream) {
+    return root_into(output, config, capacity_ - 1U, stream);
+}
+
+ops::SamplingConfig ToolMaskExchange::root_into(const OutputSession* output,
+                                                ops::SamplingConfig config, std::size_t row,
+                                                hipStream_t stream) {
     config.allowed_token_words = nullptr;
     config.allowed_token_column_stride = 0;
-    if (outputs_[row] && outputs_[row]->has_tool_grammar()) {
+    if (output && output->has_tool_grammar()) {
         const std::array<TokenId, 1> token{0};
         const std::array<std::int32_t, 1> parent{-1};
-        outputs_[row]->fill_tool_masks(token, parent, {root_mask(row), kWords});
+        output->fill_tool_masks(token, parent, {root_mask(row), kWords});
         HIP_CHECK(hipMemcpyAsync(const_cast<std::uint32_t*>(device_mask(row)), root_mask(row),
                                    kWords * sizeof(std::uint32_t), hipMemcpyHostToDevice, stream));
         config.allowed_token_words = device_mask(row);

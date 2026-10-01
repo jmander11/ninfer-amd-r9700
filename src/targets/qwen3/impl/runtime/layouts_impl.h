@@ -1,6 +1,7 @@
 #include "targets/qwen3/impl/runtime/instance.h"
 #include "targets/qwen3/impl/runtime/layouts.h"
 #include "targets/qwen3/impl/runtime/linear_state_slots.h"
+#include "targets/qwen3/impl/runtime/prefill_schedule.h"
 #include "targets/qwen3/impl/runtime/context_checkpoint.h"
 #include "targets/qwen3/impl/runtime/prompt_embedding_staging.h"
 #include "targets/qwen3/impl/runtime/vision_context.h"
@@ -353,11 +354,18 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
         (void)workspace_recipe::text_prefill_roots<TextConfig>(
             layout, tokens, plan.features.vision ? 3 : 0, plan.features.vision ? tokens : 0);
     };
+    // The uniform verify sequences of a Text body when they are not its batch_size x max_width
+    // panel (a mixed round's verify part beside the prefill owner's columns).
+    struct VerifySequences {
+        std::int32_t count = 0;
+        std::int32_t width = 0;
+    };
     const auto attention_stage = [&](WorkspaceLayoutBuilder& layout, std::int32_t first,
                                      std::int32_t last, qwen3::TextPhase phase,
                                      std::int32_t batch_size, std::int32_t min_width,
                                      std::int32_t max_width, TextAttentionEnvelope envelope,
-                                     bool tree_verify = false) {
+                                     bool tree_verify = false,
+                                     VerifySequences verify_sequences = {}) {
         auto stage = layout.scope();
         (void)workspace_recipe::text_attention_projection<TextConfig>(layout, last);
         scratch(layout, Variant::attention_projection_workspace_capacity_bytes(plan.weights_profile,
@@ -373,7 +381,15 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
         scratch(layout, Variant::full_attention_workspace_capacity_bytes(
                             max_width, envelope.max_visible_keys, tree_verify));
         }
-        (void)batch_size;
+        // The batched sequence launch holds one workspace slice per sequence; tree verification
+        // attends one sequence at a time.
+        const VerifySequences sequences = verify_sequences.count != 0
+                                              ? verify_sequences
+                                              : VerifySequences{batch_size, max_width};
+        if (!tree_verify) {
+            scratch(layout, Variant::full_attention_sequences_workspace_capacity_bytes(
+                                sequences.count, sequences.width, envelope.max_visible_keys));
+        }
         (void)min_width;
         scratch(layout, Variant::attention_output_projection_workspace_capacity_bytes(
                             plan.weights_profile, phase, first, last));
@@ -419,9 +435,9 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
                                  std::int32_t last, qwen3::TextPhase phase, GdnWorkspacePath path,
                                  std::int32_t batch_size, std::int32_t min_width,
                                  std::int32_t max_width, TextAttentionEnvelope envelope,
-                                 bool tree_verify = false) {
+                                 bool tree_verify = false, VerifySequences verify_sequences = {}) {
         attention_stage(layout, first, last, phase, batch_size, min_width, max_width, envelope,
-                        tree_verify);
+                        tree_verify, verify_sequences);
         gdn_stage(layout, first, last, phase, path, batch_size, min_width, max_width);
         post_mixer_stage(layout, first, last, phase);
     };
@@ -768,6 +784,44 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
                             checked_add(dflash_peak, panel_bytes, "adaptive DFlash compact"));
                     }
                 }
+                // Mixed round: the batch's live verify panels stay while one Text body of the
+                // owner's slice plus the verify columns runs over them, with the GDN mixed front's
+                // aggregate projections and record packing, then the owner's context append.
+                if (plan.prefill_slice != 0 &&
+                    batch < static_cast<std::int32_t>(plan.max_concurrency)) {
+                    // The forward is always the slice plus every other lane's full verify panel;
+                    // the owner takes what `batch` live panels of at least two columns leave.
+                    const auto mixed_t = static_cast<std::int32_t>(
+                        plan.prefill_slice +
+                        (plan.max_concurrency - 1U) * plan.dflash_verify_width);
+                    const std::int32_t owner = mixed_t - 2 * batch;
+                    WorkspaceLayoutBuilder panels;
+                    matrix(panels, DType::BF16, DFlashConfig::feature_rows, aggregate);
+                    for (int i = 0; i < 10; ++i) { matrix(panels, DType::I32, dflash_verify, batch); }
+                    matrix(panels, DType::BF16, TextConfig::hidden, aggregate);
+                    matrix(panels, DType::BF16, TextConfig::output_rows, aggregate);
+                    WorkspaceLayoutBuilder mixed;
+                    matrix(mixed, DType::BF16, TextConfig::hidden, mixed_t);
+                    matrix(mixed, DType::I32, mixed_t, 1);
+                    matrix(mixed, DType::I32, mixed_t, 1);
+                    matrix(mixed, DType::BF16, 2 * TextConfig::key_dim, mixed_t);
+                    matrix(mixed, DType::BF16, 2 * TextConfig::value_dim, mixed_t);
+                    matrix(mixed, DType::BF16, TextConfig::convolution_dim, aggregate);
+                    matrix(mixed, DType::BF16, TextConfig::key_dim, aggregate);
+                    matrix(mixed, DType::BF16, TextConfig::value_dim, aggregate);
+                    matrix(mixed, DType::FP32, 2 * TextConfig::gdn_value_heads, aggregate);
+                    target_body(mixed, 1, mixed_t, qwen3::TextPhase::Prefill,
+                                GdnWorkspacePath::Prefill, 1, 1, mixed_t, text_envelope, false,
+                                VerifySequences{batch, dflash_verify});
+                    scratch(mixed, ops::speculative_accept_greedy_drafts_workspace_capacity_bytes(
+                                       TextConfig::token_domain, drafts, drafts, batch, batch));
+                    scratch(mixed,
+                            ops::sampling_workspace_capacity_bytes(TextConfig::token_domain, 1, 1));
+                    out.dflash_mixed = std::max(
+                        {out.dflash_mixed,
+                         checked_add(finish(panels), finish(mixed), "mixed DFlash round"),
+                         dflash_context_capacity(owner, false)});
+                }
             }
         }
     }
@@ -781,7 +835,8 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
     }
 
     out.capacity = std::max({out.text_prefill, out.ordinary_round, out.mtp_prefill, out.mtp_round,
-                             out.dflash_context, out.dflash_round, out.vision_encode});
+                             out.dflash_context, out.dflash_round, out.dflash_mixed,
+                             out.vision_encode});
     return out;
 }
 
@@ -888,6 +943,23 @@ std::unique_ptr<SequencePlanImpl> build_sequence_candidate(const SequencePlannin
             ? dflash_storage_verify_width(impl->captured_ks, inputs.draft_window, inputs.dflash_verify_width)
             : 0U;
     impl->speculative_backend = inputs.speculative_backend;
+    // A slice must fit one prefill body beside the largest other-lane verify batch. A mixed
+    // round's owner also takes the verify columns its round leaves unused, so the mixed forward
+    // is always slice + (C-1) x verify width; the workspace plans that width.
+    impl->prefill_slice = inputs.prefill_slice;
+    if (impl->prefill_slice != 0 && inputs.speculative_backend == SpeculativeBackend::DFlash) {
+        const std::uint64_t verify_columns =
+            static_cast<std::uint64_t>(inputs.max_concurrency - 1U) * impl->dflash_verify_width;
+        if (verify_columns >= inputs.prefill_chunk) {
+            throw std::invalid_argument("prefill_slice needs a prefill chunk wider than the "
+                                        "other lanes' verify columns");
+        }
+        std::uint32_t bound = inputs.prefill_chunk - static_cast<std::uint32_t>(verify_columns);
+        // A bound above the irregular split must stay aligned, or every slice would fall back
+        // to the 4096-token split.
+        if (bound > kIrregularPrefillSplit) { bound -= bound % kPrefillChunkAlignment; }
+        impl->prefill_slice = std::min(impl->prefill_slice, bound);
+    }
     impl->proposal_head       = inputs.proposal_head;
     impl->features            = inputs.features;
     impl->use_device_graph    = inputs.use_device_graph;
@@ -1058,6 +1130,8 @@ make_sequence_planner_impl(DeviceContext& device, const EngineOptions& options,
         .capacity            = options.max_context,
         .max_concurrency     = options.max_concurrency,
         .prefill_chunk       = std::min(options.prefill_chunk, options.max_context),
+        .prefill_slice       = std::min(options.prefill_slice,
+                                        std::min(options.prefill_chunk, options.max_context)),
         .draft_window        = options.speculative.draft_tokens,
         .dflash_verify_width = options.speculative.dflash_verify_width,
         .adaptive_draft      = options.speculative.adaptive_draft,

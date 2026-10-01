@@ -11,6 +11,10 @@
 #include <optional>
 #include <span>
 
+namespace ninfer::ops::r9700::kv {
+struct Fp8Int4KvAppendArgs;
+} // namespace ninfer::ops::r9700::kv
+
 namespace ninfer::targets::qwen3 {
 
 // The sole Qwen3.8 growing-cache identity. K is direct OCP E4M3FN, V is canonical signed INT4,
@@ -244,6 +248,14 @@ public:
 
     void launch_append_layer(std::uint32_t layer, const hip_bfloat16* keys,
                              const hip_bfloat16* values, hipStream_t stream);
+    // The same layer append for the distinct transactions of one compact decode batch (at most
+    // four, one cache), as one codec launch. Each transaction keeps its own host authority,
+    // positions, table row and status word exactly as its launch_append_layer would.
+    static void launch_append_layers(std::span<PagedKVTransaction* const> transactions,
+                                     std::uint32_t layer,
+                                     std::span<const hip_bfloat16* const> keys,
+                                     std::span<const hip_bfloat16* const> values,
+                                     hipStream_t stream);
     void launch_compact_layer(std::uint32_t layer, std::uint32_t prefix,
                               std::span<const std::uint32_t> selected_path,
                               hipStream_t stream);
@@ -283,6 +295,11 @@ private:
                        const std::int32_t* device_table_row = nullptr);
 
     void prepare_launch(hipStream_t stream);
+    // Validates and stages one layer append; record_append_layer follows its launch.
+    [[nodiscard]] ops::r9700::kv::Fp8Int4KvAppendArgs prepare_append_layer(
+        std::uint32_t layer, const hip_bfloat16* keys, const hip_bfloat16* values,
+        hipStream_t stream);
+    void record_append_layer(std::uint32_t layer) noexcept;
     void require_open(const char* operation) const;
     void require_new_layer(std::uint32_t layer, const char* operation) const;
     void finish(bool poison) noexcept;

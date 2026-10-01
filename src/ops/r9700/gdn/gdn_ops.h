@@ -48,19 +48,34 @@ namespace ninfer::ops::r9700::gdn {
     hip_bfloat16* output, std::uint32_t channels, std::uint32_t tokens,
     hipStream_t stream) noexcept;
 
-// Fixed ordinary-prefill Qwen3.8 projection/convolution handoff. The represented BF16
-// projection outputs remain separate: query_key is [2048,4096] and projected_value is
-// [2048,6144] (the output gate is projected directly by the caller). The operation applies the
-// incumbent width-four causal convolution and SiLU formula directly into query [2048,2048], key
-// [2048,2048], and value [2048,6144], then publishes the final three represented projection
-// columns to history. history_in/history_out are disjoint or exactly identical. This
-// target-specific entry accepts exactly 2048 tokens; snapshot/replay and every other ordinary
-// width use their existing paths.
-[[nodiscard]] hipError_t projection_conv_prefill_p2048_direct_scatter_bf16(
+// One-sequence Qwen3.8 prefill projection/convolution handoff at any width T >= 1. The
+// represented BF16 projection outputs remain separate: query_key is [T,4096], and token t's
+// value projection is the 6144 values at projected_value + t * value_stride, where value_stride
+// is 6144 (a separately projected value; the output gate is projected by the caller) or 12288
+// (the [value,z] projection rows; z is left to the caller). The operation applies the incumbent
+// width-four causal convolution and SiLU formula directly into query [T,2048], key [T,2048], and
+// value [T,6144], then publishes the trailing three represented columns of
+// concat(history_in, projection) to history_out. history_in/history_out are disjoint or exactly
+// identical.
+[[nodiscard]] hipError_t projection_conv_prefill_direct_scatter_bf16(
     const hip_bfloat16* query_key, const hip_bfloat16* projected_value,
-    const hip_bfloat16* conv_weight, const hip_bfloat16* history_in,
-    hip_bfloat16* history_out, hip_bfloat16* query, hip_bfloat16* key,
-    hip_bfloat16* value, std::uint32_t tokens, hipStream_t stream) noexcept;
+    std::uint32_t value_stride, const hip_bfloat16* conv_weight, const hip_bfloat16* history_in,
+    hip_bfloat16* history_out, hip_bfloat16* query, hip_bfloat16* key, hip_bfloat16* value,
+    std::uint32_t tokens, hipStream_t stream) noexcept;
+
+// A mixed round's GDN convolution in one launch: the prefill owner's direct scatter over its
+// leading owner_tokens columns (value_stride 6144, history_in/history_out as above) and
+// the recorded convolution of projection_conv_record_bf16 over the trailing width*batch columns of
+// the same query_key/projected_value/query/key/value storage (value rows only; the projection
+// publishes the output gate). Bitwise those two calls; the owner's
+// history and the verify batch's initial state slots are disjoint.
+[[nodiscard]] hipError_t projection_conv_mixed_split_bf16(
+    const hip_bfloat16* query_key, const hip_bfloat16* projected_value,
+    const hip_bfloat16* conv_weight, const hip_bfloat16* history_in, hip_bfloat16* history_out,
+    hip_bfloat16* query, hip_bfloat16* key, hip_bfloat16* value, std::uint32_t owner_tokens,
+    const hip_bfloat16* conv_states, const std::int32_t* valid_columns,
+    const std::int32_t* initial_state_slots, hip_bfloat16* conv_record, std::uint32_t width,
+    std::uint32_t batch, std::uint32_t state_slots, hipStream_t stream) noexcept;
 
 // Qwen3.8-27B verification projection/convolution at the fixed real geometry. `query_key` is
 // BF16 [B*W,4096] in column-major Tensor storage, `value_z` is BF16 [B*W,12288] in [value,z]

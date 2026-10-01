@@ -541,7 +541,8 @@ void qualify_normalization_and_activations(hipStream_t stream) {
     DeviceBuffer<hip_bfloat16> d_bias(kHidden);
     copy_to_device(d_weight, weight);
     copy_to_device(d_bias, bias);
-    for (std::uint32_t rows = 1; rows <= 8; ++rows) {
+    // 25..127 rows are mixed decode/prefill units served by the one-token-per-wave route.
+    for (const std::uint32_t rows : {1U, 2U, 3U, 4U, 5U, 6U, 7U, 8U, 25U, 57U, 127U}) {
         const std::size_t elements = static_cast<std::size_t>(kHidden) * rows;
         const std::vector<hip_bfloat16> input = bf16_fixture(elements, rows + 131U);
         const std::vector<hip_bfloat16> up = bf16_fixture(elements, rows + 149U);
@@ -1651,7 +1652,7 @@ int main() {
         qualify_argmax(stream);
         qualify_public_extended_paths(stream);
         HIP_CHECK(hipStreamDestroy(stream));
-        std::cout << "r9700_eager_op_qualification: PASS rows=T1..8 D=" << kHidden
+        std::cout << "r9700_eager_op_qualification: PASS rows=T1..8 (norms also T25/57/127) D=" << kHidden
                   << " vocab=" << kVocabValid << '/' << kVocabPhysical
                   << " mtp_pack_split=exact" << '\n';
         return 0;

@@ -1139,15 +1139,31 @@ static_assert(kDenseVerifyComputeWaves * 16U >= 8U * 6U);
 static_assert(kDenseVerifyKeyItems + 4U * kDenseVerifyKeys == 2U * kDenseVerifyLoaders);
 static_assert(kDenseVerifyKeyItems - kDenseVerifyLoaders == 32U);
 
+// Kernel arguments of one packed launch over the sequences of a compact decode batch. Grid z is
+// the sequence: its own arguments (page table or table row, frontier, positions, output) and its
+// own partial workspace (score_workspace) come from this kernarg array, so each CTA runs exactly
+// the arithmetic of a one-sequence launch. Slots at and above gridDim.z are never read.
+struct DenseVerifySequences {
+    Fp8Int4KvAttentionArgs sequence[kPackedDecodeMaximumSequences];
+    std::uint32_t chunk_keys[kPackedDecodeMaximumSequences];
+    std::uint32_t chunks[kPackedDecodeMaximumSequences];
+};
+
 template <std::uint32_t Group>
 __global__ __launch_bounds__(kDenseVerifyThreads)
-void dense_verify_kernel(Fp8Int4KvAttentionArgs a, std::uint32_t chunk_keys, float* partial) {
+void dense_verify_kernel(DenseVerifySequences sequences) {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
+    // Grid y covers the batch's longest chunk split; a shorter sequence's surplus CTAs exit.
+    const std::uint32_t sequence = blockIdx.z, chunk = blockIdx.y;
+    if (chunk >= sequences.chunks[sequence]) return;
+    const Fp8Int4KvAttentionArgs& a = sequences.sequence[sequence];
+    const std::uint32_t chunk_keys = sequences.chunk_keys[sequence];
+    float* const partial = a.score_workspace;
     __shared__ DenseVerifyShared shared;
     const std::uint32_t tid = threadIdx.x, lane = tid % 32U;
     const std::uint32_t wave = __builtin_amdgcn_readfirstlane(tid / 32U);
     const std::uint32_t axis = lane % 16U, half = lane / 16U;
-    const std::uint32_t kv_head = blockIdx.x, chunk = blockIdx.y;
+    const std::uint32_t kv_head = blockIdx.x;
     const std::uint32_t tile_rows = a.query_rows;
     const std::size_t physical_pages = a.physical_tokens / kPageSize;
 
@@ -1262,16 +1278,21 @@ void dense_verify_kernel(Fp8Int4KvAttentionArgs a, std::uint32_t chunk_keys, flo
         out[kHeadDim + 1U] = invalid ? __builtin_nanf("") : row_denominator;
     }
 #else
-    (void)a; (void)chunk_keys; (void)partial;
+    (void)sequences;
 #endif
 }
 
 // Stable FP32 merge of the split partials: O = sum_c n_c 2^(m_c - M), L = sum_c l_c 2^(m_c - M),
-// output = O * (8 / L), restoring the V/8 staging factor as the one-pass kernel does.
+// output = O * (8 / L), restoring the V/8 staging factor as the one-pass kernel does. Grid z is
+// the sequence and grid y covers the batch's widest row panel; a narrower sequence's surplus rows
+// exit.
 __global__ __launch_bounds__(kHeadDim)
-void dense_verify_merge_kernel(Fp8Int4KvAttentionArgs a, std::uint32_t chunks,
-                               const float* partial) {
+void dense_verify_merge_kernel(DenseVerifySequences sequences) {
+    const Fp8Int4KvAttentionArgs& a = sequences.sequence[blockIdx.z];
     const std::uint32_t head = blockIdx.x, row = blockIdx.y, feature = threadIdx.x;
+    if (row >= a.query_rows) return;
+    const std::uint32_t chunks = sequences.chunks[blockIdx.z];
+    const float* const partial = a.score_workspace;
     float* output = a.output + (static_cast<std::size_t>(row) * 24U + head) * kHeadDim + feature;
     if (a.active_query_rows != nullptr) {
         const std::int32_t active = *a.active_query_rows;
@@ -1667,8 +1688,11 @@ hipError_t fp8_int4_kv_attention_mid_rows(const Fp8Int4KvAttentionArgs& a,
     }
     const hipError_t error = hipGetLastError();
     if (error != hipSuccess) return error;
+    DenseVerifySequences merge{};
+    merge.sequence[0] = a;
+    merge.chunks[0] = split.chunks;
     hipLaunchKernelGGL(dense_verify_merge_kernel, dim3(24U, a.query_rows), dim3(kHeadDim), 0,
-                       stream, a, split.chunks, a.score_workspace);
+                       stream, merge);
     return hipGetLastError();
 #else
     (void)stream;
@@ -1686,40 +1710,60 @@ std::size_t fp8_int4_kv_attention_packed_decode_workspace_bytes(
 }
 
 hipError_t fp8_int4_kv_attention_packed_decode(
-    const Fp8Int4KvAttentionArgs& a, hipStream_t stream) noexcept {
-    if (!a.query || !a.key_codes || !a.value_codes || !a.value_scale_bits || !a.page_table ||
-        !a.page_table_pages || !a.context ||
-        a.context > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max()) ||
-        !a.physical_tokens || a.physical_tokens % kPageSize || a.query_heads != 24U ||
-        a.kv_heads != 4U || a.q_to_kv != 6U || (a.query_rows < 1U || a.query_rows > 8U) ||
-        !a.row_positions || !a.score_workspace ||
-        !a.output || !std::isfinite(a.attention_scale) || !(a.attention_scale > 0.0F) ||
-        (a.page_table_row != nullptr &&
-         (a.page_table_row_stride < a.page_table_pages || a.page_table_row_count == 0U)) ||
-        a.key_layout != Fp8Int4KvPlaneLayout::TokenFastest ||
-        a.value_layout != Fp8Int4KvPlaneLayout::FeatureFastest ||
-        a.value_scale_layout != Fp8Int4KvPlaneLayout::FeatureFastest ||
-        a.ancestor_masks != nullptr ||
-        a.prefix_lengths != nullptr || a.active_query_rows != nullptr ||
-        a.prefix_length_stride > 1U ||
-        a.page_table_pages < (a.context + kPageSize - 1U) / kPageSize ||
-        a.value_group != 16U) {
+    std::span<const Fp8Int4KvAttentionArgs> sequences, hipStream_t stream) noexcept {
+    if (sequences.empty() || sequences.size() > kPackedDecodeMaximumSequences) {
         return hipErrorInvalidValue;
     }
+    DenseVerifySequences batch{};
+    std::uint32_t grid_chunks = 0U, grid_rows = 0U;
+    for (std::size_t sequence = 0U; sequence < sequences.size(); ++sequence) {
+        const Fp8Int4KvAttentionArgs& a = sequences[sequence];
+        if (!a.query || !a.key_codes || !a.value_codes || !a.value_scale_bits || !a.page_table ||
+            !a.page_table_pages || !a.context ||
+            a.context > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max()) ||
+            !a.physical_tokens || a.physical_tokens % kPageSize || a.query_heads != 24U ||
+            a.kv_heads != 4U || a.q_to_kv != 6U || (a.query_rows < 1U || a.query_rows > 8U) ||
+            !a.row_positions || !a.score_workspace ||
+            !a.output || !std::isfinite(a.attention_scale) || !(a.attention_scale > 0.0F) ||
+            (a.page_table_row != nullptr &&
+             (a.page_table_row_stride < a.page_table_pages || a.page_table_row_count == 0U)) ||
+            a.key_layout != Fp8Int4KvPlaneLayout::TokenFastest ||
+            a.value_layout != Fp8Int4KvPlaneLayout::FeatureFastest ||
+            a.value_scale_layout != Fp8Int4KvPlaneLayout::FeatureFastest ||
+            a.ancestor_masks != nullptr ||
+            a.prefix_lengths != nullptr || a.active_query_rows != nullptr ||
+            a.prefix_length_stride > 1U ||
+            a.page_table_pages < (a.context + kPageSize - 1U) / kPageSize ||
+            a.value_group != 16U) {
+            return hipErrorInvalidValue;
+        }
+        const std::uint32_t chunk_keys = dense_verify_chunk_keys(a.context);
+        batch.sequence[sequence] = a;
+        batch.chunk_keys[sequence] = chunk_keys;
+        batch.chunks[sequence] =
+            static_cast<std::uint32_t>((a.context + chunk_keys - 1U) / chunk_keys);
+        grid_chunks = std::max(grid_chunks, batch.chunks[sequence]);
+        grid_rows = std::max(grid_rows, a.query_rows);
+    }
 #if defined(__HIPCC__)
-    const std::uint32_t chunk_keys = dense_verify_chunk_keys(a.context);
-    const auto chunks = static_cast<std::uint32_t>((a.context + chunk_keys - 1U) / chunk_keys);
-    hipLaunchKernelGGL((dense_verify_kernel<16U>), dim3(4U, chunks), dim3(kDenseVerifyThreads), 0,
-                       stream, a, chunk_keys, a.score_workspace);
+    const auto count = static_cast<std::uint32_t>(sequences.size());
+    hipLaunchKernelGGL((dense_verify_kernel<16U>), dim3(4U, grid_chunks, count),
+                       dim3(kDenseVerifyThreads), 0, stream, batch);
     const hipError_t error = hipGetLastError();
     if (error != hipSuccess) return error;
-    hipLaunchKernelGGL(dense_verify_merge_kernel, dim3(24U, a.query_rows), dim3(kHeadDim), 0,
-                       stream, a, chunks, a.score_workspace);
+    hipLaunchKernelGGL(dense_verify_merge_kernel, dim3(24U, grid_rows, count), dim3(kHeadDim), 0,
+                       stream, batch);
     return hipGetLastError();
 #else
     (void)stream;
     return hipErrorNotSupported;
 #endif
+}
+
+hipError_t fp8_int4_kv_attention_packed_decode(const Fp8Int4KvAttentionArgs& args,
+                                               hipStream_t stream) noexcept {
+    return fp8_int4_kv_attention_packed_decode(
+        std::span<const Fp8Int4KvAttentionArgs>(&args, 1U), stream);
 }
 
 namespace {

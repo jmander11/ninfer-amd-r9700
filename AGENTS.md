@@ -95,9 +95,10 @@ codebook and private fixed BF16 state.
 
 The workload is one R9700, one resident model instance, and a startup-fixed one to four active
 requests. The Engine forms one compact decode batch per round boundary with bounded FIFO ingress
-and no preemption. Large-scale or preemptive continuous batching, priority/QoS scheduling,
-additional checkpoint targets, and retargeting to another execution platform are outside the
-current product. This is a trusted local, single-owner project, and requirements from a different
+and no preemption; one prefill owner at a time advances either prefill-first or in startup-fixed
+slices, which under DFlash share a decode round's target forward (mixed round). Large-scale or
+preemptive continuous batching, priority/QoS scheduling, additional checkpoint targets, and
+retargeting to another execution platform are outside the current product. This is a trusted local, single-owner project, and requirements from a different
 workload, trust model, or deployment model are out of scope until the contract is explicitly
 changed.
 

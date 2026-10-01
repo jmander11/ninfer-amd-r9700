@@ -46,7 +46,8 @@ fp8_quantize_activation(const Fp8ActivationQuantizeArgs& args, hipStream_t strea
 // Fused producers (any T). Each quantizes exactly the BF16 tensor its unfused producer would
 // publish (which is never materialized):
 // - RMSNorm of x [T,5120]: BF16(x * rsqrt(mean(x^2) + eps) * (w + unit_offset)), with the FP32
-//   reduction order of the eager K5120 small-T RMSNorm;
+//   reduction order of the eager K5120 row-CTA RMSNorm; a non-null `normalized` [T,5120] (disjoint
+//   from every other operand) also receives those BF16 rows;
 // - output gate: BF16(BF16(attention) / (1 + exp(-gate))) of FP32 attention and BF16 gate [T,K].
 struct Fp8NormalizedQuantizeArgs {
     const hip_bfloat16* input  = nullptr;
@@ -54,6 +55,7 @@ struct Fp8NormalizedQuantizeArgs {
     float eps                  = 0.0F;
     bool unit_offset           = false;
     Fp8ActivationWorkspace workspace{};
+    hip_bfloat16* normalized   = nullptr;
 };
 [[nodiscard]] hipError_t fp8_quantize_normalized_activation(
     const Fp8NormalizedQuantizeArgs& args, hipStream_t stream) noexcept;

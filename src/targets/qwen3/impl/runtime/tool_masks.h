@@ -39,6 +39,13 @@ public:
               std::span<const ops::SamplingConfig> sampling);
     // Ordinary/prefill root sampling; called at a synchronized CPU boundary.
     [[nodiscard]] ops::SamplingConfig root(std::size_t row, hipStream_t stream);
+    // A prefilling request's first-token sampling. Its mask occupies the last row, which no
+    // decode batch reaches while a request prefills (the batch has at most capacity - 1 rows),
+    // and the bound batch is left intact, so this may run inside a mixed round before its
+    // work is enqueued.
+    [[nodiscard]] ops::SamplingConfig prefill_root(const OutputSession* output,
+                                                   ops::SamplingConfig config,
+                                                   hipStream_t stream);
     // Called inside the speculative graph after ids/parents are constructed. The returned
     // configs are target-only: draft proposal sampling keeps its own unmasked configs.
     [[nodiscard]] const ops::SamplingConfig* publish(
@@ -56,6 +63,9 @@ private:
     void serve() noexcept;
     void answer(std::uint32_t request) noexcept;
     void fill(bool tree);
+    [[nodiscard]] ops::SamplingConfig root_into(const OutputSession* output,
+                                                ops::SamplingConfig config, std::size_t row,
+                                                hipStream_t stream);
     [[nodiscard]] std::uint32_t* host_mask(std::size_t row) const;
     [[nodiscard]] std::uint32_t* root_mask(std::size_t row) const;
     [[nodiscard]] const std::uint32_t* device_mask(std::size_t row) const;

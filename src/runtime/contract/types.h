@@ -113,6 +113,12 @@ struct PrefillStepResult {
     bool host_input_consumed              = false;
 };
 
+// One DecodeRound whose target forward also advanced the prefill owner's next chunk.
+struct MixedGeneratedRound {
+    BatchedGeneratedRound round;
+    PrefillStepResult prefill;
+};
+
 struct RoundBudget {
     std::uint32_t generated_tokens_remaining = 0;
 };

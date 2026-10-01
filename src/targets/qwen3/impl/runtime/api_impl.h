@@ -176,14 +176,16 @@ template <>
 runtime::PrefillStepResult
 Program<Variant>::start_prefill_lane(std::uint32_t lane, PreparedPrompt&& prompt,
                                      RequestPlan<Variant>&& plan,
-                                     runtime::TransientRegion transient, const OutputSession* output) {
+                                     runtime::TransientRegion transient, const OutputSession* output,
+                                     bool decode_waiting) {
     return impl_->start_prefill_lane(lane, PreparedPromptAccess::take(std::move(prompt)),
-                                     std::move(plan), transient, output);
+                                     std::move(plan), transient, output, decode_waiting);
 }
 
 template <>
-runtime::PrefillStepResult Program<Variant>::advance_prefill_lane(std::uint32_t lane) {
-    return impl_->advance_prefill_lane(lane);
+runtime::PrefillStepResult Program<Variant>::advance_prefill_lane(std::uint32_t lane,
+                                                                  bool decode_waiting) {
+    return impl_->advance_prefill_lane(lane, decode_waiting);
 }
 
 template <>
@@ -191,6 +193,19 @@ runtime::BatchedGeneratedRound
 Program<Variant>::decode_batch(std::span<const std::uint32_t> lanes,
                                std::span<const runtime::RoundBudget> budgets) {
     return impl_->decode_batch(lanes, budgets);
+}
+
+template <>
+bool Program<Variant>::prefill_mixable(std::uint32_t lane) const noexcept {
+    return impl_->prefill_mixable(lane);
+}
+
+template <>
+runtime::MixedGeneratedRound
+Program<Variant>::decode_batch_with_prefill(std::span<const std::uint32_t> lanes,
+                                            std::span<const runtime::RoundBudget> budgets,
+                                            std::uint32_t prefill_lane) {
+    return impl_->decode_batch_with_prefill(lanes, budgets, prefill_lane);
 }
 
 template <>

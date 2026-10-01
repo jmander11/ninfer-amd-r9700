@@ -4,10 +4,13 @@
 // an independent FP64 product of the decoded E4M3 weight and activation codes with their FP32
 // row/token scales checks every output element (small T) or sampled tokens and rows (prefill);
 // output guards; and a nonfinite input token publishes the canonical BF16 NaN in exactly its row
-// while every other token's output is unchanged.
+// while every other token's output is unchanged. At prefill widths the same rows also run through
+// fp8lut4_linear (raw staging) with a split output and with residual accumulation, which must
+// equal the plain route bitwise (BF16(residual + BF16(y)) for accumulation).
 #include "ninfer/types.h"
 #include "ops/r9700/linear/fp8_activation.h"
 #include "ops/r9700/linear/fp8_small_t_linear.h"
+#include "ops/r9700/linear/fp8lut4_linear.h"
 #include "ops/r9700/linear/linear_execution.h"
 #include "../../tests/ops/fp8_int4_kv_oracle.h"
 
@@ -183,6 +186,58 @@ double run_shape(std::uint32_t rows, std::uint32_t columns, std::uint32_t tokens
             worst = std::max(worst, error);
         }
     }
+    if (fp8::fp8_row_scaled_projection_supported(tokens, rows, columns)) {
+        const fp8::Fp8Lut4Weight raw{image.data, nullptr,
+                                     reinterpret_cast<const float*>(image.data + codes.size()), rows,
+                                     columns};
+        // Split at a 128-row boundary inside the rows.
+        const std::uint32_t split = rows / 2U / 128U * 128U;
+        Device<hip_bfloat16> leading(static_cast<std::size_t>(tokens) * split);
+        Device<hip_bfloat16> trailing(static_cast<std::size_t>(tokens) * (rows - split));
+        check(fp8::fp8lut4_linear(raw, planes,
+                                  {.leading = leading.data, .trailing = trailing.data, .split = split},
+                                  nullptr),
+              "raw split run");
+        check(hipDeviceSynchronize(), "sync split");
+        std::vector<std::uint16_t> lead(static_cast<std::size_t>(tokens) * split),
+            trail(static_cast<std::size_t>(tokens) * (rows - split));
+        check(hipMemcpy(lead.data(), leading.data, leading.bytes(), hipMemcpyDeviceToHost), "lead");
+        check(hipMemcpy(trail.data(), trailing.data, trailing.bytes(), hipMemcpyDeviceToHost), "trail");
+        for (std::uint32_t token = 0; token < tokens; ++token)
+            for (std::uint32_t row = 0; row < rows; ++row) {
+                const std::uint16_t got = row < split
+                    ? lead[static_cast<std::size_t>(token) * split + row]
+                    : trail[static_cast<std::size_t>(token) * (rows - split) + row - split];
+                require(got == output[kGuard + static_cast<std::size_t>(token) * rows + row],
+                        "raw split output differs from the plain route");
+            }
+        // Accumulation into a random BF16 residual.
+        std::vector<std::uint16_t> base(outputs);
+        for (auto& bits : base) {
+            const hip_bfloat16 value(static_cast<float>((rng.uniform() - 0.5) * 8.0));
+            std::memcpy(&bits, &value, sizeof(bits));
+        }
+        Device<hip_bfloat16> residual(outputs);
+        check(hipMemcpy(residual.data, base.data(), residual.bytes(), hipMemcpyHostToDevice), "base");
+        check(fp8::fp8lut4_linear(raw, planes, {.leading = residual.data, .accumulate = true}, nullptr),
+              "raw accumulate run");
+        check(hipDeviceSynchronize(), "sync accumulate");
+        std::vector<std::uint16_t> summed(outputs);
+        check(hipMemcpy(summed.data(), residual.data, residual.bytes(), hipMemcpyDeviceToHost), "sum");
+        const auto as_float = [](std::uint16_t bits) {
+            const std::uint32_t word = static_cast<std::uint32_t>(bits) << 16U;
+            float value;
+            std::memcpy(&value, &word, sizeof(value));
+            return value;
+        };
+        for (std::size_t index = 0; index < outputs; ++index) {
+            const hip_bfloat16 expected(as_float(base[index]) + as_float(output[kGuard + index]));
+            std::uint16_t expected_bits;
+            std::memcpy(&expected_bits, &expected, sizeof(expected_bits));
+            require(summed[index] == expected_bits,
+                    "raw accumulate output differs from BF16(residual + plain output)");
+        }
+    }
     // A nonfinite represented input poisons exactly its token's output row.
     const std::uint32_t bad_token = tokens / 2U;
     input[static_cast<std::size_t>(bad_token) * columns + 3U] =
@@ -220,10 +275,10 @@ int main() {
         for (const auto [rows, columns] : {std::pair<std::uint32_t, std::uint32_t>{7168U, 5120U},
                                            {5120U, 6144U}, {34816U, 5120U}, {5120U, 17408U},
                                            {4096U, 5120U}}) {
-            for (const std::uint32_t tokens : {33U, 300U, 2048U})
+            for (const std::uint32_t tokens : {33U, 64U, 100U, 128U, 129U, 200U, 300U, 640U, 2048U})
                 worst = std::max(worst, run_shape(rows, columns, tokens, rng));
         }
-        std::cout << "fp8_row_scaled_linear: PASS small T=1..32 and prefill T=33/300/2048 on "
+        std::cout << "fp8_row_scaled_linear: PASS small T=1..32 and prefill T=33/64/100/128/129/200/300/640/2048 on "
                      "N7168/K5120, N5120/K6144, N34816/K5120, N5120/K17408, N4096/K5120 "
                      "maximum_normalized_error="
                   << worst << " nonfinite_poison=PASS guards=PASS\n";

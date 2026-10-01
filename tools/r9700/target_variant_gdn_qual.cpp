@@ -32,14 +32,10 @@ using Variant = ninfer::targets::qwen3_8_27b::detail::Variant;
 static_assert(!Variant::ExecutionState::gdn_q4_pair_t1_selected(
     4U, 1U, QType::Q4G64_F16S, QType::Q4G64_F16S));
 
-static_assert(Variant::gdn_input_projection_prefill_p2048_selected(
-    ninfer::targets::qwen3::TextPhase::Prefill, 2048));
-static_assert(!Variant::gdn_input_projection_prefill_p2048_selected(
-    ninfer::targets::qwen3::TextPhase::Prefill, 1024));
-static_assert(!Variant::gdn_input_projection_prefill_p2048_selected(
-    ninfer::targets::qwen3::TextPhase::Prefill, 4096));
-static_assert(!Variant::gdn_input_projection_prefill_p2048_selected(
-    ninfer::targets::qwen3::TextPhase::Verify, 2048));
+static_assert(Variant::gdn_input_projection_prefill_selected(
+    ninfer::targets::qwen3::TextPhase::Prefill));
+static_assert(!Variant::gdn_input_projection_prefill_selected(
+    ninfer::targets::qwen3::TextPhase::Verify));
 static_assert(Variant::ExecutionState::gdn_q4_pair_t1_selected(
     8U, 1U, QType::Q4G64_F16S, QType::Q4G64_F16S));
 static_assert(!Variant::ExecutionState::gdn_q4_pair_t1_selected(

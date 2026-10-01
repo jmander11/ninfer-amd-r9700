@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 
 namespace ninfer::ops::r9700::kv {
 
@@ -73,6 +74,13 @@ struct Fp8Int4KvAppendArgs {
 // scale. The caller owns stream ordering, output-plane non-overlap, allocation-product overflow
 // checks, and inspection of status before cache commit.
 [[nodiscard]] hipError_t fp8_int4_kv_append(const Fp8Int4KvAppendArgs& args,
+                                             hipStream_t stream) noexcept;
+// One launch appends the panels of up to four sequences of a compact decode batch (grid y =
+// sequence), each with its own arguments and status word; every stored byte and status bit equals
+// that of the sequence's one-sequence launch. All sequences share one value group and plane order,
+// and their destination slots must not overlap.
+inline constexpr std::size_t kAppendMaximumSequences = 4U;
+[[nodiscard]] hipError_t fp8_int4_kv_append(std::span<const Fp8Int4KvAppendArgs> sequences,
                                              hipStream_t stream) noexcept;
 
 } // namespace ninfer::ops::r9700::kv

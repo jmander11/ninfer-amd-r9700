@@ -296,6 +296,14 @@ std::string usage_text(std::string_view program) {
         << "                              the default 64 MiB headroom (default: workload)\n"
         << "  --prefill-chunk <tokens>    multiple of " << kPrefillChunkAlignment
         << " (default: " << kDefaultPrefillChunk << ")\n"
+        << "  --prefill-slice <tokens>    prefill-owner tokens per slice while other\n"
+        << "                              requests decode (default: 0, prefill first)\n"
+        << "  --prefill-slice-rounds <N>  decode rounds per prefill slice (default: 1)\n"
+        << "  --contention <P,R>          C-1 lanes decode while one lane runs R fresh P-token\n"
+        << "                              prefills; reports decode and prefill tok/s (C >= 2)\n"
+        << "  --contention-context <L>    prompt tokens of each contention decode lane\n"
+        << "                              (default: 512)\n"
+        << "  --contention-lanes <N>      contention decode lanes, 1..C-1 (default: C-1)\n"
         << "  --concurrency <1..4>        concurrent Engine lanes (default: 1);\n"
         << "                              pp+tg at C>1 reports batched decode after a sequential\n"
         << "                              prefix-reuse seed so prefill/decode do not interleave\n"
@@ -373,6 +381,31 @@ BenchOptions parse_args(int argc, char** argv) {
             }
         } else if (arg == "--prefill-chunk") {
             options.prefill_chunk = parse_u32(value("--prefill-chunk"), "prefill-chunk");
+        } else if (arg == "--prefill-slice") {
+            options.prefill_slice = parse_u32(value("--prefill-slice"), "prefill-slice", true);
+        } else if (arg == "--prefill-slice-rounds") {
+            options.prefill_slice_rounds =
+                parse_u32(value("--prefill-slice-rounds"), "prefill-slice-rounds");
+        } else if (arg == "--pair-check") {
+            const auto parsed = parse_pair_list(value("--pair-check"), "pair-check");
+            if (parsed.size() != 1 || parsed.front().first <= 0 || parsed.front().second <= 0) {
+                throw std::invalid_argument("--pair-check takes exactly one positive P,G pair");
+            }
+            options.pair_check = parsed.front();
+        } else if (arg == "--contention") {
+            const auto parsed = parse_pair_list(value("--contention"), "contention");
+            if (parsed.size() != 1 || parsed.front().first <= 0 || parsed.front().second <= 0) {
+                throw std::invalid_argument("--contention takes exactly one positive P,R pair");
+            }
+            options.contention = parsed.front();
+        } else if (arg == "--contention-lanes") {
+            options.contention_lanes =
+                static_cast<std::uint32_t>(parse_positive(value("--contention-lanes"),
+                                                          "contention-lanes"));
+        } else if (arg == "--contention-context") {
+            options.contention_context =
+                static_cast<std::uint32_t>(parse_positive(value("--contention-context"),
+                                                          "contention-context"));
         } else if (arg == "--concurrency") {
             options.concurrency = parse_u32(value("--concurrency"), "concurrency");
             if (options.concurrency > kMaximumConcurrency) {
@@ -459,6 +492,15 @@ BenchOptions parse_args(int argc, char** argv) {
     }
     if (options.retain_token_ids && options.output != OutputFormat::Json) {
         throw std::invalid_argument("--retain-token-ids requires --output json");
+    }
+    if (options.pair_check && options.concurrency != 2) {
+        throw std::invalid_argument("--pair-check requires --concurrency 2");
+    }
+    if (options.contention && options.concurrency < 2) {
+        throw std::invalid_argument("--contention requires --concurrency >= 2");
+    }
+    if (options.contention_lanes >= options.concurrency) {
+        throw std::invalid_argument("--contention-lanes must be below --concurrency");
     }
     if (options.isolate_prompt_decode && options.prompt_gen.empty()) {
         throw std::invalid_argument("--isolate-prompt-decode requires -pg/--prompt-gen");

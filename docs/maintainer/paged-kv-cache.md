@@ -478,20 +478,26 @@ physically impossible zero-cost append fusion is therefore below 0.8 percent at 
 percent at longer contexts. A single ordinary HIP launch cannot globally order all independent
 append writers before all attention readers, and per-query-head encoding violates single-writer
 transaction ownership. Separate ordered append followed by the selected attention family is the
-qualified architecture. Host-fixed 1..6-row decode (ordinary T=1, MTP and DFlash chain
+qualified architecture. Host-fixed 1..8-row decode (ordinary T=1, MTP and DFlash chain
 verification; non-tree, contexts 64..262144) runs the packed decode route: the dense attention
 arithmetic split over context chunks with a stable FP32 merge and a bounded caller-owned partial
-workspace. Host-fixed 9..127-row causal chunks (appended turns, tool results and prompt tails)
-run the mid-row route: the 32-row dense prefill tiles split over at most 64 context chunks into at
-most 2048 row-chunk FP32 partials (50.7 MB), merged by the same stable FP32 merge. The chunk
-count minimizes whole 64-CTA waves times keys per CTA plus a fixed overhead; host-fixed
-128..1023-row calls take this route whenever that splits the context and dense prefill
-otherwise, as do 1024 rows and above and device-counted rows. At context 8,192 and above,
-fixed-width T=4 with packed-tree or device-active-row metadata uses the three-stage split-512
-leaf with caller-owned score/partial/merge storage; remaining shapes use fused
+workspace. A uniform causal sequence batch (ordinary decode, MTP and chain verification, and a
+mixed round's verify part) keeps one append transaction per sequence but issues each layer's
+append for all of them as one codec launch, and, when every sequence takes the packed route,
+attends all of them with one split launch and one merge (grid z = sequence, each with its own
+table row, frontier, positions, output and workspace slice); every sequence's bytes equal its own
+launch. Tree verification and batches with a sequence off the packed route attend one sequence
+at a time after the shared append. Host-fixed 9..127-row causal chunks (appended turns, tool
+results and prompt tails) run the mid-row route: the 32-row dense prefill tiles split over at most
+64 context chunks into at most 2048 row-chunk FP32 partials (50.7 MB), merged by the same stable
+FP32 merge. The chunk count minimizes whole 64-CTA waves times keys per CTA plus a fixed
+overhead; host-fixed 128..1023-row calls take this route whenever that splits the context and
+dense prefill otherwise, as do 1024 rows and above and device-counted rows. At context 8,192 and
+above, fixed-width T=4 with packed-tree or device-active-row metadata uses the three-stage
+split-512 leaf with caller-owned score/partial/merge storage; remaining shapes use fused
 QK/online-FP32-softmax/PV. Planned attention workspace covers every narrower host-fixed row
 count at every smaller frontier, because planners size one call from the maximum row count and
-visible envelope.
+visible envelope, plus one packed slice per sequence of a batched launch.
 
 Final admission additionally requires:
 

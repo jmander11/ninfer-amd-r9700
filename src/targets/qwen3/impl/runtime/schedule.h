@@ -151,12 +151,38 @@ struct TargetVerifyFrameView {
     qwen3::ToolMaskExchange* tool_masks = nullptr;
 };
 
+// The prefill owner's DFlash context append addresses the last ingress slot (max_concurrency - 1):
+// a decode batch sharing a unit with the owner holds at most max_concurrency - 1 other lanes.
+
+// Prefill cards: KV authority, rewrite checkpoint outputs and staging of one owner chunk, and
+// the owner's DFlash feature sink whose consumer appends the chunk to the drafter context.
+void attach_prefill_state(TextContext& card, PrefillContext& state,
+                          std::optional<std::uint32_t> rewrite_checkpoint_capture_frontier);
+[[nodiscard]] DFlashFeatureSink make_dflash_prefill_sink(PrefillContext& state);
+
+// One DFlash round whose target forward also carries the prefill owner's next text chunk
+// (TextContext::mixed_prefill_verify). Always eager; `result` receives the owner's progress.
+struct DFlashMixedOwner {
+    PrefillContext* prefill = nullptr;
+    MixedPrefillSlice slice;
+    std::optional<std::uint32_t> rewrite_checkpoint_capture_frontier;
+    PrefillChunkResult result;
+};
+
 void configure_text_card(TextContext& card, const ExecutionCore& execution,
                          const ops::SamplingConfig* sampling, std::int32_t current_state_slot,
                          std::uint32_t mtp_proposal_extent);
 void target_verify_accept(ExecutionCore& execution, Tensor& continuation_hidden_store,
                           TextContext& card, TargetVerifyFrameView frame,
                           bool reset_workspace = true);
+// target_verify_accept's two halves around the target forward: binds the verify controls
+// (replay records, tool masks, sampling, tree) and returns the frame with its live sampler;
+// resolve accepts drafts and publishes the selected continuation hidden.
+[[nodiscard]] TargetVerifyFrameView target_verify_prepare(ExecutionCore& execution,
+                                                          TextContext& card,
+                                                          TargetVerifyFrameView frame);
+void target_verify_resolve(ExecutionCore& execution, Tensor& continuation_hidden_store,
+                           TextContext& card, TargetVerifyFrameView frame);
 
 [[nodiscard]] PrefillChunkResult prefill_text_chunk(
     PrefillContext& state, std::span<const TokenId> ids, std::uint32_t nominal_length,
@@ -219,5 +245,8 @@ void capture_dflash_decode_batch(DFlashBatchContext& state, std::int32_t batch_s
 void dflash_decode_batch(DFlashBatchContext& state, std::int32_t batch_size, std::uint32_t k,
                          std::uint32_t verify_width, DFlashEnvelopes envelopes,
                          DecodeGraphExecutable* executable);
+void dflash_mixed_batch(DFlashBatchContext& state, DFlashMixedOwner& owner,
+                        std::int32_t batch_size, std::uint32_t k, std::uint32_t verify_width,
+                        DFlashEnvelopes envelopes);
 
 } // namespace ninfer::targets::qwen3::detail::NINFER_QWEN3_RUNTIME_NS::schedule

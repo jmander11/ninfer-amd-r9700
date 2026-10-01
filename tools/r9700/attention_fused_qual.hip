@@ -222,9 +222,9 @@ void run_front(std::uint32_t tokens, Rng& rng, bool poison) {
     require(reference.status() == (poison ? fp8::Fp8ActivationNonfinite : fp8::Fp8ActivationOk),
             label + " reference status");
     require(fused.status() == reference.status(), label + " fused status");
-    // Byte parity holds while eager RMSNorm takes the rows4 route the fused producer mirrors
-    // (T <= 24); fp8_producers_qual checks the producer against its FP64 oracle at every width.
-    if (!poison && tokens <= 24U) {
+    // Byte parity holds because eager RMSNorm takes the row-CTA route the fused producer mirrors at
+    // every width; fp8_producers_qual checks the producer against its FP64 oracle.
+    if (!poison) {
         const auto reference_bytes = reference.image();
         const auto fused_bytes = fused.image();
         require(reference_bytes == fused_bytes, label + " activation image differs");

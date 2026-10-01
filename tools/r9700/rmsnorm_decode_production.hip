@@ -262,11 +262,13 @@ void run_regression(hipStream_t stream) {
     upload(d_weight, weight);
     Error maximum;
     std::uint32_t cases = 0;
-    constexpr std::uint32_t maximum_rows = 24U;
+    std::vector<std::uint32_t> widths;
+    for (std::uint32_t rows = 1U; rows <= 128U; ++rows) widths.push_back(rows);
+    for (const std::uint32_t rows : {255U, 256U, 2048U}) widths.push_back(rows);
     std::array<std::vector<hip_bfloat16>, 18> singleton_outputs;
     std::uint64_t crosswidth_mismatches = 0;
     std::string first_crosswidth_mismatch;
-    for (std::uint32_t rows = 1U; rows <= maximum_rows; ++rows) {
+    for (const std::uint32_t rows : widths) {
         for (const std::uint32_t fixture : {0U, 1U, 2U}) {
             auto input = make_input(rows, fixture);
             // Move the same represented column through every supported lane
@@ -317,7 +319,7 @@ void run_regression(hipStream_t stream) {
         }
     }
 
-    for (const std::uint32_t graph_rows : {2U, 5U, 6U, 10U, 24U}) {
+    for (const std::uint32_t graph_rows : {2U, 5U, 6U, 10U, 24U, 64U, 127U}) {
         const auto graph_input = make_input(graph_rows, 0U);
         DeviceBuffer<hip_bfloat16> d_input(graph_input.size());
         DeviceBuffer<hip_bfloat16> d_output(graph_input.size() + 2U * kGuardElements);
@@ -377,15 +379,15 @@ void run_regression(hipStream_t stream) {
                          std::numeric_limits<float>::infinity(), stream);
     reject_without_write(d_input.get(), d_weight.get(), out, kFeatures, 1U, kModelEps, nullptr);
 
-    std::cout << "r9700 production RMSNorm K5120 rows1.." << maximum_rows
+    std::cout << "r9700 production RMSNorm K5120 rows1..128,255,256,2048"
               << ": oracle/graph/boundary PASS cases=" << cases
               << " max_bf16_steps=" << maximum.max_bf16_steps
-              << " graph_rows=2,5,6,10,24 graph_replays_per_row=2 graph_eager_exact=true"
+              << " graph_rows=2,5,6,10,24,64,127 graph_replays_per_row=2 graph_eager_exact=true"
               << " output_canaries=true malformed_cases=10 crosswidth_mismatches="
               << crosswidth_mismatches
               << '\n';
     if (crosswidth_mismatches != 0U) fail(first_crosswidth_mismatch);
-    std::cout << "RMSNorm same-column T1..24 exact invariance: PASS\n";
+    std::cout << "RMSNorm same-column T1..128/255/256/2048 exact invariance: PASS\n";
 }
 } // namespace
 
