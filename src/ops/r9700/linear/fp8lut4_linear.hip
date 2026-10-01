@@ -322,7 +322,7 @@ __device__ __forceinline__ void lds_barrier() {
     __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
 }
 
-// ---- Deep mid-T (T 33..64, codebook weights; deep_shape selects it). The mid-T CTA (kRowBlocks
+// ---- Deep mid-T (T 33..128, codebook weights; deep_shape selects it). The mid-T CTA (kRowBlocks
 // blocks of 16 rows, K split kSplit-ways, each split's T x 64 activation bytes staged in LDS once
 // per step) with kDepth 64-column steps of weight codes, group codes and staging units in flight
 // per wave. Loads return in order: the mid-T kernel issues step s + 1's loads in step s and waits
@@ -337,7 +337,7 @@ template <bool kAccumulate, bool kSiluPair, std::uint32_t kRowBlocks, std::uint3
           std::uint32_t kTiles, std::uint32_t kDepth>
 __global__ __launch_bounds__(256) void fp8lut4_mid_deep_kernel(KernelArgs a) {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
-    static_assert(kRowBlocks * kSplit == 8U && kTiles >= 3U && kTiles <= 4U && kDepth >= 2U &&
+    static_assert(kRowBlocks * kSplit == 8U && kTiles >= 3U && kTiles <= 8U && kDepth >= 2U &&
                   kDepth <= 4U);
     constexpr std::uint32_t kTokens = 16U * kTiles;
     constexpr std::uint32_t kGroupThreads = 32U * kRowBlocks;
@@ -959,40 +959,55 @@ void launch_deep_as(const KernelArgs& args, hipStream_t stream) {
         grid, block, 0, stream, args);
 }
 
-// Plain or residual output (one projection or a fused pair): three token tiles at T 33..48,
-// four at T 49..64.
-template <std::uint32_t kRowBlocks, std::uint32_t kSplit, std::uint32_t kDepth>
-void launch_deep_plain(const KernelArgs& args, hipStream_t stream) {
-    const bool four = args.tokens > 48U;
-    if (args.output.accumulate) {
-        if (four) launch_deep_as<true, false, kRowBlocks, kSplit, kDepth, 4U>(args, stream);
-        else launch_deep_as<true, false, kRowBlocks, kSplit, kDepth, 3U>(args, stream);
-    } else {
-        if (four) launch_deep_as<false, false, kRowBlocks, kSplit, kDepth, 4U>(args, stream);
-        else launch_deep_as<false, false, kRowBlocks, kSplit, kDepth, 3U>(args, stream);
-    }
+// ceil(T / 16) token tiles, instantiated for kMinTiles..kMaxTiles (the widths its shapes select).
+template <bool kAccumulate, bool kSiluPair, std::uint32_t kRowBlocks, std::uint32_t kSplit,
+          std::uint32_t kDepth, std::uint32_t kMinTiles, std::uint32_t kMaxTiles>
+void launch_deep_tiles(const KernelArgs& args, hipStream_t stream) {
+    const std::uint32_t tiles = (args.tokens + 15U) / 16U;
+    [&]<std::uint32_t... kOffset>(std::integer_sequence<std::uint32_t, kOffset...>) {
+        ((tiles == kMinTiles + kOffset
+              ? launch_deep_as<kAccumulate, kSiluPair, kRowBlocks, kSplit, kDepth, kMinTiles + kOffset>(args, stream)
+              : void()), ...);
+    }(std::make_integer_sequence<std::uint32_t, kMaxTiles - kMinTiles + 1U>{});
 }
 
-// Deep mid-T selection at T 33..64 (codebook weights, 16-byte-aligned outputs), from interleaved
-// eager medians against the mid-T kernel on the R9700 (fp8lut4_linear_qual candidate sweep,
-// 2026-09-30, T 33/40/48/49/56/64):
-// - pairs of >= 14336 combined rows run fused in one launch: 4 x 2 row blocks / K splits, depth 2
-//   (attention N7168 + N7168 K5120: 0.68-0.73x, T64 96 -> 70 us), or 8 x 1, depth 2, from 16384
-//   rows (GDN N4096 + N12288 K5120: 0.66-0.73x, T64 105 -> 73 us);
+// Plain or residual output (one projection or a fused pair).
+template <std::uint32_t kRowBlocks, std::uint32_t kSplit, std::uint32_t kDepth,
+          std::uint32_t kMinTiles, std::uint32_t kMaxTiles>
+void launch_deep_plain(const KernelArgs& args, hipStream_t stream) {
+    if (args.output.accumulate)
+        launch_deep_tiles<true, false, kRowBlocks, kSplit, kDepth, kMinTiles, kMaxTiles>(args, stream);
+    else
+        launch_deep_tiles<false, false, kRowBlocks, kSplit, kDepth, kMinTiles, kMaxTiles>(args, stream);
+}
+
+// Deep mid-T selection at T 33..128 (codebook weights, 16-byte-aligned outputs), from interleaved
+// eager medians against the mid-T kernel on the R9700 (fp8lut4_linear_qual candidate sweeps of
+// 4 x 2 / 8 x 1 row blocks / K splits at depth 2..4, 2 x 2 and 4 x 1 four-wave CTAs, and the
+// prefill CTA; 2026-09-30 T 33..64, 2026-10-01 T 40..128). The prefill CTA takes 1.2-2.4x the
+// mid-T time below T 129.
+// - pairs of >= 14336 combined rows run fused in one launch: 4 x 2, depth 2 (attention N7168 +
+//   N7168 K5120: 0.66-0.73x, T64 96 -> 70 us, T128 171 -> 115 us), or 8 x 1 from 16384 rows (GDN
+//   N4096 + N12288 K5120), depth 2 at T 33..64 (0.66-0.73x, T64 105 -> 73 us) and depth 4 at
+//   T 65..128 (0.70-0.75x, T128 161 -> 120 us);
 // - N5120 outputs (MLP down K17408, attention/GDN output K6144), plain or residual: 4 x 2, depth 2
-//   (0.78-0.88x; K17408 T64 106 -> 89 us, K6144 T64 43 -> 36 us);
-// - SiLU gate/up N34816 at T 49..64: 4 x 2, depth 4 (0.96-0.97x; mid-T is as fast below);
+//   (0.78-0.90x; K17408 T64 106 -> 89 us, T128 166 -> 149 us; K6144 T128 71 -> 58 us);
+// - SiLU gate/up N34816: 4 x 2, depth 4 at T 49..64 (0.95-0.97x; mid-T is as fast below) and
+//   depth 2 at T 65..128 (0.86-0.92x, T128 294 -> 269 us);
 // - output head (>= 131072 rows) at T 49..64: 8 x 1, depth 2 (0.97x, T64 1244 -> 1206 us).
 // Everything else keeps the mid-T kernel.
-enum class DeepShape { None, Rows64Depth2, Rows64Depth4, Rows128Depth2 };
+enum class DeepShape { None, Rows64Depth2, Rows64Depth4, Rows128Depth2, Rows128Depth4 };
 
-constexpr std::uint32_t kDeepMaximumTokens = 64U, kDeepFourTileTokens = 49U;
+constexpr std::uint32_t kDeepMaximumTokens = 128U, kDeepFourTileTokens = 49U;
+constexpr std::uint32_t kDeepShallowMaximumTokens = 64U;  // depth and head boundary
 constexpr std::uint32_t kDeepPairRows = 14336U, kDeepWidePairRows = 16384U;
 constexpr std::uint32_t kDeepNarrowRows = 5120U, kDeepHeadRows = 131072U;
 
 bool deep_fits(DeepShape shape, std::uint32_t rows, std::uint32_t columns) noexcept {
-    const std::uint32_t row_blocks = shape == DeepShape::Rows128Depth2 ? 8U : 4U;
-    const std::uint32_t split = 8U / row_blocks, depth = shape == DeepShape::Rows64Depth4 ? 4U : 2U;
+    const bool wide = shape == DeepShape::Rows128Depth2 || shape == DeepShape::Rows128Depth4;
+    const std::uint32_t row_blocks = wide ? 8U : 4U, split = 8U / row_blocks;
+    const std::uint32_t depth =
+        shape == DeepShape::Rows64Depth4 || shape == DeepShape::Rows128Depth4 ? 4U : 2U;
     return rows % (16U * row_blocks) == 0U && (columns / 64U) % split == 0U &&
            columns / 64U / split >= depth;
 }
@@ -1011,11 +1026,13 @@ DeepShape deep_shape(const KernelArgs& args) noexcept {
     if (!deep_width(args)) return DeepShape::None;
     const std::uint32_t rows = args.weight.rows;
     DeepShape shape = DeepShape::None;
+    const bool shallow = args.tokens <= kDeepShallowMaximumTokens;
     if (args.output.silu_pair) {
-        if (args.tokens >= kDeepFourTileTokens) shape = DeepShape::Rows64Depth4;
+        if (!shallow) shape = DeepShape::Rows64Depth2;
+        else if (args.tokens >= kDeepFourTileTokens) shape = DeepShape::Rows64Depth4;
     } else if (rows == kDeepNarrowRows) {
         shape = DeepShape::Rows64Depth2;
-    } else if (rows >= kDeepHeadRows && args.tokens >= kDeepFourTileTokens) {
+    } else if (rows >= kDeepHeadRows && args.tokens >= kDeepFourTileTokens && shallow) {
         shape = DeepShape::Rows128Depth2;
     }
     return shape != DeepShape::None && deep_fits(shape, rows, args.weight.columns) ? shape
@@ -1029,8 +1046,9 @@ DeepShape deep_pair_shape(const KernelArgs& args) noexcept {
     second.output = args.second_output;
     const std::uint32_t rows = args.weight.rows + args.second.rows;
     if (!deep_width(args) || !deep_width(second) || rows < kDeepPairRows) return DeepShape::None;
-    const DeepShape shape = rows >= kDeepWidePairRows ? DeepShape::Rows128Depth2
-                                                      : DeepShape::Rows64Depth2;
+    const DeepShape shape = rows < kDeepWidePairRows ? DeepShape::Rows64Depth2
+                            : args.tokens <= kDeepShallowMaximumTokens ? DeepShape::Rows128Depth2
+                                                                       : DeepShape::Rows128Depth4;
     return deep_fits(shape, args.weight.rows, args.weight.columns) &&
                    deep_fits(shape, args.second.rows, args.second.columns)
                ? shape : DeepShape::None;
@@ -1038,10 +1056,14 @@ DeepShape deep_pair_shape(const KernelArgs& args) noexcept {
 
 void launch_deep(const KernelArgs& args, DeepShape shape, hipStream_t stream) {
     switch (shape) {
-    case DeepShape::Rows64Depth2: launch_deep_plain<4U, 2U, 2U>(args, stream); break;
-    case DeepShape::Rows64Depth4:  // SiLU pair, four token tiles
+    case DeepShape::Rows64Depth2:  // pairs and N5120 at T 33..128, SiLU at T 65..128
+        if (args.output.silu_pair) launch_deep_tiles<false, true, 4U, 2U, 2U, 5U, 8U>(args, stream);
+        else launch_deep_plain<4U, 2U, 2U, 3U, 8U>(args, stream);
+        break;
+    case DeepShape::Rows64Depth4:  // SiLU pair at T 49..64
         launch_deep_as<false, true, 4U, 2U, 4U, 4U>(args, stream); break;
-    case DeepShape::Rows128Depth2: launch_deep_plain<8U, 1U, 2U>(args, stream); break;
+    case DeepShape::Rows128Depth2: launch_deep_plain<8U, 1U, 2U, 3U, 4U>(args, stream); break;
+    case DeepShape::Rows128Depth4: launch_deep_plain<8U, 1U, 4U, 5U, 8U>(args, stream); break;
     case DeepShape::None: break;
     }
 }

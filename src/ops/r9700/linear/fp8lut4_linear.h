@@ -54,7 +54,7 @@ struct Fp8Lut4Output {
                                     const Fp8ActivationWorkspace& activation,
                                     const Fp8Lut4Output& output, hipStream_t stream) noexcept;
 // Two projections of one image (one launch at small T and, for the Text attention and GDN pairs,
-// at T 33..64); both accumulate or neither does.
+// at T 33..128); both accumulate or neither does.
 [[nodiscard]] hipError_t fp8lut4_linear_pair(const Fp8Lut4Weight& first, const Fp8Lut4Output& first_output,
                                          const Fp8Lut4Weight& second, const Fp8Lut4Output& second_output,
                                          const Fp8ActivationWorkspace& activation,

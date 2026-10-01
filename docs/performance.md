@@ -96,14 +96,27 @@ interleaved medians, `profiles/bench/r9700-c8-20260930/`):
 | FP8LUT4 mid-T loop drained every load per step; deep-pipelined variant at T33..64 (load ring, LDS-only barriers), attention and GDN pairs fused into one launch | attention pair T56 94 -> 66 us; GDN pair 103 -> 74 us; N5120 K17408 106 -> 88 us; K6144 43 -> 36 us; SiLU and head at T49..64 -3 to -4% |
 | A8Q4 token-tile CTA (exact ceil(T/16) token fragments, LDS-shared activations, in-CTA split-K, two groups in flight) for the drafter shapes and draft head at T17..64 | N5120/K17408 T56 270 -> 115 us; N34816 T56 350 -> 193 us; draft head N131072 (was WMMA32) T56 2500 -> 709 us; C2..C4 widths T18..32 0.53-0.94x |
 
+Short prompts and prefill tails (T65..128) took the latency-bound mid-T loop until the deep
+kernel was extended to eight token tiles (2026-10-01 sweep, every candidate oracle-checked):
+attention pair T128 171 -> 115 us, GDN pair (8 x 1, depth 4) 161 -> 120 us, N5120 K17408 166 ->
+149 us, SiLU gate/up 294 -> 269 us. The prefill CTA stays slower below T129 (1.2-2.4x mid-T).
+Whole-inference prefill, production DFlash adaptive K7, C1, ten repetitions x two interleaved
+runs against be26d62b (`widet/short_ab.sh`):
+
+| Prompt | 48 | 64 | 72 | 96 | 112 | 128 | 200 |
+|---|---|---|---|---|---|---|---|
+| Before (ms) | 34.8 | 36.3 | 43.5 | 47.1 | 52.7 | 57.3 | 81.3 |
+| After (ms) | 34.8 | 36.3 | 38.8 | 42.5 | 47.7 | 52.0 | 81.6 |
+
 Rejected: three- and four-tile small-T FP8LUT4 (8-38% slower than mid-T at T>=48, L2 activation
 re-reads), and a fused wide GDN normalized front at T33..64 (113 us against 17 us for the
 three-launch composition).
 
 Steady-state C8 decode round (rocprof, contention run): 62.1 -> 50.8 ms wall. Per call, the
 verify-width GEMMs now match their C4 cost (N5120 down/out 63.0 against 62.6 us, GDN pair 102
-against 101 us); the SiLU gate/up stays at 87% of its byte bound against 94% at C4 (~0.6 ms per
-round). Costs that grow with lanes are per-lane state traffic (GDN replay fold 1.7 -> 4.2 ms,
+against 101 us); the SiLU gate/up takes 175 us at T64 against 171.5 us at T32 (C4), both 86-87%
+of its T1 streaming time (150 us); none of the candidate CTA shapes (4 x 2 / 8 x 1 / 2 x 2 / 4 x 1
+row blocks x K splits, depth 2..4) was faster. Costs that grow with lanes are per-lane state traffic (GDN replay fold 1.7 -> 4.2 ms,
 record 34 -> 64 us, verify attention 20 -> 42 us per call at 3 -> 7 lanes).
 
 Whole inference (`-pg 512,512`, DFlash adaptive K7, two runs): C4 268.6 / 269.3 -> 273.4 / 277.2

@@ -274,7 +274,7 @@ void run_case(const std::vector<double>& book, std::uint32_t rows, std::uint32_t
     }
 }
 
-// Two projections of one image (one launch at small T and at the fused T 33..64 widths). Either
+// Two projections of one image (one launch at small T and at the fused T 33..128 widths). Either
 // may split its rows: rows [0, split) and [split, N) publish to separate outputs (split 0: one
 // output). Outputs start as NaN, so every element must be published; sampled rows of both are
 // checked against the oracle through the splits.
@@ -574,7 +574,7 @@ int main(int argc, char** argv) {
             run_case(book, 5120, 17408, tokens, false, false, rng, stream);
             run_case(book, 7168, 5120, tokens, false, false, rng, stream);
         }
-        for (const std::uint32_t tokens : {1U, 6U, 16U, 24U, 32U, 33U, 40U, 49U, 56U, 64U, 96U, 130U, 200U, 300U, 640U, 2048U})
+        for (const std::uint32_t tokens : {1U, 6U, 16U, 24U, 32U, 33U, 40U, 49U, 56U, 64U, 65U, 96U, 100U, 113U, 128U, 130U, 200U, 300U, 640U, 2048U})
             run_silu(book, 34816, 5120, tokens, rng, stream);
         run_pair(book, 7168, 6144, 7168, 5120, 6, rng, stream);
         run_pair(book, 7168, 6144, 7168, 5120, 1, rng, stream);
@@ -592,11 +592,20 @@ int main(int argc, char** argv) {
         // GDN conv-record fallback layout: query-key + value-z, both unsplit, production order.
         run_pair(book, 4096, 0, 12288, 5120, 33, rng, stream);
         run_pair(book, 4096, 0, 12288, 5120, 64, rng, stream);
+        // T 65..128 deep pairs: attention 4 x 2 depth 2, GDN 8 x 1 depth 4 (five to eight tiles).
+        run_pair(book, 7168, 6144, 7168, 5120, 72, rng, stream, 6144);
+        run_pair(book, 7168, 6144, 7168, 5120, 128, rng, stream, 6144);
+        run_pair(book, 4096, 0, 12288, 5120, 65, rng, stream, 6144);
+        run_pair(book, 4096, 0, 12288, 5120, 90, rng, stream, 6144);
+        run_pair(book, 4096, 0, 12288, 5120, 100, rng, stream, 6144);
+        run_pair(book, 4096, 0, 12288, 5120, 128, rng, stream);
         // Poisoned tokens through the fused deep pairs.
         run_pair(book, 7168, 6144, 7168, 5120, 49, rng, stream, 6144, true);
         run_pair(book, 4096, 0, 12288, 5120, 40, rng, stream, 6144, true);
-        // Poisoned tokens through the SiLU epilogue: mid-T (T40) and deep (T49, T64).
-        for (const std::uint32_t tokens : {40U, 49U, 64U})
+        run_pair(book, 7168, 6144, 7168, 5120, 97, rng, stream, 6144, true);
+        run_pair(book, 4096, 0, 12288, 5120, 113, rng, stream, 6144, true);
+        // Poisoned tokens through the SiLU epilogue: mid-T (T40) and deep (T49, T64, T65, T128).
+        for (const std::uint32_t tokens : {40U, 49U, 64U, 65U, 128U})
             run_silu(book, 34816, 5120, tokens, rng, stream, false, false, true);
         run_pair(book, 7168, 6144, 7168, 5120, 71, rng, stream);
         run_pair(book, 7168, 6144, 7168, 5120, 130, rng, stream);
@@ -612,6 +621,9 @@ int main(int argc, char** argv) {
         run_case(book, 5120, 17408, 49, true, true, rng, stream);  // residual, poisoned token
         run_case(book, 5120, 6144, 33, true, true, rng, stream);
         run_case(book, 5120, 17408, 80, true, false, rng, stream);
+        run_case(book, 5120, 6144, 128, true, false, rng, stream);
+        run_case(book, 5120, 17408, 113, true, true, rng, stream);  // residual, poisoned token
+        run_case(book, 5120, 6144, 72, false, true, rng, stream);
         run_case(book, 7168, 5120, 50, false, true, rng, stream);
         run_case(book, 5120, 6144, 2048, true, false, rng, stream);
         run_case(book, 5120, 17408, 200, true, false, rng, stream);
