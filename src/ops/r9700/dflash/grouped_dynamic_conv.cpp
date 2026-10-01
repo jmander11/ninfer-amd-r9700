@@ -18,7 +18,7 @@ void require_hidden_layout(const Tensor& hidden, const char* label) {
                                     " must be BF16 [5120,T] or [5120,T,B]");
     }
     if (hidden.ne[2] > 1 && hidden.ne[1] > kGroupedDynamicConvMaxWidthWhenBatched) {
-        throw std::invalid_argument("grouped_dynamic_conv: B=2..4 admits T=1..16");
+        throw std::invalid_argument("grouped_dynamic_conv: B=2..8 admits T=1..16");
     }
     if (!hidden.is_contiguous() || hidden.data == nullptr) {
         throw std::invalid_argument(std::string("grouped_dynamic_conv: ") + label +

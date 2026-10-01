@@ -1,5 +1,5 @@
 // Implements: include/ninfer/ops/mtp_round.h
-// Match: fixed K=1..5 MTP round transition for one startup-frozen B=1..4 batch.
+// Match: fixed K=1..5 MTP round transition for one startup-frozen B=1..8 batch.
 #include "ninfer/ops/mtp_round.h"
 #include "ninfer/types.h"
 
@@ -102,7 +102,7 @@ void mtp_prepare_next_round(const Tensor& verify_ids, const Tensor& next_anchors
         throw std::invalid_argument("mtp_prepare_next_round: T must be in [2,6]");
     }
     if (batch < 1 || batch > static_cast<std::int32_t>(kMaximumConcurrency)) {
-        throw std::invalid_argument("mtp_prepare_next_round: B must be in [1,4]");
+        throw std::invalid_argument("mtp_prepare_next_round: B must be in [1,8]");
     }
     if (max_context <= 0) {
         throw std::invalid_argument("mtp_prepare_next_round: max_context must be positive");

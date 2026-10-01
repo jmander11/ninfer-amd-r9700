@@ -7,6 +7,7 @@
 #include "core/arena.h"
 #include "core/device.h"
 #include "core/tensor.h"
+#include "ninfer/types.h"
 #include "ops/r9700/kv/fp8_int4_kv_trace.h"
 #include "targets/qwen3/impl/runtime/instance.h"
 #include "targets/qwen3/impl/runtime/prefill_tail_trace_path.h"
@@ -420,8 +421,8 @@ inline std::optional<Call> select_target_call(
         return Call{.role=legacy,.width=width,.batch=batch,.column=0,.frontier=130,
                     .ids=&ids,.positions=&positions,.rope=&rope};
     if (!matches(wanted)) return std::nullopt;
-    const int selected_batch = selected_integer("BATCH",1,4);
-    const int lane = selected_integer("LANE",0,3);
+    const int selected_batch = selected_integer("BATCH",1,static_cast<int>(kMaximumConcurrency));
+    const int lane = selected_integer("LANE",0,static_cast<int>(kMaximumConcurrency)-1);
     const int frontier = selected_integer("FRONTIER",1,2147483647);
     const int column = selected_integer("COLUMN",-1,5);
     const int expected_token = selected_integer("TOKEN",0,TextConfig::token_domain-1);
@@ -431,8 +432,10 @@ inline std::optional<Call> select_target_call(
     HIP_CHECK(hipStreamIsCapturing(stream,&capture));
     if (capture != hipStreamCaptureStatusNone)
         throw std::invalid_argument("selected boundary trace is eager-only");
-    std::array<int,4> slots{}, valid{};
-    std::array<int,24> pos{};
+    std::array<int,kMaximumConcurrency> slots{}, valid{};
+    std::array<int,kMaximumConcurrency*16U> pos{};
+    if (static_cast<std::size_t>(batch)*static_cast<std::size_t>(width) > pos.size())
+        throw std::invalid_argument("selected boundary trace panel exceeds the compact batch");
     HIP_CHECK(hipMemcpyAsync(slots.data(),state_slots.data,batch*sizeof(int),hipMemcpyDeviceToHost,stream));
     HIP_CHECK(hipMemcpyAsync(pos.data(),positions.data,batch*width*sizeof(int),hipMemcpyDeviceToHost,stream));
     if (valid_columns)
@@ -733,7 +736,7 @@ private:
         return out.str();
     }
     void require_call() const {
-        if (call_.role == Role::None || call_.role != requested_role() || call_.batch < 1 || call_.batch > 4 ||
+        if (call_.role == Role::None || call_.role != requested_role() || call_.batch < 1 || call_.batch > static_cast<std::int32_t>(kMaximumConcurrency) ||
             call_.row < 0 || call_.row >= call_.batch ||
             call_.column < 0 || call_.column >= call_.width || call_.ids == nullptr ||
             call_.positions == nullptr || call_.rope == nullptr) {

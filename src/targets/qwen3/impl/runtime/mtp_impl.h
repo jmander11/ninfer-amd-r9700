@@ -24,7 +24,7 @@ class MtpKvTransactionBatch {
 public:
     explicit MtpKvTransactionBatch(std::size_t count) : size_(count) {
         if (count == 0U || count > transactions_.size()) {
-            throw std::invalid_argument("MTP KV transaction batch size must be in [1,4]");
+            throw std::invalid_argument("MTP KV transaction batch size must be in [1,8]");
         }
     }
 

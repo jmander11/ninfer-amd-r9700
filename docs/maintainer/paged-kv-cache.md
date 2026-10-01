@@ -18,7 +18,7 @@ growing-cache path. Represented BF16 K/V inputs are quantized only when appended
 the stored representation directly; it never gathers the cache into a request-contiguous buffer.
 
 The product is one resident model on one `gfx1201` wave32 device with startup-fixed concurrency
-`C=1..4`. A single request may consume most of the shared physical page pool. Active, retained,
+`C=1..8`. A single request may consume most of the shared physical page pool. Active, retained,
 and speculative provisional state use the same entitlement accounting.
 
 The cache owns storage and physical mapping, not model scheduling. It does not interpret request
@@ -151,7 +151,7 @@ SHA-256 values are `86763d6d3ac2ff8fc27a3815f3816aaba44a11acfaf4ebf54ca5d8991ddc
 and `2c9bb5a64f0e25a307f3f2b783a527ed6b42d1671c6e826d7ca98545052e9b31`.
 
 These once superseded every earlier capacity generation, but are themselves historical after the
-C=1..4 product-cap migration and cannot enter the current selection. Fresh exact C=1..4 capacity
+C=1..4 product-cap migration and cannot enter the current selection. Fresh exact C=1..8 capacity
 matrices are required for both eligible recipes, both cache groups, and each candidate execution
 profile. The still earlier generations are the
 `pareto-capacity-layout-*` pair with always-on nested ROCTX markers, the completed G16 and
@@ -457,7 +457,7 @@ Representative coverage is:
 - G16/G32 and every plane-order candidate while selection is open;
 - fragmented as well as identity mappings;
 - ordinary and speculative fixed-width execution; and
-- final whole-Engine prefill/decode at C=1..4 once a real artifact exists.
+- final whole-Engine prefill/decode at C=1..8 once a real artifact exists.
 
 The 32-point cache-layout sweep passed the independent layout and attention oracles. The current
 G16/token-K/feature-V/feature-scale profile has normalized mean latency 1.004041, mean rank 2.188,
@@ -505,12 +505,12 @@ Final admission additionally requires:
 2. exact greedy-token comparison at every scored position;
 3. eager/Device Graph state and output parity;
 4. speculative acceptance/publication checks; and
-5. complete prefill/decode and C=1..4 throughput with valid attribution.
+5. complete prefill/decode and C=1..8 throughput with valid attribution.
 
 The complete BF16 source checkpoint and supported Python environment are present, and the paired
 quality evidence is retained. Remaining final admission work is selection-dependent physical
 eager/Device Graph parity, speculative acceptance/publication, and attributed prefill/decode
-throughput across C=1..4 on the selected profile. No earlier device/backend result is product
+throughput across C=1..8 on the selected profile. No earlier device/backend result is product
 evidence.
 
 ## 15. Fixed contract versus tunable profile

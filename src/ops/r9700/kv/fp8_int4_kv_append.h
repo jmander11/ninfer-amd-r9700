@@ -3,6 +3,8 @@
 #include <hip/hip_bfloat16.h>
 #include <hip/hip_runtime_api.h>
 
+#include "ninfer/types.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -75,11 +77,11 @@ struct Fp8Int4KvAppendArgs {
 // checks, and inspection of status before cache commit.
 [[nodiscard]] hipError_t fp8_int4_kv_append(const Fp8Int4KvAppendArgs& args,
                                              hipStream_t stream) noexcept;
-// One launch appends the panels of up to four sequences of a compact decode batch (grid y =
+// One launch appends the panels of up to kMaximumConcurrency sequences of a compact decode batch (grid y =
 // sequence), each with its own arguments and status word; every stored byte and status bit equals
 // that of the sequence's one-sequence launch. All sequences share one value group and plane order,
 // and their destination slots must not overlap.
-inline constexpr std::size_t kAppendMaximumSequences = 4U;
+inline constexpr std::size_t kAppendMaximumSequences = kMaximumConcurrency;
 [[nodiscard]] hipError_t fp8_int4_kv_append(std::span<const Fp8Int4KvAppendArgs> sequences,
                                              hipStream_t stream) noexcept;
 

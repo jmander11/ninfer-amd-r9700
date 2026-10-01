@@ -20,10 +20,10 @@ bool is_quantized_projection(QType qtype) {
 
 void require_sequence_extent(std::int32_t tokens, std::int32_t batch, const char* op) {
     if (tokens <= 0 || batch <= 0 || batch > kDflash2PathSelectMaxBatch) {
-        throw std::invalid_argument(std::string(op) + ": T and B must be positive with B<=4");
+        throw std::invalid_argument(std::string(op) + ": T and B must be positive with B<=8");
     }
     if (batch > 1 && tokens > kDflash2PathSelectMaxWidthWhenBatched) {
-        throw std::invalid_argument(std::string(op) + ": B=2..4 admits T=1..16");
+        throw std::invalid_argument(std::string(op) + ": B=2..8 admits T=1..16");
     }
 }
 

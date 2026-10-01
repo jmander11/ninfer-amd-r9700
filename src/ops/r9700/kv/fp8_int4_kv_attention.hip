@@ -1148,6 +1148,8 @@ struct DenseVerifySequences {
     std::uint32_t chunk_keys[kPackedDecodeMaximumSequences];
     std::uint32_t chunks[kPackedDecodeMaximumSequences];
 };
+static_assert(sizeof(DenseVerifySequences) <= 4096U,
+              "dense verify sequences must fit the kernarg segment");
 
 template <std::uint32_t Group>
 __global__ __launch_bounds__(kDenseVerifyThreads)

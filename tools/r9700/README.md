@@ -15,7 +15,7 @@ including split512 for tree/device-count T=4 at context 8192 and above. The work
 checks invalid device page-table rows and physical pages poison every represented row (1..6)
 without touching workspace guards; `check_attention_parity_static.py` pins the split kernel's
 resources (235 VGPRs, no scratch, 16 BF16 and 16 FP16 WMMAs) and the merge kernel. A compact batch
-of up to four sequences shares one split launch and one merge (grid z = sequence, per-sequence
+of up to eight sequences shares one split launch and one merge (grid z = sequence, per-sequence
 kernarg slots and workspace), and one append codec launch (grid y = sequence).
 
 Focused qualification (JSON on stdout):
@@ -30,10 +30,10 @@ build-r9700/src/ninfer_r9700_full_attention_qual
 ```
 
 The discriminator retains W5/W6 and adds widths 1..4 at context64 and133 (4100 with
-`--long-context`), compact C1..4 device page-table selection, causal prefixes,
+`--long-context`), compact C1..8 device page-table selection, causal prefixes,
 invalid-row poisoning, eager/graph equality, and workspace/output guards. `--sequence-batch`
-requires the B=1..4 sequence-batched packed launch (contexts 37/600/4100/33000 over one shuffled
-shared pool, W8 and mixed W8/5/1/7 rows, device table rows and direct tables) to equal each
+requires the B=1..8 sequence-batched packed launch (contexts 37/600/4100/33000/129/2050/8200/1000
+over one shuffled shared pool, W8 and mixed W8/5/1/7 and W8/5/1/7/4/8/2/6 rows, device table rows and direct tables) to equal each
 sequence's one-sequence launch byte for byte, eager and graph-replayed, from poisoned outputs and
 workspaces, and the batched append (prefix, device-count, table-row and invalid-position
 sequences) to equal per-sequence appends in every plane byte and status word.
@@ -53,7 +53,8 @@ every element, and the prefill GEMM route (raw E4M3 staging) on N7168/K5120, N51
 N34816/K5120, N5120/K17408 and N4096/K5120 at T=17,300,2048 over sampled tokens and rows, against
 an FP64 product of the consumed codes (BF16 half-ulp plus the FP32 accumulation bound), with
 output guards and per-token nonfinite-input poisoning. `ninfer_r9700_swa_qual` includes the production C1 K5
-drafter block (T6 over a 4096-token window) with its timing.
+drafter block (T6 over a 4096-token window) and the C8 K7/K6 drafter blocks (T8/T7 over eight
+4096-token windows) with their timings.
 
 Selected concurrent Text localization uses the existing eager layer-boundary
 trace without serializing the model batch. Set
@@ -217,10 +218,19 @@ N7168/K5120, N6144/K5120, N1280/K5120 and N5120/K4096 at their selected widths.
 including the three previously selected output cells. The complete owner has89
 cells. N12288 T5/6 retains scale-gather; its concurrent widths use the tiled
 successor body, not the small-T accumulator mapping.
-N34816/K5120 T18/20/24 use one wave for both M tiles, sharing each weight payload
-while retaining independent ordered G64 accumulations. Other projection cells
-retain their prior routes. Focused canonical qualification and complete-Op timing:
-`profiles/bench/r9700-remaining-candidates-20260924/`.
+Other projection cells retain their prior routes. Focused canonical qualification and
+complete-Op timing: `profiles/bench/r9700-remaining-candidates-20260924/`.
+Every concurrent-DFlash width T17..64 of N34816/K5120, N5120/K17408, N5120/K25600, N6144/K5120,
+N5120/K4096 and the N131072/K5120 draft head, and T49..64 of N1280/K5120, take a token-tile CTA
+(`a8q4_token_tile_cta.h`: one CTA per ceil(T/16)x16 token tile and 64- or 128-row tile, staged
+activations shared by its row fragments, in-CTA K split with two groups of loads in flight) selected
+per shape and tile class from `profiles/bench/r9700-c8-20260930/drafter/token_tile_ab2.json`
+(table and medians in `a8q4_small_batch_projection.h`); N1280/K5120 T25..48 keeps the tiled body
+with one CTA row per M tile. `--wide-only` qualifies just these cells (including the off-table
+class-bound widths T17/33/63) and the in-place residual epilogue of the N5120 token-tile routes;
+`--wide-ab` additionally times every qualified wide cell (7 interleaved unprofiled event trials
+over disjoint weight copies of at least 256 MiB) against the prefill-CTA/WMMA32 route those widths
+took before the wide table.
 These scopes use identical numerical criteria and
 report their restricted domain explicitly. Restricted results never qualify the
 unmeasured domain. Retained original diagnostic provenance:
@@ -231,8 +241,8 @@ ISA checker have been removed. Their evidence remains under the gate-up-pipeline
 projection-pipeline and verify-pipeline-family packages in `profiles/bench/`.
 For new linked ISA inspection use the safe extractor
 `tools/bench/extract_embedded_code_object.py`: the selected projection module owns
-`small_batch_projection_kernel<N,K,T>` for the ordinary tiled cells, including down,
-and `gate_up_paired_tiles_kernel<T>` for N34816/K5120 T18/20/24.
+`small_batch_projection_kernel<N,K,T>` for the ordinary tiled cells, including down, and
+`a8q4_token_tile_kernel<TokenTileConfig<...>,Accumulate>` for the token-tile wide cells.
 Do not apply the retired four-IU4-site scale-gather checker to primed/drained pipelines.
 
 ## Standalone suite
@@ -1109,14 +1119,14 @@ unchanged represented inputs, and dynamic count replay through a HIP Graph. It d
 frontier and never enters the asymmetric FP8-K/INT4-V Text/MTP transaction contract.
 
 `ninfer_r9700_mtp_round_qual` covers the exact MTP next-round state transition over every fixed
-product shape K=1..5 and B=1..4. It compares alignment IDs, next proposal extents, AR positions,
+product shape K=1..5 and B=1..8. It compares alignment IDs, next proposal extents, AR positions,
 MRoPE positions, and validity columns with an independent host integer oracle, including
 budget/context exhaustion, zero/full acceptance, nontrivial row pitch, untouched pitch padding,
 and immutable inputs. The public Op and implementation are native HIP members of the closed
 gfx1201 archive; the retired wrapper, launcher, kernel, and duplicate legacy test are removed.
 
 `ninfer_r9700_speculative_round_qual` covers the complete chain and packed-tree acceptance owner.
-It exhausts K=1..8, W=2..16, and B=1..4, then checks mixed greedy/stochastic rows at both the
+It exhausts K=1..8, W=2..16, and B=1..8, then checks mixed greedy/stochastic rows at both the
 512-token single-workgroup boundary and the full 248320-token Qwen3.8 vocabulary. An independent
 host oracle rebuilds the represented-BF16 top-20 distribution in FP64, applies penalties and the
 round-local path overlay, uses the exact counter RNG, and evaluates selector-q Leviathan residuals,
@@ -1130,8 +1140,8 @@ hidden selection bit. A captured full-vocabulary-style multi-stage chain replays
 with dynamic input state. The selected caller-owned partial/distribution pipeline uses no hidden
 allocation or host readback. Retained pre-cap physical R9700 timings over 20 unprofiled ROCm events
 measured 2.01 ms for chain V=248320/K=8/B=8 and 0.59 ms for the mixed greedy/stochastic product
-tree V=248320/W=12/B=8; those B=8 measurements are historical, not supported-product evidence.
-The active qualifier covers B=1..4. LLVM metadata reports 20 VGPR/1440 bytes LDS for the partial kernel and 17
+tree V=248320/W=12/B=8; those pre-cap timings predate the current kernels and are not current
+product evidence. The active qualifier covers B=1..8. LLVM metadata reports 20 VGPR/1440 bytes LDS for the partial kernel and 17
 VGPR/224 bytes LDS for finalization, with wave32 and no private scratch in either. The retired
 wrapper, launcher, kernel, and duplicate legacy test are removed.
 
@@ -1716,7 +1726,7 @@ vocabularies use one exact 512-token partial top-20 stage followed by a bounded 
 each partial selects within eight waves and merges their shortlists in wave zero, avoiding a
 45-barrier full sorting network while retaining the same total 64-bit ordering key;
 the transient key plane comes only from the caller's `WorkspaceArena`. The qualifier runs the
-full padded Qwen vocabulary of 248320 tokens at every product B=1..4 and compares selected IDs plus the
+full padded Qwen vocabulary of 248320 tokens at every product B=1..8 and compares selected IDs plus the
 entire token-count publication image with an independent host ordering/FP64 probability oracle.
 Its cases combine greedy and positive-temperature rows, exact BF16 ties across partials,
 presence/frequency penalties, top-k clamping, top-p/min-p filters, and counter keys separated by

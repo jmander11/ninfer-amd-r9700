@@ -14,7 +14,7 @@ NInfer distinguishes four scopes:
 
 A result is stated only at the scope directly measured. Kernel or Op timings do not establish
 tokens per second. Final production selection requires a complete model artifact, numerical
-quality guardrails, same-candidate graph/eager parity, resolved capacity, and end-to-end C=1..4
+quality guardrails, same-candidate graph/eager parity, resolved capacity, and end-to-end C=1..8
 measurements on an otherwise idle R9700.
 
 Benchmark schema 21 sums each request's active prepare, Vision and prefill service time across
@@ -81,6 +81,35 @@ Decode depends on DFlash acceptance and therefore on the prompt mix; compare onl
 harness. Prefill rows predate the 2026-09-28 output-head and
 attention GPTQ reconversions, which change weight values but not formats or routes, and all rows
 predate the 2026-09-30 reduction to 21 protections (C1 decode +2.3%, C4 unchanged, prefill +0.4%).
+
+## C=1..8: verify-width kernels for C5..C8 (2026-10-01)
+
+`kMaximumConcurrency` is 8. DFlash verify rounds at C5..C8 run the Text and drafter projections at
+T = B x W = 17..64 columns (B <= 8 lanes, W = 4..8), widths the C2..C4 routes never reached. A C8
+contention trace (7 decode lanes, 8K owner, production DFlash adaptive K7, `prof.sh`) attributed
+the regressions, and each fix was qualified against its FP64 oracle before adoption (unprofiled
+interleaved medians, `profiles/bench/r9700-c8-20260930/`):
+
+| Change | Before -> after |
+|---|---|
+| Drafter SWA: always split for long windows (direct above 48 columns) | T8xB8, 4096 window: 3.30 -> 0.36 ms per call |
+| FP8LUT4 mid-T loop drained every load per step; deep-pipelined variant at T33..64 (load ring, LDS-only barriers), attention and GDN pairs fused into one launch | attention pair T56 94 -> 66 us; GDN pair 103 -> 74 us; N5120 K17408 106 -> 88 us; K6144 43 -> 36 us; SiLU and head at T49..64 -3 to -4% |
+| A8Q4 token-tile CTA (exact ceil(T/16) token fragments, LDS-shared activations, in-CTA split-K, two groups in flight) for the drafter shapes and draft head at T17..64 | N5120/K17408 T56 270 -> 115 us; N34816 T56 350 -> 193 us; draft head N131072 (was WMMA32) T56 2500 -> 709 us; C2..C4 widths T18..32 0.53-0.94x |
+
+Rejected: three- and four-tile small-T FP8LUT4 (8-38% slower than mid-T at T>=48, L2 activation
+re-reads), and a fused wide GDN normalized front at T33..64 (113 us against 17 us for the
+three-launch composition).
+
+Steady-state C8 decode round (rocprof, contention run): 62.1 -> 50.8 ms wall. Per call, the
+verify-width GEMMs now match their C4 cost (N5120 down/out 63.0 against 62.6 us, GDN pair 102
+against 101 us); the SiLU gate/up stays at 87% of its byte bound against 94% at C4 (~0.6 ms per
+round). Costs that grow with lanes are per-lane state traffic (GDN replay fold 1.7 -> 4.2 ms,
+record 34 -> 64 us, verify attention 20 -> 42 us per call at 3 -> 7 lanes).
+
+Whole inference (`-pg 512,512`, DFlash adaptive K7, two runs): C4 268.6 / 269.3 -> 273.4 / 277.2
+tok/s against 4a9382b5; C8 411 / 422 tok/s. 8K PPL mean NLL 1.8803156903 against 1.8803155915:
+the scorer evaluates the output head over 64-token slices, which now take the deep head route.
+ctest 91/91.
 
 ## FP8 protections reduced to 21 against the 5090 NVFP4 build (2026-09-30)
 

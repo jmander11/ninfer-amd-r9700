@@ -1,6 +1,6 @@
 #include "a8q4_small_batch_projection.h"
 #include "a8q4_pipeline_impl.h"
-#include "a8q4_paired_tiles.h"
+#include "a8q4_token_tile_cta.h"
 
 namespace ninfer::ops::r9700::linear {
 namespace {
@@ -26,14 +26,6 @@ __global__ __launch_bounds__((32 * k_split<N, K>())) void small_batch_projection
 }
 template <unsigned N, unsigned K, unsigned T>
 hipError_t launch_width(const A8Q4G64LinearArgs& a, hipStream_t stream) {
-    // The paired tail holds at most eight tokens (one half-wave WMMA column); T28/32 use the tiled body.
-    if constexpr (N == 34816 && K == 5120 && (T == 18 || T == 20 || T == 24)) {
-        if (a.accumulate_output) return hipErrorInvalidValue;
-        hipLaunchKernelGGL((detail::gate_up_paired_tiles_kernel<T>),dim3(N/16),dim3(32),0,stream,
-            a.activation_low_codes,a.activation_high_codes,a.activation_scales,a.activation_status,
-            a.weight_codes,a.weight_scales,a.output);
-        return hipGetLastError();
-    } else {
     // Only the N5120 residual-stream projections admit the in-place residual epilogue.
     if constexpr (N == 5120) {
         if (a.accumulate_output) {
@@ -49,7 +41,93 @@ hipError_t launch_width(const A8Q4G64LinearArgs& a, hipStream_t stream) {
         a.activation_low_codes,a.activation_high_codes,a.activation_scales,a.activation_status,
         a.weight_codes,a.weight_scales,a.output);
     return hipGetLastError();
+}
+// Token-tile wide routes (a8q4_token_tile_cta.h): one token fragment and four 16-row fragments
+// per wave; Rb row waves, Ks in-CTA K slices, Pd groups of loads in flight. The token tile is
+// ceil(T/16)x16 at run time; every admitted shape has an even G64 group count divisible by
+// Ks*Pd and rows divisible by 16*4*Rb. Scale planes are 256-byte aligned by the workspace and
+// storage contracts; the kernel reads each FP16 scale through its aligned 32-bit word.
+template <unsigned N, unsigned K, unsigned Mt, unsigned Rb, unsigned Ks, unsigned Pd>
+hipError_t launch_token_tile_class(const A8Q4G64LinearArgs& a, hipStream_t stream) {
+    using S = detail::TokenTileConfig<Mt, 1, 4, Rb, Ks, Pd>;
+    static_assert(N % S::Rows == 0 && K % 128 == 0 && (K / 64) % (Ks * Pd) == 0);
+    const auto launch = [&](auto kernel) {
+        hipLaunchKernelGGL(kernel, dim3(N / S::Rows), dim3(S::Threads), 0, stream,
+                           a.activation_low_codes, a.activation_high_codes, a.activation_scales,
+                           a.activation_status, a.weight_codes, a.weight_scales, a.output,
+                           a.tokens, N, K / 64U);
+        return hipGetLastError();
+    };
+    // Only the N5120 residual-stream projections admit the in-place residual epilogue.
+    if constexpr (N == 5120) {
+        if (a.accumulate_output) return launch(detail::a8q4_token_tile_kernel<S, true>);
     }
+    if (a.accumulate_output) return hipErrorInvalidValue;
+    return launch(detail::a8q4_token_tile_kernel<S, false>);
+}
+// Only the token-tile classes [MinMt, MaxMt] a route is selected for are instantiated.
+template <unsigned N, unsigned K, unsigned Rb, unsigned Ks, unsigned Pd, unsigned MinMt,
+          unsigned MaxMt>
+hipError_t launch_token_tile(const A8Q4G64LinearArgs& a, hipStream_t stream) {
+    const unsigned mt = (a.tokens + 15U) / 16U;
+    if (mt < MinMt || mt > MaxMt ||
+        reinterpret_cast<std::uintptr_t>(a.activation_scales) % 4U != 0U ||
+        reinterpret_cast<std::uintptr_t>(a.weight_scales) % 4U != 0U)
+        return hipErrorInvalidValue;
+    if constexpr (MinMt <= 2 && MaxMt >= 2)
+        if (mt == 2U) return launch_token_tile_class<N,K,2,Rb,Ks,Pd>(a,stream);
+    if constexpr (MinMt <= 3 && MaxMt >= 3)
+        if (mt == 3U) return launch_token_tile_class<N,K,3,Rb,Ks,Pd>(a,stream);
+    if constexpr (MaxMt >= 4)
+        if (mt == 4U) return launch_token_tile_class<N,K,4,Rb,Ks,Pd>(a,stream);
+    return hipErrorInvalidValue;
+}
+template <unsigned N, unsigned K>
+hipError_t launch_wide(const A8Q4G64LinearArgs& a, hipStream_t stream) {
+    using R = detail::A8Q4WideRoute;
+    constexpr bool n64 = N == 34816 && K == 5120;
+    constexpr bool n128 = N == 131072 && K == 5120;
+    constexpr bool tiled = N == 1280 && K == 5120;
+    switch (detail::select_a8q4_small_batch_wide_route(
+                a.tokens,a.rows,a.columns,a.padded_columns)) {
+    case R::TokenTileN64SplitK:
+        if constexpr (tiled) return launch_token_tile<N,K,1,2,2,4,4>(a,stream);
+        else if constexpr (n64) return launch_token_tile<N,K,1,2,2,3,4>(a,stream);
+        else return launch_token_tile<N,K,1,2,2,2,4>(a,stream);
+    case R::TokenTileN64:
+        if constexpr (n64) return launch_token_tile<N,K,1,1,1,2,2>(a,stream);
+        else break;
+    case R::TokenTileN128:
+        if constexpr (n128) return launch_token_tile<N,K,2,1,2,2,3>(a,stream);
+        else break;
+    case R::TiledM:
+        if constexpr (tiled) {
+            switch (a.tokens) {
+            case 25: return launch_width<N,K,25>(a,stream);
+            case 30: return launch_width<N,K,30>(a,stream);
+            case 35: return launch_width<N,K,35>(a,stream);
+            case 36: return launch_width<N,K,36>(a,stream);
+            case 40: return launch_width<N,K,40>(a,stream);
+            case 42: return launch_width<N,K,42>(a,stream);
+            case 48: return launch_width<N,K,48>(a,stream);
+            }
+        }
+        break;
+    case R::None: break;
+    }
+    return hipErrorInvalidValue;
+}
+template <unsigned N, unsigned K>
+constexpr bool has_wide_cells() {
+    return (N == 5120 && (K == 4096 || K == 17408 || K == 25600)) ||
+           ((N == 34816 || N == 6144 || N == 1280 || N == 131072) && K == 5120);
+}
+// T>16 table cells (tiled body) of shapes whose T17..64 widths all take a token-tile route are
+// unreachable; only the remaining shapes instantiate them.
+template <unsigned N, unsigned K>
+constexpr bool has_t18_32_table() {
+    return (N == 5120 && K == 6144) ||
+           ((N == 12288 || N == 4096 || N == 7168 || N == 1280) && K == 5120);
 }
 // Two projections of one prepared activation in one launch: CTAs [0, N0/16) own the first
 // matrix's row tiles and the rest the second's, so the pair pays one launch ramp and tail.
@@ -121,6 +199,13 @@ hipError_t launch_pair(const A8Q4G64LinearArgs& a, const A8Q4G64LinearArgs& b,
 }
 template <unsigned N, unsigned K>
 hipError_t launch_prepared(const A8Q4G64LinearArgs& a, hipStream_t stream) {
+    if constexpr (has_wide_cells<N,K>()) {
+        if (detail::use_a8q4_small_batch_wide(a.tokens,a.rows,a.columns,a.padded_columns))
+            return launch_wide<N,K>(a,stream);
+    }
+    if constexpr (N == 131072) {
+        return hipErrorInvalidValue;
+    } else {
     if constexpr ((N==34816 && K==5120) || (N==5120 && (K==17408 || K==6144))) {
         if(a.tokens==1) return launch_width<N,K,1>(a,stream);
     }
@@ -138,6 +223,10 @@ hipError_t launch_prepared(const A8Q4G64LinearArgs& a, hipStream_t stream) {
         case 14: return launch_width<N,K,14>(a,stream);
         case 15: return launch_width<N,K,15>(a,stream);
         case 16: return launch_width<N,K,16>(a,stream);
+        }
+    }
+    if constexpr (has_t18_32_table<N,K>()) {
+        switch(a.tokens) {
         case 18: return launch_width<N,K,18>(a,stream);
         case 20: return launch_width<N,K,20>(a,stream);
         case 21: return launch_width<N,K,21>(a,stream);
@@ -152,6 +241,7 @@ hipError_t launch_prepared(const A8Q4G64LinearArgs& a, hipStream_t stream) {
     if(a.tokens==7)return launch_width<N,K,7>(a,stream);
     if(a.tokens==8)return launch_width<N,K,8>(a,stream);
     return hipErrorInvalidValue;
+    }
 }
 template <unsigned N, unsigned K>
 hipError_t launch(const A8Q4G64CandidateArgs& a, hipStream_t stream) {
@@ -218,6 +308,7 @@ hipError_t detail::launch_a8q4_small_batch_projection_pair_split(
 
 hipError_t detail::launch_a8q4_small_batch_projection(
     const A8Q4G64LinearArgs& a, hipStream_t stream) noexcept {
+    if (a.rows == 131072) return launch_prepared<131072,5120>(a,stream);
     if (a.rows == 34816) return launch_prepared<34816,5120>(a,stream);
     if (a.rows == 5120 && a.columns == 17408) return launch_prepared<5120,17408>(a,stream);
     if (a.rows == 5120 && a.columns == 25600) return launch_prepared<5120,25600>(a,stream);
@@ -233,6 +324,7 @@ hipError_t a8q4_small_batch_projection(
     const A8Q4G64CandidateArgs& a, hipStream_t stream) noexcept {
     if (!detail::use_a8q4_small_batch_projection(a.tokens,a.rows,a.columns,a.padded_columns))
         return hipErrorInvalidValue;
+    if (a.rows == 131072 && a.columns == 5120) return launch<131072,5120>(a,stream);
     if (a.rows == 34816 && a.columns == 5120) return launch<34816,5120>(a,stream);
     if (a.rows == 5120 && a.columns == 17408) return launch<5120,17408>(a,stream);
     if (a.rows == 5120 && a.columns == 25600) return launch<5120,25600>(a,stream);

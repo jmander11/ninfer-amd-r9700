@@ -396,10 +396,13 @@ double median(std::array<double, kTrials> values) {
 // planes. The pool is shared as in production: disjoint shuffled physical pages per sequence, either
 // selected through device table rows of one pool-wide table or passed as direct page tables.
 Json sequence_batch_qualification(ninfer::DeviceContext& device) {
-    constexpr std::array<std::size_t, 4> kContexts{37U, 600U, 4100U, 33000U};
+    constexpr std::array<std::size_t, 8> kContexts{37U, 600U, 4100U, 33000U,
+                                                   129U, 2050U, 8200U, 1000U};
+    static_assert(kContexts.size() == kv::kPackedDecodeMaximumSequences &&
+                  kContexts.size() == kv::kAppendMaximumSequences);
     constexpr std::size_t kSparePages = 7U;
     constexpr std::size_t kRowElements = static_cast<std::size_t>(kQueryHeads) * kHeadDim;
-    std::array<std::size_t, 4> page_counts{};
+    std::array<std::size_t, kContexts.size()> page_counts{};
     std::size_t pool_pages = kSparePages, table_stride = 0U;
     for (std::size_t i = 0; i < kContexts.size(); ++i) {
         page_counts[i] = (kContexts[i] + kPageSize - 1U) / kPageSize;
@@ -412,8 +415,8 @@ Json sequence_batch_qualification(ninfer::DeviceContext& device) {
     for (std::size_t page = 0; page < pool_pages; ++page)
         physical[page] = static_cast<std::uint32_t>(page);
     std::shuffle(physical.begin(), physical.end(), random);
-    // Pool-wide table [4][stride]; rows beyond a sequence's pages hold an out-of-pool page.
-    std::vector<std::uint32_t> tables(4U * table_stride, static_cast<std::uint32_t>(pool_pages));
+    // Pool-wide table [8][stride]; rows beyond a sequence's pages hold an out-of-pool page.
+    std::vector<std::uint32_t> tables(kContexts.size() * table_stride, static_cast<std::uint32_t>(pool_pages));
     std::size_t next_page = 0U;
     for (std::size_t i = 0; i < kContexts.size(); ++i)
         for (std::size_t page = 0; page < page_counts[i]; ++page)
@@ -440,13 +443,13 @@ Json sequence_batch_qualification(ninfer::DeviceContext& device) {
     DeviceArray<std::uint16_t> d_scales(scales.size());
     DeviceArray<std::uint32_t> d_tables(tables.size());
     DeviceArray<hip_bfloat16> d_queries(queries.size());
-    DeviceArray<std::int32_t> d_table_rows(4U);
+    DeviceArray<std::int32_t> d_table_rows(kContexts.size());
     upload(d_keys, keys);
     upload(d_values, values);
     upload(d_scales, scales);
     upload(d_tables, tables);
     upload(d_queries, queries);
-    upload(d_table_rows, std::vector<std::int32_t>{0, 1, 2, 3});
+    upload(d_table_rows, std::vector<std::int32_t>{0, 1, 2, 3, 4, 5, 6, 7});
 
     struct Case {
         const char* name;
@@ -460,6 +463,11 @@ Json sequence_batch_qualification(ninfer::DeviceContext& device) {
         {"b3_w8_table_rows", {1U, 2U, 3U}, {8U, 8U, 8U}, true},
         {"b4_w8_table_rows", {0U, 1U, 2U, 3U}, {8U, 8U, 8U, 8U}, true},
         {"b4_mixed_rows_direct_tables", {3U, 0U, 2U, 1U}, {8U, 5U, 1U, 7U}, false},
+        {"b6_w8_table_rows", {0U, 1U, 2U, 3U, 4U, 5U}, {8U, 8U, 8U, 8U, 8U, 8U}, true},
+        {"b8_w8_table_rows", {0U, 1U, 2U, 3U, 4U, 5U, 6U, 7U}, std::vector<std::uint32_t>(8U, 8U),
+         true},
+        {"b8_mixed_rows_direct_tables", {6U, 3U, 0U, 7U, 2U, 5U, 1U, 4U},
+         {8U, 5U, 1U, 7U, 4U, 8U, 2U, 6U}, false},
     };
     Json attention_cells = Json::array();
     for (const Case& cell : cases) {
@@ -493,7 +501,7 @@ Json sequence_batch_qualification(ninfer::DeviceContext& device) {
                 .page_table_pages = static_cast<std::uint32_t>(table_stride),
                 .page_table_row = cell.table_rows ? d_table_rows.get() + sequence : nullptr,
                 .page_table_row_stride = static_cast<std::uint32_t>(table_stride),
-                .page_table_row_count = 4U,
+                .page_table_row_count = static_cast<std::uint32_t>(kContexts.size()),
                 .context = context, .physical_tokens = pool_tokens,
                 .query_heads = kQueryHeads, .kv_heads = kKvHeads, .q_to_kv = kQueriesPerKv,
                 .value_group = kValueGroup, .query_rows = rows,
@@ -582,7 +590,7 @@ Json sequence_batch_qualification(ninfer::DeviceContext& device) {
                                    {"batched_median_ms", median(batched_ms)}});
     }
 
-    // Append: four sequences write disjoint suffixes into one poisoned pool; one uses a device
+    // Append: eight sequences write disjoint suffixes into one poisoned pool; one uses a device
     // token count, one a device table row, and one a gapped position panel (InvalidPosition).
     constexpr std::size_t kAppendRows = 8U;
     std::vector<float> source_values(kContexts.size() * kAppendRows * kKvHeads * kHeadDim);
@@ -615,11 +623,11 @@ Json sequence_batch_qualification(ninfer::DeviceContext& device) {
             .token_count = i == 1U ? d_token_count.get() : nullptr,
             .first_position = static_cast<std::uint32_t>(kContexts[i] - kAppendRows),
             .kv_heads = kKvHeads,
-            .page_table = i == 3U ? d_tables.get() : d_tables.get() + i * table_stride,
+            .page_table = (i == 3U || i == 6U) ? d_tables.get() : d_tables.get() + i * table_stride,
             .page_table_pages = static_cast<std::uint32_t>(table_stride),
-            .page_table_row = i == 3U ? d_table_rows.get() + i : nullptr,
+            .page_table_row = (i == 3U || i == 6U) ? d_table_rows.get() + i : nullptr,
             .page_table_row_stride = static_cast<std::uint32_t>(table_stride),
-            .page_table_row_count = 4U,
+            .page_table_row_count = static_cast<std::uint32_t>(kContexts.size()),
             .physical_tokens = pool_tokens,
             .key_codes = d_keys.get(), .value_codes = d_values.get(),
             .value_scale_bits = d_scales.get(),
@@ -642,7 +650,8 @@ Json sequence_batch_qualification(ninfer::DeviceContext& device) {
     const auto reference_values = download(d_values);
     const auto reference_scales = download(d_scales);
     const auto reference_status = download(d_status);
-    if (reference_status != std::vector<std::uint32_t>{0U, 0U, kv::Fp8Int4KvAppendInvalidPosition, 0U})
+    if (reference_status != std::vector<std::uint32_t>{0U, 0U, kv::Fp8Int4KvAppendInvalidPosition,
+                                                       0U, 0U, 0U, 0U, 0U})
         fail("per-sequence append status is not the fixture's expected isolation");
     if (reference_keys == keys || reference_values == values || reference_scales == scales)
         fail("per-sequence append wrote no cache bytes");
@@ -657,8 +666,8 @@ Json sequence_batch_qualification(ninfer::DeviceContext& device) {
     return {{"attention", attention_cells},
             {"attention_criterion", "per-sequence output bytes and output/workspace canaries "
                                     "equal to one-sequence launches, eager and graph replay"},
-            {"append", {{"sequences", kContexts.size()}, {"rows", {3, 8, 8, 8}},
-                        {"device_token_count_sequence", 1}, {"device_table_row_sequence", 3},
+            {"append", {{"sequences", kContexts.size()}, {"rows", {3, 8, 8, 8, 8, 8, 8, 8}},
+                        {"device_token_count_sequence", 1}, {"device_table_row_sequences", {3, 6}},
                         {"invalid_position_sequence", 2},
                         {"status", reference_status}, {"plane_bytes_equal", true}}},
             {"context37_note", "below the packed routing minimum; compared at Op level only"},
@@ -965,7 +974,7 @@ int main(int argc, char** argv) {
             DeviceArray<float> output(elements + 2U);
             DeviceArray<float> scores(score_elements + 2U);
             DeviceArray<std::int32_t> positions(rows), selected_row(1U);
-            for (std::uint32_t concurrency = 1U; concurrency <= 4U; ++concurrency) {
+            for (std::uint32_t concurrency = 1U; concurrency <= ninfer::kMaximumConcurrency; ++concurrency) {
                 // Other table rows deliberately contain invalid physical pages:
                 // ignoring the device selector cannot pass as an equivalent map.
                 std::vector<std::uint32_t> tables(concurrency * pages.size(),

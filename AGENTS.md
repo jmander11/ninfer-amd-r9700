@@ -93,7 +93,7 @@ below FP8. Other `-eval` identities
 remain evaluation and conversion-base artifacts. DFlash2 keeps its model-specified BF16 selector
 codebook and private fixed BF16 state.
 
-The workload is one R9700, one resident model instance, and a startup-fixed one to four active
+The workload is one R9700, one resident model instance, and a startup-fixed one to eight active
 requests. The Engine forms one compact decode batch per round boundary with bounded FIFO ingress
 and no preemption; one prefill owner at a time advances either prefill-first or in startup-fixed
 slices, which under DFlash share a decode round's target forward (mixed round). Large-scale or

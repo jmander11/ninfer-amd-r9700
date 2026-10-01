@@ -96,7 +96,7 @@ void sample(const Tensor& logits, Tensor& out, std::int32_t token_domain,
     if (out.dtype != DType::I32) { throw std::invalid_argument("sample: out must be I32"); }
     if (logits.ne[2] != 1 || logits.ne[3] != 1 || logits.ne[0] <= 0 || logits.ne[1] <= 0 ||
         logits.ne[1] > kMaximumRequestRows) {
-        throw std::invalid_argument("sample: logits must be rank-2 [physical_rows,B], B in [1,4]");
+        throw std::invalid_argument("sample: logits must be rank-2 [physical_rows,B], B in [1,8]");
     }
     if (out.ne[0] != logits.ne[1] || out.ne[1] != 1 || out.ne[2] != 1 || out.ne[3] != 1) {
         throw std::invalid_argument("sample: out must be I32 [B]");

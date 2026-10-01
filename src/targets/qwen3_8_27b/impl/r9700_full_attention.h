@@ -55,7 +55,7 @@ struct R9700FullAttentionArgs {
 [[nodiscard]] hipError_t r9700_qwen3_8_27b_full_attention(const R9700FullAttentionArgs& args,
                                                       hipStream_t stream) noexcept;
 
-// Sequence batch of one compact decode round (at most four sequences of one cache, each with its
+// Sequence batch of one compact decode round (at most kMaximumConcurrency sequences of one cache, each with its
 // own read capability, positions, output and workspace): true when every sequence is a
 // non-tree host-fixed call on the packed decode route, which then serves the whole batch as one
 // split launch and one merge launch with each sequence's output bytes equal to its single call.

@@ -53,7 +53,7 @@ struct BidirectionalGqaBF16ContextView {
  * byte is unchanged. The oracle evaluates `ideal` naively in FP64 from represented inputs. The
  * BF16 out is promoted and compared directly with that result; output storage rounding belongs to
  * the Op's numerical criterion, not the oracle. out is the only observable mutation and is
- * completely overwritten. The native gfx1201 implementation domain is W=1..16 and B=1..4.
+ * completely overwritten. The native gfx1201 implementation domain is W=1..16 and B=1..8.
  *
  * The caller guarantees min_context <= L <= max_context and that every logical page intersecting
  * [0,L) is materialized. The execution envelope may affect finite launch selection and workspace

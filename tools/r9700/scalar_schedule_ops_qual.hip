@@ -335,7 +335,7 @@ void qualify_masked_block(hipStream_t stream) {
     d_valid.verify_guards("masked valid");
     d_ids.verify_guards("masked ids");
     d_positions.verify_guards("masked positions");
-    std::cout << "prepare_masked_block PASS W1..16_B1..4 W16B4_us=" << elapsed << '\n';
+    std::cout << "prepare_masked_block PASS W1..16_B1..8 W16B4_us=" << elapsed << '\n';
 }
 
 std::vector<hip_bfloat16> bit_fixture(std::size_t count, std::uint32_t seed) {
@@ -353,8 +353,12 @@ void qualify_ragged_prefix(hipStream_t stream) {
     const std::size_t source_count = static_cast<std::size_t>(kDflashFeatures) * kDflashWidth * capacity;
     const std::size_t output_count = static_cast<std::size_t>(kDflashFeatures) * kDflashWidth * kMaxBatch;
     const auto source = bit_fixture(source_count, 0x51EDC0DEU);
-    std::vector<std::int32_t> lanes{3, 0, 2, 1};
-    std::vector<std::int32_t> starts{100, 201, 302, 403};
+    // A fixed non-identity lane permutation and distinct starts for every row.
+    std::vector<std::int32_t> lanes(kMaxBatch), starts(kMaxBatch);
+    for (std::int32_t row = 0; row < kMaxBatch; ++row) {
+        lanes[row] = (row * 3 + kMaxBatch - 1) % kMaxBatch;
+        starts[row] = 100 + row * 101;
+    }
     std::vector<std::int32_t> ends(kMaxBatch);
     for (std::int32_t row = 0; row < kMaxBatch; ++row) {
         ends[row] = starts[row] + (row == kMaxBatch - 1 ? kDflashWidth : row);

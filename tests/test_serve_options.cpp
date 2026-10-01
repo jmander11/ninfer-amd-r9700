@@ -31,7 +31,7 @@ ServeOptions parse(std::vector<std::string> arguments) {
 int main() {
     int failures = 0;
 
-    static_assert(ninfer::kMaximumConcurrency == 4);
+    static_assert(ninfer::kMaximumConcurrency == 8);
 
     const ServeOptions defaults = parse({"ninfer-serve", "model.ninfer"});
     failures += check(defaults.prefill_chunk == ninfer::kDefaultPrefillChunk,
@@ -162,7 +162,7 @@ int main() {
     failures +=
         check(serve_usage_text("ninfer-serve").find("--context-checkpoints") != std::string::npos,
               "serve help omits --context-checkpoints");
-    failures += check(serve_usage_text("ninfer-serve").find("--max-concurrency 1..4") !=
+    failures += check(serve_usage_text("ninfer-serve").find("--max-concurrency 1..8") !=
                           std::string::npos,
                       "serve help omits the product concurrency range");
     failures += check(configured.enable_vision, "--vision did not enable Vision");
@@ -189,10 +189,10 @@ int main() {
         check(configured.max_concurrency == 4, "--max-concurrency did not reach serving options");
     bool excessive_concurrency_rejected = false;
     try {
-        (void)parse({"ninfer-serve", "model.ninfer", "--max-concurrency", "5"});
+        (void)parse({"ninfer-serve", "model.ninfer", "--max-concurrency", "9"});
     } catch (const std::invalid_argument&) { excessive_concurrency_rejected = true; }
     failures += check(excessive_concurrency_rejected,
-                      "--max-concurrency accepted more than four active requests");
+                      "--max-concurrency accepted more than eight active requests");
     failures += check(configured.max_context == 4096 &&
                           configured.kv_capacity.mode == ninfer::KvCapacityMode::Explicit &&
                           configured.kv_capacity.explicit_tokens == 8192,

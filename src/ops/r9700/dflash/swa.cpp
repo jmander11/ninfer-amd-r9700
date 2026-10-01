@@ -63,8 +63,10 @@ void validate_context(const CyclicKVCacheLayerView& context) {
 
 detail::SwaLaunchPlan resolve_plan(SwaContextExecutionEnvelope envelope, std::int32_t tokens,
                                    std::int32_t batch) {
+    // Long windows always split, at every compact-batch width: at 56-64 columns (C8 K6/K7) the
+    // direct kernel took 3.2-3.3 ms against 0.36 ms split (4096-token windows, swa_qual).
     const std::int32_t columns = tokens * batch;
-    if (envelope.max_context <= kDirectContextLimit || columns > 48) {
+    if (envelope.max_context <= kDirectContextLimit) {
         return {.direct = true, .splits = 1};
     }
     std::int32_t splits = 1;

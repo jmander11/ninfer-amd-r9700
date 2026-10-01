@@ -252,8 +252,9 @@ int main() {
         hipStream_t stream = nullptr;
         check(hipStreamCreate(&stream), "stream");
         Rng rng{0xf8f8ULL};
-        for (const std::uint32_t tokens : {1U, 6U, 16U, 17U, 130U, 2048U}) run(tokens, false, rng, stream);
-        for (const std::uint32_t tokens : {6U, 300U}) run(tokens, true, rng, stream);
+        for (const std::uint32_t tokens : {1U, 6U, 16U, 17U, 33U, 48U, 64U, 130U, 2048U})
+            run(tokens, false, rng, stream);
+        for (const std::uint32_t tokens : {6U, 49U, 300U}) run(tokens, true, rng, stream);
         std::cout << "fp8 producers qualification: PASS\n";
         return 0;
     } catch (const std::exception& error) {

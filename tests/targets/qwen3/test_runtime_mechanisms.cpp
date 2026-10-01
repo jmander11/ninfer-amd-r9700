@@ -1042,8 +1042,10 @@ void test_prefill_context_marks() {
     expect(Slots::staging_state_slot(4) == 4, "C=4 staging is slot C");
     expect(Slots::current_state_slot(3, 4) == 3, "C=4 last-lane current is slot 3");
     expect(Slots::staging_state_slot(3) == 3, "C=3 staging is slot C");
-    expect_throw([] { (void)Slots::state_slot_count(5, true); },
-                 "Linear Attention state slots accepted non-product C=5");
+    expect(Slots::state_slot_count(8, true) == 9, "C=8 MTP/DFlash GDN pool is C+1");
+    expect(Slots::current_state_slot(7, 8) == 7, "C=8 last-lane current is slot 7");
+    expect_throw([] { (void)Slots::state_slot_count(9, true); },
+                 "Linear Attention state slots accepted non-product C=9");
 }
 
 } // namespace

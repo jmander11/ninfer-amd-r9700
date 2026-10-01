@@ -626,7 +626,8 @@ void qualify_batched_projection_conv(hipStream_t stream) {
     constexpr std::uint32_t width = 4;
     constexpr std::uint32_t batch = ninfer::kMaximumConcurrency;
     constexpr std::uint32_t columns = width * batch;
-    constexpr std::uint32_t state_slots = 20;
+    static_assert(batch == 8U, "the fixture below lists eight rows");
+    constexpr std::uint32_t state_slots = batch + batch * width;
 
     const auto query_key = bf16_fixture(static_cast<std::size_t>(columns) *
                                             (query_rows + key_rows),
@@ -636,11 +637,12 @@ void qualify_batched_projection_conv(hipStream_t stream) {
     const auto weight = bf16_fixture(static_cast<std::size_t>(kChannels) * 4U, 107U, 1024.0F);
     const auto initial_state =
         bf16_fixture(static_cast<std::size_t>(state_slots) * 3U * kChannels, 109U, 257.0F);
-    const std::vector<std::int32_t> valid{4, 2, 3, 1};
-    const std::vector<std::int32_t> initial_slots{0, 1, 2, 3};
-    const std::vector<std::int32_t> snapshot_bases{4, 8, 12, 16};
+    const std::vector<std::int32_t> valid{4, 2, 3, 1, 1, 4, 2, 3};
+    const std::vector<std::int32_t> initial_slots{0, 1, 2, 3, 4, 5, 6, 7};
+    const std::vector<std::int32_t> snapshot_bases{8, 12, 16, 20, 24, 28, 32, 36};
     const std::vector<std::int32_t> parents{
-        -1, 0, 0, 2, -1, 0, 0, 0, -1, 0, 0, 1, -1, 0, 1, 2};
+        -1, 0, 0, 2, -1, 0, 0, 0, -1, 0, 0, 1, -1, 0, 1, 2,
+        -1, 0, 1, 1, -1, 0, 1, 2, -1, 0, 0, 0, -1, 0, 0, 1};
 
     DeviceBuffer<hip_bfloat16> d_query_key(query_key.size());
     DeviceBuffer<hip_bfloat16> d_value_z(value_z.size());
@@ -822,7 +824,8 @@ void qualify_mixed_projection_conv(hipStream_t stream) {
     const std::vector<Case> cases{{1U, 8U, 1U, {8}, {5}},
                                   {7U, 8U, 3U, {8, 5, 1}, {5, 6, 7}},
                                   {1000U, 8U, 4U, {8, 8, 3, 2}, {4, 5, 6, 7}},
-                                  {2040U, 2U, 4U, {2, 1, 2, 2}, {1, 2, 3, 4}}};
+                                  {2040U, 2U, 4U, {2, 1, 2, 2}, {1, 2, 3, 4}},
+                                  {968U, 8U, 7U, {8, 8, 3, 8, 2, 8, 5}, {7, 1, 2, 3, 4, 5, 6}}};
     for (const Case& c : cases) {
         const std::uint32_t columns = c.owner + c.width * c.batch;
         const auto query_key =
@@ -1090,7 +1093,7 @@ int main(int argc, char** argv) {
         qualify_recurrent_and_transactions(stream);
         HIP_CHECK(hipStreamDestroy(stream));
         std::cout << "r9700_gdn_op_qualification: PASS conv=T1..8/17/31/32/33/63/64/65/128/1025/2048 "
-                     "B=1..4 tree/snapshot mixed C=10240 Hq=16 Hv=48 K=V=128\n";
+                     "B=1..8 tree/snapshot mixed C=10240 Hq=16 Hv=48 K=V=128\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "r9700_gdn_op_qualification: FAIL: " << error.what() << '\n';

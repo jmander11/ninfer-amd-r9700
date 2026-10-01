@@ -125,7 +125,7 @@ void prepare_masked_block(const Tensor& anchors, const Tensor& lengths,
     const std::int32_t batch = ids.ne[1];
     if (width < 1 || width > 16 || batch < 1 ||
         batch > static_cast<std::int32_t>(kMaximumConcurrency) || mask_id < 0) {
-        throw std::invalid_argument("prepare_masked_block: requires W=1..16, B=1..4, mask_id>=0");
+        throw std::invalid_argument("prepare_masked_block: requires W=1..16, B=1..8, mask_id>=0");
     }
     require_i32_vector(anchors, batch, operation, "anchors");
     require_i32_vector(lengths, batch, operation, "lengths");

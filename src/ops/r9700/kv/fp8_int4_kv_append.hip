@@ -77,6 +77,7 @@ __device__ std::size_t physical_token(std::size_t logical, const std::uint32_t* 
 struct AppendSequences {
     Fp8Int4KvAppendArgs sequence[kAppendMaximumSequences];
 };
+static_assert(sizeof(AppendSequences) <= 4096U, "append sequences must fit the kernarg segment");
 
 template <std::uint32_t Group, bool KeyTokenFastest, bool ValueTokenFastest,
           bool ScaleTokenFastest>

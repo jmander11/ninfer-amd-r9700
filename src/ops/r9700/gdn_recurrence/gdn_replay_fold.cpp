@@ -1,4 +1,5 @@
 #include "ninfer/ops/gdn_replay.h"
+#include "ninfer/types.h"
 
 #include "ops/r9700/gdn_recurrence/gdn_replay_fold_internal.h"
 
@@ -17,6 +18,8 @@ namespace {
 
 constexpr std::int32_t kStateDim    = 128;
 constexpr std::int32_t kMaximumRows = 8;
+static_assert(kMaximumRows >= static_cast<std::int32_t>(kMaximumConcurrency),
+              "every compact-batch replay record needs a kernarg row");
 
 bool aligned_to(const void* pointer, std::uintptr_t alignment) {
     return pointer != nullptr && (reinterpret_cast<std::uintptr_t>(pointer) & (alignment - 1)) == 0;

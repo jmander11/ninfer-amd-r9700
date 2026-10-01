@@ -42,7 +42,7 @@ struct SwaContextExecutionEnvelope {
  * Context and query K/V are unchanged. out is the only observable mutation and is completely
  * overwritten. The R9700 implementation domain is T=1..16 on gfx1201 wave32.
  *
- * The registered request-batch domain is B=1..4. The caller guarantees min_context <= L <=
+ * The registered request-batch domain is B=1..8. The caller guarantees min_context <= L <=
  * max_context, sequential nonnegative positions, and that the cyclic context contains the
  * declared live interval. The envelope is checked in the device route without a host read and
  * never changes the admitted key set.

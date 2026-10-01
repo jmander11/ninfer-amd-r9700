@@ -168,7 +168,7 @@ SYSTEM_INCLUDES := -nostdinc \
 	-isystem /usr/local/include \
 	-isystem /usr/include/$(MULTIARCH) \
 	-isystem /usr/include
-CXXFLAGS := -O3 -std=c++20 --offload-arch=$(ARCH) -I../../src $(SYSTEM_INCLUDES) -Wall -Wextra -Werror
+CXXFLAGS := -O3 -std=c++20 --offload-arch=$(ARCH) -I../../include -I../../src $(SYSTEM_INCLUDES) -Wall -Wextra -Werror
 LDFLAGS := -L$(ROCM_ROOT)/lib -Wl,-rpath,$(ROCM_ROOT)/lib
 
 

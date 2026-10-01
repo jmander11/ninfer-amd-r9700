@@ -628,7 +628,7 @@ int main() {
         qualify_p_less(device);
         qualify_eligibility_and_positions(device);
         benchmark(device);
-        std::cout << "PASS: R9700 sampling B=1..4, exact token/count publication, FP64 probability oracle\n";
+        std::cout << "PASS: R9700 sampling B=1..8, exact token/count publication, FP64 probability oracle\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "FAIL: " << error.what() << '\n';

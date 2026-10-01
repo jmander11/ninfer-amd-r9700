@@ -205,7 +205,7 @@ target_link_libraries(ninfer_r9700_instruction_qual PRIVATE hip::host)
 add_executable(ninfer_r9700_kv_qual
   ${PROJECT_SOURCE_DIR}/tools/r9700/kv_op_qual.hip)
 target_include_directories(ninfer_r9700_kv_qual PRIVATE
-  ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/tests)
+  ${PROJECT_SOURCE_DIR}/include ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/tests)
 set_target_properties(ninfer_r9700_kv_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
 target_link_libraries(ninfer_r9700_kv_qual PRIVATE ninfer_r9700_core hip::host)
 

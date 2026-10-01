@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <utility>
 
 namespace ninfer::ops::r9700::linear {
 namespace {
@@ -13,6 +14,7 @@ namespace {
 using fp8lut4::decode8;
 using fp8lut4::F32x8;
 using fp8lut4::I32x2;
+using U32x4 = std::uint32_t __attribute__((ext_vector_type(4)));
 
 constexpr std::uint16_t kCanonicalBf16QuietNan = 0x7FC0U;
 
@@ -303,6 +305,229 @@ __global__ __launch_bounds__(256) void fp8lut4_mid_t_kernel(KernelArgs a) {
                 *out = round_bf16(y[item]);
             }
         }
+    }
+#else
+    (void)a;
+#endif
+}
+
+// A CTA barrier ordering only LDS: __syncthreads' workgroup fence also waits for every global
+// load in flight, which would drain the deep mid-T prefetch at each step.
+__device__ __forceinline__ void lds_barrier() {
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
+    // This wave's LDS accesses, explicitly (no builtin on gfx12; operand-free, so no load waits).
+    asm volatile("s_wait_dscnt 0x0" ::: "memory");
+    __builtin_amdgcn_s_barrier_signal(-1);
+    __builtin_amdgcn_s_barrier_wait(-1);
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
+}
+
+// ---- Deep mid-T (T 33..64, codebook weights; deep_shape selects it). The mid-T CTA (kRowBlocks
+// blocks of 16 rows, K split kSplit-ways, each split's T x 64 activation bytes staged in LDS once
+// per step) with kDepth 64-column steps of weight codes, group codes and staging units in flight
+// per wave. Loads return in order: the mid-T kernel issues step s + 1's loads in step s and waits
+// for all of them before its WMMAs (its conditional staging loads join with a full wait) and
+// again in __syncthreads, one DRAM round trip per step. Here step s + 1's activation is loaded
+// with its weight kDepth - 1 steps earlier, so waiting for it before the LDS store leaves steps
+// s + 2 .. s + kDepth in flight. CTAs past weight.rows / (16 kRowBlocks) project `second` (a pair
+// in one launch). The WMMA chain and the in-order K split combine are those of the mid-T kernel
+// of the same kRowBlocks / kSplit; the epilogue publishes eight rows (or SiLU features) per lane
+// with one 16-byte store (16-byte-aligned outputs). Barriers order LDS only (lds_barrier).
+template <bool kAccumulate, bool kSiluPair, std::uint32_t kRowBlocks, std::uint32_t kSplit,
+          std::uint32_t kTiles, std::uint32_t kDepth>
+__global__ __launch_bounds__(256) void fp8lut4_mid_deep_kernel(KernelArgs a) {
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx1201__)
+    static_assert(kRowBlocks * kSplit == 8U && kTiles >= 3U && kTiles <= 4U && kDepth >= 2U &&
+                  kDepth <= 4U);
+    constexpr std::uint32_t kTokens = 16U * kTiles;
+    constexpr std::uint32_t kGroupThreads = 32U * kRowBlocks;
+    constexpr std::uint32_t kUnits = (kTokens * 4U + kGroupThreads - 1U) / kGroupThreads;
+    constexpr std::uint32_t kActivationBytes = 2U * kSplit * kTokens * kMidStride;
+    constexpr std::uint32_t kPartialBytes =
+        kSplit > 1U ? kRowBlocks * kTiles * 8U * 32U * 4U : 0U;
+    __shared__ uint2 table[256];
+    __shared__ __attribute__((aligned(16)))
+    std::uint8_t lds[kActivationBytes > kPartialBytes ? kActivationBytes : kPartialBytes];
+    const std::uint32_t thread = threadIdx.x, lane = thread & 31U;
+    const std::uint32_t wave = __builtin_amdgcn_readfirstlane(thread >> 5U);
+    const std::uint32_t block = wave % kRowBlocks, split = wave / kRowBlocks;
+    const std::uint32_t axis = lane & 15U, half = lane >> 4U;
+    const std::uint32_t first_ctas = a.weight.rows / (16U * kRowBlocks);
+    const bool second = blockIdx.x >= first_ctas;
+    // By value: the CTA-uniform selection stays in scalar registers.
+    const Fp8Lut4Weight weight = second ? a.second : a.weight;
+    const Fp8Lut4Output output = second ? a.second_output : a.output;
+    const std::uint32_t row_base =
+        ((second ? blockIdx.x - first_ctas : blockIdx.x) * kRowBlocks + block) * 16U;
+    const std::uint32_t columns = weight.columns, slabs = columns / 64U;
+    const std::uint32_t steps = slabs / kSplit, first_slab = split * steps;
+    const std::uint32_t tokens = a.tokens;
+    fp8lut4::load_table(table, 256U);
+
+    const std::size_t first_tile = static_cast<std::size_t>(row_base / 16U) * slabs + first_slab;
+    const std::uint32_t slot = half * 16U + axis;
+    const std::uint8_t* codes = weight.codes + first_tile * 512U + slot * 16U;
+    const std::uint8_t* groups = weight.groups + first_tile * 32U + slot;
+    // Staging unit u of this split's group: token u / 4, 16-byte part u % 4 of the step. Every
+    // load is unconditional (a conditional load joins its register with a wait for every load in
+    // flight): absent tokens and units past the tile read the last token, whose WMMA columns are
+    // never published.
+    const std::uint32_t group_thread = thread % kGroupThreads;
+    const std::uint8_t* unit_bytes[kUnits];
+#pragma unroll
+    for (std::uint32_t i = 0; i < kUnits; ++i) {
+        const std::uint32_t unit = group_thread + i * kGroupThreads;
+        const std::uint32_t token = min(unit / 4U, tokens - 1U);
+        unit_bytes[i] = a.activation + static_cast<std::size_t>(token) * columns +
+                        static_cast<std::size_t>(first_slab) * 64U + (unit % 4U) * 16U;
+    }
+    // The ring of kDepth steps in flight (slot = step % kDepth, a compile-time index everywhere),
+    // in vector registers: uint4 struct copies become memcpys that keep the ring in private memory.
+    U32x4 ring_w[kDepth];
+    std::uint32_t ring_g[kDepth];
+    U32x4 ring_x[kDepth][kUnits];
+    const auto load = [&](std::uint32_t step, U32x4& w, std::uint32_t& g,
+                          U32x4 (&units)[kUnits]) __attribute__((always_inline)) {
+        w = *reinterpret_cast<const U32x4*>(codes + static_cast<std::size_t>(step) * 512U);
+        g = groups[static_cast<std::size_t>(step) * 32U];
+#pragma unroll
+        for (std::uint32_t i = 0; i < kUnits; ++i)
+            units[i] = *reinterpret_cast<const U32x4*>(unit_bytes[i] + static_cast<std::size_t>(step) * 64U);
+    };
+    const auto stage_store = [&](const U32x4 (&units)[kUnits],
+                                 std::uint32_t buffer) __attribute__((always_inline)) {
+        std::uint8_t* base = lds + (buffer * kSplit + split) * kTokens * kMidStride;
+#pragma unroll
+        for (std::uint32_t i = 0; i < kUnits; ++i) {
+            const std::uint32_t unit = group_thread + i * kGroupThreads;
+            if (unit < kTokens * 4U)
+                *reinterpret_cast<U32x4*>(base + (unit / 4U) * kMidStride + (unit % 4U) * 16U) = units[i];
+        }
+    };
+
+    F32x8 accumulator[kTiles]{};
+    // Inlined everywhere: an outlined call would keep the ring in private memory.
+    const auto run_step = [&]<std::uint32_t kSlot>(std::uint32_t step) __attribute__((always_inline)) {
+        const uint2 book = table[ring_g[kSlot]];
+        const U32x4 code_word = ring_w[kSlot];
+        const uint2 w0 = decode8(code_word.x, book), w1 = decode8(code_word.y, book);
+        const uint2 w2 = decode8(code_word.z, book), w3 = decode8(code_word.w, book);
+        const std::uint32_t w[8]{w0.x, w0.y, w1.x, w1.y, w2.x, w2.y, w3.x, w3.y};
+        // The slot is free: its weight is decoded and its activation was staged a step ago. The
+        // last kDepth steps reload the final step (unused) instead of branching.
+        load(step + kDepth < steps ? step + kDepth : steps - 1U, ring_w[kSlot], ring_g[kSlot],
+             ring_x[kSlot]);
+        const std::uint8_t* activation = lds + ((step & 1U) * kSplit + split) * kTokens * kMidStride;
+#pragma unroll
+        for (std::uint32_t tile = 0; tile < kTiles; ++tile) {
+            const uint4* xt = reinterpret_cast<const uint4*>(
+                activation + (tile * 16U + axis) * kMidStride + half * 32U);
+            const uint4 x0 = xt[0], x1 = xt[1];
+            const std::uint32_t x[8]{x0.x, x0.y, x0.z, x0.w, x1.x, x1.y, x1.z, x1.w};
+#pragma unroll
+            for (std::uint32_t chunk = 0; chunk < 4U; ++chunk) {
+                accumulator[tile] = __builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8_w32_gfx12(
+                    I32x2{static_cast<int>(w[2U * chunk]), static_cast<int>(w[2U * chunk + 1U])},
+                    I32x2{static_cast<int>(x[2U * chunk]), static_cast<int>(x[2U * chunk + 1U])},
+                    accumulator[tile]);
+            }
+        }
+        if (step + 1U < steps) stage_store(ring_x[(kSlot + 1U) % kDepth], (step + 1U) & 1U);
+        lds_barrier();
+    };
+    using Slots = std::make_integer_sequence<std::uint32_t, kDepth>;
+
+    // deep_fits guarantees steps >= kDepth.
+    [&]<std::uint32_t... kSlot>(std::integer_sequence<std::uint32_t, kSlot...>) __attribute__((always_inline)) {
+        (load(kSlot, ring_w[kSlot], ring_g[kSlot], ring_x[kSlot]), ...);
+    }(Slots{});
+    stage_store(ring_x[0], 0U);
+    lds_barrier();  // codebook and the first activation step
+    const std::uint32_t whole = steps - steps % kDepth;
+    for (std::uint32_t base = 0; base < whole; base += kDepth) {
+        [&]<std::uint32_t... kSlot>(std::integer_sequence<std::uint32_t, kSlot...>) __attribute__((always_inline)) {
+            (run_step.template operator()<kSlot>(base + kSlot), ...);
+        }(Slots{});
+    }
+    [&]<std::uint32_t... kSlot>(std::integer_sequence<std::uint32_t, kSlot...>) __attribute__((always_inline)) {
+        ((whole + kSlot < steps ? run_step.template operator()<kSlot>(whole + kSlot) : void()), ...);
+    }(Slots{});
+
+    if constexpr (kSplit > 1U) {
+        // The activation buffers are dead after the last barrier: split partials reuse them.
+        float* partial = reinterpret_cast<float*>(lds);
+        for (std::uint32_t s = 1; s < kSplit; ++s) {
+            if (split == s) {
+#pragma unroll
+                for (std::uint32_t tile = 0; tile < kTiles; ++tile)
+#pragma unroll
+                    for (std::uint32_t item = 0; item < 8U; ++item) {
+                        float* p = partial + ((block * kTiles + tile) * 8U + item) * 32U + lane;
+                        *p = s == 1U ? accumulator[tile][item] : *p + accumulator[tile][item];
+                    }
+            }
+            lds_barrier();
+        }
+        if (split != 0U) return;
+#pragma unroll
+        for (std::uint32_t tile = 0; tile < kTiles; ++tile)
+#pragma unroll
+            for (std::uint32_t item = 0; item < 8U; ++item)
+                accumulator[tile][item] += partial[((block * kTiles + tile) * 8U + item) * 32U + lane];
+    }
+
+    float row_scale[8];
+#pragma unroll
+    for (std::uint32_t item = 0; item < 8U; ++item)
+        row_scale[item] = weight.scales[row_base + half * 8U + item];
+#pragma unroll
+    for (std::uint32_t tile = 0; tile < kTiles; ++tile) {
+        const std::uint32_t token = tile * 16U + axis;
+        const bool present = token < tokens;
+        const float token_scale = present ? a.token_scales[token] : 0.0F;
+        const bool poison = present && a.status[token] != Fp8ActivationOk;
+        float y[8];
+#pragma unroll
+        for (std::uint32_t item = 0; item < 8U; ++item)
+            y[item] = accumulator[tile][item] * row_scale[item] * token_scale;
+        std::uint16_t value[8];
+        uint4* out = nullptr;
+        if constexpr (kSiluPair) {
+            // Lane `half` 0 holds this block's eight gate rows, lane ^ 16 their up partners.
+            float partner[8];
+#pragma unroll
+            for (std::uint32_t item = 0; item < 8U; ++item) partner[item] = __shfl_xor(y[item], 16, 32);
+            if (half != 0U || !present) continue;
+#pragma unroll
+            for (std::uint32_t item = 0; item < 8U; ++item)
+                value[item] = poison ? kCanonicalBf16QuietNan : silu_pair_value(y[item], partner[item]);
+            out = reinterpret_cast<uint4*>(reinterpret_cast<std::uint16_t*>(output.leading) +
+                                           static_cast<std::size_t>(token) * (weight.rows / 2U) +
+                                           row_base / 2U);
+        } else {
+            if (!present) continue;
+            // Eight consecutive rows of one side of the split (a multiple of 128).
+            out = reinterpret_cast<uint4*>(output_at(weight, output, token, row_base + half * 8U));
+            uint4 prior{};
+            if constexpr (kAccumulate) prior = *out;
+            const std::uint32_t prior_words[4]{prior.x, prior.y, prior.z, prior.w};
+#pragma unroll
+            for (std::uint32_t item = 0; item < 8U; ++item) {
+                if (poison) {
+                    value[item] = kCanonicalBf16QuietNan;
+                } else if constexpr (kAccumulate) {
+                    const std::uint16_t prior_bits =
+                        static_cast<std::uint16_t>(prior_words[item / 2U] >> (16U * (item & 1U)));
+                    value[item] = round_bf16(bf16_float(prior_bits) + bf16_float(round_bf16(y[item])));
+                } else {
+                    value[item] = round_bf16(y[item]);
+                }
+            }
+        }
+        *out = uint4{value[0] | (static_cast<std::uint32_t>(value[1]) << 16U),
+                     value[2] | (static_cast<std::uint32_t>(value[3]) << 16U),
+                     value[4] | (static_cast<std::uint32_t>(value[5]) << 16U),
+                     value[6] | (static_cast<std::uint32_t>(value[7]) << 16U)};
     }
 #else
     (void)a;
@@ -725,6 +950,102 @@ void launch_mid(const KernelArgs& args, hipStream_t stream) {
     }
 }
 
+template <bool kAccumulate, bool kSiluPair, std::uint32_t kRowBlocks, std::uint32_t kSplit,
+          std::uint32_t kDepth, std::uint32_t kTiles>
+void launch_deep_as(const KernelArgs& args, hipStream_t stream) {
+    const dim3 grid((args.weight.rows + args.second.rows) / (16U * kRowBlocks)), block(256U);
+    hipLaunchKernelGGL(
+        (fp8lut4_mid_deep_kernel<kAccumulate, kSiluPair, kRowBlocks, kSplit, kTiles, kDepth>),
+        grid, block, 0, stream, args);
+}
+
+// Plain or residual output (one projection or a fused pair): three token tiles at T 33..48,
+// four at T 49..64.
+template <std::uint32_t kRowBlocks, std::uint32_t kSplit, std::uint32_t kDepth>
+void launch_deep_plain(const KernelArgs& args, hipStream_t stream) {
+    const bool four = args.tokens > 48U;
+    if (args.output.accumulate) {
+        if (four) launch_deep_as<true, false, kRowBlocks, kSplit, kDepth, 4U>(args, stream);
+        else launch_deep_as<true, false, kRowBlocks, kSplit, kDepth, 3U>(args, stream);
+    } else {
+        if (four) launch_deep_as<false, false, kRowBlocks, kSplit, kDepth, 4U>(args, stream);
+        else launch_deep_as<false, false, kRowBlocks, kSplit, kDepth, 3U>(args, stream);
+    }
+}
+
+// Deep mid-T selection at T 33..64 (codebook weights, 16-byte-aligned outputs), from interleaved
+// eager medians against the mid-T kernel on the R9700 (fp8lut4_linear_qual candidate sweep,
+// 2026-09-30, T 33/40/48/49/56/64):
+// - pairs of >= 14336 combined rows run fused in one launch: 4 x 2 row blocks / K splits, depth 2
+//   (attention N7168 + N7168 K5120: 0.68-0.73x, T64 96 -> 70 us), or 8 x 1, depth 2, from 16384
+//   rows (GDN N4096 + N12288 K5120: 0.66-0.73x, T64 105 -> 73 us);
+// - N5120 outputs (MLP down K17408, attention/GDN output K6144), plain or residual: 4 x 2, depth 2
+//   (0.78-0.88x; K17408 T64 106 -> 89 us, K6144 T64 43 -> 36 us);
+// - SiLU gate/up N34816 at T 49..64: 4 x 2, depth 4 (0.96-0.97x; mid-T is as fast below);
+// - output head (>= 131072 rows) at T 49..64: 8 x 1, depth 2 (0.97x, T64 1244 -> 1206 us).
+// Everything else keeps the mid-T kernel.
+enum class DeepShape { None, Rows64Depth2, Rows64Depth4, Rows128Depth2 };
+
+constexpr std::uint32_t kDeepMaximumTokens = 64U, kDeepFourTileTokens = 49U;
+constexpr std::uint32_t kDeepPairRows = 14336U, kDeepWidePairRows = 16384U;
+constexpr std::uint32_t kDeepNarrowRows = 5120U, kDeepHeadRows = 131072U;
+
+bool deep_fits(DeepShape shape, std::uint32_t rows, std::uint32_t columns) noexcept {
+    const std::uint32_t row_blocks = shape == DeepShape::Rows128Depth2 ? 8U : 4U;
+    const std::uint32_t split = 8U / row_blocks, depth = shape == DeepShape::Rows64Depth4 ? 4U : 2U;
+    return rows % (16U * row_blocks) == 0U && (columns / 64U) % split == 0U &&
+           columns / 64U / split >= depth;
+}
+
+bool aligned16(const Fp8Lut4Output& output) noexcept {
+    return reinterpret_cast<std::uintptr_t>(output.leading) % 16U == 0U &&
+           reinterpret_cast<std::uintptr_t>(output.trailing) % 16U == 0U;
+}
+
+bool deep_width(const KernelArgs& args) noexcept {
+    return args.tokens >= kMidMinimumTokens && args.tokens <= kDeepMaximumTokens &&
+           args.weight.groups != nullptr && aligned16(args.output);
+}
+
+DeepShape deep_shape(const KernelArgs& args) noexcept {
+    if (!deep_width(args)) return DeepShape::None;
+    const std::uint32_t rows = args.weight.rows;
+    DeepShape shape = DeepShape::None;
+    if (args.output.silu_pair) {
+        if (args.tokens >= kDeepFourTileTokens) shape = DeepShape::Rows64Depth4;
+    } else if (rows == kDeepNarrowRows) {
+        shape = DeepShape::Rows64Depth2;
+    } else if (rows >= kDeepHeadRows && args.tokens >= kDeepFourTileTokens) {
+        shape = DeepShape::Rows128Depth2;
+    }
+    return shape != DeepShape::None && deep_fits(shape, rows, args.weight.columns) ? shape
+                                                                                 : DeepShape::None;
+}
+
+// Both projections of `args` (first and second) in one launch.
+DeepShape deep_pair_shape(const KernelArgs& args) noexcept {
+    KernelArgs second = args;
+    second.weight = args.second;
+    second.output = args.second_output;
+    const std::uint32_t rows = args.weight.rows + args.second.rows;
+    if (!deep_width(args) || !deep_width(second) || rows < kDeepPairRows) return DeepShape::None;
+    const DeepShape shape = rows >= kDeepWidePairRows ? DeepShape::Rows128Depth2
+                                                      : DeepShape::Rows64Depth2;
+    return deep_fits(shape, args.weight.rows, args.weight.columns) &&
+                   deep_fits(shape, args.second.rows, args.second.columns)
+               ? shape : DeepShape::None;
+}
+
+void launch_deep(const KernelArgs& args, DeepShape shape, hipStream_t stream) {
+    switch (shape) {
+    case DeepShape::Rows64Depth2: launch_deep_plain<4U, 2U, 2U>(args, stream); break;
+    case DeepShape::Rows64Depth4:  // SiLU pair, four token tiles
+        launch_deep_as<false, true, 4U, 2U, 4U, 4U>(args, stream); break;
+    case DeepShape::Rows128Depth2: launch_deep_plain<8U, 1U, 2U>(args, stream); break;
+    case DeepShape::None: break;
+    }
+}
+
 enum class PrefillShape { T256R128, T256R64, T512R64 };
 
 // Three 256x128 CTAs are resident per WGP (32 WGPs, 96 CTAs). Selected by whole-model prefill
@@ -889,6 +1210,10 @@ hipError_t fp8lut4_linear(const Fp8Lut4Weight& weight, const Fp8ActivationWorksp
         return hipErrorInvalidValue;
     }
     const KernelArgs args = kernel_args(weight, output, activation);
+    if (const DeepShape shape = deep_shape(args); shape != DeepShape::None) {
+        launch_deep(args, shape, stream);
+        return hipGetLastError();
+    }
     if (mid_supported(activation.tokens, weight.rows, weight.columns)) {
         launch_mid(args, stream);
         return hipGetLastError();
@@ -906,6 +1231,15 @@ hipError_t fp8lut4_linear_pair(const Fp8Lut4Weight& first, const Fp8Lut4Output& 
         first_output.accumulate != second_output.accumulate || first_output.silu_pair ||
         second_output.silu_pair) {
         return hipErrorInvalidValue;
+    }
+    {
+        KernelArgs args = kernel_args(first, first_output, activation);
+        args.second = second;
+        args.second_output = second_output;
+        if (const DeepShape shape = deep_pair_shape(args); shape != DeepShape::None) {
+            launch_deep(args, shape, stream);
+            return hipGetLastError();
+        }
     }
     if (mid_supported(activation.tokens, first.rows, first.columns) ||
         !small_route(activation.tokens, first.rows, first.columns) ||

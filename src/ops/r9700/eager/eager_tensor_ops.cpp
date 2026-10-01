@@ -16,6 +16,7 @@
 #include "ninfer/ops/silu_mul.h"
 
 #include "core/device.h"
+#include "ninfer/types.h"
 #include "ops/r9700/eager/eager_ops.h"
 
 #include <algorithm>
@@ -275,7 +276,7 @@ void offset_i32_position_rows(const Tensor& source, const Tensor& deltas, Tensor
     require_contiguous_nonnull(source, operation, "source");
     require_contiguous_nonnull(destination, operation, "destination");
     require_vector(deltas, DType::I32, operation, "deltas");
-    if (source.ne[0] <= 0 || source.ne[1] <= 0 || source.ne[1] > 4 ||
+    if (source.ne[0] <= 0 || source.ne[1] <= 0 || source.ne[1] > static_cast<std::int32_t>(kMaximumConcurrency) ||
         source.ne[2] != 1 || source.ne[3] != 1 || destination.ne[0] != source.ne[0] ||
         destination.ne[1] != source.ne[1] || destination.ne[2] != 1 || destination.ne[3] != 1 ||
         deltas.ne[0] != source.ne[1])

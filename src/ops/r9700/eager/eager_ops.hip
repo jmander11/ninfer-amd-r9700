@@ -1,5 +1,7 @@
 #include "ops/r9700/eager/eager_ops.h"
 
+#include "ninfer/types.h"
+
 #include <hip/hip_fp16.h>
 
 #include <algorithm>
@@ -910,7 +912,7 @@ hipError_t i32_offset_rows(const std::int32_t* source, const std::int32_t* delta
                             std::int32_t* destination, std::size_t width,
                             std::size_t rows, hipStream_t stream) noexcept {
     return checked_launch(source && deltas && destination && valid_linear_count(width) &&
-                              rows > 0 && rows <= 4 && valid_stream(stream), [&] {
+                              rows > 0 && rows <= kMaximumConcurrency && valid_stream(stream), [&] {
         hipLaunchKernelGGL(offset_rows_kernel, dim3((width + kBlock - 1) / kBlock, rows),
                            dim3(kBlock), 0, stream, source, deltas, destination, width);
     });

@@ -158,6 +158,9 @@ void run_case(const std::vector<double>& book, std::uint32_t rows, std::uint32_t
     for (auto& b : base) b = hip_bfloat16(static_cast<float>(rng.normal()));
     Device<hip_bfloat16> output(base.size());
     output.upload(base);
+    // A plain output starts as NaN: every element must be published.
+    if (!accumulate)
+        check(hipMemsetAsync(output.data, 0xff, output.count * sizeof(hip_bfloat16), stream), "poison output");
     check(linear::fp8lut4_linear(weight.view(), activation.workspace,
                              {.leading = output.data, .accumulate = accumulate}, stream), "fp8lut4");
     check(hipStreamSynchronize(stream), "sync");
@@ -182,9 +185,9 @@ void run_case(const std::vector<double>& book, std::uint32_t rows, std::uint32_t
         check(hipStreamSynchronize(stream), "sync qualified graph");
     }
     const auto got = output.download();
-    if (graph_timing)
+    if (graph_timing || !poison)
         for (const auto value : got)
-            require(std::isfinite(bf16_value(value.data)), label + " captured replay left nonfinite output");
+            require(std::isfinite(bf16_value(value.data)), label + " unwritten/nonfinite output");
     if (poison) {
         // The nonfinite element belongs to token poisoned_token; exactly its outputs are NaN.
         const std::uint32_t poisoned_token =
@@ -271,57 +274,92 @@ void run_case(const std::vector<double>& book, std::uint32_t rows, std::uint32_t
     }
 }
 
-// Two projections of one image in one launch; the first publishes rows [0, split) and [split, N)
-// to separate outputs. Both are checked against the oracle through the split.
+// Two projections of one image (one launch at small T and at the fused T 33..64 widths). Either
+// may split its rows: rows [0, split) and [split, N) publish to separate outputs (split 0: one
+// output). Outputs start as NaN, so every element must be published; sampled rows of both are
+// checked against the oracle through the splits.
 void run_pair(const std::vector<double>& book, std::uint32_t rows0, std::uint32_t split0,
               std::uint32_t rows1, std::uint32_t columns, std::uint32_t tokens, Rng& rng,
-              hipStream_t stream) {
-    const std::string label = "pair N" + std::to_string(rows0) + "/" + std::to_string(split0) +
-                              "+N" + std::to_string(rows1) + " T" + std::to_string(tokens);
+              hipStream_t stream, std::uint32_t split1 = 0U, bool poison = false) {
+    const std::string label = std::string(poison ? "poisoned " : "") + "pair N" + std::to_string(rows0) +
+                              (split0 != 0U ? "/" + std::to_string(split0) : "") + "+N" +
+                              std::to_string(rows1) +
+                              (split1 != 0U ? "/" + std::to_string(split1) : "") + " T" +
+                              std::to_string(tokens);
     Weight first(rows0, columns, rng), second(rows1, columns, rng);
     std::vector<hip_bfloat16> input(static_cast<std::size_t>(tokens) * columns);
     for (auto& x : input) x = hip_bfloat16(static_cast<float>(rng.normal()));
+    const std::uint32_t poisoned_token = tokens / 2U;
+    if (poison) input[static_cast<std::size_t>(poisoned_token) * columns + 3U] = hip_bfloat16(NAN);
     Device<hip_bfloat16> device_input(input.size());
     device_input.upload(input);
     Activation activation(tokens, columns);
     check(linear::fp8_quantize_activation({device_input.data, activation.workspace}, stream), "q");
-    Device<hip_bfloat16> leading(static_cast<std::size_t>(tokens) * split0),
-        trailing(static_cast<std::size_t>(tokens) * (rows0 - split0)),
-        other(static_cast<std::size_t>(tokens) * rows1);
-    check(linear::fp8lut4_linear_pair(first.view(), {leading.data, trailing.data, split0, false},
-                                  second.view(), {.leading = other.data}, activation.workspace,
-                                  stream), "pair");
+    struct Side {
+        const Weight& weight;
+        std::uint32_t split;
+        Device<hip_bfloat16> leading, trailing;
+        Side(const Weight& w, std::uint32_t s, std::uint32_t tokens)
+            : weight(w), split(s),
+              leading(static_cast<std::size_t>(tokens) * (s != 0U ? s : w.rows)),
+              trailing(s != 0U ? static_cast<std::size_t>(tokens) * (w.rows - s) : 1U) {}
+        linear::Fp8Lut4Output output() const {
+            return {leading.data, split != 0U ? trailing.data : nullptr, split, false};
+        }
+    };
+    Side sides[2]{{first, split0, tokens}, {second, split1, tokens}};
+    for (const Side& side : sides)
+        for (const Device<hip_bfloat16>* buffer : {&side.leading, &side.trailing})
+            check(hipMemsetAsync(buffer->data, 0xff, buffer->count * sizeof(hip_bfloat16), stream),
+                  "poison pair output");
+    check(linear::fp8lut4_linear_pair(first.view(), sides[0].output(), second.view(),
+                                  sides[1].output(), activation.workspace, stream), "pair");
     check(hipStreamSynchronize(stream), "sync");
     std::vector<std::uint8_t> codes(static_cast<std::size_t>(tokens) * columns);
     std::vector<float> token_scales(tokens);
     check(hipMemcpy(codes.data(), activation.workspace.codes, codes.size(), hipMemcpyDeviceToHost), "c");
     check(hipMemcpy(token_scales.data(), activation.workspace.scales, tokens * 4U, hipMemcpyDeviceToHost), "s");
-    const auto lead = leading.download(), trail = trailing.download(), rest = other.download();
     double worst = 0.0;
-    const auto verify = [&](const Weight& weight, std::uint32_t r, double got, std::uint32_t t) {
-        double sum = 0.0, magnitude = 0.0;
-        for (std::uint32_t k = 0; k < columns; ++k) {
-            const double product = weight.value(book, r, k) *
-                oracle::decode_e4m3fn(codes[static_cast<std::size_t>(t) * columns + k]);
-            sum += product;
-            magnitude += std::abs(product);
+    for (const Side& side : sides) {
+        const auto lead = side.leading.download(), trail = side.trailing.download();
+        // Every element published; a poisoned run: exactly the flagged token's are the canonical NaN.
+        const auto published = [&](const std::vector<hip_bfloat16>& values, std::uint32_t width) {
+            for (std::size_t i = 0; i < values.size(); ++i) {
+                const bool flagged = poison && i / width == poisoned_token;
+                require(flagged ? values[i].data == 0x7FC0U : std::isfinite(bf16_value(values[i].data)),
+                        label + (flagged ? " per-token poisoning" : " unwritten/nonfinite output"));
+            }
+        };
+        published(lead, side.split != 0U ? side.split : side.weight.rows);
+        if (side.split != 0U) published(trail, side.weight.rows - side.split);
+        if (poison) continue;
+        const std::uint32_t rows = side.weight.rows, split = side.split;
+        for (std::uint32_t t = 0; t < tokens; ++t) {
+            for (std::uint32_t r = 0; r < rows; r += &side == sides ? 29U : 31U) {
+                const double got = split == 0U
+                    ? bf16_value(lead[static_cast<std::size_t>(t) * rows + r].data)
+                    : r < split ? bf16_value(lead[static_cast<std::size_t>(t) * split + r].data)
+                                : bf16_value(trail[static_cast<std::size_t>(t) * (rows - split) + r - split].data);
+                double sum = 0.0, magnitude = 0.0;
+                for (std::uint32_t k = 0; k < columns; ++k) {
+                    const double product = side.weight.value(book, r, k) *
+                        oracle::decode_e4m3fn(codes[static_cast<std::size_t>(t) * columns + k]);
+                    sum += product;
+                    magnitude += std::abs(product);
+                }
+                const double scale = static_cast<double>(side.weight.scales[r]) * token_scales[t];
+                const double expected = sum * scale;
+                require(std::isfinite(got) && std::isfinite(expected) && std::isfinite(magnitude),
+                        label + " nonfinite paired output/oracle");
+                worst = std::max(worst, std::abs(got - expected) /
+                                            (std::abs(expected) / 128.0 +
+                                             magnitude * scale * std::ldexp(1.0, -16) + 1e-30));
+            }
         }
-        const double scale = static_cast<double>(weight.scales[r]) * token_scales[t];
-        const double expected = sum * scale;
-        require(std::isfinite(got) && std::isfinite(expected) && std::isfinite(magnitude),
-                label + " nonfinite paired output/oracle");
-        worst = std::max(worst, std::abs(got - expected) /
-                                    (std::abs(expected) / 128.0 + magnitude * scale * std::ldexp(1.0, -16) + 1e-30));
-    };
-    for (std::uint32_t t = 0; t < tokens; ++t) {
-        for (std::uint32_t r = 0; r < rows0; r += 29U) {
-            const double got = r < split0
-                ? bf16_value(lead[static_cast<std::size_t>(t) * split0 + r].data)
-                : bf16_value(trail[static_cast<std::size_t>(t) * (rows0 - split0) + r - split0].data);
-            verify(first, r, got, t);
-        }
-        for (std::uint32_t r = 0; r < rows1; r += 31U)
-            verify(second, r, bf16_value(rest[static_cast<std::size_t>(t) * rows1 + r].data), t);
+    }
+    if (poison) {
+        std::cout << label << ": poisoned token " << poisoned_token << " exact\n";
+        return;
     }
     require(worst <= 1.0, label + " FP64 oracle bound exceeded: " + std::to_string(worst));
     std::cout << label << ": worst/bound " << worst << "\n";
@@ -330,11 +368,15 @@ void run_pair(const std::vector<double>& book, std::uint32_t rows0, std::uint32_
 // SiLU-pair epilogue: rows interleaved gate/up in 16-row tiles; output [T, rows / 2] against the
 // FP64 silu(g) * u with the three BF16 roundings (g, u, output) and FP32 accumulation bounded.
 void run_silu(const std::vector<double>& book, std::uint32_t rows, std::uint32_t columns,
-              std::uint32_t tokens, Rng& rng, hipStream_t stream, bool every_token = false, bool graph_timing = false) {
-    const std::string label = "silu pair N" + std::to_string(rows) + " T" + std::to_string(tokens);
+              std::uint32_t tokens, Rng& rng, hipStream_t stream, bool every_token = false, bool graph_timing = false,
+              bool poison = false) {
+    const std::string label = std::string(poison ? "poisoned " : "") + "silu pair N" +
+                              std::to_string(rows) + " T" + std::to_string(tokens);
     Weight weight(rows, columns, rng);
     std::vector<hip_bfloat16> input(static_cast<std::size_t>(tokens) * columns);
     for (auto& x : input) x = hip_bfloat16(static_cast<float>(rng.normal()));
+    const std::uint32_t poisoned_token = tokens / 2U;
+    if (poison) input[static_cast<std::size_t>(poisoned_token) * columns + 7U] = hip_bfloat16(NAN);
     Device<hip_bfloat16> device_input(input.size());
     device_input.upload(input);
     Activation activation(tokens, columns);
@@ -343,6 +385,7 @@ void run_silu(const std::vector<double>& book, std::uint32_t rows, std::uint32_t
     check(linear::fp8_quantize_activation({device_input.data, activation.workspace}, stream), "q");
     const std::uint32_t features = rows / 2U;
     Device<hip_bfloat16> output(static_cast<std::size_t>(tokens) * features);
+    check(hipMemsetAsync(output.data, 0xff, output.count * sizeof(hip_bfloat16), stream), "poison SiLU output");
     check(linear::fp8lut4_linear(weight.view(), activation.workspace,
                              {.leading = output.data, .silu_pair = true}, stream), "silu");
     check(hipStreamSynchronize(stream), "sync");
@@ -368,9 +411,16 @@ void run_silu(const std::vector<double>& book, std::uint32_t rows, std::uint32_t
     check(hipMemcpy(codes.data(), activation.workspace.codes, codes.size(), hipMemcpyDeviceToHost), "c");
     check(hipMemcpy(token_scales.data(), activation.workspace.scales, tokens * 4U, hipMemcpyDeviceToHost), "s");
     const auto got = output.download();
-    if (graph_timing)
-        for (const auto value : got)
-            require(std::isfinite(bf16_value(value.data)), "SiLU replay left nonfinite output");
+    // Every feature published; a poisoned run: exactly the flagged token's are the canonical NaN.
+    for (std::size_t i = 0; i < got.size(); ++i) {
+        const bool flagged = poison && i / features == poisoned_token;
+        require(flagged ? got[i].data == 0x7FC0U : std::isfinite(bf16_value(got[i].data)),
+                label + (flagged ? " per-token poisoning" : " unwritten/nonfinite output"));
+    }
+    if (poison) {
+        std::cout << label << ": poisoned token " << poisoned_token << " exact\n";
+        return;
+    }
     std::vector<std::uint32_t> sample_tokens{0U, tokens / 2U, tokens - 1U};
     if (every_token) {
         sample_tokens.clear();
@@ -446,6 +496,7 @@ void time_shapes(const std::vector<double>& book, hipStream_t stream, Rng& rng) 
             run_case(book, shape.rows, shape.columns, tokens, false, false, rng, stream, true);
 }
 
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -512,10 +563,10 @@ int main(int argc, char** argv) {
         const Shape shapes[] = {{34816, 5120}, {5120, 17408}, {12288, 5120}, {7168, 5120},
                                 {5120, 6144}, {4096, 5120}, {1280, 5120}, {5120, 25600}};
         for (const auto& shape : shapes)
-            for (const std::uint32_t tokens : {1U, 5U, 6U, 16U, 17U, 20U, 24U, 32U, 33U, 57U, 65U, 80U, 96U, 97U, 113U, 128U})
+            for (const std::uint32_t tokens : {1U, 5U, 6U, 16U, 17U, 20U, 24U, 32U, 33U, 40U, 48U, 49U, 56U, 57U, 64U, 65U, 80U, 96U, 97U, 113U, 128U})
                 run_case(book, shape.rows, shape.columns, tokens, false, false, rng, stream);
-        // FP8LUT4 output head (N248320/K5120): C1..C4 verification widths up to T32.
-        for (const std::uint32_t tokens : {1U, 6U, 16U, 24U, 32U})
+        // FP8LUT4 output head (N248320/K5120): C1..C8 verification widths up to T64.
+        for (const std::uint32_t tokens : {1U, 6U, 16U, 24U, 32U, 40U, 49U, 64U})
             run_case(book, 248320, 5120, tokens, false, false, rng, stream);
         // Prefill CTA shapes: 256x64 (T130/200 at N<12288), 512x64 (T300/1000/2048), 256x128
         // (T640, and T <= 256 at N >= 12288), with partial token tiles.
@@ -523,13 +574,30 @@ int main(int argc, char** argv) {
             run_case(book, 5120, 17408, tokens, false, false, rng, stream);
             run_case(book, 7168, 5120, tokens, false, false, rng, stream);
         }
-        for (const std::uint32_t tokens : {1U, 6U, 16U, 24U, 32U, 40U, 96U, 130U, 200U, 300U, 640U, 2048U})
+        for (const std::uint32_t tokens : {1U, 6U, 16U, 24U, 32U, 33U, 40U, 49U, 56U, 64U, 96U, 130U, 200U, 300U, 640U, 2048U})
             run_silu(book, 34816, 5120, tokens, rng, stream);
         run_pair(book, 7168, 6144, 7168, 5120, 6, rng, stream);
         run_pair(book, 7168, 6144, 7168, 5120, 1, rng, stream);
         run_pair(book, 12288, 6144, 4096, 5120, 5, rng, stream);
         run_pair(book, 7168, 6144, 7168, 5120, 24, rng, stream);
         run_pair(book, 12288, 6144, 4096, 5120, 32, rng, stream);
+        // T 33..64 fused deep pairs in their production layouts: attention query-key (query/key
+        // split) + gate-value (gate/value split), GDN query-key + value-z (value/z split).
+        run_pair(book, 7168, 6144, 7168, 5120, 33, rng, stream, 6144);
+        run_pair(book, 7168, 6144, 7168, 5120, 49, rng, stream, 6144);
+        run_pair(book, 7168, 6144, 7168, 5120, 64, rng, stream, 6144);
+        run_pair(book, 4096, 0, 12288, 5120, 40, rng, stream, 6144);
+        run_pair(book, 4096, 0, 12288, 5120, 56, rng, stream, 6144);
+        run_pair(book, 12288, 6144, 4096, 5120, 64, rng, stream);
+        // GDN conv-record fallback layout: query-key + value-z, both unsplit, production order.
+        run_pair(book, 4096, 0, 12288, 5120, 33, rng, stream);
+        run_pair(book, 4096, 0, 12288, 5120, 64, rng, stream);
+        // Poisoned tokens through the fused deep pairs.
+        run_pair(book, 7168, 6144, 7168, 5120, 49, rng, stream, 6144, true);
+        run_pair(book, 4096, 0, 12288, 5120, 40, rng, stream, 6144, true);
+        // Poisoned tokens through the SiLU epilogue: mid-T (T40) and deep (T49, T64).
+        for (const std::uint32_t tokens : {40U, 49U, 64U})
+            run_silu(book, 34816, 5120, tokens, rng, stream, false, false, true);
         run_pair(book, 7168, 6144, 7168, 5120, 71, rng, stream);
         run_pair(book, 7168, 6144, 7168, 5120, 130, rng, stream);
         run_pair(book, 12288, 6144, 4096, 5120, 200, rng, stream);
@@ -538,6 +606,11 @@ int main(int argc, char** argv) {
         run_case(book, 5120, 17408, 1, true, false, rng, stream);
         run_case(book, 5120, 6144, 6, true, false, rng, stream);
         run_case(book, 5120, 17408, 24, true, false, rng, stream);
+        run_case(book, 5120, 17408, 56, true, false, rng, stream);
+        run_case(book, 5120, 6144, 64, true, false, rng, stream);
+        run_case(book, 5120, 6144, 40, true, false, rng, stream);  // three token tiles
+        run_case(book, 5120, 17408, 49, true, true, rng, stream);  // residual, poisoned token
+        run_case(book, 5120, 6144, 33, true, true, rng, stream);
         run_case(book, 5120, 17408, 80, true, false, rng, stream);
         run_case(book, 7168, 5120, 50, false, true, rng, stream);
         run_case(book, 5120, 6144, 2048, true, false, rng, stream);
@@ -547,6 +620,11 @@ int main(int argc, char** argv) {
         run_case(book, 7168, 5120, 1, false, true, rng, stream);
         run_case(book, 7168, 5120, 6, false, true, rng, stream);
         run_case(book, 7168, 5120, 28, false, true, rng, stream);
+        run_case(book, 7168, 5120, 40, false, true, rng, stream);
+        run_case(book, 7168, 5120, 64, false, true, rng, stream);
+        run_case(book, 5120, 6144, 40, false, true, rng, stream);
+        run_case(book, 5120, 17408, 64, false, true, rng, stream);
+        run_case(book, 248320, 5120, 56, false, true, rng, stream);
         run_case(book, 7168, 5120, 300, false, true, rng, stream);
         ninfer::r9700_qualification::device_guard().check("after-linear-suite");
         if (timed) time_shapes(book, stream, rng);

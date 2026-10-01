@@ -194,7 +194,7 @@ void qualify_host_split512_routing() {
                 class_at(Variant::ordinary_graph_profiles(63U), 62U) == 0U,
             "split-512 Device Graph topology classes are incomplete");
     for (const std::uint32_t width : {5U, 6U}) {
-        for (std::uint32_t batch = 1; batch <= 4; ++batch) {
+        for (std::uint32_t batch = 1; batch <= ninfer::kMaximumConcurrency; ++batch) {
             const auto profiles = Variant::dflash_graph_profiles(16384U, width - 1U, batch, width);
             const bool g16 = ninfer::targets::qwen3::detail::kR9700TextKVValueGroup == 16;
             const std::uint32_t verify_class = g16 ? 3U : 0U;
@@ -282,7 +282,7 @@ void qualify_host_ordinary_graph_allowance() {
     inputs.features = {.vision = false, .speculative = ninfer::SpeculativeBackend::None};
     for (const std::uint32_t capacity : {1024U, 4096U, 4224U}) {
         const std::size_t definitions = capacity == 1024U ? 3U : capacity == 4096U ? 4U : 5U;
-        for (const std::uint32_t concurrency : {1U, 2U, 3U, 4U}) {
+        for (std::uint32_t concurrency = 1U; concurrency <= ninfer::kMaximumConcurrency; ++concurrency) {
             inputs.capacity = capacity;
             inputs.max_concurrency = concurrency;
             inputs.use_device_graph = true;
@@ -310,7 +310,7 @@ void qualify_host_ordinary_graph_allowance() {
                     "eager ordinary plan reserves graph residency");
         }
     }
-    std::printf("r9700_runtime_planner: PASS host ordinary C1..4/context1024,4096,4224 allowance\n");
+    std::printf("r9700_runtime_planner: PASS host ordinary C1..8/context1024,4096,4224 allowance\n");
 }
 
 void qualify_host_hybrid_allocation_bound() {
@@ -925,9 +925,9 @@ int main(int argc, char** argv) {
         }
         std::printf(
             "r9700_runtime_planner: PASS q4_activation_bits=%d q4_prefill_cta_profile=%.*s "
-            "w8_activation_bits=%d C=1..4 "
+            "w8_activation_bits=%d C=1..8 "
             "ordinary/vision/MTP/DFlash fixed widths; 32K MTP3 graph allowance; "
-            "exact 32K DFlash K=1..11 C=1..4 graph inventories; profile-consistent integer "
+            "exact 32K DFlash K=1..11 C=1..8 graph inventories; profile-consistent integer "
             "workspace including DFlash Q4 companions\n",
             ninfer::ops::r9700::linear::kQ4ActivationBits,
             static_cast<int>(ninfer::ops::r9700::linear::kQ4PrefillCtaProfile.size()),

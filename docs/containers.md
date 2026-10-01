@@ -62,8 +62,8 @@ applies only to the running server. Reuse the builder for subsequent builds.
 
 The default listener is host loopback port 8001 (container port 8080), with no API key. Change the bind
 address only behind suitable access controls. `.env` can override model path,
-port, context, C1..4, draft count and cache capacities. For the measured workload,
-use K5 at C1–2 and K4 at C3–4. The runtime is bounded to24GiB host RAM with no
+port, context, C1..8, draft count and cache capacities. For the measured workload,
+use K5 at C1–2 and K4 at C3–4; C5–8 is not yet measured. The runtime is bounded to24GiB host RAM with no
 container swap; this limit does not count GPU VRAM. Cache/runtime allocations
 must fit that bound. Existing NVIDIA containers are not modified.
 
@@ -285,4 +285,4 @@ running target container restarts; `--no-restart` leaves its current process
 running, and `--image-only` changes only the image. A stopped container is never
 started automatically. Dockerfile, toolchain or dependency changes require a full
 image rebuild rather than an app-only hot patch. No container workflow changes
-the startup-fixed one-to-four active-request contract.
+the startup-fixed one-to-eight active-request contract.

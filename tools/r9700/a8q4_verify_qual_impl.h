@@ -1,6 +1,7 @@
 #define NINFER_A8Q4_QUAL_NO_MAIN
 #include "a8q4_shape_sweep_qual.hip"
 #include "ops/r9700/linear/a8q4_small_batch_projection.h"
+#include "ops/r9700/linear/r9700_q4_activation_profile.h"
 #include "ninfer/ops/linear.h"
 #include <cstring>
 #include <functional>
@@ -299,6 +300,18 @@ struct Run {
     const Fixture* fixture;bool eager;
     std::vector<hip_bfloat16> control;std::array<std::vector<hip_bfloat16>,Copies> actual;
 };
+const char* wide_route_name(linear::detail::A8Q4WideRoute route) {
+    using R=linear::detail::A8Q4WideRoute;
+    return route==R::TiledM?"tiled_m":route==R::TokenTileN64?"token_tile_n64":
+           route==R::TokenTileN64SplitK?"token_tile_n64_split_k":
+           route==R::TokenTileN128?"token_tile_n128":"none";
+}
+linear::A8Q4G64LinearArgs prepared(unsigned t,const linear::A8Q4G64CandidateArgs& a,
+                                   const linear::A8G64ActivationWorkspace& w) {
+    return {w.low_codes,w.low_code_bytes,w.high_codes,w.high_code_bytes,w.scales,w.scale_bytes,
+            w.status,a.weight_codes,a.weight_code_bytes,a.weight_scales,a.weight_scale_bytes,
+            a.output,t,N,K,K};
+}
 std::vector<hip_bfloat16> activation(unsigned t) {
     const auto base=make_decode_dot8_input(K);std::vector<hip_bfloat16> x(t*K);
     for(unsigned token=0;token<t;++token)for(unsigned k=0;k<K;++k)
@@ -343,11 +356,7 @@ void cell(unsigned t,hipStream_t s,std::ostream& out) {
         const auto control_args=arguments(t,input,*weights[0],control);
         const auto cw=workspace(t,control);
         HIP_CHECK(linear::a8g64_quantize_activation({control_args.input,cw},s));
-        HIP_CHECK(linear::a8q4g64_linear_wmma32({cw.low_codes,cw.low_code_bytes,
-            cw.high_codes,cw.high_code_bytes,cw.scales,cw.scale_bytes,cw.status,
-            control_args.weight_codes,control_args.weight_code_bytes,
-            control_args.weight_scales,control_args.weight_scale_bytes,
-            control_args.output,t,N,K,K},s));
+        HIP_CHECK(linear::a8q4g64_linear_wmma32(prepared(t,control_args,cw),s));
         run.control=control.value.read(s);
         launch(arguments(t,input,*weights[0],candidate),s);
         const auto eager_reference=candidate.value.read(s);
@@ -432,7 +441,114 @@ void cell(unsigned t,hipStream_t s,std::ostream& out) {
        <<",\"historical_2pct_rms_10pct_gross_pass\":"
        <<(public_error.relative_rms<=0.02 && public_error.gross_rms<=0.10 &&
           public_error.zero_reference_nonzero_tokens==0?"true":"false")
-       <<",\"rows_checked\":"<<original.reference.rows.size()<<",\"generic_control_oracle_checked\":true}}";
+       <<",\"rows_checked\":"<<original.reference.rows.size()<<",\"generic_control_oracle_checked\":true}";
+    const auto route=linear::detail::select_a8q4_small_batch_wide_route(t,N,K,K);
+    if(route!=linear::detail::A8Q4WideRoute::None)
+        out<<",\"wide_route\":\""<<wide_route_name(route)<<'"';
+    out<<'}';
+}
+// In-place residual epilogue of a shared-weight N5120 cell through the public projected-residual
+// Op. The product is checked against the FP64 oracle bounds; the accumulate contract
+// BF16(residual + BF16(product)) is then checked exactly against that qualified product.
+void accumulate_cell(unsigned t,hipStream_t s,std::ostream& out) {
+    const auto host=make_decode_dot8_weights(N,K);const auto x=activation(t);
+    const Fixture f=fixture(t,x,host);
+    std::vector<hip_bfloat16> residual(static_cast<std::size_t>(t)*N);
+    for(std::size_t i=0;i<residual.size();++i)
+        residual[i]=hip_bfloat16(static_cast<float>(static_cast<int>((i*37U)%201U)-100)*0.0137F);
+    std::vector<hip_bfloat16> product,accumulated;
+    {
+    const GpuLease lease;
+    Guarded<hip_bfloat16> input(x.size(),s);input.put(x,s);Output plain(t,s),inplace(t,s);
+    Weights weights(host,s);
+    HIP_CHECK(hipMemsetAsync(plain.scratch.data(),0xff,plain.scratch.bytes(),s));
+    launch(arguments(t,input,weights,plain),s);
+    product=plain.value.read(s);
+    inplace.value.put(residual,s);
+    HIP_CHECK(hipMemsetAsync(inplace.scratch.data(),0xff,inplace.scratch.bytes(),s));
+    if(!linear::a8q4g64_projected_residual_supported(t,N,K))fail("accumulate cell unsupported");
+    HIP_CHECK(linear::a8q4g64_projected_residual(arguments(t,input,weights,inplace),s));
+    codec(t,inplace,f.represented,s);
+    accumulated=inplace.value.read(s);
+    inplace.value.guards(s);inplace.scratch.guards(s);plain.value.guards(s);
+    exact(input.read(s),f.x,"hidden mutation");
+    exact(weights.codes.read(s),host.codes,"code mutation");
+    exact(weights.scales.read(s),host.scales,"scale mutation");
+    }
+    const auto pe=compare_public(t,product,f.reference,f.budget);
+    for(std::size_t i=0;i<accumulated.size();++i) {
+        const hip_bfloat16 expected(static_cast<float>(residual[i])+static_cast<float>(product[i]));
+        if(accumulated[i].data!=expected.data)
+            fail("accumulate epilogue mismatch: N="+std::to_string(N)+" K="+std::to_string(K)+
+                 " T="+std::to_string(t)+" index="+std::to_string(i));
+    }
+    out<<"{\"tokens\":"<<t<<",\"rows\":"<<N<<",\"columns\":"<<K
+       <<",\"accumulate\":true,\"exact_bf16_residual_plus_bf16_product\":true"
+       <<",\"maximum_public_norm_bound_fraction\":"<<pe.public_bound_fraction
+       <<",\"maximum_arithmetic_norm_bound_fraction\":"<<pe.arithmetic_bound_fraction<<'}';
+}
+// Unprofiled event A/B of one oracle-qualified wide cell on one prepared activation: the route
+// these widths took before the wide table (prefill CTA above T32 on its qualified tuples, else
+// WMMA32) and the selected wide route. Launches rotate over disjoint weight copies totalling at least 256 MiB, so each
+// reads its weights from DRAM rather than the 64 MiB last-level cache, as one decode round's
+// distinct layers do.
+void timing_cell(unsigned t,hipStream_t s,std::ostream& out) {
+    constexpr unsigned Trials=7;
+    const auto host=make_decode_dot8_weights(N,K);const auto x=activation(t);
+    const std::size_t weight_bytes=host.codes.size()+host.scales.size()*sizeof(std::uint16_t);
+    const unsigned copies=static_cast<unsigned>(std::max<std::size_t>(2,
+        ((std::size_t{256}<<20)+weight_bytes-1)/weight_bytes));
+    const unsigned iterations=std::max(32U,copies);
+    const bool prefill_cta=linear::use_a8q4_prefill_cta(t,N,K);
+    constexpr unsigned routes=2;
+    std::array<std::array<double,Trials>,routes> samples{};
+    {
+    const GpuLease lease;
+    Guarded<hip_bfloat16> input(x.size(),s);input.put(x,s);Output output(t,s);
+    std::vector<std::unique_ptr<Weights>> weights;
+    for(unsigned i=0;i<copies;++i)weights.push_back(std::make_unique<Weights>(host,s));
+    const auto w=workspace(t,output);
+    HIP_CHECK(linear::a8g64_quantize_activation({input.data(),w},s));
+    const auto launch_route=[&](unsigned route,unsigned copy) {
+        const auto a=prepared(t,arguments(t,input,*weights[copy],output),w);
+        if(route==0)return prefill_cta?linear::a8q4g64_linear_prefill_cta(a,s):
+                                       linear::a8q4g64_linear_wmma32(a,s);
+        return linear::detail::launch_a8q4_small_batch_projection(a,s);
+    };
+    Event begin,end;
+    const auto measure=[&](unsigned route) {
+        for(unsigned i=0;i<2;++i)HIP_CHECK(launch_route(route,i%copies));
+        HIP_CHECK(hipEventRecord(begin.get(),s));
+        for(unsigned i=0;i<iterations;++i)HIP_CHECK(launch_route(route,i%copies));
+        HIP_CHECK(hipEventRecord(end.get(),s));HIP_CHECK(hipEventSynchronize(end.get()));
+        float ms=0;HIP_CHECK(hipEventElapsedTime(&ms,begin.get(),end.get()));
+        return 1000.0*ms/iterations;
+    };
+    power();
+    for(unsigned trial=0;trial<Trials;++trial)
+        for(unsigned i=0;i<routes;++i) {
+            const unsigned route=trial%2==0?i:routes-1-i;
+            samples[route][trial]=measure(route);
+        }
+    power();
+    }
+    const auto median=[](std::array<double,Trials> v){std::sort(v.begin(),v.end());return v[Trials/2];};
+    const double incumbent=median(samples[0]),selected=median(samples[1]);
+    const auto route=linear::detail::select_a8q4_small_batch_wide_route(t,N,K,K);
+    const auto emit=[&](const char* name,const std::array<double,Trials>& v) {
+        out<<",\""<<name<<"\":[";
+        for(unsigned i=0;i<Trials;++i)out<<(i?",":"")<<v[i];
+        out<<']';
+    };
+    out<<"{\"tokens\":"<<t<<",\"rows\":"<<N<<",\"columns\":"<<K
+       <<",\"incumbent_route\":\""<<(prefill_cta?"prefill_cta":"wmma32")<<'"'
+       <<",\"selected_route\":\""<<wide_route_name(route)<<'"'
+       <<",\"weight_copies\":"<<copies<<",\"launches_per_trial\":"<<iterations
+       <<",\"incumbent_median_us\":"<<incumbent<<",\"selected_median_us\":"<<selected
+       <<",\"selected_over_incumbent\":"<<selected/incumbent
+       <<",\"selected_dram_gbps\":"<<static_cast<double>(weight_bytes)/(selected*1e3);
+    emit("incumbent_us",samples[0]);emit("selected_us",samples[1]);
+    out<<'}';
 }
 }
 // The paired small-batch launch (two projections of one prepared activation) through the public
@@ -482,7 +598,8 @@ void pair_cell(unsigned t,unsigned n0,unsigned n1,hipStream_t s,std::ostream& ou
 #ifndef NINFER_A8Q4_VERIFY_QUAL_NO_MAIN
 int main(int argc,char** argv) {
  try {
-    bool mlp_only=false,output_only=false,draft_only=false,projection_only=false,concurrent_only=false;
+    bool mlp_only=false,output_only=false,draft_only=false,projection_only=false,concurrent_only=false,
+         wide_only=false,wide_ab=false;
     std::vector<std::string_view> args(argv+1,argv+argc);
     if(args.size()>=2 && args[args.size()-2]=="--gpu-lock"){gpu_lock_path=args.back();args.resize(args.size()-2);}
     const bool scoped=args.size()==3;
@@ -491,20 +608,28 @@ int main(int argc,char** argv) {
     draft_only=scoped && args[2]=="--draft-only";
     projection_only=scoped && args[2]=="--projection-only";
     concurrent_only=scoped && args[2]=="--concurrent-only";
-    if((args.size()!=2 && !mlp_only && !output_only && !draft_only && !projection_only && !concurrent_only) || args[0]!="--out-json")
-        fail("usage: selected_q4_qual --out-json FRESH.json [--mlp-only|--output-only|--draft-only|--projection-only|--concurrent-only] [--gpu-lock PATH]");
+    wide_only=scoped && args[2]=="--wide-only";
+    wide_ab=scoped && args[2]=="--wide-ab";
+    if((args.size()!=2 && !mlp_only && !output_only && !draft_only && !projection_only && !concurrent_only &&
+        !wide_only && !wide_ab) || args[0]!="--out-json")
+        fail("usage: selected_q4_qual --out-json FRESH.json [--mlp-only|--output-only|--draft-only|--projection-only|--concurrent-only|--wide-only|--wide-ab] [--gpu-lock PATH]");
+    // --wide-only/--wide-ab: the wide-route cells only; --wide-ab times each after its oracle passes.
+    wide_only=wide_only || wide_ab;
     const std::filesystem::path output=std::string(args[1]);require_fresh_output(output);power();
     HIP_CHECK(hipSetDevice(0));hipDeviceProp_t props{};HIP_CHECK(hipGetDeviceProperties(&props,0));
     char pci[32]{};HIP_CHECK(hipDeviceGetPCIBusId(pci,sizeof(pci),0));
     if(std::string_view(props.name)!="AMD Radeon AI PRO R9700" || std::string_view(props.gcnArchName)!="gfx1201" ||
        props.warpSize!=32 || (std::string_view(pci)!="0000:13:00.0" && std::string_view(pci)!="13:00.0"))fail("wrong device");
     hipStream_t stream{};HIP_CHECK(hipStreamCreateWithFlags(&stream,hipStreamNonBlocking));
-    std::ostringstream out;out<<std::setprecision(17)<<"{\"schema\":\""
+    std::ostringstream out;
+    out<<std::setprecision(17)<<"{\"schema\":\""
         <<"ninfer.r9700.a8q4-small-batch-projections.v3"
         <<"\",\"status\":\"qualified\",\"public_dispatch_tested\":true,"
           "\"pci\":\"0000:13:00.0\",\"power\":\"auto\",\"copies\":3,\"scope\":\""
-        <<(mlp_only?"mlp_only":output_only?"output_only":draft_only?"draft_only":projection_only?"projection_only":concurrent_only?"concurrent_only":"complete_owner")<<"\",\"cells\":[";
-    constexpr std::array<std::array<unsigned,2>,10> shapes{{{34816,5120},{5120,6144},{12288,5120},{4096,5120},{5120,17408},{5120,25600},{7168,5120},{6144,5120},{1280,5120},{5120,4096}}};
+        <<(mlp_only?"mlp_only":output_only?"output_only":draft_only?"draft_only":projection_only?"projection_only":
+           concurrent_only?"concurrent_only":wide_ab?"wide_ab":wide_only?"wide_only":"complete_owner")<<"\",\"cells\":[";
+    constexpr std::array<std::array<unsigned,2>,11> shapes{{{34816,5120},{5120,6144},{12288,5120},{4096,5120},{5120,17408},{5120,25600},{7168,5120},{6144,5120},{1280,5120},{5120,4096},{131072,5120}}};
+    std::vector<std::array<unsigned,3>> timed;
     bool first=true;
     for(const auto& shape:shapes) {
         if(concurrent_only && (shape==std::array<unsigned,2>{34816,5120} ||
@@ -519,15 +644,36 @@ int main(int argc,char** argv) {
            shape!=std::array<unsigned,2>{1280,5120} &&
            shape!=std::array<unsigned,2>{5120,4096})continue;
         N=shape[0];K=shape[1];G=K/64;
-        for(unsigned t:{1U,2U,3U,4U,5U,6U,7U,8U,10U,12U,14U,15U,16U,18U,20U,21U,24U,28U,32U}) {
-            if(concurrent_only && t<10)continue;
+        // T17/33/63 are off-table widths at the token-tile class bounds (generic in T).
+        for(unsigned t:{1U,2U,3U,4U,5U,6U,7U,8U,10U,12U,14U,15U,16U,17U,18U,20U,21U,24U,25U,28U,30U,
+                        32U,33U,35U,36U,40U,42U,48U,49U,56U,63U,64U}) {
+            const bool wide=linear::detail::use_a8q4_small_batch_wide(t,N,K,K);
+            if(concurrent_only && (t<10 || wide))continue;
             if(draft_only && (t<5 || t>8))continue;
+            if(wide_only && !wide)continue;
             if(!linear::detail::use_a8q4_small_batch_projection(t,N,K,K))continue;
             if(!first)out<<',';first=false;cell(t,stream,out);
+            if(wide_ab)timed.push_back({N,K,t});
         }
     }
+    out<<"],\"accumulate\":[";
+    if(!mlp_only && !output_only && !draft_only && !projection_only && !concurrent_only) {
+        bool first_accumulate=true;
+        for(const unsigned columns:{4096U,17408U,25600U})
+            for(const unsigned t:{17U,25U,30U,33U,35U,48U,49U,56U,63U,64U}) {
+                N=5120;K=columns;G=K/64;
+                // The wide routes' in-place epilogues (token tile on every N5120 shape).
+                if(!linear::detail::use_a8q4_small_batch_wide(t,N,K,K))continue;
+                if(!first_accumulate)out<<',';first_accumulate=false;accumulate_cell(t,stream,out);
+            }
+    }
+    out<<"],\"timing\":[";
+    for(std::size_t i=0;i<timed.size();++i) {
+        N=timed[i][0];K=timed[i][1];G=K/64;
+        if(i)out<<',';timing_cell(timed[i][2],stream,out);
+    }
     out<<"],\"pairs\":[";
-    if(!mlp_only && !output_only && !draft_only) {
+    if(!mlp_only && !output_only && !draft_only && !wide_only) {
         bool first_pair=true;
         for(unsigned t:{5U,6U,7U,8U,12U,28U,32U}) {
             for(const auto& pair:{std::array<unsigned,2>{4096,12288},std::array<unsigned,2>{7168,7168}}) {

@@ -252,17 +252,26 @@ int main() {
                                           {16, 12, 8, 4}, {3, 1, 2, 0}, {0, 2048});
         // Production C1 K5 drafter block: six columns over a full 4096-token window.
         const Result production = run_case(device, 4096, 6, {8190}, {6}, {0}, {0, 8194});
+        // Production C8 K7/K6 drafter blocks: eight lanes of eight (seven) columns over full
+        // 4096-token windows, lanes permuted.
+        const Result c8_k7 = run_case(device, 4096, 8, {8190, 5000, 4097, 6000, 7777, 9000, 4500, 8000},
+                                      {8, 8, 8, 8, 8, 8, 8, 8}, {7, 0, 6, 1, 5, 2, 4, 3}, {0, 9000});
+        const Result c8_k6 = run_case(device, 4096, 7, {8190, 5000, 4097, 6000, 7777, 9000, 4500, 8000},
+                                      {7, 7, 7, 7, 7, 7, 7, 7}, {7, 0, 6, 1, 5, 2, 4, 3}, {0, 9000});
         std::cout << "swa: PASS gfx1201 wave32 D128/Hq32/Hkv8 W4096 T3/B2 mixed-tail "
                      "W2048 T1 max_abs="
                   << std::max({w4096.max_abs, w2048.max_abs, w2048_b2.max_abs, direct.max_abs,
-                               saturated.max_abs, production.max_abs})
+                               saturated.max_abs, production.max_abs, c8_k7.max_abs,
+                               c8_k6.max_abs})
                   << " rel_l2=" << std::max({w4096.relative_l2, w2048.relative_l2,
                                               w2048_b2.relative_l2, direct.relative_l2,
-                                              saturated.relative_l2, production.relative_l2})
+                                              saturated.relative_l2, production.relative_l2,
+                                              c8_k7.relative_l2, c8_k6.relative_l2})
                   << " ms4096=" << w4096.milliseconds << " ms2048=" << w2048.milliseconds
                   << " ms2048_t3b2=" << w2048_b2.milliseconds
                   << " ms2048_t16b4=" << saturated.milliseconds
                   << " ms4096_t6b1=" << production.milliseconds
+                  << " ms4096_t8b8=" << c8_k7.milliseconds << " ms4096_t7b8=" << c8_k6.milliseconds
                   << '\n';
         return 0;
     } catch (const std::exception& error) {

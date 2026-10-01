@@ -75,7 +75,7 @@ inline constexpr std::int32_t kDflash2VerifyWidth              = 12;
  *   [T,B]. selector_ids is contiguous I32 [16,T] or [16,T,B] and
  *   selector_q is contiguous FP32 of the same shape; both null or both non-null. Every anchor
  *   and every selected token id is in [0, codebook_rows).
- *   T is any positive value at B=1; B=2..4 admits T=1..16.
+ *   T is any positive value at B=1; B=2..8 admits T=1..16.
  *
  * Supported domain:
  *   Projection preserves each sequence's C=1 Linear arithmetic route, independent of B.

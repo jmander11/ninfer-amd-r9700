@@ -167,11 +167,11 @@ struct DensePrefillWmmaResources {
 // numerator/origin/denominator partials to the caller workspace; one stable FP32 merge normalizes.
 // Row positions are absolute; invalid positions, page-table rows and physical pages poison exactly
 // the dependent rows with NaN.
-// One launch pair serves up to four sequences of a compact decode batch (grid z = sequence), each
+// One launch pair serves up to kMaximumConcurrency sequences of a compact decode batch (grid z = sequence), each
 // with its own arguments, rows, frontier and caller-owned score_workspace partials; every
 // sequence's output bytes equal those of its one-sequence launch. Sequences must not share output
 // or workspace storage.
-inline constexpr std::size_t kPackedDecodeMaximumSequences = 4U;
+inline constexpr std::size_t kPackedDecodeMaximumSequences = kMaximumConcurrency;
 [[nodiscard]] std::size_t fp8_int4_kv_attention_packed_decode_workspace_bytes(
     std::size_t context, std::uint32_t rows) noexcept;
 [[nodiscard]] hipError_t fp8_int4_kv_attention_packed_decode(

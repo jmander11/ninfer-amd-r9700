@@ -19,7 +19,7 @@ namespace ninfer {
 
 using TokenId = std::int32_t;
 
-inline constexpr std::uint32_t kMaximumConcurrency = 4;
+inline constexpr std::uint32_t kMaximumConcurrency = 8;
 inline constexpr std::size_t kMaxContextCheckpointMarks = 16;
 // Physical campaign commands remain explicit and do not inherit this product-wide startup default.
 inline constexpr std::uint32_t kDefaultPrefillChunk = 4096;

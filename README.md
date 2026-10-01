@@ -2,7 +2,7 @@
 
 Native C++/HIP inference for **Qwen3.8-27B on one Radeon AI PRO R9700** (`gfx1201`,
 wave32). Supports CLI generation, OpenAI/Anthropic-compatible serving, Vision,
-DFlash2 speculative decoding, fixed concurrency of 1–4 requests, prefix caching,
+DFlash2 speculative decoding, fixed concurrency of 1–8 requests, prefix caching,
 Device Graphs and perplexity scoring. This is a target-specific AMD engine, not
 a general multi-model or multi-GPU framework.
 

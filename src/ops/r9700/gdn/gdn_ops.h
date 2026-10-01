@@ -96,7 +96,7 @@ namespace ninfer::ops::r9700::gdn {
 // `conv_record` receives the represented BF16 q/k/value projection for every valid token. With a
 // null parent tensor, columns are sequential. Otherwise parent_index is I32 [W,B] in column-major
 // Tensor storage: a negative parent selects the checkpoint and a nonnegative parent must precede
-// the child. Width is 2..16 and batch is 1..4.
+// the child. Width is 2..16 and batch is 1..8.
 [[nodiscard]] hipError_t projection_conv_record_bf16(
     const hip_bfloat16* query_key, const hip_bfloat16* value_z,
     const hip_bfloat16* conv_weight, const hip_bfloat16* conv_states,
