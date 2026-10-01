@@ -65,11 +65,11 @@ public:
           admission_capacity_(instance.program->admission_capacity()),
           context_capacity_(options.max_context),
           load_progress_(options.load_progress), generation_recovery_(options.generation_recovery),
-          prefill_slice_(options.prefill_slice),
-          slice_decode_rounds_(options.prefill_slice_rounds) {
+          mixed_forward_(instance.program->mixed_forward()),
+          mixed_forward_rounds_(options.mixed_forward_rounds) {
         if (max_concurrency_ == 0 || max_concurrency_ > kMaximumConcurrency ||
             options.max_pending_requests == 0 || pending_timeout_.count() <= 0 ||
-            slice_decode_rounds_ == 0) {
+            mixed_forward_rounds_ == 0) {
             throw std::invalid_argument("concurrent executor bounds are invalid");
         }
         if (admission_capacity_.active_lanes != max_concurrency_ ||
@@ -1458,7 +1458,7 @@ private:
         decode_rounds_since_prefill_ = step.processed_prompt_tokens != 0 || step.complete
                                            ? 0U
                                            : std::max(decode_rounds_since_prefill_,
-                                                      slice_decode_rounds_ - 1U);
+                                                      mixed_forward_rounds_ - 1U);
         cumulative_stats_.computed_prefill_tokens += step.processed_prompt_tokens;
         if (request->recovery.attempts != 0) {
             request->recovery.prefill_tokens += step.processed_prompt_tokens;
@@ -2706,20 +2706,20 @@ private:
                 }
 
                 if (prefill_lane_) {
-                    // A configured slice shares every slice_decode_rounds_-th decode round's
-                    // target forward with a mixable owner, or runs as its own bounded step after
-                    // that many decode rounds; without one the owner's prefill runs to completion.
+                    // A configured mixed forward carries a mixable owner's slice in every
+                    // mixed_forward_rounds_-th decode round, or bounds its own step after that
+                    // many decode rounds; without one the owner's prefill runs to completion.
                     const std::uint32_t owner = *prefill_lane_;
-                    if (prefill_slice_ != 0 && !membership.empty() &&
+                    if (mixed_forward_ != 0 && !membership.empty() &&
                         !membership_contains(membership, owner) &&
                         instance_.program->prefill_mixable(owner)) {
-                        if (decode_rounds_since_prefill_ + 1U < slice_decode_rounds_) {
+                        if (decode_rounds_since_prefill_ + 1U < mixed_forward_rounds_) {
                             run_membership_decode();
                         } else {
                             run_membership_decode(owner);
                         }
-                    } else if (prefill_slice_ != 0 && !membership.empty() &&
-                               decode_rounds_since_prefill_ < slice_decode_rounds_) {
+                    } else if (mixed_forward_ != 0 && !membership.empty() &&
+                               decode_rounds_since_prefill_ < mixed_forward_rounds_) {
                         run_membership_decode();
                     } else {
                         run_prefill_step(!membership.empty());
@@ -2771,8 +2771,8 @@ private:
     const std::uint32_t context_capacity_;
     LoadProgress load_progress_;
     const bool generation_recovery_;
-    const std::uint32_t prefill_slice_;
-    const std::uint32_t slice_decode_rounds_;
+    const std::uint32_t mixed_forward_;
+    const std::uint32_t mixed_forward_rounds_;
     std::uint32_t decode_rounds_since_prefill_ = 0;
 
     std::mutex idle_maintenance_mutex_; // Idle submission versus score admission; never on decode path.

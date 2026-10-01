@@ -296,13 +296,14 @@ GenerationService::GenerationService(ServeOptions options, LoadProgress load_pro
     engine_options.max_pending_requests = options_.max_pending_requests;
     engine_options.pending_timeout_ms   = options_.pending_timeout_ms;
     engine_options.prefill_chunk        = options_.prefill_chunk;
-    engine_options.prefill_slice        = options_.prefill_slice;
-    engine_options.prefill_slice_rounds = options_.prefill_slice_rounds;
+    engine_options.mixed_forward        = options_.mixed_forward;
+    engine_options.mixed_forward_rounds = options_.mixed_forward_rounds;
     engine_options.enable_vision        = options_.enable_vision;
     engine_options.use_device_graph     = options_.use_device_graph;
     engine_options.speculative          = options_.speculative;
     engine_options.load_progress        = std::move(load_progress);
     engine_              = std::make_unique<ninfer::Engine>(std::move(engine_options));
+    options_.mixed_forward = engine_->options().mixed_forward;
     prompt_capabilities_ = engine_->prompt_capabilities();
     request_capacity_    = std::make_shared<RequestCapacity>(
         static_cast<std::size_t>(options_.max_concurrency) + options_.max_pending_requests);

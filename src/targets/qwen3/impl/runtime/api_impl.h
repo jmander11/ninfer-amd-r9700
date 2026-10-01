@@ -201,6 +201,11 @@ bool Program<Variant>::prefill_mixable(std::uint32_t lane) const noexcept {
 }
 
 template <>
+std::uint32_t Program<Variant>::mixed_forward() const noexcept {
+    return impl_->mixed_forward;
+}
+
+template <>
 runtime::MixedGeneratedRound
 Program<Variant>::decode_batch_with_prefill(std::span<const std::uint32_t> lanes,
                                             std::span<const runtime::RoundBudget> budgets,

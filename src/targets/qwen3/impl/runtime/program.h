@@ -313,9 +313,10 @@ public:
                                                                 runtime::TransientRegion transient,
                                                                 const qwen3::OutputSession* output = nullptr,
                                                                 bool decode_waiting = false);
-    // With decode_waiting and a configured prefill_slice, a mixable owner returns without
+    // With decode_waiting and a configured mixed_forward, a mixable owner returns without
     // progress (0 tokens, incomplete): its first slice runs in the next mixed round.
-    // decode_waiting bounds the step by prefill_slice (when configured) instead of prefill_chunk.
+    // decode_waiting bounds the step's forward by mixed_forward (when configured) instead of
+    // prefill_chunk.
     [[nodiscard]] runtime::PrefillStepResult advance_prefill_lane(std::uint32_t lane,
                                                                   bool decode_waiting = false);
     [[nodiscard]] runtime::BatchedGeneratedRound
@@ -324,8 +325,8 @@ public:
     // True when the staged owner's next step can share a DFlash round's target forward: a
     // text-only prompt with prompt tokens left and no MTP bridge.
     [[nodiscard]] bool prefill_mixable(std::uint32_t lane) const noexcept;
-    // One DFlash round for `lanes` that also advances the owner's next chunk (bounded by the
-    // prefill slice and the prefill workspace) in the same target forward.
+    // One DFlash round for `lanes` that also advances the owner's next chunk (the mixed forward
+    // width less the round's live verify columns) in the same target forward.
     [[nodiscard]] runtime::MixedGeneratedRound
     decode_batch_with_prefill(std::span<const std::uint32_t> lanes,
                               std::span<const runtime::RoundBudget> budgets,
@@ -424,7 +425,7 @@ public:
     const std::uint32_t kv_capacity;
     const std::uint32_t max_concurrency;
     const std::uint32_t prefill_chunk;
-    const std::uint32_t prefill_slice;
+    const std::uint32_t mixed_forward;
     const std::uint32_t draft_window;
     const std::uint32_t dflash_verify_width;
     const bool adaptive_draft;
@@ -518,23 +519,22 @@ private:
     [[nodiscard]] runtime::PrefillStepResult advance_prefill(
         SequenceState& sequence, RequestControl& request, bool decode_waiting,
         const MixedChunkRunner* mixed = nullptr, std::uint32_t step_cap = 0);
-    // Largest prompt extent of one prefill step; admission projects service work with the
-    // slice because any step may run while decode rows wait.
+    // Largest prompt extent of one prefill step: while decode rows wait, a separate step's
+    // forward is the configured mixed forward width.
     [[nodiscard]] std::uint32_t prefill_step_tokens(bool decode_waiting) const noexcept {
-        return decode_waiting && prefill_slice != 0 ? prefill_slice : prefill_chunk;
+        return decode_waiting && mixed_forward != 0 ? mixed_forward : prefill_chunk;
     }
-    // Step extent the admission projection counts with. A mixed step can leave the cursor
-    // unaligned, after which a step above the irregular split may split at it, so a slice above
-    // that split is projected at the split; every non-final step still advances at least that.
+    // Step extent the admission projection counts with: the least a non-final step advances
+    // while decode rows wait. A mixed step's owner gets at least the forward less every other
+    // lane's full verify panel, and can leave the cursor unaligned, after which a step above the
+    // irregular split may split at it, so the extent is capped at the split.
     [[nodiscard]] std::uint32_t projected_step_tokens() const noexcept {
-        const std::uint32_t tokens = prefill_step_tokens(true);
-        return prefill_slice != 0 ? std::min(tokens, kIrregularPrefillSplit) : tokens;
+        if (mixed_forward == 0) { return prefill_chunk; }
+        return std::min(mixed_forward - (max_concurrency - 1U) * dflash_verify_width,
+                        kIrregularPrefillSplit);
     }
-    // Target width of a mixed round: the slice beside every other lane's full verify panel. A
-    // round with fewer or narrower verify panels gives the owner the unused columns.
-    [[nodiscard]] std::uint32_t mixed_forward_tokens() const noexcept {
-        return prefill_slice + (max_concurrency - 1U) * dflash_verify_width;
-    }
+    // Target width of a mixed round: the owner fills it beside the round's live verify panels.
+    [[nodiscard]] std::uint32_t mixed_forward_tokens() const noexcept { return mixed_forward; }
     void enqueue_dflash_context_append(std::span<const std::uint32_t> lanes,
                                        std::span<const std::uint32_t> starts,
                                        std::span<const std::uint32_t> counts);

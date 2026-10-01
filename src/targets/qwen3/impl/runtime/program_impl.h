@@ -374,7 +374,7 @@ ProgramImplCore::ProgramImplCore(const LoadedModelData& model_in, const Sequence
                                  std::unique_ptr<HostPinnedArena> kv_ram_arena)
     : model(model_in), device(device_in), weights_profile(plan.weights_profile), capacity(plan.capacity), kv_capacity(plan.kv_capacity),
       max_concurrency(plan.max_concurrency), prefill_chunk(plan.prefill_chunk),
-      prefill_slice(plan.prefill_slice),
+      mixed_forward(plan.mixed_forward),
       draft_window(plan.draft_window), dflash_verify_width(plan.dflash_verify_width),
       adaptive_draft(plan.adaptive_draft), p_less_draft_temperature(plan.p_less_draft_temperature),
       captured_ks(plan.captured_ks),
@@ -1017,7 +1017,7 @@ runtime::PrefillStepResult ProgramImplCore::start_prefill_lane(std::uint32_t lan
         }
         staged.elapsed_seconds = std::chrono::duration<double>(Clock::now() - started).count();
         request.lifecycle      = Lifecycle::Prefilling;
-        if (decode_waiting && prefill_slice != 0 && prefill_mixable(lane)) {
+        if (decode_waiting && mixed_forward != 0 && prefill_mixable(lane)) {
             // The first slice joins the next decode round's target forward (mixed round)
             // instead of running alone while the decode lanes wait.
             sequence.use_tick = next_use_tick_++;

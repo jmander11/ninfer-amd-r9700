@@ -52,9 +52,10 @@ FP8LUT4 artifact was admitted; it remains in git history.
 - [ ] `CLOCKS-README` [user-gated; `LONGCTX-PREFILL` is closed] Matched README benchmarks at stock
   clocks and at the user's undervolted/higher-clock setting.
 - [x] `MIXED-PREFILL-DECODE` [changed the product contract] Done 2026-09-29.
-  `--prefill-slice S --prefill-slice-rounds D` lets a DFlash text owner's S-token slice share
-  every D-th decode round's target forward (a mixed round); other owners time-share. The default
-  stays prefill-first (S=0). The decode-share vs prefill-throughput Pareto frontier, the serve
+  `--mixed-forward N --mixed-forward-rounds D` lets a DFlash text owner's slice fill an N-column
+  forward (a multiple of 256) beside every D-th decode round's verify columns (a mixed round);
+  other owners time-share with N-token steps. The default (`auto`, 2026-09-30) is N = 1024 under
+  DFlash with C > 1 and prefill-first otherwise. The decode-share vs prefill-throughput Pareto frontier, the serve
   stall check, and the kernel fixes that made mixed rounds cheap are in `docs/performance.md`
   "Mixed prefill/decode frontier". Architecture: `concurrent-inference-architecture.md` §1.2,
   §2.5, §7.3, §8.9.

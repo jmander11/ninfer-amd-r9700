@@ -132,14 +132,16 @@ struct EngineOptions {
     std::uint32_t max_pending_requests = 16;
     std::uint32_t pending_timeout_ms   = 30000;
     std::uint32_t prefill_chunk        = kDefaultPrefillChunk;
-    // Prompt tokens of the prefill owner advanced per slice while other requests are
-    // decode-ready; 0 runs the owner's whole prefill before the next decode round. A DFlash
-    // text owner's slice shares the target forward of every prefill_slice_rounds-th decode round,
-    // widened by the verify columns that round leaves unused, so the mixed forward is always
-    // prefill_slice + (C-1) x verify width; other owners run it as a separate step after
-    // prefill_slice_rounds decode rounds.
-    std::uint32_t prefill_slice        = 0;
-    std::uint32_t prefill_slice_rounds = 1;
+    // Forward width (columns) of each prefill step while other requests are decode-ready; 0 runs
+    // the owner's whole prefill before the next decode round. A DFlash text owner's slice shares
+    // the target forward of every mixed_forward_rounds-th decode round and fills it beside that
+    // round's verify columns, so the owner advances at least mixed_forward - (C-1) x verify width;
+    // other owners run a separate step of mixed_forward tokens after mixed_forward_rounds decode
+    // rounds. A multiple of 256, at most prefill_chunk, and wider than the other lanes' verify
+    // columns. Unset selects automatically: 1024 (bounded by prefill_chunk) with DFlash and
+    // C > 1, otherwise 0. Engine::options() reports the resolved value.
+    std::optional<std::uint32_t> mixed_forward;
+    std::uint32_t mixed_forward_rounds = 1;
     std::size_t kv_ram_capacity_bytes  = 0;
     std::size_t kv_disk_capacity_bytes = 0;
     std::filesystem::path kv_disk_location;

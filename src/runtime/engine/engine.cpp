@@ -140,6 +140,7 @@ public:
         active            = std::move(constructed.active);
         load              = std::move(constructed.load);
         sampling_defaults = constructed.sampling_defaults;
+        options.mixed_forward = active->program->mixed_forward();
         executor          = std::make_unique<Executor>(*active, device, options);
     }
 

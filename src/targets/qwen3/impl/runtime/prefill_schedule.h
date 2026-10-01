@@ -13,6 +13,11 @@ namespace ninfer::targets::qwen3::detail {
 
 inline constexpr std::uint32_t kPrefillChunkAlignment = 128;
 inline constexpr std::uint32_t kIrregularPrefillSplit = 4096;
+// Mixed forward widths are multiples of 256: whole-model prefill holds its rate at every
+// 256-multiple width and loses 3-5% between them. The automatic width scored highest on the
+// measured frontier (docs/performance.md, Mixed prefill/decode frontier).
+inline constexpr std::uint32_t kMixedForwardAlignment = 256;
+inline constexpr std::uint32_t kMixedForwardTokens    = 1024;
 
 // Large aligned extents use the full 8192-token workspace efficiently. A large
 // unaligned tail uses 4096 first so only the smaller final unit pays the tail cost.

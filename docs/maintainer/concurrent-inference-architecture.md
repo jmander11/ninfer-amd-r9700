@@ -88,10 +88,10 @@ NInfer 不支持 preemption，因此 request 只有在其 prompt、声明的最�
 ### 2.5 One prefill owner
 
 同一时刻最多有一个 admitted request 拥有 prefill/finalization path。Suffix prefill 以 bounded step 为
-单位推进：`prefill_slice=0` 时 owner 的整个 prefill 在下一个 decode round 之前连续完成
-（prefill-first）；`prefill_slice=S>0` 且存在 decode-ready request 时，独立 step 最多推进 S 个 prompt
-tokens，mixed step 推进 S 加上该 round 未用的 verify columns（§8.9），并按 §7.3 与 decode rounds
-交错或并入 mixed round。其他等待请求仍留在 host queue，不占 slot
+单位推进：`mixed_forward=0` 时 owner 的整个 prefill 在下一个 decode round 之前连续完成
+（prefill-first）；`mixed_forward=N>0` 且存在 decode-ready request 时，每个 step 的 forward 宽度为 N：
+独立 step 最多推进 N 个 prompt tokens，mixed step 推进 N 减去该 round 的 live verify columns
+（§8.9），并按 §7.3 与 decode rounds 交错或并入 mixed round。其他等待请求仍留在 host queue，不占 slot
 或 model state。
 
 ### 2.6 Single GPU execution owner
@@ -971,18 +971,21 @@ boundary 最多发布一个新 admitted request。
 
 ### 7.3 Decode/prefill policy
 
-调度策略由两个 startup-fixed 参数决定：`prefill_slice=S`（每个 slice 的 prompt tokens，`0` 表示
-prefill-first）和 `prefill_slice_rounds=D`（每个 slice 对应的 decode rounds，`D>=1`）：
+调度策略由两个 startup-fixed 参数决定：`mixed_forward=N`（decode-ready 时每个 prefill step 的
+forward 宽度，256 的倍数，`0` 表示 prefill-first；未设置时由 planner 自动选择：DFlash 且 C>1 时
+`N = min(1024, chunk)`，其中 chunk 为 `min(prefill_chunk, max_context)` 向下取 256 的倍数；若该值不大于
+`(C-1)W` 或为其他 backend，则为 `0`）和 `mixed_forward_rounds=D`（每个 slice 对应的 decode
+rounds，`D>=1`）：
 
 ```text
 if a prefill owner exists:
-    if S == 0 or no request is DECODE_READY:
+    if N == 0 or no request is DECODE_READY:
         run the owner's next PrefillChunk (up to prefill_chunk tokens)
     else if the owner is mixable (§8.9):
-        run D-1 DecodeRounds, then one MixedRound whose owner fills S + (C-1)W columns
+        run D-1 DecodeRounds, then one MixedRound whose owner fills N columns
         less the round's live verify columns
     else:
-        run D DecodeRounds, then one PrefillChunk of <= S tokens
+        run D DecodeRounds, then one PrefillChunk of <= N tokens
 else if one or more requests are DECODE_READY:
     run one DecodeRound containing all of them
 else:
@@ -1266,13 +1269,13 @@ bindings intact (Speculative grammar exchange).
 
 ```text
 columns = [owner slice (S_eff tokens) | verify rows (B x W_live)]
-S_eff   = min(remaining prompt, S + (C-1)W - B x W_live)
+S_eff   = min(remaining prompt, N - B x W_live)      (at least N - (C-1)W before the last slice)
 ```
 
-The forward width is fixed at `S + (C-1)W`. The owner takes the verify columns a round leaves
-unused, when fewer than `C-1` requests decode or adaptive draft length gives `W_live < W`, so the
-aligned forward width holds in every round. Choose `S` so that `S + (C-1)W` is a multiple of 256
-(1000 at C4, 1008 at C3, 1016 at C2 with W=8).
+The forward width is fixed at the configured `N`, a multiple of 256 (prefill holds its rate at
+256-multiple widths and loses 3-5% between them). The owner takes the verify columns a round
+leaves unused, when fewer than `C-1` requests decode or adaptive draft length gives `W_live < W`,
+so the aligned forward width holds in every round.
 
 - Linears, norms and MLP run once over all columns, so the weights stream once for both the
   owner's prompt tokens and the verify rows.
@@ -1284,7 +1287,7 @@ aligned forward width holds in every round. Choose `S` so that `S + (C-1)W` is a
   owner's DFlash context append runs after the round's egress. The owner stages its ingress
   in frame slot `C-1`, because the owner is never a member and `B <= C-1`.
 - Final owner steps finalize and sample as in ordinary prefill.
-- Admission with decode-ready requests and a configured slice does not run a mixable owner's
+- Admission with decode-ready requests and a configured mixed forward does not run a mixable owner's
   first step: `start_prefill_lane` returns without progress, and the first slice joins the next
   round, so decode never stalls for a separate first step. That empty step spends no service
   quantum and does not restart the `D` cadence.
@@ -1292,11 +1295,10 @@ aligned forward width holds in every round. Choose `S` so that `S + (C-1)W` is a
   verify tails, the egress copy and the owner context append are enqueued. Its status read
   therefore waits on the finished round instead of stalling submission between the last layer
   and the tails.
-- Capacity: `S <= prefill_chunk - (C-1)W` (rounded down to a multiple of 128 when that bound
-  exceeds 4096), clamped at plan time, so the mixed forward fits the chunk. The plan rejects a
-  chunk that cannot hold `(C-1)W` verify columns plus one prompt token. The workspace plan
-  reserves a separate `dflash_mixed` layout of `S + (C-1)W` columns with an owner of up to
-  `S + (C-1)W - 2B` columns at each batch `B` (verify panels are at least two columns wide).
+- Capacity: the plan rejects an `N` that is not a multiple of 256, exceeds the prefill chunk, or
+  cannot hold `(C-1)W` verify columns plus one prompt token. The workspace plan reserves a
+  separate `dflash_mixed` layout of `N` columns with an owner of up to `N - 2B` columns at each
+  batch `B` (verify panels are at least two columns wide).
 - Mixed rounds are eager. Pure decode rounds keep their Device Graph definitions, and
   adaptive-draft round-time observation skips mixed rounds.
 

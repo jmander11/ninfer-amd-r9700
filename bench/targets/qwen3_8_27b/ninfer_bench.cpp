@@ -381,8 +381,8 @@ std::string run_contention(ninfer::Engine& engine, const ninfer::bench::BenchOpt
     out << "{\n  \"concurrency\": " << options.concurrency
         << ", \"prefill_tokens\": " << prefill_tokens << ", \"prefills\": " << prefills
         << ", \"prefill_chunk\": " << options.prefill_chunk
-        << ", \"prefill_slice\": " << options.prefill_slice
-        << ", \"prefill_slice_rounds\": " << options.prefill_slice_rounds
+        << ", \"mixed_forward\": " << engine.options().mixed_forward.value_or(0)
+        << ", \"mixed_forward_rounds\": " << options.mixed_forward_rounds
         << ", \"decode_context\": " << options.contention_context
         << ", \"decode_lanes\": " << decode_lanes << ",\n  \"ttft_s\": [";
     for (std::size_t i = 0; i < ttft.size(); ++i) { out << (i ? ", " : "") << ttft[i]; }
@@ -428,8 +428,8 @@ std::string run_pair_check(ninfer::Engine& engine, const ninfer::bench::BenchOpt
         }
         out << "]";
     };
-    out << "{\n  \"prefill_slice\": " << options.prefill_slice
-        << ",\n  \"prefill_slice_rounds\": " << options.prefill_slice_rounds << ",\n";
+    out << "{\n  \"mixed_forward\": " << engine.options().mixed_forward.value_or(0)
+        << ",\n  \"mixed_forward_rounds\": " << options.mixed_forward_rounds << ",\n";
     emit("a", ra);
     out << ",\n";
     emit("b", rb);
@@ -505,8 +505,8 @@ int main(int argc, char** argv) {
                                                ninfer::bench::concurrent_kv_capacity_tokens(
                                                    max_context, options.concurrency));
         engine_options.prefill_chunk = options.prefill_chunk;
-        engine_options.prefill_slice = options.prefill_slice;
-        engine_options.prefill_slice_rounds = options.prefill_slice_rounds;
+        engine_options.mixed_forward = options.mixed_forward;
+        engine_options.mixed_forward_rounds = options.mixed_forward_rounds;
         engine_options.speculative.backend       = options.draft_tokens == 0
                                                        ? ninfer::SpeculativeBackend::None
                                                        : options.spec_backend;

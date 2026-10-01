@@ -91,7 +91,7 @@ struct SequencePlanningInputs {
     std::uint32_t capacity                 = 0;
     std::uint32_t max_concurrency          = 1;
     std::uint32_t prefill_chunk            = 0;
-    std::uint32_t prefill_slice            = 0;
+    std::optional<std::uint32_t> mixed_forward;
     std::uint32_t draft_window             = 0;
     std::uint32_t dflash_verify_width      = 0;
     bool adaptive_draft = false;
@@ -123,7 +123,7 @@ struct SequencePlanImpl<NINFER_QWEN3_VARIANT> {
     std::uint32_t main_page_groups         = 0;
     std::uint32_t max_concurrency          = 1;
     std::uint32_t prefill_chunk            = 0;
-    std::uint32_t prefill_slice            = 0;
+    std::uint32_t mixed_forward            = 0;
     std::uint32_t draft_window             = 0;
     std::uint32_t dflash_verify_width      = 0;
     bool adaptive_draft = false;

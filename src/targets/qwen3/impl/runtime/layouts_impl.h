@@ -787,13 +787,11 @@ WorkspacePlan build_workspace_plan(const SequencePlanImpl& plan) {
                 // Mixed round: the batch's live verify panels stay while one Text body of the
                 // owner's slice plus the verify columns runs over them, with the GDN mixed front's
                 // aggregate projections and record packing, then the owner's context append.
-                if (plan.prefill_slice != 0 &&
+                if (plan.mixed_forward != 0 &&
                     batch < static_cast<std::int32_t>(plan.max_concurrency)) {
-                    // The forward is always the slice plus every other lane's full verify panel;
-                    // the owner takes what `batch` live panels of at least two columns leave.
-                    const auto mixed_t = static_cast<std::int32_t>(
-                        plan.prefill_slice +
-                        (plan.max_concurrency - 1U) * plan.dflash_verify_width);
+                    // The forward is always the configured width; the owner takes what `batch`
+                    // live panels of at least two columns leave.
+                    const auto mixed_t = static_cast<std::int32_t>(plan.mixed_forward);
                     const std::int32_t owner = mixed_t - 2 * batch;
                     WorkspaceLayoutBuilder panels;
                     matrix(panels, DType::BF16, DFlashConfig::feature_rows, aggregate);
@@ -943,22 +941,30 @@ std::unique_ptr<SequencePlanImpl> build_sequence_candidate(const SequencePlannin
             ? dflash_storage_verify_width(impl->captured_ks, inputs.draft_window, inputs.dflash_verify_width)
             : 0U;
     impl->speculative_backend = inputs.speculative_backend;
-    // A slice must fit one prefill body beside the largest other-lane verify batch. A mixed
-    // round's owner also takes the verify columns its round leaves unused, so the mixed forward
-    // is always slice + (C-1) x verify width; the workspace plans that width.
-    impl->prefill_slice = inputs.prefill_slice;
-    if (impl->prefill_slice != 0 && inputs.speculative_backend == SpeculativeBackend::DFlash) {
-        const std::uint64_t verify_columns =
-            static_cast<std::uint64_t>(inputs.max_concurrency - 1U) * impl->dflash_verify_width;
-        if (verify_columns >= inputs.prefill_chunk) {
-            throw std::invalid_argument("prefill_slice needs a prefill chunk wider than the "
-                                        "other lanes' verify columns");
-        }
-        std::uint32_t bound = inputs.prefill_chunk - static_cast<std::uint32_t>(verify_columns);
-        // A bound above the irregular split must stay aligned, or every slice would fall back
-        // to the 4096-token split.
-        if (bound > kIrregularPrefillSplit) { bound -= bound % kPrefillChunkAlignment; }
-        impl->prefill_slice = std::min(impl->prefill_slice, bound);
+    // The mixed forward width bounds every prefill step's forward while decode rows wait. A
+    // mixed round's owner fills it beside the live verify panels, so it must exceed every other
+    // lane's full panel. Automatic: kMixedForwardTokens (bounded by the chunk) when mixed rounds
+    // exist, prefill-first otherwise.
+    const std::uint64_t verify_columns =
+        static_cast<std::uint64_t>(inputs.max_concurrency - 1U) * impl->dflash_verify_width;
+    if (inputs.mixed_forward) {
+        impl->mixed_forward = *inputs.mixed_forward;
+    } else {
+        const std::uint32_t forward = std::min(
+            kMixedForwardTokens, inputs.prefill_chunk - inputs.prefill_chunk % kMixedForwardAlignment);
+        impl->mixed_forward = inputs.speculative_backend == SpeculativeBackend::DFlash &&
+                                      inputs.max_concurrency > 1U && verify_columns < forward
+                                  ? forward
+                                  : 0U;
+    }
+    if (impl->mixed_forward != 0 &&
+        (impl->mixed_forward % kMixedForwardAlignment != 0 ||
+         impl->mixed_forward > inputs.prefill_chunk || impl->mixed_forward <= verify_columns)) {
+        throw std::invalid_argument(
+            "mixed_forward must be a multiple of " + std::to_string(kMixedForwardAlignment) +
+            ", at most the prefill chunk (" + std::to_string(inputs.prefill_chunk) +
+            "), and wider than the other lanes' verify columns (" +
+            std::to_string(verify_columns) + ")");
     }
     impl->proposal_head       = inputs.proposal_head;
     impl->features            = inputs.features;
@@ -1130,8 +1136,7 @@ make_sequence_planner_impl(DeviceContext& device, const EngineOptions& options,
         .capacity            = options.max_context,
         .max_concurrency     = options.max_concurrency,
         .prefill_chunk       = std::min(options.prefill_chunk, options.max_context),
-        .prefill_slice       = std::min(options.prefill_slice,
-                                        std::min(options.prefill_chunk, options.max_context)),
+        .mixed_forward       = options.mixed_forward,
         .draft_window        = options.speculative.draft_tokens,
         .dflash_verify_width = options.speculative.dflash_verify_width,
         .adaptive_draft      = options.speculative.adaptive_draft,

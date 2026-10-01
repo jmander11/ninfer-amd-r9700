@@ -994,6 +994,7 @@ void HttpServer::attach(GenerationService& service) {
     const ninfer::LoadSummary load     = service.load_summary();
     const ninfer::MemorySummary memory = service.memory_summary();
     public_model_id_                   = resolve_public_model_id(options_, load.model_id);
+    options_.mixed_forward             = service.options().mixed_forward;
     service_                           = &service;
     metrics_.attach(options_, load, memory, public_model_id_,
                     query_server_log_environment(options_.device));

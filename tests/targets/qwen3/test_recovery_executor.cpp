@@ -556,6 +556,7 @@ public:
         throw std::logic_error("cold prefill did not complete in one step");
     }
     [[nodiscard]] bool prefill_mixable(std::uint32_t) const noexcept { return false; }
+    [[nodiscard]] std::uint32_t mixed_forward() const noexcept { return 0; }
     [[nodiscard]] MixedGeneratedRound decode_batch_with_prefill(
         std::span<const std::uint32_t>, std::span<const RoundBudget>, std::uint32_t) {
         throw std::logic_error("recovery probe never mixes prefill into decode");

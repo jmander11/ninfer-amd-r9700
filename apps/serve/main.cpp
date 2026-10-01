@@ -98,6 +98,12 @@ int main(int argc, char** argv) {
                  << " kv-ram=" << ninfer::serve::format_kv_ram_occupancy(memory)
                  << " kv-disk=" << ninfer::serve::format_kv_disk_occupancy(memory);
         ninfer::serve::write_console_log(ninfer::serve::ConsoleLogLevel::Info, capacity.str());
+        const std::uint32_t forward = service.options().mixed_forward.value_or(0);
+        ninfer::serve::write_console_log(
+            ninfer::serve::ConsoleLogLevel::Info,
+            "Mixed forward " + (forward == 0 ? std::string("off (prefill-first)")
+                                             : std::to_string(forward) + " columns") +
+                (options.mixed_forward ? " (explicit)" : " (auto)"));
 
         ninfer::serve::write_console_log(ninfer::serve::ConsoleLogLevel::Info, "warming up...");
         service.warmup();

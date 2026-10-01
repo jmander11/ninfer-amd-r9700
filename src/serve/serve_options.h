@@ -34,8 +34,8 @@ struct ServeOptions {
     std::uint32_t max_pending_requests     = 16;
     std::uint32_t pending_timeout_ms       = 30000;
     std::uint32_t prefill_chunk            = kDefaultPrefillChunk;
-    std::uint32_t prefill_slice            = 0;
-    std::uint32_t prefill_slice_rounds     = 1;
+    std::optional<std::uint32_t> mixed_forward; // unset => automatic (Engine resolves)
+    std::uint32_t mixed_forward_rounds     = 1;
     std::size_t kv_ram_capacity_bytes      = 0;
     std::size_t kv_disk_capacity_bytes     = 0;
     std::filesystem::path kv_disk_location;

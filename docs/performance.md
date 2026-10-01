@@ -144,8 +144,10 @@ C4 contention bench: 3 lanes decode with 6144-token outputs while the 4th lane r
 LM-head draft) and prefill chunk 2048. **Decode share** is the decode rounds/s during the prefills
 divided by the mean decode-only rate of 4 s windows before and after (acceptance drifts along the
 greedy corpus). Aggregate decode is that share times the median decode-only rate (215 tok/s).
-**Stall** is the longest decode gap inserted by one prefill step or mixed round. S is
-`--prefill-slice`, and D is `--prefill-slice-rounds`.
+**Stall** is the longest decode gap inserted by one prefill step or mixed round. S is the owner's
+slice (the flag of these runs, `--prefill-slice`), and D is the slices' decode-round cadence. The
+current flags are `--mixed-forward N`, the forward width N = S + (C-1)·W (W=8 here), and
+`--mixed-forward-rounds D`.
 
 Pareto frontier after the small-T prefill work below (sweep `fused6`; time-share rows from
 `ts3`; aggregate decode at the 222 tok/s decode-only reference; stall is the mixed round time):
@@ -260,10 +262,16 @@ The score here measures only the co-batching gain over time-sharing, which score
 not choose a latency point. Its maximum at S=1000 (a 1024-column forward) is a hardware-efficiency
 optimum. S also sets the decode lanes' round time during a prefill: ~0.18 s at S=488, ~0.30 s at
 S=1000 and ~0.52 s at S=2024, against 39 ms for a decode-only round. The TTFT cost at S=1000 is
-~8% (2.7 s against 2.5 s for an 8K prompt). S=1000 is the default choice for local use. If a
-deployment has an inter-token latency target, the rule is the largest S whose mixed round meets
-it, rounded so S + (C-1)·8 is a multiple of 256 (S=488 for ~0.2 s). With no decode-ready request
-the owner runs prefill-first chunks regardless of S.
+~8% (2.7 s against 2.5 s for an 8K prompt). The default (`--mixed-forward auto`) is this
+optimum: a 1024-column forward (bounded by the chunk) under DFlash with C > 1, so S = 1000 at C4
+with W=8. Smaller
+draft windows were checked at C4 with adaptive draft and two passes each. With max K=3, S=1012
+scored 1.075 and 1.063, against 1.066 and 1.055 at S=1000. With max K=5, S=1006 scored 1.059 and
+1.059, against 1.057 and 1.057 at S=1000. The tile-filling S wins every pair, and the score
+stays above 1 (`profiles/bench/r9700-mixed-pd-20260929/kcheck.sh`). If a
+deployment has an inter-token latency target, the rule is the largest 256-multiple
+`--mixed-forward` whose mixed round meets it (512 for ~0.2 s). The flag only accepts multiples of
+256. With no decode-ready request the owner runs prefill-first chunks regardless.
 
 **Adopted: tile-filling mixed slices.** A mixed round's owner now takes the verify columns its
 round leaves unused, so the forward stays at S + 8·(C−1) = 1024 when fewer than C−1 requests
@@ -312,7 +320,7 @@ artifact; pinned binaries, against an upstream-only build of 0eab8185).**
   acceptance follows the text.
 - C4 score (this build): S=1000 1.060 / 1.063, S=488 1.053 / 1.052, one decode lane at S=1000
   1.070.
-- Serve (C3, `--prefill-slice 1008`, two streaming decodes while a 9,593-token prompt arrives):
+- Serve (C3, S=1008, i.e. `--mixed-forward 1024`, two streaming decodes while a 9,593-token prompt arrives):
   the long request answers correctly in 3.18 s, and each stream's largest gap is 0.33 s, against
   2.99 s prefill-first. A 0.62 s gap in one run was a transient host stall; two reruns gave
   0.33 s, as did the pre-sync build.

@@ -296,9 +296,10 @@ std::string usage_text(std::string_view program) {
         << "                              the default 64 MiB headroom (default: workload)\n"
         << "  --prefill-chunk <tokens>    multiple of " << kPrefillChunkAlignment
         << " (default: " << kDefaultPrefillChunk << ")\n"
-        << "  --prefill-slice <tokens>    prefill-owner tokens per slice while other\n"
-        << "                              requests decode (default: 0, prefill first)\n"
-        << "  --prefill-slice-rounds <N>  decode rounds per prefill slice (default: 1)\n"
+        << "  --mixed-forward auto|<N>    prefill-step forward width (multiple of 256) while\n"
+        << "                              other requests decode; auto = the server default\n"
+        << "                              (default: 0, prefill first)\n"
+        << "  --mixed-forward-rounds <N>  decode rounds per prefill slice (default: 1)\n"
         << "  --contention <P,R>          C-1 lanes decode while one lane runs R fresh P-token\n"
         << "                              prefills; reports decode and prefill tok/s (C >= 2)\n"
         << "  --contention-context <L>    prompt tokens of each contention decode lane\n"
@@ -381,11 +382,16 @@ BenchOptions parse_args(int argc, char** argv) {
             }
         } else if (arg == "--prefill-chunk") {
             options.prefill_chunk = parse_u32(value("--prefill-chunk"), "prefill-chunk");
-        } else if (arg == "--prefill-slice") {
-            options.prefill_slice = parse_u32(value("--prefill-slice"), "prefill-slice", true);
-        } else if (arg == "--prefill-slice-rounds") {
-            options.prefill_slice_rounds =
-                parse_u32(value("--prefill-slice-rounds"), "prefill-slice-rounds");
+        } else if (arg == "--mixed-forward") {
+            const std::string forward = value("--mixed-forward");
+            if (forward == "auto") {
+                options.mixed_forward.reset();
+            } else {
+                options.mixed_forward = parse_u32(forward, "mixed-forward", true);
+            }
+        } else if (arg == "--mixed-forward-rounds") {
+            options.mixed_forward_rounds =
+                parse_u32(value("--mixed-forward-rounds"), "mixed-forward-rounds");
         } else if (arg == "--pair-check") {
             const auto parsed = parse_pair_list(value("--pair-check"), "pair-check");
             if (parsed.size() != 1 || parsed.front().first <= 0 || parsed.front().second <= 0) {
@@ -465,6 +471,9 @@ BenchOptions parse_args(int argc, char** argv) {
     if (!saw_artifact) { throw std::invalid_argument("--weights is required"); }
     if (options.prefill_chunk % kPrefillChunkAlignment != 0) {
         throw std::invalid_argument("--prefill-chunk must be a multiple of 128");
+    }
+    if (options.mixed_forward && *options.mixed_forward % 256 != 0) {
+        throw std::invalid_argument("--mixed-forward must be auto or a multiple of 256");
     }
     if (options.spec_backend == SpeculativeBackend::Mtp &&
         options.draft_tokens > kMaxMtpDraftTokens) {

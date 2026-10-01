@@ -80,8 +80,9 @@ struct BenchOptions {
     int warmup      = kDefaultWarmup;
     std::optional<std::uint32_t> max_context;
     std::uint32_t prefill_chunk    = kDefaultPrefillChunk;
-    std::uint32_t prefill_slice    = 0;
-    std::uint32_t prefill_slice_rounds = 1;
+    // Prefill-first by default so pp/tg cells keep their methodology; unset => Engine auto.
+    std::optional<std::uint32_t> mixed_forward = 0;
+    std::uint32_t mixed_forward_rounds = 1;
     std::uint32_t concurrency      = 1;
     SpeculativeBackend spec_backend    = SpeculativeBackend::Mtp;
     std::uint32_t draft_tokens         = 0;
