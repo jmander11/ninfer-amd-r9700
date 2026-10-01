@@ -113,10 +113,22 @@ public:
                          const VisionPrefillPlan& plan, runtime::TransientRegion transient);
 
     [[nodiscard]] VisionChunk prepare_chunk(std::uint32_t begin, std::uint32_t nominal_length);
+    // Runs the Vision encode the chunk at `begin` would start with, if any, without preparing
+    // the chunk; prepare_chunk then finds the item encoded. Returns whether it encoded.
+    [[nodiscard]] bool encode_ahead(std::uint32_t begin, std::uint32_t nominal_length);
     [[nodiscard]] bool release_consumed_media_payload() noexcept;
     [[nodiscard]] double elapsed_seconds() const;
 
 private:
+    struct SelectedChunk {
+        std::uint32_t length                    = 0;
+        const VisionUseSpan* use                = nullptr;
+        const qwen3::VisionItemControl* control = nullptr;
+        Tensor output;
+    };
+    [[nodiscard]] SelectedChunk select_chunk(std::uint32_t begin, std::uint32_t nominal_length) const;
+    // Encodes the selected use's item unless it is already the active item.
+    bool encode_selected(const SelectedChunk& selected);
     void encode_batch();
 
     DeviceContext& device_;

@@ -1455,7 +1455,8 @@ private:
                                             bool cancel_at_boundary) {
         // An owner admitted without progress (its first slice waits for a mixed round) takes
         // the next round rather than restarting the slice cadence.
-        decode_rounds_since_prefill_ = step.processed_prompt_tokens != 0 || step.complete
+        decode_rounds_since_prefill_ = step.processed_prompt_tokens != 0 || step.complete ||
+                                               step.encoded_only
                                            ? 0U
                                            : std::max(decode_rounds_since_prefill_,
                                                       mixed_forward_rounds_ - 1U);

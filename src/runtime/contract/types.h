@@ -111,6 +111,9 @@ struct PrefillStepResult {
     std::uint32_t processed_prompt_tokens = 0;
     bool complete                         = false;
     bool host_input_consumed              = false;
+    // The step ran GPU work without prompt tokens (a Vision encode ahead of its first chunk), so
+    // it counts as a prefill step for the decode-round cadence.
+    bool encoded_only                     = false;
 };
 
 // One DecodeRound whose target forward also advanced the prefill owner's next chunk.

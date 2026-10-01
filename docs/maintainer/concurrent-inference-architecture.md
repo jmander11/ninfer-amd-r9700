@@ -1006,8 +1006,10 @@ DecodeRound，再 admission selected request 并执行它的 first prefill/final
 ingress 因此不能在两个 donor progress rounds 之间连续 admission 多个 requests，也不能无限延迟 frozen
 frontier 的 decode progress。
 
-`S>0` 时 slice 限制插入两个 decode rounds 之间（或并入一个 mixed round）的 prompt work；`S=0`
-时 decode 停顿覆盖 owner 的整个 prefill。Chunk/slice 的具体 token/media extent 是经过 target 和
+`N>0` 时 slice 限制插入两个 decode rounds 之间（或并入一个 mixed round）的 prompt work；`N=0`
+时 decode 停顿覆盖 owner 的整个 prefill。存在 decode-ready request 时，Vision encode 单独构成一个
+prefill step（不推进 prompt tokens，`encoded_only`），随后的 decode rounds 先于消费它的 text chunk 运行，
+因此 decode 停顿不会叠加 encode 与 chunk。Chunk/slice 的具体 token/media extent 是经过 target 和
 hardware qualification 的配置，不属于 scheduler semantic。Vision 和其他 prefill GPU phases
 必须本身构成 bounded unit，或已被计入该 chunk 的 latency bound；不存在 scheduler 之外的
 unbounded prefill work。

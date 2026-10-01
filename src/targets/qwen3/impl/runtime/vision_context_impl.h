@@ -544,7 +544,8 @@ void VisionPrefillSession::encode_batch() {
     final_item_encoded_ = true;
 }
 
-VisionChunk VisionPrefillSession::prepare_chunk(std::uint32_t begin, std::uint32_t nominal_length) {
+VisionPrefillSession::SelectedChunk
+VisionPrefillSession::select_chunk(std::uint32_t begin, std::uint32_t nominal_length) const {
     if (nominal_length == 0 || begin >= prompt_.token_ids.size()) {
         throw std::invalid_argument("Vision chunk range is empty or outside the prompt");
     }
@@ -555,9 +556,7 @@ VisionChunk VisionPrefillSession::prepare_chunk(std::uint32_t begin, std::uint32
     const VisionChunkSelection selected =
         select_vision_prefill_chunk(plan_.uses, begin, end - begin);
     if (selected.length == 0) { throw std::logic_error("Vision chunk cap made no forward progress"); }
-    if (!selected.use_index) {
-        return VisionChunk{static_cast<std::int32_t>(selected.length), nullptr, {}};
-    }
+    if (!selected.use_index) { return SelectedChunk{.length = selected.length}; }
     const VisionUseSpan* active = &plan_.uses[*selected.use_index];
     if (active->item_index >= plan_.control->items.size() ||
         active->item_index >= prompt_.vision_items.size()) {
@@ -581,38 +580,64 @@ VisionChunk VisionPrefillSession::prepare_chunk(std::uint32_t begin, std::uint32
     Tensor output(transient_.data + output_offset, DType::BF16,
                   {VisionScheduleConfig::out_hidden,
                    static_cast<std::int32_t>(control.merged_count)});
+    return SelectedChunk{selected.length, active, &control, output};
+}
 
-    if (!active_item_ || *active_item_ != active->item_index) {
-        if (active_item_ && active->item_index <= *active_item_) {
-            throw std::logic_error("Vision items are not consumed in strictly increasing order");
-        }
-        if (aggregate_enabled_) {
-            if (!batch_encoded_) { encode_batch(); }
-        } else {
-            const std::size_t patch_offset = checked_mul(
-                control.patch_begin, static_cast<std::size_t>(VisionScheduleConfig::patch_dim),
-                "item patch offset");
-            const std::size_t patch_elements = checked_mul(
-                control.patch_count, static_cast<std::size_t>(VisionScheduleConfig::patch_dim),
-                "item patch elements");
-            if (patch_offset > prompt_.patches.size() ||
-                patch_elements > prompt_.patches.size() - patch_offset) {
-                throw std::invalid_argument("Vision item patch range exceeds prepared payload");
-            }
-            timers_.emplace_back(device_);
-            timers_.back().start();
-            context_.encode(
-                VisionItemView{
-                    std::span<const float>(prompt_.patches).subspan(patch_offset, patch_elements),
-                    &control},
-                output, workspace_);
-            timers_.back().record_stop();
-            workspace_.reset();
-            final_item_encoded_ = active->item_index == final_item_;
-        }
-        active_item_ = active->item_index;
+bool VisionPrefillSession::encode_selected(const SelectedChunk& selected) {
+    const VisionUseSpan* active = selected.use;
+    if (active == nullptr || (active_item_ && *active_item_ == active->item_index)) {
+        return false;
     }
-    return VisionChunk{static_cast<std::int32_t>(selected.length), &control, output};
+    if (active_item_ && active->item_index <= *active_item_) {
+        throw std::logic_error("Vision items are not consumed in strictly increasing order");
+    }
+    bool encoded = false;
+    if (aggregate_enabled_) {
+        if (!batch_encoded_) {
+            encode_batch();
+            encoded = true;
+        }
+    } else {
+        const qwen3::VisionItemControl& control = *selected.control;
+        const std::size_t patch_offset = checked_mul(
+            control.patch_begin, static_cast<std::size_t>(VisionScheduleConfig::patch_dim),
+            "item patch offset");
+        const std::size_t patch_elements = checked_mul(
+            control.patch_count, static_cast<std::size_t>(VisionScheduleConfig::patch_dim),
+            "item patch elements");
+        if (patch_offset > prompt_.patches.size() ||
+            patch_elements > prompt_.patches.size() - patch_offset) {
+            throw std::invalid_argument("Vision item patch range exceeds prepared payload");
+        }
+        Tensor output = selected.output;
+        timers_.emplace_back(device_);
+        timers_.back().start();
+        context_.encode(
+            VisionItemView{
+                std::span<const float>(prompt_.patches).subspan(patch_offset, patch_elements),
+                &control},
+            output, workspace_);
+        timers_.back().record_stop();
+        workspace_.reset();
+        final_item_encoded_ = active->item_index == final_item_;
+        encoded = true;
+    }
+    active_item_ = active->item_index;
+    return encoded;
+}
+
+bool VisionPrefillSession::encode_ahead(std::uint32_t begin, std::uint32_t nominal_length) {
+    return encode_selected(select_chunk(begin, nominal_length));
+}
+
+VisionChunk VisionPrefillSession::prepare_chunk(std::uint32_t begin, std::uint32_t nominal_length) {
+    const SelectedChunk selected = select_chunk(begin, nominal_length);
+    if (selected.use == nullptr) {
+        return VisionChunk{static_cast<std::int32_t>(selected.length), nullptr, {}};
+    }
+    (void)encode_selected(selected);
+    return VisionChunk{static_cast<std::int32_t>(selected.length), selected.control,
+                       selected.output};
 }
 
 bool VisionPrefillSession::release_consumed_media_payload() noexcept {

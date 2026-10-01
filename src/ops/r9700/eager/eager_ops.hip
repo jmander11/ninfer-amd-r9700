@@ -426,28 +426,33 @@ __global__ __launch_bounds__(kBlock) void rmsnorm_k256_token8_kernel(
     }
 }
 
+__device__ __forceinline__ float wave_sum(float value) {
+#pragma unroll
+    for (int offset = 16; offset > 0; offset >>= 1) { value += __shfl_xor(value, offset, 32); }
+    return value;
+}
+
+// One wave per row: the mean, then the centered variance (two passes over the row), then the
+// affine output.
 __global__ void layernorm_kernel(const hip_bfloat16* input, const hip_bfloat16* weight,
                                  const hip_bfloat16* bias, hip_bfloat16* output,
-                                 std::uint32_t features, float eps) {
-    const std::uint32_t row = blockIdx.x;
+                                 std::uint32_t features, std::uint32_t rows, float eps) {
+    const std::uint32_t lane = threadIdx.x % 32U;
+    const std::uint32_t row  = blockIdx.x * (blockDim.x / 32U) + threadIdx.x / 32U;
+    if (row >= rows) { return; }
     const std::size_t base = static_cast<std::size_t>(row) * features;
-    __shared__ float mean;
-    __shared__ float inverse;
-    if (threadIdx.x == 0) {
-        float sum = 0.0F;
-        for (std::uint32_t feature = 0; feature < features; ++feature) {
-            sum += static_cast<float>(input[base + feature]);
-        }
-        mean = sum / static_cast<float>(features);
-        float variance = 0.0F;
-        for (std::uint32_t feature = 0; feature < features; ++feature) {
-            const float centered = static_cast<float>(input[base + feature]) - mean;
-            variance = fmaf(centered, centered, variance);
-        }
-        inverse = rsqrtf(variance / static_cast<float>(features) + eps);
+    float sum = 0.0F;
+    for (std::uint32_t feature = lane; feature < features; feature += 32U) {
+        sum += static_cast<float>(input[base + feature]);
     }
-    __syncthreads();
-    for (std::uint32_t feature = threadIdx.x; feature < features; feature += blockDim.x) {
+    const float mean = wave_sum(sum) / static_cast<float>(features);
+    float variance = 0.0F;
+    for (std::uint32_t feature = lane; feature < features; feature += 32U) {
+        const float centered = static_cast<float>(input[base + feature]) - mean;
+        variance = fmaf(centered, centered, variance);
+    }
+    const float inverse = rsqrtf(wave_sum(variance) / static_cast<float>(features) + eps);
+    for (std::uint32_t feature = lane; feature < features; feature += 32U) {
         const float normalized = (static_cast<float>(input[base + feature]) - mean) * inverse;
         output[base + feature] = hip_bfloat16(normalized * static_cast<float>(weight[feature]) +
                                                static_cast<float>(bias[feature]));
@@ -1190,8 +1195,13 @@ hipError_t layernorm_bf16(const hip_bfloat16* input, const hip_bfloat16* weight,
     return checked_launch(input != nullptr && weight != nullptr && bias != nullptr && output != nullptr &&
                               features != 0 && rows != 0 && std::isfinite(eps) && eps > 0.0F &&
                               valid_stream(stream),
-                          [&] { hipLaunchKernelGGL(layernorm_kernel, dim3(rows), dim3(kBlock), 0, stream,
-                                                   input, weight, bias, output, features, eps); });
+                          [&] {
+                              constexpr std::uint32_t rows_per_block = kBlock / 32U;
+                              hipLaunchKernelGGL(layernorm_kernel,
+                                                 dim3((rows + rows_per_block - 1U) / rows_per_block),
+                                                 dim3(kBlock), 0, stream, input, weight, bias,
+                                                 output, features, rows, eps);
+                          });
 }
 
 hipError_t l2norm_bf16(const hip_bfloat16* input, hip_bfloat16* output,

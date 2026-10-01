@@ -36,12 +36,13 @@ struct Fixture {
 };
 
 Fixture make_fixture(int patches, int salt, bool isolate_segments,
-                     const std::vector<int>& cumulative) {
+                     const std::vector<int>& cumulative, float query_scale) {
     const std::size_t elements = static_cast<std::size_t>(patches) * kHeads * kDim;
     Fixture result{std::vector<hip_bfloat16>(elements), std::vector<hip_bfloat16>(elements),
                    std::vector<hip_bfloat16>(elements)};
     for (std::size_t index = 0; index < elements; ++index) {
-        result.q[index] = hip_bfloat16(static_cast<float>(static_cast<int>((index * 17U + salt) % 97U) - 48) /
+        result.q[index] = hip_bfloat16(query_scale *
+                                       static_cast<float>(static_cast<int>((index * 17U + salt) % 97U) - 48) /
                                        64.0F);
         result.k[index] = hip_bfloat16(static_cast<float>(static_cast<int>((index * 29U + salt + 3) % 101U) - 50) /
                                        64.0F);
@@ -62,6 +63,16 @@ Fixture make_fixture(int patches, int salt, bool isolate_segments,
     return result;
 }
 
+// Rows checked against the oracle: every query up to 512 patches, otherwise every 37th query plus
+// each segment's first and last.
+bool checked_query(int query, const std::vector<int>& cumulative) {
+    if (cumulative.back() <= 512 || query % 37 == 0) { return true; }
+    for (std::size_t segment = 0; segment + 1 < cumulative.size(); ++segment) {
+        if (query == cumulative[segment] || query + 1 == cumulative[segment + 1]) { return true; }
+    }
+    return false;
+}
+
 std::vector<double> oracle(const Fixture& fixture, const std::vector<int>& cumulative) {
     constexpr double scale = 0.117851130197757920733474060350808;
     std::vector<double> output(fixture.q.size(), 0.0);
@@ -70,6 +81,7 @@ std::vector<double> oracle(const Fixture& fixture, const std::vector<int>& cumul
         const int end = cumulative[segment + 1];
         std::vector<double> scores(static_cast<std::size_t>(end - begin));
         for (int query = begin; query < end; ++query) {
+            if (!checked_query(query, cumulative)) { continue; }
             for (int head = 0; head < kHeads; ++head) {
                 double maximum = -std::numeric_limits<double>::infinity();
                 for (int key = begin; key < end; ++key) {
@@ -105,12 +117,12 @@ std::vector<double> oracle(const Fixture& fixture, const std::vector<int>& cumul
 }
 
 void run_case(const std::vector<int>& lengths, bool uniform_entry, bool padded_qkv,
-              bool isolate_segments, int salt, hipStream_t stream) {
+              bool isolate_segments, int salt, hipStream_t stream, float query_scale = 1.0F) {
     std::vector<int> cumulative(lengths.size() + 1, 0);
     std::partial_sum(lengths.begin(), lengths.end(), cumulative.begin() + 1);
     const int patches = cumulative.back();
     const std::size_t token_plane = static_cast<std::size_t>(kHeads) * kDim;
-    const Fixture fixture = make_fixture(patches, salt, isolate_segments, cumulative);
+    const Fixture fixture = make_fixture(patches, salt, isolate_segments, cumulative, query_scale);
     const std::vector<double> expected = oracle(fixture, cumulative);
 
     ninfer::DeviceBuffer q_storage;
@@ -192,6 +204,7 @@ void run_case(const std::vector<int>& lengths, bool uniform_entry, bool padded_q
     double max_abs = 0.0;
     double max_reference = 0.0;
     for (std::size_t index = 0; index < actual.size(); ++index) {
+        if (!checked_query(static_cast<int>(index / (kHeads * kDim)), cumulative)) { continue; }
         const double got = represented(actual[index]);
         const double error = got - expected[index];
         squared_error += error * error;
@@ -254,6 +267,13 @@ int main() {
         run_case({4, 7}, false, true, true, 7, device.stream);
         run_case({64, 65, 65}, false, true, false, 31, device.stream);
         run_case({68, 68}, true, true, false, 101, device.stream);
+        // Real extents: one 768x512 image, one 1920x1080 image, and three images in one call,
+        // in the production interleaved QKV layout; the sharp case drives logits to ~40.
+        run_case({1536}, false, true, false, 13, device.stream);
+        run_case({1536}, false, true, false, 17, device.stream, 8.0F);
+        run_case({8256}, false, true, false, 19, device.stream);
+        run_case({1540, 2052, 1604}, false, true, false, 23, device.stream);
+        run_case({1536, 1536}, true, true, false, 29, device.stream, 8.0F);
         std::cout << "vision_attention: PASS\n";
         return 0;
     } catch (const std::exception& exception) {

@@ -544,6 +544,44 @@ Correctness (`--pair-check 3000,64`, C2):
   oracles), so its greedy stream can flip at a near-tie (first difference at token 33–139 of
   256).
 
+## Decode pauses by incoming request and the Vision encoder (2026-09-30)
+
+C3 serve, DFlash K7 adaptive, default `--mixed-forward auto` (1024), two streaming decodes while one
+request arrives (`profiles/bench/r9700-mixed-pd-20260929/probe.sh`, `tiers.sh`). Pause is the
+longest gap in either stream while the request is in flight; arrival adds one ordinary decode round
+(0.034 s) in every case.
+
+| Incoming request | Longest pause | Request latency |
+|---|---|---|
+| 9.6K-token text prompt (8 runs) | 0.329-0.334 s | 3.17-3.22 s |
+| Follow-up turn, prefix in VRAM / RAM tier / disk tier | 0.089 / 0.112 / 0.088 s | 0.25 / 0.51 / 2.02 s |
+| 768x512 image (408 tokens), before / after | 0.347 / 0.205 s | 0.87-1.05 / 0.86-0.98 s |
+| 1920x1080 image (2,064 tokens), before / after | 2.82 / 0.44 s | 3.9 / 1.8-2.05 s |
+
+The RAM and disk restores (0.18 s copy, 1.7 s SSD read) run on the copy stream while decode
+continues. A single earlier 0.62 s gap did not recur in 8 instrumented runs; that run's whole
+prefill was 14% slower, which points to external contention rather than a scheduling path.
+
+The 1080p pause was the Vision encode, which ran as one unbounded step. A kernel trace of one
+encode (`profiles/rocprof/vision-1080p-20260930*`, attribution only) put 2,172 of 2,443 ms in
+Vision attention (80 ms per block at P=8,256, ~4 TFLOP/s) and 78 ms in LayerNorm, whose row
+statistics ran serially on one thread. Changes:
+- Vision attention computes S^T = K Q^T, so each lane owns one query: the online softmax is
+  per-lane plus one half-wave shuffle, and the accumulator is already the B operand of
+  O^T = V^T P^T, with no LDS transpose. K and a transposed V are staged per 64-key tile with
+  16-byte loads, 8 waves (128 queries) per block. Probabilities keep the BF16 high-plus-residual
+  split: a single BF16 failed the FP64 oracle (rel L2 0.0047 > 0.0025). Qualifier event timing:
+  P=8,256 84.2 -> 7.48 ms, P=1,536 3.6 -> 0.37 ms, three images P=5,196 12.8 -> 1.23 ms; error
+  against the FP64 oracle unchanged (rel L2 0.00167). 16 waves only helped P=1,536.
+- LayerNorm runs one wave per row (two-pass mean and centered variance): D=1152 x 8,256 rows
+  1.80 -> 0.082 ms against its FP64 oracle.
+- While decode waits, the encode runs as its own prefill step (`encoded_only`), so the following
+  text chunk waits for a decode round instead of adding to the same pause (0.735 -> 0.44 s).
+
+The 1080p encode window fell from 2,443 to 394 ms: attention 194 ms, A8Q4 Vision linears 155 ms,
+the rest ~40 ms. Greedy image descriptions diverge from the previous build at near-ties and stay
+accurate. The BF16-source Vision parity tool needs a torch environment that this host lacks.
+
 ## Mid-row attention route (2026-09-28)
 
 Causal chunks of 9..127 rows (short appended turns and tool results, prompt tails with

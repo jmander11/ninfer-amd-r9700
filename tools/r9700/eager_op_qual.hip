@@ -541,6 +541,66 @@ void qualify_normalization_and_activations(hipStream_t stream) {
     DeviceBuffer<hip_bfloat16> d_bias(kHidden);
     copy_to_device(d_weight, weight);
     copy_to_device(d_bias, bias);
+    // Vision LayerNorm: 1152 features over one 1920x1080 image's 8256 patches and a ragged count.
+    for (const std::uint32_t rows : {8256U, 37U}) {
+        constexpr std::uint32_t kVisionFeatures = 1152;
+        const std::size_t elements = static_cast<std::size_t>(kVisionFeatures) * rows;
+        const std::vector<hip_bfloat16> input = bf16_fixture(elements, rows + 211U);
+        const std::vector<hip_bfloat16> vision_weight = bf16_fixture(kVisionFeatures, 223U);
+        const std::vector<hip_bfloat16> vision_bias = bf16_fixture(kVisionFeatures, 227U);
+        DeviceBuffer<hip_bfloat16> d_input(elements);
+        DeviceBuffer<hip_bfloat16> d_output(elements);
+        DeviceBuffer<hip_bfloat16> d_vision_weight(kVisionFeatures);
+        DeviceBuffer<hip_bfloat16> d_vision_bias(kVisionFeatures);
+        copy_to_device(d_input, input);
+        copy_to_device(d_vision_weight, vision_weight);
+        copy_to_device(d_vision_bias, vision_bias);
+        const std::array<std::int32_t, 2> shape{static_cast<std::int32_t>(kVisionFeatures),
+                                                static_cast<std::int32_t>(rows)};
+        ninfer::Tensor input_tensor(d_input.get(), ninfer::DType::BF16, {shape[0], shape[1]});
+        ninfer::Tensor output_tensor(d_output.get(), ninfer::DType::BF16, {shape[0], shape[1]});
+        ninfer::Tensor weight_tensor(d_vision_weight.get(), ninfer::DType::BF16, {shape[0]});
+        ninfer::Tensor bias_tensor(d_vision_bias.get(), ninfer::DType::BF16, {shape[0]});
+        std::vector<double> expected(elements);
+        for (std::uint32_t row = 0; row < rows; ++row) {
+            const std::size_t base = static_cast<std::size_t>(row) * kVisionFeatures;
+            double sum = 0.0;
+            for (std::uint32_t feature = 0; feature < kVisionFeatures; ++feature) {
+                sum += static_cast<float>(input[base + feature]);
+            }
+            const double mean = sum / kVisionFeatures;
+            double variance = 0.0;
+            for (std::uint32_t feature = 0; feature < kVisionFeatures; ++feature) {
+                const double centered = static_cast<float>(input[base + feature]) - mean;
+                variance += centered * centered;
+            }
+            const double inverse = 1.0 / std::sqrt(variance / kVisionFeatures + 1.0e-6);
+            for (std::uint32_t feature = 0; feature < kVisionFeatures; ++feature) {
+                expected[base + feature] =
+                    (static_cast<float>(input[base + feature]) - mean) * inverse *
+                        static_cast<float>(vision_weight[feature]) +
+                    static_cast<float>(vision_bias[feature]);
+            }
+        }
+        ninfer::ops::layer_norm(input_tensor, weight_tensor, bias_tensor, 1.0e-6F, output_tensor,
+                                stream);
+        hipEvent_t begin = nullptr;
+        hipEvent_t end = nullptr;
+        HIP_CHECK(hipEventCreate(&begin));
+        HIP_CHECK(hipEventCreate(&end));
+        HIP_CHECK(hipEventRecord(begin, stream));
+        ninfer::ops::layer_norm(input_tensor, weight_tensor, bias_tensor, 1.0e-6F, output_tensor,
+                                stream);
+        HIP_CHECK(hipEventRecord(end, stream));
+        HIP_CHECK(hipEventSynchronize(end));
+        float elapsed_ms = 0.0F;
+        HIP_CHECK(hipEventElapsedTime(&elapsed_ms, begin, end));
+        HIP_CHECK(hipEventDestroy(begin));
+        HIP_CHECK(hipEventDestroy(end));
+        require_bf16_close(copy_to_host(d_output), expected, "vision LayerNorm FP64 oracle");
+        std::cout << "vision LayerNorm D=1152 rows=" << rows << " time_ms=" << elapsed_ms << '\n';
+    }
+
     // 25..127 rows are mixed decode/prefill units served by the one-token-per-wave route.
     for (const std::uint32_t rows : {1U, 2U, 3U, 4U, 5U, 6U, 7U, 8U, 25U, 57U, 127U}) {
         const std::size_t elements = static_cast<std::size_t>(kHidden) * rows;

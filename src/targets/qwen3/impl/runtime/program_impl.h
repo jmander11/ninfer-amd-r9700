@@ -3876,6 +3876,16 @@ runtime::PrefillStepResult ProgramImplCore::advance_prefill(SequenceState& seque
                                   rewrite_checkpoint_capture_frontier);
             } else if (staged.vision) {
                 mark_workspace_usage(workspace_plan.vision_encode);
+                // While decode rows wait, a Vision encode runs as its own step, so decode rounds
+                // resume before the chunk that consumes it.
+                if (decode_waiting && staged.vision->encode_ahead(staged.cursor, nominal)) {
+                    const double step_seconds =
+                        std::chrono::duration<double>(Clock::now() - started).count();
+                    staged.elapsed_seconds += step_seconds;
+                    return runtime::PrefillStepResult{.summary             = summary,
+                                                      .host_input_consumed = host_input_consumed,
+                                                      .encoded_only        = true};
+                }
                 result = schedule::prefill_multimodal_chunk(
                     schedule_state, staged.prompt, *staged.vision, nominal,
                     rewrite_checkpoint_capture_frontier, final_candidate);
