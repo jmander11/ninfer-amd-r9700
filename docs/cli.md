@@ -157,7 +157,7 @@ R9700 speed recommendations require R9700 end-to-end measurements; NVIDIA timing
 | `--kv-disk-capacity off\|N` | SSD KV prefix-cache unique-object capacity in MiB; `off` disables the tier | `off` |
 | `--kv-disk-location PATH` | directory for the SSD page store; required iff `--kv-disk-capacity` is enabled | unset |
 | `--kv-disk-compress off\|zstd` | zstd-1 on new GDN/hidden/cyclic writes; KV pages stay uncompressed | `off` |
-| `--prefill-chunk N` | positive text-prefill chunk, in multiples of 128 | `4096` |
+| `--prefill-chunk N` | positive text-prefill chunk, in multiples of 128 | `2048` |
 | `--max-new N` | requested output-token limit | `128` |
 | `--device N` | HIP device index | `0` |
 | `--spec mtp\|dflash` | speculative backend | off |

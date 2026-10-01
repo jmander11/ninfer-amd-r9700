@@ -22,7 +22,9 @@ using TokenId = std::int32_t;
 inline constexpr std::uint32_t kMaximumConcurrency = 8;
 inline constexpr std::size_t kMaxContextCheckpointMarks = 16;
 // Physical campaign commands remain explicit and do not inherit this product-wide startup default.
-inline constexpr std::uint32_t kDefaultPrefillChunk = 4096;
+// Chunks 2048 and 4096 prefill at the same rate (8K/32K/128K within 0.2%, docs/performance.md);
+// 2048 needs half the transient workspace.
+inline constexpr std::uint32_t kDefaultPrefillChunk = 2048;
 
 [[nodiscard]] inline std::vector<std::uint32_t>
 parse_context_checkpoint_marks_flag(std::string_view raw,

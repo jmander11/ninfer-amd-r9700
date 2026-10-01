@@ -103,7 +103,9 @@ T8192 45.4 -> 14.2 ms). Whole prefill, production DFlash adaptive K7, C1
 | 8192 / 4096 | 3857 ms (2,124 tok/s) | 2405 ms (3,406 tok/s) |
 | 8192 / 8192 | — | 2419 ms (3,387 tok/s) |
 
-Chunk size no longer moves 8K prefill (within 1%). Below T2048 the curve keeps the 256-token tile
+Chunk size no longer moves prefill: 32K 2,949 / 2,949 tok/s and 128K 1,916 / 1,915 tok/s at chunk
+2048 / 4096 (8K within 1%). Chunk 2048 needs half the workspace (253 against 505 MiB), so it is now
+the default for the CLI, server, benchmark and PPL tools as well as compose. Below T2048 the curve keeps the 256-token tile
 steps (T160 74 ms against T128 50 ms and T256 88 ms); a separate remainder launch would re-stream
 the ~14 GB of weights and costs about as much as the padding it saves.
 

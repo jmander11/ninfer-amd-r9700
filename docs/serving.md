@@ -774,7 +774,7 @@ curl http://127.0.0.1:8080/v1/models \
 | `--max-concurrency N` | maximum admitted requests; valid range `1..8` | `1` |
 | `--max-pending-requests N` | additional requests allowed to wait for admission | `16` |
 | `--pending-timeout-ms N` | maximum preparation-plus-admission wait | `30000` |
-| `--prefill-chunk N` | text-prefill chunk | `4096` |
+| `--prefill-chunk N` | text-prefill chunk | `2048` |
 | `--mixed-forward auto\|N` | forward width (columns) of each prefill step while other requests are decoding; `0` runs each prompt's whole prefill first. With DFlash a text prompt's slice rides inside a decode round: one forward of `N` columns holds the verify columns of the decoding requests and the prompt tokens fill the rest, at least `N - (C-1)*W`. Other prompts run a separate step of `N` tokens. `N` must be a multiple of 256 (prefill loses 3–5% between multiples), at most `--prefill-chunk` and `--max-context`, and wider than `(C-1)*W`. `auto` is 1024 (bounded by those, rounded down to a multiple of 256) under DFlash with C > 1 and `0` otherwise; startup logs the resolved value. Smaller widths shorten each decode pause (about 0.18 s at 512 against 0.30 s at 1024) at some prefill throughput. See [prefill/decode frontier](performance.md#mixed-prefilldecode-frontier-2026-09-29) | `auto` |
 | `--mixed-forward-rounds N` | decode rounds per prefill slice (`1` = every decode round carries one slice; larger values leave plain decode rounds between slices) | `1` |
 | `--log-stats-interval-ms N` | aggregate throughput report interval; `0` disables it | `5000` |
