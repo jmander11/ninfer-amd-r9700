@@ -82,6 +82,31 @@ harness. Prefill rows predate the 2026-09-28 output-head and
 attention GPTQ reconversions, which change weight values but not formats or routes, and all rows
 predate the 2026-09-30 reduction to 21 protections (C1 decode +2.3%, C4 unchanged, prefill +0.4%).
 
+## Prefill GEMM token spans: chunks above 2048 (2026-10-01)
+
+One FP8LUT4 / row-scaled FP8 prefill GEMM launch over more than ~2048 tokens lost its activation
+image from cache: its CTAs walk every token tile of a row block together, so each row block
+re-streamed the whole image from DRAM. Per token (`fp8lut4_linear_qual --time-cell`, now allowed
+to T8192), gate/up N34816 K5120 cost 1.75 us at T2048, 2.75 at T2560, 4.36 at T4096 and 5.55 at
+T8192; N12288 0.62 -> 1.90; the narrow MLP down (N5120 K17408) stayed flat to T4096 and reached 1.49
+at T8192. The `--time-cell` cap of T2048 had hidden it, and the CLI/serve/bench default chunk
+4096 ran 38% slower than chunk 2048. The GEMM now launches 2048-token spans for wide outputs and
+4096-token spans for narrow ones; per-token cost is flat to T8192 (gate/up T4096 17.9 -> 7.1 ms,
+T8192 45.4 -> 14.2 ms). Whole prefill, production DFlash adaptive K7, C1
+(`profiles/bench/r9700-prefill-curve-20261001/`):
+
+| Prompt / chunk | Before | After |
+|---|---|---|
+| 3072 / 4096 | 1185 ms (2,592 tok/s) | 876 ms (3,506 tok/s) |
+| 4096 / 4096 | 1908 ms (2,147 tok/s) | 1174 ms (3,487 tok/s) |
+| 8192 / 2048 | 2399 ms (3,414 tok/s) | 2402 ms (3,410 tok/s) |
+| 8192 / 4096 | 3857 ms (2,124 tok/s) | 2405 ms (3,406 tok/s) |
+| 8192 / 8192 | — | 2419 ms (3,387 tok/s) |
+
+Chunk size no longer moves 8K prefill (within 1%). Below T2048 the curve keeps the 256-token tile
+steps (T160 74 ms against T128 50 ms and T256 88 ms); a separate remainder launch would re-stream
+the ~14 GB of weights and costs about as much as the padding it saves.
+
 ## C=1..8: verify-width kernels for C5..C8 (2026-10-01)
 
 `kMaximumConcurrency` is 8. DFlash verify rounds at C5..C8 run the Text and drafter projections at

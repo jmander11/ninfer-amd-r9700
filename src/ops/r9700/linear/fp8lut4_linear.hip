@@ -4,6 +4,7 @@
 
 #include <hip/hip_runtime.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <utility>
@@ -1105,15 +1106,44 @@ void launch_prefill_as(const KernelArgs& args, hipStream_t stream) {
         0, stream, args);
 }
 
+// Tokens [start, start + tokens) of `args` as a launch of its own: the activation rows, token
+// scales and status words, and every output row of those tokens.
+KernelArgs token_span(const KernelArgs& args, std::uint32_t start, std::uint32_t tokens) noexcept {
+    KernelArgs part = args;
+    const std::uint32_t rows = args.weight.rows, split = args.output.split;
+    const std::size_t lead = args.output.silu_pair ? rows / 2U : split != 0U ? split : rows;
+    part.activation += static_cast<std::size_t>(start) * args.weight.columns;
+    part.token_scales += start;
+    part.status += start;
+    part.output.leading += static_cast<std::size_t>(start) * lead;
+    if (split != 0U) part.output.trailing += static_cast<std::size_t>(start) * (rows - split);
+    part.tokens = tokens;
+    return part;
+}
+
+// One launch per token span. A launch's CTAs walk every token tile of a row block together, so the
+// resident CTAs keep the launch's whole activation image hot; once it outgrows the cache, every
+// row block re-streams it from DRAM. Per-token cost on the R9700 (fp8lut4_linear_qual
+// --time-cell, one launch): wide N34816 K5120 1.75 us at T2048, 2.75 at T2560, 4.36 at T4096,
+// 5.55 at T8192; N12288 0.62 -> 1.90; narrow N5120 K17408 flat to T4096 (0.84-0.87), 1.49 at
+// T8192. Wide outputs (>= 96 128-row CTAs per tile) launch 2048-token spans, narrow ones 4096
+// (2048 cost them 2-6% at T2560..3072): every width now holds its T2048 per-token cost.
+constexpr std::uint32_t kPrefillWideSpanTokens = 2048U, kPrefillNarrowSpanTokens = 4096U;
+
 template <bool kAccumulate, bool kSiluPair, bool kRawFp8>
 void launch_prefill_shape(const KernelArgs& args, hipStream_t stream) {
-    switch (prefill_shape(args.tokens, args.weight.rows)) {
-    case PrefillShape::T256R128:
-        launch_prefill_as<kAccumulate, kSiluPair, kRawFp8, 4U, 64U>(args, stream); break;
-    case PrefillShape::T256R64:
-        launch_prefill_as<kAccumulate, kSiluPair, kRawFp8, 4U, 32U>(args, stream); break;
-    case PrefillShape::T512R64:
-        launch_prefill_as<kAccumulate, kSiluPair, kRawFp8, 8U, 64U>(args, stream); break;
+    const std::uint32_t span = args.weight.rows / kPrefillRows >= kPrefillResidentCtas
+                                   ? kPrefillWideSpanTokens : kPrefillNarrowSpanTokens;
+    for (std::uint32_t start = 0; start < args.tokens; start += span) {
+        const KernelArgs part = token_span(args, start, std::min(span, args.tokens - start));
+        switch (prefill_shape(part.tokens, part.weight.rows)) {
+        case PrefillShape::T256R128:
+            launch_prefill_as<kAccumulate, kSiluPair, kRawFp8, 4U, 64U>(part, stream); break;
+        case PrefillShape::T256R64:
+            launch_prefill_as<kAccumulate, kSiluPair, kRawFp8, 4U, 32U>(part, stream); break;
+        case PrefillShape::T512R64:
+            launch_prefill_as<kAccumulate, kSiluPair, kRawFp8, 8U, 64U>(part, stream); break;
+        }
     }
 }
 

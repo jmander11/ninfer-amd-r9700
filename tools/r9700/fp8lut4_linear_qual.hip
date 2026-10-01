@@ -513,7 +513,7 @@ int main(int argc, char** argv) {
             const auto tokens = std::stoul(argv[2]);
             const auto rows = std::stoul(argv[3]);
             const auto columns = std::stoul(argv[4]);
-            require(tokens >= 1U && tokens <= 2048U, "time-cell T must be in 1..2048");
+            require(tokens >= 1U && tokens <= 8192U, "time-cell T must be in 1..8192");
             require((rows == 34816U && columns == 5120U) ||
                     (rows == 5120U && columns == 17408U) ||
                     (rows == 12288U && columns == 5120U) ||
@@ -626,6 +626,14 @@ int main(int argc, char** argv) {
         run_case(book, 5120, 6144, 72, false, true, rng, stream);
         run_case(book, 7168, 5120, 50, false, true, rng, stream);
         run_case(book, 5120, 6144, 2048, true, false, rng, stream);
+        // Prefill GEMM token spans (2048 tokens per wide launch, 4096 narrow): three wide spans
+        // plain and SiLU, a poisoned token in the second span, a two-span narrow residual, and a
+        // split pair output.
+        run_case(book, 34816, 5120, 4100, false, false, rng, stream);
+        run_silu(book, 34816, 5120, 4100, rng, stream);
+        run_case(book, 12288, 5120, 5000, false, true, rng, stream);
+        run_case(book, 5120, 17408, 4500, true, false, rng, stream);
+        run_pair(book, 12288, 6144, 4096, 5120, 2200, rng, stream);
         run_case(book, 5120, 17408, 200, true, false, rng, stream);
         run_case(book, 5120, 6144, 300, true, false, rng, stream);
         run_case(book, 7168, 5120, 300, false, true, rng, stream);

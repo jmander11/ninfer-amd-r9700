@@ -275,10 +275,10 @@ int main() {
         for (const auto [rows, columns] : {std::pair<std::uint32_t, std::uint32_t>{7168U, 5120U},
                                            {5120U, 6144U}, {34816U, 5120U}, {5120U, 17408U},
                                            {4096U, 5120U}}) {
-            for (const std::uint32_t tokens : {33U, 64U, 100U, 128U, 129U, 200U, 300U, 640U, 2048U})
+            for (const std::uint32_t tokens : {33U, 64U, 100U, 128U, 129U, 200U, 300U, 640U, 2048U, 2600U})
                 worst = std::max(worst, run_shape(rows, columns, tokens, rng));
         }
-        std::cout << "fp8_row_scaled_linear: PASS small T=1..32 and prefill T=33/64/100/128/129/200/300/640/2048 on "
+        std::cout << "fp8_row_scaled_linear: PASS small T=1..32 and prefill T=33/64/100/128/129/200/300/640/2048/2600 on "
                      "N7168/K5120, N5120/K6144, N34816/K5120, N5120/K17408, N4096/K5120 "
                      "maximum_normalized_error="
                   << worst << " nonfinite_poison=PASS guards=PASS\n";
