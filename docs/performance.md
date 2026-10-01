@@ -584,8 +584,8 @@ longest gap in either stream while the request is in flight; arrival adds one or
 |---|---|---|
 | 9.6K-token text prompt (8 runs) | 0.329-0.334 s | 3.17-3.22 s |
 | Follow-up turn, prefix in VRAM / RAM tier / disk tier | 0.089 / 0.112 / 0.088 s | 0.25 / 0.51 / 2.02 s |
-| 768x512 image (408 tokens), before / after | 0.347 / 0.205 s | 0.87-1.05 / 0.86-0.98 s |
-| 1920x1080 image (2,064 tokens), before / after | 2.82 / 0.44 s | 3.9 / 1.8-2.05 s |
+| 768x512 image (408 tokens), before / after | 0.347 / 0.205 s | 0.87-1.05 / 0.83-0.87 s |
+| 1920x1080 image (2,064 tokens), before / after | 2.82 / 0.35 s | 3.9 / 1.79-1.89 s |
 
 The RAM and disk restores (0.18 s copy, 1.7 s SSD read) run on the copy stream while decode
 continues. A single earlier 0.62 s gap did not recur in 8 instrumented runs; that run's whole
@@ -597,7 +597,7 @@ Vision attention (80 ms per block at P=8,256, ~4 TFLOP/s) and 78 ms in LayerNorm
 statistics ran serially on one thread. Changes:
 - Vision attention computes S^T = K Q^T, so each lane owns one query: the online softmax is
   per-lane plus one half-wave shuffle, and the accumulator is already the B operand of
-  O^T = V^T P^T, with no LDS transpose. K and a transposed V are staged per 64-key tile with
+  O^T = V^T P^T, with no LDS transpose. K and a transposed V are staged per 32-key tile with
   16-byte loads, 8 waves (128 queries) per block. Probabilities keep the BF16 high-plus-residual
   split: a single BF16 failed the FP64 oracle (rel L2 0.0047 > 0.0025). Qualifier event timing:
   P=8,256 84.2 -> 7.48 ms, P=1,536 3.6 -> 0.37 ms, three images P=5,196 12.8 -> 1.23 ms; error
@@ -607,9 +607,24 @@ statistics ran serially on one thread. Changes:
 - While decode waits, the encode runs as its own prefill step (`encoded_only`), so the following
   text chunk waits for a decode round instead of adding to the same pause (0.735 -> 0.44 s).
 
-The 1080p encode window fell from 2,443 to 394 ms: attention 194 ms, A8Q4 Vision linears 155 ms,
-the rest ~40 ms. Greedy image descriptions diverge from the previous build at near-ties and stay
-accurate. The BF16-source Vision parity tool needs a torch environment that this host lacks.
+- The Vision A8Q4 linears ran the one-wave WMMA32 route (one 16x16 tile per wave, no operand
+  reuse). They now take the cooperative prefill CTA, exact against the FP64 oracle
+  (`tools/r9700/vision_a8q4_linear_qual.hip`): the M128xN128 kernel for patch, qkv, projection
+  and merger tuples above 32 patches, and the M64xN128 fallback for the MLP tuples (N4304, and
+  K4304 padded to 4352) above 128 patches, which keep WMMA32 below. Per 1080p encode
+  160 -> 66 ms; for example qkv 1.42 -> 0.51 ms, fc2 2.02 -> 0.84 ms.
+- Attention key tiles of 32 instead of 64: P=1,536 0.37 -> 0.31 ms, P=5,196 1.27 -> 1.22 ms,
+  P=8,256 unchanged. Rejected: 128-key tiles (P=8,256 10.2 ms), 16 waves, and FP16
+  probabilities (one WMMA instead of two), which fail the oracle at rel L2 0.0045 with or
+  without a 2^14 scale against subnormals: the error is rounding bias over many near-equal
+  probabilities, which the BF16 residual removes.
+
+The 1080p encode window fell from 2,443 to 318 ms: attention 200 ms (~70 TFLOP/s executed,
+including the residual pass), linears 67 ms, activation quantization, bias and GELU ~30 ms. Its
+decode pause (0.35 s) now matches a text mixed round (0.33 s), so the encode is not split further.
+Greedy image descriptions diverge from the previous build at near-ties and stay accurate, and a
+128x128 image (64 patches) runs. The BF16-source Vision parity tool needs a torch environment
+that this host lacks.
 
 ## Mid-row attention route (2026-09-28)
 

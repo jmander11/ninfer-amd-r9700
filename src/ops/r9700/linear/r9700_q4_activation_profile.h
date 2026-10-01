@@ -143,16 +143,27 @@ enum class A8Q4PrefillRoute : std::uint8_t {
 // Text, bulk-MTP and DFlash-context matrix tuples above the largest decode/verification width
 // (32), where it is 1.1-3.6x faster than the WMMA32 and single-bank routes (DFlash context
 // N5120/K25600: T64 651 -> 361 us, T512 3650 -> 971 us); decode and verification widths keep
-// their routes.
+// their routes. The Vision tower's patch, block and merger tuples take the same CTA: 2x faster
+// than WMMA32 at every one (1920x1080 encode linears 160 -> 67 ms). The MLP tuples (N4304, and
+// K4304 padded to 4352) are outside the M128 kernel's limits; its M64xN128 fallback serves only
+// T > 128, so they keep WMMA32 up to 128 patches.
 [[nodiscard]] constexpr bool use_a8q4_prefill_cta(
     std::uint32_t tokens, std::uint32_t rows, std::uint32_t columns) noexcept {
     const bool qualified_tokens = tokens > 32U;
+    const bool vision_mlp = (rows == 4304U && columns == 1152U) ||
+                            (rows == 1152U && columns == 4304U);
+    const bool vision_shape =
+        (rows == 1152U && (columns == 1536U || columns == 1152U)) ||
+        (rows == 3456U && columns == 1152U) ||
+        (columns == 4608U && (rows == 4608U || rows == 5120U)) ||
+        (vision_mlp && tokens > 128U);
     const bool qualified_shape =
         ((rows == 7168U || rows == 4096U || rows == 12288U || rows == 34816U ||
           rows == 1024U || rows == 6144U) &&
          columns == 5120U) ||
         (rows == 5120U &&
-         (columns == 6144U || columns == 10240U || columns == 17408U || columns == 25600U));
+         (columns == 6144U || columns == 10240U || columns == 17408U || columns == 25600U)) ||
+        vision_shape;
     return kQ4ActivationBits == 8U && qualified_tokens && qualified_shape;
 }
 

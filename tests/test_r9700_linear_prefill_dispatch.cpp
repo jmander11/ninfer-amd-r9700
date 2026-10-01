@@ -71,6 +71,15 @@ static_assert(linear::kQ4ActivationBits != 8U ||
 static_assert(linear::kW8ActivationBits != 8U ||
               accepts_cartesian(kW8Shapes, linear::use_a8w8_prefill_cta));
 
+// Vision MLP tuples reach only the M64xN128 fallback, which serves T > 128; smaller images keep
+// WMMA32. The M128-eligible Vision tuples join at T > 32 like Text.
+static_assert(linear::kQ4ActivationBits != 8U ||
+              (!linear::use_a8q4_prefill_cta(64U, 4304U, 1152U) &&
+               !linear::use_a8q4_prefill_cta(128U, 1152U, 4304U) &&
+               linear::use_a8q4_prefill_cta(129U, 4304U, 1152U) &&
+               linear::use_a8q4_prefill_cta(8256U, 1152U, 4304U) &&
+               linear::use_a8q4_prefill_cta(64U, 3456U, 1152U) &&
+               linear::use_a8q4_prefill_cta(33U, 4608U, 4608U)));
 static_assert(!linear::use_a8q4_prefill_cta(32U, 7168U, 5120U));
 static_assert(linear::kQ4ActivationBits != 8U || linear::use_a8q4_prefill_cta(33U, 7168U, 5120U));
 static_assert(linear::kQ4ActivationBits != 8U ||

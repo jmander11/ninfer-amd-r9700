@@ -23,8 +23,8 @@ constexpr int kWave         = 32;
 constexpr int kWavesPerBlock = 8;
 constexpr int kQueryTile    = kWavesPerBlock * kMatrixTile;
 constexpr int kThreads      = kWave * kWavesPerBlock;
-// Keys staged per iteration; the score and value products run over these four 16-key subtiles.
-constexpr int kKeyTile      = 64;
+// Keys staged per iteration; the score and value products run over these two 16-key subtiles.
+constexpr int kKeyTile      = 32;
 constexpr int kKeySubtiles  = kKeyTile / kMatrixTile;
 constexpr int kFeatureTiles = (kHeadDim + kMatrixTile - 1) / kMatrixTile;
 constexpr int kPaddedDim    = kFeatureTiles * kMatrixTile;
@@ -71,11 +71,11 @@ __device__ __forceinline__ short bf16_bits(float value) {
     return static_cast<short>(hip_bfloat16(value).data);
 }
 
-// Flash attention over one segment-bounded 64-query tile and one head. Scores are formed
+// Flash attention over one segment-bounded 128-query tile and one head. Scores are formed
 // transposed, S^T = K Q^T, so each lane owns one query column of the accumulator: the
 // softmax statistics are per-lane values combined with the partner half-wave, and the
 // accumulator already has the B-operand layout of O^T = V^T P^T, with no LDS transpose. K and a
-// transposed V are staged per 64-key tile with 16-byte loads; probabilities enter the value
+// transposed V are staged per 32-key tile with 16-byte loads; probabilities enter the value
 // product as a BF16 high part plus its BF16 residual.
 __global__ __launch_bounds__(kThreads) void vision_attention_wave32_kernel(
     const hip_bfloat16* __restrict__ q, const hip_bfloat16* __restrict__ k,
