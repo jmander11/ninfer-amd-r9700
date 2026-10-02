@@ -218,10 +218,11 @@ constexpr std::uint32_t layer_ctas_per_row(std::uint32_t threads, std::uint32_t 
 }
 
 #if defined(__HIPCC__)
-// CTA `cta` of the layer fold grid (rows-major), `threads` threads, LDS key/reduction arrays of
-// threads/128 items.
-template <std::uint32_t Threads, int Tiles = 1>
-__device__ __forceinline__ void fold_layer_cta(const LayerArgs& args, std::uint32_t cta,
+// CTA `cta` of the layer fold grid (rows-major) run on CTA context `context` of `Threads`
+// threads (persistent_cta.h), LDS key/reduction arrays of Threads/128 items.
+template <std::uint32_t Threads, int Tiles = 1, class Context>
+__device__ __forceinline__ void fold_layer_cta(const Context& context, const LayerArgs& args,
+                                               std::uint32_t cta,
                                                float (&key)[Threads / kItemThreads][kStateDim],
                                                float (&reduction)[Threads / kItemThreads][kStateDim]) {
     static_assert(kStateTiles % Tiles == 0);
@@ -233,15 +234,15 @@ __device__ __forceinline__ void fold_layer_cta(const LayerArgs& args, std::uint3
     const DeferredRow source = args.rows[batch];
     if (source.columns <= 0) return;  // CTA-uniform
     const Row row{.record_row = source.record_row, .slot = source.slot, .columns = source.columns};
-    const std::uint32_t sub = threadIdx.x / kItemThreads;
+    const std::uint32_t sub = context.thread() / kItemThreads;
     const std::uint32_t item = (cta % kCtasPerRow) * kItems + sub;
     const bool active = item < kRowItems;
     const std::int32_t value_head = active ? static_cast<std::int32_t>(item) / kHeadItems : 0;
     const std::int32_t state_tile =
         active ? static_cast<std::int32_t>(item) % kHeadItems * Tiles : 0;
     fold_item<Tiles>(args.planes, args.layer, row, args.recurrent_layer, args.conv_layer,
-                     value_head, state_tile, static_cast<int>(threadIdx.x % kItemThreads), active,
-                     key[sub], reduction[sub], [] { __syncthreads(); });
+                     value_head, state_tile, static_cast<int>(context.thread() % kItemThreads),
+                     active, key[sub], reduction[sub], [&] { context.sync(); });
 }
 
 #endif

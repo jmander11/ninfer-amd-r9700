@@ -69,13 +69,15 @@ inline constexpr std::size_t kCacheWarmStride = 256U;
 }
 
 #if defined(__HIPCC__)
-// Called by CTA `cta` of `ctas` warm CTAs (the ones past the work grid).
-__device__ inline void warm_cache(const CacheWarm& warm, std::uint32_t cta, std::uint32_t ctas) {
+// Called by thread `thread` of `threads` of CTA `cta` of `ctas` warm CTAs (the ones past the
+// work grid); the lines are strided over every warm thread whatever the CTA width.
+__device__ inline void warm_cache(const CacheWarm& warm, std::uint32_t cta, std::uint32_t ctas,
+                                  std::uint32_t thread, std::uint32_t threads) {
     std::uint32_t sink = 0U;
-    std::size_t line = static_cast<std::size_t>(cta) * blockDim.x + threadIdx.x;
+    std::size_t line = static_cast<std::size_t>(cta) * threads + thread;
     for (const CacheWarmRange& range : warm.ranges) {
         const std::size_t lines = range.data == nullptr ? 0U : range.bytes / kCacheWarmStride;
-        for (; line < lines; line += static_cast<std::size_t>(ctas) * blockDim.x)
+        for (; line < lines; line += static_cast<std::size_t>(ctas) * threads)
             sink ^= *reinterpret_cast<const std::uint32_t*>(
                 static_cast<const std::uint8_t*>(range.data) + line * kCacheWarmStride);
         line -= lines;

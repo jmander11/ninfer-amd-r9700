@@ -6,6 +6,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace ninfer {
 namespace {
@@ -75,7 +76,7 @@ std::string describe_graph_node(hipGraphNode_t node) {
 DecodeGraphDefinition::~DecodeGraphDefinition() { reset(); }
 
 DecodeGraphDefinition::DecodeGraphDefinition(DecodeGraphDefinition&& other) noexcept
-    : graph_(other.graph_) {
+    : graph_(other.graph_), storage_(std::move(other.storage_)) {
     other.graph_ = nullptr;
 }
 
@@ -83,6 +84,7 @@ DecodeGraphDefinition& DecodeGraphDefinition::operator=(DecodeGraphDefinition&& 
     if (this != &other) {
         reset();
         graph_       = other.graph_;
+        storage_     = std::move(other.storage_);
         other.graph_ = nullptr;
     }
     return *this;
@@ -108,9 +110,17 @@ void DecodeGraphDefinition::capture(hipStream_t stream, const std::function<void
     graph_ = graph;
 }
 
+void DecodeGraphDefinition::rewrite(const std::function<DeviceBuffer(hipGraph_t)>& rewriter) {
+    if (!ready()) { throw std::logic_error("cannot rewrite an empty HIP Graph definition"); }
+    storage_ = rewriter(graph_);
+}
+
 bool DecodeGraphDefinition::ready() const noexcept { return graph_ != nullptr; }
 
-void DecodeGraphDefinition::reset() noexcept { destroy_graph(graph_); }
+void DecodeGraphDefinition::reset() noexcept {
+    destroy_graph(graph_);
+    storage_ = DeviceBuffer{};
+}
 
 DecodeGraphExecutable::~DecodeGraphExecutable() { reset(); }
 

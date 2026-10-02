@@ -3,6 +3,7 @@
 // Device-side pieces of the FP8LUT4 x per-token E4M3 Linear shared by the Linear kernels and fused
 // consumers (e.g. the GDN projection-convolution epilogue).
 #include "ops/r9700/linear/fp8lut4_linear.h"
+#include "ops/r9700/persistent/persistent_cta.h"
 
 #include <hip/hip_bfloat16.h>
 #include <hip/hip_runtime.h>
@@ -95,12 +96,14 @@ __device__ __forceinline__ uint2 decode8(std::uint32_t codes, uint2 table) {
                  __builtin_amdgcn_perm(odd_bytes, even_bytes, 0x07030602U)};
 }
 
-// Copies the codebook into the CTA's LDS table (caller synchronizes before use).
-__device__ __forceinline__ void load_table(uint2* table, std::uint32_t threads) {
-    for (std::uint32_t i = threadIdx.x; i < 256U; i += threads) table[i] = kDeviceTable.words[i];
+// Thread `thread` of `threads` copies its share of the codebook into the CTA's LDS table (the
+// caller synchronizes before use).
+__device__ __forceinline__ void load_table(uint2* table, std::uint32_t thread,
+                                           std::uint32_t threads) {
+    for (std::uint32_t i = thread; i < 256U; i += threads) table[i] = kDeviceTable.words[i];
 }
 
-// Small T (T <= 16 per token tile, kTiles tiles): 16 weight rows [row_base, row_base + 16), kSplit waves each owning a
+// Small T (T <= 16 per token tile, kTiles tiles) on CTA context `cta` (persistent_cta.h): 16 weight rows [row_base, row_base + 16), kSplit waves each owning a
 // contiguous K range. Lane (axis = lane & 15, half = lane >> 4) streams slot 16 half + axis of the
 // row block's N16 x K64 tile per 64-column step (one contiguous 512-byte code tile per wave), i.e.
 // row `axis`'s 32-column group `2 step + half`, and the same 32 activation bytes of token `axis`; the
@@ -111,15 +114,16 @@ __device__ __forceinline__ void load_table(uint2* table, std::uint32_t threads) 
 // waiting: the first batch of weight and activation loads is in flight before the CTA barrier that
 // publishes the codebook. kTiles = 2 serves T 17..32: each decoded weight fragment also feeds the
 // WMMA of token tile 1 (tokens 16 + axis), so weight traffic and decode stay those of one tile.
-template <std::uint32_t kSplit, std::uint32_t kSteps, std::uint32_t kTiles, class Publish>
-__device__ __forceinline__ void small_t_rows(const Fp8Lut4Weight& weight, std::uint32_t row_base,
+template <std::uint32_t kSplit, std::uint32_t kSteps, std::uint32_t kTiles, class Cta, class Publish>
+__device__ __forceinline__ void small_t_rows(const Cta& cta, const Fp8Lut4Weight& weight,
+                                             std::uint32_t row_base,
                                              const std::uint8_t* activation_codes,
                                              const float* token_scales, std::uint32_t tokens,
                                              const uint2* table,
                                              float (&partial)[kSplit][kTiles][8][32],
                                              Publish&& publish) {
     static_assert(kTiles == 1U || kTiles == 2U);
-    const std::uint32_t lane = threadIdx.x & 31U, wave = threadIdx.x >> 5U;
+    const std::uint32_t lane = cta.thread() & 31U, wave = cta.thread() >> 5U;
     const std::uint32_t axis = lane & 15U, half = lane >> 4U;
     const std::uint32_t columns = weight.columns;
     const std::uint32_t steps = columns / 64U / kSplit;
@@ -131,27 +135,26 @@ __device__ __forceinline__ void small_t_rows(const Fp8Lut4Weight& weight, std::u
     const std::size_t first_tile =
         static_cast<std::size_t>(row_base / 16U) * (columns / 64U) + wave * steps;
     const std::uint32_t slot = half * 16U + axis;
-    const std::uint8_t* codes = weight.codes + first_tile * 512U + slot * 16U;
-    const std::uint8_t* groups = weight.groups + first_tile * 32U + slot;
-    const std::uint8_t* activation[kTiles];
+    const auto* codes = persistent::global(weight.codes) + first_tile * 512U + slot * 16U;
+    const auto* groups = persistent::global(weight.groups) + first_tile * 32U + slot;
+    const persistent::Global<const std::uint8_t>* activation[kTiles];
 #pragma unroll
     for (std::uint32_t tile = 0; tile < kTiles; ++tile)
-        activation[tile] = activation_codes +
+        activation[tile] = persistent::global(activation_codes) +
             static_cast<std::size_t>(token[tile] ? tile * 16U + axis : 0U) * columns + k_base;
     struct Batch { uint4 w[kSteps]; std::uint32_t g[kSteps]; uint4 x[kSteps][kTiles][2]; };
     const auto load = [&](std::uint32_t step) {
         Batch value;
 #pragma unroll
         for (std::uint32_t i = 0; i < kSteps; ++i) {
-            value.w[i] = *reinterpret_cast<const uint4*>(codes + static_cast<std::size_t>(step + i) * 512U);
+            value.w[i] = persistent::load16(codes + static_cast<std::size_t>(step + i) * 512U);
             value.g[i] = groups[static_cast<std::size_t>(step + i) * 32U];
 #pragma unroll
             for (std::uint32_t tile = 0; tile < kTiles; ++tile) {
                 if (token[tile]) {
-                    const uint4* x = reinterpret_cast<const uint4*>(
-                        activation[tile] + static_cast<std::size_t>(step + i) * 64U);
-                    value.x[i][tile][0] = x[0];
-                    value.x[i][tile][1] = x[1];
+                    const auto* x = activation[tile] + static_cast<std::size_t>(step + i) * 64U;
+                    value.x[i][tile][0] = persistent::load16(x);
+                    value.x[i][tile][1] = persistent::load16(x + 16U);
                 } else {
                     value.x[i][tile][0] = uint4{};
                     value.x[i][tile][1] = uint4{};
@@ -184,7 +187,7 @@ __device__ __forceinline__ void small_t_rows(const Fp8Lut4Weight& weight, std::u
         }
     };
     Batch current = load(0U);
-    __syncthreads();  // codebook
+    cta.sync();  // codebook
     for (std::uint32_t step = kSteps; step < steps; step += kSteps) {
         const Batch next = load(step);
         consume(current);
@@ -196,13 +199,13 @@ __device__ __forceinline__ void small_t_rows(const Fp8Lut4Weight& weight, std::u
 #pragma unroll
         for (std::uint32_t item = 0; item < 8U; ++item)
             partial[wave][tile][item][lane] = accumulator[tile][item];
-    __syncthreads();
+    cta.sync();
     if (wave == 0U) {
 #pragma unroll
         for (std::uint32_t tile = 0; tile < kTiles; ++tile) {
             if (!token[tile]) continue;
             const std::uint32_t t = tile * 16U + axis;
-            const float token_scale = token_scales[t];
+            const float token_scale = persistent::global(token_scales)[t];
 #pragma unroll
             for (std::uint32_t item = 0; item < 8U; ++item) {
                 float sum = partial[0][tile][item][lane];
@@ -210,7 +213,7 @@ __device__ __forceinline__ void small_t_rows(const Fp8Lut4Weight& weight, std::u
                 for (std::uint32_t split = 1; split < kSplit; ++split)
                     sum += partial[split][tile][item][lane];
                 const std::uint32_t row = row_base + half * 8U + item;
-                publish(t, row, sum * weight.scales[row] * token_scale);
+                publish(t, row, sum * persistent::global(weight.scales)[row] * token_scale);
             }
         }
     }

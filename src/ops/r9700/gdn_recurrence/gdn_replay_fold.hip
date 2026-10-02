@@ -1,6 +1,7 @@
 // Native wave32 implementation of the all-layer ReplaySSM fold boundary.
 #include "ops/r9700/gdn_recurrence/gdn_replay_fold_internal.h"
 #include "ops/r9700/gdn_recurrence/gdn_replay_fold_impl.h"
+#include "ops/r9700/persistent/persistent_cta.h"
 
 #include "core/device.h"
 
@@ -75,7 +76,8 @@ __global__ __launch_bounds__(fold::kItemThreads)
 void replay_fold_layer_kernel(fold::LayerArgs args) {
     __shared__ float key[1][kStateDim];
     __shared__ float reduction[1][kStateDim];
-    fold::fold_layer_cta<fold::kItemThreads>(args, blockIdx.x, key, reduction);
+    fold::fold_layer_cta<fold::kItemThreads>(r9700::persistent::LaunchCta{}, args, blockIdx.x, key,
+                                             reduction);
 }
 
 template <class Geometry>

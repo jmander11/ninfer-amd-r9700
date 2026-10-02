@@ -74,6 +74,10 @@ constexpr std::size_t kR9700DFlashK1FusedExecutableBytes     = 10ULL * kMiB;
 // Charge updates, not additional executables or physical FP8 arena rounding.
 constexpr std::size_t kR9700DFlashCalibratedDefinitions = 3U;
 constexpr std::size_t kR9700DFlashGraphUpdateBytes = 4ULL * kMiB;
+// Each single-sequence definition is lowered to persistent decode kernels (ops/persistent_decode.h):
+// its program storage and the lowered executable's residency. Lowering three C1 definitions
+// consumed 16 MiB beyond the executable terms with DFlash K7 and MTP K3, 8 MiB without a draft.
+constexpr std::size_t kR9700PersistentDecodeDefinitionBytes = 6ULL * kMiB;
 
 enum class GdnWorkspacePath : std::uint8_t {
     Prefill,
@@ -986,6 +990,8 @@ std::unique_ptr<SequencePlanImpl> build_sequence_candidate(const SequencePlannin
         impl->request_transient_capacity_bytes =
             schedule::VisionContext::output_transient_bytes(merged);
     }
+    // Single-sequence graph definitions, which capture lowers to persistent decode kernels.
+    std::size_t lowered_definitions = 0;
     if (impl->use_device_graph) {
         // Allowance groups executable residency by topology, including MTP's retained
         // profile-update allocations. Speculative K and exact batch size are already
@@ -993,6 +999,7 @@ std::unique_ptr<SequencePlanImpl> build_sequence_candidate(const SequencePlannin
         if (impl->speculative_backend == SpeculativeBackend::None) {
             std::vector<GraphExecutionProfile> expanded;
             const auto profiles = ordinary_graph_profiles(impl->capacity);
+            lowered_definitions += profiles.size();
             for (std::uint32_t batch_size = 1; batch_size <= impl->max_concurrency; ++batch_size) {
                 for (const GraphExecutionProfile planned : profiles) {
                     GraphExecutionProfile folded = planned;
@@ -1030,6 +1037,7 @@ std::unique_ptr<SequencePlanImpl> build_sequence_candidate(const SequencePlannin
             const auto k_stride = speculative_graph_stride(impl->capacity, impl->max_concurrency, impl->captured_ks, impl->speculative_backend, impl->dflash_verify_width);
             for (const auto k : impl->captured_ks) {
             const auto profiles = mtp_graph_profiles(impl->capacity, k);
+            lowered_definitions += profiles.size();
             for (std::uint32_t batch_size = 1; batch_size <= impl->max_concurrency; ++batch_size) {
                 for (const GraphExecutionProfile planned : profiles) {
                     GraphExecutionProfile folded = planned;
@@ -1065,6 +1073,7 @@ std::unique_ptr<SequencePlanImpl> build_sequence_candidate(const SequencePlannin
             const std::uint32_t w = dflash_captured_verify_width(k, impl->dflash_verify_width);
             for (std::uint32_t batch_size = 1; batch_size <= impl->max_concurrency; ++batch_size) {
                 const auto profiles = dflash_graph_profiles(impl->capacity, k, batch_size, w);
+                if (batch_size == 1U) lowered_definitions += profiles.size();
                 for (const GraphExecutionProfile planned : profiles) {
                     GraphExecutionProfile folded = planned;
                     folded.topology_class =
@@ -1107,8 +1116,12 @@ std::unique_ptr<SequencePlanImpl> build_sequence_candidate(const SequencePlannin
                 kR9700DFlashGraphFamilyBytes, allowance.bytes,
                 "DFlash graph family allowance");
         }
+        impl->graph_allowance_bytes = checked_add(
+            impl->graph_allowance_bytes,
+            checked_mul(lowered_definitions, kR9700PersistentDecodeDefinitionBytes,
+                        "persistent decode allowance"),
+            "graph allowance with persistent decode");
     }
-
     impl->device_reservation_bytes = checked_add(
         checked_add(
             checked_add(impl->persistent.bytes, impl->workspace.capacity, "sequence memory plan"),

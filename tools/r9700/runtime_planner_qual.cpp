@@ -35,6 +35,10 @@ namespace {
 
 using Variant = ninfer::targets::qwen3_8_27b::detail::Variant;
 
+// Each single-sequence (B=1) Device Graph definition is lowered to persistent decode kernels and
+// charged this allowance (layouts_impl.h kR9700PersistentDecodeDefinitionBytes).
+constexpr std::size_t kLoweredDefinitionBytes = 6ULL * 1024ULL * 1024ULL;
+
 void require(bool condition, const char* message);
 
 template <class Function>
@@ -292,7 +296,8 @@ void qualify_host_ordinary_graph_allowance() {
             const auto plan = runtime::build_sequence_candidate_for_qualification(
                 inputs, physical_pages);
             const std::size_t expected = (23ULL + concurrency *
-                (24ULL + 4ULL * (definitions - 3U))) * 1024ULL * 1024ULL;
+                (24ULL + 4ULL * (definitions - 3U))) * 1024ULL * 1024ULL +
+                definitions * kLoweredDefinitionBytes;  // B=1 definitions
             require(plan->graph_definition_count == definitions * concurrency &&
                         plan->graph_executable_count == concurrency &&
                         plan->graph_allowance_bytes == expected,
@@ -387,6 +392,7 @@ void qualify_host_dflash_graph_allowance() {
                 plan->graph_executable_count == topology_classes.size() &&
                 topology_classes.size() == expected_classes,
             "DFlash C1 K4/W5 graph topology inventory changed");
+    expected_allowance += profiles.size() * kLoweredDefinitionBytes;  // C1: all lowered
     require(plan->graph_allowance_bytes == expected_allowance,
             "DFlash C1 K4/W5 allowance must reserve each distinct executable topology");
     // Reproduce the selective-protected context 1024 startup geometry whose
@@ -400,7 +406,8 @@ void qualify_host_dflash_graph_allowance() {
         measured_inputs.dflash_verify_width=k+1U;
         const auto measured=runtime::build_sequence_candidate_for_qualification(measured_inputs,16U);
         require(measured->graph_executable_count==1U &&
-                    measured->graph_allowance_bytes==74ULL*1024ULL*1024ULL &&
+                    measured->graph_allowance_bytes==74ULL*1024ULL*1024ULL +
+                        measured->graph_definition_count*kLoweredDefinitionBytes &&
                     measured->graph_allowance_bytes>=74448896ULL,
                 "DFlash selective-protected graph allowance misses measured startup residency");
     }
@@ -425,7 +432,8 @@ void qualify_host_dflash_graph_allowance() {
                 const std::size_t classes = 1U;
                 const std::size_t extra_updates = definitions_per_batch - 3U;
                 const std::size_t expected = (48ULL + concurrency *
-                    (26ULL * classes + 4ULL * extra_updates)) * 1024ULL*1024ULL;
+                    (26ULL * classes + 4ULL * extra_updates)) * 1024ULL*1024ULL +
+                    definitions_per_batch * kLoweredDefinitionBytes;  // B=1 definitions
                 require(compact->graph_executable_count == classes * concurrency &&
                             compact->graph_definition_count == definitions_per_batch*concurrency &&
                             compact->graph_allowance_bytes == expected,
@@ -478,7 +486,8 @@ void qualify_host_mtp_graph_allowance() {
         require(plan->graph_definition_count == c.definitions &&
                     plan->graph_executable_count == c.executables,
                 "MTP fixed/adaptive graph inventory differs from its captured K/B profiles");
-        const auto expected = (46ULL + 4ULL * (c.executables + c.updates)) * 1024ULL * 1024ULL;
+        const auto expected = (46ULL + 4ULL * (c.executables + c.updates)) * 1024ULL * 1024ULL +
+            c.definitions / c.concurrency * kLoweredDefinitionBytes;
         require(plan->graph_allowance_bytes == expected,
                 "MTP allowance omitted profile update/restore residency");
         inputs.use_device_graph = false;
@@ -622,7 +631,8 @@ std::size_t qualify_plan(ninfer::DeviceContext& device, std::uint32_t concurrenc
             if (count > 1) operations += static_cast<std::size_t>(count);
         }
         require(plan.impl_->graph_allowance_bytes ==
-                    kMtpGraphFamilyBytes + 4ULL * kMiB * operations,
+                    kMtpGraphFamilyBytes + 4ULL * kMiB * operations +
+                        profiles.size() * kLoweredDefinitionBytes,
                 "MTP graph allowance does not match its ROCm family/executable inventory");
     }
     if (use_device_graph && backend == ninfer::SpeculativeBackend::None) {
@@ -657,7 +667,8 @@ std::size_t qualify_plan(ninfer::DeviceContext& device, std::uint32_t concurrenc
         }
         require(plan.impl_->graph_allowance_bytes ==
                     kOrdinaryGraphFamilyBytes +
-                        kOrdinaryGraphExecutableBytes * topology_classes.size() + update_bytes,
+                        kOrdinaryGraphExecutableBytes * topology_classes.size() + update_bytes +
+                        profiles.size() * kLoweredDefinitionBytes,
                 "ordinary graph allowance does not match its ROCm family/executable inventory");
     }
     if (use_device_graph && backend == ninfer::SpeculativeBackend::DFlash) {
@@ -672,6 +683,7 @@ std::size_t qualify_plan(ninfer::DeviceContext& device, std::uint32_t concurrenc
             const auto profiles = Variant::dflash_graph_profiles(
                 max_context, drafts, batch_size, expected_dflash_width);
             definitions += profiles.size();
+            if (batch_size == 1U) expected_allowance += profiles.size() * kLoweredDefinitionBytes;
             for (const auto profile : profiles) {
                 const std::uint32_t folded =
                     profile.topology_class * concurrency + (batch_size - 1U);

@@ -1387,6 +1387,21 @@ qualification。完整算子与 route correctness 由独立测试和 real-artifa
 startup 只验证 graph inventory、update compatibility、resource materialization 和每个 executable 的一次
 可执行性。
 
+### 9.1a `B=1` persistent lowering
+
+`B=1` definition 在 capture 后、instantiate 前由 `ops::persistent_decode_lower` 原地改写：图中每段至少两个
+连续的 hosted kernel nodes（small-T FP8LUT4 / row-scaled FP8 projections、FP8 activation producers、
+GDN front / pair-conv / record、Q/K norm-RoPE）替换为一个 persistent kernel node。该 kernel 以每 WGP 两个
+384-thread blocks 常驻，把每个 captured launch 作为一个 phase，用其原 kernel body、原参数和 virtual
+block/grid indices 执行，phase 之间是 grid barrier；输出与原 kernel nodes bitwise 相同。其余 nodes
+（verify attention、drafter、sampling、copies）保持不变，graph 仍是单链。
+
+Lowering 返回的 program storage（phase records、captured arguments、barrier words）由
+`DecodeGraphDefinition` 持有，生命周期覆盖 graph 及由其 instantiate / update 的 executables；同一
+topology 的 definitions 降低为相同 node 序列，因此 `hipGraphExecUpdate` 照常适用。Memory plan 为每个
+lowered definition 计入固定 allowance。`B>1` definitions 不降低（lowered C4/C8 更慢），见
+`docs/performance.md`。
+
 ### 9.2 Dynamic active set
 
 active set 改变时，runtime 发布新的 frame ingress 并选择匹配的预捕获 definition：

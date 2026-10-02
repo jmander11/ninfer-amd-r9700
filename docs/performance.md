@@ -82,6 +82,59 @@ harness. Prefill rows predate the 2026-09-28 output-head and
 attention GPTQ reconversions, which change weight values but not formats or routes, and all rows
 predate the 2026-09-30 reduction to 21 protections (C1 decode +2.3%, C4 unchanged, prefill +0.4%).
 
+## Persistent decode kernel (2026-10-02)
+
+Every single-sequence (`B=1`) decode graph is lowered after capture (`ops::persistent_decode_lower`):
+each run of consecutive hosted launches (the FP8LUT4 and row-scaled FP8 small-T projections, the
+FP8 activation producers, the GDN front, pair projection with convolution and record, and Q/K
+norm-RoPE) becomes one persistent kernel of two 384-thread blocks per WGP. Each launch is a phase
+of virtual CTAs running the launch's own kernel body, separated by an atomic grid barrier
+(1.36 us against ~3 us per graph kernel). Outputs are bitwise those of the kernel nodes.
+A C1 K7 round runs 578 phases in 25 persistent kernels; verify attention, the drafter and the
+sampling tail stay kernel nodes. `B>1` definitions keep their kernel nodes: lowered, C4 and C8
+DFlash decoded 6.6% and 5.5% slower. The grid barrier needs all blocks co-resident (checked by
+occupancy at lowering), so the GPU is not shared with another resident persistent workload.
+
+What made phases as fast as their kernels:
+
+| Change | C1 K7 ms/round (lowered) |
+|---|---|
+| First correct lowering (out-of-line bodies) | 33.6 |
+| Inlined bodies, global-address-space arguments (no FLAT), one-pass front | 32.6 |
+| Next-phase weight stream at the barrier, one wave per waiting block (replaces warm CTAs) | 32.1 |
+| GDN pair convolution one thread per (row, token) | 31.2 |
+| Next-phase instruction prefetch at the barrier (`s_prefetch_inst`, 128 KiB) | 30.07 |
+
+The instruction prefetch was worth ~1 ms per round: every phase runs a different body of a
+~0.3 MB kernel while the weight stream evicts its code from L2 (6.5x the hosted kernels'
+instruction-cache misses before it). The barrier stream is time-bounded (it stops when the barrier
+opens) and rate-bounded: wider streams queued the latency-bound phases' own loads (16 / 32 / 64 /
+128 / 384 threads: 32.04 / 31.50 / 32.15 / 33.30 / 33.8 ms before the instruction prefetch);
+non-temporal loads did not help. Not adopted: three blocks per WGP (168 VGPRs; the front spills),
+four-step projection load batches (+0.2 ms), wider prefetch for the pair after the front.
+
+Same-session A/B, `ninfer_bench` P512/G256, C1, kernel-node graphs (lowering disabled in the
+same build) vs lowered, interleaved:
+
+| Mode | Kernel nodes | Lowered | Accepted tokens |
+|---|---|---|---|
+| DFlash K7 `--lm-head-draft` | 30.33 / 30.37 ms/round | 30.04 / 30.10 ms/round (-1.0%) | 519 / 3.0843 both |
+| MTP K3 | 78.32 / 77.22 tok/s | 78.59 / 78.60 tok/s | 480 / 2.6667 both |
+| No draft | 38.27 / 37.76 tok/s | 38.22 / 37.86 tok/s | — |
+
+Greedy token ids are identical with and without lowering (3 prompts x DFlash K7, MTP K3, no draft,
+384 tokens) and so is seeded p-less sampling at fixed K7; with `--adaptive-draft` the live K
+follows measured round time, so a faster round may pick another K and realize another sample of
+the same distribution. Per-body bitwise identity: `persistent_decode_qual`.
+Evidence: `profiles/bench/r9700-megakernel-20261002/` (`ab*`, `trace*`, `tokens/`).
+
+The 2026-10-01 feasibility bound (96 phases, empty phase 0.95-1.0 us against 3.3 us per graph
+kernel; ~1.3 ms per round before costs;
+`profiles/bench/r9700-decode-c1-20261001/persistent_barrier.hip`, `persistent_gemm_chain.hip`)
+held as an upper bound; projections are HBM-bound
+(the SiLU pair streams at ~628 GB/s), so shorter latency-bound phases mostly move bytes into the
+following projection rather than remove them.
+
 ## Deferred GDN replay fold (2026-10-01)
 
 The eager ReplaySSM fold after each DFlash round streamed every GDN layer's 3 MB state in and out
@@ -99,22 +152,6 @@ thread (77 -> 20 fold CTAs per row) only 23.1 -> 22.4 us. Same-session A/B again
 (three interleaved passes, within noise), C4 268.0 / 269.5 -> 271.4 / 274.7 tok/s (+1.3 / +1.9%).
 Evidence: `profiles/bench/r9700-decode-c1-20261001/deferred/`.
 
-Persistent-kernel feasibility (microbenchmark, not adopted): 96 phases chained by an atomic
-generation grid barrier inside one kernel, against the same phases as 96 Device Graph kernels
-(32-128 CTAs of 256 threads). An empty phase costs 0.95-1.0 us against 3.3 us per graph kernel;
-with a CTA-strided read of 2 / 8 / 17 MiB per phase the persistent kernel saves 1.7 / 1.65 / 1.65
-us per boundary (graph boundaries partly overlap the work). Across the ~800 kernels of a C1 K7
-round that bounds a whole-round megakernel at ~1.3 ms (~4%), before its costs: one register and
-LDS budget for every phase and fixed resident grid sizes. With the production small-T FP8LUT4 GEMM
-body (`fp8lut4::small_t_rows`, T8) as the phases, one GDN layer's four projection shapes over
-eight distinct layers (32 phases, 1.6 GB at 592 GB/s): 2749 us as graph kernels, 2694 / 2677 us
-persistent at 10 / 6 resident CTAs per WGP, 1.7-2.3 us saved per boundary, so a shared, lower
-occupancy does not slow the projections. Of a round's ~800 boundaries only 129 lie between two
-latency-bound kernels (the rest touch one of 407 projection-class kernels), so persistent
-segments of latency-bound kernels alone are bounded at ~0.25 ms; the boundaries worth taking
-need the projections inside the persistent kernel.
-(`profiles/bench/r9700-decode-c1-20261001/persistent_barrier.hip`, `persistent_gemm_chain.hip`).
-
 ## Decode cache warming (2026-10-01)
 
 C1 DFlash K7 profile (`ninfer_bench` P512/G256, kernel trace): 30.9 ms per round, 802 kernels,
@@ -125,7 +162,7 @@ producers, GDN front and record, verify attention) and launch boundaries. An emp
 `ROC_USE_FGS_KERNARG`, `DEBUG_HIP_GRAPH_*` or direct-doorbell settings; a grid of about 2016-2048
 waves costs ~34 us (empty 256-thread grids of 253..256 CTAs).
 
-Latency-bound kernels now carry warm CTAs past their work grid that touch one dword per 256-byte
+(Lowered `B=1` graphs drop these warm CTAs; see Persistent decode kernel.) Latency-bound kernels now carry warm CTAs past their work grid that touch one dword per 256-byte
 line of the next projection's head (`core/cache_warm.h`), so it starts from L2/Infinity Cache:
 the FP8 activation producers warm 2 MiB of their consumer (codes plus group codes), the GDN
 normalized front 4 MiB of the GDN pair projection, and the GDN recurrence (record and snapshot)

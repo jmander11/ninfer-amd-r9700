@@ -1,5 +1,5 @@
 #include "ops/r9700/linear/fp8_activation.h"
-#include "ops/r9700/linear/fp8_encode_impl.h"
+#include "ops/r9700/linear/fp8_activation_kernels.h"
 
 #include <hip/amd_detail/amd_hip_fp8.h>
 #include <hip/hip_runtime.h>
@@ -11,19 +11,54 @@
 #include <limits>
 
 namespace ninfer::ops::r9700::linear {
+namespace fp8_activation_kernels {
+
+__global__ __launch_bounds__(kBlockSize) void fp8_quantize_activation_kernel(
+    const hip_bfloat16* input, std::uint8_t* codes, float* scales, std::uint32_t* status,
+    std::uint32_t tokens, std::uint32_t columns, std::uint32_t padded, CacheWarm warm,
+    std::uint32_t work_ctas) {
+    __shared__ QuantizeShared shared;
+    quantize_activation_body(persistent::LaunchCta{}, shared, input, codes, scales, status, tokens,
+                             columns, padded, warm, work_ctas);
+}
+
+__global__ __launch_bounds__(kNormThreads) void fp8_quantize_normalized_kernel(
+    const hip_bfloat16* input, const hip_bfloat16* weight, float eps, bool unit_offset,
+    std::uint8_t* codes, float* scales, std::uint32_t* status, hip_bfloat16* normalized,
+    CacheWarm warm, std::uint32_t tokens) {
+    __shared__ NormalizedShared<kNormThreads> shared;
+    quantize_normalized_body<kNormThreads>(persistent::LaunchCta{}, shared, input, weight, eps,
+                                           unit_offset, codes, scales, status, normalized, warm,
+                                           tokens);
+}
+
+__global__ __launch_bounds__(kGatedNormThreads) void fp8_quantize_gated_rmsnorm_kernel(
+    const hip_bfloat16* input, const hip_bfloat16* gate, const hip_bfloat16* weight, float eps,
+    std::uint8_t* codes, float* scales, std::uint32_t* status, CacheWarm warm,
+    std::uint32_t tokens) {
+    __shared__ EncodeShared<kGatedNormThreads> shared;
+    quantize_gated_rmsnorm_body<kGatedNormThreads>(persistent::LaunchCta{}, shared, input, gate,
+                                                   weight, eps, codes, scales, status, warm,
+                                                   tokens);
+}
+
+} // namespace fp8_activation_kernels
+
 namespace {
 
-using fp8_encode::encode_row8;
-using fp8_encode::encode_rows;
-using fp8_encode::unpack8;
+using fp8_activation_kernels::fp8_quantize_activation_kernel;
+using fp8_activation_kernels::fp8_quantize_gated_kernel;
+using fp8_activation_kernels::fp8_quantize_gated_rmsnorm_kernel;
+using fp8_activation_kernels::fp8_quantize_normalized_kernel;
+using fp8_activation_kernels::kBlockSize;
+using fp8_activation_kernels::kGatedNormColumns;
+using fp8_activation_kernels::kGatedNormThreads;
+using fp8_activation_kernels::kNormFeatures;
+using fp8_activation_kernels::kNormThreads;
 
-constexpr std::uint32_t kWaveSize        = 32U;
-constexpr std::uint32_t kBlockSize       = 256U;
-constexpr std::uint32_t kWavesPerBlock   = kBlockSize / kWaveSize;
 constexpr std::uint32_t kQuantizeResidentBlocks = 128U;
 constexpr std::uint32_t kColumnAlignment = 128U;
 constexpr std::size_t kPlaneAlignment    = 256U;
-constexpr float kE4M3FiniteMaximum       = 448.0F;
 
 bool checked_mul(std::size_t lhs, std::size_t rhs, std::size_t* out) noexcept {
     if (out == nullptr || (rhs != 0U && lhs > std::numeric_limits<std::size_t>::max() / rhs)) {
@@ -123,267 +158,6 @@ bool valid_workspace(const Fp8ActivationWorkspace& workspace) noexcept {
                            status_bytes(workspace)) &&
            !ranges_overlap(workspace.scales, workspace.scale_bytes, workspace.status,
                            status_bytes(workspace));
-}
-
-__device__ __forceinline__ void quantize_activation_row(
-    std::uint32_t token, const hip_bfloat16* input, std::uint8_t* codes, float* scales,
-    std::uint32_t* status, std::uint32_t columns, std::uint32_t padded) {
-    const std::uint32_t lane = threadIdx.x % kWaveSize;
-    const std::uint32_t wave = threadIdx.x / kWaveSize;
-    float local_maximum = 0.0F;
-    unsigned local_bad  = 0U;
-    const auto observe = [&](float value) {
-        local_bad |= static_cast<unsigned>(!isfinite(value));
-        if (isfinite(value)) local_maximum = fmaxf(local_maximum, fabsf(value));
-    };
-    // Eight-column 16-byte rows when every token row is aligned; the codec is unchanged.
-    const bool vectorized = columns % 8U == 0U &&
-        reinterpret_cast<std::uintptr_t>(input) % 16U == 0U;
-    const hip_bfloat16* row = input + static_cast<std::size_t>(token) * columns;
-    if (vectorized) {
-        const auto* vectors = reinterpret_cast<const uint4*>(row);
-#pragma unroll 4
-        for (std::uint32_t i = threadIdx.x; i < columns / 8U; i += blockDim.x) {
-            const uint4 packed = vectors[i];
-            const std::uint32_t words[4] = {packed.x, packed.y, packed.z, packed.w};
-#pragma unroll
-            for (int w = 0; w < 4; ++w) {
-                observe(__uint_as_float(words[w] << 16));
-                observe(__uint_as_float(words[w] & 0xffff0000U));
-            }
-        }
-    } else {
-        for (std::uint32_t column = threadIdx.x; column < columns; column += blockDim.x) {
-            observe(static_cast<float>(row[column]));
-        }
-    }
-#pragma unroll
-    for (std::uint32_t delta = kWaveSize / 2U; delta != 0U; delta >>= 1U) {
-        local_maximum = fmaxf(local_maximum, __shfl_down(local_maximum, delta, kWaveSize));
-        local_bad |= __shfl_down(local_bad, delta, kWaveSize);
-    }
-
-    __shared__ float wave_maxima[kWavesPerBlock];
-    __shared__ unsigned wave_bad[kWavesPerBlock];
-    __shared__ float token_scale;
-    __shared__ unsigned token_bad;
-    if (lane == 0U) {
-        wave_maxima[wave] = local_maximum;
-        wave_bad[wave] = local_bad;
-    }
-    __syncthreads();
-
-    if (wave == 0U) {
-        float maximum = lane < kWavesPerBlock ? wave_maxima[lane] : 0.0F;
-        unsigned bad  = lane < kWavesPerBlock ? wave_bad[lane] : 0U;
-#pragma unroll
-        for (std::uint32_t delta = kWaveSize / 2U; delta != 0U; delta >>= 1U) {
-            maximum = fmaxf(maximum, __shfl_down(maximum, delta, kWaveSize));
-            bad |= __shfl_down(bad, delta, kWaveSize);
-        }
-        if (lane == 0U) {
-            token_bad = bad != 0U;
-            token_scale = bad != 0U ? 0.0F : maximum / kE4M3FiniteMaximum;
-            scales[token] = token_scale;
-            status[token] = bad != 0U ? Fp8ActivationNonfinite : Fp8ActivationOk;
-        }
-    }
-    __syncthreads();
-
-    const auto encode = [&](float value) {
-        return static_cast<std::uint8_t>(
-            __hip_cvt_float_to_fp8(value / token_scale, __HIP_SATFINITE, __HIP_E4M3));
-    };
-    const bool encoded = token_bad == 0U && token_scale != 0.0F;
-    std::uint8_t* code_row = codes + static_cast<std::size_t>(token) * padded;
-    std::uint32_t tail = 0U;
-    if (vectorized) {
-        const auto* vectors = reinterpret_cast<const uint4*>(row);
-        for (std::uint32_t i = threadIdx.x; i < columns / 8U; i += blockDim.x) {
-            std::uint32_t packed_codes[2] = {0U, 0U};
-            if (encoded) {
-                const uint4 packed = vectors[i];
-                const std::uint32_t words[4] = {packed.x, packed.y, packed.z, packed.w};
-#pragma unroll
-                for (int w = 0; w < 4; ++w) {
-                    const std::uint32_t pair =
-                        static_cast<std::uint32_t>(encode(__uint_as_float(words[w] << 16))) |
-                        (static_cast<std::uint32_t>(
-                             encode(__uint_as_float(words[w] & 0xffff0000U))) << 8U);
-                    packed_codes[w / 2] |= pair << (16U * (w % 2));
-                }
-            }
-            *reinterpret_cast<uint2*>(code_row + static_cast<std::size_t>(i) * 8U) =
-                uint2{packed_codes[0], packed_codes[1]};
-        }
-        tail = columns;
-    }
-    for (std::uint32_t column = tail + threadIdx.x; column < padded; column += blockDim.x) {
-        code_row[column] = encoded && column < columns ? encode(static_cast<float>(row[column]))
-                                                       : std::uint8_t{0U};
-    }
-}
-
-// A resident grid strides over tokens: grids beyond about 2048 waves paid a ~30 us dispatch
-// penalty on gfx1201 whatever the row width. Each token row is quantized independently.
-__global__ __launch_bounds__(kBlockSize) void fp8_quantize_activation_kernel(
-    const hip_bfloat16* input, std::uint8_t* codes, float* scales, std::uint32_t* status,
-    std::uint32_t tokens, std::uint32_t columns, std::uint32_t padded, CacheWarm warm,
-    std::uint32_t work_ctas) {
-    if (blockIdx.x >= work_ctas) {
-        warm_cache(warm, blockIdx.x - work_ctas, gridDim.x - work_ctas);
-        return;
-    }
-    for (std::uint32_t token = blockIdx.x; token < tokens; token += work_ctas) {
-        quantize_activation_row(token, input, codes, scales, status, columns, padded);
-        __syncthreads();  // the next row reuses the block's reduction storage
-    }
-}
-
-// K5120 RMSNorm with the eager row-CTA reduction: one 16-byte vector per thread of a 640-thread
-// row, per-thread FMA sum of squares, wave butterfly, then the wave sums in ascending order.
-constexpr std::uint32_t kNormFeatures = 5120U;
-constexpr std::uint32_t kNormThreads = kNormFeatures / 8U;
-constexpr std::uint32_t kNormWaves = kNormThreads / kWaveSize;
-
-__device__ __forceinline__ float norm_vector_sumsq(const float (&values)[8]) {
-    float sumsq = 0.0F;
-#pragma unroll
-    for (int i = 0; i < 8; ++i) sumsq = fmaf(values[i], values[i], sumsq);
-#pragma unroll
-    for (std::uint32_t width = kWaveSize / 2U; width != 0U; width >>= 1U)
-        sumsq += __shfl_xor(sumsq, width, kWaveSize);
-    return sumsq;  // identical in every lane
-}
-
-__device__ __forceinline__ void norm_vector_apply(float (&values)[8], uint4 gains, float inverse,
-                                                  bool unit_offset) {
-    const std::uint32_t gain_words[4] = {gains.x, gains.y, gains.z, gains.w};
-    const float offset = unit_offset ? 1.0F : 0.0F;
-#pragma unroll
-    for (int w = 0; w < 4; ++w) {
-        const float low_gain = __uint_as_float(gain_words[w] << 16) + offset;
-        const float high_gain = __uint_as_float(gain_words[w] & 0xffff0000U) + offset;
-        values[2 * w] = static_cast<float>(hip_bfloat16(values[2 * w] * inverse * low_gain));
-        values[2 * w + 1] =
-            static_cast<float>(hip_bfloat16(values[2 * w + 1] * inverse * high_gain));
-    }
-}
-
-__global__ __launch_bounds__(kNormThreads) void fp8_quantize_normalized_kernel(
-    const hip_bfloat16* input, const hip_bfloat16* weight, float eps, bool unit_offset,
-    std::uint8_t* codes, float* scales, std::uint32_t* status, hip_bfloat16* normalized,
-    CacheWarm warm, std::uint32_t tokens) {
-    if (blockIdx.x >= tokens) {
-        warm_cache(warm, blockIdx.x - tokens, gridDim.x - tokens);
-        return;
-    }
-    const std::uint32_t lane = threadIdx.x % kWaveSize, wave = threadIdx.x / kWaveSize;
-    const auto* rows = reinterpret_cast<const uint4*>(input);
-    const auto* gains = reinterpret_cast<const uint4*>(weight);
-    const std::uint32_t token = blockIdx.x;
-    float values[8];
-    unpack8(rows[static_cast<std::size_t>(token) * kNormThreads + threadIdx.x], values);
-    const float sumsq = norm_vector_sumsq(values);
-    __shared__ float wave_sums[kNormWaves];
-    if (lane == 0U) wave_sums[wave] = sumsq;
-    __syncthreads();
-    float block_sum = 0.0F;
-#pragma unroll
-    for (std::uint32_t index = 0; index < kNormWaves; ++index) block_sum += wave_sums[index];
-    const float inverse = rsqrtf(block_sum / static_cast<float>(kNormFeatures) + eps);
-    norm_vector_apply(values, gains[threadIdx.x], inverse, unit_offset);
-    if (normalized != nullptr) {
-        // The values are BF16-represented: the high halves are their exact BF16 bits.
-        std::uint32_t words[4];
-#pragma unroll
-        for (int w = 0; w < 4; ++w) {
-            words[w] = (__float_as_uint(values[2 * w]) >> 16) |
-                       (__float_as_uint(values[2 * w + 1]) & 0xffff0000U);
-        }
-        reinterpret_cast<uint4*>(normalized)[static_cast<std::size_t>(token) * kNormThreads +
-                                             threadIdx.x] = uint4{words[0], words[1], words[2],
-                                                                  words[3]};
-    }
-    encode_row8<kNormThreads>(values, threadIdx.x, token, codes, scales, kNormFeatures, status);
-}
-
-// Output gate over K = 8 * threads features.
-__device__ __forceinline__ void gate_vector(const hip_bfloat16* gate, const float* attention,
-                                            std::size_t offset, float (&values)[8]) {
-    float gates[8];
-    unpack8(*reinterpret_cast<const uint4*>(gate + offset), gates);
-    const float4 low = *reinterpret_cast<const float4*>(attention + offset);
-    const float4 high = *reinterpret_cast<const float4*>(attention + offset + 4U);
-    const float x[8] = {low.x, low.y, low.z, low.w, high.x, high.y, high.z, high.w};
-#pragma unroll
-    for (int i = 0; i < 8; ++i) {
-        const float represented = static_cast<float>(hip_bfloat16(x[i]));
-        values[i] = static_cast<float>(hip_bfloat16(represented / (1.0F + expf(-gates[i]))));
-    }
-}
-
-template <std::uint32_t Threads>
-__global__ __launch_bounds__(Threads) void fp8_quantize_gated_kernel(
-    const hip_bfloat16* gate, const float* attention, std::uint8_t* codes, float* scales,
-    std::uint32_t* status, CacheWarm warm, std::uint32_t tokens) {
-    if (blockIdx.x >= tokens) {
-        warm_cache(warm, blockIdx.x - tokens, gridDim.x - tokens);
-        return;
-    }
-    constexpr std::uint32_t columns = 8U * Threads;
-    const std::uint32_t token = blockIdx.x;
-    float values[8];
-    gate_vector(gate, attention, static_cast<std::size_t>(token) * columns + threadIdx.x * 8U,
-                values);
-    encode_row8<Threads>(values, threadIdx.x, token, codes, scales, columns, status);
-}
-
-
-// Gated per-head RMSNorm of the GDN recurrent output x [T, 48 x 128] with gate z:
-// BF16(x * rsqrt(mean_head(x^2) + eps) * w * silu(z)); the 16 lanes of a DPP row hold one head
-// (eight features each). One 768-thread CTA per token row.
-constexpr std::uint32_t kGatedNormColumns = 6144U;
-constexpr std::uint32_t kGatedNormThreads = kGatedNormColumns / 8U;
-constexpr std::uint32_t kGatedNormHead = 128U;
-
-__device__ __forceinline__ void gated_norm_vector(const hip_bfloat16* input,
-                                                  const hip_bfloat16* gate,
-                                                  const hip_bfloat16* weight, float eps,
-                                                  std::uint32_t token, float (&values)[8]) {
-    const std::size_t offset = static_cast<std::size_t>(token) * kGatedNormThreads + threadIdx.x;
-    float x[8], z[8], w[8];
-    unpack8(reinterpret_cast<const uint4*>(input)[offset], x);
-    unpack8(reinterpret_cast<const uint4*>(gate)[offset], z);
-    unpack8(reinterpret_cast<const uint4*>(weight)[threadIdx.x % (kGatedNormHead / 8U)], w);
-    float sumsq = 0.0F;
-#pragma unroll
-    for (int i = 0; i < 8; ++i) sumsq = fmaf(x[i], x[i], sumsq);
-    sumsq += __int_as_float(__builtin_amdgcn_update_dpp(0, __float_as_int(sumsq), 0x168, 0xf, 0xf, false));
-    sumsq += __int_as_float(__builtin_amdgcn_update_dpp(0, __float_as_int(sumsq), 0x164, 0xf, 0xf, false));
-    sumsq += __int_as_float(__builtin_amdgcn_update_dpp(0, __float_as_int(sumsq), 0x162, 0xf, 0xf, false));
-    sumsq += __int_as_float(__builtin_amdgcn_update_dpp(0, __float_as_int(sumsq), 0x161, 0xf, 0xf, false));
-    const float inverse = rsqrtf(sumsq / static_cast<float>(kGatedNormHead) + eps);
-#pragma unroll
-    for (int i = 0; i < 8; ++i) {
-        const float silu = z[i] / (1.0F + expf(-z[i]));
-        values[i] = static_cast<float>(hip_bfloat16(x[i] * inverse * w[i] * silu));
-    }
-}
-
-__global__ __launch_bounds__(kGatedNormThreads) void fp8_quantize_gated_rmsnorm_kernel(
-    const hip_bfloat16* input, const hip_bfloat16* gate, const hip_bfloat16* weight, float eps,
-    std::uint8_t* codes, float* scales, std::uint32_t* status, CacheWarm warm,
-    std::uint32_t tokens) {
-    if (blockIdx.x >= tokens) {
-        warm_cache(warm, blockIdx.x - tokens, gridDim.x - tokens);
-        return;
-    }
-    const std::uint32_t token = blockIdx.x;
-    float values[8];
-    gated_norm_vector(input, gate, weight, eps, token, values);
-    encode_row8<kGatedNormThreads>(values, threadIdx.x, token, codes, scales, kGatedNormColumns,
-                                   status);
 }
 
 constexpr std::uint32_t kGatedColumns = 6144U;

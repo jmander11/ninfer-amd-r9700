@@ -973,7 +973,7 @@ void capture_dflash_decode_batch(DFlashBatchContext& state, std::int32_t batch_s
                                  DFlashEnvelopes envelopes,
                                  DecodeGraphDefinition& definition) {
     auto body = dflash_decode_batch_body(state, batch_size, k, verify_width, envelopes, false);
-    capture_graph(state, definition, body);
+    capture_graph(state, definition, batch_size, body);
 }
 
 void dflash_mixed_batch(DFlashBatchContext& state, DFlashMixedOwner& owner,

@@ -15,20 +15,33 @@ namespace ninfer::ops::r9700::linear::fp8_encode {
 constexpr std::uint32_t kWaveSize = 32U;
 constexpr float kE4M3FiniteMaximum = 448.0F;
 
-// Encodes one token row held as V vectors of eight values per thread (vector i * Threads + thread):
+template <std::uint32_t Threads>
+struct EncodeShared {
+    float wave_maxima[Threads / kWaveSize];
+    unsigned wave_bad[Threads / kWaveSize];
+};
+
+// Encodes one token row of 8 * Vectors columns held by a Threads-thread CTA context as V vectors
+// of eight values per thread (vector v * Threads + thread; those at or past Vectors do not exist):
 // the finite maximum and nonfinite flag are reduced over the CTA, then the row publishes scale
 // max / 448, its status word and E4M3 codes exactly as fp8_quantize_activation_kernel does for the
-// same BF16 values.
-template <std::uint32_t Threads, std::uint32_t V = 1U>
-__device__ __forceinline__ void encode_rows(const float (&values)[V][8], std::uint32_t token,
+// same BF16 values. The maximum and flag are order-independent, so any CTA width that holds the
+// row encodes it identically.
+template <std::uint32_t Threads, std::uint32_t V = 1U, std::uint32_t Vectors = Threads * V,
+          class Cta>
+__device__ __forceinline__ void encode_rows(const Cta& cta, EncodeShared<Threads>& shared,
+                                            const float (&values)[V][8], std::uint32_t token,
                                             std::uint8_t* codes, float* scales,
                                             std::uint32_t padded, std::uint32_t* status) {
-    constexpr std::uint32_t waves = Threads / kWaveSize;
-    const std::uint32_t lane = threadIdx.x % kWaveSize, wave = threadIdx.x / kWaveSize;
+    static_assert(Threads % kWaveSize == 0U && Vectors <= Threads * V);
+    const std::uint32_t thread = cta.thread();
+    const std::uint32_t lane = thread % kWaveSize, wave = thread / kWaveSize;
+    const auto exists = [&](std::uint32_t v) { return v * Threads + thread < Vectors; };
     float maximum = 0.0F;
     unsigned bad = 0U;
 #pragma unroll
     for (std::uint32_t v = 0; v < V; ++v) {
+        if (!exists(v)) continue;
 #pragma unroll
         for (int i = 0; i < 8; ++i) {
             bad |= static_cast<unsigned>(!isfinite(values[v][i]));
@@ -40,28 +53,27 @@ __device__ __forceinline__ void encode_rows(const float (&values)[V][8], std::ui
         maximum = fmaxf(maximum, __shfl_xor(maximum, delta, kWaveSize));
         bad |= __shfl_xor(bad, delta, kWaveSize);
     }
-    __shared__ float wave_maxima[waves];
-    __shared__ unsigned wave_bad[waves];
     if (lane == 0U) {
-        wave_maxima[wave] = maximum;
-        wave_bad[wave] = bad;
+        shared.wave_maxima[wave] = maximum;
+        shared.wave_bad[wave] = bad;
     }
-    __syncthreads();
+    cta.sync();
     float row_maximum = 0.0F;
     unsigned row_bad = 0U;
 #pragma unroll
-    for (std::uint32_t index = 0; index < waves; ++index) {
-        row_maximum = fmaxf(row_maximum, wave_maxima[index]);
-        row_bad |= wave_bad[index];
+    for (std::uint32_t index = 0; index < Threads / kWaveSize; ++index) {
+        row_maximum = fmaxf(row_maximum, shared.wave_maxima[index]);
+        row_bad |= shared.wave_bad[index];
     }
     const float token_scale = row_bad != 0U ? 0.0F : row_maximum / kE4M3FiniteMaximum;
-    if (threadIdx.x == 0U) {
+    if (thread == 0U) {
         scales[token] = token_scale;
         status[token] = row_bad != 0U ? Fp8ActivationNonfinite : Fp8ActivationOk;
     }
     const bool encoded = row_bad == 0U && token_scale != 0.0F;
 #pragma unroll
     for (std::uint32_t v = 0; v < V; ++v) {
+        if (!exists(v)) continue;
         std::uint32_t packed[2] = {0U, 0U};
         if (encoded) {
 #pragma unroll
@@ -72,19 +84,9 @@ __device__ __forceinline__ void encode_rows(const float (&values)[V][8], std::ui
             }
         }
         *reinterpret_cast<uint2*>(codes + static_cast<std::size_t>(token) * padded +
-                                  (static_cast<std::size_t>(v) * Threads + threadIdx.x) * 8U) =
+                                  (static_cast<std::size_t>(v) * Threads + thread) * 8U) =
             uint2{packed[0], packed[1]};
     }
-}
-
-template <std::uint32_t Threads>
-__device__ __forceinline__ void encode_row8(const float (&values)[8], std::uint32_t vector,
-                                            std::uint32_t token, std::uint8_t* codes,
-                                            float* scales, std::uint32_t padded,
-                                            std::uint32_t* status) {
-    (void)vector;  // vector == threadIdx.x for every single-vector producer
-    const float (&rows)[1][8] = reinterpret_cast<const float (&)[1][8]>(values);
-    encode_rows<Threads, 1U>(rows, token, codes, scales, padded, status);
 }
 
 __device__ __forceinline__ void unpack8(uint4 packed, float (&values)[8]) {

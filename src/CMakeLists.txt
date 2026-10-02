@@ -42,6 +42,7 @@ add_library(ninfer_r9700_core STATIC
   ops/r9700/gdn_recurrence/gdn_replay_fold.hip
   ops/r9700/sampling/sampling.hip
   ops/r9700/rope/rope.hip
+  ops/r9700/persistent/persistent_decode.hip
   ops/r9700/vision/vision_attention.hip
   ops/r9700/vision/vision_pos_embed.hip
   ops/r9700/attention_projection/attention_projection.hip
@@ -785,6 +786,14 @@ add_executable(ninfer_r9700_gdn_fp8lut4_front_qual
 ninfer_r9700_internal_includes(ninfer_r9700_gdn_fp8lut4_front_qual)
 set_target_properties(ninfer_r9700_gdn_fp8lut4_front_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
 target_link_libraries(ninfer_r9700_gdn_fp8lut4_front_qual PRIVATE ninfer_r9700_core hip::host)
+
+# Qualify the persistent decode lowering: lowered Device Graph chains bitwise equal to their
+# captured production launches.
+add_executable(ninfer_r9700_persistent_decode_qual
+  ${PROJECT_SOURCE_DIR}/tools/r9700/persistent_decode_qual.hip)
+ninfer_r9700_internal_includes(ninfer_r9700_persistent_decode_qual)
+set_target_properties(ninfer_r9700_persistent_decode_qual PROPERTIES HIP_ARCHITECTURES gfx1201)
+target_link_libraries(ninfer_r9700_persistent_decode_qual PRIVATE ninfer_r9700_core hip::host)
 
 # Qualify the fused DFlash drafter Q/K norm, RoPE and V split.
 add_executable(ninfer_r9700_dflash_qkv_norm_rope_qual
