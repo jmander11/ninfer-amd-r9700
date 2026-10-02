@@ -127,12 +127,12 @@ Evidence: `profiles/bench/r9700-upstream-sync-20260928/`.
 
 ## `9639c32f..f7f70d89` (4 upstream commits, reconciled 2026-10-02)
 
-- Ported: `ca08451c` `/metrics` buckets, labels and closed-label series storage (`f7b0b3fb`;
+- Ported: `ca08451c` `/metrics` buckets, labels and closed-label series storage (`cc613dc3`;
   keeps the HIP/Device Graph identity, `ninfer_device_memory_bytes`, the `/v1/score` route and
   the AMD API code set; `reservation_exceeded` stays absent because the R9700 executor never
   publishes it). `a1d289ec` closed preserve-off turns stored cut at their turn checkpoint, per-reason
   disk drop counters under the mutex, and the shared splice checkpoint-prefix fallback
-  (`a0cb1f9b`). The cut image's current-state copies use the copy-stream host callback behind the
+  (`db1abce1`). The cut image's current-state copies use the copy-stream host callback behind the
   image fence instead of upstream's host wait and scheduler-thread memcpy. R9700 C1 serve, 4
   two-turn chats of ~2.7K tokens: RAM 427 -> 286 MiB per entry, turn 2 appends with the resident
   checkpoint's reuse length and identical greedy tokens (DFlash k4, MTP k3, DFlash K7 adaptive
