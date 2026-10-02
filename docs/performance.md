@@ -82,6 +82,31 @@ harness. Prefill rows predate the 2026-09-28 output-head and
 attention GPTQ reconversions, which change weight values but not formats or routes, and all rows
 predate the 2026-09-30 reduction to 21 protections (C1 decode +2.3%, C4 unchanged, prefill +0.4%).
 
+## Adaptive draft picker and p-less draft temperature per K (2026-10-02)
+
+Upstream `fd16c8ba` replaced its picker with learned per-k hop hazards plus one exploration round
+in 32, and scaled the p-less draft temperature down at k=6/7. Measured here before porting:
+production serving shape (`--temperature 1.5`, DFlash `--lm-head-draft`, Device Graphs), 12
+manifest prompts x greedy + two p-less seeds x 768 tokens, paired per-request decode rate with
+95% bootstrap, alternating arm order per server lifetime.
+
+| | C1 | C4 |
+|---|---|---|
+| fixed K7 vs adaptive K7 (2 lifetimes) | 1.035 (1.018-1.052) | 1.043 (1.023-1.066) |
+| fixed K7 vs adaptive K7 (4 more lifetimes) | 0.999 (0.997-1.001) | 1.001 (0.987-1.016) |
+| adaptive K7 + exploration vs adaptive K7 | 0.993 (0.986-0.999) | 0.998 (0.983-1.013) |
+| p-less only: K7 draft T 0.3 vs 0.4 | 0.991 (0.965-1.017) | 1.018 (0.996-1.041) |
+| p-less only: K6 draft T 0.35 vs 0.4 | 0.989 (0.966-1.010) | 1.005 (0.984-1.025) |
+
+Fixed K7 is the best fixed k for every prompt at both C, and adaptive K7 matches it, except that
+one of six adaptive server lifetimes locked K6 for its whole life (5.98 drafted per round, 30.5 vs
+29.9 ms per round, ~6% slower): T(k) is a running mean refreshed only by rounds at k, so a high
+early K7 sample is never corrected. Upstream-style exploration removes the lock in a closed-loop
+model but costs 0.7% at C1 on every lifetime (explored rounds pull the locked k to ~6.3 drafted per
+round), more than the lock's expected cost, so it is not adopted; neither is the hazard model it
+serves. The scaled draft temperatures are within noise of 0.4, which was tuned with K7 adaptive.
+Evidence: `profiles/bench/r9700-sync-open-items-20261002/`.
+
 ## Persistent decode kernel (2026-10-02)
 
 Every single-sequence (`B=1`) decode graph is lowered after capture (`ops::persistent_decode_lower`):

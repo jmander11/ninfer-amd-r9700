@@ -142,13 +142,12 @@ Evidence: `profiles/bench/r9700-upstream-sync-20260928/`.
 - Already equivalent from `fd16c8ba`: BF16 verify projections and the W8/Q4 heads at k=6/7 (every
   verify projection and head is one aggregate launch over all W*C columns up to 64), and the
   full-width drafter-context append (the AMD path has always appended at the storage width).
-- Not ported, needs an R9700 A/B: the `fd16c8ba` learned per-law/per-k hop-hazard picker and the
-  p-less draft-temperature scale at k=6/7. The AMD picker (`a7880a27` deepest-observed
-  extrapolation with T estimation and single probes) was measured on R9700 (1.074x vs adaptive
-  K5), the 0.4 p-less draft temperature was tuned with K7 adaptive, and upstream measured its
-  picker within noise of a static hop table (-1.8% +/- 1.9%). Its exploration guard waits for a
-  measured T at every k, which the AMD estimator never guarantees, so a port also has to choose
-  between exploration-driven T measurement and the existing estimator.
+- Not ported after R9700 A/B (`docs/performance.md`, 2026-10-02): the `fd16c8ba` learned
+  per-law/per-k hop-hazard picker with its 1-in-32 exploration, and the p-less draft-temperature
+  scale at k=6/7. Adaptive K7 already matches the per-prompt best fixed K (K7 everywhere) at C1 and
+  C4; exploration cost 0.7% at C1 against an intermittent K6 lock (one lifetime in six), and the
+  scaled temperatures were within noise of 0.4. The unused DFlash `append` envelope that upstream
+  widened to the verify width is removed here instead.
 - Excluded: the `fd16c8ba` CUDA/NVFP4 kernel changes (W8 dynamic shared memory, NVFP4 W4A8
   M48/K256, NVFP4 GDN record, GQA T=7/8 split rules). No action: `f7f70d89` relaxes an upstream
   real test the AMD tree does not carry (the cached-versus-fresh interleavings resume check).
