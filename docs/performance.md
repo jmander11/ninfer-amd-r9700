@@ -105,8 +105,15 @@ generation grid barrier inside one kernel, against the same phases as 96 Device 
 with a CTA-strided read of 2 / 8 / 17 MiB per phase the persistent kernel saves 1.7 / 1.65 / 1.65
 us per boundary (graph boundaries partly overlap the work). Across the ~800 kernels of a C1 K7
 round that bounds a whole-round megakernel at ~1.3 ms (~4%), before its costs: one register and
-LDS budget for every phase and fixed resident grid sizes.
-(`profiles/bench/r9700-decode-c1-20261001/persistent_barrier.hip`).
+LDS budget for every phase and fixed resident grid sizes. With the production small-T FP8LUT4 GEMM
+body (`fp8lut4::small_t_rows`, T8) as the phases, one GDN layer's four projection shapes over
+eight distinct layers (32 phases, 1.6 GB at 592 GB/s): 2749 us as graph kernels, 2694 / 2677 us
+persistent at 10 / 6 resident CTAs per WGP, 1.7-2.3 us saved per boundary, so a shared, lower
+occupancy does not slow the projections. Of a round's ~800 boundaries only 129 lie between two
+latency-bound kernels (the rest touch one of 407 projection-class kernels), so persistent
+segments of latency-bound kernels alone are bounded at ~0.25 ms; the boundaries worth taking
+need the projections inside the persistent kernel.
+(`profiles/bench/r9700-decode-c1-20261001/persistent_barrier.hip`, `persistent_gemm_chain.hip`).
 
 ## Decode cache warming (2026-10-01)
 
