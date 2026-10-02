@@ -12,13 +12,15 @@ namespace ninfer::ops {
  * Rewrites a captured single-stream Device Graph in place: every run of at least two consecutive
  * kernel nodes whose kernels the persistent decode kernel hosts becomes one persistent decode
  * kernel node, which executes the run's launches as phases in capture order, one grid-wide
- * barrier between consecutive phases. Each phase runs the captured launch's own kernel body on
- * virtual CTAs with the captured arguments, block and grid indices, so every hosted launch
- * produces exactly the bytes it produces as its own kernel node; a launch's CTAs keep CTA
- * semantics (no ordering or co-residency among them). A launch's cache-warm CTAs
+ * barrier between consecutive phases. Each phase runs the captured launch's kernel body on
+ * virtual CTAs with the captured arguments, block and grid indices, or a re-tiled body of the
+ * same Op over its own virtual grid (the GDN record: one CTA per sequence and head), so every
+ * hosted launch produces exactly the bytes it produces as its own kernel node; a launch's CTAs
+ * keep CTA semantics (no ordering or co-residency among them). A launch's cache-warm CTAs
  * (core/cache_warm.h), which write nothing, are not run; the kernel prefetches the next phase's
  * weights and instructions while it waits at a barrier instead. The hosted kernels are those of
- * a single-sequence decode graph (one 16-token tile per projection).
+ * a single-sequence decode graph (one 16-token tile per projection); a hosted kernel launched
+ * past its hosted shape (a GDN record wider than 8 columns) stays a kernel node.
  *
  * The graph is a single chain (each node has at most one dependency and one dependent); other
  * nodes (copies, fills, kernels the persistent kernel does not host) stay as they are. Returns the

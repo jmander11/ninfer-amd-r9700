@@ -1392,8 +1392,8 @@ startup 只验证 graph inventory、update compatibility、resource materializat
 `B=1` definition 在 capture 后、instantiate 前由 `ops::persistent_decode_lower` 原地改写：图中每段至少两个
 连续的 hosted kernel nodes（small-T FP8LUT4 / row-scaled FP8 projections、FP8 activation producers、
 GDN front / pair-conv / record、Q/K norm-RoPE）替换为一个 persistent kernel node。该 kernel 以每 WGP 两个
-384-thread blocks 常驻，把每个 captured launch 作为一个 phase，用其原 kernel body、原参数和 virtual
-block/grid indices 执行，phase 之间是 grid barrier；输出与原 kernel nodes bitwise 相同。其余 nodes
+384-thread blocks 常驻，把每个 captured launch 作为一个 phase，用其原 kernel body（GDN record 为同一 Op
+的 per-(sequence, head) re-tiled body，宽度 >8 时保持 kernel node）、原参数和 virtual block/grid indices 执行，phase 之间是 grid barrier；输出与原 kernel nodes bitwise 相同。其余 nodes
 （verify attention、drafter、sampling、copies）保持不变，graph 仍是单链。
 
 Lowering 返回的 program storage（phase records、captured arguments、barrier words）由

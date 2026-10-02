@@ -133,6 +133,14 @@ kernel-node graphs vs `5d018ccf` lowered, 95% bootstrap): round time 1.3% shorte
 (1.0131, 1.0115–1.0145; 31.89 -> 31.48 ms/round), decode rate 1.025 (1.012–1.045; 137.1 -> 140.2
 tok/s). All 22 greedy pairs produce identical output; 18 of 44 seeded pairs differ because adaptive
 K follows the measured round time.
+The GDN record runs one whole-block virtual CTA per (sequence, head) with three value rows per
+row slot (each token staged once; the launch's four 256-thread row tiles fit one per block), and
+a phase's partial last round spreads over all blocks (group-major virtual CTAs): the C1 record
+phase 14.5 -> 11.7 us and the round 29.79-29.88 -> 29.64-29.70 ms (fast-mode passes, same
+accepted tokens). At C1 a persistent kernel reaches its first phase 0.7 us after it starts and its
+first phase runs as fast as a steady one, so the remaining unhosted nodes (verify attention, the
+drafter, sampling; ~150 per round) cost only their ~0.25 ms of launch gaps.
+
 Multi-sequence (`B>1`) lowering, not adopted. Lowered as-is, C4 and C8 DFlash K7 decoded 6.6%
 and 5.5% slower: a C4 verification is 32 columns, whose two-token-tile projections were not
 hosted, so a round became 47 persistent kernels of about two phases each. Hosting the two-tile

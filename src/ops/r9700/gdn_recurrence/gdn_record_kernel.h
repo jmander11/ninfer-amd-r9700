@@ -253,6 +253,96 @@ __device__ __forceinline__ void record_body(
     }
 }
 
+// The ordinary record (no tree) with one CTA of Threads threads per (batch, head) instead of
+// kOrdinaryRowTiles: each token is staged once, and every 8-thread row slot carries value rows
+// slot, slot + Threads / 8, ... through the recurrence, interleaving their independent chains.
+// Each row's arithmetic is record_body's. Grid: work_ctas / kOrdinaryRowTiles CTAs.
+template <int Threads, int MaxWidth>
+struct RecordHeadShared {
+    float staged_q[MaxWidth][kDim];
+    float staged_k[MaxWidth][kDim];
+    float staged_v[MaxWidth][kDim];
+    float controls[MaxWidth][2];
+};
+
+template <int Threads, int MaxWidth, class Cta>
+__device__ __forceinline__ void record_head_body(
+    const Cta& cta, RecordHeadShared<Threads, MaxWidth>& shared, const hip_bfloat16* q,
+    const hip_bfloat16* k, const hip_bfloat16* v, const float* g, const float* beta,
+    const float* states, const std::int32_t* valid_columns, const std::int32_t* initial_slots,
+    const std::int32_t* /*parent_index*/, float* /*tree_states*/, hip_bfloat16* key_record,
+    hip_bfloat16* value_record, float* gate_record, hip_bfloat16* output, int width, int slots,
+    float scale, const CacheWarm& /*warm*/, unsigned /*work_ctas*/) {
+    static_assert(Threads % 32 == 0 && MaxWidth >= 1 && MaxWidth <= Threads / 32);
+    constexpr int kSlots = Threads / kThreadsPerRow;
+    constexpr int kRowPasses = (kDim + kSlots - 1) / kSlots;
+    const int combined = static_cast<int>(cta.block().x);
+    const int batch = combined / kValueHeads;
+    const int value_head = combined % kValueHeads;
+    const int tid = static_cast<int>(cta.thread());
+    const int lane = tid % 32;
+    const int wave = tid / 32;
+    const int slot = tid / kThreadsPerRow;
+    const int sublane = tid % kThreadsPerRow;
+    const int q_head = value_head / kGroup;
+    const int valid = valid_columns == nullptr ? width : valid_columns[batch];
+    const int initial = initial_slots[batch];
+    if (initial < 0 || initial >= slots || valid < 1 || valid > width || width > MaxWidth) {
+        return;
+    }
+    const std::size_t state_head = static_cast<std::size_t>(value_head) * kDim * kDim;
+    const std::size_t slot_stride = static_cast<std::size_t>(kValueHeads) * kDim * kDim;
+    const auto row_of = [&](int pass) { return slot + pass * kSlots; };
+    float local[kRowPasses][kKeysPerThread];
+#pragma unroll
+    for (int pass = 0; pass < kRowPasses; ++pass)
+        if (row_of(pass) < kDim)
+            load_state_row(states, static_cast<std::size_t>(initial) * slot_stride + state_head,
+                           row_of(pass), sublane, local[pass]);
+    // Wave w stages token w (MaxWidth <= waves).
+    if (wave < valid) {
+        const int token = wave;
+        const std::size_t column = static_cast<std::size_t>(batch) * width + token;
+        const std::size_t qk_base = (column * kQHeads + q_head) * kDim;
+        const std::size_t vh = column * kValueHeads + value_head;
+        stage_token_qk_wave(q, k, qk_base, shared.staged_q[token], shared.staged_k[token], lane);
+#pragma unroll
+        for (int item = 0; item < 4; ++item) {
+            const int index = lane + item * 32;
+            const hip_bfloat16 value = v[vh * kDim + index];
+            shared.staged_v[token][index] = static_cast<float>(value);
+            value_record[vh * kDim + index] = value;
+            if (value_head % kGroup == 0) key_record[qk_base + index] = k[qk_base + index];
+        }
+        if (lane == 0) {
+            shared.controls[token][0] = expf(g[vh]);
+            shared.controls[token][1] = beta[vh];
+            gate_record[vh * 2] = g[vh];
+            gate_record[vh * 2 + 1] = beta[vh];
+        }
+    }
+    cta.sync();
+    for (int token = 0; token < valid; ++token) {
+        const std::size_t vh =
+            (static_cast<std::size_t>(batch) * width + token) * kValueHeads + value_head;
+#pragma unroll
+        for (int pass = 0; pass < kRowPasses; ++pass) {
+            const int row = row_of(pass);
+            if (row < kDim)
+                transition(local[pass], shared.staged_q[token], shared.staged_k[token],
+                           shared.staged_v[token][row], shared.controls[token][0],
+                           shared.controls[token][1], scale, sublane, output + vh * kDim + row);
+        }
+    }
+    for (int token = valid; token < width; ++token) {
+        const std::size_t vh =
+            (static_cast<std::size_t>(batch) * width + token) * kValueHeads + value_head;
+#pragma unroll
+        for (int pass = 0; pass < kRowPasses; ++pass)
+            if (row_of(pass) < kDim && sublane == 0) output[vh * kDim + row_of(pass)] = hip_bfloat16(0.0F);
+    }
+}
+
 template <bool Tree>
 __global__ __launch_bounds__(kOrdinaryBlock, 1)
 void record_kernel(const hip_bfloat16* q, const hip_bfloat16* k, const hip_bfloat16* v,

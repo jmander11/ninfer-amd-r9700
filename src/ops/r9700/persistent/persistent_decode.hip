@@ -1,8 +1,9 @@
 // Persistent decode kernel (ops::persistent_decode_lower): one resident grid of
 // kBlockThreads-thread blocks, two per WGP, executes a run of captured launches as phases separated by grid barriers.
-// A phase's virtual CTAs run the launch's kernel body (persistent_cta.h) on a group of whole
-// waves: kBlockThreads / Threads groups per block for a Threads-wide body, the whole block for a
-// kBlockThreads-wide one. Each hosted kernel is an Entry: its kernel, launch width, body width,
+// A phase's virtual CTAs run the launch's kernel body (persistent_cta.h; or an entry's re-tiled
+// body of the same Op) on a group of whole waves: kBlockThreads / Threads groups per block for a
+// Threads-wide body, the whole block for a kBlockThreads-wide one; group g of block b runs
+// virtual CTAs g * gridDim.x + b, ... (a partial last round spreads over all blocks). Each hosted kernel is an Entry: its kernel, launch width, body width,
 // LDS, body and the weight bytes its virtual CTAs stream. While a block waits at a grid barrier
 // it prefetches the next phase's instructions and its own first virtual CTAs' weight lines.
 #include "ninfer/ops/persistent_decode.h"
@@ -322,14 +323,27 @@ struct GdnPairConvRecord {
     }
 };
 
-struct GdnRecord : WorkGrid<18> {
+// One whole-block virtual CTA per (sequence, head) staging each of at most eight tokens once,
+// three value rows per row slot (the launch's four 256-thread row tiles per head each stage
+// every token and fit one per block). Hosted up to a verification width of 8.
+struct GdnRecord {
+    static constexpr int kMaxWidth = 8;
+    static constexpr bool lds_reuse_safe = false;
     static constexpr auto kernel = &recurrence::record_kernel<false>;
     static constexpr std::uint32_t launch_threads = recurrence::kOrdinaryBlock;
-    static constexpr std::uint32_t threads = launch_threads;
-    using Shared = recurrence::RecordShared;
+    static constexpr std::uint32_t threads = kBlockThreads;
+    using Shared = recurrence::RecordHeadShared<threads, kMaxWidth>;
+    template <class Params>
+    static uint3 grid(uint3, const Params& params) {
+        return uint3{slot_value<18>(params) / recurrence::kOrdinaryRowTiles, 1U, 1U};
+    }
+    template <class Params>
+    static bool admits(const Params& params) {
+        return slot_value<14>(params) <= kMaxWidth;  // width
+    }
     template <class Cta, class... A>
     __device__ static void run(const Cta& cta, Shared& shared, const A&... a) {
-        recurrence::record_body<false>(cta, shared, a...);
+        recurrence::record_head_body<threads, kMaxWidth>(cta, shared, a...);
     }
 };
 
@@ -408,7 +422,7 @@ struct Phase {
     std::uint32_t grid_z;
 };
 
-// Lines of this block's first-round virtual CTAs of a phase (c = blockIdx.x * groups + g), in
+// Lines of this block's first-round virtual CTAs of a phase (c = g * gridDim.x + blockIdx.x), in
 // order: line `line` addresses one kCacheWarmStride line (0: past them).
 struct BlockStreams {
     const PhaseStreams* streams;
@@ -421,7 +435,7 @@ struct BlockStreams {
     __device__ __forceinline__ explicit BlockStreams(const PhaseStreams& next) : streams(&next) {
         groups = next.groups;
         for (std::uint32_t g = 0; g < kMaximumGroups; ++g) {
-            const std::uint32_t c = blockIdx.x * groups + g;
+            const std::uint32_t c = g * gridDim.x + blockIdx.x;
             const StreamRange* part = next.parts[c < next.split ? 0U : 1U];
             lines[g] = g < groups && c < next.total
                 ? range_lines(part[0]) + range_lines(part[1])
@@ -431,7 +445,7 @@ struct BlockStreams {
     __device__ __forceinline__ std::uint64_t address(std::uint64_t line) const {
         for (std::uint32_t g = 0; g < kMaximumGroups; ++g) {
             if (line < lines[g]) {
-                const std::uint32_t c = blockIdx.x * groups + g;
+                const std::uint32_t c = g * gridDim.x + blockIdx.x;
                 const bool second = c >= streams->split;
                 const StreamRange* ranges = streams->parts[second ? 1U : 0U];
                 const std::uint64_t cta = second ? c - streams->split : c;
@@ -608,7 +622,7 @@ __device__ __forceinline__ void run_phase(std::uint32_t slot) {
     const persistent::PhaseCta<kWholeBlock> first{thread, E::threads,
                                                   uint3{}, grid, &group_barriers[group],
                                                   E::threads / kWaveSize};
-    for (std::uint32_t index = blockIdx.x * kGroups + group; index < total;
+    for (std::uint32_t index = group * gridDim.x + blockIdx.x; index < total;
          index += gridDim.x * kGroups) {
         persistent::PhaseCta<kWholeBlock> cta = first;
         cta.block_ = uint3{index % grid.x, index % plane / grid.x, index / plane};
@@ -663,6 +677,7 @@ struct HostEntry {
     void (*pack)(void* const* params, void* out) = nullptr;
     uint3 (*grid)(uint3 captured, const void* args) = nullptr;
     PhaseStreams (*streams)(const void* args) = nullptr;
+    bool (*admits)(const void* args) = nullptr;
 };
 
 template <class P, std::size_t... I>
@@ -690,6 +705,12 @@ HostEntry host_entry() {
                 streams.groups = entry_groups<E>();
             }
             return streams;
+        },
+        [](const void* args) {
+            if constexpr (requires(const Params& params) { E::admits(params); })
+                return E::admits(*static_cast<const Params*>(args));
+            else
+                return true;
         }};
 }
 
@@ -748,6 +769,9 @@ bool hosted(hipGraphNode_t node, Hosted& out) {
             params.sharedMemBytes != 0U || params.blockDim.x != table[index].launch_threads ||
             params.blockDim.y != 1U || params.blockDim.z != 1U)
             throw std::logic_error("persistent_decode_lower: unexpected launch of a hosted kernel");
+        alignas(16) std::uint8_t args[kArgsBytes];
+        table[index].pack(params.kernelParams, args);
+        if (!table[index].admits(args)) return false;
         out = Hosted{index, params};
         return true;
     }
