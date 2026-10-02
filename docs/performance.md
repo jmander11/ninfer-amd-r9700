@@ -168,7 +168,12 @@ drafter, sampling; ~150 per round) cost only their ~0.25 ms of launch gaps. Phas
 objective on its own: placing the GDN front's fold CTAs on WGPs of their own (blocks b and b + 32
 share one) cut the front 19.0 -> 15.3 us but lengthened the pair projection after it 78.9 -> 85.4
 us, whose weights the waiting blocks had been streaming at the barrier, and the round by 0.1 ms;
-not adopted. The large projections already stream at about 630-650 GB/s.
+not adopted. The large projections already stream at about 630-650 GB/s. Shortening the FP8
+activation quantization (one register-cached pass, one reduction barrier) was likewise neutral
+end to end. What helped instead: a phase that streams no weights (quantization, GDN front and
+record, RoPE) prefetches at its barrier the next weight-streaming phase's lines, so a projection's
+tail and the small phases after it stream the coming projection: C1 DFlash K7 29.64-29.73 ->
+29.45-29.55 ms/round, MTP K3 33.61 -> 33.45-33.47 ms/round (same accepted tokens).
 
 Multi-sequence (`B>1`) lowering, not adopted. Lowered as-is, C4 and C8 DFlash K7 decoded 6.6%
 and 5.5% slower: a C4 verification is 32 columns, whose two-token-tile projections were not

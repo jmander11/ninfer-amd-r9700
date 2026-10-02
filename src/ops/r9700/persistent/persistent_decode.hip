@@ -828,6 +828,13 @@ DeviceBuffer persistent_decode_lower(hipGraph_t graph) {
             records[record].streams = entry.streams(records[record].args);
             records[record].streams.total = grid.x * grid.y * grid.z;
         }
+        // A phase that streams no weights takes the streams of the next phase of its run that
+        // does (if any): the barrier before it (a projection's tail) and its own barrier then
+        // both stream the coming projection's lines, instead of the first waiting idle.
+        for (std::size_t index = record - 1U; index > record - run.count; --index) {
+            if (records[index - 1U].streams.groups == 0U)
+                records[index - 1U].streams = records[index].streams;
+        }
     }
     DeviceBuffer storage(image.size());
     storage.copy_from_host(image.data(), image.size());
