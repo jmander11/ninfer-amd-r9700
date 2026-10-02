@@ -99,6 +99,15 @@ thread (77 -> 20 fold CTAs per row) only 23.1 -> 22.4 us. Same-session A/B again
 (three interleaved passes, within noise), C4 268.0 / 269.5 -> 271.4 / 274.7 tok/s (+1.3 / +1.9%).
 Evidence: `profiles/bench/r9700-decode-c1-20261001/deferred/`.
 
+Persistent-kernel feasibility (microbenchmark, not adopted): 96 phases chained by an atomic
+generation grid barrier inside one kernel, against the same phases as 96 Device Graph kernels
+(32-128 CTAs of 256 threads). An empty phase costs 0.95-1.0 us against 3.3 us per graph kernel;
+with a CTA-strided read of 2 / 8 / 17 MiB per phase the persistent kernel saves 1.7 / 1.65 / 1.65
+us per boundary (graph boundaries partly overlap the work). Across the ~800 kernels of a C1 K7
+round that bounds a whole-round megakernel at ~1.3 ms (~4%), before its costs: one register and
+LDS budget for every phase and fixed resident grid sizes.
+(`profiles/bench/r9700-decode-c1-20261001/persistent_barrier.hip`).
+
 ## Decode cache warming (2026-10-01)
 
 C1 DFlash K7 profile (`ninfer_bench` P512/G256, kernel trace): 30.9 ms per round, 802 kernels,
