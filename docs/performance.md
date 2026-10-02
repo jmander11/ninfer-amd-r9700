@@ -139,7 +139,11 @@ a phase's partial last round spreads over all blocks (group-major virtual CTAs):
 phase 14.5 -> 11.7 us and the round 29.79-29.88 -> 29.64-29.70 ms (fast-mode passes, same
 accepted tokens). At C1 a persistent kernel reaches its first phase 0.7 us after it starts and its
 first phase runs as fast as a steady one, so the remaining unhosted nodes (verify attention, the
-drafter, sampling; ~150 per round) cost only their ~0.25 ms of launch gaps.
+drafter, sampling; ~150 per round) cost only their ~0.25 ms of launch gaps. Phase time is not the
+objective on its own: placing the GDN front's fold CTAs on WGPs of their own (blocks b and b + 32
+share one) cut the front 19.0 -> 15.3 us but lengthened the pair projection after it 78.9 -> 85.4
+us, whose weights the waiting blocks had been streaming at the barrier, and the round by 0.1 ms;
+not adopted. The large projections already stream at about 630-650 GB/s.
 
 Multi-sequence (`B>1`) lowering, not adopted. Lowered as-is, C4 and C8 DFlash K7 decoded 6.6%
 and 5.5% slower: a C4 verification is 32 columns, whose two-token-tile projections were not
