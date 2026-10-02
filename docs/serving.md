@@ -890,8 +890,16 @@ reports. Latency, token, finish-reason, prefix, and speculative families observe
 generations only; `ninfer_generation_requests_total` also counts `rejected`, `error`, and `cancelled`
 attempts. `ninfer_recovery_events_total{kind="cycle_exclusion"}` counts published events, which are
 powers-of-two samples; the true exclusion count is `ninfer_recovery_cycle_exclusions_total`.
-Exhausted-recovery details collapse into the closed causes `retry_budget`, `output_budget`,
-`lane_rebuild`, `prologue`, and `other`; the JSONL `recovery` event keeps the raw text.
+An `exhausted` event's `cause` is its decision: `retry_budget`, `output_budget` (the repaired
+request cannot keep its admitted output budget or pages), `prologue`, or `lane_rebuild`; the JSONL
+`recovery` event keeps the raw detail. `ninfer_generation_media_requests_total` counts every
+generation attempt whose prompt had media, whatever its result.
+
+Every label value is from a closed set, so series are bounded: unknown API error codes collapse to
+`code="other"`, unnamed ones to `code="unnamed"`, and unknown routes, methods, or statuses to
+`"other"`. HTTP series appear once their route has served a request. Histogram buckets are sized
+for this workload: wall clocks span 1 ms to 20 minutes, inter-token latency 2 ms to 250 ms, token
+counts 32 to 262144, decode rate 5 to 1000 tok/s, and prefill rate 250 to 30000 tok/s.
 
 ```promql
 rate(ninfer_engine_committed_decode_tokens_total[1m])

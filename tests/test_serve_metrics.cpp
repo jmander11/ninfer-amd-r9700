@@ -1,5 +1,7 @@
 #include "serve/metrics.h"
 
+#include <ninfer/targets/qwen3/generation_recovery.h>
+
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
@@ -8,13 +10,17 @@
 #include <iostream>
 #include <locale>
 #include <set>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 
 namespace {
 
 using ninfer::serve::GenerationObservation;
 using ninfer::serve::GenerationOutcome;
+using ninfer::serve::GenerationResult;
+using ninfer::serve::MetricsProtocol;
 using ninfer::serve::ScrapeInputs;
 using ninfer::serve::ServeMetrics;
 using ninfer::serve::kMetricFamilies;
@@ -97,8 +103,8 @@ int main() {
     inputs.stats.gpu_kv_main_capacity_pages = 128;
     inputs.stats.gpu_kv_main_entitled_pages = 40;
     inputs.stats.gpu_kv_spec_capacity_pages = 16;
-    auto snapshot = ninfer::serve::fill_metrics_snapshot(metrics, inputs);
-    const std::string text = ninfer::serve::render_prometheus_text(snapshot);
+    const auto snapshot    = metrics.snapshot(inputs);
+    const std::string text = snapshot.prometheus_text();
 
     failures += check(text.find("# HELP ninfer_engine_info ") != std::string::npos &&
                           text.find("# HELP ninfer_engine_info ") < text.find("# TYPE ninfer_engine_info "),
@@ -128,11 +134,9 @@ int main() {
                       "phase histogram sum is missing");
 
     inputs.stats.kv_cache_fallbacks = 10;
-    const std::string first = ninfer::serve::render_prometheus_text(
-        ninfer::serve::fill_metrics_snapshot(metrics, inputs));
+    const std::string first = metrics.snapshot(inputs).prometheus_text();
     inputs.stats.kv_cache_fallbacks = 20;
-    const std::string second = ninfer::serve::render_prometheus_text(
-        ninfer::serve::fill_metrics_snapshot(metrics, inputs));
+    const std::string second = metrics.snapshot(inputs).prometheus_text();
     failures += check(contains(second, "ninfer_kv_cache_fallbacks_total 20\n") &&
                           !contains(second, "ninfer_kv_cache_fallbacks_total 30"),
                       "absolute counter accumulated across scrapes");
@@ -151,8 +155,7 @@ int main() {
     failures += check(rendered == catalog, "rendered families do not match kMetricFamilies");
 
     ServeMetrics fresh_metrics;
-    const std::string fresh = ninfer::serve::render_prometheus_text(
-        ninfer::serve::fill_metrics_snapshot(fresh_metrics, {}));
+    const std::string fresh = fresh_metrics.snapshot({}).prometheus_text();
     for (const char* phase : {"prepare_cpu", "media_wait", "media_fetch", "queue", "copy_hold",
                               "vision", "prefill", "decode", "recovery", "http_tail"}) {
         failures += check(contains(fresh, std::string("phase=\"") + phase + "\""),
@@ -171,12 +174,11 @@ int main() {
     outcome.metrics.speculative_rounds_per_draft      = {0, 3};
     outcome.metrics.speculative_live_draft_tokens     = 4;
     GenerationObservation observation;
-    observation.protocol = "openai_chat";
-    observation.result   = "success";
+    observation.protocol = MetricsProtocol::OpenAiChat;
+    observation.result   = GenerationResult::Success;
     observation.outcome  = &outcome;
-    ninfer::serve::observe_generation(metrics, observation);
-    const std::string observed = ninfer::serve::render_prometheus_text(
-        ninfer::serve::fill_metrics_snapshot(metrics, inputs));
+    metrics.observe_generation(observation);
+    const std::string observed = metrics.snapshot(inputs).prometheus_text();
     failures += check(contains(observed, "ninfer_speculative_accepted_tokens_total 6\n"),
                       "accepted tokens were not recorded");
     failures += check(contains(observed, "ninfer_prefix_cache_hit_tokens_total{source=\"host_ram\"} 40\n"),
@@ -201,14 +203,13 @@ int main() {
         event.kind             = ninfer::RecoveryEventKind::CycleExclusion;
         event.cause            = "reasoning_cycle";
         event.cycle_exclusions = exclusions;
-        ninfer::serve::observe_recovery_event(metrics, event);
+        metrics.observe_recovery_event(event);
     }
     GenerationObservation terminal;
-    terminal.result   = "error";
+    terminal.result   = GenerationResult::Error;
     terminal.recovery = &outcome.metrics.recovery;
-    ninfer::serve::observe_generation(metrics, terminal);
-    const std::string recovery = ninfer::serve::render_prometheus_text(
-        ninfer::serve::fill_metrics_snapshot(metrics, inputs));
+    metrics.observe_generation(terminal);
+    const std::string recovery = metrics.snapshot(inputs).prometheus_text();
     failures += check(
         contains(recovery,
                  "ninfer_recovery_events_total{cause=\"reasoning_cycle\",kind=\"cycle_exclusion\"} 3\n"),
@@ -216,18 +217,20 @@ int main() {
     failures += check(contains(recovery, "ninfer_recovery_cycle_exclusions_total 8\n"),
                       "terminal cycle exclusions did not add the true total");
 
-    const auto cause = [](const char* kind, const char* detail) {
+    const auto cause = [](std::string_view kind, std::string_view detail) {
         return std::string(ninfer::serve::prometheus_recovery_cause(kind, detail));
     };
+    namespace qwen = ninfer::targets::qwen3;
+    // Every detail the executor publishes on an exhausted event.
     failures += check(
         cause("exhausted", "persistent reasoning exhausted its retry or output-token budget") ==
                 "retry_budget" &&
             cause("exhausted", "no retry or output-token budget remains") == "retry_budget" &&
-            cause("exhausted", "reserved lane cannot be rebuilt safely") == "lane_rebuild" &&
-            cause("exhausted", "repaired request cannot preserve its admitted output budget") ==
-                "output_budget" &&
-            cause("exhausted", "open generation is not the thinking prologue") == "prologue" &&
+            cause("exhausted", qwen::kRecoveryBudgetExhausted) == "output_budget" &&
+            cause("exhausted", qwen::kRecoveryPrologueExhausted) == "prologue" &&
+            cause("exhausted", qwen::kRecoveryLaneExhausted) == "lane_rebuild" &&
             cause("retry_triggered", "repeated_reasoning") == "repeated_reasoning" &&
+            cause("finished", "tool_calls") == "tool_calls" &&
             cause("exhausted", "garbage") == "other",
         "exhausted causes did not map to the closed set");
 
@@ -238,19 +241,17 @@ int main() {
     skipped.metrics.prefill_seconds = 0;
     skipped.metrics.prefix_cache_hit_tokens = 32;
     GenerationObservation skip;
-    skip.result  = "success";
+    skip.result  = GenerationResult::Success;
     skip.outcome = &skipped;
     ServeMetrics skip_metrics;
-    ninfer::serve::observe_generation(skip_metrics, skip);
-    const std::string skipped_text = ninfer::serve::render_prometheus_text(
-        ninfer::serve::fill_metrics_snapshot(skip_metrics, {}));
+    skip_metrics.observe_generation(skip);
+    const std::string skipped_text = skip_metrics.snapshot({}).prometheus_text();
     failures += check(contains(skipped_text, "ninfer_generation_output_tokens_per_second_count 0\n") &&
                           contains(skipped_text, "ninfer_generation_inter_token_latency_seconds_count{protocol=\"openai_chat\"} 0\n") &&
                           contains(skipped_text, "ninfer_generation_phase_seconds_count{phase=\"prefill\"} 0\n"),
                       "zero decode or a full prefix hit observed a sample");
 
-    const std::string json_text = ninfer::serve::render_metrics_json(
-        ninfer::serve::fill_metrics_snapshot(metrics, inputs));
+    const std::string json_text = metrics.snapshot(inputs).json();
     const auto json = nlohmann::json::parse(json_text);
     for (const char* key : {"engine", "build", "scheduler", "http", "gpu_kv", "kv_ram", "kv_disk",
                             "prefix_reuse", "speculative", "recovery", "generation", "phases",
@@ -259,6 +260,91 @@ int main() {
     }
     failures += check(json.at("kv_ram").at("used_bytes") == 4096, "kv_ram.used_bytes drifted from the snapshot");
     failures += check(json.at("phases").at("decode").at("count") == 1, "phases.decode.count drifted from the fixture");
+    failures += check(json.at("device_memory").at("total") == 34359738368.0 &&
+                          json.at("device_memory").at("graph_observed") == 3145728.0,
+                      "device_memory drifted from the startup snapshot");
+
+    const auto& accepted = json.at("speculative").at("accepted_by_position");
+    const auto& by_k     = json.at("speculative").at("rounds_by_k");
+    failures += check(accepted.size() == 15 && accepted.at(0) == 1 && accepted.at(1) == 2 &&
+                          by_k.size() == 15 && by_k.at(0) == 3 && by_k.at(1) == 0,
+                      "speculative position or k arrays drifted from the fixture");
+
+    // Prefill throughput is thousands of tokens per second; it must land in a finite bucket.
+    ServeMetrics rate_metrics;
+    GenerationOutcome prefill = success_outcome();
+    prefill.metrics.prefill_tail_tok_s = 7000.0;
+    GenerationObservation rate;
+    rate.outcome = &prefill;
+    rate_metrics.observe_generation(rate);
+    const std::string rate_text = rate_metrics.snapshot({}).prometheus_text();
+    failures += check(contains(rate_text,
+                               "ninfer_generation_prefill_tokens_per_second_bucket{le=\"6000\"} 0\n") &&
+                          contains(rate_text,
+                                   "ninfer_generation_prefill_tokens_per_second_bucket{le=\"8000\"} 1\n"),
+                      "prefill tokens per second has no finite bucket at real rates");
+    // A 1 s decode over the fixture's 9-token completion is 0.1-0.25 s per token.
+    failures += check(
+        contains(rate_text, "ninfer_generation_inter_token_latency_seconds_bucket{le=\"0.1\",protocol=\"openai_chat\"} 0\n") &&
+            contains(rate_text, "ninfer_generation_inter_token_latency_seconds_bucket{le=\"0.25\",protocol=\"openai_chat\"} 1\n"),
+        "inter-token latency bucket drifted");
+    failures += check(contains(rate_text, "ninfer_generation_prompt_tokens_bucket{le=\"262144\"}"),
+                      "token histogram does not reach 262144");
+
+    ServeMetrics event_metrics;
+    event_metrics.observe_api_error("unknown_parameter");
+    event_metrics.observe_api_error("");
+    event_metrics.observe_api_error("made_up_code");
+    GenerationObservation media_error;
+    media_error.protocol  = MetricsProtocol::AnthropicMessages;
+    media_error.result    = GenerationResult::Error;
+    media_error.stream    = true;
+    media_error.has_media = true;
+    event_metrics.observe_generation(media_error);
+    event_metrics.observe_token_count(MetricsProtocol::OpenAiResponses);
+    event_metrics.observe_http("/v1/responses/abc/cancel", "POST", 200, 0.02);
+    event_metrics.observe_http("/v1/responses/abc/cancel", "POST", 200, 0.02);
+    event_metrics.observe_http("/health", "HEAD", 200, 0.001);
+    event_metrics.observe_http("/v1/score", "POST", 400, 0.01);
+    event_metrics.observe_http("/nope", "BREW", 999, 0.5);
+    const std::string event_text = event_metrics.snapshot({}).prometheus_text();
+    failures += check(contains(event_text, "ninfer_api_errors_total{code=\"unknown_parameter\"} 1\n") &&
+                          contains(event_text, "ninfer_api_errors_total{code=\"unnamed\"} 1\n") &&
+                          contains(event_text, "ninfer_api_errors_total{code=\"other\"} 1\n"),
+                      "API error codes did not map to the closed set");
+    failures += check(contains(event_text, "ninfer_generation_media_requests_total 1\n") &&
+                          contains(event_text,
+                                   "ninfer_generation_requests_total{protocol=\"anthropic_messages\","
+                                   "result=\"error\",stream=\"true\",thinking=\"false\",tools=\"false\"} 1\n"),
+                      "a failed media generation was not counted");
+    failures += check(contains(event_text,
+                               "ninfer_token_count_requests_total{protocol=\"openai_responses\"} 1\n"),
+                      "token-count request was not counted");
+    failures += check(
+        contains(event_text,
+                 "ninfer_http_requests_total{method=\"POST\",protocol=\"openai_responses\","
+                 "route=\"/v1/responses/{id}/cancel\",status=\"200\"} 2\n") &&
+            contains(event_text, "ninfer_http_requests_total{method=\"HEAD\",protocol=\"health\","
+                                 "route=\"/health\",status=\"200\"} 1\n") &&
+            contains(event_text, "ninfer_http_requests_total{method=\"POST\",protocol=\"score\","
+                                 "route=\"/v1/score\",status=\"400\"} 1\n") &&
+            contains(event_text, "ninfer_http_requests_total{method=\"other\",protocol=\"other\","
+                                 "route=\"other\",status=\"other\"} 1\n") &&
+            contains(event_text, "ninfer_http_request_duration_seconds_count{protocol=\"openai_responses\","
+                                 "route=\"/v1/responses/{id}/cancel\"} 2\n"),
+        "HTTP requests were not classified by route, method, and status");
+
+    failures += check(ninfer::serve::metrics_protocol("openai_chat_completions") == MetricsProtocol::OpenAiChat &&
+                          ninfer::serve::metrics_protocol("openai_responses") ==
+                              MetricsProtocol::OpenAiResponses &&
+                          ninfer::serve::metrics_protocol("anthropic_messages") ==
+                              MetricsProtocol::AnthropicMessages,
+                      "request-log protocols did not map");
+    bool unknown_protocol_threw = false;
+    try {
+        (void)ninfer::serve::metrics_protocol("openai_chat");
+    } catch (const std::logic_error&) { unknown_protocol_threw = true; }
+    failures += check(unknown_protocol_threw, "an unknown request-log protocol was accepted");
 
     auto routed = ninfer::serve::classify_http_route("/v1/responses/abc/cancel");
     failures += check(std::string(routed.route) == "/v1/responses/{id}/cancel",
