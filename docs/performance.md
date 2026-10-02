@@ -102,7 +102,13 @@ warm CTAs; accepted tokens match). C1 K7, three interleaved passes: 30.87 -> 30.
 (99.9 -> 101.7 tok/s). A producer's warm only pays for the time it overlaps: 4 MiB stretched each
 producer by as much as it saved in the projection.
 
-Rejected: warming from a parallel graph branch (fork/join made a layer 4x slower);
+Rejected: running each activation producer inside its projection kernel (the first T CTAs produce
+the image; row CTAs issue their first weight batch, then wait on a self-clearing arrival counter).
+It removed 196 of 802 kernels per round and was bitwise identical, but a 128-thread producer CTA
+is slower than the row-wide producer kernel and the waiting row CTAs leave DRAM idle meanwhile:
+C1 K7 31.27 ms per round (vs 30.32), normalized gate/up T8 164.8 vs 161.8 us per layer, 171.6 with
+the waiting CTAs touching their own slice; a synthetic spin producer had suggested 3-5 us saved per
+pair. Also rejected: warming from a parallel graph branch (fork/join made a layer 4x slower);
 `hipExtAnyOrderLaunch` consumer/producer overlap, which works eagerly (a 5.6 us producer fully
 hidden) but is dropped by graph capture; gfx1201 reports no dynamic data-prefetch regions.
 Evidence: `profiles/bench/r9700-decode-c1-20261001/`.
