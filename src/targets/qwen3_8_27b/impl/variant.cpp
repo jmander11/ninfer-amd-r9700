@@ -512,6 +512,27 @@ void Variant::ExecutionState::fp8lut4_project(const ops::r9700::linear::Fp8Activ
 
 namespace {
 
+// Cache warming (core/cache_warm.h) at weight-streaming widths only: a prefill GEMM reuses its
+// weight across token tiles. Sizes were swept on the C1 DFlash K7 round (2026-10-01): a
+// producer warms the first ~2 MiB, about its own duration of DRAM time; the GDN front (9 us)
+// and recurrence (13 us) windows warm 4 MiB of the GDN pair projection's head and of the output
+// projection after its producer's share.
+constexpr std::uint32_t kWarmMaximumTokens = 128U;
+constexpr std::size_t kProducerWarmBytes = std::size_t{2} << 20U;
+constexpr std::size_t kGdnFrontWarmBytes = std::size_t{4} << 20U;
+constexpr std::size_t kGdnRecurrenceWarmBytes = std::size_t{4} << 20U;
+
+// The head of a projection's stream, warmed by the activation producer launched just before it.
+CacheWarm producer_warm(const Weight& weight, std::uint32_t tokens) {
+    if (tokens > kWarmMaximumTokens) return {};
+    return weight_warm(weight, 0U, kProducerWarmBytes);
+}
+
+CacheWarm fp8lut4_warm(std::uint32_t tokens,
+                       std::span<const Variant::ExecutionState::Fp8Lut4Target> targets) {
+    return targets.empty() ? CacheWarm{} : producer_warm(targets.front().weight, tokens);
+}
+
 std::uint32_t tensor_columns(const Tensor& tensor) {
     return static_cast<std::uint32_t>(
         static_cast<std::int64_t>(tensor.ne[1]) * tensor.ne[2] * tensor.ne[3]);
@@ -530,7 +551,8 @@ bool Variant::ExecutionState::fp8lut4_projections(const Tensor& input,
     if (!fp8lut4_targets_supported(tokens, columns, targets)) return false;
     const auto image = fp8lut4_image(tokens, columns);
     HIP_CHECK(ops::r9700::linear::fp8_quantize_activation(
-        {static_cast<const hip_bfloat16*>(input.data), image}, stream));
+        {static_cast<const hip_bfloat16*>(input.data), image, fp8lut4_warm(tokens, targets)},
+        stream));
     fp8lut4_project(image, targets, stream);
     return true;
 }
@@ -554,7 +576,8 @@ bool Variant::ExecutionState::fp8lut4_normalized_projections(const Tensor& resid
          .weight = static_cast<const hip_bfloat16*>(norm.data), .eps = eps, .unit_offset = true,
          .workspace = image,
          .normalized = normalized == nullptr ? nullptr
-                                             : static_cast<hip_bfloat16*>(normalized->data)},
+                                             : static_cast<hip_bfloat16*>(normalized->data),
+         .warm = fp8lut4_warm(tokens, targets)},
         stream));
     fp8lut4_project(image, targets, stream);
     return true;
@@ -573,7 +596,7 @@ bool Variant::ExecutionState::fp8lut4_gated_projections(const Tensor& gate,
     const auto image = fp8lut4_image(tokens, TextConfig::query_size);
     HIP_CHECK(ops::r9700::linear::fp8_quantize_gated_activation(
         {static_cast<const hip_bfloat16*>(gate.data), static_cast<const float*>(attention_fp32.data),
-         image},
+         image, fp8lut4_warm(tokens, targets)},
         stream));
     fp8lut4_project(image, targets, stream);
     return true;
@@ -598,12 +621,18 @@ bool Variant::ExecutionState::fp8lut4_gated_rmsnorm_projections(
     HIP_CHECK(ops::r9700::linear::fp8_quantize_gated_rmsnorm_activation(
         {.input = static_cast<const hip_bfloat16*>(recurrent_output.data),
          .gate = static_cast<const hip_bfloat16*>(z.data),
-         .weight = static_cast<const hip_bfloat16*>(norm.data), .eps = eps, .workspace = image},
+         .weight = static_cast<const hip_bfloat16*>(norm.data), .eps = eps, .workspace = image,
+         .warm = fp8lut4_warm(tokens, targets)},
         stream));
     fp8lut4_project(image, targets, stream);
     return true;
 }
 
+
+CacheWarm Variant::gdn_recurrence_warm(const Weight& output_projection, std::int32_t tokens) {
+    if (tokens <= 0 || static_cast<std::uint32_t>(tokens) > kWarmMaximumTokens) return {};
+    return weight_warm(output_projection, kProducerWarmBytes, kGdnRecurrenceWarmBytes);
+}
 
 ops::r9700::linear::FusedSiluA8Q4G64DownArgs Variant::ExecutionState::fused_down_args(
     const Tensor& gate_up, const Weight& down, Tensor& residual) const {
@@ -1023,7 +1052,9 @@ bool Variant::ExecutionState::gdn_fp8lut4_front(const Tensor& residual, const Te
         static_cast<const hip_bfloat16*>(weights.b_projection.qdata),
         static_cast<const float*>(weights.a_log.data),
         static_cast<const float*>(weights.dt_bias.data), static_cast<float*>(g.data),
-        static_cast<float*>(beta.data), *image, stream));
+        static_cast<float*>(beta.data), *image, stream,
+        static_cast<std::uint32_t>(tokens) <= kWarmMaximumTokens
+            ? weight_warm(query_key, 0U, kGdnFrontWarmBytes) : CacheWarm{}));
     return true;
 }
 
@@ -1698,7 +1729,8 @@ bool Variant::ExecutionState::attention_fp8_normalized_projection(
          .weight = static_cast<const hip_bfloat16*>(norm.data),
          .eps = eps,
          .unit_offset = true,
-         .workspace = *first},
+         .workspace = *first,
+         .warm = producer_warm(query_key, width)},
         stream));
     HIP_CHECK(ops::r9700::linear::fp8_small_t_pair_split(
         {.first = fp8_rows(query_key),
@@ -1732,7 +1764,8 @@ bool Variant::ExecutionState::attention_fp8_gated_output(
     HIP_CHECK(ops::r9700::linear::fp8_quantize_gated_activation(
         {.gate = static_cast<const hip_bfloat16*>(gate.data),
          .attention = static_cast<const float*>(attention_fp32.data),
-         .workspace = *activation},
+         .workspace = *activation,
+         .warm = producer_warm(weight, static_cast<std::uint32_t>(tokens))},
         stream));
     HIP_CHECK(ops::r9700::linear::fp8_small_t_residual(
         fp8_rows(weight), *activation, static_cast<hip_bfloat16*>(residual.data), stream));

@@ -511,6 +511,19 @@ PoolCase pool_case(int width, int batch, int salt) {
     return result;
 }
 
+
+// A CacheWarm over a scratch allocation (lengths not multiples of the warm stride): the Op runs
+// with its warm CTAs, which must not change any result.
+ninfer::CacheWarm scratch_warm() {
+    static std::uint8_t* scratch = [] {
+        void* bytes = nullptr;
+        if (hipMalloc(&bytes, std::size_t{6} << 20U) != hipSuccess) throw std::runtime_error("warm scratch");
+        return static_cast<std::uint8_t*>(bytes);
+    }();
+    return {{{scratch, (std::size_t{4} << 20U) + 100U},
+             {scratch + (std::size_t{4} << 20U), (std::size_t{1} << 20U) + 7U}}};
+}
+
 void qualify_snapshot(int width, int batch, int salt, hipStream_t stream) {
     PoolCase test = pool_case(width, batch, salt);
     if (width == 1) { test.bases = test.initial; }
@@ -530,7 +543,7 @@ void qualify_snapshot(int width, int batch, int salt, hipStream_t stream) {
                        {kDim, kValueHeads, test.in.width, test.in.batch});
     ninfer::ops::gated_delta_net_snapshot(device.tq, device.tk, device.tv, device.tg,
                                           device.tbeta, kScale, true, states, tvalid, tinitial,
-                                          tbases, out, stream);
+                                          tbases, out, stream, scratch_warm());
     HIP_CHECK(hipStreamSynchronize(stream));
     const std::size_t state_count = static_cast<std::size_t>(kValueHeads) * kDim * kDim;
     const auto actual_pool = copied<float>(pool, test.pool.size());
@@ -610,7 +623,7 @@ void qualify_record(bool tree, int width, int batch, int salt, hipStream_t strea
     ninfer::ops::gated_delta_net_replay_record(
         device.tq, device.tk, device.tv, device.tg, device.tbeta, kScale, states, tvalid,
         tinitial, keys, values, gates, out, stream, tree ? &tparent : nullptr,
-        tree ? &arena : nullptr);
+        tree ? &arena : nullptr, scratch_warm());
     HIP_CHECK(hipStreamSynchronize(stream));
     if (copied<float>(pool, test.pool.size()) != test.pool) { fail("record mutated state pool"); }
     const auto actual_keys = copied<hip_bfloat16>(key_record, test.in.k.size());

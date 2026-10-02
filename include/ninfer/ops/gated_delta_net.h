@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/arena.h"
+#include "core/cache_warm.h"
 #include "core/tensor.h"
 
 #include <hip/hip_runtime_api.h>
@@ -72,12 +73,14 @@ void gated_delta_net_trace_prefix_state(
  * state. The caller reserves disjoint complete [base,base+W) intervals and prevents one row from
  * overwriting another row's initial slot; a row may overwrite its own initial slot after loading
  * it. This form uses no arena allocation and `ssm_states` is the only persistent state mutated.
+ * `warm` (also on the replay form) is touched by CTAs past the recurrence grid
+ * (core/cache_warm.h).
  */
 void gated_delta_net_snapshot(const Tensor& q, const Tensor& k, const Tensor& v, const Tensor& g,
                               const Tensor& beta, float scale, bool normalize_qk,
                               Tensor& ssm_states, const Tensor& valid_columns,
                               const Tensor& initial_state_slots, const Tensor& snapshot_base_slots,
-                              Tensor& out, hipStream_t stream);
+                              Tensor& out, hipStream_t stream, const CacheWarm& warm = {});
 
 /**
  * Op: gated_delta_net_replay_record
@@ -111,6 +114,7 @@ void gated_delta_net_replay_record(const Tensor& q, const Tensor& k, const Tenso
                                    const Tensor& initial_state_slots, Tensor& key_record,
                                    Tensor& value_record, Tensor& gate_record, Tensor& out,
                                    hipStream_t stream, const Tensor* parent_index = nullptr,
-                                   WorkspaceArena* workspace = nullptr);
+                                   WorkspaceArena* workspace = nullptr,
+                                   const CacheWarm& warm = {});
 
 } // namespace ninfer::ops

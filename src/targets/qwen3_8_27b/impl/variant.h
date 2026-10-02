@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/cache_warm.h"
 #include "ops/r9700/linear/a8q4_small_batch_projection.h"
 #include "ops/r9700/linear/fp8_activation.h"
 #include "targets/qwen3_8_27b/impl/config.h"
@@ -489,6 +490,10 @@ struct Variant {
         Tensor& query, Tensor& key, Tensor& value, Tensor& output_gate,
         qwen3::TextPhase phase, WorkspaceArena& workspace, hipStream_t stream,
         ExecutionState* execution = nullptr, std::int32_t text_layer = -1);
+    // The part of the GDN output projection's stream the recurrence warms ahead of it, past the
+    // head its activation producer warms (empty at prefill widths).
+    [[nodiscard]] static CacheWarm gdn_recurrence_warm(const Weight& output_projection,
+                                                       std::int32_t tokens);
     // The family provides the gated-RMSNorm parameters and the BF16 [128,48,T] normalized
     // scratch; the leaf owns whether the normalized output is materialized (always when
     // `materialize_normalized`) or fused into the output projection's activation codec.

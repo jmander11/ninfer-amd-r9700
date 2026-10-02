@@ -228,8 +228,13 @@ __device__ __forceinline__ void quantize_activation_row(
 // penalty on gfx1201 whatever the row width. Each token row is quantized independently.
 __global__ __launch_bounds__(kBlockSize) void fp8_quantize_activation_kernel(
     const hip_bfloat16* input, std::uint8_t* codes, float* scales, std::uint32_t* status,
-    std::uint32_t tokens, std::uint32_t columns, std::uint32_t padded) {
-    for (std::uint32_t token = blockIdx.x; token < tokens; token += gridDim.x) {
+    std::uint32_t tokens, std::uint32_t columns, std::uint32_t padded, CacheWarm warm,
+    std::uint32_t work_ctas) {
+    if (blockIdx.x >= work_ctas) {
+        warm_cache(warm, blockIdx.x - work_ctas, gridDim.x - work_ctas);
+        return;
+    }
+    for (std::uint32_t token = blockIdx.x; token < tokens; token += work_ctas) {
         quantize_activation_row(token, input, codes, scales, status, columns, padded);
         __syncthreads();  // the next row reuses the block's reduction storage
     }
@@ -267,7 +272,12 @@ __device__ __forceinline__ void norm_vector_apply(float (&values)[8], uint4 gain
 
 __global__ __launch_bounds__(kNormThreads) void fp8_quantize_normalized_kernel(
     const hip_bfloat16* input, const hip_bfloat16* weight, float eps, bool unit_offset,
-    std::uint8_t* codes, float* scales, std::uint32_t* status, hip_bfloat16* normalized) {
+    std::uint8_t* codes, float* scales, std::uint32_t* status, hip_bfloat16* normalized,
+    CacheWarm warm, std::uint32_t tokens) {
+    if (blockIdx.x >= tokens) {
+        warm_cache(warm, blockIdx.x - tokens, gridDim.x - tokens);
+        return;
+    }
     const std::uint32_t lane = threadIdx.x % kWaveSize, wave = threadIdx.x / kWaveSize;
     const auto* rows = reinterpret_cast<const uint4*>(input);
     const auto* gains = reinterpret_cast<const uint4*>(weight);
@@ -316,7 +326,11 @@ __device__ __forceinline__ void gate_vector(const hip_bfloat16* gate, const floa
 template <std::uint32_t Threads>
 __global__ __launch_bounds__(Threads) void fp8_quantize_gated_kernel(
     const hip_bfloat16* gate, const float* attention, std::uint8_t* codes, float* scales,
-    std::uint32_t* status) {
+    std::uint32_t* status, CacheWarm warm, std::uint32_t tokens) {
+    if (blockIdx.x >= tokens) {
+        warm_cache(warm, blockIdx.x - tokens, gridDim.x - tokens);
+        return;
+    }
     constexpr std::uint32_t columns = 8U * Threads;
     const std::uint32_t token = blockIdx.x;
     float values[8];
@@ -359,7 +373,12 @@ __device__ __forceinline__ void gated_norm_vector(const hip_bfloat16* input,
 
 __global__ __launch_bounds__(kGatedNormThreads) void fp8_quantize_gated_rmsnorm_kernel(
     const hip_bfloat16* input, const hip_bfloat16* gate, const hip_bfloat16* weight, float eps,
-    std::uint8_t* codes, float* scales, std::uint32_t* status) {
+    std::uint8_t* codes, float* scales, std::uint32_t* status, CacheWarm warm,
+    std::uint32_t tokens) {
+    if (blockIdx.x >= tokens) {
+        warm_cache(warm, blockIdx.x - tokens, gridDim.x - tokens);
+        return;
+    }
     const std::uint32_t token = blockIdx.x;
     float values[8];
     gated_norm_vector(input, gate, weight, eps, token, values);
@@ -414,11 +433,13 @@ hipError_t fp8_quantize_activation(const Fp8ActivationQuantizeArgs& args,
         ranges_overlap(args.input, input_bytes, args.workspace.status, status_bytes(args.workspace))) {
         return hipErrorInvalidValue;
     }
+    const std::uint32_t work_ctas = std::min(args.workspace.tokens, kQuantizeResidentBlocks);
     hipLaunchKernelGGL(fp8_quantize_activation_kernel,
-                       dim3(std::min(args.workspace.tokens, kQuantizeResidentBlocks)),
+                       dim3(work_ctas + cache_warm_ctas(args.warm, kBlockSize, work_ctas)),
                        dim3(kBlockSize), 0, stream, args.input, args.workspace.codes,
                        args.workspace.scales, args.workspace.status, args.workspace.tokens,
-                       args.workspace.columns, args.workspace.padded_columns);
+                       args.workspace.columns, args.workspace.padded_columns, args.warm,
+                       work_ctas);
     return hipGetLastError();
 }
 
@@ -449,9 +470,10 @@ hipError_t fp8_quantize_normalized_activation(const Fp8NormalizedQuantizeArgs& a
         return hipErrorInvalidValue;
     }
     hipLaunchKernelGGL(fp8_quantize_normalized_kernel,
-                       dim3(workspace.tokens), dim3(kNormThreads), 0,
-                       stream, args.input, args.weight, args.eps, args.unit_offset,
-                       workspace.codes, workspace.scales, workspace.status, args.normalized);
+                       dim3(workspace.tokens + cache_warm_ctas(args.warm, kNormThreads, workspace.tokens)),
+                       dim3(kNormThreads), 0, stream, args.input, args.weight, args.eps,
+                       args.unit_offset, workspace.codes, workspace.scales, workspace.status,
+                       args.normalized, args.warm, workspace.tokens);
     return hipGetLastError();
 }
 
@@ -478,9 +500,11 @@ hipError_t fp8_quantize_gated_activation(const Fp8GatedQuantizeArgs& args,
         return hipErrorInvalidValue;
     }
     hipLaunchKernelGGL(fp8_quantize_gated_kernel<kGatedColumns / 8U>,
-                       dim3(workspace.tokens), dim3(kGatedColumns / 8U),
-                       0, stream, args.gate, args.attention, workspace.codes, workspace.scales,
-                       workspace.status);
+                       dim3(workspace.tokens +
+                            cache_warm_ctas(args.warm, kGatedColumns / 8U, workspace.tokens)),
+                       dim3(kGatedColumns / 8U), 0, stream, args.gate, args.attention,
+                       workspace.codes, workspace.scales, workspace.status, args.warm,
+                       workspace.tokens);
     return hipGetLastError();
 }
 
@@ -505,9 +529,11 @@ hipError_t fp8_quantize_gated_rmsnorm_activation(const Fp8GatedRmsNormQuantizeAr
         return hipErrorInvalidValue;
     }
     hipLaunchKernelGGL(fp8_quantize_gated_rmsnorm_kernel,
-                       dim3(workspace.tokens), dim3(kGatedNormThreads),
-                       0, stream, args.input, args.gate, args.weight, args.eps, workspace.codes,
-                       workspace.scales, workspace.status);
+                       dim3(workspace.tokens +
+                            cache_warm_ctas(args.warm, kGatedNormThreads, workspace.tokens)),
+                       dim3(kGatedNormThreads), 0, stream, args.input, args.gate, args.weight,
+                       args.eps, workspace.codes, workspace.scales, workspace.status, args.warm,
+                       workspace.tokens);
     return hipGetLastError();
 }
 

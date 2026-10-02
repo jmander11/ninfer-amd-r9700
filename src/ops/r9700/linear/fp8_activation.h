@@ -3,6 +3,8 @@
 #include <hip/hip_bfloat16.h>
 #include <hip/hip_runtime_api.h>
 
+#include "core/cache_warm.h"
+
 #include <cstddef>
 #include <cstdint>
 
@@ -29,10 +31,13 @@ enum Fp8ActivationStatus : std::uint32_t {
     Fp8ActivationNonfinite = 1U << 0U,
 };
 
+// Every producer also takes the consumer's CacheWarm (core/cache_warm.h): warm CTAs past its
+// work grid touch those bytes while the latency-bound producer runs.
 struct Fp8ActivationQuantizeArgs {
     // This represented BF16 [T,K] tensor is the sole public input rounding boundary.
     const hip_bfloat16* input = nullptr;
     Fp8ActivationWorkspace workspace{};
+    CacheWarm warm{};
 };
 
 [[nodiscard]] std::size_t fp8_activation_workspace_capacity_bytes(
@@ -56,6 +61,7 @@ struct Fp8NormalizedQuantizeArgs {
     bool unit_offset           = false;
     Fp8ActivationWorkspace workspace{};
     hip_bfloat16* normalized   = nullptr;
+    CacheWarm warm{};
 };
 [[nodiscard]] hipError_t fp8_quantize_normalized_activation(
     const Fp8NormalizedQuantizeArgs& args, hipStream_t stream) noexcept;
@@ -64,6 +70,7 @@ struct Fp8GatedQuantizeArgs {
     const hip_bfloat16* gate = nullptr;
     const float* attention   = nullptr;
     Fp8ActivationWorkspace workspace{};
+    CacheWarm warm{};
 };
 [[nodiscard]] hipError_t fp8_quantize_gated_activation(const Fp8GatedQuantizeArgs& args,
                                                        hipStream_t stream) noexcept;
@@ -77,6 +84,7 @@ struct Fp8GatedRmsNormQuantizeArgs {
     const hip_bfloat16* weight = nullptr;
     float eps                  = 0.0F;
     Fp8ActivationWorkspace workspace{};
+    CacheWarm warm{};
 };
 [[nodiscard]] hipError_t fp8_quantize_gated_rmsnorm_activation(
     const Fp8GatedRmsNormQuantizeArgs& args, hipStream_t stream) noexcept;

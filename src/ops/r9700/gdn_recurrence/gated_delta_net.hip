@@ -226,7 +226,11 @@ void snapshot_kernel(const hip_bfloat16* q, const hip_bfloat16* k, const hip_bfl
                      const std::int32_t* valid_columns,
                      const std::int32_t* initial_slots,
                      const std::int32_t* snapshot_bases, hip_bfloat16* output,
-                     int width, int slots, float scale) {
+                     int width, int slots, float scale, CacheWarm warm, unsigned work_ctas) {
+    if (blockIdx.x >= work_ctas) {
+        warm_cache(warm, blockIdx.x - work_ctas, gridDim.x - work_ctas);
+        return;
+    }
     const int combined = static_cast<int>(blockIdx.x);
     const int batch = combined / kValueHeads;
     const int value_head = combined % kValueHeads;
@@ -345,7 +349,12 @@ void record_kernel(const hip_bfloat16* q, const hip_bfloat16* k, const hip_bfloa
                    const std::int32_t* valid_columns, const std::int32_t* initial_slots,
                    const std::int32_t* parent_index, float* tree_states,
                    hip_bfloat16* key_record, hip_bfloat16* value_record, float* gate_record,
-                   hip_bfloat16* output, int width, int slots, float scale) {
+                   hip_bfloat16* output, int width, int slots, float scale, CacheWarm warm,
+                   unsigned work_ctas) {
+    if (blockIdx.x >= work_ctas) {
+        warm_cache(warm, blockIdx.x - work_ctas, gridDim.x - work_ctas);
+        return;
+    }
     constexpr int kWaves = kOrdinaryBlock / 32;
     const int combined = static_cast<int>(blockIdx.x) / kOrdinaryRowTiles;
     const int row_tile = static_cast<int>(blockIdx.x) % kOrdinaryRowTiles;
@@ -591,7 +600,7 @@ void gated_delta_net_snapshot(const Tensor& q, const Tensor& k, const Tensor& v,
                               const Tensor& beta, float scale, bool normalize_qk,
                               Tensor& states, const Tensor& valid_columns,
                               const Tensor& initial_slots, const Tensor& snapshot_bases,
-                              Tensor& out, hipStream_t stream) {
+                              Tensor& out, hipStream_t stream, const CacheWarm& warm) {
     const Geometry geometry =
         validate_inputs(q, k, v, g, beta, scale, out, q.ne[3], kMaximumVerifyWidth);
     if (states.ne[3] < 1) { throw std::invalid_argument("gated_delta_net: empty state pool"); }
@@ -605,8 +614,10 @@ void gated_delta_net_snapshot(const Tensor& q, const Tensor& k, const Tensor& v,
     disjoint({&q, &k, &v, &g, &beta, &out, &states, &valid_columns, &initial_slots});
     disjoint({&q, &k, &v, &g, &beta, &out, &states, &valid_columns, &snapshot_bases});
     if (stream == nullptr) { throw std::invalid_argument("gated_delta_net: null stream"); }
+    const unsigned snapshot_ctas = static_cast<unsigned>(geometry.batch * kValueHeads);
 #define NINFER_LAUNCH_SNAPSHOT(NORM) \
-    hipLaunchKernelGGL((snapshot_kernel<NORM>), dim3(geometry.batch * kValueHeads), dim3(kBlock), \
+    hipLaunchKernelGGL((snapshot_kernel<NORM>), \
+                       dim3(snapshot_ctas + cache_warm_ctas(warm, kBlock, snapshot_ctas)), dim3(kBlock), \
                        0, stream, static_cast<const hip_bfloat16*>(q.data), \
                        static_cast<const hip_bfloat16*>(k.data), static_cast<const hip_bfloat16*>(v.data), \
                        static_cast<const float*>(g.data), static_cast<const float*>(beta.data), \
@@ -614,7 +625,8 @@ void gated_delta_net_snapshot(const Tensor& q, const Tensor& k, const Tensor& v,
                        empty(valid_columns) ? nullptr : static_cast<const std::int32_t*>(valid_columns.data), \
                        static_cast<const std::int32_t*>(initial_slots.data), \
                        static_cast<const std::int32_t*>(snapshot_bases.data), \
-                       static_cast<hip_bfloat16*>(out.data), geometry.width, states.ne[3], scale)
+                       static_cast<hip_bfloat16*>(out.data), geometry.width, states.ne[3], scale, \
+                       warm, snapshot_ctas)
     if (normalize_qk) { NINFER_LAUNCH_SNAPSHOT(true); }
     else { NINFER_LAUNCH_SNAPSHOT(false); }
 #undef NINFER_LAUNCH_SNAPSHOT
@@ -642,7 +654,7 @@ void gated_delta_net_replay_record(const Tensor& q, const Tensor& k, const Tenso
                                    const Tensor& initial_slots, Tensor& key_record,
                                    Tensor& value_record, Tensor& gate_record, Tensor& out,
                                    hipStream_t stream, const Tensor* parent_index,
-                                   WorkspaceArena* workspace) {
+                                   WorkspaceArena* workspace, const CacheWarm& warm) {
     const Geometry geometry =
         validate_inputs(q, k, v, g, beta, scale, out, q.ne[3], kMaximumVerifyWidth);
     if (geometry.width < 2 || states.ne[3] < 1) {
@@ -669,14 +681,15 @@ void gated_delta_net_replay_record(const Tensor& q, const Tensor& k, const Tenso
     if (tree) { tensors.push_back(parent_index); }
     disjoint(tensors);
     if (stream == nullptr) { throw std::invalid_argument("gated_delta_net: null stream"); }
+    const unsigned record_ctas =
+        static_cast<unsigned>(geometry.batch * kValueHeads * kOrdinaryRowTiles);
+    const dim3 record_grid(record_ctas + cache_warm_ctas(warm, kOrdinaryBlock, record_ctas));
     if (tree) {
         auto scope = workspace->scope();
         const std::size_t bytes = gated_delta_net_replay_record_workspace_capacity_bytes(
             kValueHeads, geometry.batch, geometry.width);
         float* scratch = static_cast<float*>(workspace->alloc_bytes(bytes).data);
-        hipLaunchKernelGGL((record_kernel<true>),
-                           dim3(geometry.batch * kValueHeads * kOrdinaryRowTiles),
-                           dim3(kOrdinaryBlock),
+        hipLaunchKernelGGL((record_kernel<true>), record_grid, dim3(kOrdinaryBlock),
                            0, stream, static_cast<const hip_bfloat16*>(q.data),
                            static_cast<const hip_bfloat16*>(k.data),
                            static_cast<const hip_bfloat16*>(v.data), static_cast<const float*>(g.data),
@@ -687,11 +700,9 @@ void gated_delta_net_replay_record(const Tensor& q, const Tensor& k, const Tenso
                            static_cast<hip_bfloat16*>(key_record.data),
                            static_cast<hip_bfloat16*>(value_record.data),
                            static_cast<float*>(gate_record.data), static_cast<hip_bfloat16*>(out.data),
-                           geometry.width, states.ne[3], scale);
+                           geometry.width, states.ne[3], scale, warm, record_ctas);
     } else {
-        hipLaunchKernelGGL((record_kernel<false>),
-                           dim3(geometry.batch * kValueHeads * kOrdinaryRowTiles),
-                           dim3(kOrdinaryBlock), 0, stream, static_cast<const hip_bfloat16*>(q.data),
+        hipLaunchKernelGGL((record_kernel<false>), record_grid, dim3(kOrdinaryBlock), 0, stream, static_cast<const hip_bfloat16*>(q.data),
                            static_cast<const hip_bfloat16*>(k.data),
                            static_cast<const hip_bfloat16*>(v.data), static_cast<const float*>(g.data),
                            static_cast<const float*>(beta.data), static_cast<const float*>(states.data),
@@ -700,7 +711,7 @@ void gated_delta_net_replay_record(const Tensor& q, const Tensor& k, const Tenso
                            static_cast<hip_bfloat16*>(key_record.data),
                            static_cast<hip_bfloat16*>(value_record.data),
                            static_cast<float*>(gate_record.data), static_cast<hip_bfloat16*>(out.data),
-                           geometry.width, states.ne[3], scale);
+                           geometry.width, states.ne[3], scale, warm, record_ctas);
     }
     HIP_CHECK(hipGetLastError());
 }

@@ -77,6 +77,19 @@ struct Image {
     }
 };
 
+
+// A CacheWarm over a scratch allocation (lengths not multiples of the warm stride): the Op runs
+// with its warm CTAs, which must not change any result.
+ninfer::CacheWarm scratch_warm() {
+    static std::uint8_t* scratch = [] {
+        void* bytes = nullptr;
+        if (hipMalloc(&bytes, std::size_t{6} << 20U) != hipSuccess) throw std::runtime_error("warm scratch");
+        return static_cast<std::uint8_t*>(bytes);
+    }();
+    return {{{scratch, (std::size_t{4} << 20U) + 100U},
+             {scratch + (std::size_t{4} << 20U), (std::size_t{1} << 20U) + 7U}}};
+}
+
 void run_front(unsigned T, bool poison, hipStream_t s) {
     const std::string label = "front T" + std::to_string(T) + (poison ? " poisoned" : "");
     Rng rng;
@@ -103,7 +116,8 @@ void run_front(unsigned T, bool poison, hipStream_t s) {
     std::vector<std::uint32_t> stale(T, 7U);
     check(hipMemcpy(fused.workspace.status, stale.data(), T * 4U, hipMemcpyHostToDevice), "stale");
     check(gdn::fp8_gdn_normalized_front(d_residual.data, d_norm.data, 1e-6F, true, d_a.data, d_b.data,
-                                        d_a_log.data, d_dt.data, g8.data, beta8.data, fused.workspace, s),
+                                        d_a_log.data, d_dt.data, g8.data, beta8.data, fused.workspace, s,
+                                        scratch_warm()),
           "fp8 front");
     check(lin::fp8_quantize_activation({seam.data, reference.workspace}, s), "reference quantize");
     check(hipStreamSynchronize(s), "sync");

@@ -2,7 +2,8 @@
 // gate, GDN gated per-head RMSNorm) against an FP64 oracle of their
 // represented BF16 values: per-token scale max|v| / 448, every decoded code within one E4M3 rounding
 // of the value (plus the BF16 seam rounding), and the per-token status words, including a token
-// with a nonfinite input, at small and prefill widths.
+// with a nonfinite input, at small and prefill widths. Each producer is also run with a CacheWarm
+// (core/cache_warm.h) and must publish a byte-identical image.
 #include "ops/r9700/linear/fp8_activation.h"
 #include "../../tests/ops/fp8_int4_kv_oracle.h"
 
@@ -121,6 +122,29 @@ struct Image {
     }
 };
 
+std::vector<std::uint8_t> image_bytes(const Image& image) {
+    std::vector<std::uint8_t> host(image.storage.count);
+    check(hipMemcpy(host.data(), image.storage.data, host.size(), hipMemcpyDeviceToHost), "image");
+    return host;
+}
+
+// Warm ranges over a scratch allocation, deliberately not multiples of the warm stride.
+ninfer::CacheWarm scratch_warm() {
+    static Device<std::uint8_t> scratch(std::size_t{6} << 20U);
+    return {{{scratch.data, (std::size_t{4} << 20U) + 100U},
+             {scratch.data + (std::size_t{4} << 20U), (std::size_t{1} << 20U) + 7U}}};
+}
+
+// Runs `produce` again into a fresh image with the scratch warm; the bytes must match.
+template <class Produce>
+void require_warm_identical(const Image& reference, std::uint32_t tokens, std::uint32_t columns,
+                            Produce produce, hipStream_t stream, const std::string& label) {
+    Image warmed(tokens, columns);
+    check(produce(warmed.workspace, scratch_warm()), "warmed producer");
+    check(hipStreamSynchronize(stream), "sync");
+    require(image_bytes(warmed) == image_bytes(reference), label + " differs with a cache warm");
+}
+
 void run(std::uint32_t tokens, bool poison, Rng& rng, hipStream_t stream) {
     const std::string suffix = " T" + std::to_string(tokens) + (poison ? " poisoned" : "");
     const std::uint32_t bad_token = tokens / 2U;
@@ -139,6 +163,9 @@ void run(std::uint32_t tokens, bool poison, Rng& rng, hipStream_t stream) {
         std::vector<double> v(x.size());
         for (std::size_t i = 0; i < x.size(); ++i) v[i] = static_cast<float>(x[i]);
         check_image(image.workspace, v, tokens, K, "plain" + suffix);
+        require_warm_identical(image, tokens, K, [&](const auto& workspace, const auto& warm) {
+            return linear::fp8_quantize_activation({dx.data, workspace, warm}, stream);
+        }, stream, "plain" + suffix);
     }
     {  // RMSNorm with unit offset (K5120).
         constexpr std::uint32_t K = 5120;
@@ -166,6 +193,10 @@ void run(std::uint32_t tokens, bool poison, Rng& rng, hipStream_t stream) {
                          (1.0 + static_cast<float>(w[k])));
         }
         check_image(image.workspace, v, tokens, K, "normalized" + suffix);
+        require_warm_identical(image, tokens, K, [&](const auto& workspace, const auto& warm) {
+            return linear::fp8_quantize_normalized_activation(
+                {dx.data, dw.data, 1e-6F, true, workspace, nullptr, warm}, stream);
+        }, stream, "normalized" + suffix);
         // The BF16 side output: the same image, and exactly the rows it encodes (a plain
         // quantization of the side output reproduces it), each within one BF16 step of the oracle.
         Device<hip_bfloat16> dn(x.size());
@@ -175,14 +206,10 @@ void run(std::uint32_t tokens, bool poison, Rng& rng, hipStream_t stream) {
         check(linear::fp8_quantize_normalized_activation(args, stream), "normalized side");
         check(linear::fp8_quantize_activation({dn.data, requantized.workspace}, stream), "requantize");
         check(hipStreamSynchronize(stream), "sync");
-        const auto bytes = [&](const Image& i) {
-            std::vector<std::uint8_t> host(i.storage.count);
-            check(hipMemcpy(host.data(), i.storage.data, host.size(), hipMemcpyDeviceToHost), "image");
-            return host;
-        };
-        const auto reference = bytes(image);
-        require(bytes(side) == reference, "normalized side image differs" + suffix);
-        require(bytes(requantized) == reference, "normalized side rows differ from the image" + suffix);
+        const auto reference = image_bytes(image);
+        require(image_bytes(side) == reference, "normalized side image differs" + suffix);
+        require(image_bytes(requantized) == reference,
+                "normalized side rows differ from the image" + suffix);
         const auto n = dn.download();
         for (std::size_t i = 0; i < n.size(); ++i) {
             if (!std::isfinite(v[i])) continue;
@@ -208,6 +235,9 @@ void run(std::uint32_t tokens, bool poison, Rng& rng, hipStream_t stream) {
         for (std::size_t i = 0; i < v.size(); ++i)
             v[i] = bf16(bf16(attention[i]) / (1.0 + std::exp(-static_cast<double>(static_cast<float>(gate[i])))));
         check_image(image.workspace, v, tokens, K, "attention gate" + suffix);
+        require_warm_identical(image, tokens, K, [&](const auto& workspace, const auto& warm) {
+            return linear::fp8_quantize_gated_activation({dg.data, da.data, workspace, warm}, stream);
+        }, stream, "attention gate" + suffix);
     }
     {  // GDN gated per-head RMSNorm (48 x 128).
         constexpr std::uint32_t K = 6144, head = 128;
@@ -242,6 +272,10 @@ void run(std::uint32_t tokens, bool poison, Rng& rng, hipStream_t stream) {
             if (bad) v[static_cast<std::size_t>(t) * K] = NAN;
         }
         check_image(image.workspace, v, tokens, K, "gdn gated rmsnorm" + suffix);
+        require_warm_identical(image, tokens, K, [&](const auto& workspace, const auto& warm) {
+            return linear::fp8_quantize_gated_rmsnorm_activation(
+                {dx.data, dz.data, dw.data, 1e-6F, workspace, warm}, stream);
+        }, stream, "gdn gated rmsnorm" + suffix);
     }
 }
 

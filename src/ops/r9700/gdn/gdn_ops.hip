@@ -759,7 +759,11 @@ __global__ __launch_bounds__(kControlT1Threads) void gdn_normalized_front_kernel
     const float* dt_bias, float* g, float* beta, std::uint8_t* low_codes,
     std::uint8_t* high_codes, std::uint16_t* scale_words, std::uint32_t* status,
     hip_bfloat16* hidden, std::uint32_t* clear_status, std::uint32_t tokens,
-    float* fp8_scales) {
+    float* fp8_scales, CacheWarm warm) {
+    if (blockIdx.x >= kControlHeads) {
+        warm_cache(warm, blockIdx.x - kControlHeads, gridDim.x - kControlHeads);
+        return;
+    }
     __shared__ float wave_sums[kFrontPassTokens][kFrontWaves];
     __shared__ float inverses[kFrontPassTokens];
     __shared__ float a_waves[kFrontPassTokens][kFrontWaves];
@@ -1510,7 +1514,7 @@ hipError_t bf16_gdn_normalized_front(
                            dim3(kControlT1Threads), 0, stream, residual, norm, eps, unit_offset,
                            a_weight, b_weight, a_log, dt_bias, g, beta, planes.low_codes,
                            planes.high_codes, planes.scales, planes.status, hidden,
-                           clear_status, tokens, nullptr);
+                           clear_status, tokens, nullptr, CacheWarm{});
     });
 }
 
@@ -1518,7 +1522,7 @@ hipError_t fp8_gdn_normalized_front(
     const hip_bfloat16* residual, const hip_bfloat16* norm, float eps, bool unit_offset,
     const hip_bfloat16* a_weight, const hip_bfloat16* b_weight, const float* a_log,
     const float* dt_bias, float* g, float* beta, const linear::Fp8ActivationWorkspace& image,
-    hipStream_t stream) noexcept {
+    hipStream_t stream, const CacheWarm& warm) noexcept {
     const std::uint32_t tokens = image.tokens;
     const auto aligned16 = [](const void* pointer) {
         return reinterpret_cast<std::uintptr_t>(pointer) % 16U == 0U;
@@ -1550,10 +1554,11 @@ hipError_t fp8_gdn_normalized_front(
         for (std::size_t second = first + 1; second < ranges.size(); ++second)
             if (overlaps(ranges[first], ranges[second])) return hipErrorInvalidValue;
     return checked_launch(true, [&] {
-        hipLaunchKernelGGL(gdn_normalized_front_kernel<true>, dim3(kControlHeads),
+        hipLaunchKernelGGL(gdn_normalized_front_kernel<true>,
+                           dim3(kControlHeads + cache_warm_ctas(warm, kControlT1Threads, kControlHeads)),
                            dim3(kControlT1Threads), 0, stream, residual, norm, eps, unit_offset,
                            a_weight, b_weight, a_log, dt_bias, g, beta, image.codes, nullptr,
-                           nullptr, image.status, nullptr, nullptr, tokens, image.scales);
+                           nullptr, image.status, nullptr, nullptr, tokens, image.scales, warm);
     });
 }
 

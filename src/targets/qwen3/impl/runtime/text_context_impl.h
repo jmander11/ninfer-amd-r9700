@@ -1392,7 +1392,8 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
                                                kGdnScale, recurrent_states, valid,
                                                *active_linear_state_slots_, live_records.key,
                                                live_records.value, live_records.gate, out_batch, s,
-                                               active_parent_index_, &work_);
+                                               active_parent_index_, &work_,
+                                               Variant::gdn_recurrence_warm(*w.out_proj, T));
             if (pack_replay) {
                 qwen3::pack_replay_record_layer(persistent_records, live_records, s);
             }
@@ -1400,7 +1401,7 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
             ops::gated_delta_net_snapshot(q_batch, k_batch, v_batch, g_batch, beta_batch, kGdnScale,
                                           /*normalize_qk=*/true, recurrent_states, valid,
                                           *active_linear_state_slots_, *active_linear_state_slots_,
-                                          out_batch, s);
+                                          out_batch, s, Variant::gdn_recurrence_warm(*w.out_proj, T));
         }
         if constexpr (requires { tap.capture_gdn_recurrence(text_layer, o, s); }) {
             tap.capture_gdn_recurrence(text_layer, o, s);
@@ -1568,7 +1569,8 @@ void TextContext::gdn_mix_mixed(const GdnLayerW& w, Tensor& x, int gidx, int tex
                                            kGdnScale, recurrent_states, valid,
                                            *active_linear_state_slots_, live_records.key,
                                            live_records.value, live_records.gate, out_batch, s,
-                                           nullptr, &work_);
+                                           nullptr, &work_,
+                                           Variant::gdn_recurrence_warm(*w.out_proj, T));
         if (pack_replay) { qwen3::pack_replay_record_layer(persistent_records, live_records, s); }
     }
 

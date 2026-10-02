@@ -82,6 +82,31 @@ harness. Prefill rows predate the 2026-09-28 output-head and
 attention GPTQ reconversions, which change weight values but not formats or routes, and all rows
 predate the 2026-09-30 reduction to 21 protections (C1 decode +2.3%, C4 unchanged, prefill +0.4%).
 
+## Decode cache warming (2026-10-01)
+
+C1 DFlash K7 profile (`ninfer_bench` P512/G256, kernel trace): 30.9 ms per round, 802 kernels,
+29.3 ms kernel time. The round's weight bytes (~15.4 GB) stream in ~24 ms at the 636 GB/s read
+peak; the rest is projection ramp/tail (~2 ms), latency-bound kernels (~2.7 ms: quantize
+producers, GDN front and record, verify attention) and launch boundaries. An empty kernel costs
+3.05 us inside a Device Graph on gfx1201, unchanged by `HIP_FORCE_DEV_KERNARG`,
+`ROC_USE_FGS_KERNARG`, `DEBUG_HIP_GRAPH_*` or direct-doorbell settings; a grid of about 2016-2048
+waves costs ~34 us (empty 256-thread grids of 253..256 CTAs).
+
+Latency-bound kernels now carry warm CTAs past their work grid that touch one dword per 256-byte
+line of the next projection's head (`core/cache_warm.h`), so it starts from L2/Infinity Cache:
+the FP8 activation producers warm 2 MiB of their consumer (codes plus group codes), the GDN
+normalized front 4 MiB of the GDN pair projection, and the GDN recurrence (record and snapshot)
+4 MiB of the output projection after its producer's share; prefill widths (T > 128) warm
+nothing. Results are bit-identical (the producer, front and recurrence qualifications run with
+warm CTAs; accepted tokens match). C1 K7, three interleaved passes: 30.87 -> 30.32 ms per round
+(99.9 -> 101.7 tok/s). A producer's warm only pays for the time it overlaps: 4 MiB stretched each
+producer by as much as it saved in the projection.
+
+Rejected: warming from a parallel graph branch (fork/join made a layer 4x slower);
+`hipExtAnyOrderLaunch` consumer/producer overlap, which works eagerly (a 5.6 us producer fully
+hidden) but is dropped by graph capture; gfx1201 reports no dynamic data-prefetch regions.
+Evidence: `profiles/bench/r9700-decode-c1-20261001/`.
+
 ## Prefill GEMM token spans: chunks above 2048 (2026-10-01)
 
 One FP8LUT4 / row-scaled FP8 prefill GEMM launch over more than ~2048 tokens lost its activation
