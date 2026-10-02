@@ -387,23 +387,34 @@ void idle_cancel_during_capacity_eviction(ninfer::DeviceContext& device) {
     const auto second = capture_tokens(ram, pool, allocation, device,
                                        std::vector<ninfer::TokenId>(64, 22));
     disk.note_ram_resident(second, 0);
-    disk.test_set_manifest_io_stall_ms(300);
+    // The eviction's MANIFEST write is held until the cancellation has registered, so the
+    // cancellation always lands inside the window regardless of host scheduling.
+    disk.test_hold_manifest_io(true);
     disk.test_set_payload_io_stall_ms(2000);
     disk.request_idle_spill();
     if (!wait_pred([&] { return disk.test_manifest_io_entered(); }, std::chrono::seconds(5))) {
-        disk.test_set_manifest_io_stall_ms(0);
+        disk.test_hold_manifest_io(false);
         disk.test_set_payload_io_stall_ms(0);
         disk.cancel_idle_spill();
         require(false, "idle-cancel-evict idle prepare did not reach capacity eviction");
     }
-    const auto started = std::chrono::steady_clock::now();
-    disk.cancel_idle_spill();
-    const auto elapsed = std::chrono::steady_clock::now() - started;
-    disk.test_set_manifest_io_stall_ms(0);
+    const std::uint64_t epoch = disk.test_idle_cancel_epoch();
+    std::chrono::steady_clock::time_point released;
+    std::chrono::steady_clock::time_point finished;
+    std::thread canceller([&] {
+        disk.cancel_idle_spill();
+        finished = std::chrono::steady_clock::now();
+    });
+    const bool registered = wait_pred([&] { return disk.test_idle_cancel_epoch() != epoch; },
+                                      std::chrono::seconds(5));
+    released = std::chrono::steady_clock::now();
+    disk.test_hold_manifest_io(false);
+    canceller.join();
     disk.test_set_payload_io_stall_ms(0);
     const bool durable = disk.ram_is_durable(second);
     disk.wait_idle_and_fsync();
-    require(elapsed <= std::chrono::milliseconds(1200),
+    require(registered, "idle-cancel-evict cancellation did not register during the MANIFEST write");
+    require(finished - released <= std::chrono::milliseconds(1200),
             "idle cancel waited for a spill installed after cancellation");
     require(!durable, "idle spill committed after cancellation");
 }

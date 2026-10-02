@@ -323,7 +323,9 @@ public:
     void test_force_zstd_fail();
     void test_set_payload_io_stall_ms(int ms);
     [[nodiscard]] bool test_payload_io_entered() const;
-    void test_set_manifest_io_stall_ms(int ms);
+    // While held, MANIFEST writes wait before writing until the test releases them.
+    void test_hold_manifest_io(bool held);
+    [[nodiscard]] std::uint64_t test_idle_cancel_epoch();
     void test_set_compaction_copy_stall_ms(int ms) {
         compaction_copy_stall_ms_.store(ms, std::memory_order_release);
     }
@@ -1092,7 +1094,7 @@ private:
     std::uint32_t restore_state_inflight_ = 0;
     std::atomic<int> payload_io_stall_ms_{0};
     mutable std::atomic<bool> payload_io_entered_{false};
-    std::atomic<int> manifest_io_stall_ms_{0};
+    std::atomic<bool> manifest_io_held_{false};
     mutable std::atomic<bool> manifest_io_entered_{false};
     std::atomic<int> fsync_stall_ms_{0};
     mutable std::atomic<bool> fsync_entered_{false};

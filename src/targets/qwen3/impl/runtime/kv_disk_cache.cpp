@@ -2656,8 +2656,9 @@ void KVDiskCache::write_manifest() const {
     w.u32(static_cast<std::uint32_t>(fifo_.size()));
     for (std::uint64_t id : fifo_) { w.u64(id); }
     manifest_io_entered_.store(true, std::memory_order_release);
-    const int stall_ms = manifest_io_stall_ms_.load(std::memory_order_acquire);
-    if (stall_ms > 0) { std::this_thread::sleep_for(std::chrono::milliseconds(stall_ms)); }
+    while (manifest_io_held_.load(std::memory_order_acquire)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
     const auto path = config_.location / "MANIFEST";
     write_file_bytes(path, w.bytes.data(), w.bytes.size());
     fsync_path(path);
@@ -2672,8 +2673,9 @@ void KVDiskCache::write_manifest(std::unique_lock<std::mutex>& lock) const {
     lock.unlock();
     try {
         manifest_io_entered_.store(true, std::memory_order_release);
-        const int stall_ms = manifest_io_stall_ms_.load(std::memory_order_acquire);
-        if (stall_ms > 0) { std::this_thread::sleep_for(std::chrono::milliseconds(stall_ms)); }
+        while (manifest_io_held_.load(std::memory_order_acquire)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
         const auto path = config_.location / "MANIFEST";
         write_file_bytes(path, w.bytes.data(), w.bytes.size());
         fsync_path(path);
@@ -8900,9 +8902,14 @@ bool KVDiskCache::test_payload_io_entered() const {
     return payload_io_entered_.load(std::memory_order_acquire);
 }
 
-void KVDiskCache::test_set_manifest_io_stall_ms(int ms) {
-    manifest_io_entered_.store(false, std::memory_order_release);
-    manifest_io_stall_ms_.store(ms, std::memory_order_release);
+void KVDiskCache::test_hold_manifest_io(bool held) {
+    if (held) { manifest_io_entered_.store(false, std::memory_order_release); }
+    manifest_io_held_.store(held, std::memory_order_release);
+}
+
+std::uint64_t KVDiskCache::test_idle_cancel_epoch() {
+    std::lock_guard lock(mutex_);
+    return idle_cancel_epoch_;
 }
 
 bool KVDiskCache::test_manifest_io_entered() const {
