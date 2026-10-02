@@ -480,26 +480,26 @@ __device__ __forceinline__ void prefetch_code(std::uint32_t entry, std::uint64_t
 }
 
 // Grid-wide barrier: every block's prior global writes are visible to every block afterwards.
-// Thread 0 of each block arrives; the last arrival resets the count and advances the generation.
+// Thread 0 of each block arrives on a monotonic 64-bit arrival count, which every launch leaves a
+// multiple of the grid size; the barrier opens when the count reaches the end of the arrival's
+// round, so the last arrival's own atomic opens it (one atomic on the critical path).
 // While a block waits it prefetches the next phase's instructions and streams its first-round
 // weight lines of the next phase (`next`) into the caches, one line per prefetch thread per batch
 // (a touched dword fills its line, core/cache_warm.h), until the barrier opens: the wait of a
 // block a phase leaves idle, or that finishes early, overlaps the next phase's memory stream. A
 // pure cache hint: the loaded values are discarded.
-__device__ __forceinline__ void grid_barrier(std::uint32_t* barrier, std::uint32_t& generation,
-                                             const PhaseStreams& next,
+__device__ __forceinline__ void grid_barrier(std::uint64_t* arrivals, const PhaseStreams& next,
                                              std::uint32_t next_entry) {
     __shared__ std::uint32_t open;
+    __shared__ std::uint64_t target;
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
     __syncthreads();
     if (threadIdx.x == 0U) {
-        const bool last = __hip_atomic_fetch_add(&barrier[0], 1U, __ATOMIC_ACQ_REL,
-                                                 __HIP_MEMORY_SCOPE_AGENT) == gridDim.x - 1U;
-        if (last) {
-            __hip_atomic_store(&barrier[0], 0U, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-            __hip_atomic_fetch_add(&barrier[1], 1U, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
-        }
-        open = last ? 1U : 0U;
+        const std::uint64_t ticket =
+            __hip_atomic_fetch_add(arrivals, 1ULL, __ATOMIC_ACQ_REL, __HIP_MEMORY_SCOPE_AGENT);
+        const std::uint64_t end = (ticket / gridDim.x + 1U) * gridDim.x;
+        target = end;
+        open = ticket + 1U == end ? 1U : 0U;
     }
     // The next phase's instructions.
     if (threadIdx.x < kWaveSize) prefetch_code(next_entry, kCodePrefetch);
@@ -517,18 +517,15 @@ __device__ __forceinline__ void grid_barrier(std::uint32_t* barrier, std::uint32
             // Past the block's lines: wait without loading.
             if (__syncthreads_and(address == 0U)) break;
             if (threadIdx.x == 0U &&
-                __hip_atomic_load(&barrier[1], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT) !=
-                    generation)
+                __hip_atomic_load(arrivals, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT) >= target)
                 open = 1U;
             __syncthreads();
         }
     }
     if (threadIdx.x == 0U) {
-        while (__hip_atomic_load(&barrier[1], __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT) ==
-               generation)
+        while (__hip_atomic_load(arrivals, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT) < target)
             __builtin_amdgcn_s_sleep(1);
     }
-    ++generation;
     __syncthreads();
     __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
 }
@@ -554,7 +551,7 @@ static_assert(kLdsBytes + 2U * sizeof(PhaseSlot) + 64U <= kBlockLds,
 
 struct Program {
     const PhaseSlot* phases = nullptr;
-    std::uint32_t* barrier = nullptr;  // [0] arrivals, [1] generation
+    std::uint64_t* arrivals = nullptr;  // grid barrier arrival count
     std::uint32_t phase_count = 0;
     std::uint32_t first_entry = 0;  // entry of phase 0
 };
@@ -640,10 +637,8 @@ __global__ __launch_bounds__(kBlockThreads) __attribute__((amdgpu_waves_per_eu(k
 void persistent_decode_kernel(Program program) {
     if (threadIdx.x < kMaximumGroups)
         group_barriers[threadIdx.x] = persistent::GroupBarrier{0U, 0U};
-    // The first phase's instructions, while its record and the barrier generation load.
+    // The first phase's instructions, while its record loads.
     if (threadIdx.x < kWaveSize) prefetch_code(program.first_entry, kCodePrefetch);
-    std::uint32_t generation =
-        __hip_atomic_load(&program.barrier[1], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
     store_phase_word(0U, fetch_phase_word(program, 0U));
     __syncthreads();
     for (std::uint32_t index = 0; index < program.phase_count; ++index) {
@@ -654,7 +649,7 @@ void persistent_decode_kernel(Program program) {
         dispatch(phase_slots[slot].phase.entry, slot, std::make_index_sequence<kEntryCount>{});
         if (next) {
             store_phase_word(slot ^ 1U, next_word);
-            grid_barrier(program.barrier, generation, phase_slots[slot ^ 1U].streams,
+            grid_barrier(program.arrivals, phase_slots[slot ^ 1U].streams,
                          phase_slots[slot ^ 1U].phase.entry);
         }
     }
@@ -829,7 +824,7 @@ DeviceBuffer persistent_decode_lower(hipGraph_t graph) {
     std::size_t first_phase = 0;
     for (const Run& run : runs) {
         Program program{reinterpret_cast<const PhaseSlot*>(base + kPhaseOffset) + first_phase,
-                        reinterpret_cast<std::uint32_t*>(base),
+                        reinterpret_cast<std::uint64_t*>(base),
                         static_cast<std::uint32_t>(run.count),
                         static_cast<std::uint32_t>(launches[run.first].entry)};
         first_phase += run.count;
