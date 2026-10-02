@@ -5,9 +5,10 @@ repository by custom AMD ports, not merged ancestry; `AGENTS.md` states the sync
 
 ## Baseline
 
-Reconciled through upstream `9639c32f32027630cd361407807fc004cd91ce13` (2026-09-30), advanced
-from `34c7119b` (2026-09-28) and `e04fad3728573a0109236929f5d473475a8657f2` (2026-09-21, AMD
-ports `7187d95d`, `2eab0a50`, `49c896dd`) by the dispositions below. The next sync reviews upstream changes after `9639c32f`
+Reconciled through upstream `f7f70d895a317617d8d0dcfb43b42d519a65fa9f` (2026-10-02), advanced
+from `9639c32f` (2026-09-30), `34c7119b` (2026-09-28) and
+`e04fad3728573a0109236929f5d473475a8657f2` (2026-09-21, AMD ports `7187d95d`, `2eab0a50`,
+`49c896dd`) by the dispositions below. The next sync reviews upstream changes after `f7f70d89`
 against current AMD behavior.
 
 ## Ported features (`c450798c..e04fad37`)
@@ -123,3 +124,33 @@ Evidence: `profiles/bench/r9700-upstream-sync-20260928/`.
   compile-time qualification build with fixed tau, not a runtime flag; Sparge is not implemented;
   Sage is rejected by the precision policy), and the NVIDIA measurement records `f33ff218`,
   `163c6b38`, `ceeac05d`.
+
+## `9639c32f..f7f70d89` (4 upstream commits, reconciled 2026-10-02)
+
+- Ported: `ca08451c` `/metrics` buckets, labels and closed-label series storage (`f7b0b3fb`;
+  keeps the HIP/Device Graph identity, `ninfer_device_memory_bytes`, the `/v1/score` route and
+  the AMD API code set; `reservation_exceeded` stays absent because the R9700 executor never
+  publishes it). `a1d289ec` closed preserve-off turns stored cut at their turn checkpoint, per-reason
+  disk drop counters under the mutex, and the shared splice checkpoint-prefix fallback
+  (`a0cb1f9b`). The cut image's current-state copies use the copy-stream host callback behind the
+  image fence instead of upstream's host wait and scheduler-thread memcpy. R9700 C1 serve, 4
+  two-turn chats of ~2.7K tokens: RAM 427 -> 286 MiB per entry, turn 2 appends with the resident
+  checkpoint's reuse length and identical greedy tokens (DFlash k4, MTP k3, DFlash K7 adaptive
+  with thinking, restored from RAM and from disk). The splice fallback is unreachable here (a
+  trailing assistant turn is tokenized cold for its scoring boundary) and is kept as the one
+  shared helper.
+- Already equivalent from `fd16c8ba`: BF16 verify projections and the W8/Q4 heads at k=6/7 (every
+  verify projection and head is one aggregate launch over all W*C columns up to 64), and the
+  full-width drafter-context append (the AMD path has always appended at the storage width).
+- Not ported, needs an R9700 A/B: the `fd16c8ba` learned per-law/per-k hop-hazard picker and the
+  p-less draft-temperature scale at k=6/7. The AMD picker (`a7880a27` deepest-observed
+  extrapolation with T estimation and single probes) was measured on R9700 (1.074x vs adaptive
+  K5), the 0.4 p-less draft temperature was tuned with K7 adaptive, and upstream measured its
+  picker within noise of a static hop table (-1.8% +/- 1.9%). Its exploration guard waits for a
+  measured T at every k, which the AMD estimator never guarantees, so a port also has to choose
+  between exploration-driven T measurement and the existing estimator.
+- Excluded: the `fd16c8ba` CUDA/NVFP4 kernel changes (W8 dynamic shared memory, NVFP4 W4A8
+  M48/K256, NVFP4 GDN record, GQA T=7/8 split rules). No action: `f7f70d89` relaxes an upstream
+  real test the AMD tree does not carry (the cached-versus-fresh interleavings resume check).
+
+Evidence: `profiles/bench/r9700-upstream-sync-20261002/`.
