@@ -1087,8 +1087,19 @@ RamCaptureResult KVRamCache::capture(const RamCaptureSource& source) try {
     header.rewrite_kind            = source.rewrite_kind;
     header.hash_c_valid            = source.hash_c_valid;
     header.rewrite_frontier        = source.rewrite_frontier;
-    header.text_mapped_pages       = source.text->mapped_page_count();
-    header.backend_mapped_pages    = source.backend ? source.backend->mapped_page_count() : 0;
+    header.text_mapped_pages = source.text_pages.value_or(source.text->mapped_page_count());
+    header.backend_mapped_pages =
+        source.backend ? source.backend_pages.value_or(source.backend->mapped_page_count()) : 0;
+    if (header.text_mapped_pages > source.text->mapped_page_count() ||
+        (source.backend && header.backend_mapped_pages > source.backend->mapped_page_count())) {
+        throw std::invalid_argument("RAM capture page extent exceeds mapped pages");
+    }
+    const bool current_from_host = source.current_state.conv != nullptr;
+    if (current_from_host &&
+        (source.current_state.recurrent == nullptr ||
+         (source.dflash_local != nullptr && source.current_state.dflash == nullptr))) {
+        throw std::invalid_argument("RAM capture current host image is incomplete");
+    }
     header.text_plane_count        = static_cast<std::uint32_t>(source.text_pool->plane_count());
     header.backend_plane_count     =
         source.backend_pool ? static_cast<std::uint32_t>(source.backend_pool->plane_count()) : 0;
@@ -1260,7 +1271,7 @@ RamCaptureResult KVRamCache::capture(const RamCaptureSource& source) try {
         // Rewrite and ladder images are pinned host buffers; they copy on the stream's host
         // callback thread so a capture during decode does not run ~150 MB memcpys here.
         std::vector<HostCopy> host_copies;
-        host_copies.reserve(3 + 4 * source.ladder_heads.size());
+        host_copies.reserve(6 + 4 * source.ladder_heads.size());
         if (lengths[1] != 0) { source.identity->pack(raw + header.offset[1]); }
         const auto start_device_copies = [&] {
             if (copies_start != nullptr) { return; }
@@ -1270,17 +1281,26 @@ RamCaptureResult KVRamCache::capture(const RamCaptureSource& source) try {
         if (lengths[2] != 0) {
             start_device_copies();
             pack_paged_kv_allocation_to_host(*source.text, *source.text_pool, raw + header.offset[2],
-                                             source.stream);
+                                             header.text_mapped_pages, source.stream);
             copies_launched = true;
         }
         if (source.backend != nullptr && lengths[3] != 0) {
             start_device_copies();
             pack_paged_kv_allocation_to_host(*source.backend, *source.backend_pool,
-                                             raw + header.offset[3], source.stream);
+                                             raw + header.offset[3], header.backend_mapped_pages,
+                                             source.stream);
             copies_launched = true;
         }
         if (source.gdn != nullptr) {
-            if (lengths[4] != 0 || lengths[6] != 0) {
+            if (current_from_host) {
+                if (lengths[4] != 0) {
+                    host_copies.push_back({raw + header.offset[4], source.current_state.conv, lengths[4]});
+                }
+                if (lengths[6] != 0) {
+                    host_copies.push_back(
+                        {raw + header.offset[6], source.current_state.recurrent, lengths[6]});
+                }
+            } else if (lengths[4] != 0 || lengths[6] != 0) {
                 start_device_copies();
                 source.gdn->pack_slot_to_host(source.gdn_current_slot, raw + header.offset[4],
                                               raw + header.offset[6], source.stream);
@@ -1308,10 +1328,14 @@ RamCaptureResult KVRamCache::capture(const RamCaptureSource& source) try {
             copies_launched = true;
         }
         if (source.dflash_local != nullptr && lengths[10] != 0) {
-            start_device_copies();
-            source.dflash_local->copy_lane_to_host(source.dflash_lane, raw + header.offset[10],
-                                                   source.stream);
-            copies_launched = true;
+            if (current_from_host) {
+                host_copies.push_back({raw + header.offset[10], source.current_state.dflash, lengths[10]});
+            } else {
+                start_device_copies();
+                source.dflash_local->copy_lane_to_host(source.dflash_lane, raw + header.offset[10],
+                                                       source.stream);
+                copies_launched = true;
+            }
         }
         if (lengths[11] != 0) {
             host_copies.push_back({raw + header.offset[11], source.rewrite_state.dflash, lengths[11]});
@@ -1350,25 +1374,22 @@ RamCaptureResult KVRamCache::capture(const RamCaptureSource& source) try {
         }
         if (!host_copies.empty()) {
             start_device_copies();
-            // Stream-ordered after the D2H that filled each image.
-            if (source.rewrite_state.copies_done != nullptr) {
-                HIP_CHECK(hipStreamWaitEvent(source.stream, source.rewrite_state.copies_done, 0));
-            }
-            for (const RamLadderHead& head : source.ladder_heads) {
-                if (head.copies_done != nullptr) {
-                    HIP_CHECK(hipStreamWaitEvent(source.stream, head.copies_done, 0));
+            // Stream-ordered after the D2H that filled each image; each fence is re-recorded
+            // after the callback so the image's owner waits for these reads.
+            std::vector<hipEvent_t> fences;
+            fences.reserve(2 + source.ladder_heads.size());
+            const auto add_fence = [&fences](hipEvent_t fence) {
+                if (fence != nullptr && std::find(fences.begin(), fences.end(), fence) == fences.end()) {
+                    fences.push_back(fence);
                 }
-            }
+            };
+            add_fence(source.rewrite_state.copies_done);
+            if (current_from_host) { add_fence(source.current_state.copies_done); }
+            for (const RamLadderHead& head : source.ladder_heads) { add_fence(head.copies_done); }
+            for (hipEvent_t fence : fences) { HIP_CHECK(hipStreamWaitEvent(source.stream, fence, 0)); }
             enqueue_host_copies(std::move(host_copies), source.stream);
             copies_launched = true;
-            if (source.rewrite_state.copies_done != nullptr) {
-                HIP_CHECK(hipEventRecord(source.rewrite_state.copies_done, source.stream));
-            }
-            for (const RamLadderHead& head : source.ladder_heads) {
-                if (head.copies_done != nullptr) {
-                    HIP_CHECK(hipEventRecord(head.copies_done, source.stream));
-                }
-            }
+            for (hipEvent_t fence : fences) { HIP_CHECK(hipEventRecord(fence, source.stream)); }
         }
 
         if (next_id_ == 0) { throw std::logic_error("RAM cache entry id overflow"); }

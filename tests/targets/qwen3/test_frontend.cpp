@@ -478,6 +478,63 @@ int test_literal_content_provenance() {
     return failures;
 }
 
+// A warm host-encode splice must hit the cache and equal a cold encode, checkpoint and
+// generation-opener mark included, for each preserve/generation-prompt/tool-loop shape of a
+// two-turn chat. (A trailing assistant turn is tokenized cold for its scoring boundary.)
+int test_host_encode_splice_matches_cold() {
+    if (skip_without_official_tokenizer("test_host_encode_splice_matches_cold")) { return 0; }
+    const fi::Tokenizer& tokenizer = official_tokenizer();
+    int failures = 0;
+    for (const fi::CompiledChatTemplate* chat : {&thinking_toggle_template(), &reasoning_effort_template()}) {
+        for (const bool preserve : {false, true}) {
+            for (const bool generation : {false, true}) {
+                for (const bool tool_loop : {false, true}) {
+                    const std::string label =
+                        std::string(chat == &thinking_toggle_template() ? "toggle" : "effort") +
+                        (preserve ? " preserve" : " no-preserve") +
+                        (generation ? " generation" : " no-generation") +
+                        (tool_loop ? " tool-loop" : "");
+                    fi::ChatRenderOptions options;
+                    options.preserve_thinking = preserve;
+                    fi::EncodedHistoryCache cache;
+                    (void)fi::encode_chat_with_cache(
+                        tokenizer, *chat, {chat_message(ninfer::ChatRole::User, "q1")}, options, cache);
+                    fi::ChatMessage first   = chat_message(ninfer::ChatRole::Assistant, tool_loop ? "" : "a1");
+                    first.reasoning_content = "r1";
+                    std::vector<fi::ChatMessage> history{chat_message(ninfer::ChatRole::User, "q1")};
+                    if (tool_loop) {
+                        first.tool_calls.push_back({.id = "c1", .name = "f", .arguments_json = "{}"});
+                        history.push_back(first);
+                        fi::ChatMessage result = chat_message(ninfer::ChatRole::Tool, "out");
+                        result.tool_call_id    = "c1";
+                        history.push_back(result);
+                    } else {
+                        history.push_back(first);
+                        history.push_back(chat_message(ninfer::ChatRole::User, "q2"));
+                    }
+                    options.add_generation_prompt = generation;
+                    const fi::EncodedChat warm =
+                        fi::encode_chat_with_cache(tokenizer, *chat, history, options, cache);
+                    const bool hit = fi::last_host_encode_observation.cache_hit;
+                    const fi::EncodedChat cold =
+                        fi::encode_rendered_chat(tokenizer, chat->render(history, options));
+                    failures += check(hit, (label + ": missed the host-encode cache").c_str());
+                    failures += check(warm.input_ids == cold.input_ids &&
+                                          warm.rewrite_checkpoint == cold.rewrite_checkpoint,
+                                      (label + ": warm splice differs from a cold encode").c_str());
+                    // Only a preserve-off checkpoint at this request's own opener is marked; a
+                    // tool loop's checkpoint sits at the loop's first opener.
+                    const bool own_opener = !preserve && generation && !tool_loop;
+                    failures += check(!cold.rewrite_checkpoint ||
+                                          cold.rewrite_checkpoint->generation_opener == own_opener,
+                                      (label + ": generation-opener mark is wrong").c_str());
+                }
+            }
+        }
+    }
+    return failures;
+}
+
 int test_official_chat_template() {
     int failures = 0;
     failures += check(render_chat_text({chat_message(ninfer::ChatRole::User, "hello")}) ==
@@ -2488,6 +2545,7 @@ int main() {
     failures += test_completed_assistant_scoring_boundary();
     failures += test_rewrite_checkpoint_trace();
     failures += test_turn_closure_token_frontiers();
+    failures += test_host_encode_splice_matches_cold();
     failures += test_official_resource_guards();
     failures += test_recovery_fragment(thinking_toggle_template(), false);
     failures += test_recovery_fragment(reasoning_effort_template(), true);

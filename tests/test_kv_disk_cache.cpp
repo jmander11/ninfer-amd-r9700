@@ -655,11 +655,15 @@ void ram_reclaim_skips_attempt_captures(ninfer::DeviceContext& device) {
     };
     const std::array<std::uint64_t, 1> keep{attempt};
     const auto drops   = disk.snapshot().drops;
+    const auto unsaved = disk.snapshot().drop_reasons[static_cast<std::size_t>(
+        ninfer::KvDiskDropReason::ReclaimUnsaved)];
     const auto started = std::chrono::steady_clock::now();
     const auto first   = disk.reclaim_ram_entry(false, keep);
     const bool dropped_older = first == cache::RamReclaim::Evicted && !resident(older) &&
                                resident(attempt) && !disk.ram_reclaim_pending();
-    const bool drop_counted  = disk.snapshot().drops == drops + 1;
+    const bool drop_counted  = disk.snapshot().drops == drops + 1 &&
+                              disk.snapshot().drop_reasons[static_cast<std::size_t>(
+                                  ninfer::KvDiskDropReason::ReclaimUnsaved)] == unsaved + 1;
     const auto second        = disk.reclaim_ram_entry(false, keep);
     const bool refused       = second == cache::RamReclaim::NoVictim && resident(attempt) &&
                                !disk.ram_reclaim_pending();

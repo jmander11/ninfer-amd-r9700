@@ -341,6 +341,19 @@ Host capacity is fixed by `--kv-ram-capacity`; `off` disables retained FIFO spil
 checkpoint state. Captures that do not fit are dropped without blocking admission. Active requests
 are never offloaded. Logged occupancy counts live host residents, not retired in-flight buffers.
 
+A closed preserve-off turn is captured cut at its turn checkpoint. The request stopped on a stop
+token or string without a tool call, and its `TurnClosure` checkpoint `F` is its own generation
+opener (frontend `generation_opener`; a checkpoint inside a tool loop sits at the loop's first
+opener and is not marked). The next preserve-off prompt re-renders that reply without reasoning and
+diverges after `F`, so no frontier past `F` is reachable. The RAM entry, and therefore its disk
+spill, stores the lane as of `F`: ledger, identity, Text and backend KV end at `F`; the current GDN
+state, DFlash cyclic lane and tail hidden are the checkpoint's; no rewrite set and no head past `F`
+is stored. The next turn appends at `F` with the reuse length `restore_turn_checkpoint` had, so
+each entry holds one state set. Such a request appending from a cut RAM/disk entry writes no
+automatic turn-rollback head; a resident append writes it as usual. The VRAM retained lane is
+unchanged. Cost: switching that conversation to preserve-on, or continuing the reply as an
+assistant prefill, re-prefills the reply.
+
 RAM image version 6 binds both semantic and per-plane physical fingerprints. Capture explicitly
 returns captured, needs-eviction, or dropped; the caller owns spill/eviction decisions. Optional
 pinned allocation failure leaves the request able to proceed without retained cache capture.

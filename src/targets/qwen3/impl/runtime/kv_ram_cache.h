@@ -107,10 +107,16 @@ struct RamCaptureSource {
     const PagedKVAllocation* backend   = nullptr;
     const PagedKVPool* backend_pool    = nullptr;
     std::optional<Fp8KInt4VSemanticFingerprint> backend_semantics;
+    // Leading mapped pages to store; nullopt stores every mapped page.
+    std::optional<std::uint32_t> text_pages;
+    std::optional<std::uint32_t> backend_pages;
 
     const LinearAttentionStatePool* gdn = nullptr;
     std::int32_t gdn_current_slot       = -1;
     RewriteStateHostSource rewrite_state;
+    // When `conv` is set, the current GDN state and DFlash lane are copied from this host
+    // image instead of the device slot and lane (a capture cut at its rewrite checkpoint).
+    RewriteStateHostSource current_state;
 
     const Tensor* tail_hidden                = nullptr;
     const Tensor* rewrite_checkpoint_hidden  = nullptr;
