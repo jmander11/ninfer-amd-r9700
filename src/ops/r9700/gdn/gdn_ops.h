@@ -4,6 +4,7 @@
 #include <hip/hip_runtime_api.h>
 
 #include "core/cache_warm.h"
+#include "ninfer/ops/gdn_replay.h"
 #include "ops/r9700/linear/fp8lut4_linear.h"
 #include "ops/r9700/linear/fp8_activation.h"
 #include "ops/r9700/linear/r9700_linear.h"
@@ -169,12 +170,15 @@ namespace ninfer::ops::r9700::gdn {
 
 // The same front with the seam encoded as a per-token E4M3 image (bound for tokens x 5120) for
 // FP8LUT4 projections: each token's owner CTA publishes its codes, scale and status word. CTAs
-// past the front grid touch `warm` (core/cache_warm.h).
+// past the front grid apply `fold` (when non-null: that layer's deferred replay fold, bitwise
+// ops::gdn_replay_fold_layer, whose state it alone touches) and then touch `warm`
+// (core/cache_warm.h).
 [[nodiscard]] hipError_t fp8_gdn_normalized_front(
     const hip_bfloat16* residual, const hip_bfloat16* norm, float eps, bool unit_offset,
     const hip_bfloat16* a_weight, const hip_bfloat16* b_weight, const float* a_log,
     const float* dt_bias, float* g, float* beta, const linear::Fp8ActivationWorkspace& image,
-    hipStream_t stream, const CacheWarm& warm = {}) noexcept;
+    hipStream_t stream, const CacheWarm& warm = {},
+    const GdnLayerFold* fold = nullptr) noexcept;
 
 // Exact FP32 state movement for transaction/checkpoint publication. Source/destination are
 // non-overlapping FP32 elements and count is positive.

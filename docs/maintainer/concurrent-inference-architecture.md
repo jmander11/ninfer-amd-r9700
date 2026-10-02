@@ -1248,7 +1248,8 @@ row result
 
 Speculative backend 的 target GDN 使用 ReplaySSM 时，GPU graph 只读 lane 的 current state 并写
 Program-owned raw records，不推进 committed GDN state。CPU output preview 得到每行最终提交长度后，
-`resolve_pending_batch` 先用原始 `B` 行执行一次 all-layer Fold，再完成必要的 hidden/backend correction，
+`resolve_pending_batch` 先用原始 `B` 行执行一次 all-layer Fold（继续运行的 DFlash chain 行除外，见下文
+deferred Fold），再完成必要的 hidden/backend correction，
 同步成功后才推进 host frontiers。取消行以 `commit_columns=0` 参与原始 row mapping，Fold 对该行严格
 no-op，随后 retain 该行已 commit 的 continuation，而不是释放 bundle。Executor 只能在这个 commit tail
 成功后提交 output preview 和发布 output event。
@@ -1578,6 +1579,15 @@ convolution/key/value/gate records 写入固定 arena，physical record row 恒�
 最终 output prefix 后，一次 Fold 用 frozen `lanes[b]` 把 row `b` 提交到该 lane 的 current state。Rows
 不得因取消或不同 acceptance length 被压缩、重排。Record 位于 Device Graph 内，Fold 位于 CPU 决策后的
 eager commit tail；下一 GPU unit 必须等当前 records 被 Fold 消费后才能覆盖 arena。
+
+Deferred Fold：DFlash chain 行若提交 `committed > 0` 且非 terminal，`resolve_pending_batch` 不在 commit
+tail 中 fold 它，而是在 `SequenceState` 记下 `(committed, record row)`；该 lane 的 GDN slot 暂停在 round
+base 之前的状态，ledger/KV/hidden 照常推进。下一 DFlash round 把这些行写入
+`DFlashDecodeIngress::gdn_fold`（按本轮 row，含旧 record row 与 slot），target verify 对每个 GDN 层先应用
+该层 Fold（FP8 front 内融合，其他路径用 `gdn_replay_fold_layer`），再写本轮该层 records，因此 arena
+覆盖仍在消费之后，结果与 all-layer Fold 逐位相同。不在下一 round 中的 lane、tree round，以及读取或捕获
+lane 状态的 Program 入口（prefill、retain、capture/restore、score、shutdown）先用 all-layer Fold
+eagerly flush；`clear_lane` 丢弃未应用的 Fold。
 
 Target execution 完成到 Fold 结束期间，请求处于 Pending：authoritative execution/ledger frontiers、ledger
 内容和 prefix identity 仍停在 round base；licensed tokens 和 backend staging 只作为未发布候选存在。Fold、

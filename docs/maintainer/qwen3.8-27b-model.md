@@ -247,7 +247,9 @@ update and does not retain a speculative trajectory. MTP target verification ins
 q/k/v placement, and publication of the represented convolution column to the Program-owned
 ReplaySSM record row while leaving persistent state unchanged. The recurrent stage likewise emits
 raw key/value/gate records; after output resolution, one all-layer Fold applies only the committed
-record prefix to the lane's current state.
+record prefix to the lane's current state. A continuing DFlash chain row instead defers its Fold
+into its next verification forward, where each GDN layer's Fold runs ahead of that layer's front
+(`gdn_replay_fold_layer`, fused into the FP8 front); the result is bitwise the all-layer Fold.
 
 The eliminated qkv intermediate is not a semantic cast boundary; each exact route uses its
 directly oracle-qualified private precision and staging. The separate Z projection remains in the
@@ -444,7 +446,7 @@ Transactional tool grammar advances only for published tokens, never for unverif
 
 Target verification writes candidate KV into provisioned but unpublished extents. After the final
 per-row output prefix is known, one all-layer Fold commits the accepted sequential prefix into the
-lane's current state. The transaction trims rejected KV, commits continuation hidden and MTP or
+lane's current state (deferred layer by layer into the next round for continuing DFlash chain rows). The transaction trims rejected KV, commits continuation hidden and MTP or
 DFlash cyclic state, and only then advances the authoritative frontier and publishes output. Near
 context capacity, the Engine falls back to the one-token target path when a complete safe round
 does not fit.

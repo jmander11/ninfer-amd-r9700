@@ -82,6 +82,23 @@ harness. Prefill rows predate the 2026-09-28 output-head and
 attention GPTQ reconversions, which change weight values but not formats or routes, and all rows
 predate the 2026-09-30 reduction to 21 protections (C1 decode +2.3%, C4 unchanged, prefill +0.4%).
 
+## Deferred GDN replay fold (2026-10-01)
+
+The eager ReplaySSM fold after each DFlash round streamed every GDN layer's 3 MB state in and out
+(0.52 ms at C1, ~570 GB/s) and its dirty lines landed on the next round's first kernels. A
+continuing chain row now defers it: the next round's verify forward folds layer L ahead of layer
+L's GDN front, as extra CTAs of the FP8 front kernel (four state tiles per thread, sharing the key
+normalization), and only lanes leaving the batch, tree rounds and state-reading Program entries
+fold eagerly. State and history are bitwise the all-layer fold (`gdn_replay_fold_qual`, standalone
+per-layer and front-fused), and accepted tokens match HEAD at C1 (519) and C4 (2055).
+
+The fold is bandwidth-bound, so deferral cannot hide its traffic: the front grows from 9.0 to
+22.4 us per layer (the fold's own ~10 us of state streaming plus the front), against the
+0.52 ms eager launch it replaces. Preloading the per-column records moved nothing; four tiles per
+thread (77 -> 20 fold CTAs per row) only 23.1 -> 22.4 us. Same-session A/B against HEAD, P512/G256 K7: C1 30.39 -> 30.33 ms per round
+(three interleaved passes, within noise), C4 268.0 / 269.5 -> 271.4 / 274.7 tok/s (+1.3 / +1.9%).
+Evidence: `profiles/bench/r9700-decode-c1-20261001/deferred/`.
+
 ## Decode cache warming (2026-10-01)
 
 C1 DFlash K7 profile (`ninfer_bench` P512/G256, kernel trace): 30.9 ms per round, 802 kernels,

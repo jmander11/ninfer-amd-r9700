@@ -8,6 +8,8 @@
 #include "core/linear_attention_state.h"
 #include "ninfer/ops/gdn_replay.h"
 #include "ninfer/ops/gated_delta_net.h"
+#include "ops/r9700/gdn/gdn_ops.h"
+#include "ops/r9700/linear/fp8_activation.h"
 
 #include <algorithm>
 #include <array>
@@ -332,6 +334,161 @@ void require_invalid(Callable&& callable, const std::string& label) {
     fail(label + ": expected invalid_argument");
 }
 
+// One front launch (T verification columns of Qwen3.8 GDN controls) with or without a fused
+// deferred fold; returns g, beta and the E4M3 image bytes, which the fold must not change.
+std::vector<std::uint8_t> run_front(const ninfer::ops::GdnLayerFold* fold, hipStream_t stream) {
+    namespace gdn = ninfer::ops::r9700::gdn;
+    namespace lin = ninfer::ops::r9700::linear;
+    constexpr unsigned kTokens = 16, kHidden = 5120, kHeads = 48;
+    std::vector<hip_bfloat16> residual(kTokens * kHidden), norm(kHidden), a(kHeads * kHidden),
+        b(kHeads * kHidden);
+    for (std::size_t i = 0; i < residual.size(); ++i) residual[i] = bf16(pattern(0xe001U + i, 2.0F));
+    for (std::size_t i = 0; i < norm.size(); ++i) norm[i] = bf16(pattern(0xe101U + i, 0.2F));
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        a[i] = bf16(pattern(0xe201U + i, 0.02F));
+        b[i] = bf16(pattern(0xe301U + i, 0.02F));
+    }
+    std::vector<float> a_log(kHeads), dt_bias(kHeads);
+    for (unsigned h = 0; h < kHeads; ++h) {
+        a_log[h] = pattern(0xe401U + h, 0.5F);
+        dt_bias[h] = pattern(0xe501U + h, 0.5F);
+    }
+    const std::size_t image_bytes = lin::fp8_activation_workspace_capacity_bytes(kTokens, kHidden);
+    const std::size_t control_bytes = kTokens * kHeads * sizeof(float);
+    ninfer::DeviceBuffer d_residual(residual.size() * 2), d_norm(norm.size() * 2),
+        d_a(a.size() * 2), d_b(b.size() * 2), d_a_log(kHeads * 4), d_dt(kHeads * 4),
+        d_g(control_bytes), d_beta(control_bytes), d_image(image_bytes);
+    HIP_CHECK(hipMemcpy(d_residual.data(), residual.data(), d_residual.size(), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_norm.data(), norm.data(), d_norm.size(), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_a.data(), a.data(), d_a.size(), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_b.data(), b.data(), d_b.size(), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_a_log.data(), a_log.data(), d_a_log.size(), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_dt.data(), dt_bias.data(), d_dt.size(), hipMemcpyHostToDevice));
+    d_image.fill(0);
+    lin::Fp8ActivationWorkspace image{};
+    HIP_CHECK(lin::fp8_bind_activation_workspace(d_image.data(), image_bytes, kTokens, kHidden, &image));
+    HIP_CHECK(gdn::fp8_gdn_normalized_front(
+        static_cast<const hip_bfloat16*>(d_residual.data()),
+        static_cast<const hip_bfloat16*>(d_norm.data()), 1e-6F, true,
+        static_cast<const hip_bfloat16*>(d_a.data()), static_cast<const hip_bfloat16*>(d_b.data()),
+        static_cast<const float*>(d_a_log.data()), static_cast<const float*>(d_dt.data()),
+        static_cast<float*>(d_g.data()), static_cast<float*>(d_beta.data()), image, stream, {},
+        fold));
+    HIP_CHECK(hipStreamSynchronize(stream));
+    std::vector<std::uint8_t> out(2 * control_bytes + image.code_bytes + image.scale_bytes);
+    HIP_CHECK(hipMemcpy(out.data(), d_g.data(), control_bytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(out.data() + control_bytes, d_beta.data(), control_bytes,
+                        hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(out.data() + 2 * control_bytes, image.codes, image.code_bytes,
+                        hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(out.data() + 2 * control_bytes + image.code_bytes, image.scales,
+                        image.scale_bytes, hipMemcpyDeviceToHost));
+    return out;
+}
+
+// Deferred fold (ops::gdn_replay_fold_layer and its fusion into the FP8 GDN front): device rows
+// whose record row differs from their position, one prefix row and one no-op row, must leave the
+// oracle layer's state and history bitwise equal to the all-layer chain fold and leave every
+// other layer untouched.
+void qualify_deferred(const ninfer::GdnReplayRecords& records,
+                      ninfer::LinearAttentionStatePool& states, const Fixture& fixture,
+                      const std::array<std::vector<float>, kCapacity>& initial_recurrent,
+                      const std::array<std::vector<hip_bfloat16>, kCapacity>& initial_history,
+                      hipStream_t stream) {
+    // Record row 1 (3 columns) folds into slot 0; record row 0 (6 columns) into slot 1.
+    const std::array<int, kCapacity> slot_of_record{1, 0};
+    const std::array<int, kCapacity> columns_of_record{kWidth, 3};
+    const auto reset = [&] {
+        for (int row = 0; row < kCapacity; ++row) {
+            HIP_CHECK(hipMemcpyAsync(states.recurrent_slot(kOracleLayer, slot_of_record[row]).data,
+                                     initial_recurrent[row].data(),
+                                     initial_recurrent[row].size() * sizeof(float),
+                                     hipMemcpyHostToDevice, stream));
+            HIP_CHECK(hipMemcpyAsync(states.conv_slot(kOracleLayer, slot_of_record[row]).data,
+                                     initial_history[row].data(),
+                                     initial_history[row].size() * sizeof(hip_bfloat16),
+                                     hipMemcpyHostToDevice, stream));
+        }
+        HIP_CHECK(hipStreamSynchronize(stream));
+    };
+    struct Snapshot {
+        std::array<std::vector<float>, kSlots> recurrent;
+        std::array<std::vector<hip_bfloat16>, kSlots> conv;
+        std::vector<float> neighbor;
+    };
+    const auto snapshot = [&] {
+        Snapshot result;
+        for (int slot = 0; slot < kSlots; ++slot) {
+            result.recurrent[slot] = copy_tensor<float>(states.recurrent_slot(kOracleLayer, slot));
+            result.conv[slot] = copy_tensor<hip_bfloat16>(states.conv_slot(kOracleLayer, slot));
+        }
+        result.neighbor = copy_tensor<float>(states.recurrent_slot(kOracleLayer + 1, 0));
+        return result;
+    };
+    const auto require_same = [&](const Snapshot& actual, const Snapshot& expected,
+                                  const std::string& label) {
+        for (int slot = 0; slot < kSlots; ++slot) {
+            if (actual.recurrent[slot] != expected.recurrent[slot]) {
+                fail(label + ": recurrent slot " + std::to_string(slot) + " differs");
+            }
+            require_bf16_exact(actual.conv[slot], expected.conv[slot],
+                               label + ": conv slot " + std::to_string(slot));
+        }
+        if (actual.neighbor != expected.neighbor) fail(label + ": neighboring layer changed");
+    };
+
+    reset();
+    std::array<ninfer::ops::GdnReplayFoldRow, kCapacity> chain{};
+    for (int row = 0; row < kCapacity; ++row) {
+        chain[row] = {.linear_state_slot = slot_of_record[row],
+                      .commit_columns = columns_of_record[row]};
+    }
+    ninfer::ops::gdn_replay_fold(records, states.all_layers_view(), chain, stream);
+    HIP_CHECK(hipStreamSynchronize(stream));
+    const Snapshot expected = snapshot();
+    require_state_close(expected.recurrent[0],
+                        recurrent_oracle(fixture, 1, {0, 1, 2}, initial_recurrent[1]),
+                        "all-layer chain prefix 3");
+
+    // Rows: position 0 takes record row 1, position 1 record row 0.
+    ninfer::ops::GdnDeferredFoldRows host_rows{};
+    host_rows.row[0] = {.linear_state_slot = 0, .commit_columns = 3, .record_row = 1};
+    host_rows.row[1] = {.linear_state_slot = 1, .commit_columns = kWidth, .record_row = 0};
+    ninfer::DeviceBuffer device_rows(sizeof(host_rows));
+    HIP_CHECK(hipMemcpy(device_rows.data(), &host_rows, sizeof(host_rows), hipMemcpyHostToDevice));
+    const auto layer_fold = [&](int layer) {
+        return ninfer::ops::GdnLayerFold{
+            .records = &records,
+            .recurrent = states.recurrent.at(static_cast<std::size_t>(layer)),
+            .conv = states.conv.at(static_cast<std::size_t>(layer)),
+            .layer = layer,
+            .rows = static_cast<const ninfer::ops::GdnDeferredFoldRows*>(device_rows.data()),
+            .batch = kCapacity,
+        };
+    };
+
+    reset();
+    for (int layer = 0; layer < kLayers; ++layer) {
+        ninfer::ops::gdn_replay_fold_layer(layer_fold(layer), stream);
+    }
+    HIP_CHECK(hipStreamSynchronize(stream));
+    require_same(snapshot(), expected, "per-layer deferred fold");
+
+    const std::vector<std::uint8_t> plain_front = run_front(nullptr, stream);
+    reset();
+    for (int layer = 0; layer < kLayers; ++layer) {
+        const ninfer::ops::GdnLayerFold fold = layer_fold(layer);
+        const std::vector<std::uint8_t> front = run_front(&fold, stream);
+        if (front != plain_front) fail("front outputs changed by its fused fold");
+    }
+    require_same(snapshot(), expected, "front-fused deferred fold");
+
+    ninfer::ops::GdnLayerFold oversized = layer_fold(kOracleLayer);
+    oversized.batch = kCapacity + 1;
+    require_invalid([&] { ninfer::ops::gdn_replay_fold_layer(oversized, stream); },
+                    "deferred batch above record capacity");
+}
+
 void qualify(hipStream_t stream) {
     ninfer::LayoutBuilder record_builder;
     const ninfer::GdnReplayRecordLayout record_layout = ninfer::plan_gdn_replay_records(
@@ -463,6 +620,8 @@ void qualify(hipStream_t stream) {
         [&] { ninfer::ops::gdn_replay_fold(records, states.all_layers_view(), invalid_path, stream); },
         "out-of-range path index");
 
+    qualify_deferred(records, states, fixture, initial_recurrent, initial_history, stream);
+
     require_bf16_exact(copy_tensor<hip_bfloat16>(records.conv), fixture.conv,
                        "read-only convolution records");
     require_bf16_exact(copy_tensor<hip_bfloat16>(records.key), fixture.key,
@@ -489,7 +648,8 @@ int main() {
             throw;
         }
         std::cout << "r9700_gdn_replay_fold: PASS gfx1201 wave32 Qwen3.8 L48/Hq16/Hv48 "
-                     "B=2 W=6 prefix6/path5/no-op/read-only ordinary-state-exact max_state_abs="
+                     "B=2 W=6 prefix6/path5/no-op/read-only ordinary-state-exact "
+                     "deferred-layer/front-fused-bitwise max_state_abs="
                   << g_max_state_abs << " max_state_rel_l2=" << g_max_state_relative_l2 << '\n';
         return 0;
     } catch (const std::exception& error) {

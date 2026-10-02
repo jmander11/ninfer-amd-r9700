@@ -19,7 +19,11 @@ TargetVerifyFrameView target_verify_prepare(ExecutionCore& execution, TextContex
         tree != (frame.fold_path.data != nullptr)) {
         throw std::logic_error("speculative tree verify frame is incomplete");
     }
-    card.set_gdn_state_action(GdnStateAction::RecordForReplay, frame.replay_records);
+    if (tree && frame.gdn_fold != nullptr) {
+        throw std::logic_error("speculative tree verify cannot carry a deferred GDN fold");
+    }
+    card.set_gdn_state_action(GdnStateAction::RecordForReplay, frame.replay_records,
+                              frame.gdn_fold);
     if (frame.tool_masks) {
         frame.sampling = frame.tool_masks->publish(frame.ids, tree ? &frame.parent_index : nullptr,
                                                    frame.valid_columns, execution.device.stream);

@@ -1,4 +1,5 @@
 #include "ops/r9700/gdn/gdn_ops.h"
+#include "ops/r9700/gdn_recurrence/gdn_replay_fold_internal.h"
 #include "ops/r9700/linear/a8g64_codec.h"
 #include "ops/r9700/linear/a8q4_pipeline_impl.h"
 #include "ops/r9700/linear/fp8lut4_pipeline_impl.h"
@@ -750,6 +751,19 @@ __device__ __forceinline__ uint4 front_seam(uint4 packed, uint4 gains, float inv
     return uint4{seam[0], seam[1], seam[2], seam[3]};
 }
 
+namespace fold = ninfer::ops::detail::gated_delta_net::fold;
+
+// A layer's deferred replay fold run by `ctas` CTAs past the front grid (zero: none).
+constexpr std::uint32_t kFrontFoldItems = kControlT1Threads / fold::kItemThreads;
+// Four state tiles per fold thread keep the front and fold CTAs co-resident at the front's
+// register budget (one dispatch wave for a single row).
+constexpr int kFrontFoldTiles = 4;
+static_assert(kControlT1Threads % fold::kItemThreads == 0U);
+struct FrontFold {
+    fold::LayerArgs args{};
+    std::uint32_t ctas = 0U;
+};
+
 // kFp8: the owner CTA of each token encodes its seam row as a per-token E4M3 image (codes in
 // low_codes, FP32 scales in fp8_scales, one status word per token); otherwise the A8G64 codec.
 template <bool kFp8>
@@ -759,9 +773,17 @@ __global__ __launch_bounds__(kControlT1Threads) void gdn_normalized_front_kernel
     const float* dt_bias, float* g, float* beta, std::uint8_t* low_codes,
     std::uint8_t* high_codes, std::uint16_t* scale_words, std::uint32_t* status,
     hip_bfloat16* hidden, std::uint32_t* clear_status, std::uint32_t tokens,
-    float* fp8_scales, CacheWarm warm) {
+    float* fp8_scales, CacheWarm warm, FrontFold fold) {
     if (blockIdx.x >= kControlHeads) {
-        warm_cache(warm, blockIdx.x - kControlHeads, gridDim.x - kControlHeads);
+        const std::uint32_t cta = blockIdx.x - kControlHeads;
+        if (cta < fold.ctas) {
+            __shared__ float fold_key[kFrontFoldItems][fold::kStateDim];
+            __shared__ float fold_reduction[kFrontFoldItems][fold::kStateDim];
+            fold::fold_layer_cta<kControlT1Threads, kFrontFoldTiles>(fold.args, cta, fold_key,
+                                                                         fold_reduction);
+            return;
+        }
+        warm_cache(warm, cta - fold.ctas, gridDim.x - kControlHeads - fold.ctas);
         return;
     }
     __shared__ float wave_sums[kFrontPassTokens][kFrontWaves];
@@ -1514,7 +1536,7 @@ hipError_t bf16_gdn_normalized_front(
                            dim3(kControlT1Threads), 0, stream, residual, norm, eps, unit_offset,
                            a_weight, b_weight, a_log, dt_bias, g, beta, planes.low_codes,
                            planes.high_codes, planes.scales, planes.status, hidden,
-                           clear_status, tokens, nullptr, CacheWarm{});
+                           clear_status, tokens, nullptr, CacheWarm{}, FrontFold{});
     });
 }
 
@@ -1522,8 +1544,18 @@ hipError_t fp8_gdn_normalized_front(
     const hip_bfloat16* residual, const hip_bfloat16* norm, float eps, bool unit_offset,
     const hip_bfloat16* a_weight, const hip_bfloat16* b_weight, const float* a_log,
     const float* dt_bias, float* g, float* beta, const linear::Fp8ActivationWorkspace& image,
-    hipStream_t stream, const CacheWarm& warm) noexcept {
+    hipStream_t stream, const CacheWarm& warm, const GdnLayerFold* layer_fold) noexcept {
     const std::uint32_t tokens = image.tokens;
+    FrontFold front_fold{};
+    if (layer_fold != nullptr) {
+        try {
+            front_fold.args = detail::gated_delta_net::replay_fold_layer_args(*layer_fold);
+        } catch (...) {
+            return hipErrorInvalidValue;
+        }
+        front_fold.ctas = static_cast<std::uint32_t>(front_fold.args.batch) *
+                          fold::layer_ctas_per_row(kControlT1Threads, kFrontFoldTiles);
+    }
     const auto aligned16 = [](const void* pointer) {
         return reinterpret_cast<std::uintptr_t>(pointer) % 16U == 0U;
     };
@@ -1554,11 +1586,13 @@ hipError_t fp8_gdn_normalized_front(
         for (std::size_t second = first + 1; second < ranges.size(); ++second)
             if (overlaps(ranges[first], ranges[second])) return hipErrorInvalidValue;
     return checked_launch(true, [&] {
+        const std::uint32_t work_ctas = kControlHeads + front_fold.ctas;
         hipLaunchKernelGGL(gdn_normalized_front_kernel<true>,
-                           dim3(kControlHeads + cache_warm_ctas(warm, kControlT1Threads, kControlHeads)),
+                           dim3(work_ctas + cache_warm_ctas(warm, kControlT1Threads, work_ctas)),
                            dim3(kControlT1Threads), 0, stream, residual, norm, eps, unit_offset,
                            a_weight, b_weight, a_log, dt_bias, g, beta, image.codes, nullptr,
-                           nullptr, image.status, nullptr, nullptr, tokens, image.scales, warm);
+                           nullptr, image.status, nullptr, nullptr, tokens, image.scales, warm,
+                           front_fold);
     });
 }
 

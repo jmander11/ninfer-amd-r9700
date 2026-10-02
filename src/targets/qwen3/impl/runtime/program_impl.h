@@ -724,6 +724,8 @@ runtime::PrefillStepResult ProgramImplCore::start_prefill_lane(std::uint32_t lan
                                                                bool decode_waiting) {
     layer_boundary_trace::require_eager(use_device_graph);
     if (lane >= max_concurrency) { throw std::out_of_range("request lane is out of range"); }
+    // Admission may reuse or snapshot any lane's state.
+    flush_deferred_gdn_folds();
     SequenceState& sequence = sequences[lane];
     RequestControl& request = requests[lane];
     request.captured_context_checkpoint_tokens = 0;
@@ -1038,11 +1040,13 @@ runtime::PrefillStepResult ProgramImplCore::start_prefill_lane(std::uint32_t lan
 runtime::PrefillStepResult ProgramImplCore::advance_prefill_lane(std::uint32_t lane,
                                                                  bool decode_waiting) {
     if (lane >= max_concurrency) { throw std::out_of_range("request lane is out of range"); }
+    flush_deferred_gdn_fold(lane);
     return advance_prefill(sequences[lane], requests[lane], decode_waiting);
 }
 
 void ProgramImplCore::resolve_prefill_lane(std::uint32_t lane, bool terminal) {
     if (lane >= max_concurrency) { throw std::out_of_range("request lane is out of range"); }
+    flush_deferred_gdn_fold(lane);
     if (requests[lane].pending.kind != PendingKind::Begin) {
         throw std::logic_error("resolve_prefill_lane requires a pending prefill token");
     }
@@ -1102,6 +1106,7 @@ void ProgramImplCore::resolve_pending_batch(std::span<const std::uint32_t> lanes
 
     std::array<ops::GdnReplayFoldRow, kMaximumConcurrency> fold_rows{};
     std::array<std::int32_t, kMaximumConcurrency> hidden_selectors{};
+    std::array<std::uint32_t, kMaximumConcurrency> defer_rows{};
     bool needs_hidden_correction = false;
     for (std::size_t row = 0; row < lanes.size(); ++row) {
         const std::uint32_t lane = lanes[row];
@@ -1147,6 +1152,13 @@ void ProgramImplCore::resolve_pending_batch(std::span<const std::uint32_t> lanes
                 fold_rows[row].path[i] = dflash_host_egress->fold_path
                     [row * dflash_verify_width + i];
             }
+        }
+        // A continuing chain row folds inside its next verification forward instead
+        // (DFlashDecodeIngress::gdn_fold); every other row folds here.
+        if (speculative_backend == SpeculativeBackend::DFlash && !tree_fold && committed > 0 &&
+            !terminal[row]) {
+            fold_rows[row].commit_columns = 0;
+            defer_rows[row]               = committed;
         }
         const bool partial_commit =
             !cancelled[row] && !retry && committed > 0 && committed < pending.produced;
@@ -1242,9 +1254,22 @@ void ProgramImplCore::resolve_pending_batch(std::span<const std::uint32_t> lanes
             }
         }
 
-        ops::gdn_replay_fold(*replay_records, decoder->linear_attention.all_layers_view(),
-                             std::span<const ops::GdnReplayFoldRow>(fold_rows.data(), lanes.size()),
-                             device.stream);
+        const bool eager_fold = std::any_of(
+            fold_rows.begin(), fold_rows.begin() + static_cast<std::ptrdiff_t>(lanes.size()),
+            [](const ops::GdnReplayFoldRow& row) {
+                return row.path_length > 0 || (row.path_length < 0 && row.commit_columns > 0);
+            });
+        if (eager_fold) {
+            ops::gdn_replay_fold(
+                *replay_records, decoder->linear_attention.all_layers_view(),
+                std::span<const ops::GdnReplayFoldRow>(fold_rows.data(), lanes.size()),
+                device.stream);
+        }
+        for (std::size_t row = 0; row < lanes.size(); ++row) {
+            SequenceState& sequence        = sequences[lanes[row]];
+            sequence.deferred_fold_columns = defer_rows[row];
+            sequence.deferred_fold_row     = static_cast<std::uint32_t>(row);
+        }
 
         if (needs_hidden_correction) {
             const auto batch = static_cast<std::int32_t>(lanes.size());
@@ -1459,6 +1484,7 @@ void ProgramImplCore::retain_committed_sequence(SequenceState& sequence, Request
 
 void ProgramImplCore::retain_lane(std::uint32_t lane) {
     if (lane >= max_concurrency) { throw std::out_of_range("request lane is out of range"); }
+    flush_deferred_gdn_fold(lane);
     SequenceState& sequence = sequences[lane];
     RequestControl& request = requests[lane];
     if (request.lifecycle != Lifecycle::Active) {
@@ -1469,6 +1495,7 @@ void ProgramImplCore::retain_lane(std::uint32_t lane) {
 
 bool ProgramImplCore::retain_reusable_lane(std::uint32_t lane) {
     if (lane >= max_concurrency) { return false; }
+    flush_deferred_gdn_fold(lane);
     SequenceState& sequence = sequences[lane];
     RequestControl& request = requests[lane];
     if (request.lifecycle == Lifecycle::Active) {
@@ -1503,6 +1530,7 @@ bool ProgramImplCore::copy_reusable_prompt(std::uint32_t lane, std::uint32_t pro
 
 bool ProgramImplCore::revert_cancelled_prefill_lane(std::uint32_t lane) {
     if (lane >= max_concurrency) { return false; }
+    flush_deferred_gdn_fold(lane);
     SequenceState& sequence = sequences[lane];
     RequestControl& request = requests[lane];
     if (request.lifecycle != Lifecycle::Prefilling || !sequence.kv) { return false; }
@@ -1688,6 +1716,7 @@ bool ProgramImplCore::capture_retained_lane(std::uint32_t lane, std::uint64_t* r
     if (ram_entry_id != nullptr) { *ram_entry_id = 0; }
     if (deferred != nullptr) { *deferred = false; }
     if (!kv_ram_cache_ || !has_retained_lane(lane)) { return true; }
+    flush_deferred_gdn_fold(lane);
     device.order_copy_after_compute();
     qwen3::detail::RamCaptureSource source;
     try {
@@ -2289,6 +2318,7 @@ void ProgramImplCore::restore_ram_entry(std::uint32_t lane, std::uint64_t entry_
                                         const RequestPlan& plan) {
     if (lane >= max_concurrency) { throw std::out_of_range("request lane is out of range"); }
     if (!kv_ram_cache_) { throw std::logic_error("RAM restore requires an enabled RAM tier"); }
+    flush_deferred_gdn_fold(lane);
     if (plan.impl_ == nullptr) { throw std::invalid_argument("request plan is empty"); }
     const RequestPlanImpl& request_plan = *plan.impl_;
     if (request_plan.reuse == ReusePath::FullReset || request_plan.ram_entry_id != entry_id ||
@@ -2459,6 +2489,7 @@ void ProgramImplCore::restore_disk_entry(std::uint32_t lane, std::uint64_t entry
                                          const RequestPlan& plan) {
     if (lane >= max_concurrency) { throw std::out_of_range("request lane is out of range"); }
     if (!kv_disk_cache_) { throw std::logic_error("disk restore requires an enabled disk tier"); }
+    flush_deferred_gdn_fold(lane);
     if (plan.impl_ == nullptr) { throw std::invalid_argument("request plan is empty"); }
     const RequestPlanImpl& request_plan = *plan.impl_;
     if (request_plan.reuse == ReusePath::FullReset || request_plan.disk_entry_id != entry_id ||
@@ -2663,6 +2694,7 @@ void ProgramImplCore::discard_ram_capture(std::uint64_t ram_id) {
 
 void ProgramImplCore::shutdown_kv_tiers(LoadProgress progress) {
     if (kv_tiers_shutdown_) { return; }
+    flush_deferred_gdn_folds();
     kv_tiers_shutdown_ = true;
     auto report = [&](std::string_view phase, std::uint64_t done, std::uint64_t total) {
         if (!progress.callback) { return; }
@@ -2852,10 +2884,46 @@ void ProgramImplCore::clear_lane(SequenceState& sequence, RequestControl& reques
     sequence.disk_unpacked_context_base = 0;
     sequence.disk_unpacked_context_hash = {};
     clear_context_checkpoints(sequence);
+    sequence.deferred_fold_columns   = 0;
     request.pending                  = {};
     request.adaptive                 = {};
     request.typical_cycle_reasoning  = false;
     request.prompt_tokens            = 0;
+}
+
+void ProgramImplCore::flush_deferred_gdn_folds(std::span<const std::uint32_t> lanes) {
+    std::array<ops::GdnReplayFoldRow, kMaximumConcurrency> rows{};
+    for (ops::GdnReplayFoldRow& row : rows) {
+        row = {.linear_state_slot = LinearStateSlots::current_state_slot(0, max_concurrency),
+               .commit_columns    = 0};
+    }
+    std::size_t row_count = 0;
+    const auto take = [&](std::uint32_t lane) {
+        if (lane >= max_concurrency) { throw std::out_of_range("request lane is out of range"); }
+        SequenceState& sequence = sequences[lane];
+        if (sequence.deferred_fold_columns == 0) { return; }
+        const std::uint32_t row = sequence.deferred_fold_row;
+        if (!replay_records || row >= kMaximumConcurrency || rows[row].commit_columns != 0) {
+            throw std::logic_error("deferred GDN fold row is invalid");
+        }
+        rows[row]  = {.linear_state_slot = LinearStateSlots::current_state_slot(lane, max_concurrency),
+                      .commit_columns    = static_cast<std::int32_t>(sequence.deferred_fold_columns)};
+        row_count  = std::max<std::size_t>(row_count, row + 1U);
+        sequence.deferred_fold_columns = 0;
+    };
+    if (lanes.empty()) {
+        for (std::uint32_t lane = 0; lane < max_concurrency; ++lane) { take(lane); }
+    } else {
+        for (const std::uint32_t lane : lanes) { take(lane); }
+    }
+    if (row_count == 0) { return; }
+    ops::gdn_replay_fold(*replay_records, decoder->linear_attention.all_layers_view(),
+                         std::span<const ops::GdnReplayFoldRow>(rows.data(), row_count),
+                         device.stream);
+}
+
+void ProgramImplCore::flush_deferred_gdn_fold(std::uint32_t lane) {
+    flush_deferred_gdn_folds(std::span<const std::uint32_t>(&lane, 1));
 }
 
 PagedKVPool* ProgramImplCore::backend_kv_pool() noexcept {
@@ -4627,6 +4695,20 @@ ProgramImplCore::decode_dflash_batch(std::span<const std::uint32_t> lanes,
     }
     decision_trace::require_eager(use_device_graph);
     layer_boundary_trace::require_eager(use_device_graph);
+    // This round rewrites every record row: lanes outside it apply their deferred fold first.
+    {
+        std::array<std::uint32_t, kMaximumConcurrency> outside{};
+        std::size_t outside_count = 0;
+        for (std::uint32_t lane = 0; lane < max_concurrency; ++lane) {
+            if (sequences[lane].deferred_fold_columns != 0 &&
+                std::find(lanes.begin(), lanes.end(), lane) == lanes.end()) {
+                outside[outside_count++] = lane;
+            }
+        }
+        if (outside_count != 0) {
+            flush_deferred_gdn_folds(std::span<const std::uint32_t>(outside.data(), outside_count));
+        }
+    }
 
     const std::uint32_t width           = dflash_verify_width;
     std::array<std::uint32_t, kMaximumConcurrency> row_ks{};
@@ -4767,6 +4849,19 @@ ProgramImplCore::decode_dflash_batch(std::span<const std::uint32_t> lanes,
                 std::min(capacity, frontier + dflash_verify_width),
                 DFlashConfig::full_layers > 0 ? frontier : 0U);
             realized_extent = std::max(realized_extent, extent);
+        }
+        // Tree verification folds through a path, so its rows take no deferred chain fold.
+        if (dflash_uses_tree_verify(batch_k, live_w)) { flush_deferred_gdn_folds(lanes); }
+        for (std::size_t row = 0; row < lanes.size(); ++row) {
+            SequenceState& sequence = sequences[lanes[row]];
+            if (sequence.deferred_fold_columns == 0) { continue; }
+            dflash_host_ingress->gdn_fold.row[row] = ops::GdnDeferredFoldRow{
+                .linear_state_slot =
+                    LinearStateSlots::current_state_slot(lanes[row], max_concurrency),
+                .commit_columns = static_cast<std::int32_t>(sequence.deferred_fold_columns),
+                .record_row     = static_cast<std::int32_t>(sequence.deferred_fold_row),
+            };
+            sequence.deferred_fold_columns = 0;
         }
 
         SegmentedKvTransactionBatch text_transactions(lanes.size(), kv_resolution_words(false));
@@ -5330,6 +5425,7 @@ void ProgramImplCore::run_decode_score(PreparedPromptData&& prompt,
 
 ScoreResult ProgramImplCore::score(PreparedPromptData&& prompt, RequestPlan&& plan,
                                    runtime::TransientRegion transient, ScoreOptions options) {
+    flush_deferred_gdn_folds();
     const auto started                   = Clock::now();
     const std::uint32_t prompt_tokens    = static_cast<std::uint32_t>(prompt.token_ids.size());
     const std::vector<TokenId> token_ids = prompt.token_ids;

@@ -856,6 +856,7 @@ auto dflash_decode_batch_body(DFlashBatchContext& state, std::int32_t batch_size
             .accepted_drafts = accepted,
             .selected_hidden = selected_hidden,
             .replay_records  = state.execution.replay_records,
+            .gdn_fold        = use_tree ? nullptr : frame.gdn_fold,
             .sampling        = frame.sampling,
             .feature_sink    = &sink,
             .tool_masks      = state.tool_masks,

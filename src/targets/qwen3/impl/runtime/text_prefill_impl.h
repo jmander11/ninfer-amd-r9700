@@ -33,7 +33,7 @@ void configure_text_card(TextContext& card, const ExecutionCore& execution,
                          std::uint32_t mtp_proposal_extent) {
     card.set_sampling(sampling);
     card.set_linear_state_slot(current_state_slot);
-    card.set_gdn_state_action(GdnStateAction::UpdateInPlace, nullptr);
+    card.set_gdn_state_action(GdnStateAction::UpdateInPlace, nullptr, nullptr);
     card.set_mtp_proposal_extent(mtp_proposal_extent);
     if (execution.proposal_head == ProposalHead::Full) {
         card.set_proposal_head(nullptr, nullptr, 0);

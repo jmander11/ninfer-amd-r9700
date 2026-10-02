@@ -2,6 +2,7 @@
 
 #include "core/layout.h"
 #include "core/tensor.h"
+#include "ninfer/ops/gdn_replay.h"
 #include "ninfer/ops/sampling.h"
 #include "ninfer/types.h"
 
@@ -85,6 +86,9 @@ struct DFlashDecodeIngress {
     // MRoPE delta to its own position panel after proposal construction.
     std::array<std::int32_t, kMaximumConcurrency> rope_deltas{};
     std::array<ops::SamplingConfig, kMaximumConcurrency> sampling{};
+    // The previous round's ReplaySSM fold, deferred into this round's verification forward:
+    // row b folds its lane's accepted columns layer by layer ahead of that layer's GDN front.
+    ops::GdnDeferredFoldRows gdn_fold{};
 };
 
 struct DFlashDecodeEgress {
@@ -277,6 +281,7 @@ struct DFlashDecodeState {
     Tensor lanes;
     Tensor rope_deltas;
     const ops::SamplingConfig* sampling = nullptr;
+    const ops::GdnDeferredFoldRows* gdn_fold = nullptr;
     Tensor licensed_tokens;
     Tensor licensed_counts;
     Tensor accepted_drafts;

@@ -7,6 +7,7 @@
 #include "ninfer/ops/gated_rmsnorm.h"
 #include "ninfer/ops/gdn_gating.h"
 #include "ninfer/ops/gdn_projection.h"
+#include "ninfer/ops/gdn_replay.h"
 #include "ninfer/ops/mtp_pack.h"
 #include "ninfer/ops/normalized_linear.h"
 #include "ninfer/ops/projected_residual.h"
@@ -1019,7 +1020,8 @@ bool Variant::ExecutionState::gdn_q4_normalized_front_t1(
 bool Variant::ExecutionState::gdn_fp8lut4_front(const Tensor& residual, const Tensor& norm,
                                             float eps, const GdnProjectionWeights& weights,
                                             Tensor& g, Tensor& beta, hipStream_t stream,
-                                            ops::r9700::linear::Fp8ActivationWorkspace* image) {
+                                            ops::r9700::linear::Fp8ActivationWorkspace* image,
+                                            const ops::GdnLayerFold* fold) {
     constexpr std::int32_t kHeads = TextConfig::gdn_value_heads;
     const std::int32_t tokens = residual.ne[1];
     const auto control_weight = [](const Weight& weight) {
@@ -1054,14 +1056,15 @@ bool Variant::ExecutionState::gdn_fp8lut4_front(const Tensor& residual, const Te
         static_cast<const float*>(weights.dt_bias.data), static_cast<float*>(g.data),
         static_cast<float*>(beta.data), *image, stream,
         static_cast<std::uint32_t>(tokens) <= kWarmMaximumTokens
-            ? weight_warm(query_key, 0U, kGdnFrontWarmBytes) : CacheWarm{}));
+            ? weight_warm(query_key, 0U, kGdnFrontWarmBytes) : CacheWarm{},
+        fold));
     return true;
 }
 
 bool Variant::ExecutionState::gdn_q4_normalized_front_record(
     const Tensor& residual, const Tensor& norm, float eps, const GdnProjectionWeights& weights,
     const GdnConvRecord& record, Tensor& g, Tensor& beta, WorkspaceArena& workspace,
-    std::int32_t text_layer, hipStream_t stream) {
+    std::int32_t text_layer, hipStream_t stream, const ops::GdnLayerFold* fold) {
     constexpr std::int32_t kRows0 = 2 * TextConfig::key_dim;
     constexpr std::int32_t kRows1 = 2 * TextConfig::value_dim;
     const std::int32_t tokens = residual.ne[1];
@@ -1074,7 +1077,7 @@ bool Variant::ExecutionState::gdn_q4_normalized_front_record(
         return static_cast<hip_bfloat16*>(tensor.data);
     };
     ops::r9700::linear::Fp8ActivationWorkspace image{};
-    if (gdn_fp8lut4_front(residual, norm, eps, weights, g, beta, stream, &image)) {
+    if (gdn_fp8lut4_front(residual, norm, eps, weights, g, beta, stream, &image, fold)) {
         const auto width = static_cast<std::uint32_t>(record.query.ne[1]);
         const auto batch = static_cast<std::uint32_t>(record.query.ne[2]);
         const auto state_slots = static_cast<std::uint32_t>(record.conv_states.ne[2]);
@@ -1120,6 +1123,7 @@ bool Variant::ExecutionState::gdn_q4_normalized_front_record(
                       &required)) {
         return false;
     }
+    if (fold != nullptr) ops::gdn_replay_fold_layer(*fold, stream);
     const auto i32 = [](const Tensor* tensor) {
         return tensor == nullptr || tensor->data == nullptr
                    ? nullptr
@@ -2524,7 +2528,8 @@ void Variant::gdn_front_record(
     const Tensor& valid_columns, const Tensor& initial_slots, Tensor& hidden, Tensor& g,
     Tensor& beta, Tensor& conv_record, Tensor& query, Tensor& key, Tensor& value,
     Tensor& output_gate, qwen3::TextPhase phase, WorkspaceArena& workspace, hipStream_t stream,
-    const Tensor* parent_index, ExecutionState* execution, std::int32_t text_layer) {
+    const Tensor* parent_index, ExecutionState* execution, std::int32_t text_layer,
+    const ops::GdnLayerFold* fold) {
     const std::int32_t width = hidden.ne[1];
     const std::int32_t batch = hidden.ne[2];
     const std::int32_t tokens = width * batch;
@@ -2546,10 +2551,11 @@ void Variant::gdn_front_record(
                                                    query, key, value, output_gate};
         if (execution->gdn_q4_normalized_front_record(residual_flat, norm_weight, eps, weights,
                                                       record, g, beta, workspace, text_layer,
-                                                      stream)) {
+                                                      stream, fold)) {
             return;
         }
     }
+    if (fold != nullptr) ops::gdn_replay_fold_layer(*fold, stream);
     Tensor hidden_flat = hidden.view({TextConfig::hidden, tokens});
     gdn_norm_control_projection(residual_flat, norm_weight, eps, weights, hidden_flat, g, beta,
                                 stream);

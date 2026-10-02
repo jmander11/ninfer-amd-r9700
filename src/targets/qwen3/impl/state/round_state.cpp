@@ -372,6 +372,8 @@ DFlashDecodeState::DFlashDecodeState(DeviceSpan backing, const DFlashDecodeState
         ingress_tensor(offsetof(DFlashDecodeIngress, rope_deltas), DType::I32, {batch});
     sampling = reinterpret_cast<const ops::SamplingConfig*>(
         static_cast<const unsigned char*>(ingress.data) + offsetof(DFlashDecodeIngress, sampling));
+    gdn_fold = reinterpret_cast<const ops::GdnDeferredFoldRows*>(
+        static_cast<const unsigned char*>(ingress.data) + offsetof(DFlashDecodeIngress, gdn_fold));
     licensed_tokens =
         egress_tensor(offsetof(DFlashDecodeEgress, licensed_tokens), DType::I32, {width, batch});
     licensed_counts =

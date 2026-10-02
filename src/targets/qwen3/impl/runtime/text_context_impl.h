@@ -316,12 +316,27 @@ void TextContext::set_linear_state_slot(std::int32_t current_slot) {
 }
 
 void TextContext::set_gdn_state_action(GdnStateAction action,
-                                       const GdnReplayRecords* replay_records) {
-    if ((action == GdnStateAction::RecordForReplay) != (replay_records != nullptr)) {
+                                       const GdnReplayRecords* replay_records,
+                                       const ops::GdnDeferredFoldRows* deferred_fold) {
+    if ((action == GdnStateAction::RecordForReplay) != (replay_records != nullptr) ||
+        (deferred_fold != nullptr && action != GdnStateAction::RecordForReplay)) {
         throw std::invalid_argument("TextContext GDN state action has inconsistent records");
     }
-    gdn_state_action_ = action;
-    replay_records_   = replay_records;
+    gdn_state_action_  = action;
+    replay_records_    = replay_records;
+    deferred_gdn_fold_ = deferred_fold;
+}
+
+std::optional<ops::GdnLayerFold> TextContext::deferred_gdn_layer_fold(int gidx) {
+    if (deferred_gdn_fold_ == nullptr) return std::nullopt;
+    return ops::GdnLayerFold{
+        .records   = replay_records_,
+        .recurrent = state_.recurrent.at(static_cast<std::size_t>(gidx)),
+        .conv      = state_.conv.at(static_cast<std::size_t>(gidx)),
+        .layer     = gidx,
+        .rows      = deferred_gdn_fold_,
+        .batch     = active_sequence_batch_,
+    };
 }
 
 void TextContext::set_tree_verify(const Tensor* parent_index, const Tensor* ancestor_mask,
@@ -1317,6 +1332,8 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
             persistent_records = replay_records_->layer(gidx, active_sequence_row_,
                                                         active_sequence_batch_);
             live_records       = persistent_records;
+            const std::optional<ops::GdnLayerFold> layer_fold = deferred_gdn_layer_fold(gidx);
+            if (layer_fold && !record_front) ops::gdn_replay_fold_layer(*layer_fold, s);
             if (pack_replay) {
                 // LLD Capture/run: GDN requires record.ne[2]==q.ne[2]; pack only when they differ.
                 const GdnReplayRecordSpec& spec = replay_records_->spec;
@@ -1336,7 +1353,8 @@ void TextContext::gdn_mix(const GdnLayerW& w, Tensor& x, int gidx, int text_laye
                                           *active_linear_state_slots_, projection_input, g, beta,
                                           live_records.conv, query_output, key_output,
                                           value_output, gate_output, ph, work_, s,
-                                          active_parent_index_, linear_execution_, text_layer);
+                                          active_parent_index_, linear_execution_, text_layer,
+                                          layer_fold ? &*layer_fold : nullptr);
             } else {
                 Variant::gdn_input_projection_record(
                     projection_input, *w.projection, *w.conv1d, conv_states, valid,
@@ -1530,6 +1548,9 @@ void TextContext::gdn_mix_mixed(const GdnLayerW& w, Tensor& x, int gidx, int tex
     Tensor hidden = control.hidden;
     Tensor g      = control.g;
     Tensor beta   = control.beta;
+    if (const std::optional<ops::GdnLayerFold> layer_fold = deferred_gdn_layer_fold(gidx)) {
+        ops::gdn_replay_fold_layer(*layer_fold, s);
+    }
     Variant::gdn_front_mixed(x, *w.input_norm, kCfg.rms_eps, *w.projection, *w.conv1d,
                              owner_conv, conv_states, valid, *active_linear_state_slots_, owner,
                              hidden, g, beta, live_records.conv, projection.query,

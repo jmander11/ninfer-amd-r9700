@@ -11,6 +11,7 @@
 #include "core/gdn_replay_records.h"
 #include "core/tensor.h"
 #include "core/weight.h"
+#include "ninfer/ops/gdn_replay.h"
 #include "ninfer/ops/sampling.h"
 #include <ninfer/targets/qwen3/decoder_state.h>
 #include <ninfer/targets/qwen3/prepared_prompt.h>
@@ -208,7 +209,10 @@ public:
     }
 
     void set_linear_state_slot(std::int32_t current_slot);
-    void set_gdn_state_action(GdnStateAction action, const GdnReplayRecords* replay_records);
+    // `deferred_fold` (RecordForReplay only, may be null): device rows of the previous round's
+    // ReplaySSM fold, applied to each GDN layer ahead of that layer's verification front.
+    void set_gdn_state_action(GdnStateAction action, const GdnReplayRecords* replay_records,
+                              const ops::GdnDeferredFoldRows* deferred_fold);
     void set_tree_verify(const Tensor* parent_index, const Tensor* ancestor_mask,
                          const Tensor* prefix_lengths);
     void set_sequence_row(std::int32_t row) noexcept { active_sequence_row_ = row; }
@@ -324,6 +328,8 @@ private:
     void gdn_mix(const GdnLayerW& weights, Tensor& x, int index, int text_layer, Phase phase,
                  Tap& tap);
     void gdn_mix_mixed(const GdnLayerW& weights, Tensor& x, int index, int text_layer);
+    // Layer `gidx`'s share of the bound deferred fold, if any.
+    [[nodiscard]] std::optional<ops::GdnLayerFold> deferred_gdn_layer_fold(int gidx);
     void mlp_tail(const Tensor* post_norm, const MlpW& weights, Tensor& x, int text_layer,
                   Phase phase);
     void run_layers(Tensor& x, Phase phase);
@@ -411,6 +417,7 @@ private:
     std::int32_t linear_state_current_slot_               = 0;
     GdnStateAction gdn_state_action_                      = GdnStateAction::UpdateInPlace;
     const GdnReplayRecords* replay_records_               = nullptr;
+    const ops::GdnDeferredFoldRows* deferred_gdn_fold_    = nullptr;
     std::int64_t prefill_rewrite_checkpoint_frontier_     = -1;
     std::span<const std::uint32_t> prefill_split_frontiers_{};
     Tensor* rewrite_checkpoint_hidden_output_             = nullptr;

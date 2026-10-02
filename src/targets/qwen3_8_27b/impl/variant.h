@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/cache_warm.h"
+#include "ninfer/ops/gdn_replay.h"
 #include "ops/r9700/linear/a8q4_small_batch_projection.h"
 #include "ops/r9700/linear/fp8_activation.h"
 #include "targets/qwen3_8_27b/impl/config.h"
@@ -175,7 +176,8 @@ struct Variant {
         [[nodiscard]] bool gdn_q4_normalized_front_record(
             const Tensor& residual, const Tensor& norm, float eps,
             const GdnProjectionWeights& weights, const GdnConvRecord& record, Tensor& g,
-            Tensor& beta, WorkspaceArena& workspace, std::int32_t text_layer, hipStream_t stream);
+            Tensor& beta, WorkspaceArena& workspace, std::int32_t text_layer, hipStream_t stream,
+            const ops::GdnLayerFold* fold);
         [[nodiscard]] bool gdn_q4_normalized_prefill(
             const Tensor& residual, const Tensor& norm, float eps, const Weight& query_key,
             const Weight& value_z, Tensor& normalized, Tensor& query_key_output,
@@ -309,11 +311,13 @@ struct Variant {
             const Tensor& gate_up, const Weight& down, Tensor& residual) const;
         // FP8LUT4 GDN front: residual RMSNorm, a/b controls into g/beta and the per-token E4M3 image
         // of the seam (bound in the serialized region) from one kernel; false unless both GDN
-        // input projections are FP8LUT4.
+        // input projections are FP8LUT4. A non-null `fold` (that layer's deferred replay fold)
+        // runs in the same launch.
         [[nodiscard]] bool gdn_fp8lut4_front(const Tensor& residual, const Tensor& norm, float eps,
                                          const GdnProjectionWeights& weights, Tensor& g,
                                          Tensor& beta, hipStream_t stream,
-                                         ops::r9700::linear::Fp8ActivationWorkspace* image);
+                                         ops::r9700::linear::Fp8ActivationWorkspace* image,
+                                         const ops::GdnLayerFold* fold = nullptr);
         [[nodiscard]] ops::r9700::linear::Fp8ActivationWorkspace fp8lut4_image(
             std::uint32_t tokens, std::uint32_t columns) const;
         void fp8lut4_project(const ops::r9700::linear::Fp8ActivationWorkspace& image,
@@ -457,7 +461,9 @@ struct Variant {
     // Verification record front: owns the GDN input RMSNorm of `residual` [hidden,width,batch],
     // the a/b controls into g/beta, the query-key/value-z projections and the convolution record
     // (gdn_input_projection_record's outputs). `hidden` [hidden,width,batch] is scratch for the
-    // unfused composition; the fused A8 route does not materialize it.
+    // unfused composition; the fused A8 route does not materialize it. A non-null `fold` (this
+    // layer's deferred replay fold of the previous round) is applied before the convolution
+    // record reads the layer's state, fused into the FP8 front when that route runs.
     static void gdn_front_record(
         const Tensor& residual, const Tensor& norm_weight, float eps,
         const GdnProjectionWeights& weights, const Tensor& conv_weight, const Tensor& conv_states,
@@ -465,7 +471,8 @@ struct Variant {
         Tensor& beta, Tensor& conv_record, Tensor& query, Tensor& key, Tensor& value,
         Tensor& output_gate, qwen3::TextPhase phase, WorkspaceArena& workspace,
         hipStream_t stream, const Tensor* parent_index = nullptr,
-        ExecutionState* execution = nullptr, std::int32_t text_layer = -1);
+        ExecutionState* execution = nullptr, std::int32_t text_layer = -1,
+        const ops::GdnLayerFold* fold = nullptr);
     // Mixed front: one prefill owner's leading `prefill_columns` columns of `residual`
     // [hidden,T] followed by a record-verify batch of `conv_record`'s [conv,width,batch] columns.
     // Normalization, a/b controls and the input projections run once over all T columns; the

@@ -146,6 +146,8 @@ struct TargetVerifyFrameView {
     Tensor draft_selector_q;
     bool tree_verify = false;
     const GdnReplayRecords* replay_records = nullptr;
+    // DFlash chain verification: the device rows of the previous round's deferred fold.
+    const ops::GdnDeferredFoldRows* gdn_fold = nullptr;
     const ops::SamplingConfig* sampling    = nullptr;
     DFlashFeatureSink* feature_sink        = nullptr;
     qwen3::ToolMaskExchange* tool_masks = nullptr;

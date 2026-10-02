@@ -217,8 +217,13 @@ validate_fold_rows(const GdnReplayRecords& records, LinearAttentionStateAllLayer
                 }
             }
         }
+        const auto folds = [](const GdnReplayFoldRow& candidate) {
+            return candidate.path_length > 0 ||
+                   (candidate.path_length < 0 && candidate.commit_columns > 0);
+        };
         for (std::size_t previous = 0; previous < row; ++previous) {
-            if (rows[previous].linear_state_slot == rows[row].linear_state_slot) {
+            if (folds(rows[previous]) && folds(rows[row]) &&
+                rows[previous].linear_state_slot == rows[row].linear_state_slot) {
                 throw std::invalid_argument("gdn_replay_fold: active state slots must be distinct");
             }
         }
@@ -243,6 +248,51 @@ void gdn_replay_fold(const GdnReplayRecords& records, LinearAttentionStateAllLay
         validate_fold_rows(records, states, rows);
     detail::gated_delta_net::launch_replay_fold(records, states, packed,
                                                 static_cast<std::int32_t>(rows.size()), stream);
+}
+
+namespace detail::gated_delta_net {
+
+fold::LayerArgs replay_fold_layer_args(const GdnLayerFold& layer_fold) {
+    if (layer_fold.records == nullptr || layer_fold.rows == nullptr) {
+        throw std::invalid_argument("gdn_replay_fold_layer: records and rows are required");
+    }
+    const GdnReplayRecords& records = *layer_fold.records;
+    validate_fold_records(records);
+    const auto& spec = records.spec;
+    if (spec.qk_heads != fold::kQkHeads || spec.value_heads != fold::kValueHeads ||
+        spec.conv_channels != fold::kConvChannels || layer_fold.layer < 0 ||
+        layer_fold.layer >= spec.layers || layer_fold.batch < 1 ||
+        layer_fold.batch > spec.record_capacity ||
+        layer_fold.batch > static_cast<std::int32_t>(GdnDeferredFoldRows{}.row.size()) ||
+        reinterpret_cast<std::uintptr_t>(layer_fold.rows) % alignof(GdnDeferredFoldRows) != 0U) {
+        throw std::invalid_argument("gdn_replay_fold_layer: unsupported layer, batch or rows");
+    }
+    const std::int32_t slots = layer_fold.recurrent.ne[3];
+    require_tensor(layer_fold.recurrent, DType::FP32, {kStateDim, kStateDim, spec.value_heads, slots},
+                   256, "gdn_replay_fold_layer", "recurrent state");
+    require_tensor(layer_fold.conv, DType::BF16, {spec.conv_channels, 3, slots}, 256,
+                   "gdn_replay_fold_layer", "conv state");
+    static_assert(sizeof(fold::DeferredRow) == sizeof(GdnDeferredFoldRow) &&
+                  sizeof(GdnDeferredFoldRows) == 8U * sizeof(fold::DeferredRow));
+    return fold::LayerArgs{
+        .planes = {static_cast<const hip_bfloat16*>(records.key.data),
+                   static_cast<const hip_bfloat16*>(records.value.data),
+                   static_cast<const float*>(records.gate.data),
+                   static_cast<const hip_bfloat16*>(records.conv.data), spec.record_capacity,
+                   spec.width},
+        .layer = layer_fold.layer,
+        .recurrent_layer = static_cast<float*>(layer_fold.recurrent.data),
+        .conv_layer = static_cast<hip_bfloat16*>(layer_fold.conv.data),
+        .rows = reinterpret_cast<const fold::DeferredRow*>(layer_fold.rows),
+        .batch = layer_fold.batch,
+    };
+}
+
+} // namespace detail::gated_delta_net
+
+void gdn_replay_fold_layer(const GdnLayerFold& fold, hipStream_t stream) {
+    detail::gated_delta_net::launch_replay_fold_layer(
+        detail::gated_delta_net::replay_fold_layer_args(fold), stream);
 }
 
 } // namespace ninfer::ops

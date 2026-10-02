@@ -232,6 +232,12 @@ struct SequenceState {
     // at end of occupy and in clear_lane so a later VRAM/RAM staged restore still unpacks.
     std::uint32_t disk_unpacked_context_base = 0;
     qwen3::detail::PrefixHash128 disk_unpacked_context_hash{};
+    // A committed DFlash chain round whose ReplaySSM fold is deferred into the lane's next
+    // verification forward: `deferred_fold_columns` (> 0 while pending) columns of physical
+    // record row `deferred_fold_row`. Until it is applied, the lane's GDN slot holds the state
+    // before that round and the record row must not be overwritten.
+    std::uint32_t deferred_fold_columns = 0;
+    std::uint32_t deferred_fold_row     = 0;
 };
 
 // Request/round control is not retained with a reusable SequenceState. A later concurrent Engine
@@ -500,6 +506,10 @@ public:
 
 private:
     void clear_lane(SequenceState& sequence, RequestControl& request) noexcept;
+    // Applies the pending deferred folds of `lanes` (all lanes when empty) with the eager
+    // all-layer fold, before anything else reads their GDN state or rewrites their records.
+    void flush_deferred_gdn_folds(std::span<const std::uint32_t> lanes = {});
+    void flush_deferred_gdn_fold(std::uint32_t lane);
     void retain_committed_sequence(SequenceState& sequence, RequestControl& request);
     void ordered_reset(SequenceState& sequence);
     void prepare_graphs();
