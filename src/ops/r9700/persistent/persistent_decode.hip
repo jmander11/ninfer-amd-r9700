@@ -460,10 +460,12 @@ struct BlockStreams {
     }
 };
 
-// One wave per block streams next-phase lines while the block waits: a bounded number of lines
+// Two waves per block stream next-phase lines while the block waits: a bounded number of lines
 // in flight, so the stream does not queue the latency-bound loads of the blocks still working
-// (one wave measured 0.4-1.1 ms per C1 DFlash round faster than 16, 128 or 384 threads).
-constexpr std::uint32_t kPrefetchThreads = 32U;
+// (with weightless phases streaming the coming projection, a C1 DFlash round measured 0.25 ms
+// faster than one wave and 0.15 / 0.4 ms faster than three / four; 128 or 384 threads were
+// 0.4-1.1 ms slower than one wave before).
+constexpr std::uint32_t kPrefetchThreads = 64U;
 
 // Code of each entry's body, [first, end) as recorded by its first execution (benign races:
 // every writer stores the same value), so a block waiting at the barrier before a phase can

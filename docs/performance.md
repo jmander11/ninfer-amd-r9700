@@ -173,7 +173,9 @@ activation quantization (one register-cached pass, one reduction barrier) was li
 end to end. What helped instead: a phase that streams no weights (quantization, GDN front and
 record, RoPE) prefetches at its barrier the next weight-streaming phase's lines, so a projection's
 tail and the small phases after it stream the coming projection: C1 DFlash K7 29.64-29.73 ->
-29.45-29.55 ms/round, MTP K3 33.61 -> 33.45-33.47 ms/round (same accepted tokens).
+29.45-29.55 ms/round, MTP K3 33.61 -> 33.45-33.47 ms/round (same accepted tokens). With that,
+two prefetch waves per waiting block beat one: DFlash 29.21-29.23 ms/round (three waves 29.38,
+four 29.60), MTP K3 33.22-33.24.
 
 Multi-sequence (`B>1`) lowering, not adopted. Lowered as-is, C4 and C8 DFlash K7 decoded 6.6%
 and 5.5% slower: a C4 verification is 32 columns, whose two-token-tile projections were not
