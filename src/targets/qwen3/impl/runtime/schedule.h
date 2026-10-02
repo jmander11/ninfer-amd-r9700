@@ -116,7 +116,6 @@ struct DFlashAppendContext {
 struct DFlashEnvelopes {
     ops::SwaContextExecutionEnvelope local;
     ops::GqaContextExecutionEnvelope full;
-    ops::KVCacheAppendPrefixExecutionEnvelope append;
 };
 
 struct TargetVerifyFrameView {

@@ -202,13 +202,10 @@ std::array<std::int32_t, 3> prompt_rope_position(const PreparedPromptData& promp
             prompt.positions[2 * tokens + token]};
 }
 
-schedule::DFlashEnvelopes dflash_envelopes(std::uint32_t min_frontier, std::uint32_t max_frontier,
-                                           std::uint32_t k) {
-    (void)min_frontier;
+schedule::DFlashEnvelopes dflash_envelopes(std::uint32_t max_frontier) {
     return schedule::DFlashEnvelopes{
-        .local  = {0, max_frontier},
-        .full   = {0, max_frontier},
-        .append = {0, k + 1},
+        .local = {0, max_frontier},
+        .full  = {0, max_frontier},
     };
 }
 
@@ -3677,7 +3674,7 @@ void ProgramImplCore::prepare_graphs() {
                 *io.dflash_decode,      *dflash_host_ingress, *dflash_host_egress,
                 tail_hidden_store,      transactions.binding(), tool_masks.get()};
             const schedule::DFlashEnvelopes envelopes =
-                dflash_envelopes(frontier, maximum_frontier, fixed_k);
+                dflash_envelopes(maximum_frontier);
             if (definition != nullptr) {
                 schedule::capture_dflash_decode_batch(
                     dflash_state, static_cast<std::int32_t>(batch_size), fixed_k, fixed_w,
@@ -4939,7 +4936,7 @@ ProgramImplCore::decode_dflash_batch(std::span<const std::uint32_t> lanes,
             maximum_frontier, "DFlash batch");
         const std::uint32_t transaction_maximum_frontier = planned.max;
         const schedule::DFlashEnvelopes envelopes =
-            dflash_envelopes(planned.min, planned.max, batch_k);
+            dflash_envelopes(planned.max);
         if (prefill_lane && (prefill_step == nullptr || !prefill_mixable(*prefill_lane) ||
                              dflash_uses_tree_verify(batch_k, live_w) ||
                              std::find(lanes.begin(), lanes.end(), *prefill_lane) != lanes.end())) {
