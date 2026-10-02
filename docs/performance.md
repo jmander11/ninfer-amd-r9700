@@ -126,7 +126,14 @@ Greedy token ids are identical with and without lowering (3 prompts x DFlash K7,
 384 tokens) and so is seeded p-less sampling at fixed K7; with `--adaptive-draft` the live K
 follows measured round time, so a faster round may pick another K and realize another sample of
 the same distribution. Per-body bitwise identity: `persistent_decode_qual`.
-Evidence: `profiles/bench/r9700-megakernel-20261002/` (`ab*`, `trace*`, `tokens/`).
+
+Production configuration (CLI, DFlash adaptive K7 `--lm-head-draft`, C1, 11 manifest scenario
+prompts x {greedy, two p-less T1.5 seeds}, 768 tokens, two ABBA passes, 66 pairs; `26dddc00`
+kernel-node graphs vs `5d018ccf` lowered, 95% bootstrap): round time 1.3% shorter
+(1.0131, 1.0115–1.0145; 31.89 -> 31.48 ms/round), decode rate 1.025 (1.012–1.045; 137.1 -> 140.2
+tok/s). All 22 greedy pairs produce identical output; 18 of 44 seeded pairs differ because adaptive
+K follows the measured round time.
+Evidence: `profiles/bench/r9700-megakernel-20261002/` (`ab*`, `trace*`, `tokens/`, `corpus/`).
 
 The 2026-10-01 feasibility bound (96 phases, empty phase 0.95-1.0 us against 3.3 us per graph
 kernel; ~1.3 ms per round before costs;
