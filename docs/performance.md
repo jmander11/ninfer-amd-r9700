@@ -91,9 +91,9 @@ norm-RoPE) becomes one persistent kernel of two 384-thread blocks per WGP. Each 
 of virtual CTAs running the launch's own kernel body, separated by an atomic grid barrier
 (1.36 us against ~3 us per graph kernel). Outputs are bitwise those of the kernel nodes.
 A C1 K7 round runs 578 phases in 25 persistent kernels; verify attention, the drafter and the
-sampling tail stay kernel nodes. `B>1` definitions keep their kernel nodes: lowered, C4 and C8
-DFlash decoded 6.6% and 5.5% slower. The grid barrier needs all blocks co-resident (checked by
-occupancy at lowering), so the GPU is not shared with another resident persistent workload.
+sampling tail stay kernel nodes. `B>1` definitions keep their kernel nodes (below). The grid
+barrier needs all blocks co-resident (checked by occupancy at lowering), so the GPU is not shared
+with another resident persistent workload.
 
 What made phases as fast as their kernels:
 
@@ -133,7 +133,20 @@ kernel-node graphs vs `5d018ccf` lowered, 95% bootstrap): round time 1.3% shorte
 (1.0131, 1.0115–1.0145; 31.89 -> 31.48 ms/round), decode rate 1.025 (1.012–1.045; 137.1 -> 140.2
 tok/s). All 22 greedy pairs produce identical output; 18 of 44 seeded pairs differ because adaptive
 K follows the measured round time.
-Evidence: `profiles/bench/r9700-megakernel-20261002/` (`ab*`, `trace*`, `tokens/`, `corpus/`).
+Multi-sequence (`B>1`) lowering, not adopted. Lowered as-is, C4 and C8 DFlash K7 decoded 6.6%
+and 5.5% slower: a C4 verification is 32 columns, whose two-token-tile projections were not
+hosted, so a round became 47 persistent kernels of about two phases each. Hosting the two-tile
+FP8LUT4/FP8 projections, the separately projected GDN convolution record and a per-head GDN
+record (all bitwise, `persistent_decode_qual` with batched GDN layers) gave 72 kernels / 577
+phases per C4 round, still 2.7% slower (45.25 vs 44.03 ms/round); C2 decoded equally (35.42 vs
+35.45) and C8 within its run-to-run noise (58.7-63.4 vs 57.7-62.2). Per-phase timestamps
+attributed the rest to wide phases: the kernel runs at most six waves per SIMD (its 233-VGPR
+budget), where the 32-column GDN front (1.8x), convolution record (1.6x) and two-tile SiLU pair
+lose occupancy against their own launches, while a barrier saves only ~0.6 us of the ~1.6 us
+launch gap and every further persistent kernel starts ~8 us slower than a steady phase.
+
+Evidence: `profiles/bench/r9700-megakernel-20261002/` (`ab*`, `trace*`, `tokens/`, `corpus/`,
+`abB`/`abX`/`abY`/`abZ`, `b4trace/`).
 
 The 2026-10-01 feasibility bound (96 phases, empty phase 0.95-1.0 us against 3.3 us per graph
 kernel; ~1.3 ms per round before costs;
