@@ -7382,13 +7382,15 @@ void KVDiskCache::start_restore_state_h2d_locked(hipStream_t stream) {
                                    state_h2d_stream_));
         copied_state = true;
     };
-    // Rewrite checkpoints are lane-owned pinned host images; the loaded slices copy on the host.
+    // Rewrite checkpoints are lane-owned pinned host images; the loaded slices copy on the state
+    // stream's host callback thread, after the image's fence, instead of on this thread.
+    std::vector<HostCopy> rewrite_copies;
     auto host_from_arena = [&](void* dst, const auto& src, const char* label) {
         if (!live() || src.empty()) { return; }
         if (dst == nullptr) {
             throw std::logic_error(std::string("KV disk restore is missing the ") + label);
         }
-        std::memcpy(dst, src.data(), src.size());
+        rewrite_copies.push_back({dst, src.data(), src.size()});
     };
     auto cyclic_from_arena = [&](CyclicKVCache* cache, const auto& src) {
         if (!live() || cache == nullptr || src.empty()) { return; }
@@ -7428,6 +7430,14 @@ void KVDiskCache::start_restore_state_h2d_locked(hipStream_t stream) {
     if (restore_unpack_rewrite_ && restore_target_->dflash_local != nullptr) {
         host_from_arena(restore_target_->rewrite_state.dflash,
                         restore_state_slices_.rewrite_cyclic, "rewrite-checkpoint DFlash image");
+    }
+    if (!rewrite_copies.empty() && live()) {
+        const hipEvent_t image_done = restore_target_->rewrite_state.copies_done;
+        if (image_done != nullptr) { HIP_CHECK(hipStreamWaitEvent(state_h2d_stream_, image_done, 0)); }
+        state_arena_h2d_pending_ = true;
+        enqueue_host_copies(std::move(rewrite_copies), state_h2d_stream_);
+        copied_state = true;
+        if (image_done != nullptr) { HIP_CHECK(hipEventRecord(image_done, state_h2d_stream_)); }
     }
     if (fail_after_state_h2d_enqueue_.exchange(false, std::memory_order_acq_rel)) {
         throw std::runtime_error("injected failure after KV disk state H2D enqueue");

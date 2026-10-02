@@ -620,7 +620,8 @@ private:
     void drop_context_checkpoints_after(SequenceState& sequence, std::uint32_t frontier) noexcept;
     void clear_context_checkpoints(SequenceState& sequence) noexcept;
     void install_ram_context_checkpoints(SequenceState& sequence,
-                                         const qwen3::detail::RamRestoredHost& host);
+                                         const qwen3::detail::RamRestoredHost& host,
+                                         std::uint64_t entry_id);
     void install_disk_context_checkpoints(SequenceState& sequence,
                                           qwen3::detail::DiskRestoredHost&& host);
     [[nodiscard]] bool staging_holds(std::uint32_t lane, qwen3::detail::PrefixHash128 hash,

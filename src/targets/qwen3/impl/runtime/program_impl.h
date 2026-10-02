@@ -1638,23 +1638,23 @@ ProgramImplCore::ram_capture_source(const SequenceState& sequence) {
     source.gdn_current_slot = LinearStateSlots::current_state_slot(sequence.lane, max_concurrency);
     source.tail_hidden      = &sequence.tail_hidden;
     if (sequence.rewrite_checkpoint.valid) {
-        // The host tier reads the image directly, so its capture D2H must have landed.
+        // The host tier reads the image on the copy stream after its fence.
         const ContextCheckpointHead& image = sequence.rewrite_image;
-        image.wait_copies();
         source.rewrite_checkpoint_hidden = &sequence.rewrite_checkpoint_hidden;
         source.rewrite_state             = qwen3::detail::RewriteStateHostSource{
-                        .conv      = image.conv->data(),
-                        .recurrent = image.recurrent->data(),
-                        .dflash    = image.dflash ? image.dflash->data() : nullptr,
+                        .conv        = image.conv->data(),
+                        .recurrent   = image.recurrent->data(),
+                        .dflash      = image.dflash ? image.dflash->data() : nullptr,
+                        .copies_done = image.copies_done,
         };
     }
     source.ladder_heads.reserve(sequence.context_checkpoints.size());
     for (const ContextCheckpointHead& head : sequence.context_checkpoints) {
-        head.wait_copies();
         RamLadderHead view;
-        view.frontier = head.frontier;
-        view.hash     = head.hash;
-        view.kind     = head.kind;
+        view.frontier    = head.frontier;
+        view.hash        = head.hash;
+        view.kind        = head.kind;
+        view.copies_done = head.copies_done;
         if (head.conv) {
             view.conv       = head.conv->data();
             view.conv_bytes = head.conv->size();
@@ -1872,9 +1872,11 @@ void ProgramImplCore::drop_context_checkpoints_after(SequenceState& sequence,
 }
 
 void ProgramImplCore::install_ram_context_checkpoints(
-    SequenceState& sequence, const qwen3::detail::RamRestoredHost& host) {
+    SequenceState& sequence, const qwen3::detail::RamRestoredHost& host, std::uint64_t entry_id) {
     std::vector<ContextCheckpointHead> heads;
     heads.reserve(host.ladder_images.size());
+    std::vector<HostCopy> copies;
+    copies.reserve(4 * host.ladder_images.size());
     for (const qwen3::detail::RamLadderImage& image : host.ladder_images) {
         if (image.hidden_bytes != 0 && sequence.tail_hidden.bytes() != 0 &&
             image.hidden_bytes != sequence.tail_hidden.bytes()) {
@@ -1889,23 +1891,29 @@ void ProgramImplCore::install_ram_context_checkpoints(
             image.recurrent != nullptr ? image.recurrent_bytes : 0,
             image.hidden != nullptr ? image.hidden_bytes : 0,
             image.dflash != nullptr ? image.dflash_bytes : 0);
-        head.wait_copies();
+        // A recycled head's last reader or writer finishes before the copy stream refills it.
+        HIP_CHECK(hipStreamWaitEvent(device.copy_stream, head.copies_done, 0));
         head.frontier = image.frontier;
         head.hash     = image.hash;
         head.kind     = image.kind;
         if (image.conv_bytes != 0 && image.conv != nullptr) {
-            std::memcpy(head.conv->data(), image.conv, image.conv_bytes);
+            copies.push_back({head.conv->data(), image.conv, image.conv_bytes});
         }
         if (image.recurrent_bytes != 0 && image.recurrent != nullptr) {
-            std::memcpy(head.recurrent->data(), image.recurrent, image.recurrent_bytes);
+            copies.push_back({head.recurrent->data(), image.recurrent, image.recurrent_bytes});
         }
         if (image.hidden_bytes != 0 && image.hidden != nullptr) {
-            std::memcpy(head.hidden->data(), image.hidden, image.hidden_bytes);
+            copies.push_back({head.hidden->data(), image.hidden, image.hidden_bytes});
         }
         if (image.dflash_bytes != 0 && image.dflash != nullptr) {
-            std::memcpy(head.dflash->data(), image.dflash, image.dflash_bytes);
+            copies.push_back({head.dflash->data(), image.dflash, image.dflash_bytes});
         }
         heads.push_back(std::move(head));
+    }
+    // The entry's block stays fenced until these copies land; each head's fence follows them.
+    kv_ram_cache_->copy_from_entry(entry_id, std::move(copies), device.copy_stream);
+    for (ContextCheckpointHead& head : heads) {
+        record_context_checkpoint_head_use(head, device.copy_stream);
     }
     clear_context_checkpoints(sequence);
     sequence.context_checkpoints = std::move(heads);
@@ -2049,6 +2057,8 @@ void ProgramImplCore::capture_rewrite_image(SequenceState& sequence) {
     ++sequence.rewrite_image_generation;
     if (staging_hidden.data == nullptr) {
         if (dflash) { throw std::logic_error("DFlash rewrite capture requires the staging lane"); }
+        // A host-tier callback on the copy stream may still be reading the previous contents.
+        HIP_CHECK(hipStreamWaitEvent(device.stream, image.copies_done, 0));
         decoder->linear_attention.pack_slot_to_host(current, image.conv->data(),
                                                     image.recurrent->data(), device.stream);
         record_context_checkpoint_head_use(image, device.stream);
@@ -2098,14 +2108,15 @@ void ProgramImplCore::restore_rewrite_checkpoint_state(SequenceState& sequence) 
 
 qwen3::detail::RewriteStateHostTarget
 ProgramImplCore::rewrite_state_host_target(SequenceState& sequence) {
-    // Tier restores overwrite the image with host copies after every pending DMA on it.
+    // Tier restores overwrite the image by stream-ordered host copies after its fence and
+    // re-record the fence after them.
     ContextCheckpointHead& image = sequence.rewrite_image;
-    image.wait_copies();
     ++sequence.rewrite_image_generation;
     return qwen3::detail::RewriteStateHostTarget{
-        .conv      = image.conv->data(),
-        .recurrent = image.recurrent->data(),
-        .dflash    = image.dflash ? image.dflash->data() : nullptr,
+        .conv        = image.conv->data(),
+        .recurrent   = image.recurrent->data(),
+        .dflash      = image.dflash ? image.dflash->data() : nullptr,
+        .copies_done = image.copies_done,
     };
 }
 
@@ -2360,7 +2371,7 @@ void ProgramImplCore::restore_ram_entry(std::uint32_t lane, std::uint64_t entry_
         sequence.disk_entry_id   = host.disk_entry_id;
         sequence.mtp_draft_count = 0;
         sequence.retained        = true;
-        install_ram_context_checkpoints(sequence, host);
+        install_ram_context_checkpoints(sequence, host, entry_id);
         if (qwen3::detail::is_staged_checkpoint_restore(request_plan.reuse)) {
             sequence.tail_hidden_valid = true;
             if (speculative_backend == SpeculativeBackend::DFlash) {

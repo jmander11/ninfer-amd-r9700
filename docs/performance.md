@@ -717,6 +717,27 @@ Greedy image descriptions diverge from the previous build at near-ties and stay 
 128x128 image (64 patches) runs. The BF16-source Vision parity tool needs a torch environment
 that this host lacks.
 
+## Decode stalls from KV-tier host copies (2026-10-01)
+
+C3 serve with the Compose tiers (RAM 4 GiB, disk 32 GiB, context 32768), DFlash K7 adaptive: two
+streams decode while six ~12K-token conversations rotate through the third lane for three passes,
+so each turn captures the retained lane and later turns restore from RAM or disk
+(`profiles/bench/r9700-stalls-20261001/churn.sh`, worker-thread timers in a scratch build). Every
+capture, RAM restore and disk restore copied the ~150 MB GDN rewrite image (plus DFlash and ladder
+images) on the scheduler thread while the other lanes waited: ROCm executes `hipMemcpyAsync`
+between pinned host buffers as a blocking CPU memcpy (151 MB: 11 ms in the call), while a
+`hipLaunchHostFunc` copy returns in 0.02 ms and does not delay kernels on another stream. Those
+copies now run as copy-stream host callbacks:
+
+| Worker-thread call while 2 lanes decode | Before (total / max) | After (total / max) |
+|---|---|---|
+| Lane capture (18 admissions) | 520 / 49 ms | 99 / 14 ms |
+| RAM restore (4 hits) | 112 / 36 ms | 18 / 6 ms |
+| Disk restore pump (9 hits) | 204 / 40 ms | none above 2 ms |
+
+All 18 greedy replies are identical between the builds. A generation-recovery retry that restores
+from RAM or disk now also waits in copy-hold instead of blocking decode for the whole copy.
+
 ## Mid-row attention route (2026-09-28)
 
 Causal chunks of 9..127 rows (short appended turns and tool results, prompt tails with

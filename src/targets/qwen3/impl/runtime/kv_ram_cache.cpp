@@ -1257,6 +1257,10 @@ RamCaptureResult KVRamCache::capture(const RamCaptureSource& source) try {
         if (lengths[0] != 0) {
             std::memcpy(raw + header.offset[0], source.ledger.data(), lengths[0]);
         }
+        // Rewrite and ladder images are pinned host buffers; they copy on the stream's host
+        // callback thread so a capture during decode does not run ~150 MB memcpys here.
+        std::vector<HostCopy> host_copies;
+        host_copies.reserve(3 + 4 * source.ladder_heads.size());
         if (lengths[1] != 0) { source.identity->pack(raw + header.offset[1]); }
         const auto start_device_copies = [&] {
             if (copies_start != nullptr) { return; }
@@ -1283,10 +1287,11 @@ RamCaptureResult KVRamCache::capture(const RamCaptureSource& source) try {
                 copies_launched = true;
             }
             if (lengths[5] != 0) {
-                std::memcpy(raw + header.offset[5], source.rewrite_state.conv, lengths[5]);
+                host_copies.push_back({raw + header.offset[5], source.rewrite_state.conv, lengths[5]});
             }
             if (lengths[7] != 0) {
-                std::memcpy(raw + header.offset[7], source.rewrite_state.recurrent, lengths[7]);
+                host_copies.push_back(
+                    {raw + header.offset[7], source.rewrite_state.recurrent, lengths[7]});
             }
         }
         if (source.tail_hidden != nullptr && lengths[8] != 0) {
@@ -1309,7 +1314,7 @@ RamCaptureResult KVRamCache::capture(const RamCaptureSource& source) try {
             copies_launched = true;
         }
         if (lengths[11] != 0) {
-            std::memcpy(raw + header.offset[11], source.rewrite_state.dflash, lengths[11]);
+            host_copies.push_back({raw + header.offset[11], source.rewrite_state.dflash, lengths[11]});
         }
         for (std::size_t i = 0; i < source.ladder_heads.size(); ++i) {
             const RamLadderHead& head  = source.ladder_heads[i];
@@ -1318,28 +1323,51 @@ RamCaptureResult KVRamCache::capture(const RamCaptureSource& source) try {
                 if (head.conv == nullptr) {
                     throw std::invalid_argument("RAM ladder conv image is null");
                 }
-                std::memcpy(raw + layout.conv_off, head.conv, static_cast<std::size_t>(layout.conv_len));
+                host_copies.push_back({raw + layout.conv_off, head.conv,
+                                       static_cast<std::size_t>(layout.conv_len)});
             }
             if (layout.rec_len != 0) {
                 if (head.recurrent == nullptr) {
                     throw std::invalid_argument("RAM ladder recurrent image is null");
                 }
-                std::memcpy(raw + layout.rec_off, head.recurrent,
-                            static_cast<std::size_t>(layout.rec_len));
+                host_copies.push_back({raw + layout.rec_off, head.recurrent,
+                                       static_cast<std::size_t>(layout.rec_len)});
             }
             if (layout.hidden_len != 0) {
                 if (head.hidden == nullptr) {
                     throw std::invalid_argument("RAM ladder hidden image is null");
                 }
-                std::memcpy(raw + layout.hidden_off, head.hidden,
-                            static_cast<std::size_t>(layout.hidden_len));
+                host_copies.push_back({raw + layout.hidden_off, head.hidden,
+                                       static_cast<std::size_t>(layout.hidden_len)});
             }
             if (layout.dflash_len != 0) {
                 if (head.dflash == nullptr) {
                     throw std::invalid_argument("RAM ladder DFlash cyclic image is null");
                 }
-                std::memcpy(raw + layout.dflash_off, head.dflash,
-                            static_cast<std::size_t>(layout.dflash_len));
+                host_copies.push_back({raw + layout.dflash_off, head.dflash,
+                                       static_cast<std::size_t>(layout.dflash_len)});
+            }
+        }
+        if (!host_copies.empty()) {
+            start_device_copies();
+            // Stream-ordered after the D2H that filled each image.
+            if (source.rewrite_state.copies_done != nullptr) {
+                HIP_CHECK(hipStreamWaitEvent(source.stream, source.rewrite_state.copies_done, 0));
+            }
+            for (const RamLadderHead& head : source.ladder_heads) {
+                if (head.copies_done != nullptr) {
+                    HIP_CHECK(hipStreamWaitEvent(source.stream, head.copies_done, 0));
+                }
+            }
+            enqueue_host_copies(std::move(host_copies), source.stream);
+            copies_launched = true;
+            if (source.rewrite_state.copies_done != nullptr) {
+                HIP_CHECK(hipEventRecord(source.rewrite_state.copies_done, source.stream));
+            }
+            for (const RamLadderHead& head : source.ladder_heads) {
+                if (head.copies_done != nullptr) {
+                    HIP_CHECK(hipEventRecord(head.copies_done, source.stream));
+                }
             }
         }
 
@@ -1548,15 +1576,17 @@ RamRestoredHost KVRamCache::unpack_device(std::uint64_t entry_id, const RamResto
         }
         const bool unpack_rewrite =
             !context_head || header.rewrite_frontier <= target.reuse_base;
+        std::vector<HostCopy> rewrite_copies;
+        rewrite_copies.reserve(3);
         if (unpack_rewrite && target.gdn != nullptr &&
             (header.length[5] != 0 || header.length[7] != 0)) {
             if (target.rewrite_state.conv == nullptr || target.rewrite_state.recurrent == nullptr) {
                 throw std::logic_error("RAM restore is missing the rewrite-checkpoint GDN image");
             }
-            std::memcpy(target.rewrite_state.conv, raw + header.offset[5],
-                        static_cast<std::size_t>(header.length[5]));
-            std::memcpy(target.rewrite_state.recurrent, raw + header.offset[7],
-                        static_cast<std::size_t>(header.length[7]));
+            rewrite_copies.push_back({target.rewrite_state.conv, raw + header.offset[5],
+                                      static_cast<std::size_t>(header.length[5])});
+            rewrite_copies.push_back({target.rewrite_state.recurrent, raw + header.offset[7],
+                                      static_cast<std::size_t>(header.length[7])});
         }
         if (!context_head && target.tail_hidden != nullptr && header.length[8] != 0) {
             HIP_CHECK(hipMemcpyAsync(target.tail_hidden->data, raw + header.offset[8],
@@ -1576,8 +1606,18 @@ RamRestoredHost KVRamCache::unpack_device(std::uint64_t entry_id, const RamResto
             if (target.rewrite_state.dflash == nullptr) {
                 throw std::logic_error("RAM restore is missing the rewrite-checkpoint DFlash image");
             }
-            std::memcpy(target.rewrite_state.dflash, raw + header.offset[11],
-                        static_cast<std::size_t>(header.length[11]));
+            rewrite_copies.push_back({target.rewrite_state.dflash, raw + header.offset[11],
+                                      static_cast<std::size_t>(header.length[11])});
+        }
+        if (!rewrite_copies.empty()) {
+            // Stream-ordered after every earlier reader or writer of the lane's image.
+            if (target.rewrite_state.copies_done != nullptr) {
+                HIP_CHECK(hipStreamWaitEvent(target.stream, target.rewrite_state.copies_done, 0));
+            }
+            enqueue_host_copies(std::move(rewrite_copies), target.stream);
+            if (target.rewrite_state.copies_done != nullptr) {
+                HIP_CHECK(hipEventRecord(target.rewrite_state.copies_done, target.stream));
+            }
         }
     } catch (...) {
         std::lock_guard lock(io_mutex_);
@@ -1595,6 +1635,15 @@ RamRestoredHost KVRamCache::unpack_device(std::uint64_t entry_id, const RamResto
         throw std::bad_alloc();
     }
     return host_from_header(raw, header);
+}
+
+void KVRamCache::copy_from_entry(std::uint64_t entry_id, std::vector<HostCopy> copies,
+                                 hipStream_t stream) {
+    if (copies.empty()) { return; }
+    std::lock_guard lock(io_mutex_);
+    Record& record = require(entry_id);
+    enqueue_host_copies(std::move(copies), stream);
+    record_copies(record, stream);
 }
 
 void KVRamCache::test_tamper_identity_digest(std::uint64_t entry_id, std::uint8_t byte) {

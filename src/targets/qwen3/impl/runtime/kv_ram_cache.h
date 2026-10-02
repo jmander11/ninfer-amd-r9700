@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/arena.h"
+#include "core/host_copy.h"
 #include "core/cyclic_kv_cache.h"
 #include "core/fp8_int4_paged_kv_cache.h"
 #include "core/linear_attention_state.h"
@@ -39,21 +40,27 @@ struct RamLadderHead {
     std::size_t recurrent_bytes = 0;
     std::size_t hidden_bytes    = 0;
     std::size_t dflash_bytes    = 0;
+    // The head's fence; capture re-records it after the host-callback reads of the images.
+    hipEvent_t copies_done = nullptr;
 };
 
 // Lane-owned pinned rewrite-checkpoint images, in the LinearAttentionStatePool slot host-image
 // and CyclicKVCache lane host-image layouts. DFlash is null for non-DFlash engines. The owner has
-// completed every asynchronous copy into or out of the images before handing them over.
+// completed every asynchronous copy into or out of the images before handing them over. The tiers
+// copy the images by stream-ordered host callbacks and then re-record `copies_done`, the images'
+// own fence, on that stream; the owner's later readers and writers wait on it.
 struct RewriteStateHostSource {
     const void* conv      = nullptr;
     const void* recurrent = nullptr;
     const void* dflash    = nullptr;
+    hipEvent_t copies_done = nullptr;
 };
 
 struct RewriteStateHostTarget {
     void* conv      = nullptr;
     void* recurrent = nullptr;
     void* dflash    = nullptr;
+    hipEvent_t copies_done = nullptr;
 };
 
 struct RamLadderIndex {
@@ -235,6 +242,9 @@ public:
     };
     [[nodiscard]] HostKvView host_kv(std::uint64_t entry_id) const;
     RamRestoredHost unpack_device(std::uint64_t entry_id, const RamRestoreTarget& target);
+    // Enqueues host copies out of a restored entry's block on `stream` and extends the entry's
+    // copy fence over them, so the block outlives the copies and readiness includes them.
+    void copy_from_entry(std::uint64_t entry_id, std::vector<HostCopy> copies, hipStream_t stream);
 
     [[nodiscard]] RamRestoredHost load_host(std::uint64_t entry_id) const;
 

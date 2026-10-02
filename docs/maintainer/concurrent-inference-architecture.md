@@ -177,7 +177,8 @@ resident checkpoint is reusable does it take the longer RAM or disk image onto t
 a failed host restore cold-prefills the same lane without sticking a cold fallback. It never trims
 KV at an arbitrary token while retaining stale recurrent state, and it captures no turn rollback
 checkpoint. Other requests keep maximal-batch scheduling outside that exclusive prefill; a
-host-restore retry blocks them for the copy. Calls remain unpublished until accepted; already
+host-restore retry holds its lane in copy-hold like an admission, so they keep decoding while the
+RAM or disk image copies. Calls remain unpublished until accepted; already
 streamed prose/reasoning cannot be retracted. Extra prefill work and recovery events are reported separately from original prompt
 usage. Exhaustion is a request error, not synthetic EOS, engine shutdown, or a promise of progress.
 
@@ -882,7 +883,11 @@ If the held request is cancelled or fails before admit-complete, drain waits for
 harvests, releases an unused RAM claim, and `evict_retained_lane` on every captured victim so the
 D2H image is the only remaining copy. A later RAM hit exclusive-claims the matching host entry (pinned entries are invisible to later
 `plan_match`). `capture` and `unpack` record a start HIP event before the copies and a done event
-after them so other-lane decode can overlap the DMA. Consume then erases that entry wherever it
+after them so other-lane decode can overlap the DMA. The pinned rewrite-checkpoint and ladder
+images (GDN conv/recurrent, DFlash cyclic; ~150 MB each) copy host-to-host through
+`enqueue_host_copies`, a stream-ordered host callback, because ROCm runs `hipMemcpyAsync` between
+host buffers as a CPU copy inside the call. Each image's `copies_done` fence is stream-waited
+before and re-recorded after those copies; disk restore does the same on its state stream. Consume then erases that entry wherever it
 sits in the FIFO and retires the host block, including after an incomplete first chunk; a throw
 before consume releases the claim and leaves the host row in place. After consume the bundle lives
 only in VRAM until a later spill recaptures it. Occupancy `used`/`entries` (human `kv-ram=` / `n=`)
