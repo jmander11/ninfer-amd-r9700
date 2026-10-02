@@ -3871,7 +3871,8 @@ KVDiskCache::EncodedStateBlob KVDiskCache::encode_state_blob(
     blob.first_bytes = na;
     blob.second = b;
     blob.second_bytes = nb;
-    if (config_.compress == KvDiskCompress::Zstd && unc != 0 && !force_zstd_fail_) {
+    if (config_.compress == KvDiskCompress::Zstd && unc != 0 &&
+        !force_zstd_fail_.load(std::memory_order_acquire)) {
         std::vector<std::uint8_t> joined;
         const void* src = a;
         std::size_t src_n = unc;
@@ -6017,13 +6018,18 @@ bool KVDiskCache::prepare_spill(std::uint64_t ram_id, bool emergency,
                                     : config_.logical_page_bytes);
     const std::uint64_t page_bytes = static_cast<std::uint64_t>(write_main) * main_page_bytes +
                                      static_cast<std::uint64_t>(write_backend) * backend_page_bytes;
-    std::uint64_t state_bytes = 0;
+    struct StateSource {
+        DiskStateKind kind;
+        const void* first;
+        std::size_t first_bytes;
+        const void* second;
+        std::size_t second_bytes;
+    };
+    std::vector<StateSource> state_sources;
     auto prepare_state = [&](DiskStateKind kind, const void* first, std::size_t first_bytes,
                              const void* second = nullptr, std::size_t second_bytes = 0) {
         if (first_bytes == 0 && second_bytes == 0) { return; }
-        session.encoded_state.push_back(
-            encode_state_blob(kind, first, first_bytes, second, second_bytes));
-        state_bytes += aligned_state_file_bytes(session.encoded_state.back().payload_bytes());
+        state_sources.push_back({kind, first, first_bytes, second, second_bytes});
     };
     const std::size_t conv_n = session.image.gdn_conv_bytes;
     const std::size_t rec_n = session.image.gdn_recurrent_bytes;
@@ -6067,6 +6073,26 @@ bool KVDiskCache::prepare_spill(std::uint64_t ram_id, bool emergency,
     for (std::size_t i = 0; i < ladders.size() && i < 2; ++i) {
         prepare_slot(ladders[i], DiskStateKind::LadderGdn, DiskStateKind::LadderHidden,
                      DiskStateKind::DflashLadder);
+    }
+    // zstd over the ~150 MB GDN images takes hundreds of milliseconds, so it runs with the
+    // mutex released: the scheduler takes it for planning, claims and restore pumping while
+    // other lanes decode. The sources are the pinned RAM entry; the session is still private.
+    session.encoded_state.reserve(state_sources.size());
+    const bool compress = config_.compress == KvDiskCompress::Zstd;
+    if (compress) { lock.unlock(); }
+    try {
+        for (const StateSource& source : state_sources) {
+            session.encoded_state.push_back(encode_state_blob(
+                source.kind, source.first, source.first_bytes, source.second, source.second_bytes));
+        }
+    } catch (...) {
+        if (!lock.owns_lock()) { lock.lock(); }
+        throw;
+    }
+    if (!lock.owns_lock()) { lock.lock(); }
+    std::uint64_t state_bytes = 0;
+    for (const EncodedStateBlob& blob : session.encoded_state) {
+        state_bytes += aligned_state_file_bytes(blob.payload_bytes());
     }
     const auto aligned_raw_bytes = [](std::uint64_t bytes) -> std::uint64_t {
         if (bytes > std::numeric_limits<std::uint64_t>::max() -
@@ -7530,8 +7556,45 @@ void KVDiskCache::pump_restore(hipStream_t stream) {
     pump_restore_locked(lock, stream);
 }
 
+void KVDiskCache::begin_cancel_restore() {
+    std::unique_lock lock(mutex_);
+    begin_cancel_restore_locked();
+}
+
+bool KVDiskCache::restore_cancel_settled() const {
+    std::lock_guard lock(mutex_);
+    if (window_inflight_ != 0 || restore_state_inflight_ != 0 || !reader_claims_.empty()) {
+        return false;
+    }
+    if (state_arena_h2d_pending_ && state_h2d_stream_ != nullptr) {
+        const hipError_t ready = hipStreamQuery(state_h2d_stream_);
+        if (ready == hipErrorNotReady) { return false; }
+        HIP_CHECK(ready);
+    }
+    for (const WindowSlot& slot : window_) {
+        if (!slot.h2d_done || slot.h2d_event == nullptr) { continue; }
+        const hipError_t ready = hipEventQuery(slot.h2d_event);
+        if (ready == hipErrorNotReady) { return false; }
+        HIP_CHECK(ready);
+    }
+    return true;
+}
+
 void KVDiskCache::cancel_restore() {
     std::unique_lock lock(mutex_);
+    begin_cancel_restore_locked();
+    waiting_reader_drain_.store(!reader_claims_.empty(), std::memory_order_release);
+    idle_cv_.wait(lock, [&] {
+        return window_inflight_ == 0 && restore_state_inflight_ == 0 && reader_claims_.empty();
+    });
+    waiting_reader_drain_.store(false, std::memory_order_release);
+    wait_state_arena_idle(lock);
+    restore_state_slices_ = {};
+    wait_h2d_slots_locked();
+    for (WindowSlot& slot : window_) { reset_window_slot_keep_host(slot); }
+}
+
+void KVDiskCache::begin_cancel_restore_locked() {
     ++restore_epoch_;
     restore_q_.clear();
     discard_prefetch_queue();
@@ -7549,15 +7612,6 @@ void KVDiskCache::cancel_restore() {
     idle_cv_.notify_all();
     cv_.notify_all();
     restore_state_continue_.store(true, std::memory_order_release);
-    waiting_reader_drain_.store(!reader_claims_.empty(), std::memory_order_release);
-    idle_cv_.wait(lock, [&] {
-        return window_inflight_ == 0 && restore_state_inflight_ == 0 && reader_claims_.empty();
-    });
-    waiting_reader_drain_.store(false, std::memory_order_release);
-    wait_state_arena_idle(lock);
-    restore_state_slices_ = {};
-    wait_h2d_slots_locked();
-    for (WindowSlot& slot : window_) { reset_window_slot_keep_host(slot); }
 }
 
 bool KVDiskCache::copies_ready() const {
@@ -8890,7 +8944,7 @@ std::uint32_t KVDiskCache::test_disk_io_pins(std::uint64_t entry_id) const {
 
 void KVDiskCache::test_force_zstd_fail() {
     std::lock_guard lock(mutex_);
-    force_zstd_fail_ = true;
+    force_zstd_fail_.store(true, std::memory_order_release);
 }
 
 void KVDiskCache::test_set_payload_io_stall_ms(int ms) {

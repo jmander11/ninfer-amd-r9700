@@ -299,6 +299,11 @@ public:
     bool lifecycle_retries           = false;
     // Lane 1 decodes beside the retry; its one round must not wait for the host restore.
     bool peer_decoding               = false;
+    // With peer_decoding: the retry is cancelled during its host restore. The hold must stay
+    // parked while the peer decodes, and drain only once its copies settle.
+    bool cancel_held                 = false;
+    std::uint32_t decodes_since_cancel = 0;
+    bool cancel_begun                = false;
     std::vector<std::vector<TokenId>> prefilled_prompts;
 
     void note(const char* event) {
@@ -464,6 +469,9 @@ public:
     void restore_ram_entry(std::uint32_t, std::uint64_t, const ProbePlan&) {
         note("restore_ram");
         ++restore_ram_count;
+        if (cancel_held && request_cancellation != nullptr) {
+            request_cancellation->store(true, std::memory_order_release);
+        }
         if (script == CacheCase::RecoveryRamRestoreFails ||
             (script == CacheCase::AdmitRamRestoreThenCold && restore_ram_count == 1)) {
             throw CacheRestoreFailure("probe host restore failed");
@@ -477,6 +485,11 @@ public:
         ++discard_ram_count;
     }
     void cancel_disk_restore() { note("cancel_disk"); }
+    void begin_copy_hold_cancel() {
+        note("begin_cancel");
+        cancel_begun = true;
+    }
+    [[nodiscard]] bool copy_hold_cancel_settled() const { return decodes_since_cancel != 0; }
     void synchronize_all() { note("sync"); }
 
     [[nodiscard]] PrefillStepResult start_prefill_lane(std::uint32_t lane, PreparedPrompt prompt,
@@ -567,7 +580,10 @@ public:
                                                      std::span<const RoundBudget>) {
         if (peer_decoding) {
             note("decode");
-            return {.tokens     = std::span<const TokenId>(&kPeerStop, 1),
+            if (cancel_begun) { ++decodes_since_cancel; }
+            // The cancelled-hold case keeps the peer decoding for one more round.
+            const bool more = cancel_held && ++peer_rounds_ == 1;
+            return {.tokens     = std::span<const TokenId>(more ? &kPeerContinue : &kPeerStop, 1),
                     .row_counts = std::span<const std::int32_t>(&kPeerCount, 1),
                     .row_stride = 1};
         }
@@ -620,6 +636,8 @@ public:
 
 private:
     static constexpr TokenId kPeerStop         = kCallerStop;
+    static constexpr TokenId kPeerContinue     = 1000 + 'a';
+    std::uint32_t peer_rounds_                 = 0;
     static constexpr std::int32_t kPeerCount   = 1;
     bool ram_timings_pending_ = false;
     bool disk_timings_pending_ = false;
@@ -713,6 +731,19 @@ int fail_case(const ProbeProgram& program, bool ok, const char* message) {
 
 int check_scripted_recovery(const ProbeProgram& program, const RecoveryOutcome& outcome) {
     int failures = 0;
+    if (program.cancel_held) {
+        failures += fail_case(program, outcome.finished && outcome.error.empty() &&
+                                           outcome.finish == FinishReason::Cancelled &&
+                                           outcome.peer_finish == FinishReason::StopToken &&
+                                           program.prefill_count == 0 &&
+                                           event_count(program.trace, "release_ram") == 1 &&
+                                           in_order(program.trace, {"restore_ram", "begin_cancel",
+                                                                    "decode", "cancel_disk"}) &&
+                                           outcome.slot_empty && !outcome.executor_failed,
+                              "a cancelled host restore drained while the peer was decoding");
+        if (failures != 0) { dump_trace(program); }
+        return failures;
+    }
     failures += fail_case(program, outcome.finished && outcome.error.empty(),
                           outcome.error.empty() ? "the retry did not finish" : outcome.error.c_str());
     const bool cancelled = program.cancel_on_restore;
@@ -967,11 +998,12 @@ int drive_scripted_recovery(ConcurrentExecutor<ProbeInstance>& executor) {
 } // namespace ninfer::runtime
 
 int run_recovery(Frontend& frontend, CacheCase script, bool cancel_on_restore = false,
-                 bool peer_decoding = false) {
+                 bool peer_decoding = false, bool cancel_held = false) {
     ProbeProgram program;
     program.script = script;
     program.cancel_on_restore = cancel_on_restore;
     program.peer_decoding     = peer_decoding;
+    program.cancel_held       = cancel_held;
     ProbeLoaded loaded{frontend};
     RecoveryProbe instance;
     instance.program = &program;
@@ -1167,6 +1199,7 @@ int main() {
         failures += run_recovery(frontend, CacheCase::RecoveryDiskHit, true);
         failures += run_recovery(frontend, CacheCase::RecoveryRamHit, false, true);
         failures += run_recovery(frontend, CacheCase::RecoveryDiskHit, false, true);
+        failures += run_recovery(frontend, CacheCase::RecoveryRamHit, false, true, true);
         for (const CacheCase script : admission_cases) { failures += run_admission(frontend, script); }
         failures += run_retry_lifecycle(frontend);
         std::cout << "recovery executor failures=" << failures << '\n';

@@ -567,6 +567,7 @@ ProgramImplCore::ProgramImplCore(const LoadedModelData& model_in, const Sequence
         qwen3::detail::create_cache_hip_event(&staging_.d2d_done, hipEventDisableTiming);
         qwen3::detail::create_cache_hip_event(&staging_.copies_done, hipEventDisableTiming);
     }
+    qwen3::detail::create_cache_hip_event(&copy_hold_cancel_fence_, hipEventDisableTiming);
 }
 
 ProgramImplCore::~ProgramImplCore() noexcept {
@@ -581,6 +582,11 @@ ProgramImplCore::~ProgramImplCore() noexcept {
     if (staging_.copies_done != nullptr) {
         (void)hipEventDestroy(staging_.copies_done);
         staging_.copies_done = nullptr;
+    }
+    if (copy_hold_cancel_fence_ != nullptr) {
+        (void)hipEventSynchronize(copy_hold_cancel_fence_);
+        (void)hipEventDestroy(copy_hold_cancel_fence_);
+        copy_hold_cancel_fence_ = nullptr;
     }
     for (std::uint32_t lane = 0; lane < max_concurrency; ++lane) {
         clear_context_checkpoints(sequences[lane]);
@@ -2667,6 +2673,18 @@ void ProgramImplCore::pump_disk_restore() {
         device.synchronize_all();
         throw runtime::CacheRestoreFailure("disk cache copy metadata allocation failed");
     }
+}
+
+void ProgramImplCore::begin_copy_hold_cancel() {
+    if (kv_disk_cache_) { kv_disk_cache_->begin_cancel_restore(); }
+    HIP_CHECK(hipEventRecord(copy_hold_cancel_fence_, device.copy_stream));
+}
+
+bool ProgramImplCore::copy_hold_cancel_settled() const {
+    const hipError_t ready = hipEventQuery(copy_hold_cancel_fence_);
+    if (ready == hipErrorNotReady) { return false; }
+    HIP_CHECK(ready);
+    return !kv_disk_cache_ || kv_disk_cache_->restore_cancel_settled();
 }
 
 void ProgramImplCore::cancel_disk_restore() {

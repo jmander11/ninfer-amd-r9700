@@ -390,6 +390,10 @@ public:
     void prefetch_disk_plan(std::uint64_t entry_id, const RequestPlan& plan);
     void pump_disk_restore();
     void cancel_disk_restore();
+    // A cancelled copy-hold admission stops further restore work and fences the copies already
+    // queued, so the executor can keep decoding until they settle instead of draining them.
+    void begin_copy_hold_cancel();
+    [[nodiscard]] bool copy_hold_cancel_settled() const;
     void discard_ram_capture(std::uint64_t ram_id);
     void shutdown_kv_tiers(LoadProgress progress = {});
     void request_idle_spill();
@@ -657,6 +661,7 @@ private:
         hipEvent_t copies_done = nullptr;
     };
     ContextCheckpointStaging staging_;
+    hipEvent_t copy_hold_cancel_fence_ = nullptr;
     std::vector<ContextCheckpointHead> context_checkpoint_pool_;
 };
 

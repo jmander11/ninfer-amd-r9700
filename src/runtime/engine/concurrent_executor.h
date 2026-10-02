@@ -635,6 +635,9 @@ private:
         // Set for a generation-recovery retry: its lane and output stay with the retry,
         // so a failed host restore cold-prefills the same lane from this base plan.
         std::optional<BasePlan> recovery_base;
+        // Cancelled while other lanes decode: restore work has stopped and the copies already
+        // queued are fenced; the hold drains once they settle.
+        bool cancel_pending = false;
     };
 
     [[nodiscard]] static bool membership_contains(const RoundMembership& membership,
@@ -1294,18 +1297,32 @@ private:
         for (std::uint32_t lane = 0; lane < max_concurrency_; ++lane) {
             const auto& request = slots_[lane];
             if (request == nullptr || !cancelled_at_boundary[lane]) { continue; }
-            if (copy_hold_ && copy_hold_->lane == lane) { drain_copy_hold_before_abort(); }
-            if (request->decode_ready) {
-                instance_.program->retain_lane(lane);
-            } else if (!instance_.program->revert_cancelled_prefill_lane(lane)) {
-                instance_.program->abort_lane(lane);
+            if (copy_hold_ && copy_hold_->lane == lane && !build_round_membership().empty()) {
+                // Draining here would wait for the hold's in-flight disk reads and copies
+                // while other lanes decode; the worker loop finishes it once they settle.
+                if (!copy_hold_->cancel_pending) {
+                    instance_.program->begin_copy_hold_cancel();
+                    copy_hold_->cancel_pending = true;
+                }
+                continue;
             }
-            if (prefill_lane_ && *prefill_lane_ == lane) {
-                instance_.request_memory.deactivate();
-                prefill_lane_.reset();
-            }
-            complete_cancelled(request);
+            cancel_lane(lane);
         }
+    }
+
+    void cancel_lane(std::uint32_t lane) {
+        const std::shared_ptr<Request> request = slots_[lane];
+        if (copy_hold_ && copy_hold_->lane == lane) { drain_copy_hold_before_abort(); }
+        if (request->decode_ready) {
+            instance_.program->retain_lane(lane);
+        } else if (!instance_.program->revert_cancelled_prefill_lane(lane)) {
+            instance_.program->abort_lane(lane);
+        }
+        if (prefill_lane_ && *prefill_lane_ == lane) {
+            instance_.request_memory.deactivate();
+            prefill_lane_.reset();
+        }
+        complete_cancelled(request);
     }
 
     [[nodiscard]] bool expire_pending_requests() {
@@ -2623,6 +2640,12 @@ private:
                     lock.unlock();
                     {
                         std::scoped_lock execution_lock(execution_mutex_);
+                        try {
+                            // A hold the caller already cancelled finishes as cancelled.
+                            if (copy_hold_ && copy_hold_->cancel_pending) {
+                                cancel_lane(copy_hold_->lane);
+                            }
+                        } catch (...) {}
                         drain_copy_hold_before_abort();
                         try {
                             instance_.program->shutdown_kv_tiers(load_progress_);
@@ -2653,6 +2676,15 @@ private:
                         run_decode_round(membership, mixed_owner);
                         decode_admission_burst.complete_decode();
                     };
+
+                if (copy_hold_ && copy_hold_->cancel_pending) {
+                    if (membership.empty() || instance_.program->copy_hold_cancel_settled()) {
+                        cancel_lane(copy_hold_->lane);
+                    } else {
+                        run_membership_decode();
+                    }
+                    continue;
+                }
 
                 if (copy_hold_) {
                     const bool held_in_membership =

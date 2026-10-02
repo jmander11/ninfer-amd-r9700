@@ -257,6 +257,10 @@ public:
     [[nodiscard]] bool restore_setup_ready(std::uint64_t entry_id) const;
     void pump_restore(hipStream_t stream);
     void cancel_restore();
+    // The non-blocking half of cancel_restore: stops issuing restore work. Reads, state decode
+    // and H2D already in flight keep running until restore_cancel_settled().
+    void begin_cancel_restore();
+    [[nodiscard]] bool restore_cancel_settled() const;
 
     [[nodiscard]] bool copies_ready() const;
     [[nodiscard]] bool restore_failed() const;
@@ -666,6 +670,7 @@ private:
     [[nodiscard]] bool restore_readers_busy_locked() const noexcept;
     [[nodiscard]] bool restore_or_prefetch_busy_locked() const noexcept;
     [[nodiscard]] bool restore_cancels_idle_locked() const noexcept;
+    void begin_cancel_restore_locked();
     [[nodiscard]] bool emergency_payload_busy_locked() const noexcept;
     void note_reader_claim_locked(const Job& job);
     void drop_reader_claim(const Job& job) noexcept;
@@ -1175,7 +1180,7 @@ private:
     bool fail_prepare_spill_               = false;
     int fail_spill_enqueue_after_ = -1;
     void (*before_branch_refs_)() = nullptr;
-    bool force_zstd_fail_     = false;
+    std::atomic<bool> force_zstd_fail_{false};
     std::filesystem::path canonical_location_;
     std::vector<std::uint64_t> branch_shared_ids_;
 };

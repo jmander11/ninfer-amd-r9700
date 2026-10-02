@@ -236,6 +236,8 @@ public:
     void prefetch_disk_plan(std::uint64_t entry_id, const RequestPlan<Variant>& plan);
     void pump_disk_restore();
     void cancel_disk_restore();
+    void begin_copy_hold_cancel();
+    [[nodiscard]] bool copy_hold_cancel_settled() const;
     void discard_ram_capture(std::uint64_t ram_id);
     void shutdown_kv_tiers(LoadProgress progress = {});
     void request_idle_spill();

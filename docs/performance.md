@@ -764,6 +764,21 @@ copies now run as copy-stream host callbacks:
 All 18 greedy replies are identical between the builds. A generation-recovery retry that restores
 from RAM or disk now also waits in copy-hold instead of blocking decode for the whole copy.
 
+Two more scheduler stalls showed up under stress (same harness, `churn.sh ... cancel`, which drops
+every third driver request 0.25 s in; `TIERS` sets the tier sizes):
+- A cancelled copy-hold admission drained synchronously: the disk restore cancel waited for its
+  in-flight SSD reads, and the drain waited for the copy stream. With the Compose tiers each cancel
+  blocked decode 1.2-1.4 s. The hold now stays parked behind a copy-stream fence and a
+  non-blocking disk cancel, and drains once they settle; no drain took 2 ms or more afterwards.
+- With `--kv-disk-compress zstd` and small tiers (RAM 1 GiB, disk 3 GiB), the disk worker ran
+  zstd-1 over each ~150 MB GDN state blob holding the cache mutex, which restore pumping, claims
+  and planning on the scheduler take: `pump_disk_restore` max 683 -> 14 ms and admission max
+  785 -> 64 ms after encoding with the mutex released.
+
+A long-context run (4 conversations of ~26K tokens, past the first checkpoint mark) showed one
+63 ms pinned checkpoint-head allocation at first use; the head pool then recycles. The median
+mixed-round pause stayed 0.32 s in every run.
+
 ## Mid-row attention route (2026-09-28)
 
 Causal chunks of 9..127 rows (short appended turns and tool results, prompt tails with

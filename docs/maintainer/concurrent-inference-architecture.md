@@ -879,7 +879,11 @@ H2D) is in flight. Admit-complete waits with `hipEventQuery` (and `hipEventSynch
 only when membership is empty), then `evict_retained_lane` / `kv.reset()`, optional restore H2D,
 `wait_kv_ram_copies_on_compute` immediately before this lane's `start_prefill_lane`, and harvest.
 Harvest of D2H/H2D elapsed happens after that wait, not on an overlapping DecodeRound launch.
-If the held request is cancelled or fails before admit-complete, drain waits for those copies,
+A cancellation while other lanes decode does not drain at once: `begin_copy_hold_cancel` stops
+further disk restore work and fences the copies already queued, the hold stays parked while
+DecodeRounds continue, and the drain below runs once `copy_hold_cancel_settled` (or membership is
+empty), so it no longer waits on in-flight SSD reads. If the held request is cancelled or fails
+before admit-complete, drain waits for those copies,
 harvests, releases an unused RAM claim, and `evict_retained_lane` on every captured victim so the
 D2H image is the only remaining copy. A later RAM hit exclusive-claims the matching host entry (pinned entries are invisible to later
 `plan_match`). `capture` and `unpack` record a start HIP event before the copies and a done event

@@ -377,6 +377,16 @@ void Program<Variant>::cancel_disk_restore() {
 }
 
 template <>
+void Program<Variant>::begin_copy_hold_cancel() {
+    impl_->begin_copy_hold_cancel();
+}
+
+template <>
+bool Program<Variant>::copy_hold_cancel_settled() const {
+    return impl_->copy_hold_cancel_settled();
+}
+
+template <>
 void Program<Variant>::discard_ram_capture(std::uint64_t ram_id) {
     impl_->discard_ram_capture(ram_id);
 }
